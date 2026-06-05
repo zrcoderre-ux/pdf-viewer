@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PDF Naming Logic Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; max-width: 1000px; margin: 0 auto; }
+        .test { margin: 10px 0; padding: 10px; border-left: 3px solid #ccc; }
+        .test.pass { border-color: green; background: #e8f5e9; }
+        .test.fail { border-color: red; background: #ffebee; }
+        .input { color: #666; }
+        .output { color: #000; font-weight: bold; }
+        .expected { color: #1976d2; }
+        h2 { margin-top: 30px; }
+    </style>
+</head>
+<body>
+    <h1>PDF Naming Logic Test Suite</h1>
+    <div id="results"></div>
+
+    <script type="module">
+        // Copy the naming functions from viewer.js
+        const LOWERCASE_WORDS = new Set([
+          'a', 'an', 'the', 'for', 'and', 'nor', 'but', 'or', 'yet', 'so',
+          'as', 'at', 'by', 'from', 'in', 'into', 'like', 'near', 'of', 'off',
+          'on', 'onto', 'out', 'over', 'past', 'per', 'plus', 'than', 'thru',
+          'till', 'to', 'up', 'upon', 'via', 'with', 'amid', 'anti', 're'
+        ]);
+
+        const PROTECTED_ACRONYMS = new Map([
+          ['fac', 'FAC'], ['sac', 'SAC'], ['tac', 'TAC'], ['ceqa', 'CEQA'],
+          ['cd', 'CD'], ['ceo', 'CEO'], ['iied', 'IIED'], ['llc', 'LLC'],
+          ['llp', 'LLP'], ['lp', 'LP'], ['lllp', 'LLLP'], ['pc', 'PC'],
+          ['gp', 'GP'], ['feha', 'FEHA'], ['iso', 'ISO'], ['msj', 'MSJ'],
+          ['mts', 'MtS'], ['inc', 'Inc.'],
+        ]);
+
+        function isDottedAcronym(tok) {
+          if (tok.length < 2) return false;
+          for (let i = 0; i < tok.length; i++) {
+            if (i % 2 === 0) { if (!/[a-zA-Z]/.test(tok[i])) return false; }
+            else             { if (tok[i] !== '.') return false; }
+          }
+          return true;
+        }
+
+        function endsWithBreak(tok) {
+          if (!tok) return false;
+          const last = tok[tok.length - 1];
+          if (last === ':') return true;
+          if (last === '\u2014' || last === '\u2013') return true;
+          if (tok.endsWith('--')) return true;
+          return false;
+        }
+
+        function toTitleCase(str) {
+          const tokens = str.split(/(\s+)/);
+          const wordTokens = tokens.filter(t => !/^\s+$/.test(t) && t.length > 0);
+          const totalWords = wordTokens.length;
+          let wordIndex = 0;
+          let capitalizeNext = true;
+
+          return tokens.map(tok => {
+            if (/^\s+$/.test(tok) || tok.length === 0) return tok;
+            wordIndex++;
+            const isFirst = wordIndex === 1;
+            const isLast  = wordIndex === totalWords;
+
+            if (isDottedAcronym(tok)) {
+              capitalizeNext = endsWithBreak(tok);
+              return tok;
+            }
+
+            const leadMatch  = tok.match(/^[^a-zA-Z0-9]*/);
+            const trailMatch = tok.match(/[^a-zA-Z0-9]*$/);
+            const lead  = leadMatch  ? leadMatch[0]  : '';
+            const trail = trailMatch ? trailMatch[0] : '';
+            const bare  = tok.slice(lead.length, tok.length - trail.length);
+
+            if (!bare) {
+              capitalizeNext = endsWithBreak(tok);
+              return tok;
+            }
+
+            const afterConnectiveHyphen = lead.endsWith('-') && !isFirst;
+            const acronymKey = bare.toLowerCase();
+            if (PROTECTED_ACRONYMS.has(acronymKey)) {
+              capitalizeNext = endsWithBreak(tok);
+              return lead + PROTECTED_ACRONYMS.get(acronymKey) + trail;
+            }
+
+            let shouldCap;
+            if (isFirst || isLast) {
+              shouldCap = true;
+            } else if (capitalizeNext) {
+              shouldCap = true;
+            } else if (afterConnectiveHyphen) {
+              shouldCap = false;
+            } else if (LOWERCASE_WORDS.has(bare.toLowerCase())) {
+              shouldCap = false;
+            } else {
+              shouldCap = true;
+            }
+
+            capitalizeNext = endsWithBreak(tok);
+
+            const cased = shouldCap
+              ? bare[0].toUpperCase() + bare.slice(1).toLowerCase()
+              : bare.toLowerCase();
+
+            return lead + cased + trail;
+          }).join('');
+        }
+
+        function countMatches(str, pattern) {
+          return (str.match(pattern) || []).length;
+        }
+
+        function handleDeclaration(s) {
+          const declMatch = s.match(/\bDeclaration of\s+(.+?)\s+(?:In Support of|ISO)\s+(.+)$/i);
+          if (!declMatch) return null;
+          
+          const namePart = declMatch[1].trim();
+          const isoPart = declMatch[2].trim();
+          
+          const nameWords = namePart.split(/\s+/);
+          const lastName = nameWords[nameWords.length - 1];
+          
+          return `${lastName} Decl. ISO ${isoPart}`;
+        }
+
+        function simplifyName(raw) {
+          let s = raw;
+
+          const declResult = handleDeclaration(s);
+          if (declResult) return declResult;
+
+          const rawNorm = raw.replace(/[_\-]+/g, ' ');
+          const hasMtSRaw = /\bMtS\b/.test(rawNorm) || /\bMotion\s+to\s+Strike\b/i.test(rawNorm);
+          const hasISORaw = /\bISO\b/.test(rawNorm);
+
+          s = s.replace(/[_\-]+/g, ' ');
+          s = s.replace(/[^a-zA-Z. ]/g, '');
+          s = s.replace(/\s+/g, ' ').trim();
+          s = s.replace(/\.{2,}/g, '.').replace(/^\.+|\.+$/g, '');
+          if (!s) return 'document';
+
+          s = toTitleCase(s);
+          s = s.replace(/\b(\w+(?:\.\w+)*) \1\b/gi, '$1');
+          s = s.replace(/\b(\w+(?:\.\w+)*) \1\b/gi, '$1');
+
+          s = s.replace(/\bMotion for Summary Judgment\b/gi, 'MSJ');
+          s = s.replace(/\bMotion to Strike\b/gi, 'MtS');
+
+          const hasMtS = hasMtSRaw || /\bMtS\b/.test(s);
+
+          s = s.replace(/\bIn Support Of\b/gi, 'ISO');
+          s = s.replace(/\bIn Support\b/gi, 'ISO');
+
+          const hasISO = hasISORaw || /\bISO\b/.test(s);
+
+          const replyCount      = countMatches(s, /\bReply\b/gi);
+          const oppositionCount = countMatches(s, /\bOpposition\b/gi);
+          const motionCount     = countMatches(s, /\bMotion\b/gi);
+
+          if (replyCount > 1)      return hasMtS ? 'MtS Reply'      : 'Reply';
+          if (oppositionCount > 1) return hasMtS ? 'MtS Opposition' : 'Opposition';
+          if (motionCount > 1)     return 'Motion';
+
+          if (/\bReply\b/i.test(s))                 return hasMtS ? 'MtS Reply'      : 'Reply';
+          if (!hasISO && /\bOpposition\b/i.test(s)) return hasMtS ? 'MtS Opposition' : 'Opposition';
+
+          s = s.replace(/\bDeclaration\b/gi, 'Decl.');
+          s = s.replace(/\bEvidentiary Objections\b/gi, 'Evid. Objs.');
+
+          if (hasISO) {
+            s = s.replace(/\bMotion\b/gi, 'Mot.');
+            s = s.replace(/\bOpposition\b/gi, 'Opp.');
+          }
+
+          s = s.replace(/\bPlaintiffs['']s?\b/gi, "Plfs.'");
+          s = s.replace(/\bPlaintiffs\b/gi, 'Plfs.');
+          s = s.replace(/\bPlaintiff['']s\b/gi, "Plf.'s");
+          s = s.replace(/\bPlaintiff\b/gi, 'Plf.');
+
+          s = s.replace(/\bDefendants['']s?\b/gi, "Defs.'");
+          s = s.replace(/\bDefendants\b/gi, 'Defs.');
+          s = s.replace(/\bDefendant['']s\b/gi, "Def.'s");
+          s = s.replace(/\bDefendant\b/gi, 'Def.');
+
+          s = s.replace(/\s+/g, ' ').trim();
+          return s;
+        }
+
+        // Test cases
+        const tests = [
+            // Declaration tests (the main new feature)
+            {
+                category: "Declaration Handling",
+                input: "DECLARATION OF JANE SMITH IN SUPPORT OF MOTION",
+                expected: "Smith Decl. ISO Motion"
+            },
+            {
+                category: "Declaration Handling",
+                input: "Declaration of John Doe In Support of MSJ",
+                expected: "Doe Decl. ISO MSJ"
+            },
+            {
+                category: "Declaration Handling",
+                input: "DECLARATION OF MARIA GARCIA-LOPEZ IN SUPPORT OF OPPOSITION",
+                expected: "Garcia-Lopez Decl. ISO Opposition"
+            },
+            {
+                category: "Declaration Handling",
+                input: "Declaration of Alice Mary Johnson In Support of Reply",
+                expected: "Johnson Decl. ISO Reply"
+            },
+            {
+                category: "Declaration Handling",
+                input: "DECLARATION OF ROBERT SMITH ISO MOTION TO STRIKE",
+                expected: "Smith Decl. ISO Motion to Strike"
+            },
+            
+            // Standard legal document tests
+            {
+                category: "Standard Documents",
+                input: "PLAINTIFF'S OPPOSITION TO MOTION FOR SUMMARY JUDGMENT",
+                expected: "Plf.'s Opposition"
+            },
+            {
+                category: "Standard Documents",
+                input: "MOTION TO STRIKE DEFENDANT'S REPLY",
+                expected: "MtS Def.'s Reply"
+            },
+            {
+                category: "Standard Documents",
+                input: "Reply in Support of Motion for Summary Judgment",
+                expected: "Reply"
+            },
+            {
+                category: "Standard Documents",
+                input: "DEFENDANT'S EVIDENTIARY OBJECTIONS",
+                expected: "Def.'s Evid. Objs."
+            },
+            
+            // ISO abbreviation tests
+            {
+                category: "ISO Abbreviations",
+                input: "Motion in Support of MSJ",
+                expected: "Mot. ISO MSJ"
+            },
+            {
+                category: "ISO Abbreviations",
+                input: "Opposition in Support of Plaintiffs",
+                expected: "Opp. ISO Plfs."
+            },
+            
+            // Title case tests
+            {
+                category: "Title Casing",
+                input: "MOTION FOR SUMMARY JUDGMENT RE FEHA CLAIMS",
+                expected: "MSJ re FEHA Claims"
+            },
+            {
+                category: "Title Casing",
+                input: "complaint for damages under ceqa",
+                expected: "Complaint for Damages under CEQA"
+            },
+        ];
+
+        // Run tests and display results
+        const resultsDiv = document.getElementById('results');
+        let currentCategory = '';
+        let passCount = 0;
+        let failCount = 0;
+
+        tests.forEach(test => {
+            if (test.category !== currentCategory) {
+                currentCategory = test.category;
+                const categoryHeader = document.createElement('h2');
+                categoryHeader.textContent = currentCategory;
+                resultsDiv.appendChild(categoryHeader);
+            }
+
+            const result = simplifyName(test.input);
+            const pass = result === test.expected;
+            if (pass) passCount++; else failCount++;
+
+            const testDiv = document.createElement('div');
+            testDiv.className = 'test ' + (pass ? 'pass' : 'fail');
+            testDiv.innerHTML = `
+                <div class="input">Input: ${test.input}</div>
+                <div class="output">Output: ${result}</div>
+                <div class="expected">Expected: ${test.expected}</div>
+                ${pass ? '✓ PASS' : '✗ FAIL'}
+            `;
+            resultsDiv.appendChild(testDiv);
+        });
+
+        // Summary
+        const summary = document.createElement('h2');
+        summary.textContent = `Summary: ${passCount} passed, ${failCount} failed (${tests.length} total)`;
+        summary.style.color = failCount === 0 ? 'green' : 'red';
+        resultsDiv.insertBefore(summary, resultsDiv.firstChild);
+    </script>
+</body>
+</html>

@@ -1,0 +1,187 @@
+# Legal Citation Linker — Chrome Extension
+
+A Chrome extension version of `pdf_linker.py`. Open any PDF in Chrome and the
+extension renders it with PDF.js, runs the same citation detection algorithm
+your Python script uses, and overlays clickable links on every detected
+citation. The PDF itself is **not modified** — overlays disappear when the
+tab closes.
+
+## Viewer Features
+
+In addition to citation linking, the viewer supports:
+
+- **Text selection and copy** — click and drag to select text, then Ctrl+C
+  (Cmd+C on macOS) to copy. Selection geometry now correctly aligns with the
+  rendered glyphs at every zoom level.
+- **Persistent highlighting** — select any text and release the mouse to
+  apply a yellow highlight. Click an existing highlight to remove it.
+  Highlights persist across zoom changes but vanish when the tab closes
+  (no cross-session storage).
+- **Zoom in / out** with the toolbar buttons.
+- **Download** the original PDF with a smart filename (see below).
+- **Open original** in Chrome's built-in PDF viewer (skips the linker).
+
+## Smart PDF Naming
+
+The extension supports two filename-source modes, set on the Options page
+(right-click extension icon → Options → "Default filename source"):
+
+- **Source filename (default).** Uses the original filename as the
+  server / URL / Content-Disposition supplies it. No transformation.
+- **Derive from document footer.** Reads the document title printed at
+  the bottom of court filings and applies legal-document naming rules.
+
+### Footer-mode naming rules
+
+When footer mode is active, the title is parsed through an ordered set of
+rules. The output is the bare canonical document type, with a
+disambiguating qualifier added only when another open PDF would collide:
+
+- Documents collapse to their canonical types: `Motion`, `Demurrer`,
+  `Opposition`, `Reply`, `Complaint`, `Notice of Motion`, `Petition`,
+  `FAC` / `SAC` / `TAC`.
+- Declarations preserve the last name and what they support:
+  `Smith Decl. ISO Mot.`, `Hroshovyk Decl. ISO Opp.`,
+  `Aranyi Decl.` for bare declarations.
+- Hyphenated last names are kept whole (`Garcia-Lopez Decl. ISO Opp.`).
+- Party identifiers (`Plaintiff's`, `Defendant Blue Shield's`,
+  `Experian's`) are stripped from the leading edge of the title.
+- The `Notice of Motion and Motion to X` prefix is stripped to `Motion`
+  (target captured as `Mot. to X`). A bare `Notice of Motion for X` is
+  preserved as its own type (procedural notice).
+- Case-number tails (`Case No. 24STCP03993`) and damages-blob descriptive
+  tails (`for compensatory, punitive, ... damages`) are stripped.
+
+### Cross-tab disambiguation
+
+When two open viewer tabs would show the same canonical name, the
+disambiguator adds the smallest available qualifier:
+
+- Two demurrers → `Demurrer to SAC` and `Demurrer to FAC`
+- Two complaints → `Complaint` and `Singleton Complaint` (using the
+  case-caption plaintiff)
+- Two motions → `Mot. to Strike` and `Mot. to Compel Arbitration`
+- Two oppositions → `Opposition to Demurrer` and `Opposition to Mot.`
+- Two replies → `Reply to Opp. to Mot.` and `Reply to Opp. to Demurrer`
+
+A single open viewer always shows the bare canonical name; the qualifier
+appears live as soon as another tab opens with a colliding type, and
+disappears again when that tab closes.
+
+Source mode is recommended as the default because most court-filing PDFs
+already arrive with sensible names, and the footer extraction is only as
+good as the footer text PDF.js can recover. Switch to footer mode when
+working with a corpus where the source names are unhelpful (eCMS UUID
+filenames, scanned-document IDs, etc.).
+
+## Faithful port of pdf_linker.py
+
+The detection logic is a line-by-line port of `pdf_linker.py`. Output has
+been verified citation-for-citation against the Python on the sample
+memorandum (10/10 match, identical keys). The port includes:
+
+- The full reporter list — all CA reporters, federal reporters, and 13
+  out-of-state regional reporters (P., A., N.E., N.W., S.E., S.W., So., N.Y.,
+  spaced and compact forms).
+- The walk-back-from-`v.` algorithm for accurate party-name boundaries —
+  honors sentence punctuation, paragraph breaks, name-connector words
+  (`of`, `the`, `and`, `&`, `de`, `la`, `du`, `von`, `van`), and corporate
+  suffixes (`Co.`, `Inc.`, `Corp.`, `Ltd.`, `Ass'n.`).
+- All 29 California codes (long forms + CSM short forms), section number
+  shapes including `437c` and `1714.45(b)(1)`.
+- `In re` cases (separate pattern, no `v.` anchor).
+- `Cal. Rules of Court` / `California Rules of Court`, `rule` or `rules`,
+  with nested subsections.
+- Both **CSM** and **Bluebook** case forms — chosen by whichever tail
+  pattern matches first within 200 chars after the `v.` anchor.
+- Pin-cite ranges including em-dash forms (`, 110-12`, `, 110–12`).
+- Document-wide supra resolution using **first-seen** short name (matches
+  `setdefault` semantics).
+- Span deduplication so overlapping detections don't double-link.
+
+## Provider toggle: Westlaw / Lexis+
+
+A toggle in the popup, viewer toolbar, and options page lets you choose where
+citations resolve to. Stored in `chrome.storage.sync` so it follows your
+Chrome profile.
+
+URL fallback construction uses the same dual-provider tables as the Python
+script — `WL_SEARCH_PREFIX` for Westlaw (`CA CIVIL § 1542`) and
+`LEXIS_SEARCH_PREFIX` for Lexis+ (`Cal Civ Code § 1542`). Lexis+ doesn't
+expose a public citation-direct deep-link API (its permalinks need an
+internal UUID), so Lexis URLs use the universal search endpoint
+`https://plus.lexis.com/search?pdsearchterms=...`. Signed in, the cited
+document is the top hit on the results page.
+
+## citation_repo.json support
+
+The Python script reads a curated JSON file from your SharePoint folder that
+maps citation keys to hand-verified URLs. The extension supports the same
+file: load it on the **Options** page (right-click extension icon → Options).
+The repo is stored in `chrome.storage.local`. Resolution priority matches
+the Python:
+
+```
+westlaw provider → westlaw_url > lexis_url > fallback_url > url > built
+lexis provider   → lexis_url   > westlaw_url > fallback_url > url > built
+```
+
+(The Python is `lexis > westlaw > fallback > url`; the extension respects
+the *active* provider's URL first, falling back across providers, which is
+the behavior most users expect from a provider toggle.)
+
+## Install
+
+### 1. Get PDF.js
+
+This downloads two files (`pdf.mjs` and `pdf.worker.mjs`) into `pdfjs/build/`.
+
+**Windows:**
+```
+python fetch-pdfjs.py
+```
+
+**macOS / Linux:**
+```bash
+./fetch-pdfjs.sh
+```
+(Or `python3 fetch-pdfjs.py` — same result.)
+
+### 2. Load the extension
+
+1. Open `chrome://extensions`
+2. Toggle **Developer mode** on (top right)
+3. Click **Load unpacked** and select this folder
+
+For local PDFs (`file://`), enable **Allow access to file URLs** on the
+extension's details page.
+
+## What it does not do
+
+- It does **not** write a `*_linked.pdf` file. (That's the whole point of
+  the extension version.) Keep using `pdf_linker.py` if you need a
+  permanent linked PDF.
+- It does **not** OCR PDFs without a text layer. The Python script can,
+  via Tesseract; the extension assumes PDFs are already OCR'd.
+- It does **not** run any code on remote servers. Everything happens
+  locally in the browser. The only network requests are the PDF fetch
+  itself and any Westlaw / Lexis link the user clicks.
+
+## Files
+
+```
+manifest.json                        MV3 manifest
+background.js                        webNavigation -> viewer redirect
+popup.html / popup.js                Toolbar popup (provider toggle + legend)
+options.html / options.js            Options page (provider + repo upload)
+viewer/viewer.html                   PDF viewer shell
+viewer/viewer.css                    Page + textLayer + linkLayer styles
+viewer/viewer.js                     PDF.js loader, two-pass renderer
+viewer/citation-linker.js            Detection + URL resolution
+viewer/footer-naming.js              Footer-derived naming rule engine
+viewer/disambiguation.js             Cross-tab collision registry
+viewer/reporters.js                  Reporter list (port of REPORTERS_RAW)
+viewer/statute-codes.js              Code patterns (port of STATUTE_CODES)
+viewer/code-tables.js                WL / Lexis search prefix tables
+fetch-pdfjs.sh                       One-time PDF.js download
+```

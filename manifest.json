@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Legal Citation Linker for PDFs",
+  "version": "1.2.0",
+  "description": "Detects legal citations (Bluebook + CSM) in PDFs opened in Chrome and overlays clickable links to Westlaw or Lexis+. Faithful port of pdf_linker.py.",
+  "permissions": [
+    "declarativeNetRequest",
+    "declarativeNetRequestFeedback",
+    "webNavigation",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Legal Citation Linker",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "viewer/viewer.html",
+        "viewer/viewer.js",
+        "viewer/viewer.css",
+        "viewer/citation-linker.js",
+        "viewer/footer-naming.js",
+        "viewer/disambiguation.js",
+        "viewer/naming-override.js",
+        "viewer/highlights.js",
+        "viewer/reporters.js",
+        "viewer/statute-codes.js",
+        "viewer/code-tables.js",
+        "pdfjs/build/pdf.mjs",
+        "pdfjs/build/pdf.worker.mjs"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

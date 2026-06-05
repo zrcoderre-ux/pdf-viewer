@@ -1,0 +1,257 @@
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #525659;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #fff;
+}
+/* Body owns scroll. The sticky-toolbar attempt didn't behave correctly
+   for all users (likely depends on element-tree height interactions),
+   so the toolbar is now position:fixed below. Body still scrolls. */
+body { overflow-y: auto; }
+
+/* Toolbar height available everywhere via the cascade. Used by both
+   #toolbar (its own padding makes it this tall) and #viewer-container
+   (offset so content doesn't hide behind the fixed bar). */
+:root { --toolbar-height: 48px; }
+
+#toolbar {
+  /* Fixed pinning, not sticky — works regardless of any ancestor's
+     overflow/height quirks. The viewer-container gets a top padding
+     equal to the toolbar's height so content starts below the fixed
+     bar instead of behind it. */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #323639;
+  border-bottom: 1px solid #1a1a1a;
+  font-size: 13px;
+}
+
+#toolbar .spacer { flex: 1; }
+#toolbar button {
+  background: #4a4d50;
+  color: #fff;
+  border: 1px solid #5a5d60;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+#toolbar button:hover { background: #5a5d60; }
+#zoom-level { min-width: 48px; text-align: center; }
+
+.toolbar-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #ddd;
+  font-size: 12px;
+}
+#provider,
+#naming-mode {
+  background: #4a4d50;
+  color: #fff;
+  border: 1px solid #5a5d60;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+#provider:hover,
+#naming-mode:hover { background: #5a5d60; }
+
+#filename {
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  transition: background 0.1s ease;
+}
+#filename:hover {
+  background: #4a4d50;
+}
+#filename-input {
+  font-weight: 600;
+  font-family: inherit;
+  font-size: inherit;
+  background: #1f2123;
+  color: #fff;
+  border: 1px solid #1a73e8;
+  border-radius: 3px;
+  padding: 2px 6px;
+  outline: none;
+  /* Selection in dark inputs is invisible by default in some Chromiums. */
+  caret-color: #fff;
+}
+#filename-input::selection {
+  background: rgba(26, 115, 232, 0.5);
+}
+#status { color: #aaa; }
+#link-count { color: #7ec699; font-weight: 500; }
+
+#viewer-container {
+  /* Top padding offsets the position:fixed toolbar above so page 1
+     starts below the bar instead of behind it. The --toolbar-height
+     value is set on #toolbar. */
+  padding: var(--toolbar-height, 48px) 24px 24px;
+}
+
+#pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.page-wrapper {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.page-wrapper canvas {
+  display: block;
+}
+
+/* PDF.js text layer — invisible glyphs overlaid on the canvas so text is
+   selectable. We make the GLYPHS transparent (color + caret-color) rather
+   than the whole layer (opacity: 0), because an opacity:0 parent forces
+   its ::selection highlight to 0% alpha too — selection still happens but
+   is invisible to the user, which reads as "selection is broken" and
+   shows the no-drop cursor on mousedown. */
+.textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  user-select: text;
+  color: transparent;
+  caret-color: transparent;
+  forced-color-adjust: none;
+}
+
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+/* When user selects text, show the highlight from the canvas underneath. */
+.textLayer ::selection {
+  background: rgba(0, 100, 255, 0.3);
+  color: transparent;
+}
+
+/* Highlight overlay layer — sits between the text layer and the link layer
+   in DOM order. The container itself must NOT capture pointer events, or
+   it will block mousedown on the textLayer spans underneath and selection
+   silently fails (cursor turns to the "no-drop" prohibition symbol because
+   the empty div is not selectable text and is not a link). Individual
+   highlight rects inside re-enable pointer-events: auto in highlights.js
+   so right-clicking a rect to remove it still works. */
+.highlightLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Citation overlay layer — sits on top of the text layer. The container
+   doesn't capture pointer events (selection works through it), and each
+   <a> is sized only to the underline strip itself so it doesn't block
+   text selection above. */
+.linkLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.linkLayer a.citation-link {
+  /* Sized to a thin underline strip aligned to the baseline; the citation
+     text above the strip remains selectable because the <a> doesn't cover
+     it. The .top/.height set by JS position the strip at the baseline. */
+  position: absolute;
+  pointer-events: auto;
+  text-decoration: none;
+  cursor: pointer;
+  background: #1a73e8;
+  opacity: 0.85;
+  border-radius: 1px;
+  transition: opacity 0.1s ease, transform 0.1s ease;
+}
+
+.linkLayer a.citation-link:hover {
+  opacity: 1;
+  transform: scaleY(1.6);
+  transform-origin: center;
+}
+
+.linkLayer a.citation-link[data-kind="case"]    { background: #1a73e8; }
+.linkLayer a.citation-link[data-kind="statute"] { background: #137333; }
+.linkLayer a.citation-link[data-kind="rule"]    { background: #b06000; }
+.linkLayer a.citation-link[data-kind="supra"] {
+  background: linear-gradient(to right, #8430ce 50%, transparent 50%);
+  background-size: 6px 100%;
+  background-repeat: repeat-x;
+}
+/* Short-form references ("Smith v. Jones" mentioned later in body text after
+   the full citation appeared earlier). Same base blue as a full case cite
+   but with a thinner, slightly faded look so a reader can tell the two
+   apart at a glance. */
+.linkLayer a.citation-link[data-kind="shortform"] {
+  background: #1a73e8;
+  opacity: 0.55;
+}
+.linkLayer a.citation-link[data-kind="shortform"]:hover {
+  opacity: 0.9;
+}
+
+/* Right-click context menu shown over selections / existing highlights.
+   Without these rules the menu div is created in the DOM but has no
+   background, padding, or text color — effectively invisible. */
+#hl-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  display: none;
+  min-width: 160px;
+  background: #2a2c2f;
+  border: 1px solid #1a1a1a;
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  padding: 4px 0;
+  font-size: 13px;
+  color: #fff;
+}
+#hl-ctx-menu button {
+  display: block;
+  width: 100%;
+  background: transparent;
+  color: inherit;
+  border: none;
+  text-align: left;
+  padding: 7px 14px;
+  font-size: inherit;
+  font-family: inherit;
+  cursor: pointer;
+}
+#hl-ctx-menu button:hover {
+  background: #3a3d40;
+}
+#hl-ctx-menu button.hl-ctx-danger {
+  color: #ff7b7b;
+}
+#hl-ctx-menu button.hl-ctx-danger:hover {
+  background: #4a2222;
+}
