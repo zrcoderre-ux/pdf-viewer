@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>PDF Viewer</title>
+  <link rel="stylesheet" href="viewer.css">
+</head>
+<body>
+  <header id="toolbar">
+    <span id="filename">PDF</span>
+    <label class="toolbar-label">
+      Name from:
+      <select id="naming-mode" title="Choose how this document is named in the toolbar and on download. This setting applies only to the current document; the global default is set in the popup or options page.">
+        <option value="source">Source</option>
+        <option value="footer">Footer</option>
+      </select>
+    </label>
+    <span id="status">Loading…</span>
+    <span id="link-count"></span>
+    <span class="spacer"></span>
+    <label class="toolbar-label">
+      Links to:
+      <select id="provider">
+        <option value="lexis">Lexis+</option>
+        <option value="westlaw">Westlaw</option>
+      </select>
+    </label>
+    <button id="zoom-out" title="Zoom out">−</button>
+    <span id="zoom-level">100%</span>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="highlight-toggle" title="Highlight tool: click to toggle. When active, drag to highlight text. Right-click selected text anytime to highlight." aria-pressed="false">✏ Highlight</button>
+    <button id="download" title="Download PDF">⬇ Download</button>
+    <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
+  </header>
+  <main id="viewer-container">
+    <div id="pages"></div>
+  </main>
+  <script type="module" src="viewer.js"></script>
+</body>
+</html>

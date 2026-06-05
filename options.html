@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Citation Linker — Options</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 640px; margin: 32px auto; padding: 0 20px; color: #222;
+    }
+    h1 { font-size: 20px; margin: 0 0 4px 0; }
+    h2 { font-size: 15px; margin: 24px 0 8px 0; color: #333; }
+    .lede { color: #555; }
+    code { background: #f3f3f3; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+    .card {
+      border: 1px solid #e2e2e6; border-radius: 8px;
+      padding: 14px 16px; margin: 12px 0; background: #fafbfc;
+    }
+    button {
+      background: #1a73e8; color: white; border: none;
+      padding: 7px 14px; border-radius: 5px; cursor: pointer; font-size: 13px;
+    }
+    button:hover { background: #1664c1; }
+    button.secondary { background: #6b7280; }
+    button.secondary:hover { background: #4b5563; }
+    input[type="file"] { font-size: 13px; }
+    label.radio { display: inline-flex; align-items: center; gap: 6px; margin-right: 16px; }
+    .status { color: #137333; font-size: 13px; margin-top: 8px; min-height: 18px; }
+    .status.error { color: #b00020; }
+    .repo-info { font-size: 12px; color: #555; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Legal Citation Linker</h1>
+  <p class="lede">PDF citation overlay — same patterns as <code>pdf_linker.py</code>.</p>
+
+  <h2>Default citation provider</h2>
+  <div class="card">
+    <label class="radio"><input type="radio" name="provider" value="westlaw"> Westlaw</label>
+    <label class="radio"><input type="radio" name="provider" value="lexis"> Lexis+</label>
+  </div>
+
+  <h2>Default filename source</h2>
+  <div class="card">
+    <p class="lede" style="margin-top:0;">
+      How the viewer should name a PDF in the toolbar and on download.
+    </p>
+    <label class="radio"><input type="radio" name="namingMode" value="source"> Source filename (default)</label>
+    <label class="radio"><input type="radio" name="namingMode" value="footer"> Derive from document footer</label>
+    <p class="lede" style="font-size:12px;margin-top:10px;">
+      The footer option reads the document title printed at the bottom of
+      court filings and applies legal-document abbreviation rules
+      (Declaration → Decl., Opposition → Opp., etc.). When two open PDFs
+      have the same derived name, the viewer disambiguates them
+      automatically (e.g. <code>Demurrer</code> becomes
+      <code>Demurrer to SAC</code> and <code>Demurrer to FAC</code>).
+      The source-filename option uses the original name as the server
+      sent it — no transformation.
+    </p>
+  </div>
+
+  <h2>Citation repository</h2>
+  <div class="card">
+    <p class="lede" style="margin-top:0;">
+      If you maintain a <code>citation_repo.json</code> file with hand-curated
+      Westlaw and Lexis URLs (the same format <code>pdf_linker.py</code> uses),
+      load it here. Linked citations matching repo entries will use the
+      curated URL instead of a fallback search.
+    </p>
+    <input type="file" id="repo-file" accept=".json,application/json">
+    <button id="repo-clear" class="secondary" type="button">Clear</button>
+    <div class="repo-info" id="repo-info">No repository loaded.</div>
+    <div class="status" id="repo-status"></div>
+  </div>
+
+  <h2>Extra PDF URL patterns</h2>
+  <div class="card">
+    <p class="lede" style="margin-top:0;">
+      Some sites serve PDFs without a <code>.pdf</code> in the URL (LA Court
+      eCMS, agency document portals, etc.). Add URL patterns here and the
+      extension will treat matching URLs as PDFs. Use <code>*</code> as a
+      wildcard. One pattern per line.
+    </p>
+    <p class="lede">Examples:</p>
+<pre style="background:#fff;border:1px solid #e2e2e6;padding:10px;border-radius:5px;font-size:12px;overflow:auto;margin:6px 0;">https://civil.lacourt.org/ecourt/ecms/doc*
+https://www.courts.ca.gov/opinions/*
+https://example.gov/getfile?id=*</pre>
+    <textarea id="patterns" rows="6" style="width:100%;font-family:Consolas,Menlo,monospace;font-size:12px;padding:8px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;"></textarea>
+    <div style="margin-top:8px;">
+      <button id="patterns-save" type="button">Save patterns</button>
+      <span class="status" id="patterns-status"></span>
+    </div>
+    <p class="lede" style="font-size:12px;margin-top:10px;">
+      Note: The LA Superior Court eCMS pattern
+      (<code>civil.lacourt.org/ecourt/ecms/doc*</code>) is built in — you
+      don't need to add it here.
+    </p>
+  </div>
+
+  <h2>Schema reference</h2>
+  <div class="card">
+    <p class="lede" style="margin-top:0;">Expected JSON shape:</p>
+<pre style="background:#fff;border:1px solid #e2e2e6;padding:10px;border-radius:5px;font-size:12px;overflow:auto;">{
+  "cases": {
+    "Smith v. Jones (2017) 13 Cal.App.5th 1152": {
+      "westlaw_url": "https://...",
+      "lexis_url":   "https://..."
+    }
+  },
+  "statutes": {
+    "CCP § 425.16": {
+      "westlaw_url": "https://...",
+      "lexis_url":   "https://..."
+    }
+  },
+  "rules": {
+    "Cal. Rules of Court, rule 3.1300(a)": {
+      "westlaw_url": "https://..."
+    }
+  }
+}</pre>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

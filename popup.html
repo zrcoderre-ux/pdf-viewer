@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           width: 280px; padding: 12px; margin: 0; font-size: 13px; color: #222; }
+    h1 { font-size: 14px; margin: 0 0 8px 0; }
+    p  { margin: 6px 0; color: #444; }
+    code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+
+    .provider-row { margin: 12px 0; padding: 10px; background: #f5f7fa; border-radius: 6px; }
+    .provider-row .label { font-weight: 600; margin-bottom: 6px; }
+    .provider-options { display: flex; gap: 6px; }
+    .provider-options label {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      gap: 6px; padding: 6px 10px; border: 1px solid #cdd; border-radius: 4px;
+      cursor: pointer; background: #fff; font-size: 12px;
+    }
+    .provider-options input { margin: 0; }
+    .provider-options label:has(input:checked) {
+      border-color: #1a73e8; background: #e8f0fe; color: #1a73e8; font-weight: 600;
+    }
+
+    .legend { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+    .swatch { width: 24px; height: 4px; }
+    .case    { background: #1a73e8; }
+    .statute { background: #137333; }
+    .rule    { background: #b06000; }
+    .supra   { background: #8430ce; }
+  </style>
+</head>
+<body>
+  <h1>Legal Citation Linker</h1>
+
+  <div class="provider-row">
+    <div class="label">Open citations on:</div>
+    <div class="provider-options">
+      <label><input type="radio" name="provider" value="westlaw"> Westlaw</label>
+      <label><input type="radio" name="provider" value="lexis"> Lexis+</label>
+    </div>
+  </div>
+
+  <div class="provider-row">
+    <div class="label">Document name from:</div>
+    <div class="provider-options">
+      <label><input type="radio" name="namingMode" value="source"> Source</label>
+      <label><input type="radio" name="namingMode" value="footer"> Footer</label>
+    </div>
+  </div>
+
+  <p>Open any <code>.pdf</code> in Chrome and clickable links appear over the
+  citations. Reload an open PDF to apply a provider change.</p>
+
+  <div class="legend">
+    <div class="legend-item"><span class="swatch case"></span> Case citation</div>
+    <div class="legend-item"><span class="swatch statute"></span> Statute / code</div>
+    <div class="legend-item"><span class="swatch rule"></span> Rule of court</div>
+    <div class="legend-item"><span class="swatch supra"></span> Supra (resolved)</div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
