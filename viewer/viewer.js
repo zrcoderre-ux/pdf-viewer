@@ -1384,6 +1384,7 @@ function logPdfHistory() {
   const entry = {
     url:         fileUrl,
     sourceTitle: sourceDisplayName || "",
+    footerName:  footerExtraction ? (footerExtraction.displayName || "") : "",
     footerTitle: footerExtraction ? (footerExtraction.raw || "") : "",
     timestamp:   new Date().toISOString(),
   };
