@@ -113,3 +113,84 @@ patternsSaveBtn.addEventListener("click", () => {
     setTimeout(() => { patternsStatus.textContent = ""; }, 2500);
   });
 });
+
+// ---------- PDF History ----------
+
+const historyContainer = document.getElementById("history-container");
+const historyDownloadBtn = document.getElementById("history-download");
+const historyClearBtn = document.getElementById("history-clear");
+const historyStatus = document.getElementById("history-status");
+
+function csvEscape(v) {
+  const s = String(v ?? "");
+  return s.includes(",") || s.includes('"') || s.includes("\n")
+    ? '"' + s.replace(/"/g, '""') + '"'
+    : s;
+}
+
+function renderHistory(entries) {
+  if (!entries || entries.length === 0) {
+    historyContainer.innerHTML = '<p class="history-empty">No PDFs recorded yet.</p>';
+    return;
+  }
+  const rows = entries.map(e => `
+    <tr>
+      <td>${csvEscape(e.timestamp).replace(/T/, " ").replace(/\.\d+Z$/, "")}</td>
+      <td>${e.sourceTitle ? escapeHtml(e.sourceTitle) : "<em style='color:#aaa'>—</em>"}</td>
+      <td>${e.footerTitle ? escapeHtml(e.footerTitle) : "<em style='color:#aaa'>—</em>"}</td>
+      <td><a href="${escapeHtml(e.url)}" target="_blank" style="font-size:11px;color:#1a73e8;word-break:break-all;">${escapeHtml(e.url)}</a></td>
+    </tr>`).join("");
+  historyContainer.innerHTML = `
+    <table id="history-table">
+      <thead><tr><th>Opened</th><th>Source name</th><th>Footer title</th><th>URL</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function loadHistory() {
+  chrome.storage.local.get({ pdfHistory: [] }, ({ pdfHistory }) => {
+    renderHistory(pdfHistory);
+  });
+}
+loadHistory();
+
+historyDownloadBtn.addEventListener("click", () => {
+  chrome.storage.local.get({ pdfHistory: [] }, ({ pdfHistory }) => {
+    if (!pdfHistory.length) {
+      historyStatus.textContent = "No history to download.";
+      historyStatus.className = "status";
+      setTimeout(() => { historyStatus.textContent = ""; }, 2500);
+      return;
+    }
+    const header = ["Opened", "Source name", "Footer title", "URL"];
+    const csvRows = [header, ...pdfHistory.map(e => [
+      e.timestamp,
+      e.sourceTitle,
+      e.footerTitle,
+      e.url,
+    ])].map(row => row.map(csvEscape).join(",")).join("\r\n");
+    const blob = new Blob(["﻿" + csvRows], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "pdf-history.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+});
+
+historyClearBtn.addEventListener("click", () => {
+  chrome.storage.local.remove("pdfHistory", () => {
+    historyStatus.textContent = "History cleared.";
+    historyStatus.className = "status";
+    setTimeout(() => { historyStatus.textContent = ""; }, 2500);
+    renderHistory([]);
+  });
+});
