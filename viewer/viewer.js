@@ -1528,6 +1528,14 @@ function startRename() {
       serverFilename = finalName;  // already sanitized lightly above
       document.title = `${finalName} — PDF Viewer`;
       filenameEl.title = "Click to rename (overridden by you)";
+      // Persist the user's final revision so it appears in the history CSV.
+      chrome.storage.local.get({ pdfHistory: [] }, ({ pdfHistory }) => {
+        const idx = pdfHistory.findIndex(e => e.url === fileUrl);
+        if (idx !== -1) {
+          pdfHistory[idx].revisedTitle = finalName;
+          chrome.storage.local.set({ pdfHistory });
+        }
+      });
     }
   }
 

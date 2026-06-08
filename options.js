@@ -138,11 +138,12 @@ function renderHistory(entries) {
       <td>${csvEscape(e.timestamp).replace(/T/, " ").replace(/\.\d+Z$/, "")}</td>
       <td>${e.sourceTitle ? escapeHtml(e.sourceTitle) : "<em style='color:#aaa'>—</em>"}</td>
       <td>${e.footerTitle ? escapeHtml(e.footerTitle) : "<em style='color:#aaa'>—</em>"}</td>
+      <td>${e.revisedTitle ? escapeHtml(e.revisedTitle) : "<em style='color:#aaa'>—</em>"}</td>
       <td><a href="${escapeHtml(e.url)}" target="_blank" style="font-size:11px;color:#1a73e8;word-break:break-all;">${escapeHtml(e.url)}</a></td>
     </tr>`).join("");
   historyContainer.innerHTML = `
     <table id="history-table">
-      <thead><tr><th>Opened</th><th>Source name</th><th>Footer title</th><th>URL</th></tr></thead>
+      <thead><tr><th>Opened</th><th>Source name</th><th>Footer title</th><th>Revised name</th><th>URL</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -170,11 +171,12 @@ historyDownloadBtn.addEventListener("click", () => {
       setTimeout(() => { historyStatus.textContent = ""; }, 2500);
       return;
     }
-    const header = ["Opened", "Source name", "Footer title", "URL"];
+    const header = ["Opened", "Source name", "Footer title", "Revised name", "URL"];
     const csvRows = [header, ...pdfHistory.map(e => [
       e.timestamp,
       e.sourceTitle,
       e.footerTitle,
+      e.revisedTitle ?? "",
       e.url,
     ])].map(row => row.map(csvEscape).join(",")).join("\r\n");
     const blob = new Blob(["﻿" + csvRows], { type: "text/csv;charset=utf-8;" });
