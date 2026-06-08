@@ -1259,6 +1259,7 @@ async function renderAllPages() {
     // Once we have page 1 (or pages 1 and 2), try to resolve a title.
     if (pageNum === 2 || (pageNum === 1 && pdfDoc.numPages === 1)) {
       tryResolveFooterTitle();
+      logPdfHistory();
       // Whether or not a title was found, the footer pass is now complete.
       // Unblock any Download handler that's waiting.
       if (_resolveFooterTitle) { _resolveFooterTitle(); _resolveFooterTitle = null; }
@@ -1376,6 +1377,27 @@ function tryResolveFooterTitle() {
   // Paint if footer mode is active. applyNamingMode handles the await on
   // the disambiguation lookup.
   applyNamingMode();
+}
+
+function logPdfHistory() {
+  if (!fileUrl) return;
+  const entry = {
+    url:         fileUrl,
+    sourceTitle: sourceDisplayName || "",
+    footerTitle: footerExtraction ? (footerExtraction.raw || "") : "",
+    timestamp:   new Date().toISOString(),
+  };
+  chrome.storage.local.get({ pdfHistory: [] }, ({ pdfHistory }) => {
+    // Update existing entry for this URL, or prepend a new one.
+    const idx = pdfHistory.findIndex(e => e.url === fileUrl);
+    if (idx !== -1) {
+      pdfHistory[idx] = entry;
+    } else {
+      pdfHistory.unshift(entry);
+      if (pdfHistory.length > 500) pdfHistory.length = 500;
+    }
+    chrome.storage.local.set({ pdfHistory });
+  });
 }
 
 function updateLinkCount() {

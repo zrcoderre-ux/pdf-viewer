@@ -28,6 +28,11 @@
     .status { color: #137333; font-size: 13px; margin-top: 8px; min-height: 18px; }
     .status.error { color: #b00020; }
     .repo-info { font-size: 12px; color: #555; margin-top: 6px; }
+    #history-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+    #history-table th { text-align: left; border-bottom: 1px solid #ccc; padding: 4px 6px; color: #444; font-weight: 600; }
+    #history-table td { padding: 4px 6px; border-bottom: 1px solid #eee; word-break: break-all; }
+    #history-table tr:last-child td { border-bottom: none; }
+    .history-empty { font-size: 13px; color: #888; margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -95,6 +100,22 @@ https://example.gov/getfile?id=*</pre>
       (<code>civil.lacourt.org/ecourt/ecms/doc*</code>) is built in — you
       don't need to add it here.
     </p>
+  </div>
+
+  <h2>PDF history</h2>
+  <div class="card">
+    <p class="lede" style="margin-top:0;">
+      Every PDF opened by the viewer is logged here with its source filename,
+      footer-derived title, URL, and the time it was opened.
+    </p>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button id="history-download" type="button">Download as CSV</button>
+      <button id="history-clear" class="secondary" type="button">Clear history</button>
+      <span class="status" id="history-status"></span>
+    </div>
+    <div id="history-container">
+      <p class="history-empty">No PDFs recorded yet.</p>
+    </div>
   </div>
 
   <h2>Schema reference</h2>
