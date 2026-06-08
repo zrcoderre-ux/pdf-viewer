@@ -1036,7 +1036,7 @@ function setDisplayName(raw, { definitive = true, origin = "source" } = {}) {
 function paintDisplayName(display) {
   filenameEl.textContent = display;
   document.title = display
-    ? `${display} — Citation Linker`
+    ? `${display} — PDF Viewer`
     : "PDF Viewer";
 }
 
@@ -1526,7 +1526,7 @@ function startRename() {
     if (save && newName && newName !== current) {
       userOverrodeName = true;
       serverFilename = finalName;  // already sanitized lightly above
-      document.title = `${finalName} — Citation Linker`;
+      document.title = `${finalName} — PDF Viewer`;
       filenameEl.title = "Click to rename (overridden by you)";
     }
   }
