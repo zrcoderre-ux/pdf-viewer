@@ -1320,15 +1320,21 @@ async function renderAllPages() {
 function tryResolveFooterTitle() {
   const p1 = _footerByPage.get(1) || [];
   const p2 = _footerByPage.get(2) || [];
+
+  // A footer line that begins with the word "Type" — ignoring any leading
+  // punctuation, e.g. "(TYPE OR PRINT NAME)" — is a fillable signature-block
+  // label. It marks this as a blank Judicial Council / court form rather than
+  // a real filing, so we don't try to derive a title from it: fall back to the
+  // source name.
+  //
+  // We scan the raw footer LINES rather than the single chosen title because
+  // the form's running title (e.g. the repeated "MEMORANDUM OF COSTS
+  // (SUMMARY)" band on an MC-010) would otherwise win and mask the label.
+  const isTypeLabel = (l) => /^[^A-Za-z]*type\b/i.test((l.text || "").trim());
+  if (p1.some(isTypeLabel) || p2.some(isTypeLabel)) return;
+
   const rawTitle = chooseTitleFromFooters(p1, p2);
   if (!rawTitle) return;
-
-  // A leading "TYPE" (e.g. "Type or Print", "Type or Print Name and Signature
-  // of Declarant", "Type/Print") is a form-field label that appears as the
-  // footer on blank court forms, not a document title. Any footer that starts
-  // with the word "Type" is treated as such, so silently fall back to the
-  // source name.
-  if (/^type\b/i.test(rawTitle)) return;
 
   // New rule engine first — produces structured output we can disambiguate
   // against sibling tabs. Falls back to the legacy simplifyName-only flow
