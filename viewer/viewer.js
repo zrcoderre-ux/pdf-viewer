@@ -1323,10 +1323,12 @@ function tryResolveFooterTitle() {
   const rawTitle = chooseTitleFromFooters(p1, p2);
   if (!rawTitle) return;
 
-  // "TYPE OR PRINT" (and spacing/case variants like "Type or Print", "TYPEORPRINT")
-  // is a form-field label that appears as the footer on blank court forms.
-  // It's not a document title, so silently fall back to the source name.
-  if (/^type\s*or\s*print\b/i.test(rawTitle)) return;
+  // A leading "TYPE" (e.g. "Type or Print", "Type or Print Name and Signature
+  // of Declarant", "Type/Print") is a form-field label that appears as the
+  // footer on blank court forms, not a document title. Any footer that starts
+  // with the word "Type" is treated as such, so silently fall back to the
+  // source name.
+  if (/^type\b/i.test(rawTitle)) return;
 
   // New rule engine first — produces structured output we can disambiguate
   // against sibling tabs. Falls back to the legacy simplifyName-only flow
