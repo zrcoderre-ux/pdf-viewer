@@ -1038,6 +1038,25 @@ function paintDisplayName(display) {
   document.title = display
     ? `${display} — PDF Viewer`
     : "PDF Viewer";
+  // Keep the history's "final name" in step with whatever we actually show,
+  // whether that's the source name, the footer name, a disambiguated name,
+  // or (via the rename flow) a manual revision.
+  recordFinalName(display);
+}
+
+// Persist the currently-displayed name as the history entry's final name, so
+// the log records which name we ended up using — not just the cases where the
+// user manually revised it. No-ops until logPdfHistory has created the entry
+// for this URL (that initial log captures the name itself).
+function recordFinalName(name) {
+  if (!fileUrl) return;
+  chrome.storage.local.get({ pdfHistory: [] }, ({ pdfHistory }) => {
+    const idx = pdfHistory.findIndex(e => e.url === fileUrl);
+    if (idx === -1) return;
+    if (pdfHistory[idx].finalName === name) return;
+    pdfHistory[idx].finalName = name;
+    chrome.storage.local.set({ pdfHistory });
+  });
 }
 
 // Recompute the visible name from the currently-active mode. Called
@@ -1394,6 +1413,7 @@ function logPdfHistory() {
     sourceTitle: sourceDisplayName || "",
     footerName:  footerExtraction ? (footerExtraction.displayName || "") : "",
     footerTitle: footerExtraction ? (footerExtraction.raw || "") : "",
+    finalName:   filenameEl.textContent || "",
     timestamp:   new Date().toISOString(),
   };
   chrome.storage.local.get({ pdfHistory: [] }, ({ pdfHistory }) => {
@@ -1537,14 +1557,10 @@ function startRename() {
       serverFilename = finalName;  // already sanitized lightly above
       document.title = `${finalName} — PDF Viewer`;
       filenameEl.title = "Click to rename (overridden by you)";
-      // Persist the user's final revision so it appears in the history CSV.
-      chrome.storage.local.get({ pdfHistory: [] }, ({ pdfHistory }) => {
-        const idx = pdfHistory.findIndex(e => e.url === fileUrl);
-        if (idx !== -1) {
-          pdfHistory[idx].revisedTitle = finalName;
-          chrome.storage.local.set({ pdfHistory });
-        }
-      });
+      // Persist the user's revision as the entry's final name so it appears
+      // in the history. (commit() sets filenameEl.textContent directly rather
+      // than going through paintDisplayName, so record it explicitly here.)
+      recordFinalName(finalName);
     }
   }
 
