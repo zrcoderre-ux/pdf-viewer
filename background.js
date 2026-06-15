@@ -25,11 +25,10 @@ const BUILTIN_PATTERNS = [
 ];
 
 // DNR rule IDs we own. We always rewrite all of them on update.
-const RULE_ID_BYPASS          = 1;
-const RULE_ID_PDF_SUFFIX      = 2;
+const RULE_ID_BYPASS           = 1;
+const RULE_ID_PDF_SUFFIX       = 2;
 const RULE_ID_ECMS_IMAGE_ALLOW = 3; // see buildEcmsImageAllowRule below
-const RULE_ID_PDF_FILE        = 4; // file:// local PDFs
-const RULE_ID_PATTERN_BASE    = 100; // built-in + user patterns occupy 100..N
+const RULE_ID_PATTERN_BASE     = 100; // built-in + user patterns occupy 100..N
 
 function buildBypassRule() {
   return {
@@ -83,28 +82,24 @@ function buildPdfSuffixRule() {
   };
 }
 
-// Separate rule for local file:// PDFs. Chrome only evaluates this rule when
-// the user has enabled "Allow access to file URLs" for this extension in
-// chrome://extensions. Without that toggle, DNR rules never fire for file://
-// URLs even if the rule is installed — the extension simply can't see them.
-// excludedInitiatorDomains doesn't apply to file:// origins, so we omit it;
-// the viewer fetches the PDF directly via fetch() which is not a navigation.
-function buildPdfFileRule() {
-  return {
-    id: RULE_ID_PDF_FILE,
-    priority: 1,
-    action: {
-      type: "redirect",
-      redirect: {
-        regexSubstitution: VIEWER_URL + "?file=\\0",
-      },
-    },
-    condition: {
-      regexFilter: "^file://.*\\.pdf$",
-      resourceTypes: ["main_frame", "sub_frame"],
-    },
-  };
-}
+// declarativeNetRequest rules only fire for network requests; file:// URLs
+// bypass the network stack entirely, so DNR never sees them. Instead we use
+// webNavigation.onBeforeNavigate to catch file:// PDF navigations and
+// immediately redirect the tab to our viewer. Requires "Allow access to file
+// URLs" to be toggled on in chrome://extensions → PDF Viewer → Details.
+chrome.webNavigation.onBeforeNavigate.addListener(
+  (details) => {
+    // Only intercept top-level navigations; ignore our viewer's own fetches.
+    if (details.frameId !== 0) return;
+    const url = details.url;
+    if (!/^file:\/\/.*\.pdf$/i.test(url)) return;
+    if (url.includes(BYPASS_TOKEN)) return;
+
+    const viewerUrl = VIEWER_URL + "?file=" + encodeURIComponent(url);
+    chrome.tabs.update(details.tabId, { url: viewerUrl });
+  },
+  { url: [{ schemes: ["file"] }] }
+);
 
 // Convert a glob like "https://example.com/path/*?id=*" to a DNR
 // urlFilter substring rule. DNR's urlFilter has its own simple syntax:
@@ -166,7 +161,6 @@ async function rebuildRules() {
     buildBypassRule(),
     buildEcmsImageAllowRule(),
     buildPdfSuffixRule(),
-    buildPdfFileRule(),
   ];
   allPatterns.forEach((p, i) => {
     try {
@@ -183,7 +177,6 @@ async function rebuildRules() {
       r.id === RULE_ID_BYPASS ||
       r.id === RULE_ID_PDF_SUFFIX ||
       r.id === RULE_ID_ECMS_IMAGE_ALLOW ||
-      r.id === RULE_ID_PDF_FILE ||
       (r.id >= RULE_ID_PATTERN_BASE && r.id < RULE_ID_PATTERN_BASE + 1000)
     )
     .map((r) => r.id);
@@ -201,7 +194,7 @@ async function rebuildRules() {
     try {
       await chrome.declarativeNetRequest.updateDynamicRules({
         removeRuleIds: removeIds,
-        addRules: [buildBypassRule(), buildEcmsImageAllowRule(), buildPdfSuffixRule(), buildPdfFileRule()],
+        addRules: [buildBypassRule(), buildEcmsImageAllowRule(), buildPdfSuffixRule()],
       });
       console.warn("[Citation Linker] Retried with .pdf-suffix rule only.");
     } catch (e2) {
