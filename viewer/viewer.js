@@ -1200,6 +1200,8 @@ async function loadAndRender() {
   pdfBytes = null;
   // Fresh document → fresh chance for footer/header extraction to win.
   userOverrodeName = false;
+  // Allow thumbnails to re-render for the new document.
+  thumbsRendered = false;
   // Drop any cached footer result from a previously-loaded PDF in this
   // tab and clear our session-registry entry. The new doc will register
   // its own entry once the footer pass completes; until then we don't
@@ -1747,3 +1749,69 @@ openOriginalEl.addEventListener("click", () => {
   window.open(bypassUrl, "_blank");
 });
 zoomLevelEl.textContent = `${Math.round(currentScale * 100)}%`;
+
+// ── Thumbnail panel ────────────────────────────────────────────────────────
+
+const thumbnailToggleEl = document.getElementById("thumbnail-toggle");
+const thumbnailPanelEl  = document.getElementById("thumbnail-panel");
+const THUMB_SCALE = 0.15;
+
+let thumbsRendered = false;
+
+async function renderThumbnails() {
+  if (!pdfDoc || thumbsRendered) return;
+  thumbsRendered = true;
+  thumbnailPanelEl.innerHTML = "";
+  for (let pn = 1; pn <= pdfDoc.numPages; pn++) {
+    const page = await pdfDoc.getPage(pn);
+    const vp = page.getViewport({ scale: THUMB_SCALE });
+    const item = document.createElement("div");
+    item.className = "thumb-item";
+    item.dataset.page = pn;
+    const canvas = document.createElement("canvas");
+    canvas.width  = Math.round(vp.width);
+    canvas.height = Math.round(vp.height);
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+    const label = document.createElement("span");
+    label.className = "thumb-label";
+    label.textContent = pn;
+    item.appendChild(canvas);
+    item.appendChild(label);
+    item.addEventListener("click", () => {
+      const wrappers = pagesEl.querySelectorAll(".page-wrapper");
+      const target = wrappers[pn - 1];
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    thumbnailPanelEl.appendChild(item);
+  }
+  updateActiveThumbnail();
+}
+
+function updateActiveThumbnail() {
+  if (!pdfDoc || !thumbnailPanelEl.classList.contains("open")) return;
+  const wrappers = pagesEl.querySelectorAll(".page-wrapper");
+  if (!wrappers.length) return;
+  const mid = window.scrollY + window.innerHeight / 2;
+  let activePage = 1;
+  let minDist = Infinity;
+  wrappers.forEach((w, i) => {
+    const rect = w.getBoundingClientRect();
+    const pageMid = window.scrollY + rect.top + rect.height / 2;
+    const dist = Math.abs(pageMid - mid);
+    if (dist < minDist) { minDist = dist; activePage = i + 1; }
+  });
+  thumbnailPanelEl.querySelectorAll(".thumb-item").forEach(el => {
+    el.classList.toggle("active", Number(el.dataset.page) === activePage);
+  });
+}
+
+document.addEventListener("scroll", updateActiveThumbnail, { passive: true });
+
+if (thumbnailToggleEl) {
+  thumbnailToggleEl.addEventListener("click", async () => {
+    const open = thumbnailPanelEl.classList.toggle("open");
+    document.body.classList.toggle("thumbs-open", open);
+    thumbnailToggleEl.setAttribute("aria-pressed", String(open));
+    if (open) await renderThumbnails();
+  });
+}
