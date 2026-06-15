@@ -1410,6 +1410,9 @@ function logPdfHistory() {
   if (!fileUrl) return;
   const entry = {
     url:         fileUrl,
+    finalName:   (namingMode === "footer" && footerExtraction?.displayName)
+                   ? footerExtraction.displayName
+                   : (sourceDisplayName || ""),
     sourceTitle: sourceDisplayName || "",
     footerName:  footerExtraction ? (footerExtraction.displayName || "") : "",
     footerTitle: footerExtraction ? (footerExtraction.raw || "") : "",
