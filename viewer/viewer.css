@@ -100,11 +100,61 @@ body { overflow-y: auto; }
 #status { color: #aaa; }
 #link-count { color: #7ec699; font-weight: 500; }
 
+:root { --thumb-panel-width: 136px; }
+
+#thumbnail-panel {
+  position: fixed;
+  top: var(--toolbar-height, 48px);
+  left: 0;
+  bottom: 0;
+  width: var(--thumb-panel-width);
+  background: #2a2d30;
+  border-right: 1px solid #1a1a1a;
+  overflow-y: auto;
+  z-index: 9;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+}
+#thumbnail-panel.open { display: flex; }
+
+.thumb-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 4px;
+  width: 100%;
+}
+.thumb-item:hover { background: #3a3d40; }
+.thumb-item.active { background: #1a4a8a; }
+.thumb-item canvas {
+  display: block;
+  border: 1px solid #555;
+  border-radius: 2px;
+  max-width: 112px;
+}
+.thumb-item .thumb-label {
+  font-size: 10px;
+  color: #bbb;
+  text-align: center;
+  line-height: 1;
+}
+.thumb-item.active .thumb-label { color: #fff; }
+
 #viewer-container {
   /* Top padding offsets the position:fixed toolbar above so page 1
-     starts below the bar instead of behind it. The --toolbar-height
-     value is set on #toolbar. */
+     starts below the bar instead of behind it. Left margin shifts
+     content right when the thumbnail panel is open. */
   padding: var(--toolbar-height, 48px) 24px 24px;
+  transition: padding-left 0.15s ease;
+}
+body.thumbs-open #viewer-container {
+  padding-left: calc(var(--thumb-panel-width) + 24px);
 }
 
 #pages {
