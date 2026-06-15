@@ -49,6 +49,7 @@ body { overflow-y: auto; }
 }
 #toolbar button:hover { background: #5a5d60; }
 #zoom-level { min-width: 48px; text-align: center; }
+#page-indicator { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
 
 .toolbar-label {
   display: inline-flex;

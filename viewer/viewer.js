@@ -47,6 +47,7 @@ const downloadEl  = document.getElementById("download");
 const openOriginalEl = document.getElementById("open-original");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
+const pageIndicatorEl  = document.getElementById("page-indicator");
 
 let currentScale = 1.5;
 let totalLinks = 0;
@@ -1234,6 +1235,7 @@ async function loadAndRender() {
     statusEl.textContent = `Rendering ${pdfDoc.numPages} pages…`;
     await renderAllPages();
     statusEl.textContent = "Done";
+    updatePageIndicator();
   } catch (err) {
     console.error(err);
     statusEl.textContent = "Error: " + err.message;
@@ -1438,6 +1440,25 @@ function updateLinkCount() {
     ? `· ${totalLinks} citation${totalLinks === 1 ? "" : "s"} → ${providerLabel}`
     : "";
 }
+
+function updatePageIndicator() {
+  if (!pdfDoc || !pageIndicatorEl) return;
+  const total = pdfDoc.numPages;
+  // Find the page wrapper whose midpoint is closest to the viewport center.
+  const wrappers = pagesEl.querySelectorAll(".page-wrapper");
+  if (!wrappers.length) return;
+  const mid = window.scrollY + window.innerHeight / 2;
+  let closest = 1, minDist = Infinity;
+  wrappers.forEach((w, i) => {
+    const rect = w.getBoundingClientRect();
+    const pageMid = window.scrollY + rect.top + rect.height / 2;
+    const dist = Math.abs(pageMid - mid);
+    if (dist < minDist) { minDist = dist; closest = i + 1; }
+  });
+  pageIndicatorEl.textContent = `${closest} / ${total}`;
+}
+
+document.addEventListener("scroll", updatePageIndicator, { passive: true });
 
 async function renderPageCanvasAndText(pageNumber) {
   const page = await pdfDoc.getPage(pageNumber);
