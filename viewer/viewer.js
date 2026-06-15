@@ -1200,8 +1200,11 @@ async function loadAndRender() {
   pdfBytes = null;
   // Fresh document → fresh chance for footer/header extraction to win.
   userOverrodeName = false;
-  // Allow thumbnails to re-render for the new document.
+  // Allow thumbnails and bookmarks to re-render for the new document.
   thumbsRendered = false;
+  if (panelBookmarksEl) { panelBookmarksEl.innerHTML = ""; delete panelBookmarksEl.dataset.loaded; }
+  if (tabBookmarksEl)   tabBookmarksEl.hidden = true;
+  switchTab("pages");
   // Drop any cached footer result from a previously-loaded PDF in this
   // tab and clear our session-registry entry. The new doc will register
   // its own entry once the footer pass completes; until then we don't
@@ -1750,10 +1753,14 @@ openOriginalEl.addEventListener("click", () => {
 });
 zoomLevelEl.textContent = `${Math.round(currentScale * 100)}%`;
 
-// ── Thumbnail panel ────────────────────────────────────────────────────────
+// ── Thumbnail / bookmark panel ─────────────────────────────────────────────
 
 const thumbnailToggleEl = document.getElementById("thumbnail-toggle");
 const thumbnailPanelEl  = document.getElementById("thumbnail-panel");
+const panelPagesEl      = document.getElementById("panel-pages");
+const panelBookmarksEl  = document.getElementById("panel-bookmarks");
+const tabPagesEl        = document.getElementById("tab-pages");
+const tabBookmarksEl    = document.getElementById("tab-bookmarks");
 const THUMB_SCALE = 0.15;
 
 let thumbsRendered = false;
@@ -1761,7 +1768,7 @@ let thumbsRendered = false;
 async function renderThumbnails() {
   if (!pdfDoc || thumbsRendered) return;
   thumbsRendered = true;
-  thumbnailPanelEl.innerHTML = "";
+  panelPagesEl.innerHTML = "";
   for (let pn = 1; pn <= pdfDoc.numPages; pn++) {
     const page = await pdfDoc.getPage(pn);
     const vp = page.getViewport({ scale: THUMB_SCALE });
@@ -1777,14 +1784,16 @@ async function renderThumbnails() {
     label.textContent = pn;
     item.appendChild(canvas);
     item.appendChild(label);
-    item.addEventListener("click", () => {
-      const wrappers = pagesEl.querySelectorAll(".page-wrapper");
-      const target = wrappers[pn - 1];
-      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    thumbnailPanelEl.appendChild(item);
+    item.addEventListener("click", () => scrollToPage(pn));
+    panelPagesEl.appendChild(item);
   }
   updateActiveThumbnail();
+}
+
+function scrollToPage(pn) {
+  const wrappers = pagesEl.querySelectorAll(".page-wrapper");
+  const target = wrappers[pn - 1];
+  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function updateActiveThumbnail() {
@@ -1800,18 +1809,87 @@ function updateActiveThumbnail() {
     const dist = Math.abs(pageMid - mid);
     if (dist < minDist) { minDist = dist; activePage = i + 1; }
   });
-  thumbnailPanelEl.querySelectorAll(".thumb-item").forEach(el => {
+  panelPagesEl.querySelectorAll(".thumb-item").forEach(el => {
     el.classList.toggle("active", Number(el.dataset.page) === activePage);
   });
 }
 
 document.addEventListener("scroll", updateActiveThumbnail, { passive: true });
 
+// Resolve a PDF.js outline destination to a 1-based page number.
+async function destToPageNum(dest) {
+  if (!dest) return null;
+  try {
+    const resolved = typeof dest === "string"
+      ? await pdfDoc.getDestination(dest)
+      : dest;
+    if (!resolved || !resolved[0]) return null;
+    const pageIndex = await pdfDoc.getPageIndex(resolved[0]);
+    return pageIndex + 1;
+  } catch {
+    return null;
+  }
+}
+
+function buildBookmarkTree(items, container) {
+  for (const item of items) {
+    const btn = document.createElement("button");
+    btn.className = "bookmark-item";
+    btn.textContent = item.title || "(untitled)";
+    btn.title = item.title || "";
+    btn.addEventListener("click", async () => {
+      const pn = await destToPageNum(item.dest);
+      if (pn) scrollToPage(pn);
+    });
+    container.appendChild(btn);
+    if (item.items && item.items.length) {
+      const children = document.createElement("div");
+      children.className = "bookmark-children";
+      buildBookmarkTree(item.items, children);
+      container.appendChild(children);
+    }
+  }
+}
+
+async function loadBookmarks() {
+  if (!pdfDoc || panelBookmarksEl.dataset.loaded) return;
+  panelBookmarksEl.dataset.loaded = "1";
+  const outline = await pdfDoc.getOutline();
+  if (!outline || !outline.length) return;
+  panelBookmarksEl.innerHTML = "";
+  buildBookmarkTree(outline, panelBookmarksEl);
+}
+
+async function maybeShowBookmarksTab() {
+  if (!pdfDoc || !tabBookmarksEl) return;
+  const outline = await pdfDoc.getOutline();
+  tabBookmarksEl.hidden = !outline || !outline.length;
+}
+
+function switchTab(tab) {
+  const showPages = tab === "pages";
+  tabPagesEl.classList.toggle("active", showPages);
+  tabPagesEl.setAttribute("aria-pressed", String(showPages));
+  tabBookmarksEl.classList.toggle("active", !showPages);
+  tabBookmarksEl.setAttribute("aria-pressed", String(!showPages));
+  panelPagesEl.hidden = !showPages;
+  panelBookmarksEl.hidden = showPages;
+}
+
+if (tabPagesEl)     tabPagesEl.addEventListener("click",     () => switchTab("pages"));
+if (tabBookmarksEl) tabBookmarksEl.addEventListener("click", async () => {
+  switchTab("bookmarks");
+  await loadBookmarks();
+});
+
 if (thumbnailToggleEl) {
   thumbnailToggleEl.addEventListener("click", async () => {
     const open = thumbnailPanelEl.classList.toggle("open");
     document.body.classList.toggle("thumbs-open", open);
     thumbnailToggleEl.setAttribute("aria-pressed", String(open));
-    if (open) await renderThumbnails();
+    if (open) {
+      await renderThumbnails();
+      await maybeShowBookmarksTab();
+    }
   });
 }

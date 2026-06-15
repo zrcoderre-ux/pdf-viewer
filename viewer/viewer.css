@@ -114,11 +114,43 @@ body { overflow-y: auto; }
   z-index: 9;
   display: none;
   flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+}
+#thumbnail-panel.open { display: flex; }
+
+#panel-tabs {
+  display: flex;
+  border-bottom: 1px solid #1a1a1a;
+  flex-shrink: 0;
+}
+.panel-tab {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #aaa;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 7px 4px;
+  cursor: pointer;
+  transition: color 0.1s;
+}
+.panel-tab:hover { color: #fff; }
+.panel-tab.active { color: #fff; border-bottom-color: #1a73e8; }
+
+#panel-pages {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 8px;
   padding: 10px 8px;
 }
-#thumbnail-panel.open { display: flex; }
+#panel-bookmarks {
+  padding: 8px 6px;
+  font-size: 12px;
+}
 
 .thumb-item {
   display: flex;
@@ -145,6 +177,26 @@ body { overflow-y: auto; }
   line-height: 1;
 }
 .thumb-item.active .thumb-label { color: #fff; }
+
+.bookmark-item {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: #ccc;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bookmark-item:hover { background: #3a3d40; color: #fff; }
+.bookmark-children { padding-left: 10px; }
 
 #viewer-container {
   /* Top padding offsets the position:fixed toolbar above so page 1
