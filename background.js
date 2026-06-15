@@ -25,10 +25,11 @@ const BUILTIN_PATTERNS = [
 ];
 
 // DNR rule IDs we own. We always rewrite all of them on update.
-const RULE_ID_BYPASS     = 1;
-const RULE_ID_PDF_SUFFIX = 2;
+const RULE_ID_BYPASS          = 1;
+const RULE_ID_PDF_SUFFIX      = 2;
 const RULE_ID_ECMS_IMAGE_ALLOW = 3; // see buildEcmsImageAllowRule below
-const RULE_ID_PATTERN_BASE = 100; // built-in + user patterns occupy 100..N
+const RULE_ID_PDF_FILE        = 4; // file:// local PDFs
+const RULE_ID_PATTERN_BASE    = 100; // built-in + user patterns occupy 100..N
 
 function buildBypassRule() {
   return {
@@ -78,6 +79,29 @@ function buildPdfSuffixRule() {
       resourceTypes: ["main_frame", "sub_frame"],
       // Don't redirect requests our viewer makes for the PDF itself.
       excludedInitiatorDomains: [chrome.runtime.id],
+    },
+  };
+}
+
+// Separate rule for local file:// PDFs. Chrome only evaluates this rule when
+// the user has enabled "Allow access to file URLs" for this extension in
+// chrome://extensions. Without that toggle, DNR rules never fire for file://
+// URLs even if the rule is installed — the extension simply can't see them.
+// excludedInitiatorDomains doesn't apply to file:// origins, so we omit it;
+// the viewer fetches the PDF directly via fetch() which is not a navigation.
+function buildPdfFileRule() {
+  return {
+    id: RULE_ID_PDF_FILE,
+    priority: 1,
+    action: {
+      type: "redirect",
+      redirect: {
+        regexSubstitution: VIEWER_URL + "?file=\\0",
+      },
+    },
+    condition: {
+      regexFilter: "^file://.*\\.pdf$",
+      resourceTypes: ["main_frame", "sub_frame"],
     },
   };
 }
@@ -142,6 +166,7 @@ async function rebuildRules() {
     buildBypassRule(),
     buildEcmsImageAllowRule(),
     buildPdfSuffixRule(),
+    buildPdfFileRule(),
   ];
   allPatterns.forEach((p, i) => {
     try {
@@ -158,6 +183,7 @@ async function rebuildRules() {
       r.id === RULE_ID_BYPASS ||
       r.id === RULE_ID_PDF_SUFFIX ||
       r.id === RULE_ID_ECMS_IMAGE_ALLOW ||
+      r.id === RULE_ID_PDF_FILE ||
       (r.id >= RULE_ID_PATTERN_BASE && r.id < RULE_ID_PATTERN_BASE + 1000)
     )
     .map((r) => r.id);
@@ -175,7 +201,7 @@ async function rebuildRules() {
     try {
       await chrome.declarativeNetRequest.updateDynamicRules({
         removeRuleIds: removeIds,
-        addRules: [buildBypassRule(), buildEcmsImageAllowRule(), buildPdfSuffixRule()],
+        addRules: [buildBypassRule(), buildEcmsImageAllowRule(), buildPdfSuffixRule(), buildPdfFileRule()],
       });
       console.warn("[Citation Linker] Retried with .pdf-suffix rule only.");
     } catch (e2) {
