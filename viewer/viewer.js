@@ -1408,12 +1408,11 @@ function tryResolveFooterTitle() {
 
 function logPdfHistory() {
   if (!fileUrl) return;
-  const finalName = (namingMode === "footer" && footerExtraction?.displayName)
-    ? footerExtraction.displayName
-    : (sourceDisplayName || "");
   const entry = {
     url:         fileUrl,
-    finalName,
+    finalName:   (namingMode === "footer" && footerExtraction?.displayName)
+                   ? footerExtraction.displayName
+                   : (sourceDisplayName || ""),
     sourceTitle: sourceDisplayName || "",
     footerName:  footerExtraction ? (footerExtraction.displayName || "") : "",
     footerTitle: footerExtraction ? (footerExtraction.raw || "") : "",
