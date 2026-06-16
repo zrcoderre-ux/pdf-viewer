@@ -27,6 +27,11 @@ import {
   setOverride,
   onOverrideChange,
 } from "./naming-override.js";
+import {
+  pageNeedsOcr,
+  ocrPageToTextLayer,
+  resetOcr,
+} from "./ocr.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
   "pdfjs/build/pdf.worker.mjs"
@@ -1195,6 +1200,10 @@ async function loadAndRender() {
   // (renderAllPages is also called on zoom, where we DO want them retained;
   // hence clearing here, not there.)
   clearAllHighlights();
+  // New document → drop cached OCR boxes and tear down the recognizer worker.
+  // (Deliberately here and not in renderAllPages, which also runs on zoom —
+  // the per-page OCR cache is what makes zoom cheap, so it must survive zoom.)
+  resetOcr();
   // Clear stashed bytes from any prior PDF. If the new fetch fails, the
   // Download button has nothing stale to save.
   pdfBytes = null;
@@ -1516,13 +1525,29 @@ async function renderPageCanvasAndText(pageNumber) {
   const ctx = canvas.getContext("2d");
   await page.render({ canvasContext: ctx, viewport }).promise;
 
-  const textContent = await page.getTextContent();
-  const textLayer = new pdfjsLib.TextLayer({
-    textContentSource: textContent,
-    container: textLayerDiv,
-    viewport,
-  });
-  await textLayer.render();
+  let textContent = await page.getTextContent();
+  if (pageNeedsOcr(textContent)) {
+    // No usable PDF.js text layer (scan / image-only export). Recognize the
+    // page and synthesize both the textLayer spans and a textContent-shaped
+    // object so the linker, highlights, and footer naming work unchanged.
+    // ocrPageToTextLayer caches per page, so this only OCRs once even though
+    // renderAllPages re-runs on every zoom.
+    textContent = await ocrPageToTextLayer({
+      page,
+      pageNumber,
+      displayScale: viewport.scale,
+      userHeight: userSpaceViewport.height,
+      textLayerDiv,
+      setStatus: (msg) => { statusEl.textContent = msg; },
+    });
+  } else {
+    const textLayer = new pdfjsLib.TextLayer({
+      textContentSource: textContent,
+      container: textLayerDiv,
+      viewport,
+    });
+    await textLayer.render();
+  }
 
   return { pageNumber, textContent, textLayerDiv, linkLayerDiv, highlightLayerDiv, pageWrapper: wrapper, viewport: userSpaceViewport };
 }

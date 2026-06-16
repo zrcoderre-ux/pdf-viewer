@@ -21,6 +21,9 @@
     "default_popup": "popup.html"
   },
   "options_page": "options.html",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "web_accessible_resources": [
     {
       "resources": [
@@ -35,6 +38,12 @@
         "viewer/reporters.js",
         "viewer/statute-codes.js",
         "viewer/code-tables.js",
+        "viewer/ocr.js",
+        "viewer/vendor/tesseract/tesseract.esm.min.js",
+        "viewer/vendor/tesseract/worker.min.js",
+        "viewer/vendor/tesseract/tesseract-core-lstm.wasm.js",
+        "viewer/vendor/tesseract/tesseract-core-lstm.wasm",
+        "viewer/vendor/tesseract/eng.traineddata",
         "pdfjs/build/pdf.mjs",
         "pdfjs/build/pdf.worker.mjs"
       ],
