@@ -198,3 +198,22 @@ historyClearBtn.addEventListener("click", () => {
     renderHistory([]);
   });
 });
+
+// OCR left-margin cutoff
+const ocrLeftMarginInput = document.getElementById("ocr-left-margin");
+const ocrSaveBtn         = document.getElementById("ocr-save");
+const ocrStatus          = document.getElementById("ocr-status");
+
+chrome.storage.sync.get({ ocrLeftMarginPct: 8 }, ({ ocrLeftMarginPct }) => {
+  ocrLeftMarginInput.value = ocrLeftMarginPct;
+});
+
+ocrSaveBtn.addEventListener("click", () => {
+  const v = Math.min(30, Math.max(0, parseInt(ocrLeftMarginInput.value, 10) || 0));
+  ocrLeftMarginInput.value = v;
+  chrome.storage.sync.set({ ocrLeftMarginPct: v }, () => {
+    ocrStatus.textContent = "Saved.";
+    ocrStatus.className = "status";
+    setTimeout(() => { ocrStatus.textContent = ""; }, 2000);
+  });
+});
