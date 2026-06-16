@@ -59,7 +59,10 @@ function getWorker() {
       // All paths are bundled extension URLs — MV3 forbids fetching code
       // from a CDN, so nothing here points off-extension.
       workerPath: V("worker.min.js"),
-      corePath: V(""),            // dir; tesseract picks tesseract-core-lstm.wasm.js
+      // Point directly at the non-SIMD .wasm.js file so Tesseract doesn't
+      // probe for the SIMD variant (tesseract-core-relaxedsimd-lstm.wasm.js)
+      // which is not bundled and would cause a NetworkError.
+      corePath: V("tesseract-core-lstm.wasm.js"),
       langPath: V(""),            // dir containing eng.traineddata
       gzip: false,                // we vendored the uncompressed .traineddata
       workerBlobURL: false,       // load worker.min.js directly, not via blob:
