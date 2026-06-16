@@ -117,13 +117,30 @@ async function ocrWords(page, pageNumber, setStatus) {
   return words;
 }
 
+function getLeftMarginPct() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get({ ocrLeftMarginPct: 8 }, ({ ocrLeftMarginPct }) => {
+      resolve(Math.min(30, Math.max(0, Number(ocrLeftMarginPct) || 0)));
+    });
+  });
+}
+
 // Main entry. Recognizes the page if needed, paints transparent spans into
 // textLayerDiv positioned over the rendered glyphs at the current display
 // scale, and returns a textContent-shaped object for ingestPage. Geometry
 // derives from the cached user-space boxes, so this is cheap to re-run on
 // zoom (only the first call per page actually OCRs).
 export async function ocrPageToTextLayer({ page, pageNumber, displayScale, userHeight, textLayerDiv, setStatus }) {
-  const words = await ocrWords(page, pageNumber, setStatus);
+  const allWords = await ocrWords(page, pageNumber, setStatus);
+
+  // Filter words in the left-margin exclusion zone. The cutoff is a
+  // percentage of the page's user-space width, read from storage each call
+  // so the Options-page slider takes effect on the next zoom without reload.
+  const leftMarginPct = await getLeftMarginPct();
+  const pageWidth = page.getViewport({ scale: 1 }).width;
+  const cutoff = pageWidth * (leftMarginPct / 100);
+  const words = cutoff > 0 ? allWords.filter(w => w.x0 >= cutoff) : allWords;
+
   const s = displayScale;
 
   const items = [];

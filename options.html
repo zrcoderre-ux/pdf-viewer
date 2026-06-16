@@ -102,6 +102,30 @@ https://example.gov/getfile?id=*</pre>
     </p>
   </div>
 
+  <h2>OCR settings</h2>
+  <div class="card">
+    <p class="lede" style="margin-top:0;">
+      When a scanned PDF has no selectable text, the viewer runs OCR
+      (Tesseract) to recognize it. Use the setting below to ignore text
+      found in the far-left margin — useful for law firm names and phone
+      numbers printed in the gutter of court filings.
+    </p>
+    <label style="display:flex;align-items:center;gap:10px;font-size:13px;">
+      Skip left margin
+      <input type="number" id="ocr-left-margin" min="0" max="30" step="1" value="8"
+             style="width:60px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+      % of page width
+    </label>
+    <p class="lede" style="font-size:12px;margin-top:8px;">
+      0 = no exclusion. 8 (default) skips roughly the leftmost half-inch
+      of a letter-size page. Maximum 30.
+    </p>
+    <div style="margin-top:8px;">
+      <button id="ocr-save" type="button">Save</button>
+      <span class="status" id="ocr-status"></span>
+    </div>
+  </div>
+
   <h2>PDF history</h2>
   <div class="card">
     <p class="lede" style="margin-top:0;">
