@@ -13,6 +13,10 @@ In addition to citation linking, the viewer supports:
 - **Text selection and copy** — click and drag to select text, then Ctrl+C
   (Cmd+C on macOS) to copy. Selection geometry now correctly aligns with the
   rendered glyphs at every zoom level.
+- **Rectangle (marquee) selection** — hold **Alt** and drag with the **right
+  mouse button** to sweep a box; the text whose glyphs fall inside it can then
+  be copied or highlighted (handy for columns and tables). This is an
+  alternative to the default flowing selection.
 - **Persistent highlighting** — select any text and release the mouse to
   apply a yellow highlight. Click an existing highlight to remove it.
   Highlights persist across zoom changes but vanish when the tab closes

@@ -27,6 +27,14 @@
 //   2. Normal mode: drag to select text normally (Ctrl+C copies it). A small
 //      context menu appears on right-click over a selection or an existing
 //      highlight, offering "Highlight selection" or "Remove highlight".
+//
+// Selection shapes:
+//   - Default: native flowing text selection (drag with the left button).
+//   - Rectangle (marquee): hold Alt and drag with the RIGHT button to sweep a
+//     box. On release we gather every glyph whose center falls inside the box
+//     — handy for columns/tables where flowing selection grabs the wrong text.
+//     In the highlight tool the box is highlighted immediately; otherwise the
+//     same Copy / Highlight menu appears for the boxed text.
 
 const HIGHLIGHT_COLOR = "rgba(255, 213, 0, 0.40)"; // yellow, 40% alpha
 let _nextId = 1;
@@ -233,6 +241,131 @@ export function repaintHighlightsForPage(pageNumber, textLayerDiv, highlightLaye
   }
 }
 
+// ── Rectangle (marquee) selection ───────────────────────────────────────────────
+
+// Set true on a marquee mouseup so the contextmenu event that Chrome fires
+// immediately afterwards (for the right button) is swallowed instead of
+// opening the native menu or our text menu.
+let _suppressNextContextMenu = false;
+
+// Lazily-created visual box shown while the user drags a marquee. Positioned
+// with fixed coordinates (client space) so it tracks the cursor regardless of
+// page scroll.
+let _marqueeEl = null;
+function ensureMarqueeEl() {
+  if (_marqueeEl) return _marqueeEl;
+  _marqueeEl = document.createElement("div");
+  _marqueeEl.id = "rect-marquee";
+  Object.assign(_marqueeEl.style, {
+    position: "fixed",
+    display: "none",
+    pointerEvents: "none",
+    zIndex: "2147483646",
+    border: "1px solid rgba(26,115,232,0.9)",
+    background: "rgba(26,115,232,0.15)",
+  });
+  document.body.appendChild(_marqueeEl);
+  return _marqueeEl;
+}
+function paintMarquee(el, x0, y0, x1, y1) {
+  el.style.left   = `${Math.min(x0, x1)}px`;
+  el.style.top    = `${Math.min(y0, y1)}px`;
+  el.style.width  = `${Math.abs(x1 - x0)}px`;
+  el.style.height = `${Math.abs(y1 - y0)}px`;
+}
+
+function rectsIntersect(a, b) {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+// A glyph counts as selected when its center sits inside the box.
+function centerInside(cr, box) {
+  const cx = cr.left + cr.width / 2;
+  const cy = cr.top + cr.height / 2;
+  return cx >= box.left && cx <= box.right && cy >= box.top && cy <= box.bottom;
+}
+
+// Walk the page's text spans and collect the character runs whose glyphs fall
+// inside `box` (client coords). Returns { text, runs } where each run is
+// { spanIdx, startOffset, endOffset } describing one span's selected slice.
+// Runs are returned in reading order (top→bottom, then left→right); `text` is
+// those slices joined with spaces within a line and newlines between lines.
+function collectRectSelection(box, textLayerDiv) {
+  const spans = Array.from(textLayerDiv.querySelectorAll("span"));
+  const runs = [];
+  const charRange = document.createRange();
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i];
+    const sr = span.getBoundingClientRect();
+    if (!rectsIntersect(sr, box)) continue;
+    const node = span.firstChild;
+    if (!node || node.nodeType !== Node.TEXT_NODE) continue;
+    const len = node.length || 0;
+    const top = sr.top;
+    const left = sr.left;
+    let runStart = -1;
+    for (let c = 0; c < len; c++) {
+      charRange.setStart(node, c);
+      charRange.setEnd(node, c + 1);
+      const cr = charRange.getBoundingClientRect();
+      const inside = cr.width > 0 && cr.height > 0 && centerInside(cr, box);
+      if (inside) {
+        if (runStart < 0) runStart = c;
+      } else if (runStart >= 0) {
+        runs.push({ spanIdx: i, startOffset: runStart, endOffset: c, y: top, x: left });
+        runStart = -1;
+      }
+    }
+    if (runStart >= 0) {
+      runs.push({ spanIdx: i, startOffset: runStart, endOffset: len, y: top, x: left });
+    }
+  }
+
+  // Reading order: cluster by vertical band (~4px tolerance), then by x.
+  runs.sort((a, b) => (Math.abs(a.y - b.y) > 4 ? a.y - b.y : a.x - b.x));
+
+  // Build text, inserting a newline whenever we move to a new vertical band
+  // and a single space between runs that share a line.
+  let text = "";
+  let lastY = null;
+  for (const run of runs) {
+    const slice = (spans[run.spanIdx].textContent || "")
+      .slice(run.startOffset, run.endOffset);
+    if (lastY !== null) text += (Math.abs(run.y - lastY) > 4) ? "\n" : " ";
+    text += slice;
+    lastY = run.y;
+  }
+  text = text.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").trim();
+
+  return { text, runs };
+}
+
+// Persist each marquee run as its own (single-span) highlight so the existing
+// range-based repaint/removal machinery handles them unchanged.
+function addRectHighlights(pageNumber, runs) {
+  if (!runs.length) return false;
+  if (!_highlightsByPage.has(pageNumber)) _highlightsByPage.set(pageNumber, []);
+  const list = _highlightsByPage.get(pageNumber);
+  for (const run of runs) {
+    list.push({
+      id: _nextId++,
+      startSpanIdx: run.spanIdx,
+      startOffset:  run.startOffset,
+      endSpanIdx:   run.spanIdx,
+      endOffset:    run.endOffset,
+    });
+  }
+  return true;
+}
+
+async function copyText(text) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    try { document.execCommand("copy"); } catch {}
+  }
+}
+
 // ── Event wiring ──────────────────────────────────────────────────────────────
 
 // Wire up event handlers on a single page. Call once per page after render.
@@ -243,6 +376,55 @@ export function attachHighlightHandlers(
   pageNumber, pageWrapper, textLayerDiv, highlightLayerDiv,
   getHighlightMode, repaintCb
 ) {
+  // ── Alt + right-drag: rectangle (marquee) selection ───────────────────────
+  pageWrapper.addEventListener("mousedown", (e) => {
+    if (!e.altKey || e.button !== 2) return;
+    // Take over: no native text selection, and we'll swallow the contextmenu.
+    e.preventDefault();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const boxEl = ensureMarqueeEl();
+    boxEl.style.display = "block";
+    paintMarquee(boxEl, startX, startY, startX, startY);
+
+    const onMove = (ev) => paintMarquee(boxEl, startX, startY, ev.clientX, ev.clientY);
+    const onUp = (ev) => {
+      document.removeEventListener("mousemove", onMove, true);
+      document.removeEventListener("mouseup", onUp, true);
+      boxEl.style.display = "none";
+      _suppressNextContextMenu = true; // eat the trailing contextmenu event
+
+      const box = {
+        left:   Math.min(startX, ev.clientX),
+        right:  Math.max(startX, ev.clientX),
+        top:    Math.min(startY, ev.clientY),
+        bottom: Math.max(startY, ev.clientY),
+      };
+      // Ignore click-sized boxes (no real drag).
+      if (box.right - box.left < 4 || box.bottom - box.top < 4) return;
+
+      const { text, runs } = collectRectSelection(box, textLayerDiv);
+      if (!runs.length) return;
+
+      // Highlight tool: box → highlight immediately. Otherwise offer the menu.
+      if (getHighlightMode()) {
+        if (addRectHighlights(pageNumber, runs)) repaintCb(pageNumber);
+        return;
+      }
+      showCtxMenu(ev.clientX, ev.clientY + 8, [
+        { label: "Copy", action: () => copyText(text) },
+        {
+          label: "Highlight",
+          action: () => {
+            if (addRectHighlights(pageNumber, runs)) repaintCb(pageNumber);
+          },
+        },
+      ]);
+    };
+    document.addEventListener("mousemove", onMove, true);
+    document.addEventListener("mouseup", onUp, true);
+  });
+
   // ── mouseup: highlight-tool mode auto-captures; normal mode auto-shows menu ─
   pageWrapper.addEventListener("mouseup", (e) => {
     if (e.target && e.target.classList &&
@@ -314,6 +496,11 @@ export function attachHighlightHandlers(
 
   // ── contextmenu (right-click) ─────────────────────────────────────────────
   pageWrapper.addEventListener("contextmenu", (e) => {
+    // Swallow the contextmenu that trails an Alt+right marquee drag, plus any
+    // Alt+right-click, so the native menu never flashes during the gesture.
+    if (_suppressNextContextMenu) { _suppressNextContextMenu = false; e.preventDefault(); return; }
+    if (e.altKey) { e.preventDefault(); return; }
+
     const targetIsRect = e.target && e.target.classList &&
                          e.target.classList.contains("highlight-rect");
 
