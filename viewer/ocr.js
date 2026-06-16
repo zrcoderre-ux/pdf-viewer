@@ -179,8 +179,10 @@ export async function ocrPageToTextLayer({ page, pageNumber, displayScale, userH
     // with (e,f) the position in PDF user space (origin bottom-left), so f =
     // pageHeight - y1. This lets footerLines() detect a running-footer title
     // on scanned pages exactly as it does on native text layers.
+    // Append a trailing space on non-EOL words so that when ingestPage
+    // concatenates items the words don't run together ("Aspartofits").
     items.push({
-      str: w.text,
+      str: w.eol ? w.text : w.text + " ",
       hasEOL: w.eol,
       transform: [1, 0, 0, 1, w.x0, (userHeight || 0) - w.y1],
       width: w.x1 - w.x0,
