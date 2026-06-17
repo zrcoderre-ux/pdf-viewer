@@ -1084,7 +1084,10 @@ async function applyNamingMode() {
     }
   } else {
     // Source mode.
-    if (sourceDisplayName) paintDisplayName(sourceDisplayName);
+    if (sourceDisplayName) {
+      paintDisplayName(sourceDisplayName);
+      serverFilename = sourceDisplayName;
+    }
   }
 }
 
