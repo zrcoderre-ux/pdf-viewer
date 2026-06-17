@@ -146,41 +146,45 @@ export async function ocrPageToTextLayer({ page, pageNumber, displayScale, userH
   const items = [];
   let lastPar = words.length ? words[0].par : 0;
 
-  for (const w of words) {
-    if (!w.text) continue;
+  // Accumulate words into lines; emit one <span> per line so that text
+  // selection highlights in clean line-sized blocks instead of per-word chunks.
+  let lineWords = [];
 
-    const left = w.x0 * s;
-    const top = w.y0 * s;
-    const width = (w.x1 - w.x0) * s;
-    const height = (w.y1 - w.y0) * s;
+  const flushLine = () => {
+    if (!lineWords.length) return;
+    const x0 = lineWords[0].x0;
+    const x1 = lineWords[lineWords.length - 1].x1;
+    const y0 = Math.min(...lineWords.map(w => w.y0));
+    const y1 = Math.max(...lineWords.map(w => w.y1));
+    const height = (y1 - y0) * s;
+    const width  = (x1 - x0) * s;
+    const text   = lineWords.map(w => w.text).join(" ");
 
     const span = document.createElement("span");
-    span.textContent = w.text;
-    span.style.left = `${left}px`;
-    span.style.top = `${top}px`;
-    span.style.fontSize = `${Math.max(height, 1)}px`;
+    span.textContent = text;
+    span.style.left       = `${x0 * s}px`;
+    span.style.top        = `${y0 * s}px`;
+    span.style.fontSize   = `${Math.max(height, 1)}px`;
     span.style.fontFamily = "sans-serif";
     textLayerDiv.appendChild(span);
-    // Stretch the glyph box to the OCR word width so getClientRects() (used
-    // by the link/highlight layers to build Ranges) lines up with the image.
+    // Stretch to fit so getClientRects() lines up with the rendered image.
     const natural = span.getBoundingClientRect().width;
     if (natural > 0 && width > 0) {
       span.style.transform = `scaleX(${width / natural})`;
     }
+    lineWords = [];
+  };
 
-    // Synthetic textContent item. A paragraph change emits a blank-line
-    // break (two EOLs) so the detector's walk-back boundaries fire the way
-    // they do on a real text layer.
+  for (const w of words) {
+    if (!w.text) continue;
+
+    // textContent items stay word-by-word so citation detection works normally.
+    // A paragraph change emits a blank-line break (two EOLs) so walk-back
+    // boundaries in the detector fire the same way as a native text layer.
     if (w.par !== lastPar) {
       items.push({ str: "", hasEOL: true });
       lastPar = w.par;
     }
-    // Geometry mirrors PDF.js textContent items: transform is [a,b,c,d,e,f]
-    // with (e,f) the position in PDF user space (origin bottom-left), so f =
-    // pageHeight - y1. This lets footerLines() detect a running-footer title
-    // on scanned pages exactly as it does on native text layers.
-    // Append a trailing space on non-EOL words so that when ingestPage
-    // concatenates items the words don't run together ("Aspartofits").
     items.push({
       str: w.eol ? w.text : w.text + " ",
       hasEOL: w.eol,
@@ -188,7 +192,11 @@ export async function ocrPageToTextLayer({ page, pageNumber, displayScale, userH
       width: w.x1 - w.x0,
       height: w.y1 - w.y0,
     });
+
+    lineWords.push(w);
+    if (w.eol) flushLine();
   }
+  flushLine(); // trailing line with no eol marker
 
   return { items };
 }
