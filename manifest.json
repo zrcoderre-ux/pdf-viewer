@@ -16,6 +16,14 @@
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["content/claude-citations.js"],
+      "css": ["content/claude-citations.css"],
+      "run_at": "document_idle"
+    }
+  ],
   "action": {
     "default_title": "PDF Viewer",
     "default_popup": "popup.html"

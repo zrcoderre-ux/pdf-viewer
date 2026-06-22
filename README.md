@@ -27,6 +27,21 @@ In addition to citation linking, the viewer supports:
 - **Download** the original PDF with a smart filename (see below).
 - **Open original** in Chrome's built-in PDF viewer (skips the linker).
 
+## Citation links on claude.ai
+
+The same citation engine also runs on **claude.ai**. When Claude mentions a
+case, statute, or California rule of court in a response, the extension overlays
+a clickable underline that opens it in your selected provider (Westlaw or
+Lexis+) — handy when you're using Claude to find authority and want to pull the
+source.
+
+It's **non-destructive**: claude.ai is a React app, so the extension never
+edits Claude's DOM. It draws thin, clickable underline strips in a separate
+overlay layer and repositions them as the page scrolls or new text streams in.
+The underline color reflects the active provider (blue = Westlaw, red = Lexis+),
+and it honors the same provider toggle and `citation_repo.json` as the PDF
+viewer. Text underneath stays fully selectable.
+
 ## Smart PDF Naming
 
 The extension supports two filename-source modes, set on the Options page

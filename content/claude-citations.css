@@ -1,0 +1,32 @@
+/* Overlay layer for claude.ai citation links. Sits above the page; the
+   container ignores pointer events so only the underline strips are clickable,
+   leaving the text underneath fully selectable. */
+#__cl_overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+#__cl_overlay .cl-citation-link {
+  position: fixed;
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 1px;
+  background: #1a73e8; /* default / Westlaw blue, overridden below */
+  transition: box-shadow 0.1s ease, filter 0.1s ease;
+}
+
+/* Color the underline by destination so it's clear where a click goes. */
+#__cl_overlay[data-provider="westlaw"] .cl-citation-link { background: #1a73e8; } /* blue */
+#__cl_overlay[data-provider="lexis"]   .cl-citation-link { background: #c8102e; } /* Lexis red */
+
+/* Grow the hit/visual feedback on hover (the strip itself stays thin so it
+   doesn't block text selection while idle). */
+#__cl_overlay .cl-citation-link:hover {
+  box-shadow: 0 0 0 1.5px currentColor;
+  filter: brightness(1.15);
+}
