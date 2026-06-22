@@ -52,6 +52,7 @@ const downloadEl  = document.getElementById("download");
 const openOriginalEl = document.getElementById("open-original");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
+const rectSelectToggleEl = document.getElementById("rect-select-toggle");
 const pageIndicatorEl  = document.getElementById("page-indicator");
 
 let currentScale = 1.5;
@@ -80,6 +81,9 @@ let _resolveFooterTitle = null;
 // produces a normal browser text selection that the user can copy with
 // Ctrl+C — no highlight is created. Toggled by the toolbar button.
 let highlightMode = false;
+// Rectangle-select tool: when on, a left-drag sweeps a marquee box instead of
+// a flowing text selection. Alt+drag does the same regardless of this toggle.
+let rectSelectMode = false;
 // Filename resolved from the server's Content-Disposition header, if any.
 // This wins over any URL-derived guess (e-court URLs like
 // "/PublicCaseAccess/CaseDocument?docId=123" don't carry a usable name).
@@ -1332,7 +1336,8 @@ async function renderAllPages() {
     if (signal.aborted) return;
     attachHighlightHandlers(
       refs.pageNumber, refs.pageWrapper, refs.textLayerDiv,
-      refs.highlightLayerDiv, () => highlightMode, repaintCb
+      refs.highlightLayerDiv, () => highlightMode, repaintCb,
+      () => rectSelectMode
     );
     repaintHighlightsForPage(refs.pageNumber, refs.textLayerDiv, refs.highlightLayerDiv);
   }
@@ -1649,6 +1654,18 @@ if (highlightToggleEl) {
     highlightMode = !highlightMode;
     highlightToggleEl.setAttribute("aria-pressed", String(highlightMode));
     document.body.classList.toggle("highlight-mode", highlightMode);
+  });
+}
+
+// Rectangle-select tool toggle. Same guard rationale as the highlight toggle:
+// skip if the button is absent so the rest of the listeners still wire up. The
+// body class drives the crosshair cursor; the mode getter is read live by the
+// per-page marquee handler in highlights.js.
+if (rectSelectToggleEl) {
+  rectSelectToggleEl.addEventListener("click", () => {
+    rectSelectMode = !rectSelectMode;
+    rectSelectToggleEl.setAttribute("aria-pressed", String(rectSelectMode));
+    document.body.classList.toggle("rect-select-mode", rectSelectMode);
   });
 }
 

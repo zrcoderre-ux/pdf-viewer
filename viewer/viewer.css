@@ -48,6 +48,15 @@ body { overflow-y: auto; }
   line-height: 1;
 }
 #toolbar button:hover { background: #5a5d60; }
+/* Active state for the tool toggles (Highlight, Box select). */
+#toolbar button[aria-pressed="true"] {
+  background: #1a73e8;
+  border-color: #1a73e8;
+}
+#toolbar button[aria-pressed="true"]:hover { background: #1b66c9; }
+/* Rectangle-select tool: show a crosshair so it's clear a drag draws a box. */
+body.rect-select-mode .page-wrapper,
+body.rect-select-mode .textLayer span { cursor: crosshair; }
 #zoom-level { min-width: 48px; text-align: center; }
 #page-indicator { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
 

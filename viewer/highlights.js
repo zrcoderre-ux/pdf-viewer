@@ -30,9 +30,11 @@
 //
 // Selection shapes:
 //   - Default: native flowing text selection (drag with the left button).
-//   - Rectangle (marquee): hold Alt and drag with the RIGHT button to sweep a
-//     box. On release we gather every glyph whose center falls inside the box
-//     — handy for columns/tables where flowing selection grabs the wrong text.
+//   - Rectangle (marquee): sweep a box to grab every glyph whose center falls
+//     inside it — handy for columns/tables where flowing selection grabs the
+//     wrong text. Two ways to start one:
+//       * Hold Alt and drag (either mouse button), or
+//       * Turn on the Rectangle-select tool, then drag with the left button.
 //     In the highlight tool the box is highlighted immediately; otherwise the
 //     same Copy / Highlight menu appears for the boxed text.
 
@@ -374,12 +376,21 @@ async function copyText(text) {
 // repaintCb: (pageNumber) => void  — called whenever highlights change
 export function attachHighlightHandlers(
   pageNumber, pageWrapper, textLayerDiv, highlightLayerDiv,
-  getHighlightMode, repaintCb
+  getHighlightMode, repaintCb, getRectSelectMode
 ) {
-  // ── Alt + right-drag: rectangle (marquee) selection ───────────────────────
+  // ── Rectangle (marquee) selection ─────────────────────────────────────────
+  // Started by either: Alt + drag (any button), or the Rectangle-select tool +
+  // left-drag. A plain left-drag (no Alt, tool off) is left alone so normal
+  // text selection still works.
   pageWrapper.addEventListener("mousedown", (e) => {
-    if (!e.altKey || e.button !== 2) return;
-    // Take over: no native text selection, and we'll swallow the contextmenu.
+    const rectTool   = !!(getRectSelectMode && getRectSelectMode());
+    const altGesture = e.altKey && (e.button === 0 || e.button === 2);
+    const toolGesture = rectTool && e.button === 0;
+    if (!altGesture && !toolGesture) return;
+
+    // Take over: no native text selection, and (for the right button) we'll
+    // swallow the contextmenu that follows.
+    const startButton = e.button;
     e.preventDefault();
     const startX = e.clientX;
     const startY = e.clientY;
@@ -392,7 +403,10 @@ export function attachHighlightHandlers(
       document.removeEventListener("mousemove", onMove, true);
       document.removeEventListener("mouseup", onUp, true);
       boxEl.style.display = "none";
-      _suppressNextContextMenu = true; // eat the trailing contextmenu event
+      // Only a right-button drag is followed by a contextmenu event; swallow
+      // just that one. (Setting the flag after a left-drag would wrongly eat
+      // the user's next normal right-click menu.)
+      if (startButton === 2) _suppressNextContextMenu = true;
 
       const box = {
         left:   Math.min(startX, ev.clientX),
