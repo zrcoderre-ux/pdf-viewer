@@ -42,6 +42,13 @@ The underline color reflects the active provider (blue = Westlaw, red = Lexis+),
 and it honors the same provider toggle and `citation_repo.json` as the PDF
 viewer. Text underneath stays fully selectable.
 
+In addition to the in-text underlines, a **Table of Authorities** panel appears
+in the right margin whenever at least one citation is found. It lists each
+unique authority once, grouped into Cases / Statutes / Rules, as a regular blue
+hyperlink on the citation text itself (opening Westlaw or Lexis+). The panel can
+be minimized to just its header bar and maximized again; that preference is
+remembered.
+
 ## Smart PDF Naming
 
 The extension supports two filename-source modes, set on the Options page

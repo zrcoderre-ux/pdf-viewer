@@ -41,6 +41,14 @@
   let citations = [];           // [{ range, url, key, kind }]
   let overlayEl = null;
 
+  // Table of Authorities (margin panel) state.
+  let authorities = [];         // deduped [{ key, kind, url }]
+  let toaEl = null;             // panel container
+  let toaBodyEl = null;
+  let toaCountEl = null;
+  let toaMinimized = false;
+  let lastToaSig = "";          // skip rebuild when the authority set is unchanged
+
   // ── Setup ──────────────────────────────────────────────────────────────────
 
   async function init() {
@@ -82,10 +90,14 @@
     return new Promise((resolve) => {
       chrome.storage.sync.get({ provider: "lexis" }, ({ provider: p }) => {
         provider = p === "westlaw" ? "westlaw" : "lexis";
-        chrome.storage.local.get({ citationRepo: {} }, ({ citationRepo }) => {
-          repo = citationRepo || {};
-          resolve();
-        });
+        chrome.storage.local.get(
+          { citationRepo: {}, claudeToaMinimized: false },
+          ({ citationRepo, claudeToaMinimized }) => {
+            repo = citationRepo || {};
+            toaMinimized = !!claudeToaMinimized;
+            resolve();
+          }
+        );
       });
     });
   }
@@ -143,7 +155,16 @@
       }
     }
 
+    // Deduplicate by key for the Table of Authorities (the in-text underlines
+    // keep every occurrence; the TOA lists each authority once).
+    const seen = new Map();
+    for (const c of citations) {
+      if (!seen.has(c.key)) seen.set(c.key, { key: c.key, kind: c.kind, url: c.url });
+    }
+    authorities = [...seen.values()];
+
     paint();
+    renderToa();
   }
 
   // Map a [start, end) offset within a block's concatenated text to a DOM Range.
@@ -216,6 +237,117 @@
         a.style.width = `${rect.width}px`;
         a.style.height = `${stripHeight}px`;
         overlay.appendChild(a);
+      }
+    }
+  }
+
+  // ── Table of Authorities (margin panel) ──────────────────────────────────────
+
+  const TOA_ID = "__cl_toa";
+  // case → Cases, etc. Render order follows this list.
+  const TOA_GROUPS = [
+    ["case", "Cases"],
+    ["statute", "Statutes"],
+    ["rule", "Rules"],
+  ];
+
+  function ensureToa() {
+    if (toaEl && toaEl.isConnected) return toaEl;
+
+    toaEl = document.createElement("div");
+    toaEl.id = TOA_ID;
+
+    const header = document.createElement("div");
+    header.className = "cl-toa-header";
+    header.title = "Click to minimize / maximize";
+
+    const title = document.createElement("span");
+    title.className = "cl-toa-title";
+    title.textContent = "Table of Authorities";
+
+    toaCountEl = document.createElement("span");
+    toaCountEl.className = "cl-toa-count";
+
+    const toggle = document.createElement("button");
+    toggle.className = "cl-toa-toggle";
+    toggle.type = "button";
+
+    header.appendChild(title);
+    header.appendChild(toaCountEl);
+    header.appendChild(toggle);
+
+    toaBodyEl = document.createElement("div");
+    toaBodyEl.className = "cl-toa-body";
+
+    toaEl.appendChild(header);
+    toaEl.appendChild(toaBodyEl);
+
+    const onToggle = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toaMinimized = !toaMinimized;
+      applyMinimized();
+      chrome.storage.local.set({ claudeToaMinimized: toaMinimized });
+    };
+    header.addEventListener("click", onToggle);
+
+    // Append to <html> so panel mutations don't trigger the body observer.
+    document.documentElement.appendChild(toaEl);
+    return toaEl;
+  }
+
+  function applyMinimized() {
+    if (!toaEl) return;
+    toaEl.classList.toggle("cl-toa-minimized", toaMinimized);
+    const toggle = toaEl.querySelector(".cl-toa-toggle");
+    if (toggle) {
+      toggle.textContent = toaMinimized ? "+" : "–";
+      toggle.title = toaMinimized ? "Maximize" : "Minimize";
+    }
+  }
+
+  function renderToa() {
+    // Only show the panel when at least one authority was found.
+    if (!authorities.length) {
+      if (toaEl) toaEl.style.display = "none";
+      lastToaSig = "";
+      return;
+    }
+
+    ensureToa();
+    toaEl.style.display = "";
+    toaEl.dataset.provider = provider;
+    applyMinimized();
+
+    // Rebuild the list only when the set (or provider) actually changed, so the
+    // panel doesn't flicker / lose scroll position while answers stream in.
+    const sig = provider + "|" + authorities.map((a) => a.kind + ":" + a.key).join("||");
+    if (sig === lastToaSig) return;
+    lastToaSig = sig;
+
+    toaCountEl.textContent = String(authorities.length);
+    toaBodyEl.textContent = "";
+
+    for (const [kind, label] of TOA_GROUPS) {
+      const items = authorities
+        .filter((a) => a.kind === kind)
+        .sort((a, b) => a.key.localeCompare(b.key));
+      if (!items.length) continue;
+
+      const groupEl = document.createElement("div");
+      groupEl.className = "cl-toa-group";
+      groupEl.textContent = label;
+      toaBodyEl.appendChild(groupEl);
+
+      for (const a of items) {
+        const link = document.createElement("a");
+        link.className = "cl-toa-link";
+        link.href = a.url;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.textContent = a.key;
+        link.title = `Open in ${providerLabel()}`;
+        toaBodyEl.appendChild(link);
       }
     }
   }
