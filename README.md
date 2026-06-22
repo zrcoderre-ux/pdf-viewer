@@ -116,8 +116,9 @@ memorandum (10/10 match, identical keys). The port includes:
   honors sentence punctuation, paragraph breaks, name-connector words
   (`of`, `the`, `and`, `&`, `de`, `la`, `du`, `von`, `van`), and corporate
   suffixes (`Co.`, `Inc.`, `Corp.`, `Ltd.`, `Ass'n.`).
-- All 29 California codes (long forms + CSM short forms), section number
-  shapes including `437c` and `1714.45(b)(1)`.
+- All 29 California codes (long forms, CSM short forms, and bare uppercase
+  abbreviations such as `CCP § 664.6`, `PEN § 187`, `BPC § 17200`), section
+  number shapes including `437c` and `1714.45(b)(1)`.
 - `In re` cases (separate pattern, no `v.` anchor).
 - `Cal. Rules of Court` / `California Rules of Court`, `rule` or `rules`,
   with nested subsections.

@@ -77,6 +77,41 @@ export const STATUTE_CODES_RAW = [
   // reversed orderings so both word orders match.
   [String.raw`Civ\.\s*Proc\.\s*Code`, "CCP"],
   [String.raw`Civil\s+Procedure\s+Code`, "CCP"],
+
+  // Bare uppercase abbreviations as written in practice ("CCP § 664.6",
+  // "PEN § 187", "BPC § 17200"). These mirror the canonical output
+  // abbreviations and also accept dotted forms ("C.C.P."). The required
+  // §/section + number after the name (enforced by the statute regex) keeps
+  // false positives low. Listed shortest-last so longer named forms above
+  // always win when both could match.
+  [String.raw`C\.?C\.?P\.?`, "CCP"],
+  [String.raw`CIV`, "CIV"],
+  [String.raw`PEN`, "PEN"],
+  [String.raw`EVID`, "EVID"],
+  [String.raw`BPC`, "BPC"],
+  [String.raw`FAM`, "FAM"],
+  [String.raw`GOV`, "GOV"],
+  [String.raw`HSC`, "HSC"],
+  [String.raw`LAB`, "LAB"],
+  [String.raw`PROB`, "PROB"],
+  [String.raw`VEH`, "VEH"],
+  [String.raw`WIC`, "WIC"],
+  [String.raw`CORP`, "CORP"],
+  [String.raw`INS`, "INS"],
+  [String.raw`RTC`, "RTC"],
+  [String.raw`EDC`, "EDC"],
+  [String.raw`ELEC`, "ELEC"],
+  [String.raw`FIN`, "FIN"],
+  [String.raw`FGC`, "FGC"],
+  [String.raw`HNC`, "HNC"],
+  [String.raw`MVC`, "MVC"],
+  [String.raw`PCC`, "PCC"],
+  [String.raw`PRC`, "PRC"],
+  [String.raw`PUC`, "PUC"],
+  [String.raw`SHC`, "SHC"],
+  [String.raw`UIC`, "UIC"],
+  [String.raw`WAT`, "WAT"],
+  [String.raw`COM`, "COM"],
 ];
 
 export const STATUTE_CODES_SORTED = [...STATUTE_CODES_RAW].sort(
