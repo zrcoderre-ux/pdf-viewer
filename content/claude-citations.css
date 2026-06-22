@@ -35,10 +35,13 @@
 
 #__cl_toa {
   position: fixed;
-  top: 88px;
+  top: 80px;
   right: 12px;
-  width: 280px;
-  max-height: calc(100vh - 120px);
+  width: 420px;
+  min-width: 220px;
+  height: 460px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
   display: flex;
   flex-direction: column;
   background: #ffffff;
@@ -52,6 +55,9 @@
   z-index: 2147483600;
   overflow: hidden;
 }
+
+/* Minimized collapses to just the header bar regardless of any custom height. */
+#__cl_toa.cl-toa-minimized { height: auto !important; }
 
 @media (prefers-color-scheme: dark) {
   #__cl_toa {
@@ -110,6 +116,8 @@
 .cl-toa-toggle:hover { background: rgba(127, 127, 127, 0.18); }
 
 .cl-toa-body {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 6px 10px 10px;
   overflow-y: auto;
 }
@@ -117,6 +125,29 @@
 /* Minimized: collapse to just the header bar. */
 #__cl_toa.cl-toa-minimized .cl-toa-body { display: none; }
 #__cl_toa.cl-toa-minimized .cl-toa-header { border-bottom: none; }
+#__cl_toa.cl-toa-minimized .cl-toa-resize { display: none; }
+
+/* Drag-to-resize grip in the bottom-left corner (the panel is pinned right). */
+.cl-toa-resize {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nesw-resize;
+  touch-action: none;
+  background:
+    linear-gradient(
+      45deg,
+      transparent 0 4px,
+      currentColor 4px 5px,
+      transparent 5px 8px,
+      currentColor 8px 9px,
+      transparent 9px
+    );
+  opacity: 0.35;
+}
+.cl-toa-resize:hover { opacity: 0.7; }
 
 .cl-toa-group {
   margin: 8px 0 3px;

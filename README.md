@@ -46,8 +46,9 @@ In addition to the in-text underlines, a **Table of Authorities** panel appears
 in the right margin whenever at least one citation is found. It lists each
 unique authority once, grouped into Cases / Statutes / Rules, as a regular blue
 hyperlink on the citation text itself (opening Westlaw or Lexis+). The panel can
-be minimized to just its header bar and maximized again; that preference is
-remembered.
+be minimized to just its header bar and maximized again, and **resized** by
+dragging the grip in its bottom-left corner; the minimized state and custom
+dimensions are remembered.
 
 ## Smart PDF Naming
 

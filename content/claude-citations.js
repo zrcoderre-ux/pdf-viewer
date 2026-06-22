@@ -47,6 +47,8 @@
   let toaBodyEl = null;
   let toaCountEl = null;
   let toaMinimized = false;
+  let toaWidth = null;          // persisted custom dimensions (px), null = default
+  let toaHeight = null;
   let lastToaSig = "";          // skip rebuild when the authority set is unchanged
 
   // ── Setup ──────────────────────────────────────────────────────────────────
@@ -91,10 +93,17 @@
       chrome.storage.sync.get({ provider: "lexis" }, ({ provider: p }) => {
         provider = p === "westlaw" ? "westlaw" : "lexis";
         chrome.storage.local.get(
-          { citationRepo: {}, claudeToaMinimized: false },
-          ({ citationRepo, claudeToaMinimized }) => {
+          {
+            citationRepo: {},
+            claudeToaMinimized: false,
+            claudeToaWidth: null,
+            claudeToaHeight: null,
+          },
+          ({ citationRepo, claudeToaMinimized, claudeToaWidth, claudeToaHeight }) => {
             repo = citationRepo || {};
             toaMinimized = !!claudeToaMinimized;
+            toaWidth = claudeToaWidth || null;
+            toaHeight = claudeToaHeight || null;
             resolve();
           }
         );
@@ -281,6 +290,43 @@
 
     toaEl.appendChild(header);
     toaEl.appendChild(toaBodyEl);
+
+    // Restore any saved custom dimensions.
+    if (toaWidth) toaEl.style.width = `${toaWidth}px`;
+    if (toaHeight) toaEl.style.height = `${toaHeight}px`;
+
+    // Drag-to-resize grip. The panel is pinned to the top-right, so the grip
+    // lives in the bottom-LEFT corner: drag left to widen, drag down to
+    // lengthen. Dimensions are clamped to the viewport and persisted.
+    const grip = document.createElement("div");
+    grip.className = "cl-toa-resize";
+    grip.title = "Drag to resize";
+    toaEl.appendChild(grip);
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const rect = toaEl.getBoundingClientRect();
+      const startW = rect.width;
+      const startH = rect.height;
+      grip.setPointerCapture(e.pointerId);
+      const onMove = (ev) => {
+        const w = Math.max(220, Math.min(startW + (startX - ev.clientX), window.innerWidth - 24));
+        const h = Math.max(140, Math.min(startH + (ev.clientY - startY), window.innerHeight - 24));
+        toaEl.style.width = `${w}px`;
+        toaEl.style.height = `${h}px`;
+      };
+      const onUp = () => {
+        grip.removeEventListener("pointermove", onMove);
+        grip.removeEventListener("pointerup", onUp);
+        toaWidth = Math.round(toaEl.getBoundingClientRect().width);
+        toaHeight = Math.round(toaEl.getBoundingClientRect().height);
+        chrome.storage.local.set({ claudeToaWidth: toaWidth, claudeToaHeight: toaHeight });
+      };
+      grip.addEventListener("pointermove", onMove);
+      grip.addEventListener("pointerup", onUp);
+    });
 
     const onToggle = (e) => {
       e.preventDefault();
