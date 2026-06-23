@@ -1360,6 +1360,31 @@ async function renderAllPages() {
 //      if we're displaying our source name.
 //   2. Flipping the toggle from "source" to "footer" should be instant,
 //      not require re-rendering pages 1-2.
+// Reject OCR-garbage footer titles so we fall back to the (clean) source name.
+// On scanned / clerk-stamped PDFs the footer band sometimes yields gibberish —
+// "c ,-/z!h 1 1 iUwN4QT", "I!%$(! $%#1 ...", run-together OCR words like
+// "ANDINSTALLMENTPAYMENTS", or form codes like "SCLAC CIV 298 Rev." — that
+// never make good document names. Signals:
+//   1. letters are too small a share of the text (symbol/digit noise);
+//   2. an implausibly long unbroken alphabetic run (merged OCR words; real
+//      legal words top out around 16 chars);
+//   3. too few vowels among the letters (consonant-soup OCR / form codes).
+function looksLikeGibberishTitle(title) {
+  const t = String(title || "").trim();
+  const nonSpace = t.replace(/\s/g, "");
+  if (!nonSpace) return true;
+  const letters = t.replace(/[^A-Za-z]/g, "");
+  if (letters.length / nonSpace.length < 0.55) return true;
+  const longestRun = (t.match(/[A-Za-z]+/g) || [])
+    .reduce((mx, w) => Math.max(mx, w.length), 0);
+  if (longestRun > 20) return true;
+  if (letters.length >= 6) {
+    const vowels = (letters.match(/[aeiou]/gi) || []).length;
+    if (vowels / letters.length < 0.30) return true;
+  }
+  return false;
+}
+
 function tryResolveFooterTitle() {
   const p1 = _footerByPage.get(1) || [];
   const p2 = _footerByPage.get(2) || [];
@@ -1378,6 +1403,11 @@ function tryResolveFooterTitle() {
 
   const rawTitle = chooseTitleFromFooters(p1, p2);
   if (!rawTitle) return;
+
+  // OCR-garbage footer text, or a blank Word template placeholder, is not a
+  // real title — fall back to the source name rather than display nonsense.
+  if (looksLikeGibberishTitle(rawTitle)) return;
+  if (/^pleading title\b/i.test(rawTitle.trim())) return;
 
   // New rule engine first — produces structured output we can disambiguate
   // against sibling tabs. Falls back to the legacy simplifyName-only flow

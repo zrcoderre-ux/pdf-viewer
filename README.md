@@ -71,7 +71,12 @@ disambiguating qualifier added only when another open PDF would collide:
   `FAC` / `SAC` / `TAC`.
 - Declarations preserve the last name and what they support:
   `Smith Decl. ISO Mot.`, `Bennett Decl. ISO Opp.`,
-  `Connors Decl.` for bare declarations.
+  `Connors Decl.` for bare declarations. Generational suffixes and
+  credentials are skipped when picking the surname (`Gregory Wayne Walton II`
+  → `Walton Decl.`, not `Ii Decl.`).
+- OCR-garbage or template-placeholder footers (random symbols, run-together
+  scan text, blank-form codes, `PLEADING TITLE`) are rejected so the clean
+  source filename is used instead of nonsense.
 - Hyphenated last names are kept whole (`Garcia-Lopez Decl. ISO Opp.`).
 - Party identifiers (`Plaintiff's`, `Defendant Pacific Insurance's`,
   `Creditco's`) are stripped from the leading edge of the title.

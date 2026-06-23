@@ -51,10 +51,28 @@ function normalize(raw) {
     .trim();
 }
 
+// Generational suffixes and post-nominal credentials that are never the
+// surname. Without this, "Declaration of Gregory Wayne Walton II" yields the
+// surname "II" ("Ii Decl.") instead of "Walton".
+const NAME_TAIL_NOISE = new Set([
+  "jr", "sr", "ii", "iii", "iv", "v", "vi",
+  "esq", "esquire", "mscj", "phd", "md", "jd", "llm", "cpa",
+]);
+
 // Capitalize each hyphen-separated segment; "SMITH" → "Smith",
-// "GARCIA-LOPEZ" → "Garcia-Lopez".
+// "GARCIA-LOPEZ" → "Garcia-Lopez". Picks the surname as the last *real* token,
+// skipping trailing generational suffixes ("II"), credentials ("MSCJ", "Esq."),
+// lone initials, and OCR noise (stray digits/single letters).
 function titleCaseLastWord(name) {
   const parts = name.trim().split(/\s+/);
+  while (parts.length > 1) {
+    const bare = parts[parts.length - 1].replace(/[.,]/g, "").toLowerCase();
+    if (bare === "" || /^\d+$/.test(bare) || bare.length === 1 || NAME_TAIL_NOISE.has(bare)) {
+      parts.pop();
+    } else {
+      break;
+    }
+  }
   const last = parts[parts.length - 1] || "";
   return last
     .split("-")
