@@ -42,10 +42,13 @@ The underline color reflects the active provider (blue = Westlaw, red = Lexis+),
 and it honors the same provider toggle and `citation_repo.json` as the PDF
 viewer. Text underneath stays fully selectable.
 
-**Single-code inheritance:** if exactly one statute code is named on the page
-(e.g. only "Civil Code"), every later bare `§ N` / `section N` reference is
-treated as belonging to that code and linked too. When two or more codes appear,
-bare sections are left alone (ambiguous).
+**Carry-forward inheritance:** a bare `§ N` / `section N` reference (no code
+name of its own) inherits the most recently *named* code before it in reading
+order. So after "Civil Code § 1671(b)", a later "§ 1671" links to Civil Code;
+if "CCP § 664.6" is then named, a following "§ 664.6" links to the Code of Civil
+Procedure. A bare section that appears before any code is named is left unlinked.
+(The single-named-code case is just the special case where everything follows
+one code.)
 
 In addition to the in-text underlines, a **Table of Authorities** panel appears
 in the right margin whenever at least one citation is found. It lists each

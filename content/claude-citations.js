@@ -154,7 +154,7 @@
       map.push({ node, start, end: start + val.length });
     }
 
-    // Per-block context kept for the single-code inheritance pass.
+    // Per-block context kept for the bare-section inheritance pass.
     const blocks = [];
     for (const [block, map] of groups) {
       const blockText = text.get(block);
@@ -162,8 +162,13 @@
       let hits;
       try { hits = findAllCitations(blockText); } catch { continue; }
       const matchedSpans = [];
+      const markers = []; // { pos, code } where a statute code is named
       for (const cite of hits) {
         matchedSpans.push(cite.span);
+        if (cite.kind === "statute") {
+          const i = cite.key.indexOf(" § ");
+          if (i > 0) markers.push({ pos: cite.span[0], code: cite.key.slice(0, i) });
+        }
         const range = rangeForSpan(map, cite.span[0], cite.span[1]);
         if (!range) continue;
         let url;
@@ -171,32 +176,45 @@
         if (!url) continue;
         citations.push({ range, url, key: cite.key, kind: cite.kind });
       }
-      blocks.push({ map, blockText, matchedSpans });
+      markers.sort((a, b) => a.pos - b.pos);
+      blocks.push({ map, blockText, matchedSpans, markers });
     }
 
-    // Single-code inheritance: if exactly one statute code is named anywhere on
-    // the page, treat every bare "§ N" / "section N" reference as belonging to
-    // that code and link it too. When two or more codes appear a bare section
-    // is ambiguous, so we leave those alone.
-    const codePrefix = soleStatuteCode();
-    if (codePrefix) {
-      for (const { map, blockText, matchedSpans } of blocks) {
-        BARE_SECTION_RE.lastIndex = 0;
-        let m;
-        while ((m = BARE_SECTION_RE.exec(blockText)) !== null) {
-          const s = m.index;
-          const e = m.index + m[0].length;
-          // Skip references already covered by a full citation above.
-          if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
-          const key = `${codePrefix} § ${m.groups.sec}`;
-          let url;
-          try { url = resolveUrl({ kind: "statute", key }, repo, provider); } catch { continue; }
-          if (!url) continue;
-          const range = rangeForSpan(map, s, e);
-          if (!range) continue;
-          citations.push({ range, url, key, kind: "statute" });
+    // Carry-forward inheritance: a bare "§ N" / "section N" reference (no code
+    // name of its own) inherits the most recently NAMED code that appears
+    // before it in reading order. We walk blocks in document order, tracking
+    // the last code named; within a block a bare section uses the nearest
+    // preceding code marker, falling back to the carried-in code. Bare sections
+    // before any code is ever named stay unlinked (nothing to inherit). The
+    // single-named-code case is just the special case where every bare section
+    // follows that one code.
+    let lastCode = null;
+    for (const { map, blockText, matchedSpans, markers } of blocks) {
+      BARE_SECTION_RE.lastIndex = 0;
+      let m;
+      while ((m = BARE_SECTION_RE.exec(blockText)) !== null) {
+        const s = m.index;
+        const e = m.index + m[0].length;
+        // Skip references already covered by a full citation above.
+        if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
+        // Nearest code named at or before this section in the block, else the
+        // code carried in from earlier blocks.
+        let code = lastCode;
+        for (const mk of markers) {
+          if (mk.pos <= s) code = mk.code;
+          else break;
         }
+        if (!code) continue;
+        const key = `${code} § ${m.groups.sec}`;
+        let url;
+        try { url = resolveUrl({ kind: "statute", key }, repo, provider); } catch { continue; }
+        if (!url) continue;
+        const range = rangeForSpan(map, s, e);
+        if (!range) continue;
+        citations.push({ range, url, key, kind: "statute" });
       }
+      // Hand the last code named in this block to the next block.
+      if (markers.length) lastCode = markers[markers.length - 1].code;
     }
 
     // Deduplicate by key for the Table of Authorities (the in-text underlines
@@ -209,18 +227,6 @@
 
     paint();
     renderToa();
-  }
-
-  // The single distinct statute code prefix on the page ("CIV", "9 U.S.C."),
-  // or null when zero or more than one code is present.
-  function soleStatuteCode() {
-    const prefixes = new Set();
-    for (const c of citations) {
-      if (c.kind !== "statute") continue;
-      const i = c.key.indexOf(" § ");
-      if (i > 0) prefixes.add(c.key.slice(0, i));
-    }
-    return prefixes.size === 1 ? [...prefixes][0] : null;
   }
 
   // Map a [start, end) offset within a block's concatenated text to a DOM Range.
