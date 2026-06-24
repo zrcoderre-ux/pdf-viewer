@@ -160,6 +160,11 @@ body.rect-select-mode .textLayer span { cursor: crosshair; }
   padding: 8px 6px;
   font-size: 12px;
 }
+/* The [hidden] attribute must win over the panels' own display rules, or
+   switching tabs won't actually hide the inactive panel — e.g. the Pages
+   thumbnails would stay visible on the Bookmarks tab. */
+#panel-pages[hidden],
+#panel-bookmarks[hidden] { display: none; }
 
 .thumb-item {
   display: flex;
