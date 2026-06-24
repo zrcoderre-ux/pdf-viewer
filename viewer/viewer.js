@@ -846,7 +846,20 @@ function handleDeclaration(s) {
   return `${lastName} Decl. ISO ${isoPart}`;
 }
 
+// Strip a trailing isolated "V" (a standalone single letter, optionally with a
+// period) left over from a "v." case caption in the source filename — e.g.
+// "Amended Complaint V" → "Amended Complaint", "Request for Dismissal V" →
+// "Request for Dismissal". Only removed when it's its own word at the very end;
+// a "V" inside or attached to a word (e.g. "TV", "Vol") is left untouched.
+function stripTrailingIsolatedV(name) {
+  return String(name || "").replace(/\s+[Vv]\.?$/, "").trimEnd();
+}
+
 function simplifyName(raw) {
+  return stripTrailingIsolatedV(simplifyNameCore(raw));
+}
+
+function simplifyNameCore(raw) {
   let s = raw;
 
   // Check for Declaration pattern first, before any transformations

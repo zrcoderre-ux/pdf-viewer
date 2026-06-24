@@ -93,6 +93,9 @@ disambiguating qualifier added only when another open PDF would collide:
   preserved as its own type (procedural notice).
 - Case-number tails (`Case No. 30STCV12345`) and damages-blob descriptive
   tails (`for compensatory, punitive, ... damages`) are stripped.
+- A trailing isolated `V` left over from a `v.` case caption is removed
+  (`Amended Complaint V` → `Amended Complaint`); a `V` that's part of a word is
+  kept.
 
 ### Cross-tab disambiguation
 
