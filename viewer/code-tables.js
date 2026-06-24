@@ -88,33 +88,25 @@ export function caseReporterCite(caseKey) {
   return null;
 }
 
-// Lexis search term that includes the first word of the plaintiff name (or
-// the "In re X" / "X Cases" head) plus the reporter cite. Mirrors
-// _disambiguated_lexis_term in pdf_linker.py: prevents wrong-case hits when
-// a nearby case in the same volume spans the target page (e.g. Sheppard v.
-// Maxwell, 384 U.S. 333, spanning page 346, returned instead of Miranda v.
-// Arizona, 384 U.S. 346). Falls back to the bare reporter cite when no
-// reporter tail is recognised (WL/LEXIS-only and slip cites).
+// Lexis search term: the full case name (both parties) plus the reporter cite.
+// The reporter cite (vol + reporter + page) is the unique anchor; including
+// both party names — rather than just the first word of the plaintiff —
+// improves accuracy when the lead party is generic ("People v. ...", "City of
+// ...", "In re ...") and is more robust to a stray leading token from imperfect
+// name extraction. It still disambiguates same-volume page collisions (e.g.
+// Sheppard v. Maxwell, 384 U.S. 333, spanning page 346, vs. Miranda v. Arizona,
+// 384 U.S. 346). Falls back to the bare reporter cite when no name is present,
+// and to the full key when no reporter tail is recognised (WL/LEXIS-only and
+// slip cites route through caseReporterCite separately).
 export function disambiguatedLexisTerm(caseKey) {
   const m = caseKey.match(_CASE_TAIL_RE);
   if (!m) {
-    // Not a reporter cite — return the full key; the WL/LEXIS-only path
-    // routes through caseReporterCite separately.
     return caseKey;
   }
   const [, _year, vol, reporter, page] = m;
   const reporterCite = `${vol} ${reporter} ${page}`;
-  const namePart = caseKey.slice(0, m.index).trim().replace(/,+$/, "");
-  const inre = /^In re\s+(\S+)/i.exec(namePart);
-  if (inre) {
-    return `In re ${inre[1]} ${reporterCite}`;
-  }
-  const casesM = /^((?:[A-Z]\S*\s+){1,4}Cases)\b/.exec(namePart);
-  if (casesM) {
-    return `${casesM[1]} ${reporterCite}`;
-  }
-  const firstWord = namePart.split(/\s+/)[0]?.replace(/[.,;:]+$/, "") || "";
-  return firstWord ? `${firstWord} ${reporterCite}` : reporterCite;
+  const namePart = caseKey.slice(0, m.index).trim().replace(/[,;]+$/, "");
+  return namePart ? `${namePart} ${reporterCite}` : reporterCite;
 }
 
 // Slip-cite keys are shaped:

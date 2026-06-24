@@ -154,7 +154,10 @@ script — `WL_SEARCH_PREFIX` for Westlaw (`CA CIVIL § 1542`) and
 expose a public citation-direct deep-link API (its permalinks need an
 internal UUID), so Lexis URLs use the universal search endpoint
 `https://plus.lexis.com/search?pdsearchterms=...`. Signed in, the cited
-document is the top hit on the results page.
+document is the top hit on the results page. For cases, the Lexis search term
+combines the **full case name (both parties)** with the reporter cite (e.g.
+`People v. Smith 13 Cal.App.5th 1152`) — the reporter cite is the unique anchor,
+and both party names improve accuracy when the lead party is generic.
 
 ## citation_repo.json support
 
