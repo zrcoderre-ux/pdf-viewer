@@ -1456,6 +1456,20 @@ export function runDetection() {
   return documentCites.length;
 }
 
+// Deduplicated authorities for a Table of Authorities: each detected citation
+// once, with its resolved URL for the given repo/provider. Order of first
+// appearance is preserved; the caller groups/sorts as needed.
+export function getAuthorities(repo = {}, provider = "lexis") {
+  const seen = new Map();
+  for (const c of documentCites) {
+    if (seen.has(c.key)) continue;
+    const url = resolveUrl(c, repo, provider);
+    if (!url) continue;
+    seen.set(c.key, { key: c.key, kind: c.kind, url });
+  }
+  return [...seen.values()];
+}
+
 export function placeLinksForPage(pageNumber, textLayerDiv, linkLayerDiv) {
   const pageInfo = pageJoinedItemMaps.find((p) => p.pageNumber === pageNumber);
   if (!pageInfo) return 0;

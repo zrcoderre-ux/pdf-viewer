@@ -34,6 +34,18 @@ for (const r of namingRadios) {
   });
 }
 
+// Table of Authorities panel toggle (synced; default on). Open viewer tabs and
+// the claude.ai content script subscribe to this key and show/hide live.
+const toaEnabledEl = document.getElementById("toa-enabled");
+if (toaEnabledEl) {
+  chrome.storage.sync.get({ toaEnabled: true }, ({ toaEnabled }) => {
+    toaEnabledEl.checked = toaEnabled !== false;
+  });
+  toaEnabledEl.addEventListener("change", () => {
+    chrome.storage.sync.set({ toaEnabled: toaEnabledEl.checked });
+  });
+}
+
 // Init repo info
 function refreshRepoInfo() {
   chrome.storage.local.get({ citationRepo: null, citationRepoMeta: null }, (res) => {

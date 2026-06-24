@@ -9,7 +9,9 @@ import {
   ingestPage,
   runDetection,
   placeLinksForPage,
+  getAuthorities,
 } from "./citation-linker.js";
+import { createToaPanel } from "./toa.js";
 import {
   clearAllHighlights,
   attachHighlightHandlers,
@@ -60,6 +62,10 @@ let totalLinks = 0;
 let pdfDoc = null;
 let provider = "lexis";
 let citationRepo = {};
+// Shared Table of Authorities panel (off when the user disables it in Options).
+const toaPanel = createToaPanel({
+  providerLabel: (p) => (p === "westlaw" ? "Westlaw" : "Lexis+"),
+});
 // Raw bytes of the loaded PDF, stashed during loadAndRender so the Download
 // button doesn't have to re-fetch from the server. eCMS-style URLs are slow
 // and sometimes single-use; the second fetch failing was the source of the
@@ -1119,10 +1125,11 @@ setDisplayName(filenameFromUrl(fileUrl), { definitive: false });
 
 // Read stored prefs and any saved citation_repo.json.
 chrome.storage.sync.get(
-  { provider: "lexis", namingMode: "source" },
-  async ({ provider: storedProvider, namingMode: storedNamingMode }) => {
+  { provider: "lexis", namingMode: "source", toaEnabled: true },
+  async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabled }) => {
     provider = storedProvider;
     providerEl.value = provider;
+    toaPanel.setEnabled(toaEnabled !== false);
     globalNamingMode = storedNamingMode === "footer" ? "footer" : "source";
     // Look up any per-document override for this exact PDF URL.
     perDocOverride = await getOverride(fileUrl);
@@ -1192,6 +1199,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.citationRepo) {
     citationRepo = changes.citationRepo.newValue || {};
     if (pdfDoc) renderAllPages();
+  }
+  if (area === "sync" && changes.toaEnabled) {
+    const on = changes.toaEnabled.newValue !== false;
+    toaPanel.setEnabled(on);
+    // Re-show with the current document's authorities without a full re-render.
+    if (on && pdfDoc) toaPanel.render(getAuthorities(citationRepo, provider), provider);
   }
 });
 
@@ -1329,6 +1342,9 @@ async function renderAllPages() {
   // Pass 2: run document-wide detection (resolves supra across pages).
   const totalCites = runDetection();
   void totalCites;
+
+  // Feed the Table of Authorities panel (deduped authorities for this doc).
+  if (toaPanel) toaPanel.render(getAuthorities(citationRepo, provider), provider);
 
   // Pass 3: place links on each page.
   for (const refs of pageRefs) {
