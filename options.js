@@ -40,9 +40,9 @@ for (const r of namingRadios) {
 const toaPdfEl = document.getElementById("toa-enabled-pdf");
 const toaWebEl = document.getElementById("toa-enabled-web");
 chrome.storage.sync.get(
-  { toaEnabledPdf: true, toaEnabledWeb: true },
+  { toaEnabledPdf: false, toaEnabledWeb: true },
   ({ toaEnabledPdf, toaEnabledWeb }) => {
-    if (toaPdfEl) toaPdfEl.checked = toaEnabledPdf !== false;
+    if (toaPdfEl) toaPdfEl.checked = !!toaEnabledPdf;
     if (toaWebEl) toaWebEl.checked = toaEnabledWeb !== false;
   }
 );

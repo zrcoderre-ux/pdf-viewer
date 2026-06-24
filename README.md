@@ -26,8 +26,9 @@ In addition to citation linking, the viewer supports:
 - **Table of Authorities** — a side panel listing every detected case,
   statute, and rule once, as a clickable link to your provider; minimizable and
   drag-resizable. The same panel appears for claude.ai. Options →
-  "Table of Authorities" has separate checkboxes to show/hide it in the PDF
-  viewer and on websites; in-text links are unaffected either way.
+  "Table of Authorities" has separate checkboxes for the PDF viewer and
+  websites (default: **off** for PDFs, **on** for websites); in-text links are
+  unaffected either way.
 - **OCR** scanned PDFs on demand with the toolbar **⛶ OCR** button — text
   becomes selectable and citations get linked. Enable "Automatically OCR
   scanned documents" in Options to run it without the button.

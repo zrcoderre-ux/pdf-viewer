@@ -1136,11 +1136,11 @@ setDisplayName(filenameFromUrl(fileUrl), { definitive: false });
 
 // Read stored prefs and any saved citation_repo.json.
 chrome.storage.sync.get(
-  { provider: "lexis", namingMode: "source", toaEnabledPdf: true, autoOcr: false },
+  { provider: "lexis", namingMode: "source", toaEnabledPdf: false, autoOcr: false },
   async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabledPdf, autoOcr }) => {
     provider = storedProvider;
     providerEl.value = provider;
-    toaPanel.setEnabled(toaEnabledPdf !== false);
+    toaPanel.setEnabled(!!toaEnabledPdf);
     if (autoOcr) { ocrEnabled = true; markOcrActive(); }
     globalNamingMode = storedNamingMode === "footer" ? "footer" : "source";
     // Look up any per-document override for this exact PDF URL.
