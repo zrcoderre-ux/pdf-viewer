@@ -33,6 +33,11 @@
   const BLOCK_SELECTOR =
     "p, li, td, th, blockquote, h1, h2, h3, h4, h5, h6, dd, dt, figcaption";
 
+  // Bare section reference ("§ 1671", "§§ 430.10", "section 664.6") with no
+  // code name. Used by the single-code inheritance pass below.
+  const BARE_SECTION_RE =
+    /(?:§§?|sections?|secs?\.?)\s*(?<sec>\d+(?:\.\d+)?[a-z]?(?:\([a-z0-9]+\))*)/gi;
+
   let findAllCitations = null;
   let resolveUrl = null;
 
@@ -149,18 +154,48 @@
       map.push({ node, start, end: start + val.length });
     }
 
+    // Per-block context kept for the single-code inheritance pass.
+    const blocks = [];
     for (const [block, map] of groups) {
       const blockText = text.get(block);
       if (blockText.length < 6) continue; // too short to hold a citation
       let hits;
       try { hits = findAllCitations(blockText); } catch { continue; }
+      const matchedSpans = [];
       for (const cite of hits) {
+        matchedSpans.push(cite.span);
         const range = rangeForSpan(map, cite.span[0], cite.span[1]);
         if (!range) continue;
         let url;
         try { url = resolveUrl(cite, repo, provider); } catch { continue; }
         if (!url) continue;
         citations.push({ range, url, key: cite.key, kind: cite.kind });
+      }
+      blocks.push({ map, blockText, matchedSpans });
+    }
+
+    // Single-code inheritance: if exactly one statute code is named anywhere on
+    // the page, treat every bare "§ N" / "section N" reference as belonging to
+    // that code and link it too. When two or more codes appear a bare section
+    // is ambiguous, so we leave those alone.
+    const codePrefix = soleStatuteCode();
+    if (codePrefix) {
+      for (const { map, blockText, matchedSpans } of blocks) {
+        BARE_SECTION_RE.lastIndex = 0;
+        let m;
+        while ((m = BARE_SECTION_RE.exec(blockText)) !== null) {
+          const s = m.index;
+          const e = m.index + m[0].length;
+          // Skip references already covered by a full citation above.
+          if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
+          const key = `${codePrefix} § ${m.groups.sec}`;
+          let url;
+          try { url = resolveUrl({ kind: "statute", key }, repo, provider); } catch { continue; }
+          if (!url) continue;
+          const range = rangeForSpan(map, s, e);
+          if (!range) continue;
+          citations.push({ range, url, key, kind: "statute" });
+        }
       }
     }
 
@@ -174,6 +209,18 @@
 
     paint();
     renderToa();
+  }
+
+  // The single distinct statute code prefix on the page ("CIV", "9 U.S.C."),
+  // or null when zero or more than one code is present.
+  function soleStatuteCode() {
+    const prefixes = new Set();
+    for (const c of citations) {
+      if (c.kind !== "statute") continue;
+      const i = c.key.indexOf(" § ");
+      if (i > 0) prefixes.add(c.key.slice(0, i));
+    }
+    return prefixes.size === 1 ? [...prefixes][0] : null;
   }
 
   // Map a [start, end) offset within a block's concatenated text to a DOM Range.

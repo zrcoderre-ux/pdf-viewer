@@ -42,6 +42,11 @@ The underline color reflects the active provider (blue = Westlaw, red = Lexis+),
 and it honors the same provider toggle and `citation_repo.json` as the PDF
 viewer. Text underneath stays fully selectable.
 
+**Single-code inheritance:** if exactly one statute code is named on the page
+(e.g. only "Civil Code"), every later bare `§ N` / `section N` reference is
+treated as belonging to that code and linked too. When two or more codes appear,
+bare sections are left alone (ambiguous).
+
 In addition to the in-text underlines, a **Table of Authorities** panel appears
 in the right margin whenever at least one citation is found. It lists each
 unique authority once, grouped into Cases / Statutes / Rules, as a regular blue
