@@ -1125,11 +1125,11 @@ setDisplayName(filenameFromUrl(fileUrl), { definitive: false });
 
 // Read stored prefs and any saved citation_repo.json.
 chrome.storage.sync.get(
-  { provider: "lexis", namingMode: "source", toaEnabled: true },
-  async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabled }) => {
+  { provider: "lexis", namingMode: "source", toaEnabledPdf: true },
+  async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabledPdf }) => {
     provider = storedProvider;
     providerEl.value = provider;
-    toaPanel.setEnabled(toaEnabled !== false);
+    toaPanel.setEnabled(toaEnabledPdf !== false);
     globalNamingMode = storedNamingMode === "footer" ? "footer" : "source";
     // Look up any per-document override for this exact PDF URL.
     perDocOverride = await getOverride(fileUrl);
@@ -1200,8 +1200,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
     citationRepo = changes.citationRepo.newValue || {};
     if (pdfDoc) renderAllPages();
   }
-  if (area === "sync" && changes.toaEnabled) {
-    const on = changes.toaEnabled.newValue !== false;
+  if (area === "sync" && changes.toaEnabledPdf) {
+    const on = changes.toaEnabledPdf.newValue !== false;
     toaPanel.setEnabled(on);
     // Re-show with the current document's authorities without a full re-render.
     if (on && pdfDoc) toaPanel.render(getAuthorities(citationRepo, provider), provider);

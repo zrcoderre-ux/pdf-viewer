@@ -73,8 +73,8 @@
         provider = changes.provider.newValue === "westlaw" ? "westlaw" : "lexis";
         scan(); // URLs depend on the active provider
       }
-      if (area === "sync" && changes.toaEnabled) {
-        toaPanel.setEnabled(changes.toaEnabled.newValue !== false);
+      if (area === "sync" && changes.toaEnabledWeb) {
+        toaPanel.setEnabled(changes.toaEnabledWeb.newValue !== false);
         scan();
       }
       if (area === "local" && changes.citationRepo) {
@@ -97,10 +97,10 @@
   function loadSettings() {
     return new Promise((resolve) => {
       chrome.storage.sync.get(
-        { provider: "lexis", toaEnabled: true },
-        ({ provider: p, toaEnabled }) => {
+        { provider: "lexis", toaEnabledWeb: true },
+        ({ provider: p, toaEnabledWeb }) => {
           provider = p === "westlaw" ? "westlaw" : "lexis";
-          if (toaPanel) toaPanel.setEnabled(toaEnabled !== false);
+          if (toaPanel) toaPanel.setEnabled(toaEnabledWeb !== false);
           chrome.storage.local.get({ citationRepo: {} }, ({ citationRepo }) => {
             repo = citationRepo || {};
             resolve();

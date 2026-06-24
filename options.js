@@ -34,15 +34,26 @@ for (const r of namingRadios) {
   });
 }
 
-// Table of Authorities panel toggle (synced; default on). Open viewer tabs and
-// the claude.ai content script subscribe to this key and show/hide live.
-const toaEnabledEl = document.getElementById("toa-enabled");
-if (toaEnabledEl) {
-  chrome.storage.sync.get({ toaEnabled: true }, ({ toaEnabled }) => {
-    toaEnabledEl.checked = toaEnabled !== false;
+// Table of Authorities panel toggles (synced; default on). Separate switches
+// for the PDF viewer and for websites (claude.ai); open viewer tabs and the
+// content script subscribe to these keys and show/hide live.
+const toaPdfEl = document.getElementById("toa-enabled-pdf");
+const toaWebEl = document.getElementById("toa-enabled-web");
+chrome.storage.sync.get(
+  { toaEnabledPdf: true, toaEnabledWeb: true },
+  ({ toaEnabledPdf, toaEnabledWeb }) => {
+    if (toaPdfEl) toaPdfEl.checked = toaEnabledPdf !== false;
+    if (toaWebEl) toaWebEl.checked = toaEnabledWeb !== false;
+  }
+);
+if (toaPdfEl) {
+  toaPdfEl.addEventListener("change", () => {
+    chrome.storage.sync.set({ toaEnabledPdf: toaPdfEl.checked });
   });
-  toaEnabledEl.addEventListener("change", () => {
-    chrome.storage.sync.set({ toaEnabled: toaEnabledEl.checked });
+}
+if (toaWebEl) {
+  toaWebEl.addEventListener("change", () => {
+    chrome.storage.sync.set({ toaEnabledWeb: toaWebEl.checked });
   });
 }
 
