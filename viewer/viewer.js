@@ -84,6 +84,9 @@ let highlightMode = false;
 // Rectangle-select tool: when on, a left-drag sweeps a marquee box instead of
 // a flowing text selection. Alt+drag does the same regardless of this toggle.
 let rectSelectMode = false;
+// Random id for this document's PDF-history entry, so the session can update
+// its final name later without storing (or keying on) the document URL.
+let currentHistoryId = null;
 // Filename resolved from the server's Content-Disposition header, if any.
 // This wins over any URL-derived guess (e-court URLs like
 // "/PublicCaseAccess/CaseDocument?docId=123" don't carry a usable name).
@@ -1056,12 +1059,12 @@ function paintDisplayName(display) {
 
 // Persist the currently-displayed name as the history entry's final name, so
 // the log records which name we ended up using — not just the cases where the
-// user manually revised it. No-ops until logPdfHistory has created the entry
-// for this URL (that initial log captures the name itself).
+// user manually revised it. No-ops until logPdfHistory has created this
+// session's entry (that initial log captures the name itself).
 function recordFinalName(name) {
-  if (!fileUrl) return;
+  if (!currentHistoryId) return;
   chrome.storage.local.get({ pdfHistory: [] }, ({ pdfHistory }) => {
-    const idx = pdfHistory.findIndex(e => e.url === fileUrl);
+    const idx = pdfHistory.findIndex(e => e.id === currentHistoryId);
     if (idx === -1) return;
     if (pdfHistory[idx].finalName === name) return;
     pdfHistory[idx].finalName = name;
@@ -1462,11 +1465,13 @@ function tryResolveFooterTitle() {
 
 function logPdfHistory() {
   if (!fileUrl) return;
+  // The document URL is intentionally NOT recorded. Each opened PDF gets a
+  // random in-memory id so this session can update its finalName later
+  // (rename / naming-mode change); it is not derived from or tied to the URL.
+  currentHistoryId = (crypto.randomUUID && crypto.randomUUID()) ||
+    String(Date.now()) + Math.random().toString(36).slice(2);
   const entry = {
-    url:         fileUrl,
-    finalName:   (namingMode === "footer" && footerExtraction?.displayName)
-                   ? footerExtraction.displayName
-                   : (sourceDisplayName || ""),
+    id:          currentHistoryId,
     sourceTitle: sourceDisplayName || "",
     footerName:  footerExtraction ? (footerExtraction.displayName || "") : "",
     footerTitle: footerExtraction ? (footerExtraction.raw || "") : "",
@@ -1474,14 +1479,8 @@ function logPdfHistory() {
     timestamp:   new Date().toISOString(),
   };
   chrome.storage.local.get({ pdfHistory: [] }, ({ pdfHistory }) => {
-    // Update existing entry for this URL, or prepend a new one.
-    const idx = pdfHistory.findIndex(e => e.url === fileUrl);
-    if (idx !== -1) {
-      pdfHistory[idx] = entry;
-    } else {
-      pdfHistory.unshift(entry);
-      if (pdfHistory.length > 500) pdfHistory.length = 500;
-    }
+    pdfHistory.unshift(entry);
+    if (pdfHistory.length > 500) pdfHistory.length = 500;
     chrome.storage.local.set({ pdfHistory });
   });
 }
