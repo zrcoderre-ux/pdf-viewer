@@ -127,6 +127,11 @@ good as the footer text PDF.js can recover. Switch to footer mode when
 working with a corpus where the source names are unhelpful (eCMS UUID
 filenames, scanned-document IDs, etc.).
 
+PDFs opened from the local disk (`file://`) always default to the source
+filename even when the global preference is footer mode — local files are
+usually already named sensibly. The toolbar dropdown still lets you switch an
+individual local file to footer naming.
+
 ## Faithful port of pdf_linker.py
 
 The detection logic is a line-by-line port of `pdf_linker.py`. Output has

@@ -41,6 +41,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
 
 const params = new URLSearchParams(location.search);
 const fileUrl = params.get("file");
+// Local-disk PDFs (file://) default to the source filename even when the global
+// preference is "footer" — they're usually already named sensibly and footer
+// extraction on them tends to be noise.
+const isLocalFile = /^file:/i.test(fileUrl || "");
 
 const filenameEl  = document.getElementById("filename");
 const statusEl    = document.getElementById("status");
@@ -125,7 +129,10 @@ let namingMode = "source";
 // Recompute the effective mode and (if it changed) re-paint. Called
 // from anywhere a layer above might have updated.
 function resolveEffectiveNamingMode() {
-  const next = perDocOverride || globalNamingMode;
+  // A per-document override (toolbar dropdown) always wins; otherwise local
+  // files fall back to "source" regardless of the global default.
+  const baseDefault = isLocalFile ? "source" : globalNamingMode;
+  const next = perDocOverride || baseDefault;
   if (next === namingMode) return false;
   namingMode = next;
   return true;
