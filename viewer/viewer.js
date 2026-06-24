@@ -52,6 +52,7 @@ const zoomInEl    = document.getElementById("zoom-in");
 const zoomOutEl   = document.getElementById("zoom-out");
 const downloadEl  = document.getElementById("download");
 const openOriginalEl = document.getElementById("open-original");
+const ocrRunEl    = document.getElementById("ocr-run");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
@@ -66,6 +67,9 @@ let citationRepo = {};
 const toaPanel = createToaPanel({
   providerLabel: (p) => (p === "westlaw" ? "Westlaw" : "Lexis+"),
 });
+// OCR runs on scanned pages only when enabled. Default is manual (the toolbar
+// "OCR" button); the auto-OCR option flips the default to on.
+let ocrEnabled = false;
 // Raw bytes of the loaded PDF, stashed during loadAndRender so the Download
 // button doesn't have to re-fetch from the server. eCMS-style URLs are slow
 // and sometimes single-use; the second fetch failing was the source of the
@@ -1125,11 +1129,12 @@ setDisplayName(filenameFromUrl(fileUrl), { definitive: false });
 
 // Read stored prefs and any saved citation_repo.json.
 chrome.storage.sync.get(
-  { provider: "lexis", namingMode: "source", toaEnabledPdf: true },
-  async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabledPdf }) => {
+  { provider: "lexis", namingMode: "source", toaEnabledPdf: true, autoOcr: false },
+  async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabledPdf, autoOcr }) => {
     provider = storedProvider;
     providerEl.value = provider;
     toaPanel.setEnabled(toaEnabledPdf !== false);
+    if (autoOcr) { ocrEnabled = true; markOcrActive(); }
     globalNamingMode = storedNamingMode === "footer" ? "footer" : "source";
     // Look up any per-document override for this exact PDF URL.
     perDocOverride = await getOverride(fileUrl);
@@ -1153,6 +1158,25 @@ providerEl.addEventListener("change", () => {
   chrome.storage.sync.set({ provider });
   if (pdfDoc) renderAllPages();
 });
+
+// Reflect that OCR is active for this document (manual run or auto-OCR option).
+function markOcrActive() {
+  if (!ocrRunEl) return;
+  ocrRunEl.setAttribute("aria-pressed", "true");
+  ocrRunEl.disabled = true;
+  ocrRunEl.title = "OCR is active for this document";
+}
+
+// Manual OCR: recognize scanned pages on demand, then re-render so the text
+// layer, citation links, and Table of Authorities pick up the OCR'd text.
+if (ocrRunEl) {
+  ocrRunEl.addEventListener("click", () => {
+    if (ocrEnabled) return;
+    ocrEnabled = true;
+    markOcrActive();
+    if (pdfDoc) renderAllPages();
+  });
+}
 
 // Toolbar naming-mode dropdown writes a per-document override. The
 // override is keyed by file URL and lives in chrome.storage.session, so
@@ -1205,6 +1229,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
     toaPanel.setEnabled(on);
     // Re-show with the current document's authorities without a full re-render.
     if (on && pdfDoc) toaPanel.render(getAuthorities(citationRepo, provider), provider);
+  }
+  if (area === "sync" && changes.autoOcr && changes.autoOcr.newValue && !ocrEnabled) {
+    ocrEnabled = true;
+    markOcrActive();
+    if (pdfDoc) renderAllPages();
   }
 });
 
@@ -1592,7 +1621,7 @@ async function renderPageCanvasAndText(pageNumber) {
   await page.render({ canvasContext: ctx, viewport }).promise;
 
   let textContent = await page.getTextContent();
-  if (pageNeedsOcr(textContent)) {
+  if (ocrEnabled && pageNeedsOcr(textContent)) {
     // No usable PDF.js text layer (scan / image-only export). Recognize the
     // page and synthesize both the textLayer spans and a textContent-shaped
     // object so the linker, highlights, and footer naming work unchanged.

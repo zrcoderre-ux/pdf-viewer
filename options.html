@@ -122,12 +122,22 @@ https://example.gov/getfile?id=*</pre>
   <h2>OCR settings</h2>
   <div class="card">
     <p class="lede" style="margin-top:0;">
-      When a scanned PDF has no selectable text, the viewer runs OCR
-      (Tesseract) to recognize it. Use the setting below to ignore text
-      found in the far-left margin — useful for law firm names and phone
-      numbers printed in the gutter of court filings.
+      When a scanned PDF has no selectable text, OCR (Tesseract) recognizes it
+      so the text becomes selectable and citations are linked. By default this
+      runs only when you click the <strong>OCR</strong> button in the viewer
+      toolbar; enable auto-OCR below to run it automatically on every scanned
+      document.
     </p>
-    <label style="display:flex;align-items:center;gap:10px;font-size:13px;">
+    <label class="radio">
+      <input type="checkbox" id="auto-ocr">
+      Automatically OCR scanned documents (otherwise use the toolbar button)
+    </label>
+    <p class="lede" style="margin:10px 0 0;">
+      Use the setting below to ignore text found in the far-left margin —
+      useful for law firm names and phone numbers printed in the gutter of
+      court filings.
+    </p>
+    <label style="display:flex;align-items:center;gap:10px;font-size:13px;margin-top:8px;">
       Skip left margin
       <input type="number" id="ocr-left-margin" min="0" max="30" step="1" value="8"
              style="width:60px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:13px;">

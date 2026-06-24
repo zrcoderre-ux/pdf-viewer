@@ -48,6 +48,7 @@ body { overflow-y: auto; }
   line-height: 1;
 }
 #toolbar button:hover { background: #5a5d60; }
+#toolbar button:disabled { opacity: 0.6; cursor: default; }
 /* Active state for the tool toggles (Highlight, Box select). */
 #toolbar button[aria-pressed="true"] {
   background: #1a73e8;

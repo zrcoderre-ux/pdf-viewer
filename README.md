@@ -28,6 +28,9 @@ In addition to citation linking, the viewer supports:
   drag-resizable. The same panel appears for claude.ai. Options →
   "Table of Authorities" has separate checkboxes to show/hide it in the PDF
   viewer and on websites; in-text links are unaffected either way.
+- **OCR** scanned PDFs on demand with the toolbar **⛶ OCR** button — text
+  becomes selectable and citations get linked. Enable "Automatically OCR
+  scanned documents" in Options to run it without the button.
 - **Zoom in / out** with the toolbar buttons.
 - **Download** the original PDF with a smart filename (see below).
 - **Open original** in Chrome's built-in PDF viewer (skips the linker).
@@ -215,8 +218,6 @@ extension's details page.
 - It does **not** write a `*_linked.pdf` file. (That's the whole point of
   the extension version.) Keep using `pdf_linker.py` if you need a
   permanent linked PDF.
-- It does **not** OCR PDFs without a text layer. The Python script can,
-  via Tesseract; the extension assumes PDFs are already OCR'd.
 - It does **not** run any code on remote servers. Everything happens
   locally in the browser. The only network requests are the PDF fetch
   itself and any Westlaw / Lexis link the user clicks.

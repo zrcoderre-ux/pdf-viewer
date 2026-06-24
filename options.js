@@ -220,6 +220,17 @@ historyClearBtn.addEventListener("click", () => {
   });
 });
 
+// Auto-OCR toggle (synced; default off → manual OCR via the toolbar button).
+const autoOcrEl = document.getElementById("auto-ocr");
+if (autoOcrEl) {
+  chrome.storage.sync.get({ autoOcr: false }, ({ autoOcr }) => {
+    autoOcrEl.checked = !!autoOcr;
+  });
+  autoOcrEl.addEventListener("change", () => {
+    chrome.storage.sync.set({ autoOcr: autoOcrEl.checked });
+  });
+}
+
 // OCR left-margin cutoff
 const ocrLeftMarginInput = document.getElementById("ocr-left-margin");
 const ocrSaveBtn         = document.getElementById("ocr-save");
