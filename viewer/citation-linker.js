@@ -15,6 +15,7 @@ import {
   westlawCaseUrl,
   westlawStatuteUrl,
   westlawRuleUrl,
+  westlawUccUrl,
   lexisSearchUrl,
   wlSearchTerm,
   lexisSearchTerm,
@@ -197,6 +198,24 @@ const USC_RE = new RegExp(
   String.raw`\s*` +
   String.raw`(?:§§?|sections?|secs?\.?)\s*` +
   String.raw`(?<sec>\d+(?:\.\d+)?[a-z]?(?:\([a-z0-9]+\))*)`,
+  "gi"
+);
+
+// Model Uniform Commercial Code — distinct from California's Commercial Code.
+// The TELL is a HYPHENATED section ("3-310", "2-207(2)"): the model UCC uses
+// article-section numbering with a hyphen, while California's Commercial Code
+// omits it. We match the Commercial-Code family of names (U.C.C., UCC,
+// Uniform/Unif. Commercial Code, Commercial Code, Com. Code) ONLY when the
+// section is hyphenated; non-hyphenated sections fall through to the normal
+// California statute pass.
+const UCC_RE = new RegExp(
+  String.raw`\b(?:U\.?\s*C\.?\s*C\.?` +
+  String.raw`|Unif(?:orm)?\.?\s*Commercial\s+Code` +
+  String.raw`|Commercial\s+Code` +
+  String.raw`|Com\.\s*Code)` +
+  String.raw`,?\s*` +
+  String.raw`(?:§§?|sections?|secs?\.?)\s*` +
+  String.raw`(?<sec>\d+-\d+(?:\([a-z0-9]+\))*)`,
   "gi"
 );
 
@@ -690,9 +709,26 @@ function findStatuteCitations(text) {
   const results = [];
   let m;
 
+  // Model Uniform Commercial Code (hyphenated section). Detected first so the
+  // general California pass below can skip the partial "... § 3" it would
+  // otherwise grab from "U.C.C. § 3-310".
+  const uccSpans = [];
+  UCC_RE.lastIndex = 0;
+  while ((m = UCC_RE.exec(text)) !== null) {
+    results.push({
+      kind: "statute",
+      key: `UCC § ${m.groups.sec}`,
+      span: [m.index, m.index + m[0].length],
+      matchText: m[0],
+    });
+    uccSpans.push([m.index, m.index + m[0].length]);
+  }
+
   // California statutes (and chained additional sections).
   STATUTE_RE.lastIndex = 0;
   while ((m = STATUTE_RE.exec(text)) !== null) {
+    const s = m.index, e = m.index + m[0].length;
+    if (uccSpans.some(([a, b]) => s < b && e > a)) continue; // part of a UCC cite
     const abbrev = statuteAbbrev(m);
     if (!abbrev) continue;
     const section = m.groups.sec;
@@ -1044,6 +1080,16 @@ export function resolveUrl(cite, repo, provider) {
   }
 
   if (cite.kind === "statute") {
+    // Model Uniform Commercial Code — provider-specific search terms:
+    //   Lexis+   "U.C.C. § 3-310"
+    //   Westlaw  "Unif.Commercial Code § 3-310"
+    const ucc = cite.key.match(/^UCC § (.+)$/);
+    if (ucc) {
+      const sec = ucc[1];
+      return effectiveProvider === "lexis"
+        ? lexisSearchUrl(`U.C.C. § ${sec}`)
+        : westlawUccUrl(`Unif.Commercial Code § ${sec}`);
+    }
     return effectiveProvider === "lexis"
       ? lexisSearchUrl(lexisSearchTerm(cite.key))
       : westlawStatuteUrl(wlSearchTerm(cite.key));

@@ -154,6 +154,17 @@ export function westlawRuleUrl(query) {
   );
 }
 
+// Model Uniform Commercial Code search (NOT California's Commercial Code).
+// Westlaw indexes the model UCC nationally, so we omit the CA jurisdiction
+// filter. Caller passes a term like "Unif.Commercial Code § 3-310".
+export function westlawUccUrl(query) {
+  return (
+    "https://1.next.westlaw.com/Search/Results.html" +
+    "?query=" + encodeURIComponent(query) +
+    "&contentType=STATUTE"
+  );
+}
+
 export function lexisSearchUrl(term) {
   return (
     "https://plus.lexis.com/search/" +

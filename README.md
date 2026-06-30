@@ -149,6 +149,11 @@ memorandum (10/10 match, identical keys). The port includes:
 - All 29 California codes (long forms, CSM short forms, and bare uppercase
   abbreviations such as `CCP § 664.6`, `PEN § 187`, `BPC § 17200`), section
   number shapes including `437c` and `1714.45(b)(1)`.
+- Model **Uniform Commercial Code** cites (`U.C.C. § 3-310`, `Uniform
+  Commercial Code § 2-207`) — distinguished from California's Commercial Code
+  by the hyphenated section number, and resolved to the model UCC on each
+  provider (`U.C.C. § 3-310` on Lexis+, `Unif.Commercial Code § 3-310` on
+  Westlaw).
 - `In re` cases (separate pattern, no `v.` anchor).
 - `Cal. Rules of Court` / `California Rules of Court`, `rule` or `rules`,
   with nested subsections.
