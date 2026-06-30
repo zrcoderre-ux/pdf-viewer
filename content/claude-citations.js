@@ -38,6 +38,14 @@
   const BARE_SECTION_RE =
     /(?:§§?|sections?|secs?\.?)\s*(?<sec>\d+(?:\.\d+)?[a-z]?(?:\([a-z0-9]+\))*)/gi;
 
+  // Bare model-UCC reference: a SINGLE "§" (or "section"/"sec.") followed by a
+  // HYPHENATED number ("§ 3-310"). The hyphen is the tell for the model UCC, so
+  // these need no code-name context. The lookarounds on "§" exclude the second
+  // "§" of a "§§ 1542-1543" range (which is a span of CA sections, not a UCC
+  // article-section).
+  const BARE_UCC_RE =
+    /(?:(?<!§)§(?!§)|\bsections?|\bsecs?\.?)\s*(?<sec>\d+-\d+(?:\([a-z0-9]+\))*)/gi;
+
   let findAllCitations = null;
   let resolveUrl = null;
   let toaPanel = null;          // shared Table of Authorities panel (toa.js)
@@ -184,8 +192,27 @@
     // follows that one code.
     let lastCode = null;
     for (const { map, blockText, matchedSpans, markers } of blocks) {
-      BARE_SECTION_RE.lastIndex = 0;
       let m;
+      // Bare model-UCC sections first ("§ 3-310"): identified by the hyphen
+      // alone, so no carry-forward is needed. Recorded into matchedSpans so the
+      // carry-forward pass below skips them (its section pattern would otherwise
+      // grab a wrong "§ 3").
+      BARE_UCC_RE.lastIndex = 0;
+      while ((m = BARE_UCC_RE.exec(blockText)) !== null) {
+        const s = m.index;
+        const e = m.index + m[0].length;
+        if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
+        const key = `UCC § ${m.groups.sec}`;
+        let url;
+        try { url = resolveUrl({ kind: "statute", key }, repo, provider); } catch { continue; }
+        if (!url) continue;
+        const range = rangeForSpan(map, s, e);
+        if (!range) continue;
+        citations.push({ range, url, key, kind: "statute" });
+        matchedSpans.push([s, e]);
+      }
+
+      BARE_SECTION_RE.lastIndex = 0;
       while ((m = BARE_SECTION_RE.exec(blockText)) !== null) {
         const s = m.index;
         const e = m.index + m[0].length;

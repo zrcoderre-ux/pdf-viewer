@@ -57,7 +57,9 @@ order. So after "Civil Code § 1671(b)", a later "§ 1671" links to Civil Code;
 if "CCP § 664.6" is then named, a following "§ 664.6" links to the Code of Civil
 Procedure. A bare section that appears before any code is named is left unlinked.
 (The single-named-code case is just the special case where everything follows
-one code.)
+one code.) A bare hyphenated section (`§ 3-310`) needs no code context — the
+hyphen identifies it as the model UCC — while a `§§ 1542-1543` range is left for
+carry-forward as a span of state-code sections.
 
 In addition to the in-text underlines, a **Table of Authorities** panel appears
 in the right margin whenever at least one citation is found. It lists each
