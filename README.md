@@ -49,7 +49,10 @@ edits Claude's DOM. It draws thin, clickable underline strips in a separate
 overlay layer and repositions them as the page scrolls or new text streams in.
 The underline color reflects the active provider (blue = Westlaw, red = Lexis+),
 and it honors the same provider toggle and `citation_repo.json` as the PDF
-viewer. Text underneath stays fully selectable.
+viewer. Text underneath stays fully selectable. Citations inside hidden or
+collapsed regions (e.g. a "thinking" panel) are skipped, and strips for text
+scrolled out of a clipped container are suppressed, so links never land over
+unrelated chat text.
 
 **Carry-forward inheritance:** a bare `§ N` / `section N` reference (no code
 name of its own) inherits the most recently *named* code before it in reading

@@ -141,6 +141,13 @@
         if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
         const parent = node.parentElement;
         if (!parent || parent.closest(SKIP_ANCESTOR)) return NodeFilter.FILTER_REJECT;
+        // Skip text in hidden subtrees (e.g. a collapsed "thinking" panel).
+        // Linking it would paint a strip at the text's geometric position,
+        // which for hidden/clipped content lands over unrelated chat text.
+        if (parent.checkVisibility &&
+            !parent.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })) {
+          return NodeFilter.FILTER_REJECT;
+        }
         return NodeFilter.FILTER_ACCEPT;
       },
     });
@@ -165,6 +172,10 @@
       try { hits = findAllCitations(blockText); } catch { continue; }
       const matchedSpans = [];
       const markers = []; // { pos, code } where a statute code is named
+      // Overflow-clipping ancestors of this block — used at paint time to drop
+      // strips for text scrolled out of a clipped container (e.g. a partially
+      // collapsed "thinking" panel) so they don't land over the main chat.
+      const clipEls = clipAncestorsOf(block);
       for (const cite of hits) {
         matchedSpans.push(cite.span);
         if (cite.kind === "statute") {
@@ -176,10 +187,10 @@
         let url;
         try { url = resolveUrl(cite, repo, provider); } catch { continue; }
         if (!url) continue;
-        citations.push({ range, url, key: cite.key, kind: cite.kind });
+        citations.push({ range, url, key: cite.key, kind: cite.kind, clipEls });
       }
       markers.sort((a, b) => a.pos - b.pos);
-      blocks.push({ map, blockText, matchedSpans, markers });
+      blocks.push({ map, blockText, matchedSpans, markers, clipEls });
     }
 
     // Carry-forward inheritance: a bare "§ N" / "section N" reference (no code
@@ -191,7 +202,7 @@
     // single-named-code case is just the special case where every bare section
     // follows that one code.
     let lastCode = null;
-    for (const { map, blockText, matchedSpans, markers } of blocks) {
+    for (const { map, blockText, matchedSpans, markers, clipEls } of blocks) {
       let m;
       // Bare model-UCC sections first ("§ 3-310"): identified by the hyphen
       // alone, so no carry-forward is needed. Recorded into matchedSpans so the
@@ -208,7 +219,7 @@
         if (!url) continue;
         const range = rangeForSpan(map, s, e);
         if (!range) continue;
-        citations.push({ range, url, key, kind: "statute" });
+        citations.push({ range, url, key, kind: "statute", clipEls });
         matchedSpans.push([s, e]);
       }
 
@@ -232,7 +243,7 @@
         if (!url) continue;
         const range = rangeForSpan(map, s, e);
         if (!range) continue;
-        citations.push({ range, url, key, kind: "statute" });
+        citations.push({ range, url, key, kind: "statute", clipEls });
       }
       // Hand the last code named in this block to the next block.
       if (markers.length) lastCode = markers[markers.length - 1].code;
@@ -248,6 +259,35 @@
 
     paint();
     if (toaPanel) toaPanel.render(authorities, provider);
+  }
+
+  // Collect an element's overflow-clipping ancestors (those that visually clip
+  // their content). Used to drop strips for citation text that's scrolled out
+  // of such a container — e.g. a partially collapsed "thinking" panel — whose
+  // getClientRects() would otherwise report a position over the main chat.
+  function clipAncestorsOf(el) {
+    const out = [];
+    for (let p = el && el.parentElement; p; p = p.parentElement) {
+      const s = getComputedStyle(p);
+      const clipsX = s.overflowX !== "visible";
+      const clipsY = s.overflowY !== "visible";
+      if (clipsX || clipsY) out.push({ el: p, clipsX, clipsY });
+    }
+    return out;
+  }
+
+  // True if the rect's center lies within every clipping ancestor's box — i.e.
+  // the citation text is actually visible, not scrolled out of a clipped panel.
+  function rectVisibleInClips(rect, clipEls) {
+    if (!clipEls) return true;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    for (const { el, clipsX, clipsY } of clipEls) {
+      const cr = el.getBoundingClientRect();
+      if (clipsX && (cx < cr.left || cx > cr.right)) return false;
+      if (clipsY && (cy < cr.top || cy > cr.bottom)) return false;
+    }
+    return true;
   }
 
   // Map a [start, end) offset within a block's concatenated text to a DOM Range.
@@ -300,6 +340,9 @@
       try { rects = c.range.getClientRects(); } catch { continue; }
       for (const rect of rects) {
         if (rect.width < 2 || rect.height < 2) continue;
+        // Drop strips for text clipped out of a scrollable/collapsed container
+        // (its rect would otherwise land over unrelated chat text).
+        if (!rectVisibleInClips(rect, c.clipEls)) continue;
         const a = document.createElement("a");
         a.href = c.url;
         a.target = "_blank";
