@@ -45,14 +45,15 @@ Lexis+) — handy when you're using Claude to find authority and want to pull th
 source.
 
 It's **non-destructive**: claude.ai is a React app, so the extension never
-edits Claude's DOM. It draws thin, clickable underline strips in a separate
-overlay layer and repositions them as the page scrolls or new text streams in.
-The underline color reflects the active provider (blue = Westlaw, red = Lexis+),
-and it honors the same provider toggle and `citation_repo.json` as the PDF
-viewer. Text underneath stays fully selectable. Citations inside hidden or
-collapsed regions (e.g. a "thinking" panel) are skipped, and strips for text
-scrolled out of a clipped container are suppressed, so links never land over
-unrelated chat text.
+edits Claude's DOM. It overlays a clickable link over each citation in a
+separate layer and repositions it as the page scrolls or new text streams in.
+Each link covers the whole citation (an easy click target) but is transparent
+except for a colored bottom border, so it reads as an underline; the color
+reflects the active provider (blue = Westlaw, red = Lexis+). It honors the same
+provider toggle and `citation_repo.json` as the PDF viewer. Citations inside
+hidden or collapsed regions (e.g. a "thinking" panel) are skipped, and links
+for text scrolled out of a clipped container are suppressed, so they never land
+over unrelated chat text.
 
 **Carry-forward inheritance:** a bare `§ N` / `section N` reference (no code
 name of its own) inherits the most recently *named* code before it in reading

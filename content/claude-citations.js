@@ -352,14 +352,13 @@
         a.title = `${c.key} → ${providerLabel()}`;
         a.draggable = false;
         a.addEventListener("dragstart", (ev) => ev.preventDefault());
-        // Thin strip at the text baseline: visible, clickable underline that
-        // leaves the glyphs above selectable.
-        const stripHeight = 2;
-        const top = rect.top + rect.height * 0.92 - stripHeight / 2;
+        // Cover the whole citation rect so the entire phrase is an easy click
+        // target; the CSS makes it transparent with only a colored bottom
+        // border, so it still reads as an underline.
         a.style.left = `${rect.left}px`;
-        a.style.top = `${top}px`;
+        a.style.top = `${rect.top}px`;
         a.style.width = `${rect.width}px`;
-        a.style.height = `${stripHeight}px`;
+        a.style.height = `${rect.height}px`;
         overlay.appendChild(a);
       }
     }
