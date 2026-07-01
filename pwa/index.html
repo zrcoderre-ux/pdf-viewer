@@ -1,5 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
+<!--
+  PWA shell for the citation-linking PDF viewer.
+
+  This page hosts the SAME toolbar/panel markup and loads the SAME logic
+  (viewer/viewer.js + its modules) as the Chrome extension's viewer/viewer.html.
+  The extra bits here are web-only: the manifest/service-worker wiring, an
+  "Open…" button, and a drag-and-drop empty state (app-web.js). Local PDFs are
+  fed straight into the viewer via window.__pdfViewerLoadLocal — no network, so
+  citation linking, ToA, OCR, highlighting, thumbnails, etc. all work on files
+  opened from disk.
+
+  NOTE: the toolbar markup below mirrors viewer/viewer.html (the canonical
+  source for the extension). Keep them in sync when adding toolbar controls.
+-->
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -8,42 +22,64 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="viewer/viewer.css">
+  <link rel="stylesheet" href="app-web.css">
 </head>
 <body>
+  <aside id="thumbnail-panel" aria-label="Page panel">
+    <div id="panel-tabs">
+      <button id="tab-pages" class="panel-tab active" aria-pressed="true">Pages</button>
+      <button id="tab-bookmarks" class="panel-tab" aria-pressed="false" hidden>Bookmarks</button>
+    </div>
+    <div id="panel-pages"></div>
+    <div id="panel-bookmarks" hidden></div>
+  </aside>
   <header id="toolbar">
-    <span id="app-name">PDF Viewer</span>
-    <span id="filename"></span>
+    <button id="thumbnail-toggle" title="Toggle page thumbnails">☰</button>
+    <button id="open-btn" title="Open a PDF from your computer">📂 Open…</button>
+    <span id="filename">PDF</span>
+    <label class="toolbar-label">
+      Name from:
+      <select id="naming-mode" title="Choose how this document is named in the toolbar and on download.">
+        <option value="source">Source</option>
+        <option value="footer">Footer</option>
+      </select>
+    </label>
+    <span id="status">Loading…</span>
+    <span id="link-count"></span>
     <span class="spacer"></span>
-    <span id="status">Drop a PDF or click Open</span>
-    <button id="zoom-out" title="Zoom out" disabled>−</button>
+    <span id="page-indicator" title="Current page"></span>
+    <span class="spacer"></span>
+    <label class="toolbar-label">
+      Links to:
+      <select id="provider">
+        <option value="lexis">Lexis+</option>
+        <option value="westlaw">Westlaw</option>
+      </select>
+    </label>
+    <button id="zoom-out" title="Zoom out">−</button>
     <span id="zoom-level">100%</span>
-    <button id="zoom-in" title="Zoom in" disabled>+</button>
-    <button id="open-btn" title="Open a PDF">Open…</button>
-    <input id="file-input" type="file" accept="application/pdf,.pdf" hidden>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="highlight-toggle" title="Highlight tool: click to toggle. When active, drag to highlight text. Right-click selected text anytime to highlight." aria-pressed="false">✏ Highlight</button>
+    <button id="rect-select-toggle" title="Rectangle select: click to toggle. When active, drag a box to select text by region. You can also hold Alt and drag at any time." aria-pressed="false">▭ Box select</button>
+    <button id="ocr-run" title="Run OCR on this scanned document so its text becomes selectable and citations are linked" aria-pressed="false">⛶ OCR</button>
+    <button id="download" title="Download PDF">⬇ Download</button>
+    <!-- "Open original" is extension-only (needs a source URL); app-web.js hides it. -->
+    <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
   </header>
-
-  <main id="viewer" tabindex="0" aria-label="PDF pages">
+  <main id="viewer-container">
+    <div id="pages"></div>
     <div id="dropzone">
       <div class="dz-inner">
         <div class="dz-icon" aria-hidden="true">📄</div>
         <p class="dz-title">Open a PDF</p>
-        <p class="dz-sub">Click here (or <strong>Open…</strong>) to browse your computer, or drop a PDF in. Once installed, PDFs you open from your system also land here in a dedicated window.</p>
+        <p class="dz-sub">Click here (or <strong>Open…</strong>) to browse your computer, or drop a PDF in. Once installed, PDFs you open from your system also land here in a dedicated window — with citation links, OCR, highlighting, and the Table of Authorities.</p>
       </div>
     </div>
-    <div id="pages"></div>
   </main>
+  <input id="file-input" type="file" accept="application/pdf,.pdf" hidden>
 
-  <script type="module" src="viewer.js"></script>
-  <script>
-    // Register the service worker (required for installability + offline shell).
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("sw.js").catch((e) =>
-          console.warn("SW registration failed:", e)
-        );
-      });
-    }
-  </script>
+  <script type="module" src="viewer/viewer.js"></script>
+  <script type="module" src="app-web.js"></script>
 </body>
 </html>

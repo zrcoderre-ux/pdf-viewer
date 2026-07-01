@@ -1,76 +1,72 @@
 # PDF Viewer PWA
 
-A bare-bones, installable Progressive Web App that turns PDFs into a **dedicated
-app experience** — its own icon, its own standalone window, no browser tab strip
-or address bar. It renders PDFs with the same PDF.js build the extension uses,
-but deliberately does *nothing else* (no citation linking, OCR, etc.). Its whole
-job is to be the app shell.
+An installable Progressive Web App that runs the **full citation-linking PDF
+viewer** in a dedicated, standalone window — its own icon, no browser tab strip
+or address bar. It reuses the **same** viewer code as the Chrome extension
+(`viewer/` at the repo root): citation links to Lexis+/Westlaw, Table of
+Authorities, OCR, highlighting, box-select, thumbnails/bookmarks, source/footer
+naming, and download — all working on PDFs you open from disk.
 
-## What's here
+**Live:** https://zrcoderre-ux.github.io/pdf-viewer/
+
+## How it works
+
+The PWA is a thin shell around the canonical viewer:
 
 | File | Purpose |
 |------|---------|
-| `index.html` | The app shell (toolbar + drop zone + page container). |
-| `viewer.js` | Minimal PDF.js renderer. Accepts a PDF via the OS file handler (`launchQueue`), a `?file=` URL param, drag-and-drop, or the Open button. |
-| `styles.css` | Styling for the standalone window. |
-| `manifest.webmanifest` | Web app manifest: `display: standalone`, icons, and `file_handlers` registering `application/pdf`. |
-| `sw.js` | Service worker that precaches the shell (required for installability + offline). |
-| `icons/` | App icons (192 & 512 px). Regenerate with `python3 gen-icons.py`. |
-| `vendor/pdfjs/` | Copy of the PDF.js build (`pdf.mjs` + `pdf.worker.mjs`). |
+| `index.html` | App shell. Hosts the same toolbar/panel markup as `viewer/viewer.html` and loads `viewer/viewer.js`. |
+| `app-web.js` | Web-only glue: registers the service worker, wires the **Open** button / drag-drop / OS file handler, manages the empty state. Feeds local PDFs to the viewer via `window.__pdfViewerLoadLocal`. |
+| `app-web.css` | Styles the Open button and empty-state drop zone. |
+| `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
+| `sw.js` | Service worker — **network-first** (auto-updates when online) with offline fallback. |
+| `build-site.sh` | Assembles the deployable site: this shell **+** the canonical `viewer/` and `pdfjs/` copied from the repo root. |
+| `icons/`, `gen-icons.py` | App icons (regenerate: `python3 gen-icons.py`). |
 
-## How to try it
+**Single source of truth:** the viewer logic lives once, at the repo root. The
+only extension-file change is a small, guarded shim at the top of
+`viewer/viewer.js` that supplies the `chrome.*` APIs (backed by Web Storage)
+when running as a hosted page. Inside the extension `chrome.storage` exists, so
+the shim is skipped and extension behavior is unchanged.
 
-The PWA must be served over HTTP(S) (service workers don't run from `file://`):
+Local files are read as bytes and handed straight to the viewer — no network,
+so CORS never applies and every tool works offline on opened files. (Fetching
+arbitrary *cross-origin* PDFs by URL remains the extension's job.)
+
+## Auto-update
+
+The service worker is network-first: whenever the installed app is opened
+**online**, it fetches the latest deployed assets and refreshes its cache, so
+improvements show up on the next launch — no reinstall or re-download. Offline,
+it serves the last-cached version.
+
+## Build & run locally
+
+Service workers and file handling need HTTP(S), not `file://`:
 
 ```sh
-cd pwa
-python3 -m http.server 8099
+pwa/build-site.sh          # assembles ./_site
+python3 -m http.server 8100 --directory _site
 ```
 
-Open <http://localhost:8099/> in Chrome, then install it from the address-bar
-install icon (or ⋮ → *Install PDF Viewer*). Once installed:
+Open <http://localhost:8100/>, install from the address-bar icon, then
+"Open with → PDF Viewer" on any local PDF.
 
-- **Open a local PDF from your OS** ("Open with → PDF Viewer") and it launches in
-  the standalone app window via the `file_handlers` registration.
-- Drag a PDF onto the window, or use **Open…**, to load one manually.
+## Deploying
 
-> For real deployment, host the `pwa/` folder on any static host (e.g. GitHub
-> Pages) over HTTPS. File handling and installability require a secure origin.
+`.github/workflows/deploy-pwa.yml` runs `build-site.sh` and publishes `_site` to
+GitHub Pages on every push to `main` that touches `pwa/`, `viewer/`, or
+`pdfjs/`. One-time setup (already done): **Settings → Pages → Source: GitHub
+Actions**.
 
-## Deploying & updating
+**Two delivery channels — don't confuse them:** your `git pull` tool updates the
+*extension* on your machine; this *app* updates itself from the hosted URL. The
+`pwa/` files a pull drops on disk are just source, not the running app.
 
-This PWA is **live** at:
+## Notes / limitations
 
-> **https://zrcoderre-ux.github.io/pdf-viewer/**
-
-It ships automatically. `.github/workflows/deploy-pwa.yml` publishes the `pwa/`
-folder to GitHub Pages on every push to `main` that touches `pwa/` (also runnable
-by hand from the Actions tab). One-time setup, already done: repo **Settings →
-Pages → Source: GitHub Actions**.
-
-**Two separate delivery channels — don't confuse them:**
-
-| | The extension | This PWA |
-|---|---|---|
-| Reaches your machine via | your `git pull` tool → local folder → Chrome reload | GitHub Pages → the hosted HTTPS URL above |
-| Updates when | you run the pull script | the browser refreshes it (service worker), after each deploy |
-
-The copy of `pwa/` that your pull tool drops on disk is just **source coming
-along for the ride** — opened as a local `file://`, service workers and file
-handlers are disabled, so it won't function as an app. Always use the hosted URL
-to install and run it. Pulling the repo does **not** update the installed app,
-and deploying does **not** touch your local extension folder.
-
-## How it pairs with the extension
-
-The PWA covers files launched from the OS. The companion Chrome extension (repo
-root) covers the other half:
-
-- **Web capture** — the extension's `declarativeNetRequest` redirect can point at
-  this PWA's hosted URL (`…/pwa/index.html?file=<pdf-url>`) instead of the
-  in-extension viewer, so PDFs you hit while browsing open in the app window
-  (with Chrome's "open supported links in this app" enabled).
-- **CORS bypass** — a hosted page can't fetch arbitrary cross-origin PDFs; the
-  extension has the host permissions to fetch the bytes and hand them in. The
-  `?file=` path here works today for same-origin / CORS-open URLs and local
-  files; cross-origin brokering is the extension's job.
+- **OCR** relies on the bundled Tesseract WASM. It works from local files, but
+  threaded OCR may be limited on GitHub Pages (no cross-origin-isolation
+  headers); it falls back to single-threaded where needed.
+- **Cross-tab filename disambiguation** is effectively per-window in the PWA
+  (each window has its own session storage) — a no-op, not a bug.

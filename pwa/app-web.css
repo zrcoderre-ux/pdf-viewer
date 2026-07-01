@@ -1,0 +1,47 @@
+/* Web-only styling for the PWA shell: the Open button and the empty-state drop
+   zone. All other styling comes from viewer/viewer.css (shared with the
+   extension). */
+
+#open-btn {
+  background: #1a73e8;
+  font-weight: 600;
+  white-space: nowrap;
+}
+#open-btn:hover { background: #1b66c9; }
+
+#viewer-container { position: relative; }
+
+#dropzone {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  cursor: pointer;
+  color: #e2e8f0;
+}
+#dropzone[hidden] { display: none; }
+
+.dz-inner {
+  border: 2px dashed #6b6f73;
+  border-radius: 16px;
+  padding: 40px 48px;
+  max-width: 520px;
+  background: rgba(0, 0, 0, 0.15);
+  transition: border-color 0.15s, background 0.15s;
+}
+#dropzone:hover .dz-inner {
+  border-color: #9aa0a6;
+  background: rgba(0, 0, 0, 0.25);
+}
+.dz-icon { font-size: 48px; }
+.dz-title { font-size: 22px; font-weight: 600; margin: 12px 0 8px; }
+.dz-sub { color: #b5bcc4; margin: 0; line-height: 1.5; }
+
+/* Highlight the drop target while dragging a file over the page. */
+#viewer-container.dragging .dz-inner {
+  border-color: #1a73e8;
+  background: rgba(26, 115, 232, 0.12);
+}
