@@ -1,0 +1,46 @@
+name: Deploy PWA to GitHub Pages
+
+# Publishes the pwa/ folder to GitHub Pages over HTTPS so the PDF Viewer PWA
+# can be installed and its file handlers / service worker work (both require a
+# secure origin). Only the pwa/ subtree is deployed — the extension files are
+# left out of the published site.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pwa/**"
+      - ".github/workflows/deploy-pwa.yml"
+  workflow_dispatch:
+
+# Allow one concurrent deployment; let an in-progress run finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload pwa/ as the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pwa
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
