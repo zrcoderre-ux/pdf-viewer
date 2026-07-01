@@ -10,6 +10,8 @@ on:
     branches: [main]
     paths:
       - "pwa/**"
+      - "viewer/**"
+      - "pdfjs/**"
       - ".github/workflows/deploy-pwa.yml"
   workflow_dispatch:
 
@@ -39,10 +41,13 @@ jobs:
         # can't create the Pages site itself, so this is a one-time manual step.)
         uses: actions/configure-pages@v5
 
-      - name: Upload pwa/ as the site
+      - name: Assemble site (PWA shell + canonical viewer + PDF.js)
+        run: bash pwa/build-site.sh "$GITHUB_WORKSPACE/_site"
+
+      - name: Upload the assembled site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: pwa
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment

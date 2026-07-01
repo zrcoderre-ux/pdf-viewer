@@ -35,6 +35,84 @@ import {
   resetOcr,
 } from "./ocr.js";
 
+// ---------------------------------------------------------------------------
+// Web (PWA) shim. This is the citation-linking viewer from the Chrome
+// extension. When it is served as a hosted page instead — the installed PWA on
+// GitHub Pages — the `chrome.*` extension APIs don't exist. Define a minimal
+// shim, backed by Web Storage, so the identical viewer code runs unchanged in
+// both places. Inside the extension `chrome.storage` exists and this whole
+// block is skipped, so extension behavior is untouched.
+if (typeof chrome === "undefined" || !(chrome && chrome.storage)) {
+  const ROOT = new URL("../", import.meta.url).href; // dir holding viewer/ & pdfjs/
+  const listeners = [];
+  const notify = (changes, area) => {
+    if (!changes || !Object.keys(changes).length) return;
+    for (const fn of listeners) {
+      try { fn(changes, area); } catch (e) { console.error(e); }
+    }
+  };
+  const makeArea = (store, areaName) => {
+    const read = (k) => {
+      const raw = store.getItem(k);
+      if (raw == null) return undefined;
+      try { return JSON.parse(raw); } catch { return undefined; }
+    };
+    return {
+      get(query, cb) {
+        const out = {};
+        if (query == null) {
+          for (let i = 0; i < store.length; i++) { const k = store.key(i); out[k] = read(k); }
+        } else if (typeof query === "string") {
+          const v = read(query); if (v !== undefined) out[query] = v;
+        } else if (Array.isArray(query)) {
+          for (const k of query) { const v = read(k); if (v !== undefined) out[k] = v; }
+        } else {
+          for (const k of Object.keys(query)) { const v = read(k); out[k] = v === undefined ? query[k] : v; }
+        }
+        if (cb) return void cb(out);
+        return Promise.resolve(out);
+      },
+      set(items, cb) {
+        const changes = {};
+        for (const k of Object.keys(items)) {
+          const oldValue = read(k);
+          store.setItem(k, JSON.stringify(items[k]));
+          changes[k] = { oldValue, newValue: items[k] };
+        }
+        notify(changes, areaName);
+        if (cb) return void cb();
+        return Promise.resolve();
+      },
+      remove(keys, cb) {
+        const arr = Array.isArray(keys) ? keys : [keys];
+        const changes = {};
+        for (const k of arr) { const oldValue = read(k); store.removeItem(k); changes[k] = { oldValue, newValue: undefined }; }
+        notify(changes, areaName);
+        if (cb) return void cb();
+        return Promise.resolve();
+      },
+    };
+  };
+  const SYNTH_TAB_ID = 1; // single "tab" per window; sessionStorage is per-window
+  window.chrome = {
+    runtime: { getURL: (p) => new URL(String(p).replace(/^\/+/, ""), ROOT).href },
+    storage: {
+      local: makeArea(localStorage, "local"),
+      sync: makeArea(localStorage, "sync"),
+      session: makeArea(sessionStorage, "session"),
+      onChanged: {
+        addListener: (fn) => listeners.push(fn),
+        removeListener: (fn) => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); },
+      },
+    },
+    tabs: {
+      getCurrent: (cb) => cb({ id: SYNTH_TAB_ID }),
+      query: (_q, cb) => cb([{ id: SYNTH_TAB_ID }]),
+      remove: () => {},
+    },
+  };
+}
+
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
   "pdfjs/build/pdf.worker.mjs"
 );
@@ -1263,11 +1341,9 @@ window.addEventListener("beforeunload", () => {
   unregisterEntry();
 });
 
-async function loadAndRender() {
-  if (!fileUrl) {
-    statusEl.textContent = "No file specified.";
-    return;
-  }
+// Reset per-document state before rendering a new PDF (whether it arrived by
+// URL fetch or as a local file). Shared by loadAndRender and loadLocalFile.
+function resetForNewDocument() {
   // New PDF -> drop any highlights from a previously loaded document.
   // (renderAllPages is also called on zoom, where we DO want them retained;
   // hence clearing here, not there.)
@@ -1276,7 +1352,7 @@ async function loadAndRender() {
   // (Deliberately here and not in renderAllPages, which also runs on zoom —
   // the per-page OCR cache is what makes zoom cheap, so it must survive zoom.)
   resetOcr();
-  // Clear stashed bytes from any prior PDF. If the new fetch fails, the
+  // Clear stashed bytes from any prior PDF. If the new load fails, the
   // Download button has nothing stale to save.
   pdfBytes = null;
   // Fresh document → fresh chance for footer/header extraction to win.
@@ -1293,6 +1369,29 @@ async function loadAndRender() {
   footerExtraction = null;
   _footerByPage.clear();
   unregisterEntry();
+}
+
+// Render a PDF from raw bytes. `sourceName`, when given (local files know their
+// filename directly), seeds the source-mode display name.
+async function renderBytes(buf, { sourceName } = {}) {
+  if (sourceName) setDisplayName(sourceName);
+  // Stash a copy for the Download handler. PDF.js takes ownership of the
+  // buffer it's handed (some versions transfer it), so we keep our own.
+  pdfBytes = buf.slice(0);
+  const loadingTask = pdfjsLib.getDocument({ data: buf });
+  pdfDoc = await loadingTask.promise;
+  statusEl.textContent = `Rendering ${pdfDoc.numPages} pages…`;
+  await renderAllPages();
+  statusEl.textContent = "Done";
+  updatePageIndicator();
+}
+
+async function loadAndRender() {
+  if (!fileUrl) {
+    statusEl.textContent = "No file specified.";
+    return;
+  }
+  resetForNewDocument();
   try {
     statusEl.textContent = "Downloading…";
     // Fetch the PDF ourselves (instead of letting PDF.js fetch by URL) so we
@@ -1313,20 +1412,30 @@ async function loadAndRender() {
     }
 
     const buf = await resp.arrayBuffer();
-    // Stash a copy for the Download handler. PDF.js takes ownership of the
-    // buffer it's handed (some versions transfer it), so we keep our own.
-    pdfBytes = buf.slice(0);
-    const loadingTask = pdfjsLib.getDocument({ data: buf });
-    pdfDoc = await loadingTask.promise;
-    statusEl.textContent = `Rendering ${pdfDoc.numPages} pages…`;
-    await renderAllPages();
-    statusEl.textContent = "Done";
-    updatePageIndicator();
+    await renderBytes(buf);
   } catch (err) {
     console.error(err);
     statusEl.textContent = "Error: " + err.message;
   }
 }
+
+// Render a local File object directly (no network). Used by the PWA shell when
+// a PDF is opened from disk (OS file handler, Open button, or drag-and-drop),
+// so cross-origin/CORS never enters the picture. Exposed on window for the
+// web glue; unused (but harmless) inside the extension.
+async function loadLocalFile(file) {
+  if (!file) return;
+  resetForNewDocument();
+  try {
+    statusEl.textContent = "Reading…";
+    const buf = await file.arrayBuffer();
+    await renderBytes(buf, { sourceName: file.name });
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = "Error: " + err.message;
+  }
+}
+window.__pdfViewerLoadLocal = loadLocalFile;
 
 async function renderAllPages() {
   // Cancel any previous in-flight render (zoom-while-rendering, or Download
