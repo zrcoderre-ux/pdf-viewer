@@ -37,6 +37,30 @@ install icon (or ⋮ → *Install PDF Viewer*). Once installed:
 > For real deployment, host the `pwa/` folder on any static host (e.g. GitHub
 > Pages) over HTTPS. File handling and installability require a secure origin.
 
+## Deploying & updating
+
+This PWA is **live** at:
+
+> **https://zrcoderre-ux.github.io/pdf-viewer/**
+
+It ships automatically. `.github/workflows/deploy-pwa.yml` publishes the `pwa/`
+folder to GitHub Pages on every push to `main` that touches `pwa/` (also runnable
+by hand from the Actions tab). One-time setup, already done: repo **Settings →
+Pages → Source: GitHub Actions**.
+
+**Two separate delivery channels — don't confuse them:**
+
+| | The extension | This PWA |
+|---|---|---|
+| Reaches your machine via | your `git pull` tool → local folder → Chrome reload | GitHub Pages → the hosted HTTPS URL above |
+| Updates when | you run the pull script | the browser refreshes it (service worker), after each deploy |
+
+The copy of `pwa/` that your pull tool drops on disk is just **source coming
+along for the ride** — opened as a local `file://`, service workers and file
+handlers are disabled, so it won't function as an app. Always use the hosted URL
+to install and run it. Pulling the repo does **not** update the installed app,
+and deploying does **not** touch your local extension folder.
+
 ## How it pairs with the extension
 
 The PWA covers files launched from the OS. The companion Chrome extension (repo
