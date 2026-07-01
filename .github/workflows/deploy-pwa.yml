@@ -34,11 +34,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure Pages
+        # Requires Pages to be enabled once in repo Settings → Pages →
+        # Build and deployment → Source: "GitHub Actions". (The Actions token
+        # can't create the Pages site itself, so this is a one-time manual step.)
         uses: actions/configure-pages@v5
-        with:
-          # Auto-create the Pages site (build type = GitHub Actions) so no
-          # manual toggle in repo Settings → Pages is required.
-          enablement: true
 
       - name: Upload pwa/ as the site
         uses: actions/upload-pages-artifact@v3
