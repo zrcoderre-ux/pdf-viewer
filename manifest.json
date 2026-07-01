@@ -22,6 +22,11 @@
       "js": ["content/claude-citations.js"],
       "css": ["content/claude-citations.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://zrcoderre-ux.github.io/pdf-viewer/*"],
+      "js": ["content/app-bridge.js"],
+      "run_at": "document_start"
     }
   ],
   "action": {

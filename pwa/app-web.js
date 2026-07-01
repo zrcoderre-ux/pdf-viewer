@@ -134,11 +134,88 @@ function openLocalFile(file) {
   });
 }
 
-// Open a URL in a new tab (routed web PDF): the viewer fetches it itself.
+// --- Extension broker -------------------------------------------------------
+// If the extension is installed, its content-script bridge (content/app-bridge)
+// can fetch a URL with the user's cookies + host permissions (bypassing CORS)
+// and hand back the bytes. That's the only way cookie-gated / cross-origin
+// court PDFs can open here. We detect it with a ping and fall back to a direct
+// fetch by the viewer when it's absent.
+
+const EXT_NS = "pdfviewer-ext";
+const extPending = new Map();
+let extReady = false;
+let extSeq = 0;
+
+window.addEventListener("message", (e) => {
+  if (e.source !== window || e.origin !== location.origin) return;
+  const m = e.data;
+  if (!m || m.ns !== EXT_NS || m.dir !== "toPage") return;
+  if (m.type === "ready") { extReady = true; return; }
+  const p = extPending.get(m.requestId);
+  if (!p) return;
+  extPending.delete(m.requestId);
+  if (m.type === "bytes") p.resolve({ b64: m.b64, filename: m.filename });
+  else p.reject(new Error(m.error || "extension fetch failed"));
+});
+
+function extAvailable() {
+  if (extReady) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    window.postMessage({ ns: EXT_NS, dir: "toExt", type: "ping" }, location.origin);
+    setTimeout(() => resolve(extReady), 400);
+  });
+}
+
+function extFetch(url) {
+  return new Promise((resolve, reject) => {
+    const requestId = ++extSeq;
+    extPending.set(requestId, { resolve, reject });
+    window.postMessage({ ns: EXT_NS, dir: "toExt", type: "fetch", url, requestId }, location.origin);
+    setTimeout(() => {
+      if (extPending.has(requestId)) { extPending.delete(requestId); reject(new Error("extension fetch timeout")); }
+    }, 60000);
+  });
+}
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+}
+
+function nameFromUrl(url) {
+  try {
+    const p = new URL(url).pathname.split("/").filter(Boolean).pop() || "document.pdf";
+    return /\.pdf$/i.test(p) ? decodeURIComponent(p) : "document.pdf";
+  } catch { return "document.pdf"; }
+}
+
+function feedFileToTab(tab, file) {
+  const feed = () => {
+    const w = tab.iframe.contentWindow;
+    if (w && w.__pdfViewerLoadLocal) { w.__pdfViewerLoadLocal(file); watchTitle(tab); }
+    else setTimeout(feed, 30);
+  };
+  feed();
+}
+
+// Open a URL in a new tab (routed web PDF). Prefer the extension broker so
+// cookie-gated/cross-origin PDFs work; otherwise let the viewer fetch directly.
 function openUrl(url) {
   newTab({
     initialLabel: "Loading…",
-    pending: (tab) => {
+    pending: async (tab) => {
+      if (await extAvailable()) {
+        try {
+          const { b64, filename } = await extFetch(url);
+          const file = new File([b64ToBytes(b64)], filename || nameFromUrl(url), { type: "application/pdf" });
+          feedFileToTab(tab, file);
+          return;
+        } catch (err) {
+          console.warn("extension broker failed; falling back to direct fetch:", err);
+        }
+      }
       tab.iframe.addEventListener("load", () => watchTitle(tab), { once: true });
       tab.iframe.src = VIEWER_SRC + "?file=" + encodeURIComponent(url);
     },
