@@ -240,6 +240,49 @@ function getUserPatterns() {
   });
 }
 
+// Broker for the hosted app: fetch a PDF with the user's cookies + host
+// permissions (bypassing CORS) and return the bytes. Requested by the app's
+// content-script bridge (content/app-bridge.js). Only used when the user turns
+// on "Open web PDFs in the app"; harmless otherwise.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "fetchPdf" || typeof msg.url !== "string") return;
+  (async () => {
+    try {
+      const resp = await fetch(msg.url, { credentials: "include" });
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const buf = await resp.arrayBuffer();
+      sendResponse({
+        ok: true,
+        b64: arrayBufferToBase64(buf),
+        filename: filenameFromContentDisposition(resp.headers.get("Content-Disposition")),
+      });
+    } catch (e) {
+      sendResponse({ ok: false, error: String((e && e.message) || e) });
+    }
+  })();
+  return true; // keep the message channel open for the async sendResponse
+});
+
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  const CHUNK = 0x8000; // build the binary string in chunks to avoid arg limits
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// Minimal Content-Disposition filename parser (RFC 5987 filename*=UTF-8''… and
+// the legacy filename="…" form). Returns null if nothing usable is found.
+function filenameFromContentDisposition(cd) {
+  if (!cd) return null;
+  let m = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cd);
+  if (m) { try { return decodeURIComponent(m[1].trim()); } catch { return m[1].trim(); } }
+  m = /filename\s*=\s*"([^"]+)"/i.exec(cd) || /filename\s*=\s*([^;]+)/i.exec(cd);
+  return m ? m[1].trim() : null;
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Legal Citation Linker installed.");
   rebuildRules();

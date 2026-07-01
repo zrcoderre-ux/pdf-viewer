@@ -69,19 +69,26 @@ Actions**.
 
 The extension can redirect PDFs you click while browsing to this app instead of
 its own bundled viewer — enable it in the extension's **Options → "Open web PDFs
-in the app"**. A routed PDF arrives as `…/pdf-viewer/?file=<url>` and opens in a
-new tab.
+in the app"** (off by default). A routed PDF arrives as `…/pdf-viewer/?file=<url>`
+and opens in a new tab.
 
-Two caveats (also shown on the Options page):
+**Extension-brokered fetch.** A hosted page can't fetch cookie-gated or
+cross-origin court PDFs. So the app doesn't fetch routed URLs itself — it asks
+the extension. A content-script bridge (`content/app-bridge.js`) injected into
+the app's page relays the request to the extension's background worker, which
+fetches the PDF **with your cookies and host permissions** (bypassing CORS) and
+returns the bytes. The app then renders them like a locally-opened file. This
+makes eCMS / Westlaw / cross-origin PDFs work in the app. If the extension isn't
+present, the app falls back to fetching the URL directly (public PDFs only).
 
-- For a routed PDF to open in the **installed app window** (not just a browser
-  tab), turn on Chrome's "Open supported links in this app" for the installed
-  PWA. The manifest requests this via `handle_links: preferred`, but the user
-  setting is what actually enables it.
-- The app fetches the PDF itself, so routing works for public / same-origin
-  PDFs but **not** cookie-gated or cross-origin court documents (eCMS, Westlaw).
-  Those stay with the extension's viewer, which fetches with your cookies and
-  host permissions — which is why routing is **off by default**.
+The one manual step: for a routed PDF to open in the **installed app window**
+(not just a browser tab), turn on Chrome's "Open supported links in this app"
+for the PWA. The manifest requests this via `handle_links: preferred`, but the
+user setting is what enables it. (The brokered fetch works either way — this
+only controls window vs. tab.)
+
+Note: the bridge content script is matched to the default app URL in
+`manifest.json`. If you change the app URL in Options, update that match.
 
 ## Notes / limitations
 
