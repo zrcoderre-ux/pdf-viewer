@@ -11,13 +11,15 @@ naming, and download — all working on PDFs you open from disk.
 
 ## How it works
 
-The PWA is a thin shell around the canonical viewer:
+The PWA is a **tabbed shell** around the canonical viewer. Each open PDF is a
+separate `<iframe>` running `viewer/viewer.html`, so every tab is a fully
+isolated viewer instance (its own zoom, highlights, OCR…) with no shared state:
 
 | File | Purpose |
 |------|---------|
-| `index.html` | App shell. Hosts the same toolbar/panel markup as `viewer/viewer.html` and loads `viewer/viewer.js`. |
-| `app-web.js` | Web-only glue: registers the service worker, wires the **Open** button / drag-drop / OS file handler, manages the empty state. Feeds local PDFs to the viewer via `window.__pdfViewerLoadLocal`. |
-| `app-web.css` | Styles the Open button and empty-state drop zone. |
+| `index.html` | Tab-manager shell: a tab strip + iframe stage + empty state. Hosts no viewer markup itself. |
+| `app-web.js` | Tab manager: opens PDFs in new tabs (+ button, drag-drop, OS file handler, or a routed `?file=` URL), switches/closes tabs, syncs tab titles, registers the service worker. Local files reach a tab's viewer via `iframe.contentWindow.__pdfViewerLoadLocal`; tabs load lazily the first time they're shown so overlays get correct geometry. |
+| `app-web.css` | Styles the tab strip, iframe stage, and empty-state drop zone. |
 | `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
 | `sw.js` | Service worker — **network-first** (auto-updates when online) with offline fallback. |
 | `build-site.sh` | Assembles the deployable site: this shell **+** the canonical `viewer/` and `pdfjs/` copied from the repo root. |
@@ -62,6 +64,24 @@ Actions**.
 **Two delivery channels — don't confuse them:** your `git pull` tool updates the
 *extension* on your machine; this *app* updates itself from the hosted URL. The
 `pwa/` files a pull drops on disk are just source, not the running app.
+
+## Routing web PDFs to the app (optional, off by default)
+
+The extension can redirect PDFs you click while browsing to this app instead of
+its own bundled viewer — enable it in the extension's **Options → "Open web PDFs
+in the app"**. A routed PDF arrives as `…/pdf-viewer/?file=<url>` and opens in a
+new tab.
+
+Two caveats (also shown on the Options page):
+
+- For a routed PDF to open in the **installed app window** (not just a browser
+  tab), turn on Chrome's "Open supported links in this app" for the installed
+  PWA. The manifest requests this via `handle_links: preferred`, but the user
+  setting is what actually enables it.
+- The app fetches the PDF itself, so routing works for public / same-origin
+  PDFs but **not** cookie-gated or cross-origin court documents (eCMS, Westlaw).
+  Those stay with the extension's viewer, which fetches with your cookies and
+  host permissions — which is why routing is **off by default**.
 
 ## Notes / limitations
 

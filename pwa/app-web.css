@@ -1,47 +1,115 @@
-/* Web-only styling for the PWA shell: the Open button and the empty-state drop
-   zone. All other styling comes from viewer/viewer.css (shared with the
-   extension). */
+/* Tab-manager shell. The viewer chrome lives inside each iframe (viewer.css);
+   this styles only the tab strip, the iframe stage, and the empty state. */
 
-#open-btn {
-  background: #1a73e8;
-  font-weight: 600;
+:root { --tabstrip-h: 40px; }
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #1e293b;
+  color: #e2e8f0;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+
+/* --- Tab strip --- */
+#tabstrip {
+  display: flex;
+  align-items: stretch;
+  height: var(--tabstrip-h);
+  background: #0f172a;
+  border-bottom: 1px solid #000;
+  padding-left: max(4px, env(titlebar-area-x, 4px));
+  user-select: none;
+}
+#tabs { display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: thin; }
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  min-width: 120px;
+  padding: 0 8px 0 12px;
+  background: #1e293b;
+  border-right: 1px solid #000;
+  cursor: pointer;
   white-space: nowrap;
 }
-#open-btn:hover { background: #1b66c9; }
+.tab:hover { background: #273449; }
+.tab.active { background: #334155; }
+.tab-label { overflow: hidden; text-overflow: ellipsis; }
+.tab-close {
+  flex: none;
+  width: 18px; height: 18px;
+  line-height: 16px;
+  text-align: center;
+  border: none; border-radius: 4px;
+  background: transparent; color: #94a3b8;
+  cursor: pointer; font-size: 15px;
+}
+.tab-close:hover { background: #475569; color: #fff; }
 
-#viewer-container { position: relative; }
+#new-tab {
+  flex: none;
+  width: 34px;
+  border: none;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 20px;
+  cursor: pointer;
+}
+#new-tab:hover { background: #273449; }
 
-#dropzone {
+/* --- Iframe stage --- */
+#tab-views {
+  position: absolute;
+  top: var(--tabstrip-h); left: 0; right: 0; bottom: 0;
+}
+.tab-view {
   position: absolute;
   inset: 0;
+  width: 100%; height: 100%;
+  border: 0;
+  display: none;
+  background: #525659;
+}
+.tab-view.active { display: block; }
+
+/* --- Empty state --- */
+#dropzone {
+  position: absolute;
+  top: var(--tabstrip-h); left: 0; right: 0; bottom: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
   padding: 24px;
   cursor: pointer;
-  color: #e2e8f0;
 }
 #dropzone[hidden] { display: none; }
-
 .dz-inner {
-  border: 2px dashed #6b6f73;
+  border: 2px dashed #475569;
   border-radius: 16px;
   padding: 40px 48px;
-  max-width: 520px;
-  background: rgba(0, 0, 0, 0.15);
+  max-width: 540px;
   transition: border-color 0.15s, background 0.15s;
 }
-#dropzone:hover .dz-inner {
-  border-color: #9aa0a6;
-  background: rgba(0, 0, 0, 0.25);
-}
+#dropzone:hover .dz-inner { border-color: #64748b; background: rgba(255, 255, 255, 0.03); }
 .dz-icon { font-size: 48px; }
 .dz-title { font-size: 22px; font-weight: 600; margin: 12px 0 8px; }
-.dz-sub { color: #b5bcc4; margin: 0; line-height: 1.5; }
+.dz-sub { color: #94a3b8; margin: 0; line-height: 1.5; }
 
-/* Highlight the drop target while dragging a file over the page. */
-#viewer-container.dragging .dz-inner {
-  border-color: #1a73e8;
-  background: rgba(26, 115, 232, 0.12);
+/* Highlight the whole stage while dragging a file over it. */
+body.dragging .dz-inner { border-color: #1a73e8; background: rgba(26, 115, 232, 0.12); }
+body.dragging.has-tabs #tab-views::after {
+  content: "Drop to open in a new tab";
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 600; color: #fff;
+  background: rgba(15, 23, 42, 0.6);
+  border: 3px dashed #1a73e8;
+  pointer-events: none;
 }

@@ -31,8 +31,9 @@
     }
   ],
   "launch_handler": {
-    "client_mode": "navigate-new"
+    "client_mode": "focus-existing"
   },
+  "handle_links": "preferred",
   "file_handlers": [
     {
       "action": "./index.html",
