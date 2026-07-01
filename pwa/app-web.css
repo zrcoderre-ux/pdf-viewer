@@ -63,6 +63,31 @@ html, body {
 }
 #new-tab:hover { background: #273449; }
 
+.strip-spacer { flex: 1 1 auto; }
+
+/* Extension-connected indicator. */
+.ext-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: #94a3b8;
+  white-space: nowrap;
+  cursor: default;
+}
+.ext-status .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+  flex: none;
+}
+.ext-status.checking .dot { background: #eab308; }
+.ext-status.connected { color: #86efac; }
+.ext-status.connected .dot { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
+.ext-status.absent .dot { background: #64748b; }
+
 /* --- Iframe stage --- */
 #tab-views {
   position: absolute;
