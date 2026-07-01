@@ -93,13 +93,28 @@ if (typeof chrome === "undefined" || !(chrome && chrome.storage)) {
       },
     };
   };
-  const SYNTH_TAB_ID = 1; // single "tab" per window; sessionStorage is per-window
+  // `session` is backed by an in-memory store, not sessionStorage: when several
+  // viewer instances run as sibling iframes (the PWA's tab bar) they share one
+  // origin's sessionStorage, which would make their per-document session state
+  // collide. In-memory keeps each viewer instance isolated. `local`/`sync` stay
+  // on localStorage so settings persist and are shared across tabs.
+  const memStore = (() => {
+    const m = new Map();
+    return {
+      getItem: (k) => (m.has(k) ? m.get(k) : null),
+      setItem: (k, v) => { m.set(k, v); },
+      removeItem: (k) => { m.delete(k); },
+      get length() { return m.size; },
+      key: (i) => Array.from(m.keys())[i],
+    };
+  })();
+  const SYNTH_TAB_ID = 1; // one logical "tab" per viewer instance (per iframe)
   window.chrome = {
     runtime: { getURL: (p) => new URL(String(p).replace(/^\/+/, ""), ROOT).href },
     storage: {
       local: makeArea(localStorage, "local"),
       sync: makeArea(localStorage, "sync"),
-      session: makeArea(sessionStorage, "session"),
+      session: makeArea(memStore, "session"),
       onChanged: {
         addListener: (fn) => listeners.push(fn),
         removeListener: (fn) => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); },
@@ -1428,8 +1443,15 @@ async function loadLocalFile(file) {
   resetForNewDocument();
   try {
     statusEl.textContent = "Reading…";
-    const buf = await file.arrayBuffer();
-    await renderBytes(buf, { sourceName: file.name });
+    // Copy into a Uint8Array created in THIS realm. When the viewer runs in an
+    // iframe (the PWA's tab bar), the File is handed in from the parent window,
+    // so file.arrayBuffer() returns a parent-realm ArrayBuffer that PDF.js's
+    // cross-realm instanceof checks would reject. A same-realm byte copy is
+    // always accepted.
+    const ab = await file.arrayBuffer();
+    const bytes = new Uint8Array(ab.byteLength);
+    bytes.set(new Uint8Array(ab));
+    await renderBytes(bytes, { sourceName: file.name });
   } catch (err) {
     console.error(err);
     statusEl.textContent = "Error: " + err.message;

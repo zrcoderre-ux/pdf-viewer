@@ -64,6 +64,37 @@
     </p>
   </div>
 
+  <h2>Open web PDFs in the app</h2>
+  <div class="card">
+    <label class="radio">
+      <input type="checkbox" id="route-to-app">
+      Route web PDFs to the installed PDF Viewer app (instead of this extension's viewer)
+    </label>
+    <p class="lede" style="font-size:12px;margin-top:10px;">
+      Off by default. When on, clicking a PDF link redirects to the installed
+      app so it opens as a tab in that dedicated window. Two things to know:
+    </p>
+    <ul class="lede" style="font-size:12px;margin:6px 0 0;padding-left:18px;">
+      <li>For it to actually open in the <strong>installed app window</strong>
+        (not just a browser tab), enable “Open supported links in this app” in
+        the app’s settings (<code>chrome://apps</code> → right-click →
+        App info, or the app’s ⋮ menu).</li>
+      <li>The app fetches the PDF itself, so this works for public / same-site
+        PDFs but <strong>not</strong> cookie-gated or cross-origin court
+        documents (eCMS, Westlaw, etc.) — leave this off for those and use the
+        extension’s built-in viewer.</li>
+    </ul>
+    <label style="display:flex;align-items:center;gap:10px;font-size:13px;margin-top:12px;">
+      App URL
+      <input type="url" id="app-url" placeholder="https://zrcoderre-ux.github.io/pdf-viewer/"
+             style="flex:1;padding:4px 8px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+    </label>
+    <div style="margin-top:8px;">
+      <button id="route-save" type="button">Save</button>
+      <span class="status" id="route-status"></span>
+    </div>
+  </div>
+
   <h2>Table of Authorities</h2>
   <div class="card">
     <label class="radio">

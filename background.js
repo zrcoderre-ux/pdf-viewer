@@ -11,6 +11,33 @@
 
 const VIEWER_URL = chrome.runtime.getURL("viewer/viewer.html");
 
+// Optional routing: when the user turns on "Open web PDFs in the app", web PDF
+// navigations are redirected to the installed PWA instead of this extension's
+// bundled viewer. Off by default — the extension viewer stays the default
+// because it can fetch cookie-gated / cross-origin PDFs that a hosted page
+// can't. See the Options page.
+const DEFAULT_APP_URL = "https://zrcoderre-ux.github.io/pdf-viewer/";
+
+function getRoutingPrefs() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get(
+      { routeToApp: false, appUrl: DEFAULT_APP_URL },
+      ({ routeToApp, appUrl }) => {
+        const url = (typeof appUrl === "string" && appUrl.trim()) || DEFAULT_APP_URL;
+        resolve({ routeToApp: !!routeToApp, appUrl: url });
+      }
+    );
+  });
+}
+
+// The redirect target base — the extension viewer, or the app when routing is
+// on. The original PDF URL is appended as ?file=<url> by the rules below.
+function redirectBase({ routeToApp, appUrl }) {
+  if (!routeToApp) return VIEWER_URL;
+  // Point at the app shell; it reads ?file= and opens the PDF in a new tab.
+  return appUrl.replace(/[?#].*$/, "");
+}
+
 // Bypass token — when this query param is present in a URL, an allow rule
 // (priority 100) overrides redirect rules (priority 1) and the navigation
 // goes through to Chrome's built-in viewer. "Open original" in the viewer
@@ -62,14 +89,14 @@ function buildEcmsImageAllowRule() {
   };
 }
 
-function buildPdfSuffixRule() {
+function buildPdfSuffixRule(base) {
   return {
     id: RULE_ID_PDF_SUFFIX,
     priority: 1,
     action: {
       type: "redirect",
       redirect: {
-        regexSubstitution: VIEWER_URL + "?file=\\0",
+        regexSubstitution: base + "?file=\\0",
       },
     },
     condition: {
@@ -105,7 +132,7 @@ chrome.webNavigation.onBeforeNavigate.addListener(
 // urlFilter substring rule. DNR's urlFilter has its own simple syntax:
 //   * = wildcard, | = anchor, no escaping. Pipe-prefixed patterns anchor
 // at the start. This matches what the user typed in the Options textarea.
-function buildPatternRule(id, urlFilter) {
+function buildPatternRule(id, urlFilter, base) {
   return {
     id,
     priority: 1,
@@ -115,7 +142,7 @@ function buildPatternRule(id, urlFilter) {
         // Use regexSubstitution \\0 to embed the ORIGINAL url in the
         // viewer URL. Note we need a regex match for \\0 to work, so we
         // also set regexFilter from the urlFilter glob.
-        regexSubstitution: VIEWER_URL + "?file=\\0",
+        regexSubstitution: base + "?file=\\0",
       },
     },
     condition: {
@@ -156,15 +183,16 @@ function globToRegex(glob) {
 async function rebuildRules() {
   const userPatterns = await getUserPatterns();
   const allPatterns = [...BUILTIN_PATTERNS, ...userPatterns];
+  const base = redirectBase(await getRoutingPrefs());
 
   const newRules = [
     buildBypassRule(),
     buildEcmsImageAllowRule(),
-    buildPdfSuffixRule(),
+    buildPdfSuffixRule(base),
   ];
   allPatterns.forEach((p, i) => {
     try {
-      newRules.push(buildPatternRule(RULE_ID_PATTERN_BASE + i, p));
+      newRules.push(buildPatternRule(RULE_ID_PATTERN_BASE + i, p, base));
     } catch (e) {
       console.warn(`[Citation Linker] Skipping bad pattern ${JSON.stringify(p)}: ${e.message}`);
     }
@@ -194,7 +222,7 @@ async function rebuildRules() {
     try {
       await chrome.declarativeNetRequest.updateDynamicRules({
         removeRuleIds: removeIds,
-        addRules: [buildBypassRule(), buildEcmsImageAllowRule(), buildPdfSuffixRule()],
+        addRules: [buildBypassRule(), buildEcmsImageAllowRule(), buildPdfSuffixRule(base)],
       });
       console.warn("[Citation Linker] Retried with .pdf-suffix rule only.");
     } catch (e2) {
@@ -222,7 +250,8 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "sync" && changes.pdfUrlPatterns) {
+  if (area !== "sync") return;
+  if (changes.pdfUrlPatterns || changes.routeToApp || changes.appUrl) {
     rebuildRules();
   }
 });
