@@ -127,8 +127,29 @@ if ("launchQueue" in window) {
 const fileParam = new URLSearchParams(location.search).get("file");
 if (fileParam) loadUrl(fileParam);
 
-// 3a. Manual open button.
-openBtnEl.addEventListener("click", () => fileInputEl.click());
+// 3a. Manual open — browse your computer for a PDF. Prefer the modern native
+// file picker (nicer dialog, PDF-filtered); fall back to a hidden <input> on
+// browsers without the File System Access API.
+async function pickFile() {
+  if (window.showOpenFilePicker) {
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: "PDF document", accept: { "application/pdf": [".pdf"] } }],
+        multiple: false,
+      });
+      await loadFile(await handle.getFile());
+      return;
+    } catch (err) {
+      if (err && err.name === "AbortError") return; // user cancelled the dialog
+      // Any other error: fall through to the <input> fallback.
+    }
+  }
+  fileInputEl.click();
+}
+
+openBtnEl.addEventListener("click", pickFile);
+// The empty-state panel is a big click target for the same action.
+dropzoneEl.addEventListener("click", pickFile);
 fileInputEl.addEventListener("change", () => {
   if (fileInputEl.files.length) loadFile(fileInputEl.files[0]);
 });
