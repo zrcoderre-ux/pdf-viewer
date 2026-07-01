@@ -146,11 +146,25 @@ const extPending = new Map();
 let extReady = false;
 let extSeq = 0;
 
+// Live "extension connected" indicator in the tab strip.
+const extStatusEl = document.getElementById("ext-status");
+function setExtStatus(state) {
+  if (!extStatusEl) return;
+  const label = extStatusEl.querySelector(".ext-label");
+  extStatusEl.classList.remove("checking", "connected", "absent");
+  extStatusEl.classList.add(state);
+  if (label) {
+    label.textContent = state === "connected" ? "Extension connected"
+      : state === "absent" ? "Extension not detected"
+      : "Checking…";
+  }
+}
+
 window.addEventListener("message", (e) => {
   if (e.source !== window || e.origin !== location.origin) return;
   const m = e.data;
   if (!m || m.ns !== EXT_NS || m.dir !== "toPage") return;
-  if (m.type === "ready") { extReady = true; return; }
+  if (m.type === "ready") { extReady = true; setExtStatus("connected"); return; }
   const p = extPending.get(m.requestId);
   if (!p) return;
   extPending.delete(m.requestId);
@@ -280,6 +294,11 @@ if (routed) {
 }
 
 updateChrome();
+
+// Detect the extension bridge on load so the indicator reflects reality even
+// before any routed PDF is opened.
+setExtStatus("checking");
+extAvailable().then((ok) => setExtStatus(ok ? "connected" : "absent"));
 
 // Service worker: installability, offline, and auto-update when online.
 if ("serviceWorker" in navigator) {
