@@ -305,6 +305,11 @@ function toMatchPattern(raw) {
   const host = slash === -1 ? s : s.slice(0, slash);
   let path = slash === -1 ? "/*" : s.slice(slash);
   if (path === "" || path === "/") path = "/*";
+  // A Chrome match pattern path matches literally unless it contains "*". A
+  // path with no wildcard (e.g. "/v2/") would match ONLY that exact URL — which
+  // on a single-page app means basically nothing. Append "*" so it prefix-
+  // matches everything under that path, which is what users expect.
+  else if (!path.includes("*")) path += "*";
   if (!host) return null;
   return `${scheme}://${host}${path}`;
 }
@@ -347,6 +352,7 @@ async function syncCitationSites() {
       js: ["content/claude-citations.js"],
       css: ["content/claude-citations.css"],
       runAt: "document_idle",
+      allFrames: true, // many SPAs render surfaces in same-origin iframes
     }]);
     console.log(`[Citation Linker] Citation links enabled on ${matches.length} extra site(s):`, matches.join(", "));
   } catch (e) {
