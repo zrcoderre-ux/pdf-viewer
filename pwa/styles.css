@@ -84,9 +84,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
   text-align: center;
   padding: 24px;
+  cursor: pointer;
 }
 #dropzone.hidden { display: none; }
 
@@ -95,6 +95,11 @@ body {
   border-radius: 16px;
   padding: 40px 48px;
   max-width: 480px;
+  transition: border-color 0.15s, background 0.15s;
+}
+#dropzone:hover .dz-inner {
+  border-color: var(--muted);
+  background: rgba(148, 163, 184, 0.06);
 }
 .dz-icon { font-size: 48px; }
 .dz-title { font-size: 20px; font-weight: 600; margin: 12px 0 6px; }
