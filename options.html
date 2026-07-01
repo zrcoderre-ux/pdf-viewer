@@ -114,6 +114,29 @@
     </p>
   </div>
 
+  <h2>Citation links on websites</h2>
+  <div class="card">
+    <p class="lede" style="margin-top:0;">
+      The extension overlays clickable citation links on <code>claude.ai</code>
+      automatically. Add more websites here and the same links will appear on
+      them. One site per line; use <code>*</code> as a wildcard. A bare domain
+      covers the whole site.
+    </p>
+    <p class="lede">Examples:</p>
+<pre style="background:#fff;border:1px solid #e2e2e6;padding:10px;border-radius:5px;font-size:12px;overflow:auto;margin:6px 0;">chatgpt.com
+*.courtlistener.com
+https://www.law.cornell.edu/*</pre>
+    <textarea id="citation-sites" rows="5" style="width:100%;font-family:Consolas,Menlo,monospace;font-size:12px;padding:8px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;"></textarea>
+    <div style="margin-top:8px;">
+      <button id="citation-sites-save" type="button">Save sites</button>
+      <span class="status" id="citation-sites-status"></span>
+    </div>
+    <p class="lede" style="font-size:12px;margin-top:10px;">
+      Newly added sites take effect the next time you load or reload those
+      pages. <code>claude.ai</code> is built in — you don't need to add it.
+    </p>
+  </div>
+
   <h2>Citation repository</h2>
   <div class="card">
     <p class="lede" style="margin-top:0;">

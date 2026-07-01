@@ -283,18 +283,94 @@ function filenameFromContentDisposition(cd) {
   return m ? m[1].trim() : null;
 }
 
+// ---------------------------------------------------------------------------
+// Extra citation-link sites. claude.ai is built in (a static content script in
+// manifest.json). Users can add more sites in Options; we inject the SAME
+// content script into them via a dynamic registration that we keep in sync with
+// storage. host_permissions is <all_urls>, so no extra permission prompt.
+const USER_CITATION_SCRIPT_ID = "user-citation-sites";
+
+// Normalize flexible user input into a Chrome match pattern:
+//   "example.com"          -> "https://example.com/*"
+//   "example.com/docs/*"   -> "https://example.com/docs/*"
+//   "*.example.com"        -> "https://*.example.com/*"
+//   "https://ex.com/*"     -> unchanged
+function toMatchPattern(raw) {
+  let s = String(raw || "").trim();
+  if (!s) return null;
+  let scheme = "https";
+  const schemeMatch = /^(\*|https?):\/\//i.exec(s);
+  if (schemeMatch) { scheme = schemeMatch[1].toLowerCase(); s = s.slice(schemeMatch[0].length); }
+  const slash = s.indexOf("/");
+  const host = slash === -1 ? s : s.slice(0, slash);
+  let path = slash === -1 ? "/*" : s.slice(slash);
+  if (path === "" || path === "/") path = "/*";
+  if (!host) return null;
+  return `${scheme}://${host}${path}`;
+}
+
+function isValidMatchPattern(p) {
+  // scheme://host/path, host may be "*", "*.domain", or a plain host.
+  return /^(\*|https?):\/\/(\*|(\*\.)?[^/*\s]+)\/[^\s]*$/.test(p);
+}
+
+function getCitationSiteMatches() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get({ citationSites: [] }, ({ citationSites }) => {
+      const arr = Array.isArray(citationSites) ? citationSites : [];
+      const out = [];
+      for (const raw of arr) {
+        const pat = toMatchPattern(raw);
+        if (pat && isValidMatchPattern(pat) && !out.includes(pat)) out.push(pat);
+      }
+      resolve(out);
+    });
+  });
+}
+
+async function syncCitationSites() {
+  // Remove any prior registration so we always reflect current storage.
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [USER_CITATION_SCRIPT_ID] });
+    if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: [USER_CITATION_SCRIPT_ID] });
+  } catch (e) { /* nothing registered yet */ }
+
+  const matches = await getCitationSiteMatches();
+  if (!matches.length) {
+    console.log("[Citation Linker] No extra citation-link sites.");
+    return;
+  }
+  try {
+    await chrome.scripting.registerContentScripts([{
+      id: USER_CITATION_SCRIPT_ID,
+      matches,
+      js: ["content/claude-citations.js"],
+      css: ["content/claude-citations.css"],
+      runAt: "document_idle",
+    }]);
+    console.log(`[Citation Linker] Citation links enabled on ${matches.length} extra site(s):`, matches.join(", "));
+  } catch (e) {
+    console.error("[Citation Linker] Failed to register citation sites:", e);
+  }
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   console.log("Legal Citation Linker installed.");
   rebuildRules();
+  syncCitationSites();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   rebuildRules();
+  syncCitationSites();
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync") return;
   if (changes.pdfUrlPatterns || changes.routeToApp || changes.appUrl) {
     rebuildRules();
+  }
+  if (changes.citationSites) {
+    syncCitationSites();
   }
 });
