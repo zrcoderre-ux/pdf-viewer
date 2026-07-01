@@ -61,18 +61,36 @@
   // ── Setup ──────────────────────────────────────────────────────────────────
 
   async function init() {
+    // The citation engine is REQUIRED. Loading it via dynamic import() can be
+    // blocked by a strict site Content-Security-Policy — if so, we can't run
+    // here, and we say so loudly (in the console) so it's diagnosable rather
+    // than a silent no-op.
     try {
-      const base = chrome.runtime.getURL("viewer/citation-linker.js");
-      const mod = await import(base);
+      const mod = await import(chrome.runtime.getURL("viewer/citation-linker.js"));
       findAllCitations = mod.findAllCitations;
       resolveUrl = mod.resolveUrl;
+    } catch (e) {
+      window.__citationLinker = { active: false, reason: "engine blocked (site CSP?)", host: location.host };
+      console.warn(
+        `[Citation Linker] Could not load the citation engine on ${location.host} — ` +
+        `this site's Content-Security-Policy is likely blocking it, so citation links can't be added here.`,
+        e
+      );
+      return;
+    }
+
+    // The Table of Authorities panel is OPTIONAL — if its import is blocked,
+    // in-text citation links still work, so don't let it abort init.
+    try {
       const toaMod = await import(chrome.runtime.getURL("viewer/toa.js"));
       toaPanel = toaMod.createToaPanel({ providerLabel });
     } catch (e) {
-      // Without the engine there's nothing to do; fail quietly.
-      console.warn("[claude-citations] could not load citation engine:", e);
-      return;
+      toaPanel = null;
+      console.warn("[Citation Linker] Table of Authorities panel unavailable on this site:", e);
     }
+
+    window.__citationLinker = { active: true, host: location.host, lastScanCitations: 0 };
+    console.info(`[Citation Linker] Active on ${location.host}. Inspect window.__citationLinker for status.`);
 
     await loadSettings();
 
@@ -82,7 +100,7 @@
         scan(); // URLs depend on the active provider
       }
       if (area === "sync" && changes.toaEnabledWeb) {
-        toaPanel.setEnabled(changes.toaEnabledWeb.newValue !== false);
+        if (toaPanel) toaPanel.setEnabled(changes.toaEnabledWeb.newValue !== false);
         scan();
       }
       if (area === "local" && changes.citationRepo) {
@@ -136,32 +154,43 @@
     const groups = new Map(); // block element -> [{ node, start, end }]
     const text = new Map();   // block element -> concatenated string
 
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
-        const parent = node.parentElement;
-        if (!parent || parent.closest(SKIP_ANCESTOR)) return NodeFilter.FILTER_REJECT;
-        // Skip text in hidden subtrees (e.g. a collapsed "thinking" panel).
-        // Linking it would paint a strip at the text's geometric position,
-        // which for hidden/clipped content lands over unrelated chat text.
-        if (parent.checkVisibility &&
-            !parent.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-
-    let node;
-    while ((node = walker.nextNode())) {
-      const block = node.parentElement.closest(BLOCK_SELECTOR) || node.parentElement;
+    const acceptText = (node) => {
+      if (!node.nodeValue || !node.nodeValue.trim()) return false;
+      const parent = node.parentElement; // null for text directly under a shadow root
+      if (!parent || parent.closest(SKIP_ANCESTOR)) return false;
+      // Skip text in hidden subtrees (e.g. a collapsed "thinking" panel).
+      // Linking it would paint a strip at the text's geometric position,
+      // which for hidden/clipped content lands over unrelated chat text.
+      if (parent.checkVisibility &&
+          !parent.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })) {
+        return false;
+      }
+      return true;
+    };
+    const addTextNode = (node) => {
+      const parent = node.parentElement;
+      const block = parent.closest(BLOCK_SELECTOR) || parent;
       let map = groups.get(block);
       if (!map) { map = []; groups.set(block, map); text.set(block, ""); }
       const start = text.get(block).length;
       const val = node.nodeValue;
       text.set(block, text.get(block) + val);
       map.push({ node, start, end: start + val.length });
-    }
+    };
+
+    // Walk the light DOM AND every open shadow root. Modern web-component apps
+    // (Teams, many enterprise SPAs) render their text inside shadow trees that
+    // a plain document walk never reaches. A TreeWalker can't cross shadow
+    // boundaries, so we recurse into each element's shadowRoot ourselves.
+    const walkRoot = (root) => {
+      const tw = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+      let n;
+      while ((n = tw.nextNode())) {
+        if (n.nodeType === Node.TEXT_NODE) { if (acceptText(n)) addTextNode(n); }
+        else if (n.shadowRoot) walkRoot(n.shadowRoot);
+      }
+    };
+    walkRoot(document.body);
 
     // Per-block context kept for the bare-section inheritance pass.
     const blocks = [];
@@ -256,6 +285,8 @@
       if (!seen.has(c.key)) seen.set(c.key, { key: c.key, kind: c.kind, url: c.url });
     }
     authorities = [...seen.values()];
+
+    if (window.__citationLinker) window.__citationLinker.lastScanCitations = citations.length;
 
     paint();
     if (toaPanel) toaPanel.render(authorities, provider);
