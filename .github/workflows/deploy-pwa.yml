@@ -35,6 +35,10 @@ jobs:
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          # Auto-create the Pages site (build type = GitHub Actions) so no
+          # manual toggle in repo Settings → Pages is required.
+          enablement: true
 
       - name: Upload pwa/ as the site
         uses: actions/upload-pages-artifact@v3
