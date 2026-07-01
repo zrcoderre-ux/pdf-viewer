@@ -86,6 +86,32 @@ if (routeToAppEl && appUrlEl) {
   if (routeSaveBtn) routeSaveBtn.addEventListener("click", saveRouting);
 }
 
+// Extra citation-link websites (synced). Stored as raw lines; the background
+// worker normalizes them into match patterns and (re)registers the content
+// script live via chrome.scripting.
+const citationSitesEl = document.getElementById("citation-sites");
+const citationSitesSaveBtn = document.getElementById("citation-sites-save");
+const citationSitesStatus = document.getElementById("citation-sites-status");
+if (citationSitesEl && citationSitesSaveBtn) {
+  chrome.storage.sync.get({ citationSites: [] }, ({ citationSites }) => {
+    citationSitesEl.value = (citationSites || []).join("\n");
+  });
+  citationSitesSaveBtn.addEventListener("click", () => {
+    const lines = citationSitesEl.value
+      .split("\n")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    chrome.storage.sync.set({ citationSites: lines }, () => {
+      citationSitesStatus.textContent =
+        lines.length === 0
+          ? "Cleared."
+          : `Saved ${lines.length} site${lines.length === 1 ? "" : "s"}.`;
+      citationSitesStatus.className = "status";
+      setTimeout(() => { citationSitesStatus.textContent = ""; }, 2500);
+    });
+  });
+}
+
 // Init repo info
 function refreshRepoInfo() {
   chrome.storage.local.get({ citationRepo: null, citationRepoMeta: null }, (res) => {
