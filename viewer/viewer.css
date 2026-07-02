@@ -130,6 +130,25 @@ body.rect-select-mode .textLayer span { cursor: crosshair; }
 }
 #thumbnail-panel.open { display: flex; }
 
+/* Drag handle on the panel's right edge to resize (expand) the Pages /
+   Bookmarks column. Sits over the panel border; only shown when the panel is
+   open. Updates --thumb-panel-width, which drives both the panel width and the
+   content's left offset. */
+#thumb-resize {
+  position: fixed;
+  top: var(--toolbar-height, 48px);
+  bottom: 0;
+  left: var(--thumb-panel-width);
+  width: 8px;
+  margin-left: -4px;
+  cursor: ew-resize;
+  z-index: 10;
+  display: none;
+  touch-action: none;
+}
+body.thumbs-open #thumb-resize { display: block; }
+#thumb-resize:hover { background: rgba(26, 115, 232, 0.5); }
+
 #panel-tabs {
   display: flex;
   border-bottom: 1px solid #1a1a1a;

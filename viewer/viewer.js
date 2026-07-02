@@ -2163,3 +2163,30 @@ if (thumbnailToggleEl) {
     }
   });
 }
+
+// Drag the Pages / Bookmarks column's right edge to resize it. The panel is
+// pinned to the left, so its width is just the pointer's x. --thumb-panel-width
+// drives both the panel and the content offset; persist it across sessions.
+const thumbResizeEl = document.getElementById("thumb-resize");
+function setThumbPanelWidth(px) {
+  const w = Math.max(100, Math.min(px, Math.round(window.innerWidth * 0.6)));
+  document.documentElement.style.setProperty("--thumb-panel-width", `${w}px`);
+  return w;
+}
+chrome.storage.sync.get({ thumbPanelWidth: null }, ({ thumbPanelWidth }) => {
+  if (thumbPanelWidth) setThumbPanelWidth(thumbPanelWidth);
+});
+if (thumbResizeEl) {
+  thumbResizeEl.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    thumbResizeEl.setPointerCapture(e.pointerId);
+    const onMove = (ev) => setThumbPanelWidth(ev.clientX);
+    const onUp = (ev) => {
+      thumbResizeEl.removeEventListener("pointermove", onMove);
+      thumbResizeEl.removeEventListener("pointerup", onUp);
+      chrome.storage.sync.set({ thumbPanelWidth: setThumbPanelWidth(ev.clientX) });
+    };
+    thumbResizeEl.addEventListener("pointermove", onMove);
+    thumbResizeEl.addEventListener("pointerup", onUp);
+  });
+}

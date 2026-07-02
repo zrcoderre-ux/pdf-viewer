@@ -43,7 +43,17 @@ const CSS = `
   overflow: hidden;
   container-type: inline-size;
 }
-#${PANEL_ID}.cl-toa-minimized { height: auto !important; }
+/* Minimized shrinks to just the header bar — only wide enough for the title,
+   count, and the +/- button (overrides any custom drag size). container-type
+   must be cleared or inline-size containment would stop the panel from sizing
+   to its content. */
+#${PANEL_ID}.cl-toa-minimized {
+  width: auto !important;
+  min-width: 0 !important;
+  height: auto !important;
+  container-type: normal !important;
+}
+#${PANEL_ID}.cl-toa-minimized .cl-toa-title { flex: 0 0 auto; }
 @media (prefers-color-scheme: dark) {
   #${PANEL_ID} {
     background: #1f2024;
