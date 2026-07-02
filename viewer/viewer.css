@@ -297,43 +297,37 @@ body.thumbs-open #viewer-container {
 }
 
 .linkLayer a.citation-link {
-  /* Sized to a thin underline strip aligned to the baseline; the citation
-     text above the strip remains selectable because the <a> doesn't cover
-     it. The .top/.height set by JS position the strip at the baseline. */
+  /* Covers the whole citation (a big, easy click target) but is transparent
+     except for a colored bottom border — a rectangle outlined only on the
+     bottom, which reads as an underline. The .top/.height set by JS now span
+     the full text rect. Color (per citation kind, below) drives the border via
+     currentColor. */
   position: absolute;
   pointer-events: auto;
   text-decoration: none;
   cursor: pointer;
-  background: #1a73e8;
-  opacity: 0.85;
-  border-radius: 1px;
-  transition: opacity 0.1s ease, transform 0.1s ease;
+  background: transparent;
+  color: #1a73e8;
+  border-bottom: 2px solid currentColor;
+  box-sizing: border-box;
+  transition: background 0.1s ease;
 }
 
 .linkLayer a.citation-link:hover {
-  opacity: 1;
-  transform: scaleY(1.6);
-  transform-origin: center;
+  /* Tint the rectangle in its own color so the click area is discoverable. */
+  background: color-mix(in srgb, currentColor 15%, transparent);
 }
 
-.linkLayer a.citation-link[data-kind="case"]    { background: #1a73e8; }
-.linkLayer a.citation-link[data-kind="statute"] { background: #137333; }
-.linkLayer a.citation-link[data-kind="rule"]    { background: #b06000; }
-.linkLayer a.citation-link[data-kind="supra"] {
-  background: linear-gradient(to right, #8430ce 50%, transparent 50%);
-  background-size: 6px 100%;
-  background-repeat: repeat-x;
-}
+.linkLayer a.citation-link[data-kind="case"]    { color: #1a73e8; }
+.linkLayer a.citation-link[data-kind="statute"] { color: #137333; }
+.linkLayer a.citation-link[data-kind="rule"]    { color: #b06000; }
+.linkLayer a.citation-link[data-kind="supra"]   { color: #8430ce; border-bottom-style: dashed; }
 /* Short-form references ("Smith v. Jones" mentioned later in body text after
-   the full citation appeared earlier). Same base blue as a full case cite
-   but with a thinner, slightly faded look so a reader can tell the two
-   apart at a glance. */
+   the full citation appeared earlier). Same base blue as a full case cite but
+   with a faded underline so a reader can tell the two apart at a glance. */
 .linkLayer a.citation-link[data-kind="shortform"] {
-  background: #1a73e8;
-  opacity: 0.55;
-}
-.linkLayer a.citation-link[data-kind="shortform"]:hover {
-  opacity: 0.9;
+  color: #1a73e8;
+  border-bottom-color: rgba(26, 115, 232, 0.5);
 }
 
 /* Right-click context menu shown over selections / existing highlights.

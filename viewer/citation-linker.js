@@ -1146,14 +1146,13 @@ function createLinkOverlayFromRects({ rects, url, kind, title, linkLayerDiv }) {
     // on dragstart as a belt-and-suspenders fix.
     a.draggable = false;
     a.addEventListener("dragstart", (e) => e.preventDefault());
-    // Place underline as a thin strip at the text baseline. Leaves the text
-    // above selectable while still giving a clear, clickable underline.
-    const stripHeight = 2;
-    const stripTop = rect.top + rect.height * 0.94 - stripHeight / 2;
+    // Cover the whole citation rect so the entire phrase is an easy click
+    // target; the CSS makes it transparent with only a colored bottom border,
+    // so it still reads as an underline.
     a.style.left   = `${rect.left}px`;
-    a.style.top    = `${stripTop}px`;
+    a.style.top    = `${rect.top}px`;
     a.style.width  = `${rect.width}px`;
-    a.style.height = `${stripHeight}px`;
+    a.style.height = `${rect.height}px`;
     linkLayerDiv.appendChild(a);
   }
 }
