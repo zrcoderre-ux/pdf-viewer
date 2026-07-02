@@ -53,7 +53,10 @@ const CSS = `
   height: auto !important;
   container-type: normal !important;
 }
-#${PANEL_ID}.cl-toa-minimized .cl-toa-title { flex: 0 0 auto; }
+/* Minimized: natural left-to-right row (title, count, toggle) sized to content
+   — not the centered grid used when expanded. */
+#${PANEL_ID}.cl-toa-minimized .cl-toa-header { display: flex; }
+#${PANEL_ID}.cl-toa-minimized .cl-toa-title { text-align: left; }
 @media (prefers-color-scheme: dark) {
   #${PANEL_ID} {
     background: #1f2024;
@@ -62,8 +65,13 @@ const CSS = `
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   }
 }
+/* Expanded: title centered across the full width, with the count + toggle
+   overlaid at the right edge. (The title spans both grid columns and is
+   center-aligned; the actions sit in the right column on top of it — the title
+   text is short enough that they never visually collide.) */
 #${PANEL_ID} .cl-toa-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
@@ -75,11 +83,20 @@ const CSS = `
   #${PANEL_ID} .cl-toa-header { border-bottom-color: #34363c; }
 }
 #${PANEL_ID} .cl-toa-title {
+  grid-column: 1 / -1;
+  text-align: center;
   font-weight: 600;
-  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  pointer-events: none; /* clicks fall through to the header (minimize toggle) */
+}
+#${PANEL_ID} .cl-toa-actions {
+  grid-column: 2;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 #${PANEL_ID} .cl-toa-count {
   min-width: 20px;
@@ -162,7 +179,7 @@ function injectStyle() {
   (document.head || document.documentElement).appendChild(s);
 }
 
-export function createToaPanel({ providerLabel } = {}) {
+export function createToaPanel({ providerLabel, top } = {}) {
   injectStyle();
   const label = providerLabel || ((p) => (p === "westlaw" ? "Westlaw" : "Lexis+"));
 
@@ -190,6 +207,7 @@ export function createToaPanel({ providerLabel } = {}) {
     if (el && el.isConnected) return el;
     el = document.createElement("div");
     el.id = PANEL_ID;
+    if (top) el.style.top = top;
 
     const header = document.createElement("div");
     header.className = "cl-toa-header";
@@ -206,7 +224,12 @@ export function createToaPanel({ providerLabel } = {}) {
     toggle.className = "cl-toa-toggle";
     toggle.type = "button";
 
-    header.append(title, countEl, toggle);
+    // count + toggle stay grouped at the right; the title centers between.
+    const actions = document.createElement("div");
+    actions.className = "cl-toa-actions";
+    actions.append(countEl, toggle);
+
+    header.append(title, actions);
 
     bodyEl = document.createElement("div");
     bodyEl.className = "cl-toa-body";

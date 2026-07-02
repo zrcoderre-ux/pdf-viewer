@@ -163,6 +163,8 @@ let citationRepo = {};
 // Shared Table of Authorities panel (off when the user disables it in Options).
 const toaPanel = createToaPanel({
   providerLabel: (p) => (p === "westlaw" ? "Westlaw" : "Lexis+"),
+  // Sit just below the fixed toolbar (claude.ai keeps the default top).
+  top: "calc(var(--toolbar-height, 48px) + 8px)",
 });
 // OCR runs on scanned pages only when enabled. Default is manual (the toolbar
 // "OCR" button); the auto-OCR option flips the default to on.
@@ -2173,7 +2175,7 @@ function setThumbPanelWidth(px) {
   document.documentElement.style.setProperty("--thumb-panel-width", `${w}px`);
   return w;
 }
-chrome.storage.sync.get({ thumbPanelWidth: null }, ({ thumbPanelWidth }) => {
+chrome.storage.local.get({ thumbPanelWidth: null }, ({ thumbPanelWidth }) => {
   if (thumbPanelWidth) setThumbPanelWidth(thumbPanelWidth);
 });
 if (thumbResizeEl) {
@@ -2184,7 +2186,7 @@ if (thumbResizeEl) {
     const onUp = (ev) => {
       thumbResizeEl.removeEventListener("pointermove", onMove);
       thumbResizeEl.removeEventListener("pointerup", onUp);
-      chrome.storage.sync.set({ thumbPanelWidth: setThumbPanelWidth(ev.clientX) });
+      chrome.storage.local.set({ thumbPanelWidth: setThumbPanelWidth(ev.clientX) });
     };
     thumbResizeEl.addEventListener("pointermove", onMove);
     thumbResizeEl.addEventListener("pointerup", onUp);
