@@ -83,7 +83,9 @@
     // in-text citation links still work, so don't let it abort init.
     try {
       const toaMod = await import(chrome.runtime.getURL("viewer/toa.js"));
-      toaPanel = toaMod.createToaPanel({ providerLabel });
+      // Sit just below the browser toolbar (near the top of the viewport),
+      // matching the PDF viewer's placement under its own toolbar.
+      toaPanel = toaMod.createToaPanel({ providerLabel, top: "8px" });
     } catch (e) {
       toaPanel = null;
       console.warn("[Citation Linker] Table of Authorities panel unavailable on this site:", e);
