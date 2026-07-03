@@ -79,7 +79,10 @@ The extension supports two filename-source modes, set on the Options page
 (right-click extension icon → Options → "Default filename source"):
 
 - **Source filename (default).** Uses the original filename as the
-  server / URL / Content-Disposition supplies it. No transformation.
+  server / URL / Content-Disposition supplies it. No transformation — unless
+  you enable "Apply the same naming rules to the source filename" in Options,
+  which runs the source name through the same abbreviation / title-case rules
+  as footer mode (off by default).
 - **Derive from document footer.** Reads the document title printed at
   the bottom of court filings and applies legal-document naming rules.
 

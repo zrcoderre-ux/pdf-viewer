@@ -244,6 +244,18 @@ let footerExtraction = null;
 // so we can switch back to it when namingMode flips from "footer" to
 // "source" without re-running anything.
 let sourceDisplayName = "";
+// Raw source filename (extension stripped), kept so the source name can be
+// recomputed when the "apply naming rules to source" option toggles.
+let sourceRawName = "";
+// When true, the source filename is run through the same name-altering rules
+// as footer titles; when false (default), the raw source name is shown as-is.
+let alterSource = false;
+
+// Derive the source display name from the raw filename, honoring alterSource.
+function computeSourceDisplay(rawNoExt) {
+  if (alterSource) return simplifyName(rawNoExt) || rawNoExt || "PDF";
+  return rawNoExt || "PDF";
+}
 
 // Best-effort filename derived purely from the URL. Used as fallback only.
 //
@@ -1148,7 +1160,12 @@ function setDisplayName(raw, { definitive = true, origin = "source" } = {}) {
     // Strip .pdf before simplifying so the pipeline doesn't treat ".pdf"
     // as a meaningful token.
     const withoutExt = String(raw).replace(/\.pdf$/i, "");
-    display = simplifyName(withoutExt) || withoutExt || "PDF";
+    if (origin === "source") {
+      sourceRawName = withoutExt;
+      display = computeSourceDisplay(withoutExt);
+    } else {
+      display = simplifyName(withoutExt) || withoutExt || "PDF";
+    }
     if (definitive) serverFilename = display;
   }
   // Cache by origin so applyNamingMode can swap between them later.
@@ -1231,12 +1248,15 @@ setDisplayName(filenameFromUrl(fileUrl), { definitive: false });
 
 // Read stored prefs and any saved citation_repo.json.
 chrome.storage.sync.get(
-  { provider: "lexis", namingMode: "source", toaEnabledPdf: false, autoOcr: false },
-  async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabledPdf, autoOcr }) => {
+  { provider: "lexis", namingMode: "source", toaEnabledPdf: false, autoOcr: false, alterSource: false },
+  async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabledPdf, autoOcr, alterSource: storedAlterSource }) => {
     provider = storedProvider;
     providerEl.value = provider;
     toaPanel.setEnabled(!!toaEnabledPdf);
     if (autoOcr) { ocrEnabled = true; markOcrActive(); }
+    alterSource = !!storedAlterSource;
+    // Recompute any source name derived before the preference loaded.
+    if (sourceRawName) sourceDisplayName = computeSourceDisplay(sourceRawName);
     globalNamingMode = storedNamingMode === "footer" ? "footer" : "source";
     // Look up any per-document override for this exact PDF URL.
     perDocOverride = await getOverride(fileUrl);
@@ -1320,6 +1340,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (!perDocOverride && resolveEffectiveNamingMode()) {
       if (namingModeEl) namingModeEl.value = namingMode;
       applyNamingMode();
+    }
+  }
+  if (area === "sync" && changes.alterSource) {
+    alterSource = !!changes.alterSource.newValue;
+    // Recompute the source name and re-show it if source naming is active.
+    if (!userOverrodeName && sourceRawName) {
+      sourceDisplayName = computeSourceDisplay(sourceRawName);
+      if (namingMode === "source") {
+        serverFilename = sourceDisplayName;
+        paintDisplayName(sourceDisplayName);
+      }
     }
   }
   if (area === "local" && changes.citationRepo) {
@@ -1955,10 +1986,10 @@ downloadEl.addEventListener("click", async () => {
     //   3. Literal "document".
     let chosen;
     if (serverFilename) {
-      chosen = serverFilename; // already simplified
+      chosen = serverFilename; // already reflects the naming settings
     } else {
       const raw = filenameFromUrl(fileUrl) || "document";
-      chosen = simplifyName(raw.replace(/\.pdf$/i, "")) || raw;
+      chosen = computeSourceDisplay(raw.replace(/\.pdf$/i, "")) || raw;
     }
     const filename = sanitizePdfFilename(chosen);
 

@@ -34,6 +34,18 @@ for (const r of namingRadios) {
   });
 }
 
+// "Apply naming rules to the source filename" (synced; default off → the raw
+// source name is shown as-is). Open viewer tabs subscribe and re-derive live.
+const alterSourceEl = document.getElementById("alter-source");
+if (alterSourceEl) {
+  chrome.storage.sync.get({ alterSource: false }, ({ alterSource }) => {
+    alterSourceEl.checked = !!alterSource;
+  });
+  alterSourceEl.addEventListener("change", () => {
+    chrome.storage.sync.set({ alterSource: alterSourceEl.checked });
+  });
+}
+
 // Table of Authorities panel toggles (synced; default on). Separate switches
 // for the PDF viewer and for websites (claude.ai); open viewer tabs and the
 // content script subscribe to these keys and show/hide live.
