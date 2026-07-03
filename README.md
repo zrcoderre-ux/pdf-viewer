@@ -111,6 +111,10 @@ disambiguating qualifier added only when another open PDF would collide:
   preserved as its own type (procedural notice).
 - Case-number tails (`Case No. 30STCV12345`) and damages-blob descriptive
   tails (`for compensatory, punitive, ... damages`) are stripped.
+- A declaration listed after a semicolon is treated as a *supporting*
+  document and ignored, so a multi-document filing is named from its primary
+  document (`Opposition ...; Declaration of Smith` → `Opposition`). A
+  standalone declaration (no preceding semicolon) still names as a declaration.
 - A trailing isolated `V` left over from a `v.` case caption is removed
   (`Amended Complaint V` → `Amended Complaint`); a `V` that's part of a word is
   kept.

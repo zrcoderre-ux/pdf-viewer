@@ -51,6 +51,20 @@ function normalize(raw) {
     .trim();
 }
 
+// A declaration listed after a semicolon is a *supporting* document within a
+// multi-document filing (e.g. "Opposition to Motion; Declaration of Smith").
+// It isn't the primary document, so drop such declaration clauses and let the
+// filing be named from the primary document instead. The first clause (the
+// primary document) is always kept \u2014 a standalone "Declaration of X" with no
+// preceding semicolon is untouched, so it still names as a declaration.
+function stripSupportingDeclaration(s) {
+  if (!s.includes(";")) return s;
+  const isDecl = (p) => /\bdeclaration\b|\bdecl\./i.test(p);
+  const kept = s.split(";").filter((p, i) => i === 0 || !isDecl(p));
+  const out = kept.join(";").replace(/[;\s]+$/, "").trim();
+  return out || s;
+}
+
 // Generational suffixes and post-nominal credentials that are never the
 // surname. Without this, "Declaration of Gregory Wayne Walton II" yields the
 // surname "II" ("Ii Decl.") instead of "Walton".
@@ -631,6 +645,10 @@ export function extractTitle(raw) {
   if (!raw) return result;
 
   let s = normalize(raw);
+  // Drop a declaration that trails a semicolon — it's a supporting document,
+  // not the primary one this filing should be named after. Done before sRaw is
+  // captured so the "recover a Decl." insurance below doesn't re-introduce it.
+  s = stripSupportingDeclaration(s);
   const sRaw = s;  // for the post-match insurance check
 
   // 2. Caption party (and strip the tail).
