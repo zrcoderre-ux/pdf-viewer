@@ -16,7 +16,8 @@ import {
   clearAllHighlights,
   attachHighlightHandlers,
   repaintHighlightsForPage,
-  getHighlightRects,
+  getHighlightRectGroups,
+  addImportedHighlight,
 } from "./highlights.js";
 import { buildEditedPdf } from "./pdf-edit.js";
 import { extractTitle } from "./footer-naming.js";
@@ -1329,6 +1330,9 @@ function setEditingEnabled(on) {
 setEditingEnabled(isLocalFile);
 
 // Collect on-screen highlight rectangles converted to PDF points, per page.
+// Collect the current highlights as PDF-space quads, grouped per highlight, so
+// each becomes one /Highlight annotation. Inverse of the paint transform: layer
+// px → PDF points via ÷ scale and a Y-flip about the page height.
 function collectHighlightPdfRects() {
   const byPage = new Map();
   const wrappers = pagesEl.querySelectorAll(".page-wrapper");
@@ -1338,15 +1342,20 @@ function collectHighlightPdfRects() {
     const hlLayer = w.querySelector(".highlightLayer");
     const hPts = pageHeightPtsByNum.get(pn);
     if (!tl || !hlLayer || !hPts) return;
-    const rects = getHighlightRects(pn, tl, hlLayer);
-    if (!rects.length) return;
     const s = currentScale;
-    byPage.set(pn, rects.map((r) => ({
-      x: r.left / s,
-      y: hPts - (r.top / s) - (r.height / s),
-      w: r.width / s,
-      h: r.height / s,
-    })));
+    const groups = getHighlightRectGroups(pn, tl, hlLayer, { scale: s, pageHeightPts: hPts });
+    if (!groups.length) return;
+    const out = [];
+    for (const g of groups) {
+      const rects = g.rects.map((r) => ({
+        x: r.left / s,
+        y: hPts - (r.top / s) - (r.height / s),
+        w: r.width / s,
+        h: r.height / s,
+      }));
+      if (rects.length) out.push({ rects });
+    }
+    if (out.length) byPage.set(pn, out);
   });
   return byPage;
 }
@@ -1580,6 +1589,47 @@ function resetForNewDocument() {
   unregisterEntry();
 }
 
+// Load the document's existing /Highlight annotations into the removable
+// highlight overlay. Only for editable (downloaded/local) docs — those are the
+// ones we render annotations for ourselves and let the user delete/re-save.
+// Read-only web PDFs let PDF.js draw their annotations on the canvas as usual.
+const HIGHLIGHT_ANNOTATION_TYPE = 9; // pdfjsLib.AnnotationType.HIGHLIGHT
+// True once we've imported at least one /Highlight annotation from the current
+// document. Gates whether the canvas render skips annotations (so we own the
+// highlights) — see renderPageCanvasAndText.
+let docHasAnnotationHighlights = false;
+async function importHighlightAnnotations() {
+  docHasAnnotationHighlights = false;
+  if (!editingAllowed || !pdfDoc) return;
+  for (let pn = 1; pn <= pdfDoc.numPages; pn++) {
+    let annots;
+    try {
+      const page = await pdfDoc.getPage(pn);
+      annots = await page.getAnnotations({ intent: "display" });
+    } catch {
+      continue;
+    }
+    for (const a of annots) {
+      if (!a || a.annotationType !== HIGHLIGHT_ANNOTATION_TYPE) continue;
+      const q = a.quadPoints;
+      if (!q || !q.length) continue;
+      // PDF.js normalizes QuadPoints to 8 numbers per quad, laid out
+      // [minX, maxY, maxX, maxY, minX, minY, maxX, minY]. Recover {x,y,w,h}
+      // in PDF points (origin bottom-left).
+      const pdfRects = [];
+      for (let i = 0; i + 7 < q.length; i += 8) {
+        const left = q[i], top = q[i + 1], right = q[i + 2], bottom = q[i + 5];
+        const x = Math.min(left, right);
+        const y = Math.min(top, bottom);
+        const w = Math.abs(right - left);
+        const h = Math.abs(top - bottom);
+        if (w > 0 && h > 0) pdfRects.push({ x, y, w, h });
+      }
+      if (pdfRects.length) { addImportedHighlight(pn, pdfRects); docHasAnnotationHighlights = true; }
+    }
+  }
+}
+
 // Render a PDF from raw bytes. `sourceName`, when given (local files know their
 // filename directly), seeds the source-mode display name.
 async function renderBytes(buf, { sourceName } = {}) {
@@ -1589,6 +1639,11 @@ async function renderBytes(buf, { sourceName } = {}) {
   pdfBytes = buf.slice(0);
   const loadingTask = pdfjsLib.getDocument({ data: buf });
   pdfDoc = await loadingTask.promise;
+  // Bring any existing /Highlight annotations into the removable overlay before
+  // the first paint, so a saved-and-reopened file shows its highlights as
+  // deletable ones (and we don't double-draw them — the canvas render skips
+  // annotations for editable docs).
+  await importHighlightAnnotations();
   statusEl.textContent = `Rendering ${pdfDoc.numPages} pages…`;
   await renderAllPages();
   statusEl.textContent = "Done";
@@ -1727,7 +1782,8 @@ async function renderAllPages() {
   // restores them onto the freshly rendered pages.
   const repaintCb = (pn) => {
     const r = pageRefs.find((x) => x.pageNumber === pn);
-    if (r) repaintHighlightsForPage(pn, r.textLayerDiv, r.highlightLayerDiv);
+    if (r) repaintHighlightsForPage(pn, r.textLayerDiv, r.highlightLayerDiv,
+      { scale: currentScale, pageHeightPts: pageHeightPtsByNum.get(pn) });
   };
   for (const refs of pageRefs) {
     if (signal.aborted) return;
@@ -1736,7 +1792,8 @@ async function renderAllPages() {
       refs.highlightLayerDiv, () => highlightMode, repaintCb,
       () => rectSelectMode
     );
-    repaintHighlightsForPage(refs.pageNumber, refs.textLayerDiv, refs.highlightLayerDiv);
+    repaintHighlightsForPage(refs.pageNumber, refs.textLayerDiv, refs.highlightLayerDiv,
+      { scale: currentScale, pageHeightPts: pageHeightPtsByNum.get(refs.pageNumber) });
   }
 
   updateLinkCount();
@@ -1957,7 +2014,17 @@ async function renderPageCanvasAndText(pageNumber) {
   pagesEl.appendChild(wrapper);
 
   const ctx = canvas.getContext("2d");
-  await page.render({ canvasContext: ctx, viewport }).promise;
+  // When the document carries /Highlight annotations we've pulled into the
+  // removable overlay, tell PDF.js NOT to paint annotations onto the canvas —
+  // otherwise each highlight is drawn twice and the canvas copy can't be
+  // deleted. We only do this when there ARE such highlights, so ordinary PDFs
+  // (including local ones with form fields) keep PDF.js's normal annotation
+  // rendering; the only tradeoff is a doc that has both highlights and other
+  // annotations, where the latter won't paint.
+  const annotationMode = docHasAnnotationHighlights
+    ? pdfjsLib.AnnotationMode.DISABLE
+    : pdfjsLib.AnnotationMode.ENABLE;
+  await page.render({ canvasContext: ctx, viewport, annotationMode }).promise;
 
   let textContent = await page.getTextContent();
   if (ocrEnabled && pageNeedsOcr(textContent)) {

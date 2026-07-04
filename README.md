@@ -20,9 +20,10 @@ In addition to citation linking, the viewer supports:
   dragging with the left button. This is an alternative to the default flowing
   selection.
 - **Persistent highlighting** — select any text and release the mouse to
-  apply a yellow highlight. Click an existing highlight to remove it.
-  Highlights persist across zoom changes but vanish when the tab closes
-  (no cross-session storage).
+  apply a yellow highlight. Right-click a highlight to remove it. Highlights
+  persist across zoom changes; for editable documents they can be saved into
+  the file and stay removable after reopening (see below), otherwise they vanish
+  when the tab closes.
 - **Table of Authorities** — a side panel listing every detected case,
   statute, and rule once, as a clickable link to your provider; minimizable and
   drag-resizable. The same panel appears for claude.ai. Options →
@@ -34,12 +35,16 @@ In addition to citation linking, the viewer supports:
   scanned documents" in Options to run it without the button.
 - **Edit &amp; save — local documents only.** For a PDF you've already
   downloaded — opened from disk (`file://` in the extension) or via the app —
-  the toolbar replaces **Download** with **💾 Save** (bakes your highlights into
+  the toolbar replaces **Download** with **💾 Save** (writes your highlights into
   the PDF) and adds **⧉ Combine** (merges other PDFs onto the end, then saves).
-  In the app, Save writes back to the same file in place using its file handle;
-  otherwise it goes through the browser's save dialog. Both are powered by the
-  bundled `pdf-lib` writer. Web PDFs you're only viewing stay read-only — edit
-  access is granted only to documents you've already downloaded.
+  Highlights are saved as real **PDF highlight annotations** (the same kind Adobe
+  uses), not baked-in drawings, so they stay editable: reopen the file and they
+  come back as removable highlights (right-click to delete, then Save again), and
+  Adobe/Preview can delete them too. In the app, Save writes back to the same
+  file in place using its file handle; otherwise it goes through the browser's
+  save dialog. Both are powered by the bundled `pdf-lib` writer. Web PDFs you're
+  only viewing stay read-only — edit access is granted only to documents you've
+  already downloaded.
 - **Zoom in / out** with the toolbar buttons.
 - **Download** the original PDF with a smart filename (see below).
 - **Open original** in Chrome's built-in PDF viewer (skips the linker).

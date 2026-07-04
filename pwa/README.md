@@ -69,11 +69,13 @@ Actions**.
 
 Because every PDF in the app is one you opened from disk, the app is where
 editing lives. The viewer's toolbar shows **Save** instead of **Download**:
-Save bakes your highlights into the PDF and writes them back to the same file
-(via the file's handle from the picker / OS file handler), and **Combine**
-merges other PDFs onto the end. The browser extension stays view-only for web
-PDFs you haven't downloaded — a clean split: extension for browsing, app for
-editing.
+Save writes your highlights into the PDF and back to the same file (via the
+file's handle from the picker / OS file handler), and **Combine** merges other
+PDFs onto the end. Highlights are stored as real **PDF highlight annotations**,
+not baked-in drawings, so they survive as *removable* highlights — reopen the
+file and you can right-click any of them to delete it, then Save again (Adobe and
+Preview can delete them too). The browser extension stays view-only for web PDFs
+you haven't downloaded — a clean split: extension for browsing, app for editing.
 
 > The old "route web PDFs to the app" path (an extension→app redirect with a
 > brokered fetch) has been removed. The extension always opens PDFs in its own

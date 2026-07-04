@@ -5,7 +5,8 @@
 // them — so there is no storage layer here, just a module-level Map keyed
 // by page number.
 //
-// Storage shape per highlight:
+// Storage shape per highlight — two kinds:
+//   Span-based (made in this session by selecting text):
 //   {
 //     id: number,                      // monotonically increasing
 //     startSpanIdx: number,            // index into textLayer's <span> children
@@ -13,13 +14,22 @@
 //     endSpanIdx:   number,
 //     endOffset:    number,
 //   }
+//   Imported (loaded from a saved PDF's /Highlight annotations):
+//   {
+//     id: number,
+//     pdfRects: Array<{x,y,w,h}>,       // PDF points, origin bottom-left
+//     imported: true,
+//   }
 //
-// Geometry: highlights are repainted from these (span, offset) coordinates
+// Geometry: span highlights are repainted from their (span, offset) coordinates
 // by constructing a DOM Range and calling getClientRects() — same approach
-// the citation linker uses for its overlay rects. This means highlights
-// stay aligned correctly across zoom changes (which re-render the page
-// from scratch with new spans, but the span *count* and *text content* are
-// stable for a given PDF, so the indices remain valid).
+// the citation linker uses for its overlay rects. This means they stay aligned
+// correctly across zoom changes (which re-render the page from scratch with new
+// spans, but the span *count* and *text content* are stable for a given PDF, so
+// the indices remain valid). Imported highlights are stored in PDF space and
+// converted to on-screen pixels each repaint (× scale, with a Y-flip), so they
+// track zoom too — and, crucially, they're removable exactly like span
+// highlights, which is how a saved-and-reopened highlight can be deleted.
 //
 // Two ways to add a highlight:
 //   1. Highlight tool mode (highlightMode = true): releasing the mouse after
@@ -123,17 +133,28 @@ export function hasHighlights() {
   return false;
 }
 
-// Rendered highlight rectangles for a page, relative to highlightLayerDiv (px,
-// top-left origin) — the same rects painted on screen. The caller converts
-// these into PDF-space points to bake them into the saved file.
-export function getHighlightRects(pageNumber, textLayerDiv, highlightLayerDiv) {
+// Rendered highlight rectangles for a page, grouped per highlight, relative to
+// highlightLayerDiv (px, top-left origin) — the same rects painted on screen.
+// The caller converts each group into PDF-space points to write it as one
+// /Highlight annotation. `renderCtx` = { scale, pageHeightPts } is needed to
+// place imported (PDF-space) highlights; span highlights ignore it.
+export function getHighlightRectGroups(pageNumber, textLayerDiv, highlightLayerDiv, renderCtx) {
   const list = _highlightsByPage.get(pageNumber);
   if (!list || !list.length) return [];
   const out = [];
   for (const hl of list) {
-    for (const r of rectsForHighlight(hl, textLayerDiv, highlightLayerDiv)) out.push(r);
+    const rects = rectsForHighlight(hl, textLayerDiv, highlightLayerDiv, renderCtx);
+    if (rects.length) out.push({ id: hl.id, rects });
   }
   return out;
+}
+
+// Register a highlight loaded from a saved PDF's annotations. `pdfRects` are in
+// PDF points (origin bottom-left). Stored as one removable highlight.
+export function addImportedHighlight(pageNumber, pdfRects) {
+  if (!pdfRects || !pdfRects.length) return;
+  if (!_highlightsByPage.has(pageNumber)) _highlightsByPage.set(pageNumber, []);
+  _highlightsByPage.get(pageNumber).push({ id: _nextId++, pdfRects, imported: true });
 }
 
 function captureSelectionForPage(pageNumber, textLayerDiv) {
@@ -196,7 +217,27 @@ function removeHighlight(pageNumber, id) {
 
 // ── Geometry ──────────────────────────────────────────────────────────────────
 
-function rectsForHighlight(hl, textLayerDiv, highlightLayerDiv) {
+function rectsForHighlight(hl, textLayerDiv, highlightLayerDiv, renderCtx) {
+  // Imported highlight: stored in PDF points, converted to layer pixels here.
+  // The highlight layer covers the page at the current scale, so a PDF point
+  // (x, y-from-bottom) maps to layer px: left = x·scale, top = (H − (y+h))·scale.
+  if (hl.pdfRects) {
+    const s = (renderCtx && renderCtx.scale) || 1;
+    const hPts = renderCtx && renderCtx.pageHeightPts;
+    if (!hPts) return [];
+    const out = [];
+    for (const r of hl.pdfRects) {
+      if (!(r.w > 0 && r.h > 0)) continue;
+      out.push({
+        left:   r.x * s,
+        top:    (hPts - (r.y + r.h)) * s,
+        width:  r.w * s,
+        height: r.h * s,
+      });
+    }
+    return out;
+  }
+
   const spans = textLayerDiv.querySelectorAll("span");
   const startSpan = spans[hl.startSpanIdx];
   const endSpan   = spans[hl.endSpanIdx];
@@ -236,7 +277,7 @@ function rectsForHighlight(hl, textLayerDiv, highlightLayerDiv) {
 
 // ── Painting ──────────────────────────────────────────────────────────────────
 
-export function repaintHighlightsForPage(pageNumber, textLayerDiv, highlightLayerDiv) {
+export function repaintHighlightsForPage(pageNumber, textLayerDiv, highlightLayerDiv, renderCtx) {
   while (highlightLayerDiv.firstChild) {
     highlightLayerDiv.removeChild(highlightLayerDiv.firstChild);
   }
@@ -245,7 +286,7 @@ export function repaintHighlightsForPage(pageNumber, textLayerDiv, highlightLaye
   if (!list || !list.length) return;
 
   for (const hl of list) {
-    const rects = rectsForHighlight(hl, textLayerDiv, highlightLayerDiv);
+    const rects = rectsForHighlight(hl, textLayerDiv, highlightLayerDiv, renderCtx);
     if (!rects.length) continue;
     for (const r of rects) {
       const div = document.createElement("div");
