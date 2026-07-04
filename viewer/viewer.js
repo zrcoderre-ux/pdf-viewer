@@ -19,7 +19,7 @@ import {
   getHighlightRectGroups,
   addImportedHighlight,
 } from "./highlights.js";
-import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark } from "./pdf-edit.js";
+import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf } from "./pdf-edit.js";
 import { extractTitle } from "./footer-naming.js";
 import {
   registerEntry,
@@ -159,6 +159,7 @@ const organizeEl  = document.getElementById("organize-pages");
 const batesEl     = document.getElementById("bates-number");
 const headerFooterEl = document.getElementById("headerfooter-btn");
 const watermarkEl = document.getElementById("watermark-btn");
+const splitEl     = document.getElementById("split-btn");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
@@ -1332,6 +1333,7 @@ function setEditingEnabled(on) {
   if (batesEl)     batesEl.hidden      = !on;
   if (headerFooterEl) headerFooterEl.hidden = !on;
   if (watermarkEl) watermarkEl.hidden  = !on;
+  if (splitEl)     splitEl.hidden      = !on;
   if (downloadEl)  downloadEl.hidden  = on; // Save stands in for Download when editable
 }
 // A file:// document in the extension is already a local/downloaded file.
@@ -2833,6 +2835,146 @@ if (watermarkEl) watermarkEl.addEventListener("click", openWmModal);
 if (wmCancelEl)  wmCancelEl.addEventListener("click", closeWmModal);
 if (wmApplyEl)   wmApplyEl.addEventListener("click", applyWatermark);
 if (wmModalEl)   wmModalEl.addEventListener("click", (e) => { if (e.target === wmModalEl) closeWmModal(); });
+
+// ── Split into multiple PDFs ────────────────────────────────────────────────
+const splitModalEl   = document.getElementById("split-modal");
+const splitModeEl    = document.getElementById("split-mode");
+const splitChunkEl   = document.getElementById("split-chunk");
+const splitChunkRow  = document.getElementById("split-chunk-row");
+const splitRangesEl  = document.getElementById("split-ranges");
+const splitRangesRow = document.getElementById("split-ranges-row");
+const splitSummaryEl = document.getElementById("split-summary");
+const splitCancelEl  = document.getElementById("split-cancel");
+const splitApplyEl   = document.getElementById("split-apply");
+
+// Consecutive-index groups of at most `n` pages: [[0,1],[2,3],[4]] for n=2.
+function chunkGroups(total, n) {
+  const size = Math.max(1, Math.floor(n) || 1);
+  const groups = [];
+  for (let i = 0; i < total; i += size) {
+    const g = [];
+    for (let k = i; k < Math.min(i + size, total); k++) g.push(k);
+    groups.push(g);
+  }
+  return groups;
+}
+
+// Parse "1-3, 5, 8-" into 0-based index groups (one group per token). An open
+// end ("8-") runs to the last page; an open start ("-3") starts at page 1.
+function parseRanges(str, total) {
+  const groups = [];
+  for (const tokRaw of String(str || "").split(",")) {
+    const tok = tokRaw.trim();
+    if (!tok) continue;
+    let a, b;
+    if (tok.includes("-")) {
+      const [s, e] = tok.split("-");
+      a = s.trim() === "" ? 1 : parseInt(s, 10);
+      b = e.trim() === "" ? total : parseInt(e, 10);
+    } else {
+      a = b = parseInt(tok, 10);
+    }
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    a = Math.max(1, Math.min(total, a));
+    b = Math.max(1, Math.min(total, b));
+    if (a > b) [a, b] = [b, a];
+    const idx = [];
+    for (let p = a; p <= b; p++) idx.push(p - 1);
+    if (idx.length) groups.push(idx);
+  }
+  return groups;
+}
+
+function splitGroups() {
+  const total = pdfDoc ? pdfDoc.numPages : 0;
+  const mode = splitModeEl ? splitModeEl.value : "chunks";
+  if (mode === "single") return chunkGroups(total, 1);
+  if (mode === "ranges") return parseRanges(splitRangesEl ? splitRangesEl.value : "", total);
+  return chunkGroups(total, parseInt(splitChunkEl ? splitChunkEl.value : "1", 10));
+}
+
+function updateSplitUi() {
+  const mode = splitModeEl ? splitModeEl.value : "chunks";
+  if (splitChunkRow)  splitChunkRow.hidden  = mode !== "chunks";
+  if (splitRangesRow) splitRangesRow.hidden = mode !== "ranges";
+  const n = splitGroups().length;
+  if (splitSummaryEl) splitSummaryEl.textContent = n ? `${n} file${n === 1 ? "" : "s"}` : "—";
+  if (splitApplyEl) splitApplyEl.disabled = n === 0;
+}
+
+function partName(base, indices) {
+  const first = indices[0] + 1;
+  const last = indices[indices.length - 1] + 1;
+  const span = first === last ? `p${first}` : `p${first}-${last}`;
+  return `${base} ${span}.pdf`;
+}
+
+function openSplitModal() {
+  if (!editingAllowed || !splitModalEl) return;
+  updateSplitUi();
+  splitModalEl.hidden = false;
+}
+function closeSplitModal() { if (splitModalEl) splitModalEl.hidden = true; }
+
+async function applySplit() {
+  if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return; }
+  const groups = splitGroups();
+  if (!groups.length) { statusEl.textContent = "Nothing to split — check your ranges."; return; }
+  // Ask for the destination folder FIRST, while the click's user activation is
+  // still fresh (the pdf-lib work below is async and would consume it).
+  if (splitApplyEl) splitApplyEl.disabled = true;
+  try {
+    const base = saveNameForDoc().replace(/\.pdf$/i, "");
+    let dirHandle = null;
+    let useFolder = false;
+    if (window.showDirectoryPicker) {
+      try {
+        dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
+        useFolder = true;
+      } catch (e) {
+        if (e && e.name === "AbortError") { statusEl.textContent = ""; return; }
+      }
+    }
+    statusEl.textContent = "Splitting…";
+    const baked = await bakeCurrentHighlights();
+    const parts = await splitPdf({ srcBytes: baked, groups });
+    if (!parts.length) { statusEl.textContent = "Nothing to split."; return; }
+    let written = 0;
+    for (const part of parts) {
+      const name = partName(base, part.indices);
+      const blob = new Blob([part.bytes], { type: "application/pdf" });
+      if (useFolder && dirHandle) {
+        const fh = await dirHandle.getFileHandle(name, { create: true });
+        const w = await fh.createWritable();
+        await w.write(blob);
+        await w.close();
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = name; a.click();
+        URL.revokeObjectURL(url);
+      }
+      written++;
+    }
+    closeSplitModal();
+    statusEl.textContent = useFolder
+      ? `Saved ${written} file${written === 1 ? "" : "s"} to the folder.`
+      : `Downloaded ${written} file${written === 1 ? "" : "s"}.`;
+  } catch (e) {
+    console.error("[pdf-viewer] split failed:", e);
+    statusEl.textContent = "Split failed.";
+  } finally {
+    if (splitApplyEl) splitApplyEl.disabled = false;
+  }
+}
+
+if (splitEl)       splitEl.addEventListener("click", openSplitModal);
+if (splitCancelEl) splitCancelEl.addEventListener("click", closeSplitModal);
+if (splitApplyEl)  splitApplyEl.addEventListener("click", applySplit);
+if (splitModalEl)  splitModalEl.addEventListener("click", (e) => { if (e.target === splitModalEl) closeSplitModal(); });
+[splitModeEl, splitChunkEl, splitRangesEl].forEach((el) => {
+  if (el) el.addEventListener("input", updateSplitUi);
+});
 
 // Drag the Pages / Bookmarks column's right edge to resize it. The panel is
 // pinned to the left, so its width is just the pointer's x. --thumb-panel-width

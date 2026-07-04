@@ -58,6 +58,10 @@ In addition to citation linking, the viewer supports:
 - **Watermark — local documents only.** The **🌊 Watermark** button stamps
   translucent text (e.g. `CONFIDENTIAL`) diagonally across every page, with
   adjustable size, opacity, and color.
+- **Split — local documents only.** The **✂ Split** button breaks the document
+  into several PDFs — every N pages, one page per file, or custom ranges like
+  `1-3, 4-8, 9-`. Parts save into a folder you pick (or as downloads), and each
+  part keeps the highlights on its pages.
 - **Zoom in / out** with the toolbar buttons.
 - **Download** the original PDF with a smart filename (see below).
 - **Open original** in Chrome's built-in PDF viewer (skips the linker).

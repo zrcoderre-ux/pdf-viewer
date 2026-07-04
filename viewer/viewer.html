@@ -90,6 +90,27 @@
       </div>
     </div>
   </div>
+
+  <div id="split-modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="split-title">
+      <h3 id="split-title">Split document</h3>
+      <p class="modal-sub">Saves several PDFs — into a folder you pick, or as downloads.</p>
+      <label class="modal-row">Split by
+        <select id="split-mode">
+          <option value="chunks">Every N pages</option>
+          <option value="single">One page per file</option>
+          <option value="ranges">Custom ranges</option>
+        </select>
+      </label>
+      <label class="modal-row" id="split-chunk-row">Pages per file <input id="split-chunk" type="number" value="1" min="1" step="1"></label>
+      <label class="modal-row" id="split-ranges-row" hidden>Ranges <input id="split-ranges" type="text" placeholder="1-3, 4-8, 9-"></label>
+      <p class="modal-preview">Result: <span id="split-summary">—</span></p>
+      <div class="modal-actions">
+        <button id="split-cancel">Cancel</button>
+        <button id="split-apply" class="primary">Split &amp; Save</button>
+      </div>
+    </div>
+  </div>
   <div id="thumb-resize" title="Drag to resize the panel"></div>
   <header id="toolbar">
     <button id="thumbnail-toggle" title="Toggle page thumbnails">☰</button>
@@ -125,6 +146,7 @@
     <button id="bates-number" title="Add Bates numbers to every page (local documents only)" hidden>▤ Bates</button>
     <button id="headerfooter-btn" title="Add header/footer text or page numbers (local documents only)" hidden>🔖 Header/Footer</button>
     <button id="watermark-btn" title="Add a translucent watermark to every page (local documents only)" hidden>🌊 Watermark</button>
+    <button id="split-btn" title="Split this document into several PDFs (local documents only)" hidden>✂ Split</button>
     <button id="download" title="Download PDF">⬇ Download</button>
     <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
   </header>

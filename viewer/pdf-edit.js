@@ -263,6 +263,25 @@ export async function stampWatermark({
   return doc.save();
 }
 
+// Split a PDF into several documents. `groups` is an array of page-index lists
+// (0-based); each list becomes one output PDF, in order. copyPages carries each
+// page's annotations (highlights) into its part. Returns an array of
+// { indices, bytes } — indices is the (validated) page list actually used.
+export async function splitPdf({ srcBytes, groups }) {
+  const src = await PDFDocument.load(srcBytes);
+  const total = src.getPageCount();
+  const parts = [];
+  for (const g of groups || []) {
+    const indices = (g || []).filter((i) => Number.isInteger(i) && i >= 0 && i < total);
+    if (!indices.length) continue;
+    const out = await PDFDocument.create();
+    const copied = await out.copyPages(src, indices);
+    for (const p of copied) out.addPage(p);
+    parts.push({ indices, bytes: await out.save() });
+  }
+  return parts;
+}
+
 // Page count of a PDF (used to report merge results).
 export async function pageCount(bytes) {
   const doc = await PDFDocument.load(bytes);
