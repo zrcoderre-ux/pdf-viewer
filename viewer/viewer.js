@@ -16,7 +16,9 @@ import {
   clearAllHighlights,
   attachHighlightHandlers,
   repaintHighlightsForPage,
+  getHighlightRects,
 } from "./highlights.js";
+import { buildEditedPdf } from "./pdf-edit.js";
 import { extractTitle } from "./footer-naming.js";
 import {
   registerEntry,
@@ -150,6 +152,8 @@ const zoomOutEl   = document.getElementById("zoom-out");
 const downloadEl  = document.getElementById("download");
 const openOriginalEl = document.getElementById("open-original");
 const ocrRunEl    = document.getElementById("ocr-run");
+const saveEditsEl = document.getElementById("save-edits");
+const combineEl   = document.getElementById("combine-pdfs");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
@@ -157,6 +161,9 @@ const pageIndicatorEl  = document.getElementById("page-indicator");
 
 let currentScale = 1.5;
 let totalLinks = 0;
+// pageNumber -> PDF page height in points; used to map screen highlight rects
+// into PDF coordinates when saving an edited copy.
+const pageHeightPtsByNum = new Map();
 let pdfDoc = null;
 let provider = "lexis";
 let citationRepo = {};
@@ -1300,6 +1307,130 @@ if (ocrRunEl) {
   });
 }
 
+// ── Editing: save edits into the file (local documents only) ────────────────
+//
+// Editing is offered only for documents you've already downloaded — i.e. opened
+// from local disk (file://). Web PDFs you're only viewing stay read-only. Save
+// bakes the in-viewer highlights into a new PDF via pdf-lib; Combine merges
+// other local PDFs in after it. Both write out through the File System Access
+// picker (falling back to a normal download).
+const editingAllowed = isLocalFile;
+if (saveEditsEl) saveEditsEl.hidden = !editingAllowed;
+if (combineEl)   combineEl.hidden   = !editingAllowed;
+
+// Collect on-screen highlight rectangles converted to PDF points, per page.
+function collectHighlightPdfRects() {
+  const byPage = new Map();
+  const wrappers = pagesEl.querySelectorAll(".page-wrapper");
+  wrappers.forEach((w, i) => {
+    const pn = i + 1;
+    const tl = w.querySelector(".textLayer");
+    const hlLayer = w.querySelector(".highlightLayer");
+    const hPts = pageHeightPtsByNum.get(pn);
+    if (!tl || !hlLayer || !hPts) return;
+    const rects = getHighlightRects(pn, tl, hlLayer);
+    if (!rects.length) return;
+    const s = currentScale;
+    byPage.set(pn, rects.map((r) => ({
+      x: r.left / s,
+      y: hPts - (r.top / s) - (r.height / s),
+      w: r.width / s,
+      h: r.height / s,
+    })));
+  });
+  return byPage;
+}
+
+// Write bytes to disk: prefer the Save-file picker (lets the user overwrite the
+// original); fall back to a normal blob download where it isn't available.
+async function writeOutPdf(bytes, suggestedName) {
+  const name = /\.pdf$/i.test(suggestedName) ? suggestedName : `${suggestedName}.pdf`;
+  const blob = new Blob([bytes], { type: "application/pdf" });
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: name,
+        types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return true;
+    } catch (e) {
+      if (e && e.name === "AbortError") return false; // user cancelled
+      // otherwise fall through to the download path
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+  return true;
+}
+
+async function saveEditedPdf() {
+  if (!editingAllowed || !saveEditsEl) return;
+  if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return; }
+  saveEditsEl.disabled = true;
+  try {
+    statusEl.textContent = "Saving…";
+    const edited = await buildEditedPdf({
+      srcBytes: pdfBytes.slice(0),
+      highlightsByPage: collectHighlightPdfRects(),
+    });
+    const ok = await writeOutPdf(edited, sanitizePdfFilename(serverFilename || "document"));
+    statusEl.textContent = ok ? "Saved." : "";
+  } catch (e) {
+    console.error("[pdf-viewer] save failed:", e);
+    statusEl.textContent = "Save failed.";
+  } finally {
+    saveEditsEl.disabled = false;
+  }
+}
+
+async function combinePdfs() {
+  if (!editingAllowed || !combineEl) return;
+  if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return; }
+  if (!window.showOpenFilePicker) { statusEl.textContent = "File picker unavailable here."; return; }
+  let handles;
+  try {
+    handles = await window.showOpenFilePicker({
+      multiple: true,
+      types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }],
+    });
+  } catch (e) {
+    if (e && e.name === "AbortError") return;
+    throw e;
+  }
+  if (!handles || !handles.length) return;
+  combineEl.disabled = true;
+  try {
+    statusEl.textContent = "Combining…";
+    const appendBytes = [];
+    for (const h of handles) {
+      const f = await h.getFile();
+      appendBytes.push(new Uint8Array(await f.arrayBuffer()));
+    }
+    const edited = await buildEditedPdf({
+      srcBytes: pdfBytes.slice(0),
+      highlightsByPage: collectHighlightPdfRects(),
+      appendBytes,
+    });
+    const ok = await writeOutPdf(edited, "combined.pdf");
+    statusEl.textContent = ok ? `Combined ${handles.length + 1} files.` : "";
+  } catch (e) {
+    console.error("[pdf-viewer] combine failed:", e);
+    statusEl.textContent = "Combine failed.";
+  } finally {
+    combineEl.disabled = false;
+  }
+}
+
+if (saveEditsEl) saveEditsEl.addEventListener("click", saveEditedPdf);
+if (combineEl)   combineEl.addEventListener("click", combinePdfs);
+
 // Toolbar naming-mode dropdown writes a per-document override. The
 // override is keyed by file URL and lives in chrome.storage.session, so
 // it survives tab reload but dies on browser close. The override always
@@ -1746,6 +1877,9 @@ async function renderPageCanvasAndText(pageNumber) {
   // We use a scale=1 viewport for footer math so coordinates match the
   // PDF user-space units that page.getTextContent() returns by default.
   const userSpaceViewport = page.getViewport({ scale: 1 });
+  // Remember the page height in PDF points so on-screen highlight rects can be
+  // converted to PDF coordinates when saving an edited copy.
+  pageHeightPtsByNum.set(pageNumber, userSpaceViewport.height);
 
   const wrapper = document.createElement("div");
   wrapper.className = "page-wrapper";

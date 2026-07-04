@@ -114,6 +114,25 @@ export function clearAllHighlights() {
   _nextId = 1;
 }
 
+// True if any page has at least one highlight (used to enable "Save").
+export function hasHighlights() {
+  for (const list of _highlightsByPage.values()) if (list && list.length) return true;
+  return false;
+}
+
+// Rendered highlight rectangles for a page, relative to highlightLayerDiv (px,
+// top-left origin) — the same rects painted on screen. The caller converts
+// these into PDF-space points to bake them into the saved file.
+export function getHighlightRects(pageNumber, textLayerDiv, highlightLayerDiv) {
+  const list = _highlightsByPage.get(pageNumber);
+  if (!list || !list.length) return [];
+  const out = [];
+  for (const hl of list) {
+    for (const r of rectsForHighlight(hl, textLayerDiv, highlightLayerDiv)) out.push(r);
+  }
+  return out;
+}
+
 function captureSelectionForPage(pageNumber, textLayerDiv) {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
