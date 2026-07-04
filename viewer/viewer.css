@@ -365,6 +365,31 @@ body.thumbs-open #thumb-resize { display: block; }
 .modal-actions button.primary { background: #1a73e8; }
 .modal-actions button.primary:hover { background: #1b66c9; }
 .modal-actions button:disabled { opacity: 0.5; cursor: default; }
+.modal code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  background: #1e1f21;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.hf-grid {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr 1fr;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.hf-grid .hf-lbl { font-size: 12px; color: #cfcfcf; }
+.hf-grid input {
+  background: #1e1f21;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 12px;
+  min-width: 0;
+  width: 100%;
+}
 
 .bookmark-item {
   display: block;

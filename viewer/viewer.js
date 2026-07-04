@@ -19,7 +19,7 @@ import {
   getHighlightRectGroups,
   addImportedHighlight,
 } from "./highlights.js";
-import { buildEditedPdf, applyPagePlan, stampBates } from "./pdf-edit.js";
+import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark } from "./pdf-edit.js";
 import { extractTitle } from "./footer-naming.js";
 import {
   registerEntry,
@@ -157,6 +157,8 @@ const saveEditsEl = document.getElementById("save-edits");
 const combineEl   = document.getElementById("combine-pdfs");
 const organizeEl  = document.getElementById("organize-pages");
 const batesEl     = document.getElementById("bates-number");
+const headerFooterEl = document.getElementById("headerfooter-btn");
+const watermarkEl = document.getElementById("watermark-btn");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
@@ -1328,6 +1330,8 @@ function setEditingEnabled(on) {
   if (combineEl)   combineEl.hidden   = !on;
   if (organizeEl)  organizeEl.hidden  = !on;
   if (batesEl)     batesEl.hidden      = !on;
+  if (headerFooterEl) headerFooterEl.hidden = !on;
+  if (watermarkEl) watermarkEl.hidden  = !on;
   if (downloadEl)  downloadEl.hidden  = on; // Save stands in for Download when editable
 }
 // A file:// document in the extension is already a local/downloaded file.
@@ -2748,6 +2752,87 @@ if (batesModalEl)  batesModalEl.addEventListener("click", (e) => { if (e.target 
 [batesPrefixEl, batesStartEl, batesDigitsEl].forEach((el) => {
   if (el) el.addEventListener("input", updateBatesPreview);
 });
+
+// Generic "stamp then save in place and reload" runner shared by the
+// header/footer and watermark tools.
+async function runStampAndSave(makeBytes, busyMsg, applyBtn) {
+  if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return false; }
+  if (applyBtn) applyBtn.disabled = true;
+  try {
+    statusEl.textContent = busyMsg;
+    const baked = await bakeCurrentHighlights();
+    const out = await makeBytes(baked);
+    const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
+    if (ok) { await reloadEditedBytes(out); statusEl.textContent = "Saved."; }
+    else statusEl.textContent = "";
+    return ok;
+  } catch (e) {
+    console.error("[pdf-viewer] stamp failed:", e);
+    statusEl.textContent = "Stamp failed.";
+    return false;
+  } finally {
+    if (applyBtn) applyBtn.disabled = false;
+  }
+}
+
+// ── Header / footer ─────────────────────────────────────────────────────────
+const hfModalEl  = document.getElementById("hf-modal");
+const hfCancelEl = document.getElementById("hf-cancel");
+const hfApplyEl  = document.getElementById("hf-apply");
+const hfInputs = {
+  hl: document.getElementById("hf-hl"), hc: document.getElementById("hf-hc"), hr: document.getElementById("hf-hr"),
+  fl: document.getElementById("hf-fl"), fc: document.getElementById("hf-fc"), fr: document.getElementById("hf-fr"),
+};
+function openHfModal()  { if (editingAllowed && hfModalEl) hfModalEl.hidden = false; }
+function closeHfModal() { if (hfModalEl) hfModalEl.hidden = true; }
+async function applyHeaderFooter() {
+  const slots = {};
+  let any = false;
+  for (const k of Object.keys(hfInputs)) {
+    const v = hfInputs[k] ? hfInputs[k].value.trim() : "";
+    if (v) { slots[k] = v; any = true; }
+  }
+  if (!any) { statusEl.textContent = "Enter header or footer text first."; return; }
+  const ok = await runStampAndSave(
+    (baked) => stampHeaderFooter({ srcBytes: baked, slots }),
+    "Adding header/footer…", hfApplyEl,
+  );
+  if (ok) closeHfModal();
+}
+if (headerFooterEl) headerFooterEl.addEventListener("click", openHfModal);
+if (hfCancelEl)     hfCancelEl.addEventListener("click", closeHfModal);
+if (hfApplyEl)      hfApplyEl.addEventListener("click", applyHeaderFooter);
+if (hfModalEl)      hfModalEl.addEventListener("click", (e) => { if (e.target === hfModalEl) closeHfModal(); });
+
+// ── Watermark ───────────────────────────────────────────────────────────────
+const wmModalEl    = document.getElementById("watermark-modal");
+const wmTextEl     = document.getElementById("wm-text");
+const wmSizeEl     = document.getElementById("wm-size");
+const wmOpacityEl  = document.getElementById("wm-opacity");
+const wmColorEl    = document.getElementById("wm-color");
+const wmDiagonalEl = document.getElementById("wm-diagonal");
+const wmCancelEl   = document.getElementById("wm-cancel");
+const wmApplyEl    = document.getElementById("wm-apply");
+const WM_COLORS = { gray: [0.5, 0.5, 0.5], red: [0.8, 0.1, 0.1], blue: [0.1, 0.3, 0.8], black: [0, 0, 0] };
+function openWmModal()  { if (editingAllowed && wmModalEl) wmModalEl.hidden = false; }
+function closeWmModal() { if (wmModalEl) wmModalEl.hidden = true; }
+async function applyWatermark() {
+  const text = wmTextEl ? wmTextEl.value.trim() : "";
+  if (!text) { statusEl.textContent = "Enter watermark text first."; return; }
+  const fontSize = Math.min(200, Math.max(8, parseInt(wmSizeEl.value, 10) || 60));
+  const opacity = Math.min(1, Math.max(0.01, (parseInt(wmOpacityEl.value, 10) || 15) / 100));
+  const color = WM_COLORS[wmColorEl.value] || WM_COLORS.gray;
+  const diagonal = !!(wmDiagonalEl && wmDiagonalEl.checked);
+  const ok = await runStampAndSave(
+    (baked) => stampWatermark({ srcBytes: baked, text, fontSize, opacity, color, diagonal }),
+    "Adding watermark…", wmApplyEl,
+  );
+  if (ok) closeWmModal();
+}
+if (watermarkEl) watermarkEl.addEventListener("click", openWmModal);
+if (wmCancelEl)  wmCancelEl.addEventListener("click", closeWmModal);
+if (wmApplyEl)   wmApplyEl.addEventListener("click", applyWatermark);
+if (wmModalEl)   wmModalEl.addEventListener("click", (e) => { if (e.target === wmModalEl) closeWmModal(); });
 
 // Drag the Pages / Bookmarks column's right edge to resize it. The panel is
 // pinned to the left, so its width is just the pointer's x. --thumb-panel-width

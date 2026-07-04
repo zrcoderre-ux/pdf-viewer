@@ -52,6 +52,12 @@ In addition to citation linking, the viewer supports:
 - **Bates numbering — local documents only.** The **▤ Bates** button stamps a
   sequential number on every page — set a prefix, starting number, digit count,
   and corner. Placement is exact on standard pages and rotation-aware.
+- **Header / footer — local documents only.** The **🔖 Header/Footer** button
+  adds text to any of six slots (header/footer × left/center/right); use `{n}`
+  for the page number and `{N}` for the total (e.g. `Page {n} of {N}`).
+- **Watermark — local documents only.** The **🌊 Watermark** button stamps
+  translucent text (e.g. `CONFIDENTIAL`) diagonally across every page, with
+  adjustable size, opacity, and color.
 - **Zoom in / out** with the toolbar buttons.
 - **Download** the original PDF with a smart filename (see below).
 - **Open original** in Chrome's built-in PDF viewer (skips the linker).

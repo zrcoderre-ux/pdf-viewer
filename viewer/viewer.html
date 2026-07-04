@@ -46,6 +46,50 @@
       </div>
     </div>
   </div>
+
+  <div id="hf-modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hf-title">
+      <h3 id="hf-title">Header &amp; footer</h3>
+      <p class="modal-sub">Leave any box blank. Use <code>{n}</code> for the page number and <code>{N}</code> for the total.</p>
+      <div class="hf-grid">
+        <span class="hf-lbl">Header</span>
+        <input id="hf-hl" type="text" placeholder="left" maxlength="80">
+        <input id="hf-hc" type="text" placeholder="center" maxlength="80">
+        <input id="hf-hr" type="text" placeholder="right" maxlength="80">
+        <span class="hf-lbl">Footer</span>
+        <input id="hf-fl" type="text" placeholder="left" maxlength="80">
+        <input id="hf-fc" type="text" placeholder="center" maxlength="80">
+        <input id="hf-fr" type="text" placeholder="right" maxlength="80">
+      </div>
+      <div class="modal-actions">
+        <button id="hf-cancel">Cancel</button>
+        <button id="hf-apply" class="primary">Apply &amp; Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="watermark-modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-title">
+      <h3 id="wm-title">Watermark</h3>
+      <p class="modal-sub">Stamps translucent text across every page.</p>
+      <label class="modal-row">Text <input id="wm-text" type="text" placeholder="CONFIDENTIAL" maxlength="40"></label>
+      <label class="modal-row">Size <input id="wm-size" type="number" value="60" min="8" max="200" step="1"></label>
+      <label class="modal-row">Opacity % <input id="wm-opacity" type="number" value="15" min="1" max="100" step="1"></label>
+      <label class="modal-row">Color
+        <select id="wm-color">
+          <option value="gray">Gray</option>
+          <option value="red">Red</option>
+          <option value="blue">Blue</option>
+          <option value="black">Black</option>
+        </select>
+      </label>
+      <label class="modal-row">Diagonal <input id="wm-diagonal" type="checkbox" checked></label>
+      <div class="modal-actions">
+        <button id="wm-cancel">Cancel</button>
+        <button id="wm-apply" class="primary">Apply &amp; Save</button>
+      </div>
+    </div>
+  </div>
   <div id="thumb-resize" title="Drag to resize the panel"></div>
   <header id="toolbar">
     <button id="thumbnail-toggle" title="Toggle page thumbnails">☰</button>
@@ -79,6 +123,8 @@
     <button id="combine-pdfs" title="Merge other PDFs onto the end of this one and save (local documents only)" hidden>⧉ Combine</button>
     <button id="organize-pages" title="Reorder, rotate, delete, or extract pages (local documents only)" hidden>▦ Pages</button>
     <button id="bates-number" title="Add Bates numbers to every page (local documents only)" hidden>▤ Bates</button>
+    <button id="headerfooter-btn" title="Add header/footer text or page numbers (local documents only)" hidden>🔖 Header/Footer</button>
+    <button id="watermark-btn" title="Add a translucent watermark to every page (local documents only)" hidden>🌊 Watermark</button>
     <button id="download" title="Download PDF">⬇ Download</button>
     <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
   </header>

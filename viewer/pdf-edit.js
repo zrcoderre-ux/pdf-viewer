@@ -151,6 +151,31 @@ export async function applyPagePlan({ srcBytes, plan }) {
   return out.save();
 }
 
+// Map a text slot in a page's *displayed* box to unrotated page coordinates for
+// drawText, plus the counter-rotation that keeps the text upright.
+//   angle:  the page's /Rotate (0/90/180/270).
+//   halign: "l" | "c" | "r";  valign: "top" | "bottom".
+// The displayed box swaps width/height on 90°/270°; the (Xd, Yd) point picked
+// there is mapped back through the /Rotate viewing transform. For unrotated
+// pages this is just the geometric position.
+function placeInBox({ angle, W, H, tw, fontSize, margin, halign, valign }) {
+  const rotated = angle === 90 || angle === 270;
+  const Wd = rotated ? H : W;
+  const Hd = rotated ? W : H;
+  const Xd = halign === "l" ? margin
+    : halign === "r" ? Wd - margin - tw
+    : (Wd - tw) / 2;
+  const Yd = valign === "bottom" ? margin : Hd - margin - fontSize;
+  let x, y;
+  if (angle === 90)       { x = W - Yd; y = Xd; }
+  else if (angle === 180) { x = W - Xd; y = H - Yd; }
+  else if (angle === 270) { x = Yd;     y = H - Xd; }
+  else                    { x = Xd;     y = Yd; }
+  return { x, y, rot: angle };
+}
+
+const norm360 = (a) => ((a || 0) % 360 + 360) % 360;
+
 // Stamp a Bates number on every page (bottom-right by default). Numbers run
 // `start`, `start+1`, … zero-padded to `digits`, with an optional `prefix`
 // (e.g. "ABC" → "ABC000123"). Placement is corrected for each page's /Rotate so
@@ -168,27 +193,72 @@ export async function stampBates({
     const label = `${prefix}${String(n).padStart(digits, "0")}`;
     n++;
     const { width: W, height: H } = page.getSize();
-    const angle = ((page.getRotation().angle || 0) % 360 + 360) % 360;
+    const angle = norm360(page.getRotation().angle);
     const tw = font.widthOfTextAtSize(label, fontSize);
-    // Pick the target corner in the page's *displayed* box (width/height swap on
-    // 90°/270°), then map that visual point (Xd, Yd) back into the unrotated
-    // page coordinates drawText uses. The label is counter-rotated by the page's
-    // /Rotate so it reads upright. For unrotated pages (the common case) this is
-    // just the geometric corner; the rotated-page mapping is derived from the
-    // /Rotate viewing transform.
-    const rotated = angle === 90 || angle === 270;
-    const Wd = rotated ? H : W;
-    const Hd = rotated ? W : H;
-    const right = position.endsWith("r");
-    const bottom = position.startsWith("b");
-    const Xd = right ? Wd - margin - tw : margin;
-    const Yd = bottom ? margin : Hd - margin - fontSize;
-    let x, y;
-    if (angle === 90)       { x = W - Yd; y = Xd; }
-    else if (angle === 180) { x = W - Xd; y = H - Yd; }
-    else if (angle === 270) { x = Yd;     y = H - Xd; }
-    else                    { x = Xd;     y = Yd; }
-    page.drawText(label, { x, y, size: fontSize, font, color: rgb(0, 0, 0), rotate: degrees(angle) });
+    const { x, y, rot } = placeInBox({
+      angle, W, H, tw, fontSize, margin,
+      halign: position.endsWith("r") ? "r" : "l",
+      valign: position.startsWith("b") ? "bottom" : "top",
+    });
+    page.drawText(label, { x, y, size: fontSize, font, color: rgb(0, 0, 0), rotate: degrees(rot) });
+  }
+  return doc.save();
+}
+
+// Stamp custom header/footer text. `slots` maps any of six positions to text:
+//   hl hc hr — header left / center / right   (top of page)
+//   fl fc fr — footer left / center / right   (bottom of page)
+// Each string may contain the tokens {n} (page number) and {N} (page count).
+// Placement is /Rotate-aware, matching Bates.
+export async function stampHeaderFooter({ srcBytes, slots = {}, fontSize = 9, margin = 24 }) {
+  const doc = await PDFDocument.load(srcBytes);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = doc.getPages();
+  const total = pages.length;
+  const layout = [
+    ["hl", "l", "top"], ["hc", "c", "top"], ["hr", "r", "top"],
+    ["fl", "l", "bottom"], ["fc", "c", "bottom"], ["fr", "r", "bottom"],
+  ];
+  pages.forEach((page, i) => {
+    const n = i + 1;
+    const { width: W, height: H } = page.getSize();
+    const angle = norm360(page.getRotation().angle);
+    for (const [key, halign, valign] of layout) {
+      const raw = slots[key];
+      if (!raw) continue;
+      const text = String(raw).replace(/\{n\}/g, n).replace(/\{N\}/g, total);
+      if (!text) continue;
+      const tw = font.widthOfTextAtSize(text, fontSize);
+      const { x, y, rot } = placeInBox({ angle, W, H, tw, fontSize, margin, halign, valign });
+      page.drawText(text, { x, y, size: fontSize, font, color: rgb(0, 0, 0), rotate: degrees(rot) });
+    }
+  });
+  return doc.save();
+}
+
+// Stamp a translucent watermark across every page — big text centered on the
+// page, diagonal by default. Meant for "CONFIDENTIAL", "DRAFT", etc.
+export async function stampWatermark({
+  srcBytes, text, fontSize = 60, opacity = 0.15,
+  color = [0.5, 0.5, 0.5], diagonal = true,
+}) {
+  if (!text) throw new Error("Watermark text is required.");
+  const doc = await PDFDocument.load(srcBytes);
+  const font = await doc.embedFont(StandardFonts.HelveticaBold);
+  const [r, g, b] = color;
+  for (const page of doc.getPages()) {
+    const { width: W, height: H } = page.getSize();
+    const tw = font.widthOfTextAtSize(text, fontSize);
+    // Diagonal along the page's own diagonal (bottom-left → top-right).
+    const angleDeg = diagonal ? Math.atan2(H, W) * 180 / Math.PI : 0;
+    const rad = angleDeg * Math.PI / 180;
+    // Anchor so the baseline's midpoint sits at the page center.
+    const x = W / 2 - (tw / 2) * Math.cos(rad) - (fontSize / 3) * Math.sin(rad);
+    const y = H / 2 - (tw / 2) * Math.sin(rad) + (fontSize / 3) * Math.cos(rad);
+    page.drawText(text, {
+      x, y, size: fontSize, font,
+      color: rgb(r, g, b), opacity, rotate: degrees(angleDeg),
+    });
   }
   return doc.save();
 }
