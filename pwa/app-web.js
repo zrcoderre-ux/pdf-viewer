@@ -1,14 +1,13 @@
 // Tab manager for the PWA shell.
 //
 // Each open PDF is an <iframe> loading the canonical viewer (viewer/viewer.html).
-// Because the iframes are same-origin, we drive them directly:
-//   - local files  -> iframe.contentWindow.__pdfViewerLoadLocal(file)
-//   - routed URLs  -> iframe src = viewer/viewer.html?file=<url> (viewer fetches)
-// Tabs are fully isolated viewer instances; closing one tears its iframe down.
+// Because the iframes are same-origin, we drive them directly: local files are
+// handed to iframe.contentWindow.__pdfViewerLoadLocal(file, handle). Tabs are
+// fully isolated viewer instances; closing one tears its iframe down.
 //
 // Entry points that create tabs: the + button, the empty-state drop zone,
-// drag-and-drop, the OS file handler (launchQueue), and a ?file=<url> on the
-// shell URL (how the extension's optional "route web PDFs to the app" lands).
+// drag-and-drop, and the OS file handler (launchQueue). The app is for files
+// you open from disk; viewing web PDFs is the browser extension's job.
 
 const tabsEl = document.getElementById("tabs");
 const viewsEl = document.getElementById("tab-views");
@@ -119,119 +118,19 @@ function newTab({ initialLabel, pending }) {
 }
 
 // Open a local File in a new tab. Loads lazily when the tab is first shown.
-function openLocalFile(file) {
+// `handle` is the FileSystemFileHandle when we have one (file picker / OS
+// handler) — passed through so the viewer's Save can overwrite the same file.
+function openLocalFile(file, handle) {
   if (!file) return;
   newTab({
     initialLabel: file.name,
     pending: (tab) => {
       const feed = () => {
         const w = tab.iframe.contentWindow;
-        if (w && w.__pdfViewerLoadLocal) { w.__pdfViewerLoadLocal(file); watchTitle(tab); }
+        if (w && w.__pdfViewerLoadLocal) { w.__pdfViewerLoadLocal(file, handle); watchTitle(tab); }
         else setTimeout(feed, 30);
       };
       feed();
-    },
-  });
-}
-
-// --- Extension broker -------------------------------------------------------
-// If the extension is installed, its content-script bridge (content/app-bridge)
-// can fetch a URL with the user's cookies + host permissions (bypassing CORS)
-// and hand back the bytes. That's the only way cookie-gated / cross-origin
-// court PDFs can open here. We detect it with a ping and fall back to a direct
-// fetch by the viewer when it's absent.
-
-const EXT_NS = "pdfviewer-ext";
-const extPending = new Map();
-let extReady = false;
-let extSeq = 0;
-
-// Live "extension connected" indicator in the tab strip.
-const extStatusEl = document.getElementById("ext-status");
-function setExtStatus(state) {
-  if (!extStatusEl) return;
-  const label = extStatusEl.querySelector(".ext-label");
-  extStatusEl.classList.remove("checking", "connected", "absent");
-  extStatusEl.classList.add(state);
-  if (label) {
-    label.textContent = state === "connected" ? "Extension connected"
-      : state === "absent" ? "Extension not detected"
-      : "Checking…";
-  }
-}
-
-window.addEventListener("message", (e) => {
-  if (e.source !== window || e.origin !== location.origin) return;
-  const m = e.data;
-  if (!m || m.ns !== EXT_NS || m.dir !== "toPage") return;
-  if (m.type === "ready") { extReady = true; setExtStatus("connected"); return; }
-  const p = extPending.get(m.requestId);
-  if (!p) return;
-  extPending.delete(m.requestId);
-  if (m.type === "bytes") p.resolve({ b64: m.b64, filename: m.filename });
-  else p.reject(new Error(m.error || "extension fetch failed"));
-});
-
-function extAvailable() {
-  if (extReady) return Promise.resolve(true);
-  return new Promise((resolve) => {
-    window.postMessage({ ns: EXT_NS, dir: "toExt", type: "ping" }, location.origin);
-    setTimeout(() => resolve(extReady), 400);
-  });
-}
-
-function extFetch(url) {
-  return new Promise((resolve, reject) => {
-    const requestId = ++extSeq;
-    extPending.set(requestId, { resolve, reject });
-    window.postMessage({ ns: EXT_NS, dir: "toExt", type: "fetch", url, requestId }, location.origin);
-    setTimeout(() => {
-      if (extPending.has(requestId)) { extPending.delete(requestId); reject(new Error("extension fetch timeout")); }
-    }, 60000);
-  });
-}
-
-function b64ToBytes(b64) {
-  const bin = atob(b64);
-  const u = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
-  return u;
-}
-
-function nameFromUrl(url) {
-  try {
-    const p = new URL(url).pathname.split("/").filter(Boolean).pop() || "document.pdf";
-    return /\.pdf$/i.test(p) ? decodeURIComponent(p) : "document.pdf";
-  } catch { return "document.pdf"; }
-}
-
-function feedFileToTab(tab, file) {
-  const feed = () => {
-    const w = tab.iframe.contentWindow;
-    if (w && w.__pdfViewerLoadLocal) { w.__pdfViewerLoadLocal(file); watchTitle(tab); }
-    else setTimeout(feed, 30);
-  };
-  feed();
-}
-
-// Open a URL in a new tab (routed web PDF). Prefer the extension broker so
-// cookie-gated/cross-origin PDFs work; otherwise let the viewer fetch directly.
-function openUrl(url) {
-  newTab({
-    initialLabel: "Loading…",
-    pending: async (tab) => {
-      if (await extAvailable()) {
-        try {
-          const { b64, filename } = await extFetch(url);
-          const file = new File([b64ToBytes(b64)], filename || nameFromUrl(url), { type: "application/pdf" });
-          feedFileToTab(tab, file);
-          return;
-        } catch (err) {
-          console.warn("extension broker failed; falling back to direct fetch:", err);
-        }
-      }
-      tab.iframe.addEventListener("load", () => watchTitle(tab), { once: true });
-      tab.iframe.src = VIEWER_SRC + "?file=" + encodeURIComponent(url);
     },
   });
 }
@@ -245,7 +144,7 @@ async function pickFiles() {
         types: [{ description: "PDF document", accept: { "application/pdf": [".pdf"] } }],
         multiple: true,
       });
-      for (const h of handles) openLocalFile(await h.getFile());
+      for (const h of handles) openLocalFile(await h.getFile(), h);
       return;
     } catch (err) {
       if (err && err.name === "AbortError") return;
@@ -281,24 +180,11 @@ document.addEventListener("drop", (e) => {
 if ("launchQueue" in window) {
   window.launchQueue.setConsumer(async (params) => {
     if (!params || !params.files) return;
-    for (const handle of params.files) openLocalFile(await handle.getFile());
+    for (const handle of params.files) openLocalFile(await handle.getFile(), handle);
   });
 }
 
-// Routed web PDF: the extension can redirect a PDF to <app>/?file=<url>.
-const routed = new URLSearchParams(location.search).get("file");
-if (routed) {
-  openUrl(routed);
-  // Clean the shell URL so a refresh doesn't reopen the same tab.
-  history.replaceState(null, "", location.pathname);
-}
-
 updateChrome();
-
-// Detect the extension bridge on load so the indicator reflects reality even
-// before any routed PDF is opened.
-setExtStatus("checking");
-extAvailable().then((ok) => setExtStatus(ok ? "connected" : "absent"));
 
 // Service worker: installability, offline, and auto-update when online.
 if ("serviceWorker" in navigator) {

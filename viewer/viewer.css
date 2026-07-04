@@ -303,6 +303,9 @@ body.thumbs-open #viewer-container {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  /* Translucency applied once, to the whole layer, so overlapping (solid)
+     highlight rects read as a single flat tint instead of stacking darker. */
+  opacity: 0.4;
 }
 
 /* Citation overlay layer — sits on top of the text layer. The container

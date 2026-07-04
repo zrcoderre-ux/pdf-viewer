@@ -38,7 +38,10 @@
 //     In the highlight tool the box is highlighted immediately; otherwise the
 //     same Copy / Highlight menu appears for the boxed text.
 
-const HIGHLIGHT_COLOR = "rgba(255, 213, 0, 0.40)"; // yellow, 40% alpha
+// Solid yellow. The translucency is applied ONCE at the layer level
+// (.highlightLayer { opacity }) rather than per-rect, so overlapping highlight
+// rectangles don't stack into a darker patch — the whole layer is one flat tint.
+const HIGHLIGHT_COLOR = "rgb(255, 213, 0)";
 let _nextId = 1;
 
 // pageNumber -> Array<highlight>

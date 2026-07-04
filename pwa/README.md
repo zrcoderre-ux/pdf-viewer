@@ -65,30 +65,19 @@ Actions**.
 *extension* on your machine; this *app* updates itself from the hosted URL. The
 `pwa/` files a pull drops on disk are just source, not the running app.
 
-## Routing web PDFs to the app (optional, off by default)
+## Editing local documents
 
-The extension can redirect PDFs you click while browsing to this app instead of
-its own bundled viewer — enable it in the extension's **Options → "Open web PDFs
-in the app"** (off by default). A routed PDF arrives as `…/pdf-viewer/?file=<url>`
-and opens in a new tab.
+Because every PDF in the app is one you opened from disk, the app is where
+editing lives. The viewer's toolbar shows **Save** instead of **Download**:
+Save bakes your highlights into the PDF and writes them back to the same file
+(via the file's handle from the picker / OS file handler), and **Combine**
+merges other PDFs onto the end. The browser extension stays view-only for web
+PDFs you haven't downloaded — a clean split: extension for browsing, app for
+editing.
 
-**Extension-brokered fetch.** A hosted page can't fetch cookie-gated or
-cross-origin court PDFs. So the app doesn't fetch routed URLs itself — it asks
-the extension. A content-script bridge (`content/app-bridge.js`) injected into
-the app's page relays the request to the extension's background worker, which
-fetches the PDF **with your cookies and host permissions** (bypassing CORS) and
-returns the bytes. The app then renders them like a locally-opened file. This
-makes eCMS / Westlaw / cross-origin PDFs work in the app. If the extension isn't
-present, the app falls back to fetching the URL directly (public PDFs only).
-
-The one manual step: for a routed PDF to open in the **installed app window**
-(not just a browser tab), turn on Chrome's "Open supported links in this app"
-for the PWA. The manifest requests this via `handle_links: preferred`, but the
-user setting is what enables it. (The brokered fetch works either way — this
-only controls window vs. tab.)
-
-Note: the bridge content script is matched to the default app URL in
-`manifest.json`. If you change the app URL in Options, update that match.
+> The old "route web PDFs to the app" path (an extension→app redirect with a
+> brokered fetch) has been removed. The extension always opens PDFs in its own
+> viewer; the app is only for files opened from disk.
 
 ## Notes / limitations
 

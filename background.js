@@ -11,31 +11,11 @@
 
 const VIEWER_URL = chrome.runtime.getURL("viewer/viewer.html");
 
-// Optional routing: when the user turns on "Open web PDFs in the app", web PDF
-// navigations are redirected to the installed PWA instead of this extension's
-// bundled viewer. Off by default — the extension viewer stays the default
-// because it can fetch cookie-gated / cross-origin PDFs that a hosted page
-// can't. See the Options page.
-const DEFAULT_APP_URL = "https://zrcoderre-ux.github.io/pdf-viewer/";
-
-function getRoutingPrefs() {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get(
-      { routeToApp: false, appUrl: DEFAULT_APP_URL },
-      ({ routeToApp, appUrl }) => {
-        const url = (typeof appUrl === "string" && appUrl.trim()) || DEFAULT_APP_URL;
-        resolve({ routeToApp: !!routeToApp, appUrl: url });
-      }
-    );
-  });
-}
-
-// The redirect target base — the extension viewer, or the app when routing is
-// on. The original PDF URL is appended as ?file=<url> by the rules below.
-function redirectBase({ routeToApp, appUrl }) {
-  if (!routeToApp) return VIEWER_URL;
-  // Point at the app shell; it reads ?file= and opens the PDF in a new tab.
-  return appUrl.replace(/[?#].*$/, "");
+// The redirect target base. Web-PDF routing to the installed app was removed —
+// PDFs always open in the extension's own viewer. Kept as a function so the
+// rule builders below are unchanged.
+function redirectBase() {
+  return VIEWER_URL;
 }
 
 // Bypass token — when this query param is present in a URL, an allow rule
@@ -183,7 +163,7 @@ function globToRegex(glob) {
 async function rebuildRules() {
   const userPatterns = await getUserPatterns();
   const allPatterns = [...BUILTIN_PATTERNS, ...userPatterns];
-  const base = redirectBase(await getRoutingPrefs());
+  const base = redirectBase();
 
   const newRules = [
     buildBypassRule(),
@@ -238,49 +218,6 @@ function getUserPatterns() {
       resolve(arr.filter((s) => typeof s === "string" && s.trim().length > 0));
     });
   });
-}
-
-// Broker for the hosted app: fetch a PDF with the user's cookies + host
-// permissions (bypassing CORS) and return the bytes. Requested by the app's
-// content-script bridge (content/app-bridge.js). Only used when the user turns
-// on "Open web PDFs in the app"; harmless otherwise.
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (!msg || msg.type !== "fetchPdf" || typeof msg.url !== "string") return;
-  (async () => {
-    try {
-      const resp = await fetch(msg.url, { credentials: "include" });
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
-      const buf = await resp.arrayBuffer();
-      sendResponse({
-        ok: true,
-        b64: arrayBufferToBase64(buf),
-        filename: filenameFromContentDisposition(resp.headers.get("Content-Disposition")),
-      });
-    } catch (e) {
-      sendResponse({ ok: false, error: String((e && e.message) || e) });
-    }
-  })();
-  return true; // keep the message channel open for the async sendResponse
-});
-
-function arrayBufferToBase64(buf) {
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  const CHUNK = 0x8000; // build the binary string in chunks to avoid arg limits
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
-  }
-  return btoa(binary);
-}
-
-// Minimal Content-Disposition filename parser (RFC 5987 filename*=UTF-8''… and
-// the legacy filename="…" form). Returns null if nothing usable is found.
-function filenameFromContentDisposition(cd) {
-  if (!cd) return null;
-  let m = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(cd);
-  if (m) { try { return decodeURIComponent(m[1].trim()); } catch { return m[1].trim(); } }
-  m = /filename\s*=\s*"([^"]+)"/i.exec(cd) || /filename\s*=\s*([^;]+)/i.exec(cd);
-  return m ? m[1].trim() : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -373,7 +310,7 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync") return;
-  if (changes.pdfUrlPatterns || changes.routeToApp || changes.appUrl) {
+  if (changes.pdfUrlPatterns) {
     rebuildRules();
   }
   if (changes.citationSites) {

@@ -1307,16 +1307,26 @@ if (ocrRunEl) {
   });
 }
 
-// ── Editing: save edits into the file (local documents only) ────────────────
+// ── Editing: save edits into the file (downloaded / local documents only) ───
 //
-// Editing is offered only for documents you've already downloaded — i.e. opened
-// from local disk (file://). Web PDFs you're only viewing stay read-only. Save
-// bakes the in-viewer highlights into a new PDF via pdf-lib; Combine merges
-// other local PDFs in after it. Both write out through the File System Access
-// picker (falling back to a normal download).
-const editingAllowed = isLocalFile;
-if (saveEditsEl) saveEditsEl.hidden = !editingAllowed;
-if (combineEl)   combineEl.hidden   = !editingAllowed;
+// Editing is offered only for documents you've already downloaded — a PDF
+// opened from disk: file:// in the extension, or handed in via
+// __pdfViewerLoadLocal in the app. Web PDFs you're only viewing stay read-only.
+// When editing is on, the toolbar shows Save (bakes the in-viewer highlights
+// into the PDF via pdf-lib) and Combine (merges other PDFs in after it), and
+// the Download button is replaced by Save. Save writes in place when we have a
+// writable file handle (the app), otherwise through the Save-file picker.
+let editingAllowed = false;
+let localFileHandle = null; // FileSystemFileHandle for in-place save, if provided
+
+function setEditingEnabled(on) {
+  editingAllowed = on;
+  if (saveEditsEl) saveEditsEl.hidden = !on;
+  if (combineEl)   combineEl.hidden   = !on;
+  if (downloadEl)  downloadEl.hidden  = on; // Save stands in for Download when editable
+}
+// A file:// document in the extension is already a local/downloaded file.
+setEditingEnabled(isLocalFile);
 
 // Collect on-screen highlight rectangles converted to PDF points, per page.
 function collectHighlightPdfRects() {
@@ -1341,11 +1351,30 @@ function collectHighlightPdfRects() {
   return byPage;
 }
 
-// Write bytes to disk: prefer the Save-file picker (lets the user overwrite the
-// original); fall back to a normal blob download where it isn't available.
-async function writeOutPdf(bytes, suggestedName) {
+// Write bytes to the document. Order of preference:
+//   1. inPlace + a writable file handle (the app) → overwrite the same file.
+//   2. the Save-file picker (lets the user choose / overwrite).
+//   3. a normal blob download.
+async function writeOutPdf(bytes, suggestedName, { inPlace = false } = {}) {
   const name = /\.pdf$/i.test(suggestedName) ? suggestedName : `${suggestedName}.pdf`;
   const blob = new Blob([bytes], { type: "application/pdf" });
+
+  if (inPlace && localFileHandle && localFileHandle.createWritable) {
+    try {
+      if (localFileHandle.requestPermission) {
+        const perm = await localFileHandle.requestPermission({ mode: "readwrite" });
+        if (perm !== "granted") throw new Error("write permission denied");
+      }
+      const writable = await localFileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return true;
+    } catch (e) {
+      if (e && e.name === "AbortError") return false;
+      // fall through to the picker / download
+    }
+  }
+
   if (window.showSaveFilePicker) {
     try {
       const handle = await window.showSaveFilePicker({
@@ -1361,6 +1390,7 @@ async function writeOutPdf(bytes, suggestedName) {
       // otherwise fall through to the download path
     }
   }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -1380,7 +1410,7 @@ async function saveEditedPdf() {
       srcBytes: pdfBytes.slice(0),
       highlightsByPage: collectHighlightPdfRects(),
     });
-    const ok = await writeOutPdf(edited, sanitizePdfFilename(serverFilename || "document"));
+    const ok = await writeOutPdf(edited, sanitizePdfFilename(serverFilename || "document"), { inPlace: true });
     statusEl.textContent = ok ? "Saved." : "";
   } catch (e) {
     console.error("[pdf-viewer] save failed:", e);
@@ -1602,9 +1632,13 @@ async function loadAndRender() {
 // a PDF is opened from disk (OS file handler, Open button, or drag-and-drop),
 // so cross-origin/CORS never enters the picture. Exposed on window for the
 // web glue; unused (but harmless) inside the extension.
-async function loadLocalFile(file) {
+async function loadLocalFile(file, handle) {
   if (!file) return;
   resetForNewDocument();
+  // A local/downloaded file → editable. Keep the writable handle (if the app
+  // provided one) so Save can overwrite the same file in place.
+  localFileHandle = handle || null;
+  setEditingEnabled(true);
   try {
     statusEl.textContent = "Reading…";
     // Copy into a Uint8Array created in THIS realm. When the viewer runs in an

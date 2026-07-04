@@ -69,35 +69,6 @@ if (toaWebEl) {
   });
 }
 
-// Route-web-PDFs-to-app option (synced; default off). The background script
-// subscribes to routeToApp/appUrl and rebuilds its redirect rules live.
-const DEFAULT_APP_URL = "https://zrcoderre-ux.github.io/pdf-viewer/";
-const routeToAppEl = document.getElementById("route-to-app");
-const appUrlEl = document.getElementById("app-url");
-const routeSaveBtn = document.getElementById("route-save");
-const routeStatus = document.getElementById("route-status");
-if (routeToAppEl && appUrlEl) {
-  chrome.storage.sync.get(
-    { routeToApp: false, appUrl: DEFAULT_APP_URL },
-    ({ routeToApp, appUrl }) => {
-      routeToAppEl.checked = !!routeToApp;
-      appUrlEl.value = appUrl || DEFAULT_APP_URL;
-    }
-  );
-  const saveRouting = () => {
-    const url = appUrlEl.value.trim() || DEFAULT_APP_URL;
-    appUrlEl.value = url;
-    chrome.storage.sync.set({ routeToApp: routeToAppEl.checked, appUrl: url }, () => {
-      routeStatus.textContent = "Saved.";
-      routeStatus.className = "status";
-      setTimeout(() => { routeStatus.textContent = ""; }, 2000);
-    });
-  };
-  // Toggling the checkbox saves immediately; the URL field saves on the button.
-  routeToAppEl.addEventListener("change", saveRouting);
-  if (routeSaveBtn) routeSaveBtn.addEventListener("click", saveRouting);
-}
-
 // Extra citation-link websites (synced). Stored as raw lines; the background
 // worker normalizes them into match patterns and (re)registers the content
 // script live via chrome.scripting.
