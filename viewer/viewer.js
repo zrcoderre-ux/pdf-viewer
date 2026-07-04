@@ -19,7 +19,7 @@ import {
   getHighlightRectGroups,
   addImportedHighlight,
 } from "./highlights.js";
-import { buildEditedPdf } from "./pdf-edit.js";
+import { buildEditedPdf, applyPagePlan, stampBates } from "./pdf-edit.js";
 import { extractTitle } from "./footer-naming.js";
 import {
   registerEntry,
@@ -155,6 +155,8 @@ const openOriginalEl = document.getElementById("open-original");
 const ocrRunEl    = document.getElementById("ocr-run");
 const saveEditsEl = document.getElementById("save-edits");
 const combineEl   = document.getElementById("combine-pdfs");
+const organizeEl  = document.getElementById("organize-pages");
+const batesEl     = document.getElementById("bates-number");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
@@ -1324,6 +1326,8 @@ function setEditingEnabled(on) {
   editingAllowed = on;
   if (saveEditsEl) saveEditsEl.hidden = !on;
   if (combineEl)   combineEl.hidden   = !on;
+  if (organizeEl)  organizeEl.hidden  = !on;
+  if (batesEl)     batesEl.hidden      = !on;
   if (downloadEl)  downloadEl.hidden  = on; // Save stands in for Download when editable
 }
 // A file:// document in the extension is already a local/downloaded file.
@@ -1575,8 +1579,11 @@ function resetForNewDocument() {
   pdfBytes = null;
   // Fresh document → fresh chance for footer/header extraction to win.
   userOverrodeName = false;
-  // Allow thumbnails and bookmarks to re-render for the new document.
+  // Allow thumbnails and bookmarks to re-render for the new document, and drop
+  // any organize-mode state / cached thumbnails from the previous document.
   thumbsRendered = false;
+  resetOrganizeState();
+  thumbDataUrlCache.clear();
   if (panelBookmarksEl) { panelBookmarksEl.innerHTML = ""; delete panelBookmarksEl.dataset.loaded; }
   if (tabBookmarksEl)   tabBookmarksEl.hidden = true;
   switchTab("pages");
@@ -2431,6 +2438,316 @@ if (thumbnailToggleEl) {
     }
   });
 }
+
+// ── Organize pages: reorder / rotate / delete / extract ─────────────────────
+//
+// Turns the Pages panel into an editor. Changes are collected into a page
+// "plan" (order + per-page rotation; omitted pages are deletions) and applied
+// only on "Apply & Save": current highlights are baked into the file first,
+// then the plan is applied with pdf-lib (which carries each page's annotations
+// along), and the viewer reloads from the result. Extract writes the checked
+// pages to a *new* file, leaving the current document untouched.
+const organizeBarEl = document.getElementById("organize-bar");
+const orgApplyEl    = document.getElementById("org-apply");
+const orgExtractEl  = document.getElementById("org-extract");
+const orgResetEl    = document.getElementById("org-reset");
+const orgDoneEl     = document.getElementById("org-done");
+
+let organizeMode = false;
+let pagePlan = [];             // [{ id, srcIndex(0-based), rotate(0/90/180/270) }]
+const organizeSel = new Set(); // plan-entry ids checked for extract
+const thumbDataUrlCache = new Map(); // srcIndex -> dataURL
+let _planSeq = 0;
+let _dragId = null;
+
+function saveNameForDoc() {
+  return sanitizePdfFilename(serverFilename || "document");
+}
+
+async function bakeCurrentHighlights() {
+  // Highlights → annotations in the bytes, so page moves/rotations carry them.
+  return buildEditedPdf({ srcBytes: pdfBytes.slice(0), highlightsByPage: collectHighlightPdfRects() });
+}
+
+async function buildThumbCache() {
+  if (!pdfDoc) return;
+  for (let i = 0; i < pdfDoc.numPages; i++) {
+    if (thumbDataUrlCache.has(i)) continue;
+    const page = await pdfDoc.getPage(i + 1);
+    const vp = page.getViewport({ scale: THUMB_SCALE });
+    const c = document.createElement("canvas");
+    c.width = Math.round(vp.width);
+    c.height = Math.round(vp.height);
+    await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
+    thumbDataUrlCache.set(i, c.toDataURL());
+  }
+}
+
+function ctrlBtn(glyph, title, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "org-ctrl";
+  b.textContent = glyph;
+  b.title = title;
+  b.addEventListener("click", (e) => { e.stopPropagation(); onClick(); });
+  return b;
+}
+
+function updateOrganizeButtons() {
+  if (orgExtractEl) orgExtractEl.disabled = organizeSel.size === 0;
+}
+
+function renderOrganizeList() {
+  panelPagesEl.innerHTML = "";
+  pagePlan.forEach((entry, idx) => {
+    const item = document.createElement("div");
+    item.className = "thumb-item organize";
+    item.draggable = true;
+    item.dataset.id = String(entry.id);
+
+    const chk = document.createElement("input");
+    chk.type = "checkbox";
+    chk.className = "org-check";
+    chk.checked = organizeSel.has(entry.id);
+    chk.title = "Check to include in Extract";
+    chk.addEventListener("click", (e) => e.stopPropagation());
+    chk.addEventListener("change", () => {
+      if (chk.checked) organizeSel.add(entry.id); else organizeSel.delete(entry.id);
+      updateOrganizeButtons();
+    });
+
+    const box = document.createElement("div");
+    box.className = "org-thumb-box";
+    const img = document.createElement("img");
+    img.className = "org-thumb";
+    img.src = thumbDataUrlCache.get(entry.srcIndex) || "";
+    img.style.transform = `rotate(${entry.rotate}deg)`;
+    box.appendChild(img);
+
+    const label = document.createElement("span");
+    label.className = "thumb-label";
+    label.textContent = entry.srcIndex + 1 === idx + 1
+      ? `${idx + 1}`
+      : `${idx + 1} · was ${entry.srcIndex + 1}`;
+
+    const controls = document.createElement("div");
+    controls.className = "org-controls";
+    controls.append(
+      ctrlBtn("↑", "Move up", () => moveEntry(idx, -1)),
+      ctrlBtn("↓", "Move down", () => moveEntry(idx, 1)),
+      ctrlBtn("⟳", "Rotate 90°", () => rotateEntry(idx)),
+      ctrlBtn("✕", "Delete page", () => deleteEntry(idx)),
+    );
+
+    item.append(chk, box, label, controls);
+
+    item.addEventListener("dragstart", (e) => {
+      _dragId = entry.id;
+      item.classList.add("dragging");
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+    });
+    item.addEventListener("dragend", () => { _dragId = null; item.classList.remove("dragging"); });
+    item.addEventListener("dragover", (e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = "move"; });
+    item.addEventListener("drop", (e) => {
+      e.preventDefault();
+      if (_dragId != null && _dragId !== entry.id) reorderPlan(_dragId, entry.id);
+    });
+
+    panelPagesEl.appendChild(item);
+  });
+  updateOrganizeButtons();
+}
+
+function moveEntry(idx, dir) {
+  const j = idx + dir;
+  if (j < 0 || j >= pagePlan.length) return;
+  [pagePlan[idx], pagePlan[j]] = [pagePlan[j], pagePlan[idx]];
+  renderOrganizeList();
+}
+
+function rotateEntry(idx) {
+  pagePlan[idx].rotate = (pagePlan[idx].rotate + 90) % 360;
+  renderOrganizeList();
+}
+
+function deleteEntry(idx) {
+  if (pagePlan.length <= 1) { statusEl.textContent = "A document must keep at least one page."; return; }
+  const [removed] = pagePlan.splice(idx, 1);
+  organizeSel.delete(removed.id);
+  renderOrganizeList();
+}
+
+function reorderPlan(dragId, targetId) {
+  const from = pagePlan.findIndex((p) => p.id === dragId);
+  if (from < 0) return;
+  const [moved] = pagePlan.splice(from, 1);
+  const to = pagePlan.findIndex((p) => p.id === targetId);
+  pagePlan.splice(to < 0 ? pagePlan.length : to, 0, moved);
+  renderOrganizeList();
+}
+
+function resetPlanToIdentity() {
+  pagePlan = [];
+  organizeSel.clear();
+  for (let i = 0; i < (pdfDoc ? pdfDoc.numPages : 0); i++) {
+    pagePlan.push({ id: ++_planSeq, srcIndex: i, rotate: 0 });
+  }
+}
+
+function resetOrganizeState() {
+  organizeMode = false;
+  if (organizeBarEl) organizeBarEl.hidden = true;
+  if (organizeEl) organizeEl.setAttribute("aria-pressed", "false");
+  document.body.classList.remove("organize-mode");
+  pagePlan = [];
+  organizeSel.clear();
+}
+
+async function enterOrganize() {
+  if (!editingAllowed || !pdfDoc || organizeMode) return;
+  // Open the panel WITHOUT the toggle handler's normal-thumbnail render — that
+  // runs async and would interleave with the organize list we build below.
+  if (!thumbnailPanelEl.classList.contains("open")) {
+    thumbnailPanelEl.classList.add("open");
+    document.body.classList.add("thumbs-open");
+    if (thumbnailToggleEl) thumbnailToggleEl.setAttribute("aria-pressed", "true");
+  }
+  switchTab("pages");
+  statusEl.textContent = "Preparing pages…";
+  await buildThumbCache();
+  resetPlanToIdentity();
+  organizeMode = true;
+  if (organizeBarEl) organizeBarEl.hidden = false;
+  if (organizeEl) organizeEl.setAttribute("aria-pressed", "true");
+  document.body.classList.add("organize-mode");
+  renderOrganizeList();
+  statusEl.textContent = "";
+}
+
+async function exitOrganize() {
+  resetOrganizeState();
+  thumbsRendered = false;
+  panelPagesEl.innerHTML = "";
+  if (thumbnailPanelEl.classList.contains("open")) await renderThumbnails();
+}
+
+// Reload the viewer from freshly-edited bytes, refreshing pages, highlights,
+// and thumbnails while leaving the display name/naming choice intact.
+async function reloadEditedBytes(out) {
+  resetOrganizeState();
+  clearAllHighlights();
+  thumbDataUrlCache.clear();
+  thumbsRendered = false;
+  panelPagesEl.innerHTML = "";
+  await renderBytes(out.slice(0));
+  if (thumbnailPanelEl.classList.contains("open")) await renderThumbnails();
+}
+
+async function applyOrganize() {
+  if (!organizeMode || !pdfBytes) return;
+  if (orgApplyEl) orgApplyEl.disabled = true;
+  try {
+    statusEl.textContent = "Applying page changes…";
+    const baked = await bakeCurrentHighlights();
+    const plan = pagePlan.map((p) => ({ srcIndex: p.srcIndex, rotate: p.rotate }));
+    const out = await applyPagePlan({ srcBytes: baked, plan });
+    const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
+    if (ok) { await reloadEditedBytes(out); statusEl.textContent = "Saved."; }
+    else statusEl.textContent = "";
+  } catch (e) {
+    console.error("[pdf-viewer] organize failed:", e);
+    statusEl.textContent = "Page changes failed.";
+  } finally {
+    if (orgApplyEl) orgApplyEl.disabled = false;
+  }
+}
+
+async function extractSelectedPages() {
+  const sel = pagePlan.filter((p) => organizeSel.has(p.id));
+  if (!sel.length) { statusEl.textContent = "No pages checked to extract."; return; }
+  if (!pdfBytes) return;
+  if (orgExtractEl) orgExtractEl.disabled = true;
+  try {
+    statusEl.textContent = "Extracting…";
+    const baked = await bakeCurrentHighlights();
+    const out = await applyPagePlan({
+      srcBytes: baked,
+      plan: sel.map((p) => ({ srcIndex: p.srcIndex, rotate: p.rotate })),
+    });
+    const ok = await writeOutPdf(out, `${saveNameForDoc()} (extract).pdf`);
+    statusEl.textContent = ok ? `Extracted ${sel.length} page${sel.length === 1 ? "" : "s"}.` : "";
+  } catch (e) {
+    console.error("[pdf-viewer] extract failed:", e);
+    statusEl.textContent = "Extract failed.";
+  } finally {
+    if (orgExtractEl) orgExtractEl.disabled = false;
+  }
+}
+
+if (organizeEl) organizeEl.addEventListener("click", () => {
+  if (organizeMode) exitOrganize(); else enterOrganize();
+});
+if (orgApplyEl)   orgApplyEl.addEventListener("click", applyOrganize);
+if (orgExtractEl) orgExtractEl.addEventListener("click", extractSelectedPages);
+if (orgResetEl)   orgResetEl.addEventListener("click", () => { resetPlanToIdentity(); renderOrganizeList(); });
+if (orgDoneEl)    orgDoneEl.addEventListener("click", exitOrganize);
+
+// ── Bates numbering ─────────────────────────────────────────────────────────
+const batesModalEl    = document.getElementById("bates-modal");
+const batesPrefixEl   = document.getElementById("bates-prefix");
+const batesStartEl    = document.getElementById("bates-start");
+const batesDigitsEl   = document.getElementById("bates-digits");
+const batesPositionEl = document.getElementById("bates-position");
+const batesPreviewEl  = document.getElementById("bates-preview");
+const batesCancelEl   = document.getElementById("bates-cancel");
+const batesApplyEl    = document.getElementById("bates-apply");
+
+function batesDigits() { return Math.min(12, Math.max(1, parseInt(batesDigitsEl.value, 10) || 6)); }
+function batesStart()  { const n = parseInt(batesStartEl.value, 10); return Number.isFinite(n) && n >= 0 ? n : 1; }
+
+function updateBatesPreview() {
+  if (!batesPreviewEl) return;
+  batesPreviewEl.textContent = `${batesPrefixEl.value || ""}${String(batesStart()).padStart(batesDigits(), "0")}`;
+}
+
+function openBatesModal() {
+  if (!editingAllowed || !batesModalEl) return;
+  updateBatesPreview();
+  batesModalEl.hidden = false;
+}
+function closeBatesModal() { if (batesModalEl) batesModalEl.hidden = true; }
+
+async function applyBates() {
+  if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return; }
+  if (batesApplyEl) batesApplyEl.disabled = true;
+  try {
+    statusEl.textContent = "Adding Bates numbers…";
+    const baked = await bakeCurrentHighlights();
+    const out = await stampBates({
+      srcBytes: baked,
+      prefix: batesPrefixEl.value || "",
+      start: batesStart(),
+      digits: batesDigits(),
+      position: batesPositionEl.value || "br",
+    });
+    const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
+    if (ok) { closeBatesModal(); await reloadEditedBytes(out); statusEl.textContent = "Saved."; }
+    else statusEl.textContent = "";
+  } catch (e) {
+    console.error("[pdf-viewer] bates failed:", e);
+    statusEl.textContent = "Bates numbering failed.";
+  } finally {
+    if (batesApplyEl) batesApplyEl.disabled = false;
+  }
+}
+
+if (batesEl)       batesEl.addEventListener("click", openBatesModal);
+if (batesCancelEl) batesCancelEl.addEventListener("click", closeBatesModal);
+if (batesApplyEl)  batesApplyEl.addEventListener("click", applyBates);
+if (batesModalEl)  batesModalEl.addEventListener("click", (e) => { if (e.target === batesModalEl) closeBatesModal(); });
+[batesPrefixEl, batesStartEl, batesDigitsEl].forEach((el) => {
+  if (el) el.addEventListener("input", updateBatesPreview);
+});
 
 // Drag the Pages / Bookmarks column's right edge to resize it. The panel is
 // pinned to the left, so its width is just the pointer's x. --thumb-panel-width

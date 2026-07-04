@@ -45,6 +45,13 @@ In addition to citation linking, the viewer supports:
   save dialog. Both are powered by the bundled `pdf-lib` writer. Web PDFs you're
   only viewing stay read-only — edit access is granted only to documents you've
   already downloaded.
+- **Organize pages — local documents only.** The **▦ Pages** button turns the
+  page panel into an editor: drag thumbnails to reorder, rotate or delete
+  individual pages, or check pages and **Extract** them to a new PDF. **Apply &
+  Save** rewrites the document (your highlights ride along with their pages).
+- **Bates numbering — local documents only.** The **▤ Bates** button stamps a
+  sequential number on every page — set a prefix, starting number, digit count,
+  and corner. Placement is exact on standard pages and rotation-aware.
 - **Zoom in / out** with the toolbar buttons.
 - **Download** the original PDF with a smart filename (see below).
 - **Open original** in Chrome's built-in PDF viewer (skips the linker).

@@ -11,9 +11,41 @@
       <button id="tab-pages" class="panel-tab active" aria-pressed="true">Pages</button>
       <button id="tab-bookmarks" class="panel-tab" aria-pressed="false" hidden>Bookmarks</button>
     </div>
+    <div id="organize-bar" hidden>
+      <div class="org-hint">Drag to reorder · rotate/delete each page · check pages to extract</div>
+      <div class="org-actions">
+        <button id="org-apply" title="Apply these page changes and save the document">Apply &amp; Save</button>
+        <button id="org-extract" title="Save the checked pages as a new PDF">Extract ✓</button>
+        <button id="org-reset" title="Undo all pending page changes">Reset</button>
+        <button id="org-done" title="Leave organize mode">Done</button>
+      </div>
+    </div>
     <div id="panel-pages"></div>
     <div id="panel-bookmarks" hidden></div>
   </aside>
+
+  <div id="bates-modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bates-title">
+      <h3 id="bates-title">Bates numbering</h3>
+      <p class="modal-sub">Stamps a sequential number on every page.</p>
+      <label class="modal-row">Prefix <input id="bates-prefix" type="text" placeholder="e.g. ABC" maxlength="24"></label>
+      <label class="modal-row">Start at <input id="bates-start" type="number" value="1" min="0" step="1"></label>
+      <label class="modal-row">Digits <input id="bates-digits" type="number" value="6" min="1" max="12" step="1"></label>
+      <label class="modal-row">Position
+        <select id="bates-position">
+          <option value="br">Bottom-right</option>
+          <option value="bl">Bottom-left</option>
+          <option value="tr">Top-right</option>
+          <option value="tl">Top-left</option>
+        </select>
+      </label>
+      <p class="modal-preview">Preview: <span id="bates-preview">ABC000001</span></p>
+      <div class="modal-actions">
+        <button id="bates-cancel">Cancel</button>
+        <button id="bates-apply" class="primary">Apply &amp; Save</button>
+      </div>
+    </div>
+  </div>
   <div id="thumb-resize" title="Drag to resize the panel"></div>
   <header id="toolbar">
     <button id="thumbnail-toggle" title="Toggle page thumbnails">☰</button>
@@ -45,6 +77,8 @@
     <button id="ocr-run" title="Run OCR on this scanned document so its text becomes selectable and citations are linked" aria-pressed="false">⛶ OCR</button>
     <button id="save-edits" title="Save a copy with your highlights baked into the PDF (local documents only)" hidden>💾 Save</button>
     <button id="combine-pdfs" title="Merge other PDFs onto the end of this one and save (local documents only)" hidden>⧉ Combine</button>
+    <button id="organize-pages" title="Reorder, rotate, delete, or extract pages (local documents only)" hidden>▦ Pages</button>
+    <button id="bates-number" title="Add Bates numbers to every page (local documents only)" hidden>▤ Bates</button>
     <button id="download" title="Download PDF">⬇ Download</button>
     <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
   </header>
