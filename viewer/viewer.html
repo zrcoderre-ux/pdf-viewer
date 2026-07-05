@@ -140,14 +140,21 @@
     <button id="highlight-toggle" title="Highlight tool: click to toggle. When active, drag to highlight text. Right-click selected text anytime to highlight." aria-pressed="false">✏ Highlight</button>
     <button id="rect-select-toggle" title="Rectangle select: click to toggle. When active, drag a box to select text by region. You can also hold Alt and drag at any time." aria-pressed="false">▭ Box select</button>
     <button id="ocr-run" title="Run OCR on this scanned document so its text becomes selectable and citations are linked" aria-pressed="false">⛶ OCR</button>
-    <button id="save-edits" title="Save a copy with your highlights baked into the PDF (local documents only)" hidden>💾 Save</button>
-    <button id="combine-pdfs" title="Merge other PDFs onto the end of this one and save (local documents only)" hidden>⧉ Combine</button>
-    <button id="organize-pages" title="Reorder, rotate, delete, or extract pages (local documents only)" hidden>▦ Pages</button>
-    <button id="bates-number" title="Add Bates numbers to every page (local documents only)" hidden>▤ Bates</button>
-    <button id="headerfooter-btn" title="Add header/footer text or page numbers (local documents only)" hidden>🔖 Header/Footer</button>
-    <button id="watermark-btn" title="Add a translucent watermark to every page (local documents only)" hidden>🌊 Watermark</button>
-    <button id="split-btn" title="Split this document into several PDFs (local documents only)" hidden>✂ Split</button>
-    <button id="images-btn" title="Add image files (JPG/PNG…) as new pages (local documents only)" hidden>🖼 Images</button>
+    <button id="save-edits" title="Save your highlights and edits into the PDF (local documents only)" hidden>💾 Save</button>
+    <div id="edit-menu-wrap">
+      <button id="edit-menu-btn" title="Edit this document" aria-haspopup="true" aria-expanded="false" hidden>✎ Edit ▾</button>
+      <div id="edit-menu" role="menu" hidden>
+        <button id="combine-pdfs" role="menuitem" title="Merge other PDFs onto the end of this one and save">⧉ Combine PDFs…</button>
+        <button id="images-btn" role="menuitem" title="Add image files (JPG/PNG…) as new pages">🖼 Add images…</button>
+        <div class="menu-sep" role="separator"></div>
+        <button id="organize-pages" role="menuitem" title="Reorder, rotate, delete, or extract pages">▦ Organize pages</button>
+        <button id="split-btn" role="menuitem" title="Split this document into several PDFs">✂ Split…</button>
+        <div class="menu-sep" role="separator"></div>
+        <button id="bates-number" role="menuitem" title="Add Bates numbers to every page">▤ Bates numbering…</button>
+        <button id="headerfooter-btn" role="menuitem" title="Add header/footer text or page numbers">🔖 Header &amp; footer…</button>
+        <button id="watermark-btn" role="menuitem" title="Add a translucent watermark to every page">🌊 Watermark…</button>
+      </div>
+    </div>
     <button id="download" title="Download PDF">⬇ Download</button>
     <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
   </header>

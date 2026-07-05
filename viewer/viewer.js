@@ -161,6 +161,9 @@ const headerFooterEl = document.getElementById("headerfooter-btn");
 const watermarkEl = document.getElementById("watermark-btn");
 const splitEl     = document.getElementById("split-btn");
 const imagesEl    = document.getElementById("images-btn");
+const editMenuBtn  = document.getElementById("edit-menu-btn");
+const editMenuEl   = document.getElementById("edit-menu");
+const editMenuWrap = document.getElementById("edit-menu-wrap");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
@@ -1328,14 +1331,11 @@ let localFileHandle = null; // FileSystemFileHandle for in-place save, if provid
 
 function setEditingEnabled(on) {
   editingAllowed = on;
+  // Save is a primary button; every other document-editing action lives in the
+  // Edit ▾ dropdown, so we only need to gate those two entry points here.
   if (saveEditsEl) saveEditsEl.hidden = !on;
-  if (combineEl)   combineEl.hidden   = !on;
-  if (organizeEl)  organizeEl.hidden  = !on;
-  if (batesEl)     batesEl.hidden      = !on;
-  if (headerFooterEl) headerFooterEl.hidden = !on;
-  if (watermarkEl) watermarkEl.hidden  = !on;
-  if (splitEl)     splitEl.hidden      = !on;
-  if (imagesEl)    imagesEl.hidden     = !on;
+  if (editMenuBtn) editMenuBtn.hidden = !on;
+  if (!on && editMenuEl) editMenuEl.hidden = true; // don't leave the menu open
   if (downloadEl)  downloadEl.hidden  = on; // Save stands in for Download when editable
 }
 // A file:// document in the extension is already a local/downloaded file.
@@ -3054,6 +3054,39 @@ async function addImagesAsPages() {
 }
 
 if (imagesEl) imagesEl.addEventListener("click", addImagesAsPages);
+
+// ── Edit ▾ dropdown ─────────────────────────────────────────────────────────
+// Houses every document-editing action (Combine, Organize, Split, Images,
+// Bates, Header/Footer, Watermark). Each item keeps its own click handler
+// (wired above); this just opens/closes the menu and closes it after a pick.
+function closeEditMenu() {
+  if (!editMenuEl || editMenuEl.hidden) return;
+  editMenuEl.hidden = true;
+  if (editMenuBtn) editMenuBtn.setAttribute("aria-expanded", "false");
+  document.removeEventListener("mousedown", onEditMenuOutside, true);
+  document.removeEventListener("keydown", onEditMenuKey, true);
+}
+function openEditMenu() {
+  if (!editMenuEl) return;
+  editMenuEl.hidden = false;
+  if (editMenuBtn) editMenuBtn.setAttribute("aria-expanded", "true");
+  document.addEventListener("mousedown", onEditMenuOutside, true);
+  document.addEventListener("keydown", onEditMenuKey, true);
+}
+function onEditMenuOutside(e) {
+  if (editMenuWrap && !editMenuWrap.contains(e.target)) closeEditMenu();
+}
+function onEditMenuKey(e) {
+  if (e.key === "Escape") { closeEditMenu(); if (editMenuBtn) editMenuBtn.focus(); }
+}
+if (editMenuBtn) editMenuBtn.addEventListener("click", () => {
+  if (editMenuEl && editMenuEl.hidden) openEditMenu(); else closeEditMenu();
+});
+// Close after any item is chosen (the item's own handler has already run in the
+// target phase before this bubbling listener fires).
+if (editMenuEl) editMenuEl.addEventListener("click", (e) => {
+  if (e.target.closest('button[role="menuitem"]')) closeEditMenu();
+});
 
 // Drag the Pages / Bookmarks column's right edge to resize it. The panel is
 // pinned to the left, so its width is just the pointer's x. --thumb-panel-width

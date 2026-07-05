@@ -55,6 +55,47 @@ body { overflow-y: auto; }
   border-color: #1a73e8;
 }
 #toolbar button[aria-pressed="true"]:hover { background: #1b66c9; }
+
+/* ── Edit ▾ dropdown ──────────────────────────────────────────────────────── */
+#edit-menu-wrap { position: relative; display: inline-flex; }
+#edit-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 190px;
+  background: #2a2d30;
+  border: 1px solid #4a4d50;
+  border-radius: 6px;
+  padding: 5px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+#edit-menu[hidden] { display: none; }
+#edit-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: #eee;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#edit-menu button:hover { background: #3a3d40; }
+#edit-menu button:disabled { opacity: 0.5; cursor: default; }
+#edit-menu button[aria-pressed="true"] { background: #1a4a8a; color: #fff; }
+#edit-menu .menu-sep {
+  height: 1px;
+  background: #4a4d50;
+  margin: 4px 6px;
+}
 /* Rectangle-select tool: show a crosshair so it's clear a drag draws a box. */
 body.rect-select-mode .page-wrapper,
 body.rect-select-mode .textLayer span { cursor: crosshair; }

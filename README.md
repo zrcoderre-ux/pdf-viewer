@@ -33,6 +33,10 @@ In addition to citation linking, the viewer supports:
 - **OCR** scanned PDFs on demand with the toolbar **⛶ OCR** button — text
   becomes selectable and citations get linked. Enable "Automatically OCR
   scanned documents" in Options to run it without the button.
+For editable documents, the toolbar shows **💾 Save** plus an **✎ Edit ▾**
+dropdown that gathers every document operation below (Combine, Add images,
+Organize pages, Split, Bates, Header/Footer, Watermark).
+
 - **Edit &amp; save — local documents only.** For a PDF you've already
   downloaded — opened from disk (`file://` in the extension) or via the app —
   the toolbar replaces **Download** with **💾 Save** (writes your highlights into
