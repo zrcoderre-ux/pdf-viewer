@@ -19,7 +19,7 @@ import {
   getHighlightRectGroups,
   addImportedHighlight,
 } from "./highlights.js";
-import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf } from "./pdf-edit.js";
+import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages } from "./pdf-edit.js";
 import { extractTitle } from "./footer-naming.js";
 import {
   registerEntry,
@@ -160,6 +160,7 @@ const batesEl     = document.getElementById("bates-number");
 const headerFooterEl = document.getElementById("headerfooter-btn");
 const watermarkEl = document.getElementById("watermark-btn");
 const splitEl     = document.getElementById("split-btn");
+const imagesEl    = document.getElementById("images-btn");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
@@ -1334,6 +1335,7 @@ function setEditingEnabled(on) {
   if (headerFooterEl) headerFooterEl.hidden = !on;
   if (watermarkEl) watermarkEl.hidden  = !on;
   if (splitEl)     splitEl.hidden      = !on;
+  if (imagesEl)    imagesEl.hidden     = !on;
   if (downloadEl)  downloadEl.hidden  = on; // Save stands in for Download when editable
 }
 // A file:// document in the extension is already a local/downloaded file.
@@ -2975,6 +2977,83 @@ if (splitModalEl)  splitModalEl.addEventListener("click", (e) => { if (e.target 
 [splitModeEl, splitChunkEl, splitRangesEl].forEach((el) => {
   if (el) el.addEventListener("input", updateSplitUi);
 });
+
+// ── Add images as pages ─────────────────────────────────────────────────────
+function loadImageEl(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// Normalize an image File to bytes pdf-lib can embed. JPEG/PNG pass through
+// untouched (no re-encode, no quality loss); anything else the browser can
+// decode (WebP, GIF, BMP…) is drawn to a canvas and exported as PNG.
+async function normalizeImageFile(file) {
+  const ab = await file.arrayBuffer();
+  const type = (file.type || "").toLowerCase();
+  if (type === "image/jpeg" || type === "image/jpg") return { bytes: new Uint8Array(ab), format: "jpg" };
+  if (type === "image/png") return { bytes: new Uint8Array(ab), format: "png" };
+  const url = URL.createObjectURL(new Blob([ab], { type: type || "application/octet-stream" }));
+  try {
+    const img = await loadImageEl(url);
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    canvas.getContext("2d").drawImage(img, 0, 0);
+    const pngBlob = await new Promise((res) => canvas.toBlob(res, "image/png"));
+    if (!pngBlob) return null;
+    return { bytes: new Uint8Array(await pngBlob.arrayBuffer()), format: "png" };
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function addImagesAsPages() {
+  if (!editingAllowed || !pdfBytes) return;
+  if (!window.showOpenFilePicker) { statusEl.textContent = "File picker unavailable here."; return; }
+  let handles;
+  try {
+    handles = await window.showOpenFilePicker({
+      multiple: true,
+      types: [{ description: "Images", accept: { "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"] } }],
+    });
+  } catch (e) {
+    if (e && e.name === "AbortError") return;
+    throw e;
+  }
+  if (!handles || !handles.length) return;
+  if (imagesEl) imagesEl.disabled = true;
+  try {
+    statusEl.textContent = "Adding images…";
+    const images = [];
+    for (const h of handles) {
+      const norm = await normalizeImageFile(await h.getFile());
+      if (norm) images.push(norm);
+    }
+    if (!images.length) { statusEl.textContent = "No usable images."; return; }
+    const baked = await bakeCurrentHighlights();
+    const out = await appendImagesAsPages({ srcBytes: baked, images });
+    const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
+    if (ok) {
+      await reloadEditedBytes(out);
+      const n = images.length;
+      statusEl.textContent = `Added ${n} image page${n === 1 ? "" : "s"} at the end.`;
+    } else statusEl.textContent = "";
+  } catch (e) {
+    console.error("[pdf-viewer] add images failed:", e);
+    statusEl.textContent = "Adding images failed.";
+  } finally {
+    if (imagesEl) imagesEl.disabled = false;
+  }
+}
+
+if (imagesEl) imagesEl.addEventListener("click", addImagesAsPages);
 
 // Drag the Pages / Bookmarks column's right edge to resize it. The panel is
 // pinned to the left, so its width is just the pointer's x. --thumb-panel-width

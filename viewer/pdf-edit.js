@@ -282,6 +282,30 @@ export async function splitPdf({ srcBytes, groups }) {
   return parts;
 }
 
+// Append image files as new pages. `images` is an array of { bytes, format }
+// where format is "jpg" or "png" (the caller normalizes other types to PNG via
+// a canvas, since pdf-lib only embeds JPEG/PNG). Each image gets its own page,
+// sized to the image but scaled down to fit within US Letter (612×792 pts) so a
+// high-resolution photo doesn't produce an absurdly large page. Existing pages
+// (and their annotations/highlights) are untouched.
+export async function appendImagesAsPages({ srcBytes, images, position = "end" }) {
+  const doc = await PDFDocument.load(srcBytes);
+  let insertAt = position === "start" ? 0 : doc.getPageCount();
+  for (const img of images || []) {
+    if (!img || !img.bytes) continue;
+    const embedded = img.format === "jpg"
+      ? await doc.embedJpg(img.bytes)
+      : await doc.embedPng(img.bytes);
+    const wPx = embedded.width, hPx = embedded.height;
+    const s = Math.min(1, 612 / wPx, 792 / hPx);
+    const pw = Math.max(1, wPx * s), ph = Math.max(1, hPx * s);
+    const page = doc.insertPage(insertAt, [pw, ph]);
+    page.drawImage(embedded, { x: 0, y: 0, width: pw, height: ph });
+    insertAt++;
+  }
+  return doc.save();
+}
+
 // Page count of a PDF (used to report merge results).
 export async function pageCount(bytes) {
   const doc = await PDFDocument.load(bytes);
