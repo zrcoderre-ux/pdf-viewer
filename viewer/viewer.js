@@ -2072,6 +2072,16 @@ async function renderPageCanvasAndText(pageNumber) {
   highlightLayerDiv.style.height = `${viewport.height}px`;
   wrapper.appendChild(highlightLayerDiv);
 
+  // Custom selection tint. The native ::selection is made transparent (see CSS)
+  // and we paint the selection ourselves here as solid rects with the layer's
+  // translucency applied once — so overlapping text spans don't stack into
+  // darker patches. Sits above highlights, like a real selection.
+  const selectionLayerDiv = document.createElement("div");
+  selectionLayerDiv.className = "selectionLayer";
+  selectionLayerDiv.style.width  = `${viewport.width}px`;
+  selectionLayerDiv.style.height = `${viewport.height}px`;
+  wrapper.appendChild(selectionLayerDiv);
+
   const linkLayerDiv = document.createElement("div");
   linkLayerDiv.className = "linkLayer";
   wrapper.appendChild(linkLayerDiv);
@@ -2174,6 +2184,59 @@ function excludeLineNumberColumn(textLayerDiv) {
     s.style.webkitUserSelect = "none";
   }
 }
+
+// Repaint the custom selection tint from the live browser selection. Because
+// the native ::selection is transparent, this is what the user actually sees.
+// We paint the selection's client rects as solid divs into each page's
+// selectionLayer (which applies the translucency once), so overlapping spans
+// never darken. Wrapped so a failure can never leave the page in a bad state.
+function repaintSelectionOverlay() {
+  const layers = pagesEl.querySelectorAll(".selectionLayer");
+  for (const l of layers) l.replaceChildren();
+
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  // Only paint selections that live inside the rendered pages (ignore
+  // selections in form inputs, the toolbar, etc.).
+  if (!sel.anchorNode || !pagesEl.contains(sel.anchorNode)) return;
+
+  const wrappers = pagesEl.querySelectorAll(".page-wrapper");
+  const boxes = [];
+  for (const w of wrappers) {
+    const layer = w.querySelector(".selectionLayer");
+    if (layer) boxes.push({ layer, rect: w.getBoundingClientRect() });
+  }
+  if (!boxes.length) return;
+
+  for (let i = 0; i < sel.rangeCount; i++) {
+    for (const cr of sel.getRangeAt(i).getClientRects()) {
+      if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+      const cx = cr.left + cr.width / 2;
+      const cy = cr.top + cr.height / 2;
+      const hit = boxes.find(({ rect }) =>
+        cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom);
+      if (!hit) continue;
+      const d = document.createElement("div");
+      d.className = "selection-rect";
+      d.style.left   = `${cr.left - hit.rect.left}px`;
+      d.style.top    = `${cr.top - hit.rect.top}px`;
+      d.style.width  = `${cr.width}px`;
+      d.style.height = `${cr.height}px`;
+      hit.layer.appendChild(d);
+    }
+  }
+}
+
+// selectionchange fires rapidly while dragging — coalesce to one repaint per
+// animation frame, and never let a paint error break selection.
+let _selectionRaf = 0;
+document.addEventListener("selectionchange", () => {
+  if (_selectionRaf) return;
+  _selectionRaf = requestAnimationFrame(() => {
+    _selectionRaf = 0;
+    try { repaintSelectionOverlay(); } catch { /* keep selection working */ }
+  });
+});
 
 // --- Zoom controls ---
 function setZoom(newScale) {

@@ -506,10 +506,28 @@ body.thumbs-open #viewer-container {
   transform-origin: 0% 0%;
 }
 
-/* When user selects text, show the highlight from the canvas underneath. */
+/* The native selection tint is made transparent: overlapping PDF.js text spans
+   would each paint their own translucent ::selection and stack into darker
+   patches. Instead we paint the selection ourselves (see .selectionLayer) as a
+   single flat layer. Selection still works for copy — only its visual moves to
+   our overlay. */
 .textLayer ::selection {
-  background: rgba(0, 100, 255, 0.3);
+  background: transparent;
   color: transparent;
+}
+
+/* Our selection tint: solid rects, with the translucency applied ONCE to the
+   whole layer, so overlaps read as one flat blue instead of darkening. */
+.selectionLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.3;
+  z-index: 3;
+}
+.selectionLayer .selection-rect {
+  position: absolute;
+  background: rgb(0, 100, 255);
 }
 
 /* Box (marquee) selection has no native ::selection tint, so we paint the
