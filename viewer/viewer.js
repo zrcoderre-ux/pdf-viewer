@@ -2164,24 +2164,43 @@ function excludeLineNumberColumn(textLayerDiv) {
   if (spans.length < 8) return;
   const width = textLayerDiv.offsetWidth || 1;
   const height = textLayerDiv.offsetHeight || 1;
-  const marginX = width * 0.12; // left ~1 inch of a Letter page
+  // Candidate line-number spans: a bare 1–2 digit number in the left quarter of
+  // the page (line numbers hug the left, but the exact inset varies by doc).
+  const leftZone = width * 0.25;
   const cand = [];
   for (const s of spans) {
     const t = (s.textContent || "").trim();
-    if (!/^\d{1,2}$/.test(t)) continue;      // a bare 1–2 digit number
-    if (s.offsetLeft > marginX) continue;    // hugging the left edge
-    cand.push(s);
+    if (!/^\d{1,2}$/.test(t)) continue;
+    const left = s.offsetLeft;
+    if (left > leftZone) continue;
+    cand.push({ s, left, top: s.offsetTop });
   }
   if (cand.length < 8) return;
-  let minTop = Infinity, maxTop = -Infinity;
-  for (const s of cand) {
-    const y = s.offsetTop;
-    if (y < minTop) minTop = y;
-    if (y > maxTop) maxTop = y;
+  // Find the largest cluster of candidates that share a left position (±16px,
+  // which absorbs the offset between left/right-aligned single- vs double-digit
+  // numbers). That cluster is the line-number column.
+  cand.sort((a, b) => a.left - b.left);
+  let best = [], group = [];
+  for (const c of cand) {
+    if (group.length && c.left - group[0].left > 16) {
+      if (group.length > best.length) best = group;
+      group = [];
+    }
+    group.push(c);
   }
-  // Must span most of the page vertically to be a line-number column.
+  if (group.length > best.length) best = group;
+  if (best.length < 8) return;
+  // The column must run down most of the page to be line numbering, not a stray
+  // cluster of numbers.
+  let minTop = Infinity, maxTop = -Infinity;
+  for (const c of best) {
+    if (c.top < minTop) minTop = c.top;
+    if (c.top > maxTop) maxTop = c.top;
+  }
   if (maxTop - minTop < height * 0.4) return;
-  for (const s of cand) s.textContent = "";
+  // Clear the text (they stay visible on the canvas) so a selection dragged
+  // across them can't include the numbers.
+  for (const c of best) c.s.textContent = "";
 }
 
 // Repaint the custom selection tint from the live browser selection. Because
