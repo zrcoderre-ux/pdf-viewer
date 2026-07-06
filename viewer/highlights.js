@@ -431,6 +431,50 @@ async function copyText(text) {
   }
 }
 
+// ── Box-selection preview ─────────────────────────────────────────────────────
+// A marquee (box) selection uses a custom drag rectangle that disappears on
+// release, and — unlike native flowing selection — the boxed text has no
+// ::selection tint, so nothing shows what was grabbed. We paint a translucent
+// blue overlay over the selected glyph runs and keep it up until the next
+// mousedown (a new selection, or a click to dismiss) or until the runs are
+// turned into a highlight.
+let _boxSelPreview = [];
+
+function clearBoxSelPreview() {
+  for (const el of _boxSelPreview) el.remove();
+  _boxSelPreview = [];
+}
+
+function paintRunsPreview(pageWrapper, textLayerDiv, runs) {
+  clearBoxSelPreview();
+  const spans = textLayerDiv.querySelectorAll("span");
+  const wrapRect = pageWrapper.getBoundingClientRect();
+  const range = document.createRange();
+  for (const run of runs) {
+    const span = spans[run.spanIdx];
+    const node = span && span.firstChild;
+    if (!node) continue;
+    const len = node.length || 0;
+    try {
+      range.setStart(node, Math.max(0, Math.min(run.startOffset, len)));
+      range.setEnd(node, Math.max(0, Math.min(run.endOffset, len)));
+    } catch {
+      continue;
+    }
+    for (const cr of range.getClientRects()) {
+      if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+      const d = document.createElement("div");
+      d.className = "box-sel-preview";
+      d.style.left   = `${cr.left - wrapRect.left}px`;
+      d.style.top    = `${cr.top - wrapRect.top}px`;
+      d.style.width  = `${cr.width}px`;
+      d.style.height = `${cr.height}px`;
+      pageWrapper.appendChild(d);
+      _boxSelPreview.push(d);
+    }
+  }
+}
+
 // ── Event wiring ──────────────────────────────────────────────────────────────
 
 // Wire up event handlers on a single page. Call once per page after render.
@@ -446,6 +490,9 @@ export function attachHighlightHandlers(
   // left-drag. A plain left-drag (no Alt, tool off) is left alone so normal
   // text selection still works.
   pageWrapper.addEventListener("mousedown", (e) => {
+    // Any press on a page dismisses a lingering box-selection preview — whether
+    // it starts a new selection or is just a click to clear the old one.
+    clearBoxSelPreview();
     const rectTool   = !!(getRectSelectMode && getRectSelectMode());
     const altGesture = e.altKey && (e.button === 0 || e.button === 2);
     const toolGesture = rectTool && e.button === 0;
@@ -488,11 +535,14 @@ export function attachHighlightHandlers(
         if (addRectHighlights(pageNumber, runs)) repaintCb(pageNumber);
         return;
       }
+      // Show what was grabbed (persists until the next click) and offer actions.
+      paintRunsPreview(pageWrapper, textLayerDiv, runs);
       showCtxMenu(ev.clientX, ev.clientY + 8, [
         { label: "Copy", action: () => copyText(text) },
         {
           label: "Highlight",
           action: () => {
+            clearBoxSelPreview();
             if (addRectHighlights(pageNumber, runs)) repaintCb(pageNumber);
           },
         },

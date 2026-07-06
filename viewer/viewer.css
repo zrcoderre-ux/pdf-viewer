@@ -512,6 +512,16 @@ body.thumbs-open #viewer-container {
   color: transparent;
 }
 
+/* Box (marquee) selection has no native ::selection tint, so we paint the
+   grabbed glyph runs ourselves with the same blue. It persists after the mouse
+   is released (until the next click) so you can see what you selected. */
+.box-sel-preview {
+  position: absolute;
+  background: rgba(0, 100, 255, 0.3);
+  pointer-events: none;
+  z-index: 8;
+}
+
 /* Highlight overlay layer — sits between the text layer and the link layer
    in DOM order. The container itself must NOT capture pointer events, or
    it will block mousedown on the textLayer spans underneath and selection
