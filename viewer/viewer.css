@@ -562,6 +562,72 @@ body.thumbs-open #viewer-container {
   background: rgba(26, 115, 232, 0.15);
 }
 
+/* ── Form-fill overlay ────────────────────────────────────────────────────── */
+.formLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 15; /* above text/links so fields are editable */
+}
+.form-field {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+  font-family: inherit;
+  color: #000;
+  background: rgba(255, 245, 130, 0.4); /* light tint so fields are findable */
+  border: 1px solid #1a73e8;
+  border-radius: 2px;
+  padding: 0 2px;
+  margin: 0;
+}
+.form-field:focus {
+  outline: 2px solid #1a73e8;
+  background: rgba(255, 255, 255, 0.97);
+}
+input.form-field[type="checkbox"],
+input.form-field[type="radio"] {
+  background: transparent;
+  border: none;
+  accent-color: #1a73e8;
+  cursor: pointer;
+}
+select.form-field { padding: 0; }
+
+#form-bar {
+  position: fixed;
+  top: calc(var(--toolbar-height) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #2a2d30;
+  border: 1px solid #4a4d50;
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  color: #eee;
+}
+#form-bar[hidden] { display: none; }
+#form-bar .form-bar-label { color: #cfcfcf; }
+#form-bar button {
+  background: #4a4d50;
+  color: #eee;
+  border: none;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+#form-bar button:hover { background: #5a5d60; }
+#form-bar button.primary { background: #1a73e8; }
+#form-bar button.primary:hover { background: #1b66c9; }
+#form-bar button:disabled { opacity: 0.5; cursor: default; }
+
 .linkLayer a.citation-link {
   /* Covers the whole citation (a big, easy click target) but is transparent
      except for a colored bottom border — a rectangle outlined only on the

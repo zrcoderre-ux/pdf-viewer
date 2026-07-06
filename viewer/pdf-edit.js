@@ -333,7 +333,21 @@ export async function fillForm({ srcBytes, values = {}, flatten = false }) {
       } else if (field instanceof PDFCheckBox) {
         if (v) field.check(); else field.uncheck();
       } else if (field instanceof PDFRadioGroup) {
-        if (v) field.select(String(v)); else field.clear();
+        if (v) {
+          const opts = field.getOptions();
+          let choice = String(v);
+          // The value may be the option NAME (matches getOptions), or the raw
+          // export/appearance-state value the UI read from the widget, which
+          // for some forms is a positional index ("0","1"). Fall back to
+          // treating it as an index into the options when it isn't a name.
+          if (!opts.includes(choice)) {
+            const idx = parseInt(choice, 10);
+            if (Number.isInteger(idx) && idx >= 0 && idx < opts.length) choice = opts[idx];
+          }
+          field.select(choice);
+        } else {
+          field.clear();
+        }
       } else if (field instanceof PDFDropdown) {
         if (v) field.select(String(v)); else field.clear();
       } else if (field instanceof PDFOptionList) {

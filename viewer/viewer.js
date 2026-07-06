@@ -19,7 +19,7 @@ import {
   getHighlightRectGroups,
   addImportedHighlight,
 } from "./highlights.js";
-import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages } from "./pdf-edit.js";
+import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages, fillForm, hasFormFields } from "./pdf-edit.js";
 import { extractTitle } from "./footer-naming.js";
 import {
   registerEntry,
@@ -1591,6 +1591,7 @@ function resetForNewDocument() {
   // any organize-mode state / cached thumbnails from the previous document.
   thumbsRendered = false;
   resetOrganizeState();
+  exitFormMode();
   thumbDataUrlCache.clear();
   if (panelBookmarksEl) { panelBookmarksEl.innerHTML = ""; delete panelBookmarksEl.dataset.loaded; }
   if (tabBookmarksEl)   tabBookmarksEl.hidden = true;
@@ -1659,6 +1660,9 @@ async function renderBytes(buf, { sourceName } = {}) {
   // deletable ones (and we don't double-draw them — the canvas render skips
   // annotations for editable docs).
   await importHighlightAnnotations();
+  // Does this document have fillable form fields? Gates the "Fill form" action.
+  docHasForm = editingAllowed ? await hasFormFields(pdfBytes) : false;
+  updateFormMenuItem();
   statusEl.textContent = `Rendering ${pdfDoc.numPages} pages…`;
   await renderAllPages();
   statusEl.textContent = "Done";
@@ -2078,6 +2082,11 @@ async function renderPageCanvasAndText(pageNumber) {
   pdfLinkLayerDiv.className = "linkLayer pdfLinkLayer";
   wrapper.appendChild(pdfLinkLayerDiv);
 
+  // Interactive form-field overlay (populated only in form-fill mode).
+  const formLayerDiv = document.createElement("div");
+  formLayerDiv.className = "formLayer";
+  wrapper.appendChild(formLayerDiv);
+
   pagesEl.appendChild(wrapper);
 
   const ctx = canvas.getContext("2d");
@@ -2096,6 +2105,10 @@ async function renderPageCanvasAndText(pageNumber) {
   // Make the PDF's own hyperlinks clickable (PDF.js paints their visuals but
   // doesn't wire up clicks unless we overlay them ourselves).
   await placeNativeLinksForPage(page, viewport, pdfLinkLayerDiv);
+
+  // In form-fill mode, (re)build the editable field overlays for this page —
+  // this also runs on zoom re-renders, prefilled from any in-progress edits.
+  if (formMode) await renderFormOverlaysForPage(page, viewport, formLayerDiv);
 
   let textContent = await page.getTextContent();
   if (ocrEnabled && pageNeedsOcr(textContent)) {
@@ -3181,6 +3194,157 @@ if (editMenuBtn) editMenuBtn.addEventListener("click", () => {
 if (editMenuEl) editMenuEl.addEventListener("click", (e) => {
   if (e.target.closest('button[role="menuitem"]')) closeEditMenu();
 });
+
+// ── Fill form ───────────────────────────────────────────────────────────────
+// Renders editable HTML controls over the PDF's AcroForm fields. Edits are kept
+// in `formValues` (keyed by field name) so they survive zoom re-renders; on save
+// they're written back with pdf-lib's form API, optionally flattened.
+const fillFormEl   = document.getElementById("fill-form");
+const formBarEl    = document.getElementById("form-bar");
+const formSaveEl   = document.getElementById("form-save");
+const formFlattenEl = document.getElementById("form-flatten");
+const formCancelEl = document.getElementById("form-cancel");
+
+let formMode = false;
+let docHasForm = false;
+const formValues = new Map(); // fieldName -> string | boolean | string[]
+const WIDGET_ANNOTATION_TYPE = 20; // pdfjsLib.AnnotationType.WIDGET
+
+function updateFormMenuItem() {
+  if (fillFormEl) fillFormEl.hidden = !docHasForm;
+}
+
+async function renderFormOverlaysForPage(page, viewport, layerDiv) {
+  layerDiv.innerHTML = "";
+  let annots;
+  try {
+    annots = await page.getAnnotations({ intent: "display" });
+  } catch {
+    return;
+  }
+  for (const a of annots) {
+    if (!a || a.annotationType !== WIDGET_ANNOTATION_TYPE || !a.fieldName || !a.rect) continue;
+    if (a.fieldType === "Btn" && a.pushButton) continue; // action buttons have no value
+    const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(a.rect);
+    const left = Math.min(x1, x2), top = Math.min(y1, y2);
+    const width = Math.abs(x2 - x1), height = Math.abs(y2 - y1);
+    if (width < 2 || height < 2) continue;
+    const name = a.fieldName;
+    const stored = formValues.has(name) ? formValues.get(name) : undefined;
+    let ctrl = null;
+
+    if (a.fieldType === "Tx") {
+      ctrl = a.multiLine ? document.createElement("textarea") : document.createElement("input");
+      if (!a.multiLine) ctrl.type = "text";
+      const cur = stored !== undefined ? stored : (a.fieldValue || "");
+      ctrl.value = cur == null ? "" : String(cur);
+      if (a.maxLen) ctrl.maxLength = a.maxLen;
+      ctrl.style.fontSize = `${Math.max(8, Math.min(height * 0.7, 16))}px`;
+      ctrl.addEventListener("input", () => formValues.set(name, ctrl.value));
+    } else if (a.fieldType === "Btn" && a.checkBox) {
+      ctrl = document.createElement("input");
+      ctrl.type = "checkbox";
+      const cur = stored !== undefined ? stored : !!(a.fieldValue && a.fieldValue !== "Off");
+      ctrl.checked = !!cur;
+      ctrl.addEventListener("change", () => formValues.set(name, ctrl.checked));
+    } else if (a.fieldType === "Btn" && a.radioButton) {
+      ctrl = document.createElement("input");
+      ctrl.type = "radio";
+      ctrl.name = `radio-${name}`;
+      ctrl.value = a.buttonValue == null ? "" : String(a.buttonValue);
+      const sel = stored !== undefined ? stored : a.fieldValue;
+      ctrl.checked = sel != null && String(sel) === ctrl.value;
+      ctrl.addEventListener("change", () => { if (ctrl.checked) formValues.set(name, ctrl.value); });
+    } else if (a.fieldType === "Ch" && a.options && a.options.length) {
+      ctrl = document.createElement("select");
+      if (a.multiSelect) ctrl.multiple = true;
+      const cur = stored !== undefined ? stored : a.fieldValue;
+      const curArr = Array.isArray(cur) ? cur.map(String) : (cur != null ? [String(cur)] : []);
+      for (const opt of a.options) {
+        const o = document.createElement("option");
+        o.value = String(opt.exportValue);
+        o.textContent = String(opt.displayValue != null ? opt.displayValue : opt.exportValue);
+        if (curArr.includes(o.value)) o.selected = true;
+        ctrl.appendChild(o);
+      }
+      ctrl.addEventListener("change", () => {
+        formValues.set(name, ctrl.multiple
+          ? Array.from(ctrl.selectedOptions).map((o) => o.value)
+          : ctrl.value);
+      });
+    }
+    if (!ctrl) continue;
+
+    ctrl.classList.add("form-field");
+    ctrl.style.left = `${left}px`;
+    ctrl.style.top = `${top}px`;
+    ctrl.style.width = `${width}px`;
+    ctrl.style.height = `${height}px`;
+    if (a.readOnly) ctrl.disabled = true;
+    layerDiv.appendChild(ctrl);
+  }
+}
+
+async function populateAllFormOverlays() {
+  const wrappers = pagesEl.querySelectorAll(".page-wrapper");
+  for (let i = 0; i < wrappers.length; i++) {
+    const layer = wrappers[i].querySelector(".formLayer");
+    if (!layer) continue;
+    const page = await pdfDoc.getPage(i + 1);
+    await renderFormOverlaysForPage(page, page.getViewport({ scale: currentScale }), layer);
+  }
+}
+
+function clearAllFormOverlays() {
+  for (const l of pagesEl.querySelectorAll(".formLayer")) l.innerHTML = "";
+}
+
+async function enterFormMode() {
+  if (!editingAllowed || !docHasForm || formMode) return;
+  formMode = true;
+  formValues.clear();
+  document.body.classList.add("form-mode");
+  if (formBarEl) formBarEl.hidden = false;
+  statusEl.textContent = "Fill the form fields, then Save.";
+  await populateAllFormOverlays();
+}
+
+function exitFormMode() {
+  formMode = false;
+  document.body.classList.remove("form-mode");
+  if (formBarEl) formBarEl.hidden = true;
+  clearAllFormOverlays();
+  formValues.clear();
+}
+
+async function saveFilledForm(flatten) {
+  if (!formMode || !pdfBytes) return;
+  if (formSaveEl) formSaveEl.disabled = true;
+  if (formFlattenEl) formFlattenEl.disabled = true;
+  try {
+    statusEl.textContent = flatten ? "Flattening form…" : "Saving form…";
+    const values = Object.fromEntries(formValues);
+    const baked = await bakeCurrentHighlights();
+    const out = await fillForm({ srcBytes: baked, values, flatten });
+    const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
+    if (ok) {
+      exitFormMode();
+      await reloadEditedBytes(out); // recomputes docHasForm + refreshes pages
+      statusEl.textContent = flatten ? "Form flattened and saved." : "Form saved.";
+    } else statusEl.textContent = "";
+  } catch (e) {
+    console.error("[pdf-viewer] form save failed:", e);
+    statusEl.textContent = "Form save failed.";
+  } finally {
+    if (formSaveEl) formSaveEl.disabled = false;
+    if (formFlattenEl) formFlattenEl.disabled = false;
+  }
+}
+
+if (fillFormEl)   fillFormEl.addEventListener("click", enterFormMode);
+if (formSaveEl)   formSaveEl.addEventListener("click", () => saveFilledForm(false));
+if (formFlattenEl) formFlattenEl.addEventListener("click", () => saveFilledForm(true));
+if (formCancelEl) formCancelEl.addEventListener("click", exitFormMode);
 
 // Drag the Pages / Bookmarks column's right edge to resize it. The panel is
 // pinned to the left, so its width is just the pointer's x. --thumb-panel-width
