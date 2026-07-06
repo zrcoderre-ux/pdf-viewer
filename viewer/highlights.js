@@ -322,7 +322,9 @@ function ensureMarqueeEl() {
   _marqueeEl = document.createElement("div");
   _marqueeEl.id = "rect-marquee";
   Object.assign(_marqueeEl.style, {
-    position: "fixed",
+    // Absolute (document-anchored), not fixed (viewport-anchored), so the box
+    // stays over the same content if the page is scrolled mid-drag.
+    position: "absolute",
     display: "none",
     pointerEvents: "none",
     zIndex: "2147483646",
@@ -502,13 +504,16 @@ export function attachHighlightHandlers(
     // swallow the contextmenu that follows.
     const startButton = e.button;
     e.preventDefault();
-    const startX = e.clientX;
-    const startY = e.clientY;
+    // Anchor the drag in DOCUMENT coordinates (pageX/pageY) so scrolling during
+    // the drag keeps the box over the same content. The marquee is positioned
+    // absolutely, so these coordinates paint it correctly and it scrolls along.
+    const startX = e.pageX;
+    const startY = e.pageY;
     const boxEl = ensureMarqueeEl();
     boxEl.style.display = "block";
     paintMarquee(boxEl, startX, startY, startX, startY);
 
-    const onMove = (ev) => paintMarquee(boxEl, startX, startY, ev.clientX, ev.clientY);
+    const onMove = (ev) => paintMarquee(boxEl, startX, startY, ev.pageX, ev.pageY);
     const onUp = (ev) => {
       document.removeEventListener("mousemove", onMove, true);
       document.removeEventListener("mouseup", onUp, true);
@@ -518,11 +523,16 @@ export function attachHighlightHandlers(
       // the user's next normal right-click menu.)
       if (startButton === 2) _suppressNextContextMenu = true;
 
+      // collectRectSelection compares against getBoundingClientRect (viewport
+      // space), so convert the document-anchored start back to the CURRENT
+      // viewport frame; the end point is already a live client coordinate.
+      const startClientX = startX - window.scrollX;
+      const startClientY = startY - window.scrollY;
       const box = {
-        left:   Math.min(startX, ev.clientX),
-        right:  Math.max(startX, ev.clientX),
-        top:    Math.min(startY, ev.clientY),
-        bottom: Math.max(startY, ev.clientY),
+        left:   Math.min(startClientX, ev.clientX),
+        right:  Math.max(startClientX, ev.clientX),
+        top:    Math.min(startClientY, ev.clientY),
+        bottom: Math.max(startClientY, ev.clientY),
       };
       // Ignore click-sized boxes (no real drag).
       if (box.right - box.left < 4 || box.bottom - box.top < 4) return;

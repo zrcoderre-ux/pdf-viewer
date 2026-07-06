@@ -2484,7 +2484,9 @@ pagesEl.addEventListener("mousedown", (e) => {
   const wrapper = e.target.closest(".page-wrapper");
   if (!wrapper) return;
   e.preventDefault();
-  const startX = e.clientX, startY = e.clientY;
+  // Document coordinates (pageX/pageY) + an absolutely-positioned marquee, so
+  // the box stays over the same content if the page is scrolled mid-drag.
+  const startX = e.pageX, startY = e.pageY;
   const box = ensureCropMarquee();
   box.style.display = "block";
   const paint = (x1, y1) => {
@@ -2494,18 +2496,21 @@ pagesEl.addEventListener("mousedown", (e) => {
     box.style.height = `${Math.abs(y1 - startY)}px`;
   };
   paint(startX, startY);
-  const onMove = (ev) => paint(ev.clientX, ev.clientY);
+  const onMove = (ev) => paint(ev.pageX, ev.pageY);
   const onUp = async (ev) => {
     document.removeEventListener("mousemove", onMove, true);
     document.removeEventListener("mouseup", onUp, true);
     box.style.display = "none";
+    // The wrapper's DOCUMENT position is scroll-invariant, so the region is
+    // computed correctly regardless of any mid-drag scroll.
     const r = wrapper.getBoundingClientRect();
+    const docLeft = r.left + window.scrollX, docTop = r.top + window.scrollY;
     const clamp = (v) => Math.max(0, Math.min(1, v));
     const region = {
-      left:   clamp((Math.min(startX, ev.clientX) - r.left) / r.width),
-      right:  clamp((Math.max(startX, ev.clientX) - r.left) / r.width),
-      top:    clamp((Math.min(startY, ev.clientY) - r.top) / r.height),
-      bottom: clamp((Math.max(startY, ev.clientY) - r.top) / r.height),
+      left:   clamp((Math.min(startX, ev.pageX) - docLeft) / r.width),
+      right:  clamp((Math.max(startX, ev.pageX) - docLeft) / r.width),
+      top:    clamp((Math.min(startY, ev.pageY) - docTop) / r.height),
+      bottom: clamp((Math.max(startY, ev.pageY) - docTop) / r.height),
     };
     const norm = normalizeRegion(region);
     if (!norm) { statusEl.textContent = "Draw a larger box to set the text area."; return; }

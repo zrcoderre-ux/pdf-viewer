@@ -105,7 +105,9 @@ body.rect-select-mode .textLayer span { cursor: crosshair; }
 body.crop-mode .page-wrapper,
 body.crop-mode .textLayer span { cursor: crosshair; }
 #crop-marquee {
-  position: fixed;
+  /* Absolute (document-anchored), not fixed, so the box tracks the content when
+     the page is scrolled mid-drag. */
+  position: absolute;
   display: none;
   z-index: 9998;
   border: 1px dashed #1a73e8;
