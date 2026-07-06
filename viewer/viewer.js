@@ -2121,7 +2121,45 @@ async function renderPageCanvasAndText(pageNumber) {
     await textLayer.render();
   }
 
+  excludeLineNumberColumn(textLayerDiv);
+
   return { pageNumber, textContent, textLayerDiv, linkLayerDiv, highlightLayerDiv, pageWrapper: wrapper, viewport: userSpaceViewport };
+}
+
+// Pleadings print line numbers (1–28) down the left margin. Those number spans
+// are DOM-adjacent to the body text, so a normal drag-selection over the body
+// sweeps them in too — the selection appears to jump to "the numbers on the
+// side." Detect that left-margin numeric column and mark it non-selectable so
+// it's excluded from any selection (the numbers stay visible on the canvas).
+// Conservative on purpose — it only fires for a tall column of many bare 1–2
+// digit numbers hugging the left edge, which is specifically pleading line
+// numbering, not ordinary content.
+function excludeLineNumberColumn(textLayerDiv) {
+  const spans = textLayerDiv.querySelectorAll("span");
+  if (spans.length < 8) return;
+  const width = textLayerDiv.offsetWidth || 1;
+  const height = textLayerDiv.offsetHeight || 1;
+  const marginX = width * 0.08; // left 8% of the page
+  const cand = [];
+  for (const s of spans) {
+    const t = (s.textContent || "").trim();
+    if (!/^\d{1,2}$/.test(t)) continue;      // a bare 1–2 digit number
+    if (s.offsetLeft > marginX) continue;    // hugging the left edge
+    cand.push(s);
+  }
+  if (cand.length < 8) return;
+  let minTop = Infinity, maxTop = -Infinity;
+  for (const s of cand) {
+    const y = s.offsetTop;
+    if (y < minTop) minTop = y;
+    if (y > maxTop) maxTop = y;
+  }
+  // Must span most of the page vertically to be a line-number column.
+  if (maxTop - minTop < height * 0.4) return;
+  for (const s of cand) {
+    s.style.userSelect = "none";
+    s.style.webkitUserSelect = "none";
+  }
 }
 
 // --- Zoom controls ---
