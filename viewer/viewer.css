@@ -99,6 +99,59 @@ body { overflow-y: auto; }
 /* Rectangle-select tool: show a crosshair so it's clear a drag draws a box. */
 body.rect-select-mode .page-wrapper,
 body.rect-select-mode .textLayer span { cursor: crosshair; }
+
+/* Crop (selectable-area) tool: crosshair while active, a live drag box, and a
+   dashed indicator of the current selectable region. */
+body.crop-mode .page-wrapper,
+body.crop-mode .textLayer span { cursor: crosshair; }
+#crop-marquee {
+  position: fixed;
+  display: none;
+  z-index: 9998;
+  border: 1px dashed #1a73e8;
+  background: rgba(26, 115, 232, 0.12);
+  pointer-events: none;
+}
+.crop-region {
+  position: absolute;
+  z-index: 4;
+  border: 2px dashed #1a73e8;
+  background: rgba(26, 115, 232, 0.06);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+#crop-bar {
+  position: fixed;
+  top: calc(var(--toolbar-height) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #2a2d30;
+  border: 1px solid #4a4d50;
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  color: #eee;
+}
+#crop-bar[hidden] { display: none; }
+#crop-bar .crop-bar-label { color: #cfcfcf; }
+#crop-bar button {
+  background: #4a4d50;
+  color: #eee;
+  border: none;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+#crop-bar button:hover { background: #5a5d60; }
+#crop-bar button.primary { background: #1a73e8; }
+#crop-bar button.primary:hover { background: #1b66c9; }
 #zoom-level { min-width: 48px; text-align: center; }
 #page-indicator { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
 

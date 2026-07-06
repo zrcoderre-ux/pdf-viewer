@@ -167,6 +167,10 @@ const editMenuWrap = document.getElementById("edit-menu-wrap");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
+const cropSelectEl = document.getElementById("crop-select");
+const cropBarEl    = document.getElementById("crop-bar");
+const cropResetEl  = document.getElementById("crop-reset");
+const cropDoneEl   = document.getElementById("crop-done");
 const pageIndicatorEl  = document.getElementById("page-indicator");
 
 let currentScale = 1.5;
@@ -210,6 +214,10 @@ let highlightMode = false;
 // Rectangle-select tool: when on, a left-drag sweeps a marquee box instead of
 // a flowing text selection. Alt+drag does the same regardless of this toggle.
 let rectSelectMode = false;
+// Selectable-text region (the crop tool): {left,right,top,bottom} as fractions
+// of the page [0,1], or null for the whole page. Persisted across documents.
+let selectionRegion = null;
+let cropMode = false;
 // Random id for this document's PDF-history entry, so the session can update
 // its final name later without storing (or keying on) the document URL.
 let currentHistoryId = null;
@@ -1285,8 +1293,9 @@ chrome.storage.sync.get(
     // Re-paint with the loaded mode now in effect. If a URL-derived name
     // was already set above, this picks the right one to display.
     applyNamingMode();
-    chrome.storage.local.get({ citationRepo: {} }, ({ citationRepo: r }) => {
+    chrome.storage.local.get({ citationRepo: {}, textSelectionRegion: null }, ({ citationRepo: r, textSelectionRegion }) => {
       citationRepo = r || {};
+      selectionRegion = normalizeRegion(textSelectionRegion);
       loadAndRender();
     });
   }
@@ -2144,9 +2153,27 @@ async function renderPageCanvasAndText(pageNumber) {
     await textLayer.render();
   }
 
-  excludeLineNumberColumn(textLayerDiv);
+  applySelectableArea(textLayerDiv);
+  updateCropOverlay(wrapper);
 
   return { pageNumber, textContent, textLayerDiv, linkLayerDiv, highlightLayerDiv, pageWrapper: wrapper, viewport: userSpaceViewport };
+}
+
+// Limit which text is selectable. If the user has drawn a selectable-text region
+// (the crop tool), clear the text of spans whose center falls outside it — they
+// stay visible on the canvas but can't be selected or swept into a selection.
+// With no region set, fall back to the automatic line-number-column heuristic.
+function applySelectableArea(textLayerDiv) {
+  if (!selectionRegion) { excludeLineNumberColumn(textLayerDiv); return; }
+  const W = textLayerDiv.offsetWidth || 1;
+  const H = textLayerDiv.offsetHeight || 1;
+  const { left, right, top, bottom } = selectionRegion;
+  for (const s of textLayerDiv.querySelectorAll("span")) {
+    if (!s.textContent) continue;
+    const cx = (s.offsetLeft + s.offsetWidth / 2) / W;
+    const cy = (s.offsetTop + s.offsetHeight / 2) / H;
+    if (cx < left || cx > right || cy < top || cy > bottom) s.textContent = "";
+  }
 }
 
 // Pleadings print line numbers (1–28) down the left margin. Those number spans
@@ -2364,6 +2391,132 @@ if (rectSelectToggleEl) {
     document.body.classList.toggle("rect-select-mode", rectSelectMode);
   });
 }
+
+// ── Crop tool: user-defined selectable-text region ──────────────────────────
+// The user toggles the tool on and drags a box; text outside the box becomes
+// non-selectable (see applySelectableArea). The region is saved and reused for
+// every document until changed or reset — a reliable, user-controlled answer to
+// margin line numbers (and anything else) leaking into selections.
+
+// Validate a stored region; return null (whole page) if malformed.
+function normalizeRegion(r) {
+  if (!r || typeof r !== "object") return null;
+  let { left, right, top, bottom } = r;
+  if (![left, right, top, bottom].every((v) => typeof v === "number" && v >= 0 && v <= 1)) return null;
+  if (right - left < 0.02 || bottom - top < 0.02) return null;
+  return { left, right, top, bottom };
+}
+
+// Draw (or remove) the dashed region indicator on a page wrapper.
+function updateCropOverlay(wrapper) {
+  let box = wrapper.querySelector(".crop-region");
+  if (!cropMode || !selectionRegion) {
+    if (box) box.remove();
+    return;
+  }
+  if (!box) {
+    box = document.createElement("div");
+    box.className = "crop-region";
+    wrapper.appendChild(box);
+  }
+  const { left, right, top, bottom } = selectionRegion;
+  box.style.left = `${left * 100}%`;
+  box.style.top = `${top * 100}%`;
+  box.style.width = `${(right - left) * 100}%`;
+  box.style.height = `${(bottom - top) * 100}%`;
+}
+
+function updateAllCropOverlays() {
+  for (const w of pagesEl.querySelectorAll(".page-wrapper")) updateCropOverlay(w);
+}
+
+function saveSelectionRegion() {
+  chrome.storage.local.set({ textSelectionRegion: selectionRegion });
+}
+
+// Re-render so spans get their text back, then re-apply the current region.
+async function reapplySelectableArea() {
+  await renderAllPages();
+  updateAllCropOverlays();
+}
+
+function setCropMode(on) {
+  cropMode = on;
+  if (on) {
+    // Turn off the other drag tools so their marquees don't fight the crop drag.
+    if (highlightMode) {
+      highlightMode = false;
+      if (highlightToggleEl) highlightToggleEl.setAttribute("aria-pressed", "false");
+      document.body.classList.remove("highlight-mode");
+    }
+    if (rectSelectMode) {
+      rectSelectMode = false;
+      if (rectSelectToggleEl) rectSelectToggleEl.setAttribute("aria-pressed", "false");
+      document.body.classList.remove("rect-select-mode");
+    }
+  }
+  if (cropSelectEl) cropSelectEl.setAttribute("aria-pressed", String(on));
+  document.body.classList.toggle("crop-mode", on);
+  if (cropBarEl) cropBarEl.hidden = !on;
+  updateAllCropOverlays();
+}
+
+if (cropSelectEl) cropSelectEl.addEventListener("click", () => setCropMode(!cropMode));
+if (cropDoneEl)   cropDoneEl.addEventListener("click", () => setCropMode(false));
+if (cropResetEl)  cropResetEl.addEventListener("click", async () => {
+  selectionRegion = null;
+  saveSelectionRegion();
+  statusEl.textContent = "Selectable area reset to the full page.";
+  await reapplySelectableArea();
+});
+
+// Marquee drag to define the region (only while the crop tool is active).
+let _cropMarquee = null;
+function ensureCropMarquee() {
+  if (_cropMarquee) return _cropMarquee;
+  _cropMarquee = document.createElement("div");
+  _cropMarquee.id = "crop-marquee";
+  document.body.appendChild(_cropMarquee);
+  return _cropMarquee;
+}
+pagesEl.addEventListener("mousedown", (e) => {
+  if (!cropMode || e.button !== 0) return;
+  const wrapper = e.target.closest(".page-wrapper");
+  if (!wrapper) return;
+  e.preventDefault();
+  const startX = e.clientX, startY = e.clientY;
+  const box = ensureCropMarquee();
+  box.style.display = "block";
+  const paint = (x1, y1) => {
+    box.style.left = `${Math.min(startX, x1)}px`;
+    box.style.top = `${Math.min(startY, y1)}px`;
+    box.style.width = `${Math.abs(x1 - startX)}px`;
+    box.style.height = `${Math.abs(y1 - startY)}px`;
+  };
+  paint(startX, startY);
+  const onMove = (ev) => paint(ev.clientX, ev.clientY);
+  const onUp = async (ev) => {
+    document.removeEventListener("mousemove", onMove, true);
+    document.removeEventListener("mouseup", onUp, true);
+    box.style.display = "none";
+    const r = wrapper.getBoundingClientRect();
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    const region = {
+      left:   clamp((Math.min(startX, ev.clientX) - r.left) / r.width),
+      right:  clamp((Math.max(startX, ev.clientX) - r.left) / r.width),
+      top:    clamp((Math.min(startY, ev.clientY) - r.top) / r.height),
+      bottom: clamp((Math.max(startY, ev.clientY) - r.top) / r.height),
+    };
+    const norm = normalizeRegion(region);
+    if (!norm) { statusEl.textContent = "Draw a larger box to set the text area."; return; }
+    selectionRegion = norm;
+    saveSelectionRegion();
+    statusEl.textContent = "Selectable area set.";
+    await reapplySelectableArea();
+  };
+  document.addEventListener("mousemove", onMove, true);
+  document.addEventListener("mouseup", onUp, true);
+});
 
 // Download saves the original PDF to the user's Downloads folder. We trigger
 // a regular browser download by creating an <a download> pointing at a blob

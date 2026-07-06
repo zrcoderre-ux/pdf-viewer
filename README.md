@@ -19,6 +19,13 @@ In addition to citation linking, the viewer supports:
   button), or by turning on the **▭ Box select** tool in the toolbar and
   dragging with the left button. This is an alternative to the default flowing
   selection.
+- **Selectable text area (crop)** — turn on the **⬚ Text area** tool and drag a
+  box to define exactly what's selectable; text outside it (e.g. pleading line
+  numbers in the margin) becomes non-selectable, so a normal drag can't sweep it
+  in. The numbers stay visible on the page — they just don't join your selection
+  or copy. The area is remembered and applied to every document until you change
+  it or **Reset to full page**. (With no area set, the viewer still auto-detects
+  and excludes a pleading line-number column.)
 - **Persistent highlighting** — select any text and release the mouse to
   apply a yellow highlight. Right-click a highlight to remove it. Highlights
   persist across zoom changes; for editable documents they can be saved into
