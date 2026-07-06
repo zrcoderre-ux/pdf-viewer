@@ -25,6 +25,11 @@ import {
   StandardFonts,
   degrees,
   rgb,
+  PDFTextField,
+  PDFCheckBox,
+  PDFRadioGroup,
+  PDFDropdown,
+  PDFOptionList,
 } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
 
 // Yellow, matching the on-screen highlight, at 40% so text stays readable.
@@ -304,6 +309,54 @@ export async function appendImagesAsPages({ srcBytes, images, position = "end" }
     insertAt++;
   }
   return doc.save();
+}
+
+// Fill AcroForm fields and optionally flatten them. `values` maps a field's
+// fully-qualified name to its new value:
+//   text field      → string
+//   checkbox        → boolean
+//   radio group     → the chosen option's export value (string)
+//   dropdown/list   → an option string (or array of strings for multi-select)
+// Fields absent from `values` keep whatever they already had. When `flatten` is
+// true the filled values are baked into the page content and the interactive
+// fields are removed, so the result is no longer editable.
+export async function fillForm({ srcBytes, values = {}, flatten = false }) {
+  const doc = await PDFDocument.load(srcBytes);
+  const form = doc.getForm();
+  for (const field of form.getFields()) {
+    const name = field.getName();
+    if (!(name in values)) continue;
+    const v = values[name];
+    try {
+      if (field instanceof PDFTextField) {
+        field.setText(v == null ? "" : String(v));
+      } else if (field instanceof PDFCheckBox) {
+        if (v) field.check(); else field.uncheck();
+      } else if (field instanceof PDFRadioGroup) {
+        if (v) field.select(String(v)); else field.clear();
+      } else if (field instanceof PDFDropdown) {
+        if (v) field.select(String(v)); else field.clear();
+      } else if (field instanceof PDFOptionList) {
+        if (v && v.length) field.select(Array.isArray(v) ? v.map(String) : [String(v)]);
+        else field.clear();
+      }
+    } catch {
+      // A value the field rejects (e.g. an option not in its list) is skipped
+      // rather than aborting the whole fill.
+    }
+  }
+  if (flatten) form.flatten();
+  return doc.save();
+}
+
+// Whether a PDF has any interactive AcroForm fields.
+export async function hasFormFields(bytes) {
+  try {
+    const doc = await PDFDocument.load(bytes);
+    return doc.getForm().getFields().length > 0;
+  } catch {
+    return false;
+  }
 }
 
 // Page count of a PDF (used to report merge results).
