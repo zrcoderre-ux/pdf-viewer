@@ -548,6 +548,20 @@ body.thumbs-open #viewer-container {
   pointer-events: none;
 }
 
+/* The PDF's own hyperlinks (link annotations). The blue/underline visual is
+   already baked into the page by the document author, so this overlay is just an
+   invisible click target with a faint hover tint for discoverability. */
+.pdfLinkLayer a.pdf-link {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.1s ease;
+}
+.pdfLinkLayer a.pdf-link:hover {
+  background: rgba(26, 115, 232, 0.15);
+}
+
 .linkLayer a.citation-link {
   /* Covers the whole citation (a big, easy click target) but is transparent
      except for a colored bottom border — a rectangle outlined only on the

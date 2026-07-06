@@ -1977,6 +1977,52 @@ function updatePageIndicator() {
 
 document.addEventListener("scroll", updatePageIndicator, { passive: true });
 
+// Overlay clickable elements for the PDF's own link annotations (external URLs
+// and internal go-to-page links), so the document's native hyperlinks work here
+// the way they do in Acrobat. `viewport` is the display viewport (current zoom);
+// convertToViewportRectangle maps the annotation's PDF-space rect to layer px.
+const LINK_ANNOTATION_TYPE = 2; // pdfjsLib.AnnotationType.LINK
+async function placeNativeLinksForPage(page, viewport, layerDiv) {
+  let annots;
+  try {
+    annots = await page.getAnnotations({ intent: "display" });
+  } catch {
+    return;
+  }
+  for (const a of annots) {
+    if (!a || a.annotationType !== LINK_ANNOTATION_TYPE || !a.rect) continue;
+    const hasUrl = typeof a.url === "string" && a.url;
+    const hasDest = a.dest != null;
+    if (!hasUrl && !hasDest) continue; // skip links with no navigable target
+    const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(a.rect);
+    const left = Math.min(x1, x2), top = Math.min(y1, y2);
+    const width = Math.abs(x2 - x1), height = Math.abs(y2 - y1);
+    if (width < 1 || height < 1) continue;
+    const el = document.createElement("a");
+    el.className = "pdf-link";
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.style.width = `${width}px`;
+    el.style.height = `${height}px`;
+    if (hasUrl) {
+      el.href = a.url;
+      el.target = "_blank";
+      el.rel = "noopener noreferrer";
+      el.title = a.url;
+    } else {
+      el.href = "#";
+      el.title = "Go to linked page";
+      const dest = a.dest;
+      el.addEventListener("click", async (e) => {
+        e.preventDefault();
+        const pn = await destToPageNum(dest);
+        if (pn) scrollToPage(pn);
+      });
+    }
+    layerDiv.appendChild(el);
+  }
+}
+
 async function renderPageCanvasAndText(pageNumber) {
   const page = await pdfDoc.getPage(pageNumber);
   const viewport = page.getViewport({ scale: currentScale });
@@ -2026,6 +2072,12 @@ async function renderPageCanvasAndText(pageNumber) {
   linkLayerDiv.className = "linkLayer";
   wrapper.appendChild(linkLayerDiv);
 
+  // Separate layer for the PDF's OWN hyperlinks (link annotations), kept apart
+  // from the citation overlay so the two never clobber each other.
+  const pdfLinkLayerDiv = document.createElement("div");
+  pdfLinkLayerDiv.className = "linkLayer pdfLinkLayer";
+  wrapper.appendChild(pdfLinkLayerDiv);
+
   pagesEl.appendChild(wrapper);
 
   const ctx = canvas.getContext("2d");
@@ -2040,6 +2092,10 @@ async function renderPageCanvasAndText(pageNumber) {
     ? pdfjsLib.AnnotationMode.DISABLE
     : pdfjsLib.AnnotationMode.ENABLE;
   await page.render({ canvasContext: ctx, viewport, annotationMode }).promise;
+
+  // Make the PDF's own hyperlinks clickable (PDF.js paints their visuals but
+  // doesn't wire up clicks unless we overlay them ourselves).
+  await placeNativeLinksForPage(page, viewport, pdfLinkLayerDiv);
 
   let textContent = await page.getTextContent();
   if (ocrEnabled && pageNeedsOcr(textContent)) {
