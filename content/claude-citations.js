@@ -345,6 +345,37 @@
     }
   }
 
+  // The message composer is a fixed bar at the bottom of the page; chat text
+  // scrolls *behind* it. Because our overlay sits above everything (max
+  // z-index), a citation strip whose rect lands under the composer would paint
+  // its underline over the "write a message" box. Collect the composer's input
+  // bar rect(s) so paint can drop those strips.
+  function composerRects() {
+    const rects = [];
+    for (const ce of document.querySelectorAll("[contenteditable='true'], [contenteditable=''], textarea")) {
+      // Prefer the surrounding fixed/sticky input bar (so its toolbar/padding is
+      // covered too), else fall back to the editable element itself. Bounded
+      // climb so this stays cheap on every scroll frame.
+      let box = ce, p = ce.parentElement, depth = 0;
+      while (p && p !== document.body && depth < 20) {
+        const pos = getComputedStyle(p).position;
+        if (pos === "fixed" || pos === "sticky") { box = p; break; }
+        p = p.parentElement; depth++;
+      }
+      const r = box.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) rects.push(r);
+    }
+    return rects;
+  }
+
+  function rectIntersectsAny(rect, others) {
+    for (const o of others) {
+      if (rect.left < o.right && rect.right > o.left &&
+          rect.top < o.bottom && rect.bottom > o.top) return true;
+    }
+    return false;
+  }
+
   // ── Paint: ranges → underline strips ─────────────────────────────────────────
 
   let rafPending = false;
@@ -368,6 +399,7 @@
     const overlay = ensureOverlay();
     overlay.dataset.provider = provider;
     overlay.textContent = "";
+    const blockers = composerRects();
     for (const c of citations) {
       let rects;
       try { rects = c.range.getClientRects(); } catch { continue; }
@@ -376,6 +408,9 @@
         // Drop strips for text clipped out of a scrollable/collapsed container
         // (its rect would otherwise land over unrelated chat text).
         if (!rectVisibleInClips(rect, c.clipEls)) continue;
+        // Drop strips that fall under the message composer (chat text scrolls
+        // behind it, but our overlay would otherwise paint over the input box).
+        if (rectIntersectsAny(rect, blockers)) continue;
         const a = document.createElement("a");
         a.href = c.url;
         a.target = "_blank";
