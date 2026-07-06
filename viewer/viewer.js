@@ -2150,19 +2150,21 @@ async function renderPageCanvasAndText(pageNumber) {
 }
 
 // Pleadings print line numbers (1–28) down the left margin. Those number spans
-// are DOM-adjacent to the body text, so a normal drag-selection over the body
-// sweeps them in too — the selection appears to jump to "the numbers on the
-// side." Detect that left-margin numeric column and mark it non-selectable so
-// it's excluded from any selection (the numbers stay visible on the canvas).
-// Conservative on purpose — it only fires for a tall column of many bare 1–2
-// digit numbers hugging the left edge, which is specifically pleading line
-// numbering, not ordinary content.
+// sit between the body-text spans in DOM order, so a drag-selection over the
+// body sweeps them in too — the selection appears to jump to "the numbers on
+// the side." `user-select: none` does NOT prevent this: a selection range that
+// spans across such a span still includes its text. So instead we clear the
+// text of the number spans in the (invisible) text layer — the numbers stay
+// visible because they're painted on the page canvas, they just no longer
+// contribute any selectable/copyable text. Conservative detection: only a tall
+// left-margin column of many bare 1–2 digit numbers, i.e. line numbering, not
+// ordinary content.
 function excludeLineNumberColumn(textLayerDiv) {
   const spans = textLayerDiv.querySelectorAll("span");
   if (spans.length < 8) return;
   const width = textLayerDiv.offsetWidth || 1;
   const height = textLayerDiv.offsetHeight || 1;
-  const marginX = width * 0.08; // left 8% of the page
+  const marginX = width * 0.12; // left ~1 inch of a Letter page
   const cand = [];
   for (const s of spans) {
     const t = (s.textContent || "").trim();
@@ -2179,10 +2181,7 @@ function excludeLineNumberColumn(textLayerDiv) {
   }
   // Must span most of the page vertically to be a line-number column.
   if (maxTop - minTop < height * 0.4) return;
-  for (const s of cand) {
-    s.style.userSelect = "none";
-    s.style.webkitUserSelect = "none";
-  }
+  for (const s of cand) s.textContent = "";
 }
 
 // Repaint the custom selection tint from the live browser selection. Because
