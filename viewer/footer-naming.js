@@ -135,18 +135,23 @@ function stripCaseNumberNoise(s) {
   return s;
 }
 
-// === step 4: "Notice of Motion and Motion ..." prefix collapse ===
+// === step 4: "Notice of Motion ... and Motion ..." prefix collapse ===
 //
-// Only strip when followed by "Motion" — the "and Motion ..." form is the
-// combined-document convention. Bare "Notice of Motion for X" is its own
-// type (a procedural notice) and is preserved for the Notice-of-Motion rule.
+// A "Notice of Motion" whose footer also contains the phrase "and Motion" is
+// the combined notice+motion filing, so it's really a Motion. Strip the
+// "Notice of Motion ... and " lead-in (up to the "and" before that Motion) so
+// the Motion rule sees the actual motion. This fires whether "and Motion"
+// immediately follows "Notice of Motion" ("Notice of Motion and Motion to X")
+// or trails other words ("Notice of Motion for Summary Judgment and Motion for
+// Adjudication"). A bare "Notice of Motion for X" with no "and Motion" is left
+// alone — it's its own procedural-notice type.
 //
 // Accepts an optional leading party possessive in the same step so the
 // bare-possessive party-strip never sees this construction. Eliminates a
 // class of misfires where the lazy 's regex walked past Motion words.
 function stripNoticeOfMotionAndMotion(s) {
   return s.replace(
-    /^(?:[a-z][a-z\s.'&,-]+?'s\s+)?notice\s+of\s+motion\s+and\s+(?=motion\b)/i,
+    /^(?:[a-z][a-z\s.'&,-]+?'s\s+)?notice\s+of\s+motion\b[\s\S]*?\band\s+(?=motion\b)/i,
     ""
   );
 }

@@ -308,6 +308,28 @@ const tests = [
     raw: "DECLARATION OF DANIEL FISHER, ESQ AND PLAINTIFF'S COMPENDIUM OF EXHIBITS IN SUPPORT OF PLAINTIFF'S OPPOSITION TO MOTION SUMMARY JUDGMENT",
     expect: { canonical: "Fisher Decl. ISO Opp." },
   },
+
+  // === Notice of Motion → Motion when the footer contains "and Motion" ===
+  {
+    name: "nom-and-motion-adjacent",
+    raw: "NOTICE OF MOTION AND MOTION TO COMPEL FURTHER RESPONSES",
+    expect: { canonical: "Motion", target: "Mot. to Compel Further Responses" },
+  },
+  {
+    name: "nom-and-motion-nonadjacent",  // "and Motion" trails other words
+    raw: "Notice of Motion for Summary Judgment and Motion for Summary Adjudication",
+    expect: { canonical: "Motion" },
+  },
+  {
+    name: "nom-and-motion-with-party",
+    raw: "Defendant's Notice of Motion and Motion to Strike Answer",
+    expect: { canonical: "Motion", target: "Mot. to Strike Answer" },
+  },
+  {
+    name: "nom-bare-stays-notice",  // no "and Motion" → preserved
+    raw: "Notice of Motion for Sanctions",
+    expect: { canonical: "Notice of Motion" },
+  },
 ];
 
 // --- runner ---
