@@ -102,9 +102,9 @@ const tests = [
     expect: { canonical: "Motion", target: "Mot. to Compel Arbitration" },
   },
   {
-    name: "notice-of-motion-for-msj-bare",
+    name: "notice-of-motion-for-msj-bare",  // a Notice of Motion IS the motion
     raw: "Notice of Motion for Summary Judgment",
-    expect: { canonical: "Notice of Motion", target: "Mot. for Summary Judgment" },
+    expect: { canonical: "Motion", target: "Mot. for Summary Judgment" },
   },
   {
     name: "notice-of-motion-and-motion-to-strike",
@@ -326,10 +326,22 @@ const tests = [
     expect: { canonical: "Motion", target: "Mot. to Strike Answer" },
   },
   {
-    name: "nom-bare-stays-notice",  // no "and Motion" → preserved
+    name: "nom-bare-becomes-motion",  // a Notice of Motion IS the motion
     raw: "Notice of Motion for Sanctions",
-    expect: { canonical: "Notice of Motion" },
+    expect: { canonical: "Motion" },
   },
+
+  // === New doc-type rules derived from naming history ===
+  { name: "objection-to-decl", raw: "OBJECTIONS TO ANDERSON DECL - MOTION TO VACATE DEFAULT", expect: { canonical: "Objection to Anderson Decl." } },
+  { name: "proposed-order", raw: "[PROPOSED] ORDER RE PLAINTIFF'S MOTION FOR LEAVE TO AMEND COMPLAINT", expect: { canonical: "Proposed Order" } },
+  { name: "proposed-order-bare", raw: "[PROPOSED] ORDER", expect: { canonical: "Proposed Order" } },
+  { name: "proof-of-service", raw: "PROOF OF SERVICE RE NOTICE OF MOTION AND MOTION TO VACATE", expect: { canonical: "Proof of Service" } },
+  { name: "request-for-dismissal", raw: "REQUEST FOR DISMISSAL", expect: { canonical: "Request for Dismissal" } },
+  { name: "amendment-to-complaint", raw: "AMENDMENT TO COMPLAINT", expect: { canonical: "Amendment to Complaint" } },
+  { name: "glued-possessive-opposition", raw: "PLAINTIFF'SOPPOSITION TO DEFENDANT'SMOTION FOR SUMMARY ADJUDICATION", expect: { canonical: "Opposition" } },
+  { name: "glued-declaration", raw: "YUDECLARATION IN SUPPORT OF PLAINTIFF'SOPPOSITION TO DEFENDANT'SMSA", expect: { canonical: "Yu Decl. ISO Opp." } },
+  { name: "leading-case-number", raw: "25STCV32877 KOSLYNDECLARATION REDEMURRER", expect: { canonical: "Koslyn Decl." } },
+  { name: "declarant-middle-initial-v", raw: "DECLARATION OF PAUL V. CARELLI IV IN SUPPORT OF DEFENDANT'S OPPOSITION", expect: { canonical: "Carelli Decl. ISO Opp." } },
 ];
 
 // --- runner ---

@@ -275,10 +275,26 @@ let sourceRawName = "";
 // When true, the source filename is run through the same name-altering rules
 // as footer titles; when false (default), the raw source name is shown as-is.
 let alterSource = false;
+// True when the last computeSourceDisplay recognized a document *type* from the
+// source filename (via the footer/type engine). Lets applyNamingMode treat a
+// typed source name as a strong signal for the "best of both" fallback.
+let sourceHasType = false;
 
 // Derive the source display name from the raw filename, honoring alterSource.
+// With alterSource on, first try the smart type engine (recognizes Decl. /
+// Motion / Opposition / Demurrer / etc. from the filename itself); fall back to
+// the general title cleanup for anything it doesn't classify.
 function computeSourceDisplay(rawNoExt) {
-  if (alterSource) return simplifyName(rawNoExt) || rawNoExt || "PDF";
+  sourceHasType = false;
+  if (!rawNoExt) return "PDF";
+  if (alterSource) {
+    const parsed = extractTitle(rawNoExt.replace(/[_]+/g, " "));
+    if (parsed.canonical) {
+      sourceHasType = true;
+      return parsed.canonical;
+    }
+    return simplifyName(rawNoExt) || rawNoExt || "PDF";
+  }
   return rawNoExt || "PDF";
 }
 
@@ -1244,24 +1260,34 @@ function recordFinalName(name) {
 // resolves, and when a sibling tab's session entry changes (collision).
 async function applyNamingMode() {
   if (userOverrodeName) return;
-  if (namingMode === "footer") {
-    if (footerExtraction && footerExtraction.displayName) {
-      // Run disambiguation against any sibling viewer tabs.
-      const disambiguated = await computeDisplayForThisTab();
-      const name = disambiguated || footerExtraction.displayName;
-      paintDisplayName(name);
-      // Keep serverFilename in sync so Download reuses the name.
-      serverFilename = name;
-    } else if (sourceDisplayName) {
-      // Footer mode but no extraction yet — show source as placeholder.
-      paintDisplayName(sourceDisplayName);
-    }
+  // "Best of both": the selected mode is the preference, but if its signal is
+  // weak (no recognized document type) we fall back to the other source when it
+  // DID recognize a type — whichever is closer to a real name wins. Final
+  // fallback is the cleaned source filename.
+  const footerTyped = !!(footerExtraction && footerExtraction.canonical);
+  const preferFooter = namingMode === "footer";
+
+  const useFooter = async () => {
+    const disambiguated = await computeDisplayForThisTab();
+    return disambiguated || footerExtraction.displayName;
+  };
+
+  let name = null;
+  if (preferFooter) {
+    if (footerTyped) name = await useFooter();
+    else if (sourceHasType && sourceDisplayName) name = sourceDisplayName; // typed source beats an untyped footer
+    else if (footerExtraction && footerExtraction.displayName) name = footerExtraction.displayName;
+    else if (sourceDisplayName) name = sourceDisplayName;
   } else {
-    // Source mode.
-    if (sourceDisplayName) {
-      paintDisplayName(sourceDisplayName);
-      serverFilename = sourceDisplayName;
-    }
+    if (sourceHasType && sourceDisplayName) name = sourceDisplayName;
+    else if (footerTyped) name = await useFooter();                        // typed footer beats an untyped source
+    else if (sourceDisplayName) name = sourceDisplayName;
+    else if (footerExtraction && footerExtraction.displayName) name = footerExtraction.displayName;
+  }
+
+  if (name) {
+    paintDisplayName(name);
+    serverFilename = name;
   }
 }
 

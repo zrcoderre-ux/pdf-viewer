@@ -47,6 +47,16 @@ function normalize(raw) {
   return String(raw)
     .replace(/[\u2018\u2019\u201B\u2032]/g, "'")
     .replace(/[\u201C\u201D\u201F\u2033]/g, '"')
+    // Repair run-together words from PDF text extraction that drops spaces \u2014
+    // they otherwise defeat the \b-anchored type keywords below.
+    //   "PLAINTIFF'SOPPOSITION" \u2192 "PLAINTIFF'S OPPOSITION"  (glued possessive;
+    //     only split before an UPPERCASE letter so names like O'Sullivan/D'Souza
+    //     are left intact)
+    //   "YUDECLARATION"         \u2192 "YU DECLARATION"          (name glued to type)
+    //   "INSUPPORT OF"          \u2192 "IN SUPPORT OF"
+    .replace(/(['\u2019]s)(?=[A-Z])/gi, "$1 ")
+    .replace(/([A-Za-z])(declarations?)\b/gi, "$1 $2")
+    .replace(/\binsupport\b/gi, "in support")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -112,10 +122,15 @@ function titleCasePhrase(s) {
 // Both sides of v. need uppercase first letter (so lowercase prose "v" doesn't trip).
 // We take the LAST v.-match in the string — case captions are at the tail.
 function capturePartyFromCaptionTail(s) {
+  // A declaration is named after its declarant, never the case caption — and a
+  // declarant's middle initial "V." ("Paul V. Carelli") looks exactly like a
+  // caption "v." connector, which would wrongly truncate the name. So skip
+  // caption-party capture entirely for declarations.
+  if (/\bdecl(?:aration|\.)\s+of\b/i.test(s)) return { stripped: s, party: null };
   // [Vv]\. for the connector — case captions use either V. or v.
   // Surrounding tokens require uppercase first letter so lowercase prose
   // "guns v cars" doesn't trip.
-  const matches = [...s.matchAll(/\b([A-Z][A-Za-z'-]+)\s+[Vv]\.?\s+[A-Z][A-Za-z'-]+/g)];
+  const matches = [...s.matchAll(/\b([A-Z][A-Za-z'-]+)\s+[Vv]s?\.?\s+[A-Z][A-Za-z'-]+/g)];
   if (matches.length === 0) return { stripped: s, party: null };
   const m = matches[matches.length - 1];
   const party = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
@@ -125,6 +140,10 @@ function capturePartyFromCaptionTail(s) {
 // === step 3: noise stripping ===
 
 function stripCaseNumberNoise(s) {
+  // Leading California case number token, e.g. "25STCV32877 ..." or
+  // "30STCV12345 ..." printed at the top of a caption — strip it so it doesn't
+  // become the leading word of the name.
+  s = s.replace(/^\s*\d{2}[A-Z]{2,6}\d{3,}\b\s*/i, "").trim();
   // "CASE NO. 30STCV12345" → strip from here to end.
   s = s.replace(/\bcase\s+(?:no\.?|number)\s+\S.*$/i, "").trim();
   // Trailing comma-laden descriptive blobs like "for compensatory, punitive,
@@ -264,8 +283,10 @@ function titleCasePartyLabel(name) {
 //   or punctuation; last token in the captured slice is the surname.
 //   "[Last] Declaration" or "[Last] Decl[.]"
 function lastNameFromOf(s) {
+  // Accept the abbreviated "Decl. of {name}" (common in filenames) as well as
+  // the spelled-out "Declaration of {name}".
   const m = s.match(
-    /\bdeclaration\s+of\s+([A-Za-z][A-Za-z'\-.]*(?:\s+[A-Za-z][A-Za-z'\-.]*)*?)(?=\s+(?:in\s+support(?:\s+of)?|in\s+supp\.?|i\/?s\/?o|iso)\b|\s*[,.]|$)/i
+    /\b(?:declaration|decl\.?)\s+of\s+([A-Za-z][A-Za-z'\-.]*(?:\s+[A-Za-z][A-Za-z'\-.]*)*?)(?=\s+(?:in\s+support(?:\s+of)?|in\s+supp\.?|i\/?s\/?o|iso)\b|\s*[,.]|$)/i
   );
   if (!m) return null;
   return titleCaseLastWord(m[1]);
@@ -296,6 +317,20 @@ function detectISOTarget(s) {
 }
 
 const RULES = [
+  // 0. Objection to a declaration. Must precede the declaration rules, which
+  // would otherwise name it after the declarant ("Anderson Decl.") instead of
+  // as the objection to that declaration.
+  {
+    name: "objection-to-decl",
+    test(s) {
+      if (!/^\s*objections?\s+to\b/i.test(s)) return null;
+      if (!/\bdeclaration\b|\bdecl\.?\b/i.test(s)) return null;
+      const last = lastNameFromOf(s) || lastNameFromNameDecl(s);
+      if (!last) return null;
+      return { canonical: `Objection to ${last} Decl.` };
+    },
+  },
+
   // 1. Declaration ISO {Reply | Opposition | Motion | Petition}
   {
     name: "decl-iso",
@@ -325,6 +360,41 @@ const RULES = [
       const last = lastNameFromOf(s) || lastNameFromNameDecl(s);
       if (!last) return null;
       return { canonical: `${last} Decl.` };
+    },
+  },
+
+  // 2.2. Court orders. Must precede Reply/Opposition/Demurrer/Motion because an
+  // order's title references the underlying motion ("[PROPOSED] ORDER RE …
+  // MOTION"). Only fires when "order" is the document's own leading type.
+  {
+    name: "order",
+    test(s) {
+      if (!/^\s*(?:\[?\s*proposed\s*\]?\s*)?order\b/i.test(s)) return null;
+      const proposed = /\bproposed\b/i.test(s) || /^\s*\[/.test(s);
+      if (/\border\s+of\s+dismissal\b/i.test(s)) {
+        return { canonical: proposed ? "Proposed Order" : "Order of Dismissal" };
+      }
+      return { canonical: proposed ? "Proposed Order" : "Order" };
+    },
+  },
+
+  // 2.3. Proof of service. Precedes the motion/notice rules so a "PROOF OF
+  // SERVICE RE NOTICE OF MOTION …" is named for what it is, not the motion.
+  {
+    name: "proof-of-service",
+    test(s) {
+      if (!/\bproof\s+of\s+service\b/i.test(s)) return null;
+      return { canonical: "Proof of Service" };
+    },
+  },
+
+  // 2.4. Request for dismissal (distinct from a request for judicial notice or
+  // for entry of default judgment).
+  {
+    name: "request-for-dismissal",
+    test(s) {
+      if (!/\brequest\s+for\s+dismissal\b/i.test(s)) return null;
+      return { canonical: "Request for Dismissal" };
     },
   },
 
@@ -547,7 +617,10 @@ const RULES = [
       const forM = s.match(/\bnotice\s+of\s+motion\s+for\s+([a-z][a-z\s']+?)(?:\s+in\b|\s*[,.;]|\s*$)/i);
       if (toM)       target = "Mot. to "  + titleCasePhrase(toM[1].trim());
       else if (forM) target = "Mot. for " + titleCasePhrase(forM[1].trim());
-      return { canonical: "Notice of Motion", target };
+      // A "Notice of Motion" IS the motion for naming purposes — the filed
+      // document is the notice+motion. (Confirmed across the naming history:
+      // every "Notice of Motion …" the user kept was named "Motion".)
+      return { canonical: "Motion", target };
     },
   },
 
@@ -624,6 +697,16 @@ const RULES = [
       if (/\b(?:second|2nd)\s+amended\s+complaint\b/i.test(s)) return { canonical: "SAC" };
       if (/\b(?:first|1st)\s+amended\s+complaint\b/i.test(s))  return { canonical: "FAC" };
       return null;
+    },
+  },
+
+  // 9.5. Amendment to a complaint (e.g. correcting a fictitious/incorrect name)
+  // is NOT the complaint itself — must precede the Complaint catchall.
+  {
+    name: "amendment-to-complaint",
+    test(s) {
+      if (!/\bamendment\s+to\s+(?:the\s+)?complaint\b/i.test(s)) return null;
+      return { canonical: "Amendment to Complaint" };
     },
   },
 
