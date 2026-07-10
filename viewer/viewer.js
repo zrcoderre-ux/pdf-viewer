@@ -487,12 +487,18 @@ function captionTitle(textContent, viewport) {
     .map((y) => byY.get(y).sort((a, b) => a.transform[4] - b.transform[4])
       .map((i) => i.str).join(" ").replace(/\s+/g, " ").trim())
     .filter(Boolean);
+  // The caption title sits BELOW the case number (which sits below any court-
+  // header fragment — "…CALIFORNIA", "…ANGELES" — that spilled into the right
+  // column). Anchor on the "Case No." line when present; otherwise just skip
+  // leading metadata/junk from the top.
+  let start = 0;
+  const caseIdx = lines.findIndex((l) => /^case\s+no/i.test(l));
+  if (caseIdx >= 0) start = caseIdx + 1;
   const title = [];
-  let started = false;
-  for (const l of lines) {
+  for (let i = start; i < lines.length; i++) {
+    const l = lines[i];
     if (CAPTION_JUNK.test(l)) continue;                     // box borders / stray numbers
-    if (CAPTION_META.test(l)) { if (started) break; else continue; } // metadata: skip lead-in, stop after title
-    started = true;
+    if (CAPTION_META.test(l)) { if (title.length) break; else continue; } // metadata: skip lead-in, stop after title
     title.push(l);
   }
   return title.join(" ").replace(/\s+/g, " ").trim();

@@ -55,7 +55,11 @@ function normalize(raw) {
     //   "YUDECLARATION"         \u2192 "YU DECLARATION"          (name glued to type)
     //   "INSUPPORT OF"          \u2192 "IN SUPPORT OF"
     .replace(/(['\u2019]s)(?=[A-Z])/gi, "$1 ")
-    .replace(/([A-Za-z])(declarations?)\b/gi, "$1 $2")
+    // Split a document-type word glued to the preceding word, e.g.
+    // "AMENDEDCOMPLAINT" -> "AMENDED COMPLAINT", "YUDECLARATION" -> "YU
+    // DECLARATION". Only these specific type words (none is a substring of an
+    // ordinary word), and only when a letter precedes them.
+    .replace(/([A-Za-z])(declarations?|complaint|opposition|demurrer|memorandum|petition|stipulation|objection)\b/gi, "$1 $2")
     .replace(/\binsupport\b/gi, "in support")
     .replace(/\s+/g, " ")
     .trim();
