@@ -1775,6 +1775,31 @@ async function importHighlightAnnotations() {
   }
 }
 
+// Resolve the document's display/download name from page text alone — no
+// rendering. Reads the footer band of pages 1–2 and the page-1 caption via
+// getTextContent (which executes in the PDF.js worker, independent of whether
+// this iframe is visible), then runs the same title-resolution the render loop
+// uses. Called early in renderBytes so hidden background tabs name themselves
+// without waiting to be shown. Safe to run again during the render pass.
+async function resolveNameEarly() {
+  try {
+    _footerByPage.clear();
+    pageOneCaptionTitle = "";
+    const last = Math.min(2, pdfDoc.numPages);
+    for (let pn = 1; pn <= last; pn++) {
+      const page = await pdfDoc.getPage(pn);
+      const viewport = page.getViewport({ scale: 1 });
+      const textContent = await page.getTextContent();
+      _footerByPage.set(pn, footerLines(textContent, viewport));
+      if (pn === 1) pageOneCaptionTitle = captionTitle(textContent, viewport);
+    }
+    tryResolveFooterTitle();
+  } catch (e) {
+    // Non-fatal: the render loop will retry name resolution once it runs.
+    console.warn("[pdf-viewer] early name resolution failed:", e);
+  }
+}
+
 // Render a PDF from raw bytes. `sourceName`, when given (local files know their
 // filename directly), seeds the source-mode display name.
 async function renderBytes(buf, { sourceName } = {}) {
@@ -1792,6 +1817,13 @@ async function renderBytes(buf, { sourceName } = {}) {
   // Does this document have fillable form fields? Gates the "Fill form" action.
   docHasForm = editingAllowed ? await hasFormFields(pdfBytes) : false;
   updateFormMenuItem();
+  // Resolve the document's name from its text BEFORE rendering. getTextContent
+  // runs in the PDF.js Web Worker, so it completes even when this viewer lives
+  // in a hidden (display:none) iframe — where Chrome suspends canvas rendering
+  // and rAF. This is what lets every open tab show its real name (and download
+  // under it) without being clicked. The later render pass re-runs the same
+  // resolution once geometry is real; it's idempotent.
+  await resolveNameEarly();
   statusEl.textContent = `Rendering ${pdfDoc.numPages} pages…`;
   await renderAllPages();
   statusEl.textContent = "Done";
