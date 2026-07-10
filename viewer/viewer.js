@@ -2045,6 +2045,21 @@ function tryResolveFooterTitle() {
     }
   }
 
+  // Amended-complaint ordinal from the caption: a complaint's caption states
+  // whether it's the First/Second/Third Amended Complaint even when the footer
+  // or source say only "Complaint" / "Amended Complaint". When the caption's own
+  // document type is an amended complaint (FAC/SAC/TAC), use it. (This only
+  // fires when the caption IS a complaint — a demurrer/opposition "… to First
+  // Amended Complaint" parses to Demurrer/Opposition, not FAC.)
+  if (pageOneCaptionTitle) {
+    const capParsed = extractTitle(pageOneCaptionTitle);
+    if (capParsed.canonical === "FAC" || capParsed.canonical === "SAC" || capParsed.canonical === "TAC") {
+      captionOverrideName = capParsed.canonical;
+      applyParsedTitle(capParsed, pageOneCaptionTitle, "caption");
+      return;
+    }
+  }
+
   // A footer line that begins with the word "Type" — ignoring any leading
   // punctuation, e.g. "(TYPE OR PRINT NAME)" — is a fillable signature-block
   // label. It marks this as a blank Judicial Council / court form rather than
