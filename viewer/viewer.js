@@ -510,6 +510,27 @@ function captionSaysDeclaration(text) {
   return /^declaration\b/i.test(text.slice(m));
 }
 
+// The user's rule: a caption that LEADS with "Notice of …" in a short document
+// (< 4 pages) is just the procedural notice, not the underlying motion/etc.
+// Returns the notice name ("Notice of Motion", "Notice of Hearing", …) or null.
+// Leading-only (first document-type word is "notice") so an opposition that
+// merely mentions "notice of motion" isn't misread as a notice.
+const CAP_TITLE_WORD = /\b(?:declaration|motion|opposition|demurrer|reply|petition|complaint|memorandum|notice|objection|request|order|stipulation|answer|brief|application)\b/i;
+const NOTICE_TC_CONNECTORS = new Set(["a","an","the","and","or","of","to","for","in","on","at","by","re"]);
+function captionNoticeName(text) {
+  if (!text) return null;
+  const m = text.search(CAP_TITLE_WORD);
+  if (m < 0) return null;
+  const head = text.slice(m);
+  const nm = head.match(/^notice\s+of\s+([a-z][a-z\s'.]*?)(?=\s+(?:and|to|for|on|upon|re|regarding|that|pursuant)\b|[;,()]|$)/i);
+  if (!nm) return null;
+  const phrase = nm[1].trim().split(/\s+/).map((w, i) => {
+    const l = w.toLowerCase();
+    return i > 0 && NOTICE_TC_CONNECTORS.has(l) ? l : (l ? l[0].toUpperCase() + l.slice(1) : "");
+  }).join(" ");
+  return phrase ? `Notice of ${phrase}` : null;
+}
+
 // A line is a plausible title if it's mostly uppercase letters, has a
 // reasonable length, and doesn't look like a page number or attorney info.
 function looksLikeTitle(text) {
@@ -1218,9 +1239,9 @@ function filenameFromTitle(title) {
 const _footerByPage = new Map();
 // The page-1 caption title (right-column document title), captured at render.
 let pageOneCaptionTitle = "";
-// When the caption says "Declaration" (before "Motion"), this holds the
-// declaration name — it wins over BOTH footer and source naming.
-let captionDeclarationName = null;
+// A name derived from the page-1 caption (a leading Declaration, or a short-doc
+// "Notice of …") that wins over BOTH footer and source naming.
+let captionOverrideName = null;
 
 // Single source of truth for "show this name everywhere visible to the
 // user." Updates the toolbar filename element AND the browser tab title
@@ -1320,9 +1341,9 @@ async function applyNamingMode() {
   if (userOverrodeName) return;
   // A caption that leads with "Declaration" is authoritative — it wins over both
   // footer and source, regardless of the selected naming mode.
-  if (captionDeclarationName) {
-    paintDisplayName(captionDeclarationName);
-    serverFilename = captionDeclarationName;
+  if (captionOverrideName) {
+    paintDisplayName(captionOverrideName);
+    serverFilename = captionOverrideName;
     return;
   }
   // "Best of both": the selected mode is the preference, but if its signal is
@@ -1703,7 +1724,7 @@ function resetForNewDocument() {
   footerExtraction = null;
   _footerByPage.clear();
   pageOneCaptionTitle = "";
-  captionDeclarationName = null;
+  captionOverrideName = null;
   unregisterEntry();
 }
 
@@ -2005,8 +2026,21 @@ function tryResolveFooterTitle() {
   if (pageOneCaptionTitle && captionSaysDeclaration(pageOneCaptionTitle)) {
     const capParsed = extractTitle(pageOneCaptionTitle);
     if (capParsed.canonical && /\bDecl\.?/.test(capParsed.canonical)) {
-      captionDeclarationName = capParsed.canonical; // wins over footer AND source
+      captionOverrideName = capParsed.canonical; // wins over footer AND source
       applyParsedTitle(capParsed, pageOneCaptionTitle, "caption");
+      return;
+    }
+  }
+
+  // Short-document notice: a caption that leads with "Notice of …" in a document
+  // under 4 pages is just the procedural notice — not the underlying motion — so
+  // name it as the notice, overriding footer/source (and the usual
+  // "Notice of Motion → Motion" collapse, which only holds for the full motion).
+  if (pageOneCaptionTitle && pdfDoc && pdfDoc.numPages < 4) {
+    const noticeName = captionNoticeName(pageOneCaptionTitle);
+    if (noticeName) {
+      captionOverrideName = noticeName;
+      applyParsedTitle({ canonical: noticeName }, pageOneCaptionTitle, "caption");
       return;
     }
   }
