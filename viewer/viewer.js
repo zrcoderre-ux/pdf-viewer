@@ -457,6 +457,59 @@ function footerLines(textContent, viewport, bottomFrac = 0.18) {
   return all.filter(r => r.y < cutoff);
 }
 
+// A California pleading's caption box (page 1) prints the document's real title
+// in the right column, next to the party block. The footer running-title can
+// disagree with it (e.g. a declaration in support of an opposition often shows
+// only "OPPOSITION …" in the footer), so we read the caption separately.
+// A line is caption *metadata* (judge, hearing, case number, filed dates) — not
+// the title — if it starts with one of these; caption-box borders/numbers are
+// junk to skip.
+const CAPTION_META = /^(?:case\s+no|hon\b|honorable|dept\b|department|judge\b|hearing\b|trial\b|time\b|date\b|res\.?\s*id|reservation|assigned|electronically|exempt|reserved|action\s+filed|[a-z.]{2,}\s+filed\b)/i;
+const CAPTION_JUNK = /^[\d)(.,\s|:_-]+$/;
+function captionTitle(textContent, viewport) {
+  const items = textContent && textContent.items;
+  if (!items || !viewport) return "";
+  const W = viewport.width, H = viewport.height;
+  if (!W || !H) return "";
+  // Right column, upper-middle of the page (where the caption title sits).
+  const right = items.filter((i) =>
+    i.str && i.str.trim() &&
+    i.transform[4] > W * 0.47 && i.transform[5] > H * 0.30 && i.transform[5] < H * 0.93);
+  if (!right.length) return "";
+  const byY = new Map();
+  for (const it of right) {
+    const y = Math.round(it.transform[5]);
+    if (!byY.has(y)) byY.set(y, []);
+    byY.get(y).push(it);
+  }
+  const ys = [...byY.keys()].sort((a, b) => b - a); // top → bottom
+  const lines = ys
+    .map((y) => byY.get(y).sort((a, b) => a.transform[4] - b.transform[4])
+      .map((i) => i.str).join(" ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const title = [];
+  let started = false;
+  for (const l of lines) {
+    if (CAPTION_JUNK.test(l)) continue;                     // box borders / stray numbers
+    if (CAPTION_META.test(l)) { if (started) break; else continue; } // metadata: skip lead-in, stop after title
+    started = true;
+    title.push(l);
+  }
+  return title.join(" ").replace(/\s+/g, " ").trim();
+}
+
+// The user's rule: if "Declaration" precedes "Motion" in the caption title, the
+// document IS a declaration (in support of whatever it follows), regardless of
+// the footer or source name. Generalized so a *trailing* supporting declaration
+// (e.g. a demurrer's "…; Declaration of Elsa Larsen") doesn't misfire: the
+// caption's FIRST document-type word must be "declaration".
+function captionSaysDeclaration(text) {
+  if (!text) return false;
+  const m = text.search(/\b(?:declaration|motion|opposition|demurrer|reply|petition|complaint|memorandum|notice|objection|request|order|stipulation|answer|brief|application)\b/i);
+  if (m < 0) return false;
+  return /^declaration\b/i.test(text.slice(m));
+}
+
 // A line is a plausible title if it's mostly uppercase letters, has a
 // reasonable length, and doesn't look like a page number or attorney info.
 function looksLikeTitle(text) {
@@ -1163,6 +1216,11 @@ function filenameFromTitle(title) {
 
 // Page-level holder of extracted footer lines, populated during render.
 const _footerByPage = new Map();
+// The page-1 caption title (right-column document title), captured at render.
+let pageOneCaptionTitle = "";
+// When the caption says "Declaration" (before "Motion"), this holds the
+// declaration name — it wins over BOTH footer and source naming.
+let captionDeclarationName = null;
 
 // Single source of truth for "show this name everywhere visible to the
 // user." Updates the toolbar filename element AND the browser tab title
@@ -1260,6 +1318,13 @@ function recordFinalName(name) {
 // resolves, and when a sibling tab's session entry changes (collision).
 async function applyNamingMode() {
   if (userOverrodeName) return;
+  // A caption that leads with "Declaration" is authoritative — it wins over both
+  // footer and source, regardless of the selected naming mode.
+  if (captionDeclarationName) {
+    paintDisplayName(captionDeclarationName);
+    serverFilename = captionDeclarationName;
+    return;
+  }
   // "Best of both": the selected mode is the preference, but if its signal is
   // weak (no recognized document type) we fall back to the other source when it
   // DID recognize a type — whichever is closer to a real name wins. Final
@@ -1637,6 +1702,8 @@ function resetForNewDocument() {
   // want stale collision data influencing other tabs.
   footerExtraction = null;
   _footerByPage.clear();
+  pageOneCaptionTitle = "";
+  captionDeclarationName = null;
   unregisterEntry();
 }
 
@@ -1801,6 +1868,9 @@ async function renderAllPages() {
     if (pageNum <= 2 && refs.textContent && refs.viewport) {
       _footerByPage.set(pageNum, footerLines(refs.textContent, refs.viewport));
     }
+    if (pageNum === 1 && refs.textContent && refs.viewport) {
+      pageOneCaptionTitle = captionTitle(refs.textContent, refs.viewport);
+    }
     // Once we have page 1 (or pages 1 and 2), try to resolve a title.
     if (pageNum === 2 || (pageNum === 1 && pdfDoc.numPages === 1)) {
       tryResolveFooterTitle();
@@ -1893,9 +1963,53 @@ function looksLikeGibberishTitle(title) {
   return false;
 }
 
+// Build footerExtraction from a parsed title + its raw text, register it for
+// cross-tab disambiguation, and repaint. `source` labels the tooltip.
+function applyParsedTitle(parsed, rawTitle, source) {
+  let displayName;
+  if (parsed.canonical) {
+    displayName = parsed.canonical;
+  } else {
+    const withoutExt = rawTitle.replace(/\.pdf$/i, "");
+    displayName = simplifyName(withoutExt) || withoutExt || "PDF";
+  }
+  footerExtraction = {
+    displayName,
+    canonical: parsed.canonical,
+    target: parsed.target,
+    party: parsed.party,
+    partyLabel: parsed.partyLabel,
+    raw: rawTitle,
+  };
+  if (parsed.canonical) {
+    registerEntry({
+      canonical: parsed.canonical,
+      target: parsed.target,
+      party: parsed.party,
+      partyLabel: parsed.partyLabel,
+    });
+  }
+  filenameEl.title = `Title recovered from document ${source}: ${rawTitle}`;
+  applyNamingMode();
+}
+
 function tryResolveFooterTitle() {
   const p1 = _footerByPage.get(1) || [];
   const p2 = _footerByPage.get(2) || [];
+
+  // Caption override (highest priority): a page-1 caption whose title leads with
+  // "Declaration" (before any "Motion") IS a declaration — regardless of the
+  // footer running title (which often shows only the opposition/motion it
+  // supports) or the source filename. Guarded by a real declarant name so a
+  // stray caption read can't misfire.
+  if (pageOneCaptionTitle && captionSaysDeclaration(pageOneCaptionTitle)) {
+    const capParsed = extractTitle(pageOneCaptionTitle);
+    if (capParsed.canonical && /\bDecl\.?/.test(capParsed.canonical)) {
+      captionDeclarationName = capParsed.canonical; // wins over footer AND source
+      applyParsedTitle(capParsed, pageOneCaptionTitle, "caption");
+      return;
+    }
+  }
 
   // A footer line that begins with the word "Type" — ignoring any leading
   // punctuation, e.g. "(TYPE OR PRINT NAME)" — is a fillable signature-block
@@ -1922,50 +2036,9 @@ function tryResolveFooterTitle() {
   // when the new engine can't identify a document type (covers exotic
   // titles like cover-page memo headings that don't follow the canonical
   // motion/decl/complaint vocabulary).
-  const parsed = extractTitle(rawTitle);
-  let displayName;
-  if (parsed.canonical) {
-    // Default to canonical; disambiguation may upgrade this when sibling
-    // tabs are open with colliding types.
-    displayName = parsed.canonical;
-  } else {
-    // Legacy fallback path. The old simplifyName produced names for many
-    // exotic footers (cover-page memo titles, etc.) that the new rule
-    // engine intentionally doesn't handle. Use it as a safety net so
-    // those documents still get sensible names rather than reverting to
-    // the URL/source filename.
-    const withoutExt = rawTitle.replace(/\.pdf$/i, "");
-    displayName = simplifyName(withoutExt) || withoutExt || "PDF";
-  }
-
-  footerExtraction = {
-    displayName,
-    canonical: parsed.canonical,
-    target: parsed.target,
-    party: parsed.party,
-    partyLabel: parsed.partyLabel,
-    raw: rawTitle,
-  };
-
-  // Register for cross-tab collision. The disambiguation listener may
-  // call back with an updated display name moments later.
-  if (parsed.canonical) {
-    registerEntry({
-      canonical: parsed.canonical,
-      target: parsed.target,
-      party: parsed.party,
-      partyLabel: parsed.partyLabel,
-    });
-  }
-
-  // Tooltip always reflects the raw recovered footer text — useful for
-  // sanity-checking the extraction even when the user isn't displaying
-  // the footer-derived name.
-  filenameEl.title = `Title recovered from document footer: ${rawTitle}`;
-
-  // Paint if footer mode is active. applyNamingMode handles the await on
-  // the disambiguation lookup.
-  applyNamingMode();
+  // New rule engine; applyParsedTitle falls back to simplifyName for exotic
+  // titles the engine can't classify, and handles register/repaint.
+  applyParsedTitle(extractTitle(rawTitle), rawTitle, "footer");
 }
 
 function logPdfHistory() {
