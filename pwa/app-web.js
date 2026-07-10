@@ -37,19 +37,17 @@ function activate(id) {
     t.btn.classList.toggle("active", on);
     t.btn.setAttribute("aria-selected", String(on));
   }
-  // Load a tab's PDF the first time it's actually shown, so the viewer renders
-  // and places citation overlays with correct (visible) geometry — never while
-  // the iframe is display:none. Deferred via microtask so that opening several
-  // files at once only loads the one that ends up active; the rest load when
-  // first clicked.
-  queueMicrotask(() => {
-    const t = tabs.find((x) => x.id === id);
-    if (t && t.pending && activeId === id) {
-      const run = t.pending;
-      t.pending = null;
-      run(t);
-    }
-  });
+  // A tab that was fed while hidden (display:none) placed its overlays with zero
+  // geometry. The first time it's shown, reflow the viewer so citation links /
+  // highlights / form fields land correctly. (The name already resolved while
+  // hidden, so labels/downloads are right regardless.)
+  const t = tabs.find((x) => x.id === id);
+  if (t && t.fed && !t.reflowed) {
+    t.reflowed = true;
+    queueMicrotask(() => {
+      try { t.iframe.contentWindow?.__pdfViewerReflow?.(); } catch { /* not ready */ }
+    });
+  }
 }
 
 function setLabel(tab, text) {
@@ -101,38 +99,45 @@ function makeTabButton(id, initialLabel) {
   return { btn, labelEl };
 }
 
-// Create a tab. `pending(tab)` runs the first time the tab is shown (see
-// activate) and is responsible for actually loading the PDF into its iframe.
-function newTab({ initialLabel, pending }) {
+// Create a tab and feed its PDF to the viewer as soon as the viewer is ready —
+// even while the tab is hidden — so every open PDF resolves its real name (and
+// download filename) automatically, without waiting to be clicked.
+function newTab({ initialLabel, file, handle }) {
   const id = ++seq;
   const iframe = document.createElement("iframe");
   iframe.className = "tab-view";
-  iframe.src = VIEWER_SRC; // blank viewer; the PDF is loaded lazily on show
+  iframe.src = VIEWER_SRC;
   viewsEl.appendChild(iframe);
   const { btn, labelEl } = makeTabButton(id, initialLabel || "Loading…");
-  const tab = { id, iframe, btn, labelEl, pending };
+  const tab = { id, iframe, btn, labelEl, file, handle, fed: false, reflowed: false };
   tabs.push(tab);
+  feedWhenReady(tab);
   activate(id);
   updateChrome();
   return tab;
 }
 
-// Open a local File in a new tab. Loads lazily when the tab is first shown.
-// `handle` is the FileSystemFileHandle when we have one (file picker / OS
-// handler) — passed through so the viewer's Save can overwrite the same file.
+// Feed the PDF into a tab's viewer once its window exposes the load hook. Runs
+// regardless of visibility. If the tab is the visible one when fed, it rendered
+// with correct geometry and needs no later reflow.
+function feedWhenReady(tab) {
+  const w = tab.iframe.contentWindow;
+  if (w && w.__pdfViewerLoadLocal) {
+    tab.fed = true;
+    if (activeId === tab.id) tab.reflowed = true; // rendered while visible
+    w.__pdfViewerLoadLocal(tab.file, tab.handle);
+    watchTitle(tab);
+  } else {
+    setTimeout(() => feedWhenReady(tab), 30);
+  }
+}
+
+// Open a local File in a new tab. `handle` is the FileSystemFileHandle when we
+// have one (file picker / OS handler) — passed through so the viewer's Save can
+// overwrite the same file.
 function openLocalFile(file, handle) {
   if (!file) return;
-  newTab({
-    initialLabel: file.name,
-    pending: (tab) => {
-      const feed = () => {
-        const w = tab.iframe.contentWindow;
-        if (w && w.__pdfViewerLoadLocal) { w.__pdfViewerLoadLocal(file, handle); watchTitle(tab); }
-        else setTimeout(feed, 30);
-      };
-      feed();
-    },
-  });
+  newTab({ initialLabel: file.name, file, handle });
 }
 
 // ---- Open affordances ------------------------------------------------------

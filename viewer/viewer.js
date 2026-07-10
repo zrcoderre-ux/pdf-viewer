@@ -1860,6 +1860,13 @@ async function loadLocalFile(file, handle) {
 }
 window.__pdfViewerLoadLocal = loadLocalFile;
 
+// Re-render at the current zoom. The PWA tab shell calls this when a tab that
+// was loaded while hidden (display:none, so overlays landed with zero geometry)
+// is first shown, so citation links / highlights / form fields get correct
+// positions. Naming already resolved during the hidden render — this is only
+// about overlay geometry.
+window.__pdfViewerReflow = () => { if (pdfDoc) renderAllPages(); };
+
 async function renderAllPages() {
   // Cancel any previous in-flight render (zoom-while-rendering, or Download
   // clicked mid-render). The signal is checked between pages and passes; we
