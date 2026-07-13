@@ -20,7 +20,7 @@ import {
   addImportedHighlight,
 } from "./highlights.js";
 import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages, fillForm, hasFormFields } from "./pdf-edit.js";
-import { extractTitle } from "./footer-naming.js";
+import { extractTitle, citationShortForm } from "./footer-naming.js";
 import {
   registerEntry,
   unregisterEntry,
@@ -1243,6 +1243,16 @@ function filenameFromTitle(title) {
 
 // Page-level holder of extracted footer lines, populated during render.
 const _footerByPage = new Map();
+
+// Per-page structure used to build "copy with citation" record references:
+//   lineRows: pleading line-number rows [{y0, y1, num}] (fractions of page height)
+//   paraCandidates: numbered-paragraph markers [{y, num, left}] (fractions)
+// Captured at render time before applySelectableArea clears any span text.
+const pageStructures = new Map();
+// Doc-wide sequential paragraph markers [{page, y, num}], assembled after render.
+// Non-empty (length >= 3) means the document numbers its paragraphs, so a
+// reference cites the paragraph (¶ 9) instead of page:line.
+let docParagraphs = [];
 // The page-1 caption title (right-column document title), captured at render.
 let pageOneCaptionTitle = "";
 // A name derived from the page-1 caption (a leading Declaration, or a short-doc
@@ -1729,6 +1739,8 @@ function resetForNewDocument() {
   // want stale collision data influencing other tabs.
   footerExtraction = null;
   _footerByPage.clear();
+  pageStructures.clear();
+  docParagraphs = [];
   pageOneCaptionTitle = "";
   captionOverrideName = null;
   unregisterEntry();
@@ -1899,6 +1911,9 @@ window.__pdfViewerLoadLocal = loadLocalFile;
 // about overlay geometry.
 window.__pdfViewerReflow = () => { if (pdfDoc) renderAllPages(); };
 
+// Test hook: build the citation for the current selection (used by e2e checks).
+window.__pdfViewerBuildCitation = () => buildCitationReference();
+
 async function renderAllPages() {
   // Cancel any previous in-flight render (zoom-while-rendering, or Download
   // clicked mid-render). The signal is checked between pages and passes; we
@@ -1916,6 +1931,7 @@ async function renderAllPages() {
   pagesEl.innerHTML = "";
   totalLinks = 0;
   _footerByPage.clear();
+  pageStructures.clear();
 
   resetDocument({ repo: citationRepo, provider });
 
@@ -1948,6 +1964,10 @@ async function renderAllPages() {
   }
 
   if (signal.aborted) return;
+
+  // Assemble the doc-wide numbered-paragraph sequence from the per-page markers
+  // captured during render — used to decide page:line vs ¶ references.
+  finalizeReferenceStructure();
 
   // Pass 2: run document-wide detection (resolves supra across pages).
   const totalCites = runDetection();
@@ -2241,6 +2261,7 @@ async function renderPageCanvasAndText(pageNumber) {
 
   const wrapper = document.createElement("div");
   wrapper.className = "page-wrapper";
+  wrapper.dataset.pageNumber = String(pageNumber);
   wrapper.style.width  = `${viewport.width}px`;
   wrapper.style.height = `${viewport.height}px`;
 
@@ -2346,6 +2367,11 @@ async function renderPageCanvasAndText(pageNumber) {
     await textLayer.render();
   }
 
+  // Capture line-number / paragraph-marker positions for citation references
+  // BEFORE applySelectableArea clears any span text (line numbers, cropped-out
+  // margins). Reads the intact text layer.
+  capturePageReference(pageNumber, textLayerDiv);
+
   applySelectableArea(textLayerDiv);
   updateCropOverlay(wrapper);
 
@@ -2379,11 +2405,17 @@ function applySelectableArea(textLayerDiv) {
 // contribute any selectable/copyable text. Conservative detection: only a tall
 // left-margin column of many bare 1–2 digit numbers, i.e. line numbering, not
 // ordinary content.
-function excludeLineNumberColumn(textLayerDiv) {
+// Detect the pleading line-number column and return its spans as
+// [{s, left, top, height, num}] in reading order, or [] if this page has no
+// such column. Conservative: only a tall left-margin column of many bare 1–2
+// digit numbers counts, so ordinary content is never mistaken for line numbers.
+// Shared by the selection-exclusion clearing and the citation-reference capture.
+function detectLineNumberSpans(textLayerDiv) {
   const spans = textLayerDiv.querySelectorAll("span");
-  if (spans.length < 8) return;
+  if (spans.length < 8) return [];
   const width = textLayerDiv.offsetWidth || 1;
   const height = textLayerDiv.offsetHeight || 1;
+  if (!textLayerDiv.offsetHeight) return []; // no layout (hidden tab) — skip
   // Candidate line-number spans: a bare 1–2 digit number in the left quarter of
   // the page (line numbers hug the left, but the exact inset varies by doc).
   const leftZone = width * 0.25;
@@ -2393,9 +2425,9 @@ function excludeLineNumberColumn(textLayerDiv) {
     if (!/^\d{1,2}$/.test(t)) continue;
     const left = s.offsetLeft;
     if (left > leftZone) continue;
-    cand.push({ s, left, top: s.offsetTop });
+    cand.push({ s, left, top: s.offsetTop, height: s.offsetHeight, num: parseInt(t, 10) });
   }
-  if (cand.length < 8) return;
+  if (cand.length < 8) return [];
   // Find the largest cluster of candidates that share a left position (±16px,
   // which absorbs the offset between left/right-aligned single- vs double-digit
   // numbers). That cluster is the line-number column.
@@ -2409,7 +2441,7 @@ function excludeLineNumberColumn(textLayerDiv) {
     group.push(c);
   }
   if (group.length > best.length) best = group;
-  if (best.length < 8) return;
+  if (best.length < 8) return [];
   // The column must run down most of the page to be line numbering, not a stray
   // cluster of numbers.
   let minTop = Infinity, maxTop = -Infinity;
@@ -2417,10 +2449,91 @@ function excludeLineNumberColumn(textLayerDiv) {
     if (c.top < minTop) minTop = c.top;
     if (c.top > maxTop) maxTop = c.top;
   }
-  if (maxTop - minTop < height * 0.4) return;
-  // Clear the text (they stay visible on the canvas) so a selection dragged
-  // across them can't include the numbers.
-  for (const c of best) c.s.textContent = "";
+  if (maxTop - minTop < height * 0.4) return [];
+  best.sort((a, b) => a.top - b.top);
+  return best;
+}
+
+function excludeLineNumberColumn(textLayerDiv) {
+  // Clear the text of the line-number spans (they stay visible on the canvas)
+  // so a selection dragged across them can't include the numbers.
+  for (const c of detectLineNumberSpans(textLayerDiv)) c.s.textContent = "";
+}
+
+// Capture per-page structure for "copy with citation": the pleading line-number
+// rows and any numbered-paragraph markers, as fractions of page height/width so
+// they survive zoom re-renders. Must run BEFORE applySelectableArea clears span
+// text. A no-op on hidden tabs (no layout) — re-runs on reflow.
+function capturePageReference(pageNumber, textLayerDiv) {
+  const H = textLayerDiv.offsetHeight;
+  const W = textLayerDiv.offsetWidth || 1;
+  if (!H) return;
+
+  const lineSpans = detectLineNumberSpans(textLayerDiv);
+  const lineRows = lineSpans.map((c) => ({
+    y0: c.top / H,
+    y1: (c.top + (c.height || 0)) / H,
+    num: c.num,
+  }));
+
+  // Numbered-paragraph markers: a span that starts with "N." / "N)" (a small
+  // integer), sitting to the right of the line-number column (body text, not the
+  // margin). We keep raw candidates here; finalizeReferenceStructure validates
+  // them into a sequential run across the whole document.
+  const lineColRight = lineSpans.length
+    ? Math.max(...lineSpans.map((c) => c.left + (c.s.offsetWidth || 0)))
+    : 0;
+  const paraCandidates = [];
+  for (const s of textLayerDiv.querySelectorAll("span")) {
+    const t = (s.textContent || "").trim();
+    const m = t.match(/^(\d{1,3})[.)](?:\s|$)/);
+    if (!m) continue;
+    const left = s.offsetLeft;
+    if (left <= lineColRight + 4) continue; // still in the line-number margin
+    if (left > W * 0.5) continue;           // paragraph numbers start at the left
+    paraCandidates.push({ y: s.offsetTop / H, num: parseInt(m[1], 10), left: left / W });
+  }
+
+  pageStructures.set(pageNumber, { lineRows, paraCandidates });
+}
+
+// After all pages render, stitch the per-page paragraph-marker candidates into
+// one document-wide sequential run (1, 2, 3, …). Stray numbered list items are
+// filtered out by requiring consecutive numbering within a shared left indent.
+function finalizeReferenceStructure() {
+  const all = [];
+  for (const [page, st] of pageStructures) {
+    for (const c of st.paraCandidates) all.push({ page, y: c.y, num: c.num, left: c.left });
+  }
+  if (all.length < 3) { docParagraphs = []; return; }
+
+  // Bucket by left indent (paragraph numbers share a column; a stray "1." in an
+  // indented sub-list sits at a different x). Try each bucket; keep the longest
+  // consecutive +1 run found in any of them.
+  const buckets = new Map();
+  for (const c of all) {
+    const key = Math.round(c.left / 0.03);
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(c);
+  }
+
+  let best = [];
+  for (const group of buckets.values()) {
+    group.sort((a, b) => (a.page - b.page) || (a.y - b.y));
+    let cur = [];
+    for (const c of group) {
+      if (cur.length && c.num === cur[cur.length - 1].num + 1) cur.push(c);
+      else {
+        if (cur.length > best.length) best = cur;
+        cur = [c];
+      }
+    }
+    if (cur.length > best.length) best = cur;
+  }
+
+  docParagraphs = best.length >= 3
+    ? best.map((c) => ({ page: c.page, y: c.y, num: c.num }))
+    : [];
 }
 
 // Repaint the custom selection tint from the live browser selection. Because
@@ -2473,8 +2586,197 @@ document.addEventListener("selectionchange", () => {
   _selectionRaf = requestAnimationFrame(() => {
     _selectionRaf = 0;
     try { repaintSelectionOverlay(); } catch { /* keep selection working */ }
+    try { updateCitePopover(); } catch { /* keep selection working */ }
   });
 });
+
+// =====================================================================
+// Copy with citation
+//
+// Appends a record-citation parenthetical to the copied text, so a passage
+// pasted into a brief carries its own pin cite. The parenthetical names the
+// document (short form of the resolved title) and the location:
+//   • pleading paper → page & line numbers   "(Mot. at p. 6:3-6.)"
+//   • numbered ¶s    → paragraph number       "(Doe Decl. ¶ 9.)"
+// A small button appears next to any text selection inside the pages; clicking
+// it copies "{selected text} {parenthetical}" to the clipboard.
+// =====================================================================
+
+const citePopover = document.createElement("button");
+citePopover.id = "cite-popover";
+citePopover.type = "button";
+citePopover.textContent = "❝ Copy with citation";
+citePopover.title = "Copy the selected text with a record citation appended";
+citePopover.hidden = true;
+// Don't let pressing the button collapse the page selection before we read it.
+citePopover.addEventListener("mousedown", (e) => e.preventDefault());
+citePopover.addEventListener("click", copyWithCitation);
+document.body.appendChild(citePopover);
+
+function hideCitePopover() { citePopover.hidden = true; }
+
+// Show the button just below the end of the current selection, if that
+// selection lives inside the rendered pages. Repositioned on selectionchange
+// and on scroll so it tracks the passage.
+function updateCitePopover() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed ||
+      !sel.anchorNode || !pagesEl.contains(sel.anchorNode)) {
+    hideCitePopover();
+    return;
+  }
+  const rects = sel.getRangeAt(sel.rangeCount - 1).getClientRects();
+  let last = null;
+  for (const r of rects) if (r.width > 0.5 && r.height > 0.5) last = r;
+  if (!last) { hideCitePopover(); return; }
+  citePopover.hidden = false;
+  const w = citePopover.offsetWidth || 160;
+  const left = Math.min(last.right + 4, window.innerWidth - w - 6);
+  const top = Math.min(last.bottom + 6, window.innerHeight - 34);
+  citePopover.style.left = `${Math.max(6, left)}px`;
+  citePopover.style.top = `${Math.max(6, top)}px`;
+}
+
+// Keep the button glued to the selection as the page scrolls.
+document.getElementById("viewer-container")
+  ?.addEventListener("scroll", () => { if (!citePopover.hidden) updateCitePopover(); }, { passive: true });
+
+async function copyWithCitation() {
+  const ref = buildCitationReference();
+  if (!ref) { flashStatus("Select some text first"); return; }
+  const payload = ref.text ? `${ref.text} ${ref.parenthetical}` : ref.parenthetical;
+  const ok = await writeClipboard(payload);
+  flashStatus(ok ? `Copied ${ref.parenthetical}` : "Copy failed");
+  hideCitePopover();
+}
+
+let _statusTimer = 0;
+function flashStatus(msg) {
+  statusEl.textContent = msg;
+  if (_statusTimer) clearTimeout(_statusTimer);
+  _statusTimer = setTimeout(() => { statusEl.textContent = "Done"; }, 2500);
+}
+
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Fallback for contexts where the async clipboard API is unavailable.
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    } catch { return false; }
+  }
+}
+
+// Build the citation for the current selection, or null if there's nothing
+// citable. Returns { text, parenthetical }.
+function buildCitationReference() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed ||
+      !sel.anchorNode || !pagesEl.contains(sel.anchorNode)) return null;
+  const text = sel.toString().replace(/\s+/g, " ").trim();
+
+  // Map the selection's client rects onto pages, recording the vertical band
+  // (as a fraction of page height) that the selection covers on each page.
+  const wrapInfo = [];
+  for (const w of pagesEl.querySelectorAll(".page-wrapper")) {
+    wrapInfo.push({ page: Number(w.dataset.pageNumber), rect: w.getBoundingClientRect() });
+  }
+  const bands = new Map(); // page -> { top, bottom } fractions
+  for (let i = 0; i < sel.rangeCount; i++) {
+    for (const cr of sel.getRangeAt(i).getClientRects()) {
+      if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+      const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
+      const hit = wrapInfo.find(({ rect }) =>
+        cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom);
+      if (!hit || hit.rect.height <= 0) continue;
+      const t = (cr.top - hit.rect.top) / hit.rect.height;
+      const b = (cr.bottom - hit.rect.top) / hit.rect.height;
+      const cur = bands.get(hit.page);
+      if (!cur) bands.set(hit.page, { top: t, bottom: b });
+      else { cur.top = Math.min(cur.top, t); cur.bottom = Math.max(cur.bottom, b); }
+    }
+  }
+  if (bands.size === 0) return null;
+  const pages = [...bands.keys()].sort((a, b) => a - b);
+
+  const shortForm = citationShortForm(filenameEl.textContent || sourceDisplayName || "");
+
+  // Numbered paragraphs take precedence over page:line when the document has
+  // them (declarations, complaints) — that's how those documents are pin-cited.
+  const loc = docParagraphs.length >= 3
+    ? paragraphLocator(bands, pages)
+    : lineLocator(bands, pages);
+
+  const parenthetical = loc.kind === "para"
+    ? `(${shortForm} ${loc.str}.)`
+    : `(${shortForm} at ${loc.str}.)`;
+  return { text, parenthetical };
+}
+
+// Paragraph locator: the ¶ number(s) the selection spans, from the doc-wide
+// sequential marker list. A selection belongs to the last paragraph whose
+// marker starts at or above its start.
+function paragraphLocator(bands, pages) {
+  const firstPage = pages[0], lastPage = pages[pages.length - 1];
+  const start = { page: firstPage, y: bands.get(firstPage).top };
+  const end = { page: lastPage, y: bands.get(lastPage).bottom };
+  const atOrAbove = (m, pos) =>
+    m.page < pos.page || (m.page === pos.page && m.y <= pos.y + 0.006);
+
+  let startNum = null, endNum = null;
+  for (const m of docParagraphs) {
+    if (atOrAbove(m, start)) startNum = m.num;
+    if (atOrAbove(m, end)) endNum = m.num;
+  }
+  if (startNum == null) startNum = docParagraphs[0].num; // selection precedes ¶ 1
+  if (endNum == null || endNum < startNum) endNum = startNum;
+  const str = startNum === endNum ? `¶ ${startNum}` : `¶¶ ${startNum}-${endNum}`;
+  return { kind: "para", str };
+}
+
+// Page:line locator. Uses the captured line-number rows; falls back to a
+// page-only cite for pages without pleading line numbers.
+function lineLocator(bands, pages) {
+  const tol = 0.004;
+  const per = pages.map((p) => {
+    const st = pageStructures.get(p);
+    const band = bands.get(p);
+    if (!st || !st.lineRows.length) return { page: p, start: null, end: null };
+    const hit = st.lineRows.filter((r) => r.y1 >= band.top - tol && r.y0 <= band.bottom + tol);
+    if (!hit.length) return { page: p, start: null, end: null };
+    const nums = hit.map((r) => r.num);
+    return { page: p, start: Math.min(...nums), end: Math.max(...nums) };
+  });
+
+  const firstPage = pages[0], lastPage = pages[pages.length - 1];
+  if (!per.some((x) => x.start != null)) {
+    // No line numbers anywhere in the selection — cite the page(s) alone.
+    const str = firstPage === lastPage ? `p. ${firstPage}` : `pp. ${firstPage}-${lastPage}`;
+    return { kind: "page", str };
+  }
+
+  if (firstPage === lastPage) {
+    const x = per[0];
+    if (x.start == null) return { kind: "page", str: `p. ${firstPage}` };
+    const lines = x.start === x.end ? `${x.start}` : `${x.start}-${x.end}`;
+    return { kind: "line", str: `p. ${firstPage}:${lines}` };
+  }
+
+  const first = per[0], last = per[per.length - 1];
+  const startStr = first.start != null ? `${first.page}:${first.start}` : `${first.page}`;
+  const endStr = last.end != null ? `${last.page}:${last.end}` : `${last.page}`;
+  return { kind: "line", str: `pp. ${startStr}-${endStr}` };
+}
 
 // --- Zoom controls ---
 function setZoom(newScale) {

@@ -788,6 +788,76 @@ export function extractTitle(raw) {
   return result;
 }
 
+// === citation short form ===
+//
+// Turn a resolved display name (what the toolbar/tab shows — e.g. "Motion",
+// "Opposition to Demurrer", "Doe Decl. ISO Opp.", "Pacific Insurance's
+// Demurrer", "FAC", "Hopkins Complaint") into the abbreviated form a lawyer
+// would use in a record citation's signal parenthetical:
+//
+//   "Motion"                → "Mot."
+//   "Opposition to Demurrer"→ "Opp."
+//   "Doe Decl. ISO Opp."    → "Doe Decl."   (declarant kept, ISO clause dropped)
+//   "FAC"                   → "FAC"
+//   "Hopkins Complaint"     → "Compl."
+//
+// The party qualifier is intentionally dropped for most types (a single-motion
+// record cites just "Mot."), but a declaration IS named after its declarant, so
+// that name is preserved. Order matters: the checks resolve the PRIMARY document
+// type first, before any inner reference (a Reply's name mentions the Opposition
+// it answers; an Objection's name mentions the Declaration it targets).
+export function citationShortForm(name) {
+  const s = (name || "").trim();
+  if (!s) return "Doc.";
+
+  // Objection — its display form is "Objection to {Last} Decl.", which contains
+  // "Decl.", so it must be caught before the declaration rule.
+  if (/\bobjection\b/i.test(s)) return "Obj.";
+
+  // Short procedural notice ("Notice of Ruling", "Notice of Opposition"): the
+  // document IS the notice. (A "Notice of Motion" has already collapsed to
+  // "Motion" upstream, so it never reaches here.)
+  if (/^\s*notice\s+of\b/i.test(s)) return "Notice";
+
+  // Declaration — "{Last} Decl." / "{Last} Decl. ISO …". Keep the declarant and
+  // drop the ISO suffix; that named short cite ("Doe Decl.") is the whole point.
+  const decl = s.match(/([A-Z][A-Za-z'’.\-]*)\s+Decl\b\.?/);
+  if (decl) return `${decl[1]} Decl.`;
+
+  // Amended complaints keep their acronym.
+  const amended = s.match(/^\s*(FAC|SAC|TAC)\b/);
+  if (amended) return amended[1];
+
+  // Separate-statement family.
+  if (/^\s*AUMF\b/.test(s)) return "AUMF";
+  if (/^\s*UMF\b/.test(s)) return "UMF";
+  if (/\bseparate\s+statement\b/i.test(s)) return "Sep. Stmt.";
+
+  // Request for judicial notice.
+  if (/\bRJN\b/.test(s) || /\brequest\s+for\s+judicial\s+notice\b/i.test(s)) return "RJN";
+
+  // Reply before Opposition (a Reply's name names the Opposition it answers).
+  if (/\breply\b/i.test(s)) return "Reply";
+  if (/\bopposition\b|\bopp\.?\b/i.test(s)) return "Opp.";
+
+  if (/\bdemurrer\b/i.test(s)) return "Demurrer";
+  if (/\bex\s+parte\b/i.test(s)) return "Ex Parte App.";
+
+  // Motion — display collapses "Notice of Motion" and "Mot. to X" to a Motion.
+  if (/\bmotion\b|\bmot\.?\b/i.test(s)) return "Mot.";
+  if (/\bpetition\b|\bpet\.?\b/i.test(s)) return "Pet.";
+
+  if (/\bamendment\s+to\s+(?:the\s+)?complaint\b/i.test(s)) return "Am. to Compl.";
+  if (/\bcomplaint\b/i.test(s)) return "Compl.";
+  if (/\banswer\b/i.test(s)) return "Answer";
+  if (/\bproof\s+of\s+service\b/i.test(s)) return "POS";
+  if (/\brequest\s+for\s+dismissal\b/i.test(s)) return "Req. for Dismissal";
+  if (/\border\b/i.test(s)) return "Order";
+
+  // Nothing recognized — the name is already concise, so cite it verbatim.
+  return s;
+}
+
 // === disambiguation ===
 //
 // Input:  entries — each { id, canonical, target, party, partyLabel }
