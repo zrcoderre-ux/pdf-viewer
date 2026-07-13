@@ -1,5 +1,5 @@
 // Node-runnable tests. Run: node test-naming.mjs
-import { extractTitle, disambiguate } from "./viewer/footer-naming.js";
+import { extractTitle, disambiguate, citationShortForm } from "./viewer/footer-naming.js";
 
 const tests = [
   // === The 14 spec examples ===
@@ -546,5 +546,46 @@ dtest("aumf collision uses partyLabel", [
   a: "Plaintiff's AUMF",
   b: "Cross-Plaintiff's AUMF",
 });
+
+// --- citation short-form tests ---
+
+console.log("\n--- citation short form ---");
+
+function ctest(name, input, want) {
+  const got = citationShortForm(input);
+  if (got === want) {
+    console.log(`✓ ${name}`);
+  } else {
+    console.log(`✗ ${name}: got=${JSON.stringify(got)} want=${JSON.stringify(want)}`);
+    process.exitCode = 1;
+  }
+}
+
+ctest("motion",                "Motion",                    "Mot.");
+ctest("motion with party",     "Pacific Insurance's Motion","Mot.");
+ctest("mot to strike",         "Mot. to Strike",            "Mot.");
+ctest("opposition",            "Opposition",                "Opp.");
+ctest("opp to demurrer",       "Opposition to Demurrer",    "Opp.");
+ctest("reply",                 "Reply",                     "Reply");
+ctest("reply to opp to mot",   "Reply to Opp. to Mot.",     "Reply");
+ctest("demurrer",              "Demurrer to SAC",           "Demurrer");
+ctest("decl bare",             "Smith Decl.",               "Smith Decl.");
+ctest("decl iso opp",          "Doe Decl. ISO Opp.",        "Doe Decl.");
+ctest("decl hyphen",           "Garcia-Lopez Decl. ISO Reply", "Garcia-Lopez Decl.");
+ctest("objection to decl",     "Objection to Anderson Decl.", "Obj.");
+ctest("complaint",             "Complaint",                 "Compl.");
+ctest("complaint with party",  "Hopkins Complaint",         "Compl.");
+ctest("FAC",                   "FAC",                       "FAC");
+ctest("SAC",                   "SAC",                       "SAC");
+ctest("petition",              "Pet. for Writ of Mandate",  "Pet.");
+ctest("ex parte",              "Ex Parte App. for Order Shortening Time", "Ex Parte App.");
+ctest("rjn",                   "RJN ISO Opp.",              "RJN");
+ctest("umf",                   "UMF",                       "UMF");
+ctest("aumf",                  "AUMF",                      "AUMF");
+ctest("separate statement",    "Separate Statement",        "Sep. Stmt.");
+ctest("proposed order",        "Proposed Order",            "Order");
+ctest("proof of service",      "Proof of Service",          "POS");
+ctest("short notice",          "Notice of Opposition",      "Notice");
+ctest("unknown falls through", "Trial Brief",               "Trial Brief");
 
 console.log("\nDone.");
