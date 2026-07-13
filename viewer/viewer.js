@@ -1253,6 +1253,10 @@ const pageStructures = new Map();
 // Non-empty (length >= 3) means the document numbers its paragraphs, so a
 // reference cites the paragraph (¶ 9) instead of page:line.
 let docParagraphs = [];
+// Offset from PDF page index to the page number PRINTED on the page, i.e.
+// printedPage = pdfIndex + printedPageOffset. Detected from a footer/header slot
+// whose numbers increment by exactly 1 per page. null → cite the PDF index.
+let printedPageOffset = null;
 // The page-1 caption title (right-column document title), captured at render.
 let pageOneCaptionTitle = "";
 // A name derived from the page-1 caption (a leading Declaration, or a short-doc
@@ -1741,6 +1745,7 @@ function resetForNewDocument() {
   _footerByPage.clear();
   pageStructures.clear();
   docParagraphs = [];
+  printedPageOffset = null;
   pageOneCaptionTitle = "";
   captionOverrideName = null;
   unregisterEntry();
@@ -2484,23 +2489,51 @@ function capturePageReference(pageNumber, textLayerDiv) {
     ? Math.max(...lineSpans.map((c) => c.left + (c.s.offsetWidth || 0)))
     : 0;
   const paraCandidates = [];
+  // Printed page-number candidates from the top and bottom margins. Each records
+  // its number, band, and x-fraction; finalizeReferenceStructure finds the slot
+  // whose numbers increment by 1 per page (the real page number).
+  const pageNumCands = [];
   for (const s of textLayerDiv.querySelectorAll("span")) {
     const t = (s.textContent || "").trim();
-    const m = t.match(/^(\d{1,3})[.)](?:\s|$)/);
-    if (!m) continue;
     const left = s.offsetLeft;
-    if (left <= lineColRight + 4) continue; // still in the line-number margin
-    if (left > W * 0.5) continue;           // paragraph numbers start at the left
-    paraCandidates.push({ y: s.offsetTop / H, num: parseInt(m[1], 10), left: left / W });
+    const yFrac = s.offsetTop / H;
+
+    const pm = t.match(/^(\d{1,3})[.)](?:\s|$)/);
+    if (pm && left > lineColRight + 4 && left <= W * 0.5) {
+      paraCandidates.push({ y: yFrac, num: parseInt(pm[1], 10), left: left / W });
+    }
+
+    // Page number: only in the top ~12% or bottom ~15% margin, and never in the
+    // far-left line-number column (a bottom line number would masquerade as one).
+    if ((yFrac < 0.12 || yFrac > 0.85) && left > lineColRight + 4) {
+      const n = pageNumberFromText(t);
+      if (n != null) pageNumCands.push({ band: yFrac < 0.5 ? "t" : "b", x: left / W, num: n });
+    }
   }
 
-  pageStructures.set(pageNumber, { lineRows, paraCandidates });
+  pageStructures.set(pageNumber, { lineRows, paraCandidates, pageNumCands });
+}
+
+// Pull a page number out of a margin token. Accepts a bare integer, "Page N",
+// a dash-wrapped "- N -", or "N of M". Returns null if the token isn't one.
+function pageNumberFromText(t) {
+  let m;
+  if ((m = t.match(/^(\d{1,4})$/))) return parseInt(m[1], 10);
+  if ((m = t.match(/^page\s+(\d{1,4})\b/i))) return parseInt(m[1], 10);
+  if ((m = t.match(/^[-–—]\s*(\d{1,4})\s*[-–—]$/))) return parseInt(m[1], 10);
+  if ((m = t.match(/^(\d{1,4})\s+of\s+\d{1,4}$/i))) return parseInt(m[1], 10);
+  return null;
 }
 
 // After all pages render, stitch the per-page paragraph-marker candidates into
 // one document-wide sequential run (1, 2, 3, …). Stray numbered list items are
 // filtered out by requiring consecutive numbering within a shared left indent.
 function finalizeReferenceStructure() {
+  // Printed page numbers are independent of paragraph numbering — resolve them
+  // first so the early return below (documents with no numbered paragraphs)
+  // doesn't skip them.
+  finalizePrintedPageNumbers();
+
   const all = [];
   for (const [page, st] of pageStructures) {
     for (const c of st.paraCandidates) all.push({ page, y: c.y, num: c.num, left: c.left });
@@ -2534,6 +2567,47 @@ function finalizeReferenceStructure() {
   docParagraphs = best.length >= 3
     ? best.map((c) => ({ page: c.page, y: c.y, num: c.num }))
     : [];
+}
+
+// Determine the printed-page offset: find the margin slot (band + x position)
+// whose numbers satisfy printedNum == pdfPage + offset for a single constant
+// offset across at least two pages. Only a real page number increments by 1 per
+// page, so this rejects case numbers, years, and bottom line numbers (all
+// constant, hence a non-constant offset). The offset extrapolates to pages whose
+// number wasn't detected (e.g. an unnumbered first page).
+function finalizePrintedPageNumbers() {
+  printedPageOffset = null;
+  // slotKey -> Map<offset, Set<pdfPage>>
+  const slots = new Map();
+  for (const [page, st] of pageStructures) {
+    for (const c of st.pageNumCands || []) {
+      const key = `${c.band}:${Math.round(c.x / 0.08)}`;
+      const offset = c.num - page;
+      if (!slots.has(key)) slots.set(key, new Map());
+      const byOffset = slots.get(key);
+      if (!byOffset.has(offset)) byOffset.set(offset, new Set());
+      byOffset.get(offset).add(page);
+    }
+  }
+
+  let bestCoverage = 1, bestOffset = null;
+  for (const byOffset of slots.values()) {
+    for (const [offset, pagesSet] of byOffset) {
+      // A valid page number is positive on every page it labels.
+      let valid = true;
+      for (const p of pagesSet) if (p + offset < 1) { valid = false; break; }
+      if (valid && pagesSet.size > bestCoverage) {
+        bestCoverage = pagesSet.size;
+        bestOffset = offset;
+      }
+    }
+  }
+  if (bestOffset != null && bestCoverage >= 2) printedPageOffset = bestOffset;
+}
+
+// The page number as printed on the page (falls back to the PDF index).
+function printedPage(pdfIndex) {
+  return pdfIndex + (printedPageOffset ?? 0);
 }
 
 // Repaint the custom selection tint from the live browser selection. Because
@@ -2699,6 +2773,11 @@ function buildCitationReference() {
       const hit = wrapInfo.find(({ rect }) =>
         cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom);
       if (!hit || hit.rect.height <= 0) continue;
+      // A selection that crosses a page boundary engulfs the next page's
+      // full-size canvas / overlay layers, whose rects would otherwise report a
+      // whole-page band. Real text-line rects are a small fraction of page
+      // height, so drop anything tall enough to be a page-sized element.
+      if (cr.height > hit.rect.height * 0.25) continue;
       const t = (cr.top - hit.rect.top) / hit.rect.height;
       const b = (cr.bottom - hit.rect.top) / hit.rect.height;
       const cur = bands.get(hit.page);
@@ -2758,7 +2837,9 @@ function lineLocator(bands, pages) {
     return { page: p, start: Math.min(...nums), end: Math.max(...nums) };
   });
 
-  const firstPage = pages[0], lastPage = pages[pages.length - 1];
+  // Page numbers in the cite are the ones PRINTED on the page.
+  const firstPage = printedPage(pages[0]);
+  const lastPage = printedPage(pages[pages.length - 1]);
   if (!per.some((x) => x.start != null)) {
     // No line numbers anywhere in the selection — cite the page(s) alone.
     const str = firstPage === lastPage ? `p. ${firstPage}` : `pp. ${firstPage}-${lastPage}`;
@@ -2773,8 +2854,8 @@ function lineLocator(bands, pages) {
   }
 
   const first = per[0], last = per[per.length - 1];
-  const startStr = first.start != null ? `${first.page}:${first.start}` : `${first.page}`;
-  const endStr = last.end != null ? `${last.page}:${last.end}` : `${last.page}`;
+  const startStr = first.start != null ? `${printedPage(first.page)}:${first.start}` : `${printedPage(first.page)}`;
+  const endStr = last.end != null ? `${printedPage(last.page)}:${last.end}` : `${printedPage(last.page)}`;
   return { kind: "line", str: `pp. ${startStr}-${endStr}` };
 }
 
