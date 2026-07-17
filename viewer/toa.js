@@ -75,8 +75,9 @@ const CSS = `
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  cursor: pointer;
+  cursor: move;
   user-select: none;
+  touch-action: none;
   border-bottom: 1px solid #e6e8eb;
 }
 @media (prefers-color-scheme: dark) {
@@ -185,23 +186,41 @@ export function createToaPanel({ providerLabel, top } = {}) {
 
   let el = null, bodyEl = null, countEl = null;
   let minimized = false, width = null, height = null;
+  // Custom position, kept as offsets from the top-right corner so the panel
+  // stays right/top-anchored (which is what the bottom-left resize grip expects).
+  // null → use the default placement.
+  let posRight = null, posTop = null;
   let enabled = true;
   let lastSig = "";
+  // Set true while a header drag is in progress so the trailing click doesn't
+  // also toggle minimize.
+  let dragMoved = false;
 
-  // Restore persisted minimize state + custom size.
+  // Restore persisted minimize state + custom size + custom position.
   chrome.storage.local.get(
-    { toaMinimized: false, toaWidth: null, toaHeight: null },
+    { toaMinimized: false, toaWidth: null, toaHeight: null, toaRight: null, toaTop: null },
     (s) => {
       minimized = !!s.toaMinimized;
       width = s.toaWidth || null;
       height = s.toaHeight || null;
+      posRight = s.toaRight != null ? s.toaRight : null;
+      posTop = s.toaTop != null ? s.toaTop : null;
       if (el) {
         if (width) el.style.width = `${width}px`;
         if (height) el.style.height = `${height}px`;
+        applyPosition();
         applyMinimized();
       }
     }
   );
+
+  // Write the custom position onto the element (right + top offsets). A no-op
+  // for whichever offset hasn't been set, leaving the CSS/option default.
+  function applyPosition() {
+    if (!el) return;
+    if (posRight != null) el.style.right = `${posRight}px`;
+    if (posTop != null) el.style.top = `${posTop}px`;
+  }
 
   function ensure() {
     if (el && el.isConnected) return el;
@@ -211,7 +230,7 @@ export function createToaPanel({ providerLabel, top } = {}) {
 
     const header = document.createElement("div");
     header.className = "cl-toa-header";
-    header.title = "Click to minimize / maximize";
+    header.title = "Drag to move · click to minimize / maximize";
 
     const title = document.createElement("span");
     title.className = "cl-toa-title";
@@ -238,6 +257,44 @@ export function createToaPanel({ providerLabel, top } = {}) {
 
     if (width) el.style.width = `${width}px`;
     if (height) el.style.height = `${height}px`;
+    applyPosition();
+
+    // Drag the header to reposition the panel. Kept top/right-anchored so the
+    // bottom-left resize grip keeps behaving. A small movement threshold tells a
+    // drag apart from the click that minimizes/maximizes (see the click handler).
+    header.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const startX = e.clientX, startY = e.clientY;
+      const r = el.getBoundingClientRect();
+      const startRight = window.innerWidth - r.right;
+      const startTop = r.top;
+      let capturing = false;
+      dragMoved = false;
+      const onMove = (ev) => {
+        const dx = ev.clientX - startX, dy = ev.clientY - startY;
+        if (!dragMoved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+        if (!capturing) { try { header.setPointerCapture(e.pointerId); } catch { /* ok */ } capturing = true; }
+        dragMoved = true;
+        const w = el.getBoundingClientRect().width;
+        const right = Math.max(0, Math.min(startRight - dx, Math.max(0, window.innerWidth - w)));
+        const t = Math.max(0, Math.min(startTop + dy, Math.max(0, window.innerHeight - 32)));
+        el.style.right = `${right}px`;
+        el.style.top = `${t}px`;
+      };
+      const onUp = () => {
+        header.removeEventListener("pointermove", onMove);
+        header.removeEventListener("pointerup", onUp);
+        if (capturing) { try { header.releasePointerCapture(e.pointerId); } catch { /* ok */ } }
+        if (dragMoved) {
+          const b = el.getBoundingClientRect();
+          posRight = Math.round(window.innerWidth - b.right);
+          posTop = Math.round(b.top);
+          chrome.storage.local.set({ toaRight: posRight, toaTop: posTop });
+        }
+      };
+      header.addEventListener("pointermove", onMove);
+      header.addEventListener("pointerup", onUp);
+    });
 
     const grip = document.createElement("div");
     grip.className = "cl-toa-resize";
@@ -270,6 +327,8 @@ export function createToaPanel({ providerLabel, top } = {}) {
     header.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
+      // A click that concluded a drag shouldn't also minimize/maximize.
+      if (dragMoved) { dragMoved = false; return; }
       minimized = !minimized;
       applyMinimized();
       chrome.storage.local.set({ toaMinimized: minimized });
