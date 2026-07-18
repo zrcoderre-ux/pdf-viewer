@@ -332,7 +332,17 @@ const tests = [
   },
 
   // === New doc-type rules derived from naming history ===
-  { name: "objection-to-decl", raw: "OBJECTIONS TO ANDERSON DECL - MOTION TO VACATE DEFAULT", expect: { canonical: "Objection to Anderson Decl." } },
+  { name: "objection-to-decl", raw: "OBJECTIONS TO ANDERSON DECL - MOTION TO VACATE DEFAULT", expect: { canonical: "Obj. to Anderson Decl." } },
+  // Objections are their own type — never collapse to the objected-to document.
+  { name: "objection-to-rjn", raw: "Defendant's Objection to Plaintiff's Request For Judicial Notice", expect: { canonical: "Obj. to RJN", partyLabel: "Defendant" } },
+  { name: "objection-to-evidence", raw: "Plaintiff's Objection to Defendant's Evidence", expect: { canonical: "Obj. to Evidence", partyLabel: "Plaintiff" } },
+  { name: "objection-to-motion", raw: "Defendant's Objections to Plaintiff's Motion to Compel Further Responses", expect: { canonical: "Obj. to Mot.", partyLabel: "Defendant" } },
+  { name: "objection-to-declaration-of", raw: "Objection to Declaration of Jane Smith", expect: { canonical: "Obj. to Smith Decl." } },
+  { name: "objection-to-evidence-iso", raw: "Defendant's Objection to Plaintiff's Evidence in Support of Opposition", expect: { canonical: "Obj. to Evidence" } },
+  // Evidence / Compendium of Evidence — its own type, not the opp/motion it supports.
+  { name: "evidence-iso-opp", raw: "Plaintiff's Evidence in Support of Opposition to Motion for Summary Judgment", expect: { canonical: "Evidence ISO Opp.", partyLabel: "Plaintiff" } },
+  { name: "compendium-of-evidence", raw: "Defendant's Compendium of Evidence", expect: { canonical: "Evidence", partyLabel: "Defendant" } },
+  { name: "evidence-iso-motion", raw: "Evidence in Support of Motion to Compel Arbitration", expect: { canonical: "Evidence ISO Mot." } },
   { name: "proposed-order", raw: "[PROPOSED] ORDER RE PLAINTIFF'S MOTION FOR LEAVE TO AMEND COMPLAINT", expect: { canonical: "Proposed Order" } },
   { name: "proposed-order-bare", raw: "[PROPOSED] ORDER", expect: { canonical: "Proposed Order" } },
   { name: "proof-of-service", raw: "PROOF OF SERVICE RE NOTICE OF MOTION AND MOTION TO VACATE", expect: { canonical: "Proof of Service" } },
@@ -538,6 +548,29 @@ dtest("two rjns same target different parties", [
   b: "Defendant's RJN ISO Opp.",
 });
 
+// Two objections to the same thing, different parties → party disambiguates.
+dtest("two objections to rjn different parties", [
+  { id: "a", canonical: "Obj. to RJN", target: null, partyLabel: "Defendant" },
+  { id: "b", canonical: "Obj. to RJN", target: null, partyLabel: "Plaintiff" },
+], {
+  a: "Defendant's Obj. to RJN",
+  b: "Plaintiff's Obj. to RJN",
+});
+
+// A single objection stays bare (no needless party qualifier).
+dtest("single objection stays bare", [
+  { id: "a", canonical: "Obj. to RJN", target: null, partyLabel: "Defendant" },
+], { a: "Obj. to RJN" });
+
+// Two evidence compendia, different parties.
+dtest("two evidence iso opp different parties", [
+  { id: "a", canonical: "Evidence ISO Opp.", target: null, partyLabel: "Plaintiff" },
+  { id: "b", canonical: "Evidence ISO Opp.", target: null, partyLabel: "Defendant" },
+], {
+  a: "Plaintiff's Evidence ISO Opp.",
+  b: "Defendant's Evidence ISO Opp.",
+});
+
 // AUMF/UMF participate in disambiguation
 dtest("aumf collision uses partyLabel", [
   { id: "a", canonical: "AUMF", target: null, partyLabel: "Plaintiff" },
@@ -573,6 +606,11 @@ ctest("decl bare",             "Smith Decl.",               "Smith Decl.");
 ctest("decl iso opp",          "Doe Decl. ISO Opp.",        "Doe Decl.");
 ctest("decl hyphen",           "Garcia-Lopez Decl. ISO Reply", "Garcia-Lopez Decl.");
 ctest("objection to decl",     "Objection to Anderson Decl.", "Obj.");
+ctest("obj. to rjn",           "Obj. to RJN",               "Obj.");
+ctest("obj. to anderson decl", "Obj. to Anderson Decl.",    "Obj.");
+ctest("obj. to evidence",      "Obj. to Evidence",          "Obj.");
+ctest("evidence iso opp",      "Evidence ISO Opp.",         "Evid.");
+ctest("evidence bare",         "Evidence",                  "Evid.");
 ctest("complaint",             "Complaint",                 "Compl.");
 ctest("complaint with party",  "Hopkins Complaint",         "Compl.");
 ctest("FAC",                   "FAC",                       "FAC");
