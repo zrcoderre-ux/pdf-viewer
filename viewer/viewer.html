@@ -150,29 +150,42 @@
     <button id="zoom-out" title="Zoom out">−</button>
     <span id="zoom-level">100%</span>
     <button id="zoom-in" title="Zoom in">+</button>
-    <button id="highlight-toggle" title="Highlight tool: click to toggle. When active, drag to highlight text. Right-click selected text anytime to highlight." aria-pressed="false">✏ Highlight</button>
-    <button id="rect-select-toggle" title="Rectangle select: click to toggle. When active, drag a box to select text by region. You can also hold Alt and drag at any time." aria-pressed="false">▭ Box select</button>
-    <button id="crop-select" title="Set the selectable text area: toggle on, then drag a box. Text outside the box (e.g. margin line numbers) won't be selectable. Applies to every document until you change or reset it." aria-pressed="false">⬚ Text area</button>
-    <button id="ocr-run" title="Run OCR on this scanned document so its text becomes selectable and citations are linked" aria-pressed="false">⛶ OCR</button>
     <button id="save-edits" title="Save your highlights and edits into the PDF (local documents only)" hidden>💾 Save</button>
-    <div id="edit-menu-wrap">
-      <button id="edit-menu-btn" title="Edit this document" aria-haspopup="true" aria-expanded="false" hidden>✎ Edit ▾</button>
-      <div id="edit-menu" role="menu" hidden>
-        <button id="combine-pdfs" role="menuitem" title="Merge other PDFs onto the end of this one and save">⧉ Combine PDFs…</button>
-        <button id="images-btn" role="menuitem" title="Add image files (JPG/PNG…) as new pages">🖼 Add images…</button>
-        <button id="fill-form" role="menuitem" title="Fill in this PDF's form fields" hidden>📝 Fill form…</button>
-        <div class="menu-sep" role="separator"></div>
-        <button id="organize-pages" role="menuitem" title="Reorder, rotate, delete, or extract pages">▦ Organize pages</button>
-        <button id="split-btn" role="menuitem" title="Split this document into several PDFs">✂ Split…</button>
-        <div class="menu-sep" role="separator"></div>
-        <button id="bates-number" role="menuitem" title="Add Bates numbers to every page">▤ Bates numbering…</button>
-        <button id="headerfooter-btn" role="menuitem" title="Add header/footer text or page numbers">🔖 Header &amp; footer…</button>
-        <button id="watermark-btn" role="menuitem" title="Add a translucent watermark to every page">🌊 Watermark…</button>
-      </div>
-    </div>
     <button id="download" title="Download PDF">⬇ Download</button>
     <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
   </header>
+
+  <!-- Adobe-Acrobat-style vertical tools rail down the right margin. Holds the
+       annotation/selection tools always, and the document-editing tools when the
+       document is editable (local/downloaded). -->
+  <aside id="tools-rail" aria-label="Tools">
+    <button id="tools-rail-collapse" title="Collapse the tools panel" aria-expanded="true">Tools <span class="chev">›</span></button>
+
+    <div id="tools-rail-body">
+      <div class="tools-group-label">Comment</div>
+      <button id="highlight-toggle" class="tool-btn" title="Highlight tool: click to toggle. When active, drag to highlight text. Right-click selected text anytime to highlight." aria-pressed="false"><span class="ti">✏</span><span class="tl">Highlight</span></button>
+      <button id="rect-select-toggle" class="tool-btn" title="Rectangle select: click to toggle. When active, drag a box to select text by region. You can also hold Alt and drag at any time." aria-pressed="false"><span class="ti">▭</span><span class="tl">Box select</span></button>
+      <button id="crop-select" class="tool-btn" title="Set the selectable text area: toggle on, then drag a box. Text outside the box (e.g. margin line numbers) won't be selectable. Applies to every document until you change or reset it." aria-pressed="false"><span class="ti">⬚</span><span class="tl">Text area</span></button>
+      <button id="ocr-run" class="tool-btn" title="Run OCR on this scanned document so its text becomes selectable and citations are linked" aria-pressed="false"><span class="ti">⛶</span><span class="tl">OCR</span></button>
+
+      <div id="tools-edit-section" hidden>
+        <div class="tools-group-label">Edit</div>
+        <button id="fill-form" class="tool-btn" title="Fill in this PDF's form fields" hidden><span class="ti">📝</span><span class="tl">Fill form…</span></button>
+        <button id="combine-pdfs" class="tool-btn" title="Merge other PDFs onto the end of this one and save"><span class="ti">⧉</span><span class="tl">Combine PDFs…</span></button>
+        <button id="images-btn" class="tool-btn" title="Add image files (JPG/PNG…) as new pages"><span class="ti">🖼</span><span class="tl">Add images…</span></button>
+
+        <div class="tools-group-label">Organize</div>
+        <button id="organize-pages" class="tool-btn" title="Reorder, rotate, delete, or extract pages"><span class="ti">▦</span><span class="tl">Organize pages</span></button>
+        <button id="split-btn" class="tool-btn" title="Split this document into several PDFs"><span class="ti">✂</span><span class="tl">Split…</span></button>
+
+        <div class="tools-group-label">Stamp</div>
+        <button id="bates-number" class="tool-btn" title="Add Bates numbers to every page"><span class="ti">▤</span><span class="tl">Bates numbering…</span></button>
+        <button id="headerfooter-btn" class="tool-btn" title="Add header/footer text or page numbers"><span class="ti">🔖</span><span class="tl">Header &amp; footer…</span></button>
+        <button id="watermark-btn" class="tool-btn" title="Add a translucent watermark to every page"><span class="ti">🌊</span><span class="tl">Watermark…</span></button>
+      </div>
+    </div>
+  </aside>
+
   <main id="viewer-container">
     <div id="pages"></div>
   </main>

@@ -56,46 +56,120 @@ body { overflow-y: auto; }
 }
 #toolbar button[aria-pressed="true"]:hover { background: #1b66c9; }
 
-/* ── Edit ▾ dropdown ──────────────────────────────────────────────────────── */
-#edit-menu-wrap { position: relative; display: inline-flex; }
-#edit-menu {
-  position: absolute;
-  top: calc(100% + 6px);
+/* ── Adobe-Acrobat-style tools rail (right margin) ───────────────────────────── */
+:root {
+  --tools-rail-width: 208px;         /* expanded width */
+  --tools-rail-collapsed: 52px;      /* icon-only width */
+  --tools-rail-cur: var(--tools-rail-width); /* current width (drives layout) */
+}
+body.tools-collapsed { --tools-rail-cur: var(--tools-rail-collapsed); }
+
+#tools-rail {
+  position: fixed;
+  top: var(--toolbar-height, 48px);
   right: 0;
-  z-index: 20;
-  min-width: 190px;
+  bottom: 0;
+  width: var(--tools-rail-cur);
   background: #2a2d30;
-  border: 1px solid #4a4d50;
-  border-radius: 6px;
-  padding: 5px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  border-left: 1px solid #1a1a1a;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 9;
   display: flex;
   flex-direction: column;
   gap: 1px;
+  padding: 8px;
+  transition: width 0.12s ease;
 }
-#edit-menu[hidden] { display: none; }
-#edit-menu button {
-  display: block;
+
+/* Rail header / collapse toggle. */
+#tools-rail-collapse {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  background: none;
+  border: none;
+  color: #cfd2d4;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 6px 6px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid #3a3d40;
+  cursor: pointer;
+}
+#tools-rail-collapse:hover { color: #fff; }
+#tools-rail-collapse .chev { transition: transform 0.12s ease; font-weight: 400; }
+body.tools-collapsed #tools-rail-collapse .chev { transform: rotate(180deg); }
+/* Collapsed: the header shows only the chevron, centered. */
+body.tools-collapsed #tools-rail-collapse {
+  justify-content: center;
+  font-size: 0;            /* hide the word "Tools" */
+  padding: 6px 0 8px;
+}
+body.tools-collapsed #tools-rail-collapse .chev { font-size: 15px; }
+
+.tools-group-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8a8d90;
+  margin: 12px 6px 4px;
+}
+body.tools-collapsed .tools-group-label {
+  margin: 10px 0 3px;
+  text-align: center;
+  font-size: 0;            /* collapse to a thin divider */
+  border-top: 1px solid #3a3d40;
+  padding-top: 8px;
+}
+
+#tools-rail .tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 11px;
   width: 100%;
   text-align: left;
   background: none;
-  border: none;
-  color: #eee;
+  border: 1px solid transparent;
+  color: #e8e8e8;
   font-family: inherit;
   font-size: 13px;
-  padding: 7px 10px;
-  border-radius: 4px;
+  line-height: 1.1;
+  padding: 8px 10px;
+  border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
 }
-#edit-menu button:hover { background: #3a3d40; }
-#edit-menu button:disabled { opacity: 0.5; cursor: default; }
-#edit-menu button[aria-pressed="true"] { background: #1a4a8a; color: #fff; }
-#edit-menu .menu-sep {
-  height: 1px;
-  background: #4a4d50;
-  margin: 4px 6px;
+#tools-rail .tool-btn:hover { background: #3a3d40; }
+#tools-rail .tool-btn:disabled { opacity: 0.45; cursor: default; }
+/* The id-scoped rule above outranks the UA [hidden] rule, so restore it: a
+   button/section with `hidden` (e.g. Fill form on a formless doc, or the whole
+   Edit section on a read-only web PDF) must actually be hidden. */
+#tools-rail .tool-btn[hidden],
+#tools-edit-section[hidden] { display: none; }
+#tools-rail .tool-btn[aria-pressed="true"] {
+  background: #1a73e8;
+  border-color: #1a73e8;
+  color: #fff;
 }
+#tools-rail .tool-btn[aria-pressed="true"]:hover { background: #1b66c9; }
+#tools-rail .tool-btn .ti {
+  flex: 0 0 20px;
+  text-align: center;
+  font-size: 15px;
+}
+/* Collapsed: icon-only buttons, labels hidden, centered. */
+body.tools-collapsed #tools-rail .tool-btn {
+  justify-content: center;
+  padding: 9px 0;
+  gap: 0;
+}
+body.tools-collapsed #tools-rail .tool-btn .tl { display: none; }
 /* Rectangle-select tool: show a crosshair so it's clear a drag draws a box. */
 body.rect-select-mode .page-wrapper,
 body.rect-select-mode .textLayer span { cursor: crosshair; }
@@ -508,11 +582,11 @@ body.thumbs-open #thumb-resize { display: block; }
 .bookmark-children { padding-left: 10px; }
 
 #viewer-container {
-  /* Top padding offsets the position:fixed toolbar above so page 1
-     starts below the bar instead of behind it. Left margin shifts
+  /* Top padding offsets the position:fixed toolbar above so page 1 starts below
+     the bar. Right padding reserves the fixed tools rail; left margin shifts
      content right when the thumbnail panel is open. */
-  padding: var(--toolbar-height, 48px) 24px 24px;
-  transition: padding-left 0.15s ease;
+  padding: var(--toolbar-height, 48px) calc(var(--tools-rail-cur) + 24px) 24px 24px;
+  transition: padding-left 0.15s ease, padding-right 0.12s ease;
 }
 body.thumbs-open #viewer-container {
   padding-left: calc(var(--thumb-panel-width) + 24px);
