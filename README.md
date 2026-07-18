@@ -45,7 +45,8 @@ annotation tools (Highlight, Box select, Text area, OCR) are always there, and
 for editable documents an **Edit** section adds every document operation
 (Combine, Add images, Organize pages, Split, Bates, Header/Footer, Watermark).
 Click **TOOLS** at the top of the rail to collapse it to an icon-only strip.
-Editable documents also show **💾 Save** in the top toolbar.
+Editable documents also show **💾 Save** in the top toolbar. The **☀ / 🌙**
+button toggles between dark (default) and light themes; the choice is remembered.
 
 - **Edit &amp; save — local documents only.** For a PDF you've already
   downloaded — opened from disk (`file://` in the extension) or via the app —

@@ -3999,6 +3999,32 @@ if (toolsRailCollapseEl) {
   } catch { /* ok */ }
 }
 
+// ── Light / dark theme ────────────────────────────────────────────────────────
+// The viewer defaults to dark; data-theme="light" on <html> flips it to light.
+// The choice is stored in localStorage (read synchronously by a tiny <head>
+// script so light mode doesn't flash dark on load). localStorage works in both
+// the extension page and the hosted PWA, so no chrome.storage round-trip needed.
+const themeToggleEl = document.getElementById("theme-toggle");
+function applyTheme(theme) {
+  const light = theme === "light";
+  document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
+  if (themeToggleEl) {
+    themeToggleEl.textContent = light ? "🌙" : "☀";
+    themeToggleEl.title = light ? "Switch to dark mode" : "Switch to light mode";
+  }
+}
+if (themeToggleEl) {
+  // Reflect whatever the pre-paint <head> script already applied.
+  let currentTheme = "dark";
+  try { if (localStorage.getItem("pdfViewerTheme") === "light") currentTheme = "light"; } catch { /* ok */ }
+  applyTheme(currentTheme);
+  themeToggleEl.addEventListener("click", () => {
+    currentTheme = currentTheme === "light" ? "dark" : "light";
+    applyTheme(currentTheme);
+    try { localStorage.setItem("pdfViewerTheme", currentTheme); } catch { /* ok */ }
+  });
+}
+
 // ── Fill form ───────────────────────────────────────────────────────────────
 // Renders editable HTML controls over the PDF's AcroForm fields. Edits are kept
 // in `formValues` (keyed by field name) so they survive zoom re-renders; on save
