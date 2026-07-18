@@ -301,6 +301,31 @@ function lastNameFromNameDecl(s) {
   return titleCaseLastWord(m[1]);
 }
 
+// What an objection objects to, as a short label — so an objection is named for
+// what it is ("Obj. to RJN"), not collapsed to the objected-to document. Checks
+// a declaration first (its clause can contain other type words), then the
+// distinctive support docs, then the motion/opposition family.
+function objectionTarget(s) {
+  const m = /objections?\s+(?:to|re:?)\s+(.+)$/i.exec(s);
+  if (!m) return null;
+  const rest = m[1];
+  if (/\bdeclaration\b|\bdecl\.?\b/i.test(rest)) {
+    const last = lastNameFromOf(rest) || lastNameFromNameDecl(rest);
+    return last ? `${last} Decl.` : "Decl.";
+  }
+  if (/\brequest\s+for\s+judicial\s+notice\b|\breq\.?\s+for\s+judicial\s+notice\b|\brjn\b/i.test(rest)) return "RJN";
+  if (/\bevidence\b/i.test(rest))                 return "Evidence";
+  if (/\bseparate\s+statement\b/i.test(rest))     return "Separate Statement";
+  if (/\bdemurrer\b/i.test(rest))                 return "Demurrer";
+  if (/\bex\s+parte\s+application\b/i.test(rest)) return "Ex Parte App.";
+  if (/\bpetition\b|\bpet\.?\b/i.test(rest))      return "Pet.";
+  if (/\bmotion\b|\bmot\.?\b/i.test(rest))        return "Mot.";
+  if (/\bopposition\b|\bopp\.?\b/i.test(rest))    return "Opp.";
+  if (/\breply\b/i.test(rest))                    return "Reply";
+  if (/\bcomplaint\b/i.test(rest))                return "Compl.";
+  return null;
+}
+
 // Detect what's being supported by an ISO clause.
 // "...ISO Plaintiff's Opposition to Motion..." → "opposition" (outermost wins).
 //
@@ -321,17 +346,19 @@ function detectISOTarget(s) {
 }
 
 const RULES = [
-  // 0. Objection to a declaration. Must precede the declaration rules, which
-  // would otherwise name it after the declarant ("Anderson Decl.") instead of
-  // as the objection to that declaration.
+  // 0. Objection — its own document type. Names the objection for what it is and
+  // captures WHAT it objects to, so it never collapses to that thing (an
+  // "Objection to Request for Judicial Notice" is "Obj. to RJN", not "RJN"; an
+  // "Objection to Anderson Declaration" is "Obj. to Anderson Decl.", not
+  // "Anderson Decl."). Must precede every rule for the objected-to type
+  // (declaration, RJN, evidence, motion, demurrer, opposition, …). Allows a
+  // leading party possessive ("Defendant's Objection to …").
   {
-    name: "objection-to-decl",
+    name: "objection",
     test(s) {
-      if (!/^\s*objections?\s+to\b/i.test(s)) return null;
-      if (!/\bdeclaration\b|\bdecl\.?\b/i.test(s)) return null;
-      const last = lastNameFromOf(s) || lastNameFromNameDecl(s);
-      if (!last) return null;
-      return { canonical: `Objection to ${last} Decl.` };
+      if (!/^\s*(?:[a-z][a-z\s.'&,-]+?'s\s+)?objections?\b/i.test(s)) return null;
+      const target = objectionTarget(s);
+      return { canonical: target ? `Obj. to ${target}` : "Objection" };
     },
   },
 
@@ -526,6 +553,32 @@ const RULES = [
 
       // Bare "Separate Statement" (the moving party's original).
       return { canonical: "Separate Statement" };
+    },
+  },
+
+  // 2.9. Evidence (a/k/a Compendium of Evidence) filed in support of a motion or
+  // opposition — its own document type, NOT the opposition/motion it supports.
+  // Mirrors the RJN rule's ISO-suffix handling. Must precede Reply/Opposition/
+  // Motion because "Evidence in Support of Opposition" contains those words.
+  {
+    name: "evidence",
+    test(s) {
+      if (!/\bevidence\b/i.test(s)) return null;
+      // Only when evidence is the document's own type: it leads the title
+      // (optionally "[party's] Compendium of Evidence"), or it's the thing being
+      // submitted "in support of" something.
+      const leads = /^\s*(?:[a-z][a-z\s.'&,-]+?'s\s+)?(?:compendium\s+of\s+)?evidence\b/i.test(s)
+                 || /\bevidence\s+in\s+support\b/i.test(s);
+      if (!leads) return null;
+      const iso = detectISOTarget(s);
+      const suffix = iso && {
+        reply:      "ISO Reply",
+        opposition: "ISO Opp.",
+        motion:     "ISO Mot.",
+        petition:   "ISO Pet.",
+        exparte:    "ISO Ex Parte App.",
+      }[iso];
+      return { canonical: suffix ? `Evidence ${suffix}` : "Evidence" };
     },
   },
 
@@ -810,9 +863,10 @@ export function citationShortForm(name) {
   const s = (name || "").trim();
   if (!s) return "Doc.";
 
-  // Objection — its display form is "Objection to {Last} Decl.", which contains
-  // "Decl.", so it must be caught before the declaration rule.
-  if (/\bobjection\b/i.test(s)) return "Obj.";
+  // Objection — its display form is "Obj. to {target}" (or "Objection to …"),
+  // which may contain another type word (Decl., RJN, Evidence), so it must be
+  // caught before those rules.
+  if (/\bobjections?\b/i.test(s) || /^\s*obj\.\s/i.test(s)) return "Obj.";
 
   // Short procedural notice ("Notice of Ruling", "Notice of Opposition"): the
   // document IS the notice. (A "Notice of Motion" has already collapsed to
@@ -835,6 +889,10 @@ export function citationShortForm(name) {
 
   // Request for judicial notice.
   if (/\bRJN\b/.test(s) || /\brequest\s+for\s+judicial\s+notice\b/i.test(s)) return "RJN";
+
+  // Evidence (a/k/a Compendium of Evidence) — before Reply/Opposition, whose
+  // words appear in "Evidence ISO Opp.".
+  if (/\bevidence\b/i.test(s)) return "Evid.";
 
   // Reply before Opposition (a Reply's name names the Opposition it answers).
   if (/\breply\b/i.test(s)) return "Reply";
@@ -904,6 +962,8 @@ function hasLadder(canonical) {
   if (TYPES_WITH_LADDER.has(canonical)) return true;
   if (canonical === "RJN") return true;
   if (canonical.startsWith("RJN ISO ")) return true;
+  if (canonical === "Objection" || canonical.startsWith("Obj. to ")) return true;
+  if (canonical === "Evidence" || canonical.startsWith("Evidence ISO ")) return true;
   return false;
 }
 
