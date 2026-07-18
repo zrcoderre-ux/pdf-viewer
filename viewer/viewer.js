@@ -161,9 +161,10 @@ const headerFooterEl = document.getElementById("headerfooter-btn");
 const watermarkEl = document.getElementById("watermark-btn");
 const splitEl     = document.getElementById("split-btn");
 const imagesEl    = document.getElementById("images-btn");
-const editMenuBtn  = document.getElementById("edit-menu-btn");
-const editMenuEl   = document.getElementById("edit-menu");
-const editMenuWrap = document.getElementById("edit-menu-wrap");
+// Right-margin tools rail: the container for the document-editing tools (shown
+// only for editable docs) and the collapse toggle.
+const toolsEditSection = document.getElementById("tools-edit-section");
+const toolsRailCollapseEl = document.getElementById("tools-rail-collapse");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
@@ -1473,10 +1474,9 @@ let localFileHandle = null; // FileSystemFileHandle for in-place save, if provid
 function setEditingEnabled(on) {
   editingAllowed = on;
   // Save is a primary button; every other document-editing action lives in the
-  // Edit ▾ dropdown, so we only need to gate those two entry points here.
+  // tools rail's Edit section, so we gate that section (and Save) here.
   if (saveEditsEl) saveEditsEl.hidden = !on;
-  if (editMenuBtn) editMenuBtn.hidden = !on;
-  if (!on && editMenuEl) editMenuEl.hidden = true; // don't leave the menu open
+  if (toolsEditSection) toolsEditSection.hidden = !on;
   if (downloadEl)  downloadEl.hidden  = on; // Save stands in for Download when editable
 }
 // A file:// document in the extension is already a local/downloaded file.
@@ -3977,38 +3977,27 @@ async function addImagesAsPages() {
 
 if (imagesEl) imagesEl.addEventListener("click", addImagesAsPages);
 
-// ── Edit ▾ dropdown ─────────────────────────────────────────────────────────
-// Houses every document-editing action (Combine, Organize, Split, Images,
-// Bates, Header/Footer, Watermark). Each item keeps its own click handler
-// (wired above); this just opens/closes the menu and closes it after a pick.
-function closeEditMenu() {
-  if (!editMenuEl || editMenuEl.hidden) return;
-  editMenuEl.hidden = true;
-  if (editMenuBtn) editMenuBtn.setAttribute("aria-expanded", "false");
-  document.removeEventListener("mousedown", onEditMenuOutside, true);
-  document.removeEventListener("keydown", onEditMenuKey, true);
+// ── Tools rail collapse ──────────────────────────────────────────────────────
+// Collapse the right-margin tools rail to an icon-only strip (Acrobat-style),
+// reclaiming horizontal space. The state is persisted so it sticks across docs
+// and app updates.
+function applyToolsCollapsed(on) {
+  document.body.classList.toggle("tools-collapsed", on);
+  if (toolsRailCollapseEl) {
+    toolsRailCollapseEl.setAttribute("aria-expanded", String(!on));
+    toolsRailCollapseEl.title = on ? "Expand the tools panel" : "Collapse the tools panel";
+  }
 }
-function openEditMenu() {
-  if (!editMenuEl) return;
-  editMenuEl.hidden = false;
-  if (editMenuBtn) editMenuBtn.setAttribute("aria-expanded", "true");
-  document.addEventListener("mousedown", onEditMenuOutside, true);
-  document.addEventListener("keydown", onEditMenuKey, true);
+if (toolsRailCollapseEl) {
+  toolsRailCollapseEl.addEventListener("click", () => {
+    const on = !document.body.classList.contains("tools-collapsed");
+    applyToolsCollapsed(on);
+    try { chrome.storage.local.set({ toolsRailCollapsed: on }); } catch { /* ok */ }
+  });
+  try {
+    chrome.storage.local.get({ toolsRailCollapsed: false }, (s) => applyToolsCollapsed(!!s.toolsRailCollapsed));
+  } catch { /* ok */ }
 }
-function onEditMenuOutside(e) {
-  if (editMenuWrap && !editMenuWrap.contains(e.target)) closeEditMenu();
-}
-function onEditMenuKey(e) {
-  if (e.key === "Escape") { closeEditMenu(); if (editMenuBtn) editMenuBtn.focus(); }
-}
-if (editMenuBtn) editMenuBtn.addEventListener("click", () => {
-  if (editMenuEl && editMenuEl.hidden) openEditMenu(); else closeEditMenu();
-});
-// Close after any item is chosen (the item's own handler has already run in the
-// target phase before this bubbling listener fires).
-if (editMenuEl) editMenuEl.addEventListener("click", (e) => {
-  if (e.target.closest('button[role="menuitem"]')) closeEditMenu();
-});
 
 // ── Fill form ───────────────────────────────────────────────────────────────
 // Renders editable HTML controls over the PDF's AcroForm fields. Edits are kept
