@@ -864,3 +864,125 @@ select.form-field { padding: 0; }
 #hl-ctx-menu button.hl-ctx-danger:hover {
   background: #4a2222;
 }
+
+/* ══ Light theme ═══════════════════════════════════════════════════════════════
+   The viewer defaults to dark. Setting data-theme="light" on <html> (via the
+   toolbar ☀ / 🌙 toggle) repaints the app chrome — toolbar, panels, tools rail,
+   menus, modals, bars, buttons — in a light palette. PDF pages stay white in
+   both themes; the accent blue and the citation / highlight colors are unchanged.
+   Only the surfaces/text/borders that would be unreadable on light flip here, so
+   the (untouched) rules above remain the dark defaults. */
+:root[data-theme="light"] {
+  --l-canvas: #c9cccf;   /* page area behind the (white) PDFs */
+  --l-chrome: #f3f4f6;   /* toolbar */
+  --l-panel:  #f7f8fa;   /* thumbnail panel, tools rail, bars, modals */
+  --l-inset:  #ffffff;   /* inputs, menus */
+  --l-btn:        #e8eaed;
+  --l-btn-border: #c4c7cb;
+  --l-btn-hover:  #dbdee2;
+  --l-text:       #1f2328;
+  --l-text-muted: #5a5f66;
+  --l-text-faint: #80868b;
+  --l-border: #d2d5d9;
+  --l-hover:  #e9ebee;
+  --l-active: #d2e3fc;    /* selected thumbnail (light blue) */
+}
+
+:root[data-theme="light"] body { background: var(--l-canvas); color: var(--l-text); }
+
+/* Toolbar */
+:root[data-theme="light"] #toolbar { background: var(--l-chrome); border-bottom-color: var(--l-border); }
+:root[data-theme="light"] #toolbar button {
+  background: var(--l-btn); color: var(--l-text); border-color: var(--l-btn-border);
+}
+:root[data-theme="light"] #toolbar button:hover { background: var(--l-btn-hover); }
+:root[data-theme="light"] .toolbar-label { color: var(--l-text-muted); }
+:root[data-theme="light"] #provider,
+:root[data-theme="light"] #naming-mode {
+  background: var(--l-btn); color: var(--l-text); border-color: var(--l-btn-border);
+}
+:root[data-theme="light"] #provider:hover,
+:root[data-theme="light"] #naming-mode:hover { background: var(--l-btn-hover); }
+:root[data-theme="light"] #filename:hover { background: var(--l-btn); }
+:root[data-theme="light"] #filename-input { background: var(--l-inset); color: var(--l-text); }
+:root[data-theme="light"] #status { color: var(--l-text-muted); }
+:root[data-theme="light"] #link-count { color: #137333; }
+
+/* Tools rail */
+:root[data-theme="light"] #tools-rail { background: var(--l-panel); border-left-color: var(--l-border); }
+:root[data-theme="light"] #tools-rail-collapse { color: var(--l-text-muted); border-bottom-color: var(--l-border); }
+:root[data-theme="light"] #tools-rail-collapse:hover { color: var(--l-text); }
+:root[data-theme="light"] .tools-group-label { color: var(--l-text-faint); }
+:root[data-theme="light"] body.tools-collapsed .tools-group-label { border-top-color: var(--l-border); }
+:root[data-theme="light"] #tools-rail .tool-btn { color: var(--l-text); }
+:root[data-theme="light"] #tools-rail .tool-btn:hover { background: var(--l-hover); }
+
+/* Thumbnail panel */
+:root[data-theme="light"] #thumbnail-panel { background: var(--l-panel); border-right-color: var(--l-border); }
+:root[data-theme="light"] #panel-tabs { border-bottom-color: var(--l-border); }
+:root[data-theme="light"] .panel-tab { color: var(--l-text-muted); }
+:root[data-theme="light"] .panel-tab:hover,
+:root[data-theme="light"] .panel-tab.active { color: var(--l-text); }
+:root[data-theme="light"] .thumb-item:hover { background: var(--l-hover); }
+:root[data-theme="light"] .thumb-item.active { background: var(--l-active); }
+:root[data-theme="light"] .thumb-item canvas { border-color: var(--l-border); }
+:root[data-theme="light"] .thumb-item .thumb-label { color: var(--l-text-muted); }
+:root[data-theme="light"] .thumb-item.active .thumb-label { color: var(--l-text); }
+
+/* Organize-pages bar */
+:root[data-theme="light"] #organize-bar { background: var(--l-panel); border-bottom-color: var(--l-border); }
+:root[data-theme="light"] .org-hint { color: var(--l-text-faint); }
+:root[data-theme="light"] .org-actions button { background: var(--l-btn); color: var(--l-text); }
+:root[data-theme="light"] .org-actions button:hover { background: var(--l-btn-hover); }
+:root[data-theme="light"] .org-thumb { border-color: var(--l-border); }
+:root[data-theme="light"] .org-ctrl { background: var(--l-btn); color: var(--l-text); }
+
+/* Crop / form floating bars */
+:root[data-theme="light"] #crop-bar,
+:root[data-theme="light"] #form-bar {
+  background: var(--l-panel); border-color: var(--l-border); color: var(--l-text);
+}
+:root[data-theme="light"] #crop-bar .crop-bar-label,
+:root[data-theme="light"] #form-bar .form-bar-label { color: var(--l-text-muted); }
+:root[data-theme="light"] #crop-bar button,
+:root[data-theme="light"] #form-bar button { background: var(--l-btn); color: var(--l-text); }
+:root[data-theme="light"] #crop-bar button:hover,
+:root[data-theme="light"] #form-bar button:hover { background: var(--l-btn-hover); }
+
+/* Modals */
+:root[data-theme="light"] .modal { background: var(--l-panel); color: var(--l-text); border-color: var(--l-border); }
+:root[data-theme="light"] .modal .modal-sub,
+:root[data-theme="light"] .modal-preview { color: var(--l-text-faint); }
+:root[data-theme="light"] .modal-row input,
+:root[data-theme="light"] .modal-row select,
+:root[data-theme="light"] .hf-grid input {
+  background: var(--l-inset); color: var(--l-text); border-color: var(--l-btn-border);
+}
+:root[data-theme="light"] .modal-preview #bates-preview { color: var(--l-text); }
+:root[data-theme="light"] .modal-actions button { background: var(--l-btn); color: var(--l-text); }
+:root[data-theme="light"] .modal-actions button:hover { background: var(--l-btn-hover); }
+:root[data-theme="light"] .modal code { background: #eceef1; }
+:root[data-theme="light"] .hf-grid .hf-lbl { color: var(--l-text-muted); }
+
+/* Bookmarks */
+:root[data-theme="light"] .bookmark-item { color: var(--l-text-muted); }
+:root[data-theme="light"] .bookmark-item:hover { background: var(--l-hover); color: var(--l-text); }
+
+/* Highlight context menu */
+:root[data-theme="light"] #hl-ctx-menu {
+  background: var(--l-inset); color: var(--l-text); border-color: var(--l-border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+}
+:root[data-theme="light"] #hl-ctx-menu button:hover { background: var(--l-hover); }
+:root[data-theme="light"] #hl-ctx-menu button.hl-ctx-danger { color: #c5221f; }
+:root[data-theme="light"] #hl-ctx-menu button.hl-ctx-danger:hover { background: #fce8e6; }
+
+/* Softer page shadow on the lighter canvas */
+:root[data-theme="light"] .page-wrapper { box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22); }
+
+/* Table of Authorities panel, when it appears inside the viewer, follows the
+   app theme (its own stylesheet only knows the OS scheme). */
+:root[data-theme="light"] #__cl_toa {
+  background: var(--l-inset); color: var(--l-text); border-color: var(--l-border);
+}
+:root[data-theme="light"] #__cl_toa .cl-toa-header { border-bottom-color: var(--l-border); }

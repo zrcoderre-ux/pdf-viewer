@@ -4,6 +4,12 @@
   <meta charset="utf-8">
   <title>PDF Viewer</title>
   <link rel="stylesheet" href="viewer.css">
+  <!-- Apply the saved theme before first paint so light mode doesn't flash dark
+       on load. viewer.js keeps this localStorage key in sync with the toggle. -->
+  <script>
+    try { if (localStorage.getItem("pdfViewerTheme") === "light")
+      document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+  </script>
 </head>
 <body>
   <aside id="thumbnail-panel" aria-label="Page panel">
@@ -153,6 +159,7 @@
     <button id="save-edits" title="Save your highlights and edits into the PDF (local documents only)" hidden>💾 Save</button>
     <button id="download" title="Download PDF">⬇ Download</button>
     <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
+    <button id="theme-toggle" title="Switch to light mode" aria-label="Switch color theme">☀</button>
   </header>
 
   <!-- Adobe-Acrobat-style vertical tools rail down the right margin. Holds the
