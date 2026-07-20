@@ -31,9 +31,13 @@ In addition to citation linking, the viewer supports:
   persist across zoom changes; for editable documents they can be saved into
   the file and stay removable after reopening (see below), otherwise they vanish
   when the tab closes.
+- **CACI jury instructions** — references like **CACI No. 3710** (also
+  `CACI 3710`, `CACI Nos. 3710, 3711`, verdict forms `CACI No. VF-3900`) link to
+  the instruction on your provider.
 - **Table of Authorities** — a side panel listing every detected case,
-  statute, and rule once, as a clickable link to your provider; minimizable and
-  drag-resizable. The same panel appears for claude.ai. Options →
+  statute, rule, and CACI instruction once, as a clickable link to your
+  provider; minimizable and drag-resizable. The same panel appears for
+  claude.ai. Options →
   "Table of Authorities" has separate checkboxes for the PDF viewer and
   websites (default: **off** for PDFs, **on** for websites); in-text links are
   unaffected either way.

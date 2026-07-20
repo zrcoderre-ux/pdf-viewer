@@ -247,6 +247,32 @@ const RPC_RE = new RegExp(
   "gi"
 );
 
+// CACI — Judicial Council of California Civil Jury Instructions.
+//   "CACI No. 3710", "CACI 3710", "CACI Nos. 3710, 3711",
+//   "(CACI) No. 3903A", "CACI No. VF-3900" (verdict form).
+// Instruction numbers are 3–4 digits with an optional letter suffix (3903A);
+// verdict forms carry a "VF-" prefix. The distinctive "CACI" token keeps the
+// false-positive risk low, so a bare "CACI 3710" (no "No.") is accepted too.
+const CACI_RE = new RegExp(
+  String.raw`\bCACI\b[\s),]*(?:Nos?\.?\s*)?` +
+  String.raw`(?<num>(?:VF[-\s]?)?\d{3,4}[A-Z]?)`,
+  "gi"
+);
+// Chained additional instruction numbers after a primary CACI match:
+//   "CACI Nos. 3710, 3711, and 3712". Anchored at the previous match's end
+//   via the sticky (`y`) flag, exactly like ADDL_SEC_RE for statutes.
+const CACI_ADDL_RE = new RegExp(
+  String.raw`\s*(?:,\s*and|,|\s+and)\s+` +
+  String.raw`(?<num>(?:VF[-\s]?)?\d{3,4}[A-Z]?)`,
+  "yi"
+);
+
+// Normalize a captured CACI number: strip whitespace, upper-case the optional
+// letter suffix, and canonicalize a verdict-form prefix to "VF-".
+function normalizeCaciNum(raw) {
+  return raw.replace(/\s+/g, "").toUpperCase().replace(/^VF-?/, "VF-");
+}
+
 // "v." anchored — walk back from each occurrence to identify the plaintiff.
 const ANCHOR_RE = /(?<=\s)v\.(?=\s)/g;
 
@@ -799,6 +825,37 @@ function findRuleCitations(text) {
   return results;
 }
 
+function findCaciCitations(text) {
+  const results = [];
+  let m;
+  CACI_RE.lastIndex = 0;
+  while ((m = CACI_RE.exec(text)) !== null) {
+    const num = normalizeCaciNum(m.groups.num);
+    results.push({
+      kind: "caci",
+      key: `CACI No. ${num}`,
+      span: [m.index, m.index + m[0].length],
+      matchText: m[0],
+    });
+    // Chained additional numbers ("CACI Nos. 3710, 3711, and 3712"): each
+    // inherits the CACI context from the primary match. Anchored via sticky `y`.
+    let scanPos = m.index + m[0].length;
+    while (true) {
+      CACI_ADDL_RE.lastIndex = scanPos;
+      const cont = CACI_ADDL_RE.exec(text);
+      if (!cont || cont.index !== scanPos) break;
+      results.push({
+        kind: "caci",
+        key: `CACI No. ${normalizeCaciNum(cont.groups.num)}`,
+        span: [cont.index, cont.index + cont[0].length],
+        matchText: cont[0].replace(/^\s+/, ""),
+      });
+      scanPos = cont.index + cont[0].length;
+    }
+  }
+  return results;
+}
+
 function findSupraCitations(text, fullCitesInOrder) {
   // First-seen short-name -> full cite (matches setdefault in pdf_linker.py).
   // Storing the whole cite (not just the key) lets us carry wlOnly/lexisOnly/
@@ -999,10 +1056,11 @@ export function findAllCitations(text) {
   const fullCases = findCaseCitations(norm);
   const statutes  = findStatuteCitations(norm);
   const rules     = findRuleCitations(norm);
+  const caci      = findCaciCitations(norm);
 
   // Rewrite matchText to use the original text (preserves original
   // whitespace for any downstream consumer that tries to match characters).
-  for (const c of [...fullCases, ...statutes, ...rules]) {
+  for (const c of [...fullCases, ...statutes, ...rules, ...caci]) {
     c.matchText = text.slice(c.span[0], c.span[1]);
   }
 
@@ -1016,7 +1074,7 @@ export function findAllCitations(text) {
   const shortForms = findShortFormCitations(norm, fullOrdered);
   for (const c of shortForms) c.matchText = text.slice(c.span[0], c.span[1]);
 
-  const all = [...fullCases, ...statutes, ...rules, ...supras, ...shortForms]
+  const all = [...fullCases, ...statutes, ...rules, ...caci, ...supras, ...shortForms]
     .sort((a, b) => a.span[0] - b.span[0]);
 
   // Deduplicate overlapping spans. The short-form pass already self-filters
@@ -1047,7 +1105,8 @@ export function resolveUrl(cite, repo, provider) {
 
   const section =
     cite.kind === "case" ? "cases" :
-    cite.kind === "statute" ? "statutes" : "rules";
+    cite.kind === "statute" ? "statutes" :
+    cite.kind === "caci" ? "caci" : "rules";
   const entry = (repo[section] || {})[cite.key] || {};
 
   // Provider preference order:
@@ -1058,6 +1117,17 @@ export function resolveUrl(cite, repo, provider) {
     : ["westlaw_url", "lexis_url", "fallback_url", "url"];
   for (const f of order) {
     if (entry[f]) return entry[f];
+  }
+
+  // CACI jury instructions — no direct-link citation form, so search by the
+  // instruction number ("CACI 3710"). Both providers surface the instruction
+  // from that term; Westlaw is scoped to California.
+  if (cite.kind === "caci") {
+    const num = cite.key.replace(/^CACI No\.\s*/, "");
+    const term = `CACI ${num}`;
+    return effectiveProvider === "lexis"
+      ? lexisSearchUrl(term)
+      : westlawRuleUrl(term);
   }
 
   // Built search-URL fallback.
