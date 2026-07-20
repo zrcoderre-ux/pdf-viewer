@@ -185,7 +185,7 @@ const tests = [
   {
     name: "reply-to-opp-to-ex-parte",
     raw: "Defendant Pacific Insurance's Reply to Opposition to Ex Parte Application",
-    expect: { canonical: "Reply", target: "Opp. to Ex Parte App.", partyLabel: "Pacific Insurance" },
+    expect: { canonical: "Reply", target: "Opp. to Ex Parte App.", partyLabel: "Defendant", partyName: "Pacific Insurance" },
   },
   {
     name: "decl-iso-ex-parte",
@@ -202,7 +202,7 @@ const tests = [
   {
     name: "party-labeled-defendant",
     raw: "Defendant Pacific Insurance's Demurrer to SAC",
-    expect: { canonical: "Demurrer", target: "SAC", partyLabel: "Pacific Insurance" },
+    expect: { canonical: "Demurrer", target: "SAC", partyLabel: "Defendant", partyName: "Pacific Insurance" },
   },
   {
     name: "party-bare-receiver",
@@ -215,9 +215,26 @@ const tests = [
     expect: { canonical: "Motion", partyLabel: "Creditco" },
   },
   {
-    name: "party-labeled-with-name",
+    name: "party-labeled-with-name",  // role wins; name kept as deep fallback
     raw: "Plaintiff Jordan Avery's Opposition to Defendant's Motion",
-    expect: { canonical: "Opposition", target: "Mot.", partyLabel: "Jordan Avery" },
+    expect: { canonical: "Opposition", target: "Mot.", partyLabel: "Plaintiff", partyName: "Jordan Avery" },
+  },
+  {
+    name: "party-role-plus-person-name",
+    raw: "Plaintiff John Doe's Motion to Compel Arbitration",
+    expect: { canonical: "Motion", partyLabel: "Plaintiff", partyName: "John Doe" },
+  },
+  {
+    name: "party-role-only-keeps-null-name",
+    raw: "Plaintiff's Opposition to Demurrer",
+    expect: { canonical: "Opposition", partyLabel: "Plaintiff", partyName: null },
+  },
+  // Declarations are the exception: the declarant's actual last name stays in
+  // the canonical, regardless of any role possessive in the ISO clause.
+  {
+    name: "decl-keeps-declarant-name",
+    raw: "Declaration of John Doe in Support of Plaintiff Jane Roe's Opposition to Motion for Summary Judgment",
+    expect: { canonical: "Doe Decl. ISO Opp." },
   },
   {
     name: "party-llc-suffix",
@@ -569,6 +586,37 @@ dtest("two evidence iso opp different parties", [
 ], {
   a: "Plaintiff's Evidence ISO Opp.",
   b: "Defendant's Evidence ISO Opp.",
+});
+
+// === Multiple same-role filers fall back to party names ===
+
+// Two plaintiffs, same document type and target: role label collides at every
+// role level, so their NAMES distinguish (level 4).
+dtest("two plaintiffs distinguished by name", [
+  { id: "a", canonical: "Opposition", target: "Mot.", partyLabel: "Plaintiff", partyName: "Jordan Avery" },
+  { id: "b", canonical: "Opposition", target: "Mot.", partyLabel: "Plaintiff", partyName: "Jane Roe" },
+], {
+  a: "Jordan Avery's Opposition",
+  b: "Jane Roe's Opposition",
+});
+
+// A named plaintiff and an unnamed one: the unnamed entry keeps its role label
+// at the name level, which is already distinct.
+dtest("named vs unnamed plaintiff", [
+  { id: "a", canonical: "Motion", target: "Mot. to Strike", partyLabel: "Plaintiff", partyName: "Jordan Avery" },
+  { id: "b", canonical: "Motion", target: "Mot. to Strike", partyLabel: "Plaintiff", partyName: null },
+], {
+  a: "Jordan Avery's Motion",
+  b: "Plaintiff's Motion",
+});
+
+// Different roles still resolve at the cheaper role level — names never used.
+dtest("different roles stay role-labeled", [
+  { id: "a", canonical: "Motion", target: "Mot. to Strike", partyLabel: "Plaintiff", partyName: "Jordan Avery" },
+  { id: "b", canonical: "Motion", target: "Mot. to Strike", partyLabel: "Defendant", partyName: "Pacific Insurance" },
+], {
+  a: "Plaintiff's Motion",
+  b: "Defendant's Motion",
 });
 
 // === Part / volume designators ===

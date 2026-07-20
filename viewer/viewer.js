@@ -2160,6 +2160,7 @@ function applyParsedTitle(parsed, rawTitle, source) {
     target: parsed.target,
     party: parsed.party,
     partyLabel: parsed.partyLabel,
+    partyName: parsed.partyName,
     partVol: docPartVol,
     raw: rawTitle,
   };
@@ -2169,6 +2170,7 @@ function applyParsedTitle(parsed, rawTitle, source) {
       target: parsed.target,
       party: parsed.party,
       partyLabel: parsed.partyLabel,
+      partyName: parsed.partyName,
       partVol: docPartVol,
     });
   }

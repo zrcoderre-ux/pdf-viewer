@@ -113,6 +113,7 @@ export async function computeDisplayForThisTab() {
       target: v.target,
       party: v.party,
       partyLabel: v.partyLabel,
+      partyName: v.partyName,
       partVol: v.partVol,
     });
   }
