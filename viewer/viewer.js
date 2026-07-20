@@ -11,6 +11,7 @@ import {
   placeLinksForPage,
   getAuthorities,
   findAllCitations,
+  hasCaseCitation,
 } from "./citation-linker.js";
 import { createToaPanel } from "./toa.js";
 import {
@@ -1279,12 +1280,12 @@ let captionOverrideName = null;
 // caption or footer band. Appended to whatever display name wins, so multi-
 // volume filings stay distinct on screen AND in the downloaded filename.
 let docPartVol = null;
-// True once we've established this document contains NO legal citations.
-// A "Notice of Motion (and Motion)" title normally names as "Motion", but a
-// citation-less document under that title is just the notice pages — the
-// memorandum with the actual authorities travels separately — so it names as
-// "Notice of Motion" instead.
-let docNoCitations = false;
+// True once we've established this document is only the procedural notice.
+// A "Notice of Motion (and Motion)" title normally names as "Motion", but the
+// document is only the notice pages unless it cites at least one CASE or runs
+// more than 8 pages. Statute/rule boilerplate doesn't count — a bare notice
+// routinely recites "pursuant to CCP § 1005"; only a memorandum cites cases.
+let docIsBareNotice = false;
 
 // Single source of truth for "show this name everywhere visible to the
 // user." Updates the toolbar filename element AND the browser tab title
@@ -1778,7 +1779,7 @@ function resetForNewDocument() {
   pageOneCaptionTitle = "";
   captionOverrideName = null;
   docPartVol = null;
-  docNoCitations = false;
+  docIsBareNotice = false;
   unregisterEntry();
 }
 
@@ -1842,16 +1843,18 @@ async function resolveNameEarly() {
       if (pn === 1) pageOneCaptionTitle = captionTitle(textContent, viewport);
     }
     tryResolveFooterTitle();
-    // Citation-less notice check. Only when the title resolved to "Motion" via
-    // a "Notice of Motion" form is the citation scan worth paying for: if the
-    // whole document contains no legal citation, it's just the notice pages
-    // and should name as "Notice of Motion". The scan reads page text via the
-    // worker (hidden-tab safe) and stops at the first citation found — a real
-    // combined motion hits one within its first few memorandum pages.
+    // Bare-notice check. A title that resolved to "Motion" via a "Notice of
+    // Motion" form stays "Motion" only if the document cites at least one CASE
+    // or runs more than 8 pages; otherwise it's just the notice pages and
+    // names "Notice of Motion". Statute/rule recitals ("pursuant to CCP
+    // § 1005") don't count. The scan reads page text via the worker
+    // (hidden-tab safe) and stops at the first case cite — a real combined
+    // motion hits one within its first few memorandum pages.
     if (footerExtraction && footerExtraction.canonical === "Motion" &&
-        /\bnotice\s+of\s+motion\b/i.test(footerExtraction.raw || "")) {
-      docNoCitations = !(await documentHasAnyCitation());
-      if (docNoCitations) tryResolveFooterTitle(); // re-resolve; applyParsedTitle downgrades
+        /\bnotice\s+of\s+motion\b/i.test(footerExtraction.raw || "") &&
+        pdfDoc.numPages <= 8) {
+      docIsBareNotice = !(await documentHasCaseCitation());
+      if (docIsBareNotice) tryResolveFooterTitle(); // re-resolve; applyParsedTitle downgrades
     }
   } catch (e) {
     // Non-fatal: the render loop will retry name resolution once it runs.
@@ -1859,10 +1862,11 @@ async function resolveNameEarly() {
   }
 }
 
-// True if any page of the current document contains a detectable legal
-// citation (case, statute, rule, or CACI). Scans page-by-page and
-// short-circuits on the first hit, so citation-rich documents bail out fast.
-async function documentHasAnyCitation() {
+// True if any page of the current document contains a detectable CASE
+// citation. Statutes/rules/CACI are ignored (see the bare-notice rule). Scans
+// page-by-page and short-circuits on the first hit, so citation-rich
+// documents bail out fast.
+async function documentHasCaseCitation() {
   for (let pn = 1; pn <= pdfDoc.numPages; pn++) {
     const page = await pdfDoc.getPage(pn);
     const tc = await page.getTextContent();
@@ -1870,7 +1874,9 @@ async function documentHasAnyCitation() {
     for (const it of tc.items) {
       if (typeof it.str === "string") txt += it.str + (it.hasEOL ? "\n" : " ");
     }
-    try { if (findAllCitations(txt).length) return true; } catch { /* keep scanning */ }
+    try {
+      if (findAllCitations(txt).some((c) => c.kind === "case")) return true;
+    } catch { /* keep scanning */ }
   }
   return false;
 }
@@ -2040,14 +2046,16 @@ async function renderAllPages() {
 
   // Pass 2: run document-wide detection (resolves supra across pages).
   const totalCites = runDetection();
-  // Citation-less notice (post-render authority): the early worker-side scan
-  // can't see OCR'd text, so re-check with the full ingested document. A
-  // "Notice of Motion (and Motion)" that turned out to have zero citations
+  void totalCites;
+  // Bare-notice re-check (post-render authority): the early worker-side scan
+  // can't see OCR'd text, so re-test with the full ingested document. A
+  // "Notice of Motion (and Motion)" of 8 pages or fewer with no case citation
   // renames to "Notice of Motion" here.
-  if (totalCites === 0 && !docNoCitations &&
+  if (!docIsBareNotice &&
       footerExtraction && footerExtraction.canonical === "Motion" &&
-      /\bnotice\s+of\s+motion\b/i.test(footerExtraction.raw || "")) {
-    docNoCitations = true;
+      /\bnotice\s+of\s+motion\b/i.test(footerExtraction.raw || "") &&
+      pdfDoc && pdfDoc.numPages <= 8 && !hasCaseCitation()) {
+    docIsBareNotice = true;
     tryResolveFooterTitle();
   }
 
@@ -2130,12 +2138,12 @@ function looksLikeGibberishTitle(title) {
 // Build footerExtraction from a parsed title + its raw text, register it for
 // cross-tab disambiguation, and repaint. `source` labels the tooltip.
 function applyParsedTitle(parsed, rawTitle, source) {
-  // Citation-less notice: a "Notice of Motion (and Motion)" title parses to
-  // "Motion", but when the document has been found to contain no legal
-  // citations it's only the procedural notice. Applied here — the choke point
-  // every (re-)resolution passes through — so later re-renders can't flip the
-  // name back to "Motion".
-  if (parsed.canonical === "Motion" && docNoCitations &&
+  // Bare notice: a "Notice of Motion (and Motion)" title parses to "Motion",
+  // but when the document has been found to be only the procedural notice
+  // (no case citation and ≤ 8 pages) it names as "Notice of Motion". Applied
+  // here — the choke point every (re-)resolution passes through — so later
+  // re-renders can't flip the name back to "Motion".
+  if (parsed.canonical === "Motion" && docIsBareNotice &&
       /\bnotice\s+of\s+motion\b/i.test(rawTitle || "")) {
     parsed = { ...parsed, canonical: "Notice of Motion" };
   }

@@ -1571,6 +1571,15 @@ export function runDetection() {
   return documentCites.length;
 }
 
+// True if document-wide detection found at least one CASE citation. Statutes,
+// rules, and CACI don't count — a bare notice of motion routinely recites its
+// statutory basis ("pursuant to CCP § 1005"), but only a memorandum cites
+// cases. (Supra/short-form entries carry kind "case" too, but they only exist
+// when a full case cite was detected, so this test is not widened by them.)
+export function hasCaseCitation() {
+  return documentCites.some((c) => c.kind === "case");
+}
+
 // Deduplicated authorities for a Table of Authorities: each detected citation
 // once, with its resolved URL for the given repo/provider. Order of first
 // appearance is preserved; the caller groups/sorts as needed.
