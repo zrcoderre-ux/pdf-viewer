@@ -184,11 +184,11 @@ function stripNoticeOfMotionAndMotion(s) {
 // Looks at the leading possessive on the string and returns the filing
 // party as a single display label. Examples:
 //
-//   "Plaintiff's Complaint"             → "Plaintiff"
-//   "Defendant Pacific Insurance's Demurrer"  → "Pacific Insurance"
-//   "Receiver's Opposition"             → "Receiver"
-//   "Creditco's Motion"                 → "Creditco"
-//   "Plaintiff Jordan Avery's Opp."      → "Jordan Avery"
+//   "Plaintiff's Complaint"                  → "Plaintiff"
+//   "Plaintiff John Doe's Opposition"        → "Plaintiff"
+//   "Defendant Pacific Insurance's Demurrer" → "Defendant"
+//   "Receiver's Opposition"                  → "Receiver"
+//   "Creditco's Motion"                      → "Creditco"
 //
 // Returns null when nothing party-shaped is at the front. The result is
 // used only as a disambiguation qualifier — when two documents of the
@@ -199,17 +199,24 @@ function stripNoticeOfMotionAndMotion(s) {
 // stays in place for them.
 //
 // Implementation notes:
-// - When a standard procedural role (Plaintiff/Defendant/etc.) is
-//   followed by additional content before the 's, that content is the
-//   more distinguishing piece — return it instead of the role label.
-//   "Defendant Pacific Insurance's" → "Pacific Insurance" because the role alone
-//   ("Defendant") isn't distinguishing in a case with multiple defendants.
-// - When the leading possessive is just a role with no name
-//   ("Plaintiff's"), or when it's not a recognized role at all
+// - When a standard procedural role (Plaintiff/Defendant/etc.) leads,
+//   the ROLE is the label even when a name follows it: "Plaintiff John
+//   Doe's Opposition" names as "Plaintiff's Opposition", never "John
+//   Doe's Opposition". The one place a real person's name IS wanted —
+//   declarations ("Doe Decl. ISO Opp.") — takes it from the
+//   declarant-name rules, not from this label.
+// - The name that followed the role is NOT discarded: it's returned as
+//   `name` and used as a deeper disambiguation fallback. When multiple
+//   same-role parties file the same document type (two plaintiffs, two
+//   oppositions), the role label can't tell them apart — their names can
+//   ("Jordan Avery's Opposition" / "Jane Roe's Opposition").
+// - When the leading possessive is not a recognized role at all
 //   ("Receiver's", "Creditco's"), use the captured phrase as-is.
 // - The bare-possessive pattern is lazy and could in principle walk
 //   past document-type keywords to find an 's later in the string;
 //   guard against that with looksLikeDocTypeKeyword.
+//
+// Returns { label, name } or null.
 
 const KNOWN_ROLES_RE = new RegExp(
   "^(?:" +
@@ -222,24 +229,25 @@ const KNOWN_ROLES_RE = new RegExp(
 );
 
 function capturePartyLabel(s) {
-  // Pattern 1: "{KnownRole} {Name}'s ..." — return the name part.
-  // The role is matched non-greedily; everything between it and the 's
-  // is the name (which may be multiple tokens for corporate names).
+  // Pattern 1: "{KnownRole} {Name}'s ..." — the ROLE is the label; the name
+  // rides along separately as the deeper disambiguation fallback.
   const labeledWithName = s.match(
-    /^(?:plaintiffs?|defendants?|petitioners?|respondents?|cross-?plaintiffs?|cross-?defendants?|cross-?complainants?|cross-?respondents?|counter-?plaintiffs?|counter-?defendants?|counter-?claimants?|third-?party\s+plaintiffs?|third-?party\s+defendants?)\s+([a-z][a-z\s.'&,-]*?)'s\b/i
+    /^(plaintiffs?|defendants?|petitioners?|respondents?|cross-?plaintiffs?|cross-?defendants?|cross-?complainants?|cross-?respondents?|counter-?plaintiffs?|counter-?defendants?|counter-?claimants?|third-?party\s+plaintiffs?|third-?party\s+defendants?)\s+([a-z][a-z\s.'&,-]*?)'s\b/i
   );
   if (labeledWithName) {
-    const name = labeledWithName[1].trim();
-    if (name) return titleCasePartyLabel(name);
-    // Fall through to the role-only branch if the capture was empty.
+    const name = labeledWithName[2].trim();
+    return {
+      label: titleCasePartyLabel(labeledWithName[1]),
+      name: name ? titleCasePartyLabel(name) : null,
+    };
   }
 
-  // Pattern 2: "{KnownRole}'s ..." — return the role itself.
+  // Pattern 2: "{KnownRole}'s ..." — the role itself; no name available.
   const roleOnly = s.match(
     /^(plaintiffs?|defendants?|petitioners?|respondents?|cross-?plaintiffs?|cross-?defendants?|cross-?complainants?|cross-?respondents?|counter-?plaintiffs?|counter-?defendants?|counter-?claimants?|third-?party\s+plaintiffs?|third-?party\s+defendants?)'s\b/i
   );
   if (roleOnly) {
-    return titleCasePartyLabel(roleOnly[1]);
+    return { label: titleCasePartyLabel(roleOnly[1]), name: null };
   }
 
   // Pattern 3: bare leading possessive — not a recognized role label,
@@ -250,7 +258,7 @@ function capturePartyLabel(s) {
   if (bare) {
     const candidate = bare[1].trim();
     if (looksLikeDocTypeKeyword(candidate)) return null;
-    return titleCasePartyLabel(candidate);
+    return { label: titleCasePartyLabel(candidate), name: null };
   }
 
   return null;
@@ -784,7 +792,8 @@ export function extractTitle(raw) {
     canonical: null,
     target: null,
     party: null,          // case-caption party ("Hopkins" from "X v. Y")
-    partyLabel: null,     // filing-party label ("Receiver", "Pacific Insurance", "Plaintiff")
+    partyLabel: null,     // filing-party role/label ("Plaintiff", "Receiver", "Creditco")
+    partyName: null,      // named filer behind a role ("Jordan Avery" from "Plaintiff Jordan Avery's")
     raw: raw || "",
   };
   if (!raw) return result;
@@ -810,7 +819,11 @@ export function extractTitle(raw) {
   // 4.5 Capture filing-party label from the head of the string. Done
   // non-destructively — the type rules anchor on document-type keywords
   // and don't care about the leading possessive, so we leave it in place.
-  result.partyLabel = capturePartyLabel(s);
+  const pl = capturePartyLabel(s);
+  if (pl) {
+    result.partyLabel = pl.label;
+    result.partyName = pl.name;
+  }
 
   // 5. Walk type rules.
   let matched = null;
@@ -1000,8 +1013,15 @@ export function appendPartVol(name, partVol) {
 // group is fully unique:
 //
 //   Level 1: target only           → "Demurrer to SAC" / "Opposition to Demurrer"
-//   Level 2: partyLabel only       → "Receiver's Opposition" / "Pacific Insurance's Demurrer"
+//   Level 2: partyLabel only       → "Receiver's Opposition" / "Plaintiff's Demurrer"
 //   Level 3: target + partyLabel   → "Receiver's Opposition to Ex Parte App."
+//   Level 4: partyName only        → "Jordan Avery's Opposition" (multiple
+//            same-role filers — two plaintiffs — need their names)
+//   Level 5: target + partyName    → "Jordan Avery's Opposition to Mot."
+//
+// Levels 4–5 use the named filer captured behind a role possessive
+// ("Plaintiff Jordan Avery's …"); entries without one fall back to their
+// partyLabel at those levels.
 //
 // An entry with neither target nor partyLabel stays bare at every level
 // (no info to add). If two such entries collide, they remain visually
@@ -1039,6 +1059,9 @@ function hasLadder(canonical) {
 // Format an entry given a level + a type. Returns the display name string.
 function formatAtLevel(e, level) {
   const c = e.canonical;
+  // Levels 4-5 qualify by the named filer; entries without one keep their role
+  // label so a named plaintiff can still separate from an unnamed one.
+  const nameLbl = e.partyName || e.partyLabel;
   switch (level) {
     case 0: // bare canonical
       return c;
@@ -1052,6 +1075,16 @@ function formatAtLevel(e, level) {
         if (withT && e.partyLabel) return `${possessive(e.partyLabel)} ${withT}`;
         if (withT) return withT;
         if (e.partyLabel) return `${possessive(e.partyLabel)} ${c}`;
+        return c;
+      }
+    case 4: // partyName only
+      return nameLbl ? `${possessive(nameLbl)} ${c}` : c;
+    case 5: // target + partyName
+      {
+        const withT = formatWithTarget(c, e.target);
+        if (withT && nameLbl) return `${possessive(nameLbl)} ${withT}`;
+        if (withT) return withT;
+        if (nameLbl) return `${possessive(nameLbl)} ${c}`;
         return c;
       }
   }
@@ -1136,9 +1169,10 @@ export function disambiguate(entries) {
     // Walk the ladder. At each level, format every entry; if the result
     // is unique across the group, commit. Otherwise advance to the next
     // level. Level 0 (bare) is skipped — we're here because the group
-    // collides on the bare form.
-    let chosenLevel = 3;  // fallback if nothing makes it unique
-    for (let level = 1; level <= 3; level++) {
+    // collides on the bare form. Levels 4-5 swap the role label for the
+    // named filer, separating multiple same-role parties (two plaintiffs).
+    let chosenLevel = 5;  // fallback if nothing makes it unique
+    for (let level = 1; level <= 5; level++) {
       const names = group.map(e => formatAtLevel(e, level));
       if (new Set(names).size === names.length) {
         chosenLevel = level;
