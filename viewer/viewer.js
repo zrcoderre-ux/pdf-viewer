@@ -20,7 +20,7 @@ import {
   addImportedHighlight,
 } from "./highlights.js";
 import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages, fillForm, hasFormFields } from "./pdf-edit.js";
-import { extractTitle, citationShortForm } from "./footer-naming.js";
+import { extractTitle, citationShortForm, extractPartVolume, appendPartVol } from "./footer-naming.js";
 import {
   registerEntry,
   unregisterEntry,
@@ -96,28 +96,27 @@ if (typeof chrome === "undefined" || !(chrome && chrome.storage)) {
       },
     };
   };
-  // `session` is backed by an in-memory store, not sessionStorage: when several
-  // viewer instances run as sibling iframes (the PWA's tab bar) they share one
-  // origin's sessionStorage, which would make their per-document session state
-  // collide. In-memory keeps each viewer instance isolated. `local`/`sync` stay
-  // on localStorage so settings persist and are shared across tabs.
-  const memStore = (() => {
-    const m = new Map();
-    return {
-      getItem: (k) => (m.has(k) ? m.get(k) : null),
-      setItem: (k, v) => { m.set(k, v); },
-      removeItem: (k) => { m.delete(k); },
-      get length() { return m.size; },
-      key: (i) => Array.from(m.keys())[i],
-    };
+  // `session` is backed by real sessionStorage, which sibling viewer iframes in
+  // the PWA's tab bar SHARE (it belongs to the enclosing browser tab, and it
+  // clears when that tab closes — the right lifetime for session state). This
+  // sharing is what lets same-named documents in different PWA tabs see each
+  // other and disambiguate ("Vol. 1" / "Vol. 2"). Each iframe gets a unique
+  // synthetic tab id so per-tab keys never collide; per-document keys (naming
+  // overrides, keyed by URL) are shared deliberately. `local`/`sync` stay on
+  // localStorage so settings persist across sessions.
+  const SYNTH_TAB_ID = (() => {
+    const buf = new Uint32Array(1);
+    (self.crypto || { getRandomValues: (b) => { b[0] = Math.floor(Math.random() * 2 ** 31); } })
+      .getRandomValues(buf);
+    return buf[0] % 2 ** 31 || 1;
   })();
-  const SYNTH_TAB_ID = 1; // one logical "tab" per viewer instance (per iframe)
   window.chrome = {
+    __pwaShim: true,
     runtime: { getURL: (p) => new URL(String(p).replace(/^\/+/, ""), ROOT).href },
     storage: {
       local: makeArea(localStorage, "local"),
       sync: makeArea(localStorage, "sync"),
-      session: makeArea(memStore, "session"),
+      session: makeArea(sessionStorage, "session"),
       onChanged: {
         addListener: (fn) => listeners.push(fn),
         removeListener: (fn) => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); },
@@ -129,6 +128,18 @@ if (typeof chrome === "undefined" || !(chrome && chrome.storage)) {
       remove: () => {},
     },
   };
+  // A `storage` event fires in every OTHER same-origin window when session/
+  // local storage changes (the writer notifies itself via makeArea's notify).
+  // Translate sessionStorage events into chrome.storage.onChanged so a sibling
+  // PWA tab registering its document triggers this tab's collision recompute.
+  window.addEventListener("storage", (e) => {
+    if (!e || e.key == null || e.storageArea !== sessionStorage) return;
+    const parse = (v) => {
+      if (v == null) return undefined;
+      try { return JSON.parse(v); } catch { return undefined; }
+    };
+    notify({ [e.key]: { oldValue: parse(e.oldValue), newValue: parse(e.newValue) } }, "session");
+  });
 }
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
@@ -1263,6 +1274,10 @@ let pageOneCaptionTitle = "";
 // A name derived from the page-1 caption (a leading Declaration, or a short-doc
 // "Notice of …") that wins over BOTH footer and source naming.
 let captionOverrideName = null;
+// This document's part/volume designator ("Vol. 2", "Part 1"), read from the
+// caption or footer band. Appended to whatever display name wins, so multi-
+// volume filings stay distinct on screen AND in the downloaded filename.
+let docPartVol = null;
 
 // Single source of truth for "show this name everywhere visible to the
 // user." Updates the toolbar filename element AND the browser tab title
@@ -1363,8 +1378,9 @@ async function applyNamingMode() {
   // A caption that leads with "Declaration" is authoritative — it wins over both
   // footer and source, regardless of the selected naming mode.
   if (captionOverrideName) {
-    paintDisplayName(captionOverrideName);
-    serverFilename = captionOverrideName;
+    const n = appendPartVol(captionOverrideName, docPartVol);
+    paintDisplayName(n);
+    serverFilename = n;
     return;
   }
   // "Best of both": the selected mode is the preference, but if its signal is
@@ -1393,6 +1409,12 @@ async function applyNamingMode() {
   }
 
   if (name) {
+    // The document's own part/volume designator rides along on every naming
+    // path (footer, disambiguated, source fallback) so the display name and
+    // the download filename always carry it — and never lose it when a
+    // sibling tab closes. appendPartVol refuses to double-append when the
+    // chosen name already ends with the designator.
+    name = appendPartVol(name, docPartVol);
     paintDisplayName(name);
     serverFilename = name;
   }
@@ -1748,6 +1770,7 @@ function resetForNewDocument() {
   printedPageOffset = null;
   pageOneCaptionTitle = "";
   captionOverrideName = null;
+  docPartVol = null;
   unregisterEntry();
 }
 
@@ -1919,6 +1942,12 @@ window.__pdfViewerReflow = () => { if (pdfDoc) renderAllPages(); };
 // Test hook: build the citation for the current selection (used by e2e checks).
 window.__pdfViewerBuildCitation = () => buildCitationReference();
 
+// The PWA shell calls this before tearing down a tab's iframe. Removing an
+// iframe discards its document WITHOUT firing beforeunload, so without this
+// explicit hook the closed tab's registry entry would linger in the shared
+// sessionStorage and keep influencing sibling tabs' disambiguation.
+window.__pdfViewerUnregister = () => { try { unregisterEntry(); } catch { /* ok */ } };
+
 async function renderAllPages() {
   // Cancel any previous in-flight render (zoom-while-rendering, or Download
   // clicked mid-render). The signal is checked between pages and passes; we
@@ -2070,6 +2099,7 @@ function applyParsedTitle(parsed, rawTitle, source) {
     target: parsed.target,
     party: parsed.party,
     partyLabel: parsed.partyLabel,
+    partVol: docPartVol,
     raw: rawTitle,
   };
   if (parsed.canonical) {
@@ -2078,6 +2108,7 @@ function applyParsedTitle(parsed, rawTitle, source) {
       target: parsed.target,
       party: parsed.party,
       partyLabel: parsed.partyLabel,
+      partVol: docPartVol,
     });
   }
   filenameEl.title = `Title recovered from document ${source}: ${rawTitle}`;
@@ -2087,6 +2118,12 @@ function applyParsedTitle(parsed, rawTitle, source) {
 function tryResolveFooterTitle() {
   const p1 = _footerByPage.get(1) || [];
   const p2 = _footerByPage.get(2) || [];
+
+  // Part/volume designator ("VOLUME 1 OF 3", "Part II") from the caption or the
+  // footer band. Computed before any branch below so every naming path —
+  // caption override, footer title, source fallback — carries it.
+  const footerBandText = [...p1, ...p2].map((l) => l.text || "").join(" ");
+  docPartVol = extractPartVolume(pageOneCaptionTitle) || extractPartVolume(footerBandText);
 
   // Caption override (highest priority): a page-1 caption whose title leads with
   // "Declaration" (before any "Motion") IS a declaration — regardless of the
