@@ -18,6 +18,7 @@ const GROUPS = [
   ["case", "Cases"],
   ["statute", "Statutes"],
   ["rule", "Rules"],
+  ["caci", "Jury Instructions"],
 ];
 
 const CSS = `

@@ -818,6 +818,7 @@ select.form-field { padding: 0; }
 .linkLayer a.citation-link[data-kind="case"]    { color: #1a73e8; }
 .linkLayer a.citation-link[data-kind="statute"] { color: #137333; }
 .linkLayer a.citation-link[data-kind="rule"]    { color: #b06000; }
+.linkLayer a.citation-link[data-kind="caci"]    { color: #00838f; }
 .linkLayer a.citation-link[data-kind="supra"]   { color: #8430ce; border-bottom-style: dashed; }
 /* Short-form references ("Smith v. Jones" mentioned later in body text after
    the full citation appeared earlier). Same base blue as a full case cite but
