@@ -1,5 +1,5 @@
 // Node-runnable tests. Run: node test-naming.mjs
-import { extractTitle, disambiguate, citationShortForm } from "./viewer/footer-naming.js";
+import { extractTitle, disambiguate, citationShortForm, extractPartVolume, appendPartVol } from "./viewer/footer-naming.js";
 
 const tests = [
   // === The 14 spec examples ===
@@ -571,6 +571,46 @@ dtest("two evidence iso opp different parties", [
   b: "Defendant's Evidence ISO Opp.",
 });
 
+// === Part / volume designators ===
+
+// Two volumes of the same filing: same type, target, AND party — only the
+// volume number can tell them apart.
+dtest("two volumes of same evidence appendix", [
+  { id: "a", canonical: "Evidence ISO Opp.", target: null, partyLabel: "Plaintiff", partVol: "Vol. 1" },
+  { id: "b", canonical: "Evidence ISO Opp.", target: null, partyLabel: "Plaintiff", partVol: "Vol. 2" },
+], {
+  a: "Evidence ISO Opp. Vol. 1",
+  b: "Evidence ISO Opp. Vol. 2",
+});
+
+// The designator sticks even when the document is alone (durable: the name
+// doesn't change when a sibling tab closes).
+dtest("single volume keeps its designator", [
+  { id: "a", canonical: "Evidence ISO Opp.", target: null, partyLabel: "Plaintiff", partVol: "Vol. 1" },
+], { a: "Evidence ISO Opp. Vol. 1" });
+
+// Parts on a motion.
+dtest("two parts of same motion", [
+  { id: "a", canonical: "Motion", target: "Mot. to Compel", partyLabel: "Defendant", partVol: "Part 1" },
+  { id: "b", canonical: "Motion", target: "Mot. to Compel", partyLabel: "Defendant", partVol: "Part 2" },
+], { a: "Motion Part 1", b: "Motion Part 2" });
+
+// Same volume number from different parties → ladder still differentiates,
+// with the designator appended after.
+dtest("same volume different parties", [
+  { id: "a", canonical: "Evidence ISO Opp.", target: null, partyLabel: "Plaintiff", partVol: "Vol. 1" },
+  { id: "b", canonical: "Evidence ISO Opp.", target: null, partyLabel: "Defendant", partVol: "Vol. 1" },
+], {
+  a: "Plaintiff's Evidence ISO Opp. Vol. 1",
+  b: "Defendant's Evidence ISO Opp. Vol. 1",
+});
+
+// Declarations (no ladder) get volumes too.
+dtest("two volumes of same declaration", [
+  { id: "a", canonical: "Smith Decl. ISO Mot.", partVol: "Vol. 1" },
+  { id: "b", canonical: "Smith Decl. ISO Mot.", partVol: "Vol. 2" },
+], { a: "Smith Decl. ISO Mot. Vol. 1", b: "Smith Decl. ISO Mot. Vol. 2" });
+
 // AUMF/UMF participate in disambiguation
 dtest("aumf collision uses partyLabel", [
   { id: "a", canonical: "AUMF", target: null, partyLabel: "Plaintiff" },
@@ -625,5 +665,46 @@ ctest("proposed order",        "Proposed Order",            "Order");
 ctest("proof of service",      "Proof of Service",          "POS");
 ctest("short notice",          "Notice of Opposition",      "Notice");
 ctest("unknown falls through", "Trial Brief",               "Trial Brief");
+
+// --- part/volume extraction tests ---
+
+console.log("\n--- part/volume extraction ---");
+
+function pvtest(name, input, want) {
+  const got = extractPartVolume(input);
+  if (got === want) {
+    console.log(`✓ ${name}`);
+  } else {
+    console.log(`✗ ${name}: got=${JSON.stringify(got)} want=${JSON.stringify(want)}`);
+    process.exitCode = 1;
+  }
+}
+
+pvtest("volume arabic",        "PLAINTIFF'S APPENDIX OF EVIDENCE VOLUME 1",     "Vol. 1");
+pvtest("volume of N",          "COMPENDIUM OF EVIDENCE VOLUME 2 OF 4",          "Vol. 2");
+pvtest("vol dot",              "APPENDIX OF EXHIBITS, VOL. 3",                  "Vol. 3");
+pvtest("volume roman",         "EVIDENCE IN SUPPORT OF OPPOSITION VOLUME II",   "Vol. 2");
+pvtest("volume word",          "DECLARATION OF JOHN DOE VOLUME ONE",            "Vol. 1");
+pvtest("part arabic",          "MOTION TO COMPEL FURTHER RESPONSES PART 2",     "Part 2");
+pvtest("part roman",           "SEPARATE STATEMENT PART III",                   "Part 3");
+pvtest("part word",            "APPENDIX PART TWO",                             "Part 2");
+pvtest("pt abbreviation",      "EXHIBITS PT. 4",                                "Part 4");
+pvtest("volume no. N",         "APPENDIX VOLUME NO. 2",                         "Vol. 2");
+pvtest("in-part prose no hit", "ORDER GRANTING IN PART AND DENYING IN PART MOTION", null);
+pvtest("bare part no number",  "THIS DOCUMENT IS PART OF THE RECORD",           null);
+pvtest("no designator",        "PLAINTIFF'S OPPOSITION TO MOTION",              null);
+pvtest("bad roman rejected",   "PART IIX OF THE FILING",                        null);
+pvtest("empty",                "",                                              null);
+
+// appendPartVol double-append guard
+{
+  const a = appendPartVol("Evidence ISO Opp.", "Vol. 1");
+  const b = appendPartVol(a, "Vol. 1");
+  const ok = a === "Evidence ISO Opp. Vol. 1" && b === a &&
+             appendPartVol("Motion", null) === "Motion" &&
+             appendPartVol("Motion Part 1", "Part 2") === "Motion Part 1 Part 2";
+  console.log(`${ok ? "✓" : "✗"} appendPartVol append + no-double-append`);
+  if (!ok) process.exitCode = 1;
+}
 
 console.log("\nDone.");

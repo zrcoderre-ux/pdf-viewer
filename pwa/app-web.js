@@ -20,6 +20,16 @@ let tabs = [];
 let activeId = null;
 let seq = 0;
 
+// The viewers share this browser tab's sessionStorage for their cross-tab
+// naming registry ("titledoc:*" keys). A full shell reload discards every
+// iframe without cleanup, so purge leftover entries before any viewer boots —
+// ghosts from the previous load would corrupt name disambiguation.
+try {
+  for (const k of Object.keys(sessionStorage)) {
+    if (k.startsWith("titledoc:")) sessionStorage.removeItem(k);
+  }
+} catch { /* storage unavailable — viewers fall back gracefully */ }
+
 function cleanTitle(t) {
   return (t || "").replace(/\s*[—-]\s*PDF Viewer\s*$/, "").trim() || "PDF";
 }
@@ -71,6 +81,10 @@ function closeTab(id) {
   const idx = tabs.findIndex((t) => t.id === id);
   if (idx < 0) return;
   const [tab] = tabs.splice(idx, 1);
+  // Removing an iframe discards its document without firing unload handlers,
+  // so tell the viewer to drop its cross-tab naming-registry entry first —
+  // otherwise the closed doc would keep disambiguating the remaining tabs.
+  try { tab.iframe.contentWindow?.__pdfViewerUnregister?.(); } catch { /* gone */ }
   tab.iframe.remove();
   tab.btn.remove();
   if (activeId === id) {

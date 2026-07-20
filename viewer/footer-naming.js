@@ -916,6 +916,75 @@ export function citationShortForm(name) {
   return s;
 }
 
+// === part / volume designators ===
+//
+// Multi-volume filings (evidence appendices, compendia, multi-part motions)
+// print their designator in the caption or footer: "VOLUME 1 OF 3", "Vol. II",
+// "PART TWO". Two volumes of the same filing share type, target, AND party, so
+// the disambiguation ladder can't tell them apart — the designator can, and it
+// also belongs in the download filename so the saved files stay distinct.
+
+const _WORD_NUMS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+  seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+};
+
+// Strict small-roman parser (I..XXXIX). Returns null for anything malformed
+// ("IIX") so a stray letter run can't read as a number.
+function romanToInt(s) {
+  const vals = { i: 1, v: 5, x: 10, l: 50 };
+  const up = s.toLowerCase();
+  let total = 0, prev = 0;
+  for (let i = up.length - 1; i >= 0; i--) {
+    const v = vals[up[i]];
+    if (!v) return null;
+    if (v < prev) total -= v; else { total += v; prev = v; }
+  }
+  if (total < 1 || total > 39) return null;
+  // Round-trip check rejects non-canonical forms like "IIX" or "VV".
+  const canon = (n) => {
+    const table = [[10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
+    let out = "";
+    for (const [v, sym] of table) while (n >= v) { out += sym; n -= v; }
+    return out;
+  };
+  return canon(total) === up ? total : null;
+}
+
+// Find a part/volume designator in caption or footer text. Returns the
+// normalized short form ("Vol. 2", "Part 1") or null. The number may be
+// arabic, roman ("II"), or a word ("TWO"); an optional "of N" tail is
+// accepted and ignored. "Part"/"Pt." require the number immediately after
+// (bar an optional "No.") so prose like "granted in part" never matches.
+export function extractPartVolume(raw) {
+  if (!raw) return null;
+  const re = /\b(vol(?:ume)?s?|pt|part)\s*\.?\s*(?:no\.?\s*)?(\d{1,3}|[ivxl]{1,7}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/gi;
+  let m;
+  while ((m = re.exec(String(raw))) !== null) {
+    const numTok = m[2].toLowerCase();
+    let n;
+    if (/^\d+$/.test(numTok)) n = parseInt(numTok, 10);
+    else if (_WORD_NUMS[numTok] != null) n = _WORD_NUMS[numTok];
+    else n = romanToInt(numTok);
+    if (n == null || n < 1) continue;
+    const label = /^p/i.test(m[1]) ? "Part" : "Vol.";
+    return `${label} ${n}`;
+  }
+  return null;
+}
+
+// Append a part/volume designator to a display name, refusing to double-append
+// when the name already ends with it (the designator can arrive via more than
+// one path: disambiguate() output, the footer displayName, a re-opened file
+// whose source name kept the suffix).
+export function appendPartVol(name, partVol) {
+  if (!name) return name || "";
+  if (!partVol) return name;
+  const esc = partVol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`(?:^|\\s)${esc}$`).test(name)) return name;
+  return `${name} ${partVol}`;
+}
+
 // === disambiguation ===
 //
 // Input:  entries — each { id, canonical, target, party, partyLabel }
@@ -1029,26 +1098,38 @@ export function disambiguate(entries) {
   }
 
   for (const [canonical, group] of groups) {
+    // A document's own part/volume designator is always part of its name —
+    // "Evidence ISO Opp. Vol. 2" is that document's identity, colliding or not,
+    // so the name (and the downloaded file) never changes when a sibling tab
+    // opens or closes.
     if (group.length === 1) {
-      out.set(group[0].id, canonical);
+      out.set(group[0].id, appendPartVol(canonical, group[0].partVol));
+      continue;
+    }
+
+    // Part/volume first: two volumes of the same filing share type, target,
+    // AND party — the ladder can't tell them apart, but "Vol. 1"/"Vol. 2" can.
+    const pvNames = group.map((e) => appendPartVol(canonical, e.partVol));
+    if (group.some((e) => e.partVol) && new Set(pvNames).size === pvNames.length) {
+      group.forEach((e, i) => out.set(e.id, pvNames[i]));
       continue;
     }
 
     // Special cases that don't use the ladder.
     if (/\bDecl\.?\b/.test(canonical) || canonical === "FAC" || canonical === "SAC" || canonical === "TAC") {
-      for (const e of group) out.set(e.id, canonical);
+      for (const e of group) out.set(e.id, appendPartVol(canonical, e.partVol));
       continue;
     }
     if (canonical === "Complaint") {
       for (const e of group) {
-        out.set(e.id, e.party ? `${e.party} Complaint` : "Complaint");
+        out.set(e.id, appendPartVol(e.party ? `${e.party} Complaint` : "Complaint", e.partVol));
       }
       continue;
     }
 
     if (!hasLadder(canonical)) {
       // No known disambiguator — leave bare.
-      for (const e of group) out.set(e.id, canonical);
+      for (const e of group) out.set(e.id, appendPartVol(canonical, e.partVol));
       continue;
     }
 
@@ -1065,7 +1146,7 @@ export function disambiguate(entries) {
       }
     }
     for (const e of group) {
-      out.set(e.id, formatAtLevel(e, chosenLevel));
+      out.set(e.id, appendPartVol(formatAtLevel(e, chosenLevel), e.partVol));
     }
   }
   return out;

@@ -29,13 +29,16 @@ function key(tabId) {
 }
 
 // Get this tab's id. Wrapped in a memoized promise because chrome.tabs
-// is async and the value never changes for the life of the page.
+// is async and the value never changes for the life of the page. The resolved
+// value is also cached synchronously for teardown paths (see unregisterEntry).
 let _myTabIdPromise = null;
+let _myTabIdCached = null;
 function getMyTabId() {
   if (_myTabIdPromise) return _myTabIdPromise;
   _myTabIdPromise = new Promise((resolve) => {
     chrome.tabs.getCurrent((tab) => {
-      resolve(tab ? tab.id : null);
+      _myTabIdCached = tab ? tab.id : null;
+      resolve(_myTabIdCached);
     });
   });
   return _myTabIdPromise;
@@ -45,6 +48,11 @@ function getMyTabId() {
 // corresponds to an open tab. Called on register; cheap because session
 // storage is small (one entry per open viewer tab).
 async function sweepStale() {
+  // Under the PWA shim, chrome.tabs.query only knows about THIS viewer iframe,
+  // so the sweep would wrongly purge every sibling tab's entry. The PWA cleans
+  // up differently: the shell purges the registry on boot and unregisters a
+  // tab's entry when it closes it.
+  if (chrome.__pwaShim) return;
   const all = await chrome.storage.session.get(null);
   const openTabIds = new Set(
     await new Promise((res) =>
@@ -71,11 +79,21 @@ export async function registerEntry(entry) {
   await chrome.storage.session.set({ [key(tabId)]: entry });
 }
 
-// Unregister on tab close. Wired via beforeunload from viewer.js.
-export async function unregisterEntry() {
-  const tabId = await getMyTabId();
-  if (tabId == null) return;
-  await chrome.storage.session.remove(key(tabId));
+// Unregister on tab close. Wired via beforeunload from viewer.js and called
+// by the PWA shell right before it removes a tab's iframe. When the tab id is
+// already cached, skip the await: a document being torn down never gets
+// another microtask, and under the PWA shim the storage removal itself runs
+// synchronously inside the call — so the fast path is what makes close-time
+// cleanup actually happen.
+export function unregisterEntry() {
+  if (_myTabIdCached != null) {
+    return chrome.storage.session.remove(key(_myTabIdCached));
+  }
+  return (async () => {
+    const tabId = await getMyTabId();
+    if (tabId == null) return;
+    await chrome.storage.session.remove(key(tabId));
+  })();
 }
 
 // Read all currently-registered entries and run the disambiguator across
@@ -95,6 +113,7 @@ export async function computeDisplayForThisTab() {
       target: v.target,
       party: v.party,
       partyLabel: v.partyLabel,
+      partVol: v.partVol,
     });
   }
   if (entries.length === 0) return null;
