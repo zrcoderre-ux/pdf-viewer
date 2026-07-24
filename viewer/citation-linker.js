@@ -799,12 +799,23 @@ function findStatuteCitations(text) {
   return results;
 }
 
+// Strip the parenthetical subparts from a rule number, leaving only the
+// overall rule ("3.1300(a)(1)" -> "3.1300"). The link/search must target the
+// rule as a whole: including a subpart derails the Westlaw/Lexis search.
+function baseRuleNumber(ruleNum) {
+  const m = ruleNum.match(/^\d+(?:\.\d+)*/);
+  return m ? m[0] : ruleNum;
+}
+
 function findRuleCitations(text) {
   const results = [];
   let m;
   RULE_RE.lastIndex = 0;
   while ((m = RULE_RE.exec(text)) !== null) {
-    const ruleNum = m[1];
+    // Link to the overall rule only — drop any (a)(1)-style subparts, which
+    // otherwise break the search. The highlighted span still covers the full
+    // citation, subparts included.
+    const ruleNum = baseRuleNumber(m[1]);
     results.push({
       kind: "rule",
       key: `Cal. Rules of Court, rule ${ruleNum}`,
