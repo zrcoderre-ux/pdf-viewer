@@ -825,7 +825,8 @@ function findRuleCitations(text) {
   }
   RPC_RE.lastIndex = 0;
   while ((m = RPC_RE.exec(text)) !== null) {
-    const ruleNum = m[1];
+    // Same as the Rules of Court: link to the overall rule, not the subpart.
+    const ruleNum = baseRuleNumber(m[1]);
     results.push({
       kind: "rule",
       key: `Cal. Rules of Prof. Conduct, rule ${ruleNum}`,
