@@ -112,7 +112,28 @@ const SLIP_TAIL_RE = new RegExp(
   "i"
 );
 
-// In re cases (no v. anchor). Three alternatives:
+// Probate, conservatorship, and family-law cases use "in the matter of"
+// conventions instead of "X v. Y": "In re Marriage of Smith", "Estate of
+// Bowles", "Guardianship of Doe", "Conservatorship of Whitley", "Adoption of
+// Jones". All share the same citation-tail structure as In re, so one regex
+// over a prefix alternation covers them. The prefix is NOT captured as its
+// own group — that would shift the numeric group indices the consumer below
+// depends on — so the consumer re-extracts it via NONV_PREFIX_RE.
+// Mirrors _NONV_PREFIX in pdf_linker.py.
+const NONV_PREFIX =
+  // "In re" in any casing an OCR layer produces ("In Re", "IN RE").
+  String.raw`In [Rr][Ee]|IN RE|` +
+  String.raw`Estate of|` +
+  String.raw`Guardianship of|` +
+  String.raw`Conservatorship of|` +
+  String.raw`Adoption of|` +
+  String.raw`Marriage of`;
+
+// Recovers which prefix matched, since the prefix isn't a numbered group.
+// Anchored at start-of-match.
+const NONV_PREFIX_RE = new RegExp(String.raw`^\s*(${NONV_PREFIX})\b`);
+
+// Non-v. cases. Three alternatives:
 //   CSM:      " ... (year) vol REPORTER page"
 //   Bluebook: " ..., vol REPORTER page (court year)" or "... vol ... (year)"
 //   WL:       " ..., [docket text], YYYY WL NNNNNN (court year)"
@@ -120,7 +141,7 @@ const SLIP_TAIL_RE = new RegExp(
 // number — federal district-court WL cites commonly carry docket info
 // between the case name and the WL number.
 const INRE_RE = new RegExp(
-  String.raw`\bIn re\s+([A-Z][A-Za-z0-9.\-'\u2019&, ]+?)\s*` +
+  String.raw`\b(?:${NONV_PREFIX})\s+([A-Z][A-Za-z0-9.\-'\u2019&, ]+?)\s*` +
   String.raw`(?:` +
     // CSM form
     String.raw`\((?:[^)]*?\b)?(\d{4})\)\s+(\d{1,4})\s+(${REPORTER_PATTERN})\s+(\d{1,5})` +
@@ -158,7 +179,7 @@ const CASES_RE = new RegExp(
 
 // "Smith, supra" or "Smith v. Jones, supra"
 const SUPRA_RE = new RegExp(
-  String.raw`\b((?:In re\s+)?[A-Z][A-Za-z0-9.\-'\u2019&]+(?:\s+v\.\s+[A-Z][A-Za-z0-9.\-'\u2019&]+)?)` +
+  String.raw`\b((?:(?:${NONV_PREFIX})\s+)?[A-Z][A-Za-z0-9.\-'\u2019&]+(?:\s+v\.\s+[A-Z][A-Za-z0-9.\-'\u2019&]+)?)` +
   String.raw`,\s*supra\b`,
   "g"
 );
@@ -553,9 +574,20 @@ function walkBackForName(text, vPos, minPos = 0) {
 // Citation finders
 // ============================================================================
 
+// Strip non-v. case-name prefixes ("In re", "Estate of", "Conservatorship
+// of", etc.) plus "Ex parte" and "People v." so the short name is the
+// distinguishing subject ("Whitley", not "Conservatorship"). The prefix group
+// REPEATS ("+") because prefixes nest: "In re Marriage of Smith" is "In re" +
+// "Marriage of" + "Smith", and a single strip leaves "Marriage of Smith",
+// whose first word makes every Marriage-of case share the short name
+// "Marriage" and never match its supra cites. Mirrors _short_name in
+// pdf_linker.py.
+const SHORT_NAME_PREFIX_RE = new RegExp(
+  String.raw`^(?:(?:${NONV_PREFIX})\s+|Ex parte\s+|People v\.\s+)+`, "i");
+
 function shortName(plaintiff) {
   let p = plaintiff.trim();
-  p = p.replace(/^(In re|Ex parte|People v\.\s+)/i, "");
+  p = p.replace(SHORT_NAME_PREFIX_RE, "");
   const parts = p.split(/\s+/);
   return parts[0] ? parts[0].replace(/[,.;:]+$/, "") : p;
 }
@@ -667,10 +699,16 @@ function findCaseCitations(text) {
     });
   }
 
-  // In re cases
+  // In re / Estate of / Guardianship of / Conservatorship of / Adoption of /
+  // Marriage of cases (no v. anchor)
   INRE_RE.lastIndex = 0;
   while ((m = INRE_RE.exec(text)) !== null) {
     const name = m[1].replace(/\s+/g, " ").trim();
+    // Recover which prefix matched. INRE_RE doesn't capture the prefix as a
+    // numbered group (that would shift the numbered captures the branch logic
+    // below depends on), so re-extract it from the matched text.
+    const prefixM = NONV_PREFIX_RE.exec(m[0]);
+    const prefix = prefixM ? prefixM[1] : "In re";
     // Group layout: m[1]=name, then EITHER m[2..5] (CSM), m[6..9] (Bluebook),
     // or m[10..12] (WL: year-of-cite, WL-number, decision-year).
     let year, vol, reporter, page;
@@ -683,7 +721,7 @@ function findCaseCitations(text) {
       // WL alternative
       const wlYear = m[10], wlNum = m[11];
       wlOnly = true;
-      const fullName = `In re ${name}`;
+      const fullName = `${prefix} ${name}`;
       const key = `${fullName} ${wlYear} WL ${wlNum}`;
       results.push({
         kind: "case",
@@ -696,7 +734,7 @@ function findCaseCitations(text) {
       continue;
     }
     const repCompact = reporter.replace(/\s+/g, "");
-    const fullName = `In re ${name}`;
+    const fullName = `${prefix} ${name}`;
     const key = `${fullName} (${year}) ${vol} ${repCompact} ${page}`;
     results.push({
       kind: "case",
