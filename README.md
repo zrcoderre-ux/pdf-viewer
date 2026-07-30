@@ -225,7 +225,11 @@ memorandum (10/10 match, identical keys). The port includes:
   by the hyphenated section number, and resolved to the model UCC on each
   provider (`U.C.C. § 3-310` on Lexis+, `Unif.Commercial Code § 3-310` on
   Westlaw).
-- `In re` cases (separate pattern, no `v.` anchor).
+- Non-`v.` case names (separate pattern, no `v.` anchor): `In re`,
+  `Estate of`, `Guardianship of`, `Conservatorship of`, `Adoption of`,
+  `Marriage of` — e.g. `Conservatorship of Whitley (2010) 50 Cal.4th 1206`.
+  Prefixes nest (`In re Marriage of Bonds`), and the short name used for
+  supra resolution is the subject that follows them (`Bonds`, `Whitley`).
 - `Cal. Rules of Court` / `California Rules of Court`, `rule` or `rules`,
   with nested subsections.
 - Both **CSM** and **Bluebook** case forms — chosen by whichever tail
