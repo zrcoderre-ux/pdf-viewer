@@ -411,7 +411,25 @@ function walkBackForName(text, vPos, minPos = 0) {
     const tok = text.slice(tokStart, tokEnd);
     if (!tok) break;
 
-    const lastChar = tok[tok.length - 1];
+    // A closing quote HIDES the sentence-ending mark from both boundary tests
+    // below. A quotation that ends a sentence reads `English.”`, whose last
+    // character is the quote, not the period — so `tok.endsWith(".")` was false,
+    // the walk-back sailed on through the sentence before the citation, and the
+    // whole sentence came back as the case name:
+    //     "An arbitration provision is procedurally unconscionable where it
+    //      “was neither provided … written English.” (Penilla v. Westmont Corp.
+    //      (2016) 3 Cal.App.5th 205, 209.)"
+    // Strip the closers for the tests only: the token itself is recorded and
+    // measured unchanged, so a possessive like `Farmers'` is unaffected.
+    const tokCore = tok.replace(/[”’"')\]]+$/, "");
+    const hadCloser = tokCore.length < tok.length;
+    if (!tokCore) {
+      // Nothing but closing punctuation — a quotation ended right here.
+      if (tokens.length) break;
+      return null;
+    }
+
+    const lastChar = tokCore[tokCore.length - 1];
     if (":;!?".includes(lastChar)) break;
 
     // Stopper-abbreviations check ("E.g.,", "I.e.,", "Cf.", "Supra,"). These
@@ -431,15 +449,20 @@ function walkBackForName(text, vPos, minPos = 0) {
     // "Mfg.", "Sav.", "Bldg." as part of corporate names — these appear
     // constantly inside party names.
     if (
-      tok.endsWith(".") &&
-      tok.length > 1 &&
-      tok[tok.length - 2] >= "a" && tok[tok.length - 2] <= "z"
+      tokCore.endsWith(".") &&
+      tokCore.length > 1 &&
+      tokCore[tokCore.length - 2] >= "a" && tokCore[tokCore.length - 2] <= "z"
     ) {
-      const inner = tok.replace(/\.+$/, "");
+      // `Co.”` — the closing quote says the QUOTATION ended here, so this is a
+      // sentence boundary even though "Co." is exactly the abbreviation the
+      // allowance below exists for. That allowance is for abbreviations INSIDE
+      // a party name, and a name token is never followed by a closing quote.
+      if (hadCloser) break;
+      const inner = tokCore.replace(/\.+$/, "");
       const isShortCapAbbrev =
         inner.length >= 1 && inner.length <= 6 &&
         inner[0] >= "A" && inner[0] <= "Z";
-      if (!isShortCapAbbrev && !ABBREV_OK.has(tok.toLowerCase())) break;
+      if (!isShortCapAbbrev && !ABBREV_OK.has(tokCore.toLowerCase())) break;
     }
 
     // Strip leading punctuation. Also strip a leading hyphen because PDFs
