@@ -130,12 +130,24 @@ Pipeline:
 Rule order (outermost wrapper first):
 
 ```
-Declaration > Reply > Opposition > Demurrer > Notice of Motion >
-Ex Parte Application > Motion > Petition > Amended Complaint > Complaint
+Self-titled (Errata / Notice of Ruling / Trial Brief / Memo of Costs /
+Case Management Statement / …) > Response to Objections > Objection >
+Declaration > Order > Proof of Service > RJN > Separate Statement >
+Evidence > Notice of Non-Opposition > Reply > Opposition > Demurrer >
+Notice of Motion > Ex Parte Application > Motion > Petition > Answer >
+Cross-Complaint > Amended Complaint > Complaint > bare MPA
 ```
 
 Order constraints that matter:
-- Declaration before everything else (a `Decl. ISO Reply` is a
+- Self-titled procedural docs first: a "NOTICE OF ERRATA RE: PLAINTIFF'S
+  EVIDENCE IN OPPOSITION TO ... MOTION" is an errata notice, and would
+  otherwise mislabel as Opposition.
+- Response-to-objections before Objection (its title contains
+  `Objections`), and Objection before every objected-to type — an
+  "Objections to Declaration of X" is `Obj. to X Decl.`, not `X Decl.`
+  Leading party possessives match both singular (`Defendant's`) and
+  plural (`Defendants'`) forms.
+- Declaration before the response/brief types (a `Decl. ISO Reply` is a
   declaration, not a reply).
 - Reply before Opposition (a Reply's title contains `Opposition to ...`).
 - Notice of Motion before Motion (`Notice of Motion for X` contains
