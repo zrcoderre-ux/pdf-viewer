@@ -29,8 +29,11 @@
 // document-type keywords directly — so stripping isn't actually needed.
 //
 // Rule order (outermost wrapper first):
-//   Declaration > Reply > Opposition > Demurrer > Notice of Motion >
-//   Motion > Petition > Amended Complaint > Complaint
+//   Self-titled (Errata/Ruling/etc.) > Response to Objections > Objection >
+//   Declaration > Order > Proof of Service > RJN > Separate Statement >
+//   Evidence > Notice of Non-Opposition > Reply > Opposition > Demurrer >
+//   Notice of Motion > Ex Parte > Motion > Petition > Answer >
+//   Cross-Complaint > Amended Complaint > Complaint > MPA
 //
 // Notice of Motion comes BEFORE Motion because "Notice of Motion for X"
 // contains "Motion for X" as a substring — the Motion rule would otherwise
@@ -42,25 +45,49 @@
 
 // === normalization helpers ===
 
+// Document-type keywords used to resolve ambiguous glued possessives. When
+// "PLAINTIFFS'SEPARATE" is split, the apostrophe could be read as either
+// "PLAINTIFF'S EPARATE" (possessive 's) or "PLAINTIFFS' SEPARATE" (plural
+// possessive s') \u2014 only the reading that yields a real type keyword is right.
+const GLUE_KEYWORDS =
+  "separate|statement|opposition|objections?|declarations?|demurrer|complaint|" +
+  "motion|reply|evidence|exhibits?|compendium|request|responses?|memorandum|" +
+  "petition|notice";
+
 function normalize(raw) {
   if (!raw) return "";
   return String(raw)
     .replace(/[\u2018\u2019\u201B\u2032]/g, "'")
     .replace(/[\u201C\u201D\u201F\u2033]/g, '"')
+    // PDF extraction sometimes floats the possessive apostrophe away from its
+    // word: "DEFENDANT ' S MOTION" / "PLAINTIFFS ' OBJECTIONS". Reattach it
+    // before the glued-word repairs below.
+    .replace(/(\w)\s+(')\s*(?=s\b)/gi, "$1$2")
+    .replace(/(s)\s+(')(?!\w)/gi, "$1$2")
     // Repair run-together words from PDF text extraction that drops spaces \u2014
     // they otherwise defeat the \b-anchored type keywords below.
+    //   "PLAINTIFFS'SEPARATE"   \u2192 "PLAINTIFFS' SEPARATE"    (plural possessive
+    //     glued to a type keyword; must run before the 's split, which would
+    //     otherwise misread it as "PLAINTIFFS'S EPARATE")
     //   "PLAINTIFF'SOPPOSITION" \u2192 "PLAINTIFF'S OPPOSITION"  (glued possessive;
     //     only split before an UPPERCASE letter so names like O'Sullivan/D'Souza
     //     are left intact)
     //   "YUDECLARATION"         \u2192 "YU DECLARATION"          (name glued to type)
     //   "INSUPPORT OF"          \u2192 "IN SUPPORT OF"
-    .replace(/(['\u2019]s)(?=[A-Z])/gi, "$1 ")
+    .replace(new RegExp(`(s')(?=(?:${GLUE_KEYWORDS})\\b)`, "gi"), "$1 ")
+    .replace(/('s)(?=[A-Z])/gi, "$1 ")
     // Split a document-type word glued to the preceding word, e.g.
     // "AMENDEDCOMPLAINT" -> "AMENDED COMPLAINT", "YUDECLARATION" -> "YU
     // DECLARATION". Only these specific type words (none is a substring of an
     // ordinary word), and only when a letter precedes them.
     .replace(/([A-Za-z])(declarations?|complaint|opposition|demurrer|memorandum|petition|stipulation|objection)\b/gi, "$1 $2")
-    .replace(/\binsupport\b/gi, "in support")
+    .replace(/\bin(support|opposition|reply)\b/gi, "in $1")
+    .replace(/\bto(defendants?|plaintiffs?)\b/gi, "to $1")
+    .replace(/\bjudicialnotice\b/gi, "judicial notice")
+    // OCR reads the "I" of "ISO" as a lowercase L.
+    .replace(/\blso\b/gi, "iso")
+    // "EX-PART" / "EX PART" typo for "ex parte".
+    .replace(/\bex[\s-]+parte?\b/gi, "ex parte")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -85,6 +112,10 @@ function stripSupportingDeclaration(s) {
 const NAME_TAIL_NOISE = new Set([
   "jr", "sr", "ii", "iii", "iv", "v", "vi",
   "esq", "esquire", "mscj", "phd", "md", "jd", "llm", "cpa",
+  // Trailing verbs that ride along when the ISO clause is phrased
+  // "Declaration of Donna Forte FILED in support of ..." — "Filed" would
+  // otherwise be taken as the surname.
+  "filed", "submitted", "offered", "lodged",
 ]);
 
 // Capitalize each hyphen-separated segment; "SMITH" → "Smith",
@@ -101,7 +132,10 @@ function titleCaseLastWord(name) {
       break;
     }
   }
-  const last = parts[parts.length - 1] || "";
+  let last = parts[parts.length - 1] || "";
+  // A middle initial glued to the surname by dropped whitespace
+  // ("DEBORAH R.TOGA" → token "R.TOGA") — strip the leading initial.
+  last = last.replace(/^[A-Za-z]\.(?=[A-Za-z]{2,})/, "");
   return last
     .split("-")
     .map(seg => seg ? seg[0].toUpperCase() + seg.slice(1).toLowerCase() : "")
@@ -118,6 +152,13 @@ function titleCasePhrase(s) {
     if (i > 0 && LOWER_CONNECTORS.has(lower)) return lower;
     return lower ? lower[0].toUpperCase() + lower.slice(1) : "";
   }).join(" ");
+}
+
+// Captured "Motion to/for X" phrases can end at a truncated footer line or
+// just before an ", in the alternative" clause, leaving a dangling connector
+// ("Summary Judgment or", "Request for Production of"). Trim the dangle.
+function trimTrailingConnectors(s) {
+  return s.replace(/(?:\s+(?:or|and|of|to|in|for|the|a|an))+\s*$/i, "");
 }
 
 // === step 2: caption party capture ===
@@ -138,7 +179,12 @@ function capturePartyFromCaptionTail(s) {
   if (matches.length === 0) return { stripped: s, party: null };
   const m = matches[matches.length - 1];
   const party = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
-  return { stripped: s.slice(0, m.index).replace(/[,\s]+$/, "").trim(), party };
+  const stripped = s.slice(0, m.index).replace(/[,\s]+$/, "").trim();
+  // A v.-match at (or near) the head of the string isn't a trailing case
+  // caption — it's the document's own first words ("PLAINTIFFS V SARKISYAN
+  // ... REPLY BRIEF ..."). Stripping would delete the whole title, so keep it.
+  if (!stripped) return { stripped: s, party };
+  return { stripped, party };
 }
 
 // === step 3: noise stripping ===
@@ -153,7 +199,15 @@ function stripCaseNumberNoise(s) {
   // Trailing comma-laden descriptive blobs like "for compensatory, punitive,
   // and liquidated damages, injunctive relief, and civil penalties". Anchored
   // on damages-vocabulary openers so we don't strip "Motion for Summary Judgment".
-  s = s.replace(/\bfor\s+(?:damages|compensatory|punitive|liquidated|injunctive|civil|monetary|equitable|declaratory)\b[^.]*$/i, "").trim();
+  s = s.replace(/\bfor\s+(?:damages|compensatory|punitive|liquidated|injunctive|civil\s+penalties|monetary|equitable|declaratory)\b[^.]*$/i, "").trim();
+  // Law-firm boilerplate printed in the footer band alongside the title:
+  // "THOMPSONHINELLP ATTORNEYS ATLAW LOSANGELES NOTICE OF RULING ...".
+  // Drop the firm token + "ATTORNEYS AT LAW"; a glued "LOSANGELES" is the
+  // same boilerplate's city line (a real caption spells "Los Angeles" with
+  // the space, so it's left alone).
+  s = s.replace(/\b\S+\s+attorneys?\s+at\s*law\b/gi, " ");
+  s = s.replace(/\blosangeles\b/gi, " ");
+  s = s.replace(/\s+/g, " ").trim();
   s = s.replace(/[,.\s]+$/, "").trim();
   return s;
 }
@@ -174,7 +228,7 @@ function stripCaseNumberNoise(s) {
 // class of misfires where the lazy 's regex walked past Motion words.
 function stripNoticeOfMotionAndMotion(s) {
   return s.replace(
-    /^(?:[a-z][a-z\s.'&,-]+?'s\s+)?notice\s+of\s+motion\b[\s\S]*?\band\s+(?=motion\b)/i,
+    /^(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?notice\s+of\s+motion\b[\s\S]*?\band\s+(?=motion\b)/i,
     ""
   );
 }
@@ -232,7 +286,7 @@ function capturePartyLabel(s) {
   // Pattern 1: "{KnownRole} {Name}'s ..." — the ROLE is the label; the name
   // rides along separately as the deeper disambiguation fallback.
   const labeledWithName = s.match(
-    /^(plaintiffs?|defendants?|petitioners?|respondents?|cross-?plaintiffs?|cross-?defendants?|cross-?complainants?|cross-?respondents?|counter-?plaintiffs?|counter-?defendants?|counter-?claimants?|third-?party\s+plaintiffs?|third-?party\s+defendants?)\s+([a-z][a-z\s.'&,-]*?)'s\b/i
+    /^(plaintiffs?|defendants?|petitioners?|respondents?|cross-?plaintiffs?|cross-?defendants?|cross-?complainants?|cross-?respondents?|counter-?plaintiffs?|counter-?defendants?|counter-?claimants?|third-?party\s+plaintiffs?|third-?party\s+defendants?)\s+([a-z][a-z\s.'&,-]*?)(?:'s|(?<=s)')(?=\s|$)/i
   );
   if (labeledWithName) {
     const name = labeledWithName[2].trim();
@@ -244,7 +298,7 @@ function capturePartyLabel(s) {
 
   // Pattern 2: "{KnownRole}'s ..." — the role itself; no name available.
   const roleOnly = s.match(
-    /^(plaintiffs?|defendants?|petitioners?|respondents?|cross-?plaintiffs?|cross-?defendants?|cross-?complainants?|cross-?respondents?|counter-?plaintiffs?|counter-?defendants?|counter-?claimants?|third-?party\s+plaintiffs?|third-?party\s+defendants?)'s\b/i
+    /^(plaintiffs?|defendants?|petitioners?|respondents?|cross-?plaintiffs?|cross-?defendants?|cross-?complainants?|cross-?respondents?|counter-?plaintiffs?|counter-?defendants?|counter-?claimants?|third-?party\s+plaintiffs?|third-?party\s+defendants?)(?:'s|')(?=\s|$)/i
   );
   if (roleOnly) {
     return { label: titleCasePartyLabel(roleOnly[1]), name: null };
@@ -254,7 +308,7 @@ function capturePartyLabel(s) {
   // so the captured phrase IS the party label. Covers "Receiver's",
   // "Trustee's", "Creditco's", "Pacific Insurance's", etc. Guard against
   // greedy backtracking onto document-type keywords.
-  const bare = s.match(/^([a-z][a-z\s.'&,-]+?)'s\b/i);
+  const bare = s.match(/^([a-z][a-z\s.'&,-]+?)(?:'s|(?<=s)')(?=\s|$)/i);
   if (bare) {
     const candidate = bare[1].trim();
     if (looksLikeDocTypeKeyword(candidate)) return null;
@@ -265,7 +319,12 @@ function capturePartyLabel(s) {
 }
 
 function looksLikeDocTypeKeyword(phrase) {
-  return /^(?:opposition|reply|motion|petition|declaration|decl|demurrer|complaint|notice|memorandum|memo|brief|answer|application|ex\s+parte)\b/i.test(phrase);
+  // Searched ANYWHERE in the candidate, not just at its head: the lazy
+  // bare-possessive pattern can walk across a whole title to a later
+  // possessive ("Supplemental Declaration of A. Moore in Support of
+  // Defendants' Reply" → candidate is everything before "Defendants'"),
+  // and such a walk always swallows a document-type word on the way.
+  return /\b(?:opposition|reply|motion|petition|declarations?|decl|demurrer|complaint|notice|memorandum|memo|brief|answer|application|objections?|responses?|evidence|errata|statement|request|ex\s+parte)\b/i.test(phrase);
 }
 
 // Title-case a party label. Preserves common short-form corporate
@@ -298,13 +357,13 @@ function lastNameFromOf(s) {
   // Accept the abbreviated "Decl. of {name}" (common in filenames) as well as
   // the spelled-out "Declaration of {name}".
   const m = s.match(
-    /\b(?:declaration|decl\.?)\s+of\s+([A-Za-z][A-Za-z'\-.]*(?:\s+[A-Za-z][A-Za-z'\-.]*)*?)(?=\s+(?:in\s+support(?:\s+of)?|in\s+supp\.?|i\/?s\/?o|iso)\b|\s*[,.]|$)/i
+    /\b(?:declaration|decl\.?)\s+of\s+([A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'\-.]*(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'\-.]*)*?)(?=\s+(?:in\s+support(?:\s+of)?|in\s+supp\.?|i\/?s\/?o|iso)\b|\s*[,.]|$)/i
   );
   if (!m) return null;
   return titleCaseLastWord(m[1]);
 }
 function lastNameFromNameDecl(s) {
-  const m = s.match(/\b([A-Za-z][A-Za-z'\-.]*)\s+decl(?:aration|\.?)\b/i);
+  const m = s.match(/\b([A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'\-.]*)\s+decl(?:aration|\.?)\b/i);
   if (!m) return null;
   return titleCaseLastWord(m[1]);
 }
@@ -323,6 +382,9 @@ function objectionTarget(s) {
   }
   if (/\brequest\s+for\s+judicial\s+notice\b|\breq\.?\s+for\s+judicial\s+notice\b|\brjn\b/i.test(rest)) return "RJN";
   if (/\bevidence\b/i.test(rest))                 return "Evidence";
+  // The opposing party's Statement of Additional Undisputed Material Facts —
+  // more specific than a plain Separate Statement, so checked first.
+  if (/\bseparate\s+statement\s+of\s+[a-z\s]*\badditional\b[a-z\s]*\bmaterial\s+facts\b/i.test(rest)) return "AUMF";
   if (/\bseparate\s+statement\b/i.test(rest))     return "Separate Statement";
   if (/\bdemurrer\b/i.test(rest))                 return "Demurrer";
   if (/\bex\s+parte\s+application\b/i.test(rest)) return "Ex Parte App.";
@@ -348,24 +410,94 @@ function detectISOTarget(s) {
   if (/\bopposition\b|\bopp\.?\b/.test(tail))       return "opposition";
   if (/\bex\s+parte\s+application\b/.test(tail))    return "exparte";
   if (/\brjn\b|\brequest\s+for\s+judicial\s+notice\b|\breq\.?\s+for\s+judicial\s+notice\b/.test(tail)) return "rjn";
-  if (/\bmotion\b|\bmot\.?\b/.test(tail))           return "motion";
+  // MSJ/MSA are the ubiquitous shorthands for a summary-judgment/adjudication
+  // motion ("COMPENDIUM OF EVIDENCE ISO MSJ").
+  if (/\bmotion\b|\bmot\.?\b|\bmsj\b|\bmsa\b/.test(tail)) return "motion";
   if (/\bpetition\b|\bpet\.?\b/.test(tail))         return "petition";
+  // Checked after motion so "ISO Demurrer and Motion to Strike" keeps its
+  // established "ISO Mot." form; fires only for a demurrer-only support doc.
+  if (/\bdemurrer\b/.test(tail))                    return "demurrer";
   return null;
 }
 
+// Self-titled procedural documents: the footer IS the name — no target, no
+// response structure to parse. Each entry is [test-regex, canonical]. All are
+// anchored to the head of the title (past an optional party possessive) except
+// "Notice of Hearing on …", which OCR noise routinely buries mid-string.
+const SELF_TITLED = [
+  [/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?(?:amended\s+)?notice\s+of\s+errata\b/i, "Notice of Errata"],
+  [/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?errata\b/i, "Errata"],
+  [/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?notice\s+of\s+ruling\b/i, "Notice of Ruling"],
+  [/^\s*notice\s+of\s+association\s+of\s+(?:counsel|attorneys?)\b/i, "Notice of Association of Counsel"],
+  [/\bnotice\s+of\s+hearing\s+on\b/i, "Notice of Hearing"],
+  [/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?case\s+management\s+statement\b/i, "Case Management Statement"],
+  [/^\s*certificate\s+of\s+mailing\b/i, "Certificate of Mailing"],
+  [/^\s*certificate\s+of\s+electronic\s+service\b/i, "Certificate of Electronic Service"],
+  [/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?memorandum\s+of\s+costs\b/i, null],  // Summary/Worksheet resolved below
+  [/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?responses?\s+to\s+(?:an\s+)?order\s+to\s+show\s+cause\b/i, "Response to Order to Show Cause"],
+  [/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?trial\s+brief\b/i, "Trial Brief"],
+];
+
 const RULES = [
-  // 0. Objection — its own document type. Names the objection for what it is and
-  // captures WHAT it objects to, so it never collapses to that thing (an
+  // 0. Self-titled procedural documents. Before everything else because their
+  // titles freely mention other type keywords ("NOTICE OF ERRATA RE:
+  // PLAINTIFF'S EVIDENCE IN OPPOSITION TO ... MOTION ..." is an errata notice,
+  // not an Opposition — a footer shape that used to be the single biggest
+  // source of spurious "Opposition" labels).
+  {
+    name: "self-titled",
+    test(s) {
+      for (const [re, canonical] of SELF_TITLED) {
+        if (!re.test(s)) continue;
+        if (canonical) return { canonical };
+        // Memorandum of Costs: "(SUMMARY)" vs "(WORKSHEET)" variants.
+        return {
+          canonical: /\bworksheet\b/i.test(s)
+            ? "Memorandum of Costs Worksheet"
+            : "Memorandum of Costs Summary",
+        };
+      }
+      // "GENERAL ORDER RE X" — keep the subject; a bare "General Order" label
+      // would collide across the many standing orders courts issue.
+      const go = s.match(/^\s*general\s+order\s+re:?\s+(.+)$/i);
+      if (go) return { canonical: `General Order re ${titleCasePhrase(go[1])}` };
+      return null;
+    },
+  },
+
+  // 0.2. Response to evidentiary objections — the objecting party's opponent
+  // defending its evidence. NOT an Objection (and must precede that rule: the
+  // objection rule's lazy possessive would happily swallow "Defendant's
+  // Response to Plaintiff's" and misfire on the "Objections" that follows).
+  {
+    name: "response-to-objections",
+    test(s) {
+      if (!/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?(?:supplemental\s+)?responses?\s+to\b/i.test(s)) return null;
+      if (!/\bobjections?\b/i.test(s)) return null;
+      const evid =
+        /\bevidentiary\s+objections?\b/i.test(s) ||
+        /\bobjections?\s+to\s+(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?evidence\b/i.test(s);
+      return { canonical: evid ? "Response to Evid. Objs." : "Response to Objs." };
+    },
+  },
+
+  // 0.5. Objection — its own document type. Names the objection for what it is
+  // and captures WHAT it objects to, so it never collapses to that thing (an
   // "Objection to Request for Judicial Notice" is "Obj. to RJN", not "RJN"; an
   // "Objection to Anderson Declaration" is "Obj. to Anderson Decl.", not
   // "Anderson Decl."). Must precede every rule for the objected-to type
   // (declaration, RJN, evidence, motion, demurrer, opposition, …). Allows a
-  // leading party possessive ("Defendant's Objection to …").
+  // leading party possessive — singular ("Defendant's") or plural
+  // ("Defendants'") — and the "Evidentiary Objections" phrasing, which
+  // objects to evidence by definition even when no "to …" clause follows
+  // ("PLAINTIFF'S EVIDENTIARY OBJECTIONS ISO OPPOSITION TO MSJ" is an
+  // objection to the movant's evidence, never an Opposition).
   {
     name: "objection",
     test(s) {
-      if (!/^\s*(?:[a-z][a-z\s.'&,-]+?'s\s+)?objections?\b/i.test(s)) return null;
-      const target = objectionTarget(s);
+      if (!/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?(?:evidentiary\s+)?objections?\b/i.test(s)) return null;
+      let target = objectionTarget(s);
+      if (!target && /\bevidentiary\s+objections?\b/i.test(s)) target = "Evidence";
       return { canonical: target ? `Obj. to ${target}` : "Objection" };
     },
   },
@@ -386,6 +518,7 @@ const RULES = [
         petition:   "Decl. ISO Pet.",
         exparte:    "Decl. ISO Ex Parte App.",
         rjn:        "Decl. ISO RJN",
+        demurrer:   "Decl. ISO Demurrer",
       }[iso];
       return { canonical: `${last} ${suffix}` };
     },
@@ -475,6 +608,7 @@ const RULES = [
           motion:     "ISO Mot.",
           petition:   "ISO Pet.",
           exparte:    "ISO Ex Parte App.",
+          demurrer:   "ISO Demurrer",
         }[iso];
         canonical = `RJN ${suffix}`;
       }
@@ -544,13 +678,26 @@ const RULES = [
         return { canonical: "AUMF" };
       }
 
-      // UMF: either "Separate Statement in Opposition" (the standard
-      // responsive form) or "Response(s) to ... Separate Statement of
-      // UMF" (alternate naming convention). Both produce UMF.
-      if (/\bseparate\s+statement\s+in\s+opposition\b/i.test(s)) {
+      // UMF: "Separate Statement in Opposition" (the standard responsive
+      // form; "of [Disputed] [Material] Facts" may intervene) or "Response(s)
+      // to ... Separate Statement of UMF" (the same document under a
+      // different name convention). Both produce UMF.
+      //
+      // But the "Response to UMF" check must NOT swallow the reply-stage
+      // document: when the MOVING party responds to the opposition's separate
+      // statement ("GM'S RESPONSE TO PLAINTIFF'S SEPARATE STATEMENT OF
+      // DISPUTED MATERIAL FACTS ISO OPPOSITION ..."), that's a Reply Separate
+      // Statement. The referenced statement tells the two apart: "undisputed
+      // material facts" is the movant's original; "disputed facts" / "in
+      // opposition" is the opposition's responsive statement.
+      if (/\bresponses?\s+to\b[\s\S]*\bseparate\s+statement\s+of\s+[a-z\s]*\bundisputed\s+material\s+facts\b/i.test(s)) {
         return { canonical: "UMF" };
       }
-      if (/\bresponses?\s+to\b[\s\S]*\bseparate\s+statement\s+of\s+[a-z\s]*\bundisputed\s+material\s+facts\b/i.test(s)) {
+      if (/\b(?:reply|responses?)\s+to\b[\s\S]*\bseparate\s+statement\b/i.test(s) &&
+          (/\bdisputed\b/i.test(s) || /\bin\s+opposition\b/i.test(s))) {
+        return { canonical: "Reply Separate Statement" };
+      }
+      if (/\bseparate\s+statement\s+(?:of\s+[a-z\s]*\bfacts\s+)?in\s+opposition\b/i.test(s)) {
         return { canonical: "UMF" };
       }
 
@@ -571,22 +718,40 @@ const RULES = [
   {
     name: "evidence",
     test(s) {
-      if (!/\bevidence\b/i.test(s)) return null;
+      if (!/\bevidence\b/i.test(s) && !/\bcompendium\s+of\s+exhibits\b/i.test(s)) return null;
       // Only when evidence is the document's own type: it leads the title
-      // (optionally "[party's] Compendium of Evidence"), or it's the thing being
-      // submitted "in support of" something.
-      const leads = /^\s*(?:[a-z][a-z\s.'&,-]+?'s\s+)?(?:compendium\s+of\s+)?evidence\b/i.test(s)
-                 || /\bevidence\s+in\s+support\b/i.test(s);
+      // (optionally "[party's] Compendium of Evidence" — a "Compendium of
+      // Exhibits" is the same animal under another name), or it's the thing
+      // being submitted "in support of" something.
+      const leads = /^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?(?:compendium\s+of\s+)?(?:evidence|exhibits)\b/i.test(s)
+                 || /\b(?:evidence|exhibits)\s+in\s+support\b/i.test(s);
       if (!leads) return null;
-      const iso = detectISOTarget(s);
+      // "Evidence in Opposition to [Motion]" carries no ISO connector but is
+      // the same thing as "Evidence ISO Opp." — evidence submitted with the
+      // opposition. Recognizing it keeps it distinct from the Opposition
+      // brief itself.
+      const iso = detectISOTarget(s) ||
+        (/\b(?:evidence|exhibits)\s+in\s+opposition\b/i.test(s) ? "opposition" : null);
       const suffix = iso && {
         reply:      "ISO Reply",
         opposition: "ISO Opp.",
         motion:     "ISO Mot.",
         petition:   "ISO Pet.",
         exparte:    "ISO Ex Parte App.",
+        demurrer:   "ISO Demurrer",
       }[iso];
       return { canonical: suffix ? `Evidence ${suffix}` : "Evidence" };
+    },
+  },
+
+  // 2.95. Notice of Non-Opposition — announces that nobody opposed a motion.
+  // Contains the word "opposition" (and usually "motion"), but is neither;
+  // must precede both rules.
+  {
+    name: "non-opposition",
+    test(s) {
+      if (!/\bnotice\s+of\s+(?:non[\s-]*opposition|no\s+opposition)\b/i.test(s)) return null;
+      return { canonical: "Notice of Non-Opposition" };
     },
   },
 
@@ -601,7 +766,7 @@ const RULES = [
       const inner = afterReply[1];
 
       // Most common: "Reply to [Party's] Opposition to [Motion/Petition/Demurrer/Ex Parte App]"
-      const oppInner = /\b(?:[a-z][a-z\s.'&,-]+?'s\s+)?opposition\s+(?:to|of)\s+(.+)$/i.exec(inner);
+      const oppInner = /\b(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?opposition\s+(?:to|of)\s+(.+)$/i.exec(inner);
       if (oppInner) {
         const deepest = oppInner[1];
         // Order: demurrer/ex-parte are specific; motion last.
@@ -628,7 +793,7 @@ const RULES = [
       if (!/\bopposition\b/i.test(s)) return null;
       // "Opposition to [Party's] [Motion/Petition/Demurrer/Ex Parte App]" —
       // allow the intervening party possessive.
-      const m = /\bopposition\s+(?:to|of)\s+(?:[a-z][a-z\s.'&,-]+?'s\s+)?(.+)$/i.exec(s);
+      const m = /\bopposition\s+(?:to|of)\s+(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?(.+)$/i.exec(s);
       let target = null;
       if (m) {
         const inner = m[1];
@@ -638,7 +803,7 @@ const RULES = [
         if (/\bdemurrer\b/i.test(inner))           target = "Demurrer";
         else if (/\bex\s+parte\s+application\b/i.test(inner)) target = "Ex Parte App.";
         else if (/\bpetition\b/i.test(inner))      target = "Pet.";
-        else if (/\bmotion\b/i.test(inner))        target = "Mot.";
+        else if (/\bmotion\b|\bmsj\b|\bmsa\b/i.test(inner)) target = "Mot.";
       }
       return { canonical: "Opposition", target };
     },
@@ -652,15 +817,17 @@ const RULES = [
       if (!/\bdemurrer\b/i.test(s)) return null;
       let target = null;
       let tm = s.match(
-        /\bto\s+(?:[a-z][a-z\s.'&,-]+?'s\s+)?(?:the\s+)?(first|second|third|1st|2nd|3rd)\s+amended\s+complaint\b/i
+        /\bto\s+(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?(?:the\s+)?(first|second|third|1st|2nd|3rd)\s+amended\s+(cross-?\s?)?complaint\b/i
       );
       if (tm) {
         const ord = tm[1].toLowerCase();
         target = (ord === "first" || ord === "1st") ? "FAC"
                : (ord === "second" || ord === "2nd") ? "SAC"
                : "TAC";
+        // "…to Second Amended CROSS-Complaint" → SACC, not SAC.
+        if (tm[2]) target += "C";
       } else {
-        tm = s.match(/\bto\s+(?:[a-z][a-z\s.'&,-]+?'s\s+)?(sac|fac|tac|answer)\b/i);
+        tm = s.match(/\bto\s+(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?(sacc|facc|tacc|sac|fac|tac|answer)\b/i);
         if (tm) {
           target = tm[1].toUpperCase() === "ANSWER" ? "Answer" : tm[1].toUpperCase();
         }
@@ -680,8 +847,8 @@ const RULES = [
       let target = null;
       const toM  = s.match(/\bnotice\s+of\s+motion\s+to\s+([a-z][a-z\s']+?)(?:\s+in\b|\s*[,.;]|\s*$)/i);
       const forM = s.match(/\bnotice\s+of\s+motion\s+for\s+([a-z][a-z\s']+?)(?:\s+in\b|\s*[,.;]|\s*$)/i);
-      if (toM)       target = "Mot. to "  + titleCasePhrase(toM[1].trim());
-      else if (forM) target = "Mot. for " + titleCasePhrase(forM[1].trim());
+      if (toM)       target = "Mot. to "  + titleCasePhrase(trimTrailingConnectors(toM[1].trim()));
+      else if (forM) target = "Mot. for " + titleCasePhrase(trimTrailingConnectors(forM[1].trim()));
       // A "Notice of Motion" IS the motion for naming purposes — the filed
       // document is the notice+motion. (Confirmed across the naming history:
       // every "Notice of Motion …" the user kept was named "Motion".)
@@ -707,7 +874,7 @@ const RULES = [
       if (all.length) {
         const winner = all[0];
         target = (winner.kind === "to" ? "Ex Parte App. to " : "Ex Parte App. for ")
-               + titleCasePhrase(winner.m[1].trim());
+               + titleCasePhrase(trimTrailingConnectors(winner.m[1].trim()));
       }
       return { canonical: "Ex Parte Application", target };
     },
@@ -728,7 +895,7 @@ const RULES = [
       if (all.length) {
         const winner = all[0];
         target = (winner.kind === "to" ? "Mot. to " : "Mot. for ")
-               + titleCasePhrase(winner.m[1].trim());
+               + titleCasePhrase(trimTrailingConnectors(winner.m[1].trim()));
       }
       return { canonical: "Motion", target };
     },
@@ -747,9 +914,34 @@ const RULES = [
       if (all.length) {
         const winner = all[0];
         target = (winner.kind === "to" ? "Pet. to " : "Pet. for ")
-               + titleCasePhrase(winner.m[1].trim());
+               + titleCasePhrase(trimTrailingConnectors(winner.m[1].trim()));
       }
       return { canonical: "Petition", target };
+    },
+  },
+
+  // 8.7. Answer — "ANSWER TO COMPLAINT" is the answer, not the complaint it
+  // responds to. Must precede the Complaint catchall.
+  {
+    name: "answer",
+    test(s) {
+      if (!/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?(?:verified\s+|amended\s+)*answer\b/i.test(s)) return null;
+      return { canonical: "Answer" };
+    },
+  },
+
+  // 8.8. Cross-complaints — their own pleading, never the Complaint. Amended
+  // ones get the standard California acronyms (FACC/SACC/TACC), paralleling
+  // FAC/SAC/TAC below. Must precede both amended-complaint (whose regex
+  // doesn't see the "cross-" in between) and the Complaint catchall.
+  {
+    name: "cross-complaint",
+    test(s) {
+      if (!/\bcross-?\s?complaint\b/i.test(s)) return null;
+      if (/\b(?:third|3rd)\s+amended\s+cross-?\s?complaint\b/i.test(s))  return { canonical: "TACC" };
+      if (/\b(?:second|2nd)\s+amended\s+cross-?\s?complaint\b/i.test(s)) return { canonical: "SACC" };
+      if (/\b(?:first|1st)\s+amended\s+cross-?\s?complaint\b/i.test(s))  return { canonical: "FACC" };
+      return { canonical: "Cross-Complaint" };
     },
   },
 
@@ -781,6 +973,17 @@ const RULES = [
     test(s) {
       if (!/\bcomplaint\b/i.test(s)) return null;
       return { canonical: "Complaint" };
+    },
+  },
+
+  // 11. Bare Memorandum of Points and Authorities. Last on purpose: an MPA
+  // "ISO Motion" or "in Opposition to X" already resolved to Motion/Opposition
+  // via the earlier rules; only a title that names nothing else lands here.
+  {
+    name: "mpa",
+    test(s) {
+      if (!/\bmemorandum\s+of\s+points\s+(?:and|&)\s+authorities\b/i.test(s)) return null;
+      return { canonical: "Memorandum of Points and Authorities" };
     },
   },
 ];
@@ -876,6 +1079,14 @@ export function citationShortForm(name) {
   const s = (name || "").trim();
   if (!s) return "Doc.";
 
+  // Response to (evidentiary) objections — before the Objection check, whose
+  // keywords its display name contains.
+  if (/^\s*(?:[a-z][a-z\s.'&,-]+?(?:'s|s')\s+)?responses?\s+to\b/i.test(s) &&
+      /\bobjs?\.|\bobjections?\b/i.test(s)) {
+    return "Resp. to Objs.";
+  }
+  if (/\bresponse\s+to\s+order\s+to\s+show\s+cause\b/i.test(s)) return "Resp. to OSC";
+
   // Objection — its display form is "Obj. to {target}" (or "Objection to …"),
   // which may contain another type word (Decl., RJN, Evidence), so it must be
   // caught before those rules.
@@ -891,9 +1102,13 @@ export function citationShortForm(name) {
   const decl = s.match(/([A-Z][A-Za-z'’.\-]*)\s+Decl\b\.?/);
   if (decl) return `${decl[1]} Decl.`;
 
-  // Amended complaints keep their acronym.
-  const amended = s.match(/^\s*(FAC|SAC|TAC)\b/);
+  // Amended complaints (and cross-complaints) keep their acronym.
+  const amended = s.match(/^\s*(FACC|SACC|TACC|FAC|SAC|TAC)\b/);
   if (amended) return amended[1];
+
+  // Cross-complaints — before the plain Complaint check, whose keyword their
+  // name contains.
+  if (/\bcross-?complaint\b/i.test(s)) return "Cross-Compl.";
 
   // Separate-statement family.
   if (/^\s*AUMF\b/.test(s)) return "AUMF";
@@ -923,6 +1138,8 @@ export function citationShortForm(name) {
   if (/\banswer\b/i.test(s)) return "Answer";
   if (/\bproof\s+of\s+service\b/i.test(s)) return "POS";
   if (/\brequest\s+for\s+dismissal\b/i.test(s)) return "Req. for Dismissal";
+  if (/\bmemorandum\s+of\s+points\s+(?:and|&)\s+authorities\b/i.test(s)) return "MPA";
+  if (/\btrial\s+brief\b/i.test(s)) return "Trial Br.";
   if (/\border\b/i.test(s)) return "Order";
 
   // Nothing recognized — the name is already concise, so cite it verbatim.
@@ -1041,6 +1258,11 @@ const TYPES_WITH_LADDER = new Set([
   "Opposition", "Reply", "Ex Parte Application",
   "Separate Statement", "Reply Separate Statement",
   "AUMF", "UMF",
+  "Answer", "Cross-Complaint", "Trial Brief",
+  "Notice of Non-Opposition", "Notice of Errata", "Errata",
+  "Response to Evid. Objs.", "Response to Objs.",
+  "Response to Order to Show Cause",
+  "Memorandum of Points and Authorities",
 ]);
 
 // True if this canonical participates in the iterative disambiguation
@@ -1116,8 +1338,12 @@ function formatWithTarget(canonical, target) {
 
 // Possessive form. "Receiver" → "Receiver's"; "Pacific Insurance" → "Pacific Insurance's";
 // "James" → "James's"; "Jones" → "Jones's" (CMS style — we don't try to
-// detect "ends in s" and switch to bare apostrophe).
+// detect "ends in s" and switch to bare apostrophe for NAMES). Plural role
+// labels are the exception: "Defendants" → "Defendants'", never "Defendants's".
 function possessive(s) {
+  if (/(?:^|\s|-)(?:plaintiffs|defendants|petitioners|respondents|complainants|claimants|intervenors)$/i.test(s)) {
+    return `${s}'`;
+  }
   return `${s}'s`;
 }
 
@@ -1149,7 +1375,8 @@ export function disambiguate(entries) {
     }
 
     // Special cases that don't use the ladder.
-    if (/\bDecl\.?\b/.test(canonical) || canonical === "FAC" || canonical === "SAC" || canonical === "TAC") {
+    if (/\bDecl\.?\b/.test(canonical) ||
+        ["FAC", "SAC", "TAC", "FACC", "SACC", "TACC"].includes(canonical)) {
       for (const e of group) out.set(e.id, appendPartVol(canonical, e.partVol));
       continue;
     }

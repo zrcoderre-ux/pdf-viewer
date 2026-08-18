@@ -369,6 +369,75 @@ const tests = [
   { name: "glued-declaration", raw: "YUDECLARATION IN SUPPORT OF PLAINTIFF'SOPPOSITION TO DEFENDANT'SMSA", expect: { canonical: "Yu Decl. ISO Opp." } },
   { name: "leading-case-number", raw: "25STCV32877 KOSLYNDECLARATION REDEMURRER", expect: { canonical: "Koslyn Decl." } },
   { name: "declarant-middle-initial-v", raw: "DECLARATION OF PAUL V. CARELLI IV IN SUPPORT OF DEFENDANT'S OPPOSITION", expect: { canonical: "Carelli Decl. ISO Opp." } },
+
+  // === Regressions from the Aug-2026 naming history (pdfhistory.csv) ===
+  // The recurring failure was support documents — Objections, Separate
+  // Statements, Evidence — collapsing to "Opposition" (or to the objected-to
+  // document). Each case below is a real footer from that history.
+
+  // Evidentiary objections are objections to evidence, never the Opposition
+  // they ride along with.
+  { name: "csv evid objs ISO opp", raw: "PLAINTIFF’S EVIDENTIARY OBJECTIONS INSUPPORT OF OPPOSITION TO DEFENDANT’S MOTION FOR SUMMARY JUDGMENT/ADJUDICATION", expect: { canonical: "Obj. to Evidence", partyLabel: "Plaintiff" } },
+  // Plural possessive ("DEFENDANTS'") used to defeat the objection rule,
+  // mislabeling the objection as the declaration it attacks.
+  { name: "csv defs objs to decl", raw: "DEFENDANTS’ OBJECTIONS TO DECLARATION OF CURTIS GARCIA", expect: { canonical: "Obj. to Garcia Decl.", partyLabel: "Defendants" } },
+  // Floating possessive spaces + "FILED" riding on the declarant's name.
+  { name: "csv objs to forte decl", raw: "PLAINTIFFS ’ EVIDENTIARY OBJECTIONS TO DECLARATION OF DONNA FORTE FILED IN SUPPORT OF DEFENDANT ’ S MOTION TO COMPEL ENFORCEMENT OF PURPORTED PRE - LITIGATION SETTLEMENT AGREEMENT BETWEEN PLAINTIFFS AND DEFENDANT", expect: { canonical: "Obj. to Forte Decl." } },
+  { name: "csv obj to AUMF", raw: "DEFENDANTS’ OBJECTION TO PLAINTIFF’S SEPARATE STATEMENT OF ADDITIONAL UNDISPUTED MATERIAL FACTS", expect: { canonical: "Obj. to AUMF", partyLabel: "Defendants" } },
+  // A response TO objections is not itself an objection.
+  { name: "csv response to evid objs", raw: "GENERAL MOTORS, LLC’S RESPONSES TO PLAINTIFF’S EVIDENTIARY OBJECTIONS", expect: { canonical: "Response to Evid. Objs." } },
+  { name: "csv response to objs-to-evidence", raw: "DEFENDANT’S RESPONSE TO PLAINTIFF’S OBJECTIONS TO EVIDENCE IN SUPPORT OF MOTION TO COMPEL ARBITRATION", expect: { canonical: "Response to Evid. Objs.", partyLabel: "Defendant" } },
+  // Glued plural possessive + glued IN/TO used to shred "SEPARATE STATEMENT"
+  // and leave only "Opposition" visible.
+  { name: "csv glued plural SS in opp", raw: "PLAINTIFFS'SEPARATE STATEMENT INOPPOSITION TODEFENDANT AMERICAN HONDA MOTOR CO.,INC.'SMOTION FOR SUMMARY ADJUDICATION", expect: { canonical: "UMF" } },
+  // Moving party responding to the opposition's separate statement.
+  { name: "csv reply separate statement", raw: "GM’S RESPONSE TO PLAINTIFF’S SEPARATE STATEMENT OF DISPUTED MATERIAL FACTS ISO OPPOSITION TO MOTION FOR SUMMARY JUDGMENT OR ADJUDICATION", expect: { canonical: "Reply Separate Statement" } },
+  { name: "csv responses to SS disputed", raw: "DEFENDANTS’ RESPONSES TO PLAINTIFF’S SEPARATE STATEMENT OF DISPUTED FACTS IN OPPOSITION TO DEFENDANT’S MOTION FOR SUMMARY JUDGMENT OR, IN THE ALTERNATIVE, SUMMARY ADJUDICATION", expect: { canonical: "Reply Separate Statement", partyLabel: "Defendants" } },
+  { name: "csv SS of disputed facts in opp", raw: "PLAINTIFF JOSEPH PALLADINO’S SEPARATE STATEMENT OF DISPUTED FACTS IN OPPOSITION TO DEFENDANT’S MOTION FOR SUMMARY JUDGMENT OR, IN THE ALTERNATIVE, SUMMARY ADJUDICATION", expect: { canonical: "UMF" } },
+  // "ISO MSJ" shorthand + plural possessive.
+  { name: "csv compendium ISO MSJ", raw: "DEFENDANTS’ COMPENDIUM OF EVIDENCE ISO MSJ", expect: { canonical: "Evidence ISO Mot.", partyLabel: "Defendants" } },
+  // OCR "lSO" (lowercase L) for ISO.
+  { name: "csv compendium lSO MSJ", raw: "DEFEND.ANTS'COMPENDIUM OF EVIDENCE lSO MSJ 322943543v.L", expect: { canonical: "Evidence ISO Mot." } },
+  { name: "csv evidence in opposition", raw: "PLAINTIFF JOSEPH PALLADINO’S EVIDENCE IN OPPOSITION TO DEFENDANTS’ MOTION FOR SUMMARY JUDGMENT OR ADJUDICATION – PART 1 OF 5", expect: { canonical: "Evidence ISO Opp.", partyLabel: "Plaintiff" } },
+  { name: "csv compendium of exhibits ISO opp", raw: "PLAINTIFF’S COMPENDIUM OF EXHIBITS IN SUPPORT OF PLAINTIFF’S OPPOSITION TO DEFENDANTS JACK GERLACH, SANTA FE RANCH, LLC, AND LIGHTSOURCE ENTERTAINMENT, LLC’S MOTION FOR SUMMARY JUDGMENT", expect: { canonical: "Evidence ISO Opp." } },
+  // An errata notice about evidence is an errata notice, not the evidence —
+  // and certainly not an Opposition.
+  { name: "csv notice of errata re evidence", raw: "NOTICE OF ERRATA RE: PLAINTIFF JOSEPH PALLADINO'S EVIDENCE IN OPPOSITION TO DEFENDANTS' MOTION FOR SUMMARY JUDGMENT OR ADJUDICATION- PART 1 OF 2 AND PART 2 OF 2", expect: { canonical: "Notice of Errata" } },
+  { name: "csv errata re compendium", raw: "DEFENDANTS’ ERRATA RE: COMPENDIUM OF EVIDENCE ISO MSJ", expect: { canonical: "Errata", partyLabel: "Defendants" } },
+  // Notices of non-opposition are not Oppositions (OCR splits "NON -").
+  { name: "csv notice of non-opposition", raw: "NOTICE OF NON -OPPOSITION TO DEFENDANT GLENDALE ADVENTIST MEDICAL CENTER’S MOTION TO ENFORCE SETTLEMENT PURSUANT TO CALIFORNIA CODE OF CIVIL PROCEDURE 664.6 AND REQUEST TO FILE DOCUMENTS UNDER SEAL", expect: { canonical: "Notice of Non-Opposition" } },
+  { name: "csv notice of no opposition", raw: "DEFENDANT GLENDALE ADVENTIST MEDICAL CENTER’S NOTICE OF NO OPPOSITION FILED TO MOTION TO ENFORCE SETTLEMENT", expect: { canonical: "Notice of Non-Opposition" } },
+  // Answers and cross-complaints are their own pleadings, not the Complaint.
+  { name: "csv answer to complaint", raw: "ANSWER TO COMPLAINT", expect: { canonical: "Answer" } },
+  { name: "csv cross-complaint", raw: "VERIFIED CROSS-COMPLAINT BY HUDSON INSURANCE COMPANY FOR DECLARATORY RELIEF AND INTERPLEADER", expect: { canonical: "Cross-Complaint" } },
+  { name: "csv SACC", raw: "CROSS-COMPLAINANT RESCORE HOLLYWOOD, LLC’S SECOND AMENDED CROSS-COMPLAINT", expect: { canonical: "SACC" } },
+  // Law-firm footer boilerplate ("THOMPSONHINELLP ATTORNEYS ATLAW LOSANGELES")
+  // stripped before type rules run.
+  { name: "csv firm-noise notice of ruling", raw: "THOMPSONHINELLP ATTORNEYS ATLAW LOSANGELES NOTICE OF RULING AND CONTINUANCE OF CASE MANAGEMENT CONFERENCE", expect: { canonical: "Notice of Ruling" } },
+  { name: "csv firm-noise demurrer to SACC", raw: "THOMPSONHINELLP ATTORNEYS ATLAW BERNARDS BUILDERS. INC’S NOTICE AND DEMURRER TO RESCORE HOLLYWOOD, LLC’S LOSANGELES SECOND AMENDED CROSS-COMPLAINT", expect: { canonical: "Demurrer", target: "SACC" } },
+  { name: "csv rjn ISO demurrer", raw: "THOMPSONHINELLP ATTORNEYS ATLAW LOSANGELES BERNARDS BUILDER’S REQUEST FOR JUDICIAL NOTICE IN SUPPORT OF DEMURRER TO SECOND AMENDED CROSS-COMPLAINT OF RESCORE HOLLYWOOD, INC.", expect: { canonical: "RJN ISO Demurrer", partyLabel: "Bernards Builder" } },
+  // Accented declarant name; glued initial on the surname.
+  { name: "csv accented declarant", raw: "DECLARATION OF SHANÉ JACKSON IN SUPPORT OF DEFENDANTS DSV AIR & SEA INC. AND ANTOINE BELOTE’S MOTION TO COMPEL ARBITRATION", expect: { canonical: "Jackson Decl. ISO Mot." } },
+  { name: "csv glued surname initial", raw: "DECLARATION OF DEBORAH R.TOGA", expect: { canonical: "Toga Decl." } },
+  // Dangling connector trimmed off the captured motion target.
+  { name: "csv motion target trailing-or", raw: "DEFENDANTS’ NOTICE OF MOTION AND MOTION FOR SUMMARY JUDGMENT OR, IN THE ALTERNATIVE, SUMMARY ADJUDICATION", expect: { canonical: "Motion", target: "Mot. for Summary Judgment" } },
+  { name: "csv opposition to MSJ shorthand", raw: "PLAINTIFF’S OPPOSITION TO MSJ/MSA", expect: { canonical: "Opposition", target: "Mot." } },
+  // Glued "JUDICIALNOTICE" + a caption "v." that isn't at the string's tail.
+  { name: "csv glued judicialnotice", raw: "PLAINTIFF'S REQUEST FOR JUDICIALNOTICE OF MORATAYA V. FORTADES (B341752)— PUBLISHED COURT OF APPEAL OPINION REVERSING THIS COURT FOR DUE PROCESS VIOLATIONS", expect: { canonical: "RJN" } },
+  // A leading "PLAINTIFFS V ..." caption must not swallow the whole title.
+  { name: "csv leading caption v", raw: "PLAINTIFFS V ADIM SARKISYAN AND SERGEY MIRZOYANS' REPLY BRIEF IN SUPPORT OF PLAINTIFFS' MOTION FOR ATTORNEYS' FEES, AND COSTS; DECLARATION OF DAVID N. BARRY, ESQ., WITH EXHIBITS", expect: { canonical: "Reply" } },
+  // Self-titled procedural documents.
+  { name: "csv trial brief", raw: "DEFENDANT SERENA MO’S TRIAL BRIEF", expect: { canonical: "Trial Brief", partyLabel: "Defendant" } },
+  { name: "csv memo of costs summary", raw: "MEMORANDUM OF COSTS (SUMMARY)", expect: { canonical: "Memorandum of Costs Summary" } },
+  { name: "csv memo of costs worksheet", raw: "MEMORANDUM OF COSTS (WORKSHEET)", expect: { canonical: "Memorandum of Costs Worksheet" } },
+  { name: "csv notice of association", raw: "NOTICE OF ASSOCIATION OF COUNSEL FOR DEFENDANT AMERICAN HONDA MOTOR CO., INC.", expect: { canonical: "Notice of Association of Counsel" } },
+  { name: "csv notice of hearing on petition", raw: "UNLIMITED JURISDICTION NOTICE OF HEARING ON PETITION FOR APPROVAL FOR TRANSFER OF PAYMENT RIGHTS [ PURSUANT TO CAL . INS. CODE § 10134, ET SEQ.]", expect: { canonical: "Notice of Hearing" } },
+  { name: "csv case management statement", raw: "CASE MANAGEMENT STATEMENT", expect: { canonical: "Case Management Statement" } },
+  { name: "csv response to OSC", raw: "PLAINTIFF’S RESPONSE TO ORDER TO SHOW CAUSE", expect: { canonical: "Response to Order to Show Cause", partyLabel: "Plaintiff" } },
+  { name: "csv general order", raw: "GENERAL ORDER RE MANDATORY ELECTRONIC FILING FOR CIVIL", expect: { canonical: "General Order re Mandatory Electronic Filing for Civil" } },
+  { name: "csv bare MPA", raw: "MEMORANDUM OF POINTS AND AUTHORITIES", expect: { canonical: "Memorandum of Points and Authorities" } },
+  // MPA that names its motion still resolves to the motion, not to MPA.
+  { name: "csv MPA ISO motion", raw: "DEFENDANT AMERICAN HONDA MOTOR CO., INC.’S MEMORANDUM OF POINTS AND AUTHORITIES IN SUPPORT OF ITS MOTION FOR SUMMARY ADJUDICATION", expect: { canonical: "Motion" } },
 ];
 
 // --- runner ---
@@ -712,7 +781,14 @@ ctest("separate statement",    "Separate Statement",        "Sep. Stmt.");
 ctest("proposed order",        "Proposed Order",            "Order");
 ctest("proof of service",      "Proof of Service",          "POS");
 ctest("short notice",          "Notice of Opposition",      "Notice");
-ctest("unknown falls through", "Trial Brief",               "Trial Brief");
+ctest("trial brief",           "Trial Brief",               "Trial Br.");
+ctest("cross-complaint",       "Cross-Complaint",           "Cross-Compl.");
+ctest("SACC",                  "SACC",                      "SACC");
+ctest("response to evid objs", "Response to Evid. Objs.",   "Resp. to Objs.");
+ctest("response to OSC",       "Response to Order to Show Cause", "Resp. to OSC");
+ctest("notice of non-opp",     "Notice of Non-Opposition",  "Notice");
+ctest("mpa",                   "Memorandum of Points and Authorities", "MPA");
+ctest("unknown falls through", "Case Management Statement", "Case Management Statement");
 
 // --- part/volume extraction tests ---
 
