@@ -130,6 +130,17 @@ one code.) A bare hyphenated section (`§ 3-310`) needs no code context — the
 hyphen identifies it as the model UCC — while a `§§ 1542-1543` range is left for
 carry-forward as a span of state-code sections.
 
+**Where it runs.** `claude.ai` is built in. On the Options page, **Link
+citations on all websites** turns the same overlay on for the rest of the web,
+and an **exceptions** list below it names the sites to leave alone. Westlaw,
+WestlawNext, Lexis and LexisNexis are pre-listed there: they link their own
+citations, so ours would sit on top and take the click. An exception covers
+`http` and `https` both, applies whether or not the all-sites box is checked,
+and overrides `claude.ai` too. With the box unchecked, a separate list names
+the individual sites to link on (`chatgpt.com`, `*.courtlistener.com`, …).
+Adding an exception takes its links down immediately; every other change
+applies on the next page load.
+
 In addition to the in-text underlines, a **Table of Authorities** panel appears
 in the right margin whenever at least one citation is found. It lists each
 unique authority once, grouped into Cases / Statutes / Rules, as a regular blue
@@ -266,10 +277,10 @@ and both party names improve accuracy when the lead party is generic.
 ## citation_repo.json support
 
 The Python script reads a curated JSON file from your SharePoint folder that
-maps citation keys to hand-verified URLs. The extension supports the same
-file: load it on the **Options** page (right-click extension icon → Options).
-The repo is stored in `chrome.storage.local`. Resolution priority matches
-the Python:
+maps citation keys to hand-verified URLs. The extension resolves against the
+same data when it's present in `chrome.storage.local` under `citationRepo`.
+(The upload form was removed from the Options page; a repo already stored
+there still applies.) Resolution priority matches the Python:
 
 ```
 westlaw provider → westlaw_url > lexis_url > fallback_url > url > built
@@ -321,7 +332,8 @@ extension's details page.
 manifest.json                        MV3 manifest
 background.js                        webNavigation -> viewer redirect
 popup.html / popup.js                Toolbar popup (provider toggle + legend)
-options.html / options.js            Options page (provider + repo upload)
+options.html / options.js            Options page (provider, naming, sites, OCR)
+citation-site-rules.js               Where web citation links may run (shared)
 viewer/viewer.html                   PDF viewer shell
 viewer/viewer.css                    Page + textLayer + linkLayer styles
 viewer/viewer.js                     PDF.js loader, two-pass renderer

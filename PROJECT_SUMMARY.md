@@ -17,11 +17,13 @@ overlays in `linkLayer` and `highlights.js` to wire up text-selection
 behaviors. Footer-derived naming is handled by `footer-naming.js` (rule
 engine), `disambiguation.js` (cross-tab collision registry over
 `chrome.storage.session`), and `naming-override.js` (per-document override).
-Provider toggle, naming mode, repo upload, and extra URL patterns live in
-`options.js`, `popup.js`, and the viewer toolbar with `chrome.storage`
-(sync for global prefs, session for per-doc overrides and cross-tab
-registry, local for the citation repo). Per-provider URL builders are in
-`code-tables.js`.
+Provider toggle, naming mode, the websites citation links run on, and extra
+URL patterns live in `options.js`, `popup.js`, and the viewer toolbar with
+`chrome.storage` (sync for global prefs, session for per-doc overrides and
+cross-tab registry, local for the citation repo). `citation-site-rules.js`
+holds the site defaults and the match-pattern matcher, shared by the Options
+page, the background worker's content-script registration, and the content
+script itself. Per-provider URL builders are in `code-tables.js`.
 
 ## Fixes applied in earlier sessions
 
@@ -305,9 +307,11 @@ Naming (run `node test-naming.mjs` for the full set):
 manifest.json                        MV3 manifest
 background.js                        DNR redirect rules + eCMS exclusion
 popup.html / popup.js                Provider toggle + naming mode + legend
-options.html / options.js            Repo upload + extra URL patterns + naming default
+options.html / options.js            Web citation sites + URL patterns + naming default
+citation-site-rules.js               Site defaults + match-pattern matcher (shared)
 fetch-pdfjs.py / .sh                 One-time PDF.js download
 test-naming.mjs                      Node-runnable rule-engine tests
+test-citation-sites.mjs              Node-runnable web-citation-site tests
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing

@@ -1,15 +1,9 @@
-// Options page: provider toggle (synced) + citation_repo.json upload (local).
-//
-// The repo lives in chrome.storage.local rather than .sync because it can
-// exceed the 8 KB per-item sync quota. Open viewer tabs subscribe to local
-// changes and re-render when the repo updates.
+// Options page. Every setting here is synced (chrome.storage.sync) so it
+// follows the Chrome profile; the background worker and the content script
+// subscribe to the keys they care about and re-apply live.
 
 const radios = document.querySelectorAll('input[name="provider"]');
 const namingRadios = document.querySelectorAll('input[name="namingMode"]');
-const fileInput  = document.getElementById("repo-file");
-const clearBtn   = document.getElementById("repo-clear");
-const repoInfo   = document.getElementById("repo-info");
-const repoStatus = document.getElementById("repo-status");
 
 // Init provider radios
 chrome.storage.sync.get({ provider: "lexis" }, ({ provider }) => {
@@ -69,86 +63,106 @@ if (toaWebEl) {
   });
 }
 
-// Extra citation-link websites (synced). Stored as raw lines; the background
-// worker normalizes them into match patterns and (re)registers the content
-// script live via chrome.scripting.
+// ---------- Citation links on websites ----------
+//
+// Three synced keys drive this:
+//   citationAllSites        link on every http/https site
+//   citationSites           the sites to link on when that's off
+//   citationSiteExceptions  never link on these, in either mode
+// The background worker watches all three and re-registers the content script;
+// the content script watches the exceptions and stands down where it must.
+
+const SiteRules = window.CitationSiteRules;
+
+// Show a "Saved."-style message and clear it a moment later.
+function flashStatus(el, message, isError) {
+  el.textContent = message;
+  el.className = isError ? "status error" : "status";
+  setTimeout(() => { el.textContent = ""; }, 2500);
+}
+
+// Read a textarea as a trimmed, blank-free list of lines.
+function linesOf(textarea) {
+  return textarea.value
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+const allSitesEl = document.getElementById("citation-all-sites");
 const citationSitesEl = document.getElementById("citation-sites");
+const citationSitesBlock = document.getElementById("citation-sites-block");
 const citationSitesSaveBtn = document.getElementById("citation-sites-save");
 const citationSitesStatus = document.getElementById("citation-sites-status");
+const exceptionsEl = document.getElementById("citation-exceptions");
+const exceptionsSaveBtn = document.getElementById("citation-exceptions-save");
+const exceptionsResetBtn = document.getElementById("citation-exceptions-reset");
+const exceptionsStatus = document.getElementById("citation-exceptions-status");
+
+// The per-site list has nothing to say while every site is covered.
+function syncSitesBlockVisibility() {
+  if (citationSitesBlock) {
+    citationSitesBlock.style.display = allSitesEl && allSitesEl.checked ? "none" : "";
+  }
+}
+
+if (allSitesEl) {
+  chrome.storage.sync.get({ citationAllSites: false }, ({ citationAllSites }) => {
+    allSitesEl.checked = !!citationAllSites;
+    syncSitesBlockVisibility();
+  });
+  allSitesEl.addEventListener("change", () => {
+    chrome.storage.sync.set({ citationAllSites: allSitesEl.checked });
+    syncSitesBlockVisibility();
+  });
+}
+
 if (citationSitesEl && citationSitesSaveBtn) {
   chrome.storage.sync.get({ citationSites: [] }, ({ citationSites }) => {
     citationSitesEl.value = (citationSites || []).join("\n");
   });
   citationSitesSaveBtn.addEventListener("click", () => {
-    const lines = citationSitesEl.value
-      .split("\n")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+    const lines = linesOf(citationSitesEl);
     chrome.storage.sync.set({ citationSites: lines }, () => {
-      citationSitesStatus.textContent =
-        lines.length === 0
-          ? "Cleared."
-          : `Saved ${lines.length} site${lines.length === 1 ? "" : "s"}.`;
-      citationSitesStatus.className = "status";
-      setTimeout(() => { citationSitesStatus.textContent = ""; }, 2500);
+      flashStatus(
+        citationSitesStatus,
+        lines.length === 0 ? "Cleared." : `Saved ${lines.length} site${lines.length === 1 ? "" : "s"}.`
+      );
     });
   });
 }
 
-// Init repo info
-function refreshRepoInfo() {
-  chrome.storage.local.get({ citationRepo: null, citationRepoMeta: null }, (res) => {
-    const meta = res.citationRepoMeta;
-    if (!res.citationRepo || !meta) {
-      repoInfo.textContent = "No repository loaded.";
-      return;
+// Exceptions. The Westlaw / Lexis+ defaults are seeded by the storage.get
+// default, so they appear the first time this page is opened — and an empty
+// box the user saves on purpose stays empty rather than being re-seeded.
+if (exceptionsEl && exceptionsSaveBtn) {
+  const defaults = (SiteRules && SiteRules.DEFAULT_EXCEPTIONS) || [];
+  chrome.storage.sync.get(
+    { citationSiteExceptions: defaults },
+    ({ citationSiteExceptions }) => {
+      exceptionsEl.value = (citationSiteExceptions || []).join("\n");
     }
-    repoInfo.textContent =
-      `Loaded ${meta.filename || "repo"} — ` +
-      `${meta.cases || 0} cases, ${meta.statutes || 0} statutes, ` +
-      `${meta.rules || 0} rules.`;
+  );
+  exceptionsSaveBtn.addEventListener("click", () => {
+    const lines = linesOf(exceptionsEl);
+    chrome.storage.sync.set({ citationSiteExceptions: lines }, () => {
+      flashStatus(
+        exceptionsStatus,
+        lines.length === 0
+          ? "Cleared — citation links now run everywhere they're enabled."
+          : `Saved ${lines.length} exception${lines.length === 1 ? "" : "s"}.`
+      );
+    });
   });
+  if (exceptionsResetBtn) {
+    exceptionsResetBtn.addEventListener("click", () => {
+      exceptionsEl.value = defaults.join("\n");
+      chrome.storage.sync.set({ citationSiteExceptions: defaults }, () => {
+        flashStatus(exceptionsStatus, "Restored the default exceptions.");
+      });
+    });
+  }
 }
-refreshRepoInfo();
-
-fileInput.addEventListener("change", () => {
-  const f = fileInput.files && fileInput.files[0];
-  if (!f) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    let parsed;
-    try {
-      parsed = JSON.parse(reader.result);
-    } catch (e) {
-      repoStatus.textContent = "Could not parse JSON: " + e.message;
-      repoStatus.className = "status error";
-      return;
-    }
-    const meta = {
-      filename: f.name,
-      cases:    Object.keys(parsed.cases    || {}).length,
-      statutes: Object.keys(parsed.statutes || {}).length,
-      rules:    Object.keys(parsed.rules    || {}).length,
-    };
-    chrome.storage.local.set(
-      { citationRepo: parsed, citationRepoMeta: meta },
-      () => {
-        repoStatus.textContent = "Repository loaded.";
-        repoStatus.className = "status";
-        refreshRepoInfo();
-      }
-    );
-  };
-  reader.readAsText(f);
-});
-
-clearBtn.addEventListener("click", () => {
-  chrome.storage.local.remove(["citationRepo", "citationRepoMeta"], () => {
-    repoStatus.textContent = "Repository cleared.";
-    repoStatus.className = "status";
-    refreshRepoInfo();
-  });
-});
 
 // ---------- Extra PDF URL patterns ----------
 
@@ -161,17 +175,12 @@ chrome.storage.sync.get({ pdfUrlPatterns: [] }, ({ pdfUrlPatterns }) => {
 });
 
 patternsSaveBtn.addEventListener("click", () => {
-  const lines = patternsTextarea.value
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const lines = linesOf(patternsTextarea);
   chrome.storage.sync.set({ pdfUrlPatterns: lines }, () => {
-    patternsStatus.textContent =
-      lines.length === 0
-        ? "Cleared."
-        : `Saved ${lines.length} pattern${lines.length === 1 ? "" : "s"}.`;
-    patternsStatus.className = "status";
-    setTimeout(() => { patternsStatus.textContent = ""; }, 2500);
+    flashStatus(
+      patternsStatus,
+      lines.length === 0 ? "Cleared." : `Saved ${lines.length} pattern${lines.length === 1 ? "" : "s"}.`
+    );
   });
 });
 
