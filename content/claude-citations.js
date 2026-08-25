@@ -55,12 +55,54 @@
   let citations = [];           // [{ range, url, key, kind }]
   let authorities = [];         // deduped [{ key, kind, url }] for the TOA
   let overlayEl = null;
+  let suppressed = false;      // true on a site the user excepted in Options
 
   const providerLabel = () => (provider === "westlaw" ? "Westlaw" : "Lexis+");
 
   // ── Setup ──────────────────────────────────────────────────────────────────
 
+  // Sites listed as exceptions in Options never get citation links. The
+  // background worker already keeps them out of its dynamic registration, but
+  // the claude.ai injection is static in manifest.json and can't be excluded
+  // that way — so the check has to be enforceable from in here too.
+  function isExceptedSite() {
+    const rules = window.CitationSiteRules;
+    if (!rules) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      chrome.storage.sync.get(
+        { citationSiteExceptions: rules.DEFAULT_EXCEPTIONS },
+        ({ citationSiteExceptions }) => {
+          resolve(rules.isExcepted(location.href, citationSiteExceptions));
+        }
+      );
+    });
+  }
+
+  // Stop linking without a reload — the overlay comes down, the TOA empties,
+  // and scan() becomes a no-op until the site is taken off the list.
+  function setSuppressed(next) {
+    if (next === suppressed) return;
+    suppressed = next;
+    if (suppressed) {
+      citations = [];
+      authorities = [];
+      paint();
+      if (toaPanel) toaPanel.render([], provider);
+      window.__citationLinker = { active: false, reason: "site excepted in Options", host: location.host };
+    } else {
+      window.__citationLinker = { active: true, host: location.host, lastScanCitations: 0 };
+      scan();
+    }
+  }
+
   async function init() {
+    if (await isExceptedSite()) {
+      suppressed = true;
+      window.__citationLinker = { active: false, reason: "site excepted in Options", host: location.host };
+      console.info(`[Citation Linker] ${location.host} is listed as an exception in Options — not linking here.`);
+      return;
+    }
+
     // The citation engine is REQUIRED. Loading it via dynamic import() can be
     // blocked by a strict site Content-Security-Policy — if so, we can't run
     // here, and we say so loudly (in the console) so it's diagnosable rather
@@ -105,6 +147,11 @@
         if (toaPanel) toaPanel.setEnabled(changes.toaEnabledWeb.newValue !== false);
         scan();
       }
+      if (area === "sync" && changes.citationSiteExceptions) {
+        const rules = window.CitationSiteRules;
+        const list = changes.citationSiteExceptions.newValue;
+        if (rules) setSuppressed(rules.isExcepted(location.href, list || []));
+      }
       if (area === "local" && changes.citationRepo) {
         repo = changes.citationRepo.newValue || {};
         scan();
@@ -147,7 +194,7 @@
   }
 
   function scan() {
-    if (!findAllCitations) return;
+    if (suppressed || !findAllCitations) return;
     citations = [];
 
     // Group accepted text nodes by their nearest block ancestor so detection

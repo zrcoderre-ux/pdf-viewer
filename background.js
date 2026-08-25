@@ -9,6 +9,11 @@
 //   1. Any URL whose path ends in .pdf (with optional query string).
 //   2. Any URL matching a built-in or user-added pattern (eCMS etc.).
 
+// Site defaults, input normalization, and the match-pattern matcher are shared
+// with the Options page and the content script.
+importScripts("citation-site-rules.js");
+const SiteRules = self.CitationSiteRules;
+
 const VIEWER_URL = chrome.runtime.getURL("viewer/viewer.html");
 
 // The redirect target base. Web-PDF routing to the installed app was removed —
@@ -221,52 +226,37 @@ function getUserPatterns() {
 }
 
 // ---------------------------------------------------------------------------
-// Extra citation-link sites. claude.ai is built in (a static content script in
-// manifest.json). Users can add more sites in Options; we inject the SAME
-// content script into them via a dynamic registration that we keep in sync with
-// storage. host_permissions is <all_urls>, so no extra permission prompt.
+// Where citation links run on the web.
+//
+// Two modes, set on the Options page:
+//   every website        — one registration over http/https with the
+//                          exceptions as excludeMatches
+//   only listed websites — a registration per site the user named
+//
+// Either way the exception list wins. claude.ai is a static content script in
+// manifest.json, so it isn't covered by excludeMatches here — the content
+// script checks the same list itself and stands down. host_permissions is
+// <all_urls>, so neither mode prompts for a new permission.
 const USER_CITATION_SCRIPT_ID = "user-citation-sites";
 
-// Normalize flexible user input into a Chrome match pattern:
-//   "example.com"          -> "https://example.com/*"
-//   "example.com/docs/*"   -> "https://example.com/docs/*"
-//   "*.example.com"        -> "https://*.example.com/*"
-//   "https://ex.com/*"     -> unchanged
-function toMatchPattern(raw) {
-  let s = String(raw || "").trim();
-  if (!s) return null;
-  let scheme = "https";
-  const schemeMatch = /^(\*|https?):\/\//i.exec(s);
-  if (schemeMatch) { scheme = schemeMatch[1].toLowerCase(); s = s.slice(schemeMatch[0].length); }
-  const slash = s.indexOf("/");
-  const host = slash === -1 ? s : s.slice(0, slash);
-  let path = slash === -1 ? "/*" : s.slice(slash);
-  if (path === "" || path === "/") path = "/*";
-  // A Chrome match pattern path matches literally unless it contains "*". A
-  // path with no wildcard (e.g. "/v2/") would match ONLY that exact URL — which
-  // on a single-page app means basically nothing. Append "*" so it prefix-
-  // matches everything under that path, which is what users expect.
-  else if (!path.includes("*")) path += "*";
-  if (!host) return null;
-  return `${scheme}://${host}${path}`;
-}
-
-function isValidMatchPattern(p) {
-  // scheme://host/path, host may be "*", "*.domain", or a plain host.
-  return /^(\*|https?):\/\/(\*|(\*\.)?[^/*\s]+)\/[^\s]*$/.test(p);
-}
-
-function getCitationSiteMatches() {
+function getCitationSiteSettings() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get({ citationSites: [] }, ({ citationSites }) => {
-      const arr = Array.isArray(citationSites) ? citationSites : [];
-      const out = [];
-      for (const raw of arr) {
-        const pat = toMatchPattern(raw);
-        if (pat && isValidMatchPattern(pat) && !out.includes(pat)) out.push(pat);
+    chrome.storage.sync.get(
+      {
+        citationAllSites: false,
+        citationSites: [],
+        citationSiteExceptions: SiteRules.DEFAULT_EXCEPTIONS,
+      },
+      ({ citationAllSites, citationSites, citationSiteExceptions }) => {
+        resolve({
+          allSites: !!citationAllSites,
+          matches: citationAllSites
+            ? SiteRules.ALL_SITES
+            : SiteRules.toMatchPatterns(citationSites),
+          excludeMatches: SiteRules.exceptionPatterns(citationSiteExceptions),
+        });
       }
-      resolve(out);
-    });
+    );
   });
 }
 
@@ -277,21 +267,31 @@ async function syncCitationSites() {
     if (existing.length) await chrome.scripting.unregisterContentScripts({ ids: [USER_CITATION_SCRIPT_ID] });
   } catch (e) { /* nothing registered yet */ }
 
-  const matches = await getCitationSiteMatches();
+  const { allSites, matches, excludeMatches } = await getCitationSiteSettings();
   if (!matches.length) {
-    console.log("[Citation Linker] No extra citation-link sites.");
+    console.log("[Citation Linker] Citation links limited to claude.ai.");
     return;
   }
+  const script = {
+    id: USER_CITATION_SCRIPT_ID,
+    matches,
+    js: ["citation-site-rules.js", "content/claude-citations.js"],
+    css: ["content/claude-citations.css"],
+    runAt: "document_idle",
+    // Sites the user named one by one get every frame — many SPAs render their
+    // content in same-origin iframes. Across the whole web that would mean
+    // injecting into every ad and widget frame on every page, so all-sites mode
+    // stays in the top frame.
+    allFrames: !allSites,
+  };
+  if (excludeMatches.length) script.excludeMatches = excludeMatches;
   try {
-    await chrome.scripting.registerContentScripts([{
-      id: USER_CITATION_SCRIPT_ID,
-      matches,
-      js: ["content/claude-citations.js"],
-      css: ["content/claude-citations.css"],
-      runAt: "document_idle",
-      allFrames: true, // many SPAs render surfaces in same-origin iframes
-    }]);
-    console.log(`[Citation Linker] Citation links enabled on ${matches.length} extra site(s):`, matches.join(", "));
+    await chrome.scripting.registerContentScripts([script]);
+    console.log(
+      allSites
+        ? `[Citation Linker] Citation links enabled on all websites, except: ${excludeMatches.join(", ") || "(none)"}`
+        : `[Citation Linker] Citation links enabled on ${matches.length} extra site(s): ${matches.join(", ")}`
+    );
   } catch (e) {
     console.error("[Citation Linker] Failed to register citation sites:", e);
   }
@@ -313,7 +313,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.pdfUrlPatterns) {
     rebuildRules();
   }
-  if (changes.citationSites) {
+  if (changes.citationSites || changes.citationAllSites || changes.citationSiteExceptions) {
     syncCitationSites();
   }
 });
