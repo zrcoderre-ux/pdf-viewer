@@ -254,6 +254,18 @@ const ADDL_SEC_RE = new RegExp(
   "yi"
 );
 
+// A section reference carrying no code name of its own: "§ 425.16",
+// "section 1542", "§§ 1542, 1543". Meaningless in isolation — it is resolved
+// only by the carry-over pass in findStatuteCitations, which hands it the code
+// that the same section number was already given earlier on the same page.
+// The optional hyphenated tail keeps a model-UCC section ("§ 3-310") whole
+// instead of capturing a bare "3".
+const BARE_SEC_RE = new RegExp(
+  String.raw`(?:§§?|\b(?:sections?|secs?\.?))\s*` +
+  String.raw`(?<sec>\d+(?:\.\d+)?[a-z]?(?:-\d+)?(?:\([a-z0-9]+\))*)`,
+  "gi"
+);
+
 // Cal. Rules of Court rule N.N(letter)(digit)…
 const RULE_RE = new RegExp(
   String.raw`\b(?:Cal\.\s*Rules?\s*of\s*Court|California\s*Rules?\s*of\s*Court),?\s*` +
@@ -792,6 +804,39 @@ function findCaseCitations(text) {
   return results;
 }
 
+// Split a statute key ("CCP § 425.16", "9 U.S.C. § 1", "UCC § 3-310") into
+// its code prefix and its section number.
+function splitStatuteKey(key) {
+  const m = key.match(/^(.*) \u00a7 (.+)$/);
+  return m ? { prefix: m[1], section: m[2] } : null;
+}
+
+// A section number stripped of its subparts: "425.16(b)(1)" -> "425.16". Two
+// references to one statute differ only in how deep they point, so subparts
+// are dropped when matching a bare reference against a code-named one.
+function baseSectionNumber(section) {
+  return section.replace(/\([^)]*\)/g, "").trim().toLowerCase();
+}
+
+// Page lookup for offsets into the detection text. ingestPage separates pages
+// with "\n\f\n", so the form feeds preceding an offset count the page breaks
+// crossed to reach it. Text handed straight to findAllCitations (tests,
+// single-page callers) has none, leaving the whole string on page 0.
+function makePageLookup(text) {
+  const breaks = [];
+  for (let i = 0; i < text.length; i++) if (text[i] === "\f") breaks.push(i);
+  if (!breaks.length) return () => 0;
+  return (offset) => {
+    let lo = 0, hi = breaks.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (breaks[mid] < offset) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+}
+
 function findStatuteCitations(text) {
   const results = [];
   let m;
@@ -855,6 +900,66 @@ function findStatuteCitations(text) {
       span: [m.index, m.index + m[0].length],
       matchText: m[0],
     });
+  }
+
+  // Carry-over: once a page ties a section number to a code name, later bare
+  // references to that number on the same page belong to that code.
+  //   "Code of Civil Procedure section 425.16 ... § 425.16(b) ... section 425.16"
+  // The scope is deliberately tight. Only references AFTER the code-named one
+  // inherit, only within the one page, and only when that page ties the number
+  // to a single code — a page that gives the same number two different codes
+  // leaves its bare references unlinked rather than guessing between them. A
+  // bare reference that carries its own code name was already matched above,
+  // so it never reaches this pass.
+  const pageOf = makePageLookup(text);
+  const namedSpans = results.map((r) => r.span);
+  // "page|section" -> { prefix, from } for the first code-named occurrence,
+  // or null once a second code claims the same number on that page.
+  const byNumber = new Map();
+  for (const r of results) {
+    const parts = splitStatuteKey(r.key);
+    if (!parts) continue;
+    const slot = `${pageOf(r.span[0])}|${baseSectionNumber(parts.section)}`;
+    const prior = byNumber.get(slot);
+    if (prior === undefined) {
+      byNumber.set(slot, { prefix: parts.prefix, from: r.span[1] });
+    } else if (prior && prior.prefix !== parts.prefix) {
+      byNumber.set(slot, null);
+    }
+  }
+  if (byNumber.size) {
+    BARE_SEC_RE.lastIndex = 0;
+    while ((m = BARE_SEC_RE.exec(text)) !== null) {
+      const s = m.index, e = m.index + m[0].length;
+      if (namedSpans.some(([a, b]) => s < b && e > a)) continue; // has its own code
+      const slot = `${pageOf(s)}|${baseSectionNumber(m.groups.sec)}`;
+      const owner = byNumber.get(slot);
+      if (!owner || s < owner.from) continue;
+      results.push({
+        kind: "statute",
+        key: `${owner.prefix} \u00a7 ${m.groups.sec}`,
+        span: [s, e],
+        matchText: m[0],
+        inheritedCode: true,
+      });
+      // Chained sections after a carried-over reference ("§§ 1542, 1543") inherit
+      // the same code, exactly as they do after a code-named cite.
+      let scanPos = e;
+      while (true) {
+        ADDL_SEC_RE.lastIndex = scanPos;
+        const cont = ADDL_SEC_RE.exec(text);
+        if (!cont || cont.index !== scanPos) break;
+        results.push({
+          kind: "statute",
+          key: `${owner.prefix} \u00a7 ${cont.groups.sec}`,
+          span: [cont.index, cont.index + cont[0].length],
+          matchText: cont[0].replace(/^\s+/, ""),
+          inheritedCode: true,
+        });
+        scanPos = cont.index + cont[0].length;
+      }
+      BARE_SEC_RE.lastIndex = scanPos;
+    }
   }
 
   return results;

@@ -31,6 +31,13 @@ In addition to citation linking, the viewer supports:
   persist across zoom changes; for editable documents they can be saved into
   the file and stay removable after reopening (see below), otherwise they vanish
   when the tab closes.
+- **Repeated section numbers** — a brief that names a code once ("Code of Civil
+  Procedure section 425.16") and then drops it gets its later bare references
+  linked too: on that page, `§ 425.16(b)` and `section 425.16` resolve to the
+  same statute. Inheritance runs forward only, stops at the page break, and
+  stands down where one page ties the same number to two different codes
+  (`Civ. Code § 1542` and `Pen. Code § 1542`), leaving those bare references
+  unlinked rather than guessing.
 - **CACI jury instructions** — references like **CACI No. 3710** (also
   `CACI 3710`, `CACI Nos. 3710, 3711`, verdict forms `CACI No. VF-3900`) link to
   the instruction on your provider.
