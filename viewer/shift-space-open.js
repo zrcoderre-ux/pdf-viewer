@@ -64,6 +64,17 @@
   let mouseX = null;
   let mouseY = null;
 
+  // Overlay owners that draw fewer links than they know about register here:
+  //   window.__shiftSpaceLinkSources.push(() => [{ url, rects }, …])
+  // The array is shared (an extension gets one isolated world per frame) and
+  // created by whichever file loads first, so registration order doesn't
+  // matter. Selection only — an undrawn link can't be under the pointer.
+  function linkSources() {
+    const list = root.__shiftSpaceLinkSources;
+    return Array.isArray(list) ? list : [];
+  }
+  root.__shiftSpaceLinkSources = root.__shiftSpaceLinkSources || [];
+
   // ── Which links can be opened ──────────────────────────────────────────────
 
   function isOpenableLink(el) {
@@ -95,6 +106,10 @@
   function coverage(el, selRects) {
     let rects;
     try { rects = el.getClientRects(); } catch (e) { return 0; }
+    return coverageOfRects(rects, selRects);
+  }
+
+  function coverageOfRects(rects, selRects) {
     let total = 0;
     let covered = 0;
     for (const r of rects) {
@@ -122,15 +137,25 @@
 
   // ── Finding targets ────────────────────────────────────────────────────────
 
-  // The link the mouse is resting on, if any. Read live from the pointer's last
-  // known position rather than remembered from mouseover, so it stays right
-  // after the page scrolls or an overlay repaints under a still mouse.
+  // The link the mouse is resting on, if any.
+  //
+  // ":hover" is the browser's own hit-test state — exactly the element the real
+  // cursor is over, kept correct through scrolls and repaints without us
+  // tracking a single coordinate. (It's what already tints a citation strip
+  // when you point at one.) Nested anchors aren't valid HTML, so the last match
+  // in document order is the innermost one. The remembered pointer position is
+  // only a fallback for the odd case where hover state is unavailable.
   function linkAtPointer() {
-    if (mouseX == null || mouseY == null || !doc.elementFromPoint) return null;
-    const el = doc.elementFromPoint(mouseX, mouseY);
-    if (!el || !el.closest) return null;
-    const a = el.closest("a[href]");
-    return isOpenableLink(a) ? a : null;
+    let hovered = null;
+    try {
+      const hits = doc.querySelectorAll("a[href]:hover");
+      if (hits.length) hovered = hits[hits.length - 1];
+    } catch (e) { /* fall through to the coordinate fallback */ }
+    if (!hovered && mouseX != null && mouseY != null && doc.elementFromPoint) {
+      const el = doc.elementFromPoint(mouseX, mouseY);
+      hovered = el && el.closest ? el.closest("a[href]") : null;
+    }
+    return isOpenableLink(hovered) ? hovered : null;
   }
 
   // Every link the selection paints over, in reading order.
@@ -168,23 +193,38 @@
     for (const a of candidates) {
       if (!isOpenableLink(a)) continue;
       if (coverage(a, selRects) < MIN_COVERAGE) continue;
-      hits.push(a);
+      hits.push({ url: a.href, rect: firstRect(a) });
+    }
+    // Links their owner knows about but hasn't drawn. The website overlay only
+    // paints citations currently scrolled into view, so a selection running off
+    // the screen would otherwise stop at the last visible one — the strips for
+    // the rest simply don't exist in the DOM. Sources report the whole
+    // inventory with live rects, and the same coverage test decides.
+    for (const source of linkSources()) {
+      let entries;
+      try { entries = source(); } catch (e) { continue; }
+      for (const entry of entries || []) {
+        if (!entry || !entry.url || !entry.rects || !entry.rects.length) continue;
+        if (coverageOfRects(entry.rects, selRects) < MIN_COVERAGE) continue;
+        hits.push({ url: entry.url, rect: entry.rects[0] });
+      }
     }
     // Open them the way they read: top to bottom, then left to right. Links on
     // one line rarely share an exact top (glyph rects differ by a pixel), so
     // anything within a few pixels counts as the same line.
     hits.sort((p, q) => {
-      const rp = firstRect(p), rq = firstRect(q);
-      const dt = rp.top - rq.top;
-      return Math.abs(dt) > 4 ? dt : rp.left - rq.left;
+      const dt = p.rect.top - q.rect.top;
+      return Math.abs(dt) > 4 ? dt : p.rect.left - q.rect.left;
     });
     return hits;
   }
 
-  function urlsOf(links) {
+  // One tab per destination: a citation that wraps across two lines is two
+  // strips, and an overlay's painted strip repeats what its source reports.
+  function urlsOf(hits) {
     const out = [];
-    for (const a of links) {
-      const url = a.href;
+    for (const h of hits) {
+      const url = h && (h.url || h.href);
       if (url && out.indexOf(url) === -1) out.push(url);
     }
     return out;
@@ -195,8 +235,14 @@
   // which is the ordinary case right after a drag-select and means "all of
   // these", not "this one".
   function collectUrls() {
-    const selected = urlsOf(linksInSelection(root.getSelection ? root.getSelection() : null));
     const hovered = linkAtPointer();
+    // While the focus is in a text box, only the pointer counts. Shift+Space
+    // has to keep typing a space there, and a selection sitting behind the box
+    // (chat composers hold the focus almost all the time) must not eat the key
+    // — but a cursor parked on a hyperlink is unambiguous.
+    const selected = isEditable(doc.activeElement)
+      ? []
+      : urlsOf(linksInSelection(root.getSelection ? root.getSelection() : null));
     if (hovered) {
       const url = hovered.href;
       if (selected.indexOf(url) === -1) return [url];
@@ -272,8 +318,6 @@
     if (!e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
     const isSpace = e.code === "Space" || e.key === " " || e.key === "Spacebar";
     if (!isSpace) return;
-    // In a text field Shift+Space types a space.
-    if (isEditable(doc.activeElement)) return;
 
     const urls = collectUrls();
     if (!urls.length) return; // no link in play — let the page scroll up
@@ -294,17 +338,11 @@
 
   function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; }
 
-  // Pointer left the window: it isn't resting on anything any more.
-  function onMouseOut(e) {
-    if (!e.relatedTarget) { mouseX = null; mouseY = null; }
-  }
-
   function install() {
     // Capture on the window so the shortcut is read before the page's own
     // handlers — many sites bind Space themselves.
     root.addEventListener("keydown", onKeyDown, true);
     doc.addEventListener("mousemove", onMouseMove, { capture: true, passive: true });
-    doc.addEventListener("mouseout", onMouseOut, { capture: true, passive: true });
 
     const api = extensionApi();
     if (!api || !api.storage) return;
