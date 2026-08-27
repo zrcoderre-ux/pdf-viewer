@@ -19,6 +19,12 @@
   },
   "content_scripts": [
     {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["viewer/shift-space-open.js"],
+      "all_frames": true,
+      "run_at": "document_start"
+    },
+    {
       "matches": ["https://claude.ai/*"],
       "js": ["citation-site-rules.js", "content/claude-citations.js"],
       "css": ["content/claude-citations.css"],

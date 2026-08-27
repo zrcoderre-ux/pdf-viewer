@@ -24,6 +24,13 @@ cross-tab registry, local for the citation repo). `citation-site-rules.js`
 holds the site defaults and the match-pattern matcher, shared by the Options
 page, the background worker's content-script registration, and the content
 script itself. Per-provider URL builders are in `code-tables.js`.
+`viewer/shift-space-open.js` is a third shared file — a classic script loaded
+both by `viewer.html` and as an all-sites content script — that turns
+Shift+Space into a middle click; it finds its targets geometrically (the
+selection's rects vs. each link's rects) because our citation overlays are
+never inside the selected DOM, and hands the URLs to `background.js`, which is
+the only place that can open an unfocused tab (`chrome.tabs.create`,
+`active: false`).
 
 ## Fixes applied in earlier sessions
 
@@ -309,9 +316,11 @@ background.js                        DNR redirect rules + eCMS exclusion
 popup.html / popup.js                Provider toggle + naming mode + legend
 options.html / options.js            Web citation sites + URL patterns + naming default
 citation-site-rules.js               Site defaults + match-pattern matcher (shared)
+viewer/shift-space-open.js           Shift+Space = middle click (viewer + every site)
 fetch-pdfjs.py / .sh                 One-time PDF.js download
 test-naming.mjs                      Node-runnable rule-engine tests
 test-citation-sites.mjs              Node-runnable web-citation-site tests
+test-shift-space-open.mjs            Node-runnable Shift+Space tests (stubbed DOM)
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing

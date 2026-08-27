@@ -317,3 +317,74 @@ chrome.storage.onChanged.addListener((changes, area) => {
     syncCitationSites();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Shift+Space "middle click" — open links in unfocused background tabs.
+//
+// shift-space-open.js (content script in web pages, plain <script> in the PDF
+// viewer) collects the links under the pointer or inside the selection and
+// sends them here. Only the worker can open a tab that doesn't take focus, and
+// only it knows the tab that asked, which is what makes the new tabs land right
+// after it — the way Chrome places a middle-clicked tab.
+
+const MAX_BACKGROUND_TABS = 20;
+
+// http/https/file plus our own viewer pages. Anything else (javascript:,
+// mailto:, data:) is not something a middle click would have opened.
+const BACKGROUND_TAB_SCHEMES = ["http:", "https:", "file:", "chrome-extension:"];
+
+function toOpenableUrl(raw) {
+  if (typeof raw !== "string" || !raw) return null;
+  let parsed;
+  try { parsed = new URL(raw); } catch (e) { return null; }
+  return BACKGROUND_TAB_SCHEMES.includes(parsed.protocol) ? parsed.href : null;
+}
+
+async function openBackgroundTabs(urls, opener) {
+  const clean = [];
+  for (const raw of Array.isArray(urls) ? urls : []) {
+    const url = toOpenableUrl(raw);
+    if (url && !clean.includes(url)) clean.push(url);
+    if (clean.length >= MAX_BACKGROUND_TABS) break;
+  }
+
+  let opened = 0;
+  for (const url of clean) {
+    // active:false is the whole point: a middle-clicked tab loads behind the
+    // page you're reading.
+    const props = { url, active: false };
+    if (opener && typeof opener.id === "number") {
+      props.openerTabId = opener.id;
+      props.windowId = opener.windowId;
+      props.index = opener.index + 1 + opened;
+    }
+    let tab;
+    try {
+      tab = await chrome.tabs.create(props);
+    } catch (e) {
+      console.warn(`[Citation Linker] Could not open ${url} in a background tab:`, e);
+      continue;
+    }
+    opened++;
+    // A middle-clicked tab stays in the opener's tab group; match that when
+    // the opener is in one.
+    if (opener && opener.groupId > -1 && chrome.tabs.group && tab && tab.id != null) {
+      try {
+        await chrome.tabs.group({ groupId: opener.groupId, tabIds: tab.id });
+      } catch (e) { /* group closed mid-flight; the tab is still open */ }
+    }
+  }
+  return opened;
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "open-background-tabs") return; // not ours
+  openBackgroundTabs(msg.urls, sender && sender.tab).then(
+    (opened) => sendResponse({ opened }),
+    (e) => {
+      console.warn("[Citation Linker] Background-tab open failed:", e);
+      sendResponse({ opened: 0 });
+    }
+  );
+  return true; // sendResponse is called asynchronously
+});
