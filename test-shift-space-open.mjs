@@ -37,12 +37,14 @@ const rect = (left, top, width, height) => ({
   left, top, width, height, right: left + width, bottom: top + height,
 });
 
-// Supports exactly the selectors the script uses: "a[href]" and the
-// comma-separated overlay list ("a.citation-link, a.pdf-link, …").
+// Supports exactly the selectors the script uses: "a[href]", "a[href]:hover",
+// and the comma-separated overlay list ("a.citation-link, a.pdf-link, …").
+// ":hover" matches an element the test marked as being under the cursor.
 function matchesOne(el, sel) {
-  const m = /^([a-z]+)?((?:\.[\w-]+)*)(\[[\w-]+\])?$/i.exec(sel.trim());
+  const m = /^([a-z]+)?((?:\.[\w-]+)*)(\[[\w-]+\])?(:hover)?$/i.exec(sel.trim());
   if (!m) throw new Error(`test stub: unsupported selector ${sel}`);
-  const [, tag, classes, attr] = m;
+  const [, tag, classes, attr, hover] = m;
+  if (hover && !el.hovered) return false;
   if (tag && el.tagName !== tag.toUpperCase()) return false;
   const own = String(el.className || "").split(/\s+/);
   for (const c of (classes || "").split(".").filter(Boolean)) {
@@ -67,6 +69,7 @@ function makeEl(tag, opts = {}) {
     children: [],
     parent: null,
     isContentEditable: !!opts.contentEditable,
+    hovered: false,
     style: {},
     textContent: "",
     isConnected: true,
@@ -138,7 +141,7 @@ function selectionOverBothLines(page) {
   };
 }
 
-function load(page, { selection = null, storage = {}, chromeApi = true } = {}) {
+function load(page, { selection = null, storage = {}, chromeApi = true, sources = [] } = {}) {
   const sent = [];
   const openedWindows = [];
   const doc = {
@@ -182,15 +185,23 @@ function load(page, { selection = null, storage = {}, chromeApi = true } = {}) {
       },
     };
   }
+  ctx.__shiftSpaceLinkSources = sources;
   ctx.window = ctx;
   ctx.self = ctx;
   vm.createContext(ctx);
   vm.runInContext(read("viewer/shift-space-open.js"), ctx);
+  // Point at a link the way a real cursor does — through the browser's own
+  // :hover state, which is what the script reads.
+  const hover = (el) => {
+    walk(page.html, (n) => { n.hovered = false; });
+    if (el) el.hovered = true;
+  };
   return {
     api: ctx.ShiftSpaceOpen,
     sent,
     openedWindows,
     doc,
+    hover,
     fireStorage: (changes) => storageListener && storageListener(changes, "sync"),
   };
 }
@@ -257,7 +268,7 @@ console.log("\n--- every link the selection covers ---");
 {
   const page = makePage();
   const { api } = load(page, { selection: selectionOverBothLines(page) });
-  const hrefs = api.linksInSelection(selectionOverBothLines(page)).map((a) => a.href);
+  const hrefs = api.linksInSelection(selectionOverBothLines(page)).map((h) => h.url);
   check("the two strips of one wrapped citation are both found",
     hrefs.filter((h) => h === "https://cite.test/1").length, 2);
   check("...and collapse to one tab", api.urlsOf(api.linksInSelection(selectionOverBothLines(page)))
@@ -335,6 +346,83 @@ console.log("\n--- what the shortcut acts on ---");
 // The key itself
 // ---------------------------------------------------------------------------
 
+console.log("\n--- the cursor, as the browser reports it ---");
+{
+  // :hover is the browser's own hit-test state — no coordinates to go stale,
+  // and it survives an overlay repainting itself under a still cursor.
+  const page = makePage();
+  const loaded = load(page);
+  loaded.hover(page.a1);
+  check("the hovered link is the target", loaded.api.collectUrls(), ["https://a.test/"]);
+  loaded.hover(page.strip1);
+  check("a citation strip counts the same", loaded.api.collectUrls(), ["https://cite.test/1"]);
+  loaded.hover(null);
+  check("hovering nothing opens nothing", loaded.api.collectUrls(), []);
+}
+{
+  const page = makePage();
+  const loaded = load(page);
+  loaded.hover(page.jsLink);
+  check("a javascript: link under the cursor is still not a target",
+    loaded.api.collectUrls(), []);
+}
+
+console.log("\n--- links an overlay knows about but hasn't drawn ---");
+{
+  // The website overlay only paints citations currently scrolled into view. A
+  // selection running off the screen has to reach the rest anyway, so their
+  // owner reports them with live rects.
+  const page = makePage();
+  const offScreen = [
+    { url: "https://offscreen.test/1", rects: [rect(10, 800, 120, 20)] },
+    { url: "https://offscreen.test/2", rects: [rect(10, 2400, 120, 20)] },
+    { url: "https://cite.test/1", rects: [rect(10, 130, 150, 20)] }, // already painted
+  ];
+  const selection = {
+    isCollapsed: false, rangeCount: 1,
+    getRangeAt: () => ({
+      commonAncestorContainer: page.article,
+      // one long drag: the visible lines and everything scrolled past
+      getClientRects: () => [rect(10, 100, 300, 20), rect(10, 130, 200, 20), rect(0, 700, 400, 2000)],
+    }),
+  };
+  const { api } = load(page, { selection, sources: [() => offScreen] });
+  const urls = api.urlsOf(api.linksInSelection(selection));
+  check("off-screen links open too, in reading order", urls, [
+    "https://a.test/", "https://b.test/", "https://cite.test/1",
+    "https://offscreen.test/1", "https://offscreen.test/2",
+  ]);
+  check("a reported link that was also painted opens once",
+    urls.filter((u) => u === "https://cite.test/1").length, 1);
+}
+{
+  const page = makePage();
+  const selection = {
+    isCollapsed: false, rangeCount: 1,
+    getRangeAt: () => ({ commonAncestorContainer: page.article, getClientRects: () => [rect(10, 100, 300, 20)] }),
+  };
+  const source = () => [{ url: "https://far.test/", rects: [rect(10, 5000, 120, 20)] }];
+  const { api } = load(page, { selection, sources: [source] });
+  check("a reported link the selection never reaches stays shut",
+    api.urlsOf(api.linksInSelection(selection)).includes("https://far.test/"), false);
+}
+{
+  const page = makePage();
+  const boom = () => { throw new Error("overlay mid-rebuild"); };
+  const { api } = load(page, {
+    selection: selectionOverBothLines(page),
+    sources: [boom, () => [{ url: "https://ok.test/", rects: [rect(10, 100, 100, 20)] }]],
+  });
+  check("a source that throws doesn't take the others down with it",
+    api.urlsOf(api.linksInSelection(selectionOverBothLines(page))).includes("https://ok.test/"), true);
+}
+{
+  const page = makePage();
+  const { api } = load(page, { selection: selectionOverBothLines(page), sources: [] });
+  check("no sources registered is the ordinary case",
+    api.urlsOf(api.linksInSelection(selectionOverBothLines(page))).length, 3);
+}
+
 console.log("\n--- Shift+Space ---");
 {
   const page = makePage();
@@ -373,19 +461,27 @@ console.log("\n--- Shift+Space ---");
   }
 }
 {
+  // Typing in a text box: the key has to keep producing a space. A chat
+  // composer holds the focus almost all the time, so the selection path is off
+  // there — but a cursor resting on a link is still unambiguous.
   const page = makePage();
-  const loaded = load(page);
-  const input = makeEl("input");
-  loaded.doc.activeElement = input;
-  loaded.api.setPointer(50, 110);
+  const loaded = load(page, { selection: selectionOverBothLines(page) });
+  loaded.doc.activeElement = makeEl("input");
   const e = keyEvent();
   loaded.api.onKeyDown(e);
-  check("in a text field it still types a space", [loaded.sent.length, e.prevented], [0, false]);
+  check("in a text field, a selection behind it doesn't eat the space",
+    [loaded.sent.length, e.prevented], [0, false]);
 
   loaded.doc.activeElement = makeEl("div", { contentEditable: true });
   const e2 = keyEvent();
   loaded.api.onKeyDown(e2);
-  check("...and in a rich-text composer too", [loaded.sent.length, e2.prevented], [0, false]);
+  check("...nor in a rich-text composer", [loaded.sent.length, e2.prevented], [0, false]);
+
+  loaded.hover(page.a1);
+  const e3 = keyEvent();
+  loaded.api.onKeyDown(e3);
+  check("...but a link under the cursor still opens (the composer keeps focus)",
+    [loaded.sent.length, e3.prevented], [1, true]);
 }
 {
   const page = makePage();

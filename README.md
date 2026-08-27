@@ -117,12 +117,16 @@ scroll wheel. **Shift + Space** does the same thing from the keyboard:
 
 It works on **every website** and in the PDF viewer, on the page's own
 hyperlinks and on the citation underlines this extension adds — both alike. A
-citation that wraps across two lines is two underline strips but still one tab.
+citation that wraps across two lines is two underline strips but still one tab,
+and a selection that runs past the bottom of the screen still opens the links
+scrolled out of view, not just the ones you can see.
 
 When no link is involved — nothing under the pointer, nothing linked in the
-selection — Shift + Space scrolls up a screen exactly as it always has. Inside
-a text box or a chat composer it types a space, as it always has. Turn the
-shortcut off entirely in Options → "Shift + Space opens links".
+selection — Shift + Space scrolls up a screen exactly as it always has. In a
+text box it still types a space; a chat composer keeps the keyboard focus
+almost all the time, so there the shortcut answers to the mouse pointer alone
+and a selection behind the box is ignored. Turn the shortcut off entirely in
+Options → "Shift + Space opens links".
 
 ## Citation links on claude.ai
 

@@ -442,6 +442,22 @@
     return overlayEl;
   }
 
+  // Shift+Space ("open every link the selection covers", shift-space-open.js —
+  // same extension, same isolated world) can only see the strips paint() has
+  // drawn, and paint() deliberately skips citations scrolled out of view. So a
+  // selection running past the bottom of the screen would stop at the last
+  // visible citation. Hand over the whole inventory instead, measured from the
+  // Ranges themselves, which exist whether or not a strip was drawn.
+  (window.__shiftSpaceLinkSources = window.__shiftSpaceLinkSources || []).push(() => {
+    const out = [];
+    for (const c of citations) {
+      let rects;
+      try { rects = c.range.getClientRects(); } catch (e) { continue; }
+      if (rects.length) out.push({ url: c.url, rects: [...rects] });
+    }
+    return out;
+  });
+
   function paint() {
     const overlay = ensureOverlay();
     overlay.dataset.provider = provider;

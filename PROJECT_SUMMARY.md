@@ -30,7 +30,12 @@ Shift+Space into a middle click; it finds its targets geometrically (the
 selection's rects vs. each link's rects) because our citation overlays are
 never inside the selected DOM, and hands the URLs to `background.js`, which is
 the only place that can open an unfocused tab (`chrome.tabs.create`,
-`active: false`).
+`active: false`). Two things there are easy to get wrong and are commented at
+the call site: the hovered link comes from `a[href]:hover` (the browser's own
+hit-test state) rather than tracked mouse coordinates, and an overlay that
+paints only part of what it knows — `claude-citations.js` skips citations
+scrolled out of their container — registers a source on
+`window.__shiftSpaceLinkSources` so a selection still reaches the undrawn ones.
 
 ## Fixes applied in earlier sessions
 
