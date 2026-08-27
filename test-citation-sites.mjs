@@ -85,7 +85,8 @@ function runBackground(storage) {
     importScripts(rel) { vm.runInContext(read(rel), ctx); },
     chrome: {
       runtime: { id: "test", getURL: (p) => "chrome-extension://test/" + p,
-                 onInstalled: { addListener() {} }, onStartup: { addListener() {} } },
+                 onInstalled: { addListener() {} }, onStartup: { addListener() {} },
+                 onMessage: { addListener() {} } },
       webNavigation: { onBeforeNavigate: { addListener() {} } },
       storage: {
         sync: { get: (defaults, cb) => cb(Object.fromEntries(

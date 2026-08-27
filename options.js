@@ -63,6 +63,19 @@ if (toaWebEl) {
   });
 }
 
+// Shift+Space "middle click" (synced; default on). Read by the shortcut script
+// in every tab and in the PDF viewer; it re-reads the key live, so unchecking
+// this takes effect without a reload.
+const shiftSpaceEl = document.getElementById("shift-space-open");
+if (shiftSpaceEl) {
+  chrome.storage.sync.get({ shiftSpaceOpenLinks: true }, ({ shiftSpaceOpenLinks }) => {
+    shiftSpaceEl.checked = shiftSpaceOpenLinks !== false;
+  });
+  shiftSpaceEl.addEventListener("change", () => {
+    chrome.storage.sync.set({ shiftSpaceOpenLinks: shiftSpaceEl.checked });
+  });
+}
+
 // ---------- Citation links on websites ----------
 //
 // Three synced keys drive this:

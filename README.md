@@ -101,6 +101,29 @@ button toggles between dark (default) and light themes; the choice is remembered
 - **Download** the original PDF with a smart filename (see below).
 - **Open original** in Chrome's built-in PDF viewer (skips the linker).
 
+## Shift + Space = middle click
+
+Chrome opens a link in an unfocused background tab when you click it with the
+scroll wheel. **Shift + Space** does the same thing from the keyboard:
+
+- **Rest the mouse on a link** and press Shift + Space — it opens behind the
+  page you're reading, right after the current tab (and in the same tab group,
+  if there is one). Focus never leaves what you were doing.
+- **Select text first** and Shift + Space opens *every* link the selection
+  covers, in reading order — sweep a paragraph of citations and pull all of
+  them at once. Up to 20 at a time; a brief note says how many opened.
+- If the mouse is resting on a link *outside* the selection, that link wins —
+  the pointer is what a middle click would have acted on.
+
+It works on **every website** and in the PDF viewer, on the page's own
+hyperlinks and on the citation underlines this extension adds — both alike. A
+citation that wraps across two lines is two underline strips but still one tab.
+
+When no link is involved — nothing under the pointer, nothing linked in the
+selection — Shift + Space scrolls up a screen exactly as it always has. Inside
+a text box or a chat composer it types a space, as it always has. Turn the
+shortcut off entirely in Options → "Shift + Space opens links".
+
 ## Citation links on claude.ai
 
 The same citation engine also runs on **claude.ai**. When Claude mentions a
@@ -334,6 +357,7 @@ background.js                        webNavigation -> viewer redirect
 popup.html / popup.js                Toolbar popup (provider toggle + legend)
 options.html / options.js            Options page (provider, naming, sites, OCR)
 citation-site-rules.js               Where web citation links may run (shared)
+viewer/shift-space-open.js           Shift+Space = middle click (viewer + all sites)
 viewer/viewer.html                   PDF viewer shell
 viewer/viewer.css                    Page + textLayer + linkLayer styles
 viewer/viewer.js                     PDF.js loader, two-pass renderer
