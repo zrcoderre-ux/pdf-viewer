@@ -115,11 +115,28 @@ The viewer can name documents two ways:
 |---|---|---|---|
 | Global default | `storage.sync.namingMode` | Popup + Options page | All viewer tabs that don't have a per-doc override |
 | Per-document override | `storage.session.naming-override:{url}` | Viewer toolbar dropdown | Only the document at that URL; survives tab reload, dies on browser close |
-| Effective mode | (derived) | What the toolbar actually shows | `override ?? global` |
+| Effective mode | (derived) | What the toolbar actually shows | `override ?? per-document default` |
 
 The toolbar dropdown always mirrors the effective mode. Picking something
 in the toolbar creates a per-doc override; until then the toolbar tracks
 the global.
+
+### Documents opened from disk keep their name
+
+A PDF opened from disk — `file://` in the extension, or a `File` handed to
+`__pdfViewerLoadLocal` in the app — is already named, by whoever downloaded
+or filed it. The naming rules exist for PDFs read *before* download, where
+the name is still the viewer's to pick, so a local document is shown under
+its own filename verbatim: no rule engine (not even with "apply naming rules
+to source names" on), no footer title, no caption override, no part/volume
+suffix, and no cross-tab disambiguation — it doesn't register in the
+collision registry, so it can't push a sibling tab into qualifying its name
+either. Picking a mode in the toolbar dropdown is a deliberate ask and lifts
+the suppression for that one document.
+
+`resolveNaming()` in `naming-override.js` is the one place that decides this
+(`{ mode, keepSourceName }`); `viewer.js` mirrors it into `namingMode` /
+`keepSourceNameAsIs`.
 
 ### Footer-naming rule engine (`footer-naming.js`)
 
@@ -218,17 +235,22 @@ corresponds to an open tab. Cheap because session storage is small.
 Tiny module: `getOverride(fileUrl)`, `setOverride(fileUrl, mode)`,
 `onOverrideChange(fileUrl, cb)`. Keys session storage by file URL. The
 toolbar dropdown is the only writer; the popup and options page write
-only to the global key.
+only to the global key. Also holds `resolveNaming()`, the pure function that
+turns (local-or-not, override, global) into the effective mode plus the
+"keep the on-disk name" flag — covered by `test-naming.mjs`.
 
 ### State management in viewer.js
 
-Three name variables coexist:
+Four name variables coexist:
 - `globalNamingMode` — mirror of `storage.sync.namingMode`
 - `perDocOverride` — `getOverride(fileUrl)` result, null when unset
-- `namingMode` — effective mode, derived as `perDocOverride || globalNamingMode`
+- `isLocalDocument` — opened from disk (`file://`, or the app's local-open path)
+- `namingMode` / `keepSourceNameAsIs` — effective mode and suppression, from
+  `resolveNaming()`
 
-`resolveEffectiveNamingMode()` recomputes the effective mode after any
-layer changes; if it changed, `applyNamingMode()` re-paints the toolbar.
+`resolveEffectiveNamingMode()` recomputes both after any layer changes; if
+either changed, the source name is re-derived and `applyNamingMode()`
+re-paints the toolbar.
 
 `setDisplayName` now takes an `origin` tag (`"source"` or `"footer"`)
 and caches both forms separately. Flipping naming mode swaps between
@@ -236,7 +258,8 @@ them with no re-extraction.
 
 Footer extraction (`tryResolveFooterTitle`) always runs regardless of
 mode — the structured result is needed for the disambiguation registry,
-and toggle-flipping should be instant.
+and toggle-flipping should be instant. Whether the result reaches the
+registry is decided separately, by `syncDisambiguationEntry()`.
 
 ## Things to know before changing code
 

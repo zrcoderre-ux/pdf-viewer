@@ -286,10 +286,18 @@ good as the footer text PDF.js can recover. Switch to footer mode when
 working with a corpus where the source names are unhelpful (eCMS UUID
 filenames, scanned-document IDs, etc.).
 
-PDFs opened from the local disk (`file://`) always default to the source
-filename even when the global preference is footer mode — local files are
-usually already named sensibly. The toolbar dropdown still lets you switch an
-individual local file to footer naming.
+### Documents opened from disk keep their name
+
+A PDF opened from disk — `file://` in the extension, or opened in the app from
+the file handler, the Open button, or drag-and-drop — is left alone. It shows
+the filename it already has, exactly: no footer title, no naming rules applied
+to the filename (even with "apply naming rules to source names" on), no
+part/volume suffix, and no cross-tab disambiguation. Renaming is for PDFs you
+read *before* downloading them, where the viewer picks the name it will be
+saved under; once the file is on disk, its name is yours.
+
+The toolbar dropdown still overrides this for one document: picking source or
+footer naming there is a deliberate ask, and the rules apply again.
 
 ## Faithful port of pdf_linker.py
 

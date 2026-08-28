@@ -33,6 +33,7 @@ import {
   getOverride,
   setOverride,
   onOverrideChange,
+  resolveNaming,
 } from "./naming-override.js";
 import {
   pageNeedsOcr,
@@ -151,10 +152,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
 
 const params = new URLSearchParams(location.search);
 const fileUrl = params.get("file");
-// Local-disk PDFs (file://) default to the source filename even when the global
-// preference is "footer" — they're usually already named sensibly and footer
-// extraction on them tends to be noise.
-const isLocalFile = /^file:/i.test(fileUrl || "");
+// True when this document was opened from disk rather than read off the web:
+// file:// in the extension, or a File handed to loadLocalFile by the app. Such
+// a document is already named — the naming rules exist for PDFs read before
+// download — so it keeps its filename (see keepSourceName) and it's editable.
+// Set on the app's local-open path, hence `let`.
+let isLocalDocument = /^file:/i.test(fileUrl || "");
 
 const filenameEl  = document.getElementById("filename");
 const statusEl    = document.getElementById("status");
@@ -253,23 +256,36 @@ let userOverrodeName = false;
 //   perDocOverride    — per-document override, set via the toolbar
 //                       dropdown. Keyed by file URL in chrome.storage.session.
 //                       Survives a tab reload, dies when Chrome closes.
-//   namingMode        — effective mode, derived as perDocOverride ?? globalNamingMode.
-//                       This is what all the rendering logic reads.
+//   namingMode        — effective mode, derived as perDocOverride ?? the
+//                       default for this document ("source" for one opened
+//                       from disk, otherwise globalNamingMode). This is what
+//                       all the rendering logic reads.
 // When the user has not set a per-doc override, the toolbar mirrors the
-// global; setting one in the toolbar is what creates the override.
+// global; setting one in the toolbar is what creates the override — and, for
+// a document opened from disk, is what lets the naming rules touch its name
+// at all.
 let globalNamingMode = "source";
 let perDocOverride = null;
 let namingMode = "source";
+// True while the document's own filename must be shown exactly as it is — the
+// case for a PDF opened from disk, until the user picks a mode for it in the
+// toolbar dropdown. See resolveNaming in naming-override.js for the reasoning.
+let keepSourceNameAsIs = isLocalDocument;
 
-// Recompute the effective mode and (if it changed) re-paint. Called
-// from anywhere a layer above might have updated.
+// Recompute the effective mode / suppression and report whether either
+// changed. Called from anywhere a layer above might have updated.
 function resolveEffectiveNamingMode() {
-  // A per-document override (toolbar dropdown) always wins; otherwise local
-  // files fall back to "source" regardless of the global default.
-  const baseDefault = isLocalFile ? "source" : globalNamingMode;
-  const next = perDocOverride || baseDefault;
-  if (next === namingMode) return false;
-  namingMode = next;
+  const { mode, keepSourceName } = resolveNaming({
+    isLocalDocument,
+    perDocOverride,
+    globalNamingMode,
+  });
+  if (mode === namingMode && keepSourceName === keepSourceNameAsIs) return false;
+  namingMode = mode;
+  keepSourceNameAsIs = keepSourceName;
+  // Whether the raw filename gets run through the naming rules just changed,
+  // so the cached source name has to be derived again.
+  if (sourceRawName) sourceDisplayName = computeSourceDisplay(sourceRawName);
   return true;
 }
 
@@ -302,6 +318,8 @@ let sourceHasType = false;
 function computeSourceDisplay(rawNoExt) {
   sourceHasType = false;
   if (!rawNoExt) return "PDF";
+  // Opened from disk → show the filename it already has, untouched.
+  if (keepSourceNameAsIs) return rawNoExt;
   if (alterSource) {
     const parsed = extractTitle(rawNoExt.replace(/[_]+/g, " "));
     if (parsed.canonical) {
@@ -1384,6 +1402,18 @@ function recordFinalName(name) {
 // resolves, and when a sibling tab's session entry changes (collision).
 async function applyNamingMode() {
   if (userOverrodeName) return;
+  // A document opened from disk keeps the name it arrived with: no footer
+  // title, no caption override, no part/volume suffix, no disambiguation
+  // against sibling tabs. Only a deliberate pick in the toolbar dropdown
+  // lifts this.
+  if (keepSourceNameAsIs) {
+    const asIs = sourceRawName || sourceDisplayName;
+    if (asIs) {
+      paintDisplayName(asIs);
+      serverFilename = asIs;
+    }
+    return;
+  }
   // A caption that leads with "Declaration" is authoritative — it wins over both
   // footer and source, regardless of the selected naming mode.
   if (captionOverrideName) {
@@ -1511,7 +1541,7 @@ function setEditingEnabled(on) {
   if (downloadEl)  downloadEl.hidden  = on; // Save stands in for Download when editable
 }
 // A file:// document in the extension is already a local/downloaded file.
-setEditingEnabled(isLocalFile);
+setEditingEnabled(isLocalDocument);
 
 // Collect on-screen highlight rectangles converted to PDF points, per page.
 // Collect the current highlights as PDF-space quads, grouped per highlight, so
@@ -1665,7 +1695,12 @@ if (namingModeEl) {
     const v = namingModeEl.value === "footer" ? "footer" : "source";
     perDocOverride = v;
     await setOverride(fileUrl, v);
-    if (resolveEffectiveNamingMode()) applyNamingMode();
+    if (resolveEffectiveNamingMode()) {
+      // Picking a mode for a local document lifts the "keep the on-disk name"
+      // suppression, so this document joins the registry (or leaves it).
+      syncDisambiguationEntry();
+      applyNamingMode();
+    }
   });
 }
 
@@ -1675,6 +1710,7 @@ onOverrideChange(fileUrl, (newOverride) => {
   perDocOverride = newOverride;
   if (resolveEffectiveNamingMode()) {
     if (namingModeEl) namingModeEl.value = namingMode;
+    syncDisambiguationEntry();
     applyNamingMode();
   } else if (namingModeEl && namingModeEl.value !== namingMode) {
     namingModeEl.value = namingMode;
@@ -1959,6 +1995,11 @@ async function loadLocalFile(file, handle) {
   // provided one) so Save can overwrite the same file in place.
   localFileHandle = handle || null;
   setEditingEnabled(true);
+  // Opened from disk, exactly like a file:// document in the extension: the
+  // name it already has is the name it keeps.
+  isLocalDocument = true;
+  resolveEffectiveNamingMode();
+  if (namingModeEl) namingModeEl.value = namingMode;
   try {
     statusEl.textContent = "Reading…";
     // Copy into a Uint8Array created in THIS realm. When the viewer runs in an
@@ -2178,18 +2219,31 @@ function applyParsedTitle(parsed, rawTitle, source) {
     partVol: docPartVol,
     raw: rawTitle,
   };
-  if (parsed.canonical) {
-    registerEntry({
-      canonical: parsed.canonical,
-      target: parsed.target,
-      party: parsed.party,
-      partyLabel: parsed.partyLabel,
-      partyName: parsed.partyName,
-      partVol: docPartVol,
-    });
+  syncDisambiguationEntry();
+  // The tooltip explains where a displayed footer/caption name came from. A
+  // document keeping its on-disk name isn't showing one, so it doesn't get it.
+  if (!keepSourceNameAsIs) {
+    filenameEl.title = `Title recovered from document ${source}: ${rawTitle}`;
   }
-  filenameEl.title = `Title recovered from document ${source}: ${rawTitle}`;
   applyNamingMode();
+}
+
+// Publish (or withhold) this document's footer identity in the cross-tab
+// disambiguation registry. A document keeping its on-disk name isn't displaying
+// a canonical name, so it must not push a sibling tab into qualifying its own.
+// Called whenever the extraction or the suppression changes.
+function syncDisambiguationEntry() {
+  if (keepSourceNameAsIs) { unregisterEntry(); return; }
+  const e = footerExtraction;
+  if (!e || !e.canonical) return;
+  registerEntry({
+    canonical: e.canonical,
+    target: e.target,
+    party: e.party,
+    partyLabel: e.partyLabel,
+    partyName: e.partyName,
+    partVol: e.partVol,
+  });
 }
 
 function tryResolveFooterTitle() {

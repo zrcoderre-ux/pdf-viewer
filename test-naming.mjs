@@ -1,5 +1,6 @@
 // Node-runnable tests. Run: node test-naming.mjs
 import { extractTitle, disambiguate, citationShortForm, extractPartVolume, appendPartVol } from "./viewer/footer-naming.js";
+import { resolveNaming } from "./viewer/naming-override.js";
 
 const tests = [
   // === The 14 spec examples ===
@@ -830,5 +831,50 @@ pvtest("empty",                "",                                              
   console.log(`${ok ? "✓" : "✗"} appendPartVol append + no-double-append`);
   if (!ok) process.exitCode = 1;
 }
+
+// --- which naming rules apply (local vs. read-before-download) ---
+//
+// A PDF opened from disk keeps the name it already has; one read off the web
+// (before you download it) is the one the naming rules are for.
+
+console.log("\n--- naming resolution: local vs. web ---");
+
+function rntest(name, input, want) {
+  const got = resolveNaming(input);
+  if (got.mode === want.mode && got.keepSourceName === want.keepSourceName) {
+    console.log(`\u2713 ${name}`);
+  } else {
+    console.log(`\u2717 ${name}: got=${JSON.stringify(got)} want=${JSON.stringify(want)}`);
+    process.exitCode = 1;
+  }
+}
+
+rntest("web doc, source default",
+  { isLocalDocument: false, globalNamingMode: "source" },
+  { mode: "source", keepSourceName: false });
+rntest("web doc, footer default",
+  { isLocalDocument: false, globalNamingMode: "footer" },
+  { mode: "footer", keepSourceName: false });
+rntest("local doc keeps its filename under the source default",
+  { isLocalDocument: true, globalNamingMode: "source" },
+  { mode: "source", keepSourceName: true });
+rntest("local doc keeps its filename even under the footer default",
+  { isLocalDocument: true, globalNamingMode: "footer" },
+  { mode: "source", keepSourceName: true });
+rntest("toolbar footer pick lifts the local suppression",
+  { isLocalDocument: true, globalNamingMode: "source", perDocOverride: "footer" },
+  { mode: "footer", keepSourceName: false });
+rntest("toolbar source pick lifts it too (rules apply to the filename)",
+  { isLocalDocument: true, globalNamingMode: "footer", perDocOverride: "source" },
+  { mode: "source", keepSourceName: false });
+rntest("per-doc override still wins for web docs",
+  { isLocalDocument: false, globalNamingMode: "footer", perDocOverride: "source" },
+  { mode: "source", keepSourceName: false });
+rntest("junk override ignored",
+  { isLocalDocument: true, globalNamingMode: "footer", perDocOverride: "nonsense" },
+  { mode: "source", keepSourceName: true });
+rntest("no arguments at all",
+  undefined,
+  { mode: "source", keepSourceName: false });
 
 console.log("\nDone.");

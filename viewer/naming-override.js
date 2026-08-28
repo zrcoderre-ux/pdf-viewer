@@ -58,3 +58,31 @@ export function onOverrideChange(fileUrl, cb) {
   chrome.storage.onChanged.addListener(listener);
   return () => chrome.storage.onChanged.removeListener(listener);
 }
+
+// Resolve which naming rules apply to the current document. Two inputs decide
+// it: where the document came from, and whether the user has made a per-doc
+// choice in the toolbar dropdown.
+//
+//   mode           — "source" | "footer": which name the viewer displays.
+//   keepSourceName — true when the document's own filename is shown verbatim:
+//                    no rule engine, no footer title, no caption override, no
+//                    part/volume suffix, no cross-tab disambiguation.
+//
+// A PDF opened from disk (file:// in the extension, or a File handed to the
+// app) already has a name — the one it was downloaded or filed under. Renaming
+// is for PDFs read before download, where the name is still ours to pick; once
+// a file lives on disk, its name is the user's. So a local document keeps its
+// filename unless the user asks for something else in the toolbar dropdown,
+// which lifts the suppression for that document.
+export function resolveNaming({
+  isLocalDocument = false,
+  perDocOverride = null,
+  globalNamingMode = "source",
+} = {}) {
+  const override =
+    perDocOverride === "source" || perDocOverride === "footer" ? perDocOverride : null;
+  const base = isLocalDocument
+    ? "source"
+    : (globalNamingMode === "footer" ? "footer" : "source");
+  return { mode: override || base, keepSourceName: isLocalDocument && !override };
+}
