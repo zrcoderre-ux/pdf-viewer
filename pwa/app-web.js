@@ -58,6 +58,10 @@ function activate(id) {
       try { t.iframe.contentWindow?.__pdfViewerReflow?.(); } catch { /* not ready */ }
     });
   }
+  // Hand the keyboard to the viewer itself, so its shortcuts (auto-scroll's
+  // A / Space / [ / ], Shift+Space to open links) work on the tab you're
+  // looking at without having to click into the page first.
+  if (t) { try { t.iframe.focus(); } catch { /* not ready */ } }
 }
 
 function setLabel(tab, text) {

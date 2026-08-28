@@ -48,6 +48,9 @@ In addition to citation linking, the viewer supports:
   "Table of Authorities" has separate checkboxes for the PDF viewer and
   websites (default: **off** for PDFs, **on** for websites); in-text links are
   unaffected either way.
+- **Auto-scroll while reading** — the **↓ Auto-scroll** toolbar button (or the
+  **A** key) creeps the document upward at your reading pace, so a long brief
+  reads without touching the wheel. See below.
 - **OCR** scanned PDFs on demand with the toolbar **⛶ OCR** button — text
   becomes selectable and citations get linked. Enable "Automatically OCR
   scanned documents" in Options to run it without the button.
@@ -127,6 +130,45 @@ text box it still types a space; a chat composer keeps the keyboard focus
 almost all the time, so there the shortcut answers to the mouse pointer alone
 and a selection behind the box is ignored. Turn the shortcut off entirely in
 Options → "Shift + Space opens links".
+
+## Auto-scroll while reading
+
+Ported from the reading auto-scroll in the Inbox Cleaner PWA and rebuilt for a
+desktop viewer. Turn it on with the **↓ Auto-scroll** toolbar button or the **A**
+key and the page creeps upward continuously, so reading a long PDF costs no
+scrolling at all.
+
+Speed is set as a **reading pace in words per minute**, not pixels per second,
+and the viewer converts it per page: it already extracts each page's text for
+citation linking, so it knows how many words a page holds and how tall that page
+renders. A dense block-quote page therefore creeps, a caption page or a scanned
+exhibit divider slides past quickly, and both are on screen for about as long as
+reading them takes. Change the zoom and the pace re-derives itself, because
+density is measured per rendered pixel.
+
+It stays out of the way:
+
+- **Scroll whenever you like.** Wheel, trackpad, scrollbar, arrows, PageDown —
+  auto-scroll yields instantly and picks back up about a second after you stop,
+  from wherever you left the page.
+- **It holds still while you're working.** It won't resume while you have text
+  selected, or while a dialog, the highlight menu, or one of the mode bars
+  (Text area, Fill form, Organize) is open.
+- Motion is snapped to the display's pixel grid rather than floated with a
+  transform, so page canvases are never resampled and PDF text stays crisp —
+  half-pixel steps on a HiDPI screen.
+
+| Key | |
+|-----|---|
+| **A** | Auto-scroll on / off |
+| **Space** | Pause / resume (only while auto-scroll is on — otherwise it's the browser's page-down) |
+| **[** / **]** | Slower / faster, in 25-wpm steps |
+| **Esc** | Turn auto-scroll off |
+
+The floating bar at the bottom has the same controls, and fades back to a
+whisper while the mouse is still so it doesn't sit on top of what you're
+reading. Speed and the on/off state are remembered, so a reading session doesn't
+need re-arming for every file.
 
 ## Citation links on claude.ai
 
@@ -365,6 +407,7 @@ viewer/shift-space-open.js           Shift+Space = middle click (viewer + all si
 viewer/viewer.html                   PDF viewer shell
 viewer/viewer.css                    Page + textLayer + linkLayer styles
 viewer/viewer.js                     PDF.js loader, two-pass renderer
+viewer/autoscroll.js                 Auto-scroll engine + control bar
 viewer/citation-linker.js            Detection + URL resolution
 viewer/footer-naming.js              Footer-derived naming rule engine
 viewer/disambiguation.js             Cross-tab collision registry

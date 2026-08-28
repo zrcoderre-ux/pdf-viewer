@@ -5,7 +5,7 @@ viewer** in a dedicated, standalone window — its own icon, no browser tab stri
 or address bar. It reuses the **same** viewer code as the Chrome extension
 (`viewer/` at the repo root): citation links to Lexis+/Westlaw, Table of
 Authorities, OCR, highlighting, box-select, thumbnails/bookmarks, source/footer
-naming, and download — all working on PDFs you open from disk.
+naming, auto-scroll, and download — all working on PDFs you open from disk.
 
 **Live:** https://zrcoderre-ux.github.io/pdf-viewer/
 
@@ -18,7 +18,7 @@ isolated viewer instance (its own zoom, highlights, OCR…) with no shared state
 | File | Purpose |
 |------|---------|
 | `index.html` | Tab-manager shell: a tab strip + iframe stage + empty state. Hosts no viewer markup itself. |
-| `app-web.js` | Tab manager: opens PDFs in new tabs (+ button, drag-drop, OS file handler, or a routed `?file=` URL), switches/closes tabs, syncs tab titles, registers the service worker. Local files reach a tab's viewer via `iframe.contentWindow.__pdfViewerLoadLocal`; tabs load lazily the first time they're shown so overlays get correct geometry. |
+| `app-web.js` | Tab manager: opens PDFs in new tabs (+ button, drag-drop, OS file handler, or a routed `?file=` URL), switches/closes tabs, syncs tab titles, registers the service worker. Local files reach a tab's viewer via `iframe.contentWindow.__pdfViewerLoadLocal`; tabs load lazily the first time they're shown so overlays get correct geometry. The active tab's iframe takes keyboard focus, so the viewer's shortcuts (auto-scroll's A / Space / [ / ], Shift+Space) work without clicking into the page. |
 | `app-web.css` | Styles the tab strip, iframe stage, and empty-state drop zone. |
 | `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
 | `sw.js` | Service worker — **network-first** (auto-updates when online) with offline fallback. |

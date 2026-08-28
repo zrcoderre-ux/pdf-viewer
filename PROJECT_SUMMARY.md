@@ -329,6 +329,7 @@ test-shift-space-open.mjs            Node-runnable Shift+Space tests (stubbed DO
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing
+viewer/autoscroll.js                 Auto-scroll: wpm-paced reading scroll + its control bar
 viewer/citation-linker.js            Detection + placement + URL resolution
 viewer/highlights.js                 Selection, highlight, context menu
 viewer/footer-naming.js              Footer-title rule engine + iterative disambiguator
