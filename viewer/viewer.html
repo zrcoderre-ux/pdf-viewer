@@ -156,6 +156,7 @@
     <button id="zoom-out" title="Zoom out">−</button>
     <span id="zoom-level">100%</span>
     <button id="zoom-in" title="Zoom in">+</button>
+    <button id="autoscroll-toggle" title="Auto-scroll while reading — the page creeps upward at your reading pace (A)" aria-pressed="false">↓ Auto-scroll</button>
     <button id="save-edits" title="Save your highlights and edits into the PDF (local documents only)" hidden>💾 Save</button>
     <button id="download" title="Download PDF">⬇ Download</button>
     <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
@@ -196,6 +197,17 @@
   <main id="viewer-container">
     <div id="pages"></div>
   </main>
+
+  <!-- Auto-scroll controls. Shown only while the mode is on; fades back while
+       the mouse is still so it doesn't sit on top of what you're reading. -->
+  <div id="autoscroll-bar" role="group" aria-label="Auto-scroll" hidden>
+    <button id="as-play" title="Pause (Space)" aria-label="Pause">❙❙</button>
+    <button id="as-slower" title="Slower ([)" aria-label="Slower">−</button>
+    <input id="as-speed" type="range" min="80" max="700" step="10" value="250" aria-label="Reading speed in words per minute">
+    <button id="as-faster" title="Faster (])" aria-label="Faster">+</button>
+    <span id="as-wpm">250 wpm</span>
+    <button id="as-close" title="Turn auto-scroll off (Esc)" aria-label="Turn auto-scroll off">✕</button>
+  </div>
   <!-- Shift+Space = middle click: opens the link under the pointer, or every
        link in the selection, in unfocused background tabs. Shared verbatim with
        the web content script; a classic script so both can load it. -->

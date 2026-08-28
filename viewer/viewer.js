@@ -39,6 +39,7 @@ import {
   ocrPageToTextLayer,
   resetOcr,
 } from "./ocr.js";
+import { autoScroll } from "./autoscroll.js";
 
 // ---------------------------------------------------------------------------
 // Web (PWA) shim. This is the citation-linking viewer from the Chrome
@@ -1753,6 +1754,9 @@ function resetForNewDocument() {
   // (Deliberately here and not in renderAllPages, which also runs on zoom —
   // the per-page OCR cache is what makes zoom cheap, so it must survive zoom.)
   resetOcr();
+  // New document → forget the previous one's per-page word counts, which are
+  // what auto-scroll paces itself by.
+  autoScroll.resetDocument();
   // Clear stashed bytes from any prior PDF. If the new load fails, the
   // Download button has nothing stale to save.
   pdfBytes = null;
@@ -2003,6 +2007,10 @@ async function renderAllPages() {
   // or the URL-derived name.
   footerTitleResolved = new Promise((res) => { _resolveFooterTitle = res; });
 
+  // Auto-scroll must not run while #pages is empty — the document height
+  // collapses to nothing, which would read as "reached the end".
+  autoScroll.beginRender();
+
   pagesEl.innerHTML = "";
   totalLinks = 0;
   _footerByPage.clear();
@@ -2018,6 +2026,9 @@ async function renderAllPages() {
     const refs = await renderPageCanvasAndText(pageNum);
     if (signal.aborted) return;
     ingestPage(pageNum, refs.textContent);
+    // Same extracted text the linker just ingested — auto-scroll paces itself
+    // by how many words each rendered page actually holds.
+    autoScroll.notePageText(pageNum, refs.textContent);
     pageRefs.push(refs);
     // Capture the footer band of the first two pages so we can detect a
     // running-footer title. We only look at those — that's enough signal
@@ -2093,6 +2104,9 @@ async function renderAllPages() {
   }
 
   updateLinkCount();
+  // Pages are measurable again: re-derive the reading pace (page heights just
+  // changed with the zoom) and resume if the mode is on.
+  autoScroll.endRender();
 }
 
 // Extract and set the filename from the document footer. Whether this
@@ -4302,3 +4316,10 @@ if (thumbResizeEl) {
     thumbResizeEl.addEventListener("pointerup", onUp);
   });
 }
+
+// ── Auto-scroll ─────────────────────────────────────────────────────────────
+// Hands-free reading: the document creeps upward at your reading pace so long
+// PDFs don't need constant wheeling. Toolbar button, the floating speed bar,
+// and the A / Space / [ / ] / Esc shortcuts all live in autoscroll.js; the
+// render pipeline feeds it page text and tells it when layout changed.
+autoScroll.init({ pagesEl, status: flashStatus });
