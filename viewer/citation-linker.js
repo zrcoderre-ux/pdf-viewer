@@ -17,7 +17,7 @@ import {
   westlawRuleUrl,
   westlawUccUrl,
   westlawFederalStatuteUrl,
-  westlawRegulationUrl,
+  westlawFederalSearchUrl,
   lexisSearchUrl,
   wlSearchTerm,
   lexisSearchTerm,
@@ -33,6 +33,9 @@ import {
   FED_SECTION,
   FEDERAL_REGULATIONS,
   FEDERAL_CODES_SORTED,
+  REV_RUL_NUMBER,
+  REV_RUL_BULLETIN,
+  DASH_CLASS,
 } from "./federal-codes.js";
 
 // ============================================================================
@@ -322,6 +325,39 @@ function federalCodeName(match) {
     if (match.groups[`f${i}`]) return FEDERAL_CODES_SORTED[i].name;
   }
   return null;
+}
+
+// IRS revenue rulings: "Rev. Rul. 2013-17", "Revenue Ruling 2013-17",
+// "Rev. Rul. 83-137, 1983-2 C.B. 41". The plural forms ("Rev. Ruls.",
+// "Revenue Rulings") are accepted so a list reads naturally; the chained
+// numbers after the first are picked up by REV_RUL_ADDL_RE below.
+//
+// Unlike a statute or a regulation, a revenue ruling has no section number —
+// its number IS the citation — so nothing here uses FED_SECTION and nothing
+// carries over to a later bare reference.
+const REV_RUL_RE = new RegExp(
+  String.raw`\bRev(?:enue)?\.?\s*Rul(?:ings?|ing|s)?\.?\s*` +
+  `(?:Nos?\\.?\\s*)?` +
+  `(?<num>${REV_RUL_NUMBER})` +
+  `(?:${REV_RUL_BULLETIN})?`,
+  "gi"
+);
+
+// Chained rulings: "Rev. Ruls. 2003-102, 2003-103 and 2004-45". Each carries
+// its own bulletin cite if the writer gave one.
+const REV_RUL_ADDL_RE = new RegExp(
+  String.raw`\s*(?:,\s*and|,|\s+and)\s+` +
+  `(?<num>${REV_RUL_NUMBER})` +
+  `(?:${REV_RUL_BULLETIN})?`,
+  "yi"
+);
+
+// Canonicalize a ruling number for the key: whatever dash the PDF used becomes
+// an ASCII hyphen, so "Rev. Rul. 96–55" and "Rev. Rul. 96-55" are one
+// authority in the Table of Authorities rather than two.
+const REV_RUL_DASH_RE = new RegExp(DASH_CLASS, "g");
+function normalizeRevRulNum(raw) {
+  return raw.replace(/\s+/g, "").replace(REV_RUL_DASH_RE, "-");
 }
 
 // Chained additional sections after a federal cite — the federal counterpart
@@ -990,6 +1026,39 @@ function findStatuteCitations(text) {
     return scanPos;
   };
 
+  // IRS revenue rulings. Run before the section-based passes so the bulletin
+  // tail ("1983-2 C.B. 41") is inside a claimed span and nothing else can
+  // carve a citation out of its numbers.
+  REV_RUL_RE.lastIndex = 0;
+  while ((m = REV_RUL_RE.exec(text)) !== null) {
+    let end = m.index + m[0].length;
+    results.push({
+      kind: "guidance",
+      key: `Rev. Rul. ${normalizeRevRulNum(m.groups.num)}`,
+      span: [m.index, end],
+      matchText: m[0],
+    });
+    fedSpans.push([m.index, end]);
+    // "Rev. Ruls. 2003-102, 2003-103 and 2004-45" — each later number is its
+    // own ruling, inheriting only the "Rev. Rul." label.
+    while (true) {
+      REV_RUL_ADDL_RE.lastIndex = end;
+      const cont = REV_RUL_ADDL_RE.exec(text);
+      if (!cont || cont.index !== end) break;
+      const contEnd = cont.index + cont[0].length;
+      if (startsNextCitation(text, contEnd)) break;
+      results.push({
+        kind: "guidance",
+        key: `Rev. Rul. ${normalizeRevRulNum(cont.groups.num)}`,
+        span: [cont.index, contEnd],
+        matchText: cont[0].replace(/^\s+/, ""),
+      });
+      fedSpans.push([cont.index, contEnd]);
+      end = contEnd;
+    }
+    REV_RUL_RE.lastIndex = end;
+  }
+
   // "29 C.F.R. § 2560.503-1", "40 C.F.R. pt. 60".
   CFR_RE.lastIndex = 0;
   while ((m = CFR_RE.exec(text)) !== null) {
@@ -1484,6 +1553,7 @@ export function resolveUrl(cite, repo, provider) {
     cite.kind === "case" ? "cases" :
     cite.kind === "statute" ? "statutes" :
     cite.kind === "regulation" ? "regulations" :
+    cite.kind === "guidance" ? "guidance" :
     cite.kind === "caci" ? "caci" : "rules";
   const entry = (repo[section] || {})[cite.key] || {};
 
@@ -1527,7 +1597,8 @@ export function resolveUrl(cite, repo, provider) {
     return westlawCaseUrl(reporterCite);
   }
 
-  if (cite.kind === "statute" || cite.kind === "regulation") {
+  if (cite.kind === "statute" || cite.kind === "regulation" ||
+      cite.kind === "guidance") {
     // Model Uniform Commercial Code — provider-specific search terms:
     //   Lexis+   "U.C.C. § 3-310"
     //   Westlaw  "Unif.Commercial Code § 3-310"
@@ -1547,9 +1618,9 @@ export function resolveUrl(cite, repo, provider) {
     const fed = federalSearchTerm(cite.key);
     if (fed) {
       if (effectiveProvider === "lexis") return lexisSearchUrl(fed.term);
-      return fed.kind === "regulation"
-        ? westlawRegulationUrl(fed.term)
-        : westlawFederalStatuteUrl(fed.term);
+      return fed.kind === "statute"
+        ? westlawFederalStatuteUrl(fed.term)
+        : westlawFederalSearchUrl(fed.term);
     }
     return effectiveProvider === "lexis"
       ? lexisSearchUrl(lexisSearchTerm(cite.key))

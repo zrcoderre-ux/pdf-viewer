@@ -28,7 +28,8 @@ a statute key names federal authority — federal materials search nationally,
 since the `jurisdiction=CA` filter that scopes a California statute search
 hides them. `viewer/federal-codes.js` holds the tables that classification
 runs on (C.F.R. titles for named regulation series, U.S.C. titles for the
-federal codes numbered section-for-section with their codification).
+federal codes numbered section-for-section with their codification, and the
+number and bulletin shapes for IRS revenue rulings).
 `viewer/shift-space-open.js` is a third shared file — a classic script loaded
 both by `viewer.html` and as an all-sites content script — that turns
 Shift+Space into a middle click; it finds its targets geometrically (the
@@ -365,7 +366,7 @@ viewer/disambiguation.js             Cross-tab collision registry (storage.sessi
 viewer/naming-override.js            Per-document naming-mode override (storage.session)
 viewer/reporters.js                  REPORTERS_RAW port
 viewer/statute-codes.js              STATUTE_CODES port
-viewer/federal-codes.js              C.F.R. / U.S.C. / named federal code tables
+viewer/federal-codes.js              C.F.R. / U.S.C. / named federal codes, rev. ruls.
 viewer/code-tables.js                WL / Lexis URL builders
 pdfjs/build/pdf.mjs                  PDF.js main module (downloaded)
 pdfjs/build/pdf.worker.mjs           PDF.js worker (downloaded)

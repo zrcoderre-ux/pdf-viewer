@@ -60,6 +60,34 @@ export const FED_SECTION =
   String.raw`|\d+` +
   String.raw`)(?:\([A-Za-z0-9]+\))*`;
 
+// IRS published guidance — revenue rulings.
+//
+// Two number eras, and both are still cited: rulings before 2000 carry a
+// two-digit year ("Rev. Rul. 83-137", "Rev. Rul. 99-7"), rulings after it a
+// four-digit one ("Rev. Rul. 2013-17"). The four-digit form is tried first so
+// "2013-17" is not read as the two-digit "20" plus a stray "13-17".
+//
+// The dash class accepts every code point a PDF extractor produces for a
+// hyphen — ASCII hyphen-minus, figure dash, en dash, em dash, minus sign.
+// Rulings are typeset with en dashes often enough ("Rev. Rul. 96–55") that
+// matching only the ASCII hyphen silently drops them; the same omission broke
+// reporter cites until U+2012 was added to REPORTER_PART.
+export const DASH_CLASS = String.raw`[\-‒–—−]`;
+
+export const REV_RUL_NUMBER =
+  String.raw`(?:\d{4}|\d{2})` + DASH_CLASS + String.raw`\d{1,3}`;
+
+// The bulletin the ruling was published in, which follows the number in a
+// full cite: "Rev. Rul. 83-137, 1983-2 C.B. 41", "Rev. Rul. 96-55, 1996-49
+// I.R.B. 4". Bluebook T1.2 prefers the Cumulative Bulletin, falling back to
+// its advance sheet, the Internal Revenue Bulletin; the Cumulative Bulletin
+// ceased publication in 2008, so anything recent cites the I.R.B. Optional —
+// plenty of briefs give the ruling number alone — but matched when present so
+// the underline covers the whole citation rather than stopping mid-cite.
+export const REV_RUL_BULLETIN =
+  String.raw`,?\s*\d{4}` + DASH_CLASS + String.raw`\d{1,2}\s*` +
+  String.raw`(?:C\.?\s*B\.?|I\.?\s*R\.?\s*B\.?)\s*\d{1,4}`;
+
 // Named regulation series whose agency name replaces the C.F.R. title.
 // `name` is the canonical form the key is built from; `cfrTitle` is the
 // C.F.R. title the URL builder substitutes.

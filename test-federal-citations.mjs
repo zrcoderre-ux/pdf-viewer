@@ -1,7 +1,7 @@
 // Node-runnable tests for federal regulations and codes.
 // Run: node test-federal-citations.mjs
 //
-// Three families, each linked differently (see viewer/federal-codes.js):
+// Four families, each linked differently (see viewer/federal-codes.js):
 //
 //   C.F.R.       the title number is in the cite, so nothing is rewritten
 //   named regs   "Treas. Reg." stands in for C.F.R. title 26 — except a
@@ -9,6 +9,8 @@
 //   named codes  "Internal Revenue Code" is 26 U.S.C. section-for-section;
 //                "ERISA" is not (§ 701 is 29 U.S.C. § 1181), so it is
 //                searched by popular name instead of being rewritten
+//   rev. ruls.   IRS published guidance, whose number IS the citation — there
+//                is no section, and nothing is rewritten
 //
 // Keys always preserve the citation as written, so the Table of Authorities
 // reads back in the writer's own form; the rewriting happens at URL time.
@@ -28,11 +30,16 @@ function check(label, got, want) {
   }
 }
 
-// [key, kind] for every statute/regulation found, in document order.
+// [key, kind] for every federal authority found, in document order.
 function statuteHits(text) {
   return findAllCitations(text)
-    .filter((c) => c.kind === "statute" || c.kind === "regulation")
+    .filter((c) => ["statute", "regulation", "guidance"].includes(c.kind))
     .map((c) => [c.key, c.kind]);
+}
+
+// The text each citation underlines, so a span that stops mid-cite shows up.
+function spans(text) {
+  return findAllCitations(text).map((c) => c.matchText);
 }
 
 console.log("\n--- the three forms from the original request ---");
@@ -144,6 +151,55 @@ console.log("\n--- carry-over: a bare section inherits a federal code ---");
      ["29 C.F.R. § 2560.503-1(f)", "regulation"]]);
 }
 
+console.log("\n--- IRS revenue rulings ---");
+check("abbreviated",
+  statuteHits("Rev. Rul. 2013-17."),
+  [["Rev. Rul. 2013-17", "guidance"]]);
+check("spelled out",
+  statuteHits("Revenue Ruling 2013-17."),
+  [["Rev. Rul. 2013-17", "guidance"]]);
+// Rulings before 2000 carry a two-digit year. The four-digit form has to be
+// tried first, or "2013-17" reads as the two-digit "20" plus a stray "13-17".
+check("two-digit year",
+  statuteHits("Rev. Rul. 99-7; Rev. Rul. 83-137."),
+  [["Rev. Rul. 99-7", "guidance"], ["Rev. Rul. 83-137", "guidance"]]);
+check("an optional No.",
+  statuteHits("Rev. Rul. No. 99-7."),
+  [["Rev. Rul. 99-7", "guidance"]]);
+check("plural, chained",
+  statuteHits("See Rev. Ruls. 2003-102, 2003-103 and 2004-45."),
+  [["Rev. Rul. 2003-102", "guidance"], ["Rev. Rul. 2003-103", "guidance"],
+   ["Rev. Rul. 2004-45", "guidance"]]);
+
+console.log("\n--- the bulletin cite is part of the citation ---");
+// Bluebook T1.2 cites a ruling to the Cumulative Bulletin, or to its advance
+// sheet the Internal Revenue Bulletin. The underline should cover the whole
+// citation rather than stopping after the ruling number.
+check("C.B. tail is underlined",
+  spans("Rev. Rul. 83-137, 1983-2 C.B. 41."),
+  ["Rev. Rul. 83-137, 1983-2 C.B. 41"]);
+check("I.R.B. tail is underlined",
+  spans("Rev. Rul. 96-55, 1996-49 I.R.B. 4."),
+  ["Rev. Rul. 96-55, 1996-49 I.R.B. 4"]);
+check("...but the key is the ruling number alone",
+  statuteHits("Rev. Rul. 96-55, 1996-49 I.R.B. 4."),
+  [["Rev. Rul. 96-55", "guidance"]]);
+// PDF extraction turns the hyphen into whichever dash the typesetter used.
+// Normalizing to ASCII keeps one authority from listing twice in the Table of
+// Authorities.
+check("an en dash is the same ruling",
+  statuteHits("Rev. Rul. 96\u201355, 1996\u201349 I.R.B. 4."),
+  [["Rev. Rul. 96-55", "guidance"]]);
+
+console.log("\n--- a revenue ruling is not read out of ordinary prose ---");
+check("no ruling number",
+  statuteHits("The revenue rulings issued in 2013 were numerous."), []);
+check("a year range is not a ruling",
+  statuteHits("The court reviewed the 2013-2014 fiscal year."), []);
+check("Revenue and Taxation Code still resolves",
+  statuteHits("Revenue and Taxation Code section 23151."),
+  [["RTC § 23151", "statute"]]);
+
 console.log("\n--- search terms ---");
 check("Treasury regulation becomes its C.F.R. section",
   federalSearchTerm("Treas. Reg. § 1.125"),
@@ -164,6 +220,9 @@ check("the Internal Revenue Code is 26 U.S.C. section-for-section",
 check("ERISA keeps the act's own numbering",
   federalSearchTerm("ERISA § 701"),
   { kind: "statute", term: "ERISA § 701" });
+check("a revenue ruling is searched as written",
+  federalSearchTerm("Rev. Rul. 2013-17"),
+  { kind: "guidance", term: "Rev. Rul. 2013-17" });
 check("California keys are not federal",
   federalSearchTerm("CCP § 425.16"), null);
 
@@ -189,6 +248,18 @@ console.log("\n--- URLs ---");
   // Regulations are not statutes; the contentType=STATUTE filter would drop
   // them.
   check("...unfiltered by content type", wl.includes("contentType"), false);
+}
+{
+  const cite = { kind: "guidance", key: "Rev. Rul. 2013-17" };
+  const wl = resolveUrl(cite, {}, "westlaw");
+  check("guidance is not scoped to California",
+    wl.includes("jurisdiction=CA"), false);
+  // A revenue ruling is not a statute; the contentType=STATUTE filter would
+  // drop it.
+  check("...nor filtered to the statute databases",
+    wl.includes("contentType"), false);
+  check("Westlaw gets the ruling number",
+    decodeURIComponent(wl.split("query=")[1]), "Rev. Rul. 2013-17");
 }
 check("a curated repo entry still wins",
   resolveUrl(
