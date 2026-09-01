@@ -817,6 +817,9 @@ select.form-field { padding: 0; }
 
 .linkLayer a.citation-link[data-kind="case"]    { color: #1a73e8; }
 .linkLayer a.citation-link[data-kind="statute"] { color: #137333; }
+/* Federal regulations (C.F.R., Treas. Reg.). A lighter green than a statute —
+   related enough to read as the same family, distinct enough to tell apart. */
+.linkLayer a.citation-link[data-kind="regulation"] { color: #4f8a10; }
 .linkLayer a.citation-link[data-kind="rule"]    { color: #b06000; }
 .linkLayer a.citation-link[data-kind="caci"]    { color: #00838f; }
 .linkLayer a.citation-link[data-kind="supra"]   { color: #8430ce; border-bottom-style: dashed; }

@@ -4,6 +4,12 @@
 // validated against live Westlaw and Lexis+ pages. Where pdf_linker.py and
 // content.js disagreed, content.js wins.
 
+import {
+  CFR_TITLE_BY_REG,
+  USC_TITLE_BY_CODE,
+  FEDERAL_CODE_NAMES,
+} from "./federal-codes.js";
+
 export const WL_SEARCH_PREFIX = {
   BPC: "CA BUS & PROF", COM: "CA COML",       CIV: "CA CIVIL",
   CCP: "CA CIV PRO",    CORP: "CA CORP",      EDC: "CA EDUC",
@@ -165,6 +171,28 @@ export function westlawUccUrl(query) {
   );
 }
 
+// Federal statutes (U.S. Code, and the named codes that rewrite into it).
+// Deliberately NOT scoped with jurisdiction=CA the way westlawStatuteUrl is:
+// the California filter would exclude the national statute databases where
+// these live. Same reasoning as westlawUccUrl.
+export function westlawFederalStatuteUrl(query) {
+  return (
+    "https://1.next.westlaw.com/Search/Results.html" +
+    "?query=" + encodeURIComponent(query) +
+    "&contentType=STATUTE"
+  );
+}
+
+// Federal regulations (C.F.R. and the named regulation series). No
+// contentType filter — regulations are not statutes, and an unfiltered
+// national search reliably surfaces the C.F.R. section.
+export function westlawRegulationUrl(query) {
+  return (
+    "https://1.next.westlaw.com/Search/Results.html" +
+    "?query=" + encodeURIComponent(query)
+  );
+}
+
 export function lexisSearchUrl(term) {
   return (
     "https://plus.lexis.com/search/" +
@@ -194,4 +222,82 @@ export function lexisSearchTerm(key) {
   if (!m) return key;
   const prefix = LEXIS_SEARCH_PREFIX[m[1]];
   return prefix ? `${prefix} § ${m[2]}` : key;
+}
+
+// ---------- Federal keys ----------
+//
+// Statute and regulation keys preserve the citation as the document wrote it
+// ("Treas. Reg. § 1.125", "I.R.C. § 9801(f)"), so the Table of Authorities
+// reads back in the writer's own form. The rewriting to a citation a search
+// engine resolves happens here, at URL time.
+//
+// Splitting a key back into prefix and section is also what makes the
+// carry-over passes work: they rebuild a key from a remembered prefix and a
+// bare section number, so classification has to run off the key alone rather
+// than off any flag set at detection time.
+
+const _KEY_SPLIT_RE = /^(.*?)\s*§\s*(.+)$/;
+const _CFR_PREFIX_RE = /^\d{1,3}\s+C\.F\.R\.$/;
+const _USC_PREFIX_RE = /^\d{1,3}\s+U\.S\.C\.(?:,?\s*App\.)?$/;
+// "40 C.F.R. pt. 60" — a part cite, which carries no § at all.
+const _CFR_PART_RE = /^\d{1,3}\s+C\.F\.R\.\s+pt\.\s+\d+$/;
+// A named regulation, optionally qualified: "Prop. Treas. Reg.".
+const _REG_QUALIFIER_RE = /^(Prop\.|Temp\.)\s+(.*)$/;
+
+// Classify a statute/regulation key and build the search term both providers
+// should receive for it. Returns null when the key is not federal (California
+// codes and the model UCC keep their own paths in resolveUrl).
+//
+//   "29 C.F.R. § 2560.503-1"  -> { kind: "regulation", term: unchanged }
+//   "Treas. Reg. § 1.125"     -> { kind: "regulation", term: "26 C.F.R. § 1.125" }
+//   "Prop. Treas. Reg. § 1.1" -> { kind: "regulation", term: unchanged }
+//   "9 U.S.C. § 1"            -> { kind: "statute",    term: unchanged }
+//   "I.R.C. § 9801(f)"        -> { kind: "statute",    term: "26 U.S.C. § 9801(f)" }
+//   "ERISA § 701"             -> { kind: "statute",    term: unchanged }
+export function federalSearchTerm(key) {
+  if (_CFR_PART_RE.test(key)) return { kind: "regulation", term: key };
+
+  const m = key.match(_KEY_SPLIT_RE);
+  if (!m) return null;
+  const prefix = m[1];
+  const section = m[2];
+
+  if (_CFR_PREFIX_RE.test(prefix)) return { kind: "regulation", term: key };
+  if (_USC_PREFIX_RE.test(prefix)) return { kind: "statute", term: key };
+
+  // A named regulation. A "Prop." qualifier is load-bearing: a proposed
+  // regulation has not been adopted into the C.F.R., so rewriting it to a
+  // C.F.R. section would point at something that does not exist. Search the
+  // practitioner's form instead. Temporary regulations are in the C.F.R.
+  // (their section numbers carry the "T"), so they convert normally.
+  const qual = prefix.match(_REG_QUALIFIER_RE);
+  const bareName = qual ? qual[2] : prefix;
+  const cfrTitle = CFR_TITLE_BY_REG.get(bareName);
+  if (cfrTitle) {
+    if (qual && qual[1] === "Prop.") return { kind: "regulation", term: key };
+    return { kind: "regulation", term: `${cfrTitle} C.F.R. § ${section}` };
+  }
+
+  if (FEDERAL_CODE_NAMES.has(prefix)) {
+    const uscTitle = USC_TITLE_BY_CODE.get(prefix);
+    // Parallel-numbered codes rewrite to the U.S.C. form, which resolves
+    // directly. Independently numbered acts keep their own numbering — the
+    // act-to-U.S.C. correspondence is a table, not a formula — and are found
+    // by popular name.
+    return {
+      kind: "statute",
+      term: uscTitle ? `${uscTitle} U.S.C. § ${section}` : key,
+    };
+  }
+
+  return null;
+}
+
+// True when a key names federal authority in the C.F.R. family. The `kind`
+// carried on a citation drives the Table of Authorities grouping and the
+// underline color; this lets the carry-over passes, which only ever have a
+// rebuilt key to go on, tag inherited references the same way.
+export function isRegulationKey(key) {
+  const fed = federalSearchTerm(key);
+  return !!fed && fed.kind === "regulation";
 }

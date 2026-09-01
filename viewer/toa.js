@@ -10,13 +10,15 @@
 //   panel.setEnabled(bool);                // honor the user's options toggle
 //
 // authorities should already be deduplicated; the panel groups them into
-// Cases / Statutes / Rules and renders each as a plain blue hyperlink.
+// Cases / Statutes / Regulations / Rules and renders each as a plain blue
+// hyperlink.
 
 const STYLE_ID = "__toa_style";
 const PANEL_ID = "__cl_toa";
 const GROUPS = [
   ["case", "Cases"],
   ["statute", "Statutes"],
+  ["regulation", "Regulations"],
   ["rule", "Rules"],
   ["caci", "Jury Instructions"],
 ];

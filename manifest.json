@@ -53,6 +53,7 @@
         "viewer/highlights.js",
         "viewer/reporters.js",
         "viewer/statute-codes.js",
+        "viewer/federal-codes.js",
         "viewer/code-tables.js",
         "viewer/ocr.js",
         "viewer/vendor/tesseract/tesseract.esm.min.js",

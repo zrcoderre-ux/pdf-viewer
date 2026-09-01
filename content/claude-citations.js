@@ -34,9 +34,12 @@
     "p, li, td, th, blockquote, h1, h2, h3, h4, h5, h6, dd, dt, figcaption";
 
   // Bare section reference ("§ 1671", "§§ 430.10", "section 664.6") with no
-  // code name. Used by the single-code inheritance pass below.
+  // code name. Used by the single-code inheritance pass below. The shape is
+  // wide enough for federal sections too — the C.F.R. and the U.S. Code both
+  // put dots and hyphens inside one section number ("§ 2560.503-1"), and a
+  // bare reference that inherits a federal code has to keep the whole thing.
   const BARE_SECTION_RE =
-    /(?:§§?|sections?|secs?\.?)\s*(?<sec>\d+(?:\.\d+)?[a-z]?(?:\([a-z0-9]+\))*)/gi;
+    /(?:§§?|sections?|secs?\.?)\s*(?<sec>\d+(?:\.\d+)*[a-z]{0,3}(?:-\d+[a-z]{0,3})?(?:\([a-z0-9]+\))*)/gi;
 
   // Bare model-UCC reference: a SINGLE "§" (or "section"/"sec.") followed by a
   // HYPHENATED number ("§ 3-310"). The hyphen is the tell for the model UCC, so
@@ -249,16 +252,22 @@
       let hits;
       try { hits = findAllCitations(blockText); } catch { continue; }
       const matchedSpans = [];
-      const markers = []; // { pos, code } where a statute code is named
+      const markers = []; // { pos, code, kind } where a code is named
       // Overflow-clipping ancestors of this block — used at paint time to drop
       // strips for text scrolled out of a clipped container (e.g. a partially
       // collapsed "thinking" panel) so they don't land over the main chat.
       const clipEls = clipAncestorsOf(block);
       for (const cite of hits) {
         matchedSpans.push(cite.span);
-        if (cite.kind === "statute") {
+        if (cite.kind === "statute" || cite.kind === "regulation") {
           const i = cite.key.indexOf(" § ");
-          if (i > 0) markers.push({ pos: cite.span[0], code: cite.key.slice(0, i) });
+          if (i > 0) {
+            markers.push({
+              pos: cite.span[0],
+              code: cite.key.slice(0, i),
+              kind: cite.kind,
+            });
+          }
         }
         const range = rangeForSpan(map, cite.span[0], cite.span[1]);
         if (!range) continue;
@@ -279,6 +288,9 @@
     // before any code is ever named stay unlinked (nothing to inherit). The
     // single-named-code case is just the special case where every bare section
     // follows that one code.
+    // Carried between blocks as { code, kind } — the kind travels with the
+    // code so a section inheriting "Treas. Reg." is still grouped and colored
+    // as a regulation, not a statute.
     let lastCode = null;
     for (const { map, blockText, matchedSpans, markers, clipEls } of blocks) {
       let m;
@@ -311,20 +323,21 @@
         // code carried in from earlier blocks.
         let code = lastCode;
         for (const mk of markers) {
-          if (mk.pos <= s) code = mk.code;
+          if (mk.pos <= s) code = mk;
           else break;
         }
         if (!code) continue;
-        const key = `${code} § ${m.groups.sec}`;
+        const key = `${code.code} § ${m.groups.sec}`;
+        const kind = code.kind;
         let url;
-        try { url = resolveUrl({ kind: "statute", key }, repo, provider); } catch { continue; }
+        try { url = resolveUrl({ kind, key }, repo, provider); } catch { continue; }
         if (!url) continue;
         const range = rangeForSpan(map, s, e);
         if (!range) continue;
-        citations.push({ range, url, key, kind: "statute", clipEls });
+        citations.push({ range, url, key, kind, clipEls });
       }
       // Hand the last code named in this block to the next block.
-      if (markers.length) lastCode = markers[markers.length - 1].code;
+      if (markers.length) lastCode = markers[markers.length - 1];
     }
 
     // Deduplicate by key for the Table of Authorities (the in-text underlines

@@ -16,15 +16,24 @@ import {
   westlawStatuteUrl,
   westlawRuleUrl,
   westlawUccUrl,
+  westlawFederalStatuteUrl,
+  westlawRegulationUrl,
   lexisSearchUrl,
   wlSearchTerm,
   lexisSearchTerm,
   caseReporterCite,
   disambiguatedLexisTerm,
   slipSearchTerm,
+  federalSearchTerm,
+  isRegulationKey,
 } from "./code-tables.js";
 import { REPORTERS_SORTED } from "./reporters.js";
 import { STATUTE_CODES_SORTED } from "./statute-codes.js";
+import {
+  FED_SECTION,
+  FEDERAL_REGULATIONS,
+  FEDERAL_CODES_SORTED,
+} from "./federal-codes.js";
 
 // ============================================================================
 // Regex pieces (ported from pdf_linker.py — keep these in sync)
@@ -209,17 +218,119 @@ function statuteAbbrev(match) {
   return null;
 }
 
-// Federal statutes: "9 U.S.C. § 1", "42 U.S.C. § 1983". Title number precedes
-// the code abbreviation. Allow optional ", App." after "U.S.C." for appendix
-// sections. PDFs sometimes render U.S.C. with intervening spaces between
-// letters, so accept "U. S. C." too.
+// True when the text at `pos` begins with whitespace and then a capital
+// letter — the guard every chained-section loop applies to the number it just
+// matched. A chained number followed by a capitalized word is not another
+// section in the list; it is the title number or lead word of the NEXT
+// citation ("Treas. Reg. § 1.125, 4 Internal Revenue Code section 9801",
+// "29 U.S.C. § 1132 and 42 U.S.C. § 1983"). Left unguarded the chain both
+// invents a citation ("Treas. Reg. § 4") and swallows the title number the
+// real following cite needs. Genuine chains end in punctuation or a lowercase
+// word, so what this gives up is only a list running straight into a
+// capitalized word with no punctuation between.
+//
+// Two reasons this is a JS check on the finished match rather than a lookahead
+// inside the chain patterns. Those patterns carry the `i` flag, under which an
+// inline [A-Z] matches lowercase too — it would end every chain at the first
+// "and". And as a lookahead it would be satisfiable by BACKTRACKING to a
+// shorter number, so "and 42 U.S.C." would quietly match just "4". Applied
+// afterwards, it can only accept or reject the number the regex actually
+// matched. Sticky so it anchors at `pos` without copying the document text.
+const NEXT_CITE_RE = /\s+[A-Z]/y;
+function startsNextCitation(text, pos) {
+  NEXT_CITE_RE.lastIndex = pos;
+  return NEXT_CITE_RE.test(text);
+}
+
+// ---------------------------------------------------------------------------
+// Federal regulations and codes
+// ---------------------------------------------------------------------------
+//
+// Section numbers here use FED_SECTION rather than the California shape: the
+// U.S. Code and the C.F.R. both put dots and hyphens INSIDE a single section
+// number ("2560.503-1", "2000e-2", "1.125-4T"), which the California pattern
+// would truncate — "42 U.S.C. § 2000e-2" came out as "§ 2000e".
+//
+// Each of these three patterns makes the §/section marker optional in the one
+// place it is safe to: when the number that follows is dotted. Every C.F.R.
+// section is part-and-section, so "29 CFR 2560.503-1" is unambiguous, while
+// requiring the marker everywhere else keeps "Treasury Regulations issued in
+// 2004" from being read as a citation to section 2004.
+
+// Federal statutes: "9 U.S.C. § 1", "42 U.S.C. § 2000e-2", "42 USC 1983".
+// The title number precedes the code abbreviation. Allow an optional
+// ", App." for appendix sections, and the annotated editions (U.S.C.A.,
+// U.S.C.S.) practitioners cite from Westlaw and Lexis. PDFs sometimes render
+// the abbreviation with intervening spaces, so "U. S. C." is accepted too.
 const USC_RE = new RegExp(
-  String.raw`\b(?<title>\d{1,3})\s+U\.\s*S\.\s*C\.` +
-  String.raw`(?:\s*App\.)?` +
+  String.raw`\b(?<title>\d{1,3})\s+U\.?\s*S\.?\s*C\.?(?:\s*[AS]\.?)?(?![A-Za-z])` +
+  String.raw`(?:,?\s*App\.)?` +
   String.raw`\s*` +
-  String.raw`(?:§§?|sections?|secs?\.?)\s*` +
-  String.raw`(?<sec>\d+(?:\.\d+)?[a-z]?(?:\([a-z0-9]+\))*)`,
+  String.raw`(?:(?:§§?|sections?|secs?\.?)\s*|(?=\d))` +
+  `(?<sec>${FED_SECTION})`,
   "gi"
+);
+
+// Federal regulations by title: "29 C.F.R. § 2560.503-1", "45 CFR 164.512",
+// and part-level cites ("40 C.F.R. pt. 60", "29 C.F.R. Part 1910"), which
+// name a whole part and carry no section number at all.
+const CFR_RE = new RegExp(
+  String.raw`\b(?<title>\d{1,3})\s+C\.?\s*F\.?\s*R\.?(?![A-Za-z])` +
+  String.raw`,?\s*` +
+  String.raw`(?:(?:pts?\.|parts?)\s*(?<part>\d+)` +
+  String.raw`|(?:(?:§§?|sections?|secs?\.?)\s*|(?=\d+\.))` +
+  `(?<sec>${FED_SECTION}))`,
+  "gi"
+);
+
+// Named regulation series, where the agency name stands in for the C.F.R.
+// title: "Treas. Reg. § 1.125". The optional qualifier is captured because
+// "Prop." changes where the regulation lives — a proposed regulation is not
+// in the C.F.R. yet — and so has to survive into the key.
+const FED_REG_RE = new RegExp(
+  String.raw`\b(?:(?<qual>Prop(?:osed)?|Temp(?:orary)?)\.?\s*)?` +
+  `(?:${FEDERAL_REGULATIONS.map((r, i) => `(?<g${i}>${r.pattern})`).join("|")})` +
+  String.raw`,?\s*` +
+  String.raw`(?:(?:§§?|sections?|secs?\.?)\s*|(?=\d+\.))` +
+  `(?<sec>${FED_SECTION})`,
+  "gi"
+);
+
+function federalRegName(match) {
+  for (let i = 0; i < FEDERAL_REGULATIONS.length; i++) {
+    if (match.groups[`g${i}`]) return FEDERAL_REGULATIONS[i].name;
+  }
+  return null;
+}
+
+// Named federal codes and acts: "Internal Revenue Code section 9801(f)",
+// "I.R.C. § 61", "ERISA § 701", "Bankruptcy Code § 362". The §/section marker
+// is REQUIRED here — an act's name is ordinary enough prose ("the Securities
+// Exchange Act of 1934 requires...") that a bare number after it would be
+// read as a citation far too often.
+const FED_CODE_RE = new RegExp(
+  String.raw`\b(?:${FEDERAL_CODES_SORTED.map((c, i) => `(?<f${i}>${c.pattern})`).join("|")})` +
+  String.raw`(?![A-Za-z])` +
+  String.raw`,?\s*` +
+  String.raw`(?:§§?|sections?|secs?\.?)\s*` +
+  `(?<sec>${FED_SECTION})`,
+  "gi"
+);
+
+function federalCodeName(match) {
+  for (let i = 0; i < FEDERAL_CODES_SORTED.length; i++) {
+    if (match.groups[`f${i}`]) return FEDERAL_CODES_SORTED[i].name;
+  }
+  return null;
+}
+
+// Chained additional sections after a federal cite — the federal counterpart
+// of ADDL_SEC_RE: "29 C.F.R. §§ 2560.503-1, 2560.503-2", "26 U.S.C. §§ 9801
+// and 9802". Anchored to the previous match via the sticky flag.
+const FED_ADDL_SEC_RE = new RegExp(
+  String.raw`\s*(?:,\s*and|,|\s+and)\s+` +
+  `(?<sec>${FED_SECTION})`,
+  "yi"
 );
 
 // Model Uniform Commercial Code — distinct from California's Commercial Code.
@@ -262,7 +373,7 @@ const ADDL_SEC_RE = new RegExp(
 // instead of capturing a bare "3".
 const BARE_SEC_RE = new RegExp(
   String.raw`(?:§§?|\b(?:sections?|secs?\.?))\s*` +
-  String.raw`(?<sec>\d+(?:\.\d+)?[a-z]?(?:-\d+)?(?:\([a-z0-9]+\))*)`,
+  String.raw`(?<sec>\d+(?:\.\d+)*[a-z]{0,3}(?:-\d+[a-z]{0,3})?(?:\([a-z0-9]+\))*)`,
   "gi"
 );
 
@@ -841,19 +952,115 @@ function findStatuteCitations(text) {
   const results = [];
   let m;
 
-  // Model Uniform Commercial Code (hyphenated section). Detected first so the
-  // general California pass below can skip the partial "... § 3" it would
-  // otherwise grab from "U.C.C. § 3-310".
+  // Federal regulations and codes run FIRST. Their section numbers are wider
+  // than the California shape (dots and hyphens inside one number), so a
+  // California pass that reached "26 C.F.R. § 1.125" or "42 U.S.C. § 2000e-2"
+  // first would carve a truncated section out of the middle of it. Every
+  // federal span is recorded and the later passes skip anything overlapping.
+  const fedSpans = [];
+
+  // Push a federal citation plus any sections chained onto it ("§§ 9801,
+  // 9802"), all inheriting the same code prefix. Mirrors what the California
+  // pass does with ADDL_SEC_RE. Returns the scan position to resume from, so
+  // the caller's regex doesn't re-match text a chain already consumed.
+  const pushFederal = (kind, prefix, section, start, end, matched) => {
+    results.push({
+      kind,
+      key: `${prefix} § ${section}`,
+      span: [start, end],
+      matchText: matched,
+    });
+    fedSpans.push([start, end]);
+    let scanPos = end;
+    while (true) {
+      FED_ADDL_SEC_RE.lastIndex = scanPos;
+      const cont = FED_ADDL_SEC_RE.exec(text);
+      if (!cont || cont.index !== scanPos) break;
+      const contEnd = cont.index + cont[0].length;
+      if (startsNextCitation(text, contEnd)) break;
+      results.push({
+        kind,
+        key: `${prefix} § ${cont.groups.sec}`,
+        span: [cont.index, contEnd],
+        matchText: cont[0].replace(/^\s+/, ""),
+      });
+      fedSpans.push([cont.index, contEnd]);
+      scanPos = contEnd;
+    }
+    return scanPos;
+  };
+
+  // "29 C.F.R. § 2560.503-1", "40 C.F.R. pt. 60".
+  CFR_RE.lastIndex = 0;
+  while ((m = CFR_RE.exec(text)) !== null) {
+    const prefix = `${m.groups.title} C.F.R.`;
+    const start = m.index, end = m.index + m[0].length;
+    if (m.groups.part !== undefined) {
+      // A part cite names a whole part, so there is no section to chain onto.
+      results.push({
+        kind: "regulation",
+        key: `${prefix} pt. ${m.groups.part}`,
+        span: [start, end],
+        matchText: m[0],
+      });
+      fedSpans.push([start, end]);
+      continue;
+    }
+    CFR_RE.lastIndex = pushFederal("regulation", prefix, m.groups.sec, start, end, m[0]);
+  }
+
+  // "Treas. Reg. § 1.125", "Prop. Treas. Reg. § 1.125-1". The qualifier stays
+  // in the key: a proposed regulation is not in the C.F.R., and the URL
+  // builder has to be able to tell.
+  FED_REG_RE.lastIndex = 0;
+  while ((m = FED_REG_RE.exec(text)) !== null) {
+    const start = m.index, end = m.index + m[0].length;
+    if (fedSpans.some(([a, b]) => start < b && end > a)) continue;
+    const name = federalRegName(m);
+    if (!name) continue;
+    const qual = m.groups.qual
+      ? (/^prop/i.test(m.groups.qual) ? "Prop. " : "Temp. ")
+      : "";
+    FED_REG_RE.lastIndex =
+      pushFederal("regulation", `${qual}${name}`, m.groups.sec, start, end, m[0]);
+  }
+
+  // "Internal Revenue Code section 9801(f)", "ERISA § 701".
+  FED_CODE_RE.lastIndex = 0;
+  while ((m = FED_CODE_RE.exec(text)) !== null) {
+    const start = m.index, end = m.index + m[0].length;
+    if (fedSpans.some(([a, b]) => start < b && end > a)) continue;
+    const name = federalCodeName(m);
+    if (!name) continue;
+    FED_CODE_RE.lastIndex =
+      pushFederal("statute", name, m.groups.sec, start, end, m[0]);
+  }
+
+  // "9 U.S.C. § 1", "42 U.S.C. § 2000e-2". The key keeps the title number
+  // explicit: "9 U.S.C. § 1".
+  USC_RE.lastIndex = 0;
+  while ((m = USC_RE.exec(text)) !== null) {
+    const start = m.index, end = m.index + m[0].length;
+    if (fedSpans.some(([a, b]) => start < b && end > a)) continue;
+    USC_RE.lastIndex =
+      pushFederal("statute", `${m.groups.title} U.S.C.`, m.groups.sec, start, end, m[0]);
+  }
+
+  // Model Uniform Commercial Code (hyphenated section). Detected before the
+  // general California pass below so that pass can skip the partial "... § 3"
+  // it would otherwise grab from "U.C.C. § 3-310".
   const uccSpans = [];
   UCC_RE.lastIndex = 0;
   while ((m = UCC_RE.exec(text)) !== null) {
+    const s0 = m.index, e0 = m.index + m[0].length;
+    if (fedSpans.some(([a, b]) => s0 < b && e0 > a)) continue;
     results.push({
       kind: "statute",
       key: `UCC § ${m.groups.sec}`,
-      span: [m.index, m.index + m[0].length],
+      span: [s0, e0],
       matchText: m[0],
     });
-    uccSpans.push([m.index, m.index + m[0].length]);
+    uccSpans.push([s0, e0]);
   }
 
   // California statutes (and chained additional sections).
@@ -861,6 +1068,7 @@ function findStatuteCitations(text) {
   while ((m = STATUTE_RE.exec(text)) !== null) {
     const s = m.index, e = m.index + m[0].length;
     if (uccSpans.some(([a, b]) => s < b && e > a)) continue; // part of a UCC cite
+    if (fedSpans.some(([a, b]) => s < b && e > a)) continue; // part of a federal cite
     const abbrev = statuteAbbrev(m);
     if (!abbrev) continue;
     const section = m.groups.sec;
@@ -878,6 +1086,7 @@ function findStatuteCitations(text) {
       ADDL_SEC_RE.lastIndex = scanPos;
       const cont = ADDL_SEC_RE.exec(text);
       if (!cont || cont.index !== scanPos) break;
+      if (startsNextCitation(text, cont.index + cont[0].length)) break;
       results.push({
         kind: "statute",
         key: `${abbrev} § ${cont.groups.sec}`,
@@ -886,20 +1095,6 @@ function findStatuteCitations(text) {
       });
       scanPos = cont.index + cont[0].length;
     }
-  }
-
-  // Federal statutes: "9 U.S.C. § 1", "42 U.S.C. § 1983".
-  // Key form preserves the title number explicitly: "9 U.S.C. § 1".
-  USC_RE.lastIndex = 0;
-  while ((m = USC_RE.exec(text)) !== null) {
-    const title = m.groups.title;
-    const section = m.groups.sec;
-    results.push({
-      kind: "statute",
-      key: `${title} U.S.C. \u00a7 ${section}`,
-      span: [m.index, m.index + m[0].length],
-      matchText: m[0],
-    });
   }
 
   // Carry-over: once a page ties a section number to a code name, later bare
@@ -935,9 +1130,11 @@ function findStatuteCitations(text) {
       const slot = `${pageOf(s)}|${baseSectionNumber(m.groups.sec)}`;
       const owner = byNumber.get(slot);
       if (!owner || s < owner.from) continue;
+      const key = `${owner.prefix} \u00a7 ${m.groups.sec}`;
+      const kind = isRegulationKey(key) ? "regulation" : "statute";
       results.push({
-        kind: "statute",
-        key: `${owner.prefix} \u00a7 ${m.groups.sec}`,
+        kind,
+        key,
         span: [s, e],
         matchText: m[0],
         inheritedCode: true,
@@ -949,8 +1146,9 @@ function findStatuteCitations(text) {
         ADDL_SEC_RE.lastIndex = scanPos;
         const cont = ADDL_SEC_RE.exec(text);
         if (!cont || cont.index !== scanPos) break;
+        if (startsNextCitation(text, cont.index + cont[0].length)) break;
         results.push({
-          kind: "statute",
+          kind,
           key: `${owner.prefix} \u00a7 ${cont.groups.sec}`,
           span: [cont.index, cont.index + cont[0].length],
           matchText: cont[0].replace(/^\s+/, ""),
@@ -1022,6 +1220,7 @@ function findCaciCitations(text) {
       CACI_ADDL_RE.lastIndex = scanPos;
       const cont = CACI_ADDL_RE.exec(text);
       if (!cont || cont.index !== scanPos) break;
+      if (startsNextCitation(text, cont.index + cont[0].length)) break;
       results.push({
         kind: "caci",
         key: `CACI No. ${normalizeCaciNum(cont.groups.num)}`,
@@ -1284,6 +1483,7 @@ export function resolveUrl(cite, repo, provider) {
   const section =
     cite.kind === "case" ? "cases" :
     cite.kind === "statute" ? "statutes" :
+    cite.kind === "regulation" ? "regulations" :
     cite.kind === "caci" ? "caci" : "rules";
   const entry = (repo[section] || {})[cite.key] || {};
 
@@ -1327,7 +1527,7 @@ export function resolveUrl(cite, repo, provider) {
     return westlawCaseUrl(reporterCite);
   }
 
-  if (cite.kind === "statute") {
+  if (cite.kind === "statute" || cite.kind === "regulation") {
     // Model Uniform Commercial Code — provider-specific search terms:
     //   Lexis+   "U.C.C. § 3-310"
     //   Westlaw  "Unif.Commercial Code § 3-310"
@@ -1337,6 +1537,19 @@ export function resolveUrl(cite, repo, provider) {
       return effectiveProvider === "lexis"
         ? lexisSearchUrl(`U.C.C. § ${sec}`)
         : westlawUccUrl(`Unif.Commercial Code § ${sec}`);
+    }
+    // Federal regulations and codes. Classified off the KEY rather than off
+    // cite.kind, because the carry-over passes — here and in the claude.ai
+    // content script — rebuild a citation from a remembered code prefix and a
+    // bare section number, and a key is all they have. Westlaw's California
+    // jurisdiction filter would hide every one of these, so they route to the
+    // national search builders instead.
+    const fed = federalSearchTerm(cite.key);
+    if (fed) {
+      if (effectiveProvider === "lexis") return lexisSearchUrl(fed.term);
+      return fed.kind === "regulation"
+        ? westlawRegulationUrl(fed.term)
+        : westlawFederalStatuteUrl(fed.term);
     }
     return effectiveProvider === "lexis"
       ? lexisSearchUrl(lexisSearchTerm(cite.key))
@@ -1460,7 +1673,9 @@ function extractDistinctiveSubstring(needle) {
   // keyword preceding it. The marker is what visually anchors the cite
   // for the reader; it's also rare enough not to false-match elsewhere
   // on the page. Capture up to two chained sections with §§.
-  let m = needle.match(/§§?\s*\d+(?:\.\d+)?[a-z]?(?:\([a-z0-9]+\))*(?:\s*,\s*\d+(?:\.\d+)?[a-z]?(?:\([a-z0-9]+\))*)?/i);
+  let m = needle.match(
+    new RegExp(String.raw`§§?\s*` + FED_SECTION + String.raw`(?:\s*,\s*` + FED_SECTION + String.raw`)?`, "i")
+  );
   if (m) return m[0];
 
   // "sections? 12345" form (no § marker — e.g. when the cite is at the
@@ -1483,8 +1698,10 @@ function extractDistinctiveSubstring(needle) {
   m = needle.match(/rules?\s+\d+(?:\.\d+)*(?:\([a-z0-9]+\))*/i);
   if (m) return m[0];
 
-  // U.S.C.: "9 U.S.C. § 1".
-  m = needle.match(/\d+\s+U\.\s*S\.\s*C\.[^a-z]*§§?\s*\d+(?:\.\d+)?[a-z]?(?:\([a-z0-9]+\))*/i);
+  // U.S.C. and C.F.R.: "9 U.S.C. § 1", "29 C.F.R. § 2560.503-1".
+  m = needle.match(
+    new RegExp(String.raw`\d+\s+(?:U\.?\s*S\.?\s*C\.?|C\.?\s*F\.?\s*R\.?)[^a-z]*§§?\s*` + FED_SECTION, "i")
+  );
   if (m) return m[0];
 
   return null;

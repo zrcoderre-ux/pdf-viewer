@@ -41,9 +41,14 @@ In addition to citation linking, the viewer supports:
 - **CACI jury instructions** — references like **CACI No. 3710** (also
   `CACI 3710`, `CACI Nos. 3710, 3711`, verdict forms `CACI No. VF-3900`) link to
   the instruction on your provider.
+- **Federal regulations and codes** — `29 C.F.R. § 2560.503-1`, `45 CFR
+  164.512(a)`, `40 C.F.R. pt. 60`, `Treas. Reg. § 1.125`, `42 U.S.C. § 2000e-2`,
+  `Internal Revenue Code section 9801(f)`, `Bankruptcy Code § 362(a)` and
+  `ERISA § 502(a)` all link, and are searched nationally rather than through
+  the California filter that scopes a state-code search. See below.
 - **Table of Authorities** — a side panel listing every detected case,
-  statute, rule, and CACI instruction once, as a clickable link to your
-  provider; minimizable and drag-resizable. The same panel appears for
+  statute, regulation, rule, and CACI instruction once, as a clickable link to
+  your provider; minimizable and drag-resizable. The same panel appears for
   claude.ai. Options →
   "Table of Authorities" has separate checkboxes for the PDF viewer and
   websites (default: **off** for PDFs, **on** for websites); in-text links are
@@ -212,7 +217,7 @@ applies on the next page load.
 
 In addition to the in-text underlines, a **Table of Authorities** panel appears
 in the right margin whenever at least one citation is found. It lists each
-unique authority once, grouped into Cases / Statutes / Rules, as a regular blue
+unique authority once, grouped into Cases / Statutes / Regulations / Rules, as a regular blue
 hyperlink on the citation text itself (opening Westlaw or Lexis+). The panel can
 be minimized to just its header bar and maximized again, and **resized** by
 dragging the grip in its bottom-left corner; the minimized state and custom
@@ -320,6 +325,33 @@ memorandum (10/10 match, identical keys). The port includes:
   by the hyphenated section number, and resolved to the model UCC on each
   provider (`U.C.C. § 3-310` on Lexis+, `Unif.Commercial Code § 3-310` on
   Westlaw).
+- **Federal regulations**: the C.F.R. by title (`29 C.F.R. § 2560.503-1`,
+  `45 CFR 164.512(a)`, and part cites like `40 C.F.R. pt. 60`), plus named
+  series where the agency stands in for the title — `Treas. Reg. § 1.125` is
+  searched as `26 C.F.R. § 1.125`. A **proposed** regulation is the exception:
+  `Prop. Treas. Reg. § 1.125-1` is searched as written, because a proposed
+  regulation has not been adopted into the C.F.R. and the converted cite would
+  point at a section that does not exist. Temporary regulations are in the
+  C.F.R. and convert normally.
+- **Federal codes**: the U.S. Code (`42 U.S.C. § 1983`, bare `42 USC 1983`,
+  annotated `5 U.S.C.A. § 552`, appendix `9 U.S.C. App. § 1`), and named codes
+  and acts — `Internal Revenue Code section 9801(f)` / `I.R.C. § 61` / `IRC
+  § 501(c)(3)`, `Bankruptcy Code § 362(a)`, `ERISA § 502(a)`, `FLSA`, `NLRA`,
+  the `Securities Exchange Act of 1934`.
+
+  Named codes split on whether the act was codified section-for-section. The
+  Internal Revenue Code and the Bankruptcy Code were, so `I.R.C. § 9801` is
+  searched as `26 U.S.C. § 9801` — a citation both providers resolve directly.
+  ERISA and the rest were not (`ERISA § 701` is `29 U.S.C. § 1181`, a
+  section-by-section lookup table rather than a formula), so those keep the
+  act's own numbering and are found by popular name. Either way the citation is
+  listed in the Table of Authorities in the form the document used.
+
+  Federal section numbers carry dots and hyphens *inside* one number —
+  `2560.503-1`, `2000e-2`, `1.125-4T` — so they are matched with a wider
+  pattern than the California codes. A hyphen between two plain integers stays
+  a range: `29 U.S.C. §§ 1181-1185` links section 1181 rather than inventing a
+  section "1181-1185".
 - Non-`v.` case names (separate pattern, no `v.` anchor): `In re`,
   `Estate of`, `Guardianship of`, `Conservatorship of`, `Adoption of`,
   `Marriage of` — e.g. `Conservatorship of Whitley (2010) 50 Cal.4th 1206`.
@@ -421,6 +453,7 @@ viewer/footer-naming.js              Footer-derived naming rule engine
 viewer/disambiguation.js             Cross-tab collision registry
 viewer/reporters.js                  Reporter list (port of REPORTERS_RAW)
 viewer/statute-codes.js              Code patterns (port of STATUTE_CODES)
+viewer/federal-codes.js              C.F.R. / U.S.C. / named federal codes
 viewer/code-tables.js                WL / Lexis search prefix tables
 fetch-pdfjs.sh                       One-time PDF.js download
 ```
