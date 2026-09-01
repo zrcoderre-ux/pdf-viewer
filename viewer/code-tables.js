@@ -183,10 +183,11 @@ export function westlawFederalStatuteUrl(query) {
   );
 }
 
-// Federal regulations (C.F.R. and the named regulation series). No
-// contentType filter — regulations are not statutes, and an unfiltered
-// national search reliably surfaces the C.F.R. section.
-export function westlawRegulationUrl(query) {
+// Federal material that is not statutory: C.F.R. sections, the named
+// regulation series, and IRS published guidance. No contentType filter —
+// none of these live in the statute databases, and an unfiltered national
+// search reliably surfaces them.
+export function westlawFederalSearchUrl(query) {
   return (
     "https://1.next.westlaw.com/Search/Results.html" +
     "?query=" + encodeURIComponent(query)
@@ -239,6 +240,9 @@ export function lexisSearchTerm(key) {
 const _KEY_SPLIT_RE = /^(.*?)\s*§\s*(.+)$/;
 const _CFR_PREFIX_RE = /^\d{1,3}\s+C\.F\.R\.$/;
 const _USC_PREFIX_RE = /^\d{1,3}\s+U\.S\.C\.(?:,?\s*App\.)?$/;
+// "Rev. Rul. 2013-17". The ruling number is the whole citation — both
+// providers index it in that form, so nothing is rewritten.
+const _REV_RUL_RE = /^Rev\. Rul\. (?:\d{4}|\d{2})-\d{1,3}$/;
 // "40 C.F.R. pt. 60" — a part cite, which carries no § at all.
 const _CFR_PART_RE = /^\d{1,3}\s+C\.F\.R\.\s+pt\.\s+\d+$/;
 // A named regulation, optionally qualified: "Prop. Treas. Reg.".
@@ -251,10 +255,13 @@ const _REG_QUALIFIER_RE = /^(Prop\.|Temp\.)\s+(.*)$/;
 //   "29 C.F.R. § 2560.503-1"  -> { kind: "regulation", term: unchanged }
 //   "Treas. Reg. § 1.125"     -> { kind: "regulation", term: "26 C.F.R. § 1.125" }
 //   "Prop. Treas. Reg. § 1.1" -> { kind: "regulation", term: unchanged }
+//   "Rev. Rul. 2013-17"       -> { kind: "guidance",   term: unchanged }
 //   "9 U.S.C. § 1"            -> { kind: "statute",    term: unchanged }
 //   "I.R.C. § 9801(f)"        -> { kind: "statute",    term: "26 U.S.C. § 9801(f)" }
 //   "ERISA § 701"             -> { kind: "statute",    term: unchanged }
 export function federalSearchTerm(key) {
+  // Revenue rulings and C.F.R. part cites carry no "§" to split on.
+  if (_REV_RUL_RE.test(key)) return { kind: "guidance", term: key };
   if (_CFR_PART_RE.test(key)) return { kind: "regulation", term: key };
 
   const m = key.match(_KEY_SPLIT_RE);

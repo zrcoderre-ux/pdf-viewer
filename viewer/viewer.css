@@ -820,6 +820,10 @@ select.form-field { padding: 0; }
 /* Federal regulations (C.F.R., Treas. Reg.). A lighter green than a statute —
    related enough to read as the same family, distinct enough to tell apart. */
 .linkLayer a.citation-link[data-kind="regulation"] { color: #4f8a10; }
+/* IRS published guidance (revenue rulings) — agency authority rather than
+   enacted law, so it gets its own color instead of a shade of the statute
+   green. */
+.linkLayer a.citation-link[data-kind="guidance"] { color: #9a6700; }
 .linkLayer a.citation-link[data-kind="rule"]    { color: #b06000; }
 .linkLayer a.citation-link[data-kind="caci"]    { color: #00838f; }
 .linkLayer a.citation-link[data-kind="supra"]   { color: #8430ce; border-bottom-style: dashed; }

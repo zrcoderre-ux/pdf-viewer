@@ -46,9 +46,12 @@ In addition to citation linking, the viewer supports:
   `Internal Revenue Code section 9801(f)`, `Bankruptcy Code § 362(a)` and
   `ERISA § 502(a)` all link, and are searched nationally rather than through
   the California filter that scopes a state-code search. See below.
+- **IRS revenue rulings** — `Rev. Rul. 2013-17`, `Revenue Ruling 2013-17`,
+  `Rev. Rul. 83-137, 1983-2 C.B. 41`, and chained lists (`Rev. Ruls. 2003-102,
+  2003-103 and 2004-45`) link to the ruling on your provider.
 - **Table of Authorities** — a side panel listing every detected case,
-  statute, regulation, rule, and CACI instruction once, as a clickable link to
-  your provider; minimizable and drag-resizable. The same panel appears for
+  statute, regulation, revenue ruling, rule, and CACI instruction once, as a
+  clickable link to your provider; minimizable and drag-resizable. The same panel appears for
   claude.ai. Options →
   "Table of Authorities" has separate checkboxes for the PDF viewer and
   websites (default: **off** for PDFs, **on** for websites); in-text links are
@@ -217,7 +220,8 @@ applies on the next page load.
 
 In addition to the in-text underlines, a **Table of Authorities** panel appears
 in the right margin whenever at least one citation is found. It lists each
-unique authority once, grouped into Cases / Statutes / Regulations / Rules, as a regular blue
+unique authority once, grouped into Cases / Statutes / Regulations /
+Administrative Guidance / Rules, as a regular blue
 hyperlink on the citation text itself (opening Westlaw or Lexis+). The panel can
 be minimized to just its header bar and maximized again, and **resized** by
 dragging the grip in its bottom-left corner; the minimized state and custom
@@ -352,6 +356,16 @@ memorandum (10/10 match, identical keys). The port includes:
   pattern than the California codes. A hyphen between two plain integers stays
   a range: `29 U.S.C. §§ 1181-1185` links section 1181 rather than inventing a
   section "1181-1185".
+- **IRS revenue rulings**: `Rev. Rul. 2013-17` and `Revenue Ruling 2013-17`,
+  with or without the bulletin the ruling was published in — Bluebook T1.2
+  cites to the Cumulative Bulletin or its advance sheet the Internal Revenue
+  Bulletin, and `Rev. Rul. 83-137, 1983-2 C.B. 41` is underlined whole rather
+  than stopping after the number. Both number eras are read: the two-digit
+  year used before 2000 (`Rev. Rul. 99-7`) and the four-digit one after it.
+  Whatever dash a PDF renders — hyphen, en dash, em dash — normalizes to one
+  authority, so `Rev. Rul. 96–55` and `Rev. Rul. 96-55` are not listed twice.
+  A ruling has no section number, so nothing carries over to a later bare
+  reference the way a statute's section does.
 - Non-`v.` case names (separate pattern, no `v.` anchor): `In re`,
   `Estate of`, `Guardianship of`, `Conservatorship of`, `Adoption of`,
   `Marriage of` — e.g. `Conservatorship of Whitley (2010) 50 Cal.4th 1206`.
