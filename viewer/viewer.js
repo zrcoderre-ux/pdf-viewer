@@ -2066,7 +2066,7 @@ async function renderAllPages() {
     if (signal.aborted) return;
     const refs = await renderPageCanvasAndText(pageNum);
     if (signal.aborted) return;
-    ingestPage(pageNum, refs.textContent);
+    ingestPage(pageNum, refs.textContent, { italicFontNames: refs.italicFontNames });
     // Same extracted text the linker just ingested — auto-scroll paces itself
     // by how many words each rendered page actually holds.
     autoScroll.notePageText(pageNum, refs.textContent);
@@ -2548,7 +2548,45 @@ async function renderPageCanvasAndText(pageNumber) {
   applySelectableArea(textLayerDiv);
   updateCropOverlay(wrapper);
 
-  return { pageNumber, textContent, textLayerDiv, linkLayerDiv, highlightLayerDiv, pageWrapper: wrapper, viewport: userSpaceViewport };
+  return {
+    pageNumber, textContent, textLayerDiv, linkLayerDiv, highlightLayerDiv,
+    pageWrapper: wrapper, viewport: userSpaceViewport,
+    italicFontNames: italicFontNamesFor(page, textContent),
+  };
+}
+
+// Which of a page's fonts are italic. The text layer is no help here — PDF.js
+// gives its spans only a generic fallback family ("serif") — so posture has to
+// come from the font object PDF.js resolved during render: `italic` when it
+// worked the posture out itself, and otherwise the font's own name, which is
+// how italic faces are labeled in practice ("ABCDEF+TimesNewRomanPS-ItalicMT",
+// "Garamond-Oblique", "TimesNewRoman,It").
+//
+// This is what lets the citation linker see that a later "Market Lofts" is set
+// in italics, and so is a reference to the case cited in full earlier.
+const ITALIC_FONT_NAME_RE = /italic|oblique|(?:^|[-_,+])it(?:al)?(?:mt)?$/i;
+
+function italicFontNamesFor(page, textContent) {
+  const italic = new Set();
+  const styles = textContent && textContent.styles;
+  if (!styles) return italic;
+  for (const fontName of Object.keys(styles)) {
+    let font = null;
+    try {
+      if (page.commonObjs.has(fontName)) font = page.commonObjs.get(fontName);
+    } catch {
+      font = null;
+    }
+    if (!font) continue;
+    if (font.italic === true) { italic.add(fontName); continue; }
+    // Subset-embedded fonts carry a six-letter "ABCDEF+" tag before the name.
+    const name = String(font.name || "").replace(/^[A-Z]{6}\+/, "");
+    const substituted = String(font.systemFontInfo?.css || "");
+    if (ITALIC_FONT_NAME_RE.test(name) || ITALIC_FONT_NAME_RE.test(substituted)) {
+      italic.add(fontName);
+    }
+  }
+  return italic;
 }
 
 // Limit which text is selectable. If the user has drawn a selectable-text region

@@ -461,9 +461,15 @@ const ANCHOR_RE = /(?<=\s)v\.(?=\s)/g;
 // Plaintiff: uppercase-leading token with internal letters/digits/'-./&.
 // Defendant: same, plus optional ", Inc." / ", LLC" / etc.
 const _PARTY_TOKEN = String.raw`[A-Z][A-Za-z0-9.\-'\u2019&]*`;
+// A defendant may open with a number — "9th Street Market Lofts, LLC",
+// "3M Co.", "7-Eleven, Inc." — so its first token accepts digits followed by
+// a letter (or a hyphen and a capital). Plaintiffs keep the capital-only
+// rule: a leading number there is nearly always stray text, not a party.
+const _DEF_FIRST_TOKEN =
+  String.raw`(?:[A-Z]|\d+(?:[A-Za-z]|[\-\u2010-\u2015][A-Z]))[A-Za-z0-9.\-'\u2019&]*`;
 const SHORT_FORM_RE = new RegExp(
   String.raw`\b(${_PARTY_TOKEN}(?:\s+${_PARTY_TOKEN}){0,3})\s+v\.\s+` +
-  String.raw`(${_PARTY_TOKEN}(?:\s+${_PARTY_TOKEN}){0,4}(?:,\s*(?:Inc|LLC|LLP|Ltd|Corp|Co)\.?)?)`,
+  String.raw`(${_DEF_FIRST_TOKEN}(?:\s+${_PARTY_TOKEN}){0,4}(?:,\s*(?:Inc|LLC|LLP|Ltd|Corp|Co)\.?)?)`,
   "g"
 );
 
@@ -774,6 +780,26 @@ function shortName(plaintiff) {
   return parts[0] ? parts[0].replace(/[,.;:]+$/, "") : p;
 }
 
+// A parenthetical directly after a full citation that ANNOUNCES the short
+// name the rest of the document will use: "... 222 Cal.App.4th 924 (Market
+// Lofts)", "(hereafter Market Lofts)", '("Market Lofts")'. Most trailing
+// parentheticals are something else entirely — subsequent history, an
+// explanatory phrase, "citation omitted" — so anything carrying the
+// vocabulary of those is rejected. Returns the announced name, or null.
+const PAREN_NAME_RE = /^\s*\((?:here(?:in)?after,?\s+)?["'\u201c\u2018]?([A-Z][A-Za-z0-9.'\u2019&\-]*(?:\s+[A-Za-z0-9.'\u2019&\-]+){0,4})["'\u201d\u2019]?\)/;
+const PAREN_NAME_REJECT_RE =
+  /\b(?:omitted|added|emphasis|italics|quotation|quotations|citation|citations|internal|cleaned|banc|curiam|plurality|opn|dictum|dicta|modified|denied|granted|overruled|disapproved|superseded|affd|revd|aff|rev|cert|accord|quoting|citing|holding|noting|finding|conc|dis|see|supra|infra|fn|footnote|original|italic)\b/i;
+
+function parentheticalShortName(text, endOfCite) {
+  const m = PAREN_NAME_RE.exec(text.slice(endOfCite, endOfCite + 90));
+  if (!m) return null;
+  const name = m[1].replace(/[,.;:]+$/, "").trim();
+  if (name.length < 3) return null;
+  if (/\d/.test(name)) return null;              // "(2014)", "(9th Cir. 2015)"
+  if (PAREN_NAME_REJECT_RE.test(name)) return null;
+  return name;
+}
+
 function findCaseCitations(text) {
   const results = [];
 
@@ -835,7 +861,13 @@ function findCaseCitations(text) {
     const [kind, mm] = candidates[0];
 
     const defendantText = rest.slice(0, mm.index).replace(/[,\s]+$/, "").trim();
-    if (!defendantText || !/[A-Z]/.test(defendantText[0])) continue;
+    // A defendant normally opens with a capital, but plenty of real parties
+    // open with a number — "9th Street Market Lofts, LLC", "3M Co.", "21st
+    // Century Ins. Co.", "99 Cents Only Stores". Accept a leading digit too,
+    // still requiring a capitalized word somewhere in the name so stray
+    // numeric text between "v." and a reporter can't pass as a party.
+    if (!defendantText) continue;
+    if (!/^[A-Z0-9]/.test(defendantText) || !/[A-Z]/.test(defendantText)) continue;
     if (defendantText.length > 200) continue;
 
     let tailForKey;
@@ -872,6 +904,13 @@ function findCaseCitations(text) {
       span: [plaintiffStart, matchEnd],
       matchText: text.slice(plaintiffStart, matchEnd),
       short: shortName(plaintiffClean),
+      plaintiff: plaintiffClean,
+      defendant: defendantClean,
+      caseName: `${plaintiffClean} v. ${defendantClean}`,
+      // A court that means to be short-cited says so right after the full
+      // cite: "... 222 Cal.App.4th 924 (Market Lofts)". That parenthetical
+      // is the name the rest of the document will italicize.
+      parenName: parentheticalShortName(text, matchEnd),
       // WL-only unpublished decisions exist only on Westlaw.
       wlOnly:    kind === "wl",
       // U.S. Dist. LEXIS database numbers are Lexis-only.
@@ -911,6 +950,8 @@ function findCaseCitations(text) {
         span: [m.index, m.index + m[0].length],
         matchText: m[0],
         short: shortName(fullName),
+        caseName: fullName,
+        parenName: parentheticalShortName(text, m.index + m[0].length),
         wlOnly,
       });
       continue;
@@ -924,6 +965,8 @@ function findCaseCitations(text) {
       span: [m.index, m.index + m[0].length],
       matchText: m[0],
       short: shortName(fullName),
+      caseName: fullName,
+      parenName: parentheticalShortName(text, m.index + m[0].length),
     });
   }
 
@@ -945,6 +988,8 @@ function findCaseCitations(text) {
       span: [m.index, m.index + m[0].length],
       matchText: m[0],
       short: name.split(/\s+/)[0],
+      caseName: name,
+      parenName: parentheticalShortName(text, m.index + m[0].length),
     });
   }
 
@@ -1435,6 +1480,231 @@ function findShortFormCitations(text, fullCites) {
 }
 
 // ============================================================================
+// Italicized short names — "the court in *Market Lofts* held ..."
+// ============================================================================
+//
+// Case names are italicized; nothing else in a brief or an opinion reliably
+// is. So once a case has been cited in full, a later italic run carrying part
+// of its name IS a reference to it, and gets the same link the full cite got.
+//
+// The safety rule is the one a reader applies: link only when the italicized
+// fragment can mean exactly one case already cited earlier in the document.
+// If two cases cited before it answer to the same fragment ("Smith" for both
+// Smith v. Jones and People v. Smith), the fragment is ambiguous and stays
+// unlinked, even though a longer fragment naming either of them would link.
+
+// Words that identify nothing on their own. A fragment made only of these
+// ("People", "the State", "Superior Court") is never enough to name a case.
+const GENERIC_PARTY_WORDS = new Set([
+  "people", "state", "states", "city", "county", "united", "us", "usa",
+  "commissioner", "commission", "board", "department", "dept", "director",
+  "estate", "marriage", "matter", "conservatorship", "guardianship",
+  "adoption", "in", "re", "the", "of", "and", "a", "an", "co", "company",
+  "corp", "corporation", "companies", "inc", "llc", "llp", "lp", "ltd",
+  "court", "courts", "superior", "supreme", "appeal", "appeals",
+  "government", "district", "association", "assn", "assoc", "committee",
+  "bank", "insurance", "ins", "national", "american", "california",
+  "general", "attorney", "employment", "industrial", "public", "division",
+  "agency", "authority", "council", "bureau", "office", "service",
+  "services", "systems", "group", "partners", "holdings", "trust", "et",
+  "al", "defendant", "defendants", "plaintiff", "plaintiffs", "respondent",
+  "appellant", "petitioner", "real",
+]);
+
+// Trailing corporate designators, dropped to produce a second alias so
+// "*Ford Motor*" reaches "Ford Motor Co."
+const CORP_SUFFIX_RE =
+  /[,\s]+(?:Inc|LLC|L\.L\.C|LLP|L\.L\.P|LP|Ltd|Corp|Co|Company|N\.A|P\.C|PC|S\.A)\.?$/i;
+
+// Signal and connective words an italic run carries alongside the name —
+// "*See Market Lofts*", "*Market Lofts, supra*", "*accord Aguilar*". None of
+// them ever stands alone as a case's short name.
+const ITALIC_TRIM_WORDS = new Set([
+  "see", "also", "cf", "but", "compare", "accord", "contra", "eg", "ie",
+  "in", "quoting", "citing", "following", "id", "ibid", "supra", "infra",
+  "at", "and", "with", "the", "of", "to", "e", "g", "i", "here",
+  "generally", "post", "ante", "hereafter", "hereinafter",
+]);
+
+function allGeneric(aliasWords) {
+  return aliasWords.every((w) => GENERIC_PARTY_WORDS.has(w));
+}
+
+// Alias forms for one party name: the whole name, the whole name without a
+// corporate designator, and each leading word-prefix of it. Prefixes are how
+// a two-word distinctive name gets recognized ("Market Lofts" out of "Market
+// Lofts Community Assn."), so they're only generated when the name opens with
+// a distinctive word — "City of Los Angeles" must not contribute "City".
+function partyAliases(name) {
+  const out = [];
+  const push = (str) => {
+    const norm = normalizeParty(str);
+    if (!norm || norm.length < 3) return;
+    const words = norm.split(" ");
+    if (allGeneric(words)) return;
+    out.push(norm);
+  };
+  const base = name.trim().replace(SHORT_NAME_PREFIX_RE, "").trim();
+  if (!base) return out;
+  push(base);
+  const noCorp = base.replace(CORP_SUFFIX_RE, "").trim();
+  if (noCorp !== base) push(noCorp);
+
+  const words = noCorp.split(/\s+/);
+  if (!words.length) return out;
+  if (GENERIC_PARTY_WORDS.has(normalizeParty(words[0]))) return out;
+  for (let n = 1; n < Math.min(words.length, 5); n++) {
+    // A prefix ending on a generic word adds nothing the shorter one didn't
+    // already say ("Farmers' Insurance" over "Farmers'"), so skip it — but
+    // keep going, because the word after it may well be distinctive.
+    if (GENERIC_PARTY_WORDS.has(normalizeParty(words[n - 1]))) continue;
+    push(words.slice(0, n).join(" "));
+  }
+  return out;
+}
+
+// Every fragment that names this case. Plaintiff-side aliases come first
+// because that's the convention; the defendant only supplies aliases when the
+// plaintiff is an institution the short name would never be built from
+// ("People v. Smith" is "Smith"). A parenthetical the court announced always
+// counts, whichever side it came from.
+function caseAliases(cite) {
+  const out = new Set();
+  const add = (a) => { if (a) out.add(a); };
+  if (cite.caseName) add(normalizeParty(cite.caseName));
+  const plaintiffSide = cite.plaintiff ? partyAliases(cite.plaintiff)
+                      : cite.caseName  ? partyAliases(cite.caseName)
+                      : [];
+  for (const a of plaintiffSide) add(a);
+  if (!plaintiffSide.length && cite.defendant) {
+    for (const a of partyAliases(cite.defendant)) add(a);
+  }
+  if (cite.parenName) {
+    for (const a of partyAliases(cite.parenName)) add(a);
+    add(normalizeParty(cite.parenName));
+  }
+  out.delete("");
+  return out;
+}
+
+// Italic character ranges arrive per text item, so one italicized name is
+// usually several adjacent ranges. Join ranges separated by nothing but
+// whitespace back into the single run the reader sees.
+function mergeItalicRuns(text, ranges) {
+  const sorted = [...ranges]
+    .filter((r) => Array.isArray(r) && r[1] > r[0])
+    .sort((a, b) => a[0] - b[0]);
+  const runs = [];
+  for (const [s, e] of sorted) {
+    const last = runs[runs.length - 1];
+    // Overlapping, adjacent, or separated only by the space or line break
+    // between two text items — the reader sees one italic phrase either way.
+    const gap = last ? text.slice(Math.min(last[1], s), s) : null;
+    if (last && gap.length <= 3 && !/\S/.test(gap)) {
+      last[1] = Math.max(last[1], e);
+      continue;
+    }
+    runs.push([s, e]);
+  }
+  return runs;
+}
+
+// Words of a run, each with its span in the document, stripped of the
+// punctuation that clings to a citation ("Lofts," / "(Aguilar" / "Smith's").
+function runWords(text, start, end) {
+  const words = [];
+  const re = /\S+/g;
+  re.lastIndex = 0;
+  const slice = text.slice(start, end);
+  let m;
+  while ((m = re.exec(slice)) !== null) {
+    let ws = start + m.index;
+    let we = ws + m[0].length;
+    // The period stays: it belongs to the abbreviations case names are full
+    // of ("Assn.", "Co."), and normalizeParty drops it before any comparison.
+    while (ws < we && !/[A-Za-z0-9]/.test(text[ws])) ws++;
+    while (we > ws && !/[A-Za-z0-9.]/.test(text[we - 1])) we--;
+    if (we > ws) words.push({ start: ws, end: we, text: text.slice(ws, we) });
+  }
+  return words;
+}
+
+function findItalicShortNames(text, fullCitesInOrder, italicRanges, claimedSpans) {
+  if (!italicRanges || !italicRanges.length) return [];
+  const cases = fullCitesInOrder.filter((c) => c.kind === "case");
+  if (!cases.length) return [];
+
+  // alias -> full cites (document order) that answer to it.
+  const registry = new Map();
+  for (const c of cases) {
+    for (const alias of caseAliases(c)) {
+      let arr = registry.get(alias);
+      if (!arr) registry.set(alias, arr = []);
+      arr.push(c);
+    }
+  }
+  if (!registry.size) return [];
+
+  const results = [];
+  for (const [runStart, runEnd] of mergeItalicRuns(text, italicRanges)) {
+    if (runEnd - runStart < 3 || runEnd - runStart > 200) continue;
+    const words = runWords(text, runStart, runEnd);
+    if (!words.length || words.length > 12) continue;
+
+    // Longest fragment wins, so "*Market Lofts*" links as the two words the
+    // reader sees rather than as "Market" alone.
+    let best = null;
+    for (let len = words.length; len >= 1 && !best; len--) {
+      for (let i = 0; i + len <= words.length; i++) {
+        const window = words.slice(i, i + len);
+        // Only registered aliases match, so a signal word inside a longer
+        // fragment is harmless. A LONE word is the risk — a case whose short
+        // name happens to be "Contra" or "Accord" would otherwise capture
+        // every italicized signal in the document.
+        if (len === 1 && ITALIC_TRIM_WORDS.has(normalizeParty(window[0].text))) continue;
+        const alias = normalizeParty(window.map((w) => w.text).join(" "));
+        if (alias.length < 3) continue;
+        const candidates = registry.get(alias);
+        if (!candidates) continue;
+        // Only cases already cited in full BEFORE this point can be meant,
+        // and only if exactly one of them answers to the fragment.
+        const earlier = candidates.filter((c) => c.span[1] <= window[0].start);
+        if (!earlier.length) continue;
+        const keys = new Set(earlier.map((c) => c.key));
+        if (keys.size > 1) continue;                 // ambiguous — leave it alone
+        best = { target: earlier[earlier.length - 1], window, alias };
+        break;
+      }
+    }
+    if (!best) continue;
+
+    const start = best.window[0].start;
+    const end = best.window[best.window.length - 1].end;
+    let overlap = false;
+    for (const [s, e] of claimedSpans) {
+      if (start < e && end > s) { overlap = true; break; }
+    }
+    if (overlap) continue;
+
+    const target = best.target;
+    results.push({
+      kind: "case",
+      key: target.key,
+      span: [start, end],
+      matchText: text.slice(start, end),
+      short: text.slice(start, end),
+      isShortForm: true,
+      isItalicShort: true,
+      wlOnly:    !!target.wlOnly,
+      lexisOnly: !!target.lexisOnly,
+      slipOnly:  !!target.slipOnly,
+    });
+    claimedSpans.push([start, end]);
+  }
+  return results;
+}
+
+// ============================================================================
 // Newline normalization (port of _normalize_for_detection)
 // ============================================================================
 
@@ -1497,7 +1767,10 @@ function normalizeForDetection(text) {
   return out.join("");
 }
 
-export function findAllCitations(text) {
+// `opts.italicRanges` — [start, end) character ranges of the ORIGINAL text
+// that are set in italics. Optional: callers with no font information (plain
+// strings, tests) simply skip the italic short-name pass.
+export function findAllCitations(text, opts = {}) {
   const norm = normalizeForDetection(text);
   const fullCases = findCaseCitations(norm);
   const statutes  = findStatuteCitations(norm);
@@ -1520,7 +1793,14 @@ export function findAllCitations(text) {
   const shortForms = findShortFormCitations(norm, fullOrdered);
   for (const c of shortForms) c.matchText = text.slice(c.span[0], c.span[1]);
 
-  const all = [...fullCases, ...statutes, ...rules, ...caci, ...supras, ...shortForms]
+  // Italic short-name pass. Runs last so it can stand clear of every span the
+  // earlier passes already claimed — an italicized full cite is linked as the
+  // full cite, not twice.
+  const claimed = [...fullCases, ...supras, ...shortForms].map((c) => c.span);
+  const italics = findItalicShortNames(norm, fullOrdered, opts.italicRanges, claimed);
+  for (const c of italics) c.matchText = text.slice(c.span[0], c.span[1]);
+
+  const all = [...fullCases, ...statutes, ...rules, ...caci, ...supras, ...shortForms, ...italics]
     .sort((a, b) => a.span[0] - b.span[0]);
 
   // Deduplicate overlapping spans. The short-form pass already self-filters
@@ -2007,6 +2287,7 @@ let documentText = "";
 let documentCites = [];
 let pageRanges = [];          // [{ pageNumber, start, end }]
 let pageJoinedItemMaps = [];  // [{ pageNumber, joinedStart, itemRanges }]
+let documentItalics = [];     // [start, end) ranges of italic text, doc-wide
 let documentRepo = {};
 let documentProvider = "lexis";
 
@@ -2015,13 +2296,27 @@ export function resetDocument({ repo = {}, provider = "lexis" } = {}) {
   documentCites = [];
   pageRanges = [];
   pageJoinedItemMaps = [];
+  documentItalics = [];
   documentRepo = repo;
   documentProvider = provider;
 }
 
-export function ingestPage(pageNumber, textContent) {
+// `opts.italicFontNames` — a Set of textContent.styles keys the caller has
+// identified as italic faces. Every item drawn in one of them contributes an
+// italic range, which is what lets the linker see an italicized short name.
+export function ingestPage(pageNumber, textContent, opts = {}) {
   const { joined, itemRanges } = buildJoinedText(textContent);
   const startInDoc = documentText.length;
+  const italicFonts = opts.italicFontNames;
+  if (italicFonts && italicFonts.size) {
+    const items = textContent.items || [];
+    for (const { start, end, itemIndex } of itemRanges) {
+      const item = items[itemIndex];
+      if (item && italicFonts.has(item.fontName) && end > start) {
+        documentItalics.push([startInDoc + start, startInDoc + end]);
+      }
+    }
+  }
   documentText += joined;
   // Page break the detection regex won't cross at sentence boundaries.
   // pdf_linker.py uses "\n\f\n"; we use the same so newline-stop logic works.
@@ -2033,7 +2328,7 @@ export function ingestPage(pageNumber, textContent) {
 }
 
 export function runDetection() {
-  documentCites = findAllCitations(documentText);
+  documentCites = findAllCitations(documentText, { italicRanges: documentItalics });
   return documentCites.length;
 }
 

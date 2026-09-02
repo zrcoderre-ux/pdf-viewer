@@ -378,6 +378,28 @@ memorandum (10/10 match, identical keys). The port includes:
 - Pin-cite ranges including em-dash forms (`, 110-12`, `, 110–12`).
 - Document-wide supra resolution using **first-seen** short name (matches
   `setdefault` semantics).
+- **Italicized short names.** Case names are italicized and nearly nothing
+  else in a brief or an opinion is, so once a case has been cited in full, a
+  later italic fragment of its name — `Market Lofts`, `Aguilar`, `In re
+  Marriage of Davis` — gets the same link the full citation got. The fragment
+  may be the plaintiff's first word, any leading run of the plaintiff's name,
+  the whole case name, the short name a court announced in a parenthetical
+  (`... 222 Cal.App.4th 924 (Market Lofts)`), or the defendant where the
+  plaintiff is an institution the short form is never built from (`People v.
+  Smith` is `Smith`). Signals and pin cites caught inside the same italic run
+  (`see Aguilar`, `Market Lofts, supra`) are stepped over, and the longest
+  fragment that names a case wins, so the reader's whole phrase is underlined
+  rather than its first word.
+
+  The safety rule is the reader's own: a fragment links only when exactly one
+  case cited **earlier** in the document answers to it. Where two do — `Smith`
+  after both `Smith v. Jones` and `People v. Smith` — the bare word stays
+  unlinked, though a longer fragment naming one of them still links.
+
+  Posture comes from the PDF's own fonts in the viewer (`italic` on the font
+  PDF.js resolved, or an italic face name like `TimesNewRomanPS-ItalicMT`) and
+  from computed `font-style` in the web content script. Text with no font
+  information behind it — plain strings, OCR'd scans — simply skips the pass.
 - Span deduplication so overlapping detections don't double-link.
 
 ## Provider toggle: Westlaw / Lexis+
