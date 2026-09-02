@@ -205,6 +205,23 @@
     // counted exactly once.
     const groups = new Map(); // block element -> [{ node, start, end }]
     const text = new Map();   // block element -> concatenated string
+    const italics = new Map(); // block element -> [[start, end], ...]
+
+    // Case names are italicized and almost nothing else is, so an italic run
+    // repeating part of a case cited earlier in the same block is a reference
+    // to it. Posture is read per parent element and cached — getComputedStyle
+    // on every text node of a long page is far too expensive.
+    const italicCache = new WeakMap();
+    const isItalicEl = (el) => {
+      let cached = italicCache.get(el);
+      if (cached === undefined) {
+        let style = null;
+        try { style = getComputedStyle(el); } catch { style = null; }
+        cached = !!style && style.fontStyle !== "normal";
+        italicCache.set(el, cached);
+      }
+      return cached;
+    };
 
     const acceptText = (node) => {
       if (!node.nodeValue || !node.nodeValue.trim()) return false;
@@ -223,11 +240,12 @@
       const parent = node.parentElement;
       const block = parent.closest(BLOCK_SELECTOR) || parent;
       let map = groups.get(block);
-      if (!map) { map = []; groups.set(block, map); text.set(block, ""); }
+      if (!map) { map = []; groups.set(block, map); text.set(block, ""); italics.set(block, []); }
       const start = text.get(block).length;
       const val = node.nodeValue;
       text.set(block, text.get(block) + val);
       map.push({ node, start, end: start + val.length });
+      if (isItalicEl(parent)) italics.get(block).push([start, start + val.length]);
     };
 
     // Walk the light DOM AND every open shadow root. Modern web-component apps
@@ -250,7 +268,9 @@
       const blockText = text.get(block);
       if (blockText.length < 6) continue; // too short to hold a citation
       let hits;
-      try { hits = findAllCitations(blockText); } catch { continue; }
+      try {
+        hits = findAllCitations(blockText, { italicRanges: italics.get(block) });
+      } catch { continue; }
       const matchedSpans = [];
       const markers = []; // { pos, code, kind } where a code is named
       // Overflow-clipping ancestors of this block — used at paint time to drop

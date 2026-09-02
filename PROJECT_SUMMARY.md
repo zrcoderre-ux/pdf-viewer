@@ -355,6 +355,7 @@ fetch-pdfjs.py / .sh                 One-time PDF.js download
 test-naming.mjs                      Node-runnable rule-engine tests
 test-citation-sites.mjs              Node-runnable web-citation-site tests
 test-shift-space-open.mjs            Node-runnable Shift+Space tests (stubbed DOM)
+test-italic-short-names.mjs          Node-runnable italic short-name linking tests
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing
