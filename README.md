@@ -223,9 +223,18 @@ in the right margin whenever at least one citation is found. It lists each
 unique authority once, grouped into Cases / Statutes / Regulations /
 Administrative Guidance / Rules, as a regular blue
 hyperlink on the citation text itself (opening Westlaw or Lexis+). The panel can
-be minimized to just its header bar and maximized again, and **resized** by
-dragging the grip in its bottom-left corner; the minimized state and custom
-dimensions are remembered.
+be minimized to just its header bar and maximized again, **moved** by dragging
+its header, and **resized** by dragging the grip in its bottom-left corner; the
+minimized state, position, and custom dimensions are remembered.
+
+A remembered position is measured against the window it was set in, so it is
+re-clamped to the current window every time the panel is shown and whenever the
+window resizes. Without that, a panel parked on a wide monitor lands entirely
+off screen the next time the same profile opens a PDF in a narrower window —
+still enabled, still counting authorities, just nowhere the user can see it,
+which looks exactly like the Table of Authorities having switched itself off.
+Only the applied position is clamped, never the saved one, so widening the
+window again puts the panel back where you left it.
 
 ## Smart PDF Naming
 
