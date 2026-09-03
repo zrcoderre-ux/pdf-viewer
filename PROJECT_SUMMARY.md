@@ -357,6 +357,7 @@ test-citation-sites.mjs              Node-runnable web-citation-site tests
 test-shift-space-open.mjs            Node-runnable Shift+Space tests (stubbed DOM)
 test-italic-short-names.mjs          Node-runnable italic short-name linking tests
 test-toa-position.mjs                Node-runnable TOA panel position-clamp tests
+test-bare-rule.mjs                   Node-runnable bare rule-of-court tests
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing

@@ -382,6 +382,15 @@ memorandum (10/10 match, identical keys). The port includes:
   supra resolution is the subject that follows them (`Bonds`, `Whitley`).
 - `Cal. Rules of Court` / `California Rules of Court`, `rule` or `rules`,
   with nested subsections.
+- **Bare rules.** A rule cited with no rule set named — `rule 3.1350(f)`,
+  `Rule 8.204` — is read as a California rule of court, which is what an
+  unqualified rule number means in a California brief. Every rule of court
+  carries a dot in its number, so the undotted forms that would otherwise be
+  swept in (`rule 12(b)(6)`, `rule 5 of the bylaws`) are left alone, as is a
+  rule whose neighboring words name somebody else's rules (`Federal Rules of
+  Civil Procedure, rule 26.1`, `local rule 3.57`). A rule set the text names
+  outright still wins: `Cal. Rules of Prof. Conduct, rule 1.9` links to the
+  professional conduct rule.
 - Both **CSM** and **Bluebook** case forms — chosen by whichever tail
   pattern matches first within 200 chars after the `v.` anchor.
 - Pin-cite ranges including em-dash forms (`, 110-12`, `, 110–12`).

@@ -420,12 +420,42 @@ const RULE_RE = new RegExp(
   "gi"
 );
 
-// Rules of Professional Conduct: "Cal. Rules of Prof. Conduct, rule 1.9".
+// Rules of Professional Conduct: "Cal. Rules of Prof. Conduct, rule 1.9",
+// "Rules of Professional Conduct 3.7". Both forms are current, and the one
+// carrying "rule" has to be accepted here so that a named professional-conduct
+// rule claims its own span before the bare-rule pass below, which would
+// otherwise read the number as a rule of court. A comma is allowed only in
+// front of that "rule": without it, "Conduct, 9 Cal.4th 275" would read as a
+// rule number rather than the case cite it is.
 const RPC_RE = new RegExp(
-  String.raw`\b(?:Cal(?:ifornia)?\.?\s+)?Rules?\s+of\s+(?:Prof(?:essional)?\.?\s+)?Conduct\s+` +
+  String.raw`\b(?:Cal(?:ifornia)?\.?\s+)?Rules?\s+of\s+(?:Prof(?:essional)?\.?\s+)?Conduct` +
+  String.raw`(?:,?\s*rules?\s+|\s+)` +
   String.raw`(\d+(?:\.\d+)*(?:\([a-z0-9]+\))*)`,
   "gi"
 );
+
+// A rule reference that names no rule set of its own: "rule 3.1350",
+// "Rule 8.204(a)(1)(C)". Read as a California rule of court — that is what an
+// unqualified "rule" means in a California brief. Every rule of court is
+// numbered with a dot (2.100, 3.1350, 8.204), and requiring the dot is what
+// keeps a federal "rule 12(b)(6)" or a contract's "rule 5" out of the net.
+const BARE_RULE_RE = new RegExp(
+  String.raw`\brules?\s+(\d+(?:\.\d+)+(?:\([a-z0-9]+\))*)`,
+  "gi"
+);
+
+// The run of words a rule-set name would occupy if one were there, anchored
+// to the text immediately before a bare rule reference. Only an adjacent
+// qualifier can disclaim California: the same word a sentence away cannot.
+const RULE_QUALIFIER_RE = /(?:[A-Za-z][A-Za-z.'\u2019]*[\s,]+){0,5}$/;
+
+// A qualifier naming somebody else's rules — "Federal Rules of Civil
+// Procedure, rule 26.1", "local rule 3.57", "Rules of Professional Conduct,
+// rule 1.9" where the set was named too far back for RPC_RE to reach. The
+// reference is left unlinked rather than guessed at: a missed link costs the
+// reader a click, a wrong one sends them to the wrong rule.
+const FOREIGN_RULE_WORD_RE =
+  /\b(?:fed|federal|f\.r\.|local|prof|professional|conduct|evid|evidence|bankr|bankruptcy|appellate|arbitration|jams|aaa)\b/i;
 
 // CACI — Judicial Council of California Civil Jury Instructions.
 //   "CACI No. 3710", "CACI 3710", "CACI Nos. 3710, 3711",
@@ -1312,6 +1342,28 @@ function findRuleCitations(text) {
       matchText: m[0],
     });
   }
+
+  // Bare references — "rule 3.1350" with no rule set named. California briefs
+  // cite the rules of court this way as a matter of course, so an unqualified
+  // rule number is taken to be one. Spans already claimed above are skipped:
+  // the "rule 1.9" inside a professional-conduct cite is that cite's, and the
+  // "rule 3.1300" inside "Cal. Rules of Court, rule 3.1300" is already linked.
+  const namedSpans = results.map((r) => r.span);
+  BARE_RULE_RE.lastIndex = 0;
+  while ((m = BARE_RULE_RE.exec(text)) !== null) {
+    const s = m.index, e = m.index + m[0].length;
+    if (namedSpans.some(([a, b]) => s < b && e > a)) continue;
+    const lead = text.slice(Math.max(0, s - 60), s);
+    if (FOREIGN_RULE_WORD_RE.test(lead.match(RULE_QUALIFIER_RE)[0])) continue;
+    results.push({
+      kind: "rule",
+      key: `Cal. Rules of Court, rule ${baseRuleNumber(m[1])}`,
+      span: [s, e],
+      matchText: m[0],
+      assumedRuleSet: true,
+    });
+  }
+
   return results;
 }
 
