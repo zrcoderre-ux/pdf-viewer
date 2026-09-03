@@ -10,6 +10,9 @@
 
 import { findAllCitations } from "./viewer/citation-linker.js";
 
+// Pages are joined with "\n\f\n" by ingestPage; mirror that here.
+const page = (...pages) => pages.join("\n\f\n");
+
 let fails = 0;
 
 function check(label, got, want) {
@@ -99,6 +102,88 @@ console.log("\n--- rules of professional conduct keep their own set ---");
   const text =
     "Counsel breached the Rules of Professional Conduct, 9 Cal.4th 275, 283.";
   check("a case cite after the rule set is not a rule number", ruleKeys(text), []);
+}
+
+console.log("\n--- carry-over: the page names the set once ---");
+{
+  const text =
+    "Counsel is disqualified under Cal. Rules of Prof. Conduct, rule 1.9. " +
+    "Rule 1.9(a) reaches a substantially related matter.";
+  check("a bare number the page already placed keeps that set",
+    ruleKeys(text),
+    ["Cal. Rules of Prof. Conduct, rule 1.9", "Cal. Rules of Prof. Conduct, rule 1.9"]);
+}
+{
+  const text =
+    "Rule 1.9(a) reaches a substantially related matter. That is what " +
+    "Cal. Rules of Prof. Conduct, rule 1.9 provides.";
+  check("carry-over reads backwards within the page too",
+    ruleKeys(text),
+    ["Cal. Rules of Prof. Conduct, rule 1.9", "Cal. Rules of Prof. Conduct, rule 1.9"]);
+}
+{
+  const text =
+    "The motion cites California Rules of Court, rule 3.1345 for the format. " +
+    "Rule 3.1345(c) states what the separate statement must contain.";
+  check("a rule of court named on the page carries the same way",
+    ruleKeys(text),
+    ["Cal. Rules of Court, rule 3.1345", "Cal. Rules of Court, rule 3.1345"]);
+}
+{
+  const text =
+    "Fees are set by California Rules of Court, rule 1.5, and conflicts by " +
+    "the Rules of Professional Conduct, rule 1.5. Rule 1.5 is contested.";
+  check("one number, two sets on the page — the bare reference is left alone",
+    ruleKeys(text),
+    ["Cal. Rules of Court, rule 1.5", "Cal. Rules of Prof. Conduct, rule 1.5"]);
+}
+{
+  const text = page(
+    "Counsel is disqualified under Cal. Rules of Prof. Conduct, rule 1.9.",
+    "The prior representation is substantially related. Rule 1.9 applies."
+  );
+  check("carry-over stops at the page break",
+    ruleKeys(text),
+    ["Cal. Rules of Prof. Conduct, rule 1.9", "Cal. Rules of Court, rule 1.9"]);
+}
+
+console.log("\n--- a page arguing conduct reads its bare rules that way ---");
+{
+  const text =
+    "Cal. Rules of Prof. Conduct, rule 1.9 bars the successive representation, " +
+    "and rule 1.7 bars the concurrent one.";
+  check("a second number on a conduct page follows the page",
+    ruleKeys(text),
+    ["Cal. Rules of Prof. Conduct, rule 1.9", "Cal. Rules of Prof. Conduct, rule 1.7"]);
+}
+{
+  const text =
+    "The hearing was noticed under rule 3.1300. Counsel is disqualified under " +
+    "Cal. Rules of Prof. Conduct, rule 1.9.";
+  check("a rule cited before the conduct discussion keeps the default",
+    ruleKeys(text),
+    ["Cal. Rules of Court, rule 3.1300", "Cal. Rules of Prof. Conduct, rule 1.9"]);
+}
+{
+  const text =
+    "Cal. Rules of Prof. Conduct, rule 1.9 governs. The motion was noticed " +
+    "under California Rules of Court, rule 3.1300, and rule 3.1350 controls " +
+    "the separate statement.";
+  check("a page that names both sets flips nothing",
+    ruleKeys(text),
+    ["Cal. Rules of Prof. Conduct, rule 1.9", "Cal. Rules of Court, rule 3.1300",
+     "Cal. Rules of Court, rule 3.1350"]);
+}
+{
+  const text = page(
+    "The motion is timely under California Rules of Court, rule 3.1300.",
+    "Cal. Rules of Prof. Conduct, rule 1.9 governs the conflict, and the " +
+    "hearing was set under rule 3.1300."
+  );
+  check("a number the document ties to the rules of court keeps that set",
+    ruleKeys(text),
+    ["Cal. Rules of Court, rule 3.1300", "Cal. Rules of Prof. Conduct, rule 1.9",
+     "Cal. Rules of Court, rule 3.1300"]);
 }
 
 console.log("\n" + "=".repeat(60));

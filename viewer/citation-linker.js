@@ -1315,8 +1315,14 @@ function baseRuleNumber(ruleNum) {
   return m ? m[0] : ruleNum;
 }
 
+// The two California rule sets a bare rule reference can belong to.
+const RULES_OF_COURT = "Cal. Rules of Court";
+const RULES_OF_PROF_CONDUCT = "Cal. Rules of Prof. Conduct";
+
 function findRuleCitations(text) {
   const results = [];
+  // Every rule that named its own set, for the carry-over pass below.
+  const named = [];
   let m;
   RULE_RE.lastIndex = 0;
   while ((m = RULE_RE.exec(text)) !== null) {
@@ -1324,43 +1330,111 @@ function findRuleCitations(text) {
     // otherwise break the search. The highlighted span still covers the full
     // citation, subparts included.
     const ruleNum = baseRuleNumber(m[1]);
+    const span = [m.index, m.index + m[0].length];
     results.push({
       kind: "rule",
-      key: `Cal. Rules of Court, rule ${ruleNum}`,
-      span: [m.index, m.index + m[0].length],
+      key: `${RULES_OF_COURT}, rule ${ruleNum}`,
+      span,
       matchText: m[0],
     });
+    named.push({ set: RULES_OF_COURT, num: ruleNum, span });
   }
   RPC_RE.lastIndex = 0;
   while ((m = RPC_RE.exec(text)) !== null) {
     // Same as the Rules of Court: link to the overall rule, not the subpart.
     const ruleNum = baseRuleNumber(m[1]);
+    const span = [m.index, m.index + m[0].length];
     results.push({
       kind: "rule",
-      key: `Cal. Rules of Prof. Conduct, rule ${ruleNum}`,
-      span: [m.index, m.index + m[0].length],
+      key: `${RULES_OF_PROF_CONDUCT}, rule ${ruleNum}`,
+      span,
       matchText: m[0],
     });
+    named.push({ set: RULES_OF_PROF_CONDUCT, num: ruleNum, span });
+  }
+
+  // Carry-over, the rule counterpart of the statute pass above. A page that
+  // ties a rule number to a rule set hands that set to the page's bare
+  // references to the same number: "Rules of Professional Conduct, rule 1.9
+  // ... rule 1.9(a)" is one rule cited twice, not a conduct rule and a rule of
+  // court. A page that gives one number two different sets leaves its bare
+  // references unlinked rather than guessing between them.
+  //
+  // Unlike the statute pass this runs in both directions within the page. The
+  // statute pass carries forward only because a bare section it cannot place
+  // goes unlinked, which costs nothing; a bare rule this pass cannot place is
+  // read as a rule of court, so declining to look backwards does not withhold
+  // a guess, it makes a worse one.
+  const pageOf = makePageLookup(text);
+  // "page|number" -> { set }, or null once a second set claims the same
+  // number on that page.
+  const byNumber = new Map();
+  // page -> { court: boolean, rpcFrom: number } — which sets the page names,
+  // and where its first professional-conduct cite ends.
+  const pageSets = new Map();
+  // Every number the DOCUMENT ties to the rules of court, wherever it says so.
+  const courtNumbers = new Set();
+  for (const r of named) {
+    const page = pageOf(r.span[0]);
+    const slot = `${page}|${r.num}`;
+    const prior = byNumber.get(slot);
+    if (prior === undefined) byNumber.set(slot, { set: r.set });
+    else if (prior && prior.set !== r.set) byNumber.set(slot, null);
+
+    let ctx = pageSets.get(page);
+    if (!ctx) pageSets.set(page, (ctx = { court: false, rpcFrom: Infinity }));
+    if (r.set === RULES_OF_COURT) {
+      ctx.court = true;
+      courtNumbers.add(r.num);
+    } else {
+      ctx.rpcFrom = Math.min(ctx.rpcFrom, r.span[1]);
+    }
+  }
+
+  // The set a bare reference falls back to when its own number was never
+  // named on the page. Normally the rules of court — but a page that names
+  // the Rules of Professional Conduct and never once names the rules of court
+  // is a page arguing conduct, and its bare rules are read that way.
+  //
+  // This is the weaker of the two inferences: the number itself was never
+  // named, so the page's subject is all there is to go on. It is fenced
+  // accordingly. It runs forward only, from the first conduct cite on the
+  // page, so a rule cited before the subject came up keeps the default; and a
+  // number the document ties to the rules of court anywhere keeps that set,
+  // since a disqualification motion still notices its own hearing under rule
+  // 3.1300.
+  function fallbackSet(page, num, start) {
+    const ctx = pageSets.get(page);
+    if (ctx && !ctx.court && start >= ctx.rpcFrom && !courtNumbers.has(num)) {
+      return RULES_OF_PROF_CONDUCT;
+    }
+    return RULES_OF_COURT;
   }
 
   // Bare references — "rule 3.1350" with no rule set named. California briefs
   // cite the rules of court this way as a matter of course, so an unqualified
-  // rule number is taken to be one. Spans already claimed above are skipped:
-  // the "rule 1.9" inside a professional-conduct cite is that cite's, and the
-  // "rule 3.1300" inside "Cal. Rules of Court, rule 3.1300" is already linked.
-  const namedSpans = results.map((r) => r.span);
+  // rule number is taken to be one unless the page says otherwise. Spans
+  // already claimed above are skipped: the "rule 1.9" inside a
+  // professional-conduct cite is that cite's, and the "rule 3.1300" inside
+  // "Cal. Rules of Court, rule 3.1300" is already linked.
+  const namedSpans = named.map((r) => r.span);
   BARE_RULE_RE.lastIndex = 0;
   while ((m = BARE_RULE_RE.exec(text)) !== null) {
     const s = m.index, e = m.index + m[0].length;
     if (namedSpans.some(([a, b]) => s < b && e > a)) continue;
     const lead = text.slice(Math.max(0, s - 60), s);
     if (FOREIGN_RULE_WORD_RE.test(lead.match(RULE_QUALIFIER_RE)[0])) continue;
+    const num = baseRuleNumber(m[1]);
+    const page = pageOf(s);
+    const owner = byNumber.get(`${page}|${num}`);
+    if (owner === null) continue; // one number, two sets on the page
+    const set = owner ? owner.set : fallbackSet(page, num, s);
     results.push({
       kind: "rule",
-      key: `Cal. Rules of Court, rule ${baseRuleNumber(m[1])}`,
+      key: `${set}, rule ${num}`,
       span: [s, e],
       matchText: m[0],
-      assumedRuleSet: true,
+      ...(owner ? { inheritedRuleSet: true } : { assumedRuleSet: true }),
     });
   }
 
