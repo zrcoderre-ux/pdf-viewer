@@ -219,21 +219,35 @@ function removeHighlight(pageNumber, id) {
 
 function rectsForHighlight(hl, textLayerDiv, highlightLayerDiv, renderCtx) {
   // Imported highlight: stored in PDF points, converted to layer pixels here.
-  // The highlight layer covers the page at the current scale, so a PDF point
-  // (x, y-from-bottom) maps to layer px: left = x·scale, top = (H − (y+h))·scale.
+  // With the page's display viewport in hand we let PDF.js do the mapping —
+  // that is the only version that survives a rotated page, where the layer's
+  // axes no longer run the same way as the PDF's. Without one, fall back to the
+  // plain unrotated math: a PDF point (x, y-from-bottom) maps to layer px
+  // left = x·scale, top = (H − (y+h))·scale.
   if (hl.pdfRects) {
+    const vp = renderCtx && renderCtx.viewport;
     const s = (renderCtx && renderCtx.scale) || 1;
     const hPts = renderCtx && renderCtx.pageHeightPts;
-    if (!hPts) return [];
+    if (!vp && !hPts) return [];
     const out = [];
     for (const r of hl.pdfRects) {
       if (!(r.w > 0 && r.h > 0)) continue;
-      out.push({
-        left:   r.x * s,
-        top:    (hPts - (r.y + r.h)) * s,
-        width:  r.w * s,
-        height: r.h * s,
-      });
+      if (vp) {
+        const [x1, y1, x2, y2] = vp.convertToViewportRectangle([r.x, r.y, r.x + r.w, r.y + r.h]);
+        out.push({
+          left:   Math.min(x1, x2),
+          top:    Math.min(y1, y2),
+          width:  Math.abs(x2 - x1),
+          height: Math.abs(y2 - y1),
+        });
+      } else {
+        out.push({
+          left:   r.x * s,
+          top:    (hPts - (r.y + r.h)) * s,
+          width:  r.w * s,
+          height: r.h * s,
+        });
+      }
     }
     return out;
   }

@@ -41,6 +41,7 @@ import {
   resetOcr,
 } from "./ocr.js";
 import { autoScroll } from "./autoscroll.js";
+import { pageRotation } from "./rotation.js";
 
 // ---------------------------------------------------------------------------
 // Web (PWA) shim. This is the citation-linking viewer from the Chrome
@@ -196,6 +197,10 @@ let totalLinks = 0;
 // pageNumber -> PDF page height in points; used to map screen highlight rects
 // into PDF coordinates when saving an edited copy.
 const pageHeightPtsByNum = new Map();
+// pageNumber -> the display viewport the page was last rendered with. Highlight
+// geometry converts through it rather than through scale alone, because a
+// rotated page's layer pixels no longer line up with PDF points axis-for-axis.
+const pageViewportByNum = new Map();
 let pdfDoc = null;
 let provider = "lexis";
 let citationRepo = {};
@@ -1545,8 +1550,9 @@ setEditingEnabled(isLocalDocument);
 
 // Collect on-screen highlight rectangles converted to PDF points, per page.
 // Collect the current highlights as PDF-space quads, grouped per highlight, so
-// each becomes one /Highlight annotation. Inverse of the paint transform: layer
-// px → PDF points via ÷ scale and a Y-flip about the page height.
+// each becomes one /Highlight annotation. Inverse of the paint transform: the
+// page's display viewport maps layer px back to PDF points, which is a ÷ scale
+// and a Y-flip on an upright page and the right thing on a rotated one.
 function collectHighlightPdfRects() {
   const byPage = new Map();
   const wrappers = pagesEl.querySelectorAll(".page-wrapper");
@@ -1555,18 +1561,32 @@ function collectHighlightPdfRects() {
     const tl = w.querySelector(".textLayer");
     const hlLayer = w.querySelector(".highlightLayer");
     const hPts = pageHeightPtsByNum.get(pn);
+    const vp = pageViewportByNum.get(pn);
     if (!tl || !hlLayer || !hPts) return;
     const s = currentScale;
-    const groups = getHighlightRectGroups(pn, tl, hlLayer, { scale: s, pageHeightPts: hPts });
+    const groups = getHighlightRectGroups(pn, tl, hlLayer,
+      { scale: s, pageHeightPts: hPts, viewport: vp });
     if (!groups.length) return;
     const out = [];
     for (const g of groups) {
-      const rects = g.rects.map((r) => ({
-        x: r.left / s,
-        y: hPts - (r.top / s) - (r.height / s),
-        w: r.width / s,
-        h: r.height / s,
-      }));
+      const rects = g.rects.map((r) => {
+        if (vp) {
+          const [x1, y1] = vp.convertToPdfPoint(r.left, r.top);
+          const [x2, y2] = vp.convertToPdfPoint(r.left + r.width, r.top + r.height);
+          return {
+            x: Math.min(x1, x2),
+            y: Math.min(y1, y2),
+            w: Math.abs(x2 - x1),
+            h: Math.abs(y2 - y1),
+          };
+        }
+        return {
+          x: r.left / s,
+          y: hPts - (r.top / s) - (r.height / s),
+          w: r.width / s,
+          h: r.height / s,
+        };
+      });
       if (rects.length) out.push({ rects });
     }
     if (out.length) byPage.set(pn, out);
@@ -1629,11 +1649,16 @@ async function saveEditedPdf() {
   saveEditsEl.disabled = true;
   try {
     statusEl.textContent = "Saving…";
-    const edited = await buildEditedPdf({
+    let edited = await buildEditedPdf({
       srcBytes: pdfBytes.slice(0),
       highlightsByPage: collectHighlightPdfRects(),
     });
+    // Rotation the user applied on screen is part of "my edits" too, so Save
+    // writes it into the file rather than leaving the page sideways on disk.
+    const rotated = pageRotation.any();
+    if (rotated) edited = await applyRotationToBytes(edited, pageRotation.deltas());
     const ok = await writeOutPdf(edited, sanitizePdfFilename(serverFilename || "document"), { inPlace: true });
+    if (ok && rotated) await reloadEditedBytes(edited);
     statusEl.textContent = ok ? "Saved." : "";
   } catch (e) {
     console.error("[pdf-viewer] save failed:", e);
@@ -1802,6 +1827,7 @@ function resetForNewDocument() {
   // any organize-mode state / cached thumbnails from the previous document.
   thumbsRendered = false;
   resetOrganizeState();
+  pageRotation.resetDocument();
   exitFormMode();
   thumbDataUrlCache.clear();
   if (panelBookmarksEl) { panelBookmarksEl.innerHTML = ""; delete panelBookmarksEl.dataset.loaded; }
@@ -2131,7 +2157,8 @@ async function renderAllPages() {
   const repaintCb = (pn) => {
     const r = pageRefs.find((x) => x.pageNumber === pn);
     if (r) repaintHighlightsForPage(pn, r.textLayerDiv, r.highlightLayerDiv,
-      { scale: currentScale, pageHeightPts: pageHeightPtsByNum.get(pn) });
+      { scale: currentScale, pageHeightPts: pageHeightPtsByNum.get(pn),
+        viewport: pageViewportByNum.get(pn) });
   };
   for (const refs of pageRefs) {
     if (signal.aborted) return;
@@ -2141,7 +2168,8 @@ async function renderAllPages() {
       () => rectSelectMode
     );
     repaintHighlightsForPage(refs.pageNumber, refs.textLayerDiv, refs.highlightLayerDiv,
-      { scale: currentScale, pageHeightPts: pageHeightPtsByNum.get(refs.pageNumber) });
+      { scale: currentScale, pageHeightPts: pageHeightPtsByNum.get(refs.pageNumber),
+        viewport: pageViewportByNum.get(refs.pageNumber) });
   }
 
   updateLinkCount();
@@ -2357,12 +2385,12 @@ function updateLinkCount() {
     : "";
 }
 
-function updatePageIndicator() {
-  if (!pdfDoc || !pageIndicatorEl) return;
-  const total = pdfDoc.numPages;
-  // Find the page wrapper whose midpoint is closest to the viewport center.
+// The page the reader is on: the wrapper whose midpoint is closest to the
+// middle of the window. Drives the page indicator, and is what "This page"
+// means to the rotate tool.
+function visiblePageNumber() {
   const wrappers = pagesEl.querySelectorAll(".page-wrapper");
-  if (!wrappers.length) return;
+  if (!wrappers.length) return 1;
   const mid = window.scrollY + window.innerHeight / 2;
   let closest = 1, minDist = Infinity;
   wrappers.forEach((w, i) => {
@@ -2371,7 +2399,12 @@ function updatePageIndicator() {
     const dist = Math.abs(pageMid - mid);
     if (dist < minDist) { minDist = dist; closest = i + 1; }
   });
-  pageIndicatorEl.textContent = `${closest} / ${total}`;
+  return closest;
+}
+
+function updatePageIndicator() {
+  if (!pdfDoc || !pageIndicatorEl) return;
+  pageIndicatorEl.textContent = `${visiblePageNumber()} / ${pdfDoc.numPages}`;
 }
 
 document.addEventListener("scroll", updatePageIndicator, { passive: true });
@@ -2424,9 +2457,19 @@ async function placeNativeLinksForPage(page, viewport, layerDiv) {
 
 async function renderPageCanvasAndText(pageNumber) {
   const page = await pdfDoc.getPage(pageNumber);
-  const viewport = page.getViewport({ scale: currentScale });
+  // The rotate tool's angle rides on top of the page's own /Rotate, so a page
+  // that already ships sideways turns from where it actually sits. PDF.js takes
+  // an absolute rotation, hence the sum.
+  const rotationDelta = pageRotation.delta(pageNumber);
+  const viewport = page.getViewport({
+    scale: currentScale,
+    rotation: (((page.rotate + rotationDelta) % 360) + 360) % 360,
+  });
+  pageViewportByNum.set(pageNumber, viewport);
   // We use a scale=1 viewport for footer math so coordinates match the
   // PDF user-space units that page.getTextContent() returns by default.
+  // Deliberately NOT rotated: getTextContent() reports user space whichever way
+  // the page is being displayed, so footer/caption math must stay in that frame.
   const userSpaceViewport = page.getViewport({ scale: 1 });
   // Remember the page height in PDF points so on-screen highlight rects can be
   // converted to PDF coordinates when saving an edited copy.
@@ -2480,6 +2523,12 @@ async function renderPageCanvasAndText(pageNumber) {
 
   const linkLayerDiv = document.createElement("div");
   linkLayerDiv.className = "linkLayer";
+  // A citation "underline" is the bottom border of the box over the citation,
+  // so the border has to move to whichever edge is under the text now. What
+  // decides that is the tool's own rotation, not the page's total angle: a page
+  // that ships with /Rotate 90 already renders its text horizontally, and only
+  // turning it further stands the text on its side.
+  if (rotationDelta) linkLayerDiv.dataset.rotation = String(rotationDelta);
   wrapper.appendChild(linkLayerDiv);
 
   // Separate layer for the PDF's OWN hyperlinks (link annotations), kept apart
@@ -2528,6 +2577,8 @@ async function renderPageCanvasAndText(pageNumber) {
       pageNumber,
       displayScale: viewport.scale,
       userHeight: userSpaceViewport.height,
+      userWidth: userSpaceViewport.width,
+      rotation: rotationDelta,
       textLayerDiv,
       setStatus: (msg) => { statusEl.textContent = msg; },
     });
@@ -2979,13 +3030,30 @@ function buildCitationReference() {
       const hit = wrapInfo.find(({ rect }) =>
         cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom);
       if (!hit || hit.rect.height <= 0) continue;
+      // Bands are fractions down the page as the PAGE is written, not as it is
+      // currently displayed — the line-number rows they get compared against
+      // come from the text layer, which PDF.js lays out in the page's own
+      // frame however the page is turned. Mapping the selection back through
+      // the viewport is what puts the two in the same frame; on an upright
+      // page it reduces to the plain fraction below.
+      const vp = pageViewportByNum.get(hit.page);
+      let t, b;
+      if (vp) {
+        const { pageHeight, pageY } = vp.rawDims;
+        const top = pageY + pageHeight;
+        const [, ya] = vp.convertToPdfPoint(cr.left - hit.rect.left, cr.top - hit.rect.top);
+        const [, yb] = vp.convertToPdfPoint(cr.right - hit.rect.left, cr.bottom - hit.rect.top);
+        t = (top - Math.max(ya, yb)) / pageHeight;
+        b = (top - Math.min(ya, yb)) / pageHeight;
+      } else {
+        t = (cr.top - hit.rect.top) / hit.rect.height;
+        b = (cr.bottom - hit.rect.top) / hit.rect.height;
+      }
       // A selection that crosses a page boundary engulfs the next page's
       // full-size canvas / overlay layers, whose rects would otherwise report a
       // whole-page band. Real text-line rects are a small fraction of page
       // height, so drop anything tall enough to be a page-sized element.
-      if (cr.height > hit.rect.height * 0.25) continue;
-      const t = (cr.top - hit.rect.top) / hit.rect.height;
-      const b = (cr.bottom - hit.rect.top) / hit.rect.height;
+      if (b - t > 0.25) continue;
       const cur = bands.get(hit.page);
       if (!cur) bands.set(hit.page, { top: t, bottom: b });
       else { cur.top = Math.min(cur.top, t); cur.bottom = Math.max(cur.bottom, b); }
@@ -3225,6 +3293,8 @@ async function reapplySelectableArea() {
 function setCropMode(on) {
   cropMode = on;
   if (on) {
+    // Both bars sit in the same strip under the toolbar.
+    pageRotation.close();
     // Turn off the other drag tools so their marquees don't fight the crop drag.
     if (highlightMode) {
       highlightMode = false;
@@ -3452,7 +3522,12 @@ async function renderThumbnails() {
   panelPagesEl.innerHTML = "";
   for (let pn = 1; pn <= pdfDoc.numPages; pn++) {
     const page = await pdfDoc.getPage(pn);
-    const vp = page.getViewport({ scale: THUMB_SCALE });
+    // Thumbnails show the pages the way the viewer is showing them, pending
+    // rotation included.
+    const vp = page.getViewport({
+      scale: THUMB_SCALE,
+      rotation: (((page.rotate + pageRotation.delta(pn)) % 360) + 360) % 360,
+    });
     const item = document.createElement("div");
     item.className = "thumb-item";
     item.dataset.page = pn;
@@ -3471,10 +3546,10 @@ async function renderThumbnails() {
   updateActiveThumbnail();
 }
 
-function scrollToPage(pn) {
+function scrollToPage(pn, { smooth = true } = {}) {
   const wrappers = pagesEl.querySelectorAll(".page-wrapper");
   const target = wrappers[pn - 1];
-  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (target) target.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
 }
 
 function updateActiveThumbnail() {
@@ -3726,7 +3801,10 @@ function resetPlanToIdentity() {
   pagePlan = [];
   organizeSel.clear();
   for (let i = 0; i < (pdfDoc ? pdfDoc.numPages : 0); i++) {
-    pagePlan.push({ id: ++_planSeq, srcIndex: i, rotate: 0 });
+    // Rotation the user already applied on screen starts the plan where they
+    // left it — the organize thumbnails are unrotated renders, so the plan's
+    // angle is what turns them, and Apply writes the same angle either way.
+    pagePlan.push({ id: ++_planSeq, srcIndex: i, rotate: pageRotation.delta(i + 1) });
   }
 }
 
@@ -3771,6 +3849,9 @@ async function exitOrganize() {
 // and thumbnails while leaving the display name/naming choice intact.
 async function reloadEditedBytes(out) {
   resetOrganizeState();
+  // The bytes we're about to load already carry whatever rotation was pending,
+  // so keeping the view angles would turn every page a second time.
+  pageRotation.clear();
   clearAllHighlights();
   thumbDataUrlCache.clear();
   thumbsRendered = false;
@@ -4337,6 +4418,7 @@ function clearAllFormOverlays() {
 
 async function enterFormMode() {
   if (!editingAllowed || !docHasForm || formMode) return;
+  pageRotation.close(); // shares the strip under the toolbar with the form bar
   formMode = true;
   formValues.clear();
   document.body.classList.add("form-mode");
@@ -4415,3 +4497,72 @@ if (thumbResizeEl) {
 // and the A / Space / [ / ] / Esc shortcuts all live in autoscroll.js; the
 // render pipeline feeds it page text and tells it when layout changed.
 autoScroll.init({ pagesEl, status: flashStatus });
+
+// ── Page rotation ───────────────────────────────────────────────────────────
+// Sideways scans and landscape exhibits. The angles live in rotation.js (with
+// the floating bar and the R / Shift+R shortcuts); what belongs here is the
+// part that touches the document: re-rendering the pages at the new angle and,
+// when the reader asks for it, writing the rotation into the file.
+
+// Rotate pages in `bytes` by the per-page angles in `deltas`
+// (Map<pageNumber, degrees>). Same operation Organize pages applies, so a
+// rotation saved from either place lands in the file identically.
+async function applyRotationToBytes(bytes, deltas) {
+  const plan = [];
+  for (let i = 0; i < pdfDoc.numPages; i++) {
+    plan.push({ srcIndex: i, rotate: deltas.get(i + 1) || 0 });
+  }
+  return applyPagePlan({ srcBytes: bytes, plan });
+}
+
+// Re-draw every page at the current angles, then put the reader back on the
+// page they were reading — a rotated page changes height, so the old scroll
+// offset would land somewhere else in the document.
+async function rerenderKeepingPlace() {
+  if (!pdfDoc) return;
+  const pn = visiblePageNumber();
+  await renderAllPages();
+  if (!organizeMode && thumbnailPanelEl.classList.contains("open")) {
+    thumbsRendered = false;
+    panelPagesEl.innerHTML = "";
+    await renderThumbnails();
+  }
+  scrollToPage(pn, { smooth: false });
+  updatePageIndicator();
+}
+
+async function saveRotationToFile(deltas) {
+  if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return; }
+  try {
+    statusEl.textContent = "Saving rotation…";
+    // For an editable document the highlights go in first, so page rotation
+    // carries them along. A read-only web PDF keeps its own annotations
+    // untouched — we only turn its pages and hand back a copy.
+    const src = editingAllowed ? await bakeCurrentHighlights() : pdfBytes.slice(0);
+    const out = await applyRotationToBytes(src, deltas);
+    const name = editingAllowed ? saveNameForDoc() : `${saveNameForDoc()} (rotated).pdf`;
+    const ok = await writeOutPdf(out, name, { inPlace: editingAllowed });
+    if (!ok) { statusEl.textContent = ""; return; }
+    // Saved in place: reload from the result so the file and the view agree
+    // (and the angles reset to zero). A downloaded copy leaves this tab alone.
+    if (editingAllowed) await reloadEditedBytes(out);
+    statusEl.textContent = editingAllowed ? "Rotation saved." : "Saved a rotated copy.";
+  } catch (e) {
+    console.error("[pdf-viewer] rotation save failed:", e);
+    statusEl.textContent = "Saving the rotation failed.";
+  }
+}
+
+pageRotation.init({
+  status: flashStatus,
+  beforeOpen: () => {
+    if (cropMode) setCropMode(false);
+    if (organizeMode) exitOrganize();
+  },
+  blocked: () => organizeMode,
+  rerender: rerenderKeepingPlace,
+  save: saveRotationToFile,
+  canSave: () => !!pdfBytes,
+  currentPage: visiblePageNumber,
+  numPages: () => (pdfDoc ? pdfDoc.numPages : 0),
+});
