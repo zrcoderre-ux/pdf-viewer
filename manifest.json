@@ -56,6 +56,7 @@
         "viewer/federal-codes.js",
         "viewer/code-tables.js",
         "viewer/ocr.js",
+        "viewer/rotation.js",
         "viewer/vendor/tesseract/tesseract.esm.min.js",
         "viewer/vendor/tesseract/worker.min.js",
         "viewer/vendor/tesseract/tesseract-core-lstm.wasm.js",

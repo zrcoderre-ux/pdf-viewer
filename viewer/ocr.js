@@ -10,6 +10,7 @@
 // repaintHighlights / footer naming all work unchanged.
 
 import Tesseract from "./vendor/tesseract/tesseract.esm.min.js";
+import { rotatedRunPlacement, normalizeAngle } from "./rotation.js";
 const { createWorker } = Tesseract;
 
 const V = (p) => chrome.runtime.getURL(`viewer/vendor/tesseract/${p}`);
@@ -129,8 +130,16 @@ function getLeftMarginPct() {
 // textLayerDiv positioned over the rendered glyphs at the current display
 // scale, and returns a textContent-shaped object for ingestPage. Geometry
 // derives from the cached user-space boxes, so this is cheap to re-run on
-// zoom (only the first call per page actually OCRs).
-export async function ocrPageToTextLayer({ page, pageNumber, displayScale, userHeight, textLayerDiv, setStatus }) {
+// zoom (only the first call per page actually OCRs) — and on a rotate, which
+// turns the spans with the page instead of re-recognizing it.
+//
+// `rotation` is the rotate tool's extra clockwise angle. Recognition always
+// runs on the page as the PDF stores it, so the cached boxes stay valid and
+// only their placement changes.
+export async function ocrPageToTextLayer({
+  page, pageNumber, displayScale, userHeight, userWidth, rotation = 0,
+  textLayerDiv, setStatus,
+}) {
   const allWords = await ocrWords(page, pageNumber, setStatus);
 
   // Filter words in the left-margin exclusion zone. The cutoff is a
@@ -142,6 +151,11 @@ export async function ocrPageToTextLayer({ page, pageNumber, displayScale, userH
   const words = cutoff > 0 ? allWords.filter(w => w.x0 >= cutoff) : allWords;
 
   const s = displayScale;
+  const angle = normalizeAngle(rotation);
+  // The unrotated display box the OCR boxes live in — what a rotated placement
+  // measures against.
+  const pageH = userHeight || page.getViewport({ scale: 1 }).height;
+  const pageW = userWidth || pageWidth;
 
   const items = [];
   let lastPar = words.length ? words[0].par : 0;
@@ -156,22 +170,30 @@ export async function ocrPageToTextLayer({ page, pageNumber, displayScale, userH
     const x1 = lineWords[lineWords.length - 1].x1;
     const y0 = Math.min(...lineWords.map(w => w.y0));
     const y1 = Math.max(...lineWords.map(w => w.y1));
-    const height = (y1 - y0) * s;
-    const width  = (x1 - x0) * s;
     const text   = lineWords.map(w => w.text).join(" ");
+    // On a rotated page the line starts where its top-left corner ended up and
+    // runs in the direction the page was turned; upright, this is just x0/y0.
+    const { left, top, runWidth: width, runHeight: height } = rotatedRunPlacement({
+      x0, y0, x1, y1, pageW, pageH, angle, scale: s,
+    });
 
     const span = document.createElement("span");
     span.textContent = text;
-    span.style.left       = `${x0 * s}px`;
-    span.style.top        = `${y0 * s}px`;
+    span.style.left       = `${left}px`;
+    span.style.top        = `${top}px`;
     span.style.fontSize   = `${Math.max(height, 1)}px`;
     span.style.fontFamily = "sans-serif";
+    if (angle) span.style.transformOrigin = "0 0";
     textLayerDiv.appendChild(span);
-    // Stretch to fit so getClientRects() lines up with the rendered image.
+    // Stretch to fit so getClientRects() lines up with the rendered image. The
+    // rotation goes on the same transform, applied before the stretch so the
+    // stretch still runs along the line of text.
     const natural = span.getBoundingClientRect().width;
-    if (natural > 0 && width > 0) {
-      span.style.transform = `scaleX(${width / natural})`;
-    }
+    const scaleX = natural > 0 && width > 0 ? width / natural : 1;
+    const parts = [];
+    if (angle) parts.push(`rotate(${angle}deg)`);
+    if (scaleX !== 1) parts.push(`scaleX(${scaleX})`);
+    if (parts.length) span.style.transform = parts.join(" ");
     lineWords = [];
   };
 

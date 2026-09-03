@@ -285,7 +285,8 @@ function scheduleResume() {
 // page along underneath them.
 function overlayOpen() {
   if (document.querySelector(
-    ".modal-backdrop:not([hidden]), #crop-bar:not([hidden]), #form-bar:not([hidden]), #organize-bar:not([hidden])"
+    ".modal-backdrop:not([hidden]), #crop-bar:not([hidden]), #form-bar:not([hidden]), " +
+    "#organize-bar:not([hidden]), #rotate-bar:not([hidden])"
   )) return true;
   const ctx = document.getElementById("hl-ctx-menu");
   return !!(ctx && ctx.style.display === "block");
