@@ -177,6 +177,22 @@ const CSS = `
 }
 `;
 
+// Clamp a panel position (offsets from the window's top-right corner) so the
+// panel stays on screen: fully visible horizontally, and with at least its
+// header bar visible vertically. Pure and exported for testing.
+const HEADER_H = 32;
+
+export function clampPanelPosition({ right, top, width, winW, winH }) {
+  const out = { right: null, top: null };
+  if (right != null) {
+    out.right = Math.max(0, Math.min(right, Math.max(0, winW - (width || 0))));
+  }
+  if (top != null) {
+    out.top = Math.max(0, Math.min(top, Math.max(0, winH - HEADER_H)));
+  }
+  return out;
+}
+
 function injectStyle() {
   if (document.getElementById(STYLE_ID)) return;
   const s = document.createElement("style");
@@ -219,13 +235,33 @@ export function createToaPanel({ providerLabel, top } = {}) {
     }
   );
 
-  // Write the custom position onto the element (right + top offsets). A no-op
-  // for whichever offset hasn't been set, leaving the CSS/option default.
+  // Write the custom position onto the element (right + top offsets), clamped
+  // to the window it is actually being shown in. A no-op for whichever offset
+  // hasn't been set, leaving the CSS/option default.
+  //
+  // The clamp is what keeps a dragged panel reachable. The saved offsets are
+  // measured against the window the drag happened in, so a panel parked at the
+  // left of a wide monitor lands entirely off-screen once the same profile
+  // opens a PDF in a narrower window — rendering as usual, just nowhere the
+  // user can see it, which reads as the Table of Authorities having switched
+  // itself off. `posRight` / `posTop` keep the SAVED values and only the style
+  // is clamped, so widening the window again restores the placement the user
+  // chose rather than the corner we had to fall back to.
   function applyPosition() {
     if (!el) return;
-    if (posRight != null) el.style.right = `${posRight}px`;
-    if (posTop != null) el.style.top = `${posTop}px`;
+    if (posRight == null && posTop == null) return;
+    const w = el.isConnected ? el.getBoundingClientRect().width : (width || 0);
+    const p = clampPanelPosition({
+      right: posRight, top: posTop, width: w,
+      winW: window.innerWidth, winH: window.innerHeight,
+    });
+    if (p.right != null) el.style.right = `${p.right}px`;
+    if (p.top != null) el.style.top = `${p.top}px`;
   }
+
+  // Shrinking the window (or moving it to a smaller display) must pull the
+  // panel back into view rather than push it out of reach.
+  window.addEventListener("resize", applyPosition);
 
   function ensure() {
     if (el && el.isConnected) return el;
@@ -280,11 +316,13 @@ export function createToaPanel({ providerLabel, top } = {}) {
         if (!dragMoved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
         if (!capturing) { try { header.setPointerCapture(e.pointerId); } catch { /* ok */ } capturing = true; }
         dragMoved = true;
-        const w = el.getBoundingClientRect().width;
-        const right = Math.max(0, Math.min(startRight - dx, Math.max(0, window.innerWidth - w)));
-        const t = Math.max(0, Math.min(startTop + dy, Math.max(0, window.innerHeight - 32)));
-        el.style.right = `${right}px`;
-        el.style.top = `${t}px`;
+        const p = clampPanelPosition({
+          right: startRight - dx, top: startTop + dy,
+          width: el.getBoundingClientRect().width,
+          winW: window.innerWidth, winH: window.innerHeight,
+        });
+        el.style.right = `${p.right}px`;
+        el.style.top = `${p.top}px`;
       };
       const onUp = () => {
         header.removeEventListener("pointermove", onMove);
@@ -340,6 +378,9 @@ export function createToaPanel({ providerLabel, top } = {}) {
     });
 
     document.documentElement.appendChild(el);
+    // Re-apply now that the panel is in the document: the clamp needs its real
+    // rendered width, which is only measurable once it is connected.
+    applyPosition();
     return el;
   }
 
