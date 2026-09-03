@@ -391,6 +391,19 @@ memorandum (10/10 match, identical keys). The port includes:
   Civil Procedure, rule 26.1`, `local rule 3.57`). A rule set the text names
   outright still wins: `Cal. Rules of Prof. Conduct, rule 1.9` links to the
   professional conduct rule.
+- **Rule-set carry-over.** A page that ties a rule number to a rule set hands
+  that set to the page's bare references to the same number, so `Rules of
+  Professional Conduct, rule 1.9 ... rule 1.9(a)` is one rule cited twice.
+  This reads in both directions within the page — unlike the statute
+  carry-over, which runs forward only, because an unplaced bare rule is not
+  left unlinked but read as a rule of court, so declining to look backwards
+  would make a worse guess rather than withhold one. A page that gives one
+  number two different sets leaves its bare references unlinked rather than
+  choosing. A page that names the professional conduct rules and never names
+  the rules of court also reads its *other* bare rules as conduct rules — the
+  weaker inference, so it runs forward only from the first conduct cite, and a
+  number the document ties to the rules of court anywhere keeps that set (a
+  disqualification motion still notices its own hearing under rule 3.1300).
 - Both **CSM** and **Bluebook** case forms — chosen by whichever tail
   pattern matches first within 200 chars after the `v.` anchor.
 - Pin-cite ranges including em-dash forms (`, 110-12`, `, 110–12`).
