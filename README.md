@@ -273,7 +273,11 @@ fortnight.
 
 **Carry-forward inheritance:** a bare `§ N` / `section N` reference (no code
 name of its own) inherits the most recently *named* code before it in reading
-order. So after "Civil Code § 1671(b)", a later "§ 1671" links to Civil Code;
+order — named in a citation or simply in prose, so "Chapter 12 of Title 10 of
+Part 2 of the Code of Civil Procedure … a manufacturer election under section
+871.29" links that section to the Code of Civil Procedure even though the code
+was never cited with a section of its own. So after "Civil Code § 1671(b)", a
+later "§ 1671" links to Civil Code;
 if "CCP § 664.6" is then named, a following "§ 664.6" links to the Code of Civil
 Procedure. A bare section that appears before any code is named is left unlinked.
 (The single-named-code case is just the special case where everything follows

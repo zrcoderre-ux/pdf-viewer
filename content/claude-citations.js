@@ -61,6 +61,7 @@
 
   let findAllCitations = null;
   let resolveUrl = null;
+  let findCodeNameMentions = null;   // codes named in prose, for carry-forward
   let toaPanel = null;          // shared Table of Authorities panel (toa.js)
   let memory = null;            // per-URL citation memory (citation-memory.js)
   let memoryApi = null;         // its module (storage-key helpers + pruning)
@@ -129,6 +130,7 @@
       const mod = await import(chrome.runtime.getURL("viewer/citation-linker.js"));
       findAllCitations = mod.findAllCitations;
       resolveUrl = mod.resolveUrl;
+      findCodeNameMentions = mod.findCodeNameMentions || null;
     } catch (e) {
       window.__citationLinker = { active: false, reason: "engine blocked (site CSP?)", host: location.host };
       console.warn(
@@ -370,6 +372,20 @@
         }
       }
       addCitation(cite);
+    }
+
+    // A code can be named without being cited — "Chapter 12 of Title 10 of Part
+    // 2 of the Code of Civil Procedure", "under the Evidence Code". No section
+    // number, so nothing to link, but the reader who then meets "section 871.29"
+    // reads it as that code's, and carry-forward has to as well. Without these,
+    // only a code cited WITH a section could be inherited from, so a paragraph
+    // that names its code in prose left every later section unlinked.
+    if (findCodeNameMentions) {
+      try {
+        for (const mention of findCodeNameMentions(docText)) {
+          markers.push({ pos: mention.pos, code: mention.code, kind: mention.kind });
+        }
+      } catch { /* an engine build without the helper: citations still carry */ }
     }
     markers.sort((a, b) => a.pos - b.pos);
 

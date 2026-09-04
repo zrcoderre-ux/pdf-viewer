@@ -498,6 +498,42 @@ console.log("\n--- and it is written without waiting to be unloaded ---");
   ], [true, [AGUILAR]]);
 }
 
+console.log("\n--- a code named in prose is enough for a bare section ---");
+{
+  const page = await loadPage("https://claude.ai/chat/code", [
+    para(
+      "Both parties proceed as though Chapter 12 of Title 10 of Part 2 of the " +
+      "Code of Civil Procedure, added in 2024, governs this action. Whether it " +
+      "does turns on a manufacturer election under section 871.29, which neither " +
+      "party addresses beyond Plaintiffs' assertion that Defendant \"bound " +
+      "itself\" to the new sections."
+    ),
+  ], {});
+  check("the section inherits the code named in the sentence before it",
+    page.toaKeys(), ["CCP § 871.29"]);
+  check("the code name itself is not a link", page.linkKeys(), ["CCP § 871.29"]);
+}
+{
+  const page = await loadPage("https://claude.ai/chat/code2", [
+    para("The Evidence Code governs admissibility."),
+    para("Section 1152 excludes the offer, and § 664.6 is not in play."),
+  ], {});
+  check("carry-forward reaches across paragraphs too",
+    page.toaKeys(), ["EVID § 1152", "EVID § 664.6"]);
+}
+{
+  const page = await loadPage("https://claude.ai/chat/code3", [
+    para("Under the Civil Code, and later under the Penal Code, section 1542 recurs."),
+  ], {});
+  check("the nearest code named before it wins", page.toaKeys(), ["PEN § 1542"]);
+}
+{
+  const page = await loadPage("https://claude.ai/chat/code4", [
+    para("Section 871.29 comes first. The Code of Civil Procedure is named after."),
+  ], {});
+  check("a section before any code is named stays unlinked", page.toaKeys(), []);
+}
+
 console.log("\n" + "=".repeat(60));
 console.log(`FAILURES: ${fails}`);
 process.exit(fails ? 1 : 0);
