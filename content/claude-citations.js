@@ -13,12 +13,22 @@
 // reposition them on scroll/resize. This mirrors the PDF viewer's linkLayer.
 //
 // Pipeline:
-//   scan()  — walk visible text nodes, group by block, run findAllCitations on
-//             each block, map each hit back to a DOM Range, resolve its URL.
+//   scan()  — walk visible text nodes into ONE page-wide string, run
+//             findAllCitations over it, map each hit back to a DOM Range,
+//             resolve its URL.
 //   paint() — read getClientRects() for each Range and lay down underline
 //             strips. Cheap; safe to run on every scroll frame.
 // scan() runs (debounced) on DOM mutations; paint() runs (rAF-throttled) on
 // scroll/resize. Provider / repo changes trigger a re-scan.
+//
+// A chat page is not a document, and two consequences follow. It unmounts what
+// scrolls out of view, so scan() also feeds a per-URL memory (citation-memory.js):
+// the Table of Authorities lists everything found on the page so far rather than
+// only what is mounted right now, and a case cited in a message no longer in the
+// DOM is still available for an italicized short name further down to resolve
+// against. And a short-form reference points back to a full cite in an earlier
+// paragraph, which is why the page is scanned as one string instead of block by
+// block.
 
 (function () {
   if (window.__claudeCitationsLoaded) return;
@@ -52,6 +62,7 @@
   let findAllCitations = null;
   let resolveUrl = null;
   let toaPanel = null;          // shared Table of Authorities panel (toa.js)
+  let memory = null;            // per-URL citation memory (citation-memory.js)
 
   let provider = "lexis";       // matches the PDF viewer default
   let repo = {};
@@ -89,6 +100,7 @@
     if (suppressed) {
       citations = [];
       authorities = [];
+      if (memory) memory.clear();
       paint();
       if (toaPanel) toaPanel.render([], provider);
       window.__citationLinker = { active: false, reason: "site excepted in Options", host: location.host };
@@ -122,6 +134,17 @@
         e
       );
       return;
+    }
+
+    // The per-URL memory is what keeps an authority listed after the app has
+    // unmounted the message it came from. Optional in the same sense as the
+    // panel: without it the TOA falls back to listing only what is on screen.
+    try {
+      const memMod = await import(chrome.runtime.getURL("viewer/citation-memory.js"));
+      memory = memMod.createCitationMemory();
+    } catch (e) {
+      memory = null;
+      console.warn("[Citation Linker] Citation memory unavailable on this site:", e);
     }
 
     // The Table of Authorities panel is OPTIONAL — if its import is blocked,
@@ -190,6 +213,12 @@
 
   // ── Scan: text → citations → ranges ──────────────────────────────────────────
 
+  // Blocks are joined by a paragraph break — a hard stop for the detector — so
+  // reading the page as one string doesn't invent a citation that runs out of
+  // one paragraph and into the next. Anything that slips past it anyway is
+  // dropped by the segment check in addCitation().
+  const BLOCK_SEP = "\n\n";
+
   let scanTimer = null;
   function scheduleScan() {
     clearTimeout(scanTimer);
@@ -198,19 +227,26 @@
 
   function scan() {
     if (suppressed || !findAllCitations) return;
+    // Another conversation is another set of authorities. The same one — its
+    // query string and #hash aside — keeps everything found on it so far.
+    if (memory) memory.setUrl(location.href);
     citations = [];
 
-    // Group accepted text nodes by their nearest block ancestor so detection
-    // runs per logical block (citations never span blocks) and each node is
-    // counted exactly once.
-    const groups = new Map(); // block element -> [{ node, start, end }]
-    const text = new Map();   // block element -> concatenated string
-    const italics = new Map(); // block element -> [[start, end], ...]
+    // The page is read as ONE string rather than block by block. Short-form
+    // references point BACKWARD — "Aguilar, supra", an italicized "Market
+    // Lofts" — and the full citation they resolve against is usually in an
+    // earlier paragraph, which a per-block scan can't see.
+    let docText = "";
+    const nodes = [];      // { node, start, end }, document order, doc offsets
+    const segments = [];   // { start, end, clipEls } per contiguous block run
+    const italicRanges = [];
+    let currentBlock = null;
+    let segment = null;
 
     // Case names are italicized and almost nothing else is, so an italic run
-    // repeating part of a case cited earlier in the same block is a reference
-    // to it. Posture is read per parent element and cached — getComputedStyle
-    // on every text node of a long page is far too expensive.
+    // repeating part of a case cited earlier is a reference to it. Posture is
+    // read per parent element and cached — getComputedStyle on every text node
+    // of a long page is far too expensive.
     const italicCache = new WeakMap();
     const isItalicEl = (el) => {
       let cached = italicCache.get(el);
@@ -221,6 +257,16 @@
         italicCache.set(el, cached);
       }
       return cached;
+    };
+
+    // Overflow-clipping ancestors of a block — used at paint time to drop
+    // strips for text scrolled out of a clipped container (e.g. a partially
+    // collapsed "thinking" panel) so they don't land over the main chat.
+    const clipCache = new Map();
+    const clipsFor = (block) => {
+      let c = clipCache.get(block);
+      if (c === undefined) clipCache.set(block, (c = clipAncestorsOf(block)));
+      return c;
     };
 
     const acceptText = (node) => {
@@ -236,16 +282,24 @@
       }
       return true;
     };
+
     const addTextNode = (node) => {
       const parent = node.parentElement;
       const block = parent.closest(BLOCK_SELECTOR) || parent;
-      let map = groups.get(block);
-      if (!map) { map = []; groups.set(block, map); text.set(block, ""); italics.set(block, []); }
-      const start = text.get(block).length;
-      const val = node.nodeValue;
-      text.set(block, text.get(block) + val);
-      map.push({ node, start, end: start + val.length });
-      if (isItalicEl(parent)) italics.get(block).push([start, start + val.length]);
+      // A new block (or a return to one after a nested block interrupted it)
+      // starts a new segment, separated from the last by a paragraph break.
+      if (block !== currentBlock) {
+        if (docText) docText += BLOCK_SEP;
+        currentBlock = block;
+        segment = { start: docText.length, end: docText.length, clipEls: clipsFor(block) };
+        segments.push(segment);
+      }
+      const start = docText.length;
+      docText += node.nodeValue;
+      const end = docText.length;
+      nodes.push({ node, start, end });
+      segment.end = end;
+      if (isItalicEl(parent)) italicRanges.push([start, end]);
     };
 
     // Walk the light DOM AND every open shadow root. Modern web-component apps
@@ -262,116 +316,130 @@
     };
     walkRoot(document.body);
 
-    // Per-block context kept for the bare-section inheritance pass.
-    const blocks = [];
-    for (const [block, map] of groups) {
-      const blockText = text.get(block);
-      if (blockText.length < 6) continue; // too short to hold a citation
-      let hits;
+    let hits = [];
+    if (docText.length >= 6) {
       try {
-        hits = findAllCitations(blockText, { italicRanges: italics.get(block) });
-      } catch { continue; }
-      const matchedSpans = [];
-      const markers = []; // { pos, code, kind } where a code is named
-      // Overflow-clipping ancestors of this block — used at paint time to drop
-      // strips for text scrolled out of a clipped container (e.g. a partially
-      // collapsed "thinking" panel) so they don't land over the main chat.
-      const clipEls = clipAncestorsOf(block);
-      for (const cite of hits) {
-        matchedSpans.push(cite.span);
-        if (cite.kind === "statute" || cite.kind === "regulation") {
-          const i = cite.key.indexOf(" § ");
-          if (i > 0) {
-            markers.push({
-              pos: cite.span[0],
-              code: cite.key.slice(0, i),
-              kind: cite.kind,
-            });
-          }
+        hits = findAllCitations(docText, {
+          italicRanges,
+          // Cases already seen on this page. An app that unmounts what scrolls
+          // out of view takes the full citation with it, and without this an
+          // italicized "Market Lofts" further down would have nothing left to
+          // resolve against.
+          priorCases: memory ? memory.priorCases() : [],
+        });
+      } catch { hits = []; }
+    }
+
+    const matchedSpans = [];
+    const markers = [];   // { pos, code, kind } where a code is named
+
+    // Link one detected citation and remember its authority. A match running
+    // past the end of the block it starts in is an artifact of reading the page
+    // as one string — two adjacent blocks that happen to read as one sentence —
+    // and is dropped, because no reader sees one citation there.
+    const addCitation = (cite) => {
+      const seg = segmentFor(segments, cite.span[0]);
+      if (!seg || cite.span[1] > seg.end) return;
+      let url;
+      try { url = resolveUrl(cite, repo, provider); } catch { return; }
+      if (!url) return;
+      // Remembered before the range is built: an authority the reader has seen
+      // is still an authority even if we can't map it back to a paintable range.
+      if (memory) memory.remember(cite, url);
+      const range = rangeForSpan(nodes, cite.span[0], cite.span[1]);
+      if (!range) return;
+      citations.push({ range, url, key: cite.key, kind: cite.kind, clipEls: seg.clipEls });
+    };
+
+    for (const cite of hits) {
+      matchedSpans.push(cite.span);
+      if (cite.kind === "statute" || cite.kind === "regulation") {
+        const i = cite.key.indexOf(" § ");
+        if (i > 0) {
+          markers.push({ pos: cite.span[0], code: cite.key.slice(0, i), kind: cite.kind });
         }
-        const range = rangeForSpan(map, cite.span[0], cite.span[1]);
-        if (!range) continue;
-        let url;
-        try { url = resolveUrl(cite, repo, provider); } catch { continue; }
-        if (!url) continue;
-        citations.push({ range, url, key: cite.key, kind: cite.kind, clipEls });
       }
-      markers.sort((a, b) => a.pos - b.pos);
-      blocks.push({ map, blockText, matchedSpans, markers, clipEls });
+      addCitation(cite);
+    }
+    markers.sort((a, b) => a.pos - b.pos);
+
+    // Bare model-UCC sections first ("§ 3-310"): identified by the hyphen
+    // alone, so no carry-forward is needed. Recorded into matchedSpans so the
+    // carry-forward pass below skips them (its section pattern would otherwise
+    // grab a wrong "§ 3").
+    let m;
+    BARE_UCC_RE.lastIndex = 0;
+    while ((m = BARE_UCC_RE.exec(docText)) !== null) {
+      const s = m.index;
+      const e = m.index + m[0].length;
+      if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
+      addCitation({ kind: "statute", key: `UCC § ${m.groups.sec}`, span: [s, e] });
+      matchedSpans.push([s, e]);
     }
 
     // Carry-forward inheritance: a bare "§ N" / "section N" reference (no code
     // name of its own) inherits the most recently NAMED code that appears
-    // before it in reading order. We walk blocks in document order, tracking
-    // the last code named; within a block a bare section uses the nearest
-    // preceding code marker, falling back to the carried-in code. Bare sections
-    // before any code is ever named stay unlinked (nothing to inherit). The
-    // single-named-code case is just the special case where every bare section
-    // follows that one code.
-    // Carried between blocks as { code, kind } — the kind travels with the
-    // code so a section inheriting "Treas. Reg." is still grouped and colored
-    // as a regulation, not a statute.
-    let lastCode = null;
-    for (const { map, blockText, matchedSpans, markers, clipEls } of blocks) {
-      let m;
-      // Bare model-UCC sections first ("§ 3-310"): identified by the hyphen
-      // alone, so no carry-forward is needed. Recorded into matchedSpans so the
-      // carry-forward pass below skips them (its section pattern would otherwise
-      // grab a wrong "§ 3").
-      BARE_UCC_RE.lastIndex = 0;
-      while ((m = BARE_UCC_RE.exec(blockText)) !== null) {
-        const s = m.index;
-        const e = m.index + m[0].length;
-        if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
-        const key = `UCC § ${m.groups.sec}`;
-        let url;
-        try { url = resolveUrl({ kind: "statute", key }, repo, provider); } catch { continue; }
-        if (!url) continue;
-        const range = rangeForSpan(map, s, e);
-        if (!range) continue;
-        citations.push({ range, url, key, kind: "statute", clipEls });
-        matchedSpans.push([s, e]);
+    // before it in reading order. Bare sections before any code is ever named
+    // stay unlinked (nothing to inherit). The single-named-code case is just
+    // the special case where every bare section follows that one code. The
+    // kind travels with the code, so a section inheriting "Treas. Reg." is
+    // still grouped and colored as a regulation, not a statute.
+    BARE_SECTION_RE.lastIndex = 0;
+    while ((m = BARE_SECTION_RE.exec(docText)) !== null) {
+      const s = m.index;
+      const e = m.index + m[0].length;
+      // Skip references already covered by a full citation above.
+      if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
+      // Nearest code named at or before this section.
+      let code = null;
+      for (const mk of markers) {
+        if (mk.pos <= s) code = mk;
+        else break;
       }
-
-      BARE_SECTION_RE.lastIndex = 0;
-      while ((m = BARE_SECTION_RE.exec(blockText)) !== null) {
-        const s = m.index;
-        const e = m.index + m[0].length;
-        // Skip references already covered by a full citation above.
-        if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
-        // Nearest code named at or before this section in the block, else the
-        // code carried in from earlier blocks.
-        let code = lastCode;
-        for (const mk of markers) {
-          if (mk.pos <= s) code = mk;
-          else break;
-        }
-        if (!code) continue;
-        const key = `${code.code} § ${m.groups.sec}`;
-        const kind = code.kind;
-        let url;
-        try { url = resolveUrl({ kind, key }, repo, provider); } catch { continue; }
-        if (!url) continue;
-        const range = rangeForSpan(map, s, e);
-        if (!range) continue;
-        citations.push({ range, url, key, kind, clipEls });
-      }
-      // Hand the last code named in this block to the next block.
-      if (markers.length) lastCode = markers[markers.length - 1];
+      if (!code) continue;
+      addCitation({ kind: code.kind, key: `${code.code} § ${m.groups.sec}`, span: [s, e] });
     }
 
-    // Deduplicate by key for the Table of Authorities (the in-text underlines
-    // keep every occurrence; the TOA lists each authority once).
-    const seen = new Map();
-    for (const c of citations) {
-      if (!seen.has(c.key)) seen.set(c.key, { key: c.key, kind: c.kind, url: c.url });
-    }
-    authorities = [...seen.values()];
+    // The Table of Authorities is CUMULATIVE for as long as the reader stays on
+    // this page. A chat app unmounts the messages that scroll out of view, so a
+    // list rebuilt from the live DOM would drop authorities as the reader
+    // scrolled past them — the panel emptying itself behind you.
+    authorities = memory
+      ? memory.authorities((c) => resolveUrl(c, repo, provider))
+      : dedupeAuthorities(citations);
 
-    if (window.__citationLinker) window.__citationLinker.lastScanCitations = citations.length;
+    if (window.__citationLinker) {
+      window.__citationLinker.lastScanCitations = citations.length;
+      window.__citationLinker.authorities = authorities.length;
+    }
 
     paint();
     if (toaPanel) toaPanel.render(authorities, provider);
+  }
+
+  // Used only if the memory module didn't load: the authorities visible in
+  // this scan, deduped by key (the in-text underlines keep every occurrence;
+  // the TOA lists each authority once).
+  function dedupeAuthorities(list) {
+    const seen = new Map();
+    for (const c of list) {
+      if (!seen.has(c.key)) seen.set(c.key, { key: c.key, kind: c.kind, url: c.url });
+    }
+    return [...seen.values()];
+  }
+
+  // The segment — one contiguous run of text in a single block — that a
+  // document offset falls in. Binary search: a long chat has thousands.
+  function segmentFor(segments, pos) {
+    let lo = 0, hi = segments.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const seg = segments[mid];
+      if (pos < seg.start) hi = mid - 1;
+      else if (pos >= seg.end) lo = mid + 1;
+      else return seg;
+    }
+    return null;
   }
 
   // Collect an element's overflow-clipping ancestors (those that visually clip
@@ -403,22 +471,26 @@
     return true;
   }
 
-  // Map a [start, end) offset within a block's concatenated text to a DOM Range.
-  function rangeForSpan(map, s, e) {
-    let startNode = null, startOff = 0, endNode = null, endOff = 0;
-    for (const m of map) {
-      if (startNode === null && s >= m.start && s < m.end) {
-        startNode = m.node; startOff = s - m.start;
-      }
-      if (e > m.start && e <= m.end) {
-        endNode = m.node; endOff = e - m.start;
-      }
+  // Map a [start, end) offset within the page's concatenated text to a DOM
+  // Range. Offsets that begin on a block separator belong to no node and get
+  // no range.
+  function rangeForSpan(nodes, s, e) {
+    let lo = 0, hi = nodes.length - 1, i = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const n = nodes[mid];
+      if (s < n.start) hi = mid - 1;
+      else if (s >= n.end) lo = mid + 1;
+      else { i = mid; break; }
     }
-    if (!startNode || !endNode) return null;
+    if (i === -1) return null;
+    let j = i;
+    while (j < nodes.length && e > nodes[j].end) j++;
+    if (j >= nodes.length || e <= nodes[j].start) return null;
     try {
       const r = document.createRange();
-      r.setStart(startNode, startOff);
-      r.setEnd(endNode, endOff);
+      r.setStart(nodes[i].node, s - nodes[i].start);
+      r.setEnd(nodes[j].node, e - nodes[j].start);
       return r;
     } catch {
       return null;

@@ -30,6 +30,17 @@ hides them. `viewer/federal-codes.js` holds the tables that classification
 runs on (C.F.R. titles for named regulation series, U.S.C. titles for the
 federal codes numbered section-for-section with their codification, and the
 number and bulletin shapes for IRS revenue rulings).
+`content/claude-citations.js` reads a chat page as ONE string (short forms point
+back to a full cite in an earlier paragraph, which a per-block scan cannot see)
+and keeps a per-URL memory in `viewer/citation-memory.js`, because such a page
+unmounts its own messages as the reader scrolls: without it the Table of
+Authorities loses cases on the way down the page, and an italicized short name
+loses the full cite it refers back to. The memory makes the panel cumulative for
+as long as the reader stays on the conversation, and feeds the remembered cases
+back into detection as `findAllCitations(text, { priorCases })`. It is cleared
+when the app navigates to another conversation (origin + path; a query string or
+`#fragment` is the same page).
+
 `viewer/shift-space-open.js` is a third shared file — a classic script loaded
 both by `viewer.html` and as an all-sites content script — that turns
 Shift+Space into a middle click; it finds its targets geometrically (the
@@ -412,12 +423,14 @@ test-italic-short-names.mjs          Node-runnable italic short-name linking tes
 test-toa-position.mjs                Node-runnable TOA panel position-clamp tests
 test-bare-rule.mjs                   Node-runnable bare-rule + rule-set carry-over tests
 test-page-rotation.mjs               Node-runnable page-rotation geometry + scope tests
+test-citation-memory.mjs             Node-runnable per-URL citation-memory tests (stubbed DOM)
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing
 viewer/autoscroll.js                 Auto-scroll: wpm-paced reading scroll + its control bar
 viewer/rotation.js                   Page rotation: per-page angles, rotate bar, rotated geometry
 viewer/citation-linker.js            Detection + placement + URL resolution
+viewer/citation-memory.js            Per-URL memory: cumulative TOA + remembered cases
 viewer/highlights.js                 Selection, highlight, context menu
 viewer/footer-naming.js              Footer-title rule engine + iterative disambiguator
 viewer/disambiguation.js             Cross-tab collision registry (storage.session)
