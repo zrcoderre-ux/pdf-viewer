@@ -263,6 +263,14 @@ and is cleared when the app navigates to another one, since a different
 conversation has different authorities. Switching providers re-derives the
 remembered links rather than dropping them.
 
+**A refresh is not a new conversation.** The memory is written to
+`chrome.storage.local` under that conversation's own key — a beat after the last
+citation is found, and again as the page unloads — and read back on the way in,
+so reloading restores the table rather than emptying it, and an italicized short
+name still reaches a case the page read before the refresh. What is stored stays
+bounded: the 40 most recently read conversations, and nothing untouched for a
+fortnight.
+
 **Carry-forward inheritance:** a bare `§ N` / `section N` reference (no code
 name of its own) inherits the most recently *named* code before it in reading
 order. So after "Civil Code § 1671(b)", a later "§ 1671" links to Civil Code;

@@ -39,7 +39,10 @@ loses the full cite it refers back to. The memory makes the panel cumulative for
 as long as the reader stays on the conversation, and feeds the remembered cases
 back into detection as `findAllCitations(text, { priorCases })`. It is cleared
 when the app navigates to another conversation (origin + path; a query string or
-`#fragment` is the same page).
+`#fragment` is the same page), and it outlives a reload: each conversation's
+record is written to `chrome.storage.local` under its own key (debounced, plus a
+`pagehide` flush) and hydrated on the way back in, with `prunePageIndex()`
+holding the stored history to the 40 most recent conversations and a fortnight.
 
 `viewer/shift-space-open.js` is a third shared file — a classic script loaded
 both by `viewer.html` and as an all-sites content script — that turns
@@ -430,7 +433,7 @@ viewer/viewer.js                     PDF.js loader, two-pass renderer, naming pl
 viewer/autoscroll.js                 Auto-scroll: wpm-paced reading scroll + its control bar
 viewer/rotation.js                   Page rotation: per-page angles, rotate bar, rotated geometry
 viewer/citation-linker.js            Detection + placement + URL resolution
-viewer/citation-memory.js            Per-URL memory: cumulative TOA + remembered cases
+viewer/citation-memory.js            Per-URL memory: cumulative TOA + remembered cases, saved across reloads
 viewer/highlights.js                 Selection, highlight, context menu
 viewer/footer-naming.js              Footer-title rule engine + iterative disambiguator
 viewer/disambiguation.js             Cross-tab collision registry (storage.session)
