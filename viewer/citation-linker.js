@@ -221,6 +221,42 @@ function statuteAbbrev(match) {
   return null;
 }
 
+// A code NAMED without being cited: "Chapter 12 of Title 10 of Part 2 of the
+// Code of Civil Procedure", "the Evidence Code forecloses it", "under ERISA".
+// There is no section number, so this is not a citation and never becomes a
+// link. It is context — the reader who then meets a bare "section 871.29" takes
+// it to mean the code just named, and a carry-forward pass needs to be able to
+// do the same. Without it a bare section can only inherit a code that was
+// itself cited WITH a section, so a passage that names its code in prose leaves
+// every later section unlinked.
+//
+// Used by the claude.ai content script, whose carry-forward is "the most recent
+// code named before this point". The viewer's own pass (in
+// findStatuteCitations) deliberately does NOT consult these: it inherits by
+// section NUMBER, which is what lets it leave "Section 5 of the lease" alone on
+// a page that also cites a code. Prose mentions can't tie a number to a code,
+// so feeding them to that pass would sweep in exactly the references it is
+// careful to skip.
+const CODE_MENTION_RE = new RegExp(
+  String.raw`\b(?:Cal\.\s*|California\s+)?(?:` +
+  STATUTE_CODES_SORTED.map(([pat], i) => `(?<c${i}>${pat})`).join("|") + "|" +
+  FEDERAL_CODES_SORTED.map((c, i) => `(?<f${i}>${c.pattern})`).join("|") +
+  String.raw`)(?![A-Za-z])`,
+  "gsi"
+);
+
+export function findCodeNameMentions(text) {
+  const out = [];
+  CODE_MENTION_RE.lastIndex = 0;
+  let m;
+  while ((m = CODE_MENTION_RE.exec(text)) !== null) {
+    const code = statuteAbbrev(m) || federalCodeName(m);
+    if (!code) continue;
+    out.push({ pos: m.index, end: m.index + m[0].length, code, kind: "statute" });
+  }
+  return out;
+}
+
 // True when the text at `pos` begins with whitespace and then a capital
 // letter — the guard every chained-section loop applies to the number it just
 // matched. A chained number followed by a capitalized word is not another

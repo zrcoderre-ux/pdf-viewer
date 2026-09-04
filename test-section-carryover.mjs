@@ -8,7 +8,7 @@
 // carry-over runs FORWARD only, stops at the page break, and stands down when
 // one page ties the same number to two different codes.
 
-import { findAllCitations } from "./viewer/citation-linker.js";
+import { findAllCitations, findCodeNameMentions } from "./viewer/citation-linker.js";
 
 let fails = 0;
 
@@ -104,6 +104,31 @@ console.log("\n--- boundaries ---");
   check("a reference with its own code keeps it",
     statuteKeys(text), ["CIV § 1542", "PEN § 1542"]);
 }
+
+console.log("\n--- codes named without being cited ---");
+// A code can be named in prose with no section of its own: "Chapter 12 of Title
+// 10 of Part 2 of the Code of Civil Procedure". findCodeNameMentions finds
+// those, and the claude.ai content script inherits from them — its rule is "the
+// most recent code named before this point". The viewer's pass above does NOT
+// consult them, deliberately: it inherits by section NUMBER, which is what lets
+// it leave "Section 5 of the lease" alone on a page that also cites a code.
+const mentions = (t) => findCodeNameMentions(t).map((c) => c.code);
+
+check("a code named mid-sentence, with no section",
+  mentions("Chapter 12 of Title 10 of Part 2 of the Code of Civil Procedure, added in 2024, governs."),
+  ["CCP"]);
+check("short forms and federal acts count too",
+  mentions("Under Evid. Code, and under ERISA, and under the Bus. & Prof. Code."),
+  ["EVID", "ERISA", "BPC"]);
+check("in document order, so the nearest one before a section can be found",
+  mentions("Under the Civil Code, and later under the Penal Code, section 1542 recurs."),
+  ["CIV", "PEN"]);
+check("prose that names no code", mentions("The lease governs this dispute."), []);
+check(
+  "the viewer's own pass is unmoved by a prose mention",
+  statuteKeys("The Code of Civil Procedure governs. Section 5 of the lease does not."),
+  []
+);
 
 console.log("\n" + "=".repeat(60));
 console.log(`FAILURES: ${fails}`);
