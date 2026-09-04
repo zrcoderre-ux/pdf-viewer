@@ -63,6 +63,9 @@
   let resolveUrl = null;
   let toaPanel = null;          // shared Table of Authorities panel (toa.js)
   let memory = null;            // per-URL citation memory (citation-memory.js)
+  let memoryApi = null;         // its module (storage-key helpers + pruning)
+  let savedRevision = -1;       // memory.revision as last written to storage
+  let saveTimer = null;
 
   let provider = "lexis";       // matches the PDF viewer default
   let repo = {};
@@ -140,10 +143,11 @@
     // unmounted the message it came from. Optional in the same sense as the
     // panel: without it the TOA falls back to listing only what is on screen.
     try {
-      const memMod = await import(chrome.runtime.getURL("viewer/citation-memory.js"));
-      memory = memMod.createCitationMemory();
+      memoryApi = await import(chrome.runtime.getURL("viewer/citation-memory.js"));
+      memory = memoryApi.createCitationMemory();
     } catch (e) {
       memory = null;
+      memoryApi = null;
       console.warn("[Citation Linker] Citation memory unavailable on this site:", e);
     }
 
@@ -192,6 +196,10 @@
     window.addEventListener("scroll", schedulePaint, { capture: true, passive: true });
     window.addEventListener("resize", schedulePaint, { passive: true });
 
+    // A reload is what the debounce would otherwise lose: write on the way out
+    // so the last authorities found are in storage before the page goes.
+    window.addEventListener("pagehide", flushSave);
+
     scan();
   }
 
@@ -229,7 +237,9 @@
     if (suppressed || !findAllCitations) return;
     // Another conversation is another set of authorities. The same one — its
     // query string and #hash aside — keeps everything found on it so far.
-    if (memory) memory.setUrl(location.href);
+    // A page the reader is returning to — after a reload, or after a trip to
+    // another conversation and back — brings its saved table with it.
+    if (memory && memory.setUrl(location.href)) hydrateFromStorage();
     citations = [];
 
     // The page is read as ONE string rather than block by block. Short-form
@@ -415,6 +425,75 @@
 
     paint();
     if (toaPanel) toaPanel.render(authorities, provider);
+    scheduleSave();
+  }
+
+  // ── Persistence: the table survives a reload ────────────────────────────────
+  //
+  // A refresh is not a new conversation, so it must not empty the panel. Each
+  // page's record lives under its own chrome.storage.local key, with one small
+  // index recording when each was last seen — so a save writes back only the
+  // conversation being read, and the history stays bounded (see prunePageIndex).
+
+  function hydrateFromStorage() {
+    if (!memory || !memoryApi || !memory.url) return;
+    const key = memory.url;
+    chrome.storage.local.get({ [memoryApi.pageStoreKey(key)]: null }, (got) => {
+      if (chrome.runtime.lastError) return;
+      // The reader may have moved on while storage was answering.
+      if (!memory || memory.url !== key) return;
+      if (!memory.hydrate(got[memoryApi.pageStoreKey(key)])) return;
+      // savedRevision is deliberately left alone: the scan that ran while
+      // storage was answering may have found authorities the stored record
+      // doesn't have, and those still need writing back.
+      authorities = memory.authorities((c) => resolveUrl(c, repo, provider));
+      if (toaPanel) toaPanel.render(authorities, provider);
+    });
+  }
+
+  function scheduleSave() {
+    if (!memory || !memoryApi || memory.revision === savedRevision) return;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveToStorage, 1500);
+  }
+
+  function flushSave() {
+    if (!memory || !memoryApi || memory.revision === savedRevision) return;
+    clearTimeout(saveTimer);
+    saveToStorage();
+  }
+
+  function saveToStorage() {
+    if (!memory || !memoryApi || !memory.url) return;
+    const key = memory.url;
+    const storeKey = memoryApi.pageStoreKey(key);
+    chrome.storage.local.get(
+      { [memoryApi.PAGE_INDEX_KEY]: {}, [storeKey]: null },
+      (got) => {
+        if (chrome.runtime.lastError || !memory || memory.url !== key) return;
+        // Another tab may have written this same conversation since we last
+        // read it. Merging rather than overwriting keeps both tabs' findings.
+        memory.hydrate(got[storeKey]);
+        const now = Date.now();
+        const { index, dropped } = memoryApi.prunePageIndex({
+          ...(got[memoryApi.PAGE_INDEX_KEY] || {}),
+          [key]: now,
+        });
+        const rev = memory.revision;
+        const write = { [memoryApi.PAGE_INDEX_KEY]: index, [storeKey]: { at: now, ...memory.toJSON() } };
+        chrome.storage.local.set(write, () => {
+          if (chrome.runtime.lastError) {
+            console.warn("[Citation Linker] Could not save the Table of Authorities:",
+              chrome.runtime.lastError.message);
+            return;
+          }
+          if (memory && memory.url === key) savedRevision = rev;
+        });
+        // Records the index no longer carries are dead weight.
+        const stale = dropped.filter((k) => k !== key).map(memoryApi.pageStoreKey);
+        if (stale.length) chrome.storage.local.remove(stale, () => chrome.runtime.lastError);
+      }
+    );
   }
 
   // Used only if the memory module didn't load: the authorities visible in

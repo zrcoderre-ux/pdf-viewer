@@ -18,7 +18,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createCitationMemory, pageKey } from "./viewer/citation-memory.js";
+import {
+  createCitationMemory, pageKey, pageStoreKey, prunePageIndex, PAGE_INDEX_KEY,
+} from "./viewer/citation-memory.js";
 import { findAllCitations, caseMemo } from "./viewer/citation-linker.js";
 
 const SRC = path.dirname(fileURLToPath(import.meta.url)) + "/";
@@ -206,7 +208,7 @@ function para(src, tag = "p") {
 
 // Install the globals the content script and the panel expect, run the real
 // script, and hand back the levers the tests need.
-async function loadPage(href, blocks) {
+async function loadPage(href, blocks, store = {}) {
   const body = makeEl("body", { children: blocks });
   const html = makeEl("html");
   html.isConnected = true;
@@ -238,8 +240,12 @@ async function loadPage(href, blocks) {
     addEventListener: () => {},
   };
 
+  const listeners = new Map();
   globalThis.window = globalThis;
-  globalThis.addEventListener = () => {};
+  globalThis.addEventListener = (type, fn) => {
+    if (!listeners.has(type)) listeners.set(type, []);
+    listeners.get(type).push(fn);
+  };
   globalThis.removeEventListener = () => {};
   globalThis.innerWidth = 1280;
   globalThis.innerHeight = 720;
@@ -253,11 +259,26 @@ async function loadPage(href, blocks) {
   });
   globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
   globalThis.MutationObserver = class { constructor(cb) { observerCb = cb; } observe() {} };
+  // A real (if tiny) chrome.storage.local: the same object can be handed to a
+  // second loadPage() call, which is what a reload looks like from in here.
   globalThis.chrome = {
-    runtime: { getURL: (p) => new URL(p, `file://${SRC}`).href },
+    runtime: { getURL: (p) => new URL(p, `file://${SRC}`).href, lastError: null },
     storage: {
       sync: { get: (defaults, cb) => cb(defaults) },
-      local: { get: (defaults, cb) => cb(defaults), set: () => {} },
+      local: {
+        get(defaults, cb) {
+          const out = {};
+          for (const [k, v] of Object.entries(defaults)) {
+            out[k] = k in store ? store[k] : v;
+          }
+          cb(out);
+        },
+        set(obj, cb) { Object.assign(store, obj); if (cb) cb(); },
+        remove(keys, cb) {
+          for (const k of [].concat(keys)) delete store[k];
+          if (cb) cb();
+        },
+      },
       onChanged: { addListener: () => {} },
     },
   };
@@ -296,6 +317,11 @@ async function loadPage(href, blocks) {
     async navigate(nextHref) {
       globalThis.location = { href: nextHref, host: new URL(nextHref).host };
       await this.rescan();
+    },
+    // What a reload does on the way out: flush the memory to storage.
+    async unload() {
+      for (const fn of listeners.get("pagehide") || []) fn();
+      await settle(120);
     },
   };
 }
@@ -378,6 +404,98 @@ console.log("\n--- a citation is not invented across two blocks ---");
     para("Jones (1999) 20 Cal.4th 100, and lost."),
   ]);
   check("nothing spans the paragraph break", page.toaKeys(), []);
+}
+
+console.log("\n--- a stored record is folded back in, junk and all ---");
+{
+  const mem = createCitationMemory();
+  mem.setUrl("https://claude.ai/chat/abc");
+  const [aguilar] = findAllCitations(`See ${AGUILAR}.`);
+  mem.remember(aguilar, "https://lexis.test/aguilar");
+  const saved = JSON.parse(JSON.stringify(mem.toJSON()));
+
+  const restored = createCitationMemory();
+  restored.setUrl("https://claude.ai/chat/abc");
+  check("what was saved comes back", [
+    restored.hydrate(saved),
+    restored.authorities().map((a) => a.key),
+    restored.priorCases().map((c) => c.key),
+  ], [true, [AGUILAR], [AGUILAR]]);
+  check("re-hydrating the same record learns nothing new",
+    restored.hydrate(saved), false);
+  check("malformed storage is skipped, not trusted", [
+    restored.hydrate(null),
+    restored.hydrate({ authorities: "nonsense", cases: 7 }),
+    restored.hydrate({ authorities: [{ key: "" }, null], cases: [{ key: "x" }] }),
+    restored.authorities().length,
+  ], [false, false, false, 1]);
+}
+
+console.log("\n--- the stored history stays bounded ---");
+{
+  const day = 24 * 60 * 60 * 1000;
+  const now = 1_000 * day;
+  check("a page untouched for a fortnight is dropped", prunePageIndex(
+    { fresh: now - day, stale: now - 15 * day },
+    { now }
+  ), { index: { fresh: now - day }, dropped: ["stale"] });
+
+  const many = {};
+  for (let i = 0; i < 5; i++) many[`p${i}`] = now - i * 1000;
+  check("the oldest beyond the cap are dropped", prunePageIndex(many, { now, maxPages: 3 }), {
+    index: { p0: now, p1: now - 1000, p2: now - 2000 },
+    dropped: ["p3", "p4"],
+  });
+  check("garbage entries are dropped too",
+    prunePageIndex({ good: now, bad: "yesterday", worse: null }, { now }),
+    { index: { good: now }, dropped: [] });
+}
+
+console.log("\n--- a reload does not empty the table ---");
+{
+  const store = {};
+  const page = await loadPage("https://claude.ai/chat/abc", [
+    para(`The court in ${AGUILAR}, 850, set the standard.`),
+    para(`See also ${MARKET_LOFTS}, 930.`),
+  ], store);
+  check("found while reading", page.toaKeys(), [AGUILAR, MARKET_LOFTS]);
+  await page.unload();
+  check("written to storage under this conversation's key",
+    Object.keys(store).sort(),
+    [PAGE_INDEX_KEY, pageStoreKey("https://claude.ai/chat/abc")].sort());
+
+  // The reload: the same URL, the same storage, and a page whose messages
+  // haven't been rendered back yet.
+  const reloaded = await loadPage("https://claude.ai/chat/abc", [], store);
+  check("still listed after the reload", reloaded.toaKeys(), [AGUILAR, MARKET_LOFTS]);
+  check("with nothing underlined, since nothing is on the page yet",
+    reloaded.linkKeys(), []);
+
+  // And an italic short name still reaches a case it read before the reload.
+  const returning = await loadPage("https://claude.ai/chat/abc", [
+    para("«Market Lofts» remains the closest authority."),
+  ], store);
+  check("a short name links to a case remembered from before the reload",
+    returning.linkKeys(), [MARKET_LOFTS]);
+
+  const other = await loadPage("https://claude.ai/chat/zzz", [], store);
+  check("another conversation gets its own (empty) table", other.toaKeys(), []);
+}
+
+console.log("\n--- and it is written without waiting to be unloaded ---");
+{
+  // Nothing guarantees a pagehide (a crashed tab, a killed browser), so the
+  // save also runs on its own a beat after the last thing was found.
+  const store = {};
+  await loadPage("https://claude.ai/chat/slow", [
+    para(`The court in ${AGUILAR}, 850, set the standard.`),
+  ], store);
+  check("not written the instant it is found", Object.keys(store), []);
+  await settle(1800);
+  check("written once the page settles", [
+    Object.keys(store[PAGE_INDEX_KEY] || {}).includes("https://claude.ai/chat/slow"),
+    (store[pageStoreKey("https://claude.ai/chat/slow")] || {}).authorities.map((a) => a.key),
+  ], [true, [AGUILAR]]);
 }
 
 console.log("\n" + "=".repeat(60));
