@@ -52,7 +52,9 @@ In addition to citation linking, the viewer supports:
 - **Table of Authorities** — a side panel listing every detected case,
   statute, regulation, revenue ruling, rule, and CACI instruction once, as a
   clickable link to your provider; minimizable and drag-resizable. The same panel appears for
-  claude.ai. Options →
+  claude.ai, where it is cumulative: an authority stays listed for the rest of
+  your time on that conversation, even after the message it came from has
+  scrolled out of the page and been unmounted. Options →
   "Table of Authorities" has separate checkboxes for the PDF viewer and
   websites (default: **off** for PDFs, **on** for websites); in-text links are
   unaffected either way.
@@ -238,6 +240,28 @@ provider toggle and `citation_repo.json` as the PDF viewer. Citations inside
 hidden or collapsed regions (e.g. a "thinking" panel) are skipped, and links
 for text scrolled out of a clipped container are suppressed, so they never land
 over unrelated chat text.
+
+**The page is read as one document.** Short-form references point backward —
+`Aguilar, supra`, an italicized `Market Lofts` — and the full citation they
+resolve against is usually in an earlier paragraph, so detection runs over the
+whole page at once rather than paragraph by paragraph. Paragraphs are separated
+by a hard break in that text, and a match that runs from one block into the next
+is discarded, because no reader sees one citation there.
+
+**What the page has shown you stays.** A chat page is not a document: it mounts
+and unmounts its own messages as you scroll, so a Table of Authorities rebuilt
+from the live DOM would drop cases as you scrolled past them — the panel
+emptying itself behind you. The extension keeps a per-URL memory instead
+(`viewer/citation-memory.js`), and two things follow. The Table of Authorities
+is cumulative: an authority stays listed for as long as you stay on that
+conversation, whether or not the message it came from is still in the page. And
+a case cited in a message that has since been unmounted is still available for
+an italicized short name further down to resolve against. In-text underlines
+are still painted only over text that is actually on the page. The memory is
+scoped to one URL — a query string or `#fragment` is the same conversation —
+and is cleared when the app navigates to another one, since a different
+conversation has different authorities. Switching providers re-derives the
+remembered links rather than dropping them.
 
 **Carry-forward inheritance:** a bare `§ N` / `section N` reference (no code
 name of its own) inherits the most recently *named* code before it in reading
@@ -473,6 +497,13 @@ memorandum (10/10 match, identical keys). The port includes:
   PDF.js resolved, or an italic face name like `TimesNewRomanPS-ItalicMT`) and
   from computed `font-style` in the web content script. Text with no font
   information behind it — plain strings, OCR'd scans — simply skips the pass.
+
+  A caller that no longer holds the text the full cite appeared in can pass the
+  cases it remembers as `findAllCitations(text, { priorCases })`. They join the
+  registry as though cited before the first character, so an italicized short
+  name still links after a chat app has unmounted the message carrying its full
+  citation; they never become citations of their own, and the ambiguity rule
+  holds across them.
 - Span deduplication so overlapping detections don't double-link.
 
 ## Provider toggle: Westlaw / Lexis+

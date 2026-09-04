@@ -13,7 +13,7 @@
 // the viewer, from computed font-style in the web content script. Tests write
 // them inline with «guillemets», which the helper strips back out.
 
-import { findAllCitations } from "./viewer/citation-linker.js";
+import { findAllCitations, caseMemo } from "./viewer/citation-linker.js";
 
 let fails = 0;
 
@@ -49,6 +49,15 @@ function markup(src) {
 function italicLinks(src) {
   const { text, ranges } = markup(src);
   return findAllCitations(text, { italicRanges: ranges })
+    .filter((c) => c.isItalicShort)
+    .map((c) => [c.matchText, c.key]);
+}
+
+// [linked text, resolved case key] for every italic short-name link, with a
+// set of cases the caller remembers from text that is no longer in `src`.
+function priorLinks(src, priorCases) {
+  const { text, ranges } = markup(src);
+  return findAllCitations(text, { italicRanges: ranges, priorCases })
     .filter((c) => c.isItalicShort)
     .map((c) => [c.matchText, c.key]);
 }
@@ -203,6 +212,48 @@ check(
   "no italic information at all changes nothing",
   findAllCitations(`${AGUILAR}, 850. Aguilar states the standard.`).map((c) => c.matchText),
   [`${AGUILAR}, 850`]
+);
+
+console.log("\n--- a case remembered from text the caller no longer holds ---");
+// A chat page unmounts the messages that scroll out of view, so the full cite
+// an italic short name refers back to may not be in the string being scanned at
+// all. caseMemo() records what the caller saw; opts.priorCases feeds it back.
+const memoOf = (src) => caseMemo(findAllCitations(src)[0]);
+
+check(
+  "without the memory there is nothing to resolve against",
+  italicLinks("«Market Lofts» controls the question."),
+  []
+);
+check(
+  "with it, the italicized fragment links to the remembered case",
+  priorLinks("«Market Lofts» controls the question.", [memoOf(MARKET_LOFTS + ", 930.")]),
+  [["Market Lofts", MARKET_LOFTS]]
+);
+check(
+  "a remembered case and one on the page, both answering to Smith",
+  priorLinks(
+    "People v. Smith (2004) 33 Cal.4th 1, 5. «Smith» is ambiguous now.",
+    [memoOf("Smith v. Jones (1999) 20 Cal.4th 100, 105.")]
+  ),
+  []
+);
+check(
+  "the same case remembered AND cited on the page is not ambiguous",
+  priorLinks(`${AGUILAR}, 850. «Aguilar» still links.`, [memoOf(`${AGUILAR}, 850.`)]),
+  [["Aguilar", AGUILAR]]
+);
+check(
+  "a remembered case never becomes a citation of its own",
+  findAllCitations("Nothing is cited in this sentence.", {
+    priorCases: [memoOf(`${AGUILAR}, 850.`)],
+  }).map((c) => c.matchText),
+  []
+);
+check(
+  "junk in the memory is ignored rather than thrown",
+  priorLinks("«Market Lofts» controls.", [null, {}, memoOf(MARKET_LOFTS + ", 930.")]),
+  [["Market Lofts", MARKET_LOFTS]]
 );
 
 console.log("\n" + "=".repeat(60));

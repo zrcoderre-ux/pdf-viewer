@@ -1755,6 +1755,50 @@ function runWords(text, start, end) {
   return words;
 }
 
+// The record a caller keeps so a case cited in text it no longer holds can
+// still be recognized later. A web page that unmounts what scrolls out of view
+// (a chat transcript, a virtualized list) hands the linker only the text it has
+// left, so the full cite an italicized short name refers back to may be gone
+// from the string being scanned. Feeding these back in as `opts.priorCases`
+// puts the case back in the registry without putting it back in the text.
+//
+// Short forms are not memos: only a full citation carries the party names the
+// aliases are built from, which is what a case name is recognized by. A supra,
+// short-form or italic reference carries the key alone and makes no memo.
+export function caseMemo(cite) {
+  if (!cite || cite.kind !== "case" || !cite.key || !cite.caseName) return null;
+  if (cite.isSupra || cite.isShortForm || cite.isItalicShort) return null;
+  return {
+    kind: "case",
+    key: cite.key,
+    caseName: cite.caseName,
+    plaintiff: cite.plaintiff,
+    defendant: cite.defendant,
+    parenName: cite.parenName,
+    wlOnly: !!cite.wlOnly,
+    lexisOnly: !!cite.lexisOnly,
+    slipOnly: !!cite.slipOnly,
+    span: [-1, -1],
+  };
+}
+
+// Remembered cases sit before every offset in the text being scanned — they
+// were cited earlier, in text this caller no longer has — so the "cited in full
+// before this point" rule counts them. The span is forced rather than trusted:
+// a memo carries whatever span it had in the text it came from, which indexes
+// into a different string.
+function normalizePriorCases(list) {
+  if (!Array.isArray(list) || !list.length) return [];
+  const out = [];
+  const seen = new Set();
+  for (const c of list) {
+    if (!c || !c.key || seen.has(c.key)) continue;
+    seen.add(c.key);
+    out.push({ ...c, kind: "case", isShortForm: false, span: [-1, -1] });
+  }
+  return out;
+}
+
 function findItalicShortNames(text, fullCitesInOrder, italicRanges, claimedSpans) {
   if (!italicRanges || !italicRanges.length) return [];
   const cases = fullCitesInOrder.filter((c) => c.kind === "case");
@@ -1896,6 +1940,14 @@ function normalizeForDetection(text) {
 // `opts.italicRanges` — [start, end) character ranges of the ORIGINAL text
 // that are set in italics. Optional: callers with no font information (plain
 // strings, tests) simply skip the italic short-name pass.
+//
+// `opts.priorCases` — caseMemo() records for full case citations the caller saw
+// earlier in text that is no longer part of `text` (see caseMemo). They join
+// the italic pass's registry as though cited before the first character, so an
+// italicized short name still links after its full cite has scrolled out of the
+// page. They never become citations of their own, and the ambiguity rule holds
+// across them: a fragment answering to a remembered case and a differently-keyed
+// one on the page is ambiguous, and stays unlinked.
 export function findAllCitations(text, opts = {}) {
   const norm = normalizeForDetection(text);
   const fullCases = findCaseCitations(norm);
@@ -1923,7 +1975,13 @@ export function findAllCitations(text, opts = {}) {
   // earlier passes already claimed — an italicized full cite is linked as the
   // full cite, not twice.
   const claimed = [...fullCases, ...supras, ...shortForms].map((c) => c.span);
-  const italics = findItalicShortNames(norm, fullOrdered, opts.italicRanges, claimed);
+  const prior = normalizePriorCases(opts.priorCases);
+  const italics = findItalicShortNames(
+    norm,
+    prior.length ? [...prior, ...fullOrdered] : fullOrdered,
+    opts.italicRanges,
+    claimed
+  );
   for (const c of italics) c.matchText = text.slice(c.span[0], c.span[1]);
 
   const all = [...fullCases, ...statutes, ...rules, ...caci, ...supras, ...shortForms, ...italics]

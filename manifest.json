@@ -46,6 +46,7 @@
         "viewer/viewer.js",
         "viewer/viewer.css",
         "viewer/citation-linker.js",
+        "viewer/citation-memory.js",
         "viewer/toa.js",
         "viewer/footer-naming.js",
         "viewer/disambiguation.js",
