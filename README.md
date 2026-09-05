@@ -68,7 +68,7 @@ In addition to citation linking, the viewer supports:
   sideways scan or an upside-down page the right way up, on any document. The
   rotation is on screen straight away; writing it into the file is a separate
   click, and is offered for web PDFs too (as a copy). See below.
-The tools live in an Adobe-Acrobat-style **tools rail** down the right margin:
+The tools live in an Adobe-Acrobat-style **tools rail** down the left margin:
 annotation tools (Highlight, Box select, Text area, OCR) and **Rotate pages**
 are always there, and
 for editable documents an **Edit** section adds every document operation

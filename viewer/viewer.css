@@ -56,7 +56,7 @@ body { overflow-y: auto; }
 }
 #toolbar button[aria-pressed="true"]:hover { background: #1b66c9; }
 
-/* ── Adobe-Acrobat-style tools rail (right margin) ───────────────────────────── */
+/* ── Adobe-Acrobat-style tools rail (left margin) ────────────────────────────── */
 :root {
   --tools-rail-width: 208px;         /* expanded width */
   --tools-rail-collapsed: 52px;      /* icon-only width */
@@ -67,11 +67,11 @@ body.tools-collapsed { --tools-rail-cur: var(--tools-rail-collapsed); }
 #tools-rail {
   position: fixed;
   top: var(--toolbar-height, 48px);
-  right: 0;
+  left: 0;
   bottom: 0;
   width: var(--tools-rail-cur);
   background: #2a2d30;
-  border-left: 1px solid #1a1a1a;
+  border-right: 1px solid #1a1a1a;
   overflow-y: auto;
   overflow-x: hidden;
   z-index: 9;
@@ -341,11 +341,11 @@ body.crop-mode .textLayer span { cursor: crosshair; }
 #thumbnail-panel {
   position: fixed;
   top: var(--toolbar-height, 48px);
-  left: 0;
+  right: 0;
   bottom: 0;
   width: var(--thumb-panel-width);
   background: #2a2d30;
-  border-right: 1px solid #1a1a1a;
+  border-left: 1px solid #1a1a1a;
   overflow-y: auto;
   z-index: 9;
   display: none;
@@ -356,17 +356,17 @@ body.crop-mode .textLayer span { cursor: crosshair; }
 }
 #thumbnail-panel.open { display: flex; }
 
-/* Drag handle on the panel's right edge to resize (expand) the Pages /
+/* Drag handle on the panel's left edge to resize (expand) the Pages /
    Bookmarks column. Sits over the panel border; only shown when the panel is
    open. Updates --thumb-panel-width, which drives both the panel width and the
-   content's left offset. */
+   content's right offset. */
 #thumb-resize {
   position: fixed;
   top: var(--toolbar-height, 48px);
   bottom: 0;
-  left: var(--thumb-panel-width);
+  right: var(--thumb-panel-width);
   width: 8px;
-  margin-left: -4px;
+  margin-right: -4px;
   cursor: ew-resize;
   z-index: 10;
   display: none;
@@ -639,13 +639,13 @@ body.thumbs-open #thumb-resize { display: block; }
 
 #viewer-container {
   /* Top padding offsets the position:fixed toolbar above so page 1 starts below
-     the bar. Right padding reserves the fixed tools rail; left margin shifts
-     content right when the thumbnail panel is open. */
-  padding: var(--toolbar-height, 48px) calc(var(--tools-rail-cur) + 24px) 24px 24px;
-  transition: padding-left 0.15s ease, padding-right 0.12s ease;
+     the bar. Left padding reserves the fixed tools rail; right padding shifts
+     content left when the thumbnail panel is open. */
+  padding: var(--toolbar-height, 48px) 24px 24px calc(var(--tools-rail-cur) + 24px);
+  transition: padding-left 0.12s ease, padding-right 0.15s ease;
 }
 body.thumbs-open #viewer-container {
-  padding-left: calc(var(--thumb-panel-width) + 24px);
+  padding-right: calc(var(--thumb-panel-width) + 24px);
 }
 
 #pages {
@@ -1099,7 +1099,7 @@ select.form-field { padding: 0; }
 :root[data-theme="light"] #link-count { color: #137333; }
 
 /* Tools rail */
-:root[data-theme="light"] #tools-rail { background: var(--l-panel); border-left-color: var(--l-border); }
+:root[data-theme="light"] #tools-rail { background: var(--l-panel); border-right-color: var(--l-border); }
 :root[data-theme="light"] #tools-rail-collapse { color: var(--l-text-muted); border-bottom-color: var(--l-border); }
 :root[data-theme="light"] #tools-rail-collapse:hover { color: var(--l-text); }
 :root[data-theme="light"] .tools-group-label { color: var(--l-text-faint); }
@@ -1108,7 +1108,7 @@ select.form-field { padding: 0; }
 :root[data-theme="light"] #tools-rail .tool-btn:hover { background: var(--l-hover); }
 
 /* Thumbnail panel */
-:root[data-theme="light"] #thumbnail-panel { background: var(--l-panel); border-right-color: var(--l-border); }
+:root[data-theme="light"] #thumbnail-panel { background: var(--l-panel); border-left-color: var(--l-border); }
 :root[data-theme="light"] #panel-tabs { border-bottom-color: var(--l-border); }
 :root[data-theme="light"] .panel-tab { color: var(--l-text-muted); }
 :root[data-theme="light"] .panel-tab:hover,
