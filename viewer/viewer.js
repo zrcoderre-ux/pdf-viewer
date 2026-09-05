@@ -4265,7 +4265,7 @@ async function addImagesAsPages() {
 if (imagesEl) imagesEl.addEventListener("click", addImagesAsPages);
 
 // ── Tools rail collapse ──────────────────────────────────────────────────────
-// Collapse the right-margin tools rail to an icon-only strip (Acrobat-style),
+// Collapse the left-margin tools rail to an icon-only strip (Acrobat-style),
 // reclaiming horizontal space. The state is persisted so it sticks across docs
 // and app updates.
 function applyToolsCollapsed(on) {
@@ -4464,9 +4464,10 @@ if (formSaveEl)   formSaveEl.addEventListener("click", () => saveFilledForm(fals
 if (formFlattenEl) formFlattenEl.addEventListener("click", () => saveFilledForm(true));
 if (formCancelEl) formCancelEl.addEventListener("click", exitFormMode);
 
-// Drag the Pages / Bookmarks column's right edge to resize it. The panel is
-// pinned to the left, so its width is just the pointer's x. --thumb-panel-width
-// drives both the panel and the content offset; persist it across sessions.
+// Drag the Pages / Bookmarks column's left edge to resize it. The panel is
+// pinned to the right, so its width is the window width minus the pointer's x.
+// --thumb-panel-width drives both the panel and the content offset; persist it
+// across sessions.
 const thumbResizeEl = document.getElementById("thumb-resize");
 function setThumbPanelWidth(px) {
   const w = Math.max(100, Math.min(px, Math.round(window.innerWidth * 0.6)));
@@ -4480,11 +4481,11 @@ if (thumbResizeEl) {
   thumbResizeEl.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     thumbResizeEl.setPointerCapture(e.pointerId);
-    const onMove = (ev) => setThumbPanelWidth(ev.clientX);
+    const onMove = (ev) => setThumbPanelWidth(window.innerWidth - ev.clientX);
     const onUp = (ev) => {
       thumbResizeEl.removeEventListener("pointermove", onMove);
       thumbResizeEl.removeEventListener("pointerup", onUp);
-      chrome.storage.local.set({ thumbPanelWidth: setThumbPanelWidth(ev.clientX) });
+      chrome.storage.local.set({ thumbPanelWidth: setThumbPanelWidth(window.innerWidth - ev.clientX) });
     };
     thumbResizeEl.addEventListener("pointermove", onMove);
     thumbResizeEl.addEventListener("pointerup", onUp);
