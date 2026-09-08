@@ -577,14 +577,13 @@ app, which routes it to the reader tab.
 - **Line lock.** Pleading paper is read by its line numbers, and a numbered
   line that wraps puts its tail on a screen line with no number — one line
   off from the PDF. **Line lock** (toolbar, remembered) holds every numbered
-  line to one screen line. What it spends to make the longest line fit, in
-  order: the white space beside the page (the page widens into the stage),
-  then the page's own side margins, then the font, a point at a time. It
-  never touches the numbers: the gutter shows the file's own, nothing moves
-  from one number to the next, and a line too long for even the smallest
-  font wraps under its own number and is counted in the status bar. Display
-  only — the size and width you set are kept, and come back when the lock
-  is off.
+  line to one screen line by making the page **as wide as its longest line
+  needs** at the size you chose — past the window's edge if it must, with a
+  horizontal scroll bar under it, the way a zoomed PDF behaves. Zoom in as
+  far as you like: the font is never touched, so the size is yours to
+  calibrate the page by, and the numbers are never touched either — the
+  gutter shows the file's own and nothing moves between them. Display only:
+  the width you set comes back when the lock is off.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**

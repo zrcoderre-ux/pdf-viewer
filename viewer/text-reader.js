@@ -1547,22 +1547,19 @@ async function writeText(text, name, handle) {
 // Pleading paper is read by its line numbers, and a numbered line that
 // WRAPS puts its tail on a screen line with no number — read across to the
 // PDF, that is one line off. With the lock on every numbered line is held
-// to one screen line, and what is spent to make it fit is, in order: the
-// white space beside the page (the page widens into the stage), the page's
-// own side margins, and only then the font, a point at a time. The numbers
-// themselves are never touched — the gutter shows the file's own, nothing
-// moves between them, and a line too long for even the smallest font wraps
-// under its own number and is counted in the status bar rather than cut.
-// Display only: the settings keep the size and width the reader chose, and
-// the effective values live in two CSS variables the pages read.
-const LOCK_MIN_PX = 9;
+// to one screen line, and the page is made AS WIDE AS THE LONGEST LINE
+// NEEDS at the size the reader chose — past the window's edge if that is
+// what it takes, with a horizontal scroll bar under it, the way a zoomed
+// PDF behaves. The font is never touched: zooming in is the reader's to do,
+// and the size is what they calibrate the page by. The numbers are never
+// touched either — the gutter shows the file's own and nothing moves
+// between them. Display only: the settings keep the width the reader
+// chose, and the effective width lives in a CSS variable the pages read.
 function applyLineLock() {
   const root = document.documentElement.style;
   root.setProperty("--reader-size-eff", settings.fontSize + "px");
   root.setProperty("--reader-width-eff", settings.pageWidth + "px");
   document.body.classList.toggle("line-lock", !!settings.lineLock);
-  document.body.classList.remove("lock-tight");
-  for (const el of pagesEl.querySelectorAll(".lt.overlong")) el.classList.remove("overlong");
   const st = $("st-lock");
   if (!settings.lineLock || !doc) { st.textContent = ""; return; }
   const bodies = pageBodies().filter((b) => b.classList.contains("numbered") && !b.closest(".tpage").classList.contains("swapped"));
@@ -1572,29 +1569,15 @@ function applyLineLock() {
   const lts = [];
   for (const b of bodies) lts.push(...b.querySelectorAll(".line.num > .lt"));
   const overflow = () => { let o = 0; for (const lt of lts) o = Math.max(o, lt.scrollWidth - lt.clientWidth); return o; };
-  const avail = Math.max(300, stageEl.clientWidth - 32);
-  let width = settings.pageWidth, size = settings.fontSize, tight = false;
+  let width = settings.pageWidth;
   let over = overflow();
-  for (let n = 0; over > 0 && width < avail && n < 8; n++) {
-    width = Math.min(avail, width + over + 1);
+  for (let n = 0; over > 0 && n < 12; n++) {
+    width = Math.ceil(width + over + 1);
     root.setProperty("--reader-width-eff", width + "px");
     over = overflow();
   }
-  if (over > 0) { tight = true; document.body.classList.add("lock-tight"); over = overflow(); }
-  while (over > 0 && size > LOCK_MIN_PX) {
-    size -= 1;
-    root.setProperty("--reader-size-eff", size + "px");
-    over = overflow();
-  }
-  let stillWrap = 0;
-  if (over > 0) {
-    for (const lt of lts) if (lt.scrollWidth > lt.clientWidth + 1) { lt.classList.add("overlong"); stillWrap++; }
-  }
-  const spent = [];
-  if (width !== settings.pageWidth) spent.push(`width ${Math.round(width)}px`);
-  if (tight) spent.push("narrow margins");
-  if (size !== settings.fontSize) spent.push(`font ${size}px (set ${settings.fontSize})`);
-  st.textContent = "Line lock" + (spent.length ? ": " + spent.join(", ") : ": every numbered line fits") + (stillWrap ? ` · ${stillWrap} line${stillWrap === 1 ? "" : "s"} still too long at ${LOCK_MIN_PX}px, wrapped under its number` : "");
+  const wider = width > stageEl.clientWidth - 32;
+  st.textContent = "Line lock" + (width !== settings.pageWidth ? `: page ${width}px wide for its longest line` + (wider ? " — scroll sideways" : "") : ": every numbered line fits");
 }
 
 // ── citations ────────────────────────────────────────────────────────────────────────
