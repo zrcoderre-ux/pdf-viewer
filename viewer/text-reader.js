@@ -85,6 +85,7 @@ let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
 let dirty = false;
+let editing = false;         // a document opens protected; ✎ Edit lifts it
 let provider = "lexis";
 let citationRepo = {};
 let toaOn = false;
@@ -587,6 +588,10 @@ function openText(text, name, handle) {
   fileName = name;
   fileHandle = handle;
   dirty = false;
+  editing = false;
+  clearHistory();
+  document.body.classList.remove("editing");
+  $("edit-toggle").setAttribute("aria-pressed", "false");
   document.title = name + " — Text Reader";
   if (!dirHandle) loadValuesFor(name);
   render();
@@ -723,7 +728,7 @@ function render() {
     inner.className = "page-inner";
     const body = document.createElement("div");
     body.className = "page-body";
-    body.contentEditable = "plaintext-only";
+    body.contentEditable = editing ? "plaintext-only" : "false";
     body.spellcheck = false;
     buildBody(body, p.lines.join("\n"));
     const layer = document.createElement("div");
@@ -833,9 +838,112 @@ pagesEl.addEventListener("input", (e) => {
 
 function setDirty(on) { if (dirty !== on) { dirty = on; updateDirty(); } }
 function updateDirty() {
-  saveBtn.disabled = !doc;
-  $("st-dirty").textContent = dirty ? "● Unsaved edits" : "";
+  saveBtn.disabled = !doc || !(editing || dirty);
+  $("edit-toggle").disabled = !doc;
+  $("st-dirty").textContent = dirty ? "● Unsaved edits" : (doc && !editing ? "Protected — ✎ Edit to change" : "");
 }
+
+// ── edit protection ────────────────────────────────────────────────────────────────
+//
+// A document opens PROTECTED: the pages take no keystroke until ✎ Edit is
+// on, so reading, selecting and flagging can never nudge a character into
+// the file. Edits already made stay (and stay saveable) when protection is
+// put back.
+function setEditing(on) {
+  editing = !!on && !!doc;
+  document.body.classList.toggle("editing", editing);
+  $("edit-toggle").setAttribute("aria-pressed", String(editing));
+  for (const body of pageBodies()) body.contentEditable = editing ? "plaintext-only" : "false";
+  updateDirty();
+}
+$("edit-toggle").addEventListener("click", () => setEditing(!editing));
+
+// ── undo / redo ───────────────────────────────────────────────────────────────────────
+//
+// The reader's own history, because the browser's cannot be trusted here:
+// a typed real name is rewritten into a pseudonym span by script, and a
+// programmatic change breaks or empties the native undo stack. A snapshot is
+// the page's on-disk text plus the caret, taken before an edit begins (and
+// coalesced while typing runs on), and before every rewrite the reader makes
+// itself; Ctrl+Z puts the page back to it, Ctrl+Y / Ctrl+Shift+Z forward.
+const UNDO_COALESCE_MS = 800;
+const UNDO_MAX = 200;
+let undoStack = [], redoStack = [], lastSnapAt = 0, lastSnapPage = -1;
+
+function pageIndexOf(body) { return Number(body.closest(".tpage").dataset.index); }
+function caretOffsetIn(body) {
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount) return -1;
+  const r = sel.getRangeAt(0);
+  if (!body.contains(r.startContainer)) return -1;
+  const { segs } = flatten(body);
+  const seg = segs.find((x) => x.node === r.startContainer);
+  if (seg) return seg.start + r.startOffset;
+  // The caret sits on an element boundary: count the text before it.
+  const probe = document.createRange();
+  probe.selectNodeContents(body);
+  probe.setEnd(r.startContainer, r.startOffset);
+  return probe.toString().length;
+}
+function snapshotOf(body) {
+  return { page: pageIndexOf(body), text: TD.serializeNodes(body), caret: caretOffsetIn(body) };
+}
+/** Record the page as it stands, before an edit; `force` skips coalescing. */
+function snapshot(body, force) {
+  const now = Date.now();
+  const i = pageIndexOf(body);
+  if (!force && i === lastSnapPage && now - lastSnapAt < UNDO_COALESCE_MS) { lastSnapAt = now; return; }
+  undoStack.push(snapshotOf(body));
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack = [];
+  lastSnapAt = now; lastSnapPage = i;
+}
+function restoreSnapshot(snap) {
+  const body = pageBodies()[snap.page];
+  if (!body) return;
+  buildBody(body, snap.text);
+  doc.pages[snap.page].lines = snap.text.split("\n");
+  if (snap.caret >= 0) {
+    const { segs } = flatten(body);
+    const r = rangeFor(segs, snap.caret, snap.caret);
+    if (r) { const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+  }
+  body.focus({ preventScroll: true });
+  setDirty(true);
+  afterTextChange();
+}
+function undo() {
+  const snap = undoStack.pop();
+  if (!snap) return;
+  const body = pageBodies()[snap.page];
+  if (body) redoStack.push(snapshotOf(body));
+  restoreSnapshot(snap);
+  lastSnapPage = -1;
+}
+function redo() {
+  const snap = redoStack.pop();
+  if (!snap) return;
+  const body = pageBodies()[snap.page];
+  if (body) undoStack.push(snapshotOf(body));
+  restoreSnapshot(snap);
+  lastSnapPage = -1;
+}
+function clearHistory() { undoStack = []; redoStack = []; lastSnapPage = -1; }
+pagesEl.addEventListener("beforeinput", (e) => {
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  if (!body) return;
+  if (e.inputType === "historyUndo" || e.inputType === "historyRedo") { e.preventDefault(); return; }
+  // A deletion after typing, or typing after a deletion, is its own step.
+  const kind = /delete/i.test(e.inputType) ? "del" : "ins";
+  snapshot(body, kind !== snapshot.lastKind);
+  snapshot.lastKind = kind;
+});
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
+}, true);
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
 /**
@@ -861,6 +969,7 @@ function convertTypedReals(body) {
     if (h.node === caretNode && caretOff >= h.start && caretOff <= h.end) continue;
     const node = h.node;
     if (!node.isConnected) continue;
+    if (!made) snapshot(body, true);
     node.splitText(h.end);
     const mid = node.splitText(h.start);
     mid.replaceWith(makePn(h.fake, h.matched));
@@ -893,6 +1002,7 @@ async function saveDocument() {
     if (fwd && fwd.rx) {
       const fw = forwardText(text);
       if (fw.swaps) {
+        snapshot(body, true);
         text = fw.text;
         forwarded += fw.swaps;
         buildBody(body, text);

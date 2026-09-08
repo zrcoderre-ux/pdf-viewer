@@ -598,8 +598,12 @@ app, which routes it to the reader tab.
   keys are remembered, so a lone `.txt` can be read under a key already
   loaded. A real name from the key standing **unfaked** in an export is
   counted in the status bar and underlined — that is a leak the run missed.
-- **Editable, and the file never learns the real names.** The pages are
-  editable and **Save** (Ctrl+S) writes the text back to the same file. A
+- **Editable — once you say so — and the file never learns the real names.**
+  A document opens **protected**: reading, selecting and flagging can never
+  nudge a character into it. **✎ Edit** lifts that for the document in front
+  of you, **Ctrl+Z** and **Ctrl+Y** undo and redo through the reader's own
+  history (the browser's cannot survive the pseudonym rewrites), and **Save**
+  (Ctrl+S) writes the text back to the same file. A
   pseudonym span always writes its **fake**; a real name you type is turned
   into a pseudonym span the moment the caret leaves it, and anything left
   is written as its pseudonym on save. The save refuses outright rather than
