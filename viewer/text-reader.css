@@ -1,0 +1,205 @@
+/* text-reader.css — the text reader's chrome. Dark by default like the PDF
+   viewer; data-theme="light" on <html> flips the chrome. The PAGES are white
+   sheets in both themes, the way a PDF page is. */
+
+* { box-sizing: border-box; }
+/* An author display value (flex on the empty state and the popover) beats
+   the UA's [hidden] rule, so hidden is restated here where it always wins. */
+[hidden] { display: none !important; }
+:root {
+  --toolbar-height: 44px;
+  --status-height: 26px;
+  --side-width: 300px;
+  --chrome: #323639;
+  --chrome-2: #2a2d30;
+  --canvas: #525659;
+  --btn: #4a4d50;
+  --btn-border: #5a5d60;
+  --btn-hover: #5a5d60;
+  --text: #f1f1f1;
+  --text-muted: #b9bcc0;
+  --border: #1a1a1a;
+  --inset: #202326;
+  --accent: #1a73e8;
+  --pn-bg: rgba(255, 213, 79, 0.42);
+  --pn-bg-hover: rgba(255, 193, 7, 0.7);
+  --flag-bg: rgba(244, 67, 54, 0.22);
+  --leak-bg: rgba(255, 112, 67, 0.35);
+  --reader-font: Georgia, serif;
+  --reader-size: 15px;
+  --reader-lh: 1.5;
+  --reader-width: 820px;
+}
+:root[data-theme="light"] {
+  --chrome: #f3f4f6;
+  --chrome-2: #f7f8fa;
+  --canvas: #c9cccf;
+  --btn: #e8eaed;
+  --btn-border: #c4c7cb;
+  --btn-hover: #dbdee2;
+  --text: #1f2328;
+  --text-muted: #5a5f66;
+  --border: #d2d5d9;
+  --inset: #ffffff;
+}
+
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+/* ── toolbar ─────────────────────────────────────────────────────────────── */
+#toolbar {
+  position: fixed; top: 0; left: 0; right: 0; height: var(--toolbar-height); z-index: 10;
+  display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  background: var(--chrome); border-bottom: 1px solid var(--border);
+  overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: thin;
+}
+#toolbar .spacer { flex: 1; min-width: 8px; }
+#toolbar .sep { width: 1px; height: 24px; background: var(--btn-border); flex: none; }
+#toolbar button, #statusbar button, .side-actions button, #flag-pop button {
+  background: var(--btn); color: var(--text); border: 1px solid var(--btn-border);
+  padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; line-height: 1.2; flex: none;
+}
+#toolbar button:hover, .side-actions button:hover { background: var(--btn-hover); }
+#toolbar button:disabled { opacity: 0.5; cursor: default; }
+#toolbar button.primary, .side-actions button.primary, #flag-pop button { background: var(--accent); border-color: var(--accent); color: #fff; }
+#toolbar button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+#toolbar select, #toolbar input[type="text"] {
+  background: var(--inset); color: var(--text); border: 1px solid var(--btn-border);
+  border-radius: 4px; padding: 3px 6px; font-size: 13px; max-width: 220px;
+}
+#toolbar input[type="range"] { width: 80px; }
+.tb-label { color: var(--text-muted); font-size: 12px; }
+.tb-value { min-width: 2ch; text-align: center; }
+.tb-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--text); cursor: pointer; }
+
+/* ── layout ────────────────────────────────────────────────────────────────── */
+#main {
+  position: absolute; top: var(--toolbar-height); bottom: var(--status-height); left: 0; right: 0;
+  display: flex;
+}
+#stage { flex: 1; overflow-y: auto; overflow-x: auto; position: relative; }
+body.side-hidden #side { display: none; }
+#side {
+  width: var(--side-width); flex: none; background: var(--chrome-2); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.side-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.side-tab {
+  flex: 1; background: transparent; color: var(--text-muted); border: none; padding: 8px; cursor: pointer; font-size: 13px;
+  border-bottom: 2px solid transparent;
+}
+.side-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.side-body { flex: 1; overflow-y: auto; padding: 10px; }
+.side-hint, .side-note { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; line-height: 1.4; }
+.side-body ul { list-style: none; margin: 0; padding: 0; }
+.side-body li {
+  display: flex; align-items: center; gap: 6px; padding: 5px 6px; border-radius: 4px; cursor: pointer; word-break: break-word;
+}
+.side-body li:hover { background: var(--btn-hover); }
+.side-body li.current { background: var(--accent); color: #fff; }
+.side-body li .tag { font-size: 10px; padding: 1px 5px; border-radius: 8px; background: #b71c1c; color: #fff; flex: none; }
+.side-body li .x {
+  margin-left: auto; flex: none; background: transparent; border: none; color: inherit; cursor: pointer; font-size: 14px; padding: 0 4px;
+}
+.side-actions { display: flex; gap: 6px; margin: 8px 0; }
+.badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--btn-border); color: var(--text); font-size: 11px; text-align: center; }
+
+/* ── the empty state ───────────────────────────────────────────────────────── */
+#empty { display: flex; align-items: center; justify-content: center; height: 100%; padding: 24px; }
+.empty-inner { max-width: 560px; text-align: center; background: var(--chrome); border: 1px dashed var(--btn-border); border-radius: 10px; padding: 28px; }
+.empty-icon { font-size: 40px; }
+.empty-title { font-size: 18px; margin: 8px 0; }
+.empty-sub { color: var(--text-muted); line-height: 1.5; }
+.empty-sub code { background: var(--inset); padding: 1px 4px; border-radius: 3px; }
+body.dragging #empty .empty-inner { border-color: var(--accent); }
+
+/* ── pages ─────────────────────────────────────────────────────────────────── */
+#pages { padding: 20px 0 60px; }
+.tpage {
+  width: var(--reader-width); max-width: calc(100% - 32px); margin: 0 auto 18px;
+  background: #fff; color: #111; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); border-radius: 2px;
+}
+.page-label {
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #666; background: #f3f4f6; border-bottom: 1px solid #e3e5e8; padding: 5px 24px;
+  border-radius: 2px 2px 0 0; user-select: none;
+}
+.page-label.doc { background: #e8f0fe; color: #174ea6; font-weight: 600; font-size: 12px; }
+.page-label .review { color: #b45309; margin-left: 8px; }
+.page-inner { position: relative; }
+.page-body {
+  font-family: var(--reader-font); font-size: var(--reader-size); line-height: var(--reader-lh);
+  white-space: pre-wrap; overflow-wrap: anywhere; padding: 28px 48px 36px; min-height: 120px;
+  outline: none; caret-color: #111;
+}
+.page-body:focus { box-shadow: inset 0 0 0 2px rgba(26, 115, 232, 0.25); }
+.gutter { color: #9aa0a6; font-size: 0.8em; user-select: text; }
+body.gutter-off .gutter { color: inherit; font-size: inherit; }
+
+/* A pseudonym: the real name shown, the fake underneath. Lightly marked, and
+   brighter under the pointer, so an unmarked name-shaped word reads as what
+   it is — a name the run left in the clear. */
+.pn { background: var(--pn-bg); border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 193, 7, 0.25); cursor: help; }
+.pn:hover { background: var(--pn-bg-hover); }
+body.marks-off .pn { background: transparent; box-shadow: none; cursor: text; }
+body.marks-off .pn:hover { background: transparent; }
+body.show-fakes .pn { background: rgba(120, 144, 156, 0.25); box-shadow: 0 0 0 1px rgba(120, 144, 156, 0.4); }
+body.show-fakes.marks-off .pn { background: transparent; box-shadow: none; }
+
+::highlight(flagged) { background-color: var(--flag-bg); text-decoration: underline wavy #d32f2f; }
+::highlight(leak) { background-color: var(--leak-bg); text-decoration: underline double #e65100; }
+
+/* Citation underlines: thin strips at the foot of each line fragment, so the
+   text stays editable and selectable above them. Colours match the viewer. */
+.link-layer { position: absolute; inset: 0; pointer-events: none; }
+.cite-link {
+  position: absolute; display: block; height: 6px; pointer-events: auto; cursor: pointer;
+  border-bottom: 2px solid #1a73e8; opacity: 0.85;
+}
+.cite-link:hover { opacity: 1; background: rgba(26, 115, 232, 0.12); }
+.cite-link.kind-statute, .cite-link.kind-regulation { border-bottom-color: #137333; }
+.cite-link.kind-rule, .cite-link.kind-caci, .cite-link.kind-guidance { border-bottom-color: #b06000; }
+.cite-link.kind-supra { border-bottom-color: #8430ce; }
+
+/* ── floating bits ────────────────────────────────────────────────────────── */
+#flag-pop {
+  position: fixed; z-index: 30; display: flex; align-items: center; gap: 8px;
+  background: var(--chrome); border: 1px solid var(--btn-border); border-radius: 6px; padding: 4px 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); font-size: 12px; max-width: 360px;
+}
+#flag-pop button:disabled { opacity: 0.5; cursor: default; }
+#flag-pop-note { color: var(--text-muted); }
+#pn-tip {
+  position: fixed; z-index: 40; pointer-events: none; max-width: 360px;
+  background: #1f2328; color: #fff; border-radius: 4px; padding: 5px 8px; font-size: 12px; line-height: 1.35;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
+}
+#pn-tip b { color: #ffd54f; }
+#toast {
+  position: fixed; left: 50%; bottom: calc(var(--status-height) + 14px); transform: translateX(-50%); z-index: 50;
+  background: #1f2328; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px; max-width: 70vw;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+#toast.error { background: #b71c1c; }
+
+/* ── status bar ──────────────────────────────────────────────────────────── */
+#statusbar {
+  position: fixed; left: 0; right: 0; bottom: 0; height: var(--status-height); z-index: 10;
+  display: flex; align-items: center; gap: 16px; padding: 0 12px;
+  background: var(--chrome); border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted);
+  white-space: nowrap; overflow: hidden;
+}
+#statusbar .spacer { flex: 1; }
+#statusbar .warn { color: #ff8a65; }
+#st-dirty:not(:empty) { color: #ffd54f; }
+#st-file { color: var(--text); }
+
+@media (max-width: 900px) {
+  :root { --side-width: 240px; }
+}

@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Text Reader</title>
+  <link rel="stylesheet" href="text-reader.css">
+  <!-- Same theme key as the PDF viewer, applied before first paint so light
+       mode doesn't flash dark on load. -->
+  <script>
+    try { if (localStorage.getItem("pdfViewerTheme") === "light")
+      document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
+  </script>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="open-file" title="Open a text export (.txt or .txt.LEAK) from disk">📄 Open file</button>
+    <button id="open-folder" title="Open a case folder: its pseudonym key and every export under Text Files">📁 Open case folder</button>
+    <button id="save" class="primary" title="Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)" disabled>💾 Save</button>
+    <span class="sep"></span>
+
+    <label class="tb-label" for="key-select">Key</label>
+    <select id="key-select" title="Which pseudonym key translates this document"><option value="">(none)</option></select>
+    <button id="load-key" title="Load a pseudonym_key.xlsx">Load key…</button>
+    <span class="sep"></span>
+
+    <label class="tb-label" for="font-select">Font</label>
+    <select id="font-select" title="Reading font"></select>
+    <input id="font-custom" type="text" placeholder="font-family…" title="Any installed font, as a CSS font-family" hidden>
+    <button id="size-down" title="Smaller text">A−</button>
+    <span id="size-label" class="tb-value">15</span>
+    <button id="size-up" title="Larger text">A+</button>
+    <label class="tb-label" for="lh-range">Leading</label>
+    <input id="lh-range" type="range" min="1" max="2.4" step="0.1" title="Line height">
+    <label class="tb-label" for="width-range">Width</label>
+    <input id="width-range" type="range" min="480" max="1400" step="20" title="Page width">
+    <span class="sep"></span>
+
+    <label class="tb-toggle" title="Highlight every pseudonym lightly and show the fake on hover"><input id="marks-toggle" type="checkbox"> Mark pseudonyms</label>
+    <label class="tb-toggle" title="Show the document as it is on disk — the fakes — instead of the real names"><input id="fakes-toggle" type="checkbox"> Show fakes</label>
+    <span class="sep"></span>
+
+    <button id="flag-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F)">🚩 Flag real value</button>
+    <span class="spacer"></span>
+
+    <label class="tb-label" for="provider">Cites on</label>
+    <select id="provider" title="Which service citation links open on">
+      <option value="lexis">Lexis+</option>
+      <option value="westlaw">Westlaw</option>
+    </select>
+    <button id="toa-toggle" title="Table of Authorities panel" aria-pressed="false">§ Authorities</button>
+    <button id="panel-toggle" title="Documents and flagged values" aria-pressed="true">▤ Panel</button>
+    <button id="theme-toggle" title="Light / dark">☀</button>
+  </div>
+
+  <div id="main">
+    <div id="stage">
+      <div id="empty">
+        <div class="empty-inner">
+          <div class="empty-icon" aria-hidden="true">📝</div>
+          <p class="empty-title">Read a text export like a document</p>
+          <p class="empty-sub">Open a scrubbed <strong>.txt</strong> export, or a whole <strong>case folder</strong> — its <code>pseudonym_key.xlsx</code> puts the real names back <em>on screen only</em>, each one lightly marked with the pseudonym on hover. Citations link to Lexis+ or Westlaw. Edit the text and save: the file on disk keeps the fakes. Spot a name the run missed? Select it and flag it for PDF-Linker's next pass.</p>
+          <p class="empty-sub">Drop a file here to open it.</p>
+        </div>
+      </div>
+      <div id="pages" hidden></div>
+    </div>
+
+    <aside id="side" aria-label="Panel">
+      <div class="side-tabs">
+        <button id="tab-docs" class="side-tab active" aria-pressed="true">Documents</button>
+        <button id="tab-flags" class="side-tab" aria-pressed="false">Flagged <span id="flag-count" class="badge">0</span></button>
+      </div>
+      <div id="side-docs" class="side-body">
+        <p class="side-hint" id="docs-hint">Open a case folder to list its exports here.</p>
+        <ul id="docs-list"></ul>
+      </div>
+      <div id="side-flags" class="side-body" hidden>
+        <p class="side-hint">Names you spotted unfaked. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it on its next run or Apply Leak Fixes and pseudonymizes each one.</p>
+        <ul id="flags-list"></ul>
+        <div class="side-actions">
+          <button id="flags-save" class="primary" title="Write New Real Values.txt into the case folder">Save list to case folder</button>
+          <button id="flags-copy" title="Copy the list, one value per line">Copy</button>
+        </div>
+        <p class="side-note" id="flags-note"></p>
+      </div>
+    </aside>
+  </div>
+
+  <div id="statusbar">
+    <span id="st-file">No document</span>
+    <span id="st-key"></span>
+    <span id="st-pn"></span>
+    <span id="st-leaks" class="warn"></span>
+    <span id="st-cites"></span>
+    <span class="spacer"></span>
+    <span id="st-dirty"></span>
+  </div>
+
+  <div id="flag-pop" hidden><button id="flag-pop-btn">🚩 Flag as real value</button><span id="flag-pop-note"></span></div>
+  <div id="pn-tip" hidden></div>
+  <div id="toast" hidden></div>
+
+  <input id="file-input" type="file" accept=".txt,.LEAK,text/plain" hidden>
+  <input id="key-input" type="file" accept=".xlsx" hidden>
+
+  <script type="module" src="text-reader.js"></script>
+</body>
+</html>
