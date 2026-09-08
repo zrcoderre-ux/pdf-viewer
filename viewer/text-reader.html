@@ -34,7 +34,7 @@
     <input id="lh-range" type="range" min="1" max="2.4" step="0.1" title="Leading (line spacing), remembered as the default for every text file">
     <label class="tb-label" for="width-range">Width</label>
     <input id="width-range" type="range" min="480" max="1400" step="20" title="Page width">
-    <label class="tb-toggle" title="Keep every numbered line on one screen line: the page takes the white space beside it, then its own side margins, then the font shrinks — the line numbers are never touched (remembered)"><input id="lock-toggle" type="checkbox"> Line lock</label>
+    <label class="tb-toggle" title="Keep every numbered line on one screen line: the page is made as wide as its longest line needs at your size, scrolling sideways past the window if it must — the font and the line numbers are never touched (remembered)"><input id="lock-toggle" type="checkbox"> Line lock</label>
     <span class="sep"></span>
 
     <label class="tb-toggle" title="Highlight every pseudonym lightly and show the fake on hover"><input id="marks-toggle" type="checkbox"> Mark pseudonyms</label>
@@ -136,6 +136,7 @@
     <p class="sp-note" id="swap-pop-note"></p>
   </div>
   <div id="pn-tip" hidden></div>
+  <div id="type-tip" hidden></div>
   <div id="toast" hidden></div>
 
   <input id="file-input" type="file" accept=".txt,.LEAK,text/plain" hidden>

@@ -577,14 +577,13 @@ app, which routes it to the reader tab.
 - **Line lock.** Pleading paper is read by its line numbers, and a numbered
   line that wraps puts its tail on a screen line with no number — one line
   off from the PDF. **Line lock** (toolbar, remembered) holds every numbered
-  line to one screen line. What it spends to make the longest line fit, in
-  order: the white space beside the page (the page widens into the stage),
-  then the page's own side margins, then the font, a point at a time. It
-  never touches the numbers: the gutter shows the file's own, nothing moves
-  from one number to the next, and a line too long for even the smallest
-  font wraps under its own number and is counted in the status bar. Display
-  only — the size and width you set are kept, and come back when the lock
-  is off.
+  line to one screen line by making the page **as wide as its longest line
+  needs** at the size you chose — past the window's edge if it must, with a
+  horizontal scroll bar under it, the way a zoomed PDF behaves. Zoom in as
+  far as you like: the font is never touched, so the size is yours to
+  calibrate the page by, and the numbers are never touched either — the
+  gutter shows the file's own and nothing moves between them. Display only:
+  the width you set comes back when the lock is off.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
@@ -618,10 +617,32 @@ app, which routes it to the reader tab.
   of you, **Ctrl+Z** and **Ctrl+Y** undo and redo through the reader's own
   history (the browser's cannot survive the pseudonym rewrites), and **Save**
   (Ctrl+S) writes the text back to the same file. A
-  pseudonym span always writes its **fake**; a real name you type is turned
-  into a pseudonym span the moment the caret leaves it, and anything left
-  is written as its pseudonym on save. The save refuses outright rather than
-  write a real value the key binds. Deleting a marked name deletes the fake.
+  pseudonym span always writes its **fake**; anything typed as a real name
+  and left plain is written as its pseudonym on save. The save refuses
+  outright rather than write a real value the key binds. Deleting a marked
+  name deletes the fake.
+- **The numbers are the paper.** On a numbered page the line numbers are
+  fixed and the text moves between them. **Enter** sends the text after the
+  caret down into the next numbered slot, and the slot below takes what was
+  there, on down until an empty slot absorbs the shift — with no empty slot
+  left, the last line's text lands on a new unnumbered line at the foot of
+  the page, so nothing is lost. **Backspace** at the start of a line joins it
+  to the line above and pulls the run below up a slot; **Delete** at the end
+  of a line is the same join from the other side; a paste is typed in line
+  by line. So where the export left line 7 empty and the PDF has text on it,
+  click line 7 and type: the file gets ` 7  ` and your text, and PDF-Linker's
+  next run reads it as line 7. A selection that reaches across a number is
+  refused an edit, and the numbers never take a keystroke.
+- **The pseudonym at the caret.** Finish typing a real value the key binds
+  and a prompt at the caret names its pseudonym — the Claude extension's
+  as-you-type correction, for the page. **Space** marks it as an autocorrect
+  (the real name stays on screen, the fake goes underneath and into the
+  file, and the space lands after it); **→** marks it without the space;
+  **Esc** leaves that one plain, and the save still writes its pseudonym. A
+  real that opens a longer name in the key ("Helen" beside "Helen Rasho"),
+  or a kept one, is never space-marked: the space types on, and the whole
+  name is offered the moment it is finished. A name typed and left is
+  marked by the reader on its own once the caret has moved off it.
 - **Flag what the run missed — and un-flag what it got wrong.** The point of
   reading the real names is to spot the ones that are *not* marked. Select
   such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the

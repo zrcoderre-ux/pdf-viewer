@@ -96,7 +96,7 @@ let folderName = "";
 let folderDocs = [];         // [{ name, handle, quarantined }]
 let folderPdfs = [];         // [{ name, handle }] — the case folder's PDFs
 let key = null;              // parsed key (PK.parseKey)
-let rev = null, fwd = null, reals = null; // compiled matchers
+let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
 let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
@@ -118,7 +118,9 @@ function toast(msg, { error = false, ms = 3200 } = {}) {
 }
 function debounce(fn, ms) {
   let t = null;
-  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  const d = (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  d.cancel = () => clearTimeout(t);
+  return d;
 }
 function lsGet(k, dflt) {
   try { const v = localStorage.getItem(k); return v == null ? dflt : JSON.parse(v); } catch { return dflt; }
@@ -372,6 +374,8 @@ function compileKey() {
   rev = key ? PK.compile(key) : null;
   fwd = k ? PK.compileForward(k) : null;
   reals = k ? PK.compileReals(k) : null;
+  // A kept value is never offered, and a real that opens one stays partial.
+  ahead = k ? PK.compileTypeahead(k, keeps.map((x) => x.value)) : null;
 }
 function setKey(parsed) {
   key = parsed || null;
@@ -616,6 +620,7 @@ function openText(text, name, handle) {
   fileHandle = handle;
   dirty = false;
   editing = false;
+  typeDismissed = null;
   clearHistory();
   document.body.classList.remove("editing");
   $("edit-toggle").setAttribute("aria-pressed", "false");
@@ -829,12 +834,21 @@ function buildBody(body, text) {
     });
     lineStart = r.s.endsWith("\n") || (lineStart && r.s === "");
   });
+  for (const l of body.querySelectorAll(".line > .lt")) placeholderIn(l);
 }
-/** The gutter span: the number (shown in the margin) and the spacing after it (kept, not shown). */
+/** An empty slot carries a <br> so the caret can stand in it; one with text does not need it. */
+function placeholderIn(lt) {
+  // A <br> is only ever the placeholder: Enter and a paste never insert one
+  // (plaintext-only types "\n"), so with text present every <br> goes.
+  if (!lt.textContent.length) { if (!lt.querySelector("br")) lt.appendChild(document.createElement("br")); }
+  else for (const br of [...lt.querySelectorAll("br")]) br.remove();
+}
+/** The gutter span: the number (shown in the margin) and the spacing after it (kept, not shown). The numbers are fixed: the span takes no edit. */
 function makeGutter(prefix) {
   const m = prefix.match(/^( ?\d{1,2})( *)$/) || [null, prefix, ""];
   const span = document.createElement("span");
   span.className = "gutter";
+  span.contentEditable = "false";
   const num = document.createElement("span");
   num.className = "gn";
   num.textContent = m[1];
@@ -907,7 +921,9 @@ function updateCounts() {
 pagesEl.addEventListener("input", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body) return;
+  normalizeLines(body);
   setDirty(true);
+  offerAtCaret(body);
   convertTypedRealsSoon(body);
   afterTextChangeSoon();
 });
@@ -934,6 +950,343 @@ function setEditing(on) {
 }
 $("edit-toggle").addEventListener("click", () => setEditing(!editing));
 
+
+// ── the numbers are the paper: editing between fixed slots ──────────────────────
+//
+// A page numbered down its margin is edited the way it is read: the numbers
+// never move, the TEXT moves between them. Enter sends the text after the
+// caret down into the next slot, the slot below takes what was there, and so
+// on until an empty slot absorbs the shift (or a new unnumbered line at the
+// foot of the page takes the last of it — the file gains a line, nothing is
+// lost). Backspace at the start of a line joins it to the line above and
+// pulls the run of text below up one slot. Delete at the end of a line is
+// the same join from the other side. The decisions are textdoc.shiftDown /
+// shiftUp; here they are applied to the DOM by MOVING nodes, so a pseudonym
+// span travels intact and the numbers' own spans are never touched. Every
+// such edit is saveable: a numbered line that gains text gains the two
+// spaces PDF-Linker writes after its number (fixGutterSpacing), so the file
+// parses back to the same numbered line — an empty "  7" opened and typed
+// into is written " 7  typed text", never " 7typed text".
+// A page with no numbered margin edits as plain lines: Enter makes a new
+// line block, Backspace at a line's start removes one.
+function lineOfNode(body, n) {
+  const el = n && (n.nodeType === 1 ? n : n.parentElement);
+  const line = el && el.closest && el.closest(".line");
+  return line && body.contains(line) ? line : null;
+}
+/**
+ * The caret's line and its point inside that line's .lt. A caret on the
+ * page body itself (between lines, or after the last — where a click below
+ * the text or a select-all-and-collapse leaves it) is taken to the line it
+ * stands beside: the start of the line after it, else the end of the last.
+ */
+function caretLine(body) {
+  const pt = caretIn(body);
+  if (!pt) return null;
+  let line = lineOfNode(body, pt.container);
+  if (line) return { line, pt: pointInLt(line, pt) };
+  if (pt.container !== body) return null;
+  const lines = [...body.querySelectorAll(":scope > .line")];
+  if (!lines.length) return null;
+  const kids = [...body.childNodes];
+  const next = kids.slice(pt.offset).find((k) => k.nodeType === 1 && k.classList.contains("line"));
+  line = next || lines[lines.length - 1];
+  const lt = ltOf(line);
+  return { line, pt: next ? { container: lt, offset: 0 } : { container: lt, offset: lt.childNodes.length } };
+}
+function ltOf(line) { return line.querySelector(":scope > .lt"); }
+function caretIn(body) {
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  if (!sel.isCollapsed || !body.contains(r.startContainer)) return null;
+  return { container: r.startContainer, offset: r.startOffset };
+}
+/** The caret as a point INSIDE a line's .lt: a caret on the number, or on the line itself, is put at the text's edge. */
+function pointInLt(line, pt) {
+  const lt = ltOf(line);
+  if (lt.contains(pt.container)) return pt;
+  const before = pt.container === line ? pt.offset <= [...line.childNodes].indexOf(lt) : !!(pt.container.parentElement && pt.container.parentElement.closest(".gutter"));
+  return before ? { container: lt, offset: 0 } : { container: lt, offset: lt.childNodes.length };
+}
+function placeCaret(node, offset) {
+  try {
+    const r = document.createRange();
+    r.setStart(node, offset); r.collapse(true);
+    const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  } catch { /* nothing to place in */ }
+}
+function extractAll(lt) {
+  const r = document.createRange(); r.selectNodeContents(lt);
+  const frag = r.extractContents();
+  for (const br of [...frag.querySelectorAll("br")]) br.remove();
+  return frag;
+}
+function newLineAfter(ref) {
+  const line = document.createElement("div");
+  line.className = "line";
+  const lt = document.createElement("span");
+  lt.className = "lt";
+  line.appendChild(lt);
+  placeholderIn(lt);
+  ref.after(line);
+  return line;
+}
+/** A numbered line that has text carries PDF-Linker's two spaces after its number; the DOM keeps that true. */
+function fixGutterSpacing(body) {
+  for (const line of body.querySelectorAll(".line.num")) {
+    const lt = ltOf(line), g = line.querySelector(":scope > .gutter");
+    if (!lt || !g || !lt.textContent.length) continue;
+    let gs = g.querySelector(".gs");
+    if (!gs) { gs = document.createElement("span"); gs.className = "gs"; g.appendChild(gs); }
+    if (gs.textContent.length < 2) gs.textContent = "  ";
+  }
+}
+/**
+ * Chrome types into whatever box the caret was put in: a click on an empty
+ * slot can leave the caret on the LINE rather than its .lt, and the text
+ * node then lands beside the .lt instead of inside it; a block emptied by
+ * deletion may gain a placeholder <br>, which would serialize as a line. Both
+ * are put right, the caret with them.
+ */
+function normalizeLines(body) {
+  const pt = caretIn(body);
+  let moved = false;
+  for (const line of [...body.querySelectorAll(".line")]) {
+    let lt = ltOf(line);
+    if (!lt) { lt = document.createElement("span"); lt.className = "lt"; line.appendChild(lt); }
+    for (const n of [...line.childNodes]) {
+      if (n === lt || (n.nodeType === 1 && n.classList.contains("gutter"))) continue;
+      if (n.nodeType === 1 && n.nodeName === "BR") { n.remove(); continue; }
+      const before = [...line.childNodes].indexOf(n) < [...line.childNodes].indexOf(lt);
+      if (before) lt.insertBefore(n, lt.firstChild); else lt.appendChild(n);
+      moved = true;
+    }
+    placeholderIn(lt);
+  }
+  for (const n of [...body.childNodes]) {
+    // Text typed straight into the body (a page with no line yet) gets a line.
+    if (n.nodeType === 1 && n.classList.contains("line")) continue;
+    if (n.nodeType === 1 && n.nodeName === "BR") { n.remove(); continue; }
+    const line = document.createElement("div"); line.className = "line";
+    const lt = document.createElement("span"); lt.className = "lt";
+    n.replaceWith(line); line.appendChild(lt); lt.appendChild(n);
+    moved = true;
+  }
+  fixGutterSpacing(body);
+  if (moved && pt && pt.container.isConnected) placeCaret(pt.container, Math.min(pt.offset, pt.container.nodeType === 3 ? pt.container.data.length : pt.container.childNodes.length));
+}
+
+/** Enter: the text after the caret goes down a slot. */
+function enterAtCaret(body, { snap = true } = {}) {
+  const cl = caretLine(body);
+  if (!cl) return false;
+  const { line, pt: at } = cl;
+  if (snap) snapshot(body, true);
+  const lt = ltOf(line);
+  const r = document.createRange();
+  r.setStart(at.container, at.offset);
+  r.setEnd(lt, lt.childNodes.length);
+  let carry = r.extractContents();
+  for (const br of [...carry.querySelectorAll("br")]) br.remove();
+  let target = null;
+  if (!body.classList.contains("numbered")) {
+    target = newLineAfter(line);
+    ltOf(target).appendChild(carry);
+  } else {
+    let cur = line.nextElementSibling, placed = false;
+    while (cur) {
+      const clt = cur.classList.contains("line") ? ltOf(cur) : null;
+      if (clt) {
+        if (!target) target = cur;
+        if (!clt.textContent.length) { clt.appendChild(carry); placed = true; break; }
+        const displaced = extractAll(clt);
+        clt.appendChild(carry);
+        carry = displaced;
+      }
+      cur = cur.nextElementSibling;
+    }
+    if (!placed) {
+      const foot = newLineAfter(body.lastElementChild);
+      ltOf(foot).appendChild(carry);
+      if (!target) target = foot;
+    }
+  }
+  for (const l of body.querySelectorAll(".line > .lt")) placeholderIn(l);
+  fixGutterSpacing(body);
+  placeCaret(ltOf(target), 0);
+  setDirty(true);
+  afterTextChange();
+  return true;
+}
+/** Backspace at the start of a line: join it to the line above, the run below moves up. */
+function joinLineUp(body, line) {
+  const prev = line.previousElementSibling;
+  if (!prev || !prev.classList.contains("line")) return false;
+  snapshot(body, true);
+  const plt = ltOf(prev);
+  const joinAt = plt.textContent.length;
+  plt.appendChild(extractAll(ltOf(line)));
+  if (!body.classList.contains("numbered")) line.remove();
+  else {
+    let cur = line;
+    for (;;) {
+      const next = cur.nextElementSibling;
+      const nlt = next && next.classList.contains("line") ? ltOf(next) : null;
+      if (!nlt || !nlt.textContent.length) {
+        if (!next && !cur.classList.contains("num")) cur.remove();
+        break;
+      }
+      ltOf(cur).appendChild(extractAll(nlt));
+      cur = next;
+    }
+  }
+  for (const l of body.querySelectorAll(".line > .lt")) placeholderIn(l);
+  fixGutterSpacing(body);
+  const at = pointAtOffset(plt, joinAt);
+  placeCaret(at.node, at.offset);
+  setDirty(true);
+  afterTextChange();
+  return true;
+}
+function backspaceAtCaret(body) {
+  const cl = caretLine(body);
+  if (!cl) return false;
+  const { line, pt: at } = cl;
+  const lt = ltOf(line);
+  if (offsetOfPoint(lt, at.container, at.offset) !== 0) return false;
+  return joinLineUp(body, line) || true; // at the first line there is nothing to join: the number stays
+}
+function deleteAtCaret(body) {
+  const cl = caretLine(body);
+  if (!cl) return false;
+  const { line, pt: at } = cl;
+  const lt = ltOf(line);
+  if (offsetOfPoint(lt, at.container, at.offset) !== lt.textContent.length) return false;
+  const next = line.nextElementSibling;
+  if (!next || !next.classList.contains("line")) return true; // the last line: nothing after it to join
+  return joinLineUp(body, next);
+}
+/** A selection reaching across a line number: an edit over it would take the number with it, so it is refused. */
+function selectionCrossesGutter(body) {
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+  const r = sel.getRangeAt(0);
+  if (!body.contains(r.commonAncestorContainer)) return false;
+  for (const g of body.querySelectorAll(".gutter")) if (r.intersectsNode(g)) return true;
+  return false;
+}
+pagesEl.addEventListener("keydown", (e) => {
+  if (!editing || e.ctrlKey || e.metaKey || e.altKey) return;
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  if (!body) return;
+  if (e.key === "Enter") { e.preventDefault(); hideTypeTip(); enterAtCaret(body); }
+  else if (e.key === "Backspace") { if (backspaceAtCaret(body)) e.preventDefault(); }
+  else if (e.key === "Delete") { if (deleteAtCaret(body)) e.preventDefault(); }
+});
+// A paste is typed in line by line, each line break an Enter, so pasted text
+// moves between the slots as typed text does.
+pagesEl.addEventListener("paste", (e) => {
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  if (!body || !editing) return;
+  const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+  e.preventDefault();
+  if (!text) return;
+  snapshot(body, true);
+  batchEdit = true;
+  try {
+    const lines = text.replace(/\r\n?/g, "\n").split("\n");
+    lines.forEach((piece, i) => {
+      if (piece) document.execCommand("insertText", false, piece);
+      if (i < lines.length - 1) enterAtCaret(body, { snap: false });
+    });
+  } finally { batchEdit = false; }
+});
+
+// ── the as-you-type prompt (the Claude extension's, for the page) ────────────────
+//
+// The moment the caret sits at the end of a just-typed REAL value a prompt
+// at the caret names the pseudonym it will carry. Space marks it as an
+// autocorrect — the name becomes a pseudonym span (the real name shown, the
+// fake underneath and in the file) and the space lands after it; ArrowRight
+// marks it without the space; Escape leaves that one alone. A real that
+// OPENS a longer real in the key ("Helen" beside "Helen Rasho") is never
+// space-swapped — the space may be the middle of the longer name, which is
+// offered whole the moment it is finished (PK.swapsOnSpace). The debounced
+// converter below stays the net for everything the caret is not on — a
+// paste, a name typed and left — and skips the spot Escape dismissed.
+const typeTip = $("type-tip");
+let typeHit = null;      // { body, node, offset, hit } while the prompt shows
+let typeDismissed = null; // { body, end, real } the user Escaped — `end` a text offset in the page, so it survives a rebuild
+function textBeforeCaret(pt) {
+  if (pt.container.nodeType !== 3) return "";
+  let t = pt.container.data.slice(0, pt.offset);
+  // Plain text in the same line before this node, up to the last pseudonym span.
+  for (let n = pt.container.previousSibling; n && n.nodeType === 3; n = n.previousSibling) t = n.data + t;
+  return t;
+}
+function offerAtCaret(body) {
+  hideTypeTip();
+  if (!ahead || !editing) return;
+  const pt = caretIn(body);
+  if (!pt || pt.container.nodeType !== 3 || (pt.container.parentElement && pt.container.parentElement.closest(".pn, .gutter"))) return;
+  const tb = textBeforeCaret(pt);
+  const hit = PK.endingReal(ahead, tb);
+  if (!hit || hit.matched.length > pt.offset) return;
+  // The name just typed completes a KEPT value ("Rasho" closing a kept "Helen Rasho"): left as it stands.
+  const krx = keptMatcher();
+  if (krx) { krx.lastIndex = 0; let m; while ((m = krx.exec(tb))) { if (m.index + m[0].length === tb.length) return; if (m.index === krx.lastIndex) krx.lastIndex++; } }
+  if (typeDismissed && typeDismissed.body === body && typeDismissed.end === offsetOfPoint(body, pt.container, pt.offset) && typeDismissed.real === hit.real) return;
+  typeHit = { body, node: pt.container, offset: pt.offset, hit };
+  typeTip.innerHTML = "";
+  const b = document.createElement("b");
+  b.textContent = PK.mirrorCase(hit.matched, hit.fake);
+  typeTip.append("Pseudonym: ", b);
+  const k = document.createElement("span");
+  k.className = "keys";
+  k.textContent = hit.partial ? " — → marks it; Space types on (it may open a longer name)" : " — Space or → marks it, Esc leaves it";
+  typeTip.append(k);
+  const rect = document.getSelection().getRangeAt(0).getBoundingClientRect();
+  typeTip.hidden = false;
+  const w = typeTip.offsetWidth;
+  typeTip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, rect.left)) + "px";
+  typeTip.style.top = (rect.bottom + 6) + "px";
+}
+function hideTypeTip() { typeTip.hidden = true; typeHit = null; }
+/** Mark the value the prompt names as a pseudonym span, `tail` (a space) after it. */
+function acceptTyped(tail) {
+  const t = typeHit;
+  if (!t || !t.node.isConnected) { hideTypeTip(); return false; }
+  const { body, node, offset, hit } = t;
+  hideTypeTip();
+  snapshot(body, true);
+  const start = offset - hit.matched.length;
+  node.splitText(offset);
+  const mid = node.splitText(start);
+  const pn = makePn(PK.mirrorCase(hit.matched, hit.fake), hit.matched);
+  mid.replaceWith(pn);
+  let after = pn.nextSibling;
+  if (!after || after.nodeType !== 3) { after = document.createTextNode(""); pn.after(after); }
+  if (tail) after.insertData(0, tail);
+  placeCaret(after, tail.length);
+  setDirty(true);
+  afterTextChange();
+  toast(`Marked as ${pn.dataset.fake} — the file carries the pseudonym`);
+  return true;
+}
+pagesEl.addEventListener("keydown", (e) => {
+  if (!typeHit || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === " " && PK.swapsOnSpace(typeHit.hit)) { if (acceptTyped(" ")) e.preventDefault(); }
+  else if (e.key === "ArrowRight") { if (acceptTyped("")) e.preventDefault(); }
+  else if (e.key === "Escape") { typeDismissed = { body: typeHit.body, end: offsetOfPoint(typeHit.body, typeHit.node, typeHit.offset), real: typeHit.hit.real }; hideTypeTip(); e.preventDefault(); }
+});
+document.addEventListener("selectionchange", () => {
+  if (!typeHit) return;
+  const pt = caretIn(typeHit.body);
+  if (!pt || pt.container !== typeHit.node || pt.offset !== typeHit.offset) hideTypeTip();
+});
+stageEl.addEventListener("scroll", () => { if (typeHit) hideTypeTip(); }, { passive: true });
+
 // ── undo / redo ───────────────────────────────────────────────────────────────────────
 //
 // The reader's own history, because the browser's cannot be trusted here:
@@ -945,6 +1298,7 @@ $("edit-toggle").addEventListener("click", () => setEditing(!editing));
 const UNDO_COALESCE_MS = 800;
 const UNDO_MAX = 200;
 let undoStack = [], redoStack = [], lastSnapAt = 0, lastSnapPage = -1;
+let batchEdit = false; // one snapshot covers a multi-step edit (a paste)
 
 function pageIndexOf(body) { return Number(body.closest(".tpage").dataset.index); }
 function caretOffsetIn(body) {
@@ -964,7 +1318,7 @@ function offsetOfPoint(body, container, offset) {
     if (found >= 0) return;
     if (n.nodeType === 3) { if (n === container) found = off + offset; else off += n.data.length; return; }
     if (n.nodeType !== 1) return;
-    if (n.nodeName === "BR") { off += 1; return; }
+    if (n.nodeName === "BR") { if (n.nextSibling) off += 1; return; }
     if (BLOCKISH.has(n.nodeName) && !atStart) off += 1;
     const kids = [...n.childNodes];
     for (let i = 0; i < kids.length; i++) {
@@ -988,7 +1342,7 @@ function pointAtOffset(body, target) {
       return;
     }
     if (n.nodeType !== 1) return;
-    if (n.nodeName === "BR") { off += 1; return; }
+    if (n.nodeName === "BR") { if (n.nextSibling) off += 1; return; }
     if (BLOCKISH.has(n.nodeName) && !atStart) { off += 1; if (target === off) { hit = { node: n, offset: 0 }; return; } }
     let i = 0;
     for (const c of [...n.childNodes]) { rec(c, i === 0 && atStart); if (hit) return; i++; }
@@ -1001,6 +1355,7 @@ function snapshotOf(body) {
 }
 /** Record the page as it stands, before an edit; `force` skips coalescing. */
 function snapshot(body, force) {
+  if (batchEdit) return;
   const now = Date.now();
   const i = pageIndexOf(body);
   if (!force && i === lastSnapPage && now - lastSnapAt < UNDO_COALESCE_MS) { lastSnapAt = now; return; }
@@ -1012,6 +1367,8 @@ function snapshot(body, force) {
 function restoreSnapshot(snap) {
   const body = pageBodies()[snap.page];
   if (!body) return;
+  convertTypedRealsSoon.cancel();
+  hideTypeTip();
   buildBody(body, snap.text);
   doc.pages[snap.page].lines = snap.text.split("\n");
   if (snap.caret >= 0) {
@@ -1043,6 +1400,7 @@ pagesEl.addEventListener("beforeinput", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body) return;
   if (e.inputType === "historyUndo" || e.inputType === "historyRedo") { e.preventDefault(); return; }
+  if (selectionCrossesGutter(body)) { e.preventDefault(); toast("The line numbers are fixed: edit within a line, or join lines with Backspace at a line's start.", { error: true }); return; }
   // A deletion after typing, or typing after a deletion, is its own step.
   const kind = /delete/i.test(e.inputType) ? "del" : "ins";
   snapshot(body, kind !== snapshot.lastKind);
@@ -1077,6 +1435,7 @@ function convertTypedReals(body) {
   let made = 0;
   for (const h of hits) {
     if (h.node === caretNode && caretOff >= h.start && caretOff <= h.end) continue;
+    if (typeDismissed && typeDismissed.body === body && offsetOfPoint(body, h.node, h.end) === typeDismissed.end) continue;
     const node = h.node;
     if (!node.isConnected) continue;
     if (!made) snapshot(body, true);
@@ -1188,22 +1547,19 @@ async function writeText(text, name, handle) {
 // Pleading paper is read by its line numbers, and a numbered line that
 // WRAPS puts its tail on a screen line with no number — read across to the
 // PDF, that is one line off. With the lock on every numbered line is held
-// to one screen line, and what is spent to make it fit is, in order: the
-// white space beside the page (the page widens into the stage), the page's
-// own side margins, and only then the font, a point at a time. The numbers
-// themselves are never touched — the gutter shows the file's own, nothing
-// moves between them, and a line too long for even the smallest font wraps
-// under its own number and is counted in the status bar rather than cut.
-// Display only: the settings keep the size and width the reader chose, and
-// the effective values live in two CSS variables the pages read.
-const LOCK_MIN_PX = 9;
+// to one screen line, and the page is made AS WIDE AS THE LONGEST LINE
+// NEEDS at the size the reader chose — past the window's edge if that is
+// what it takes, with a horizontal scroll bar under it, the way a zoomed
+// PDF behaves. The font is never touched: zooming in is the reader's to do,
+// and the size is what they calibrate the page by. The numbers are never
+// touched either — the gutter shows the file's own and nothing moves
+// between them. Display only: the settings keep the width the reader
+// chose, and the effective width lives in a CSS variable the pages read.
 function applyLineLock() {
   const root = document.documentElement.style;
   root.setProperty("--reader-size-eff", settings.fontSize + "px");
   root.setProperty("--reader-width-eff", settings.pageWidth + "px");
   document.body.classList.toggle("line-lock", !!settings.lineLock);
-  document.body.classList.remove("lock-tight");
-  for (const el of pagesEl.querySelectorAll(".lt.overlong")) el.classList.remove("overlong");
   const st = $("st-lock");
   if (!settings.lineLock || !doc) { st.textContent = ""; return; }
   const bodies = pageBodies().filter((b) => b.classList.contains("numbered") && !b.closest(".tpage").classList.contains("swapped"));
@@ -1213,29 +1569,15 @@ function applyLineLock() {
   const lts = [];
   for (const b of bodies) lts.push(...b.querySelectorAll(".line.num > .lt"));
   const overflow = () => { let o = 0; for (const lt of lts) o = Math.max(o, lt.scrollWidth - lt.clientWidth); return o; };
-  const avail = Math.max(300, stageEl.clientWidth - 32);
-  let width = settings.pageWidth, size = settings.fontSize, tight = false;
+  let width = settings.pageWidth;
   let over = overflow();
-  for (let n = 0; over > 0 && width < avail && n < 8; n++) {
-    width = Math.min(avail, width + over + 1);
+  for (let n = 0; over > 0 && n < 12; n++) {
+    width = Math.ceil(width + over + 1);
     root.setProperty("--reader-width-eff", width + "px");
     over = overflow();
   }
-  if (over > 0) { tight = true; document.body.classList.add("lock-tight"); over = overflow(); }
-  while (over > 0 && size > LOCK_MIN_PX) {
-    size -= 1;
-    root.setProperty("--reader-size-eff", size + "px");
-    over = overflow();
-  }
-  let stillWrap = 0;
-  if (over > 0) {
-    for (const lt of lts) if (lt.scrollWidth > lt.clientWidth + 1) { lt.classList.add("overlong"); stillWrap++; }
-  }
-  const spent = [];
-  if (width !== settings.pageWidth) spent.push(`width ${Math.round(width)}px`);
-  if (tight) spent.push("narrow margins");
-  if (size !== settings.fontSize) spent.push(`font ${size}px (set ${settings.fontSize})`);
-  st.textContent = "Line lock" + (spent.length ? ": " + spent.join(", ") : ": every numbered line fits") + (stillWrap ? ` · ${stillWrap} line${stillWrap === 1 ? "" : "s"} still too long at ${LOCK_MIN_PX}px, wrapped under its number` : "");
+  const wider = width > stageEl.clientWidth - 32;
+  st.textContent = "Line lock" + (width !== settings.pageWidth ? `: page ${width}px wide for its longest line` + (wider ? " — scroll sideways" : "") : ": every numbered line fits");
 }
 
 // ── citations ────────────────────────────────────────────────────────────────────────
@@ -1258,7 +1600,7 @@ function flatten(body, { blankGutters = false } = {}) {
       return;
     }
     if (n.nodeType !== 1) return;
-    if (n.nodeName === "BR") { text += "\n"; return; }
+    if (n.nodeName === "BR") { if (n.nextSibling) text += "\n"; return; }
     if ((n.nodeName === "DIV" || n.nodeName === "P" || n.nodeName === "LI") && !atStart) text += "\n";
     let first = true;
     for (const c of n.childNodes) { rec(c, first && atStart); first = false; }

@@ -8,7 +8,7 @@
 
 import {
   markCss,
-  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered,
+  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
   addValue, removeValue, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE,
@@ -34,6 +34,36 @@ check("…and not among prose", pageIsNumbered([" 1  Exhibit", "a", "b", "c"]), 
 check("no numbers, no margin", pageIsNumbered(["a", "b", ""]), false);
 check("blank lines do not count against it", pageIsNumbered([" 1  a", "", "", "", " 2  b"]), true);
 check("lineLock is remembered and defaults off", [normalizeSettings({}).lineLock, normalizeSettings({ lineLock: true }).lineLock, normalizeSettings({ lineLock: "yes" }).lineLock], [false, true, false]);
+
+// ---- placeholders ---------------------------------------------------------
+console.log("placeholders");
+{
+  const el = (name, kids, attrs) => ({ nodeType: 1, nodeName: name, childNodes: kids, getAttribute: (k) => (attrs && attrs[k]) || null });
+  const tx = (d) => ({ nodeType: 3, data: d });
+  const withSiblings = (kids) => { kids.forEach((k, i) => { k.nextSibling = kids[i + 1] || null; }); return kids; };
+  const br = () => el("BR", []);
+  check("a <br> closing its block is a placeholder, not a line", serializeNodes(el("DIV", withSiblings([el("DIV", withSiblings([tx("a")])), el("DIV", withSiblings([br()])), el("DIV", withSiblings([tx("b"), br()]))]))), "a\n\nb");
+  check("a <br> with something after it is still a line break", serializeNodes(el("DIV", withSiblings([tx("a"), br(), tx("b")]))), "a\nb");
+}
+
+// ---- fixed line slots -------------------------------------------------------
+console.log("fixed line slots");
+const L = (...t) => t.map((x) => ({ num: true, text: x }));
+const texts = (r) => r.lines.map((l) => (l.num ? "" : "~") + l.text);
+check("Enter sends the tail down into the first blank slot below", texts(shiftDown(L("abc", "def", "", "ghi"), 0, "a", "bc")), ["a", "bc", "def", "ghi"]);
+check("…the numbers stay where they are", shiftDown(L("abc", "def", "", "ghi"), 0, "a", "bc").lines.map((l) => l.num), [true, true, true, true]);
+check("with no blank slot the last line's text lands on a new unnumbered line", texts(shiftDown(L("abc", "def"), 0, "abc", "")), ["abc", "", "~def"]);
+check("Enter at the end of the last line adds an unnumbered line", shiftDown(L("abc"), 0, "abc", "").appended, true);
+check("the caret goes to the slot below", shiftDown(L("abc", ""), 0, "ab", "c").target, 1);
+check("Backspace at the start of a line joins it above and pulls the run up", texts(shiftUp(L("ab", "cd", "ef", "", "gh"), 1)), ["abcd", "ef", "", "", "gh"]);
+check("…and reports where the join is, for the caret", shiftUp(L("ab", "cd"), 1).joinAt, 2);
+check("a run reaching an unnumbered foot line drops that line", (() => { const r = shiftUp([{ num: true, text: "ab" }, { num: true, text: "cd" }, { num: false, text: "ef" }], 1); return [texts(r), r.dropped]; })(), [["abcd", "ef"], true]);
+check("a numbered last slot is emptied, never dropped", (() => { const r = shiftUp(L("ab", "cd", "ef"), 1); return [texts(r), r.dropped]; })(), [["abcd", "ef", ""], false]);
+// The blank slot Enter absorbed cannot be told from any other once the run is
+// contiguous, so Backspace leaves the blank at the END of the run (Ctrl+Z is
+// the exact inverse).
+check("Enter then Backspace: the text is back, the blank slot at the run's end", (() => { const a = shiftDown(L("abc", "def", "", "x"), 0, "a", "bc"); const b = shiftUp(a.lines, 1); return texts(b); })(), ["abc", "def", "x", ""]);
+check("Backspace at the first line does nothing", shiftUp(L("ab"), 0).joinAt, -1);
 
 // ---- pages ----------------------------------------------------------------
 console.log("pages");
@@ -84,10 +114,11 @@ check("a bare number followed by text is not a gutter", gutterPrefix("3 items"),
 // ---- the DOM walk, on a minimal node tree ------------------------------------
 console.log("serialization");
 const T = (s) => ({ nodeType: 3, data: s });
-const E = (name, attrs, kids) => ({
-  nodeType: 1, nodeName: name, childNodes: kids || [],
-  getAttribute: (k) => (attrs && k in attrs ? attrs[k] : null),
-});
+const E = (name, attrs, kids) => {
+  const childNodes = kids || [];
+  childNodes.forEach((k, i) => { k.nextSibling = childNodes[i + 1] || null; }); // a <br> asks whether it closes its element
+  return { nodeType: 1, nodeName: name, childNodes, getAttribute: (k) => (attrs && k in attrs ? attrs[k] : null) };
+};
 const body = E("DIV", {}, [
   E("SPAN", { class: "gutter" }, [T(" 2  ")]),
   T("Plaintiff "),
