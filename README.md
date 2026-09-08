@@ -565,8 +565,12 @@ app, which routes it to the reader tab.
   sheet, with the printed page number and any REVIEW clause on its label and
   the pleading gutter numbers dimmed into a margin. Pick the font (Georgia,
   Times, Charter, Palatino, system sans, Arial, Verdana, Courier, Consolas, or
-  any installed family by name), size, leading and page width; the choice is
-  remembered. Light and dark chrome follow the viewer's own theme toggle.
+  any installed family by name), size, leading and page width. Those are
+  **remembered as the defaults**: the font and leading chosen once are what
+  every text file opens in from then on — set them in the reader's toolbar or
+  under Options → "Text reader — default font and leading", and every open
+  reader tab follows at once. Display only: the text file itself is never
+  changed. Light and dark chrome follow the viewer's own theme toggle.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
@@ -575,28 +579,58 @@ app, which routes it to the reader tab.
 - **Real names from the key.** **Open case folder** picks the matter's folder
   and takes only `pseudonym_key.xlsx` and the exports out of it (a `*.txt.LEAK`
   quarantined by PDF-Linker's leak gate is listed too, marked, and opened
-  first — it is the one to read). Every fake is shown as its real value in
+  first — it is the one to read). The reader **remembers every case folder it
+  is shown**, so a document opened on its own afterwards — from the file
+  picker, a drop, or the installed app's file handler — is matched to the
+  folder it sits in (its own folder, or the one above `Text Files`) and that
+  folder's key is attached automatically; where the browser wants the folder
+  re-authorised first, a bar offers it in one click, and a file from a folder
+  the reader has never seen gets an offer to open it once. Every fake is shown as its real value in
   the case the fake was written in, **lightly highlighted**, and hovering
-  shows the pseudonym underneath. **Mark pseudonyms** turns the highlight and
-  the hover off; **Show fakes** shows the document as it is on disk. The key
+  shows the pseudonym underneath. The highlight's **colour and intensity**
+  are yours to set (the swatch and slider beside "Mark pseudonyms", or under
+  Options), and are remembered like the font; **Mark pseudonyms** turns the
+  highlight and the hover off; **Show fakes** shows the document as it is on
+  disk. The key
   is read the way `DeAnonymize.bas` and the Claude extension read it: columns
   by header name, operator keeps skipped, alt spellings forward-only, an
   ambiguous fake retired, the pinned tab out of the reversal. The last few
   keys are remembered, so a lone `.txt` can be read under a key already
   loaded. A real name from the key standing **unfaked** in an export is
   counted in the status bar and underlined — that is a leak the run missed.
-- **Editable, and the file never learns the real names.** The pages are
-  editable and **Save** (Ctrl+S) writes the text back to the same file. A
+- **Editable — once you say so — and the file never learns the real names.**
+  A document opens **protected**: reading, selecting and flagging can never
+  nudge a character into it. **✎ Edit** lifts that for the document in front
+  of you, **Ctrl+Z** and **Ctrl+Y** undo and redo through the reader's own
+  history (the browser's cannot survive the pseudonym rewrites), and **Save**
+  (Ctrl+S) writes the text back to the same file. A
   pseudonym span always writes its **fake**; a real name you type is turned
   into a pseudonym span the moment the caret leaves it, and anything left
   is written as its pseudonym on save. The save refuses outright rather than
   write a real value the key binds. Deleting a marked name deletes the fake.
-- **Flag what the run missed.** The point of reading the real names is to
-  spot the ones that are *not* marked. Select such a name and press **🚩 Flag
-  real value** (or Ctrl+Shift+F); the **Flagged** panel collects them and
-  **Save list to case folder** writes `New Real Values.txt` beside the key,
-  which PDF-Linker reads on its next run — and on Apply Leak Fixes — as if
-  each line had been given with `--term`. A pseudonym cannot be flagged.
+- **Flag what the run missed — and un-flag what it got wrong.** The point of
+  reading the real names is to spot the ones that are *not* marked. Select
+  such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the
+  **Flagged** panel collects them and **Save list to case folder** writes
+  `New Real Values.txt` beside the key, which PDF-Linker reads on its next
+  run — and on Apply Leak Fixes — as if each line had been given with
+  `--term`. The opposite mistake, a value that should never have been faked
+  (a word of a cited decision's name, usually), is **right-clicked**: "Keep in
+  this case" is PDF-Linker's `no`, "Never fake it anywhere" its `never`. The
+  keep takes effect in the reader **at once** — every occurrence loses its
+  highlight and shows a dotted underline, the tooltip says the file still
+  carries the fake, and a save neither rewrites the kept value to its fake nor
+  refuses over it — and goes into the same file as a `no: VALUE` / `never:
+  VALUE` line, which PDF-Linker reads as the worksheet's own decision on the
+  run that actually restores the files. The **Flagged** panel lists both
+  kinds, each withdrawable.
+- **Reading tools from the PDF viewer.** **↓ Auto-scroll** (or **A**) creeps
+  the document at a reading pace, **[** and **]** slow and speed it, Space
+  pauses; **Shift + Space** opens the citation under the pointer, or every
+  citation in the selection, in background tabs, as on a PDF; the theme
+  toggle and the Authorities panel are the viewer's own. The Documents /
+  Flagged panel collapses on its **»** chevron (or **▤ Panel**), stays closed
+  until it has something to show, and remembers your choice.
 
 The decisions live in `viewer/textdoc.js` (the page model, the DOM-to-disk
 walk, the values file) and `viewer/pseudo-key.js` (the key, a port of the
@@ -646,6 +680,7 @@ manifest.json                        MV3 manifest
 background.js                        webNavigation -> viewer redirect
 popup.html / popup.js                Toolbar popup (provider toggle + legend)
 options.html / options.js            Options page (provider, naming, sites, OCR)
+viewer/reader-options.js             Options page: the text reader's default font and leading (module)
 citation-site-rules.js               Where web citation links may run (shared)
 viewer/shift-space-open.js           Shift+Space = middle click (viewer + all sites)
 viewer/viewer.html                   PDF viewer shell

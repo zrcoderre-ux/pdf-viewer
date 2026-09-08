@@ -261,8 +261,39 @@ const VALUES_HEAD = [
   "# One real value per line: names spotted unfaked in the scrubbed exports.",
   "# PDF-Linker reads this file from the case folder on its next run (and on",
   "# Apply Leak Fixes) and pseudonymizes each value as if it had been given",
-  "# with --term. Lines beginning with # are ignored. Delete a line to withdraw it.",
+  "# with --term. A line 'no: VALUE' is the opposite — a value the run faked",
+  "# that should be left as it is in this case (a cited decision's name); a",
+  "# line 'never: VALUE' keeps it in every case. Lines beginning with # are",
+  "# ignored. Delete a line to withdraw it.",
 ];
+
+// A keep line: `no: VALUE` (this case) or `never: VALUE` (every case).
+export const KEEP_RE = /^(no|never)\s*:\s*(.+?)\s*$/i;
+export const KEEP_CONTROLS = ["no", "never"];
+
+/** A keep entry as the list holds it: { control, value }. */
+export function makeKeep(control, value) {
+  const c = String(control || "no").toLowerCase();
+  return { control: KEEP_CONTROLS.includes(c) ? c : "no", value: normalizeValue(value) };
+}
+/** Add a keep, or change the control of one already held (its spelling kept). */
+export function addKeep(keeps, control, value) {
+  const k = makeKeep(control, value);
+  if (!k.value) return (keeps || []).slice();
+  const have = (keeps || []).find((x) => foldKey(x.value) === foldKey(k.value));
+  const out = (keeps || []).filter((x) => foldKey(x.value) !== foldKey(k.value));
+  out.push(have ? { control: k.control, value: have.value } : k);
+  return out;
+}
+export function removeKeep(keeps, value) {
+  const k = foldKey(value);
+  return (keeps || []).filter((x) => foldKey(x.value) !== k);
+}
+export function keptControl(keeps, value) {
+  const k = foldKey(value);
+  const hit = (keeps || []).find((x) => foldKey(x.value) === k);
+  return hit ? hit.control : "";
+}
 
 /** A flagged value, normalised: one line, one space between words. */
 export function normalizeValue(s) {
@@ -283,23 +314,33 @@ export function removeValue(list, value) {
   return (list || []).filter((x) => foldKey(x) !== k);
 }
 
-export function formatValuesFile(values) {
+export function formatValuesFile(values, keeps) {
   const body = (values || []).map(normalizeValue).filter(Boolean);
-  return VALUES_HEAD.concat(body).join("\n") + "\n";
+  const kept = (keeps || []).map((k) => makeKeep(k.control, k.value)).filter((k) => k.value).map((k) => `${k.control}: ${k.value}`);
+  return VALUES_HEAD.concat(body, kept).join("\n") + "\n";
 }
 
+/** The file's values to fake, in order (the keeps are parseReaderFile's). */
 export function parseValuesFile(text) {
-  const out = [];
+  return parseReaderFile(text).values;
+}
+
+/** Both halves of the file: { values, keeps }. */
+export function parseReaderFile(text) {
+  const values = [];
+  const keeps = [];
   const seen = new Set();
   for (const raw of String(text == null ? "" : text).split(/\r?\n/)) {
-    const line = raw.replace(/^﻿/, "").trim();
+    const line = raw.replace(/^\ufeff/, "").trim();
     if (!line || line[0] === "#") continue;
-    const v = normalizeValue(line);
-    if (seen.has(foldKey(v))) continue;
+    const m = line.match(KEEP_RE);
+    const v = normalizeValue(m ? m[2] : line);
+    if (!v || seen.has(foldKey(v))) continue;
     seen.add(foldKey(v));
-    out.push(v);
+    if (m) keeps.push(makeKeep(m[1], v));
+    else values.push(v);
   }
-  return out;
+  return { values, keeps };
 }
 
 /**
@@ -369,6 +410,8 @@ export const DEFAULT_SETTINGS = {
   lineHeight: 1.5,   // ratio
   pageWidth: 820,    // px
   marks: true,       // highlight pseudonyms and show the fake on hover
+  markColor: "#f5c518", // the highlight's colour
+  markAlpha: 0.18,   // …and how strong it is (0 = invisible, 1 = solid); subtle by default
   showFakes: false,  // display the fakes instead of the real names
   gutter: true,      // dim the pleading line numbers
 };
@@ -382,6 +425,8 @@ export function normalizeSettings(raw) {
   s.lineHeight = clamp(Number(s.lineHeight), 1, 3, DEFAULT_SETTINGS.lineHeight);
   s.pageWidth = clamp(Number(s.pageWidth), 400, 2000, DEFAULT_SETTINGS.pageWidth);
   s.marks = s.marks !== false;
+  s.markColor = /^#[0-9a-fA-F]{6}$/.test(String(s.markColor || "")) ? String(s.markColor).toLowerCase() : DEFAULT_SETTINGS.markColor;
+  s.markAlpha = clamp(Number(s.markAlpha), 0.04, 0.9, DEFAULT_SETTINGS.markAlpha);
   s.showFakes = s.showFakes === true;
   s.gutter = s.gutter !== false;
   return s;
@@ -390,6 +435,16 @@ export function normalizeSettings(raw) {
 function clamp(n, lo, hi, dflt) {
   if (!isFinite(n)) return dflt;
   return Math.min(hi, Math.max(lo, n));
+}
+
+/** The pseudonym highlight as CSS colours: the fill, the hover fill, the ring. */
+export function markCss(settings) {
+  const s = settings || DEFAULT_SETTINGS;
+  const hex = /^#[0-9a-fA-F]{6}$/.test(String(s.markColor || "")) ? s.markColor : DEFAULT_SETTINGS.markColor;
+  const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16);
+  const a = clamp(Number(s.markAlpha), 0.04, 0.9, DEFAULT_SETTINGS.markAlpha);
+  const rgba = (alpha) => `rgba(${r}, ${g}, ${b}, ${Math.min(1, alpha).toFixed(3)})`;
+  return { bg: rgba(a), hover: rgba(Math.min(1, a + 0.3)), ring: rgba(Math.min(1, a * 0.6)) };
 }
 
 /** The font-family CSS for a settings object. */

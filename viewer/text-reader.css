@@ -21,8 +21,9 @@
   --border: #1a1a1a;
   --inset: #202326;
   --accent: #1a73e8;
-  --pn-bg: rgba(255, 213, 79, 0.42);
-  --pn-bg-hover: rgba(255, 193, 7, 0.7);
+  --pn-bg: rgba(245, 197, 24, 0.18);      /* set from the settings at run time */
+  --pn-bg-hover: rgba(245, 197, 24, 0.48);
+  --pn-ring: rgba(245, 197, 24, 0.11);
   --flag-bg: rgba(244, 67, 54, 0.22);
   --leak-bg: rgba(255, 112, 67, 0.35);
   --reader-font: Georgia, serif;
@@ -74,9 +75,21 @@ body {
   border-radius: 4px; padding: 3px 6px; font-size: 13px; max-width: 220px;
 }
 #toolbar input[type="range"] { width: 80px; }
+#toolbar input[type="range"].short { width: 56px; }
+#toolbar input[type="color"] { width: 26px; height: 22px; padding: 0; border: 1px solid var(--btn-border); border-radius: 4px; background: var(--inset); cursor: pointer; }
 .tb-label { color: var(--text-muted); font-size: 12px; }
 .tb-value { min-width: 2ch; text-align: center; }
 .tb-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--text); cursor: pointer; }
+
+/* The offer bar under the toolbar: attach the key of the folder a lone file
+   sits in, or open that folder once so the reader remembers it. */
+#key-offer {
+  position: fixed; top: var(--toolbar-height); left: 0; right: 0; z-index: 9;
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  background: #fff8e1; color: #3e2723; border-bottom: 1px solid #ffe082; font-size: 13px;
+}
+#key-offer button { background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
+#key-offer #key-offer-close { background: transparent; color: #3e2723; border-color: transparent; font-size: 16px; margin-left: auto; }
 
 /* ── layout ────────────────────────────────────────────────────────────────── */
 #main {
@@ -104,6 +117,8 @@ body.side-hidden #side { display: none; }
 .side-body li:hover { background: var(--btn-hover); }
 .side-body li.current { background: var(--accent); color: #fff; }
 .side-body li .tag { font-size: 10px; padding: 1px 5px; border-radius: 8px; background: #b71c1c; color: #fff; flex: none; }
+.side-body li .tag.keep { background: #546e7a; }
+.side-tab.collapse { flex: none; width: 34px; font-size: 16px; }
 .side-body li .x {
   margin-left: auto; flex: none; background: transparent; border: none; color: inherit; cursor: pointer; font-size: 14px; padding: 0 4px;
 }
@@ -139,15 +154,22 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
   outline: none; caret-color: #111;
 }
 .page-body:focus { box-shadow: inset 0 0 0 2px rgba(26, 115, 232, 0.25); }
+body:not(.editing) .page-body { caret-color: transparent; }
+body.editing .tpage { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(26, 115, 232, 0.35); }
 .gutter { color: #9aa0a6; font-size: 0.8em; user-select: text; }
 body.gutter-off .gutter { color: inherit; font-size: inherit; }
 
 /* A pseudonym: the real name shown, the fake underneath. Lightly marked, and
    brighter under the pointer, so an unmarked name-shaped word reads as what
    it is — a name the run left in the clear. */
-.pn { background: var(--pn-bg); border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 193, 7, 0.25); cursor: help; }
+.pn { background: var(--pn-bg); border-radius: 2px; box-shadow: 0 0 0 1px var(--pn-ring); cursor: help; }
 .pn:hover { background: var(--pn-bg-hover); }
+/* A kept pseudonym: no highlight, a dotted underline saying "left alone on
+   the next run" — read as ordinary text, which is what it will be. */
+.pn.kept { background: transparent; box-shadow: none; text-decoration: underline dotted #78909c; text-underline-offset: 2px; }
+.pn.kept:hover { background: rgba(120, 144, 156, 0.18); }
 body.marks-off .pn { background: transparent; box-shadow: none; cursor: text; }
+body.marks-off .pn.kept { text-decoration: none; }
 body.marks-off .pn:hover { background: transparent; }
 body.show-fakes .pn { background: rgba(120, 144, 156, 0.25); box-shadow: 0 0 0 1px rgba(120, 144, 156, 0.4); }
 body.show-fakes.marks-off .pn { background: transparent; box-shadow: none; }
@@ -174,6 +196,16 @@ body.show-fakes.marks-off .pn { background: transparent; box-shadow: none; }
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); font-size: 12px; max-width: 360px;
 }
 #flag-pop button:disabled { opacity: 0.5; cursor: default; }
+#flag-pop button.secondary { background: var(--btn); color: var(--text); border-color: var(--btn-border); }
+#keep-menu {
+  position: fixed; z-index: 35; display: flex; flex-direction: column; gap: 4px; min-width: 260px; max-width: 380px;
+  background: var(--chrome); border: 1px solid var(--btn-border); border-radius: 6px; padding: 8px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-size: 12px;
+}
+#keep-menu .km-head { padding: 2px 4px 6px; line-height: 1.4; }
+#keep-menu .km-sub { color: var(--text-muted); }
+#keep-menu button { text-align: left; background: var(--btn); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 5px 8px; cursor: pointer; font-size: 12px; }
+#keep-menu button:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+#keep-menu button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
 #flag-pop-note { color: var(--text-muted); }
 #pn-tip {
   position: fixed; z-index: 40; pointer-events: none; max-width: 360px;

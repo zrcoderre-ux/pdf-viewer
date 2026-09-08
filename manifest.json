@@ -74,6 +74,7 @@
         "viewer/text-reader.html",
         "viewer/text-reader.js",
         "viewer/text-reader.css",
+        "viewer/reader-options.js",
         "viewer/textdoc.js",
         "viewer/pseudo-key.js",
         "viewer/xlsx-read.js",

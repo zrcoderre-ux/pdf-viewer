@@ -44,6 +44,8 @@ const sizeLabel = $("size-label");
 const lhRange = $("lh-range");
 const widthRange = $("width-range");
 const marksToggle = $("marks-toggle");
+const markColorEl = $("mark-color");
+const markAlphaEl = $("mark-alpha");
 const fakesToggle = $("fakes-toggle");
 const providerEl = $("provider");
 const docsList = $("docs-list");
@@ -58,7 +60,15 @@ const tipEl = $("pn-tip");
 const toastEl = $("toast");
 
 // ── state ──────────────────────────────────────────────────────────────────
-const SETTINGS_KEY = "textReader.settings";
+// The reading defaults — font, size, leading, page width, whether pseudonyms
+// are marked — live in chrome.storage.sync so they are REMEMBERED: the font
+// and leading chosen once are what every text file opens in from then on,
+// the Options page can set them without a document open, and every reader
+// tab follows a change at once. (In the hosted app the shim backs sync with
+// localStorage, so the same key works there.) An older build kept them in
+// localStorage under the key below; that copy is adopted once.
+const SETTINGS_KEY = "textReaderSettings";
+const LEGACY_SETTINGS_KEY = "textReader.settings";
 const KEYS_KEY = "textReader.keys";
 const VALUES_PREFIX = "textReader.values.";
 const MAX_KEYS = 12;
@@ -72,8 +82,10 @@ let folderDocs = [];         // [{ name, handle, quarantined }]
 let key = null;              // parsed key (PK.parseKey)
 let rev = null, fwd = null, reals = null; // compiled matchers
 let settings = loadSettings();
-let flagged = [];            // New Real Values list
+let flagged = [];            // New Real Values list: names to fake next run
+let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
 let dirty = false;
+let editing = false;         // a document opens protected; ✎ Edit lifts it
 let provider = "lexis";
 let citationRepo = {};
 let toaOn = false;
@@ -100,8 +112,44 @@ function lsSet(k, v) {
 }
 
 // ── settings ─────────────────────────────────────────────────────────────────
-function loadSettings() { return TD.normalizeSettings(lsGet(SETTINGS_KEY, null)); }
-function saveSettings() { lsSet(SETTINGS_KEY, settings); }
+// The legacy local copy is the starting point until the synced defaults
+// arrive (below); "Show fakes" is a view, not a default, and opens off.
+function loadSettings() {
+  const s = TD.normalizeSettings(lsGet(LEGACY_SETTINGS_KEY, null));
+  s.showFakes = false;
+  return s;
+}
+// What is REMEMBERED: everything but the show-fakes view.
+function persistable(s) {
+  const out = Object.assign({}, s);
+  delete out.showFakes;
+  return out;
+}
+function saveSettings() {
+  chrome.storage.sync.set({ [SETTINGS_KEY]: persistable(settings) });
+}
+function loadSyncedSettings() {
+  chrome.storage.sync.get({ [SETTINGS_KEY]: null }, (got) => {
+    const stored = got && got[SETTINGS_KEY];
+    if (stored) {
+      settings = Object.assign(TD.normalizeSettings(stored), { showFakes: settings.showFakes });
+    } else if (localStorage.getItem(LEGACY_SETTINGS_KEY)) {
+      saveSettings(); // migrate the older build's local copy, once
+    }
+    applySettings();
+    relayout();
+  });
+}
+// Defaults changed elsewhere — the Options page, another reader tab — apply
+// here too, so what the reader shows is always the current default.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync" || !changes[SETTINGS_KEY]) return;
+  const merged = Object.assign(TD.normalizeSettings(changes[SETTINGS_KEY].newValue || null), { showFakes: settings.showFakes });
+  if (JSON.stringify(persistable(merged)) === JSON.stringify(persistable(settings))) return;
+  settings = merged;
+  applySettings();
+  relayout();
+});
 
 function applySettings() {
   const root = document.documentElement.style;
@@ -109,6 +157,13 @@ function applySettings() {
   root.setProperty("--reader-size", settings.fontSize + "px");
   root.setProperty("--reader-lh", String(settings.lineHeight));
   root.setProperty("--reader-width", settings.pageWidth + "px");
+  const mark = TD.markCss(settings);
+  root.setProperty("--pn-bg", mark.bg);
+  root.setProperty("--pn-bg-hover", mark.hover);
+  root.setProperty("--pn-ring", mark.ring);
+  markColorEl.value = settings.markColor;
+  markAlphaEl.value = String(settings.markAlpha);
+  markColorEl.disabled = markAlphaEl.disabled = !settings.marks;
   document.body.classList.toggle("marks-off", !settings.marks);
   document.body.classList.toggle("show-fakes", settings.showFakes);
   document.body.classList.toggle("gutter-off", !settings.gutter);
@@ -142,6 +197,8 @@ $("size-up").addEventListener("click", () => { settings.fontSize = Math.min(40, 
 lhRange.addEventListener("input", () => { settings.lineHeight = Number(lhRange.value); saveSettings(); applySettings(); relayout(); });
 widthRange.addEventListener("input", () => { settings.pageWidth = Number(widthRange.value); saveSettings(); applySettings(); relayout(); });
 marksToggle.addEventListener("change", () => { settings.marks = marksToggle.checked; saveSettings(); applySettings(); hideTip(); });
+markColorEl.addEventListener("input", () => { settings.markColor = markColorEl.value; saveSettings(); applySettings(); });
+markAlphaEl.addEventListener("input", () => { settings.markAlpha = Number(markAlphaEl.value); saveSettings(); applySettings(); });
 fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.checked; saveSettings(); applySettings(); showFakes(settings.showFakes); });
 
 // ── theme (shared with the PDF viewer) ───────────────────────────────────────
@@ -192,11 +249,28 @@ $("toa-toggle").addEventListener("click", () => {
   chrome.storage.sync.set({ toaEnabledText: toaOn });
   if (toaOn) renderToa();
 });
-$("panel-toggle").addEventListener("click", () => {
-  const hidden = document.body.classList.toggle("side-hidden");
-  $("panel-toggle").setAttribute("aria-pressed", String(!hidden));
+// The side panel collapses to nothing — a chevron on the panel, the toolbar
+// button, or Esc-free: the choice is remembered, and until one is made the
+// panel stays closed and opens itself the first time it has something to
+// show (a folder's documents, a flag).
+let sideChoice = lsGet("textReader.side", null); // true/false once chosen, else null
+function showSidePanel(on, { remember = false } = {}) {
+  document.body.classList.toggle("side-hidden", !on);
+  $("panel-toggle").setAttribute("aria-pressed", String(!!on));
+  if (remember) { sideChoice = !!on; lsSet("textReader.side", sideChoice); }
   relayout();
-});
+}
+function autoShowSidePanel() { if (sideChoice !== false) showSidePanel(true); }
+$("panel-toggle").addEventListener("click", () => showSidePanel(document.body.classList.contains("side-hidden"), { remember: true }));
+$("side-collapse").addEventListener("click", () => showSidePanel(false, { remember: true }));
+// The Options page holds the same reading defaults; the button is shown only
+// where there is an Options page to open (the extension, not the hosted app).
+{
+  const btn = $("defaults-btn");
+  const canOpen = typeof chrome !== "undefined" && chrome.runtime && typeof chrome.runtime.openOptionsPage === "function" && !chrome.__pwaShim;
+  btn.hidden = !canOpen;
+  btn.addEventListener("click", () => { try { chrome.runtime.openOptionsPage(); } catch { /* not an extension page */ } });
+}
 const SIDE_TABS = [["tab-docs", "side-docs"], ["tab-flags", "side-flags"]];
 function showSideTab(tab) {
   for (const [t, b] of SIDE_TABS) {
@@ -243,11 +317,43 @@ function fillKeySelect(selectedId) {
   if (keySelect.value !== (selectedId || "")) keySelect.value = "";
 }
 
+// The key with the kept values taken out of its FORWARD side: a value the
+// operator has said was wrongly faked may stand in the text as itself, so a
+// save neither rewrites it to the fake nor refuses over it. The reverse side
+// is untouched — the fake still in the file still shows as the real value.
+function keyLessKeeps(k) {
+  if (!k || !keeps.length) return k;
+  return Object.assign({}, k, { warn: (k.warn || []).filter((w) => !TD.keptControl(keeps, w.real)) });
+}
+// An occurrence of a kept value is blanked (same length, a non-word
+// character) before the forward side looks at the text, so a kept
+// "Helen Rasho" is not rewritten through its own "Helen" and "Rasho" rows.
+function keptMatcher() { return keeps.length ? PK.buildMatcher(keeps.map((k) => k.value)) : null; }
+function maskKept(text) {
+  const rx = keptMatcher();
+  return rx ? text.replace(rx, (m) => "\u0000".repeat(m.length)) : text;
+}
+/** real → fake over `text`, kept occurrences left exactly as they stand. */
+function forwardText(text) {
+  const runs = PK.forwardRuns(fwd, maskKept(text));
+  let off = 0, swaps = 0;
+  const out = runs.map((r) => {
+    const len = r.t === "swap" ? r.from.length : r.s.length;
+    const piece = r.t === "swap" ? (swaps++, r.to) : text.slice(off, off + len);
+    off += len;
+    return piece;
+  }).join("");
+  return { text: out, swaps };
+}
+function compileKey() {
+  const k = keyLessKeeps(key);
+  rev = key ? PK.compile(key) : null;
+  fwd = k ? PK.compileForward(k) : null;
+  reals = k ? PK.compileReals(k) : null;
+}
 function setKey(parsed) {
   key = parsed || null;
-  rev = key ? PK.compile(key) : null;
-  fwd = key ? PK.compileForward(key) : null;
-  reals = key ? PK.compileReals(key) : null;
+  compileKey();
   $("st-key").textContent = key ? "Key: " + PK.keyTitle(key) + (key.dropped.ambiguous ? ` (${key.dropped.ambiguous} ambiguous fake${key.dropped.ambiguous === 1 ? "" : "s"} retired)` : "") : "";
   if (doc) retranslate();
 }
@@ -257,14 +363,14 @@ keySelect.addEventListener("change", () => {
   setKey(keySelect.value ? lib[keySelect.value] : null);
 });
 
-async function loadKeyFromBytes(bytes, name, folder) {
+async function loadKeyFromBytes(bytes, name, folder, { quiet = false } = {}) {
   const wb = await parseXlsx(bytes);
   if (!PK.sheetsLookLikeKey(wb.sheets)) throw new Error(`${name} has no "Real Value" / "Replacement" header — not a pseudonym key.`);
   const parsed = PK.parseKey(wb.sheets, name);
   const id = storeKey(parsed, folder);
   fillKeySelect(id);
   setKey(keyLibrary()[id]);
-  toast(`Key loaded: ${PK.keyTitle(key)} — ${key.pairs.length} reversible binding${key.pairs.length === 1 ? "" : "s"}` +
+  if (!quiet) toast(`Key loaded: ${PK.keyTitle(key)} — ${key.pairs.length} reversible binding${key.pairs.length === 1 ? "" : "s"}` +
     (key.dropped.ambiguous ? `, ${key.dropped.ambiguous} ambiguous retired` : ""));
 }
 
@@ -291,11 +397,189 @@ $("key-input").addEventListener("change", async () => {
   catch (e) { toast(String(e.message || e), { error: true }); }
 });
 
+// ── the case folders the reader has been shown ─────────────────────────────────
+//
+// A file handle knows nothing about the folder it sits in, so a document
+// opened on its own could not find its key. The reader therefore REMEMBERS
+// every case folder it is shown (Open case folder, or the offer below) as a
+// directory handle in IndexedDB — handles persist there — and when a lone
+// file is opened it asks each remembered folder whether the file is inside
+// it. Where one is, the case folder is the file's own folder, or the folder
+// ABOVE "Text Files" where the file sits in that, and its pseudonym_key.xlsx
+// is attached without being asked. Reading a remembered folder may need the
+// browser's permission again; that is asked on a click, never silently.
+const DB_NAME = "textReader";
+const DIRS_STORE = "dirs";
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) return reject(new Error("no IndexedDB"));
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => { req.result.createObjectStore(DIRS_STORE); };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function rememberDir(handle) {
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(DIRS_STORE, "readwrite");
+      tx.objectStore(DIRS_STORE).put(handle, handle.name);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch { /* the folder simply is not remembered */ }
+}
+async function rememberedDirs() {
+  try {
+    const db = await openDb();
+    const out = await new Promise((resolve, reject) => {
+      const req = db.transaction(DIRS_STORE, "readonly").objectStore(DIRS_STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return out.filter((h) => h && h.kind === "directory");
+  } catch { return []; }
+}
+async function permissionOf(handle, mode) {
+  try { return handle.queryPermission ? await handle.queryPermission({ mode }) : "granted"; } catch { return "granted"; }
+}
+
+/**
+ * The case folder a file handle sits in, from the remembered folders:
+ * { dir, needs } — `needs` true where the folder must be re-authorised on a
+ * click before it can be read — or null where no remembered folder holds it.
+ */
+async function caseFolderFor(fileHandle) {
+  if (!fileHandle || typeof fileHandle.isSameEntry !== "function") return null;
+  for (const dir of await rememberedDirs()) {
+    let path = null;
+    try { path = await dir.resolve(fileHandle); } catch { path = null; }
+    if (!path) continue;
+    // The file's own folder, or the folder above a "Text Files" it sits in.
+    let up = path.length - 1;
+    if (up >= 1 && path[up - 1].toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) up -= 1;
+    let caseDir = dir;
+    try {
+      for (const seg of path.slice(0, up)) caseDir = await caseDir.getDirectoryHandle(seg);
+    } catch { continue; }
+    const perm = await permissionOf(caseDir, "readwrite");
+    return { dir: caseDir, needs: perm !== "granted" };
+  }
+  return null;
+}
+
+/** Read a case folder: its key, its exports and its flagged values. */
+async function scanFolder(h) {
+  const found = { keyHandle: null, valuesHandle: null, textDir: null, docs: [], rootDocs: [] };
+  for await (const [name, entry] of h.entries()) {
+    if (entry.kind === "file") {
+      if (TD.isKeyName(name) && !found.keyHandle) found.keyHandle = entry;
+      else if (name.toLowerCase() === TD.VALUES_FILE.toLowerCase()) found.valuesHandle = entry;
+      else if (TD.isExportName(name)) found.rootDocs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
+    } else if (entry.kind === "directory" && name.toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) {
+      found.textDir = entry;
+    }
+  }
+  if (found.textDir) {
+    for await (const [name, entry] of found.textDir.entries()) {
+      if (entry.kind === "file" && TD.isExportName(name)) found.docs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
+    }
+  }
+  // Under the older single-folder layout the exports sit in the case folder
+  // itself; with a Text Files folder present, a root .txt is somebody's note.
+  if (!found.docs.length) found.docs = found.rootDocs;
+  found.docs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  return found;
+}
+
+/** Make `h` the current case folder: key attached, documents listed, flags loaded. */
+async function adoptFolder(h, { quiet = false } = {}) {
+  dirHandle = h;
+  folderName = h.name;
+  await rememberDir(h);
+  const found = await scanFolder(h);
+  folderDocs = found.docs;
+  if (found.keyHandle) {
+    try {
+      const f = await found.keyHandle.getFile();
+      await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, folderName, { quiet });
+    } catch (e) { toast("The folder's key could not be read: " + (e.message || e), { error: true }); }
+  } else if (!quiet) {
+    toast("No pseudonym_key.xlsx in " + folderName + " — the documents will read in their fakes.");
+  }
+  const stored = readStoredValues(VALUES_PREFIX + folderName);
+  flagged = stored.values;
+  keeps = stored.keeps;
+  if (found.valuesHandle) {
+    try {
+      const onDisk = TD.parseReaderFile(await (await found.valuesHandle.getFile()).text());
+      for (const v of onDisk.values) flagged = TD.addValue(flagged, v);
+      for (const k of onDisk.keeps) if (!TD.keptControl(keeps, k.value)) keeps = TD.addKeep(keeps, k.control, k.value);
+    } catch { /* unreadable: the in-memory list stands */ }
+  }
+  persistValues();
+  compileKey();
+  renderFlags();
+  renderDocList();
+  if (folderDocs.length) { autoShowSidePanel(); showSideTab("tab-docs"); }
+  return found;
+}
+
+// The offer bar: a lone file whose case folder is known but needs a click to
+// read, or is not known at all.
+const keyOffer = $("key-offer");
+function showKeyOffer(text, action, onAct) {
+  $("key-offer-text").textContent = text;
+  const btn = $("key-offer-btn");
+  btn.textContent = action;
+  btn.onclick = async () => { hideKeyOffer(); await onAct(); };
+  keyOffer.hidden = false;
+}
+function hideKeyOffer() { keyOffer.hidden = true; }
+$("key-offer-close").addEventListener("click", hideKeyOffer);
+
+/**
+ * A document opened on its own: attach the key of the case folder it sits
+ * in, if the reader has been shown that folder; else say how to.
+ */
+async function attachKeyForFile(handle) {
+  if (dirHandle) {
+    // Already inside a case folder: a file from that folder needs nothing.
+    try { if (handle && (await dirHandle.resolve(handle))) return; } catch { /* not ours */ }
+  }
+  const at = await caseFolderFor(handle);
+  if (!at) {
+    if (!key) showKeyOffer("No key attached. Open this file's case folder once and its pseudonym_key.xlsx is attached automatically from then on.", "Open case folder…", openFolder);
+    return;
+  }
+  const attach = async () => {
+    if (at.needs) {
+      try {
+        const perm = await at.dir.requestPermission({ mode: "readwrite" });
+        if (perm !== "granted") { toast("Access to " + at.dir.name + " was not granted; the key stays unattached.", { error: true }); return; }
+      } catch (e) { toast("Could not reopen " + at.dir.name + ": " + (e.message || e), { error: true }); return; }
+    }
+    await adoptFolder(at.dir, { quiet: true });
+    if (doc) retranslate();
+    markDocList();
+    toast(key ? "Attached the key from " + at.dir.name : "No pseudonym_key.xlsx in " + at.dir.name);
+  };
+  if (at.needs) showKeyOffer("This file is in " + at.dir.name + ". Attach its pseudonym key?", "Attach key", attach);
+  else await attach();
+}
+
 // ── opening documents ───────────────────────────────────────────────────────────
 async function openFile(file, handle) {
   if (!file) return;
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
+  hideKeyOffer();
   const text = await file.text();
+  // The case folder first, so the document renders under its own key.
+  try { await attachKeyForFile(handle || null); } catch (e) { console.warn(e); }
   openText(text, file.name, handle || null);
 }
 
@@ -304,6 +588,10 @@ function openText(text, name, handle) {
   fileName = name;
   fileHandle = handle;
   dirty = false;
+  editing = false;
+  clearHistory();
+  document.body.classList.remove("editing");
+  $("edit-toggle").setAttribute("aria-pressed", "false");
   document.title = name + " — Text Reader";
   if (!dirHandle) loadValuesFor(name);
   render();
@@ -338,56 +626,19 @@ async function openFolder() {
   try { h = await window.showDirectoryPicker({ mode: "readwrite" }); }
   catch (e) { if (e && e.name !== "AbortError") toast(String(e.message || e), { error: true }); return; }
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
-  dirHandle = h;
-  folderName = h.name;
-  folderDocs = [];
-  let keyHandle = null, valuesHandle = null, textDir = null;
-  const rootDocs = [];
-  for await (const [name, entry] of h.entries()) {
-    if (entry.kind === "file") {
-      if (TD.isKeyName(name) && !keyHandle) keyHandle = entry;
-      else if (name.toLowerCase() === TD.VALUES_FILE.toLowerCase()) valuesHandle = entry;
-      else if (TD.isExportName(name)) rootDocs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
-    } else if (entry.kind === "directory" && name.toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) {
-      textDir = entry;
-    }
-  }
-  if (textDir) {
-    for await (const [name, entry] of textDir.entries()) {
-      if (entry.kind === "file" && TD.isExportName(name)) folderDocs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
-    }
-  }
-  // Under the older single-folder layout the exports sit in the case folder
-  // itself; with a Text Files folder present, a root .txt is somebody's note.
-  if (!folderDocs.length) folderDocs = rootDocs;
-  folderDocs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
-
-  if (keyHandle) {
-    try {
-      const f = await keyHandle.getFile();
-      await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, folderName);
-    } catch (e) { toast("The folder's key could not be read: " + (e.message || e), { error: true }); }
-  } else {
-    toast("No pseudonym_key.xlsx in " + folderName + " — the documents will read in their fakes.");
-  }
-  // The flagged list on disk is the durable one; anything remembered here for
-  // this folder is merged in.
-  flagged = lsGet(VALUES_PREFIX + folderName, []);
-  if (valuesHandle) {
-    try {
-      const onDisk = TD.parseValuesFile(await (await valuesHandle.getFile()).text());
-      for (const v of onDisk) flagged = TD.addValue(flagged, v);
-    } catch { /* unreadable: the in-memory list stands */ }
-  }
-  persistValues();
-  renderFlags();
-  renderDocList();
+  hideKeyOffer();
+  const found = await adoptFolder(h);
   if (folderDocs.length) {
-    const first = folderDocs.find((d) => d.quarantined) || folderDocs[0];
-    await openFolderDoc(first);
+    // A file already open from this folder just takes the key; otherwise the
+    // quarantined export, the one to read, else the first.
+    if (fileHandle && folderDocs.some((d) => d.handle === fileHandle)) { if (doc) retranslate(); markDocList(); return; }
+    let mine = null;
+    if (fileHandle) { try { mine = (await h.resolve(fileHandle)) ? fileHandle : null; } catch { mine = null; } }
+    if (mine && doc) { retranslate(); markDocList(); return; }
+    await openFolderDoc(folderDocs.find((d) => d.quarantined) || folderDocs[0]);
   } else {
     doc = null; pagesEl.hidden = true; emptyEl.hidden = false;
-    toast("No text exports in " + folderName + (textDir ? "" : " (no Text Files folder)"), { error: true });
+    toast("No text exports in " + folderName + (found.textDir ? "" : " (no Text Files folder)"), { error: true });
   }
 }
 $("open-folder").addEventListener("click", openFolder);
@@ -477,7 +728,7 @@ function render() {
     inner.className = "page-inner";
     const body = document.createElement("div");
     body.className = "page-body";
-    body.contentEditable = "plaintext-only";
+    body.contentEditable = editing ? "plaintext-only" : "false";
     body.spellcheck = false;
     buildBody(body, p.lines.join("\n"));
     const layer = document.createElement("div");
@@ -530,7 +781,20 @@ function makePn(fake, real) {
   span.dataset.fake = fake;
   span.dataset.real = real;
   span.textContent = settings.showFakes ? fake : real;
+  markKept(span);
   return span;
+}
+// A kept value's spans carry the mark that says so: the highlight goes, a
+// dotted underline says "left alone on the next run", and the tooltip says
+// what the file still carries until then.
+function markKept(span) {
+  const c = TD.keptControl(keeps, span.dataset.real);
+  span.classList.toggle("kept", !!c);
+  if (c) span.dataset.kept = c; else delete span.dataset.kept;
+}
+function remarkKept() {
+  for (const s of pagesEl.querySelectorAll(".pn")) markKept(s);
+  updateCounts();
 }
 
 function pageBodies() { return [...pagesEl.querySelectorAll(".page-body")]; }
@@ -559,7 +823,8 @@ window.addEventListener("resize", relayout);
 
 function updateCounts() {
   const n = pagesEl.querySelectorAll(".pn").length;
-  $("st-pn").textContent = key ? `${n} pseudonym${n === 1 ? "" : "s"} shown as real names` : "";
+  const k = pagesEl.querySelectorAll(".pn.kept").length;
+  $("st-pn").textContent = key ? `${n} pseudonym${n === 1 ? "" : "s"} shown as real names` + (k ? ` · ${k} kept (un-faked on the next run)` : "") : "";
 }
 
 // ── editing ──────────────────────────────────────────────────────────────────────
@@ -573,9 +838,112 @@ pagesEl.addEventListener("input", (e) => {
 
 function setDirty(on) { if (dirty !== on) { dirty = on; updateDirty(); } }
 function updateDirty() {
-  saveBtn.disabled = !doc;
-  $("st-dirty").textContent = dirty ? "● Unsaved edits" : "";
+  saveBtn.disabled = !doc || !(editing || dirty);
+  $("edit-toggle").disabled = !doc;
+  $("st-dirty").textContent = dirty ? "● Unsaved edits" : (doc && !editing ? "Protected — ✎ Edit to change" : "");
 }
+
+// ── edit protection ────────────────────────────────────────────────────────────────
+//
+// A document opens PROTECTED: the pages take no keystroke until ✎ Edit is
+// on, so reading, selecting and flagging can never nudge a character into
+// the file. Edits already made stay (and stay saveable) when protection is
+// put back.
+function setEditing(on) {
+  editing = !!on && !!doc;
+  document.body.classList.toggle("editing", editing);
+  $("edit-toggle").setAttribute("aria-pressed", String(editing));
+  for (const body of pageBodies()) body.contentEditable = editing ? "plaintext-only" : "false";
+  updateDirty();
+}
+$("edit-toggle").addEventListener("click", () => setEditing(!editing));
+
+// ── undo / redo ───────────────────────────────────────────────────────────────────────
+//
+// The reader's own history, because the browser's cannot be trusted here:
+// a typed real name is rewritten into a pseudonym span by script, and a
+// programmatic change breaks or empties the native undo stack. A snapshot is
+// the page's on-disk text plus the caret, taken before an edit begins (and
+// coalesced while typing runs on), and before every rewrite the reader makes
+// itself; Ctrl+Z puts the page back to it, Ctrl+Y / Ctrl+Shift+Z forward.
+const UNDO_COALESCE_MS = 800;
+const UNDO_MAX = 200;
+let undoStack = [], redoStack = [], lastSnapAt = 0, lastSnapPage = -1;
+
+function pageIndexOf(body) { return Number(body.closest(".tpage").dataset.index); }
+function caretOffsetIn(body) {
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount) return -1;
+  const r = sel.getRangeAt(0);
+  if (!body.contains(r.startContainer)) return -1;
+  const { segs } = flatten(body);
+  const seg = segs.find((x) => x.node === r.startContainer);
+  if (seg) return seg.start + r.startOffset;
+  // The caret sits on an element boundary: count the text before it.
+  const probe = document.createRange();
+  probe.selectNodeContents(body);
+  probe.setEnd(r.startContainer, r.startOffset);
+  return probe.toString().length;
+}
+function snapshotOf(body) {
+  return { page: pageIndexOf(body), text: TD.serializeNodes(body), caret: caretOffsetIn(body) };
+}
+/** Record the page as it stands, before an edit; `force` skips coalescing. */
+function snapshot(body, force) {
+  const now = Date.now();
+  const i = pageIndexOf(body);
+  if (!force && i === lastSnapPage && now - lastSnapAt < UNDO_COALESCE_MS) { lastSnapAt = now; return; }
+  undoStack.push(snapshotOf(body));
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack = [];
+  lastSnapAt = now; lastSnapPage = i;
+}
+function restoreSnapshot(snap) {
+  const body = pageBodies()[snap.page];
+  if (!body) return;
+  buildBody(body, snap.text);
+  doc.pages[snap.page].lines = snap.text.split("\n");
+  if (snap.caret >= 0) {
+    const { segs } = flatten(body);
+    const r = rangeFor(segs, snap.caret, snap.caret);
+    if (r) { const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+  }
+  body.focus({ preventScroll: true });
+  setDirty(true);
+  afterTextChange();
+}
+function undo() {
+  const snap = undoStack.pop();
+  if (!snap) return;
+  const body = pageBodies()[snap.page];
+  if (body) redoStack.push(snapshotOf(body));
+  restoreSnapshot(snap);
+  lastSnapPage = -1;
+}
+function redo() {
+  const snap = redoStack.pop();
+  if (!snap) return;
+  const body = pageBodies()[snap.page];
+  if (body) undoStack.push(snapshotOf(body));
+  restoreSnapshot(snap);
+  lastSnapPage = -1;
+}
+function clearHistory() { undoStack = []; redoStack = []; lastSnapPage = -1; }
+pagesEl.addEventListener("beforeinput", (e) => {
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  if (!body) return;
+  if (e.inputType === "historyUndo" || e.inputType === "historyRedo") { e.preventDefault(); return; }
+  // A deletion after typing, or typing after a deletion, is its own step.
+  const kind = /delete/i.test(e.inputType) ? "del" : "ins";
+  snapshot(body, kind !== snapshot.lastKind);
+  snapshot.lastKind = kind;
+});
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+  else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
+}, true);
 window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
 /**
@@ -591,7 +959,7 @@ function convertTypedReals(body) {
   const sel = document.getSelection();
   const caretNode = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
   const caretOff = sel && sel.rangeCount ? sel.getRangeAt(0).startOffset : -1;
-  const segs = plainSegments(body);
+  const segs = plainSegments(body).map((seg) => ({ node: seg.node, text: maskKept(seg.text) }));
   const hits = TD.findRealsInPlain(fwd, segs);
   // Last hit first, so the offsets of the earlier ones in the same node
   // stay valid as the node is split.
@@ -601,6 +969,7 @@ function convertTypedReals(body) {
     if (h.node === caretNode && caretOff >= h.start && caretOff <= h.end) continue;
     const node = h.node;
     if (!node.isConnected) continue;
+    if (!made) snapshot(body, true);
     node.splitText(h.end);
     const mid = node.splitText(h.start);
     mid.replaceWith(makePn(h.fake, h.matched));
@@ -631,10 +1000,11 @@ async function saveDocument() {
   bodies.forEach((body, i) => {
     let text = TD.serializeNodes(body);
     if (fwd && fwd.rx) {
-      const runs = PK.forwardRuns(fwd, text);
-      if (runs.some((r) => r.t === "swap")) {
-        text = runs.map((r) => (r.t === "swap" ? r.to : r.s)).join("");
-        forwarded += runs.filter((r) => r.t === "swap").length;
+      const fw = forwardText(text);
+      if (fw.swaps) {
+        snapshot(body, true);
+        text = fw.text;
+        forwarded += fw.swaps;
         buildBody(body, text);
       }
     }
@@ -644,7 +1014,7 @@ async function saveDocument() {
   // The standing assertion. Nothing above should let a bound real value
   // through, and if something did the save must not.
   if (reals) {
-    const left = PK.findReals(reals, out);
+    const left = PK.findReals(reals, maskKept(out));
     if (left.length) {
       toast("Not saved: the text still carries a real name the key binds — " + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again.", { error: true });
       return;
@@ -823,7 +1193,8 @@ function paintHighlights() {
   for (const body of bodies) {
     const segs = plainSegments(body);
     if (fwd) {
-      for (const h of TD.findRealsInPlain(fwd, segs)) {
+      const masked = segs.map((seg) => ({ node: seg.node, text: maskKept(seg.text) }));
+      for (const h of TD.findRealsInPlain(fwd, masked)) {
         const r = document.createRange();
         r.setStart(h.node, h.start); r.setEnd(h.node, h.end);
         leakRanges.push(r);
@@ -854,6 +1225,7 @@ pagesEl.addEventListener("mouseover", (e) => {
   const b = document.createElement("b");
   b.textContent = settings.showFakes ? pn.dataset.real : pn.dataset.fake;
   tipEl.append(settings.showFakes ? "Real name: " : "Pseudonym: ", b);
+  if (pn.dataset.kept) tipEl.append(document.createElement("br"), `Kept (${pn.dataset.kept === "never" ? "every case" : "this case"}): PDF-Linker leaves it un-faked on its next run. Right-click to change.`);
   tipEl.hidden = false;
   const r = pn.getBoundingClientRect();
   const tw = tipEl.offsetWidth;
@@ -873,11 +1245,69 @@ function currentSelection() {
     : range.commonAncestorContainer.parentElement && range.commonAncestorContainer.parentElement.closest(".page-body");
   if (!body) return null;
   const frag = range.cloneContents();
-  const touches = !!(frag.querySelector && frag.querySelector(".pn")) ||
-    !!(range.startContainer.parentElement && range.startContainer.parentElement.closest(".pn")) ||
-    !!(range.endContainer.parentElement && range.endContainer.parentElement.closest(".pn"));
-  return { text: sel.toString(), touches, range };
+  const inFrag = frag.querySelector ? frag.querySelector(".pn") : null;
+  const startPn = range.startContainer.parentElement && range.startContainer.parentElement.closest(".pn");
+  const endPn = range.endContainer.parentElement && range.endContainer.parentElement.closest(".pn");
+  const touches = !!(inFrag || startPn || endPn);
+  // The live span (a fragment holds a copy): the one the selection starts in,
+  // else the first one it covers.
+  let pn = startPn || endPn || null;
+  if (!pn && inFrag) pn = [...body.querySelectorAll(".pn")].find((el) => range.intersectsNode(el)) || null;
+  return { text: sel.toString(), touches, range, pn };
 }
+
+// ── un-flagging a wrongly faked value ───────────────────────────────────────────
+//
+// A pseudonym that should never have been one — a word of a cited decision's
+// name is the usual case. Right-click it: "keep in this case" is the
+// worksheet's `no`, "never fake anywhere" its `never`, and either takes
+// effect HERE at once (the mark goes, every occurrence) and reaches
+// PDF-Linker through New Real Values.txt for the run that actually restores
+// the file. Until that run the file still carries the fake, which the
+// tooltip says.
+const keepMenu = $("keep-menu");
+let keepMenuFor = null;
+function showKeepMenu(pn, x, y) {
+  keepMenuFor = pn;
+  const real = pn.dataset.real;
+  const c = TD.keptControl(keeps, real);
+  $("keep-menu-value").textContent = real;
+  $("keep-menu-fake").textContent = pn.dataset.fake;
+  $("keep-menu-no").hidden = c === "no";
+  $("keep-menu-never").hidden = c === "never";
+  $("keep-menu-undo").hidden = !c;
+  keepMenu.hidden = false;
+  keepMenu.style.left = Math.max(4, Math.min(window.innerWidth - keepMenu.offsetWidth - 4, x)) + "px";
+  keepMenu.style.top = Math.max(4, Math.min(window.innerHeight - keepMenu.offsetHeight - 4, y)) + "px";
+}
+function hideKeepMenu() { keepMenu.hidden = true; keepMenuFor = null; }
+pagesEl.addEventListener("contextmenu", (e) => {
+  const pn = e.target.closest && e.target.closest(".pn");
+  if (!pn) return;
+  e.preventDefault();
+  hideTip();
+  showKeepMenu(pn, e.clientX, e.clientY);
+});
+document.addEventListener("mousedown", (e) => { if (!keepMenu.hidden && !keepMenu.contains(e.target)) hideKeepMenu(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { hideKeepMenu(); flagPop.hidden = true; } });
+
+function setKeep(real, control) {
+  keeps = control ? TD.addKeep(keeps, control, real) : TD.removeKeep(keeps, real);
+  persistValues();
+  compileKey();
+  remarkKept();
+  renderFlags();
+  paintHighlights();
+  showSidePanel(true);
+  showSideTab("tab-flags");
+  toast(control
+    ? `"${real}" kept${control === "never" ? " in every case" : " in this case"} — un-marked here now; PDF-Linker un-fakes it in the file on its next run (save the list to the case folder first).`
+    : `"${real}" is a pseudonym again`);
+}
+$("keep-menu-no").addEventListener("click", () => { const r = keepMenuFor && keepMenuFor.dataset.real; hideKeepMenu(); if (r) setKeep(r, "no"); });
+$("keep-menu-never").addEventListener("click", () => { const r = keepMenuFor && keepMenuFor.dataset.real; hideKeepMenu(); if (r) setKeep(r, "never"); });
+$("keep-menu-undo").addEventListener("click", () => { const r = keepMenuFor && keepMenuFor.dataset.real; hideKeepMenu(); if (r) setKeep(r, ""); });
+$("keep-menu-cancel").addEventListener("click", hideKeepMenu);
 
 const showFlagPopSoon = debounce(showFlagPop, 120);
 document.addEventListener("selectionchange", showFlagPopSoon);
@@ -887,6 +1317,13 @@ function showFlagPop() {
   const problem = TD.flagProblem(s.text, s.touches);
   flagPopBtn.disabled = !!problem;
   flagPopNote.textContent = problem || "";
+  // A pseudonym in the selection: the question is the other one.
+  const pnIn = s.pn;
+  $("flag-pop-keep").hidden = !pnIn;
+  if (pnIn) {
+    flagPopNote.textContent = "Wrongly faked? Keep \u201c" + pnIn.dataset.real + "\u201d:";
+    $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu(pnIn, e.clientX, e.clientY); };
+  }
   const rects = s.range.getClientRects();
   const r = rects.length ? rects[rects.length - 1] : s.range.getBoundingClientRect();
   flagPop.hidden = false;
@@ -895,6 +1332,7 @@ function showFlagPop() {
   flagPop.style.top = Math.max(toolbar.offsetHeight + 4, r.bottom + 6) + "px";
 }
 flagPopBtn.addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
+$("flag-pop-keep").addEventListener("mousedown", (e) => e.preventDefault());
 flagPopBtn.addEventListener("click", flagSelection);
 $("flag-btn").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-btn").addEventListener("click", flagSelection);
@@ -911,19 +1349,45 @@ function flagSelection() {
   paintHighlights();
   flagPop.hidden = true;
   // The list is where the flag went; show it growing.
-  document.body.classList.remove("side-hidden");
-  $("panel-toggle").setAttribute("aria-pressed", "true");
+  showSidePanel(true);
   showSideTab("tab-flags");
   toast(flagged.length > before ? `Flagged "${v}" — ${flagged.length} value${flagged.length === 1 ? "" : "s"} to hand to PDF-Linker` : `"${v}" is already flagged`);
 }
 
 function valuesStoreKey() { return VALUES_PREFIX + (folderName || fileName || "loose"); }
-function loadValuesFor() { flagged = lsGet(valuesStoreKey(), []); renderFlags(); }
-function persistValues() { lsSet(valuesStoreKey(), flagged); }
+// Stored as { values, keeps }; an older build stored the values list bare.
+function readStoredValues(k) {
+  const v = lsGet(k, null);
+  if (Array.isArray(v)) return { values: v, keeps: [] };
+  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [] };
+}
+function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; keeps = st.keeps; compileKey(); renderFlags(); }
+function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps }); }
 
 function renderFlags() {
   flagsList.innerHTML = "";
-  flagCount.textContent = String(flagged.length);
+  flagCount.textContent = String(flagged.length + keeps.length);
+  const keepsList = $("keeps-list");
+  keepsList.innerHTML = "";
+  $("keeps-block").hidden = !keeps.length;
+  for (const k of keeps) {
+    const li = document.createElement("li");
+    li.textContent = k.value;
+    const t = document.createElement("span");
+    t.className = "tag keep";
+    t.textContent = k.control === "never" ? "never" : "this case";
+    t.title = k.control === "never" ? "Kept in every case (never)" : "Kept in this case (no)";
+    li.appendChild(t);
+    li.title = "Click to find it in the document";
+    li.addEventListener("click", () => findInPages(k.value));
+    const x = document.createElement("button");
+    x.className = "x";
+    x.textContent = "×";
+    x.title = "Make it a pseudonym again";
+    x.addEventListener("click", (e) => { e.stopPropagation(); setKeep(k.value, ""); });
+    li.appendChild(x);
+    keepsList.appendChild(li);
+  }
   for (const v of flagged) {
     const li = document.createElement("li");
     li.textContent = v;
@@ -962,8 +1426,8 @@ function findInPages(v) {
 }
 
 async function saveValuesFile() {
-  if (!flagged.length) { toast("Nothing flagged yet — select an unfaked name and press Flag.", { error: true }); return; }
-  const text = TD.formatValuesFile(flagged);
+  if (!flagged.length && !keeps.length) { toast("Nothing flagged yet — select an unfaked name and press Flag, or right-click a pseudonym to keep it.", { error: true }); return; }
+  const text = TD.formatValuesFile(flagged, keeps);
   if (dirHandle) {
     try {
       if (dirHandle.requestPermission) {
@@ -974,7 +1438,7 @@ async function saveValuesFile() {
       const w = await h.createWritable();
       await w.write(new Blob([text], { type: "text/plain" }));
       await w.close();
-      toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} value${flagged.length === 1 ? "" : "s"}) into ${folderName} — run PDF-Linker or Apply Leak Fixes to pseudonymize them.`);
+      toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep) into ${folderName} — re-run PDF-Linker to apply them to the files.`);
       return;
     } catch (e) {
       toast("Could not write into the folder (" + (e.message || e) + ") — choose where to save.", { error: true });
@@ -984,17 +1448,65 @@ async function saveValuesFile() {
 }
 $("flags-save").addEventListener("click", saveValuesFile);
 $("flags-copy").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(flagged.join("\n") + "\n"); toast("Copied " + flagged.length + " value" + (flagged.length === 1 ? "" : "s")); }
+  try { await navigator.clipboard.writeText(flagged.concat(keeps.map((k) => k.control + ": " + k.value)).join("\n") + "\n"); toast("Copied " + (flagged.length + keeps.length) + " line" + (flagged.length + keeps.length === 1 ? "" : "s")); }
   catch { toast("Copy failed", { error: true }); }
+});
+
+// ── auto-scroll while reading ────────────────────────────────────────────────────────
+//
+// The PDF viewer's creep, for the reader's own scroll box: A toggles it,
+// [ and ] slow and speed it, Space pauses; the pace is remembered. Stops at
+// the foot of the document and on any wheel or drag by the reader.
+const autoBtn = $("autoscroll");
+let autoOn = false, autoSpeed = lsGet("textReader.autoscroll", 40), autoLast = 0, autoAcc = 0, autoRaf = 0;
+function autoStep(ts) {
+  if (!autoOn) return;
+  if (autoLast) {
+    autoAcc += (autoSpeed * (ts - autoLast)) / 1000;
+    const px = Math.floor(autoAcc);
+    if (px > 0) { stageEl.scrollTop += px; autoAcc -= px; }
+    if (stageEl.scrollTop + stageEl.clientHeight >= stageEl.scrollHeight - 1) { setAutoScroll(false); return; }
+  }
+  autoLast = ts;
+  autoRaf = requestAnimationFrame(autoStep);
+}
+function setAutoScroll(on) {
+  autoOn = !!on && !!doc;
+  autoBtn.setAttribute("aria-pressed", String(autoOn));
+  autoBtn.title = (autoOn ? "Auto-scrolling at " : "Auto-scroll while reading (A) — ") + Math.round(autoSpeed) + " px/s; [ slower, ] faster, Space pauses";
+  cancelAnimationFrame(autoRaf);
+  autoLast = 0; autoAcc = 0;
+  if (autoOn) autoRaf = requestAnimationFrame(autoStep);
+}
+function nudgeAutoSpeed(factor) {
+  autoSpeed = Math.max(8, Math.min(400, autoSpeed * factor));
+  lsSet("textReader.autoscroll", autoSpeed);
+  setAutoScroll(autoOn);
+  toast("Auto-scroll " + Math.round(autoSpeed) + " px/s");
+}
+autoBtn.addEventListener("click", () => setAutoScroll(!autoOn));
+stageEl.addEventListener("wheel", () => { if (autoOn) setAutoScroll(false); }, { passive: true });
+document.addEventListener("keydown", (e) => {
+  // Not while typing in the document or a field.
+  const t = e.target;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))) return;
+  if (e.key === "a" || e.key === "A") { e.preventDefault(); setAutoScroll(!autoOn); }
+  else if (e.key === "[") { e.preventDefault(); nudgeAutoSpeed(0.8); }
+  else if (e.key === "]") { e.preventDefault(); nudgeAutoSpeed(1.25); }
+  else if (e.key === " " && autoOn) { e.preventDefault(); setAutoScroll(false); }
 });
 
 // ── hooks for the PWA tab shell ───────────────────────────────────────────────────────
 window.__textReaderLoadLocal = (file, handle) => openFile(file, handle);
+window.__textReaderRememberDir = (h) => rememberDir(h);
 window.__textReaderReflow = () => { if (doc) placeCitations(); };
 window.__pdfViewerUnregister = () => {};
 
 // ── boot ───────────────────────────────────────────────────────────────────────────────────
 applySettings();
+loadSyncedSettings();
+showSidePanel(sideChoice === true);
 fillKeySelect("");
 // The most recent key is offered on a lone file straight away: a folder pick
 // replaces it with the folder's own.
