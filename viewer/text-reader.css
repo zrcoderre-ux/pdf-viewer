@@ -30,6 +30,9 @@
   --reader-size: 15px;
   --reader-lh: 1.5;
   --reader-width: 820px;
+  --reader-size-eff: 15px;   /* what the pages use: the setting, less what line lock had to take */
+  --reader-width-eff: 820px;
+  --gutter-w: 2.6em;         /* the numbered margin */
 }
 :root[data-theme="light"] {
   --chrome: #f3f4f6;
@@ -154,7 +157,7 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 /* ── pages ─────────────────────────────────────────────────────────────────── */
 #pages { padding: 20px 0 60px; }
 .tpage {
-  width: var(--reader-width); max-width: calc(100% - 32px); margin: 0 auto 18px;
+  width: var(--reader-width-eff); max-width: calc(100% - 32px); margin: 0 auto 18px;
   background: #fff; color: #111; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); border-radius: 2px;
 }
 .page-label {
@@ -178,10 +181,29 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 .pdf-inline { position: relative; min-height: 120px; background: #fff; }
 .page-inner { position: relative; }
 .page-body {
-  font-family: var(--reader-font); font-size: var(--reader-size); line-height: var(--reader-lh);
+  font-family: var(--reader-font); font-size: var(--reader-size-eff); line-height: var(--reader-lh);
   white-space: pre-wrap; overflow-wrap: anywhere; padding: 28px 48px 36px; min-height: 120px;
   outline: none; caret-color: #111;
 }
+body.lock-tight .page-body { padding-left: 14px; padding-right: 14px; }
+/* One block per line. An empty line keeps a line's height. */
+.line { min-height: calc(var(--reader-lh) * 1em); }
+.line > .lt { display: block; min-width: 0; }
+/* Pleading paper: the numbers stand in a ruled margin, each line's text
+   hanging under its number, a wrapped continuation never crossing the rule.
+   The spacing the file writes after the number is in the DOM (the round
+   trip needs it) and out of the layout. */
+.page-body.numbered .line { display: grid; grid-template-columns: var(--gutter-w) minmax(0, 1fr); align-items: baseline; }
+.page-body.numbered .line:not(.num) > .lt { grid-column: 2; }
+.page-body.numbered .gutter {
+  grid-column: 1; text-align: right; padding-right: 0.5em; margin-right: 1.1em;
+  border-right: 1px solid #c4c7cb; white-space: pre; user-select: text; align-self: stretch;
+}
+.page-body.numbered .gutter .gs { display: none; }
+/* Line lock: a numbered line is held to one screen line; a line even the
+   smallest font cannot fit (.overlong) wraps under its own number. */
+body.line-lock .page-body.numbered .line.num > .lt { white-space: pre; }
+body.line-lock .page-body.numbered .line.num > .lt.overlong { white-space: pre-wrap; }
 .page-body:focus { box-shadow: inset 0 0 0 2px rgba(26, 115, 232, 0.25); }
 body:not(.editing) .page-body { caret-color: transparent; }
 body.editing .tpage { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(26, 115, 232, 0.35); }

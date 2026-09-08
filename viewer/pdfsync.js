@@ -138,3 +138,17 @@ export function scrollTopFor(pos, tops, heights) {
   const i = Math.max(0, Math.min(tops.length - 1, pos.index));
   return Math.max(0, tops[i] + (heights[i] || 0) * (pos.fraction || 0) - (pos.above || 0));
 }
+
+/**
+ * Page geometry for the sync ANCHORED ON THE FIRST LINE of each page:
+ * `anchors` are the tops of each page's first printed line in the box,
+ * `end` the bottom of the last page. A page's span runs from its own first
+ * line to the next page's, so when one box has a page's first line at its
+ * top the other has that page's first line at its top too — the text's
+ * page label and the PDF's top margin fall out of the mapping.
+ */
+export function anchorGeometry(anchors, end) {
+  const tops = (anchors || []).map((a) => Number(a) || 0);
+  const heights = tops.map((t, i) => Math.max(1, (i + 1 < tops.length ? tops[i + 1] : Number(end) || t + 1) - t));
+  return { tops, heights };
+}

@@ -562,8 +562,11 @@ toolbar popup (**📝 Open text reader**), or open a `.txt` in the installed
 app, which routes it to the reader tab.
 
 - **Pages, in your font.** Each `====== Page N ======` block is laid out as a
-  sheet, with the printed page number and any REVIEW clause on its label and
-  the pleading gutter numbers dimmed into a margin. Pick the font (Georgia,
+  sheet, with the printed page number and any REVIEW clause on its label. A
+  page numbered down its margin — pleading paper — is laid out as one: the
+  numbers stand in a **ruled margin** of their own, a vertical rule and a gap
+  between them and the body, and each numbered line hangs under its number
+  so a wrapped continuation never crosses the rule. Pick the font (Georgia,
   Times, Charter, Palatino, system sans, Arial, Verdana, Courier, Consolas, or
   any installed family by name), size, leading and page width. Those are
   **remembered as the defaults**: the font and leading chosen once are what
@@ -571,6 +574,17 @@ app, which routes it to the reader tab.
   under Options → "Text reader — default font and leading", and every open
   reader tab follows at once. Display only: the text file itself is never
   changed. Light and dark chrome follow the viewer's own theme toggle.
+- **Line lock.** Pleading paper is read by its line numbers, and a numbered
+  line that wraps puts its tail on a screen line with no number — one line
+  off from the PDF. **Line lock** (toolbar, remembered) holds every numbered
+  line to one screen line. What it spends to make the longest line fit, in
+  order: the white space beside the page (the page widens into the stage),
+  then the page's own side margins, then the font, a point at a time. It
+  never touches the numbers: the gutter shows the file's own, nothing moves
+  from one number to the next, and a line too long for even the smallest
+  font wraps under its own number and is counted in the status bar. Display
+  only — the size and width you set are kept, and come back when the lock
+  is off.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
@@ -639,9 +653,11 @@ app, which routes it to the reader tab.
   with no key — **⇄ PDF pages…** offers **Pick PDF…**, and a dropped `.pdf`
   is taken the same way. The PDF is read only when it is first shown.
   **⇔ Side by side** opens the PDF in a pane beside the text, one PDF page
-  per text page, and holds the two at the **same page and fraction of it**
-  whichever you scroll — page 7 of the text beside page 7 of the PDF
-  whatever their heights; remembered. With it off, a page whose text is not
+  per text page, and holds the two together whichever you scroll — anchored
+  on each page's **first printed line**, the text's first line of text under
+  its label and the PDF's first line of type under its top margin, so the
+  top lines line up and the pages move in proportion between them;
+  remembered. With it off, a page whose text is not
   worth reading (an exhibit the OCR mangled) is **swapped**: the **⇄ PDF**
   button on the page's label shows the PDF page in the text's place, the
   rest staying text, and **⇄ PDF pages…** takes a run — `5, 12-18` — of the

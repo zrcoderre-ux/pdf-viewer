@@ -8,7 +8,7 @@
 
 import {
   markCss,
-  parseExport, serializeExport, pageLabel, gutterPrefix,
+  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered,
   serializeNodes, textOf, findRealsInPlain,
   addValue, removeValue, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE,
@@ -25,6 +25,15 @@ function check(label, got, want) {
     fails++;
   }
 }
+
+// ---- pleading paper -----------------------------------------------------
+console.log("numbered margin");
+check("three numbered lines make a margin", pageIsNumbered([" 1  a", " 2  b", " 3  c", "stamp"]), true);
+check("a lone number on a short page is a margin only where it is half the lines", pageIsNumbered([" 1  Exhibit", "cover"]), true);
+check("…and not among prose", pageIsNumbered([" 1  Exhibit", "a", "b", "c"]), false);
+check("no numbers, no margin", pageIsNumbered(["a", "b", ""]), false);
+check("blank lines do not count against it", pageIsNumbered([" 1  a", "", "", "", " 2  b"]), true);
+check("lineLock is remembered and defaults off", [normalizeSettings({}).lineLock, normalizeSettings({ lineLock: true }).lineLock, normalizeSettings({ lineLock: "yes" }).lineLock], [false, true, false]);
 
 // ---- pages ----------------------------------------------------------------
 console.log("pages");
