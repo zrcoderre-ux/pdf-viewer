@@ -76,6 +76,7 @@
         "viewer/text-reader.css",
         "viewer/reader-options.js",
         "viewer/textdoc.js",
+        "viewer/pdfsync.js",
         "viewer/pseudo-key.js",
         "viewer/xlsx-read.js",
         "viewer/vendor/tesseract/tesseract.esm.min.js",

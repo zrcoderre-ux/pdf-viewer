@@ -631,12 +631,32 @@ app, which routes it to the reader tab.
   toggle and the Authorities panel are the viewer's own. The Documents /
   Flagged panel collapses on its **»** chevron (or **▤ Panel**), stays closed
   until it has something to show, and remembers your choice.
+- **The PDF it came from, beside the text or swapped into it.** PDF-Linker
+  leaves the PDF in the case folder under its real name and names the export
+  for the same stem scrubbed, so the reader finds the pair by running each
+  PDF's name forward through the key (a `Combined Text.txt` is matched member
+  by member off its banners); where nothing matches — a lone file, a folder
+  with no key — **⇄ PDF pages…** offers **Pick PDF…**, and a dropped `.pdf`
+  is taken the same way. The PDF is read only when it is first shown.
+  **⇔ Side by side** opens the PDF in a pane beside the text, one PDF page
+  per text page, and holds the two at the **same page and fraction of it**
+  whichever you scroll — page 7 of the text beside page 7 of the PDF
+  whatever their heights; remembered. With it off, a page whose text is not
+  worth reading (an exhibit the OCR mangled) is **swapped**: the **⇄ PDF**
+  button on the page's label shows the PDF page in the text's place, the
+  rest staying text, and **⇄ PDF pages…** takes a run — `5, 12-18` — of the
+  export's own page numbers. The swapped text is hidden, not removed: a
+  save still writes it, and ⇄ Text puts it back. Swaps are remembered per
+  document by PDF page number. Rendered pages are dropped as they scroll far
+  out of view, so a long PDF costs no more than the pages in reach.
 
 The decisions live in `viewer/textdoc.js` (the page model, the DOM-to-disk
-walk, the values file) and `viewer/pseudo-key.js` (the key, a port of the
-Claude extension's `src/pseudo.js`), with `viewer/xlsx-read.js` reading the
-workbook; `node test-textdoc.mjs`, `node test-pseudo-key.mjs` and
-`node test-xlsx-read.mjs` cover them.
+walk, the values file), `viewer/pseudo-key.js` (the key, a port of the
+Claude extension's `src/pseudo.js`) and `viewer/pdfsync.js` (which PDF an
+export came from, page ranges, where "the same place" is in two scroll
+boxes), with `viewer/xlsx-read.js` reading the workbook;
+`node test-textdoc.mjs`, `node test-pseudo-key.mjs`, `node test-pdfsync.mjs`
+and `node test-xlsx-read.mjs` cover them.
 
 ## Install
 
@@ -686,6 +706,7 @@ viewer/shift-space-open.js           Shift+Space = middle click (viewer + all si
 viewer/viewer.html                   PDF viewer shell
 viewer/text-reader.html / .js / .css Text reader for PDF-Linker's exports (pages, cites, key)
 viewer/textdoc.js                    Text reader's document model (pure; test-textdoc.mjs)
+viewer/pdfsync.js                    Text reader's PDF pane decisions: matching, ranges, scroll sync (pure; test-pdfsync.mjs)
 viewer/pseudo-key.js                 pseudonym_key.xlsx reader + fake↔real swaps (pure; test-pseudo-key.mjs)
 viewer/xlsx-read.js                  Minimal .xlsx reader (pure; test-xlsx-read.mjs)
 viewer/web-shim.js                   chrome.* shim for the hosted (PWA) pages

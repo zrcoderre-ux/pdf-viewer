@@ -97,6 +97,23 @@ body {
   display: flex;
 }
 #stage { flex: 1; overflow-y: auto; overflow-x: auto; position: relative; }
+/* The PDF beside the text: its own scroll box, held page for page with the
+   stage (pdfsync.js decides where "the same place" is). */
+#pdf-pane { flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; background: #3b3e41; border-left: 1px solid var(--border); padding: 20px 16px 60px; }
+:root[data-theme="light"] #pdf-pane { background: #b9bcc0; }
+.pdf-slot { position: relative; margin: 0 auto 18px; background: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); border-radius: 2px; overflow: hidden; }
+.pdf-slot.blank { background: transparent; box-shadow: none; color: #d0d3d6; font-size: 12px; text-align: center; padding: 8px; }
+:root[data-theme="light"] .pdf-slot.blank { color: #3c4043; }
+.pdf-slot .pdf-tag, .pdf-inline .pdf-tag {
+  position: absolute; top: 4px; left: 4px; z-index: 1; font: 11px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: rgba(31, 35, 40, 0.75); color: #fff; padding: 1px 6px; border-radius: 3px; pointer-events: none;
+}
+.pdf-slot canvas, .pdf-inline canvas { display: block; }
+.pdf-slot .pdf-wait, .pdf-inline .pdf-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9aa0a6; font-size: 12px; pointer-events: none; }
+.pdf-slot.ready .pdf-wait, .pdf-inline.ready .pdf-wait { display: none; }
+#pdf-pane .pane-empty { max-width: 420px; margin: 40px auto; text-align: center; color: #e8eaed; font-size: 13px; line-height: 1.5; }
+:root[data-theme="light"] #pdf-pane .pane-empty { color: #1f2328; }
+#pdf-pane .pane-empty button { background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 13px; }
 body.side-hidden #side { display: none; }
 #side {
   width: var(--side-width); flex: none; background: var(--chrome-2); border-left: 1px solid var(--border);
@@ -147,6 +164,18 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 }
 .page-label.doc { background: #e8f0fe; color: #174ea6; font-weight: 600; font-size: 12px; }
 .page-label .review { color: #b45309; margin-left: 8px; }
+/* The swap control on a page label: this page from the PDF, or back to text. */
+.page-label .swap-page {
+  float: right; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.page-label .swap-page:hover { background: #e3e5e8; }
+.page-label .swap-page.nopdf { opacity: 0.55; }
+.tpage.swapped .page-label .swap-page { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* A swapped page: the PDF page stands where its text was; the text is still
+   in the DOM (and still saves) but is not shown. */
+.tpage.swapped .page-body, .tpage.swapped .link-layer { display: none; }
+.pdf-inline { position: relative; min-height: 120px; background: #fff; }
 .page-inner { position: relative; }
 .page-body {
   font-family: var(--reader-font); font-size: var(--reader-size); line-height: var(--reader-lh);
@@ -207,6 +236,20 @@ body.show-fakes.marks-off .pn { background: transparent; box-shadow: none; }
 #keep-menu button:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
 #keep-menu button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
 #flag-pop-note { color: var(--text-muted); }
+#swap-pop {
+  position: fixed; z-index: 35; display: flex; flex-direction: column; gap: 6px; width: 340px;
+  background: var(--chrome); border: 1px solid var(--btn-border); border-radius: 6px; padding: 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-size: 12px;
+}
+#swap-pop .sp-head { line-height: 1.4; word-break: break-word; }
+#swap-pop .sp-row { display: flex; align-items: center; gap: 8px; }
+#swap-pop .sp-row span { color: var(--text-muted); flex: none; }
+#swap-pop input { flex: 1; background: var(--inset); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 4px 6px; font-size: 13px; min-width: 0; }
+#swap-pop .sp-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+#swap-pop button { background: var(--btn); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 12px; }
+#swap-pop button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+#swap-pop button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
+#swap-pop button:hover { filter: brightness(1.1); }
+#swap-pop .sp-note { color: var(--text-muted); margin: 0; line-height: 1.4; }
 #pn-tip {
   position: fixed; z-index: 40; pointer-events: none; max-width: 360px;
   background: #1f2328; color: #fff; border-radius: 4px; padding: 5px 8px; font-size: 12px; line-height: 1.35;
