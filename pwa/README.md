@@ -65,6 +65,16 @@ Actions**.
 *extension* on your machine; this *app* updates itself from the hosted URL. The
 `pwa/` files a pull drops on disk are just source, not the running app.
 
+## Text exports
+
+A `.txt` opened in the app — from the picker, a drop, or the OS file handler —
+opens in the **text reader** (`viewer/text-reader.html`) in its own tab rather
+than the PDF viewer: PDF-Linker's scrubbed exports laid out as pages in your
+font, citations linked, the real names put back on screen from the case's
+`pseudonym_key.xlsx`, editable and saved back with the fakes underneath. See
+the root README's "Text reader" section. The tab manager feeds it through
+`__textReaderLoadLocal`, the reader's twin of the viewer's load hook.
+
 ## Editing local documents
 
 Because every PDF in the app is one you opened from disk, the app is where

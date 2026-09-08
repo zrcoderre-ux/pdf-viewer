@@ -57,6 +57,28 @@ paints only part of what it knows — `claude-citations.js` skips citations
 scrolled out of their container — registers a source on
 `window.__shiftSpaceLinkSources` so a selection still reaches the undrawn ones.
 
+## The text reader (`viewer/text-reader.html`)
+
+A second page in the same extension and the same PWA: PDF-Linker's scrubbed
+`.txt` exports, read like a document. `text-reader.js` is wiring over three
+pure, Node-tested modules — `textdoc.js` (the export as pages by its
+`====== Page N ======` headers, byte-exact round trip; the DOM walk that
+serializes a pseudonym span as its FAKE; the `New Real Values.txt` list),
+`pseudo-key.js` (a port of the Claude extension's `src/pseudo.js`: parseKey
+by header name, keeps dropped, pinned tab out of the reversal, ambiguous fake
+retired, case-mirrored swaps in both directions) and `xlsx-read.js` (a port
+of its `src/xlsxread.js`). It reuses `citation-linker.js` and `toa.js`
+directly; citation underlines are painted as thin overlay strips from DOM
+Ranges so the text stays editable, and the pleading gutter numbers are
+blanked length-for-length before detection so a wrapped cite still parses.
+The one rule: the real names exist only in the page. Every pseudonym is a
+`contenteditable=false` span carrying `data-fake`; a save serializes the
+fakes, forwards any real name typed into plain text to its pseudonym, and
+refuses if a bound real value would still reach the file. `web-shim.js` is
+the `chrome.*` shim that used to sit at the top of `viewer.js`, moved out so
+both pages import it first. The PWA shell (`pwa/app-web.js`) routes a `.txt`
+to a reader iframe and feeds it through `__textReaderLoadLocal`.
+
 ## Fixes applied in earlier sessions
 
 All in `viewer/` unless noted. Each fix is documented inline at the call
@@ -428,6 +450,11 @@ test-bare-rule.mjs                   Node-runnable bare-rule + rule-set carry-ov
 test-page-rotation.mjs               Node-runnable page-rotation geometry + scope tests
 test-citation-memory.mjs             Node-runnable per-URL citation-memory tests (stubbed DOM)
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
+viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
+viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)
+viewer/pseudo-key.js                     pseudonym_key.xlsx reader, fake<->real swaps (pure; test-pseudo-key.mjs)
+viewer/xlsx-read.js                      Minimal .xlsx reader (pure; test-xlsx-read.mjs)
+viewer/web-shim.js                       chrome.* shim for the hosted pages (was inline in viewer.js)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing
 viewer/autoscroll.js                 Auto-scroll: wpm-paced reading scroll + its control bar

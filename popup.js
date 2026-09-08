@@ -30,3 +30,10 @@ for (const r of namingRadios) {
     if (r.checked) chrome.storage.sync.set({ namingMode: r.value });
   });
 }
+
+// The text reader is its own page in the extension; a tab is the right place
+// for a document you read and edit.
+document.getElementById("open-text-reader").addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("viewer/text-reader.html") });
+  window.close();
+});

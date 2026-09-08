@@ -16,6 +16,11 @@ const newTabBtn = document.getElementById("new-tab");
 const fileInput = document.getElementById("file-input");
 
 const VIEWER_SRC = "viewer/viewer.html";
+// A PDF-Linker text export opens in the text reader instead: the same tab
+// strip, a different page in the iframe.
+const READER_SRC = "viewer/text-reader.html";
+const isTextFile = (f) => /\.(txt|leak)$/i.test(f.name) || f.type === "text/plain";
+const isPdfFile = (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
 let tabs = [];
 let activeId = null;
 let seq = 0;
@@ -31,7 +36,7 @@ try {
 } catch { /* storage unavailable — viewers fall back gracefully */ }
 
 function cleanTitle(t) {
-  return (t || "").replace(/\s*[—-]\s*PDF Viewer\s*$/, "").trim() || "PDF";
+  return (t || "").replace(/\s*[—-]\s*(PDF Viewer|Text Reader)\s*$/, "").trim() || "PDF";
 }
 
 function updateChrome() {
@@ -55,7 +60,10 @@ function activate(id) {
   if (t && t.fed && !t.reflowed) {
     t.reflowed = true;
     queueMicrotask(() => {
-      try { t.iframe.contentWindow?.__pdfViewerReflow?.(); } catch { /* not ready */ }
+      try {
+        const w = t.iframe.contentWindow;
+        (t.text ? w?.__textReaderReflow : w?.__pdfViewerReflow)?.();
+      } catch { /* not ready */ }
     });
   }
   // Hand the keyboard to the viewer itself, so its shortcuts (auto-scroll's
@@ -120,14 +128,14 @@ function makeTabButton(id, initialLabel) {
 // Create a tab and feed its PDF to the viewer as soon as the viewer is ready —
 // even while the tab is hidden — so every open PDF resolves its real name (and
 // download filename) automatically, without waiting to be clicked.
-function newTab({ initialLabel, file, handle }) {
+function newTab({ initialLabel, file, handle, text }) {
   const id = ++seq;
   const iframe = document.createElement("iframe");
   iframe.className = "tab-view";
-  iframe.src = VIEWER_SRC;
+  iframe.src = text ? READER_SRC : VIEWER_SRC;
   viewsEl.appendChild(iframe);
   const { btn, labelEl } = makeTabButton(id, initialLabel || "Loading…");
-  const tab = { id, iframe, btn, labelEl, file, handle, fed: false, reflowed: false };
+  const tab = { id, iframe, btn, labelEl, file, handle, text: !!text, fed: false, reflowed: false };
   tabs.push(tab);
   feedWhenReady(tab);
   activate(id);
@@ -140,10 +148,11 @@ function newTab({ initialLabel, file, handle }) {
 // with correct geometry and needs no later reflow.
 function feedWhenReady(tab) {
   const w = tab.iframe.contentWindow;
-  if (w && w.__pdfViewerLoadLocal) {
+  const load = w && (tab.text ? w.__textReaderLoadLocal : w.__pdfViewerLoadLocal);
+  if (load) {
     tab.fed = true;
     if (activeId === tab.id) tab.reflowed = true; // rendered while visible
-    w.__pdfViewerLoadLocal(tab.file, tab.handle);
+    load(tab.file, tab.handle);
     watchTitle(tab);
   } else {
     setTimeout(() => feedWhenReady(tab), 30);
@@ -155,7 +164,7 @@ function feedWhenReady(tab) {
 // overwrite the same file.
 function openLocalFile(file, handle) {
   if (!file) return;
-  newTab({ initialLabel: file.name, file, handle });
+  newTab({ initialLabel: file.name, file, handle, text: isTextFile(file) && !isPdfFile(file) });
 }
 
 // ---- Open affordances ------------------------------------------------------
@@ -164,7 +173,10 @@ async function pickFiles() {
   if (window.showOpenFilePicker) {
     try {
       const handles = await window.showOpenFilePicker({
-        types: [{ description: "PDF document", accept: { "application/pdf": [".pdf"] } }],
+        types: [
+          { description: "PDF document", accept: { "application/pdf": [".pdf"] } },
+          { description: "Text export", accept: { "text/plain": [".txt", ".LEAK"] } },
+        ],
         multiple: true,
       });
       for (const h of handles) openLocalFile(await h.getFile(), h);
@@ -196,7 +208,7 @@ fileInput.addEventListener("change", () => {
 );
 document.addEventListener("drop", (e) => {
   const files = e.dataTransfer?.files;
-  if (files) for (const f of files) if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) openLocalFile(f);
+  if (files) for (const f of files) if (isPdfFile(f) || isTextFile(f)) openLocalFile(f);
 });
 
 // OS file handler — a PDF opened from the system lands here (possibly several).

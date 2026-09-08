@@ -552,6 +552,58 @@ lexis provider   → lexis_url   > westlaw_url > fallback_url > url > built
 the *active* provider's URL first, falling back across providers, which is
 the behavior most users expect from a provider toggle.)
 
+## Text reader for PDF-Linker's exports
+
+PDF-Linker scrubs a case's filings into `Text Files/*.txt` and writes
+`pseudonym_key.xlsx`, the real↔fake map. The **text reader**
+(`viewer/text-reader.html`) reads those exports the way this viewer reads a
+PDF — and puts the real names back **on screen only**. Open it from the
+toolbar popup (**📝 Open text reader**), or open a `.txt` in the installed
+app, which routes it to the reader tab.
+
+- **Pages, in your font.** Each `====== Page N ======` block is laid out as a
+  sheet, with the printed page number and any REVIEW clause on its label and
+  the pleading gutter numbers dimmed into a margin. Pick the font (Georgia,
+  Times, Charter, Palatino, system sans, Arial, Verdana, Courier, Consolas, or
+  any installed family by name), size, leading and page width; the choice is
+  remembered. Light and dark chrome follow the viewer's own theme toggle.
+- **Citations linked.** The same detector the PDF viewer runs underlines every
+  case, statute, rule, regulation and CACI instruction and links it to Lexis+
+  or Westlaw (the provider setting is shared), with the **§ Authorities**
+  panel listing them once. A cite that wraps onto a numbered line is read
+  across the gutter number, as `pdf_linker.py` reads it.
+- **Real names from the key.** **Open case folder** picks the matter's folder
+  and takes only `pseudonym_key.xlsx` and the exports out of it (a `*.txt.LEAK`
+  quarantined by PDF-Linker's leak gate is listed too, marked, and opened
+  first — it is the one to read). Every fake is shown as its real value in
+  the case the fake was written in, **lightly highlighted**, and hovering
+  shows the pseudonym underneath. **Mark pseudonyms** turns the highlight and
+  the hover off; **Show fakes** shows the document as it is on disk. The key
+  is read the way `DeAnonymize.bas` and the Claude extension read it: columns
+  by header name, operator keeps skipped, alt spellings forward-only, an
+  ambiguous fake retired, the pinned tab out of the reversal. The last few
+  keys are remembered, so a lone `.txt` can be read under a key already
+  loaded. A real name from the key standing **unfaked** in an export is
+  counted in the status bar and underlined — that is a leak the run missed.
+- **Editable, and the file never learns the real names.** The pages are
+  editable and **Save** (Ctrl+S) writes the text back to the same file. A
+  pseudonym span always writes its **fake**; a real name you type is turned
+  into a pseudonym span the moment the caret leaves it, and anything left
+  is written as its pseudonym on save. The save refuses outright rather than
+  write a real value the key binds. Deleting a marked name deletes the fake.
+- **Flag what the run missed.** The point of reading the real names is to
+  spot the ones that are *not* marked. Select such a name and press **🚩 Flag
+  real value** (or Ctrl+Shift+F); the **Flagged** panel collects them and
+  **Save list to case folder** writes `New Real Values.txt` beside the key,
+  which PDF-Linker reads on its next run — and on Apply Leak Fixes — as if
+  each line had been given with `--term`. A pseudonym cannot be flagged.
+
+The decisions live in `viewer/textdoc.js` (the page model, the DOM-to-disk
+walk, the values file) and `viewer/pseudo-key.js` (the key, a port of the
+Claude extension's `src/pseudo.js`), with `viewer/xlsx-read.js` reading the
+workbook; `node test-textdoc.mjs`, `node test-pseudo-key.mjs` and
+`node test-xlsx-read.mjs` cover them.
+
 ## Install
 
 ### 1. Get PDF.js
@@ -597,6 +649,11 @@ options.html / options.js            Options page (provider, naming, sites, OCR)
 citation-site-rules.js               Where web citation links may run (shared)
 viewer/shift-space-open.js           Shift+Space = middle click (viewer + all sites)
 viewer/viewer.html                   PDF viewer shell
+viewer/text-reader.html / .js / .css Text reader for PDF-Linker's exports (pages, cites, key)
+viewer/textdoc.js                    Text reader's document model (pure; test-textdoc.mjs)
+viewer/pseudo-key.js                 pseudonym_key.xlsx reader + fake↔real swaps (pure; test-pseudo-key.mjs)
+viewer/xlsx-read.js                  Minimal .xlsx reader (pure; test-xlsx-read.mjs)
+viewer/web-shim.js                   chrome.* shim for the hosted (PWA) pages
 viewer/viewer.css                    Page + textLayer + linkLayer styles
 viewer/viewer.js                     PDF.js loader, two-pass renderer
 viewer/autoscroll.js                 Auto-scroll engine + control bar

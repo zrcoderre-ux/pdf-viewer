@@ -22,6 +22,10 @@
       border-color: #1a73e8; background: #e8f0fe; color: #1a73e8; font-weight: 600;
     }
 
+    .wide { width: 100%; padding: 7px 10px; border: 1px solid #cdd; border-radius: 4px;
+            background: #fff; cursor: pointer; font-size: 12px; }
+    .wide:hover { border-color: #1a73e8; background: #e8f0fe; color: #1a73e8; }
+
     .legend { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
     .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; }
     .swatch { width: 24px; height: 4px; }
@@ -52,6 +56,11 @@
 
   <p>Open any <code>.pdf</code> in Chrome and clickable links appear over the
   citations. Reload an open PDF to apply a provider change.</p>
+
+  <div class="provider-row">
+    <div class="label">Text exports:</div>
+    <button id="open-text-reader" class="wide" title="Read PDF-Linker's scrubbed .txt exports like a document — real names on screen from the pseudonym key, citations linked, editable">📝 Open text reader</button>
+  </div>
 
   <div class="legend">
     <div class="legend-item"><span class="swatch case"></span> Case citation</div>

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "PDF Viewer",
   "version": "1.2.0",
-  "description": "Detects legal citations (Bluebook + CSM) in PDFs opened in Chrome and overlays clickable links to Westlaw or Lexis+. Faithful port of pdf_linker.py.",
+  "description": "Detects legal citations (Bluebook + CSM) in PDFs opened in Chrome and overlays clickable links to Westlaw or Lexis+. Faithful port of pdf_linker.py. Includes a text reader for PDF-Linker's scrubbed exports.",
   "permissions": [
     "declarativeNetRequest",
     "declarativeNetRequestFeedback",
@@ -19,15 +19,27 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["viewer/shift-space-open.js"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "viewer/shift-space-open.js"
+      ],
       "all_frames": true,
       "run_at": "document_start"
     },
     {
-      "matches": ["https://claude.ai/*"],
-      "js": ["citation-site-rules.js", "content/claude-citations.js"],
-      "css": ["content/claude-citations.css"],
+      "matches": [
+        "https://claude.ai/*"
+      ],
+      "js": [
+        "citation-site-rules.js",
+        "content/claude-citations.js"
+      ],
+      "css": [
+        "content/claude-citations.css"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -58,6 +70,13 @@
         "viewer/code-tables.js",
         "viewer/ocr.js",
         "viewer/rotation.js",
+        "viewer/web-shim.js",
+        "viewer/text-reader.html",
+        "viewer/text-reader.js",
+        "viewer/text-reader.css",
+        "viewer/textdoc.js",
+        "viewer/pseudo-key.js",
+        "viewer/xlsx-read.js",
         "viewer/vendor/tesseract/tesseract.esm.min.js",
         "viewer/vendor/tesseract/worker.min.js",
         "viewer/vendor/tesseract/tesseract-core-lstm.wasm.js",
@@ -66,7 +85,9 @@
         "pdfjs/build/pdf.mjs",
         "pdfjs/build/pdf.worker.mjs"
       ],
-      "matches": ["<all_urls>"]
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ]
 }

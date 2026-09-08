@@ -1,0 +1,138 @@
+// Node-runnable tests for the text reader's document model (viewer/textdoc.js).
+// Run: node test-textdoc.mjs
+//
+// The property that matters most is the ROUND TRIP: a PDF-Linker export the
+// reader opens and saves without an edit must come back byte for byte, and a
+// pseudonym span must always serialize as its FAKE — the real names live on
+// top of the file and never in it.
+
+import {
+  parseExport, serializeExport, pageLabel, gutterPrefix,
+  serializeNodes, textOf, findRealsInPlain,
+  addValue, removeValue, formatValuesFile, parseValuesFile, flagProblem,
+  isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE,
+} from "./viewer/textdoc.js";
+import { parseKey, compileForward } from "./viewer/pseudo-key.js";
+
+let fails = 0;
+function check(label, got, want) {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}`);
+  if (!ok) {
+    console.log(`        got : ${JSON.stringify(got)}`);
+    console.log(`        want: ${JSON.stringify(want)}`);
+    fails++;
+  }
+}
+
+// ---- pages ----------------------------------------------------------------
+console.log("pages");
+const EXPORT =
+  "====== Page 1 ======\n" +
+  " 1  SUPERIOR COURT OF CALIFORNIA\n" +
+  " 2  Ingrid Strangeways, Plaintiff,\n" +
+  "\n" +
+  "====== Page 2 (printed p. 1) — REVIEW: recognised at only 99 dpi, text is LOW CONFIDENCE ======\n" +
+  "10  (Kremerman v. White (2021) 71 Cal.App.5th 358.)\n" +
+  "28  end\n";
+const doc = parseExport(EXPORT);
+check("two pages", doc.pages.length, 2);
+check("page numbers", doc.pages.map((p) => p.number), [1, 2]);
+check("printed and review read off the header", [doc.pages[1].printed, doc.pages[1].review],
+  ["1", "REVIEW: recognised at only 99 dpi, text is LOW CONFIDENCE"]);
+check("lines kept, blanks included", doc.pages[0].lines, [" 1  SUPERIOR COURT OF CALIFORNIA", " 2  Ingrid Strangeways, Plaintiff,", ""]);
+check("round trip", serializeExport(doc), EXPORT);
+check("label", pageLabel(doc.pages[1]), "Page 2 (printed p. 1)");
+
+const NOHDR = "line one\r\nline two";
+const d2 = parseExport(NOHDR);
+check("a Word export is one page with no header", [d2.pages.length, d2.pages[0].header, d2.pages[0].lines], [1, null, ["line one", "line two"]]);
+check("CRLF and no trailing newline survive", serializeExport(d2), NOHDR);
+check("empty file", serializeExport(parseExport("")), "");
+check("preamble before the first header", parseExport("stray\n====== Page 1 ======\nx\n").pages.map((p) => [p.header, p.lines]),
+  [[null, ["stray"]], ["====== Page 1 ======", ["x"]]]);
+
+const COMBINED =
+  "COMBINED TEXT EXPORT\n" +
+  "#### DOCUMENT 1 OF 2 IN THIS COMBINED FILE: Brief.txt ####\n" +
+  "====== Page 1 ======\n" +
+  "a\n" +
+  "#### DOCUMENT 2 OF 2 IN THIS COMBINED FILE: Reply.txt ####\n" +
+  "====== Page 1 ======\n" +
+  "b\n";
+const d3 = parseExport(COMBINED);
+check("banners open their own pages", d3.pages.map((p) => pageLabel(p)),
+  ["", "Document 1 of 2: Brief.txt", "Page 1", "Document 2 of 2: Reply.txt", "Page 1"]);
+check("combined round trip", serializeExport(d3), COMBINED);
+
+check("gutter prefix", gutterPrefix(" 2  Ingrid Strangeways"), { gutter: " 2  ", rest: "Ingrid Strangeways" });
+check("gutter with a wide indent", gutterPrefix("12        NOTICE").gutter, "12        ");
+check("no gutter on prose", gutterPrefix("2. The parties"), null);
+check("an empty numbered line is all gutter", gutterPrefix(" 3"), { gutter: " 3", rest: "" });
+check("a bare number followed by text is not a gutter", gutterPrefix("3 items"), null);
+
+// ---- the DOM walk, on a minimal node tree ------------------------------------
+console.log("serialization");
+const T = (s) => ({ nodeType: 3, data: s });
+const E = (name, attrs, kids) => ({
+  nodeType: 1, nodeName: name, childNodes: kids || [],
+  getAttribute: (k) => (attrs && k in attrs ? attrs[k] : null),
+});
+const body = E("DIV", {}, [
+  E("SPAN", { class: "gutter" }, [T(" 2  ")]),
+  T("Plaintiff "),
+  E("SPAN", { "data-fake": "Ingrid Strangeways" }, [T("Helen Rasho")]),
+  T(" sued\ntwice"),
+  E("BR"),
+  E("DIV", {}, [T("a wrapped div")]),
+]);
+check("disk gets the fake", serializeNodes(body), " 2  Plaintiff Ingrid Strangeways sued\ntwice\n\na wrapped div");
+check("screen gets the real", textOf(body), " 2  Plaintiff Helen Rasho sued\ntwice\n\na wrapped div");
+check("a leading div adds no newline", serializeNodes(E("DIV", {}, [E("DIV", {}, [T("x")]), E("DIV", {}, [T("y")])])), "x\ny");
+
+// ---- real values typed into the plain text -------------------------------------
+console.log("real values in plain text");
+const HEADERS = ["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"];
+const key = parseKey([{ name: "Pseudonym Key", rows: [HEADERS,
+  ["person", "Helen Rasho", "Ingrid Strangeways", "", "", "spreadsheet", 12],
+  ["person-token", "Rasho", "Strangeways", "", "", "spreadsheet", 30],
+  ["entity-token", "The", "Flintham", "", "", "prescan", 2],
+] }], "pseudonym_key.xlsx");
+const fwd = compileForward(key);
+const hits = findRealsInPlain(fwd, [{ node: "n1", text: "Ms. Rasho and HELEN RASHO's motion; the court" }]);
+check("both spellings found, longest first at its site", hits.map((h) => [h.matched, h.fake]),
+  [["Rasho", "Strangeways"], ["HELEN RASHO's", "INGRID STRANGEWAYS'S"]]);
+check("a common word bound by the key is never rewritten", hits.length, 2);
+
+// ---- the values file ---------------------------------------------------------------
+console.log("values file");
+let list = addValue([], "  Rosa   Delgado ");
+list = addValue(list, "rosa delgado");
+list = addValue(list, "Sunbelt Rentals LLC");
+check("dedup, case-blind, whitespace folded", list, ["Rosa Delgado", "Sunbelt Rentals LLC"]);
+check("remove", removeValue(list, "ROSA DELGADO"), ["Sunbelt Rentals LLC"]);
+const file = formatValuesFile(list);
+check("file round trip", parseValuesFile(file), list);
+check("comments and blanks ignored", parseValuesFile("# note\n\n  Rosa Delgado\n#x\nRosa Delgado\n"), ["Rosa Delgado"]);
+check("the file is named with spaces", VALUES_FILE, "New Real Values.txt");
+check("flag: nothing selected", flagProblem("  ", false) !== "", true);
+check("flag: a pseudonym", flagProblem("Strangeways", true) !== "", true);
+check("flag: a passage", flagProblem("x".repeat(200), false) !== "", true);
+check("flag: a name", flagProblem("Rosa Delgado", false), "");
+
+// ---- folder listing ------------------------------------------------------------------
+console.log("folder");
+check("exports", ["Brief.txt", "Brief.txt.LEAK", "Reply.TXT"].map(isExportName), [true, true, true]);
+check("tool artifacts are not documents", ["LEAKS.txt", "Combined Text.txt", "Authorities Cited.txt", "New Real Values.txt", "ETA 12-30 (3 files).txt", "DONE 12-45.txt", "pdf_linker.log"].map(isExportName), [false, false, false, false, false, false, false]);
+check("quarantine", isQuarantinedName("Brief.txt.LEAK"), true);
+check("key name", [isKeyName("pseudonym_key.xlsx"), isKeyName("pseudonym_key (1).xlsx"), isKeyName("Order 2024.xlsx")], [true, true, false]);
+
+// ---- settings ------------------------------------------------------------------------------
+console.log("settings");
+const s = normalizeSettings({ font: "nope", fontSize: 200, lineHeight: "x", marks: false });
+check("bad settings fall back", [s.font, s.fontSize, s.lineHeight, s.marks], ["georgia", 40, 1.5, false]);
+check("custom font css", fontCss(normalizeSettings({ font: "custom", customFont: "Baskerville, serif" })), "Baskerville, serif");
+check("empty custom falls back to the first preset", fontCss(normalizeSettings({ font: "custom", customFont: " " })), "Georgia, 'Times New Roman', serif");
+
+console.log(fails ? `\n${fails} FAILED` : "\nall passed");
+process.exit(fails ? 1 : 0);
