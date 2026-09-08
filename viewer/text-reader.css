@@ -112,6 +112,24 @@ body {
   background: rgba(31, 35, 40, 0.75); color: #fff; padding: 1px 6px; border-radius: 3px; pointer-events: none;
 }
 .pdf-slot canvas, .pdf-inline canvas { display: block; }
+.pdf-sheet { position: relative; }
+.pdf-slot { user-select: text; }
+.pdf-slot .page-label { border-radius: 2px 2px 0 0; }
+/* pdf.js's text layer over the bitmap: invisible glyph boxes the selection reads. */
+.textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; user-select: text; color: transparent; caret-color: transparent; forced-color-adjust: none; }
+.textLayer span, .textLayer br { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.textLayer ::selection { background: rgba(26, 115, 232, 0.35); color: transparent; }
+/* A text page on its PDF page's grid (side by side): the PDF's width and
+   height, each numbered line at its number's own height, the body at the
+   PDF's text margin. */
+.tpage.matched { max-width: none; }
+.tpage.matched .page-body { min-height: 0; height: 100%; }
+.page-body.fixed { padding: 0; position: relative; }
+.page-body.fixed .line { position: absolute; left: 0; right: 0; min-height: 0; }
+.page-body.fixed .line > .lt { min-height: 0; }
+/* The gutter's own right margin lies inside its track, so the track is the
+   PDF's body margin exactly and the text starts where the PDF's does. */
+.page-body.numbered.fixed .line { grid-template-columns: var(--body-x, 3.7em) minmax(0, 1fr); }
 .pdf-slot .pdf-wait, .pdf-inline .pdf-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9aa0a6; font-size: 12px; pointer-events: none; }
 .pdf-slot.ready .pdf-wait, .pdf-inline.ready .pdf-wait { display: none; }
 #pdf-pane .pane-empty { max-width: 420px; margin: 40px auto; text-align: center; color: #e8eaed; font-size: 13px; line-height: 1.5; }

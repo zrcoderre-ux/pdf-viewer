@@ -9,7 +9,7 @@
 import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
-  compileTypeahead, endingReal, swapsOnSpace,
+  compileTypeahead, endingReal, swapsOnSpace, findRealSpans, foldGaps,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -111,6 +111,25 @@ console.log("typeahead");
   check("nothing at the end, nothing offered", endingReal(ahead, "Plaintiff Helen Rasho alleges"), null);
   check("inside a longer word, nothing", endingReal(ahead, "Rashomon Rasho, and Grasho"), null);
   check("the match is case-insensitive and reports what was typed", (endingReal(ahead, "HELEN RASHO") || {}).matched, "HELEN RASHO");
+}
+
+// ---- a name wrapped across numbered lines ----------------------------------
+console.log("across lines");
+{
+  const c = compile(key), f = compileForward(key), r = compileReals(key);
+  const wrapped = " 8  Plaintiff Ingrid\n 9  Strangeways moved.";
+  const runs = translateRuns(c, wrapped);
+  check("a fake wrapped over a gutter number is one name, shown as two pieces", runs.filter((x) => x.t === "swap").map((x) => x.from + ">" + x.to), ["Ingrid>Helen", "Strangeways>Rasho"]);
+  check("the gutter number stays in the text between the pieces", runs.map((x) => x.t === "text" ? x.s : "*"), [" 8  Plaintiff ", "*", "\n 9  ", "*", " moved."]);
+  check("each piece knows the whole", runs.filter((x) => x.t === "swap").map((x) => [x.whole.from, x.whole.to, x.piece, x.pieces]), [["Ingrid\n 9  Strangeways", "Helen Rasho", 0, 2], ["Ingrid\n 9  Strangeways", "Helen Rasho", 1, 2]]);
+  check("a blank numbered line between the halves is crossed too", translateRuns(c, "Ingrid\n 9\n10  Strangeways").filter((x) => x.t === "swap").map((x) => x.to), ["Helen", "Rasho"]);
+  check("a real wrapped the same way is written as its fake, line by line, the number kept", forwardRuns(f, "Helen\n 5  Rasho appeared").map((x) => x.t === "swap" ? x.to : x.s).join(""), "Ingrid\n 5  Strangeways appeared");
+  check("case is read across the gap", translateRuns(c, "INGRID\n 9  STRANGEWAYS").filter((x) => x.t === "swap").map((x) => x.to), ["HELEN", "RASHO"]);
+  const three = compileForward(keyOf([["entity", "Cross River Bank", "Thornfield", "", "", "", 1]]));
+  check("word counts that differ: the whole replacement on the first line, nothing on the next", forwardRuns(three, "at Cross River\n 9  Bank today").map((x) => x.t === "swap" ? "[" + x.to + "]" : x.s).join(""), "at [Thornfield]\n 9  [] today");
+  check("a number inside prose is not a gutter: no gap there, only the surname token", translateRuns(c, "Ingrid 9 Strangeways").filter((x) => x.t === "swap").map((x) => x.from), ["Strangeways"]);
+  check("a wrapped real is found with its span", findRealSpans(r, "x Helen\n 5  Rasho y").map((x) => [x.start, x.end, x.real]), [[2, 17, "Helen Rasho"]]);
+  check("foldGaps reads the gap as a space", foldGaps("Helen\n 5  Rasho"), "Helen Rasho");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

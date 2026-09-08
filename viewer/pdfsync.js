@@ -152,3 +152,198 @@ export function anchorGeometry(anchors, end) {
   const heights = tops.map((t, i) => Math.max(1, (i + 1 < tops.length ? tops[i + 1] : Number(end) || t + 1) - t));
   return { tops, heights };
 }
+
+// ---- the PDF page's own line geometry ---------------------------------------
+//
+// Pleading paper prints its line numbers down the left margin, and a PDF's
+// text layer (the filer's own or an OCR's) carries them as text items: a
+// bare "1".."28" standing at the left. From those the page's LINE GRID is
+// read — where line 1 sits, the pitch between lines, and where the body
+// text begins — so a text page can be laid out on the same grid and its
+// line 7 stands exactly beside the PDF's line 7.
+
+function median(xs) {
+  const a = xs.slice().sort((p, q) => p - q);
+  return a.length ? (a.length % 2 ? a[(a.length - 1) / 2] : (a[a.length / 2 - 1] + a[a.length / 2]) / 2) : NaN;
+}
+
+/**
+ * `items` are the page's text items as [{ str, x, top, w, h }] in PDF units
+ * with a top-left origin; `size` is { w, h }. Returns
+ * { y1, pitch, first, last, bodyX, numberRight } — the top of line 1's
+ * number, the distance between lines, the numbers seen, and where the body
+ * text starts — or null where fewer than three line numbers stand in the
+ * margin or they do not fall on one grid.
+ */
+export function pleadingGeometry(items, size) {
+  const w = (size && size.w) || 612;
+  const cands = new Map();
+  for (const it of items || []) {
+    const m = /^\s*(\d{1,2})\s*$/.exec(it.str || "");
+    if (!m) continue;
+    const n = parseInt(m[1], 10);
+    if (n < 1 || n > 40 || !(it.x < w * 0.25)) continue;
+    if (!cands.has(n)) cands.set(n, []);
+    cands.get(n).push({ n, top: it.top, x: it.x, right: it.x + (it.w || 0) });
+  }
+  if (cands.size < 3) return null;
+  // One per number: the one nearest the left edge (a "3" in the body is not it).
+  let pts = [...cands.values()].map((c) => c.slice().sort((a, b) => a.x - b.x)[0]).sort((a, b) => a.n - b.n);
+  const fit = (ps) => {
+    const pitches = [];
+    for (let i = 1; i < ps.length; i++) pitches.push((ps[i].top - ps[i - 1].top) / (ps[i].n - ps[i - 1].n));
+    const pitch = median(pitches);
+    const y1 = median(ps.map((q) => q.top - (q.n - 1) * pitch));
+    return { pitch, y1 };
+  };
+  let { pitch, y1 } = fit(pts);
+  if (!(pitch > 0)) return null;
+  // Drop what does not sit on the grid (a footnote's "2", an exhibit number), then refit.
+  const kept = pts.filter((q) => Math.abs(q.top - (y1 + (q.n - 1) * pitch)) < pitch / 2);
+  if (kept.length < 3) return null;
+  pts = kept;
+  ({ pitch, y1 } = fit(pts));
+  if (!(pitch > 0)) return null;
+  const numberRight = Math.max(...pts.map((q) => q.right));
+  const first = pts[0].n, last = pts[pts.length - 1].n;
+  const bandTop = y1 - pitch, bandBottom = y1 + last * pitch;
+  let bodyX = Infinity;
+  for (const it of items || []) {
+    if (!it.str || !it.str.trim() || /^\s*\d{1,2}\s*$/.test(it.str)) continue;
+    if (it.x <= numberRight + 1 || it.top < bandTop || it.top > bandBottom) continue;
+    if (it.x < bodyX) bodyX = it.x;
+  }
+  if (!isFinite(bodyX)) bodyX = numberRight + pitch;
+  return { y1, pitch, first, last, bodyX, numberRight };
+}
+
+/** The top of line `n` on the grid. */
+export function lineTop(geom, n) {
+  return geom.y1 + (n - 1) * geom.pitch;
+}
+
+/**
+ * Where each of a text page's lines goes on the PDF's grid: a numbered line
+ * at its number; an unnumbered line under the numbered line before it, a
+ * pitch further down for each (a foot line after 28 sits below 28); lines
+ * before the first numbered one stack upward from it (an e-filing stamp).
+ * `lines` are [{ num }] (the gutter number or null); returns tops in PDF
+ * units, null where the page has no numbered line to hang anything on.
+ */
+export function slotTops(lines, geom) {
+  const out = (lines || []).map(() => null);
+  if (!geom) return out;
+  const firstIdx = (lines || []).findIndex((l) => l && l.num);
+  if (firstIdx < 0) return out;
+  let last = null, k = 0;
+  (lines || []).forEach((l, i) => {
+    if (l && l.num) { last = lineTop(geom, l.num); k = 0; out[i] = last; }
+    else if (last != null) { k++; out[i] = last + k * geom.pitch; }
+  });
+  for (let i = 0; i < firstIdx; i++) out[i] = Math.max(0, lineTop(geom, lines[firstIdx].num) - (firstIdx - i) * geom.pitch);
+  return out;
+}
+
+// ---- a page with no numbers: the PDF's printed rows, matched by their words ------
+//
+// An exhibit, a letter, an order: no margin numbers to hang the lines on,
+// but the PDF's text layer still says where every printed ROW sits, and the
+// export's lines are those rows written out — the same words, scrubbed. So
+// the lines are matched to the rows by the words they share, in order (a
+// monotone alignment, the shape of a diff), and each matched line takes its
+// row's own top and left. A line no row claims sits under the line before
+// it; a blank export line is the gap the page really had.
+
+/** The page's printed rows from its text items: [{ top, left, height, text }] sorted down the page. */
+export function pdfRows(items, size) {
+  const rows = [];
+  const sorted = (items || []).filter((it) => it.str && it.str.trim()).slice().sort((a, b) => a.top - b.top || a.x - b.x);
+  for (const it of sorted) {
+    const h = it.h || 10;
+    const last = rows[rows.length - 1];
+    if (last && Math.abs(it.top - last.top) <= Math.max(2, Math.min(h, last.height) * 0.6)) {
+      last.items.push(it);
+      last.top = Math.min(last.top, it.top);
+      last.height = Math.max(last.height, h);
+    } else rows.push({ top: it.top, height: h, items: [it] });
+  }
+  return rows.map((r) => {
+    const its = r.items.slice().sort((a, b) => a.x - b.x);
+    return { top: r.top, left: its[0].x, height: r.height, text: its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim() };
+  });
+}
+
+function wordSet(s) {
+  return new Set((String(s || "").toLowerCase().match(/[a-z0-9]{2,}/g) || []));
+}
+/** How alike two lines are: the share of words they have in common (0..1). */
+export function lineSimilarity(a, b) {
+  const A = wordSet(a), B = wordSet(b);
+  if (!A.size || !B.size) return 0;
+  let both = 0;
+  for (const w of A) if (B.has(w)) both++;
+  return both / Math.max(A.size, B.size);
+}
+
+/**
+ * Which row each line is, in order: `lines` and `rows` are texts; returns an
+ * array, per line, of the row index or null. A pair counts only where it
+ * shares at least `min` of its words; a line with no words (a blank) is
+ * never matched.
+ */
+export function alignLines(lines, rows, min = 0.25) {
+  const n = (lines || []).length, m = (rows || []).length;
+  const out = new Array(n).fill(null);
+  if (!n || !m) return out;
+  const sim = lines.map((l) => rows.map((r) => { const v = lineSimilarity(l, r); return v >= min ? v : 0; }));
+  // Longest-common-subsequence with weights: best[i][j] over the first i lines and j rows.
+  const best = Array.from({ length: n + 1 }, () => new Float64Array(m + 1));
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      let v = Math.max(best[i - 1][j], best[i][j - 1]);
+      if (sim[i - 1][j - 1] > 0) v = Math.max(v, best[i - 1][j - 1] + sim[i - 1][j - 1]);
+      best[i][j] = v;
+    }
+  }
+  let i = n, j = m;
+  while (i > 0 && j > 0) {
+    if (sim[i - 1][j - 1] > 0 && best[i][j] === best[i - 1][j - 1] + sim[i - 1][j - 1]) { out[i - 1] = j - 1; i--; j--; }
+    else if (best[i - 1][j] >= best[i][j - 1]) i--;
+    else j--;
+  }
+  return out;
+}
+
+/**
+ * Where each line goes on a page with no number grid: matched lines at their
+ * row's top and left; the others under the line before them, a pitch apart
+ * (the median distance between matched rows); leading ones stack up from the
+ * first match. Returns [{ top, left }] per line, or null where nothing
+ * matched at all, plus the pitch.
+ */
+export function rowLayout(lineTexts, rows) {
+  const map = alignLines(lineTexts, rows.map((r) => r.text));
+  const matched = map.map((j, i) => (j == null ? null : i)).filter((i) => i != null);
+  if (!matched.length) return null;
+  const tops = matched.map((i) => rows[map[i]].top);
+  // The pitch is read between lines the export wrote ADJACENT (no blank
+  // between): a blank line stands for a gap the page really had.
+  const adjacent = [], stepped = [];
+  for (let k = 1; k < tops.length; k++) {
+    if (!(tops[k] > tops[k - 1])) continue;
+    const step = matched[k] - matched[k - 1];
+    (step === 1 ? adjacent : stepped).push((tops[k] - tops[k - 1]) / step);
+  }
+  const med = (xs) => { const a = xs.slice().sort((p, q) => p - q); return a[Math.floor(a.length / 2)]; };
+  const pitch = adjacent.length ? med(adjacent) : stepped.length ? med(stepped) : rows[map[matched[0]]].height * 1.2;
+  const left0 = Math.min(...rows.map((r) => r.left));
+  const out = new Array(lineTexts.length).fill(null);
+  let last = null, k = 0;
+  lineTexts.forEach((_, i) => {
+    if (map[i] != null) { last = rows[map[i]].top; k = 0; out[i] = { top: last, left: rows[map[i]].left }; }
+    else if (last != null) { k++; out[i] = { top: last + k * pitch, left: left0 }; }
+  });
+  const first = matched[0];
+  for (let i = 0; i < first; i++) out[i] = { top: Math.max(0, rows[map[first]].top - (first - i) * pitch), left: left0 };
+  return { positions: out, pitch };
+}

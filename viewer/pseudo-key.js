@@ -288,11 +288,26 @@ function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// A space in a value matches a GAP: any run of spaces, or a line break —
+// with the pleading gutter number that opens the next line (" 9  ", or a
+// bare " 9" on an empty line) and any blank line between — so a name
+// wrapped at the margin, its halves two numbered lines apart, is one name.
+// The number is a gutter number only where PDF-Linker writes one: one or
+// two digits opening the line, two spaces or the line's end after it.
+const GUTTER_TOKEN = "(?: ?\\d{1,2}(?=[ ]{2}|[ ]*\\r?\\n|[ ]*$))?";
+const GAP = "(?:[ \\t]|\\r?\\n" + GUTTER_TOKEN + ")+";
+// A gap that crosses at least one line, for cutting a match into its lines.
+const LINE_GAP_RE = new RegExp("[ \\t]*(?:\\r?\\n" + GUTTER_TOKEN + "[ \\t]*)+", "g");
+const GAP_RE = new RegExp(GAP, "g");
+/** The text with every gap read as one space — what a wrapped match looks up as. */
+export function foldGaps(s) {
+  return String(s == null ? "" : s).replace(GAP_RE, " ");
+}
+
 // One alternation, longest value first (the engine tries alternatives in
-// order, so the full name beats its own surname token). A literal space in the
-// value matches any whitespace run, so a name wrapped over a line still
-// matches. Boundaries are alphanumeric lookarounds rather than \b, because a
-// fake can end in a digit ("Deverell5") or hold an @ ("quenby3@postbox9.org").
+// order, so the full name beats its own surname token). Boundaries are
+// alphanumeric lookarounds rather than \b, because a fake can end in a digit
+// ("Deverell5") or hold an @ ("quenby3@postbox9.org").
 export function buildMatcher(values) {
   const sorted = values
     .filter((v) => v)
@@ -300,7 +315,7 @@ export function buildMatcher(values) {
     .sort((a, b) => b.length - a.length);
   if (!sorted.length) return null;
   const alts = sorted
-    .map((v) => escapeRe(v).replace(/ /g, "\\s+") + (POSS_TAIL_RE.test(v) ? "" : "(?:['’][sS])?"))
+    .map((v) => escapeRe(v).replace(/ /g, GAP) + (POSS_TAIL_RE.test(v) ? "" : "(?:['’][sS])?"))
     .join("|");
   return new RegExp("(?<![A-Za-z0-9_])(?:" + alts + ")(?![A-Za-z0-9_])", "gi");
 }
@@ -421,16 +436,49 @@ export function compileReals(key) {
 
 // Look a match up in a compiled map, a possessive of a bare value included.
 function lookup(compiled, m) {
-  let mapped = compiled.map.get(fold(m));
+  const g = foldGaps(m);
+  let mapped = compiled.map.get(fold(g));
   let suffix = "";
   if (mapped == null) {
-    const mp = m.match(POSS_MATCH_RE);
+    const mp = g.match(POSS_MATCH_RE);
     if (mp) {
-      mapped = compiled.map.get(fold(m.slice(0, -mp[0].length)));
+      mapped = compiled.map.get(fold(g.slice(0, -mp[0].length)));
       if (mapped != null) suffix = mp[0];
     }
   }
   return mapped == null ? null : { mapped, suffix };
+}
+
+/**
+ * A match that crosses lines, as one swap PER LINE: the matched text is cut
+ * at its line gaps (the gutter numbers stay in the text between), and the
+ * replacement's words are dealt out to the pieces by the words each piece
+ * carried — word for word where the counts agree, else the whole
+ * replacement on the first piece and nothing on the rest. Every piece
+ * carries `whole`, the match and its replacement entire, for a tooltip or a
+ * keep that is about the name and not its half.
+ */
+function pieceRuns(matched, to) {
+  const gaps = [...matched.matchAll(LINE_GAP_RE)];
+  if (!gaps.length) return [{ t: "swap", from: matched, to }];
+  const pieces = [];
+  let at = 0;
+  for (const g of gaps) {
+    if (g.index > at) pieces.push({ t: "swap", from: matched.slice(at, g.index) });
+    pieces.push({ t: "text", s: g[0] });
+    at = g.index + g[0].length;
+  }
+  if (at < matched.length) pieces.push({ t: "swap", from: matched.slice(at) });
+  const swaps = pieces.filter((r) => r.t === "swap");
+  const counts = swaps.map((r) => r.from.trim().split(/\s+/).filter(Boolean).length);
+  const words = to.split(" ").filter(Boolean);
+  const whole = { from: matched, to };
+  if (counts.reduce((a, b) => a + b, 0) === words.length) {
+    let i = 0;
+    swaps.forEach((r, k) => { r.to = words.slice(i, i + counts[k]).join(" "); i += counts[k]; });
+  } else swaps.forEach((r, k) => { r.to = k === 0 ? to : ""; });
+  swaps.forEach((r, k) => { r.whole = whole; r.piece = k; r.pieces = swaps.length; });
+  return pieces;
 }
 
 /**
@@ -458,8 +506,8 @@ function runsWith(compiled, text) {
     }
     if (m.index > at) out.push({ t: "text", s: text.slice(at, m.index) });
     const core = hit.suffix ? m[0].slice(0, -hit.suffix.length) : m[0];
-    const shape = caseShape(core);
-    out.push({ t: "swap", from: m[0], to: applyCase(shape, hit.mapped) + casedSuffix(shape, hit.suffix) });
+    const shape = caseShape(foldGaps(core));
+    out.push(...pieceRuns(m[0], applyCase(shape, hit.mapped) + casedSuffix(shape, hit.suffix)));
     at = m.index + m[0].length;
     if (m.index === rx.lastIndex) rx.lastIndex++;
   }
@@ -484,7 +532,7 @@ export function translate(compiled, text) {
   let out = "";
   for (const r of runs) {
     if (r.t === "swap") {
-      count++;
+      if (!r.piece) count++; // a name wrapped over lines is one name, however many pieces
       out += r.to;
     } else out += r.s;
   }
@@ -510,6 +558,21 @@ export function findReals(compiledReals, text) {
       seen.add(fold(w.real));
       out.push(w);
     }
+    if (m.index === rx.lastIndex) rx.lastIndex++;
+  }
+  return out;
+}
+
+/** Every real value standing in `text`, with where: [{ start, end, matched, real, fake }], lines crossed included. */
+export function findRealSpans(compiledReals, text) {
+  const out = [];
+  if (!compiledReals || !compiledReals.rx || !text) return out;
+  const rx = compiledReals.rx;
+  rx.lastIndex = 0;
+  let m;
+  while ((m = rx.exec(text))) {
+    const hit = lookup(compiledReals, m[0]);
+    if (hit && hit.mapped) out.push({ start: m.index, end: m.index + m[0].length, matched: m[0], real: hit.mapped.real, fake: hit.mapped.fake });
     if (m.index === rx.lastIndex) rx.lastIndex++;
   }
   return out;

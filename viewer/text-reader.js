@@ -812,7 +812,7 @@ function buildBody(body, text) {
   newLine();
   runs.forEach((r, ri) => {
     if (r.t === "swap") {
-      lt.appendChild(makePn(r.from, r.to));
+      lt.appendChild(makePn(r.from, r.to, r));
       lineStart = false;
       return;
     }
@@ -862,21 +862,31 @@ function makeGutter(prefix) {
   return span;
 }
 
-function makePn(fake, real) {
+function makePn(fake, real, run) {
   const span = document.createElement("span");
   span.className = "pn";
   span.contentEditable = "false";
   span.dataset.fake = fake;
   span.dataset.real = real;
+  // A piece of a name wrapped across lines: the whole name rides on each
+  // piece, for the tooltip, the keep menu and the count.
+  if (run && run.whole) {
+    span.dataset.wholeFake = run.whole.from;
+    span.dataset.wholeReal = run.whole.to;
+    span.dataset.piece = run.piece + "/" + run.pieces;
+  }
   span.textContent = settings.showFakes ? fake : real;
   markKept(span);
   return span;
 }
+/** The real value a span stands for — the whole name where the span is one line's piece of it. */
+function pnReal(span) { return span.dataset.wholeReal != null ? PK.foldGaps(span.dataset.wholeReal) : span.dataset.real; }
+function pnFake(span) { return span.dataset.wholeFake != null ? PK.foldGaps(span.dataset.wholeFake) : span.dataset.fake; }
 // A kept value's spans carry the mark that says so: the highlight goes, a
 // dotted underline says "left alone on the next run", and the tooltip says
 // what the file still carries until then.
 function markKept(span) {
-  const c = TD.keptControl(keeps, span.dataset.real);
+  const c = TD.keptControl(keeps, pnReal(span));
   span.classList.toggle("kept", !!c);
   if (c) span.dataset.kept = c; else delete span.dataset.kept;
 }
@@ -903,17 +913,19 @@ function showFakes(on) {
 function afterTextChange() {
   updateCounts();
   textAnchors = null;
+  applyMatchedLayout();
   applyLineLock();
   placeCitations();
   paintHighlights();
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
-const relayout = debounce(() => { textAnchors = null; applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
+const relayout = debounce(() => { textAnchors = null; applyMatchedLayout(); applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
-  const n = pagesEl.querySelectorAll(".pn").length;
-  const k = pagesEl.querySelectorAll(".pn.kept").length;
+  const all = [...pagesEl.querySelectorAll(".pn")].filter((s) => !s.dataset.piece || s.dataset.piece.startsWith("0/"));
+  const n = all.length;
+  const k = all.filter((s) => s.classList.contains("kept")).length;
   $("st-pn").textContent = key ? `${n} pseudonym${n === 1 ? "" : "s"} shown as real names` + (k ? ` · ${k} kept (un-faked on the next run)` : "") : "";
 }
 
@@ -1562,6 +1574,7 @@ function applyLineLock() {
   document.body.classList.toggle("line-lock", !!settings.lineLock);
   const st = $("st-lock");
   if (!settings.lineLock || !doc) { st.textContent = ""; return; }
+  if (pagesEl.querySelector(".tpage.matched")) { st.textContent = "Line lock: pages sized to the PDF — a long line runs past the edge, scroll sideways"; return; }
   const bodies = pageBodies().filter((b) => b.classList.contains("numbered") && !b.closest(".tpage").classList.contains("swapped"));
   if (!bodies.length) { st.textContent = "Line lock: no numbered lines"; return; }
   // Measured line by line: a grid item's text overflow is not in the page
@@ -1586,7 +1599,7 @@ function applyLineLock() {
  * same walk serializeNodes makes, on the DISPLAYED text, so a citation found
  * in the string can be turned into a DOM Range.
  */
-function flatten(body, { blankGutters = false } = {}) {
+function flatten(body, { blankGutters = false, blankPn = false } = {}) {
   const segs = [];
   let text = "";
   const rec = (n, atStart) => {
@@ -1596,7 +1609,11 @@ function flatten(body, { blankGutters = false } = {}) {
       // length: a cite that wraps onto a numbered line otherwise carries a
       // digit run between its volume and its reporter, or between the code
       // and its section, and parses as nothing (the pdf_linker.py rule).
-      text += blankGutters && n.parentElement && n.parentElement.closest(".gutter") ? " ".repeat(n.data.length) : n.data;
+      // A pseudonym span's shown text is blanked the same way for the leak
+      // scan: the real name inside it is on top of the file, not in it.
+      const p = n.parentElement;
+      const blank = (blankGutters && p && p.closest(".gutter")) || (blankPn && p && p.closest(".pn"));
+      text += blank ? " ".repeat(n.data.length) : n.data;
       return;
     }
     if (n.nodeType !== 1) return;
@@ -1698,12 +1715,13 @@ function paintHighlights() {
   const bodies = pageBodies();
   const flagRx = flagged.length ? PK.buildMatcher(flagged) : null;
   for (const body of bodies) {
-    const segs = plainSegments(body);
-    if (fwd) {
-      const masked = segs.map((seg) => ({ node: seg.node, text: maskKept(seg.text) }));
-      for (const h of TD.findRealsInPlain(fwd, masked)) {
-        const r = document.createRange();
-        r.setStart(h.node, h.start); r.setEnd(h.node, h.end);
+    if (reals) {
+      // Over the whole page, pseudonym spans blanked, so a real name wrapped
+      // over a line break and its gutter number is found as one.
+      const { text, segs } = flatten(body, { blankPn: true });
+      for (const h of PK.findRealSpans(reals, maskKept(text))) {
+        const r = rangeFor(segs, h.start, h.end);
+        if (!r) continue;
         leakRanges.push(r);
         leaks++;
       }
@@ -1730,8 +1748,9 @@ pagesEl.addEventListener("mouseover", (e) => {
   if (!pn || !settings.marks) { hideTip(); return; }
   tipEl.innerHTML = "";
   const b = document.createElement("b");
-  b.textContent = settings.showFakes ? pn.dataset.real : pn.dataset.fake;
+  b.textContent = settings.showFakes ? pnReal(pn) : pnFake(pn);
   tipEl.append(settings.showFakes ? "Real name: " : "Pseudonym: ", b);
+  if (pn.dataset.piece) tipEl.append(` (wrapped over ${pn.dataset.piece.split("/")[1]} lines; this line: ${settings.showFakes ? pn.dataset.real : pn.dataset.fake})`);
   if (pn.dataset.kept) tipEl.append(document.createElement("br"), `Kept (${pn.dataset.kept === "never" ? "every case" : "this case"}): PDF-Linker leaves it un-faked on its next run. Right-click to change.`);
   tipEl.hidden = false;
   const r = pn.getBoundingClientRect();
@@ -1776,10 +1795,10 @@ const keepMenu = $("keep-menu");
 let keepMenuFor = null;
 function showKeepMenu(pn, x, y) {
   keepMenuFor = pn;
-  const real = pn.dataset.real;
+  const real = pnReal(pn);
   const c = TD.keptControl(keeps, real);
   $("keep-menu-value").textContent = real;
-  $("keep-menu-fake").textContent = pn.dataset.fake;
+  $("keep-menu-fake").textContent = pnFake(pn);
   $("keep-menu-no").hidden = c === "no";
   $("keep-menu-never").hidden = c === "never";
   $("keep-menu-undo").hidden = !c;
@@ -1811,9 +1830,9 @@ function setKeep(real, control) {
     ? `"${real}" kept${control === "never" ? " in every case" : " in this case"} — un-marked here now; PDF-Linker un-fakes it in the file on its next run (save the list to the case folder first).`
     : `"${real}" is a pseudonym again`);
 }
-$("keep-menu-no").addEventListener("click", () => { const r = keepMenuFor && keepMenuFor.dataset.real; hideKeepMenu(); if (r) setKeep(r, "no"); });
-$("keep-menu-never").addEventListener("click", () => { const r = keepMenuFor && keepMenuFor.dataset.real; hideKeepMenu(); if (r) setKeep(r, "never"); });
-$("keep-menu-undo").addEventListener("click", () => { const r = keepMenuFor && keepMenuFor.dataset.real; hideKeepMenu(); if (r) setKeep(r, ""); });
+$("keep-menu-no").addEventListener("click", () => { const r = keepMenuFor && pnReal(keepMenuFor); hideKeepMenu(); if (r) setKeep(r, "no"); });
+$("keep-menu-never").addEventListener("click", () => { const r = keepMenuFor && pnReal(keepMenuFor); hideKeepMenu(); if (r) setKeep(r, "never"); });
+$("keep-menu-undo").addEventListener("click", () => { const r = keepMenuFor && pnReal(keepMenuFor); hideKeepMenu(); if (r) setKeep(r, ""); });
 $("keep-menu-cancel").addEventListener("click", hideKeepMenu);
 
 const showFlagPopSoon = debounce(showFlagPop, 120);
@@ -2053,23 +2072,29 @@ function loadPdf(src) {
       const v = (await pdf.getPage(i)).getViewport({ scale: 1 });
       sizes.push({ w: v.width, h: v.height });
     }
-    const info = { pdf, count: pdf.numPages, sizes, name: src.name, lines: sizes.map(() => null) };
-    // Where each page's FIRST printed line sits, for the side-by-side
-    // anchors: read in the background, the pane re-aligning as it lands.
+    const info = { pdf, count: pdf.numPages, sizes, name: src.name, lines: sizes.map(() => null), geoms: sizes.map(() => null), rows: sizes.map(() => null) };
+    // Where each page's FIRST printed line sits (the side-by-side anchor)
+    // and its LINE GRID (pdfsync.pleadingGeometry, from the numbers down its
+    // margin): read in the background, the pane re-aligning as it lands.
     (async () => {
       for (let i = 1; i <= pdf.numPages; i++) {
         try {
           const tc = await (await pdf.getPage(i)).getTextContent();
+          const sz = sizes[i - 1];
+          const items = [];
           let top = Infinity;
           for (const it of tc.items) {
-            if (!it.str || !it.str.trim() || !it.transform) continue;
-            const t = sizes[i - 1].h - (it.transform[5] + (it.height || 0));
-            if (t >= 0 && t < top) top = t;
+            if (!it.str || !it.transform) continue;
+            const t = sz.h - (it.transform[5] + (it.height || 0));
+            if (it.str.trim() && t >= 0 && t < top) top = t;
+            items.push({ str: it.str, x: it.transform[4], top: t, w: it.width || 0, h: it.height || 0 });
           }
           info.lines[i - 1] = isFinite(top) ? top : null;
+          info.geoms[i - 1] = PS.pleadingGeometry(items, sz);
+          info.rows[i - 1] = PS.pdfRows(items, sz);
         } catch { info.lines[i - 1] = null; }
       }
-      if (sbsOn && !pdfPane.hidden) syncScroll("text", true);
+      if (sbsOn && !pdfPane.hidden) { applyMatchedLayout(); syncScroll("text", true); }
     })();
     return info;
   })();
@@ -2079,16 +2104,23 @@ function loadPdf(src) {
 }
 const PDF_LINE_DEFAULT = 72 / 792; // an inch down a letter page, until the PDF says
 /** A slot's first printed line, in px from the slot's top, from the PDF loaded so far. */
+/** The loaded PDF behind a source, or null while it is still loading. */
+function infoFor(src) {
+  try { const p = src && pdfCache.get(src.name); return p && p.__info ? p.__info : null; } catch { return null; }
+}
+/** The box a slot renders its page into (under its label, where it has one). */
+function sheetOf(el) { return el.querySelector(".pdf-sheet") || el; }
 function pdfFirstLine(el) {
   const src = pdfSources[Number(el.dataset.index)];
   const page = Number(el.dataset.page);
-  const w = el.clientWidth || paneWidth();
-  let info = null;
-  try { const p = pdfCache.get(src.name); if (p && p.__info) info = p.__info; } catch { info = null; }
+  const sheet = sheetOf(el);
+  const base = sheet === el ? 0 : sheet.offsetTop;
+  const w = sheet.clientWidth || paneWidth();
+  const info = infoFor(src);
   const sz = info && info.sizes[page - 1];
   const y = info && info.lines[page - 1];
-  if (sz && y != null) return (y * w) / sz.w;
-  return sz ? (PDF_LINE_DEFAULT * sz.h * w) / sz.w : el.clientHeight * PDF_LINE_DEFAULT;
+  if (sz && y != null) return base + (y * w) / sz.w;
+  return base + (sz ? (PDF_LINE_DEFAULT * sz.h * w) / sz.w : sheet.clientHeight * PDF_LINE_DEFAULT);
 }
 
 /** Which PDF each text page comes from, through the key and the folder's PDFs. */
@@ -2149,15 +2181,17 @@ async function renderInto(el, src, pageNo, cssWidth) {
   const page = await info.pdf.getPage(pageNo);
   if (el.dataset.want !== want) return;
   const base = page.getViewport({ scale: 1 });
+  const cssScale = cssWidth / base.width;
   const dpr = Math.min(3, window.devicePixelRatio || 1);
-  const vp = page.getViewport({ scale: (cssWidth / base.width) * dpr });
-  const canvas = el.querySelector("canvas");
+  const vp = page.getViewport({ scale: cssScale * dpr });
+  const sheet = sheetOf(el);
+  const canvas = sheet.querySelector("canvas");
   if (el.__task) { try { el.__task.cancel(); } catch { /* done */ } }
   canvas.width = Math.round(vp.width);
   canvas.height = Math.round(vp.height);
   canvas.style.width = cssWidth + "px";
   canvas.style.height = Math.round(vp.height / dpr) + "px";
-  el.style.height = "";
+  sheet.style.height = "";
   const task = page.render({ canvasContext: canvas.getContext("2d"), viewport: vp });
   el.__task = task;
   try { await task.promise; } catch (e) { if (!(e && e.name === "RenderingCancelledException")) console.warn(e); return; }
@@ -2165,28 +2199,59 @@ async function renderInto(el, src, pageNo, cssWidth) {
   if (el.dataset.want !== want) return;
   el.dataset.rendered = want;
   el.classList.add("ready");
+  // The page's text, selectable over the bitmap (pdf.js's own text layer).
+  const layer = sheet.querySelector(".textLayer");
+  if (layer) {
+    layer.innerHTML = "";
+    layer.style.setProperty("--scale-factor", String(cssScale));
+    layer.style.setProperty("--total-scale-factor", String(cssScale));
+    try {
+      const tl = new pdfjsLib.TextLayer({ textContentSource: await page.getTextContent(), container: layer, viewport: page.getViewport({ scale: cssScale }) });
+      if (el.dataset.want === want) await tl.render();
+    } catch (e) { console.warn(e); }
+  }
 }
 function releaseCanvas(el) {
   if (!el.dataset.rendered) return;
-  const canvas = el.querySelector("canvas");
-  // Keep the box its size, drop the bitmap.
-  el.style.height = canvas.style.height;
+  const sheet = sheetOf(el);
+  const canvas = sheet.querySelector("canvas");
+  // Keep the box its size, drop the bitmap and the text.
+  sheet.style.height = canvas.style.height;
   canvas.width = canvas.height = 0;
   canvas.style.height = "0px";
+  const layer = sheet.querySelector(".textLayer");
+  if (layer) layer.innerHTML = "";
   delete el.dataset.rendered;
   el.classList.remove("ready");
 }
-function slotShell(cls, tag) {
+/**
+ * A slot: for the pane, a page label like the text page's (so the two are
+ * the same size, label and all) over a sheet holding the bitmap and the
+ * text layer; for a swapped-in page, the sheet alone with a corner tag.
+ */
+function slotShell(cls, tag, { label = false } = {}) {
   const el = document.createElement("div");
   el.className = cls;
+  const sheet = document.createElement("div");
+  sheet.className = "pdf-sheet";
   const t = document.createElement("div");
-  t.className = "pdf-tag";
-  t.textContent = tag;
+  if (label) {
+    t.className = "page-label pdf-label";
+    t.textContent = tag;
+    el.appendChild(t);
+  } else {
+    t.className = "pdf-tag";
+    t.textContent = tag;
+    sheet.appendChild(t);
+  }
   const c = document.createElement("canvas");
+  const layer = document.createElement("div");
+  layer.className = "textLayer";
   const w = document.createElement("div");
   w.className = "pdf-wait";
   w.textContent = "Loading…";
-  el.append(t, c, w);
+  sheet.append(c, layer, w);
+  el.appendChild(sheet);
   return el;
 }
 /** The height a page box should have before its bitmap arrives, from the PDF's page sizes. */
@@ -2194,8 +2259,8 @@ async function presize(el, src, pageNo, cssWidth) {
   try {
     const info = await loadPdf(src);
     const sz = info.sizes[pageNo - 1];
-    if (sz && !el.dataset.rendered) el.style.height = Math.round((cssWidth * sz.h) / sz.w) + "px";
-    if (el.classList.contains("pdf-slot")) syncScroll("text", true);
+    if (sz && !el.dataset.rendered) sheetOf(el).style.height = Math.round((cssWidth * sz.h) / sz.w) + "px";
+    if (el.classList.contains("pdf-slot")) { applyMatchedLayout(); syncScroll("text", true); }
   } catch { /* the render reports it */ }
 }
 const paneObserver = new IntersectionObserver((entries) => {
@@ -2242,9 +2307,9 @@ function buildPdfPane() {
       el.className = "pdf-slot blank";
       el.textContent = p.banner != null ? TD.pageLabel(p) : (p.header != null ? "No PDF page for this part" : "");
     } else {
-      el = slotShell("pdf-slot", "PDF p. " + t.page + (pdfSourceNames().length > 1 ? " · " + t.src.name : ""));
+      el = slotShell("pdf-slot", "PDF p. " + t.page + (pdfSourceNames().length > 1 ? " · " + t.src.name : ""), { label: true });
       el.dataset.page = String(t.page);
-      el.style.height = Math.round(w * 11 / 8.5) + "px"; // letter, until the PDF says
+      sheetOf(el).style.height = Math.round(w * 11 / 8.5) + "px"; // letter, until the PDF says
       presize(el, t.src, t.page, w);
       paneObserver.observe(el);
     }
@@ -2252,7 +2317,87 @@ function buildPdfPane() {
     el.style.width = t ? w + "px" : "";
     pdfPane.appendChild(el);
   });
+  applyMatchedLayout();
   syncScroll("text", true);
+}
+
+// ── the text page on the PDF page's own grid ──
+//
+// Beside its PDF page a text page takes that page's GEOMETRY: the same
+// width, the sheet the same height (label and all, so the two are one size
+// to the eye), and — where the PDF's text layer carries the pleading
+// numbers down its margin — each numbered line placed at ITS number's own
+// height on the PDF, the body starting at the PDF's text margin, the
+// leading the PDF's own pitch. Line 7 of the text then stands exactly
+// beside line 7 of the PDF, whatever the page's furniture. The font stays
+// the reader's: the grid places the lines, the size is theirs to calibrate.
+// A page with no numbers (an exhibit, a letter, an order) is laid out on
+// the PDF's printed ROWS instead: each text line is matched to the row that
+// carries its words (pdfsync.rowLayout, in order, the way a diff matches)
+// and takes that row's own top and left, so its paragraphs and headings sit
+// where the PDF's do. Only where nothing matches at all (a scan with no
+// text layer) does the page keep its flowing layout, inside a sheet of the
+// PDF page's height.
+// Display only — no line moves in the file, and the layout is lifted the
+// moment the pane closes.
+function applyMatchedLayout() {
+  const on = sbsOn && !pdfPane.hidden;
+  for (const sec of pagesEl.querySelectorAll(".tpage")) {
+    const i = Number(sec.dataset.index);
+    const slot = on ? pdfPane.querySelector(`.pdf-slot[data-index="${i}"]:not(.blank)`) : null;
+    const t = slot && pdfTarget(i);
+    const info = t && infoFor(t.src);
+    const sz = info && info.sizes[t.page - 1];
+    if (!slot || !sz) { clearMatched(sec); continue; }
+    const sheet = sheetOf(slot);
+    const w = sheet.clientWidth || paneWidth();
+    const scale = w / sz.w;
+    const inner = sec.querySelector(".page-inner");
+    const body = sec.querySelector(".page-body");
+    sec.classList.add("matched");
+    sec.style.width = w + "px";
+    inner.style.height = Math.round(sz.h * scale) + "px";
+    const geom = info.geoms[t.page - 1];
+    const lines = [...body.querySelectorAll(":scope > .line")];
+    if (geom && body.classList.contains("numbered")) {
+      body.classList.add("fixed");
+      sec.style.setProperty("--body-x", (geom.bodyX * scale) + "px");
+      const tops = PS.slotTops(lines.map((l) => ({ num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null })), geom);
+      lines.forEach((l, k) => {
+        if (tops[k] == null) { l.style.top = ""; l.style.lineHeight = ""; return; }
+        l.style.top = (tops[k] * scale) + "px";
+        l.style.lineHeight = (geom.pitch * scale) + "px";
+      });
+    } else {
+      const rows = info.rows[t.page - 1];
+      const lay = rows && rows.length ? PS.rowLayout(lines.map((l) => l.textContent), rows) : null;
+      if (lay) {
+        body.classList.add("fixed");
+        sec.style.removeProperty("--body-x");
+        lines.forEach((l, k) => {
+          const pos = lay.positions[k];
+          if (!pos) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; return; }
+          l.style.top = (pos.top * scale) + "px";
+          l.style.left = (pos.left * scale) + "px";
+          l.style.lineHeight = (lay.pitch * scale) + "px";
+        });
+      } else {
+        body.classList.remove("fixed");
+        for (const l of lines) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; }
+      }
+    }
+  }
+  textAnchors = null;
+}
+function clearMatched(sec) {
+  if (!sec.classList.contains("matched")) return;
+  sec.classList.remove("matched");
+  sec.style.width = "";
+  sec.style.removeProperty("--body-x");
+  sec.querySelector(".page-inner").style.height = "";
+  const body = sec.querySelector(".page-body");
+  body.classList.remove("fixed");
+  for (const l of body.querySelectorAll(":scope > .line")) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; }
 }
 function setSideBySide(on, { remember = true } = {}) {
   sbsOn = !!on;
@@ -2324,6 +2469,7 @@ function refitPdf() {
       if (el.dataset.rendered) renderInto(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), w);
       else presize(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), w);
     }
+    applyMatchedLayout();
   }
   for (const el of pagesEl.querySelectorAll(".pdf-inline")) {
     const sec = el.closest(".tpage");

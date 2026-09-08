@@ -589,6 +589,12 @@ app, which routes it to the reader tab.
   or Westlaw (the provider setting is shared), with the **§ Authorities**
   panel listing them once. A cite that wraps onto a numbered line is read
   across the gutter number, as `pdf_linker.py` reads it.
+- **A name wrapped across lines is one name.** A pseudonym or a real value
+  whose halves sit on two numbered lines — the line break, the next line's
+  gutter number and any blank line between — is matched as one: the reader
+  shows the real name half on each line (the tooltip names the whole), a
+  wrapped real is one leak, and a save writes the fake line by line with
+  the numbers untouched.
 - **Real names from the key.** **Open case folder** picks the matter's folder
   and takes only `pseudonym_key.xlsx` and the exports out of it (a `*.txt.LEAK`
   quarantined by PDF-Linker's leak gate is listed too, marked, and opened
@@ -674,11 +680,18 @@ app, which routes it to the reader tab.
   with no key — **⇄ PDF pages…** offers **Pick PDF…**, and a dropped `.pdf`
   is taken the same way. The PDF is read only when it is first shown.
   **⇔ Side by side** opens the PDF in a pane beside the text, one PDF page
-  per text page, and holds the two together whichever you scroll — anchored
-  on each page's **first printed line**, the text's first line of text under
-  its label and the PDF's first line of type under its top margin, so the
-  top lines line up and the pages move in proportion between them;
-  remembered. With it off, a page whose text is not
+  per text page, and lays each text page out on **its PDF page's own
+  geometry**: the same width and height, label and all, and — where the
+  PDF's text layer carries the pleading numbers down its margin — every
+  numbered line at its number's own height, the body starting at the PDF's
+  text margin, the leading the PDF's pitch, so line 7 stands beside line 7.
+  A page with no numbers (an exhibit, a letter, an order) is laid out on
+  the PDF's printed **rows** instead: each text line is matched to the row
+  carrying its words and takes its top and left, so paragraphs and headings
+  sit where the PDF's do. The font stays yours; the grid only places the
+  lines. The two panes scroll together, anchored on each page's first
+  printed line, and the PDF's text is **selectable** in the pane. Display
+  only — the layout lifts when the pane closes; remembered. With it off, a page whose text is not
   worth reading (an exhibit the OCR mangled) is **swapped**: the **⇄ PDF**
   button on the page's label shows the PDF page in the text's place, the
   rest staying text, and **⇄ PDF pages…** takes a run — `5, 12-18` — of the

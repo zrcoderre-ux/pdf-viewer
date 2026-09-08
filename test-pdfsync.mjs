@@ -4,6 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -74,6 +75,53 @@ check("anchors: a text page and a PDF page meet at their first lines whatever th
   return [scrollTopFor(scrollPosition(80, text.tops, text.heights), pdf.tops, pdf.heights), scrollTopFor(scrollPosition(380, text.tops, text.heights), pdf.tops, pdf.heights), scrollTopFor(scrollPosition(230, text.tops, text.heights), pdf.tops, pdf.heights)];
 })(), [120, 1100, 610]);
 check("anchors: an empty list", anchorGeometry([], 0), { tops: [], heights: [] });
+console.log("the PDF page's line grid");
+{
+  const items = [];
+  for (let n = 1; n <= 28; n++) items.push({ str: String(n), x: 40, top: 60 + (n - 1) * 24, w: 10, h: 12 });
+  items.push({ str: "SUPERIOR COURT", x: 90, top: 60, w: 100, h: 12 }, { str: "v.", x: 90, top: 60 + 3 * 24, w: 10, h: 12 });
+  items.push({ str: "2", x: 300, top: 400, w: 6, h: 12 });          // a "2" in the body: not a margin number
+  items.push({ str: "Exhibit A", x: 200, top: 740, w: 60, h: 12 });  // below the grid: not the body margin
+  const g = pleadingGeometry(items, { w: 612, h: 792 });
+  check("line 1, the pitch and the numbers seen", g && [g.y1, g.pitch, g.first, g.last], [60, 24, 1, 28]);
+  check("the body starts where the text does, right of the numbers", g && [g.bodyX, g.numberRight], [90, 50]);
+  check("line 7 on the grid", lineTop(g, 7), 60 + 6 * 24);
+  check("a stray number off the grid is dropped", pleadingGeometry(items.concat([{ str: "5", x: 42, top: 700, w: 8, h: 12 }]), { w: 612, h: 792 }).y1, 60);
+  check("fewer than three numbers is no grid", pleadingGeometry(items.slice(0, 2), { w: 612, h: 792 }), null);
+  check("numbers all on one line is no grid", pleadingGeometry([{ str: "1", x: 40, top: 60 }, { str: "2", x: 60, top: 60 }, { str: "3", x: 80, top: 60 }], { w: 612, h: 792 }), null);
+  const L = (...ns) => ns.map((n) => ({ num: n }));
+  check("numbered lines sit at their numbers, an unnumbered one under the line before it", slotTops(L(null, 1, 2, null, 3), g), [36, 60, 84, 108, 108]);
+  check("a foot line after 28 sits below 28", slotTops(L(28, null), g), [60 + 27 * 24, 60 + 28 * 24]);
+  check("two stamp lines above line 1 stack upward, never above the page", slotTops(L(null, null, 1), { y1: 30, pitch: 24 }), [0, 6, 30]);
+  check("no numbered line, nothing to hang on", slotTops(L(null, null), g), [null, null]);
+  check("no grid, nothing", slotTops(L(1, 2), null), [null, null]);
+}
+
+console.log("a page with no numbers: rows matched by their words");
+{
+  const items = [
+    { str: "ORDER OF DISMISSAL", x: 200, top: 60, w: 120, h: 12 },
+    { str: "The court, having considered", x: 72, top: 100, w: 150, h: 12 }, { str: "the motion,", x: 230, top: 100.4, w: 60, h: 12 },
+    { str: "orders as follows:", x: 72, top: 114, w: 90, h: 12 },
+    { str: "1. The action is dismissed.", x: 90, top: 150, w: 140, h: 12 },
+    { str: "2. Each side bears its own fees.", x: 90, top: 164, w: 160, h: 12 },
+    { str: "Dated: March 1, 2026", x: 72, top: 210, w: 100, h: 12 },
+  ];
+  const rows = pdfRows(items, { w: 612, h: 792 });
+  check("items on one baseline are one row, in x order", rows.map((r) => r.text), ["ORDER OF DISMISSAL", "The court, having considered the motion,", "orders as follows:", "1. The action is dismissed.", "2. Each side bears its own fees.", "Dated: March 1, 2026"]);
+  check("a row carries its top and left", [rows[1].top, rows[1].left, rows[3].left], [100, 72, 90]);
+  check("similarity is the share of words in common", [lineSimilarity("The court having considered the motion", "the court, having considered the MOTION,"), lineSimilarity("abc def", "xyz"), lineSimilarity("", "x")], [1, 0, 0]);
+  const lines = ["ORDER OF DISMISSAL", "", "The court, having considered the motion,", "orders as follows:", "", "1. The action is dismissed.", "2. Each side bears its own fees.", "", "Dated: March 1, 2026", "Judge of the Superior Court"];
+  check("lines match their rows in order, blanks and an unmatched line left out", alignLines(lines, rows.map((r) => r.text)), [0, null, 1, 2, null, 3, 4, null, 5, null]);
+  check("a scrubbed name still matches its row on the other words", alignLines(["Plaintiff Ingrid Strangeways alleges that Melbury breached the lease."], ["Plaintiff Helen Rasho alleges that Quillmark breached the lease."]), [0]);
+  const lay = rowLayout(lines, rows);
+  check("matched lines take their row's top and left", [lay.positions[0], lay.positions[5]], [{ top: 60, left: 200 }, { top: 150, left: 90 }]);
+  check("an unmatched line sits a pitch under the line before, at the page's margin", lay.positions[9], { top: 210 + lay.pitch, left: 72 });
+  check("a blank line takes the slot under its predecessor", lay.positions[1].top, 60 + lay.pitch);
+  check("the pitch is the median row spacing", lay.pitch, 14);
+  check("nothing matched, nothing laid out", rowLayout(["zzz"], rows), null);
+}
+
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
