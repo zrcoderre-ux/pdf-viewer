@@ -44,6 +44,10 @@
 
     <button id="flag-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead.">🚩 Flag real value</button>
     <button id="autoscroll" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses" aria-pressed="false">↓ Auto-scroll</button>
+    <span class="sep"></span>
+
+    <button id="sbs-toggle" title="Show the PDF this export came from beside the text, page for page, scrolling together (remembered)" aria-pressed="false" disabled>⇔ Side by side</button>
+    <button id="swap-btn" title="Swap PDF pages into the text: read a page or a run of pages (a badly scanned exhibit) from the PDF, in place, while the rest stays text" disabled>⇄ PDF pages…</button>
     <span class="spacer"></span>
 
     <label class="tb-label" for="provider">Cites on</label>
@@ -71,6 +75,7 @@
       </div>
       <div id="pages" hidden></div>
     </div>
+    <div id="pdf-pane" aria-label="The PDF, side by side" hidden></div>
 
     <aside id="side" aria-label="Panel">
       <div class="side-tabs">
@@ -104,6 +109,7 @@
     <span id="st-pn"></span>
     <span id="st-leaks" class="warn"></span>
     <span id="st-cites"></span>
+    <span id="st-pdf"></span>
     <span class="spacer"></span>
     <span id="st-dirty"></span>
   </div>
@@ -116,11 +122,23 @@
     <button id="keep-menu-undo">It is a pseudonym after all</button>
     <button id="keep-menu-cancel" class="secondary">Cancel</button>
   </div>
+  <div id="swap-pop" hidden>
+    <div class="sp-head" id="swap-pop-head"></div>
+    <label class="sp-row"><span>PDF pages</span><input id="swap-range" type="text" placeholder="e.g. 5, 12-18" spellcheck="false"></label>
+    <div class="sp-actions">
+      <button id="swap-show" class="primary" title="Show these PDF pages in place of their text">Show from PDF</button>
+      <button id="swap-text" title="Put these pages back to text">Back to text</button>
+      <button id="swap-clear" class="secondary" title="Every page back to text">Clear all</button>
+    </div>
+    <div class="sp-actions"><button id="pdf-pick" class="secondary" title="Choose the PDF by hand">Pick PDF…</button><button id="swap-close" class="secondary">Close</button></div>
+    <p class="sp-note" id="swap-pop-note"></p>
+  </div>
   <div id="pn-tip" hidden></div>
   <div id="toast" hidden></div>
 
   <input id="file-input" type="file" accept=".txt,.LEAK,text/plain" hidden>
   <input id="key-input" type="file" accept=".xlsx" hidden>
+  <input id="pdf-input" type="file" accept=".pdf,application/pdf" hidden>
 
   <!-- Shift+Space = middle click on the citation underlines, as in the viewer. -->
   <script src="shift-space-open.js"></script>

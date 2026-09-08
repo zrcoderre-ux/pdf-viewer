@@ -452,6 +452,7 @@ test-citation-memory.mjs             Node-runnable per-URL citation-memory tests
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
 viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)
+viewer/pdfsync.js                        Its PDF pane: which PDF an export came from, page ranges, scroll sync (pure; test-pdfsync.mjs)
 viewer/pseudo-key.js                     pseudonym_key.xlsx reader, fake<->real swaps (pure; test-pseudo-key.mjs)
 viewer/xlsx-read.js                      Minimal .xlsx reader (pure; test-xlsx-read.mjs)
 viewer/web-shim.js                       chrome.* shim for the hosted pages (was inline in viewer.js)

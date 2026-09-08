@@ -20,6 +20,11 @@
 //   FLAGGING. A name the run left in the clear is selected and flagged; the
 //   list is written to New Real Values.txt in the case folder, which
 //   PDF-Linker reads on its next pass.
+//   THE PDF. The PDF an export came from sits in the case folder under its
+//   real name; the reader finds it through the key and shows it either SIDE
+//   BY SIDE, page for page, the two scrolling together, or SWAPPED IN for
+//   the pages whose text is not worth reading (a badly scanned exhibit) —
+//   the PDF page standing in the text's place while the rest stays text.
 //
 // The decisions are in viewer/textdoc.js and viewer/pseudo-key.js (tested
 // from Node); this file is the DOM around them.
@@ -30,6 +35,10 @@ import { createToaPanel } from "./toa.js";
 import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
+import * as PS from "./pdfsync.js";
+import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdfjs/build/pdf.worker.mjs");
 
 const $ = (id) => document.getElementById(id);
 const toolbar = $("toolbar");
@@ -79,6 +88,7 @@ let fileHandle = null;       // FileSystemFileHandle for in-place save
 let dirHandle = null;        // the case folder, when one was opened
 let folderName = "";
 let folderDocs = [];         // [{ name, handle, quarantined }]
+let folderPdfs = [];         // [{ name, handle }] — the case folder's PDFs
 let key = null;              // parsed key (PK.parseKey)
 let rev = null, fwd = null, reals = null; // compiled matchers
 let settings = loadSettings();
@@ -355,7 +365,7 @@ function setKey(parsed) {
   key = parsed || null;
   compileKey();
   $("st-key").textContent = key ? "Key: " + PK.keyTitle(key) + (key.dropped.ambiguous ? ` (${key.dropped.ambiguous} ambiguous fake${key.dropped.ambiguous === 1 ? "" : "s"} retired)` : "") : "";
-  if (doc) retranslate();
+  if (doc) { retranslate(); refreshPdf(); }
 }
 
 keySelect.addEventListener("change", () => {
@@ -474,10 +484,11 @@ async function caseFolderFor(fileHandle) {
 
 /** Read a case folder: its key, its exports and its flagged values. */
 async function scanFolder(h) {
-  const found = { keyHandle: null, valuesHandle: null, textDir: null, docs: [], rootDocs: [] };
+  const found = { keyHandle: null, valuesHandle: null, textDir: null, docs: [], rootDocs: [], pdfs: [] };
   for await (const [name, entry] of h.entries()) {
     if (entry.kind === "file") {
-      if (TD.isKeyName(name) && !found.keyHandle) found.keyHandle = entry;
+      if (/\.pdf$/i.test(name) && !/_temp\.pdf$/i.test(name)) found.pdfs.push({ name, handle: entry });
+      else if (TD.isKeyName(name) && !found.keyHandle) found.keyHandle = entry;
       else if (name.toLowerCase() === TD.VALUES_FILE.toLowerCase()) found.valuesHandle = entry;
       else if (TD.isExportName(name)) found.rootDocs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
     } else if (entry.kind === "directory" && name.toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) {
@@ -493,16 +504,19 @@ async function scanFolder(h) {
   // itself; with a Text Files folder present, a root .txt is somebody's note.
   if (!found.docs.length) found.docs = found.rootDocs;
   found.docs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  found.pdfs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   return found;
 }
 
 /** Make `h` the current case folder: key attached, documents listed, flags loaded. */
 async function adoptFolder(h, { quiet = false } = {}) {
+  if (dirHandle !== h) forgetPdfs();
   dirHandle = h;
   folderName = h.name;
   await rememberDir(h);
   const found = await scanFolder(h);
   folderDocs = found.docs;
+  folderPdfs = found.pdfs;
   if (found.keyHandle) {
     try {
       const f = await found.keyHandle.getFile();
@@ -526,6 +540,7 @@ async function adoptFolder(h, { quiet = false } = {}) {
   renderFlags();
   renderDocList();
   if (folderDocs.length) { autoShowSidePanel(); showSideTab("tab-docs"); }
+  if (doc) refreshPdf();
   return found;
 }
 
@@ -595,6 +610,7 @@ function openText(text, name, handle) {
   document.title = name + " — Text Reader";
   if (!dirHandle) loadValuesFor(name);
   render();
+  setupPdfForDoc();
   markDocList();
   $("st-file").textContent = name + (TD.isQuarantinedName(name) ? " (quarantined by PDF-Linker's leak gate)" : "") + " · " + doc.pages.length + " page" + (doc.pages.length === 1 ? "" : "s");
   updateDirty();
@@ -693,6 +709,9 @@ document.addEventListener("drop", (e) => {
         catch (err) { toast(String(err.message || err), { error: true }); }
       }
     }
+    // A dropped PDF is the one to show beside (or inside) the open document.
+    const pdf = files.find((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
+    if (pdf && doc) await usePickedPdf(pdf);
     const at = files.findIndex((f) => /\.(txt|leak)$/i.test(f.name) || f.type === "text/plain");
     if (at === -1) return;
     let handle = null;
@@ -722,6 +741,14 @@ function render() {
         lab.appendChild(r);
       }
       lab.contentEditable = "false";
+      if (PS.pdfPageOf(p)) {
+        // Swap this page for its PDF page, or back (the PDF section below).
+        const b = document.createElement("button");
+        b.className = "swap-page";
+        b.type = "button";
+        b.addEventListener("click", (e) => { e.preventDefault(); toggleSwap(i); });
+        lab.appendChild(b);
+      }
       sec.appendChild(lab);
     }
     const inner = document.createElement("div");
@@ -818,7 +845,7 @@ function afterTextChange() {
   paintHighlights();
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
-const relayout = debounce(() => { placeCitations(); }, 150);
+const relayout = debounce(() => { placeCitations(); refitPdf(); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -1495,6 +1522,429 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "[") { e.preventDefault(); nudgeAutoSpeed(0.8); }
   else if (e.key === "]") { e.preventDefault(); nudgeAutoSpeed(1.25); }
   else if (e.key === " " && autoOn) { e.preventDefault(); setAutoScroll(false); }
+});
+
+// ── the PDF beside the text ──────────────────────────────────────────────────────────
+//
+// PDF-Linker leaves the PDF in the case folder under its REAL name and names
+// the export for the same stem SCRUBBED, so the pair is found by translating
+// each PDF's stem forward through the key (pdfsync.matchPdf); a Combined
+// Text.txt is matched member by member off its banners, and a document with
+// no match (a lone file, a folder with no key) takes a PDF picked by hand.
+// The PDF is read only when it is first shown, never on open.
+//
+// Two ways to look at it, and one at a time:
+//   SIDE BY SIDE — the pane beside the stage holds one slot per text page,
+//   the PDF page rendered into it as it scrolls into view, and the two
+//   scroll boxes are held at the same page-and-fraction (scrollPosition /
+//   scrollTopFor), so page 7 of the text sits beside page 7 of the PDF
+//   whatever their heights. Remembered.
+//   SWAPPED IN — with the pane off, a page (or "5, 12-18" of them) shows its
+//   PDF page in the text's place: the page body is hidden, not removed, so
+//   it still serializes on save and comes back with one click. Remembered
+//   per document, by PDF page number.
+// Canvases are dropped as their pages scroll far out of view: a 130-page
+// PDF rendered whole is gigabytes of bitmap.
+const pdfPane = $("pdf-pane");
+const sbsBtn = $("sbs-toggle");
+const swapBtn = $("swap-btn");
+const swapPop = $("swap-pop");
+const PDF_MARGIN = 800; // px beyond the viewport a page is kept rendered
+let sbsOn = lsGet("textReader.sbs", false) === true;
+let pdfSources = [];        // per text page: { name, handle?, file? } or null
+let pdfPicked = null;       // a PDF chosen by hand for this document
+let swaps = new Set();      // "<pdf name>|<page>" swapped in
+const pdfCache = new Map(); // name → Promise<{ pdf, count, sizes, name }>
+
+function forgetPdfs() {
+  for (const p of pdfCache.values()) p.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }).catch(() => {});
+  pdfCache.clear();
+  pdfPicked = null;
+}
+
+/** Open (once) the PDF behind a source: its page count and each page's size at scale 1. */
+function loadPdf(src) {
+  if (pdfCache.has(src.name)) return pdfCache.get(src.name);
+  const p = (async () => {
+    const file = src.file || await src.handle.getFile();
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const sizes = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const v = (await pdf.getPage(i)).getViewport({ scale: 1 });
+      sizes.push({ w: v.width, h: v.height });
+    }
+    return { pdf, count: pdf.numPages, sizes, name: src.name };
+  })();
+  pdfCache.set(src.name, p);
+  p.catch(() => pdfCache.delete(src.name));
+  return p;
+}
+
+/** Which PDF each text page comes from, through the key and the folder's PDFs. */
+function resolvePdfSources() {
+  if (!doc) { pdfSources = []; return; }
+  const names = PS.pageSources(doc.pages, fileName);
+  const fwdName = fwd ? (s) => forwardText(s).text : null;
+  const memo = new Map();
+  pdfSources = names.map((n) => {
+    if (!memo.has(n)) {
+      const hit = PS.matchPdf(n, folderPdfs.map((p) => p.name), fwdName);
+      memo.set(n, hit ? folderPdfs.find((p) => p.name === hit) : pdfPicked);
+    }
+    return memo.get(n) || null;
+  });
+}
+function pdfSourceNames() { return [...new Set(pdfSources.filter(Boolean).map((s) => s.name))]; }
+/** The PDF page a text page shows, with its source — or null. */
+function pdfTarget(i) {
+  const src = pdfSources[i], n = doc && PS.pdfPageOf(doc.pages[i]);
+  return src && n ? { src, page: n, key: src.name + "|" + n } : null;
+}
+
+/** Everything the PDF side shows for the current document, from scratch. */
+function setupPdfForDoc() {
+  pdfPicked = null;
+  swaps = new Set(lsGet(PS.swapStoreKey(folderName, fileName), []));
+  refreshPdf();
+}
+/** Re-resolve the PDFs (the key or the folder changed) and redraw. */
+function refreshPdf() {
+  resolvePdfSources();
+  const any = pdfSources.some(Boolean);
+  sbsBtn.disabled = !doc;
+  swapBtn.disabled = !doc;
+  refreshSwapButtons();
+  applySwaps();
+  buildPdfPane();
+  updatePdfStatus();
+  if (!any && !doc) hideSwapPop();
+}
+function updatePdfStatus() {
+  const names = pdfSourceNames();
+  const n = [...swaps].filter((k) => pdfSources.some((s, i) => s && pdfTarget(i) && pdfTarget(i).key === k)).length;
+  $("st-pdf").textContent = !doc ? "" : names.length ? "PDF: " + names.join(", ") + (n ? ` · ${n} page${n === 1 ? "" : "s"} shown from the PDF` : "") : "No matching PDF in the case folder";
+}
+
+// ── rendering a page into a canvas ──
+async function renderInto(el, src, pageNo, cssWidth) {
+  const want = src.name + "|" + pageNo + "|" + cssWidth + "|" + (window.devicePixelRatio || 1);
+  if (el.dataset.rendered === want) return;
+  el.dataset.want = want;
+  let info;
+  try { info = await loadPdf(src); }
+  catch (e) { el.querySelector(".pdf-wait").textContent = "Could not open " + src.name + ": " + (e.message || e); return; }
+  if (el.dataset.want !== want) return;
+  if (pageNo > info.count) { el.querySelector(".pdf-wait").textContent = `The PDF has ${info.count} page${info.count === 1 ? "" : "s"}; there is no page ${pageNo}.`; return; }
+  const page = await info.pdf.getPage(pageNo);
+  if (el.dataset.want !== want) return;
+  const base = page.getViewport({ scale: 1 });
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  const vp = page.getViewport({ scale: (cssWidth / base.width) * dpr });
+  const canvas = el.querySelector("canvas");
+  if (el.__task) { try { el.__task.cancel(); } catch { /* done */ } }
+  canvas.width = Math.round(vp.width);
+  canvas.height = Math.round(vp.height);
+  canvas.style.width = cssWidth + "px";
+  canvas.style.height = Math.round(vp.height / dpr) + "px";
+  el.style.height = "";
+  const task = page.render({ canvasContext: canvas.getContext("2d"), viewport: vp });
+  el.__task = task;
+  try { await task.promise; } catch (e) { if (!(e && e.name === "RenderingCancelledException")) console.warn(e); return; }
+  finally { if (el.__task === task) el.__task = null; }
+  if (el.dataset.want !== want) return;
+  el.dataset.rendered = want;
+  el.classList.add("ready");
+}
+function releaseCanvas(el) {
+  if (!el.dataset.rendered) return;
+  const canvas = el.querySelector("canvas");
+  // Keep the box its size, drop the bitmap.
+  el.style.height = canvas.style.height;
+  canvas.width = canvas.height = 0;
+  canvas.style.height = "0px";
+  delete el.dataset.rendered;
+  el.classList.remove("ready");
+}
+function slotShell(cls, tag) {
+  const el = document.createElement("div");
+  el.className = cls;
+  const t = document.createElement("div");
+  t.className = "pdf-tag";
+  t.textContent = tag;
+  const c = document.createElement("canvas");
+  const w = document.createElement("div");
+  w.className = "pdf-wait";
+  w.textContent = "Loading…";
+  el.append(t, c, w);
+  return el;
+}
+/** The height a page box should have before its bitmap arrives, from the PDF's page sizes. */
+async function presize(el, src, pageNo, cssWidth) {
+  try {
+    const info = await loadPdf(src);
+    const sz = info.sizes[pageNo - 1];
+    if (sz && !el.dataset.rendered) el.style.height = Math.round((cssWidth * sz.h) / sz.w) + "px";
+  } catch { /* the render reports it */ }
+}
+const paneObserver = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    const el = en.target;
+    if (en.isIntersecting) renderInto(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), paneWidth());
+    else releaseCanvas(el);
+  }
+}, { root: pdfPane, rootMargin: PDF_MARGIN + "px 0px" });
+const inlineObserver = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    const el = en.target;
+    const sec = el.closest(".tpage");
+    if (en.isIntersecting) renderInto(el, pdfSources[Number(sec.dataset.index)], Number(el.dataset.page), inlineWidth(sec));
+    else releaseCanvas(el);
+  }
+}, { root: stageEl, rootMargin: PDF_MARGIN + "px 0px" });
+
+function paneWidth() { return Math.max(200, pdfPane.clientWidth - 32); }
+function inlineWidth(sec) { return Math.max(200, sec.clientWidth); }
+
+// ── side by side ──
+function buildPdfPane() {
+  pdfPane.innerHTML = "";
+  pdfPane.hidden = !sbsOn || !doc;
+  document.body.classList.toggle("sbs", sbsOn && !!doc);
+  sbsBtn.setAttribute("aria-pressed", String(sbsOn && !!doc));
+  if (pdfPane.hidden) return;
+  if (!pdfSources.some(Boolean)) {
+    const box = document.createElement("div");
+    box.className = "pane-empty";
+    box.innerHTML = `<p>No PDF in the case folder matches <b></b>${dirHandle ? "" : " (no case folder is open)"}.</p><p><button type="button">Pick the PDF…</button></p>`;
+    box.querySelector("b").textContent = fileName;
+    box.querySelector("button").addEventListener("click", pickPdf);
+    pdfPane.appendChild(box);
+    return;
+  }
+  const w = paneWidth();
+  doc.pages.forEach((p, i) => {
+    const t = pdfTarget(i);
+    let el;
+    if (!t) {
+      el = document.createElement("div");
+      el.className = "pdf-slot blank";
+      el.textContent = p.banner != null ? TD.pageLabel(p) : (p.header != null ? "No PDF page for this part" : "");
+    } else {
+      el = slotShell("pdf-slot", "PDF p. " + t.page + (pdfSourceNames().length > 1 ? " · " + t.src.name : ""));
+      el.dataset.page = String(t.page);
+      el.style.height = Math.round(w * 11 / 8.5) + "px"; // letter, until the PDF says
+      presize(el, t.src, t.page, w);
+      paneObserver.observe(el);
+    }
+    el.dataset.index = String(i);
+    el.style.width = t ? w + "px" : "";
+    pdfPane.appendChild(el);
+  });
+  syncScroll("text", true);
+}
+function setSideBySide(on, { remember = true } = {}) {
+  sbsOn = !!on;
+  if (remember) lsSet("textReader.sbs", sbsOn);
+  buildPdfPane();
+  applySwaps();
+  relayout();
+}
+sbsBtn.addEventListener("click", () => setSideBySide(!sbsOn));
+
+// The two boxes at one place: whichever the reader scrolls leads, and the
+// other follows to the same page and fraction of it. A follow lands a
+// scroll event of its own, which is ignored while the lead is fresh.
+let syncLead = null, syncTimer = 0;
+function pageGeometry(box, sel) {
+  const els = [...box.querySelectorAll(sel)];
+  return { tops: els.map((e) => e.offsetTop), heights: els.map((e) => e.offsetHeight) };
+}
+function syncScroll(from, force) {
+  if (!sbsOn || pdfPane.hidden) return;
+  if (!force && syncLead && syncLead !== from) return;
+  syncLead = from;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => { syncLead = null; }, 120);
+  const [a, b, sa, sb] = from === "text" ? [stageEl, pdfPane, ".tpage", ".pdf-slot"] : [pdfPane, stageEl, ".pdf-slot", ".tpage"];
+  const ga = pageGeometry(a, sa), gb = pageGeometry(b, sb);
+  if (!ga.tops.length || !gb.tops.length) return;
+  const target = PS.scrollTopFor(PS.scrollPosition(a.scrollTop, ga.tops, ga.heights), gb.tops, gb.heights);
+  if (Math.abs(b.scrollTop - target) > 1) b.scrollTop = target;
+}
+stageEl.addEventListener("scroll", () => syncScroll("text"), { passive: true });
+pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });
+
+/** Widths changed (a resize, the panel): re-fit every shown PDF page. */
+function refitPdf() {
+  if (!doc) return;
+  if (!pdfPane.hidden) {
+    const w = paneWidth();
+    for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) {
+      el.style.width = w + "px";
+      if (el.dataset.rendered) renderInto(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), w);
+      else presize(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), w);
+    }
+  }
+  for (const el of pagesEl.querySelectorAll(".pdf-inline")) {
+    const sec = el.closest(".tpage");
+    if (el.dataset.rendered) renderInto(el, pdfSources[Number(sec.dataset.index)], Number(el.dataset.page), inlineWidth(sec));
+  }
+}
+
+// ── swapping pages in ──
+function isSwapped(i) { const t = pdfTarget(i); return !!(t && swaps.has(t.key)); }
+function refreshSwapButtons() {
+  for (const sec of pagesEl.querySelectorAll(".tpage")) {
+    const b = sec.querySelector(".swap-page");
+    if (!b) continue;
+    const i = Number(sec.dataset.index);
+    const t = pdfTarget(i);
+    const on = isSwapped(i);
+    b.classList.toggle("nopdf", !t);
+    b.textContent = on ? "⇄ Text" : "⇄ PDF";
+    b.title = !t ? "No PDF matched this document — ⇄ PDF pages… in the toolbar picks one" : on ? "Back to the text of this page" : `Show PDF page ${t.page} here instead of its text`;
+  }
+}
+/** Show or hide the PDF page inside each swapped text page (never while side by side). */
+function applySwaps() {
+  for (const sec of pagesEl.querySelectorAll(".tpage")) {
+    const i = Number(sec.dataset.index);
+    const t = pdfTarget(i);
+    const on = !sbsOn && !!t && swaps.has(t.key);
+    sec.classList.toggle("swapped", on);
+    let inline = sec.querySelector(".pdf-inline");
+    if (on) {
+      if (!inline) {
+        inline = slotShell("pdf-inline", "PDF p. " + t.page);
+        sec.querySelector(".page-inner").appendChild(inline);
+      }
+      if (inline.dataset.page !== String(t.page) || inline.dataset.src !== t.src.name) {
+        inline.dataset.page = String(t.page);
+        inline.dataset.src = t.src.name;
+        delete inline.dataset.rendered;
+        inline.classList.remove("ready");
+        inline.querySelector(".pdf-tag").textContent = "PDF p. " + t.page;
+        presize(inline, t.src, t.page, inlineWidth(sec));
+      }
+      inlineObserver.observe(inline);
+    } else if (inline) {
+      inlineObserver.unobserve(inline);
+      if (inline.__task) { try { inline.__task.cancel(); } catch { /* done */ } }
+      inline.remove();
+    }
+  }
+  refreshSwapButtons();
+  updatePdfStatus();
+  placeCitations();
+}
+function persistSwaps() { lsSet(PS.swapStoreKey(folderName, fileName), [...swaps]); }
+function setSwaps(indices, on) {
+  for (const i of indices) { const t = pdfTarget(i); if (t) { if (on) swaps.add(t.key); else swaps.delete(t.key); } }
+  persistSwaps();
+  if (sbsOn) { toast(on ? "Those pages show from the PDF once Side by side is off." : "Back to text"); }
+  applySwaps();
+}
+function toggleSwap(i) {
+  const t = pdfTarget(i);
+  if (!t) { showSwapPop(); toast("No PDF matched this document — pick it first.", { error: true }); return; }
+  if (sbsOn) { setSideBySide(false); }
+  setSwaps([i], !swaps.has(t.key));
+}
+
+// The swap popover: "5, 12-18" of the PDF the page in view comes from.
+function sourceInView() {
+  const g = pageGeometry(stageEl, ".tpage");
+  const pos = PS.scrollPosition(stageEl.scrollTop, g.tops, g.heights);
+  for (let i = pos.index; i < pdfSources.length; i++) if (pdfSources[i]) return pdfSources[i];
+  return pdfSources.find(Boolean) || null;
+}
+function indicesForPages(src, pages) {
+  const want = new Set(pages);
+  const out = [];
+  pdfSources.forEach((s, i) => { const t = pdfTarget(i); if (s && t && s.name === src.name && want.has(t.page)) out.push(i); });
+  return out;
+}
+async function showSwapPop() {
+  if (!doc) return;
+  const src = sourceInView();
+  const head = $("swap-pop-head");
+  const note = $("swap-pop-note");
+  if (src) {
+    head.innerHTML = "";
+    head.append("PDF: ");
+    const b = document.createElement("b"); b.textContent = src.name; head.appendChild(b);
+    try { const info = await loadPdf(src); head.append(` · ${info.count} page${info.count === 1 ? "" : "s"}`); } catch { /* the render reports it */ }
+    const mine = [...swaps].filter((k) => k.startsWith(src.name + "|")).map((k) => parseInt(k.split("|")[1], 10));
+    $("swap-range").value = PS.formatPageRanges(mine);
+    note.textContent = mine.length ? `Shown from the PDF now: pages ${PS.formatPageRanges(mine)}.` + (sbsOn ? " (Side by side is on; they show once it is off.)" : "") : "PDF page numbers — the export's own \"Page N\" — a page, or a run of pages: a badly scanned exhibit read from the PDF while the rest stays text.";
+  } else {
+    head.textContent = dirHandle ? `No PDF in ${folderName} matches ${fileName}.` : "No case folder is open, so no PDF was matched.";
+    $("swap-range").value = "";
+    note.textContent = "Pick the PDF this export came from; its pages can then be shown in place of the text.";
+  }
+  const r = swapBtn.getBoundingClientRect();
+  swapPop.style.left = Math.max(8, Math.min(window.innerWidth - 356, r.left)) + "px";
+  swapPop.style.top = (r.bottom + 6) + "px";
+  swapPop.hidden = false;
+  $("swap-range").focus();
+  $("swap-range").select();
+}
+function hideSwapPop() { swapPop.hidden = true; }
+function applyRange(on) {
+  const src = sourceInView();
+  if (!src) { pickPdf(); return; }
+  const text = $("swap-range").value;
+  const max = (() => { const m = $("swap-pop-head").textContent.match(/· (\d+) page/); return m ? parseInt(m[1], 10) : null; })();
+  const { pages, bad } = PS.parsePageRanges(text, max);
+  if (bad.length) { toast("Not a page or a range: " + bad.join(", ") + (max ? ` (the PDF has ${max} pages)` : ""), { error: true }); return; }
+  if (!pages.length) { toast("Type the PDF pages to show, e.g. 5, 12-18", { error: true }); return; }
+  const idx = indicesForPages(src, pages);
+  if (!idx.length) { toast("None of those pages is in this document's text.", { error: true }); return; }
+  if (on) {
+    // "Show these" states the whole set: pages not named go back to text.
+    const keep = new Set(idx.map((i) => pdfTarget(i).key));
+    for (const k of [...swaps]) if (k.startsWith(src.name + "|") && !keep.has(k)) swaps.delete(k);
+  }
+  setSwaps(idx, on);
+  if (on && sbsOn) setSideBySide(false);
+  hideSwapPop();
+  if (on && idx.length) { const sec = pagesEl.querySelector(`.tpage[data-index="${idx[0]}"]`); if (sec) stageEl.scrollTo({ top: sec.offsetTop - 12, behavior: "smooth" }); }
+}
+swapBtn.addEventListener("click", () => { if (swapPop.hidden) showSwapPop(); else hideSwapPop(); });
+$("swap-show").addEventListener("click", () => applyRange(true));
+$("swap-text").addEventListener("click", () => applyRange(false));
+$("swap-clear").addEventListener("click", () => { swaps.clear(); persistSwaps(); applySwaps(); hideSwapPop(); });
+$("swap-close").addEventListener("click", hideSwapPop);
+$("swap-range").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); applyRange(true); } else if (e.key === "Escape") hideSwapPop(); });
+document.addEventListener("mousedown", (e) => { if (!swapPop.hidden && !swapPop.contains(e.target) && e.target !== swapBtn) hideSwapPop(); });
+
+// A PDF picked by hand stands in for every document the folder gave none.
+async function usePickedPdf(file) {
+  if (!file) return;
+  pdfPicked = { name: file.name, file };
+  pdfCache.delete(file.name);
+  refreshPdf();
+  toast("Using " + file.name + " for this document.");
+}
+async function pickPdf() {
+  hideSwapPop();
+  if (window.showOpenFilePicker) {
+    try {
+      const [h] = await window.showOpenFilePicker({ types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }] });
+      await usePickedPdf(await h.getFile());
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      if (!(e && /picker|not allowed|SecurityError|TypeError/i.test(String(e)))) { toast(String(e.message || e), { error: true }); return; }
+    }
+  }
+  $("pdf-input").click();
+}
+$("pdf-pick").addEventListener("click", pickPdf);
+$("pdf-input").addEventListener("change", async () => {
+  const f = $("pdf-input").files[0];
+  $("pdf-input").value = "";
+  await usePickedPdf(f);
 });
 
 // ── hooks for the PWA tab shell ───────────────────────────────────────────────────────
