@@ -117,6 +117,22 @@ export function pageLabel(page) {
   return s;
 }
 
+/**
+ * Whether a page is PLEADING PAPER — numbered down its margin — from its
+ * lines: at least three carry a gutter number, or at least one does and
+ * they are half of the non-blank lines. A lone "1" opening a short
+ * exhibit page is not a margin.
+ */
+export function pageIsNumbered(lines) {
+  let numbered = 0, filled = 0;
+  for (const l of lines || []) {
+    if (!String(l).trim()) continue;
+    filled++;
+    if (gutterPrefix(l)) numbered++;
+  }
+  return numbered >= 3 || (numbered >= 1 && numbered * 2 >= filled);
+}
+
 /** The gutter number a line opens with: { gutter, rest } or null. */
 export function gutterPrefix(line) {
   const m = String(line == null ? "" : line).match(GUTTER_RE);
@@ -414,6 +430,7 @@ export const DEFAULT_SETTINGS = {
   markAlpha: 0.18,   // …and how strong it is (0 = invisible, 1 = solid); subtle by default
   showFakes: false,  // display the fakes instead of the real names
   gutter: true,      // dim the pleading line numbers
+  lineLock: false,   // keep every numbered line on ONE screen line (below)
 };
 
 /** A settings object with every field valid, from whatever was stored. */
@@ -429,6 +446,7 @@ export function normalizeSettings(raw) {
   s.markAlpha = clamp(Number(s.markAlpha), 0.04, 0.9, DEFAULT_SETTINGS.markAlpha);
   s.showFakes = s.showFakes === true;
   s.gutter = s.gutter !== false;
+  s.lineLock = s.lineLock === true;
   return s;
 }
 

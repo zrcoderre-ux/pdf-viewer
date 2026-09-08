@@ -3,7 +3,7 @@
 
 import {
   normalizeStem, spaceStem, matchPdf, pageSources, pdfPageOf,
-  parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor,
+  parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -68,6 +68,12 @@ check("no pages", scrollPosition(50, [], []), { index: 0, fraction: 0, above: 0 
 check("above the first page: the padding is carried in pixels", scrollPosition(0, [20, 120], [100, 100]), { index: 0, fraction: 0, above: 20 });
 check("…so the other box lands at its own top, whatever its page heights", scrollTopFor({ index: 0, fraction: 0, above: 20 }, [20, 900], [880, 880]), 0);
 
+check("anchors: each page spans first line to the next page's first line", anchorGeometry([60, 460, 900], 1300), { tops: [60, 460, 900], heights: [400, 440, 400] });
+check("anchors: a text page and a PDF page meet at their first lines whatever the furniture above", (() => {
+  const text = anchorGeometry([80, 380], 700), pdf = anchorGeometry([120, 1100], 2000);
+  return [scrollTopFor(scrollPosition(80, text.tops, text.heights), pdf.tops, pdf.heights), scrollTopFor(scrollPosition(380, text.tops, text.heights), pdf.tops, pdf.heights), scrollTopFor(scrollPosition(230, text.tops, text.heights), pdf.tops, pdf.heights)];
+})(), [120, 1100, 610]);
+check("anchors: an empty list", anchorGeometry([], 0), { tops: [], heights: [] });
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

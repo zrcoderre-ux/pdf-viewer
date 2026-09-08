@@ -68,7 +68,9 @@ if (fontEl) {
   }
 
   function read() {
-    settings = normalizeSettings({
+    // Over the settings as stored: the reader's own toggles (line lock,
+    // the gutter) are not on this page and must survive a save from it.
+    settings = normalizeSettings(Object.assign({}, settings, {
       font: fontEl.value,
       customFont: customEl.value,
       fontSize: Number(sizeEl.value),
@@ -77,7 +79,7 @@ if (fontEl) {
       marks: marksEl.checked,
       markColor: markColorEl.value,
       markAlpha: Number(markAlphaEl.value),
-    });
+    }));
     show();
     save();
   }

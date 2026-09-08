@@ -5,8 +5,13 @@
 // What it does, and the one rule under all of it:
 //
 //   PAGES. The export's "====== Page N ======" headers lay the text out as
-//   sheets, in a font the reader chooses, with the pleading gutter numbers
-//   dimmed into a margin.
+//   sheets, in a font the reader chooses. A page numbered down its margin
+//   (pleading paper) is laid out as one: the numbers stand in a ruled
+//   margin of their own and each numbered line hangs under its number.
+//   LINE LOCK keeps every numbered line on one screen line — first by
+//   taking the white space beside the page, then the page's own side
+//   margins, then the font — and never by touching the numbers: the
+//   numbers shown are the file's own, and nothing moves between them.
 //   CITATIONS. The same detector the PDF viewer runs (citation-linker.js)
 //   underlines every authority and links it to Lexis+ or Westlaw; the Table
 //   of Authorities panel lists them.
@@ -56,6 +61,7 @@ const marksToggle = $("marks-toggle");
 const markColorEl = $("mark-color");
 const markAlphaEl = $("mark-alpha");
 const fakesToggle = $("fakes-toggle");
+const lockToggle = $("lock-toggle");
 const providerEl = $("provider");
 const docsList = $("docs-list");
 const docsHint = $("docs-hint");
@@ -167,6 +173,10 @@ function applySettings() {
   root.setProperty("--reader-size", settings.fontSize + "px");
   root.setProperty("--reader-lh", String(settings.lineHeight));
   root.setProperty("--reader-width", settings.pageWidth + "px");
+  // The EFFECTIVE size and width are what the pages use: the settings'
+  // own, unless line lock has had to take something off them (below).
+  root.setProperty("--reader-size-eff", settings.fontSize + "px");
+  root.setProperty("--reader-width-eff", settings.pageWidth + "px");
   const mark = TD.markCss(settings);
   root.setProperty("--pn-bg", mark.bg);
   root.setProperty("--pn-bg-hover", mark.hover);
@@ -185,6 +195,7 @@ function applySettings() {
   widthRange.value = String(settings.pageWidth);
   marksToggle.checked = settings.marks;
   fakesToggle.checked = settings.showFakes;
+  lockToggle.checked = settings.lineLock;
 }
 
 for (const p of TD.FONT_PRESETS) {
@@ -210,6 +221,7 @@ marksToggle.addEventListener("change", () => { settings.marks = marksToggle.chec
 markColorEl.addEventListener("input", () => { settings.markColor = markColorEl.value; saveSettings(); applySettings(); });
 markAlphaEl.addEventListener("input", () => { settings.markAlpha = Number(markAlphaEl.value); saveSettings(); applySettings(); });
 fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.checked; saveSettings(); applySettings(); showFakes(settings.showFakes); });
+lockToggle.addEventListener("change", () => { settings.lineLock = lockToggle.checked; saveSettings(); applySettings(); relayout(); });
 
 // ── theme (shared with the PDF viewer) ───────────────────────────────────────
 const themeToggle = $("theme-toggle");
@@ -768,37 +780,72 @@ function render() {
   afterTextChange();
 }
 
-/** Fill a page body from its on-disk text: gutter spans, pseudonym spans. */
+/**
+ * Fill a page body from its on-disk text: one `.line` block per line, each
+ * holding its gutter span (the number, and the spacing after it, which is
+ * kept in the DOM for the round trip and hidden from the layout) and a
+ * `.lt` span with the line's text and pseudonym spans. A block per line is
+ * what lets a numbered page lay its numbers out in a margin of their own:
+ * the text of a line hangs under its number, and a wrapped continuation
+ * never crosses the rule. serializeNodes reads a DIV as a line break, so
+ * the file comes back byte for byte.
+ */
 function buildBody(body, text) {
   body.innerHTML = "";
+  body.classList.toggle("numbered", TD.pageIsNumbered(text.split("\n")));
   const runs = rev ? PK.translateRuns(rev, text) : [{ t: "text", s: text }];
-  let lineStart = true;
+  let line = null, lt = null, lineStart = true;
+  const newLine = () => {
+    line = document.createElement("div");
+    line.className = "line";
+    lt = document.createElement("span");
+    lt.className = "lt";
+    line.appendChild(lt);
+    body.appendChild(line);
+    lineStart = true;
+  };
+  newLine();
   runs.forEach((r, ri) => {
     if (r.t === "swap") {
-      body.appendChild(makePn(r.from, r.to));
+      lt.appendChild(makePn(r.from, r.to));
       lineStart = false;
       return;
     }
     const pieces = r.s.split("\n");
     pieces.forEach((piece, i) => {
-      if (i > 0) { body.appendChild(document.createTextNode("\n")); lineStart = true; }
+      if (i > 0) newLine();
       if (!piece) return;
       // A gutter number is followed by text; where that text is the pseudonym
       // span the NEXT run supplies, the number still opens the line.
       const last = i === pieces.length - 1 && ri + 1 < runs.length;
       const g = lineStart ? TD.gutterPrefix(last ? piece + "\u0001" : piece) : null;
       if (g && g.gutter.length <= piece.length) {
-        const span = document.createElement("span");
-        span.className = "gutter";
-        span.textContent = g.gutter;
-        body.appendChild(span);
+        line.insertBefore(makeGutter(g.gutter), lt);
+        line.classList.add("num");
         const rest = piece.slice(g.gutter.length);
-        if (rest) body.appendChild(document.createTextNode(rest));
-      } else body.appendChild(document.createTextNode(piece));
+        if (rest) lt.appendChild(document.createTextNode(rest));
+      } else lt.appendChild(document.createTextNode(piece));
       lineStart = false;
     });
     lineStart = r.s.endsWith("\n") || (lineStart && r.s === "");
   });
+}
+/** The gutter span: the number (shown in the margin) and the spacing after it (kept, not shown). */
+function makeGutter(prefix) {
+  const m = prefix.match(/^( ?\d{1,2})( *)$/) || [null, prefix, ""];
+  const span = document.createElement("span");
+  span.className = "gutter";
+  const num = document.createElement("span");
+  num.className = "gn";
+  num.textContent = m[1];
+  span.appendChild(num);
+  if (m[2]) {
+    const sp = document.createElement("span");
+    sp.className = "gs";
+    sp.textContent = m[2];
+    span.appendChild(sp);
+  }
+  return span;
 }
 
 function makePn(fake, real) {
@@ -841,11 +888,13 @@ function showFakes(on) {
 // flagged and leaked highlights. Cheap enough to run on every settled edit.
 function afterTextChange() {
   updateCounts();
+  textAnchors = null;
+  applyLineLock();
   placeCitations();
   paintHighlights();
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
-const relayout = debounce(() => { placeCitations(); refitPdf(); }, 150);
+const relayout = debounce(() => { textAnchors = null; applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -903,14 +952,49 @@ function caretOffsetIn(body) {
   if (!sel || !sel.rangeCount) return -1;
   const r = sel.getRangeAt(0);
   if (!body.contains(r.startContainer)) return -1;
-  const { segs } = flatten(body);
-  const seg = segs.find((x) => x.node === r.startContainer);
-  if (seg) return seg.start + r.startOffset;
-  // The caret sits on an element boundary: count the text before it.
-  const probe = document.createRange();
-  probe.selectNodeContents(body);
-  probe.setEnd(r.startContainer, r.startOffset);
-  return probe.toString().length;
+  return offsetOfPoint(body, r.startContainer, r.startOffset);
+}
+// The two walks below count the page's text the way flatten does — a line
+// block is a "\n" — so a caret on an element boundary (an empty line, the
+// end of a line) has an offset, and an offset has a place to put it.
+const BLOCKISH = new Set(["DIV", "P", "LI"]);
+function offsetOfPoint(body, container, offset) {
+  let off = 0, found = -1;
+  const rec = (n, atStart) => {
+    if (found >= 0) return;
+    if (n.nodeType === 3) { if (n === container) found = off + offset; else off += n.data.length; return; }
+    if (n.nodeType !== 1) return;
+    if (n.nodeName === "BR") { off += 1; return; }
+    if (BLOCKISH.has(n.nodeName) && !atStart) off += 1;
+    const kids = [...n.childNodes];
+    for (let i = 0; i < kids.length; i++) {
+      if (n === container && i === offset) { found = off; return; }
+      rec(kids[i], i === 0 && atStart);
+      if (found >= 0) return;
+    }
+    if (n === container) found = off;
+  };
+  rec(body, true);
+  return found >= 0 ? found : off;
+}
+/** { node, offset } for a text offset, on an element boundary where no text node holds it. */
+function pointAtOffset(body, target) {
+  let off = 0, hit = null;
+  const rec = (n, atStart) => {
+    if (hit) return;
+    if (n.nodeType === 3) {
+      if (target >= off && target <= off + n.data.length) hit = { node: n, offset: target - off };
+      off += n.data.length;
+      return;
+    }
+    if (n.nodeType !== 1) return;
+    if (n.nodeName === "BR") { off += 1; return; }
+    if (BLOCKISH.has(n.nodeName) && !atStart) { off += 1; if (target === off) { hit = { node: n, offset: 0 }; return; } }
+    let i = 0;
+    for (const c of [...n.childNodes]) { rec(c, i === 0 && atStart); if (hit) return; i++; }
+  };
+  rec(body, true);
+  return hit || { node: body, offset: body.childNodes.length };
 }
 function snapshotOf(body) {
   return { page: pageIndexOf(body), text: TD.serializeNodes(body), caret: caretOffsetIn(body) };
@@ -931,9 +1015,8 @@ function restoreSnapshot(snap) {
   buildBody(body, snap.text);
   doc.pages[snap.page].lines = snap.text.split("\n");
   if (snap.caret >= 0) {
-    const { segs } = flatten(body);
-    const r = rangeFor(segs, snap.caret, snap.caret);
-    if (r) { const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+    const at = pointAtOffset(body, snap.caret);
+    try { const r = document.createRange(); r.setStart(at.node, at.offset); r.collapse(true); const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(r); } catch { /* the caret is simply not restored */ }
   }
   body.focus({ preventScroll: true });
   setDirty(true);
@@ -1100,6 +1183,61 @@ async function writeText(text, name, handle) {
   return true;
 }
 
+// ── line lock ──────────────────────────────────────────────────────────────────────────
+//
+// Pleading paper is read by its line numbers, and a numbered line that
+// WRAPS puts its tail on a screen line with no number — read across to the
+// PDF, that is one line off. With the lock on every numbered line is held
+// to one screen line, and what is spent to make it fit is, in order: the
+// white space beside the page (the page widens into the stage), the page's
+// own side margins, and only then the font, a point at a time. The numbers
+// themselves are never touched — the gutter shows the file's own, nothing
+// moves between them, and a line too long for even the smallest font wraps
+// under its own number and is counted in the status bar rather than cut.
+// Display only: the settings keep the size and width the reader chose, and
+// the effective values live in two CSS variables the pages read.
+const LOCK_MIN_PX = 9;
+function applyLineLock() {
+  const root = document.documentElement.style;
+  root.setProperty("--reader-size-eff", settings.fontSize + "px");
+  root.setProperty("--reader-width-eff", settings.pageWidth + "px");
+  document.body.classList.toggle("line-lock", !!settings.lineLock);
+  document.body.classList.remove("lock-tight");
+  for (const el of pagesEl.querySelectorAll(".lt.overlong")) el.classList.remove("overlong");
+  const st = $("st-lock");
+  if (!settings.lineLock || !doc) { st.textContent = ""; return; }
+  const bodies = pageBodies().filter((b) => b.classList.contains("numbered") && !b.closest(".tpage").classList.contains("swapped"));
+  if (!bodies.length) { st.textContent = "Line lock: no numbered lines"; return; }
+  // Measured line by line: a grid item's text overflow is not in the page
+  // body's own scrollWidth.
+  const lts = [];
+  for (const b of bodies) lts.push(...b.querySelectorAll(".line.num > .lt"));
+  const overflow = () => { let o = 0; for (const lt of lts) o = Math.max(o, lt.scrollWidth - lt.clientWidth); return o; };
+  const avail = Math.max(300, stageEl.clientWidth - 32);
+  let width = settings.pageWidth, size = settings.fontSize, tight = false;
+  let over = overflow();
+  for (let n = 0; over > 0 && width < avail && n < 8; n++) {
+    width = Math.min(avail, width + over + 1);
+    root.setProperty("--reader-width-eff", width + "px");
+    over = overflow();
+  }
+  if (over > 0) { tight = true; document.body.classList.add("lock-tight"); over = overflow(); }
+  while (over > 0 && size > LOCK_MIN_PX) {
+    size -= 1;
+    root.setProperty("--reader-size-eff", size + "px");
+    over = overflow();
+  }
+  let stillWrap = 0;
+  if (over > 0) {
+    for (const lt of lts) if (lt.scrollWidth > lt.clientWidth + 1) { lt.classList.add("overlong"); stillWrap++; }
+  }
+  const spent = [];
+  if (width !== settings.pageWidth) spent.push(`width ${Math.round(width)}px`);
+  if (tight) spent.push("narrow margins");
+  if (size !== settings.fontSize) spent.push(`font ${size}px (set ${settings.fontSize})`);
+  st.textContent = "Line lock" + (spent.length ? ": " + spent.join(", ") : ": every numbered line fits") + (stillWrap ? ` · ${stillWrap} line${stillWrap === 1 ? "" : "s"} still too long at ${LOCK_MIN_PX}px, wrapped under its number` : "");
+}
+
 // ── citations ────────────────────────────────────────────────────────────────────────
 /**
  * A page body as one string with a map from offsets back to text nodes: the
@@ -1116,7 +1254,7 @@ function flatten(body, { blankGutters = false } = {}) {
       // length: a cite that wraps onto a numbered line otherwise carries a
       // digit run between its volume and its reporter, or between the code
       // and its section, and parses as nothing (the pdf_linker.py rule).
-      text += blankGutters && n.parentElement && n.parentElement.classList.contains("gutter") ? " ".repeat(n.data.length) : n.data;
+      text += blankGutters && n.parentElement && n.parentElement.closest(".gutter") ? " ".repeat(n.data.length) : n.data;
       return;
     }
     if (n.nodeType !== 1) return;
@@ -1573,11 +1711,42 @@ function loadPdf(src) {
       const v = (await pdf.getPage(i)).getViewport({ scale: 1 });
       sizes.push({ w: v.width, h: v.height });
     }
-    return { pdf, count: pdf.numPages, sizes, name: src.name };
+    const info = { pdf, count: pdf.numPages, sizes, name: src.name, lines: sizes.map(() => null) };
+    // Where each page's FIRST printed line sits, for the side-by-side
+    // anchors: read in the background, the pane re-aligning as it lands.
+    (async () => {
+      for (let i = 1; i <= pdf.numPages; i++) {
+        try {
+          const tc = await (await pdf.getPage(i)).getTextContent();
+          let top = Infinity;
+          for (const it of tc.items) {
+            if (!it.str || !it.str.trim() || !it.transform) continue;
+            const t = sizes[i - 1].h - (it.transform[5] + (it.height || 0));
+            if (t >= 0 && t < top) top = t;
+          }
+          info.lines[i - 1] = isFinite(top) ? top : null;
+        } catch { info.lines[i - 1] = null; }
+      }
+      if (sbsOn && !pdfPane.hidden) syncScroll("text", true);
+    })();
+    return info;
   })();
   pdfCache.set(src.name, p);
-  p.catch(() => pdfCache.delete(src.name));
+  p.then((info) => { p.__info = info; }).catch(() => pdfCache.delete(src.name));
   return p;
+}
+const PDF_LINE_DEFAULT = 72 / 792; // an inch down a letter page, until the PDF says
+/** A slot's first printed line, in px from the slot's top, from the PDF loaded so far. */
+function pdfFirstLine(el) {
+  const src = pdfSources[Number(el.dataset.index)];
+  const page = Number(el.dataset.page);
+  const w = el.clientWidth || paneWidth();
+  let info = null;
+  try { const p = pdfCache.get(src.name); if (p && p.__info) info = p.__info; } catch { info = null; }
+  const sz = info && info.sizes[page - 1];
+  const y = info && info.lines[page - 1];
+  if (sz && y != null) return (y * w) / sz.w;
+  return sz ? (PDF_LINE_DEFAULT * sz.h * w) / sz.w : el.clientHeight * PDF_LINE_DEFAULT;
 }
 
 /** Which PDF each text page comes from, through the key and the folder's PDFs. */
@@ -1684,6 +1853,7 @@ async function presize(el, src, pageNo, cssWidth) {
     const info = await loadPdf(src);
     const sz = info.sizes[pageNo - 1];
     if (sz && !el.dataset.rendered) el.style.height = Math.round((cssWidth * sz.h) / sz.w) + "px";
+    if (el.classList.contains("pdf-slot")) syncScroll("text", true);
   } catch { /* the render reports it */ }
 }
 const paneObserver = new IntersectionObserver((entries) => {
@@ -1752,12 +1922,39 @@ function setSideBySide(on, { remember = true } = {}) {
 sbsBtn.addEventListener("click", () => setSideBySide(!sbsOn));
 
 // The two boxes at one place: whichever the reader scrolls leads, and the
-// other follows to the same page and fraction of it. A follow lands a
-// scroll event of its own, which is ignored while the lead is fresh.
+// other follows. The place is measured from each page's FIRST PRINTED LINE
+// — the text page's first line of text below its label, the PDF page's
+// first line of type below its top margin — so the two top lines line up,
+// and between two pages' first lines the boxes move in proportion. A
+// follow lands a scroll event of its own, which is ignored while the lead
+// is fresh.
 let syncLead = null, syncTimer = 0;
+let textAnchors = null; // memo: the text pages' first lines, reset on any relayout
 function pageGeometry(box, sel) {
   const els = [...box.querySelectorAll(sel)];
   return { tops: els.map((e) => e.offsetTop), heights: els.map((e) => e.offsetHeight) };
+}
+function firstLineOffset(sec) {
+  const top = sec.getBoundingClientRect().top;
+  for (const l of sec.querySelectorAll(".line")) {
+    if (l.textContent.trim()) return l.getBoundingClientRect().top - top;
+  }
+  const body = sec.querySelector(".page-body");
+  return body ? body.getBoundingClientRect().top - top : 0;
+}
+function textGeometry() {
+  const secs = [...pagesEl.querySelectorAll(".tpage")];
+  if (!secs.length) return { tops: [], heights: [] };
+  if (!textAnchors || textAnchors.length !== secs.length) textAnchors = secs.map((sec) => sec.offsetTop + firstLineOffset(sec));
+  const last = secs[secs.length - 1];
+  return PS.anchorGeometry(textAnchors, last.offsetTop + last.offsetHeight);
+}
+function pdfGeometry() {
+  const slots = [...pdfPane.querySelectorAll(".pdf-slot")];
+  if (!slots.length) return { tops: [], heights: [] };
+  const anchors = slots.map((el) => el.offsetTop + (el.classList.contains("blank") ? 0 : pdfFirstLine(el)));
+  const last = slots[slots.length - 1];
+  return PS.anchorGeometry(anchors, last.offsetTop + last.offsetHeight);
 }
 function syncScroll(from, force) {
   if (!sbsOn || pdfPane.hidden) return;
@@ -1765,8 +1962,9 @@ function syncScroll(from, force) {
   syncLead = from;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => { syncLead = null; }, 120);
-  const [a, b, sa, sb] = from === "text" ? [stageEl, pdfPane, ".tpage", ".pdf-slot"] : [pdfPane, stageEl, ".pdf-slot", ".tpage"];
-  const ga = pageGeometry(a, sa), gb = pageGeometry(b, sb);
+  const [a, b] = from === "text" ? [stageEl, pdfPane] : [pdfPane, stageEl];
+  const ga = from === "text" ? textGeometry() : pdfGeometry();
+  const gb = from === "text" ? pdfGeometry() : textGeometry();
   if (!ga.tops.length || !gb.tops.length) return;
   const target = PS.scrollTopFor(PS.scrollPosition(a.scrollTop, ga.tops, ga.heights), gb.tops, gb.heights);
   if (Math.abs(b.scrollTop - target) > 1) b.scrollTop = target;
@@ -1952,6 +2150,8 @@ window.__textReaderLoadLocal = (file, handle) => openFile(file, handle);
 window.__textReaderRememberDir = (h) => rememberDir(h);
 window.__textReaderReflow = () => { if (doc) placeCitations(); };
 window.__pdfViewerUnregister = () => {};
+// For the smoke test: the geometry the side-by-side sync reads.
+window.__textReaderSyncGeometry = () => ({ text: textGeometry(), pdf: pdfGeometry() });
 
 // ── boot ───────────────────────────────────────────────────────────────────────────────────
 applySettings();
