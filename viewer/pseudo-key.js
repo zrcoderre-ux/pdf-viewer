@@ -514,3 +514,73 @@ export function findReals(compiledReals, text) {
   }
   return out;
 }
+
+// ---- the as-you-type prompt (the Claude extension's compileTypeahead) ----------
+
+/**
+ * Typeahead entries for the as-you-type prompt: the warning's own rows
+ * (common English out), longest real first so "Helen Rasho" is offered
+ * whole before its surname token, each carrying a regex that matches only
+ * at the very END of the text — the word the caret just finished.
+ *
+ * `partial` marks a real that OPENS a longer real in the same key —
+ * "Helen" when the key also binds "Helen Rasho". The space bar cannot tell
+ * "Helen" the whole name from "Helen" the first half of one, so it never
+ * swaps a partial: the arrow still does, and the space simply types on
+ * toward the longer phrase, which is offered whole the moment it is
+ * finished.
+ */
+export function compileTypeahead(key, alsoLonger) {
+  const warn = ((key && key.warn) || []).filter((w) => !isCommonReal(w.real));
+  // `alsoLonger`: values not offered themselves (a kept "Helen Rasho") that a
+  // shorter real may still be the opening of — "Helen" stays partial.
+  const folded = warn.map((w) => fold(w.real)).concat((alsoLonger || []).map((v) => fold(v)));
+  return warn
+    .slice()
+    .sort((a, b) => b.real.length - a.real.length)
+    .map((w) => ({
+      real: w.real,
+      fake: w.fake,
+      partial: isOpeningOfLonger(fold(w.real), folded),
+      rx: new RegExp("(?<![A-Za-z0-9_])" + escapeRe(w.real).replace(/ /g, "\\s+") + (POSS_TAIL_RE.test(w.real) ? "" : "(?:['’][sS])?") + "$", "i"),
+    }));
+}
+// Whether `f` (folded) begins some LONGER folded real in `all` at a word
+// edge: "helen" opens "helen rasho"; it does not open "helena rasho".
+function isOpeningOfLonger(f, all) {
+  if (!f) return false;
+  for (const other of all) {
+    if (other.length <= f.length || other.slice(0, f.length) !== f) continue;
+    if (!/[a-z0-9_]/i.test(other.charAt(f.length))) return true;
+  }
+  return false;
+}
+
+/**
+ * The real value `textBefore` ENDS with — the name just typed out, caret
+ * hard against its last character — or null. `matched` is the text as the
+ * user typed it, which is what the swap must remove and what the fake's
+ * casing mirrors. Each test runs against only the tail, so a long page
+ * costs the same as a short one per keystroke.
+ */
+export function endingReal(ahead, textBefore) {
+  const t = String(textBefore || "");
+  if (!t) return null;
+  for (const e of ahead || []) {
+    const tail = t.slice(-(e.real.length * 2 + 8));
+    const m = e.rx.exec(tail);
+    if (m) {
+      // "Zachary's" typed against a bare "Zachary" row offers "John's".
+      let fake = e.fake;
+      const mp = m[0].match(POSS_MATCH_RE);
+      if (mp && !POSS_TAIL_RE.test(e.real)) fake = e.fake + mp[0];
+      return { real: e.real, fake, matched: m[0], partial: !!e.partial };
+    }
+  }
+  return null;
+}
+
+/** Whether the space bar swaps `hit` on its own: a whole name yes, the opening of a longer one no. */
+export function swapsOnSpace(hit) {
+  return !!hit && !hit.partial;
+}

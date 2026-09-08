@@ -9,6 +9,7 @@
 import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
+  compileTypeahead, endingReal, swapsOnSpace,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -91,6 +92,26 @@ const grown = keyOf([
 ]);
 check("a re-run's key is the same case", sameCaseKey(key, grown), true);
 check("another case is not", sameCaseKey(key, keyOf([["person", "A B", "C D", "", "", "", 1]])), false);
+
+// ---- the as-you-type prompt --------------------------------------------------
+console.log("typeahead");
+{
+  const ahead = compileTypeahead(key);
+  check("longest real first", ahead[0].real.length >= ahead[ahead.length - 1].real.length, true);
+  const whole = endingReal(ahead, "Plaintiff Helen Rasho");
+  check("the name just typed is offered, with its fake", whole && [whole.real, whole.fake, whole.matched, whole.partial], ["Helen Rasho", "Ingrid Strangeways", "Helen Rasho", false]);
+  const two = compileTypeahead(keyOf([["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 2], ["person-token", "Helen", "Ingrid", "", "", "", 2]]));
+  const first = endingReal(two, "Plaintiff Helen");
+  check("a real that opens a longer one is partial", first && [first.real, first.partial], ["Helen", true]);
+  check("…and the longer one, once finished, is whole", (endingReal(two, "Plaintiff Helen Rasho") || {}).partial, false);
+  check("space swaps a whole name and not a partial", [swapsOnSpace(whole), swapsOnSpace(first), swapsOnSpace(null)], [true, false, false]);
+  const kept = compileTypeahead(keyOf([["person-token", "Helen", "Ingrid", "", "", "", 2]]), ["Helen Rasho"]);
+  check("a real that opens a KEPT value is partial too", (endingReal(kept, "Helen") || {}).partial, true);
+  check("a possessive rides the swap", (endingReal(ahead, "and Rasho's") || {}).fake, "Strangeways's");
+  check("nothing at the end, nothing offered", endingReal(ahead, "Plaintiff Helen Rasho alleges"), null);
+  check("inside a longer word, nothing", endingReal(ahead, "Rashomon Rasho, and Grasho"), null);
+  check("the match is case-insensitive and reports what was typed", (endingReal(ahead, "HELEN RASHO") || {}).matched, "HELEN RASHO");
+}
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

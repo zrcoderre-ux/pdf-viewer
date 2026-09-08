@@ -188,7 +188,7 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 body.lock-tight .page-body { padding-left: 14px; padding-right: 14px; }
 /* One block per line. An empty line keeps a line's height. */
 .line { min-height: calc(var(--reader-lh) * 1em); }
-.line > .lt { display: block; min-width: 0; }
+.line > .lt { display: block; min-width: 0; min-height: calc(var(--reader-lh) * 1em); }
 /* Pleading paper: the numbers stand in a ruled margin, each line's text
    hanging under its number, a wrapped continuation never crossing the rule.
    The spacing the file writes after the number is in the DOM (the round
@@ -278,6 +278,14 @@ body.show-fakes.marks-off .pn { background: transparent; box-shadow: none; }
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35);
 }
 #pn-tip b { color: #ffd54f; }
+/* The as-you-type prompt at the caret: the pseudonym the name just typed will carry. */
+#type-tip {
+  position: fixed; z-index: 41; pointer-events: none; max-width: 420px;
+  background: #1f2328; color: #fff; border-radius: 4px; padding: 5px 8px; font-size: 12px; line-height: 1.35;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35); border-left: 3px solid #ffd54f;
+}
+#type-tip b { color: #ffd54f; }
+#type-tip .keys { color: #b9bcc0; }
 #toast {
   position: fixed; left: 50%; bottom: calc(var(--status-height) + 14px); transform: translateX(-50%); z-index: 50;
   background: #1f2328; color: #fff; padding: 8px 14px; border-radius: 6px; font-size: 13px; max-width: 70vw;

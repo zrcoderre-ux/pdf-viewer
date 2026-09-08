@@ -151,7 +151,11 @@ export function gutterPrefix(line) {
 //
 // Chrome's `contenteditable="plaintext-only"` inserts a "\n" for Enter inside a
 // pre-wrap element, but a <br> or a wrapping <div> can still arrive (a paste,
-// an older engine), so both are read as line breaks too.
+// an older engine), so both are read as line breaks too — except a <br> that
+// CLOSES its element, which is the placeholder an empty editable block
+// carries so the caret has somewhere to go (Chrome leaves one behind when a
+// block is emptied, and the reader puts one in every empty line slot); a
+// trailing line break renders as nothing, and it is read as nothing.
 
 const TEXT_NODE = 3;
 const ELEMENT_NODE = 1;
@@ -167,7 +171,7 @@ function walk(node, emit, opts) {
     if (n.nodeType !== ELEMENT_NODE) return;
     const name = String(n.nodeName || "").toUpperCase();
     if (name === "BR") {
-      emit("\n");
+      if (n.nextSibling) emit("\n");
       return;
     }
     const fake = n.getAttribute ? n.getAttribute("data-fake") : null;
@@ -403,6 +407,51 @@ export function isKeyName(name) {
 // unscrubbed copies (never listed as documents: it carries the real names).
 export const TEXT_SUBFOLDER = "Text Files";
 export const ORIGINAL_SUBFOLDER_RE = /^original text/i;
+
+// ---- fixed line slots -------------------------------------------------------------
+//
+// On pleading paper the numbers are the paper: an edit moves TEXT between
+// the numbered slots and never moves a number. Enter in a line sends the
+// text after the caret down into the next slot, whose own text goes down a
+// slot, and so on until an EMPTY slot takes the last of it — the first blank
+// line below absorbs the shift, as it does on the typed page; with no blank
+// slot left, the last line's text lands on a new UNNUMBERED line at the foot
+// of the page (the file gains a line; nothing is lost). Backspace at the
+// start of a line is the inverse: its text joins the line above and the run
+// of non-blank lines under it moves up one slot, the slot at the run's end
+// left empty — and an unnumbered line that shift emptied at the foot of the
+// page is dropped again. `lines` are [{ num, text }] — whether the line
+// carries a gutter number, and its text after it.
+
+/** Enter in line `i`, `head` staying and `tail` moving down. */
+export function shiftDown(lines, i, head, tail) {
+  const out = lines.map((l) => ({ num: !!l.num, text: String(l.text) }));
+  if (i < 0 || i >= out.length) return { lines: out, appended: false, target: i };
+  out[i].text = String(head);
+  let carry = String(tail);
+  for (let j = i + 1; j < out.length; j++) {
+    const displaced = out[j].text;
+    out[j].text = carry;
+    if (displaced === "") return { lines: out, appended: false, target: i + 1 };
+    carry = displaced;
+  }
+  out.push({ num: false, text: carry });
+  return { lines: out, appended: true, target: i + 1 };
+}
+
+/** Backspace at the start of line `i` (i ≥ 1): its text joins line i-1, the run below moves up. */
+export function shiftUp(lines, i) {
+  const out = lines.map((l) => ({ num: !!l.num, text: String(l.text) }));
+  if (i < 1 || i >= out.length) return { lines: out, joinAt: -1, dropped: false };
+  const joinAt = out[i - 1].text.length;
+  out[i - 1].text += out[i].text;
+  let j = i;
+  while (j + 1 < out.length && out[j + 1].text !== "") { out[j].text = out[j + 1].text; j++; }
+  out[j].text = "";
+  let dropped = false;
+  if (j === out.length - 1 && !out[j].num) { out.pop(); dropped = true; }
+  return { lines: out, joinAt, dropped };
+}
 
 // ---- reading settings -----------------------------------------------------------------
 
