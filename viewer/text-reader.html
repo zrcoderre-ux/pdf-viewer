@@ -23,23 +23,26 @@
     <button id="load-key" title="Load a pseudonym_key.xlsx">Load key…</button>
     <span class="sep"></span>
 
-    <label class="tb-label" for="font-select">Font</label>
-    <select id="font-select" title="Reading font"></select>
+    <label class="tb-label" for="font-select" title="The font every text file opens in — remembered; display only, the file is never changed">Font</label>
+    <select id="font-select" title="The reading font, remembered as the default for every text file. Display only — the file itself is never changed. Also under Options."></select>
     <input id="font-custom" type="text" placeholder="font-family…" title="Any installed font, as a CSS font-family" hidden>
     <button id="size-down" title="Smaller text">A−</button>
     <span id="size-label" class="tb-value">15</span>
     <button id="size-up" title="Larger text">A+</button>
     <label class="tb-label" for="lh-range">Leading</label>
-    <input id="lh-range" type="range" min="1" max="2.4" step="0.1" title="Line height">
+    <input id="lh-range" type="range" min="1" max="2.4" step="0.1" title="Leading (line spacing), remembered as the default for every text file">
     <label class="tb-label" for="width-range">Width</label>
     <input id="width-range" type="range" min="480" max="1400" step="20" title="Page width">
     <span class="sep"></span>
 
     <label class="tb-toggle" title="Highlight every pseudonym lightly and show the fake on hover"><input id="marks-toggle" type="checkbox"> Mark pseudonyms</label>
+    <input id="mark-color" type="color" title="Highlight colour — remembered">
+    <input id="mark-alpha" type="range" class="short" min="0.04" max="0.9" step="0.02" title="Highlight intensity — remembered">
     <label class="tb-toggle" title="Show the document as it is on disk — the fakes — instead of the real names"><input id="fakes-toggle" type="checkbox"> Show fakes</label>
     <span class="sep"></span>
 
-    <button id="flag-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F)">🚩 Flag real value</button>
+    <button id="flag-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead.">🚩 Flag real value</button>
+    <button id="autoscroll" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses" aria-pressed="false">↓ Auto-scroll</button>
     <span class="spacer"></span>
 
     <label class="tb-label" for="provider">Cites on</label>
@@ -49,8 +52,11 @@
     </select>
     <button id="toa-toggle" title="Table of Authorities panel" aria-pressed="false">§ Authorities</button>
     <button id="panel-toggle" title="Documents and flagged values" aria-pressed="true">▤ Panel</button>
+    <button id="defaults-btn" title="Reading defaults (font, size, leading, width) in the extension's Options page" hidden>⚙ Defaults</button>
     <button id="theme-toggle" title="Light / dark">☀</button>
   </div>
+
+  <div id="key-offer" hidden><span id="key-offer-text"></span><button id="key-offer-btn" class="primary"></button><button id="key-offer-close" title="Dismiss">×</button></div>
 
   <div id="main">
     <div id="stage">
@@ -69,14 +75,19 @@
       <div class="side-tabs">
         <button id="tab-docs" class="side-tab active" aria-pressed="true">Documents</button>
         <button id="tab-flags" class="side-tab" aria-pressed="false">Flagged <span id="flag-count" class="badge">0</span></button>
+        <button id="side-collapse" class="side-tab collapse" title="Collapse the panel (▤ Panel in the toolbar brings it back)">»</button>
       </div>
       <div id="side-docs" class="side-body">
         <p class="side-hint" id="docs-hint">Open a case folder to list its exports here.</p>
         <ul id="docs-list"></ul>
       </div>
       <div id="side-flags" class="side-body" hidden>
-        <p class="side-hint">Names you spotted unfaked. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it on its next run or Apply Leak Fixes and pseudonymizes each one.</p>
+        <p class="side-hint">Names you spotted unfaked — to be pseudonymized. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it on its next run or Apply Leak Fixes.</p>
         <ul id="flags-list"></ul>
+        <div id="keeps-block" hidden>
+          <p class="side-hint">Wrongly faked — kept as they really read. Un-marked here now; PDF-Linker restores them in the files on its next run.</p>
+          <ul id="keeps-list"></ul>
+        </div>
         <div class="side-actions">
           <button id="flags-save" class="primary" title="Write New Real Values.txt into the case folder">Save list to case folder</button>
           <button id="flags-copy" title="Copy the list, one value per line">Copy</button>
@@ -96,13 +107,22 @@
     <span id="st-dirty"></span>
   </div>
 
-  <div id="flag-pop" hidden><button id="flag-pop-btn">🚩 Flag as real value</button><span id="flag-pop-note"></span></div>
+  <div id="flag-pop" hidden><button id="flag-pop-btn">🚩 Flag as real value</button><span id="flag-pop-note"></span><button id="flag-pop-keep" class="secondary" hidden>Keep…</button></div>
+  <div id="keep-menu" hidden>
+    <div class="km-head">Wrongly faked? <b id="keep-menu-value"></b><br><span class="km-sub">The file carries <b id="keep-menu-fake"></b> until PDF-Linker re-runs.</span></div>
+    <button id="keep-menu-no">Keep in this case (no)</button>
+    <button id="keep-menu-never">Never fake it anywhere (never)</button>
+    <button id="keep-menu-undo">It is a pseudonym after all</button>
+    <button id="keep-menu-cancel" class="secondary">Cancel</button>
+  </div>
   <div id="pn-tip" hidden></div>
   <div id="toast" hidden></div>
 
   <input id="file-input" type="file" accept=".txt,.LEAK,text/plain" hidden>
   <input id="key-input" type="file" accept=".xlsx" hidden>
 
+  <!-- Shift+Space = middle click on the citation underlines, as in the viewer. -->
+  <script src="shift-space-open.js"></script>
   <script type="module" src="text-reader.js"></script>
 </body>
 </html>

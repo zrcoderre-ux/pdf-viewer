@@ -7,9 +7,10 @@
 // top of the file and never in it.
 
 import {
+  markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix,
   serializeNodes, textOf, findRealsInPlain,
-  addValue, removeValue, formatValuesFile, parseValuesFile, flagProblem,
+  addValue, removeValue, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward } from "./viewer/pseudo-key.js";
@@ -115,6 +116,16 @@ const file = formatValuesFile(list);
 check("file round trip", parseValuesFile(file), list);
 check("comments and blanks ignored", parseValuesFile("# note\n\n  Rosa Delgado\n#x\nRosa Delgado\n"), ["Rosa Delgado"]);
 check("the file is named with spaces", VALUES_FILE, "New Real Values.txt");
+let keeps = addKeep([], "no", "Stockton Theatres");
+keeps = addKeep(keeps, "bogus", "Palermo");
+keeps = addKeep(keeps, "never", "stockton theatres");
+check("a keep per value, the later control winning, a bad control read as no", keeps, [{ control: "no", value: "Palermo" }, { control: "never", value: "Stockton Theatres" }]);
+check("keptControl", [keptControl(keeps, "PALERMO"), keptControl(keeps, "x")], ["no", ""]);
+check("removeKeep", removeKeep(keeps, "palermo"), [{ control: "never", value: "Stockton Theatres" }]);
+const both = formatValuesFile(list, keeps);
+check("keeps written as control lines", both.endsWith("\nno: Palermo\nnever: Stockton Theatres\n"), true);
+check("both halves read back", parseReaderFile(both), { values: list, keeps });
+check("parseValuesFile ignores the keeps", parseValuesFile(both), list);
 check("flag: nothing selected", flagProblem("  ", false) !== "", true);
 check("flag: a pseudonym", flagProblem("Strangeways", true) !== "", true);
 check("flag: a passage", flagProblem("x".repeat(200), false) !== "", true);
@@ -131,6 +142,10 @@ check("key name", [isKeyName("pseudonym_key.xlsx"), isKeyName("pseudonym_key (1)
 console.log("settings");
 const s = normalizeSettings({ font: "nope", fontSize: 200, lineHeight: "x", marks: false });
 check("bad settings fall back", [s.font, s.fontSize, s.lineHeight, s.marks], ["georgia", 40, 1.5, false]);
+const mk = normalizeSettings({ markColor: "#0000FF", markAlpha: 5 });
+check("highlight colour normalised and intensity bounded", [mk.markColor, mk.markAlpha], ["#0000ff", 0.9]);
+check("a bad colour falls back", normalizeSettings({ markColor: "blue" }).markColor, "#f5c518");
+check("markCss", markCss({ markColor: "#ff0000", markAlpha: 0.2 }), { bg: "rgba(255, 0, 0, 0.200)", hover: "rgba(255, 0, 0, 0.500)", ring: "rgba(255, 0, 0, 0.120)" });
 check("custom font css", fontCss(normalizeSettings({ font: "custom", customFont: "Baskerville, serif" })), "Baskerville, serif");
 check("empty custom falls back to the first preset", fontCss(normalizeSettings({ font: "custom", customFont: " " })), "Georgia, 'Times New Roman', serif");
 

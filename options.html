@@ -31,6 +31,15 @@
     #history-table td { padding: 4px 6px; border-bottom: 1px solid #eee; word-break: break-all; }
     #history-table tr:last-child td { border-bottom: none; }
     .history-empty { font-size: 13px; color: #888; margin-top: 8px; }
+    .reader-grid { display: grid; grid-template-columns: 130px 1fr; gap: 8px 12px; align-items: center; font-size: 13px; }
+    .reader-grid select, .reader-grid input[type="text"], .reader-grid input[type="number"] {
+      padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+    .reader-grid select { min-width: 220px; }
+    .reader-grid input[type="text"] { width: 100%; margin-top: 6px; box-sizing: border-box; }
+    .reader-grid input[type="number"] { width: 90px; }
+    .reader-sample { background: #fff; border: 1px solid #e2e2e6; border-radius: 4px; padding: 14px 18px; margin: 12px 0 0; color: #111; }
+    .reader-sample .pn { background: var(--pn-bg, rgba(245,197,24,0.18)); box-shadow: 0 0 0 1px var(--pn-ring, transparent); border-radius: 2px; }
+    .reader-sample.marks-off .pn { background: transparent; box-shadow: none; }
   </style>
 </head>
 <body>
@@ -75,6 +84,43 @@
       downloading them. The viewer's own dropdown still overrides this for a
       single document.
     </p>
+  </div>
+
+  <h2>Text reader — default font and leading</h2>
+  <div class="card">
+    <p class="lede" style="margin-top:0;">
+      How PDF-Linker's <code>.txt</code> exports read in the text reader
+      (<strong>📝 Open text reader</strong> in the toolbar popup): the font and
+      leading every text file opens in. Display only — the text file itself is
+      never changed. The reader's own toolbar sets the same defaults, and every
+      open reader tab follows a change here at once.
+    </p>
+    <div class="reader-grid">
+      <label for="reader-font">Font</label>
+      <div>
+        <select id="reader-font"></select>
+        <input id="reader-font-custom" type="text" placeholder="any installed font, as a CSS font-family" hidden>
+      </div>
+      <label for="reader-size">Size (px)</label>
+      <div><input id="reader-size" type="number" min="9" max="40" step="1"></div>
+      <label for="reader-lh">Leading</label>
+      <div><input id="reader-lh" type="number" min="1" max="3" step="0.1"> × the font size</div>
+      <label for="reader-width">Page width (px)</label>
+      <div><input id="reader-width" type="number" min="400" max="2000" step="20"></div>
+      <label for="reader-marks">Pseudonyms</label>
+      <div><label class="radio" style="margin:0"><input type="checkbox" id="reader-marks"> Highlight each pseudonym and show the fake on hover</label></div>
+      <label for="reader-mark-color">Highlight</label>
+      <div>
+        <input id="reader-mark-color" type="color" title="Highlight colour">
+        <input id="reader-mark-alpha" type="range" min="0.04" max="0.9" step="0.02" title="Highlight intensity" style="width:140px;vertical-align:middle;">
+        <span id="reader-mark-alpha-val" style="font-size:12px;color:#555;"></span>
+      </div>
+    </div>
+    <p id="reader-sample" class="reader-sample">Plaintiff <span class="pn">Helen Rasho</span> alleges that <span class="pn">Quillmark</span> breached the lease. (See Kremerman v. White (2021) 71 Cal.App.5th 358.)<br><span class="pn">Rasho's</span> counsel, Rosa Delgado, so declared.</p>
+    <div style="margin-top:8px;">
+      <button id="reader-reset" class="secondary" type="button">Restore defaults</button>
+      <span class="status" id="reader-status"></span>
+    </div>
   </div>
 
   <h2>Table of Authorities</h2>
@@ -238,5 +284,6 @@ https://example.gov/getfile?id=*</pre>
 
   <script src="citation-site-rules.js"></script>
   <script src="options.js"></script>
+  <script type="module" src="viewer/reader-options.js"></script>
 </body>
 </html>
