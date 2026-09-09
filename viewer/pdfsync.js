@@ -318,8 +318,9 @@ export function alignLines(lines, rows, min = 0.25) {
  * Where each line goes on a page with no number grid: matched lines at their
  * row's top and left; the others under the line before them, a pitch apart
  * (the median distance between matched rows); leading ones stack up from the
- * first match. Returns [{ top, left }] per line, or null where nothing
- * matched at all, plus the pitch.
+ * first match. Returns [{ top, left, size }] per line — `size` the matched
+ * row's own type height, null for a line no row claims — or null where
+ * nothing matched at all, plus the pitch.
  */
 export function rowLayout(lineTexts, rows) {
   const map = alignLines(lineTexts, rows.map((r) => r.text));
@@ -340,50 +341,81 @@ export function rowLayout(lineTexts, rows) {
   const out = new Array(lineTexts.length).fill(null);
   let last = null, k = 0;
   lineTexts.forEach((_, i) => {
-    if (map[i] != null) { last = rows[map[i]].top; k = 0; out[i] = { top: last, left: rows[map[i]].left }; }
-    else if (last != null) { k++; out[i] = { top: last + k * pitch, left: left0 }; }
+    if (map[i] != null) { last = rows[map[i]].top; k = 0; out[i] = { top: last, left: rows[map[i]].left, size: rows[map[i]].height }; }
+    else if (last != null) { k++; out[i] = { top: last + k * pitch, left: left0, size: null }; }
   });
   const first = matched[0];
-  for (let i = 0; i < first; i++) out[i] = { top: Math.max(0, rows[map[first]].top - (first - i) * pitch), left: left0 };
+  for (let i = 0; i < first; i++) out[i] = { top: Math.max(0, rows[map[first]].top - (first - i) * pitch), left: left0, size: null };
   return { positions: out, pitch };
 }
 
-// ---- the scale a text page is drawn at beside its PDF page --------------------
+// ---- the type a text page is set in beside its PDF page ----------------------
 //
 // A page is a page: the type keeps its own spacing whatever size it is set
 // at, the way a PDF does, so zooming in must never push two lines together.
-// The reader's LEADING therefore sets the scale — the sheet, the line grid
-// and the margins are drawn so that one of the PDF's line slots is exactly
-// one of the reader's lines — and a size too big for the pane grows the
+// And the PDF's type sets the text's. The reading size is the size of the
+// BODY type — the PDF's body drawn at that size fixes the scale, and the
+// sheet, the line grid, the margins and the PDF page beside it are all
+// drawn at it, so the two are one size to the eye at any zoom — while each
+// line takes its own row's size where the PDF varies (a heading, a
+// footnote, the small print of an exhibit), so a page of tight rows fits
+// them instead of being pushed down. A size too big for the pane grows the
 // page past its edge, where the horizontal scroll bar reaches it.
 
 /**
- * The scale: the reader's leading (in px) fills one line slot of the PDF's
- * grid (`pitch`, in PDF units). Bounded, so a misread pitch cannot blow the
- * sheet up or crush it. Null where there is no grid to scale to.
+ * The page's body type size in PDF units: the median height of its printed
+ * rows, the margin's bare line numbers left out. Null where there are no
+ * rows to read.
  */
-export function matchedScale(pitch, leading, { min = 0.15, max = 8 } = {}) {
-  const p = Number(pitch), l = Number(leading);
-  if (!(p > 0) || !(l > 0)) return null;
-  return Math.min(max, Math.max(min, l / p));
+export function pageTypeSize(rows) {
+  const hs = (rows || []).filter((r) => r && r.height > 0 && !/^\s*\d{1,2}\s*$/.test(r.text || "")).map((r) => r.height);
+  return hs.length ? median(hs) : null;
 }
 
 /**
- * Lines that never land on each other: each top is held at least `gap`
- * (one line of type, in the same units) below the line before it, pushed
- * down where the PDF's own rows were printed closer than that — a scan's
- * text layer has rows a few points apart, a signature under its rule
- * tighter still. Reading the text beats lining it up: a pushed line is
- * out of register with the PDF by that much and legible, an overlapped one
- * is neither. Nulls (lines with no place) pass through. `tops` in order.
+ * Each line's type size from its row's: `sizes` per line (null where the
+ * line has no row), `base` the page's body size. A row within `tolerance`
+ * of the body is the body — a text layer's heights wobble, an OCR's more —
+ * and one further off (a heading, a footnote) keeps its own.
  */
-export function spreadTops(tops, gap) {
-  const g = Number(gap) > 0 ? Number(gap) : 0;
-  let last = null;
-  return (tops || []).map((t) => {
+export function typeSizes(sizes, base, tolerance = 0.2) {
+  const b = Number(base) > 0 ? Number(base) : null;
+  return (sizes || []).map((h) => {
+    if (!(h > 0)) return b;
+    if (b && Math.abs(h - b) <= b * tolerance) return b;
+    return h;
+  });
+}
+
+/**
+ * The scale that draws `unit` PDF units as `px` pixels: the PDF's body
+ * type at the reading size. Bounded, so a misread size cannot blow the
+ * sheet up or crush it. Null where there is nothing to scale to.
+ */
+export function matchedScale(unit, px, { min = 0.15, max = 8 } = {}) {
+  const u = Number(unit), p = Number(px);
+  if (!(u > 0) || !(p > 0)) return null;
+  return Math.min(max, Math.max(min, p / u));
+}
+
+/**
+ * Lines that never land on each other: each top is held at least the box
+ * of the line before it below that line — `box` one height for all, or one
+ * per line — pushed down where the PDF's own rows were printed closer
+ * than that (a scan's text layer, a signature under its rule). Reading the
+ * text beats lining it up: a pushed line is out of register with the PDF
+ * by that much and legible, an overlapped one is neither. Nulls (lines
+ * with no place) pass through. `tops` in order.
+ */
+export function spreadTops(tops, box) {
+  const boxes = Array.isArray(box) ? box : null;
+  const one = !boxes && Number(box) > 0 ? Number(box) : 0;
+  let last = null, lastBox = 0;
+  return (tops || []).map((t, i) => {
     if (t == null || !Number.isFinite(t)) return t == null ? null : t;
-    const y = last == null ? t : Math.max(t, last + g);
+    const y = last == null ? t : Math.max(t, last + lastBox);
     last = y;
+    lastBox = boxes ? (Number(boxes[i]) > 0 ? Number(boxes[i]) : 0) : one;
     return y;
   });
 }

@@ -1578,7 +1578,7 @@ function applyLineLock() {
   // already, whatever the lock says: the page is drawn at the reading
   // size's scale and widened for its longest line.
   if (pagesEl.querySelector(".tpage.matched")) {
-    st.textContent = "Side by side: pages at the PDF's own scale — the size zooms both sheets" + (matchedExtra ? `, ${matchedExtra}px wider for the longest line, scroll sideways` : "");
+    st.textContent = "Side by side: the text in the PDF's own type sizes, the size zooming both sheets" + (matchedExtra ? `, ${matchedExtra}px wider for the longest line, scroll sideways` : "");
     return;
   }
   if (!settings.lineLock) { st.textContent = ""; return; }
@@ -2486,23 +2486,26 @@ function buildPdfPane() {
 // matches at all (a scan with no text layer) does the page keep its flowing
 // layout, inside a sheet of the PDF page's height.
 //
-// THE SIZE IS THE SCALE. A page is a page: the type keeps its own spacing
-// whatever size it is set at, the way a PDF does. So the reader's leading
-// is what the grid is drawn to — one PDF line slot is one line of the
-// reader's type (pdfsync.matchedScale) — and the sheet, its margins and the
-// PDF page beside it are drawn at that same scale. Setting the size up
-// GROWS BOTH SHEETS instead of pushing the lines together; a page too wide
-// for its pane runs past the edge and the scroll bar underneath reaches it.
+// THE SIZE IS THE SCALE, AND THE PDF'S TYPE SETS THE TEXT'S. A page is a
+// page: the type keeps its own spacing whatever size it is set at, the way
+// a PDF does. The reading size is the size of the BODY type: the PDF's
+// body drawn at that size fixes the scale (pdfsync.matchedScale), and the
+// sheet, its margins, the line grid and the PDF page beside it are all
+// drawn at that scale — so the two are one size to the eye at any zoom,
+// and setting the size up GROWS BOTH SHEETS instead of pushing the lines
+// together; a page too wide for its pane runs past the edge and the
+// scroll bar underneath reaches it. Where the PDF's type varies, each line
+// takes its own row's size (a heading larger, a footnote or an exhibit's
+// small print smaller; pdfsync.typeSizes), so a page of tight rows fits
+// them. The leading setting has no say here: the PDF's rows are the
+// leading.
 // A line too long for the PDF's own column is never wrapped either (a
 // wrapped line would fall on the slot below it): the sheet widens by what
 // the longest one needs, and the stage scrolls sideways.
 // Display only — no line moves in the file, and the layout is lifted the
 // moment the pane closes.
 let matchedExtra = 0; // px the sheets were widened for their longest line
-/** The reader's own leading: the height one line of the file takes, in px. */
-function readerLeading() {
-  return Math.max(1, settings.fontSize * (Number(settings.lineHeight) || 1.5));
-}
+const LINE_BOX = 1.2;  // a line's box, in its own type size: what the next line must clear
 /** A pane slot at a width: re-rendered where its bitmap is up, pre-sized where it is not. */
 function fitSlot(el, w) {
   const prev = parseFloat(el.style.width);
@@ -2518,7 +2521,6 @@ function fitSlot(el, w) {
 }
 function applyMatchedLayout() {
   const on = sbsOn && !pdfPane.hidden;
-  const leading = readerLeading();
   const plans = [];
   const matchedSlots = new Set();
   for (const sec of pagesEl.querySelectorAll(".tpage")) {
@@ -2531,30 +2533,38 @@ function applyMatchedLayout() {
     const body = sec.querySelector(".page-body");
     const lines = [...body.querySelectorAll(":scope > .line")];
     const geom = info.geoms[t.page - 1];
+    const rows = info.rows[t.page - 1];
     const numbered = !!geom && body.classList.contains("numbered");
-    let tops = null, lefts = null, pitch = 0;
+    let tops = null, lefts = null, sizes = null, pitch = 0;
+    // The body type: the page's own, else (numbers with no body read) the
+    // reader's leading filling the pitch, as it does off the grid.
+    let base = PS.pageTypeSize(rows);
     if (numbered) {
       tops = PS.slotTops(lines.map((l) => ({ num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null })), geom);
       pitch = geom.pitch;
+      if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
+      sizes = PS.typeSizes(lines.map(() => null), base);
     } else {
-      const rows = info.rows[t.page - 1];
       const lay = rows && rows.length ? PS.rowLayout(lines.map((l) => l.textContent), rows) : null;
       if (lay) {
         tops = lay.positions.map((p) => (p ? p.top : null));
         lefts = lay.positions.map((p) => (p ? p.left : null));
         pitch = lay.pitch;
+        if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
+        sizes = PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base);
       }
     }
     // Never on top of each other: a row the PDF (a scan's text layer, most
-    // often) prints closer under the one above than a line of type is tall
+    // often) prints closer under the one above than that line's box is tall
     // is pushed down to clear it, and out of register with the PDF by that
     // much — reading the text beats lining it up (pdfsync.spreadTops).
-    if (tops) tops = PS.spreadTops(tops, pitch);
+    const boxes = sizes ? sizes.map((h) => h * LINE_BOX) : null;
+    if (tops) tops = PS.spreadTops(tops, boxes);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
-    const scale = PS.matchedScale(pitch, leading) || paneWidth() / sz.w;
+    const scale = PS.matchedScale(base, settings.fontSize) || paneWidth() / sz.w;
     matchedSlots.add(slot);
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, pitch, scale });
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, scale });
   }
   // Every slot the layout did not claim keeps the pane's own width.
   if (on) for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) if (!matchedSlots.has(el)) fitSlot(el, paneWidth());
@@ -2565,17 +2575,19 @@ function applyMatchedLayout() {
     p.sec.classList.add("matched");
     p.sec.style.width = w + "px";
     // The PDF page's height — or more, where a pushed line runs past its foot.
-    const foot = p.tops ? Math.max(...p.tops.filter((y) => y != null), -Infinity) + 1.5 * p.pitch : 0;
+    let foot = 0;
+    if (p.tops) p.tops.forEach((y, k) => { if (y != null) foot = Math.max(foot, y + p.boxes[k] + p.pitch); });
     p.sec.querySelector(".page-inner").style.height = Math.round(Math.max(p.sz.h, foot) * p.scale) + "px";
     p.body.classList.toggle("fixed", !!p.tops);
     if (p.geom) p.sec.style.setProperty("--body-x", (p.geom.bodyX * p.scale) + "px");
     else p.sec.style.removeProperty("--body-x");
     p.lines.forEach((l, k) => {
       const top = p.tops ? p.tops[k] : null;
-      if (top == null) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; return; }
+      if (top == null) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; return; }
       l.style.top = (top * p.scale) + "px";
       l.style.left = p.lefts && p.lefts[k] != null ? (p.lefts[k] * p.scale) + "px" : "";
-      l.style.lineHeight = (p.pitch * p.scale) + "px";
+      l.style.fontSize = (p.sizes[k] * p.scale) + "px";
+      l.style.lineHeight = (p.boxes[k] * p.scale) + "px";
     });
   }
   // The longest line: the sheets grow by what it needs, all of them by the
@@ -2604,7 +2616,7 @@ function clearMatched(sec) {
   sec.querySelector(".page-inner").style.height = "";
   const body = sec.querySelector(".page-body");
   body.classList.remove("fixed");
-  for (const l of body.querySelectorAll(":scope > .line")) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; }
+  for (const l of body.querySelectorAll(":scope > .line")) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
 }
 function setSideBySide(on, { remember = true } = {}) {
   sbsOn = !!on;
@@ -2662,13 +2674,9 @@ function syncScroll(from, force) {
   if (!ga.tops.length || !gb.tops.length) return;
   const target = PS.scrollTopFor(PS.scrollPosition(a.scrollTop, ga.tops, ga.heights), gb.tops, gb.heights);
   if (Math.abs(b.scrollTop - target) > 1) b.scrollTop = target;
-  // Sideways too, where a page is wider than its pane: the two sheets are
-  // the same width at the same scale, so the same share of the run.
-  const amax = a.scrollWidth - a.clientWidth, bmax = b.scrollWidth - b.clientWidth;
-  if (amax > 1 && bmax > 1) {
-    const x = Math.round((a.scrollLeft / amax) * bmax);
-    if (Math.abs(b.scrollLeft - x) > 1) b.scrollLeft = x;
-  }
+  // Not sideways: the text sheet is widened for its longest line and its
+  // margins are not the PDF's, so one box's run is not the other's. Each
+  // scrolls sideways on its own.
 }
 stageEl.addEventListener("scroll", () => syncScroll("text"), { passive: true });
 pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });

@@ -690,14 +690,21 @@ app, which routes it to the reader tab.
   A page with no numbers (an exhibit, a letter, an order) is laid out on
   the PDF's printed **rows** instead: each text line is matched to the row
   carrying its words and takes its top and left, so paragraphs and headings
-  sit where the PDF's do. **The size is the zoom.** A page is a page: the
-  type keeps its own spacing at any size, the way a PDF does, so the
-  reading size draws the grid — one of the PDF's line slots is one line of
-  your type — and setting it up **grows both sheets** instead of pushing
-  the lines together. A page too wide for its pane runs past the edge with
-  a horizontal scroll bar under it, and a line too long for the PDF's own
-  column is never wrapped either: the sheets widen by what the longest one
-  needs and the two panes scroll sideways together. **Never on top of
+  sit where the PDF's do. **The size is the zoom, and the PDF's type sets
+  the text's.** A page is a page: the type keeps its own spacing at any
+  size, the way a PDF does. The reading size is the size of the *body*
+  type — the PDF's body drawn at that size fixes the scale, and the sheet,
+  the grid, the margins and the PDF page beside it are all drawn at it, so
+  the two are one size to the eye at any zoom without a hand adjustment —
+  and where the PDF's type varies, each line takes its own row's size: a
+  heading larger, a footnote or an exhibit's small print smaller, so a
+  page of tight rows fits them. (The leading setting has no say here; the
+  PDF's rows are the leading.) Setting the size up **grows both sheets**
+  instead of pushing the lines together. A page too wide for its pane runs
+  past the edge with a horizontal scroll bar under it, and a line too long
+  for the PDF's own column is never wrapped either: the sheets widen by
+  what the longest one needs. Each pane scrolls sideways on its own — the
+  text sheet is wider and its margins are not the PDF's. **Never on top of
   itself:** where the PDF's own rows sit closer than a line of type is tall
   (a scan's text layer, a signature under its rule) the line is pushed down
   to clear the one above, a line out of register with the PDF and legible

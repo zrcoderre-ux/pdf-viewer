@@ -5,7 +5,7 @@ import {
   normalizeStem, spaceStem, matchPdf, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout,
-  matchedScale, spreadTops,
+  matchedScale, spreadTops, pageTypeSize, typeSizes,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -116,27 +116,32 @@ console.log("a page with no numbers: rows matched by their words");
   check("lines match their rows in order, blanks and an unmatched line left out", alignLines(lines, rows.map((r) => r.text)), [0, null, 1, 2, null, 3, 4, null, 5, null]);
   check("a scrubbed name still matches its row on the other words", alignLines(["Plaintiff Ingrid Strangeways alleges that Melbury breached the lease."], ["Plaintiff Helen Rasho alleges that Quillmark breached the lease."]), [0]);
   const lay = rowLayout(lines, rows);
-  check("matched lines take their row's top and left", [lay.positions[0], lay.positions[5]], [{ top: 60, left: 200 }, { top: 150, left: 90 }]);
-  check("an unmatched line sits a pitch under the line before, at the page's margin", lay.positions[9], { top: 210 + lay.pitch, left: 72 });
+  check("matched lines take their row's top, left and type size", [lay.positions[0], lay.positions[5]], [{ top: 60, left: 200, size: 12 }, { top: 150, left: 90, size: 12 }]);
+  check("an unmatched line sits a pitch under the line before, at the page's margin, no size of its own", lay.positions[9], { top: 210 + lay.pitch, left: 72, size: null });
   check("a blank line takes the slot under its predecessor", lay.positions[1].top, 60 + lay.pitch);
   check("the pitch is the median row spacing", lay.pitch, 14);
   check("nothing matched, nothing laid out", rowLayout(["zzz"], rows), null);
 }
 
-console.log("the scale a page is drawn at: the reading size, never the spacing");
+console.log("the type a page is set in: the PDF's own sizes at the reading size");
 {
-  // 15px type at 1.5 leading in a 24pt pleading slot: the sheet is drawn a
-  // shade under the PDF's own size, and every point of size grows it.
-  check("the leading fills one line slot", matchedScale(24, 22.5), 0.9375);
-  check("a bigger size is a bigger sheet, the spacing untouched", matchedScale(24, 45), 1.875);
-  check("no pitch, no scale", [matchedScale(0, 22.5), matchedScale(24, 0)], [null, null]);
-  check("a misread pitch cannot blow the sheet up", matchedScale(0.5, 22.5), 8);
+  const rows = [{ top: 60, height: 12, text: "1" }, { top: 60, height: 12, text: "IN THE SUPERIOR COURT" }, { top: 84, height: 12, text: "2" }, { top: 84, height: 12.4, text: "FOR THE COUNTY" }, { top: 700, height: 8, text: "footnote" }];
+  check("the body size is the median row height, the margin's numbers left out", pageTypeSize(rows), 12);
+  check("no rows, no size", [pageTypeSize([]), pageTypeSize(null)], [null, null]);
+  check("a row within a fifth of the body is the body; a heading and a footnote keep their own; a line with no row takes the body", typeSizes([12.4, 11, 18, null, 8], 12), [12, 12, 18, 12, 8]);
+  check("no body size: each row its own", typeSizes([10, null], null), [10, null]);
+  // 12pt body at a 15px reading size: the sheet is drawn at 1.25, and every point of size grows it.
+  check("the body type at the reading size sets the scale", matchedScale(12, 15), 1.25);
+  check("a bigger size is a bigger sheet, the spacing untouched", matchedScale(12, 30), 2.5);
+  check("no size, no scale", [matchedScale(0, 15), matchedScale(12, 0)], [null, null]);
+  check("a misread size cannot blow the sheet up", matchedScale(0.5, 22.5), 8);
   check("lines on the grid are left where they are", spreadTops([36, 60, 84, 108], 24), [36, 60, 84, 108]);
   check("a row printed too close under the one above is pushed down a line", spreadTops([0, 14, 20, 40], 14), [0, 14, 28, 42]);
   check("the push carries until a gap absorbs it", spreadTops([0, 5, 10, 60], 14), [0, 14, 28, 60]);
   check("two lines on one row never share it", spreadTops([100, 100], 24), [100, 124]);
   check("a line with no place is passed over, not pushed", spreadTops([0, null, 3], 14), [0, null, 14]);
-  check("no gap, nothing moves", spreadTops([0, 5], 0), [0, 5]);
+  check("each line's own box: a heading's tall box pushes, a footnote's small one does not", spreadTops([0, 10, 30, 36], [22, 14, 14, 9]), [0, 22, 36, 50]);
+  check("no box, nothing moves", spreadTops([0, 5], 0), [0, 5]);
 }
 
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");
