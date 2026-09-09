@@ -1718,6 +1718,7 @@ function paintHighlights() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   const flaggedRanges = [];
   const leakRanges = [];
+  leakHits = [];
   let leaks = 0;
   const bodies = pageBodies();
   const flagRx = flagged.length ? PK.buildMatcher(flagged) : null;
@@ -1730,6 +1731,7 @@ function paintHighlights() {
         const r = rangeFor(segs, h.start, h.end);
         if (!r) continue;
         leakRanges.push(r);
+        leakHits.push({ range: r, real: h.real, fake: h.fake });
         leaks++;
       }
     }
@@ -1746,7 +1748,28 @@ function paintHighlights() {
   }
   CSS.highlights.set("flagged", new Highlight(...flaggedRanges));
   CSS.highlights.set("leak", new Highlight(...leakRanges));
-  $("st-leaks").textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save` : "";
+  $("st-leaks").textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; right-click one to keep it` : "";
+}
+let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
+/** The unfaked real name under a point, or null. */
+function leakAt(x, y) {
+  let node = null, offset = 0;
+  try {
+    if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(x, y); if (p) { node = p.offsetNode; offset = p.offset; } }
+    else if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, y); if (r) { node = r.startContainer; offset = r.startOffset; } }
+  } catch { return null; }
+  if (!node) return null;
+  for (const h of leakHits) { try { if (h.range.isPointInRange(node, offset)) return h; } catch { /* a range from a page since rebuilt */ } }
+  return null;
+}
+/** The unfaked real name a selection touches, or null. */
+function leakIn(range) {
+  for (const h of leakHits) {
+    try {
+      if (h.range.compareBoundaryPoints(Range.END_TO_START, range) < 0 && h.range.compareBoundaryPoints(Range.START_TO_END, range) > 0) return h;
+    } catch { /* a range from a page since rebuilt */ }
+  }
+  return null;
 }
 
 // ── pseudonym tooltip ──────────────────────────────────────────────────────────────────
@@ -1798,14 +1821,21 @@ function currentSelection() {
 // PDF-Linker through New Real Values.txt for the run that actually restores
 // the file. Until that run the file still carries the fake, which the
 // tooltip says.
+// The other way round, an unfaked real name (orange: the key binds it and
+// the file carries it in the clear) is kept the same way, from a right
+// click on it or the Keep… beside a selection touching it: the mark goes,
+// the save leaves it as it stands, and PDF-Linker's next run skips it.
 const keepMenu = $("keep-menu");
-let keepMenuFor = null;
-function showKeepMenu(pn, x, y) {
-  keepMenuFor = pn;
-  const real = pnReal(pn);
-  const c = TD.keptControl(keeps, real);
-  $("keep-menu-value").textContent = real;
-  $("keep-menu-fake").textContent = pnFake(pn);
+let keepMenuFor = null; // { real, fake, leak }
+function showKeepMenu(target, x, y) {
+  const t = target instanceof Element ? { real: pnReal(target), fake: pnFake(target), leak: false } : target;
+  keepMenuFor = t;
+  const c = TD.keptControl(keeps, t.real);
+  $("keep-menu-lead").textContent = t.leak ? "Standing unfaked:" : "Wrongly faked?";
+  $("keep-menu-value").textContent = t.real;
+  $("keep-menu-fake").textContent = t.fake;
+  $("keep-menu-sub").childNodes[0].nodeValue = t.leak ? "Written as " : "The file carries ";
+  $("keep-menu-sub").childNodes[2].nodeValue = t.leak ? " on save, unless it is kept." : " until PDF-Linker re-runs.";
   $("keep-menu-no").hidden = c === "no";
   $("keep-menu-never").hidden = c === "never";
   $("keep-menu-undo").hidden = !c;
@@ -1816,15 +1846,16 @@ function showKeepMenu(pn, x, y) {
 function hideKeepMenu() { keepMenu.hidden = true; keepMenuFor = null; }
 pagesEl.addEventListener("contextmenu", (e) => {
   const pn = e.target.closest && e.target.closest(".pn");
-  if (!pn) return;
+  const target = pn || (() => { const h = leakAt(e.clientX, e.clientY); return h ? { real: h.real, fake: h.fake, leak: true } : null; })();
+  if (!target) return;
   e.preventDefault();
   hideTip();
-  showKeepMenu(pn, e.clientX, e.clientY);
+  showKeepMenu(target, e.clientX, e.clientY);
 });
 document.addEventListener("mousedown", (e) => { if (!keepMenu.hidden && !keepMenu.contains(e.target)) hideKeepMenu(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { hideKeepMenu(); flagPop.hidden = true; } });
 
-function setKeep(real, control) {
+function setKeep(real, control, { leak = false } = {}) {
   keeps = control ? TD.addKeep(keeps, control, real) : TD.removeKeep(keeps, real);
   persistValues();
   compileKey();
@@ -1833,13 +1864,14 @@ function setKeep(real, control) {
   paintHighlights();
   showSidePanel(true);
   showSideTab("tab-flags");
-  toast(control
-    ? `"${real}" kept${control === "never" ? " in every case" : " in this case"} — un-marked here now; PDF-Linker un-fakes it in the file on its next run (save the list to the case folder first).`
-    : `"${real}" is a pseudonym again`);
+  toast(!control ? `"${real}" is a pseudonym again`
+    : leak ? `"${real}" kept${control === "never" ? " in every case" : " in this case"} — left as it stands, on save and on PDF-Linker's next run (save the list to the case folder first).`
+    : `"${real}" kept${control === "never" ? " in every case" : " in this case"} — un-marked here now; PDF-Linker un-fakes it in the file on its next run (save the list to the case folder first).`);
 }
-$("keep-menu-no").addEventListener("click", () => { const r = keepMenuFor && pnReal(keepMenuFor); hideKeepMenu(); if (r) setKeep(r, "no"); });
-$("keep-menu-never").addEventListener("click", () => { const r = keepMenuFor && pnReal(keepMenuFor); hideKeepMenu(); if (r) setKeep(r, "never"); });
-$("keep-menu-undo").addEventListener("click", () => { const r = keepMenuFor && pnReal(keepMenuFor); hideKeepMenu(); if (r) setKeep(r, ""); });
+const keepChosen = (control) => { const t = keepMenuFor; hideKeepMenu(); if (t) setKeep(t.real, control, { leak: t.leak }); };
+$("keep-menu-no").addEventListener("click", () => keepChosen("no"));
+$("keep-menu-never").addEventListener("click", () => keepChosen("never"));
+$("keep-menu-undo").addEventListener("click", () => keepChosen(""));
 $("keep-menu-cancel").addEventListener("click", hideKeepMenu);
 
 const showFlagPopSoon = debounce(showFlagPop, 120);
@@ -1850,12 +1882,18 @@ function showFlagPop() {
   const problem = TD.flagProblem(s.text, s.touches);
   flagPopBtn.disabled = !!problem;
   flagPopNote.textContent = problem || "";
-  // A pseudonym in the selection: the question is the other one.
+  // A pseudonym in the selection: the question is the other one. An
+  // unfaked real name in it: whether to leave it so.
   const pnIn = s.pn;
-  $("flag-pop-keep").hidden = !pnIn;
+  const leak = pnIn ? null : leakIn(s.range);
+  $("flag-pop-keep").hidden = !pnIn && !leak;
   if (pnIn) {
     flagPopNote.textContent = "Wrongly faked? Keep \u201c" + pnIn.dataset.real + "\u201d:";
     $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu(pnIn, e.clientX, e.clientY); };
+  } else if (leak) {
+    flagPopBtn.disabled = true;
+    flagPopNote.textContent = "\u201c" + leak.real + "\u201d is in the key and stands unfaked. Leave it so?";
+    $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu({ real: leak.real, fake: leak.fake, leak: true }, e.clientX, e.clientY); };
   }
   const rects = s.range.getClientRects();
   const r = rects.length ? rects[rects.length - 1] : s.range.getBoundingClientRect();
@@ -2857,6 +2895,7 @@ window.__textReaderReflow = () => { if (doc) placeCitations(); };
 window.__pdfViewerUnregister = () => {};
 // For the smoke test: the geometry the side-by-side sync reads.
 window.__textReaderSyncGeometry = () => ({ text: textGeometry(), pdf: pdfGeometry() });
+window.__textReaderSetKey = (parsed) => setKey(parsed);
 
 // ── boot ───────────────────────────────────────────────────────────────────────────────────
 applySettings();

@@ -596,7 +596,11 @@ app, which routes it to the reader tab.
   gutter number and any blank line between — is matched as one: the reader
   shows the real name half on each line (the tooltip names the whole), a
   wrapped real is one leak, and a save writes the fake line by line with
-  the numbers untouched.
+  the numbers untouched. A real name that should stay — a cited decision
+  bearing a party's surname — is **kept** from the orange mark itself:
+  right-click it (or select it and take **Keep…**), and *keep in this case*
+  or *never fake it* leaves it as it stands, on save and on PDF-Linker's
+  next run, the same keep a wrongly faked pseudonym takes.
 - **Real names from the key.** **Open case folder** picks the matter's folder
   and takes only `pseudonym_key.xlsx` and the exports out of it (a `*.txt.LEAK`
   quarantined by PDF-Linker's leak gate is listed too, marked, and opened
