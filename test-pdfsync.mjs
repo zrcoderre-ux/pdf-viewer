@@ -5,7 +5,7 @@ import {
   normalizeStem, spaceStem, matchPdf, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout,
-  typePitch, matchedScale,
+  matchedScale, spreadTops,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -125,17 +125,18 @@ console.log("a page with no numbers: rows matched by their words");
 
 console.log("the scale a page is drawn at: the reading size, never the spacing");
 {
-  check("a grid of one pitch is that pitch", typePitch([36, 60, 84, 108], 24), 24);
-  check("rows printed close together pull the pitch down, floored at half the usual gap", typePitch([0, 14, 28, 34, 48], 14), 7);
-  check("a lone tight row does not shrink the whole page", typePitch([0, 24, 48, 50, 74, 98, 122, 146, 170, 194, 218], 24), 24);
-  check("no gaps at all falls back to the layout's own pitch", typePitch([40], 14), 14);
-  check("no gaps and no fallback is no pitch", typePitch([], 0), null);
   // 15px type at 1.5 leading in a 24pt pleading slot: the sheet is drawn a
   // shade under the PDF's own size, and every point of size grows it.
   check("the leading fills one line slot", matchedScale(24, 22.5), 0.9375);
   check("a bigger size is a bigger sheet, the spacing untouched", matchedScale(24, 45), 1.875);
   check("no pitch, no scale", [matchedScale(0, 22.5), matchedScale(24, 0)], [null, null]);
   check("a misread pitch cannot blow the sheet up", matchedScale(0.5, 22.5), 8);
+  check("lines on the grid are left where they are", spreadTops([36, 60, 84, 108], 24), [36, 60, 84, 108]);
+  check("a row printed too close under the one above is pushed down a line", spreadTops([0, 14, 20, 40], 14), [0, 14, 28, 42]);
+  check("the push carries until a gap absorbs it", spreadTops([0, 5, 10, 60], 14), [0, 14, 28, 60]);
+  check("two lines on one row never share it", spreadTops([100, 100], 24), [100, 124]);
+  check("a line with no place is passed over, not pushed", spreadTops([0, null, 3], 14), [0, null, 14]);
+  check("no gap, nothing moves", spreadTops([0, 5], 0), [0, 5]);
 }
 
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");

@@ -2209,14 +2209,153 @@ async function renderInto(el, src, pageNo, cssWidth) {
   // The page's text, selectable over the bitmap (pdf.js's own text layer).
   const layer = sheet.querySelector(".textLayer");
   if (layer) {
+    if (el.__text) { try { el.__text.cancel(); } catch { /* done */ } el.__text = null; }
     layer.innerHTML = "";
     layer.style.setProperty("--scale-factor", String(cssScale));
     layer.style.setProperty("--total-scale-factor", String(cssScale));
     try {
       const tl = new pdfjsLib.TextLayer({ textContentSource: await page.getTextContent(), container: layer, viewport: page.getViewport({ scale: cssScale }) });
-      if (el.dataset.want === want) await tl.render();
-    } catch (e) { console.warn(e); }
+      if (el.dataset.want !== want) return;
+      el.__text = tl;
+      await tl.render();
+      if (el.__text === tl) el.__text = null;
+      if (el.dataset.want === want) { blankLineNumbers(layer); bindSelection(layer); }
+    } catch (e) { if (!(e && e.name === "AbortException")) console.warn(e); }
   }
+}
+
+// ── selecting in the PDF's text ──
+//
+// pdf.js lays a page's text out as absolutely positioned spans in an
+// otherwise empty box, and the browser has nowhere sensible to put a
+// selection that begins or ends BETWEEN them: a drag started in the margin
+// before a sentence, or let go in the space after its period, anchors at
+// an arbitrary place in the layer's DOM (Chrome walks its children by
+// height, not by row), and the clipboard gets the line below, or the
+// numbers down the side. So the drag is the reader's own. Every point the
+// pointer visits is snapped to the nearest character ON ITS OWN ROW — into
+// the span under it, or to the near edge of the closest span beside it —
+// and the selection is set between the two snapped carets; a double click
+// takes the word, a triple the row. The browser still paints the selection
+// and Ctrl+C still copies it. A click with a modifier is left to the
+// browser.
+function bindSelection(layer) {
+  if (layer.__selecting) return;
+  layer.__selecting = true;
+  layer.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+    const a = caretInLayer(layer, e.clientX, e.clientY);
+    if (!a) return;
+    e.preventDefault();
+    const sel = document.getSelection();
+    if (e.detail >= 2) { const r = e.detail === 2 ? wordAround(a) : rowAround(layer, a); if (r) sel.setBaseAndExtent(r.startContainer, r.startOffset, r.endContainer, r.endOffset); return; }
+    sel.setBaseAndExtent(a.node, a.offset, a.node, a.offset);
+    const box = layer.closest("#pdf-pane") || stageEl;
+    const move = (ev) => {
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      const at = (under && under.closest && under.closest(".textLayer")) || layer;
+      const f = caretInLayer(at, ev.clientX, ev.clientY) || caretInLayer(layer, ev.clientX, ev.clientY);
+      if (f) sel.setBaseAndExtent(a.node, a.offset, f.node, f.offset);
+      // Past the box's edge the page follows the pointer, as a native drag would.
+      const br = box.getBoundingClientRect();
+      if (ev.clientY > br.bottom - 16) box.scrollTop += 14;
+      else if (ev.clientY < br.top + 16) box.scrollTop -= 14;
+    };
+    const up = () => { window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up); };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  });
+}
+/** The text spans of a layer with their boxes, in DOM order: [{ span, node, rect }]. A span of bare space (pdf.js writes one for a gap) is nothing to snap to. */
+function layerSpans(layer) {
+  const out = [];
+  for (const sp of layer.querySelectorAll("span")) {
+    const node = sp.firstChild;
+    if (!node || node.nodeType !== 3 || !node.data.trim()) continue;
+    const rect = sp.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) out.push({ span: sp, node, rect });
+  }
+  return out;
+}
+/**
+ * The caret nearest a point, on the point's own row: { node, offset } in a
+ * span's text, or null where the layer has no text. The row is the span
+ * whose box holds the point's height, else the nearest by height; the span
+ * on it the one under the point, else the nearest beside it, entered at
+ * the edge the point is on.
+ */
+function caretInLayer(layer, x, y) {
+  const spans = layerSpans(layer);
+  if (!spans.length) return null;
+  const vdist = (r) => (y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0);
+  let rowD = Infinity;
+  for (const s of spans) rowD = Math.min(rowD, vdist(s.rect));
+  const row = spans.filter((s) => vdist(s.rect) <= rowD + 0.5);
+  const hdist = (r) => (x < r.left ? r.left - x : x > r.right ? x - r.right : 0);
+  let best = row[0];
+  for (const s of row) if (hdist(s.rect) < hdist(best.rect)) best = s;
+  const { node, rect } = best;
+  if (x <= rect.left) return { node, offset: 0 };
+  if (x >= rect.right) return { node, offset: node.data.length };
+  // Inside the span: the browser's own caret at the point, held to this span.
+  const cy = rect.top + rect.height / 2;
+  try {
+    if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(x, cy); if (p && p.offsetNode === node) return { node, offset: p.offset }; }
+    else if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, cy); if (r && r.startContainer === node) return { node, offset: r.startOffset }; }
+  } catch { /* fall through to the proportional guess */ }
+  return { node, offset: Math.max(0, Math.min(node.data.length, Math.round(((x - rect.left) / rect.width) * node.data.length))) };
+}
+/** The word around a caret, as a Range. */
+function wordAround(a) {
+  const t = a.node.data;
+  let s = a.offset, e = a.offset;
+  while (s > 0 && /\S/.test(t[s - 1])) s--;
+  while (e < t.length && /\S/.test(t[e])) e++;
+  if (s === e) return null;
+  const r = document.createRange(); r.setStart(a.node, s); r.setEnd(a.node, e);
+  return r;
+}
+/** The row a caret is on — every span at that height, first to last — as a Range. */
+function rowAround(layer, a) {
+  const spans = layerSpans(layer);
+  const me = spans.find((s) => s.node === a.node);
+  if (!me) return null;
+  const cy = me.rect.top + me.rect.height / 2;
+  const row = spans.filter((s) => s.rect.top <= cy && cy <= s.rect.bottom).sort((p, q) => p.rect.left - q.rect.left);
+  const r = document.createRange(); r.setStart(row[0].node, 0); r.setEnd(row[row.length - 1].node, row[row.length - 1].node.data.length);
+  return r;
+}
+/**
+ * Pleading paper's line numbers, blanked in the text layer so a drag across
+ * the body never sweeps them in: the number spans stand between the body's
+ * in DOM order, and a selection dragged from the margin runs through them —
+ * "1 2 3 4" on the clipboard where the line was wanted. The numbers stay on
+ * the bitmap. The PDF viewer's own rule (excludeLineNumberColumn), read the
+ * same conservative way: a tall left-margin column of many bare 1–2 digit
+ * numbers, never a stray number in the body.
+ */
+function blankLineNumbers(layer) {
+  const spans = layer.querySelectorAll("span");
+  const W = layer.offsetWidth || 1, H = layer.offsetHeight || 1;
+  if (spans.length < 8 || !layer.offsetHeight) return;
+  const cand = [];
+  for (const sp of spans) {
+    const t = (sp.textContent || "").trim();
+    if (!/^\d{1,2}$/.test(t) || sp.offsetLeft > W * 0.25) continue;
+    cand.push({ sp, left: sp.offsetLeft, top: sp.offsetTop });
+  }
+  if (cand.length < 8) return;
+  cand.sort((a, b) => a.left - b.left);
+  let best = [], group = [];
+  for (const c of cand) {
+    if (group.length && c.left - group[0].left > 16) { if (group.length > best.length) best = group; group = []; }
+    group.push(c);
+  }
+  if (group.length > best.length) best = group;
+  if (best.length < 8) return;
+  const tops = best.map((c) => c.top);
+  if (Math.max(...tops) - Math.min(...tops) < H * 0.4) return;
+  for (const c of best) c.sp.textContent = "";
 }
 function releaseCanvas(el) {
   if (!el.dataset.rendered) return;
@@ -2227,6 +2366,7 @@ function releaseCanvas(el) {
   canvas.width = canvas.height = 0;
   canvas.style.height = "0px";
   const layer = sheet.querySelector(".textLayer");
+  if (el.__text) { try { el.__text.cancel(); } catch { /* done */ } el.__text = null; }
   if (layer) layer.innerHTML = "";
   delete el.dataset.rendered;
   el.classList.remove("ready");
@@ -2371,7 +2511,9 @@ function fitSlot(el, w) {
   const src = pdfSources[Number(el.dataset.index)];
   const page = Number(el.dataset.page);
   if (!src || !page) return;
-  if (el.dataset.rendered) renderInto(el, src, page, w);
+  // A render already up, or on its way, is redone at the new width (the
+  // one in flight lands at the old one otherwise, cropped by the sheet).
+  if (el.dataset.rendered || el.dataset.want) renderInto(el, src, page, w);
   else presize(el, src, page, w);
 }
 function applyMatchedLayout() {
@@ -2393,16 +2535,21 @@ function applyMatchedLayout() {
     let tops = null, lefts = null, pitch = 0;
     if (numbered) {
       tops = PS.slotTops(lines.map((l) => ({ num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null })), geom);
-      pitch = PS.typePitch(tops.filter((y) => y != null), geom.pitch);
+      pitch = geom.pitch;
     } else {
       const rows = info.rows[t.page - 1];
       const lay = rows && rows.length ? PS.rowLayout(lines.map((l) => l.textContent), rows) : null;
       if (lay) {
         tops = lay.positions.map((p) => (p ? p.top : null));
         lefts = lay.positions.map((p) => (p ? p.left : null));
-        pitch = PS.typePitch(tops.filter((y) => y != null), lay.pitch);
+        pitch = lay.pitch;
       }
     }
+    // Never on top of each other: a row the PDF (a scan's text layer, most
+    // often) prints closer under the one above than a line of type is tall
+    // is pushed down to clear it, and out of register with the PDF by that
+    // much — reading the text beats lining it up (pdfsync.spreadTops).
+    if (tops) tops = PS.spreadTops(tops, pitch);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
     const scale = PS.matchedScale(pitch, leading) || paneWidth() / sz.w;
@@ -2417,7 +2564,9 @@ function applyMatchedLayout() {
     fitSlot(p.slot, w);
     p.sec.classList.add("matched");
     p.sec.style.width = w + "px";
-    p.sec.querySelector(".page-inner").style.height = Math.round(p.sz.h * p.scale) + "px";
+    // The PDF page's height — or more, where a pushed line runs past its foot.
+    const foot = p.tops ? Math.max(...p.tops.filter((y) => y != null), -Infinity) + 1.5 * p.pitch : 0;
+    p.sec.querySelector(".page-inner").style.height = Math.round(Math.max(p.sz.h, foot) * p.scale) + "px";
     p.body.classList.toggle("fixed", !!p.tops);
     if (p.geom) p.sec.style.setProperty("--body-x", (p.geom.bodyX * p.scale) + "px");
     else p.sec.style.removeProperty("--body-x");

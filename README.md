@@ -697,10 +697,19 @@ app, which routes it to the reader tab.
   the lines together. A page too wide for its pane runs past the edge with
   a horizontal scroll bar under it, and a line too long for the PDF's own
   column is never wrapped either: the sheets widen by what the longest one
-  needs and the two panes scroll sideways together. The two panes scroll
-  together, anchored on each page's first printed line, and the PDF's text
-  is **selectable** in the pane. Display only — the layout lifts when the
-  pane closes; remembered. With it off, a page whose text is not
+  needs and the two panes scroll sideways together. **Never on top of
+  itself:** where the PDF's own rows sit closer than a line of type is tall
+  (a scan's text layer, a signature under its rule) the line is pushed down
+  to clear the one above, a line out of register with the PDF and legible
+  — reading the text beats lining it up. The two panes scroll together,
+  anchored on each page's first printed line. **The PDF's text is
+  selectable and copies**, in the pane and on a swapped-in page: drag from
+  the margin, from the space before a word, or let go after the period —
+  every point snaps to the nearest character on its own row, so the
+  clipboard carries the passage under the pointer and never the line
+  numbers down the side (they are blanked in the text layer, as the PDF
+  viewer blanks them); a double click takes the word, a triple the row.
+  Display only — the layout lifts when the pane closes; remembered. With it off, a page whose text is not
   worth reading (an exhibit the OCR mangled) is **swapped**: the **⇄ PDF**
   button on the page's label shows the PDF page in the text's place, the
   rest staying text, and **⇄ PDF pages…** takes a run — `5, 12-18` — of the
