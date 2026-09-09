@@ -102,7 +102,7 @@ body {
 #stage { flex: 1; overflow-y: auto; overflow-x: auto; position: relative; }
 /* The PDF beside the text: its own scroll box, held page for page with the
    stage (pdfsync.js decides where "the same place" is). */
-#pdf-pane { flex: 1; overflow-y: auto; overflow-x: hidden; position: relative; background: #3b3e41; border-left: 1px solid var(--border); padding: 20px 16px 60px; }
+#pdf-pane { flex: 1; overflow-y: auto; overflow-x: auto; position: relative; background: #3b3e41; border-left: 1px solid var(--border); padding: 20px 16px 60px; }
 :root[data-theme="light"] #pdf-pane { background: #b9bcc0; }
 .pdf-slot { position: relative; margin: 0 auto 18px; background: #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); border-radius: 2px; overflow: hidden; }
 .pdf-slot.blank { background: transparent; box-shadow: none; color: #d0d3d6; font-size: 12px; text-align: center; padding: 8px; }
@@ -124,6 +124,12 @@ body {
    PDF's text margin. */
 .tpage.matched { max-width: none; }
 .tpage.matched .page-body { min-height: 0; height: 100%; }
+/* On the PDF's grid a line is one printed line: it never wraps (a wrapped
+   line would fall on the slot below it) and never shrinks. The sheet is
+   widened for the longest line instead, past the pane's edge if it must,
+   and the stage scrolls sideways — the way a zoomed PDF behaves. */
+.page-body.fixed .line > .lt { white-space: pre; }
+body.matched-pages #pages { width: max-content; min-width: 100%; }
 .page-body.fixed { padding: 0; position: relative; }
 .page-body.fixed .line { position: absolute; left: 0; right: 0; min-height: 0; }
 .page-body.fixed .line > .lt { min-height: 0; }

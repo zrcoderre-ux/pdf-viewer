@@ -583,7 +583,9 @@ app, which routes it to the reader tab.
   far as you like: the font is never touched, so the size is yours to
   calibrate the page by, and the numbers are never touched either — the
   gutter shows the file's own and nothing moves between them. Display only:
-  the width you set comes back when the lock is off.
+  the width you set comes back when the lock is off. Side by side the PDF's
+  own grid holds every line to one screen line already, whatever the lock
+  says.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
@@ -688,10 +690,17 @@ app, which routes it to the reader tab.
   A page with no numbers (an exhibit, a letter, an order) is laid out on
   the PDF's printed **rows** instead: each text line is matched to the row
   carrying its words and takes its top and left, so paragraphs and headings
-  sit where the PDF's do. The font stays yours; the grid only places the
-  lines. The two panes scroll together, anchored on each page's first
-  printed line, and the PDF's text is **selectable** in the pane. Display
-  only — the layout lifts when the pane closes; remembered. With it off, a page whose text is not
+  sit where the PDF's do. **The size is the zoom.** A page is a page: the
+  type keeps its own spacing at any size, the way a PDF does, so the
+  reading size draws the grid — one of the PDF's line slots is one line of
+  your type — and setting it up **grows both sheets** instead of pushing
+  the lines together. A page too wide for its pane runs past the edge with
+  a horizontal scroll bar under it, and a line too long for the PDF's own
+  column is never wrapped either: the sheets widen by what the longest one
+  needs and the two panes scroll sideways together. The two panes scroll
+  together, anchored on each page's first printed line, and the PDF's text
+  is **selectable** in the pane. Display only — the layout lifts when the
+  pane closes; remembered. With it off, a page whose text is not
   worth reading (an exhibit the OCR mangled) is **swapped**: the **⇄ PDF**
   button on the page's label shows the PDF page in the text's place, the
   rest staying text, and **⇄ PDF pages…** takes a run — `5, 12-18` — of the

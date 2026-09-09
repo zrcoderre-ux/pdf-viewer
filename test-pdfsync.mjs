@@ -5,6 +5,7 @@ import {
   normalizeStem, spaceStem, matchPdf, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout,
+  typePitch, matchedScale,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -120,6 +121,21 @@ console.log("a page with no numbers: rows matched by their words");
   check("a blank line takes the slot under its predecessor", lay.positions[1].top, 60 + lay.pitch);
   check("the pitch is the median row spacing", lay.pitch, 14);
   check("nothing matched, nothing laid out", rowLayout(["zzz"], rows), null);
+}
+
+console.log("the scale a page is drawn at: the reading size, never the spacing");
+{
+  check("a grid of one pitch is that pitch", typePitch([36, 60, 84, 108], 24), 24);
+  check("rows printed close together pull the pitch down, floored at half the usual gap", typePitch([0, 14, 28, 34, 48], 14), 7);
+  check("a lone tight row does not shrink the whole page", typePitch([0, 24, 48, 50, 74, 98, 122, 146, 170, 194, 218], 24), 24);
+  check("no gaps at all falls back to the layout's own pitch", typePitch([40], 14), 14);
+  check("no gaps and no fallback is no pitch", typePitch([], 0), null);
+  // 15px type at 1.5 leading in a 24pt pleading slot: the sheet is drawn a
+  // shade under the PDF's own size, and every point of size grows it.
+  check("the leading fills one line slot", matchedScale(24, 22.5), 0.9375);
+  check("a bigger size is a bigger sheet, the spacing untouched", matchedScale(24, 45), 1.875);
+  check("no pitch, no scale", [matchedScale(0, 22.5), matchedScale(24, 0)], [null, null]);
+  check("a misread pitch cannot blow the sheet up", matchedScale(0.5, 22.5), 8);
 }
 
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");

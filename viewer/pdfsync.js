@@ -347,3 +347,44 @@ export function rowLayout(lineTexts, rows) {
   for (let i = 0; i < first; i++) out[i] = { top: Math.max(0, rows[map[first]].top - (first - i) * pitch), left: left0 };
   return { positions: out, pitch };
 }
+
+// ---- the scale a text page is drawn at beside its PDF page --------------------
+//
+// A page is a page: the type keeps its own spacing whatever size it is set
+// at, the way a PDF does, so zooming in must never push two lines together.
+// The reader's LEADING therefore sets the scale — the sheet, the line grid
+// and the margins are drawn so that one of the PDF's line slots is exactly
+// one of the reader's lines — and a size too big for the pane grows the
+// page past its edge, where the horizontal scroll bar reaches it.
+
+/**
+ * The pitch a page's own type can be set on: the tight gaps decide, so a
+ * row printed close under the one above does not take the line after it on
+ * top of itself, floored at half the usual gap where one row is an outlier
+ * (a superscript, a signature line). `tops` are the lines' tops in PDF
+ * units, in order; `fallback` is the layout's own pitch.
+ */
+export function typePitch(tops, fallback) {
+  const gaps = [];
+  const ts = (tops || []).filter((t) => Number.isFinite(t));
+  for (let i = 1; i < ts.length; i++) {
+    const d = ts[i] - ts[i - 1];
+    if (d > 0.5) gaps.push(d);
+  }
+  if (!gaps.length) return Number(fallback) > 0 ? Number(fallback) : null;
+  const sorted = gaps.slice().sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length / 2)];
+  const low = sorted[Math.floor(sorted.length * 0.1)];
+  return Math.max(low, med / 2);
+}
+
+/**
+ * The scale: the reader's leading (in px) fills one line slot of the PDF's
+ * grid (`pitch`, in PDF units). Bounded, so a misread pitch cannot blow the
+ * sheet up or crush it. Null where there is no grid to scale to.
+ */
+export function matchedScale(pitch, leading, { min = 0.15, max = 8 } = {}) {
+  const p = Number(pitch), l = Number(leading);
+  if (!(p > 0) || !(l > 0)) return null;
+  return Math.min(max, Math.max(min, l / p));
+}

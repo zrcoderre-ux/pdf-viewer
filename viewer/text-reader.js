@@ -1573,8 +1573,15 @@ function applyLineLock() {
   root.setProperty("--reader-width-eff", settings.pageWidth + "px");
   document.body.classList.toggle("line-lock", !!settings.lineLock);
   const st = $("st-lock");
-  if (!settings.lineLock || !doc) { st.textContent = ""; return; }
-  if (pagesEl.querySelector(".tpage.matched")) { st.textContent = "Line lock: pages sized to the PDF — a long line runs past the edge, scroll sideways"; return; }
+  if (!doc) { st.textContent = ""; return; }
+  // Side by side the PDF's own grid holds every line to one screen line
+  // already, whatever the lock says: the page is drawn at the reading
+  // size's scale and widened for its longest line.
+  if (pagesEl.querySelector(".tpage.matched")) {
+    st.textContent = "Side by side: pages at the PDF's own scale — the size zooms both sheets" + (matchedExtra ? `, ${matchedExtra}px wider for the longest line, scroll sideways` : "");
+    return;
+  }
+  if (!settings.lineLock) { st.textContent = ""; return; }
   const bodies = pageBodies().filter((b) => b.classList.contains("numbered") && !b.closest(".tpage").classList.contains("swapped"));
   if (!bodies.length) { st.textContent = "Line lock: no numbered lines"; return; }
   // Measured line by line: a grid item's text overflow is not in the page
@@ -2266,7 +2273,9 @@ async function presize(el, src, pageNo, cssWidth) {
 const paneObserver = new IntersectionObserver((entries) => {
   for (const en of entries) {
     const el = en.target;
-    if (en.isIntersecting) renderInto(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), paneWidth());
+    // The slot's own width: beside a matched text page that is the PDF
+    // page's scale, which the reading size sets, not the pane's.
+    if (en.isIntersecting) renderInto(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), parseFloat(el.style.width) || paneWidth());
     else releaseCanvas(el);
   }
 }, { root: pdfPane, rootMargin: PDF_MARGIN + "px 0px" });
@@ -2323,25 +2332,53 @@ function buildPdfPane() {
 
 // ── the text page on the PDF page's own grid ──
 //
-// Beside its PDF page a text page takes that page's GEOMETRY: the same
-// width, the sheet the same height (label and all, so the two are one size
-// to the eye), and — where the PDF's text layer carries the pleading
-// numbers down its margin — each numbered line placed at ITS number's own
-// height on the PDF, the body starting at the PDF's text margin, the
-// leading the PDF's own pitch. Line 7 of the text then stands exactly
-// beside line 7 of the PDF, whatever the page's furniture. The font stays
-// the reader's: the grid places the lines, the size is theirs to calibrate.
-// A page with no numbers (an exhibit, a letter, an order) is laid out on
-// the PDF's printed ROWS instead: each text line is matched to the row that
-// carries its words (pdfsync.rowLayout, in order, the way a diff matches)
-// and takes that row's own top and left, so its paragraphs and headings sit
-// where the PDF's do. Only where nothing matches at all (a scan with no
-// text layer) does the page keep its flowing layout, inside a sheet of the
-// PDF page's height.
+// Beside its PDF page a text page takes that page's GEOMETRY: the sheet the
+// same width and height (label and all, so the two are one size to the
+// eye), and — where the PDF's text layer carries the pleading numbers down
+// its margin — each numbered line placed at ITS number's own height on the
+// PDF, the body starting at the PDF's text margin, the leading the PDF's
+// own pitch. Line 7 of the text then stands exactly beside line 7 of the
+// PDF, whatever the page's furniture. A page with no numbers (an exhibit, a
+// letter, an order) is laid out on the PDF's printed ROWS instead: each
+// text line is matched to the row that carries its words (pdfsync.rowLayout,
+// in order, the way a diff matches) and takes that row's own top and left,
+// so its paragraphs and headings sit where the PDF's do. Only where nothing
+// matches at all (a scan with no text layer) does the page keep its flowing
+// layout, inside a sheet of the PDF page's height.
+//
+// THE SIZE IS THE SCALE. A page is a page: the type keeps its own spacing
+// whatever size it is set at, the way a PDF does. So the reader's leading
+// is what the grid is drawn to — one PDF line slot is one line of the
+// reader's type (pdfsync.matchedScale) — and the sheet, its margins and the
+// PDF page beside it are drawn at that same scale. Setting the size up
+// GROWS BOTH SHEETS instead of pushing the lines together; a page too wide
+// for its pane runs past the edge and the scroll bar underneath reaches it.
+// A line too long for the PDF's own column is never wrapped either (a
+// wrapped line would fall on the slot below it): the sheet widens by what
+// the longest one needs, and the stage scrolls sideways.
 // Display only — no line moves in the file, and the layout is lifted the
 // moment the pane closes.
+let matchedExtra = 0; // px the sheets were widened for their longest line
+/** The reader's own leading: the height one line of the file takes, in px. */
+function readerLeading() {
+  return Math.max(1, settings.fontSize * (Number(settings.lineHeight) || 1.5));
+}
+/** A pane slot at a width: re-rendered where its bitmap is up, pre-sized where it is not. */
+function fitSlot(el, w) {
+  const prev = parseFloat(el.style.width);
+  if (prev > 0 && Math.abs(prev - w) < 0.5) return;
+  el.style.width = w + "px";
+  const src = pdfSources[Number(el.dataset.index)];
+  const page = Number(el.dataset.page);
+  if (!src || !page) return;
+  if (el.dataset.rendered) renderInto(el, src, page, w);
+  else presize(el, src, page, w);
+}
 function applyMatchedLayout() {
   const on = sbsOn && !pdfPane.hidden;
+  const leading = readerLeading();
+  const plans = [];
+  const matchedSlots = new Set();
   for (const sec of pagesEl.querySelectorAll(".tpage")) {
     const i = Number(sec.dataset.index);
     const slot = on ? pdfPane.querySelector(`.pdf-slot[data-index="${i}"]:not(.blank)`) : null;
@@ -2349,42 +2386,63 @@ function applyMatchedLayout() {
     const info = t && infoFor(t.src);
     const sz = info && info.sizes[t.page - 1];
     if (!slot || !sz) { clearMatched(sec); continue; }
-    const sheet = sheetOf(slot);
-    const w = sheet.clientWidth || paneWidth();
-    const scale = w / sz.w;
-    const inner = sec.querySelector(".page-inner");
     const body = sec.querySelector(".page-body");
-    sec.classList.add("matched");
-    sec.style.width = w + "px";
-    inner.style.height = Math.round(sz.h * scale) + "px";
-    const geom = info.geoms[t.page - 1];
     const lines = [...body.querySelectorAll(":scope > .line")];
-    if (geom && body.classList.contains("numbered")) {
-      body.classList.add("fixed");
-      sec.style.setProperty("--body-x", (geom.bodyX * scale) + "px");
-      const tops = PS.slotTops(lines.map((l) => ({ num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null })), geom);
-      lines.forEach((l, k) => {
-        if (tops[k] == null) { l.style.top = ""; l.style.lineHeight = ""; return; }
-        l.style.top = (tops[k] * scale) + "px";
-        l.style.lineHeight = (geom.pitch * scale) + "px";
-      });
+    const geom = info.geoms[t.page - 1];
+    const numbered = !!geom && body.classList.contains("numbered");
+    let tops = null, lefts = null, pitch = 0;
+    if (numbered) {
+      tops = PS.slotTops(lines.map((l) => ({ num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null })), geom);
+      pitch = PS.typePitch(tops.filter((y) => y != null), geom.pitch);
     } else {
       const rows = info.rows[t.page - 1];
       const lay = rows && rows.length ? PS.rowLayout(lines.map((l) => l.textContent), rows) : null;
       if (lay) {
-        body.classList.add("fixed");
-        sec.style.removeProperty("--body-x");
-        lines.forEach((l, k) => {
-          const pos = lay.positions[k];
-          if (!pos) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; return; }
-          l.style.top = (pos.top * scale) + "px";
-          l.style.left = (pos.left * scale) + "px";
-          l.style.lineHeight = (lay.pitch * scale) + "px";
-        });
-      } else {
-        body.classList.remove("fixed");
-        for (const l of lines) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; }
+        tops = lay.positions.map((p) => (p ? p.top : null));
+        lefts = lay.positions.map((p) => (p ? p.left : null));
+        pitch = PS.typePitch(tops.filter((y) => y != null), lay.pitch);
       }
+    }
+    // No grid to draw to (a scan with no text layer): the page keeps its
+    // flowing layout at the pane's own scale.
+    const scale = PS.matchedScale(pitch, leading) || paneWidth() / sz.w;
+    matchedSlots.add(slot);
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, pitch, scale });
+  }
+  // Every slot the layout did not claim keeps the pane's own width.
+  if (on) for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) if (!matchedSlots.has(el)) fitSlot(el, paneWidth());
+  document.body.classList.toggle("matched-pages", plans.length > 0);
+  for (const p of plans) {
+    const w = Math.round(p.sz.w * p.scale);
+    fitSlot(p.slot, w);
+    p.sec.classList.add("matched");
+    p.sec.style.width = w + "px";
+    p.sec.querySelector(".page-inner").style.height = Math.round(p.sz.h * p.scale) + "px";
+    p.body.classList.toggle("fixed", !!p.tops);
+    if (p.geom) p.sec.style.setProperty("--body-x", (p.geom.bodyX * p.scale) + "px");
+    else p.sec.style.removeProperty("--body-x");
+    p.lines.forEach((l, k) => {
+      const top = p.tops ? p.tops[k] : null;
+      if (top == null) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; return; }
+      l.style.top = (top * p.scale) + "px";
+      l.style.left = p.lefts && p.lefts[k] != null ? (p.lefts[k] * p.scale) + "px" : "";
+      l.style.lineHeight = (p.pitch * p.scale) + "px";
+    });
+  }
+  // The longest line: the sheets grow by what it needs, all of them by the
+  // same amount so the pages stay one size. Measured line by line — a grid
+  // item's overflow is not in the page body's own scrollWidth.
+  matchedExtra = 0;
+  const laid = plans.filter((p) => p.tops);
+  if (laid.length) {
+    const lts = [];
+    for (const p of laid) lts.push(...p.body.querySelectorAll(":scope > .line > .lt"));
+    const overflow = () => { let o = 0; for (const lt of lts) o = Math.max(o, lt.scrollWidth - lt.clientWidth); return o; };
+    let over = overflow();
+    for (let n = 0; over > 0 && n < 6; n++) {
+      matchedExtra = Math.ceil(matchedExtra + over + 1);
+      for (const p of plans) p.sec.style.width = (Math.round(p.sz.w * p.scale) + matchedExtra) + "px";
+      over = overflow();
     }
   }
   textAnchors = null;
@@ -2455,6 +2513,13 @@ function syncScroll(from, force) {
   if (!ga.tops.length || !gb.tops.length) return;
   const target = PS.scrollTopFor(PS.scrollPosition(a.scrollTop, ga.tops, ga.heights), gb.tops, gb.heights);
   if (Math.abs(b.scrollTop - target) > 1) b.scrollTop = target;
+  // Sideways too, where a page is wider than its pane: the two sheets are
+  // the same width at the same scale, so the same share of the run.
+  const amax = a.scrollWidth - a.clientWidth, bmax = b.scrollWidth - b.clientWidth;
+  if (amax > 1 && bmax > 1) {
+    const x = Math.round((a.scrollLeft / amax) * bmax);
+    if (Math.abs(b.scrollLeft - x) > 1) b.scrollLeft = x;
+  }
 }
 stageEl.addEventListener("scroll", () => syncScroll("text"), { passive: true });
 pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });
@@ -2462,15 +2527,10 @@ pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });
 /** Widths changed (a resize, the panel): re-fit every shown PDF page. */
 function refitPdf() {
   if (!doc) return;
-  if (!pdfPane.hidden) {
-    const w = paneWidth();
-    for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) {
-      el.style.width = w + "px";
-      if (el.dataset.rendered) renderInto(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), w);
-      else presize(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), w);
-    }
-    applyMatchedLayout();
-  }
+  // The pane's widths belong to the matched layout: beside a text page a
+  // slot is drawn at the PDF page's own scale, and only a slot the layout
+  // does not claim falls back to the pane's width.
+  if (!pdfPane.hidden) applyMatchedLayout();
   for (const el of pagesEl.querySelectorAll(".pdf-inline")) {
     const sec = el.closest(".tpage");
     if (el.dataset.rendered) renderInto(el, pdfSources[Number(sec.dataset.index)], Number(el.dataset.page), inlineWidth(sec));
