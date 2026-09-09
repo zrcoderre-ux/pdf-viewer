@@ -281,6 +281,29 @@ function startsNextCitation(text, pos) {
   return NEXT_CITE_RE.test(text);
 }
 
+// What joins one item of a citation list to the next. Every chained-item
+// pattern below (statutes, federal sections, revenue rulings, CACI numbers)
+// opens with this.
+//
+// "or" belongs here as much as "and" does. Writers list sections in the
+// alternative all the time — "Code of Civil Procedure sections 1010.6 or 1013
+// and 1170.7", "service under section 1013 or 1013a" — and a chain that knew
+// only "and" stopped dead at the first "or", leaving every section after it
+// unlinked. "and/or" and "&" are the same list written differently. The
+// alternation puts "and/or" before "and" so the longer form wins.
+const LIST_CONN = String.raw`\s*(?:,\s*(?:and/or|and|or|&)|,|\s+(?:and/or|and|or|&))\s+`;
+
+// A chained number that is really a quantity: "section 1013, or 10 court days"
+// ends its list at "1013" — "10" counts days, it does not name a section. The
+// tell is the unit word that follows. Cheap to check and it costs nothing real,
+// since no section number is ever followed by one of these words.
+const CHAIN_UNIT_RE =
+  /\s*(?:court|calendar|business|working)?\s*(?:days?|hours?|weeks?|months?|years?|percent|%)\b/iy;
+function endsInQuantity(text, pos) {
+  CHAIN_UNIT_RE.lastIndex = pos;
+  return CHAIN_UNIT_RE.test(text);
+}
+
 // ---------------------------------------------------------------------------
 // Federal regulations and codes
 // ---------------------------------------------------------------------------
@@ -382,7 +405,7 @@ const REV_RUL_RE = new RegExp(
 // Chained rulings: "Rev. Ruls. 2003-102, 2003-103 and 2004-45". Each carries
 // its own bulletin cite if the writer gave one.
 const REV_RUL_ADDL_RE = new RegExp(
-  String.raw`\s*(?:,\s*and|,|\s+and)\s+` +
+  LIST_CONN +
   `(?<num>${REV_RUL_NUMBER})` +
   `(?:${REV_RUL_BULLETIN})?`,
   "yi"
@@ -400,7 +423,7 @@ function normalizeRevRulNum(raw) {
 // of ADDL_SEC_RE: "29 C.F.R. §§ 2560.503-1, 2560.503-2", "26 U.S.C. §§ 9801
 // and 9802". Anchored to the previous match via the sticky flag.
 const FED_ADDL_SEC_RE = new RegExp(
-  String.raw`\s*(?:,\s*and|,|\s+and)\s+` +
+  LIST_CONN +
   `(?<sec>${FED_SECTION})`,
   "yi"
 );
@@ -432,7 +455,7 @@ const UCC_RE = new RegExp(
 // current scan position. The match MUST be anchored to scan_pos in source —
 // JS doesn't have re.match-with-pos, so we use sticky (`y`) with lastIndex.
 const ADDL_SEC_RE = new RegExp(
-  String.raw`\s*(?:,\s*and|,|\s+and)\s+` +
+  LIST_CONN +
   String.raw`(?<sec>\d+(?:\.\d+)?[a-z]?(?:\([a-z0-9]+\))*)`,
   "yi"
 );
@@ -508,7 +531,7 @@ const CACI_RE = new RegExp(
 //   "CACI Nos. 3710, 3711, and 3712". Anchored at the previous match's end
 //   via the sticky (`y`) flag, exactly like ADDL_SEC_RE for statutes.
 const CACI_ADDL_RE = new RegExp(
-  String.raw`\s*(?:,\s*and|,|\s+and)\s+` +
+  LIST_CONN +
   String.raw`(?<num>(?:VF[-\s]?)?\d{3,4}[A-Z]?)`,
   "yi"
 );
@@ -1125,6 +1148,7 @@ function findStatuteCitations(text) {
       if (!cont || cont.index !== scanPos) break;
       const contEnd = cont.index + cont[0].length;
       if (startsNextCitation(text, contEnd)) break;
+      if (endsInQuantity(text, contEnd)) break;
       results.push({
         kind,
         key: `${prefix} § ${cont.groups.sec}`,
@@ -1267,6 +1291,7 @@ function findStatuteCitations(text) {
       const cont = ADDL_SEC_RE.exec(text);
       if (!cont || cont.index !== scanPos) break;
       if (startsNextCitation(text, cont.index + cont[0].length)) break;
+      if (endsInQuantity(text, cont.index + cont[0].length)) break;
       results.push({
         kind: "statute",
         key: `${abbrev} § ${cont.groups.sec}`,
@@ -1327,6 +1352,7 @@ function findStatuteCitations(text) {
         const cont = ADDL_SEC_RE.exec(text);
         if (!cont || cont.index !== scanPos) break;
         if (startsNextCitation(text, cont.index + cont[0].length)) break;
+        if (endsInQuantity(text, cont.index + cont[0].length)) break;
         results.push({
           kind,
           key: `${owner.prefix} \u00a7 ${cont.groups.sec}`,
