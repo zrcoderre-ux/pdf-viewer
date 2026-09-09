@@ -38,6 +38,13 @@ In addition to citation linking, the viewer supports:
   stands down where one page ties the same number to two different codes
   (`Civ. Code § 1542` and `Pen. Code § 1542`), leaving those bare references
   unlinked rather than guessing.
+- **Lists of sections** — a code named once carries down the whole list,
+  however it is punctuated: `Code of Civil Procedure sections 1010.6 or 1013
+  and 1170.7` links all three, and so do `Civ. Code §§ 1542, 1543, or 1544`,
+  `section 1013 and/or 1013a`, and `Gov. Code §§ 12940 & 12945`. The list ends
+  where the next citation begins, and where the number counts something rather
+  than naming a section (`section 1013, or 10 court days later` links 1013
+  alone).
 - **CACI jury instructions** — references like **CACI No. 3710** (also
   `CACI 3710`, `CACI Nos. 3710, 3711`, verdict forms `CACI No. VF-3900`) link to
   the instruction on your provider.

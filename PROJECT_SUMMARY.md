@@ -449,6 +449,7 @@ test-toa-position.mjs                Node-runnable TOA panel position-clamp test
 test-bare-rule.mjs                   Node-runnable bare-rule + rule-set carry-over tests
 test-page-rotation.mjs               Node-runnable page-rotation geometry + scope tests
 test-citation-memory.mjs             Node-runnable per-URL citation-memory tests (stubbed DOM)
+test-section-lists.mjs               Node-runnable chained section-list tests (and / or / & connectors)
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
 viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)
