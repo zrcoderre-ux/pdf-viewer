@@ -372,7 +372,7 @@ async function groupOpenedTabs(tabIds, opener, title) {
   }
 }
 
-async function openBackgroundTabs(urls, opener, deliberate, groupTitle) {
+async function openBackgroundTabs(urls, opener, deliberate, group, groupTitle) {
   const cap = deliberate ? MAX_DELIBERATE_TABS : MAX_BACKGROUND_TABS;
   const clean = [];
   for (const raw of Array.isArray(urls) ? urls : []) {
@@ -408,10 +408,11 @@ async function openBackgroundTabs(urls, opener, deliberate, groupTitle) {
     if (tab && tab.id != null) openedIds.push(tab.id);
   }
 
-  if (deliberate) {
+  if (group) {
     // A set the reader asked for as a set arrives as one: its own group,
     // named for what it is, rather than joining whatever group the page they
-    // asked from happens to sit in.
+    // asked from happens to sit in. (Whether the gesture cap applied is a
+    // separate question — a request can be grouped without being counted.)
     await groupOpenedTabs(openedIds, opener, groupTitle);
   } else if (opener && opener.groupId > -1 && chrome.tabs.group && openedIds.length) {
     // A middle-clicked tab stays in the opener's tab group; match that when
@@ -427,9 +428,13 @@ async function openBackgroundTabs(urls, opener, deliberate, groupTitle) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.type !== "open-background-tabs") return; // not ours
-  // `deliberate` says the caller showed the reader how many tabs this opens
-  // before they asked for it (see MAX_DELIBERATE_TABS).
-  openBackgroundTabs(msg.urls, sender && sender.tab, !!msg.deliberate, msg.groupTitle).then(
+  // `deliberate` says the reader named these tabs — a button that carried the
+  // count, or a selection dragged across exactly these links — so the gesture
+  // cap gives way to the far higher ceiling (see MAX_DELIBERATE_TABS).
+  // `group` asks for them in a tab group of their own.
+  openBackgroundTabs(
+    msg.urls, sender && sender.tab, !!msg.deliberate, !!msg.group, msg.groupTitle
+  ).then(
     (result) => sendResponse(result),
     (e) => {
       console.warn("[Citation Linker] Background-tab open failed:", e);

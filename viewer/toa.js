@@ -230,7 +230,10 @@ function openInTabs(urls, done) {
     // `deliberate`: the button's label carried the count, so the reader asked
     // for exactly this many tabs — the worker lifts its gesture cap and puts
     // them in a tab group of their own, under `groupTitle`.
-    const msg = { type: "open-background-tabs", urls, deliberate: true, groupTitle: "Cases" };
+    const msg = {
+      type: "open-background-tabs", urls,
+      deliberate: true, group: true, groupTitle: "Cases",
+    };
     api.runtime.sendMessage(msg, (resp) => {
       const err = api.runtime.lastError; // worker asleep / no receiver
       const opened = resp && typeof resp.opened === "number" ? resp.opened : 0;

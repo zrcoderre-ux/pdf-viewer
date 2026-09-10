@@ -40,9 +40,13 @@
   const doc = root.document;
   if (!doc) return;
 
-  // Opening a tab per link is only reasonable up to a point; a selection that
-  // sweeps a whole page of citations shouldn't fill the tab strip.
-  const MAX_TABS = 20;
+  // Opening a tab per link is only reasonable up to a point. A selection is an
+  // act of its own — the reader dragged across exactly these links and meant
+  // all of them, however far past the bottom of the screen they run — so the
+  // ceiling is high, and it is a ceiling rather than a budget: it exists only
+  // so a runaway selection can't take the browser down with it. It matches the
+  // worker's own ceiling for a request that counted itself.
+  const MAX_TABS = 120;
 
   // A selected link has to be genuinely covered by the selection, not merely
   // touched at its edge. Well under half, because a partial selection through
@@ -260,10 +264,17 @@
 
   function open(urls) {
     const api = extensionApi();
+    // More than one link means a selection: the reader dragged across them and
+    // wants the set. So the worker keeps them together in a tab group of their
+    // own rather than scattering them along the tab strip, and its cap for an
+    // uncounted gesture doesn't apply — this gesture named its links.
+    const many = urls.length > 1;
     if (api) {
       // The background worker holds chrome.tabs; only it can open a tab that
       // doesn't steal focus.
-      api.runtime.sendMessage({ type: "open-background-tabs", urls }, () => {
+      const msg = { type: "open-background-tabs", urls };
+      if (many) { msg.deliberate = true; msg.group = true; msg.groupTitle = "Links"; }
+      api.runtime.sendMessage(msg, () => {
         void api.runtime.lastError; // worker asleep / no receiver — nothing to do
       });
       return;

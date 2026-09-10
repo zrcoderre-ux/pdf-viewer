@@ -503,7 +503,9 @@ console.log("\n--- Shift+Space ---");
   check("...and so does re-checking it", loaded.sent.length, 1);
 }
 {
-  // A selection sweeping a page of citations must not fill the tab strip.
+  // A selection running well past the bottom of the screen is still one act:
+  // the reader dragged across these links and meant all of them, so every one
+  // opens — a ceiling stands far above, not a budget of twenty.
   const many = [];
   for (let i = 0; i < 25; i++) {
     many.push(link(`https://cite.test/${i}`, [rect(10, 100 + i * 20, 100, 20)], { className: "citation-link" }));
@@ -520,10 +522,43 @@ console.log("\n--- Shift+Space ---");
   api.setPointer(null, null);
   check("all 25 are found", api.collectUrls().length, 25);
   api.onKeyDown(keyEvent());
-  check("but only 20 tabs open", sent[0].urls.length, api.MAX_TABS);
+  check("and all 25 open", sent[0].urls.length, 25);
   check("...starting from the top of the selection", sent[0].urls[0], "https://cite.test/0");
+  check("...as a set: grouped, and past the cap a one-link gesture answers to",
+    [sent[0].group, sent[0].groupTitle, sent[0].deliberate], [true, "Links", true]);
   const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
-  check("...and the count is reported", toast.textContent, "Opened 20 of 25 links in background tabs");
+  check("...and the count is reported", toast.textContent, "Opened 25 links in background tabs");
+}
+{
+  // The ceiling is still a ceiling.
+  const many = [];
+  for (let i = 0; i < 150; i++) {
+    many.push(link(`https://cite.test/${i}`, [rect(10, 100 + i * 20, 100, 20)], { className: "citation-link" }));
+  }
+  const article = makeEl("article");
+  const overlay = makeEl("div", { children: many });
+  const body = makeEl("body", { children: [article, overlay] });
+  const page = { html: makeEl("html", { children: [body] }), article };
+  const selection = {
+    isCollapsed: false, rangeCount: 1,
+    getRangeAt: () => ({ commonAncestorContainer: article, getClientRects: () => [rect(0, 90, 200, 3200)] }),
+  };
+  const { api, sent } = load(page, { selection });
+  api.setPointer(null, null);
+  api.onKeyDown(keyEvent());
+  check("a runaway selection stops at the ceiling", sent[0].urls.length, api.MAX_TABS);
+  const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
+  check("...and says so", toast.textContent, "Opened 120 of 150 links in background tabs");
+}
+{
+  // One link is one link: no group, and nothing that lifts a cap.
+  const page = makePage();
+  const { api, sent } = load(page);
+  api.setPointer(50, 110);
+  api.onKeyDown(keyEvent());
+  check("a single link is opened plainly", sent[0], {
+    type: "open-background-tabs", urls: ["https://a.test/"],
+  });
 }
 {
   // Outside the extension (the PWA build) there is no worker to ask.
@@ -620,7 +655,7 @@ console.log("\n--- the tabs the worker opens ---");
   const { ctx, created } = runBackground();
   const urls = [];
   for (let i = 0; i < 36; i++) urls.push(`https://x.test/${i}`);
-  const out = await ctx.openBackgroundTabs(urls, { id: 1, windowId: 1, index: 0, groupId: -1 }, true);
+  const out = await ctx.openBackgroundTabs(urls, { id: 1, windowId: 1, index: 0, groupId: -1 }, true, false);
   check("a deliberate request is not cut to twenty", created.length, 36);
   check("...and reports all of them", [out.opened, out.asked], [36, 36]);
 }
@@ -628,14 +663,15 @@ console.log("\n--- the tabs the worker opens ---");
   const { ctx, created } = runBackground();
   const urls = [];
   for (let i = 0; i < 200; i++) urls.push(`https://x.test/${i}`);
-  await ctx.openBackgroundTabs(urls, { id: 1, windowId: 1, index: 0, groupId: -1 }, true);
+  await ctx.openBackgroundTabs(urls, { id: 1, windowId: 1, index: 0, groupId: -1 }, true, false);
   check("it still has a ceiling", created.length, 120);
 }
 {
   const { ctx, created } = runBackground();
   const replies = [];
   ctx.__onMessage(
-    { type: "open-background-tabs", urls: ["https://a.test/", "https://b.test/"], deliberate: true },
+    { type: "open-background-tabs", urls: ["https://a.test/", "https://b.test/"],
+      deliberate: true, group: true, groupTitle: "Links" },
     { tab: { id: 1, windowId: 1, index: 0, groupId: -1 } },
     (r) => replies.push(r)
   );
@@ -679,7 +715,7 @@ console.log("\n--- a set asked for as a set arrives as one ---");
   const { ctx, grouped, groupUpdates } = runBackground();
   await ctx.openBackgroundTabs(
     ["https://a.test/", "https://b.test/", "https://c.test/"],
-    { id: 1, windowId: 3, index: 0, groupId: 9 }, true, "Cases"
+    { id: 1, windowId: 3, index: 0, groupId: 9 }, true, true, "Cases"
   );
   check("the opened tabs are grouped together",
     grouped, [{ tabIds: [500, 501, 502], createProperties: { windowId: 3 } }]);
@@ -689,14 +725,14 @@ console.log("\n--- a set asked for as a set arrives as one ---");
 {
   const { ctx, grouped, groupUpdates } = runBackground();
   await ctx.openBackgroundTabs(["https://a.test/"], { id: 1, windowId: 1, index: 0, groupId: -1 },
-    true, "Cases");
+    true, true, "Cases");
   check("one tab is not a group", grouped, []);
   check("...and nothing is named", groupUpdates, []);
 }
 {
   // The extension page (the PDF viewer) sends no tab of its own.
   const { ctx, grouped } = runBackground();
-  await ctx.openBackgroundTabs(["https://a.test/", "https://b.test/"], undefined, true, "Cases");
+  await ctx.openBackgroundTabs(["https://a.test/", "https://b.test/"], undefined, true, true, "Cases");
   check("with no opener the group is left to land in the current window",
     grouped, [{ tabIds: [500, 501], createProperties: {} }]);
 }
@@ -705,7 +741,7 @@ console.log("\n--- a set asked for as a set arrives as one ---");
   const { ctx, created } = runBackground();
   ctx.chrome.tabs.group = async () => { throw new Error("no groups here"); };
   const out = await ctx.openBackgroundTabs(["https://a.test/", "https://b.test/"],
-    { id: 1, windowId: 1, index: 0, groupId: -1 }, true, "Cases");
+    { id: 1, windowId: 1, index: 0, groupId: -1 }, true, true, "Cases");
   check("a refused group costs no tabs", [created.length, out.opened], [2, 2]);
 }
 {

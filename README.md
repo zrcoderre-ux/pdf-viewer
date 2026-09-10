@@ -136,7 +136,10 @@ scroll wheel. **Shift + Space** does the same thing from the keyboard:
   if there is one). Focus never leaves what you were doing.
 - **Select text first** and Shift + Space opens *every* link the selection
   covers, in reading order — sweep a paragraph of citations and pull all of
-  them at once. Up to 20 at a time; a brief note says how many opened.
+  them at once, into a **tab group** of their own named `Links` rather than
+  strung along the tab strip. A selection is one act, so all of them means all
+  of them: the ceiling is 120, high enough to be a guard against a runaway
+  selection rather than a budget. A brief note says how many opened.
 - If the mouse is resting on a link *outside* the selection, that link wins —
   the pointer is what a middle click would have acted on.
 
@@ -342,10 +345,10 @@ cases: a statute, rule, regulation or jury instruction is read in place, and
 ten code sections in ten tabs is not what the reader came for. The tabs open
 behind the page, so the button reports what happened (`Opened 12`) rather than
 leaving the click unanswered, and a hosted page whose pop-ups are blocked says
-that instead. The worker's twenty-tab cap is a guard for Shift+Space, which can
-name hundreds of links the reader never counted; this button carries its count
-in its own label, so what it asks for is what the reader asked for, and only a
-far higher ceiling (120) stands behind it. The tabs arrive as one **tab group**
+that instead. The worker's twenty-tab cap is for a gesture that named no
+count — one link under the pointer; this button carries its count in its own
+label, as a selection carries its own extent, so what it asks for is what the
+reader asked for, and only a far higher ceiling (120) stands behind it. The tabs arrive as one **tab group**
 named `Cases` — a set asked for as a set should not land as three dozen loose
 tabs — rather than joining whatever group the page they were asked from sits
 in. A browser that won't group them has still opened every one. The same report, with the URLs and the reason any
