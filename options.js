@@ -211,6 +211,9 @@ function csvEscape(v) {
     : s;
 }
 
+// Entries logged before the raw source filename was recorded have no
+// sourceRaw; those rows show an em dash in that column rather than repeating
+// the display name, which may or may not have been altered.
 function renderHistory(entries) {
   if (!entries || entries.length === 0) {
     historyContainer.innerHTML = '<p class="history-empty">No PDFs recorded yet.</p>';
@@ -220,13 +223,14 @@ function renderHistory(entries) {
     <tr>
       <td>${csvEscape(e.timestamp).replace(/T/, " ").replace(/\.\d+Z$/, "")}</td>
       <td>${e.sourceTitle ? escapeHtml(e.sourceTitle) : "<em style='color:#aaa'>—</em>"}</td>
+      <td>${e.sourceRaw   ? escapeHtml(e.sourceRaw)   : "<em style='color:#aaa'>—</em>"}</td>
       <td>${e.footerName  ? escapeHtml(e.footerName)  : "<em style='color:#aaa'>—</em>"}</td>
       <td>${e.footerTitle ? escapeHtml(e.footerTitle) : "<em style='color:#aaa'>—</em>"}</td>
       <td>${e.finalName   ? escapeHtml(e.finalName)   : "<em style='color:#aaa'>—</em>"}</td>
     </tr>`).join("");
   historyContainer.innerHTML = `
     <table id="history-table">
-      <thead><tr><th>Opened</th><th>Source name</th><th>Footer name</th><th>Footer</th><th>Final name</th></tr></thead>
+      <thead><tr><th>Opened</th><th>Source name</th><th>Source file</th><th>Footer name</th><th>Footer</th><th>Final name</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
@@ -254,10 +258,11 @@ historyDownloadBtn.addEventListener("click", () => {
       setTimeout(() => { historyStatus.textContent = ""; }, 2500);
       return;
     }
-    const header = ["Opened", "Source name", "Footer name", "Footer", "Final name"];
+    const header = ["Opened", "Source name", "Source file", "Footer name", "Footer", "Final name"];
     const csvRows = [header, ...pdfHistory.map(e => [
       e.timestamp,
       e.sourceTitle ?? "",
+      e.sourceRaw   ?? "",
       e.footerName  ?? "",
       e.footerTitle ?? "",
       e.finalName   ?? "",

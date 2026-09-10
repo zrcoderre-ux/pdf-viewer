@@ -269,8 +269,12 @@ https://example.gov/getfile?id=*</pre>
   <h2>PDF history</h2>
   <div class="card">
     <p class="lede" style="margin-top:0;">
-      Every PDF opened by the viewer is logged here with its source filename,
-      footer-derived title, URL, and the time it was opened.
+      Every PDF opened by the viewer is logged here: the source filename as
+      received (<strong>Source file</strong>), the name the viewer showed for
+      it (<strong>Source name</strong> &mdash; the two differ only when the
+      naming rules are applied to source filenames), the printed footer and
+      the title derived from it, the final name, and the time it was opened.
+      The document's URL is never recorded.
     </p>
     <div style="display:flex;gap:8px;align-items:center;">
       <button id="history-download" type="button">Download as CSV</button>

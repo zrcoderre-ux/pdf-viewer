@@ -2265,6 +2265,11 @@ function logPdfHistory() {
   const entry = {
     id:          currentHistoryId,
     sourceTitle: sourceDisplayName || "",
+    // The filename as the server sent it (extension stripped), kept beside
+    // the display name so the history shows what the source-naming rules did
+    // — the same raw/derived pair the footer columns already carry. The two
+    // are identical while "apply naming rules to the source" is off.
+    sourceRaw:   sourceRawName || "",
     footerName:  footerExtraction ? (footerExtraction.displayName || "") : "",
     footerTitle: footerExtraction ? (footerExtraction.raw || "") : "",
     finalName:   filenameEl.textContent || "",
