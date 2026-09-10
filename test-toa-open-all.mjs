@@ -140,6 +140,23 @@ respond = () => ({ opened: 0 });
 button().fire("click");
 check("nothing opened at all", button().textContent, "Couldn't open");
 
+console.log("\n--- a hosted page, where the browser blocks pop-ups ---");
+{
+  // No extension: window.open is the only way to open a tab, and a blocked
+  // call returns null. This is what "it only opened the first one" is.
+  const savedChrome = globalThis.chrome;
+  globalThis.chrome = undefined;
+  let calls = 0;
+  globalThis.window.open = () => (++calls === 1 ? { closed: false } : null);
+  panel.render([...CASES, ...OTHERS], "lexis");
+  button().fire("click");
+  check("every case was tried", calls, 3);
+  check("...and the button says what to do about it",
+    button().textContent, "Opened 1 of 3 — allow pop-ups");
+  globalThis.window.open = () => { throw new Error("no window.open on the extension path"); };
+  globalThis.chrome = savedChrome;
+}
+
 console.log("\n--- a repeated render doesn't paint over the result ---");
 respond = (urls) => ({ opened: urls.length });
 panel.render([...CASES, ...OTHERS], "lexis");

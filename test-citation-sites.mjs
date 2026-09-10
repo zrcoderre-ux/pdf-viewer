@@ -236,6 +236,54 @@ console.log("\n--- Options page ---");
   check("the per-site list still saves", o.lastWrite(), { citationSites: ["chatgpt.com"] });
 }
 
+// ---------------------------------------------------------------------------
+// The scope preview
+//
+// A line covers less than it looks like it does in two ways — a path narrows
+// it to that path, a named scheme narrows it to that scheme — and neither is
+// visible in the box. "I listed the site and it still linked there" is nearly
+// always one of them, so the page says what each line reaches.
+// ---------------------------------------------------------------------------
+
+console.log("\n--- what each line covers, spelled out under the box ---");
+{
+  const o = runOptions({ citationSiteExceptions: ["civil.lacourt.org"] });
+  check("a bare site: the whole thing, either scheme",
+    o.el("citation-exceptions-preview").textContent,
+    "*://civil.lacourt.org/*  —  civil.lacourt.org, every page, http and https");
+}
+{
+  const o = runOptions({ citationSiteExceptions: ["https://civil.lacourt.org/ecourt/ecms"] });
+  check("a path: that path only, and the scheme that was named",
+    o.el("citation-exceptions-preview").textContent,
+    "https://civil.lacourt.org/ecourt/ecms*  —  civil.lacourt.org, " +
+    "only pages under /ecourt/ecms, https only");
+}
+{
+  const o = runOptions({ citationSiteExceptions: ["*.westlaw.com", "not a url /"] });
+  check("subdomains, and a line that isn't a site at all",
+    o.el("citation-exceptions-preview").textContent.split("\n"),
+    [
+      "*://*.westlaw.com/*  —  westlaw.com and its subdomains, every page, http and https",
+      "not a url /  —  not a site pattern; this line is ignored",
+    ]);
+}
+{
+  const o = runOptions({ citationSites: ["chatgpt.com"] });
+  check("the opt-in list defaults to https, and says so",
+    o.el("citation-sites-preview").textContent,
+    "https://chatgpt.com/*  —  chatgpt.com, every page, https only");
+}
+{
+  const o = runOptions({ citationSiteExceptions: [] });
+  const box = o.el("citation-exceptions");
+  box.value = "civil.lacourt.org";
+  box.fire("input");
+  check("typing updates it before anything is saved",
+    o.el("citation-exceptions-preview").textContent,
+    "*://civil.lacourt.org/*  —  civil.lacourt.org, every page, http and https");
+}
+
 console.log("\n" + "=".repeat(60));
 console.log(`FAILURES: ${fails}`);
 process.exit(fails ? 1 : 0);

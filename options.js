@@ -94,6 +94,36 @@ function flashStatus(el, message, isError) {
   setTimeout(() => { el.textContent = ""; }, 2500);
 }
 
+// What one line in a site box actually covers, in the words a reader needs to
+// catch the two ways a line quietly covers less than it looks like it does:
+// a path narrows it to that path, and a named scheme narrows it to that
+// scheme. "I listed the site and it still linked on it" is nearly always one
+// of those — an exception written as
+// "https://civil.lacourt.org/ecourt/ecms" leaves every other page of
+// civil.lacourt.org linked.
+function describeScope(raw, defaultScheme) {
+  const pattern = SiteRules && SiteRules.toMatchPattern(raw, defaultScheme);
+  if (!pattern || !SiteRules.isValidMatchPattern(pattern)) {
+    return `${raw}  —  not a site pattern; this line is ignored`;
+  }
+  const m = /^(\*|https?):\/\/([^/]+)(\/.*)$/.exec(pattern);
+  const [, scheme, host, path] = m;
+  const notes = [];
+  notes.push(host.startsWith("*.")
+    ? `${host.slice(2)} and its subdomains`
+    : host);
+  notes.push(path === "/*" ? "every page" : `only pages under ${path.replace(/\*$/, "")}`);
+  notes.push(scheme === "*" ? "http and https" : `${scheme} only`);
+  return `${pattern}  —  ${notes.join(", ")}`;
+}
+
+// Paint the scope of every line currently in `textarea` under it.
+function renderScopePreview(textarea, target, defaultScheme) {
+  if (!textarea || !target) return;
+  const lines = linesOf(textarea);
+  target.textContent = lines.map((l) => describeScope(l, defaultScheme)).join("\n");
+}
+
 // Read a textarea as a trimmed, blank-free list of lines.
 function linesOf(textarea) {
   return textarea.value
@@ -111,6 +141,8 @@ const exceptionsEl = document.getElementById("citation-exceptions");
 const exceptionsSaveBtn = document.getElementById("citation-exceptions-save");
 const exceptionsResetBtn = document.getElementById("citation-exceptions-reset");
 const exceptionsStatus = document.getElementById("citation-exceptions-status");
+const exceptionsPreview = document.getElementById("citation-exceptions-preview");
+const citationSitesPreview = document.getElementById("citation-sites-preview");
 
 // The per-site list has nothing to say while every site is covered.
 function syncSitesBlockVisibility() {
@@ -131,10 +163,14 @@ if (allSitesEl) {
 }
 
 if (citationSitesEl && citationSitesSaveBtn) {
+  const paintSites = () => renderScopePreview(citationSitesEl, citationSitesPreview, "https");
   chrome.storage.sync.get({ citationSites: [] }, ({ citationSites }) => {
     citationSitesEl.value = (citationSites || []).join("\n");
+    paintSites();
   });
+  citationSitesEl.addEventListener("input", paintSites);
   citationSitesSaveBtn.addEventListener("click", () => {
+    paintSites();
     const lines = linesOf(citationSitesEl);
     chrome.storage.sync.set({ citationSites: lines }, () => {
       flashStatus(
@@ -150,13 +186,20 @@ if (citationSitesEl && citationSitesSaveBtn) {
 // box the user saves on purpose stays empty rather than being re-seeded.
 if (exceptionsEl && exceptionsSaveBtn) {
   const defaults = (SiteRules && SiteRules.DEFAULT_EXCEPTIONS) || [];
+  // Exceptions default to BOTH schemes, so the preview is built the same way
+  // the matcher builds them — an exception the user has to write twice isn't
+  // one.
+  const paintExceptions = () => renderScopePreview(exceptionsEl, exceptionsPreview, "*");
   chrome.storage.sync.get(
     { citationSiteExceptions: defaults },
     ({ citationSiteExceptions }) => {
       exceptionsEl.value = (citationSiteExceptions || []).join("\n");
+      paintExceptions();
     }
   );
+  exceptionsEl.addEventListener("input", paintExceptions);
   exceptionsSaveBtn.addEventListener("click", () => {
+    paintExceptions();
     const lines = linesOf(exceptionsEl);
     chrome.storage.sync.set({ citationSiteExceptions: lines }, () => {
       flashStatus(
@@ -170,6 +213,7 @@ if (exceptionsEl && exceptionsSaveBtn) {
   if (exceptionsResetBtn) {
     exceptionsResetBtn.addEventListener("click", () => {
       exceptionsEl.value = defaults.join("\n");
+      paintExceptions();
       chrome.storage.sync.set({ citationSiteExceptions: defaults }, () => {
         flashStatus(exceptionsStatus, "Restored the default exceptions.");
       });

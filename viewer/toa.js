@@ -217,23 +217,40 @@ export function clampPanelPosition({ right, top, width, winW, winH }) {
 // for the Shift+Space "middle click" — same message, same cap on how many tabs
 // one gesture may open. It answers with the number it actually opened.
 //
-// A hosted page (the PWA build) has no worker: window.open is all there is, and
-// the browser may refuse some of them. `opened` there counts what we asked for.
+// A hosted page (the PWA build) has no worker, so window.open is all there is —
+// and a browser blocking pop-ups lets the first one through and refuses the
+// rest, which is exactly what "it only opened the first case" looks like. A
+// blocked call returns null, so they can be counted and reported rather than
+// leaving the reader to wonder; `blocked` is passed back so the button can say
+// what to do about it.
 function openInTabs(urls, done) {
   const api = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id
     ? chrome : null;
   if (api) {
     api.runtime.sendMessage({ type: "open-background-tabs", urls }, (resp) => {
-      void api.runtime.lastError; // worker asleep / no receiver
-      done(resp && typeof resp.opened === "number" ? resp.opened : 0);
+      const err = api.runtime.lastError; // worker asleep / no receiver
+      const opened = resp && typeof resp.opened === "number" ? resp.opened : 0;
+      // Always logged, in the console of the page the panel is on — the button
+      // says what happened for a few seconds, and this is the copy of it that
+      // is still there afterwards, with the URLs and any per-tab reason.
+      console.info(
+        `[Citation Linker] Open all: ${urls.length} case link${urls.length === 1 ? "" : "s"}, ` +
+        `${opened} opened.`,
+        { urls, failed: (resp && resp.failed) || [], error: err ? err.message : null }
+      );
+      done(opened, false);
     });
     return;
   }
   let opened = 0;
+  let blocked = false;
   for (const url of urls) {
-    try { window.open(url, "_blank", "noopener"); opened++; } catch { /* blocked */ }
+    let win = null;
+    try { win = window.open(url, "_blank", "noopener"); } catch { win = null; }
+    if (win) opened++;
+    else blocked = true;
   }
-  done(opened);
+  done(opened, blocked);
 }
 
 function injectStyle() {
@@ -459,7 +476,7 @@ export function createToaPanel({ providerLabel, top } = {}) {
     flashing = true;
     openAllEl.textContent = text;
     clearTimeout(flashTimer);
-    flashTimer = setTimeout(() => { flashing = false; paintOpenAll(); }, 2500);
+    flashTimer = setTimeout(() => { flashing = false; paintOpenAll(); }, 5000);
   }
 
   function paintOpenAll() {
@@ -474,8 +491,10 @@ export function createToaPanel({ providerLabel, top } = {}) {
     if (!caseUrls.length) return;
     const urls = caseUrls.slice();
     openAllEl.disabled = true;
-    openInTabs(urls, (opened) => {
-      if (!opened) flash("Couldn't open");
+    openInTabs(urls, (opened, blocked) => {
+      if (blocked && !opened) flash("Blocked — allow pop-ups");
+      else if (blocked) flash(`Opened ${opened} of ${urls.length} — allow pop-ups`);
+      else if (!opened) flash("Couldn't open");
       else if (opened < urls.length) flash(`Opened ${opened} of ${urls.length}`);
       else flash(`Opened ${opened}`);
       if (openAllEl) openAllEl.disabled = false;

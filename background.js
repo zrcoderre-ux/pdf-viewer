@@ -349,6 +349,10 @@ async function openBackgroundTabs(urls, opener) {
   }
 
   let opened = 0;
+  // Why a tab didn't open is the only thing that explains "it opened one and
+  // stopped", and the worker's own console is not where anyone looks. The
+  // failures go back to the caller, which logs them in the page's console.
+  const failed = [];
   for (const url of clean) {
     // active:false is the whole point: a middle-clicked tab loads behind the
     // page you're reading.
@@ -363,6 +367,7 @@ async function openBackgroundTabs(urls, opener) {
       tab = await chrome.tabs.create(props);
     } catch (e) {
       console.warn(`[Citation Linker] Could not open ${url} in a background tab:`, e);
+      failed.push({ url, message: String((e && e.message) || e) });
       continue;
     }
     opened++;
@@ -374,16 +379,18 @@ async function openBackgroundTabs(urls, opener) {
       } catch (e) { /* group closed mid-flight; the tab is still open */ }
     }
   }
-  return opened;
+  // `asked` counts the URLs that survived cleaning (deduplicated, and dropped
+  // if the cap was reached), which is what `opened` should be compared against.
+  return { opened, asked: clean.length, failed };
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.type !== "open-background-tabs") return; // not ours
   openBackgroundTabs(msg.urls, sender && sender.tab).then(
-    (opened) => sendResponse({ opened }),
+    (result) => sendResponse(result),
     (e) => {
       console.warn("[Citation Linker] Background-tab open failed:", e);
-      sendResponse({ opened: 0 });
+      sendResponse({ opened: 0, asked: 0, failed: [{ url: "", message: String((e && e.message) || e) }] });
     }
   );
   return true; // sendResponse is called asynchronously

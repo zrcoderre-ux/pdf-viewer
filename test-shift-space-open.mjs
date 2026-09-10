@@ -583,7 +583,9 @@ console.log("\n--- the tabs the worker opens ---");
     ["https://a.test/", "https://b.test/"],
     { id: 42, windowId: 3, index: 5, groupId: -1 }
   );
-  check("one tab per link", opened, 2);
+  check("one tab per link", opened.opened, 2);
+  check("...and it reports what it was asked for", opened.asked, 2);
+  check("...with nothing to explain", opened.failed, []);
   check("unfocused, as a middle click is", created.map((c) => c.active), [false, false]);
   check("stacked just after the tab that asked", created.map((c) => c.index), [6, 7]);
   check("and owned by it", created.map((c) => c.openerTabId), [42, 42]);
@@ -603,8 +605,26 @@ console.log("\n--- the tabs the worker opens ---");
   const { ctx, created } = runBackground();
   const urls = [];
   for (let i = 0; i < 30; i++) urls.push(`https://x.test/${i}`);
-  await ctx.openBackgroundTabs(urls, { id: 1, windowId: 1, index: 0, groupId: -1 });
+  const out = await ctx.openBackgroundTabs(urls, { id: 1, windowId: 1, index: 0, groupId: -1 });
   check("the worker caps the burst too", created.length, 20);
+  check("...and says it opened every one it kept", [out.opened, out.asked], [20, 20]);
+}
+{
+  // A tab that refuses to open is the whole explanation for "it opened one and
+  // stopped", so the reason travels back with the count.
+  const { ctx } = runBackground();
+  let n = 0;
+  ctx.chrome.tabs.create = async (props) => {
+    if (++n === 2) throw new Error("Tabs cannot be edited right now");
+    return { id: 500 + n, ...props };
+  };
+  const out = await ctx.openBackgroundTabs(
+    ["https://a.test/", "https://b.test/", "https://c.test/"],
+    { id: 1, windowId: 1, index: 0, groupId: -1 }
+  );
+  check("the ones that opened are counted", [out.opened, out.asked], [2, 3]);
+  check("...and the one that didn't is explained",
+    out.failed, [{ url: "https://b.test/", message: "Tabs cannot be edited right now" }]);
 }
 {
   const { ctx, grouped } = runBackground();
@@ -627,7 +647,9 @@ console.log("\n--- the tabs the worker opens ---");
   );
   check("the message is answered asynchronously", handled, true);
   await new Promise((r) => setTimeout(r, 0));
-  check("...with the count", replies, [{ opened: 1 }]);
+  // The reply carries what the caller needs to explain a partial open: the
+  // count, what it was asked for after cleaning, and why any tab was refused.
+  check("...with the count", replies, [{ opened: 1, asked: 1, failed: [] }]);
   check("...having opened the tab", created.length, 1);
   check("someone else's message is not ours",
     ctx.__onMessage({ type: "something-else" }, {}, () => {}), undefined);

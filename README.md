@@ -303,6 +303,20 @@ the individual sites to link on (`chatgpt.com`, `*.courtlistener.com`, …).
 Adding an exception takes its links down immediately; every other change
 applies on the next page load.
 
+A line covers less than it looks like it does in two ways, and both are easy to
+write by accident: **a path narrows it to that path**
+(`civil.lacourt.org/ecourt/ecms` leaves every other page of the site linked —
+name the site alone to cover the site), and **naming a scheme narrows it to
+that scheme**. Neither is visible in the box, so the Options page writes out
+what every line reaches, under the box, as it is typed:
+
+```
+*://civil.lacourt.org/*                   —  civil.lacourt.org, every page, http and https
+https://civil.lacourt.org/ecourt/ecms*    —  civil.lacourt.org, only pages under /ecourt/ecms, https only
+*://*.westlaw.com/*                       —  westlaw.com and its subdomains, every page, http and https
+```
+
+
 An exception also reaches the PDF viewer, through the URL the PDF was served
 from: a document downloaded from an excepted site opens with no citation links
 and no Table of Authorities, and the toolbar says so where the citation count
@@ -328,8 +342,11 @@ cases: a statute, rule, regulation or jury instruction is read in place, and
 ten code sections in ten tabs is not what the reader came for. The tabs open
 behind the page, so the button reports what happened (`Opened 12`) rather than
 leaving the click unanswered; where more cases are listed than one gesture may
-open, it says so (`Opened 20 of 34`). The button is hidden when the table holds
-no cases.
+open, it says so (`Opened 20 of 34`), and a hosted page whose pop-ups are
+blocked says that instead. The same report, with the URLs and the reason any
+tab was refused, is logged to the console of the page the panel is on, since
+the button's own copy is gone in a few seconds. The button is hidden when the
+table holds no cases.
 
 A remembered position is measured against the window it was set in, so it is
 re-clamped to the current window every time the panel is shown and whenever the
