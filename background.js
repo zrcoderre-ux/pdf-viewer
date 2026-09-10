@@ -350,6 +350,27 @@ function toOpenableUrl(raw) {
   return BACKGROUND_TAB_SCHEMES.includes(parsed.protocol) ? parsed.href : null;
 }
 
+// One tab per destination, and two links are one destination when they differ
+// only in ways that don't change the page. `new URL()` already settles the
+// spelling — scheme and host case, a bare host's missing "/" — so what is left
+// is the fragment: "…/FullText?cite=42+Cal.4th+531" and the same URL with a
+// pincite anchor on the end open the same document, and a selection sweeping a
+// document that cites a case three times shouldn't hand back three tabs of it.
+//
+// A fragment that starts with "/" or "!" is not an anchor, it is a route: an
+// app that navigates in the hash ("#/matter/12" vs "#/matter/13") serves two
+// different pages from one URL, and collapsing those would open the wrong one.
+// Mirrored in shift-space-open.js, which needs the same answer to report an
+// honest count. Comparison only — the URL that is opened is the one the page
+// gave, anchor and all.
+function sameLinkKey(url) {
+  let parsed;
+  try { parsed = new URL(url); } catch (e) { return url; }
+  const hash = parsed.hash;
+  if (hash && (hash.startsWith("#/") || hash.startsWith("#!"))) return parsed.href;
+  return parsed.origin + parsed.pathname + parsed.search;
+}
+
 // Put the tabs a deliberate request opened into a tab group of their own, so
 // three dozen cases arrive as one labelled block in the tab strip instead of
 // three dozen loose tabs. Best effort: tab groups are a convenience, and a
@@ -375,9 +396,14 @@ async function groupOpenedTabs(tabIds, opener, title) {
 async function openBackgroundTabs(urls, opener, deliberate, group, groupTitle) {
   const cap = deliberate ? MAX_DELIBERATE_TABS : MAX_BACKGROUND_TABS;
   const clean = [];
+  const seen = new Set();
   for (const raw of Array.isArray(urls) ? urls : []) {
     const url = toOpenableUrl(raw);
-    if (url && !clean.includes(url)) clean.push(url);
+    if (!url) continue;
+    const key = sameLinkKey(url);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clean.push(url);
     if (clean.length >= cap) break;
   }
 

@@ -144,8 +144,13 @@ scroll wheel. **Shift + Space** does the same thing from the keyboard:
   the pointer is what a middle click would have acted on.
 
 It works on **every website** and in the PDF viewer, on the page's own
-hyperlinks and on the citation underlines this extension adds — both alike. A
-citation that wraps across two lines is two underline strips but still one tab,
+hyperlinks and on the citation underlines this extension adds — both alike.
+**One tab per destination**, always: a citation that wraps across two lines is
+two underline strips but still one tab, a case cited three times in the
+selection is one tab, and two links that differ only in the anchor they jump to
+(`…/FullText?cite=42+Cal.4th+531#p550` and `#p552`) are one tab — the first
+spelling is the one opened, anchor and all. A hash that *routes* (`#/matter/12`)
+is the address rather than a place within a page, so those stay separate,
 and a selection that runs past the bottom of the screen still opens the links
 scrolled out of view, not just the ones you can see.
 
@@ -340,8 +345,8 @@ minimized state, position, and custom dimensions are remembered.
 
 **Open all cases.** A button in the panel's header — `Open 12 cases`, so the
 count is known before the click — opens every case in the table, each in its
-own background tab, the way Shift+Space opens a selection's links. Only the
-cases: a statute, rule, regulation or jury instruction is read in place, and
+own background tab (one per destination, as Shift+Space opens a selection's
+links). Only the cases: a statute, rule, regulation or jury instruction is read in place, and
 ten code sections in ten tabs is not what the reader came for. The tabs open
 behind the page, so the button reports what happened (`Opened 12`) rather than
 leaving the click unanswered, and a hosted page whose pop-ups are blocked says

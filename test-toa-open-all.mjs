@@ -146,6 +146,31 @@ respond = () => ({ opened: 0 });
 button().fire("click");
 check("nothing opened at all", button().textContent, "Couldn't open");
 
+console.log("\n--- one tab per destination ---");
+{
+  // A repo entry can point two pincites of one case at the same document with
+  // different anchors. The reader asked for the case, once.
+  const anchored = [
+    { key: "Doe v. Roe (2007) 42 Cal.4th 531", kind: "case", url: "https://x/doe#p550" },
+    { key: "Doe v. Roe (2007) 42 Cal.4th 531, 552", kind: "case", url: "https://x/doe#p552" },
+    { key: "Lazar v. Superior Court (1996) 12 Cal.4th 631", kind: "case", url: "https://x/lazar" },
+  ];
+  panel.render(anchored, "lexis");
+  check("anchors on one document are one case", button().textContent, "Open 2 cases");
+  sent = null;
+  button().fire("click");
+  check("...and the first spelling is what opens", sent.urls, ["https://x/doe#p550", "https://x/lazar"]);
+}
+{
+  // A hash that is a route is the address, not a place within a page.
+  const routed = [
+    { key: "A v. B (2001) 1 Cal.5th 1", kind: "case", url: "https://app/#/doc/1" },
+    { key: "C v. D (2002) 2 Cal.5th 2", kind: "case", url: "https://app/#/doc/2" },
+  ];
+  panel.render(routed, "lexis");
+  check("two routes are two cases", button().textContent, "Open 2 cases");
+}
+
 console.log("\n--- a hosted page, where the browser blocks pop-ups ---");
 {
   // No extension: window.open is the only way to open a tab, and a blocked

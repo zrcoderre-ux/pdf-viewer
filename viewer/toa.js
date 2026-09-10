@@ -223,6 +223,20 @@ export function clampPanelPosition({ right, top, width, winW, winH }) {
 // blocked call returns null, so they can be counted and reported rather than
 // leaving the reader to wonder; `blocked` is passed back so the button can say
 // what to do about it.
+// One tab per destination, by the same rule the background worker and the
+// Shift+Space shortcut use: two links are one destination when they differ
+// only in a fragment, which moves within a page rather than to another one.
+// A repo entry can give two pincites of one case as two anchors on the same
+// document, and the reader asked for the case once. A fragment that opens with
+// "/" or "!" is a route, not an anchor, and stays part of the address.
+function linkKey(url) {
+  let parsed;
+  try { parsed = new URL(url, document.baseURI); } catch { return url; }
+  const hash = parsed.hash;
+  if (hash && (hash.charAt(1) === "/" || hash.charAt(1) === "!")) return parsed.href;
+  return parsed.origin + parsed.pathname + parsed.search;
+}
+
 function openInTabs(urls, done) {
   const api = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id
     ? chrome : null;
@@ -284,6 +298,7 @@ export function createToaPanel({ providerLabel, top } = {}) {
   // "Open all" opens. Statutes, regulations, rules and jury instructions are
   // deliberately left out: a table's cases are what a reader opens one by one.
   let caseUrls = [];
+  let caseKeys = null;      // the linkKey of each, so one case is one tab
   let openAllEl = null;
   let flashTimer = null;
   let flashing = false;   // a result is on the button; don't paint over it
@@ -539,6 +554,7 @@ export function createToaPanel({ providerLabel, top } = {}) {
     countEl.textContent = String(authorities.length);
     bodyEl.textContent = "";
     caseUrls = [];
+    caseKeys = new Set();
 
     for (const [kind, grpLabel] of GROUPS) {
       const items = authorities
@@ -552,7 +568,10 @@ export function createToaPanel({ providerLabel, top } = {}) {
       bodyEl.appendChild(g);
 
       for (const a of items) {
-        if (kind === "case" && a.url && !caseUrls.includes(a.url)) caseUrls.push(a.url);
+        if (kind === "case" && a.url) {
+          const k = linkKey(a.url);
+          if (!caseKeys.has(k)) { caseKeys.add(k); caseUrls.push(a.url); }
+        }
         const lnk = document.createElement("a");
         lnk.className = "cl-toa-link";
         lnk.href = a.url;

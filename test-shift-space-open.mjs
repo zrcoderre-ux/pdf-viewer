@@ -279,6 +279,21 @@ console.log("\n--- every link the selection covers ---");
     hrefs.includes("https://outside.test/"), false);
 }
 {
+  // Counting is the shortcut's own job too — the note it shows has to match
+  // what the worker will do — so it collapses the same pairs the worker does.
+  const { api } = load(makePage());
+  check("an anchor is a place in a page, not another page",
+    api.urlsOf([
+      { url: "https://a.test/doc#p10" },
+      { url: "https://a.test/doc#p22" },
+      { url: "https://a.test/doc" },
+    ]), ["https://a.test/doc#p10"]);
+  check("a query is another page",
+    api.urlsOf([{ url: "https://a.test/doc?cite=1" }, { url: "https://a.test/doc?cite=2" }]).length, 2);
+  check("a hash route is the address",
+    api.urlsOf([{ url: "https://app/#/a" }, { url: "https://app/#/b" }]).length, 2);
+}
+{
   // Two links on one line whose glyph rects differ by a pixel still open
   // left-to-right, not in whatever order the tops happen to sort.
   const right = link("https://right.test/", [rect(200, 101, 100, 20)]);
@@ -639,6 +654,22 @@ console.log("\n--- the tabs the worker opens ---");
   );
   check("only real navigable URLs, deduplicated",
     created.map((c) => c.url), ["https://a.test/", "file:///tmp/x.pdf"]);
+}
+{
+  // Two links are one destination when only the anchor differs: a document
+  // that cites one case three times, each with its own pincite, is one tab.
+  const { ctx, created } = runBackground();
+  await ctx.openBackgroundTabs(
+    ["https://a.test/doc?cite=1#p10", "https://a.test/doc?cite=1#p22", "https://a.test/doc?cite=1",
+     "https://a.test/doc?cite=2", "https://app.test/#/matter/1", "https://app.test/#/matter/2"],
+    { id: 1, windowId: 1, index: 0, groupId: -1 }
+  );
+  check("anchors on one page open once, as the page first spelled it",
+    created.map((c) => c.url),
+    ["https://a.test/doc?cite=1#p10", "https://a.test/doc?cite=2",
+     // A hash that routes is the address: these are two pages, not two places
+     // in one.
+     "https://app.test/#/matter/1", "https://app.test/#/matter/2"]);
 }
 {
   const { ctx, created } = runBackground();

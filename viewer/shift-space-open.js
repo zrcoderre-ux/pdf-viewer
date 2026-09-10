@@ -223,13 +223,32 @@
     return hits;
   }
 
-  // One tab per destination: a citation that wraps across two lines is two
-  // strips, and an overlay's painted strip repeats what its source reports.
+  // One tab per destination, counted the way the worker counts it (see
+  // sameLinkKey in background.js): a citation that wraps across two lines is
+  // two strips, an overlay's painted strip repeats what its source reports,
+  // and a document that cites the same case three times is still one case.
+  // Two links are one destination when they differ only in a fragment, which
+  // moves within a page rather than to another one — unless the fragment is a
+  // route ("#/matter/12"), which is the whole address in an app that navigates
+  // in the hash. The first spelling seen is the one opened, anchor and all.
+  function linkKey(url) {
+    let parsed;
+    try { parsed = new URL(url, doc.baseURI); } catch (e) { return url; }
+    const hash = parsed.hash;
+    if (hash && (hash.charAt(1) === "/" || hash.charAt(1) === "!")) return parsed.href;
+    return parsed.origin + parsed.pathname + parsed.search;
+  }
+
   function urlsOf(hits) {
     const out = [];
+    const seen = [];
     for (const h of hits) {
       const url = h && (h.url || h.href);
-      if (url && out.indexOf(url) === -1) out.push(url);
+      if (!url) continue;
+      const key = linkKey(url);
+      if (seen.indexOf(key) !== -1) continue;
+      seen.push(key);
+      out.push(url);
     }
     return out;
   }
