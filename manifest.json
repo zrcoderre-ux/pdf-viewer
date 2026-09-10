@@ -79,6 +79,8 @@
         "viewer/pdfsync.js",
         "viewer/pseudo-key.js",
         "viewer/xlsx-read.js",
+        "viewer/xlsx-write.js",
+        "viewer/leaks.js",
         "viewer/vendor/tesseract/tesseract.esm.min.js",
         "viewer/vendor/tesseract/worker.min.js",
         "viewer/vendor/tesseract/tesseract-core-lstm.wasm.js",

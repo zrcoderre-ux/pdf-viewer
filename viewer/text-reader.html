@@ -44,11 +44,12 @@
     <span class="sep"></span>
 
     <button id="flag-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead.">🚩 Flag real value</button>
+    <button id="leaks-btn" title="Review PDF-Linker's LEAKS.xlsx row by row: each row shown above the text, the text opened at its page and line, the decision written into the worksheet's Fix? cell. The case folder's own worksheet is attached when the folder is opened; click to open it, or to load one.">⚠ Leaks <span id="leaks-count" class="badge" hidden>0</span></button>
     <button id="autoscroll" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses" aria-pressed="false">↓ Auto-scroll</button>
     <span class="sep"></span>
 
     <button id="sbs-toggle" title="Show the PDF this export came from beside the text, page for page, scrolling together (remembered)" aria-pressed="false" disabled>⇔ Side by side</button>
-    <button id="swap-btn" title="Swap PDF pages into the text: read a page or a run of pages (a badly scanned exhibit) from the PDF, in place, while the rest stays text" disabled>⇄ PDF pages…</button>
+    <button id="swap-btn" title="Swap PDF pages into the text: read a page or a run of pages (a badly scanned exhibit) from the PDF, in place, while the rest stays text. For a Combined Text.txt, pick every member's PDF at once." disabled>⇄ PDF pages…</button>
     <span class="spacer"></span>
 
     <label class="tb-label" for="provider">Cites on</label>
@@ -62,6 +63,40 @@
     <button id="theme-toggle" title="Light / dark">☀</button>
   </div>
 
+  <!-- The LEAKS review bar: the worksheet's current row above the text, the
+       text opened at the row's page and line. The decision goes into the
+       row's Fix? cell exactly as PDF-Linker's Apply Leak Fixes reads it. -->
+  <div id="leaks-bar" hidden>
+    <div class="lb-row">
+      <span id="lb-count" class="lb-count"></span>
+      <span id="lb-type" class="lb-type"></span>
+      <b id="lb-value" class="lb-value" title="The flagged value"></b>
+      <span id="lb-where" class="lb-where"></span>
+      <span class="spacer"></span>
+      <button id="lb-prev" title="Previous row (Alt+↑)">‹</button>
+      <button id="lb-next" title="Next row (Alt+↓)">›</button>
+      <button id="lb-next-open" title="The next row with nothing typed in its Fix? cell">Next undecided</button>
+      <button id="lb-find" title="Find this value in the text again">Find in text</button>
+      <button id="lb-save" class="primary" title="Write the decisions into LEAKS.xlsx in the case folder (Ctrl+Shift+S). Then double-click Apply Leak Fixes.bat, or re-run PDF-Linker, to apply them to the files.">💾 Save LEAKS.xlsx</button>
+      <button id="lb-open" title="Load another LEAKS.xlsx">📂</button>
+      <button id="lb-close" title="Hide the bar (the worksheet stays loaded; ⚠ Leaks brings it back)">×</button>
+    </div>
+    <div class="lb-row lb-context-row">
+      <div id="lb-context" class="lb-context"></div>
+      <div id="lb-notes" class="lb-notes"></div>
+    </div>
+    <div class="lb-row lb-decide">
+      <span class="tb-label">Fix?</span>
+      <span id="lb-answer" class="lb-answer"></span>
+      <button data-fix="yes" title="Fake it with an auto pseudonym (Alt+Y)">yes</button>
+      <button data-fix="no" title="Leave it as it stands in this case (Alt+N)">no</button>
+      <button data-fix="never" title="Leave it as it stands in every case — the nuclear keep">never</button>
+      <button data-fix="phrase" title="Fake it whole, kept words inside it too">phrase</button>
+      <input id="lb-typed" type="text" spellcheck="false" placeholder="or type: the replacement · ~CORRECT SPELLING (this is a misspelling of it) · *CORRECT TEXT (a scan error; ** in every folder) · [part to keep]" title="Anything else PDF-Linker's Fix? cell accepts. Enter applies it and moves on.">
+      <button id="lb-apply" title="Write the typed text into the Fix? cell">Apply</button>
+      <button id="lb-clear" class="secondary" title="Clear the cell — decide later">clear</button>
+    </div>
+  </div>
   <div id="key-offer" hidden><span id="key-offer-text"></span><button id="key-offer-btn" class="primary"></button><button id="key-offer-close" title="Dismiss">×</button></div>
 
   <div id="main">
@@ -82,11 +117,21 @@
       <div class="side-tabs">
         <button id="tab-docs" class="side-tab active" aria-pressed="true">Documents</button>
         <button id="tab-flags" class="side-tab" aria-pressed="false">Flagged <span id="flag-count" class="badge">0</span></button>
+        <button id="tab-leaks" class="side-tab" aria-pressed="false">Leaks <span id="leaks-tab-count" class="badge">0</span></button>
         <button id="side-collapse" class="side-tab collapse" title="Collapse the panel (▤ Panel in the toolbar brings it back)">»</button>
       </div>
       <div id="side-docs" class="side-body">
         <p class="side-hint" id="docs-hint">Open a case folder to list its exports here.</p>
         <ul id="docs-list"></ul>
+      </div>
+      <div id="side-leaks" class="side-body" hidden>
+        <p class="side-hint" id="leaks-hint">Open a case folder with a <code>LEAKS.xlsx</code> in it, or load one, to review its rows here.</p>
+        <ul id="leaks-list"></ul>
+        <div class="side-actions" id="leaks-actions" hidden>
+          <button id="leaks-save" class="primary" title="Write the decisions into LEAKS.xlsx">Save worksheet</button>
+          <button id="leaks-load" title="Load another LEAKS.xlsx">Load…</button>
+        </div>
+        <p class="side-note" id="leaks-note"></p>
       </div>
       <div id="side-flags" class="side-body" hidden>
         <p class="side-hint">Names you spotted unfaked — to be pseudonymized. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it on its next run or Apply Leak Fixes.</p>
@@ -132,7 +177,7 @@
       <button id="swap-text" title="Put these pages back to text">Back to text</button>
       <button id="swap-clear" class="secondary" title="Every page back to text">Clear all</button>
     </div>
-    <div class="sp-actions"><button id="pdf-pick" class="secondary" title="Choose the PDF by hand">Pick PDF…</button><button id="swap-close" class="secondary">Close</button></div>
+    <div class="sp-actions"><button id="pdf-pick" class="secondary" title="Choose the PDF by hand — for a combined file, select every member's PDF at once and each is matched to its document">Pick PDFs…</button><button id="swap-close" class="secondary">Close</button></div>
     <p class="sp-note" id="swap-pop-note"></p>
   </div>
   <div id="pn-tip" hidden></div>
@@ -141,7 +186,8 @@
 
   <input id="file-input" type="file" accept=".txt,.LEAK,text/plain" hidden>
   <input id="key-input" type="file" accept=".xlsx" hidden>
-  <input id="pdf-input" type="file" accept=".pdf,application/pdf" hidden>
+  <input id="pdf-input" type="file" accept=".pdf,application/pdf" multiple hidden>
+  <input id="leaks-input" type="file" accept=".xlsx" hidden>
 
   <!-- Shift+Space = middle click on the citation underlines, as in the viewer. -->
   <script src="shift-space-open.js"></script>

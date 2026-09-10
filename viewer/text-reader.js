@@ -25,6 +25,9 @@
 //   FLAGGING. A name the run left in the clear is selected and flagged; the
 //   list is written to New Real Values.txt in the case folder, which
 //   PDF-Linker reads on its next pass.
+//   LEAKS. PDF-Linker's LEAKS.xlsx, the leak-triage worksheet, is worked row
+//   by row: the row in a bar above the text, the text opened at its page and
+//   line, the decision written into the row's own Fix? cell.
 //   THE PDF. The PDF an export came from sits in the case folder under its
 //   real name; the reader finds it through the key and shows it either SIDE
 //   BY SIDE, page for page, the two scrolling together, or SWAPPED IN for
@@ -41,6 +44,8 @@ import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
 import * as PS from "./pdfsync.js";
+import * as LK from "./leaks.js";
+import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdfjs/build/pdf.worker.mjs");
@@ -295,7 +300,7 @@ $("side-collapse").addEventListener("click", () => showSidePanel(false, { rememb
   btn.hidden = !canOpen;
   btn.addEventListener("click", () => { try { chrome.runtime.openOptionsPage(); } catch { /* not an extension page */ } });
 }
-const SIDE_TABS = [["tab-docs", "side-docs"], ["tab-flags", "side-flags"]];
+const SIDE_TABS = [["tab-docs", "side-docs"], ["tab-flags", "side-flags"], ["tab-leaks", "side-leaks"]];
 function showSideTab(tab) {
   for (const [t, b] of SIDE_TABS) {
     const on = t === tab;
@@ -500,11 +505,15 @@ async function caseFolderFor(fileHandle) {
 
 /** Read a case folder: its key, its exports and its flagged values. */
 async function scanFolder(h) {
-  const found = { keyHandle: null, valuesHandle: null, textDir: null, docs: [], rootDocs: [], pdfs: [] };
+  const found = { keyHandle: null, valuesHandle: null, leaksHandle: null, combined: null, textDir: null, docs: [], rootDocs: [], pdfs: [] };
   for await (const [name, entry] of h.entries()) {
     if (entry.kind === "file") {
       if (/\.pdf$/i.test(name) && !/_temp\.pdf$/i.test(name)) found.pdfs.push({ name, handle: entry });
       else if (TD.isKeyName(name) && !found.keyHandle) found.keyHandle = entry;
+      // The leak worksheet: the current name over the legacy one PDF-Linker still reads.
+      else if (LK.isLeaksName(name) && (!found.leaksHandle || LK.leaksRank(name) < LK.leaksRank(found.leaksHandle.name))) found.leaksHandle = entry;
+      // Combined Text.txt sits in the case folder itself, not in Text Files.
+      else if (TD.isCombinedName(name)) found.combined = { name, handle: entry, combined: true };
       else if (name.toLowerCase() === TD.VALUES_FILE.toLowerCase()) found.valuesHandle = entry;
       else if (TD.isExportName(name)) found.rootDocs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
     } else if (entry.kind === "directory" && name.toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) {
@@ -531,7 +540,9 @@ async function adoptFolder(h, { quiet = false } = {}) {
   folderName = h.name;
   await rememberDir(h);
   const found = await scanFolder(h);
-  folderDocs = found.docs;
+  // The combined file, when the folder has one, listed first: it is the one
+  // file holding every export, and the one the drafting model was handed.
+  folderDocs = found.combined ? [found.combined].concat(found.docs) : found.docs;
   folderPdfs = found.pdfs;
   if (found.keyHandle) {
     try {
@@ -555,6 +566,21 @@ async function adoptFolder(h, { quiet = false } = {}) {
   compileKey();
   renderFlags();
   renderDocList();
+  // The folder's own leak worksheet, attached as its key is; one from
+  // another folder is dropped, since its rows name that folder's files.
+  if (found.leaksHandle) {
+    try {
+      const f = await found.leaksHandle.getFile();
+      const parsed = await attachLeaks(new Uint8Array(await f.arrayBuffer()), f.name, found.leaksHandle, { quiet: true, folder: folderName });
+      if (parsed && !quiet) {
+        const und = LK.undecidedCount(parsed.rows);
+        toast(`${f.name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}` + (und ? `, ${und} undecided — ⚠ Leaks to review them.` : ", every row decided."));
+      }
+    } catch (e) { toast("The folder's LEAKS.xlsx could not be read: " + (e.message || e), { error: true }); }
+  } else if (leaks && leaks.folder && leaks.folder !== folderName) {
+    persistLeaks(); // remembered for the folder it belongs to
+    dropLeaks();
+  }
   if (folderDocs.length) { autoShowSidePanel(); showSideTab("tab-docs"); }
   if (doc) refreshPdf();
   return found;
@@ -668,7 +694,7 @@ async function openFolder() {
     let mine = null;
     if (fileHandle) { try { mine = (await h.resolve(fileHandle)) ? fileHandle : null; } catch { mine = null; } }
     if (mine && doc) { retranslate(); markDocList(); return; }
-    await openFolderDoc(folderDocs.find((d) => d.quarantined) || folderDocs[0]);
+    await openFolderDoc(folderDocs.find((d) => d.quarantined) || folderDocs.find((d) => !d.combined) || folderDocs[0]);
   } else {
     doc = null; pagesEl.hidden = true; emptyEl.hidden = false;
     toast("No text exports in " + folderName + (found.textDir ? "" : " (no Text Files folder)"), { error: true });
@@ -689,6 +715,13 @@ function renderDocList() {
   for (const d of folderDocs) {
     const li = document.createElement("li");
     li.textContent = d.name.replace(/\.txt(\.LEAK)?$/i, "");
+    if (d.combined) {
+      const t = document.createElement("span");
+      t.className = "tag combined";
+      t.textContent = "all";
+      t.title = "Every export in one file, each behind its own DOCUMENT banner — its PDFs are matched document by document";
+      li.appendChild(t);
+    }
     if (d.quarantined) {
       const t = document.createElement("span");
       t.className = "tag";
@@ -724,11 +757,18 @@ document.addEventListener("drop", (e) => {
       if (TD.isKeyName(f.name)) {
         try { await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, ""); }
         catch (err) { toast(String(err.message || err), { error: true }); }
+      } else if (LK.isLeaksName(f.name)) {
+        // A dropped worksheet is attached, with its handle where the drop carries one.
+        let h = null;
+        try { h = await handles[files.indexOf(f)]; } catch { h = null; }
+        try { if (await attachLeaks(new Uint8Array(await f.arrayBuffer()), f.name, h && h.kind === "file" ? h : null)) await goToLeak(Math.max(0, LK.nextUndecided(leakRows(), null))); }
+        catch (err) { toast(String(err.message || err), { error: true }); }
       }
     }
-    // A dropped PDF is the one to show beside (or inside) the open document.
-    const pdf = files.find((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
-    if (pdf && doc) await usePickedPdf(pdf);
+    // Dropped PDFs are the ones to show beside (or inside) the open document
+    // — several at once for a combined file, each matched to its member.
+    const pdfs = files.filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
+    if (pdfs.length && doc) await usePickedPdfs(pdfs);
     const at = files.findIndex((f) => /\.(txt|leak)$/i.test(f.name) || f.type === "text/plain");
     if (at === -1) return;
     let handle = null;
@@ -1748,6 +1788,11 @@ function paintHighlights() {
   }
   CSS.highlights.set("flagged", new Highlight(...flaggedRanges));
   CSS.highlights.set("leak", new Highlight(...leakRanges));
+  // The LEAKS bar's current row, wherever its value stands.
+  leakRowRanges = [];
+  if (leakRowValue) for (const body of bodies) for (const r of leakMatches(body, leakRowValue)) leakRowRanges.push({ body, range: r });
+  CSS.highlights.set("leakrow", new Highlight(...leakRowRanges.map((x) => x.range)));
+  markLeakHere();
   $("st-leaks").textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; right-click one to keep it` : "";
 }
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
@@ -2023,6 +2068,481 @@ $("flags-copy").addEventListener("click", async () => {
   catch { toast("Copy failed", { error: true }); }
 });
 
+// ── the LEAKS worksheet ───────────────────────────────────────────────────────────
+//
+// PDF-Linker's leak triage is a worksheet, LEAKS.xlsx in the case folder: one
+// row per flagged value with a Fix? cell the operator answers (yes / no /
+// never / phrase, ~CORRECT SPELLING, *CORRECT TEXT, a [kept part], or the
+// exact replacement), and Apply Leak Fixes reads the cells back. Answering
+// it in Excel means reading a sentence in a cell and guessing at the page.
+// Here the worksheet is attached — from the case folder on open, or loaded
+// by hand — and worked ROW BY ROW: the current row stands in a bar above the
+// text (value, type, where, both Context quotes, the Fix? controls), the
+// reader opens the row's own document, scrolls to its page and line, and
+// marks the value wherever it stands; the text stays editable underneath,
+// and the PDF beside it follows as it always does on a scroll. A decision
+// is the exact text PDF-Linker will read, written into that row's Fix? cell
+// and nowhere else (xlsx-write.js copies every other part of the workbook
+// through byte for byte); it is remembered here until saved, and Save
+// writes LEAKS.xlsx back in place. Then Apply Leak Fixes does the rest.
+// A `no` or `never` on a value the key binds is mirrored as one of the
+// reader's own keeps, so the orange mark goes and a save of the document
+// leaves the value as it stands — the two channels agreeing on the one
+// thing they both say. A `yes` is the worksheet's alone: it is never also
+// flagged into New Real Values.txt, which would hand PDF-Linker the same
+// value twice under two different rules.
+const leaksBar = $("leaks-bar");
+let leaks = null;          // { parsed, bytes, name, handle, folder, at, mirrored: Set }
+let leakRowValue = "";     // the current row's value, marked wherever it stands
+let leakRowRanges = [];    // where it stands, from the last paint: [{ body, range }]
+let leakHere = null;       // the occurrence the bar scrolled to
+
+function leaksStoreKey() { return LK.decisionsKey(leaks.folder || folderName || fileName, leaks.name); }
+function persistLeaks() { if (leaks) lsSet(leaksStoreKey(), LK.packDecisions(leaks.parsed.rows)); }
+function leaksDirty() { return !!leaks && leaks.parsed.rows.some((r) => r.fix !== r.fix0); }
+function leakRows() { return leaks ? leaks.parsed.rows : []; }
+
+/** Attach a worksheet: its bytes (kept for the rewrite), its handle (for the save in place). */
+async function attachLeaks(bytes, name, handle, { quiet = false, folder = "" } = {}) {
+  const wb = await parseXlsx(bytes);
+  if (!LK.sheetsLookLikeLeaks(wb.sheets)) throw new Error(`${name} has no "Value" / "Fix?" header — not a LEAKS worksheet.`);
+  const parsed = LK.parseLeaks(wb.sheets, name);
+  if (!parsed.part) throw new Error(`${name}: the LEAKS sheet could not be placed in the workbook.`);
+  // Unsaved decisions are never lost to a re-attach: they are remembered
+  // per worksheet (folder and name) and laid back over the rows below.
+  if (leaks) persistLeaks();
+  leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", at: -1, mirrored: new Set() };
+  const remembered = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));
+  for (const r of parsed.rows) if (r.fix !== r.fix0) mirrorLeakKeep(r);
+  leakRowValue = "";
+  leakHere = null;
+  renderLeaksTab();
+  updateLeaksButton();
+  if (!leaksBar.hidden) { const i = LK.nextUndecided(parsed.rows, null); await goToLeak(i >= 0 ? i : 0, { locate: false }); }
+  else paintHighlights();
+  const und = LK.undecidedCount(parsed.rows);
+  if (!quiet) toast(`${name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}, ${und} undecided` + (remembered ? `, ${remembered} decided here and not yet saved` : "") + " — ⚠ Leaks to review them.");
+  return parsed;
+}
+function dropLeaks() {
+  leaks = null;
+  leakRowValue = "";
+  leakHere = null;
+  showLeaksBar(false);
+  renderLeaksTab();
+  updateLeaksButton();
+}
+
+function updateLeaksButton() {
+  const rows = leakRows();
+  const badge = $("leaks-count");
+  badge.hidden = !leaks;
+  badge.textContent = String(LK.undecidedCount(rows));
+  badge.title = leaks ? `${LK.undecidedCount(rows)} of ${rows.length} rows undecided` : "";
+  $("leaks-btn").setAttribute("aria-pressed", String(!leaksBar.hidden));
+  $("leaks-tab-count").textContent = String(rows.length);
+}
+
+/** Whether the key binds this value (so an unfaked occurrence is an orange leak). */
+function boundByKey(value) { return !!(reals && reals.map && reals.map.get(PK.fold(PK.foldGaps(value)))); }
+/** A `no` / `never` on a bound value becomes one of the reader's keeps; withdrawn, it is withdrawn here too. */
+function mirrorLeakKeep(row) {
+  const kind = LK.classifyFix(row.fix, row.value).kind;
+  const f = PK.fold(row.value);
+  const want = LK.isKeepKind(kind) && boundByKey(row.value);
+  if (want) { keeps = TD.addKeep(keeps, kind, row.value); leaks.mirrored.add(f); }
+  else if (leaks.mirrored.has(f)) { keeps = TD.removeKeep(keeps, row.value); leaks.mirrored.delete(f); }
+  else return false;
+  persistValues();
+  compileKey();
+  remarkKept();
+  renderFlags();
+  return true;
+}
+
+// The bar: shown and hidden by the toolbar button and its own ×; it takes
+// its own height above the stage (--bar-h), so the first lines of the text
+// are never under it.
+function setBarHeight() {
+  document.documentElement.style.setProperty("--bar-h", leaksBar.hidden ? "0px" : leaksBar.offsetHeight + "px");
+}
+if (typeof ResizeObserver !== "undefined") new ResizeObserver(setBarHeight).observe(leaksBar);
+function showLeaksBar(on) {
+  const was = !leaksBar.hidden;
+  leaksBar.hidden = !on;
+  setBarHeight();
+  updateLeaksButton();
+  if (was !== !!on) relayout();
+  if (!on) { leakRowValue = ""; leakHere = null; paintHighlights(); }
+}
+
+function escRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+/** The quote with the value bolded, as the worksheet's Context cell bolds it. */
+function quoteNodes(text, value) {
+  const frag = document.createDocumentFragment();
+  const v = TD.normalizeValue(value);
+  if (!v || !text) { frag.append(text || ""); return frag; }
+  const rx = new RegExp(escRe(v).replace(/ /g, "\\s+"), "gi");
+  let at = 0, m;
+  while ((m = rx.exec(text))) {
+    if (m.index > at) frag.append(text.slice(at, m.index));
+    const b = document.createElement("b");
+    b.textContent = m[0];
+    frag.append(b);
+    at = m.index + m[0].length;
+    if (m.index === rx.lastIndex) rx.lastIndex++;
+  }
+  if (at < text.length) frag.append(text.slice(at));
+  return frag;
+}
+function typeClass(type) {
+  const t = String(type || "").toUpperCase();
+  return t === "LEAK" ? "leak" : t.startsWith("REID") ? "reid" : "";
+}
+
+function renderLeaksBar() {
+  if (!leaks || leaks.at < 0 || leaks.at >= leakRows().length) return;
+  const rows = leakRows(), row = rows[leaks.at];
+  const und = LK.undecidedCount(rows);
+  $("lb-count").textContent = `Row ${leaks.at + 1} of ${rows.length}` + (und ? ` · ${und} undecided` : " · all decided");
+  const tt = $("lb-type");
+  tt.textContent = row.type || "review";
+  tt.className = "lb-type " + typeClass(row.type);
+  $("lb-value").textContent = row.value;
+  const files = LK.parseFiles(row.file);
+  $("lb-where").textContent = [files.length ? files.join(", ") : row.file, row.where].filter(Boolean).join(" · ");
+  const ctx = $("lb-context");
+  ctx.innerHTML = "";
+  const halves = LK.splitContext(row.context);
+  if (halves.original) ctx.append(quoteNodes(halves.original, row.value));
+  else { const i = document.createElement("i"); i.textContent = "(no context quoted)"; ctx.append(i); }
+  if (halves.exported) {
+    const ex = document.createElement("div");
+    ex.className = "lb-export";
+    const tag = document.createElement("span");
+    tag.className = "lb-tag";
+    tag.textContent = "export";
+    ex.append(tag, quoteNodes(halves.exported, row.value));
+    ctx.append(ex);
+  }
+  $("lb-notes").textContent = row.notes || "";
+  const c = LK.classifyFix(row.fix, row.value);
+  const ans = $("lb-answer");
+  ans.textContent = c.label + (row.fix !== row.fix0 ? " (unsaved)" : "");
+  ans.className = "lb-answer" + (c.kind ? "" : " undecided");
+  for (const b of leaksBar.querySelectorAll("button[data-fix]")) b.classList.toggle("on", c.kind === b.dataset.fix);
+  const typed = $("lb-typed");
+  if (document.activeElement !== typed) typed.value = LK.CONTROLS.includes(c.kind) || !c.kind ? "" : row.fix;
+  const n = rows.filter((r) => r.fix !== r.fix0).length;
+  $("lb-save").disabled = !n;
+  $("lb-save").textContent = n ? `💾 Save LEAKS.xlsx (${n})` : "💾 Save LEAKS.xlsx";
+  $("lb-prev").disabled = $("lb-next").disabled = rows.length < 2;
+  $("lb-next-open").disabled = !und;
+}
+
+function renderLeaksTab() {
+  const list = $("leaks-list");
+  list.innerHTML = "";
+  const rows = leakRows();
+  $("leaks-hint").textContent = leaks
+    ? `${leaks.name}${leaks.folder ? " · " + leaks.folder : ""} · ${rows.length} row${rows.length === 1 ? "" : "s"}, ${LK.undecidedCount(rows)} undecided. Click a row: the text opens at it.`
+    : "Open a case folder with a LEAKS.xlsx in it, or load one, to review its rows here.";
+  $("leaks-actions").hidden = !leaks;
+  rows.forEach((r, i) => {
+    const li = document.createElement("li");
+    li.className = i === (leaks ? leaks.at : -1) ? "current" : "";
+    const t = document.createElement("span");
+    t.className = "tag type " + typeClass(r.type);
+    t.textContent = typeClass(r.type) === "leak" ? "LEAK" : typeClass(r.type) === "reid" ? "REID" : "review";
+    t.title = r.type;
+    const v = document.createElement("span");
+    v.className = "lv";
+    v.textContent = r.value;
+    const c = LK.classifyFix(r.fix, r.value);
+    const f = document.createElement("span");
+    f.className = "tag fix " + (c.kind ? (LK.isKeepKind(c.kind) ? "no" : "") : "open");
+    f.textContent = c.kind ? (LK.CONTROLS.includes(c.kind) ? c.kind : c.kind === "error" ? "?" : "typed") : "?";
+    f.title = c.label + (r.fix !== r.fix0 ? " (unsaved)" : "");
+    li.append(t, v, f);
+    li.title = `${r.value} — ${r.type} — ${r.file} — ${r.where}`;
+    li.addEventListener("click", () => goToLeak(i));
+    list.appendChild(li);
+  });
+  const n = rows.filter((r) => r.fix !== r.fix0).length;
+  $("leaks-save").disabled = !n;
+  $("leaks-note").textContent = !leaks ? "" : n
+    ? `${n} decision${n === 1 ? "" : "s"} not yet saved (remembered here until then).`
+    : leaks.handle || dirHandle ? `Saves into ${leaks.folder || folderName || "the folder"}/${leaks.name}. After saving, double-click Apply Leak Fixes.bat, or re-run PDF-Linker.` : "No folder is open: a save asks where to write the worksheet.";
+}
+
+/** Show row `i` in the bar and take the text to it. */
+async function goToLeak(i, { locate = true } = {}) {
+  const rows = leakRows();
+  if (!rows.length) return;
+  leaks.at = ((i % rows.length) + rows.length) % rows.length;
+  const row = rows[leaks.at];
+  leakRowValue = row.value;
+  leakHere = null;
+  showLeaksBar(true);
+  renderLeaksBar();
+  renderLeaksTab();
+  if (locate) await locateLeak(row);
+  else paintHighlights();
+}
+
+/** Every place `value` stands on a page body: DOM ranges, the value's own spelling or a bare substring of it. */
+function leakMatches(body, value) {
+  const out = [];
+  const v = TD.normalizeValue(value);
+  if (!v) return out;
+  // Pseudonym spans blanked: a span SHOWS the real name, and a worksheet
+  // value standing inside one is the faked occurrence, not the leak.
+  const { text, segs } = flatten(body, { blankPn: true });
+  const push = (s, e) => { const r = rangeFor(segs, s, e); if (r) out.push(r); };
+  const rx = PK.buildMatcher([v]);
+  if (rx) {
+    let m;
+    rx.lastIndex = 0;
+    while ((m = rx.exec(text))) { push(m.index, m.index + m[0].length); if (m.index === rx.lastIndex) rx.lastIndex++; }
+  }
+  if (!out.length && v.length >= 3) {
+    // A welded or reduced finding has no bounded occurrence by construction.
+    const low = text.toLowerCase(), needle = v.toLowerCase();
+    let at = 0;
+    while ((at = low.indexOf(needle, at)) >= 0) { push(at, at + needle.length); at += needle.length; }
+  }
+  return out;
+}
+function gutterOf(range) {
+  const el = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  const line = el && el.closest && el.closest(".line");
+  const gn = line && line.querySelector(".gutter .gn");
+  const n = gn ? parseInt(gn.textContent, 10) : NaN;
+  return isFinite(n) ? n : null;
+}
+
+/**
+ * Open the row's document (the first of its files that has an export in
+ * the folder, unless the open one is among them), scroll to the page and
+ * line its Where names, and mark the occurrence there.
+ */
+async function locateLeak(row) {
+  const files = LK.parseFiles(row.file);
+  const fwdName = fwd ? (s) => forwardText(s).text : null;
+  const here = (name) => name && files.some((f) => LK.matchExport(f, [name], fwdName));
+  let target = null;
+  if (files.length && !here(fileName)) {
+    const names = folderDocs.map((d) => d.name);
+    for (const f of files) {
+      const e = LK.matchExport(f, names, fwdName);
+      if (e) { target = folderDocs.find((d) => d.name === e); break; }
+    }
+    // A combined file already open holds every member: stay in it.
+    if (target && doc && PS.combinedMembers(doc.pages).some((m) => here(m))) target = null;
+  }
+  if (target && target.name !== fileName) {
+    // openFile asks about unsaved edits; a refusal leaves the open document.
+    const wasEditing = editing;
+    await openFolderDoc(target);
+    if (!doc || fileName !== target.name) { paintHighlights(); return; }
+    if (wasEditing) setEditing(true);
+  } else if (files.length && !target && !here(fileName)) {
+    toast(`${files[0]}: no export in ${folderName || "the folder"} matches it — searching ${fileName || "the open document"} instead.`);
+  }
+  paintHighlights();
+  if (!doc) return;
+  // The occurrence to stand at: on the page Where names (its own number,
+  // under the row's own member in a combined file), on the line it names
+  // where the page carries gutter numbers, else the first anywhere.
+  const wheres = LK.parseWhere(row.where);
+  const members = PS.pageSources(doc.pages, fileName);
+  const memberOk = (i) => !files.length || here(members[i]) || members[i] === fileName;
+  let best = null, bestScore = -1;
+  for (const hit of leakRowRanges) {
+    const sec = hit.body.closest(".tpage");
+    const i = Number(sec.dataset.index);
+    const page = doc.pages[i] && doc.pages[i].number;
+    const g = gutterOf(hit.range);
+    let score = 0;
+    for (const w of wheres) {
+      let s = 0;
+      if (w.page != null && page === w.page && memberOk(i)) s = 2;
+      else if (w.page == null && page == null) s = 1;
+      if (s && w.line != null && g != null && g >= w.line && g <= (w.lineEnd != null && w.lineEnd >= w.line ? w.lineEnd : w.line)) s += 3;
+      score = Math.max(score, s);
+    }
+    if (score > bestScore) { bestScore = score; best = hit; }
+  }
+  if (!best) {
+    $("lb-where").textContent += " — not found in " + fileName;
+    toast(`"${row.value}" is not in ${fileName}` + (files.length ? ` (the row names ${files.join(", ")})` : ""), { error: true });
+    return;
+  }
+  leakHere = best.range;
+  markLeakHere();
+  const sec = best.body.closest(".tpage");
+  let rect = best.range.getBoundingClientRect();
+  if (!rect.height) rect = sec.getBoundingClientRect(); // the page is swapped for its PDF page
+  const st = stageEl.getBoundingClientRect();
+  stageEl.scrollTo({ top: stageEl.scrollTop + rect.top - st.top - Math.max(40, stageEl.clientHeight / 3), behavior: "smooth" });
+  if (bestScore < 2 && wheres.length) toast(`Found "${row.value}" on ${TD.pageLabel(doc.pages[Number(sec.dataset.index)]) || "the page"}, not at ${row.where}.`);
+}
+function markLeakHere() {
+  if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
+  if (leakHere && leakHere.startContainer.isConnected) CSS.highlights.set("leakrow-here", new Highlight(leakHere));
+  else CSS.highlights.delete("leakrow-here");
+}
+
+/** Write a decision into the current row's Fix? cell (remembered until saved). */
+function decideLeak(text, { advance = false } = {}) {
+  if (!leaks || leaks.at < 0) return;
+  const row = leakRows()[leaks.at];
+  row.fix = String(text == null ? "" : text).trim();
+  persistLeaks();
+  mirrorLeakKeep(row);
+  renderLeaksBar();
+  renderLeaksTab();
+  updateLeaksButton();
+  paintHighlights();
+  if (!advance) return;
+  const n = LK.nextUndecided(leakRows(), leaks.at);
+  if (n >= 0 && n !== leaks.at) goToLeak(n);
+  else if (n < 0) toast("Every row is decided — save the worksheet, then Apply Leak Fixes.");
+}
+
+/** Write the decisions into the workbook: the same file, the Fix? cells changed, read back before it is written. */
+async function saveLeaks() {
+  if (!leaks) { toast("No LEAKS.xlsx is loaded.", { error: true }); return; }
+  const edits = LK.fixEdits(leaks.parsed);
+  if (!edits.length) { toast("Nothing to save — no decision has changed."); return; }
+  let out;
+  try {
+    out = await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, edits);
+    // The standing check: what was written reads back as what was decided.
+    const back = LK.parseLeaks((await parseXlsx(out)).sheets, leaks.name);
+    const byRow = new Map(back.rows.map((r) => [r.n, r]));
+    for (const r of leaks.parsed.rows) {
+      const b = byRow.get(r.n);
+      if (!b || b.value !== r.value || b.fix !== r.fix) throw new Error(`row ${r.n} (${r.value}) did not read back as decided`);
+    }
+    if (back.rows.length !== leaks.parsed.rows.length) throw new Error("the row count changed");
+  } catch (e) {
+    toast("Not saved: " + (e.message || e), { error: true });
+    return;
+  }
+  let handle = leaks.handle;
+  if (!handle && dirHandle) {
+    try { handle = await dirHandle.getFileHandle(leaks.name, { create: true }); } catch { handle = null; }
+  }
+  const ok = await writeBlob(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), leaks.name, handle,
+    { description: "LEAKS worksheet", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } });
+  if (!ok) return;
+  leaks.bytes = out;
+  if (handle) leaks.handle = handle;
+  for (const r of leaks.parsed.rows) r.fix0 = r.fix;
+  try { localStorage.removeItem(leaksStoreKey()); } catch { /* fine */ }
+  renderLeaksBar();
+  renderLeaksTab();
+  const und = LK.undecidedCount(leaks.parsed.rows);
+  toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still undecided` : "") + ". Double-click Apply Leak Fixes.bat (or re-run PDF-Linker) to apply them to the files.", { ms: 6000 });
+}
+
+/** Write bytes: in place through the handle, else the Save picker, else a download. */
+async function writeBlob(blob, name, handle, type) {
+  if (handle && handle.createWritable) {
+    try {
+      if (handle.requestPermission) {
+        const perm = await handle.requestPermission({ mode: "readwrite" });
+        if (perm !== "granted") throw new Error("write permission denied");
+      }
+      const w = await handle.createWritable();
+      await w.write(blob);
+      await w.close();
+      return true;
+    } catch (e) {
+      if (e && e.name === "AbortError") return false;
+      toast("Could not write in place (" + (e.message || e) + ") — choose where to save.", { error: true });
+    }
+  }
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: name, types: [type] });
+      const w = await h.createWritable();
+      await w.write(blob);
+      await w.close();
+      return true;
+    } catch (e) {
+      if (e && e.name === "AbortError") return false;
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  return true;
+}
+
+async function pickLeaks() {
+  if (window.showOpenFilePicker) {
+    try {
+      const [h] = await window.showOpenFilePicker({ types: [{ description: "LEAKS worksheet", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }] });
+      const f = await h.getFile();
+      if (await attachLeaks(new Uint8Array(await f.arrayBuffer()), f.name, h)) await goToLeak(Math.max(0, LK.nextUndecided(leakRows(), null)));
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      if (!(e && /picker|not allowed|SecurityError|TypeError/i.test(String(e)))) { toast(String(e.message || e), { error: true }); return; }
+    }
+  }
+  $("leaks-input").click();
+}
+$("leaks-input").addEventListener("change", async () => {
+  const f = $("leaks-input").files[0];
+  $("leaks-input").value = "";
+  if (!f) return;
+  try { if (await attachLeaks(new Uint8Array(await f.arrayBuffer()), f.name, null)) await goToLeak(Math.max(0, LK.nextUndecided(leakRows(), null))); }
+  catch (e) { toast(String(e.message || e), { error: true }); }
+});
+$("leaks-btn").addEventListener("click", async () => {
+  if (!leaks) { await pickLeaks(); return; }
+  if (!leaksBar.hidden) { showLeaksBar(false); return; }
+  await goToLeak(leaks.at >= 0 ? leaks.at : Math.max(0, LK.nextUndecided(leakRows(), null)));
+});
+$("lb-close").addEventListener("click", () => showLeaksBar(false));
+$("lb-open").addEventListener("click", pickLeaks);
+$("leaks-load").addEventListener("click", pickLeaks);
+$("lb-prev").addEventListener("click", () => goToLeak(leaks.at - 1));
+$("lb-next").addEventListener("click", () => goToLeak(leaks.at + 1));
+$("lb-next-open").addEventListener("click", () => { const n = LK.nextUndecided(leakRows(), leaks.at); if (n >= 0) goToLeak(n); });
+$("lb-find").addEventListener("click", () => { if (leaks && leaks.at >= 0) locateLeak(leakRows()[leaks.at]); });
+$("lb-save").addEventListener("click", saveLeaks);
+$("leaks-save").addEventListener("click", saveLeaks);
+for (const b of leaksBar.querySelectorAll("button[data-fix]")) b.addEventListener("click", () => decideLeak(b.dataset.fix, { advance: true }));
+$("lb-apply").addEventListener("click", () => { const t = $("lb-typed").value.trim(); if (t) decideLeak(t, { advance: true }); else toast("Type the replacement, ~CORRECT SPELLING, *CORRECT TEXT or [part to keep] first.", { error: true }); });
+$("lb-clear").addEventListener("click", () => { $("lb-typed").value = ""; decideLeak(""); });
+$("lb-typed").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("lb-apply").click(); }
+  if (e.key === "Escape") { e.preventDefault(); $("lb-typed").blur(); }
+});
+// Alt+↓/↑ walk the rows (Alt+←/→ are the browser's own Back and Forward),
+// Alt+Y / Alt+N decide the current one — from the page, never from a field
+// being typed in.
+document.addEventListener("keydown", (e) => {
+  if (!leaks || leaksBar.hidden) return;
+  const t = e.target;
+  const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveLeaks(); return; }
+  if (!e.altKey || e.ctrlKey || e.metaKey) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); goToLeak(leaks.at + 1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); goToLeak(leaks.at - 1); }
+  else if (!typing && e.key.toLowerCase() === "y") { e.preventDefault(); decideLeak("yes", { advance: true }); }
+  else if (!typing && e.key.toLowerCase() === "n") { e.preventDefault(); decideLeak("no", { advance: true }); }
+});
+
 // ── auto-scroll while reading ────────────────────────────────────────────────────────
 //
 // The PDF viewer's creep, for the reader's own scroll box: A toggles it,
@@ -2097,6 +2617,8 @@ const PDF_MARGIN = 800; // px beyond the viewport a page is kept rendered
 let sbsOn = lsGet("textReader.sbs", false) === true;
 let pdfSources = [];        // per text page: { name, handle?, file? } or null
 let pdfPicked = null;       // a PDF chosen by hand for this document
+let pickedPdfs = new Map(); // PDFs picked by hand for a combined file, by name: { name, file }
+let pickedByMember = new Map(); // …and the member each was matched to by ORDER, where names could not
 let swaps = new Set();      // "<pdf name>|<page>" swapped in
 const pdfCache = new Map(); // name → Promise<{ pdf, count, sizes, name }>
 
@@ -2104,6 +2626,8 @@ function forgetPdfs() {
   for (const p of pdfCache.values()) p.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }).catch(() => {});
   pdfCache.clear();
   pdfPicked = null;
+  pickedPdfs = new Map();
+  pickedByMember = new Map();
 }
 
 /** Open (once) the PDF behind a source: its page count and each page's size at scale 1. */
@@ -2173,14 +2697,33 @@ function resolvePdfSources() {
   if (!doc) { pdfSources = []; return; }
   const names = PS.pageSources(doc.pages, fileName);
   const fwdName = fwd ? (s) => forwardText(s).text : null;
+  // A combined file's members, in the order its header lists them: each
+  // is matched to a PDF on its own — the folder's, then one picked by hand
+  // (by name through the key, else by order) — never to one PDF for all.
+  const members = PS.combinedMembers(doc.pages);
   const memo = new Map();
   pdfSources = names.map((n) => {
     if (!memo.has(n)) {
       const hit = PS.matchPdf(n, folderPdfs.map((p) => p.name), fwdName);
-      memo.set(n, hit ? folderPdfs.find((p) => p.name === hit) : pdfPicked);
+      let src = hit ? folderPdfs.find((p) => p.name === hit) : null;
+      if (!src && pickedPdfs.size) { const p = PS.matchPdf(n, [...pickedPdfs.keys()], fwdName); if (p) src = pickedPdfs.get(p); }
+      if (!src && pickedByMember.has(n)) src = pickedByMember.get(n);
+      if (!src && pdfPicked && members.length <= 1) src = pdfPicked;
+      memo.set(n, src || null);
     }
     return memo.get(n) || null;
   });
+}
+/** The combined file's members with no PDF yet, in order ([] for a lone export). */
+function membersWithoutPdf() {
+  if (!doc) return [];
+  const names = PS.pageSources(doc.pages, fileName);
+  const out = [];
+  for (const m of PS.combinedMembers(doc.pages)) {
+    const i = names.indexOf(m);
+    if (i >= 0 && !pdfSources[i] && !out.includes(m)) out.push(m);
+  }
+  return out;
 }
 function pdfSourceNames() { return [...new Set(pdfSources.filter(Boolean).map((s) => s.name))]; }
 /** The PDF page a text page shows, with its source — or null. */
@@ -2210,7 +2753,17 @@ function refreshPdf() {
 function updatePdfStatus() {
   const names = pdfSourceNames();
   const n = [...swaps].filter((k) => pdfSources.some((s, i) => s && pdfTarget(i) && pdfTarget(i).key === k)).length;
-  $("st-pdf").textContent = !doc ? "" : names.length ? "PDF: " + names.join(", ") + (n ? ` · ${n} page${n === 1 ? "" : "s"} shown from the PDF` : "") : "No matching PDF in the case folder";
+  const members = doc ? PS.combinedMembers(doc.pages) : [];
+  const missing = membersWithoutPdf();
+  let text = "";
+  if (!doc) text = "";
+  else if (members.length > 1) {
+    text = `PDFs: ${members.length - missing.length} of ${members.length} documents matched`;
+    if (missing.length) text += ` — none for ${missing.slice(0, 3).join(", ")}${missing.length > 3 ? ` and ${missing.length - 3} more` : ""} (⇄ PDF pages… → Pick PDFs…)`;
+    else if (names.length) text += ": " + names.join(", ");
+  } else text = names.length ? "PDF: " + names.join(", ") : "No matching PDF in the case folder";
+  if (n) text += ` · ${n} page${n === 1 ? "" : "s"} shown from the PDF`;
+  $("st-pdf").textContent = text;
 }
 
 // ── rendering a page into a canvas ──
@@ -2479,7 +3032,10 @@ function buildPdfPane() {
   if (!pdfSources.some(Boolean)) {
     const box = document.createElement("div");
     box.className = "pane-empty";
-    box.innerHTML = `<p>No PDF in the case folder matches <b></b>${dirHandle ? "" : " (no case folder is open)"}.</p><p><button type="button">Pick the PDF…</button></p>`;
+    const members = PS.combinedMembers(doc.pages);
+    box.innerHTML = members.length > 1
+      ? `<p><b></b> lists ${members.length} documents and no PDF in the case folder matches any of them${dirHandle ? "" : " (no case folder is open)"}.</p><p><button type="button">Pick their PDFs…</button></p><p>Select every PDF at once: each is matched to its document by name through the key, or by the order the file lists them.</p>`
+      : `<p>No PDF in the case folder matches <b></b>${dirHandle ? "" : " (no case folder is open)"}.</p><p><button type="button">Pick the PDF…</button></p>`;
     box.querySelector("b").textContent = fileName;
     box.querySelector("button").addEventListener("click", pickPdf);
     pdfPane.appendChild(box);
@@ -2867,12 +3423,46 @@ async function usePickedPdf(file) {
   refreshPdf();
   toast("Using " + file.name + " for this document.");
 }
+/**
+ * PDFs picked by hand. For a lone export the first is the document's. For a
+ * combined file each is matched to a member: by NAME through the key first
+ * (the export is the PDF's stem scrubbed), and where names settle nothing —
+ * no key loaded — by ORDER, the picked PDFs against the members the header
+ * lists that still lack one, which is what "select them all at once" means.
+ */
+async function usePickedPdfs(files) {
+  const list = [...(files || [])].filter(Boolean);
+  if (!list.length || !doc) return;
+  const members = PS.combinedMembers(doc.pages);
+  if (members.length <= 1) { await usePickedPdf(list[0]); return; }
+  const fwdName = fwd ? (s) => forwardText(s).text : null;
+  const byName = [], unmatched = [];
+  for (const f of list) {
+    pdfCache.delete(f.name);
+    const src = { name: f.name, file: f };
+    pickedPdfs.set(f.name, src);
+    const m = members.find((mm) => PS.matchPdf(mm, [f.name], fwdName));
+    if (m) byName.push(m); else unmatched.push(src);
+  }
+  resolvePdfSources();
+  const open = membersWithoutPdf();
+  let byOrder = 0;
+  if (unmatched.length && unmatched.length === open.length) {
+    open.forEach((m, i) => pickedByMember.set(m, unmatched[i]));
+    byOrder = unmatched.length;
+  }
+  refreshPdf();
+  const left = membersWithoutPdf();
+  toast(`${members.length - left.length} of ${members.length} documents have a PDF` + (byName.length ? ` (${byName.length} matched by name` + (byOrder ? `, ${byOrder} by order)` : ")") : byOrder ? ` (${byOrder} matched by order)` : "") +
+    (left.length ? ` — still none for ${left.slice(0, 3).join(", ")}${left.length > 3 ? "…" : ""}` : "") +
+    (unmatched.length && !byOrder ? ` — ${unmatched.length} picked PDF${unmatched.length === 1 ? "" : "s"} matched no document (pick exactly the ${open.length} missing to match by order)` : "") + ".", { ms: 6000 });
+}
 async function pickPdf() {
   hideSwapPop();
   if (window.showOpenFilePicker) {
     try {
-      const [h] = await window.showOpenFilePicker({ types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }] });
-      await usePickedPdf(await h.getFile());
+      const hs = await window.showOpenFilePicker({ multiple: true, types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }] });
+      await usePickedPdfs(await Promise.all(hs.map((h) => h.getFile())));
       return;
     } catch (e) {
       if (e && e.name === "AbortError") return;
@@ -2883,9 +3473,9 @@ async function pickPdf() {
 }
 $("pdf-pick").addEventListener("click", pickPdf);
 $("pdf-input").addEventListener("change", async () => {
-  const f = $("pdf-input").files[0];
+  const fs = [...$("pdf-input").files];
   $("pdf-input").value = "";
-  await usePickedPdf(f);
+  await usePickedPdfs(fs);
 });
 
 // ── hooks for the PWA tab shell ───────────────────────────────────────────────────────
@@ -2896,6 +3486,22 @@ window.__pdfViewerUnregister = () => {};
 // For the smoke test: the geometry the side-by-side sync reads.
 window.__textReaderSyncGeometry = () => ({ text: textGeometry(), pdf: pdfGeometry() });
 window.__textReaderSetKey = (parsed) => setKey(parsed);
+// …and the leak worksheet's: attach, walk, decide, and the bytes a save
+// would write (verified, not written), so the round trip into PDF-Linker's
+// own reader can be checked from outside.
+window.__textReaderLoadKey = (bytes, name) => loadKeyFromBytes(new Uint8Array(bytes), name, "", { quiet: true });
+window.__textReaderAttachLeaks = (bytes, name) => attachLeaks(new Uint8Array(bytes), name, null, { quiet: true });
+window.__textReaderGoToLeak = (i) => goToLeak(i);
+window.__textReaderDecide = (text, advance) => decideLeak(text, { advance: !!advance });
+window.__textReaderLeaks = () => (leaks ? {
+  at: leaks.at, barHidden: leaksBar.hidden, dirty: leaksDirty(),
+  rows: leaks.parsed.rows.map((r) => ({ n: r.n, value: r.value, fix: r.fix, fix0: r.fix0 })),
+  here: leakHere ? { text: leakHere.toString(), gutter: gutterOf(leakHere), page: Number(leakHere.startContainer.parentElement.closest(".tpage").dataset.index) } : null,
+  marks: leakRowRanges.length, keeps: keeps.slice(), leakMarks: leakHits.length,
+} : null);
+window.__textReaderLeaksBytes = async () => Array.from(await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, LK.fixEdits(leaks.parsed)));
+window.__textReaderPickPdfs = (files) => usePickedPdfs(files);
+window.__textReaderPdfSources = () => pdfSources.map((s) => (s ? s.name : null));
 
 // ── boot ───────────────────────────────────────────────────────────────────────────────────
 applySettings();
@@ -2911,3 +3517,5 @@ fillKeySelect("");
 }
 updateDirty();
 renderFlags();
+renderLeaksTab();
+updateLeaksButton();

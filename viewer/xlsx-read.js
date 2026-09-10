@@ -60,7 +60,11 @@ function zipEntries(data) {
   for (let n = 0; n < count; n++) {
     if (u32(b, off) !== CEN_SIG) break;
     const method = u16(b, off + 10);
+    const time = u16(b, off + 12);
+    const date = u16(b, off + 14);
+    const crc = u32(b, off + 16);
     const compSize = u32(b, off + 20);
+    const size = u32(b, off + 24);
     const nameLen = u16(b, off + 28);
     const extraLen = u16(b, off + 30);
     const commentLen = u16(b, off + 32);
@@ -69,10 +73,17 @@ function zipEntries(data) {
     if (u32(b, localOff) === LOC_SIG) {
       const lNameLen = u16(b, localOff + 26);
       const lExtraLen = u16(b, localOff + 28);
+      // `size` is the COMPRESSED length (what readEntry slices); `usize`,
+      // `crc`, `time` and `date` are carried for a writer that copies an
+      // entry through untouched (xlsx-write.js).
       entries.push({
         name: name,
         method: method,
         size: compSize,
+        usize: size,
+        crc: crc,
+        time: time,
+        date: date,
         start: localOff + 30 + lNameLen + lExtraLen,
       });
     }
@@ -164,14 +175,20 @@ function cellText(cellTag, inner, shared) {
 
 function parseSheetXml(xml, shared) {
   const rows = [];
-  const rowRe = /<row(?:\s[^>]*)?>([\s\S]*?)<\/row>/g;
+  const rowRe = /<row((?:\s[^>]*)?)>([\s\S]*?)<\/row>/g;
   let rm;
   while ((rm = rowRe.exec(xml))) {
+    // A row sits at its own r= (1-based) where it carries one, so a sheet
+    // written with a gap keeps its numbering — the writer addresses a cell
+    // by that number — else after the previous row.
+    const rn = parseInt(attr(rm[1], "r") || "", 10);
+    const at = isFinite(rn) && rn >= 1 ? rn - 1 : rows.length;
+    while (rows.length < at) rows.push([]);
     const row = [];
     let next = 0; // next column when a cell carries no r=
     const cellRe = /<c((?:\s[^>]*)?)\/>|<c((?:\s[^>]*)?)>([\s\S]*?)<\/c>/g;
     let cm;
-    while ((cm = cellRe.exec(rm[1]))) {
+    while ((cm = cellRe.exec(rm[2]))) {
       const tag = cm[1] != null ? cm[1] : cm[2];
       const inner = cm[3] || "";
       const ref = attr(tag, "r");
@@ -180,7 +197,7 @@ function parseSheetXml(xml, shared) {
       next = at + 1;
     }
     for (let i = 0; i < row.length; i++) if (row[i] == null) row[i] = "";
-    rows.push(row);
+    rows[at] = row;
   }
   return rows;
 }
@@ -188,7 +205,7 @@ function parseSheetXml(xml, shared) {
 // ---- workbook -------------------------------------------------------------
 
 /**
- * The workbook's sheets, in workbook order: [{name, rows: string[][]}].
+ * The workbook's sheets, in workbook order: [{name, part, rows: string[][]}].
  * Sheet names come from xl/workbook.xml and each is tied to its part through
  * the rels file; a workbook without rels (or with an unresolvable rid) falls
  * back to xl/worksheets/sheetN.xml in numeric order, which is what every
@@ -242,8 +259,11 @@ async function parseXlsx(data) {
       const at = parts.indexOf(part);
       if (at >= 0) nextPart = at + 1;
     }
+    // `part` is the sheet's zip entry, so a writer can put an edited copy of
+    // exactly this sheet back (xlsx-write.js).
     out.push({
       name: s.name,
+      part: part,
       rows: part ? parseSheetXml(await text(part), shared) : [],
     });
   }

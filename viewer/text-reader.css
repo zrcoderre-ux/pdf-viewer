@@ -87,16 +87,71 @@ body {
 /* The offer bar under the toolbar: attach the key of the folder a lone file
    sits in, or open that folder once so the reader remembers it. */
 #key-offer {
-  position: fixed; top: var(--toolbar-height); left: 0; right: 0; z-index: 9;
+  position: fixed; top: calc(var(--toolbar-height) + var(--bar-h, 0px)); left: 0; right: 0; z-index: 9;
   display: flex; align-items: center; gap: 10px; padding: 6px 12px;
   background: #fff8e1; color: #3e2723; border-bottom: 1px solid #ffe082; font-size: 13px;
 }
 #key-offer button { background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #key-offer #key-offer-close { background: transparent; color: #3e2723; border-color: transparent; font-size: 16px; margin-left: auto; }
 
+/* The LEAKS review bar, under the toolbar and ABOVE the stage (it takes its
+   own height, through --bar-h, rather than covering the first lines): the
+   worksheet's current row — value, type, where, both Context quotes — and
+   the Fix? controls. The value is bolded in the quotes as it is in the
+   worksheet. */
+#leaks-bar {
+  position: fixed; top: var(--toolbar-height); left: 0; right: 0; z-index: 9;
+  display: flex; flex-direction: column; gap: 4px; padding: 6px 12px;
+  background: var(--chrome-2); color: var(--text); border-bottom: 2px solid #e65100; font-size: 13px;
+}
+#leaks-bar .lb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+#leaks-bar .lb-row .spacer { flex: 1; min-width: 8px; }
+#leaks-bar button {
+  background: var(--btn); color: var(--text); border: 1px solid var(--btn-border);
+  padding: 3px 9px; border-radius: 4px; cursor: pointer; font-size: 12px; line-height: 1.2; flex: none;
+}
+#leaks-bar button:hover { background: var(--btn-hover); }
+#leaks-bar button:disabled { opacity: 0.5; cursor: default; }
+#leaks-bar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+#leaks-bar button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
+#leaks-bar button.on { background: #e65100; border-color: #e65100; color: #fff; }
+#leaks-bar .lb-count { color: var(--text-muted); font-variant-numeric: tabular-nums; flex: none; }
+#leaks-bar .lb-type { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: #546e7a; color: #fff; flex: none; text-transform: uppercase; letter-spacing: 0.02em; }
+#leaks-bar .lb-type.leak { background: #b71c1c; }
+#leaks-bar .lb-type.reid { background: #e65100; }
+#leaks-bar .lb-value { font-size: 15px; word-break: break-word; }
+#leaks-bar .lb-where { color: var(--text-muted); word-break: break-word; }
+#leaks-bar .lb-context-row { align-items: flex-start; }
+#leaks-bar .lb-context {
+  flex: 1 1 60%; min-width: 240px; max-height: 6.2em; overflow-y: auto; line-height: 1.4;
+  background: var(--inset); border: 1px solid var(--btn-border); border-radius: 4px; padding: 4px 8px; color: var(--text);
+  white-space: pre-wrap; word-break: break-word;
+}
+#leaks-bar .lb-context b { color: #ff8a65; }
+#leaks-bar .lb-context .lb-export { color: var(--text-muted); border-top: 1px dashed var(--btn-border); margin-top: 3px; padding-top: 3px; }
+#leaks-bar .lb-context .lb-export b { color: #ffd54f; }
+#leaks-bar .lb-context .lb-tag { font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-right: 6px; }
+#leaks-bar .lb-notes { flex: 1 1 30%; min-width: 200px; max-height: 6.2em; overflow-y: auto; color: var(--text-muted); font-size: 12px; line-height: 1.4; word-break: break-word; }
+#leaks-bar .lb-answer { min-width: 120px; color: #ffd54f; }
+#leaks-bar .lb-answer.undecided { color: var(--text-muted); }
+#leaks-bar #lb-typed { flex: 1; min-width: 200px; background: var(--inset); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+/* The row's value wherever it stands in the text, and the one the bar scrolled to. */
+::highlight(leakrow) { background-color: rgba(230, 81, 0, 0.22); text-decoration: underline solid #e65100 2px; }
+::highlight(leakrow-here) { background-color: rgba(230, 81, 0, 0.55); text-decoration: underline solid #e65100 2px; }
+/* The Leaks tab: one row per worksheet row, its type and its decision. */
+.side-body li .tag.type { background: #546e7a; }
+.side-body li .tag.type.leak { background: #b71c1c; }
+.side-body li .tag.type.reid { background: #e65100; }
+.side-body li .tag.fix { background: #2e7d32; }
+.side-body li .tag.fix.open { background: transparent; border: 1px solid var(--btn-border); color: var(--text-muted); }
+.side-body li .tag.fix.no { background: #455a64; }
+.side-body li .tag.combined { background: #174ea6; }
+.side-body li .lv { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-body li.current .tag.fix.open { color: #fff; border-color: #fff; }
+
 /* ── layout ────────────────────────────────────────────────────────────────── */
 #main {
-  position: absolute; top: var(--toolbar-height); bottom: var(--status-height); left: 0; right: 0;
+  position: absolute; top: calc(var(--toolbar-height) + var(--bar-h, 0px)); bottom: var(--status-height); left: 0; right: 0;
   display: flex;
 }
 #stage { flex: 1; overflow-y: auto; overflow-x: auto; position: relative; }

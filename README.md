@@ -630,6 +630,39 @@ app, which routes it to the reader tab.
   keys are remembered, so a lone `.txt` can be read under a key already
   loaded. A real name from the key standing **unfaked** in an export is
   counted in the status bar and underlined — that is a leak the run missed.
+- **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
+  is `LEAKS.xlsx` in the case folder: one row per flagged value with a
+  **Fix?** cell to answer, and Apply Leak Fixes reads the cells back. The
+  reader attaches the folder's worksheet when the folder is opened (or
+  **⚠ Leaks** loads one; a dropped `LEAKS.xlsx` attaches too) and works it
+  **one row at a time**: the current row stands in a bar above the text —
+  value, type, file and page:line, both Context quotes with the value
+  bolded, the Notes — and the text **opens the row's own document and
+  scrolls to its page and line**, the value marked wherever it stands (the
+  occurrence the bar went to strongest). The page stays editable underneath,
+  and side by side the PDF follows as it always does. **yes / no / never /
+  phrase** are buttons; anything else the cell takes — the replacement,
+  `~CORRECT SPELLING`, `*CORRECT TEXT` (`**` in every folder), a `[part to
+  keep]` — is typed and applied with Enter; **Alt+Y**, **Alt+N**, **Alt+↑/↓**
+  work from the page. A decision moves you to the next undecided row; the
+  **Leaks** tab lists every row with its state and jumps to any of them. A
+  `no` or `never` on a value the key binds is mirrored as one of the reader's
+  keeps, so the orange mark goes and a save of the document leaves the value
+  as it stands. Decisions are remembered until **Save LEAKS.xlsx**
+  (Ctrl+Shift+S) writes them **into the same workbook in place** — only the
+  Fix? cells change; every other part of the file, the Context quotes, the
+  column widths and the dropdown come back byte for byte, and the file is
+  read back before it is written — after which Apply Leak Fixes (or a
+  re-run) applies them to the files. A `yes` here is the worksheet's alone:
+  it is never also flagged into `New Real Values.txt`.
+- **`Combined Text.txt` brings its PDFs with it.** The combined file PDF-Linker
+  writes into the case folder is listed first among the documents, and its
+  members — the `# Documents in this file:` list on its first page, in
+  order — are each matched to their own PDF: the case folder's through the
+  key, or PDFs picked by hand (**⇄ PDF pages… → Pick PDFs…**, or a drop),
+  several at once, each matched to its member by name through the key and,
+  where no name settles it, by the order the file lists them. The status bar
+  says which members still have no PDF.
 - **Editable — once you say so — and the file never learns the real names.**
   A document opens **protected**: reading, selecting and flagging can never
   nudge a character into it. **✎ Edit** lifts that for the document in front
@@ -741,8 +774,12 @@ walk, the values file), `viewer/pseudo-key.js` (the key, a port of the
 Claude extension's `src/pseudo.js`) and `viewer/pdfsync.js` (which PDF an
 export came from, page ranges, where "the same place" is in two scroll
 boxes), with `viewer/xlsx-read.js` reading the workbook;
-`node test-textdoc.mjs`, `node test-pseudo-key.mjs`, `node test-pdfsync.mjs`
-and `node test-xlsx-read.mjs` cover them.
+`viewer/leaks.js` (the LEAKS worksheet: rows by header, what a Fix? cell
+means, where a row points) and `viewer/xlsx-write.js` (the Fix? cells
+written back into the same workbook, every other part copied through);
+`node test-textdoc.mjs`, `node test-pseudo-key.mjs`, `node test-pdfsync.mjs`,
+`node test-xlsx-read.mjs`, `node test-xlsx-write.mjs` and `node test-leaks.mjs`
+cover them.
 
 ## Install
 
@@ -795,6 +832,8 @@ viewer/textdoc.js                    Text reader's document model (pure; test-te
 viewer/pdfsync.js                    Text reader's PDF pane decisions: matching, ranges, scroll sync (pure; test-pdfsync.mjs)
 viewer/pseudo-key.js                 pseudonym_key.xlsx reader + fake↔real swaps (pure; test-pseudo-key.mjs)
 viewer/xlsx-read.js                  Minimal .xlsx reader (pure; test-xlsx-read.mjs)
+viewer/xlsx-write.js                 Writes cells back into an .xlsx, the rest copied through (pure; test-xlsx-write.mjs)
+viewer/leaks.js                      Text reader's LEAKS.xlsx model: rows, Fix? cells, where a row points (pure; test-leaks.mjs)
 viewer/web-shim.js                   chrome.* shim for the hosted (PWA) pages
 viewer/viewer.css                    Page + textLayer + linkLayer styles
 viewer/viewer.js                     PDF.js loader, two-pass renderer
