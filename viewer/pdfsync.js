@@ -55,10 +55,46 @@ export function pageSources(pages, fileName) {
   let cur = fileName || "";
   for (const p of pages || []) {
     if (p.banner != null) {
-      const m = String(p.banner).match(/^#+ DOCUMENT \d+ OF \d+ IN THIS COMBINED FILE: (.+?) #+$/);
+      const m = String(p.banner).match(BANNER_NAME_RE);
       if (m) cur = m[1];
     }
     out.push(cur);
+  }
+  return out;
+}
+
+// The list a Combined Text.txt opens with (_combined_text_body):
+//   # Documents in this file:
+//   #   1. Brief.txt
+//   #   2. Reply.txt
+const MEMBER_LIST_RE = /^#\s*Documents in this file:\s*$/i;
+const MEMBER_LINE_RE = /^#\s+(\d+)\.\s+(.+?)\s*$/;
+const BANNER_NAME_RE = /^#+ DOCUMENT \d+ OF \d+ IN THIS COMBINED FILE: (.+?) #+$/;
+
+/**
+ * The documents a Combined Text.txt holds, IN ORDER: the names its header
+ * lists under "# Documents in this file:", else — an older combined file,
+ * or a header somebody trimmed — the distinct names of its DOCUMENT
+ * banners in the order they stand. A lone export yields [].
+ */
+export function combinedMembers(pages) {
+  const out = [];
+  const first = (pages || [])[0];
+  if (first && first.banner == null && first.header == null) {
+    let inList = false;
+    for (const line of first.lines || []) {
+      const l = String(line);
+      if (!inList) { if (MEMBER_LIST_RE.test(l)) inList = true; continue; }
+      const m = l.match(MEMBER_LINE_RE);
+      if (!m) break;
+      out.push(m[2]);
+    }
+    if (out.length) return out;
+  }
+  for (const p of pages || []) {
+    if (p.banner == null) continue;
+    const m = String(p.banner).match(BANNER_NAME_RE);
+    if (m && !out.includes(m[1])) out.push(m[1]);
   }
   return out;
 }

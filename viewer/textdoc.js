@@ -403,6 +403,13 @@ export function isKeyName(name) {
   return /^pseudonym[ _-]?key.*\.xlsx$/i.test(String(name == null ? "" : name).split(/[\\/]/).pop().trim());
 }
 
+// The one file holding every export, which PDF-Linker writes into the CASE
+// folder (not Text Files) — listed as a document of its own, first.
+export const COMBINED_FILE = "Combined Text.txt";
+export function isCombinedName(name) {
+  return String(name == null ? "" : name).split(/[\\/]/).pop().trim().toLowerCase() === COMBINED_FILE.toLowerCase();
+}
+
 // The folder PDF-Linker writes the exports to, and the one holding the
 // unscrubbed copies (never listed as documents: it carries the real names).
 export const TEXT_SUBFOLDER = "Text Files";

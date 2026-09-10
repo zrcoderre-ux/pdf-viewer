@@ -5,7 +5,7 @@ import {
   normalizeStem, spaceStem, matchPdf, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout,
-  matchedScale, spreadTops, pageTypeSize, typeSizes,
+  matchedScale, spreadTops, pageTypeSize, typeSizes, combinedMembers,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -47,6 +47,13 @@ check("a lone export's pages name the file", pageSources(lone.pages, "Brief.txt"
 check("a text page's PDF page is its header number", lone.pages.map(pdfPageOf), [1, 2]);
 check("a page with no header has no PDF page", pdfPageOf(parseExport("just text\n").pages[0]), null);
 check("a combined member's numbering restarts; a banner page has no PDF page", combined.pages.map(pdfPageOf), [null, null, 1, 2, null, 1]);
+console.log("combined members");
+check("the header's list, in its order", combinedMembers(parseExport(
+  "# ----\n# COMBINED TEXT EXPORT — 2 documents in one file\n#\n# Documents in this file:\n#   1. Reply.txt\n#   2. Brief.txt\n#\n# Page numbering restarts\n# ----\n" +
+  "\n######## DOCUMENT 1 OF 2 IN THIS COMBINED FILE: Reply.txt ########\n\n====== Page 1 ======\n 1  a\n").pages), ["Reply.txt", "Brief.txt"]);
+check("no list: the banners, distinct, in order", combinedMembers(combined.pages), ["Brief.txt", "Reply.txt"]);
+check("a lone export has no members", combinedMembers(lone.pages), []);
+check("a list line that is not numbered ends the list", combinedMembers(parseExport("# Documents in this file:\n#   1. A.txt\n#\n#   2. B.txt\n").pages), ["A.txt"]);
 
 console.log("page ranges");
 check("ranges, singles, either order, sorted unique", parsePageRanges("12-14, 5; 7 3-2 5", 20), { pages: [2, 3, 5, 7, 12, 13, 14], bad: [] });

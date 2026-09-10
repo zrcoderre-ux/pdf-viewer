@@ -79,6 +79,22 @@ the `chrome.*` shim that used to sit at the top of `viewer.js`, moved out so
 both pages import it first. The PWA shell (`pwa/app-web.js`) routes a `.txt`
 to a reader iframe and feeds it through `__textReaderLoadLocal`.
 
+The LEAKS review bar works PDF-Linker's `LEAKS.xlsx` row by row from the
+text: `leaks.js` (pure) reads the worksheet by header name, classifies a
+Fix? cell the way `_pn_parse_decision_rows` will read it, parses the Where
+and File cells, and matches a File name to its export (the reverse of
+`pdfsync.matchPdf`); `text-reader.js` shows the current row in a bar above
+the stage (it takes its own height through `--bar-h`), opens the row's
+document, scrolls to its page and gutter line and marks the value
+(`::highlight(leakrow)`), mirrors a `no`/`never` on a bound value as a
+reader keep, and saves through `xlsx-write.js`, which rewrites ONLY the
+Fix? cells as inline strings inside the original zip — every other entry
+copied through with its compressed bytes, CRC and stamp — and reads the
+result back before it is written. A `Combined Text.txt` is listed first
+among a folder's documents, and `pdfsync.combinedMembers` reads its
+`# Documents in this file:` list so picked PDFs are matched member by
+member, by name through the key or by order.
+
 ## Fixes applied in earlier sessions
 
 All in `viewer/` unless noted. Each fix is documented inline at the call
@@ -456,6 +472,8 @@ viewer/textdoc.js                        Its document model (pure; test-textdoc.
 viewer/pdfsync.js                        Its PDF pane: which PDF an export came from, page ranges, scroll sync (pure; test-pdfsync.mjs)
 viewer/pseudo-key.js                     pseudonym_key.xlsx reader, fake<->real swaps (pure; test-pseudo-key.mjs)
 viewer/xlsx-read.js                      Minimal .xlsx reader (pure; test-xlsx-read.mjs)
+viewer/xlsx-write.js                     Fix? cells written back into the same .xlsx (pure; test-xlsx-write.mjs)
+viewer/leaks.js                          LEAKS.xlsx model for the review bar (pure; test-leaks.mjs)
 viewer/web-shim.js                       chrome.* shim for the hosted pages (was inline in viewer.js)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing
