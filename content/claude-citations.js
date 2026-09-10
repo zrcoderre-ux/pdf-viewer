@@ -452,12 +452,14 @@
   // conversation being read, and the history stays bounded (see prunePageIndex).
 
   function hydrateFromStorage() {
-    if (!memory || !memoryApi || !memory.url) return;
+    if (suppressed || !memory || !memoryApi || !memory.url) return;
     const key = memory.url;
     chrome.storage.local.get({ [memoryApi.pageStoreKey(key)]: null }, (got) => {
       if (chrome.runtime.lastError) return;
-      // The reader may have moved on while storage was answering.
-      if (!memory || memory.url !== key) return;
+      // The reader may have moved on while storage was answering — or added
+      // this site to the exception list, in which case the stored table must
+      // not come back up behind the suppression that just took it down.
+      if (suppressed || !memory || memory.url !== key) return;
       if (!memory.hydrate(got[memoryApi.pageStoreKey(key)])) return;
       // savedRevision is deliberately left alone: the scan that ran while
       // storage was answering may have found authorities the stored record

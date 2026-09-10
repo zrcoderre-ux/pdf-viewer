@@ -303,8 +303,17 @@ the individual sites to link on (`chatgpt.com`, `*.courtlistener.com`, …).
 Adding an exception takes its links down immediately; every other change
 applies on the next page load.
 
+An exception also reaches the PDF viewer, through the URL the PDF was served
+from: a document downloaded from an excepted site opens with no citation links
+and no Table of Authorities, and the toolbar says so where the citation count
+would be. Taking the exception off (or adding one) applies to the open document
+right away. A document opened from disk came from no website, so no exception
+covers it.
+
 In addition to the in-text underlines, a **Table of Authorities** panel appears
-in the right margin whenever at least one citation is found. It lists each
+in the right margin whenever at least one citation is found. It is a list of
+those links and nothing else, so it never appears where they don't — on an
+excepted site, or on a PDF one served. It lists each
 unique authority once, grouped into Cases / Statutes / Regulations /
 Administrative Guidance / Rules, as a regular blue
 hyperlink on the citation text itself (opening Westlaw or Lexis+). The panel can

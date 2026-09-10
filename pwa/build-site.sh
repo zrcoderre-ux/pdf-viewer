@@ -24,5 +24,8 @@ cp -r "$here/icons" "$out/icons"
 # Canonical viewer + PDF.js (single source of truth lives at the repo root).
 cp -r "$root/viewer" "$out/viewer"
 cp -r "$root/pdfjs" "$out/pdfjs"
+# viewer.html loads this from the site root: the exception list decides whether
+# a PDF served by a given site gets citation links and a Table of Authorities.
+cp "$root/citation-site-rules.js" "$out/citation-site-rules.js"
 
 echo "Assembled site -> $out"

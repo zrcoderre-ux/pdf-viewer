@@ -1,11 +1,12 @@
 // citation-site-rules.js
 //
 // Where citation links are allowed to appear on the web — the defaults, the
-// input normalizer, and the matcher. Three surfaces need the same answers:
+// input normalizer, and the matcher. Four surfaces need the same answers:
 //
 //   background.js            registers the content script on the right sites
 //   options.html/options.js  seeds and saves the lists
 //   content/*.js             refuses to run on an excepted site
+//   viewer/viewer.js         leaves a PDF served by one unlinked
 //
 // The content script for claude.ai is declared statically in manifest.json, so
 // the background worker can't un-register it. That's why the matcher ships to
@@ -108,6 +109,19 @@
   const exceptionPatterns = (lines) => toMatchPatterns(lines, "*");
   const isExcepted = (url, lines) => matchesAny(url, lines, "*");
 
+  // The same question asked about a DOCUMENT rather than a page: was this PDF
+  // served by an excepted site? An excepted site gets no citation links, and a
+  // Table of Authorities is a list of those links — so a document this returns
+  // true for gets neither.
+  //
+  // A document opened from disk came from no website, so no exception can
+  // cover it: file:// in the extension, and the blob:/data: URLs and the
+  // missing URL of a File handed straight to the viewer.
+  const isExceptedDocument = (url, lines) => {
+    if (!url || /^(file|blob|data):/i.test(url)) return false;
+    return isExcepted(url, lines);
+  };
+
   root.CitationSiteRules = {
     DEFAULT_EXCEPTIONS,
     ALL_SITES,
@@ -117,5 +131,6 @@
     matchesAny,
     exceptionPatterns,
     isExcepted,
+    isExceptedDocument,
   };
 })(typeof self !== "undefined" ? self : this);

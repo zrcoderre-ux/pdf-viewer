@@ -67,6 +67,20 @@ check("claude.ai can be excepted like anything else",
 check("an empty list excepts nothing",
   Rules.isExcepted("https://westlaw.com/", []), false);
 
+console.log("\n--- a PDF the viewer opens, judged by the site that served it ---");
+check("a PDF served by an excepted site gets no links, hence no table",
+  Rules.isExceptedDocument("https://advance.lexis.com/api/document.pdf", DEFAULTS), true);
+check("http counts there too",
+  Rules.isExceptedDocument("http://westlaw.com/doc/x.pdf", DEFAULTS), true);
+check("a PDF from anywhere else is linked as usual",
+  Rules.isExceptedDocument("https://civil.lacourt.org/ecourt/ecms/doc?id=1", DEFAULTS), false);
+check("a document opened from disk came from no website",
+  Rules.isExceptedDocument("file:///C:/Users/x/motion.pdf", ["*", "westlaw.com"]), false);
+check("...nor did one handed straight to the viewer",
+  Rules.isExceptedDocument(null, ["westlaw.com"]), false);
+check("...or read from a blob",
+  Rules.isExceptedDocument("blob:https://westlaw.com/9f2", DEFAULTS), false);
+
 console.log("\n--- opt-in sites default to https, exceptions to either scheme ---");
 check("site list", Rules.toMatchPatterns(["example.com", "*.foo.com/a", "", "   "]),
   ["https://example.com/*", "https://*.foo.com/a*"]);

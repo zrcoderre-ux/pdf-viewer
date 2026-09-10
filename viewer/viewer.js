@@ -109,6 +109,18 @@ const toaPanel = createToaPanel({
   // Sit just below the fixed toolbar (claude.ai keeps the default top).
   top: "calc(var(--toolbar-height, 48px) + 8px)",
 });
+// The Options page's exception list — the sites that never get citation links —
+// governs this viewer too, through the URL the PDF was served from. A site on
+// that list is a site the reader has said not to link on, and the Table of
+// Authorities is nothing but a list of those links: a document served by an
+// excepted site therefore gets neither. Loaded as a classic script from
+// viewer.html, so the matcher here is the same one the background worker, the
+// Options page, and the web content script use.
+const SiteRules = window.CitationSiteRules || null;
+let linkingSuppressed = false;   // this PDF came from an excepted site
+let toaOptionOn = false;         // the Options checkbox, on its own
+// The panel is shown only when the option is on AND linking is allowed here.
+const applyToaEnabled = () => toaPanel.setEnabled(toaOptionOn && !linkingSuppressed);
 // OCR runs on scanned pages only when enabled. Default is manual (the toolbar
 // "OCR" button); the auto-OCR option flips the default to on.
 let ocrEnabled = false;
@@ -1371,11 +1383,16 @@ setDisplayName(filenameFromUrl(fileUrl), { definitive: false });
 
 // Read stored prefs and any saved citation_repo.json.
 chrome.storage.sync.get(
-  { provider: "lexis", namingMode: "source", toaEnabledPdf: false, autoOcr: false, alterSource: false },
-  async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabledPdf, autoOcr, alterSource: storedAlterSource }) => {
+  { provider: "lexis", namingMode: "source", toaEnabledPdf: false, autoOcr: false, alterSource: false,
+    citationSiteExceptions: SiteRules ? SiteRules.DEFAULT_EXCEPTIONS : [] },
+  async ({ provider: storedProvider, namingMode: storedNamingMode, toaEnabledPdf, autoOcr, alterSource: storedAlterSource,
+           citationSiteExceptions }) => {
     provider = storedProvider;
     providerEl.value = provider;
-    toaPanel.setEnabled(!!toaEnabledPdf);
+    linkingSuppressed = !!SiteRules &&
+      SiteRules.isExceptedDocument(fileUrl, citationSiteExceptions);
+    toaOptionOn = !!toaEnabledPdf;
+    applyToaEnabled();
     if (autoOcr) { ocrEnabled = true; markOcrActive(); }
     alterSource = !!storedAlterSource;
     // Recompute any source name derived before the preference loaded.
@@ -1672,10 +1689,26 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (pdfDoc) renderAllPages();
   }
   if (area === "sync" && changes.toaEnabledPdf) {
-    const on = changes.toaEnabledPdf.newValue !== false;
-    toaPanel.setEnabled(on);
+    toaOptionOn = changes.toaEnabledPdf.newValue !== false;
+    applyToaEnabled();
     // Re-show with the current document's authorities without a full re-render.
-    if (on && pdfDoc) toaPanel.render(getAuthorities(citationRepo, provider), provider);
+    if (toaOptionOn && !linkingSuppressed && pdfDoc) {
+      toaPanel.render(getAuthorities(citationRepo, provider), provider);
+    }
+  }
+  // Excepting a site takes its links down right away on the web; a PDF it
+  // served is no different, and the table goes with them. Taking the exception
+  // off puts both back. Either way the link layers are built by a render, so
+  // that is what re-runs.
+  if (area === "sync" && changes.citationSiteExceptions) {
+    const next = !!SiteRules &&
+      SiteRules.isExceptedDocument(fileUrl, changes.citationSiteExceptions.newValue || []);
+    if (next !== linkingSuppressed) {
+      linkingSuppressed = next;
+      applyToaEnabled();
+      if (pdfDoc) renderAllPages();
+      else updateLinkCount();
+    }
   }
   if (area === "sync" && changes.autoOcr && changes.autoOcr.newValue && !ocrEnabled) {
     ocrEnabled = true;
@@ -2036,15 +2069,22 @@ async function renderAllPages() {
     tryResolveFooterTitle();
   }
 
-  // Feed the Table of Authorities panel (deduped authorities for this doc).
-  if (toaPanel) toaPanel.render(getAuthorities(citationRepo, provider), provider);
+  // A document served by an excepted site is left unlinked, and with nothing
+  // linked there is no table to list: the panel is emptied rather than filled.
+  // Detection still ran above — the smart filename is drawn from the same pass.
+  if (linkingSuppressed) {
+    if (toaPanel) toaPanel.render([], provider);
+  } else {
+    // Feed the Table of Authorities panel (deduped authorities for this doc).
+    if (toaPanel) toaPanel.render(getAuthorities(citationRepo, provider), provider);
 
-  // Pass 3: place links on each page.
-  for (const refs of pageRefs) {
-    if (signal.aborted) return;
-    totalLinks += placeLinksForPage(
-      refs.pageNumber, refs.textLayerDiv, refs.linkLayerDiv
-    );
+    // Pass 3: place links on each page.
+    for (const refs of pageRefs) {
+      if (signal.aborted) return;
+      totalLinks += placeLinksForPage(
+        refs.pageNumber, refs.textLayerDiv, refs.linkLayerDiv
+      );
+    }
   }
 
   if (signal.aborted) return;
@@ -2283,6 +2323,12 @@ function logPdfHistory() {
 }
 
 function updateLinkCount() {
+  // Zero links because the reader excepted this site reads as a failure to
+  // detect anything unless the toolbar says which it was.
+  if (linkingSuppressed) {
+    linkCountEl.textContent = "· citation links off for this site";
+    return;
+  }
   const providerLabel = provider === "lexis" ? "Lexis+" : "Westlaw";
   linkCountEl.textContent = totalLinks > 0
     ? `· ${totalLinks} citation${totalLinks === 1 ? "" : "s"} → ${providerLabel}`
