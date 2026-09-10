@@ -119,7 +119,12 @@ check("...and the panel's own count still counts everything",
 console.log("\n--- clicking opens the cases in tabs ---");
 button().fire("click");
 check("the worker is asked to open the case URLs, in listed order", sent,
-  { type: "open-background-tabs", urls: ["https://x/doe", "https://x/guz", "https://x/lazar"] });
+  { type: "open-background-tabs",
+    urls: ["https://x/doe", "https://x/guz", "https://x/lazar"],
+    // The label said "Open 3 cases" before the click, so this is not a gesture
+    // that might have named more links than the reader realized: the worker's
+    // cap for those does not apply.
+    deliberate: true });
 check("the button reports back", button().textContent, "Opened 3");
 
 console.log("\n--- a table with no cases has nothing to open ---");

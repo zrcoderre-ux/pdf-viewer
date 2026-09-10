@@ -327,7 +327,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // only it knows the tab that asked, which is what makes the new tabs land right
 // after it — the way Chrome places a middle-clicked tab.
 
+// A gesture's cap. Shift+Space over a big selection can name hundreds of links
+// without the reader having counted them, and twenty tabs is already a lot of
+// browser to hand someone who meant to open a few.
 const MAX_BACKGROUND_TABS = 20;
+
+// A deliberate request's cap. The Table of Authorities' "Open all" button
+// carries the count in its own label — the reader clicked "Open 36 cases"
+// knowing the number — so capping that at twenty answers a different question
+// than the one asked. It still has a ceiling, because a table of hundreds
+// would take the browser down with it.
+const MAX_DELIBERATE_TABS = 120;
 
 // http/https/file plus our own viewer pages. Anything else (javascript:,
 // mailto:, data:) is not something a middle click would have opened.
@@ -340,12 +350,13 @@ function toOpenableUrl(raw) {
   return BACKGROUND_TAB_SCHEMES.includes(parsed.protocol) ? parsed.href : null;
 }
 
-async function openBackgroundTabs(urls, opener) {
+async function openBackgroundTabs(urls, opener, deliberate) {
+  const cap = deliberate ? MAX_DELIBERATE_TABS : MAX_BACKGROUND_TABS;
   const clean = [];
   for (const raw of Array.isArray(urls) ? urls : []) {
     const url = toOpenableUrl(raw);
     if (url && !clean.includes(url)) clean.push(url);
-    if (clean.length >= MAX_BACKGROUND_TABS) break;
+    if (clean.length >= cap) break;
   }
 
   let opened = 0;
@@ -386,7 +397,9 @@ async function openBackgroundTabs(urls, opener) {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.type !== "open-background-tabs") return; // not ours
-  openBackgroundTabs(msg.urls, sender && sender.tab).then(
+  // `deliberate` says the caller showed the reader how many tabs this opens
+  // before they asked for it (see MAX_DELIBERATE_TABS).
+  openBackgroundTabs(msg.urls, sender && sender.tab, !!msg.deliberate).then(
     (result) => sendResponse(result),
     (e) => {
       console.warn("[Citation Linker] Background-tab open failed:", e);

@@ -610,6 +610,35 @@ console.log("\n--- the tabs the worker opens ---");
   check("...and says it opened every one it kept", [out.opened, out.asked], [20, 20]);
 }
 {
+  // A gesture may name more links than the reader counted, so twenty is the
+  // cap for one. A request that showed its count first ("Open 36 cases") asked
+  // for exactly what it asked for.
+  const { ctx, created } = runBackground();
+  const urls = [];
+  for (let i = 0; i < 36; i++) urls.push(`https://x.test/${i}`);
+  const out = await ctx.openBackgroundTabs(urls, { id: 1, windowId: 1, index: 0, groupId: -1 }, true);
+  check("a deliberate request is not cut to twenty", created.length, 36);
+  check("...and reports all of them", [out.opened, out.asked], [36, 36]);
+}
+{
+  const { ctx, created } = runBackground();
+  const urls = [];
+  for (let i = 0; i < 200; i++) urls.push(`https://x.test/${i}`);
+  await ctx.openBackgroundTabs(urls, { id: 1, windowId: 1, index: 0, groupId: -1 }, true);
+  check("it still has a ceiling", created.length, 120);
+}
+{
+  const { ctx, created } = runBackground();
+  const replies = [];
+  ctx.__onMessage(
+    { type: "open-background-tabs", urls: ["https://a.test/", "https://b.test/"], deliberate: true },
+    { tab: { id: 1, windowId: 1, index: 0, groupId: -1 } },
+    (r) => replies.push(r)
+  );
+  await new Promise((r) => setTimeout(r, 0));
+  check("the flag travels with the message", created.length, 2);
+}
+{
   // A tab that refuses to open is the whole explanation for "it opened one and
   // stopped", so the reason travels back with the count.
   const { ctx } = runBackground();
