@@ -345,7 +345,10 @@ leaving the click unanswered, and a hosted page whose pop-ups are blocked says
 that instead. The worker's twenty-tab cap is a guard for Shift+Space, which can
 name hundreds of links the reader never counted; this button carries its count
 in its own label, so what it asks for is what the reader asked for, and only a
-far higher ceiling (120) stands behind it. The same report, with the URLs and the reason any
+far higher ceiling (120) stands behind it. The tabs arrive as one **tab group**
+named `Cases` — a set asked for as a set should not land as three dozen loose
+tabs — rather than joining whatever group the page they were asked from sits
+in. A browser that won't group them has still opened every one. The same report, with the URLs and the reason any
 tab was refused, is logged to the console of the page the panel is on, since
 the button's own copy is gone in a few seconds. The button is hidden when the
 table holds no cases.

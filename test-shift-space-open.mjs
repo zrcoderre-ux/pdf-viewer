@@ -542,6 +542,7 @@ console.log("\n--- Shift+Space ---");
 function runBackground() {
   const created = [];
   const grouped = [];
+  const groupUpdates = [];
   let nextId = 500;
   const ctx = {
     console: { log() {}, warn() {}, error() {} },
@@ -568,12 +569,15 @@ function runBackground() {
         create: async (props) => { created.push(props); return { id: nextId++ }; },
         group: async (props) => { grouped.push(props); return 7; },
       },
+      tabGroups: {
+        update: async (groupId, props) => { groupUpdates.push({ groupId, ...props }); },
+      },
     },
   };
   ctx.self = ctx;
   vm.createContext(ctx);
   vm.runInContext(read("background.js"), ctx);
-  return { ctx, created, grouped };
+  return { ctx, created, grouped, groupUpdates };
 }
 
 console.log("\n--- the tabs the worker opens ---");
@@ -657,14 +661,52 @@ console.log("\n--- the tabs the worker opens ---");
 }
 {
   const { ctx, grouped } = runBackground();
-  await ctx.openBackgroundTabs(["https://a.test/"], { id: 1, windowId: 1, index: 0, groupId: 9 });
-  check("a tab opened from a grouped tab joins its group",
-    grouped, [{ groupId: 9, tabIds: 500 }]);
+  await ctx.openBackgroundTabs(["https://a.test/", "https://b.test/"],
+    { id: 1, windowId: 1, index: 0, groupId: 9 });
+  check("tabs opened from a grouped tab join its group",
+    grouped, [{ groupId: 9, tabIds: [500, 501] }]);
 }
 {
   const { ctx, grouped } = runBackground();
   await ctx.openBackgroundTabs(["https://a.test/"], { id: 1, windowId: 1, index: 0, groupId: -1 });
   check("an ungrouped opener groups nothing", grouped, []);
+}
+
+console.log("\n--- a set asked for as a set arrives as one ---");
+{
+  // Three dozen loose tabs is not what "Open all" meant. A deliberate request
+  // gets a group of its own — not the opener's, whatever the opener is in.
+  const { ctx, grouped, groupUpdates } = runBackground();
+  await ctx.openBackgroundTabs(
+    ["https://a.test/", "https://b.test/", "https://c.test/"],
+    { id: 1, windowId: 3, index: 0, groupId: 9 }, true, "Cases"
+  );
+  check("the opened tabs are grouped together",
+    grouped, [{ tabIds: [500, 501, 502], createProperties: { windowId: 3 } }]);
+  check("...under the name the caller gave, and left open",
+    groupUpdates, [{ groupId: 7, title: "Cases", color: "blue", collapsed: false }]);
+}
+{
+  const { ctx, grouped, groupUpdates } = runBackground();
+  await ctx.openBackgroundTabs(["https://a.test/"], { id: 1, windowId: 1, index: 0, groupId: -1 },
+    true, "Cases");
+  check("one tab is not a group", grouped, []);
+  check("...and nothing is named", groupUpdates, []);
+}
+{
+  // The extension page (the PDF viewer) sends no tab of its own.
+  const { ctx, grouped } = runBackground();
+  await ctx.openBackgroundTabs(["https://a.test/", "https://b.test/"], undefined, true, "Cases");
+  check("with no opener the group is left to land in the current window",
+    grouped, [{ tabIds: [500, 501], createProperties: {} }]);
+}
+{
+  // Grouping is a convenience; a browser that refuses still opened the tabs.
+  const { ctx, created } = runBackground();
+  ctx.chrome.tabs.group = async () => { throw new Error("no groups here"); };
+  const out = await ctx.openBackgroundTabs(["https://a.test/", "https://b.test/"],
+    { id: 1, windowId: 1, index: 0, groupId: -1 }, true, "Cases");
+  check("a refused group costs no tabs", [created.length, out.opened], [2, 2]);
 }
 {
   const { ctx, created } = runBackground();

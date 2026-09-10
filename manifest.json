@@ -8,6 +8,7 @@
     "declarativeNetRequestFeedback",
     "webNavigation",
     "tabs",
+    "tabGroups",
     "storage",
     "scripting"
   ],

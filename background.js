@@ -350,7 +350,29 @@ function toOpenableUrl(raw) {
   return BACKGROUND_TAB_SCHEMES.includes(parsed.protocol) ? parsed.href : null;
 }
 
-async function openBackgroundTabs(urls, opener, deliberate) {
+// Put the tabs a deliberate request opened into a tab group of their own, so
+// three dozen cases arrive as one labelled block in the tab strip instead of
+// three dozen loose tabs. Best effort: tab groups are a convenience, and a
+// browser that won't group them still has every tab open.
+async function groupOpenedTabs(tabIds, opener, title) {
+  if (!chrome.tabs.group || tabIds.length < 2) return null;
+  try {
+    const createProperties = opener && opener.windowId != null
+      ? { windowId: opener.windowId } : {};
+    const groupId = await chrome.tabs.group({ tabIds, createProperties });
+    // Naming (and colouring) the group needs the tabGroups API; without it the
+    // group is still a group, just untitled.
+    if (title && chrome.tabGroups && chrome.tabGroups.update) {
+      await chrome.tabGroups.update(groupId, { title, color: "blue", collapsed: false });
+    }
+    return groupId;
+  } catch (e) {
+    console.warn("[Citation Linker] Could not group the opened tabs:", e);
+    return null;
+  }
+}
+
+async function openBackgroundTabs(urls, opener, deliberate, groupTitle) {
   const cap = deliberate ? MAX_DELIBERATE_TABS : MAX_BACKGROUND_TABS;
   const clean = [];
   for (const raw of Array.isArray(urls) ? urls : []) {
@@ -364,6 +386,7 @@ async function openBackgroundTabs(urls, opener, deliberate) {
   // stopped", and the worker's own console is not where anyone looks. The
   // failures go back to the caller, which logs them in the page's console.
   const failed = [];
+  const openedIds = [];
   for (const url of clean) {
     // active:false is the whole point: a middle-clicked tab loads behind the
     // page you're reading.
@@ -382,13 +405,20 @@ async function openBackgroundTabs(urls, opener, deliberate) {
       continue;
     }
     opened++;
+    if (tab && tab.id != null) openedIds.push(tab.id);
+  }
+
+  if (deliberate) {
+    // A set the reader asked for as a set arrives as one: its own group,
+    // named for what it is, rather than joining whatever group the page they
+    // asked from happens to sit in.
+    await groupOpenedTabs(openedIds, opener, groupTitle);
+  } else if (opener && opener.groupId > -1 && chrome.tabs.group && openedIds.length) {
     // A middle-clicked tab stays in the opener's tab group; match that when
     // the opener is in one.
-    if (opener && opener.groupId > -1 && chrome.tabs.group && tab && tab.id != null) {
-      try {
-        await chrome.tabs.group({ groupId: opener.groupId, tabIds: tab.id });
-      } catch (e) { /* group closed mid-flight; the tab is still open */ }
-    }
+    try {
+      await chrome.tabs.group({ groupId: opener.groupId, tabIds: openedIds });
+    } catch (e) { /* group closed mid-flight; the tabs are still open */ }
   }
   // `asked` counts the URLs that survived cleaning (deduplicated, and dropped
   // if the cap was reached), which is what `opened` should be compared against.
@@ -399,7 +429,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.type !== "open-background-tabs") return; // not ours
   // `deliberate` says the caller showed the reader how many tabs this opens
   // before they asked for it (see MAX_DELIBERATE_TABS).
-  openBackgroundTabs(msg.urls, sender && sender.tab, !!msg.deliberate).then(
+  openBackgroundTabs(msg.urls, sender && sender.tab, !!msg.deliberate, msg.groupTitle).then(
     (result) => sendResponse(result),
     (e) => {
       console.warn("[Citation Linker] Background-tab open failed:", e);

@@ -123,8 +123,9 @@ check("the worker is asked to open the case URLs, in listed order", sent,
     urls: ["https://x/doe", "https://x/guz", "https://x/lazar"],
     // The label said "Open 3 cases" before the click, so this is not a gesture
     // that might have named more links than the reader realized: the worker's
-    // cap for those does not apply.
-    deliberate: true });
+    // cap for those does not apply, and the tabs are grouped under this name
+    // rather than scattered across the tab strip.
+    deliberate: true, groupTitle: "Cases" });
 check("the button reports back", button().textContent, "Opened 3");
 
 console.log("\n--- a table with no cases has nothing to open ---");
