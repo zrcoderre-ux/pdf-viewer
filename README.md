@@ -503,6 +503,26 @@ memorandum (10/10 match, identical keys). The port includes:
 - Pin-cite ranges including em-dash forms (`, 110-12`, `, 110–12`).
 - Document-wide supra resolution using **first-seen** short name (matches
   `setdefault` semantics).
+- **Short-form `X v. Y` references.** A case cited in full anywhere in the
+  document is linked again wherever the document names both its parties, even
+  with no reporter cite alongside — the form a table of authorities uses, and
+  the form a brief falls into on second reference. Either party may be given
+  short: `Four Star Electric` for `Four Star Electric, Inc.`, `Ford` for `Ford
+  Motor Co.`, `Christensen, Miller` for the rest of the firm. The match is by
+  whole words, so `Smith` never answers for `Smithson`.
+
+  A party name is not only capitalized words. It carries the ampersand of a
+  firm (`Careau & Co.`, `F & H Construction`, `Philipson & Simon`), the comma
+  before a corporate designator (`PCO, Inc.`), and the lowercase connectors a
+  caption keeps (`Committee on Children's Television`, `Regents of Univ. of
+  California`) — each of which used to end the name early and cost the link.
+  A connector the sentence supplied rather than the name (`Chillon v. Ford and
+  the trial court agreed`) is left out of the link, and a word the sentence
+  put in front of the name — a heading on the line above, most often `Cases`
+  above the first entry of a table — is dropped rather than taken as part of
+  the plaintiff. That last one was worth a whole entry: a name read one word
+  too wide doesn't just come out wrong, it takes the citation inside it down
+  with it.
 - **Italicized short names.** Case names are italicized and nearly nothing
   else in a brief or an opinion is, so once a case has been cited in full, a
   later italic fragment of its name — `Market Lofts`, `Aguilar`, `In re

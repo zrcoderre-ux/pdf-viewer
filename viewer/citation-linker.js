@@ -556,9 +556,31 @@ const _PARTY_TOKEN = String.raw`[A-Z][A-Za-z0-9.\-'\u2019&]*`;
 // rule: a leading number there is nearly always stray text, not a party.
 const _DEF_FIRST_TOKEN =
   String.raw`(?:[A-Z]|\d+(?:[A-Za-z]|[\-\u2010-\u2015][A-Z]))[A-Za-z0-9.\-'\u2019&]*`;
+// Not every token of a party name starts with a capital. A firm is joined by
+// an ampersand ("Careau & Co.", "F & H Construction", "Philipson & Simon"),
+// and a caption keeps its lowercase connectors ("Committee on Children's
+// Television", "Regents of Univ. of California"). These are interior only —
+// a party still has to open with a capital (or, for a defendant, a digit).
+// Without them the capture stops at the ampersand and hands the registry
+// "Co." for "Careau & Co.", which matches nothing and drops the link.
+// The lookahead is what keeps a connector from matching the front of an
+// ordinary word: without it "ex" claims the "ex" of "explained" and "Chillon
+// v. Ford explained" is read as a case against "Ford ex".
+const _PARTY_JOIN =
+  String.raw`(?:&|(?:of|the|and|on|for|de|la|du|van|von|ex|rel)\.?(?![A-Za-z]))`;
+const _PARTY_NEXT = String.raw`(?:${_PARTY_TOKEN}|${_PARTY_JOIN})`;
+// A connector the capture ran on into ("Chillon v. Ford and the court held")
+// is not part of the defendant's name. Trimmed before the lookup, and the
+// link's span shortened with it.
+const TRAILING_JOIN_RE = new RegExp(String.raw`(?:\s+${_PARTY_JOIN})+$`);
+// A corporate designator sits behind a comma the token pattern can't cross.
+// The defendant always allowed one; a plaintiff needs it too, or "PCO, Inc.
+// v. Christensen, Miller" is read as a case brought by "Inc.".
+const _CORP_TAIL =
+  String.raw`(?:,\s*(?:Inc|LLC|L\.L\.C|LLP|L\.L\.P|LP|Ltd|Corp|Co|Company)\.?)?`;
 const SHORT_FORM_RE = new RegExp(
-  String.raw`\b(${_PARTY_TOKEN}(?:\s+${_PARTY_TOKEN}){0,3})\s+v\.\s+` +
-  String.raw`(${_DEF_FIRST_TOKEN}(?:\s+${_PARTY_TOKEN}){0,4}(?:,\s*(?:Inc|LLC|LLP|Ltd|Corp|Co)\.?)?)`,
+  String.raw`\b(${_PARTY_TOKEN}(?:\s+${_PARTY_NEXT}){0,4}${_CORP_TAIL})\s+v\.\s+` +
+  String.raw`(${_DEF_FIRST_TOKEN}(?:\s+${_PARTY_NEXT}){0,5}${_CORP_TAIL})`,
   "g"
 );
 
@@ -575,13 +597,18 @@ const SHORTFORM_LEAD_RE =
 
 const SIGNAL_PREFIXES = new Set([
   "see", "cf", "cf.", "per", "in", "but", "compare", "accord", "e.g.",
-  "also", "n", "of", "the", "and", "to", "by", "for", "with", "from",
+  "also", "n", "of", "the", "and", "to", "by", "for", "on", "with", "from",
   "as", "if", "when", "while", "since", "because", "though", "although",
   "court", "supreme", "federal", "state", "california",
 ]);
 
 const NAME_CONNECTORS = new Set([
   "of", "the", "and", "&", "de", "la", "du", "von", "van", "re",
+  // Lowercase words a caption carries between its name tokens: "Committee on
+  // Children's Television", "Californians for Disability Rights". Both are
+  // also SIGNAL_PREFIXES, so one left over at the front of a walk-back
+  // ("relied on Doe v. Roe") is stripped rather than kept as a name.
+  "on", "for",
   // Latin connectors used in case captions:
   //   "People ex rel. [relator] v. [defendant]" — government suing in the
   //   name of an interested private party. Without these, walk-back stops
@@ -1584,6 +1611,15 @@ function normalizeParty(s) {
   return s.replace(/[.,;:'"\u2019]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
+// One party name against another, both already normalized: equal, or one a
+// leading WORD-prefix of the other. The word boundary is what keeps a prefix
+// from spanning into the middle of a name ("smith" vs "smithson").
+function wordPrefix(whole, part) {
+  return whole === part ||
+    (whole.length > part.length && whole.startsWith(part) && whole[part.length] === " ");
+}
+const sameParty = (a, b) => wordPrefix(a, b) || wordPrefix(b, a);
+
 function findShortFormCitations(text, fullCites) {
   // Build (plaintiff_norm, defendant_norm) -> full cite registry. Use
   // case-key parsing identical to pdf_linker._link_short_form_cases.
@@ -1614,36 +1650,58 @@ function findShortFormCitations(text, fullCites) {
   const results = [];
   let m;
   SHORT_FORM_RE.lastIndex = 0;
-  while ((m = SHORT_FORM_RE.exec(text)) !== null) {
-    const plaintiffRaw = m[1].trim();
-    const defendant = m[2].trim();
-    const plaintiff = plaintiffRaw.replace(SHORTFORM_LEAD_RE, "").trim();
-    if (!plaintiff) continue;
-    const pNorm = normalizeParty(plaintiff);
-    const dNorm = normalizeParty(defendant);
+  // A registered case whose two parties answer to these two names.
+  const lookup = (pNorm, dNorm) => {
+    // Exact match first; then a relaxed one. A short form drops what the full
+    // name carries, and it drops it from EITHER party: "Four Star Electric"
+    // for "Four Star Electric, Inc.", "Christensen, Miller" for the rest of
+    // the firm. So either side may be a leading prefix of the registered one,
+    // in either direction — measured in whole words, so that "Smith" cannot
+    // answer for "Smithson".
+    const exact = registry.get(pNorm + "|" + dNorm);
+    if (exact) return exact.full;
+    for (const pair of allPairs) {
+      if (sameParty(pair.pNorm, pNorm) && sameParty(pair.dNorm, dNorm)) return pair.full;
+    }
+    return null;
+  };
 
-    // Exact match first; then relaxed match where short defendant is a
-    // prefix of registered (e.g. short "Ford" matches "Ford Motor Co.").
-    let target = registry.get(pNorm + "|" + dNorm)?.full;
-    if (!target) {
-      for (const pair of allPairs) {
-        if (pair.pNorm === pNorm &&
-            (pair.dNorm.startsWith(dNorm) || dNorm.startsWith(pair.dNorm))) {
-          target = pair.full;
-          break;
-        }
-      }
+  while ((m = SHORT_FORM_RE.exec(text)) !== null) {
+    const defRaw = m[2].replace(TRAILING_JOIN_RE, "");
+    const defendant = defRaw.trim();
+    const defDropped = m[2].length - defRaw.length;
+    if (!defendant) continue;
+    const dNorm = normalizeParty(defendant);
+    // The plaintiff capture reaches back as far as the name pattern allows,
+    // which is sometimes further than the name: a heading sitting above the
+    // citation ("Cases", "Table of Authorities") or a lead-in the signal-word
+    // strip doesn't know reads as more of the plaintiff. Try the longest
+    // reading, then drop one leading word at a time. Without this a capture
+    // that starts a word too early doesn't merely mis-name the party — the
+    // failed lookup takes the whole span with it, and the citation inside it
+    // is never tried at all.
+    const lead = m[1].replace(SHORTFORM_LEAD_RE, "");
+    const leadLen = m[1].length - lead.length;
+    const wordStarts = [...lead.matchAll(/\S+/g)].map((w) => w.index);
+
+    let target = null;
+    let plaintiffStart = 0;
+    for (const at of wordStarts) {
+      const cand = lead.slice(at).trim();
+      // A name opens with a capital or a digit, never with "of" or "&".
+      if (!/^[A-Z0-9]/.test(cand)) continue;
+      const pNorm = normalizeParty(cand);
+      if (!pNorm) continue;
+      target = lookup(pNorm, dNorm);
+      if (target) { plaintiffStart = at; break; }
     }
     if (!target) continue;
 
-    // Compute the span of the cleaned "Plaintiff v. Defendant" portion only.
-    // The raw match starts at m.index but may include a leading "In " / "See "
-    // that we stripped from plaintiff. Find where the cleaned plaintiff
-    // begins in the raw match text.
+    // The span covers the "Plaintiff v. Defendant" that matched — not the
+    // heading or lead-in words the capture opened with.
     const matchStartInDoc = m.index;
-    const cleanedStartOffset = plaintiffRaw.length - plaintiff.length;
-    const start = matchStartInDoc + cleanedStartOffset;
-    const end = matchStartInDoc + m[0].length;
+    const start = matchStartInDoc + leadLen + plaintiffStart;
+    const end = matchStartInDoc + m[0].length - defDropped;
 
     // Skip if this span overlaps a full citation we already detected.
     let overlap = false;
