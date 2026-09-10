@@ -128,6 +128,25 @@ const CSS = `
   color: inherit;
 }
 #${PANEL_ID} .cl-toa-toggle:hover { background: rgba(127, 127, 127, 0.18); }
+/* "Open 12 cases" — sits with the count and the minimize toggle. Hidden when
+   the panel is minimized (the header is then only wide enough for the title)
+   and whenever the table holds no cases. */
+#${PANEL_ID} .cl-toa-open-all {
+  all: unset;
+  cursor: pointer;
+  padding: 1px 8px;
+  border: 1px solid #d7dbe0;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 16px;
+  color: inherit;
+  white-space: nowrap;
+}
+#${PANEL_ID} .cl-toa-open-all:hover { background: rgba(127, 127, 127, 0.18); }
+#${PANEL_ID}.cl-toa-minimized .cl-toa-open-all { display: none; }
+@media (prefers-color-scheme: dark) {
+  #${PANEL_ID} .cl-toa-open-all { border-color: #3a3c42; }
+}
 #${PANEL_ID} .cl-toa-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -193,6 +212,30 @@ export function clampPanelPosition({ right, top, width, winW, winH }) {
   return out;
 }
 
+// Open every URL in a tab of its own. Inside the extension only the background
+// worker can open a tab that doesn't steal focus, and it is already doing this
+// for the Shift+Space "middle click" — same message, same cap on how many tabs
+// one gesture may open. It answers with the number it actually opened.
+//
+// A hosted page (the PWA build) has no worker: window.open is all there is, and
+// the browser may refuse some of them. `opened` there counts what we asked for.
+function openInTabs(urls, done) {
+  const api = typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id
+    ? chrome : null;
+  if (api) {
+    api.runtime.sendMessage({ type: "open-background-tabs", urls }, (resp) => {
+      void api.runtime.lastError; // worker asleep / no receiver
+      done(resp && typeof resp.opened === "number" ? resp.opened : 0);
+    });
+    return;
+  }
+  let opened = 0;
+  for (const url of urls) {
+    try { window.open(url, "_blank", "noopener"); opened++; } catch { /* blocked */ }
+  }
+  done(opened);
+}
+
 function injectStyle() {
   if (document.getElementById(STYLE_ID)) return;
   const s = document.createElement("style");
@@ -213,6 +256,13 @@ export function createToaPanel({ providerLabel, top } = {}) {
   let posRight = null, posTop = null;
   let enabled = true;
   let lastSig = "";
+  // The URLs behind the Cases group, in the order the panel lists them — what
+  // "Open all" opens. Statutes, regulations, rules and jury instructions are
+  // deliberately left out: a table's cases are what a reader opens one by one.
+  let caseUrls = [];
+  let openAllEl = null;
+  let flashTimer = null;
+  let flashing = false;   // a result is on the button; don't paint over it
   // Set true while a header drag is in progress so the trailing click doesn't
   // also toggle minimize.
   let dragMoved = false;
@@ -284,10 +334,26 @@ export function createToaPanel({ providerLabel, top } = {}) {
     toggle.className = "cl-toa-toggle";
     toggle.type = "button";
 
-    // count + toggle stay grouped at the right; the title centers between.
+    openAllEl = document.createElement("button");
+    openAllEl.className = "cl-toa-open-all";
+    openAllEl.type = "button";
+    openAllEl.title =
+      "Open every case in the table, each in its own tab. " +
+      "Statutes, regulations, rules and jury instructions are left alone.";
+    // The header is the drag handle and a click on it minimizes the panel, so
+    // the button has to keep its own clicks (and its own drag) to itself.
+    openAllEl.addEventListener("pointerdown", (e) => e.stopPropagation());
+    openAllEl.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openAllCases();
+    });
+
+    // open-all + count + toggle stay grouped at the right; the title centers
+    // between.
     const actions = document.createElement("div");
     actions.className = "cl-toa-actions";
-    actions.append(countEl, toggle);
+    actions.append(openAllEl, countEl, toggle);
 
     header.append(title, actions);
 
@@ -384,6 +450,38 @@ export function createToaPanel({ providerLabel, top } = {}) {
     return el;
   }
 
+  // Say what happened, in the button itself, then put the label back. The tabs
+  // open behind the page, so without this the click has no visible result at
+  // all — and when the worker's cap is reached, the count is the only place
+  // the reader learns that not every case was opened.
+  function flash(text) {
+    if (!openAllEl) return;
+    flashing = true;
+    openAllEl.textContent = text;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { flashing = false; paintOpenAll(); }, 2500);
+  }
+
+  function paintOpenAll() {
+    if (!openAllEl || flashing) return;
+    const n = caseUrls.length;
+    openAllEl.hidden = n === 0;
+    openAllEl.textContent = `Open ${n} case${n === 1 ? "" : "s"}`;
+    openAllEl.disabled = false;
+  }
+
+  function openAllCases() {
+    if (!caseUrls.length) return;
+    const urls = caseUrls.slice();
+    openAllEl.disabled = true;
+    openInTabs(urls, (opened) => {
+      if (!opened) flash("Couldn't open");
+      else if (opened < urls.length) flash(`Opened ${opened} of ${urls.length}`);
+      else flash(`Opened ${opened}`);
+      if (openAllEl) openAllEl.disabled = false;
+    });
+  }
+
   function applyMinimized() {
     if (!el) return;
     el.classList.toggle("cl-toa-minimized", minimized);
@@ -398,6 +496,7 @@ export function createToaPanel({ providerLabel, top } = {}) {
     if (!enabled || !authorities || !authorities.length) {
       if (el) el.style.display = "none";
       lastSig = "";
+      caseUrls = [];
       return;
     }
     ensure();
@@ -408,11 +507,12 @@ export function createToaPanel({ providerLabel, top } = {}) {
     // Rebuild only when the set (or provider) changed, to avoid flicker / lost
     // scroll position on incremental updates.
     const sig = provider + "|" + authorities.map((a) => a.kind + ":" + a.key).join("||");
-    if (sig === lastSig) return;
+    if (sig === lastSig) { paintOpenAll(); return; }
     lastSig = sig;
 
     countEl.textContent = String(authorities.length);
     bodyEl.textContent = "";
+    caseUrls = [];
 
     for (const [kind, grpLabel] of GROUPS) {
       const items = authorities
@@ -426,6 +526,7 @@ export function createToaPanel({ providerLabel, top } = {}) {
       bodyEl.appendChild(g);
 
       for (const a of items) {
+        if (kind === "case" && a.url && !caseUrls.includes(a.url)) caseUrls.push(a.url);
         const lnk = document.createElement("a");
         lnk.className = "cl-toa-link";
         lnk.href = a.url;
@@ -436,6 +537,14 @@ export function createToaPanel({ providerLabel, top } = {}) {
         bodyEl.appendChild(lnk);
       }
     }
+
+    // A different set of authorities means a different number of cases, so a
+    // result still sitting on the button is out of date: it goes now rather
+    // than at the end of its own timer. (A re-render of the SAME set — every
+    // scan of a chat page — leaves it alone; see the early return above.)
+    clearTimeout(flashTimer);
+    flashing = false;
+    paintOpenAll();
   }
 
   function setEnabled(v) {

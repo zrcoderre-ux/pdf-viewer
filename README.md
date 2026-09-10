@@ -321,6 +321,16 @@ be minimized to just its header bar and maximized again, **moved** by dragging
 its header, and **resized** by dragging the grip in its bottom-left corner; the
 minimized state, position, and custom dimensions are remembered.
 
+**Open all cases.** A button in the panel's header — `Open 12 cases`, so the
+count is known before the click — opens every case in the table, each in its
+own background tab, the way Shift+Space opens a selection's links. Only the
+cases: a statute, rule, regulation or jury instruction is read in place, and
+ten code sections in ten tabs is not what the reader came for. The tabs open
+behind the page, so the button reports what happened (`Opened 12`) rather than
+leaving the click unanswered; where more cases are listed than one gesture may
+open, it says so (`Opened 20 of 34`). The button is hidden when the table holds
+no cases.
+
 A remembered position is measured against the window it was set in, so it is
 re-clamped to the current window every time the panel is shown and whenever the
 window resizes. Without that, a panel parked on a wide monitor lands entirely
