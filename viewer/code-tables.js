@@ -74,6 +74,11 @@ const LEXIS_PDMFID = "1530671";
 const _CASE_TAIL_RE  = /\((\d{4})\)\s+(\d{1,4})\s+(\S+?)\s+(\d{1,5})\s*$/;
 const _WL_TAIL_RE    = /(\d{4})\s+WL\s+(\d{4,8})\s*$/;
 const _LEXIS_TAIL_RE = /(\d{4})\s+U\.S\.\s*Dist\.\s*LEXIS\s+(\d{4,8})\s*$/;
+// A key built from a citation the document gave without a year:
+//   "Doe v. City of Los Angeles 42 Cal.4th 531"
+// Same tail, minus the parenthetical. Tried LAST, so the WL and LEXIS forms
+// above — which also read as vol/reporter/page — keep their own handling.
+const _NOYEAR_TAIL_RE = /(?:^|\s)(\d{1,4})\s+(\S+?)\s+(\d{1,5})\s*$/;
 
 export function caseReporterCite(caseKey) {
   let m = caseKey.match(_CASE_TAIL_RE);
@@ -91,6 +96,11 @@ export function caseReporterCite(caseKey) {
     const [, year, num] = m;
     return `${year} U.S. Dist. LEXIS ${num}`;
   }
+  m = caseKey.match(_NOYEAR_TAIL_RE);
+  if (m) {
+    const [, vol, reporter, page] = m;
+    return `${vol} ${reporter} ${page}`;
+  }
   return null;
 }
 
@@ -107,6 +117,9 @@ export function caseReporterCite(caseKey) {
 export function disambiguatedLexisTerm(caseKey) {
   const m = caseKey.match(_CASE_TAIL_RE);
   if (!m) {
+    // A yearless key ("Doe v. City of Los Angeles 42 Cal.4th 531") is already
+    // exactly this term — name plus reporter cite, nothing to strip. So is a
+    // WL/LEXIS or slip key, which route through caseReporterCite instead.
     return caseKey;
   }
   const [, _year, vol, reporter, page] = m;

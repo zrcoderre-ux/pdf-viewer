@@ -500,6 +500,24 @@ memorandum (10/10 match, identical keys). The port includes:
   disqualification motion still notices its own hearing under rule 3.1300).
 - Both **CSM** and **Bluebook** case forms — chosen by whichever tail
   pattern matches first within 200 chars after the `v.` anchor.
+- **Case citations with no year.** `Doe v. City of Los Angeles, 42 Cal.4th
+  531, 550` — the form a table of authorities uses, and the one a brief falls
+  into when the year is left out. Every other tail is anchored by a year
+  parenthetical, so without one the whole table went unlinked. The year is
+  what usually proves a reporter cite is a citation, so this form is a
+  fallback, read only where no year-bearing tail matched, and the proof falls
+  to two other things: the reporter has to be one in the table (`42 Cal.4th
+  531` is a citation, `5 March 2020` is not), and every word of the
+  defendant's name has to read as part of a name — otherwise a sentence that
+  runs into a reporter cite (`Doe v. Roe held, at 42 Cal.4th 531`) would pass
+  as one. `supra` fails that test, which leaves short-form references to the
+  pass that owns them.
+
+  Where the same case is also cited in full somewhere in the document, the
+  yearless reading takes the full citation's key — the reporter cite says they
+  are the same case — so the Table of Authorities carries one entry, not two,
+  and both links go to the same place. Where it isn't, the citation stands on
+  its own and its search URL is built from the reporter cite alone.
 - Pin-cite ranges including em-dash forms (`, 110-12`, `, 110–12`).
 - Document-wide supra resolution using **first-seen** short name (matches
   `setdefault` semantics).

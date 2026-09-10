@@ -3,10 +3,11 @@
 // Run: node test-short-form-names.mjs
 //
 // The reported miss was a table of authorities whose entries carry the party
-// names and the reporter cite but no year — not a full citation, so each line
-// is linked only if the short-form pass recognizes the two parties. Eight
-// entries out of twenty-one went unlinked, and each failure was a party name
-// the capture couldn't hold whole:
+// names and the reporter cite but no year. Eight entries out of twenty-one
+// went unlinked, and each failure was a party name the capture couldn't hold
+// whole — the names still have to be read correctly for such an entry to
+// reach the key of the case cited in full elsewhere, and for a bare name with
+// no cite of its own to link at all:
 //
 //   "Careau & Co."                  the ampersand ended the name at "Co."
 //   "F & H Construction"            same, on the defendant's side
@@ -33,6 +34,12 @@ function check(label, got, want) {
 // The text each short-form link landed on, in document order.
 const shortLinks = (text) =>
   findAllCitations(text).filter((c) => c.isShortForm).map((c) => c.matchText);
+
+// Every case link's [text, key], in document order, from `at` onward.
+const caseLinksFrom = (text, at) =>
+  findAllCitations(text)
+    .filter((c) => c.kind === "case" && c.span[0] >= at)
+    .map((c) => [c.matchText, c.key]);
 
 // Every link's [text, key].
 const allLinks = (text) =>
@@ -69,22 +76,28 @@ const TABLE = [
 ];
 
 console.log("\n--- the eight table entries that went unlinked ---");
-check(
-  "every entry links back to the case cited in full",
-  shortLinks(brief(FULL, TABLE)),
-  [
-    "Committee on Children's Television v. General Foods Corp.",
-    "Four Star Electric v. F & H Construction",
-    "Philipson & Simon v. Gulsvig",
-    // The underline stops at the comma inside the firm's name: what follows a
-    // comma there is as often the volume number as the next partner.
-    "PCO, Inc. v. Christensen",
-    "Holistic Supplements v. Stark",
-    "PacLink Communications v. Superior Court",
-    "Careau & Co. v. Security Pacific",
-    "Pacific Bay Recovery v. California Physicians' Services",
-  ]
-);
+{
+  // Each entry carries a reporter cite of its own, so it is read as a citation
+  // in its own right; the key it resolves to is the one the full citation
+  // earlier in the brief established, so the table adds no second entry to the
+  // Table of Authorities.
+  const text = brief(FULL, TABLE);
+  const table = text.indexOf("\n\nCases\n\n");
+  check(
+    "every entry links, under the key of the case cited in full",
+    caseLinksFrom(text, table),
+    [
+      [TABLE[0], "Committee on Children's Television, Inc. v. General Foods Corp. (1983) 35 Cal.3d 197"],
+      [TABLE[1], "Four Star Electric, Inc. v. F & H Construction (1992) 7 Cal.App.4th 1375"],
+      [TABLE[2], "Philipson & Simon v. Gulsvig (2007) 154 Cal.App.4th 347"],
+      [TABLE[3], "PCO, Inc. v. Christensen, Miller, Fink, Jacobs, Glaser, Weil & Shapiro, LLP (2007) 150 Cal.App.4th 384"],
+      [TABLE[4], "Holistic Supplements, L.L.C. v. Stark (2021) 61 Cal.App.5th 530"],
+      [TABLE[5], "PacLink Communications Internat., Inc. v. Superior Court (2001) 90 Cal.App.4th 958"],
+      [TABLE[6], "Careau & Co. v. Security Pacific Business Credit, Inc. (1990) 222 Cal.App.3d 1371"],
+      [TABLE[7], "Pacific Bay Recovery, Inc. v. California Physicians' Services, Inc. (2017) 12 Cal.App.5th 200"],
+    ]
+  );
+}
 
 console.log("\n--- the name the full citation itself is keyed under ---");
 check(
@@ -110,7 +123,21 @@ console.log("\n--- the heading above the first entry ---");
     "Teselle v. McLoughlin (2009) 173 Cal.App.4th 156, 179 is the rule.\n\n" +
     "Cases\n\nTeselle v. McLoughlin, 173 Cal.App.4th 156, 179";
   check(
-    "the link lands on the case name, not on the heading before it",
+    "the link lands on the entry, not on the heading before it",
+    caseLinksFrom(text, text.indexOf("\n\nCases\n\n")),
+    [["Teselle v. McLoughlin, 173 Cal.App.4th 156, 179",
+      "Teselle v. McLoughlin (2009) 173 Cal.App.4th 156"]]
+  );
+}
+{
+  // The same heading, with a name no citation follows: here the short-form
+  // pass is the only thing that can link it, and it has to look past the
+  // heading word its capture opened on.
+  const text =
+    "Teselle v. McLoughlin (2009) 173 Cal.App.4th 156, 179 is the rule.\n\n" +
+    "Cases\n\nTeselle v. McLoughlin";
+  check(
+    "a bare name under the heading still links",
     shortLinks(text),
     ["Teselle v. McLoughlin"]
   );

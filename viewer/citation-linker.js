@@ -85,6 +85,19 @@ const FLAT_TAIL_RE = new RegExp(
   String.raw`\s+${REPORTER_PART}\s*,?\s*\((?:[^)]*?\b)?(\d{4})\)`
 );
 
+// Yearless tail: " vol REPORTER page[, pin]" with no year anywhere — the form
+// a table of authorities uses ("Doe v. City of Los Angeles, 42 Cal.4th 531,
+// 550"), and the one a brief falls into when the year is left out. The comma
+// before the volume is optional, as it is in FLAT_TAIL.
+//
+// This is a FALLBACK, tried only where no year-bearing tail matched, because
+// the year parenthetical is what usually proves a reporter cite is a cite. A
+// known reporter is what carries the proof here instead: REPORTER_PART only
+// matches the reporters in the table, so "42 Cal.4th 531" is a citation and
+// "42 apples 531" is not. Group layout: (vol, reporter, page) — no year, so
+// the numbering stops one short of BB_TAIL's.
+const NOYEAR_TAIL_RE = new RegExp(String.raw`,?\s+${REPORTER_PART}`);
+
 // Westlaw-only citation tail: ", YYYY WL NNNNNN, at *N (court date)".
 // Used for unpublished decisions that exist only on Westlaw. The year in
 // parens may include a court abbreviation and date like (C.D. Cal. Nov. 2,
@@ -916,6 +929,23 @@ function parentheticalShortName(text, endOfCite) {
   return name;
 }
 
+// Does every word of `s` read as part of a party name — a capitalized (or
+// numeric) token, or one of the lowercase connectors a caption carries? Used
+// only where a citation has no year to anchor it (see NOYEAR_TAIL_RE), which
+// is the one place a run of ordinary prose could otherwise pass as a party.
+// "supra" and "id." fail it, which is what keeps a short-form reference from
+// being read as a full citation.
+function looksLikePartyName(s) {
+  const words = s.split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > 12) return false;
+  return words.every((w) => {
+    const bare = w.replace(/^[("'\u201c\u2018]+/, "").replace(/[,.;:)"'\u201d\u2019]+$/, "");
+    if (!bare) return false;
+    if (/^[A-Z0-9]/.test(bare)) return true;
+    return NAME_CONNECTORS.has(bare.toLowerCase());
+  });
+}
+
 function findCaseCitations(text) {
   const results = [];
 
@@ -958,6 +988,15 @@ function findCaseCitations(text) {
     if (lexisHit && lexisHit.index <= MAX_DIST) candidates.push(["lexis", lexisHit]);
     if (flatHit  && flatHit.index  <= MAX_DIST) candidates.push(["flat",  flatHit]);
 
+    // A cite with no year at all is a fallback too: where a year-bearing tail
+    // matched, that reading is the better one, and only where none did is a
+    // bare reporter cite worth taking as a citation.
+    if (!candidates.length) {
+      const noYearHit = NOYEAR_TAIL_RE.exec(rest);
+      NOYEAR_TAIL_RE.lastIndex = 0;
+      if (noYearHit && noYearHit.index <= MAX_DIST) candidates.push(["noyear", noYearHit]);
+    }
+
     // Slip cite is a *fallback*: only consider it if no reporter-shaped tail
     // matched. Slip cites have no reporter to anchor a strong match, so
     // they're vulnerable to misreading "Case No." references in body text
@@ -986,16 +1025,33 @@ function findCaseCitations(text) {
     if (!/^[A-Z0-9]/.test(defendantText) || !/[A-Z]/.test(defendantText)) continue;
     if (defendantText.length > 200) continue;
 
+    // Without a year, nothing sits between the defendant's name and the
+    // reporter cite to mark where the citation starts — so the name has to
+    // carry that boundary itself. Every word of it must read as part of a
+    // name, or this is a sentence that happens to run into a reporter cite:
+    // "Doe v. Roe held, at 42 Cal.4th 531", "Plaintiff v. Defendant arguments
+    // aside, the 12 Cal.App.5th 1". "supra" and "id." are excluded by the
+    // same rule for a different reason: that is a short-form reference, which
+    // the supra pass owns.
+    if (kind === "noyear" && !looksLikePartyName(defendantText)) continue;
+
     let tailForKey;
+    let reporterCite = null;
     if (kind === "csm") {
       const [, year, vol, reporter, page] = mm;
-      tailForKey = `(${year}) ${vol} ${reporter.replace(/\s+/g, "")} ${page}`;
+      reporterCite = `${vol} ${reporter.replace(/\s+/g, "")} ${page}`;
+      tailForKey = `(${year}) ${reporterCite}`;
+    } else if (kind === "noyear") {
+      const [, vol, reporter, page] = mm;
+      reporterCite = `${vol} ${reporter.replace(/\s+/g, "")} ${page}`;
+      tailForKey = reporterCite;
     } else if (kind === "bb" || kind === "flat") {
       // Group layout is identical: (vol, reporter, page, year). The only
       // structural difference is the comma at the start of BB, which both
       // patterns absorb internally before the captured groups.
       const [, vol, reporter, page, year] = mm;
-      tailForKey = `(${year}) ${vol} ${reporter.replace(/\s+/g, "")} ${page}`;
+      reporterCite = `${vol} ${reporter.replace(/\s+/g, "")} ${page}`;
+      tailForKey = `(${year}) ${reporterCite}`;
     } else if (kind === "wl") {
       tailForKey = `${mm[1]} WL ${mm[2]}`;
     } else if (kind === "lexis") {
@@ -1033,7 +1089,35 @@ function findCaseCitations(text) {
       lexisOnly: kind === "lexis",
       // Slip cites have no reporter cite — fall back to name search.
       slipOnly:  kind === "slip",
+      // A cite the document gave without a year. Kept so the same case cited
+      // in full elsewhere can lend this one its key (see below).
+      yearless:  kind === "noyear",
+      reporterCite,
     });
+  }
+
+  // One case, one key. A document that cites a case in full and lists it again
+  // without the year has said the same thing twice, and the reporter cite —
+  // volume, reporter, page — says they are the same case. Let the yearless
+  // reading take the full one's key, so the Table of Authorities carries one
+  // entry rather than two and both links go to the same place.
+  const keyByReporterCite = new Map();
+  for (const c of results) {
+    if (!c.yearless && c.reporterCite && !keyByReporterCite.has(c.reporterCite)) {
+      keyByReporterCite.set(c.reporterCite, c);
+    }
+  }
+  if (keyByReporterCite.size) {
+    for (const c of results) {
+      if (!c.yearless) continue;
+      const full = keyByReporterCite.get(c.reporterCite);
+      if (!full) continue;
+      c.key = full.key;
+      c.caseName = full.caseName;
+      c.short = full.short;
+      c.plaintiff = full.plaintiff;
+      c.defendant = full.defendant;
+    }
   }
 
   // In re / Estate of / Guardianship of / Conservatorship of / Adoption of /
@@ -1607,6 +1691,16 @@ function findSupraCitations(text, fullCitesInOrder) {
 // introduces "Chillon v. Ford Motor Co., 2023 WL 3035369..." once and then
 // refers to it as just "Chillon v. Ford" in surrounding discussion.
 
+// "<plaintiff> v. <defendant> <tail>" — the shape every case key takes, used
+// to read the two party names back out of one. The last alternative is the
+// yearless tail, which has no parenthetical to mark where the name ends: the
+// reporter table marks it instead, so a party name that ends in a number
+// ("Studio 1220, Inc.") isn't mistaken for the volume.
+const CASE_KEY_RE = new RegExp(
+  String.raw`^(.+?)\s+v\.\s+(.+?)\s+(?:\(\d{4}\)|\d{4}\s+WL|\d{4}\s+U\.S\.\s*Dist\.\s*LEXIS` +
+  String.raw`|Case\s+No\.|\d{1,4}\s+(?:${REPORTER_PATTERN})\s+\d{1,5}\s*$)`
+);
+
 function normalizeParty(s) {
   return s.replace(/[.,;:'"\u2019]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 }
@@ -1625,7 +1719,7 @@ function findShortFormCitations(text, fullCites) {
   // case-key parsing identical to pdf_linker._link_short_form_cases.
   const registry = new Map(); // key "p|d" -> { key, full }
   const allPairs = [];        // [{ pNorm, dNorm, full }] for relaxed match
-  const caseKeyRe = /^(.+?)\s+v\.\s+(.+?)\s+(?:\(\d{4}\)|\d{4}\s+WL|\d{4}\s+U\.S\.\s*Dist\.\s*LEXIS|Case\s+No\.)/;
+  const caseKeyRe = CASE_KEY_RE;
   for (const c of fullCites) {
     if (c.kind !== "case") continue;
     const km = caseKeyRe.exec(c.key);
