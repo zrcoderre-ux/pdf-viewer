@@ -665,6 +665,11 @@ const CORP_SUFFIX_LOWER = new Set([
 ]);
 const CORP_SUFFIX_UPPER = new Set(["LLC", "LLP", "LP", "LLLP", "PLLC", "PC", "PLC"]);
 
+// ", et al." before the "v.", and the widest stretch it can occupy: the
+// phrase itself, plus room for the spacing a wrapped line leaves behind it.
+const ET_AL_RE = /,\s*et\s+al\.?\s*$/;
+const ET_AL_WINDOW = 48;
+
 function walkBackForName(text, vPos, minPos = 0) {
   // `minPos` clips the walk-back's leftmost reach. Callers use it to prevent
   // walk-back from one citation's `v.` scanning past an earlier citation's
@@ -674,10 +679,16 @@ function walkBackForName(text, vPos, minPos = 0) {
 
   // Skip a trailing ", et al." if present immediately before v. — handles
   // "Juan Carlos Meneses, et al. v. FCA US LLC" without abandoning at "al.".
-  const head = text.slice(0, pos + 1);
-  const etAl = head.match(/,\s*et\s+al\.?\s*$/);
-  if (etAl && etAl.index >= minPos) {
-    pos = etAl.index - 1;
+  //
+  // Measured in a WINDOW, not against the whole document. The phrase is a
+  // dozen characters; slicing the text from its start and scanning that for
+  // an anchored match costs one pass over everything before the citation,
+  // per citation — which on a combined export of a thousand pages is most
+  // of the time the reader spends opening the file.
+  const from = Math.max(minPos, pos + 1 - ET_AL_WINDOW);
+  const etAl = text.slice(from, pos + 1).match(ET_AL_RE);
+  if (etAl && from + etAl.index >= minPos) {
+    pos = from + etAl.index - 1;
     while (pos > minPos && text[pos] === " ") pos--;
   }
 
@@ -2103,14 +2114,19 @@ function findItalicShortNames(text, fullCitesInOrder, italicRanges, claimedSpans
 // AUTHORITIES" that sits above a list of citations on a TOA page. Without
 // this guard, the walk-back from "v." can grab the heading word as the
 // start of the plaintiff name.
+//
+// A heading is short, and the measure comes BEFORE the slice: a line that runs
+// on for a page is not a heading, and copying it out to learn that costs as
+// much as the rest of the pass.
+const HEADING_MAX = 35;
 function looksLikeHeadingLine(text, lineStart, lineEnd) {
   let end = lineEnd;
   while (end > lineStart && /\s/.test(text[end - 1])) end--;
   if (end <= lineStart) return false;
-  const line = text.slice(lineStart, end);
-  // Headings are short. 35 chars covers "TABLE OF AUTHORITIES" (20),
+  // 35 chars covers "TABLE OF AUTHORITIES" (20),
   // "CALIFORNIA SUPREME COURT CASES" (30), "Statutes" (8), etc.
-  if (line.length > 35) return false;
+  if (end - lineStart > HEADING_MAX) return false;
+  const line = text.slice(lineStart, end);
   // A real citation always contains either " v. " or a multi-digit reporter
   // volume followed by a reporter abbrev. If the line has either, it's not
   // a heading.
@@ -2134,18 +2150,21 @@ function normalizeForDetection(text) {
     }
     return false;
   };
-  const prevNewline = (i) => {
-    for (let j = i - 1; j >= 0; j--) {
-      if (out[j] === "\n" || out[j] === "\f") return j;
-    }
-    return -1;
-  };
+  // The last line break still standing in `out` — what the line before `i`
+  // begins after. Carried forward as the pass goes rather than found by
+  // scanning back for it: a wrapped paragraph's newlines have by then become
+  // spaces, so the scan runs to the start of the document and the pass costs
+  // the square of the text's length. A combined export of a thousand pages
+  // spent most of its open in that scan.
+  let prevBreak = -1;
   for (let i = 0; i < n; i++) {
-    if (out[i] !== "\n") continue;
-    if (hasNewlineWithin(i, -1) || hasNewlineWithin(i, +1)) continue;
+    const ch = out[i];
+    // A form feed is never rewritten, and ends a line like a newline does.
+    if (ch === "\f") { prevBreak = i; continue; }
+    if (ch !== "\n") continue;
+    if (hasNewlineWithin(i, -1) || hasNewlineWithin(i, +1)) { prevBreak = i; continue; }
     // Preserve newline if the preceding line looks like a section heading.
-    const prev = prevNewline(i);
-    if (looksLikeHeadingLine(text, prev + 1, i)) continue;
+    if (looksLikeHeadingLine(text, prevBreak + 1, i)) { prevBreak = i; continue; }
     out[i] = " ";
   }
   return out.join("");

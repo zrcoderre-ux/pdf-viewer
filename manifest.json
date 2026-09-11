@@ -72,6 +72,7 @@
         "viewer/ocr.js",
         "viewer/rotation.js",
         "viewer/web-shim.js",
+        "viewer/theme-boot.js",
         "viewer/text-reader.html",
         "viewer/text-reader.js",
         "viewer/text-reader.css",

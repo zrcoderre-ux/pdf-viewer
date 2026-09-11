@@ -6,10 +6,7 @@
   <link rel="stylesheet" href="text-reader.css">
   <!-- Same theme key as the PDF viewer, applied before first paint so light
        mode doesn't flash dark on load. -->
-  <script>
-    try { if (localStorage.getItem("pdfViewerTheme") === "light")
-      document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
-  </script>
+  <script src="theme-boot.js"></script>
 </head>
 <body>
   <div id="toolbar">
