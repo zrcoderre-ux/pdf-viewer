@@ -804,7 +804,14 @@ app, which routes it to the reader tab.
   had been left alone on purpose. Every kept value standing in the clear now
   carries the **same dotted mark a kept pseudonym** does, counted in the status
   bar ("3 kept values standing as they read"), for the rest of the session and
-  every session after: the keeps themselves are remembered per case.
+  every session after: the keeps themselves are remembered per case. Marked
+  where the key binds something in it, which is where a keep means anything — a
+  master workbook carries the settled decisions of every other matter too
+  ("Court", "Clerk", "County"), and nothing in this case was going to fake
+  those. The test is CONTAINS, not equals: the workbook keeps "David W.
+  Slayton" where the key binds "David", and that keep is worth seeing exactly
+  because the "David" inside it would otherwise have been faked. (Masking is
+  untouched and still covers every keep; only the marks are narrowed.)
 - **The master workbook's keeps, in force everywhere.** PDF-Linker keeps one
   workbook across every matter — `Master Leaks.xlsx`, wherever
   `master_leaks_path` points — and its **KEEP sheet** is the settled answer to

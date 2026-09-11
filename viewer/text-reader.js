@@ -387,6 +387,41 @@ function keptMatcher() {
   }
   return keptRxMemo.rx;
 }
+// Does a kept value carry anything the key binds? `reals` cannot answer it —
+// the kept values are taken out of the key's forward side, which is the whole
+// point of a keep — so the question goes to the key's own warning rows, every
+// one of them, through a matcher of their own.
+//
+// CONTAINS, not equals: a keep is usually a phrase around the bound word, and
+// the phrase is what makes it safe. The master workbook keeps "David W.
+// Slayton" while the key binds "David"; that keep is worth marking exactly
+// because the "David" inside it would otherwise have been faked.
+let keyBindsMemo = { key: null, rx: null };
+function keyBinds(value) {
+  if (keyBindsMemo.key !== key) {
+    const reals = ((key && key.warn) || []).map((w) => w.real).filter(Boolean);
+    keyBindsMemo = { key, rx: reals.length ? PK.buildMatcher(reals) : null };
+  }
+  const rx = keyBindsMemo.rx;
+  if (!rx) return false;
+  rx.lastIndex = 0; // a global matcher carries its place between tests
+  return rx.test(String(value == null ? "" : value));
+}
+// The keeps worth MARKING: the ones the key binds. A keep is worth seeing
+// because it says "this name was left alone on purpose" — which only means
+// something where the name would otherwise have been faked or flagged. The
+// master workbook carries the settled decisions of every other matter too
+// ("Court", "Clerk", "County"), and marking those here would underline half
+// the page to no purpose: nothing was ever going to flag them in this case.
+// Masking (see maskKept) still covers every keep; only the marks are narrowed.
+let keptMarkMemo = { keeps: null, master: null, key: null, rx: null };
+function keptMarkMatcher() {
+  if (keptMarkMemo.keeps !== keeps || keptMarkMemo.master !== masterKeeps || keptMarkMemo.key !== key) {
+    const mine = allKeeps().filter((k) => keyBinds(k.value));
+    keptMarkMemo = { keeps, master: masterKeeps, key, rx: mine.length ? PK.buildMatcher(mine.map((k) => k.value)) : null };
+  }
+  return keptMarkMemo.rx;
+}
 function maskKept(text) {
   const rx = keptMatcher();
   return rx ? text.replace(rx, (m) => "\u0000".repeat(m.length)) : text;
@@ -1925,6 +1960,20 @@ function placeCitations() {
 function renderToa() { if (toaOn) toaPanel.render(lastCites, provider); }
 
 // ── highlights: flagged values and real names standing in the clear ─────────────
+/**
+ * A highlight over a list of ranges, added one at a time — NOT
+ * `new Highlight(...ranges)`. That spreads the whole list into a single call,
+ * and a hundred thousand marks (a master workbook's worth of standing keeps,
+ * matched across a case file of a thousand pages — "Court", "Clerk", "County"
+ * are on every page of it) overflows the stack: "Maximum call stack size
+ * exceeded", thrown before the page has drawn anything. The same list added one
+ * by one costs nothing, and the marks themselves have no such limit.
+ */
+function highlightOf(ranges) {
+  const h = new Highlight();
+  for (const r of ranges) h.add(r);
+  return h;
+}
 function paintHighlights() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   const flaggedRanges = [];
@@ -1937,7 +1986,7 @@ function paintHighlights() {
   // mark gone (it is not a leak) nothing said it was a decision rather than an
   // oversight. It carries the same dotted mark a kept pseudonym does, so a
   // page read later shows which names were left alone on purpose.
-  const keptRx = keptMatcher();
+  const keptRx = keptMarkMatcher();
   const keptRanges = [];
   keptSeen = new Set();
   for (const body of bodies) {
@@ -1977,13 +2026,13 @@ function paintHighlights() {
       }
     }
   }
-  CSS.highlights.set("flagged", new Highlight(...flaggedRanges));
-  CSS.highlights.set("leak", new Highlight(...leakRanges));
-  CSS.highlights.set("kept", new Highlight(...keptRanges));
+  CSS.highlights.set("flagged", highlightOf(flaggedRanges));
+  CSS.highlights.set("leak", highlightOf(leakRanges));
+  CSS.highlights.set("kept", highlightOf(keptRanges));
   // The LEAKS bar's current row, wherever its value stands.
   leakRowRanges = [];
   if (leakRowValue) for (const body of bodies) for (const r of leakMatches(body, leakRowValue)) leakRowRanges.push({ body, range: r });
-  CSS.highlights.set("leakrow", new Highlight(...leakRowRanges.map((x) => x.range)));
+  CSS.highlights.set("leakrow", highlightOf(leakRowRanges.map((x) => x.range)));
   markLeakHere();
   $("st-leaks").textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; right-click one to keep it` : "";
   const nk = keptRanges.length;
