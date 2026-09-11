@@ -14,39 +14,6 @@
     <button id="open-folder" title="Open a case folder: its pseudonym key and every export under Text Files">📁 Open case folder</button>
     <button id="edit-toggle" title="Allow editing — a document opens protected; turn this on to type in it (the real names still never reach the file)" aria-pressed="false" disabled>✎ Edit</button>
     <button id="save" class="primary" title="Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)" disabled>💾 Save</button>
-    <span class="sep"></span>
-
-    <label class="tb-label" for="key-select">Key</label>
-    <select id="key-select" title="Which pseudonym key translates this document"><option value="">(none)</option></select>
-    <button id="load-key" title="Load a pseudonym_key.xlsx">Load key…</button>
-    <span class="sep"></span>
-
-    <label class="tb-label" for="font-select" title="The font every text file opens in — remembered; display only, the file is never changed">Font</label>
-    <select id="font-select" title="The reading font, remembered as the default for every text file. Display only — the file itself is never changed. Also under Options."></select>
-    <input id="font-custom" type="text" placeholder="font-family…" title="Any installed font, as a CSS font-family" hidden>
-    <button id="size-down" title="Smaller text">A−</button>
-    <span id="size-label" class="tb-value">15</span>
-    <button id="size-up" title="Larger text">A+</button>
-    <label class="tb-label" for="lh-range">Leading</label>
-    <input id="lh-range" type="range" min="1" max="2.4" step="0.1" title="Leading (line spacing), remembered as the default for every text file">
-    <label class="tb-label" for="width-range">Width</label>
-    <input id="width-range" type="range" min="480" max="1400" step="20" title="Page width">
-    <label class="tb-toggle" title="Keep every numbered line on one screen line: the page is made as wide as its longest line needs at your size, scrolling sideways past the window if it must — the font and the line numbers are never touched (remembered)"><input id="lock-toggle" type="checkbox"> Line lock</label>
-    <span class="sep"></span>
-
-    <label class="tb-toggle" title="Highlight every pseudonym lightly and show the fake on hover"><input id="marks-toggle" type="checkbox"> Mark pseudonyms</label>
-    <input id="mark-color" type="color" title="Highlight colour — remembered">
-    <input id="mark-alpha" type="range" class="short" min="0.04" max="0.9" step="0.02" title="Highlight intensity — remembered">
-    <label class="tb-toggle" title="Show the document as it is on disk — the fakes — instead of the real names"><input id="fakes-toggle" type="checkbox"> Show fakes</label>
-    <span class="sep"></span>
-
-    <button id="flag-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead.">🚩 Flag real value</button>
-    <button id="leaks-btn" title="Review PDF-Linker's LEAKS.xlsx row by row: each row shown above the text, the text opened at its page and line, the decision written into the worksheet's Fix? cell. The case folder's own worksheet is attached when the folder is opened; click to open it, or to load one.">⚠ Leaks <span id="leaks-count" class="badge" hidden>0</span></button>
-    <button id="autoscroll" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses" aria-pressed="false">↓ Auto-scroll</button>
-    <span class="sep"></span>
-
-    <button id="sbs-toggle" title="Show the PDF this export came from beside the text, page for page, scrolling together (remembered)" aria-pressed="false" disabled>⇔ Side by side</button>
-    <button id="swap-btn" title="Swap PDF pages into the text: read a page or a run of pages (a badly scanned exhibit) from the PDF, in place, while the rest stays text. For a Combined Text.txt, pick every member's PDF at once." disabled>⇄ PDF pages…</button>
     <span class="spacer"></span>
 
     <label class="tb-label" for="provider">Cites on</label>
@@ -97,6 +64,63 @@
   <div id="key-offer" hidden><span id="key-offer-text"></span><button id="key-offer-btn" class="primary"></button><button id="key-offer-close" title="Dismiss">×</button></div>
 
   <div id="main">
+    <!-- Adobe-Acrobat-style vertical tools rail down the left margin, the same
+         one the PDF viewer carries. The reading, pseudonym, review and PDF
+         tools live here rather than across the top bar, which holds only the
+         document's own actions. -->
+    <aside id="tools-rail" aria-label="Tools">
+      <button id="tools-rail-collapse" title="Collapse the tools panel" aria-expanded="true">Tools <span class="chev">‹</span></button>
+
+      <div id="tools-rail-body">
+        <div class="tools-group-label">Reading</div>
+        <div class="tool-row stack">
+          <label class="tool-row-label" for="font-select" title="The font every text file opens in — remembered; display only, the file is never changed">Font</label>
+          <select id="font-select" title="The reading font, remembered as the default for every text file. Display only — the file itself is never changed. Also under Options."></select>
+          <input id="font-custom" type="text" placeholder="font-family…" title="Any installed font, as a CSS font-family" hidden>
+        </div>
+        <div class="tool-row">
+          <span class="tool-row-label">Size</span>
+          <span class="tool-stepper">
+            <button id="size-down" title="Smaller text">A−</button>
+            <span id="size-label" class="tb-value">15</span>
+            <button id="size-up" title="Larger text">A+</button>
+          </span>
+        </div>
+        <div class="tool-row">
+          <label class="tool-row-label" for="lh-range">Leading</label>
+          <input id="lh-range" type="range" min="1" max="2.4" step="0.1" title="Leading (line spacing), remembered as the default for every text file">
+        </div>
+        <div class="tool-row">
+          <label class="tool-row-label" for="width-range">Width</label>
+          <input id="width-range" type="range" min="480" max="1400" step="20" title="Page width">
+        </div>
+        <label class="tool-btn tool-toggle" title="Keep every numbered line on one screen line: the page is made as wide as its longest line needs at your size, scrolling sideways past the window if it must — the font and the line numbers are never touched (remembered)"><input id="lock-toggle" type="checkbox"><span class="ti">🔒</span><span class="tl">Line lock</span></label>
+
+        <div class="tools-group-label">Pseudonyms</div>
+        <div class="tool-row stack">
+          <label class="tool-row-label" for="key-select">Key</label>
+          <select id="key-select" title="Which pseudonym key translates this document"><option value="">(none)</option></select>
+        </div>
+        <button id="load-key" class="tool-btn" title="Load a pseudonym_key.xlsx"><span class="ti">🔑</span><span class="tl">Load key…</span></button>
+        <label class="tool-btn tool-toggle" title="Highlight every pseudonym lightly and show the fake on hover"><input id="marks-toggle" type="checkbox"><span class="ti">✐</span><span class="tl">Mark pseudonyms</span></label>
+        <div class="tool-row">
+          <span class="tool-row-label">Colour</span>
+          <input id="mark-color" type="color" title="Highlight colour — remembered">
+          <input id="mark-alpha" type="range" class="short" min="0.04" max="0.9" step="0.02" title="Highlight intensity — remembered">
+        </div>
+        <label class="tool-btn tool-toggle" title="Show the document as it is on disk — the fakes — instead of the real names"><input id="fakes-toggle" type="checkbox"><span class="ti">🎭</span><span class="tl">Show fakes</span></label>
+
+        <div class="tools-group-label">Review</div>
+        <button id="flag-btn" class="tool-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead."><span class="ti">🚩</span><span class="tl">Flag real value</span></button>
+        <button id="leaks-btn" class="tool-btn" title="Review PDF-Linker's LEAKS.xlsx row by row: each row shown above the text, the text opened at its page and line, the decision written into the worksheet's Fix? cell. The case folder's own worksheet is attached when the folder is opened; click to open it, or to load one."><span class="ti">⚠</span><span class="tl">Leaks</span><span id="leaks-count" class="badge" hidden>0</span></button>
+        <button id="autoscroll" class="tool-btn" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses" aria-pressed="false"><span class="ti">↓</span><span class="tl">Auto-scroll</span></button>
+
+        <div class="tools-group-label">PDF</div>
+        <button id="sbs-toggle" class="tool-btn" title="Show the PDF this export came from beside the text, page for page, scrolling together (remembered)" aria-pressed="false" disabled><span class="ti">⇔</span><span class="tl">Side by side</span></button>
+        <button id="swap-btn" class="tool-btn" title="Swap PDF pages into the text: read a page or a run of pages (a badly scanned exhibit) from the PDF, in place, while the rest stays text. For a Combined Text.txt, pick every member's PDF at once." disabled><span class="ti">⇄</span><span class="tl">PDF pages…</span></button>
+      </div>
+    </aside>
+
     <div id="stage">
       <div id="empty">
         <div class="empty-inner">

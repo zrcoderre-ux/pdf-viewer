@@ -298,6 +298,25 @@ function showSidePanel(on, { remember = false } = {}) {
 function autoShowSidePanel() { if (sideChoice !== false) showSidePanel(true); }
 $("panel-toggle").addEventListener("click", () => showSidePanel(document.body.classList.contains("side-hidden"), { remember: true }));
 $("side-collapse").addEventListener("click", () => showSidePanel(false, { remember: true }));
+
+// The tools rail down the left margin — the PDF viewer's, with the reading,
+// pseudonym, review and PDF tools on it. It collapses to an icon strip rather
+// than away, so a tool is always one click off; the choice is remembered.
+{
+  const railBtn = $("tools-rail-collapse");
+  const applyTools = (collapsed) => {
+    document.body.classList.toggle("tools-collapsed", collapsed);
+    railBtn.setAttribute("aria-expanded", String(!collapsed));
+    railBtn.title = collapsed ? "Expand the tools panel" : "Collapse the tools panel";
+  };
+  applyTools(lsGet("textReader.tools", false) === true);
+  railBtn.addEventListener("click", () => {
+    const collapsed = !document.body.classList.contains("tools-collapsed");
+    applyTools(collapsed);
+    lsSet("textReader.tools", collapsed);
+    relayout();
+  });
+}
 // The Options page holds the same reading defaults; the button is shown only
 // where there is an Options page to open (the extension, not the hosted app).
 {
@@ -686,14 +705,20 @@ async function adoptFolder(h, { quiet = false } = {}) {
 // The offer bar: a lone file whose case folder is known but needs a click to
 // read, or is not known at all.
 const keyOffer = $("key-offer");
+// The bar takes its own height above the stage (--offer-h), the way the LEAKS
+// bar does, so it never covers the first lines or the head of the tools rail.
+function syncOfferHeight() {
+  document.documentElement.style.setProperty("--offer-h", keyOffer.hidden ? "0px" : keyOffer.offsetHeight + "px");
+}
 function showKeyOffer(text, action, onAct) {
   $("key-offer-text").textContent = text;
   const btn = $("key-offer-btn");
   btn.textContent = action;
   btn.onclick = async () => { hideKeyOffer(); await onAct(); };
   keyOffer.hidden = false;
+  syncOfferHeight();
 }
-function hideKeyOffer() { keyOffer.hidden = true; }
+function hideKeyOffer() { keyOffer.hidden = true; syncOfferHeight(); }
 $("key-offer-close").addEventListener("click", hideKeyOffer);
 
 /**
@@ -1100,7 +1125,7 @@ function afterTextChange() {
   paintHighlights();
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
-const relayout = debounce(() => { textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
+const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -2761,7 +2786,7 @@ function mirrorLeakKeep(row) {
   return true;
 }
 
-// The bar: shown and hidden by the toolbar button and its own ×; it takes
+// The bar: shown and hidden by ⚠ Leaks in the tools rail and its own ×; it takes
 // its own height above the stage (--bar-h), so the first lines of the text
 // are never under it.
 function setBarHeight() {
@@ -4039,7 +4064,7 @@ function refreshSwapButtons() {
     // thousand idle rewrites cost more than drawing the underlines did.
     const label = on ? "⇄ Text" : "⇄ PDF";
     if (b.textContent !== label) b.textContent = label;
-    const title = !t ? "No PDF matched this document — ⇄ PDF pages… in the toolbar picks one" : on ? "Back to the text of this page" : `Show PDF page ${t.page} here instead of its text`;
+    const title = !t ? "No PDF matched this document — ⇄ PDF pages… in the tools panel picks one" : on ? "Back to the text of this page" : `Show PDF page ${t.page} here instead of its text`;
     if (b.title !== title) b.title = title;
   }
 }
@@ -4137,9 +4162,10 @@ async function showSwapPop() {
     $("swap-range").value = "";
     note.textContent = "Pick the PDF this export came from; its pages can then be shown in place of the text.";
   }
+  // The button stands in the left rail, so the popover flies out beside it.
   const r = swapBtn.getBoundingClientRect();
-  swapPop.style.left = Math.max(8, Math.min(window.innerWidth - 356, r.left)) + "px";
-  swapPop.style.top = (r.bottom + 6) + "px";
+  swapPop.style.left = Math.max(8, Math.min(window.innerWidth - 356, r.right + 8)) + "px";
+  swapPop.style.top = Math.max(8, Math.min(window.innerHeight - 240, r.top)) + "px";
   swapPop.hidden = false;
   $("swap-range").focus();
   $("swap-range").select();

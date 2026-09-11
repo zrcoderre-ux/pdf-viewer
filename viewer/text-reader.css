@@ -10,6 +10,8 @@
   --toolbar-height: 44px;
   --status-height: 26px;
   --side-width: 300px;
+  --tools-rail-width: 200px;         /* expanded */
+  --tools-rail-collapsed: 46px;      /* icon-only */
   --chrome: #323639;
   --chrome-2: #2a2d30;
   --canvas: #525659;
@@ -64,7 +66,6 @@ body {
   overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: thin;
 }
 #toolbar .spacer { flex: 1; min-width: 8px; }
-#toolbar .sep { width: 1px; height: 24px; background: var(--btn-border); flex: none; }
 #toolbar button, #statusbar button, .side-actions button, #flag-pop button {
   background: var(--btn); color: var(--text); border: 1px solid var(--btn-border);
   padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 13px; line-height: 1.2; flex: none;
@@ -77,15 +78,13 @@ body {
   background: var(--inset); color: var(--text); border: 1px solid var(--btn-border);
   border-radius: 4px; padding: 3px 6px; font-size: 13px; max-width: 220px;
 }
-#toolbar input[type="range"] { width: 80px; }
-#toolbar input[type="range"].short { width: 56px; }
-#toolbar input[type="color"] { width: 26px; height: 22px; padding: 0; border: 1px solid var(--btn-border); border-radius: 4px; background: var(--inset); cursor: pointer; }
 .tb-label { color: var(--text-muted); font-size: 12px; }
 .tb-value { min-width: 2ch; text-align: center; }
-.tb-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--text); cursor: pointer; }
 
 /* The offer bar under the toolbar: attach the key of the folder a lone file
-   sits in, or open that folder once so the reader remembers it. */
+   sits in, or open that folder once so the reader remembers it. Like the LEAKS
+   bar it takes its own height (--offer-h) above the stage rather than covering
+   the first lines and the head of the tools rail. */
 #key-offer {
   position: fixed; top: calc(var(--toolbar-height) + var(--bar-h, 0px)); left: 0; right: 0; z-index: 9;
   display: flex; align-items: center; gap: 10px; padding: 6px 12px;
@@ -151,10 +150,101 @@ body {
 
 /* ── layout ────────────────────────────────────────────────────────────────── */
 #main {
-  position: absolute; top: calc(var(--toolbar-height) + var(--bar-h, 0px)); bottom: var(--status-height); left: 0; right: 0;
+  position: absolute; top: calc(var(--toolbar-height) + var(--bar-h, 0px) + var(--offer-h, 0px)); bottom: var(--status-height); left: 0; right: 0;
   display: flex;
 }
 #stage { flex: 1; overflow-y: auto; overflow-x: auto; position: relative; }
+
+/* ── the tools rail (left margin) ──────────────────────────────────────────
+   The PDF viewer's Acrobat-style rail, carried over to the text reader: the
+   reading, pseudonym, review and PDF tools stand down the left margin in
+   labelled groups instead of across the top bar. Collapsed it keeps the
+   buttons as an icon strip; the choice is remembered. */
+#tools-rail {
+  width: var(--tools-rail-width); flex: none;
+  background: var(--chrome-2); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+body.tools-collapsed #tools-rail { width: var(--tools-rail-collapsed); }
+#tools-rail-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 8px 12px; scrollbar-width: thin; }
+body.tools-collapsed #tools-rail-body { padding: 4px 6px 12px; }
+
+/* Rail header / collapse toggle. */
+#tools-rail-collapse {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: none;
+  background: none; border: none; border-bottom: 1px solid var(--border); color: var(--text-muted);
+  font-family: inherit; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 9px 12px; cursor: pointer;
+}
+#tools-rail-collapse:hover { color: var(--text); }
+#tools-rail-collapse .chev { font-weight: 400; font-size: 14px; transition: transform 0.12s ease; }
+body.tools-collapsed #tools-rail-collapse { justify-content: center; font-size: 0; padding: 9px 0; }
+body.tools-collapsed #tools-rail-collapse .chev { font-size: 15px; transform: rotate(180deg); }
+
+.tools-group-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); opacity: 0.85; margin: 12px 6px 4px;
+}
+/* Collapsed, a group label is a thin divider between the icons. */
+body.tools-collapsed .tools-group-label {
+  font-size: 0; margin: 8px 0 6px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+/* …but the first group needs no rule: the header's own is right above it. */
+body.tools-collapsed #tools-rail-body > .tools-group-label:first-child { margin-top: 2px; padding-top: 0; border-top: none; }
+
+#tools-rail .tool-btn {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: none; border: 1px solid transparent; color: var(--text);
+  font-family: inherit; font-size: 13px; line-height: 1.15;
+  padding: 7px 9px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+#tools-rail .tool-btn:hover { background: var(--btn-hover); }
+#tools-rail .tool-btn:disabled { opacity: 0.45; cursor: default; }
+#tools-rail .tool-btn:disabled:hover { background: none; }
+/* The id-scoped rules above outrank the UA [hidden] rule; restore it. */
+#tools-rail .tool-btn[hidden] { display: none; }
+#tools-rail .tool-btn[aria-pressed="true"],
+#tools-rail .tool-toggle:has(input:checked) { background: var(--accent); border-color: var(--accent); color: #fff; }
+#tools-rail .tool-btn[aria-pressed="true"]:hover,
+#tools-rail .tool-toggle:has(input:checked):hover { filter: brightness(1.08); }
+#tools-rail .tool-btn .ti { flex: 0 0 20px; text-align: center; font-size: 15px; }
+#tools-rail .tool-btn .tl { overflow: hidden; text-overflow: ellipsis; }
+#tools-rail .tool-btn .badge { margin-left: auto; }
+/* A checkbox toggle wears the button's clothes: the box itself is out of the
+   way and the pressed state is the accent fill, as on the tool buttons. */
+#tools-rail .tool-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+#tools-rail .tool-toggle { position: relative; }
+#tools-rail .tool-toggle:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A labelled control (font, size, leading, width, key, mark colour). */
+#tools-rail .tool-row { display: flex; align-items: center; gap: 8px; padding: 4px 9px; min-width: 0; }
+#tools-rail .tool-row.stack { flex-direction: column; align-items: stretch; gap: 3px; }
+#tools-rail .tool-row-label { flex: none; color: var(--text-muted); font-size: 11px; }
+#tools-rail .tool-row.stack .tool-row-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+#tools-rail .tool-row select, #tools-rail .tool-row input[type="text"] {
+  flex: 1 1 auto; min-width: 0; max-width: 100%;
+  background: var(--inset); color: var(--text); border: 1px solid var(--btn-border);
+  border-radius: 4px; padding: 3px 6px; font-size: 12px; font-family: inherit;
+}
+#tools-rail .tool-row input[type="range"] { flex: 1 1 auto; min-width: 0; width: 100%; }
+#tools-rail .tool-row input[type="color"] {
+  flex: none; width: 26px; height: 22px; padding: 0; cursor: pointer;
+  background: var(--inset); border: 1px solid var(--btn-border); border-radius: 4px;
+}
+#tools-rail .tool-stepper { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+#tools-rail .tool-stepper button {
+  background: var(--btn); color: var(--text); border: 1px solid var(--btn-border);
+  border-radius: 4px; padding: 2px 7px; font-size: 12px; line-height: 1.2; cursor: pointer; font-family: inherit;
+}
+#tools-rail .tool-stepper button:hover { background: var(--btn-hover); }
+#tools-rail .tool-stepper .tb-value { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; }
+/* Collapsed: the icons alone — every labelled control folds away until the
+   rail is opened again. */
+body.tools-collapsed #tools-rail .tool-row { display: none; }
+body.tools-collapsed #tools-rail .tool-btn { justify-content: center; gap: 0; padding: 8px 0; }
+body.tools-collapsed #tools-rail .tool-btn .tl { display: none; }
+body.tools-collapsed #tools-rail .tool-btn .badge { margin-left: 0; position: absolute; top: 2px; right: 2px; font-size: 9px; min-width: 14px; padding: 0 3px; }
+body.tools-collapsed #tools-rail .tool-btn { position: relative; }
 /* The PDF beside the text: its own scroll box, held page for page with the
    stage (pdfsync.js decides where "the same place" is). */
 #pdf-pane { flex: 1; overflow-y: auto; overflow-x: auto; position: relative; background: #3b3e41; border-left: 1px solid var(--border); padding: 20px 16px 60px; }
@@ -397,5 +487,5 @@ body.marks-off [data-here]:hover { background: transparent; }
 #st-file { color: var(--text); }
 
 @media (max-width: 900px) {
-  :root { --side-width: 240px; }
+  :root { --side-width: 240px; --tools-rail-width: 168px; }
 }

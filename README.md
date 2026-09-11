@@ -655,6 +655,16 @@ PDF — and puts the real names back **on screen only**. Open it from the
 toolbar popup (**📝 Open text reader**), or open a `.txt` in the installed
 app, which routes it to the reader tab.
 
+- **The tools stand down the left margin.** The reading, pseudonym, review and
+  PDF tools are in a **Tools** panel on the left — the same rail the PDF viewer
+  carries — in labelled groups: *Reading* (font, size, leading, width, line
+  lock), *Pseudonyms* (key, mark and its colour and intensity, show fakes),
+  *Review* (flag a real value, the LEAKS worksheet, auto-scroll) and *PDF*
+  (side by side, PDF pages). The top bar keeps only the document's own
+  actions — open a file or a case folder, Edit, Save — and the settings that
+  belong to the window: the citation provider, **§ Authorities**, **▤ Panel**
+  and the theme. **Tools** at the head of the rail collapses it to an icon
+  strip and back, and that choice is remembered.
 - **Pages, in your font.** Each `====== Page N ======` block is laid out as a
   sheet, with the printed page number and any REVIEW clause on its label. A
   page numbered down its margin — pleading paper — is laid out as one: the
@@ -664,13 +674,13 @@ app, which routes it to the reader tab.
   Times, Charter, Palatino, system sans, Arial, Verdana, Courier, Consolas, or
   any installed family by name), size, leading and page width. Those are
   **remembered as the defaults**: the font and leading chosen once are what
-  every text file opens in from then on — set them in the reader's toolbar or
-  under Options → "Text reader — default font and leading", and every open
+  every text file opens in from then on — set them in the reader's Tools panel
+  or under Options → "Text reader — default font and leading", and every open
   reader tab follows at once. Display only: the text file itself is never
   changed. Light and dark chrome follow the viewer's own theme toggle.
 - **Line lock.** Pleading paper is read by its line numbers, and a numbered
   line that wraps puts its tail on a screen line with no number — one line
-  off from the PDF. **Line lock** (toolbar, remembered) holds every numbered
+  off from the PDF. **Line lock** (Tools panel, remembered) holds every numbered
   line to one screen line by making the page **as wide as its longest line
   needs** at the size you chose — past the window's edge if it must, with a
   horizontal scroll bar under it, the way a zoomed PDF behaves. Zoom in as
