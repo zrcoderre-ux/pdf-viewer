@@ -91,6 +91,7 @@ const SETTINGS_KEY = "textReaderSettings";
 const LEGACY_SETTINGS_KEY = "textReader.settings";
 const KEYS_KEY = "textReader.keys";
 const VALUES_PREFIX = "textReader.values.";
+const SPOTS_PREFIX = "textReader.spots.";
 const MAX_KEYS = 12;
 
 let doc = null;              // TD.parseExport result
@@ -105,6 +106,7 @@ let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
 let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
+let spots = [];              // spot keeps for the open document: [{ page, value, nth }]
 let dirty = false;
 let editing = false;         // a document opens protected; ✎ Edit lifts it
 let provider = "lexis";
@@ -362,9 +364,13 @@ function maskKept(text) {
   const rx = keptMatcher();
   return rx ? text.replace(rx, (m) => "\u0000".repeat(m.length)) : text;
 }
-/** real → fake over `text`, kept occurrences left exactly as they stand. */
-function forwardText(text) {
-  const runs = PK.forwardRuns(fwd, maskKept(text));
+/**
+ * real → fake over `text`, kept occurrences left exactly as they stand: the
+ * values kept for the whole case, and the ranges `held` names — the spot keeps,
+ * whose places in this very text the caller read off the page.
+ */
+function forwardText(text, held) {
+  const runs = PK.forwardRuns(fwd, TD.blankRanges(maskKept(text), held || []));
   let off = 0, swaps = 0;
   const out = runs.map((r) => {
     const len = r.t === "swap" ? r.from.length : r.s.length;
@@ -652,6 +658,7 @@ function openText(text, name, handle) {
   $("edit-toggle").setAttribute("aria-pressed", "false");
   document.title = name + " — Text Reader";
   if (!dirHandle) loadValuesFor(name);
+  spots = TD.normalizeSpots(lsGet(spotStoreKey(), []));
   render();
   setupPdfForDoc();
   markDocList();
@@ -814,7 +821,7 @@ function render() {
     body.className = "page-body";
     body.contentEditable = editing ? "plaintext-only" : "false";
     body.spellcheck = false;
-    buildBody(body, p.lines.join("\n"));
+    buildBody(body, p.lines.join("\n"), i);
     const layer = document.createElement("div");
     layer.className = "link-layer";
     inner.append(body, layer);
@@ -835,10 +842,16 @@ function render() {
  * never crosses the rule. serializeNodes reads a DIV as a line break, so
  * the file comes back byte for byte.
  */
-function buildBody(body, text) {
+function buildBody(body, text, page) {
   body.innerHTML = "";
   body.classList.toggle("numbered", TD.pageIsNumbered(text.split("\n")));
   const runs = rev ? PK.translateRuns(rev, text) : [{ t: "text", s: text }];
+  // The page's spot keeps, as places in the text it is being built from. `at`
+  // follows the same text as the runs are laid out, so each spot's own
+  // characters go into a span of their own — carrying no fake, so the value
+  // stays as it reads here while every other occurrence is faked as usual.
+  const holds = TD.spotRanges(text, TD.spotsOnPage(spots, page));
+  let at = 0;
   let line = null, lt = null, lineStart = true;
   const newLine = () => {
     line = document.createElement("div");
@@ -849,16 +862,31 @@ function buildBody(body, text) {
     body.appendChild(line);
     lineStart = true;
   };
+  // Text into the line, any spot keep inside it in a span of its own.
+  const appendText = (s, from) => {
+    if (!s) return;
+    let i = 0;
+    for (const [a, b] of holds) {
+      if (b <= from + i || a >= from + s.length) continue;
+      const lo = Math.max(a - from, i), hi = Math.min(b - from, s.length);
+      if (hi <= lo) continue;
+      if (lo > i) lt.appendChild(document.createTextNode(s.slice(i, lo)));
+      lt.appendChild(makeHeld(s.slice(lo, hi)));
+      i = hi;
+    }
+    if (i < s.length) lt.appendChild(document.createTextNode(s.slice(i)));
+  };
   newLine();
   runs.forEach((r, ri) => {
     if (r.t === "swap") {
       lt.appendChild(makePn(r.from, r.to, r));
+      at += r.from.length;
       lineStart = false;
       return;
     }
     const pieces = r.s.split("\n");
     pieces.forEach((piece, i) => {
-      if (i > 0) newLine();
+      if (i > 0) { newLine(); at += 1; }
       if (!piece) return;
       // A gutter number is followed by text; where that text is the pseudonym
       // span the NEXT run supplies, the number still opens the line.
@@ -867,9 +895,9 @@ function buildBody(body, text) {
       if (g && g.gutter.length <= piece.length) {
         line.insertBefore(makeGutter(g.gutter), lt);
         line.classList.add("num");
-        const rest = piece.slice(g.gutter.length);
-        if (rest) lt.appendChild(document.createTextNode(rest));
-      } else lt.appendChild(document.createTextNode(piece));
+        appendText(piece.slice(g.gutter.length), at + g.gutter.length);
+      } else appendText(piece, at);
+      at += piece.length;
       lineStart = false;
     });
     lineStart = r.s.endsWith("\n") || (lineStart && r.s === "");
@@ -899,6 +927,22 @@ function makeGutter(prefix) {
     sp.textContent = m[2];
     span.appendChild(sp);
   }
+  return span;
+}
+
+/**
+ * A SPOT KEEP's span: the value as it reads, at this one place, with no fake
+ * under it — so the disk text carries the real value here like any other plain
+ * text, while the same value goes on being faked everywhere else. Not editable,
+ * for the same reason a pseudonym span is not: typing inside it would move the
+ * place the keep names.
+ */
+function makeHeld(text) {
+  const span = document.createElement("span");
+  span.className = "held";
+  span.dataset.here = "";
+  span.contentEditable = "false";
+  span.textContent = text;
   return span;
 }
 
@@ -939,7 +983,7 @@ function pageBodies() { return [...pagesEl.querySelectorAll(".page-body")]; }
 
 /** Re-translate every page under the current key, keeping the edits. */
 function retranslate() {
-  for (const body of pageBodies()) buildBody(body, TD.serializeNodes(body));
+  for (const body of pageBodies()) buildBody(body, TD.serializeNodes(body), pageIndexOf(body));
   afterTextChange();
 }
 
@@ -966,7 +1010,12 @@ function updateCounts() {
   const all = [...pagesEl.querySelectorAll(".pn")].filter((s) => !s.dataset.piece || s.dataset.piece.startsWith("0/"));
   const n = all.length;
   const k = all.filter((s) => s.classList.contains("kept")).length;
-  $("st-pn").textContent = key ? `${n} pseudonym${n === 1 ? "" : "s"} shown as real names` + (k ? ` · ${k} kept (un-faked on the next run)` : "") : "";
+  const h = pagesEl.querySelectorAll("[data-here]").length;
+  $("st-pn").textContent = key
+    ? `${n} pseudonym${n === 1 ? "" : "s"} shown as real names`
+      + (k ? ` · ${k} kept (un-faked on the next run)` : "")
+      + (h ? ` · ${h} kept where ${h === 1 ? "it stands" : "they stand"}` : "")
+    : "";
 }
 
 // ── editing ──────────────────────────────────────────────────────────────────────
@@ -1281,7 +1330,7 @@ function offerAtCaret(body) {
   hideTypeTip();
   if (!ahead || !editing) return;
   const pt = caretIn(body);
-  if (!pt || pt.container.nodeType !== 3 || (pt.container.parentElement && pt.container.parentElement.closest(".pn, .gutter"))) return;
+  if (!pt || pt.container.nodeType !== 3 || (pt.container.parentElement && pt.container.parentElement.closest(".pn, .gutter, [data-here]"))) return;
   const tb = textBeforeCaret(pt);
   const hit = PK.endingReal(ahead, tb);
   if (!hit || hit.matched.length > pt.offset) return;
@@ -1403,7 +1452,12 @@ function pointAtOffset(body, target) {
   return hit || { node: body, offset: body.childNodes.length };
 }
 function snapshotOf(body) {
-  return { page: pageIndexOf(body), text: TD.serializeNodes(body), caret: caretOffsetIn(body) };
+  // The page's spot keeps travel with its text: they are part of how the page
+  // stands, and a redo that brought the text back without them would leave the
+  // value in the clear with nothing saying so — which the next save would write
+  // back to its pseudonym.
+  const page = pageIndexOf(body);
+  return { page, text: TD.serializeNodes(body), caret: caretOffsetIn(body), spots: spotsFromBody(body, page) };
 }
 /** Record the page as it stands, before an edit; `force` skips coalescing. */
 function snapshot(body, force) {
@@ -1421,8 +1475,13 @@ function restoreSnapshot(snap) {
   if (!body) return;
   convertTypedRealsSoon.cancel();
   hideTypeTip();
-  buildBody(body, snap.text);
+  // The page's keeps as that snapshot had them, so buildBody can put the spans
+  // back where the text it is building from carries them.
+  spots = spots.filter((x) => x.page !== snap.page).concat(snap.spots || []);
+  buildBody(body, snap.text, snap.page);
   doc.pages[snap.page].lines = snap.text.split("\n");
+  // …and what actually landed is what is remembered.
+  syncSpots(body);
   if (snap.caret >= 0) {
     const at = pointAtOffset(body, snap.caret);
     try { const r = document.createRange(); r.setStart(at.node, at.offset); r.collapse(true); const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(r); } catch { /* the caret is simply not restored */ }
@@ -1506,7 +1565,7 @@ function convertTypedReals(body) {
 function plainSegments(body) {
   const out = [];
   const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
-    acceptNode: (n) => (n.parentElement && n.parentElement.closest(".pn") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    acceptNode: (n) => (n.parentElement && n.parentElement.closest(".pn, [data-here]") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
   });
   let n;
   while ((n = w.nextNode())) out.push({ node: n, text: n.data });
@@ -1518,24 +1577,33 @@ async function saveDocument() {
   if (!doc) return;
   let forwarded = 0;
   const bodies = pageBodies();
+  // Each page as it will be written, and the same text with its spot keeps
+  // blanked — what the standing assertion below is allowed to look at.
+  const scan = [];
   bodies.forEach((body, i) => {
-    let text = TD.serializeNodes(body);
+    let { text, held } = TD.serializeHeld(body);
     if (fwd && fwd.rx) {
-      const fw = forwardText(text);
+      const fw = forwardText(text, held);
       if (fw.swaps) {
         snapshot(body, true);
-        text = fw.text;
         forwarded += fw.swaps;
-        buildBody(body, text);
+        buildBody(body, fw.text, i);
+        ({ text, held } = TD.serializeHeld(body)); // the rebuilt page, its spots found again
       }
     }
     doc.pages[i].lines = text.split("\n");
+    scan[i] = TD.blankRanges(text, held).split("\n");
   });
   const out = TD.serializeExport(doc);
   // The standing assertion. Nothing above should let a bound real value
-  // through, and if something did the save must not.
+  // through, and if something did the save must not. A value kept where it
+  // stands is the one thing that may: it is in the file because the operator
+  // put it there, so the assertion reads the export with those places blanked.
   if (reals) {
-    const left = PK.findReals(reals, maskKept(out));
+    const held = TD.serializeExport(Object.assign({}, doc, {
+      pages: doc.pages.map((p, i) => Object.assign({}, p, { lines: scan[i] || p.lines })),
+    }));
+    const left = PK.findReals(reals, maskKept(held));
     if (left.length) {
       toast("Not saved: the text still carries a real name the key binds — " + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again.", { error: true });
       return;
@@ -1657,9 +1725,11 @@ function flatten(body, { blankGutters = false, blankPn = false } = {}) {
       // digit run between its volume and its reporter, or between the code
       // and its section, and parses as nothing (the pdf_linker.py rule).
       // A pseudonym span's shown text is blanked the same way for the leak
-      // scan: the real name inside it is on top of the file, not in it.
+      // scan: the real name inside it is on top of the file, not in it. So is
+      // a spot keep's, for the opposite reason — the real value IS in the file
+      // there, and deliberately, so it is not a leak to report.
       const p = n.parentElement;
-      const blank = (blankGutters && p && p.closest(".gutter")) || (blankPn && p && p.closest(".pn"));
+      const blank = (blankGutters && p && p.closest(".gutter")) || (blankPn && p && p.closest(".pn, [data-here]"));
       text += blank ? " ".repeat(n.data.length) : n.data;
       return;
     }
@@ -1858,6 +1928,22 @@ function leakIn(range) {
 
 // ── pseudonym tooltip ──────────────────────────────────────────────────────────────────
 pagesEl.addEventListener("mouseover", (e) => {
+  const here = e.target.closest && e.target.closest("[data-here]");
+  if (here && settings.marks) {
+    tipEl.innerHTML = "";
+    const f = TD.fakeFor(fwd, here.textContent);
+    tipEl.append("Kept where it stands: the file carries it as it reads here");
+    if (f) {
+      const b = document.createElement("b");
+      b.textContent = f;
+      tipEl.append(document.createElement("br"), "Elsewhere it is still ", b, ". Right-click to change.");
+    } else tipEl.append(". Right-click to change.");
+    tipEl.hidden = false;
+    const hr = here.getBoundingClientRect();
+    tipEl.style.left = Math.max(4, Math.min(window.innerWidth - tipEl.offsetWidth - 4, hr.left)) + "px";
+    tipEl.style.top = (hr.top > 40 ? hr.top - tipEl.offsetHeight - 6 : hr.bottom + 6) + "px";
+    return;
+  }
   const pn = e.target.closest && e.target.closest(".pn");
   if (!pn || !settings.marks) { hideTip(); return; }
   tipEl.innerHTML = "";
@@ -1872,7 +1958,7 @@ pagesEl.addEventListener("mouseover", (e) => {
   tipEl.style.left = Math.max(4, Math.min(window.innerWidth - tw - 4, r.left)) + "px";
   tipEl.style.top = (r.top > 40 ? r.top - tipEl.offsetHeight - 6 : r.bottom + 6) + "px";
 });
-pagesEl.addEventListener("mouseout", (e) => { if (e.target.closest && e.target.closest(".pn")) hideTip(); });
+pagesEl.addEventListener("mouseout", (e) => { if (e.target.closest && e.target.closest(".pn, [data-here]")) hideTip(); });
 function hideTip() { tipEl.hidden = true; }
 
 // ── flagging a real value ────────────────────────────────────────────────────────────────
@@ -1893,7 +1979,12 @@ function currentSelection() {
   // else the first one it covers.
   let pn = startPn || endPn || null;
   if (!pn && inFrag) pn = [...body.querySelectorAll(".pn")].find((el) => range.intersectsNode(el)) || null;
-  return { text: sel.toString(), touches, range, pn };
+  // A value kept where it stands: the question about it is the keep, not the flag.
+  const inHere = frag.querySelector ? frag.querySelector("[data-here]") : null;
+  let here = (range.startContainer.parentElement && range.startContainer.parentElement.closest("[data-here]"))
+    || (range.endContainer.parentElement && range.endContainer.parentElement.closest("[data-here]")) || null;
+  if (!here && inHere) here = [...body.querySelectorAll("[data-here]")].find((el) => range.intersectsNode(el)) || null;
+  return { text: sel.toString(), touches, range, pn, here };
 }
 
 // ── un-flagging a wrongly faked value ───────────────────────────────────────────
@@ -1910,27 +2001,35 @@ function currentSelection() {
 // click on it or the Keep… beside a selection touching it: the mark goes,
 // the save leaves it as it stands, and PDF-Linker's next run skips it.
 const keepMenu = $("keep-menu");
-let keepMenuFor = null; // { real, fake, leak }
+let keepMenuFor = null; // { real, fake, leak, span, range, here }
 function showKeepMenu(target, x, y) {
-  const t = target instanceof Element ? { real: pnReal(target), fake: pnFake(target), leak: false } : target;
+  const t = target instanceof Element
+    ? (target.dataset.here != null
+      ? { real: target.textContent, fake: TD.fakeFor(fwd, target.textContent) || "", leak: false, span: target, here: true }
+      : { real: pnReal(target), fake: pnFake(target), leak: false, span: target })
+    : target;
   keepMenuFor = t;
   const c = TD.keptControl(keeps, t.real);
-  $("keep-menu-lead").textContent = t.leak ? "Standing unfaked:" : "Wrongly faked?";
+  $("keep-menu-lead").textContent = t.here ? "Kept where it stands:" : t.leak ? "Standing unfaked:" : "Wrongly faked?";
   $("keep-menu-value").textContent = t.real;
-  $("keep-menu-fake").textContent = t.fake;
-  $("keep-menu-sub").childNodes[0].nodeValue = t.leak ? "Written as " : "The file carries ";
-  $("keep-menu-sub").childNodes[2].nodeValue = t.leak ? " on save, unless it is kept." : " until PDF-Linker re-runs.";
+  $("keep-menu-fake").textContent = t.fake || "its pseudonym";
+  $("keep-menu-sub").childNodes[0].nodeValue = t.here ? "The file carries it as it reads here; elsewhere " : t.leak ? "Written as " : "The file carries ";
+  $("keep-menu-sub").childNodes[2].nodeValue = t.here ? " still stands for it." : t.leak ? " on save, unless it is kept." : " until PDF-Linker re-runs.";
+  // The narrowest keep: this occurrence, and no other. Already one, or already
+  // kept for the whole case, and there is nothing narrower to ask for.
+  $("keep-menu-here").hidden = !!t.here || !!c;
   $("keep-menu-no").hidden = c === "no";
   $("keep-menu-never").hidden = c === "never";
-  $("keep-menu-undo").hidden = !c;
+  $("keep-menu-undo").hidden = !c && !t.here;
+  $("keep-menu-undo").textContent = t.here && !c ? "Fake it here after all" : "It is a pseudonym after all";
   keepMenu.hidden = false;
   keepMenu.style.left = Math.max(4, Math.min(window.innerWidth - keepMenu.offsetWidth - 4, x)) + "px";
   keepMenu.style.top = Math.max(4, Math.min(window.innerHeight - keepMenu.offsetHeight - 4, y)) + "px";
 }
 function hideKeepMenu() { keepMenu.hidden = true; keepMenuFor = null; }
 pagesEl.addEventListener("contextmenu", (e) => {
-  const pn = e.target.closest && e.target.closest(".pn");
-  const target = pn || (() => { const h = leakAt(e.clientX, e.clientY); return h ? { real: h.real, fake: h.fake, leak: true } : null; })();
+  const pn = e.target.closest && e.target.closest(".pn, [data-here]");
+  const target = pn || (() => { const h = leakAt(e.clientX, e.clientY); return h ? { real: h.real, fake: h.fake, leak: true, range: h.range } : null; })();
   if (!target) return;
   e.preventDefault();
   hideTip();
@@ -1938,6 +2037,105 @@ pagesEl.addEventListener("contextmenu", (e) => {
 });
 document.addEventListener("mousedown", (e) => { if (!keepMenu.hidden && !keepMenu.contains(e.target)) hideKeepMenu(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { hideKeepMenu(); flagPop.hidden = true; } });
+
+// ── spot keeps: this one occurrence, left as it reads ─────────────────────────────
+//
+// The page's spans are the truth: after any change to them the page's spots are
+// read back off it, so a spot is never remembered in a place the text no longer
+// has. Which occurrence each one is, is counted in the DISK text — the text the
+// file carries and the reader opens again — because that is what both halves
+// agree on (see textdoc.js).
+function spotsFromBody(body, page) {
+  const { text, held } = TD.serializeHeld(body);
+  return held.map(([a, b]) => {
+    const value = text.slice(a, b);
+    const at = TD.occurrencesOf(text, value).findIndex(([s]) => s === a);
+    return TD.makeSpot(page, value, at < 0 ? 0 : at);
+  });
+}
+function syncSpots(body) {
+  const page = pageIndexOf(body);
+  spots = spots.filter((x) => x.page !== page).concat(spotsFromBody(body, page));
+  persistSpots();
+}
+/** The spans of the wrapped name one piece belongs to — just the one piece's span where it stands whole. */
+function wrappedPieces(span) {
+  if (span.dataset.wholeFake == null) return [span];
+  const all = [...span.closest(".page-body").querySelectorAll(".pn")];
+  const same = (el) => el.dataset.wholeFake === span.dataset.wholeFake && el.dataset.wholeReal === span.dataset.wholeReal;
+  const pieceOf = (el) => Number(String(el.dataset.piece || "0/1").split("/")[0]) || 0;
+  const count = Number(String(span.dataset.piece || "0/1").split("/")[1]) || 1;
+  const mine = pieceOf(span);
+  const at = all.indexOf(span);
+  const out = [span];
+  for (let i = at - 1, want = mine - 1; i >= 0 && want >= 0; i--, want--) {
+    if (!same(all[i]) || pieceOf(all[i]) !== want) break;
+    out.unshift(all[i]);
+  }
+  for (let i = at + 1, want = mine + 1; i < all.length && want < count; i++, want++) {
+    if (!same(all[i]) || pieceOf(all[i]) !== want) break;
+    out.push(all[i]);
+  }
+  return out;
+}
+/** Keep a pseudonym span where it stands: the real value takes its place, here only. */
+function keepSpanHere(span) {
+  const body = span.closest(".page-body");
+  if (!body) return;
+  const real = pnReal(span);
+  snapshot(body, true);
+  // A name wrapped over two numbered lines is one name: every piece of it is
+  // kept, or half of it would go on reading as a pseudonym.
+  for (const el of wrappedPieces(span)) el.replaceWith(makeHeld(el.dataset.real));
+  afterSpotChange(body, real);
+}
+/** Keep an unfaked real name where it stands: the save leaves this one as it reads. */
+function keepRangeHere(range, real) {
+  const parts = [];
+  const root = range.commonAncestorContainer;
+  const add = (n) => {
+    if (n.nodeType !== 3 || !range.intersectsNode(n)) return;
+    // The gutter number a wrapped name runs across is the file's own, not part of the name.
+    if (n.parentElement && n.parentElement.closest(".gutter, [data-here]")) return;
+    const from = n === range.startContainer ? range.startOffset : 0;
+    const to = n === range.endContainer ? range.endOffset : n.data.length;
+    if (to > from) parts.push({ node: n, from, to });
+  };
+  if (root.nodeType === 3) add(root);
+  else { const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) add(n); }
+  if (!parts.length) return;
+  const body = parts[0].node.parentElement.closest(".page-body");
+  if (!body) return;
+  snapshot(body, true);
+  // Back to front, so the offsets of the earlier parts stay good as nodes split.
+  for (const part of parts.reverse()) {
+    const node = part.node;
+    if (part.to < node.data.length) node.splitText(part.to);
+    const mid = part.from > 0 ? node.splitText(part.from) : node;
+    mid.replaceWith(makeHeld(mid.data));
+  }
+  afterSpotChange(body, real);
+}
+/** Put a spot keep back: the value is a pseudonym again at that place. */
+function undoSpotHere(span) {
+  const body = span.closest(".page-body");
+  if (!body) return;
+  const real = span.textContent;
+  const fake = TD.fakeFor(fwd, real);
+  snapshot(body, true);
+  if (fake) span.replaceWith(makePn(fake, real));
+  else span.replaceWith(document.createTextNode(real)); // unbound now: plain text, and the save decides
+  afterSpotChange(body, real, { undone: true });
+}
+function afterSpotChange(body, real, { undone = false } = {}) {
+  syncSpots(body);
+  setDirty(true);
+  afterTextChange();
+  renderFlags();
+  toast(undone
+    ? `"${real}" is a pseudonym again at that place`
+    : `"${real}" kept where it stands — here only; every other occurrence is still faked`);
+}
 
 function setKeep(real, control, { leak = false } = {}) {
   keeps = control ? TD.addKeep(keeps, control, real) : TD.removeKeep(keeps, real);
@@ -1953,9 +2151,22 @@ function setKeep(real, control, { leak = false } = {}) {
     : `"${real}" kept${control === "never" ? " in every case" : " in this case"} — un-marked here now; PDF-Linker un-fakes it in the file on its next run (save the list to the case folder first).`);
 }
 const keepChosen = (control) => { const t = keepMenuFor; hideKeepMenu(); if (t) setKeep(t.real, control, { leak: t.leak }); };
+$("keep-menu-here").addEventListener("click", () => {
+  const t = keepMenuFor;
+  hideKeepMenu();
+  if (!t) return;
+  if (t.span) keepSpanHere(t.span);
+  else if (t.range) keepRangeHere(t.range, t.real);
+});
 $("keep-menu-no").addEventListener("click", () => keepChosen("no"));
 $("keep-menu-never").addEventListener("click", () => keepChosen("never"));
-$("keep-menu-undo").addEventListener("click", () => keepChosen(""));
+$("keep-menu-undo").addEventListener("click", () => {
+  const t = keepMenuFor;
+  // A spot keep with no wider keep over it is undone where it stands; the
+  // wider keeps are withdrawn as they always were.
+  if (t && t.here && !TD.keptControl(keeps, t.real)) { hideKeepMenu(); undoSpotHere(t.span); return; }
+  keepChosen("");
+});
 $("keep-menu-cancel").addEventListener("click", hideKeepMenu);
 
 const showFlagPopSoon = debounce(showFlagPop, 120);
@@ -1969,15 +2180,20 @@ function showFlagPop() {
   // A pseudonym in the selection: the question is the other one. An
   // unfaked real name in it: whether to leave it so.
   const pnIn = s.pn;
-  const leak = pnIn ? null : leakIn(s.range);
-  $("flag-pop-keep").hidden = !pnIn && !leak;
-  if (pnIn) {
+  const hereIn = pnIn ? null : s.here;
+  const leak = pnIn || hereIn ? null : leakIn(s.range);
+  $("flag-pop-keep").hidden = !pnIn && !hereIn && !leak;
+  if (hereIn) {
+    flagPopBtn.disabled = true;
+    flagPopNote.textContent = "\u201c" + hereIn.textContent + "\u201d is kept where it stands. Change it?";
+    $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu(hereIn, e.clientX, e.clientY); };
+  } else if (pnIn) {
     flagPopNote.textContent = "Wrongly faked? Keep \u201c" + pnIn.dataset.real + "\u201d:";
     $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu(pnIn, e.clientX, e.clientY); };
   } else if (leak) {
     flagPopBtn.disabled = true;
     flagPopNote.textContent = "\u201c" + leak.real + "\u201d is in the key and stands unfaked. Leave it so?";
-    $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu({ real: leak.real, fake: leak.fake, leak: true }, e.clientX, e.clientY); };
+    $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu({ real: leak.real, fake: leak.fake, leak: true, range: leak.range }, e.clientX, e.clientY); };
   }
   const rects = s.range.getClientRects();
   const r = rects.length ? rects[rects.length - 1] : s.range.getBoundingClientRect();
@@ -2010,6 +2226,10 @@ function flagSelection() {
 }
 
 function valuesStoreKey() { return VALUES_PREFIX + (folderName || fileName || "loose"); }
+// Spot keeps belong to ONE document, not to the case: they name a place in it.
+// Remembered per document, like its swapped pages.
+function spotStoreKey() { return SPOTS_PREFIX + (folderName || "") + "/" + (fileName || ""); }
+function persistSpots() { lsSet(spotStoreKey(), spots); }
 // Stored as { values, keeps }; an older build stored the values list bare.
 function readStoredValues(k) {
   const v = lsGet(k, null);
@@ -2021,7 +2241,8 @@ function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps }); 
 
 function renderFlags() {
   flagsList.innerHTML = "";
-  flagCount.textContent = String(flagged.length + keeps.length);
+  flagCount.textContent = String(flagged.length + keeps.length + spots.length);
+  renderSpots();
   const keepsList = $("keeps-list");
   keepsList.innerHTML = "";
   $("keeps-block").hidden = !keeps.length;
@@ -2059,6 +2280,59 @@ function renderFlags() {
   flagsNote.textContent = dirHandle
     ? `Saves to ${folderName}/${TD.VALUES_FILE}.`
     : "No case folder is open: the list is remembered here and can be saved anywhere or copied.";
+}
+
+// The document's spot keeps, each one findable and withdrawable: a keep made by
+// right-clicking one word in one place is otherwise hard to find again.
+function renderSpots() {
+  const list = $("spots-list");
+  list.innerHTML = "";
+  $("spots-block").hidden = !spots.length;
+  for (const sp of spots.slice().sort((a, b) => a.page - b.page || a.nth - b.nth)) {
+    const li = document.createElement("li");
+    li.textContent = sp.value;
+    const t = document.createElement("span");
+    t.className = "tag keep";
+    t.textContent = "p. " + (sp.page + 1);
+    t.title = "Kept where it stands on page " + (sp.page + 1) + " of this document";
+    li.appendChild(t);
+    li.title = "Click to go to it";
+    li.addEventListener("click", () => goToSpot(sp));
+    const x = document.createElement("button");
+    x.className = "x";
+    x.textContent = "×";
+    x.title = "Fake it here after all";
+    x.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const span = spanForSpot(sp);
+      if (span) undoSpotHere(span);
+    });
+    li.appendChild(x);
+    list.appendChild(li);
+  }
+}
+/**
+ * The span a stored spot stands in, or null where the text no longer has it.
+ * The page's spots come back in the order its spans stand, which is the order
+ * the document gives them, so one list indexes the other.
+ */
+function spanForSpot(sp) {
+  const body = pageBodies()[sp.page];
+  if (!body) return null;
+  const at = spotsFromBody(body, sp.page).findIndex((x) => TD.sameSpot(x, sp));
+  if (at < 0) return null;
+  return [...body.querySelectorAll("[data-here]")].filter((el) => el.textContent.length)[at] || null;
+}
+function goToSpot(sp) {
+  const span = spanForSpot(sp);
+  if (!span) { toast(`"${sp.value}" is no longer kept on page ${sp.page + 1}`); return; }
+  const r = document.createRange();
+  r.selectNodeContents(span);
+  const sel = document.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+  const rect = span.getBoundingClientRect();
+  stageEl.scrollBy({ top: rect.top - stageEl.getBoundingClientRect().top - stageEl.clientHeight / 3, behavior: "smooth" });
 }
 
 function findInPages(v) {

@@ -10,6 +10,7 @@ import {
   markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
+  serializeHeld, blankRanges, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE,
 } from "./viewer/textdoc.js";
@@ -131,6 +132,60 @@ check("disk gets the fake", serializeNodes(body), " 2  Plaintiff Ingrid Strangew
 check("screen gets the real", textOf(body), " 2  Plaintiff Helen Rasho sued\ntwice\n\na wrapped div");
 check("a leading div adds no newline", serializeNodes(E("DIV", {}, [E("DIV", {}, [T("x")]), E("DIV", {}, [T("y")])])), "x\ny");
 
+// ---- spot keeps: one occurrence left as it reads ---------------------------------
+console.log("spot keeps");
+{
+  // The Clerk's name on a pleading: "David" faked in one place, kept where it
+  // stands in the other, and a line number in the gutter before both.
+  const page = E("DIV", {}, [
+    E("SPAN", { class: "gutter" }, [T(" 1  ")]),
+    T("Plaintiff "),
+    E("SPAN", { "data-fake": "Party7", "data-real": "David" }, [T("David")]),
+    T(" Smith, by "),
+    E("SPAN", { "data-here": "" }, [T("David")]),
+    T(" W. Slayton, Clerk"),
+  ]);
+  check("disk gets the fake where it is faked and the real where it is kept",
+    serializeNodes(page), " 1  Plaintiff Party7 Smith, by David W. Slayton, Clerk");
+  check("the screen reads the same either way",
+    textOf(page), " 1  Plaintiff David Smith, by David W. Slayton, Clerk");
+  const held = serializeHeld(page);
+  check("serializeHeld gives the same text as a plain save", held.text, serializeNodes(page));
+  check("…and where the kept spot landed in it", held.held, [[31, 36]]);
+  check("the range is the value itself", held.text.slice(31, 36), "David");
+  check("a page with no spot keep holds none", serializeHeld(E("DIV", {}, [T("plain")])).held, []);
+  check("an empty spot span is not a range", serializeHeld(E("DIV", {}, [E("SPAN", { "data-here": "" }, [])])).held, []);
+
+  check("blanking holds every other offset still",
+    blankRanges("by David W. Slayton", [[3, 8]]), "by \u0000\u0000\u0000\u0000\u0000 W. Slayton");
+  check("nothing to blank, nothing changed", blankRanges("as it reads", []), "as it reads");
+}
+
+console.log("which occurrence");
+check("every occurrence, in order", occurrencesOf("David, then David again", "David"), [[0, 5], [12, 17]]);
+check("whole words only — a fake reading Davidson holds no David",
+  occurrencesOf("Davidson and David", "David"), [[13, 18]]);
+check("case is not what tells two occurrences apart", occurrencesOf("DAVID and David", "David"), [[0, 5], [10, 15]]);
+check("a value with a period in it is matched literally", occurrencesOf("A.B. Co. and AXBX Co.", "A.B."), [[0, 4]]);
+check("nothing to find", occurrencesOf("none here", "David"), []);
+
+console.log("the spot list");
+check("a spot is its page, its value and which occurrence", makeSpot("2", " David ", "1"), { page: 2, value: "David", nth: 1 });
+check("junk out of storage is dropped", normalizeSpots([{ page: 1, value: "David", nth: 0 }, { page: 1, value: "", nth: 0 }, null, 7]), [{ page: 1, value: "David", nth: 0 }]);
+check("two spots are the same spot by page, value and occurrence",
+  [sameSpot(makeSpot(1, "David", 0), makeSpot(1, "david", 0)), sameSpot(makeSpot(1, "David", 0), makeSpot(1, "David", 1)), sameSpot(makeSpot(1, "David", 0), makeSpot(2, "David", 0))],
+  [true, false, false]);
+check("one page's spots, in the order they stand",
+  spotsOnPage([makeSpot(2, "David", 1), makeSpot(1, "Ann", 0), makeSpot(2, "David", 0)], 2),
+  [{ page: 2, value: "David", nth: 0 }, { page: 2, value: "David", nth: 1 }]);
+{
+  const text = "Party7 Smith wrote to David W. Slayton, and David W. Slayton replied";
+  check("the second occurrence is found by its ordinal", spotRanges(text, [makeSpot(0, "David", 1)]), [[44, 49]]);
+  check("both of them", spotRanges(text, [makeSpot(0, "David", 0), makeSpot(0, "David", 1)]), [[22, 27], [44, 49]]);
+  check("a spot whose occurrence has gone simply does not apply", spotRanges("nothing of the sort", [makeSpot(0, "David", 0)]), []);
+  check("…and so does an ordinal past the end", spotRanges(text, [makeSpot(0, "David", 5)]), []);
+}
+
 // ---- real values typed into the plain text -------------------------------------
 console.log("real values in plain text");
 const HEADERS = ["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"];
@@ -144,6 +199,12 @@ const hits = findRealsInPlain(fwd, [{ node: "n1", text: "Ms. Rasho and HELEN RAS
 check("both spellings found, longest first at its site", hits.map((h) => [h.matched, h.fake]),
   [["Rasho", "Strangeways"], ["HELEN RASHO's", "INGRID STRANGEWAYS'S"]]);
 check("a common word bound by the key is never rewritten", hits.length, 2);
+// Un-keeping a spot has to put the pseudonym back, which means asking the key
+// what one value's fake is, in the case the value was written in.
+check("the fake for one value, in its own case", [fakeFor(fwd, "Helen Rasho"), fakeFor(fwd, "HELEN RASHO"), fakeFor(fwd, "Rasho")],
+  ["Ingrid Strangeways", "INGRID STRANGEWAYS", "Strangeways"]);
+check("a value the key does not bind has no fake", fakeFor(fwd, "Slayton"), null);
+check("no key, no fake", fakeFor(null, "Helen Rasho"), null);
 
 // ---- the values file ---------------------------------------------------------------
 console.log("values file");

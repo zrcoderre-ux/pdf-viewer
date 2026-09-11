@@ -304,6 +304,14 @@ body.marks-off .pn.kept { text-decoration: none; }
 body.marks-off .pn:hover { background: transparent; }
 body.show-fakes .pn { background: rgba(120, 144, 156, 0.25); box-shadow: 0 0 0 1px rgba(120, 144, 156, 0.4); }
 body.show-fakes.marks-off .pn { background: transparent; box-shadow: none; }
+/* A SPOT KEEP: this one occurrence left as it reads, while the same value goes
+   on being faked everywhere else. Marked like a kept pseudonym — a dotted
+   underline, no highlight — because that is what it is, narrowed to one place.
+   Shown as itself under Show fakes too: here the file really does carry it. */
+[data-here] { text-decoration: underline dotted #78909c; text-underline-offset: 2px; cursor: help; }
+[data-here]:hover { background: rgba(120, 144, 156, 0.18); border-radius: 2px; }
+body.marks-off [data-here] { text-decoration: none; }
+body.marks-off [data-here]:hover { background: transparent; }
 
 ::highlight(flagged) { background-color: var(--flag-bg); text-decoration: underline wavy #d32f2f; }
 ::highlight(leak) { background-color: var(--leak-bg); text-decoration: underline double #e65100; }

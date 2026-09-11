@@ -798,6 +798,28 @@ app, which routes it to the reader tab.
   VALUE` line, which PDF-Linker reads as the worksheet's own decision on the
   run that actually restores the files. The **Flagged** panel lists both
   kinds, each withdrawable.
+- **Or keep it at one place only.** Both of those keeps are decisions about a
+  *value*, and neither fits the name on every document: the Clerk's own
+  signature block. Fake the "David" of *David W. Slayton* and the pseudonym
+  standing there also stands for a party's "David" — which tells the reader
+  the party is a David too. Keep "David" for the whole case and every David
+  in it comes back. So the menu's third, narrowest choice is **Keep just this
+  one (here only)**: *this* occurrence reads as itself, and every other
+  occurrence of the value goes on being faked. It is an edit, not an
+  instruction for the next run — the value stands in the clear at that place,
+  the save writes it as it reads, the orange leak mark leaves it alone and the
+  save's own assertion lets it through, all at that place only. A name wrapped
+  over two numbered lines is kept whole, both halves together. An **unfaked**
+  real name takes the same choice from its own right-click, which is how one
+  occurrence is left as it stands without keeping the value everywhere.
+  Kept spots are marked with the same dotted underline a kept pseudonym
+  carries, are listed under **Flagged** with their page (click to go to one,
+  **×** to fake it there after all), ride along with **undo and redo**, and are
+  **remembered per document**, so reopening the export finds them again — which
+  is what keeps the reader from reading the value as a leak the next time. They
+  go nowhere near `New Real Values.txt`: a place in one file is not something
+  PDF-Linker's value-level rules can be told, so a re-run of PDF-Linker, which
+  writes the exports again from the PDFs, fakes it once more.
 - **Reading tools from the PDF viewer.** **↓ Auto-scroll** (or **A**) creeps
   the document at a reading pace, **[** and **]** slow and speed it, Space
   pauses; **Shift + Space** opens the citation under the pointer, or every

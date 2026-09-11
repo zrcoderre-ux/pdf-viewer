@@ -163,6 +163,10 @@ const BLOCKS = new Set(["DIV", "P", "LI"]);
 
 function walk(node, emit, opts) {
   const fakes = !!(opts && opts.fakes);
+  // `mark` is told where a SPOT KEEP's span starts and ends in what is being
+  // emitted (see serializeHeld): a value the operator said to leave alone at
+  // this one place, which is therefore plain text on disk like any other.
+  const mark = opts && opts.mark;
   const rec = (n, atStart) => {
     if (n.nodeType === TEXT_NODE) {
       emit(n.data != null ? n.data : n.nodeValue || "");
@@ -172,6 +176,12 @@ function walk(node, emit, opts) {
     const name = String(n.nodeName || "").toUpperCase();
     if (name === "BR") {
       if (n.nextSibling) emit("\n");
+      return;
+    }
+    if (mark && n.getAttribute && n.getAttribute(HERE_ATTR) != null) {
+      mark("in");
+      for (const c of n.childNodes || []) rec(c, false);
+      mark("out");
       return;
     }
     const fake = n.getAttribute ? n.getAttribute("data-fake") : null;
@@ -208,6 +218,108 @@ export function textOf(root) {
   let out = "";
   walk(root, (s) => { out += s; }, { fakes: false });
   return out;
+}
+
+// ---- spot keeps: a value left as it reads at ONE place ---------------------------
+//
+// The two keeps the reader has always had are decisions about a VALUE: leave
+// "Careau" alone in this case, or in every case. Neither can say what a name
+// on every document needs — the Clerk's own name, whose "David" must read as
+// itself where it stands while a party's "David" stays faked, since one
+// pseudonym standing for both would say the party is a David too. A SPOT KEEP
+// is that narrower decision: this occurrence, here, and no other.
+//
+// The span the reader marks it with carries no fake, so the disk text gets the
+// real value at that one place like any other plain text, and the round trip
+// is unchanged. What has to be remembered is WHICH occurrence it was, and the
+// disk text is the only thing both halves of the reader agree on: a spot is
+// its value and its ordinal among that value's occurrences in the page's own
+// disk text ({ page, value, nth }). Every occurrence of the value elsewhere on
+// the page is a fake and spells differently, so the ordinal is stable under
+// every edit but one to the spot's own line.
+const HERE_ATTR = "data-here";
+
+/**
+ * What a page body writes to disk, and where its spot keeps landed in it:
+ * { text, held: [[start, end), …] } — the ranges a save must leave as they
+ * read rather than write back to their pseudonyms.
+ */
+export function serializeHeld(root) {
+  let out = "";
+  const held = [];
+  let open = -1;
+  walk(root, (s) => { out += s; }, {
+    fakes: true,
+    mark: (phase) => {
+      if (phase === "in") open = out.length;
+      else if (open >= 0) { if (out.length > open) held.push([open, out.length]); open = -1; }
+    },
+  });
+  return { text: out, held };
+}
+
+/** `text` with each range blanked to the same length, so offsets still hold. */
+export function blankRanges(text, ranges) {
+  if (!ranges || !ranges.length) return text;
+  let out = text;
+  for (const [a, b] of ranges) {
+    if (!(b > a)) continue;
+    out = out.slice(0, a) + "\u0000".repeat(b - a) + out.slice(b);
+  }
+  return out;
+}
+
+function escapeRe(s) {
+  return String(s == null ? "" : s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Every occurrence of `value` in `text`, as [start, end) pairs. Whole words
+ * only, and by the same boundary rule the key's own matcher uses, so a fake
+ * that happens to read "Davidson" holds no occurrence of "David".
+ */
+export function occurrencesOf(text, value) {
+  const out = [];
+  const v = String(value == null ? "" : value);
+  if (!v || !text) return out;
+  const rx = new RegExp("(?<![A-Za-z0-9_])" + escapeRe(v) + "(?![A-Za-z0-9_])", "gi");
+  let m;
+  while ((m = rx.exec(text))) {
+    out.push([m.index, m.index + m[0].length]);
+    if (m.index === rx.lastIndex) rx.lastIndex++;
+  }
+  return out;
+}
+
+/** A spot keep as the list holds it: { page, value, nth }. */
+export function makeSpot(page, value, nth) {
+  return { page: Number(page) || 0, value: normalizeValue(value), nth: Math.max(0, Number(nth) || 0) };
+}
+/** A stored list, cleaned of anything that is not a spot. */
+export function normalizeSpots(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((s) => s && s.value)
+    .map((s) => makeSpot(s.page, s.value, s.nth));
+}
+export function sameSpot(a, b) {
+  return !!a && !!b && a.page === b.page && a.nth === b.nth && foldKey(a.value) === foldKey(b.value);
+}
+/** The spots on one page, in the order they stand. */
+export function spotsOnPage(spots, page) {
+  return (spots || []).filter((s) => s.page === page).sort((a, b) => a.nth - b.nth);
+}
+/**
+ * Where a page's spots stand in its disk text: [[start, end), …], sorted. A
+ * spot whose occurrence is no longer there — its line edited since — simply
+ * does not apply, and the value goes back to being faked.
+ */
+export function spotRanges(text, spots) {
+  const out = [];
+  for (const s of spots || []) {
+    const at = occurrencesOf(text, s.value)[s.nth];
+    if (at) out.push(at);
+  }
+  return out.sort((a, b) => a[0] - b[0]);
 }
 
 /**
@@ -250,6 +362,11 @@ function foldKey(s) {
 // The fake in the matched text's own case, possessive carried — exactly what
 // pseudo-key's forwardRuns writes, so the span made while typing and the
 // text a save writes cannot differ.
+/** The fake a real value takes, in the value's own case — null if unbound. */
+export function fakeFor(compiledForward, value) {
+  if (!compiledForward || !compiledForward.map) return null;
+  return lookupForward(compiledForward, String(value == null ? "" : value));
+}
 function lookupForward(compiled, m) {
   let fake = compiled.map.get(foldKey(m));
   let suffix = "";

@@ -137,6 +137,10 @@
           <p class="side-hint">Wrongly faked — kept as they really read. Un-marked here now; PDF-Linker restores them in the files on its next run.</p>
           <ul id="keeps-list"></ul>
         </div>
+        <div id="spots-block" hidden>
+          <p class="side-hint">Kept <em>where they stand</em> — this document only, at these places. Every other occurrence of the value is still faked; a save writes the value as it reads here.</p>
+          <ul id="spots-list"></ul>
+        </div>
         <div class="side-actions">
           <button id="flags-save" class="primary" title="Write New Real Values.txt into the case folder">Save list to case folder</button>
           <button id="flags-copy" title="Copy the list, one value per line">Copy</button>
@@ -161,6 +165,7 @@
   <div id="flag-pop" hidden><button id="flag-pop-btn">🚩 Flag as real value</button><span id="flag-pop-note"></span><button id="flag-pop-keep" class="secondary" hidden>Keep…</button></div>
   <div id="keep-menu" hidden>
     <div class="km-head"><span id="keep-menu-lead">Wrongly faked?</span> <b id="keep-menu-value"></b><br><span class="km-sub" id="keep-menu-sub">The file carries <b id="keep-menu-fake"></b> until PDF-Linker re-runs.</span></div>
+    <button id="keep-menu-here">Keep just this one (here only)</button>
     <button id="keep-menu-no">Keep in this case (no)</button>
     <button id="keep-menu-never">Never fake it anywhere (never)</button>
     <button id="keep-menu-undo">It is a pseudonym after all</button>
