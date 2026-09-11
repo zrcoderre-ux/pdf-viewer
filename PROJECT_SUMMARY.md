@@ -79,6 +79,17 @@ the `chrome.*` shim that used to sit at the top of `viewer.js`, moved out so
 both pages import it first. The PWA shell (`pwa/app-web.js`) routes a `.txt`
 to a reader iframe and feeds it through `__textReaderLoadLocal`.
 
+The tools live in a left-margin rail (`#tools-rail`), the PDF viewer's
+Acrobat-style panel carried over to this page: the top bar had grown to some
+two dozen controls, so the reading, pseudonym, review and PDF tools moved into
+labelled groups down the left side and the bar kept only the document's own
+actions. It is a flex child of `#main`, so the stage simply narrows; `Tools`
+at its head collapses it to an icon strip (`body.tools-collapsed`, remembered
+under `textReader.tools`), and a checkbox tool wears a button's clothes — the
+box itself is visually hidden and `:has(input:checked)` paints the pressed
+state. The key-offer bar now takes its own height through `--offer-h`, the way
+the LEAKS bar takes `--bar-h`, so neither covers the head of the rail.
+
 The LEAKS review bar works PDF-Linker's `LEAKS.xlsx` row by row from the
 text: `leaks.js` (pure) reads the worksheet by header name, classifies a
 Fix? cell the way `_pn_parse_decision_rows` will read it, parses the Where
