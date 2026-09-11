@@ -25,7 +25,16 @@
 // link in, the way intersectsNode() would.
 //
 // The tab itself is opened by the background worker (chrome.tabs.create with
-// active:false), because a page can't open an unfocused tab on its own.
+// active:false), because a page can't open an unfocused tab on its own — and
+// there is no second way of doing it. window.open puts the reader IN the new
+// tab, which is the one thing this shortcut exists to avoid. So when the
+// worker is out of reach the links don't open and a line says why, rather than
+// opening them the only way a page can. Falling back to window.open is what
+// made the shortcut feel unpredictable: the same keypress would open a link
+// quietly on one tab and yank the reader away on the next, for a reason
+// invisible from the page — the extension had been reloaded or updated
+// underneath it (the content script keeps running with nothing left to talk
+// to), or the page was the hosted build, which has no worker at all.
 //
 // Shift+Space is Chrome's "scroll up one screen". We call preventDefault ONLY
 // when we found at least one link to open — with no link in play the key
@@ -281,27 +290,51 @@
     return api && api.runtime && api.runtime.id ? api : null;
   }
 
-  function open(urls) {
+  // Whether a tab can be opened without taking focus — which is to say whether
+  // the worker is reachable, since it is the only thing that can do it.
+  // `chrome.runtime.id` is the standard test: it is gone in a page whose
+  // extension has been reloaded or updated since the page loaded, and the shim
+  // the hosted build installs (web-shim.js) never had one.
+  function canOpenUnfocused() { return !!extensionApi(); }
+
+  // Three ways to be without a worker, and the reader can act on two of them.
+  // An invalidated context still has a chrome.runtime, just no id — the page
+  // outlived the extension it was talking to, and only a reload fixes it. The
+  // hosted build's shim (web-shim.js) has a runtime of its own and marks
+  // itself, as does having no chrome at all: there is no worker to have.
+  // Otherwise the extension is live and the worker simply didn't answer.
+  function unavailableMessage() {
+    const api = root.chrome;
+    if (!api || !api.runtime || api.__pwaShim) {
+      return "Opening links in the background needs the extension";
+    }
+    if (!api.runtime.id) return "Reload this page to open links — the extension was updated";
+    return "The extension didn't answer — no links opened";
+  }
+
+  // Hand the links to the worker and report what it did with them: the number
+  // it opened, or null if it never answered — it can go away between the check
+  // above and the send. The toast is written from the answer rather than from
+  // the request, so it can't announce tabs that nobody opened.
+  function open(urls, done) {
     const api = extensionApi();
+    if (!api) { done(null); return; }
     // More than one link means a selection: the reader dragged across them and
     // wants the set. So the worker keeps them together in a tab group of their
     // own rather than scattering them along the tab strip, and its cap for an
     // uncounted gesture doesn't apply — this gesture named its links.
     const many = urls.length > 1;
-    if (api) {
-      // The background worker holds chrome.tabs; only it can open a tab that
-      // doesn't steal focus.
-      const msg = { type: "open-background-tabs", urls };
-      if (many) { msg.deliberate = true; msg.group = true; msg.groupTitle = "Links"; }
-      api.runtime.sendMessage(msg, () => {
-        void api.runtime.lastError; // worker asleep / no receiver — nothing to do
+    const msg = { type: "open-background-tabs", urls };
+    if (many) { msg.deliberate = true; msg.group = true; msg.groupTitle = "Links"; }
+    try {
+      api.runtime.sendMessage(msg, (resp) => {
+        let lost = false;
+        // Reading lastError on a context that died mid-flight throws.
+        try { lost = !!api.runtime.lastError; } catch (e) { lost = true; }
+        done(lost ? null : resp || null);
       });
-      return;
-    }
-    // Outside the extension (the PWA build), a page can't open an unfocused
-    // tab at all. Best effort: open it anyway rather than swallow the keypress.
-    for (const url of urls) {
-      try { root.open(url, "_blank", "noopener"); } catch (e) { /* popup blocked */ }
+    } catch (e) {
+      done(null); // context invalidated between the check and the send
     }
   }
 
@@ -352,18 +385,30 @@
     const urls = collectUrls();
     if (!urls.length) return; // no link in play — let the page scroll up
 
+    // The gesture named a link, so the key is ours from here either way: what
+    // it must never do is hand the reader to a new tab, and what it should not
+    // do is scroll the page out from under a gesture aimed at a link.
     e.preventDefault();
     e.stopPropagation();
 
+    if (!canOpenUnfocused()) { toast(unavailableMessage()); return; }
+
     const opening = urls.slice(0, MAX_TABS);
-    open(opening);
-    toast(
-      urls.length > opening.length
-        ? `Opened ${opening.length} of ${urls.length} links in background tabs`
-        : opening.length === 1
-          ? "Opened link in a background tab"
-          : `Opened ${opening.length} links in background tabs`
-    );
+    open(opening, (result) => {
+      if (!result) { toast(unavailableMessage()); return; }
+      // The worker counts what it opened — the page's ceiling, its own
+      // deduplication and any tab that refused to open are all in that number.
+      const opened = typeof result.opened === "number" ? result.opened : opening.length;
+      toast(
+        opened === 0
+          ? "No links opened"
+          : opened < urls.length
+            ? `Opened ${opened} of ${urls.length} links in background tabs`
+            : opened === 1
+              ? "Opened link in a background tab"
+              : `Opened ${opened} links in background tabs`
+      );
+    });
   }
 
   function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; }
@@ -399,6 +444,7 @@
     collectUrls,
     urlsOf,
     onKeyDown,
+    canOpenUnfocused,
     setPointer: (x, y) => { mouseX = x; mouseY = y; },
     setEnabled: (v) => { enabled = v; },
     MAX_TABS,

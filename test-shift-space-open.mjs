@@ -141,7 +141,14 @@ function selectionOverBothLines(page) {
   };
 }
 
-function load(page, { selection = null, storage = {}, chromeApi = true, sources = [] } = {}) {
+// `chromeApi`: true — a live extension; "orphaned" — a content script whose
+// extension has been reloaded or updated under it (chrome.runtime survives,
+// its id doesn't); "pwa" — the hosted build's shim; false — no chrome at all.
+// `worker`: "answers" — the background worker replies; "silent" — it doesn't,
+// and the call comes back with runtime.lastError set.
+function load(page, {
+  selection = null, storage = {}, chromeApi = true, sources = [], worker = "answers",
+} = {}) {
   const sent = [];
   const openedWindows = [];
   const doc = {
@@ -169,12 +176,33 @@ function load(page, { selection = null, storage = {}, chromeApi = true, sources 
     addEventListener() {},
     open: (url) => openedWindows.push(url),
   };
-  if (chromeApi) {
+  if (chromeApi === "pwa") {
+    // web-shim.js: a chrome object with no worker behind it, and no id.
+    ctx.chrome = { __pwaShim: true, runtime: { getURL: (u) => u } };
+  } else if (chromeApi === "orphaned") {
+    ctx.chrome = {
+      runtime: {
+        id: undefined,
+        lastError: { message: "Extension context invalidated." },
+        sendMessage: (msg, cb) => { sent.push(msg); cb && cb(undefined); },
+      },
+    };
+  } else if (chromeApi) {
+    const silent = worker === "silent";
     ctx.chrome = {
       runtime: {
         id: "test",
         lastError: undefined,
-        sendMessage: (msg, cb) => { sent.push(msg); cb && cb({ opened: msg.urls.length }); },
+        sendMessage: (msg, cb) => {
+          sent.push(msg);
+          if (silent) {
+            ctx.chrome.runtime.lastError = { message: "Could not establish connection." };
+            cb && cb(undefined);
+            ctx.chrome.runtime.lastError = undefined;
+            return;
+          }
+          cb && cb({ opened: msg.urls.length, asked: msg.urls.length, failed: [] });
+        },
       },
       storage: {
         sync: {
@@ -575,14 +603,73 @@ console.log("\n--- Shift+Space ---");
     type: "open-background-tabs", urls: ["https://a.test/"],
   });
 }
+// ---------------------------------------------------------------------------
+// Never a tab that takes the reader with it
+//
+// Only the worker can open a tab that doesn't take focus. Where it can't be
+// reached there is no second-best: window.open would land the reader in the
+// new tab, which is the whole thing this shortcut exists to avoid, and which
+// made the same keypress behave differently from one tab to the next. So
+// nothing opens, and the toast says why.
+// ---------------------------------------------------------------------------
+
+console.log("\n--- with no worker to ask ---");
 {
-  // Outside the extension (the PWA build) there is no worker to ask.
+  // The hosted build (the PWA): a chrome shim, never a worker.
+  const page = makePage();
+  const { api, openedWindows, sent } = load(page, { chromeApi: "pwa" });
+  api.setPointer(50, 110);
+  const e = keyEvent();
+  api.onKeyDown(e);
+  check("the hosted build opens no focus-stealing tab", openedWindows, []);
+  check("...and asks no worker", sent.length, 0);
+  const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
+  check("...and says what it would take",
+    toast.textContent, "Opening links in the background needs the extension");
+  check("...and the key is still the shortcut's, not the page's", e.prevented, true);
+}
+{
+  // No chrome at all — the same answer.
   const page = makePage();
   const { api, openedWindows } = load(page, { chromeApi: false });
   api.setPointer(50, 110);
   api.onKeyDown(keyEvent());
-  check("with no extension API it falls back to window.open",
-    openedWindows, ["https://a.test/"]);
+  check("with no extension API at all, still nothing is opened in the reader's face",
+    openedWindows, []);
+}
+{
+  // The common one: the extension was reloaded or updated while this page sat
+  // open, so the content script is still running with nothing to talk to.
+  const page = makePage();
+  const { api, openedWindows, sent } = load(page, { chromeApi: "orphaned" });
+  api.setPointer(50, 110);
+  api.onKeyDown(keyEvent());
+  check("an orphaned content script opens nothing", [openedWindows, sent.length], [[], 0]);
+  const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
+  check("...and names the remedy",
+    toast.textContent, "Reload this page to open links — the extension was updated");
+}
+{
+  // The worker was asked and never answered: the toast reports that, rather
+  // than the tabs it hoped for.
+  const page = makePage();
+  const { api, sent, openedWindows } = load(page, { worker: "silent" });
+  api.setPointer(50, 110);
+  api.onKeyDown(keyEvent());
+  check("a silent worker is still asked once", sent.length, 1);
+  check("...and nothing is opened from the page instead", openedWindows, []);
+  const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
+  check("...and the toast doesn't claim a tab",
+    toast.textContent, "The extension didn't answer — no links opened");
+}
+{
+  // What the worker actually opened is what gets reported.
+  const page = makePage();
+  const { api } = load(page);
+  api.setPointer(50, 110);
+  api.onKeyDown(keyEvent());
+  const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
+  check("one link, one line", toast.textContent, "Opened link in a background tab");
 }
 
 // ---------------------------------------------------------------------------
