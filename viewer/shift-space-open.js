@@ -25,16 +25,21 @@
 // link in, the way intersectsNode() would.
 //
 // The tab itself is opened by the background worker (chrome.tabs.create with
-// active:false), because a page can't open an unfocused tab on its own — and
-// there is no second way of doing it. window.open puts the reader IN the new
-// tab, which is the one thing this shortcut exists to avoid. So when the
-// worker is out of reach the links don't open and a line says why, rather than
-// opening them the only way a page can. Falling back to window.open is what
-// made the shortcut feel unpredictable: the same keypress would open a link
-// quietly on one tab and yank the reader away on the next, for a reason
-// invisible from the page — the extension had been reloaded or updated
-// underneath it (the content script keeps running with nothing left to talk
-// to), or the page was the hosted build, which has no worker at all.
+// active:false), because a page can't open an unfocused tab on its own. Where
+// the worker can't be reached the links still open, by the only means a page
+// has — window.open, which puts the reader in the new tab. That is not what
+// the shortcut promises, and it is still better than a keypress that does
+// nothing, so the toast carries the difference instead: it says the tab came
+// to the front and what would have kept it behind.
+//
+// This is where the shortcut looked unpredictable, opening a link quietly on
+// one tab and pulling the reader away on the next, for a reason nothing on the
+// page showed. Two of them:
+//
+//   * The extension was reloaded or updated while a page sat open. The content
+//     script keeps running with nothing left to talk to (chrome.runtime.id is
+//     gone), and only reloading the page gets the worker back.
+//   * The page is the hosted build, which has no worker at all.
 //
 // Shift+Space is Chrome's "scroll up one screen". We call preventDefault ONLY
 // when we found at least one link to open — with no link in play the key
@@ -303,13 +308,23 @@
   // hosted build's shim (web-shim.js) has a runtime of its own and marks
   // itself, as does having no chrome at all: there is no worker to have.
   // Otherwise the extension is live and the worker simply didn't answer.
-  function unavailableMessage() {
+  function whyInFront() {
     const api = root.chrome;
-    if (!api || !api.runtime || api.__pwaShim) {
-      return "Opening links in the background needs the extension";
+    if (!api || !api.runtime || api.__pwaShim) return "background tabs need the extension";
+    if (!api.runtime.id) return "reload this page for background tabs";
+    return "the extension didn't answer";
+  }
+
+  // All a page can do by itself: open the tab in front of the reader. Not what
+  // the shortcut promises, and better than nothing happening — the toast is
+  // what carries the difference.
+  function openHere(urls) {
+    for (const url of urls) {
+      // `noopener` keeps the new tab from reaching back into this one. It also
+      // makes window.open return null whether it opened or was refused, so
+      // there is nothing here worth counting; the toast reports what was sent.
+      try { root.open(url, "_blank", "noopener"); } catch (e) { /* pop-up blocked */ }
     }
-    if (!api.runtime.id) return "Reload this page to open links — the extension was updated";
-    return "The extension didn't answer — no links opened";
   }
 
   // Hand the links to the worker and report what it did with them: the number
@@ -336,6 +351,16 @@
     } catch (e) {
       done(null); // context invalidated between the check and the send
     }
+  }
+
+  // "Opened link in a background tab", "Opened 9 of 40 links in new tabs" — the
+  // shape is the same wherever the tabs came from, and only the kind of tab
+  // changes. A short count of what a gesture did, which matters most where it
+  // isn't obvious (a big selection), and where the answer isn't the promised
+  // one (tabs that came to the front).
+  function countPhrase(n, asked, kind) {
+    if (n < asked) return `Opened ${n} of ${asked} links in ${kind}s`;
+    return n === 1 ? `Opened link in a ${kind}` : `Opened ${n} links in ${kind}s`;
   }
 
   // Background tabs open silently. A one-line confirmation says how many, which
@@ -391,23 +416,31 @@
     e.preventDefault();
     e.stopPropagation();
 
-    if (!canOpenUnfocused()) { toast(unavailableMessage()); return; }
-
     const opening = urls.slice(0, MAX_TABS);
+
+    // No worker to ask: open them here, in front of the reader, and say so.
+    // Done inside the keypress, where the browser still counts the gesture as
+    // the reason for the tabs and lets them through.
+    if (!canOpenUnfocused()) {
+      openHere(opening);
+      toast(`${countPhrase(opening.length, urls.length, "new tab")} — ${whyInFront()}`);
+      return;
+    }
+
     open(opening, (result) => {
-      if (!result) { toast(unavailableMessage()); return; }
+      // Asked, and no answer came: the worker went away, or the extension did.
+      // The links are worth more open than owed, so they open the other way.
+      if (!result) {
+        openHere(opening);
+        toast(`${countPhrase(opening.length, urls.length, "new tab")} — ${whyInFront()}`);
+        return;
+      }
       // The worker counts what it opened — the page's ceiling, its own
       // deduplication and any tab that refused to open are all in that number.
       const opened = typeof result.opened === "number" ? result.opened : opening.length;
-      toast(
-        opened === 0
-          ? "No links opened"
-          : opened < urls.length
-            ? `Opened ${opened} of ${urls.length} links in background tabs`
-            : opened === 1
-              ? "Opened link in a background tab"
-              : `Opened ${opened} links in background tabs`
-      );
+      toast(opened === 0
+        ? "No links opened"
+        : countPhrase(opened, urls.length, "background tab"));
     });
   }
 
