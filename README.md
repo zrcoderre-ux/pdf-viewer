@@ -909,7 +909,19 @@ app, which routes it to the reader tab.
   clipboard carries the passage under the pointer and never the line
   numbers down the side (they are blanked in the text layer, as the PDF
   viewer blanks them); a double click takes the word, a triple the row.
-  Display only — the layout lifts when the pane closes; remembered. With it off, a page whose text is not
+  Display only — the layout lifts when the pane closes; remembered. **The
+  members' PDFs open one at a time, in the order the file lists them.** A
+  combined export names two dozen documents, each with a PDF of its own, and
+  asking for them all as the pane is built meant two dozen files read whole,
+  parsed, every page measured and its text read for the line grid, all at once
+  and all competing, before a single page could be looked at — about a second
+  and a half on a 21-document case before anything was drawn, now a quarter of
+  one. They go through a queue: one document at a time, the first member's
+  pages ready while the twenty-first waits its turn, and whatever the reader
+  has actually scrolled to **jumps ahead of the rest** (a page coming into view
+  moves its PDF, and the reading of its grid, to the front). A page is worth
+  seeing before it is worth aligning, so each PDF's line grid is read after the
+  documents already waiting, and the pane re-aligns as it lands. With it off, a page whose text is not
   worth reading (an exhibit the OCR mangled) is **swapped**: the **⇄ PDF**
   button on the page's label shows the PDF page in the text's place, the
   rest staying text, and **⇄ PDF pages…** takes a run — `5, 12-18` — of the
