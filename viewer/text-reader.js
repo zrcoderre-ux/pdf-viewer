@@ -3175,6 +3175,7 @@ let swaps = new Set();      // "<pdf name>|<page>" swapped in
 const pdfCache = new Map(); // name → Promise<{ pdf, count, sizes, name }>
 
 function forgetPdfs() {
+  cancelPdfJobs();
   for (const p of pdfCache.values()) p.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }).catch(() => {});
   pdfCache.clear();
   pdfPicked = null;
@@ -3182,46 +3183,104 @@ function forgetPdfs() {
   pickedByMember = new Map();
 }
 
-/** Open (once) the PDF behind a source: its page count and each page's size at scale 1. */
-function loadPdf(src) {
-  if (pdfCache.has(src.name)) return pdfCache.get(src.name);
-  const p = (async () => {
-    const file = src.file || await src.handle.getFile();
-    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
-    const sizes = [];
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const v = (await pdf.getPage(i)).getViewport({ scale: 1 });
-      sizes.push({ w: v.width, h: v.height });
-    }
-    const info = { pdf, count: pdf.numPages, sizes, name: src.name, lines: sizes.map(() => null), geoms: sizes.map(() => null), rows: sizes.map(() => null) };
-    // Where each page's FIRST printed line sits (the side-by-side anchor)
-    // and its LINE GRID (pdfsync.pleadingGeometry, from the numbers down its
-    // margin): read in the background, the pane re-aligning as it lands.
-    (async () => {
-      for (let i = 1; i <= pdf.numPages; i++) {
-        try {
-          const tc = await (await pdf.getPage(i)).getTextContent();
-          const sz = sizes[i - 1];
-          const items = [];
-          let top = Infinity;
-          for (const it of tc.items) {
-            if (!it.str || !it.transform) continue;
-            const t = sz.h - (it.transform[5] + (it.height || 0));
-            if (it.str.trim() && t >= 0 && t < top) top = t;
-            items.push({ str: it.str, x: it.transform[4], top: t, w: it.width || 0, h: it.height || 0 });
-          }
-          info.lines[i - 1] = isFinite(top) ? top : null;
-          info.geoms[i - 1] = PS.pleadingGeometry(items, sz);
-          info.rows[i - 1] = PS.pdfRows(items, sz);
-        } catch { info.lines[i - 1] = null; }
+// ── opening the PDFs: ONE AT A TIME, in the order they appear ─────────────────────
+//
+// A Combined Text.txt names two dozen documents, each with a PDF of its own, and
+// side by side asks every slot for its page size as the pane is built. Every one
+// of those asks used to open its PDF there and then: two dozen files read whole
+// into memory, parsed, every page measured and its text read for the line grid,
+// all at once and all competing, before a single page could be looked at.
+//
+// They go through a queue instead. One document is opened at a time, in the
+// order the pane asked — which is the order the combined file lists them — so
+// the first member's pages are ready while the twenty-first is still waiting its
+// turn. Whatever the reader has actually scrolled to jumps the queue: a slot
+// coming into view asks with `now`, which moves that PDF (and the reading of its
+// grid) to the front.
+const pdfJobs = [];        // queued work, each tagged with the PDF it is for
+let pdfJobBusy = false;
+function pumpPdfJobs() {
+  if (pdfJobBusy) return;
+  pdfJobBusy = true;
+  (async () => {
+    try {
+      while (pdfJobs.length) {
+        const job = pdfJobs.shift();
+        try { await job.run(); } catch { /* whoever asked for it reports it */ }
       }
-      if (sbsOn && !pdfPane.hidden) { applyMatchedLayout(); syncScroll("text", true); }
-    })();
-    return info;
+    } finally { pdfJobBusy = false; }
   })();
+}
+/** Everything queued for one PDF to the front, keeping the order it was asked in. */
+function bumpPdfJobs(name) {
+  const mine = [];
+  for (let i = pdfJobs.length - 1; i >= 0; i--) if (pdfJobs[i].name === name) mine.unshift(pdfJobs.splice(i, 1)[0]);
+  if (mine.length) pdfJobs.unshift(...mine);
+}
+/** Drop what is still queued — the document being read has changed under it. */
+function cancelPdfJobs() {
+  for (const job of pdfJobs.splice(0, pdfJobs.length)) if (job.cancel) job.cancel();
+}
+
+/**
+ * Open (once) the PDF behind a source: its page count and each page's size at
+ * scale 1. `now` is for a page on screen — it goes to the head of the queue.
+ */
+function loadPdf(src, { now = false } = {}) {
+  const held = pdfCache.get(src.name);
+  if (held) { if (now) bumpPdfJobs(src.name); return held; }
+  let settle = null;
+  const p = new Promise((res, rej) => { settle = { res, rej }; });
   pdfCache.set(src.name, p);
-  p.then((info) => { p.__info = info; }).catch(() => pdfCache.delete(src.name));
+  p.then((info) => { p.__info = info; }).catch(() => { if (pdfCache.get(src.name) === p) pdfCache.delete(src.name); });
+  const job = {
+    name: src.name,
+    run: () => openPdf(src).then(settle.res, settle.rej),
+    cancel: () => settle.rej(Object.assign(new Error("cancelled"), { cancelled: true })),
+  };
+  if (now) pdfJobs.unshift(job); else pdfJobs.push(job);
+  pumpPdfJobs();
   return p;
+}
+async function openPdf(src) {
+  const file = src.file || await src.handle.getFile();
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  const sizes = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const v = (await pdf.getPage(i)).getViewport({ scale: 1 });
+    sizes.push({ w: v.width, h: v.height });
+  }
+  const info = { pdf, count: pdf.numPages, sizes, name: src.name, lines: sizes.map(() => null), geoms: sizes.map(() => null), rows: sizes.map(() => null) };
+  // The line grid comes after the documents already waiting: a page is worth
+  // seeing before it is worth aligning, and the pane re-aligns as it lands.
+  pdfJobs.push({ name: src.name, run: () => readPdfGrid(info) });
+  pumpPdfJobs();
+  return info;
+}
+/**
+ * Where each page's FIRST printed line sits (the side-by-side anchor) and its
+ * LINE GRID (pdfsync.pleadingGeometry, from the numbers down its margin).
+ */
+async function readPdfGrid(info) {
+  const { pdf, sizes } = info;
+  for (let i = 1; i <= pdf.numPages; i++) {
+    try {
+      const tc = await (await pdf.getPage(i)).getTextContent();
+      const sz = sizes[i - 1];
+      const items = [];
+      let top = Infinity;
+      for (const it of tc.items) {
+        if (!it.str || !it.transform) continue;
+        const t = sz.h - (it.transform[5] + (it.height || 0));
+        if (it.str.trim() && t >= 0 && t < top) top = t;
+        items.push({ str: it.str, x: it.transform[4], top: t, w: it.width || 0, h: it.height || 0 });
+      }
+      info.lines[i - 1] = isFinite(top) ? top : null;
+      info.geoms[i - 1] = PS.pleadingGeometry(items, sz);
+      info.rows[i - 1] = PS.pdfRows(items, sz);
+    } catch { info.lines[i - 1] = null; }
+  }
+  if (sbsOn && !pdfPane.hidden) { applyMatchedLayout(); syncScroll("text", true); }
 }
 const PDF_LINE_DEFAULT = 72 / 792; // an inch down a letter page, until the PDF says
 /** A slot's first printed line, in px from the slot's top, from the PDF loaded so far. */
@@ -3324,8 +3383,12 @@ async function renderInto(el, src, pageNo, cssWidth) {
   if (el.dataset.rendered === want) return;
   el.dataset.want = want;
   let info;
-  try { info = await loadPdf(src); }
-  catch (e) { el.querySelector(".pdf-wait").textContent = "Could not open " + src.name + ": " + (e.message || e); return; }
+  try { info = await loadPdf(src, { now: true }); }
+  catch (e) {
+    if (e && e.cancelled) return; // the document being read changed under it
+    el.querySelector(".pdf-wait").textContent = "Could not open " + src.name + ": " + (e.message || e);
+    return;
+  }
   if (el.dataset.want !== want) return;
   if (pageNo > info.count) { el.querySelector(".pdf-wait").textContent = `The PDF has ${info.count} page${info.count === 1 ? "" : "s"}; there is no page ${pageNo}.`; return; }
   const page = await info.pdf.getPage(pageNo);
@@ -4107,6 +4170,11 @@ window.__textReaderLeaks = () => (leaks ? {
 window.__textReaderLeaksBytes = async () => Array.from(await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, LK.fixEdits(leaks.parsed)));
 window.__textReaderPickPdfs = (files) => usePickedPdfs(files);
 window.__textReaderPdfSources = () => pdfSources.map((s) => (s ? s.name : null));
+window.__textReaderPdfQueue = () => ({
+  queued: pdfJobs.map((j) => j.name),
+  busy: pdfJobBusy,
+  open: [...pdfCache.keys()].filter((n) => { const p = pdfCache.get(n); return !!(p && p.__info); }),
+});
 window.__textReaderMaster = (bytes, name) => readMasterBytes(new Uint8Array(bytes), name);
 window.__textReaderMasterState = () => ({
   info: masterInfo, keeps: masterKeeps.map((k) => k.control + ":" + k.value),
