@@ -10,6 +10,7 @@ import {
   isLeaksName, leaksRank, headerIndex, sheetsLookLikeLeaks, leaksSheet, parseLeaks, classifyFix, isKeepKind,
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
   packDecisions, unpackDecisions, decisionsKey, CONTEXT_RULE,
+  isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
 
@@ -109,6 +110,40 @@ check("unsaved decisions remembered with the cell they replace", packed, { 2: { 
   check("…but never over a cell somebody typed since", [unpackDecisions(changed, packed), changed[0].fix], [1, "never"]);
 }
 check("the store key names folder and file", decisionsKey("Rasho v Quillmark", "LEAKS.xlsx"), "textReader.leaks.Rasho v Quillmark/LEAKS.xlsx");
+
+// ---- the master workbook's KEEP sheet -------------------------------------------
+console.log("\nthe master workbook");
+check("the workbook by name", [isMasterName("Master Leaks.xlsx"), isMasterName("master_leaks.xlsx"), isMasterName("Master Leaks (1).xlsx"), isMasterName("LEAKS.xlsx"), isMasterName("pseudonym_key.xlsx")],
+  [true, true, true, false, false]);
+{
+  // The two sheets PDF-Linker writes. The tally has no Fix? column, which is
+  // what keeps it from being read as a list of decisions.
+  const sheets = [
+    { name: "Master Leaks", rows: [["Value", "Type", "Times Seen", "Cases", "First Seen", "Last Seen"], ["Helen Rasho", "person", 12, 3, "2026-01-02", "2026-09-01"]] },
+    { name: "KEEP", rows: [
+      ["Value", "Fix? (yes/no)", "Type", "Times Seen", "Cases", "First Seen", "Last Seen", "Notes", "Origin"],
+      ["David W. Slayton", "no", "person", 41, 12, "2026-01-02", "2026-09-10", "Court's Executive Officer", "Strangeways"],
+      ["Stockton Theatres", "never", "entity", 9, 4, "", "", "a cited decision", ""],
+      ["Careau", "[Careau]", "entity-token", 3, 1, "", "", "whole value kept", ""],
+      ["David W. Slayton Jr", "[David]", "person", 2, 1, "", "", "part only", ""],
+      ["Quillmark", "yes", "entity", 5, 2, "", "", "faked as usual", ""],
+      ["", "no", "", "", "", "", "", "", ""],
+    ] },
+  ];
+  check("the KEEP sheet is found and the tally passed over", masterKeepSheet(sheets).name, "KEEP");
+  check("a workbook with a KEEP sheet reads as the master", sheetsLookLikeMaster(sheets), true);
+  check("a LEAKS workbook does not", sheetsLookLikeMaster([{ name: "LEAKS", rows: [["Value", "Fix?"], ["x", ""]] }]), false);
+  const m = parseMasterKeeps(sheets, "Master Leaks.xlsx");
+  check("the standing keeps, whole values only", m.keeps.map((k) => k.control + ":" + k.value),
+    ["no:David W. Slayton", "never:Stockton Theatres", "no:Careau"]);
+  check("a keep of part of a value is counted, not applied", m.partial.map((p) => p.value + "→" + p.parts.join("+")), ["David W. Slayton Jr→David"]);
+  check("a yes is not a keep", m.keeps.some((k) => /Quillmark/.test(k.value)), false);
+  check("a row with no value is skipped, as PDF-Linker skips it", m.rows, 5);
+  check("the note comes across", m.keeps[0].note, "Court's Executive Officer");
+  let threw = "";
+  try { parseMasterKeeps([{ name: "Sheet1", rows: [["a"]] }], "Book.xlsx"); } catch (e) { threw = e.message; }
+  check("a workbook with no KEEP sheet says so", /no "KEEP" sheet/.test(threw), true);
+}
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

@@ -798,6 +798,58 @@ app, which routes it to the reader tab.
   VALUE` line, which PDF-Linker reads as the worksheet's own decision on the
   run that actually restores the files. The **Flagged** panel lists both
   kinds, each withdrawable.
+- **A keep stays visible.** A value kept is a decision, and with the orange
+  mark gone (it is not a leak any more) nothing used to say so — the name read
+  like any other word, and a page read a week later gave no sign which names
+  had been left alone on purpose. Every kept value standing in the clear now
+  carries the **same dotted mark a kept pseudonym** does, counted in the status
+  bar ("3 kept values standing as they read"), for the rest of the session and
+  every session after: the keeps themselves are remembered per case.
+- **The master workbook's keeps, in force everywhere.** PDF-Linker keeps one
+  workbook across every matter — `Master Leaks.xlsx`, wherever
+  `master_leaks_path` points — and its **KEEP sheet** is the settled answer to
+  "leave this alone": the Clerk's own name, a cited decision's party, every
+  value already ruled on, with its Times Seen and the folders it has protected.
+  **Load master workbook…** (the Flagged panel) reads that sheet and holds
+  those values kept **without being asked again** — they are not flagged as
+  leaks, not rewritten to a pseudonym on save, and marked like any other keep,
+  in this case and every other. The workbook is **chosen once**: the browser
+  will not read a path on its own, so its handle is remembered (as case folders
+  are) and attached by every reader tab at startup; when the browser wants the
+  grant renewed, the panel offers it in one click rather than asking silently.
+  Dropping the workbook on the reader attaches it for the session. The panel
+  says how many standing keeps are in force and lists **the ones standing in
+  the open document** — the values it would otherwise have flagged. Only keeps
+  of a WHOLE value are applied: a bracketed spec that keeps part of a value
+  ("`[David]` W. Slayton") says that part stands inside that value, not that
+  the part stands everywhere, so those rows are counted and left to PDF-Linker
+  rather than widened into a rule the reader would apply to any "David". The
+  workbook's other sheet, the "Master Leaks" tally of genuine leaks, is not
+  read: it has no Fix? column, so the header rule passes over it. Nothing is
+  ever written back to it — withdrawing a standing keep is done in the
+  workbook, and the reader's right-click says so.
+- **Or keep it at one place only.** Both of those keeps are decisions about a
+  *value*, and neither fits the name on every document: the Clerk's own
+  signature block. Fake the "David" of *David W. Slayton* and the pseudonym
+  standing there also stands for a party's "David" — which tells the reader
+  the party is a David too. Keep "David" for the whole case and every David
+  in it comes back. So the menu's third, narrowest choice is **Keep just this
+  one (here only)**: *this* occurrence reads as itself, and every other
+  occurrence of the value goes on being faked. It is an edit, not an
+  instruction for the next run — the value stands in the clear at that place,
+  the save writes it as it reads, the orange leak mark leaves it alone and the
+  save's own assertion lets it through, all at that place only. A name wrapped
+  over two numbered lines is kept whole, both halves together. An **unfaked**
+  real name takes the same choice from its own right-click, which is how one
+  occurrence is left as it stands without keeping the value everywhere.
+  Kept spots are marked with the same dotted underline a kept pseudonym
+  carries, are listed under **Flagged** with their page (click to go to one,
+  **×** to fake it there after all), ride along with **undo and redo**, and are
+  **remembered per document**, so reopening the export finds them again — which
+  is what keeps the reader from reading the value as a leak the next time. They
+  go nowhere near `New Real Values.txt`: a place in one file is not something
+  PDF-Linker's value-level rules can be told, so a re-run of PDF-Linker, which
+  writes the exports again from the PDFs, fakes it once more.
 - **Reading tools from the PDF viewer.** **↓ Auto-scroll** (or **A**) creeps
   the document at a reading pace, **[** and **]** slow and speed it, Space
   pauses; **Shift + Space** opens the citation under the pointer, or every
@@ -811,7 +863,17 @@ app, which routes it to the reader tab.
   PDF's name forward through the key (a `Combined Text.txt` is matched member
   by member off its banners); where nothing matches — a lone file, a folder
   with no key — **⇄ PDF pages…** offers **Pick PDF…**, and a dropped `.pdf`
-  is taken the same way. The PDF is read only when it is first shown.
+  is taken the same way. A pane with nothing to show **says which of the
+  three things is missing**, since "no PDF matches" read as a matching
+  failure when usually there was nothing to match: no case folder open means
+  no PDFs at all (and the pane offers to open one), no key means the names
+  cannot be compared — a PDF keeps its real name and the export is named for
+  the same stem scrubbed, so only the key can tell that
+  `Rasho v Quillmark - MTC.pdf` is `Strangeways v Melbury - MTC.txt` — and
+  with PDFs and a key in hand it says the names simply do not meet. The
+  suffixes are never the difficulty: `.pdf`, `.txt` and `.txt.LEAK` all come
+  off before the comparison, and a combined file's 21 members match their 21
+  PDFs by name through the key. The PDF is read only when it is first shown.
   **⇔ Side by side** opens the PDF in a pane beside the text, one PDF page
   per text page, and lays each text page out on **its PDF page's own
   geometry**: the same width and height, label and all, and — where the
