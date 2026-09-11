@@ -1713,39 +1713,78 @@ function placeCitations() {
   for (const m of maps) m.body.nextElementSibling.innerHTML = "";
   const seen = new Map();
   let linked = 0;
+  // The page a citation fell on, by binary search over the pages' offsets
+  // rather than a walk from the first page for each one: a thousand-page
+  // export has thousands of citations, and the walk makes that a product.
+  const pageAt = (s, e) => {
+    let lo = 0, hi = maps.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const m = maps[mid];
+      if (s < m.base) hi = mid - 1;
+      else if (s >= m.base + m.len + 2) lo = mid + 1;
+      else return e <= m.base + m.len ? m : null; // a span across two pages is neither's
+    }
+    return null;
+  };
+  // Each page measured ONCE, however many citations land on it: its own box,
+  // and the gutter numbers a wrapped citation may run across. Reading them
+  // per citation measured every number on the page again for each one.
+  const measure = (m) => {
+    if (!m.rect) {
+      m.rect = m.body.getBoundingClientRect();
+      m.gutters = [...m.body.querySelectorAll(".gutter")].map((g) => ({ el: g, box: g.getBoundingClientRect() }));
+    }
+    return m;
+  };
+  // EVERY measurement first, the underlines after. An underline is a box the
+  // layout has to account for, so measuring one page, drawing its links, then
+  // measuring the next makes the browser lay the document out again for each
+  // page in turn — on a long export, most of the time the open takes. One
+  // read pass, then one write pass, and the layout is done once.
+  const plans = [];
   for (const c of found) {
     const url = resolveUrl(c, citationRepo, provider);
     if (!url) continue;
     if (!seen.has(c.key)) seen.set(c.key, { key: c.key, kind: c.kind, url });
     const [s, e] = c.span;
-    const m = maps.find((x) => s >= x.base && e <= x.base + x.len);
+    const m = pageAt(s, e);
     if (!m) continue;
     const range = rangeFor(m.segs, s - m.base, e - m.base);
     if (!range) continue;
-    const layer = m.body.nextElementSibling;
-    const bodyRect = m.body.getBoundingClientRect();
-    const kind = c.isSupra || c.isShortForm ? "supra" : c.kind;
+    const bodyRect = measure(m).rect;
     // A cite that wraps onto a numbered line spans the gutter number it was
     // detected across; the number is not part of the citation and gets no
     // underline.
-    const gutters = [...m.body.querySelectorAll(".gutter")]
-      .filter((g) => range.intersectsNode(g))
-      .map((g) => g.getBoundingClientRect());
+    const gutters = m.gutters.filter((g) => range.intersectsNode(g.el)).map((g) => g.box);
+    const strips = [];
     for (const r of range.getClientRects()) {
       if (r.width < 1) continue;
       if (gutters.some((g) => r.left >= g.left - 0.5 && r.right <= g.right + 0.5 && r.top >= g.top - 0.5 && r.bottom <= g.bottom + 0.5)) continue;
-      const a = document.createElement("a");
-      a.className = "cite-link kind-" + kind;
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.title = c.key;
-      a.style.left = (r.left - bodyRect.left) + "px";
-      a.style.top = (r.bottom - bodyRect.top - 6) + "px";
-      a.style.width = r.width + "px";
-      layer.appendChild(a);
+      strips.push({ left: r.left - bodyRect.left, top: r.bottom - bodyRect.top - 6, width: r.width });
+    }
+    if (strips.length) {
+      plans.push({
+        layer: m.body.nextElementSibling,
+        kind: c.isSupra || c.isShortForm ? "supra" : c.kind,
+        url, key: c.key, strips,
+      });
     }
     linked++;
+  }
+  for (const p of plans) {
+    for (const r of p.strips) {
+      const a = document.createElement("a");
+      a.className = "cite-link kind-" + p.kind;
+      a.href = p.url;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.title = p.key;
+      a.style.left = r.left + "px";
+      a.style.top = r.top + "px";
+      a.style.width = r.width + "px";
+      p.layer.appendChild(a);
+    }
   }
   lastCites = [...seen.values()];
   $("st-cites").textContent = linked ? `${linked} citation${linked === 1 ? "" : "s"} linked` : "";
@@ -3289,31 +3328,55 @@ function refitPdf() {
 }
 
 // ── swapping pages in ──
-function isSwapped(i) { const t = pdfTarget(i); return !!(t && swaps.has(t.key)); }
 function refreshSwapButtons() {
-  for (const sec of pagesEl.querySelectorAll(".tpage")) {
-    const b = sec.querySelector(".swap-page");
-    if (!b) continue;
+  // ONE query for every button, rather than asking each page for its own:
+  // a page's own query walks that page's whole subtree, and a thousand of
+  // those cost more than the rest of the open put together.
+  for (const b of pagesEl.querySelectorAll(".swap-page")) {
+    const sec = b.closest(".tpage");
+    if (!sec) continue;
     const i = Number(sec.dataset.index);
     const t = pdfTarget(i);
-    const on = isSwapped(i);
+    const on = !!t && swaps.has(t.key);
     b.classList.toggle("nopdf", !t);
-    b.textContent = on ? "⇄ Text" : "⇄ PDF";
-    b.title = !t ? "No PDF matched this document — ⇄ PDF pages… in the toolbar picks one" : on ? "Back to the text of this page" : `Show PDF page ${t.page} here instead of its text`;
+    // Written only where it changed. Rewriting text that already reads the
+    // same is not free: every live Range in the document — and a page of
+    // citation underlines and highlighted names leaves thousands behind —
+    // is asked to re-measure itself on each character-data change, so a
+    // thousand idle rewrites cost more than drawing the underlines did.
+    const label = on ? "⇄ Text" : "⇄ PDF";
+    if (b.textContent !== label) b.textContent = label;
+    const title = !t ? "No PDF matched this document — ⇄ PDF pages… in the toolbar picks one" : on ? "Back to the text of this page" : `Show PDF page ${t.page} here instead of its text`;
+    if (b.title !== title) b.title = title;
   }
 }
 /** Show or hide the PDF page inside each swapped text page (never while side by side). */
 function applySwaps() {
+  // A PDF page coming into a text page, or leaving it, moves the text below
+  // it and the citation underlines with it. Nothing swapped, nothing moved:
+  // a document that opens with no pages swapped — which is most of them —
+  // does not need its citations placed a second time, and on a long export
+  // that second pass is as slow as the first.
+  let moved = false;
+  // The pages that already show a PDF page, found in one query for the same
+  // reason (see refreshSwapButtons).
+  const inlines = new Map();
+  for (const el of pagesEl.querySelectorAll(".pdf-inline")) {
+    const sec = el.closest(".tpage");
+    if (sec) inlines.set(sec, el);
+  }
   for (const sec of pagesEl.querySelectorAll(".tpage")) {
     const i = Number(sec.dataset.index);
     const t = pdfTarget(i);
     const on = !sbsOn && !!t && swaps.has(t.key);
+    if (sec.classList.contains("swapped") !== on) moved = true;
     sec.classList.toggle("swapped", on);
-    let inline = sec.querySelector(".pdf-inline");
+    let inline = inlines.get(sec) || null;
     if (on) {
       if (!inline) {
         inline = slotShell("pdf-inline", "PDF p. " + t.page);
         sec.querySelector(".page-inner").appendChild(inline);
+        moved = true;
       }
       if (inline.dataset.page !== String(t.page) || inline.dataset.src !== t.src.name) {
         inline.dataset.page = String(t.page);
@@ -3322,17 +3385,19 @@ function applySwaps() {
         inline.classList.remove("ready");
         inline.querySelector(".pdf-tag").textContent = "PDF p. " + t.page;
         presize(inline, t.src, t.page, inlineWidth(sec));
+        moved = true;
       }
       inlineObserver.observe(inline);
     } else if (inline) {
       inlineObserver.unobserve(inline);
       if (inline.__task) { try { inline.__task.cancel(); } catch { /* done */ } }
       inline.remove();
+      moved = true;
     }
   }
   refreshSwapButtons();
   updatePdfStatus();
-  placeCitations();
+  if (moved) placeCitations();
 }
 function persistSwaps() { lsSet(PS.swapStoreKey(folderName, fileName), [...swaps]); }
 function setSwaps(indices, on) {

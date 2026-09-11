@@ -856,6 +856,24 @@ app, which routes it to the reader tab.
   document by PDF page number. Rendered pages are dropped as they scroll far
   out of view, so a long PDF costs no more than the pages in reach.
 
+- **A long export opens in one go.** A `Combined Text.txt` carrying a whole
+  case — a thousand pages, every citation in them underlined and every name
+  from the key put back — is laid out, linked and highlighted in one pass,
+  without Chrome offering to stop the page. Three things had made the open
+  cost the square of the document's length rather than its length: the
+  citation detector looked for a `", et al."` before each `v.` by scanning
+  everything before it, and found the start of each line by scanning back
+  over the line breaks it had already joined; the reader measured every page
+  again for each citation on it, and drew each underline between two
+  measurements, so the browser laid the whole document out again for every
+  page; and a page's own `querySelector` walked that page's whole subtree,
+  once per page, to find a button on it. Each is now done once, a window or a
+  carried position rather than a scan, and every measurement is taken before
+  the first underline is drawn. A thousand-page export that took half a
+  minute opens in about four seconds, with byte-identical underlines, links,
+  Table of Authorities, pseudonyms and counts. `node test-long-export-scan.mjs`
+  holds the detector's cost to the document's length.
+
 The decisions live in `viewer/textdoc.js` (the page model, the DOM-to-disk
 walk, the values file), `viewer/pseudo-key.js` (the key, a port of the
 Claude extension's `src/pseudo.js`) and `viewer/pdfsync.js` (which PDF an
@@ -866,7 +884,8 @@ means, where a row points) and `viewer/xlsx-write.js` (the Fix? cells
 written back into the same workbook, every other part copied through);
 `node test-textdoc.mjs`, `node test-pseudo-key.mjs`, `node test-pdfsync.mjs`,
 `node test-xlsx-read.mjs`, `node test-xlsx-write.mjs` and `node test-leaks.mjs`
-cover them.
+cover them, and `node test-long-export-scan.mjs` covers what a long export
+costs to scan.
 
 ## Install
 
@@ -922,6 +941,7 @@ viewer/xlsx-read.js                  Minimal .xlsx reader (pure; test-xlsx-read.
 viewer/xlsx-write.js                 Writes cells back into an .xlsx, the rest copied through (pure; test-xlsx-write.mjs)
 viewer/leaks.js                      Text reader's LEAKS.xlsx model: rows, Fix? cells, where a row points (pure; test-leaks.mjs)
 viewer/web-shim.js                   chrome.* shim for the hosted (PWA) pages
+viewer/theme-boot.js                 Saved theme applied before first paint (viewer + reader)
 viewer/viewer.css                    Page + textLayer + linkLayer styles
 viewer/viewer.js                     PDF.js loader, two-pass renderer
 viewer/autoscroll.js                 Auto-scroll engine + control bar

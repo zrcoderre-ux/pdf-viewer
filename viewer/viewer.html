@@ -6,10 +6,7 @@
   <link rel="stylesheet" href="viewer.css">
   <!-- Apply the saved theme before first paint so light mode doesn't flash dark
        on load. viewer.js keeps this localStorage key in sync with the toggle. -->
-  <script>
-    try { if (localStorage.getItem("pdfViewerTheme") === "light")
-      document.documentElement.setAttribute("data-theme", "light"); } catch (e) {}
-  </script>
+  <script src="theme-boot.js"></script>
 </head>
 <body>
   <!-- Pages / Bookmarks column down the right margin. -->
