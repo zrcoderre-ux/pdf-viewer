@@ -392,6 +392,11 @@ function lookupForward(compiled, m) {
 // PDF-Linker reads it on its next pass over the folder as if each line had
 // been given with --term. Lines opening with # are comments. No underscores
 // in the name, by the owner's rule for documents.
+//
+// The file is a HANDOVER, not a record: a run that applies it deletes it, so
+// the next run is not handed the same values again and the folder does not
+// keep a list of real names lying beside the exports. Its absence is
+// therefore the run's answer, which valuesApplied reads (see below).
 
 export const VALUES_FILE = "New Real Values.txt";
 
@@ -404,6 +409,8 @@ const VALUES_HEAD = [
   "# that should be left as it is in this case (a cited decision's name); a",
   "# line 'never: VALUE' keeps it in every case. Lines beginning with # are",
   "# ignored. Delete a line to withdraw it.",
+  "# PDF-Linker DELETES this file once a run has applied it; the reader reads",
+  "# it gone as the values having been faked and takes them off its list.",
 ];
 
 // A keep line: `no: VALUE` (this case) or `never: VALUE` (every case).
@@ -480,6 +487,26 @@ export function parseReaderFile(text) {
     else values.push(v);
   }
   return { values, keeps };
+}
+
+/**
+ * The list once PDF-Linker has taken the file away. A run that applies the
+ * file deletes it, and that deletion is the only word the reader gets that
+ * the values were used: they are faked in the exports now, so they come off
+ * the list. `handed` is what the last save into the case folder wrote, so a
+ * value flagged since that save — never in the file, never applied — stays.
+ * The keeps stand either way: `no` / `never` are decisions about the value,
+ * not one run's work, and the master workbook, not this file, is where
+ * PDF-Linker keeps them.
+ *
+ * Returns { values, keeps, applied }.
+ */
+export function valuesApplied({ values, keeps, handed } = {}) {
+  const gone = new Set((handed || []).map((v) => foldKey(v)));
+  const kept = [];
+  const applied = [];
+  for (const v of values || []) (gone.has(foldKey(v)) ? applied : kept).push(v);
+  return { values: kept, keeps: (keeps || []).slice(), applied };
 }
 
 /**

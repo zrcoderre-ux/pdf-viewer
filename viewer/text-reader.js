@@ -24,7 +24,8 @@
 //   the save refuses rather than break it.
 //   FLAGGING. A name the run left in the clear is selected and flagged; the
 //   list is written to New Real Values.txt in the case folder, which
-//   PDF-Linker reads on its next pass.
+//   PDF-Linker reads on its next pass and then deletes — the file gone is the
+//   run saying it applied the list, and the reader clears those values.
 //   LEAKS. PDF-Linker's LEAKS.xlsx, the leak-triage worksheet, is worked row
 //   by row: the row in a bar above the text, the text opened at its page and
 //   line, the decision written into the row's own Fix? cell.
@@ -106,6 +107,7 @@ let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
 let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
+let handed = [];             // …and what the last save into the case folder handed the run
 let spots = [];              // spot keeps for the open document: [{ page, value, nth }]
 let masterKeeps = [];        // standing keeps from PDF-Linker's master workbook (its KEEP sheet)
 let masterInfo = null;       // { name, sheet, rows, partial } once it is attached
@@ -652,17 +654,34 @@ async function adoptFolder(h, { quiet = false } = {}) {
   const stored = readStoredValues(VALUES_PREFIX + folderName);
   flagged = stored.values;
   keeps = stored.keeps;
+  handed = stored.handed;
+  let applied = [];
   if (found.valuesHandle) {
     try {
       const onDisk = TD.parseReaderFile(await (await found.valuesHandle.getFile()).text());
       for (const v of onDisk.values) flagged = TD.addValue(flagged, v);
       for (const k of onDisk.keeps) if (!TD.keptControl(keeps, k.value)) keeps = TD.addKeep(keeps, k.control, k.value);
     } catch { /* unreadable: the in-memory list stands */ }
+  } else if (handed.length) {
+    // The file was written into this folder and is not there now: PDF-Linker
+    // deletes it on the run that applies it, so those values are faked in the
+    // exports and come off the list. Anything flagged since that save stays.
+    const after = TD.valuesApplied({ values: flagged, keeps, handed });
+    flagged = after.values;
+    keeps = after.keeps;
+    applied = after.applied;
+    handed = [];
   }
   persistValues();
   compileKey();
   renderFlags();
   renderDocList();
+  // Said even on a quiet attach: the list emptying is the operator's own
+  // work being retired, not folder housekeeping to pass over in silence.
+  if (applied.length) {
+    toast(`PDF-Linker has taken ${TD.VALUES_FILE} from ${folderName}: ${applied.length} flagged value${applied.length === 1 ? " is" : "s are"} faked in these exports now, and off the list.`,
+      { ms: 6000 });
+  }
   // The folder's own leak worksheet, attached as its key is; one from
   // another folder is dropped, since its rows name that folder's files.
   if (found.leaksHandle) {
@@ -2475,14 +2494,15 @@ function valuesStoreKey() { return VALUES_PREFIX + (folderName || fileName || "l
 // Remembered per document, like its swapped pages.
 function spotStoreKey() { return SPOTS_PREFIX + (folderName || "") + "/" + (fileName || ""); }
 function persistSpots() { lsSet(spotStoreKey(), spots); }
-// Stored as { values, keeps }; an older build stored the values list bare.
+// Stored as { values, keeps, handed }; an older build stored the values list
+// bare, and one before `handed` stored no record of what a save handed over.
 function readStoredValues(k) {
   const v = lsGet(k, null);
-  if (Array.isArray(v)) return { values: v, keeps: [] };
-  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [] };
+  if (Array.isArray(v)) return { values: v, keeps: [], handed: [] };
+  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [], handed: (v && v.handed) || [] };
 }
-function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; keeps = st.keeps; compileKey(); renderFlags(); }
-function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps }); }
+function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; keeps = st.keeps; handed = st.handed; compileKey(); renderFlags(); }
+function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps, handed }); }
 
 function renderFlags() {
   flagsList.innerHTML = "";
@@ -2524,7 +2544,7 @@ function renderFlags() {
     flagsList.appendChild(li);
   }
   flagsNote.textContent = dirHandle
-    ? `Saves to ${folderName}/${TD.VALUES_FILE}.`
+    ? `Saves to ${folderName}/${TD.VALUES_FILE}; PDF-Linker deletes the file on the run that applies it, and the list clears here.`
     : "No case folder is open: the list is remembered here and can be saved anywhere or copied.";
 }
 
@@ -2655,7 +2675,10 @@ async function saveValuesFile() {
       const w = await h.createWritable();
       await w.write(new Blob([text], { type: "text/plain" }));
       await w.close();
-      toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep) into ${folderName} — re-run PDF-Linker to apply them to the files.`);
+      handed = flagged.slice();
+      persistValues();
+      toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep) into ${folderName} — re-run PDF-Linker to apply them to the files. The run deletes the file when it has; the reader reads that as done and clears the list.`,
+        { ms: 6000 });
       return;
     } catch (e) {
       toast("Could not write into the folder (" + (e.message || e) + ") — choose where to save.", { error: true });

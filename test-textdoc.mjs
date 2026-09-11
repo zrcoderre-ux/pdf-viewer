@@ -11,7 +11,7 @@ import {
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, blankRanges, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
-  addValue, removeValue, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
+  addValue, removeValue, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, valuesApplied,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward } from "./viewer/pseudo-key.js";
@@ -227,6 +227,15 @@ const both = formatValuesFile(list, keeps);
 check("keeps written as control lines", both.endsWith("\nno: Palermo\nnever: Stockton Theatres\n"), true);
 check("both halves read back", parseReaderFile(both), { values: list, keeps });
 check("parseValuesFile ignores the keeps", parseValuesFile(both), list);
+// A run that applies the file deletes it; the reader reads the file gone as
+// the values having been faked, and only the ones it actually handed over.
+const consumed = valuesApplied({ values: ["Rosa Delgado", "Sunbelt Rentals LLC", "Ada Quillmark"], keeps, handed: ["rosa  delgado", "Sunbelt Rentals LLC"] });
+check("the handed values come off the list", consumed.values, ["Ada Quillmark"]);
+check("…and are reported as applied", consumed.applied, ["Rosa Delgado", "Sunbelt Rentals LLC"]);
+check("the keeps stand: they are not one run's work", consumed.keeps, keeps);
+check("nothing handed, nothing applied", valuesApplied({ values: list, keeps: [], handed: [] }), { values: list, keeps: [], applied: [] });
+check("an empty list survives a missing file", valuesApplied({}), { values: [], keeps: [], applied: [] });
+
 check("flag: nothing selected", flagProblem("  ", false) !== "", true);
 check("flag: a pseudonym", flagProblem("Strangeways", true) !== "", true);
 check("flag: a passage", flagProblem("x".repeat(200), false) !== "", true);

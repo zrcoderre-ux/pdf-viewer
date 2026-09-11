@@ -788,7 +788,13 @@ app, which routes it to the reader tab.
   **Flagged** panel collects them and **Save list to case folder** writes
   `New Real Values.txt` beside the key, which PDF-Linker reads on its next
   run — and on Apply Leak Fixes — as if each line had been given with
-  `--term`. The opposite mistake, a value that should never have been faked
+  `--term`. The file is a handover, not a record: **a run that applies it
+  deletes it**, so the next run is not handed the same values a second time
+  and a list of real names is not left lying beside the scrubbed exports.
+  The reader reads the deletion as the run's answer — open the folder again
+  and the values it handed over come off the **Flagged** panel, faked in the
+  exports now, while anything flagged since that save stays and the keeps,
+  which are decisions about a value rather than one run's work, stand. The opposite mistake, a value that should never have been faked
   (a word of a cited decision's name, usually), is **right-clicked**: "Keep in
   this case" is PDF-Linker's `no`, "Never fake it anywhere" its `never`. The
   keep takes effect in the reader **at once** — every occurrence loses its

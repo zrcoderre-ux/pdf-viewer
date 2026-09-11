@@ -131,7 +131,7 @@
         <p class="side-note" id="leaks-note"></p>
       </div>
       <div id="side-flags" class="side-body" hidden>
-        <p class="side-hint">Names you spotted unfaked — to be pseudonymized. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it on its next run or Apply Leak Fixes.</p>
+        <p class="side-hint">Names you spotted unfaked — to be pseudonymized. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it on its next run or Apply Leak Fixes, then deletes it — a run that applied the list takes the file away, and these values come off the list.</p>
         <ul id="flags-list"></ul>
         <div id="keeps-block" hidden>
           <p class="side-hint">Wrongly faked — kept as they really read. Un-marked here now; PDF-Linker restores them in the files on its next run.</p>
@@ -150,7 +150,7 @@
           <ul id="spots-list"></ul>
         </div>
         <div class="side-actions">
-          <button id="flags-save" class="primary" title="Write New Real Values.txt into the case folder">Save list to case folder</button>
+          <button id="flags-save" class="primary" title="Write New Real Values.txt into the case folder. PDF-Linker deletes the file on the run that applies it, and the reader reads that as the values having been faked.">Save list to case folder</button>
           <button id="flags-copy" title="Copy the list, one value per line">Copy</button>
         </div>
         <p class="side-note" id="flags-note"></p>
