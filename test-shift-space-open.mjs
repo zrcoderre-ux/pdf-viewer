@@ -604,13 +604,13 @@ console.log("\n--- Shift+Space ---");
   });
 }
 // ---------------------------------------------------------------------------
-// Never a tab that takes the reader with it
+// With no worker to ask
 //
 // Only the worker can open a tab that doesn't take focus. Where it can't be
-// reached there is no second-best: window.open would land the reader in the
-// new tab, which is the whole thing this shortcut exists to avoid, and which
-// made the same keypress behave differently from one tab to the next. So
-// nothing opens, and the toast says why.
+// reached the links still open, the one way a page can — in front of the
+// reader — because that beats a keypress that does nothing. What must not
+// happen is the reader being pulled into a tab with no idea why, so the toast
+// says the tab came to the front, and what would have kept it behind.
 // ---------------------------------------------------------------------------
 
 console.log("\n--- with no worker to ask ---");
@@ -621,11 +621,11 @@ console.log("\n--- with no worker to ask ---");
   api.setPointer(50, 110);
   const e = keyEvent();
   api.onKeyDown(e);
-  check("the hosted build opens no focus-stealing tab", openedWindows, []);
-  check("...and asks no worker", sent.length, 0);
+  check("the hosted build opens the link anyway", openedWindows, ["https://a.test/"]);
+  check("...with no worker to ask", sent.length, 0);
   const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
-  check("...and says what it would take",
-    toast.textContent, "Opening links in the background needs the extension");
+  check("...and says where the tab went, and what it would take to keep it back",
+    toast.textContent, "Opened link in a new tab — background tabs need the extension");
   check("...and the key is still the shortcut's, not the page's", e.prevented, true);
 }
 {
@@ -634,8 +634,8 @@ console.log("\n--- with no worker to ask ---");
   const { api, openedWindows } = load(page, { chromeApi: false });
   api.setPointer(50, 110);
   api.onKeyDown(keyEvent());
-  check("with no extension API at all, still nothing is opened in the reader's face",
-    openedWindows, []);
+  check("with no extension API at all the link still opens",
+    openedWindows, ["https://a.test/"]);
 }
 {
   // The common one: the extension was reloaded or updated while this page sat
@@ -644,23 +644,46 @@ console.log("\n--- with no worker to ask ---");
   const { api, openedWindows, sent } = load(page, { chromeApi: "orphaned" });
   api.setPointer(50, 110);
   api.onKeyDown(keyEvent());
-  check("an orphaned content script opens nothing", [openedWindows, sent.length], [[], 0]);
+  check("an orphaned content script opens the link itself",
+    [openedWindows, sent.length], [["https://a.test/"], 0]);
   const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
   check("...and names the remedy",
-    toast.textContent, "Reload this page to open links — the extension was updated");
+    toast.textContent, "Opened link in a new tab — reload this page for background tabs");
 }
 {
-  // The worker was asked and never answered: the toast reports that, rather
-  // than the tabs it hoped for.
+  // The worker was asked and never answered. The links are worth more open
+  // than owed, so they open the other way — and the toast doesn't pretend they
+  // went quietly.
   const page = makePage();
   const { api, sent, openedWindows } = load(page, { worker: "silent" });
   api.setPointer(50, 110);
   api.onKeyDown(keyEvent());
   check("a silent worker is still asked once", sent.length, 1);
-  check("...and nothing is opened from the page instead", openedWindows, []);
+  check("...and the link opens from the page instead",
+    openedWindows, ["https://a.test/"]);
   const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
-  check("...and the toast doesn't claim a tab",
-    toast.textContent, "The extension didn't answer — no links opened");
+  check("...and the toast doesn't claim a background tab",
+    toast.textContent, "Opened link in a new tab — the extension didn't answer");
+}
+{
+  // A selection's worth of links, opened the only way a page can.
+  const many = [];
+  for (let i = 0; i < 4; i++) {
+    many.push(link(`https://cite.test/${i}`, [rect(10, 100 + i * 20, 100, 20)], { className: "citation-link" }));
+  }
+  const article = makeEl("article");
+  const page = { html: makeEl("html", { children: [makeEl("body", { children: [article, makeEl("div", { children: many })] })] }), article };
+  const selection = {
+    isCollapsed: false, rangeCount: 1,
+    getRangeAt: () => ({ commonAncestorContainer: article, getClientRects: () => [rect(0, 90, 200, 100)] }),
+  };
+  const { api, openedWindows } = load(page, { selection, chromeApi: "orphaned" });
+  api.setPointer(null, null);
+  api.onKeyDown(keyEvent());
+  check("every one of them opens", openedWindows.length, 4);
+  const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
+  check("...counted, and placed",
+    toast.textContent, "Opened 4 links in new tabs — reload this page for background tabs");
 }
 {
   // What the worker actually opened is what gets reported.
