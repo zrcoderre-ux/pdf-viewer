@@ -356,6 +356,8 @@ export function findRealsInPlain(compiledForward, segments) {
 }
 
 const POSS_MATCH_RE = /['’][sS]$/;
+/** A value folded for comparison: trimmed, one space between words, lower case. */
+export function foldValue(s) { return foldKey(s); }
 function foldKey(s) {
   return String(s == null ? "" : s).trim().replace(/\s+/g, " ").toLowerCase();
 }

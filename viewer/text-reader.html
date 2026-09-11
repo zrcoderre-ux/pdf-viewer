@@ -137,6 +137,14 @@
           <p class="side-hint">Wrongly faked — kept as they really read. Un-marked here now; PDF-Linker restores them in the files on its next run.</p>
           <ul id="keeps-list"></ul>
         </div>
+        <div id="master-block">
+          <p class="side-hint" id="master-hint"></p>
+          <ul id="master-list"></ul>
+          <div class="side-actions">
+            <button id="master-load" title="PDF-Linker's master workbook (Master Leaks.xlsx): its KEEP sheet holds the values you have already said to leave alone, in every case. Chosen once, attached from then on.">Load master workbook…</button>
+            <button id="master-renew" class="primary" hidden title="The browser wants the file authorised again">Re-authorise</button>
+          </div>
+        </div>
         <div id="spots-block" hidden>
           <p class="side-hint">Kept <em>where they stand</em> — this document only, at these places. Every other occurrence of the value is still faked; a save writes the value as it reads here.</p>
           <ul id="spots-list"></ul>
@@ -155,6 +163,7 @@
     <span id="st-key"></span>
     <span id="st-pn"></span>
     <span id="st-leaks" class="warn"></span>
+    <span id="st-kept"></span>
     <span id="st-cites"></span>
     <span id="st-pdf"></span>
     <span id="st-lock"></span>
@@ -190,6 +199,7 @@
   <input id="key-input" type="file" accept=".xlsx" hidden>
   <input id="pdf-input" type="file" accept=".pdf,application/pdf" multiple hidden>
   <input id="leaks-input" type="file" accept=".xlsx" hidden>
+  <input id="master-input" type="file" accept=".xlsx" hidden>
 
   <!-- Shift+Space = middle click on the citation underlines, as in the viewer. -->
   <script src="shift-space-open.js"></script>

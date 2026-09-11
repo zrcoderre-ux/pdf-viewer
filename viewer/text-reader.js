@@ -107,6 +107,10 @@ let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
 let spots = [];              // spot keeps for the open document: [{ page, value, nth }]
+let masterKeeps = [];        // standing keeps from PDF-Linker's master workbook (its KEEP sheet)
+let masterInfo = null;       // { name, sheet, rows, partial } once it is attached
+let masterHandle = null;     // its file handle, remembered between sessions
+let masterNeeds = null;      // …the same handle, when the browser wants it re-authorised first
 let dirty = false;
 let editing = false;         // a document opens protected; ✎ Edit lifts it
 let provider = "lexis";
@@ -348,18 +352,41 @@ function fillKeySelect(selectedId) {
   if (keySelect.value !== (selectedId || "")) keySelect.value = "";
 }
 
+// Every keep in force: this case's own, and the standing ones the master
+// workbook carries between cases (see attachMaster). The master's are consulted
+// wherever a keep is consulted and written nowhere — PDF-Linker already holds
+// them, and New Real Values.txt is for this case's decisions.
+function allKeeps() { return masterKeeps.length ? keeps.concat(masterKeeps) : keeps; }
+/** Which list a value is kept by: "case", "master", or "". */
+function keptBy(value) {
+  if (TD.keptControl(keeps, value)) return "case";
+  return TD.keptControl(masterKeeps, value) ? "master" : "";
+}
 // The key with the kept values taken out of its FORWARD side: a value the
 // operator has said was wrongly faked may stand in the text as itself, so a
 // save neither rewrites it to the fake nor refuses over it. The reverse side
 // is untouched — the fake still in the file still shows as the real value.
 function keyLessKeeps(k) {
-  if (!k || !keeps.length) return k;
-  return Object.assign({}, k, { warn: (k.warn || []).filter((w) => !TD.keptControl(keeps, w.real)) });
+  const kept = allKeeps();
+  if (!k || !kept.length) return k;
+  return Object.assign({}, k, { warn: (k.warn || []).filter((w) => !TD.keptControl(kept, w.real)) });
 }
 // An occurrence of a kept value is blanked (same length, a non-word
 // character) before the forward side looks at the text, so a kept
 // "Helen Rasho" is not rewritten through its own "Helen" and "Rasho" rows.
-function keptMatcher() { return keeps.length ? PK.buildMatcher(keeps.map((k) => k.value)) : null; }
+// One matcher per set of keeps, not per call: the master workbook can hold
+// hundreds of values, the matcher over them is a big alternation to compile,
+// and a save or a repaint asks for it once per page. Both lists are replaced
+// rather than edited in place whenever they change, so their identity is the
+// whole test.
+let keptRxMemo = { keeps: null, master: null, rx: null };
+function keptMatcher() {
+  if (keptRxMemo.keeps !== keeps || keptRxMemo.master !== masterKeeps) {
+    const kept = allKeeps();
+    keptRxMemo = { keeps, master: masterKeeps, rx: kept.length ? PK.buildMatcher(kept.map((k) => k.value)) : null };
+  }
+  return keptRxMemo.rx;
+}
 function maskKept(text) {
   const rx = keptMatcher();
   return rx ? text.replace(rx, (m) => "\u0000".repeat(m.length)) : text;
@@ -386,7 +413,7 @@ function compileKey() {
   fwd = k ? PK.compileForward(k) : null;
   reals = k ? PK.compileReals(k) : null;
   // A kept value is never offered, and a real that opens one stays partial.
-  ahead = k ? PK.compileTypeahead(k, keeps.map((x) => x.value)) : null;
+  ahead = k ? PK.compileTypeahead(k, allKeeps().map((x) => x.value)) : null;
 }
 function setKey(parsed) {
   key = parsed || null;
@@ -447,15 +474,44 @@ $("key-input").addEventListener("change", async () => {
 // browser's permission again; that is asked on a click, never silently.
 const DB_NAME = "textReader";
 const DIRS_STORE = "dirs";
+const FILES_STORE = "files"; // single files the reader keeps between sessions: the master workbook
 
 function openDb() {
   return new Promise((resolve, reject) => {
     if (!("indexedDB" in window)) return reject(new Error("no IndexedDB"));
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => { req.result.createObjectStore(DIRS_STORE); };
+    const req = indexedDB.open(DB_NAME, 2);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(DIRS_STORE)) db.createObjectStore(DIRS_STORE);
+      if (!db.objectStoreNames.contains(FILES_STORE)) db.createObjectStore(FILES_STORE);
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+async function rememberFile(name, handle) {
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(FILES_STORE, "readwrite");
+      tx.objectStore(FILES_STORE).put(handle, name);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch { /* simply not remembered */ }
+}
+async function rememberedFile(name) {
+  try {
+    const db = await openDb();
+    const out = await new Promise((resolve, reject) => {
+      const req = db.transaction(FILES_STORE, "readonly").objectStore(FILES_STORE).get(name);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return out && out.kind === "file" ? out : null;
+  } catch { return null; }
 }
 async function rememberDir(handle) {
   try {
@@ -764,6 +820,9 @@ document.addEventListener("drop", (e) => {
       if (TD.isKeyName(f.name)) {
         try { await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, ""); }
         catch (err) { toast(String(err.message || err), { error: true }); }
+      } else if (LK.isMasterName(f.name)) {
+        try { await readMasterBytes(new Uint8Array(await f.arrayBuffer()), f.name); }
+        catch (err) { toast(String(err.message || err), { error: true }); }
       } else if (LK.isLeaksName(f.name)) {
         // A dropped worksheet is attached, with its handle where the drop carries one.
         let h = null;
@@ -970,9 +1029,12 @@ function pnFake(span) { return span.dataset.wholeFake != null ? PK.foldGaps(span
 // dotted underline says "left alone on the next run", and the tooltip says
 // what the file still carries until then.
 function markKept(span) {
-  const c = TD.keptControl(keeps, pnReal(span));
+  const real = pnReal(span);
+  const c = TD.keptControl(allKeeps(), real);
   span.classList.toggle("kept", !!c);
   if (c) span.dataset.kept = c; else delete span.dataset.kept;
+  const by = keptBy(real);
+  if (by === "master") span.dataset.keptBy = "master"; else delete span.dataset.keptBy;
 }
 function remarkKept() {
   for (const s of pagesEl.querySelectorAll(".pn")) markKept(s);
@@ -1871,17 +1933,37 @@ function paintHighlights() {
   let leaks = 0;
   const bodies = pageBodies();
   const flagRx = flagged.length ? PK.buildMatcher(flagged) : null;
+  // A value KEPT stands in the clear like any other word, and with the orange
+  // mark gone (it is not a leak) nothing said it was a decision rather than an
+  // oversight. It carries the same dotted mark a kept pseudonym does, so a
+  // page read later shows which names were left alone on purpose.
+  const keptRx = keptMatcher();
+  const keptRanges = [];
+  keptSeen = new Set();
   for (const body of bodies) {
+    // Over the whole page, pseudonym spans blanked, so a real name wrapped
+    // over a line break and its gutter number is found as one. The spots kept
+    // where they stand are blanked with them: they carry their own mark.
+    const flat = reals || keptRx ? flatten(body, { blankPn: true }) : null;
     if (reals) {
-      // Over the whole page, pseudonym spans blanked, so a real name wrapped
-      // over a line break and its gutter number is found as one.
-      const { text, segs } = flatten(body, { blankPn: true });
+      const { text, segs } = flat;
       for (const h of PK.findRealSpans(reals, maskKept(text))) {
         const r = rangeFor(segs, h.start, h.end);
         if (!r) continue;
         leakRanges.push(r);
         leakHits.push({ range: r, real: h.real, fake: h.fake });
         leaks++;
+      }
+    }
+    if (keptRx) {
+      const { text, segs } = flat;
+      keptRx.lastIndex = 0;
+      let m;
+      while ((m = keptRx.exec(text))) {
+        const r = rangeFor(segs, m.index, m.index + m[0].length);
+        if (r) keptRanges.push(r);
+        keptSeen.add(TD.foldValue(PK.foldGaps(m[0])));
+        if (m.index === keptRx.lastIndex) keptRx.lastIndex++;
       }
     }
     if (flagRx) {
@@ -1897,14 +1979,18 @@ function paintHighlights() {
   }
   CSS.highlights.set("flagged", new Highlight(...flaggedRanges));
   CSS.highlights.set("leak", new Highlight(...leakRanges));
+  CSS.highlights.set("kept", new Highlight(...keptRanges));
   // The LEAKS bar's current row, wherever its value stands.
   leakRowRanges = [];
   if (leakRowValue) for (const body of bodies) for (const r of leakMatches(body, leakRowValue)) leakRowRanges.push({ body, range: r });
   CSS.highlights.set("leakrow", new Highlight(...leakRowRanges.map((x) => x.range)));
   markLeakHere();
   $("st-leaks").textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; right-click one to keep it` : "";
+  const nk = keptRanges.length;
+  $("st-kept").textContent = nk ? `${nk} kept value${nk === 1 ? "" : "s"} standing as ${nk === 1 ? "it reads" : "they read"}` : "";
 }
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
+let keptSeen = new Set(); // the kept values that actually stand in this document, folded — from the last paint
 /** The unfaked real name under a point, or null. */
 function leakAt(x, y) {
   let node = null, offset = 0;
@@ -1951,7 +2037,11 @@ pagesEl.addEventListener("mouseover", (e) => {
   b.textContent = settings.showFakes ? pnReal(pn) : pnFake(pn);
   tipEl.append(settings.showFakes ? "Real name: " : "Pseudonym: ", b);
   if (pn.dataset.piece) tipEl.append(` (wrapped over ${pn.dataset.piece.split("/")[1]} lines; this line: ${settings.showFakes ? pn.dataset.real : pn.dataset.fake})`);
-  if (pn.dataset.kept) tipEl.append(document.createElement("br"), `Kept (${pn.dataset.kept === "never" ? "every case" : "this case"}): PDF-Linker leaves it un-faked on its next run. Right-click to change.`);
+  if (pn.dataset.keptBy === "master") {
+    tipEl.append(document.createElement("br"), `Kept by ${masterInfo ? masterInfo.name : "the master workbook"} — left alone in every case, and not flagged as a leak. Withdraw it in that workbook's KEEP sheet.`);
+  } else if (pn.dataset.kept) {
+    tipEl.append(document.createElement("br"), `Kept (${pn.dataset.kept === "never" ? "every case" : "this case"}): PDF-Linker leaves it un-faked on its next run. Right-click to change.`);
+  }
   tipEl.hidden = false;
   const r = pn.getBoundingClientRect();
   const tw = tipEl.offsetWidth;
@@ -2009,18 +2099,25 @@ function showKeepMenu(target, x, y) {
       : { real: pnReal(target), fake: pnFake(target), leak: false, span: target })
     : target;
   keepMenuFor = t;
-  const c = TD.keptControl(keeps, t.real);
-  $("keep-menu-lead").textContent = t.here ? "Kept where it stands:" : t.leak ? "Standing unfaked:" : "Wrongly faked?";
+  const by = keptBy(t.real);
+  const c = by === "case" ? TD.keptControl(keeps, t.real) : "";
+  const master = by === "master";
+  $("keep-menu-lead").textContent = master ? "Kept by the master workbook:"
+    : t.here ? "Kept where it stands:" : t.leak ? "Standing unfaked:" : "Wrongly faked?";
   $("keep-menu-value").textContent = t.real;
   $("keep-menu-fake").textContent = t.fake || "its pseudonym";
-  $("keep-menu-sub").childNodes[0].nodeValue = t.here ? "The file carries it as it reads here; elsewhere " : t.leak ? "Written as " : "The file carries ";
-  $("keep-menu-sub").childNodes[2].nodeValue = t.here ? " still stands for it." : t.leak ? " on save, unless it is kept." : " until PDF-Linker re-runs.";
+  $("keep-menu-sub").childNodes[0].nodeValue = master ? "Left alone in every case by " + (masterInfo ? masterInfo.name : "the master workbook") + "; "
+    : t.here ? "The file carries it as it reads here; elsewhere " : t.leak ? "Written as " : "The file carries ";
+  $("keep-menu-sub").childNodes[2].nodeValue = master ? " — withdraw it there, not here."
+    : t.here ? " still stands for it." : t.leak ? " on save, unless it is kept." : " until PDF-Linker re-runs.";
+  if (master) $("keep-menu-fake").textContent = "its KEEP sheet says so";
   // The narrowest keep: this occurrence, and no other. Already one, or already
-  // kept for the whole case, and there is nothing narrower to ask for.
-  $("keep-menu-here").hidden = !!t.here || !!c;
-  $("keep-menu-no").hidden = c === "no";
-  $("keep-menu-never").hidden = c === "never";
-  $("keep-menu-undo").hidden = !c && !t.here;
+  // kept for the whole case (or by the master), and there is nothing narrower
+  // to ask for.
+  $("keep-menu-here").hidden = !!t.here || !!c || master;
+  $("keep-menu-no").hidden = c === "no" || master;
+  $("keep-menu-never").hidden = c === "never" || master;
+  $("keep-menu-undo").hidden = (!c && !t.here) || master;
   $("keep-menu-undo").textContent = t.here && !c ? "Fake it here after all" : "It is a pseudonym after all";
   keepMenu.hidden = false;
   keepMenu.style.left = Math.max(4, Math.min(window.innerWidth - keepMenu.offsetWidth - 4, x)) + "px";
@@ -2037,6 +2134,95 @@ pagesEl.addEventListener("contextmenu", (e) => {
 });
 document.addEventListener("mousedown", (e) => { if (!keepMenu.hidden && !keepMenu.contains(e.target)) hideKeepMenu(); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { hideKeepMenu(); flagPop.hidden = true; } });
+
+// ── the master workbook: the keeps that hold in every case ─────────────────────────
+//
+// PDF-Linker keeps one workbook across every matter, and its KEEP sheet is the
+// settled answer to "leave this alone": the Clerk's name, a cited decision's
+// party, every value an operator has already ruled on. The reader reads that
+// sheet and holds those values kept WITHOUT being asked again — so it stops
+// flagging as leaks the very things the operator has decided are not.
+//
+// The browser will not read a path on its own, so the workbook is chosen once
+// and its handle remembered here (IndexedDB keeps file handles); from then on
+// every reader tab attaches it at startup. Where the browser wants the grant
+// renewed — after it is restarted, usually — the Flagged panel offers it in one
+// click rather than asking silently.
+const MASTER_FILE = "master";
+
+async function readMaster(handle, { quiet = false } = {}) {
+  const file = await handle.getFile();
+  const wb = await parseXlsx(new Uint8Array(await file.arrayBuffer()));
+  if (!LK.sheetsLookLikeMaster(wb.sheets)) {
+    throw new Error(file.name + ' has no "KEEP" sheet — PDF-Linker\'s master workbook holds the standing keeps there.');
+  }
+  const m = LK.parseMasterKeeps(wb.sheets, file.name);
+  masterKeeps = m.keeps.map((k) => TD.makeKeep(k.control, k.value));
+  masterInfo = { name: file.name, sheet: m.sheet, rows: m.rows, partial: m.partial.length };
+  masterHandle = handle;
+  masterNeeds = null;
+  compileKey();
+  if (doc) { remarkKept(); paintHighlights(); }
+  renderFlags();
+  if (!quiet) {
+    toast(`${masterInfo.name}: ${masterKeeps.length} standing keep${masterKeeps.length === 1 ? "" : "s"} in force`
+      + (masterInfo.partial ? ` (${masterInfo.partial} keep${masterInfo.partial === 1 ? "" : "s"} of part of a value left to PDF-Linker)` : "") + ".");
+  }
+}
+/** Choose the master workbook: read now, and attached from now on. */
+async function attachMaster() {
+  let handle = null;
+  if (window.showOpenFilePicker) {
+    try {
+      [handle] = await window.showOpenFilePicker({
+        types: [{ description: "PDF-Linker master workbook", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
+      });
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      handle = null;
+    }
+  }
+  if (!handle) { $("master-input").click(); return; }
+  try {
+    await readMaster(handle);
+    await rememberFile(MASTER_FILE, handle);
+  } catch (e) { toast(String(e.message || e), { error: true }); }
+}
+/** The workbook chosen in an earlier session, attached again. */
+async function restoreMaster() {
+  const handle = await rememberedFile(MASTER_FILE);
+  if (!handle) return;
+  const perm = await permissionOf(handle, "read");
+  if (perm === "granted") {
+    try { await readMaster(handle, { quiet: true }); } catch (e) { console.warn(e); }
+    return;
+  }
+  // Not silently: the grant is asked for on a click.
+  masterNeeds = handle;
+  masterInfo = null;
+  renderFlags();
+}
+async function renewMaster() {
+  const handle = masterNeeds;
+  if (!handle) return;
+  try {
+    const perm = await handle.requestPermission({ mode: "read" });
+    if (perm !== "granted") { toast("The master workbook stays unattached.", { error: true }); return; }
+    await readMaster(handle);
+  } catch (e) { toast(String(e.message || e), { error: true }); }
+}
+/** A master workbook opened as plain bytes (dropped, or through the file input): read, not remembered. */
+async function readMasterBytes(bytes, name) {
+  const wb = await parseXlsx(bytes);
+  if (!LK.sheetsLookLikeMaster(wb.sheets)) throw new Error(name + ' has no "KEEP" sheet.');
+  const m = LK.parseMasterKeeps(wb.sheets, name);
+  masterKeeps = m.keeps.map((k) => TD.makeKeep(k.control, k.value));
+  masterInfo = { name, sheet: m.sheet, rows: m.rows, partial: m.partial.length, loose: true };
+  compileKey();
+  if (doc) { remarkKept(); paintHighlights(); }
+  renderFlags();
+  toast(`${name}: ${masterKeeps.length} standing keep${masterKeeps.length === 1 ? "" : "s"} in force for this session.`);
+}
 
 // ── spot keeps: this one occurrence, left as it reads ─────────────────────────────
 //
@@ -2169,6 +2355,16 @@ $("keep-menu-undo").addEventListener("click", () => {
 });
 $("keep-menu-cancel").addEventListener("click", hideKeepMenu);
 
+$("master-load").addEventListener("click", attachMaster);
+$("master-renew").addEventListener("click", renewMaster);
+$("master-input").addEventListener("change", async () => {
+  const f = $("master-input").files[0];
+  $("master-input").value = "";
+  if (!f) return;
+  try { await readMasterBytes(new Uint8Array(await f.arrayBuffer()), f.name); }
+  catch (e) { toast(String(e.message || e), { error: true }); }
+});
+
 const showFlagPopSoon = debounce(showFlagPop, 120);
 document.addEventListener("selectionchange", showFlagPopSoon);
 function showFlagPop() {
@@ -2243,6 +2439,7 @@ function renderFlags() {
   flagsList.innerHTML = "";
   flagCount.textContent = String(flagged.length + keeps.length + spots.length);
   renderSpots();
+  renderMaster();
   const keepsList = $("keeps-list");
   keepsList.innerHTML = "";
   $("keeps-block").hidden = !keeps.length;
@@ -2280,6 +2477,48 @@ function renderFlags() {
   flagsNote.textContent = dirHandle
     ? `Saves to ${folderName}/${TD.VALUES_FILE}.`
     : "No case folder is open: the list is remembered here and can be saved anywhere or copied.";
+}
+
+// The master workbook's standing keeps: how many there are, and — the useful
+// part when reading — which of them are actually holding a value in THIS
+// document, the ones that would otherwise be flagged.
+function renderMaster() {
+  const hint = $("master-hint");
+  const list = $("master-list");
+  list.innerHTML = "";
+  $("master-renew").hidden = !masterNeeds;
+  $("master-load").textContent = masterInfo ? "Load another…" : "Load master workbook…";
+  if (masterNeeds) {
+    hint.textContent = "The master workbook is remembered but needs authorising again — its standing keeps are not in force until it is.";
+    return;
+  }
+  if (!masterInfo) {
+    hint.textContent = "No master workbook attached. PDF-Linker's own (Master Leaks.xlsx) holds a KEEP sheet of every value you have said to leave alone; attached here, the reader stops flagging them as leaks — in this case and every other.";
+    return;
+  }
+  const here = masterKeeps.filter((k) => keptSeen.has(TD.foldValue(k.value)));
+  hint.textContent = `${masterInfo.name} · ${masterKeeps.length} standing keep${masterKeeps.length === 1 ? "" : "s"}`
+    + (masterInfo.partial ? `, ${masterInfo.partial} of part of a value left to PDF-Linker` : "")
+    + (masterInfo.loose ? " (this session only — choose it with the button to keep it attached)" : "")
+    + (here.length ? ` · ${here.length} standing in this document:` : " · none of them stands in this document.");
+  for (const k of here.slice(0, 60)) {
+    const li = document.createElement("li");
+    li.textContent = k.value;
+    const t = document.createElement("span");
+    t.className = "tag keep";
+    t.textContent = "master";
+    t.title = "Kept by the master workbook, in every case — withdraw it there, not here";
+    li.appendChild(t);
+    li.title = "Click to find it in the document";
+    li.addEventListener("click", () => findInPages(k.value));
+    list.appendChild(li);
+  }
+  if (here.length > 60) {
+    const li = document.createElement("li");
+    li.className = "more";
+    li.textContent = `…and ${here.length - 60} more`;
+    list.appendChild(li);
+  }
 }
 
 // The document's spot keeps, each one findable and withdrawable: a keep made by
@@ -3346,11 +3585,38 @@ function buildPdfPane() {
     const box = document.createElement("div");
     box.className = "pane-empty";
     const members = PS.combinedMembers(doc.pages);
-    box.innerHTML = members.length > 1
-      ? `<p><b></b> lists ${members.length} documents and no PDF in the case folder matches any of them${dirHandle ? "" : " (no case folder is open)"}.</p><p><button type="button">Pick their PDFs…</button></p><p>Select every PDF at once: each is matched to its document by name through the key, or by the order the file lists them.</p>`
-      : `<p>No PDF in the case folder matches <b></b>${dirHandle ? "" : " (no case folder is open)"}.</p><p><button type="button">Pick the PDF…</button></p>`;
-    box.querySelector("b").textContent = fileName;
+    const what = members.length > 1 ? `the ${members.length} documents it lists` : "it";
+    // Say which of the three things is actually missing. "No PDF matches" read
+    // as a matching failure when usually there was nothing to match: no case
+    // folder open means no PDFs at all, and without a key the names cannot be
+    // compared — PDF-Linker leaves a PDF under its REAL name and names the
+    // export for the same stem scrubbed, so only the key can tell that
+    // "Rasho v Quillmark - MTC.pdf" is "Strangeways v Melbury - MTC.txt".
+    // The suffixes are not the difficulty: .pdf, .txt and .txt.LEAK all come
+    // off before the comparison.
+    const haveAny = folderPdfs.length || pickedPdfs.size;
+    const parts = [];
+    if (!haveAny) {
+      parts.push(`<p>No PDF is available to match ${what}: ` +
+        (dirHandle ? `no PDF in <b class="fn"></b> to go with this export` : "no case folder is open, and none has been picked by hand") + ".</p>");
+    } else if (!key) {
+      parts.push(`<p>${folderPdfs.length ? `${folderPdfs.length} PDF${folderPdfs.length === 1 ? "" : "s"} in the case folder, but none matches ` + what : `None of the PDFs picked matches ${what}`}` +
+        " — and <b>no pseudonym key is loaded</b>. The PDFs keep their real names and this export is named in pseudonyms, so the key is what tells the two apart.</p>");
+    } else {
+      parts.push(`<p>${haveAny} PDF${haveAny === 1 ? "" : "s"} available and none matches ${what} by name. ` +
+        "Each PDF's own name is run forward through the key and compared with the export's — a PDF renamed since the run, or one of a document the key does not name, will not meet it.</p>");
+    }
+    parts.push(`<p><button type="button">${members.length > 1 ? "Pick their PDFs…" : "Pick the PDF…"}</button>` +
+      (dirHandle ? "" : ` <button type="button" class="secondary openfolder">Open case folder…</button>`) + "</p>");
+    parts.push(members.length > 1
+      ? "<p>Select every member's PDF at once: each is matched to its document by name through the key, and where the names cannot say, by the order this file lists them.</p>"
+      : "<p>Or pick the one PDF this export came from.</p>");
+    box.innerHTML = parts.join("");
+    const fn = box.querySelector(".fn");
+    if (fn) fn.textContent = folderName;
     box.querySelector("button").addEventListener("click", pickPdf);
+    const of = box.querySelector(".openfolder");
+    if (of) of.addEventListener("click", openFolder);
     pdfPane.appendChild(box);
     return;
   }
@@ -3841,6 +4107,11 @@ window.__textReaderLeaks = () => (leaks ? {
 window.__textReaderLeaksBytes = async () => Array.from(await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, LK.fixEdits(leaks.parsed)));
 window.__textReaderPickPdfs = (files) => usePickedPdfs(files);
 window.__textReaderPdfSources = () => pdfSources.map((s) => (s ? s.name : null));
+window.__textReaderMaster = (bytes, name) => readMasterBytes(new Uint8Array(bytes), name);
+window.__textReaderMasterState = () => ({
+  info: masterInfo, keeps: masterKeeps.map((k) => k.control + ":" + k.value),
+  needs: !!masterNeeds, seen: [...keptSeen],
+});
 
 // ── boot ───────────────────────────────────────────────────────────────────────────────────
 applySettings();
@@ -3858,3 +4129,6 @@ updateDirty();
 renderFlags();
 renderLeaksTab();
 updateLeaksButton();
+// The master workbook's standing keeps, in force before the first document is
+// read — the whole point of them is that nobody has to be asked again.
+restoreMaster();

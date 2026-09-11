@@ -183,6 +183,68 @@ export function isKeepKind(kind) {
   return kind === "no" || kind === "never";
 }
 
+// ---- the master workbook: the keeps PDF-Linker carries between cases -------------
+//
+// Beside each case's own LEAKS.xlsx, PDF-Linker keeps ONE workbook across every
+// matter (`_pn_master_path`), holding two sheets:
+//
+//   "KEEP"         the durable decisions — a value marked "leave it alone", or a
+//                  bracketed keep-spec — re-applied on every future run in any
+//                  folder. Headers: Value, "Fix? (yes/no)", Type, Times Seen,
+//                  Cases, First Seen, Last Seen, Notes, Origin.
+//   "Master Leaks" the tally of GENUINE leaks seen across matters. The opposite
+//                  list, and not read here: it has no Fix? column, so the header
+//                  rule below passes over it of its own accord.
+//
+// The reader wants the KEEP sheet for one reason: a value the operator has
+// already said to leave alone is not a leak, and flagging it again in every new
+// case is the reader crying wolf at its own settled decisions.
+export const MASTER_KEEP_SHEET = "KEEP";
+export const MASTER_TALLY_SHEET = "Master Leaks";
+const MASTER_NAME_RE = /^(master[ _]leaks|master)(?: ?\(\d+\)| - copy)?\.xlsx$/i;
+/** The master workbook by name, Windows' copies included. */
+export function isMasterName(name) {
+  return MASTER_NAME_RE.test(String(name == null ? "" : name).split(/[\\/]/).pop().trim());
+}
+/** Its KEEP sheet, or null — by name, and only where it reads as a decision sheet. */
+export function masterKeepSheet(sheets) {
+  return (sheets || []).find((sh) => fold(sh && sh.name) === fold(MASTER_KEEP_SHEET) && headerIndex(sh && sh.rows) >= 0) || null;
+}
+export function sheetsLookLikeMaster(sheets) {
+  return !!masterKeepSheet(sheets);
+}
+/**
+ * The master workbook's standing keeps: { name, sheet, keeps, partial, rows }.
+ * `keeps` are the values to leave alone WHEREVER they stand — [{ value,
+ * control, note, cases }].
+ *
+ * Only a keep of the WHOLE value is taken. A bracketed spec that keeps part of
+ * a value ("[David] W. Slayton") says that part stands inside that value, not
+ * that the part stands everywhere; applying it as a value would stop the reader
+ * flagging the same word in a name it knows nothing about. Those rows are
+ * counted in `partial` and reported rather than applied.
+ */
+export function parseMasterKeeps(sheets, name) {
+  const sheet = masterKeepSheet(sheets);
+  if (!sheet) {
+    throw new Error((name || "The workbook") + ' has no "KEEP" sheet with a Value / Fix? header — not PDF-Linker\'s master workbook.');
+  }
+  const parsed = parseLeaks([sheet], name);
+  const keeps = [];
+  const partial = [];
+  for (const row of parsed.rows) {
+    const c = classifyFix(row.fix, row.value);
+    if (isKeepKind(c.kind)) {
+      keeps.push({ value: row.value, control: c.kind === "never" ? "never" : "no", note: row.notes });
+    } else if (c.kind === "keep") {
+      const whole = (c.parts || []).some((part) => fold(part) === fold(row.value));
+      if (whole) keeps.push({ value: row.value, control: "no", note: row.notes });
+      else partial.push({ value: row.value, parts: c.parts || [] });
+    }
+  }
+  return { name: name || "", sheet: sheet.name, keeps, partial, rows: parsed.rows.length };
+}
+
 // ---- the locating columns ------------------------------------------------------------
 
 const WHERE_RE = /^p\.(\d+)(?:\s*\(printed p\.\s*([^)]*)\))?(?::(\d+)(?:-(?:p\.\d+:)?(\d+))?)?$/i;
