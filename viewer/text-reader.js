@@ -1058,14 +1058,14 @@ function showFakes(on) {
 // flagged and leaked highlights. Cheap enough to run on every settled edit.
 function afterTextChange() {
   updateCounts();
-  textAnchors = null;
+  textAnchors = null; textLineTops = null;
   applyMatchedLayout();
   applyLineLock();
   placeCitations();
   paintHighlights();
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
-const relayout = debounce(() => { textAnchors = null; applyMatchedLayout(); applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
+const relayout = debounce(() => { textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -3644,10 +3644,10 @@ function buildPdfPane() {
   document.body.classList.toggle("sbs", sbsOn && !!doc);
   sbsBtn.setAttribute("aria-pressed", String(sbsOn && !!doc));
   if (pdfPane.hidden) return;
+  const members = PS.combinedMembers(doc.pages);
   if (!pdfSources.some(Boolean)) {
     const box = document.createElement("div");
     box.className = "pane-empty";
-    const members = PS.combinedMembers(doc.pages);
     const what = members.length > 1 ? `the ${members.length} documents it lists` : "it";
     // Say which of the three things is actually missing. "No PDF matches" read
     // as a matching failure when usually there was nothing to match: no case
@@ -3690,7 +3690,12 @@ function buildPdfPane() {
     if (!t) {
       el = document.createElement("div");
       el.className = "pdf-slot blank";
-      el.textContent = p.banner != null ? TD.pageLabel(p) : (p.header != null ? "No PDF page for this part" : "");
+      // The leading page of a combined file is its own list of the documents
+      // in it — there is no PDF page for it, and saying so beats an empty box.
+      el.textContent = p.banner != null ? TD.pageLabel(p)
+        : p.header != null ? "No PDF page for this part"
+        : i === 0 && members.length > 1 ? "The file's own list of its documents — no PDF page"
+        : "No PDF page for this part";
     } else {
       el = slotShell("pdf-slot", "PDF p. " + t.page + (pdfSourceNames().length > 1 ? " · " + t.src.name : ""), { label: true });
       el.dataset.page = String(t.page);
@@ -3842,7 +3847,26 @@ function applyMatchedLayout() {
       over = overflow();
     }
   }
-  textAnchors = null;
+  // A text page with NO PDF page keeps the pane level with it. A combined file
+  // always has two kinds: its own contents page at the top, and a banner page
+  // before each member — and each of those used to stand beside a stub of a
+  // slot sixteen or thirty pixels tall. The columns were out of step from the
+  // first page (a 580px contents page against a 16px strip) and ran a few
+  // thousand pixels apart over a case's worth of documents, so neither the eye
+  // nor the scroll sync could hold them together. The slot is given its text
+  // page's own height instead: nothing to show, but the same amount of it.
+  //
+  // Read first, written after, so the heights come from pages that have already
+  // taken their matched sizes above.
+  if (on) {
+    const blanks = [];
+    for (const el of pdfPane.querySelectorAll(".pdf-slot.blank")) {
+      const sec = pagesEl.querySelector(`.tpage[data-index="${el.dataset.index}"]`);
+      if (sec) blanks.push([el, sec.offsetHeight]);
+    }
+    for (const [el, h] of blanks) el.style.height = h + "px";
+  }
+  textAnchors = null; textLineTops = null;
 }
 function clearMatched(sec) {
   if (!sec.classList.contains("matched")) return;
@@ -3871,7 +3895,8 @@ sbsBtn.addEventListener("click", () => setSideBySide(!sbsOn));
 // follow lands a scroll event of its own, which is ignored while the lead
 // is fresh.
 let syncLead = null, syncTimer = 0;
-let textAnchors = null; // memo: the text pages' first lines, reset on any relayout
+let textAnchors = null;  // memo: the text pages' first lines, reset on any relayout
+let textLineTops = null; // …the same, measured from each page's own top
 function pageGeometry(box, sel) {
   const els = [...box.querySelectorAll(sel)];
   return { tops: els.map((e) => e.offsetTop), heights: els.map((e) => e.offsetHeight) };
@@ -3884,17 +3909,33 @@ function firstLineOffset(sec) {
   const body = sec.querySelector(".page-body");
   return body ? body.getBoundingClientRect().top - top : 0;
 }
-function textGeometry() {
+/** The text pages' anchors, measured once per layout: absolute, and per page. */
+function textAnchorsNow() {
   const secs = [...pagesEl.querySelectorAll(".tpage")];
+  if (!textAnchors || textAnchors.length !== secs.length) {
+    textLineTops = secs.map((sec) => firstLineOffset(sec));
+    textAnchors = secs.map((sec, i) => sec.offsetTop + textLineTops[i]);
+  }
+  return secs;
+}
+function textGeometry() {
+  const secs = textAnchorsNow();
   if (!secs.length) return { tops: [], heights: [] };
-  if (!textAnchors || textAnchors.length !== secs.length) textAnchors = secs.map((sec) => sec.offsetTop + firstLineOffset(sec));
   const last = secs[secs.length - 1];
   return PS.anchorGeometry(textAnchors, last.offsetTop + last.offsetHeight);
 }
 function pdfGeometry() {
   const slots = [...pdfPane.querySelectorAll(".pdf-slot")];
   if (!slots.length) return { tops: [], heights: [] };
-  const anchors = slots.map((el) => el.offsetTop + (el.classList.contains("blank") ? 0 : pdfFirstLine(el)));
+  textAnchorsNow(); // the text pages' own offsets, for the slots that have no page
+  const anchors = slots.map((el) => {
+    if (!el.classList.contains("blank")) return el.offsetTop + pdfFirstLine(el);
+    // A slot with no PDF page of its own stands level with its text page and is
+    // the same height as it (see applyMatchedLayout), so it takes that page's
+    // own anchor: the pair then scrolls as one rather than a page-height apart.
+    const at = Number(el.dataset.index);
+    return el.offsetTop + (textLineTops && textLineTops[at] != null ? textLineTops[at] : 0);
+  });
   const last = slots[slots.length - 1];
   return PS.anchorGeometry(anchors, last.offsetTop + last.offsetHeight);
 }

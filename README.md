@@ -880,6 +880,17 @@ app, which routes it to the reader tab.
   PDF's text layer carries the pleading numbers down its margin — every
   numbered line at its number's own height, the body starting at the PDF's
   text margin, the leading the PDF's pitch, so line 7 stands beside line 7.
+  **A text page with no PDF page keeps the pane level with it.** A combined
+  file always has two kinds: its own list of the documents in it, at the top,
+  and a banner page before each member. Each of those used to stand beside a
+  stub of a slot — a 580px contents page against a 16px strip, a 148px banner
+  page against 30px — so the two columns were out of step from the first page
+  and ran three thousand pixels apart over a case's worth of documents: the
+  PDF never sat beside the text being read, whichever side was scrolled. Such a
+  slot now takes its text page's own height and its own anchor, nothing to show
+  but the same amount of it, and the contents page's slot says what it is. The
+  columns sit level to within a pixel at every scroll position, from either
+  side.
   A page with no numbers (an exhibit, a letter, an order) is laid out on
   the PDF's printed **rows** instead: each text line is matched to the row
   carrying its words and takes its top and left, so paragraphs and headings
