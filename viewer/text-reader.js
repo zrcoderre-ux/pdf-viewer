@@ -471,6 +471,9 @@ function compileKey() {
 }
 function setKey(parsed) {
   key = parsed || null;
+  // Pages built ahead of time carry this key's translation: under another one
+  // they are simply wrong, so they go, and the window fills again.
+  staleReady();
   compileKey();
   $("st-key").textContent = key ? "Key: " + PK.keyTitle(key) + (key.dropped.ambiguous ? ` (${key.dropped.ambiguous} ambiguous fake${key.dropped.ambiguous === 1 ? "" : "s"} retired)` : "") : "";
   if (doc) { retranslate(); refreshPdf(); }
@@ -651,7 +654,7 @@ async function scanFolder(h) {
 
 /** Make `h` the current case folder: key attached, documents listed, flags loaded. */
 async function adoptFolder(h, { quiet = false } = {}) {
-  if (dirHandle !== h) { forgetPdfs(); dropReadAhead(); }
+  if (dirHandle !== h) { forgetPdfs(); dropReady(); }
   dirHandle = h;
   folderName = h.name;
   await rememberDir(h);
@@ -756,14 +759,21 @@ async function openFile(file, handle) {
   if (!file) return;
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
   hideKeyOffer();
-  const text = await fileText(file);
-  // The case folder first, so the document renders under its own key.
+  // The case folder first, so the document renders under its own key — and so
+  // a document built ahead of time is judged against the key it will open under.
   try { await attachKeyForFile(handle || null); } catch (e) { console.warn(e); }
-  openText(text, file.name, handle || null);
+  const built = readyFor(file);
+  if (built) {
+    ready.delete(file.name); // the reader owns it from here: it is about to be edited
+    openText("", file.name, handle || null, built);
+    warmForLeaks();
+    return;
+  }
+  openText(await file.text(), file.name, handle || null);
 }
 
-function openText(text, name, handle) {
-  doc = TD.parseExport(text);
+function openText(text, name, handle, built) {
+  doc = built ? built.doc : TD.parseExport(text);
   fileName = name;
   fileHandle = handle;
   dirty = false;
@@ -775,7 +785,11 @@ function openText(text, name, handle) {
   document.title = name + " — Text Reader";
   if (!dirHandle) loadValuesFor(name);
   spots = TD.normalizeSpots(lsGet(spotStoreKey(), []));
-  render();
+  // A document built ahead of time goes up as it stands, unless its spot keeps
+  // have moved since it was built — then its pages are built again from the
+  // parse, which is already in hand.
+  if (built && JSON.stringify(built.spots) === JSON.stringify(spots)) showPages(built.nodes, built);
+  else render();
   setupPdfForDoc();
   markDocList();
   $("st-file").textContent = name + (TD.isQuarantinedName(name) ? " (quarantined by PDF-Linker's leak gate)" : "") + " · " + doc.pages.length + " page" + (doc.pages.length === 1 ? "" : "s");
@@ -834,7 +848,6 @@ async function openFolderDoc(d) {
 
 function renderDocList() {
   docsList.innerHTML = "";
-  docsHint.textContent = folderDocs.length ? folderName + " · " + folderDocs.length + " document" + (folderDocs.length === 1 ? "" : "s") : "Open a case folder to list its exports here.";
   for (const d of folderDocs) {
     const li = document.createElement("li");
     li.textContent = d.name.replace(/\.txt(\.LEAK)?$/i, "");
@@ -852,11 +865,11 @@ function renderDocList() {
       t.title = "Quarantined by PDF-Linker's leak gate — read it to find what leaked";
       li.appendChild(t);
     }
-    li.title = d.name;
     li.addEventListener("click", () => openFolderDoc(d));
     li.dataset.name = d.name;
     docsList.appendChild(li);
   }
+  renderDocReady();
   markDocList();
 }
 function markDocList() {
@@ -905,11 +918,15 @@ document.addEventListener("drop", (e) => {
 });
 
 // ── rendering ─────────────────────────────────────────────────────────────────────
-function render() {
-  pagesEl.innerHTML = "";
-  emptyEl.hidden = true;
-  pagesEl.hidden = false;
-  doc.pages.forEach((p, i) => {
+/**
+ * A document's pages as DOM, built into `into` — `#pages` itself, or a
+ * fragment held off the page (buildAhead). `from`/`to` build a slice of
+ * them, so a long document can go up a piece at a time without the page
+ * going unresponsive; `theirSpots` are that document's own spot keeps.
+ */
+function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpots = null, editable = false } = {}) {
+  for (let i = from; i < to; i++) {
+    const p = pages[i];
     const sec = document.createElement("section");
     sec.className = "tpage";
     sec.dataset.index = String(i);
@@ -938,15 +955,50 @@ function render() {
     inner.className = "page-inner";
     const body = document.createElement("div");
     body.className = "page-body";
-    body.contentEditable = editing ? "plaintext-only" : "false";
+    body.contentEditable = editable ? "plaintext-only" : "false";
     body.spellcheck = false;
-    buildBody(body, p.lines.join("\n"), i);
+    buildBody(body, p.lines.join("\n"), i, theirSpots);
     const layer = document.createElement("div");
     layer.className = "link-layer";
     inner.append(body, layer);
     sec.appendChild(inner);
-    pagesEl.appendChild(sec);
-  });
+    into.appendChild(sec);
+  }
+}
+
+function render() {
+  pagesEl.innerHTML = "";
+  emptyEl.hidden = true;
+  pagesEl.hidden = false;
+  buildPages(pagesEl, doc.pages, { editable: editing });
+  stageEl.scrollTop = 0;
+  afterTextChange();
+}
+/** The keeps as they stand, so a built document can tell whether they have moved. */
+function keepsSignature() { return allKeeps().map((k) => k.control + ":" + k.value).join("|"); }
+/**
+ * A document built ahead of time, put on the page as it stands.
+ *
+ * Its pseudonym spans are brought up to date first — the keeps and the
+ * fake/real toggle can both have moved since it was built, and neither is
+ * worth building the document again for — and that is done while the pages
+ * are still OFF the page, where a write costs nothing. The same writes made
+ * after they are on it cost a second on a long document, which is more than
+ * building the whole thing from scratch.
+ */
+function showPages(nodes, built) {
+  const fakes = !!built && built.fakes !== settings.showFakes;
+  const marks = !!built && built.keeps !== keepsSignature();
+  if (fakes || marks) {
+    for (const s of nodes.querySelectorAll(".pn")) {
+      if (fakes) s.textContent = settings.showFakes ? s.dataset.fake : s.dataset.real;
+      if (marks) markKept(s);
+    }
+  }
+  pagesEl.innerHTML = "";
+  emptyEl.hidden = true;
+  pagesEl.hidden = false;
+  pagesEl.appendChild(nodes);
   stageEl.scrollTop = 0;
   afterTextChange();
 }
@@ -961,15 +1013,16 @@ function render() {
  * never crosses the rule. serializeNodes reads a DIV as a line break, so
  * the file comes back byte for byte.
  */
-function buildBody(body, text, page) {
+function buildBody(body, text, page, theirSpots) {
   body.innerHTML = "";
   body.classList.toggle("numbered", TD.pageIsNumbered(text.split("\n")));
   const runs = rev ? PK.translateRuns(rev, text) : [{ t: "text", s: text }];
+  const pageSpots = theirSpots || spots;
   // The page's spot keeps, as places in the text it is being built from. `at`
   // follows the same text as the runs are laid out, so each spot's own
   // characters go into a span of their own — carrying no fake, so the value
   // stays as it reads here while every other occurrence is faked as usual.
-  const holds = TD.spotRanges(text, TD.spotsOnPage(spots, page));
+  const holds = TD.spotRanges(text, TD.spotsOnPage(pageSpots, page));
   let at = 0;
   let line = null, lt = null, lineStart = true;
   const newLine = () => {
@@ -2872,7 +2925,7 @@ async function attachLeaks(bytes, name, handle, { quiet = false, folder = "" } =
 function dropLeaks() {
   leaks = null;
   dropWarmPages();
-  dropReadAhead();
+  dropReady();
   leakRowValue = "";
   leakHere = null;
   showLeaksBar(false);
@@ -3728,69 +3781,157 @@ async function warmPage(opened, key, pageNo, cssWidth) {
   } finally { warmBusy.delete(key); }
 }
 
-// ── the documents the rows name, read before the hop to them ─────────────────────
+// ── the documents the review will visit, built before it reaches them ───────────
 //
-// A row's page stands in its OWN export, and the reader opens that export to
-// go to it. The reading is the part that can be done early, so it is: the
-// next documents the worksheet points at are read into memory while the
-// review works on the one in front, and an open that finds a document there
-// takes it instead of going to disk. The text is held against the file it
-// came from — name, size and modification time — so an export written since
-// (a save from here, or another run of PDF-Linker) is read again rather than
-// remembered wrongly.
-const AHEAD_DOCS = 2;        // exports read ahead of the review
-const AHEAD_CHARS = 12e6;    // …and the most text held while doing it
-const readAhead = new Map(); // "<name>|<size>|<modified>" → the text
-let aheadGen = 0;
-function aheadKey(file) { return file.name + "|" + file.size + "|" + file.lastModified; }
-function dropReadAhead() { aheadGen++; readAhead.clear(); }
-/** A file's text: the copy read ahead where it is still the same file, else the file's own. */
-async function fileText(file) {
-  const held = readAhead.get(aheadKey(file));
-  return held != null ? held : file.text();
+// A case folder's leaks are spread over its exports, and the review walks from
+// one to the next: a row names its own document, and stepping to that row
+// opens it. Opening is the expensive part — and nearly all of that is BUILDING
+// the page. Reading the file and parsing it into pages cost a millisecond
+// between them; laying forty pages of pleading paper out as DOM costs a
+// quarter of a second, and a long export the best part of a second.
+//
+// So the documents the worksheet names are built BEFORE the review reaches
+// them, off the page: read, parsed, and their pages built into a fragment
+// that is nowhere in the document yet — no layout, no paint, nothing on
+// screen. Opening one is then putting that fragment on the page, which costs
+// the settle (the counts, the layout, the highlights) and nothing else.
+//
+// Gradually, on purpose, and within a budget. Never the whole folder at once:
+// the documents are taken in the order the review will reach them, one at a
+// time, in idle time, each in slices of pages, so the building never stands
+// between the reader and the page. How many are held is what FITS — up to
+// READY_DOCS of them and READY_PAGES between them, which on a case of
+// ordinary exports is every document with a leak in it and on a case of long
+// ones is the next two or three. A document of more than READY_MAX_PAGES is
+// never held: the combined file is that document, and holding it is what
+// takes the tab down. What no longer fits is dropped, furthest from the row
+// in front first.
+const READY_DOCS = 6;         // documents held built at once
+const READY_PAGES = 400;      // …and the pages between them
+const READY_MAX_PAGES = 200;  // …and the most any one of them may have
+const READY_SLICE = 8;        // pages built before yielding again
+const ready = new Map();      // export name → { name, handle, fileKey, doc, nodes, epoch, spots } | { name, skipped }
+let readyWanted = [];         // the window, in the order the review will reach it
+let readyBusy = false;
+let readyEpoch = 0;           // bumped whenever a built page would no longer be right
+
+/** Built pages are translated under the key as it stood: a change makes them wrong. */
+function dropReady() {
+  readyWanted = [];
+  ready.clear();
+  renderDocReady();
 }
-/** Read ahead the exports the worksheet points at next — the ones not already open. */
-async function readAheadDocs() {
-  const gen = ++aheadGen;
-  if (!leaks || !folderDocs.length) { readAhead.clear(); return; }
+function staleReady() { readyEpoch++; dropReady(); warmForLeaks(); }
+function fileKeyOf(file) { return file.name + "|" + file.size + "|" + file.lastModified; }
+const idle = () => new Promise((res) => {
+  if (typeof requestIdleCallback === "function") requestIdleCallback(() => res(), { timeout: 600 });
+  else setTimeout(res, 16);
+});
+
+/** The exports the worksheet points at, in visit order, that are not already open. */
+function leakDocNames() {
+  if (!leaks || !folderDocs.length) return [];
   const fwdName = fwd ? (s) => forwardText(s).text : null;
   const names = folderDocs.map((d) => d.name);
-  const open = doc ? [fileName, ...PS.combinedMembers(doc.pages)] : [fileName];
-  const wanted = [];
+  // A combined file already open holds every member: there is no hop to make.
+  const open = [fileName, ...(doc ? PS.combinedMembers(doc.pages) : [])].filter(Boolean);
+  const out = [];
   for (const t of LK.leakPages(leakRows(), leaks.at)) {
-    if (!t.file) continue;
-    // A combined file already open holds every member: there is no hop to make.
-    if (LK.matchExport(t.file, open.filter(Boolean), fwdName)) continue;
+    if (!t.file || LK.matchExport(t.file, open, fwdName)) continue;
     const e = LK.matchExport(t.file, names, fwdName);
-    if (!e || wanted.includes(e)) continue;
-    wanted.push(e);
-    if (wanted.length >= AHEAD_DOCS) break;
+    if (e && !out.includes(e)) out.push(e);
   }
+  return out;
+}
+
+/** The pages held between them — the budget the window is kept inside. */
+function heldPages() {
+  let n = 0;
+  for (const e of ready.values()) n += e.pages || 0;
+  return n;
+}
+/** Hold the documents ahead of the row in front — and let go of what no longer fits. */
+function planReadyDocs() {
+  if (!leaks || !folderDocs.length) { dropReady(); return; }
+  readyWanted = leakDocNames().slice(0, READY_DOCS);
+  // In visit order, keep what fits; the rest go — the furthest from the row in
+  // front being the ones the review will want last.
+  let pages = 0;
   const keep = new Set();
-  let held = 0;
-  for (const name of wanted) {
-    const d = folderDocs.find((x) => x.name === name);
-    if (!d) continue;
-    let file;
-    try { file = await d.handle.getFile(); } catch { continue; }
-    if (gen !== aheadGen) return;
-    const k = aheadKey(file);
-    keep.add(k);
-    if (readAhead.has(k)) { held += readAhead.get(k).length; continue; }
-    if (held >= AHEAD_CHARS) continue;
-    let text;
-    try { text = await file.text(); } catch { continue; }
-    if (gen !== aheadGen || text.length > AHEAD_CHARS) return;
-    readAhead.set(k, text);
-    held += text.length;
+  for (const name of readyWanted) {
+    const e = ready.get(name);
+    const cost = e ? e.pages || 0 : 0;
+    if (e && pages + cost > READY_PAGES && keep.size) break;
+    keep.add(name);
+    pages += cost;
   }
-  for (const k of [...readAhead.keys()]) if (!keep.has(k)) readAhead.delete(k);
+  for (const name of [...ready.keys()]) if (!keep.has(name)) ready.delete(name);
+  renderDocReady();
+  pumpReady();
+}
+function pumpReady() {
+  if (readyBusy) return;
+  if (heldPages() >= READY_PAGES) return; // full: the rest wait for the window to move
+  const next = readyWanted.find((n) => !ready.has(n));
+  const d = next ? folderDocs.find((x) => x.name === next) : null;
+  if (!d) return;
+  readyBusy = true;
+  buildAhead(d).catch(() => { ready.set(d.name, { name: d.name, skipped: "unreadable" }); })
+    .then(() => { readyBusy = false; renderDocReady(); pumpReady(); });
+}
+/** One document read, parsed and built off the page, a slice at a time. */
+async function buildAhead(d) {
+  const epoch = readyEpoch;
+  const file = await d.handle.getFile();
+  const text = await file.text();
+  if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
+  const parsed = TD.parseExport(text);
+  if (parsed.pages.length > READY_MAX_PAGES) { ready.set(d.name, { name: d.name, skipped: `${parsed.pages.length} pages — too long to hold ready` }); return; }
+  const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + d.name, []));
+  const nodes = document.createDocumentFragment();
+  for (let at = 0; at < parsed.pages.length; at += READY_SLICE) {
+    await idle();
+    // The key changed, or the review moved on: what is built so far is dropped.
+    if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
+    buildPages(nodes, parsed.pages, { from: at, to: Math.min(at + READY_SLICE, parsed.pages.length), spots: theirSpots });
+  }
+  ready.set(d.name, {
+    name: d.name, handle: d.handle, fileKey: fileKeyOf(file), doc: parsed, nodes, epoch,
+    spots: theirSpots, pages: parsed.pages.length,
+    // What its spans were built under: a keep decided since, or the fake/real
+    // toggle flipped since, is put right as the document goes up.
+    fakes: settings.showFakes, keeps: keepsSignature(),
+  });
+}
+/** The document built for this file, or null — the same file, under the same key. */
+function readyFor(file) {
+  const e = file ? ready.get(file.name) : null;
+  if (!e || !e.nodes) return null;
+  if (e.epoch !== readyEpoch || e.fileKey !== fileKeyOf(file)) {
+    // Written since it was built (another PDF-Linker run, a save): what is
+    // held is of the old file, so it goes and the window builds the new one.
+    ready.delete(e.name);
+    return null;
+  }
+  return e;
+}
+/** Which documents in the list are held ready, and how many. */
+function renderDocReady() {
+  const held = [...ready.values()].filter((e) => e.nodes);
+  for (const li of docsList.children) {
+    const e = ready.get(li.dataset.name);
+    li.classList.toggle("ready", !!(e && e.nodes));
+    li.title = li.dataset.name + (e && e.nodes ? " — built and waiting" : e && e.skipped ? " — not held (" + e.skipped + ")" : "");
+  }
+  const base = folderDocs.length ? folderName + " · " + folderDocs.length + " document" + (folderDocs.length === 1 ? "" : "s") : "Open a case folder to list its exports here.";
+  const want = readyWanted.length;
+  docsHint.textContent = base + (leaks && want ? ` · ${held.length} of ${want} with leaks ready to open` + (readyBusy ? ", building…" : "") : "");
 }
 
 /** The worksheet's next pages and documents, held ready. Coalesced: the review moves in steps. */
 const warmForLeaks = debounce(() => {
   planWarmPages();
-  readAheadDocs().catch(() => { /* the open reports it */ });
+  planReadyDocs();
 }, 200);
 
 // ── rendering a page into a canvas ──
@@ -4635,6 +4776,8 @@ window.__textReaderLeaks = () => (leaks ? {
   marks: leakRowRanges.length, keeps: keeps.slice(), leakMarks: leakHits.length,
 } : null);
 window.__textReaderLeaksBytes = async () => Array.from(await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, LK.fixEdits(leaks.parsed)));
+window.__textReaderAdoptFolder = (h) => adoptFolder(h, { quiet: true });
+window.__textReaderOpenDoc = (name) => { const d = folderDocs.find((x) => x.name === name); return d ? openFolderDoc(d) : null; };
 window.__textReaderPickPdfs = (files) => usePickedPdfs(files);
 window.__textReaderPdfSources = () => pdfSources.map((s) => (s ? s.name : null));
 window.__textReaderPdfQueue = () => ({
@@ -4644,7 +4787,10 @@ window.__textReaderPdfQueue = () => ({
 });
 // …and what has been drawn ahead of the review: the pages held ready, the
 // ones being drawn now, and the exports read ahead of the hop to them.
-window.__textReaderWarm = () => ({ held: [...warmPages.keys()], drawing: [...warmBusy], wanted: [...warmWanted], ahead: [...readAhead.keys()] });
+window.__textReaderWarm = () => ({
+  held: [...warmPages.keys()], drawing: [...warmBusy], wanted: [...warmWanted],
+  docs: { wanted: readyWanted.slice(), built: [...ready.values()].filter((e) => e.nodes).map((e) => e.name), skipped: [...ready.values()].filter((e) => e.skipped).map((e) => e.name + ": " + e.skipped), busy: readyBusy },
+});
 window.__textReaderMaster = (bytes, name) => readMasterBytes(new Uint8Array(bytes), name);
 window.__textReaderMasterState = () => ({
   info: masterInfo, keeps: masterKeeps.map((k) => k.control + ":" + k.value),
