@@ -1121,10 +1121,18 @@ function afterTextChange() {
   textAnchors = null; textLineTops = null;
   applyMatchedLayout();
   applyLineLock();
-  placeCitations();
+  // The citations settle a beat after the edit rather than with it. Reading
+  // a long export for citations is the one part of this that a long document
+  // makes slow — the scan is of the whole text, since a short form ("Ibid.",
+  // an italicized name) means what the cite BEFORE it means, wherever on the
+  // way it stands — and doing it between keystrokes is what made a long
+  // document feel stuck. Everything else here is the edit itself and stays
+  // immediate; the underlines catch up once the typing stops.
+  placeCitationsSoon();
   paintHighlights();
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
+const placeCitationsSoon = debounce(() => placeCitations(), 450);
 const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
 window.addEventListener("resize", relayout);
 
@@ -1342,6 +1350,71 @@ function enterAtCaret(body, { snap = true } = {}) {
   afterTextChange();
   return true;
 }
+/**
+ * The rest of a paste: `pieces` laid into the slots after the caret, all at
+ * once. What stands after the caret rides down with the last piece, and on
+ * pleading paper the text below moves down by as many slots as there are
+ * pieces — the blank slots it passes absorbing a piece each, exactly as each
+ * Enter's cascade stopped at the first empty line below it.
+ */
+function insertLinesAtCaret(body, pieces) {
+  const cl = caretLine(body);
+  if (!cl || !pieces.length) return false;
+  const { line, pt: at } = cl;
+  const lt = ltOf(line);
+  const r = document.createRange();
+  r.setStart(at.container, at.offset);
+  r.setEnd(lt, lt.childNodes.length);
+  const tail = r.extractContents();
+  for (const br of [...tail.querySelectorAll("br")]) br.remove();
+  // The pieces as fragments; the last one carries the tail down with it, and
+  // its own text node is where the caret is left.
+  let caretNode = null;
+  const frags = pieces.map((piece, i) => {
+    const f = document.createDocumentFragment();
+    if (piece) {
+      const t = document.createTextNode(piece);
+      f.appendChild(t);
+      if (i === pieces.length - 1) caretNode = t;
+    }
+    return f;
+  });
+  frags[frags.length - 1].appendChild(tail);
+  let caretSlot = null;
+  if (!body.classList.contains("numbered")) {
+    let after = line;
+    frags.forEach((f, i) => {
+      const nl = newLineAfter(after);
+      ltOf(nl).appendChild(f);
+      if (i === frags.length - 1) caretSlot = nl;
+      after = nl;
+    });
+  } else {
+    const below = [];
+    for (let cur = line.nextElementSibling; cur; cur = cur.nextElementSibling) if (cur.classList.contains("line")) below.push(cur);
+    const contents = below.map((l) => extractAll(ltOf(l)));
+    let absorb = frags.length;
+    const kept = [];
+    for (const f of contents) {
+      if (absorb > 0 && !f.textContent.length) { absorb--; continue; }
+      kept.push(f);
+    }
+    const seq = frags.concat(kept);
+    seq.forEach((f, i) => {
+      const slot = below[i] || newLineAfter(body.lastElementChild);
+      ltOf(slot).appendChild(f);
+      if (i === frags.length - 1) caretSlot = slot;
+    });
+  }
+  for (const l of body.querySelectorAll(".line > .lt")) placeholderIn(l);
+  fixGutterSpacing(body);
+  if (caretNode) placeCaret(caretNode, caretNode.data.length);
+  else if (caretSlot) placeCaret(ltOf(caretSlot), 0);
+  setDirty(true);
+  afterTextChange();
+  return true;
+}
+
 /** Backspace at the start of a line: join it to the line above, the run below moves up. */
 function joinLineUp(body, line) {
   const prev = line.previousElementSibling;
@@ -1390,6 +1463,7 @@ function deleteAtCaret(body) {
   if (!next || !next.classList.contains("line")) return true; // the last line: nothing after it to join
   return joinLineUp(body, next);
 }
+const GUTTER_FIXED = "The line numbers are fixed: edit within a line, or join lines with Backspace at a line's start.";
 /** A selection reaching across a line number: an edit over it would take the number with it, so it is refused. */
 function selectionCrossesGutter(body) {
   const sel = document.getSelection();
@@ -1407,23 +1481,40 @@ pagesEl.addEventListener("keydown", (e) => {
   else if (e.key === "Backspace") { if (backspaceAtCaret(body)) e.preventDefault(); }
   else if (e.key === "Delete") { if (deleteAtCaret(body)) e.preventDefault(); }
 });
-// A paste is typed in line by line, each line break an Enter, so pasted text
-// moves between the slots as typed text does.
+// A paste goes in as ONE edit, its first piece typed where the caret stands
+// (so it replaces a selection, and the line numbers keep their guard) and the
+// rest laid into the slots below in a single pass.
+//
+// It used to be typed in line by line, an Enter per break, so that pasted
+// text moved between the slots exactly as typed text does. It does still —
+// but an Enter on pleading paper pushes EVERY line below it down a slot, and
+// then re-reads the whole document: the counts, the matched layout, the line
+// lock, the citations and the highlights, over every page. A multi-paragraph
+// block pasted from the PDF beside it meant one cascade and one re-read per
+// line, each dearer than the last, and the page stopped answering until the
+// last of them was done. Now the cascade happens once and the document is
+// re-read once, at the end.
 pagesEl.addEventListener("paste", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body || !editing) return;
   const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
   e.preventDefault();
   if (!text) return;
+  if (selectionCrossesGutter(body)) { toast(GUTTER_FIXED, { error: true }); return; }
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
   snapshot(body, true);
   batchEdit = true;
   try {
-    const lines = text.replace(/\r\n?/g, "\n").split("\n");
-    lines.forEach((piece, i) => {
-      if (piece) document.execCommand("insertText", false, piece);
-      if (i < lines.length - 1) enterAtCaret(body, { snap: false });
-    });
+    const sel = document.getSelection();
+    if (lines[0]) document.execCommand("insertText", false, lines[0]);
+    else if (sel && !sel.isCollapsed) document.execCommand("delete");
+    if (lines.length > 1) insertLinesAtCaret(body, lines.slice(1));
   } finally { batchEdit = false; }
+  // The document has just been read whole; the settle the typing itself asked
+  // for would only read it again.
+  afterTextChangeSoon.cancel();
+  if (lines.length === 1) afterTextChange();
+  convertTypedRealsSoon(body);
 });
 
 // ── the as-you-type prompt (the Claude extension's, for the page) ────────────────
@@ -1633,7 +1724,7 @@ pagesEl.addEventListener("beforeinput", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body) return;
   if (e.inputType === "historyUndo" || e.inputType === "historyRedo") { e.preventDefault(); return; }
-  if (selectionCrossesGutter(body)) { e.preventDefault(); toast("The line numbers are fixed: edit within a line, or join lines with Backspace at a line's start.", { error: true }); return; }
+  if (selectionCrossesGutter(body)) { e.preventDefault(); toast(GUTTER_FIXED, { error: true }); return; }
   // A deletion after typing, or typing after a deletion, is its own step.
   const kind = /delete/i.test(e.inputType) ? "del" : "ins";
   snapshot(body, kind !== snapshot.lastKind);
@@ -1888,6 +1979,7 @@ function rangeFor(segs, start, end) {
 }
 
 function placeCitations() {
+  placeCitationsSoon.cancel();
   if (!doc) return;
   const bodies = pageBodies();
   const parts = [];
@@ -1902,7 +1994,6 @@ function placeCitations() {
   const full = parts.join("\n\n");
   let found = [];
   try { found = findAllCitations(full); } catch (e) { console.error(e); }
-  for (const m of maps) m.body.nextElementSibling.innerHTML = "";
   const seen = new Map();
   let linked = 0;
   // The page a citation fell on, by binary search over the pages' offsets
@@ -1923,11 +2014,18 @@ function placeCitations() {
   // and the gutter numbers a wrapped citation may run across. Reading them
   // per citation measured every number on the page again for each one.
   const measure = (m) => {
-    if (!m.rect) {
-      m.rect = m.body.getBoundingClientRect();
-      m.gutters = [...m.body.querySelectorAll(".gutter")].map((g) => ({ el: g, box: g.getBoundingClientRect() }));
-    }
+    if (!m.rect) m.rect = m.body.getBoundingClientRect();
     return m;
+  };
+  // The numbers are measured only for a page that has a citation running
+  // across one — a cite that stands within its own line draws a single strip
+  // and can hold no number. On a pleading export that is nearly every cite,
+  // and measuring all twenty-eight numbers of all two hundred pages (and
+  // asking each of them, for each cite, whether the cite reaches it) was the
+  // bulk of what a re-read cost.
+  const gutters = (m) => {
+    if (!m.gutters) m.gutters = [...m.body.querySelectorAll(".gutter")].map((g) => ({ el: g, box: g.getBoundingClientRect() }));
+    return m.gutters;
   };
   // EVERY measurement first, the underlines after. An underline is a box the
   // layout has to account for, so measuring one page, drawing its links, then
@@ -1948,11 +2046,11 @@ function placeCitations() {
     // A cite that wraps onto a numbered line spans the gutter number it was
     // detected across; the number is not part of the citation and gets no
     // underline.
-    const gutters = m.gutters.filter((g) => range.intersectsNode(g.el)).map((g) => g.box);
+    const rects = [...range.getClientRects()].filter((r) => r.width >= 1);
+    const boxes = rects.length > 1 ? gutters(m).filter((g) => range.intersectsNode(g.el)).map((g) => g.box) : [];
     const strips = [];
-    for (const r of range.getClientRects()) {
-      if (r.width < 1) continue;
-      if (gutters.some((g) => r.left >= g.left - 0.5 && r.right <= g.right + 0.5 && r.top >= g.top - 0.5 && r.bottom <= g.bottom + 0.5)) continue;
+    for (const r of rects) {
+      if (boxes.some((g) => r.left >= g.left - 0.5 && r.right <= g.right + 0.5 && r.top >= g.top - 0.5 && r.bottom <= g.bottom + 0.5)) continue;
       strips.push({ left: r.left - bodyRect.left, top: r.bottom - bodyRect.top - 6, width: r.width });
     }
     if (strips.length) {
@@ -1964,18 +2062,38 @@ function placeCitations() {
     }
     linked++;
   }
+  // A page's underlines are rewritten only where they have CHANGED. Every
+  // layer used to be emptied and redrawn on every pass, and a pass runs on
+  // every settled edit: a two-hundred-page export threw away five thousand
+  // links and built five thousand more for one typed character, which got
+  // slower the longer the reader stayed on the document. The strips a page
+  // wants are a short string; where it matches what that layer already
+  // carries, the layer is left alone.
+  const byLayer = new Map();
+  for (const m of maps) byLayer.set(m.body.nextElementSibling, []);
   for (const p of plans) {
-    for (const r of p.strips) {
-      const a = document.createElement("a");
-      a.className = "cite-link kind-" + p.kind;
-      a.href = p.url;
-      a.target = "_blank";
-      a.rel = "noopener";
-      a.title = p.key;
-      a.style.left = r.left + "px";
-      a.style.top = r.top + "px";
-      a.style.width = r.width + "px";
-      p.layer.appendChild(a);
+    const mine = byLayer.get(p.layer);
+    if (mine) mine.push(p);
+  }
+  for (const [layer, mine] of byLayer) {
+    const sig = mine.map((p) => p.kind + " " + p.url + " " + p.key + " " +
+      p.strips.map((r) => Math.round(r.left) + "," + Math.round(r.top) + "," + Math.round(r.width)).join(";")).join("\n");
+    if (layer.__cites === sig) continue;
+    layer.__cites = sig;
+    layer.innerHTML = "";
+    for (const p of mine) {
+      for (const r of p.strips) {
+        const a = document.createElement("a");
+        a.className = "cite-link kind-" + p.kind;
+        a.href = p.url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.title = p.key;
+        a.style.left = r.left + "px";
+        a.style.top = r.top + "px";
+        a.style.width = r.width + "px";
+        layer.appendChild(a);
+      }
     }
   }
   lastCites = [...seen.values()];

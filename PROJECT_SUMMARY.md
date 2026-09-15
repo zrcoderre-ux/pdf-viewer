@@ -121,6 +121,26 @@ the same way — two at a time, held against name, size and modification time,
 so a file written since is read again — and an open takes the text from
 there instead of going to disk.
 
+Editing a LONG export stays responsive. A paste is one edit: its first
+piece goes in through `insertText` (so it replaces a selection and the
+line-number guard applies as it does to anything typed), and
+`insertLinesAtCaret` lays the rest into the slots in a single pass — the
+text below moves down once, the blank slots it passes absorbing a piece
+each, exactly as each Enter's cascade did, which an A/B against the old
+line-by-line path pins character for character. `afterTextChange` keeps the
+counts, the matched layout, the line lock and the highlights immediate and
+hands the citations to `placeCitationsSoon` (450 ms): the citation scan
+reads the WHOLE document — a short form means what the cite before it
+means, wherever that stands — so it belongs after the typing, not between
+keystrokes. And `placeCitations` now rewrites a page's link layer only when
+that page's strips have changed (`layer.__cites`, the strips as a string),
+and measures a page's gutter numbers only for a cite that actually wraps
+across one; redrawing all five thousand links on every pass was both the
+bulk of a re-read and the reason the reader got slower the longer a
+document stayed open. Thirty lines pasted into a two-hundred-page export:
+22.6 s before, 13 ms after, with the same 4,824 underlines in the same
+places.
+
 ## Fixes applied in earlier sessions
 
 All in `viewer/` unless noted. Each fix is documented inline at the call
