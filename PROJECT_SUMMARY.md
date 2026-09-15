@@ -149,6 +149,23 @@ keep changes only what is marked. Built and cold opens were compared
 node for node, including 1,920 pseudonym spans and 960 citation
 underlines: the same document either way.
 
+`applyMatchedLayout` is asked for far more often than it can afford to run,
+so the asks are coalesced: `applyMatchedLayoutSoon` collects them and runs
+one pass on the next animation frame. `presize` asks once per slot as each
+PDF page's size arrives and `readPdfGrid` asks again when the grid lands —
+on a seventy-page complaint that was 144 passes over the whole document
+(1,090 ms of pure matching, one task of a full second); it is 8 passes and
+~150 ms now. Within a pass, the pane's slots are indexed by page once
+instead of a `querySelector` per page, its width is read once instead of per
+page, and each line remembers what the last pass wrote to it (`l.__laid`,
+cleared by `clearMatched`) so a line already in place is not written again.
+Measured on a 70-page complaint with its PDF beside it: 1.6-1.9 s of blocked
+main thread before, 0.57-0.65 s after, worst task ~1,000 ms before and
+~170 ms after, and nothing at all while scrolling. Alignment was checked
+after the change — 70 of 70 pages matched, text sheet and slot the same
+width, zero drift — and the lines still take a new scale when the reading
+size changes.
+
 Editing a LONG export stays responsive. A paste is one edit: its first
 piece goes in through `insertText` (so it replaces a selection and the
 line-number guard applies as it does to anything typed), and

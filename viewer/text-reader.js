@@ -3531,7 +3531,7 @@ async function readPdfGrid(info) {
       info.rows[i - 1] = PS.pdfRows(items, sz);
     } catch { info.lines[i - 1] = null; }
   }
-  if (sbsOn && !pdfPane.hidden) { applyMatchedLayout(); syncScroll("text", true); }
+  if (sbsOn && !pdfPane.hidden) applyMatchedLayoutSoon();
 }
 const PDF_LINE_DEFAULT = 72 / 792; // an inch down a letter page, until the PDF says
 /** A slot's first printed line, in px from the slot's top, from the PDF loaded so far. */
@@ -4178,7 +4178,7 @@ async function presize(el, src, pageNo, cssWidth) {
     const info = await loadPdf(src);
     const sz = info.sizes[pageNo - 1];
     if (sz && !el.dataset.rendered) sheetOf(el).style.height = Math.round((cssWidth * sz.h) / sz.w) + "px";
-    if (el.classList.contains("pdf-slot")) { applyMatchedLayout(); syncScroll("text", true); }
+    if (el.classList.contains("pdf-slot")) applyMatchedLayoutSoon();
   } catch { /* the render reports it */ }
 }
 const paneObserver = new IntersectionObserver((entries) => {
@@ -4325,13 +4325,36 @@ function fitSlot(el, w) {
   if (el.dataset.rendered || el.dataset.want) renderInto(el, src, page, w);
   else presize(el, src, page, w);
 }
+// The columns are re-matched ONCE a frame, however many things ask for it.
+// The pane asks a slot at a time as each PDF's page sizes arrive, and the
+// grid asks again when it lands: on a seventy-page complaint that was a
+// hundred and forty passes over the whole document, each laying out every
+// line of every page against the PDF's grid, and the best part of two
+// seconds in which the page answered nothing. One pass covers them all.
+let matchQueued = false;
+function applyMatchedLayoutSoon() {
+  if (matchQueued) return;
+  matchQueued = true;
+  requestAnimationFrame(() => {
+    matchQueued = false;
+    if (!doc) return;
+    applyMatchedLayout();
+    if (sbsOn && !pdfPane.hidden) syncScroll("text", true);
+  });
+}
 function applyMatchedLayout() {
   const on = sbsOn && !pdfPane.hidden;
   const plans = [];
   const matchedSlots = new Set();
+  // The pane's slots by their page, and its width, read ONCE: asking the pane
+  // for a slot page by page walks every slot each time, and asking it for its
+  // width lays the whole box out again. Seventy pages made both a hundred-fold.
+  const slots = new Map();
+  if (on) for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) slots.set(Number(el.dataset.index), el);
+  const paneW = on ? paneWidth() : 0;
   for (const sec of pagesEl.querySelectorAll(".tpage")) {
     const i = Number(sec.dataset.index);
-    const slot = on ? pdfPane.querySelector(`.pdf-slot[data-index="${i}"]:not(.blank)`) : null;
+    const slot = on ? slots.get(i) || null : null;
     const t = slot && pdfTarget(i);
     const info = t && infoFor(t.src);
     const sz = info && info.sizes[t.page - 1];
@@ -4368,12 +4391,12 @@ function applyMatchedLayout() {
     if (tops) tops = PS.spreadTops(tops, boxes);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
-    const scale = PS.matchedScale(base, settings.fontSize) || paneWidth() / sz.w;
+    const scale = PS.matchedScale(base, settings.fontSize) || paneW / sz.w;
     matchedSlots.add(slot);
     plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, scale });
   }
   // Every slot the layout did not claim keeps the pane's own width.
-  if (on) for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) if (!matchedSlots.has(el)) fitSlot(el, paneWidth());
+  if (on) for (const el of slots.values()) if (!matchedSlots.has(el)) fitSlot(el, paneW);
   document.body.classList.toggle("matched-pages", plans.length > 0);
   for (const p of plans) {
     const w = Math.round(p.sz.w * p.scale);
@@ -4387,8 +4410,19 @@ function applyMatchedLayout() {
     p.body.classList.toggle("fixed", !!p.tops);
     if (p.geom) p.sec.style.setProperty("--body-x", (p.geom.bodyX * p.scale) + "px");
     else p.sec.style.removeProperty("--body-x");
+    // Only the lines that MOVE are written to. A pass over a seventy-page
+    // complaint sets four properties on two thousand lines, and the passes
+    // repeat — as each PDF's sizes arrive, as its grid lands, after every
+    // settled edit — almost always to put every line back where it already
+    // stands. What it would write is remembered on the line, and a line
+    // already there is left alone.
     p.lines.forEach((l, k) => {
       const top = p.tops ? p.tops[k] : null;
+      const want = top == null ? "" :
+        (top * p.scale) + "|" + (p.lefts && p.lefts[k] != null ? p.lefts[k] * p.scale : "") + "|" +
+        (p.sizes[k] * p.scale) + "|" + (p.boxes[k] * p.scale);
+      if (l.__laid === want) return;
+      l.__laid = want;
       if (top == null) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; return; }
       l.style.top = (top * p.scale) + "px";
       l.style.left = p.lefts && p.lefts[k] != null ? (p.lefts[k] * p.scale) + "px" : "";
@@ -4441,7 +4475,7 @@ function clearMatched(sec) {
   sec.querySelector(".page-inner").style.height = "";
   const body = sec.querySelector(".page-body");
   body.classList.remove("fixed");
-  for (const l of body.querySelectorAll(":scope > .line")) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
+  for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
 }
 function setSideBySide(on, { remember = true } = {}) {
   sbsOn = !!on;
