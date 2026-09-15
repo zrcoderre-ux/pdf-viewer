@@ -792,11 +792,29 @@ app, which routes it to the reader tab.
   left, the last line's text lands on a new unnumbered line at the foot of
   the page, so nothing is lost. **Backspace** at the start of a line joins it
   to the line above and pulls the run below up a slot; **Delete** at the end
-  of a line is the same join from the other side; a paste is typed in line
-  by line. So where the export left line 7 empty and the PDF has text on it,
+  of a line is the same join from the other side; a **paste of several lines
+  goes in as one edit** — its first line typed where the caret stands, the
+  rest laid into the slots below in a single pass, the text below moving
+  down once. So where the export left line 7 empty and the PDF has text on it,
   click line 7 and type: the file gets ` 7  ` and your text, and PDF-Linker's
   next run reads it as line 7. A selection that reaches across a number is
   refused an edit, and the numbers never take a keystroke.
+- **A long export keeps answering while you edit it.** A paste used to be
+  typed in line by line, and each of those lines pushed the page's text down
+  a slot and then had the whole document re-read after it — the counts, the
+  matched layout, the line lock, the citations and the highlights, over every
+  page. A block of thirty lines pasted out of the PDF into a two-hundred-page
+  export locked the reader up for **twenty-two seconds**; the same paste now
+  takes **thirteen milliseconds**, and puts the same text in the same slots
+  with the same underlines on it. Two things got it there: the paste is one
+  pass and one re-read instead of one per line, and the **citation underlines
+  settle a beat after the edit rather than with it** — the scan has to read
+  the whole document, since a short form ("*Ibid.*", an italicized name)
+  means what the cite before it means, wherever on the way that cite stands,
+  and doing that between keystrokes is what made a long document feel stuck.
+  A page's underlines are rewritten only where they have actually changed,
+  so an edit on one page no longer throws away and redraws every link in the
+  file — which is what made the reader slower the longer you stayed in it.
 - **The pseudonym at the caret.** Finish typing a real value the key binds
   and a prompt at the caret names its pseudonym — the Claude extension's
   as-you-type correction, for the page. **Space** marks it as an autocorrect
