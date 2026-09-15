@@ -16,7 +16,7 @@
 // reads back in the writer's own form; the rewriting happens at URL time.
 
 import { findAllCitations, resolveUrl } from "./viewer/citation-linker.js";
-import { federalSearchTerm } from "./viewer/code-tables.js";
+import { federalSearchTerm, wlSearchTerm } from "./viewer/code-tables.js";
 
 let fails = 0;
 
@@ -96,6 +96,38 @@ check("appendix",
   [["9 U.S.C. § 1", "statute"]]);
 check("a reporter cite is not a U.S.C. cite",
   statuteHits("Anderson v. Liberty Lobby, Inc. (1986) 477 U.S. 242, 248."),
+  []);
+
+console.log("\n--- the code spelled out ---");
+// California state-court papers follow the California Style Manual, which
+// spells the code out rather than abbreviating it. Spelled out or not, the
+// citation is the same one, so the key — and with it the Table of Authorities
+// entry and the search both providers receive — is the U.S.C. form.
+check("United States Code, spelled out",
+  statuteHits("See 50 United States Code section 3931(b)(1)."),
+  [["50 U.S.C. \u00a7 3931(b)(1)", "statute"]]);
+check("the whole cite is underlined",
+  spans("See 50 United States Code section 3931(b)(1)."),
+  ["50 United States Code section 3931(b)(1)"]);
+check("spelled out and abbreviated are one authority",
+  statuteHits("50 United States Code section 3931; 50 U.S.C. \u00a7 3931."),
+  [["50 U.S.C. \u00a7 3931", "statute"], ["50 U.S.C. \u00a7 3931", "statute"]]);
+check("title-number prefix and the 'of the' form",
+  statuteHits("Title 50 of the United States Code, section 3931."),
+  [["50 U.S.C. \u00a7 3931", "statute"]]);
+check("U.S. Code, the form a web lookup gives",
+  statuteHits("42 U.S. Code \u00a7 1983."),
+  [["42 U.S.C. \u00a7 1983", "statute"]]);
+check("spelled-out annotated edition",
+  statuteHits("5 United States Code Annotated \u00a7 552(b)."),
+  [["5 U.S.C. \u00a7 552(b)", "statute"]]);
+check("a comma before the section marker",
+  statuteHits("42 U.S.C., section 1983."),
+  [["42 U.S.C. \u00a7 1983", "statute"]]);
+// The code named without a title number in front of it is prose, not a cite —
+// there is no title to link to.
+check("the code named with no title number is not a citation",
+  statuteHits("The United States Code section governing this is unclear."),
   []);
 
 console.log("\n--- named federal codes ---");
@@ -214,7 +246,7 @@ check("a temporary regulation is in the C.F.R. and converts",
   { kind: "regulation", term: "26 C.F.R. § 1.125-4T" });
 check("the Internal Revenue Code is 26 U.S.C. section-for-section",
   federalSearchTerm("I.R.C. § 9801(f)"),
-  { kind: "statute", term: "26 U.S.C. § 9801(f)" });
+  { kind: "statute", term: "26 U.S.C. § 9801" });
 // ERISA § 701 is 29 U.S.C. § 1181 — a section-by-section lookup table, not a
 // formula — so the act keeps its own numbering and is found by popular name.
 check("ERISA keeps the act's own numbering",
@@ -225,6 +257,40 @@ check("a revenue ruling is searched as written",
   { kind: "guidance", term: "Rev. Rul. 2013-17" });
 check("California keys are not federal",
   federalSearchTerm("CCP § 425.16"), null);
+
+console.log("\n--- a federal search runs on the section, not the subdivision ---");
+// The subdivision is a paragraph of the section, not a document of its own on
+// either provider, so the search is given the section the providers index. The
+// key keeps the subdivision, so the Table of Authorities still reads back the
+// pinpoint the writer gave.
+check("U.S.C. subdivisions are dropped from the term",
+  federalSearchTerm("50 U.S.C. \u00a7 3931(b)(1)"),
+  { kind: "statute", term: "50 U.S.C. \u00a7 3931" });
+check("a hyphenated section survives the drop",
+  federalSearchTerm("42 U.S.C. \u00a7 2000e-2(a)(1)"),
+  { kind: "statute", term: "42 U.S.C. \u00a7 2000e-2" });
+check("C.F.R. subdivisions too",
+  federalSearchTerm("45 C.F.R. \u00a7 164.512(a)"),
+  { kind: "regulation", term: "45 C.F.R. \u00a7 164.512" });
+check("and an act searched by popular name",
+  federalSearchTerm("ERISA \u00a7 502(a)(1)(B)"),
+  { kind: "statute", term: "ERISA \u00a7 502" });
+// California statutes are unaffected — they keep their subdivisions.
+check("a California statute keeps its subdivision",
+  wlSearchTerm("CCP \u00a7 425.16(b)(1)"), "CA CIV PRO \u00a7 425.16(b)(1)");
+// The key the citation carries is untouched: only the search term is shortened.
+check("the key still shows the pinpoint",
+  statuteHits("50 United States Code section 3931(b)(1)."),
+  [["50 U.S.C. \u00a7 3931(b)(1)", "statute"]]);
+{
+  const cite = { kind: "statute", key: "50 U.S.C. \u00a7 3931(b)(1)" };
+  check("Westlaw searches the section",
+    decodeURIComponent(resolveUrl(cite, {}, "westlaw").split("query=")[1]),
+    "50 U.S.C. \u00a7 3931&contentType=STATUTE");
+  check("Lexis searches the section",
+    decodeURIComponent(resolveUrl(cite, {}, "lexis").split("pdsearchterms=")[1]),
+    "50 U.S.C. \u00a7 3931");
+}
 
 console.log("\n--- URLs ---");
 {

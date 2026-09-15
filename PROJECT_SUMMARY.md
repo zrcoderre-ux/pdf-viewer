@@ -511,6 +511,10 @@ Citation linking:
 - "Civil Code" at end of one line / "section 3287(a)" on the next — should
   link (tests inter-span space repair).
 - "§ 425.16" mentioned multiple times on one page — every occurrence links.
+- "50 United States Code section 3931(b)(1)" — links, keys as
+  "50 U.S.C. § 3931(b)(1)", and searches as "50 U.S.C. § 3931". The code
+  spelled out is the California Style Manual form; the search drops the
+  subdivision, which neither provider indexes as a document of its own.
 - Smith v. Jones-style case cites with `(2017) 13 Cal.App.5th 1152` tails —
   link should land on the case name, not somewhere else.
 - eCMS `https://civil.lacourt.org/ecourt/ecms/document/image?…` URL — opens

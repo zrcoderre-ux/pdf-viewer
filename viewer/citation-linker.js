@@ -332,16 +332,45 @@ function endsInQuantity(text, pos) {
 // requiring the marker everywhere else keeps "Treasury Regulations issued in
 // 2004" from being read as a citation to section 2004.
 
-// Federal statutes: "9 U.S.C. § 1", "42 U.S.C. § 2000e-2", "42 USC 1983".
-// The title number precedes the code abbreviation. Allow an optional
-// ", App." for appendix sections, and the annotated editions (U.S.C.A.,
-// U.S.C.S.) practitioners cite from Westlaw and Lexis. PDFs sometimes render
-// the abbreviation with intervening spaces, so "U. S. C." is accepted too.
+// How the code itself is named, in every form a brief writes it. Bluebook
+// practice abbreviates ("42 U.S.C. § 1983", "42 USC 1983"), and PDFs
+// sometimes render the abbreviation with intervening spaces, so "U. S. C."
+// is accepted too. But California state-court papers follow the California
+// Style Manual, which spells the code out — "50 United States Code section
+// 3931(b)(1)" — and a brief drafted off a web lookup carries Cornell's
+// "50 U.S. Code § 3931". Both spell the same citation, so both are read as
+// one: the key is built from the title number and the abbreviation
+// regardless, so "United States Code" and "U.S.C." are a single authority in
+// the Table of Authorities rather than two.
+//
+// The spelled-out alternatives come FIRST. The abbreviation branch would
+// otherwise consume "U.S." out of "U.S. Code" and then fail at the section
+// marker, and an alternation takes the first branch that matches, not the
+// longest.
+const USC_NAME =
+  String.raw`(?:United\s+States\s+Code(?:\s+(?:Annotated|Service))?` +
+  String.raw`|U\.?\s*S\.?\s*Code` +
+  String.raw`|U\.?\s*S\.?\s*C\.?(?:\s*[AS]\.?)?)`;
+
+// Federal statutes: "9 U.S.C. § 1", "42 U.S.C. § 2000e-2", "42 USC 1983",
+// "50 United States Code section 3931(b)(1)".
+//
+// The title number precedes the code name, in the bare form the Bluebook uses
+// or the "title 50 of the United States Code" form that spelled-out cites
+// often take. Allow an optional ", App." for appendix sections, and the
+// annotated editions (U.S.C.A., U.S.C.S.) practitioners cite from Westlaw and
+// Lexis.
 const USC_RE = new RegExp(
-  String.raw`\b(?<title>\d{1,3})\s+U\.?\s*S\.?\s*C\.?(?:\s*[AS]\.?)?(?![A-Za-z])` +
+  String.raw`\b(?:title\s+)?(?<title>\d{1,3})\s+(?:of\s+the\s+)?` +
+  USC_NAME + String.raw`(?![A-Za-z])` +
   String.raw`(?:,?\s*App\.)?` +
-  String.raw`\s*` +
-  String.raw`(?:(?:§§?|sections?|secs?\.?)\s*|(?=\d))` +
+  // A comma may separate the code from its section marker — "50 United
+  // States Code, section 3931" is how the spelled-out form usually reads,
+  // and the California statute and C.F.R. patterns both allow it already.
+  // The comma is permitted ONLY before an express marker: a bare number
+  // after one ("42 U.S.C., 1983") is as likely to be a year or a count as a
+  // section, and the marker is what makes the number a citation.
+  String.raw`(?:,?\s*(?:§§?|sections?|secs?\.?)\s*|\s*(?=\d))` +
   `(?<sec>${FED_SECTION})`,
   "gi"
 );

@@ -261,6 +261,23 @@ const _CFR_PART_RE = /^\d{1,3}\s+C\.F\.R\.\s+pt\.\s+\d+$/;
 // A named regulation, optionally qualified: "Prop. Treas. Reg.".
 const _REG_QUALIFIER_RE = /^(Prop\.|Temp\.)\s+(.*)$/;
 
+// The section number a federal search runs on: the section itself, without
+// the subdivisions the document cited it down to. "50 U.S.C. § 3931(b)(1)"
+// searches as "50 U.S.C. § 3931".
+//
+// The subdivision is not a separate document on either provider — (b)(1) is a
+// paragraph of § 3931, which is the unit both index — so carrying it into the
+// query only gives the search something extra to fail on, while the section
+// alone lands on the same page. The KEY keeps the subdivision, so the Table of
+// Authorities still reads back the pinpoint the writer gave.
+//
+// Federal only. California statutes keep their subdivisions in the search term
+// (see wlSearchTerm and lexisSearchTerm), which is why this lives here rather
+// than in the shared key splitter.
+function sectionForSearch(section) {
+  return section.replace(/\([^)]*\)/g, "").trim();
+}
+
 // Classify a statute/regulation key and build the search term both providers
 // should receive for it. Returns null when the key is not federal (California
 // codes and the model UCC keep their own paths in resolveUrl).
@@ -270,7 +287,8 @@ const _REG_QUALIFIER_RE = /^(Prop\.|Temp\.)\s+(.*)$/;
 //   "Prop. Treas. Reg. § 1.1" -> { kind: "regulation", term: unchanged }
 //   "Rev. Rul. 2013-17"       -> { kind: "guidance",   term: unchanged }
 //   "9 U.S.C. § 1"            -> { kind: "statute",    term: unchanged }
-//   "I.R.C. § 9801(f)"        -> { kind: "statute",    term: "26 U.S.C. § 9801(f)" }
+//   "I.R.C. § 9801(f)"        -> { kind: "statute",    term: "26 U.S.C. § 9801" }
+//   "50 U.S.C. § 3931(b)(1)"  -> { kind: "statute",    term: "50 U.S.C. § 3931" }
 //   "ERISA § 701"             -> { kind: "statute",    term: unchanged }
 export function federalSearchTerm(key) {
   // Revenue rulings and C.F.R. part cites carry no "§" to split on.
@@ -280,10 +298,14 @@ export function federalSearchTerm(key) {
   const m = key.match(_KEY_SPLIT_RE);
   if (!m) return null;
   const prefix = m[1];
-  const section = m[2];
+  const section = sectionForSearch(m[2]);
 
-  if (_CFR_PREFIX_RE.test(prefix)) return { kind: "regulation", term: key };
-  if (_USC_PREFIX_RE.test(prefix)) return { kind: "statute", term: key };
+  if (_CFR_PREFIX_RE.test(prefix)) {
+    return { kind: "regulation", term: `${prefix} § ${section}` };
+  }
+  if (_USC_PREFIX_RE.test(prefix)) {
+    return { kind: "statute", term: `${prefix} § ${section}` };
+  }
 
   // A named regulation. A "Prop." qualifier is load-bearing: a proposed
   // regulation has not been adopted into the C.F.R., so rewriting it to a
@@ -294,7 +316,9 @@ export function federalSearchTerm(key) {
   const bareName = qual ? qual[2] : prefix;
   const cfrTitle = CFR_TITLE_BY_REG.get(bareName);
   if (cfrTitle) {
-    if (qual && qual[1] === "Prop.") return { kind: "regulation", term: key };
+    if (qual && qual[1] === "Prop.") {
+      return { kind: "regulation", term: `${prefix} § ${section}` };
+    }
     return { kind: "regulation", term: `${cfrTitle} C.F.R. § ${section}` };
   }
 
@@ -306,7 +330,9 @@ export function federalSearchTerm(key) {
     // by popular name.
     return {
       kind: "statute",
-      term: uscTitle ? `${uscTitle} U.S.C. § ${section}` : key,
+      term: uscTitle
+        ? `${uscTitle} U.S.C. § ${section}`
+        : `${prefix} § ${section}`,
     };
   }
 
