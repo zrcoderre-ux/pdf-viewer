@@ -799,6 +799,26 @@ app, which routes it to the reader tab.
   click line 7 and type: the file gets ` 7  ` and your text, and PDF-Linker's
   next run reads it as line 7. A selection that reaches across a number is
   refused an edit, and the numbers never take a keystroke.
+- **The documents with leaks in them are ready before you open them.** Open a
+  case folder with a `LEAKS.xlsx` in it and the reader starts getting the
+  documents its rows name — whichever document you came in on, and whether or
+  not you ever click them in the list. Each is read, parsed and its pages
+  **built off the page**, in the order the review will actually reach them
+  (the row in front, the undecided rows after it, then the rest), and opening
+  one is then putting those pages up rather than making them. The **Documents**
+  tab marks the ones that are ready and says how many (`3 of 3 with leaks
+  ready to open`).
+  Gradually, and within a budget: one document at a time, in idle time, each
+  built in slices of pages, so the building never stands between you and the
+  page you are reading. How many are held is what fits — up to six of them and
+  four hundred pages between them, which on a case of ordinary exports is
+  every document with a leak in it and on a case of long ones is the next two
+  or three. **A document of more than two hundred pages is never held**: that
+  is the combined file, and holding it is what takes the tab down. What the
+  window has passed is let go of, furthest from the row in front first. A key
+  loaded or changed drops them all (their pages carry that key's translation);
+  a keep decided since, or the pseudonym toggle flipped since, is put right as
+  the document goes up rather than built again.
 - **A long export keeps answering while you edit it.** A paste used to be
   typed in line by line, and each of those lines pushed the page's text down
   a slot and then had the whole document re-read after it — the counts, the

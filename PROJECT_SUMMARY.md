@@ -121,6 +121,34 @@ the same way — two at a time, held against name, size and modification time,
 so a file written since is read again — and an open takes the text from
 there instead of going to disk.
 
+The documents a review will visit are built BEFORE it reaches them. Opening
+a document is read, parse and build, and the read and the parse cost a
+millisecond between them: the building is the whole of it (a long export
+under a full key, the best part of a second). So `buildPages` — the page
+loop lifted out of `render()` — builds each document the LEAKS rows name
+into a DocumentFragment that is nowhere in the page, where no style or
+layout work happens at all, and `openFile` puts that fragment up
+(`showPages`) instead of making it. Attaching it costs a couple of
+milliseconds; what is left of an open is the settle, which is the browser
+laying out the document it is now showing.
+
+The window is kept by `planReadyDocs`, in the order `leaks.leakPages` says
+the review will reach them: up to READY_DOCS documents and READY_PAGES
+pages between them, one built at a time through `requestIdleCallback` and
+in slices of READY_SLICE pages, nothing over READY_MAX_PAGES held at all
+(the combined file), and whatever no longer fits dropped from the far end.
+A built document carries what it was built under — the file's size and
+modification time, the key epoch, that document's own spot keeps, the
+fake/real toggle and a keeps signature — and `readyFor` refuses one that no
+longer matches. The toggle and the keeps are put right ON THE FRAGMENT
+before it goes up: the same writes made after it is on the page cost a
+second on a long document, which is more than building it from scratch.
+`setKey` drops the lot, since built pages carry that key's translation;
+`compileKey` does not, because `rev` is compiled from the whole key and a
+keep changes only what is marked. Built and cold opens were compared
+node for node, including 1,920 pseudonym spans and 960 citation
+underlines: the same document either way.
+
 Editing a LONG export stays responsive. A paste is one edit: its first
 piece goes in through `insertText` (so it replaces a selection and the
 line-number guard applies as it does to anything typed), and
