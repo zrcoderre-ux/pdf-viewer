@@ -819,6 +819,21 @@ app, which routes it to the reader tab.
   loaded or changed drops them all (their pages carry that key's translation);
   a keep decided since, or the pseudonym toggle flipped since, is put right as
   the document goes up rather than built again.
+- **Opening a document with its PDF beside it does not lock the page.** The
+  two columns are matched page by page — each text page laid on its PDF
+  page's own grid — and that matching asks for a pass over the whole document
+  every time anything about the PDF side changes. Each of a document's PDF
+  pages reports its size as it is opened, and its line grid lands later
+  still, so a seventy-page complaint asked for **a hundred and forty passes**,
+  each laying out two thousand lines against the grid: the best part of two
+  seconds in which the page answered nothing, and a single stretch of a full
+  second inside it. The asks are now collected and answered **once a frame** —
+  eight passes for that complaint instead of a hundred and forty — the pane is
+  read once per pass rather than once per page, and a line already standing
+  where the pass would put it is left alone. The same complaint now blocks
+  **0.6 s in no stretch longer than 0.18 s**, and scrolling it with the PDF
+  alongside blocks nothing at all. The columns line up exactly as before:
+  every page matched, the two sheets the same width, no drift between them.
 - **A long export keeps answering while you edit it.** A paste used to be
   typed in line by line, and each of those lines pushed the page's text down
   a slot and then had the whole document re-read after it — the counts, the
