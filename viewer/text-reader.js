@@ -651,7 +651,7 @@ async function scanFolder(h) {
 
 /** Make `h` the current case folder: key attached, documents listed, flags loaded. */
 async function adoptFolder(h, { quiet = false } = {}) {
-  if (dirHandle !== h) forgetPdfs();
+  if (dirHandle !== h) { forgetPdfs(); dropReadAhead(); }
   dirHandle = h;
   folderName = h.name;
   await rememberDir(h);
@@ -756,7 +756,7 @@ async function openFile(file, handle) {
   if (!file) return;
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
   hideKeyOffer();
-  const text = await file.text();
+  const text = await fileText(file);
   // The case folder first, so the document renders under its own key.
   try { await attachKeyForFile(handle || null); } catch (e) { console.warn(e); }
   openText(text, file.name, handle || null);
@@ -2746,12 +2746,15 @@ async function attachLeaks(bytes, name, handle, { quiet = false, folder = "" } =
   updateLeaksButton();
   if (!leaksBar.hidden) { const i = LK.nextUndecided(parsed.rows, null); await goToLeak(i >= 0 ? i : 0, { locate: false }); }
   else paintHighlights();
+  warmForLeaks();
   const und = LK.undecidedCount(parsed.rows);
   if (!quiet) toast(`${name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}, ${und} undecided` + (remembered ? `, ${remembered} decided here and not yet saved` : "") + " — ⚠ Leaks to review them.");
   return parsed;
 }
 function dropLeaks() {
   leaks = null;
+  dropWarmPages();
+  dropReadAhead();
   leakRowValue = "";
   leakHere = null;
   showLeaksBar(false);
@@ -2914,6 +2917,7 @@ async function goToLeak(i, { locate = true } = {}) {
   renderLeaksTab();
   if (locate) await locateLeak(row);
   else paintHighlights();
+  warmForLeaks();
 }
 
 /** Every place `value` stands on a page body: DOM ranges, the value's own spelling or a bare substring of it. */
@@ -3030,6 +3034,7 @@ function decideLeak(text, { advance = false } = {}) {
   renderLeaksTab();
   updateLeaksButton();
   paintHighlights();
+  warmForLeaks();
   if (!advance) return;
   const n = LK.nextUndecided(leakRows(), leaks.at);
   if (n >= 0 && n !== leaks.at) goToLeak(n);
@@ -3250,6 +3255,7 @@ const pdfCache = new Map(); // name → Promise<{ pdf, count, sizes, name }>
 
 function forgetPdfs() {
   cancelPdfJobs();
+  dropWarmPages();
   for (const p of pdfCache.values()) p.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }).catch(() => {});
   pdfCache.clear();
   pdfPicked = null;
@@ -3451,11 +3457,234 @@ function updatePdfStatus() {
   $("st-pdf").textContent = text;
 }
 
+// ── the pages a leak stands on, drawn before the row is reached ──────────────────
+//
+// Answering LEAKS.xlsx is a walk from page to page, and every one of those
+// pages is named in the rows before the operator reaches any of them. So the
+// reader goes and gets them. With a worksheet attached, the rows are read in
+// the order the review will reach them (leaks.leakPages: the row in front,
+// the undecided rows after it, then the rest), each row's PDF is opened, and
+// its own page is drawn into a bitmap held ready. A slot coming into view
+// paints that bitmap at once — the page is THERE, where a "Loading…" box used
+// to stand — and pdf.js, which by then holds the page, its fonts and its
+// operator list, draws the sharp one over it a moment later.
+//
+// Bounded on purpose. A page held ready is a bitmap, so only a window of them
+// is kept (WARM_PAGES), the window moving with the review: whatever falls
+// outside it is closed. They are drawn at one screen's width and at one
+// device pixel per css pixel, since the warmed page stands in for a moment
+// rather than being the page anybody reads. And the drawing goes through the
+// same queue as everything else (pdfJobs) and at the BACK of it, so whatever
+// is actually in front of the reader is still served first.
+const WARM_PAGES = 12;   // pages held ready at once
+const WARM_WIDTH = 900;  // css px a held page is drawn at, at most
+const warmPages = new Map();  // "<pdf name>|<page>" → ImageBitmap
+const warmWanted = new Set(); // the keys the window holds, as it stands
+const warmBusy = new Set();   // …and those being drawn for it now
+
+function warmKey(name, page) { return name + "|" + page; }
+function dropWarmPages() {
+  // Nothing is wanted, so whatever is being drawn drops what it has when it
+  // lands (warmPage checks the window at every step).
+  warmWanted.clear();
+  for (const bmp of warmPages.values()) { try { bmp.close(); } catch { /* gone */ } }
+  warmPages.clear();
+}
+/** The width the held pages are drawn at: the box they will be shown in, within reason. */
+function warmWidth() {
+  const sec = pagesEl.querySelector(".tpage");
+  const w = sbsOn && !pdfPane.hidden ? paneWidth() : sec ? inlineWidth(sec) : 0;
+  return Math.max(400, Math.min(WARM_WIDTH, Math.round(w) || WARM_WIDTH));
+}
+/** Draw a held page into a slot as it stands, until its own render lands. */
+function paintWarm(el, bmp, cssWidth) {
+  if (!bmp || !cssWidth || el.dataset.rendered) return false;
+  const sheet = sheetOf(el);
+  const canvas = sheet.querySelector("canvas");
+  if (!canvas) return false;
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  const w = Math.round(cssWidth * dpr);
+  const h = Math.round((w * bmp.height) / bmp.width);
+  canvas.width = w;
+  canvas.height = h;
+  canvas.style.width = cssWidth + "px";
+  canvas.style.height = Math.round(h / dpr) + "px";
+  sheet.style.height = "";
+  canvas.getContext("2d").drawImage(bmp, 0, 0, w, h);
+  el.dataset.preview = "1";
+  el.classList.add("ready");
+  return true;
+}
+/** A slot already waiting on the page just warmed takes it now. */
+function paintWarmInto(key) {
+  for (const el of document.querySelectorAll("[data-warm]")) {
+    if (el.dataset.warm === key && !el.dataset.rendered) paintWarm(el, warmPages.get(key), el.__warmWidth);
+  }
+}
+
+/**
+ * The PDF pages the worksheet points at, in the order the review will reach
+ * them: [{ src, page }], at most `limit`. A row's File cell holds the real
+ * name, which is the case folder's own name for the PDF; a row naming no
+ * file — or one whose PDF the folder does not hold — is taken as the open
+ * document's, where its page belongs to it.
+ */
+function leakWarmTargets(limit) {
+  const fwdName = fwd ? (s) => forwardText(s).text : null;
+  const names = folderPdfs.map((p) => p.name);
+  const members = doc ? PS.pageSources(doc.pages, fileName) : [];
+  const out = [], seen = new Set();
+  for (const t of LK.leakPages(leakRows(), leaks ? leaks.at : 0)) {
+    if (t.page == null) continue;
+    let src = null, page = t.page;
+    const hit = t.file ? PS.matchPdf(t.file, names, fwdName) : null;
+    if (hit) src = folderPdfs.find((p) => p.name === hit);
+    else if (doc) {
+      for (let i = 0; i < doc.pages.length; i++) {
+        if (PS.pdfPageOf(doc.pages[i]) !== page) continue;
+        if (t.file && members[i] !== t.file && !LK.matchExport(t.file, [members[i]], fwdName)) continue;
+        const tgt = pdfTarget(i);
+        if (tgt) { src = tgt.src; page = tgt.page; break; }
+      }
+    }
+    if (!src) continue;
+    const k = warmKey(src.name, page);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ src, page });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/** Hold the worksheet's next pages ready — and close the ones the review has left behind. */
+function planWarmPages() {
+  // Nothing to hold where there is no worksheet, or where the PDF side is put
+  // away: a page nobody is going to be shown is a bitmap for nothing.
+  if (!leaks || !doc || (!(sbsOn && !pdfPane.hidden) && !swaps.size)) { dropWarmPages(); return; }
+  const cssWidth = warmWidth();
+  const targets = leakWarmTargets(WARM_PAGES);
+  warmWanted.clear();
+  for (const t of targets) warmWanted.add(warmKey(t.src.name, t.page));
+  for (const [k, bmp] of [...warmPages]) {
+    if (warmWanted.has(k)) continue;
+    try { bmp.close(); } catch { /* gone */ }
+    warmPages.delete(k);
+  }
+  for (const t of targets) {
+    const key = warmKey(t.src.name, t.page);
+    // Held already, or being drawn: a window that moves by one row leaves the
+    // work it has already asked for alone.
+    if (warmPages.has(key) || warmBusy.has(key)) continue;
+    warmBusy.add(key);
+    // The open is asked for HERE and so is queued ahead of the drawing, which
+    // then never waits on the queue from inside a job the queue is running.
+    const opened = loadPdf(t.src);
+    pdfJobs.push({ name: t.src.name, run: () => warmPage(opened, key, t.page, cssWidth) });
+  }
+  pumpPdfJobs();
+}
+async function warmPage(opened, key, pageNo, cssWidth) {
+  try {
+    if (!warmWanted.has(key) || warmPages.has(key)) return;
+    let info;
+    try { info = await opened; } catch { return; } // whoever shows the page reports it
+    if (!warmWanted.has(key) || pageNo > info.count) return;
+    const page = await info.pdf.getPage(pageNo);
+    if (!warmWanted.has(key)) return;
+    const base = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: cssWidth / base.width });
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(vp.width);
+    canvas.height = Math.round(vp.height);
+    let bmp = null;
+    try {
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+      if (warmWanted.has(key)) bmp = await createImageBitmap(canvas);
+    } catch (e) { if (!(e && e.name === "RenderingCancelledException")) console.warn(e); }
+    canvas.width = canvas.height = 0; // the bitmap is the copy that is kept
+    if (!bmp) return;
+    if (!warmWanted.has(key)) { try { bmp.close(); } catch { /* gone */ } return; }
+    warmPages.set(key, bmp);
+    paintWarmInto(key);
+  } finally { warmBusy.delete(key); }
+}
+
+// ── the documents the rows name, read before the hop to them ─────────────────────
+//
+// A row's page stands in its OWN export, and the reader opens that export to
+// go to it. The reading is the part that can be done early, so it is: the
+// next documents the worksheet points at are read into memory while the
+// review works on the one in front, and an open that finds a document there
+// takes it instead of going to disk. The text is held against the file it
+// came from — name, size and modification time — so an export written since
+// (a save from here, or another run of PDF-Linker) is read again rather than
+// remembered wrongly.
+const AHEAD_DOCS = 2;        // exports read ahead of the review
+const AHEAD_CHARS = 12e6;    // …and the most text held while doing it
+const readAhead = new Map(); // "<name>|<size>|<modified>" → the text
+let aheadGen = 0;
+function aheadKey(file) { return file.name + "|" + file.size + "|" + file.lastModified; }
+function dropReadAhead() { aheadGen++; readAhead.clear(); }
+/** A file's text: the copy read ahead where it is still the same file, else the file's own. */
+async function fileText(file) {
+  const held = readAhead.get(aheadKey(file));
+  return held != null ? held : file.text();
+}
+/** Read ahead the exports the worksheet points at next — the ones not already open. */
+async function readAheadDocs() {
+  const gen = ++aheadGen;
+  if (!leaks || !folderDocs.length) { readAhead.clear(); return; }
+  const fwdName = fwd ? (s) => forwardText(s).text : null;
+  const names = folderDocs.map((d) => d.name);
+  const open = doc ? [fileName, ...PS.combinedMembers(doc.pages)] : [fileName];
+  const wanted = [];
+  for (const t of LK.leakPages(leakRows(), leaks.at)) {
+    if (!t.file) continue;
+    // A combined file already open holds every member: there is no hop to make.
+    if (LK.matchExport(t.file, open.filter(Boolean), fwdName)) continue;
+    const e = LK.matchExport(t.file, names, fwdName);
+    if (!e || wanted.includes(e)) continue;
+    wanted.push(e);
+    if (wanted.length >= AHEAD_DOCS) break;
+  }
+  const keep = new Set();
+  let held = 0;
+  for (const name of wanted) {
+    const d = folderDocs.find((x) => x.name === name);
+    if (!d) continue;
+    let file;
+    try { file = await d.handle.getFile(); } catch { continue; }
+    if (gen !== aheadGen) return;
+    const k = aheadKey(file);
+    keep.add(k);
+    if (readAhead.has(k)) { held += readAhead.get(k).length; continue; }
+    if (held >= AHEAD_CHARS) continue;
+    let text;
+    try { text = await file.text(); } catch { continue; }
+    if (gen !== aheadGen || text.length > AHEAD_CHARS) return;
+    readAhead.set(k, text);
+    held += text.length;
+  }
+  for (const k of [...readAhead.keys()]) if (!keep.has(k)) readAhead.delete(k);
+}
+
+/** The worksheet's next pages and documents, held ready. Coalesced: the review moves in steps. */
+const warmForLeaks = debounce(() => {
+  planWarmPages();
+  readAheadDocs().catch(() => { /* the open reports it */ });
+}, 200);
+
 // ── rendering a page into a canvas ──
 async function renderInto(el, src, pageNo, cssWidth) {
   const want = src.name + "|" + pageNo + "|" + cssWidth + "|" + (window.devicePixelRatio || 1);
   if (el.dataset.rendered === want) return;
   el.dataset.want = want;
+  // A page warmed for the LEAKS worksheet is already drawn: it goes up now,
+  // in place of the "Loading…" box, and the sharp one is drawn over it below.
+  el.dataset.warm = warmKey(src.name, pageNo);
+  el.__warmWidth = cssWidth;
+  paintWarm(el, warmPages.get(el.dataset.warm), cssWidth);
   let info;
   try { info = await loadPdf(src, { now: true }); }
   catch (e) {
@@ -3485,6 +3714,7 @@ async function renderInto(el, src, pageNo, cssWidth) {
   finally { if (el.__task === task) el.__task = null; }
   if (el.dataset.want !== want) return;
   el.dataset.rendered = want;
+  delete el.dataset.preview;
   el.classList.add("ready");
   // The page's text, selectable over the bitmap (pdf.js's own text layer).
   const layer = sheet.querySelector(".textLayer");
@@ -3638,7 +3868,7 @@ function blankLineNumbers(layer) {
   for (const c of best) c.sp.textContent = "";
 }
 function releaseCanvas(el) {
-  if (!el.dataset.rendered) return;
+  if (!el.dataset.rendered && !el.dataset.preview) return;
   const sheet = sheetOf(el);
   const canvas = sheet.querySelector("canvas");
   // Keep the box its size, drop the bitmap and the text.
@@ -3649,6 +3879,8 @@ function releaseCanvas(el) {
   if (el.__text) { try { el.__text.cancel(); } catch { /* done */ } el.__text = null; }
   if (layer) layer.innerHTML = "";
   delete el.dataset.rendered;
+  delete el.dataset.preview;
+  delete el.dataset.warm;
   el.classList.remove("ready");
 }
 /**
@@ -4115,6 +4347,7 @@ function applySwaps() {
   }
   refreshSwapButtons();
   updatePdfStatus();
+  warmForLeaks();
   if (moved) placeCitations();
 }
 function persistSwaps() { lsSet(PS.swapStoreKey(folderName, fileName), [...swaps]); }
@@ -4291,6 +4524,9 @@ window.__textReaderPdfQueue = () => ({
   busy: pdfJobBusy,
   open: [...pdfCache.keys()].filter((n) => { const p = pdfCache.get(n); return !!(p && p.__info); }),
 });
+// …and what has been drawn ahead of the review: the pages held ready, the
+// ones being drawn now, and the exports read ahead of the hop to them.
+window.__textReaderWarm = () => ({ held: [...warmPages.keys()], drawing: [...warmBusy], wanted: [...warmWanted], ahead: [...readAhead.keys()] });
 window.__textReaderMaster = (bytes, name) => readMasterBytes(new Uint8Array(bytes), name);
 window.__textReaderMasterState = () => ({
   info: masterInfo, keeps: masterKeeps.map((k) => k.control + ":" + k.value),
