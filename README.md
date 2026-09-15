@@ -481,8 +481,14 @@ memorandum (10/10 match, identical keys). The port includes:
   point at a section that does not exist. Temporary regulations are in the
   C.F.R. and convert normally.
 - **Federal codes**: the U.S. Code (`42 U.S.C. § 1983`, bare `42 USC 1983`,
-  annotated `5 U.S.C.A. § 552`, appendix `9 U.S.C. App. § 1`), and named codes
-  and acts — `Internal Revenue Code section 9801(f)` / `I.R.C. § 61` / `IRC
+  annotated `5 U.S.C.A. § 552`, appendix `9 U.S.C. App. § 1`), including the
+  code spelled out the way the California Style Manual writes it —
+  `50 United States Code section 3931(b)(1)`, `Title 50 of the United States
+  Code, section 3931`, and the `42 U.S. Code § 1983` form a web lookup gives.
+  Spelled out or abbreviated, the citation is keyed as
+  `50 U.S.C. § 3931(b)(1)`, so the two spellings are one authority in the
+  Table of Authorities rather than two. Named codes and acts are read as
+  well — `Internal Revenue Code section 9801(f)` / `I.R.C. § 61` / `IRC
   § 501(c)(3)`, `Bankruptcy Code § 362(a)`, `ERISA § 502(a)`, `FLSA`, `NLRA`,
   the `Securities Exchange Act of 1934`.
 
@@ -499,6 +505,14 @@ memorandum (10/10 match, identical keys). The port includes:
   pattern than the California codes. A hyphen between two plain integers stays
   a range: `29 U.S.C. §§ 1181-1185` links section 1181 rather than inventing a
   section "1181-1185".
+
+  A federal search runs on the section, not the subdivision the document cited
+  it down to: `50 U.S.C. § 3931(b)(1)` is searched as `50 U.S.C. § 3931`, and
+  `45 C.F.R. § 164.512(a)` as `45 C.F.R. § 164.512`. The subdivision is a
+  paragraph of the section rather than a document either provider indexes, so
+  the shorter cite lands on the same page with less to fail on. Only the
+  search is shortened — the Table of Authorities still lists the pinpoint the
+  writer gave. California statutes keep their subdivisions in the search term.
 - **IRS revenue rulings**: `Rev. Rul. 2013-17` and `Revenue Ruling 2013-17`,
   with or without the bulletin the ruling was published in — Bluebook T1.2
   cites to the Cumulative Bulletin or its advance sheet the Internal Revenue
