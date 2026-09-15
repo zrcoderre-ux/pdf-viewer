@@ -752,6 +752,21 @@ app, which routes it to the reader tab.
   read back before it is written — after which Apply Leak Fixes (or a
   re-run) applies them to the files. A `yes` here is the worksheet's alone:
   it is never also flagged into `New Real Values.txt`.
+- **The pages a leak stands on are drawn before you reach them.** Every page
+  a review will visit is named in the worksheet's rows before it gets to any
+  of them, so with a worksheet attached the reader goes and gets them: the
+  rows are read in the order the review will actually reach them — the row in
+  front, the undecided rows after it, then the rest — each row's PDF is
+  opened, and its own page is drawn into a bitmap held ready. A page coming
+  into view is painted from that bitmap at once, where a **Loading…** box
+  used to stand, and pdf.js draws the sharp one over it a moment later. Only
+  a window of pages is held (twelve), and the window moves with the review:
+  what it leaves behind is closed, and nothing at all is held while the PDF
+  side is put away. The **exports** the rows name are read ahead the same
+  way — the next two the review will hop to — each held against the file it
+  came from (name, size and modification time), so an export written since,
+  by a save here or another run of PDF-Linker, is read again rather than
+  remembered wrongly.
 - **`Combined Text.txt` brings its PDFs with it.** The combined file PDF-Linker
   writes into the case folder is listed first among the documents, and its
   members — the `# Documents in this file:` list on its first page, in

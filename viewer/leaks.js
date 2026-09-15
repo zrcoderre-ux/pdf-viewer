@@ -342,3 +342,47 @@ export function unpackDecisions(rows, stored) {
   }
   return n;
 }
+
+// ---- the pages the worksheet points at -------------------------------------------------
+//
+// Answering a row means standing on the page it names, so the pages a review
+// will reach are all written down in the rows before it gets to any of them.
+// The reader reads them off ahead of time (text-reader.js warms them), and
+// wants them in the order the review will ACTUALLY reach them: the row in
+// front of the operator, then the undecided rows after it — the ones a
+// decision moves to — wrapping at the end, and only then the decided ones,
+// which are reached by a click in the Leaks tab or not at all.
+
+/**
+ * Every page the rows name, in that visit order: [{ file, page }] — `file`
+ * the File cell's name ("" where the row names none: the open document),
+ * `page` the export's PDF page, null for a row that names a file but no
+ * page of it (a Word body's "line N"). Each file-and-page once. A row
+ * naming several files gives its pages to each, the way the row itself
+ * stands for a value found in each.
+ */
+export function leakPages(rows, from) {
+  const all = rows || [];
+  const n = all.length;
+  if (!n) return [];
+  const start = Number.isInteger(from) && from >= 0 && from < n ? from : 0;
+  const order = [];
+  for (let k = 0; k < n; k++) order.push(all[(start + k) % n]);
+  const out = [];
+  const seen = new Set();
+  const take = (row) => {
+    const pages = parseWhere(row.where).filter((w) => w.page != null).map((w) => w.page);
+    const files = parseFiles(row.file);
+    for (const file of files.length ? files : [""]) {
+      for (const page of pages.length ? pages : [null]) {
+        const k = fold(file) + "|" + (page == null ? "" : page);
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push({ file, page });
+      }
+    }
+  };
+  for (const row of order) if (!fold(row.fix)) take(row);
+  for (const row of order) if (fold(row.fix)) take(row);
+  return out;
+}

@@ -106,6 +106,21 @@ among a folder's documents, and `pdfsync.combinedMembers` reads its
 `# Documents in this file:` list so picked PDFs are matched member by
 member, by name through the key or by order.
 
+The pages those rows name are drawn BEFORE the review reaches them.
+`leaks.leakPages` lists every page a row names in the order the review will
+reach it — the row in front of the operator, the undecided rows after it
+(the ones a decision moves to), then the rest — and `text-reader.js` keeps a
+window of twelve of them open and drawn into `ImageBitmap`s, queued through
+the same one-PDF-at-a-time queue the pane uses and at the BACK of it, so
+whatever is on screen is still served first. A slot coming into view paints
+the held bitmap (`data-preview`, cleared when its own render lands), so the
+`Loading…` box never stands on a page the worksheet already named; the
+window moves with the review, closing what it leaves behind, and is emptied
+whenever the PDF side is put away. The exports the rows name are read ahead
+the same way — two at a time, held against name, size and modification time,
+so a file written since is read again — and an open takes the text from
+there instead of going to disk.
+
 ## Fixes applied in earlier sessions
 
 All in `viewer/` unless noted. Each fix is documented inline at the call

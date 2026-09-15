@@ -9,7 +9,7 @@
 import {
   isLeaksName, leaksRank, headerIndex, sheetsLookLikeLeaks, leaksSheet, parseLeaks, classifyFix, isKeepKind,
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
-  packDecisions, unpackDecisions, decisionsKey, CONTEXT_RULE,
+  packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
@@ -90,6 +90,29 @@ check("Context: the two halves, or the original alone", [splitContext("a\n" + CO
   check("a File name reaches its export through the key", matchExport("Rasho v Quillmark - MTC.pdf", docs, forward), "Strangeways v Melbury - MTC.txt");
   check("…a bare stem too, a Word file too, a quarantined export too", [matchExport("Order.docx", docs, forward), matchExport("Reply.pdf", docs, null)], ["Order.txt", "Reply.txt.LEAK"]);
   check("no match, no export", matchExport("Nothing.pdf", docs, forward), null);
+}
+
+console.log("the pages the rows point at");
+{
+  const R = (fix, file, where) => ({ fix, file, where });
+  const pages = [
+    R("", "Brief.pdf", "p.4:7-8, p.9:12"),          // 0  undecided
+    R("yes", "Brief.pdf", "p.4:2, p.31"),           // 1  decided
+    R("", "Guaranty.pdf, Brief.pdf", "p.2:16"),     // 2  undecided, two files
+    R("", "Order.docx", "line 12-14"),              // 3  undecided, no page of its own
+    R("no", "—", "p.7"),                            // 4  decided, no file named
+  ];
+  check("every page once, undecided rows first, in row order",
+    leakPages(pages, 0).map((t) => t.file + "|" + (t.page == null ? "-" : t.page)),
+    ["Brief.pdf|4", "Brief.pdf|9", "Guaranty.pdf|2", "Brief.pdf|2", "Order.docx|-", "Brief.pdf|31", "|7"]);
+  check("the row in front comes first, and the rows wrap round to it",
+    leakPages(pages, 2).map((t) => t.file + "|" + (t.page == null ? "-" : t.page)),
+    ["Guaranty.pdf|2", "Brief.pdf|2", "Order.docx|-", "Brief.pdf|4", "Brief.pdf|9", "|7", "Brief.pdf|31"]);
+  check("a sentinel Where and an empty sheet point nowhere",
+    [leakPages([R("", "Brief.pdf", "(no longer present)")], 0), leakPages([], 0), leakPages(null, 0)],
+    [[{ file: "Brief.pdf", page: null }], [], []]);
+  check("out-of-range and missing starts read as the first row",
+    [leakPages(pages, 99)[0].page, leakPages(pages, null)[0].page], [4, 4]);
 }
 
 console.log("working the rows");
