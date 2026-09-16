@@ -24,7 +24,7 @@
 // copy read exactly what the file says. The spans are re-derived on every
 // pass (undressed first), because an edit can split or join a cell.
 
-import { ruleParts, ruleShape } from "./textdoc.js";
+import { ruleParts, ruleShape, serializeNodes } from "./textdoc.js";
 
 /** An empty slot carries a <br> so the caret can stand in it; one with text does not need it. */
 export function placeholderIn(lt) {
@@ -96,8 +96,11 @@ export function dressLines(body) {
     undress(lt);
     line.classList.remove("rl", "rt", "rr");
     placeholderIn(lt);
-    const g = line.querySelector(":scope > .gutter");
-    const shape = ruleShape((g ? g.textContent : "") + lt.textContent);
+    // The bars are located in the line as the FILE writes it — the fakes
+    // underneath, not the real names on screen: the file's columns are the
+    // ones PDF-Linker aligned, and a row whose real name is three letters
+    // longer than its fake is still a row of the same box.
+    const shape = ruleShape(serializeNodes(line));
     if (!shape) { prevKey = null; continue; }
     const cells = dressRules(lt);
     if (shape.rule) line.classList.add("rr");
@@ -124,10 +127,13 @@ function ruleBlocks(root) {
 }
 
 const cellsOf = (line) => [...line.querySelectorAll(":scope > .lt > .rc")];
+/** A laid line's record: "top|left|size|box" (text-reader.js, applyMatchedLayout). */
+const laidOf = (line) => String(line.__laid || "").split("|").map(parseFloat);
 
 /**
- * The widths the table layout cannot supply, measured and set: asked after
- * layout and again whenever the font moves.
+ * What the table layout cannot supply, measured and set. Run at the end of
+ * every layout pass (applyMatchedLayout), which is after the page fill, after
+ * every settled edit, on every font change, and each time a PDF's grid lands.
  *
  * A row that is a table of its own (`.rt`) has no text rows to size its
  * columns — two stacked boxes meet at a bottom rule and a top rule, and the
@@ -135,49 +141,75 @@ const cellsOf = (line) => [...line.querySelectorAll(":scope > .lt > .rc")];
  * right in a monospace font and not in any other — so it is sized to the
  * block under it where that block shares its bars.
  *
+ * A box never wraps (a wrapped cell is a box with a hole in it), so a box
+ * wider than its sheet has the SHEET widened for it, as line lock widens a
+ * page for its longest numbered line; the stage scrolls sideways.
+ *
  * And on a page laid on its PDF's grid (side by side) every line is
  * positioned on its own, so no two rows share an anonymous table at all:
  * there each box's rows are measured together, every column set to the
- * widest cell in it, and the rows given one left edge, so the box is a box
- * there too.
+ * widest cell in it, the rows given one left edge, and each row made as tall
+ * as the gap to the row below it, so its bar meets the next row's — the box
+ * is a box there too.
  */
 export function fitRuleRows(root) {
-  for (const line of root.querySelectorAll(".line.rt")) {
+  for (const line of root.querySelectorAll(".line.rl")) {
     line.classList.remove("fit");
+    line.style.height = "";
     for (const c of cellsOf(line)) c.style.width = "";
   }
-  const fixed = [];
-  for (const line of root.querySelectorAll(".page-body.fixed .line.rl")) for (const c of cellsOf(line)) c.style.width = "";
+  for (const sec of root.querySelectorAll(".tpage")) {
+    if (!sec.__ruleWide) continue;
+    sec.__ruleWide = false;
+    sec.style.width = ""; sec.style.maxWidth = "";
+  }
+  const widen = new Map();
   for (const block of ruleBlocks(root)) {
-    const laid = block.lines[0].closest(".page-body.fixed");
-    if (laid) { fixed.push(block); continue; }
     const line = block.lines[0];
-    if (!line.classList.contains("rt") || block.lines.length < 2) continue;
-    // The lone row's own widths are measured with it alone; the block's rows
-    // share a table and are measured as a table.
-    const cells = cellsOf(line), ncells = cellsOf(block.lines[1]);
-    if (ncells.length !== cells.length) continue;
-    const ws = ncells.map((c) => c.getBoundingClientRect().width);
+    const body = line.closest(".page-body");
+    if (!body) continue;
+    if (body.classList.contains("fixed")) { fitLaidBlock(block); continue; }
+    if (line.classList.contains("rt") && block.lines.length > 1) {
+      // The lone row's own widths are measured with it alone; the block's
+      // rows share a table and are measured as one.
+      const cells = cellsOf(line), ncells = cellsOf(block.lines[1]);
+      if (ncells.length === cells.length) {
+        const ws = ncells.map((c) => c.getBoundingClientRect().width);
+        line.classList.add("fit");
+        cells.forEach((c, i) => { c.style.width = ws[i] + "px"; });
+      }
+    }
+    const sec = body.closest(".tpage");
+    if (!sec || sec.classList.contains("matched")) continue;
+    const limit = body.getBoundingClientRect().right - parseFloat(getComputedStyle(body).paddingRight || 0);
+    let right = 0;
+    for (const l of block.lines) right = Math.max(right, l.getBoundingClientRect().right);
+    const over = right - limit;
+    if (over > 0.5) widen.set(sec, Math.max(widen.get(sec) || 0, over));
+  }
+  for (const [sec, over] of widen) {
+    sec.__ruleWide = true;
+    sec.style.width = Math.ceil(sec.getBoundingClientRect().width + over) + "px";
+    sec.style.maxWidth = "none";
+  }
+}
+
+function fitLaidBlock(block) {
+  if (block.lines.length < 2) return;
+  const rows = block.lines.map(cellsOf);
+  const n = Math.max(...rows.map((r) => r.length));
+  const ws = new Array(n).fill(0);
+  for (const r of rows) r.forEach((c, i) => { ws[i] = Math.max(ws[i], c.getBoundingClientRect().width); });
+  // The left and top the layout gave each row are in its own record, never
+  // read back off the style this overrides.
+  const laid = block.lines.map(laidOf);
+  let left = null;
+  for (const l of laid) if (!isNaN(l[1])) left = left == null ? l[1] : Math.min(left, l[1]);
+  block.lines.forEach((line, k) => {
     line.classList.add("fit");
-    cells.forEach((c, i) => { c.style.width = ws[i] + "px"; });
-  }
-  for (const block of fixed) {
-    if (block.lines.length < 2) continue;
-    const rows = block.lines.map(cellsOf);
-    const n = Math.max(...rows.map((r) => r.length));
-    const ws = new Array(n).fill(0);
-    for (const r of rows) r.forEach((c, i) => { ws[i] = Math.max(ws[i], c.getBoundingClientRect().width); });
-    // The left the layout gave each row is in its own record (`__laid`,
-    // "top|left|size|box"), never read back off the style this overrides.
-    let left = null;
-    for (const line of block.lines) {
-      const l = parseFloat(String(line.__laid || "").split("|")[1]);
-      if (!isNaN(l)) left = left == null ? l : Math.min(left, l);
-    }
-    for (const line of block.lines) {
-      line.classList.add("fit");
-      cellsOf(line).forEach((c, i) => { c.style.width = ws[i] + "px"; });
-      if (left != null) line.style.left = left + "px";
-    }
-  }
+    cellsOf(line).forEach((c, i) => { c.style.width = ws[i] + "px"; });
+    if (left != null) line.style.left = left + "px";
+    const top = laid[k][0], next = k + 1 < laid.length ? laid[k + 1][0] : NaN;
+    if (!isNaN(top) && !isNaN(next) && next > top) line.style.height = (next - top) + "px";
+  });
 }

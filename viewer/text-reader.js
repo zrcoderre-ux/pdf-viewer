@@ -1187,7 +1187,6 @@ function afterTextChange() {
   textAnchors = null; textLineTops = null;
   applyMatchedLayout();
   applyLineLock();
-  fitRuleRows(pagesEl);
   // The citations settle a beat after the edit rather than with it. Reading
   // a long export for citations is the one part of this that a long document
   // makes slow — the scan is of the whole text, since a short form ("Ibid.",
@@ -1200,7 +1199,7 @@ function afterTextChange() {
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
 const placeCitationsSoon = debounce(() => placeCitations(), 450);
-const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); fitRuleRows(pagesEl); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
+const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -4479,6 +4478,9 @@ function applyMatchedLayout() {
     }
     for (const [el, h] of blanks) el.style.height = h + "px";
   }
+  // The boxes the export draws: their columns and sheets, measured now that
+  // every line stands where this pass put it (rules.js).
+  fitRuleRows(pagesEl);
   textAnchors = null; textLineTops = null;
 }
 function clearMatched(sec) {
@@ -4489,7 +4491,7 @@ function clearMatched(sec) {
   sec.querySelector(".page-inner").style.height = "";
   const body = sec.querySelector(".page-body");
   body.classList.remove("fixed");
-  for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
+  for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
 }
 function setSideBySide(on, { remember = true } = {}) {
   sbsOn = !!on;
