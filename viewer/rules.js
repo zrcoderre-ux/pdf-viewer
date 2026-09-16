@@ -110,24 +110,74 @@ export function dressLines(body) {
   }
 }
 
+/** The consecutive lines of one box: runs of `.line.rl` siblings sharing a bar key. */
+function ruleBlocks(root) {
+  const blocks = [];
+  let run = null;
+  for (const line of root.querySelectorAll(".line")) {
+    const rl = line.classList.contains("rl");
+    if (rl && run && !line.classList.contains("rt") && run.key === line.dataset.rk && run.lines[run.lines.length - 1].nextElementSibling === line) run.lines.push(line);
+    else if (rl) { run = { key: line.dataset.rk, lines: [line] }; blocks.push(run); }
+    else run = null;
+  }
+  return blocks;
+}
+
+const cellsOf = (line) => [...line.querySelectorAll(":scope > .lt > .rc")];
+
 /**
- * A row that is a table of its own (`.rt`) sized to the block under it, where
- * the row below shares its bars: two stacked boxes meet at a bottom rule and
- * a top rule, and the top rule of the second, drawn alone, would take its
- * `─` glyphs' own width — right in a monospace font and not in any other.
- * Measured, so it is asked after layout and again whenever the font moves.
+ * The widths the table layout cannot supply, measured and set: asked after
+ * layout and again whenever the font moves.
+ *
+ * A row that is a table of its own (`.rt`) has no text rows to size its
+ * columns — two stacked boxes meet at a bottom rule and a top rule, and the
+ * top rule of the second, drawn alone, would take its `─` glyphs' own width,
+ * right in a monospace font and not in any other — so it is sized to the
+ * block under it where that block shares its bars.
+ *
+ * And on a page laid on its PDF's grid (side by side) every line is
+ * positioned on its own, so no two rows share an anonymous table at all:
+ * there each box's rows are measured together, every column set to the
+ * widest cell in it, and the rows given one left edge, so the box is a box
+ * there too.
  */
-export function fitLoneRows(root) {
+export function fitRuleRows(root) {
   for (const line of root.querySelectorAll(".line.rt")) {
     line.classList.remove("fit");
-    const cells = [...line.querySelectorAll(":scope > .lt > .rc")];
-    for (const c of cells) c.style.width = "";
-    const next = line.nextElementSibling;
-    if (!next || !next.classList.contains("rl") || next.classList.contains("rt") || next.dataset.rk !== line.dataset.rk) continue;
-    const ncells = [...next.querySelectorAll(":scope > .lt > .rc")];
+    for (const c of cellsOf(line)) c.style.width = "";
+  }
+  const fixed = [];
+  for (const line of root.querySelectorAll(".page-body.fixed .line.rl")) for (const c of cellsOf(line)) c.style.width = "";
+  for (const block of ruleBlocks(root)) {
+    const laid = block.lines[0].closest(".page-body.fixed");
+    if (laid) { fixed.push(block); continue; }
+    const line = block.lines[0];
+    if (!line.classList.contains("rt") || block.lines.length < 2) continue;
+    // The lone row's own widths are measured with it alone; the block's rows
+    // share a table and are measured as a table.
+    const cells = cellsOf(line), ncells = cellsOf(block.lines[1]);
     if (ncells.length !== cells.length) continue;
     const ws = ncells.map((c) => c.getBoundingClientRect().width);
     line.classList.add("fit");
     cells.forEach((c, i) => { c.style.width = ws[i] + "px"; });
+  }
+  for (const block of fixed) {
+    if (block.lines.length < 2) continue;
+    const rows = block.lines.map(cellsOf);
+    const n = Math.max(...rows.map((r) => r.length));
+    const ws = new Array(n).fill(0);
+    for (const r of rows) r.forEach((c, i) => { ws[i] = Math.max(ws[i], c.getBoundingClientRect().width); });
+    // The left the layout gave each row is in its own record (`__laid`,
+    // "top|left|size|box"), never read back off the style this overrides.
+    let left = null;
+    for (const line of block.lines) {
+      const l = parseFloat(String(line.__laid || "").split("|")[1]);
+      if (!isNaN(l)) left = left == null ? l : Math.min(left, l);
+    }
+    for (const line of block.lines) {
+      line.classList.add("fit");
+      cellsOf(line).forEach((c, i) => { c.style.width = ws[i] + "px"; });
+      if (left != null) line.style.left = left + "px";
+    }
   }
 }

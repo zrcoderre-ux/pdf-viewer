@@ -707,8 +707,18 @@ app, which routes it to the reader tab.
   under its own width. The glyphs stay underneath — a save and a copy read
   exactly what the file says. Two boxes stacked with different widths keep
   their own columns; the one row between them that belongs to neither is
-  drawn on its own, exact in a monospace font. A page laid on its PDF's grid
-  (side by side) draws each row on its own the same way.
+  drawn on its own and sized to the box under it. A page laid on its PDF's
+  grid (side by side) positions every line on its own, so there each box's
+  rows are measured together, every column set to its widest cell and the
+  rows given one left edge — the box is a box there too.
+- **Print what you see.** **🖨 Print** (Ctrl+P) sends the pages exactly as
+  they are shown to the browser's print dialog, where "Save as PDF" keeps a
+  copy: the font and leading in force, the drawn boxes, the pseudonym marks,
+  one sheet per printed page, each sheet at its screen width and the lot
+  scaled to the paper so nothing re-wraps. It is a copy of the screen, so it carries the
+  real names if they are showing — turn on *show fakes* first to print a
+  scrubbed copy. The chrome around the pages and the citation underlines are
+  left off.
 - **Line lock.** Pleading paper is read by its line numbers, and a numbered
   line that wraps puts its tail on a screen line with no number — one line
   off from the PDF. **Line lock** (Tools panel, remembered) holds every numbered

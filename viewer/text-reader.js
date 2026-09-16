@@ -43,7 +43,7 @@ import { createToaPanel } from "./toa.js";
 import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
-import { dressLines, fitLoneRows, placeholderIn } from "./rules.js";
+import { dressLines, fitRuleRows, placeholderIn } from "./rules.js";
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
 import * as XW from "./xlsx-write.js";
@@ -236,6 +236,25 @@ markColorEl.addEventListener("input", () => { settings.markColor = markColorEl.v
 markAlphaEl.addEventListener("input", () => { settings.markAlpha = Number(markAlphaEl.value); saveSettings(); applySettings(); });
 fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.checked; saveSettings(); applySettings(); showFakes(settings.showFakes); });
 lockToggle.addEventListener("change", () => { settings.lineLock = lockToggle.checked; saveSettings(); applySettings(); relayout(); });
+
+// ── print ────────────────────────────────────────────────────────────────────
+// The pages as they are shown, to paper or to a PDF — the browser's own
+// dialog, where "Save as PDF" is a destination. What prints is the display:
+// the font and leading in force, the boxes drawn, the real names on screen
+// (a printout is a copy of the SCREEN and carries whatever the screen does —
+// show the fakes first to print a scrubbed copy). The chrome around the
+// pages is dropped in the print stylesheet, nothing is re-laid, and the
+// citation strips are left off, being overlays measured for the screen.
+$("print-btn").addEventListener("click", () => window.print());
+// The sheets keep their screen width in print, so nothing re-wraps, and the
+// widest one is zoomed to the paper's printable width (letter and A4 alike).
+const PRINT_WIDTH_PX = 700;
+window.addEventListener("beforeprint", () => {
+  let w = 0;
+  for (const t of pagesEl.querySelectorAll(".tpage")) w = Math.max(w, t.offsetWidth);
+  document.documentElement.style.setProperty("--print-zoom", String(w > PRINT_WIDTH_PX ? PRINT_WIDTH_PX / w : 1));
+});
+window.addEventListener("afterprint", () => document.documentElement.style.removeProperty("--print-zoom"));
 
 // ── theme (shared with the PDF viewer) ───────────────────────────────────────
 const themeToggle = $("theme-toggle");
@@ -1168,7 +1187,7 @@ function afterTextChange() {
   textAnchors = null; textLineTops = null;
   applyMatchedLayout();
   applyLineLock();
-  fitLoneRows(pagesEl);
+  fitRuleRows(pagesEl);
   // The citations settle a beat after the edit rather than with it. Reading
   // a long export for citations is the one part of this that a long document
   // makes slow — the scan is of the whole text, since a short form ("Ibid.",
@@ -1181,7 +1200,7 @@ function afterTextChange() {
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
 const placeCitationsSoon = debounce(() => placeCitations(), 450);
-const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); fitLoneRows(pagesEl); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
+const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); fitRuleRows(pagesEl); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
