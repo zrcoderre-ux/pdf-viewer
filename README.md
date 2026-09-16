@@ -705,12 +705,18 @@ app, which routes it to the reader tab.
   Consolas; a line that is nothing but rules (a box's top, a divider) is a
   hairline at half a line's height, and an underline inside a row is a line
   under its own width. The glyphs stay underneath — a save and a copy read
-  exactly what the file says. Two boxes stacked with different widths keep
-  their own columns; the one row between them that belongs to neither is
-  drawn on its own and sized to the box under it. A page laid on its PDF's
-  grid (side by side) positions every line on its own, so there each box's
-  rows are measured together, every column set to its widest cell and the
-  rows given one left edge — the box is a box there too.
+  exactly what the file says, and the bars are located in the file's own
+  text, so a row whose real name is longer than its fake is still a row of
+  the same box. A box never wraps — a wrapped cell is a box with a hole in it
+  — so a box wider than its sheet widens the sheet, as line lock does for a
+  long numbered line, and the stage scrolls sideways. Two boxes stacked with
+  different widths keep their own columns; the one row between them that
+  belongs to neither is drawn on its own and sized to the box under it. A
+  page laid on its PDF's grid (side by side) positions every line on its own,
+  so there each box's rows are measured together after every layout pass —
+  every column set to its widest cell, the rows given one left edge, and each
+  row made as tall as the gap to the next so the bars meet — the box is a box
+  there too.
 - **Print what you see.** **🖨 Print** (Ctrl+P) sends the pages exactly as
   they are shown to the browser's print dialog, where "Save as PDF" keeps a
   copy: the font and leading in force, the drawn boxes, the pseudonym marks,
