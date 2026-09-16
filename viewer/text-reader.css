@@ -398,6 +398,11 @@ body.line-lock .page-body.numbered .line.num > .lt { white-space: pre; }
    a `─` run there keeps its glyphs' own width (exact in a monospace font). */
 .line.rt .rc.hf { font-size: inherit; -webkit-text-fill-color: transparent; }
 .line.rt.fit .rc.hf { font-size: 0; }
+/* On the PDF's grid a row is one printed line and never wraps, and a rule
+   row keeps the slot the PDF gave it, its hairline at the slot's middle. */
+.page-body.fixed .rc { white-space: pre; }
+.page-body.fixed .line.rr > .lt { line-height: inherit; }
+.line.rl.fit .rc.hf { font-size: 0; }
 /* A line that is nothing but rules is a hairline on the page: half a line tall. */
 .line.rr, .line.rr > .lt { min-height: 0; line-height: calc(var(--reader-lh) * 0.5em); }
 body.line-lock .tpage { max-width: none; }
@@ -517,3 +522,28 @@ body.marks-off [data-here]:hover { background: transparent; }
 @media (max-width: 900px) {
   :root { --side-width: 240px; --tools-rail-width: 168px; }
 }
+
+/* ── print ───────────────────────────────────────────────────────────────────
+   The pages as shown, and nothing else: the chrome goes, the scroll box
+   becomes the document, each sheet keeps its width (the browser scales a
+   sheet wider than the paper) and starts a printed page. The drawn rules and
+   the pseudonym marks are backgrounds, which a printer drops unless told
+   otherwise. The citation strips are overlays measured for the screen and are
+   left off. */
+@media print {
+  html, body { height: auto; overflow: visible; background: #fff; }
+  #toolbar, #leaks-bar, #key-offer, #tools-rail, #side, #statusbar, #toast, #pdf-pane, #flag-pop { display: none !important; }
+  #main { position: static; display: block; }
+  #stage { overflow: visible; position: static; }
+  #pages { padding: 0; width: auto !important; min-width: 0 !important; }
+  /* The sheets keep the width they have on screen, so nothing re-wraps, and
+     the lot is zoomed to the paper (--print-zoom, set as the dialog opens). */
+  #pages { zoom: var(--print-zoom, 1); }
+  .tpage { max-width: none; margin: 0 auto 18px; box-shadow: none; border-radius: 0; break-after: page; }
+  .tpage:last-child { break-after: auto; }
+  .page-label .swap-page { display: none; }
+  .link-layer { display: none; }
+  .page-body:focus { box-shadow: none; }
+  .rb, .rc.hf, .rh, .pn, .held, .page-body.numbered .gutter, .page-label { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+@page { margin: 12mm; }
