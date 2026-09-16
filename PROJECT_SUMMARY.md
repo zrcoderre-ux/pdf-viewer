@@ -186,6 +186,27 @@ document stayed open. Thirty lines pasted into a two-hundred-page export:
 22.6 s before, 13 ms after, with the same 4,824 underlines in the same
 places.
 
+### Rule glyphs drawn as boxes (`viewer/rules.js`)
+
+PDF-Linker writes a page's line art into its export as box-drawing glyphs,
+which read as a box only in a monospace font at single spacing. `rules.js`
+re-derives, on every page fill and every line-restructuring edit, a set of
+spans over each line's rule glyphs: a line with vertical bars becomes
+`.line.rl` (`display: table-row`; its `.lt` `display: contents`) holding
+`.rc` cells split at `.rb` bar cells (one pixel wide, filled to the row's
+height), consecutive lines whose bar offsets agree (measured on the whole
+line, gutter included — a numbered row and its unnumbered continuation
+agree) share one anonymous table, and a line whose offsets differ from the
+row above is `.rt` (`display: table`, its own columns) so two stacked boxes
+never share columns. A line of nothing but rules is `.rr`, half a line tall;
+a `─` run is `.rh`, a line at its own width, or `.rc.hf` when it is a whole
+cell, a line across the cell. Every span carries the glyph as its text and no
+`data-fake`, so `serializeNodes` and the clipboard are unchanged (pinned in
+`test-textdoc.mjs`); `ruleParts` / `ruleShape` in `textdoc.js` are the pure
+half. `undress` runs first on each pass and touches only lines that carry a
+rule span, so the editor's caret text node on any other line is never
+replaced.
+
 ## Fixes applied in earlier sessions
 
 All in `viewer/` unless noted. Each fix is documented inline at the call

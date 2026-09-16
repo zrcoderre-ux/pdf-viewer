@@ -647,3 +647,56 @@ export function fontCss(settings) {
   const p = FONT_PRESETS.find((f) => f.id === s.font) || FONT_PRESETS[0];
   return p.css || FONT_PRESETS[0].css;
 }
+
+// ---- rule glyphs: the boxes an export draws ----------------------------------------
+//
+// PDF-Linker draws a page's line art into its export with the box-drawing
+// glyphs — a `─` run for a horizontal rule, a `│` on every line a vertical
+// rule crosses, a corner or tee where two meet. That is a picture of a box
+// only in a monospace font at single spacing: in any other font the bars of
+// one column land at different x on different lines, and any leading above
+// the glyph's own height cuts a vertical rule into a stack of short strokes.
+// The reader lets the font and the leading be anything, so it DRAWS the box
+// instead of showing the glyphs (viewer/rules.js): a line carrying bars is
+// laid out as a row of cells split at its bars, consecutive lines whose
+// bars stand at the same character offsets share one table, and each bar is
+// a cell one pixel wide that the row's full height fills. The glyphs stay in
+// the DOM, so the round trip and a copy are unchanged. These two are the pure
+// half — what a line's text says about its rules — and are Node-tested.
+
+export const RULE_H = "\u2500";
+export const RULE_BARS = "\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c";
+const RULE_PART_RE = /([\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c])|(\u2500+)/g;
+const RULE_ANY_RE = /[\u2500\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c]/;
+const RULE_ONLY_RE = /^[\s\u2500\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c]*$/;
+/** How much of a bar's height each glyph draws: the whole of it, its lower half (a top corner or tee), its upper half. */
+const RULE_BAR_EXTENT = { "\u2502": "full", "\u251c": "full", "\u2524": "full", "\u253c": "full",
+  "\u250c": "down", "\u2510": "down", "\u252c": "down", "\u2514": "up", "\u2518": "up", "\u2534": "up" };
+
+/** A text's pieces: { t: "text" | "bar" | "h", s }, a bar glyph one piece each, a `─` run one piece. */
+export function ruleParts(s) {
+  const out = [];
+  let last = 0, m;
+  RULE_PART_RE.lastIndex = 0;
+  while ((m = RULE_PART_RE.exec(s))) {
+    if (m.index > last) out.push({ t: "text", s: s.slice(last, m.index) });
+    out.push(m[1] ? { t: "bar", s: m[1], v: RULE_BAR_EXTENT[m[1]] } : { t: "h", s: m[2] });
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) out.push({ t: "text", s: s.slice(last) });
+  return out;
+}
+
+/**
+ * What a whole line (its gutter included) says about its rules, or null for
+ * a line with none: `bars`, the character offsets of its bar glyphs — two
+ * lines whose offsets agree are rows of one box — and `rule`, true where the
+ * line is nothing but rule glyphs and spaces (a box's top, a section
+ * divider, an underline), which is drawn at half a line's height.
+ */
+export function ruleShape(line) {
+  if (!RULE_ANY_RE.test(line)) return null;
+  const bars = [];
+  for (let i = 0; i < line.length; i++) if (RULE_BARS.includes(line[i])) bars.push(i);
+  return { bars, rule: RULE_ONLY_RE.test(line) };
+}

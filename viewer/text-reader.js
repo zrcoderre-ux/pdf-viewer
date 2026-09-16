@@ -43,6 +43,7 @@ import { createToaPanel } from "./toa.js";
 import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
+import { dressLines, fitLoneRows, placeholderIn } from "./rules.js";
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
 import * as XW from "./xlsx-write.js";
@@ -1074,14 +1075,7 @@ function buildBody(body, text, page, theirSpots) {
     });
     lineStart = r.s.endsWith("\n") || (lineStart && r.s === "");
   });
-  for (const l of body.querySelectorAll(".line > .lt")) placeholderIn(l);
-}
-/** An empty slot carries a <br> so the caret can stand in it; one with text does not need it. */
-function placeholderIn(lt) {
-  // A <br> is only ever the placeholder: Enter and a paste never insert one
-  // (plaintext-only types "\n"), so with text present every <br> goes.
-  if (!lt.textContent.length) { if (!lt.querySelector("br")) lt.appendChild(document.createElement("br")); }
-  else for (const br of [...lt.querySelectorAll("br")]) br.remove();
+  dressLines(body);
 }
 /** The gutter span: the number (shown in the margin) and the spacing after it (kept, not shown). The numbers are fixed: the span takes no edit. */
 function makeGutter(prefix) {
@@ -1174,6 +1168,7 @@ function afterTextChange() {
   textAnchors = null; textLineTops = null;
   applyMatchedLayout();
   applyLineLock();
+  fitLoneRows(pagesEl);
   // The citations settle a beat after the edit rather than with it. Reading
   // a long export for citations is the one part of this that a long document
   // makes slow — the scan is of the whole text, since a short form ("Ibid.",
@@ -1186,7 +1181,7 @@ function afterTextChange() {
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
 const placeCitationsSoon = debounce(() => placeCitations(), 450);
-const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
+const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); fitLoneRows(pagesEl); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -1396,7 +1391,7 @@ function enterAtCaret(body, { snap = true } = {}) {
       if (!target) target = foot;
     }
   }
-  for (const l of body.querySelectorAll(".line > .lt")) placeholderIn(l);
+  dressLines(body);
   fixGutterSpacing(body);
   placeCaret(ltOf(target), 0);
   setDirty(true);
@@ -1459,7 +1454,7 @@ function insertLinesAtCaret(body, pieces) {
       if (i === frags.length - 1) caretSlot = slot;
     });
   }
-  for (const l of body.querySelectorAll(".line > .lt")) placeholderIn(l);
+  dressLines(body);
   fixGutterSpacing(body);
   if (caretNode) placeCaret(caretNode, caretNode.data.length);
   else if (caretSlot) placeCaret(ltOf(caretSlot), 0);
@@ -1490,7 +1485,7 @@ function joinLineUp(body, line) {
       cur = next;
     }
   }
-  for (const l of body.querySelectorAll(".line > .lt")) placeholderIn(l);
+  dressLines(body);
   fixGutterSpacing(body);
   const at = pointAtOffset(plt, joinAt);
   placeCaret(at.node, at.offset);

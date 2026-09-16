@@ -13,6 +13,7 @@ import {
   serializeHeld, blankRanges, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE,
+  ruleParts, ruleShape,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward } from "./viewer/pseudo-key.js";
 
@@ -249,6 +250,40 @@ check("a bad colour falls back", normalizeSettings({ markColor: "blue" }).markCo
 check("markCss", markCss({ markColor: "#ff0000", markAlpha: 0.2 }), { bg: "rgba(255, 0, 0, 0.200)", hover: "rgba(255, 0, 0, 0.500)", ring: "rgba(255, 0, 0, 0.120)" });
 check("custom font css", fontCss(normalizeSettings({ font: "custom", customFont: "Baskerville, serif" })), "Baskerville, serif");
 check("empty custom falls back to the first preset", fontCss(normalizeSettings({ font: "custom", customFont: " " })), "Georgia, 'Times New Roman', serif");
+
+// ---- rule glyphs: the boxes an export draws --------------------------------
+console.log("rule glyphs");
+check("a line with no rule glyph has no shape", ruleShape(" 5  HELEN RASHO, an individual,"), null);
+check("bars are located in the WHOLE line, gutter included",
+  ruleShape(" 5  RASHO,      \u2502 Case No. 25STZV12345"), { bars: [16], rule: false });
+check("a continuation line under the same box carries the same offsets",
+  ruleShape("    (cont.)     \u2502 more").bars, ruleShape(" 5  RASHO,      \u2502 Case No.").bars);
+check("a line of nothing but rules and spaces is a rule row",
+  ruleShape("\u251c\u2500\u2500\u2500\u2500\u2524   \u2502"), { bars: [0, 5, 9], rule: true });
+check("an underline inside a text row is not a rule row",
+  ruleShape("\u2502 DOES 1  TO \u2500\u2500\u2500\u2500 \u2502").rule, false);
+check("a bar-less underline is a rule row with no bars",
+  ruleShape("          \u2500\u2500\u2500\u2500\u2500"), { bars: [], rule: true });
+check("parts: text, a bar with its extent, a run",
+  ruleParts("ab\u2502cd\u2500\u2500e\u250c\u2518"),
+  [{ t: "text", s: "ab" }, { t: "bar", s: "\u2502", v: "full" }, { t: "text", s: "cd" }, { t: "h", s: "\u2500\u2500" },
+   { t: "text", s: "e" }, { t: "bar", s: "\u250c", v: "down" }, { t: "bar", s: "\u2518", v: "up" }]);
+check("parts of a plain string is the string", ruleParts("plain"), [{ t: "text", s: "plain" }]);
+check("the parts join back to the text", ruleParts("\u250c\u2500\u2500\u252c\u2500\u2510 x").map((q) => q.s).join(""), "\u250c\u2500\u2500\u252c\u2500\u2510 x");
+// The dressed DOM (rules.js) wraps the glyphs in spans that carry no
+// data-fake, so the walk serializes them as their own text: a cell span, a
+// bar span and a run span read back as the line the file holds.
+{
+  const T = (s) => ({ nodeType: 3, data: s });
+  const E = (name, kids, attrs) => ({ nodeType: 1, nodeName: name, childNodes: kids, getAttribute: (k) => (attrs && k in attrs ? attrs[k] : null) });
+  const line1 = E("DIV", [E("SPAN", [E("SPAN", [T(" NAME: "), E("SPAN", [T("Rosa Delgado")], { "data-fake": "Wren Ashby" }), T("   ")]),
+                                     E("SPAN", [T("\u2502")]), E("SPAN", [E("SPAN", [T("\u2500\u2500\u2500")])])])]);
+  const line2 = E("DIV", [E("SPAN", [T("plain")])]);
+  const body = E("DIV", [line1, line2]);
+  check("a dressed line serializes as the file's own text, fakes underneath",
+    serializeNodes(body), " NAME: Wren Ashby   \u2502\u2500\u2500\u2500\nplain");
+  check("…and displays the real name", textOf(body), " NAME: Rosa Delgado   \u2502\u2500\u2500\u2500\nplain");
+}
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

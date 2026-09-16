@@ -692,6 +692,23 @@ app, which routes it to the reader tab.
   or under Options → "Text reader — default font and leading", and every open
   reader tab follows at once. Display only: the text file itself is never
   changed. Light and dark chrome follow the viewer's own theme toggle.
+- **The boxes are drawn, whatever the font.** PDF-Linker draws a page's
+  line art — a court form's caption box, a pleading's caption divider, a
+  section rule, an underline — into its export with the box-drawing glyphs
+  (`─`, `│`, the corners and tees), which is a box only in a monospace font at
+  single spacing: any other font puts one column's bars at different places on
+  different lines, and any leading cuts a vertical rule into a stack of short
+  strokes. The reader draws the box instead. A line carrying bars is laid out
+  as a row of cells split at its bars, consecutive lines whose bars stand at
+  the same character positions share one table, so a bar column is one
+  unbroken line down the page in Georgia at any leading exactly as in
+  Consolas; a line that is nothing but rules (a box's top, a divider) is a
+  hairline at half a line's height, and an underline inside a row is a line
+  under its own width. The glyphs stay underneath — a save and a copy read
+  exactly what the file says. Two boxes stacked with different widths keep
+  their own columns; the one row between them that belongs to neither is
+  drawn on its own, exact in a monospace font. A page laid on its PDF's grid
+  (side by side) draws each row on its own the same way.
 - **Line lock.** Pleading paper is read by its line numbers, and a numbered
   line that wraps puts its tail on a screen line with no number — one line
   off from the PDF. **Line lock** (Tools panel, remembered) holds every numbered
