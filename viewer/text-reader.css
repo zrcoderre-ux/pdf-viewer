@@ -375,6 +375,31 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
    past the window's edge if its longest line needs it — the stage scrolls
    sideways, as a zoomed PDF does. */
 body.line-lock .page-body.numbered .line.num > .lt { white-space: pre; }
+/* The boxes the export draws with line glyphs, DRAWN (rules.js). A line
+   carrying vertical bars is a table row of cells split at its bars, and
+   consecutive rows whose bars agree share one anonymous table — so a bar
+   column is one column in any font, and a bar is a one-pixel cell the row's
+   full height fills, whatever the leading. The glyph text stays underneath,
+   at no size, for the round trip and the clipboard. */
+.page-body .line.rl { display: table-row; min-height: 0; }
+.page-body .line.rl.rt { display: table; }
+.line.rl > .lt { display: contents; }
+.line.rl > .gutter { display: table-cell; width: var(--gutter-w); box-sizing: border-box; }
+.page-body.numbered .line.rl:not(.num)::before { content: ""; display: table-cell; width: var(--gutter-w); }
+.page-body.numbered .line.rl > .lt > .rc:first-child { padding-left: 1.1em; }
+.rc { display: table-cell; padding: 0; white-space: pre-wrap; box-sizing: border-box; }
+.rc.hf { font-size: 0; background: linear-gradient(currentColor, currentColor) 0 50% / 100% 1px no-repeat; }
+.rb { display: table-cell; width: 1px; min-width: 1px; padding: 0; font-size: 0; background: currentColor; }
+.rb[data-v="down"] { background: linear-gradient(transparent 50%, currentColor 50%); }
+.rb[data-v="up"] { background: linear-gradient(currentColor 50%, transparent 50%); }
+.rh { -webkit-text-fill-color: transparent; background: linear-gradient(currentColor, currentColor) 0 50% / 100% 1px no-repeat; }
+.rc.hf > .rh { background: none; }
+/* A row that is a table of its own has no text rows to size its columns, so
+   a `─` run there keeps its glyphs' own width (exact in a monospace font). */
+.line.rt .rc.hf { font-size: inherit; -webkit-text-fill-color: transparent; }
+.line.rt.fit .rc.hf { font-size: 0; }
+/* A line that is nothing but rules is a hairline on the page: half a line tall. */
+.line.rr, .line.rr > .lt { min-height: 0; line-height: calc(var(--reader-lh) * 0.5em); }
 body.line-lock .tpage { max-width: none; }
 body.line-lock #pages { width: max-content; min-width: 100%; }
 .page-body:focus { box-shadow: inset 0 0 0 2px rgba(26, 115, 232, 0.25); }
