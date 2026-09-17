@@ -10,6 +10,7 @@ import {
   isLeaksName, leaksRank, headerIndex, sheetsLookLikeLeaks, leaksSheet, parseLeaks, classifyFix, isKeepKind,
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
   packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE,
+  rowFile, reviewOrder, leakFileOrder, fileDone,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
@@ -92,6 +93,67 @@ check("Context: the two halves, or the original alone", [splitContext("a\n" + CO
   check("no match, no export", matchExport("Nothing.pdf", docs, forward), null);
 }
 
+console.log("the walk: one document at a time");
+{
+  const R = (fix, file, where) => ({ fix, file, where });
+  // Four documents' rows, interleaved in the sheet the way PDF-Linker writes
+  // them: one row per VALUE, and a value leaks wherever it leaks.
+  const walk = [
+    R("", "Brief.pdf", "p.4"),        // 0  Brief, undecided
+    R("", "Guaranty.pdf", "p.2"),     // 1  Guaranty, undecided
+    R("yes", "Brief.pdf", "p.31"),    // 2  Brief, decided
+    R("", "Order.docx", "line 12"),   // 3  Order, undecided
+    R("", "Brief.pdf", "p.9"),        // 4  Brief, undecided
+    R("", "—", "p.7"),                // 5  no file named: the open document
+  ];
+  check("a row's document is the first name in its File cell, else \"\"",
+    [rowFile(walk[0]), rowFile(walk[5]), rowFile(R("", "Guaranty.pdf, Brief.pdf", "")), rowFile(R("", "12 files", ""))],
+    ["Brief.pdf", "", "Guaranty.pdf", ""]);
+  check("the document in front is finished before the next is reached",
+    reviewOrder(walk, 0), [0, 4, 2, 1, 3, 5]);
+  check("…from a row in the middle, that row's document is the one in front",
+    reviewOrder(walk, 3), [3, 4, 0, 2, 5, 1]);
+  check("the documents in the order the review reaches them",
+    [leakFileOrder(walk, 0), leakFileOrder(walk, 1)],
+    [["Brief.pdf", "Guaranty.pdf", "Order.docx", ""], ["Guaranty.pdf", "Brief.pdf", "Order.docx", ""]]);
+  check("a document is done when no row standing in it is undecided",
+    [fileDone(walk, "Brief.pdf"), fileDone(walk, "guaranty.pdf"), fileDone(walk, "Nothing.pdf")],
+    [false, false, true]);
+  check("…and the walk moves on when it is",
+    fileDone(walk.map((r, i) => (rowFile(r) === "Brief.pdf" ? Object.assign({}, r, { fix: "yes" }) : r)), "Brief.pdf"), true);
+  check("the next undecided row stays in the document in front, wrapping inside it",
+    [nextUndecided(walk, 0), nextUndecided(walk, 4)], [4, 0]);
+  check("…and moves on only where that document has nothing left (row 1 is Guaranty's only row)",
+    nextUndecided(walk, 1), 4);
+}
+{
+  // The whole of a big folder's review, answered row by row the way the bar
+  // does it. What the reader holds rests on this: a document, once left, is
+  // never come back to, so holding the one in front is holding enough.
+  const files = [];
+  for (let d = 0; d < 40; d++) files.push(`Doc ${String(d).padStart(2, "0")}.pdf`);
+  const sheet = [];
+  for (let v = 0; v < 8; v++) for (const f of files) sheet.push({ fix: "", file: f, where: "p." + (v + 1) }); // by VALUE, as PDF-Linker writes it
+  sheet[17].fix = "yes"; // a couple pre-filled, as a re-run leaves them
+  sheet[233].fix = "~Vazquez";
+  const visited = [];
+  const done = new Set();
+  let backtracked = 0, at = nextUndecided(sheet, null);
+  while (at >= 0) {
+    const file = rowFile(sheet[at]);
+    if (file !== visited[visited.length - 1]) {
+      if (done.has(file)) backtracked++;
+      if (visited.length) done.add(visited[visited.length - 1]);
+      visited.push(file);
+    }
+    sheet[at].fix = "yes";
+    at = nextUndecided(sheet, at);
+  }
+  check("every row of a 320-row sheet is answered", undecidedCount(sheet), 0);
+  check("…each document reached once, and never gone back to", [visited.length, backtracked], [40, 0]);
+  check("…and a document left behind is done", [...done].every((f) => fileDone(sheet, f)), true);
+}
+
 console.log("the pages the rows point at");
 {
   const R = (fix, file, where) => ({ fix, file, where });
@@ -102,12 +164,15 @@ console.log("the pages the rows point at");
     R("", "Order.docx", "line 12-14"),              // 3  undecided, no page of its own
     R("no", "—", "p.7"),                            // 4  decided, no file named
   ];
-  check("every page once, undecided rows first, in row order",
-    leakPages(pages, 0).map((t) => t.file + "|" + (t.page == null ? "-" : t.page)),
-    ["Brief.pdf|4", "Brief.pdf|9", "Guaranty.pdf|2", "Brief.pdf|2", "Order.docx|-", "Brief.pdf|31", "|7"]);
+  const at = (from, files) => leakPages(pages, from, files).map((t) => t.file + "|" + (t.page == null ? "-" : t.page));
+  check("every page once, the document in front first — its decided rows too",
+    at(0), ["Brief.pdf|4", "Brief.pdf|9", "Brief.pdf|31", "Guaranty.pdf|2", "Brief.pdf|2", "Order.docx|-", "|7"]);
   check("the row in front comes first, and the rows wrap round to it",
-    leakPages(pages, 2).map((t) => t.file + "|" + (t.page == null ? "-" : t.page)),
-    ["Guaranty.pdf|2", "Brief.pdf|2", "Order.docx|-", "Brief.pdf|4", "Brief.pdf|9", "|7", "Brief.pdf|31"]);
+    at(2), ["Guaranty.pdf|2", "Brief.pdf|2", "Order.docx|-", "Brief.pdf|4", "Brief.pdf|9", "Brief.pdf|31", "|7"]);
+  check("held to one document, no page of another is asked for",
+    at(0, ["Brief.pdf"]), ["Brief.pdf|4", "Brief.pdf|9", "Brief.pdf|31", "Brief.pdf|2", "|7"]);
+  check("…and to that one and the next, once it is answered",
+    at(2, ["Guaranty.pdf", "Order.docx"]), ["Guaranty.pdf|2", "Order.docx|-", "|7"]);
   check("a sentinel Where and an empty sheet point nowhere",
     [leakPages([R("", "Brief.pdf", "(no longer present)")], 0), leakPages([], 0), leakPages(null, 0)],
     [[{ file: "Brief.pdf", page: null }], [], []]);

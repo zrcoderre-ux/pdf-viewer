@@ -304,14 +304,107 @@ export function matchExport(fileName, exportNames, forward) {
 export function undecidedCount(rows) {
   return (rows || []).filter((r) => !fold(r.fix)).length;
 }
-/** The next undecided row from `from` (exclusive), wrapping; -1 when none. */
+
+// ---- the walk: ONE DOCUMENT AT A TIME -------------------------------------------------
+//
+// A row stands in a document — its File cell — and answering it means reading
+// that document. A case folder of three hundred exports is three hundred
+// documents, and a walk that took the rows in sheet order would hop from one
+// to the next and back again, with the reader holding every document it had
+// passed through: that is what takes the tab down.
+//
+// So the walk is a DOCUMENT AT A TIME. Every row standing in the document in
+// front is reached before any row of the next one, undecided rows first; the
+// documents come in the order the rows first name them, those with something
+// left to answer before those with nothing. The reader then has to hold only
+// the document in front, and reads the next one when this one is answered
+// (text-reader.js).
+//
+// A row's document is the FIRST name in its File cell — the one the reader
+// opens for it — even where the same value leaked into several: the row is one
+// decision, made once, and it is made there. A row naming no file (or a tally,
+// "12 files") stands in "": whatever document is open when the walk reaches it.
+
+/** The document a row stands in: the first name in its File cell, "" where it names none. */
+export function rowFile(row) {
+  const files = parseFiles(row && row.file);
+  return files.length ? files[0] : "";
+}
+
+/**
+ * The rows in the order the review will reach them, as indices into `rows`:
+ * the row in front, then the rest of ITS document — undecided first, in sheet
+ * order from the row in front, wrapping — then the next document, and so on.
+ */
+export function reviewOrder(rows, from) {
+  const all = rows || [];
+  const n = all.length;
+  if (!n) return [];
+  const start = Number.isInteger(from) && from >= 0 && from < n ? from : 0;
+  // Each document's rows, undecided and decided, gathered in one pass from
+  // the row in front round to it — so each list is already in walk order.
+  const byFile = new Map();
+  const files = [];
+  const home = fold(rowFile(all[start]));
+  files.push(home);
+  byFile.set(home, { un: [], de: [] });
+  for (let k = 0; k < n; k++) {
+    const i = (start + k) % n;
+    const f = fold(rowFile(all[i]));
+    let b = byFile.get(f);
+    if (!b) { byFile.set(f, (b = { un: [], de: [] })); files.push(f); }
+    (fold(all[i].fix) ? b.de : b.un).push(i);
+  }
+  // The document in front first, then those with rows still to answer, then
+  // the rest — each in the order the walk first names it.
+  const order = [home]
+    .concat(files.filter((f) => f !== home && byFile.get(f).un.length))
+    .concat(files.filter((f) => f !== home && !byFile.get(f).un.length));
+  const out = [start]; // the row in front is where the operator is standing, decided or not
+  for (const f of order) {
+    const b = byFile.get(f);
+    for (const i of b.un) if (i !== start) out.push(i);
+    for (const i of b.de) if (i !== start) out.push(i);
+  }
+  return out;
+}
+
+/**
+ * The documents the review will visit, in that order — each under the
+ * spelling its first row gives it; "" is the open document.
+ */
+export function leakFileOrder(rows, from) {
+  const all = rows || [];
+  const out = [];
+  const seen = new Set();
+  for (const i of reviewOrder(all, from)) {
+    const file = rowFile(all[i]);
+    const k = fold(file);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(file);
+  }
+  return out;
+}
+
+/** Whether every row standing in `file` has been answered. */
+export function fileDone(rows, file) {
+  const k = fold(file);
+  return !(rows || []).some((r) => fold(rowFile(r)) === k && !fold(r.fix));
+}
+
+/** The next undecided row from `from` (exclusive), in walk order; -1 when none. */
 export function nextUndecided(rows, from, dir) {
-  const n = (rows || []).length;
-  if (!n) return -1;
-  const step = dir < 0 ? -1 : 1;
-  for (let k = 1; k <= n; k++) {
-    const i = (((from == null ? -1 : from) + step * k) % n + n) % n;
-    if (!fold(rows[i].fix)) return i;
+  const all = rows || [];
+  if (!all.length) return -1;
+  const here = Number.isInteger(from) && from >= 0 && from < all.length ? from : null;
+  const order = reviewOrder(all, here == null ? 0 : here);
+  const rest = order.slice(1);
+  if (dir < 0) rest.reverse();
+  // From a row in front the walk goes past it and round to it; from nowhere
+  // (no row in front yet) the first row of the walk counts too.
+  for (const i of here == null ? [order[0], ...rest] : [...rest, order[0]]) {
+    if (!fold(all[i].fix)) return i;
   }
   return -1;
 }
@@ -348,10 +441,9 @@ export function unpackDecisions(rows, stored) {
 // Answering a row means standing on the page it names, so the pages a review
 // will reach are all written down in the rows before it gets to any of them.
 // The reader reads them off ahead of time (text-reader.js warms them), and
-// wants them in the order the review will ACTUALLY reach them: the row in
-// front of the operator, then the undecided rows after it — the ones a
-// decision moves to — wrapping at the end, and only then the decided ones,
-// which are reached by a click in the Leaks tab or not at all.
+// wants them in the order the review will ACTUALLY reach them — which is the
+// walk above: the row in front of the operator, the rest of its document,
+// then the next document's.
 
 /**
  * Every page the rows name, in that visit order: [{ file, page }] — `file`
@@ -360,20 +452,23 @@ export function unpackDecisions(rows, stored) {
  * page of it (a Word body's "line N"). Each file-and-page once. A row
  * naming several files gives its pages to each, the way the row itself
  * stands for a value found in each.
+ *
+ * `files`, where given, is the documents the reader is willing to hold — the
+ * one in front, and the next once that one is answered. Pages of any other
+ * document are left out, so a folder too big to hold at once is never asked
+ * for at once. A page named by no file is the open document's and always kept.
  */
-export function leakPages(rows, from) {
+export function leakPages(rows, from, files) {
   const all = rows || [];
-  const n = all.length;
-  if (!n) return [];
-  const start = Number.isInteger(from) && from >= 0 && from < n ? from : 0;
-  const order = [];
-  for (let k = 0; k < n; k++) order.push(all[(start + k) % n]);
+  const only = files == null ? null : new Set((files || []).map(fold));
   const out = [];
   const seen = new Set();
-  const take = (row) => {
+  for (const i of reviewOrder(all, from)) {
+    const row = all[i];
     const pages = parseWhere(row.where).filter((w) => w.page != null).map((w) => w.page);
-    const files = parseFiles(row.file);
-    for (const file of files.length ? files : [""]) {
+    const named = parseFiles(row.file);
+    for (const file of named.length ? named : [""]) {
+      if (only && file && !only.has(fold(file))) continue;
       for (const page of pages.length ? pages : [null]) {
         const k = fold(file) + "|" + (page == null ? "" : page);
         if (seen.has(k)) continue;
@@ -381,8 +476,6 @@ export function leakPages(rows, from) {
         out.push({ file, page });
       }
     }
-  };
-  for (const row of order) if (!fold(row.fix)) take(row);
-  for (const row of order) if (fold(row.fix)) take(row);
+  }
   return out;
 }

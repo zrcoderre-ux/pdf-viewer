@@ -106,10 +106,25 @@ among a folder's documents, and `pdfsync.combinedMembers` reads its
 `# Documents in this file:` list so picked PDFs are matched member by
 member, by name through the key or by order.
 
+The review walks the folder ONE DOCUMENT AT A TIME. A row stands in the
+document its File cell names first (`leaks.rowFile` — one row is one
+decision, made where the reader opens it), and `leaks.reviewOrder` puts the
+rows in the order the review will reach them: the row in front, the rest of
+ITS document — undecided first, in sheet order, wrapping — then the next
+document's, the documents coming in the order the rows first name them and
+those with something left to answer before those without. `nextUndecided`
+walks that order, so a decision keeps the operator in the document in front
+until it is answered; `leakFileOrder` and `fileDone` say which document that
+is and when it is done. What the reader HOLDS follows the same walk:
+`leakFileWindow` hands `leaks.leakPages` the document in front alone — and,
+once `fileDone`, it and the next — so a folder of three hundred exports is
+never asked for at once. Past BIG_FOLDER (24) exports that window is one
+document; under it the reader works further ahead as it always has, since a
+case of a dozen exports can hold every document with a leak in it.
+
 The pages those rows name are drawn BEFORE the review reaches them.
-`leaks.leakPages` lists every page a row names in the order the review will
-reach it — the row in front of the operator, the undecided rows after it
-(the ones a decision moves to), then the rest — and `text-reader.js` keeps a
+`leaks.leakPages` lists every page a row names in that walk order, held to
+the documents the window allows, and `text-reader.js` keeps a
 window of twelve of them open and drawn into `ImageBitmap`s, queued through
 the same one-PDF-at-a-time queue the pane uses and at the BACK of it, so
 whatever is on screen is still served first. A slot coming into view paints
@@ -117,9 +132,26 @@ the held bitmap (`data-preview`, cleared when its own render lands), so the
 `Loading…` box never stands on a page the worksheet already named; the
 window moves with the review, closing what it leaves behind, and is emptied
 whenever the PDF side is put away. The exports the rows name are read ahead
-the same way — two at a time, held against name, size and modification time,
-so a file written since is read again — and an open takes the text from
-there instead of going to disk.
+the same way — held against name, size and modification time, so a file
+written since is read again — and an open takes the text from there instead
+of going to disk; in a big folder that is the ONE document the walk will
+reach next, read while the operator is still answering the last rows of this
+one.
+
+The PDFs behind them are closed again behind the review. `pdfCache` used to
+hold every PDF opened for as long as the folder was open, which is right for
+a case of a document or two and fatal for a folder of three hundred: each
+holds its bytes, its pages as pdf.js holds them and the line grid read off
+every one of them, and a review that hops from document to document opened
+them all. `trimPdfs` (called as the document changes and as the worksheet's
+window moves) destroys the PDFs nothing points at any more — `pdfsInUse` is
+the open document's own sources, the swapped-in pages, the PDFs picked by
+hand and the warm window — keeping the PDF_HELD most recently asked for
+past those, since stepping back to the document just answered should not
+read it again. `loadPdf` moves a PDF it hands back to the end of the map,
+which makes the insertion order least-recently-used first, and destroys one
+that was closed while it was still opening; `readPdfGrid` stops when its own
+PDF is no longer the cached one.
 
 The documents a review will visit are built BEFORE it reaches them. Opening
 a document is read, parse and build, and the read and the parse cost a
@@ -137,6 +169,9 @@ the review will reach them: up to READY_DOCS documents and READY_PAGES
 pages between them, one built at a time through `requestIdleCallback` and
 in slices of READY_SLICE pages, nothing over READY_MAX_PAGES held at all
 (the combined file), and whatever no longer fits dropped from the far end.
+In a big folder `leakFileWindow` has already cut that list to one document —
+and to none at all while the document in front still has rows to answer, so
+the next is read at the moment this one is finished and not before.
 A built document carries what it was built under — the file's size and
 modification time, the key epoch, that document's own spot keeps, the
 fake/real toggle and a keeps signature — and `readyFor` refuses one that no

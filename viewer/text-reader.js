@@ -3017,7 +3017,11 @@ function renderLeaksBar() {
   if (!leaks || leaks.at < 0 || leaks.at >= leakRows().length) return;
   const rows = leakRows(), row = rows[leaks.at];
   const und = LK.undecidedCount(rows);
-  $("lb-count").textContent = `Row ${leaks.at + 1} of ${rows.length}` + (und ? ` · ${und} undecided` : " · all decided");
+  // The walk is a document at a time, so how many are left in THIS one is
+  // what says when the review moves on to the next.
+  const here = rows.filter((r) => LK.fold(LK.rowFile(r)) === LK.fold(LK.rowFile(row)) && !LK.fold(r.fix)).length;
+  $("lb-count").textContent = `Row ${leaks.at + 1} of ${rows.length}` + (und ? ` · ${und} undecided` : " · all decided")
+    + (und && here && here !== und ? ` (${here} in this document)` : "");
   const tt = $("lb-type");
   tt.textContent = row.type || "review";
   tt.className = "lb-type " + typeClass(row.type);
@@ -3447,6 +3451,43 @@ function forgetPdfs() {
   pickedByMember = new Map();
 }
 
+// ── closing the PDFs the review has walked past ────────────────────────────────
+//
+// An opened PDF is not small: its bytes, its pages as pdf.js holds them, and
+// the line grid read off every one of them. That was fine while a case was a
+// document or two — they were opened once and kept for as long as the folder
+// was. A leak review walks a folder of three hundred exports, each with its
+// own PDF behind it, and every hop opened another and closed none: the tab
+// took the whole folder into memory a document at a time until it went down.
+//
+// So a PDF nothing points at any more is destroyed. What points at one: the
+// open document (its pages are drawn from it), a page swapped into the text,
+// a PDF picked by hand, and the window of pages held ready for the worksheet.
+// Past those, the few most recently opened are kept — stepping back to the
+// document just answered should not read it again — and the rest go.
+const PDF_HELD = 3; // PDFs kept open past the ones in use
+function pdfsInUse() {
+  const keep = new Set(pdfSourceNames());
+  const nameOf = (k) => k.slice(0, k.lastIndexOf("|"));
+  for (const k of warmWanted) keep.add(nameOf(k));
+  for (const k of swaps) keep.add(nameOf(k));
+  if (pdfPicked) keep.add(pdfPicked.name);
+  for (const p of pickedPdfs.values()) keep.add(p.name);
+  for (const p of pickedByMember.values()) keep.add(p.name);
+  return keep;
+}
+function trimPdfs() {
+  const keep = pdfsInUse();
+  // Insertion order is least-recently-used first: loadPdf moves a PDF it is
+  // handed back to the end.
+  const spare = [...pdfCache.keys()].filter((n) => !keep.has(n));
+  for (const name of spare.slice(0, Math.max(0, spare.length - PDF_HELD))) {
+    const p = pdfCache.get(name);
+    pdfCache.delete(name);
+    if (p) p.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }).catch(() => {});
+  }
+}
+
 // ── opening the PDFs: ONE AT A TIME, in the order they appear ─────────────────────
 //
 // A Combined Text.txt names two dozen documents, each with a PDF of its own, and
@@ -3492,11 +3533,21 @@ function cancelPdfJobs() {
  */
 function loadPdf(src, { now = false } = {}) {
   const held = pdfCache.get(src.name);
-  if (held) { if (now) bumpPdfJobs(src.name); return held; }
+  if (held) {
+    pdfCache.delete(src.name);   // asked for again: it goes to the end of the
+    pdfCache.set(src.name, held); // queue trimPdfs closes from the front of
+    if (now) bumpPdfJobs(src.name);
+    return held;
+  }
   let settle = null;
   const p = new Promise((res, rej) => { settle = { res, rej }; });
   pdfCache.set(src.name, p);
-  p.then((info) => { p.__info = info; }).catch(() => { if (pdfCache.get(src.name) === p) pdfCache.delete(src.name); });
+  p.then((info) => {
+    p.__info = info;
+    // Closed while it was still opening (trimPdfs): nothing is holding it, so
+    // it is destroyed here rather than left open with no way back to it.
+    if (pdfCache.get(src.name) !== p) { try { info.pdf.destroy(); } catch { /* gone */ } }
+  }).catch(() => { if (pdfCache.get(src.name) === p) pdfCache.delete(src.name); });
   const job = {
     name: src.name,
     run: () => openPdf(src).then(settle.res, settle.rej),
@@ -3528,6 +3579,9 @@ async function openPdf(src) {
 async function readPdfGrid(info) {
   const { pdf, sizes } = info;
   for (let i = 1; i <= pdf.numPages; i++) {
+    // Closed behind the review (trimPdfs): there is nothing left to align to.
+    const held = pdfCache.get(info.name);
+    if (!held || (held.__info && held.__info !== info)) return;
     try {
       const tc = await (await pdf.getPage(i)).getTextContent();
       const sz = sizes[i - 1];
@@ -3616,6 +3670,7 @@ function setupPdfForDoc() {
 /** Re-resolve the PDFs (the key or the folder changed) and redraw. */
 function refreshPdf() {
   resolvePdfSources();
+  trimPdfs(); // the document changed: the last one's PDFs are nobody's now
   const any = pdfSources.some(Boolean);
   sbsBtn.disabled = !doc;
   swapBtn.disabled = !doc;
@@ -3706,19 +3761,49 @@ function paintWarmInto(key) {
   }
 }
 
+// ── the documents the reader is willing to hold ─────────────────────────────────
+//
+// A worksheet's rows are spread over the folder's exports, and the walk takes
+// them a document at a time (leaks.js). What the reader holds follows that
+// walk: the document in front, and — once every row standing in it is
+// answered — the next one, read and built while the operator is still looking
+// at the last of this one.
+//
+// In a SMALL folder it keeps working further ahead, as it always has: a case
+// of a dozen exports can hold every document with a leak in it, and holding
+// them is what makes stepping between them instant. It is the big folder —
+// hundreds of text files, each with a PDF behind it — that cannot be held at
+// once and must not be asked for at once.
+const BIG_FOLDER = 24; // exports past which the review goes one document at a time
+function oneDocAtATime() { return folderDocs.length > BIG_FOLDER; }
+/**
+ * The documents the worksheet's pages may be fetched from, in visit order —
+ * the document in front alone until its rows are answered, then it and the
+ * next. `null` where there is nothing to hold back: a small folder holds
+ * whatever fits, as it always has.
+ */
+function leakFileWindow() {
+  if (!oneDocAtATime()) return null;
+  const rows = leakRows();
+  const files = LK.leakFileOrder(rows, leaks ? leaks.at : 0);
+  if (!files.length) return null;
+  return files.slice(0, LK.fileDone(rows, files[0]) ? 2 : 1);
+}
+
 /**
  * The PDF pages the worksheet points at, in the order the review will reach
- * them: [{ src, page }], at most `limit`. A row's File cell holds the real
- * name, which is the case folder's own name for the PDF; a row naming no
- * file — or one whose PDF the folder does not hold — is taken as the open
- * document's, where its page belongs to it.
+ * them: [{ src, page }], at most `limit`, and none from a document outside
+ * the window. A row's File cell holds the real name, which is the case
+ * folder's own name for the PDF; a row naming no file — or one whose PDF the
+ * folder does not hold — is taken as the open document's, where its page
+ * belongs to it.
  */
 function leakWarmTargets(limit) {
   const fwdName = fwd ? (s) => forwardText(s).text : null;
   const names = folderPdfs.map((p) => p.name);
   const members = doc ? PS.pageSources(doc.pages, fileName) : [];
   const out = [], seen = new Set();
-  for (const t of LK.leakPages(leakRows(), leaks ? leaks.at : 0)) {
+  for (const t of LK.leakPages(leakRows(), leaks ? leaks.at : 0, leakFileWindow())) {
     if (t.page == null) continue;
     let src = null, page = t.page;
     const hit = t.file ? PS.matchPdf(t.file, names, fwdName) : null;
@@ -3841,7 +3926,11 @@ const idle = () => new Promise((res) => {
   else setTimeout(res, 16);
 });
 
-/** The exports the worksheet points at, in visit order, that are not already open. */
+/**
+ * The exports the worksheet points at, in visit order, that are not already
+ * open — and, in a big folder, only the one the walk will reach next, once
+ * the document in front has been answered (leakFileWindow).
+ */
 function leakDocNames() {
   if (!leaks || !folderDocs.length) return [];
   const fwdName = fwd ? (s) => forwardText(s).text : null;
@@ -3849,7 +3938,7 @@ function leakDocNames() {
   // A combined file already open holds every member: there is no hop to make.
   const open = [fileName, ...(doc ? PS.combinedMembers(doc.pages) : [])].filter(Boolean);
   const out = [];
-  for (const t of LK.leakPages(leakRows(), leaks.at)) {
+  for (const t of LK.leakPages(leakRows(), leaks.at, leakFileWindow())) {
     if (!t.file || LK.matchExport(t.file, open, fwdName)) continue;
     const e = LK.matchExport(t.file, names, fwdName);
     if (e && !out.includes(e)) out.push(e);
@@ -3938,13 +4027,18 @@ function renderDocReady() {
   }
   const base = folderDocs.length ? folderName + " · " + folderDocs.length + " document" + (folderDocs.length === 1 ? "" : "s") : "Open a case folder to list its exports here.";
   const want = readyWanted.length;
-  docsHint.textContent = base + (leaks && want ? ` · ${held.length} of ${want} with leaks ready to open` + (readyBusy ? ", building…" : "") : "");
+  const note = !leaks ? ""
+    : want ? ` · ${held.length} of ${want} with leaks ready to open` + (readyBusy ? ", building…" : "")
+    : oneDocAtATime() ? " · leaks one document at a time: the next is read once this one is answered"
+    : "";
+  docsHint.textContent = base + note;
 }
 
 /** The worksheet's next pages and documents, held ready. Coalesced: the review moves in steps. */
 const warmForLeaks = debounce(() => {
   planWarmPages();
   planReadyDocs();
+  trimPdfs(); // …and the PDFs the window has moved off are closed behind it
 }, 200);
 
 // ── rendering a page into a canvas ──
@@ -3966,7 +4060,10 @@ async function renderInto(el, src, pageNo, cssWidth) {
   }
   if (el.dataset.want !== want) return;
   if (pageNo > info.count) { el.querySelector(".pdf-wait").textContent = `The PDF has ${info.count} page${info.count === 1 ? "" : "s"}; there is no page ${pageNo}.`; return; }
-  const page = await info.pdf.getPage(pageNo);
+  // trimPdfs never closes a PDF this document is drawn from; a page asked for
+  // as one is closed anyway (a pick withdrawn, the folder changed) is dropped.
+  let page;
+  try { page = await info.pdf.getPage(pageNo); } catch { return; }
   if (el.dataset.want !== want) return;
   const base = page.getViewport({ scale: 1 });
   const cssScale = cssWidth / base.width;
@@ -4840,6 +4937,9 @@ window.__textReaderPdfQueue = () => ({
 window.__textReaderWarm = () => ({
   held: [...warmPages.keys()], drawing: [...warmBusy], wanted: [...warmWanted],
   docs: { wanted: readyWanted.slice(), built: [...ready.values()].filter((e) => e.nodes).map((e) => e.name), skipped: [...ready.values()].filter((e) => e.skipped).map((e) => e.name + ": " + e.skipped), busy: readyBusy },
+  // The walk: the documents the rows stand in, and the ones the reader will
+  // go as far as fetching from — one at a time in a big folder.
+  walk: { files: LK.leakFileOrder(leakRows(), leaks ? leaks.at : 0), window: leakFileWindow(), oneAtATime: oneDocAtATime() },
 });
 window.__textReaderMaster = (bytes, name) => readMasterBytes(new Uint8Array(bytes), name);
 window.__textReaderMasterState = () => ({

@@ -799,21 +799,35 @@ app, which routes it to the reader tab.
   read back before it is written — after which Apply Leak Fixes (or a
   re-run) applies them to the files. A `yes` here is the worksheet's alone:
   it is never also flagged into `New Real Values.txt`.
+- **A review goes through the folder one document at a time.** A row stands
+  in a document — its File cell — and the rows are worked **document by
+  document**: every row standing in the document in front is reached before
+  any row of the next one, undecided first, so a decision keeps you where you
+  are and the review moves on only when that document has nothing left. The
+  bar says how many of the undecided rows are in the document in front. A
+  value that leaked into several documents is still **one row and one
+  decision**, made in the first of them. This is what lets a case folder of
+  hundreds of text files be answered at all: the reader holds the document in
+  front of you and reads the next one **only once you have finished this
+  one** — never the folder at once, which is what used to take the tab down.
+  (Under two dozen exports it keeps working further ahead, as it always has;
+  there is nothing to protect you from in a folder that small.)
 - **The pages a leak stands on are drawn before you reach them.** Every page
   a review will visit is named in the worksheet's rows before it gets to any
   of them, so with a worksheet attached the reader goes and gets them: the
-  rows are read in the order the review will actually reach them — the row in
-  front, the undecided rows after it, then the rest — each row's PDF is
-  opened, and its own page is drawn into a bitmap held ready. A page coming
-  into view is painted from that bitmap at once, where a **Loading…** box
-  used to stand, and pdf.js draws the sharp one over it a moment later. Only
-  a window of pages is held (twelve), and the window moves with the review:
-  what it leaves behind is closed, and nothing at all is held while the PDF
-  side is put away. The **exports** the rows name are read ahead the same
-  way — the next two the review will hop to — each held against the file it
-  came from (name, size and modification time), so an export written since,
-  by a save here or another run of PDF-Linker, is read again rather than
-  remembered wrongly.
+  rows are read in the order the review will actually reach them, each row's
+  PDF is opened, and its own page is drawn into a bitmap held ready. A page
+  coming into view is painted from that bitmap at once, where a **Loading…**
+  box used to stand, and pdf.js draws the sharp one over it a moment later.
+  Only a window of pages is held (twelve), and the window moves with the
+  review: what it leaves behind is closed, and nothing at all is held while
+  the PDF side is put away. The **exports** the rows name are read ahead the
+  same way, each held against the file it came from (name, size and
+  modification time), so an export written since, by a save here or another
+  run of PDF-Linker, is read again rather than remembered wrongly. **The PDFs
+  behind them are closed again as the review walks past them** — a PDF holds
+  its bytes, its pages and the line grid read off every one of them, and a
+  folder of three hundred of them cannot all be open at once.
 - **`Combined Text.txt` brings its PDFs with it.** The combined file PDF-Linker
   writes into the case folder is listed first among the documents, and its
   members — the `# Documents in this file:` list on its first page, in
