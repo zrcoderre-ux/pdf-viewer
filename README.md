@@ -863,6 +863,13 @@ app, which routes it to the reader tab.
   what it was. That message stands in the bar across the top until you dismiss
   it — not a toast that flashes past behind the document — and its button puts
   the line on the clipboard.
+- **The marks give up rather than hold the page.** Reading the names over a
+  document is the most expensive thing the reader does. It now stops for
+  breath between handfuls of names rather than between pages — a Word export
+  has no page breaks in it at all, so "a page at a time" was the whole file in
+  one go — and if it has spent more than eight seconds on one document it stops
+  altogether, says so in the bar, and leaves the words on the page. The next
+  document gets a fresh start.
 - **Plain reading**, in the Review group of the tools rail: the words and
   nothing else. No marks over the text, no citation links, no PDF beside it,
   nothing read ahead — for a document too big for the rest of it, or a reader

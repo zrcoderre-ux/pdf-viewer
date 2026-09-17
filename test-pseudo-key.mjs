@@ -9,7 +9,7 @@
 import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
-  compileTypeahead, endingReal, swapsOnSpace, findRealSpans, foldGaps, buildMatcher,
+  compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -297,6 +297,44 @@ console.log("\nthe matcher, value by value");
     [huge.test("about Helen Rasho today"), huge.test("nobody here"),
      "Helen Rasho met Party 7 Holdings".replace(huge, (m) => "·".repeat(m.length))],
     [true, false, "··········· met ················"]);
+}
+
+// ---- reading a document in handfuls ----------------------------------------------
+//
+// A Word export has no page headers, so the whole of it is ONE page: read a
+// page at a time it is never put down, and the reader holds the thread until
+// the browser offers to kill it. Read in handfuls it can stop anywhere, and
+// what it finds may not change for being read that way.
+console.log("\nin handfuls");
+{
+  const k = keyOf([
+    ["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 9],
+    ["person-token", "Rasho", "Strangeways", "", "", "", 9],
+    ["entity", "Cross River Bank", "Alder Vale Trust", "", "", "", 9],
+  ]);
+  const reals = compileReals(k);
+  const text = Array.from({ length: 200 }, (_, i) =>
+    ` ${(i % 28) + 1}  Helen Rasho and Cross River Bank and Rasho again, line ${i}.`).join("\n");
+  const whole = findRealSpans(reals, text);
+  const byHand = [];
+  let at = 0, rounds = 0;
+  for (;;) {
+    const { spans, next } = findRealSpansFrom(reals, text, at, 7);
+    byHand.push(...spans);
+    rounds++;
+    if (next < 0) break;
+    at = next;
+  }
+  check("a handful at a time finds what one pass finds", byHand, whole);
+  check("…and it took more than one handful to do it", rounds > 10, true);
+  check("…a handful of one works too", (() => {
+    const one = []; let a = 0;
+    for (;;) { const r = findRealSpansFrom(reals, text, a, 1); one.push(...r.spans); if (r.next < 0) break; a = r.next; }
+    return one.length;
+  })(), whole.length);
+  check("no key, no text: nothing and nowhere to carry on from",
+    [findRealSpansFrom(null, text, 0, 5), findRealSpansFrom(reals, "", 0, 5)],
+    [{ spans: [], next: -1 }, { spans: [], next: -1 }]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -221,6 +221,8 @@ function markDoing() {
 // Passes that await overlap rather than nest, so an entry is taken out by
 // identity, not by being the last one in.
 function startDoing(what) { const e = { what }; doingStack.push(e); markDoing(); return e; }
+/** Say more precisely what a pass already running is doing. */
+function noteDoing(e, what) { if (e) { e.what = what; markDoing(); } }
 function endDoing(e) {
   const i = doingStack.lastIndexOf(e);
   if (i >= 0) doingStack.splice(i, 1);
@@ -236,7 +238,7 @@ function during(what, fn) {
 async function duringAsync(what, fn) {
   const from = performance.now();
   const e = startDoing(what);
-  try { return await fn(); } finally { endDoing(e); notePass(what, from); }
+  try { return await fn(e); } finally { endDoing(e); notePass(what, from); }
 }
 /** A slice of a pass already named: the report wants it, the breadcrumb does not. */
 function duringSlice(what, fn) {
@@ -668,6 +670,17 @@ function keptMarkMatcher() {
   }
   return keptMarkMemo.rx;
 }
+// The flagged values, matched: one matcher per list, not one per reading. The
+// list is replaced whenever it changes, so its identity is the whole test —
+// and building one is a small pattern per value, which a long list makes a
+// cost worth paying once.
+let flagRxMemo = { flagged: null, rx: null };
+function flaggedMatcher() {
+  if (flagRxMemo.flagged !== flagged) {
+    flagRxMemo = { flagged, rx: flagged.length ? PK.buildMatcher(flagged) : null };
+  }
+  return flagRxMemo.rx;
+}
 function maskKept(text) {
   const rx = keptMatcher();
   return rx ? text.replace(rx, (m) => "\u0000".repeat(m.length)) : text;
@@ -1048,6 +1061,7 @@ function openText(text, name, handle, built) {
   // A document built ahead of time goes up as it stands, unless its spot keeps
   // have moved since it was built — then its pages are built again from the
   // parse, which is already in hand.
+  marksGetAnotherChance();
   if (built && JSON.stringify(built.spots) === JSON.stringify(spots)) showPages(built.nodes, built);
   else render();
   setupPdfForDoc();
@@ -2461,7 +2475,7 @@ function scanStale() {
 function paintHighlights() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   paintRowMarks();
-  if (plain) return; // plain reading: the words, and nothing read over them
+  if (plain || marksOff) return; // the words, and nothing read over them
   if (scanStale()) scanSoon();
 }
 const scanSoon = debounce(() => { if (scanStale()) scanDocument(); }, 150);
@@ -2483,6 +2497,26 @@ async function scanDocument() {
     if (!(await scanPass())) scanSoon();
   } finally { scanning = false; }
 }
+/**
+ * The marks cost more than they are worth on this document: stop, leave the
+ * words on the page, and say so where it will be read. The operator can turn
+ * plain reading on from the bar or the rail; the marks come back with the next
+ * document, or with the next key.
+ */
+function giveUpOnMarks(spent, page, pages) {
+  marksOff = true;
+  scanSoon.cancel();
+  try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); } catch { /* none to clear */ }
+  $("st-leaks").textContent = "";
+  $("st-kept").textContent = "";
+  const line = `The marks over the text took more than ${Math.round(spent / 1000)} seconds on this document (page ${page} of ${pages}) and are off for it. The words are all here; the names are not marked.`;
+  showKeyOffer(line + " Read plainly?", "Read plainly", async () => {
+    setPlain(true);
+    try { await navigator.clipboard.writeText(line); toast("Plain reading is on, and that line is on the clipboard."); }
+    catch { toast("Plain reading is on."); }
+  });
+}
+
 /** The current LEAKS row's value, marked wherever it stands. */
 function paintRowMarks() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
@@ -2493,9 +2527,16 @@ function paintRowMarks() {
 }
 /** One reading of the whole document; false where it gave up part-way. */
 async function scanPass() {
-  return duringAsync("reading the marks over the text", () => scanPassNow());
+  return duringAsync("reading the marks over the text", (e) => scanPassNow(e));
 }
-async function scanPassNow() {
+// What the marks may cost before the reader stops trying. A pass that cannot
+// finish is worse than no marks at all: the page it is reading is a page
+// nobody can scroll, and the browser ends up offering to kill it. Past this,
+// the reader gives up on the marks for this document, says so, and leaves the
+// words on the page.
+const MARK_BUDGET = 8000; // ms of work, added up across the slices
+let marksOff = false;     // …and whether it has given up
+async function scanPassNow(pass) {
   const mark = { epoch: textEpoch, reals, flagged, keeps, master: masterKeeps, spots };
   const moved = () => mark.epoch !== textEpoch || mark.reals !== reals || mark.flagged !== flagged
     || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots;
@@ -2506,7 +2547,7 @@ async function scanPassNow() {
   let leaks = 0;
   const bodies = pageBodies();
   let clock = null;
-  const flagRx = flagged.length ? PK.buildMatcher(flagged) : null;
+  const flagRx = flaggedMatcher();
   // A value KEPT stands in the clear like any other word, and with the orange
   // mark gone (it is not a leak) nothing said it was a decision rather than an
   // oversight. It carries the same dotted mark a kept pseudonym does, so a
@@ -2514,49 +2555,85 @@ async function scanPassNow() {
   const keptRx = keptMarkMatcher();
   const keptRanges = [];
   let markFrom = performance.now();
+  let spent = 0;
+  let page = 0;
+  let gaveUp = false;
+  // The thread is put down HERE — between handfuls of names, not between pages.
+  // A PDF export is pages and could be read a page at a time; a Word export has
+  // no page headers at all, so the whole of it is ONE page, and a page at a
+  // time is the whole document in one go: the reader would hold the thread
+  // until the browser offered to kill it. `breathe` is where it stops, wherever
+  // it has got to, and where it gives up if the marks are costing too much.
+  const breathe = async (what) => {
+    if (clock && clock.timeRemaining() >= SLICE_LEFT) return true;
+    spent += performance.now() - markFrom;
+    notePass("reading the marks over the text", markFrom);
+    if (spent > MARK_BUDGET) { giveUpOnMarks(spent, page, bodies.length); gaveUp = true; return false; }
+    noteDoing(pass, what);
+    clock = await idleClock();
+    markFrom = performance.now();
+    return !moved();
+  };
+  const HANDFUL = 250; // names read before the clock is looked at again
   for (const body of bodies) {
-    if (!clock || clock.timeRemaining() < SLICE_LEFT) {
-      notePass("reading the marks over the text", markFrom);
-      clock = await idleClock();
-      if (moved()) return false; // the ground moved: this reading is of the old text
-      markFrom = performance.now();
-    }
+    page++;
+    const where = bodies.length > 1 ? ` (page ${page} of ${bodies.length})` : "";
+    if (!(await breathe(`reading the marks over the text${where}`))) return gaveUp;
     // Over the whole page, pseudonym spans blanked, so a real name wrapped
     // over a line break and its gutter number is found as one. The spots kept
     // where they stand are blanked with them: they carry their own mark.
     const flat = reals || keptRx ? flatten(body, { blankPn: true }) : null;
     if (reals) {
       const { text, segs } = flat;
-      for (const h of PK.findRealSpans(reals, maskKept(text))) {
-        const r = rangeFor(segs, h.start, h.end);
-        if (!r) continue;
-        leakRanges.push(r);
-        hits.push({ range: r, real: h.real, fake: h.fake });
-        leaks++;
+      const masked = maskKept(text);
+      let at = 0;
+      for (;;) {
+        const { spans, next } = PK.findRealSpansFrom(reals, masked, at, HANDFUL);
+        for (const h of spans) {
+          const r = rangeFor(segs, h.start, h.end);
+          if (!r) continue;
+          leakRanges.push(r);
+          hits.push({ range: r, real: h.real, fake: h.fake });
+          leaks++;
+        }
+        if (next < 0) break;
+        at = next;
+        if (!(await breathe(`reading the marks over the text${where} — the names from the key`))) return gaveUp;
       }
     }
     if (keptRx) {
       const { text, segs } = flat;
       keptRx.lastIndex = 0;
-      let m;
+      let m, n = 0;
       while ((m = keptRx.exec(text))) {
         const r = rangeFor(segs, m.index, m.index + m[0].length);
         if (r) keptRanges.push(r);
         seen.add(TD.foldValue(PK.foldGaps(m[0])));
         if (m.index === keptRx.lastIndex) keptRx.lastIndex++;
+        if (++n % HANDFUL === 0) {
+          const held = keptRx.lastIndex;
+          if (!(await breathe(`reading the marks over the text${where} — the kept values`))) return gaveUp;
+          keptRx.lastIndex = held; // the clock does not move the reading on
+        }
       }
     }
     if (flagRx) {
       const { text, segs: all } = flatten(body);
       flagRx.lastIndex = 0;
-      let m;
+      let m, n = 0;
       while ((m = flagRx.exec(text))) {
         const r = rangeFor(all, m.index, m.index + m[0].length);
         if (r) flaggedRanges.push(r);
         if (m.index === flagRx.lastIndex) flagRx.lastIndex++;
+        if (++n % HANDFUL === 0) {
+          const held = flagRx.lastIndex;
+          if (!(await breathe(`reading the marks over the text${where} — the flagged values`))) return gaveUp;
+          flagRx.lastIndex = held;
+        }
       }
     }
   }
+  noteDoing(pass, "reading the marks over the text — putting them on the page");
   // Whole, so it goes up: the ranges, what the right-click menu reads off them,
   // and the state this reading was made of.
   leakHits = hits;
@@ -4336,6 +4413,8 @@ function dropReady() {
   renderDocReady();
 }
 function staleReady() { readyEpoch++; dropReady(); warmForLeaks(); }
+/** A new document (or a new key) may be nothing like the one that was too slow. */
+function marksGetAnotherChance() { marksOff = false; }
 function fileKeyOf(file) { return file.name + "|" + file.size + "|" + file.lastModified; }
 
 /**

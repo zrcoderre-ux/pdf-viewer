@@ -263,10 +263,24 @@ cannot answer a click while it runs — the measure of that is the browser's own
 of them and 1.2 seconds. Both now take the browser's idle clock and give the
 thread back before it runs out (`idleClock`, `SLICE_LEFT`):
 
-- The document-wide mark pass (`scanPass`) reads a page, looks at the clock,
-  and yields; nothing is shown until the reading is whole, so what stands on
-  the page is always the last complete one, and a pass whose ground moves under
-  it (an edit, the key, a keep) gives up and is made again.
+- The document-wide mark pass (`scanPass`) reads, looks at the clock, and
+  yields; nothing is shown until the reading is whole, so what stands on the
+  page is always the last complete one, and a pass whose ground moves under it
+  (an edit, the key, a keep) gives up and is made again. It yields between
+  HANDFULS OF NAMES rather than between pages, because a page is not a bound on
+  anything: a PDF export is pages, but a WORD export has no page headers at all
+  (`textdoc.parseExport`), so the whole file is one page and "a page at a time"
+  is the whole document in one go — which is what the reader was doing on a
+  declaration it could never finish. `pseudo-key.findRealSpansFrom` reads a
+  handful and says where to carry on from; the kept and flagged loops count
+  their own and put the thread down the same way.
+- And it gives up rather than hang. Past MARK_BUDGET of work on one document
+  the marks stop (`giveUpOnMarks`), the highlights are cleared, `marksOff`
+  keeps the pass from starting again for that document, and the bar says what
+  happened and offers plain reading. The next document — or the next key —
+  gets another chance (`marksGetAnotherChance`). A pass that cannot finish is
+  worse than no marks at all, since the page it is reading is a page nobody can
+  scroll.
 - Building the next document ahead (`buildAhead`) built eight pages between
   yields — most of a tenth of a second under a big key — and did it WHILE the
   operator was answering rows, so the review kept moving the window, throwing

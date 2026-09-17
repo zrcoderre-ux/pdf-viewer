@@ -714,17 +714,33 @@ export function findReals(compiledReals, text) {
 
 /** Every real value standing in `text`, with where: [{ start, end, matched, real, fake }], lines crossed included. */
 export function findRealSpans(compiledReals, text) {
-  const out = [];
-  if (!compiledReals || !compiledReals.rx || !text) return out;
+  return findRealSpansFrom(compiledReals, text, 0, Infinity).spans;
+}
+
+/**
+ * The same, a handful at a time: from `from`, at most `max` of them, and where
+ * to carry on from — `next`, or -1 once the text is read out.
+ *
+ * A reader cannot hold the thread for the length of a document. A PDF export
+ * is pages and can be read a page at a time; a WORD export has no page headers
+ * at all, so the whole of it is one page, and "a page at a time" is the whole
+ * document in one go. Reading it in handfuls is what lets the reader put the
+ * thread down wherever it has got to.
+ */
+export function findRealSpansFrom(compiledReals, text, from, max) {
+  const spans = [];
+  if (!compiledReals || !compiledReals.rx || !text) return { spans, next: -1 };
   const rx = compiledReals.rx;
-  rx.lastIndex = 0;
+  rx.lastIndex = from > 0 ? from : 0;
+  const lim = max > 0 ? max : 1;
   let m;
   while ((m = rx.exec(text))) {
     const hit = lookup(compiledReals, m[0]);
-    if (hit && hit.mapped) out.push({ start: m.index, end: m.index + m[0].length, matched: m[0], real: hit.mapped.real, fake: hit.mapped.fake });
+    if (hit && hit.mapped) spans.push({ start: m.index, end: m.index + m[0].length, matched: m[0], real: hit.mapped.real, fake: hit.mapped.fake });
     if (m.index === rx.lastIndex) rx.lastIndex++;
+    if (spans.length >= lim) return { spans, next: rx.lastIndex };
   }
-  return out;
+  return { spans, next: -1 };
 }
 
 // ---- the as-you-type prompt (the Claude extension's compileTypeahead) ----------
