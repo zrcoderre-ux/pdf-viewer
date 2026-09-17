@@ -327,23 +327,63 @@ export function slotTops(lines, geom) {
 // row's own top and left. A line no row claims sits under the line before
 // it; a blank export line is the gap the page really had.
 
-/** The page's printed rows from its text items: [{ top, left, height, text }] sorted down the page. */
+/**
+ * The page's printed rows from its text items: [{ top, left, height, text }]
+ * sorted down the page.
+ *
+ * Grouped by BASELINE, not by the top of the glyph box: the items printed on
+ * one line share a baseline whatever sizes they are set in, while a tall
+ * glyph's box stands well above the line it belongs to. A twenty-five point
+ * mark on an eight point form line otherwise reads as part of the row two
+ * lines above it, the line it was never on.
+ *
+ * And a row's height is its BODY type's — the median of its items' heights
+ * weighted by the characters each one prints — not the tallest, which lets
+ * one outsized glyph (a stamped initial, a signature's flourish, a symbol in
+ * a display face) set the size for everything beside it. Side by side, a
+ * line is drawn at its row's own size (applyMatchedLayout), so a height read
+ * off the wrong glyph is a line of small print set three times too big,
+ * running off the sheet and widening every sheet in the document with it.
+ */
 export function pdfRows(items, size) {
   const rows = [];
-  const sorted = (items || []).filter((it) => it.str && it.str.trim()).slice().sort((a, b) => a.top - b.top || a.x - b.x);
+  const sorted = (items || []).filter((it) => it.str && it.str.trim()).map((it) => {
+    const h = it.h > 0 ? it.h : 10;
+    return { str: it.str, x: it.x, h, base: it.top + h };
+  }).sort((a, b) => a.base - b.base || a.x - b.x);
   for (const it of sorted) {
-    const h = it.h || 10;
     const last = rows[rows.length - 1];
-    if (last && Math.abs(it.top - last.top) <= Math.max(2, Math.min(h, last.height) * 0.6)) {
+    if (last && Math.abs(it.base - last.base) <= Math.max(2, Math.min(it.h, last.tall) * 0.6)) {
       last.items.push(it);
-      last.top = Math.min(last.top, it.top);
-      last.height = Math.max(last.height, h);
-    } else rows.push({ top: it.top, height: h, items: [it] });
+      last.base = Math.min(last.base, it.base);
+      last.tall = Math.max(last.tall, it.h);
+    } else rows.push({ base: it.base, tall: it.h, items: [it] });
   }
   return rows.map((r) => {
     const its = r.items.slice().sort((a, b) => a.x - b.x);
-    return { top: r.top, left: its[0].x, height: r.height, text: its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim() };
+    const height = bodyHeight(its);
+    // Where the row sits: its body type's own baseline, less that type's
+    // height. The outsized glyph's box is the one thing that must not place
+    // the line — it reaches up into the row above and would take the line
+    // with it.
+    const body = its.filter((i) => Math.abs(i.h - height) <= height * 0.2);
+    const base = Math.min(...(body.length ? body : its).map((i) => i.base));
+    return { top: base - height, left: its[0].x, height, text: its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim() };
   });
+}
+
+/**
+ * A row's body type height: the median of its items' heights weighted by the
+ * characters each prints, so a lone tall glyph beside a line of text counts
+ * for the one character it is and a line set wholly in a display size keeps
+ * that size.
+ */
+function bodyHeight(items) {
+  const weighed = items.map((it) => ({ h: it.h, n: Math.max(1, String(it.str).trim().length) })).sort((a, b) => a.h - b.h);
+  const half = weighed.reduce((s, w) => s + w.n, 0) / 2;
+  let seen = 0;
+  for (const w of weighed) { seen += w.n; if (seen >= half) return w.h; }
+  return weighed.length ? weighed[weighed.length - 1].h : 10;
 }
 
 function wordSet(s) {
