@@ -148,6 +148,31 @@ console.log("a page with no numbers: rows matched by their words");
   check("nothing matched, nothing laid out", rowLayout(["zzz"], rows), null);
 }
 
+console.log("a row's own type: one tall glyph does not set the line's size or place");
+{
+  // A Judicial Council form's small print, with a mark stamped on the line
+  // BELOW it in twenty-five point type: the mark's glyph box reaches up into
+  // the small print, and its height used to become that whole row's — side
+  // by side the parenthetical came out at three times the form's type and ran
+  // off the sheet.
+  const form = [
+    { str: "(If the claimant is an adult with a disability who (1) has capacity to consent to the order requested and (2) does not have a", x: 66, top: 300, w: 400, h: 8 },
+    { str: "conservator of the estate, check e. and f. and ensure that the claimant personally reads and signs item 21. (Prob. Code, § 3613.))", x: 66, top: 310, w: 400, h: 8 },
+    { str: "e.", x: 66, top: 330, w: 5, h: 8 },
+    { str: "H", x: 72, top: 313, w: 12, h: 25 },
+    { str: "Has the capacity, within the meaning of Probate Code section 812, to consent to the requested order.", x: 86, top: 330, w: 330, h: 8 },
+  ];
+  const rows = pdfRows(form, { w: 612, h: 792 });
+  check("the stamped glyph joins the line it sits on, not the row its box reaches into", rows.length, 3);
+  check("…so the small print is its own line, at its own size and place", [rows[1].text.slice(0, 12), rows[1].top, rows[1].height, rows[1].left], ["conservator ", 310, 8, 66]);
+  check("…and the stamped line is set in its body's type, at its body's place", [rows[2].top, rows[2].height], [330, 8]);
+  check("a line set wholly in a display size keeps it, the margin's number beside it and all",
+    pdfRows([{ str: "ORDER", x: 200, top: 60, w: 90, h: 24 }, { str: "1", x: 40, top: 72, w: 4, h: 12 }], null).map((r) => [r.text, r.top, r.height]),
+    [["1 ORDER", 60, 24]]);
+  check("a row of one item is that item's, whatever size it is", pdfRows([{ str: "x", x: 10, top: 20, w: 4, h: 30 }], null), [{ top: 20, left: 10, height: 30, text: "x" }]);
+  check("no items, no rows", [pdfRows([], null), pdfRows(null, null)], [[], []]);
+}
+
 console.log("the type a page is set in: the PDF's own sizes at the reading size");
 {
   const rows = [{ top: 60, height: 12, text: "1" }, { top: 60, height: 12, text: "IN THE SUPERIOR COURT" }, { top: 84, height: 12, text: "2" }, { top: 84, height: 12.4, text: "FOR THE COUNTY" }, { top: 700, height: 8, text: "footnote" }];
