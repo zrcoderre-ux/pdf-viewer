@@ -402,6 +402,20 @@ half. `undress` runs first on each pass and touches only lines that carry a
 rule span, so the editor's caret text node on any other line is never
 replaced.
 
+What the table layout cannot do is done by `fitRuleRows` at the end of each
+layout pass: a box's rows are squared up as a STACK — every consecutive rule
+row, not only the run whose bars fall at the same offsets — against one
+column grid (`ruleGrid`, pure, `test-rules.mjs`). Bar offsets within three
+characters of each other are one column, never two of one row's own, and
+each column is set far enough right for every cell that ends there. Without
+it the art's own wobble shows: a notice line too long for its box pushes
+that row's closing bar a character or two out, and that row, measured alone,
+was drawn at its own width — and side by side, where every line is
+positioned on its own, at its own left as well. The stack takes one left
+edge there and each row the height of the gap to the row below, so its bars
+meet the next row's. `test-rules.html` reads the geometry back out of a page
+in both views.
+
 ## Fixes applied in earlier sessions
 
 All in `viewer/` unless noted. Each fix is documented inline at the call
