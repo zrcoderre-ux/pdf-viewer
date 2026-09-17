@@ -844,6 +844,19 @@ app, which routes it to the reader tab.
   still after opening a document cost two freezes of over a second each; it
   costs none. If something does go wrong, the bar at the bottom now says so
   instead of the reader quietly stopping where it stood.
+- **Nothing is read ahead until you start a review.** The reader used to begin
+  reading, parsing and building the document your first undecided leak stands
+  in — and opening that document's PDF — the moment a worksheet was attached,
+  whether or not you had opened the review. Open a seven-page declaration in a
+  folder of forty-eight documents and the tab would stop answering within
+  seconds, for work you had not asked for and could not see. It waits for
+  **⚠ Leaks** now: with the bar closed the reader does nothing but show you the
+  document in front of you.
+- **When something does hold the page, it says what.** The heavy passes name
+  themselves, and a pass that holds the thread for more than a couple of
+  seconds puts that in the bar at the bottom — "the reader held the page for
+  4.2 seconds — reading the marks over the text" — so a slow reader can be
+  asked where instead of guessed at.
 - **The pages a leak stands on are drawn before you reach them.** Every page
   a review will visit is named in the worksheet's rows before it gets to any
   of them, so with a worksheet attached the reader goes and gets them: the

@@ -219,6 +219,26 @@ before and after.
    than the key as the keeps have left it — which is both stable and true, the
    names on disk having been written before anybody kept anything.
 
+Reading ahead now happens only while a REVIEW IS RUNNING. `planReadyDocs` and
+`planWarmPages` used to start on any worksheet being attached, so opening a
+seven-page declaration in a folder of forty-eight documents sent the reader off
+to read, parse and build a DIFFERENT one — the document the first undecided row
+stands in — and to open that document's PDF and measure its line grid. The
+operator had asked for none of it and could see none of it; what they saw was a
+tab that stopped answering within seconds of opening a small file. Both passes
+are now gated on `leaksBar.hidden`: with the bar closed nothing is read ahead,
+and `showLeaksBar` starts and stops the reading with the review itself.
+`openPdf`'s per-page size loop takes the idle clock too — its `await`s resolve
+from an already-parsed document, so they are no yield at all, and five hundred
+pages of them was a task of a second or more.
+
+And when a pass does hold the thread, the reader says which one: the heavy
+passes name themselves while they run (`during`, `duringAsync`, `notePass`), a
+`PerformanceObserver` on `longtask` attributes each blocked stretch to the pass
+it fell in, anything past two and a half seconds goes to the toast bar in those
+words, and `window.__textReaderBlocked()` hands back the whole ledger, worst
+first. A reader that is slow can now be asked where.
+
 Two long passes were also being made in ONE TASK each, which is a reader that
 cannot answer a click while it runs — the measure of that is the browser's own
 `longtask` count, and sitting still after opening a document used to cost two

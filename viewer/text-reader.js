@@ -188,6 +188,54 @@ function debounce(fn, ms) {
 // is a page that cannot answer a click. So a pass takes a clock and gives the
 // thread back before it runs out.
 const SLICE_LEFT = 12; // ms that must be left on the clock to start another page
+
+// ── when the reader holds the thread, it says which pass did it ────────────────
+//
+// A pass that runs for seconds is a page that answers nothing — no scrolling,
+// no buttons, and eventually the browser offering to kill it — and from the
+// outside one such pass looks exactly like another. The browser reports the
+// tasks (PerformanceObserver, "longtask"); what it cannot say is WHICH pass, so
+// the heavy ones write their name down while they run and the report names it.
+const passes = [];   // the last few heavy passes: { what, from, to }
+const blocked = [];  // …and the long tasks, with the pass each one fell in
+function notePass(what, from) {
+  passes.push({ what, from, to: performance.now() });
+  if (passes.length > 40) passes.shift();
+}
+/** Run `fn` under a name, so a long task inside it can be attributed. */
+function during(what, fn) {
+  const from = performance.now();
+  try { return fn(); } finally { notePass(what, from); }
+}
+/** The same for a pass that awaits: it names the whole of itself. */
+async function duringAsync(what, fn) {
+  const from = performance.now();
+  try { return await fn(); } finally { notePass(what, from); }
+}
+function passAt(start, end) {
+  let best = "";
+  for (const p of passes) if (p.from <= end && p.to >= start) best = p.what;
+  return best;
+}
+if (typeof PerformanceObserver === "function") {
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        const ms = Math.round(e.duration);
+        if (ms < 200) continue;
+        const what = passAt(e.startTime, e.startTime + e.duration);
+        blocked.push({ ms, what, at: new Date().toLocaleTimeString() });
+        if (blocked.length > 60) blocked.shift();
+        // Long enough that the operator felt it: say so, and say what it was.
+        if (ms >= 2500) {
+          toast(`The reader held the page for ${(ms / 1000).toFixed(1)} seconds${what ? " — " + what : ""}.`, { error: true, ms: 8000 });
+        }
+      }
+    }).observe({ entryTypes: ["longtask"] });
+  } catch { /* a browser that does not report them */ }
+}
+/** Every long task since the page was opened, worst first — for a bug report. */
+window.__textReaderBlocked = () => blocked.slice().sort((a, b) => b.ms - a.ms);
 function idleClock() {
   return new Promise((res) => {
     if (typeof requestIdleCallback === "function") requestIdleCallback(res, { timeout: 250 });
@@ -558,6 +606,9 @@ function forwardText(text, held) {
   return { text: out, swaps };
 }
 function compileKey() {
+  return during("compiling the key", () => compileKeyNow());
+}
+function compileKeyNow() {
   const k = keyLessKeeps(key);
   rev = key ? PK.compile(key) : null;
   fwd = k ? PK.compileForward(k) : null;
@@ -774,6 +825,9 @@ async function scanFolder(h) {
 
 /** Make `h` the current case folder: key attached, documents listed, flags loaded. */
 async function adoptFolder(h, { quiet = false } = {}) {
+  return duringAsync("reading the case folder", () => adoptFolderNow(h, { quiet }));
+}
+async function adoptFolderNow(h, { quiet = false } = {}) {
   if (dirHandle !== h) { forgetPdfs(); dropReady(); }
   dirHandle = h;
   folderName = h.name;
@@ -1090,7 +1144,7 @@ function render() {
   pagesEl.innerHTML = "";
   emptyEl.hidden = true;
   pagesEl.hidden = false;
-  buildPages(pagesEl, doc.pages, { editable: editing });
+  during("building the document's pages", () => buildPages(pagesEl, doc.pages, { editable: editing }));
   stageEl.scrollTop = 0;
   afterTextChange();
 }
@@ -2152,6 +2206,9 @@ function rangeFor(segs, start, end) {
 }
 
 function placeCitations() {
+  return during("finding the citations", () => placeCitationsNow());
+}
+function placeCitationsNow() {
   placeCitationsSoon.cancel();
   if (!doc) return;
   const bodies = pageBodies();
@@ -2366,10 +2423,13 @@ async function scanPass() {
   // page read later shows which names were left alone on purpose.
   const keptRx = keptMarkMatcher();
   const keptRanges = [];
+  let markFrom = performance.now();
   for (const body of bodies) {
     if (!clock || clock.timeRemaining() < SLICE_LEFT) {
+      notePass("reading the marks over the text", markFrom);
       clock = await idleClock();
       if (moved()) return false; // the ground moved: this reading is of the old text
+      markFrom = performance.now();
     }
     // Over the whole page, pseudonym spans blanked, so a real name wrapped
     // over a line break and its gutter number is found as one. The spots kept
@@ -3090,6 +3150,9 @@ function leakRows() { return leaks ? leaks.parsed.rows : []; }
 
 /** Attach a worksheet: its bytes (kept for the rewrite), its handle (for the save in place). */
 async function attachLeaks(bytes, name, handle, { quiet = false, folder = "" } = {}) {
+  return duringAsync("reading LEAKS.xlsx", () => attachLeaksNow(bytes, name, handle, { quiet, folder }));
+}
+async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" } = {}) {
   const wb = await parseXlsx(bytes);
   if (!LK.sheetsLookLikeLeaks(wb.sheets)) throw new Error(`${name} has no "Value" / "Fix?" header — not a LEAKS worksheet.`);
   const parsed = LK.parseLeaks(wb.sheets, name);
@@ -3186,6 +3249,9 @@ function showLeaksBar(on) {
   updateLeaksButton();
   if (was !== !!on) relayout();
   if (!on) { leakRowValue = ""; leakHere = null; paintHighlights(); }
+  // The review starting is when reading ahead starts; the review closing is
+  // when it stops and what it held goes.
+  if (was !== !!on) warmForLeaks();
 }
 
 function escRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
@@ -3792,10 +3858,19 @@ function loadPdf(src, { now = false } = {}) {
   return p;
 }
 async function openPdf(src) {
+  return duringAsync("opening a PDF", () => openPdfNow(src));
+}
+async function openPdfNow(src) {
   const file = src.file || await src.handle.getFile();
   const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  // Every page's size, which the pane needs before it can lay a slot out. The
+  // pages come back from a document already parsed, so an `await` per page is
+  // no yield at all — five hundred of them is one task of a second or more —
+  // and the clock is looked at as it goes.
   const sizes = [];
+  let clock = null;
   for (let i = 1; i <= pdf.numPages; i++) {
+    if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
     const v = (await pdf.getPage(i)).getViewport({ scale: 1 });
     sizes.push({ w: v.width, h: v.height });
   }
@@ -3812,6 +3887,7 @@ async function openPdf(src) {
  */
 async function readPdfGrid(info) {
   const { pdf, sizes } = info;
+  const gridFrom = performance.now();
   for (let i = 1; i <= pdf.numPages; i++) {
     // Closed behind the review (trimPdfs): there is nothing left to align to.
     const held = pdfCache.get(info.name);
@@ -3832,6 +3908,7 @@ async function readPdfGrid(info) {
       info.rows[i - 1] = PS.pdfRows(items, sz);
     } catch { info.lines[i - 1] = null; }
   }
+  notePass("reading the PDF's line grid", gridFrom);
   if (sbsOn && !pdfPane.hidden) applyMatchedLayoutSoon();
 }
 const PDF_LINE_DEFAULT = 72 / 792; // an inch down a letter page, until the PDF says
@@ -4062,9 +4139,10 @@ function leakWarmTargets(limit) {
 
 /** Hold the worksheet's next pages ready — and close the ones the review has left behind. */
 function planWarmPages() {
-  // Nothing to hold where there is no worksheet, or where the PDF side is put
-  // away: a page nobody is going to be shown is a bitmap for nothing.
-  if (!leaks || !doc || (!(sbsOn && !pdfPane.hidden) && !swaps.size)) { dropWarmPages(); return; }
+  // Nothing to hold where no review is running, or where the PDF side is put
+  // away: a page nobody is going to be shown is a bitmap for nothing — and
+  // the PDF it would be drawn from is a file to read and a grid to measure.
+  if (!leaks || leaksBar.hidden || !doc || (!(sbsOn && !pdfPane.hidden) && !swaps.size)) { dropWarmPages(); return; }
   const cssWidth = warmWidth();
   const targets = leakWarmTargets(WARM_PAGES);
   warmWanted.clear();
@@ -4194,7 +4272,13 @@ function heldPages() {
 }
 /** Hold the documents ahead of the row in front — and let go of what no longer fits. */
 function planReadyDocs() {
-  if (!leaks || !folderDocs.length) { dropReady(); return; }
+  // Only while a review is actually running. Reading ahead is worth its cost
+  // when the operator is stepping from row to row and the next document is a
+  // keystroke away; with the bar closed there is no next document, and a
+  // reader that opens a file and immediately goes off to read ANOTHER one —
+  // parsing it, building it, opening its PDF — is a page that stops answering
+  // for no reason the operator can see.
+  if (!leaks || leaksBar.hidden || !folderDocs.length) { dropReady(); return; }
   readyWanted = leakDocNames().slice(0, READY_DOCS);
   // In visit order, keep what fits; the rest go — the furthest from the row in
   // front being the ones the review will want last.
@@ -4231,7 +4315,7 @@ async function buildAhead(d) {
   const file = await d.handle.getFile();
   const text = await file.text();
   if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
-  const parsed = TD.parseExport(text);
+  const parsed = during("reading the next document ahead", () => TD.parseExport(text));
   if (parsed.pages.length > READY_MAX_PAGES) { ready.set(d.name, { name: d.name, skipped: `${parsed.pages.length} pages — too long to hold ready` }); return; }
   const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + d.name, []));
   const nodes = document.createDocumentFragment();
@@ -4249,7 +4333,8 @@ async function buildAhead(d) {
         if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
       }
     }
-    buildPages(nodes, parsed.pages, { from: at, to: Math.min(at + READY_SLICE, parsed.pages.length), spots: theirSpots });
+    during("reading the next document ahead", () =>
+      buildPages(nodes, parsed.pages, { from: at, to: Math.min(at + READY_SLICE, parsed.pages.length), spots: theirSpots }));
   }
   ready.set(d.name, {
     name: d.name, handle: d.handle, fileKey: fileKeyOf(file), doc: parsed, nodes, epoch,
@@ -4712,6 +4797,9 @@ function applyMatchedLayoutSoon() {
   });
 }
 function applyMatchedLayout() {
+  return during("lining the text up with the PDF", () => applyMatchedLayoutNow());
+}
+function applyMatchedLayoutNow() {
   const on = sbsOn && !pdfPane.hidden;
   const plans = [];
   const matchedSlots = new Set();
