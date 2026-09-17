@@ -148,15 +148,15 @@ console.log("across lines");
   check("foldGaps reads the gap as a space", foldGaps("Helen\n 5  Rasho"), "Helen Rasho");
 }
 
-// ---- a key too big for one regular expression ------------------------------------
+// ---- a key of thousands of names -------------------------------------------------
 //
-// Every space in a value is written as a fifty-character gap, so a few
-// thousand names make a pattern of half a megabyte — which the engine accepts
-// and then refuses to run, throwing the first time anything is matched against
-// it. That first time used to be inside the first document opened, so the file
-// never opened at all. Past a size the matcher is cut into several regexes and
-// worked as one, and what it finds may not change.
-console.log("\na key too big for one regular expression");
+// One alternation over every value was two disasters at a few thousand of
+// them: half a megabyte of pattern, which the engine accepts and then refuses
+// to RUN (thrown the first time anything is matched against it, which was
+// inside the first document opened, so the file never opened at all), and,
+// where it did run, an attempt per name at every word of the document. The
+// values are filed under their first word now. What they find may not change.
+console.log("\na key of thousands of names");
 {
   const names = ["Helen Rasho", "Marcus Delacroix", "Cross River Bank", "Rasho", "Quillmark LLC", "Ingrid Strangeways"];
   const filler = [];
@@ -185,25 +185,119 @@ console.log("\na key too big for one regular expression");
     "Marcus Delacroix and Helen Rasho", "Ingrid\n 4  Strangeways wrapped", "Quillmark LLC, Rasho",
   ];
   const run = (rx, s) => { const out = []; rx.lastIndex = 0; for (let m; (m = rx.exec(s));) { out.push(m.index + ":" + m[0]); if (m.index === rx.lastIndex) rx.lastIndex++; } return out; };
-  check("cut into pieces, it answers as the one regex does",
+  check("indexed by first word, it answers as one regex over each value does",
     lines.map((l) => run(big, l).filter((x) => !/Alder/.test(x))), lines.map((l) => run(small, l)));
   {
-    // A WALK over a long text, which is what reading a document is: each piece
-    // is scanned once across it, not once per name found, and what comes out
-    // is what the one regex gives.
+    // A WALK over a long text, which is what reading a document is: the words
+    // are read once across it, not once per name found, and what comes out is
+    // what a matcher of one value at a time gives.
     const long = Array.from({ length: 400 }, (_, i) =>
       ` ${(i % 28) + 1}  Plaintiff Helen Rasho and Marcus Delacroix met Cross River Bank about Alder Vale Holdings ${i}.`).join("\n");
-    const t = Date.now();
     const found = run(big, long);
-    const ms = Date.now() - t;
     check("a walk over four hundred lines finds every name",
       [found.length, found.filter((x) => /Helen Rasho/.test(x)).length], [1600, 400]);
-    check("…and the pieces agree with the one regex on the same walk",
+    check("…and the walk agrees with a one-value matcher throughout",
       found.filter((x) => !/Alder/.test(x)), run(small, long));
-    check("…in a time that says each piece was read once, not once per name", ms < 4000, true);
+  }
+  {
+    // And what it costs. A key's names begin with all sorts of words, so the
+    // word in front of the reader picks out a handful to try: the work is the
+    // document's length, not the document times the key. (The shape above —
+    // four thousand names all beginning "Alder" — is the one that cannot be
+    // told apart by a first word, and it is the slow one by construction.)
+    const spread = [];
+    for (let i = 0; i < 4000; i++) spread.push(`Vendor${i} Holdings ${i}`);
+    const wide = buildMatcher(spread.concat(["Helen Rasho"]));
+    const page = Array.from({ length: 28 }, (_, l) =>
+      ` ${l + 1}  Plaintiff Helen Rasho alleges that Vendor${l * 7} Holdings ${l * 7} signed the guaranty and has not paid.`).join("\n");
+    const doc = Array.from({ length: 150 }, () => page).join("\n");
+    const t = Date.now();
+    const hits = run(wide, doc);
+    const ms = Date.now() - t;
+    check("a hundred and fifty pages under a key of four thousand names", hits.length, 150 * 28 * 2);
+    check("…read in well under a second", ms < 900, true);
+    if (ms >= 900) console.log(`        (it took ${ms} ms)`);
   }
 }
 
+
+// ---- the matcher, against a matcher of one value at a time -----------------------
+//
+// buildMatcher indexes the values by their first word and tries only the few
+// filed under the word in front of it. What it must give back is what ONE
+// alternation over every value gave: the leftmost match, and at the same place
+// the longest value. A matcher of a single value is still one plain regex, so
+// a walk made of those — leftmost, then longest, then on past it — is the
+// oracle, built from nothing but the same public function.
+console.log("\nthe matcher, value by value");
+{
+  const oracle = (values, text) => {
+    const each = values.map((v) => ({ v, rx: buildMatcher([v]) }));
+    const out = [];
+    let at = 0;
+    for (;;) {
+      let best = null;
+      for (const { rx } of each) {
+        rx.lastIndex = at;
+        const m = rx.exec(text);
+        if (!m) continue;
+        if (!best || m.index < best.index || (m.index === best.index && m[0].length > best[0].length)) best = m;
+      }
+      if (!best) return out;
+      out.push(best.index + ":" + best[0]);
+      at = best.index + (best[0].length || 1);
+    }
+  };
+  const walk = (rx, text) => {
+    const out = [];
+    rx.lastIndex = 0;
+    for (let m; (m = rx.exec(text));) {
+      out.push(m.index + ":" + m[0]);
+      if (m.index === rx.lastIndex) rx.lastIndex++;
+    }
+    return out;
+  };
+
+  const VALUES = [
+    "Helen", "Helen Rasho", "Helena Rasho", "Rasho", "Rasho's", "Cross-River Bank",
+    "Alder Law, P.C.", "O'Brien", "Deverell5", "quenby3@postbox9.org", "Strangeways Ltd",
+    "McDonald", "Cal", "ANGELA WHITE", "Ardeshirpour- Zartoshti", "'Quoted Name'",
+  ];
+  const TEXTS = [
+    "Plaintiff Helen Rasho and Helen alone, with Helena Rasho elsewhere.",
+    "HELEN RASHO sued; helen rasho answered; Helen   Rasho replied.",
+    "Helen\n 4  Rasho wrapped over the gutter, and Cross-River\n 5  Bank did too.",
+    "Rasho's brief, RASHO'S reply, and Rasho’s motion.",
+    "Served at quenby3@postbox9.org by Deverell5 of Alder Law, P.C.",
+    "O'Brien and McDonald for Strangeways Ltd; Cal is short.",
+    "'Quoted Name' opened the matter, then Helen Rasho closed it.",
+    "Nothing here but ordinary words about a guaranty.",
+    "Rashox is not Rasho, and Helenas are not Helen.",
+    "Ardeshirpour- Zartoshti signed, as did Ardeshirpour-Zartoshti.",
+    "Helen Rasho Helen Rasho Helen Rasho back to back.",
+    "  ",
+  ];
+  const big = buildMatcher(VALUES);
+  let same = 0, diff = 0;
+  for (const t of TEXTS) {
+    const got = walk(big, t), want = oracle(VALUES, t);
+    if (JSON.stringify(got) === JSON.stringify(want)) same++;
+    else { diff++; check(`same answers on ${JSON.stringify(t.slice(0, 40))}`, got, want); }
+  }
+  check("every text reads the same as a walk of one-value matchers", [same, diff], [TEXTS.length, 0]);
+
+  // …and on a key too big to have been one alternation at all.
+  const many = VALUES.slice();
+  for (let i = 0; i < 3000; i++) many.push(`Party ${i} Holdings`);
+  const huge = buildMatcher(many);
+  const text = "Party 1742 Holdings served Helen Rasho, and Party 2 Holdings' agent replied.";
+  check("a key of three thousand reads the same", walk(huge, text), oracle(many, text));
+  check("…and finds nothing where there is nothing", walk(huge, "a quiet line with no names in it"), []);
+  check("test and replace agree with it",
+    [huge.test("about Helen Rasho today"), huge.test("nobody here"),
+     "Helen Rasho met Party 7 Holdings".replace(huge, (m) => "·".repeat(m.length))],
+    [true, false, "··········· met ················"]);
+}
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

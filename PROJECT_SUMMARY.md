@@ -144,6 +144,37 @@ to be quadratic or worse in it. Each was measured in Chromium against a
 generated case — 200 exports of 150 pages, 2,500 leak rows, a key of 4,000 —
 before and after.
 
+0. **The key's matcher ran at the speed of the whole key.** One alternation
+   over every value means the engine tries the values IN ORDER at every
+   position it cannot rule out, so a key whose names begin with all sorts of
+   words is an attempt per name at every word of the document: four thousand
+   names over a single page of pleading paper measured at 2.4 SECONDS, ten and
+   a half for a hundred and fifty pages — and the reader reads a document
+   whenever it opens one, marks the text or saves. That is a tab that does not
+   scroll, does not answer a button, and is eventually offered up for killing.
+   `buildMatcher` now files the values under their FIRST WORD: a name can only
+   stand where its own first word stands, so the words of the text are walked
+   once (a plain character-class scan, the one thing the engine does quickly),
+   each is looked up in a map, and only the handful filed under that word —
+   longest first, so a full name still beats its own surname token — are tried,
+   each by its own small sticky pattern. The same key and text, 150 pages, the
+   same 8,400 matches either way:
+
+   | names in the key | one alternation | indexed by first word |
+   |---|---|---|
+   | 500 | 546 ms | 21 ms |
+   | 1,000 | 1,861 ms | 18 ms |
+   | 2,000 | 6,383 ms | 20 ms |
+   | 3,000 | 13,578 ms | 18 ms |
+
+   The old cost grows with the key; the new one does not. A differential test
+   walks a matcher of ONE value at a time as the oracle, since that is still a
+   plain regex, and the answers match position for position — over wrapped
+   names, possessives, punctuation, digits, case, and a name standing inside a
+   longer one. The shape the index cannot help with is a key whose names all
+   begin with the SAME word ("Doe 1", "Doe 2", …): those all land in one
+   bucket and are tried in turn, which is still the old behaviour and no
+   worse.
 1. **The key's matcher was too big to run.** Every space in a value is written
    as a fifty-character gap, so a few thousand names make an alternation of
    half a megabyte; the engine accepts the pattern and then throws *Invalid
@@ -154,9 +185,10 @@ before and after.
    regexes and works them as one (`Matcher`: `exec` with `lastIndex`, `test`,
    and `String.replace` through `Symbol.replace`), leftmost first and the
    longer match where two start together — which is what the one alternation's
-   longest-value-first order meant. A key that fits in one regex still gets
-   exactly that one regex. Pinned by a differential test against the single
-   matcher.
+   longest-value-first order meant. (The word index above subsumes this: a
+   pattern per value is never too big. What remains of it is the small
+   alternation for values that begin with punctuation, which no first word can
+   file.)
 2. **The engine compiles a matcher on first use, not when it is built** — five
    seconds for a key of four thousand names, paid by whoever opened the first
    document. `warmMatchers` runs each one against a scrap of text in idle time

@@ -813,11 +813,20 @@ app, which routes it to the reader tab.
   (Under two dozen exports it keeps working further ahead, as it always has;
   there is nothing to protect you from in a folder that small.)
 - **A case of thousands of leaks, under a key of thousands of names, opens and
-  answers.** Past about three and a half thousand names, the matcher the reader
-  builds from the key was too big for the browser to run at all — and it said
-  so only when the first document was opened, which is why the file never
-  appeared and the screen went back to asking for one. It is built in pieces
-  now and worked as one. Around it, the things that were done again on every
+  answers.** The reader builds one matcher out of every name in the key, and it
+  used to look for them the way you would with a list in your hand: at every
+  word of the document, try every name. A key of a few thousand names then cost
+  a couple of seconds *per page* — and the reader reads a whole document
+  whenever it opens one, marks the text, or saves, which is why the tab would
+  not scroll, would not answer a button, and was eventually offered up for
+  killing. The names are filed under their first word now, so the word in front
+  of the reader picks out the handful that could stand there: a hundred and
+  fifty pages under a key of three thousand names went from 13.6 seconds to
+  18 milliseconds, finding exactly the same names. (Past about three and a half
+  thousand names the old matcher was also simply too big for the browser to
+  run, and said so only when the first document was opened — which is why the
+  file never appeared and the screen went back to asking for one. That is gone
+  with it.) Around it, the things that were done again on every
   keystroke are done once: the marks over the text are scanned when the text,
   the key, the flags or the keeps move and not when you answer a row (and then
   a beat later, like the citation underlines); the keeps are indexed rather

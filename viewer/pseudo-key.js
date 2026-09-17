@@ -304,63 +304,73 @@ export function foldGaps(s) {
   return String(s == null ? "" : s).replace(GAP_RE, " ");
 }
 
-// One alternation, longest value first (the engine tries alternatives in
-// order, so the full name beats its own surname token). Boundaries are
-// alphanumeric lookarounds rather than \b, because a fake can end in a digit
-// ("Deverell5") or hold an @ ("quenby3@postbox9.org").
+// A matcher over the key's values. Boundaries are alphanumeric lookarounds
+// rather than \b, because a fake can end in a digit ("Deverell5") or hold an
+// @ ("quenby3@postbox9.org"), and a space in a value matches a GAP, so a name
+// wrapped over a line and its gutter number is still one name.
 //
-// …up to a point. Every space in a value is written as a GAP — fifty
-// characters of "a run of spaces, or a line break with the pleading gutter
-// number that opens the next line" — so a key of a few thousand names makes a
-// pattern of half a megabyte, and the engine REFUSES one that big. Worse, it
-// refuses it LATE: the pattern is accepted, and "Invalid regular expression:
-// too large" is thrown the first time anything is matched against it, which is
-// inside the first document opened. The reader stopped there with the empty
-// screen still up — the file simply never opened, and nothing said why.
+// It used to be ONE alternation over every value, longest first, and for a
+// key of a few dozen names that is the right thing. For a key of a few
+// thousand it is two disasters at once:
 //
-// So a matcher too big for one regex is cut into several and worked as one
-// (Matcher, below). A key that fits in a single regex still gets that single
-// regex, exactly as before.
-const MAX_PATTERN = 150000; // characters of source per regex, well inside the engine's limit
+//   The pattern is half a megabyte — every space written as a fifty-character
+//   gap — and the engine REFUSES one that big. Worse, it refuses it LATE: the
+//   pattern is accepted and "Invalid regular expression: too large" is thrown
+//   the first time anything is matched against it, which was inside the first
+//   document opened. The file simply never opened, and nothing said why.
+//
+//   And where it did run, it ran at the speed of the whole key. The engine
+//   tries alternatives in order at every position it cannot rule out, so a
+//   thousand names that begin with a thousand different letters is a thousand
+//   attempts per word of the document: four thousand names over a single page
+//   of pleading paper measured at 2.4 SECONDS. A document is hundreds of
+//   pages, and the reader reads one whenever it opens a file, marks the text
+//   or saves — which is a tab that does not scroll and does not answer a
+//   button, and a browser that eventually offers to kill the page.
+//
+// So the values are INDEXED BY THEIR FIRST WORD. A name can only stand where
+// its own first word stands: the words of the text are walked once (a plain
+// character-class scan, which is the one thing a regex engine does quickly),
+// each is looked up in a map, and only the handful of values filed under that
+// word — longest first, so the full name still beats its own surname token —
+// are tried, each by its own small sticky pattern. The answers are identical;
+// the work is proportional to the DOCUMENT rather than to the document times
+// the key.
 
-/** One value as an alternative: its spaces as gaps, a possessive allowed after it. */
+/** One value as a pattern: its spaces as gaps, a possessive allowed after it. */
 function altFor(v) {
   return escapeRe(v).replace(/ /g, GAP) + (POSS_TAIL_RE.test(v) ? "" : "(?:['’][sS])?");
 }
-function oneMatcher(alts) {
-  return new RegExp("(?<![A-Za-z0-9_])(?:" + alts.join("|") + ")(?![A-Za-z0-9_])", "gi");
-}
-export function buildMatcher(values) {
-  const sorted = (values || [])
-    .filter((v) => v)
-    .slice()
-    .sort((a, b) => b.length - a.length);
-  if (!sorted.length) return null;
-  const alts = sorted.map(altFor);
-  const chunks = [];
-  let at = [], size = 0;
-  for (const a of alts) {
-    if (at.length && size + a.length > MAX_PATTERN) { chunks.push(at); at = []; size = 0; }
-    at.push(a);
-    size += a.length + 1;
-  }
-  if (at.length) chunks.push(at);
-  return chunks.length === 1 ? oneMatcher(chunks[0]) : new Matcher(chunks.map(oneMatcher));
-}
-
+const WORD_CLASS = "[A-Za-z0-9_]";
+const LEAD_WORD_RE = new RegExp("^" + WORD_CLASS + "+");
 /**
- * Several regexes worked as one, standing in for a global RegExp over exactly
- * what the readers of a matcher here use: `exec` with `lastIndex`, `test`, and
- * `String.replace` (through Symbol.replace).
- *
- * The one alternation tried its alternatives in order — longest value first —
- * so the name that won at a place was the longest one standing there. Split
- * over several regexes that is the same rule read across them: the leftmost
- * match wins, and where two start at the same place, the longer one does.
+ * A matcher, standing in for a global RegExp over exactly what the readers of
+ * one here use: `exec` with `lastIndex`, `test`, and `String.replace` (through
+ * Symbol.replace). Leftmost wins, and at the same place the longest value
+ * does — which is what the one alternation's own ordering meant.
  */
 class Matcher {
-  constructor(parts) {
-    this.parts = parts;
+  constructor(values) {
+    this.byWord = new Map();  // a value's first word, folded → its values, longest first
+    const loose = [];         // …and the ones that do not begin with a word character
+    for (const v of values) {
+      const lead = (String(v).match(LEAD_WORD_RE) || [""])[0].toLowerCase();
+      if (!lead) { loose.push(v); continue; }
+      // Each value keeps its own small sticky pattern, built here and compiled
+      // by the engine only if that word is ever met: a key of thousands is
+      // thousands of patterns that mostly cost nothing.
+      const entry = { v, rx: stickyOf([altFor(v)]) };
+      const list = this.byWord.get(lead);
+      if (list) list.push(entry); else this.byWord.set(lead, [entry]);
+    }
+    // Longest first, which is the ordering the single alternation had: the
+    // full name beats its own surname token.
+    for (const list of this.byWord.values()) list.sort((a, b) => b.v.length - a.v.length);
+    // A value beginning with a punctuation mark cannot be found by the word it
+    // starts with, so those few keep an alternation of their own, read the way
+    // the whole key used to be.
+    this.loose = loose.length ? oneMatcher(loose.sort((a, b) => b.length - a.length).map(altFor)) : null;
+    this.words = new RegExp(WORD_CLASS + "+", "g");
     this.lastIndex = 0;
     this.global = true;
     this.reset("");
@@ -368,35 +378,52 @@ class Matcher {
   reset(text) {
     this.text = text;
     this.from = 0;
-    // Where each piece's next match stands, and what it is: a piece is asked
-    // again only once the walk has passed the answer it already gave.
-    this.at = this.parts.map(() => -1);
-    this.hits = this.parts.map(() => null);
+    this.words.lastIndex = 0;
+    this.looseAt = -1;   // where the loose part's next match stands
+    this.looseHit = null;
   }
   exec(text) {
     const s = String(text == null ? "" : text);
     const from = this.lastIndex > 0 ? this.lastIndex : 0;
-    // Each piece is scanned ONCE across a walk, not once per match: a piece
-    // asked again from here would read the rest of the text again, and a long
-    // document read over again for every name in it is the whole document
-    // squared. What it found still stands — a match is where it is, wherever
-    // the reading started — so it is kept until the walk goes past it.
+    // The words are walked ONCE across a whole reading: a walk that started
+    // again from here for every name found would read the document over and
+    // over, which on a long one is the document squared.
     if (this.text !== s || from < this.from) this.reset(s);
     this.from = from;
     if (from > s.length) { this.lastIndex = 0; return null; }
-    let best = null;
-    for (let i = 0; i < this.parts.length; i++) {
-      if (this.at[i] < from) {
-        const rx = this.parts[i];
-        rx.lastIndex = from;
-        const m = rx.exec(s);
-        this.hits[i] = m;
-        this.at[i] = m ? m.index : Infinity;
-      }
-      const m = this.hits[i];
-      if (!m) continue;
-      if (!best || m.index < best.index || (m.index === best.index && m[0].length > best[0].length)) best = m;
+    if (this.words.lastIndex < from) this.words.lastIndex = from;
+    // The loose part, kept the same way: what it found still stands until the
+    // walk goes past it.
+    if (this.loose && this.looseAt < from) {
+      this.loose.lastIndex = from;
+      const m = this.loose.exec(s);
+      this.looseHit = m;
+      this.looseAt = m ? m.index : Infinity;
     }
+    let best = null;
+    let m;
+    while ((m = this.words.exec(s))) {
+      const start = m.index;
+      if (start < from) continue;
+      if (best && start > best.index) break; // nothing further can be leftmost
+      const list = this.byWord.get(m[0].toLowerCase());
+      if (!list) continue;
+      for (const e of list) {
+        e.rx.lastIndex = start;
+        const hit = e.rx.exec(s);
+        if (!hit) continue;
+        best = [hit[0]];       // longest value first: the first that fits is the one
+        best.index = start;
+        best.input = s;
+        break;
+      }
+      if (best) break;
+    }
+    // The walk stops on the word it matched, so the next reading begins there
+    // and passes over it: a match further on is never missed.
+    if (best) this.words.lastIndex = best.index;
+    const loose = this.looseHit;
+    if (loose && (!best || loose.index < best.index || (loose.index === best.index && loose[0].length > best[0].length))) best = loose;
     // The protocol, as a global regex keeps it: past the match, or back to the
     // start when there is none. A zero-length match leaves lastIndex where it
     // is, and the caller moves it on, exactly as it does for a RegExp.
@@ -425,6 +452,21 @@ class Matcher {
     this.lastIndex = 0;
     return out + s.slice(at);
   }
+}
+/** One value, matched only where it is tried: sticky, at a place chosen already. */
+function stickyOf(alts) {
+  return new RegExp("(?<!" + WORD_CLASS + ")(?:" + alts.join("|") + ")(?!" + WORD_CLASS + ")", "iy");
+}
+function oneMatcher(alts) {
+  return new RegExp("(?<!" + WORD_CLASS + ")(?:" + alts.join("|") + ")(?!" + WORD_CLASS + ")", "gi");
+}
+export function buildMatcher(values) {
+  const list = (values || []).filter((v) => v);
+  if (!list.length) return null;
+  // One value is one small pattern, and the reader asks for those by the
+  // thousand (the LEAKS row in front, a flagged value): it stays a regex.
+  if (list.length === 1) return oneMatcher([altFor(list[0])]);
+  return new Matcher(list.slice().sort((a, b) => b.length - a.length));
 }
 
 /**
