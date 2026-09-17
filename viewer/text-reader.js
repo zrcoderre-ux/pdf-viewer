@@ -202,15 +202,59 @@ function notePass(what, from) {
   passes.push({ what, from, to: performance.now() });
   if (passes.length > 40) passes.shift();
 }
-/** Run `fn` under a name, so a long task inside it can be attributed. */
+
+// A pass that never ENDS cannot be reported by the page it has stopped: the
+// bar cannot be painted, the observer cannot run, and the browser offers to
+// kill the tab. So a pass writes its name down BEFORE it starts and rubs it
+// out when it finishes — in localStorage, which is written there and then. A
+// name still standing when the reader next opens is a pass that did not come
+// back, and the reader says so.
+const DOING_KEY = "textReader.doing";
+const doingStack = [];
+function markDoing() {
+  try {
+    const top = doingStack[doingStack.length - 1];
+    if (top) localStorage.setItem(DOING_KEY, JSON.stringify({ what: top.what, file: fileName || "", at: Date.now() }));
+    else localStorage.removeItem(DOING_KEY);
+  } catch { /* a browser with no storage says nothing, and that is all */ }
+}
+// Passes that await overlap rather than nest, so an entry is taken out by
+// identity, not by being the last one in.
+function startDoing(what) { const e = { what }; doingStack.push(e); markDoing(); return e; }
+function endDoing(e) {
+  const i = doingStack.lastIndexOf(e);
+  if (i >= 0) doingStack.splice(i, 1);
+  markDoing();
+}
+/** Run `fn` under a name: for the long-task report, and for the breadcrumb. */
 function during(what, fn) {
   const from = performance.now();
-  try { return fn(); } finally { notePass(what, from); }
+  const e = startDoing(what);
+  try { return fn(); } finally { endDoing(e); notePass(what, from); }
 }
 /** The same for a pass that awaits: it names the whole of itself. */
 async function duringAsync(what, fn) {
   const from = performance.now();
-  try { return await fn(); } finally { notePass(what, from); }
+  const e = startDoing(what);
+  try { return await fn(); } finally { endDoing(e); notePass(what, from); }
+}
+/** A slice of a pass already named: the report wants it, the breadcrumb does not. */
+function duringSlice(what, fn) {
+  const from = performance.now();
+  try { return fn(); } finally { notePass(what, from); }
+}
+/** What the reader was in the middle of when it last stopped, if it did. */
+function reportLastStuck() {
+  let stuck = null;
+  try {
+    const raw = localStorage.getItem(DOING_KEY);
+    if (raw) stuck = JSON.parse(raw);
+    localStorage.removeItem(DOING_KEY);
+  } catch { /* nothing to report */ }
+  window.__textReaderLastStuck = stuck;
+  if (!stuck || !stuck.what) return;
+  toast(`Last time, the reader stopped while ${stuck.what}${stuck.file ? " (" + stuck.file + ")" : ""} and did not finish.`,
+    { error: true, ms: 12000 });
 }
 function passAt(start, end) {
   let best = "";
@@ -930,6 +974,9 @@ async function attachKeyForFile(handle) {
 
 // ── opening documents ───────────────────────────────────────────────────────────
 async function openFile(file, handle) {
+  return duringAsync("opening the document", () => openFileNow(file, handle));
+}
+async function openFileNow(file, handle) {
   if (!file) return;
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
   hideKeyOffer();
@@ -2406,6 +2453,9 @@ function paintRowMarks() {
 }
 /** One reading of the whole document; false where it gave up part-way. */
 async function scanPass() {
+  return duringAsync("reading the marks over the text", () => scanPassNow());
+}
+async function scanPassNow() {
   const mark = { epoch: textEpoch, reals, flagged, keeps, master: masterKeeps, spots };
   const moved = () => mark.epoch !== textEpoch || mark.reals !== reals || mark.flagged !== flagged
     || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots;
@@ -3886,6 +3936,9 @@ async function openPdfNow(src) {
  * LINE GRID (pdfsync.pleadingGeometry, from the numbers down its margin).
  */
 async function readPdfGrid(info) {
+  return duringAsync("reading the PDF's line grid", () => readPdfGridNow(info));
+}
+async function readPdfGridNow(info) {
   const { pdf, sizes } = info;
   const gridFrom = performance.now();
   for (let i = 1; i <= pdf.numPages; i++) {
@@ -4311,6 +4364,9 @@ function pumpReady() {
 }
 /** One document read, parsed and built off the page, a slice at a time. */
 async function buildAhead(d) {
+  return duringAsync("reading the next document ahead", () => buildAheadNow(d));
+}
+async function buildAheadNow(d) {
   const epoch = readyEpoch;
   const file = await d.handle.getFile();
   const text = await file.text();
@@ -4333,7 +4389,7 @@ async function buildAhead(d) {
         if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
       }
     }
-    during("reading the next document ahead", () =>
+    duringSlice("reading the next document ahead", () =>
       buildPages(nodes, parsed.pages, { from: at, to: Math.min(at + READY_SLICE, parsed.pages.length), spots: theirSpots }));
   }
   ready.set(d.name, {
@@ -5308,6 +5364,7 @@ window.addEventListener("unhandledrejection", (e) => {
 });
 
 // ── boot ───────────────────────────────────────────────────────────────────────────────────
+reportLastStuck();
 applySettings();
 loadSyncedSettings();
 showSidePanel(sideChoice === true);

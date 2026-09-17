@@ -232,7 +232,16 @@ and `showLeaksBar` starts and stops the reading with the review itself.
 from an already-parsed document, so they are no yield at all, and five hundred
 pages of them was a task of a second or more.
 
-And when a pass does hold the thread, the reader says which one: the heavy
+A pass that never ENDS cannot be reported by the page it has stopped — the bar
+cannot be painted and the observer cannot run — so a named pass also writes its
+name to `localStorage` before it starts (`startDoing`) and rubs it out when it
+finishes. A name still standing when the reader next opens is a pass that did
+not come back, and `reportLastStuck` says so in the bar: "Last time, the reader
+stopped while reading the marks over the text (Exhibit 12.txt) and did not
+finish." That survives the freeze, the kill and the reload, which is the whole
+point of it.
+
+And when a pass does hold the thread but comes back, the reader says which one: the heavy
 passes name themselves while they run (`during`, `duringAsync`, `notePass`), a
 `PerformanceObserver` on `longtask` attributes each blocked stretch to the pass
 it fell in, anything past two and a half seconds goes to the toast bar in those

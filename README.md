@@ -856,7 +856,11 @@ app, which routes it to the reader tab.
   themselves, and a pass that holds the thread for more than a couple of
   seconds puts that in the bar at the bottom — "the reader held the page for
   4.2 seconds — reading the marks over the text" — so a slow reader can be
-  asked where instead of guessed at.
+  asked where instead of guessed at. And if a pass never comes back at all —
+  the page stops answering and the browser offers to kill it — the name is
+  written down before the work starts, so the NEXT time the reader opens it
+  says what it died in the middle of. A freeze you had to kill still tells you
+  what it was.
 - **The pages a leak stands on are drawn before you reach them.** Every page
   a review will visit is named in the worksheet's rows before it gets to any
   of them, so with a worksheet attached the reader goes and gets them: the
