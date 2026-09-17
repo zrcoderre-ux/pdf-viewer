@@ -825,10 +825,16 @@ app, which routes it to the reader tab.
   name is matched through the key once rather than once per document in the
   folder; and the Leaks list is written on rather than rebuilt. On a case of
   200 exports of 150 pages, 2,500 leak rows and a key of 4,000 names: the first
-  document opens in 2.4 seconds where it used to take 17 or fail outright, and
-  ten decisions take under a second and a half where they took nineteen. If
-  something does go wrong, the bar at the bottom now says so instead of the
-  reader quietly stopping where it stood.
+  document opens in under two seconds where it used to take 17 or fail
+  outright, and ten decisions take under a second and a half where they took
+  nineteen. The two long passes the reader makes over a whole document — the
+  marks over the text, and building the next document before you reach it — are
+  cut against the browser's own clock now, so neither holds the page: nothing
+  is read ahead while you are still answering rows, and a document left
+  half-built is picked up where it stopped rather than started again. Sitting
+  still after opening a document cost two freezes of over a second each; it
+  costs none. If something does go wrong, the bar at the bottom now says so
+  instead of the reader quietly stopping where it stood.
 - **The pages a leak stands on are drawn before you reach them.** Every page
   a review will visit is named in the worksheet's rows before it gets to any
   of them, so with a worksheet attached the reader goes and gets them: the

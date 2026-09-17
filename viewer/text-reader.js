@@ -181,6 +181,19 @@ function debounce(fn, ms) {
   d.cancel = () => clearTimeout(t);
   return d;
 }
+// The browser's own answer to "how long may I keep the thread?" — the way the
+// long passes over a document are cut up. A page of a long export under a key
+// of a few thousand names is ten milliseconds to read or to build; a hundred
+// and fifty of them in one go is a second and a half in a single task, which
+// is a page that cannot answer a click. So a pass takes a clock and gives the
+// thread back before it runs out.
+const SLICE_LEFT = 12; // ms that must be left on the clock to start another page
+function idleClock() {
+  return new Promise((res) => {
+    if (typeof requestIdleCallback === "function") requestIdleCallback(res, { timeout: 250 });
+    else setTimeout(() => res({ timeRemaining: () => SLICE_LEFT + 1, didTimeout: true }), 0);
+  });
+}
 function lsGet(k, dflt) {
   try { const v = localStorage.getItem(k); return v == null ? dflt : JSON.parse(v); } catch { return dflt; }
 }
@@ -2308,6 +2321,24 @@ function paintHighlights() {
   if (scanStale()) scanSoon();
 }
 const scanSoon = debounce(() => { if (scanStale()) scanDocument(); }, 150);
+let scanning = false;
+/**
+ * The document-wide pass, made a few pages at a time against the browser's own
+ * idle clock: on a hundred-and-fifty-page export under a key of four thousand
+ * names it is a second and a half of reading, and a second and a half in one
+ * task is a reader that does not answer. Nothing is shown until the pass is
+ * whole — the marks that are up are the last complete reading, which is the
+ * right thing to leave standing — and a pass whose ground moves under it
+ * (an edit, the key, a keep) gives up and is made again.
+ */
+async function scanDocument() {
+  if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
+  if (scanning) { scanSoon(); return; }
+  scanning = true;
+  try {
+    if (!(await scanPass())) scanSoon();
+  } finally { scanning = false; }
+}
 /** The current LEAKS row's value, marked wherever it stands. */
 function paintRowMarks() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
@@ -2316,14 +2347,18 @@ function paintRowMarks() {
   CSS.highlights.set("leakrow", highlightOf(leakRowRanges.map((x) => x.range)));
   markLeakHere();
 }
-function scanDocument() {
-  if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
-  scanned = { epoch: textEpoch, reals, flagged, keeps, master: masterKeeps, spots };
+/** One reading of the whole document; false where it gave up part-way. */
+async function scanPass() {
+  const mark = { epoch: textEpoch, reals, flagged, keeps, master: masterKeeps, spots };
+  const moved = () => mark.epoch !== textEpoch || mark.reals !== reals || mark.flagged !== flagged
+    || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots;
   const flaggedRanges = [];
   const leakRanges = [];
-  leakHits = [];
+  const hits = [];
+  const seen = new Set();
   let leaks = 0;
   const bodies = pageBodies();
+  let clock = null;
   const flagRx = flagged.length ? PK.buildMatcher(flagged) : null;
   // A value KEPT stands in the clear like any other word, and with the orange
   // mark gone (it is not a leak) nothing said it was a decision rather than an
@@ -2331,8 +2366,11 @@ function scanDocument() {
   // page read later shows which names were left alone on purpose.
   const keptRx = keptMarkMatcher();
   const keptRanges = [];
-  keptSeen = new Set();
   for (const body of bodies) {
+    if (!clock || clock.timeRemaining() < SLICE_LEFT) {
+      clock = await idleClock();
+      if (moved()) return false; // the ground moved: this reading is of the old text
+    }
     // Over the whole page, pseudonym spans blanked, so a real name wrapped
     // over a line break and its gutter number is found as one. The spots kept
     // where they stand are blanked with them: they carry their own mark.
@@ -2343,7 +2381,7 @@ function scanDocument() {
         const r = rangeFor(segs, h.start, h.end);
         if (!r) continue;
         leakRanges.push(r);
-        leakHits.push({ range: r, real: h.real, fake: h.fake });
+        hits.push({ range: r, real: h.real, fake: h.fake });
         leaks++;
       }
     }
@@ -2354,7 +2392,7 @@ function scanDocument() {
       while ((m = keptRx.exec(text))) {
         const r = rangeFor(segs, m.index, m.index + m[0].length);
         if (r) keptRanges.push(r);
-        keptSeen.add(TD.foldValue(PK.foldGaps(m[0])));
+        seen.add(TD.foldValue(PK.foldGaps(m[0])));
         if (m.index === keptRx.lastIndex) keptRx.lastIndex++;
       }
     }
@@ -2369,6 +2407,11 @@ function scanDocument() {
       }
     }
   }
+  // Whole, so it goes up: the ranges, what the right-click menu reads off them,
+  // and the state this reading was made of.
+  leakHits = hits;
+  keptSeen = seen;
+  scanned = mark;
   CSS.highlights.set("flagged", highlightOf(flaggedRanges));
   CSS.highlights.set("leak", highlightOf(leakRanges));
   CSS.highlights.set("kept", highlightOf(keptRanges));
@@ -2378,6 +2421,7 @@ function scanDocument() {
   $("st-leaks").textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; right-click one to keep it` : "";
   const nk = keptRanges.length;
   $("st-kept").textContent = nk ? `${nk} kept value${nk === 1 ? "" : "s"} standing as ${nk === 1 ? "it reads" : "they read"}` : "";
+  return true;
 }
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
 let keptSeen = new Set(); // the kept values that actually stand in this document, folded — from the last paint
@@ -4097,11 +4141,22 @@ async function warmPage(opened, key, pageNo, cssWidth) {
 const READY_DOCS = 6;         // documents held built at once
 const READY_PAGES = 400;      // …and the pages between them
 const READY_MAX_PAGES = 200;  // …and the most any one of them may have
-const READY_SLICE = 8;        // pages built before yielding again
+const READY_SLICE = 1;        // pages built before the clock is looked at again
+// Building ahead is a trade of work now against waiting later, and it must
+// never be paid for out of the operator's own thread. Two rules keep it
+// honest: nothing is read while they are still working (READY_QUIET after the
+// last thing they did — a review that answers a row a second would otherwise
+// start a long document, throw it away as the window moved, and start
+// another, forever), and what is built is built against the browser's idle
+// clock rather than in slices of a fixed size, since a page of a long export
+// under a big key is ten milliseconds and eight of them is a task that shows.
+const READY_QUIET = 1200;     // ms of quiet before the next document is read
 const ready = new Map();      // export name → { name, handle, fileKey, doc, nodes, epoch, spots } | { name, skipped }
 let readyWanted = [];         // the window, in the order the review will reach it
 let readyBusy = false;
 let readyEpoch = 0;           // bumped whenever a built page would no longer be right
+let readyTimer = 0;           // the wait for quiet
+let busyAt = 0;               // when the operator last did something
 
 /** Built pages are translated under the key as it stood: a change makes them wrong. */
 function dropReady() {
@@ -4111,10 +4166,6 @@ function dropReady() {
 }
 function staleReady() { readyEpoch++; dropReady(); warmForLeaks(); }
 function fileKeyOf(file) { return file.name + "|" + file.size + "|" + file.lastModified; }
-const idle = () => new Promise((res) => {
-  if (typeof requestIdleCallback === "function") requestIdleCallback(() => res(), { timeout: 600 });
-  else setTimeout(res, 16);
-});
 
 /**
  * The exports the worksheet points at, in visit order, that are not already
@@ -4161,11 +4212,15 @@ function planReadyDocs() {
   pumpReady();
 }
 function pumpReady() {
+  clearTimeout(readyTimer);
   if (readyBusy) return;
   if (heldPages() >= READY_PAGES) return; // full: the rest wait for the window to move
   const next = readyWanted.find((n) => !ready.has(n));
   const d = next ? folderDocs.find((x) => x.name === next) : null;
   if (!d) return;
+  // Not while the operator is working: the next document waits for a gap.
+  const quiet = Date.now() - busyAt;
+  if (quiet < READY_QUIET) { readyTimer = setTimeout(pumpReady, READY_QUIET - quiet); return; }
   readyBusy = true;
   buildAhead(d).catch(() => { ready.set(d.name, { name: d.name, skipped: "unreadable" }); })
     .then(() => { readyBusy = false; renderDocReady(); pumpReady(); });
@@ -4180,10 +4235,20 @@ async function buildAhead(d) {
   if (parsed.pages.length > READY_MAX_PAGES) { ready.set(d.name, { name: d.name, skipped: `${parsed.pages.length} pages — too long to hold ready` }); return; }
   const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + d.name, []));
   const nodes = document.createDocumentFragment();
+  let clock = null;
   for (let at = 0; at < parsed.pages.length; at += READY_SLICE) {
-    await idle();
-    // The key changed, or the review moved on: what is built so far is dropped.
-    if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
+    if (!clock || clock.timeRemaining() < SLICE_LEFT) {
+      clock = await idleClock();
+      // The key changed, or the review moved on: what is built so far is dropped.
+      if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
+      // The operator back at the keyboard stops it where it stands — and it
+      // picks up there in the next gap rather than starting the document
+      // again, which on a long one is work that never finishes.
+      while (Date.now() - busyAt < READY_QUIET) {
+        await new Promise((res) => setTimeout(res, READY_QUIET - (Date.now() - busyAt)));
+        if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
+      }
+    }
     buildPages(nodes, parsed.pages, { from: at, to: Math.min(at + READY_SLICE, parsed.pages.length), spots: theirSpots });
   }
   ready.set(d.name, {
@@ -4224,11 +4289,16 @@ function renderDocReady() {
 }
 
 /** The worksheet's next pages and documents, held ready. Coalesced: the review moves in steps. */
-const warmForLeaks = debounce(() => {
+const planForLeaks = debounce(() => {
   planWarmPages();
   planReadyDocs();
   trimPdfs(); // …and the PDFs the window has moved off are closed behind it
 }, 200);
+/** Something the operator did: the window follows it, and the quiet clock starts again. */
+function warmForLeaks() {
+  busyAt = Date.now();
+  planForLeaks();
+}
 
 // ── rendering a page into a canvas ──
 async function renderInto(el, src, pageNo, cssWidth) {

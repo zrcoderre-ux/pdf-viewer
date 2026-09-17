@@ -187,6 +187,25 @@ before and after.
    than the key as the keeps have left it — which is both stable and true, the
    names on disk having been written before anybody kept anything.
 
+Two long passes were also being made in ONE TASK each, which is a reader that
+cannot answer a click while it runs — the measure of that is the browser's own
+`longtask` count, and sitting still after opening a document used to cost two
+of them and 1.2 seconds. Both now take the browser's idle clock and give the
+thread back before it runs out (`idleClock`, `SLICE_LEFT`):
+
+- The document-wide mark pass (`scanPass`) reads a page, looks at the clock,
+  and yields; nothing is shown until the reading is whole, so what stands on
+  the page is always the last complete one, and a pass whose ground moves under
+  it (an edit, the key, a keep) gives up and is made again.
+- Building the next document ahead (`buildAhead`) built eight pages between
+  yields — most of a tenth of a second under a big key — and did it WHILE the
+  operator was answering rows, so the review kept moving the window, throwing
+  the work away and starting another document. It now waits for READY_QUIET of
+  quiet before it starts, builds a page at a time against the clock, and stops
+  where it stands when the operator comes back, picking up in the next gap
+  rather than starting the document again. Sitting still after an open: 2 long
+  tasks and 1.2 s blocked → none at all.
+
 Two smaller ones: `compileTypeahead` asked "does this real open a longer one"
 by scanning every value per value, and now reads each value's own word edges in
 one pass (`openingsOf`, 212 ms → 13 ms at 2,000 names beside 2,500 keeps); and
