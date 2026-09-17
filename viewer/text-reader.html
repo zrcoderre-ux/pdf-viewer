@@ -115,6 +115,7 @@
         <button id="flag-btn" class="tool-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead."><span class="ti">🚩</span><span class="tl">Flag real value</span></button>
         <button id="leaks-btn" class="tool-btn" title="Review PDF-Linker's LEAKS.xlsx row by row: each row shown above the text, the text opened at its page and line, the decision written into the worksheet's Fix? cell. The case folder's own worksheet is attached when the folder is opened; click to open it, or to load one."><span class="ti">⚠</span><span class="tl">Leaks</span><span id="leaks-count" class="badge" hidden>0</span></button>
         <button id="autoscroll" class="tool-btn" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses" aria-pressed="false"><span class="ti">↓</span><span class="tl">Auto-scroll</span></button>
+        <label class="tool-btn tool-toggle" title="Read the words and nothing else: no marks over the text, no citation links, no PDF beside it, nothing read ahead. For a document too big for the rest of it, or a reader that will not answer."><input id="plain-toggle" type="checkbox"><span class="ti">📃</span><span class="tl">Plain reading</span></label>
 
         <div class="tools-group-label">PDF</div>
         <button id="sbs-toggle" class="tool-btn" title="Show the PDF this export came from beside the text, page for page, scrolling together (remembered)" aria-pressed="false" disabled><span class="ti">⇔</span><span class="tl">Side by side</span></button>
@@ -192,6 +193,7 @@
     <span id="st-cites"></span>
     <span id="st-pdf"></span>
     <span id="st-lock"></span>
+    <span id="st-plain" class="warn"></span>
     <span class="spacer"></span>
     <span id="st-dirty"></span>
   </div>

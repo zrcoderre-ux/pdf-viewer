@@ -243,6 +243,31 @@ function duringSlice(what, fn) {
   const from = performance.now();
   try { return fn(); } finally { notePass(what, from); }
 }
+// PLAIN READING. A reader that will not come back is no use at all, and the
+// operator cannot wait on a diagnosis: this turns off everything the document
+// does not strictly need — the marks over the text, the citation underlines,
+// the PDF beside it, anything read ahead — and leaves the words on the page.
+// It lasts as long as the tab does, and the bar says it is on.
+let plain = false;
+function setPlain(on) {
+  plain = !!on;
+  document.body.classList.toggle("plain-reading", plain);
+  if (plain) {
+    if (sbsOn) setSideBySide(false, { remember: false });
+    dropWarmPages();
+    dropReady();
+    try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); } catch { /* none to clear */ }
+  }
+  updatePlainStatus();
+  if (doc) { paintHighlights(); placeCitationsSoon(); }
+}
+function updatePlainStatus() {
+  const el = $("st-plain");
+  if (el) el.textContent = plain ? "Plain reading: the marks, the citation links and the PDF are off" : "";
+  const box = $("plain-toggle");
+  if (box) box.checked = plain;
+}
+
 /** What the reader was in the middle of when it last stopped, if it did. */
 function reportLastStuck() {
   let stuck = null;
@@ -253,8 +278,15 @@ function reportLastStuck() {
   } catch { /* nothing to report */ }
   window.__textReaderLastStuck = stuck;
   if (!stuck || !stuck.what) return;
-  toast(`Last time, the reader stopped while ${stuck.what}${stuck.file ? " (" + stuck.file + ")" : ""} and did not finish.`,
-    { error: true, ms: 12000 });
+  // Not a toast: a toast is gone in a few seconds and under the document, and
+  // this is the one line that says what to fix. It stands in the offer bar
+  // until it is read, and the button puts it on the clipboard.
+  const line = `Last time, the reader stopped while ${stuck.what}${stuck.file ? " — " + stuck.file : ""}, and did not finish.`;
+  showKeyOffer(line + " Read plainly to get past it?", "Read plainly", async () => {
+    setPlain(true);
+    try { await navigator.clipboard.writeText(line); toast("Plain reading is on, and that line is on the clipboard."); }
+    catch { toast("Plain reading is on."); }
+  });
 }
 function passAt(start, end) {
   let best = "";
@@ -272,7 +304,14 @@ if (typeof PerformanceObserver === "function") {
         if (blocked.length > 60) blocked.shift();
         // Long enough that the operator felt it: say so, and say what it was.
         if (ms >= 2500) {
-          toast(`The reader held the page for ${(ms / 1000).toFixed(1)} seconds${what ? " — " + what : ""}.`, { error: true, ms: 8000 });
+          const line = `The reader held the page for ${(ms / 1000).toFixed(1)} seconds${what ? " — " + what : ""}.`;
+          if (!plain) {
+            showKeyOffer(line + " Read plainly instead?", "Read plainly", async () => {
+              setPlain(true);
+              try { await navigator.clipboard.writeText(line); toast("Plain reading is on, and that line is on the clipboard."); }
+              catch { toast("Plain reading is on."); }
+            });
+          }
         }
       }
     }).observe({ entryTypes: ["longtask"] });
@@ -2257,7 +2296,7 @@ function placeCitations() {
 }
 function placeCitationsNow() {
   placeCitationsSoon.cancel();
-  if (!doc) return;
+  if (!doc || plain) return;
   const bodies = pageBodies();
   const parts = [];
   const maps = [];
@@ -2422,6 +2461,7 @@ function scanStale() {
 function paintHighlights() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   paintRowMarks();
+  if (plain) return; // plain reading: the words, and nothing read over them
   if (scanStale()) scanSoon();
 }
 const scanSoon = debounce(() => { if (scanStale()) scanDocument(); }, 150);
@@ -4195,7 +4235,7 @@ function planWarmPages() {
   // Nothing to hold where no review is running, or where the PDF side is put
   // away: a page nobody is going to be shown is a bitmap for nothing — and
   // the PDF it would be drawn from is a file to read and a grid to measure.
-  if (!leaks || leaksBar.hidden || !doc || (!(sbsOn && !pdfPane.hidden) && !swaps.size)) { dropWarmPages(); return; }
+  if (plain || !leaks || leaksBar.hidden || !doc || (!(sbsOn && !pdfPane.hidden) && !swaps.size)) { dropWarmPages(); return; }
   const cssWidth = warmWidth();
   const targets = leakWarmTargets(WARM_PAGES);
   warmWanted.clear();
@@ -4331,7 +4371,7 @@ function planReadyDocs() {
   // reader that opens a file and immediately goes off to read ANOTHER one —
   // parsing it, building it, opening its PDF — is a page that stops answering
   // for no reason the operator can see.
-  if (!leaks || leaksBar.hidden || !folderDocs.length) { dropReady(); return; }
+  if (plain || !leaks || leaksBar.hidden || !folderDocs.length) { dropReady(); return; }
   readyWanted = leakDocNames().slice(0, READY_DOCS);
   // In visit order, keep what fits; the rest go — the furthest from the row in
   // front being the ones the review will want last.
@@ -5001,6 +5041,7 @@ function setSideBySide(on, { remember = true } = {}) {
   relayout();
 }
 sbsBtn.addEventListener("click", () => setSideBySide(!sbsOn));
+$("plain-toggle").addEventListener("change", (e) => setPlain(e.target.checked));
 
 // The two boxes at one place: whichever the reader scrolls leads, and the
 // other follows. The place is measured from each page's FIRST PRINTED LINE

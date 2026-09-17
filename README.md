@@ -860,7 +860,14 @@ app, which routes it to the reader tab.
   the page stops answering and the browser offers to kill it — the name is
   written down before the work starts, so the NEXT time the reader opens it
   says what it died in the middle of. A freeze you had to kill still tells you
-  what it was.
+  what it was. That message stands in the bar across the top until you dismiss
+  it — not a toast that flashes past behind the document — and its button puts
+  the line on the clipboard.
+- **Plain reading**, in the Review group of the tools rail: the words and
+  nothing else. No marks over the text, no citation links, no PDF beside it,
+  nothing read ahead — for a document too big for the rest of it, or a reader
+  that will not answer. It is also what the bar offers you after a freeze, so
+  there is always a way to get the file open and keep working.
 - **The pages a leak stands on are drawn before you reach them.** Every page
   a review will visit is named in the worksheet's rows before it gets to any
   of them, so with a worksheet attached the reader goes and gets them: the

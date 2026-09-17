@@ -239,7 +239,16 @@ finishes. A name still standing when the reader next opens is a pass that did
 not come back, and `reportLastStuck` says so in the bar: "Last time, the reader
 stopped while reading the marks over the text (Exhibit 12.txt) and did not
 finish." That survives the freeze, the kill and the reload, which is the whole
-point of it.
+point of it. It goes in the OFFER BAR rather than the toast: a toast is gone in
+seconds and sits behind the document, and this is the one line that says what to
+fix. Its button turns on PLAIN READING (`setPlain`) and copies the line.
+
+Plain reading is the way through a reader that will not answer: `plain` turns
+off the document-wide mark pass, the citation underlines, the PDF pane and
+everything read ahead, leaving the words on the page. It is offered by the bar
+after a freeze and by the bar when a pass holds the thread for more than a
+couple of seconds, and it sits in the tools rail (`#plain-toggle`) to be chosen
+deliberately. It lasts as long as the tab.
 
 And when a pass does hold the thread but comes back, the reader says which one: the heavy
 passes name themselves while they run (`during`, `duringAsync`, `notePass`), a
