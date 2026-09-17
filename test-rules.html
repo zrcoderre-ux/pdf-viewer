@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Rule box test</title>
+<!-- The boxes an export draws, drawn (viewer/rules.js). The column grid is
+     tested in node (test-rules.mjs); what needs a page is the measuring and
+     the setting, so this one builds a form's caption and notice out of the
+     same glyphs PDF-Linker writes and reads back where every bar landed —
+     both ways the reader draws a page: side by side on a PDF's grid, where
+     each row is positioned on its own, and the ordinary flowing view.
+     Open it over http (an ES module will not import from a file:// page):
+       npx http-server -p 8080 . → http://127.0.0.1:8080/test-rules.html -->
+<link rel="stylesheet" href="viewer/text-reader.css">
+<style>
+  #report { font-family: monospace; padding: 16px 20px; white-space: pre; }
+  #report .pass { color: #1b7f3b; }
+  #report .fail { color: #b3261e; font-weight: 700; }
+  #stage { position: absolute; left: -4000px; top: 0; width: 1400px; }
+</style>
+</head>
+<body>
+<div id="report">running…</div>
+<div id="stage"><div id="pages">
+  <section class="tpage matched" data-index="0"><div class="page-inner" style="height:260px">
+    <div class="page-body fixed" id="laid"></div></div></section>
+  <section class="tpage" data-index="1"><div class="page-inner">
+    <div class="page-body" id="flow"></div></div></section>
+</div></div>
+<script type="module">
+import { dressLines, fitRuleRows } from "./viewer/rules.js";
+
+// An MC-350EX caption and its NOTICE TO PETITIONER as PDF-Linker writes them:
+// bars at 5, 95 and 146 down the caption, at 5 and 146 through the notice —
+// and one notice line whose text pushed its closing bar out to 148, which is
+// the same rule and not a column of its own.
+const cell = (s, n) => (s + " ".repeat(Math.max(0, n - s.length))).slice(0, n);
+const row3 = (a, b) => "     │" + cell(a, 89) + "│" + cell(b, 50) + "│";
+const row2 = (a, w = 140) => "     │" + cell(a, w) + "│";
+const rule = (l, m, r) => "     " + l + "─".repeat(89) + m + "─".repeat(50) + r;
+// [text, the top and left the PDF's grid gave the row]
+const art = [
+  [rule("┌", "┬", "┐"), 10, 20],
+  [row3(" ATTORNEY OR PARTY WITHOUT ATTORNEY     STATE BAR NUMBER: 309664", "        FOR COURT USE ONLY"), 30, 20],
+  [row3(" NAME: Headington Grantham", ""), 50, 20],
+  [rule("├", "┴", "┤"), 70, 20],
+  [row2("                    NOTICE TO PETITIONER"), 90, 44],
+  [row2(" You must use this form to request expedited court approval of a qualifying (1) compromise of a minor's disputed claim, (2) compromise"), 110, 44],
+  [row2(" of a pending action or proceeding in which a minor or a person with a disability (including a conservatee) is a party, or (3) disposition of", 142), 130, 46],
+  [row2(" the proceeds of a judgment for a minor or person with a disability. (See Code Civ. Proc., § 372.) You"), 150, 20],
+  ["     └" + "─".repeat(140) + "┘", 170, 20],
+];
+
+for (const id of ["laid", "flow"]) {
+  const body = document.getElementById(id);
+  for (const [text, top, left] of art) {
+    const line = document.createElement("div");
+    line.className = "line";
+    const lt = document.createElement("span");
+    lt.className = "lt";
+    lt.textContent = text;
+    line.appendChild(lt);
+    body.appendChild(line);
+    if (id !== "laid") continue;
+    line.style.top = top + "px";
+    line.style.left = left + "px";
+    line.style.fontSize = "11px";
+    line.style.lineHeight = "13px";
+    line.__laid = `${top}|${left}|11|13`;   // as applyMatchedLayout records it
+  }
+  dressLines(body);
+}
+fitRuleRows(document.getElementById("pages"));
+
+const rowsOf = (id) => [...document.getElementById(id).querySelectorAll(".line")].map((line) => {
+  const r = line.getBoundingClientRect();
+  return {
+    rk: line.dataset.rk,
+    bars: [...line.querySelectorAll(".rb")].map((b) => Math.round(b.getBoundingClientRect().left)),
+    left: Math.round(r.left), right: Math.round(r.right), top: Math.round(r.top), height: Math.round(r.height),
+  };
+});
+
+const out = [];
+let fails = 0;
+const check = (label, ok, note = "") => {
+  if (!ok) fails++;
+  out.push(`<span class="${ok ? "pass" : "fail"}">  ${ok ? "PASS" : "FAIL"}  ${label}${note && !ok ? "\n        " + note : ""}</span>`);
+};
+const same = (xs) => xs.every((x) => Math.abs(x - xs[0]) <= 1);
+
+for (const [id, name] of [["laid", "side by side, on the PDF's grid"], ["flow", "the flowing page"]]) {
+  const rows = rowsOf(id);
+  out.push(name + ":");
+  check("every row's first bar stands in one column", same(rows.map((r) => r.bars[0])), rows.map((r) => r.bars[0]).join(" "));
+  check("every row's last bar stands in one column, the two-character wobble with them", same(rows.map((r) => r.bars[r.bars.length - 1])), rows.map((r) => r.bars[r.bars.length - 1]).join(" "));
+  check("the caption's inner bar is the same column down its four rows", same(rows.slice(0, 4).map((r) => r.bars[1])), rows.slice(0, 4).map((r) => r.bars[1]).join(" "));
+  check("a rule row is as wide as the box, not as wide as its glyphs", Math.abs(rows[8].right - rows[7].right) <= 1, `${rows[8].right} vs ${rows[7].right}`);
+  check("the notice's rows reach the caption's right edge", Math.abs(rows[4].bars[1] - rows[0].bars[2]) <= 1, `${rows[4].bars[1]} vs ${rows[0].bars[2]}`);
+  if (id === "laid") {
+    check("every row is given one left edge", same(rows.map((r) => r.left)), rows.map((r) => r.left).join(" "));
+    check("each row reaches the row below it", rows.slice(0, -1).every((r, k) => Math.abs(r.top + r.height - rows[k + 1].top) <= 1), rows.map((r) => `${r.top}+${r.height}`).join(" "));
+  }
+}
+out.push("", `${"=".repeat(52)}`, `FAILURES: ${fails}`);
+document.getElementById("report").innerHTML = out.join("\n");
+document.title = fails ? `FAIL (${fails})` : "PASS";
+window.__fails = fails;
+</script>
+</body>
+</html>

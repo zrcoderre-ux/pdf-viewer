@@ -135,50 +135,48 @@ const laidOf = (line) => String(line.__laid || "").split("|").map(parseFloat);
  * every layout pass (applyMatchedLayout), which is after the page fill, after
  * every settled edit, on every font change, and each time a PDF's grid lands.
  *
- * A row that is a table of its own (`.rt`) has no text rows to size its
- * columns — two stacked boxes meet at a bottom rule and a top rule, and the
- * top rule of the second, drawn alone, would take its `─` glyphs' own width,
- * right in a monospace font and not in any other — so it is sized to the
- * block under it where that block shares its bars.
+ * A box is drawn as a box: every consecutive rule row — a STACK, not only the
+ * run of rows carrying their bars at the same offsets — is measured together
+ * against one column grid, and each row's cells are set to it. The stack and
+ * not the run, because the art's own columns wobble: one line of a notice too
+ * long for the box pushes that row's closing bar a character or two out, and
+ * measured on its own that row is drawn at its own width — a box with a step
+ * in its side. It also covers what a row that is a table of its own (`.rt`)
+ * could never size for itself: two stacked boxes meet at a bottom rule and a
+ * top rule, and the top rule of the second, drawn alone, would take its `─`
+ * glyphs' own width, right in a monospace font and not in any other.
  *
  * A box never wraps (a wrapped cell is a box with a hole in it), so a box
  * wider than its sheet has the SHEET widened for it, as line lock widens a
  * page for its longest numbered line; the stage scrolls sideways.
  *
- * And on a page laid on its PDF's grid (side by side) every line is
- * positioned on its own, so no two rows share an anonymous table at all:
- * there each box's rows are measured together, every column set to the
- * widest cell in it, the rows given one left edge, and each row made as tall
- * as the gap to the row below it, so its bar meets the next row's — the box
- * is a box there too.
+ * On a page laid on its PDF's grid (side by side) every line is positioned on
+ * its own, so no two rows share an anonymous table and nothing holds a box
+ * together but this pass: there the stack is given one left edge as well, and
+ * each row made as tall as the gap to the row below it, so its bar meets the
+ * next row's.
  */
 export function fitRuleRows(root) {
   for (const line of root.querySelectorAll(".line.rl")) {
     line.classList.remove("fit");
     line.style.height = "";
     for (const c of cellsOf(line)) c.style.width = "";
+    // The left a pass of its own put back: this one's is written over it
+    // below, and a row that is no longer part of a stack keeps the layout's.
+    const l = laidOf(line);
+    if (!isNaN(l[0])) line.style.left = isNaN(l[1]) ? "" : l[1] + "px";
   }
   for (const sec of root.querySelectorAll(".tpage")) {
     if (!sec.__ruleWide) continue;
     sec.__ruleWide = false;
     sec.style.width = ""; sec.style.maxWidth = "";
   }
+  for (const stack of ruleStacks(root)) fitStack(stack);
   const widen = new Map();
   for (const block of ruleBlocks(root)) {
     const line = block.lines[0];
     const body = line.closest(".page-body");
     if (!body) continue;
-    if (body.classList.contains("fixed")) { fitLaidBlock(block); continue; }
-    if (line.classList.contains("rt") && block.lines.length > 1) {
-      // The lone row's own widths are measured with it alone; the block's
-      // rows share a table and are measured as one.
-      const cells = cellsOf(line), ncells = cellsOf(block.lines[1]);
-      if (ncells.length === cells.length) {
-        const ws = ncells.map((c) => c.getBoundingClientRect().width);
-        line.classList.add("fit");
-        cells.forEach((c, i) => { c.style.width = ws[i] + "px"; });
-      }
-    }
     const sec = body.closest(".tpage");
     if (!sec || sec.classList.contains("matched")) continue;
     const limit = body.getBoundingClientRect().right - parseFloat(getComputedStyle(body).paddingRight || 0);
@@ -194,20 +192,108 @@ export function fitRuleRows(root) {
   }
 }
 
-function fitLaidBlock(block) {
-  if (block.lines.length < 2) return;
-  const rows = block.lines.map(cellsOf);
-  const n = Math.max(...rows.map((r) => r.length));
-  const ws = new Array(n).fill(0);
-  for (const r of rows) r.forEach((c, i) => { ws[i] = Math.max(ws[i], c.getBoundingClientRect().width); });
-  // The left and top the layout gave each row are in its own record, never
-  // read back off the style this overrides.
-  const laid = block.lines.map(laidOf);
+/** The consecutive rule rows of a page: one box, whatever its rows' own bars say. */
+function ruleStacks(root) {
+  const stacks = [];
+  let run = null;
+  for (const line of root.querySelectorAll(".line")) {
+    const rl = line.classList.contains("rl");
+    if (rl && run && run[run.length - 1].nextElementSibling === line) run.push(line);
+    else if (rl) { run = [line]; stacks.push(run); }
+    else run = null;
+  }
+  return stacks;
+}
+
+// How far apart two rows' bars may stand and still be the same rule, in the
+// characters of the file's own text. The art is drawn to fixed columns, and
+// what moves a bar off them is a row whose text would not fit inside them —
+// a character or two, never a column of its own.
+const RULE_COL_SLOP = 3;
+
+/**
+ * A stack of rule rows measured as one box. `rows` are each row's bar offsets
+ * in the file's own text, `widths` the width each of its cells needs — one
+ * more than its bars: the cell before the first bar, one between each pair,
+ * and the cell after the last. Returns `lead`, the width before every row's
+ * first bar, and `spans`, per row, the width of each cell between two bars.
+ *
+ * The bars stand in columns: offsets within `slop` of each other are one
+ * column, except where that would put two of a row's own bars in it. Each
+ * column is then set far enough right for every cell that ends there, a
+ * column at a time, left to right — so a cell spanning three columns pushes
+ * the third out where it must and leaves the ones between it alone, and every
+ * row's bar at a given column stands at the same place.
+ */
+export function ruleGrid(rows, widths, slop = RULE_COL_SLOP) {
+  const at = new Map();
+  rows.forEach((bars, k) => bars.forEach((o) => { if (!at.has(o)) at.set(o, new Set()); at.get(o).add(k); }));
+  const col = new Map();
+  let idx = -1, prev = null, held = null;
+  for (const o of [...at.keys()].sort((a, b) => a - b)) {
+    const here = at.get(o);
+    const clash = held && [...here].some((k) => held.has(k));
+    if (prev == null || o - prev > slop || clash) { idx++; held = new Set(here); }
+    else for (const k of here) held.add(k);
+    col.set(o, idx);
+    prev = o;
+  }
+  const w = (k, i) => { const v = widths[k] && widths[k][i]; return v > 0 ? v : 0; };
+  let lead = 0;
+  rows.forEach((bars, k) => { lead = Math.max(lead, w(k, 0)); });
+  const x = new Array(idx + 1).fill(0);
+  for (let j = 1; j <= idx; j++) {
+    let v = x[j - 1];
+    rows.forEach((bars, k) => {
+      for (let i = 0; i + 1 < bars.length; i++) {
+        if (col.get(bars[i + 1]) !== j) continue;
+        v = Math.max(v, x[col.get(bars[i])] + w(k, i + 1));
+      }
+    });
+    x[j] = v;
+  }
+  const spans = rows.map((bars) => {
+    const out = [];
+    for (let i = 0; i + 1 < bars.length; i++) out.push(x[col.get(bars[i + 1])] - x[col.get(bars[i])]);
+    return out;
+  });
+  return { lead, spans };
+}
+
+/** A row's bar offsets as dressLines recorded them. */
+const barsOf = (line) => String(line.dataset.rk || "").split(",").filter((s) => s !== "").map(Number);
+// A `─` run needs no width of its own: it is a line drawn across whatever its
+// cell is given, and measured before the box is fitted it would ask for the
+// width of ninety glyphs in a font that was never meant to draw them.
+const needOf = (c) => (!c || c.classList.contains("hf") ? 0 : c.getBoundingClientRect().width);
+
+function fitStack(lines) {
+  if (lines.length < 2) return;
+  const rows = [], cells = [], kept = [];
+  for (const line of lines) {
+    const bars = barsOf(line), cs = cellsOf(line);
+    // The bars are counted in the file's text and the cells in the line's
+    // own: a row where they disagree is left to itself rather than fitted to
+    // a grid its cells do not answer to.
+    if (!bars.length || cs.length !== bars.length + 1) continue;
+    rows.push(bars); cells.push(cs); kept.push(line);
+  }
+  if (kept.length < 2) return;
+  const { lead, spans } = ruleGrid(rows, cells.map((cs) => cs.map(needOf)));
+  // Side by side each row stands where the PDF's grid put it, so the stack is
+  // squared up there as well: one left for all of them, and each row as tall
+  // as the gap to the next. The left and top the layout gave a row are in its
+  // own record, never read back off the style this overrides.
+  const body = kept[0].closest(".page-body");
+  const laid = body && body.classList.contains("fixed") ? kept.map(laidOf) : null;
   let left = null;
-  for (const l of laid) if (!isNaN(l[1])) left = left == null ? l[1] : Math.min(left, l[1]);
-  block.lines.forEach((line, k) => {
+  if (laid) for (const l of laid) if (!isNaN(l[1])) left = left == null ? l[1] : Math.min(left, l[1]);
+  kept.forEach((line, k) => {
     line.classList.add("fit");
-    cellsOf(line).forEach((c, i) => { c.style.width = ws[i] + "px"; });
+    const cs = cells[k];
+    cs[0].style.width = lead + "px";
+    spans[k].forEach((v, i) => { cs[i + 1].style.width = v + "px"; });
+    if (!laid) return;
     if (left != null) line.style.left = left + "px";
     const top = laid[k][0], next = k + 1 < laid.length ? laid[k + 1][0] : NaN;
     if (!isNaN(top) && !isNaN(next) && next > top) line.style.height = (next - top) + "px";

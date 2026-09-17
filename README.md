@@ -1177,9 +1177,10 @@ boxes), with `viewer/xlsx-read.js` reading the workbook;
 means, where a row points) and `viewer/xlsx-write.js` (the Fix? cells
 written back into the same workbook, every other part copied through);
 `node test-textdoc.mjs`, `node test-pseudo-key.mjs`, `node test-pdfsync.mjs`,
-`node test-xlsx-read.mjs`, `node test-xlsx-write.mjs` and `node test-leaks.mjs`
-cover them, and `node test-long-export-scan.mjs` covers what a long export
-costs to scan.
+`node test-xlsx-read.mjs`, `node test-xlsx-write.mjs`, `node test-rules.mjs`
+and `node test-leaks.mjs` cover them, and `node test-long-export-scan.mjs`
+covers what a long export costs to scan. `test-rules.html`, opened over http,
+reads the drawn boxes' geometry back out of a page.
 
 ## Install
 
@@ -1230,6 +1231,7 @@ viewer/viewer.html                   PDF viewer shell
 viewer/text-reader.html / .js / .css Text reader for PDF-Linker's exports (pages, cites, key)
 viewer/textdoc.js                    Text reader's document model (pure; test-textdoc.mjs)
 viewer/pdfsync.js                    Text reader's PDF pane decisions: matching, ranges, scroll sync (pure; test-pdfsync.mjs)
+viewer/rules.js                      Text reader's box-drawing glyphs drawn as boxes (column grid pure; test-rules.mjs)
 viewer/pseudo-key.js                 pseudonym_key.xlsx reader + fake↔real swaps (pure; test-pseudo-key.mjs)
 viewer/xlsx-read.js                  Minimal .xlsx reader (pure; test-xlsx-read.mjs)
 viewer/xlsx-write.js                 Writes cells back into an .xlsx, the rest copied through (pure; test-xlsx-write.mjs)
