@@ -45,6 +45,43 @@ export function matchPdf(exportName, pdfNames, forward) {
   return null;
 }
 
+/** The name a file takes once the key is run forward over it, folded as a stem. */
+export function fakedStem(name, forward) {
+  if (typeof forward !== "function") return "";
+  let faked = "";
+  try { faked = forward(spaceStem(String(name).replace(/\.pdf$/i, ""))); } catch { faked = ""; }
+  return faked ? spaceStem(faked).toLowerCase() : "";
+}
+
+/**
+ * `matchPdf` for MANY lookups against the SAME list of PDFs. matchPdf runs
+ * the key forward over every candidate for every name it is asked about, and
+ * a LEAKS worksheet asks it thousands of times: a case folder's worth of
+ * candidates then costs hundreds of thousands of translations, which is the
+ * kind of arithmetic that stops a tab. The answer depends on the candidate,
+ * not on the name, so each candidate is translated ONCE and written down
+ * under both the stem it has and the stem it takes; a lookup is then the name's
+ * own stem read out of a map.
+ *
+ * Returns `(exportName) => the matching PDF, or null` — the same answer
+ * `matchPdf(exportName, pdfNames, forward)` gives, the first candidate in the
+ * list still winning.
+ */
+export function pdfMatcher(pdfNames, forward) {
+  const list = (pdfNames || []).slice();
+  const at = new Map(); // a stem → the first candidate that answers to it
+  list.forEach((pdf, i) => {
+    for (const s of [normalizeStem(pdf), fakedStem(pdf, forward)]) if (s && !at.has(s)) at.set(s, i);
+  });
+  const memo = new Map();
+  return (exportName) => {
+    const want = normalizeStem(exportName);
+    if (!want) return null;
+    if (!memo.has(want)) memo.set(want, at.has(want) ? list[at.get(want)] : null);
+    return memo.get(want);
+  };
+}
+
 /**
  * Per text page, the name of the DOCUMENT it belongs to: a Combined Text.txt
  * member's banner name for the pages under that banner, else the file's own

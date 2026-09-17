@@ -10,7 +10,7 @@ import {
   isLeaksName, leaksRank, headerIndex, sheetsLookLikeLeaks, leaksSheet, parseLeaks, classifyFix, isKeepKind,
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
   packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE,
-  rowFile, reviewOrder, leakFileOrder, fileDone,
+  rowFile, reviewOrder, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
@@ -91,6 +91,22 @@ check("Context: the two halves, or the original alone", [splitContext("a\n" + CO
   check("a File name reaches its export through the key", matchExport("Rasho v Quillmark - MTC.pdf", docs, forward), "Strangeways v Melbury - MTC.txt");
   check("…a bare stem too, a Word file too, a quarantined export too", [matchExport("Order.docx", docs, forward), matchExport("Reply.pdf", docs, null)], ["Order.txt", "Reply.txt.LEAK"]);
   check("no match, no export", matchExport("Nothing.pdf", docs, forward), null);
+  {
+    // The same answers, without running the key forward over a candidate per
+    // lookup: a worksheet asks this thousands of times.
+    const many = ["Rasho v Quillmark - MTC.pdf", "Order.docx", "Reply.pdf", "Nothing.pdf", "", "Rasho v Quillmark - MTC.pdf"];
+    const one = exportMatcher(docs, forward);
+    check("exportMatcher answers as matchExport does, name for name",
+      many.map(one), many.map((f) => matchExport(f, docs, forward)));
+    check("…with no key, and with no exports",
+      [many.map(exportMatcher(docs, null)), many.map(exportMatcher([], forward))],
+      [many.map((f) => matchExport(f, docs, null)), many.map(() => null)]);
+    let calls = 0;
+    const counted = (s) => { calls++; return forward(s); };
+    const m = exportMatcher(docs, counted);
+    for (let i = 0; i < 500; i++) m(many[i % many.length]);
+    check("…and the key is run over each distinct name once, not per lookup and candidate", calls <= many.length, true);
+  }
 }
 
 console.log("the walk: one document at a time");

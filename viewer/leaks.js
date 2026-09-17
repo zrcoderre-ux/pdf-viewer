@@ -24,7 +24,7 @@
 // A row's decision is stored on the row as `fix` beside the sheet's own
 // `fix0`, so what changed — and only that — is written back (fixEdits).
 
-import { matchPdf } from "./pdfsync.js";
+import { matchPdf, normalizeStem, fakedStem } from "./pdfsync.js";
 
 export const LEAKS_SHEET = "LEAKS";
 export const LEAKS_FILE = "LEAKS.xlsx";
@@ -297,6 +297,32 @@ export function matchExport(fileName, exportNames, forward) {
   if (!fileName) return null;
   for (const e of exportNames || []) if (matchPdf(e, [fileName], forward)) return e;
   return null;
+}
+
+/**
+ * `matchExport` for MANY lookups against the SAME list of exports — the
+ * worksheet's rows, which name a handful of documents between thousands of
+ * them. matchExport walks the whole list and runs the key forward over the
+ * File name once per export on the way; here the exports are indexed by stem
+ * once, the key is run forward over each File name once, and the answer is
+ * two map lookups. Same answer, the first export in the list still winning.
+ */
+export function exportMatcher(exportNames, forward) {
+  const list = (exportNames || []).slice();
+  const at = new Map(); // an export's stem → its place in the list
+  list.forEach((e, i) => { const s = normalizeStem(e); if (s && !at.has(s)) at.set(s, i); });
+  const memo = new Map();
+  return (fileName) => {
+    if (!fileName) return null;
+    if (memo.has(fileName)) return memo.get(fileName);
+    let best = -1;
+    for (const s of [normalizeStem(fileName), fakedStem(fileName, forward)]) {
+      if (s && at.has(s) && (best < 0 || at.get(s) < best)) best = at.get(s);
+    }
+    const hit = best >= 0 ? list[best] : null;
+    memo.set(fileName, hit);
+    return hit;
+  };
 }
 
 // ---- working the rows ----------------------------------------------------------------

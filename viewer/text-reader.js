@@ -113,6 +113,53 @@ let masterInfo = null;       // { name, sheet, rows, partial } once it is attach
 let masterHandle = null;     // its file handle, remembered between sessions
 let masterNeeds = null;      // …the same handle, when the browser wants it re-authorised first
 let dirty = false;
+
+// ── the same names, matched once ───────────────────────────────────────────────
+//
+// Matching a name through the key — an export to its PDF, a LEAKS File cell to
+// its export — runs the key FORWARD over every candidate, every time it is
+// asked (pdfsync.matchPdf). Asked once per document that is nothing. Asked
+// once per row of a worksheet with thousands of rows in it, against a folder
+// with hundreds of documents in it, it is hundreds of thousands of
+// translations on every open and after every decision — seconds of arithmetic
+// at a time, which is a tab that never finishes opening a file.
+//
+// So the matchers are built once and kept. Each translates its candidates ONCE
+// and answers from a map (pdfsync.pdfMatcher, leaks.exportMatcher).
+//
+// And they are built from the WHOLE key, keeps and all — which is both the
+// cheaper thing and the truer one. PDF-Linker named these files from their
+// stems run through the key, before anybody had decided to keep anything; the
+// names on disk are what they are. Translating them through the key as the
+// keeps have left it would make the folder's own names stop matching the
+// moment a name in one of them was kept, and would throw the index away on
+// every decision — a folder of PDFs costs a translation each to index.
+let nameFwdMemo = { key: null, fwd: null };
+/** real → fake over a file NAME, through the whole key; null where there is none. */
+function fwdName() {
+  if (nameFwdMemo.key !== key) nameFwdMemo = { key, fwd: key ? PK.compileForward(key) : null };
+  const f = nameFwdMemo.fwd;
+  return f ? (s) => PK.forwardRuns(f, s).map((r) => (r.t === "swap" ? r.to : r.s)).join("") : null;
+}
+let nameMatch = null;
+function nameMatchers() {
+  if (!nameMatch || nameMatch.key !== key || nameMatch.docs !== folderDocs || nameMatch.pdfs !== folderPdfs) {
+    nameMatch = { key, docs: folderDocs, pdfs: folderPdfs, fwdName: fwdName(), pdfFor: null, exportFor: null };
+  }
+  return nameMatch;
+}
+/** The folder's PDF an export (or a File cell's name) belongs to, or null. */
+function pdfForName(name) {
+  const m = nameMatchers();
+  if (!m.pdfFor) m.pdfFor = PS.pdfMatcher(folderPdfs.map((p) => p.name), m.fwdName);
+  return m.pdfFor(name);
+}
+/** The folder's export a File cell's name belongs to, or null. */
+function exportForName(name) {
+  const m = nameMatchers();
+  if (!m.exportFor) m.exportFor = LK.exportMatcher(folderDocs.map((d) => d.name), m.fwdName);
+  return m.exportFor(name);
+}
 let editing = false;         // a document opens protected; ✎ Edit lifts it
 let provider = "lexis";
 let citationRepo = {};
@@ -395,7 +442,17 @@ function fillKeySelect(selectedId) {
 // workbook carries between cases (see attachMaster). The master's are consulted
 // wherever a keep is consulted and written nowhere — PDF-Linker already holds
 // them, and New Real Values.txt is for this case's decisions.
-function allKeeps() { return masterKeeps.length ? keeps.concat(masterKeeps) : keeps; }
+// The two as one list — and the same list each time they have not moved, since
+// what is asked of it is asked thousands of times over and textdoc.keptControl
+// indexes a list by its identity; a fresh array per call would be indexed
+// again on every call.
+let allKeepsMemo = { keeps: null, master: null, all: [] };
+function allKeeps() {
+  if (allKeepsMemo.keeps !== keeps || allKeepsMemo.master !== masterKeeps) {
+    allKeepsMemo = { keeps, master: masterKeeps, all: masterKeeps.length ? keeps.concat(masterKeeps) : keeps };
+  }
+  return allKeepsMemo.all;
+}
 /** Which list a value is kept by: "case", "master", or "". */
 function keptBy(value) {
   if (TD.keptControl(keeps, value)) return "case";
@@ -439,12 +496,18 @@ let keyBindsMemo = { key: null, rx: null };
 function keyBinds(value) {
   if (keyBindsMemo.key !== key) {
     const reals = ((key && key.warn) || []).map((w) => w.real).filter(Boolean);
-    keyBindsMemo = { key, rx: reals.length ? PK.buildMatcher(reals) : null };
+    // …and the answers, since the question is asked of every keep on every
+    // repaint and the matcher is an alternation of the whole key.
+    keyBindsMemo = { key, rx: reals.length ? PK.buildMatcher(reals) : null, seen: new Map() };
   }
   const rx = keyBindsMemo.rx;
   if (!rx) return false;
-  rx.lastIndex = 0; // a global matcher carries its place between tests
-  return rx.test(String(value == null ? "" : value));
+  const v = String(value == null ? "" : value);
+  if (!keyBindsMemo.seen.has(v)) {
+    rx.lastIndex = 0; // a global matcher carries its place between tests
+    keyBindsMemo.seen.set(v, rx.test(v));
+  }
+  return keyBindsMemo.seen.get(v);
 }
 // The keeps worth MARKING: the ones the key binds. A keep is worth seeing
 // because it says "this name was left alone on purpose" — which only means
@@ -488,6 +551,30 @@ function compileKey() {
   reals = k ? PK.compileReals(k) : null;
   // A kept value is never offered, and a real that opens one stays partial.
   ahead = k ? PK.compileTypeahead(k, allKeeps().map((x) => x.value)) : null;
+  warmMatchers();
+}
+// A key's matcher is one alternation over every name in it, and the ENGINE
+// does not build it until something is matched against it — a few thousand
+// names is five seconds of that, once. The first thing to use it is the first
+// document opened, which used to carry the whole cost and take twenty seconds
+// to show a page. So the matchers are put to work here, on a scrap of text,
+// while the operator is still looking at the folder list and nobody is
+// waiting on them. Idle time, and never on the path of anything.
+let warmingMatchers = 0;
+function warmMatchers() {
+  clearTimeout(warmingMatchers);
+  const ready = [rev, fwd, reals];
+  warmingMatchers = setTimeout(() => {
+    const run = () => {
+      for (const c of ready) {
+        if (!c || !c.rx) continue;
+        try { c.rx.lastIndex = 0; c.rx.exec("the quick brown fox"); c.rx.lastIndex = 0; } catch { /* nothing to warm */ }
+      }
+      try { const rx = keptMatcher(); if (rx) { rx.lastIndex = 0; rx.exec("the quick brown fox"); rx.lastIndex = 0; } } catch { /* the same */ }
+    };
+    if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 2000 });
+    else run();
+  }, 0);
 }
 function setKey(parsed) {
   key = parsed || null;
@@ -1195,6 +1282,13 @@ function afterTextChange() {
   // document feel stuck. Everything else here is the edit itself and stays
   // immediate; the underlines catch up once the typing stops.
   placeCitationsSoon();
+  // The text moved, so what the document-wide pass found no longer stands and
+  // it has to be made again — a beat later, like the citations and for the
+  // same reason. Under a key of a few thousand names a long export is seconds
+  // of scanning, and doing it inside the open is a document that takes seconds
+  // to appear; doing it between keystrokes is an editor that will not type.
+  // The marks catch up the moment the reader stops.
+  textEpoch++;
   paintHighlights();
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
@@ -2183,8 +2277,48 @@ function highlightOf(ranges) {
   for (const r of ranges) h.add(r);
   return h;
 }
+// The marks over the text come from TWO passes, and only one of them is
+// expensive.
+//
+// The document-wide pass reads every page under the key's own matcher — every
+// real name standing unfaked, every flagged value, every kept one. Under a key
+// of a couple of thousand names, over a forty-page export, that is most of a
+// second: it is the single most expensive thing the reader does, and a
+// profile of a LEAKS review is three quarters findRealSpans.
+//
+// The row pass marks the value in the bar, wherever it stands. That is one
+// value, and it is cheap.
+//
+// Answering a row changes the row, not the document: the same names are
+// unfaked, the same values flagged. So the document-wide pass is made once for
+// each state of what it reads — the text, the key, the flags, the keeps — and
+// its ranges stand until one of those moves; stepping through a worksheet
+// repaints the row alone. When one of them DOES move (a `no` mirrored as a
+// keep), the pass is made again a beat later rather than between keystrokes,
+// so a fast operator is never waiting on it.
+let textEpoch = 0;   // bumped whenever the text under the marks changes
+let scanned = null;  // what the last document-wide pass was made of
+function scanStale() {
+  return !scanned || scanned.epoch !== textEpoch || scanned.reals !== reals || scanned.flagged !== flagged
+    || scanned.keeps !== keeps || scanned.master !== masterKeeps || scanned.spots !== spots;
+}
 function paintHighlights() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
+  paintRowMarks();
+  if (scanStale()) scanSoon();
+}
+const scanSoon = debounce(() => { if (scanStale()) scanDocument(); }, 150);
+/** The current LEAKS row's value, marked wherever it stands. */
+function paintRowMarks() {
+  if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
+  leakRowRanges = [];
+  if (leakRowValue) for (const body of pageBodies()) for (const r of leakMatches(body, leakRowValue)) leakRowRanges.push({ body, range: r });
+  CSS.highlights.set("leakrow", highlightOf(leakRowRanges.map((x) => x.range)));
+  markLeakHere();
+}
+function scanDocument() {
+  if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
+  scanned = { epoch: textEpoch, reals, flagged, keeps, master: masterKeeps, spots };
   const flaggedRanges = [];
   const leakRanges = [];
   leakHits = [];
@@ -2238,11 +2372,9 @@ function paintHighlights() {
   CSS.highlights.set("flagged", highlightOf(flaggedRanges));
   CSS.highlights.set("leak", highlightOf(leakRanges));
   CSS.highlights.set("kept", highlightOf(keptRanges));
-  // The LEAKS bar's current row, wherever its value stands.
-  leakRowRanges = [];
-  if (leakRowValue) for (const body of bodies) for (const r of leakMatches(body, leakRowValue)) leakRowRanges.push({ body, range: r });
-  CSS.highlights.set("leakrow", highlightOf(leakRowRanges.map((x) => x.range)));
-  markLeakHere();
+  // The row's own marks stand on the same pages, so they are laid again over
+  // the pass that has just been made.
+  paintRowMarks();
   $("st-leaks").textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; right-click one to keep it` : "";
   const nk = keptRanges.length;
   $("st-kept").textContent = nk ? `${nk} kept value${nk === 1 ? "" : "s"} standing as ${nk === 1 ? "it reads" : "they read"}` : "";
@@ -2923,7 +3055,7 @@ async function attachLeaks(bytes, name, handle, { quiet = false, folder = "" } =
   if (leaks) persistLeaks();
   leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", at: -1, mirrored: new Set() };
   const remembered = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));
-  for (const r of parsed.rows) if (r.fix !== r.fix0) mirrorLeakKeep(r);
+  mirrorLeakKeeps(parsed.rows.filter((r) => r.fix !== r.fix0));
   leakRowValue = "";
   leakHere = null;
   renderLeaksTab();
@@ -2960,17 +3092,40 @@ function updateLeaksButton() {
 function boundByKey(value) { return !!(reals && reals.map && reals.map.get(PK.fold(PK.foldGaps(value)))); }
 /** A `no` / `never` on a bound value becomes one of the reader's keeps; withdrawn, it is withdrawn here too. */
 function mirrorLeakKeep(row) {
+  if (!moveLeakKeep(row)) return false;
+  settleKeeps();
+  return true;
+}
+/**
+ * The same for a whole worksheet at once — the decisions remembered from a
+ * session that was not saved, laid back over the rows on attach. Settling is
+ * what costs: the key is compiled again, every pseudonym span in the document
+ * re-marked and the flags redrawn. Done per row, a worksheet with a thousand
+ * answered rows in it settles a thousand times and the tab never comes back;
+ * the rows move first, and it settles once.
+ */
+function mirrorLeakKeeps(rows) {
+  let moved = false;
+  for (const row of rows || []) if (moveLeakKeep(row)) moved = true;
+  if (moved) settleKeeps();
+  return moved;
+}
+/** The keeps list alone: whether this row's decision moved it. */
+function moveLeakKeep(row) {
   const kind = LK.classifyFix(row.fix, row.value).kind;
   const f = PK.fold(row.value);
   const want = LK.isKeepKind(kind) && boundByKey(row.value);
   if (want) { keeps = TD.addKeep(keeps, kind, row.value); leaks.mirrored.add(f); }
   else if (leaks.mirrored.has(f)) { keeps = TD.removeKeep(keeps, row.value); leaks.mirrored.delete(f); }
   else return false;
+  return true;
+}
+/** …and what a change to the keeps costs: the key, the marks, the lists. */
+function settleKeeps() {
   persistValues();
   compileKey();
   remarkKept();
   renderFlags();
-  return true;
 }
 
 // The bar: shown and hidden by ⚠ Leaks in the tools rail and its own ×; it takes
@@ -3057,17 +3212,50 @@ function renderLeaksBar() {
   $("lb-next-open").disabled = !und;
 }
 
-function renderLeaksTab() {
-  const list = $("leaks-list");
-  list.innerHTML = "";
+// The Leaks tab's list is BUILT ONCE per worksheet and written on after that.
+// A worksheet of a few dozen rows could be thrown away and made again on every
+// decision; one of two and a half thousand is ten thousand elements, and
+// making them again after every keystroke is a page that stops answering. So
+// the rows are kept (`leakLis`), a decision writes on the one row it moved,
+// and the click is read from the list rather than bound per row.
+let leakLis = [];
+const leaksList = $("leaks-list");
+leaksList.addEventListener("click", (e) => {
+  const li = e.target.closest && e.target.closest("li");
+  const i = li && li.parentElement === leaksList ? Number(li.dataset.row) : -1;
+  if (i >= 0) goToLeak(i);
+});
+/** One row's tags and title, from its decision as it stands. */
+function paintLeakRow(i) {
+  const li = leakLis[i], r = leakRows()[i];
+  if (!li || !r) return;
+  li.classList.toggle("current", i === (leaks ? leaks.at : -1));
+  const c = LK.classifyFix(r.fix, r.value);
+  const f = li.lastElementChild;
+  f.className = "tag fix " + (c.kind ? (LK.isKeepKind(c.kind) ? "no" : "") : "open");
+  f.textContent = c.kind ? (LK.CONTROLS.includes(c.kind) ? c.kind : c.kind === "error" ? "?" : "typed") : "?";
+  f.title = c.label + (r.fix !== r.fix0 ? " (unsaved)" : "");
+}
+/** The hint, the note and the save button — what every decision changes. */
+function renderLeaksTabState() {
   const rows = leakRows();
   $("leaks-hint").textContent = leaks
     ? `${leaks.name}${leaks.folder ? " · " + leaks.folder : ""} · ${rows.length} row${rows.length === 1 ? "" : "s"}, ${LK.undecidedCount(rows)} undecided. Click a row: the text opens at it.`
     : "Open a case folder with a LEAKS.xlsx in it, or load one, to review its rows here.";
   $("leaks-actions").hidden = !leaks;
-  rows.forEach((r, i) => {
+  const n = rows.filter((r) => r.fix !== r.fix0).length;
+  $("leaks-save").disabled = !n;
+  $("leaks-note").textContent = !leaks ? "" : n
+    ? `${n} decision${n === 1 ? "" : "s"} not yet saved (remembered here until then).`
+    : leaks.handle || dirHandle ? `Saves into ${leaks.folder || folderName || "the folder"}/${leaks.name}. After saving, double-click Apply Leak Fixes.bat, or re-run PDF-Linker.` : "No folder is open: a save asks where to write the worksheet.";
+}
+/** The whole list, from scratch: a worksheet attached, or dropped. */
+function renderLeaksTab() {
+  const rows = leakRows();
+  const frag = document.createDocumentFragment();
+  leakLis = rows.map((r, i) => {
     const li = document.createElement("li");
-    li.className = i === (leaks ? leaks.at : -1) ? "current" : "";
+    li.dataset.row = String(i);
     const t = document.createElement("span");
     t.className = "tag type " + typeClass(r.type);
     t.textContent = typeClass(r.type) === "leak" ? "LEAK" : typeClass(r.type) === "reid" ? "REID" : "review";
@@ -3075,34 +3263,32 @@ function renderLeaksTab() {
     const v = document.createElement("span");
     v.className = "lv";
     v.textContent = r.value;
-    const c = LK.classifyFix(r.fix, r.value);
     const f = document.createElement("span");
-    f.className = "tag fix " + (c.kind ? (LK.isKeepKind(c.kind) ? "no" : "") : "open");
-    f.textContent = c.kind ? (LK.CONTROLS.includes(c.kind) ? c.kind : c.kind === "error" ? "?" : "typed") : "?";
-    f.title = c.label + (r.fix !== r.fix0 ? " (unsaved)" : "");
     li.append(t, v, f);
     li.title = `${r.value} — ${r.type} — ${r.file} — ${r.where}`;
-    li.addEventListener("click", () => goToLeak(i));
-    list.appendChild(li);
+    frag.appendChild(li);
+    return li;
   });
-  const n = rows.filter((r) => r.fix !== r.fix0).length;
-  $("leaks-save").disabled = !n;
-  $("leaks-note").textContent = !leaks ? "" : n
-    ? `${n} decision${n === 1 ? "" : "s"} not yet saved (remembered here until then).`
-    : leaks.handle || dirHandle ? `Saves into ${leaks.folder || folderName || "the folder"}/${leaks.name}. After saving, double-click Apply Leak Fixes.bat, or re-run PDF-Linker.` : "No folder is open: a save asks where to write the worksheet.";
+  leaksList.innerHTML = "";
+  leaksList.appendChild(frag);
+  for (let i = 0; i < leakLis.length; i++) paintLeakRow(i);
+  renderLeaksTabState();
 }
 
 /** Show row `i` in the bar and take the text to it. */
 async function goToLeak(i, { locate = true } = {}) {
   const rows = leakRows();
   if (!rows.length) return;
+  const was = leaks.at;
   leaks.at = ((i % rows.length) + rows.length) % rows.length;
   const row = rows[leaks.at];
   leakRowValue = row.value;
   leakHere = null;
   showLeaksBar(true);
   renderLeaksBar();
-  renderLeaksTab();
+  paintLeakRow(was);
+  paintLeakRow(leaks.at);
+  renderLeaksTabState();
   if (locate) await locateLeak(row);
   else paintHighlights();
   warmForLeaks();
@@ -3146,13 +3332,15 @@ function gutterOf(range) {
  */
 async function locateLeak(row) {
   const files = LK.parseFiles(row.file);
-  const fwdName = fwd ? (s) => forwardText(s).text : null;
-  const here = (name) => name && files.some((f) => LK.matchExport(f, [name], fwdName));
+  // The stems this row's files answer to — their own and the ones the key
+  // gives them — read once, since `here` is asked per member and per page.
+  const wantStems = new Set();
+  for (const f of files) for (const s of [PS.normalizeStem(f), PS.fakedStem(f, fwdName())]) if (s) wantStems.add(s);
+  const here = (name) => !!name && wantStems.has(PS.normalizeStem(name));
   let target = null;
   if (files.length && !here(fileName)) {
-    const names = folderDocs.map((d) => d.name);
     for (const f of files) {
-      const e = LK.matchExport(f, names, fwdName);
+      const e = exportForName(f);
       if (e) { target = folderDocs.find((d) => d.name === e); break; }
     }
     // A combined file already open holds every member: stay in it.
@@ -3219,7 +3407,8 @@ function decideLeak(text, { advance = false } = {}) {
   persistLeaks();
   mirrorLeakKeep(row);
   renderLeaksBar();
-  renderLeaksTab();
+  paintLeakRow(leaks.at);
+  renderLeaksTabState();
   updateLeaksButton();
   paintHighlights();
   warmForLeaks();
@@ -3261,7 +3450,8 @@ async function saveLeaks() {
   for (const r of leaks.parsed.rows) r.fix0 = r.fix;
   try { localStorage.removeItem(leaksStoreKey()); } catch { /* fine */ }
   renderLeaksBar();
-  renderLeaksTab();
+  for (let i = 0; i < leakLis.length; i++) paintLeakRow(i);
+  renderLeaksTabState();
   const und = LK.undecidedCount(leaks.parsed.rows);
   toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still undecided` : "") + ". Double-click Apply Leak Fixes.bat (or re-run PDF-Linker) to apply them to the files.", { ms: 6000 });
 }
@@ -3625,7 +3815,6 @@ function pdfFirstLine(el) {
 function resolvePdfSources() {
   if (!doc) { pdfSources = []; return; }
   const names = PS.pageSources(doc.pages, fileName);
-  const fwdName = fwd ? (s) => forwardText(s).text : null;
   // A combined file's members, in the order its header lists them: each
   // is matched to a PDF on its own — the folder's, then one picked by hand
   // (by name through the key, else by order) — never to one PDF for all.
@@ -3633,9 +3822,9 @@ function resolvePdfSources() {
   const memo = new Map();
   pdfSources = names.map((n) => {
     if (!memo.has(n)) {
-      const hit = PS.matchPdf(n, folderPdfs.map((p) => p.name), fwdName);
+      const hit = pdfForName(n);
       let src = hit ? folderPdfs.find((p) => p.name === hit) : null;
-      if (!src && pickedPdfs.size) { const p = PS.matchPdf(n, [...pickedPdfs.keys()], fwdName); if (p) src = pickedPdfs.get(p); }
+      if (!src && pickedPdfs.size) { const p = PS.matchPdf(n, [...pickedPdfs.keys()], fwdName()); if (p) src = pickedPdfs.get(p); }
       if (!src && pickedByMember.has(n)) src = pickedByMember.get(n);
       if (!src && pdfPicked && members.length <= 1) src = pdfPicked;
       memo.set(n, src || null);
@@ -3799,19 +3988,20 @@ function leakFileWindow() {
  * belongs to it.
  */
 function leakWarmTargets(limit) {
-  const fwdName = fwd ? (s) => forwardText(s).text : null;
-  const names = folderPdfs.map((p) => p.name);
   const members = doc ? PS.pageSources(doc.pages, fileName) : [];
+  // The open document's own members, indexed the same way: which of them a
+  // row's File cell names, worked out once per name rather than per page.
+  const memberFor = LK.exportMatcher(members, fwdName());
   const out = [], seen = new Set();
   for (const t of LK.leakPages(leakRows(), leaks ? leaks.at : 0, leakFileWindow())) {
     if (t.page == null) continue;
     let src = null, page = t.page;
-    const hit = t.file ? PS.matchPdf(t.file, names, fwdName) : null;
+    const hit = t.file ? pdfForName(t.file) : null;
     if (hit) src = folderPdfs.find((p) => p.name === hit);
     else if (doc) {
       for (let i = 0; i < doc.pages.length; i++) {
         if (PS.pdfPageOf(doc.pages[i]) !== page) continue;
-        if (t.file && members[i] !== t.file && !LK.matchExport(t.file, [members[i]], fwdName)) continue;
+        if (t.file && members[i] !== t.file && memberFor(t.file) !== members[i]) continue;
         const tgt = pdfTarget(i);
         if (tgt) { src = tgt.src; page = tgt.page; break; }
       }
@@ -3933,14 +4123,13 @@ const idle = () => new Promise((res) => {
  */
 function leakDocNames() {
   if (!leaks || !folderDocs.length) return [];
-  const fwdName = fwd ? (s) => forwardText(s).text : null;
-  const names = folderDocs.map((d) => d.name);
   // A combined file already open holds every member: there is no hop to make.
   const open = [fileName, ...(doc ? PS.combinedMembers(doc.pages) : [])].filter(Boolean);
+  const openFor = LK.exportMatcher(open, fwdName());
   const out = [];
   for (const t of LK.leakPages(leakRows(), leaks.at, leakFileWindow())) {
-    if (!t.file || LK.matchExport(t.file, open, fwdName)) continue;
-    const e = LK.matchExport(t.file, names, fwdName);
+    if (!t.file || openFor(t.file)) continue;
+    const e = exportForName(t.file);
     if (e && !out.includes(e)) out.push(e);
   }
   return out;
@@ -4858,13 +5047,12 @@ async function usePickedPdfs(files) {
   if (!list.length || !doc) return;
   const members = PS.combinedMembers(doc.pages);
   if (members.length <= 1) { await usePickedPdf(list[0]); return; }
-  const fwdName = fwd ? (s) => forwardText(s).text : null;
   const byName = [], unmatched = [];
   for (const f of list) {
     pdfCache.delete(f.name);
     const src = { name: f.name, file: f };
     pickedPdfs.set(f.name, src);
-    const m = members.find((mm) => PS.matchPdf(mm, [f.name], fwdName));
+    const m = members.find((mm) => PS.matchPdf(mm, [f.name], fwdName()));
     if (m) byName.push(m); else unmatched.push(src);
   }
   resolvePdfSources();
@@ -4945,6 +5133,20 @@ window.__textReaderMaster = (bytes, name) => readMasterBytes(new Uint8Array(byte
 window.__textReaderMasterState = () => ({
   info: masterInfo, keeps: masterKeeps.map((k) => k.control + ":" + k.value),
   needs: !!masterNeeds, seen: [...keptSeen],
+});
+
+// An error nobody caught used to be a reader that simply stopped where it was
+// — a document half open, the empty screen still up, and nothing said. It is
+// said now: the message goes in the bar, where it can be read back to whoever
+// has to fix it, and the console still has the stack.
+window.addEventListener("error", (e) => {
+  console.error(e.error || e.message);
+  toast("Something went wrong: " + ((e.error && e.error.message) || e.message || "unknown error") + " — the console has the details.", { error: true });
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  console.error(r);
+  toast("Something went wrong: " + ((r && r.message) || r || "unknown error") + " — the console has the details.", { error: true });
 });
 
 // ── boot ───────────────────────────────────────────────────────────────────────────────────

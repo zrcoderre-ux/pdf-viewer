@@ -428,9 +428,31 @@ export function removeKeep(keeps, value) {
   const k = foldKey(value);
   return (keeps || []).filter((x) => foldKey(x.value) !== k);
 }
+// A keeps list is asked about a value over and over: once per pseudonym span
+// on the page when the marks are laid again, once per row of the key when the
+// key is compiled. Scanning the list for each question is what makes a case
+// with a thousand keeps in it a thousand times slower than one with ten —
+// and a leak review makes a keep every time the operator says "no", so the
+// reader got slower the further through the worksheet it went.
+//
+// So the list is indexed, and the index is hung off the list itself: the
+// reader replaces a keeps list rather than editing it in place (addKeep and
+// removeKeep above both return a new one), so an index built for a list is
+// good for as long as that list is the list, and goes when it does.
+const NO_KEEPS = [];
+const keepIndexes = new WeakMap();
+function keepIndex(keeps) {
+  const list = keeps || NO_KEEPS;
+  let index = keepIndexes.get(list);
+  if (!index) {
+    index = new Map();
+    for (const k of list) { const f = foldKey(k && k.value); if (!index.has(f)) index.set(f, k); }
+    keepIndexes.set(list, index);
+  }
+  return index;
+}
 export function keptControl(keeps, value) {
-  const k = foldKey(value);
-  const hit = (keeps || []).find((x) => foldKey(x.value) === k);
+  const hit = keepIndex(keeps).get(foldKey(value));
   return hit ? hit.control : "";
 }
 

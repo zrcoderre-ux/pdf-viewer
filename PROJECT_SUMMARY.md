@@ -138,6 +138,63 @@ of going to disk; in a big folder that is the ONE document the walk will
 reach next, read while the operator is still answering the last rows of this
 one.
 
+A worksheet of THOUSANDS of rows, in a case whose key holds thousands of
+names, was a different animal again, and five things in the reader turned out
+to be quadratic or worse in it. Each was measured in Chromium against a
+generated case — 200 exports of 150 pages, 2,500 leak rows, a key of 4,000 —
+before and after.
+
+1. **The key's matcher was too big to run.** Every space in a value is written
+   as a fifty-character gap, so a few thousand names make an alternation of
+   half a megabyte; the engine accepts the pattern and then throws *Invalid
+   regular expression: too large* the FIRST time anything is matched against
+   it. That first time was inside the first document opened, so the document
+   never appeared and the empty screen stayed up — "the file is not even
+   opening". `buildMatcher` now cuts a pattern past MAX_PATTERN into several
+   regexes and works them as one (`Matcher`: `exec` with `lastIndex`, `test`,
+   and `String.replace` through `Symbol.replace`), leftmost first and the
+   longer match where two start together — which is what the one alternation's
+   longest-value-first order meant. A key that fits in one regex still gets
+   exactly that one regex. Pinned by a differential test against the single
+   matcher.
+2. **The engine compiles a matcher on first use, not when it is built** — five
+   seconds for a key of four thousand names, paid by whoever opened the first
+   document. `warmMatchers` runs each one against a scrap of text in idle time
+   as soon as the key is compiled. First open: 17.4 s → 2.4 s.
+3. **The marks were scanned again on every keystroke.** `paintHighlights` read
+   every page under the key's matcher — three quarters of a profile of a leak
+   review was `findRealSpans`. What it finds changes only when the text, the
+   key, the flags or the keeps change, and answering a row changes none of
+   them, so the pass is made once per state of those (`scanStale`, `textEpoch`)
+   and a row step repaints the row alone (`paintRowMarks`). When it IS stale it
+   settles a beat later (`scanSoon`), like the citation underlines and for the
+   same reason. Ten `yes` decisions: 4.5 s → 0.44 s.
+4. **Every keep was a scan of every keep.** `textdoc.keptControl` walked the
+   list folding each value, and it is asked once per pseudonym span on the page
+   (`remarkKept`) and once per key row (`keyLessKeeps`) — with a thousand keeps
+   on a long document that is tens of millions of comparisons, and a leak
+   review makes a keep every time the operator says "no", so the reader got
+   slower the further through the worksheet it went. The list is now indexed by
+   identity in a `WeakMap` (it is always replaced, never edited in place), and
+   `allKeeps` memoises the concatenation so the index survives. Ten `no`
+   decisions: 19 s → 1.5 s.
+5. **Matching a name through the key ran the key over every candidate.**
+   `matchPdf` translates each candidate for each name it is asked about, and
+   `leakDocNames` asked it once per worksheet entry: hundreds of thousands of
+   translations on every open and after every decision. `pdfsync.pdfMatcher`
+   and `leaks.exportMatcher` translate their candidates once and answer from a
+   map (400 ms → 3 ms per pass), and they are built from the WHOLE key rather
+   than the key as the keeps have left it — which is both stable and true, the
+   names on disk having been written before anybody kept anything.
+
+Two smaller ones: `compileTypeahead` asked "does this real open a longer one"
+by scanning every value per value, and now reads each value's own word edges in
+one pass (`openingsOf`, 212 ms → 13 ms at 2,000 names beside 2,500 keeps); and
+the Leaks tab's list is built once and written on (`leakLis`, `paintLeakRow`)
+rather than thrown away and made again — ten thousand elements per keystroke on
+a worksheet of two and a half thousand rows. An uncaught error now also reaches
+the toast bar, since the failure above was silent.
+
 The PDFs behind them are closed again behind the review. `pdfCache` used to
 hold every PDF opened for as long as the folder was open, which is right for
 a case of a document or two and fatal for a folder of three hundred: each

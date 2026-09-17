@@ -9,7 +9,7 @@
 import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
-  compileTypeahead, endingReal, swapsOnSpace, findRealSpans, foldGaps,
+  compileTypeahead, endingReal, swapsOnSpace, findRealSpans, foldGaps, buildMatcher,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -107,6 +107,22 @@ console.log("typeahead");
   check("space swaps a whole name and not a partial", [swapsOnSpace(whole), swapsOnSpace(first), swapsOnSpace(null)], [true, false, false]);
   const kept = compileTypeahead(keyOf([["person-token", "Helen", "Ingrid", "", "", "", 2]]), ["Helen Rasho"]);
   check("a real that opens a KEPT value is partial too", (endingReal(kept, "Helen") || {}).partial, true);
+  {
+    // The openings are read off the values themselves rather than by scanning
+    // them all per real, so what counts as an opening is pinned: a word edge
+    // inside a LONGER value, and nothing else.
+    const edges = compileTypeahead(keyOf([
+      ["person-token", "Helen", "Ingrid", "", "", "", 2],       // opens "Helen Rasho"
+      ["person-token", "Helena", "Ingrida", "", "", "", 2],     // does NOT: "helena rasho" is another name
+      ["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 2],
+      ["entity", "Cross-River", "Alder-Vale", "", "", "", 2],   // a non-word edge that is not a space
+      ["entity", "Cross-River Bank", "Alder-Vale Trust", "", "", "", 2],
+    ]));
+    const partial = Object.fromEntries(edges.map((w) => [w.real, w.partial]));
+    check("openings: a word edge inside a longer value, and nothing else",
+      [partial["Helen"], partial["Helena"], partial["Helen Rasho"], partial["Cross-River"], partial["Cross-River Bank"]],
+      [true, false, false, true, false]);
+  }
   check("a possessive rides the swap", (endingReal(ahead, "and Rasho's") || {}).fake, "Strangeways's");
   check("nothing at the end, nothing offered", endingReal(ahead, "Plaintiff Helen Rasho alleges"), null);
   check("inside a longer word, nothing", endingReal(ahead, "Rashomon Rasho, and Grasho"), null);
@@ -131,6 +147,63 @@ console.log("across lines");
   check("a wrapped real is found with its span", findRealSpans(r, "x Helen\n 5  Rasho y").map((x) => [x.start, x.end, x.real]), [[2, 17, "Helen Rasho"]]);
   check("foldGaps reads the gap as a space", foldGaps("Helen\n 5  Rasho"), "Helen Rasho");
 }
+
+// ---- a key too big for one regular expression ------------------------------------
+//
+// Every space in a value is written as a fifty-character gap, so a few
+// thousand names make a pattern of half a megabyte — which the engine accepts
+// and then refuses to run, throwing the first time anything is matched against
+// it. That first time used to be inside the first document opened, so the file
+// never opened at all. Past a size the matcher is cut into several regexes and
+// worked as one, and what it finds may not change.
+console.log("\na key too big for one regular expression");
+{
+  const names = ["Helen Rasho", "Marcus Delacroix", "Cross River Bank", "Rasho", "Quillmark LLC", "Ingrid Strangeways"];
+  const filler = [];
+  for (let i = 0; i < 4000; i++) filler.push(`Alder Vale Holdings ${i}`);
+  const values = names.concat(filler);
+  const big = buildMatcher(values);
+  const text = "  Plaintiff Helen Rasho and Cross River Bank's agent, Alder Vale Holdings 3712, met Marcus Delacroix.\n"
+    + " 7  Ingrid\n 8  Strangeways signed for Quillmark LLC, and Rasho left.";
+  const found = [];
+  big.lastIndex = 0;
+  for (let m; (m = big.exec(text));) { found.push(m[0]); if (m.index === big.lastIndex) big.lastIndex++; }
+  check("a key of four thousand names matches instead of throwing",
+    found, ["Helen Rasho", "Cross River Bank's", "Alder Vale Holdings 3712", "Marcus Delacroix", "Ingrid\n 8  Strangeways", "Quillmark LLC", "Rasho"]);
+  check("…the longest name at a place still wins over the short one inside it",
+    found.includes("Helen Rasho") && !found.includes("Rasho Rasho"), true);
+  check("…test answers, and leaves no place behind it",
+    [big.test("about Marcus Delacroix today"), big.test("nobody here"), big.lastIndex], [true, false, 0]);
+  check("…and a replace over it covers every match",
+    "Helen Rasho met Marcus Delacroix".replace(big, (m) => "·".repeat(m.length)),
+    "··········· met ················");
+  // The same answers a single regex gives, name for name: the small matcher
+  // over the same values is one regex, so the two can be compared directly.
+  const small = buildMatcher(names);
+  const lines = [
+    "Helen Rasho signed", "Rasho alone", "Cross River Bank's demand", "no names at all here",
+    "Marcus Delacroix and Helen Rasho", "Ingrid\n 4  Strangeways wrapped", "Quillmark LLC, Rasho",
+  ];
+  const run = (rx, s) => { const out = []; rx.lastIndex = 0; for (let m; (m = rx.exec(s));) { out.push(m.index + ":" + m[0]); if (m.index === rx.lastIndex) rx.lastIndex++; } return out; };
+  check("cut into pieces, it answers as the one regex does",
+    lines.map((l) => run(big, l).filter((x) => !/Alder/.test(x))), lines.map((l) => run(small, l)));
+  {
+    // A WALK over a long text, which is what reading a document is: each piece
+    // is scanned once across it, not once per name found, and what comes out
+    // is what the one regex gives.
+    const long = Array.from({ length: 400 }, (_, i) =>
+      ` ${(i % 28) + 1}  Plaintiff Helen Rasho and Marcus Delacroix met Cross River Bank about Alder Vale Holdings ${i}.`).join("\n");
+    const t = Date.now();
+    const found = run(big, long);
+    const ms = Date.now() - t;
+    check("a walk over four hundred lines finds every name",
+      [found.length, found.filter((x) => /Helen Rasho/.test(x)).length], [1600, 400]);
+    check("…and the pieces agree with the one regex on the same walk",
+      found.filter((x) => !/Alder/.test(x)), run(small, long));
+    check("…in a time that says each piece was read once, not once per name", ms < 4000, true);
+  }
+}
+
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

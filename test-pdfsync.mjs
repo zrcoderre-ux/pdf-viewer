@@ -2,7 +2,7 @@
 // Run: node test-pdfsync.mjs
 
 import {
-  normalizeStem, spaceStem, matchPdf, pageSources, pdfPageOf,
+  normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout,
   matchedScale, spreadTops, pageTypeSize, typeSizes, combinedMembers,
@@ -35,6 +35,24 @@ check("the underscore spelling of the PDF matches the spaced export", matchPdf("
 check("no match is null", matchPdf("Reply.txt", pdfs, forward), null);
 check("a forward that throws is a bare match only", matchPdf("Order.txt", pdfs, () => { throw new Error("x"); }), "Order.pdf");
 check("an empty name matches nothing", matchPdf("", pdfs, forward), null);
+{
+  // matchPdf translates every candidate for every name it is asked about; a
+  // LEAKS worksheet asks thousands of times, so the same answers are served
+  // from an index built once.
+  const many = ["Strangeways v Melbury - MTC.txt", "Order.txt", "Strangeways v Melbury - MTC.txt.LEAK", "Reply.txt", "", "Order.txt"];
+  const one = pdfMatcher(pdfs, forward);
+  check("pdfMatcher answers as matchPdf does, name for name", many.map(one), many.map((n) => matchPdf(n, pdfs, forward)));
+  check("…with no key, and with no PDFs",
+    [many.map(pdfMatcher(pdfs, null)), many.map(pdfMatcher([], forward))],
+    [many.map((n) => matchPdf(n, pdfs, null)), many.map(() => null)]);
+  check("…and a forward that throws is still a bare match only",
+    many.map(pdfMatcher(pdfs, () => { throw new Error("x"); })), many.map((n) => matchPdf(n, pdfs, () => { throw new Error("x"); })));
+  let calls = 0;
+  const counted = (t) => { calls++; return forward(t); };
+  const m = pdfMatcher(pdfs, counted);
+  for (let i = 0; i < 500; i++) m(many[i % many.length]);
+  check("…translating each PDF once, however many names are asked about", calls, pdfs.length);
+}
 
 console.log("page sources");
 const combined = parseExport(

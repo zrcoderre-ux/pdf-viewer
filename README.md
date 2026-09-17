@@ -812,6 +812,23 @@ app, which routes it to the reader tab.
   one** — never the folder at once, which is what used to take the tab down.
   (Under two dozen exports it keeps working further ahead, as it always has;
   there is nothing to protect you from in a folder that small.)
+- **A case of thousands of leaks, under a key of thousands of names, opens and
+  answers.** Past about three and a half thousand names, the matcher the reader
+  builds from the key was too big for the browser to run at all — and it said
+  so only when the first document was opened, which is why the file never
+  appeared and the screen went back to asking for one. It is built in pieces
+  now and worked as one. Around it, the things that were done again on every
+  keystroke are done once: the marks over the text are scanned when the text,
+  the key, the flags or the keeps move and not when you answer a row (and then
+  a beat later, like the citation underlines); the keeps are indexed rather
+  than searched, so the five hundredth `no` costs what the first did; a file
+  name is matched through the key once rather than once per document in the
+  folder; and the Leaks list is written on rather than rebuilt. On a case of
+  200 exports of 150 pages, 2,500 leak rows and a key of 4,000 names: the first
+  document opens in 2.4 seconds where it used to take 17 or fail outright, and
+  ten decisions take under a second and a half where they took nineteen. If
+  something does go wrong, the bar at the bottom now says so instead of the
+  reader quietly stopping where it stood.
 - **The pages a leak stands on are drawn before you reach them.** Every page
   a review will visit is named in the worksheet's rows before it gets to any
   of them, so with a worksheet attached the reader goes and gets them: the

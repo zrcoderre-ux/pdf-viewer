@@ -308,16 +308,123 @@ export function foldGaps(s) {
 // order, so the full name beats its own surname token). Boundaries are
 // alphanumeric lookarounds rather than \b, because a fake can end in a digit
 // ("Deverell5") or hold an @ ("quenby3@postbox9.org").
+//
+// …up to a point. Every space in a value is written as a GAP — fifty
+// characters of "a run of spaces, or a line break with the pleading gutter
+// number that opens the next line" — so a key of a few thousand names makes a
+// pattern of half a megabyte, and the engine REFUSES one that big. Worse, it
+// refuses it LATE: the pattern is accepted, and "Invalid regular expression:
+// too large" is thrown the first time anything is matched against it, which is
+// inside the first document opened. The reader stopped there with the empty
+// screen still up — the file simply never opened, and nothing said why.
+//
+// So a matcher too big for one regex is cut into several and worked as one
+// (Matcher, below). A key that fits in a single regex still gets that single
+// regex, exactly as before.
+const MAX_PATTERN = 150000; // characters of source per regex, well inside the engine's limit
+
+/** One value as an alternative: its spaces as gaps, a possessive allowed after it. */
+function altFor(v) {
+  return escapeRe(v).replace(/ /g, GAP) + (POSS_TAIL_RE.test(v) ? "" : "(?:['’][sS])?");
+}
+function oneMatcher(alts) {
+  return new RegExp("(?<![A-Za-z0-9_])(?:" + alts.join("|") + ")(?![A-Za-z0-9_])", "gi");
+}
 export function buildMatcher(values) {
-  const sorted = values
+  const sorted = (values || [])
     .filter((v) => v)
     .slice()
     .sort((a, b) => b.length - a.length);
   if (!sorted.length) return null;
-  const alts = sorted
-    .map((v) => escapeRe(v).replace(/ /g, GAP) + (POSS_TAIL_RE.test(v) ? "" : "(?:['’][sS])?"))
-    .join("|");
-  return new RegExp("(?<![A-Za-z0-9_])(?:" + alts + ")(?![A-Za-z0-9_])", "gi");
+  const alts = sorted.map(altFor);
+  const chunks = [];
+  let at = [], size = 0;
+  for (const a of alts) {
+    if (at.length && size + a.length > MAX_PATTERN) { chunks.push(at); at = []; size = 0; }
+    at.push(a);
+    size += a.length + 1;
+  }
+  if (at.length) chunks.push(at);
+  return chunks.length === 1 ? oneMatcher(chunks[0]) : new Matcher(chunks.map(oneMatcher));
+}
+
+/**
+ * Several regexes worked as one, standing in for a global RegExp over exactly
+ * what the readers of a matcher here use: `exec` with `lastIndex`, `test`, and
+ * `String.replace` (through Symbol.replace).
+ *
+ * The one alternation tried its alternatives in order — longest value first —
+ * so the name that won at a place was the longest one standing there. Split
+ * over several regexes that is the same rule read across them: the leftmost
+ * match wins, and where two start at the same place, the longer one does.
+ */
+class Matcher {
+  constructor(parts) {
+    this.parts = parts;
+    this.lastIndex = 0;
+    this.global = true;
+    this.reset("");
+  }
+  reset(text) {
+    this.text = text;
+    this.from = 0;
+    // Where each piece's next match stands, and what it is: a piece is asked
+    // again only once the walk has passed the answer it already gave.
+    this.at = this.parts.map(() => -1);
+    this.hits = this.parts.map(() => null);
+  }
+  exec(text) {
+    const s = String(text == null ? "" : text);
+    const from = this.lastIndex > 0 ? this.lastIndex : 0;
+    // Each piece is scanned ONCE across a walk, not once per match: a piece
+    // asked again from here would read the rest of the text again, and a long
+    // document read over again for every name in it is the whole document
+    // squared. What it found still stands — a match is where it is, wherever
+    // the reading started — so it is kept until the walk goes past it.
+    if (this.text !== s || from < this.from) this.reset(s);
+    this.from = from;
+    if (from > s.length) { this.lastIndex = 0; return null; }
+    let best = null;
+    for (let i = 0; i < this.parts.length; i++) {
+      if (this.at[i] < from) {
+        const rx = this.parts[i];
+        rx.lastIndex = from;
+        const m = rx.exec(s);
+        this.hits[i] = m;
+        this.at[i] = m ? m.index : Infinity;
+      }
+      const m = this.hits[i];
+      if (!m) continue;
+      if (!best || m.index < best.index || (m.index === best.index && m[0].length > best[0].length)) best = m;
+    }
+    // The protocol, as a global regex keeps it: past the match, or back to the
+    // start when there is none. A zero-length match leaves lastIndex where it
+    // is, and the caller moves it on, exactly as it does for a RegExp.
+    this.lastIndex = best ? best.index + best[0].length : 0;
+    return best;
+  }
+  test(text) {
+    const held = this.lastIndex;
+    this.lastIndex = 0;
+    const m = this.exec(text);
+    this.lastIndex = held;
+    return !!m;
+  }
+  [Symbol.replace](text, replacement) {
+    const s = String(text == null ? "" : text);
+    const fn = typeof replacement === "function" ? replacement : null;
+    let out = "", at = 0;
+    this.lastIndex = 0;
+    let m;
+    while ((m = this.exec(s))) {
+      out += s.slice(at, m.index) + (fn ? fn(m[0], m.index, s) : String(replacement));
+      at = m.index + m[0].length;
+      if (m.index === this.lastIndex) this.lastIndex++;
+      if (this.lastIndex > s.length) break;
+    }
+    this.lastIndex = 0;
+    return out + s.slice(at);
+  }
 }
 
 /**
@@ -598,25 +705,32 @@ export function compileTypeahead(key, alsoLonger) {
   // `alsoLonger`: values not offered themselves (a kept "Helen Rasho") that a
   // shorter real may still be the opening of — "Helen" stays partial.
   const folded = warn.map((w) => fold(w.real)).concat((alsoLonger || []).map((v) => fold(v)));
+  const openings = openingsOf(folded);
   return warn
     .slice()
     .sort((a, b) => b.real.length - a.real.length)
     .map((w) => ({
       real: w.real,
       fake: w.fake,
-      partial: isOpeningOfLonger(fold(w.real), folded),
+      partial: openings.has(fold(w.real)),
       rx: new RegExp("(?<![A-Za-z0-9_])" + escapeRe(w.real).replace(/ /g, "\\s+") + (POSS_TAIL_RE.test(w.real) ? "" : "(?:['’][sS])?") + "$", "i"),
     }));
 }
-// Whether `f` (folded) begins some LONGER folded real in `all` at a word
-// edge: "helen" opens "helen rasho"; it does not open "helena rasho".
-function isOpeningOfLonger(f, all) {
-  if (!f) return false;
-  for (const other of all) {
-    if (other.length <= f.length || other.slice(0, f.length) !== f) continue;
-    if (!/[a-z0-9_]/i.test(other.charAt(f.length))) return true;
+// Every folded value that OPENS a longer one at a word edge: "helen" opens
+// "helen rasho"; "helena" does not. Asked once per real, it used to be a scan
+// of the whole list per real — a key of two thousand names beside a case's
+// worth of keeps is four million comparisons, and the reader compiles the key
+// again on every decision. The answer is the same read from the other end: a
+// value's own word edges are the openings it gives, so they are written down
+// once, in one pass over the values.
+function openingsOf(all) {
+  const out = new Set();
+  for (const other of all || []) {
+    for (let i = 1; i < other.length; i++) {
+      if (!/[a-z0-9_]/i.test(other.charAt(i))) out.add(other.slice(0, i));
+    }
   }
-  return false;
+  return out;
 }
 
 /**
