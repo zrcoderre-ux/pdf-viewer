@@ -638,18 +638,24 @@ export const FONT_PRESETS = [
   { id: "custom", label: "Custom…", css: "" },
 ];
 
+/**
+ * The sheet, in CSS pixels: 8.5 inches at 96 to the inch — a page of paper.
+ * It is not a setting and the type never changes it. Where the stage is
+ * narrower than this the page takes what there is, since the alternative is
+ * reading a page that will not fit the window.
+ */
+export const PAGE_WIDTH = 816;
+
 export const DEFAULT_SETTINGS = {
   font: "georgia",
   customFont: "",
   fontSize: 15,      // px
   lineHeight: 1.5,   // ratio
-  pageWidth: 820,    // px
   marks: true,       // highlight pseudonyms and show the fake on hover
   markColor: "#f5c518", // the highlight's colour
   markAlpha: 0.18,   // …and how strong it is (0 = invisible, 1 = solid); subtle by default
   showFakes: false,  // display the fakes instead of the real names
   gutter: true,      // dim the pleading line numbers
-  lineLock: false,   // keep every numbered line on ONE screen line (below)
   matchGrid: false,  // side by side, lay each page on its PDF page's geometry
 };
 
@@ -660,13 +666,15 @@ export function normalizeSettings(raw) {
   s.customFont = String(s.customFont || "").slice(0, 200);
   s.fontSize = clamp(Number(s.fontSize), 9, 40, DEFAULT_SETTINGS.fontSize);
   s.lineHeight = clamp(Number(s.lineHeight), 1, 3, DEFAULT_SETTINGS.lineHeight);
-  s.pageWidth = clamp(Number(s.pageWidth), 400, 2000, DEFAULT_SETTINGS.pageWidth);
   s.marks = s.marks !== false;
   s.markColor = /^#[0-9a-fA-F]{6}$/.test(String(s.markColor || "")) ? String(s.markColor).toLowerCase() : DEFAULT_SETTINGS.markColor;
   s.markAlpha = clamp(Number(s.markAlpha), 0.04, 0.9, DEFAULT_SETTINGS.markAlpha);
   s.showFakes = s.showFakes === true;
   s.gutter = s.gutter !== false;
-  s.lineLock = s.lineLock === true;
+  // A page is a page: the width was a setting and the lock made it wider
+  // still, and neither is a thing the reader has any more.
+  delete s.pageWidth;
+  delete s.lineLock;
   s.matchGrid = s.matchGrid === true;
   return s;
 }

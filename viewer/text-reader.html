@@ -106,22 +106,17 @@
           <input id="font-custom" type="text" placeholder="font-family…" title="Any installed font, as a CSS font-family" hidden>
         </div>
         <div class="tool-row">
-          <span class="tool-row-label">Size</span>
+          <span class="tool-row-label" title="The type on the page. The sheet is always a page: the type gives, never the paper.">Size</span>
           <span class="tool-stepper">
             <button id="size-down" title="Smaller text (Ctrl+wheel, Ctrl+minus)">A−</button>
             <span id="size-label" class="tb-value">15</span>
-            <button id="size-up" title="Larger text (Ctrl+wheel, Ctrl+plus; Ctrl+0 for the default) — the words only, never the toolbar and panels">A+</button>
+            <button id="size-up" title="Larger text (Ctrl+wheel, Ctrl+plus; Ctrl+0 for the default) — the words only: never the toolbar and panels, and never the width of the page">A+</button>
           </span>
         </div>
         <div class="tool-row">
           <label class="tool-row-label" for="lh-range">Leading</label>
           <input id="lh-range" type="range" min="1" max="2.4" step="0.1" title="Leading (line spacing), remembered as the default for every text file">
         </div>
-        <div class="tool-row">
-          <label class="tool-row-label" for="width-range">Width</label>
-          <input id="width-range" type="range" min="480" max="1400" step="20" title="Page width">
-        </div>
-        <label class="tool-btn tool-toggle" title="Keep every numbered line on one screen line: the page is made as wide as its longest line needs at your size, scrolling sideways past the window if it must — the font and the line numbers are never touched (remembered)"><input id="lock-toggle" type="checkbox"><span class="ti">🔒</span><span class="tl">Line lock</span></label>
 
         <div class="tools-group-label">Pseudonyms</div>
         <div class="tool-row stack">

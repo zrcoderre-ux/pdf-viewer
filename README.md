@@ -686,7 +686,9 @@ app, which routes it to the reader tab.
   between them and the body, and each numbered line hangs under its number
   so a wrapped continuation never crosses the rule. Pick the font (Georgia,
   Times, Charter, Palatino, system sans, Arial, Verdana, Courier, Consolas, or
-  any installed family by name), size, leading and page width. Those are
+  any installed family by name), size and leading. **There is no page width to
+  set:** the sheet is 8.5 inches of paper and nothing the reader does moves
+  it. Those are
   **remembered as the defaults**: the font and leading chosen once are what
   every text file opens in from then on — set them in the reader's Tools panel
   or under Options → "Text reader — default font and leading", and every open
@@ -714,13 +716,28 @@ app, which routes it to the reader tab.
   until then the document's prevailing shape stands in, and US Letter portrait
   behind that; a landscape exhibit reads portrait until its PDF is opened and
   takes its own shape the moment the sizes land.
+- **The paper never gives; the type does.** The sheet is a page — 8.5 inches
+  at 96 to the inch, or the stage where that is narrower, since a page that
+  will not fit the screen is no use — and **zooming makes the type bigger and
+  the paper not at all.** A line too long for its column is drawn smaller
+  rather than the page being widened for it, which is what **Line lock** used
+  to do and why it is gone: a numbered line is never wrapped (its tail would
+  fall on a screen line with no number, one line off from the PDF), so it runs
+  past the column and the type shrinks until it does not. Zoomed in past the
+  size the page is drawn to hold, it wraps after all and the page grows
+  taller: the words are what a reader zoomed in for, and nothing is allowed
+  out over the edge of the paper.
 - **The shape is a ceiling: the type gives way, not the page.** A page whose
   words want more room than its PDF page gave them — the reading size is
   yours, and the filing was set in whatever it was set in — is **drawn
   smaller** until they fit, the way the PDF itself is at that zoom. Display
-  only: the file is one size, and the size you set is still the size of a page
-  that fits. The floor is half that size; past it the page grows instead,
-  because a sheet the right shape with nothing legible on it is no use.
+  only: the file is one size. **The fit is measured at the default size, not
+  at the size you have zoomed to** — measured at the zoomed size it would take
+  back exactly what the zoom had just added, and zooming in would do nothing —
+  so at the default every page holds its words, and from there zooming in
+  makes them bigger and lets the page run on past the foot of the paper. The
+  floor is half that size; past it the page grows instead, because a sheet the
+  right shape with nothing legible on it is no use.
 - **The PDF's own type sizes, where they are known.** On a page the PDF sets
   in more than one size — an order's caption, a heading, an exhibit's small
   print, a footnote — each line takes **its own row's size**, as a multiple of
@@ -777,18 +794,6 @@ app, which routes it to the reader tab.
   remember. The document itself is not touched: the pages go back as they were
   when the dialog closes, nothing is written, and a real name standing unfaked
   is still standing and still orange, to be dealt with before a save.
-- **Line lock.** Pleading paper is read by its line numbers, and a numbered
-  line that wraps puts its tail on a screen line with no number — one line
-  off from the PDF. **Line lock** (Tools panel, remembered) holds every numbered
-  line to one screen line by making the page **as wide as its longest line
-  needs** at the size you chose — past the window's edge if it must, with a
-  horizontal scroll bar under it, the way a zoomed PDF behaves. Zoom in as
-  far as you like: the font is never touched, so the size is yours to
-  calibrate the page by, and the numbers are never touched either — the
-  gutter shows the file's own and nothing moves between them. Display only:
-  the width you set comes back when the lock is off. Under **Match PDF grid**
-  the PDF's own grid holds every line to one screen line already, whatever the
-  lock says.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**

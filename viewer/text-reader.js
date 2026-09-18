@@ -62,12 +62,10 @@ const fontSelect = $("font-select");
 const fontCustom = $("font-custom");
 const sizeLabel = $("size-label");
 const lhRange = $("lh-range");
-const widthRange = $("width-range");
 const marksToggle = $("marks-toggle");
 const markColorEl = $("mark-color");
 const markAlphaEl = $("mark-alpha");
 const fakesToggle = $("fakes-toggle");
-const lockToggle = $("lock-toggle");
 const gridToggle = $("grid-toggle");
 const providerEl = $("provider");
 const docsList = $("docs-list");
@@ -442,11 +440,10 @@ function applySettings() {
   root.setProperty("--reader-font", TD.fontCss(settings));
   root.setProperty("--reader-size", settings.fontSize + "px");
   root.setProperty("--reader-lh", String(settings.lineHeight));
-  root.setProperty("--reader-width", settings.pageWidth + "px");
-  // The EFFECTIVE size and width are what the pages use: the settings'
-  // own, unless line lock has had to take something off them (below).
+  // The EFFECTIVE size is what the pages use: the size set here, less
+  // whatever a page has had to give up to hold its words (shapePages). The
+  // width is the paper's and belongs to applyPageWidth, not to any setting.
   root.setProperty("--reader-size-eff", settings.fontSize + "px");
-  root.setProperty("--reader-width-eff", settings.pageWidth + "px");
   const mark = TD.markCss(settings);
   root.setProperty("--pn-bg", mark.bg);
   root.setProperty("--pn-bg-hover", mark.hover);
@@ -454,6 +451,12 @@ function applySettings() {
   markColorEl.value = settings.markColor;
   markAlphaEl.value = String(settings.markAlpha);
   markColorEl.disabled = markAlphaEl.disabled = !settings.marks;
+  // Zoomed in past the size a page is drawn to hold, a numbered line that is
+  // never allowed to wrap would run out over the edge of the paper. Past that
+  // size it wraps: the one-line-per-number rule is there to stand beside the
+  // PDF, and a reader who has zoomed in to read a line wants the line, not
+  // the register. The page grows taller for it; nothing leaves the sheet.
+  document.body.classList.toggle("zoomed", settings.fontSize > TD.DEFAULT_SETTINGS.fontSize);
   document.body.classList.toggle("marks-off", !settings.marks);
   document.body.classList.toggle("show-fakes", settings.showFakes);
   document.body.classList.toggle("gutter-off", !settings.gutter);
@@ -462,10 +465,8 @@ function applySettings() {
   fontCustom.value = settings.customFont;
   sizeLabel.textContent = String(settings.fontSize);
   lhRange.value = String(settings.lineHeight);
-  widthRange.value = String(settings.pageWidth);
   marksToggle.checked = settings.marks;
   fakesToggle.checked = settings.showFakes;
-  lockToggle.checked = settings.lineLock;
   gridToggle.checked = settings.matchGrid;
 }
 
@@ -532,12 +533,10 @@ window.addEventListener("keydown", (e) => {
   else if (k === "0") { e.preventDefault(); zoomText(0); }
 }, true);
 lhRange.addEventListener("input", () => { settings.lineHeight = Number(lhRange.value); saveSettings(); applySettings(); relayout(); });
-widthRange.addEventListener("input", () => { settings.pageWidth = Number(widthRange.value); saveSettings(); applySettings(); relayout(); });
 marksToggle.addEventListener("change", () => { settings.marks = marksToggle.checked; saveSettings(); applySettings(); hideTip(); });
 markColorEl.addEventListener("input", () => { settings.markColor = markColorEl.value; saveSettings(); applySettings(); });
 markAlphaEl.addEventListener("input", () => { settings.markAlpha = Number(markAlphaEl.value); saveSettings(); applySettings(); });
 fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.checked; saveSettings(); applySettings(); showFakes(settings.showFakes); });
-lockToggle.addEventListener("change", () => { settings.lineLock = lockToggle.checked; saveSettings(); applySettings(); relayout(); });
 // The grid is asked for, not assumed: a page laid on its PDF's geometry is a
 // different page to read — another width, another type size, every line moved
 // to its number's height — and the reader's first business is the words. Side
@@ -1677,7 +1676,7 @@ function afterTextChange() {
   updateCounts();
   textAnchors = null; textLineTops = null;
   applyMatchedLayout();
-  applyLineLock();
+  applyPageWidth();
   // The citations settle a beat after the edit rather than with it. Reading
   // a long export for citations is the one part of this that a long document
   // makes slow — the scan is of the whole text, since a short form ("Ibid.",
@@ -1697,7 +1696,7 @@ function afterTextChange() {
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
 const placeCitationsSoon = debounce(() => placeCitations(), 450);
-const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyLineLock(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
+const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -2457,57 +2456,42 @@ async function writeText(text, name, handle, { adopt = false } = {}) {
   return true;
 }
 
-// ── line lock ──────────────────────────────────────────────────────────────────────────
+// ── the page's own width ───────────────────────────────────────────────────────────────
 //
-// Pleading paper is read by its line numbers, and a numbered line that
-// WRAPS puts its tail on a screen line with no number — read across to the
-// PDF, that is one line off. With the lock on every numbered line is held
-// to one screen line, and the page is made AS WIDE AS THE LONGEST LINE
-// NEEDS at the size the reader chose — past the window's edge if that is
-// what it takes, with a horizontal scroll bar under it, the way a zoomed
-// PDF behaves. The font is never touched: zooming in is the reader's to do,
-// and the size is what they calibrate the page by. The numbers are never
-// touched either — the gutter shows the file's own and nothing moves
-// between them. Display only: the settings keep the width the reader
-// chose, and the effective width lives in a CSS variable the pages read.
-function applyLineLock() {
-  applyLineLockNow();
-  // The page shape is the width's, and the lock is what settles the width.
-  shapePages();
+// A PAGE IS A PAGE. The sheet is 8.5 inches of paper at 96 to the inch and
+// nothing the reader does changes that: there is no width to set, no lock to
+// widen it for a long line, and zooming makes the TYPE bigger and the paper
+// not at all. What gives instead is the type — a line too long for the column
+// or a page with more on it than the paper holds is drawn smaller (shapePages
+// below) — because a filing that has to be scrolled sideways to be read is
+// not a page, and a page whose borders move with the zoom is not paper.
+//
+// The one thing that does move it is the window: where the stage is narrower
+// than a sheet, the sheet takes what there is, the alternative being a page
+// that will not fit the screen it is read on.
+//
+// Pleading paper is read by its line numbers, and a numbered line that WRAPS
+// puts its tail on a screen line with no number — read across to the PDF,
+// that is one line off. Those lines are therefore never wrapped (the
+// stylesheet holds them to one line), which makes them run past the column
+// instead, and the type shrinking to fit is what brings them back. What was
+// Line lock is the ordinary state of the page now, and costs nothing to say.
+/** The sheet as it stands: a page of paper, or the stage where that is narrower. */
+function pageWidthNow() {
+  return Math.max(280, Math.min(TD.PAGE_WIDTH, stageEl.clientWidth - 32));
 }
-function applyLineLockNow() {
+function applyPageWidth() {
   const root = document.documentElement.style;
   root.setProperty("--reader-size-eff", settings.fontSize + "px");
-  root.setProperty("--reader-width-eff", settings.pageWidth + "px");
-  document.body.classList.toggle("line-lock", !!settings.lineLock);
+  const w = pageWidthNow();
+  root.setProperty("--reader-width", w + "px");
+  root.setProperty("--reader-width-eff", w + "px");
   const st = $("st-lock");
-  if (!doc) { st.textContent = ""; return; }
-  // Side by side the PDF's own grid holds every line to one screen line
-  // already, whatever the lock says: the page is drawn at the reading
-  // size's scale and widened for its longest line.
-  if (pagesEl.querySelector(".tpage.matched")) {
-    st.textContent = "Side by side: the text in the PDF's own type sizes"
-      + (matchedCapped ? ", drawn at your page width" : ", the size zooming both sheets")
-      + (matchedExtra ? `, ${matchedExtra}px wider for the longest line, scroll sideways` : "");
-    return;
-  }
-  if (!settings.lineLock) { st.textContent = ""; return; }
-  const bodies = pageBodies().filter((b) => b.classList.contains("numbered") && !b.closest(".tpage").classList.contains("swapped"));
-  if (!bodies.length) { st.textContent = "Line lock: no numbered lines"; return; }
-  // Measured line by line: a grid item's text overflow is not in the page
-  // body's own scrollWidth.
-  const lts = [];
-  for (const b of bodies) lts.push(...b.querySelectorAll(".line.num > .lt"));
-  const overflow = () => { let o = 0; for (const lt of lts) o = Math.max(o, lt.scrollWidth - lt.clientWidth); return o; };
-  let width = settings.pageWidth;
-  let over = overflow();
-  for (let n = 0; over > 0 && n < 12; n++) {
-    width = Math.ceil(width + over + 1);
-    root.setProperty("--reader-width-eff", width + "px");
-    over = overflow();
-  }
-  const wider = width > stageEl.clientWidth - 32;
-  st.textContent = "Line lock" + (width !== settings.pageWidth ? `: page ${width}px wide for its longest line` + (wider ? " — scroll sideways" : "") : ": every numbered line fits");
+  st.textContent = !doc ? ""
+    : pagesEl.querySelector(".tpage.matched")
+      ? "Side by side: the text in the PDF's own type sizes, on the PDF's own grid — the reading size has no say while the grid is on"
+      : "";
+  shapePages();
 }
 
 // ── citations ────────────────────────────────────────────────────────────────────────
@@ -5471,8 +5455,6 @@ function buildPdfPane() {
 // the longest one needs, and the stage scrolls sideways.
 // Display only — no line moves in the file, and the layout is lifted the
 // moment the pane closes.
-let matchedExtra = 0; // px the sheets were widened for their longest line
-let matchedCapped = false; // …and whether the reader's own width held them back
 const LINE_BOX = 1.2;  // a line's box, in its own type size: what the next line must clear
 /** A pane slot at a width: re-rendered where its bitmap is up, pre-sized where it is not. */
 function fitSlot(el, w) {
@@ -5582,19 +5564,17 @@ function applyMatchedLayoutNow() {
   // its sheet was held open to.
   if (on) for (const el of slots.values()) if (!matchedSlots.has(el)) { fitSlot(el, paneW); unlevelSlot(el); }
   document.body.classList.toggle("matched-pages", plans.length > 0);
-  // THE SHEET IS NEVER WIDER THAN THE PAGE THE READER IS SET TO. The scale
-  // comes from the type — the PDF's body drawn at the reading size — and on a
-  // filing set in large type, or at a large reading size, that asks for a
-  // sheet half again as wide as the page the reader chose, which is a
-  // document that has to be scrolled sideways to be read at all. The width
-  // caps it: past that the page is drawn at the reader's own width and the
-  // scale follows the sheet, so the grid inside it still lands on the PDF.
-  const capW = Math.max(200, Math.min(settings.pageWidth, stageEl.clientWidth - 32));
-  matchedCapped = false;
+  // THE SHEET IS THE PAGE, and the grid is drawn into it. The scale used to
+  // come from the type — the PDF's body at the reading size — which made the
+  // sheet whatever that asked for, half again the paper on a filing set in
+  // large type. The paper does not move: the page is the width every other
+  // page has, the scale is what draws the PDF page at that width, and the
+  // type on it is the PDF's own at that scale. Zooming has nothing to say
+  // here, the grid having taken the question over; the status bar says so.
+  const pageW = pageWidthNow();
   for (const p of plans) {
-    const want = Math.round(p.sz.w * p.scale);
-    const w = Math.min(want, capW);
-    if (w !== want) { p.scale = w / p.sz.w; matchedCapped = true; } // the sheet leads; the grid follows it
+    const w = pageW;
+    p.scale = w / p.sz.w; // the sheet leads; the grid follows it
     p.w = w;
     fitSlot(p.slot, w);
     p.sec.classList.add("matched");
@@ -5669,26 +5649,6 @@ function applyMatchedLayoutNow() {
         const want = x.p.h + "px";
         if (x.sheet.style.minHeight !== want) x.sheet.style.minHeight = want;
       }
-    }
-  }
-  // The longest line: the sheets grow by what it needs, all of them by the
-  // same amount so the pages stay one size — but never past the cap, which is
-  // what the cap is for. Measured line by line; a grid item's overflow is not
-  // in the page body's own scrollWidth.
-  matchedExtra = 0;
-  const room = Math.max(0, capW - Math.max(0, ...plans.map((p) => p.w || 0)));
-  const laid = room > 0 ? plans.filter((p) => p.tops) : [];
-  if (laid.length) {
-    const lts = [];
-    for (const p of laid) lts.push(...p.body.querySelectorAll(":scope > .line > .lt"));
-    const overflow = () => { let o = 0; for (const lt of lts) o = Math.max(o, lt.scrollWidth - lt.clientWidth); return o; };
-    let over = overflow();
-    for (let n = 0; over > 0 && n < 6; n++) {
-      const grown = Math.min(room, Math.ceil(matchedExtra + over + 1));
-      if (grown <= matchedExtra) break; // at the cap: the long line runs on past the sheet
-      matchedExtra = grown;
-      for (const p of plans) p.sec.style.width = (p.w + matchedExtra) + "px";
-      over = overflow();
     }
   }
   // The sheets take their page shape before anything reads their heights.
@@ -5815,11 +5775,29 @@ function applyPdfTypeSizes(sec, body) {
     if (l.style.fontSize !== want) l.style.fontSize = want;
   });
 }
-// How far the type may be taken down to make a page fit its shape, and how
-// many passes it gets. Past the floor the page grows instead: a sheet the
-// right shape with nothing legible on it is no use to anyone.
+// How far the type may be taken down to make a page hold its words, and how
+// many passes it gets. Past the floor the page grows taller instead: a sheet
+// the right shape with nothing legible on it is no use to anyone.
 const MIN_FIT = 0.5;
 const FIT_PASSES = 4;
+// THE FIT IS MEASURED AT THE SIZE A PAGE IS MEANT TO HOLD, not at the size
+// the reader has zoomed to. A fit measured at the zoomed size would shrink
+// the type by exactly what the zoom had just added, and zooming in would do
+// nothing at all. So the pages are measured with the type at its default, the
+// fit that comes out belongs to the page, and the reading size multiplies it:
+// at the default every page holds its words, and zooming in from there makes
+// the words bigger and lets the page run on past the foot of the paper — the
+// page growing to hold them, since the alternative is words nobody can see.
+// The width never gives: the paper is the paper.
+function withBaseSize(fn) {
+  const root = document.documentElement.style;
+  const held = root.getPropertyValue("--reader-size-eff");
+  root.setProperty("--reader-size-eff", TD.DEFAULT_SETTINGS.fontSize + "px");
+  try { return fn(); } finally {
+    if (held) root.setProperty("--reader-size-eff", held);
+    else root.removeProperty("--reader-size-eff");
+  }
+}
 function shapePages() {
   const secs = [...pagesEl.querySelectorAll(".tpage")];
   // A page on the grid carries the PDF's own height and type already, and a
@@ -5870,24 +5848,43 @@ function shapePages() {
   // a pass costs one layout however many pages there are. Four of them
   // converge, the first guess always overshooting a little because the page's
   // margins do not shrink with its type.
-  for (let pass = 0; pass < FIT_PASSES; pass++) {
-    const over = [];
-    for (const s of shapes) {
-      if (!(s.target > 0)) continue;
-      const h = s.body.scrollHeight;
-      if (h > s.target + 0.5) over.push([s, h]);
+  withBaseSize(() => {
+    for (let pass = 0; pass < FIT_PASSES; pass++) {
+      const over = [];
+      for (const s of shapes) {
+        if (!(s.target > 0)) continue;
+        // Too tall for the paper, or too wide for the column: a numbered line
+        // is never wrapped (it would put its tail on a line with no number),
+        // so it runs past the page instead, and the type is what gives.
+        const h = s.body.scrollHeight;
+        const want = Math.min(h > s.target + 0.5 ? s.target / h : 1, widthFit(s.body));
+        if (want < 1) over.push([s, want]);
+      }
+      if (!over.length) break;
+      let moved = false;
+      for (const [s, ratio] of over) {
+        const want = Math.max(MIN_FIT, s.fit * ratio);
+        if (want >= s.fit - 0.002) continue; // at the floor, or as close as it comes
+        s.fit = want;
+        s.sec.style.setProperty("--fit", want.toFixed(3));
+        moved = true;
+      }
+      if (!moved) break;
     }
-    if (!over.length) break;
-    let moved = false;
-    for (const [s, h] of over) {
-      const want = Math.max(MIN_FIT, s.fit * (s.target / h));
-      if (want >= s.fit - 0.002) continue; // at the floor, or as close as it comes
-      s.fit = want;
-      s.sec.style.setProperty("--fit", want.toFixed(3));
-      moved = true;
-    }
-    if (!moved) break;
+  });
+}
+/**
+ * What the type would have to be multiplied by for the widest line of a page
+ * to sit inside its column: 1 where every line already does. The line that
+ * runs furthest past decides it.
+ */
+function widthFit(body) {
+  let r = 1;
+  for (const lt of body.querySelectorAll(":scope > .line > .lt")) {
+    const w = lt.clientWidth, full = lt.scrollWidth;
+    if (w > 0 && full > w + 0.5) r = Math.min(r, w / full);
   }
+  return r;
 }
 /** A slot back as the pane built it: the levelling and the held-open box go. */
 function unlevelSlot(el) {
