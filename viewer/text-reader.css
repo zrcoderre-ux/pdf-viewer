@@ -276,10 +276,10 @@ body.tools-collapsed #tools-rail .tool-btn { position: relative; }
    PDF's text margin. */
 .tpage.matched { max-width: none; }
 .tpage.matched .page-body { min-height: 0; height: 100%; }
-/* On the PDF's grid a line is one printed line: it never wraps (a wrapped
-   line would fall on the slot below it) and never shrinks. The sheet is
-   widened for the longest line instead, past the pane's edge if it must,
-   and the stage scrolls sideways — the way a zoomed PDF behaves. */
+/* On the PDF's grid a line is one printed line: it never wraps (a wrapped line
+   would fall on the slot below it) and never shrinks. A line too long for the
+   page slides back into whatever blank the row has in front of it, and what
+   is still past the edge after that is cut off there. */
 .page-body.fixed .line > .lt { white-space: pre; }
 .page-body.fixed { padding: 0; position: relative; }
 .page-body.fixed .line { position: absolute; left: 0; right: 0; min-height: 0; }
@@ -357,7 +357,12 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
    in the DOM (and still saves) but is not shown. */
 .tpage.swapped .page-body, .tpage.swapped .link-layer { display: none; }
 .pdf-inline { position: relative; min-height: 120px; background: #fff; }
-.page-inner { position: relative; }
+/* NOTHING LEAVES THE PAPER. A line too long for its column — a numbered line,
+   which is never wrapped, or a line the PDF's grid has placed — is cut where
+   the sheet ends rather than painted out over the gap beside it. The page's
+   own height grows for its words (the type shrinks first, shapePages), so
+   this clips across and not down. */
+.page-inner { position: relative; overflow: hidden; overflow: clip; }
 /* PDF-Linker's own trailer at the foot of an export — the "Authorities cited"
    rule and its verification links. Part of the file, no part of the filed
    document, and the PDF beside it has no such page: clipped while the pane is
@@ -386,15 +391,11 @@ body.sbs .line.trailer { display: none; }
   border-right: 1px solid #c4c7cb; white-space: pre; user-select: text; align-self: stretch;
 }
 .page-body.numbered .gutter .gs { display: none; }
-/* Line lock: a numbered line is held to one screen line, and the page grows
-   past the window's edge if its longest line needs it — the stage scrolls
-   sideways, as a zoomed PDF does. */
-/* A numbered line is not wrapped: its tail would fall on a screen line with no
-   number, which read across to the PDF is one line off. It runs past the
-   column instead, and the type shrinks until it does not (shapePages). Zoomed
-   in past the size the page is drawn to hold, it wraps after all — the page
-   grows taller and nothing runs out over the edge of the paper. */
-body:not(.zoomed) .page-body.numbered .line.num > .lt { white-space: pre; }
+/* A numbered line is never wrapped: its tail would fall on a screen line with
+   no number, which read across to the PDF is one line off. It runs past the
+   column instead and is CUT at the edge of the paper (.page-inner clips) —
+   one long line does not take the whole page's type down with it. */
+.page-body.numbered .line.num > .lt { white-space: pre; }
 /* The boxes the export draws with line glyphs, DRAWN (rules.js). A line
    carrying vertical bars is a table row of cells split at its bars, and
    consecutive rows whose bars agree share one anonymous table — so a bar

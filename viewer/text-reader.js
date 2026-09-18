@@ -451,12 +451,6 @@ function applySettings() {
   markColorEl.value = settings.markColor;
   markAlphaEl.value = String(settings.markAlpha);
   markColorEl.disabled = markAlphaEl.disabled = !settings.marks;
-  // Zoomed in past the size a page is drawn to hold, a numbered line that is
-  // never allowed to wrap would run out over the edge of the paper. Past that
-  // size it wraps: the one-line-per-number rule is there to stand beside the
-  // PDF, and a reader who has zoomed in to read a line wants the line, not
-  // the register. The page grows taller for it; nothing leaves the sheet.
-  document.body.classList.toggle("zoomed", settings.fontSize > TD.DEFAULT_SETTINGS.fontSize);
   document.body.classList.toggle("marks-off", !settings.marks);
   document.body.classList.toggle("show-fakes", settings.showFakes);
   document.body.classList.toggle("gutter-off", !settings.gutter);
@@ -6023,12 +6017,12 @@ function shapePages() {
       const over = [];
       for (const s of shapes) {
         if (!(s.target > 0)) continue;
-        // Too tall for the paper, or too wide for the column: a numbered line
-        // is never wrapped (it would put its tail on a line with no number),
-        // so it runs past the page instead, and the type is what gives.
+        // Too tall for the paper: the type gives. Too WIDE is not the type's
+        // fault and is not paid for by the whole page — one runaway line
+        // would take every word on the sheet down with it — so a line that
+        // runs past the edge is cut off there by the stylesheet instead.
         const h = s.body.scrollHeight;
-        const want = Math.min(h > s.target + 0.5 ? s.target / h : 1, widthFit(s.body));
-        if (want < 1) over.push([s, want]);
+        if (h > s.target + 0.5) over.push([s, s.target / h]);
       }
       if (!over.length) break;
       let moved = false;
@@ -6043,19 +6037,7 @@ function shapePages() {
     }
   });
 }
-/**
- * What the type would have to be multiplied by for the widest line of a page
- * to sit inside its column: 1 where every line already does. The line that
- * runs furthest past decides it.
- */
-function widthFit(body) {
-  let r = 1;
-  for (const lt of body.querySelectorAll(":scope > .line > .lt")) {
-    const w = lt.clientWidth, full = lt.scrollWidth;
-    if (w > 0 && full > w + 0.5) r = Math.min(r, w / full);
-  }
-  return r;
-}
+
 /** A slot back as the pane built it: the levelling and the held-open box go. */
 function unlevelSlot(el) {
   const lab = el.querySelector(".page-label");
