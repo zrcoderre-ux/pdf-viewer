@@ -106,6 +106,7 @@ let key = null;              // parsed key (PK.parseKey)
 let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
 let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
+let flagsFor = null;         // …the storage key that list was read from, while a folder is being adopted
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
 let spots = [];              // spot keeps for the open document: [{ page, value, nth }]
 let masterKeeps = [];        // standing keeps from PDF-Linker's master workbook (its KEEP sheet)
@@ -758,7 +759,36 @@ function forwardText(text, held) {
   return { text: out, swaps };
 }
 function compileKey() {
-  return during("compiling the key", () => compileKeyNow());
+  const out = during("compiling the key", () => compileKeyNow());
+  dropFlagsNowFaked();
+  return out;
+}
+/**
+ * A flagged value the key now fakes comes off the list: the run did the job.
+ *
+ * The flag was the job — "this name is in the clear, fake it" — and the key
+ * coming back with the name in it is the run's answer. Left on the list it
+ * would go into the next New Real Values.txt and be handed over again, and it
+ * would go on wearing the red mark in a document where it no longer stands in
+ * the clear. This runs wherever the key is compiled, which is wherever the key
+ * or the keeps move: a folder opened after a run, a key chosen by hand, a keep
+ * withdrawn.
+ */
+function dropFlagsNowFaked() {
+  if (!flagged.length || !fwd) return;
+  // …and only once the list in hand is the one this folder's storage holds. A
+  // folder is adopted name first, key second, list third: between the key
+  // being compiled and the list being read, `flagged` is still the LAST
+  // folder's, and dropping from it here would write one matter's flags into
+  // another's.
+  if (flagsFor !== valuesStoreKey()) return;
+  const { kept, dropped } = TD.dropFlagsInKey(flagged, fwd);
+  if (!dropped.length) return;
+  flagged = kept;
+  persistValues();
+  renderFlags();
+  paintHighlights(); // the red marks go with the flags
+  toast(`${dropped.length} flagged value${dropped.length === 1 ? " is" : "s are"} in the key now — ${dropped.slice(0, 3).join(", ")}${dropped.length > 3 ? "…" : ""} — and ${dropped.length === 1 ? "has" : "have"} come off the list.`);
 }
 function compileKeyNow() {
   const k = keyLessKeeps(key);
@@ -999,11 +1029,17 @@ async function adoptFolderNow(h, { quiet = false } = {}) {
   }
   const stored = readStoredValues(VALUES_PREFIX + folderName);
   flagged = stored.values;
+  flagsFor = valuesStoreKey();
   keeps = stored.keeps;
   if (found.valuesHandle) {
     try {
       const onDisk = TD.parseReaderFile(await (await found.valuesHandle.getFile()).text());
-      for (const v of onDisk.values) flagged = TD.addValue(flagged, v);
+      // A value the key already fakes is not brought back in: the file on disk
+      // is the list as it stood when it was last written, and PDF-Linker has
+      // answered it since. Silently, because the file is not the operator's
+      // own list moving — the list itself is pruned where it is compiled,
+      // which says so once.
+      for (const v of onDisk.values) if (!TD.fakeFor(fwd, v)) flagged = TD.addValue(flagged, v);
       for (const k of onDisk.keeps) if (!TD.keptControl(keeps, k.value)) keeps = TD.addKeep(keeps, k.control, k.value);
     } catch { /* unreadable: the in-memory list stands */ }
   }
@@ -2364,9 +2400,20 @@ function rangeFor(segs, start, end) {
 function placeCitations() {
   return during("finding the citations", () => placeCitationsNow());
 }
+/** Every underline off the pages, wherever the links are not wanted. */
+function clearCitationLinks() {
+  for (const layer of pagesEl.querySelectorAll(".link-layer")) {
+    if (layer.__cites === "") continue;
+    layer.__cites = "";
+    layer.innerHTML = "";
+  }
+}
 function placeCitationsNow() {
   placeCitationsSoon.cancel();
-  if (!doc || plain) return;
+  if (!doc) return;
+  // Plain reading: no underlines, and the ones already drawn go with the rest
+  // of what that mode turns off.
+  if (plain) { clearCitationLinks(); return; }
   const bodies = pageBodies();
   const parts = [];
   const maps = [];
@@ -2382,6 +2429,29 @@ function placeCitationsNow() {
   try { found = findAllCitations(full); } catch (e) { console.error(e); }
   const seen = new Map();
   let linked = 0;
+  // SIDE BY SIDE: the authorities are still read, and nothing is drawn over
+  // the text. A page laid on its PDF's grid has every line positioned and
+  // sized on its own, and an underline is a strip measured off the line it
+  // sits under — measured against a body the grid has shifted under the page,
+  // re-measured as each PDF's sizes arrive and after every pass, and landing
+  // beside the words as often as under them. The links are for reading the
+  // text; side by side is for checking it against the PDF. So the pass stops
+  // at the reading: the Table of Authorities is filled as always (its entries
+  // carry the links, and a cite opened from there opens the same page), and
+  // the pages themselves carry no links until the panes are closed.
+  if (sbsOn) {
+    for (const c of found) {
+      const url = resolveUrl(c, citationRepo, provider);
+      if (url && !seen.has(c.key)) seen.set(c.key, { key: c.key, kind: c.kind, url });
+    }
+    clearCitationLinks();
+    lastCites = [...seen.values()];
+    $("st-cites").textContent = lastCites.length
+      ? `${lastCites.length} authorit${lastCites.length === 1 ? "y" : "ies"} found — the links are off side by side`
+      : "";
+    renderToa();
+    return;
+  }
   // The page a citation fell on, by binary search over the pages' offsets
   // rather than a walk from the first page for each one: a thousand-page
   // export has thousands of citations, and the walk makes that a product.
@@ -3149,7 +3219,7 @@ function readStoredValues(k) {
   if (Array.isArray(v)) return { values: v, keeps: [] };
   return { values: (v && v.values) || [], keeps: (v && v.keeps) || [] };
 }
-function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; keeps = st.keeps; compileKey(); renderFlags(); }
+function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; compileKey(); renderFlags(); }
 function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps }); }
 
 function renderFlags() {
@@ -5171,6 +5241,8 @@ function clearMatched(sec) {
 function setSideBySide(on, { remember = true } = {}) {
   sbsOn = !!on;
   if (remember) lsSet("textReader.sbs", sbsOn);
+  // The underlines go as the panes open, not a layout pass later.
+  if (sbsOn) clearCitationLinks();
   buildPdfPane();
   applySwaps();
   relayout();

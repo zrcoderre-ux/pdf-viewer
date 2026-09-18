@@ -11,7 +11,7 @@ import {
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, blankRanges, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
-  addValue, removeValue, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
+  addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE,
   ruleParts, ruleShape,
 } from "./viewer/textdoc.js";
@@ -232,6 +232,31 @@ check("flag: nothing selected", flagProblem("  ", false) !== "", true);
 check("flag: a pseudonym", flagProblem("Strangeways", true) !== "", true);
 check("flag: a passage", flagProblem("x".repeat(200), false) !== "", true);
 check("flag: a name", flagProblem("Rosa Delgado", false), "");
+
+// A flag is a job for PDF-Linker's next run, and the key coming back with the
+// name in it is the run's answer: the value is faked, and the flag has nothing
+// left to ask for.
+console.log("flags the key has answered");
+const RUN = compileForward(parseKey([{ name: "Pseudonym Key", rows: [HEADERS,
+  ["person", "Rosa Delgado", "Wilma Trent", "", "", "spreadsheet", 4],
+  ["person-token", "Delgado", "Trent", "", "", "spreadsheet", 9],
+  ["person", "Vazqez", "Wilma Trent", "", "", "alt spelling", 1],
+] }], "pseudonym_key.xlsx"));
+check("a flagged value the key now fakes comes off the list",
+  dropFlagsInKey(["Rosa Delgado", "Sunbelt Rentals LLC"], RUN),
+  { kept: ["Sunbelt Rentals LLC"], dropped: ["Rosa Delgado"] });
+check("case and spacing are no part of it",
+  dropFlagsInKey(["  ROSA   DELGADO "], RUN).dropped, ["  ROSA   DELGADO "]);
+check("an alt spelling the run added is the same answer",
+  dropFlagsInKey(["Vazqez"], RUN).dropped, ["Vazqez"]);
+check("a row for something INSIDE the value is not the answer",
+  dropFlagsInKey(["Delgado Roofing Inc."], RUN),
+  { kept: ["Delgado Roofing Inc."], dropped: [] });
+const STANDS = ["Sunbelt Rentals LLC", "Marisol Ybarra"];
+check("nothing in the key, nothing dropped \u2014 and the list stands as it is",
+  dropFlagsInKey(STANDS, RUN), { kept: STANDS, dropped: [] });
+check("no key, nothing dropped", dropFlagsInKey(["Rosa Delgado"], null), { kept: ["Rosa Delgado"], dropped: [] });
+check("no list, nothing to drop", dropFlagsInKey(null, RUN), { kept: [], dropped: [] });
 
 // ---- folder listing ------------------------------------------------------------------
 console.log("folder");
