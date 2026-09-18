@@ -1269,6 +1269,7 @@ function openText(text, name, handle, built) {
   $("edit-toggle").setAttribute("aria-pressed", "false");
   document.title = name + " — Text Reader";
   leakStep = -1; // a new document, a new walk through what stands in its clear
+  showNamesBar(false);
   if (!dirHandle) loadValuesFor(name);
   spots = TD.normalizeSpots(lsGet(spotStoreKey(), []));
   // A document built ahead of time goes up as it stands, unless its spot keeps
@@ -2942,6 +2943,8 @@ async function scanPassNow(pass) {
   const leakEl = $("st-leaks");
   leakEl.textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; click to step through them, right-click one to keep it` : "";
   leakEl.classList.toggle("step", !!leaks);
+  if (!leaks) showNamesBar(false);
+  else if (!namesBar.hidden) renderNamesBar(); // the paint moved the ranges under it
   if (leaks) {
     leakEl.setAttribute("role", "button");
     leakEl.setAttribute("tabindex", "0");
@@ -2975,8 +2978,9 @@ let leakStep = -1;
 function stepLeak(dir = 1) {
   // The ranges of the last paint, minus any whose page has been rebuilt under
   // them (an edit, a key change) before the next paint has caught up.
-  const hits = leakHits.filter((h) => h.range && h.range.startContainer && h.range.startContainer.isConnected);
+  const hits = liveLeaks();
   if (!hits.length) {
+    showNamesBar(false);
     toast(marksOff
       ? "The marks are off for this document, so the names standing in the clear are not being read."
       : "No real name from the key is standing unfaked.");
@@ -2987,13 +2991,98 @@ function stepLeak(dir = 1) {
   leakHere = h.range;
   markLeakHere();
   scrollRangeTo(h.range);
-  toast(`${leakStep + 1} of ${hits.length}: “${h.real}” — right-click it to keep it as it stands, or let the save write ${h.fake ? `“${h.fake}”` : "its pseudonym"}.`);
+  if (namesBar.hidden) showNamesBar(true);
+  else renderNamesBar();
 }
-$("st-leaks").addEventListener("click", (e) => stepLeak(e.shiftKey ? -1 : 1));
+/**
+ * THE BAR OVER THE TEXT, for the names the key binds that the run left in the
+ * clear. The LEAKS worksheet gets one; a case folder with no worksheet has the
+ * same work to do and had nothing but a right-click to do it with. So it gets
+ * the same bar, under the worksheet's where both are up: the name, where it
+ * stands, which of how many, and the decisions as buttons — keep just this
+ * one, keep it in this case, never fake it anywhere, or leave it to the save,
+ * which writes the pseudonym.
+ */
+const namesBar = $("names-bar");
+function showNamesBar(on) {
+  const was = !namesBar.hidden;
+  namesBar.hidden = !on;
+  setBarHeight();
+  if (was !== !!on) relayout();
+  if (!on) { leakHere = null; markLeakHere(); return; }
+  if (leakStep < 0) stepLeak(1);
+  else renderNamesBar();
+}
+/** The hits of the last paint whose pages are still on the page. */
+function liveLeaks() {
+  return leakHits.filter((h) => h.range && h.range.startContainer && h.range.startContainer.isConnected);
+}
+/** Where a name stands, as a reader would say it: the page's own label, and its line. */
+function leakWhere(h) {
+  const node = h.range.startContainer;
+  const el = node && (node.nodeType === 1 ? node : node.parentElement);
+  const sec = el && el.closest(".tpage");
+  if (!sec || !doc) return "";
+  const line = el.closest(".line");
+  const gn = line && line.querySelector(".gn");
+  const label = TD.pageLabel(doc.pages[Number(sec.dataset.index)]) || `Page ${Number(sec.dataset.index) + 1}`;
+  return label + (gn ? ":" + gn.textContent.trim() : "");
+}
+function renderNamesBar() {
+  if (namesBar.hidden) return;
+  const hits = liveLeaks();
+  if (!hits.length) { showNamesBar(false); return; }
+  const i = Math.min(Math.max(leakStep, 0), hits.length - 1);
+  const h = hits[i];
+  $("nb-count").textContent = `${i + 1} of ${hits.length}`;
+  $("nb-value").textContent = h.real;
+  $("nb-where").textContent = leakWhere(h);
+  $("nb-answer").textContent = h.fake ? `the save writes \u201c${h.fake}\u201d` : "the save writes its pseudonym";
+  $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2;
+}
+/** A decision taken on the name in front, and on to the next. */
+function decideName(what) {
+  const hits = liveLeaks();
+  if (!hits.length) { showNamesBar(false); return; }
+  const h = hits[Math.min(Math.max(leakStep, 0), hits.length - 1)];
+  // The walk is told at once. A repaint follows a beat later and reads the
+  // text again; until it lands, this keeps the walk honest — a name just kept
+  // is not one still standing in the clear.
+  const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+  if (what === "here") {
+    keepRangeHere(h.range, h.real);
+    leakHits = leakHits.filter((x) => x !== h);
+  } else if (what === "no" || what === "never") {
+    setKeep(h.real, what, { leak: true });
+    leakHits = leakHits.filter((x) => !same(x.real, h.real));
+  }
+  const left = liveLeaks();
+  if (!left.length) {
+    showNamesBar(false);
+    toast("Nothing the key binds is standing in the clear now.");
+    return;
+  }
+  leakStep = Math.min(leakStep, left.length - 1) - 1; // …and the step takes it on
+  stepLeak(1);
+}
+$("nb-prev").addEventListener("click", () => stepLeak(-1));
+$("nb-next").addEventListener("click", () => stepLeak(1));
+$("nb-find").addEventListener("click", () => { const h = liveLeaks()[Math.max(0, leakStep)]; if (h) scrollRangeTo(h.range); });
+$("nb-close").addEventListener("click", () => showNamesBar(false));
+$("nb-here").addEventListener("click", () => decideName("here"));
+$("nb-no").addEventListener("click", () => decideName("no"));
+$("nb-never").addEventListener("click", () => decideName("never"));
+$("nb-skip").addEventListener("click", () => stepLeak(1));
+// The count opens the bar on the first name; once it is open, it steps.
+function leaksFromCount(e) {
+  if (namesBar.hidden) showNamesBar(true);
+  else stepLeak(e && e.shiftKey ? -1 : 1);
+}
+$("st-leaks").addEventListener("click", leaksFromCount);
 $("st-leaks").addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
-  stepLeak(e.shiftKey ? -1 : 1);
+  leaksFromCount(e);
 });
 document.addEventListener("keydown", (e) => {
   if (!e.altKey || e.ctrlKey || e.metaKey || e.key.toLowerCase() !== "l") return;
@@ -3775,9 +3864,17 @@ function settleKeeps() {
 // its own height above the stage (--bar-h), so the first lines of the text
 // are never under it.
 function setBarHeight() {
-  document.documentElement.style.setProperty("--bar-h", leaksBar.hidden ? "0px" : leaksBar.offsetHeight + "px");
+  const a = leaksBar.hidden ? 0 : leaksBar.offsetHeight;
+  const b = namesBar.hidden ? 0 : namesBar.offsetHeight;
+  const root = document.documentElement.style;
+  root.setProperty("--bar-leaks", a + "px"); // where the second bar starts
+  root.setProperty("--bar-h", a + b + "px"); // …and what the two take together
 }
-if (typeof ResizeObserver !== "undefined") new ResizeObserver(setBarHeight).observe(leaksBar);
+if (typeof ResizeObserver !== "undefined") {
+  const barSizes = new ResizeObserver(setBarHeight);
+  barSizes.observe(leaksBar);
+  barSizes.observe(namesBar);
+}
 function showLeaksBar(on) {
   const was = !leaksBar.hidden;
   leaksBar.hidden = !on;
