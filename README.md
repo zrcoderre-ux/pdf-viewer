@@ -692,18 +692,6 @@ app, which routes it to the reader tab.
   or under Options → "Text reader — default font and leading", and every open
   reader tab follows at once. Display only: the text file itself is never
   changed. Light and dark chrome follow the viewer's own theme toggle.
-- **A page is a page.** Each sheet takes the **shape of the PDF page it came
-  from** — its proportions at whatever width you are reading at — so an export
-  reads as the document it was filed as instead of a stack of notes: a caption
-  page half the height of the one after it, a short exhibit page a strip, a
-  banner page a band. The words are untouched: they flow as they always did,
-  in your font at your size, and it is the paper under them that changes. A
-  floor, never a ceiling — a page whose text wants more room than the shape
-  gives it (a large reading size against a dense page) grows, because the
-  words come first. Nothing is read from a PDF until the pane is opened, so
-  until then the document's prevailing shape stands in, and US Letter portrait
-  behind that; a landscape exhibit reads portrait until its PDF is opened and
-  takes its own shape the moment the sizes land.
 - **The boxes are drawn, whatever the font.** PDF-Linker draws a page's
   line art — a court form's caption box, a pleading's caption divider, a
   section rule, an underline — into its export with the box-drawing glyphs
@@ -813,38 +801,28 @@ app, which routes it to the reader tab.
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and Apply Leak Fixes reads the cells back. The
-  reader attaches the folder's worksheet when the folder is opened (or **⚠
-  Leaks** loads one; a dropped `LEAKS.xlsx` attaches too) and works it **one
-  row at a time**: the current row stands in a bar above the text — value,
-  type, file and page:line, both Context quotes with the value bolded, the
-  Notes — and the text **opens the row's own document and scrolls to its page
-  and line**, the value marked wherever it stands (the occurrence the bar went
-  to strongest). The page stays editable underneath, and side by side the PDF
-  follows as it always does. **yes / no / never / phrase** are buttons;
-  anything else the cell takes — the replacement, `~CORRECT SPELLING`,
-  `*CORRECT TEXT` (`**` in every folder), a `[part to keep]` — is typed and
-  applied with Enter; **Alt+Y**, **Alt+N**, **Alt+↑/↓** work from the page.
-  **A row PDF-Linker answered for you is still a row to answer.** Where the
-  sheet arrives with a `~value` already in its Fix? cell — its own reading
-  that this value is a misspelling of that one — the review stops on it
-  exactly as it stops on an empty cell, and the bar says whose reading it is.
-  The suggestion is usually right, which is why it is pre-filled; when it is
-  wrong it is wrong in the way that matters most, since a `~Martin` over a
-  real "Marin" writes a real name into the file as though it had been checked.
-  **accept** (**Alt+A**) takes it as it stands and the row stops coming back;
-  typing anything else overwrites it. An acceptance writes nothing to the
-  workbook — the cell already says it — so it is remembered in the reader,
-  beside the unsaved decisions, and a save does not clear it. A decision moves
-  you to the next row still to answer; the **Leaks** tab lists every row with
-  its state and jumps to any of them. A `no` or `never` on a value the key
-  binds is mirrored as one of the reader's keeps, so the orange mark goes and
-  a save of the document leaves the value as it stands. Decisions are
-  remembered until **Save LEAKS.xlsx** (Ctrl+Shift+S) writes them **into the
-  same workbook in place** — only the Fix? cells change; every other part of
-  the file, the Context quotes, the column widths and the dropdown come back
-  byte for byte, and the file is read back before it is written — after which
-  Apply Leak Fixes (or a re-run) applies them to the files. A `yes` here is
-  the worksheet's alone: it is never also flagged into `New Real Values.txt`.
+  reader attaches the folder's worksheet when the folder is opened (or
+  **⚠ Leaks** loads one; a dropped `LEAKS.xlsx` attaches too) and works it
+  **one row at a time**: the current row stands in a bar above the text —
+  value, type, file and page:line, both Context quotes with the value
+  bolded, the Notes — and the text **opens the row's own document and
+  scrolls to its page and line**, the value marked wherever it stands (the
+  occurrence the bar went to strongest). The page stays editable underneath,
+  and side by side the PDF follows as it always does. **yes / no / never /
+  phrase** are buttons; anything else the cell takes — the replacement,
+  `~CORRECT SPELLING`, `*CORRECT TEXT` (`**` in every folder), a `[part to
+  keep]` — is typed and applied with Enter; **Alt+Y**, **Alt+N**, **Alt+↑/↓**
+  work from the page. A decision moves you to the next undecided row; the
+  **Leaks** tab lists every row with its state and jumps to any of them. A
+  `no` or `never` on a value the key binds is mirrored as one of the reader's
+  keeps, so the orange mark goes and a save of the document leaves the value
+  as it stands. Decisions are remembered until **Save LEAKS.xlsx**
+  (Ctrl+Shift+S) writes them **into the same workbook in place** — only the
+  Fix? cells change; every other part of the file, the Context quotes, the
+  column widths and the dropdown come back byte for byte, and the file is
+  read back before it is written — after which Apply Leak Fixes (or a
+  re-run) applies them to the files. A `yes` here is the worksheet's alone:
+  it is never also flagged into `New Real Values.txt`.
 - **A review goes through the folder one document at a time.** A row stands
   in a document — its File cell — and the rows are worked **document by
   document**: every row standing in the document in front is reached before
