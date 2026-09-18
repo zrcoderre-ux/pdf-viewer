@@ -260,6 +260,73 @@ export function serializeHeld(root) {
 }
 
 /** `text` with each range blanked to the same length, so offsets still hold. */
+// ---- the names of DECIDED CASES ------------------------------------------------------
+//
+// Most of what a key matches in a brief is not the matter's own people: it is
+// the parties of the decisions the brief cites. A pleading names Slaybaugh,
+// Semole and Renoir a dozen times each, and a key that binds a surname of
+// this case which happens to be one of theirs marks every one of them — which
+// buries the leak that matters under a page of orange, and, worse, would have
+// the save rewrite a published citation into a pseudonym.
+//
+// A cited case is recognisable, and that is the whole test here: a case NAME
+// ("Rasho v. Quillmark", "People v. Superior Court") carrying the CITATION
+// that makes it one — a year in parentheses, a volume and reporter, or
+// "supra" — or a short form, the party's name with "supra" after it. The
+// citation is what separates a decision from this matter's own caption, which
+// is the one thing a leak gate must never pass: a caption has no reporter.
+//
+// Inside such a span a bound value is the DECISION's party and not this
+// case's, whatever the key says: it stays as it reads, it is not marked, and
+// the forward pass writes no pseudonym over it.
+
+// A party: capitalised words, the small words a name carries, a corporate tail.
+const PARTY = "[A-Z][\\w.'\u2019-]*(?:(?:\\s+(?:of|the|and|&|de|la|le|van|von|del|da|dos|ex|rel\\.)\\s+|\\s+)[A-Z\\d][\\w.'\u2019-]*|,\\s+(?:Inc|LLC|L\\.L\\.C|Corp|Co|Ltd|N\\.A|LP|L\\.P)\\.?)*";
+const CASE_NAME_RE = new RegExp(PARTY + "\\s+v(?:s?\\.|s\\b|\\.|\\b)\\s+" + PARTY, "g");
+// What must follow the name for it to be a citation and not a caption: a year
+// in parentheses, a volume and reporter, or supra. A page or pin may come
+// first ("at p. 220"), and a comma or an opening bracket may sit between.
+const CITE_AFTER_RE = /^[\s,;]*(?:\((?:[^)]{0,40}\b\d{4})\)|\d{1,4}\s+[A-Z][\w.]*\s*\d|supra\b|\[\d)/i;
+// A short form: the party alone, with supra after it.
+const SUPRA_RE = new RegExp("[A-Z][\\w.'\u2019-]*(?:\\s+[A-Z][\\w.'\u2019-]*)*(?=,?\\s+supra\\b)", "g");
+
+/**
+ * Where `text` names a decided case: `[start, end]` per span, in order. A span
+ * covers the case NAME alone — the citation after it is what proves the name
+ * is one, and is not part of what the name protects.
+ */
+export function citedNameSpans(text) {
+  const src = String(text == null ? "" : text);
+  const out = [];
+  for (const re of [CASE_NAME_RE, SUPRA_RE]) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(src))) {
+      if (!m[0]) { re.lastIndex++; continue; }
+      const end = m.index + m[0].length;
+      if (re === CASE_NAME_RE && !CITE_AFTER_RE.test(src.slice(end, end + 60))) continue;
+      out.push([m.index, end]);
+    }
+  }
+  out.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  // The overlapping ones merged, so a caller has one span to test against.
+  const merged = [];
+  for (const [a, b] of out) {
+    const last = merged[merged.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else merged.push([a, b]);
+  }
+  return merged;
+}
+/** Whether [start, end) falls inside one of `spans`. */
+export function insideSpans(spans, start, end) {
+  for (const [a, b] of spans || []) {
+    if (a > start) break;
+    if (start >= a && end <= b) return true;
+  }
+  return false;
+}
+
 export function blankRanges(text, ranges) {
   if (!ranges || !ranges.length) return text;
   let out = text;
