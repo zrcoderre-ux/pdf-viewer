@@ -694,16 +694,19 @@ app, which routes it to the reader tab.
   or under Options → "Text reader — default font and leading", and every open
   reader tab follows at once. Display only: the text file itself is never
   changed. Light and dark chrome follow the viewer's own theme toggle.
-- **Zoom takes the words, not the window.** **Ctrl+wheel** and
-  **Ctrl+plus/minus** are what a reader reaches for when the type is too
-  small, and the browser answers them by scaling the whole window — toolbar,
-  tools panel, status bar, the bar over the leaks worksheet — which is the
-  part nobody wanted bigger. The reader catches the gesture and spends it on
-  the **reading size** instead: the size the pages are drawn at, the size that
-  sets the scale both sheets take side by side, remembered like the font.
-  **Ctrl+0** puts it back to the default. A trackpad pinch is added up and
-  spent a step at a time, so one gesture does not take the type from nine to
-  forty.
+- **Zoom magnifies the page, the way a PDF does.** **Ctrl+wheel**,
+  **Ctrl+plus/minus** and the **Zoom** buttons draw the page **larger**, and
+  nothing on it moves or changes size in relation to it: the layout at 200% is
+  the layout at 100% under a magnifying glass — the same words on the same
+  lines, in the same places on the paper — and what no longer fits the window
+  is scrolled to. A PDF gives you no way to reflow its text when you zoom, and
+  neither does this. **Ctrl+0** puts the page back to its own size. The
+  gesture is caught before the browser can scale the whole window — toolbar,
+  tools panel, status bar — which is the part nobody wanted bigger, and a
+  trackpad pinch is added up and spent a step at a time. The scale is applied
+  in the page's own pixels rather than as a picture blown up, so the type is
+  drawn at its real size and stays sharp at any magnification, and everything
+  the reader measures goes on being measured in one space.
 - **A page is a page.** Each sheet takes the **shape of the PDF page it came
   from** — its proportions at whatever width you are reading at — so an export
   reads as the document it was filed as instead of a stack of notes: a caption
@@ -825,74 +828,83 @@ app, which routes it to the reader tab.
   folder it sits in (its own folder, or the one above `Text Files`) and that
   folder's key is attached automatically; where the browser wants the folder
   re-authorised first, a bar offers it in one click, and a file from a folder
-  the reader has never seen gets an offer to open it once. Every fake is shown
-  as its real value in the case the fake was written in, **lightly
-  highlighted**, and hovering shows the pseudonym underneath. The highlight's
-  **colour and intensity** are yours to set (the swatch and slider beside
-  "Mark pseudonyms", or under Options), and are remembered like the font —
-  **written the moment you choose them.** Every reading setting is kept in two
-  places: the local copy, written at once and the one the next session opens
-  from, and the synced copy the Options page and a second tab read, written a
-  beat after the dragging stops. The synced store takes 120 writes a minute
-  and rejects the rest, and a colour is chosen by DRAGGING: a write per pixel
-  spent that quota in the first second, so the colour finally settled on was
-  the one most likely to be refused — on screen for the session, yellow again
-  the next morning. Each copy carries when it was written and the newer one
-  wins, so a synced write the browser refuses cannot undo the choice, and a
-  colour set in Options while the reader was closed still arrives. **Mark
-  pseudonyms** turns the highlight and the hover off; **Show fakes** shows the
-  document as it is on disk. The key is read the way `DeAnonymize.bas` and the
-  Claude extension read it: columns by header name, operator keeps skipped,
-  alt spellings forward-only, an ambiguous fake retired, the pinned tab out of
-  the reversal. The last few keys are remembered, so a lone `.txt` can be read
-  under a key already loaded. A real name from the key standing **unfaked** in
-  an export is counted in the status bar and underlined — that is a leak the
-  run missed. **The names of decided cases are not.** Most of what a key
-  matches in a brief belongs to the decisions it cites, not to the matter: a
-  pleading names Slaybaugh, Semole and Renoir a dozen times each, and a key
-  that binds a surname of this case which happens to be one of theirs used to
-  mark every one of them, burying the leak that matters under a page of
-  orange. A case **name** carrying the **citation** that makes it one — a year
-  in parentheses, a volume and reporter, or *supra*, and the short form
-  "Semole, supra" with it — is read as a decision, and a bound value standing
-  inside it is that decision's party. It is not marked, and **the save writes
-  no pseudonym over it**, which is what would have put out a citation to a
-  case that does not exist. That was the classic **keep**, made automatic. The
-  citation is the whole test: a caption has no reporter, so "Rasho v.
-  Quillmark, Defendant" at the head of a pleading is still a leak — the one
-  that matters most. **The count opens a bar over the text**, the same one the
-  LEAKS worksheet gets: counting them is not finding them, and on a forty-page
-  export they are wherever they are. Clicking it (or **Alt+L**, with **Shift**
-  for the one before) goes to each in the order they stand in the document,
-  marks it, and gives the decisions as buttons — **keep just this one**,
-  **keep in this case**, **never fake it anywhere**, or leave it, which the
-  save writes as its pseudonym. The bar says which of how many, and the page
-  and line it stands on, and the walk wraps at the end. Where the case folder
-  has no `LEAKS.xlsx` that is the whole review: the key is attached, the names
-  it binds are underlined, and this walks them one at a time. Where the
-  worksheet's own bar is up, this one sits under it. **And it walks the
-  folder, not the document.** The marks read the document that is open; the
-  folder holds the other forty, and a name left in the clear in one of them is
-  exactly as much of a leak. Once a document has been read, the rest of the
-  folder is **swept** on idle — each export read once, under the same key,
-  past the same keeps, the names of cited decisions spared as on the page —
-  and the count says what they are carrying. Step past the last name here and
-  the reader **opens the next document that has one** and goes on there; a
-  document with none of its own still steps into the folder. The sweep is
-  thrown away whenever the key or the keeps move, being an answer about them,
-  and a document that has been saved is struck from it. **fake it** is the
-  other half of the bar: the keeps answer the names that must stay, and this
-  answers the rest. It is the decision and not the deed — a save writes every
-  name standing in the clear anyway, so this one was always going to be faked;
-  what the walk was missing was a way to **say so**. The name is settled, the
-  walk stops offering it, and the save writes the pseudonym in its own time.
-  By value and not by place, since a save fakes every occurrence of a name
-  alike. The count says how many are settled and waiting on the save, the bar
-  counts what has been answered here, and the settling is dropped whenever the
-  key or the keeps move, both of which change what the question was. Where
-  there IS a worksheet the bar above the text is still the way through its
-  rows; this steps what is standing in the text, which is not the same list (a
-  worksheet is one row per value, and a value leaks wherever it leaks).
+  the reader has never seen gets an offer to open it once — **and the picker
+  opens where the file is**, so the case folder is already on screen and the
+  pick is one click. (A page cannot walk up from a file to the folder holding
+  it: the browser hands over a file and nothing above it, which is why the
+  first folder is picked at all. After that it is remembered.) **Picking the
+  Text Files folder by mistake is caught**: it is where the exports are, so it
+  looks like the place, and everything that makes a case folder one — the key,
+  the PDFs, the worksheet, the flagged list — is the level above. The reader
+  says so and opens the picker there again, with the folder above one click
+  away. Every fake is shown as its real value in the case the fake was written
+  in, **lightly highlighted**, and hovering shows the pseudonym underneath.
+  The highlight's **colour and intensity** are yours to set (the swatch and
+  slider beside "Mark pseudonyms", or under Options), and are remembered like
+  the font — **written the moment you choose them.** Every reading setting is
+  kept in two places: the local copy, written at once and the one the next
+  session opens from, and the synced copy the Options page and a second tab
+  read, written a beat after the dragging stops. The synced store takes 120
+  writes a minute and rejects the rest, and a colour is chosen by DRAGGING: a
+  write per pixel spent that quota in the first second, so the colour finally
+  settled on was the one most likely to be refused — on screen for the
+  session, yellow again the next morning. Each copy carries when it was
+  written and the newer one wins, so a synced write the browser refuses cannot
+  undo the choice, and a colour set in Options while the reader was closed
+  still arrives. **Mark pseudonyms** turns the highlight and the hover off;
+  **Show fakes** shows the document as it is on disk. The key is read the way
+  `DeAnonymize.bas` and the Claude extension read it: columns by header name,
+  operator keeps skipped, alt spellings forward-only, an ambiguous fake
+  retired, the pinned tab out of the reversal. The last few keys are
+  remembered, so a lone `.txt` can be read under a key already loaded. A real
+  name from the key standing **unfaked** in an export is counted in the status
+  bar and underlined — that is a leak the run missed. **The names of decided
+  cases are not.** Most of what a key matches in a brief belongs to the
+  decisions it cites, not to the matter: a pleading names Slaybaugh, Semole
+  and Renoir a dozen times each, and a key that binds a surname of this case
+  which happens to be one of theirs used to mark every one of them, burying
+  the leak that matters under a page of orange. A case **name** carrying the
+  **citation** that makes it one — a year in parentheses, a volume and
+  reporter, or *supra*, and the short form "Semole, supra" with it — is read
+  as a decision, and a bound value standing inside it is that decision's
+  party. It is not marked, and **the save writes no pseudonym over it**, which
+  is what would have put out a citation to a case that does not exist. That
+  was the classic **keep**, made automatic. The citation is the whole test: a
+  caption has no reporter, so "Rasho v. Quillmark, Defendant" at the head of a
+  pleading is still a leak — the one that matters most. **The count opens a
+  bar over the text**, the same one the LEAKS worksheet gets: counting them is
+  not finding them, and on a forty-page export they are wherever they are.
+  Clicking it (or **Alt+L**, with **Shift** for the one before) goes to each
+  in the order they stand in the document, marks it, and gives the decisions
+  as buttons — **keep just this one**, **keep in this case**, **never fake it
+  anywhere**, or leave it, which the save writes as its pseudonym. The bar
+  says which of how many, and the page and line it stands on, and the walk
+  wraps at the end. Where the case folder has no `LEAKS.xlsx` that is the
+  whole review: the key is attached, the names it binds are underlined, and
+  this walks them one at a time. Where the worksheet's own bar is up, this one
+  sits under it. **And it walks the folder, not the document.** The marks read
+  the document that is open; the folder holds the other forty, and a name left
+  in the clear in one of them is exactly as much of a leak. Once a document
+  has been read, the rest of the folder is **swept** on idle — each export
+  read once, under the same key, past the same keeps, the names of cited
+  decisions spared as on the page — and the count says what they are carrying.
+  Step past the last name here and the reader **opens the next document that
+  has one** and goes on there; a document with none of its own still steps
+  into the folder. The sweep is thrown away whenever the key or the keeps
+  move, being an answer about them, and a document that has been saved is
+  struck from it. **fake it** is the other half of the bar: the keeps answer
+  the names that must stay, and this answers the rest. It is the decision and
+  not the deed — a save writes every name standing in the clear anyway, so
+  this one was always going to be faked; what the walk was missing was a way
+  to **say so**. The name is settled, the walk stops offering it, and the save
+  writes the pseudonym in its own time. By value and not by place, since a
+  save fakes every occurrence of a name alike. The count says how many are
+  settled and waiting on the save, the bar counts what has been answered here,
+  and the settling is dropped whenever the key or the keeps move, both of
+  which change what the question was. Where there IS a worksheet the bar above
+  the text is still the way through its rows; this steps what is standing in
+  the text, which is not the same list (a worksheet is one row per value, and
+  a value leaks wherever it leaks).
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and Apply Leak Fixes reads the cells back. The
@@ -1176,29 +1188,18 @@ app, which routes it to the reader tab.
   Slayton" where the key binds "David", and that keep is worth seeing exactly
   because the "David" inside it would otherwise have been faked. (Masking is
   untouched and still covers every keep; only the marks are narrowed.)
-- **The master workbook's keeps, in force everywhere.** PDF-Linker keeps one
-  workbook across every matter — `Master Leaks.xlsx`, wherever
-  `master_leaks_path` points — and its **KEEP sheet** is the settled answer to
-  "leave this alone": the Clerk's own name, a cited decision's party, every
-  value already ruled on, with its Times Seen and the folders it has protected.
-  **Load master workbook…** (the Flagged panel) reads that sheet and holds
-  those values kept **without being asked again** — they are not flagged as
-  leaks, not rewritten to a pseudonym on save, and marked like any other keep,
-  in this case and every other. The workbook is **chosen once**: the browser
-  will not read a path on its own, so its handle is remembered (as case folders
-  are) and attached by every reader tab at startup; when the browser wants the
-  grant renewed, the panel offers it in one click rather than asking silently.
-  Dropping the workbook on the reader attaches it for the session. The panel
-  says how many standing keeps are in force and lists **the ones standing in
-  the open document** — the values it would otherwise have flagged. Only keeps
-  of a WHOLE value are applied: a bracketed spec that keeps part of a value
-  ("`[David]` W. Slayton") says that part stands inside that value, not that
-  the part stands everywhere, so those rows are counted and left to PDF-Linker
-  rather than widened into a rule the reader would apply to any "David". The
-  workbook's other sheet, the "Master Leaks" tally of genuine leaks, is not
-  read: it has no Fix? column, so the header rule passes over it. Nothing is
-  ever written back to it — withdrawing a standing keep is done in the
-  workbook, and the reader's right-click says so.
+- **The master workbook, where it is holding something.** PDF-Linker keeps one
+  workbook across every matter, whose KEEP sheet is every value you have ever
+  said to leave alone. Attached here, those keeps are in force in this case
+  too — but **only the ones the key binds are identified or shown**. A keep
+  exists to stop a value being faked, and a value this key does not bind was
+  never going to be: "Court", "Clerk", "County" and a hundred names from other
+  matters do no work here, and listing them would bury the handful that do.
+  The panel says what the workbook is **holding against the key in this
+  document** and keeps the total as a tooltip; the marks over the text are the
+  same handful; and the blanking that protects a keep from the forward pass is
+  narrowed to them as well, which takes an alternation over hundreds of values
+  out of every save and every repaint.
 - **Or keep it at one place only.** Both of those keeps are decisions about a
   *value*, and neither fits the name on every document: the Clerk's own
   signature block. Fake the "David" of *David W. Slayton* and the pseudonym

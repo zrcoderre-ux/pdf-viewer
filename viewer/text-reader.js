@@ -438,12 +438,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 function applySettings() {
   const root = document.documentElement.style;
   root.setProperty("--reader-font", TD.fontCss(settings));
-  root.setProperty("--reader-size", settings.fontSize + "px");
+  root.setProperty("--reader-size", (settings.fontSize * zoomNow()) + "px");
   root.setProperty("--reader-lh", String(settings.lineHeight));
   // The EFFECTIVE size is what the pages use: the size set here, less
   // whatever a page has had to give up to hold its words (shapePages). The
   // width is the paper's and belongs to applyPageWidth, not to any setting.
-  root.setProperty("--reader-size-eff", settings.fontSize + "px");
+  root.setProperty("--reader-size-eff", (settings.fontSize * zoomNow()) + "px");
   const mark = TD.markCss(settings);
   root.setProperty("--pn-bg", mark.bg);
   root.setProperty("--pn-bg-hover", mark.hover);
@@ -457,7 +457,7 @@ function applySettings() {
   fontSelect.value = settings.font;
   fontCustom.hidden = settings.font !== "custom";
   fontCustom.value = settings.customFont;
-  sizeLabel.textContent = String(settings.fontSize);
+  sizeLabel.textContent = Math.round(zoomNow() * 100) + "%";
   lhRange.value = String(settings.lineHeight);
   marksToggle.checked = settings.marks;
   fakesToggle.checked = settings.showFakes;
@@ -496,11 +496,13 @@ $("size-up").addEventListener("click", () => zoomText(1));
 // Caught over the whole window, not just the pages, so a pointer that happens
 // to be over the panel does not zoom the panel; and caught in the capture
 // phase, before anything else reads the key.
+// A step of a tenth each way, the way a PDF viewer steps, and Ctrl+0 back to
+// the page at its own size.
 function zoomText(step) {
-  const now = settings.fontSize;
-  const next = step === 0 ? TD.DEFAULT_SETTINGS.fontSize : Math.min(40, Math.max(9, now + step));
-  if (next === now) return;
-  settings.fontSize = next;
+  const now = zoomNow();
+  const next = step === 0 ? 1 : Math.min(5, Math.max(0.25, Math.round(now * Math.pow(1.1, step) * 100) / 100));
+  if (Math.abs(next - now) < 0.001) return;
+  settings.zoom = next;
   saveSettings();
   applySettings();
   relayout();
@@ -786,19 +788,21 @@ function keyLessKeeps(k) {
 // An occurrence of a kept value is blanked (same length, a non-word
 // character) before the forward side looks at the text, so a kept
 // "Helen Rasho" is not rewritten through its own "Helen" and "Rasho" rows.
-// One matcher per set of keeps, not per call: the master workbook can hold
-// hundreds of values, the matcher over them is a big alternation to compile,
-// and a save or a repaint asks for it once per page. Both lists are replaced
-// rather than edited in place whenever they change, so their identity is the
-// whole test.
-let keptRxMemo = { keeps: null, master: null, rx: null };
-function keptMatcher() {
-  if (keptRxMemo.keeps !== keeps || keptRxMemo.master !== masterKeeps) {
-    const kept = allKeeps();
-    keptRxMemo = { keeps, master: masterKeeps, rx: kept.length ? PK.buildMatcher(kept.map((k) => k.value)) : null };
-  }
-  return keptRxMemo.rx;
-}
+//
+// ONLY THE KEEPS THE KEY BINDS. A keep exists to stop a value being faked,
+// and a value the key does not bind was never going to be: the master
+// workbook carries the settled decisions of every other matter — "Court",
+// "Clerk", "County", a hundred names from cases this one has nothing to do
+// with — and blanking those changes nothing at all, the forward side having
+// no row that could reach them. What it costs is real: an alternation over
+// hundreds of values, compiled and run over every page on every save and
+// every repaint. So the matcher is the keeps that do work, which is the same
+// list the marks are drawn from (keptMarkMatcher, one and the same now).
+//
+// One matcher per set of keeps, not per call. Both lists are replaced rather
+// than edited in place whenever they change, and so is the key, so their
+// identity is the whole test.
+function keptMatcher() { return keptMarkMatcher(); }
 // Does a kept value carry anything the key binds? `reals` cannot answer it —
 // the kept values are taken out of the key's forward side, which is the whole
 // point of a keep — so the question goes to the key's own warning rows, every
@@ -825,13 +829,12 @@ function keyBinds(value) {
   }
   return keyBindsMemo.seen.get(v);
 }
-// The keeps worth MARKING: the ones the key binds. A keep is worth seeing
-// because it says "this name was left alone on purpose" — which only means
-// something where the name would otherwise have been faked or flagged. The
-// master workbook carries the settled decisions of every other matter too
-// ("Court", "Clerk", "County"), and marking those here would underline half
-// the page to no purpose: nothing was ever going to flag them in this case.
-// Masking (see maskKept) still covers every keep; only the marks are narrowed.
+// The keeps that DO WORK: the ones the key binds. A keep is worth seeing —
+// and worth blanking the text for — because it says "this name was left alone
+// on purpose", which only means something where the name would otherwise have
+// been faked or flagged. Marking the rest would underline half the page to no
+// purpose, and masking the rest is work done to prevent something that was
+// never going to happen.
 let keptMarkMemo = { keeps: null, master: null, key: null, rx: null };
 function keptMarkMatcher() {
   if (keptMarkMemo.keeps !== keeps || keptMarkMemo.master !== masterKeeps || keptMarkMemo.key !== key) {
@@ -1216,7 +1219,7 @@ async function attachKeyForFile(handle) {
   }
   const at = await caseFolderFor(handle);
   if (!at) {
-    if (!key) showKeyOffer("No key attached. Open this file's case folder once and its pseudonym_key.xlsx is attached automatically from then on.", "Open case folder…", openFolder);
+    if (!key) showKeyOffer("No key attached. Open this file's case folder once — the picker opens where the file is — and its pseudonym_key.xlsx is attached by itself from then on.", "Open case folder…", () => openFolder(handle || null));
     return;
   }
   const attach = async () => {
@@ -1304,14 +1307,43 @@ $("file-input").addEventListener("change", async () => {
   if (f) await openFile(f, null);
 });
 
-async function openFolder() {
+/**
+ * The case folder, picked.
+ *
+ * A page cannot walk UP from a file to the folder it sits in — the browser
+ * gives a file handle and nothing above it, and that is the whole reason this
+ * is a pick at all. What it can do is open the picker AT the file: `startIn`
+ * takes a handle, and for a file handle the picker opens in the folder
+ * holding it, so the case folder (or the Text Files folder it sits in) is
+ * already on screen and the pick is one click. After that the folder is
+ * remembered and every document under it attaches its key by itself.
+ */
+async function openFolder(startIn) {
   if (!window.showDirectoryPicker) { toast("This browser cannot open a folder; open a file instead.", { error: true }); return; }
   let h;
-  try { h = await window.showDirectoryPicker({ mode: "readwrite" }); }
-  catch (e) { if (e && e.name !== "AbortError") toast(String(e.message || e), { error: true }); return; }
+  const opts = { mode: "readwrite" };
+  if (startIn) opts.startIn = startIn;
+  else if (fileHandle) opts.startIn = fileHandle; // the folder this document is in
+  try { h = await window.showDirectoryPicker(opts); }
+  catch (e) {
+    if (e && e.name === "AbortError") return;
+    // An unusable startIn is not worth failing over: ask again without it.
+    if (opts.startIn) { try { h = await window.showDirectoryPicker({ mode: "readwrite" }); } catch (e2) { if (e2 && e2.name !== "AbortError") toast(String(e2.message || e2), { error: true }); return; } }
+    else { toast(String(e.message || e), { error: true }); return; }
+  }
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
   hideKeyOffer();
   const found = await adoptFolder(h);
+  // THE TEXT FILES FOLDER IS NOT THE CASE FOLDER. It is the easy mistake —
+  // the documents are in it, so it looks like the place — and everything that
+  // makes a case folder a case folder is one level up: the key, the PDFs, the
+  // LEAKS worksheet, the flagged list. The reader cannot step up on its own
+  // (no handle leads to its parent), so it says so and opens the picker there
+  // again, where the folder above is one click away.
+  if (looksLikeTextFiles(h, found)) {
+    showKeyOffer(`${h.name} is the folder the exports live in, not the case folder: the key, the PDFs and the worksheet are the level above it.`,
+      "Choose the folder above…", () => openFolder(h));
+  }
   if (folderDocs.length) {
     // A file already open from this folder just takes the key; otherwise the
     // quarantined export, the one to read, else the first.
@@ -1325,7 +1357,17 @@ async function openFolder() {
     toast("No text exports in " + folderName + (found.textDir ? "" : " (no Text Files folder)"), { error: true });
   }
 }
-$("open-folder").addEventListener("click", openFolder);
+$("open-folder").addEventListener("click", () => openFolder());
+
+/**
+ * Whether what was picked is the Text Files subfolder rather than the case
+ * folder: named as PDF-Linker names it, or carrying exports and none of the
+ * things that only a case folder has.
+ */
+function looksLikeTextFiles(h, found) {
+  if (h.name.toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) return true;
+  return !!found.rootDocs.length && !found.textDir && !found.keyHandle && !found.pdfs.length && !found.leaksHandle;
+}
 
 async function openFolderDoc(d) {
   try {
@@ -2493,13 +2535,32 @@ async function writeText(text, name, handle, { adopt = false } = {}) {
 // stylesheet holds them to one line), which makes them run past the column
 // instead, and the type shrinking to fit is what brings them back. What was
 // Line lock is the ordinary state of the page now, and costs nothing to say.
-/** The sheet as it stands: a page of paper, or the stage where that is narrower. */
-function pageWidthNow() {
+/**
+ * ZOOM IS MAGNIFICATION, the way a PDF zooms: the page is drawn larger and
+ * nothing on it moves or changes size in relation to it. The paper and the
+ * type are scaled by the SAME number, so the layout at 200% is the layout at
+ * 100% with a magnifying glass over it — the same words on the same lines, in
+ * the same places on the page — and what does not fit the window is reached
+ * by scrolling, as it is in a PDF viewer.
+ *
+ * Which is why the scale is in the page's own pixels rather than a CSS `zoom`
+ * over the top: everything the reader measures — the fit, the PDF's grid, the
+ * boxes an export draws, the two columns' scroll sync — goes on being measured
+ * in one space, and the type is drawn at its real size rather than a bitmap
+ * blown up, so it stays sharp at any magnification.
+ */
+function zoomNow() { return Math.min(5, Math.max(0.25, Number(settings.zoom) || 1)); }
+/** The paper at 100%: a page of it, or the stage where that is narrower. */
+function paperWidth() {
   return Math.max(280, Math.min(TD.PAGE_WIDTH, stageEl.clientWidth - 32));
+}
+/** …and as it is drawn, magnification and all. */
+function pageWidthNow() {
+  return Math.round(paperWidth() * zoomNow());
 }
 function applyPageWidth() {
   const root = document.documentElement.style;
-  root.setProperty("--reader-size-eff", settings.fontSize + "px");
+  root.setProperty("--reader-size-eff", (settings.fontSize * zoomNow()) + "px");
   const w = pageWidthNow();
   root.setProperty("--reader-width", w + "px");
   root.setProperty("--reader-width-eff", w + "px");
@@ -3775,11 +3836,18 @@ function renderMaster() {
     hint.textContent = "No master workbook attached. PDF-Linker's own (Master Leaks.xlsx) holds a KEEP sheet of every value you have said to leave alone; attached here, the reader stops flagging them as leaks — in this case and every other.";
     return;
   }
+  // WHAT IS WORTH SAYING is what the workbook is HOLDING: a standing keep the
+  // key binds, standing in this document, which the run would otherwise have
+  // faked. The rest of the workbook — the settled decisions of every other
+  // matter — does no work here and is not a list worth reading: it is a
+  // number, and the button to load another.
   const here = masterKeeps.filter((k) => keptSeen.has(TD.foldValue(k.value)));
-  hint.textContent = `${masterInfo.name} · ${masterKeeps.length} standing keep${masterKeeps.length === 1 ? "" : "s"}`
-    + (masterInfo.partial ? `, ${masterInfo.partial} of part of a value left to PDF-Linker` : "")
-    + (masterInfo.loose ? " (this session only — choose it with the button to keep it attached)" : "")
-    + (here.length ? ` · ${here.length} standing in this document:` : " · none of them stands in this document.");
+  hint.textContent = (here.length
+    ? `${here.length} value${here.length === 1 ? "" : "s"} held against the key here, by ${masterInfo.name}:`
+    : `${masterInfo.name} holds nothing the key would fake in this document.`)
+    + (masterInfo.partial ? ` (${masterInfo.partial} of part of a value left to PDF-Linker.)` : "")
+    + (masterInfo.loose ? " This session only — choose it with the button to keep it attached." : "");
+  hint.title = `${masterKeeps.length} standing keep${masterKeeps.length === 1 ? "" : "s"} in all; the others name nothing this key binds.`;
   for (const k of here.slice(0, 60)) {
     const li = document.createElement("li");
     li.textContent = k.value;
@@ -5578,7 +5646,7 @@ function buildPdfPane() {
     if (fn) fn.textContent = folderName;
     box.querySelector("button").addEventListener("click", pickPdf);
     const of = box.querySelector(".openfolder");
-    if (of) of.addEventListener("click", openFolder);
+    if (of) of.addEventListener("click", () => openFolder());
     pdfPane.appendChild(box);
     return;
   }
@@ -5744,9 +5812,11 @@ function applyMatchedLayoutNow() {
     if (tops) tops = PS.spreadTops(tops, boxes);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
-    const scale = PS.matchedScale(base, settings.fontSize) || paneW / sz.w;
+    // The scale is the sheet's, and the sheet is the paper: the write pass
+    // below sets it from the page's own width (and the magnification with it),
+    // so the grid is drawn at whatever size the paper is being read at.
     matchedSlots.add(slot);
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, scale });
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, scale: 1 });
   }
   // Every slot the layout did not claim keeps the pane's own width, and gives
   // back whatever a grid before it levelled: its label's height, and the box
@@ -5981,7 +6051,7 @@ const FIT_PASSES = 4;
 function withBaseSize(fn) {
   const root = document.documentElement.style;
   const held = root.getPropertyValue("--reader-size-eff");
-  root.setProperty("--reader-size-eff", TD.DEFAULT_SETTINGS.fontSize + "px");
+  root.setProperty("--reader-size-eff", (TD.DEFAULT_SETTINGS.fontSize * zoomNow()) + "px");
   try { return fn(); } finally {
     if (held) root.setProperty("--reader-size-eff", held);
     else root.removeProperty("--reader-size-eff");

@@ -333,7 +333,11 @@ body.side-hidden #side { display: none; }
 body.dragging #empty .empty-inner { border-color: var(--accent); }
 
 /* ── pages ─────────────────────────────────────────────────────────────────── */
-#pages { padding: 20px 0 60px; }
+/* The column is as wide as its widest sheet and never narrower than the
+   stage, so a page magnified past the window overflows into the stage's own
+   scroll instead of being clipped by a centred margin — the way a zoomed PDF
+   behaves. */
+#pages { padding: 20px 0 60px; width: max-content; min-width: 100%; }
 .tpage {
   width: var(--reader-width-eff); margin: 0 auto 18px;
   background: #fff; color: #111; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); border-radius: 2px;
