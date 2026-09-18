@@ -94,6 +94,9 @@ const LEGACY_SETTINGS_KEY = "textReader.settings";
 const SETTINGS_AT_KEY = "textReader.settingsAt"; // when the local copy was written
 const KEYS_KEY = "textReader.keys";
 const VALUES_PREFIX = "textReader.values.";
+// …and what was last WRITTEN to the case folder, so the list can tell whether
+// PDF-Linker has been handed what is in it.
+const VALUES_SAVED_PREFIX = "textReader.valuesSaved.";
 const SPOTS_PREFIX = "textReader.spots.";
 const MAX_KEYS = 12;
 
@@ -2295,7 +2298,17 @@ document.addEventListener("keydown", (e) => {
   if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
   else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
 }, true);
-window.addEventListener("beforeunload", (e) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+// What a closing tab would leave behind: an edited document unsaved, a
+// flagged list never written to the case folder, LEAKS decisions not yet in
+// the workbook. The last two survive the close — they are remembered here —
+// but nothing downstream has them: PDF-Linker reads the folder, and the
+// folder has not been told. The browser's own dialog is all a page gets;
+// which of the three it is, the panels say.
+window.addEventListener("beforeunload", (e) => {
+  if (!dirty && !valuesDirty() && !leaksDirty()) return;
+  e.preventDefault();
+  e.returnValue = "";
+});
 
 /**
  * A real value typed into the plain text becomes a pseudonym span as soon as
@@ -2381,7 +2394,7 @@ async function saveDocument() {
       return;
     }
   }
-  const ok = await writeText(out, fileName, fileHandle);
+  const ok = await writeText(out, fileName, fileHandle, { adopt: true });
   if (!ok) return;
   setDirty(false);
   if (forwarded) afterTextChange();
@@ -2393,8 +2406,16 @@ document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); flagSelection(); }
 });
 
-/** Write text: in place through the handle, else the Save picker, else a download. */
-async function writeText(text, name, handle) {
+/**
+ * Write text: in place through the handle, else the Save picker, else a
+ * download. `adopt` is for the DOCUMENT alone — a file chosen in the picker
+ * becomes the file this reader saves to from then on, which is right for the
+ * document and wrong for anything else. The flagged list goes through here
+ * too, and saving it under its own suggested name used to make New Real
+ * Values.txt the document's handle: the next Ctrl+S wrote the export over the
+ * list.
+ */
+async function writeText(text, name, handle, { adopt = false } = {}) {
   const blob = new Blob([text], { type: "text/plain" });
   if (handle && handle.createWritable) {
     try {
@@ -2417,7 +2438,7 @@ async function writeText(text, name, handle) {
       const w = await h.createWritable();
       await w.write(blob);
       await w.close();
-      if (handle == null && h && h.name === name) fileHandle = h;
+      if (adopt && handle == null && h && h.name === name) fileHandle = h;
       return true;
     } catch (e) {
       if (e && e.name === "AbortError") return false;
@@ -3355,6 +3376,21 @@ function flagSelection() {
 }
 
 function valuesStoreKey() { return VALUES_PREFIX + (folderName || fileName || "loose"); }
+function valuesSavedKey() { return VALUES_SAVED_PREFIX + (folderName || fileName || "loose"); }
+/**
+ * Whether the flagged values and the keeps have been written out since they
+ * last moved. The list is remembered here whatever happens — closing the tab
+ * loses nothing — but remembered here is not handed over: PDF-Linker reads
+ * New Real Values.txt in the case folder and nothing else, so a list that has
+ * not been written is a run's worth of work the next run will not do. The
+ * file's own text is the signature; nothing else can be out of step with it.
+ */
+function valuesDirty() {
+  if (!flagged.length && !keeps.length) return false;
+  return TD.formatValuesFile(flagged, keeps) !== lsGet(valuesSavedKey(), "");
+}
+/** …and the same list, as it stands, marked as written. */
+function markValuesSaved(text) { lsSet(valuesSavedKey(), text); renderFlags(); }
 // Spot keeps belong to ONE document, not to the case: they name a place in it.
 // Remembered per document, like its swapped pages.
 function spotStoreKey() { return SPOTS_PREFIX + (folderName || "") + "/" + (fileName || ""); }
@@ -3407,9 +3443,11 @@ function renderFlags() {
     li.appendChild(x);
     flagsList.appendChild(li);
   }
-  flagsNote.textContent = dirHandle
+  const unsaved = valuesDirty();
+  flagsNote.textContent = (dirHandle
     ? `Saves to ${folderName}/${TD.VALUES_FILE}.`
-    : "No case folder is open: the list is remembered here and can be saved anywhere or copied.";
+    : "No case folder is open: the list is remembered here and can be saved anywhere or copied.")
+    + (unsaved ? " Not written yet — PDF-Linker reads the file, not this list." : "");
 }
 
 // The master workbook's standing keeps: how many there are, and — the useful
@@ -3539,13 +3577,14 @@ async function saveValuesFile() {
       const w = await h.createWritable();
       await w.write(new Blob([text], { type: "text/plain" }));
       await w.close();
+      markValuesSaved(text);
       toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep) into ${folderName} — re-run PDF-Linker to apply them to the files.`);
       return;
     } catch (e) {
       toast("Could not write into the folder (" + (e.message || e) + ") — choose where to save.", { error: true });
     }
   }
-  await writeText(text, TD.VALUES_FILE, null);
+  if (await writeText(text, TD.VALUES_FILE, null)) markValuesSaved(text);
 }
 $("flags-save").addEventListener("click", saveValuesFile);
 $("flags-copy").addEventListener("click", async () => {
@@ -5461,6 +5500,40 @@ function applyMatchedLayoutNow() {
   }
   // The sheets take their page shape before anything reads their heights.
   shapePages();
+  // A LINE THAT RUNS OFF THE PAGE COMES BACK ONTO IT. The reader's font is not
+  // the filing's, and the same characters set in it run a little wider than
+  // the column the PDF gave them; past the sheet's edge they are gone, and the
+  // sheet does not grow past the width the reader chose. Where the row has
+  // blank space in FRONT of the text — the indent the PDF put it at — the line
+  // slides back into it, by what it overruns or by what the indent has to
+  // give, whichever is less. Its top is untouched, so it still stands beside
+  // its own row on the PDF; the indent is what gives, being the part of a line
+  // nobody reads. This runs after the sheets have grown as far as the cap
+  // allows, so a line is only ever moved when there was nowhere else to put it
+  // (and a pleading page, whose lines all start at the body margin with the
+  // numbers in front of them, has nothing to give and is left alone).
+  const spill = [];
+  for (const p of plans) {
+    if (!p.tops || !p.lefts) continue;
+    p.lines.forEach((l, k) => {
+      const left = p.lefts[k] == null ? 0 : p.lefts[k] * p.scale;
+      if (left < 1) return; // flush with the margin: nothing in front of it
+      const lt = l.querySelector(":scope > .lt");
+      if (lt) spill.push({ l, lt, left });
+    });
+  }
+  if (spill.length) {
+    for (const x of spill) x.over = x.lt.scrollWidth - x.lt.clientWidth;
+    for (const x of spill) {
+      const back = Math.min(Math.max(0, x.over), x.left);
+      const want = (x.left - back) + "px";
+      if (x.l.style.left === want) continue;
+      x.l.style.left = want;
+      // What the line was laid at no longer describes it: the next pass puts
+      // it back at its own indent and measures it again from there.
+      x.l.__laid = null;
+    }
+  }
   // A text page with NO PDF page keeps the pane level with it. A combined file
   // always has two kinds: its own contents page at the top, and a banner page
   // before each member — and each of those used to stand beside a stub of a
