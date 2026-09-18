@@ -740,23 +740,23 @@ app, which routes it to the reader tab.
   far as you like: the font is never touched, so the size is yours to
   calibrate the page by, and the numbers are never touched either — the
   gutter shows the file's own and nothing moves between them. Display only:
-  the width you set comes back when the lock is off. Side by side the PDF's
-  own grid holds every line to one screen line already, whatever the lock
-  says.
+  the width you set comes back when the lock is off. Under **Match PDF grid**
+  the PDF's own grid holds every line to one screen line already, whatever the
+  lock says.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
   panel listing them once. A cite that wraps onto a numbered line is read
-  across the gutter number, as `pdf_linker.py` reads it. **Side by side, the
-  links are off.** A page laid on its PDF's grid has every line positioned and
-  sized on its own, and an underline is a strip measured off the line it sits
-  under — measured against a body the grid has shifted under the page,
-  re-measured as each PDF's sizes arrive and after every pass, and landing
-  beside the words as often as under them. The links are for reading the text;
-  side by side is for checking it against the PDF. The authorities are still
-  read, so **§ Authorities** fills as always and a cite opened from the panel
-  opens the same page; the status bar says the links are off, and they come
-  back when the panes close.
+  across the gutter number, as `pdf_linker.py` reads it. **While the PDF pane
+  is open, the links are off** (with or without the grid). Under the grid a
+  page has every line positioned and sized on its own, and an underline is a
+  strip measured off the line it sits under — measured against a body the grid
+  has shifted under the page, re-measured as each PDF's sizes arrive and after
+  every pass, and landing beside the words as often as under them. The links
+  are for reading the text; side by side is for checking it against the PDF.
+  The authorities are still read, so **§ Authorities** fills as always and a
+  cite opened from the panel opens the same page; the status bar says the
+  links are off, and they come back when the panes close.
 - **A name wrapped across lines is one name.** A pseudonym or a real value
   whose halves sit on two numbered lines — the line break, the next line's
   gutter number and any blank line between — is matched as one: the reader
@@ -1117,12 +1117,20 @@ app, which routes it to the reader tab.
   suffixes are never the difficulty: `.pdf`, `.txt` and `.txt.LEAK` all come
   off before the comparison, and a combined file's 21 members match their 21
   PDFs by name through the key. The PDF is read only when it is first shown.
-  **⇔ Side by side** opens the PDF in a pane beside the text, one PDF page
-  per text page, and lays each text page out on **its PDF page's own
-  geometry**: the same width and height, label and all, and — where the
-  PDF's text layer carries the pleading numbers down its margin — every
-  numbered line at its number's own height, the body starting at the PDF's
-  text margin, the leading the PDF's pitch, so line 7 stands beside line 7.
+  **⇔ Side by side** opens the PDF in a pane beside the text, one PDF page per
+  text page, scrolling together. **The text reads exactly as it does with the
+  pane closed** — its own font, size, width and leading, every line where it
+  flows — because a page is for reading before it is for comparing, and a
+  reader who opens the pane to check one name does not want the document
+  re-set around them.
+  **Match PDF grid** (the PDF group of the Tools panel, remembered, off by
+  default) is the other way of working: with it on, each text page is laid out
+  on **its PDF page's own geometry** — the same width and height, label and
+  all, and, where the PDF's text layer carries the pleading numbers down its
+  margin, every numbered line at its number's own height, the body starting at
+  the PDF's text margin, the leading the PDF's pitch, so line 7 stands beside
+  line 7. Turning it off puts every page back the moment it is switched, the
+  way closing the pane does. What follows describes the grid.
   **A text page with no PDF page keeps the pane level with it.** A combined
   file always has two kinds: its own list of the documents in it, at the top,
   and a banner page before each member. Each of those used to stand beside a

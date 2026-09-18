@@ -68,6 +68,7 @@ const markColorEl = $("mark-color");
 const markAlphaEl = $("mark-alpha");
 const fakesToggle = $("fakes-toggle");
 const lockToggle = $("lock-toggle");
+const gridToggle = $("grid-toggle");
 const providerEl = $("provider");
 const docsList = $("docs-list");
 const docsHint = $("docs-hint");
@@ -462,6 +463,7 @@ function applySettings() {
   marksToggle.checked = settings.marks;
   fakesToggle.checked = settings.showFakes;
   lockToggle.checked = settings.lineLock;
+  gridToggle.checked = settings.matchGrid;
 }
 
 for (const p of TD.FONT_PRESETS) {
@@ -488,6 +490,13 @@ markColorEl.addEventListener("input", () => { settings.markColor = markColorEl.v
 markAlphaEl.addEventListener("input", () => { settings.markAlpha = Number(markAlphaEl.value); saveSettings(); applySettings(); });
 fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.checked; saveSettings(); applySettings(); showFakes(settings.showFakes); });
 lockToggle.addEventListener("change", () => { settings.lineLock = lockToggle.checked; saveSettings(); applySettings(); relayout(); });
+// The grid is asked for, not assumed: a page laid on its PDF's geometry is a
+// different page to read — another width, another type size, every line moved
+// to its number's height — and the reader's first business is the words. Side
+// by side without it is the PDF beside the text, scrolling together, the text
+// exactly as it reads with the pane closed. applyMatchedLayout lifts the grid
+// the moment this goes off, the way closing the pane does.
+gridToggle.addEventListener("change", () => { settings.matchGrid = gridToggle.checked; saveSettings(); applySettings(); relayout(); });
 
 // ── print ────────────────────────────────────────────────────────────────────
 // The pages as they are shown, to paper or to a PDF — the browser's own
@@ -2488,15 +2497,14 @@ function placeCitationsNow() {
   const seen = new Map();
   let linked = 0;
   // SIDE BY SIDE: the authorities are still read, and nothing is drawn over
-  // the text. A page laid on its PDF's grid has every line positioned and
-  // sized on its own, and an underline is a strip measured off the line it
-  // sits under — measured against a body the grid has shifted under the page,
-  // re-measured as each PDF's sizes arrive and after every pass, and landing
-  // beside the words as often as under them. The links are for reading the
-  // text; side by side is for checking it against the PDF. So the pass stops
-  // at the reading: the Table of Authorities is filled as always (its entries
-  // carry the links, and a cite opened from there opens the same page), and
-  // the pages themselves carry no links until the panes are closed.
+  // the text. The links are for reading the text; side by side is for checking
+  // it against the PDF, and under Match PDF grid an underline cannot be drawn
+  // straight anyway — a strip measured off a line the grid has moved, against
+  // a body it has shifted, re-measured as each PDF's sizes arrive, lands
+  // beside the words as often as under them. So the pass stops at the reading
+  // whenever the pane is open: the Table of Authorities is filled as always
+  // (its entries carry the links, and a cite opened from there opens the same
+  // page), and the pages themselves carry no links until the pane closes.
   if (sbsOn) {
     for (const c of found) {
       const url = resolveUrl(c, citationRepo, provider);
@@ -4338,6 +4346,7 @@ function refreshPdf() {
   const any = pdfSources.some(Boolean);
   sbsBtn.disabled = !doc;
   swapBtn.disabled = !doc;
+  gridToggle.disabled = !doc;
   refreshSwapButtons();
   applySwaps();
   buildPdfPane();
@@ -5160,6 +5169,13 @@ function applyMatchedLayout() {
 }
 function applyMatchedLayoutNow() {
   const on = sbsOn && !pdfPane.hidden;
+  // The pane is one thing and the GRID is another. Unless it is asked for
+  // (Match PDF grid), a text page beside its PDF keeps the layout it has with
+  // the pane closed — its own width, its own type at its own size, its lines
+  // where they flow — and nothing below claims a page: every sheet is cleared,
+  // every slot takes the pane's width, and the two columns are held together
+  // by the scroll sync alone.
+  const grid = on && settings.matchGrid;
   const plans = [];
   const matchedSlots = new Set();
   // The pane's slots by their page, and its width, read ONCE: asking the pane
@@ -5170,7 +5186,7 @@ function applyMatchedLayoutNow() {
   const paneW = on ? paneWidth() : 0;
   for (const sec of pagesEl.querySelectorAll(".tpage")) {
     const i = Number(sec.dataset.index);
-    const slot = on ? slots.get(i) || null : null;
+    const slot = grid ? slots.get(i) || null : null;
     const t = slot && pdfTarget(i);
     const info = t && infoFor(t.src);
     const sz = info && info.sizes[t.page - 1];

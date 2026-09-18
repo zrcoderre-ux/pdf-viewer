@@ -650,6 +650,7 @@ export const DEFAULT_SETTINGS = {
   showFakes: false,  // display the fakes instead of the real names
   gutter: true,      // dim the pleading line numbers
   lineLock: false,   // keep every numbered line on ONE screen line (below)
+  matchGrid: false,  // side by side, lay each page on its PDF page's geometry
 };
 
 /** A settings object with every field valid, from whatever was stored. */
@@ -666,6 +667,7 @@ export function normalizeSettings(raw) {
   s.showFakes = s.showFakes === true;
   s.gutter = s.gutter !== false;
   s.lineLock = s.lineLock === true;
+  s.matchGrid = s.matchGrid === true;
   return s;
 }
 
