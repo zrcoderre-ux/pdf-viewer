@@ -871,10 +871,27 @@ app, which routes it to the reader tab.
   and line it stands on, and the walk wraps at the end. Where the case folder
   has no `LEAKS.xlsx` that is the whole review: the key is attached, the names
   it binds are underlined, and this walks them one at a time. Where the
-  worksheet's own bar is up, this one sits under it. Where there IS a
-  worksheet the bar above the text is still the way through its rows; this
-  steps what is standing in the text, which is not the same list (a worksheet
-  is one row per value, and a value leaks wherever it leaks).
+  worksheet's own bar is up, this one sits under it. **And it walks the
+  folder, not the document.** The marks read the document that is open; the
+  folder holds the other forty, and a name left in the clear in one of them is
+  exactly as much of a leak. Once a document has been read, the rest of the
+  folder is **swept** on idle — each export read once, under the same key,
+  past the same keeps, the names of cited decisions spared as on the page —
+  and the count says what they are carrying. Step past the last name here and
+  the reader **opens the next document that has one** and goes on there; a
+  document with none of its own still steps into the folder. The sweep is
+  thrown away whenever the key or the keeps move, being an answer about them,
+  and a document that has been saved is struck from it. **fake it now** is the
+  other half of the bar: the keeps say what must stay, and this says write the
+  pseudonym. The document is unlocked if it was locked, the name in front is
+  turned into its pseudonym where it stands so the decision is seen before it
+  is written, the file is saved — which writes every other name standing in
+  the clear in that document too, that being what a save does — and the lock
+  goes back on. The bar counts what the walk has answered here as it goes.
+  Where there IS a worksheet the bar above the text is still the way through
+  its rows; this steps what is standing in the text, which is not the same
+  list (a worksheet is one row per value, and a value leaks wherever it
+  leaks).
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and Apply Leak Fixes reads the cells back. The

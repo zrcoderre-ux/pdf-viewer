@@ -884,6 +884,7 @@ function forwardText(text, held) {
 }
 function compileKey() {
   const out = during("compiling the key", () => compileKeyNow());
+  dropSweep(); // the folder was read under the key that has just changed
   dropFlagsNowFaked();
   return out;
 }
@@ -1273,7 +1274,8 @@ function openText(text, name, handle, built) {
   $("edit-toggle").setAttribute("aria-pressed", "false");
   document.title = name + " — Text Reader";
   leakStep = -1; // a new document, a new walk through what stands in its clear
-  showNamesBar(false);
+  answered = 0;
+  if (!leakJump) showNamesBar(false); // …unless the walk is what opened it
   if (!dirHandle) loadValuesFor(name);
   spots = TD.normalizeSpots(lsGet(spotStoreKey(), []));
   // A document built ahead of time goes up as it stands, unless its spot keeps
@@ -2403,6 +2405,9 @@ async function saveDocument() {
   const ok = await writeText(out, fileName, fileHandle, { adopt: true });
   if (!ok) return;
   setDirty(false);
+  // The save wrote every name that was standing in the clear here, so the
+  // folder's answer for this document is that it has none.
+  sweep.rows = sweep.rows.filter((r) => r.doc.handle !== fileHandle);
   if (forwarded) afterTextChange();
   toast("Saved " + fileName + (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : ""));
 }
@@ -2934,25 +2939,50 @@ async function scanPassNow(pass) {
   // The row's own marks stand on the same pages, so they are laid again over
   // the pass that has just been made.
   paintRowMarks();
-  const leakEl = $("st-leaks");
-  leakEl.textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; click to step through them, right-click one to keep it` : "";
-  leakEl.classList.toggle("step", !!leaks);
-  if (!leaks) showNamesBar(false);
-  else if (!namesBar.hidden) renderNamesBar(); // the paint moved the ranges under it
-  if (leaks) {
-    leakEl.setAttribute("role", "button");
-    leakEl.setAttribute("tabindex", "0");
-    leakEl.title = "Go to the next one (Alt+L; hold Shift for the one before)";
-  } else {
-    leakEl.removeAttribute("role");
-    leakEl.removeAttribute("tabindex");
-    leakEl.title = "";
-  }
+  renderLeakStatus();
+  sweepFolder(); // …and what the other documents of the folder are carrying
   const nk = keptRanges.length;
   $("st-kept").textContent = nk ? `${nk} kept value${nk === 1 ? "" : "s"} standing as ${nk === 1 ? "it reads" : "they read"}` : "";
   return true;
 }
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
+/**
+ * The count of names standing in the clear, the folder's share of them, and
+ * whatever the walk was waiting on. Called by the paint that counted them and
+ * again by the folder sweep, which changes the second half of the sentence
+ * without touching the page.
+ */
+function renderLeakStatus() {
+  const leaks = leakHits.length;
+  const leakEl = $("st-leaks");
+  const rest = restOfFolder();
+  const more = rest.length ? ` (and ${rest.reduce((t, r) => t + r.count, 0)} in ${rest.length} other document${rest.length === 1 ? "" : "s"} of the folder)` : "";
+  leakEl.textContent = leaks
+    ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked${more} — written as pseudonyms on save; click to step through them, right-click one to keep it`
+    : rest.length ? `⚠ none here, and ${rest.reduce((t, r) => t + r.count, 0)} in ${rest.length} other document${rest.length === 1 ? "" : "s"} — click to go on` : "";
+  leakEl.classList.toggle("step", !!leaks || rest.length > 0);
+  if (leakJump && leaks) {
+    // A document opened to go on with the walk: stand on its first name.
+    leakJump = false;
+    leakStep = -1;
+    showNamesBar(true);
+  } else if (!leaks) {
+    if (leakJump) { leakJump = false; leakStep = -1; if (rest.length) stepLeak(1); else showNamesBar(false); }
+    else if (!rest.length) showNamesBar(false);
+  } else if (!namesBar.hidden) renderNamesBar(); // the paint moved the ranges under it
+  if (leaks || rest.length) {
+    leakEl.setAttribute("role", "button");
+    leakEl.setAttribute("tabindex", "0");
+    leakEl.title = leaks
+      ? "Go to the next one (Alt+L; hold Shift for the one before)"
+      : "Open the next document of the folder that has one";
+  } else {
+    leakEl.removeAttribute("role");
+    leakEl.removeAttribute("tabindex");
+    leakEl.title = "";
+  }
+}
+
 // ── stepping the names standing in the clear ─────────────────────────────────
 //
 // The status bar COUNTS the real names the key binds that the run left in the
@@ -2969,15 +2999,31 @@ let leakHits = []; // where each real name from the key stands unfaked: [{ range
 // rows; this steps what is standing in the text, which is not the same list —
 // a worksheet is one row per value, and a value leaks wherever it leaks.
 let leakStep = -1;
+let leakJump = false; // a document opened for the walk: stand on its first name
 function stepLeak(dir = 1) {
   // The ranges of the last paint, minus any whose page has been rebuilt under
   // them (an edit, a key change) before the next paint has caught up.
   const hits = liveLeaks();
+  const rest = restOfFolder();
   if (!hits.length) {
+    // Nothing here, but the folder is not this document: the walk goes on in
+    // the next one that has something standing in the clear.
+    if (rest.length) { jumpToDoc(dir < 0 ? rest[rest.length - 1] : rest[0]); return; }
     showNamesBar(false);
     toast(marksOff
       ? "The marks are off for this document, so the names standing in the clear are not being read."
+      : sweep.running ? "None here. The rest of the folder is still being read…"
+      : dirHandle ? "No real name from the key is standing unfaked, here or anywhere else in the folder."
       : "No real name from the key is standing unfaked.");
+    return;
+  }
+  // Off the end of this document, with another in the folder still carrying
+  // one: the walk opens that document and goes on there rather than round
+  // again. The names arrive with the paint, so where to stand is left as a
+  // note for the paint to pick up (leakJump).
+  const next = leakStep + dir;
+  if ((next >= hits.length || next < 0) && rest.length) {
+    jumpToDoc(dir < 0 ? rest[rest.length - 1] : rest[0]);
     return;
   }
   leakStep = (((leakStep + dir) % hits.length) + hits.length) % hits.length;
@@ -3006,6 +3052,68 @@ function showNamesBar(on) {
   if (!on) { leakHere = null; markLeakHere(); return; }
   if (leakStep < 0) stepLeak(1);
   else renderNamesBar();
+  sweepFolder(); // …and what the rest of the folder is carrying
+}
+// ── the rest of the folder ───────────────────────────────────────────────────
+//
+// The marks read the document that is OPEN. A case folder holds the other
+// forty, and a name left in the clear in one of them is exactly as much of a
+// leak — the operator should not have to open each in turn to find that out.
+//
+// So the folder is swept: each export read once, under the same key, past the
+// same keeps, with the names of cited decisions spared as on the page. It is
+// text work and no DOM, but it is the expensive pass done forty times over,
+// so it waits for the review to start (the bar opening is what asks for it),
+// gives the thread back between documents, and is thrown away whenever the
+// key or the keeps move, being an answer about them.
+let sweep = { stamp: null, rows: [], at: 0, running: false };
+function sweepStale() {
+  return !sweep.stamp || sweep.stamp.reals !== reals || sweep.stamp.keeps !== keeps
+    || sweep.stamp.master !== masterKeeps || sweep.stamp.docs !== folderDocs;
+}
+function dropSweep() { sweep = { stamp: null, rows: [], at: 0, running: false }; }
+/** The other documents of the folder that carry a name standing in the clear. */
+function restOfFolder() {
+  return sweep.rows.filter((r) => r.count > 0 && r.doc.handle !== fileHandle);
+}
+function folderRest() {
+  if (!dirHandle || !reals) return "";
+  if (sweep.running) return `reading the rest of ${folderName}\u2026 (${sweep.at} of ${folderDocs.length})`;
+  const rest = restOfFolder();
+  if (!rest.length) return sweep.stamp ? "nothing standing in the clear in the rest of the folder" : "";
+  const n = rest.reduce((t, r) => t + r.count, 0);
+  return `\u00b7 ${n} more in ${rest.length} other document${rest.length === 1 ? "" : "s"}`;
+}
+async function sweepFolder() {
+  if (!dirHandle || !reals || sweep.running || !sweepStale()) return;
+  sweep = { stamp: { reals, keeps, master: masterKeeps, docs: folderDocs }, rows: [], at: 0, running: true };
+  const mine = sweep.stamp;
+  await duringAsync("reading the rest of the folder for names in the clear", async () => {
+    let clock = await idleClock();
+    for (const d of folderDocs) {
+      if (sweep.stamp !== mine) return; // the key moved under it: this answer is stale
+      sweep.at++;
+      renderNamesBar();
+      if (d.handle === fileHandle) continue; // the open one is read from the page itself
+      try {
+        const text = await (await d.handle.getFile()).text();
+        const masked = TD.blankRanges(maskKept(text), TD.citedNameSpans(text));
+        const found = PK.findReals(reals, masked);
+        if (found.length) sweep.rows.push({ doc: d, count: found.length, values: found.map((f) => f.real) });
+      } catch { /* unreadable: it is not a document this review can answer */ }
+      if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
+    }
+  });
+  if (sweep.stamp !== mine) return;
+  sweep.running = false;
+  renderNamesBar();
+  renderLeakStatus(); // the count says what the rest of the folder is carrying
+}
+/** On to a document of the folder that is carrying one, and stand on its first. */
+function jumpToDoc(row) {
+  leakJump = true;
+  toast(`Opening ${row.doc.name} — ${row.count} name${row.count === 1 ? "" : "s"} standing in the clear there.`);
+  openFolderDoc(row.doc);
 }
 /** The hits of the last paint whose pages are still on the page. */
 function liveLeaks() {
@@ -3028,11 +3136,13 @@ function renderNamesBar() {
   if (!hits.length) { showNamesBar(false); return; }
   const i = Math.min(Math.max(leakStep, 0), hits.length - 1);
   const h = hits[i];
-  $("nb-count").textContent = `${i + 1} of ${hits.length}`;
+  $("nb-count").textContent = `${i + 1} of ${hits.length}` + (answered ? ` · ${answered} answered here` : "");
   $("nb-value").textContent = h.real;
   $("nb-where").textContent = leakWhere(h);
   $("nb-answer").textContent = h.fake ? `the save writes \u201c${h.fake}\u201d` : "the save writes its pseudonym";
-  $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2;
+  $("nb-fake").disabled = !h.fake;
+  $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2 && !restOfFolder().length;
+  $("nb-rest").textContent = folderRest();
 }
 /** A decision taken on the name in front, and on to the next. */
 function decideName(what) {
@@ -3043,6 +3153,7 @@ function decideName(what) {
   // text again; until it lands, this keeps the walk honest — a name just kept
   // is not one still standing in the clear.
   const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+  answered++;
   if (what === "here") {
     keepRangeHere(h.range, h.real);
     leakHits = leakHits.filter((x) => x !== h);
@@ -3063,6 +3174,49 @@ $("nb-prev").addEventListener("click", () => stepLeak(-1));
 $("nb-next").addEventListener("click", () => stepLeak(1));
 $("nb-find").addEventListener("click", () => { const h = liveLeaks()[Math.max(0, leakStep)]; if (h) scrollRangeTo(h.range); });
 $("nb-close").addEventListener("click", () => showNamesBar(false));
+/**
+ * The pseudonym written over the name in front, now.
+ *
+ * A save writes every name standing in the clear — that is what the forward
+ * pass is for — so the operator who has finished keeping what must be kept
+ * has only to save. This is that, from the bar: the document is unlocked if
+ * it was locked, the name in front is turned into its pseudonym where it
+ * stands so the decision is visible before it is written, and the file is
+ * saved. The rest of the document's names go with it, and the walk moves on
+ * to the document that still has some.
+ */
+async function fakeName() {
+  const hits = liveLeaks();
+  if (!hits.length) { showNamesBar(false); return; }
+  const h = hits[Math.min(Math.max(leakStep, 0), hits.length - 1)];
+  if (!h.fake) { toast(`The key gives no pseudonym for “${h.real}”.`, { error: true }); return; }
+  const body = (() => {
+    const node = h.range.startContainer;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    return el && el.closest(".page-body");
+  })();
+  const locked = !editing;
+  if (locked) setEditing(true);
+  try {
+    if (body) snapshot(body, true);
+    const span = makePn(h.fake, h.real);
+    h.range.deleteContents();
+    h.range.insertNode(span);
+    leakHits = leakHits.filter((x) => x !== h);
+    answered++;
+    setDirty(true);
+    afterTextChange();
+    await saveDocument();
+  } finally {
+    if (locked) setEditing(false);
+  }
+  const left = liveLeaks();
+  if (!left.length) { renderNamesBar(); stepLeak(1); return; }
+  leakStep = Math.min(leakStep, left.length - 1) - 1;
+  stepLeak(1);
+}
+let answered = 0; // what the walk has settled in this document, for the bar to say
+$("nb-fake").addEventListener("click", fakeName);
 $("nb-here").addEventListener("click", () => decideName("here"));
 $("nb-no").addEventListener("click", () => decideName("no"));
 $("nb-never").addEventListener("click", () => decideName("never"));
