@@ -438,12 +438,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 function applySettings() {
   const root = document.documentElement.style;
   root.setProperty("--reader-font", TD.fontCss(settings));
-  root.setProperty("--reader-size", settings.fontSize + "px");
+  root.setProperty("--reader-size", (settings.fontSize * zoomNow()) + "px");
   root.setProperty("--reader-lh", String(settings.lineHeight));
   // The EFFECTIVE size is what the pages use: the size set here, less
   // whatever a page has had to give up to hold its words (shapePages). The
   // width is the paper's and belongs to applyPageWidth, not to any setting.
-  root.setProperty("--reader-size-eff", settings.fontSize + "px");
+  root.setProperty("--reader-size-eff", (settings.fontSize * zoomNow()) + "px");
   const mark = TD.markCss(settings);
   root.setProperty("--pn-bg", mark.bg);
   root.setProperty("--pn-bg-hover", mark.hover);
@@ -457,7 +457,7 @@ function applySettings() {
   fontSelect.value = settings.font;
   fontCustom.hidden = settings.font !== "custom";
   fontCustom.value = settings.customFont;
-  sizeLabel.textContent = String(settings.fontSize);
+  sizeLabel.textContent = Math.round(zoomNow() * 100) + "%";
   lhRange.value = String(settings.lineHeight);
   marksToggle.checked = settings.marks;
   fakesToggle.checked = settings.showFakes;
@@ -496,11 +496,13 @@ $("size-up").addEventListener("click", () => zoomText(1));
 // Caught over the whole window, not just the pages, so a pointer that happens
 // to be over the panel does not zoom the panel; and caught in the capture
 // phase, before anything else reads the key.
+// A step of a tenth each way, the way a PDF viewer steps, and Ctrl+0 back to
+// the page at its own size.
 function zoomText(step) {
-  const now = settings.fontSize;
-  const next = step === 0 ? TD.DEFAULT_SETTINGS.fontSize : Math.min(40, Math.max(9, now + step));
-  if (next === now) return;
-  settings.fontSize = next;
+  const now = zoomNow();
+  const next = step === 0 ? 1 : Math.min(5, Math.max(0.25, Math.round(now * Math.pow(1.1, step) * 100) / 100));
+  if (Math.abs(next - now) < 0.001) return;
+  settings.zoom = next;
   saveSettings();
   applySettings();
   relayout();
@@ -2532,13 +2534,32 @@ async function writeText(text, name, handle, { adopt = false } = {}) {
 // stylesheet holds them to one line), which makes them run past the column
 // instead, and the type shrinking to fit is what brings them back. What was
 // Line lock is the ordinary state of the page now, and costs nothing to say.
-/** The sheet as it stands: a page of paper, or the stage where that is narrower. */
-function pageWidthNow() {
+/**
+ * ZOOM IS MAGNIFICATION, the way a PDF zooms: the page is drawn larger and
+ * nothing on it moves or changes size in relation to it. The paper and the
+ * type are scaled by the SAME number, so the layout at 200% is the layout at
+ * 100% with a magnifying glass over it — the same words on the same lines, in
+ * the same places on the page — and what does not fit the window is reached
+ * by scrolling, as it is in a PDF viewer.
+ *
+ * Which is why the scale is in the page's own pixels rather than a CSS `zoom`
+ * over the top: everything the reader measures — the fit, the PDF's grid, the
+ * boxes an export draws, the two columns' scroll sync — goes on being measured
+ * in one space, and the type is drawn at its real size rather than a bitmap
+ * blown up, so it stays sharp at any magnification.
+ */
+function zoomNow() { return Math.min(5, Math.max(0.25, Number(settings.zoom) || 1)); }
+/** The paper at 100%: a page of it, or the stage where that is narrower. */
+function paperWidth() {
   return Math.max(280, Math.min(TD.PAGE_WIDTH, stageEl.clientWidth - 32));
+}
+/** …and as it is drawn, magnification and all. */
+function pageWidthNow() {
+  return Math.round(paperWidth() * zoomNow());
 }
 function applyPageWidth() {
   const root = document.documentElement.style;
-  root.setProperty("--reader-size-eff", settings.fontSize + "px");
+  root.setProperty("--reader-size-eff", (settings.fontSize * zoomNow()) + "px");
   const w = pageWidthNow();
   root.setProperty("--reader-width", w + "px");
   root.setProperty("--reader-width-eff", w + "px");
@@ -5783,9 +5804,11 @@ function applyMatchedLayoutNow() {
     if (tops) tops = PS.spreadTops(tops, boxes);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
-    const scale = PS.matchedScale(base, settings.fontSize) || paneW / sz.w;
+    // The scale is the sheet's, and the sheet is the paper: the write pass
+    // below sets it from the page's own width (and the magnification with it),
+    // so the grid is drawn at whatever size the paper is being read at.
     matchedSlots.add(slot);
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, scale });
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, scale: 1 });
   }
   // Every slot the layout did not claim keeps the pane's own width, and gives
   // back whatever a grid before it levelled: its label's height, and the box
@@ -6020,7 +6043,7 @@ const FIT_PASSES = 4;
 function withBaseSize(fn) {
   const root = document.documentElement.style;
   const held = root.getPropertyValue("--reader-size-eff");
-  root.setProperty("--reader-size-eff", TD.DEFAULT_SETTINGS.fontSize + "px");
+  root.setProperty("--reader-size-eff", (TD.DEFAULT_SETTINGS.fontSize * zoomNow()) + "px");
   try { return fn(); } finally {
     if (held) root.setProperty("--reader-size-eff", held);
     else root.removeProperty("--reader-size-eff");

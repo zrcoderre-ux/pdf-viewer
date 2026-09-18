@@ -724,6 +724,7 @@ export const DEFAULT_SETTINGS = {
   showFakes: false,  // display the fakes instead of the real names
   gutter: true,      // dim the pleading line numbers
   matchGrid: false,  // side by side, lay each page on its PDF page's geometry
+  zoom: 1,           // the magnification: the page drawn larger, never re-laid
 };
 
 /** A settings object with every field valid, from whatever was stored. */
@@ -743,6 +744,7 @@ export function normalizeSettings(raw) {
   delete s.pageWidth;
   delete s.lineLock;
   s.matchGrid = s.matchGrid === true;
+  s.zoom = clamp(Number(s.zoom), 0.25, 5, DEFAULT_SETTINGS.zoom);
   return s;
 }
 
