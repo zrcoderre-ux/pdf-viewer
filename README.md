@@ -669,6 +669,25 @@ PDF — and puts the real names back **on screen only**. Open it from the
 toolbar popup (**📝 Open text reader**), or open a `.txt` in the installed
 app, which routes it to the reader tab.
 
+- **A whole matter in one pick (the installed app).** PDF-Linker leaves a case
+  in one shape: the folder holds `pseudonym_key.xlsx`, the PDFs, `LEAKS.xlsx`
+  and — where the run made one — `Combined Text.txt`, with the exports
+  themselves in a **Text Files** subfolder under it. So the app opens the
+  **folder**, not the files: **📁 Case folder** on the tab strip, or the button
+  on the empty page with nothing open yet. Every export in `Text Files` opens
+  **in its own tab**, and each one comes up with the case folder already
+  attached — its key in force, its PDFs matched, its worksheet and flagged list
+  to hand — because the folder is handed to the reader with the document
+  instead of being asked for afterwards. Where the run made a combined file,
+  that one document **is** every export and opens alone rather than as forty
+  tabs of the same thing; past a handful of separate exports the rest is
+  offered rather than assumed, and either way every document is listed in each
+  reader's own Documents panel, one click away. **Files still open as files**,
+  by every route they ever did: the **+** tab and the empty page's own click
+  (a multi-select picker), a drop anywhere on the window, and the system's
+  own "open with" — `.pdf`, `.txt` and a quarantined `.txt.LEAK` alike. A
+  folder picked with no exports in it offers the file picker rather than
+  leaving a dead end.
 - **The tools stand down the left margin.** The reading, pseudonym, review and
   PDF tools are in a **Tools** panel on the left — the same rail the PDF viewer
   carries — in labelled groups: *Reading* (font, size, leading, width, line
@@ -933,13 +952,19 @@ app, which routes it to the reader tab.
   you to the next row still to answer; the **Leaks** tab lists every row with
   its state and jumps to any of them. A `no` or `never` on a value the key
   binds is mirrored as one of the reader's keeps, so the orange mark goes and
-  a save of the document leaves the value as it stands. Decisions are
-  remembered until **Save LEAKS.xlsx** (Ctrl+Shift+S) writes them **into the
-  same workbook in place** — only the Fix? cells change; every other part of
-  the file, the Context quotes, the column widths and the dropdown come back
-  byte for byte, and the file is read back before it is written — after which
-  Apply Fixes (or a re-run) applies them to the files. A `yes` here is
-  the worksheet's alone: it is never also flagged into `New Real Values.txt`.
+  a save of the document leaves the value as it stands. Decisions are **A save
+  of the document writes the worksheet too**: the rows answered while reading
+  a document are decisions about that document, and a decision left in the
+  browser is one PDF-Linker's next run will not see, so **Save** (or Ctrl+S)
+  carries them along with it — in place, through the worksheet's own handle or
+  the case folder's, and where there is neither the save says they are still
+  unwritten rather than opening a picker. Otherwise they are remembered until
+  **Save LEAKS.xlsx** (Ctrl+Shift+S) writes them **into the same workbook in
+  place** — only the Fix? cells change; every other part of the file, the
+  Context quotes, the column widths and the dropdown come back byte for byte,
+  and the file is read back before it is written — after which Apply Fixes
+  (or a re-run) applies them to the files. A `yes` here is the
+  worksheet's alone: it is never also flagged into `New Real Values.txt`.
 - **And through a document in the order the rows stand in it.** PDF-Linker
   writes one row per **value**, so the worksheet's own order is the order the
   values were first found — which sent a review to page 4, then page 31, then

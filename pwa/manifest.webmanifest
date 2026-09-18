@@ -57,7 +57,8 @@
       "action": "./index.html",
       "accept": {
         "text/plain": [
-          ".txt"
+          ".txt",
+          ".LEAK"
         ]
       },
       "icons": [

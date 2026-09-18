@@ -128,17 +128,17 @@ function makeTabButton(id, initialLabel) {
 // Create a tab and feed its PDF to the viewer as soon as the viewer is ready —
 // even while the tab is hidden — so every open PDF resolves its real name (and
 // download filename) automatically, without waiting to be clicked.
-function newTab({ initialLabel, file, handle, text }) {
+function newTab({ initialLabel, file, handle, text, dir, focus = true }) {
   const id = ++seq;
   const iframe = document.createElement("iframe");
   iframe.className = "tab-view";
   iframe.src = text ? READER_SRC : VIEWER_SRC;
   viewsEl.appendChild(iframe);
   const { btn, labelEl } = makeTabButton(id, initialLabel || "Loading…");
-  const tab = { id, iframe, btn, labelEl, file, handle, text: !!text, fed: false, reflowed: false };
+  const tab = { id, iframe, btn, labelEl, file, handle, text: !!text, dir: dir || null, fed: false, reflowed: false };
   tabs.push(tab);
   feedWhenReady(tab);
-  activate(id);
+  if (focus) activate(id);
   updateChrome();
   return tab;
 }
@@ -152,7 +152,9 @@ function feedWhenReady(tab) {
   if (load) {
     tab.fed = true;
     if (activeId === tab.id) tab.reflowed = true; // rendered while visible
-    load(tab.file, tab.handle);
+    // The case folder goes with the document where the tab came from one: the
+    // reader remembers it and attaches its key by itself.
+    load(tab.file, tab.handle, tab.dir || undefined);
     watchTitle(tab);
   } else {
     setTimeout(() => feedWhenReady(tab), 30);
@@ -188,8 +190,76 @@ async function pickFiles() {
   fileInput.click();
 }
 
+// ---- a whole case folder ---------------------------------------------------
+//
+// PDF-Linker leaves a matter in one shape: the case folder holds the key, the
+// PDFs, the LEAKS worksheet and (where the run made one) Combined Text.txt,
+// and the exports themselves sit in a "Text Files" subfolder under it. So the
+// folder is the thing to open, not the files: one pick, and the matter is up
+// — a tab per export, each with the folder attached, its key in force and its
+// PDFs to hand.
+//
+// The combined file is preferred where there is one: it IS every export, in
+// one document, and forty tabs is forty readers each compiling the same key.
+// Past a handful the rest is offered rather than assumed, and whichever way
+// it goes every document is listed in each reader's own Documents panel.
+const TEXT_SUBFOLDER = "Text Files";
+const MANY_TABS = 8;
+const isExport = (name) => /\.txt(\.leak)?$/i.test(name)
+  && !/^(leaks|pdf_linker_leaks|authorities cited|new real values)\.txt$/i.test(name)
+  && !/^(ETA|DONE) .*\.txt$/i.test(name);
+const isCombined = (name) => /^combined text\.txt$/i.test(name);
+
+async function pickCaseFolder() {
+  if (!window.showDirectoryPicker) { alert("This browser cannot open a folder. Open the text files instead."); return; }
+  let dir;
+  try { dir = await window.showDirectoryPicker({ mode: "readwrite" }); }
+  catch (e) { if (e && e.name !== "AbortError") alert(String(e.message || e)); return; }
+  let combined = null, textDir = null;
+  const rootDocs = [];
+  try {
+    for await (const [name, entry] of dir.entries()) {
+      if (entry.kind === "directory") { if (name.toLowerCase() === TEXT_SUBFOLDER.toLowerCase()) textDir = entry; continue; }
+      if (isCombined(name)) combined = entry;
+      else if (isExport(name)) rootDocs.push(entry);
+    }
+  } catch (e) { alert("Could not read " + dir.name + ": " + (e.message || e)); return; }
+  let docs = [];
+  if (textDir) {
+    try { for await (const [name, entry] of textDir.entries()) if (entry.kind === "file" && isExport(name)) docs.push(entry); }
+    catch { /* unreadable: what is in the folder itself will have to do */ }
+  }
+  if (!docs.length) docs = rootDocs;
+  docs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  if (combined) docs = [combined].concat(docs);
+  if (!docs.length) {
+    // Pointed at a folder that holds no exports, the app is still an app for
+    // opening files: say what was not there and offer the file picker rather
+    // than leaving a dead end behind the alert.
+    if (confirm("No text exports in " + dir.name + (textDir ? "" : " — and no " + TEXT_SUBFOLDER + " folder in it.")
+      + "\n\nOpen files instead?")) pickFiles();
+    return;
+  }
+  // The combined file is the whole matter in one document; open it alone.
+  let open = docs;
+  if (combined) open = [combined];
+  else if (docs.length > MANY_TABS
+    && !confirm(`${dir.name} has ${docs.length} text files. Open all of them, one tab each?\n\nCancel opens the first; the rest are listed in its Documents panel and are one click away.`)) {
+    open = [docs[0]];
+  }
+  for (const [i, h] of open.entries()) {
+    let file;
+    try { file = await h.getFile(); } catch { continue; }
+    newTab({ initialLabel: h.name, file, handle: h, text: true, dir, focus: i === 0 });
+  }
+}
+
 newTabBtn.addEventListener("click", pickFiles);
 dropzone.addEventListener("click", pickFiles);
+const caseBtn = document.getElementById("open-case");
+if (caseBtn) caseBtn.addEventListener("click", (e) => { e.stopPropagation(); pickCaseFolder(); });
+const caseBtn2 = document.getElementById("open-case-tab");
+if (caseBtn2) caseBtn2.addEventListener("click", pickCaseFolder);
 fileInput.addEventListener("change", () => {
   for (const f of fileInput.files) openLocalFile(f);
   fileInput.value = "";
