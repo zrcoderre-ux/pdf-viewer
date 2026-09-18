@@ -881,17 +881,19 @@ app, which routes it to the reader tab.
   the reader **opens the next document that has one** and goes on there; a
   document with none of its own still steps into the folder. The sweep is
   thrown away whenever the key or the keeps move, being an answer about them,
-  and a document that has been saved is struck from it. **fake it now** is the
-  other half of the bar: the keeps say what must stay, and this says write the
-  pseudonym. The document is unlocked if it was locked, the name in front is
-  turned into its pseudonym where it stands so the decision is seen before it
-  is written, the file is saved — which writes every other name standing in
-  the clear in that document too, that being what a save does — and the lock
-  goes back on. The bar counts what the walk has answered here as it goes.
-  Where there IS a worksheet the bar above the text is still the way through
-  its rows; this steps what is standing in the text, which is not the same
-  list (a worksheet is one row per value, and a value leaks wherever it
-  leaks).
+  and a document that has been saved is struck from it. **fake it** is the
+  other half of the bar: the keeps answer the names that must stay, and this
+  answers the rest. It is the decision and not the deed — a save writes every
+  name standing in the clear anyway, so this one was always going to be faked;
+  what the walk was missing was a way to **say so**. The name is settled, the
+  walk stops offering it, and the save writes the pseudonym in its own time.
+  By value and not by place, since a save fakes every occurrence of a name
+  alike. The count says how many are settled and waiting on the save, the bar
+  counts what has been answered here, and the settling is dropped whenever the
+  key or the keeps move, both of which change what the question was. Where
+  there IS a worksheet the bar above the text is still the way through its
+  rows; this steps what is standing in the text, which is not the same list (a
+  worksheet is one row per value, and a value leaks wherever it leaks).
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and Apply Leak Fixes reads the cells back. The
