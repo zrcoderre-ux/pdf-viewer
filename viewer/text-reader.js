@@ -2953,13 +2953,17 @@ let leakHits = []; // where each real name from the key stands unfaked: [{ range
  * without touching the page.
  */
 function renderLeakStatus() {
-  const leaks = leakHits.length;
+  const leaks = liveLeaks().length;                       // still to answer
+  const done = leakHits.length - leaks;                   // …and settled, still to be written
   const leakEl = $("st-leaks");
   const rest = restOfFolder();
-  const more = rest.length ? ` (and ${rest.reduce((t, r) => t + r.count, 0)} in ${rest.length} other document${rest.length === 1 ? "" : "s"} of the folder)` : "";
+  const restN = rest.reduce((t, r) => t + r.count, 0);
+  const more = rest.length ? ` (and ${restN} in ${rest.length} other document${rest.length === 1 ? "" : "s"} of the folder)` : "";
+  const settledSay = done ? `, ${done} settled and waiting on the save` : "";
   leakEl.textContent = leaks
-    ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked${more} — written as pseudonyms on save; click to step through them, right-click one to keep it`
-    : rest.length ? `⚠ none here, and ${rest.reduce((t, r) => t + r.count, 0)} in ${rest.length} other document${rest.length === 1 ? "" : "s"} — click to go on` : "";
+    ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked${more}${settledSay} — written as pseudonyms on save; click to step through them, right-click one to keep it`
+    : rest.length ? `⚠ none left here, and ${restN} in ${rest.length} other document${rest.length === 1 ? "" : "s"} — click to go on`
+    : done ? `⚠ ${done} settled and waiting on the save — Save writes them` : "";
   leakEl.classList.toggle("step", !!leaks || rest.length > 0);
   if (leakJump && leaks) {
     // A document opened to go on with the walk: stand on its first name.
@@ -3071,10 +3075,19 @@ function sweepStale() {
   return !sweep.stamp || sweep.stamp.reals !== reals || sweep.stamp.keeps !== keeps
     || sweep.stamp.master !== masterKeeps || sweep.stamp.docs !== folderDocs;
 }
-function dropSweep() { sweep = { stamp: null, rows: [], at: 0, running: false }; }
+function dropSweep() {
+  sweep = { stamp: null, rows: [], at: 0, running: false };
+  settled = new Set(); // the question has changed; so have the answers to it
+}
 /** The other documents of the folder that carry a name standing in the clear. */
 function restOfFolder() {
-  return sweep.rows.filter((r) => r.count > 0 && r.doc.handle !== fileHandle);
+  const out = [];
+  for (const r of sweep.rows) {
+    if (r.doc.handle === fileHandle) continue;
+    const count = r.values.filter((v) => !isSettled(v)).length;
+    if (count) out.push({ doc: r.doc, count, values: r.values });
+  }
+  return out;
 }
 function folderRest() {
   if (!dirHandle || !reals) return "";
@@ -3099,7 +3112,7 @@ async function sweepFolder() {
         const text = await (await d.handle.getFile()).text();
         const masked = TD.blankRanges(maskKept(text), TD.citedNameSpans(text));
         const found = PK.findReals(reals, masked);
-        if (found.length) sweep.rows.push({ doc: d, count: found.length, values: found.map((f) => f.real) });
+        if (found.length) sweep.rows.push({ doc: d, values: found.map((f) => f.real) });
       } catch { /* unreadable: it is not a document this review can answer */ }
       if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
     }
@@ -3117,7 +3130,7 @@ function jumpToDoc(row) {
 }
 /** The hits of the last paint whose pages are still on the page. */
 function liveLeaks() {
-  return leakHits.filter((h) => h.range && h.range.startContainer && h.range.startContainer.isConnected);
+  return leakHits.filter((h) => !isSettled(h.real) && h.range && h.range.startContainer && h.range.startContainer.isConnected);
 }
 /** Where a name stands, as a reader would say it: the page's own label, and its line. */
 function leakWhere(h) {
@@ -3175,47 +3188,40 @@ $("nb-next").addEventListener("click", () => stepLeak(1));
 $("nb-find").addEventListener("click", () => { const h = liveLeaks()[Math.max(0, leakStep)]; if (h) scrollRangeTo(h.range); });
 $("nb-close").addEventListener("click", () => showNamesBar(false));
 /**
- * The pseudonym written over the name in front, now.
+ * "Fake it": the decision, not the deed.
  *
  * A save writes every name standing in the clear — that is what the forward
- * pass is for — so the operator who has finished keeping what must be kept
- * has only to save. This is that, from the bar: the document is unlocked if
- * it was locked, the name in front is turned into its pseudonym where it
- * stands so the decision is visible before it is written, and the file is
- * saved. The rest of the document's names go with it, and the walk moves on
- * to the document that still has some.
+ * pass is for — so this one was always going to be faked. What the walk is
+ * missing is a way to SAY so: the keeps answer the names that must stay, and
+ * without an answer for the rest the operator has no way to tell the ones
+ * they have looked at from the ones they have not, and circles back over the
+ * same names. So this settles the name, the walk stops offering it, and the
+ * save writes the pseudonym in its own time, along with everything else.
+ *
+ * By VALUE, not by place: the save fakes every occurrence of a name alike, so
+ * a decision about one is a decision about all of them. Held for the session
+ * and dropped whenever the key or the keeps move, both of which change what
+ * the question was.
  */
-async function fakeName() {
+let settled = new Set(); // folded values the operator has said to fake
+function settledKey(v) { return String(v == null ? "" : v).trim().toLowerCase(); }
+function isSettled(v) { return settled.has(settledKey(v)); }
+function fakeName() {
   const hits = liveLeaks();
   if (!hits.length) { showNamesBar(false); return; }
   const h = hits[Math.min(Math.max(leakStep, 0), hits.length - 1)];
-  if (!h.fake) { toast(`The key gives no pseudonym for “${h.real}”.`, { error: true }); return; }
-  const body = (() => {
-    const node = h.range.startContainer;
-    const el = node && (node.nodeType === 1 ? node : node.parentElement);
-    return el && el.closest(".page-body");
-  })();
-  const locked = !editing;
-  if (locked) setEditing(true);
-  try {
-    if (body) snapshot(body, true);
-    const span = makePn(h.fake, h.real);
-    h.range.deleteContents();
-    h.range.insertNode(span);
-    leakHits = leakHits.filter((x) => x !== h);
-    answered++;
-    setDirty(true);
-    afterTextChange();
-    await saveDocument();
-  } finally {
-    if (locked) setEditing(false);
-  }
+  settled.add(settledKey(h.real));
+  answered++;
+  const n = leakHits.filter((x) => settledKey(x.real) === settledKey(h.real)).length;
+  toast(`“${h.real}” will be written as ${h.fake ? `“${h.fake}”` : "its pseudonym"} on save`
+    + (n > 1 ? ` — all ${n} of them here` : "") + ". Noted; the walk moves on.");
+  renderLeakStatus();
   const left = liveLeaks();
-  if (!left.length) { renderNamesBar(); stepLeak(1); return; }
+  if (!left.length) { stepLeak(1); return; }
   leakStep = Math.min(leakStep, left.length - 1) - 1;
   stepLeak(1);
 }
-let answered = 0; // what the walk has settled in this document, for the bar to say
+let answered = 0; // what the walk has answered in this document, for the bar to say
 $("nb-fake").addEventListener("click", fakeName);
 $("nb-here").addEventListener("click", () => decideName("here"));
 $("nb-no").addEventListener("click", () => decideName("no"));
