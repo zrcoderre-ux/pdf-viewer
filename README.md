@@ -747,16 +747,15 @@ app, which routes it to the reader tab.
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
   panel listing them once. A cite that wraps onto a numbered line is read
-  across the gutter number, as `pdf_linker.py` reads it. **While the PDF pane
-  is open, the links are off** (with or without the grid). Under the grid a
-  page has every line positioned and sized on its own, and an underline is a
-  strip measured off the line it sits under — measured against a body the grid
-  has shifted under the page, re-measured as each PDF's sizes arrive and after
-  every pass, and landing beside the words as often as under them. The links
-  are for reading the text; side by side is for checking it against the PDF.
-  The authorities are still read, so **§ Authorities** fills as always and a
-  cite opened from the panel opens the same page; the status bar says the
-  links are off, and they come back when the panes close.
+  across the gutter number, as `pdf_linker.py` reads it. **Under Match PDF
+  grid the links are off.** An underline is a strip measured off the line it
+  sits under, and the grid moves that line — against a body it has shifted,
+  and again as each PDF's sizes arrive — so the strips land beside the words
+  as often as under them. The authorities are still read, so **§ Authorities**
+  fills as always and a cite opened from the panel opens the same page; the
+  status bar says the links are off, and they come back the moment the grid
+  does. Side by side without the grid leaves every line where it flows, so
+  there the links are drawn and are right.
 - **A name wrapped across lines is one name.** A pseudonym or a real value
   whose halves sit on two numbered lines — the line break, the next line's
   gutter number and any blank line between — is matched as one: the reader

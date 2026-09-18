@@ -496,7 +496,12 @@ lockToggle.addEventListener("change", () => { settings.lineLock = lockToggle.che
 // by side without it is the PDF beside the text, scrolling together, the text
 // exactly as it reads with the pane closed. applyMatchedLayout lifts the grid
 // the moment this goes off, the way closing the pane does.
-gridToggle.addEventListener("change", () => { settings.matchGrid = gridToggle.checked; saveSettings(); applySettings(); relayout(); });
+gridToggle.addEventListener("change", () => {
+  settings.matchGrid = gridToggle.checked;
+  saveSettings(); applySettings();
+  if (gridOn()) clearCitationLinks(); // …and the underlines with it, at once
+  relayout();
+});
 
 // ── print ────────────────────────────────────────────────────────────────────
 // The pages as they are shown, to paper or to a PDF — the browser's own
@@ -2496,16 +2501,16 @@ function placeCitationsNow() {
   try { found = findAllCitations(full); } catch (e) { console.error(e); }
   const seen = new Map();
   let linked = 0;
-  // SIDE BY SIDE: the authorities are still read, and nothing is drawn over
-  // the text. The links are for reading the text; side by side is for checking
-  // it against the PDF, and under Match PDF grid an underline cannot be drawn
-  // straight anyway — a strip measured off a line the grid has moved, against
-  // a body it has shifted, re-measured as each PDF's sizes arrive, lands
-  // beside the words as often as under them. So the pass stops at the reading
-  // whenever the pane is open: the Table of Authorities is filled as always
-  // (its entries carry the links, and a cite opened from there opens the same
-  // page), and the pages themselves carry no links until the pane closes.
-  if (sbsOn) {
+  // ON THE PDF'S GRID: the authorities are still read, and nothing is drawn
+  // over the text. An underline is a strip measured off the line it sits
+  // under, and the grid moves that line — against a body it has shifted, and
+  // again as each PDF's sizes arrive — so the strips land beside the words as
+  // often as under them. The pass stops at the reading while the grid is on:
+  // the Table of Authorities is filled as always (its entries carry the links,
+  // and a cite opened from there opens the same page), and the pages carry no
+  // links until the grid comes off. The pane on its own leaves the lines where
+  // they flow, so there the links are drawn and are right.
+  if (gridOn()) {
     for (const c of found) {
       const url = resolveUrl(c, citationRepo, provider);
       if (url && !seen.has(c.key)) seen.set(c.key, { key: c.key, kind: c.kind, url });
@@ -2513,7 +2518,7 @@ function placeCitationsNow() {
     clearCitationLinks();
     lastCites = [...seen.values()];
     $("st-cites").textContent = lastCites.length
-      ? `${lastCites.length} authorit${lastCites.length === 1 ? "y" : "ies"} found — the links are off side by side`
+      ? `${lastCites.length} authorit${lastCites.length === 1 ? "y" : "ies"} found — the links are off on the PDF's grid`
       : "";
     renderToa();
     return;
@@ -5164,6 +5169,13 @@ function applyMatchedLayoutSoon() {
     if (sbsOn && !pdfPane.hidden) syncScroll("text", true);
   });
 }
+/**
+ * Whether the text is being laid on the PDF's grid right now: the pane up and
+ * the grid asked for. The pane alone changes nothing about the page, so what
+ * turns on the grid — the lines' own positions, and the citation underlines
+ * measured off them — asks this rather than asking whether the pane is open.
+ */
+function gridOn() { return sbsOn && !pdfPane.hidden && settings.matchGrid; }
 function applyMatchedLayout() {
   return during("lining the text up with the PDF", () => applyMatchedLayoutNow());
 }
@@ -5175,7 +5187,7 @@ function applyMatchedLayoutNow() {
   // where they flow — and nothing below claims a page: every sheet is cleared,
   // every slot takes the pane's width, and the two columns are held together
   // by the scroll sync alone.
-  const grid = on && settings.matchGrid;
+  const grid = gridOn();
   const plans = [];
   const matchedSlots = new Set();
   // The pane's slots by their page, and its width, read ONCE: asking the pane
@@ -5315,8 +5327,9 @@ function clearMatched(sec) {
 function setSideBySide(on, { remember = true } = {}) {
   sbsOn = !!on;
   if (remember) lsSet("textReader.sbs", sbsOn);
-  // The underlines go as the panes open, not a layout pass later.
-  if (sbsOn) clearCitationLinks();
+  // The underlines go as the panes open, not a layout pass later — where the
+  // grid is what is opening with them.
+  if (sbsOn && settings.matchGrid) clearCitationLinks();
   buildPdfPane();
   applySwaps();
   relayout();
