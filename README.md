@@ -1176,6 +1176,23 @@ app, which routes it to the reader tab.
   the PDF's text margin, the leading the PDF's pitch, so line 7 stands beside
   line 7. Turning it off puts every page back the moment it is switched, the
   way closing the pane does. What follows describes the grid.
+  **The sheet is never wider than the page you are set to.** The scale comes
+  from the type — the PDF's body drawn at the reading size — and on a filing
+  set in large type, or at a large reading size, that asked for a sheet half
+  again as wide as the page you chose and a document you had to scroll
+  sideways to read. Your width caps it: past that the page is drawn at your
+  own width and the scale follows the sheet, so the grid inside it still lands
+  on the PDF, and the status bar says so.
+  **And the two columns are boxes, not just pages.** A page's height comes
+  from the same arithmetic the bitmap is drawn by, so a height rounded one way
+  and a canvas rounded the other cannot put a pixel between them — a pixel a
+  page is a centimetre by the fortieth, one column sliding under the other
+  with nothing visibly wrong on either. Where a line pushed past the PDF's own
+  foot makes the text page taller than its PDF page (an export's footer or
+  stamp below the last numbered line), **the slot grows with it** rather than
+  the columns parting; the bitmap keeps its size and the box is held open
+  under it. The page labels are levelled to the taller of the two for the same
+  reason.
   **A text page with no PDF page keeps the pane level with it.** A combined
   file always has two kinds: its own list of the documents in it, at the top,
   and a banner page before each member. Each of those used to stand beside a

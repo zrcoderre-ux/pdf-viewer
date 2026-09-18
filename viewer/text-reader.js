@@ -2418,7 +2418,9 @@ function applyLineLockNow() {
   // already, whatever the lock says: the page is drawn at the reading
   // size's scale and widened for its longest line.
   if (pagesEl.querySelector(".tpage.matched")) {
-    st.textContent = "Side by side: the text in the PDF's own type sizes, the size zooming both sheets" + (matchedExtra ? `, ${matchedExtra}px wider for the longest line, scroll sideways` : "");
+    st.textContent = "Side by side: the text in the PDF's own type sizes"
+      + (matchedCapped ? ", drawn at your page width" : ", the size zooming both sheets")
+      + (matchedExtra ? `, ${matchedExtra}px wider for the longest line, scroll sideways` : "");
     return;
   }
   if (!settings.lineLock) { st.textContent = ""; return; }
@@ -5196,6 +5198,7 @@ function buildPdfPane() {
 // Display only — no line moves in the file, and the layout is lifted the
 // moment the pane closes.
 let matchedExtra = 0; // px the sheets were widened for their longest line
+let matchedCapped = false; // …and whether the reader's own width held them back
 const LINE_BOX = 1.2;  // a line's box, in its own type size: what the next line must clear
 /** A pane slot at a width: re-rendered where its bitmap is up, pre-sized where it is not. */
 function fitSlot(el, w) {
@@ -5297,18 +5300,40 @@ function applyMatchedLayoutNow() {
     matchedSlots.add(slot);
     plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, scale });
   }
-  // Every slot the layout did not claim keeps the pane's own width.
-  if (on) for (const el of slots.values()) if (!matchedSlots.has(el)) fitSlot(el, paneW);
+  // Every slot the layout did not claim keeps the pane's own width, and gives
+  // back whatever a grid before it levelled: its label's height, and the box
+  // its sheet was held open to.
+  if (on) for (const el of slots.values()) if (!matchedSlots.has(el)) { fitSlot(el, paneW); unlevelSlot(el); }
   document.body.classList.toggle("matched-pages", plans.length > 0);
+  // THE SHEET IS NEVER WIDER THAN THE PAGE THE READER IS SET TO. The scale
+  // comes from the type — the PDF's body drawn at the reading size — and on a
+  // filing set in large type, or at a large reading size, that asks for a
+  // sheet half again as wide as the page the reader chose, which is a
+  // document that has to be scrolled sideways to be read at all. The width
+  // caps it: past that the page is drawn at the reader's own width and the
+  // scale follows the sheet, so the grid inside it still lands on the PDF.
+  const capW = Math.max(200, Math.min(settings.pageWidth, stageEl.clientWidth - 32));
+  matchedCapped = false;
   for (const p of plans) {
-    const w = Math.round(p.sz.w * p.scale);
+    const want = Math.round(p.sz.w * p.scale);
+    const w = Math.min(want, capW);
+    if (w !== want) { p.scale = w / p.sz.w; matchedCapped = true; } // the sheet leads; the grid follows it
+    p.w = w;
     fitSlot(p.slot, w);
     p.sec.classList.add("matched");
     p.sec.style.width = w + "px";
-    // The PDF page's height — or more, where a pushed line runs past its foot.
+    // The page's height from the SAME arithmetic the bitmap is drawn by
+    // (renderInto, presize), not from the scale again: a page height rounded
+    // one way and a canvas height rounded the other is a pixel a page, and a
+    // pixel a page is a centimetre by the fortieth — one column sliding under
+    // the other with nothing visibly wrong on either.
+    const pageH = Math.round((w * p.sz.h) / p.sz.w);
+    // …or more, where a pushed line runs past the PDF's own foot. The slot
+    // grows with it (below), so the two boxes stay the same box.
     let foot = 0;
     if (p.tops) p.tops.forEach((y, k) => { if (y != null) foot = Math.max(foot, y + p.boxes[k] + p.pitch); });
-    p.sec.querySelector(".page-inner").style.height = Math.round(Math.max(p.sz.h, foot) * p.scale) + "px";
+    p.h = Math.max(pageH, Math.round(foot * p.scale));
+    p.sec.querySelector(".page-inner").style.height = p.h + "px";
     p.body.classList.toggle("fixed", !!p.tops);
     if (p.geom) p.sec.style.setProperty("--body-x", (p.geom.bodyX * p.scale) + "px");
     else p.sec.style.removeProperty("--body-x");
@@ -5332,19 +5357,60 @@ function applyMatchedLayoutNow() {
       l.style.lineHeight = (p.boxes[k] * p.scale) + "px";
     });
   }
+  // THE TWO COLUMNS ARE BOXES, NOT JUST PAGES. A text page's label can carry a
+  // REVIEW clause, a document banner's own larger type, or a line that wraps;
+  // the pane's label carries the page number and nothing else. A few pixels a
+  // page is a centimetre by the tenth, and every page after it is that much
+  // out of register — the sync holds the anchors together and the pages
+  // between them slide. So the labels are levelled to the taller of the two,
+  // and a page the grid has had to grow is matched by its slot.
+  //
+  // Read every pair, then write every pair: asking one page for its label
+  // height after writing the last one lays the document out again each time.
+  if (plans.length) {
+    const pairs = plans.map((p) => ({
+      p,
+      lt: p.sec.querySelector(".page-label"),
+      ls: p.slot.querySelector(".page-label"),
+      sheet: p.slot.querySelector(".pdf-sheet"),
+    }));
+    for (const x of pairs) {
+      x.hl = x.lt ? x.lt.offsetHeight : 0;
+      x.hs = x.ls ? x.ls.offsetHeight : 0;
+    }
+    for (const x of pairs) {
+      const lead = Math.max(x.hl, x.hs);
+      for (const [el, h] of [[x.lt, x.hl], [x.ls, x.hs]]) {
+        if (!el) continue;
+        const want = lead && h !== lead ? lead + "px" : "";
+        if (el.style.height !== want) el.style.height = want;
+      }
+      // The bitmap keeps its own height; the sheet holds the box open under it
+      // where the text page has had to grow. `minHeight`, because renderInto
+      // and presize both write `height` and would take this with it.
+      if (x.sheet) {
+        const want = x.p.h + "px";
+        if (x.sheet.style.minHeight !== want) x.sheet.style.minHeight = want;
+      }
+    }
+  }
   // The longest line: the sheets grow by what it needs, all of them by the
-  // same amount so the pages stay one size. Measured line by line — a grid
-  // item's overflow is not in the page body's own scrollWidth.
+  // same amount so the pages stay one size — but never past the cap, which is
+  // what the cap is for. Measured line by line; a grid item's overflow is not
+  // in the page body's own scrollWidth.
   matchedExtra = 0;
-  const laid = plans.filter((p) => p.tops);
+  const room = Math.max(0, capW - Math.max(0, ...plans.map((p) => p.w || 0)));
+  const laid = room > 0 ? plans.filter((p) => p.tops) : [];
   if (laid.length) {
     const lts = [];
     for (const p of laid) lts.push(...p.body.querySelectorAll(":scope > .line > .lt"));
     const overflow = () => { let o = 0; for (const lt of lts) o = Math.max(o, lt.scrollWidth - lt.clientWidth); return o; };
     let over = overflow();
     for (let n = 0; over > 0 && n < 6; n++) {
-      matchedExtra = Math.ceil(matchedExtra + over + 1);
-      for (const p of plans) p.sec.style.width = (Math.round(p.sz.w * p.scale) + matchedExtra) + "px";
+      const grown = Math.min(room, Math.ceil(matchedExtra + over + 1));
+      if (grown <= matchedExtra) break; // at the cap: the long line runs on past the sheet
+      matchedExtra = grown;
+      for (const p of plans) p.sec.style.width = (p.w + matchedExtra) + "px";
       over = overflow();
     }
   }
@@ -5512,10 +5578,19 @@ function shapePages() {
     if (!moved) break;
   }
 }
+/** A slot back as the pane built it: the levelling and the held-open box go. */
+function unlevelSlot(el) {
+  const lab = el.querySelector(".page-label");
+  if (lab && lab.style.height) lab.style.height = "";
+  const sheet = el.querySelector(".pdf-sheet");
+  if (sheet && sheet.style.minHeight) sheet.style.minHeight = "";
+}
 function clearMatched(sec) {
   if (!sec.classList.contains("matched")) return;
   sec.classList.remove("matched");
   sec.__typeStamp = null; // the grid wrote the line sizes; the flowing pass owns them now
+  const lab = sec.querySelector(".page-label");
+  if (lab && lab.style.height) lab.style.height = "";
   sec.style.width = "";
   sec.style.removeProperty("--body-x");
   sec.querySelector(".page-inner").style.height = "";
