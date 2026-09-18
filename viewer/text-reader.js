@@ -1268,6 +1268,7 @@ function openText(text, name, handle, built) {
   document.body.classList.remove("editing");
   $("edit-toggle").setAttribute("aria-pressed", "false");
   document.title = name + " — Text Reader";
+  leakStep = -1; // a new document, a new walk through what stands in its clear
   if (!dirHandle) loadValuesFor(name);
   spots = TD.normalizeSpots(lsGet(spotStoreKey(), []));
   // A document built ahead of time goes up as it stands, unless its spot keeps
@@ -2938,12 +2939,69 @@ async function scanPassNow(pass) {
   // The row's own marks stand on the same pages, so they are laid again over
   // the pass that has just been made.
   paintRowMarks();
-  $("st-leaks").textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; right-click one to keep it` : "";
+  const leakEl = $("st-leaks");
+  leakEl.textContent = leaks ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked — written as pseudonyms on save; click to step through them, right-click one to keep it` : "";
+  leakEl.classList.toggle("step", !!leaks);
+  if (leaks) {
+    leakEl.setAttribute("role", "button");
+    leakEl.setAttribute("tabindex", "0");
+    leakEl.title = "Go to the next one (Alt+L; hold Shift for the one before)";
+  } else {
+    leakEl.removeAttribute("role");
+    leakEl.removeAttribute("tabindex");
+    leakEl.title = "";
+  }
   const nk = keptRanges.length;
   $("st-kept").textContent = nk ? `${nk} kept value${nk === 1 ? "" : "s"} standing as ${nk === 1 ? "it reads" : "they read"}` : "";
   return true;
 }
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
+// ── stepping the names standing in the clear ─────────────────────────────────
+//
+// The status bar COUNTS the real names the key binds that the run left in the
+// text, and counting them is not finding them: on a forty-page export they
+// are wherever they are, in a page's worth of orange somewhere. So the count
+// is a control. Click it — or Alt+L, and Shift for the one before — and the
+// reader goes to the next one in the order they stand in the document, marks
+// it the way the worksheet marks its current row, and says which of how many
+// it is. It wraps at the end.
+//
+// Where the folder has no LEAKS.xlsx this is the whole review: the key is
+// attached, the names it binds are underlined, and this walks them. Where
+// there is a worksheet the bar above the text is still the way through its
+// rows; this steps what is standing in the text, which is not the same list —
+// a worksheet is one row per value, and a value leaks wherever it leaks.
+let leakStep = -1;
+function stepLeak(dir = 1) {
+  // The ranges of the last paint, minus any whose page has been rebuilt under
+  // them (an edit, a key change) before the next paint has caught up.
+  const hits = leakHits.filter((h) => h.range && h.range.startContainer && h.range.startContainer.isConnected);
+  if (!hits.length) {
+    toast(marksOff
+      ? "The marks are off for this document, so the names standing in the clear are not being read."
+      : "No real name from the key is standing unfaked.");
+    return;
+  }
+  leakStep = (((leakStep + dir) % hits.length) + hits.length) % hits.length;
+  const h = hits[leakStep];
+  leakHere = h.range;
+  markLeakHere();
+  scrollRangeTo(h.range);
+  toast(`${leakStep + 1} of ${hits.length}: “${h.real}” — right-click it to keep it as it stands, or let the save write ${h.fake ? `“${h.fake}”` : "its pseudonym"}.`);
+}
+$("st-leaks").addEventListener("click", (e) => stepLeak(e.shiftKey ? -1 : 1));
+$("st-leaks").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  stepLeak(e.shiftKey ? -1 : 1);
+});
+document.addEventListener("keydown", (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.key.toLowerCase() !== "l") return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return; // a field being typed in
+  e.preventDefault();
+  stepLeak(e.shiftKey ? -1 : 1);
+});
 let keptSeen = new Set(); // the kept values that actually stand in this document, folded — from the last paint
 /** The unfaked real name under a point, or null. */
 function leakAt(x, y) {
@@ -3982,11 +4040,22 @@ async function locateLeak(row) {
   leakHere = best.range;
   markLeakHere();
   const sec = best.body.closest(".tpage");
-  let rect = best.range.getBoundingClientRect();
-  if (!rect.height) rect = sec.getBoundingClientRect(); // the page is swapped for its PDF page
+  scrollRangeTo(best.range);
+  if (bestScore < 2 && wheres.length) toast(`Found "${row.value}" on ${TD.pageLabel(doc.pages[Number(sec.dataset.index)]) || "the page"}, not at ${row.where}.`);
+}
+/** A range brought onto the screen, a third of the way down the stage. */
+function scrollRangeTo(range) {
+  let rect = range.getBoundingClientRect();
+  if (!rect.height) {
+    // The page is swapped for its PDF page: the words are in the DOM and not
+    // on the screen, so the sheet itself is what there is to scroll to.
+    const node = range.startContainer;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    const sec = el && el.closest(".tpage");
+    if (sec) rect = sec.getBoundingClientRect();
+  }
   const st = stageEl.getBoundingClientRect();
   stageEl.scrollTo({ top: stageEl.scrollTop + rect.top - st.top - Math.max(40, stageEl.clientHeight / 3), behavior: "smooth" });
-  if (bestScore < 2 && wheres.length) toast(`Found "${row.value}" on ${TD.pageLabel(doc.pages[Number(sec.dataset.index)]) || "the page"}, not at ${row.where}.`);
 }
 function markLeakHere() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;

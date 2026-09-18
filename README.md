@@ -843,7 +843,17 @@ app, which routes it to the reader tab.
   the reversal. The last few keys are remembered, so a lone `.txt` can be read
   under a key already loaded. A real name from the key standing **unfaked** in
   an export is counted in the status bar and underlined — that is a leak the
-  run missed.
+  run missed. **The count is a control:** counting them is not finding them,
+  and on a forty-page export they are wherever they are, so **clicking it**
+  (or **Alt+L**, with **Shift** for the one before) goes to the next one in
+  the order they stand in the document, marks it, and says which of how many
+  it is, wrapping at the end. Where the case folder has no `LEAKS.xlsx` that
+  is the whole review: the key is attached, the names it binds are underlined,
+  and this walks them one at a time — right-click one to keep it where it
+  stands, or let the save write its pseudonym. Where there IS a worksheet the
+  bar above the text is still the way through its rows; this steps what is
+  standing in the text, which is not the same list (a worksheet is one row per
+  value, and a value leaks wherever it leaks).
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and Apply Leak Fixes reads the cells back. The

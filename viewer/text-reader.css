@@ -136,6 +136,10 @@ body {
 #leaks-bar #lb-typed { flex: 1; min-width: 200px; background: var(--inset); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
 /* The row's value wherever it stands in the text, and the one the bar scrolled to. */
 ::highlight(leakrow) { background-color: rgba(230, 81, 0, 0.22); text-decoration: underline solid #e65100 2px; }
+/* The count of names standing in the clear is a control: it steps through
+   them. Marked as one, and only while there are any. */
+#st-leaks.step { cursor: pointer; text-decoration: underline dotted; }
+#st-leaks.step:hover, #st-leaks.step:focus-visible { text-decoration: underline solid; outline: none; }
 ::highlight(leakrow-here) { background-color: rgba(230, 81, 0, 0.55); text-decoration: underline solid #e65100 2px; }
 /* The Leaks tab: one row per worksheet row, its type and its decision. */
 .side-body li .tag.type { background: #546e7a; }
