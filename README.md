@@ -740,23 +740,23 @@ app, which routes it to the reader tab.
   far as you like: the font is never touched, so the size is yours to
   calibrate the page by, and the numbers are never touched either — the
   gutter shows the file's own and nothing moves between them. Display only:
-  the width you set comes back when the lock is off. Side by side the PDF's
-  own grid holds every line to one screen line already, whatever the lock
-  says.
+  the width you set comes back when the lock is off. Under **Match PDF grid**
+  the PDF's own grid holds every line to one screen line already, whatever the
+  lock says.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
   panel listing them once. A cite that wraps onto a numbered line is read
-  across the gutter number, as `pdf_linker.py` reads it. **Side by side, the
-  links are off.** A page laid on its PDF's grid has every line positioned and
-  sized on its own, and an underline is a strip measured off the line it sits
-  under — measured against a body the grid has shifted under the page,
-  re-measured as each PDF's sizes arrive and after every pass, and landing
-  beside the words as often as under them. The links are for reading the text;
-  side by side is for checking it against the PDF. The authorities are still
-  read, so **§ Authorities** fills as always and a cite opened from the panel
-  opens the same page; the status bar says the links are off, and they come
-  back when the panes close.
+  across the gutter number, as `pdf_linker.py` reads it. **While the PDF pane
+  is open, the links are off** (with or without the grid). Under the grid a
+  page has every line positioned and sized on its own, and an underline is a
+  strip measured off the line it sits under — measured against a body the grid
+  has shifted under the page, re-measured as each PDF's sizes arrive and after
+  every pass, and landing beside the words as often as under them. The links
+  are for reading the text; side by side is for checking it against the PDF.
+  The authorities are still read, so **§ Authorities** fills as always and a
+  cite opened from the panel opens the same page; the status bar says the
+  links are off, and they come back when the panes close.
 - **A name wrapped across lines is one name.** A pseudonym or a real value
   whose halves sit on two numbered lines — the line break, the next line's
   gutter number and any blank line between — is matched as one: the reader
@@ -768,27 +768,37 @@ app, which routes it to the reader tab.
   or *never fake it* leaves it as it stands, on save and on PDF-Linker's
   next run, the same keep a wrongly faked pseudonym takes.
 - **Real names from the key.** **Open case folder** picks the matter's folder
-  and takes only `pseudonym_key.xlsx` and the exports out of it (a `*.txt.LEAK`
-  quarantined by PDF-Linker's leak gate is listed too, marked, and opened
-  first — it is the one to read). The reader **remembers every case folder it
-  is shown**, so a document opened on its own afterwards — from the file
-  picker, a drop, or the installed app's file handler — is matched to the
+  and takes only `pseudonym_key.xlsx` and the exports out of it (a
+  `*.txt.LEAK` quarantined by PDF-Linker's leak gate is listed too, marked,
+  and opened first — it is the one to read). The reader **remembers every case
+  folder it is shown**, so a document opened on its own afterwards — from the
+  file picker, a drop, or the installed app's file handler — is matched to the
   folder it sits in (its own folder, or the one above `Text Files`) and that
   folder's key is attached automatically; where the browser wants the folder
   re-authorised first, a bar offers it in one click, and a file from a folder
-  the reader has never seen gets an offer to open it once. Every fake is shown as its real value in
-  the case the fake was written in, **lightly highlighted**, and hovering
-  shows the pseudonym underneath. The highlight's **colour and intensity**
-  are yours to set (the swatch and slider beside "Mark pseudonyms", or under
-  Options), and are remembered like the font; **Mark pseudonyms** turns the
-  highlight and the hover off; **Show fakes** shows the document as it is on
-  disk. The key
-  is read the way `DeAnonymize.bas` and the Claude extension read it: columns
-  by header name, operator keeps skipped, alt spellings forward-only, an
-  ambiguous fake retired, the pinned tab out of the reversal. The last few
-  keys are remembered, so a lone `.txt` can be read under a key already
-  loaded. A real name from the key standing **unfaked** in an export is
-  counted in the status bar and underlined — that is a leak the run missed.
+  the reader has never seen gets an offer to open it once. Every fake is shown
+  as its real value in the case the fake was written in, **lightly
+  highlighted**, and hovering shows the pseudonym underneath. The highlight's
+  **colour and intensity** are yours to set (the swatch and slider beside
+  "Mark pseudonyms", or under Options), and are remembered like the font —
+  **written the moment you choose them.** Every reading setting is kept in two
+  places: the local copy, written at once and the one the next session opens
+  from, and the synced copy the Options page and a second tab read, written a
+  beat after the dragging stops. The synced store takes 120 writes a minute
+  and rejects the rest, and a colour is chosen by DRAGGING: a write per pixel
+  spent that quota in the first second, so the colour finally settled on was
+  the one most likely to be refused — on screen for the session, yellow again
+  the next morning. Each copy carries when it was written and the newer one
+  wins, so a synced write the browser refuses cannot undo the choice, and a
+  colour set in Options while the reader was closed still arrives. **Mark
+  pseudonyms** turns the highlight and the hover off; **Show fakes** shows the
+  document as it is on disk. The key is read the way `DeAnonymize.bas` and the
+  Claude extension read it: columns by header name, operator keeps skipped,
+  alt spellings forward-only, an ambiguous fake retired, the pinned tab out of
+  the reversal. The last few keys are remembered, so a lone `.txt` can be read
+  under a key already loaded. A real name from the key standing **unfaked** in
+  an export is counted in the status bar and underlined — that is a leak the
+  run missed.
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and Apply Leak Fixes reads the cells back. The
@@ -1107,12 +1117,20 @@ app, which routes it to the reader tab.
   suffixes are never the difficulty: `.pdf`, `.txt` and `.txt.LEAK` all come
   off before the comparison, and a combined file's 21 members match their 21
   PDFs by name through the key. The PDF is read only when it is first shown.
-  **⇔ Side by side** opens the PDF in a pane beside the text, one PDF page
-  per text page, and lays each text page out on **its PDF page's own
-  geometry**: the same width and height, label and all, and — where the
-  PDF's text layer carries the pleading numbers down its margin — every
-  numbered line at its number's own height, the body starting at the PDF's
-  text margin, the leading the PDF's pitch, so line 7 stands beside line 7.
+  **⇔ Side by side** opens the PDF in a pane beside the text, one PDF page per
+  text page, scrolling together. **The text reads exactly as it does with the
+  pane closed** — its own font, size, width and leading, every line where it
+  flows — because a page is for reading before it is for comparing, and a
+  reader who opens the pane to check one name does not want the document
+  re-set around them.
+  **Match PDF grid** (the PDF group of the Tools panel, remembered, off by
+  default) is the other way of working: with it on, each text page is laid out
+  on **its PDF page's own geometry** — the same width and height, label and
+  all, and, where the PDF's text layer carries the pleading numbers down its
+  margin, every numbered line at its number's own height, the body starting at
+  the PDF's text margin, the leading the PDF's pitch, so line 7 stands beside
+  line 7. Turning it off puts every page back the moment it is switched, the
+  way closing the pane does. What follows describes the grid.
   **A text page with no PDF page keeps the pane level with it.** A combined
   file always has two kinds: its own list of the documents in it, at the top,
   and a banner page before each member. Each of those used to stand beside a

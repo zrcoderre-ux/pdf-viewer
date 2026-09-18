@@ -68,6 +68,7 @@ const markColorEl = $("mark-color");
 const markAlphaEl = $("mark-alpha");
 const fakesToggle = $("fakes-toggle");
 const lockToggle = $("lock-toggle");
+const gridToggle = $("grid-toggle");
 const providerEl = $("provider");
 const docsList = $("docs-list");
 const docsHint = $("docs-hint");
@@ -90,6 +91,7 @@ const toastEl = $("toast");
 // localStorage under the key below; that copy is adopted once.
 const SETTINGS_KEY = "textReaderSettings";
 const LEGACY_SETTINGS_KEY = "textReader.settings";
+const SETTINGS_AT_KEY = "textReader.settingsAt"; // when the local copy was written
 const KEYS_KEY = "textReader.keys";
 const VALUES_PREFIX = "textReader.values.";
 const SPOTS_PREFIX = "textReader.spots.";
@@ -336,41 +338,98 @@ function lsSet(k, v) {
 }
 
 // ── settings ─────────────────────────────────────────────────────────────────
-// The legacy local copy is the starting point until the synced defaults
-// arrive (below); "Show fakes" is a view, not a default, and opens off.
+//
+// TWO COPIES, AND THE LOCAL ONE CANNOT FAIL. The settings live in
+// chrome.storage.sync, so the Options page, a second reader tab and another
+// machine all read the same defaults — and a synced write is RATE LIMITED:
+// Chrome takes 120 of them a minute and rejects the rest, reporting it in
+// `chrome.runtime.lastError` and writing nothing. The mark colour and the
+// intensity are set by dragging (an <input type="color"> and a range fire
+// `input` the whole way), which used to mean a write per pixel of the drag:
+// hundreds in a few seconds, the quota gone in the first second, and the
+// colour finally settled on the one most likely to be REJECTED. The screen
+// showed it, because the screen is painted from the object in hand, and the
+// next session opened yellow again.
+//
+// So a change is written to localStorage AT ONCE — no quota, no callback,
+// the copy the next session opens from — and the synced copy follows a beat
+// after the dragging stops, once, with the value settled on. Each copy
+// carries when it was written, and the newer wins when they disagree: a
+// synced write that never landed cannot undo the choice, and a change made in
+// the Options page while this tab was closed still arrives.
+//
+// "Show fakes" is a view, not a default, and opens off.
 function loadSettings() {
   const s = TD.normalizeSettings(lsGet(LEGACY_SETTINGS_KEY, null));
   s.showFakes = false;
   return s;
 }
-// What is REMEMBERED: everything but the show-fakes view.
+// What is REMEMBERED: everything but the show-fakes view and the stamp, which
+// is carried beside the settings rather than in them — a comparison of what
+// the reader is showing against what arrived must not turn on the clock.
 function persistable(s) {
   const out = Object.assign({}, s);
   delete out.showFakes;
+  delete out.savedAt;
   return out;
 }
+let settingsAt = Number(lsGet(SETTINGS_AT_KEY, 0)) || 0;
 function saveSettings() {
-  chrome.storage.sync.set({ [SETTINGS_KEY]: persistable(settings) });
+  settingsAt = Date.now();
+  lsSet(LEGACY_SETTINGS_KEY, persistable(settings));
+  lsSet(SETTINGS_AT_KEY, settingsAt);
+  syncSettingsSoon();
 }
+// The synced copy: once the dragging stops, and again as the tab goes away,
+// so a change made in the last half second is not left behind.
+const syncSettingsSoon = debounce(() => pushSettings(), 400);
+function pushSettings() {
+  syncSettingsSoon.cancel();
+  const body = Object.assign(persistable(settings), { savedAt: settingsAt });
+  try {
+    chrome.storage.sync.set({ [SETTINGS_KEY]: body }, () => {
+      const err = chrome.runtime && chrome.runtime.lastError;
+      // Nothing to put right here: the local copy has it, carries the later
+      // stamp, and is pushed again by the next change or the next open.
+      if (err) console.warn("settings not synced (" + err.message + ") — the local copy stands");
+    });
+  } catch (e) { console.warn("settings not synced (" + (e.message || e) + ") — the local copy stands"); }
+}
+window.addEventListener("pagehide", pushSettings);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") pushSettings(); });
 function loadSyncedSettings() {
   chrome.storage.sync.get({ [SETTINGS_KEY]: null }, (got) => {
     const stored = got && got[SETTINGS_KEY];
-    if (stored) {
+    // The newer copy wins. An older build's synced copy carries no stamp and
+    // reads as 0, which is right: a local copy written since is newer, and
+    // where there is no local copy at all the synced one still comes in.
+    const theirs = stored ? Number(stored.savedAt) || 0 : -1;
+    if (stored && theirs >= settingsAt) {
       settings = Object.assign(TD.normalizeSettings(stored), { showFakes: settings.showFakes });
+      settingsAt = theirs;
+      lsSet(LEGACY_SETTINGS_KEY, persistable(settings));
+      lsSet(SETTINGS_AT_KEY, settingsAt);
     } else if (localStorage.getItem(LEGACY_SETTINGS_KEY)) {
-      saveSettings(); // migrate the older build's local copy, once
+      // A write that never landed, or an older build's local copy: push it.
+      pushSettings();
     }
     applySettings();
     relayout();
   });
 }
 // Defaults changed elsewhere — the Options page, another reader tab — apply
-// here too, so what the reader shows is always the current default.
+// here too, so what the reader shows is always the current default. This
+// reader's own writes come back through here as well, and match what it is
+// already showing, so they stop at the comparison.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync" || !changes[SETTINGS_KEY]) return;
-  const merged = Object.assign(TD.normalizeSettings(changes[SETTINGS_KEY].newValue || null), { showFakes: settings.showFakes });
+  const arrived = changes[SETTINGS_KEY].newValue || null;
+  const merged = Object.assign(TD.normalizeSettings(arrived), { showFakes: settings.showFakes });
   if (JSON.stringify(persistable(merged)) === JSON.stringify(persistable(settings))) return;
   settings = merged;
+  settingsAt = Number(arrived && arrived.savedAt) || Date.now();
+  lsSet(LEGACY_SETTINGS_KEY, persistable(settings));
+  lsSet(SETTINGS_AT_KEY, settingsAt);
   applySettings();
   relayout();
 });
@@ -404,6 +463,7 @@ function applySettings() {
   marksToggle.checked = settings.marks;
   fakesToggle.checked = settings.showFakes;
   lockToggle.checked = settings.lineLock;
+  gridToggle.checked = settings.matchGrid;
 }
 
 for (const p of TD.FONT_PRESETS) {
@@ -430,6 +490,13 @@ markColorEl.addEventListener("input", () => { settings.markColor = markColorEl.v
 markAlphaEl.addEventListener("input", () => { settings.markAlpha = Number(markAlphaEl.value); saveSettings(); applySettings(); });
 fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.checked; saveSettings(); applySettings(); showFakes(settings.showFakes); });
 lockToggle.addEventListener("change", () => { settings.lineLock = lockToggle.checked; saveSettings(); applySettings(); relayout(); });
+// The grid is asked for, not assumed: a page laid on its PDF's geometry is a
+// different page to read — another width, another type size, every line moved
+// to its number's height — and the reader's first business is the words. Side
+// by side without it is the PDF beside the text, scrolling together, the text
+// exactly as it reads with the pane closed. applyMatchedLayout lifts the grid
+// the moment this goes off, the way closing the pane does.
+gridToggle.addEventListener("change", () => { settings.matchGrid = gridToggle.checked; saveSettings(); applySettings(); relayout(); });
 
 // ── print ────────────────────────────────────────────────────────────────────
 // The pages as they are shown, to paper or to a PDF — the browser's own
@@ -2430,15 +2497,14 @@ function placeCitationsNow() {
   const seen = new Map();
   let linked = 0;
   // SIDE BY SIDE: the authorities are still read, and nothing is drawn over
-  // the text. A page laid on its PDF's grid has every line positioned and
-  // sized on its own, and an underline is a strip measured off the line it
-  // sits under — measured against a body the grid has shifted under the page,
-  // re-measured as each PDF's sizes arrive and after every pass, and landing
-  // beside the words as often as under them. The links are for reading the
-  // text; side by side is for checking it against the PDF. So the pass stops
-  // at the reading: the Table of Authorities is filled as always (its entries
-  // carry the links, and a cite opened from there opens the same page), and
-  // the pages themselves carry no links until the panes are closed.
+  // the text. The links are for reading the text; side by side is for checking
+  // it against the PDF, and under Match PDF grid an underline cannot be drawn
+  // straight anyway — a strip measured off a line the grid has moved, against
+  // a body it has shifted, re-measured as each PDF's sizes arrive, lands
+  // beside the words as often as under them. So the pass stops at the reading
+  // whenever the pane is open: the Table of Authorities is filled as always
+  // (its entries carry the links, and a cite opened from there opens the same
+  // page), and the pages themselves carry no links until the pane closes.
   if (sbsOn) {
     for (const c of found) {
       const url = resolveUrl(c, citationRepo, provider);
@@ -4280,6 +4346,7 @@ function refreshPdf() {
   const any = pdfSources.some(Boolean);
   sbsBtn.disabled = !doc;
   swapBtn.disabled = !doc;
+  gridToggle.disabled = !doc;
   refreshSwapButtons();
   applySwaps();
   buildPdfPane();
@@ -5102,6 +5169,13 @@ function applyMatchedLayout() {
 }
 function applyMatchedLayoutNow() {
   const on = sbsOn && !pdfPane.hidden;
+  // The pane is one thing and the GRID is another. Unless it is asked for
+  // (Match PDF grid), a text page beside its PDF keeps the layout it has with
+  // the pane closed — its own width, its own type at its own size, its lines
+  // where they flow — and nothing below claims a page: every sheet is cleared,
+  // every slot takes the pane's width, and the two columns are held together
+  // by the scroll sync alone.
+  const grid = on && settings.matchGrid;
   const plans = [];
   const matchedSlots = new Set();
   // The pane's slots by their page, and its width, read ONCE: asking the pane
@@ -5112,7 +5186,7 @@ function applyMatchedLayoutNow() {
   const paneW = on ? paneWidth() : 0;
   for (const sec of pagesEl.querySelectorAll(".tpage")) {
     const i = Number(sec.dataset.index);
-    const slot = on ? slots.get(i) || null : null;
+    const slot = grid ? slots.get(i) || null : null;
     const t = slot && pdfTarget(i);
     const info = t && infoFor(t.src);
     const sz = info && info.sizes[t.page - 1];
