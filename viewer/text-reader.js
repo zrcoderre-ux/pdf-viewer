@@ -2399,11 +2399,24 @@ async function saveDocument() {
   const ok = await writeText(out, fileName, fileHandle, { adopt: true });
   if (!ok) return;
   setDirty(false);
+  // THE LIST GOES WITH IT. The flags and keeps are half of the same decision
+  // the document carries — a value kept is a value this save left standing —
+  // and a list still sitting in the browser is a run's worth of work the next
+  // run will not do. Written into the case folder without asking, that being
+  // where PDF-Linker reads it; where there is no folder there is nobody to
+  // write it for, and the save says so rather than opening a picker nobody
+  // asked for.
+  let alsoList = "";
+  if (valuesDirty()) {
+    alsoList = await saveValuesFile({ quiet: true, folderOnly: true })
+      ? ` · ${TD.VALUES_FILE} written too (${flagged.length} to fake, ${keeps.length} to keep)`
+      : " · the flagged list is still unwritten — no case folder is open, so save it from the Flagged panel";
+  }
   // The save wrote every name that was standing in the clear here, so the
   // folder's answer for this document is that it has none.
   sweep.rows = sweep.rows.filter((r) => r.doc.handle !== fileHandle);
   if (forwarded) afterTextChange();
-  toast("Saved " + fileName + (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : ""));
+  toast("Saved " + fileName + (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList);
 }
 saveBtn.addEventListener("click", saveDocument);
 document.addEventListener("keydown", (e) => {
@@ -3859,8 +3872,17 @@ function findInPages(v) {
   toast(`"${v}" is not in this document`);
 }
 
-async function saveValuesFile() {
-  if (!flagged.length && !keeps.length) { toast("Nothing flagged yet — select an unfaked name and press Flag, or right-click a pseudonym to keep it.", { error: true }); return; }
+/**
+ * The flagged list written out. `quiet` is for the save that carries it along
+ * with the document — the document's own toast says so — and `folderOnly`
+ * with it: a save of the text is not the moment to put a file picker in front
+ * of somebody who never asked for one.
+ */
+async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
+  if (!flagged.length && !keeps.length) {
+    if (!quiet) toast("Nothing flagged yet — select an unfaked name and press Flag, or right-click a pseudonym to keep it.", { error: true });
+    return false;
+  }
   const text = TD.formatValuesFile(flagged, keeps);
   if (dirHandle) {
     try {
@@ -3873,15 +3895,18 @@ async function saveValuesFile() {
       await w.write(new Blob([text], { type: "text/plain" }));
       await w.close();
       markValuesSaved(text);
-      toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep) into ${folderName} — re-run PDF-Linker to apply them to the files.`);
-      return;
+      if (!quiet) toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep) into ${folderName} — re-run PDF-Linker to apply them to the files.`);
+      return true;
     } catch (e) {
+      if (quiet) return false;
       toast("Could not write into the folder (" + (e.message || e) + ") — choose where to save.", { error: true });
     }
   }
-  if (await writeText(text, TD.VALUES_FILE, null)) markValuesSaved(text);
+  if (folderOnly) return false;
+  if (await writeText(text, TD.VALUES_FILE, null)) { markValuesSaved(text); return true; }
+  return false;
 }
-$("flags-save").addEventListener("click", saveValuesFile);
+$("flags-save").addEventListener("click", () => saveValuesFile());
 $("flags-copy").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(flagged.concat(keeps.map((k) => k.control + ": " + k.value)).join("\n") + "\n"); toast("Copied " + (flagged.length + keeps.length) + " line" + (flagged.length + keeps.length === 1 ? "" : "s")); }
   catch { toast("Copy failed", { error: true }); }
