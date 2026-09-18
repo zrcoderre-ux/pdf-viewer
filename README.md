@@ -692,6 +692,16 @@ app, which routes it to the reader tab.
   or under Options → "Text reader — default font and leading", and every open
   reader tab follows at once. Display only: the text file itself is never
   changed. Light and dark chrome follow the viewer's own theme toggle.
+- **Zoom takes the words, not the window.** **Ctrl+wheel** and
+  **Ctrl+plus/minus** are what a reader reaches for when the type is too
+  small, and the browser answers them by scaling the whole window — toolbar,
+  tools panel, status bar, the bar over the leaks worksheet — which is the
+  part nobody wanted bigger. The reader catches the gesture and spends it on
+  the **reading size** instead: the size the pages are drawn at, the size that
+  sets the scale both sheets take side by side, remembered like the font.
+  **Ctrl+0** puts it back to the default. A trackpad pinch is added up and
+  spent a step at a time, so one gesture does not take the type from nine to
+  forty.
 - **A page is a page.** Each sheet takes the **shape of the PDF page it came
   from** — its proportions at whatever width you are reading at — so an export
   reads as the document it was filed as instead of a stack of notes: a caption

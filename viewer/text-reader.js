@@ -481,8 +481,53 @@ fontCustom.addEventListener("input", () => {
   settings.customFont = fontCustom.value;
   saveSettings(); applySettings(); relayout();
 });
-$("size-down").addEventListener("click", () => { settings.fontSize = Math.max(9, settings.fontSize - 1); saveSettings(); applySettings(); relayout(); });
-$("size-up").addEventListener("click", () => { settings.fontSize = Math.min(40, settings.fontSize + 1); saveSettings(); applySettings(); relayout(); });
+$("size-down").addEventListener("click", () => zoomText(-1));
+$("size-up").addEventListener("click", () => zoomText(1));
+
+// ── zoom: the words, not the window ──────────────────────────────────────────
+//
+// Ctrl+wheel and Ctrl+plus are what a reader reaches for when the type is too
+// small, and the browser answers them by scaling the whole window — the
+// toolbar, the tools panel, the status bar, the bar over the leaks worksheet
+// — which is the part nobody wanted bigger. The tools are furniture; the
+// words are the work. So the gesture is caught and spent on the READING SIZE
+// instead: the size the pages are drawn at, the size that sets the scale both
+// sheets take side by side, the size remembered with the rest of the
+// settings. Ctrl+0 puts it back to the built-in default.
+//
+// Caught over the whole window, not just the pages, so a pointer that happens
+// to be over the panel does not zoom the panel; and caught in the capture
+// phase, before anything else reads the key.
+function zoomText(step) {
+  const now = settings.fontSize;
+  const next = step === 0 ? TD.DEFAULT_SETTINGS.fontSize : Math.min(40, Math.max(9, now + step));
+  if (next === now) return;
+  settings.fontSize = next;
+  saveSettings();
+  applySettings();
+  relayout();
+}
+// A trackpad pinch arrives as a few dozen small wheel deltas; a step per tick
+// would take the type from nine to forty in one gesture, so the deltas are
+// added up and spent a step at a time.
+const ZOOM_STEP_PX = 50;
+let zoomRoll = 0;
+window.addEventListener("wheel", (e) => {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault(); // …and the browser's own zoom with it
+  zoomRoll += e.deltaY;
+  const steps = Math.trunc(zoomRoll / ZOOM_STEP_PX);
+  if (!steps) return;
+  zoomRoll -= steps * ZOOM_STEP_PX;
+  zoomText(-steps); // a wheel away from the reader (negative) is bigger type
+}, { passive: false });
+window.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+  const k = e.key;
+  if (k === "+" || k === "=") { e.preventDefault(); zoomText(1); }
+  else if (k === "-") { e.preventDefault(); zoomText(-1); }
+  else if (k === "0") { e.preventDefault(); zoomText(0); }
+}, true);
 lhRange.addEventListener("input", () => { settings.lineHeight = Number(lhRange.value); saveSettings(); applySettings(); relayout(); });
 widthRange.addEventListener("input", () => { settings.pageWidth = Number(widthRange.value); saveSettings(); applySettings(); relayout(); });
 marksToggle.addEventListener("change", () => { settings.marks = marksToggle.checked; saveSettings(); applySettings(); hideTip(); });
