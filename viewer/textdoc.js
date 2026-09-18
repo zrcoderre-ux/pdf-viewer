@@ -467,7 +467,7 @@ const VALUES_HEAD = [
   "# New Real Values — written by the text reader for PDF-Linker.",
   "# One real value per line: names spotted unfaked in the scrubbed exports.",
   "# PDF-Linker reads this file from the case folder on its next run (and on",
-  "# Apply Leak Fixes) and pseudonymizes each value as if it had been given",
+  "# Apply Fixes) and pseudonymizes each value as if it had been given",
   "# with --term. A line 'no: VALUE' is the opposite — a value the run faked",
   "# that should be left as it is in this case (a cited decision's name); a",
   "# line 'never: VALUE' keeps it in every case. Lines beginning with # are",

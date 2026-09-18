@@ -30,7 +30,7 @@
 
   <!-- The LEAKS review bar: the worksheet's current row above the text, the
        text opened at the row's page and line. The decision goes into the
-       row's Fix? cell exactly as PDF-Linker's Apply Leak Fixes reads it. -->
+       row's Fix? cell exactly as PDF-Linker's Apply Fixes reads it. -->
   <div id="leaks-bar" class="revbar" hidden>
     <div class="lb-row">
       <span id="lb-count" class="lb-count"></span>
@@ -42,7 +42,7 @@
       <button id="lb-next" title="The next row down the document — the review walks the document, not the worksheet's own order (Alt+↓)">›</button>
       <button id="lb-next-open" title="The next row still to answer: nothing typed in its Fix? cell, or PDF-Linker's own ~suggestion sitting there unaccepted">Next unanswered</button>
       <button id="lb-find" title="Find this value in the text again">Find in text</button>
-      <button id="lb-save" class="primary" title="Write the decisions into LEAKS.xlsx in the case folder (Ctrl+Shift+S). Then double-click Apply Leak Fixes.bat, or re-run PDF-Linker, to apply them to the files.">💾 Save LEAKS.xlsx</button>
+      <button id="lb-save" class="primary" title="Write the decisions into LEAKS.xlsx in the case folder (Ctrl+Shift+S). Then double-click Apply Fixes.bat, or re-run PDF-Linker, to apply them to the files.">💾 Save LEAKS.xlsx</button>
       <button id="lb-open" title="Load another LEAKS.xlsx">📂</button>
       <button id="lb-close" title="Hide the bar (the worksheet stays loaded; ⚠ Leaks brings it back)">×</button>
     </div>
@@ -181,7 +181,7 @@
         <p class="side-note" id="leaks-note"></p>
       </div>
       <div id="side-flags" class="side-body" hidden>
-        <p class="side-hint">Names you spotted unfaked — to be pseudonymized. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it on its next run or Apply Leak Fixes.</p>
+        <p class="side-hint">Names you spotted unfaked — to be pseudonymized. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it on its next run — or, without reopening a single PDF, when you double-click <code>Apply Fixes</code> in that folder.</p>
         <ul id="flags-list"></ul>
         <div id="keeps-block" hidden>
           <p class="side-hint">Wrongly faked — kept as they really read. Un-marked here now; PDF-Linker restores them in the files on its next run.</p>

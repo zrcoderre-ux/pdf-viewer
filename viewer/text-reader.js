@@ -3996,7 +3996,7 @@ $("flags-copy").addEventListener("click", async () => {
 // PDF-Linker's leak triage is a worksheet, LEAKS.xlsx in the case folder: one
 // row per flagged value with a Fix? cell the operator answers (yes / no /
 // never / phrase, ~CORRECT SPELLING, *CORRECT TEXT, a [kept part], or the
-// exact replacement), and Apply Leak Fixes reads the cells back. Answering
+// exact replacement), and Apply Fixes reads the cells back. Answering
 // it in Excel means reading a sentence in a cell and guessing at the page.
 // Here the worksheet is attached — from the case folder on open, or loaded
 // by hand — and worked ROW BY ROW: the current row stands in a bar above the
@@ -4007,7 +4007,7 @@ $("flags-copy").addEventListener("click", async () => {
 // is the exact text PDF-Linker will read, written into that row's Fix? cell
 // and nowhere else (xlsx-write.js copies every other part of the workbook
 // through byte for byte); it is remembered here until saved, and Save
-// writes LEAKS.xlsx back in place. Then Apply Leak Fixes does the rest.
+// writes LEAKS.xlsx back in place. Then Apply Fixes does the rest.
 // A `no` or `never` on a value the key binds is mirrored as one of the
 // reader's own keeps, so the orange mark goes and a save of the document
 // leaves the value as it stands — the two channels agreeing on the one
@@ -4249,7 +4249,7 @@ function renderLeaksTabState() {
   $("leaks-save").disabled = !n;
   $("leaks-note").textContent = !leaks ? "" : n
     ? `${n} decision${n === 1 ? "" : "s"} not yet saved (remembered here until then).`
-    : leaks.handle || dirHandle ? `Saves into ${leaks.folder || folderName || "the folder"}/${leaks.name}. After saving, double-click Apply Leak Fixes.bat, or re-run PDF-Linker.` : "No folder is open: a save asks where to write the worksheet.";
+    : leaks.handle || dirHandle ? `Saves into ${leaks.folder || folderName || "the folder"}/${leaks.name}. After saving, double-click Apply Fixes.bat, or re-run PDF-Linker.` : "No folder is open: a save asks where to write the worksheet.";
 }
 /** The whole list, from scratch: a worksheet attached, or dropped. */
 function renderLeaksTab() {
@@ -4428,7 +4428,7 @@ function decideLeak(text, { advance = false } = {}) {
   if (!advance) return;
   const n = LK.nextUndecided(leakRows(), leaks.at);
   if (n >= 0 && n !== leaks.at) goToLeak(n);
-  else if (n < 0) toast("Every row is answered — save the worksheet, then Apply Leak Fixes.");
+  else if (n < 0) toast("Every row is answered — save the worksheet, then Apply Fixes.");
 }
 
 /**
@@ -4449,7 +4449,7 @@ function acceptLeak() {
   warmForLeaks();
   const n = LK.nextUndecided(leakRows(), leaks.at);
   if (n >= 0 && n !== leaks.at) goToLeak(n);
-  else if (n < 0) toast("Every row is answered — save the worksheet, then Apply Leak Fixes.");
+  else if (n < 0) toast("Every row is answered — save the worksheet, then Apply Fixes.");
 }
 
 /** Write the decisions into the workbook: the same file, the Fix? cells changed, read back before it is written. */
@@ -4495,7 +4495,7 @@ async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
   for (let i = 0; i < leakLis.length; i++) paintLeakRow(i);
   renderLeaksTabState();
   const und = LK.undecidedCount(leaks.parsed.rows);
-  if (!quiet) toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still to answer` : "") + ". Double-click Apply Leak Fixes.bat (or re-run PDF-Linker) to apply them to the files.", { ms: 6000 });
+  if (!quiet) toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still to answer` : "") + ". Double-click Apply Fixes.bat (or re-run PDF-Linker) to apply them to the files.", { ms: 6000 });
   return edits.length;
 }
 
