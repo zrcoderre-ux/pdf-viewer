@@ -56,16 +56,34 @@ if (fontEl) {
     sampleEl.style.lineHeight = String(settings.lineHeight);
   }
 
-  let statusTimer = null;
+  // A synced write is rate limited — Chrome takes 120 a minute and rejects the
+  // rest, writing nothing — and the colour swatch and the intensity slider
+  // fire `input` the whole way through a drag. A write per pixel spent the
+  // quota in the first second and the value settled on was the one most
+  // likely to be refused, which is how a colour chosen here came back yellow.
+  // The write waits for the dragging to stop, and the page says so when the
+  // browser refuses it rather than reporting a save that did not happen.
+  let statusTimer = null, saveTimer = null, pending = null;
   function save(note) {
-    const out = Object.assign({}, settings);
+    pending = note || "Saved — every text file opens this way from now on.";
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flush, 400);
+  }
+  function flush() {
+    clearTimeout(saveTimer);
+    if (pending == null) return;
+    const note = pending;
+    pending = null;
+    const out = Object.assign({}, settings, { savedAt: Date.now() });
     delete out.showFakes; // a view, never a default
     chrome.storage.sync.set({ [KEY]: out }, () => {
-      statusEl.textContent = note || "Saved — every text file opens this way from now on.";
+      const err = chrome.runtime && chrome.runtime.lastError;
+      statusEl.textContent = err ? "Not saved — the browser refused the write (" + err.message + "). Try again in a moment." : note;
       clearTimeout(statusTimer);
       statusTimer = setTimeout(() => { statusEl.textContent = ""; }, 2500);
     });
   }
+  window.addEventListener("pagehide", flush);
 
   function read() {
     // Over the settings as stored: the reader's own toggles (line lock,

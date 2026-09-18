@@ -90,6 +90,7 @@ const toastEl = $("toast");
 // localStorage under the key below; that copy is adopted once.
 const SETTINGS_KEY = "textReaderSettings";
 const LEGACY_SETTINGS_KEY = "textReader.settings";
+const SETTINGS_AT_KEY = "textReader.settingsAt"; // when the local copy was written
 const KEYS_KEY = "textReader.keys";
 const VALUES_PREFIX = "textReader.values.";
 const SPOTS_PREFIX = "textReader.spots.";
@@ -336,41 +337,98 @@ function lsSet(k, v) {
 }
 
 // ── settings ─────────────────────────────────────────────────────────────────
-// The legacy local copy is the starting point until the synced defaults
-// arrive (below); "Show fakes" is a view, not a default, and opens off.
+//
+// TWO COPIES, AND THE LOCAL ONE CANNOT FAIL. The settings live in
+// chrome.storage.sync, so the Options page, a second reader tab and another
+// machine all read the same defaults — and a synced write is RATE LIMITED:
+// Chrome takes 120 of them a minute and rejects the rest, reporting it in
+// `chrome.runtime.lastError` and writing nothing. The mark colour and the
+// intensity are set by dragging (an <input type="color"> and a range fire
+// `input` the whole way), which used to mean a write per pixel of the drag:
+// hundreds in a few seconds, the quota gone in the first second, and the
+// colour finally settled on the one most likely to be REJECTED. The screen
+// showed it, because the screen is painted from the object in hand, and the
+// next session opened yellow again.
+//
+// So a change is written to localStorage AT ONCE — no quota, no callback,
+// the copy the next session opens from — and the synced copy follows a beat
+// after the dragging stops, once, with the value settled on. Each copy
+// carries when it was written, and the newer wins when they disagree: a
+// synced write that never landed cannot undo the choice, and a change made in
+// the Options page while this tab was closed still arrives.
+//
+// "Show fakes" is a view, not a default, and opens off.
 function loadSettings() {
   const s = TD.normalizeSettings(lsGet(LEGACY_SETTINGS_KEY, null));
   s.showFakes = false;
   return s;
 }
-// What is REMEMBERED: everything but the show-fakes view.
+// What is REMEMBERED: everything but the show-fakes view and the stamp, which
+// is carried beside the settings rather than in them — a comparison of what
+// the reader is showing against what arrived must not turn on the clock.
 function persistable(s) {
   const out = Object.assign({}, s);
   delete out.showFakes;
+  delete out.savedAt;
   return out;
 }
+let settingsAt = Number(lsGet(SETTINGS_AT_KEY, 0)) || 0;
 function saveSettings() {
-  chrome.storage.sync.set({ [SETTINGS_KEY]: persistable(settings) });
+  settingsAt = Date.now();
+  lsSet(LEGACY_SETTINGS_KEY, persistable(settings));
+  lsSet(SETTINGS_AT_KEY, settingsAt);
+  syncSettingsSoon();
 }
+// The synced copy: once the dragging stops, and again as the tab goes away,
+// so a change made in the last half second is not left behind.
+const syncSettingsSoon = debounce(() => pushSettings(), 400);
+function pushSettings() {
+  syncSettingsSoon.cancel();
+  const body = Object.assign(persistable(settings), { savedAt: settingsAt });
+  try {
+    chrome.storage.sync.set({ [SETTINGS_KEY]: body }, () => {
+      const err = chrome.runtime && chrome.runtime.lastError;
+      // Nothing to put right here: the local copy has it, carries the later
+      // stamp, and is pushed again by the next change or the next open.
+      if (err) console.warn("settings not synced (" + err.message + ") — the local copy stands");
+    });
+  } catch (e) { console.warn("settings not synced (" + (e.message || e) + ") — the local copy stands"); }
+}
+window.addEventListener("pagehide", pushSettings);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") pushSettings(); });
 function loadSyncedSettings() {
   chrome.storage.sync.get({ [SETTINGS_KEY]: null }, (got) => {
     const stored = got && got[SETTINGS_KEY];
-    if (stored) {
+    // The newer copy wins. An older build's synced copy carries no stamp and
+    // reads as 0, which is right: a local copy written since is newer, and
+    // where there is no local copy at all the synced one still comes in.
+    const theirs = stored ? Number(stored.savedAt) || 0 : -1;
+    if (stored && theirs >= settingsAt) {
       settings = Object.assign(TD.normalizeSettings(stored), { showFakes: settings.showFakes });
+      settingsAt = theirs;
+      lsSet(LEGACY_SETTINGS_KEY, persistable(settings));
+      lsSet(SETTINGS_AT_KEY, settingsAt);
     } else if (localStorage.getItem(LEGACY_SETTINGS_KEY)) {
-      saveSettings(); // migrate the older build's local copy, once
+      // A write that never landed, or an older build's local copy: push it.
+      pushSettings();
     }
     applySettings();
     relayout();
   });
 }
 // Defaults changed elsewhere — the Options page, another reader tab — apply
-// here too, so what the reader shows is always the current default.
+// here too, so what the reader shows is always the current default. This
+// reader's own writes come back through here as well, and match what it is
+// already showing, so they stop at the comparison.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync" || !changes[SETTINGS_KEY]) return;
-  const merged = Object.assign(TD.normalizeSettings(changes[SETTINGS_KEY].newValue || null), { showFakes: settings.showFakes });
+  const arrived = changes[SETTINGS_KEY].newValue || null;
+  const merged = Object.assign(TD.normalizeSettings(arrived), { showFakes: settings.showFakes });
   if (JSON.stringify(persistable(merged)) === JSON.stringify(persistable(settings))) return;
   settings = merged;
+  settingsAt = Number(arrived && arrived.savedAt) || Date.now();
+  lsSet(LEGACY_SETTINGS_KEY, persistable(settings));
+  lsSet(SETTINGS_AT_KEY, settingsAt);
   applySettings();
   relayout();
 });

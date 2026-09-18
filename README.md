@@ -768,27 +768,37 @@ app, which routes it to the reader tab.
   or *never fake it* leaves it as it stands, on save and on PDF-Linker's
   next run, the same keep a wrongly faked pseudonym takes.
 - **Real names from the key.** **Open case folder** picks the matter's folder
-  and takes only `pseudonym_key.xlsx` and the exports out of it (a `*.txt.LEAK`
-  quarantined by PDF-Linker's leak gate is listed too, marked, and opened
-  first — it is the one to read). The reader **remembers every case folder it
-  is shown**, so a document opened on its own afterwards — from the file
-  picker, a drop, or the installed app's file handler — is matched to the
+  and takes only `pseudonym_key.xlsx` and the exports out of it (a
+  `*.txt.LEAK` quarantined by PDF-Linker's leak gate is listed too, marked,
+  and opened first — it is the one to read). The reader **remembers every case
+  folder it is shown**, so a document opened on its own afterwards — from the
+  file picker, a drop, or the installed app's file handler — is matched to the
   folder it sits in (its own folder, or the one above `Text Files`) and that
   folder's key is attached automatically; where the browser wants the folder
   re-authorised first, a bar offers it in one click, and a file from a folder
-  the reader has never seen gets an offer to open it once. Every fake is shown as its real value in
-  the case the fake was written in, **lightly highlighted**, and hovering
-  shows the pseudonym underneath. The highlight's **colour and intensity**
-  are yours to set (the swatch and slider beside "Mark pseudonyms", or under
-  Options), and are remembered like the font; **Mark pseudonyms** turns the
-  highlight and the hover off; **Show fakes** shows the document as it is on
-  disk. The key
-  is read the way `DeAnonymize.bas` and the Claude extension read it: columns
-  by header name, operator keeps skipped, alt spellings forward-only, an
-  ambiguous fake retired, the pinned tab out of the reversal. The last few
-  keys are remembered, so a lone `.txt` can be read under a key already
-  loaded. A real name from the key standing **unfaked** in an export is
-  counted in the status bar and underlined — that is a leak the run missed.
+  the reader has never seen gets an offer to open it once. Every fake is shown
+  as its real value in the case the fake was written in, **lightly
+  highlighted**, and hovering shows the pseudonym underneath. The highlight's
+  **colour and intensity** are yours to set (the swatch and slider beside
+  "Mark pseudonyms", or under Options), and are remembered like the font —
+  **written the moment you choose them.** Every reading setting is kept in two
+  places: the local copy, written at once and the one the next session opens
+  from, and the synced copy the Options page and a second tab read, written a
+  beat after the dragging stops. The synced store takes 120 writes a minute
+  and rejects the rest, and a colour is chosen by DRAGGING: a write per pixel
+  spent that quota in the first second, so the colour finally settled on was
+  the one most likely to be refused — on screen for the session, yellow again
+  the next morning. Each copy carries when it was written and the newer one
+  wins, so a synced write the browser refuses cannot undo the choice, and a
+  colour set in Options while the reader was closed still arrives. **Mark
+  pseudonyms** turns the highlight and the hover off; **Show fakes** shows the
+  document as it is on disk. The key is read the way `DeAnonymize.bas` and the
+  Claude extension read it: columns by header name, operator keeps skipped,
+  alt spellings forward-only, an ambiguous fake retired, the pinned tab out of
+  the reversal. The last few keys are remembered, so a lone `.txt` can be read
+  under a key already loaded. A real name from the key standing **unfaked** in
+  an export is counted in the status bar and underlined — that is a leak the
+  run missed.
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and Apply Leak Fixes reads the cells back. The
