@@ -5,7 +5,7 @@ import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout,
-  matchedScale, spreadTops, pageTypeSize, typeSizes, combinedMembers,
+  matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -178,6 +178,18 @@ console.log("the type a page is set in: the PDF's own sizes at the reading size"
   const rows = [{ top: 60, height: 12, text: "1" }, { top: 60, height: 12, text: "IN THE SUPERIOR COURT" }, { top: 84, height: 12, text: "2" }, { top: 84, height: 12.4, text: "FOR THE COUNTY" }, { top: 700, height: 8, text: "footnote" }];
   check("the body size is the median row height, the margin's numbers left out", pageTypeSize(rows), 12);
   check("no rows, no size", [pageTypeSize([]), pageTypeSize(null)], [null, null]);
+  // A PAGE IS NOT A DOCUMENT. An exhibit's title page carries one line, set
+  // large, and its own median is that heading: drawn to put THAT at the
+  // reading size, the sheet comes out a quarter the size of the filing's
+  // other pages and the PDF beside it shrinks to match. The document's own
+  // body is the reading, and the title page then shows a large heading on a
+  // page the size of the rest, the way the PDF does.
+  const title = [{ top: 300, height: 36, text: "EXHIBIT A" }];
+  check("the document's body size is read over all of its pages", docTypeSize([rows, title, rows]), 12);
+  check("…where a page alone would read its own heading as the body", pageTypeSize(title), 36);
+  check("…and the heading keeps its own size at that scale", typeSizes([36], docTypeSize([rows, title, rows])), [36]);
+  check("pages not read yet are passed over; none read, no size",
+    [docTypeSize([null, rows, null]), docTypeSize([null, null]), docTypeSize([]), docTypeSize(null)], [12, null, null, null]);
   check("a row within a fifth of the body is the body; a heading and a footnote keep their own; a line with no row takes the body", typeSizes([12.4, 11, 18, null, 8], 12), [12, 12, 18, 12, 8]);
   check("no body size: each row its own", typeSizes([10, null], null), [10, null]);
   // 12pt body at a 15px reading size: the sheet is drawn at 1.25, and every point of size grows it.

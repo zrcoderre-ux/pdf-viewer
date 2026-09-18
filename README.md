@@ -1223,6 +1223,14 @@ app, which routes it to the reader tab.
   else to put it, and pleading paper — whose lines all start at the body
   margin with the numbers in front of them — has nothing to give and is left
   alone.
+  **One scale for every page of a filing.** The scale is the PDF's body type
+  drawn at the reading size, and the body was read off each page on its own —
+  so an exhibit's **title page**, which carries "EXHIBIT A" and nothing else,
+  was drawn to put a 36-point heading at fifteen pixels: a quarter-size sheet
+  with the PDF beside it shrunk to match, and any two pages of one filing at
+  two sizes wherever their type differed. The body is read over the **whole
+  PDF** now. A title page is the size of the pages around it and shows a large
+  heading on it, the way the PDF does.
   **And the two columns are boxes, not just pages.** A page's height comes
   from the same arithmetic the bitmap is drawn by, so a height rounded one way
   and a canvas rounded the other cannot put a pixel between them — a pixel a
