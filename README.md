@@ -879,6 +879,16 @@ app, which routes it to the reader tab.
   byte for byte, and the file is read back before it is written — after which
   Apply Leak Fixes (or a re-run) applies them to the files. A `yes` here is
   the worksheet's alone: it is never also flagged into `New Real Values.txt`.
+- **And through a document in the order the rows stand in it.** PDF-Linker
+  writes one row per **value**, so the worksheet's own order is the order the
+  values were first found — which sent a review to page 4, then page 31, then
+  back to page 9, for no reason that means anything on the page. The walk
+  takes a document's rows by **where they stand in it** (the page and line of
+  the Where cell) instead, so a review reads a page and finishes with it. The
+  **‹ ›** buttons and **Alt+↑/↓** follow the same order, not the sheet's; a
+  row whose Where names no place — a sentinel, a tally — comes after the rows
+  that do. The **Leaks** tab still lists the worksheet in its own order, that
+  being what it is a list of.
 - **A review goes through the folder one document at a time.** A row stands
   in a document — its File cell — and the rows are worked **document by
   document**: every row standing in the document in front is reached before
@@ -1088,7 +1098,15 @@ app, which routes it to the reader tab.
   neither rewrites the kept value to its fake nor refuses over it — and goes
   into the same file as a `no: VALUE` / `never: VALUE` line, which PDF-Linker
   reads as the worksheet's own decision on the run that actually restores the
-  files. The **Flagged** panel lists both kinds, each withdrawable.
+  files. The **Flagged** panel lists both kinds, each withdrawable. **A list
+  that has not been written is a closing prompt.** The flags and keeps are
+  remembered here whatever happens, so closing the tab loses nothing — but
+  remembered here is not handed over: PDF-Linker reads `New Real Values.txt`
+  in the case folder and nothing else. While what is in the panel differs from
+  what was last written, the panel says so and closing the tab asks first (the
+  same prompt an edited document or an unsaved LEAKS decision raises; the
+  browser's own dialog is all a page gets, and which of the three it is, the
+  panels say).
 - **A keep stays visible.** A value kept is a decision, and with the orange
   mark gone (it is not a leak any more) nothing used to say so — the name read
   like any other word, and a page read a week later gave no sign which names
@@ -1193,6 +1211,18 @@ app, which routes it to the reader tab.
   sideways to read. Your width caps it: past that the page is drawn at your
   own width and the scale follows the sheet, so the grid inside it still lands
   on the PDF, and the status bar says so.
+  **A line too long for the page comes back onto it.** The reader's font is
+  not the filing's, and the same characters set in it run a little wider than
+  the column the PDF gave them; past the sheet's edge they are gone, and the
+  sheet no longer grows past the width you chose. Where the row has blank
+  space **in front of** the text — the indent the PDF put it at — the line
+  slides back into it, by what it overruns or by what the indent has to give,
+  whichever is less. Its top never moves, so it still stands beside its own
+  row; the indent is what gives. This happens only after the sheets have grown
+  as far as the cap allows, so a line is moved only when there was nowhere
+  else to put it, and pleading paper — whose lines all start at the body
+  margin with the numbers in front of them — has nothing to give and is left
+  alone.
   **And the two columns are boxes, not just pages.** A page's height comes
   from the same arithmetic the bitmap is drawn by, so a height rounded one way
   and a canvas rounded the other cannot put a pixel between them — a pixel a

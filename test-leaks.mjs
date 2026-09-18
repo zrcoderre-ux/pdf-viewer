@@ -10,7 +10,7 @@ import {
   isLeaksName, leaksRank, headerIndex, sheetsLookLikeLeaks, leaksSheet, parseLeaks, classifyFix, isKeepKind,
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
   packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE, isSuggested, isPending,
-  rowFile, reviewOrder, leakFileOrder, fileDone, exportMatcher,
+  rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
@@ -128,7 +128,20 @@ console.log("the walk: one document at a time");
   check("the document in front is finished before the next is reached",
     reviewOrder(walk, 0), [0, 4, 2, 1, 3, 5]);
   check("…from a row in the middle, that row's document is the one in front",
-    reviewOrder(walk, 3), [3, 4, 0, 2, 5, 1]);
+    reviewOrder(walk, 3), [3, 0, 4, 2, 5, 1]);
+  // Brief's rows come back p.4, p.9, p.31 — the order they stand in the
+  // document — and not 0, 4, 2 (the sheet's) or 4, 0, 2 (undecided first).
+  check("a document's rows are walked in the order they stand in it",
+    walkOrder(walk), [0, 4, 2, 1, 3, 5]);
+  check("…a row with no place in the document goes last of its own",
+    walkOrder([R("", "A.pdf", "(not located)"), R("", "A.pdf", "p.9"), R("", "A.pdf", "p.2")]), [2, 1, 0]);
+  check("…and a Word body sorts on its line alone",
+    walkOrder([R("", "O.docx", "line 30"), R("", "O.docx", "line 4")]), [1, 0]);
+  check("the place a row stands, and none where its Where names none",
+    [rowPlace(walk[0]), rowPlace(R("", "A.pdf", "(no longer present)")), rowPlace(R("", "A.pdf", "line 12"))],
+    [{ page: 4, line: Infinity }, null, { page: Infinity, line: 12 }]);
+  check("stepping goes down the document and wraps, backwards too",
+    [stepFrom(walk, 0, 1), stepFrom(walk, 4, 1), stepFrom(walk, 4, -1), stepFrom(walk, 0, -1)], [4, 2, 0, 5]);
   check("the documents in the order the review reaches them",
     [leakFileOrder(walk, 0), leakFileOrder(walk, 1)],
     [["Brief.pdf", "Guaranty.pdf", "Order.docx", ""], ["Guaranty.pdf", "Brief.pdf", "Order.docx", ""]]);
@@ -139,8 +152,9 @@ console.log("the walk: one document at a time");
     fileDone(walk.map((r, i) => (rowFile(r) === "Brief.pdf" ? Object.assign({}, r, { fix: "yes" }) : r)), "Brief.pdf"), true);
   check("the next undecided row stays in the document in front, wrapping inside it",
     [nextUndecided(walk, 0), nextUndecided(walk, 4)], [4, 0]);
+  // Brief's first row DOWN THE DOCUMENT is p.4, not the p.9 the sheet lists first.
   check("…and moves on only where that document has nothing left (row 1 is Guaranty's only row)",
-    nextUndecided(walk, 1), 4);
+    nextUndecided(walk, 1), 0);
 }
 {
   // The whole of a big folder's review, answered row by row the way the bar
@@ -183,8 +197,12 @@ console.log("the pages the rows point at");
   const at = (from, files) => leakPages(pages, from, files).map((t) => t.file + "|" + (t.page == null ? "-" : t.page));
   check("every page once, the document in front first — its decided rows too",
     at(0), ["Brief.pdf|4", "Brief.pdf|9", "Brief.pdf|31", "Guaranty.pdf|2", "Brief.pdf|2", "Order.docx|-", "|7"]);
+  // Brief's two rows both open on p.4, and the one that opens FURTHER UP it
+  // (p.4:2) is reached first, so its own second page (p.31) is named before
+  // the other row's p.9. The rows are in document order; the pages follow the
+  // rows, and a row that spans two pages carries its own with it.
   check("the row in front comes first, and the rows wrap round to it",
-    at(2), ["Guaranty.pdf|2", "Brief.pdf|2", "Order.docx|-", "Brief.pdf|4", "Brief.pdf|9", "Brief.pdf|31", "|7"]);
+    at(2), ["Guaranty.pdf|2", "Brief.pdf|2", "Order.docx|-", "Brief.pdf|4", "Brief.pdf|31", "Brief.pdf|9", "|7"]);
   check("held to one document, no page of another is asked for",
     at(0, ["Brief.pdf"]), ["Brief.pdf|4", "Brief.pdf|9", "Brief.pdf|31", "Brief.pdf|2", "|7"]);
   check("…and to that one and the next, once it is answered",
