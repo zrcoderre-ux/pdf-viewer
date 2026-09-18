@@ -4140,8 +4140,11 @@ $("leaks-btn").addEventListener("click", async () => {
 $("lb-close").addEventListener("click", () => showLeaksBar(false));
 $("lb-open").addEventListener("click", pickLeaks);
 $("leaks-load").addEventListener("click", pickLeaks);
-$("lb-prev").addEventListener("click", () => goToLeak(leaks.at - 1));
-$("lb-next").addEventListener("click", () => goToLeak(leaks.at + 1));
+// ‹ and › walk the review, not the worksheet: the next row is the next one
+// DOWN THE DOCUMENT (leaks.js walkOrder), so stepping through a page's rows
+// reads the page instead of hopping about it.
+$("lb-prev").addEventListener("click", () => goToLeak(LK.stepFrom(leakRows(), leaks.at, -1)));
+$("lb-next").addEventListener("click", () => goToLeak(LK.stepFrom(leakRows(), leaks.at, 1)));
 $("lb-next-open").addEventListener("click", () => { const n = LK.nextUndecided(leakRows(), leaks.at); if (n >= 0) goToLeak(n); });
 $("lb-accept").addEventListener("click", acceptLeak);
 $("lb-find").addEventListener("click", () => { if (leaks && leaks.at >= 0) locateLeak(leakRows()[leaks.at]); });
@@ -4163,8 +4166,8 @@ document.addEventListener("keydown", (e) => {
   const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveLeaks(); return; }
   if (!e.altKey || e.ctrlKey || e.metaKey) return;
-  if (e.key === "ArrowDown") { e.preventDefault(); goToLeak(leaks.at + 1); }
-  else if (e.key === "ArrowUp") { e.preventDefault(); goToLeak(leaks.at - 1); }
+  if (e.key === "ArrowDown") { e.preventDefault(); goToLeak(LK.stepFrom(leakRows(), leaks.at, 1)); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); goToLeak(LK.stepFrom(leakRows(), leaks.at, -1)); }
   else if (!typing && e.key.toLowerCase() === "a") { e.preventDefault(); acceptLeak(); }
   else if (!typing && e.key.toLowerCase() === "y") { e.preventDefault(); decideLeak("yes", { advance: true }); }
   else if (!typing && e.key.toLowerCase() === "n") { e.preventDefault(); decideLeak("no", { advance: true }); }

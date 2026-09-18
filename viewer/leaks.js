@@ -377,6 +377,10 @@ export function undecidedCount(rows) {
 // opens for it — even where the same value leaked into several: the row is one
 // decision, made once, and it is made there. A row naming no file (or a tally,
 // "12 files") stands in "": whatever document is open when the walk reaches it.
+//
+// Within a document the rows are taken in the order they STAND in it, by the
+// page and line of their Where cell, not in the order the worksheet lists
+// them — see walkOrder.
 
 /** The document a row stands in: the first name in its File cell, "" where it names none. */
 export function rowFile(row) {
@@ -385,40 +389,109 @@ export function rowFile(row) {
 }
 
 /**
+ * Where a row stands in its document: its FIRST location, the page and then
+ * the line, for putting the rows of one document in the order a reader meets
+ * them. A Word body's "line N" has no page and sorts on the line alone; a row
+ * whose Where names no place at all — a sentinel, a tally, an empty cell —
+ * has none, and goes after the rows that do.
+ */
+export function rowPlace(row) {
+  for (const l of parseWhere(row && row.where)) {
+    if (l.page == null && l.line == null) continue;
+    return { page: l.page == null ? Infinity : l.page, line: l.line == null ? Infinity : l.line };
+  }
+  return null;
+}
+/**
+ * Every row in the order the review WALKS them: document by document, and
+ * inside a document in the order the rows stand IN it.
+ *
+ * PDF-Linker writes one row per VALUE, so the sheet's own order is the order
+ * the values were first found — which sends a reader to page 4, then page 31,
+ * then back to page 9, for no reason that means anything on the page. Down
+ * the document instead: the review reads a page and finishes with it.
+ *
+ * Kept per list, because the order is asked for on every repaint and does not
+ * move: a decision changes what a row SAYS, never where it stands. The list
+ * is replaced whenever the worksheet is, so its identity is the whole test.
+ */
+let walkMemo = { rows: null, order: [] };
+export function walkOrder(rows) {
+  const all = rows || [];
+  if (walkMemo.rows === all) return walkMemo.order;
+  // One place per row, read once: a comparison that parsed the Where cell
+  // would parse it a few thousand times over a worksheet of any size.
+  const place = all.map((r, i) => {
+    const p = rowPlace(r);
+    return p ? [0, p.page, p.line, i] : [1, 0, 0, i];
+  });
+  const byFile = new Map();
+  const files = [];
+  all.forEach((r, i) => {
+    const f = fold(rowFile(r));
+    if (!byFile.has(f)) { byFile.set(f, []); files.push(f); }
+    byFile.get(f).push(i);
+  });
+  const out = [];
+  for (const f of files) {
+    const list = byFile.get(f);
+    list.sort((a, b) => {
+      const ka = place[a], kb = place[b];
+      for (let k = 0; k < 4; k++) if (ka[k] !== kb[k]) return ka[k] - kb[k];
+      return 0;
+    });
+    out.push(...list);
+  }
+  walkMemo = { rows: all, order: out };
+  return out;
+}
+/** The next row along the walk from `at` (`dir` < 0 for the one before), wrapping. */
+export function stepFrom(rows, at, dir) {
+  const walk = walkOrder(rows);
+  if (!walk.length) return -1;
+  const k = walk.indexOf(at);
+  if (k < 0) return walk[0];
+  const n = walk.length;
+  return walk[(((k + (dir < 0 ? -1 : 1)) % n) + n) % n];
+}
+/**
  * The rows in the order the review will reach them, as indices into `rows`:
- * the row in front, then the rest of ITS document — undecided first, in sheet
- * order from the row in front, wrapping — then the next document, and so on.
+ * the row in front, then the rest of ITS document from where that row stands,
+ * down the document and round to it, then the next document, and so on.
  */
 export function reviewOrder(rows, from) {
   const all = rows || [];
   const n = all.length;
   if (!n) return [];
   const start = Number.isInteger(from) && from >= 0 && from < n ? from : 0;
-  // Each document's rows, undecided and decided, gathered in one pass from
-  // the row in front round to it — so each list is already in walk order.
+  // The documents in the order the walk reaches them FROM the row in front,
+  // and each one's rows in the order they stand in it.
   const byFile = new Map();
   const files = [];
   const home = fold(rowFile(all[start]));
   files.push(home);
-  byFile.set(home, { un: [], de: [] });
+  byFile.set(home, []);
   for (let k = 0; k < n; k++) {
-    const i = (start + k) % n;
-    const f = fold(rowFile(all[i]));
-    let b = byFile.get(f);
-    if (!b) { byFile.set(f, (b = { un: [], de: [] })); files.push(f); }
-    (isPending(all[i]) ? b.un : b.de).push(i);
+    const f = fold(rowFile(all[(start + k) % n]));
+    if (!byFile.has(f)) { byFile.set(f, []); files.push(f); }
+  }
+  for (const i of walkOrder(all)) {
+    const b = byFile.get(fold(rowFile(all[i])));
+    if (b) b.push(i);
   }
   // The document in front first, then those with rows still to answer, then
   // the rest — each in the order the walk first names it.
+  const pending = (f) => byFile.get(f).some((i) => isPending(all[i]));
   const order = [home]
-    .concat(files.filter((f) => f !== home && byFile.get(f).un.length))
-    .concat(files.filter((f) => f !== home && !byFile.get(f).un.length));
-  const out = [start]; // the row in front is where the operator is standing, decided or not
-  for (const f of order) {
-    const b = byFile.get(f);
-    for (const i of b.un) if (i !== start) out.push(i);
-    for (const i of b.de) if (i !== start) out.push(i);
-  }
+    .concat(files.filter((f) => f !== home && pending(f)))
+    .concat(files.filter((f) => f !== home && !pending(f)));
+  // The row in front is where the operator is standing, decided or not, and
+  // the rest of its document follows it down the page and wraps to the top.
+  const hr = byFile.get(home);
+  const at = Math.max(0, hr.indexOf(start));
+  const out = [];
+  for (let k = 0; k < hr.length; k++) out.push(hr[(at + k) % hr.length]);
+  for (const f of order.slice(1)) out.push(...byFile.get(f));
   return out;
 }
 

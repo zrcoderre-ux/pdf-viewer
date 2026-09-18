@@ -879,6 +879,16 @@ app, which routes it to the reader tab.
   byte for byte, and the file is read back before it is written — after which
   Apply Leak Fixes (or a re-run) applies them to the files. A `yes` here is
   the worksheet's alone: it is never also flagged into `New Real Values.txt`.
+- **And through a document in the order the rows stand in it.** PDF-Linker
+  writes one row per **value**, so the worksheet's own order is the order the
+  values were first found — which sent a review to page 4, then page 31, then
+  back to page 9, for no reason that means anything on the page. The walk
+  takes a document's rows by **where they stand in it** (the page and line of
+  the Where cell) instead, so a review reads a page and finishes with it. The
+  **‹ ›** buttons and **Alt+↑/↓** follow the same order, not the sheet's; a
+  row whose Where names no place — a sentinel, a tally — comes after the rows
+  that do. The **Leaks** tab still lists the worksheet in its own order, that
+  being what it is a list of.
 - **A review goes through the folder one document at a time.** A row stands
   in a document — its File cell — and the rows are worked **document by
   document**: every row standing in the document in front is reached before
