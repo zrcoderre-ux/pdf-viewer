@@ -719,14 +719,13 @@ app, which routes it to the reader tab.
 - **The paper never gives; the type does.** The sheet is a page — 8.5 inches
   at 96 to the inch, or the stage where that is narrower, since a page that
   will not fit the screen is no use — and **zooming makes the type bigger and
-  the paper not at all.** A line too long for its column is drawn smaller
-  rather than the page being widened for it, which is what **Line lock** used
-  to do and why it is gone: a numbered line is never wrapped (its tail would
-  fall on a screen line with no number, one line off from the PDF), so it runs
-  past the column and the type shrinks until it does not. Zoomed in past the
-  size the page is drawn to hold, it wraps after all and the page grows
-  taller: the words are what a reader zoomed in for, and nothing is allowed
-  out over the edge of the paper.
+  the paper not at all.** **Nothing leaves the paper**, either: a numbered
+  line is never wrapped (its tail would fall on a screen line with no number,
+  one line off from the PDF), so it runs past its column — and is **cut where
+  the sheet ends** rather than painted out over the gap beside it. Cut, not
+  shrunk: one runaway line does not take the whole page's type down with it.
+  What widened the page for such a line was **Line lock**, and that is why it
+  is gone.
 - **The shape is a ceiling: the type gives way, not the page.** A page whose
   words want more room than its PDF page gave them — the reading size is
   yours, and the filing was set in whatever it was set in — is **drawn
@@ -1268,89 +1267,84 @@ app, which routes it to the reader tab.
   space **in front of** the text — the indent the PDF put it at — the line
   slides back into it, by what it overruns or by what the indent has to give,
   whichever is less. Its top never moves, so it still stands beside its own
-  row; the indent is what gives. This happens only after the sheets have grown
-  as far as the cap allows, so a line is moved only when there was nowhere
-  else to put it, and pleading paper — whose lines all start at the body
-  margin with the numbers in front of them — has nothing to give and is left
-  alone.
-  **One scale for every page of a filing.** The scale is the PDF's body type
-  drawn at the reading size, and the body was read off each page on its own —
-  so an exhibit's **title page**, which carries "EXHIBIT A" and nothing else,
-  was drawn to put a 36-point heading at fifteen pixels: a quarter-size sheet
-  with the PDF beside it shrunk to match, and any two pages of one filing at
-  two sizes wherever their type differed. The body is read over the **whole
-  PDF** now. A title page is the size of the pages around it and shows a large
-  heading on it, the way the PDF does.
-  **And the two columns are boxes, not just pages.** A page's height comes
-  from the same arithmetic the bitmap is drawn by, so a height rounded one way
-  and a canvas rounded the other cannot put a pixel between them — a pixel a
-  page is a centimetre by the fortieth, one column sliding under the other
-  with nothing visibly wrong on either. Where a line pushed past the PDF's own
-  foot makes the text page taller than its PDF page (an export's footer or
-  stamp below the last numbered line), **the slot grows with it** rather than
-  the columns parting; the bitmap keeps its size and the box is held open
-  under it. The page labels are levelled to the taller of the two for the same
-  reason.
-  **A text page with no PDF page keeps the pane level with it.** A combined
-  file always has two kinds: its own list of the documents in it, at the top,
-  and a banner page before each member. Each of those used to stand beside a
-  stub of a slot — a 580px contents page against a 16px strip, a 148px banner
-  page against 30px — so the two columns were out of step from the first page
-  and ran three thousand pixels apart over a case's worth of documents: the
-  PDF never sat beside the text being read, whichever side was scrolled. Such a
-  slot now takes its text page's own height and its own anchor, nothing to show
-  but the same amount of it, and the contents page's slot says what it is. The
-  columns sit level to within a pixel at every scroll position, from either
-  side.
-  A page with no numbers (an exhibit, a letter, an order) is laid out on
-  the PDF's printed **rows** instead: each text line is matched to the row
-  carrying its words and takes its top and left, so paragraphs and headings
-  sit where the PDF's do. **The size is the zoom, and the PDF's type sets
-  the text's.** A page is a page: the type keeps its own spacing at any
-  size, the way a PDF does. The reading size is the size of the *body*
-  type — the PDF's body drawn at that size fixes the scale, and the sheet,
-  the grid, the margins and the PDF page beside it are all drawn at it, so
-  the two are one size to the eye at any zoom without a hand adjustment —
-  and where the PDF's type varies, each line takes its own row's size: a
-  heading larger, a footnote or an exhibit's small print smaller, so a
-  page of tight rows fits them. (The leading setting has no say here; the
-  PDF's rows are the leading.) Setting the size up **grows both sheets**
-  instead of pushing the lines together. A page too wide for its pane runs
-  past the edge with a horizontal scroll bar under it, and a line too long
-  for the PDF's own column is never wrapped either: the sheets widen by
-  what the longest one needs. Each pane scrolls sideways on its own — the
-  text sheet is wider and its margins are not the PDF's. **Never on top of
-  itself:** where the PDF's own rows sit closer than a line of type is tall
-  (a scan's text layer, a signature under its rule) the line is pushed down
-  to clear the one above, a line out of register with the PDF and legible
-  — reading the text beats lining it up. The two panes scroll together,
-  anchored on each page's first printed line. **The PDF's text is
-  selectable and copies**, in the pane and on a swapped-in page: drag from
-  the margin, from the space before a word, or let go after the period —
-  every point snaps to the nearest character on its own row, so the
-  clipboard carries the passage under the pointer and never the line
-  numbers down the side (they are blanked in the text layer, as the PDF
-  viewer blanks them); a double click takes the word, a triple the row.
-  Display only — the layout lifts when the pane closes; remembered. **The
-  members' PDFs open one at a time, in the order the file lists them.** A
-  combined export names two dozen documents, each with a PDF of its own, and
-  asking for them all as the pane is built meant two dozen files read whole,
-  parsed, every page measured and its text read for the line grid, all at once
-  and all competing, before a single page could be looked at — about a second
-  and a half on a 21-document case before anything was drawn, now a quarter of
-  one. They go through a queue: one document at a time, the first member's
-  pages ready while the twenty-first waits its turn, and whatever the reader
-  has actually scrolled to **jumps ahead of the rest** (a page coming into view
-  moves its PDF, and the reading of its grid, to the front). A page is worth
-  seeing before it is worth aligning, so each PDF's line grid is read after the
-  documents already waiting, and the pane re-aligns as it lands. With it off, a page whose text is not
-  worth reading (an exhibit the OCR mangled) is **swapped**: the **⇄ PDF**
-  button on the page's label shows the PDF page in the text's place, the
+  row; the indent is what gives. Whatever is still past the edge after that is
+  cut off there. Pleading paper — whose lines all start at the body margin
+  with the numbers in front of them — has nothing to give and is cut at the
+  edge like any other. **One scale for every page of a filing.** The scale is
+  the PDF's body type drawn at the reading size, and the body was read off
+  each page on its own — so an exhibit's **title page**, which carries
+  "EXHIBIT A" and nothing else, was drawn to put a 36-point heading at fifteen
+  pixels: a quarter-size sheet with the PDF beside it shrunk to match, and any
+  two pages of one filing at two sizes wherever their type differed. The body
+  is read over the **whole PDF** now. A title page is the size of the pages
+  around it and shows a large heading on it, the way the PDF does. **And the
+  two columns are boxes, not just pages.** A page's height comes from the same
+  arithmetic the bitmap is drawn by, so a height rounded one way and a canvas
+  rounded the other cannot put a pixel between them — a pixel a page is a
+  centimetre by the fortieth, one column sliding under the other with nothing
+  visibly wrong on either. Where a line pushed past the PDF's own foot makes
+  the text page taller than its PDF page (an export's footer or stamp below
+  the last numbered line), **the slot grows with it** rather than the columns
+  parting; the bitmap keeps its size and the box is held open under it. The
+  page labels are levelled to the taller of the two for the same reason. **A
+  text page with no PDF page keeps the pane level with it.** A combined file
+  always has two kinds: its own list of the documents in it, at the top, and a
+  banner page before each member. Each of those used to stand beside a stub of
+  a slot — a 580px contents page against a 16px strip, a 148px banner page
+  against 30px — so the two columns were out of step from the first page and
+  ran three thousand pixels apart over a case's worth of documents: the PDF
+  never sat beside the text being read, whichever side was scrolled. Such a
+  slot now takes its text page's own height and its own anchor, nothing to
+  show but the same amount of it, and the contents page's slot says what it
+  is. The columns sit level to within a pixel at every scroll position, from
+  either side. A page with no numbers (an exhibit, a letter, an order) is laid
+  out on the PDF's printed **rows** instead: each text line is matched to the
+  row carrying its words and takes its top and left, so paragraphs and
+  headings sit where the PDF's do. **The size is the zoom, and the PDF's type
+  sets the text's.** A page is a page: the type keeps its own spacing at any
+  size, the way a PDF does. The reading size is the size of the *body* type —
+  the PDF's body drawn at that size fixes the scale, and the sheet, the grid,
+  the margins and the PDF page beside it are all drawn at it, so the two are
+  one size to the eye at any zoom without a hand adjustment — and where the
+  PDF's type varies, each line takes its own row's size: a heading larger, a
+  footnote or an exhibit's small print smaller, so a page of tight rows fits
+  them. (The leading setting has no say here; the PDF's rows are the leading.)
+  Setting the size up **grows both sheets** instead of pushing the lines
+  together. A page too wide for its pane runs past the edge with a horizontal
+  scroll bar under it, and a line too long for the PDF's own column is never
+  wrapped either: the sheets widen by what the longest one needs. Each pane
+  scrolls sideways on its own — the text sheet is wider and its margins are
+  not the PDF's. **Never on top of itself:** where the PDF's own rows sit
+  closer than a line of type is tall (a scan's text layer, a signature under
+  its rule) the line is pushed down to clear the one above, a line out of
+  register with the PDF and legible — reading the text beats lining it up. The
+  two panes scroll together, anchored on each page's first printed line. **The
+  PDF's text is selectable and copies**, in the pane and on a swapped-in page:
+  drag from the margin, from the space before a word, or let go after the
+  period — every point snaps to the nearest character on its own row, so the
+  clipboard carries the passage under the pointer and never the line numbers
+  down the side (they are blanked in the text layer, as the PDF viewer blanks
+  them); a double click takes the word, a triple the row. Display only — the
+  layout lifts when the pane closes; remembered. **The members' PDFs open one
+  at a time, in the order the file lists them.** A combined export names two
+  dozen documents, each with a PDF of its own, and asking for them all as the
+  pane is built meant two dozen files read whole, parsed, every page measured
+  and its text read for the line grid, all at once and all competing, before a
+  single page could be looked at — about a second and a half on a 21-document
+  case before anything was drawn, now a quarter of one. They go through a
+  queue: one document at a time, the first member's pages ready while the
+  twenty-first waits its turn, and whatever the reader has actually scrolled
+  to **jumps ahead of the rest** (a page coming into view moves its PDF, and
+  the reading of its grid, to the front). A page is worth seeing before it is
+  worth aligning, so each PDF's line grid is read after the documents already
+  waiting, and the pane re-aligns as it lands. With it off, a page whose text
+  is not worth reading (an exhibit the OCR mangled) is **swapped**: the **⇄
+  PDF** button on the page's label shows the PDF page in the text's place, the
   rest staying text, and **⇄ PDF pages…** takes a run — `5, 12-18` — of the
-  export's own page numbers. The swapped text is hidden, not removed: a
-  save still writes it, and ⇄ Text puts it back. Swaps are remembered per
-  document by PDF page number. Rendered pages are dropped as they scroll far
-  out of view, so a long PDF costs no more than the pages in reach.
+  export's own page numbers. The swapped text is hidden, not removed: a save
+  still writes it, and ⇄ Text puts it back. Swaps are remembered per document
+  by PDF page number. Rendered pages are dropped as they scroll far out of
+  view, so a long PDF costs no more than the pages in reach.
 
 - **A long export opens in one go.** A `Combined Text.txt` carrying a whole
   case — a thousand pages, every citation in them underlined and every name
