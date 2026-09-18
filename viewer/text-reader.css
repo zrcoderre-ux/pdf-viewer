@@ -352,8 +352,17 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 .tpage.swapped .page-body, .tpage.swapped .link-layer { display: none; }
 .pdf-inline { position: relative; min-height: 120px; background: #fff; }
 .page-inner { position: relative; }
+/* PDF-Linker's own trailer at the foot of an export — the "Authorities cited"
+   rule and its verification links. Part of the file, no part of the filed
+   document, and the PDF beside it has no such page: clipped while the pane is
+   open so the last sheet keeps the shape the rest of them hold. Hidden, never
+   removed — the DOM still carries it and a save still writes it. */
+body.sbs .line.trailer { display: none; }
+/* The reading size is the size of a page that FITS: a page whose words want
+   more room than its PDF page gave them is drawn smaller (--fit, set per
+   sheet) until they do. The file is one size; this is the paper's zoom. */
 .page-body {
-  font-family: var(--reader-font); font-size: var(--reader-size-eff); line-height: var(--reader-lh);
+  font-family: var(--reader-font); font-size: calc(var(--reader-size-eff) * var(--fit, 1)); line-height: var(--reader-lh);
   white-space: pre-wrap; overflow-wrap: anywhere; padding: 28px 48px 36px; min-height: 120px;
   outline: none; caret-color: #111;
 }

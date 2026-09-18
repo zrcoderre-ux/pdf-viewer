@@ -704,6 +704,30 @@ app, which routes it to the reader tab.
   until then the document's prevailing shape stands in, and US Letter portrait
   behind that; a landscape exhibit reads portrait until its PDF is opened and
   takes its own shape the moment the sizes land.
+- **The shape is a ceiling: the type gives way, not the page.** A page whose
+  words want more room than its PDF page gave them — the reading size is
+  yours, and the filing was set in whatever it was set in — is **drawn
+  smaller** until they fit, the way the PDF itself is at that zoom. Display
+  only: the file is one size, and the size you set is still the size of a page
+  that fits. The floor is half that size; past it the page grows instead,
+  because a sheet the right shape with nothing legible on it is no use.
+- **The PDF's own type sizes, where they are known.** On a page the PDF sets
+  in more than one size — an order's caption, a heading, an exhibit's small
+  print, a footnote — each line takes **its own row's size**, as a multiple of
+  the body size, so the page reads with the filing's own shape to it while the
+  words still flow in your font at your size. Pleading paper is one size down
+  its column and is left alone. This needs the PDF's text layer, which is read
+  when the pane is first opened, so a document read without ever opening the
+  pane is set in one size throughout.
+- **The export's own trailer is clipped beside the PDF.** PDF-Linker ends an
+  export with a `====== Authorities cited (public verification links) ======`
+  rule and a line per authority. It is part of the file — it round-trips, it
+  saves, it is translated under the key like everything else — and no part of
+  the filed document, and the PDF beside it has no such page. While the pane
+  is open those lines are hidden, so the last sheet keeps the shape the rest
+  of them hold; with the pane closed they are shown, and the page carrying
+  them is left to flow rather than have the filing squeezed to make room for
+  the links. Hidden, never removed: a save still writes it.
 - **The boxes are drawn, whatever the font.** PDF-Linker draws a page's
   line art — a court form's caption box, a pleading's caption divider, a
   section rule, an underline — into its export with the box-drawing glyphs

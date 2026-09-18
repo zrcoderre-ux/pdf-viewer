@@ -1512,8 +1512,31 @@ function buildBody(body, text, page, theirSpots) {
     });
     lineStart = r.s.endsWith("\n") || (lineStart && r.s === "");
   });
-  dressLines(body);
+  dressBody(body);
 }
+// PDF-Linker ends an export with a trailer of its own: a
+// "====== Authorities cited (public verification links) ======" rule and a
+// line per authority with its verification URL. It is part of the FILE — it
+// round-trips, it saves, it is translated under the key like everything else
+// — and no part of the filed document: the PDF beside it has no such page,
+// and a tail the PDF never had pushes the last sheet out of the shape the
+// rest of them hold. So the lines are marked here and hidden by the
+// stylesheet while the PDF pane is open. Marked, never removed: the file
+// still carries it and a save still writes it.
+const TRAILER_RE = /^\s*=+\s*Authorities cited\b.*?=+\s*$/i;
+function markTrailer(body) {
+  let inside = false;
+  for (const line of body.querySelectorAll(":scope > .line")) {
+    if (!inside && TRAILER_RE.test(line.textContent)) inside = true;
+    line.classList.toggle("trailer", inside);
+  }
+}
+/** Everything a rebuilt page body needs before it is measured: the boxes, then the trailer. */
+function dressBody(body) {
+  dressLines(body);
+  markTrailer(body);
+}
+
 /** The gutter span: the number (shown in the margin) and the spacing after it (kept, not shown). The numbers are fixed: the span takes no edit. */
 function makeGutter(prefix) {
   const m = prefix.match(/^( ?\d{1,2})( *)$/) || [null, prefix, ""];
@@ -1834,7 +1857,7 @@ function enterAtCaret(body, { snap = true } = {}) {
       if (!target) target = foot;
     }
   }
-  dressLines(body);
+  dressBody(body);
   fixGutterSpacing(body);
   placeCaret(ltOf(target), 0);
   setDirty(true);
@@ -1897,7 +1920,7 @@ function insertLinesAtCaret(body, pieces) {
       if (i === frags.length - 1) caretSlot = slot;
     });
   }
-  dressLines(body);
+  dressBody(body);
   fixGutterSpacing(body);
   if (caretNode) placeCaret(caretNode, caretNode.data.length);
   else if (caretSlot) placeCaret(ltOf(caretSlot), 0);
@@ -1928,7 +1951,7 @@ function joinLineUp(body, line) {
       cur = next;
     }
   }
-  dressLines(body);
+  dressBody(body);
   fixGutterSpacing(body);
   const at = pointAtOffset(plt, joinAt);
   placeCaret(at.node, at.offset);
@@ -5380,17 +5403,68 @@ function pdfRatioOf(i) {
   const sz = info && info.sizes[t.page - 1];
   return sz && sz.w > 0 ? sz.h / sz.w : null;
 }
+/**
+ * The type sizes the PDF sets for one page's lines, put on the lines as
+ * multiples of the body size (`em`) so they ride both the reading size and
+ * the page's fit without being worked out again for either.
+ *
+ * Only where the PDF's rows have been read, and only on a page that VARIES: a
+ * pleading page is one size down its column, and what this is for is the page
+ * that is not — an order's caption, a heading, an exhibit's small print, a
+ * footnote. The grid does the same thing with the same two helpers, where it
+ * also has the positions to put the lines at.
+ *
+ * Once per page per state. The alignment is a diff of the page's lines against
+ * the PDF's rows, and a layout pass that ran it again for every page would be
+ * the whole cost of opening a long document.
+ */
+function applyPdfTypeSizes(sec, body) {
+  const t = pdfTarget(Number(sec.dataset.index));
+  const info = t && infoFor(t.src);
+  const rows = info ? info.rows[t.page - 1] : null;
+  const stamp = textEpoch + "|" + (rows ? info.name + "|" + t.page : "none");
+  if (sec.__typeStamp === stamp) return;
+  sec.__typeStamp = stamp;
+  const lines = [...body.querySelectorAll(":scope > .line")];
+  const base = rows && rows.length ? PS.pageTypeSize(rows) : null;
+  const lay = base && !body.classList.contains("numbered")
+    ? PS.rowLayout(lines.map((l) => l.textContent), rows)
+    : null;
+  const sizes = lay ? PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base) : null;
+  lines.forEach((l, k) => {
+    const h = sizes ? sizes[k] : null;
+    // Within a fiftieth of the body IS the body: a text layer's heights wobble.
+    const want = h && Math.abs(h - base) > base * 0.02 ? (h / base).toFixed(3) + "em" : "";
+    if (l.style.fontSize !== want) l.style.fontSize = want;
+  });
+}
+// How far the type may be taken down to make a page fit its shape, and how
+// many passes it gets. Past the floor the page grows instead: a sheet the
+// right shape with nothing legible on it is no use to anyone.
+const MIN_FIT = 0.5;
+const FIT_PASSES = 4;
 function shapePages() {
   const secs = [...pagesEl.querySelectorAll(".tpage")];
-  // READ. A page on the grid carries the PDF's own height already, and a
-  // swapped page IS the PDF page; both are left alone.
-  const shapes = secs.map((sec) => {
-    const skip = sec.classList.contains("matched") || sec.classList.contains("swapped");
-    return { sec, skip, ratio: skip ? null : pdfRatioOf(Number(sec.dataset.index)) };
-  });
-  const free = shapes.find((s) => !s.skip);
-  if (!free) return;
-  const width = free.sec.clientWidth; // one read: every free sheet is this wide
+  // A page on the grid carries the PDF's own height and type already, and a
+  // swapped page IS the PDF page. A page still showing the export's trailer
+  // (the pane is closed, so nothing is clipped) is not one page of anything —
+  // it is the last page with an appendix stapled under it — and is left to
+  // flow rather than have the filing squeezed to make room for the links.
+  const clipped = document.body.classList.contains("sbs");
+  const shapes = [];
+  for (const sec of secs) {
+    const body = sec.querySelector(".page-body");
+    const loose = sec.classList.contains("matched") || sec.classList.contains("swapped")
+      || (!clipped && sec.querySelector(".line.trailer"));
+    if (loose) {
+      if (body.style.minHeight) body.style.minHeight = "";
+      if (sec.style.getPropertyValue("--fit")) sec.style.removeProperty("--fit");
+      continue;
+    }
+    shapes.push({ sec, body, ratio: pdfRatioOf(Number(sec.dataset.index)), fit: 1 });
+  }
+  if (!shapes.length) return;
+  const width = shapes[0].sec.clientWidth; // one read: every free sheet is this wide
   if (!width) return;
   // The shape for the pages with no PDF page of their own — a combined file's
   // contents page, its banners, an export whose PDF is not open yet: the
@@ -5400,17 +5474,48 @@ function shapePages() {
   for (const s of shapes) if (s.ratio) counts.set(s.ratio, (counts.get(s.ratio) || 0) + 1);
   let common = PAGE_RATIO, most = 0;
   for (const [r, n] of counts) if (n > most) { most = n; common = r; }
-  // WRITE, and only where it has moved: this runs on every layout pass, and a
-  // sheet already the right shape is left untouched.
   for (const s of shapes) {
-    const body = s.sec.querySelector(".page-body");
-    const want = s.skip ? "" : Math.round(width * (s.ratio || common)) + "px";
-    if (body.style.minHeight !== want) body.style.minHeight = want;
+    s.target = Math.round(width * (s.ratio || common));
+    const want = s.target + "px";
+    if (s.body.style.minHeight !== want) s.body.style.minHeight = want;
+    if (s.sec.style.getPropertyValue("--fit")) s.sec.style.removeProperty("--fit"); // measured at its own size first
+    applyPdfTypeSizes(s.sec, s.body);
+  }
+  // THE SHAPE IS A CEILING. A page whose words want more room than the PDF
+  // page gave them — the reading size is the reader's own, and the filing was
+  // set in whatever it was set in — is drawn smaller until they fit, the way
+  // the PDF itself is at that zoom. Display only: the file is one size, and
+  // the size in the Tools panel is still the size of a page that fits.
+  //
+  // Every page is measured, THEN every page is written. Shrinking one page and
+  // measuring the next lays the whole document out again for each page in
+  // turn, which on a long export is most of the time an open takes; this way
+  // a pass costs one layout however many pages there are. Four of them
+  // converge, the first guess always overshooting a little because the page's
+  // margins do not shrink with its type.
+  for (let pass = 0; pass < FIT_PASSES; pass++) {
+    const over = [];
+    for (const s of shapes) {
+      if (!(s.target > 0)) continue;
+      const h = s.body.scrollHeight;
+      if (h > s.target + 0.5) over.push([s, h]);
+    }
+    if (!over.length) break;
+    let moved = false;
+    for (const [s, h] of over) {
+      const want = Math.max(MIN_FIT, s.fit * (s.target / h));
+      if (want >= s.fit - 0.002) continue; // at the floor, or as close as it comes
+      s.fit = want;
+      s.sec.style.setProperty("--fit", want.toFixed(3));
+      moved = true;
+    }
+    if (!moved) break;
   }
 }
 function clearMatched(sec) {
   if (!sec.classList.contains("matched")) return;
   sec.classList.remove("matched");
+  sec.__typeStamp = null; // the grid wrote the line sizes; the flowing pass owns them now
   sec.style.width = "";
   sec.style.removeProperty("--body-x");
   sec.querySelector(".page-inner").style.height = "";
