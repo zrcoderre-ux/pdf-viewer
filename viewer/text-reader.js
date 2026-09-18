@@ -6468,7 +6468,14 @@ $("pdf-input").addEventListener("change", async () => {
 });
 
 // ── hooks for the PWA tab shell ───────────────────────────────────────────────────────
-window.__textReaderLoadLocal = (file, handle) => openFile(file, handle);
+// The shell hands a document in, and — where it opened a whole case folder —
+// the folder with it: remembered first, so the document attaches its own key,
+// its PDFs and its worksheet on the way up rather than asking to be shown the
+// folder it plainly came from.
+window.__textReaderLoadLocal = async (file, handle, dir) => {
+  if (dir) { try { await rememberDir(dir); } catch (e) { console.warn(e); } }
+  return openFile(file, handle);
+};
 window.__textReaderRememberDir = (h) => rememberDir(h);
 window.__textReaderReflow = () => { if (doc) placeCitations(); };
 window.__pdfViewerUnregister = () => {};
