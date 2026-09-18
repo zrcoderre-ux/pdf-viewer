@@ -717,14 +717,20 @@ app, which routes it to the reader tab.
   every column set to its widest cell, the rows given one left edge, and each
   row made as tall as the gap to the next so the bars meet — the box is a box
   there too.
-- **Print what you see.** **🖨 Print** (Ctrl+P) sends the pages exactly as
-  they are shown to the browser's print dialog, where "Save as PDF" keeps a
-  copy: the font and leading in force, the drawn boxes, the pseudonym marks,
-  one sheet per printed page, each sheet at its screen width and the lot
-  scaled to the paper so nothing re-wraps. It is a copy of the screen, so it carries the
-  real names if they are showing — turn on *show fakes* first to print a
-  scrubbed copy. The chrome around the pages and the citation underlines are
-  left off.
+- **Print what you see — in its pseudonyms.** **🖨 Print** (Ctrl+P) sends the
+  pages as they are shown to the browser's print dialog, where "Save as PDF"
+  keeps a copy: the font and leading in force, the drawn boxes, the pseudonym
+  marks, one sheet per printed page, each sheet at its screen width and the
+  lot scaled to the paper so nothing re-wraps. The chrome around the pages and
+  the citation underlines are left off. **The names are the one thing the
+  printout does not take from the screen.** A printout leaves the room, so a
+  print does to the pages what a save does to the file: the forward pass over
+  every page — the values kept for the case and the spot keeps left exactly as
+  they read — and then the pseudonyms on show, whichever way *Show fakes*
+  sits. Paper and PDF carry the scrubbed copy without anyone having to
+  remember. The document itself is not touched: the pages go back as they were
+  when the dialog closes, nothing is written, and a real name standing unfaked
+  is still standing and still orange, to be dealt with before a save.
 - **Line lock.** Pleading paper is read by its line numbers, and a numbered
   line that wraps puts its tail on a screen line with no number — one line
   off from the PDF. **Line lock** (Tools panel, remembered) holds every numbered
