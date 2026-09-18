@@ -40,7 +40,7 @@
       <span class="spacer"></span>
       <button id="lb-prev" title="Previous row (Alt+↑)">‹</button>
       <button id="lb-next" title="Next row (Alt+↓)">›</button>
-      <button id="lb-next-open" title="The next row with nothing typed in its Fix? cell">Next undecided</button>
+      <button id="lb-next-open" title="The next row still to answer: nothing typed in its Fix? cell, or PDF-Linker's own ~suggestion sitting there unaccepted">Next unanswered</button>
       <button id="lb-find" title="Find this value in the text again">Find in text</button>
       <button id="lb-save" class="primary" title="Write the decisions into LEAKS.xlsx in the case folder (Ctrl+Shift+S). Then double-click Apply Leak Fixes.bat, or re-run PDF-Linker, to apply them to the files.">💾 Save LEAKS.xlsx</button>
       <button id="lb-open" title="Load another LEAKS.xlsx">📂</button>
@@ -57,6 +57,7 @@
       <button data-fix="no" title="Leave it as it stands in this case (Alt+N)">no</button>
       <button data-fix="never" title="Leave it as it stands in every case — the nuclear keep">never</button>
       <button data-fix="phrase" title="Fake it whole, kept words inside it too">phrase</button>
+      <button id="lb-accept" hidden title="Accept PDF-Linker's own reading of this row, written into the sheet before you saw it — the cell stays exactly as it is and the row stops coming back (Alt+A)">accept</button>
       <input id="lb-typed" type="text" spellcheck="false" placeholder="or type: the replacement · ~CORRECT SPELLING (this is a misspelling of it) · *CORRECT TEXT (a scan error; ** in every folder) · [part to keep]" title="Anything else PDF-Linker's Fix? cell accepts. Enter applies it and moves on.">
       <button id="lb-apply" title="Write the typed text into the Fix? cell">Apply</button>
       <button id="lb-clear" class="secondary" title="Clear the cell — decide later">clear</button>

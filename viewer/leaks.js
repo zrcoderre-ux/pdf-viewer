@@ -17,6 +17,10 @@
 // what the cell will MEAN to the pass that applies it:
 //   yes / no / never / phrase          the words, as they are
 //   ~OTHER VALUE                       a misspelling of that value (= accepted)
+//                                      — and where the SHEET arrived carrying
+//                                      one, it is PDF-Linker's proposal, which
+//                                      the review stops on like an empty cell
+//                                      until the operator accepts it
 //   *CORRECT TEXT  /  **CORRECT TEXT   a scan error of it (** in every folder)
 //   [part] / {part}                    keep that part, fake the rest
 //   (part)                             the phrase inside the value
@@ -95,7 +99,7 @@ export function parseLeaks(sheets, name) {
     if (!value.trim()) continue;
     const fix = at("fix");
     out.push({
-      n: i + 1, value, fix, fix0: fix,
+      n: i + 1, value, fix, fix0: fix, ok: false,
       context: at("context"), file: at("file"), type: at("type"), where: at("where"), notes: at("notes"),
     });
   }
@@ -327,8 +331,31 @@ export function exportMatcher(exportNames, forward) {
 
 // ---- working the rows ----------------------------------------------------------------
 
+/**
+ * A row PDF-LINKER ANSWERED FOR THE OPERATOR, still standing as it wrote it:
+ * the sheet arrived with a `~value` in its Fix? cell (its own reading that
+ * this value is a misspelling of that one; `=` is read the same way), and the
+ * operator has neither changed it nor accepted it.
+ *
+ * That is a proposal, not a decision. It is usually right, which is why it is
+ * pre-filled, and when it is wrong it is wrong in the way that matters most —
+ * "~Martin" over a real "Marin" writes a real name into the file as though it
+ * had been checked. So the review stops on it exactly as it stops on an empty
+ * cell; what it must never do is go past unseen. Accepting it is a decision
+ * the reader remembers (there is nothing to write: the cell already says it).
+ */
+export function isSuggested(row) {
+  if (!row || row.ok) return false;
+  const own = String(row.fix0 == null ? "" : row.fix0).trim();
+  if (own[0] !== "~" && own[0] !== "=") return false;
+  return fold(row.fix) === fold(own);
+}
+/** Whether a row is still the review's business: nothing typed, or a suggestion not yet accepted. */
+export function isPending(row) {
+  return !fold(row && row.fix) || isSuggested(row);
+}
 export function undecidedCount(rows) {
-  return (rows || []).filter((r) => !fold(r.fix)).length;
+  return (rows || []).filter(isPending).length;
 }
 
 // ---- the walk: ONE DOCUMENT AT A TIME -------------------------------------------------
@@ -379,7 +406,7 @@ export function reviewOrder(rows, from) {
     const f = fold(rowFile(all[i]));
     let b = byFile.get(f);
     if (!b) { byFile.set(f, (b = { un: [], de: [] })); files.push(f); }
-    (fold(all[i].fix) ? b.de : b.un).push(i);
+    (isPending(all[i]) ? b.un : b.de).push(i);
   }
   // The document in front first, then those with rows still to answer, then
   // the rest — each in the order the walk first names it.
@@ -416,7 +443,7 @@ export function leakFileOrder(rows, from) {
 /** Whether every row standing in `file` has been answered. */
 export function fileDone(rows, file) {
   const k = fold(file);
-  return !(rows || []).some((r) => fold(rowFile(r)) === k && !fold(r.fix));
+  return !(rows || []).some((r) => fold(rowFile(r)) === k && isPending(r));
 }
 
 /** The next undecided row from `from` (exclusive), in walk order; -1 when none. */
@@ -430,7 +457,7 @@ export function nextUndecided(rows, from, dir) {
   // From a row in front the walk goes past it and round to it; from nowhere
   // (no row in front yet) the first row of the walk counts too.
   for (const i of here == null ? [order[0], ...rest] : [...rest, order[0]]) {
-    if (!fold(all[i].fix)) return i;
+    if (isPending(all[i])) return i;
   }
   return -1;
 }
@@ -446,10 +473,18 @@ export function fixEdits(parsed) {
 export function decisionsKey(folder, name) {
   return "textReader.leaks." + (folder || "") + "/" + (name || "");
 }
-/** { rowNumber: { base, fix } } for the rows that moved — `base` the sheet's own cell then. */
+/**
+ * { rowNumber: { base, fix } } for the rows that moved, and { base, ok: true }
+ * for a suggestion accepted as it stands — `base` the sheet's own cell then.
+ * An accepted suggestion writes nothing to the workbook (the cell already
+ * carries it) and so is remembered HERE or nowhere; a save does not clear it.
+ */
 export function packDecisions(rows) {
   const out = {};
-  for (const r of rows || []) if (r.fix !== r.fix0) out[r.n] = { base: r.fix0, fix: r.fix };
+  for (const r of rows || []) {
+    if (r.fix !== r.fix0) out[r.n] = { base: r.fix0, fix: r.fix };
+    else if (r.ok) out[r.n] = { base: r.fix0, ok: true };
+  }
   return out;
 }
 /** Remembered decisions laid back over the rows — only where the sheet's cell is still what it was. */
@@ -457,7 +492,9 @@ export function unpackDecisions(rows, stored) {
   let n = 0;
   for (const r of rows || []) {
     const s = stored && stored[r.n];
-    if (s && typeof s.fix === "string" && s.base === r.fix0 && s.fix !== r.fix0) { r.fix = s.fix; n++; }
+    if (!s || s.base !== r.fix0) continue;
+    if (typeof s.fix === "string" && s.fix !== r.fix0) { r.fix = s.fix; n++; }
+    else if (s.ok) { r.ok = true; n++; }
   }
   return n;
 }
