@@ -9,7 +9,7 @@
 import {
   isLeaksName, leaksRank, headerIndex, sheetsLookLikeLeaks, leaksSheet, parseLeaks, classifyFix, isKeepKind,
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
-  packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE,
+  packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE, isSuggested, isPending,
   rowFile, reviewOrder, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
 } from "./viewer/leaks.js";
@@ -198,9 +198,32 @@ console.log("the pages the rows point at");
 
 console.log("working the rows");
 const rows = parsed.rows.map((r) => Object.assign({}, r));
-check("undecided rows counted", undecidedCount(rows), 1);
-check("next undecided wraps, and is -1 when none", [nextUndecided(rows, 2), nextUndecided(rows, 0), nextUndecided(rows, null), nextUndecided([{ fix: "yes" }], 0)], [0, 0, 0, -1]);
-check("…backwards too", nextUndecided(rows, 0, -1), 0);
+// Row 2 is the one PDF-Linker answered for the operator ("~Vazquez", pre-filled):
+// a proposal, so the walk stops on it like the empty cell of row 1.
+check("a pre-filled ~ cell is a suggestion, not a decision",
+  rows.map(isSuggested), [false, true, false]);
+check("…and an empty cell is not one (there is nothing to accept)",
+  isSuggested({ fix: "", fix0: "" }), false);
+check("…nor is a ~ the operator typed over the sheet's own cell",
+  isSuggested({ fix: "~Vazquez", fix0: "" }), false);
+check("…nor one already accepted", isSuggested({ fix: "~Vazquez", fix0: "~Vazquez", ok: true }), false);
+check("both count as still to answer", [undecidedCount(rows), rows.map(isPending)], [2, [true, true, false]]);
+check("next unanswered wraps, and is -1 when none", [nextUndecided(rows, 2), nextUndecided(rows, 0), nextUndecided(rows, null), nextUndecided([{ fix: "yes" }], 0)], [0, 1, 0, -1]);
+check("…backwards too", nextUndecided(rows, 0, -1), 1);
+check("a file is not done while a suggestion stands in it", fileDone(rows, "Rasho v Quillmark - MTC.pdf"), false);
+{
+  // Accepting is a decision with nothing to write: the cell already says it.
+  const took = rows.map((r) => Object.assign({}, r));
+  took[1].ok = true;
+  check("an accepted suggestion leaves the walk", [undecidedCount(took), fixEdits({ cols: parsed.cols, rows: took })], [1, []]);
+  const kept = packDecisions(took);
+  check("…and is remembered beside the decisions", kept, { 3: { base: "~Vazquez", ok: true } });
+  const fresh = parseLeaks(SHEETS, "LEAKS.xlsx").rows;
+  check("…laid back over the sheet", [unpackDecisions(fresh, kept), fresh.map((r) => !!r.ok), undecidedCount(fresh)], [1, [false, true, false], 1]);
+  const moved = parseLeaks(SHEETS, "LEAKS.xlsx").rows;
+  moved[1].fix0 = moved[1].fix = "~Vazqueth"; // PDF-Linker read it again, differently
+  check("…but never over a suggestion that has changed since", [unpackDecisions(moved, kept), !!moved[1].ok], [0, false]);
+}
 rows[0].fix = "no";
 rows[2].fix = "";
 check("only the rows that moved are written, to the Fix? column, by sheet row", fixEdits({ cols: parsed.cols, rows }), [{ row: 2, col: 1, text: "no" }, { row: 5, col: 1, text: "" }]);
