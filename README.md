@@ -907,7 +907,7 @@ app, which routes it to the reader tab.
   a value leaks wherever it leaks).
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
-  **Fix?** cell to answer, and Apply Leak Fixes reads the cells back. The
+  **Fix?** cell to answer, and Apply Fixes reads the cells back. The
   reader attaches the folder's worksheet when the folder is opened (or **⚠
   Leaks** loads one; a dropped `LEAKS.xlsx` attaches too) and works it **one
   row at a time**: the current row stands in a bar above the text — value,
@@ -938,7 +938,7 @@ app, which routes it to the reader tab.
   same workbook in place** — only the Fix? cells change; every other part of
   the file, the Context quotes, the column widths and the dropdown come back
   byte for byte, and the file is read back before it is written — after which
-  Apply Leak Fixes (or a re-run) applies them to the files. A `yes` here is
+  Apply Fixes (or a re-run) applies them to the files. A `yes` here is
   the worksheet's alone: it is never also flagged into `New Real Values.txt`.
 - **And through a document in the order the rows stand in it.** PDF-Linker
   writes one row per **value**, so the worksheet's own order is the order the
@@ -1140,7 +1140,12 @@ app, which routes it to the reader tab.
   such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the
   **Flagged** panel collects them and **Save list to case folder** writes `New
   Real Values.txt` beside the key, which PDF-Linker reads on its next run —
-  and on Apply Leak Fixes — as if each line had been given with `--term`. **A
+  and on Apply Fixes — as if each line had been given with `--term`. **A
+  flag needs no full re-run.** The value is the operator's own instruction, so
+  nothing has to re-read the PDFs to find it: double-clicking `Apply Fixes` in
+  the case folder scrubs it straight into the `.txt` exports and writes its row
+  into the key. That launcher sits beside `pseudonym_key.xlsx` whether or not
+  the folder still has a `LEAKS.xlsx` to triage. **A
   flag the run has answered comes off the list.** The flag is a job: this name
   is in the clear, fake it. When the key comes back with the name in it — the
   folder opened after a run, a key chosen by hand — the job is done, and the
