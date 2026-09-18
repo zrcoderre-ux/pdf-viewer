@@ -433,21 +433,77 @@ lockToggle.addEventListener("change", () => { settings.lineLock = lockToggle.che
 // ── print ────────────────────────────────────────────────────────────────────
 // The pages as they are shown, to paper or to a PDF — the browser's own
 // dialog, where "Save as PDF" is a destination. What prints is the display:
-// the font and leading in force, the boxes drawn, the real names on screen
-// (a printout is a copy of the SCREEN and carries whatever the screen does —
-// show the fakes first to print a scrubbed copy). The chrome around the
-// pages is dropped in the print stylesheet, nothing is re-laid, and the
-// citation strips are left off, being overlays measured for the screen.
+// the font and leading in force, the boxes drawn, one sheet per page. The
+// chrome around the pages is dropped in the print stylesheet, nothing is
+// re-laid, and the citation strips are left off, being overlays measured for
+// the screen.
+//
+// THE NAMES ARE THE ONE THING THE PRINTOUT DOES NOT TAKE FROM THE SCREEN. A
+// printout leaves the room, and a copy of the screen would carry whatever the
+// screen shows — with Show fakes off, the real names. So a print does to the
+// pages what a save does to the file: the forward pass over every page (the
+// values kept for the case and the spot keeps left exactly as they read, as
+// always), and then the pseudonyms on show, whichever way the toggle sits.
+// Paper and PDF carry the scrubbed copy without anyone having to remember,
+// and Ctrl+P is the button by another name.
+//
+// The document itself is not touched. The pages go back as they were the
+// moment the dialog closes, nothing is written, the file on disk is the file
+// it was, and the undo stack never hears of it: a real name standing unfaked
+// is still standing, still orange, still there to be dealt with before a save.
 $("print-btn").addEventListener("click", () => window.print());
-// The sheets keep their screen width in print, so nothing re-wraps, and the
-// widest one is zoomed to the paper's printable width (letter and A4 alike).
+
 const PRINT_WIDTH_PX = 700;
+let printPut = null; // while a print is being prepared: how the pages go back
+
+/** Every real name the key binds shown as its pseudonym, for the printout only. */
+function fakesForPrint() {
+  if (!doc || printPut) return; // a dialog over another: the first put-back stands
+  const bodies = pageBodies();
+  const was = { html: bodies.map((b) => b.innerHTML), fakes: document.body.classList.contains("show-fakes") };
+  let moved = false;
+  if (fwd && fwd.rx) {
+    during("scrubbing the pages for print", () => {
+      for (const body of bodies) {
+        const { text, held } = TD.serializeHeld(body);
+        const fw = forwardText(text, held);
+        if (!fw.swaps) continue;
+        buildBody(body, fw.text, pageIndexOf(body));
+        moved = true;
+      }
+    });
+  }
+  if (!settings.showFakes) {
+    for (const s of pagesEl.querySelectorAll(".pn")) s.textContent = s.dataset.fake;
+    document.body.classList.add("show-fakes");
+    moved = true;
+  }
+  printPut = moved ? was : null;
+}
+
+/** …and the pages as they were, the moment the dialog closes. */
+function pagesBackAfterPrint() {
+  const was = printPut;
+  printPut = null;
+  if (!was) return;
+  pageBodies().forEach((b, i) => { if (was.html[i] != null) b.innerHTML = was.html[i]; });
+  document.body.classList.toggle("show-fakes", was.fakes);
+  afterTextChange(); // the marks and the underlines are ranges into the old nodes
+}
+
+// The sheets keep their screen width in print, so nothing re-wraps, and the
+// widest one is zoomed to the paper's printable width (letter and A4 alike) —
+// measured after the names are swapped, that being what goes to paper.
 window.addEventListener("beforeprint", () => {
+  fakesForPrint();
   let w = 0;
   for (const t of pagesEl.querySelectorAll(".tpage")) w = Math.max(w, t.offsetWidth);
   document.documentElement.style.setProperty("--print-zoom", String(w > PRINT_WIDTH_PX ? PRINT_WIDTH_PX / w : 1));
 });
-window.addEventListener("afterprint", () => document.documentElement.style.removeProperty("--print-zoom"));
+window.addEventListener("afterprint", () => {
+  document.documentElement.style.removeProperty("--print-zoom");
+  pagesBackAfterPrint();
+});
 
 // ── theme (shared with the PDF viewer) ───────────────────────────────────────
 const themeToggle = $("theme-toggle");
