@@ -5146,6 +5146,27 @@ function slotShell(cls, tag, { label = false } = {}) {
   el.appendChild(sheet);
   return el;
 }
+/**
+ * The body type size of the PDF a page comes from, held on the info object.
+ *
+ * One scale for every page of a document: a page's OWN median is the wrong
+ * reading on any page that is not mostly body text — an exhibit's title page
+ * says "EXHIBIT A" and nothing else — and it also drew two pages of the same
+ * filing at two sizes wherever their type happened to differ. The grid reads
+ * a PDF page by page, so the answer is kept against how many pages have been
+ * read and taken again as more land.
+ */
+function docTypeSize(info) {
+  if (!info || !info.rows) return null;
+  let filled = 0;
+  for (const r of info.rows) if (r) filled++;
+  if (info.__baseAt !== filled) {
+    info.__baseAt = filled;
+    info.__base = PS.docTypeSize(info.rows);
+  }
+  return info.__base;
+}
+
 /** The height a page box should have before its bitmap arrives, from the PDF's page sizes. */
 async function presize(el, src, pageNo, cssWidth) {
   try {
@@ -5357,9 +5378,12 @@ function applyMatchedLayoutNow() {
     const rows = info.rows[t.page - 1];
     const numbered = !!geom && body.classList.contains("numbered");
     let tops = null, lefts = null, sizes = null, pitch = 0;
-    // The body type: the page's own, else (numbers with no body read) the
-    // reader's leading filling the pitch, as it does off the grid.
-    let base = PS.pageTypeSize(rows);
+    // The body type: the DOCUMENT's, so every page of one filing is drawn at
+    // one scale and a title page is not sized as though its heading were
+    // body text; the page's own where the document has nothing read yet, and
+    // (numbers with no body read) the reader's leading filling the pitch, as
+    // it does off the grid.
+    let base = docTypeSize(info) || PS.pageTypeSize(rows);
     if (numbered) {
       tops = PS.slotTops(lines.map((l) => ({ num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null })), geom);
       pitch = geom.pitch;
@@ -5613,7 +5637,7 @@ function applyPdfTypeSizes(sec, body) {
   if (sec.__typeStamp === stamp) return;
   sec.__typeStamp = stamp;
   const lines = [...body.querySelectorAll(":scope > .line")];
-  const base = rows && rows.length ? PS.pageTypeSize(rows) : null;
+  const base = rows && rows.length ? (docTypeSize(info) || PS.pageTypeSize(rows)) : null;
   const lay = base && !body.classList.contains("numbered")
     ? PS.rowLayout(lines.map((l) => l.textContent), rows)
     : null;

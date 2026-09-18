@@ -481,7 +481,31 @@ export function rowLayout(lineTexts, rows) {
  * rows to read.
  */
 export function pageTypeSize(rows) {
-  const hs = (rows || []).filter((r) => r && r.height > 0 && !/^\s*\d{1,2}\s*$/.test(r.text || "")).map((r) => r.height);
+  const hs = bodyHeights(rows);
+  return hs.length ? median(hs) : null;
+}
+/** A page's printed row heights, the margin's bare line numbers left out. */
+function bodyHeights(rows) {
+  return (rows || []).filter((r) => r && r.height > 0 && !/^\s*\d{1,2}\s*$/.test(r.text || "")).map((r) => r.height);
+}
+/**
+ * The DOCUMENT's body type size: the same reading taken of every printed row
+ * in the PDF rather than of one page's.
+ *
+ * A PAGE IS NOT A DOCUMENT. An exhibit's title page carries one line —
+ * "EXHIBIT A", set large — and the median of one heading is that heading, so
+ * a page drawn to put its body type at the reading size is drawn to make a
+ * 36-point heading fifteen pixels: a quarter-size sheet, with the PDF beside
+ * it shrunk to match. The pages of one filing are one paper and belong at one
+ * scale, and the scale that suits the filing is the one its body is set in —
+ * which the title page then shows a large heading on, as the PDF does.
+ *
+ * Null where the document has no rows read yet; the caller falls back to the
+ * page's own, and to the line pitch behind that.
+ */
+export function docTypeSize(rowsByPage) {
+  const hs = [];
+  for (const rows of rowsByPage || []) if (rows) hs.push(...bodyHeights(rows));
   return hs.length ? median(hs) : null;
 }
 
