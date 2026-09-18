@@ -1,7 +1,8 @@
 // reader-options.js
 //
 // The Options page's "Text reader — default font and leading" section (the
-// pseudonym highlight's colour and intensity with them). The
+// pseudonym highlight's colour and intensity with them). There is no page
+// width here or anywhere: the sheet is a page, and the type is what gives. The
 // defaults are one synced object, `textReaderSettings` in chrome.storage.sync
 // — the same one the reader's toolbar edits — so a font or a leading set here
 // is what every text file opens in, and a change in either place shows in the
@@ -18,7 +19,6 @@ const fontEl = $("reader-font");
 const customEl = $("reader-font-custom");
 const sizeEl = $("reader-size");
 const lhEl = $("reader-lh");
-const widthEl = $("reader-width");
 const marksEl = $("reader-marks");
 const markColorEl = $("reader-mark-color");
 const markAlphaEl = $("reader-mark-alpha");
@@ -42,7 +42,6 @@ if (fontEl) {
     customEl.value = settings.customFont;
     sizeEl.value = String(settings.fontSize);
     lhEl.value = String(settings.lineHeight);
-    widthEl.value = String(settings.pageWidth);
     marksEl.checked = settings.marks;
     markColorEl.value = settings.markColor;
     markAlphaEl.value = String(settings.markAlpha);
@@ -93,7 +92,6 @@ if (fontEl) {
       customFont: customEl.value,
       fontSize: Number(sizeEl.value),
       lineHeight: Number(lhEl.value),
-      pageWidth: Number(widthEl.value),
       marks: marksEl.checked,
       markColor: markColorEl.value,
       markAlpha: Number(markAlphaEl.value),
@@ -106,7 +104,7 @@ if (fontEl) {
     settings = normalizeSettings(got && got[KEY]);
     show();
   });
-  for (const el of [fontEl, sizeEl, lhEl, widthEl, marksEl]) el.addEventListener("change", read);
+  for (const el of [fontEl, sizeEl, lhEl, marksEl]) el.addEventListener("change", read);
   for (const el of [customEl, markColorEl, markAlphaEl]) el.addEventListener("input", read);
   $("reader-reset").addEventListener("click", () => {
     settings = normalizeSettings(Object.assign({}, DEFAULT_SETTINGS));

@@ -31,9 +31,9 @@
   --reader-font: Georgia, serif;
   --reader-size: 15px;
   --reader-lh: 1.5;
-  --reader-width: 820px;
+  --reader-width: 816px;
   --reader-size-eff: 15px;   /* what the pages use: the setting, less what line lock had to take */
-  --reader-width-eff: 820px;
+  --reader-width-eff: 816px;
   --gutter-w: 2.6em;         /* the numbered margin */
 }
 :root[data-theme="light"] {
@@ -98,42 +98,45 @@ body {
    worksheet's current row — value, type, where, both Context quotes — and
    the Fix? controls. The value is bolded in the quotes as it is in the
    worksheet. */
-#leaks-bar {
+.revbar {
   position: fixed; top: var(--toolbar-height); left: 0; right: 0; z-index: 9;
   display: flex; flex-direction: column; gap: 4px; padding: 6px 12px;
   background: var(--chrome-2); color: var(--text); border-bottom: 2px solid #e65100; font-size: 13px;
 }
-#leaks-bar .lb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-#leaks-bar .lb-row .spacer { flex: 1; min-width: 8px; }
-#leaks-bar button {
+/* The worksheet's bar sits under the toolbar; the names bar under that, so
+   the two reviews stack rather than cover each other. */
+#names-bar { top: calc(var(--toolbar-height) + var(--bar-leaks, 0px)); }
+.revbar .lb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.revbar .lb-row .spacer { flex: 1; min-width: 8px; }
+.revbar button {
   background: var(--btn); color: var(--text); border: 1px solid var(--btn-border);
   padding: 3px 9px; border-radius: 4px; cursor: pointer; font-size: 12px; line-height: 1.2; flex: none;
 }
-#leaks-bar button:hover { background: var(--btn-hover); }
-#leaks-bar button:disabled { opacity: 0.5; cursor: default; }
-#leaks-bar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-#leaks-bar button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
-#leaks-bar button.on { background: #e65100; border-color: #e65100; color: #fff; }
-#leaks-bar .lb-count { color: var(--text-muted); font-variant-numeric: tabular-nums; flex: none; }
-#leaks-bar .lb-type { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: #546e7a; color: #fff; flex: none; text-transform: uppercase; letter-spacing: 0.02em; }
-#leaks-bar .lb-type.leak { background: #b71c1c; }
-#leaks-bar .lb-type.reid { background: #e65100; }
-#leaks-bar .lb-value { font-size: 15px; word-break: break-word; }
-#leaks-bar .lb-where { color: var(--text-muted); word-break: break-word; }
-#leaks-bar .lb-context-row { align-items: flex-start; }
-#leaks-bar .lb-context {
+.revbar button:hover { background: var(--btn-hover); }
+.revbar button:disabled { opacity: 0.5; cursor: default; }
+.revbar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.revbar button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
+.revbar button.on { background: #e65100; border-color: #e65100; color: #fff; }
+.revbar .lb-count { color: var(--text-muted); font-variant-numeric: tabular-nums; flex: none; }
+.revbar .lb-type { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: #546e7a; color: #fff; flex: none; text-transform: uppercase; letter-spacing: 0.02em; }
+.revbar .lb-type.leak { background: #b71c1c; }
+.revbar .lb-type.reid { background: #e65100; }
+.revbar .lb-value { font-size: 15px; word-break: break-word; }
+.revbar .lb-where { color: var(--text-muted); word-break: break-word; }
+.revbar .lb-context-row { align-items: flex-start; }
+.revbar .lb-context {
   flex: 1 1 60%; min-width: 240px; max-height: 6.2em; overflow-y: auto; line-height: 1.4;
   background: var(--inset); border: 1px solid var(--btn-border); border-radius: 4px; padding: 4px 8px; color: var(--text);
   white-space: pre-wrap; word-break: break-word;
 }
-#leaks-bar .lb-context b { color: #ff8a65; }
-#leaks-bar .lb-context .lb-export { color: var(--text-muted); border-top: 1px dashed var(--btn-border); margin-top: 3px; padding-top: 3px; }
-#leaks-bar .lb-context .lb-export b { color: #ffd54f; }
-#leaks-bar .lb-context .lb-tag { font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-right: 6px; }
-#leaks-bar .lb-notes { flex: 1 1 30%; min-width: 200px; max-height: 6.2em; overflow-y: auto; color: var(--text-muted); font-size: 12px; line-height: 1.4; word-break: break-word; }
-#leaks-bar .lb-answer { min-width: 120px; color: #ffd54f; }
-#leaks-bar .lb-answer.undecided { color: var(--text-muted); }
-#leaks-bar #lb-typed { flex: 1; min-width: 200px; background: var(--inset); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+.revbar .lb-context b { color: #ff8a65; }
+.revbar .lb-context .lb-export { color: var(--text-muted); border-top: 1px dashed var(--btn-border); margin-top: 3px; padding-top: 3px; }
+.revbar .lb-context .lb-export b { color: #ffd54f; }
+.revbar .lb-context .lb-tag { font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-right: 6px; }
+.revbar .lb-notes { flex: 1 1 30%; min-width: 200px; max-height: 6.2em; overflow-y: auto; color: var(--text-muted); font-size: 12px; line-height: 1.4; word-break: break-word; }
+.revbar .lb-answer { min-width: 120px; color: #ffd54f; }
+.revbar .lb-answer.undecided { color: var(--text-muted); }
+.revbar #lb-typed { flex: 1; min-width: 200px; background: var(--inset); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
 /* The row's value wherever it stands in the text, and the one the bar scrolled to. */
 ::highlight(leakrow) { background-color: rgba(230, 81, 0, 0.22); text-decoration: underline solid #e65100 2px; }
 /* The count of names standing in the clear is a control: it steps through
@@ -278,7 +281,6 @@ body.tools-collapsed #tools-rail .tool-btn { position: relative; }
    widened for the longest line instead, past the pane's edge if it must,
    and the stage scrolls sideways — the way a zoomed PDF behaves. */
 .page-body.fixed .line > .lt { white-space: pre; }
-body.matched-pages #pages { width: max-content; min-width: 100%; }
 .page-body.fixed { padding: 0; position: relative; }
 .page-body.fixed .line { position: absolute; left: 0; right: 0; min-height: 0; }
 .page-body.fixed .line > .lt { min-height: 0; }
@@ -333,7 +335,7 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 /* ── pages ─────────────────────────────────────────────────────────────────── */
 #pages { padding: 20px 0 60px; }
 .tpage {
-  width: var(--reader-width-eff); max-width: calc(100% - 32px); margin: 0 auto 18px;
+  width: var(--reader-width-eff); margin: 0 auto 18px;
   background: #fff; color: #111; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); border-radius: 2px;
 }
 .page-label {
@@ -387,7 +389,12 @@ body.sbs .line.trailer { display: none; }
 /* Line lock: a numbered line is held to one screen line, and the page grows
    past the window's edge if its longest line needs it — the stage scrolls
    sideways, as a zoomed PDF does. */
-body.line-lock .page-body.numbered .line.num > .lt { white-space: pre; }
+/* A numbered line is not wrapped: its tail would fall on a screen line with no
+   number, which read across to the PDF is one line off. It runs past the
+   column instead, and the type shrinks until it does not (shapePages). Zoomed
+   in past the size the page is drawn to hold, it wraps after all — the page
+   grows taller and nothing runs out over the edge of the paper. */
+body:not(.zoomed) .page-body.numbered .line.num > .lt { white-space: pre; }
 /* The boxes the export draws with line glyphs, DRAWN (rules.js). A line
    carrying vertical bars is a table row of cells split at its bars, and
    consecutive rows whose bars agree share one anonymous table — so a bar
@@ -421,8 +428,6 @@ body.line-lock .page-body.numbered .line.num > .lt { white-space: pre; }
 .line.rl.fit .rc.hf { font-size: 0; }
 /* A line that is nothing but rules is a hairline on the page: half a line tall. */
 .line.rr, .line.rr > .lt { min-height: 0; line-height: calc(var(--reader-lh) * 0.5em); }
-body.line-lock .tpage { max-width: none; }
-body.line-lock #pages { width: max-content; min-width: 100%; }
 .page-body:focus { box-shadow: inset 0 0 0 2px rgba(26, 115, 232, 0.25); }
 body:not(.editing) .page-body { caret-color: transparent; }
 body.editing .tpage { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(26, 115, 232, 0.35); }
@@ -548,7 +553,7 @@ body.marks-off [data-here]:hover { background: transparent; }
    left off. */
 @media print {
   html, body { height: auto; overflow: visible; background: #fff; }
-  #toolbar, #leaks-bar, #key-offer, #tools-rail, #side, #statusbar, #toast, #pdf-pane, #flag-pop { display: none !important; }
+  #toolbar, .revbar, #key-offer, #tools-rail, #side, #statusbar, #toast, #pdf-pane, #flag-pop { display: none !important; }
   #main { position: static; display: block; }
   #stage { overflow: visible; position: static; }
   #pages { padding: 0; width: auto !important; min-width: 0 !important; }

@@ -12,7 +12,7 @@ import {
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, blankRanges, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
-  isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE,
+  isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward } from "./viewer/pseudo-key.js";
@@ -35,7 +35,13 @@ check("a lone number on a short page is a margin only where it is half the lines
 check("…and not among prose", pageIsNumbered([" 1  Exhibit", "a", "b", "c"]), false);
 check("no numbers, no margin", pageIsNumbered(["a", "b", ""]), false);
 check("blank lines do not count against it", pageIsNumbered([" 1  a", "", "", "", " 2  b"]), true);
-check("lineLock is remembered and defaults off", [normalizeSettings({}).lineLock, normalizeSettings({ lineLock: true }).lineLock, normalizeSettings({ lineLock: "yes" }).lineLock], [false, true, false]);
+// A page is a page: neither the width nor the lock that widened it for a long
+// line is a setting any more, and an older build's stored copy of them is
+// dropped rather than carried about.
+check("the sheet is a page of paper, in CSS pixels", PAGE_WIDTH, 816);
+check("the width and the lock are gone, and do not come back from storage",
+  [normalizeSettings({}).pageWidth, normalizeSettings({ pageWidth: 1400, lineLock: true }).pageWidth, normalizeSettings({ lineLock: true }).lineLock],
+  [undefined, undefined, undefined]);
 
 // ---- placeholders ---------------------------------------------------------
 console.log("placeholders");

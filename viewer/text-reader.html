@@ -31,7 +31,7 @@
   <!-- The LEAKS review bar: the worksheet's current row above the text, the
        text opened at the row's page and line. The decision goes into the
        row's Fix? cell exactly as PDF-Linker's Apply Leak Fixes reads it. -->
-  <div id="leaks-bar" hidden>
+  <div id="leaks-bar" class="revbar" hidden>
     <div class="lb-row">
       <span id="lb-count" class="lb-count"></span>
       <span id="lb-type" class="lb-type"></span>
@@ -63,6 +63,31 @@
       <button id="lb-clear" class="secondary" title="Clear the cell — decide later">clear</button>
     </div>
   </div>
+
+  <!-- The names the key binds that the run left standing in the text. The same
+       bar the LEAKS worksheet gets, for the case folder that has no worksheet:
+       one name at a time, where it stands, and what may be done with it. -->
+  <div id="names-bar" class="revbar" hidden>
+    <div class="lb-row">
+      <span id="nb-count" class="lb-count"></span>
+      <span class="lb-type leak">unfaked</span>
+      <b id="nb-value" class="lb-value" title="A real name from the key, standing in the clear"></b>
+      <span id="nb-where" class="lb-where"></span>
+      <span class="spacer"></span>
+      <button id="nb-prev" title="The one before it, up the document (Shift+Alt+L)">‹</button>
+      <button id="nb-next" title="The next one, down the document (Alt+L)">›</button>
+      <button id="nb-find" title="Scroll back to it">Find in text</button>
+      <button id="nb-close" title="Hide the bar — the names stay marked, and the count in the status bar brings it back">×</button>
+    </div>
+    <div class="lb-row lb-decide">
+      <span class="tb-label">Leave it?</span>
+      <span id="nb-answer" class="lb-answer"></span>
+      <button id="nb-here">keep just this one</button>
+      <button id="nb-no">keep in this case</button>
+      <button id="nb-never">never fake it anywhere</button>
+      <button id="nb-skip" class="secondary">leave it — the save writes the pseudonym</button>
+    </div>
+  </div>
   <div id="key-offer" hidden><span id="key-offer-text"></span><button id="key-offer-btn" class="primary"></button><button id="key-offer-close" title="Dismiss">×</button></div>
 
   <div id="main">
@@ -81,22 +106,17 @@
           <input id="font-custom" type="text" placeholder="font-family…" title="Any installed font, as a CSS font-family" hidden>
         </div>
         <div class="tool-row">
-          <span class="tool-row-label">Size</span>
+          <span class="tool-row-label" title="The type on the page. The sheet is always a page: the type gives, never the paper.">Size</span>
           <span class="tool-stepper">
             <button id="size-down" title="Smaller text (Ctrl+wheel, Ctrl+minus)">A−</button>
             <span id="size-label" class="tb-value">15</span>
-            <button id="size-up" title="Larger text (Ctrl+wheel, Ctrl+plus; Ctrl+0 for the default) — the words only, never the toolbar and panels">A+</button>
+            <button id="size-up" title="Larger text (Ctrl+wheel, Ctrl+plus; Ctrl+0 for the default) — the words only: never the toolbar and panels, and never the width of the page">A+</button>
           </span>
         </div>
         <div class="tool-row">
           <label class="tool-row-label" for="lh-range">Leading</label>
           <input id="lh-range" type="range" min="1" max="2.4" step="0.1" title="Leading (line spacing), remembered as the default for every text file">
         </div>
-        <div class="tool-row">
-          <label class="tool-row-label" for="width-range">Width</label>
-          <input id="width-range" type="range" min="480" max="1400" step="20" title="Page width">
-        </div>
-        <label class="tool-btn tool-toggle" title="Keep every numbered line on one screen line: the page is made as wide as its longest line needs at your size, scrolling sideways past the window if it must — the font and the line numbers are never touched (remembered)"><input id="lock-toggle" type="checkbox"><span class="ti">🔒</span><span class="tl">Line lock</span></label>
 
         <div class="tools-group-label">Pseudonyms</div>
         <div class="tool-row stack">
