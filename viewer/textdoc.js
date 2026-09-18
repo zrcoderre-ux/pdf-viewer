@@ -20,9 +20,10 @@
 //   textOf          the same walk for what the page DISPLAYS.
 //   findRealsInPlain   real values standing in the editable plain text — the
 //       ones a save has to turn back into fakes, and the ones to warn about.
-//   formatValuesFile / parseValuesFile / addValue   the New Real Values.txt
-//       list: names the operator flagged as unfaked, handed to PDF-Linker
-//       for its next pass over the folder.
+//   formatValuesFile / parseValuesFile / addValue / dropFlagsInKey   the New
+//       Real Values.txt list: names the operator flagged as unfaked, handed to
+//       PDF-Linker for its next pass over the folder, and dropped again once a
+//       key comes back with them in it.
 //   isExportName / isKeyName   which files in a case folder are documents.
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
@@ -473,6 +474,27 @@ export function addValue(list, value) {
 export function removeValue(list, value) {
   const k = foldKey(value);
   return (list || []).filter((x) => foldKey(x) !== k);
+}
+
+/**
+ * The flagged values a key now FAKES, split off from the ones it does not.
+ *
+ * A flag is a job handed to PDF-Linker: this name was left in the clear, fake
+ * it on the next run. The next run's key comes back with the name in it, and
+ * the job is done — the value is a pseudonym everywhere the run reached, and a
+ * list that still carries it hands the same job over again and again.
+ *
+ * The test is the key's FORWARD side, over the whole value: a row for the
+ * value itself (an alt spelling counts, being forward-only by design), not a
+ * row for something inside it. The key binding "David" does not pseudonymize
+ * the flagged "David W. Slayton" — half the name would still be standing —
+ * so that flag stays. A value the operator has KEPT is not in the forward
+ * side at all and stays flagged for the same reason: nothing has faked it.
+ */
+export function dropFlagsInKey(list, compiledForward) {
+  const kept = [], dropped = [];
+  for (const v of list || []) (fakeFor(compiledForward, v) ? dropped : kept).push(v);
+  return { kept: dropped.length ? kept : (list || []).slice(), dropped };
 }
 
 export function formatValuesFile(values, keeps) {

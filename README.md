@@ -747,7 +747,16 @@ app, which routes it to the reader tab.
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
   panel listing them once. A cite that wraps onto a numbered line is read
-  across the gutter number, as `pdf_linker.py` reads it.
+  across the gutter number, as `pdf_linker.py` reads it. **Side by side, the
+  links are off.** A page laid on its PDF's grid has every line positioned and
+  sized on its own, and an underline is a strip measured off the line it sits
+  under — measured against a body the grid has shifted under the page,
+  re-measured as each PDF's sizes arrive and after every pass, and landing
+  beside the words as often as under them. The links are for reading the text;
+  side by side is for checking it against the PDF. The authorities are still
+  read, so **§ Authorities** fills as always and a cite opened from the panel
+  opens the same page; the status bar says the links are off, and they come
+  back when the panes close.
 - **A name wrapped across lines is one name.** A pseudonym or a real value
   whose halves sit on two numbered lines — the line break, the next line's
   gutter number and any blank line between — is matched as one: the reader
@@ -993,19 +1002,28 @@ app, which routes it to the reader tab.
 - **Flag what the run missed — and un-flag what it got wrong.** The point of
   reading the real names is to spot the ones that are *not* marked. Select
   such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the
-  **Flagged** panel collects them and **Save list to case folder** writes
-  `New Real Values.txt` beside the key, which PDF-Linker reads on its next
-  run — and on Apply Leak Fixes — as if each line had been given with
-  `--term`. The opposite mistake, a value that should never have been faked
-  (a word of a cited decision's name, usually), is **right-clicked**: "Keep in
-  this case" is PDF-Linker's `no`, "Never fake it anywhere" its `never`. The
-  keep takes effect in the reader **at once** — every occurrence loses its
-  highlight and shows a dotted underline, the tooltip says the file still
-  carries the fake, and a save neither rewrites the kept value to its fake nor
-  refuses over it — and goes into the same file as a `no: VALUE` / `never:
-  VALUE` line, which PDF-Linker reads as the worksheet's own decision on the
-  run that actually restores the files. The **Flagged** panel lists both
-  kinds, each withdrawable.
+  **Flagged** panel collects them and **Save list to case folder** writes `New
+  Real Values.txt` beside the key, which PDF-Linker reads on its next run —
+  and on Apply Leak Fixes — as if each line had been given with `--term`. **A
+  flag the run has answered comes off the list.** The flag is a job: this name
+  is in the clear, fake it. When the key comes back with the name in it — the
+  folder opened after a run, a key chosen by hand — the job is done, and the
+  value is dropped from the **Flagged** panel (the reader says which), takes
+  its red mark off the text, and stops being handed over in the next `New Real
+  Values.txt` — and a `New Real Values.txt` on disk still listing it from
+  before the run does not bring it back. The whole value has to be in the key:
+  a key that binds "David" has not pseudonymized a flagged "David W. Slayton",
+  half of which would still be standing, and a value **kept** is not in the
+  key's forward side at all — both stay flagged. The opposite mistake, a value
+  that should never have been faked (a word of a cited decision's name,
+  usually), is **right-clicked**: "Keep in this case" is PDF-Linker's `no`,
+  "Never fake it anywhere" its `never`. The keep takes effect in the reader
+  **at once** — every occurrence loses its highlight and shows a dotted
+  underline, the tooltip says the file still carries the fake, and a save
+  neither rewrites the kept value to its fake nor refuses over it — and goes
+  into the same file as a `no: VALUE` / `never: VALUE` line, which PDF-Linker
+  reads as the worksheet's own decision on the run that actually restores the
+  files. The **Flagged** panel lists both kinds, each withdrawable.
 - **A keep stays visible.** A value kept is a decision, and with the orange
   mark gone (it is not a leak any more) nothing used to say so — the name read
   like any other word, and a page read a week later gave no sign which names
