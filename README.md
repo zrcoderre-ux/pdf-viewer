@@ -682,7 +682,12 @@ app, which routes it to the reader tab.
   that one document **is** every export and opens alone rather than as forty
   tabs of the same thing; past a handful of separate exports the rest is
   offered rather than assumed, and either way every document is listed in each
-  reader's own Documents panel, one click away.
+  reader's own Documents panel, one click away. **Files still open as files**,
+  by every route they ever did: the **+** tab and the empty page's own click
+  (a multi-select picker), a drop anywhere on the window, and the system's
+  own "open with" — `.pdf`, `.txt` and a quarantined `.txt.LEAK` alike. A
+  folder picked with no exports in it offers the file picker rather than
+  leaving a dead end.
 - **The tools stand down the left margin.** The reading, pseudonym, review and
   PDF tools are in a **Tools** panel on the left — the same rail the PDF viewer
   carries — in labelled groups: *Reading* (font, size, leading, width, line

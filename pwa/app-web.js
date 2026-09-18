@@ -233,7 +233,11 @@ async function pickCaseFolder() {
   docs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   if (combined) docs = [combined].concat(docs);
   if (!docs.length) {
-    alert("No text exports in " + dir.name + (textDir ? "" : " — and no " + TEXT_SUBFOLDER + " folder in it."));
+    // Pointed at a folder that holds no exports, the app is still an app for
+    // opening files: say what was not there and offer the file picker rather
+    // than leaving a dead end behind the alert.
+    if (confirm("No text exports in " + dir.name + (textDir ? "" : " — and no " + TEXT_SUBFOLDER + " folder in it.")
+      + "\n\nOpen files instead?")) pickFiles();
     return;
   }
   // The combined file is the whole matter in one document; open it alone.
