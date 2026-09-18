@@ -788,19 +788,21 @@ function keyLessKeeps(k) {
 // An occurrence of a kept value is blanked (same length, a non-word
 // character) before the forward side looks at the text, so a kept
 // "Helen Rasho" is not rewritten through its own "Helen" and "Rasho" rows.
-// One matcher per set of keeps, not per call: the master workbook can hold
-// hundreds of values, the matcher over them is a big alternation to compile,
-// and a save or a repaint asks for it once per page. Both lists are replaced
-// rather than edited in place whenever they change, so their identity is the
-// whole test.
-let keptRxMemo = { keeps: null, master: null, rx: null };
-function keptMatcher() {
-  if (keptRxMemo.keeps !== keeps || keptRxMemo.master !== masterKeeps) {
-    const kept = allKeeps();
-    keptRxMemo = { keeps, master: masterKeeps, rx: kept.length ? PK.buildMatcher(kept.map((k) => k.value)) : null };
-  }
-  return keptRxMemo.rx;
-}
+//
+// ONLY THE KEEPS THE KEY BINDS. A keep exists to stop a value being faked,
+// and a value the key does not bind was never going to be: the master
+// workbook carries the settled decisions of every other matter — "Court",
+// "Clerk", "County", a hundred names from cases this one has nothing to do
+// with — and blanking those changes nothing at all, the forward side having
+// no row that could reach them. What it costs is real: an alternation over
+// hundreds of values, compiled and run over every page on every save and
+// every repaint. So the matcher is the keeps that do work, which is the same
+// list the marks are drawn from (keptMarkMatcher, one and the same now).
+//
+// One matcher per set of keeps, not per call. Both lists are replaced rather
+// than edited in place whenever they change, and so is the key, so their
+// identity is the whole test.
+function keptMatcher() { return keptMarkMatcher(); }
 // Does a kept value carry anything the key binds? `reals` cannot answer it —
 // the kept values are taken out of the key's forward side, which is the whole
 // point of a keep — so the question goes to the key's own warning rows, every
@@ -827,13 +829,12 @@ function keyBinds(value) {
   }
   return keyBindsMemo.seen.get(v);
 }
-// The keeps worth MARKING: the ones the key binds. A keep is worth seeing
-// because it says "this name was left alone on purpose" — which only means
-// something where the name would otherwise have been faked or flagged. The
-// master workbook carries the settled decisions of every other matter too
-// ("Court", "Clerk", "County"), and marking those here would underline half
-// the page to no purpose: nothing was ever going to flag them in this case.
-// Masking (see maskKept) still covers every keep; only the marks are narrowed.
+// The keeps that DO WORK: the ones the key binds. A keep is worth seeing —
+// and worth blanking the text for — because it says "this name was left alone
+// on purpose", which only means something where the name would otherwise have
+// been faked or flagged. Marking the rest would underline half the page to no
+// purpose, and masking the rest is work done to prevent something that was
+// never going to happen.
 let keptMarkMemo = { keeps: null, master: null, key: null, rx: null };
 function keptMarkMatcher() {
   if (keptMarkMemo.keeps !== keeps || keptMarkMemo.master !== masterKeeps || keptMarkMemo.key !== key) {
@@ -3835,11 +3836,18 @@ function renderMaster() {
     hint.textContent = "No master workbook attached. PDF-Linker's own (Master Leaks.xlsx) holds a KEEP sheet of every value you have said to leave alone; attached here, the reader stops flagging them as leaks — in this case and every other.";
     return;
   }
+  // WHAT IS WORTH SAYING is what the workbook is HOLDING: a standing keep the
+  // key binds, standing in this document, which the run would otherwise have
+  // faked. The rest of the workbook — the settled decisions of every other
+  // matter — does no work here and is not a list worth reading: it is a
+  // number, and the button to load another.
   const here = masterKeeps.filter((k) => keptSeen.has(TD.foldValue(k.value)));
-  hint.textContent = `${masterInfo.name} · ${masterKeeps.length} standing keep${masterKeeps.length === 1 ? "" : "s"}`
-    + (masterInfo.partial ? `, ${masterInfo.partial} of part of a value left to PDF-Linker` : "")
-    + (masterInfo.loose ? " (this session only — choose it with the button to keep it attached)" : "")
-    + (here.length ? ` · ${here.length} standing in this document:` : " · none of them stands in this document.");
+  hint.textContent = (here.length
+    ? `${here.length} value${here.length === 1 ? "" : "s"} held against the key here, by ${masterInfo.name}:`
+    : `${masterInfo.name} holds nothing the key would fake in this document.`)
+    + (masterInfo.partial ? ` (${masterInfo.partial} of part of a value left to PDF-Linker.)` : "")
+    + (masterInfo.loose ? " This session only — choose it with the button to keep it attached." : "");
+  hint.title = `${masterKeeps.length} standing keep${masterKeeps.length === 1 ? "" : "s"} in all; the others name nothing this key binds.`;
   for (const k of here.slice(0, 60)) {
     const li = document.createElement("li");
     li.textContent = k.value;

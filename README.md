@@ -1188,29 +1188,18 @@ app, which routes it to the reader tab.
   Slayton" where the key binds "David", and that keep is worth seeing exactly
   because the "David" inside it would otherwise have been faked. (Masking is
   untouched and still covers every keep; only the marks are narrowed.)
-- **The master workbook's keeps, in force everywhere.** PDF-Linker keeps one
-  workbook across every matter — `Master Leaks.xlsx`, wherever
-  `master_leaks_path` points — and its **KEEP sheet** is the settled answer to
-  "leave this alone": the Clerk's own name, a cited decision's party, every
-  value already ruled on, with its Times Seen and the folders it has protected.
-  **Load master workbook…** (the Flagged panel) reads that sheet and holds
-  those values kept **without being asked again** — they are not flagged as
-  leaks, not rewritten to a pseudonym on save, and marked like any other keep,
-  in this case and every other. The workbook is **chosen once**: the browser
-  will not read a path on its own, so its handle is remembered (as case folders
-  are) and attached by every reader tab at startup; when the browser wants the
-  grant renewed, the panel offers it in one click rather than asking silently.
-  Dropping the workbook on the reader attaches it for the session. The panel
-  says how many standing keeps are in force and lists **the ones standing in
-  the open document** — the values it would otherwise have flagged. Only keeps
-  of a WHOLE value are applied: a bracketed spec that keeps part of a value
-  ("`[David]` W. Slayton") says that part stands inside that value, not that
-  the part stands everywhere, so those rows are counted and left to PDF-Linker
-  rather than widened into a rule the reader would apply to any "David". The
-  workbook's other sheet, the "Master Leaks" tally of genuine leaks, is not
-  read: it has no Fix? column, so the header rule passes over it. Nothing is
-  ever written back to it — withdrawing a standing keep is done in the
-  workbook, and the reader's right-click says so.
+- **The master workbook, where it is holding something.** PDF-Linker keeps one
+  workbook across every matter, whose KEEP sheet is every value you have ever
+  said to leave alone. Attached here, those keeps are in force in this case
+  too — but **only the ones the key binds are identified or shown**. A keep
+  exists to stop a value being faked, and a value this key does not bind was
+  never going to be: "Court", "Clerk", "County" and a hundred names from other
+  matters do no work here, and listing them would bury the handful that do.
+  The panel says what the workbook is **holding against the key in this
+  document** and keeps the total as a tooltip; the marks over the text are the
+  same handful; and the blanking that protects a keep from the forward pass is
+  narrowed to them as well, which takes an alternation over hundreds of values
+  out of every save and every repaint.
 - **Or keep it at one place only.** Both of those keeps are decisions about a
   *value*, and neither fits the name on every document: the Clerk's own
   signature block. Fake the "David" of *David W. Slayton* and the pseudonym
