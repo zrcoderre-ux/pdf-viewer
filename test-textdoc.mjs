@@ -10,7 +10,7 @@ import {
   markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
-  serializeHeld, blankRanges, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
+  serializeHeld, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape,
@@ -212,6 +212,34 @@ check("the fake for one value, in its own case", [fakeFor(fwd, "Helen Rasho"), f
   ["Ingrid Strangeways", "INGRID STRANGEWAYS", "Strangeways"]);
 check("a value the key does not bind has no fake", fakeFor(fwd, "Slayton"), null);
 check("no key, no fake", fakeFor(null, "Helen Rasho"), null);
+
+// ---- the names of decided cases ------------------------------------------------------
+console.log("cited case names");
+{
+  const spans = (t) => citedNameSpans(t).map(([a, b]) => t.slice(a, b));
+  const T = "Served on Helen Rasho at home. See Rasho v. Quillmark (1977) 70 Cal.App.3d 216, 219, "
+    + "and Semole v. Sansoucie, supra, 28 Cal.App.3d 714. Rasho, supra, at p. 220. "
+    + "The Rasho declaration says otherwise.";
+  check("a case name with its citation, a short form, and a party with supra",
+    spans(T), ["See Rasho v. Quillmark", "Semole v. Sansoucie", "Rasho"]);
+  const at = (t, w) => { const i = t.indexOf(w); return insideSpans(citedNameSpans(t), i, i + w.length); };
+  check("a party of a cited decision is inside one", at(T, "Rasho v. Quillmark"), true);
+  check("…and the same name in the matter's own text is not",
+    [at(T, "Helen Rasho"), at(T, "Rasho declaration")], [false, false]);
+  // THE CAPTION IS THE ONE THING THIS MUST NOT SWALLOW: a caption carries no
+  // reporter, and a leak in one is the leak that matters most.
+  check("a caption is not a citation, whatever it looks like",
+    spans("RASHO v. QUILLMARK, Defendant. Helen Rasho v. Quillmark Industries"), []);
+  check("…nor is a v. with nothing after it", spans("the Rasho v. Quillmark matter"), []);
+  check("the federal order — name, comma, volume, reporter",
+    spans("Eagle Electric v. Keener, 247 Cal.App.2d 246, 250"), ["Eagle Electric v. Keener"]);
+  check("vs. and a bare v are read the same",
+    [spans("Renoir vs. Redstar Corp. (2004) 123 Cal.App.4th 1145").length, spans("Renoir v Redstar (2004) 1 Cal.5th 1").length], [1, 1]);
+  check("nothing to find in plain prose, and nothing thrown by an empty text",
+    [spans("The declaration of Helen Rasho, served on Vazqez."), citedNameSpans(""), citedNameSpans(null)], [[], [], []]);
+  check("a value that STRADDLES a case name's edge is not inside it",
+    at("...said Rasho v. Quillmark (1977) 70 Cal.App.3d 216", "said Rasho"), false);
+}
 
 // ---- the values file ---------------------------------------------------------------
 console.log("values file");

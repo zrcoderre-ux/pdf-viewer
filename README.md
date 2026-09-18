@@ -848,8 +848,21 @@ app, which routes it to the reader tab.
   the reversal. The last few keys are remembered, so a lone `.txt` can be read
   under a key already loaded. A real name from the key standing **unfaked** in
   an export is counted in the status bar and underlined — that is a leak the
-  run missed. **The count opens a bar over the text**, the same one the LEAKS
-  worksheet gets: counting them is not finding them, and on a forty-page
+  run missed. **The names of decided cases are not.** Most of what a key
+  matches in a brief belongs to the decisions it cites, not to the matter: a
+  pleading names Slaybaugh, Semole and Renoir a dozen times each, and a key
+  that binds a surname of this case which happens to be one of theirs used to
+  mark every one of them, burying the leak that matters under a page of
+  orange. A case **name** carrying the **citation** that makes it one — a year
+  in parentheses, a volume and reporter, or *supra*, and the short form
+  "Semole, supra" with it — is read as a decision, and a bound value standing
+  inside it is that decision's party. It is not marked, and **the save writes
+  no pseudonym over it**, which is what would have put out a citation to a
+  case that does not exist. That was the classic **keep**, made automatic. The
+  citation is the whole test: a caption has no reporter, so "Rasho v.
+  Quillmark, Defendant" at the head of a pleading is still a leak — the one
+  that matters most. **The count opens a bar over the text**, the same one the
+  LEAKS worksheet gets: counting them is not finding them, and on a forty-page
   export they are wherever they are. Clicking it (or **Alt+L**, with **Shift**
   for the one before) goes to each in the order they stand in the document,
   marks it, and gives the decisions as buttons — **keep just this one**,

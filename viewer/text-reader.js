@@ -867,7 +867,12 @@ function maskKept(text) {
  * whose places in this very text the caller read off the page.
  */
 function forwardText(text, held) {
-  const runs = PK.forwardRuns(fwd, TD.blankRanges(maskKept(text), held || []));
+  // The names of decided cases are blanked with the keeps: a party of a
+  // decision this brief cites is that decision's, not this matter's, and a
+  // save that wrote a pseudonym over it would put out a citation to a case
+  // that does not exist (textdoc.citedNameSpans).
+  const spared = (held || []).concat(TD.citedNameSpans(text));
+  const runs = PK.forwardRuns(fwd, TD.blankRanges(maskKept(text), spared));
   let off = 0, swaps = 0;
   const out = runs.map((r) => {
     const len = r.t === "swap" ? r.from.length : r.s.length;
@@ -2389,7 +2394,7 @@ async function saveDocument() {
     const held = TD.serializeExport(Object.assign({}, doc, {
       pages: doc.pages.map((p, i) => Object.assign({}, p, { lines: scan[i] || p.lines })),
     }));
-    const left = PK.findReals(reals, maskKept(held));
+    const left = PK.findReals(reals, TD.blankRanges(maskKept(held), TD.citedNameSpans(held)));
     if (left.length) {
       toast("Not saved: the text still carries a real name the key binds — " + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again.", { error: true });
       return;
@@ -2865,10 +2870,15 @@ async function scanPassNow(pass) {
     if (reals) {
       const { text, segs } = flat;
       const masked = maskKept(text);
+      // Most of what a key matches in a brief belongs to the decisions it
+      // cites, not to this matter. Those are not leaks and are not marked:
+      // see textdoc.citedNameSpans, which the save reads the same way.
+      const cited = TD.citedNameSpans(text);
       let at = 0;
       for (;;) {
         const { spans, next } = PK.findRealSpansFrom(reals, masked, at, HANDFUL);
         for (const h of spans) {
+          if (TD.insideSpans(cited, h.start, h.end)) continue; // a cited decision's party
           const r = rangeFor(segs, h.start, h.end);
           if (!r) continue;
           leakRanges.push(r);
