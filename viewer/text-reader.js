@@ -1127,7 +1127,7 @@ async function adoptFolderNow(h, { quiet = false } = {}) {
       const parsed = await attachLeaks(new Uint8Array(await f.arrayBuffer()), f.name, found.leaksHandle, { quiet: true, folder: folderName });
       if (parsed && !quiet) {
         const und = LK.undecidedCount(parsed.rows);
-        toast(`${f.name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}` + (und ? `, ${und} undecided — ⚠ Leaks to review them.` : ", every row decided."));
+        toast(`${f.name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}` + (und ? `, ${und} to answer — ⚠ Leaks to review them.` : ", every row answered."));
       }
     } catch (e) { toast("The folder's LEAKS.xlsx could not be read: " + (e.message || e), { error: true }); }
   } else if (leaks && leaks.folder && leaks.folder !== folderName) {
@@ -1512,8 +1512,31 @@ function buildBody(body, text, page, theirSpots) {
     });
     lineStart = r.s.endsWith("\n") || (lineStart && r.s === "");
   });
-  dressLines(body);
+  dressBody(body);
 }
+// PDF-Linker ends an export with a trailer of its own: a
+// "====== Authorities cited (public verification links) ======" rule and a
+// line per authority with its verification URL. It is part of the FILE — it
+// round-trips, it saves, it is translated under the key like everything else
+// — and no part of the filed document: the PDF beside it has no such page,
+// and a tail the PDF never had pushes the last sheet out of the shape the
+// rest of them hold. So the lines are marked here and hidden by the
+// stylesheet while the PDF pane is open. Marked, never removed: the file
+// still carries it and a save still writes it.
+const TRAILER_RE = /^\s*=+\s*Authorities cited\b.*?=+\s*$/i;
+function markTrailer(body) {
+  let inside = false;
+  for (const line of body.querySelectorAll(":scope > .line")) {
+    if (!inside && TRAILER_RE.test(line.textContent)) inside = true;
+    line.classList.toggle("trailer", inside);
+  }
+}
+/** Everything a rebuilt page body needs before it is measured: the boxes, then the trailer. */
+function dressBody(body) {
+  dressLines(body);
+  markTrailer(body);
+}
+
 /** The gutter span: the number (shown in the margin) and the spacing after it (kept, not shown). The numbers are fixed: the span takes no edit. */
 function makeGutter(prefix) {
   const m = prefix.match(/^( ?\d{1,2})( *)$/) || [null, prefix, ""];
@@ -1834,7 +1857,7 @@ function enterAtCaret(body, { snap = true } = {}) {
       if (!target) target = foot;
     }
   }
-  dressLines(body);
+  dressBody(body);
   fixGutterSpacing(body);
   placeCaret(ltOf(target), 0);
   setDirty(true);
@@ -1897,7 +1920,7 @@ function insertLinesAtCaret(body, pieces) {
       if (i === frags.length - 1) caretSlot = slot;
     });
   }
-  dressLines(body);
+  dressBody(body);
   fixGutterSpacing(body);
   if (caretNode) placeCaret(caretNode, caretNode.data.length);
   else if (caretSlot) placeCaret(ltOf(caretSlot), 0);
@@ -1928,7 +1951,7 @@ function joinLineUp(body, line) {
       cur = next;
     }
   }
-  dressLines(body);
+  dressBody(body);
   fixGutterSpacing(body);
   const at = pointAtOffset(plt, joinAt);
   placeCaret(at.node, at.offset);
@@ -2380,6 +2403,11 @@ async function writeText(text, name, handle) {
 // between them. Display only: the settings keep the width the reader
 // chose, and the effective width lives in a CSS variable the pages read.
 function applyLineLock() {
+  applyLineLockNow();
+  // The page shape is the width's, and the lock is what settles the width.
+  shapePages();
+}
+function applyLineLockNow() {
   const root = document.documentElement.style;
   root.setProperty("--reader-size-eff", settings.fontSize + "px");
   root.setProperty("--reader-width-eff", settings.pageWidth + "px");
@@ -3535,7 +3563,7 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" 
   else paintHighlights();
   warmForLeaks();
   const und = LK.undecidedCount(parsed.rows);
-  if (!quiet) toast(`${name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}, ${und} undecided` + (remembered ? `, ${remembered} decided here and not yet saved` : "") + " — ⚠ Leaks to review them.");
+  if (!quiet) toast(`${name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}, ${und} to answer` + (remembered ? `, ${remembered} answered here and not yet saved` : "") + " — ⚠ Leaks to review them.");
   return parsed;
 }
 function dropLeaks() {
@@ -3554,7 +3582,7 @@ function updateLeaksButton() {
   const badge = $("leaks-count");
   badge.hidden = !leaks;
   badge.textContent = String(LK.undecidedCount(rows));
-  badge.title = leaks ? `${LK.undecidedCount(rows)} of ${rows.length} rows undecided` : "";
+  badge.title = leaks ? `${LK.undecidedCount(rows)} of ${rows.length} rows still to answer` : "";
   $("leaks-btn").setAttribute("aria-pressed", String(!leaksBar.hidden));
   $("leaks-tab-count").textContent = String(rows.length);
 }
@@ -3648,8 +3676,8 @@ function renderLeaksBar() {
   const und = LK.undecidedCount(rows);
   // The walk is a document at a time, so how many are left in THIS one is
   // what says when the review moves on to the next.
-  const here = rows.filter((r) => LK.fold(LK.rowFile(r)) === LK.fold(LK.rowFile(row)) && !LK.fold(r.fix)).length;
-  $("lb-count").textContent = `Row ${leaks.at + 1} of ${rows.length}` + (und ? ` · ${und} undecided` : " · all decided")
+  const here = rows.filter((r) => LK.fold(LK.rowFile(r)) === LK.fold(LK.rowFile(row)) && LK.isPending(r)).length;
+  $("lb-count").textContent = `Row ${leaks.at + 1} of ${rows.length}` + (und ? ` · ${und} to answer` : " · all answered")
     + (und && here && here !== und ? ` (${here} in this document)` : "");
   const tt = $("lb-type");
   tt.textContent = row.type || "review";
@@ -3673,9 +3701,15 @@ function renderLeaksBar() {
   }
   $("lb-notes").textContent = row.notes || "";
   const c = LK.classifyFix(row.fix, row.value);
+  const sug = LK.isSuggested(row);
   const ans = $("lb-answer");
-  ans.textContent = c.label + (row.fix !== row.fix0 ? " (unsaved)" : "");
-  ans.className = "lb-answer" + (c.kind ? "" : " undecided");
+  ans.textContent = c.label
+    + (sug ? " — PDF-Linker's own reading, not yet accepted" : "")
+    + (row.fix !== row.fix0 ? " (unsaved)" : "");
+  // A pre-filled cell reads as answered and is not: it is marked like an empty
+  // one until the operator has said so.
+  ans.className = "lb-answer" + (c.kind && !sug ? "" : " undecided");
+  $("lb-accept").hidden = !sug;
   for (const b of leaksBar.querySelectorAll("button[data-fix]")) b.classList.toggle("on", c.kind === b.dataset.fix);
   const typed = $("lb-typed");
   if (document.activeElement !== typed) typed.value = LK.CONTROLS.includes(c.kind) || !c.kind ? "" : row.fix;
@@ -3705,16 +3739,17 @@ function paintLeakRow(i) {
   if (!li || !r) return;
   li.classList.toggle("current", i === (leaks ? leaks.at : -1));
   const c = LK.classifyFix(r.fix, r.value);
+  const sug = LK.isSuggested(r);
   const f = li.lastElementChild;
-  f.className = "tag fix " + (c.kind ? (LK.isKeepKind(c.kind) ? "no" : "") : "open");
-  f.textContent = c.kind ? (LK.CONTROLS.includes(c.kind) ? c.kind : c.kind === "error" ? "?" : "typed") : "?";
-  f.title = c.label + (r.fix !== r.fix0 ? " (unsaved)" : "");
+  f.className = "tag fix " + (c.kind && !sug ? (LK.isKeepKind(c.kind) ? "no" : "") : "open");
+  f.textContent = sug ? "~?" : c.kind ? (LK.CONTROLS.includes(c.kind) ? c.kind : c.kind === "error" ? "?" : "typed") : "?";
+  f.title = c.label + (sug ? " — PDF-Linker's own reading, not yet accepted" : "") + (r.fix !== r.fix0 ? " (unsaved)" : "");
 }
 /** The hint, the note and the save button — what every decision changes. */
 function renderLeaksTabState() {
   const rows = leakRows();
   $("leaks-hint").textContent = leaks
-    ? `${leaks.name}${leaks.folder ? " · " + leaks.folder : ""} · ${rows.length} row${rows.length === 1 ? "" : "s"}, ${LK.undecidedCount(rows)} undecided. Click a row: the text opens at it.`
+    ? `${leaks.name}${leaks.folder ? " · " + leaks.folder : ""} · ${rows.length} row${rows.length === 1 ? "" : "s"}, ${LK.undecidedCount(rows)} to answer. Click a row: the text opens at it.`
     : "Open a case folder with a LEAKS.xlsx in it, or load one, to review its rows here.";
   $("leaks-actions").hidden = !leaks;
   const n = rows.filter((r) => r.fix !== r.fix0).length;
@@ -3889,7 +3924,28 @@ function decideLeak(text, { advance = false } = {}) {
   if (!advance) return;
   const n = LK.nextUndecided(leakRows(), leaks.at);
   if (n >= 0 && n !== leaks.at) goToLeak(n);
-  else if (n < 0) toast("Every row is decided — save the worksheet, then Apply Leak Fixes.");
+  else if (n < 0) toast("Every row is answered — save the worksheet, then Apply Leak Fixes.");
+}
+
+/**
+ * Accept the row as the sheet arrived: PDF-Linker's reading stands, and the
+ * row stops coming back. Nothing is written to the workbook — the cell already
+ * says this — so the acceptance is remembered here, with the decisions.
+ */
+function acceptLeak() {
+  if (!leaks || leaks.at < 0) return;
+  const row = leakRows()[leaks.at];
+  if (!LK.isSuggested(row)) return;
+  row.ok = true;
+  persistLeaks();
+  renderLeaksBar();
+  paintLeakRow(leaks.at);
+  renderLeaksTabState();
+  updateLeaksButton();
+  warmForLeaks();
+  const n = LK.nextUndecided(leakRows(), leaks.at);
+  if (n >= 0 && n !== leaks.at) goToLeak(n);
+  else if (n < 0) toast("Every row is answered — save the worksheet, then Apply Leak Fixes.");
 }
 
 /** Write the decisions into the workbook: the same file, the Fix? cells changed, read back before it is written. */
@@ -3927,7 +3983,7 @@ async function saveLeaks() {
   for (let i = 0; i < leakLis.length; i++) paintLeakRow(i);
   renderLeaksTabState();
   const und = LK.undecidedCount(leaks.parsed.rows);
-  toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still undecided` : "") + ". Double-click Apply Leak Fixes.bat (or re-run PDF-Linker) to apply them to the files.", { ms: 6000 });
+  toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still to answer` : "") + ". Double-click Apply Leak Fixes.bat (or re-run PDF-Linker) to apply them to the files.", { ms: 6000 });
 }
 
 /** Write bytes: in place through the handle, else the Save picker, else a download. */
@@ -4001,6 +4057,7 @@ $("leaks-load").addEventListener("click", pickLeaks);
 $("lb-prev").addEventListener("click", () => goToLeak(leaks.at - 1));
 $("lb-next").addEventListener("click", () => goToLeak(leaks.at + 1));
 $("lb-next-open").addEventListener("click", () => { const n = LK.nextUndecided(leakRows(), leaks.at); if (n >= 0) goToLeak(n); });
+$("lb-accept").addEventListener("click", acceptLeak);
 $("lb-find").addEventListener("click", () => { if (leaks && leaks.at >= 0) locateLeak(leakRows()[leaks.at]); });
 $("lb-save").addEventListener("click", saveLeaks);
 $("leaks-save").addEventListener("click", saveLeaks);
@@ -4022,6 +4079,7 @@ document.addEventListener("keydown", (e) => {
   if (!e.altKey || e.ctrlKey || e.metaKey) return;
   if (e.key === "ArrowDown") { e.preventDefault(); goToLeak(leaks.at + 1); }
   else if (e.key === "ArrowUp") { e.preventDefault(); goToLeak(leaks.at - 1); }
+  else if (!typing && e.key.toLowerCase() === "a") { e.preventDefault(); acceptLeak(); }
   else if (!typing && e.key.toLowerCase() === "y") { e.preventDefault(); decideLeak("yes", { advance: true }); }
   else if (!typing && e.key.toLowerCase() === "n") { e.preventDefault(); decideLeak("no", { advance: true }); }
 });
@@ -4380,7 +4438,7 @@ function updatePdfStatus() {
 // pages is named in the rows before the operator reaches any of them. So the
 // reader goes and gets them. With a worksheet attached, the rows are read in
 // the order the review will reach them (leaks.leakPages: the row in front,
-// the undecided rows after it, then the rest), each row's PDF is opened, and
+// the rows still to answer after it, then the rest), each row's PDF is opened, and
 // its own page is drawn into a bitmap held ready. A slot coming into view
 // paints that bitmap at once — the page is THERE, where a "Loading…" box used
 // to stand — and pdf.js, which by then holds the page, its fonts and its
@@ -5290,6 +5348,8 @@ function applyMatchedLayoutNow() {
       over = overflow();
     }
   }
+  // The sheets take their page shape before anything reads their heights.
+  shapePages();
   // A text page with NO PDF page keeps the pane level with it. A combined file
   // always has two kinds: its own contents page at the top, and a banner page
   // before each member — and each of those used to stand beside a stub of a
@@ -5314,9 +5374,148 @@ function applyMatchedLayoutNow() {
   fitRuleRows(pagesEl);
   textAnchors = null; textLineTops = null;
 }
+// ── the sheet as a page ──────────────────────────────────────────────────────
+//
+// A text page is a PAGE, and takes the shape of the PDF page it came from. An
+// export's sheets used to be as tall as their words and no taller: a caption
+// page half the height of the one after it, a short exhibit page a strip, a
+// banner page a band — a stack of notes rather than a document, and, beside a
+// PDF whose pages are all one size, two columns that agreed about nothing.
+// Each sheet now takes its PDF page's PROPORTIONS at the width the reader is
+// set to. The words are untouched: they flow as they always did, in the
+// reader's own type at the reader's own width, and it is the paper under them
+// that becomes the paper the thing was filed on.
+//
+// A FLOOR, NEVER A CEILING. A page whose text wants more room than its shape
+// gives it — a large reading size against a dense page — grows, because the
+// words come first and the alternative is to hide some of them.
+//
+// Where a PDF page's own size is not known, the document's prevailing shape
+// stands in, and US Letter portrait behind that: nothing is read from a PDF
+// until the pane is opened, and a page-shaped sheet is wanted before then. A
+// landscape exhibit therefore reads portrait until its PDF is opened, and
+// takes its own shape the moment the sizes land.
+const PAGE_RATIO = 792 / 612; // US Letter portrait: what a court filing is
+/** The height-over-width of the PDF page behind a text page, where it is known. */
+function pdfRatioOf(i) {
+  const t = pdfTarget(i);
+  const info = t && infoFor(t.src);
+  const sz = info && info.sizes[t.page - 1];
+  return sz && sz.w > 0 ? sz.h / sz.w : null;
+}
+/**
+ * The type sizes the PDF sets for one page's lines, put on the lines as
+ * multiples of the body size (`em`) so they ride both the reading size and
+ * the page's fit without being worked out again for either.
+ *
+ * Only where the PDF's rows have been read, and only on a page that VARIES: a
+ * pleading page is one size down its column, and what this is for is the page
+ * that is not — an order's caption, a heading, an exhibit's small print, a
+ * footnote. The grid does the same thing with the same two helpers, where it
+ * also has the positions to put the lines at.
+ *
+ * Once per page per state. The alignment is a diff of the page's lines against
+ * the PDF's rows, and a layout pass that ran it again for every page would be
+ * the whole cost of opening a long document.
+ */
+function applyPdfTypeSizes(sec, body) {
+  const t = pdfTarget(Number(sec.dataset.index));
+  const info = t && infoFor(t.src);
+  const rows = info ? info.rows[t.page - 1] : null;
+  const stamp = textEpoch + "|" + (rows ? info.name + "|" + t.page : "none");
+  if (sec.__typeStamp === stamp) return;
+  sec.__typeStamp = stamp;
+  const lines = [...body.querySelectorAll(":scope > .line")];
+  const base = rows && rows.length ? PS.pageTypeSize(rows) : null;
+  const lay = base && !body.classList.contains("numbered")
+    ? PS.rowLayout(lines.map((l) => l.textContent), rows)
+    : null;
+  const sizes = lay ? PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base) : null;
+  lines.forEach((l, k) => {
+    const h = sizes ? sizes[k] : null;
+    // Within a fiftieth of the body IS the body: a text layer's heights wobble.
+    const want = h && Math.abs(h - base) > base * 0.02 ? (h / base).toFixed(3) + "em" : "";
+    if (l.style.fontSize !== want) l.style.fontSize = want;
+  });
+}
+// How far the type may be taken down to make a page fit its shape, and how
+// many passes it gets. Past the floor the page grows instead: a sheet the
+// right shape with nothing legible on it is no use to anyone.
+const MIN_FIT = 0.5;
+const FIT_PASSES = 4;
+function shapePages() {
+  const secs = [...pagesEl.querySelectorAll(".tpage")];
+  // A page on the grid carries the PDF's own height and type already, and a
+  // swapped page IS the PDF page. A page still showing the export's trailer
+  // (the pane is closed, so nothing is clipped) is not one page of anything —
+  // it is the last page with an appendix stapled under it — and is left to
+  // flow rather than have the filing squeezed to make room for the links.
+  const clipped = document.body.classList.contains("sbs");
+  const shapes = [];
+  for (const sec of secs) {
+    const body = sec.querySelector(".page-body");
+    const loose = sec.classList.contains("matched") || sec.classList.contains("swapped")
+      || (!clipped && sec.querySelector(".line.trailer"));
+    if (loose) {
+      if (body.style.minHeight) body.style.minHeight = "";
+      if (sec.style.getPropertyValue("--fit")) sec.style.removeProperty("--fit");
+      continue;
+    }
+    shapes.push({ sec, body, ratio: pdfRatioOf(Number(sec.dataset.index)), fit: 1 });
+  }
+  if (!shapes.length) return;
+  const width = shapes[0].sec.clientWidth; // one read: every free sheet is this wide
+  if (!width) return;
+  // The shape for the pages with no PDF page of their own — a combined file's
+  // contents page, its banners, an export whose PDF is not open yet: the
+  // commonest of the shapes that ARE known, so the odd page out is the same
+  // paper as the filing around it.
+  const counts = new Map();
+  for (const s of shapes) if (s.ratio) counts.set(s.ratio, (counts.get(s.ratio) || 0) + 1);
+  let common = PAGE_RATIO, most = 0;
+  for (const [r, n] of counts) if (n > most) { most = n; common = r; }
+  for (const s of shapes) {
+    s.target = Math.round(width * (s.ratio || common));
+    const want = s.target + "px";
+    if (s.body.style.minHeight !== want) s.body.style.minHeight = want;
+    if (s.sec.style.getPropertyValue("--fit")) s.sec.style.removeProperty("--fit"); // measured at its own size first
+    applyPdfTypeSizes(s.sec, s.body);
+  }
+  // THE SHAPE IS A CEILING. A page whose words want more room than the PDF
+  // page gave them — the reading size is the reader's own, and the filing was
+  // set in whatever it was set in — is drawn smaller until they fit, the way
+  // the PDF itself is at that zoom. Display only: the file is one size, and
+  // the size in the Tools panel is still the size of a page that fits.
+  //
+  // Every page is measured, THEN every page is written. Shrinking one page and
+  // measuring the next lays the whole document out again for each page in
+  // turn, which on a long export is most of the time an open takes; this way
+  // a pass costs one layout however many pages there are. Four of them
+  // converge, the first guess always overshooting a little because the page's
+  // margins do not shrink with its type.
+  for (let pass = 0; pass < FIT_PASSES; pass++) {
+    const over = [];
+    for (const s of shapes) {
+      if (!(s.target > 0)) continue;
+      const h = s.body.scrollHeight;
+      if (h > s.target + 0.5) over.push([s, h]);
+    }
+    if (!over.length) break;
+    let moved = false;
+    for (const [s, h] of over) {
+      const want = Math.max(MIN_FIT, s.fit * (s.target / h));
+      if (want >= s.fit - 0.002) continue; // at the floor, or as close as it comes
+      s.fit = want;
+      s.sec.style.setProperty("--fit", want.toFixed(3));
+      moved = true;
+    }
+    if (!moved) break;
+  }
+}
 function clearMatched(sec) {
   if (!sec.classList.contains("matched")) return;
   sec.classList.remove("matched");
+  sec.__typeStamp = null; // the grid wrote the line sizes; the flowing pass owns them now
   sec.style.width = "";
   sec.style.removeProperty("--body-x");
   sec.querySelector(".page-inner").style.height = "";
