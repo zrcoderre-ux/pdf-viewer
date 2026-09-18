@@ -1147,15 +1147,21 @@ app, which routes it to the reader tab.
   neither rewrites the kept value to its fake nor refuses over it — and goes
   into the same file as a `no: VALUE` / `never: VALUE` line, which PDF-Linker
   reads as the worksheet's own decision on the run that actually restores the
-  files. The **Flagged** panel lists both kinds, each withdrawable. **A list
-  that has not been written is a closing prompt.** The flags and keeps are
-  remembered here whatever happens, so closing the tab loses nothing — but
-  remembered here is not handed over: PDF-Linker reads `New Real Values.txt`
-  in the case folder and nothing else. While what is in the panel differs from
-  what was last written, the panel says so and closing the tab asks first (the
-  same prompt an edited document or an unsaved LEAKS decision raises; the
-  browser's own dialog is all a page gets, and which of the three it is, the
-  panels say).
+  files. The **Flagged** panel lists both kinds, each withdrawable. **A save
+  of the document writes the list too.** The flags and keeps are half of the
+  same decision the document carries — a value kept is a value that save left
+  standing — so a **Save** (or Ctrl+S) that finds the list changed since it
+  was last written puts it into the case folder with the document and says so
+  in the same line. Without a folder there is nowhere to put it, and the save
+  says that instead of opening a picker nobody asked for. **A list that has
+  not been written is a closing prompt.** The flags and keeps are remembered
+  here whatever happens, so closing the tab loses nothing — but remembered
+  here is not handed over: PDF-Linker reads `New Real Values.txt` in the case
+  folder and nothing else. While what is in the panel differs from what was
+  last written, the panel says so and closing the tab asks first (the same
+  prompt an edited document or an unsaved LEAKS decision raises; the browser's
+  own dialog is all a page gets, and which of the three it is, the panels
+  say).
 - **A keep stays visible.** A value kept is a decision, and with the orange
   mark gone (it is not a leak any more) nothing used to say so — the name read
   like any other word, and a page read a week later gave no sign which names
