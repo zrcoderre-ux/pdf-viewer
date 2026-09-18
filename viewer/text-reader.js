@@ -1216,7 +1216,7 @@ async function attachKeyForFile(handle) {
   }
   const at = await caseFolderFor(handle);
   if (!at) {
-    if (!key) showKeyOffer("No key attached. Open this file's case folder once and its pseudonym_key.xlsx is attached automatically from then on.", "Open case folder…", openFolder);
+    if (!key) showKeyOffer("No key attached. Open this file's case folder once — the picker opens where the file is — and its pseudonym_key.xlsx is attached by itself from then on.", "Open case folder…", () => openFolder(handle || null));
     return;
   }
   const attach = async () => {
@@ -1304,14 +1304,43 @@ $("file-input").addEventListener("change", async () => {
   if (f) await openFile(f, null);
 });
 
-async function openFolder() {
+/**
+ * The case folder, picked.
+ *
+ * A page cannot walk UP from a file to the folder it sits in — the browser
+ * gives a file handle and nothing above it, and that is the whole reason this
+ * is a pick at all. What it can do is open the picker AT the file: `startIn`
+ * takes a handle, and for a file handle the picker opens in the folder
+ * holding it, so the case folder (or the Text Files folder it sits in) is
+ * already on screen and the pick is one click. After that the folder is
+ * remembered and every document under it attaches its key by itself.
+ */
+async function openFolder(startIn) {
   if (!window.showDirectoryPicker) { toast("This browser cannot open a folder; open a file instead.", { error: true }); return; }
   let h;
-  try { h = await window.showDirectoryPicker({ mode: "readwrite" }); }
-  catch (e) { if (e && e.name !== "AbortError") toast(String(e.message || e), { error: true }); return; }
+  const opts = { mode: "readwrite" };
+  if (startIn) opts.startIn = startIn;
+  else if (fileHandle) opts.startIn = fileHandle; // the folder this document is in
+  try { h = await window.showDirectoryPicker(opts); }
+  catch (e) {
+    if (e && e.name === "AbortError") return;
+    // An unusable startIn is not worth failing over: ask again without it.
+    if (opts.startIn) { try { h = await window.showDirectoryPicker({ mode: "readwrite" }); } catch (e2) { if (e2 && e2.name !== "AbortError") toast(String(e2.message || e2), { error: true }); return; } }
+    else { toast(String(e.message || e), { error: true }); return; }
+  }
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
   hideKeyOffer();
   const found = await adoptFolder(h);
+  // THE TEXT FILES FOLDER IS NOT THE CASE FOLDER. It is the easy mistake —
+  // the documents are in it, so it looks like the place — and everything that
+  // makes a case folder a case folder is one level up: the key, the PDFs, the
+  // LEAKS worksheet, the flagged list. The reader cannot step up on its own
+  // (no handle leads to its parent), so it says so and opens the picker there
+  // again, where the folder above is one click away.
+  if (looksLikeTextFiles(h, found)) {
+    showKeyOffer(`${h.name} is the folder the exports live in, not the case folder: the key, the PDFs and the worksheet are the level above it.`,
+      "Choose the folder above…", () => openFolder(h));
+  }
   if (folderDocs.length) {
     // A file already open from this folder just takes the key; otherwise the
     // quarantined export, the one to read, else the first.
@@ -1325,7 +1354,17 @@ async function openFolder() {
     toast("No text exports in " + folderName + (found.textDir ? "" : " (no Text Files folder)"), { error: true });
   }
 }
-$("open-folder").addEventListener("click", openFolder);
+$("open-folder").addEventListener("click", () => openFolder());
+
+/**
+ * Whether what was picked is the Text Files subfolder rather than the case
+ * folder: named as PDF-Linker names it, or carrying exports and none of the
+ * things that only a case folder has.
+ */
+function looksLikeTextFiles(h, found) {
+  if (h.name.toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) return true;
+  return !!found.rootDocs.length && !found.textDir && !found.keyHandle && !found.pdfs.length && !found.leaksHandle;
+}
 
 async function openFolderDoc(d) {
   try {
@@ -5578,7 +5617,7 @@ function buildPdfPane() {
     if (fn) fn.textContent = folderName;
     box.querySelector("button").addEventListener("click", pickPdf);
     const of = box.querySelector(".openfolder");
-    if (of) of.addEventListener("click", openFolder);
+    if (of) of.addEventListener("click", () => openFolder());
     pdfPane.appendChild(box);
     return;
   }
