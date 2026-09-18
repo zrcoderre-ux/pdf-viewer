@@ -2454,6 +2454,17 @@ async function saveDocument() {
       ? ` · ${TD.VALUES_FILE} written too (${flagged.length} to fake, ${keeps.length} to keep)`
       : " · the flagged list is still unwritten — no case folder is open, so save it from the Flagged panel";
   }
+  // …and the worksheet, for the same reason: the rows answered while reading
+  // this document are decisions about this document, and a decision left in
+  // the browser is one PDF-Linker's next run will not see. Written in place,
+  // through the worksheet's own handle or the case folder's; where there is
+  // neither there is nobody to write it for, and the save says so.
+  if (leaksDirty()) {
+    const n = await saveLeaks({ quiet: true, folderOnly: true });
+    alsoList += n
+      ? ` · ${leaks.name} written too (${n} decision${n === 1 ? "" : "s"})`
+      : " · the LEAKS decisions are still unwritten — save them from the ⚠ Leaks bar";
+  }
   // The save wrote every name that was standing in the clear here, so the
   // folder's answer for this document is that it has none.
   sweep.rows = sweep.rows.filter((r) => r.doc.handle !== fileHandle);
@@ -4442,10 +4453,16 @@ function acceptLeak() {
 }
 
 /** Write the decisions into the workbook: the same file, the Fix? cells changed, read back before it is written. */
-async function saveLeaks() {
-  if (!leaks) { toast("No LEAKS.xlsx is loaded.", { error: true }); return; }
+/**
+ * The worksheet written back. `quiet` is for the save that carries it along
+ * with the document — the document's own line says so — and `folderOnly` with
+ * it: a save of the text is not the moment to put a file picker in front of
+ * somebody who never asked for one. Returns what was written, or false.
+ */
+async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
+  if (!leaks) { if (!quiet) toast("No LEAKS.xlsx is loaded.", { error: true }); return false; }
   const edits = LK.fixEdits(leaks.parsed);
-  if (!edits.length) { toast("Nothing to save — no decision has changed."); return; }
+  if (!edits.length) { if (!quiet) toast("Nothing to save — no decision has changed."); return false; }
   let out;
   try {
     out = await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, edits);
@@ -4458,16 +4475,18 @@ async function saveLeaks() {
     }
     if (back.rows.length !== leaks.parsed.rows.length) throw new Error("the row count changed");
   } catch (e) {
-    toast("Not saved: " + (e.message || e), { error: true });
-    return;
+    // The check the worksheet turns on: never quietly, whoever asked.
+    toast("The worksheet was not saved: " + (e.message || e), { error: true });
+    return false;
   }
   let handle = leaks.handle;
   if (!handle && dirHandle) {
     try { handle = await dirHandle.getFileHandle(leaks.name, { create: true }); } catch { handle = null; }
   }
+  if (!handle && folderOnly) return false; // nowhere to put it without asking
   const ok = await writeBlob(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), leaks.name, handle,
     { description: "LEAKS worksheet", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } });
-  if (!ok) return;
+  if (!ok) return false;
   leaks.bytes = out;
   if (handle) leaks.handle = handle;
   for (const r of leaks.parsed.rows) r.fix0 = r.fix;
@@ -4476,7 +4495,8 @@ async function saveLeaks() {
   for (let i = 0; i < leakLis.length; i++) paintLeakRow(i);
   renderLeaksTabState();
   const und = LK.undecidedCount(leaks.parsed.rows);
-  toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still to answer` : "") + ". Double-click Apply Leak Fixes.bat (or re-run PDF-Linker) to apply them to the files.", { ms: 6000 });
+  if (!quiet) toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still to answer` : "") + ". Double-click Apply Leak Fixes.bat (or re-run PDF-Linker) to apply them to the files.", { ms: 6000 });
+  return edits.length;
 }
 
 /** Write bytes: in place through the handle, else the Save picker, else a download. */
@@ -4555,8 +4575,8 @@ $("lb-next").addEventListener("click", () => goToLeak(LK.stepFrom(leakRows(), le
 $("lb-next-open").addEventListener("click", () => { const n = LK.nextUndecided(leakRows(), leaks.at); if (n >= 0) goToLeak(n); });
 $("lb-accept").addEventListener("click", acceptLeak);
 $("lb-find").addEventListener("click", () => { if (leaks && leaks.at >= 0) locateLeak(leakRows()[leaks.at]); });
-$("lb-save").addEventListener("click", saveLeaks);
-$("leaks-save").addEventListener("click", saveLeaks);
+$("lb-save").addEventListener("click", () => saveLeaks());
+$("leaks-save").addEventListener("click", () => saveLeaks());
 for (const b of leaksBar.querySelectorAll("button[data-fix]")) b.addEventListener("click", () => decideLeak(b.dataset.fix, { advance: true }));
 $("lb-apply").addEventListener("click", () => { const t = $("lb-typed").value.trim(); if (t) decideLeak(t, { advance: true }); else toast("Type the replacement, ~CORRECT SPELLING, *CORRECT TEXT or [part to keep] first.", { error: true }); });
 $("lb-clear").addEventListener("click", () => { $("lb-typed").value = ""; decideLeak(""); });

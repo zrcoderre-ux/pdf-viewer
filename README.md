@@ -952,13 +952,19 @@ app, which routes it to the reader tab.
   you to the next row still to answer; the **Leaks** tab lists every row with
   its state and jumps to any of them. A `no` or `never` on a value the key
   binds is mirrored as one of the reader's keeps, so the orange mark goes and
-  a save of the document leaves the value as it stands. Decisions are
-  remembered until **Save LEAKS.xlsx** (Ctrl+Shift+S) writes them **into the
-  same workbook in place** — only the Fix? cells change; every other part of
-  the file, the Context quotes, the column widths and the dropdown come back
-  byte for byte, and the file is read back before it is written — after which
-  Apply Leak Fixes (or a re-run) applies them to the files. A `yes` here is
-  the worksheet's alone: it is never also flagged into `New Real Values.txt`.
+  a save of the document leaves the value as it stands. Decisions are **A save
+  of the document writes the worksheet too**: the rows answered while reading
+  a document are decisions about that document, and a decision left in the
+  browser is one PDF-Linker's next run will not see, so **Save** (or Ctrl+S)
+  carries them along with it — in place, through the worksheet's own handle or
+  the case folder's, and where there is neither the save says they are still
+  unwritten rather than opening a picker. Otherwise they are remembered until
+  **Save LEAKS.xlsx** (Ctrl+Shift+S) writes them **into the same workbook in
+  place** — only the Fix? cells change; every other part of the file, the
+  Context quotes, the column widths and the dropdown come back byte for byte,
+  and the file is read back before it is written — after which Apply Leak
+  Fixes (or a re-run) applies them to the files. A `yes` here is the
+  worksheet's alone: it is never also flagged into `New Real Values.txt`.
 - **And through a document in the order the rows stand in it.** PDF-Linker
   writes one row per **value**, so the worksheet's own order is the order the
   values were first found — which sent a review to page 4, then page 31, then
