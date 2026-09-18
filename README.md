@@ -669,6 +669,20 @@ PDF — and puts the real names back **on screen only**. Open it from the
 toolbar popup (**📝 Open text reader**), or open a `.txt` in the installed
 app, which routes it to the reader tab.
 
+- **A whole matter in one pick (the installed app).** PDF-Linker leaves a case
+  in one shape: the folder holds `pseudonym_key.xlsx`, the PDFs, `LEAKS.xlsx`
+  and — where the run made one — `Combined Text.txt`, with the exports
+  themselves in a **Text Files** subfolder under it. So the app opens the
+  **folder**, not the files: **📁 Case folder** on the tab strip, or the button
+  on the empty page with nothing open yet. Every export in `Text Files` opens
+  **in its own tab**, and each one comes up with the case folder already
+  attached — its key in force, its PDFs matched, its worksheet and flagged list
+  to hand — because the folder is handed to the reader with the document
+  instead of being asked for afterwards. Where the run made a combined file,
+  that one document **is** every export and opens alone rather than as forty
+  tabs of the same thing; past a handful of separate exports the rest is
+  offered rather than assumed, and either way every document is listed in each
+  reader's own Documents panel, one click away.
 - **The tools stand down the left margin.** The reading, pseudonym, review and
   PDF tools are in a **Tools** panel on the left — the same rail the PDF viewer
   carries — in labelled groups: *Reading* (font, size, leading, width, line
