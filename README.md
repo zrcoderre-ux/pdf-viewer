@@ -952,9 +952,9 @@ app, which routes it to the reader tab.
   you to the next row still to answer; the **Leaks** tab lists every row with
   its state and jumps to any of them. A `no` or `never` on a value the key
   binds is mirrored as one of the reader's keeps, so the orange mark goes and
-  a save of the document leaves the value as it stands. Decisions are **A save
-  of the document writes the worksheet too**: the rows answered while reading
-  a document are decisions about that document, and a decision left in the
+  a save of the document leaves the value as it stands. **A save of the
+  document writes the worksheet too**: the rows answered while reading a
+  document are decisions about that document, and a decision left in the
   browser is one PDF-Linker's next run will not see, so **Save** (or Ctrl+S)
   carries them along with it — in place, through the worksheet's own handle or
   the case folder's, and where there is neither the save says they are still
@@ -962,9 +962,9 @@ app, which routes it to the reader tab.
   **Save LEAKS.xlsx** (Ctrl+Shift+S) writes them **into the same workbook in
   place** — only the Fix? cells change; every other part of the file, the
   Context quotes, the column widths and the dropdown come back byte for byte,
-  and the file is read back before it is written — after which Apply Fixes
-  (or a re-run) applies them to the files. A `yes` here is the
-  worksheet's alone: it is never also flagged into `New Real Values.txt`.
+  and the file is read back before it is written — after which Apply Fixes (or
+  a re-run) applies them to the files. A `yes` here is the worksheet's alone:
+  it is never also flagged into `New Real Values.txt`.
 - **And through a document in the order the rows stand in it.** PDF-Linker
   writes one row per **value**, so the worksheet's own order is the order the
   values were first found — which sent a review to page 4, then page 31, then
@@ -1165,13 +1165,13 @@ app, which routes it to the reader tab.
   such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the
   **Flagged** panel collects them and **Save list to case folder** writes `New
   Real Values.txt` beside the key, which PDF-Linker reads on its next run —
-  and on Apply Fixes — as if each line had been given with `--term`. **A
-  flag needs no full re-run.** The value is the operator's own instruction, so
+  and on Apply Fixes — as if each line had been given with `--term`. **A flag
+  needs no full re-run.** The value is the operator's own instruction, so
   nothing has to re-read the PDFs to find it: double-clicking `Apply Fixes` in
-  the case folder scrubs it straight into the `.txt` exports and writes its row
-  into the key. That launcher sits beside `pseudonym_key.xlsx` whether or not
-  the folder still has a `LEAKS.xlsx` to triage. **A
-  flag the run has answered comes off the list.** The flag is a job: this name
+  the case folder scrubs it straight into the `.txt` exports and writes its
+  row into the key. That launcher sits beside `pseudonym_key.xlsx` whether or
+  not the folder still has a `LEAKS.xlsx` to triage. **A flag the run has
+  answered comes off the list.** The flag is a job: this name
   is in the clear, fake it. When the key comes back with the name in it — the
   folder opened after a run, a key chosen by hand — the job is done, and the
   value is dropped from the **Flagged** panel (the reader says which), takes
