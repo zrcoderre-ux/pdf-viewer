@@ -46,6 +46,7 @@ import * as TD from "./textdoc.js";
 import { dressLines, fitRuleRows, placeholderIn } from "./rules.js";
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
+import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
 import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
 
@@ -90,13 +91,11 @@ const toastEl = $("toast");
 const SETTINGS_KEY = "textReaderSettings";
 const LEGACY_SETTINGS_KEY = "textReader.settings";
 const SETTINGS_AT_KEY = "textReader.settingsAt"; // when the local copy was written
-const KEYS_KEY = "textReader.keys";
 const VALUES_PREFIX = "textReader.values.";
 // …and what was last WRITTEN to the case folder, so the list can tell whether
 // PDF-Linker has been handed what is in it.
 const VALUES_SAVED_PREFIX = "textReader.valuesSaved.";
 const SPOTS_PREFIX = "textReader.spots.";
-const MAX_KEYS = 12;
 
 let doc = null;              // TD.parseExport result
 let fileName = "";
@@ -722,39 +721,9 @@ function showSideTab(tab) {
 for (const [tab] of SIDE_TABS) $(tab).addEventListener("click", () => showSideTab(tab));
 
 // ── the key library ────────────────────────────────────────────────────────────
-function keyLibrary() { return lsGet(KEYS_KEY, {}); }
-
-function storeKey(parsed, folder) {
-  const lib = keyLibrary();
-  let id = null;
-  for (const k of Object.keys(lib)) if (PK.sameCaseKey(lib[k], parsed)) { id = k; break; }
-  if (!id) id = PK.fold(parsed.name) + "#" + PK.keySignature(parsed);
-  const prev = lib[id] || {};
-  lib[id] = Object.assign({}, parsed, { folder: folder || prev.folder || "", savedAt: Date.now() });
-  // The oldest fall off; a key is one folder-pick away from being recent again.
-  const ids = Object.keys(lib).sort((a, b) => (lib[b].savedAt || 0) - (lib[a].savedAt || 0));
-  for (const old of ids.slice(MAX_KEYS)) delete lib[old];
-  lsSet(KEYS_KEY, lib);
-  return id;
-}
-
-function fillKeySelect(selectedId) {
-  const lib = keyLibrary();
-  keySelect.innerHTML = "";
-  const none = document.createElement("option");
-  none.value = "";
-  none.textContent = "(no key)";
-  keySelect.appendChild(none);
-  const ids = Object.keys(lib).sort((a, b) => (lib[b].savedAt || 0) - (lib[a].savedAt || 0));
-  for (const id of ids) {
-    const o = document.createElement("option");
-    o.value = id;
-    o.textContent = PK.keyTitle(lib[id]) + " · " + lib[id].rows + " rows";
-    keySelect.appendChild(o);
-  }
-  keySelect.value = selectedId || "";
-  if (keySelect.value !== (selectedId || "")) keySelect.value = "";
-}
+// The keys themselves live in key-library.js: one library in storage, shared
+// with the PDF viewer, so a key loaded here is the key a redaction runs on.
+const fillKeys = (selectedId) => fillKeySelect(keySelect, selectedId);
 
 // Every keep in force: this case's own, and the standing ones the master
 // workbook carries between cases (see attachMaster). The master's are consulted
@@ -964,7 +933,7 @@ async function loadKeyFromBytes(bytes, name, folder, { quiet = false } = {}) {
   if (!PK.sheetsLookLikeKey(wb.sheets)) throw new Error(`${name} has no "Real Value" / "Replacement" header — not a pseudonym key.`);
   const parsed = PK.parseKey(wb.sheets, name);
   const id = storeKey(parsed, folder);
-  fillKeySelect(id);
+  fillKeys(id);
   setKey(keyLibrary()[id]);
   if (!quiet) toast(`Key loaded: ${PK.keyTitle(key)} — ${key.pairs.length} reversible binding${key.pairs.length === 1 ? "" : "s"}` +
     (key.dropped.ambiguous ? `, ${key.dropped.ambiguous} ambiguous retired` : ""));
@@ -1284,6 +1253,10 @@ function openText(text, name, handle, built) {
   setupPdfForDoc();
   markDocList();
   $("st-file").textContent = name + (TD.isQuarantinedName(name) ? " (quarantined by PDF-Linker's leak gate)" : "") + " · " + doc.pages.length + " page" + (doc.pages.length === 1 ? "" : "s");
+  // A keep taken because one document carried the value in the clear is read
+  // again against this one: a folder's keeps are the case's, and a pseudonym
+  // standing anywhere in it is a run the case folder is owed after all.
+  refreshKeepLocality();
   updateDirty();
 }
 
@@ -3657,8 +3630,77 @@ function afterSpotChange(body, real, { undone = false } = {}) {
     : `"${real}" kept where it stands — here only; every other occurrence is still faked`);
 }
 
+// ── a keep that asks nothing of PDF-Linker ───────────────────────────────────
+//
+// Keeping a value that the run FAKED is work for PDF-Linker: the file carries
+// the pseudonym and only a run can put the real name back. Keeping a value
+// that stands in the clear is not. Nothing faked it, so there is nothing to
+// un-fake — the file already reads the way the keep wants it to read, the save
+// simply leaves it alone, and the whole of the decision is "stop marking this,
+// it was left alone on purpose."
+//
+// Such a keep stays here. It is not written into New Real Values.txt, it does
+// not make the list one the case folder is owed, and it asks for no re-run.
+// The rule itself is in textdoc.keepNeedsRun; these two answer the facts it
+// turns on.
+
+/**
+ * Whether the file this document came from carries the value's pseudonym.
+ * `text` is the file's own text where the caller already has it — asking about
+ * several keeps at once would otherwise serialize a thousand-page export once
+ * per keep.
+ */
+function fakeStandsInFile(real, text) {
+  if (!doc || !fwd) return false;
+  const fake = TD.fakeFor(fwd, real);
+  if (!fake) return false;
+  // The key's own matcher, not a plain search: a pseudonym wrapped at the
+  // margin — its halves two numbered lines apart — is still standing in this
+  // file, and a keep taken as though it were not would be a name the next run
+  // never restores.
+  const rx = PK.buildMatcher([fake]);
+  if (!rx) return false;
+  rx.lastIndex = 0;
+  return rx.test(text == null ? TD.serializeExport(doc) : text);
+}
+
+/** Whether PDF-Linker has raised this value on LEAKS.xlsx. */
+function onLeaksSheet(real) {
+  const want = LK.fold(real);
+  return leakRows().some((r) => LK.fold(r.value) === want);
+}
+
+/**
+ * Keeps taken as local, re-read against the facts as they now stand. Only ever
+ * in the one direction: a document opened later turns out to carry the
+ * pseudonym, or a worksheet arrives with the value on it, and what was a note
+ * to the reader becomes a run's worth of work again. The reverse is never
+ * inferred — a keep once owed stays owed until it is written out.
+ */
+function refreshKeepLocality() {
+  const local = keeps.filter((k) => k.local);
+  if (!local.length) return;
+  const text = doc ? TD.serializeExport(doc) : "";
+  let moved = keeps;
+  for (const k of local) {
+    if (fakeStandsInFile(k.value, text) || onLeaksSheet(k.value)) moved = TD.owe(moved, k.value);
+  }
+  if (moved === keeps) return;
+  keeps = moved;
+  persistValues();
+  renderFlags();
+}
+
 function setKeep(real, control, { leak = false } = {}) {
-  keeps = control ? TD.addKeep(keeps, control, real) : TD.removeKeep(keeps, real);
+  // A keep on a value standing in the clear, for this case only, that
+  // PDF-Linker has not itself raised, is a decision the file already carries
+  // out. Anything else is work the case folder has to be handed.
+  const local = !!control && !TD.keepNeedsRun({
+    control,
+    faked: !leak || fakeStandsInFile(real),
+    onLeaksSheet: onLeaksSheet(real),
+  });
+  keeps = control ? TD.addKeep(keeps, control, real, local) : TD.removeKeep(keeps, real);
   persistValues();
   compileKey();
   remarkKept();
@@ -3667,6 +3709,7 @@ function setKeep(real, control, { leak = false } = {}) {
   showSidePanel(true);
   showSideTab("tab-flags");
   toast(!control ? `"${real}" is a pseudonym again`
+    : local ? `"${real}" left as it stands — the file already carries it that way, so there is nothing to hand over and nothing to re-run. It is simply no longer marked.`
     : leak ? `"${real}" kept${control === "never" ? " in every case" : " in this case"} — left as it stands, on save and on PDF-Linker's next run (save the list to the case folder first).`
     : `"${real}" kept${control === "never" ? " in every case" : " in this case"} — un-marked here now; PDF-Linker un-fakes it in the file on its next run (save the list to the case folder first).`);
 }
@@ -3766,7 +3809,9 @@ function valuesSavedKey() { return VALUES_SAVED_PREFIX + (folderName || fileName
  * file's own text is the signature; nothing else can be out of step with it.
  */
 function valuesDirty() {
-  if (!flagged.length && !keeps.length) return false;
+  // A local keep is not in the file and never will be, so a list that holds
+  // nothing else is a list the case folder is owed nothing from.
+  if (!flagged.length && !TD.owedKeeps(keeps).length) return false;
   return TD.formatValuesFile(flagged, keeps) !== lsGet(valuesSavedKey(), "");
 }
 /** …and the same list, as it stands, marked as written. */
@@ -3796,9 +3841,11 @@ function renderFlags() {
     const li = document.createElement("li");
     li.textContent = k.value;
     const t = document.createElement("span");
-    t.className = "tag keep";
-    t.textContent = k.control === "never" ? "never" : "this case";
-    t.title = k.control === "never" ? "Kept in every case (never)" : "Kept in this case (no)";
+    t.className = "tag keep" + (k.local ? " settled" : "");
+    t.textContent = k.control === "never" ? "never" : k.local ? "already so" : "this case";
+    t.title = k.control === "never" ? "Kept in every case (never)"
+      : k.local ? "Kept in this case — and the file already carries it this way, so it is not written to " + TD.VALUES_FILE + " and needs no re-run."
+      : "Kept in this case (no)";
     li.appendChild(t);
     li.title = "Click to find it in the document";
     li.addEventListener("click", () => findInPages(k.value));
@@ -4040,6 +4087,10 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" 
   leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", at: -1, mirrored: new Set() };
   const remembered = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));
   mirrorLeakKeeps(parsed.rows.filter((r) => r.fix !== r.fix0));
+  // A value PDF-Linker has now raised is a question asked on the worksheet, and
+  // a keep that was answering nobody has a row to answer: it goes back on the
+  // list the case folder is owed.
+  refreshKeepLocality();
   leakRowValue = "";
   leakHere = null;
   renderLeaksTab();
@@ -6559,12 +6610,12 @@ reportLastStuck();
 applySettings();
 loadSyncedSettings();
 showSidePanel(sideChoice === true);
-fillKeySelect("");
+fillKeys("");
 // The most recent key is offered on a lone file straight away: a folder pick
 // replaces it with the folder's own.
 {
   const lib = keyLibrary();
-  const ids = Object.keys(lib).sort((a, b) => (lib[b].savedAt || 0) - (lib[a].savedAt || 0));
+  const ids = keyIds(lib);
   if (ids.length) { keySelect.value = ids[0]; setKey(lib[ids[0]]); }
 }
 updateDirty();

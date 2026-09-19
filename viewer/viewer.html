@@ -50,6 +50,29 @@
     <button id="rot-done" title="Leave the rotate tool (the rotation stays on screen)">Done</button>
   </div>
 
+  <div id="redact-bar" hidden>
+    <span class="redact-bar-label">Redact</span>
+    <select id="redact-mark" title="What a drag over a page marks: the text it covers, or the area itself (for a signature, a photo, a page with no text layer)">
+      <option value="text">Drag marks text</option>
+      <option value="area">Drag marks an area</option>
+    </select>
+    <label class="toolbar-label">Key:
+      <select id="redact-key" title="The pseudonym key whose real values are marked automatically. Keys loaded in the text reader are offered here."></select>
+    </label>
+    <button id="redact-load-key" title="Load a pseudonym_key.xlsx">Load key…</button>
+    <button id="redact-scan" title="Mark every real value the key binds, wherever it stands in this document">Mark from key</button>
+    <span id="redact-state" class="redact-bar-state">Nothing marked.</span>
+    <select id="redact-dpi" title="How finely the redacted copy is rendered. Every page becomes an image, so this is the resolution of the saved file.">
+      <option value="150">150 dpi</option>
+      <option value="200" selected>200 dpi</option>
+      <option value="300">300 dpi</option>
+    </select>
+    <button id="redact-clear" title="Take every box back off">Clear</button>
+    <button id="redact-save" class="primary" title="Save a flattened, redacted copy — never the original">Save redacted copy…</button>
+    <button id="redact-done" title="Leave the redaction tool (the boxes stay)">Done</button>
+  </div>
+  <input id="redact-key-input" type="file" accept=".xlsx" hidden>
+
   <div id="form-bar" hidden>
     <span class="form-bar-label">Filling form — edit the fields, then:</span>
     <button id="form-save" title="Save the document with your entries (fields stay editable)">Save filled</button>
@@ -189,6 +212,9 @@
       <button id="rect-select-toggle" class="tool-btn" title="Rectangle select: click to toggle. When active, drag a box to select text by region. You can also hold Alt and drag at any time." aria-pressed="false"><span class="ti">▭</span><span class="tl">Box select</span></button>
       <button id="crop-select" class="tool-btn" title="Set the selectable text area: toggle on, then drag a box. Text outside the box (e.g. margin line numbers) won't be selectable. Applies to every document until you change or reset it." aria-pressed="false"><span class="ti">⬚</span><span class="tl">Text area</span></button>
       <button id="ocr-run" class="tool-btn" title="Run OCR on this scanned document so its text becomes selectable and citations are linked" aria-pressed="false"><span class="ti">⛶</span><span class="tl">OCR</span></button>
+
+      <div class="tools-group-label">Redact</div>
+      <button id="redact-toggle" class="tool-btn" title="Redaction: mark what has to go — every real value the pseudonym key binds, plus anything you drag over — then save a flattened copy with it blacked out. Never writes the original." aria-pressed="false"><span class="ti">▬</span><span class="tl">Redact</span></button>
 
       <div class="tools-group-label">View</div>
       <button id="rotate-pages" class="tool-btn" title="Turn sideways or upside-down pages the right way up (R clockwise, Shift+R back). Rotation shows immediately; saving it into the file is a separate click." aria-pressed="false"><span class="ti">⟳</span><span class="tl">Rotate pages</span></button>

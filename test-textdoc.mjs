@@ -12,6 +12,7 @@ import {
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
+  keepNeedsRun, owedKeeps, owe, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape,
 } from "./viewer/textdoc.js";
@@ -262,6 +263,46 @@ const both = formatValuesFile(list, keeps);
 check("keeps written as control lines", both.endsWith("\nno: Palermo\nnever: Stockton Theatres\n"), true);
 check("both halves read back", parseReaderFile(both), { values: list, keeps });
 check("parseValuesFile ignores the keeps", parseValuesFile(both), list);
+// ── a keep that asks nothing of PDF-Linker ─────────────────────────────────
+//
+// Keeping a value the run FAKED is work for the next run: only PDF-Linker can
+// put the real name back. Keeping one that stands in the clear is not — the
+// file already reads that way — so it stays here rather than going into the
+// list the case folder is handed.
+console.log("which keeps PDF-Linker is owed");
+check("a value standing in the clear, this case, unraised: nothing to run",
+  keepNeedsRun({ control: "no", faked: false, onLeaksSheet: false }), false);
+check("a value the run faked: only a run can put it back",
+  keepNeedsRun({ control: "no", faked: true, onLeaksSheet: false }), true);
+check("a value PDF-Linker has raised on LEAKS.xlsx: its row is waiting on an answer",
+  keepNeedsRun({ control: "no", faked: false, onLeaksSheet: true }), true);
+check("never reaches the next matter through the file and nowhere else",
+  keepNeedsRun({ control: "never", faked: false, onLeaksSheet: false }), true);
+
+check("a local keep is marked as one", makeKeep("no", "Helen Rasho", true),
+  { control: "no", value: "Helen Rasho", local: true });
+check("…and never never", makeKeep("never", "Helen Rasho", true),
+  { control: "never", value: "Helen Rasho" });
+
+let mixed = addKeep([], "no", "Helen Rasho", true);
+mixed = addKeep(mixed, "no", "Stockton Theatres");
+check("the file is handed only what it is owed", owedKeeps(mixed),
+  [{ control: "no", value: "Stockton Theatres" }]);
+check("a local keep is not written into the file",
+  formatValuesFile([], mixed).endsWith("\nno: Stockton Theatres\n"), true);
+check("…and nothing of it is in there at all",
+  /Helen Rasho/.test(formatValuesFile([], mixed)), false);
+check("raising the same value again makes it owed",
+  owe(mixed, "HELEN RASHO"), [{ control: "no", value: "Helen Rasho" }, { control: "no", value: "Stockton Theatres" }]);
+check("owing what is already owed changes nothing", owe(mixed, "Stockton Theatres"), mixed);
+check("a keep once owed is never made local again by owe",
+  owe(owe(mixed, "Helen Rasho"), "Helen Rasho")[0], { control: "no", value: "Helen Rasho" });
+check("turning a local keep into a never writes it out",
+  owedKeeps(addKeep(mixed, "never", "Helen Rasho")).map((k) => k.value).sort(),
+  ["Helen Rasho", "Stockton Theatres"]);
+check("a keep read back from the file is owed, not local",
+  parseReaderFile("no: Helen Rasho\n").keeps, [{ control: "no", value: "Helen Rasho" }]);
+
 check("flag: nothing selected", flagProblem("  ", false) !== "", true);
 check("flag: a pseudonym", flagProblem("Strangeways", true) !== "", true);
 check("flag: a passage", flagProblem("x".repeat(200), false) !== "", true);

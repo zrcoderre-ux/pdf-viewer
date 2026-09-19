@@ -24,7 +24,7 @@ import {
   getHighlightRectGroups,
   addImportedHighlight,
 } from "./highlights.js";
-import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages, fillForm, hasFormFields } from "./pdf-edit.js";
+import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages, fillForm, hasFormFields, buildRedactedPdf } from "./pdf-edit.js";
 import { extractTitle, citationShortForm, extractPartVolume, appendPartVol } from "./footer-naming.js";
 import {
   registerEntry,
@@ -43,6 +43,10 @@ import {
   ocrPageToTextLayer,
   resetOcr,
 } from "./ocr.js";
+import * as PK from "./pseudo-key.js";
+import { parseXlsx } from "./xlsx-read.js";
+import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
+import * as RD from "./redact.js";
 import { autoScroll } from "./autoscroll.js";
 import { pageRotation } from "./rotation.js";
 
@@ -90,12 +94,30 @@ const cropBarEl    = document.getElementById("crop-bar");
 const cropResetEl  = document.getElementById("crop-reset");
 const cropDoneEl   = document.getElementById("crop-done");
 const pageIndicatorEl  = document.getElementById("page-indicator");
+const redactToggleEl  = document.getElementById("redact-toggle");
+const redactBarEl     = document.getElementById("redact-bar");
+const redactMarkEl    = document.getElementById("redact-mark");
+const redactKeyEl     = document.getElementById("redact-key");
+const redactLoadKeyEl = document.getElementById("redact-load-key");
+const redactKeyInputEl = document.getElementById("redact-key-input");
+const redactScanEl    = document.getElementById("redact-scan");
+const redactStateEl   = document.getElementById("redact-state");
+const redactDpiEl     = document.getElementById("redact-dpi");
+const redactClearEl   = document.getElementById("redact-clear");
+const redactSaveEl    = document.getElementById("redact-save");
+const redactDoneEl    = document.getElementById("redact-done");
 
 let currentScale = 1.5;
 let totalLinks = 0;
 // pageNumber -> PDF page height in points; used to map screen highlight rects
 // into PDF coordinates when saving an edited copy.
 const pageHeightPtsByNum = new Map();
+// …and the page's OWN box in user space ([x0 y0 x1 y1] as the PDF states it),
+// which is what a redaction box is clamped to. Not the same thing as the size
+// above: that is the size the page is DISPLAYED at, and a page carrying
+// /Rotate 90 is displayed 792 wide while still being 612 wide in the
+// coordinates a stored box lives in.
+const pageUserBoxByNum = new Map();
 // pageNumber -> the display viewport the page was last rendered with. Highlight
 // geometry converts through it rather than through scale alone, because a
 // rotated page's layer pixels no longer line up with PDF points axis-for-axis.
@@ -1743,6 +1765,11 @@ function resetForNewDocument() {
   // (renderAllPages is also called on zoom, where we DO want them retained;
   // hence clearing here, not there.)
   clearAllHighlights();
+  // …and with it every proposed redaction, and the span text they were found
+  // in. A box belongs to the page it was drawn on, and this is another page.
+  RD.clearRedactions();
+  pageSpans.clear();
+  updateRedactState();
   // New document → drop cached OCR boxes and tear down the recognizer worker.
   // (Deliberately here and not in renderAllPages, which also runs on zoom —
   // the per-page OCR cache is what makes zoom cheap, so it must survive zoom.)
@@ -2109,6 +2136,15 @@ async function renderAllPages() {
     repaintHighlightsForPage(refs.pageNumber, refs.textLayerDiv, refs.highlightLayerDiv,
       { scale: currentScale, pageHeightPts: pageHeightPtsByNum.get(refs.pageNumber),
         viewport: pageViewportByNum.get(refs.pageNumber) });
+    // Redactions are stored in PDF points, so a zoom (which rebuilds every
+    // layer from scratch) repaints them onto the same words at the new scale.
+    RD.attachAreaDrag({
+      pageNumber: refs.pageNumber,
+      pageWrapper: refs.pageWrapper,
+      getActive: () => redactMode && redactMark === "area",
+      onBox: addAreaRedaction,
+    });
+    repaintRedactionsOnPage(refs.pageNumber);
   }
 
   updateLinkCount();
@@ -2424,6 +2460,10 @@ async function renderPageCanvasAndText(pageNumber) {
   // Remember the page height in PDF points so on-screen highlight rects can be
   // converted to PDF coordinates when saving an edited copy.
   pageHeightPtsByNum.set(pageNumber, userSpaceViewport.height);
+  {
+    const [bx0, by0, bx1, by1] = page.view || [0, 0, userSpaceViewport.width, userSpaceViewport.height];
+    pageUserBoxByNum.set(pageNumber, { x: bx0, y: by0, w: bx1 - bx0, h: by1 - by0 });
+  }
 
   const wrapper = document.createElement("div");
   wrapper.className = "page-wrapper";
@@ -2470,6 +2510,16 @@ async function renderPageCanvasAndText(pageNumber) {
   selectionLayerDiv.style.width  = `${viewport.width}px`;
   selectionLayerDiv.style.height = `${viewport.height}px`;
   wrapper.appendChild(selectionLayerDiv);
+
+  // Proposed redactions. Above the selection so a box is never hidden by one,
+  // and translucent (see the CSS) so the words underneath stay readable until
+  // the copy is saved — a proposal you cannot read is a proposal you cannot
+  // check.
+  const redactLayerDiv = document.createElement("div");
+  redactLayerDiv.className = "redactLayer";
+  redactLayerDiv.style.width  = `${viewport.width}px`;
+  redactLayerDiv.style.height = `${viewport.height}px`;
+  wrapper.appendChild(redactLayerDiv);
 
   const linkLayerDiv = document.createElement("div");
   linkLayerDiv.className = "linkLayer";
@@ -2545,12 +2595,14 @@ async function renderPageCanvasAndText(pageNumber) {
   // BEFORE applySelectableArea clears any span text (line numbers, cropped-out
   // margins). Reads the intact text layer.
   capturePageReference(pageNumber, textLayerDiv);
+  capturePageSpans(pageNumber, textLayerDiv);
 
   applySelectableArea(textLayerDiv);
   updateCropOverlay(wrapper);
 
   return {
     pageNumber, textContent, textLayerDiv, linkLayerDiv, highlightLayerDiv,
+    redactLayerDiv,
     pageWrapper: wrapper, viewport: userSpaceViewport,
     italicFontNames: italicFontNamesFor(page, textContent),
   };
@@ -3192,6 +3244,442 @@ if (rectSelectToggleEl) {
   });
 }
 
+// ── Redaction: a flattened copy with what must go blacked out ───────────────
+//
+// The rule is in redact.js, and it is the whole reason this is not "draw a
+// black rectangle and save": a rectangle over text leaves the text in the
+// file. So a redacted copy is a NEW document made of page images with the
+// boxes painted into the pixels — no text layer, no annotations, no fonts, no
+// metadata — and the document the viewer has open is never written.
+//
+// What is marked comes from two places. The pseudonym key is the baseline:
+// PDF-Linker scrubbed this matter's exports by that key, and run over the
+// PDF's own text it says where every real value it binds STANDS on the page.
+// The hand adds the rest — a drag over text, or a drag over an area for a
+// signature, a photograph, a scanned exhibit the text layer cannot name.
+//
+// Until the copy is saved every box is a PROPOSAL, drawn translucent with the
+// words still legible under it, and one click takes a box back off.
+
+let redactMode = false;          // the tool is on
+let redactMark = "text";         // what a drag marks: "text" | "area"
+let redactKey = null;            // the chosen key, parsed
+let redactFwd = null;            // …compiled real → fake, for the copy's name
+let redactReals = null;          // …compiled to find where the reals stand
+let redactSaving = false;
+// pageNumber -> the page's text-layer span TEXTS, taken before
+// applySelectableArea empties any of them. The crop tool and the line-number
+// heuristic clear span text to keep it out of selections, but a name is no
+// less printed on the page for being unselectable, so the key is run over
+// what the page actually says.
+//
+// Only the text is kept here, and only because it is about to be thrown away.
+// Reading it costs nothing (no layout), which matters: this runs for every
+// page of every document on every zoom, whether or not anything is ever
+// redacted. The geometry — which does cost a layout read per span — is taken
+// once, at the moment a scan needs it, and not before.
+const pageSpans = new Map();
+
+function capturePageSpans(pageNumber, textLayerDiv) {
+  const out = [];
+  for (const s of textLayerDiv.querySelectorAll("span")) out.push(s.textContent || "");
+  pageSpans.set(pageNumber, out);
+}
+
+// The page's spans as redact.js wants them: the text each one holds and where
+// it sits, in layer pixels. Called with the page's text already restored, so an
+// emptied span measures as the words it prints rather than as nothing.
+function pageSpanBoxes(textLayerDiv, texts) {
+  const base = textLayerDiv.getBoundingClientRect();
+  const spans = textLayerDiv.querySelectorAll("span");
+  const out = [];
+  for (let i = 0; i < spans.length; i++) {
+    const r = spans[i].getBoundingClientRect();
+    out.push({
+      text: texts && texts[i] != null ? texts[i] : (spans[i].textContent || ""),
+      left: r.left - base.left, top: r.top - base.top,
+      width: r.width, height: r.height,
+    });
+  }
+  return out;
+}
+
+function pageWrapperFor(pageNumber) {
+  return pagesEl.querySelector(`.page-wrapper[data-page-number="${pageNumber}"]`);
+}
+
+function repaintRedactionsOnPage(pageNumber) {
+  const wrapper = pageWrapperFor(pageNumber);
+  if (!wrapper) return;
+  RD.repaintRedactionsForPage(pageNumber, wrapper.querySelector(".redactLayer"),
+    pageViewportByNum.get(pageNumber), {
+      // A box taken back off is off the page as well as out of the count: one
+      // box is several rectangles where it wrapped, and repainting the page is
+      // what takes the rest of them with it.
+      onRemove: () => { repaintRedactionsOnPage(pageNumber); updateRedactState(); },
+    });
+}
+
+function repaintAllRedactions() {
+  for (const w of pagesEl.querySelectorAll(".page-wrapper")) {
+    repaintRedactionsOnPage(Number(w.dataset.pageNumber));
+  }
+}
+
+// Screen rectangles (client space) → the boxes that get stored, in PDF points.
+// Merged into lines first, padded by a point so a glyph's descender or its
+// antialiased edge doesn't survive along the border, then held inside the page.
+function storeBoxesFromClientRects(pageNumber, clientRects, meta) {
+  const wrapper = pageWrapperFor(pageNumber);
+  const vp = pageViewportByNum.get(pageNumber);
+  if (!wrapper || !vp) return null;
+  const base = wrapper.getBoundingClientRect();
+  const local = [];
+  for (const cr of clientRects) {
+    if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+    local.push({ x: cr.left - base.left, y: cr.top - base.top, w: cr.width, h: cr.height });
+  }
+  const userBox = pageUserBoxByNum.get(pageNumber);
+  if (!userBox) return null;
+  const out = [];
+  for (const r of RD.mergeRects(local, 2)) {
+    const [x1, y1] = vp.convertToPdfPoint(r.x, r.y);
+    const [x2, y2] = vp.convertToPdfPoint(r.x + r.w, r.y + r.h);
+    const box = RD.clampRect(RD.padRect({
+      x: Math.min(x1, x2), y: Math.min(y1, y2),
+      w: Math.abs(x2 - x1), h: Math.abs(y2 - y1),
+    }, 1), userBox);
+    if (box) out.push(box);
+  }
+  return out.length ? RD.addRedaction(pageNumber, out, meta) : null;
+}
+
+// An area drag: the box itself, whatever is under it. This is the tool for a
+// signature, a photograph, a stamp, or a scanned page whose text layer knows
+// nothing — the cases the key can say nothing about.
+function addAreaRedaction(pageNumber, box) {
+  const wrapper = pageWrapperFor(pageNumber);
+  if (!wrapper) return;
+  const base = wrapper.getBoundingClientRect();
+  const rect = {
+    left: base.left + box.left, top: base.top + box.top,
+    width: box.width, height: box.height,
+  };
+  if (storeBoxesFromClientRects(pageNumber, [rect], { kind: "area", label: "this area" })) {
+    repaintRedactionsOnPage(pageNumber);
+    updateRedactState();
+  }
+}
+
+// A drag over text: what the selection covers, page by page. A selection can
+// run across a page break, so each of the range's rectangles is filed under
+// whichever page it sits on and the pages are marked separately.
+function redactCurrentSelection() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return 0;
+  const range = sel.getRangeAt(0);
+  if (!pagesEl.contains(range.commonAncestorContainer)) return 0;
+  const label = sel.toString().replace(/\s+/g, " ").trim().slice(0, 120);
+  const pages = [...pagesEl.querySelectorAll(".page-wrapper")].map((w) => ({
+    pageNumber: Number(w.dataset.pageNumber), box: w.getBoundingClientRect(),
+  }));
+  const byPage = new Map();
+  for (const cr of range.getClientRects()) {
+    if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+    const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
+    const hit = pages.find((p) => cx >= p.box.left && cx <= p.box.right &&
+                                  cy >= p.box.top && cy <= p.box.bottom);
+    if (!hit) continue;
+    if (!byPage.has(hit.pageNumber)) byPage.set(hit.pageNumber, []);
+    byPage.get(hit.pageNumber).push(cr);
+  }
+  let added = 0;
+  for (const [pageNumber, rects] of byPage) {
+    if (storeBoxesFromClientRects(pageNumber, rects, { kind: "text", label })) {
+      repaintRedactionsOnPage(pageNumber);
+      added++;
+    }
+  }
+  if (added) sel.removeAllRanges();
+  return added;
+}
+
+// The key, over the whole document: every place a real value stands.
+//
+// The page's own spans are read back in first. applySelectableArea may have
+// emptied some of them (the pleading gutter, anything outside a crop region) and
+// a range over an empty span has no rectangle — so the text is restored, the
+// geometry taken, and the page put back exactly as it was. A name is no less
+// printed for being unselectable, and a redaction that skipped it would be a
+// name left standing in a copy made to hide it.
+function scanForKeyValues() {
+  if (!redactReals) { statusEl.textContent = "Choose a pseudonym key first."; return; }
+  RD.clearRedactions("key");
+  let found = 0, missed = 0;
+  for (const wrapper of pagesEl.querySelectorAll(".page-wrapper")) {
+    const pageNumber = Number(wrapper.dataset.pageNumber);
+    const textLayerDiv = wrapper.querySelector(".textLayer");
+    const texts = pageSpans.get(pageNumber);
+    if (!textLayerDiv || !texts || !texts.length) continue;
+    const spans = textLayerDiv.querySelectorAll("span");
+    // Put the emptied spans back for the length of the measurement.
+    const emptied = [];
+    texts.forEach((t, i) => {
+      const el = spans[i];
+      if (el && el.textContent !== t) { emptied.push(i); el.textContent = t; }
+    });
+    try {
+      const { text, map } = RD.pageTextFromSpans(pageSpanBoxes(textLayerDiv, texts));
+      const hits = PK.findRealSpans(redactReals, text);
+      for (const hit of hits) {
+        const r = RD.spanRangeFor(map, hit.start, hit.end);
+        const a = r && spans[r.startSpan], b = r && spans[r.endSpan];
+        const an = a && a.firstChild, bn = b && b.firstChild;
+        if (!an || !bn) { missed++; continue; }
+        const range = document.createRange();
+        try {
+          range.setStart(an, Math.max(0, Math.min(r.startOffset, an.length || 0)));
+          range.setEnd(bn, Math.max(0, Math.min(r.endOffset, bn.length || 0)));
+        } catch { missed++; continue; }
+        const rects = [...range.getClientRects()];
+        if (!rects.length) { missed++; continue; }
+        if (storeBoxesFromClientRects(pageNumber, rects, { kind: "key", label: hit.real })) found++;
+        else missed++;
+      }
+    } finally {
+      for (const i of emptied) if (spans[i]) spans[i].textContent = "";
+    }
+    repaintRedactionsOnPage(pageNumber);
+  }
+  updateRedactState();
+  statusEl.textContent = found
+    ? `Marked ${found} value${found === 1 ? "" : "s"} the key binds` +
+      (missed ? `; ${missed} could not be placed on the page.` : ".")
+    : "The key binds nothing that stands in this document.";
+}
+
+function updateRedactState() {
+  const { boxes, pages } = RD.redactionCount();
+  if (redactStateEl) redactStateEl.textContent = RD.countLabel(boxes, pages);
+  if (redactSaveEl) redactSaveEl.disabled = !boxes || redactSaving;
+  if (redactClearEl) redactClearEl.disabled = !boxes || redactSaving;
+  if (redactScanEl) redactScanEl.disabled = !redactReals || redactSaving;
+}
+
+function setRedactKey(parsed) {
+  redactKey = parsed || null;
+  redactFwd = redactKey ? PK.compileForward(redactKey) : null;
+  redactReals = redactKey ? PK.compileReals(redactKey) : null;
+  updateRedactState();
+}
+
+async function loadRedactKeyFromFile(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const wb = await parseXlsx(bytes);
+  if (!PK.sheetsLookLikeKey(wb.sheets)) {
+    throw new Error(`${file.name} has no "Real Value" / "Replacement" header — not a pseudonym key.`);
+  }
+  const id = storeKey(PK.parseKey(wb.sheets, file.name), "");
+  fillKeySelect(redactKeyEl, id);
+  setRedactKey(keyLibrary()[id]);
+  statusEl.textContent = `Key loaded: ${PK.keyTitle(redactKey)} — ${redactKey.warn.length} bound value${redactKey.warn.length === 1 ? "" : "s"}.`;
+}
+
+async function pickRedactKey() {
+  if (window.showOpenFilePicker) {
+    try {
+      const [h] = await window.showOpenFilePicker({
+        types: [{ description: "Pseudonym key", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }],
+      });
+      await loadRedactKeyFromFile(await h.getFile());
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return;
+      if (!/picker|not allowed|SecurityError/i.test(String(e))) {
+        statusEl.textContent = String(e.message || e);
+        return;
+      }
+    }
+  }
+  if (redactKeyInputEl) redactKeyInputEl.click();
+}
+
+function setRedactMode(on) {
+  redactMode = on;
+  if (on) {
+    // One drag, one tool. The other drag tools go quiet so nothing fights over
+    // the mouse, exactly as the crop tool does when it opens.
+    pageRotation.close();
+    if (cropMode) setCropMode(false);
+    if (highlightMode) {
+      highlightMode = false;
+      if (highlightToggleEl) highlightToggleEl.setAttribute("aria-pressed", "false");
+      document.body.classList.remove("highlight-mode");
+    }
+    if (rectSelectMode) {
+      rectSelectMode = false;
+      if (rectSelectToggleEl) rectSelectToggleEl.setAttribute("aria-pressed", "false");
+      document.body.classList.remove("rect-select-mode");
+    }
+  }
+  if (redactToggleEl) redactToggleEl.setAttribute("aria-pressed", String(on));
+  if (redactBarEl) redactBarEl.hidden = !on;
+  document.body.classList.toggle("redact-mode", on);
+  document.body.classList.toggle("redact-area-mode", on && redactMark === "area");
+  updateRedactState();
+  // The key is the baseline, so opening the tool with one in hand and nothing
+  // marked sweeps the document at once: what the key binds is already proposed
+  // before the first drag, and the hand starts from there rather than from a
+  // blank page. Re-opening the tool over work already done leaves it alone.
+  if (on && redactReals && !RD.redactionCount().boxes) scanForKeyValues();
+}
+
+// A page's bytes, rendered at the saving resolution with its boxes painted in.
+// The black goes on AFTER the page is drawn and BEFORE the pixels are encoded,
+// which is the whole trick: what was under a box was never in this image.
+async function renderRedactedPage(pageNumber, scale) {
+  const page = await pdfDoc.getPage(pageNumber);
+  const delta = pageRotation.delta(pageNumber);
+  const rotation = (((page.rotate + delta) % 360) + 360) % 360;
+  const vp = page.getViewport({ scale, rotation });
+  const pts = page.getViewport({ scale: 1, rotation });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(vp.width));
+  canvas.height = Math.max(1, Math.round(vp.height));
+  const ctx = canvas.getContext("2d");
+  // A page with no background of its own would encode as black otherwise.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({
+    canvasContext: ctx,
+    viewport: vp,
+    annotationMode: docHasAnnotationHighlights
+      ? pdfjsLib.AnnotationMode.DISABLE
+      : pdfjsLib.AnnotationMode.ENABLE,
+  }).promise;
+  ctx.fillStyle = "#000000";
+  for (const box of RD.redactionsFor(pageNumber)) {
+    for (const r of box.rects) {
+      const [x1, y1, x2, y2] = vp.convertToViewportRectangle([r.x, r.y, r.x + r.w, r.y + r.h]);
+      // Outward to whole pixels: half a pixel of a letter left showing along an
+      // edge is half a letter more than a redaction may leave.
+      const x = Math.floor(Math.min(x1, x2)), y = Math.floor(Math.min(y1, y2));
+      ctx.fillRect(x, y, Math.ceil(Math.max(x1, x2)) - x, Math.ceil(Math.max(y1, y2)) - y);
+    }
+  }
+  const bytes = await canvasBytes(canvas, "image/jpeg", 0.92);
+  canvas.width = canvas.height = 0; // let the bitmap go before the next page
+  return { bytes, format: "jpg", widthPts: pts.width, heightPts: pts.height };
+}
+
+function canvasBytes(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) { reject(new Error("The page could not be rendered to an image.")); return; }
+      blob.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)), reject);
+    }, type, quality);
+  });
+}
+
+// The name the document is known by here, before the key touches it.
+function currentDocumentName() {
+  if (serverFilename) return serverFilename;
+  const raw = filenameFromUrl(fileUrl) || "document";
+  return computeSourceDisplay(raw.replace(/\.pdf$/i, "")) || raw;
+}
+
+async function saveRedactedCopy() {
+  if (!pdfDoc) { statusEl.textContent = "PDF not loaded yet."; return; }
+  const { boxes } = RD.redactionCount();
+  if (!boxes) { statusEl.textContent = "Nothing is marked for redaction."; return; }
+  redactSaving = true;
+  updateRedactState();
+  try {
+    const dpi = parseInt(redactDpiEl && redactDpiEl.value, 10) || 200;
+    const scale = dpi / 72;
+    const total = pdfDoc.numPages;
+    const pages = [];
+    // EVERY page, not only the marked ones. A copy that kept its unmarked
+    // pages as they were would carry a text layer on those pages, and a
+    // document that is searchable everywhere except over the black boxes tells
+    // a reader exactly where to look and hands them the rest of it besides.
+    for (let pn = 1; pn <= total; pn++) {
+      statusEl.textContent = `Redacting page ${pn} of ${total}…`;
+      pages.push(await renderRedactedPage(pn, scale));
+      // Let the tab breathe between pages — a long document is a long loop.
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    statusEl.textContent = "Writing the redacted copy…";
+    const bytes = await buildRedactedPdf({ pages });
+    // Forward through the key so the copy carries the pseudonymized name, and
+    // never in place: this save has no path to the open file at all.
+    const name = sanitizePdfFilename(RD.redactedName(
+      currentDocumentName(),
+      redactFwd ? (t) => PK.translate(redactFwd, t).text : null,
+    ));
+    const ok = await writeOutPdf(bytes, name);
+    statusEl.textContent = ok
+      ? `Saved ${name} — ${boxes} box${boxes === 1 ? "" : "es"} blacked out, no text layer, no metadata.`
+      : "";
+  } catch (e) {
+    console.error("[pdf-viewer] redaction failed:", e);
+    statusEl.textContent = "Redaction failed: " + (e && e.message ? e.message : e);
+  } finally {
+    redactSaving = false;
+    updateRedactState();
+  }
+}
+
+if (redactToggleEl) redactToggleEl.addEventListener("click", () => setRedactMode(!redactMode));
+if (redactDoneEl)   redactDoneEl.addEventListener("click", () => setRedactMode(false));
+if (redactMarkEl) redactMarkEl.addEventListener("change", () => {
+  redactMark = redactMarkEl.value === "area" ? "area" : "text";
+  document.body.classList.toggle("redact-area-mode", redactMode && redactMark === "area");
+});
+if (redactKeyEl) redactKeyEl.addEventListener("change", () => {
+  setRedactKey(redactKeyEl.value ? keyLibrary()[redactKeyEl.value] : null);
+  // A key chosen is a key meant to be used: the document is swept at once.
+  if (redactKeyEl.value) scanForKeyValues();
+});
+if (redactLoadKeyEl) redactLoadKeyEl.addEventListener("click", pickRedactKey);
+if (redactKeyInputEl) redactKeyInputEl.addEventListener("change", async () => {
+  const f = redactKeyInputEl.files && redactKeyInputEl.files[0];
+  redactKeyInputEl.value = "";
+  if (!f) return;
+  try { await loadRedactKeyFromFile(f); scanForKeyValues(); }
+  catch (e) { statusEl.textContent = String(e.message || e); }
+});
+if (redactScanEl)  redactScanEl.addEventListener("click", scanForKeyValues);
+if (redactClearEl) redactClearEl.addEventListener("click", () => {
+  RD.clearRedactions();
+  repaintAllRedactions();
+  updateRedactState();
+  statusEl.textContent = "Every box taken back off.";
+});
+if (redactSaveEl) redactSaveEl.addEventListener("click", saveRedactedCopy);
+
+// A drag over text marks it. The mouseup is taken on the document rather than
+// per page because a selection can cross a page break, and both halves of it
+// are the same decision.
+document.addEventListener("mouseup", () => {
+  if (!redactMode || redactMark !== "text") return;
+  // The selection is only final after the browser has finished settling it.
+  setTimeout(() => {
+    if (!redactMode || redactMark !== "text") return;
+    if (redactCurrentSelection()) updateRedactState();
+  }, 0);
+});
+
+// The most recent key is offered as soon as the viewer opens, so a case folder
+// already shown to the text reader needs no second trip to the file picker.
+{
+  const lib = keyLibrary();
+  const ids = keyIds(lib);
+  fillKeySelect(redactKeyEl, ids[0] || "");
+  if (ids.length) setRedactKey(lib[ids[0]]);
+  updateRedactState();
+}
+
 // ── Crop tool: user-defined selectable-text region ──────────────────────────
 // The user toggles the tool on and drags a box; text outside the box becomes
 // non-selectable (see applySelectableArea). The region is saved and reused for
@@ -3245,6 +3733,7 @@ function setCropMode(on) {
   if (on) {
     // Both bars sit in the same strip under the toolbar.
     pageRotation.close();
+    if (redactMode) setRedactMode(false);
     // Turn off the other drag tools so their marquees don't fight the crop drag.
     if (highlightMode) {
       highlightMode = false;
@@ -4508,6 +4997,7 @@ pageRotation.init({
   status: flashStatus,
   beforeOpen: () => {
     if (cropMode) setCropMode(false);
+    if (redactMode) setRedactMode(false);
     if (organizeMode) exitOrganize();
   },
   blocked: () => organizeMode,

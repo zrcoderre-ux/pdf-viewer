@@ -693,6 +693,71 @@ Anything that reloads the document from edited bytes must call
 `pageRotation.clear()`, or the new bytes (which already carry the angles) would
 be turned a second time.
 
+## Redaction (`viewer/redact.js`, `pdf-edit.buildRedactedPdf`)
+
+The **▬ Redact** tool marks what has to go and saves a flattened copy with it
+blacked out. Three things are load-bearing and should not be traded away:
+
+1. **The copy is a raster, not the original with rectangles on it.** A
+   rectangle drawn over text leaves the text in the file. `saveRedactedCopy`
+   re-renders **every** page to an offscreen canvas at the chosen dpi, fills
+   the boxes black on that canvas, encodes it, and `buildRedactedPdf` assembles
+   the images into a document created fresh (`PDFDocument.create`). Every page,
+   not just the marked ones: a copy searchable everywhere except over the
+   boxes tells a reader where to look.
+2. **No metadata.** `create({ updateMetadata: false })` stops pdf-lib stamping
+   its own Producer and dates; `stripMetadata` deletes any `/Info` and the
+   catalog's XMP `/Metadata` outright, and `pruneEmptyPageEntries` takes out
+   the empty `/Annots`, `/Font` and `/ExtGState` a new page is built with. The
+   guarantee does not rest on the flag alone. `test-redact.mjs` inflates the
+   saved bytes and asserts all of it, because pdf-lib writes into compressed
+   object streams — an assertion made against the raw text would pass for the
+   wrong reason.
+3. **It never writes the open file.** `writeOutPdf` is called without
+   `inPlace`, so the local-file-handle branch is unreachable from here. The
+   toolbar's 💾 Save is the in-place one, and they must stay separate.
+
+Boxes live in **PDF user-space points**, not screen pixels: a zoom rebuilds
+every layer from scratch and the rotate tool changes the frame, and points are
+what survives both. `pageUserBoxByNum` holds the page's own box from
+`page.view` for clamping — deliberately not `pageHeightPtsByNum`, which is the
+*displayed* size and is wrong for a page carrying `/Rotate 90`.
+
+The key-driven pass (`scanForKeyValues`) reads a page's spans as one string
+(`redact.pageTextFromSpans`, joined by what the geometry says the gap is:
+newline, space, or nothing for a word cut in two), runs
+`pseudo-key.findRealSpans` over it, and maps each match back to a DOM range
+(`redact.spanRangeFor`) for its rectangles. `applySelectableArea` empties the
+spans of the pleading gutter and anything outside a crop region, so the page's
+span texts are captured before that (`capturePageSpans`, text only — no layout
+read) and put back for the length of the measurement. A name is no less
+printed on the page for being unselectable.
+
+`redact.js` is the store and the painting; its decisions (span joining, char
+range to span range, line merging, padding, clamping, the copy's name) are pure
+and covered by `test-redact.mjs`.
+
+## Keeps that ask nothing of PDF-Linker (`textdoc.keepNeedsRun`)
+
+A keep says *do not fake this value*. Where the run **faked** it, only
+PDF-Linker can put the real name back, so the keep goes into
+`New Real Values.txt` and a run has to happen. Where the value **stands in the
+clear**, the file already reads the way the keep wants it to: there is nothing
+to un-fake, and the keep is a note to the reader, not an instruction. Such a
+keep is marked `local`, `formatValuesFile` leaves it out, and `valuesDirty`
+does not count it — so it raises no "not written yet" and no closing prompt.
+
+Two things disqualify it: `never` (which reaches the next matter through the
+file and nowhere else) and a value PDF-Linker has raised on `LEAKS.xlsx` (whose
+row is where it gets answered). `setKeep` decides at the moment the keep is
+taken; `refreshKeepLocality` re-reads it when a document opens or a worksheet
+attaches, and only ever in the safe direction — `textdoc.owe` turns a local
+keep into an owed one and there is no call the other way.
+
+`fakeStandsInFile` asks the **key's own matcher**, not a plain search, so a
+pseudonym wrapped at the margin with a gutter number between its halves still
+counts as standing.
+
 ## Things to know before changing code
 
 - **No browser storage in artifact-style limits here**; this is a real
@@ -791,6 +856,7 @@ test-bare-rule.mjs                   Node-runnable bare-rule + rule-set carry-ov
 test-page-rotation.mjs               Node-runnable page-rotation geometry + scope tests
 test-citation-memory.mjs             Node-runnable per-URL citation-memory tests (stubbed DOM)
 test-section-lists.mjs               Node-runnable chained section-list tests (and / or / & connectors)
+test-redact.mjs                      Node-runnable redaction tests: span mapping, box merging, and the saved copy read back for text and metadata
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
 viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)
@@ -807,6 +873,9 @@ viewer/rotation.js                   Page rotation: per-page angles, rotate bar,
 viewer/citation-linker.js            Detection + placement + URL resolution
 viewer/citation-memory.js            Per-URL memory: cumulative TOA + remembered cases, saved across reloads
 viewer/highlights.js                 Selection, highlight, context menu
+viewer/redact.js                     Redaction: the boxes, their store, the copy's name (pure parts; test-redact.mjs)
+viewer/key-library.js                The pseudonym keys in storage, shared by the reader and the viewer
+viewer/pdf-edit.js                   PDF writing via pdf-lib: highlights, page plans, stamps, the redacted copy
 viewer/footer-naming.js              Footer-title rule engine + iterative disambiguator
 viewer/disambiguation.js             Cross-tab collision registry (storage.session)
 viewer/naming-override.js            Per-document naming-mode override (storage.session)
