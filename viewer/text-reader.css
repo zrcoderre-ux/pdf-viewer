@@ -317,6 +317,8 @@ body.side-hidden #side { display: none; }
    re-run, and the tag says so rather than sitting beside the ones that are
    still owed. */
 .side-body li .tag.keep.settled { background: #2e7d32; }
+/* …and one still waiting on the folder being read: owed for now, and said to be. */
+.side-body li .tag.keep.pending { background: transparent; border: 1px solid var(--btn-border); color: var(--text-muted); }
 /* A document built ahead of the review, waiting off the page. */
 #docs-list li.ready::after { content: "\25CF"; margin-left: auto; flex: none; font-size: 9px; color: #2e7d32; }
 #docs-list li.ready.current::after { color: #fff; }

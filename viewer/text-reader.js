@@ -106,6 +106,7 @@ let folderDocs = [];         // [{ name, handle, quarantined }]
 let folderPdfs = [];         // [{ name, handle }] — the case folder's PDFs
 let key = null;              // parsed key (PK.parseKey)
 let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
+let fakesRx = null;          // …and one over the key's FAKES: which pseudonyms stand
 let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let flagsFor = null;         // …the storage key that list was read from, while a folder is being adopted
@@ -886,6 +887,11 @@ function compileKeyNow() {
   rev = key ? PK.compile(key) : null;
   fwd = k ? PK.compileForward(k) : null;
   reals = k ? PK.compileReals(k) : null;
+  // Over the WHOLE key, keeps and all. Taking a value out of the forward side
+  // is what a keep does; the question this one answers is whether the run
+  // faked that very value somewhere, and a matcher the keep had emptied could
+  // only ever answer no.
+  fakesRx = key ? PK.compileFakes(key) : null;
   // A kept value is never offered, and a real that opens one stays partial.
   ahead = k ? PK.compileTypeahead(k, allKeeps().map((x) => x.value)) : null;
   warmMatchers();
@@ -3123,6 +3129,12 @@ function showNamesBar(on) {
 // gives the thread back between documents, and is thrown away whenever the
 // key or the keeps move, being an answer about them.
 let sweep = { stamp: null, rows: [], at: 0, running: false };
+// Which PSEUDONYMS stand anywhere in the folder, folded. Collected by the same
+// reading the sweep does, but kept apart from it: the sweep is an answer about
+// the keeps and is thrown away whenever one is taken, while this is an answer
+// about what the RUN wrote, which a keep does not change. Rebuilt only when the
+// key or the folder's list of documents moves.
+let caseFakes = { key: null, docs: null, set: null };
 function sweepStale() {
   return !sweep.stamp || sweep.stamp.reals !== reals || sweep.stamp.keeps !== keeps
     || sweep.stamp.master !== masterKeeps || sweep.stamp.docs !== folderDocs;
@@ -3153,26 +3165,52 @@ async function sweepFolder() {
   if (!dirHandle || !reals || sweep.running || !sweepStale()) return;
   sweep = { stamp: { reals, keeps, master: masterKeeps, docs: folderDocs }, rows: [], at: 0, running: true };
   const mine = sweep.stamp;
+  // …and the fakes, only where the folder has not already been read for them
+  // under this key. A walk through the names drops the sweep at every decision;
+  // re-reading forty documents each time for an answer that cannot have changed
+  // would be the walk's whole cost.
+  const fakesFor = fakesIndexStale() ? { key, docs: folderDocs, set: new Set() } : null;
+  // …and whether every one of them was actually read. A document that would
+  // not open leaves the leak count a little short, which is a worse count; it
+  // leaves the FAKES index saying a pseudonym stands nowhere, which is a keep
+  // held back from a run that was the only thing able to undo it. So one
+  // unreadable document is enough to withhold the index entirely, and the
+  // keeps waiting on it stay owed.
+  let readAll = true;
   await duringAsync("reading the rest of the folder for names in the clear", async () => {
     let clock = await idleClock();
     for (const d of folderDocs) {
       if (sweep.stamp !== mine) return; // the key moved under it: this answer is stale
       sweep.at++;
       renderNamesBar();
-      if (d.handle === fileHandle) continue; // the open one is read from the page itself
+      if (d.handle === fileHandle) continue; // the open one is read from the page itself (and fakeStandsInFile)
       try {
         const text = await (await d.handle.getFile()).text();
         const masked = TD.blankRanges(maskKept(text), TD.citedNameSpans(text));
         const found = PK.findReals(reals, masked);
         if (found.length) sweep.rows.push({ doc: d, values: found.map((f) => f.real) });
-      } catch { /* unreadable: it is not a document this review can answer */ }
+        // …and, from the same reading, which PSEUDONYMS stand here. That is
+        // the other half of the folder's answer: a name in the clear is a leak,
+        // and a name the run faked is work only a run can undo. Over the raw
+        // text, not the masked one — a fake is standing whatever has been kept,
+        // and a party of a cited decision is not spared either, the run having
+        // faked it all the same. Only `fake` is read off the row: an ambiguous
+        // fake cannot say whose it is, and does not have to.
+        if (fakesFor && fakesRx) for (const w of PK.findReals(fakesRx, text)) fakesFor.set.add(PK.fold(w.fake));
+      } catch { readAll = false; /* unreadable: it is not a document this review can answer */ }
       if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
     }
   });
   if (sweep.stamp !== mine) return;
+  // Only a reading that ran to the end is an answer; a partial set would say a
+  // pseudonym stands nowhere when the document carrying it was never opened.
+  if (fakesFor && readAll) caseFakes = fakesFor;
   sweep.running = false;
   renderNamesBar();
   renderLeakStatus(); // the count says what the rest of the folder is carrying
+  // The folder has been read, so the keeps taken while it had not been can be
+  // decided on the evidence rather than held owed for want of it.
+  refreshKeepLocality();
 }
 /** On to a document of the folder that is carrying one, and stand on its first. */
 function jumpToDoc(row) {
@@ -3632,24 +3670,31 @@ function afterSpotChange(body, real, { undone = false } = {}) {
 
 // ── a keep that asks nothing of PDF-Linker ───────────────────────────────────
 //
-// Keeping a value that the run FAKED is work for PDF-Linker: the file carries
+// Keeping a value that the run FAKED is work for PDF-Linker: a file carries
 // the pseudonym and only a run can put the real name back. Keeping a value
 // that stands in the clear is not. Nothing faked it, so there is nothing to
-// un-fake — the file already reads the way the keep wants it to read, the save
-// simply leaves it alone, and the whole of the decision is "stop marking this,
-// it was left alone on purpose."
+// un-fake — the files already read the way the keep wants them to, the save
+// simply leaves the value alone, and the whole of the decision is "stop
+// marking this, it was left alone on purpose."
 //
 // Such a keep stays here. It is not written into New Real Values.txt, it does
 // not make the list one the case folder is owed, and it asks for no re-run.
-// The rule itself is in textdoc.keepNeedsRun; these two answer the facts it
-// turns on.
+//
+// AND THE QUESTION IS THE CASE'S, NOT THE DOCUMENT'S. A keep applies to every
+// export in the folder, so "was it faked?" has to be asked of every export in
+// the folder: a pseudonym standing in one of the other forty is a name the
+// next run is the only thing that can restore, whatever the document on
+// screen happens to say. The folder sweep already reads each export once, and
+// writes down which pseudonyms stand in it as it goes (sweepFolder); this
+// reads that index, plus the open document, which the sweep skips because the
+// page itself is the better copy of it.
+//
+// Until the sweep has answered there is no evidence, and a keep held back for
+// want of evidence is a name the run never restores with nothing to say so.
+// So a keep taken then is `pending`: owed like any other, and re-decided the
+// moment the folder has been read. The rule itself is textdoc.keepNeedsRun.
 
-/**
- * Whether the file this document came from carries the value's pseudonym.
- * `text` is the file's own text where the caller already has it — asking about
- * several keeps at once would otherwise serialize a thousand-page export once
- * per keep.
- */
+/** Whether the OPEN document's file carries the value's pseudonym. */
 function fakeStandsInFile(real, text) {
   if (!doc || !fwd) return false;
   const fake = TD.fakeFor(fwd, real);
@@ -3664,6 +3709,27 @@ function fakeStandsInFile(real, text) {
   return rx.test(text == null ? TD.serializeExport(doc) : text);
 }
 
+/** Whether the folder's fakes index is out of step with the key or the folder. */
+function fakesIndexStale() {
+  return !caseFakes.set || caseFakes.key !== key || caseFakes.docs !== folderDocs;
+}
+
+/** Whether the value's pseudonym stands anywhere in the case: the folder, or here. */
+function fakeStandsInCase(real, text) {
+  const fake = fwd ? TD.fakeFor(fwd, real) : "";
+  if (fake && caseFakes.set && caseFakes.set.has(PK.fold(fake))) return true;
+  // The sweep skips the open document, so it answers for itself.
+  return fakeStandsInFile(real, text);
+}
+
+/**
+ * Whether the case has actually been read for pseudonyms. With no folder open
+ * there is nothing to read but the document, and the document is the case.
+ */
+function caseIsRead() {
+  return !dirHandle || !reals ? true : !fakesIndexStale();
+}
+
 /** Whether PDF-Linker has raised this value on LEAKS.xlsx. */
 function onLeaksSheet(real) {
   const want = LK.fold(real);
@@ -3671,19 +3737,41 @@ function onLeaksSheet(real) {
 }
 
 /**
- * Keeps taken as local, re-read against the facts as they now stand. Only ever
- * in the one direction: a document opened later turns out to carry the
- * pseudonym, or a worksheet arrives with the value on it, and what was a note
- * to the reader becomes a run's worth of work again. The reverse is never
- * inferred — a keep once owed stays owed until it is written out.
+ * Whether the keep has already gone to the case folder. Once its line is in
+ * New Real Values.txt it is PDF-Linker's, and taking it back out is a change to
+ * a file nobody asked to change — the run leaving a value alone that was
+ * already standing costs nothing, so it is left there.
+ */
+function keepWasWrittenOut(k) {
+  const line = `${k.control}: ${k.value}`;
+  return lsGet(valuesSavedKey(), "").split(/\r?\n/).some((l) => l.trim() === line);
+}
+
+/**
+ * Every keep read again against the facts as they now stand.
+ *
+ *   local → owed      an export of the folder turns out to carry the
+ *                     pseudonym, or a worksheet arrives with the value on it.
+ *   pending → local   the folder has now been read, and it does not.
+ *
+ * The second move is the only one made toward local, and it is made only from
+ * `pending` and only once the folder has actually been read — and never for a
+ * keep already written into New Real Values.txt, which is PDF-Linker's now.
  */
 function refreshKeepLocality() {
-  const local = keeps.filter((k) => k.local);
-  if (!local.length) return;
+  const watched = keeps.filter((k) => k.state);
+  if (!watched.length) return;
   const text = doc ? TD.serializeExport(doc) : "";
+  const read = caseIsRead();
   let moved = keeps;
-  for (const k of local) {
-    if (fakeStandsInFile(k.value, text) || onLeaksSheet(k.value)) moved = TD.owe(moved, k.value);
+  for (const k of watched) {
+    const needsRun = TD.keepNeedsRun({
+      control: k.control,
+      faked: fakeStandsInCase(k.value, text),
+      onLeaksSheet: onLeaksSheet(k.value),
+    });
+    if (needsRun) moved = TD.owe(moved, k.value);
+    else if (k.state === "pending" && read && !keepWasWrittenOut(k)) moved = TD.settleLocal(moved, k.value);
   }
   if (moved === keeps) return;
   keeps = moved;
@@ -3692,15 +3780,17 @@ function refreshKeepLocality() {
 }
 
 function setKeep(real, control, { leak = false } = {}) {
-  // A keep on a value standing in the clear, for this case only, that
-  // PDF-Linker has not itself raised, is a decision the file already carries
-  // out. Anything else is work the case folder has to be handed.
-  const local = !!control && !TD.keepNeedsRun({
+  // A keep on a value standing in the clear anywhere in the case, for this
+  // case only, that PDF-Linker has not itself raised, is a decision the files
+  // already carry out. Anything else is work the case folder has to be handed
+  // — and so, for now, is a keep taken before the folder has been read.
+  let state = "";
+  if (control && !TD.keepNeedsRun({
     control,
-    faked: !leak || fakeStandsInFile(real),
+    faked: !leak || fakeStandsInCase(real),
     onLeaksSheet: onLeaksSheet(real),
-  });
-  keeps = control ? TD.addKeep(keeps, control, real, local) : TD.removeKeep(keeps, real);
+  })) state = caseIsRead() ? "local" : "pending";
+  keeps = control ? TD.addKeep(keeps, control, real, state) : TD.removeKeep(keeps, real);
   persistValues();
   compileKey();
   remarkKept();
@@ -3708,8 +3798,10 @@ function setKeep(real, control, { leak = false } = {}) {
   paintHighlights();
   showSidePanel(true);
   showSideTab("tab-flags");
+  sweepFolder(); // a pending keep is waiting on this
   toast(!control ? `"${real}" is a pseudonym again`
-    : local ? `"${real}" left as it stands — the file already carries it that way, so there is nothing to hand over and nothing to re-run. It is simply no longer marked.`
+    : state === "local" ? `"${real}" left as it stands — nothing in ${dirHandle ? folderName : "this document"} fakes it, so there is nothing to hand over and nothing to re-run. It is simply no longer marked.`
+    : state === "pending" ? `"${real}" left as it stands. Reading the rest of ${folderName} to see whether anything there fakes it — until that is known it stays on the list for PDF-Linker.`
     : leak ? `"${real}" kept${control === "never" ? " in every case" : " in this case"} — left as it stands, on save and on PDF-Linker's next run (save the list to the case folder first).`
     : `"${real}" kept${control === "never" ? " in every case" : " in this case"} — un-marked here now; PDF-Linker un-fakes it in the file on its next run (save the list to the case folder first).`);
 }
@@ -3841,10 +3933,13 @@ function renderFlags() {
     const li = document.createElement("li");
     li.textContent = k.value;
     const t = document.createElement("span");
-    t.className = "tag keep" + (k.local ? " settled" : "");
-    t.textContent = k.control === "never" ? "never" : k.local ? "already so" : "this case";
+    t.className = "tag keep" + (k.state === "local" ? " settled" : k.state === "pending" ? " pending" : "");
+    t.textContent = k.control === "never" ? "never"
+      : k.state === "local" ? "already so"
+      : k.state === "pending" ? "checking" : "this case";
     t.title = k.control === "never" ? "Kept in every case (never)"
-      : k.local ? "Kept in this case — and the file already carries it this way, so it is not written to " + TD.VALUES_FILE + " and needs no re-run."
+      : k.state === "local" ? "Kept in this case — and nothing in the case fakes it, so it is not written to " + TD.VALUES_FILE + " and needs no re-run."
+      : k.state === "pending" ? "Kept in this case. Until the rest of the folder has been read for its pseudonym it stays on the list for PDF-Linker."
       : "Kept in this case (no)";
     li.appendChild(t);
     li.title = "Click to find it in the document";

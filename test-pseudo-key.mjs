@@ -8,7 +8,7 @@
 
 import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
-  compileReals, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
+  compileReals, compileFakes, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher,
 } from "./viewer/pseudo-key.js";
 
@@ -80,6 +80,25 @@ check("real → fake for a save", forwardRuns(f, "Plaintiff HELEN RASHO and Rash
 check("the alt spelling forwards too", forwardRuns(f, "Ardeshirpour- Zartoshti")[0].to, "Sedgwick-Linford");
 check("the kept value is not a real to forward", forwardRuns(f, "Cal Labor").length, 1);
 check("findReals distinct, first seen", findReals(compileReals(key), "Rasho, Rasho, Helen Rasho").map((w) => w.real), ["Rasho", "Helen Rasho"]);
+
+// The other side of the same question: which PSEUDONYMS stand in a text. A
+// keep on a value the run faked is work only a run can undo, and this is what
+// says whether it did.
+console.log("compileFakes: which pseudonyms stand");
+{
+  const rx = compileFakes(key);
+  check("the fakes standing, distinct and first seen",
+    findReals(rx, "Strangeways wrote; Ingrid Strangeways signed; Strangeways filed.").map((w) => w.fake),
+    ["Strangeways", "Ingrid Strangeways"]);
+  check("a possessive is the same pseudonym",
+    findReals(rx, "Strangeways' declaration").map((w) => w.fake), ["Strangeways"]);
+  check("wrapped at the margin, gutter number and all, it is still standing",
+    findReals(rx, "Ingrid\n 9  Strangeways").map((w) => w.fake), ["Ingrid Strangeways"]);
+  check("a text with no pseudonym in it", findReals(rx, "the moving papers say nothing").length, 0);
+  check("the real name standing in the clear is not a pseudonym standing",
+    findReals(rx, "Helen Rasho appeared").length, 0);
+  check("no key, nothing to match", findReals(compileFakes(null), "anything").length, 0);
+}
 
 console.log("identity");
 check("file name", [isKeyFileName("pseudonym_key.xlsx"), isKeyFileName("pseudonym key (2).xlsx"), isKeyFileName("x.xlsx")], [true, true, false]);
