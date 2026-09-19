@@ -478,19 +478,74 @@ const VALUES_HEAD = [
 export const KEEP_RE = /^(no|never)\s*:\s*(.+?)\s*$/i;
 export const KEEP_CONTROLS = ["no", "never"];
 
-/** A keep entry as the list holds it: { control, value }. */
-export function makeKeep(control, value) {
+/**
+ * Whether a keep is work for PDF-Linker, or work already done.
+ *
+ * A keep says: do not fake this value. What that COSTS depends on what the
+ * file already says, and the two cases are not the same job at all.
+ *
+ *   The run faked it. The file carries the pseudonym and only PDF-Linker can
+ *     put the real name back, so the keep has to reach the case folder and the
+ *     run has to happen before the file reads the way the keep wants it to.
+ *   The value stands in the clear. Nothing faked it, so there is nothing to
+ *     un-fake: the file ALREADY reads the way the keep wants it to. The keep
+ *     is not an instruction, it is a note to the reader — stop marking this,
+ *     it was left alone on purpose — and handing it to PDF-Linker would ask a
+ *     run to do what has already been done.
+ *
+ * Two things spoil the second case. `never` is a decision about every matter
+ * this operator will ever open, which only the case folder's file carries from
+ * one to the next, so it is always written out. And a value PDF-Linker has
+ * itself raised on LEAKS.xlsx is a question already asked: the worksheet's own
+ * Fix? cell is where it gets answered, and a keep that stayed here would leave
+ * that row standing open.
+ */
+export function keepNeedsRun({ control, faked, onLeaksSheet }) {
+  return control === "never" || !!faked || !!onLeaksSheet;
+}
+
+/**
+ * A keep entry as the list holds it: { control, value } — and `local: true`
+ * where the keep asks nothing of PDF-Linker (keepNeedsRun said no), which is
+ * what keeps it out of New Real Values.txt.
+ */
+export function makeKeep(control, value, local) {
   const c = String(control || "no").toLowerCase();
-  return { control: KEEP_CONTROLS.includes(c) ? c : "no", value: normalizeValue(value) };
+  const k = { control: KEEP_CONTROLS.includes(c) ? c : "no", value: normalizeValue(value) };
+  // `never` reaches the next matter through the file and nowhere else, so it is
+  // never local however it was asked for.
+  if (local && k.control === "no") k.local = true;
+  return k;
 }
 /** Add a keep, or change the control of one already held (its spelling kept). */
-export function addKeep(keeps, control, value) {
-  const k = makeKeep(control, value);
+export function addKeep(keeps, control, value, local) {
+  const k = makeKeep(control, value, local);
   if (!k.value) return (keeps || []).slice();
   const have = (keeps || []).find((x) => foldKey(x.value) === foldKey(k.value));
   const out = (keeps || []).filter((x) => foldKey(x.value) !== foldKey(k.value));
-  out.push(have ? { control: k.control, value: have.value } : k);
+  out.push(have ? makeKeep(k.control, have.value, k.local) : k);
   return out;
+}
+/** The keeps PDF-Linker is owed: everything but the ones already answered. */
+export function owedKeeps(keeps) {
+  return (keeps || []).filter((k) => !k.local);
+}
+/**
+ * A keep the file already answers, turned back into one PDF-Linker is owed.
+ * The facts a keep was taken under can change under it — another document in
+ * the folder turns out to carry the pseudonym, or PDF-Linker raises the value
+ * on LEAKS.xlsx — and the safe direction is the only one taken: a keep can
+ * stop being local, never start.
+ */
+export function owe(keeps, value) {
+  const k = foldKey(value);
+  let moved = false;
+  const out = (keeps || []).map((x) => {
+    if (foldKey(x.value) !== k || !x.local) return x;
+    moved = true;
+    return { control: x.control, value: x.value };
+  });
+  return moved ? out : keeps;
 }
 export function removeKeep(keeps, value) {
   const k = foldKey(value);
@@ -566,7 +621,11 @@ export function dropFlagsInKey(list, compiledForward) {
 
 export function formatValuesFile(values, keeps) {
   const body = (values || []).map(normalizeValue).filter(Boolean);
-  const kept = (keeps || []).map((k) => makeKeep(k.control, k.value)).filter((k) => k.value).map((k) => `${k.control}: ${k.value}`);
+  // A local keep is left out on purpose: the file it would go into is a list of
+  // work for the next run, and that keep is work the run has already done
+  // (keepNeedsRun). Writing it would hand PDF-Linker a value to leave exactly
+  // as it already is.
+  const kept = owedKeeps(keeps).map((k) => makeKeep(k.control, k.value)).filter((k) => k.value).map((k) => `${k.control}: ${k.value}`);
   return VALUES_HEAD.concat(body, kept).join("\n") + "\n";
 }
 

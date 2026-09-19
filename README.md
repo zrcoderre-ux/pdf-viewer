@@ -26,6 +26,10 @@ In addition to citation linking, the viewer supports:
   or copy. The area is remembered and applied to every document until you change
   it or **Reset to full page**. (With no area set, the viewer still auto-detects
   and excludes a pleading line-number column.)
+- **Redaction** — mark what has to go (every real value the pseudonym key
+  binds, plus anything you drag over), check it while it is still only
+  proposed, then save a flattened copy with it blacked out — no text layer, no
+  metadata, and never over the original. See below.
 - **Persistent highlighting** — select any text and release the mouse to
   apply a yellow highlight. Right-click a highlight to remove it. Highlights
   persist across zoom changes; for editable documents they can be saved into
@@ -236,6 +240,57 @@ pleading keeps its `p. 4:12-18` references whichever way you're viewing it.
 While **Organize pages** is open it owns the page angles — its thumbnails have
 their own rotate buttons — and opening it carries over any rotation you had
 pending.
+
+## Redaction
+
+A redacted copy of a filing, with the pseudonym key doing the first pass.
+
+Open **▬ Redact** in the tools rail. The key is the baseline: choose the case's
+`pseudonym_key.xlsx` in the bar — every key the text reader has been shown is
+already offered there — and the viewer sweeps the document for every real value
+the key binds and proposes a box over each one, wherever it stands. That is the
+same list PDF-Linker scrubs the case's text exports by, applied to the PDF
+nobody scrubbed. Anything the key cannot reach you mark by hand: with **Drag
+marks text** a drag over the page proposes the words it covers, and with **Drag
+marks an area** it proposes the box itself — a signature, a photograph, an
+exhibit stamp, a scanned page whose text layer knows nothing.
+
+**Nothing is hidden until you save.** A proposal is a translucent red box with
+the words still legible underneath, so you can read what is about to go and
+take any box back off with a click. Boxes the key proposed are outlined in
+dashes and the ones you drew are solid, so a sweep of the document shows which
+are the run's and which are yours. They stay put through zoom and through the
+rotate tool, because a box is stored in the page's own coordinates rather than
+in screen pixels.
+
+**Save redacted copy** writes a new file, and never the one you have open. The
+redaction tool has no in-place path at all — the toolbar's 💾 Save is a
+different button, for highlights and rotation.
+
+What it writes is not this document with black rectangles added. A rectangle
+drawn over text leaves the text in the file, where anything that can select
+text can read it straight back out; that is how redacted filings have been
+un-redacted for as long as there have been redacted filings. Instead every page
+is rendered to an image with the boxes painted into the pixels, and those
+images become a new document that has never held anything else:
+
+- **no text layer** — on any page, not just the marked ones. A copy that kept
+  its unmarked pages as they were would be searchable everywhere except over
+  the black boxes, which tells a reader where to look and hands them the rest
+  of the document besides;
+- **no annotations, no form fields, no outlines, no embedded fonts**;
+- **no metadata** — no `/Info` dictionary and no XMP packet, so nothing in the
+  file carries the author, the software, the times, or the original filename.
+
+The copy is named for the document it came from, run forward through the key
+where one is loaded and marked redacted either way:
+`Rasho v Quillmark - MTC.pdf` is saved as
+`Strangeways v Melbury - MTC (redacted).pdf`. Re-redacting a redacted copy
+marks it once, not twice.
+
+Pages render at **200 dpi** by default; 150 makes a smaller file and 300 a
+sharper one. Because the result is images, it is larger than the original and
+no longer searchable — which is the point.
 
 ## Citation links on claude.ai
 
@@ -1204,6 +1259,26 @@ app, which routes it to the reader tab.
   prompt an edited document or an unsaved LEAKS decision raises; the browser's
   own dialog is all a page gets, and which of the three it is, the panels
   say).
+- **A keep the file already carries out asks nothing of PDF-Linker.** A keep
+  says *do not fake this value*, and what that costs depends on what the file
+  already says. Where the run faked it, the file carries the pseudonym and only
+  PDF-Linker can put the real name back: the keep has to reach the case folder
+  and the run has to happen. Where the value **stands in the clear**, nothing
+  faked it — there is nothing to un-fake, the file already reads the way the
+  keep wants it to read, and handing it over would ask a run to do what has
+  already been done. So that keep stays in the reader. It is not written into
+  `New Real Values.txt`, it does not make the list one the case folder is owed,
+  it raises no closing prompt, and the whole of its effect is the one that was
+  wanted: the value stops being marked. The **Flagged** panel tags it *already
+  so* rather than *this case*. Two things take a keep out of that case, because
+  both mean a question is still open: **Never fake it anywhere** reaches the
+  next matter through the file and nowhere else, so it is always written out;
+  and a value PDF-Linker has itself raised on `LEAKS.xlsx` has a row waiting on
+  an answer, which is where it gets answered. The facts are read again as they
+  change, and only in the safe direction — open a document in the same folder
+  that turns out to carry the pseudonym, or attach a worksheet that raises the
+  value, and the keep goes back on the list the case folder is owed. A keep
+  once owed is never quietly made local again.
 - **A keep stays visible.** A value kept is a decision, and with the orange
   mark gone (it is not a leak any more) nothing used to say so — the name read
   like any other word, and a page read a week later gave no sign which names
@@ -1475,6 +1550,10 @@ viewer/viewer.css                    Page + textLayer + linkLayer styles
 viewer/viewer.js                     PDF.js loader, two-pass renderer
 viewer/autoscroll.js                 Auto-scroll engine + control bar
 viewer/rotation.js                   Page rotation: angles, bar, geometry
+viewer/redact.js                     Redaction: boxes in PDF points, the key sweep's decisions, the copy's name (pure parts; test-redact.mjs)
+viewer/pdf-edit.js                   PDF writing (pdf-lib): highlights, page plans, stamps, the flattened redacted copy
+viewer/key-library.js                The pseudonym keys this browser has been shown — one library, reader and viewer
+viewer/highlights.js                 Selection, highlight, context menu
 viewer/citation-linker.js            Detection + URL resolution
 viewer/footer-naming.js              Footer-derived naming rule engine
 viewer/disambiguation.js             Cross-tab collision registry

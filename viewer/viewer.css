@@ -284,6 +284,75 @@ body.crop-mode .textLayer span { cursor: crosshair; }
 #rotate-bar button:disabled { opacity: 0.5; cursor: default; }
 #rotate-bar #rot-left,
 #rotate-bar #rot-right { font-size: 16px; line-height: 1; padding: 4px 10px; }
+/* Redaction bar — the same floating strip as the crop / rotate / form bars,
+   plus the key picker, what a drag marks, and the running count of boxes. */
+#redact-bar {
+  position: fixed;
+  top: calc(var(--toolbar-height) + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #2a2d30;
+  border: 1px solid #4a4d50;
+  border-radius: 8px;
+  padding: 8px 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  color: #eee;
+  max-width: calc(100vw - 32px);
+  flex-wrap: wrap;
+}
+#redact-bar[hidden] { display: none; }
+#redact-bar .redact-bar-label { color: #cfcfcf; }
+#redact-bar .redact-bar-state {
+  color: #cfcfcf;
+  min-width: 140px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#redact-bar select {
+  background: #4a4d50;
+  color: #eee;
+  border: none;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 6px;
+  cursor: pointer;
+  max-width: 220px;
+}
+#redact-bar button {
+  background: #4a4d50;
+  color: #eee;
+  border: none;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+#redact-bar button:hover { background: #5a5d60; }
+#redact-bar button.primary { background: #c5221f; }
+#redact-bar button.primary:hover { background: #a81d1a; }
+#redact-bar button:disabled { opacity: 0.5; cursor: default; }
+
+/* The box drawn while an area drag is in progress. Absolute (document-anchored)
+   so it stays over the same words if the page scrolls mid-drag — the crop
+   tool's marquee does the same. */
+#redact-marquee {
+  position: absolute;
+  display: none;
+  pointer-events: none;
+  z-index: 2147483646;
+  border: 1px solid rgba(197, 34, 31, 0.95);
+  background: rgba(197, 34, 31, 0.18);
+}
+
 #zoom-level { min-width: 48px; text-align: center; }
 #page-indicator { min-width: 64px; text-align: center; font-variant-numeric: tabular-nums; }
 
@@ -781,6 +850,39 @@ body.thumbs-open #viewer-container {
   opacity: 0.4;
 }
 
+/* Proposed redactions. Above the highlights and the selection, because a box
+   here is the thing being decided — but TRANSLUCENT, and never painted onto the
+   canvas: until the copy is saved, the words under a box have to stay legible
+   so what is about to go can be read first and taken back off. In the saved
+   file these same boxes are solid black in the pixels; on screen they never
+   are. Each box takes its own clicks (the layer does not) so one can be
+   removed without disturbing the selection anywhere else. */
+.redactLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+}
+.redactLayer .redact-rect {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  background: rgba(197, 34, 31, 0.32);
+  outline: 1.5px solid rgba(197, 34, 31, 0.95);
+  outline-offset: -1px;
+}
+/* A box the key proposed is marked off from one drawn by hand, so a sweep of
+   the document says which are the run's and which are yours. */
+.redactLayer .redact-rect.from-key {
+  background: rgba(197, 34, 31, 0.24);
+  outline-style: dashed;
+}
+.redactLayer .redact-rect:hover {
+  background: rgba(197, 34, 31, 0.5);
+}
+/* While the tool is on, the pointer says what a drag will do. */
+body.redact-area-mode .textLayer { cursor: crosshair; }
+
 /* Citation overlay layer — sits on top of the text layer. The container
    doesn't capture pointer events (selection works through it), and each
    <a> is sized only to the underline strip itself so it doesn't block
@@ -1130,20 +1232,30 @@ select.form-field { padding: 0; }
 /* Crop / form floating bars */
 :root[data-theme="light"] #crop-bar,
 :root[data-theme="light"] #form-bar,
-:root[data-theme="light"] #rotate-bar {
+:root[data-theme="light"] #rotate-bar,
+:root[data-theme="light"] #redact-bar {
   background: var(--l-panel); border-color: var(--l-border); color: var(--l-text);
 }
 :root[data-theme="light"] #crop-bar .crop-bar-label,
 :root[data-theme="light"] #form-bar .form-bar-label,
 :root[data-theme="light"] #rotate-bar .rotate-bar-label,
-:root[data-theme="light"] #rotate-bar .rotate-bar-state { color: var(--l-text-muted); }
+:root[data-theme="light"] #rotate-bar .rotate-bar-state,
+:root[data-theme="light"] #redact-bar .redact-bar-label,
+:root[data-theme="light"] #redact-bar .redact-bar-state { color: var(--l-text-muted); }
 :root[data-theme="light"] #crop-bar button,
 :root[data-theme="light"] #form-bar button,
 :root[data-theme="light"] #rotate-bar button,
-:root[data-theme="light"] #rotate-bar select { background: var(--l-btn); color: var(--l-text); }
+:root[data-theme="light"] #rotate-bar select,
+:root[data-theme="light"] #redact-bar button,
+:root[data-theme="light"] #redact-bar select { background: var(--l-btn); color: var(--l-text); }
 :root[data-theme="light"] #crop-bar button:hover,
 :root[data-theme="light"] #form-bar button:hover,
-:root[data-theme="light"] #rotate-bar button:hover { background: var(--l-btn-hover); }
+:root[data-theme="light"] #rotate-bar button:hover,
+:root[data-theme="light"] #redact-bar button:hover { background: var(--l-btn-hover); }
+/* The redaction bar's primary stays red in both themes: it is the button that
+   writes the file everything is hidden in. */
+:root[data-theme="light"] #redact-bar button.primary { background: #c5221f; color: #fff; }
+:root[data-theme="light"] #redact-bar button.primary:hover { background: #a81d1a; }
 
 /* Modals */
 :root[data-theme="light"] .modal { background: var(--l-panel); color: var(--l-text); border-color: var(--l-border); }

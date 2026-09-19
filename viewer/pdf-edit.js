@@ -373,6 +373,77 @@ export async function hasFormFields(bytes) {
   }
 }
 
+// Build a REDACTED copy: a new document made of page images, carrying nothing
+// else at all.
+//
+// This is deliberately not "the original with black rectangles added". A
+// rectangle drawn over text leaves the text in the file, and a redaction that
+// can be selected, copied or extracted is not a redaction. So the caller hands
+// us each page already rendered to an image with its black boxes painted into
+// the pixels, and we assemble those images into a document that has never held
+// anything else: no text, no fonts, no annotations, no form fields, no
+// outlines, no attachments — and no metadata, because a document's /Info and
+// its XMP packet carry the author, the software, the times and often the
+// original filename, none of which belongs in a copy made to hide things.
+//
+//   pages: [{ bytes, format: "jpg"|"png", widthPts, heightPts }] in page order,
+//          each image covering its whole page.
+//
+// `updateMetadata: false` is what stops pdf-lib stamping its own Producer and
+// CreationDate onto the way out; stripMetadata takes care of anything that got
+// in anyway, so the guarantee does not rest on that flag alone.
+export async function buildRedactedPdf({ pages = [] }) {
+  if (!pages.length) throw new Error("A redacted copy needs at least one page.");
+  const doc = await PDFDocument.create({ updateMetadata: false });
+  for (const p of pages) {
+    if (!p || !p.bytes) continue;
+    const img = p.format === "png" ? await doc.embedPng(p.bytes) : await doc.embedJpg(p.bytes);
+    const w = Math.max(1, p.widthPts), h = Math.max(1, p.heightPts);
+    const page = doc.addPage([w, h]);
+    page.drawImage(img, { x: 0, y: 0, width: w, height: h });
+    pruneEmptyPageEntries(page);
+  }
+  stripMetadata(doc);
+  return doc.save();
+}
+
+// A new page is built with an empty /Annots array and empty /Font and
+// /ExtGState resource dictionaries, ready for things this document will never
+// have. Left in, they are what someone auditing the file would find where they
+// were looking for exactly those words. They hold nothing, so they go.
+function pruneEmptyPageEntries(page) {
+  const node = page.node;
+  const annots = node.lookupMaybe(PDFName.of("Annots"), PDFArray);
+  if (annots && annots.size() === 0) node.delete(PDFName.of("Annots"));
+  const res = node.lookupMaybe(PDFName.of("Resources"), PDFDict);
+  if (!res) return;
+  for (const key of ["Font", "ExtGState", "Shading", "Pattern"]) {
+    const sub = res.lookupMaybe(PDFName.of(key), PDFDict);
+    if (sub && sub.keys().length === 0) res.delete(PDFName.of(key));
+  }
+}
+
+// Take every trace of provenance out of a document: the /Info dictionary (Title,
+// Author, Subject, Keywords, Creator, Producer, the two dates) and the catalog's
+// XMP /Metadata stream, which carries the same things again in a form some
+// readers prefer. Both objects are deleted outright rather than blanked, so
+// there is no empty shell left saying what used to be filled in.
+export function stripMetadata(doc) {
+  const ctx = doc.context;
+  const info = ctx.trailerInfo && ctx.trailerInfo.Info;
+  if (info) {
+    try { ctx.delete(info); } catch { /* already gone */ }
+    delete ctx.trailerInfo.Info;
+  }
+  try {
+    const md = doc.catalog.get(PDFName.of("Metadata"));
+    if (md) {
+      try { ctx.delete(md); } catch { /* already gone */ }
+      doc.catalog.delete(PDFName.of("Metadata"));
+    }
+  } catch { /* no catalog entry to take out */ }
+}
+
 // Page count of a PDF (used to report merge results).
 export async function pageCount(bytes) {
   const doc = await PDFDocument.load(bytes);

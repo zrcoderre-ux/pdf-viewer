@@ -313,6 +313,10 @@ body.side-hidden #side { display: none; }
 .side-body li.current { background: var(--accent); color: #fff; }
 .side-body li .tag { font-size: 10px; padding: 1px 5px; border-radius: 8px; background: #b71c1c; color: #fff; flex: none; }
 .side-body li .tag.keep { background: #546e7a; }
+/* A keep the file already carries out: nothing goes to PDF-Linker, nothing is
+   re-run, and the tag says so rather than sitting beside the ones that are
+   still owed. */
+.side-body li .tag.keep.settled { background: #2e7d32; }
 /* A document built ahead of the review, waiting off the page. */
 #docs-list li.ready::after { content: "\25CF"; margin-left: auto; flex: none; font-size: 9px; color: #2e7d32; }
 #docs-list li.ready.current::after { color: #fff; }
