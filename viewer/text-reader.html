@@ -90,6 +90,39 @@
       <button id="nb-skip" class="secondary">leave it for now</button>
     </div>
   </div>
+  <!-- Redacting the case folder's own PDF, from beside the export. The pane
+       shows the PDF a text export came from; this bar is what marks it and
+       what writes the copy. The boxes are proposals until the copy is saved,
+       and the copy is a new file — the PDF in the case folder is never
+       written. -->
+  <div id="redact-bar" class="revbar" hidden>
+    <div class="lb-row">
+      <span class="lb-type redact">redact</span>
+      <span id="rb-where" class="lb-where"></span>
+      <span class="spacer"></span>
+      <label class="tb-label" for="rb-mark">Drag marks</label>
+      <select id="rb-mark" title="What a drag over a PDF page marks: the text it covers, or the area itself — for a signature, a photograph, an exhibit stamp, a scanned page with no text layer to name anything in">
+        <option value="text">the text</option>
+        <option value="area">an area</option>
+      </select>
+      <button id="rb-scan" title="Mark every real value the key binds, wherever it stands — every page of the PDF, including the pages this export has no text for">Mark from key</button>
+      <button id="rb-clear" class="secondary" title="Take every box back off">Clear</button>
+      <button id="rb-close" title="Leave the tool (the boxes stay)">×</button>
+    </div>
+    <div class="lb-row lb-decide">
+      <span id="rb-state" class="lb-answer undecided">Nothing marked.</span>
+      <span id="rb-key" class="lb-where"></span>
+      <span class="spacer"></span>
+      <label class="tb-label" for="rb-dpi">Copy at</label>
+      <select id="rb-dpi" title="How finely the redacted copy is rendered. Every page becomes an image, so this is the resolution of the saved file.">
+        <option value="150">150 dpi</option>
+        <option value="200" selected>200 dpi</option>
+        <option value="300">300 dpi</option>
+      </select>
+      <button id="rb-save" class="danger" title="Save a flattened, redacted copy — a new file, never the PDF in the case folder">Save redacted copy…</button>
+    </div>
+  </div>
+
   <div id="key-offer" hidden><span id="key-offer-text"></span><button id="key-offer-btn" class="primary"></button><button id="key-offer-close" title="Dismiss">×</button></div>
 
   <div id="main">
@@ -144,6 +177,7 @@
         <button id="sbs-toggle" class="tool-btn" title="Show the PDF this export came from beside the text, page for page, scrolling together (remembered)" aria-pressed="false" disabled><span class="ti">⇔</span><span class="tl">Side by side</span></button>
         <label class="tool-btn tool-toggle" title="Side by side, lay each text page on its PDF page's own geometry — the same sheet size, every numbered line at its number's height on the PDF, the PDF's own type sizes and leading — so line 7 stands beside line 7. The citation underlines are off while it is on, being strips measured off lines the grid has moved. Off (the default), the text reads exactly as it does with the pane closed, the links are drawn as usual, and only the scrolling is tied together (remembered)"><input id="grid-toggle" type="checkbox" disabled><span class="ti">▦</span><span class="tl">Match PDF grid</span></label>
         <button id="swap-btn" class="tool-btn" title="Swap PDF pages into the text: read a page or a run of pages (a badly scanned exhibit) from the PDF, in place, while the rest stays text. For a Combined Text.txt, pick every member's PDF at once." disabled><span class="ti">⇄</span><span class="tl">PDF pages…</span></button>
+        <button id="redact-btn" class="tool-btn" title="Redact the PDF beside the text: the key marks every real value it binds, wherever it stands in the PDF, and a drag marks the rest. Saves a flattened copy with it blacked out — never the PDF in the case folder." aria-pressed="false" disabled><span class="ti">▬</span><span class="tl">Redact PDF</span></button>
       </div>
     </aside>
 

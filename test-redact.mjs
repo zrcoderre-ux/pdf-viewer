@@ -14,7 +14,7 @@ import {
   spanGap, pageTextFromSpans, spanRangeFor,
   mergeRects, padRect, clampRect, redactedName, countLabel,
   addRedaction, removeRedaction, redactionsFor, redactionPages,
-  redactionCount, clearRedactions,
+  redactionCount, clearRedactions, createRedactionStore, pageBoxFromView,
 } from "./viewer/redact.js";
 import { buildRedactedPdf } from "./viewer/pdf-edit.js";
 
@@ -164,6 +164,39 @@ console.log("the boxes held between now and the save");
     redactionCount(), { boxes: 1, pages: 1 });
   clearRedactions();
   check("and everything can go", redactionCount(), { boxes: 0, pages: 0 });
+}
+
+console.log("the page's own box, for holding a match inside it");
+{
+  check("a letter page", pageBoxFromView([0, 0, 612, 792]), { x: 0, y: 0, w: 612, h: 792 });
+  // A cropped page's box does not start at the origin, and a box is clamped
+  // to the box the PDF states, not to the size it is displayed at.
+  check("a box that does not start at the origin carries its offset",
+    pageBoxFromView([20, 30, 632, 822]), { x: 20, y: 30, w: 612, h: 792 });
+  check("no view, no box", pageBoxFromView(null), { x: 0, y: 0, w: 0, h: 0 });
+}
+
+console.log("a store per document, because a pane holds more than one");
+{
+  // The text reader's pane shows the pages of every member of a Combined
+  // Text.txt at once. Page 3 of the motion is not page 3 of the reply.
+  const motion = createRedactionStore();
+  const reply = createRedactionStore();
+  motion.add(3, [{ x: 10, y: 10, w: 40, h: 10 }], { kind: "key", label: "Helen Rasho" });
+  reply.add(3, [{ x: 20, y: 20, w: 40, h: 10 }], { kind: "area" });
+  check("each document counts only its own", motion.count(), { boxes: 1, pages: 1 });
+  check("a box filed under one is not under the other", reply.for(3)[0].kind, "area");
+  check("…and page 3 of one is not page 3 of the other", motion.for(3)[0].label, "Helen Rasho");
+  reply.clear();
+  check("clearing one leaves the other alone", motion.count(), { boxes: 1, pages: 1 });
+  check("and the cleared one is empty", reply.count(), { boxes: 0, pages: 0 });
+  // The default store the viewer's bare functions stand for is a store too,
+  // and nothing either of these did reached it.
+  clearRedactions();
+  addRedaction(3, [{ x: 0, y: 0, w: 5, h: 5 }]);
+  check("the viewer's own store is its own", redactionCount(), { boxes: 1, pages: 1 });
+  check("…and holds only what was put in it", motion.count(), { boxes: 1, pages: 1 });
+  clearRedactions();
 }
 
 // ── the file the save writes ──────────────────────────────────────────────────

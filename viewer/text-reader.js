@@ -47,6 +47,8 @@ import { dressLines, fitRuleRows, placeholderIn } from "./rules.js";
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
+import * as RD from "./redact.js";
+import { buildRedactedPdf } from "./pdf-edit.js";
 import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
 
@@ -79,6 +81,9 @@ const flagPopBtn = $("flag-pop-btn");
 const flagPopNote = $("flag-pop-note");
 const tipEl = $("pn-tip");
 const toastEl = $("toast");
+// The redaction bar, up here with the other chrome because the bar stack is
+// measured (setBarHeight) long before the redaction tool below is reached.
+const redactBar = $("redact-bar");
 
 // ── state ──────────────────────────────────────────────────────────────────
 // The reading defaults — font, size, leading, page width, whether pseudonyms
@@ -926,6 +931,10 @@ function setKey(parsed) {
   staleReady();
   compileKey();
   $("st-key").textContent = key ? "Key: " + PK.keyTitle(key) + (key.dropped.ambiguous ? ` (${key.dropped.ambiguous} ambiguous fake${key.dropped.ambiguous === 1 ? "" : "s"} retired)` : "") : "";
+  // Another key binds other values: what the last one proposed over a PDF is
+  // its reading, not this one's, and goes. Boxes drawn by hand stay — they
+  // were never the key's to propose.
+  redactKeyChanged();
   if (doc) { retranslate(); refreshPdf(); }
 }
 
@@ -1107,7 +1116,10 @@ async function adoptFolder(h, { quiet = false } = {}) {
   return duringAsync("reading the case folder", () => adoptFolderNow(h, { quiet }));
 }
 async function adoptFolderNow(h, { quiet = false } = {}) {
-  if (dirHandle !== h) { forgetPdfs(); dropReady(); }
+  // Another matter: the PDFs go, and with them any redaction proposed over
+  // them — boxes are a thing you are in the middle of, and this folder's
+  // pages are not that folder's.
+  if (dirHandle !== h) { forgetPdfs(); dropReady(); clearRedactions("the case folder changed"); }
   dirHandle = h;
   folderName = h.name;
   await rememberDir(h);
@@ -4264,14 +4276,17 @@ function settleKeeps() {
 function setBarHeight() {
   const a = leaksBar.hidden ? 0 : leaksBar.offsetHeight;
   const b = namesBar.hidden ? 0 : namesBar.offsetHeight;
+  const c = redactBar.hidden ? 0 : redactBar.offsetHeight;
   const root = document.documentElement.style;
-  root.setProperty("--bar-leaks", a + "px"); // where the second bar starts
-  root.setProperty("--bar-h", a + b + "px"); // …and what the two take together
+  root.setProperty("--bar-leaks", a + "px");     // where the second bar starts
+  root.setProperty("--bar-names", a + b + "px"); // …and the third
+  root.setProperty("--bar-h", a + b + c + "px"); // …and what the three take together
 }
 if (typeof ResizeObserver !== "undefined") {
   const barSizes = new ResizeObserver(setBarHeight);
   barSizes.observe(leaksBar);
   barSizes.observe(namesBar);
+  barSizes.observe(redactBar);
 }
 function showLeaksBar(on) {
   const was = !leaksBar.hidden;
@@ -4858,6 +4873,9 @@ function pdfsInUse() {
   if (pdfPicked) keep.add(pdfPicked.name);
   for (const p of pickedPdfs.values()) keep.add(p.name);
   for (const p of pickedByMember.values()) keep.add(p.name);
+  // …and a PDF carrying redaction boxes: the copy is written from the pages
+  // themselves, and the review walking past it is not a decision to drop them.
+  for (const [name, store] of redactStores) if (store.count().boxes) keep.add(name);
   return keep;
 }
 function trimPdfs() {
@@ -5072,6 +5090,10 @@ function refreshPdf() {
   sbsBtn.disabled = !doc;
   swapBtn.disabled = !doc;
   gridToggle.disabled = !doc;
+  // Nothing to redact without a PDF matched to the export.
+  redactBtn.disabled = !doc || !any;
+  if (redactBtn.disabled && redactOn) setRedactMode(false);
+  else if (redactOn) updateRedactBar();
   refreshSwapButtons();
   applySwaps();
   buildPdfPane();
@@ -5504,6 +5526,10 @@ async function renderInto(el, src, pageNo, cssWidth) {
   if (el.dataset.want !== want) return;
   const base = page.getViewport({ scale: 1 });
   const cssScale = cssWidth / base.width;
+  // What a redaction box is drawn through, and the page's own box it is held
+  // inside: kept on the slot because the boxes are in the PDF's points and
+  // the pane re-renders at a new width whenever the panes are resized.
+  el.__view = page.view;
   const dpr = Math.min(3, window.devicePixelRatio || 1);
   const vp = page.getViewport({ scale: cssScale * dpr });
   const sheet = sheetOf(el);
@@ -5522,6 +5548,11 @@ async function renderInto(el, src, pageNo, cssWidth) {
   el.dataset.rendered = want;
   delete el.dataset.preview;
   el.classList.add("ready");
+  // The page is up: its boxes go back on it at the width it was drawn at.
+  // Before the text layer, which may yet fail — a page with no text layer can
+  // still carry an area box over a signature.
+  el.__vp = page.getViewport({ scale: cssScale });
+  paintRedactions(el);
   // The page's text, selectable over the bitmap (pdf.js's own text layer).
   const layer = sheet.querySelector(".textLayer");
   if (layer) {
@@ -5560,6 +5591,9 @@ function bindSelection(layer) {
   layer.__selecting = true;
   layer.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+    // One drag, one tool: while the redaction tool marks AREAS, the drag over
+    // a PDF page is the marquee's and nothing selects under it.
+    if (redactOn && redactMark === "area" && layer.closest("#pdf-pane")) return;
     const a = caretInLayer(layer, e.clientX, e.clientY);
     if (!a) return;
     e.preventDefault();
@@ -5684,6 +5718,11 @@ function releaseCanvas(el) {
   const layer = sheet.querySelector(".textLayer");
   if (el.__text) { try { el.__text.cancel(); } catch { /* done */ } el.__text = null; }
   if (layer) layer.innerHTML = "";
+  // The boxes are drawn from the store every time the page is; what is on
+  // screen now belongs to a bitmap that is going.
+  const red = sheet.querySelector(".redactLayer");
+  if (red) red.innerHTML = "";
+  el.__vp = null;
   delete el.dataset.rendered;
   delete el.dataset.preview;
   delete el.dataset.warm;
@@ -5712,10 +5751,14 @@ function slotShell(cls, tag, { label = false } = {}) {
   const c = document.createElement("canvas");
   const layer = document.createElement("div");
   layer.className = "textLayer";
+  // Over the text layer, so a box is never hidden by a selection and can
+  // always be clicked back off.
+  const red = document.createElement("div");
+  red.className = "redactLayer";
   const w = document.createElement("div");
   w.className = "pdf-wait";
   w.textContent = "Loading…";
-  sheet.append(c, layer, w);
+  sheet.append(c, layer, red, w);
   el.appendChild(sheet);
   return el;
 }
@@ -5835,6 +5878,13 @@ function buildPdfPane() {
       sheetOf(el).style.height = Math.round(w * 11 / 8.5) + "px"; // letter, until the PDF says
       presize(el, t.src, t.page, w);
       paneObserver.observe(el);
+      // A drag over the page marks an area, while the redaction tool says so.
+      RD.attachAreaDrag({
+        pageNumber: t.page,
+        pageWrapper: sheetOf(el),
+        getActive: () => redactOn && redactMark === "area",
+        onBox: (_pageNo, box) => addAreaRedaction(el, box),
+      });
     }
     el.dataset.index = String(i);
     el.style.width = t ? w + "px" : "";
@@ -6322,6 +6372,10 @@ function clearMatched(sec) {
 function setSideBySide(on, { remember = true } = {}) {
   sbsOn = !!on;
   if (remember) lsSet("textReader.sbs", sbsOn);
+  // The redaction tool marks the pane's pages: with the pane shut there is
+  // nothing under it to mark. The boxes already proposed are kept, and
+  // opening the tool again opens the pane and puts them back on the pages.
+  if (!sbsOn && redactOn) setRedactMode(false);
   // The underlines go as the panes open, not a layout pass later — where the
   // grid is what is opening with them.
   if (sbsOn && settings.matchGrid) clearCitationLinks();
@@ -6632,6 +6686,458 @@ $("pdf-input").addEventListener("change", async () => {
   $("pdf-input").value = "";
   await usePickedPdfs(fs);
 });
+
+// ── redacting the PDF beside the text ─────────────────────────────────────────
+//
+// The same redaction the PDF viewer does (viewer/redact.js holds the rule and
+// the decisions), reached from where a case folder is actually worked.
+//
+// WHY HERE. The export and the PDF it was made from are the same filing seen
+// twice, and the reader already has both: the folder open, the key loaded, the
+// PDF matched to the export and standing beside it. A redaction asks exactly
+// what the review has just answered — which values in this matter are real —
+// so it is asked here rather than by opening the PDF again in another tab and
+// loading the key into it a second time.
+//
+// THE RULE IS UNCHANGED. Nothing is hidden until the copy is saved; the copy
+// is a NEW file made of page images with the boxes painted into the pixels,
+// carrying no text layer, no annotations and no metadata; and the PDF in the
+// case folder is never written. This tool has no in-place path at all.
+//
+// WHAT IS MARKED, AND FOR WHICH DOCUMENT. The key is the baseline, run over
+// the PDF's OWN text — not the export's. The export was scrubbed; the PDF is
+// the file nobody scrubbed, which is the whole reason it needs redacting. And
+// it is the reader's reading of the key: a value the review has KEPT is a
+// value already decided not to be this matter's to hide, so it is not
+// proposed. The hand adds the rest, a drag at a time, on the pages in the
+// pane.
+//
+// A Combined Text.txt shows the pages of a document per member, each with a
+// PDF of its own, so the boxes are filed per PDF (a store each) and the save
+// writes one redacted copy per PDF that carries any. They outlast the
+// document on screen — hopping between a folder's exports is how the folder is
+// read — and are dropped when the folder changes or Clear is pressed.
+const redactBtn = $("redact-btn");
+const rbWhere = $("rb-where");
+const rbState = $("rb-state");
+const rbKey = $("rb-key");
+const rbMark = $("rb-mark");
+const rbScan = $("rb-scan");
+const rbClear = $("rb-clear");
+const rbDpi = $("rb-dpi");
+const rbSave = $("rb-save");
+let redactOn = false;
+let redactMark = "text";     // what a drag marks: "text" | "area"
+let redactSaving = false;
+let redactScanning = false;
+const redactStores = new Map(); // PDF name → its own store of boxes
+
+function redactStoreFor(name) {
+  if (!redactStores.has(name)) redactStores.set(name, RD.createRedactionStore());
+  return redactStores.get(name);
+}
+/** Every PDF carrying boxes: [{ name, boxes, pages }], the open document's first. */
+function redactMarked() {
+  const mine = pdfSourceNames();
+  const out = [];
+  for (const [name, store] of redactStores) {
+    const { boxes, pages } = store.count();
+    if (boxes) out.push({ name, boxes, pages });
+  }
+  return out.sort((a, b) => (mine.indexOf(b.name) >= 0) - (mine.indexOf(a.name) >= 0));
+}
+function redactTotals() {
+  let boxes = 0, pages = 0, docs = 0;
+  for (const m of redactMarked()) { boxes += m.boxes; pages += m.pages; docs++; }
+  return { boxes, pages, docs };
+}
+/** Every box taken back off, and the pane redrawn without them. */
+function clearRedactions(why) {
+  const had = redactTotals().boxes;
+  redactStores.clear();
+  repaintAllRedactions();
+  updateRedactBar();
+  if (had && why) toast(`${had} box${had === 1 ? "" : "es"} taken back off — ${why}.`);
+  return had;
+}
+
+// ── painting the pane's slots ──
+/**
+ * The slot's own store and page, or null where there is nothing to mark.
+ *
+ * Pane slots only. A page swapped INTO the text is drawn by the same code but
+ * is never on screen with this tool: the tool opens the pane, and a swapped-in
+ * page shows only while the pane is closed.
+ */
+function slotRedaction(el, { create = false } = {}) {
+  if (!el.classList.contains("pdf-slot")) return null;
+  const src = pdfSources[Number(el.dataset.index)];
+  const page = Number(el.dataset.page);
+  if (!src || !page) return null;
+  // A page merely drawn is not a document being redacted: a store is opened
+  // when something is actually filed in it, not every time a slot scrolls by.
+  const store = create ? redactStoreFor(src.name) : redactStores.get(src.name) || null;
+  return { src, page, store };
+}
+function paintRedactions(el) {
+  const layer = sheetOf(el).querySelector(".redactLayer");
+  if (!layer) return;
+  const at = slotRedaction(el);
+  if (!at || !at.store || !el.__vp) { layer.innerHTML = ""; return; }
+  RD.repaintRedactionsForPage(at.page, layer, el.__vp, {
+    store: at.store,
+    // One box is several rectangles where it wrapped, and redrawing the page
+    // is what takes the rest of them off with it.
+    onRemove: () => { paintRedactions(el); updateRedactBar(); },
+  });
+}
+function repaintAllRedactions() {
+  for (const el of pdfPane.querySelectorAll(".pdf-slot")) paintRedactions(el);
+}
+
+// ── what a drag marks ──
+//
+// Client rectangles → the boxes that get stored, in the PDF's own points.
+// Merged into lines first (a name split across two text runs comes back as
+// two rectangles with a hairline of page between them), then padded by a point
+// so a descender or an antialiased edge does not survive along the border, and
+// held inside the page's own box.
+function storeBoxesFromClientRects(el, clientRects, meta) {
+  const at = slotRedaction(el, { create: true });
+  if (!at || !el.__vp || !el.__view) return 0;
+  const base = sheetOf(el).getBoundingClientRect();
+  const local = [];
+  for (const cr of clientRects) {
+    if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+    local.push({ x: cr.left - base.left, y: cr.top - base.top, w: cr.width, h: cr.height });
+  }
+  const pageBox = RD.pageBoxFromView(el.__view);
+  const out = [];
+  for (const r of RD.mergeRects(local, 2)) {
+    const [x1, y1] = el.__vp.convertToPdfPoint(r.x, r.y);
+    const [x2, y2] = el.__vp.convertToPdfPoint(r.x + r.w, r.y + r.h);
+    const box = RD.clampRect(RD.padRect({
+      x: Math.min(x1, x2), y: Math.min(y1, y2),
+      w: Math.abs(x2 - x1), h: Math.abs(y2 - y1),
+    }, 1), pageBox);
+    if (box) out.push(box);
+  }
+  if (!out.length || !at.store.add(at.page, out, meta)) return 0;
+  paintRedactions(el);
+  updateRedactBar();
+  return out.length;
+}
+
+/**
+ * An area drag: the box itself, whatever is under it. The tool for a
+ * signature, a photograph, an exhibit stamp, or a scanned page whose text
+ * layer knows nothing — the cases the key can say nothing about.
+ */
+function addAreaRedaction(el, box) {
+  const base = sheetOf(el).getBoundingClientRect();
+  storeBoxesFromClientRects(el, [{
+    left: base.left + box.left, top: base.top + box.top,
+    width: box.width, height: box.height,
+  }], { kind: "area", label: "this area" });
+}
+
+/**
+ * A drag over the PDF's text. The reader's own selection (bindSelection) stays
+ * inside one page's text layer, so the whole selection belongs to one slot.
+ */
+function redactCurrentSelection() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return 0;
+  const range = sel.getRangeAt(0);
+  const node = range.commonAncestorContainer;
+  const host = node.nodeType === 1 ? node : node.parentElement;
+  const el = host && host.closest ? host.closest(".pdf-slot") : null;
+  if (!el || !pdfPane.contains(el)) return 0;
+  const label = sel.toString().replace(/\s+/g, " ").trim().slice(0, 120);
+  const n = storeBoxesFromClientRects(el, [...range.getClientRects()], { kind: "text", label });
+  if (n) sel.removeAllRanges();
+  return n;
+}
+
+// The drag is taken on the document: a selection is only final once the
+// browser has finished settling it.
+document.addEventListener("mouseup", () => {
+  if (!redactOn || redactMark !== "text") return;
+  setTimeout(() => { if (redactOn && redactMark === "text") redactCurrentSelection(); }, 0);
+});
+
+// ── the key, over every page of the PDF ──
+//
+// The pane draws the pages in view, at the pane's width, and a document's
+// later pages may never be drawn at all — but a copy is the WHOLE document, so
+// the sweep goes to the PDF rather than to the pane. Each page's text is laid
+// out OFF SCREEN by pdf.js's own text layer, at scale 1 so a CSS pixel is a
+// point, and the browser is asked where the words are; nothing is rendered,
+// and what the pane happens to be showing has no say in it.
+//
+// And it is the PDF's text, never the export's: the export was scrubbed, and
+// it is the PDF that was not.
+let sweepBox = null;
+function sweepContainer() {
+  if (!sweepBox) {
+    sweepBox = document.createElement("div");
+    sweepBox.className = "textLayer redact-sweep";
+    document.body.appendChild(sweepBox);
+  }
+  return sweepBox;
+}
+
+/** Every place the key's real values stand on a page: [{ rects (in points), label }]. */
+async function keyBoxesForPage(page) {
+  const vp = page.getViewport({ scale: 1 });
+  const box = sweepContainer();
+  box.innerHTML = "";
+  box.style.width = vp.width + "px";
+  box.style.height = vp.height + "px";
+  box.style.setProperty("--scale-factor", "1");
+  box.style.setProperty("--total-scale-factor", "1");
+  const tl = new pdfjsLib.TextLayer({ textContentSource: await page.getTextContent(), container: box, viewport: vp });
+  await tl.render();
+  const spans = box.querySelectorAll("span");
+  const { text, map } = RD.pageTextFromSpans(RD.measureSpans(box));
+  const pageBox = RD.pageBoxFromView(page.view);
+  const base = box.getBoundingClientRect();
+  const out = [];
+  let missed = 0;
+  for (const hit of PK.findRealSpans(reals, text)) {
+    const r = RD.spanRangeFor(map, hit.start, hit.end);
+    const a = r && spans[r.startSpan], b = r && spans[r.endSpan];
+    const an = a && a.firstChild, bn = b && b.firstChild;
+    if (!an || !bn) { missed++; continue; }
+    const range = document.createRange();
+    try {
+      range.setStart(an, Math.max(0, Math.min(r.startOffset, an.length || 0)));
+      range.setEnd(bn, Math.max(0, Math.min(r.endOffset, bn.length || 0)));
+    } catch { missed++; continue; }
+    const local = [];
+    for (const cr of range.getClientRects()) {
+      if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+      local.push({ x: cr.left - base.left, y: cr.top - base.top, w: cr.width, h: cr.height });
+    }
+    const rects = [];
+    for (const m of RD.mergeRects(local, 2)) {
+      const [x1, y1] = vp.convertToPdfPoint(m.x, m.y);
+      const [x2, y2] = vp.convertToPdfPoint(m.x + m.w, m.y + m.h);
+      const kept = RD.clampRect(RD.padRect({
+        x: Math.min(x1, x2), y: Math.min(y1, y2),
+        w: Math.abs(x2 - x1), h: Math.abs(y2 - y1),
+      }, 1), pageBox);
+      if (kept) rects.push(kept);
+    }
+    if (rects.length) out.push({ rects, label: hit.real });
+    else missed++;
+  }
+  box.innerHTML = "";
+  return { boxes: out, missed };
+}
+
+async function scanForKeyValues() {
+  if (!reals) { toast("No pseudonym key is loaded — load one in the tools rail.", { error: true }); return; }
+  const names = pdfSourceNames();
+  // One sweep at a time: a second one running over the first would propose
+  // every value twice. The tool opening with a key in hand starts one, and so
+  // does the button and a key changed under it.
+  if (redactScanning || !names.length) return;
+  redactScanning = true;
+  updateRedactBar();
+  let found = 0, missed = 0, pagesRead = 0;
+  try {
+    for (const name of names) {
+      const src = pdfSourceFor(name);
+      if (!src) continue;
+      const store = redactStoreFor(name);
+      store.clear("key"); // a re-sweep replaces the run's own, never the hand's
+      let info;
+      try { info = await loadPdf(src, { now: true }); }
+      catch (e) { toast(`Could not open ${name}: ${e.message || e}`, { error: true }); continue; }
+      for (let pn = 1; pn <= info.count; pn++) {
+        rbState.textContent = `Reading ${name}, page ${pn} of ${info.count}…`;
+        let page;
+        try { page = await info.pdf.getPage(pn); } catch { continue; }
+        pagesRead++;
+        let hits;
+        try { hits = await keyBoxesForPage(page); } catch { continue; }
+        missed += hits.missed;
+        for (const h of hits.boxes) {
+          if (store.add(pn, h.rects, { kind: "key", label: h.label })) found++;
+        }
+        // A long document is a long loop: the tab breathes between pages.
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+  } finally { redactScanning = false; }
+  repaintAllRedactions();
+  updateRedactBar();
+  toast(found
+    ? `Marked ${found} value${found === 1 ? "" : "s"} the key binds, over ${pagesRead} page${pagesRead === 1 ? "" : "s"} of the PDF` +
+      (missed ? `; ${missed} could not be placed on the page.` : ".")
+    : `The key binds nothing that stands in ${names.length === 1 ? "this PDF" : "these PDFs"} — ${pagesRead} page${pagesRead === 1 ? "" : "s"} read.`,
+    { ms: 5000 });
+}
+
+/** The source behind a PDF name: the open document's, else one picked by hand, else the folder's. */
+function pdfSourceFor(name) {
+  for (const s of pdfSources) if (s && s.name === name) return s;
+  if (pickedPdfs.has(name)) return pickedPdfs.get(name);
+  for (const s of pickedByMember.values()) if (s && s.name === name) return s;
+  return folderPdfs.find((p) => p.name === name) || null;
+}
+
+// ── the bar ──
+function updateRedactBar() {
+  if (redactBar.hidden) return;
+  const marked = redactMarked();
+  const { boxes, pages, docs } = redactTotals();
+  const names = pdfSourceNames();
+  rbWhere.textContent = names.length
+    ? (names.length === 1 ? names[0] : `${names.length} documents beside this export`)
+    : "No PDF is matched to this export.";
+  rbState.textContent = !boxes ? "Nothing marked."
+    : `${boxes} box${boxes === 1 ? "" : "es"} on ${pages} page${pages === 1 ? "" : "s"}` +
+      (docs > 1 ? ` of ${docs} documents: ${marked.map((m) => `${m.name} (${m.boxes})`).join(", ")}` : "") + ".";
+  rbState.classList.toggle("undecided", !boxes);
+  rbKey.textContent = key
+    ? `Key: ${PK.keyTitle(key)}${allKeeps().length ? ` — a sweep skips the ${allKeeps().length} value${allKeeps().length === 1 ? "" : "s"} you have kept` : ""}`
+    : "No key loaded — the key is the baseline; load one under Pseudonyms.";
+  const busy = redactSaving || redactScanning;
+  rbScan.disabled = !reals || !names.length || busy;
+  rbClear.disabled = !boxes || busy;
+  rbSave.disabled = !boxes || busy;
+  setBarHeight();
+}
+
+function setRedactMode(on) {
+  redactOn = !!on && !!doc;
+  redactBar.hidden = !redactOn;
+  redactBtn.setAttribute("aria-pressed", String(redactOn));
+  document.body.classList.toggle("redact-on", redactOn);
+  document.body.classList.toggle("redact-area-mode", redactOn && redactMark === "area");
+  if (redactOn) {
+    // It is the pane's tool: the pages it marks are the pages the pane shows.
+    if (!sbsOn) setSideBySide(true);
+    updateRedactBar();
+    // The key is the baseline, so opening the tool with one in hand and
+    // nothing marked sweeps the PDF at once: the hand starts from what the
+    // run already knows rather than from a blank page. Opening it again over
+    // work already done leaves that work alone.
+    if (reals && !redactTotals().boxes && pdfSourceNames().length) scanForKeyValues();
+  } else {
+    setBarHeight();
+  }
+  relayout();
+}
+
+// ── the copy ──
+//
+// A page's bytes, rendered at the saving resolution with its boxes painted in.
+// The black goes on AFTER the page is drawn and BEFORE the pixels are encoded,
+// which is the whole trick: what was under a box was never in this image.
+async function renderRedactedPage(pdf, store, pageNumber, scale) {
+  const page = await pdf.getPage(pageNumber);
+  const vp = page.getViewport({ scale });
+  const pts = page.getViewport({ scale: 1 });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(vp.width));
+  canvas.height = Math.max(1, Math.round(vp.height));
+  const ctx = canvas.getContext("2d");
+  // A page with no background of its own would encode as black otherwise.
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  ctx.fillStyle = "#000000";
+  for (const box of store.for(pageNumber)) {
+    for (const r of box.rects) {
+      const [x1, y1, x2, y2] = vp.convertToViewportRectangle([r.x, r.y, r.x + r.w, r.y + r.h]);
+      // Outward to whole pixels: half a pixel of a letter left showing along
+      // an edge is half a letter more than a redaction may leave.
+      const x = Math.floor(Math.min(x1, x2)), y = Math.floor(Math.min(y1, y2));
+      ctx.fillRect(x, y, Math.ceil(Math.max(x1, x2)) - x, Math.ceil(Math.max(y1, y2)) - y);
+    }
+  }
+  const bytes = await canvasBytes(canvas, "image/jpeg", 0.92);
+  canvas.width = canvas.height = 0; // let the bitmap go before the next page
+  return { bytes, format: "jpg", widthPts: pts.width, heightPts: pts.height };
+}
+
+function canvasBytes(canvas, type, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) { reject(new Error("The page could not be rendered to an image.")); return; }
+      blob.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)), reject);
+    }, type, quality);
+  });
+}
+
+/** One copy per PDF carrying boxes, each written through the Save dialog. */
+async function saveRedactedCopies() {
+  const marked = redactMarked();
+  if (!marked.length) return;
+  redactSaving = true;
+  updateRedactBar();
+  const written = [];
+  try {
+    const dpi = parseInt(rbDpi.value, 10) || 200;
+    const scale = dpi / 72;
+    const fwdN = fwdName();
+    for (const m of marked) {
+      const src = pdfSourceFor(m.name);
+      if (!src) { toast(`${m.name} is no longer open — its boxes are still marked.`, { error: true }); continue; }
+      const store = redactStoreFor(m.name);
+      const info = await loadPdf(src, { now: true });
+      const pages = [];
+      // EVERY page, not only the marked ones. A copy that kept its unmarked
+      // pages as they were would carry a text layer on those pages, and a
+      // document searchable everywhere except over the black boxes tells a
+      // reader exactly where to look and hands them the rest of it besides.
+      for (let pn = 1; pn <= info.count; pn++) {
+        rbState.textContent = `Redacting ${m.name}, page ${pn} of ${info.count}…`;
+        pages.push(await renderRedactedPage(info.pdf, store, pn, scale));
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      rbState.textContent = `Writing the redacted copy of ${m.name}…`;
+      const bytes = await buildRedactedPdf({ pages });
+      // Forward through the key so the copy carries the pseudonymized name,
+      // and never in place: this save has no path to the PDF in the folder.
+      const name = RD.redactedName(m.name, fwdN);
+      const ok = await writeBlob(new Blob([bytes], { type: "application/pdf" }), name, null,
+        { description: "PDF", accept: { "application/pdf": [".pdf"] } });
+      if (ok) written.push({ name, boxes: m.boxes });
+    }
+    toast(written.length
+      ? `Saved ${written.map((w) => w.name).join(", ")} — ${written.reduce((n, w) => n + w.boxes, 0)} box${written.reduce((n, w) => n + w.boxes, 0) === 1 ? "" : "es"} blacked out, no text layer, no metadata. The case folder's own PDF${marked.length === 1 ? " is" : "s are"} untouched.`
+      : "Nothing was written.", { ms: 7000 });
+  } catch (e) {
+    console.error("[text-reader] redaction failed:", e);
+    toast("Redaction failed: " + (e && e.message ? e.message : e), { error: true });
+  } finally {
+    redactSaving = false;
+    updateRedactBar();
+  }
+}
+
+/** A different key: its own reading replaces the last one's, sweep and all. */
+function redactKeyChanged() {
+  if (!redactStores.size) return;
+  for (const st of redactStores.values()) st.clear("key");
+  repaintAllRedactions();
+  updateRedactBar();
+  if (redactOn && reals && pdfSourceNames().length) scanForKeyValues();
+}
+
+redactBtn.addEventListener("click", () => setRedactMode(!redactOn));
+$("rb-close").addEventListener("click", () => setRedactMode(false));
+rbMark.addEventListener("change", () => {
+  redactMark = rbMark.value === "area" ? "area" : "text";
+  document.body.classList.toggle("redact-area-mode", redactOn && redactMark === "area");
+});
+rbScan.addEventListener("click", scanForKeyValues);
+rbClear.addEventListener("click", () => { if (!clearRedactions()) return; toast("Every box taken back off."); });
+rbSave.addEventListener("click", saveRedactedCopies);
 
 // ── hooks for the PWA tab shell ───────────────────────────────────────────────────────
 // The shell hands a document in, and — where it opened a whole case folder —

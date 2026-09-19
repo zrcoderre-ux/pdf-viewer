@@ -737,6 +737,49 @@ printed on the page for being unselectable.
 range to span range, line merging, padding, clamping, the copy's name) are pure
 and covered by `test-redact.mjs`.
 
+### The same tool in the text reader (`text-reader.js`, "redacting the PDF beside the text")
+
+Side by side, the reader shows the case folder's own PDF beside the export it
+was scrubbed into; **▬ Redact PDF** marks that PDF and writes the copy from
+there. The three load-bearing things above are unchanged — the copy is a
+raster built by the same `buildRedactedPdf`, it carries no metadata, and the
+save has no in-place path (`writeBlob` is called with a null handle, so it can
+only reach the Save dialog or a download). What is different follows from
+where it runs:
+
+- **A store per document.** The viewer has one PDF open; the pane can hold the
+  pages of two dozen, because a `Combined Text.txt` names a document per member
+  and each has a PDF of its own. Page 3 of the motion is not page 3 of the
+  reply, so the single module-level store became `redact.createRedactionStore()`
+  and the reader keeps one per PDF name (the viewer's bare `addRedaction` etc.
+  still stand for a default store, unchanged). The save writes one copy per PDF
+  that carries boxes.
+- **The sweep goes to the PDF, not to the pane.** Only the pages in view are
+  ever drawn, and at the pane's width — but a copy is the whole document, so
+  `keyBoxesForPage` lays each page's text out **off screen** with pdf.js's own
+  `TextLayer` at scale 1 (one CSS pixel to the point), measures it
+  (`redact.measureSpans`) and asks the browser for the rectangles, page by
+  page, rendering no bitmap. Estimating the geometry from `getTextContent`
+  instead is what this replaced: a text item there is usually a whole printed
+  line with one origin and one width, and dividing that width by the line's
+  characters put the box a letter or two off — `QUILLMARK` with the `QUI` still
+  showing, which is not a redaction.
+- **Keeps are respected.** The reader's `reals` is compiled from the key *less
+  the keeps* (`keyLessKeeps`), and the sweep uses it: a value the review has
+  kept is one already decided not to be this matter's to hide.
+- **The boxes are the folder's, not the document's.** They outlast a hop
+  between exports (that is how a folder is read) and are dropped when the case
+  folder changes or Clear is pressed; a different key drops what the last key
+  proposed and re-sweeps, leaving the hand's boxes alone. `pdfsInUse` counts a
+  PDF carrying boxes as in use, so the review walking past it does not close it
+  underneath the save.
+
+The pane's slots carry a `.redactLayer` beside their text layer, repainted from
+the store every time a page is drawn (they are recycled as they scroll out of
+view, so the store — not the DOM — is where a box lives). While the tool marks
+areas the reader's own selection drag stands down on the pane, and the boxes
+take the pointer only while the tool is on.
+
 ## Keeps that ask nothing of PDF-Linker (`textdoc.keepNeedsRun`)
 
 A keep says *do not fake this value*. Where the run **faked** it, only
@@ -883,7 +926,7 @@ test-bare-rule.mjs                   Node-runnable bare-rule + rule-set carry-ov
 test-page-rotation.mjs               Node-runnable page-rotation geometry + scope tests
 test-citation-memory.mjs             Node-runnable per-URL citation-memory tests (stubbed DOM)
 test-section-lists.mjs               Node-runnable chained section-list tests (and / or / & connectors)
-test-redact.mjs                      Node-runnable redaction tests: span mapping, box merging, and the saved copy read back for text and metadata
+test-redact.mjs                      Node-runnable redaction tests: span mapping, box merging, a store per document, and the saved copy read back for text and metadata
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
 viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)
@@ -900,7 +943,7 @@ viewer/rotation.js                   Page rotation: per-page angles, rotate bar,
 viewer/citation-linker.js            Detection + placement + URL resolution
 viewer/citation-memory.js            Per-URL memory: cumulative TOA + remembered cases, saved across reloads
 viewer/highlights.js                 Selection, highlight, context menu
-viewer/redact.js                     Redaction: the boxes, their store, the copy's name (pure parts; test-redact.mjs)
+viewer/redact.js                     Redaction: the boxes, a store per document, the copy's name (pure parts; test-redact.mjs)
 viewer/key-library.js                The pseudonym keys in storage, shared by the reader and the viewer
 viewer/pdf-edit.js                   PDF writing via pdf-lib: highlights, page plans, stamps, the redacted copy
 viewer/footer-naming.js              Footer-title rule engine + iterative disambiguator

@@ -195,6 +195,51 @@ export function clampRect(r, page) {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
+// ── a page nobody has drawn ──────────────────────────────────────────────────
+//
+// The viewer marks the page it has on screen: pdf.js has laid its text out as
+// spans, the browser knows where every glyph of them sits, and a match turns
+// into rectangles by asking it. The text reader has no such page. Beside an
+// export it draws only the PDF pages in view, at the pane's width, and the key
+// has to be run over the WHOLE document — every page of it, including the ones
+// the export has no text for and the ones nobody will scroll to.
+//
+// The answer is not to guess the geometry from the PDF's text content. A run
+// there is usually a whole printed line with one origin and one width, and a
+// name inside it would have to be found by dividing that width by the line's
+// characters — which for proportional type is wrong by a letter or two either
+// way. Wrong by a letter is "QUILLMARK" with the QUI still showing. So the
+// page's text is LAID OUT, off screen, by the same pdf.js text layer the
+// viewer measures, and the browser is asked where the words are. The bitmap is
+// never drawn: a layout is cheap where a render is not, and it is the layout
+// that knows where a glyph sits.
+//
+// What is laid out at scale 1 is measured in points already — one CSS pixel to
+// the point — and the page's own viewport carries the rest (a /Rotate, a box
+// that does not start at the origin) back into the coordinates a box is stored
+// in, exactly as it does for the page on screen.
+
+/** The page's spans as `pageTextFromSpans` wants them, measured in the box they were laid out in. */
+export function measureSpans(container) {
+  const base = container.getBoundingClientRect();
+  const out = [];
+  for (const el of container.querySelectorAll("span")) {
+    const r = el.getBoundingClientRect();
+    out.push({
+      text: el.textContent || "",
+      left: r.left - base.left, top: r.top - base.top,
+      width: r.width, height: r.height,
+    });
+  }
+  return out;
+}
+
+/** A page's own box as `clampRect` wants it, from the page's `view`. */
+export function pageBoxFromView(view) {
+  const v = view || [0, 0, 0, 0];
+  return { x: v[0] || 0, y: v[1] || 0, w: (v[2] || 0) - (v[0] || 0), h: (v[3] || 0) - (v[1] || 0) };
+}
+
 /**
  * The name a redacted copy is saved under: the document's own stem run FORWARD
  * through the key where one is in hand — a copy of "Rasho v Quillmark - MTC.pdf"
@@ -228,51 +273,68 @@ export function countLabel(boxes, pages) {
 //
 // In memory only, like the highlights: closing the tab drops them. A proposal
 // is a thing you are in the middle of, not a thing you keep.
+//
+// ONE STORE PER DOCUMENT. The viewer has one PDF open and marks that; the text
+// reader's pane can hold the pages of two dozen, because a Combined Text.txt
+// names a document per member and each has a PDF of its own. A redacted copy
+// is a copy of ONE document, so the boxes cannot all live in one pile keyed by
+// page: page 3 of the motion and page 3 of the reply are different pages. Each
+// document gets a store of its own (`createRedactionStore`), and the viewer's
+// single document uses the default one these functions stand for.
 
-const _byPage = new Map();
-let _nextId = 1;
-
-export function addRedaction(pageNumber, rects, { kind = "area", label = "" } = {}) {
-  const clean = (rects || []).filter((r) => r && r.w > 0 && r.h > 0);
-  if (!clean.length) return null;
-  if (!_byPage.has(pageNumber)) _byPage.set(pageNumber, []);
-  const box = { id: _nextId++, rects: clean, kind, label };
-  _byPage.get(pageNumber).push(box);
-  return box;
+export function createRedactionStore() {
+  const byPage = new Map();
+  let nextId = 1;
+  return {
+    add(pageNumber, rects, { kind = "area", label = "" } = {}) {
+      const clean = (rects || []).filter((r) => r && r.w > 0 && r.h > 0);
+      if (!clean.length) return null;
+      if (!byPage.has(pageNumber)) byPage.set(pageNumber, []);
+      const box = { id: nextId++, rects: clean, kind, label };
+      byPage.get(pageNumber).push(box);
+      return box;
+    },
+    remove(pageNumber, id) {
+      const list = byPage.get(pageNumber);
+      if (!list) return false;
+      const i = list.findIndex((b) => b.id === id);
+      if (i < 0) return false;
+      list.splice(i, 1);
+      if (!list.length) byPage.delete(pageNumber);
+      return true;
+    },
+    for(pageNumber) { return byPage.get(pageNumber) || []; },
+    pages() {
+      return [...byPage.keys()].sort((a, b) => a - b)
+        .map((pageNumber) => ({ pageNumber, boxes: byPage.get(pageNumber) }))
+        .filter((p) => p.boxes && p.boxes.length);
+    },
+    count() {
+      let boxes = 0, pages = 0;
+      for (const list of byPage.values()) if (list && list.length) { boxes += list.length; pages++; }
+      return { boxes, pages };
+    },
+    clear(kind) {
+      if (!kind) { byPage.clear(); nextId = 1; return; }
+      for (const [pn, list] of [...byPage]) {
+        const kept = list.filter((b) => b.kind !== kind);
+        if (kept.length) byPage.set(pn, kept); else byPage.delete(pn);
+      }
+    },
+  };
 }
 
-export function removeRedaction(pageNumber, id) {
-  const list = _byPage.get(pageNumber);
-  if (!list) return false;
-  const i = list.findIndex((b) => b.id === id);
-  if (i < 0) return false;
-  list.splice(i, 1);
-  return true;
-}
+// The store the bare functions below work on: the one document a viewer has open.
+const _store = createRedactionStore();
 
-export function redactionsFor(pageNumber) { return _byPage.get(pageNumber) || []; }
-
+export function addRedaction(pageNumber, rects, meta) { return _store.add(pageNumber, rects, meta); }
+export function removeRedaction(pageNumber, id) { return _store.remove(pageNumber, id); }
+export function redactionsFor(pageNumber) { return _store.for(pageNumber); }
 /** Every box, page by page: [{ pageNumber, boxes }], in page order. */
-export function redactionPages() {
-  return [..._byPage.keys()].sort((a, b) => a - b)
-    .map((pageNumber) => ({ pageNumber, boxes: _byPage.get(pageNumber) }))
-    .filter((p) => p.boxes && p.boxes.length);
-}
-
+export function redactionPages() { return _store.pages(); }
 /** { boxes, pages } — what the bar counts. */
-export function redactionCount() {
-  let boxes = 0, pages = 0;
-  for (const list of _byPage.values()) if (list && list.length) { boxes += list.length; pages++; }
-  return { boxes, pages };
-}
-
-export function clearRedactions(kind) {
-  if (!kind) { _byPage.clear(); _nextId = 1; return; }
-  for (const [pn, list] of [..._byPage]) {
-    const kept = list.filter((b) => b.kind !== kind);
-    if (kept.length) _byPage.set(pn, kept); else _byPage.delete(pn);
-  }
-}
+export function redactionCount() { return _store.count(); }
+export function clearRedactions(kind) { return _store.clear(kind); }
 
 // ── painting ─────────────────────────────────────────────────────────────────
 
@@ -281,12 +343,14 @@ export function clearRedactions(kind) {
  * viewport — the stored points go through it, so the boxes sit on the same
  * words at every zoom and at every angle the rotate tool leaves the page at.
  * `onRemove(box)` is called when one is clicked, so a proposal can be taken
- * back off before it is committed to.
+ * back off before it is committed to. `store` is the document's own store,
+ * where there is more than one document on screen.
  */
-export function repaintRedactionsForPage(pageNumber, layerDiv, viewport, { onRemove } = {}) {
+export function repaintRedactionsForPage(pageNumber, layerDiv, viewport, { onRemove, store } = {}) {
   if (!layerDiv) return;
   while (layerDiv.firstChild) layerDiv.removeChild(layerDiv.firstChild);
-  const list = _byPage.get(pageNumber);
+  const held = store || _store;
+  const list = held.for(pageNumber);
   if (!list || !list.length || !viewport) return;
   for (const box of list) {
     for (const r of box.rects) {
@@ -304,7 +368,7 @@ export function repaintRedactionsForPage(pageNumber, layerDiv, viewport, { onRem
       div.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (removeRedaction(pageNumber, box.id) && onRemove) onRemove(box);
+        if (held.remove(pageNumber, box.id) && onRemove) onRemove(box);
       });
       layerDiv.appendChild(div);
     }

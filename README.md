@@ -29,7 +29,8 @@ In addition to citation linking, the viewer supports:
 - **Redaction** — mark what has to go (every real value the pseudonym key
   binds, plus anything you drag over), check it while it is still only
   proposed, then save a flattened copy with it blacked out — no text layer, no
-  metadata, and never over the original. See below.
+  metadata, and never over the original. In the viewer, and in the text reader
+  from beside the export the PDF was scrubbed into. See below.
 - **Persistent highlighting** — select any text and release the mouse to
   apply a yellow highlight. Right-click a highlight to remove it. Highlights
   persist across zoom changes; for editable documents they can be saved into
@@ -291,6 +292,18 @@ marks it once, not twice.
 Pages render at **200 dpi** by default; 150 makes a smaller file and 300 a
 sharper one. Because the result is images, it is larger than the original and
 no longer searchable — which is the point.
+
+**The same tool from the case folder.** The text reader redacts too, from
+beside the export: open a case folder, put the PDF beside the text with **⇔
+Side by side**, and **▬ Redact PDF** marks that PDF and saves the copy without
+opening it in a second tab or loading the key again. The rule above holds
+exactly — the sweep, the proposals, the copy, the name, the untouched original
+— with three differences that follow from where it is. The sweep reads the
+PDF's own text off **every page of the document**, not only the pages drawn in
+the pane. It skips the values the review has **kept**, which the reader knows
+about and the viewer does not. And where a `Combined Text.txt` puts several
+documents beside one export, the boxes are filed per PDF and the save writes a
+copy of each that carries any.
 
 ## Citation links on claude.ai
 
@@ -1474,6 +1487,36 @@ app, which routes it to the reader tab.
   by PDF page number. Rendered pages are dropped as they scroll far out of
   view, so a long PDF costs no more than the pages in reach.
 
+- **Redact the PDF from beside the export.** With the pane open, **▬ Redact
+  PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and
+  saves a flattened copy with what has to go blacked out. It is the same
+  redaction the PDF viewer does, in the place the folder is actually worked:
+  the export and the PDF are the same filing seen twice, and the reader
+  already has the folder open, the key loaded and the PDF matched to the
+  export, so nothing has to be opened in another tab and handed the key a
+  second time. Opening the tool with a key loaded **sweeps at once**: every
+  real value the key binds is proposed wherever it stands in the PDF — over
+  **every page of it**, including the pages the export has no text for and the
+  pages nobody will scroll to, because a copy is the whole document. It is the
+  PDF's own text that is read, never the export's: the export was scrubbed and
+  the PDF is the file that was not. And it is the reader's reading of the key
+  — a value you have **kept** is one the review has already said is not this
+  matter's to hide, so a sweep does not propose it. Anything the key cannot
+  reach you mark by hand on the pages in the pane: **the text** a drag covers,
+  or **an area** for a signature, a photograph, an exhibit stamp. Every box is
+  a proposal — translucent, the words legible under it, dashed where the key
+  proposed it and solid where you drew it, and a click takes one back off.
+  **Save redacted copy** writes a new file and never the PDF in the folder;
+  what it writes is not the document with rectangles on it but page images
+  with the boxes painted into the pixels, carrying no text layer, no
+  annotations and no metadata — the rule and the reasons are under
+  [Redaction](#redaction) above, unchanged. A `Combined Text.txt` shows a
+  document per member, each with a PDF of its own, so the boxes are filed per
+  PDF and the save writes **one copy per PDF that carries any**, each named
+  through the key. Boxes outlast the document on screen — hopping between a
+  folder's exports is how a folder is read — and are dropped when the case
+  folder changes or you press Clear.
+
 - **A long export opens in one go.** A `Combined Text.txt` carrying a whole
   case — a thousand pages, every citation in them underlined and every name
   from the key put back — is laid out, linked and highlighted in one pass,
@@ -1566,7 +1609,7 @@ viewer/viewer.css                    Page + textLayer + linkLayer styles
 viewer/viewer.js                     PDF.js loader, two-pass renderer
 viewer/autoscroll.js                 Auto-scroll engine + control bar
 viewer/rotation.js                   Page rotation: angles, bar, geometry
-viewer/redact.js                     Redaction: boxes in PDF points, the key sweep's decisions, the copy's name (pure parts; test-redact.mjs)
+viewer/redact.js                     Redaction: boxes in PDF points, a store per document, the key sweep's decisions, the copy's name (pure parts; test-redact.mjs)
 viewer/pdf-edit.js                   PDF writing (pdf-lib): highlights, page plans, stamps, the flattened redacted copy
 viewer/key-library.js                The pseudonym keys this browser has been shown — one library, reader and viewer
 viewer/highlights.js                 Selection, highlight, context menu

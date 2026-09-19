@@ -106,6 +106,9 @@ body {
 /* The worksheet's bar sits under the toolbar; the names bar under that, so
    the two reviews stack rather than cover each other. */
 #names-bar { top: calc(var(--toolbar-height) + var(--bar-leaks, 0px)); }
+/* …and the redaction bar under both, so all three reviews stack. It is the
+   one that writes a file, so its edge is the red the boxes are drawn in. */
+#redact-bar { top: calc(var(--toolbar-height) + var(--bar-names, 0px)); border-bottom-color: #c5221f; }
 .revbar .lb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .revbar .lb-row .spacer { flex: 1; min-width: 8px; }
 .revbar button {
@@ -121,6 +124,14 @@ body {
 .revbar .lb-type { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: #546e7a; color: #fff; flex: none; text-transform: uppercase; letter-spacing: 0.02em; }
 .revbar .lb-type.leak { background: #b71c1c; }
 .revbar .lb-type.reid { background: #e65100; }
+.revbar .lb-type.redact { background: #c5221f; }
+/* The button that writes the file everything is hidden in, in both themes. */
+.revbar button.danger { background: #c5221f; border-color: #c5221f; color: #fff; }
+.revbar button.danger:hover { background: #a81d1a; border-color: #a81d1a; }
+.revbar select {
+  background: var(--btn); color: var(--text); border: 1px solid var(--btn-border);
+  border-radius: 4px; padding: 2px 4px; font-size: 12px; font-family: inherit; cursor: pointer; flex: none;
+}
 .revbar .lb-value { font-size: 15px; word-break: break-word; }
 .revbar .lb-where { color: var(--text-muted); word-break: break-word; }
 .revbar .lb-context-row { align-items: flex-start; }
@@ -287,6 +298,42 @@ body.tools-collapsed #tools-rail .tool-btn { position: relative; }
 /* The gutter's own right margin lies inside its track, so the track is the
    PDF's body margin exactly and the text starts where the PDF's does. */
 .page-body.numbered.fixed .line { grid-template-columns: var(--body-x, 3.7em) minmax(0, 1fr); }
+/* The box the key sweep lays a page's text out in to measure it: off screen,
+   at scale 1 (a CSS pixel to the PDF point), never drawn and never in the way.
+   It is a text layer, so it takes the layer's own rules for its spans and only
+   its placement is its own. */
+.textLayer.redact-sweep {
+  position: fixed; inset: auto; left: -99999px; top: 0; z-index: -1; pointer-events: none; contain: strict;
+}
+/* Proposed redactions over a PDF page in the pane. TRANSLUCENT, and never
+   painted onto the bitmap: until the copy is saved, the words under a box
+   have to stay legible so what is about to go can be read first and taken
+   back off. In the saved file these same boxes are solid black in the pixels;
+   on screen they never are. The layer takes no clicks (the selection reaches
+   the text through it); each box takes its own. */
+.redactLayer { position: absolute; inset: 0; pointer-events: none; z-index: 6; overflow: hidden; }
+/* A box takes the pointer only while the tool is on: closed, the boxes stay
+   on the page as a record of what is marked, and the selection reaches the
+   PDF's text through them. */
+.redactLayer .redact-rect {
+  position: absolute; pointer-events: none; cursor: pointer;
+  background: rgba(197, 34, 31, 0.32);
+  outline: 1.5px solid rgba(197, 34, 31, 0.95); outline-offset: -1px;
+}
+/* A box the key proposed is marked off from one drawn by hand, so a sweep of
+   the document says which are the run's and which are yours. */
+.redactLayer .redact-rect.from-key { background: rgba(197, 34, 31, 0.24); outline-style: dashed; }
+body.redact-on .redactLayer .redact-rect { pointer-events: auto; }
+body.redact-on .redactLayer .redact-rect:hover { background: rgba(197, 34, 31, 0.5); }
+/* While the area tool is on, the pointer says what a drag will do. */
+body.redact-area-mode .pdf-slot .textLayer,
+body.redact-area-mode .pdf-slot .textLayer span { cursor: crosshair; }
+/* The box drawn while an area drag is in progress, anchored in the document so
+   it stays over the same words — the PDF viewer's marquee, the same rule. */
+#redact-marquee {
+  position: absolute; display: none; pointer-events: none; z-index: 2147483646;
+  border: 1px solid rgba(197, 34, 31, 0.95); background: rgba(197, 34, 31, 0.18);
+}
 .pdf-slot .pdf-wait, .pdf-inline .pdf-wait { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #9aa0a6; font-size: 12px; pointer-events: none; }
 .pdf-slot.ready .pdf-wait, .pdf-inline.ready .pdf-wait { display: none; }
 #pdf-pane .pane-empty { max-width: 420px; margin: 40px auto; text-align: center; color: #e8eaed; font-size: 13px; line-height: 1.5; }
