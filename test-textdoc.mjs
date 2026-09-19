@@ -12,7 +12,7 @@ import {
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
-  keepNeedsRun, owedKeeps, owe, makeKeep,
+  keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape,
 } from "./viewer/textdoc.js";
@@ -267,40 +267,53 @@ check("parseValuesFile ignores the keeps", parseValuesFile(both), list);
 //
 // Keeping a value the run FAKED is work for the next run: only PDF-Linker can
 // put the real name back. Keeping one that stands in the clear is not — the
-// file already reads that way — so it stays here rather than going into the
-// list the case folder is handed.
+// files already read that way — so it stays in the reader rather than going
+// into the list the case folder is handed. `faked` is the CASE's answer, not
+// one document's: the reader asks the folder, and until the folder has been
+// read the keep is `pending` and owed like any other.
 console.log("which keeps PDF-Linker is owed");
 check("a value standing in the clear, this case, unraised: nothing to run",
   keepNeedsRun({ control: "no", faked: false, onLeaksSheet: false }), false);
-check("a value the run faked: only a run can put it back",
+check("a pseudonym standing anywhere in the case: only a run can put it back",
   keepNeedsRun({ control: "no", faked: true, onLeaksSheet: false }), true);
 check("a value PDF-Linker has raised on LEAKS.xlsx: its row is waiting on an answer",
   keepNeedsRun({ control: "no", faked: false, onLeaksSheet: true }), true);
 check("never reaches the next matter through the file and nowhere else",
   keepNeedsRun({ control: "never", faked: false, onLeaksSheet: false }), true);
 
-check("a local keep is marked as one", makeKeep("no", "Helen Rasho", true),
-  { control: "no", value: "Helen Rasho", local: true });
-check("…and never never", makeKeep("never", "Helen Rasho", true),
+check("a local keep is marked as one", makeKeep("no", "Helen Rasho", "local"),
+  { control: "no", value: "Helen Rasho", state: "local" });
+check("a keep waiting on the folder is marked too", makeKeep("no", "Helen Rasho", "pending"),
+  { control: "no", value: "Helen Rasho", state: "pending" });
+check("…and never never", makeKeep("never", "Helen Rasho", "local"),
   { control: "never", value: "Helen Rasho" });
+check("a state nobody defined is no state", makeKeep("no", "Helen Rasho", "maybe"),
+  { control: "no", value: "Helen Rasho" });
 
-let mixed = addKeep([], "no", "Helen Rasho", true);
+let mixed = addKeep([], "no", "Helen Rasho", "local");
 mixed = addKeep(mixed, "no", "Stockton Theatres");
-check("the file is handed only what it is owed", owedKeeps(mixed),
-  [{ control: "no", value: "Stockton Theatres" }]);
+mixed = addKeep(mixed, "no", "Palermo", "pending");
+check("the file is handed everything but the keeps the case already carries out",
+  owedKeeps(mixed).map((k) => k.value), ["Stockton Theatres", "Palermo"]);
 check("a local keep is not written into the file",
-  formatValuesFile([], mixed).endsWith("\nno: Stockton Theatres\n"), true);
-check("…and nothing of it is in there at all",
   /Helen Rasho/.test(formatValuesFile([], mixed)), false);
-check("raising the same value again makes it owed",
-  owe(mixed, "HELEN RASHO"), [{ control: "no", value: "Helen Rasho" }, { control: "no", value: "Stockton Theatres" }]);
+check("a keep still waiting on the folder IS written — owed until the evidence says otherwise",
+  formatValuesFile([], mixed).endsWith("\nno: Stockton Theatres\nno: Palermo\n"), true);
+
+check("a pseudonym found standing makes a local keep owed again",
+  owe(mixed, "HELEN RASHO")[0], { control: "no", value: "Helen Rasho" });
+check("…and a pending one too", owe(mixed, "palermo")[2], { control: "no", value: "Palermo" });
 check("owing what is already owed changes nothing", owe(mixed, "Stockton Theatres"), mixed);
-check("a keep once owed is never made local again by owe",
-  owe(owe(mixed, "Helen Rasho"), "Helen Rasho")[0], { control: "no", value: "Helen Rasho" });
+check("the folder read clean settles a pending keep",
+  settleLocal(mixed, "Palermo")[2], { control: "no", value: "Palermo", state: "local" });
+check("but nothing settles a keep that was owed on the evidence",
+  settleLocal(mixed, "Stockton Theatres"), mixed);
+check("…nor one already made owed", settleLocal(owe(mixed, "Palermo"), "Palermo"),
+  owe(mixed, "Palermo"));
 check("turning a local keep into a never writes it out",
   owedKeeps(addKeep(mixed, "never", "Helen Rasho")).map((k) => k.value).sort(),
-  ["Helen Rasho", "Stockton Theatres"]);
-check("a keep read back from the file is owed, not local",
+  ["Helen Rasho", "Palermo", "Stockton Theatres"]);
+check("a keep read back from the file is owed, with no state at all",
   parseReaderFile("no: Helen Rasho\n").keeps, [{ control: "no", value: "Helen Rasho" }]);
 
 check("flag: nothing selected", flagProblem("  ", false) !== "", true);

@@ -1259,26 +1259,42 @@ app, which routes it to the reader tab.
   prompt an edited document or an unsaved LEAKS decision raises; the browser's
   own dialog is all a page gets, and which of the three it is, the panels
   say).
-- **A keep the file already carries out asks nothing of PDF-Linker.** A keep
-  says *do not fake this value*, and what that costs depends on what the file
-  already says. Where the run faked it, the file carries the pseudonym and only
+- **A keep the case already carries out asks nothing of PDF-Linker.** A keep
+  says *do not fake this value*, and what that costs depends on what the files
+  already say. Where the run faked it, a file carries the pseudonym and only
   PDF-Linker can put the real name back: the keep has to reach the case folder
   and the run has to happen. Where the value **stands in the clear**, nothing
-  faked it — there is nothing to un-fake, the file already reads the way the
-  keep wants it to read, and handing it over would ask a run to do what has
+  faked it — there is nothing to un-fake, the files already read the way the
+  keep wants them to, and handing it over would ask a run to do what has
   already been done. So that keep stays in the reader. It is not written into
   `New Real Values.txt`, it does not make the list one the case folder is owed,
   it raises no closing prompt, and the whole of its effect is the one that was
   wanted: the value stops being marked. The **Flagged** panel tags it *already
-  so* rather than *this case*. Two things take a keep out of that case, because
-  both mean a question is still open: **Never fake it anywhere** reaches the
-  next matter through the file and nowhere else, so it is always written out;
-  and a value PDF-Linker has itself raised on `LEAKS.xlsx` has a row waiting on
-  an answer, which is where it gets answered. The facts are read again as they
-  change, and only in the safe direction — open a document in the same folder
-  that turns out to carry the pseudonym, or attach a worksheet that raises the
-  value, and the keep goes back on the list the case folder is owed. A keep
-  once owed is never quietly made local again.
+  so* rather than *this case*.
+- **And the question is the case's, not the document's.** A keep applies to
+  every export in the folder, so "was it faked?" is asked of every export in
+  the folder: a pseudonym standing in one of the other forty is a name the next
+  run is the only thing that can restore, whatever the document on screen
+  happens to say. The folder sweep already reads each export once to find the
+  names standing in the clear; the same reading writes down which pseudonyms
+  stand, and that index — an answer about what the run wrote, which taking a
+  keep does not change — is kept across decisions and rebuilt only when the key
+  or the folder's list of documents moves. One document that will not open is
+  enough to withhold it: a missing file reads as "this pseudonym stands
+  nowhere", which is the one wrong answer that costs a name.
+- **Until the folder has been read, a keep is owed.** A keep taken before the
+  sweep has answered is tagged *checking* and goes into the list like any
+  other, because a keep wrongly held back is a name the run never restores and
+  nothing ever says so. When the reading finishes it is settled — or left owed,
+  if a pseudonym turned up. The move toward *already so* is the only one that
+  needs evidence, and it is never made for a keep already written into
+  `New Real Values.txt`: that line is PDF-Linker's now, and a run leaving a
+  value alone that was already standing costs nothing. Two other things keep a
+  value on the list whatever the folder says: **Never fake it anywhere**
+  reaches the next matter through the file and nowhere else, and a value
+  PDF-Linker has itself raised on `LEAKS.xlsx` has a row waiting on an answer,
+  which is where it gets answered. With no case folder open there is nothing
+  to sweep, and the open document is the whole of the case the reader can see.
 - **A keep stays visible.** A value kept is a decision, and with the orange
   mark gone (it is not a leak any more) nothing used to say so — the name read
   like any other word, and a page read a week later gave no sign which names

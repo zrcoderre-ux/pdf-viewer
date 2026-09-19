@@ -482,16 +482,20 @@ export const KEEP_CONTROLS = ["no", "never"];
  * Whether a keep is work for PDF-Linker, or work already done.
  *
  * A keep says: do not fake this value. What that COSTS depends on what the
- * file already says, and the two cases are not the same job at all.
+ * files already say, and the two cases are not the same job at all.
  *
- *   The run faked it. The file carries the pseudonym and only PDF-Linker can
+ *   The run faked it. A file carries the pseudonym and only PDF-Linker can
  *     put the real name back, so the keep has to reach the case folder and the
- *     run has to happen before the file reads the way the keep wants it to.
+ *     run has to happen before the files read the way the keep wants them to.
  *   The value stands in the clear. Nothing faked it, so there is nothing to
- *     un-fake: the file ALREADY reads the way the keep wants it to. The keep
+ *     un-fake: the files ALREADY read the way the keep wants them to. The keep
  *     is not an instruction, it is a note to the reader — stop marking this,
  *     it was left alone on purpose — and handing it to PDF-Linker would ask a
  *     run to do what has already been done.
+ *
+ * `faked` is a question about the WHOLE CASE, not about one document: a keep
+ * is the case's, and a pseudonym standing in any export of the folder is a
+ * name the next run would otherwise be the only thing able to restore.
  *
  * Two things spoil the second case. `never` is a decision about every matter
  * this operator will ever open, which only the case folder's file carries from
@@ -504,46 +508,62 @@ export function keepNeedsRun({ control, faked, onLeaksSheet }) {
   return control === "never" || !!faked || !!onLeaksSheet;
 }
 
-/**
- * A keep entry as the list holds it: { control, value } — and `local: true`
- * where the keep asks nothing of PDF-Linker (keepNeedsRun said no), which is
- * what keeps it out of New Real Values.txt.
- */
-export function makeKeep(control, value, local) {
+// A keep's state, beside its control:
+//   ""         PDF-Linker is owed it — the ordinary keep, written to the file.
+//   "local"    the files already carry it out; it is not written anywhere.
+//   "pending"  it LOOKS local, but the folder has not been read yet. Owed
+//              until the reading says otherwise, because a keep wrongly held
+//              back is a name the run never restores and nothing ever says so.
+export const KEEP_STATES = ["local", "pending"];
+
+/** A keep entry as the list holds it: { control, value } and, when it has one, `state`. */
+export function makeKeep(control, value, state) {
   const c = String(control || "no").toLowerCase();
   const k = { control: KEEP_CONTROLS.includes(c) ? c : "no", value: normalizeValue(value) };
-  // `never` reaches the next matter through the file and nowhere else, so it is
-  // never local however it was asked for.
-  if (local && k.control === "no") k.local = true;
+  // `never` reaches the next matter through the file and nowhere else, so it
+  // is never anything but owed, however it was asked for.
+  if (k.control === "no" && KEEP_STATES.includes(state)) k.state = state;
   return k;
 }
 /** Add a keep, or change the control of one already held (its spelling kept). */
-export function addKeep(keeps, control, value, local) {
-  const k = makeKeep(control, value, local);
+export function addKeep(keeps, control, value, state) {
+  const k = makeKeep(control, value, state);
   if (!k.value) return (keeps || []).slice();
   const have = (keeps || []).find((x) => foldKey(x.value) === foldKey(k.value));
   const out = (keeps || []).filter((x) => foldKey(x.value) !== foldKey(k.value));
-  out.push(have ? makeKeep(k.control, have.value, k.local) : k);
+  out.push(have ? makeKeep(k.control, have.value, k.state) : k);
   return out;
 }
-/** The keeps PDF-Linker is owed: everything but the ones already answered. */
+/** The keeps PDF-Linker is owed: everything the files do not already carry out. */
 export function owedKeeps(keeps) {
-  return (keeps || []).filter((k) => !k.local);
+  return (keeps || []).filter((k) => k.state !== "local");
 }
 /**
- * A keep the file already answers, turned back into one PDF-Linker is owed.
- * The facts a keep was taken under can change under it — another document in
- * the folder turns out to carry the pseudonym, or PDF-Linker raises the value
- * on LEAKS.xlsx — and the safe direction is the only one taken: a keep can
- * stop being local, never start.
+ * A keep the files already answer, turned back into one PDF-Linker is owed.
+ * The facts a keep was taken under can change under it — another export in the
+ * folder turns out to carry the pseudonym, or PDF-Linker raises the value on
+ * LEAKS.xlsx — and this is the only direction that direction is ever taken
+ * without evidence: a keep can stop being local, and nothing here makes one.
  */
 export function owe(keeps, value) {
+  return restate(keeps, value, "", (x) => !!x.state);
+}
+/**
+ * …and the one move the other way, which needs the folder actually read: a
+ * keep held owed only because nothing had looked yet, once looking says the
+ * files carry it out. Only from `pending` — a keep that was owed on the
+ * evidence stays owed.
+ */
+export function settleLocal(keeps, value) {
+  return restate(keeps, value, "local", (x) => x.state === "pending");
+}
+function restate(keeps, value, state, when) {
   const k = foldKey(value);
   let moved = false;
   const out = (keeps || []).map((x) => {
-    if (foldKey(x.value) !== k || !x.local) return x;
+    if (foldKey(x.value) !== k || !when(x)) return x;
     moved = true;
-    return { control: x.control, value: x.value };
+    return makeKeep(x.control, x.value, state);
   });
   return moved ? out : keeps;
 }

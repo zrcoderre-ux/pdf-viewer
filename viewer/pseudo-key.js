@@ -583,6 +583,28 @@ export function compileReals(key) {
   return { rx, map };
 }
 
+/**
+ * The same, over the FAKES: which pseudonyms stand in a text.
+ *
+ * The reverse matcher (`compile`) answers a different question — what a fake
+ * should be DISPLAYED as — and it is built from the reversible bindings only,
+ * a fake claimed by two reals having been retired from it. This one is built
+ * from every warning row the key holds, because what is asked of it is not
+ * "whose name is this" but "did the run fake anything here", and a fake two
+ * reals share is standing whoever put it there.
+ *
+ * Paired with findReals, it gives the rows whose fakes stand; a caller wanting
+ * the fakes themselves takes `w.fake` and never `w.real`, which is the half
+ * an ambiguous fake cannot answer for.
+ */
+export function compileFakes(key) {
+  const warn = ((key && key.warn) || []).filter((w) => w.fake);
+  const map = new Map();
+  for (const w of warn) if (!map.has(fold(w.fake))) map.set(fold(w.fake), w);
+  const rx = buildMatcher(warn.map((w) => w.fake));
+  return { rx, map };
+}
+
 // Look a match up in a compiled map, a possessive of a bare value included.
 function lookup(compiled, m) {
   const g = foldGaps(m);
