@@ -155,6 +155,11 @@ body {
    next, and the arrow that goes to it. */
 #names-bar.onward .lb-decide, #names-bar.onward #nb-find { display: none; }
 #names-bar.onward .lb-type { background: #546e7a; }
+/* Why the row's value is not marked on the page. It belongs IN THE BAR and
+   not in a toast: a toast is gone in three seconds, and the operator needs it
+   while they decide the row. */
+.revbar .lb-problem { color: var(--note-strong); min-width: 0; }
+.revbar .lb-problem:empty { display: none; }
 .revbar .rb-miss-row { border-top: 1px dashed var(--btn-border); padding-top: 4px; margin-top: 2px; }
 .revbar .rb-miss-row[hidden] { display: none; }
 /* The occurrence the walk is standing on, in the text. Orange like the leak

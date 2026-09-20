@@ -24,6 +24,43 @@ export function spaceStem(stem) {
 }
 
 /**
+ * The same stem with its PUNCTUATION AND SPACING taken out — letters and
+ * digits only, folded.
+ *
+ * A stem is a file name a person typed, and the same document is written
+ * "Payee Supp. Decl. ISO Pet..pdf" in one place and "Payee Supp. Decl. ISO
+ * Pet.txt" in another: a stem ending in an abbreviation's own full stop
+ * carries a doubled dot in the PDF's name and a single one in the export's,
+ * because the tool that made the export wrote `stem + ".txt"` over a stem
+ * whose trailing dot something had already eaten. Under the exact stem those
+ * are two documents. Under this one they are the document they are.
+ *
+ * It is the SECOND question, never the first: the exact stem still decides,
+ * and this is only asked where nothing answered it and exactly one candidate
+ * answers this. A looser match than "the punctuation differs" would start
+ * pairing documents that are genuinely different, and pointing the review at
+ * the wrong file is worse than pointing it at none.
+ */
+export function looseStem(name) {
+  return normalizeStem(name).replace(/[^a-z0-9]+/g, "");
+}
+/**
+ * `stem → the one candidate that answers to it loosely`, for the candidates
+ * no exact stem claimed. A stem two candidates answer to is left out: an
+ * ambiguous name has no answer, and a guess is the thing to avoid.
+ */
+export function looseIndex(keys) {
+  const seen = new Map();
+  for (const [k, v] of keys) {
+    const l = looseStem(k);
+    if (!l) continue;
+    if (seen.has(l)) { if (seen.get(l) !== v) seen.set(l, null); }
+    else seen.set(l, v);
+  }
+  return seen;
+}
+
+/**
  * The PDF an export came from: `pdfNames` are the case folder's PDFs,
  * `forward(text)` translates real → fake through the key (may be null). The
  * matching name, or null. A scrubbed match beats a bare one only in that
@@ -33,16 +70,21 @@ export function matchPdf(exportName, pdfNames, forward) {
   const want = normalizeStem(exportName);
   if (!want) return null;
   const fwd = typeof forward === "function" ? forward : null;
+  const stems = [];
   for (const pdf of pdfNames || []) {
     const stem = normalizeStem(pdf);
     if (stem === want) return pdf;
+    let faked = "";
     if (fwd) {
-      let faked = "";
       try { faked = fwd(spaceStem(String(pdf).replace(/\.pdf$/i, ""))); } catch { faked = ""; }
       if (faked && spaceStem(faked).toLowerCase() === want) return pdf;
     }
+    stems.push([stem, pdf], [faked ? spaceStem(faked).toLowerCase() : "", pdf]);
   }
-  return null;
+  // Nothing answered exactly: the one candidate that differs only in its
+  // punctuation, if there is exactly one (looseStem).
+  const one = looseIndex(stems).get(looseStem(exportName));
+  return one == null ? null : one;
 }
 
 /** The name a file takes once the key is run forward over it, folded as a stem. */
@@ -73,11 +115,21 @@ export function pdfMatcher(pdfNames, forward) {
   list.forEach((pdf, i) => {
     for (const s of [normalizeStem(pdf), fakedStem(pdf, forward)]) if (s && !at.has(s)) at.set(s, i);
   });
+  // …and the same stems with their punctuation taken out, for the names that
+  // differ only in it. Built once with the index, asked only after it.
+  const loose = looseIndex([...at.entries()]);
   const memo = new Map();
   return (exportName) => {
     const want = normalizeStem(exportName);
     if (!want) return null;
-    if (!memo.has(want)) memo.set(want, at.has(want) ? list[at.get(want)] : null);
+    if (!memo.has(want)) {
+      let hit = at.has(want) ? list[at.get(want)] : null;
+      if (hit == null) {
+        const i = loose.get(looseStem(exportName));
+        if (i != null) hit = list[i];
+      }
+      memo.set(want, hit);
+    }
     return memo.get(want);
   };
 }

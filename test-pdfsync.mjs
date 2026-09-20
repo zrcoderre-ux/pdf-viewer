@@ -36,6 +36,20 @@ check("no match is null", matchPdf("Reply.txt", pdfs, forward), null);
 check("a forward that throws is a bare match only", matchPdf("Order.txt", pdfs, () => { throw new Error("x"); }), "Order.pdf");
 check("an empty name matches nothing", matchPdf("", pdfs, forward), null);
 {
+  // A stem ending in an abbreviation's own full stop: "…ISO Pet..pdf" is the
+  // name the PDF really has, and the export beside it is one dot short. The
+  // exact stem calls them two documents; nothing else about them differs.
+  const dotted = ["Payee Supp. Decl. ISO Pet..pdf", "Reply Brief.pdf"];
+  check("a name differing only in its punctuation still matches",
+    [matchPdf("Payee Supp. Decl. ISO Pet.txt", dotted, null), pdfMatcher(dotted, null)("Payee Supp. Decl. ISO Pet.txt")],
+    ["Payee Supp. Decl. ISO Pet..pdf", "Payee Supp. Decl. ISO Pet..pdf"]);
+  check("…but an exact stem is still what decides",
+    matchPdf("Reply Brief.txt", ["Reply-Brief.pdf", "Reply Brief.pdf"], null), "Reply-Brief.pdf");
+  check("…and two candidates answering loosely is no answer, not a guess",
+    [matchPdf("A,B.txt", ["A B.pdf", "A.B.pdf"], null), pdfMatcher(["A B.pdf", "A.B.pdf"], null)("A,B.txt")],
+    [null, null]);
+}
+{
   // matchPdf translates every candidate for every name it is asked about; a
   // LEAKS worksheet asks thousands of times, so the same answers are served
   // from an index built once.

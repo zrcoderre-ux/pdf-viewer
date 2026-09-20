@@ -5026,6 +5026,7 @@ function renderLeaksBar() {
     ctx.append(ex);
   }
   $("lb-notes").textContent = row.notes || "";
+  $("lb-problem").textContent = leaks.problem || "";
   const c = LK.classifyFix(row.fix, row.value);
   const sug = LK.isSuggested(row);
   const ans = $("lb-answer");
@@ -5120,6 +5121,7 @@ async function goToLeak(i, { locate = true } = {}) {
   const row = rows[leaks.at];
   leakRowValue = row.value;
   leakHere = null;
+  leaks.problem = ""; // a new row is a new question; locateLeak answers it
   showLeaksBar(true);
   renderLeaksBar();
   paintLeakRow(was);
@@ -5188,9 +5190,12 @@ async function locateLeak(row) {
     await openFolderDoc(target);
     if (!doc || fileName !== target.name) { paintHighlights(); return; }
     if (wasEditing) setEditing(true);
-  } else if (files.length && !target && !here(fileName)) {
-    toast(`${files[0]}: no export in ${folderName || "the folder"} matches it — searching ${fileName || "the open document"} instead.`);
   }
+  // The row's own document is not in this folder. The reader still looks in
+  // whatever is open — for a lone file that is the only document there is —
+  // but it must SAY which document it looked in, or a "not found" reads as a
+  // fact about the row's document when it is a fact about another one.
+  const astray = !!files.length && !target && !here(fileName);
   paintHighlights();
   if (!doc) return;
   // The occurrence to stand at: on the page Where names (its own number,
@@ -5216,8 +5221,24 @@ async function locateLeak(row) {
     if (score > bestScore) { bestScore = score; best = hit; }
   }
   if (!best) {
-    $("lb-where").textContent += " — not found in " + fileName;
-    toast(`"${row.value}" is not in ${fileName}` + (files.length ? ` (the row names ${files.join(", ")})` : ""), { error: true });
+    // WHY it is not marked, in one sentence that names every document in play.
+    // This used to be two toasts — "no export matches it, searching X instead"
+    // and then "not in X" — of which the second overwrote the first before it
+    // could be read, so the only message left standing said the value was
+    // missing from a document the row had never named. One message, and it
+    // stays in the bar while the row is being decided.
+    const open = fileName || "the open document";
+    const mine = files.length ? files[0] : "";
+    const pdf = mine ? pdfForName(mine) : null;
+    leaks.problem = !files.length
+      ? `“${row.value}” is not in ${open}.`
+      : astray
+        ? `“${row.value}” could not be looked for where the row puts it: no export in ${folderName || "the folder"} answers to ${mine}. ${open} was read instead and does not carry it.`
+        : `“${row.value}” is not in ${open}${row.where ? `, where the row puts it (${row.where})` : ""}. `
+          + (pdf ? `${pdf} still has it; the export does not. ` : "")
+          + "The worksheet was written from the run, so a page edited or deleted since would account for the difference.";
+    $("lb-problem").textContent = leaks.problem;
+    toast(leaks.problem, { error: true, ms: 9000 });
     return;
   }
   leakHere = best.range;

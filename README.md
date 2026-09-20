@@ -1306,6 +1306,24 @@ app, which routes it to the reader tab.
   or a kept one, is never space-marked: the space types on, and the whole
   name is offered the moment it is finished. A name typed and left is
   marked by the reader on its own once the caret has moved off it.
+- **A row that cannot be located says so, once, and keeps saying it.** A LEAKS
+  row names the **PDF** the value was found in; the review has to open that
+  PDF's **text export**, and the two names do not always agree. A stem ending
+  in an abbreviation's own full stop — `Payee Supp. Decl. ISO Pet..pdf` — is
+  written one dot shorter in the export beside it, and under an exact-stem
+  match the row's document was simply not in the folder. The review then read
+  whatever was open instead and reported the value missing from a document the
+  row had never named. Two things now: a name differing from its export in
+  **nothing but punctuation** still finds it (asked only after the exact stem,
+  and only where exactly one export answers — an ambiguous name still gets no
+  answer, because pointing the review at the wrong file is worse than pointing
+  it at none); and the reason a value could not be marked is **one sentence in
+  the bar**, where it stays while the row is being decided, naming every
+  document in play. It used to be two toasts, of which the second overwrote
+  the first before it could be read. Where the export really has lost the
+  value — a page of corrupt OCR deleted since the run, say — the bar says
+  that: *is not in <export>, where the row puts it (p.6:14); <PDF> still has
+  it; the export does not.*
 - **Ctrl+F reads the whole case folder, not the open document.** The browser's
   own find reads what is in the page, and what is in the page is this document
   — with the folder read on, not even all of it, since the reel sheds its far

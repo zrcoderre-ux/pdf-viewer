@@ -92,6 +92,30 @@ check("Context: the two halves, or the original alone", [splitContext("a\n" + CO
   check("…a bare stem too, a Word file too, a quarantined export too", [matchExport("Order.docx", docs, forward), matchExport("Reply.pdf", docs, null)], ["Order.txt", "Reply.txt.LEAK"]);
   check("no match, no export", matchExport("Nothing.pdf", docs, forward), null);
   {
+    // Losing the File column is not a small loss: every row then names no
+    // document, the walk stops going document by document, and each value is
+    // looked for in whatever happens to be open.
+    const head = (h) => parseLeaks([{ name: "LEAKS", rows: [["Value", "Fix?", h, "Where"], ["Rasho", "", "Brief.pdf", "p.2"]] }], "L.xlsx").rows[0].file;
+    check("the File column under the spellings a sheet reaches it by",
+      ["File", "File(s)", "Files", "file name"].map(head), ["Brief.pdf", "Brief.pdf", "Brief.pdf", "Brief.pdf"]);
+  }
+  {
+    // A stem ending in an abbreviation's own full stop: the PDF carries the
+    // doubled dot its name really has, the export beside it one dot fewer.
+    // Under the exact stem the row's document is simply not in the folder,
+    // and the review reads whatever is open instead — then reports the value
+    // missing from a document the row never named.
+    const real = ["Pet. for Approval for Transfer of Payment Rights (1) old.txt", "Payee Supp. Decl. ISO Pet.txt"];
+    check("a File name differing from its export only in punctuation still finds it",
+      matchExport("Payee Supp. Decl. ISO Pet..pdf", real, null), "Payee Supp. Decl. ISO Pet.txt");
+    check("…and it is the SECOND question: an exact stem still wins",
+      matchExport("Payee Supp. Decl. ISO Pet..pdf", ["Payee Supp. Decl. ISO Pet..txt"].concat(real), null),
+      "Payee Supp. Decl. ISO Pet..txt");
+    check("…two exports answering to it loosely is no answer at all, not a guess",
+      [matchExport("A,B.pdf", ["A B.txt", "A.B.txt"], null), matchExport("Nowhere Near.pdf", real, null)],
+      [null, null]);
+  }
+  {
     // The same answers, without running the key forward over a candidate per
     // lookup: a worksheet asks this thousands of times.
     const many = ["Rasho v Quillmark - MTC.pdf", "Order.docx", "Reply.pdf", "Nothing.pdf", "", "Rasho v Quillmark - MTC.pdf"];

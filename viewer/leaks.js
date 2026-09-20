@@ -28,7 +28,7 @@
 // A row's decision is stored on the row as `fix` beside the sheet's own
 // `fix0`, so what changed — and only that — is written back (fixEdits).
 
-import { matchPdf, normalizeStem, fakedStem } from "./pdfsync.js";
+import { normalizeStem, fakedStem, looseStem, looseIndex } from "./pdfsync.js";
 
 export const LEAKS_SHEET = "LEAKS";
 export const LEAKS_FILE = "LEAKS.xlsx";
@@ -53,7 +53,11 @@ const HEADS = {
   value: (h) => h === "value",
   fix: (h) => h.startsWith("fix?"),
   context: (h) => h === "context",
-  file: (h) => h === "file",
+  // "File", and the spellings a sheet reaches it under: losing this column
+  // silently is expensive — every row then names no document, so the review
+  // stops walking document by document and the reader looks for each value in
+  // whatever happens to be open.
+  file: (h) => h === "file" || h === "files" || h === "file(s)" || h === "file name",
   type: (h) => h === "type",
   where: (h) => h.startsWith("where"),
   notes: (h) => h === "notes",
@@ -299,8 +303,11 @@ export function splitContext(cell) {
  */
 export function matchExport(fileName, exportNames, forward) {
   if (!fileName) return null;
-  for (const e of exportNames || []) if (matchPdf(e, [fileName], forward)) return e;
-  return null;
+  // The one-off form of exportMatcher, and literally it: asking the same
+  // question two ways is how the two come to answer it differently — one
+  // export at a time cannot see that a second answers to the same loose stem,
+  // and would return the first rather than declining an ambiguous name.
+  return exportMatcher(exportNames, forward)(fileName);
 }
 
 /**
@@ -315,6 +322,15 @@ export function exportMatcher(exportNames, forward) {
   const list = (exportNames || []).slice();
   const at = new Map(); // an export's stem → its place in the list
   list.forEach((e, i) => { const s = normalizeStem(e); if (s && !at.has(s)) at.set(s, i); });
+  // …and the stems with their punctuation taken out, for the File cell whose
+  // name differs from its export's in nothing else. A LEAKS row names the
+  // PDF — "Payee Supp. Decl. ISO Pet..pdf", a stem ending in an abbreviation's
+  // own full stop — and the export beside it is "…ISO Pet.txt", one dot
+  // short. Under the exact stem the row's document is simply not in the
+  // folder, and the review falls back to reading whatever is open: the row is
+  // then reported missing from a document it never named. Asked only after
+  // the exact stems, and only where ONE export answers (looseIndex).
+  const loose = looseIndex([...at.entries()]);
   const memo = new Map();
   return (fileName) => {
     if (!fileName) return null;
@@ -322,6 +338,10 @@ export function exportMatcher(exportNames, forward) {
     let best = -1;
     for (const s of [normalizeStem(fileName), fakedStem(fileName, forward)]) {
       if (s && at.has(s) && (best < 0 || at.get(s) < best)) best = at.get(s);
+    }
+    if (best < 0) {
+      const i = loose.get(looseStem(fileName));
+      if (i != null) best = i;
     }
     const hit = best >= 0 ? list[best] : null;
     memo.set(fileName, hit);
