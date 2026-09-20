@@ -1407,6 +1407,17 @@ app, which routes it to the reader tab.
   it raises no closing prompt, and the whole of its effect is the one that was
   wanted: the value stops being marked. The **Flagged** panel tags it *already
   so* rather than *this case*.
+- **And it writes each document as it leaves it.** Finishing a document —
+  every name answered, or stepped past the last of them — is a save's worth of
+  work: the names settled are written as their pseudonyms, the keeps taken go
+  into `New Real Values.txt`, a worksheet row answered on the way goes into
+  `LEAKS.xlsx`. None of it used to happen, so the walk moved on and left a
+  document still carrying real values with nothing on screen to say so — the
+  count and the bar are about the document now in front. The save happens on
+  the way out, and **a save that does not happen holds the walk**: the
+  standing assertion refusing, or a file that would not be written, is exactly
+  the moment not to move on, and the bar stays where it is and says why.
+  A document that owes nothing is left alone, bytes and timestamp and all.
 - **The walk does not stop at the end of a document.** The names standing in
   the clear are a folder's worth of work, and the bar over the text used to go
   down the moment the open document ran out of them — leaving the walk to be

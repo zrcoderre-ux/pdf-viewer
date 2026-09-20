@@ -2606,8 +2606,9 @@ function plainSegments(body) {
 // review that changed one line of one of them. A save with nothing edited at
 // all still writes the document being read, which is what Ctrl+S has always
 // meant for a document on its own.
+/** Writes the document (and what the case folder is owed); false where it did not. */
 async function saveDocument() {
-  if (!doc) return;
+  if (!doc) return false;
   let forwarded = 0;
   // Each page as it will be written, and the same text with its spot keeps
   // blanked — what the standing assertion below is allowed to look at.
@@ -2649,7 +2650,7 @@ async function saveDocument() {
       const left = PK.findReals(reals, TD.blankRanges(maskKept(held), TD.citedNameSpans(held)));
       if (left.length) {
         toast(`Not saved: ${m.name} still carries a real name the key binds — ` + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again.", { error: true });
-        return;
+        return false;
       }
     }
   }
@@ -2658,7 +2659,7 @@ async function saveDocument() {
     const ok = await writeText(TD.serializeExport(memberDoc(m)), m.name, m.handle, { adopt: reel.length === 1 });
     if (!ok) {
       if (wrote.length) toast(`Saved ${wrote.join(", ")} — ${m.name} was not written.`, { error: true });
-      return;
+      return false;
     }
     m.dirty = false;
     wrote.push(m.name);
@@ -2697,6 +2698,7 @@ async function saveDocument() {
     ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : "Nothing to save.")
     : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + wrote.join(", ") +
       (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList);
+  return true;
 }
 saveBtn.addEventListener("click", saveDocument);
 document.addEventListener("keydown", (e) => {
@@ -3838,11 +3840,43 @@ async function sweepFolder() {
   // decided on the evidence rather than held owed for want of it.
   refreshKeepLocality();
 }
-/** On to a document of the folder that is carrying one, and stand on its first. */
-function jumpToDoc(row) {
+/**
+ * On to a document of the folder that is carrying one, and stand on its first
+ * — THE DOCUMENT BEING LEFT WRITTEN FIRST.
+ *
+ * The walk arrives here having finished this document: every name answered,
+ * or stepped past the last of them. What that work amounts to is a save — the
+ * names settled are written as their pseudonyms, the keeps taken go into
+ * New Real Values.txt, a worksheet row answered on the way goes into
+ * LEAKS.xlsx — and none of it had happened. The operator moved on with a
+ * document still carrying real values and nothing on screen to say so, since
+ * the count and the bar are about the document now in front. A review that
+ * walks the folder has to write each document as it leaves it.
+ *
+ * A save that does NOT happen holds the walk here: the standing assertion
+ * refusing, or a file that would not be written, is exactly the moment not to
+ * move on. Nothing owed, nothing written — an untouched document is left as
+ * it stands, bytes and timestamp alike.
+ */
+async function jumpToDoc(row) {
+  if (!(await saveOnTheWayOut())) return;
   leakJump = true;
   toast(`Opening ${row.doc.name} — ${row.count} name${row.count === 1 ? "" : "s"} standing in the clear there.`);
   openFolderDoc(row.doc);
+}
+/** The open document written before the walk leaves it; false where it was not. */
+async function saveOnTheWayOut() {
+  if (!doc) return true;
+  const owed = dirty || pendingWrites().length > 0 || standingInTheClear() > 0;
+  if (!owed) return true;
+  const ok = await saveDocument();
+  if (!ok) {
+    // saveDocument has said why. All this adds is that the walk stopped here
+    // because of it, which is not obvious from a message about a save.
+    leakJump = false;
+    toast(`${fileName} was not written, so the walk has stayed here. Answer that first.`, { error: true });
+  }
+  return ok;
 }
 /** The hits of the last paint whose pages are still on the page. */
 function liveLeaks() {
