@@ -1312,6 +1312,7 @@ function openText(text, name, handle, built) {
   document.title = name + " — Text Reader";
   leakStep = -1; // a new document, a new walk through what stands in its clear
   answered = 0;
+  decidedHere = 0;
   if (!leakJump) showNamesBar(false); // …unless the walk is what opened it
   if (!dirHandle) loadValuesFor(name);
   spots = TD.normalizeSpots(lsGet(spotStoreKey(), []));
@@ -3864,9 +3865,16 @@ async function jumpToDoc(row) {
   toast(`Opening ${row.doc.name} — ${row.count} name${row.count === 1 ? "" : "s"} standing in the clear there.`);
   openFolderDoc(row.doc);
 }
-/** The open document written before the walk leaves it; false where it was not. */
+// What has been DECIDED in the document on screen: a name answered in the
+// names walk, a Fix? cell answered in the worksheet review. Not an edit, not a
+// step past a name, not a row merely looked at — a save on the way out is the
+// writing-up of decisions, and a document nobody decided anything in has
+// nothing to write up. Reset with the document, like `answered`.
+let decidedHere = 0;
+/** The open document written before a review leaves it; false where it was not. */
 async function saveOnTheWayOut() {
   if (!doc) return true;
+  if (!decidedHere) return true;
   const owed = dirty || pendingWrites().length > 0 || standingInTheClear() > 0;
   if (!owed) return true;
   const ok = await saveDocument();
@@ -3965,6 +3973,7 @@ function decideName(what) {
   // is not one still standing in the clear.
   const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
   answered++;
+  decidedHere++;
   if (what === "here") {
     keepRangeHere(h.range, h.real);
     leakHits = leakHits.filter((x) => x !== h);
@@ -4018,6 +4027,7 @@ function fakeName() {
   const h = hits[Math.min(Math.max(leakStep, 0), hits.length - 1)];
   settled.add(settledKey(h.real));
   answered++;
+  decidedHere++;
   const n = leakHits.filter((x) => settledKey(x.real) === settledKey(h.real)).length;
   toast(`“${h.real}” will be written as ${h.fake ? `“${h.fake}”` : "its pseudonym"} on save`
     + (n > 1 ? ` — all ${n} of them here` : "") + ". Noted; the walk moves on.");
@@ -5219,6 +5229,16 @@ async function locateLeak(row) {
     if (target && doc && docMembers().some((m) => here(m))) target = null;
   }
   if (target && target.name !== fileName) {
+    // The rows answered in the document being left are written before it is
+    // left, exactly as the names walk writes its own (saveOnTheWayOut) — and a
+    // save that will not happen holds the review here rather than carrying it
+    // into the next document with the last one unwritten.
+    if (!(await saveOnTheWayOut())) {
+      leaks.problem = `${fileName} was not written, so the review has stayed here. ${TD.docLabel(target.name)} is where this row stands.`;
+      $("lb-problem").textContent = leaks.problem;
+      paintHighlights();
+      return;
+    }
     // openFile asks about unsaved edits; a refusal leaves the open document.
     const wasEditing = editing;
     await openFolderDoc(target);
@@ -5306,6 +5326,7 @@ function decideLeak(text, { advance = false } = {}) {
   if (!leaks || leaks.at < 0) return;
   const row = leakRows()[leaks.at];
   row.fix = String(text == null ? "" : text).trim();
+  decidedHere++;
   persistLeaks();
   mirrorLeakKeep(row);
   renderLeaksBar();
@@ -5330,6 +5351,7 @@ function acceptLeak() {
   const row = leakRows()[leaks.at];
   if (!LK.isSuggested(row)) return;
   row.ok = true;
+  decidedHere++;
   persistLeaks();
   renderLeaksBar();
   paintLeakRow(leaks.at);
