@@ -15,6 +15,7 @@ import {
   mergeRects, padRect, clampRect, redactedName, countLabel,
   addRedaction, removeRedaction, redactionsFor, redactionPages,
   redactionCount, clearRedactions, createRedactionStore, pageBoxFromView,
+  valueWords, wordsOwed, coveredClaims,
 } from "./viewer/redact.js";
 import { buildRedactedPdf } from "./viewer/pdf-edit.js";
 
@@ -164,6 +165,75 @@ console.log("the boxes held between now and the save");
     redactionCount(), { boxes: 1, pages: 1 });
   clearRedactions();
   check("and everything can go", redactionCount(), { boxes: 0, pages: 0 });
+}
+
+console.log("the words a redaction owes");
+{
+  check("a value is its significant words", valueWords("Zachary Coderre, Esq."), ["zachary", "coderre", "esq"]);
+  check("a lone initial is not a word to chase", valueWords("Helen J. Rasho"), ["helen", "rasho"]);
+  check("nothing is nothing", valueWords(""), []);
+  // The rule, and the whole of it: what the run REPLACED is what must be
+  // boxed. A word the fake carries through was never a thing to hide.
+  check("a name owes its own words",
+    wordsOwed("Zachary Coderre", "Rushton Greenhalgh"), ["zachary", "coderre"]);
+  check("an honorific the fake carries through is owed nothing",
+    wordsOwed("Zachary Coderre, Esq.", "Rushton, Greenhalgh, Esq."), ["zachary", "coderre"]);
+  check("…and so is every word a name is built around",
+    wordsOwed("Department of Quillmark", "Department of Melbury"), ["quillmark"]);
+  check("no fake in hand, and every word is owed",
+    wordsOwed("Helen Rasho", ""), ["helen", "rasho"]);
+  check("a value the fake carries whole owes itself rather than nothing",
+    wordsOwed("Esq.", "Esq."), ["esq"]);
+}
+
+console.log("what the boxes on a page cover");
+{
+  const claim = (real, fake) => ({ real, fake });
+  // THE SPLIT-BOX CASE. The PDF's text broke the name, so the key's shorter
+  // rows matched where the full one did not: two boxes, side by side, and the
+  // whole name is black. That is the job done.
+  check("a name boxed in pieces is a name boxed",
+    coveredClaims([claim("Zachary Coderre", "Rushton Greenhalgh")], ["Zachary", "Coderre"]), [true]);
+  check("…and in one piece, as usual",
+    coveredClaims([claim("Zachary Coderre", "Rushton Greenhalgh")], ["Zachary Coderre"]), [true]);
+  check("half a name is not a name boxed",
+    coveredClaims([claim("Zachary Coderre", "Rushton Greenhalgh")], ["Zachary"]), [false]);
+  check("nothing boxed, nothing covered",
+    coveredClaims([claim("Zachary Coderre", "Rushton Greenhalgh")], []), [false]);
+
+  // THE HONORIFIC CASE. "[redacted] [redacted] Esq." is a complete redaction.
+  check("an Esq. left standing is not a miss",
+    coveredClaims([claim("Zachary Coderre, Esq.", "Rushton, Greenhalgh, Esq.")], ["Zachary", "Coderre"]), [true]);
+  check("…and the department is not a miss either",
+    coveredClaims([claim("Department of Quillmark", "Department of Melbury")], ["Quillmark"]), [true]);
+
+  // A box's words are spent once: two of a name on a page need two boxes.
+  const two = [claim("Helen Rasho", "Strangeways Melbury"), claim("Helen Rasho", "Strangeways Melbury")];
+  check("two occurrences, two boxes", coveredClaims(two, ["Helen Rasho", "Helen Rasho"]), [true, true]);
+  check("two occurrences, one box — one is still standing",
+    coveredClaims(two, ["Helen Rasho"]), [true, false]);
+  check("…and the pieces of two count the same",
+    coveredClaims(two, ["Helen", "Rasho", "Helen", "Rasho"]), [true, true]);
+
+  // A drag that ran on past the name — over the comma after it, or the word
+  // beside it — still covers the name: it is the words that are compared.
+  check("a box that took the comma too still covers the name",
+    coveredClaims([claim("Zachary Coderre", "Rushton Greenhalgh")], ["Zachary Coderre,"]), [true]);
+  check("…and one that took the word beside it",
+    coveredClaims([claim("Zachary Coderre", "Rushton Greenhalgh")], ["Zachary Coderre, Esq."]), [true]);
+  check("…and one that took the name the other way round",
+    coveredClaims([claim("Zachary Coderre", "Rushton Greenhalgh")], ["Coderre, Zachary"]), [true]);
+  check("…and one that took the whole line",
+    coveredClaims([claim("Zachary Coderre", "Rushton Greenhalgh")], ["Counsel of record: Zachary Coderre, Esq."]), [true]);
+
+  // The longest claim is matched first, or the short one spends the word it
+  // needed and the full name is reported unredacted.
+  check("a bare surname does not steal the full name's word",
+    coveredClaims([claim("Coderre", "Greenhalgh"), claim("Zachary Coderre", "Rushton Greenhalgh")],
+      ["Zachary", "Coderre", "Coderre"]), [true, true]);
+  check("…and where there is only one, the longer claim takes it",
+    coveredClaims([claim("Coderre", "Greenhalgh"), claim("Zachary Coderre", "Rushton Greenhalgh")],
+      ["Zachary", "Coderre"]), [false, true]);
 }
 
 console.log("the page's own box, for holding a match inside it");

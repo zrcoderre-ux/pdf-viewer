@@ -718,6 +718,21 @@ function showSidePanel(on, { remember = false } = {}) {
   relayout();
 }
 function autoShowSidePanel() { if (sideChoice !== false) showSidePanel(true); }
+/**
+ * A decision was taken that the Flagged list now holds — a value flagged, a
+ * pseudonym kept. The list is where it went, so the panel SHOWS it: but only
+ * if the panel is already open.
+ *
+ * It used to open the panel to say so. That is the panel deciding it knows
+ * better than the reader: flagging is done while reading, often several in a
+ * row, and having the page narrow and re-lay itself each time — the PDF pane
+ * with it — is the reading interrupted to be told something the toast already
+ * said. What the decision actually needs is not to be SHOWN but not to be
+ * LOST, and that is the save prompt's job, not the panel's.
+ */
+function noteInFlagged() {
+  if (!document.body.classList.contains("side-hidden")) showSideTab("tab-flags");
+}
 $("panel-toggle").addEventListener("click", () => showSidePanel(document.body.classList.contains("side-hidden"), { remember: true }));
 $("side-collapse").addEventListener("click", () => showSidePanel(false, { remember: true }));
 
@@ -3932,8 +3947,7 @@ function setKeep(real, control, { leak = false } = {}) {
   remarkKept();
   renderFlags();
   paintHighlights();
-  showSidePanel(true);
-  showSideTab("tab-flags");
+  noteInFlagged();
   sweepFolder(); // a pending keep is waiting on this
   toast(!control ? `"${real}" is a pseudonym again`
     : state === "local" ? `"${real}" left as it stands — nothing in ${dirHandle ? folderName : "this document"} fakes it, so there is nothing to hand over and nothing to re-run. It is simply no longer marked.`
@@ -4020,9 +4034,7 @@ function flagSelection() {
   renderFlags();
   paintHighlights();
   flagPop.hidden = true;
-  // The list is where the flag went; show it growing.
-  showSidePanel(true);
-  showSideTab("tab-flags");
+  noteInFlagged();
   toast(flagged.length > before ? `Flagged "${v}" — ${flagged.length} value${flagged.length === 1 ? "" : "s"} to hand to PDF-Linker` : `"${v}" is already flagged`);
 }
 
@@ -6666,9 +6678,15 @@ function bindSelection(layer) {
   layer.__selecting = true;
   layer.addEventListener("mousedown", (e) => {
     if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
-    // One drag, one tool: while the redaction tool marks AREAS, the drag over
-    // a PDF page is the marquee's and nothing selects under it.
-    if (redactOn && redactMark === "area" && layer.closest("#pdf-pane")) return;
+    // One drag, one tool. While the redaction tool is on, a drag over a PDF
+    // page belongs to it and nothing selects under it — in EITHER mode, and
+    // this is the whole of a bug worth remembering. The reader's selection
+    // snaps to the nearest character ON ITS ROW, which is right for reading
+    // and wrong for marking: dragged over a signature, a stamp, or any part of
+    // a page with no text in it, it would snap to the nearest words instead —
+    // so the drag that was meant to black out a signature blacked out a line
+    // of text somewhere above it, and said it had worked.
+    if (redactOn && layer.closest("#pdf-pane")) return;
     const a = caretInLayer(layer, e.clientX, e.clientY);
     if (!a) return;
     e.preventDefault();
@@ -6953,12 +6971,14 @@ function buildPdfPane() {
       sheetOf(el).style.height = Math.round(w * 11 / 8.5) + "px"; // letter, until the PDF says
       presize(el, t.src, t.page, w);
       paneObserver.observe(el);
-      // A drag over the page marks an area, while the redaction tool says so.
+      // While the redaction tool is on, a drag over the page is the TOOL's,
+      // whichever way it is set to mark: the rectangle is drawn as it is
+      // dragged, and what it becomes is decided when it is let go.
       RD.attachAreaDrag({
         pageNumber: t.page,
         pageWrapper: sheetOf(el),
-        getActive: () => redactOn && redactMark === "area",
-        onBox: (_pageNo, box) => addAreaRedaction(el, box),
+        getActive: () => redactOn,
+        onBox: (_pageNo, box) => markDraggedBox(el, box),
       });
     }
     el.dataset.index = String(i);
@@ -7923,25 +7943,76 @@ function storeBoxesFromClientRects(el, clientRects, meta) {
 }
 
 /**
- * An area drag: the box itself, whatever is under it. The tool for a
- * signature, a photograph, an exhibit stamp, or a scanned page whose text
- * layer knows nothing — the cases the key can say nothing about.
+ * The words a drag actually covers, as client rectangles.
+ *
+ * Read off the page's GEOMETRY rather than out of a selection. A selection is
+ * the wrong instrument here: it is snapped to the nearest character on a row,
+ * because that is what a reader dragging over words wants, and it will happily
+ * hand back words nowhere near the pointer when the pointer is over a part of
+ * the page that has no words at all. Geometry cannot do that — a drag over a
+ * signature covers no spans, and covering no spans is the answer.
+ *
+ * A span the drag crosses is clipped to the drag horizontally and kept whole
+ * vertically, so a drag along a line boxes the run of words under it and a
+ * drag down a column boxes each line it crosses.
  */
-function addAreaRedaction(el, box) {
+function textRectsUnder(el, box) {
+  const layer = sheetOf(el).querySelector(".textLayer");
+  if (!layer) return { rects: [], text: "" };
   const base = sheetOf(el).getBoundingClientRect();
-  const n = storeBoxesFromClientRects(el, [{
-    left: base.left + box.left, top: base.top + box.top,
-    width: box.width, height: box.height,
-  }], { kind: "area", label: "this area" });
+  const x0 = base.left + box.left, y0 = base.top + box.top;
+  const x1 = x0 + box.width, y1 = y0 + box.height;
+  const rects = [];
+  const words = [];
+  for (const span of layer.querySelectorAll("span")) {
+    const r = span.getBoundingClientRect();
+    if (!r.width || !r.height) continue;
+    // Crossed vertically: the drag reaches into the line's own band.
+    if (r.bottom <= y0 || r.top >= y1) continue;
+    const left = Math.max(r.left, x0), right = Math.min(r.right, x1);
+    if (right - left <= 0.5) continue;
+    rects.push({ left, top: r.top, width: right - left, height: r.height });
+    const t = (span.textContent || "").trim();
+    if (t) words.push(t);
+  }
+  return { rects, text: words.join(" ").replace(/\s+/g, " ").slice(0, 120) };
+}
+
+/**
+ * A drag let go of. What it marks depends on what is under it, not only on how
+ * the tool is set: asked for TEXT it boxes the words the drag covers, and
+ * where it covers none — a signature, a stamp, a photograph, a scanned page
+ * whose text layer knows nothing — it marks the rectangle that was drawn,
+ * which is what the hand plainly meant. Asked for an AREA it always marks the
+ * rectangle, words or no words.
+ */
+function markDraggedBox(el, box) {
+  const base = sheetOf(el).getBoundingClientRect();
+  const whole = [{ left: base.left + box.left, top: base.top + box.top, width: box.width, height: box.height }];
+  // What the drag covers is worked out either way, because an AREA box over a
+  // name hides that name just as surely as a box the key proposed — and the
+  // check has to be able to see that, or it goes on asking for a value the
+  // operator has plainly just blacked out.
+  const under = textRectsUnder(el, box);
+  let n = 0, fellBack = false;
+  if (redactMark === "text") {
+    if (under.rects.length) n = storeBoxesFromClientRects(el, under.rects, { kind: "text", label: under.text || "these words", words: under.text });
+    else { fellBack = true; n = storeBoxesFromClientRects(el, whole, { kind: "area", label: "this area — nothing under it is text" }); }
+  } else {
+    n = storeBoxesFromClientRects(el, whole, { kind: "area", label: "this area", words: under.text });
+  }
+  if (!n) return;
+  if (fellBack) toast("Nothing under that drag is text, so the area itself is marked — which is what a signature or a stamp needs.", { ms: 5000 });
   // …and where the export said something was missed on this very page, that
   // drag is the answer to it.
-  const at = n ? slotRedaction(el) : null;
+  const at = slotRedaction(el);
   if (at) missAnsweredByBox(at.src.name, at.page);
 }
 
 /**
- * A drag over the PDF's text. The reader's own selection (bindSelection) stays
- * inside one page's text layer, so the whole selection belongs to one slot.
+ * A selection made over the pane by something other than the drag (a double
+ * click on a word, Ctrl+A). Kept because it is a real way to mark, but it is
+ * no longer how a DRAG marks — see markDraggedBox.
  */
 function redactCurrentSelection() {
   const sel = window.getSelection();
@@ -7998,6 +8069,7 @@ async function keyBoxesForPage(page) {
   await tl.render();
   const spans = box.querySelectorAll("span");
   const { text, map } = RD.pageTextFromSpans(RD.measureSpans(box));
+  const chars = text.replace(/\s+/g, "").length;
   const pageBox = RD.pageBoxFromView(page.view);
   const base = box.getBoundingClientRect();
   const out = [];
@@ -8031,8 +8103,14 @@ async function keyBoxesForPage(page) {
     else missed++;
   }
   box.innerHTML = "";
-  return { boxes: out, missed };
+  return { boxes: out, missed, chars };
 }
+
+// Per "pdf|page", how much text the sweep found on it. A page with none is a
+// scan, or a page of pictures: the key cannot reach ANY value on it, and a
+// walk that says "not found" thirty times over without saying that is thirty
+// mysteries. With it, it is one fact.
+let sweptText = new Map();
 
 async function scanForKeyValues() {
   if (!reals) { toast("No pseudonym key is loaded — load one in the tools rail.", { error: true }); return; }
@@ -8043,6 +8121,7 @@ async function scanForKeyValues() {
   if (redactScanning || !names.length) return;
   redactScanning = true;
   updateRedactBar();
+  sweptText = new Map();
   let found = 0, missed = 0, pagesRead = 0;
   try {
     for (const name of names) {
@@ -8060,6 +8139,7 @@ async function scanForKeyValues() {
         pagesRead++;
         let hits;
         try { hits = await keyBoxesForPage(page); } catch { continue; }
+        sweptText.set(name + "|" + pn, hits.chars);
         missed += hits.missed;
         for (const h of hits.boxes) {
           if (store.add(pn, h.rects, { kind: "key", label: h.label })) found++;
@@ -8080,7 +8160,9 @@ async function scanForKeyValues() {
     ? `Marked ${found} value${found === 1 ? "" : "s"} the key binds, over ${pagesRead} page${pagesRead === 1 ? "" : "s"} of the PDF` +
       (missed ? `; ${missed} could not be placed on the page.` : ".")
     : `The key binds nothing that stands in ${names.length === 1 ? "this PDF" : "these PDFs"} — ${pagesRead} page${pagesRead === 1 ? "" : "s"} read.`) +
-    (missWalk.length ? ` The export places ${missWalk.length} more that the sweep could not find — “Check against the export” walks them.` : ""),
+    (missWalk.length
+      ? ` The export places ${missOutstanding()} more that the sweep could not find — “Check against the export” walks ${missWalk.length === missOutstanding() ? "them" : `the ${missWalk.length} places they could be`}.`
+      : ""),
     { ms: missWalk.length ? 9000 : 5000 });
 }
 
@@ -8283,76 +8365,156 @@ let missAt = -1;
 let missHere = null; // the occurrence the walk stands on, as a Range
 
 /**
- * Every real value the EXPORT places on a PDF page: "pdf|page|value" → the
- * occurrences. A name wrapped across lines is several spans and ONE
- * occurrence, so only the first piece of a run is counted.
+ * What the EXPORT claims, page by page: "pdf|page" → the claims on it, in
+ * document order.
+ *
+ * Each carries its REAL value and the FAKE that stands in its place, because
+ * the fake is what says which words a redaction actually owes (redact.js,
+ * wordsOwed): "Zachary Coderre, Esq." faked as "Rushton, Greenhalgh, Esq."
+ * owes the two names and not the Esq., which was never a thing to hide.
+ *
+ * A name wrapped across lines is several spans and ONE claim, so only the
+ * first piece of a run is counted.
  */
 function claimsFromExport() {
-  const want = new Map();
+  const byPage = new Map();
   for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
     const i = Number(sec.dataset.index);
     const t = pdfTarget(i);
     if (!t) continue;
     for (const span of sec.querySelectorAll(".pn")) {
       if (span.dataset.piece && !/^1\//.test(span.dataset.piece)) continue;
+      // A KEPT value is not a claim. The review decided this one is not this
+      // matter's to hide, the sweep is run on the key LESS the keeps and so
+      // never boxes it, and counting it here asked for a box that nothing was
+      // ever going to draw — an alarm that could not be answered and would not
+      // go away. It is the Esq. rule again: a value nobody is hiding is owed
+      // no redaction.
+      if (span.classList.contains("kept")) continue;
       const real = span.dataset.wholeReal || span.dataset.real;
       if (!real) continue;
-      const k = t.src.name + "|" + t.page + "|" + PK.fold(real);
-      if (!want.has(k)) want.set(k, { src: t.src, page: t.page, real, at: [] });
-      want.get(k).at.push({ span, pageIndex: i });
+      const fake = span.dataset.wholeFake || span.dataset.fake || "";
+      const pk = t.src.name + "|" + t.page;
+      if (!byPage.has(pk)) byPage.set(pk, []);
+      byPage.get(pk).push({
+        real, fake, span, pageIndex: i, src: t.src, page: t.page,
+        group: pk + "|" + PK.fold(real),
+      });
     }
   }
-  return want;
+  return byPage;
 }
 
-/** …and what the sweep actually boxed, counted the same way. */
-function boxesFromSweep() {
-  const got = new Map();
+/**
+ * …and what is boxed on each: "pdf|page" → the words every box there covers.
+ *
+ * THE HAND'S BOXES COUNT. A box drawn over words is as much a redaction of
+ * those words as one the key proposed, and it carries what it covered as its
+ * label — so it answers a claim exactly as a swept box does. Leaving it out
+ * was what made the check go on demanding a value the operator had just
+ * blacked out by hand: the sweep had missed it (surname first, a comma in the
+ * way, a spelling the key does not have), the drag dealt with it, and the
+ * check kept asking.
+ *
+ * It is the WORDS that are compared, never the label, so a drag that ran on
+ * over the comma after a name, or took the word beside it, or took the name
+ * the other way round, covers it just the same.
+ *
+ * An AREA box carries no words — that is what an area is for — so it cannot
+ * answer a claim here. It answers one the other way, by being drawn on the
+ * page the walk is standing on (missAnsweredByBox).
+ */
+function labelsFromSweep() {
+  const byPage = new Map();
   for (const [name, store] of redactStores) {
     for (const { pageNumber, boxes } of store.pages()) {
       for (const b of boxes) {
-        if (b.kind !== "key" || !b.label) continue;
-        const k = name + "|" + pageNumber + "|" + PK.fold(b.label);
-        got.set(k, (got.get(k) || 0) + 1);
+        // What the box COVERS, whoever drew it and whatever it is called: the
+        // key's value for a swept box, the words under the drag for a hand
+        // one — an area included, which is how a box drawn over a name in area
+        // mode answers for that name. An area over a signature covers no words
+        // and answers for nothing, which is right.
+        const covered = b.kind === "key" ? b.label : (b.words || "");
+        if (!covered) continue;
+        const pk = name + "|" + pageNumber;
+        if (!byPage.has(pk)) byPage.set(pk, []);
+        byPage.get(pk).push(covered);
       }
     }
   }
-  return got;
+  return byPage;
 }
 
 /**
  * The claims the sweep did not answer, in reading order.
  *
- * Where a value is claimed twice on a page and boxed once, WHICH of the two
- * went unboxed is not knowable from here — the export's places and the PDF's
- * are different geometries of the same page — so both are walked and the row
- * says how many of how many were placed. Better to look at two than to be told
- * about neither.
+ * The answering is by WORDS, not by labels (redact.coveredClaims): a name the
+ * PDF's text broke in two is boxed as "Zachary" and "Coderre" side by side and
+ * is a name boxed, and a word the fake carries through — Esq., Department, of
+ * — is owed no box at all. Both of those used to raise an alarm about a
+ * redaction that was already complete, which is the worst thing a check like
+ * this can do: cry wolf often enough and it stops being read.
+ *
+ * Where a value is claimed twice on a page and covered once, WHICH of the two
+ * went unboxed is still not knowable — the export's places and the PDF's are
+ * different geometries of one page — so both are walked, and the count says
+ * how many of them are really outstanding.
  */
 function redactionShortfall() {
-  const want = claimsFromExport();
-  const got = boxesFromSweep();
+  const claims = claimsFromExport();
+  const labels = labelsFromSweep();
   const out = [];
   missShort = new Map();
-  for (const [k, claim] of want) {
-    const n = got.get(k) || 0;
-    const short = claim.at.length - n;
-    if (short <= 0) continue;
-    // What is OUTSTANDING is the shortfall, not the number of places: a value
-    // the export has three times on a page and the sweep boxed twice is ONE
-    // value still standing. All three places are walked, because which of them
-    // went unboxed is not knowable from here — but finding that one value is
-    // the whole of the job, and the group closes when the count runs out
-    // rather than making the operator dismiss places already answered.
-    missShort.set(k, short);
-    for (const place of claim.at) {
-      out.push({ group: k, src: claim.src, page: claim.page, real: claim.real,
-                 span: place.span, pageIndex: place.pageIndex,
-                 want: claim.at.length, got: n });
+  for (const [pk, list] of claims) {
+    const covered = RD.coveredClaims(list, labels.get(pk) || []);
+    const byGroup = new Map();
+    list.forEach((c, i) => {
+      if (!byGroup.has(c.group)) byGroup.set(c.group, { all: [], short: 0 });
+      const g = byGroup.get(c.group);
+      g.all.push(c);
+      if (!covered[i]) g.short++;
+    });
+    for (const [gk, g] of byGroup) {
+      if (!g.short) continue;
+      missShort.set(gk, g.short);
+      const why = whyNotFound(g.all[0], labels);
+      for (const c of g.all) {
+        out.push({ group: gk, src: c.src, page: c.page, real: c.real,
+                   span: c.span, pageIndex: c.pageIndex,
+                   want: g.all.length, got: g.all.length - g.short, why });
+      }
     }
   }
   out.sort((a, b) => a.pageIndex - b.pageIndex);
   return out;
+}
+
+/**
+ * Why the sweep could not find this one — so a miss is a fact rather than a
+ * mystery. A check that only ever says "not found" teaches the operator
+ * nothing, and the three answers below are the three real reasons.
+ */
+function whyNotFound(claim, labels) {
+  const chars = sweptText.get(claim.src.name + "|" + claim.page);
+  // The page is a picture. Nothing on it can be found by any key, and every
+  // value the export puts here will be reported: that is one fact, not many.
+  if (chars === 0) return "that PDF page carries no text at all — a scan or an image, so the key cannot reach anything on it";
+  // It is boxed, but on another page: the export's page numbering and the
+  // PDF's have come apart, which is worth knowing before marking anything.
+  const need = RD.wordsOwed(claim.real, claim.fake);
+  for (const [pk, list] of labels) {
+    if (!pk.startsWith(claim.src.name + "|")) continue;
+    const page = Number(pk.slice(pk.lastIndexOf("|") + 1));
+    if (page === claim.page) continue;
+    const pool = new Set();
+    for (const l of list) for (const w of RD.valueWords(l)) pool.add(w);
+    if (need.length && need.every((w) => pool.has(w))) {
+      return `it IS boxed, but on PDF p. ${page} — this export's page numbers and the PDF's may not line up`;
+    }
+  }
+  return chars == null
+    ? "that PDF page was not swept — run “Mark from key” first"
+    : "the PDF's own text on that page does not yield it: a ligature, a line break, an OCR spelling, or it is part of a picture";
 }
 
 /** How many values are really outstanding — what the bar counts. */
@@ -8378,7 +8540,12 @@ function checkRedactionAgainstExport() {
     return;
   }
   goToMiss(0);
-  toast(`${missWalk.length} place${missWalk.length === 1 ? "" : "s"} the export says carr${missWalk.length === 1 ? "ies" : "y"} a real value that the sweep could not find on the PDF page. Walk them and mark what is really there by hand.`, { ms: 8000 });
+  // The count that matters is the VALUES outstanding, not the places to look:
+  // it is what the bar shows and what the work actually is.
+  const n = missOutstanding(), places = missWalk.length;
+  toast(`${n} value${n === 1 ? "" : "s"} the export places on these pages ${n === 1 ? "was" : "were"} not found by the sweep` +
+    (places > n ? `, somewhere among ${places} places it names` : "") +
+    ". Walk them and mark what is really there by hand.", { ms: 8000 });
 }
 
 function showMissRow(on) {
@@ -8402,7 +8569,8 @@ function goToMiss(i) {
       // takes it off the list, and a row still naming the original count would
       // be counting somewhere the walk no longer goes.
       ? ` · ${m.want} here, ${m.got} boxed — ${missShort.get(m.group) || 1} still to find among ${missWalk.filter((x) => x.group === m.group).length} place${missWalk.filter((x) => x.group === m.group).length === 1 ? "" : "s"}`
-      : "");
+      : "") +
+    (m.why ? ` · ${m.why}` : "");
   findMissInText();
 }
 

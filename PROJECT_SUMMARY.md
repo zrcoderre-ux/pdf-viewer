@@ -780,6 +780,22 @@ view, so the store — not the DOM — is where a box lives). While the tool mar
 areas the reader's own selection drag stands down on the pane, and the boxes
 take the pointer only while the tool is on.
 
+## A redaction drag is geometric, never a selection (`text-reader.js`)
+
+While the redaction tool is on, a drag over a PDF page belongs to the tool in
+BOTH modes: `attachAreaDrag` is active whenever `redactOn`, and the reader's own
+`bindSelection` stands down over the pane. That is not tidiness, it is a bug
+fix. The reader's selection snaps to the nearest character **on its row** —
+right for reading — so a drag over a signature returned a range over whatever
+text was nearest, and the box landed on a line of text well above the
+signature, silently redacting the wrong words and reporting success.
+
+`textRectsUnder()` replaces it: each text-layer span whose vertical band the
+drag crosses is clipped to the drag horizontally and kept whole vertically. No
+spans crossed means no text there, which is the honest answer, and the drag
+falls back to marking the rectangle itself (`kind: "area"`) with a toast saying
+why. `markDraggedBox` is the one place that decides.
+
 ## Checking a redaction against the export (`text-reader.js`)
 
 The sweep's blind spot is that it reads the PDF's text layer, which is not a
@@ -795,6 +811,17 @@ same way. `redactionShortfall()` is the difference, in reading order.
 
 Three decisions worth keeping:
 
+- **Coverage is by WORDS, and every box contributes what it covers.** A box
+  stores `words` (what is under it) beside `label` (what it is called): a key
+  box contributes its value, a hand box the text under the drag, an area box
+  the text under the area — which is how blacking out a name in area mode is
+  credited. Kept values are not claims at all (`reals` is the key less the
+  keeps, so the sweep never boxes one). These were the "redacted but not
+  recognised" reports: each was a real redaction the check could not see.
+- **A miss carries its reason** (`whyNotFound`): no text on that page at all,
+  boxed on a different page (page numbering out of step), or the text simply
+  not yielding it. `sweptText` records the character count per swept page,
+  which is what makes the first of those answerable.
 - **It proposes no boxes.** The export knows the page, not the place: its text
   is its own layout, not the PDF's geometry. A guessed box over the wrong words
   would be worse than none, so the walk hands the question to the operator with

@@ -102,9 +102,9 @@
       <span id="rb-where" class="lb-where"></span>
       <span class="spacer"></span>
       <label class="tb-label" for="rb-mark">Drag marks</label>
-      <select id="rb-mark" title="What a drag over a PDF page marks: the text it covers, or the area itself — for a signature, a photograph, an exhibit stamp, a scanned page with no text layer to name anything in">
-        <option value="text">the text</option>
-        <option value="area">an area</option>
+      <select id="rb-mark" title="What a drag over a PDF page marks. “The words it covers” boxes the text under the drag, tight to the lines — and where nothing under the drag IS text (a signature, a stamp, a photograph, a scanned page) it marks the rectangle you drew, since that is plainly what was meant. “The area drawn” always marks the rectangle, words or no words.">
+        <option value="text">the words it covers</option>
+        <option value="area">the area drawn</option>
       </select>
       <button id="rb-scan" title="Mark every real value the key binds, wherever it stands — every page of the PDF, including the pages this export has no text for">Mark from key</button>
       <button id="rb-check" title="Check the sweep against the export: PDF-Linker put a pseudonym wherever a real value stood, so the export knows where the values are even where the PDF's own text does not yield them. Walks what could not be placed.">Check against the export</button>

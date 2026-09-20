@@ -317,6 +317,22 @@ was missed. Mark it with an area drag and the walk takes it as answered and
 moves on; **Accounted for** does the same for a claim that turns out not to be
 on the page at all.
 
+**Anything that covers the words counts, whoever drew it.** A box the key
+proposed, a drag over the words, and an **area** drawn over them all answer the
+same claim — an area box carries what it covers, so blacking out a name in area
+mode is credited exactly as a swept box is. (An area over a *signature* covers
+no words and answers for nothing, which is right; it answers the walk the other
+way, by being drawn on the page the walk is standing on.) A value the review
+has **kept** raises nothing at all: the sweep is run on the key *less* the
+keeps, so a kept value is never boxed, and counting it would have asked for a
+box nothing was ever going to draw.
+
+**And a miss says why.** "Not found" on its own teaches nothing, so each one
+carries its reason: *that PDF page carries no text at all* (a scan — one fact,
+not thirty), *it IS boxed, but on PDF p. 4 — this export's page numbers and the
+PDF's may not line up*, or *the PDF's own text does not yield it: a ligature, a
+line break, an OCR spelling, or it is part of a picture*.
+
 **What is outstanding is the shortfall, not the number of places.** A name the
 export carries three times on a page that the sweep boxed twice is **one** value
 still standing, and the bar counts it as one. All three places are still walked,
@@ -327,6 +343,18 @@ would be work for nothing. Where two are outstanding the walk stays open after
 the first, and the row keeps count as you go: *3 here, 1 boxed — 1 still to
 find among 2 places*. That is the honest shape of it: the export can say
 something was missed, and only a person can say where it stands on the paper.
+
+**A drag marks what is under it — and where nothing is, the area.** The **Drag
+marks** setting reads *the words it covers* or *the area drawn*. On the words
+it boxes the text under the drag, tight to the lines it crosses; but where
+nothing under the drag **is** text — a signature, an exhibit stamp, a
+photograph, a scanned page whose text layer knows nothing — it marks the
+rectangle you drew, since that is plainly what the hand meant, and says so. The
+words under a drag are found by **geometry, not by a selection**: a selection
+snaps to the nearest character on a row, which is right for reading and wrong
+for marking, and a drag over a signature would hand back words nowhere near the
+pointer. (It used to. A drag over a signature blacked out a line of text above
+it and reported success.)
 
 **The same tool from the case folder.** The text reader redacts too, from
 beside the export: open a case folder, put the PDF beside the text with **⇔
@@ -1408,6 +1436,15 @@ app, which routes it to the reader tab.
   unsaved edits is labelled as such, and a real value the key binds standing in
   the text is flagged with the note that a save would write the pseudonym
   instead. **Copy** takes the whole thing, pseudonyms and all.
+- **A flag does not rearrange the page.** Flagging a value, or keeping a
+  wrongly faked one, used to open the Documents / Flagged panel to show the
+  list growing. Flagging is done *while reading*, often several in a row, and
+  having the page narrow and re-lay itself each time — the PDF pane with it —
+  is the reading interrupted to be told what the toast already said. The panel
+  now switches to **Flagged** if it is open and stays shut if it is not. What a
+  decision needs is not to be shown but not to be lost, and that is the save
+  prompt's job: the Save button lights, the status bar names what is waiting,
+  and closing the tab asks before it goes.
 - **💾 Save is lit whenever a save would do something.** Flagging a value the
   run missed, keeping one it wrongly faked, answering a row of the LEAKS
   worksheet — each is a decision that lives in the browser until it is written

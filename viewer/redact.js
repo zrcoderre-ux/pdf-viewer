@@ -240,6 +240,84 @@ export function pageBoxFromView(view) {
   return { x: v[0] || 0, y: v[1] || 0, w: (v[2] || 0) - (v[0] || 0), h: (v[3] || 0) - (v[1] || 0) };
 }
 
+// ── is a value covered? ──────────────────────────────────────────────────────
+//
+// The check against the export asks, per page: the export says this real value
+// stands here — did the sweep box it? Asked as "is there a box labelled with
+// this exact value", the answer is wrong twice over, and both wrongs raise an
+// alarm about a redaction that is in fact complete.
+//
+// A NAME CAN BE BOXED IN PIECES. The key usually binds a full name AND its
+// parts, and a PDF's text is not a clean transcript: where "Zachary Coderre"
+// is split across runs, or line-broken, or kerned oddly, the full-name matcher
+// misses and the two shorter ones hit. The result is two boxes, "Zachary" and
+// "Coderre", sitting side by side and blacking out the whole name — which is
+// the job done. Only the label is unequal.
+//
+// AND NOT EVERY WORD OF A VALUE IS A VALUE. "Zachary Coderre, Esq." is faked
+// as "Rushton, Greenhalgh, Esq." — the Esq. is carried straight through,
+// because it is not a thing to hide. A redaction that leaves it standing is
+// correct, and a check that demanded a box over it would be demanding a
+// mistake. The same goes for "Department", "of", "Inc." and every other word a
+// name is built around.
+//
+// Both fall out of one rule, and it needs no list of words to ignore: the
+// words a redaction OWES are the words the run actually replaced — the words
+// of the real value that are NOT in the fake that stands in its place. What it
+// has is the words of every value boxed on that page, whoever boxed them. A
+// claim is covered when the words it owes are all there.
+
+/** A value as its significant words, folded. One-character tokens are dropped. */
+export function valueWords(s) {
+  const out = [];
+  for (const w of String(s == null ? "" : s).toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
+    if (w.length > 1) out.push(w);
+  }
+  return out;
+}
+
+/**
+ * The words a redaction owes for a value: those of the REAL value that the
+ * FAKE does not carry. With no fake in hand (a value from the key rather than
+ * from a pseudonym on the page) every word is owed.
+ */
+export function wordsOwed(real, fake) {
+  const carried = new Set(valueWords(fake));
+  const out = [];
+  for (const w of valueWords(real)) if (!carried.has(w)) out.push(w);
+  // A value whose every word survives into the fake is not a value: rather
+  // than call it covered by nothing, it owes itself.
+  return out.length ? out : valueWords(real);
+}
+
+/**
+ * Which claims on ONE page the boxes cover.
+ *
+ * `claims` are `{ real, fake }` in document order; `labels` are the real values
+ * the sweep boxed on that page, one string per box. Answers a boolean per
+ * claim, in the same order.
+ *
+ * Each box's words are spent once: two claims of one name on a page need two
+ * boxes' worth of words, so a second claim is not covered by the first's box.
+ * The longest claims are matched FIRST — a page carrying both "Zachary
+ * Coderre" and a bare "Coderre" would otherwise let the short one spend the
+ * word the long one needs, and report the full name as unredacted.
+ */
+export function coveredClaims(claims, labels) {
+  const pool = new Map();
+  for (const l of labels || []) for (const w of valueWords(l)) pool.set(w, (pool.get(w) || 0) + 1);
+  const order = (claims || []).map((c, i) => ({ i, need: wordsOwed(c.real, c.fake) }));
+  order.sort((a, b) => b.need.length - a.need.length || a.i - b.i);
+  const out = new Array((claims || []).length).fill(false);
+  for (const { i, need } of order) {
+    if (!need.length) continue;
+    if (!need.every((w) => (pool.get(w) || 0) > 0)) continue;
+    for (const w of need) pool.set(w, pool.get(w) - 1);
+    out[i] = true;
+  }
+  return out;
+}
+
 /**
  * The name a redacted copy is saved under: the document's own stem run FORWARD
  * through the key where one is in hand — a copy of "Rasho v Quillmark - MTC.pdf"
@@ -286,11 +364,16 @@ export function createRedactionStore() {
   const byPage = new Map();
   let nextId = 1;
   return {
-    add(pageNumber, rects, { kind = "area", label = "" } = {}) {
+    add(pageNumber, rects, { kind = "area", label = "", words = "" } = {}) {
       const clean = (rects || []).filter((r) => r && r.w > 0 && r.h > 0);
       if (!clean.length) return null;
       if (!byPage.has(pageNumber)) byPage.set(pageNumber, []);
-      const box = { id: nextId++, rects: clean, kind, label };
+      // `words` is what the box actually COVERS on the page, which is not the
+      // same as what it is called. An area drawn over a name is labelled "this
+      // area" — that is what the hand asked for — but it hides those words as
+      // surely as a box the key proposed, and anything asking "is this value
+      // redacted" has to be able to see that.
+      const box = { id: nextId++, rects: clean, kind, label, words: words || "" };
       byPage.get(pageNumber).push(box);
       return box;
     },
