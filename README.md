@@ -805,15 +805,19 @@ app, which routes it to the reader tab.
   and — where the run made one — `Combined Text.txt`, with the exports
   themselves in a **Text Files** subfolder under it. So the app opens the
   **folder**, not the files: **📁 Case folder** on the tab strip, or the button
-  on the empty page with nothing open yet. Every export in `Text Files` opens
-  **in its own tab**, and each one comes up with the case folder already
-  attached — its key in force, its PDFs matched, its worksheet and flagged list
-  to hand — because the folder is handed to the reader with the document
-  instead of being asked for afterwards. Where the run made a combined file,
-  that one document **is** every export and opens alone rather than as forty
-  tabs of the same thing; past a handful of separate exports the rest is
-  offered rather than assumed, and either way every document is listed in each
-  reader's own Documents panel, one click away. **Files still open as files**,
+  on the empty page with nothing open yet. **One pick, one tab.** The combined
+  file where the run made one — it *is* every export, in one document — else
+  the first export, and it comes up with the case folder already attached: its
+  key in force, its PDFs matched, its worksheet and flagged list to hand,
+  because the folder is handed to the reader with the document instead of
+  being asked for afterwards. The rest of the matter is inside that one
+  reader, which is where it belongs: every export is listed in its Documents
+  panel and built ahead of the click, the folder reads **on** so the next one
+  hangs under the last as the page reaches it, the leak walk steps out of one
+  document and into the next by itself, and Find reads the whole folder. A tab
+  per export gave none of that — forty readers each compiling the same key,
+  each knowing only its own document, and the tab strip to hunt through for
+  whichever file the walk had just named. **Files still open as files**,
   by every route they ever did: the **+** tab and the empty page's own click
   (a multi-select picker), a drop anywhere on the window, and the system's
   own "open with" — `.pdf`, `.txt` and a quarantined `.txt.LEAK` alike. A
@@ -1239,6 +1243,17 @@ app, which routes it to the reader tab.
   one is then putting those pages up rather than making them. The **Documents**
   tab marks the ones that are ready and says how many (`3 of 3 with leaks
   ready to open`).
+- **And which of them is still carrying a real value.** A document with a name
+  the key binds standing unfaked in it, or a flagged value the next run has
+  yet to reach, wears a **⚠** beside its name in the **Documents** tab, and
+  its tooltip says how many of each. The status bar already counted what the
+  rest of the folder was carrying, but a number does not say *which* of the
+  forty it is, and the Documents tab is where the next one is chosen. The
+  documents on the page are counted from the marks over them — which know the
+  edits the file has not been given yet, and the names the walk has settled —
+  and the rest from the folder sweep, which reads each file's own text. Where
+  the marks are off (plain reading, or a document they cost too much on) the
+  file's own reading stands.
   Gradually, and within a budget: one document at a time, in idle time, each
   built in slices of pages, so the building never stands between you and the
   page you are reading. How many are held is what fits — up to six of them and
@@ -1291,6 +1306,24 @@ app, which routes it to the reader tab.
   or a kept one, is never space-marked: the space types on, and the whole
   name is offered the moment it is finished. A name typed and left is
   marked by the reader on its own once the caret has moved off it.
+- **Ctrl+F reads the whole case folder, not the open document.** The browser's
+  own find reads what is in the page, and what is in the page is this document
+  — with the folder read on, not even all of it, since the reel sheds its far
+  end to stay scrollable. A matter is forty exports, and *where does this name
+  appear* is a question about the matter. So Find is the reader's own: a bar
+  under the toolbar, every hit in this document marked and the one in front
+  marked solidly, **Enter** for the next and **Shift+Enter** for the one
+  before — and when this document runs out the walk **opens the next export
+  that has one** and stands on its first hit, round the folder from wherever
+  it was started and back again. The bar says which hit of how many is in
+  front, where it stands, and how many are in how many other documents.
+  **The folder is searched through the key.** What is on screen is the real
+  names; what is on disk is the pseudonyms. A search for a party's real name
+  therefore looks for the name as it reads in the open document, and for
+  whatever the key writes instead of it in the forty files it has not opened
+  — a name standing in the clear in one export and faked in another is found
+  in both. Esc closes; 🔍 Find in the tools rail opens it over whatever is
+  selected.
 - **Flag what the run missed — and un-flag what it got wrong.** The point of
   reading the real names is to spot the ones that are *not* marked. Select
   such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the
@@ -1311,7 +1344,16 @@ app, which routes it to the reader tab.
   before the run does not bring it back. The whole value has to be in the key:
   a key that binds "David" has not pseudonymized a flagged "David W. Slayton",
   half of which would still be standing, and a value **kept** is not in the
-  key's forward side at all — both stay flagged. The opposite mistake, a value
+  key's forward side at all — both stay flagged. **But a red mark never
+  stands over a pseudonym.** The red mark says *this value is standing in the
+  clear and the next run has yet to fake it*, and wherever the text on screen
+  is a pseudonym the run has already faked it: the file carries the fake, and
+  the real name is painted over it for reading only. So the marks read the
+  page with the pseudonyms blanked — the same reading that finds the names in
+  the clear — and a flagged "David W. Slayton" is marked where it really
+  stands and not where the key's "David" has already been swapped out
+  underneath it. (Selecting a pseudonym and flagging it was already refused
+  for the same reason.) The opposite mistake, a value
   that should never have been faked (a word of a cited decision's name,
   usually), is **right-clicked**: "Keep in this case" is PDF-Linker's `no`,
   "Never fake it anywhere" its `never`. The keep takes effect in the reader
@@ -1347,6 +1389,17 @@ app, which routes it to the reader tab.
   it raises no closing prompt, and the whole of its effect is the one that was
   wanted: the value stops being marked. The **Flagged** panel tags it *already
   so* rather than *this case*.
+- **The walk does not stop at the end of a document.** The names standing in
+  the clear are a folder's worth of work, and the bar over the text used to go
+  down the moment the open document ran out of them — leaving the walk to be
+  picked up again from the count in the status bar, at the other end of the
+  window, once per document. It stays up now: answer the last name here and
+  the walk opens the next export that has one and stands on its first, and ›
+  does the same from the bar. Where the decision just taken threw the folder's
+  reading away — a keep is a question about every export, so it does — the bar
+  says the folder is being read and goes on by itself the moment it answers.
+  And it goes round the folder in reading order, the document *after* this one
+  first, rather than back to the top of the list each time.
 - **And the question is the case's, not the document's.** A keep applies to
   every export in the folder, so "was it faked?" is asked of every export in
   the folder: a pseudonym standing in one of the other forty is a name the next

@@ -68,10 +68,28 @@
   <!-- The names the key binds that the run left standing in the text. The same
        bar the LEAKS worksheet gets, for the case folder that has no worksheet:
        one name at a time, where it stands, and what may be done with it. -->
+  <!-- Find, across every document of the case folder. The browser's own
+       Ctrl+F reads the pages that are IN THE DOM, which is this document and,
+       with the folder read on, only the part of the reel that has not been
+       shed. A case is forty documents; the folder is the thing being read. -->
+  <div id="find-bar" class="revbar" hidden>
+    <div class="lb-row">
+      <span id="fb-type" class="lb-type find">find</span>
+      <input id="fb-input" type="text" spellcheck="false" autocomplete="off" placeholder="Find in this document, and on through the case folder…" title="Enter goes to the next; Shift+Enter the one before; Esc closes. Names are searched as they READ — the real value on screen — and the rest of the folder is searched through the key, so the same name is found in a document that still carries its pseudonym.">
+      <span id="fb-count" class="lb-count"></span>
+      <span id="fb-where" class="lb-where"></span>
+      <span id="fb-rest" class="lb-where"></span>
+      <span class="spacer"></span>
+      <button id="fb-prev" title="The one before it (Shift+Enter)">‹</button>
+      <button id="fb-next" title="The next one — on into the next document of the folder when this one runs out (Enter)">›</button>
+      <button id="fb-close" title="Close (Esc)">×</button>
+    </div>
+  </div>
+
   <div id="names-bar" class="revbar" hidden>
     <div class="lb-row">
       <span id="nb-count" class="lb-count"></span>
-      <span class="lb-type leak">unfaked</span>
+      <span id="nb-type" class="lb-type leak">unfaked</span>
       <b id="nb-value" class="lb-value" title="A real name from the key, standing in the clear"></b>
       <span id="nb-where" class="lb-where"></span>
       <span id="nb-rest" class="lb-where"></span>
@@ -184,6 +202,7 @@
         <label class="tool-btn tool-toggle" title="Show the document as it is on disk — the fakes — instead of the real names"><input id="fakes-toggle" type="checkbox"><span class="ti">🎭</span><span class="tl">Show fakes</span></label>
 
         <div class="tools-group-label">Review</div>
+        <button id="find-btn" class="tool-btn" title="Find (Ctrl+F) — in this document and on through every export in the case folder. Names are looked for as they READ, the real value on screen, and the rest of the folder is searched through the key, so the same name is found in a document that still carries its pseudonym. Enter goes to the next, and on into the next document when this one runs out."><span class="ti">🔍</span><span class="tl">Find</span></button>
         <button id="flag-btn" class="tool-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead."><span class="ti">🚩</span><span class="tl">Flag real value</span></button>
         <button id="leaks-btn" class="tool-btn" title="Review PDF-Linker's LEAKS.xlsx row by row: each row shown above the text, the text opened at its page and line, the decision written into the worksheet's Fix? cell. The case folder's own worksheet is attached when the folder is opened; click to open it, or to load one."><span class="ti">⚠</span><span class="tl">Leaks</span><span id="leaks-count" class="badge" hidden>0</span></button>
         <button id="autoscroll" class="tool-btn" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses. The pace is a reading pace in words per minute: each page moves at the speed its own text needs, so a dense page goes slower than a caption page. A scroll of your own suspends it and it picks up again a second later; remembered between documents." aria-pressed="false"><span class="ti">↓</span><span class="tl">Auto-scroll</span></button>

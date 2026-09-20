@@ -84,6 +84,8 @@ const toastEl = $("toast");
 // The redaction bar, up here with the other chrome because the bar stack is
 // measured (setBarHeight) long before the redaction tool below is reached.
 const redactBar = $("redact-bar");
+// …and the find bar, measured with them.
+const findBar = $("find-bar");
 
 // ── state ──────────────────────────────────────────────────────────────────
 // The reading defaults — font, size, leading, page width, whether pseudonyms
@@ -1423,7 +1425,7 @@ function renderDocList() {
   docsList.innerHTML = "";
   for (const d of folderDocs) {
     const li = document.createElement("li");
-    li.textContent = d.name.replace(/\.txt(\.LEAK)?$/i, "");
+    li.textContent = TD.docLabel(d.name);
     if (d.combined) {
       const t = document.createElement("span");
       t.className = "tag combined";
@@ -1444,9 +1446,75 @@ function renderDocList() {
   }
   renderDocReady();
   markDocList();
+  markDocAlerts();
 }
 function markDocList() {
   for (const li of docsList.children) li.classList.toggle("current", li.dataset.name === fileName);
+}
+
+// ── the ⚠ beside a document still carrying a real value ──────────────────────
+//
+// The marks answer the document that is OPEN, and the status bar counts what
+// the rest of the folder is carrying as a number. Neither says WHICH of the
+// forty it is without opening them, and the Documents list is where the
+// operator chooses the next one — so what each one is carrying belongs beside
+// its name.
+//
+// A document is marked where a real value is still standing in it: a name the
+// key binds that the run left in the clear, or a value flagged for the next
+// run. Both are the same thing to a reader — a real value that is really
+// there — and both are the marks over the text, said document by document.
+/**
+ * What each document of the folder is carrying, by file name: { leaks, flags }.
+ * The folder's documents come from the sweep, which reads each file's own
+ * text; the ones ON THE PAGE are taken from the marks over them instead.
+ * Where the marks are off — plain reading, or a document they cost too much
+ * on — the page has no answer to give and the file's stands.
+ */
+function docAlerts() {
+  const out = new Map();
+  for (const r of sweep.rows) {
+    const leaks = r.values.filter((v) => !isSettled(v)).length;
+    const flags = r.flags || 0;
+    if (leaks || flags) out.set(r.doc.name, { leaks, flags });
+  }
+  // …and the documents the last paint actually read answer for themselves:
+  // the marks know the edits the file has not been given yet and the names
+  // the walk has settled. Only the ones that were READ — with the folder read
+  // on, the reel sheds the far end of itself, and a document off the page has
+  // no count of its own to give.
+  if (scanned && !marksOff && !plain) {
+    const live = liveLeaks();
+    for (const name of scannedDocs) {
+      const leaks = live.filter((h) => h.doc === name).length;
+      const flags = flaggedHits.get(name) || 0;
+      if (leaks || flags) out.set(name, { leaks, flags });
+      else out.delete(name);
+    }
+  }
+  return out;
+}
+function alertTitle(a) {
+  const bits = [];
+  if (a.leaks) bits.push(`${a.leaks} name${a.leaks === 1 ? "" : "s"} the key binds standing unfaked`);
+  if (a.flags) bits.push(`${a.flags} flagged value${a.flags === 1 ? "" : "s"} still in the clear`);
+  return "Still carrying a real value: " + bits.join(" and ") + ". Open it to see where.";
+}
+/** The mark itself, put beside each document that has one and taken off the rest. */
+function markDocAlerts() {
+  const alerts = docAlerts();
+  for (const li of docsList.children) {
+    const a = alerts.get(li.dataset.name);
+    let tag = li.querySelector(".tag.alert");
+    if (!a) { if (tag) tag.remove(); continue; }
+    if (!tag) {
+      tag = document.createElement("span");
+      tag.className = "tag alert";
+      tag.textContent = "⚠";
+      li.appendChild(tag);
+    }
+    tag.title = alertTitle(a);
+  }
 }
 
 // Drag and drop.
@@ -1781,6 +1849,7 @@ function afterTextChange() {
   // The marks catch up the moment the reader stops.
   textEpoch++;
   paintHighlights();
+  refindSoon(); // …and the find's own ranges, which the rebuilt pages have dropped
   // The pages are where they are now: auto-scroll takes its pace from them
   // again rather than from the layout it started under.
   autoRemeasure();
@@ -3002,6 +3071,8 @@ async function scanDocument() {
  */
 function giveUpOnMarks(spent, page, pages) {
   marksOff = true;
+  flaggedHits = new Map();
+  scannedDocs = new Set();
   scanSoon.cancel();
   try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); } catch { /* none to clear */ }
   $("st-leaks").textContent = "";
@@ -3041,6 +3112,12 @@ async function scanPassNow(pass) {
   const leakRanges = [];
   const hits = [];
   const seen = new Set();
+  // With the folder read on, one page list holds several documents, and a
+  // mark belongs to the one whose page it stands on — not to the one at the
+  // head of the reel. The Documents list says what EACH is carrying, so the
+  // reading is kept per document from here rather than counted as one.
+  const flagCounts = new Map();
+  const docsSeen = new Set();
   let leaks = 0;
   const bodies = pageBodies();
   let clock = null;
@@ -3074,12 +3151,20 @@ async function scanPassNow(pass) {
   const HANDFUL = 250; // names read before the clock is looked at again
   for (const body of bodies) {
     page++;
+    const dname = docNameOfBody(body);
+    docsSeen.add(dname);
     const where = bodies.length > 1 ? ` (page ${page} of ${bodies.length})` : "";
     if (!(await breathe(`reading the marks over the text${where}`))) return gaveUp;
     // Over the whole page, pseudonym spans blanked, so a real name wrapped
     // over a line break and its gutter number is found as one. The spots kept
     // where they stand are blanked with them: they carry their own mark.
-    const flat = reals || keptRx ? flatten(body, { blankPn: true }) : null;
+    //
+    // ALL THREE READINGS ARE MADE OF IT — the names in the clear, the kept
+    // values and the flagged ones. What a pseudonym span holds is the fake
+    // that is IN THE FILE, with the real name painted over it for reading
+    // only; no mark that says "this real value is still standing here" may
+    // be drawn over one, whichever mark it is.
+    const flat = reals || keptRx || flagRx ? flatten(body, { blankPn: true }) : null;
     if (reals) {
       const { text, segs } = flat;
       const masked = maskKept(text);
@@ -3095,7 +3180,7 @@ async function scanPassNow(pass) {
           const r = rangeFor(segs, h.start, h.end);
           if (!r) continue;
           leakRanges.push(r);
-          hits.push({ range: r, real: h.real, fake: h.fake });
+          hits.push({ range: r, real: h.real, fake: h.fake, doc: dname });
           leaks++;
         }
         if (next < 0) break;
@@ -3120,12 +3205,21 @@ async function scanPassNow(pass) {
       }
     }
     if (flagRx) {
-      const { text, segs: all } = flatten(body);
+      // The same reading as the others, and for the reason above: the red
+      // mark says the flagged value is standing in the clear and the next run
+      // has yet to fake it, and inside a pseudonym span the run has already
+      // faked it — the file carries the fake, and only the screen shows the
+      // real name. A mark there says the opposite of what is true. (The
+      // flag pop-up refuses such a selection for the same reason; see
+      // textdoc.flagProblem.) A spot keep is blanked with them: the value
+      // stands there because the operator put it back, and it carries its
+      // own mark.
+      const { text, segs: all } = flat;
       flagRx.lastIndex = 0;
-      let m, n = 0;
+      let m, n = 0, mine = 0;
       while ((m = flagRx.exec(text))) {
         const r = rangeFor(all, m.index, m.index + m[0].length);
-        if (r) flaggedRanges.push(r);
+        if (r) { flaggedRanges.push(r); mine++; }
         if (m.index === flagRx.lastIndex) flagRx.lastIndex++;
         if (++n % HANDFUL === 0) {
           const held = flagRx.lastIndex;
@@ -3133,12 +3227,15 @@ async function scanPassNow(pass) {
           flagRx.lastIndex = held;
         }
       }
+      if (mine) flagCounts.set(dname, (flagCounts.get(dname) || 0) + mine);
     }
   }
   noteDoing(pass, "reading the marks over the text — putting them on the page");
   // Whole, so it goes up: the ranges, what the right-click menu reads off them,
   // and the state this reading was made of.
   leakHits = hits;
+  flaggedHits = flagCounts;
+  scannedDocs = docsSeen;
   keptSeen = seen;
   scanned = mark;
   CSS.highlights.set("flagged", highlightOf(flaggedRanges));
@@ -3154,6 +3251,16 @@ async function scanPassNow(pass) {
   return true;
 }
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
+let flaggedHits = new Map(); // …and per document on the page, how many flagged values stand in its clear
+let scannedDocs = new Set(); // …and which documents that paint actually read (the reel sheds the far end)
+/** The document a page belongs to: the reel's member where the folder is read on, else the open file. */
+function docNameOfBody(body) {
+  if (reel.length < 2) return fileName;
+  const sec = body.closest(".tpage");
+  const i = sec ? Number(sec.dataset.index) : -1;
+  const m = i >= 0 ? reelMemberOf(i) : null;
+  return m ? m.name : fileName;
+}
 /**
  * The count of names standing in the clear, the folder's share of them, and
  * whatever the walk was waiting on. Called by the paint that counted them and
@@ -3180,7 +3287,16 @@ function renderLeakStatus() {
     showNamesBar(true);
   } else if (!leaks) {
     if (leakJump) { leakJump = false; leakStep = -1; if (rest.length) stepLeak(1); else showNamesBar(false); }
-    else if (!rest.length) showNamesBar(false);
+    else if (walkOn && !folderPending()) {
+      // The folder has been read again since the last decision: on to whatever
+      // it turned out to be carrying, or down if it is carrying nothing.
+      walkOn = false;
+      leakStep = -1;
+      if (rest.length) stepLeak(1);
+      else { showNamesBar(false); toast("Nothing the key binds is standing in the clear now."); }
+    }
+    else if (!rest.length && !folderPending()) showNamesBar(false);
+    else if (!namesBar.hidden) renderNamesBar(); // …else the bar says which document is next
   } else if (!namesBar.hidden) renderNamesBar(); // the paint moved the ranges under it
   if (leaks || rest.length) {
     leakEl.setAttribute("role", "button");
@@ -3193,6 +3309,7 @@ function renderLeakStatus() {
     leakEl.removeAttribute("tabindex");
     leakEl.title = "";
   }
+  markDocAlerts(); // …and which documents of the folder are still carrying one
 }
 
 // ── stepping the names standing in the clear ─────────────────────────────────
@@ -3212,6 +3329,7 @@ function renderLeakStatus() {
 // a worksheet is one row per value, and a value leaks wherever it leaks.
 let leakStep = -1;
 let leakJump = false; // a document opened for the walk: stand on its first name
+let walkOn = false;   // …and the walk waiting on the folder to say which document is next
 function stepLeak(dir = 1) {
   // The ranges of the last paint, minus any whose page has been rebuilt under
   // them (an edit, a key change) before the next paint has caught up.
@@ -3221,6 +3339,7 @@ function stepLeak(dir = 1) {
     // Nothing here, but the folder is not this document: the walk goes on in
     // the next one that has something standing in the clear.
     if (rest.length) { jumpToDoc(dir < 0 ? rest[rest.length - 1] : rest[0]); return; }
+    if (folderPending()) { walkOn = true; renderNamesBar(); toast("The rest of the folder is being read \u2014 the walk goes on as soon as it says what is next."); return; }
     showNamesBar(false);
     toast(marksOff
       ? "The marks are off for this document, so the names standing in the clear are not being read."
@@ -3262,11 +3381,278 @@ function showNamesBar(on) {
   namesBar.hidden = !on;
   setBarHeight();
   if (was !== !!on) relayout();
-  if (!on) { leakHere = null; markLeakHere(); return; }
+  if (!on) { leakHere = null; walkOn = false; markLeakHere(); return; }
   if (leakStep < 0) stepLeak(1);
   else renderNamesBar();
   sweepFolder(); // …and what the rest of the folder is carrying
 }
+// ── Find, across the whole case folder ───────────────────────────────────────
+//
+// Ctrl+F. The browser's own find reads the DOM, and the DOM is this document —
+// with the folder read on, not even all of it, since the reel sheds the far
+// end of itself to stay scrollable. A matter is forty exports, and "where does
+// this name appear" is a question about the matter. So Find is the reader's
+// own: the open document marked and stepped like any review, and when the last
+// hit here is passed the walk opens the next document of the folder that has
+// one and stands on its first.
+//
+// THE FOLDER IS SEARCHED THROUGH THE KEY. What is on screen is the real names;
+// what is on disk is the pseudonyms. A search for "Rasho" typed while reading
+// must therefore look for "Rasho" in the open document (where it is what the
+// page says) and for whatever the key writes instead of it in the forty files
+// it has not opened — otherwise the answer would be "only in the document you
+// happen to have open", which is worse than no answer. Both needles are put to
+// every file, so a name standing in the clear in one and faked in another is
+// found in both.
+let findQuery = "";
+let findHits = [];    // the open document's hits, in order: [{ range }]
+let findStep = -1;
+let findJump = false; // a document opened by the walk: stand on its first hit
+let findRows = [];    // the rest of the folder: [{ doc, count }]
+let findScanFor = null; // …the query and the folder that answer was about
+let findScanning = false;
+
+/** The needles a query stands for: as it reads, and as the key writes it. */
+function findNeedles(q) {
+  const t = String(q || "").trim();
+  if (!t) return [];
+  const out = [t];
+  // The same words as the file carries them. `forwardText` is the save's own
+  // translation, so what is looked for is exactly what a save would have
+  // written — including a phrase only part of which the key binds.
+  if (fwd) {
+    try {
+      const { text, swaps } = forwardText(t, []);
+      if (swaps && text && PK.fold(text) !== PK.fold(t)) out.push(text);
+    } catch { /* an odd query is searched as it reads */ }
+  }
+  return out;
+}
+// The page is searched for BOTH faces of the query too: with "Show fakes" on
+// the text on screen is the pseudonyms, and a find that only knew the real
+// name would come back empty on a page plainly carrying it.
+function findMatcherFor(q) { return PK.buildFindMatcher(findNeedles(q)); }
+
+/** The open document's hits, read off the page the way the marks are. */
+function scanFindHere() {
+  findHits = [];
+  const rx = findMatcherFor(findQuery);
+  if (!rx) { paintFind(); return; }
+  for (const body of pageBodies()) {
+    // The gutter numbers blanked, so a phrase wrapped at the margin is one
+    // phrase; the pseudonym spans NOT blanked, because what the operator is
+    // searching is what the page says.
+    const { text, segs } = flatten(body, { blankGutters: true });
+    rx.lastIndex = 0;
+    let m;
+    while ((m = rx.exec(text))) {
+      const r = rangeFor(segs, m.index, m.index + m[0].length);
+      if (r) findHits.push({ range: r });
+      if (m.index === rx.lastIndex) rx.lastIndex++;
+    }
+  }
+  if (findStep >= findHits.length) findStep = findHits.length - 1;
+  paintFind();
+}
+/** Stand on the first hit of a document just read, the way a find does as you type. */
+function findLandHere() {
+  if (findStep >= 0 || !findHits.length) return false;
+  findStep = 0;
+  paintFind();
+  scrollRangeTo(findHits[0].range);
+  return true;
+}
+function paintFind() {
+  if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
+  try {
+    CSS.highlights.set("find", highlightOf(findHits.map((h) => h.range)));
+    const here = findStep >= 0 && findHits[findStep] ? [findHits[findStep].range] : [];
+    CSS.highlights.set("findhere", highlightOf(here));
+  } catch { /* a range from a page since rebuilt */ }
+}
+function clearFindMarks() {
+  try { CSS.highlights.delete("find"); CSS.highlights.delete("findhere"); } catch { /* none to clear */ }
+}
+
+/**
+ * The rest of the folder, read once per query: which documents carry it and
+ * how many times. Idle-sliced like the leak sweep, and thrown away whenever
+ * the query, the folder or the key moves.
+ */
+function findScanStale() {
+  return !findScanFor || findScanFor.q !== findQuery || findScanFor.docs !== folderDocs || findScanFor.key !== key;
+}
+async function scanFindFolder() {
+  if (!dirHandle || !findQuery || findScanning || !findScanStale()) return;
+  findScanning = true;
+  const mine = { q: findQuery, docs: folderDocs, key };
+  findScanFor = mine;
+  const rows = [];
+  const rx = PK.buildFindMatcher(findNeedles(findQuery));
+  try {
+    await duringAsync("reading the rest of the folder for what you are looking for", async () => {
+      let clock = await idleClock();
+      for (const d of folderDocs) {
+        if (findScanFor !== mine) return; // the query moved under it
+        // The open one is READ HERE TOO, though its hits come from the page:
+        // the walk moves from document to document, and a row set that left
+        // out whichever was open when it was made would send the walk back
+        // into the document it had just left. The row is filtered out of the
+        // "rest" instead, at the moment it is asked for (findRest).
+        try {
+          const text = await (await d.handle.getFile()).text();
+          const n = rx ? countMatches(rx, text) : 0;
+          if (n) rows.push({ doc: d, count: n });
+        } catch { /* unreadable: it is not a document this search can answer */ }
+        if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
+      }
+    });
+  } finally { findScanning = false; }
+  if (findScanFor !== mine) return;
+  findRows = rows;
+  renderFindBar();
+  // A find that opened on a document with nothing in it waits for this answer
+  // before saying there is nothing anywhere (findJump), and goes on once it is in.
+  if (findJump && !findHits.length && findRest().length) { findJump = false; stepFind(1); }
+}
+
+/** The documents of the folder that carry it — the open one excepted. */
+function findRest() {
+  return roundFromHere(findRows.filter((r) => r.doc.handle !== fileHandle));
+}
+/** The bar: which hit of how many, where it stands, and what the folder holds. */
+function renderFindBar() {
+  if (findBar.hidden) return;
+  const n = findHits.length;
+  const others = findRest();
+  const rest = others.reduce((t, r) => t + r.count, 0);
+  $("fb-count").textContent = !findQuery ? ""
+    : n ? `${Math.min(Math.max(findStep, 0) + 1, n)} of ${n} here`
+    : findScanning ? "reading the folder…"
+    : "none here";
+  const h = n && findStep >= 0 ? findHits[findStep] : null;
+  $("fb-where").textContent = h ? whereInText(h.range) : "";
+  $("fb-rest").textContent = !findQuery ? ""
+    : findScanning ? `· reading ${folderName || "the folder"}…`
+    : others.length ? `· ${rest} in ${others.length} other document${others.length === 1 ? "" : "s"}${n ? "" : ` — › opens ${TD.docLabel(others[0].doc.name)}`}`
+    : dirHandle ? "· nowhere else in the folder" : "";
+  $("fb-prev").disabled = $("fb-next").disabled = !findQuery || (n < 2 && !others.length);
+}
+/**
+ * Where a range stands, as a reader would say it: the page's own label and its
+ * numbered line — and, with the folder read on, which document's page it is,
+ * since the page list then holds several. Both walks say it the same way.
+ */
+function whereInText(range) {
+  const node = range && range.startContainer;
+  const el = node && (node.nodeType === 1 ? node : node.parentElement);
+  const sec = el && el.closest && el.closest(".tpage");
+  if (!sec || !doc) return "";
+  const at = Number(sec.dataset.index);
+  const line = el.closest(".line");
+  const gn = line && line.querySelector(".gn");
+  const label = TD.pageLabel(doc.pages[at]) || `Page ${at + 1}`;
+  const m = reel.length > 1 ? reelMemberOf(at) : null;
+  return (m && m.name !== fileName ? TD.docLabel(m.name) + " · " : "") + label + (gn ? ":" + gn.textContent.trim() : "");
+}
+
+/**
+ * On to the next hit — and out of this document when it runs out. The same
+ * shape as the leak walk: the hits arrive with the next paint, so where to
+ * stand in a document just opened is left as a note for it (findJump).
+ */
+function stepFind(dir = 1) {
+  if (!findQuery) return;
+  const n = findHits.length;
+  const others = findRest();
+  if (!n) {
+    if (others.length) { jumpToFind(dir < 0 ? others[others.length - 1] : others[0]); return; }
+    if (findScanning) { findJump = true; toast(`Reading ${folderName || "the folder"} for “${findQuery}”…`); return; }
+    toast(dirHandle ? `“${findQuery}” is nowhere in ${folderName || "the folder"}.` : `“${findQuery}” is not in this document.`);
+    return;
+  }
+  const next = findStep + dir;
+  if ((next >= n || next < 0) && others.length) {
+    jumpToFind(dir < 0 ? others[others.length - 1] : others[0]);
+    return;
+  }
+  findStep = (((findStep + dir) % n) + n) % n;
+  const h = findHits[findStep];
+  paintFind();
+  scrollRangeTo(h.range);
+  renderFindBar();
+}
+function jumpToFind(row) {
+  findJump = true;
+  findStep = -1;
+  toast(`${TD.docLabel(row.doc.name)} — ${row.count} hit${row.count === 1 ? "" : "s"} for “${findQuery}”.`);
+  openFolderDoc(row.doc);
+}
+
+/**
+ * The pages were rebuilt under the find — an edit, a key, the reel hanging the
+ * next document on — so its ranges name nodes the document no longer has. The
+ * page is read again a beat later, and a document the walk opened stands on
+ * its first hit (findJump).
+ */
+const refindSoon = debounce(() => {
+  if (findBar.hidden || !findQuery) return;
+  scanFindHere();
+  findJump = false;
+  findLandHere();
+  renderFindBar();
+  scanFindFolder();
+}, 200);
+/** The query changed: the page again, and the folder behind it. */
+const findSoon = debounce(() => {
+  scanFindHere();
+  findJump = false;
+  findLandHere();
+  renderFindBar();
+  scanFindFolder();
+}, 180);
+function setFindQuery(q) {
+  const t = String(q || "");
+  if (t.trim() === findQuery) return;
+  findQuery = t.trim();
+  findStep = -1;
+  findRows = [];
+  findScanFor = null;
+  if (!findQuery) { findHits = []; clearFindMarks(); renderFindBar(); return; }
+  findSoon();
+}
+function showFindBar(on) {
+  const was = !findBar.hidden;
+  if (on && !was) reelAllLive(); // the search looks at every page of the reel
+  findBar.hidden = !on;
+  setBarHeight();
+  if (was !== !!on) relayout();
+  if (!on) { findHits = []; findStep = -1; findJump = false; clearFindMarks(); return; }
+  const input = $("fb-input");
+  // Opened over a selection, that is what is being looked for.
+  const sel = String(document.getSelection() || "").trim();
+  if (sel && sel.length <= 120 && !sel.includes("\n")) input.value = sel;
+  input.focus();
+  input.select();
+  setFindQuery(input.value);
+  renderFindBar();
+}
+$("fb-input").addEventListener("input", (e) => setFindQuery(e.target.value));
+$("fb-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); }
+  else if (e.key === "Escape") { e.preventDefault(); showFindBar(false); }
+});
+$("fb-prev").addEventListener("click", () => stepFind(-1));
+$("fb-next").addEventListener("click", () => stepFind(1));
+$("fb-close").addEventListener("click", () => showFindBar(false));
+$("find-btn").addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection to search for
+$("find-btn").addEventListener("click", () => showFindBar(findBar.hidden));
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "f") return;
+  e.preventDefault(); // the reader's find, not the browser's: the browser's cannot leave this document
+  showFindBar(true);
+});
+
 // ── the rest of the folder ───────────────────────────────────────────────────
 //
 // The marks read the document that is OPEN. A case folder holds the other
@@ -3288,13 +3674,46 @@ let sweep = { stamp: null, rows: [], at: 0, running: false };
 let caseFakes = { key: null, docs: null, set: null };
 function sweepStale() {
   return !sweep.stamp || sweep.stamp.reals !== reals || sweep.stamp.keeps !== keeps
-    || sweep.stamp.master !== masterKeeps || sweep.stamp.docs !== folderDocs;
+    || sweep.stamp.master !== masterKeeps || sweep.stamp.docs !== folderDocs
+    || sweep.stamp.flagged !== flagged;
 }
 function dropSweep() {
   sweep = { stamp: null, rows: [], at: 0, running: false };
   settled = new Set(); // the question has changed; so have the answers to it
 }
-/** The other documents of the folder that carry a name standing in the clear. */
+/**
+ * Rows of the folder in the order a walk meets them: the document AFTER the
+ * open one first, round the folder, and the one before it last. A walk that
+ * took them in the folder's own order would leave the third document for the
+ * first, and go round the folder backwards from wherever it was started.
+ */
+function roundFromHere(rows) {
+  if (rows.length < 2) return rows;
+  const at = folderDocs.findIndex((d) => d.handle === fileHandle);
+  if (at < 0) return rows;
+  const n = folderDocs.length;
+  const pos = (r) => {
+    const i = folderDocs.indexOf(r.doc);
+    return i < 0 ? Infinity : ((i - at) % n + n) % n;
+  };
+  return rows.slice().sort((a, b) => pos(a) - pos(b));
+}
+/** How many times a matcher stands in a text. */
+function countMatches(rx, text) {
+  rx.lastIndex = 0;
+  let n = 0, m;
+  while ((m = rx.exec(text))) {
+    n++;
+    if (m.index === rx.lastIndex) rx.lastIndex++;
+  }
+  return n;
+}
+/**
+ * The other documents of the folder that carry a NAME THE KEY BINDS standing
+ * in the clear — the walk's own list, so a row carrying nothing but flagged
+ * values is not a stop on it (there is nothing in it for the walk to stand
+ * on: `leakHits` is the key's names).
+ */
 function restOfFolder() {
   const out = [];
   for (const r of sweep.rows) {
@@ -3302,7 +3721,7 @@ function restOfFolder() {
     const count = r.values.filter((v) => !isSettled(v)).length;
     if (count) out.push({ doc: r.doc, count, values: r.values });
   }
-  return out;
+  return roundFromHere(out);
 }
 function folderRest() {
   if (!dirHandle || !reals) return "";
@@ -3314,13 +3733,14 @@ function folderRest() {
 }
 async function sweepFolder() {
   if (!dirHandle || !reals || sweep.running || !sweepStale()) return;
-  sweep = { stamp: { reals, keeps, master: masterKeeps, docs: folderDocs }, rows: [], at: 0, running: true };
+  sweep = { stamp: { reals, keeps, master: masterKeeps, docs: folderDocs, flagged }, rows: [], at: 0, running: true };
   const mine = sweep.stamp;
   // …and the fakes, only where the folder has not already been read for them
   // under this key. A walk through the names drops the sweep at every decision;
   // re-reading forty documents each time for an answer that cannot have changed
   // would be the walk's whole cost.
   const fakesFor = fakesIndexStale() ? { key, docs: folderDocs, set: new Set() } : null;
+  const flagRx = flaggedMatcher();
   // …and whether every one of them was actually read. A document that would
   // not open leaves the leak count a little short, which is a worse count; it
   // leaves the FAKES index saying a pseudonym stands nowhere, which is a keep
@@ -3334,12 +3754,23 @@ async function sweepFolder() {
       if (sweep.stamp !== mine) return; // the key moved under it: this answer is stale
       sweep.at++;
       renderNamesBar();
-      if (d.handle === fileHandle) continue; // the open one is read from the page itself (and fakeStandsInFile)
+      // The open one is read here TOO, though the walk and the marks read it
+      // from the page: the page's count goes with the page, and the ⚠ beside
+      // it in the Documents list has to stand after the operator moves on to
+      // the next document. What the file holds is the right answer for a
+      // document nobody is looking at. Its pseudonyms are still left to
+      // fakeStandsInFile, which reads the page.
+      const open = d.handle === fileHandle;
       try {
         const text = await (await d.handle.getFile()).text();
         const masked = TD.blankRanges(maskKept(text), TD.citedNameSpans(text));
         const found = PK.findReals(reals, masked);
-        if (found.length) sweep.rows.push({ doc: d, values: found.map((f) => f.real) });
+        // …and the values flagged for the next run, counted the way the page
+        // counts them: over the file's own text, where a value that stands is
+        // really standing — a fake is a fake on disk, with no real name
+        // painted over it.
+        const flags = flagRx ? countMatches(flagRx, text) : 0;
+        if (found.length || flags) sweep.rows.push({ doc: d, values: found.map((f) => f.real), flags });
         // …and, from the same reading, which PSEUDONYMS stand here. That is
         // the other half of the folder's answer: a name in the clear is a leak,
         // and a name the run faked is work only a run can undo. Over the raw
@@ -3347,7 +3778,7 @@ async function sweepFolder() {
         // and a party of a cited decision is not spared either, the run having
         // faked it all the same. Only `fake` is read off the row: an ambiguous
         // fake cannot say whose it is, and does not have to.
-        if (fakesFor && fakesRx) for (const w of PK.findReals(fakesRx, text)) fakesFor.set.add(PK.fold(w.fake));
+        if (fakesFor && fakesRx && !open) for (const w of PK.findReals(fakesRx, text)) fakesFor.set.add(PK.fold(w.fake));
       } catch { readAll = false; /* unreadable: it is not a document this review can answer */ }
       if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
     }
@@ -3374,29 +3805,77 @@ function liveLeaks() {
   return leakHits.filter((h) => !isSettled(h.real) && h.range && h.range.startContainer && h.range.startContainer.isConnected);
 }
 /** Where a name stands, as a reader would say it: the page's own label, and its line. */
-function leakWhere(h) {
-  const node = h.range.startContainer;
-  const el = node && (node.nodeType === 1 ? node : node.parentElement);
-  const sec = el && el.closest(".tpage");
-  if (!sec || !doc) return "";
-  const line = el.closest(".line");
-  const gn = line && line.querySelector(".gn");
-  const label = TD.pageLabel(doc.pages[Number(sec.dataset.index)]) || `Page ${Number(sec.dataset.index) + 1}`;
-  return label + (gn ? ":" + gn.textContent.trim() : "");
-}
+function leakWhere(h) { return whereInText(h.range); }
 function renderNamesBar() {
   if (namesBar.hidden) return;
   const hits = liveLeaks();
-  if (!hits.length) { showNamesBar(false); return; }
+  // NOTHING LEFT HERE IS NOT THE END OF THE WALK. The document runs out long
+  // before the folder does, and the bar used to go down with it — leaving the
+  // walk to be picked up again from the count in the status bar, at the other
+  // end of the window, once per document. The walk is one walk. So the bar
+  // stays up, says which document is next, and › goes on to it.
+  if (!hits.length) {
+    const rest = restOfFolder();
+    if (rest.length) { renderOnward(rest); return; }
+    // …and a folder whose answer is not in yet is not a folder with nothing
+    // left in it. A keep or a fake throws the sweep away — it was an answer
+    // about the keeps — so the moment AFTER the last name here is answered is
+    // exactly the moment the folder cannot say what is next. The bar waits for
+    // it, and goes on by itself when it arrives (walkOn).
+    if (folderPending()) { renderWaiting(); return; }
+    showNamesBar(false);
+    return;
+  }
+  setOnward(false);
   const i = Math.min(Math.max(leakStep, 0), hits.length - 1);
   const h = hits[i];
   $("nb-count").textContent = `${i + 1} of ${hits.length}` + (answered ? ` · ${answered} answered here` : "");
   $("nb-value").textContent = h.real;
+  $("nb-value").title = "A real name from the key, standing in the clear";
   $("nb-where").textContent = leakWhere(h);
   $("nb-answer").textContent = h.fake ? `the save writes \u201c${h.fake}\u201d` : "the save writes its pseudonym";
   $("nb-fake").disabled = !h.fake;
   $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2 && !restOfFolder().length;
   $("nb-rest").textContent = folderRest();
+}
+/** Whether the folder has still to say what it is carrying. */
+function folderPending() {
+  return !!dirHandle && !!reals && (sweep.running || sweepStale());
+}
+/** The bar while the folder is being read: the walk is not over, it is waiting. */
+function renderWaiting() {
+  setOnward(true);
+  $("nb-count").textContent = "none left here" + (answered ? ` · ${answered} answered here` : "");
+  $("nb-type").textContent = "reading";
+  $("nb-value").textContent = folderName || "the folder";
+  $("nb-value").title = "The rest of the folder is being read for names standing in the clear";
+  $("nb-where").textContent = sweep.running ? `${sweep.at} of ${folderDocs.length}\u2026` : "\u2026";
+  $("nb-rest").textContent = "";
+  $("nb-prev").disabled = $("nb-next").disabled = true;
+}
+/** The bar between documents: what is next, and the arrows that go there. */
+function renderOnward(rest) {
+  const n = rest.reduce((t, r) => t + r.count, 0);
+  const next = rest[0];
+  setOnward(true);
+  $("nb-count").textContent = "none left here" + (answered ? ` · ${answered} answered here` : "");
+  $("nb-type").textContent = "on to";
+  $("nb-value").textContent = TD.docLabel(next.doc.name);
+  $("nb-value").title = `${next.count} name${next.count === 1 ? "" : "s"} standing in the clear in ${next.doc.name}`;
+  $("nb-where").textContent = `${next.count} standing in the clear`;
+  $("nb-rest").textContent = rest.length > 1
+    ? `· ${n} in ${rest.length} documents of ${folderName || "the folder"}`
+    : "";
+  $("nb-prev").disabled = $("nb-next").disabled = false;
+}
+/** Which of the bar's two faces is up: the name in front, or the document next. */
+let onward = false;
+function setOnward(on) {
+  if (onward === !!on) return;
+  onward = !!on;
+  namesBar.classList.toggle("onward", onward);
+  if (!onward) $("nb-type").textContent = "unfaked";
+  setBarHeight(); // the decide row goes with it, and the stage sits under both
 }
 /** A decision taken on the name in front, and on to the next. */
 function decideName(what) {
@@ -3417,6 +3896,14 @@ function decideName(what) {
   }
   const left = liveLeaks();
   if (!left.length) {
+    // Answered the last one HERE: the walk goes straight on to the next
+    // document of the folder rather than putting the bar down and leaving the
+    // operator to pick it up again from the status bar. Where the decision
+    // just taken threw the folder's answer away, the walk says so and goes on
+    // the moment it is read again.
+    leakStep = -1;
+    if (restOfFolder().length) { stepLeak(1); return; }
+    if (folderPending()) { walkOn = true; renderNamesBar(); return; }
     showNamesBar(false);
     toast("Nothing the key binds is standing in the clear now.");
     return;
@@ -4414,16 +4901,19 @@ function setBarHeight() {
   const a = leaksBar.hidden ? 0 : leaksBar.offsetHeight;
   const b = namesBar.hidden ? 0 : namesBar.offsetHeight;
   const c = redactBar.hidden ? 0 : redactBar.offsetHeight;
+  const d = findBar.hidden ? 0 : findBar.offsetHeight;
   const root = document.documentElement.style;
-  root.setProperty("--bar-leaks", a + "px");     // where the second bar starts
-  root.setProperty("--bar-names", a + b + "px"); // …and the third
-  root.setProperty("--bar-h", a + b + c + "px"); // …and what the three take together
+  root.setProperty("--bar-leaks", a + "px");          // where the second bar starts
+  root.setProperty("--bar-names", a + b + "px");      // …and the third
+  root.setProperty("--bar-redact", a + b + c + "px"); // …and the fourth
+  root.setProperty("--bar-h", a + b + c + d + "px");  // …and what the four take together
 }
 if (typeof ResizeObserver !== "undefined") {
   const barSizes = new ResizeObserver(setBarHeight);
   barSizes.observe(leaksBar);
   barSizes.observe(namesBar);
   barSizes.observe(redactBar);
+  barSizes.observe(findBar);
 }
 function showLeaksBar(on) {
   const was = !leaksBar.hidden;
@@ -5621,6 +6111,7 @@ function reelChanged() {
   placeCitationsSoon();
   textEpoch++;
   paintHighlights();
+  refindSoon(); // the pages hung on the end are pages the find has not read
   refreshPdf();
   autoRemeasure();
   renderReelState();

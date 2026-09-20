@@ -460,6 +460,22 @@ function stickyOf(alts) {
 function oneMatcher(alts) {
   return new RegExp("(?<!" + WORD_CLASS + ")(?:" + alts.join("|") + ")(?!" + WORD_CLASS + ")", "gi");
 }
+/**
+ * A matcher for FINDING, which is not the same question as matching a name.
+ * A name is a whole word — "Lasso" is not found inside "Lassoed" — and that
+ * is the whole point of buildMatcher. A search is the opposite: the operator
+ * types part of a word on purpose, and a find that only answered on whole
+ * words would be a find that misses what is plainly on the page. So: no word
+ * boundaries, no possessive, and the spaces still read as gaps, so a phrase
+ * wrapped at the margin over a gutter number is found as one phrase.
+ */
+export function buildFindMatcher(values) {
+  const list = (values || []).filter((v) => String(v || "").trim());
+  if (!list.length) return null;
+  const alts = list.slice().sort((a, b) => b.length - a.length).map((v) => escapeRe(String(v).trim()).replace(/ +/g, GAP));
+  return new RegExp("(?:" + alts.join("|") + ")", "gi");
+}
+
 export function buildMatcher(values) {
   const list = (values || []).filter((v) => v);
   if (!list.length) return null;

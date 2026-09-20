@@ -215,15 +215,20 @@ async function pickFiles() {
 // PDFs, the LEAKS worksheet and (where the run made one) Combined Text.txt,
 // and the exports themselves sit in a "Text Files" subfolder under it. So the
 // folder is the thing to open, not the files: one pick, and the matter is up
-// — a tab per export, each with the folder attached, its key in force and its
-// PDFs to hand.
+// — the folder attached, its key in force and its PDFs to hand.
 //
-// The combined file is preferred where there is one: it IS every export, in
-// one document, and forty tabs is forty readers each compiling the same key.
-// Past a handful the rest is offered rather than assumed, and whichever way
-// it goes every document is listed in each reader's own Documents panel.
+// ONE TAB, WHATEVER THE FOLDER HOLDS. A case folder is a matter, not a pile
+// of files, and the reader already treats it as one: every export is listed
+// in its Documents panel, a click away and built ahead of the click; the
+// folder reads ON, the next export hanging under the last as the page reaches
+// it; the leak walk steps out of one document and into the next by itself;
+// and Find reads the whole folder. A tab per export gave none of that — forty
+// readers each compiling the same key, each knowing only its own document,
+// and the operator hunting the tab strip for the file the walk had just named.
+// So the pick opens the combined file where the run made one (it IS every
+// export, in one document) and otherwise the first, and the rest of the
+// matter is where it belongs: inside that one reader.
 const TEXT_SUBFOLDER = "Text Files";
-const MANY_TABS = 8;
 const isExport = (name) => /\.txt(\.leak)?$/i.test(name)
   && !/^(leaks|pdf_linker_leaks|authorities cited|new real values)\.txt$/i.test(name)
   && !/^(ETA|DONE) .*\.txt$/i.test(name);
@@ -259,18 +264,14 @@ async function pickCaseFolder() {
       + "\n\nOpen files instead?")) pickFiles();
     return;
   }
-  // The combined file is the whole matter in one document; open it alone.
-  let open = docs;
-  if (combined) open = [combined];
-  else if (docs.length > MANY_TABS
-    && !confirm(`${dir.name} has ${docs.length} text files. Open all of them, one tab each?\n\nCancel opens the first; the rest are listed in its Documents panel and are one click away.`)) {
-    open = [docs[0]];
-  }
-  for (const [i, h] of open.entries()) {
-    let file;
-    try { file = await h.getFile(); } catch { continue; }
-    newTab({ initialLabel: h.name, file, handle: h, text: true, dir, focus: i === 0 });
-  }
+  // The combined file is the whole matter in one document, so it is the one
+  // to open where the run made one; otherwise the first export, with the rest
+  // listed in its Documents panel.
+  const first = docs[0];
+  let file;
+  try { file = await first.getFile(); }
+  catch (e) { alert("Could not open " + first.name + ": " + (e.message || e)); return; }
+  newTab({ initialLabel: first.name, file, handle: first, text: true, dir, focus: true });
 }
 
 newTabBtn.addEventListener("click", pickFiles);

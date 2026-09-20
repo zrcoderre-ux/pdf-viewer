@@ -121,6 +121,15 @@ body {
 /* …and the redaction bar under both, so all three reviews stack. It is the
    one that writes a file, so its edge is the red the boxes are drawn in. */
 #redact-bar { top: calc(var(--toolbar-height) + var(--bar-names, 0px)); border-bottom-color: #c5221f; }
+/* …and Find under all of them. It is the one bar that reads rather than
+   decides, so its edge is the accent rather than a warning colour. */
+#find-bar { top: calc(var(--toolbar-height) + var(--bar-redact, 0px)); border-bottom-color: var(--accent); }
+#find-bar .lb-type.find { background: var(--accent); }
+#fb-input {
+  background: var(--inset); color: var(--text); border: 1px solid var(--btn-border);
+  border-radius: 4px; padding: 3px 8px; font-size: 13px; min-width: 260px; flex: 1; max-width: 520px;
+}
+#find-bar .lb-count { min-width: 9ch; }
 .revbar .lb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .revbar .lb-row .spacer { flex: 1; min-width: 8px; }
 .revbar button {
@@ -141,6 +150,11 @@ body {
 .revbar .lb-type.reid { background: #e65100; }
 .revbar .lb-type.redact { background: #c5221f; }
 .revbar .lb-type.miss { background: #e65100; }
+/* The names bar BETWEEN documents: nothing here to decide on, so the decide
+   row goes and the bar is the one sentence that matters — which document is
+   next, and the arrow that goes to it. */
+#names-bar.onward .lb-decide, #names-bar.onward #nb-find { display: none; }
+#names-bar.onward .lb-type { background: #546e7a; }
 .revbar .rb-miss-row { border-top: 1px dashed var(--btn-border); padding-top: 4px; margin-top: 2px; }
 .revbar .rb-miss-row[hidden] { display: none; }
 /* The occurrence the walk is standing on, in the text. Orange like the leak
@@ -171,6 +185,11 @@ body {
 .revbar .lb-answer.undecided { color: var(--text-muted); }
 .revbar #lb-typed { flex: 1; min-width: 200px; background: var(--inset); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 3px 6px; font-size: 12px; }
 /* The row's value wherever it stands in the text, and the one the bar scrolled to. */
+/* Find: every hit lightly, the one in front solidly — the marks a reader
+   expects from a find, in the accent rather than the review colours, so a
+   search never reads as a finding about the text. */
+::highlight(find) { background-color: rgba(26, 115, 232, 0.28); }
+::highlight(findhere) { background-color: rgba(26, 115, 232, 0.72); color: #fff; }
 ::highlight(leakrow) { background-color: rgba(230, 81, 0, 0.22); text-decoration: underline solid #e65100 2px; }
 /* The count of names standing in the clear is a control: it steps through
    them. Marked as one, and only while there are any. */
@@ -422,6 +441,13 @@ body.side-hidden #side { display: none; }
 .side-body li .tag.keep.settled { background: #2e7d32; }
 /* …and one still waiting on the folder being read: owed for now, and said to be. */
 .side-body li .tag.keep.pending { background: transparent; border: 1px solid var(--btn-border); color: var(--text-muted); }
+/* A document still carrying a real value: a name the key binds left in the
+   clear, or a flagged value the next run has yet to fake. The glyph, not a
+   pill — it sits beside the name and says "there is something here", and the
+   tooltip says what. */
+.side-body li .tag.alert { background: transparent; color: var(--note-strong); font-size: 12px; padding: 0 2px; }
+.side-body li.current .tag.alert { color: #ffd54f; }
+
 /* A document built ahead of the review, waiting off the page. */
 #docs-list li.ready::after { content: "\25CF"; margin-left: auto; flex: none; font-size: 9px; color: #2e7d32; }
 #docs-list li.ready.current::after { color: #fff; }

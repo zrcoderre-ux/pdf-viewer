@@ -708,6 +708,11 @@ export function isQuarantinedName(name) {
 }
 
 /** The pseudonym key by name — the macro's pattern plus Windows' copies. */
+/** A document's name as a reader says it: without the export's extension. */
+export function docLabel(name) {
+  return String(name == null ? "" : name).replace(/\.txt(\.LEAK)?$/i, "");
+}
+
 export function isKeyName(name) {
   return /^pseudonym[ _-]?key.*\.xlsx$/i.test(String(name == null ? "" : name).split(/[\\/]/).pop().trim());
 }
