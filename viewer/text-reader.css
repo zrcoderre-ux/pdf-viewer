@@ -217,7 +217,11 @@ body {
   position: absolute; top: calc(var(--toolbar-height) + var(--bar-h, 0px) + var(--offer-h, 0px)); bottom: var(--status-height); left: 0; right: 0;
   display: flex;
 }
-#stage { flex: 1; overflow-y: auto; overflow-x: auto; position: relative; }
+/* The reel hangs the previous document ABOVE the reading and puts the scroll
+   back by exactly what went in (reelPrepend). The browser's own scroll
+   anchoring would move it too — and not at all at the very top, where it is
+   suppressed — so the box is held still and the reel does the arithmetic. */
+#stage { flex: 1; overflow-y: auto; overflow-x: auto; position: relative; overflow-anchor: none; }
 
 /* ── the tools rail (left margin) ──────────────────────────────────────────
    The PDF viewer's Acrobat-style rail, carried over to the text reader: the
