@@ -1307,6 +1307,32 @@ function setDisplayName(raw, { definitive = true, origin = "source" } = {}) {
 }
 
 // Low-level paint: update toolbar + tab title to the given display name.
+// THE NAME A PRINT IS SAVED UNDER is the document's title, and the title
+// carries " — PDF Viewer", which is not part of any filename anybody wants.
+// For the length of the print it is the document's own name — and the SHELL's
+// too, where the viewer is an iframe in the hosted app and a print is a print
+// of the shell. Both are put back afterwards. (The reader does the same.)
+let titleBeforePrint = null;
+window.addEventListener("beforeprint", () => {
+  const name = (filenameEl && filenameEl.textContent || "").replace(/\.pdf$/i, "").trim();
+  if (!name) return;
+  titleBeforePrint = { self: document.title, top: null, had: false };
+  document.title = name;
+  try {
+    if (window.top !== window && window.top.document) {
+      titleBeforePrint.top = window.top.document.title;
+      titleBeforePrint.had = true;
+      window.top.document.title = name;
+    }
+  } catch { /* another origin above us: its own title stands */ }
+});
+window.addEventListener("afterprint", () => {
+  if (!titleBeforePrint) return;
+  document.title = titleBeforePrint.self;
+  if (titleBeforePrint.had) { try { window.top.document.title = titleBeforePrint.top; } catch { /* gone */ } }
+  titleBeforePrint = null;
+});
+
 // Used by setDisplayName and by applyNamingMode (which doesn't re-run
 // the simplification pipeline — the name is already simplified).
 function paintDisplayName(display) {

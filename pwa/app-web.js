@@ -46,6 +46,7 @@ function updateChrome() {
 
 function activate(id) {
   activeId = id;
+  syncShellTitle();
   for (const t of tabs) {
     const on = t.id === id;
     t.iframe.classList.toggle("active", on);
@@ -77,16 +78,34 @@ function setLabel(tab, text) {
   tab.btn.title = text;
 }
 
-// Reflect the viewer's document title (which tracks the PDF's name) onto the
-// tab label, live.
+// Reflect the viewer's document title (which tracks the document's name) onto
+// the tab label, live — and onto the SHELL's own title while that tab is the
+// one showing.
+//
+// The shell's title is not decoration. A print from inside an iframe is a
+// print of the top document, and the name the browser offers to save the PDF
+// under is that document's title — so with the shell stuck on "PDF Viewer"
+// every "Save as PDF" out of the reader or the viewer was called PDF Viewer,
+// whatever was open in it.
 function watchTitle(tab) {
   try {
     const doc = tab.iframe.contentDocument;
-    const apply = () => setLabel(tab, cleanTitle(doc.title));
+    const apply = () => {
+      setLabel(tab, cleanTitle(doc.title));
+      if (tab.id === activeId) syncShellTitle();
+    };
     apply();
     const titleEl = doc.querySelector("title");
     if (titleEl) new MutationObserver(apply).observe(titleEl, { childList: true });
   } catch { /* cross-origin or not ready — ignore */ }
+}
+
+/** The shell wears the open document's name; with nothing open, its own. */
+function syncShellTitle() {
+  const t = tabs.find((x) => x.id === activeId);
+  let name = "";
+  try { name = t ? cleanTitle(t.iframe.contentDocument.title) : ""; } catch { name = ""; }
+  document.title = name && name !== "PDF" ? name : "PDF Viewer";
 }
 
 function closeTab(id) {
@@ -102,7 +121,7 @@ function closeTab(id) {
   if (activeId === id) {
     const next = tabs[idx] || tabs[idx - 1];
     if (next) activate(next.id);
-    else activeId = null;
+    else { activeId = null; syncShellTitle(); }
   }
   updateChrome();
 }

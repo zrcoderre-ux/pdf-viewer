@@ -14,6 +14,7 @@
     <button id="open-folder" title="Open a case folder: its pseudonym key and every export under Text Files">📁 Open case folder</button>
     <button id="edit-toggle" title="Allow editing — a document opens protected; turn this on to type in it (the real names still never reach the file)" aria-pressed="false" disabled>✎ Edit</button>
     <button id="save" class="primary" title="Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)" disabled>💾 Save</button>
+    <button id="raw-btn" title="The file itself — what you would see opening it in Notepad. The pseudonyms as PDF-Linker wrote them, not the real names this reader shows; the page headers, the margin numbers and the spacing exactly as they sit on disk." disabled>📄 File as text</button>
     <button id="print-btn" title="Print the pages as they are shown, always in their pseudonyms — the printout carries the fakes whichever way Show fakes sits, and the document is left as it was; choose “Save as PDF” in the print dialog to keep a copy (Ctrl+P)">🖨 Print</button>
     <span class="spacer"></span>
 
@@ -106,6 +107,7 @@
         <option value="area">an area</option>
       </select>
       <button id="rb-scan" title="Mark every real value the key binds, wherever it stands — every page of the PDF, including the pages this export has no text for">Mark from key</button>
+      <button id="rb-check" title="Check the sweep against the export: PDF-Linker put a pseudonym wherever a real value stood, so the export knows where the values are even where the PDF's own text does not yield them. Walks what could not be placed.">Check against the export</button>
       <button id="rb-clear" class="secondary" title="Take every box back off">Clear</button>
       <button id="rb-close" title="Leave the tool (the boxes stay)">×</button>
     </div>
@@ -120,6 +122,20 @@
         <option value="300">300 dpi</option>
       </select>
       <button id="rb-save" class="danger" title="Save a flattened, redacted copy — a new file, never the PDF in the case folder">Save redacted copy…</button>
+    </div>
+    <!-- What the export says is there and the sweep could not find: the walk
+         that lets the operator check each one against the PDF by eye. -->
+    <div class="lb-row rb-miss-row" id="rb-miss-row" hidden>
+      <span class="lb-type miss">not found</span>
+      <span id="rb-miss-count" class="lb-count"></span>
+      <b id="rb-miss-value" class="lb-value" title="A value the export carries here that the sweep could not place on the PDF page"></b>
+      <span id="rb-miss-where" class="lb-where"></span>
+      <span class="spacer"></span>
+      <button id="rb-miss-prev" title="The one before it, up the document">‹</button>
+      <button id="rb-miss-next" title="The next one, down the document">›</button>
+      <button id="rb-miss-find" title="Scroll the text back to it — the PDF pane follows to the same page">Find in text</button>
+      <button id="rb-miss-done" class="primary" title="This one is dealt with — it is not on the PDF page, or you have just marked it by hand. Takes it off the list and moves on. An area drag on this page does the same by itself.">Accounted for</button>
+      <button id="rb-miss-close" title="Leave the review (the boxes stay)">×</button>
     </div>
   </div>
 
@@ -170,12 +186,13 @@
         <div class="tools-group-label">Review</div>
         <button id="flag-btn" class="tool-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead."><span class="ti">🚩</span><span class="tl">Flag real value</span></button>
         <button id="leaks-btn" class="tool-btn" title="Review PDF-Linker's LEAKS.xlsx row by row: each row shown above the text, the text opened at its page and line, the decision written into the worksheet's Fix? cell. The case folder's own worksheet is attached when the folder is opened; click to open it, or to load one."><span class="ti">⚠</span><span class="tl">Leaks</span><span id="leaks-count" class="badge" hidden>0</span></button>
-        <button id="autoscroll" class="tool-btn" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses" aria-pressed="false"><span class="ti">↓</span><span class="tl">Auto-scroll</span></button>
+        <button id="autoscroll" class="tool-btn" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses. The pace is a reading pace in words per minute: each page moves at the speed its own text needs, so a dense page goes slower than a caption page. A scroll of your own suspends it and it picks up again a second later; remembered between documents." aria-pressed="false"><span class="ti">↓</span><span class="tl">Auto-scroll</span></button>
         <label class="tool-btn tool-toggle" title="Read the words and nothing else: no marks over the text, no citation links, no PDF beside it, nothing read ahead. For a document too big for the rest of it, or a reader that will not answer."><input id="plain-toggle" type="checkbox"><span class="ti">📃</span><span class="tl">Plain reading</span></label>
 
         <div class="tools-group-label">PDF</div>
         <button id="sbs-toggle" class="tool-btn" title="Show the PDF this export came from beside the text, page for page, scrolling together (remembered)" aria-pressed="false" disabled><span class="ti">⇔</span><span class="tl">Side by side</span></button>
         <label class="tool-btn tool-toggle" title="Side by side, lay each text page on its PDF page's own geometry — the same sheet size, every numbered line at its number's height on the PDF, the PDF's own type sizes and leading — so line 7 stands beside line 7. The citation underlines are off while it is on, being strips measured off lines the grid has moved. Off (the default), the text reads exactly as it does with the pane closed, the links are drawn as usual, and only the scrolling is tied together (remembered)"><input id="grid-toggle" type="checkbox" disabled><span class="ti">▦</span><span class="tl">Match PDF grid</span></label>
+        <label class="tool-btn tool-toggle" title="Read the case folder ON: as the foot of this document comes into view the next export in the Documents list is read and hung underneath it, with a divider naming it, and so on down the folder — the effect of a Combined Text.txt without one existing. Each document still saves to its own file under its own name, and only the ones you edited are written. Off, a document ends where it ends (remembered)."><input id="reel-toggle" type="checkbox"><span class="ti">↧</span><span class="tl">Read folder on</span></label>
         <button id="swap-btn" class="tool-btn" title="Swap PDF pages into the text: read a page or a run of pages (a badly scanned exhibit) from the PDF, in place, while the rest stays text. For a Combined Text.txt, pick every member's PDF at once." disabled><span class="ti">⇄</span><span class="tl">PDF pages…</span></button>
         <button id="redact-btn" class="tool-btn" title="Redact the PDF beside the text: the key marks every real value it binds, wherever it stands in the PDF, and a drag marks the rest. Saves a flattened copy with it blacked out — never the PDF in the case folder." aria-pressed="false" disabled><span class="ti">▬</span><span class="tl">Redact PDF</span></button>
       </div>
@@ -242,6 +259,19 @@
     </aside>
   </div>
 
+  <!-- The auto-scroll pill: the pace, where the reading is. It floats over the
+       text because that is where the eye is, and it is dragged out of the way
+       of whatever it covers — the spot is remembered. -->
+  <div id="as-pill" hidden>
+    <span class="asp-grip" title="Drag the pill out of the way — where you leave it is remembered" aria-hidden="true">⠿</span>
+    <button id="asp-play" type="button" title="Pause (Space)" aria-label="Pause auto-scroll">❙❙</button>
+    <button id="asp-slower" type="button" title="Slower ([)" aria-label="Slower">−</button>
+    <input id="asp-speed" type="range" min="80" max="700" step="10" value="250" aria-label="Reading speed in words per minute">
+    <button id="asp-faster" type="button" title="Faster (])" aria-label="Faster">+</button>
+    <span id="asp-wpm" class="asp-wpm">250 wpm</span>
+    <button id="asp-close" type="button" title="Turn auto-scroll off (A)" aria-label="Turn auto-scroll off">×</button>
+  </div>
+
   <div id="statusbar">
     <span id="st-file">No document</span>
     <span id="st-key"></span>
@@ -276,6 +306,25 @@
     <div class="sp-actions"><button id="pdf-pick" class="secondary" title="Choose the PDF by hand — for a combined file, select every member's PDF at once and each is matched to its document">Pick PDFs…</button><button id="swap-close" class="secondary">Close</button></div>
     <p class="sp-note" id="swap-pop-note"></p>
   </div>
+  <!-- The file as it is on disk. The reader shows the REAL names over the
+       fakes and lays the lines out as sheets, which is the whole point of it
+       and also the reason it is worth being able to see what is actually in
+       the file — the pseudonyms, the page headers, the gutter spacing. -->
+  <div id="raw-modal" hidden>
+    <div class="raw-panel" role="dialog" aria-modal="true" aria-labelledby="raw-title">
+      <div class="raw-head">
+        <b id="raw-title"></b>
+        <span id="raw-note" class="raw-note"></span>
+        <span class="spacer"></span>
+        <label class="raw-wrap" title="Notepad opens with wrapping off, and so does this: a long line runs past the edge and is scrolled to."><input id="raw-wrap" type="checkbox"> Wrap lines</label>
+        <button id="raw-copy" title="Copy the whole file to the clipboard, pseudonyms and all">Copy</button>
+        <button id="raw-close" title="Close (Esc)">×</button>
+      </div>
+      <pre id="raw-text" tabindex="0"></pre>
+      <div class="raw-foot" id="raw-foot"></div>
+    </div>
+  </div>
+
   <div id="pn-tip" hidden></div>
   <div id="type-tip" hidden></div>
   <div id="toast" hidden></div>

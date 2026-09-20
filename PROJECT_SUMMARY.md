@@ -780,6 +780,107 @@ view, so the store — not the DOM — is where a box lives). While the tool mar
 areas the reader's own selection drag stands down on the pane, and the boxes
 take the pointer only while the tool is on.
 
+## Checking a redaction against the export (`text-reader.js`)
+
+The sweep's blind spot is that it reads the PDF's text layer, which is not a
+transcript — ligatures, line-broken names, OCR spellings, and anything that is
+not text at all (a signature, a letterhead, a scan). A miss leaves no trace, so
+the feature is not "find more boxes", it is "say what was not found".
+
+`claimsFromExport()` reads every `.pn` span on every text page that maps to a
+PDF page (`pdfTarget`) — a name wrapped across lines is several spans and ONE
+claim, so only `data-piece` "1/n" counts — and keys them
+`pdf|page|fold(real)`. `boxesFromSweep()` counts the `kind: "key"` boxes the
+same way. `redactionShortfall()` is the difference, in reading order.
+
+Three decisions worth keeping:
+
+- **It proposes no boxes.** The export knows the page, not the place: its text
+  is its own layout, not the PDF's geometry. A guessed box over the wrong words
+  would be worse than none, so the walk hands the question to the operator with
+  the text and the PDF page side by side.
+- **A short claim walks ALL its occurrences.** Where a value is claimed twice
+  on a page and boxed once, which of the two went unboxed is not knowable from
+  here, so both are shown with "the export has it 2 times here, the sweep
+  boxed 1".
+- **An area drag on the walked page answers it** (`missAnsweredByBox`) — that
+  is the gesture the walk exists to prompt, and asking for a second click to
+  confirm would be asking twice. `Accounted for` covers the other good answer,
+  that the value is not on that page at all. Both last as long as the marks do;
+  a fresh sweep asks again.
+
+The redaction tool keeps the whole reel live while it is open (`reelTrim`
+skips, `reelAllLive` on open): a shed page carries no pseudonyms, and a claim
+that cannot be read is a claim that would silently go unchecked.
+
+## The reel: the case folder read as one document (`text-reader.js`)
+
+`doc.pages` is the whole reel, page after page, exactly as a combined file's
+pages would be — that is the load-bearing choice. Everything that reads a page
+by its index (the PDF pane, the citations, the rules, the leak rows, the spot
+keeps) goes on working without knowing there is more than one file in it, and
+`reel` — `[{ name, handle, newline, trailingNewline, from, count, dirty,
+spots }]` — is the only thing that does.
+
+- **Appending never moves an index.** A member's pages are concatenated onto
+  the end, so every index already handed out stays what it was. This is why
+  trimming a member off the front is NOT implemented as removing its pages:
+  that would shift every index below it. If the DOM ever needs dropping for
+  memory, drop the DOM and keep a spacer — leave `doc.pages` alone.
+- **`docMembers()` / `docPageSources()`** are the two accessors the rest of the
+  reader goes through. They answer from the reel when it has members and from
+  the combined-file banners otherwise, which is how the pane, the pickers and
+  the review became reel-aware in one move.
+- **Never off a `Combined Text.txt`** (`reelOn`): that file already holds every
+  export, so hanging the folder's exports under it is the case read twice.
+- **Saving is one file per member** (`memberDoc`). What is written is what was
+  edited: `setDirty(true, pageIndex)` marks the member holding the edited page,
+  and every call site passes its own `body`'s index so an edit near a divider
+  is filed against the page it was made in rather than the reading line. The
+  standing "no real value may be written" assertion runs **per file, before any
+  file is written**, so one member being clean can never let another out.
+- **`REEL_MAX = 25`.** A folder can hold three hundred exports; read end to end
+  that is a tab that stops answering. The ceiling degrades into a message.
+
+## The reader's auto-scroll (`text-reader.js`, "auto-scroll while reading")
+
+The same engine `viewer/autoscroll.js` runs for the viewer, rebuilt around
+`#stage` instead of the window and around a text page instead of a rendered
+one. It replaced a px/s counter that stepped in whole pixels and turned itself
+off on the first wheel notch. The parts that carry their weight:
+
+- **The pace is wpm; the pixels are derived.** Each `.tpage`'s density — its
+  words per rendered pixel — is measured from the DOM, and the speed under the
+  reading line is `(wpm / 60) / density`. Because the density is measured in
+  the pixels the layout actually uses, the zoom, the leading, the page width
+  and the PDF grid need no special handling at all.
+- **Words come from the parsed export, not the DOM.** `doc.pages[i].lines`
+  with `TD.gutterPrefix` stripped. The DOM's own text carries the pleading
+  numbers down the margin — twenty-eight "words" a page nobody reads, which
+  would run the creep about a third too fast on every pleading page.
+- **A near-empty page is crossed, not flown past.** The viewer guards against
+  un-OCR'd scans by reading any page under 25 words at the document average;
+  the reader has no such uncertainty (a caption page really does hold nine
+  words), so it uses the real count with a `MIN_PAGE_WORDS` floor, and the
+  ceiling is a SCREEN figure — `clientHeight / MAX_SCREEN_SECONDS` — rather
+  than a pixel one, so "fast" means the same on any window.
+- **Manual scroll suspends; it does not stop.** The reliable signal is not the
+  event but `autoWritten`: the tick compares `scrollTop` against the integer
+  it last wrote, so the scrollbar, a find, a leak row being scrolled to, and
+  the PDF pane pulling the text along beside it are all caught without a
+  listener each. `autoBusy()` is the indefinite hold (selection, keep menu,
+  swap popup, the LEAKS and names bars, the redaction tool); the resume asks it
+  again rather than timing out.
+- **Sub-pixel motion is snapped to the device grid.** Whole pixels to
+  `scrollTop`, the remainder to a transform on `#pages`. Free-floating would
+  resample the type onto a half pixel and leave it soft — the same reason the
+  viewer snaps. Writing the same integer twice fires no scroll event, so the
+  PDF pane's own sync runs at the stepping rate, not once a frame.
+
+`autoRemeasure()` is the one hook the rest of the reader needs: `afterTextChange`
+and `relayout` call it (the pages moved), and `render`/`showPages` call it with
+`newDoc` (the words changed too).
+
 ## Keeps that ask nothing of PDF-Linker (`textdoc.keepNeedsRun`)
 
 A keep says *do not fake this value*. Where the run **faked** it, only

@@ -70,6 +70,7 @@ const markColorEl = $("mark-color");
 const markAlphaEl = $("mark-alpha");
 const fakesToggle = $("fakes-toggle");
 const gridToggle = $("grid-toggle");
+const reelToggle = $("reel-toggle");
 const providerEl = $("provider");
 const docsList = $("docs-list");
 const docsHint = $("docs-hint");
@@ -467,6 +468,7 @@ function applySettings() {
   marksToggle.checked = settings.marks;
   fakesToggle.checked = settings.showFakes;
   gridToggle.checked = settings.matchGrid;
+  reelToggle.checked = settings.reel !== false;
 }
 
 for (const p of TD.FONT_PRESETS) {
@@ -544,6 +546,12 @@ fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.
 // by side without it is the PDF beside the text, scrolling together, the text
 // exactly as it reads with the pane closed. applyMatchedLayout lifts the grid
 // the moment this goes off, the way closing the pane does.
+reelToggle.addEventListener("change", () => {
+  settings.reel = reelToggle.checked;
+  saveSettings();
+  if (settings.reel) { reelDone = false; reelMaybeExtend(); }
+  else toast("The reel is off — this document ends where it ends. What is already hanging off it stays until the next one is opened.");
+});
 gridToggle.addEventListener("change", () => {
   settings.matchGrid = gridToggle.checked;
   saveSettings(); applySettings();
@@ -615,15 +623,48 @@ function pagesBackAfterPrint() {
 // The sheets keep their screen width in print, so nothing re-wraps, and the
 // widest one is zoomed to the paper's printable width (letter and A4 alike) —
 // measured after the names are swapped, that being what goes to paper.
+// THE NAME THE PRINT IS SAVED UNDER is the document's title, so for the length
+// of the print the title is the document's own name and nothing else.
+//
+// Two things were wrong with it. The reading title carries " — Text Reader",
+// which is not part of any filename anybody wants; and in the hosted app the
+// reader is an iframe, where a print is a print of the SHELL — whose title was
+// the app's name, so every "Save as PDF" came out called PDF Viewer whatever
+// was open. The shell is same-origin, so it is told too, and both are put back
+// afterwards.
+//
+// The stem, not the file name: the browser appends ".pdf", and
+// "Rasho v Quillmark - MTC.txt.pdf" is a filename with a lie in the middle.
+let titleBeforePrint = null;
+function printTitle() {
+  const m = typeof reelCurrent === "function" ? reelCurrent() : null;
+  const n = (m && m.name) || fileName || "document";
+  return n.replace(/\.txt(\.LEAK)?$/i, "").trim() || "document";
+}
 window.addEventListener("beforeprint", () => {
   fakesForPrint();
   let w = 0;
   for (const t of pagesEl.querySelectorAll(".tpage")) w = Math.max(w, t.offsetWidth);
   document.documentElement.style.setProperty("--print-zoom", String(w > PRINT_WIDTH_PX ? PRINT_WIDTH_PX / w : 1));
+  const name = printTitle();
+  titleBeforePrint = { self: document.title, top: null, had: false };
+  document.title = name;
+  try {
+    if (window.top !== window && window.top.document) {
+      titleBeforePrint.top = window.top.document.title;
+      titleBeforePrint.had = true;
+      window.top.document.title = name;
+    }
+  } catch { /* another origin above us: its own title stands */ }
 });
 window.addEventListener("afterprint", () => {
   document.documentElement.style.removeProperty("--print-zoom");
   pagesBackAfterPrint();
+  if (titleBeforePrint) {
+    document.title = titleBeforePrint.self;
+    if (titleBeforePrint.had) { try { window.top.document.title = titleBeforePrint.top; } catch { /* gone */ } }
+    titleBeforePrint = null;
+  }
 });
 
 // ── theme (shared with the PDF viewer) ───────────────────────────────────────
@@ -1250,6 +1291,10 @@ function openText(text, name, handle, built) {
   doc = built ? built.doc : TD.parseExport(text);
   fileName = name;
   fileHandle = handle;
+  // A document opened is the head of a new reel, whatever was hanging off the
+  // last one. `doc.pages` grows from here as the folder is read on.
+  reelReset(doc, name, handle, []);
+  reelJustOpened = true;
   dirty = false;
   editing = false;
   typeDismissed = null;
@@ -1262,6 +1307,7 @@ function openText(text, name, handle, built) {
   if (!leakJump) showNamesBar(false); // …unless the walk is what opened it
   if (!dirHandle) loadValuesFor(name);
   spots = TD.normalizeSpots(lsGet(spotStoreKey(), []));
+  if (reel[0]) reel[0].spots = spots;
   // A document built ahead of time goes up as it stands, unless its spot keeps
   // have moved since it was built — then its pages are built again from the
   // parse, which is already in hand.
@@ -1270,7 +1316,7 @@ function openText(text, name, handle, built) {
   else render();
   setupPdfForDoc();
   markDocList();
-  $("st-file").textContent = name + (TD.isQuarantinedName(name) ? " (quarantined by PDF-Linker's leak gate)" : "") + " · " + doc.pages.length + " page" + (doc.pages.length === 1 ? "" : "s");
+  renderReelState();
   // A keep taken because one document carried the value in the clear is read
   // again against this one: a folder's keeps are the case's, and a pseudonym
   // standing anywhere in it is a run the case folder is owed after all.
@@ -1494,6 +1540,7 @@ function render() {
   during("building the document's pages", () => buildPages(pagesEl, doc.pages, { editable: editing }));
   stageEl.scrollTop = 0;
   afterTextChange();
+  autoRemeasure({ newDoc: true });
 }
 /** The keeps as they stand, so a built document can tell whether they have moved. */
 function keepsSignature() { return allKeeps().map((k) => k.control + ":" + k.value).join("|"); }
@@ -1522,6 +1569,7 @@ function showPages(nodes, built) {
   pagesEl.appendChild(nodes);
   stageEl.scrollTop = 0;
   afterTextChange();
+  autoRemeasure({ newDoc: true });
 }
 
 /**
@@ -1727,10 +1775,13 @@ function afterTextChange() {
   // The marks catch up the moment the reader stops.
   textEpoch++;
   paintHighlights();
+  // The pages are where they are now: auto-scroll takes its pace from them
+  // again rather than from the layout it started under.
+  autoRemeasure();
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
 const placeCitationsSoon = debounce(() => placeCitations(), 450);
-const relayout = debounce(() => { syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); }, 150);
+const relayout = debounce(() => { reelAllLive(); syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); autoRemeasure(); reelTrimSoon(); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -1750,17 +1801,52 @@ pagesEl.addEventListener("input", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body) return;
   normalizeLines(body);
-  setDirty(true);
+  setDirty(true, pageIndexOf(body));
   offerAtCaret(body);
   convertTypedRealsSoon(body);
   afterTextChangeSoon();
 });
 
-function setDirty(on) { if (dirty !== on) { dirty = on; updateDirty(); } }
+function setDirty(on, pageIndex) {
+  // A reel holds several files: the edit is the business of the one whose page
+  // it was made in, and a save writes that file and not the rest.
+  if (on) reelMarkDirty(pageIndex);
+  else for (const m of reel) m.dirty = false;
+  if (dirty !== on) { dirty = on; updateDirty(); }
+}
+/**
+ * What a save would write besides the text, as names.
+ *
+ * A save is not only the document. Flagging a value the run missed, keeping
+ * one it wrongly faked, answering a row of the LEAKS worksheet — each is a
+ * decision that lives in the browser until it is written into the case folder,
+ * and each is work PDF-Linker's next run will not see until it is. None of
+ * them touches the text, so none of them makes the document dirty, and 💾 Save
+ * used to sit greyed out over a whole review's worth of them — a state where
+ * the button says there is nothing to save and there is.
+ */
+function pendingWrites() {
+  const out = [];
+  if (valuesDirty()) out.push(TD.VALUES_FILE);
+  if (leaksDirty()) out.push(leaks ? leaks.name : "LEAKS.xlsx");
+  return out;
+}
 function updateDirty() {
-  saveBtn.disabled = !doc || !(editing || dirty);
+  const pending = pendingWrites();
+  // Enabled whenever a save would DO something: the text edited, the document
+  // unlocked for editing, or a decision waiting to be written into the folder.
+  saveBtn.disabled = !doc || !(editing || dirty || pending.length);
+  saveBtn.title = dirty || editing
+    ? "Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)" +
+      (pending.length ? ` · ${pending.join(" and ")} too` : "")
+    : pending.length
+      ? `Write ${pending.join(" and ")} into the case folder (Ctrl+S) — the text is unchanged and is not rewritten`
+      : "Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)";
   $("edit-toggle").disabled = !doc;
-  $("st-dirty").textContent = dirty ? "● Unsaved edits" : (doc && !editing ? "Protected — ✎ Edit to change" : "");
+  rawBtn.disabled = !doc;
+  $("st-dirty").textContent = dirty ? "● Unsaved edits"
+    : pending.length ? "● " + pending.join(" and ") + " to write"
+    : (doc && !editing ? "Protected — ✎ Edit to change" : "");
 }
 
 // ── edit protection ────────────────────────────────────────────────────────────────
@@ -1943,7 +2029,7 @@ function enterAtCaret(body, { snap = true } = {}) {
   dressBody(body);
   fixGutterSpacing(body);
   placeCaret(ltOf(target), 0);
-  setDirty(true);
+  setDirty(true, pageIndexOf(body));
   afterTextChange();
   return true;
 }
@@ -2007,7 +2093,7 @@ function insertLinesAtCaret(body, pieces) {
   fixGutterSpacing(body);
   if (caretNode) placeCaret(caretNode, caretNode.data.length);
   else if (caretSlot) placeCaret(ltOf(caretSlot), 0);
-  setDirty(true);
+  setDirty(true, pageIndexOf(body));
   afterTextChange();
   return true;
 }
@@ -2038,7 +2124,7 @@ function joinLineUp(body, line) {
   fixGutterSpacing(body);
   const at = pointAtOffset(plt, joinAt);
   placeCaret(at.node, at.offset);
-  setDirty(true);
+  setDirty(true, pageIndexOf(body));
   afterTextChange();
   return true;
 }
@@ -2180,7 +2266,7 @@ function acceptTyped(tail) {
   if (!after || after.nodeType !== 3) { after = document.createTextNode(""); pn.after(after); }
   if (tail) after.insertData(0, tail);
   placeCaret(after, tail.length);
-  setDirty(true);
+  setDirty(true, pageIndexOf(body));
   afterTextChange();
   toast(`Marked as ${pn.dataset.fake} — the file carries the pseudonym`);
   return true;
@@ -2281,7 +2367,7 @@ function snapshot(body, force) {
   lastSnapAt = now; lastSnapPage = i;
 }
 function restoreSnapshot(snap) {
-  const body = pageBodies()[snap.page];
+  const body = bodyForPage(snap.page);
   if (!body) return;
   convertTypedRealsSoon.cancel();
   hideTypeTip();
@@ -2297,13 +2383,13 @@ function restoreSnapshot(snap) {
     try { const r = document.createRange(); r.setStart(at.node, at.offset); r.collapse(true); const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(r); } catch { /* the caret is simply not restored */ }
   }
   body.focus({ preventScroll: true });
-  setDirty(true);
+  setDirty(true, pageIndexOf(body));
   afterTextChange();
 }
 function undo() {
   const snap = undoStack.pop();
   if (!snap) return;
-  const body = pageBodies()[snap.page];
+  const body = bodyForPage(snap.page);
   if (body) redoStack.push(snapshotOf(body));
   restoreSnapshot(snap);
   lastSnapPage = -1;
@@ -2311,7 +2397,7 @@ function undo() {
 function redo() {
   const snap = redoStack.pop();
   if (!snap) return;
-  const body = pageBodies()[snap.page];
+  const body = bodyForPage(snap.page);
   if (body) undoStack.push(snapshotOf(body));
   restoreSnapshot(snap);
   lastSnapPage = -1;
@@ -2393,14 +2479,25 @@ function plainSegments(body) {
 }
 
 // ── saving ─────────────────────────────────────────────────────────────────────────
+//
+// ONE FILE PER MEMBER. A reel is several documents read as one, and it is never
+// written as one: each member's own pages are serialized on their own and go
+// back through that member's own handle, under its own name. What is written is
+// what was EDITED — a document scrolled past and not typed in is not rewritten,
+// so reading forty documents does not put forty files' timestamps through a
+// review that changed one line of one of them. A save with nothing edited at
+// all still writes the document being read, which is what Ctrl+S has always
+// meant for a document on its own.
 async function saveDocument() {
   if (!doc) return;
   let forwarded = 0;
-  const bodies = pageBodies();
   // Each page as it will be written, and the same text with its spot keeps
   // blanked — what the standing assertion below is allowed to look at.
   const scan = [];
-  bodies.forEach((body, i) => {
+  // The members the forward pass changed, on top of the ones already edited.
+  const touched = new Set();
+  for (const body of pageBodies()) {
+    const i = pageIndexOf(body);
     let { text, held } = TD.serializeHeld(body);
     if (fwd && fwd.rx) {
       const fw = forwardText(text, held);
@@ -2409,28 +2506,48 @@ async function saveDocument() {
         forwarded += fw.swaps;
         buildBody(body, fw.text, i);
         ({ text, held } = TD.serializeHeld(body)); // the rebuilt page, its spots found again
+        touched.add(reelMemberOf(i));
       }
     }
     doc.pages[i].lines = text.split("\n");
     scan[i] = TD.blankRanges(text, held).split("\n");
-  });
-  const out = TD.serializeExport(doc);
-  // The standing assertion. Nothing above should let a bound real value
-  // through, and if something did the save must not. A value kept where it
-  // stands is the one thing that may: it is in the file because the operator
-  // put it there, so the assertion reads the export with those places blanked.
+  }
+  let write = reel.filter((m) => m.dirty || touched.has(m));
+  // Nothing about the TEXT changed. If the save was asked for because a flag,
+  // a keep or a worksheet row is waiting, write those and leave every file's
+  // bytes and timestamp alone; only an otherwise-empty Ctrl+S falls through to
+  // rewriting the document being read, which is what it has always meant.
+  if (!write.length && !pendingWrites().length && reelCurrent()) write = [reelCurrent()];
+  // The standing assertion, per file. Nothing above should let a bound real
+  // value through, and if something did the save must not — and it must not
+  // write any of the others on the strength of this one being clean, so every
+  // file about to be written is read first and one failure stops the lot. A
+  // value kept where it stands is the one thing that may pass: it is in the
+  // file because the operator put it there, so the assertion reads the export
+  // with those places blanked.
   if (reals) {
-    const held = TD.serializeExport(Object.assign({}, doc, {
-      pages: doc.pages.map((p, i) => Object.assign({}, p, { lines: scan[i] || p.lines })),
-    }));
-    const left = PK.findReals(reals, TD.blankRanges(maskKept(held), TD.citedNameSpans(held)));
-    if (left.length) {
-      toast("Not saved: the text still carries a real name the key binds — " + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again.", { error: true });
-      return;
+    for (const m of write) {
+      const held = TD.serializeExport(memberDoc(m, (p, i) => Object.assign({}, p, { lines: scan[i] || p.lines })));
+      const left = PK.findReals(reals, TD.blankRanges(maskKept(held), TD.citedNameSpans(held)));
+      if (left.length) {
+        toast(`Not saved: ${m.name} still carries a real name the key binds — ` + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again.", { error: true });
+        return;
+      }
     }
   }
-  const ok = await writeText(out, fileName, fileHandle, { adopt: true });
-  if (!ok) return;
+  const wrote = [];
+  for (const m of write) {
+    const ok = await writeText(TD.serializeExport(memberDoc(m)), m.name, m.handle, { adopt: reel.length === 1 });
+    if (!ok) {
+      if (wrote.length) toast(`Saved ${wrote.join(", ")} — ${m.name} was not written.`, { error: true });
+      return;
+    }
+    m.dirty = false;
+    wrote.push(m.name);
+    // The save wrote every name that was standing in the clear in this one, so
+    // the folder's answer for that document is that it has none.
+    sweep.rows = sweep.rows.filter((r) => r.doc.handle !== m.handle);
+  }
   setDirty(false);
   // THE LIST GOES WITH IT. The flags and keeps are half of the same decision
   // the document carries — a value kept is a value this save left standing —
@@ -2456,17 +2573,32 @@ async function saveDocument() {
       ? ` · ${leaks.name} written too (${n} decision${n === 1 ? "" : "s"})`
       : " · the LEAKS decisions are still unwritten — save them from the ⚠ Leaks bar";
   }
-  // The save wrote every name that was standing in the clear here, so the
-  // folder's answer for this document is that it has none.
-  sweep.rows = sweep.rows.filter((r) => r.doc.handle !== fileHandle);
   if (forwarded) afterTextChange();
-  toast("Saved " + fileName + (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList);
+  updateDirty();
+  toast(!wrote.length
+    ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : "Nothing to save.")
+    : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + wrote.join(", ") +
+      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList);
 }
 saveBtn.addEventListener("click", saveDocument);
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveDocument(); }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); flagSelection(); }
 });
+
+/**
+ * One member as a document in its own right: its own newline and its own
+ * trailing newline, and its own run of pages out of the reel. `map` is for the
+ * save's standing assertion, which reads the same pages with the spot keeps
+ * blanked.
+ */
+function memberDoc(m, map) {
+  const pages = doc.pages.slice(m.from, m.from + m.count);
+  return {
+    newline: m.newline, trailingNewline: m.trailingNewline,
+    pages: map ? pages.map((p, i) => map(p, m.from + i)) : pages,
+  };
+}
 
 /**
  * Write text: in place through the handle, else the Save picker, else a
@@ -3120,6 +3252,7 @@ function stepLeak(dir = 1) {
 const namesBar = $("names-bar");
 function showNamesBar(on) {
   const was = !namesBar.hidden;
+  if (on && !was) reelAllLive(); // the walk looks at every page of the reel
   namesBar.hidden = !on;
   setBarHeight();
   if (was !== !!on) relayout();
@@ -3672,7 +3805,7 @@ function undoSpotHere(span) {
 }
 function afterSpotChange(body, real, { undone = false } = {}) {
   syncSpots(body);
-  setDirty(true);
+  setDirty(true, pageIndexOf(body));
   afterTextChange();
   renderFlags();
   toast(undone
@@ -3934,6 +4067,7 @@ function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagge
 function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps }); }
 
 function renderFlags() {
+  updateDirty(); // a flag, a keep or one of them written is a save's business
   flagsList.innerHTML = "";
   flagCount.textContent = String(flagged.length + keeps.length + spots.length);
   renderSpots();
@@ -4068,7 +4202,7 @@ function renderSpots() {
  * the document gives them, so one list indexes the other.
  */
 function spanForSpot(sp) {
-  const body = pageBodies()[sp.page];
+  const body = bodyForPage(sp.page);
   if (!body) return null;
   const at = spotsFromBody(body, sp.page).findIndex((x) => TD.sameSpot(x, sp));
   if (at < 0) return null;
@@ -4290,6 +4424,7 @@ if (typeof ResizeObserver !== "undefined") {
 }
 function showLeaksBar(on) {
   const was = !leaksBar.hidden;
+  if (on && !was) reelAllLive(); // the walk looks at every page of the reel
   leaksBar.hidden = !on;
   setBarHeight();
   updateLeaksButton();
@@ -4401,6 +4536,7 @@ function paintLeakRow(i) {
 }
 /** The hint, the note and the save button — what every decision changes. */
 function renderLeaksTabState() {
+  updateDirty(); // an answered row is a save's business too
   const rows = leakRows();
   $("leaks-hint").textContent = leaks
     ? `${leaks.name}${leaks.folder ? " · " + leaks.folder : ""} · ${rows.length} row${rows.length === 1 ? "" : "s"}, ${LK.undecidedCount(rows)} to answer. Click a row: the text opens at it.`
@@ -4507,7 +4643,7 @@ async function locateLeak(row) {
       if (e) { target = folderDocs.find((d) => d.name === e); break; }
     }
     // A combined file already open holds every member: stay in it.
-    if (target && doc && PS.combinedMembers(doc.pages).some((m) => here(m))) target = null;
+    if (target && doc && docMembers().some((m) => here(m))) target = null;
   }
   if (target && target.name !== fileName) {
     // openFile asks about unsaved edits; a refusal leaves the open document.
@@ -4524,7 +4660,7 @@ async function locateLeak(row) {
   // under the row's own member in a combined file), on the line it names
   // where the page carries gutter numbers, else the first anywhere.
   const wheres = LK.parseWhere(row.where);
-  const members = PS.pageSources(doc.pages, fileName);
+  const members = docPageSources();
   const memberOk = (i) => !files.length || here(members[i]) || members[i] === fileName;
   let best = null, bestScore = -1;
   for (const hit of leakRowRanges) {
@@ -4763,48 +4899,997 @@ document.addEventListener("keydown", (e) => {
 
 // ── auto-scroll while reading ────────────────────────────────────────────────────────
 //
-// The PDF viewer's creep, for the reader's own scroll box: A toggles it,
-// [ and ] slow and speed it, Space pauses; the pace is remembered. Stops at
-// the foot of the document and on any wheel or drag by the reader.
+// The Inbox Cleaner reader's creep, for the reader's own scroll box — the same
+// engine the PDF viewer carries (viewer/autoscroll.js), rebuilt around #stage
+// rather than the window, and around a text page rather than a rendered one.
+//
+// THE PACE IS A READING PACE, not a pixel speed. What a reader sets is words
+// per minute, and the pixels follow from the page: a page of a dense
+// block-quoted brief and a page of a caption with six lines on it have to move
+// at very different speeds to be read at the same pace, and a filing is full of
+// both. So each page's own DENSITY — the words it holds per rendered pixel — is
+// measured, and the speed under the reading line is (wpm / 60) / density. It
+// falls out of that arithmetic that the zoom, the leading, the page width and
+// the PDF grid all take care of themselves: they change the pixels a page
+// takes, the density is measured in those pixels, and the pace stays what was
+// asked for.
+//
+// A MANUAL SCROLL IS NOT A STOP. Reading is not one-directional — a name is
+// checked three lines back, a wheel notch overshoots — and the old creep
+// treated every one of those as "turn it off", so the reader reached for the
+// keyboard again each time. A scroll SUSPENDS it now, and it comes back on its
+// own about a second after the scrolling settles, from wherever the reader left
+// the page. Space is the pause that sticks.
+//
+// AND IT YIELDS TO ANYTHING THE READER IS IN THE MIDDLE OF: a selection being
+// held (a value about to be flagged), a keep menu or a swap popup open over the
+// text. The page never slides out from under a decision.
+//
+// SMOOTHNESS. At a reading pace this is ten or twenty pixels a second, and
+// scrollTop only moves in whole ones — which at that speed is a visible
+// ratchet. The whole pixels go to scrollTop and the remainder is carried by a
+// transform on the page column, snapped to the DEVICE pixel grid so the type is
+// never resampled onto a half pixel and left soft: half-steps on a HiDPI
+// screen, and on a 1x screen exactly the stepping there would have been anyway.
 const autoBtn = $("autoscroll");
-let autoOn = false, autoSpeed = lsGet("textReader.autoscroll", 40), autoLast = 0, autoAcc = 0, autoRaf = 0;
-function autoStep(ts) {
-  if (!autoOn) return;
-  if (autoLast) {
-    autoAcc += (autoSpeed * (ts - autoLast)) / 1000;
-    const px = Math.floor(autoAcc);
-    if (px > 0) { stageEl.scrollTop += px; autoAcc -= px; }
-    if (stageEl.scrollTop + stageEl.clientHeight >= stageEl.scrollHeight - 1) { setAutoScroll(false); return; }
-  }
-  autoLast = ts;
-  autoRaf = requestAnimationFrame(autoStep);
+
+const AUTO_WPM_KEY = "textReader.autoWpm";
+const AUTO_ON_KEY = "textReader.autoOn";
+const MIN_WPM = 80, MAX_WPM = 700, WPM_STEP = 25;
+// The slowest it will go. A page dense enough to want less than this is being
+// read a little faster than asked rather than appearing frozen — and ] is
+// there for a reader who meant it.
+const MIN_PX_PER_SEC = 4;
+// …and the fastest, which is not a pixel figure but a SCREEN figure: however
+// little a page holds, it may not go by faster than a reader can see it go by,
+// and what "a screenful" is depends on the window.
+const MAX_SCREEN_SECONDS = 1.5;
+// A page holds at least this much attention whatever its word count says. A
+// banner, a caption, a combined file's list of its own documents: little to
+// read, still a page you look at rather than one to be teleported through.
+const MIN_PAGE_WORDS = 8;
+// What a page is taken to hold where its words cannot be counted at all,
+// divided by that page's own rendered height so the guess tracks the layout.
+const ASSUMED_WORDS_PER_PAGE = 350;
+// How far down the box the reading line sits: the page under it sets the pace.
+const READING_LINE = 0.45;
+// A frame longer than this (a citation pass, a garbage collection, a tab
+// switch) is capped, so the document does not lurch when the clock catches up.
+const MAX_FRAME_MS = 48;
+// Quiet after the last manual scroll before the creep takes back over. Long
+// enough that a run of wheel notches and the trackpad momentum after them read
+// as one gesture rather than a dozen.
+const RESUME_DELAY_MS = 1200;
+
+let autoOn = false;        // the mode itself, remembered between documents
+let autoPaused = false;    // Space: an explicit pause, which does not time out
+let autoSuspended = false; // a manual scroll, which does
+let autoWpm = 250;
+let autoRaf = 0, autoLast = 0;
+let autoPos = 0;           // the fractional position the engine drives
+let autoWritten = null;    // …and the whole one it last wrote, for the backstop
+let autoResume = 0;
+let autoPxPerSec = 0;      // eased toward the target, so a page change is not a gear change
+let autoFrac = 0;          // the sub-pixel remainder the transform is carrying
+let autoMetrics = null;    // [{ top, bottom, density }] down the document
+let autoWords = null;      // { doc, counts } — the words each page holds
+
+// Remembered, and the mode with it: turning it on is arming a reading
+// session, not a document, so the next export opens already moving.
+{
+  const w = lsGet(AUTO_WPM_KEY, 0);
+  if (typeof w === "number" && w >= MIN_WPM && w <= MAX_WPM) autoWpm = w;
+  autoOn = lsGet(AUTO_ON_KEY, false) === true;
 }
+
+const autoMax = () => Math.max(stageEl.scrollHeight - stageEl.clientHeight, 0);
+
+// ── how many words a page holds ──
+//
+// Counted off the parsed export rather than the DOM: the model is already in
+// hand, a page of it is a handful of strings, and the DOM's own text carries
+// the gutter numbers down a pleading margin — twenty-eight "words" a page that
+// nobody reads and that would have the creep run a third too fast.
+function wordCounts() {
+  if (autoWords && autoWords.doc === doc) return autoWords.counts;
+  const counts = (doc ? doc.pages : []).map((p) => {
+    let n = 0;
+    for (const line of p.lines || []) {
+      const g = TD.gutterPrefix(line);
+      const text = g ? g.rest : line;
+      for (const w of String(text).trim().split(/\s+/)) if (w) n++;
+    }
+    return n;
+  });
+  autoWords = { doc, counts };
+  return counts;
+}
+
+/**
+ * The document as the engine reads it: where each page stands in the scroll
+ * box and how many words a pixel of it is worth. Measured from the DOM, so it
+ * is the pace of the layout actually on screen — the zoom, the leading, the
+ * page width and the PDF grid are all already in these numbers.
+ */
+function refreshAutoMetrics() {
+  autoMetrics = null;
+  const secs = pagesEl.querySelectorAll(".tpage");
+  if (!secs.length) return;
+  const counts = wordCounts();
+  const pages = [];
+  let totalWords = 0, totalHeight = 0;
+  for (const sec of secs) {
+    const height = sec.offsetHeight || 1;
+    const words = counts[Number(sec.dataset.index)];
+    pages.push({ top: sec.offsetTop, bottom: sec.offsetTop + height, height, words: words == null ? null : words });
+    if (words != null) { totalWords += words; totalHeight += height; }
+  }
+  // A page the model has no count for at all is read at the document's own
+  // average, where there is one. A page it counts as nearly empty is NOT: a
+  // caption page really does hold nine words, and a reader really does cross it
+  // in a second or two. It is held to MIN_PAGE_WORDS so that "nearly empty"
+  // does not become "instantaneous", and the screen cap above does the rest.
+  const median = pages[Math.floor(pages.length / 2)].height;
+  const fallback = totalWords > 0 && totalHeight > 0
+    ? totalWords / totalHeight
+    : ASSUMED_WORDS_PER_PAGE / median;
+  for (const p of pages) {
+    p.density = p.words == null ? fallback : Math.max(p.words, MIN_PAGE_WORDS) / p.height;
+  }
+  autoMetrics = pages;
+}
+
+function autoDensityAt(y) {
+  if (!autoMetrics || !autoMetrics.length) return null;
+  let lo = 0, hi = autoMetrics.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (autoMetrics[mid].bottom < y) lo = mid + 1; else hi = mid;
+  }
+  return autoMetrics[lo].density || null;
+}
+
+function autoTarget() {
+  const d = autoDensityAt(autoPos + stageEl.clientHeight * READING_LINE);
+  if (!d) return null;
+  const ceiling = Math.max(MIN_PX_PER_SEC * 4, stageEl.clientHeight / MAX_SCREEN_SECONDS);
+  return Math.max(MIN_PX_PER_SEC, Math.min(ceiling, (autoWpm / 60) / d));
+}
+
+// ── the engine ──
+function autoRunning() { return autoOn && !!doc && !autoPaused && !autoSuspended; }
+
+function autoStart() {
+  if (autoMax() <= 4) return; // a short document: armed, and nothing to do
+  if (!autoRunning() || autoRaf) return;
+  if (!autoMetrics) refreshAutoMetrics();
+  autoLast = 0;
+  autoWritten = null;
+  autoPos = stageEl.scrollTop;
+  pagesEl.style.willChange = "transform";
+  autoRaf = requestAnimationFrame(autoTick);
+}
+
+function autoStop() {
+  if (autoRaf) { cancelAnimationFrame(autoRaf); autoRaf = 0; }
+  autoLast = 0;
+  autoClearFrac();
+}
+
+function autoTick(ts) {
+  autoRaf = 0;
+  if (!autoRunning()) return;
+  // The backstop, and the reason a manual scroll never has to be caught as an
+  // event to be obeyed: the position is somewhere the engine did not put it, so
+  // something else is driving — the scroll bar, a find, the PDF pane pulling
+  // the text along beside it, a click on a leak row.
+  if (autoWritten != null && Math.abs(stageEl.scrollTop - autoWritten) > 3) { autoInterrupt(); return; }
+  // Holding a selection is reading with intent — a value about to be flagged,
+  // a passage about to be copied — and so is a menu standing open over the text.
+  if (autoBusy()) { autoInterrupt(); return; }
+
+  if (!autoLast) autoLast = ts;
+  let dt = ts - autoLast;
+  autoLast = ts;
+  if (dt > MAX_FRAME_MS) dt = MAX_FRAME_MS;
+
+  const target = autoTarget();
+  if (target == null) { autoRaf = requestAnimationFrame(autoTick); return; }
+  // Eased over about half a second, so crossing into a denser page slows the
+  // document rather than shifting gear under the eye.
+  if (!autoPxPerSec) autoPxPerSec = target;
+  else autoPxPerSec += (target - autoPxPerSec) * Math.min(1, dt / 500);
+
+  const limit = autoMax();
+  autoPos = Math.min(autoPos + (autoPxPerSec * dt) / 1000, limit);
+  autoWrite();
+  if (autoPos >= limit - 0.5) { autoFinish(); return; }
+  autoRaf = requestAnimationFrame(autoTick);
+}
+
+// The whole pixels to scrollTop, the remainder to a transform on the column.
+// Writing the same integer twice fires no scroll event, so the per-scroll work
+// beside this — the PDF pane held page for page, the citation bookkeeping —
+// runs at the stepping rate rather than once a frame.
+function autoWrite() {
+  const whole = Math.floor(autoPos);
+  stageEl.scrollTop = whole;
+  autoWritten = stageEl.scrollTop;
+  autoSetFrac(autoPos - whole);
+}
+
+function autoSetFrac(frac) {
+  const dpr = window.devicePixelRatio || 1;
+  const q = Math.round(frac * dpr) / dpr;
+  if (q === autoFrac) return;
+  autoFrac = q;
+  pagesEl.style.transform = q ? `translate3d(0, ${-q}px, 0)` : "";
+}
+
+/** The column back where it stands, so a manual scroll starts from a clean page. */
+function autoClearFrac() {
+  if (!autoFrac && !pagesEl.style.transform && !pagesEl.style.willChange) return;
+  autoFrac = 0;
+  pagesEl.style.transform = "";
+  pagesEl.style.willChange = "";
+}
+
+function autoHasSelection() {
+  const sel = window.getSelection();
+  return !!(sel && sel.rangeCount && !sel.isCollapsed && String(sel).trim());
+}
+
+/**
+ * Something the reader is in the middle of, which the page may not move under.
+ *
+ * A selection being held is a value about to be flagged or a passage about to
+ * be copied; a menu or a popup stands over a place in the text and belongs to
+ * it. And a review is the same thing at the scale of the document: the LEAKS
+ * worksheet and the names walk both put the text at a row and ask a question
+ * about that row, and the redaction tool is a hand over a page. Creeping under
+ * any of them would carry the answer off the screen.
+ *
+ * Unlike the yield to a manual scroll this one does not time out — the resume
+ * asks again and keeps waiting — so the creep picks up when the work is put
+ * down, not a second and a bit later regardless.
+ */
+function autoBusy() {
+  if (autoHasSelection()) return true;
+  if (redactOn) return true;
+  for (const id of ["keep-menu", "flag-pop", "swap-pop", "leaks-bar", "names-bar"]) {
+    const el = $(id);
+    if (el && !el.hidden) return true;
+  }
+  return false;
+}
+
+/** Yield now, and come back once they are done. */
+function autoInterrupt() {
+  if (!autoOn || autoPaused) return;
+  autoSuspended = true;
+  autoStop();
+  autoScheduleResume();
+}
+
+function autoScheduleResume() {
+  clearTimeout(autoResume);
+  autoResume = setTimeout(() => {
+    autoResume = 0;
+    if (!autoOn || autoPaused || !doc) return;
+    // Still busy: ask again rather than pulling the page out from under them.
+    if (autoBusy()) { autoScheduleResume(); return; }
+    autoSuspended = false;
+    autoPxPerSec = 0; // take the pace up again where they left the page
+    autoStart();
+    updateAutoUi();
+  }, RESUME_DELAY_MS);
+}
+
+/**
+ * The foot of what is on screen. On a reel that is not the end of the reading
+ * — the next document is read and hung underneath, and the creep carries into
+ * it — so it only stops where the folder itself runs out.
+ */
+function autoFinish() {
+  if (reelOn() && !reelDone) {
+    autoInterrupt(); // hold while the next one is read; the resume picks it up
+    reelMaybeExtend();
+    return;
+  }
+  autoPaused = true;
+  autoStop();
+  updateAutoUi();
+  toast(reel.length > 1
+    ? "Auto-scroll reached the end of the case folder — Space reads on from wherever you scroll back to."
+    : "Auto-scroll reached the end — Space reads on from wherever you scroll back to.");
+}
+
 function setAutoScroll(on) {
   autoOn = !!on && !!doc;
+  lsSet(AUTO_ON_KEY, autoOn);
+  autoPaused = false;
+  autoSuspended = false;
+  autoPxPerSec = 0;
+  clearTimeout(autoResume);
+  autoResume = 0;
+  if (!autoOn) autoStop();
+  else if (autoMax() <= 4) toast("Nothing to auto-scroll — the document fits on screen.");
+  else { refreshAutoMetrics(); autoStart(); }
+  updateAutoUi();
+}
+
+/** Space: a pause that sticks, against the manual-scroll one that does not. */
+function toggleAutoPlay() {
+  if (!autoOn) { setAutoScroll(true); toast(`Auto-scroll on · ${autoWpm} wpm`); return; }
+  autoPaused = !autoPaused;
+  autoSuspended = false;
+  clearTimeout(autoResume);
+  autoResume = 0;
+  if (autoPaused) autoStop();
+  else { autoPxPerSec = 0; autoStart(); }
+  updateAutoUi();
+}
+
+function setAutoWpm(next) {
+  const w = Math.max(MIN_WPM, Math.min(MAX_WPM, Math.round(Number(next) || 250)));
+  if (w === autoWpm) return;
+  autoWpm = w;
+  lsSet(AUTO_WPM_KEY, autoWpm);
+  updateAutoUi();
+}
+
+function nudgeAutoSpeed(delta) {
+  setAutoWpm(Math.round((autoWpm + delta) / WPM_STEP) * WPM_STEP);
+  toast(`Auto-scroll ${autoWpm} wpm` + (autoOn ? "" : " (off — A starts it)"));
+}
+
+// ── the pill ──
+//
+// A reading pace is not a thing you can see: 250 and 400 look the same until
+// the page moves, so a wpm engine with no readout is a setting you cannot aim.
+// The pill is that readout and the controls beside it, over the text because
+// that is where the eye already is — and draggable, because it will cover
+// something eventually, with the spot remembered as fractions of the free
+// space so it lands the same way on any window.
+const AS_PILL_KEY = "textReader.autoPill";
+const asPill = $("as-pill");
+let asPillPos = null;
+{
+  const p = lsGet(AS_PILL_KEY, null);
+  if (p && isFinite(p.fx) && isFinite(p.fy)) asPillPos = { fx: clamp01(p.fx), fy: clamp01(p.fy) };
+}
+function clamp01(v) { return Math.min(1, Math.max(0, Number(v) || 0)); }
+
+/** The room the pill has: the stage's box, less the pill itself. */
+function asPillFree() {
+  const r = stageEl.getBoundingClientRect();
+  if (!asPill.offsetWidth) return null;
+  return { left: r.left, top: r.top,
+           x: Math.max(r.width - asPill.offsetWidth - 12, 0),
+           y: Math.max(r.height - asPill.offsetHeight - 12, 0) };
+}
+function placePill(x, y) {
+  asPill.style.left = Math.round(x) + "px";
+  asPill.style.top = Math.round(y) + "px";
+}
+/** Back where it was left — and, with nothing remembered, low and centred. */
+function applyPillPos() {
+  const free = asPillFree();
+  if (!free) return;
+  const at = asPillPos || { fx: 0.5, fy: 0.94 };
+  placePill(free.left + 6 + at.fx * free.x, free.top + 6 + at.fy * free.y);
+}
+{
+  let drag = null;
+  asPill.addEventListener("pointerdown", (e) => {
+    // The controls are controls, not grab handles.
+    if (e.target.closest("button, input")) return;
+    const free = asPillFree();
+    if (!free) return;
+    const r = asPill.getBoundingClientRect();
+    drag = { id: e.pointerId, free, moved: false, dx: e.clientX - r.left, dy: e.clientY - r.top };
+    try { asPill.setPointerCapture(e.pointerId); } catch { /* fine */ }
+    asPill.classList.add("dragging");
+    e.preventDefault();
+  });
+  asPill.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const f = drag.free;
+    const x = Math.min(Math.max(e.clientX - drag.dx, f.left + 6), f.left + 6 + f.x);
+    const y = Math.min(Math.max(e.clientY - drag.dy, f.top + 6), f.top + 6 + f.y);
+    drag.moved = true;
+    placePill(x, y);
+    asPillPos = { fx: f.x ? (x - f.left - 6) / f.x : 0, fy: f.y ? (y - f.top - 6) / f.y : 0 };
+    e.preventDefault();
+  });
+  const end = (e) => {
+    if (!drag || (e.pointerId != null && e.pointerId !== drag.id)) return;
+    if (drag.moved) lsSet(AS_PILL_KEY, asPillPos);
+    try { asPill.releasePointerCapture(drag.id); } catch { /* gone */ }
+    drag = null;
+    asPill.classList.remove("dragging");
+  };
+  asPill.addEventListener("pointerup", end);
+  asPill.addEventListener("pointercancel", end);
+  window.addEventListener("resize", () => { if (!asPill.hidden) applyPillPos(); }, { passive: true });
+
+  $("asp-play").addEventListener("click", () => { toggleAutoPlay(); pillAwake(); });
+  $("asp-slower").addEventListener("click", () => { nudgeAutoSpeed(-WPM_STEP); pillAwake(); });
+  $("asp-faster").addEventListener("click", () => { nudgeAutoSpeed(WPM_STEP); pillAwake(); });
+  $("asp-close").addEventListener("click", () => { setAutoScroll(false); toast("Auto-scroll off"); });
+  $("asp-speed").addEventListener("input", (e) => { setAutoWpm(e.target.value); pillAwake(); });
+}
+
+// It sits over the reading, so it fades while the pointer is still and comes
+// back on any movement — the viewer's own bar does the same.
+const PILL_IDLE_MS = 2500;
+let pillIdleTimer = 0;
+function pillAwake() {
+  if (asPill.hidden) return;
+  asPill.classList.remove("idle");
+  clearTimeout(pillIdleTimer);
+  pillIdleTimer = setTimeout(() => {
+    if (!asPill.matches(":hover")) asPill.classList.add("idle");
+  }, PILL_IDLE_MS);
+}
+document.addEventListener("mousemove", pillAwake, { passive: true });
+
+function updateAutoUi() {
+  const show = autoOn && !!doc;
+  if (asPill.hidden !== !show) {
+    asPill.hidden = !show;
+    if (show) { applyPillPos(); pillAwake(); }
+  }
+  if (show) {
+    // A yield to a manual scroll still reads as playing — it comes back on its
+    // own — so the icon does not flicker while the reader scrolls.
+    $("asp-play").textContent = autoPaused ? "▶" : "❙❙";
+    $("asp-play").title = autoPaused ? "Resume (Space)" : "Pause (Space)";
+    const sl = $("asp-speed");
+    if (Number(sl.value) !== autoWpm) sl.value = String(autoWpm);
+    $("asp-wpm").textContent = autoWpm + " wpm";
+    asPill.classList.toggle("paused", autoPaused);
+  }
   autoBtn.setAttribute("aria-pressed", String(autoOn));
-  autoBtn.title = (autoOn ? "Auto-scrolling at " : "Auto-scroll while reading (A) — ") + Math.round(autoSpeed) + " px/s; [ slower, ] faster, Space pauses";
-  cancelAnimationFrame(autoRaf);
-  autoLast = 0; autoAcc = 0;
-  if (autoOn) autoRaf = requestAnimationFrame(autoStep);
+  const state = !autoOn ? `Auto-scroll while reading (A) — ${autoWpm} wpm`
+    : !doc ? `Auto-scroll is on at ${autoWpm} wpm — it starts with the next document`
+    : autoPaused ? `Auto-scroll paused at ${autoWpm} wpm — Space reads on`
+    : `Auto-scrolling at ${autoWpm} wpm`;
+  autoBtn.title = state +
+    "; [ slower, ] faster, Space pauses. The pace is a reading pace: each page moves at the speed its own text needs.";
 }
-function nudgeAutoSpeed(factor) {
-  autoSpeed = Math.max(8, Math.min(400, autoSpeed * factor));
-  lsSet("textReader.autoscroll", autoSpeed);
-  setAutoScroll(autoOn);
-  toast("Auto-scroll " + Math.round(autoSpeed) + " px/s");
+
+// ── what the reader does ──
+autoBtn.addEventListener("click", () => {
+  setAutoScroll(!autoOn);
+  toast(autoOn ? `Auto-scroll on · ${autoWpm} wpm` : "Auto-scroll off");
+});
+// Observed, never blocked: the browser scrolls as it always would and the
+// creep gets out of the way. On the document rather than on the stage, because
+// a wheel over the PDF pane pulls the text along beside it and is the reader
+// scrolling as much as the other is — and because a click on a button is
+// something being done too, and the creep comes back a second later anyway.
+for (const evt of ["wheel", "mousedown", "touchstart"]) {
+  document.addEventListener(evt, (e) => {
+    // …but not the pill's own: pausing, or dragging the speed slider, is
+    // working the creep rather than scrolling away from it.
+    if (e.target && e.target.closest && e.target.closest("#as-pill")) return;
+    autoInterrupt();
+  }, { passive: true, capture: true });
 }
-autoBtn.addEventListener("click", () => setAutoScroll(!autoOn));
-stageEl.addEventListener("wheel", () => { if (autoOn) setAutoScroll(false); }, { passive: true });
+// The keys that scroll on their own: the reader gets the jump, and the creep
+// steps aside and comes back after it.
+const AUTO_SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 document.addEventListener("keydown", (e) => {
   // Not while typing in the document or a field.
   const t = e.target;
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))) return;
-  if (e.key === "a" || e.key === "A") { e.preventDefault(); setAutoScroll(!autoOn); }
-  else if (e.key === "[") { e.preventDefault(); nudgeAutoSpeed(0.8); }
-  else if (e.key === "]") { e.preventDefault(); nudgeAutoSpeed(1.25); }
-  else if (e.key === " " && autoOn) { e.preventDefault(); setAutoScroll(false); }
+  if (e.key === "a" || e.key === "A") {
+    e.preventDefault();
+    setAutoScroll(!autoOn);
+    toast(autoOn ? `Auto-scroll on · ${autoWpm} wpm` : "Auto-scroll off");
+  } else if (e.key === "[") { e.preventDefault(); nudgeAutoSpeed(-WPM_STEP); }
+  else if (e.key === "]") { e.preventDefault(); nudgeAutoSpeed(WPM_STEP); }
+  // Shift+Space belongs to the link opener, as it does in the viewer.
+  else if (e.key === " " && !e.shiftKey && autoOn) { e.preventDefault(); toggleAutoPlay(); }
+  else if (AUTO_SCROLL_KEYS.has(e.key)) autoInterrupt();
 });
+
+/**
+ * A document went up, or the layout under one moved (the panes, the grid, the
+ * reading size, a window resize). The pages are where they are now, so the
+ * pace is taken from them again — and the engine's own position with it, since
+ * the scroll box it was driving has been re-laid underneath it.
+ */
+function autoRemeasure({ newDoc = false } = {}) {
+  // A short document does not fill the box, and nothing will ever scroll to
+  // ask for the next one: the reel reaches once as the document goes up.
+  if (newDoc && reelJustOpened) { reelJustOpened = false; setTimeout(reelMaybeExtend, 0); }
+  if (newDoc) { autoWords = null; autoPaused = false; autoSuspended = false; }
+  autoMetrics = null;
+  updateAutoUi();
+  if (!autoOn || !doc) return;
+  autoStop(); // the column back to clean before it is measured again
+  refreshAutoMetrics();
+  autoPxPerSec = 0;
+  autoStart();
+}
+updateAutoUi();
+
+// ── the reel: the folder read as one document ────────────────────────────────────────
+//
+// A case folder is one filing read in pieces. PDF-Linker writes a document per
+// export and a Combined Text.txt beside them holding every one of them, and the
+// combined file is what you read when you want to read the CASE rather than a
+// motion — but it is a file somebody has to have built, it is stale the moment
+// a single export is re-run, and a save of it writes every document at once.
+//
+// The reel is that reading without that file. The document on screen is the one
+// that was opened; as the foot of it comes into view the NEXT export in the
+// Documents list is read, parsed and hung underneath it, with a divider naming
+// it, and so on down the folder. Nothing is combined on disk, nothing is
+// written that was not edited, and each document goes back to its own file
+// under its own name.
+//
+// WHAT A MEMBER IS. `doc.pages` is the whole reel, page after page, exactly as
+// a combined file's pages would be — which is the point: everything that reads
+// a page by its index (the pane, the citations, the rules, the leak rows, the
+// spot keeps) goes on working without knowing there is more than one file in
+// it. `reel` says which RUN of those pages came from which file, and that is
+// the only thing that knows.
+//
+// AND THE CURRENT DOCUMENT FOLLOWS THE READING. The status bar, the Documents
+// list, the spot keeps and the file a save adopts are all "this document", and
+// with four of them on screen the one you mean is the one you are looking at.
+// It changes as the reading line crosses a divider, which is the same event as
+// scrolling into it.
+//
+// A save writes EVERY member that was edited, each to its own handle, and names
+// them. Nothing else is touched: a document scrolled past and not typed in is
+// not rewritten, so a reel of forty documents does not put forty files' mtimes
+// through a review that changed one line of one of them.
+
+// How close to the foot the reading has to come before the next document is
+// read: two screens, so it is already there when it is reached rather than
+// arriving as a jolt under the eye.
+const REEL_AHEAD_SCREENS = 2;
+// How many documents may hang off one reel. A page of a long export is not
+// free — its lines, its pseudonym spans, its citation underlines — and a case
+// folder can hold three hundred of them: read end to end that is a tab that
+// stops answering. At the ceiling the reel stops and says so, and opening the
+// next document on its own starts a fresh reel from there.
+const REEL_MAX = 25;
+
+let reel = [];          // [{ name, handle, newline, trailingNewline, from, count, dirty, spots }]
+let reelAt = 0;         // the member being read: an index into `reel`
+let reelBusy = false;   // one append at a time — the scroll asks many times
+let reelDone = false;   // the list is read out
+let reelJustOpened = false; // a document went up: the first reach happens without a scroll
+
+/** The reel as one member: a document opened on its own, or the head of a folder read. */
+function reelReset(parsed, name, handle, theirSpots) {
+  reel = [{
+    name, handle,
+    newline: parsed.newline, trailingNewline: parsed.trailingNewline,
+    from: 0, count: parsed.pages.length,
+    dirty: false, spots: theirSpots || [],
+  }];
+  reelAt = 0;
+  reelBusy = false;
+  reelDone = false;
+}
+
+/** The member a page belongs to, by its index into `doc.pages`. */
+function reelMemberOf(pageIndex) {
+  for (let i = reel.length - 1; i >= 0; i--) if (pageIndex >= reel[i].from) return reel[i];
+  return reel[0] || null;
+}
+/** …and its place in the reel. */
+function reelIndexOf(pageIndex) {
+  for (let i = reel.length - 1; i >= 0; i--) if (pageIndex >= reel[i].from) return i;
+  return 0;
+}
+function reelCurrent() { return reel[reelAt] || null; }
+
+/**
+ * The documents on screen, in order — the reel's members, or a combined file's
+ * own. Everything that already knew how to put several documents beside one
+ * page list (the pane, the pickers, the leak review) asks this, and a reel
+ * reads to it exactly as a Combined Text.txt does.
+ */
+function docMembers() {
+  if (reel.length > 1) return reel.map((m) => m.name);
+  return doc ? PS.combinedMembers(doc.pages) : [];
+}
+/** …and per page, which of them it belongs to. */
+function docPageSources() {
+  if (!doc) return [];
+  return reel.length > 1 ? reelPageNames() : PS.pageSources(doc.pages, fileName);
+}
+
+/** Per page, the name of the document it came from — what the PDF pane matches on. */
+function reelPageNames() {
+  const out = new Array(doc ? doc.pages.length : 0).fill("");
+  for (const m of reel) for (let i = m.from; i < m.from + m.count; i++) out[i] = m.name;
+  return out;
+}
+
+/** The next export down the Documents list, or null at the end of it. */
+function reelNextDoc() {
+  if (!reel.length || !folderDocs.length) return null;
+  const last = reel[reel.length - 1];
+  const at = folderDocs.findIndex((d) => d.name === last.name);
+  if (at < 0) return null;
+  for (let i = at + 1; i < folderDocs.length; i++) {
+    const d = folderDocs[i];
+    // The combined file is every other document over again: reading it INTO a
+    // reel of those documents would be the folder read twice.
+    if (d.combined) continue;
+    if (reel.some((m) => m.name === d.name)) continue;
+    return d;
+  }
+  return null;
+}
+
+/** The divider between two documents: what is ending, and what is starting. */
+function reelDivider(m) {
+  const el = document.createElement("div");
+  el.className = "reel-divider";
+  el.dataset.name = m.name;
+  const label = document.createElement("span");
+  label.className = "rd-name";
+  label.textContent = m.name.replace(/\.txt(\.LEAK)?$/i, "");
+  const note = document.createElement("span");
+  note.className = "rd-note";
+  note.textContent = TD.isQuarantinedName(m.name) ? "quarantined by the leak gate" : "next in the case folder";
+  const only = document.createElement("button");
+  only.type = "button";
+  only.className = "rd-only";
+  only.title = "Open this document on its own, from its first page";
+  only.textContent = "Open on its own";
+  only.addEventListener("click", (e) => {
+    e.preventDefault();
+    const d = folderDocs.find((x) => x.name === m.name);
+    if (d) openFolderDoc(d);
+  });
+  el.append(label, note, only);
+  return el;
+}
+
+/**
+ * Hang the next document under the last. Answers whether one went up.
+ *
+ * A document the leak review has already built off the page goes up as it
+ * stands; otherwise it is read and parsed here. Either way its pages are
+ * APPENDED to `doc.pages`, so every index already handed out stays the index
+ * it was — nothing above moves when something is added below it.
+ */
+async function reelExtend() {
+  if (reelBusy || reelDone || !doc || !dirHandle) return false;
+  if (reel.length >= REEL_MAX) {
+    reelDone = true;
+    toast(`${REEL_MAX} documents is as far as one reel goes — open the next one from the Documents list to read on from there.`, { ms: 6000 });
+    renderReelState();
+    return false;
+  }
+  const next = reelNextDoc();
+  if (!next) { reelDone = true; return false; }
+  reelBusy = true;
+  try {
+    let parsed = null;
+    const built = ready.get(next.name);
+    if (built && built.doc && built.epoch === readyEpoch) parsed = built.doc;
+    if (!parsed) parsed = TD.parseExport(await (await next.handle.getFile()).text());
+    const from = doc.pages.length;
+    const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + next.name, []));
+    const m = {
+      name: next.name, handle: next.handle,
+      newline: parsed.newline, trailingNewline: parsed.trailingNewline,
+      from, count: parsed.pages.length, dirty: false, spots: theirSpots,
+    };
+    doc.pages = doc.pages.concat(parsed.pages);
+    reel.push(m);
+    const frag = document.createDocumentFragment();
+    frag.appendChild(reelDivider(m));
+    during("hanging the next document on the reel", () =>
+      buildPages(frag, doc.pages, { from, to: from + m.count, spots: theirSpots, editable: editing }));
+    pagesEl.appendChild(frag);
+    reelChanged();
+    // …and the far end is let go of once this one has been LAID OUT. Never
+    // here: a page appended this instant has not been through applyPageWidth
+    // yet, and shedding it (or anything measured in the same frame) would pin
+    // a height the sheet is about to stop having.
+    reelTrimSoon();
+    return true;
+  } catch (e) {
+    console.error("[text-reader] the reel could not hang " + next.name + ":", e);
+    toast("Could not read " + next.name + ": " + (e.message || e), { error: true });
+    reelDone = true; // do not sit in a loop asking for a file that will not open
+    return false;
+  } finally { reelBusy = false; }
+}
+
+/** The reel grew: everything measured off the document is measured again. */
+function reelChanged() {
+  textAnchors = null; textLineTops = null;
+  applyMatchedLayout();
+  applyPageWidth();
+  placeCitationsSoon();
+  textEpoch++;
+  paintHighlights();
+  refreshPdf();
+  autoRemeasure();
+  renderReelState();
+}
+
+/**
+ * Near the foot: read the next one. Asked on every scroll, so it is cheap
+ * until it is not — and while one is being read the rest of the asks fall on
+ * `reelBusy` rather than starting a second.
+ */
+function reelMaybeExtend() {
+  if (!reelOn() || reelBusy || reelDone) return;
+  const left = stageEl.scrollHeight - (stageEl.scrollTop + stageEl.clientHeight);
+  if (left > stageEl.clientHeight * REEL_AHEAD_SCREENS) return;
+  reelExtend().then((added) => {
+    // A short document can leave the foot still in view: keep going until the
+    // reading has two screens in front of it again.
+    if (added) reelMaybeExtend();
+  });
+}
+
+/**
+ * Whether the reel runs at all: a case folder, something after this document
+ * in it, and the reading set to go on.
+ *
+ * Never off a Combined Text.txt. That file already holds every export in the
+ * folder, so hanging the folder's exports under it would be the case read
+ * twice — and it is the one document that is a reel already.
+ */
+function reelOn() {
+  if (!doc || !dirHandle || folderDocs.length < 2 || settings.reel === false) return false;
+  const head = reel[0];
+  return !!head && !folderDocs.some((d) => d.name === head.name && d.combined);
+}
+
+/**
+ * The document being read, from where the reading line sits. The status bar,
+ * the Documents list, the spot keeps and the file a save adopts all mean "this
+ * document", and with several on screen the one meant is the one being looked
+ * at.
+ */
+function reelSyncCurrent() {
+  if (reel.length < 2) return;
+  const line = stageEl.scrollTop + stageEl.clientHeight * 0.35;
+  let at = 0;
+  const secs = pagesEl.querySelectorAll(".tpage");
+  for (const sec of secs) {
+    if (sec.offsetTop > line) break;
+    at = reelIndexOf(Number(sec.dataset.index));
+  }
+  if (at === reelAt) return;
+  // The one being left keeps its own spot keeps; the one being entered brings
+  // its own back, and becomes the document a save adopts and the list marks.
+  const was = reel[reelAt];
+  if (was) was.spots = spots;
+  reelAt = at;
+  const now = reel[reelAt];
+  fileName = now.name;
+  fileHandle = now.handle;
+  spots = now.spots;
+  document.title = now.name + " — Text Reader";
+  renderSpots();
+  markDocList();
+  renderReelState();
+  refreshKeepLocality();
+}
+
+/** What the status bar says about a reel: which document, and how much of the folder is on. */
+function renderReelState() {
+  const m = reelCurrent();
+  if (!m) { $("st-file").textContent = "No document"; return; }
+  const pages = m.count;
+  $("st-file").textContent = m.name + (TD.isQuarantinedName(m.name) ? " (quarantined by PDF-Linker's leak gate)" : "") +
+    " · " + pages + " page" + (pages === 1 ? "" : "s") +
+    (reel.length > 1
+      ? ` · ${reelAt + 1} of ${reel.length} on the reel` +
+        (!reelDone ? "" : reel.length >= REEL_MAX ? " (as far as one reel goes)" : " (the folder is read out)")
+      : "");
+  updateDirty();
+}
+
+/** Every member the reading has edited, in reel order. */
+function reelDirtyMembers() { return reel.filter((m) => m.dirty); }
+
+/** The member holding a page, marked edited — the file a save has to write. */
+function reelMarkDirty(pageIndex) {
+  const m = pageIndex == null ? reelCurrent() : reelMemberOf(pageIndex);
+  if (m) m.dirty = true;
+}
+
+
+// ── shedding: the reel keeps the text and lets go of the DOM ─────────────────────────
+//
+// A page is cheap as text and expensive as DOM — a line element per line, a
+// span per pseudonym, an anchor per citation, a mark per highlight — and a reel
+// of twenty documents is thousands of them held for the sake of four hundred
+// pixels somebody scrolled past an hour ago. So a document far enough from the
+// reading is SHED: its text goes back into `doc.pages`, its spot keeps back
+// into the member, and its pages are emptied.
+//
+// WHAT STAYS IS THE POINT. The `.tpage` sections themselves stay, each keeping
+// its index and pinned to the height it had. That is what makes this safe
+// rather than clever: the pages are still one element per page, in order, at
+// the right heights, so the PDF pane beside them stays page-for-page, the
+// scroll position does not move by a pixel, auto-scroll's density is still
+// measured off the real heights, and every index already handed out still
+// finds its page. Only the contents go.
+//
+// And it is reversible from what was kept: `doc.pages` holds the text, the
+// member holds the spot keeps, and coming back within reach builds the pages
+// again exactly as `buildPages` first did.
+//
+// TWO ARE NEVER SHED. The document being read, and any document with unsaved
+// edits — an edit is work in progress, and a page that has been typed in is
+// worth the memory it costs until it is written.
+
+// How far from the window a document has to be before it is let go of, and
+// come back within before it is built again. Generous: shedding what the
+// reader is about to scroll back to is work done twice.
+const REEL_KEEP_SCREENS = 4;
+
+/** The page a body belongs to, and the body a page has — or null where it is shed. */
+function bodyForPage(i) {
+  const sec = pagesEl.querySelector(`.tpage[data-index="${i}"]`);
+  return sec ? sec.querySelector(".page-body") : null;
+}
+
+/** A member's page sections, in order, from one pass over the column. */
+function memberSections(m, byIndex) {
+  const out = [];
+  for (let i = m.from; i < m.from + m.count; i++) {
+    const sec = byIndex.get(i);
+    if (sec) out.push(sec);
+  }
+  return out;
+}
+
+function shedMember(m, secs) {
+  if (m.shed) return;
+  for (const sec of secs) {
+    const inner = sec.querySelector(".page-inner");
+    const body = inner && inner.querySelector(".page-body");
+    if (!inner || !body) continue;
+    const i = Number(sec.dataset.index);
+    // Off the PDF's grid first, while the lines it laid out are still there.
+    clearMatched(sec);
+    // Everything the page knows, taken off it before it goes: the text as the
+    // FILE carries it (serializeNodes writes the fakes, never the real names),
+    // and the places this document keeps in the clear.
+    m.spots = m.spots.filter((x) => x.page !== i).concat(spotsFromBody(body, i));
+    doc.pages[i].lines = TD.serializeNodes(body).split("\n");
+    sec.style.height = sec.offsetHeight + "px"; // measured before it is emptied
+    inner.innerHTML = "";
+    sec.classList.add("shed");
+  }
+  m.shed = true;
+  // An undo step names a page that has no body to put back. The reading has
+  // been four screens away from this document; the history of it is over.
+  undoStack = undoStack.filter((sn) => sn.page < m.from || sn.page >= m.from + m.count);
+  redoStack = redoStack.filter((sn) => sn.page < m.from || sn.page >= m.from + m.count);
+}
+
+function unshedMember(m, secs) {
+  if (!m.shed) return;
+  for (const sec of secs) {
+    const inner = sec.querySelector(".page-inner");
+    if (!inner || inner.firstChild) continue;
+    const i = Number(sec.dataset.index);
+    const body = document.createElement("div");
+    body.className = "page-body";
+    body.contentEditable = editing ? "plaintext-only" : "false";
+    body.spellcheck = false;
+    buildBody(body, doc.pages[i].lines.join("\n"), i, m.spots);
+    const layer = document.createElement("div");
+    layer.className = "link-layer";
+    inner.append(body, layer);
+    sec.classList.remove("shed");
+    sec.style.height = "";
+  }
+  m.shed = false;
+}
+
+/** Build a shed page back because something is about to want it (a leak row, a jump). */
+function ensurePageLive(i) {
+  const m = reelMemberOf(i);
+  if (!m || !m.shed) return;
+  const byIndex = sectionsByIndex();
+  unshedMember(m, memberSections(m, byIndex));
+  afterShedChange();
+}
+
+function sectionsByIndex() {
+  const byIndex = new Map();
+  for (const sec of pagesEl.querySelectorAll(".tpage")) byIndex.set(Number(sec.dataset.index), sec);
+  return byIndex;
+}
+
+/**
+ * Let go of what is far away, and build back what has come near. Cheap enough
+ * to run on a scroll: it is a pass over the members, and a member that is
+ * already in the state it should be in costs a comparison.
+ */
+function reelTrim() {
+  if (reel.length < 3 || !doc) return;
+  // A review is a walk over the whole document: nothing is let go of under it.
+  // The redaction tool is one too — its check reads every pseudonym the export
+  // carries, and a shed page carries none.
+  if (!leaksBar.hidden || !namesBar.hidden || redactOn) return;
+  const top = stageEl.scrollTop;
+  const bottom = top + stageEl.clientHeight;
+  const pad = Math.max(stageEl.clientHeight * REEL_KEEP_SCREENS, 1200);
+  const byIndex = sectionsByIndex();
+  let changed = false;
+  for (let k = 0; k < reel.length; k++) {
+    const m = reel[k];
+    const secs = memberSections(m, byIndex);
+    if (!secs.length) continue;
+    const last = secs[secs.length - 1];
+    const a = secs[0].offsetTop;
+    const b = last.offsetTop + last.offsetHeight;
+    const far = b < top - pad || a > bottom + pad;
+    // The one being read, and anything typed in, stay whatever the distance.
+    const held = k === reelAt || m.dirty;
+    if (far && !held && !m.shed) { shedMember(m, secs); changed = true; }
+    else if ((!far || held) && m.shed) { unshedMember(m, secs); changed = true; }
+  }
+  if (changed) afterShedChange();
+}
+
+/**
+ * Pages came back, or went.
+ *
+ * A page built back is a page that has never been SHAPED — `shapePages` gives
+ * a sheet the height its width and its paper ratio ask for, and a body without
+ * one is as tall as its words happen to be. Left unshaped it comes back
+ * several hundred pixels shorter than the height it was shed at, and the whole
+ * column below it jumps by the difference. So the layout runs before anything
+ * else here, and the height a page comes back at is the height it left at.
+ */
+function afterShedChange() {
+  applyMatchedLayout();
+  applyPageWidth(); // …which shapes the sheets, which is what makes it stable
+  textAnchors = null; textLineTops = null;
+  textEpoch++;
+  placeCitationsSoon();
+  paintHighlights();
+  autoRemeasure();
+  renderReelState();
+}
+
+/**
+ * Every page on the reel built and live again. Two things ask for this.
+ *
+ * A RE-LAYOUT, because a shed page's height is a number pinned when the layout
+ * was something else — the reading size changed, the window was dragged — and
+ * a column of stale heights is a document that jumps under the reader. The
+ * whole thing goes live and the trim re-sheds from real measurements on the
+ * next pass. It is the one moment the reel costs what it would cost unshed,
+ * and it happens when a setting changes, not while reading.
+ *
+ * And a REVIEW OPENING. The LEAKS worksheet and the names walk both jump about
+ * the whole document looking for a value, and a page with no body is a page
+ * they would report as not holding what it holds. While either bar is open
+ * nothing is shed at all (`reelTrim`), so this is asked once, as it opens.
+ */
+function reelAllLive() {
+  if (!reel.some((m) => m.shed)) return false;
+  const byIndex = sectionsByIndex();
+  for (const m of reel) if (m.shed) unshedMember(m, memberSections(m, byIndex));
+  afterShedChange();
+  return true;
+}
 
 // ── the PDF beside the text ──────────────────────────────────────────────────────────
 //
@@ -5040,11 +6125,11 @@ function pdfFirstLine(el) {
 /** Which PDF each text page comes from, through the key and the folder's PDFs. */
 function resolvePdfSources() {
   if (!doc) { pdfSources = []; return; }
-  const names = PS.pageSources(doc.pages, fileName);
+  const names = docPageSources();
   // A combined file's members, in the order its header lists them: each
   // is matched to a PDF on its own — the folder's, then one picked by hand
   // (by name through the key, else by order) — never to one PDF for all.
-  const members = PS.combinedMembers(doc.pages);
+  const members = docMembers();
   const memo = new Map();
   pdfSources = names.map((n) => {
     if (!memo.has(n)) {
@@ -5061,9 +6146,9 @@ function resolvePdfSources() {
 /** The combined file's members with no PDF yet, in order ([] for a lone export). */
 function membersWithoutPdf() {
   if (!doc) return [];
-  const names = PS.pageSources(doc.pages, fileName);
+  const names = docPageSources();
   const out = [];
-  for (const m of PS.combinedMembers(doc.pages)) {
+  for (const m of docMembers()) {
     const i = names.indexOf(m);
     if (i >= 0 && !pdfSources[i] && !out.includes(m)) out.push(m);
   }
@@ -5103,7 +6188,7 @@ function refreshPdf() {
 function updatePdfStatus() {
   const names = pdfSourceNames();
   const n = [...swaps].filter((k) => pdfSources.some((s, i) => s && pdfTarget(i) && pdfTarget(i).key === k)).length;
-  const members = doc ? PS.combinedMembers(doc.pages) : [];
+  const members = docMembers();
   const missing = membersWithoutPdf();
   let text = "";
   if (!doc) text = "";
@@ -5219,7 +6304,7 @@ function leakFileWindow() {
  * belongs to it.
  */
 function leakWarmTargets(limit) {
-  const members = doc ? PS.pageSources(doc.pages, fileName) : [];
+  const members = docPageSources();
   // The open document's own members, indexed the same way: which of them a
   // row's File cell names, worked out once per name rather than per page.
   const memberFor = LK.exportMatcher(members, fwdName());
@@ -5365,7 +6450,7 @@ function fileKeyOf(file) { return file.name + "|" + file.size + "|" + file.lastM
 function leakDocNames() {
   if (!leaks || !folderDocs.length) return [];
   // A combined file already open holds every member: there is no hop to make.
-  const open = [fileName, ...(doc ? PS.combinedMembers(doc.pages) : [])].filter(Boolean);
+  const open = [fileName, ...docMembers()].filter(Boolean);
   const openFor = LK.exportMatcher(open, fwdName());
   const out = [];
   for (const t of LK.leakPages(leakRows(), leaks.at, leakFileWindow())) {
@@ -5820,7 +6905,7 @@ function buildPdfPane() {
   document.body.classList.toggle("sbs", sbsOn && !!doc);
   sbsBtn.setAttribute("aria-pressed", String(sbsOn && !!doc));
   if (pdfPane.hidden) return;
-  const members = PS.combinedMembers(doc.pages);
+  const members = docMembers();
   if (!pdfSources.some(Boolean)) {
     const box = document.createElement("div");
     box.className = "pane-empty";
@@ -5986,7 +7071,7 @@ function applyMatchedLayoutNow() {
   const slots = new Map();
   if (on) for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) slots.set(Number(el.dataset.index), el);
   const paneW = on ? paneWidth() : 0;
-  for (const sec of pagesEl.querySelectorAll(".tpage")) {
+  for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
     const i = Number(sec.dataset.index);
     const slot = grid ? slots.get(i) || null : null;
     const t = slot && pdfTarget(i);
@@ -6274,7 +7359,10 @@ function withBaseSize(fn) {
   }
 }
 function shapePages() {
-  const secs = [...pagesEl.querySelectorAll(".tpage")];
+  // A page the reel has shed carries a pinned height and no body: its shape is
+  // the shape it had, and the moment it is built back it is shaped with the
+  // rest. Touching it here is what would move the column under the reader.
+  const secs = [...pagesEl.querySelectorAll(".tpage:not(.shed)")];
   // A page on the grid carries the PDF's own height and type already, and a
   // swapped page IS the PDF page. A page still showing the export's trailer
   // (the pane is closed, so nothing is clipped) is not one page of anything —
@@ -6364,8 +7452,10 @@ function clearMatched(sec) {
   if (lab && lab.style.height) lab.style.height = "";
   sec.style.width = "";
   sec.style.removeProperty("--body-x");
-  sec.querySelector(".page-inner").style.height = "";
+  const inner = sec.querySelector(".page-inner");
+  if (inner) inner.style.height = "";
   const body = sec.querySelector(".page-body");
+  if (!body) return; // shed: there are no lines left to un-lay
   body.classList.remove("fixed");
   for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
 }
@@ -6454,7 +7544,10 @@ function syncScroll(from, force) {
   // margins are not the PDF's, so one box's run is not the other's. Each
   // scrolls sideways on its own.
 }
-stageEl.addEventListener("scroll", () => syncScroll("text"), { passive: true });
+stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelSyncCurrent(); reelTrimSoon(); }, { passive: true });
+// Coalesced: a scroll fires continuously, and a pass over the members that
+// builds pages back is not something to do sixty times a second.
+const reelTrimSoon = debounce(reelTrim, 200);
 pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });
 
 /** Widths changed (a resize, the panel): re-fit every shown PDF page. */
@@ -6643,7 +7736,7 @@ async function usePickedPdf(file) {
 async function usePickedPdfs(files) {
   const list = [...(files || [])].filter(Boolean);
   if (!list.length || !doc) return;
-  const members = PS.combinedMembers(doc.pages);
+  const members = docMembers();
   if (members.length <= 1) { await usePickedPdf(list[0]); return; }
   const byName = [], unmatched = [];
   for (const f of list) {
@@ -6723,6 +7816,7 @@ const rbState = $("rb-state");
 const rbKey = $("rb-key");
 const rbMark = $("rb-mark");
 const rbScan = $("rb-scan");
+const rbCheck = $("rb-check");
 const rbClear = $("rb-clear");
 const rbDpi = $("rb-dpi");
 const rbSave = $("rb-save");
@@ -6755,6 +7849,8 @@ function redactTotals() {
 function clearRedactions(why) {
   const had = redactTotals().boxes;
   redactStores.clear();
+  missWalk = []; missAt = -1;
+  if (typeof showMissRow === "function") showMissRow(false);
   repaintAllRedactions();
   updateRedactBar();
   if (had && why) toast(`${had} box${had === 1 ? "" : "es"} taken back off — ${why}.`);
@@ -6835,10 +7931,14 @@ function storeBoxesFromClientRects(el, clientRects, meta) {
  */
 function addAreaRedaction(el, box) {
   const base = sheetOf(el).getBoundingClientRect();
-  storeBoxesFromClientRects(el, [{
+  const n = storeBoxesFromClientRects(el, [{
     left: base.left + box.left, top: base.top + box.top,
     width: box.width, height: box.height,
   }], { kind: "area", label: "this area" });
+  // …and where the export said something was missed on this very page, that
+  // drag is the answer to it.
+  const at = n ? slotRedaction(el) : null;
+  if (at) missAnsweredByBox(at.src.name, at.page);
 }
 
 /**
@@ -6972,12 +8072,18 @@ async function scanForKeyValues() {
     }
   } finally { redactScanning = false; }
   repaintAllRedactions();
+  // A sweep is only half the answer: the export is the other half, and a value
+  // the PDF's text would not give up is exactly the thing nobody would notice.
+  // So the check runs itself, and the count sits in the bar from then on.
+  missWalk = doc && reals ? redactionShortfall() : [];
+  missAt = -1;
   updateRedactBar();
-  toast(found
+  toast((found
     ? `Marked ${found} value${found === 1 ? "" : "s"} the key binds, over ${pagesRead} page${pagesRead === 1 ? "" : "s"} of the PDF` +
       (missed ? `; ${missed} could not be placed on the page.` : ".")
-    : `The key binds nothing that stands in ${names.length === 1 ? "this PDF" : "these PDFs"} — ${pagesRead} page${pagesRead === 1 ? "" : "s"} read.`,
-    { ms: 5000 });
+    : `The key binds nothing that stands in ${names.length === 1 ? "this PDF" : "these PDFs"} — ${pagesRead} page${pagesRead === 1 ? "" : "s"} read.`) +
+    (missWalk.length ? ` The export places ${missWalk.length} more that the sweep could not find — “Check against the export” walks them.` : ""),
+    { ms: missWalk.length ? 9000 : 5000 });
 }
 
 /** The source behind a PDF name: the open document's, else one picked by hand, else the folder's. */
@@ -7005,6 +8111,10 @@ function updateRedactBar() {
     ? `Key: ${PK.keyTitle(key)}${allKeeps().length ? ` — a sweep skips the ${allKeeps().length} value${allKeeps().length === 1 ? "" : "s"} you have kept` : ""}`
     : "No key loaded — the key is the baseline; load one under Pseudonyms.";
   const busy = redactSaving || redactScanning;
+  const miss = missWalk.length;
+  rbCheck.disabled = !reals || !names.length || busy;
+  rbCheck.textContent = miss ? `${miss} not found — review` : "Check against the export";
+  rbCheck.classList.toggle("warn", !!miss);
   rbScan.disabled = !reals || !names.length || busy;
   rbClear.disabled = !boxes || busy;
   rbSave.disabled = !boxes || busy;
@@ -7020,6 +8130,9 @@ function setRedactMode(on) {
   if (redactOn) {
     // It is the pane's tool: the pages it marks are the pages the pane shows.
     if (!sbsOn) setSideBySide(true);
+    // …and the export's own pseudonyms are what the check reads, so every page
+    // of the reel is built while the tool is open.
+    reelAllLive();
     updateRedactBar();
     // The key is the baseline, so opening the tool with one in hand and
     // nothing marked sweeps the PDF at once: the hand starts from what the
@@ -7027,6 +8140,7 @@ function setRedactMode(on) {
     // work already done leaves that work alone.
     if (reals && !redactTotals().boxes && pdfSourceNames().length) scanForKeyValues();
   } else {
+    showMissRow(false);
     setBarHeight();
   }
   relayout();
@@ -7138,6 +8252,287 @@ rbMark.addEventListener("change", () => {
 rbScan.addEventListener("click", scanForKeyValues);
 rbClear.addEventListener("click", () => { if (!clearRedactions()) return; toast("Every box taken back off."); });
 rbSave.addEventListener("click", saveRedactedCopies);
+
+
+// ── checking the sweep against the export ────────────────────────────────────────────
+//
+// THE SWEEP CAN MISS, AND A MISS IS INVISIBLE. The key is run over the PDF's
+// OWN text, and a PDF's text is not a clean transcript: a name can be broken
+// across two lines, set with a ligature, spelled by the OCR a little
+// differently, kerned into one run with the word beside it, or not be text at
+// all — a signature, a letterhead, a scanned exhibit. Each of those is a real
+// value the sweep does not box, and nothing on screen says so. A redaction you
+// cannot check is a redaction you cannot rely on.
+//
+// THE EXPORT IS THE SECOND OPINION. PDF-Linker read the same PDF and wrote a
+// PSEUDONYM wherever a real value stood, so the export knows where the values
+// are on each page even where the PDF's own text will not give them up. Every
+// pseudonym on a text page is therefore a claim: this page of the PDF carries
+// this real value. The sweep's boxes on that PDF page are the answer, and
+// anything the export claims that the sweep did not box is what this reports.
+//
+// IT DOES NOT GUESS WHERE. The export says the value is on the page, not where
+// on the page — PDF-Linker's pages are the PDF's pages, but its text is its own
+// layout. So this does not propose a box. It walks the operator to each
+// unmatched claim in the TEXT, holds the PDF pane beside it at the same page,
+// and leaves the eye and the area drag to finish the job. That is the honest
+// shape of it: the export can say something was missed, and only a person can
+// say where it stands on the paper.
+
+let missWalk = [];   // [{ src, page, real, span, pageIndex, want, got }]
+let missAt = -1;
+let missHere = null; // the occurrence the walk stands on, as a Range
+
+/**
+ * Every real value the EXPORT places on a PDF page: "pdf|page|value" → the
+ * occurrences. A name wrapped across lines is several spans and ONE
+ * occurrence, so only the first piece of a run is counted.
+ */
+function claimsFromExport() {
+  const want = new Map();
+  for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
+    const i = Number(sec.dataset.index);
+    const t = pdfTarget(i);
+    if (!t) continue;
+    for (const span of sec.querySelectorAll(".pn")) {
+      if (span.dataset.piece && !/^1\//.test(span.dataset.piece)) continue;
+      const real = span.dataset.wholeReal || span.dataset.real;
+      if (!real) continue;
+      const k = t.src.name + "|" + t.page + "|" + PK.fold(real);
+      if (!want.has(k)) want.set(k, { src: t.src, page: t.page, real, at: [] });
+      want.get(k).at.push({ span, pageIndex: i });
+    }
+  }
+  return want;
+}
+
+/** …and what the sweep actually boxed, counted the same way. */
+function boxesFromSweep() {
+  const got = new Map();
+  for (const [name, store] of redactStores) {
+    for (const { pageNumber, boxes } of store.pages()) {
+      for (const b of boxes) {
+        if (b.kind !== "key" || !b.label) continue;
+        const k = name + "|" + pageNumber + "|" + PK.fold(b.label);
+        got.set(k, (got.get(k) || 0) + 1);
+      }
+    }
+  }
+  return got;
+}
+
+/**
+ * The claims the sweep did not answer, in reading order.
+ *
+ * Where a value is claimed twice on a page and boxed once, WHICH of the two
+ * went unboxed is not knowable from here — the export's places and the PDF's
+ * are different geometries of the same page — so both are walked and the row
+ * says how many of how many were placed. Better to look at two than to be told
+ * about neither.
+ */
+function redactionShortfall() {
+  const want = claimsFromExport();
+  const got = boxesFromSweep();
+  const out = [];
+  for (const [k, claim] of want) {
+    const n = got.get(k) || 0;
+    if (n >= claim.at.length) continue;
+    for (const place of claim.at) {
+      out.push({ src: claim.src, page: claim.page, real: claim.real,
+                 span: place.span, pageIndex: place.pageIndex,
+                 want: claim.at.length, got: n });
+    }
+  }
+  out.sort((a, b) => a.pageIndex - b.pageIndex);
+  return out;
+}
+
+/** Run the check and open the walk on what it found. */
+function checkRedactionAgainstExport() {
+  if (!doc) return;
+  if (!reals) { toast("No pseudonym key is loaded — the export's pseudonyms cannot be read without one.", { error: true }); return; }
+  reelAllLive(); // a shed page has no pseudonyms to claim anything
+  missWalk = redactionShortfall();
+  missAt = -1;
+  if (!missWalk.length) {
+    showMissRow(false);
+    const marked = redactTotals().boxes;
+    toast(marked
+      ? "Every real value the export places on these pages is boxed. The hand still owns the signatures, the stamps and anything with no text under it."
+      : "Nothing is marked yet — sweep from the key first.", { ms: 6000 });
+    return;
+  }
+  goToMiss(0);
+  toast(`${missWalk.length} place${missWalk.length === 1 ? "" : "s"} the export says carr${missWalk.length === 1 ? "ies" : "y"} a real value that the sweep could not find on the PDF page. Walk them and mark what is really there by hand.`, { ms: 8000 });
+}
+
+function showMissRow(on) {
+  $("rb-miss-row").hidden = !on;
+  if (!on) { missHere = null; paintMissHere(); }
+  setBarHeight();
+}
+
+function goToMiss(i) {
+  if (!missWalk.length) return;
+  missAt = ((i % missWalk.length) + missWalk.length) % missWalk.length;
+  const m = missWalk[missAt];
+  showMissRow(true);
+  $("rb-miss-count").textContent = `${missAt + 1} of ${missWalk.length}`;
+  $("rb-miss-value").textContent = m.real;
+  $("rb-miss-where").textContent =
+    `${TD.pageLabel(doc.pages[m.pageIndex]) || "this page"} · PDF p. ${m.page}` +
+    (pdfSourceNames().length > 1 ? ` of ${m.src.name}` : "") +
+    (m.want > 1 ? ` · the export has it ${m.want} times here, the sweep boxed ${m.got}` : "");
+  findMissInText();
+}
+
+/** The text scrolled to the occurrence, the PDF pane carried to the same page. */
+function findMissInText() {
+  const m = missWalk[missAt];
+  if (!m || !m.span.isConnected) return;
+  const r = document.createRange();
+  r.selectNodeContents(m.span);
+  missHere = r;
+  paintMissHere();
+  scrollRangeTo(r);
+  // The pane is held page for page with the text, so the PDF page this claim
+  // is about comes alongside on its own — but only once the scroll lands.
+  if (sbsOn) setTimeout(() => syncScroll("text", true), 350);
+}
+
+function paintMissHere() {
+  if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
+  if (missHere && missHere.startContainer.isConnected) CSS.highlights.set("redactmiss", new Highlight(missHere));
+  else CSS.highlights.delete("redactmiss");
+}
+
+/**
+ * One claim answered: struck off the walk and moved past.
+ *
+ * The walk is a list of QUESTIONS, not of defects, and there are two good
+ * answers to each. Either the value really is on the page and has just been
+ * boxed by hand — the signature, the letterhead, the stamp — or it is not
+ * there at all, PDF-Linker having marked a page the value never printed on.
+ * Both mean the same thing here: nothing further is owed on this one.
+ *
+ * It is a decision about this sitting, not about the file, so it lasts as long
+ * as the marks do. A fresh sweep asks again.
+ */
+function accountForMiss(i) {
+  if (i < 0 || i >= missWalk.length) return;
+  missWalk.splice(i, 1);
+  updateRedactBar();
+  if (!missWalk.length) {
+    showMissRow(false);
+    toast("Every place the export named is accounted for. What the key could not reach is marked or ruled out.", { ms: 6000 });
+    return;
+  }
+  goToMiss(Math.min(i, missWalk.length - 1));
+}
+
+/**
+ * An area drawn on the very page the walk is standing on IS the answer to it:
+ * that is the gesture the walk exists to prompt, and asking for a second click
+ * to say so would be asking twice.
+ */
+function missAnsweredByBox(srcName, pageNumber) {
+  if (missAt < 0 || $("rb-miss-row").hidden) return;
+  const m = missWalk[missAt];
+  if (!m || m.src.name !== srcName || m.page !== pageNumber) return;
+  accountForMiss(missAt);
+}
+
+$("rb-check").addEventListener("click", checkRedactionAgainstExport);
+$("rb-miss-done").addEventListener("click", () => accountForMiss(missAt));
+$("rb-miss-prev").addEventListener("click", () => goToMiss(missAt - 1));
+$("rb-miss-next").addEventListener("click", () => goToMiss(missAt + 1));
+$("rb-miss-find").addEventListener("click", findMissInText);
+$("rb-miss-close").addEventListener("click", () => showMissRow(false));
+
+
+// ── the file as text ─────────────────────────────────────────────────────────────────
+//
+// Everything the reader does is a view: the fakes are shown as the REAL names,
+// the lines are laid out as sheets, the margin numbers are given a ruled
+// gutter of their own, the citations are underlined. That is the point of it.
+// It is also the reason it is worth being able to see the file itself — because
+// what goes to the court, to PDF-Linker, and to anyone the export is handed to
+// is the bytes, not the view, and the two are meant to differ in exactly one
+// way: the file carries the pseudonyms.
+//
+// So this is the file. Not a rendering of it — the same text a save writes,
+// built the same way a save builds it (`serializeHeld` per page, which writes
+// a pseudonym span's FAKE and never the real name it shows), through the same
+// `serializeExport` that round-trips a document byte for byte. Opened on a
+// document nobody has edited, what is on screen here is what is on the disk,
+// character for character.
+//
+// WHERE THEY DIFFER IT SAYS SO. With edits not yet written the disk still
+// holds the version before them, and the header says which this is. And a real
+// value the key binds, typed in and not yet saved, stands here as itself —
+// because it is what the document holds at this moment — with a line under it
+// saying that a save would write the pseudonym instead. Both are the truth
+// about a file that is in two states at once, which is a thing a reader should
+// say rather than hide.
+const rawModal = $("raw-modal");
+const rawBtn = $("raw-btn");
+
+/** One member's text exactly as a save would write it. */
+function memberDiskText(m) {
+  const pages = [];
+  for (let i = m.from; i < m.from + m.count; i++) {
+    // A page on screen is read off the page; one the reel has shed was read
+    // off it as it was shed, and doc.pages has carried it since.
+    const body = bodyForPage(i);
+    const lines = body ? TD.serializeHeld(body).text.split("\n") : (doc.pages[i].lines || []);
+    pages.push(Object.assign({}, doc.pages[i], { lines }));
+  }
+  return TD.serializeExport({ newline: m.newline, trailingNewline: m.trailingNewline, pages });
+}
+
+function showRawFile(on) {
+  rawModal.hidden = !on;
+  if (!on) return;
+  const m = reelCurrent();
+  if (!doc || !m) { rawModal.hidden = true; return; }
+  const text = memberDiskText(m);
+  $("raw-title").textContent = m.name;
+  $("raw-text").textContent = text;
+  $("raw-text").scrollTop = 0;
+  $("raw-text").scrollLeft = 0;
+
+  // What a reader of this ought to be told, in the order it matters.
+  const notes = [];
+  if (m.dirty) notes.push("● with your unsaved edits — the file on disk is still the version before them");
+  const typed = reals ? PK.findReals(reals, TD.blankRanges(maskKept(text), TD.citedNameSpans(text))) : [];
+  if (typed.length) {
+    notes.push(`⚠ ${typed.length} real value${typed.length === 1 ? "" : "s"} the key binds stand${typed.length === 1 ? "s" : ""} here (${typed.slice(0, 3).map((w) => w.real).join(", ")}${typed.length > 3 ? "…" : ""}) — a save writes the pseudonym instead`);
+  }
+  $("raw-note").textContent = notes.join(" · ");
+
+  const lines = text.length ? text.split(/\r\n|\n/).length : 0;
+  const crlf = m.newline === "\r\n";
+  $("raw-foot").textContent =
+    `${lines.toLocaleString()} line${lines === 1 ? "" : "s"} · ${text.length.toLocaleString()} character${text.length === 1 ? "" : "s"} · ` +
+    `${crlf ? "CRLF" : "LF"} line endings · UTF-8` +
+    (m.trailingNewline ? " · ends with a newline" : " · no newline at the end") +
+    (reel.length > 1 ? ` · this is ${m.name}, the document you are reading; the others on the reel are their own files` : "");
+  $("raw-text").focus({ preventScroll: true });
+}
+
+rawBtn.addEventListener("click", () => showRawFile(true));
+$("raw-close").addEventListener("click", () => showRawFile(false));
+rawModal.addEventListener("mousedown", (e) => { if (e.target === rawModal) showRawFile(false); });
+$("raw-wrap").addEventListener("change", (e) => rawModal.classList.toggle("wrap", e.target.checked));
+$("raw-copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("raw-text").textContent);
+    toast("The file copied — pseudonyms and all, exactly as it sits on disk.");
+  } catch { toast("The clipboard refused it — select the text and copy it by hand.", { error: true }); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !rawModal.hidden) { e.preventDefault(); showRawFile(false); }
+}, true);
 
 // ── hooks for the PWA tab shell ───────────────────────────────────────────────────────
 // The shell hands a document in, and — where it opened a whole case folder —

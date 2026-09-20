@@ -293,6 +293,31 @@ Pages render at **200 dpi** by default; 150 makes a smaller file and 300 a
 sharper one. Because the result is images, it is larger than the original and
 no longer searchable — which is the point.
 
+**Checking the sweep against the export.** The key is run over the PDF's *own*
+text, and a PDF's text is not a clean transcript: a name can be broken across
+two lines, set with a ligature, spelled differently by the OCR, kerned into one
+run with the word beside it — or not be text at all, as in a signature, a
+letterhead, or a scanned exhibit. Each of those is a real value the sweep does
+not box, and nothing on screen would say so. **A redaction you cannot check is
+a redaction you cannot rely on.**
+
+So the export is read as a second opinion. PDF-Linker read the same PDF and
+wrote a **pseudonym wherever a real value stood**, so every pseudonym on a text
+page is a claim that *this page of the PDF carries this real value* — and it
+knows that even where the PDF's text will not give it up. **Check against the
+export** compares those claims against the boxes the sweep actually made, and
+the sweep says so by itself: its message ends with how many more the export
+places than it could find, and the button turns orange with the count.
+
+It does not guess *where*. The export says the value is on the page, not where
+on the paper, so nothing is proposed. Instead it **walks you to each unmatched
+claim in the text** — the occurrence underlined in the reader, the PDF pane
+carried alongside to the same page — so you can look at the PDF and see what
+was missed. Mark it with an area drag and the walk takes it as answered and
+moves on; **Accounted for** does the same for a claim that turns out not to be
+on the page at all. That is the honest shape of it: the export can say
+something was missed, and only a person can say where it stands on the paper.
+
 **The same tool from the case folder.** The text reader redacts too, from
 beside the export: open a case folder, put the PDF beside the text with **⇔
 Side by side**, and **▬ Redact PDF** marks that PDF and saves the copy without
@@ -1356,13 +1381,91 @@ app, which routes it to the reader tab.
   go nowhere near `New Real Values.txt`: a place in one file is not something
   PDF-Linker's value-level rules can be told, so a re-run of PDF-Linker, which
   writes the exports again from the PDFs, fakes it once more.
-- **Reading tools from the PDF viewer.** **↓ Auto-scroll** (or **A**) creeps
-  the document at a reading pace, **[** and **]** slow and speed it, Space
-  pauses; **Shift + Space** opens the citation under the pointer, or every
-  citation in the selection, in background tabs, as on a PDF; the theme
-  toggle and the Authorities panel are the viewer's own. The Documents /
-  Flagged panel collapses on its **»** chevron (or **▤ Panel**), stays closed
-  until it has something to show, and remembers your choice.
+- **📄 File as text — the file itself, as Notepad would open it.** Everything
+  the reader does is a view: the fakes are shown as the **real** names, the
+  lines are laid out as sheets, the margin numbers get a ruled gutter, the
+  citations are underlined. That is the point of it — and it is the reason it
+  is worth being able to see what is actually *in* the file, because what goes
+  to the court, to PDF-Linker and to anyone the export is handed to is the
+  bytes, not the view, and the two are meant to differ in exactly one way: the
+  file carries the pseudonyms. The panel is that text, fixed-pitch, wrapping
+  off as a plain editor opens it, with the page headers and the gutter spacing
+  exactly as they sit on disk — and it is not a rendering of the file but the
+  same text a save writes, built the same way, so on a document nobody has
+  edited it *is* the disk, character for character. The footer counts the lines
+  and characters and names the line endings (CRLF or LF) and whether the file
+  ends with a newline. Where the two states differ it says so: a document with
+  unsaved edits is labelled as such, and a real value the key binds standing in
+  the text is flagged with the note that a save would write the pseudonym
+  instead. **Copy** takes the whole thing, pseudonyms and all.
+- **💾 Save is lit whenever a save would do something.** Flagging a value the
+  run missed, keeping one it wrongly faked, answering a row of the LEAKS
+  worksheet — each is a decision that lives in the browser until it is written
+  into the case folder, and none of them touches the text. Save used to stay
+  greyed out over a whole review's worth of them, so the button said there was
+  nothing to save when there was, and you had to press **✎ Edit** to get at it.
+  It now lights for any of them, the status bar names what is waiting
+  (`● New Real Values.txt to write`), and such a save writes **only** those —
+  the document's own bytes and timestamp are left alone, since its text never
+  changed.
+- **The case folder read on, without a combined file.** A case is one filing in
+  pieces, and `Combined Text.txt` is the file you read when you want the case
+  rather than the motion — but somebody has to have built it, it is stale the
+  moment one export is re-run, and a save of it writes every document at once.
+  **↧ Read folder on** (the PDF group, on by default, remembered) is that
+  reading without that file: as the foot of the open document comes into view
+  the **next export in the Documents list** is read and hung underneath it,
+  with a divider naming it and an **Open on its own** button, and so on down
+  the folder. Nothing is combined on disk and nothing is written that you did
+  not edit.
+  Everything that already knew how to put several documents beside one page
+  list goes on working, because the pages ARE one list: the PDF pane matches
+  each document to its own PDF through the key, the citation underlines and the
+  Authorities panel run across the whole reel, and the leak review walks it.
+  **The document you are reading is the one you are looking at** — the status
+  bar, the Documents list, the spot keeps and the file a save adopts all follow
+  the reading line across a divider. A save writes **every document you edited,
+  each to its own file under its own name**, and names them; one you scrolled
+  past and did not type in is not rewritten, so reading forty documents does
+  not put forty timestamps through a review that changed one line of one of
+  them. The reel never runs off a `Combined Text.txt` (that file is every other
+  document over again, and is a reel already), and it stops after 25 documents
+  — a page of a long export is not free, and a folder can hold three hundred —
+  saying so, with the next one a click away in the list.
+- **Auto-scroll at a reading pace, not a pixel speed.** **↓ Auto-scroll** (or
+  **A**) creeps the document so you stop reaching for the wheel, and what you
+  set is **words per minute** — **[** and **]** by 25 at a time, remembered.
+  The pixels follow from the page: each page's own **density**, the words it
+  holds per rendered pixel, sets the speed under the reading line, so a dense
+  block-quoted page of a brief goes slowly and a caption page with nine words
+  on it is crossed in a second or two, both at the pace you asked for. The
+  zoom, the leading, the page width and the PDF grid then take care of
+  themselves — they change the pixels a page takes, the density is measured in
+  those pixels, and the pace stays put. Speeds ease over about half a second
+  between pages, so a page boundary is not a gear change.
+  **A scroll of your own is not a stop.** Reading is not one-directional — a
+  name checked three lines back, a wheel notch that overshoots — so a wheel,
+  a drag, a scroll key or the PDF pane pulling the text along beside it all
+  **suspend** the creep and it picks up on its own about a second after the
+  scrolling settles, from wherever you left the page. **Space** is the pause
+  that sticks. It also holds still for anything you are in the middle of: a
+  selection you are holding, a keep menu or a swap popup over the text, the
+  LEAKS or names review (both put the text at a row and ask about that row),
+  and the redaction tool — and that hold does not time out, it waits for the
+  work to be put down. At the foot of the document it stops and stays armed,
+  so Space reads on from wherever you scroll back to. The mode is **sticky**:
+  turn it on and the next document opens already moving.
+  Motion is sub-pixel. At a reading pace this is ten or twenty pixels a
+  second, and `scrollTop` only moves in whole ones, which at that speed
+  ratchets; the whole pixels go to `scrollTop` and the remainder is carried by
+  a transform on the page column, snapped to the **device** pixel grid so the
+  type is never left resampled onto a half pixel.
+- **The rest of the reading tools from the PDF viewer.** **Shift + Space**
+  opens the citation under the pointer, or every citation in the selection, in
+  background tabs, as on a PDF; the theme toggle and the Authorities panel are
+  the viewer's own. The Documents / Flagged panel collapses on its **»**
+  chevron (or **▤ Panel**), stays closed until it has something to show, and
+  remembers your choice.
 - **The PDF it came from, beside the text or swapped into it.** PDF-Linker
   leaves the PDF in the case folder under its real name and names the export
   for the same stem scrubbed, so the reader finds the pair by running each
