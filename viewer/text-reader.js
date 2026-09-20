@@ -549,8 +549,8 @@ fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.
 reelToggle.addEventListener("change", () => {
   settings.reel = reelToggle.checked;
   saveSettings();
-  if (settings.reel) { reelDone = false; reelMaybeExtend(); }
-  else toast("The reel is off — this document ends where it ends. What is already hanging off it stays until the next one is opened.");
+  if (settings.reel) { reelDone = false; reelDoneUp = false; reelMaybeExtend(); }
+  else toast("The reel is off — this document ends where it ends, at both ends. What is already hanging off it stays until the next one is opened.");
 });
 // ── print ────────────────────────────────────────────────────────────────────
 // The pages as they are shown, to paper or to a PDF — the browser's own
@@ -1588,7 +1588,9 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         const b = document.createElement("button");
         b.className = "swap-page";
         b.type = "button";
-        b.addEventListener("click", (e) => { e.preventDefault(); toggleSwap(i); });
+        // Read off the section at the click, never closed over: a document
+        // hung ABOVE this one renumbers every page below it (reelShift).
+        b.addEventListener("click", (e) => { e.preventDefault(); toggleSwap(Number(sec.dataset.index)); });
         lab.appendChild(b);
       }
       sec.appendChild(lab);
@@ -4634,7 +4636,16 @@ function markValuesSaved(text) { lsSet(valuesSavedKey(), text); renderFlags(); }
 // Spot keeps belong to ONE document, not to the case: they name a place in it.
 // Remembered per document, like its swapped pages.
 function spotStoreKey() { return SPOTS_PREFIX + (folderName || "") + "/" + (fileName || ""); }
-function persistSpots() { lsSet(spotStoreKey(), spots); }
+// A spot names a page of its own DOCUMENT. The page numbers in hand are the
+// reel's — one list holding several files — so they are written back rebased
+// onto the member, which is what the file is opened with again whether it is
+// opened on its own or hung anywhere on a reel.
+function persistSpots() {
+  const m = reelCurrent();
+  lsSet(spotStoreKey(), m && m.from ? spots.map((x) => ({ ...x, page: x.page - m.from })) : spots);
+}
+/** …and the same list read back, as pages of the reel a member starts at `from` of. */
+function spotsFrom(list, from) { return from ? list.map((x) => ({ ...x, page: x.page + from })) : list; }
 // Stored as { values, keeps }; an older build stored the values list bare.
 function readStoredValues(k) {
   const v = lsGet(k, null);
@@ -6046,6 +6057,24 @@ updateAutoUi();
 // written that was not edited, and each document goes back to its own file
 // under its own name.
 //
+// AND IT READS BACK UP. The export you open is rarely the first paper in the
+// case, and the papers BEFORE it are as much of the reading as the papers
+// after it, so coming up to the head of the reel hangs the previous export
+// above it, and so on back up the folder. Reading up is asked for rather than
+// assumed — a document opens at its own first page, and pulling the whole
+// case above it in the moment it opens is not what anybody asked for — so it
+// waits for the reading to come UP the column (and at the very top, where the
+// scroll box has nothing left to give and fires no event, for the wheel or the
+// key that meant it).
+//
+// THE TWO DIRECTIONS COST DIFFERENTLY. Hanging a document underneath moves
+// nothing: its pages go on the end and every index already handed out is the
+// index it was. Hanging one above moves EVERYTHING below it, so `reelShift`
+// renumbers the page sections, the members' runs, the spot keeps and the undo
+// history in one pass before the pages go in — and the scroll is then put back
+// by exactly the height that went in, so the reading does not move while the
+// folder grows above it.
+//
 // WHAT A MEMBER IS. `doc.pages` is the whole reel, page after page, exactly as
 // a combined file's pages would be — which is the point: everything that reads
 // a page by its index (the pane, the citations, the rules, the leak rows, the
@@ -6066,7 +6095,8 @@ updateAutoUi();
 
 // How close to the foot the reading has to come before the next document is
 // read: two screens, so it is already there when it is reached rather than
-// arriving as a jolt under the eye.
+// arriving as a jolt under the eye. The head of the reel is given the same
+// two screens for the document before it.
 const REEL_AHEAD_SCREENS = 2;
 // How many documents may hang off one reel. A page of a long export is not
 // free — its lines, its pseudonym spans, its citation underlines — and a case
@@ -6078,8 +6108,10 @@ const REEL_MAX = 25;
 let reel = [];          // [{ name, handle, newline, trailingNewline, from, count, dirty, spots }]
 let reelAt = 0;         // the member being read: an index into `reel`
 let reelBusy = false;   // one append at a time — the scroll asks many times
-let reelDone = false;   // the list is read out
+let reelDone = false;   // the folder is read out downward
+let reelDoneUp = false; // …and back up: nothing before the head of the reel
 let reelJustOpened = false; // a document went up: the first reach happens without a scroll
+let reelLastTop = 0;    // the scroll the last event saw, for which way the reading is going
 
 /** The reel as one member: a document opened on its own, or the head of a folder read. */
 function reelReset(parsed, name, handle, theirSpots) {
@@ -6092,6 +6124,8 @@ function reelReset(parsed, name, handle, theirSpots) {
   reelAt = 0;
   reelBusy = false;
   reelDone = false;
+  reelDoneUp = false;
+  reelLastTop = 0; // the document goes up at its own first page
 }
 
 /** The member a page belongs to, by its index into `doc.pages`. */
@@ -6146,8 +6180,33 @@ function reelNextDoc() {
   return null;
 }
 
+/** The export before the head of the reel, or null at the top of the folder. */
+function reelPrevDoc() {
+  if (!reel.length || !folderDocs.length) return null;
+  const first = reel[0];
+  const at = folderDocs.findIndex((d) => d.name === first.name);
+  if (at < 0) return null;
+  for (let i = at - 1; i >= 0; i--) {
+    const d = folderDocs[i];
+    if (d.combined) continue; // as below: the case read twice
+    if (reel.some((m) => m.name === d.name)) continue;
+    return d;
+  }
+  return null;
+}
+
+/** Whether another document may go on the reel at all — either end of it. */
+function reelRoom() {
+  if (reel.length < REEL_MAX) return true;
+  reelDone = true;
+  reelDoneUp = true;
+  toast(`${REEL_MAX} documents is as far as one reel goes — open another from the Documents list to read on from there.`, { ms: 6000 });
+  renderReelState();
+  return false;
+}
+
 /** The divider between two documents: what is ending, and what is starting. */
-function reelDivider(m) {
+function reelDivider(m, { back = false } = {}) {
   const el = document.createElement("div");
   el.className = "reel-divider";
   el.dataset.name = m.name;
@@ -6156,7 +6215,8 @@ function reelDivider(m) {
   label.textContent = m.name.replace(/\.txt(\.LEAK)?$/i, "");
   const note = document.createElement("span");
   note.className = "rd-note";
-  note.textContent = TD.isQuarantinedName(m.name) ? "quarantined by the leak gate" : "next in the case folder";
+  note.textContent = TD.isQuarantinedName(m.name) ? "quarantined by the leak gate"
+    : back ? "earlier in the case folder" : "next in the case folder";
   const only = document.createElement("button");
   only.type = "button";
   only.className = "rd-only";
@@ -6181,22 +6241,19 @@ function reelDivider(m) {
  */
 async function reelExtend() {
   if (reelBusy || reelDone || !doc || !dirHandle) return false;
-  if (reel.length >= REEL_MAX) {
-    reelDone = true;
-    toast(`${REEL_MAX} documents is as far as one reel goes — open the next one from the Documents list to read on from there.`, { ms: 6000 });
-    renderReelState();
-    return false;
-  }
+  if (!reelRoom()) return false;
   const next = reelNextDoc();
   if (!next) { reelDone = true; return false; }
   reelBusy = true;
+  const was = doc; // a document opened while the file was being read is another reel
   try {
     let parsed = null;
     const built = ready.get(next.name);
     if (built && built.doc && built.epoch === readyEpoch) parsed = built.doc;
     if (!parsed) parsed = TD.parseExport(await (await next.handle.getFile()).text());
+    if (doc !== was) return false;
     const from = doc.pages.length;
-    const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + next.name, []));
+    const theirSpots = spotsFrom(TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + next.name, [])), from);
     const m = {
       name: next.name, handle: next.handle,
       newline: parsed.newline, trailingNewline: parsed.trailingNewline,
@@ -6205,7 +6262,8 @@ async function reelExtend() {
     doc.pages = doc.pages.concat(parsed.pages);
     reel.push(m);
     const frag = document.createDocumentFragment();
-    frag.appendChild(reelDivider(m));
+    m.divider = reelDivider(m);
+    frag.appendChild(m.divider);
     during("hanging the next document on the reel", () =>
       buildPages(frag, doc.pages, { from, to: from + m.count, spots: theirSpots, editable: editing }));
     pagesEl.appendChild(frag);
@@ -6227,6 +6285,7 @@ async function reelExtend() {
 /** The reel grew: everything measured off the document is measured again. */
 function reelChanged() {
   textAnchors = null; textLineTops = null;
+  autoWords = null;
   applyMatchedLayout();
   applyPageWidth();
   placeCitationsSoon();
@@ -6255,8 +6314,164 @@ function reelMaybeExtend() {
 }
 
 /**
- * Whether the reel runs at all: a case folder, something after this document
- * in it, and the reading set to go on.
+ * Every page number in hand moves down by `n`: a document went in above.
+ *
+ * `doc.pages` is ONE list and a page is named by its place in it, which is
+ * what makes the reel invisible to everything that reads a page — the pane,
+ * the citation strips, the leak rows, the spot keeps, the undo history. The
+ * price of reading backwards is that those numbers are not stable, and this is
+ * the one place that pays it: everything holding one is renumbered here, in a
+ * single pass, before the pages themselves go in.
+ *
+ * The spot keeps are moved IN PLACE. The open document's list and its member's
+ * are usually the same array and sometimes the same objects in two arrays (an
+ * edit rebuilds the list around the page it touched and keeps the rest), so
+ * each spot is moved once, by object, rather than once per list it is in.
+ */
+function reelShift(n) {
+  if (!n) return;
+  for (const sec of pagesEl.querySelectorAll(".tpage")) sec.dataset.index = String(Number(sec.dataset.index) + n);
+  const moved = new Set();
+  const bump = (list) => { for (const x of list || []) if (!moved.has(x)) { moved.add(x); x.page += n; } };
+  for (const m of reel) { m.from += n; bump(m.spots); }
+  bump(spots);
+  for (const sn of undoStack) { sn.page += n; bump(sn.spots); }
+  for (const sn of redoStack) { sn.page += n; bump(sn.spots); }
+  if (lastSnapPage >= 0) lastSnapPage += n;
+  autoWords = null;        // counted per page, by the numbers that just moved
+  textAnchors = null; textLineTops = null;
+}
+
+/**
+ * Whether a document may be hung ABOVE the reading at this moment.
+ *
+ * A pass that is holding page numbers of its own — the leak review, the names
+ * walk, the redaction's misses, a print being prepared — would be holding the
+ * numbers of OTHER pages a moment later, so nothing goes in above one while it
+ * is open. Reading down is never held up this way: nothing moves under it.
+ */
+function reelCanRenumber() {
+  return leaksBar.hidden && namesBar.hidden && !redactOn && !missWalk.length && !printPut;
+}
+
+/**
+ * The head of the reel, given the seam it never needed. A reel opens with its
+ * head at the top of the column and nothing above it to be divided from; the
+ * first document hung above it puts something there.
+ */
+function markHeadDivider(m) {
+  if (!m || m.divider) return;
+  const sec = pagesEl.querySelector(`.tpage[data-index="${m.from}"]`);
+  if (!sec) return;
+  m.divider = reelDivider(m);
+  pagesEl.insertBefore(m.divider, sec);
+}
+
+/**
+ * Hang the document BEFORE the head of the reel above it. Answers whether one
+ * went up.
+ *
+ * Its pages go on the FRONT of `doc.pages` and everything below is renumbered
+ * with them (`reelShift`), which is the whole difference from hanging one
+ * underneath. And the reading must not move: pages going in above the window
+ * push the window down the column, so the page that was at the head is
+ * measured before and after and the scroll put back by the difference — after
+ * the layout has run, so the height it is put back by is the height the new
+ * pages are going to keep.
+ */
+async function reelPrepend() {
+  if (reelBusy || reelDoneUp || !doc || !dirHandle) return false;
+  if (!reelCanRenumber()) return false;
+  const prev = reelPrevDoc();
+  if (!prev) { reelDoneUp = true; renderReelState(); return false; }
+  if (!reelRoom()) return false;
+  reelBusy = true;
+  const was = doc, head = reel[0]; // …and the reel may not be this reel by then
+  try {
+    let parsed = null;
+    const built = ready.get(prev.name);
+    if (built && built.doc && built.epoch === readyEpoch) parsed = built.doc;
+    if (!parsed) parsed = TD.parseExport(await (await prev.handle.getFile()).text());
+    if (doc !== was || reel[0] !== head || !reelCanRenumber()) return false;
+    const n = parsed.pages.length;
+    // Where the reading stands, before anything goes in above it.
+    const anchor = pagesEl.querySelector(".tpage");
+    const wasTop = stageEl.scrollTop;
+    const wasAt = anchor ? anchor.offsetTop : 0;
+    reelShift(n);
+    doc.pages = parsed.pages.concat(doc.pages);
+    // Its own spots are already the reel's numbering: it starts the reel.
+    const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + prev.name, []));
+    const m = {
+      name: prev.name, handle: prev.handle,
+      newline: parsed.newline, trailingNewline: parsed.trailingNewline,
+      from: 0, count: n, dirty: false, spots: theirSpots,
+    };
+    reel.unshift(m);
+    reelAt++; // the member being READ is the one it was; its place in the reel is not
+    markHeadDivider(reel[1]);
+    const frag = document.createDocumentFragment();
+    m.divider = reelDivider(m, { back: true });
+    frag.appendChild(m.divider);
+    during("hanging the document before this one on the reel", () =>
+      buildPages(frag, doc.pages, { from: 0, to: n, spots: theirSpots, editable: editing }));
+    pagesEl.insertBefore(frag, pagesEl.firstChild);
+    reelChanged();
+    if (anchor) {
+      stageEl.scrollTop = wasTop + (anchor.offsetTop - wasAt);
+      reelLastTop = stageEl.scrollTop; // put back, not scrolled: not a reading going down
+    }
+    reelTrimSoon();
+    return true;
+  } catch (e) {
+    console.error("[text-reader] the reel could not hang " + prev.name + ":", e);
+    toast("Could not read " + prev.name + ": " + (e.message || e), { error: true });
+    reelDoneUp = true; // do not sit in a loop asking for a file that will not open
+    return false;
+  } finally { reelBusy = false; }
+}
+
+/**
+ * Near the head: read the one before it. The same two screens the foot is
+ * given, and the same one at a time.
+ */
+function reelMaybePrepend() {
+  if (!reelOn() || reelBusy || reelDoneUp) return;
+  if (stageEl.scrollTop > stageEl.clientHeight * REEL_AHEAD_SCREENS) return;
+  reelPrepend().then((added) => {
+    // A short document can leave the head still in view: keep going back until
+    // the reading has two screens behind it again.
+    if (added) reelMaybePrepend();
+  });
+}
+
+/**
+ * Which way the reading is going. Only a reading coming UP the column asks for
+ * the document before this one — a scroll down past the two screens at the top
+ * is not a request for the rest of the case.
+ */
+function reelScrolled() {
+  const top = stageEl.scrollTop;
+  const up = top < reelLastTop;
+  reelLastTop = top;
+  if (up) reelMaybePrepend();
+}
+// At the very top there is no scroll left to make and no event to hear, so the
+// wheel turned up and the keys that mean up are heard for themselves.
+stageEl.addEventListener("wheel", (e) => { if (e.deltaY < 0) reelMaybePrepend(); }, { passive: true });
+const REEL_BACK_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
+document.addEventListener("keydown", (e) => {
+  // Not from a field, and not from a page being TYPED in: there the keys move
+  // a caret, and a caret that actually moves the reading scrolls the box,
+  // which is heard above.
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))) return;
+  if (REEL_BACK_KEYS.has(e.key)) reelMaybePrepend();
+});
+
+/**
+ * Whether the reel runs at all: a case folder, another document in it either
+ * side of this one, and the reading set to go on.
  *
  * Never off a Combined Text.txt. That file already holds every export in the
  * folder, so hanging the folder's exports under it would be the case read
@@ -6307,11 +6522,22 @@ function renderReelState() {
   const pages = m.count;
   $("st-file").textContent = m.name + (TD.isQuarantinedName(m.name) ? " (quarantined by PDF-Linker's leak gate)" : "") +
     " · " + pages + " page" + (pages === 1 ? "" : "s") +
-    (reel.length > 1
-      ? ` · ${reelAt + 1} of ${reel.length} on the reel` +
-        (!reelDone ? "" : reel.length >= REEL_MAX ? " (as far as one reel goes)" : " (the folder is read out)")
-      : "");
+    (reel.length > 1 ? ` · ${reelAt + 1} of ${reel.length} on the reel` + reelEndNote() : "");
   updateDirty();
+}
+
+/**
+ * What the reel has left, for the status bar. Asked of the FOLDER rather than
+ * of the flags: a reader who has only read downward has never asked for the
+ * document before this one, and the answer is the same either way.
+ */
+function reelEndNote() {
+  if (reel.length >= REEL_MAX) return " (as far as one reel goes)";
+  const on = !!reelNextDoc(), back = !!reelPrevDoc();
+  if (!on && !back) return " (the folder is read out)";
+  if (!on) return " (read to the end of the folder)";
+  if (!back) return " (read back to the start of the folder)";
+  return "";
 }
 
 /** Every member the reading has edited, in reel order. */
@@ -8174,7 +8400,7 @@ function syncScroll(from, force) {
   // margins are not the PDF's, so one box's run is not the other's. Each
   // scrolls sideways on its own.
 }
-stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelSyncCurrent(); reelTrimSoon(); }, { passive: true });
+stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); }, { passive: true });
 // Coalesced: a scroll fires continuously, and a pass over the members that
 // builds pages back is not something to do sixty times a second.
 const reelTrimSoon = debounce(reelTrim, 200);

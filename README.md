@@ -1568,12 +1568,24 @@ app, which routes it to the reader tab.
   pieces, and `Combined Text.txt` is the file you read when you want the case
   rather than the motion — but somebody has to have built it, it is stale the
   moment one export is re-run, and a save of it writes every document at once.
-  **↧ Read folder on** (the PDF group, on by default, remembered) is that
+  **↕ Read folder on** (the PDF group, on by default, remembered) is that
   reading without that file: as the foot of the open document comes into view
   the **next export in the Documents list** is read and hung underneath it,
   with a divider naming it and an **Open on its own** button, and so on down
   the folder. Nothing is combined on disk and nothing is written that you did
   not edit.
+  **It reads both ways.** The export you open is rarely the first paper in the
+  case, so coming back up to the head of the reel hangs the export **before**
+  it above, and so on back up the folder. Reading back is asked for rather than
+  assumed — a document opens at its own first page, and the papers behind it
+  are pulled in when the reading comes up the column, not the moment it opens.
+  The reading itself does not move while they arrive: pages going in above the
+  window would push it down, so the scroll is put back by exactly the height
+  that went in. Going up is the more expensive direction — a page is named by
+  its place in one page list, and a document hung above renumbers every page
+  below it, the sections, the spot keeps and the undo history with them — so a
+  document is never hung above while the leak review, the names walk or the
+  redaction check is open, each of which is holding page numbers of its own.
   Everything that already knew how to put several documents beside one page
   list goes on working, because the pages ARE one list: the PDF pane matches
   each document to its own PDF through the key, the citation underlines and the
@@ -1586,8 +1598,10 @@ app, which routes it to the reader tab.
   not put forty timestamps through a review that changed one line of one of
   them. The reel never runs off a `Combined Text.txt` (that file is every other
   document over again, and is a reel already), and it stops after 25 documents
-  — a page of a long export is not free, and a folder can hold three hundred —
-  saying so, with the next one a click away in the list.
+  in all, either end — a page of a long export is not free, and a folder can
+  hold three hundred — saying so, with the next one a click away in the list.
+  The status bar says where the reel stands: `3 of 5 on the reel`, and where it
+  has read the folder out at one end or both.
 - **Auto-scroll at a reading pace, not a pixel speed.** **↓ Auto-scroll** (or
   **A**) creeps the document so you stop reaching for the wheel, and what you
   set is **words per minute** — **[** and **]** by 25 at a time, remembered.
