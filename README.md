@@ -1508,6 +1508,19 @@ app, which routes it to the reader tab.
   (`● New Real Values.txt to write`), and such a save writes **only** those —
   the document's own bytes and timestamp are left alone, since its text never
   changed.
+  **And a name standing in the clear is a save that would do something too.**
+  A real value the run left unfaked is rewritten by the save on its own — that
+  is what the forward pass is for, and the file is written whether or not a
+  character was typed — but Save did not say so: a document whose only
+  outstanding work was the run's own leftovers sat greyed, and the way to get
+  at it was to press **✎ Edit**, change nothing, and save. Unlocking a
+  protected document to make a button work is the one thing the protection
+  exists to prevent. Save is lit by those names now, and the status bar counts
+  them (`● 3 real names to write as pseudonyms — Save does it`). Every one of
+  them, settled or not: **fake it** answers the *walk*, not the save, and a
+  name nobody has looked at yet is rewritten just the same. Values **kept**,
+  the ones kept where they stand, and the parties of cited decisions are not
+  counted, because the save does not touch them either.
 - **The case folder read on, without a combined file.** A case is one filing in
   pieces, and `Combined Text.txt` is the file you read when you want the case
   rather than the motion — but somebody has to have built it, it is stale the

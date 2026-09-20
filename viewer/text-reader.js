@@ -1906,21 +1906,52 @@ function pendingWrites() {
   if (leaksDirty()) out.push(leaks ? leaks.name : "LEAKS.xlsx");
   return out;
 }
+/**
+ * How many real names the key binds are standing in the clear on the page —
+ * which is to say, HOW MUCH OF THE FILE A SAVE WOULD REWRITE without anybody
+ * typing a character.
+ *
+ * A name the run left in the clear is work the save does on its own: the
+ * forward pass swaps it for its pseudonym and the member it stands in is
+ * written, edited or not (saveDocument's `touched`). The save has always done
+ * that; what it did not do was SAY so — Save was lit by an edit, by the
+ * document being unlocked, or by a decision owed to the case folder, and a
+ * document whose only outstanding work was the run's own leftovers sat with
+ * Save greyed. The operator had to press ✎ Edit, change nothing, and save:
+ * unlocking a protected document to make the button work is exactly what the
+ * protection exists to prevent.
+ *
+ * Every hit of the last paint, settled or not: "fake it" answers the WALK,
+ * not the save, and a name nobody has looked at is rewritten just the same.
+ * Kept values, spot keeps and the parties of cited decisions are not in this
+ * count, because the save does not touch them either.
+ */
+function standingInTheClear() {
+  return leakHits.filter((h) => h.range && h.range.startContainer && h.range.startContainer.isConnected).length;
+}
 function updateDirty() {
   const pending = pendingWrites();
+  const clear = doc ? standingInTheClear() : 0;
+  const names = `${clear} real name${clear === 1 ? "" : "s"}`;
+  const asPn = clear === 1 ? "its pseudonym" : "pseudonyms";
   // Enabled whenever a save would DO something: the text edited, the document
-  // unlocked for editing, or a decision waiting to be written into the folder.
-  saveBtn.disabled = !doc || !(editing || dirty || pending.length);
+  // unlocked for editing, a decision waiting to be written into the folder, or
+  // a real name standing in the clear for the save to write as its pseudonym.
+  saveBtn.disabled = !doc || !(editing || dirty || pending.length || clear);
   saveBtn.title = dirty || editing
     ? "Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)" +
       (pending.length ? ` · ${pending.join(" and ")} too` : "")
     : pending.length
-      ? `Write ${pending.join(" and ")} into the case folder (Ctrl+S) — the text is unchanged and is not rewritten`
-      : "Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)";
+      ? `Write ${pending.join(" and ")} into the case folder (Ctrl+S)` +
+        (clear ? ` — and ${names} standing in the clear, written as ${asPn}` : " — the text is unchanged and is not rewritten")
+      : clear
+        ? `Write ${names} standing in the clear as ${asPn} (Ctrl+S) — the save does it on its own; nothing has to be edited first`
+        : "Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)";
   $("edit-toggle").disabled = !doc;
   rawBtn.disabled = !doc;
   $("st-dirty").textContent = dirty ? "● Unsaved edits"
-    : pending.length ? "● " + pending.join(" and ") + " to write"
+    : pending.length ? "● " + pending.join(" and ") + " to write" + (clear ? `, and ${names} to fake` : "")
+    : clear ? `● ${names} to write as ${asPn} — Save does it`
     : (doc && !editing ? "Protected — ✎ Edit to change" : "");
 }
 
@@ -3310,6 +3341,7 @@ function renderLeakStatus() {
     leakEl.title = "";
   }
   markDocAlerts(); // …and which documents of the folder are still carrying one
+  updateDirty();   // …and whether a save would rewrite this one on its own
 }
 
 // ── stepping the names standing in the clear ─────────────────────────────────
