@@ -799,10 +799,14 @@ Three decisions worth keeping:
   is its own layout, not the PDF's geometry. A guessed box over the wrong words
   would be worse than none, so the walk hands the question to the operator with
   the text and the PDF page side by side.
-- **A short claim walks ALL its occurrences.** Where a value is claimed twice
-  on a page and boxed once, which of the two went unboxed is not knowable from
-  here, so both are shown with "the export has it 2 times here, the sweep
-  boxed 1".
+- **A short claim walks all its occurrences, but the SHORTFALL is what is
+  outstanding.** Three claims against two boxes is one value still standing,
+  not three: `missShort` holds `want - got` per group, the bar counts the sum
+  of those, and `accountForMiss` decrements it. When it reaches zero the group's
+  remaining entries are dropped in one go — the places are walked because which
+  one went unboxed is unknowable, but once the outstanding count is met they
+  are questions already answered and making the operator dismiss each is work
+  for nothing.
 - **An area drag on the walked page answers it** (`missAnsweredByBox`) — that
   is the gesture the walk exists to prompt, and asking for a second click to
   confirm would be asking twice. `Accounted for` covers the other good answer,

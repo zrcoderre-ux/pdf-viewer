@@ -315,7 +315,17 @@ claim in the text** — the occurrence underlined in the reader, the PDF pane
 carried alongside to the same page — so you can look at the PDF and see what
 was missed. Mark it with an area drag and the walk takes it as answered and
 moves on; **Accounted for** does the same for a claim that turns out not to be
-on the page at all. That is the honest shape of it: the export can say
+on the page at all.
+
+**What is outstanding is the shortfall, not the number of places.** A name the
+export carries three times on a page that the sweep boxed twice is **one** value
+still standing, and the bar counts it as one. All three places are still walked,
+because which of the three went unboxed is not knowable from here — but the
+moment you find that one and account for it, **the whole group closes**: the
+other two are questions already answered, and dismissing them one at a time
+would be work for nothing. Where two are outstanding the walk stays open after
+the first, and the row keeps count as you go: *3 here, 1 boxed — 1 still to
+find among 2 places*. That is the honest shape of it: the export can say
 something was missed, and only a person can say where it stands on the paper.
 
 **The same tool from the case folder.** The text reader redacts too, from
@@ -1484,19 +1494,23 @@ app, which routes it to the reader tab.
   off before the comparison, and a combined file's 21 members match their 21
   PDFs by name through the key. The PDF is read only when it is first shown.
   **⇔ Side by side** opens the PDF in a pane beside the text, one PDF page per
-  text page, scrolling together. **The text reads exactly as it does with the
-  pane closed** — its own font, size, width and leading, every line where it
-  flows — because a page is for reading before it is for comparing, and a
-  reader who opens the pane to check one name does not want the document
-  re-set around them.
-  **Match PDF grid** (the PDF group of the Tools panel, remembered, off by
-  default) is the other way of working: with it on, each text page is laid out
-  on **its PDF page's own geometry** — the same width and height, label and
-  all, and, where the PDF's text layer carries the pleading numbers down its
-  margin, every numbered line at its number's own height, the body starting at
-  the PDF's text margin, the leading the PDF's pitch, so line 7 stands beside
-  line 7. Turning it off puts every page back the moment it is switched, the
-  way closing the pane does. What follows describes the grid.
+  text page, scrolling together — and each text page laid out on **its PDF
+  page's own geometry**: the same width and height, label and all, and, where
+  the PDF's text layer carries the pleading numbers down its margin, every
+  numbered line at its number's own height, the body starting at the PDF's text
+  margin, the leading the PDF's pitch, so **line 7 stands beside line 7**.
+  The grid used to be a second switch, on the reasoning that a reader opening
+  the pane to check one name does not want the document re-set around them. It
+  is one control now: a pane whose pages do not line up with the pages beside
+  them is half of what the second column is for, and reaching for another
+  switch to get the other half was a step between the reader and the thing they
+  opened the pane to do. Closing the pane puts every page back the moment it is
+  switched — its own font, size, width and leading, every line where it flows.
+  One thing the grid costs, and it is worth knowing: the **citation underlines
+  are off while the pane is open**, being strips measured off lines the grid
+  has moved. The **§ Authorities** panel still lists every authority in the
+  document and its links still open, and the status bar says so; the underlines
+  come back the moment the pane closes. What follows describes the grid.
   **The sheet is never wider than the page you are set to.** The scale comes
   from the type — the PDF's body drawn at the reading size — and on a filing
   set in large type, or at a large reading size, that asked for a sheet half

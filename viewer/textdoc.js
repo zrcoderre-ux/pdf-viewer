@@ -802,7 +802,6 @@ export const DEFAULT_SETTINGS = {
   markAlpha: 0.18,   // …and how strong it is (0 = invisible, 1 = solid); subtle by default
   showFakes: false,  // display the fakes instead of the real names
   gutter: true,      // dim the pleading line numbers
-  matchGrid: false,  // side by side, lay each page on its PDF page's geometry
   reel: true,        // read the case folder on: the next export under the last
   zoom: 1,           // the magnification: the page drawn larger, never re-laid
 };
@@ -823,7 +822,10 @@ export function normalizeSettings(raw) {
   // still, and neither is a thing the reader has any more.
   delete s.pageWidth;
   delete s.lineLock;
-  s.matchGrid = s.matchGrid === true;
+  // A page beside its PDF page is laid on that page's grid, always: the two
+  // were a setting each, and the pane without the grid is half of what the
+  // pane is for. Stored copies of the old switch are dropped.
+  delete s.matchGrid;
   // The folder read as one document: on where there is a folder to read.
   s.reel = s.reel !== false;
   s.zoom = clamp(Number(s.zoom), 0.25, 5, DEFAULT_SETTINGS.zoom);

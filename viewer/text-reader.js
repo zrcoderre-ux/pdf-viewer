@@ -69,7 +69,6 @@ const marksToggle = $("marks-toggle");
 const markColorEl = $("mark-color");
 const markAlphaEl = $("mark-alpha");
 const fakesToggle = $("fakes-toggle");
-const gridToggle = $("grid-toggle");
 const reelToggle = $("reel-toggle");
 const providerEl = $("provider");
 const docsList = $("docs-list");
@@ -467,7 +466,6 @@ function applySettings() {
   lhRange.value = String(settings.lineHeight);
   marksToggle.checked = settings.marks;
   fakesToggle.checked = settings.showFakes;
-  gridToggle.checked = settings.matchGrid;
   reelToggle.checked = settings.reel !== false;
 }
 
@@ -552,13 +550,6 @@ reelToggle.addEventListener("change", () => {
   if (settings.reel) { reelDone = false; reelMaybeExtend(); }
   else toast("The reel is off — this document ends where it ends. What is already hanging off it stays until the next one is opened.");
 });
-gridToggle.addEventListener("change", () => {
-  settings.matchGrid = gridToggle.checked;
-  saveSettings(); applySettings();
-  if (gridOn()) clearCitationLinks(); // …and the underlines with it, at once
-  relayout();
-});
-
 // ── print ────────────────────────────────────────────────────────────────────
 // The pages as they are shown, to paper or to a PDF — the browser's own
 // dialog, where "Save as PDF" is a destination. What prints is the display:
@@ -6174,7 +6165,6 @@ function refreshPdf() {
   const any = pdfSources.some(Boolean);
   sbsBtn.disabled = !doc;
   swapBtn.disabled = !doc;
-  gridToggle.disabled = !doc;
   // Nothing to redact without a PDF matched to the export.
   redactBtn.disabled = !doc || !any;
   if (redactBtn.disabled && redactOn) setRedactMode(false);
@@ -7050,18 +7040,26 @@ function applyMatchedLayoutSoon() {
  * turns on the grid — the lines' own positions, and the citation underlines
  * measured off them — asks this rather than asking whether the pane is open.
  */
-function gridOn() { return sbsOn && !pdfPane.hidden && settings.matchGrid; }
+// The grid IS side by side. The two were a toggle each for a while — the pane
+// on its own, and the pane with the pages laid on the PDF's geometry — on the
+// reasoning that a reader opening the pane to check one name does not want the
+// document re-set around them. But a pane whose pages do not line up with the
+// pages beside them is half of what it is for: the whole point of the second
+// column is that line 7 stands beside line 7, and reaching for a second switch
+// to get it was a step between the reader and the thing they opened the pane
+// to do. One control, one result.
+function gridOn() { return sbsOn && !pdfPane.hidden; }
 function applyMatchedLayout() {
   return during("lining the text up with the PDF", () => applyMatchedLayoutNow());
 }
 function applyMatchedLayoutNow() {
   const on = sbsOn && !pdfPane.hidden;
-  // The pane is one thing and the GRID is another. Unless it is asked for
-  // (Match PDF grid), a text page beside its PDF keeps the layout it has with
-  // the pane closed — its own width, its own type at its own size, its lines
-  // where they flow — and nothing below claims a page: every sheet is cleared,
-  // every slot takes the pane's width, and the two columns are held together
-  // by the scroll sync alone.
+  // The pane and the grid are one thing: a page beside its PDF page is laid on
+  // that page's geometry, and with the pane closed it is not. So `grid` is
+  // `on` — it is kept as its own name because everything below reads it, and
+  // because a page can still fall out of the grid on its own account (no PDF
+  // matched to it, or the PDF's sizes not read yet), which is what the pass
+  // below decides page by page.
   const grid = gridOn();
   const plans = [];
   const matchedSlots = new Set();
@@ -7466,9 +7464,9 @@ function setSideBySide(on, { remember = true } = {}) {
   // nothing under it to mark. The boxes already proposed are kept, and
   // opening the tool again opens the pane and puts them back on the pages.
   if (!sbsOn && redactOn) setRedactMode(false);
-  // The underlines go as the panes open, not a layout pass later — where the
-  // grid is what is opening with them.
-  if (sbsOn && settings.matchGrid) clearCitationLinks();
+  // The underlines go as the panes open, not a layout pass later — the grid is
+  // what is opening with them.
+  if (sbsOn) clearCitationLinks();
   buildPdfPane();
   applySwaps();
   relayout();
@@ -7849,7 +7847,7 @@ function redactTotals() {
 function clearRedactions(why) {
   const had = redactTotals().boxes;
   redactStores.clear();
-  missWalk = []; missAt = -1;
+  missWalk = []; missShort = new Map(); missAt = -1;
   if (typeof showMissRow === "function") showMissRow(false);
   repaintAllRedactions();
   updateRedactBar();
@@ -8111,7 +8109,7 @@ function updateRedactBar() {
     ? `Key: ${PK.keyTitle(key)}${allKeeps().length ? ` — a sweep skips the ${allKeeps().length} value${allKeeps().length === 1 ? "" : "s"} you have kept` : ""}`
     : "No key loaded — the key is the baseline; load one under Pseudonyms.";
   const busy = redactSaving || redactScanning;
-  const miss = missWalk.length;
+  const miss = missOutstanding();
   rbCheck.disabled = !reals || !names.length || busy;
   rbCheck.textContent = miss ? `${miss} not found — review` : "Check against the export";
   rbCheck.classList.toggle("warn", !!miss);
@@ -8279,7 +8277,8 @@ rbSave.addEventListener("click", saveRedactedCopies);
 // shape of it: the export can say something was missed, and only a person can
 // say where it stands on the paper.
 
-let missWalk = [];   // [{ src, page, real, span, pageIndex, want, got }]
+let missWalk = [];   // [{ group, src, page, real, span, pageIndex, want, got }]
+let missShort = new Map(); // …and per value-on-a-page, how many are still outstanding
 let missAt = -1;
 let missHere = null; // the occurrence the walk stands on, as a Range
 
@@ -8334,17 +8333,33 @@ function redactionShortfall() {
   const want = claimsFromExport();
   const got = boxesFromSweep();
   const out = [];
+  missShort = new Map();
   for (const [k, claim] of want) {
     const n = got.get(k) || 0;
-    if (n >= claim.at.length) continue;
+    const short = claim.at.length - n;
+    if (short <= 0) continue;
+    // What is OUTSTANDING is the shortfall, not the number of places: a value
+    // the export has three times on a page and the sweep boxed twice is ONE
+    // value still standing. All three places are walked, because which of them
+    // went unboxed is not knowable from here — but finding that one value is
+    // the whole of the job, and the group closes when the count runs out
+    // rather than making the operator dismiss places already answered.
+    missShort.set(k, short);
     for (const place of claim.at) {
-      out.push({ src: claim.src, page: claim.page, real: claim.real,
+      out.push({ group: k, src: claim.src, page: claim.page, real: claim.real,
                  span: place.span, pageIndex: place.pageIndex,
                  want: claim.at.length, got: n });
     }
   }
   out.sort((a, b) => a.pageIndex - b.pageIndex);
   return out;
+}
+
+/** How many values are really outstanding — what the bar counts. */
+function missOutstanding() {
+  let n = 0;
+  for (const v of missShort.values()) n += v;
+  return n;
 }
 
 /** Run the check and open the walk on what it found. */
@@ -8382,7 +8397,12 @@ function goToMiss(i) {
   $("rb-miss-where").textContent =
     `${TD.pageLabel(doc.pages[m.pageIndex]) || "this page"} · PDF p. ${m.page}` +
     (pdfSourceNames().length > 1 ? ` of ${m.src.name}` : "") +
-    (m.want > 1 ? ` · the export has it ${m.want} times here, the sweep boxed ${m.got}` : "");
+    (m.want > 1
+      // …and the places LEFT to check, not the places there were: answering one
+      // takes it off the list, and a row still naming the original count would
+      // be counting somewhere the walk no longer goes.
+      ? ` · ${m.want} here, ${m.got} boxed — ${missShort.get(m.group) || 1} still to find among ${missWalk.filter((x) => x.group === m.group).length} place${missWalk.filter((x) => x.group === m.group).length === 1 ? "" : "s"}`
+      : "");
   findMissInText();
 }
 
@@ -8420,12 +8440,31 @@ function paintMissHere() {
  */
 function accountForMiss(i) {
   if (i < 0 || i >= missWalk.length) return;
-  missWalk.splice(i, 1);
+  const done = missWalk[i];
+  const left = (missShort.get(done.group) || 1) - 1;
+  let closed = 0;
+  if (left > 0) {
+    // More of this value is still unaccounted for on this page: this place is
+    // answered, and the others are still worth a look.
+    missShort.set(done.group, left);
+    missWalk.splice(i, 1);
+  } else {
+    // The last one. Nothing is outstanding for this value on this page, so the
+    // rest of its places go with it rather than being dismissed one by one — a
+    // question already answered is not a question.
+    missShort.delete(done.group);
+    const before = missWalk.length;
+    missWalk = missWalk.filter((m) => m.group !== done.group);
+    closed = before - missWalk.length - 1;
+  }
   updateRedactBar();
   if (!missWalk.length) {
     showMissRow(false);
-    toast("Every place the export named is accounted for. What the key could not reach is marked or ruled out.", { ms: 6000 });
+    toast("Every value the export names is accounted for. What the key could not reach is marked or ruled out.", { ms: 6000 });
     return;
+  }
+  if (closed > 0) {
+    toast(`“${done.real}” is dealt with on ${TD.pageLabel(doc.pages[done.pageIndex]) || "that page"} — the other ${closed} place${closed === 1 ? "" : "s"} there ${closed === 1 ? "was" : "were"} boxed by the sweep.`, { ms: 5000 });
   }
   goToMiss(Math.min(i, missWalk.length - 1));
 }
