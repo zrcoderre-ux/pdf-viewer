@@ -1374,9 +1374,9 @@ app, which routes it to the reader tab.
   here is not handed over: PDF-Linker reads `New Real Values.txt` in the case
   folder and nothing else. While what is in the panel differs from what was
   last written, the panel says so and closing the tab asks first (the same
-  prompt an edited document or an unsaved LEAKS decision raises; the browser's
-  own dialog is all a page gets, and which of the three it is, the panels
-  say).
+  prompt an edited document, an unsaved LEAKS decision or a real name standing
+  in the clear raises; the browser's own dialog is all a page gets, and which
+  of the four it is, the panels and the status bar say).
 - **A keep the case already carries out asks nothing of PDF-Linker.** A keep
   says *do not fake this value*, and what that costs depends on what the files
   already say. Where the run faked it, a file carries the pseudonym and only
@@ -1521,6 +1521,14 @@ app, which routes it to the reader tab.
   name nobody has looked at yet is rewritten just the same. Values **kept**,
   the ones kept where they stand, and the parties of cited decisions are not
   counted, because the save does not touch them either.
+  **And closing on one asks first.** Nothing is lost by the close — the name
+  is still in the file, to be found again the next time the document is opened
+  — but what is left behind is a scrubbed export carrying a real value, with
+  the operator believing the document has been read. That is the mistake the
+  whole tool exists to prevent, so it is worth a prompt that sometimes says
+  what you already knew. Switching documents does **not** ask: the walk moves
+  from export to export by design, and a prompt at every step would be a
+  prompt nobody reads.
 - **The case folder read on, without a combined file.** A case is one filing in
   pieces, and `Combined Text.txt` is the file you read when you want the case
   rather than the motion — but somebody has to have built it, it is stale the

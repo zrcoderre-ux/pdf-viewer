@@ -2527,12 +2527,24 @@ document.addEventListener("keydown", (e) => {
 }, true);
 // What a closing tab would leave behind: an edited document unsaved, a
 // flagged list never written to the case folder, LEAKS decisions not yet in
-// the workbook. The last two survive the close — they are remembered here —
-// but nothing downstream has them: PDF-Linker reads the folder, and the
-// folder has not been told. The browser's own dialog is all a page gets;
-// which of the three it is, the panels say.
+// the workbook, or a real name the key binds still standing in the clear in
+// the document on screen. The middle two survive the close — they are
+// remembered here — but nothing downstream has them: PDF-Linker reads the
+// folder, and the folder has not been told.
+//
+// THE LAST ONE IS THE FILE ITSELF. A name the run left in the clear is a real
+// value sitting in a scrubbed export, and the save is what writes the
+// pseudonym over it (standingInTheClear). Closing on one loses no decision —
+// the name is still there to be found again — but it leaves the file carrying
+// a real value while the operator believes the document has been read, and
+// that is the mistake this whole tool exists to prevent. Better a prompt that
+// sometimes says what you already knew than a close that quietly leaves a
+// name in a filing.
+//
+// The browser's own dialog is all a page gets; which of the four it is, the
+// panels and the status bar say.
 window.addEventListener("beforeunload", (e) => {
-  if (!dirty && !valuesDirty() && !leaksDirty()) return;
+  if (!dirty && !valuesDirty() && !leaksDirty() && !standingInTheClear()) return;
   e.preventDefault();
   e.returnValue = "";
 });
