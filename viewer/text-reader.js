@@ -245,7 +245,7 @@ function markDoing() {
 }
 // Passes that await overlap rather than nest, so an entry is taken out by
 // identity, not by being the last one in.
-function startDoing(what) { const e = { what }; doingStack.push(e); markDoing(); return e; }
+function startDoing(what) { const e = { what, from: performance.now() }; doingStack.push(e); markDoing(); return e; }
 /** Say more precisely what a pass already running is doing. */
 function noteDoing(e, what) { if (e) { e.what = what; markDoing(); } }
 function endDoing(e) {
@@ -332,6 +332,25 @@ function passAt(start, end) {
   for (const p of passes) if (p.from <= end && p.to >= start) best = p.what;
   return best;
 }
+/**
+ * The passes RUNNING while a task held the thread.
+ *
+ * `passes` holds the ones that finished, and a pass records itself when it
+ * finishes — so a task that ran inside a pass still in flight matched nothing
+ * and was reported as somebody else's. On a reader whose heavy work is async
+ * by design that is most of them, and it sent an operator looking for an
+ * extension that was not there. The stack of what is open answers it: what
+ * was running when the task started, and how long each had been running.
+ */
+function passesInFlight(start) {
+  const out = [];
+  for (const e of doingStack) {
+    if (!e || !e.what) continue;
+    if (e.from != null && e.from > start) continue; // it began after the task did
+    out.push(`${e.what} (${((start - (e.from || start)) / 1000).toFixed(1)}s in)`);
+  }
+  return out;
+}
 // …AND IT SAYS SO IN THE CONSOLE, WHERE IT CAN BE COPIED.
 //
 // The report has always been there to ask for (__textReaderBlocked), which is
@@ -345,7 +364,7 @@ function passAt(start, end) {
 const HOLD_SAY = 300;      // ms a task has to hold before it is worth a line
 const HOLD_QUIET = 1500;   // …and how long the console is left alone after one
 let heldSaidAt = 0, heldSince = 0, heldRuns = 0;
-function sayHeld(ms, what) {
+function sayHeld(ms, what, inFlight) {
   heldSince += ms;
   heldRuns++;
   const now = Date.now();
@@ -354,9 +373,11 @@ function sayHeld(ms, what) {
   const runs = heldRuns > 1 ? ` (${heldRuns} holds, ${(heldSince / 1000).toFixed(1)}s in all)` : "";
   heldSince = 0;
   heldRuns = 0;
-  console.warn(`[Text Reader] held the thread ${ms} ms — ` +
-    (what || "NOT one of the reader's own passes: something else on the page (an extension, most likely)") +
-    runs + ` · ${holding()}`);
+  const open = inFlight && inFlight.length ? `in flight: ${inFlight.join(", ")}` : "";
+  const who = what || open ||
+    "no pass of the reader's own was running or open — something else on the page";
+  console.warn(`[Text Reader] held the thread ${ms} ms — ${who}` +
+    (what && open ? ` · ${open}` : "") + runs + ` · ${holding()}`);
 }
 /** What the reader is carrying, for the line above: the sizes that explain it. */
 function holding() {
@@ -377,7 +398,7 @@ if (typeof PerformanceObserver === "function") {
         const what = passAt(e.startTime, e.startTime + e.duration);
         blocked.push({ ms, what, at: new Date().toLocaleTimeString() });
         if (blocked.length > 60) blocked.shift();
-        if (ms >= HOLD_SAY) sayHeld(ms, what);
+        if (ms >= HOLD_SAY) sayHeld(ms, what, passesInFlight(e.startTime));
         // Long enough that the operator felt it: say so, and say what it was.
         if (ms >= 2500) {
           const line = `The reader held the page for ${(ms / 1000).toFixed(1)} seconds${what ? " — " + what : ""}.`;
@@ -3618,9 +3639,10 @@ async function scanFindFolder() {
   const rows = [];
   const rx = PK.buildFindMatcher(findNeedles(findQuery));
   try {
-    await duringAsync("reading the rest of the folder for what you are looking for", async () => {
+    await duringAsync("reading the rest of the folder for what you are looking for", async (pass) => {
       let clock = await idleClock();
       for (const d of folderDocs) {
+        noteDoing(pass, `searching the folder (${d.name})`);
         if (findScanFor !== mine) return; // the query moved under it
         // The open one is READ HERE TOO, though its hits come from the page:
         // the walk moves from document to document, and a row set that left
@@ -3894,9 +3916,10 @@ async function sweepFolder() {
   // unreadable document is enough to withhold the index entirely, and the
   // keeps waiting on it stay owed.
   let readAll = true;
-  await duringAsync("reading the rest of the folder for names in the clear", async () => {
+  await duringAsync("reading the rest of the folder for names in the clear", async (pass) => {
     let clock = await idleClock();
     for (const d of folderDocs) {
+      noteDoing(pass, `reading the rest of the folder (${sweep.at + 1} of ${folderDocs.length}: ${d.name})`);
       if (sweep.stamp !== mine) return; // the key moved under it: this answer is stale
       sweep.at++;
       renderNamesBar();
@@ -7183,7 +7206,7 @@ async function measurePdfNow(info) {
  * LINE GRID (pdfsync.pleadingGeometry, from the numbers down its margin).
  */
 async function readPdfGrid(info) {
-  return duringAsync("reading the PDF's line grid", () => readPdfGridNow(info));
+  return duringAsync("reading the PDF's line grid", (e) => readPdfGridNow(info, e));
 }
 // The grid is read in READING ORDER — from the page the reader is at, on to
 // the end, then back over what is behind them — because the page whose grid
@@ -7202,7 +7225,7 @@ function gridOrder(info) {
   return out;
 }
 const GRID_SLICE = 10; // ms of this thread's own work before it gives it back
-async function readPdfGridNow(info) {
+async function readPdfGridNow(info, pass) {
   const { pdf, sizes } = info;
   const gridFrom = performance.now();
   // Paced off the CLOCK, not off an idle deadline: every await here is a
@@ -7222,6 +7245,9 @@ async function readPdfGridNow(info) {
       since = performance.now();
     }
     try {
+      // Which page of which PDF, for the breadcrumb: a reader that goes down
+      // here should say what it was reading, not just that it was reading.
+      noteDoing(pass, `reading the PDF's line grid (page ${i} of ${info.count}, ${info.name})`);
       const page = await pdf.getPage(i);
       const tc = await page.getTextContent();
       // Read and handed straight back. The grid reads EVERY page of the PDF,

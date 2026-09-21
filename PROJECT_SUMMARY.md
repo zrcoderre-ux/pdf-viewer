@@ -389,6 +389,29 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### A pass IN FLIGHT is a pass, and it is not an extension
+
+The first report said `NOT one of the reader's own passes: something else on
+the page (an extension, most likely)` for a twenty-two second hold that was
+almost certainly the reader's own. `passes` holds the ones that FINISHED — a
+pass records itself when it ends — so a task that ran inside a pass still in
+flight matched nothing. On a reader whose heavy work is async by design that
+is most of them, and the line sent the search after an extension that was not
+there.
+
+`passesInFlight` answers it off the doing stack: which passes were open when
+the task began, and how long each had been running. Where a completed pass
+matches, the line names it and adds what was open beside it; where nothing
+matches and nothing is open, the line says so, which is now a claim worth
+something. The long-lived passes also say WHERE they are as they go
+(`noteDoing`) — the line grid names the page and the PDF, the folder sweep and
+the folder-wide find name the document — so both the report and the breadcrumb
+point at a place rather than at a pass that has been open for a minute.
+
+And the operator's own figures settled what the trouble is not: a tab at
+221 MB with a 54-page document and a 15 MB heap is not short of memory. It is
+one task that ran for 21.7 seconds.
+
 ### …and what KILLED it, at the next open
 
 A hold that is reported after the fact is a hold that ended. The long-task
