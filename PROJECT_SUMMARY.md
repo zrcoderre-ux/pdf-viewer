@@ -389,6 +389,33 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### …and what KILLED it, at the next open
+
+A hold that is reported after the fact is a hold that ended. The long-task
+observer runs after a task, so a task that hangs the tab until the browser
+kills it never has an after, and a killed tab writes nothing at all — which is
+the failure the operator was actually hitting, and the reason the console
+report above did not answer it.
+
+The breadcrumb covers that case and always has: a pass writes its name to
+localStorage BEFORE it starts (`markDoing`), so a name still standing at the
+next open is a pass that did not come back. Three things make it answer:
+
+- It is written to the CONSOLE at the next open, not only into the offer bar —
+  `[Text Reader] LAST SESSION DID NOT FINISH: it stopped while …` — since the
+  console is what can be copied out of a session that died.
+- It carries what the reader was HOLDING (`noteCarrying`, refreshed at most
+  every two seconds because asking costs a walk over the column): the pass
+  alone does not say whether it went down under six hundred pages or two.
+- The passes that were nameless are named, so the breadcrumb points at the
+  right one: every page DRAWN says which page of which PDF, the pages drawn
+  ahead for the worksheet say so, and `saveRedactedCopies` — every page of a
+  PDF at 200 dpi, held as an image until the copy is assembled, which is the
+  heaviest thing the reader does — says so too.
+
+Driven in Chromium by killing a tab mid-pass and reopening it: the next open
+says which pass it stopped in, on which file, carrying what, and how long ago.
+
 ### The reader says what held it, in the console
 
 Three rounds of this were diagnosed from a synthetic folder, and each round

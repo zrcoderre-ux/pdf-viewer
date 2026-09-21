@@ -222,10 +222,24 @@ function notePass(what, from) {
 // back, and the reader says so.
 const DOING_KEY = "textReader.doing";
 const doingStack = [];
+// …and WHAT IT WAS CARRYING while it did, which is the other half of the
+// answer: the pass that did not come back means little without the pages, the
+// PDFs and the rows it was holding when it went. Read at most every
+// CARRYING_EVERY, since asking costs a walk over the column, and kept as a
+// string so writing the breadcrumb stays one setItem.
+const CARRYING_EVERY = 2000;
+let carrying = "", carriedAt = 0;
+function noteCarrying(force) {
+  const now = Date.now();
+  if (!force && now - carriedAt < CARRYING_EVERY) return carrying;
+  carriedAt = now;
+  try { carrying = holding(); } catch { carrying = ""; }
+  return carrying;
+}
 function markDoing() {
   try {
     const top = doingStack[doingStack.length - 1];
-    if (top) localStorage.setItem(DOING_KEY, JSON.stringify({ what: top.what, file: fileName || "", at: Date.now() }));
+    if (top) localStorage.setItem(DOING_KEY, JSON.stringify({ what: top.what, file: fileName || "", at: Date.now(), carrying: noteCarrying() }));
     else localStorage.removeItem(DOING_KEY);
   } catch { /* a browser with no storage says nothing, and that is all */ }
 }
@@ -290,7 +304,19 @@ function reportLastStuck() {
     localStorage.removeItem(DOING_KEY);
   } catch { /* nothing to report */ }
   window.__textReaderLastStuck = stuck;
-  if (!stuck || !stuck.what) return;
+  if (!stuck || !stuck.what) {
+    console.info("[Text Reader] opened; the last session closed cleanly (nothing left unfinished).");
+    return;
+  }
+  // FIRST, IN THE CONSOLE. A pass that never came back could not report
+  // itself — the observer runs after a task, and a task that hangs the tab
+  // until the browser kills it never has an after. This line is written at
+  // the next OPEN instead, when the thread is free, so a tab that died still
+  // says what it died in, and says it somewhere that can be copied.
+  console.warn(`[Text Reader] LAST SESSION DID NOT FINISH: it stopped while ${stuck.what}` +
+    (stuck.file ? ` — ${stuck.file}` : "") +
+    (stuck.carrying ? ` · carrying ${stuck.carrying}` : "") +
+    (stuck.at ? ` · ${Math.round((Date.now() - stuck.at) / 1000)}s ago` : ""));
   // Not a toast: a toast is gone in a few seconds and under the document, and
   // this is the one line that says what to fix. It stands in the offer bar
   // until it is read, and the button puts it on the clipboard.
@@ -7500,6 +7526,9 @@ function planWarmPages() {
   pumpPdfJobs();
 }
 async function warmPage(opened, key, pageNo, cssWidth) {
+  return duringAsync(`drawing page ${pageNo} ahead for the worksheet`, () => warmPageNow(opened, key, pageNo, cssWidth));
+}
+async function warmPageNow(opened, key, pageNo, cssWidth) {
   try {
     if (!warmWanted.has(key) || warmPages.has(key)) return;
     let info;
@@ -7726,6 +7755,12 @@ function warmForLeaks() {
 
 // ── rendering a page into a canvas ──
 async function renderInto(el, src, pageNo, cssWidth) {
+  // Named for the breadcrumb: a tab killed while a page was being drawn says
+  // WHICH page of which PDF, which is the difference between "a scan did it"
+  // and a guess.
+  return duringAsync(`drawing page ${pageNo} of ${src && src.name}`, () => renderIntoNow(el, src, pageNo, cssWidth));
+}
+async function renderIntoNow(el, src, pageNo, cssWidth) {
   const want = src.name + "|" + pageNo + "|" + cssWidth + "|" + (window.devicePixelRatio || 1);
   if (el.dataset.rendered === want) return;
   el.dataset.want = want;
@@ -9614,6 +9649,9 @@ function setRedactMode(on) {
 // The black goes on AFTER the page is drawn and BEFORE the pixels are encoded,
 // which is the whole trick: what was under a box was never in this image.
 async function renderRedactedPage(pdf, store, pageNumber, scale) {
+  return duringAsync(`rendering page ${pageNumber} for the redacted copy`, () => renderRedactedPageNow(pdf, store, pageNumber, scale));
+}
+async function renderRedactedPageNow(pdf, store, pageNumber, scale) {
   const page = await pdf.getPage(pageNumber);
   const vp = page.getViewport({ scale });
   const pts = page.getViewport({ scale: 1 });
@@ -9651,6 +9689,12 @@ function canvasBytes(canvas, type, quality) {
 
 /** One copy per PDF carrying boxes, each written through the Save dialog. */
 async function saveRedactedCopies() {
+  // The heaviest thing the reader does: every page of a PDF drawn at 200 dpi
+  // and held as an image until the copy is assembled. If a tab dies here, the
+  // breadcrumb says so rather than naming whatever ran before it.
+  return duringAsync("writing the redacted copy", () => saveRedactedCopiesNow());
+}
+async function saveRedactedCopiesNow() {
   const marked = redactMarked();
   if (!marked.length) return;
   redactSaving = true;
