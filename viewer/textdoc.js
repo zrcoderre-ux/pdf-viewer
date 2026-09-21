@@ -327,14 +327,45 @@ export function insideSpans(spans, start, end) {
   return false;
 }
 
+/**
+ * `text` with each range blanked to NULs — the same length out as in, so every
+ * offset a caller has read off the original still points at the same character.
+ *
+ * ONE PASS, not one per range. It used to rebuild the whole string for each
+ * range in turn (slice + repeat + slice), which is the text copied once per
+ * range: a five-hundred-kilobyte export with a couple of thousand cited names
+ * in it is a gigabyte of copying, for one document, and the folder sweep does
+ * it to every document in the case and again whenever a keep moves. Under the
+ * profiler it was the largest single thing the reader did. The pieces are cut
+ * once and joined instead.
+ *
+ * The ranges are sorted and clamped here rather than trusted: blanking is
+ * idempotent and order cannot change the answer, so a caller handing them over
+ * in any order — or running past the end of the text — gets the same string.
+ */
 export function blankRanges(text, ranges) {
   if (!ranges || !ranges.length) return text;
-  let out = text;
-  for (const [a, b] of ranges) {
-    if (!(b > a)) continue;
-    out = out.slice(0, a) + "\u0000".repeat(b - a) + out.slice(b);
+  const src = String(text == null ? "" : text);
+  const spans = [];
+  for (const r of ranges) {
+    if (!r) continue;
+    const a = Math.max(0, Math.min(src.length, Math.trunc(r[0])));
+    const b = Math.max(0, Math.min(src.length, Math.trunc(r[1])));
+    if (b > a) spans.push([a, b]);
   }
-  return out;
+  if (!spans.length) return src;
+  spans.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  const out = [];
+  let at = 0;
+  for (const [a, b] of spans) {
+    if (b <= at) continue;          // inside one already blanked
+    const from = a > at ? a : at;   // …or overlapping the end of it
+    if (from > at) out.push(src.slice(at, from));
+    out.push("\u0000".repeat(b - from));
+    at = b;
+  }
+  out.push(src.slice(at));
+  return out.join("");
 }
 
 function escapeRe(s) {

@@ -389,6 +389,39 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### The extension reading its own reader
+
+The reader hosted over https is an ordinary website to this extension's own
+citation content script. With citation links turned on for every site (or for
+the site the reader is hosted on), `content/claude-citations.js` was injected
+into the reader's own page — where the citation engine is already running —
+and it does not scan a paragraph at a time: `scan()` walks the WHOLE document
+into one string on every DOM change, debounced 400 ms, and `paint()` asks every
+citation in the document for its rectangles on every scroll frame. The reader's
+DOM is a case folder being built, laid out, shed and drawn continuously, so the
+scan is re-armed by work it cannot see the end of.
+
+A page that links its own citations now says so — `<meta name="citation-linker"
+content="own">` on the reader, the PDF viewer and the PWA shell — and the
+content script stands down where it finds it (`CitationSiteRules.isOwnLinker`).
+Driven in Chromium with the real extension loaded and citation links on for all
+sites, over a 200-page export: five long tasks of 229–361 ms that the reader's
+own report could not name (they are not the reader's passes) become none, and
+the overlay it laid over the reader's own goes with them.
+
+### The sweep's masking: one pass, not one per name
+
+`blankRanges` blanks the cited names out of a document's text before the folder
+sweep looks for names in the clear. It rebuilt the whole string for each range
+in turn, which is the text copied once per cited name: **1,111 ms for a single
+439 KB export**, and the sweep does it to every document in the folder and
+again whenever a keep moves. Under the profiler it was the largest single thing
+the reader did — 1,166 ms of self time in a 25-second reading. The pieces are
+cut once and joined instead: 6 ms for the same document, and it no longer
+appears in the profile at all. The ranges are sorted and clamped inside the
+function rather than trusted, so order, overlap and a range running past the
+end of the text all give the same answer they always did.
+
 ### The thread, not the memory: "Loading…" and the freeze
 
 A folder of huge PDFs held the tab still even where it did not fill it, and the

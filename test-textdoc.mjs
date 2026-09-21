@@ -167,6 +167,30 @@ console.log("spot keeps");
   check("blanking holds every other offset still",
     blankRanges("by David W. Slayton", [[3, 8]]), "by \u0000\u0000\u0000\u0000\u0000 W. Slayton");
   check("nothing to blank, nothing changed", blankRanges("as it reads", []), "as it reads");
+  // Order, overlap and the end of the text: blanking is idempotent, so none of
+  // them can change the answer — and the string has to come out the length it
+  // went in, since every offset the caller holds was read off the original.
+  check("out of order is the same answer", blankRanges("by David W. Slayton", [[9, 11], [3, 8]]), "by \u0000\u0000\u0000\u0000\u0000 \u0000\u0000 Slayton");
+  check("overlapping ranges blank their union", blankRanges("by David W. Slayton", [[3, 8], [5, 11]]), "by \u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000 Slayton");
+  check("one inside another", blankRanges("by David W. Slayton", [[3, 11], [5, 8]]), "by \u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000 Slayton");
+  check("a range past the end stops at it", blankRanges("by David", [[3, 99]]), "by \u0000\u0000\u0000\u0000\u0000");
+  check("an empty range blanks nothing", blankRanges("by David", [[4, 4]]), "by David");
+  check("the length is the length", blankRanges("by David W. Slayton", [[3, 8], [12, 19]]).length, "by David W. Slayton".length);
+  {
+    // The shape that made this the reader's largest single cost: a long export
+    // with a cited name every few words. One pass over the text, not one per
+    // range — the old version copied the whole string for each of them.
+    const line = "The court in Rasho v. Quillmark (2019) 31 Cal.App.5th 1121 held otherwise. ";
+    const text = line.repeat(6000);              // ~440 KB
+    const spans = [];
+    for (let i = 0, at = 0; i < 6000; i++, at += line.length) spans.push([at + 13, at + 31]);
+    const from = Date.now();
+    const out = blankRanges(text, spans);
+    const ms = Date.now() - from;
+    check("a long export with thousands of spans keeps its length", out.length, text.length);
+    check("…and every span is blanked", out.slice(13, 31), "\u0000".repeat(18));
+    check(`…in one pass (${ms} ms, was seconds)`, ms < 1000, true);
+  }
 }
 
 console.log("which occurrence");

@@ -115,6 +115,16 @@
   }
 
   async function init() {
+    // A page that carries its own citation engine is left alone: linking it
+    // again would lay a second set of strips over the first, and scanning it
+    // means walking a document that is being rebuilt as fast as it is read.
+    const rules = window.CitationSiteRules;
+    if (rules && rules.isOwnLinker && rules.isOwnLinker(document)) {
+      suppressed = true;
+      window.__citationLinker = { active: false, reason: "the page links its own citations", host: location.host };
+      console.info("[Citation Linker] This page does its own citation linking — not linking it again here.");
+      return;
+    }
     if (await isExceptedSite()) {
       suppressed = true;
       window.__citationLinker = { active: false, reason: "site excepted in Options", host: location.host };

@@ -122,8 +122,30 @@
     return isExcepted(url, lines);
   };
 
+  // A PAGE THAT ALREADY LINKS ITS OWN CITATIONS. This extension's reader and
+  // its PDF viewer are both served over https when they are hosted rather than
+  // installed, so a content script matching the sites the operator named — or
+  // all of them — is injected into a page that has the citation engine running
+  // in it already. That is not just duplicated underlines. The content script
+  // scans by walking the WHOLE document into one string whenever the DOM
+  // changes, and the reader's DOM is a case folder of pages that is being
+  // built, laid out, shed and drawn continuously: the scan is re-armed by work
+  // it cannot see the end of, and on a four-hundred-page reel each run is
+  // seconds of the thread plus an overlay strip for every citation in the
+  // case. The page says it does its own, and the content script stands down.
+  const isOwnLinker = (doc) => {
+    try {
+      const d = doc || (typeof document !== "undefined" ? document : null);
+      if (!d) return false;
+      if (d.documentElement && d.documentElement.dataset && d.documentElement.dataset.citationLinker === "own") return true;
+      const meta = d.querySelector && d.querySelector('meta[name="citation-linker"]');
+      return !!meta && String(meta.getAttribute("content") || "").toLowerCase() === "own";
+    } catch { return false; }
+  };
+
   root.CitationSiteRules = {
     DEFAULT_EXCEPTIONS,
+    isOwnLinker,
     ALL_SITES,
     toMatchPattern,
     isValidMatchPattern,

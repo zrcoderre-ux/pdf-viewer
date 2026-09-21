@@ -3,6 +3,13 @@
 <head>
   <meta charset="utf-8">
   <title>PDF Viewer</title>
+  <!-- This page runs the citation engine itself (citation-linker.js). Hosted
+       over https it is an ordinary website to the extension's content script,
+       which would scan it and lay a second set of link strips over the first —
+       and scanning means walking the whole document every time it changes,
+       which for a case folder being read is continuously. The marker tells it
+       to stand down (citation-site-rules.js: isOwnLinker). -->
+  <meta name="citation-linker" content="own">
   <link rel="stylesheet" href="viewer.css">
   <!-- Apply the saved theme before first paint so light mode doesn't flash dark
        on load. viewer.js keeps this localStorage key in sync with the toggle. -->
