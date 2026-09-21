@@ -1600,6 +1600,12 @@ app, which routes it to the reader tab.
   document over again, and is a reel already), and it stops after 25 documents
   in all, either end — a page of a long export is not free, and a folder can
   hold three hundred — saying so, with the next one a click away in the list.
+  The **numbered margin is the boundary**: nothing the grid does puts a line
+  left of it. A PDF carries margin furniture the export has not — the firm
+  printed down the side, a seal, a stamp — and the body's margin is the one
+  its rows share, not the leftmost thing on the page. One margin serves the
+  whole document, so the numbers stand in a single straight column down it.
+
   **A file opened on its own brings in its key, and nothing else.** Where the
   reader knows the case folder a file sits in, opening that file attaches the
   folder's **pseudonym key**, its **flagged values** and its **LEAKS

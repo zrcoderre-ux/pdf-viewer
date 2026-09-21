@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft,
   matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
@@ -160,6 +160,38 @@ console.log("a page with no numbers: rows matched by their words");
   check("a blank line takes the slot under its predecessor", lay.positions[1].top, 60 + lay.pitch);
   check("the pitch is the median row spacing", lay.pitch, 14);
   check("nothing matched, nothing laid out", rowLayout(["zzz"], rows), null);
+  // THE FIRM NAME DOWN THE MARGIN. A pleading's PDF carries furniture the
+  // export does not: the firm printed sideways in the left margin, a seal, a
+  // stamp. Each is a row, and each starts further left than the body does.
+  // Taking the least left of all of them put the body's margin out in the
+  // furniture and drew every line the export had no row for out there with
+  // it — left of the numbered margin, which is the one line nothing may
+  // cross. The margin is the one the rows SHARE.
+  {
+    const body = [
+      { top: 60, left: 96, height: 12, text: "SUPERIOR COURT OF THE STATE OF CALIFORNIA" },
+      { top: 74, left: 96, height: 12, text: "Plaintiff alleges as follows:" },
+      { top: 88, left: 96, height: 12, text: "1. The parties entered into the agreement." },
+      { top: 102, left: 144, height: 12, text: "a. The first exhibit is attached." },
+    ];
+    const margin = { top: 60, left: 18, height: 9, text: "YARROWVALE HOLLOWMERE FOXGLEN LLP" };
+    const withFurniture = [margin, ...body];
+    check("the body's margin is the one the rows share, not the furniture's",
+      bodyLeftOf(withFurniture), 96);
+    const texts = body.map((r) => r.text).concat(["A line the export has that the page has not"]);
+    const lay = rowLayout(texts, withFurniture);
+    const lefts = lay.positions.map((p) => (p ? p.left : null));
+    check("no line is laid left of the numbered margin", lefts.every((l) => l == null || l >= 96), true);
+    check("…the line with no row of its own included", lefts[lefts.length - 1], 96);
+    check("…and a real indent is still an indent", lefts[3], 144);
+    // The caller's own margin wins, since the geometry read it off the numbers.
+    const laid = rowLayout(texts, withFurniture, { bodyLeft: 90 });
+    check("the margin the caller names is the floor", laid.positions.map((p) => p.left).every((l) => l >= 90), true);
+    check("one margin for the whole document, from its pages' geometry",
+      docBodyLeft([{ bodyX: 96 }, { bodyX: 98 }, { bodyX: 96 }], null), 96);
+    check("…and from the rows where no page gave a geometry",
+      docBodyLeft([], [withFurniture, withFurniture]), 96);
+  }
 }
 
 console.log("a row's own type: one tall glyph does not set the line's size or place");

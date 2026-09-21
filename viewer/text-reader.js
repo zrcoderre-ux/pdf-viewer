@@ -8352,6 +8352,22 @@ function slotShell(cls, tag, { label = false } = {}) {
  * a PDF page by page, so the answer is kept against how many pages have been
  * read and taken again as more land.
  */
+/**
+ * The numbered margin for a WHOLE PDF, kept against how many of its pages have
+ * been read, the way the body type is. One margin for the document means the
+ * numbers stand in one column down the whole of it, which is the thing a
+ * reader checks a pleading against without thinking about it.
+ */
+function docBodyLeft(info) {
+  if (!info || !info.geoms) return null;
+  let filled = 0;
+  for (const g of info.geoms) if (g) filled++;
+  if (info.__marginAt !== filled) {
+    info.__marginAt = filled;
+    info.__margin = PS.docBodyLeft(info.geoms, info.rows);
+  }
+  return info.__margin;
+}
 function docTypeSize(info) {
   if (!info || !info.rows) return null;
   let filled = 0;
@@ -8656,6 +8672,7 @@ function applyMatchedLayoutNow() {
   if (on) for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) slots.set(Number(el.dataset.index), el);
   const paneW = on ? paneWidth() : 0;
   const bases = new Map(); // each open PDF's body type, asked once for the pass
+  const margins = new Map(); // …and its numbered margin, for the same reason
   const w0 = pageWidthNow(); // …and the page width, which every plan is made at
   for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
     const i = Number(sec.dataset.index);
@@ -8681,6 +8698,12 @@ function applyMatchedLayoutNow() {
     // asked it two hundred times for the same answer.
     if (!bases.has(info)) bases.set(info, docTypeSize(info));
     let base = bases.get(info) || PS.pageTypeSize(rows);
+    // THE NUMBERED MARGIN, one for the whole PDF. Straight down the page and
+    // the same on every page of it: a margin taken page by page wanders by a
+    // point or two with the measurement, and a column of numbers that wanders
+    // is the thing the eye notices first.
+    if (!margins.has(info)) margins.set(info, docBodyLeft(info));
+    const bodyX = margins.get(info);
     // WHERE THIS PAGE'S LINES GO, worked out once and kept on the page. The
     // pass is asked for again every time a batch of the PDF's sizes lands and
     // every time more of its grid does — twenty times over on a long exhibit
@@ -8688,12 +8711,12 @@ function applyMatchedLayoutNow() {
     // bulk of what it costs. Nothing about a page's answer changes unless its
     // width, its text, its type or its grid does, so a page whose answer is in
     // hand is not worked out again.
-    const planKey = [textEpoch, w0, info.name, t.page, base, geom ? 1 : 0, rows ? rows.length : -1,
+    const planKey = [textEpoch, w0, info.name, t.page, base, bodyX, geom ? 1 : 0, rows ? rows.length : -1,
       settings.lineHeight, settings.font, settings.customFont].join("|");
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, pitch: had.pitch, scale: 1 });
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, pitch: had.pitch, bodyX: had.bodyX, scale: 1 });
       continue;
     }
     if (numbered) {
@@ -8702,7 +8725,7 @@ function applyMatchedLayoutNow() {
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
       sizes = PS.typeSizes(lines.map(() => null), base);
     } else {
-      const lay = rows && rows.length ? PS.rowLayout(lines.map((l) => l.textContent), rows) : null;
+      const lay = rows && rows.length ? PS.rowLayout(lines.map((l) => l.textContent), rows, { bodyLeft: bodyX }) : null;
       if (lay) {
         tops = lay.positions.map((p) => (p ? p.top : null));
         lefts = lay.positions.map((p) => (p ? p.left : null));
@@ -8724,8 +8747,8 @@ function applyMatchedLayoutNow() {
     // so the grid is drawn at whatever size the paper is being read at.
     matchedSlots.add(slot);
     sec.__planFor = planKey;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, scale: 1 });
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, bodyX };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, bodyX, scale: 1 });
   }
   // Every slot the layout did not claim keeps the pane's own width, and gives
   // back whatever a grid before it levelled: its label's height, and the box
@@ -8760,7 +8783,7 @@ function applyMatchedLayoutNow() {
     p.h = Math.max(pageH, Math.round(foot * p.scale));
     p.sec.querySelector(".page-inner").style.height = p.h + "px";
     p.body.classList.toggle("fixed", !!p.tops);
-    if (p.geom) p.sec.style.setProperty("--body-x", (p.geom.bodyX * p.scale) + "px");
+    if (p.bodyX > 0) p.sec.style.setProperty("--body-x", (p.bodyX * p.scale) + "px");
     else p.sec.style.removeProperty("--body-x");
     // Only the lines that MOVE are written to. A pass over a seventy-page
     // complaint sets four properties on two thousand lines, and the passes
@@ -8838,15 +8861,19 @@ function applyMatchedLayoutNow() {
     if (!p.tops || !p.lefts) continue;
     p.lines.forEach((l, k) => {
       const left = p.lefts[k] == null ? 0 : p.lefts[k] * p.scale;
-      if (left < 1) return; // flush with the margin: nothing in front of it
+      // What it may give back is the indent IN FRONT of it — the blank
+      // between the numbered margin and where this row starts — and not a
+      // pixel more: the margin is the boundary, here as everywhere.
+      const floor = p.bodyX > 0 ? p.bodyX * p.scale : 0;
+      if (left - floor < 1) return; // already at the margin: nothing to give
       const lt = l.querySelector(":scope > .lt");
-      if (lt) spill.push({ l, lt, left });
+      if (lt) spill.push({ l, lt, left, floor });
     });
   }
   if (spill.length) {
     for (const x of spill) x.over = x.lt.scrollWidth - x.lt.clientWidth;
     for (const x of spill) {
-      const back = Math.min(Math.max(0, x.over), x.left);
+      const back = Math.min(Math.max(0, x.over), x.left - x.floor);
       const want = (x.left - back) + "px";
       if (x.l.style.left === want) continue;
       x.l.style.left = want;

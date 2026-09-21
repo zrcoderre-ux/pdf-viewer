@@ -524,7 +524,42 @@ export function alignLines(lines, rows, min = 0.25) {
  * row's own type height, null for a line no row claims — or null where
  * nothing matched at all, plus the pitch.
  */
-export function rowLayout(lineTexts, rows) {
+/**
+ * THE MARGIN THE BODY STARTS AT — the left the rows SHARE, not the least left
+ * of any of them.
+ *
+ * A pleading page has furniture outside its body: a firm name printed down
+ * the left margin, a seal, a stamp. Each of those is a row like any other,
+ * and each begins further left than the text does. Taking the least left of
+ * all of them puts the body's own margin out in the furniture, and every line
+ * laid at it — a line the export has no row for, which is every line the PDF
+ * carries and the export does not — is drawn out there with it, left of the
+ * numbered margin. The numbered margin is the boundary: nothing the grid does
+ * may cross it.
+ *
+ * So the margin is the one the most rows begin at, to the nearest few points.
+ */
+export function bodyLeftOf(rows) {
+  const counts = new Map();
+  for (const r of rows || []) {
+    if (!r || !(r.left >= 0)) continue;
+    const k = Math.round(r.left / 4) * 4;
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+  let best = null, most = 0;
+  for (const [k, n] of counts) if (n > most || (n === most && best != null && k < best)) { most = n; best = k; }
+  return best;
+}
+/** …and across the pages read so far, so every page's margin is the same one. */
+export function docBodyLeft(geoms, rowsByPage) {
+  const xs = [];
+  for (const g of geoms || []) if (g && g.bodyX > 0) xs.push(g.bodyX);
+  if (xs.length) return median(xs);
+  const ls = [];
+  for (const rows of rowsByPage || []) { const l = bodyLeftOf(rows); if (l != null) ls.push(l); }
+  return ls.length ? median(ls) : null;
+}
+export function rowLayout(lineTexts, rows, { bodyLeft = null } = {}) {
   const map = alignLines(lineTexts, rows.map((r) => r.text));
   const matched = map.map((j, i) => (j == null ? null : i)).filter((i) => i != null);
   if (!matched.length) return null;
@@ -539,11 +574,15 @@ export function rowLayout(lineTexts, rows) {
   }
   const med = (xs) => { const a = xs.slice().sort((p, q) => p - q); return a[Math.floor(a.length / 2)]; };
   const pitch = adjacent.length ? med(adjacent) : stepped.length ? med(stepped) : rows[map[matched[0]]].height * 1.2;
-  const left0 = Math.min(...rows.map((r) => r.left));
+  // The body's margin, and the floor every line is held at: a row further
+  // left than it is the page's furniture, not its text.
+  const floorAt = bodyLeft != null ? bodyLeft : bodyLeftOf(rows);
+  const left0 = floorAt == null ? Math.min(...rows.map((r) => r.left)) : floorAt;
+  const held = (x) => (floorAt == null ? x : Math.max(x, floorAt));
   const out = new Array(lineTexts.length).fill(null);
   let last = null, k = 0;
   lineTexts.forEach((_, i) => {
-    if (map[i] != null) { last = rows[map[i]].top; k = 0; out[i] = { top: last, left: rows[map[i]].left, size: rows[map[i]].height }; }
+    if (map[i] != null) { last = rows[map[i]].top; k = 0; out[i] = { top: last, left: held(rows[map[i]].left), size: rows[map[i]].height }; }
     else if (last != null) { k++; out[i] = { top: last + k * pitch, left: left0, size: null }; }
   });
   const first = matched[0];

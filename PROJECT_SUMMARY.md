@@ -389,6 +389,37 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### The numbered margin is the boundary
+
+A pleading's PDF carries furniture its export does not: the firm's name
+printed down the left margin, a seal, a filing stamp. Each of those is a ROW
+like any other to `pdfRows`, and each begins further left than the body does.
+`rowLayout` took the page's margin to be `Math.min` of every row's left — so
+one sideways firm name put the body's margin out in the furniture, and every
+line the reader had to place itself (a line the export carries that the page's
+rows do not match, which on a scrubbed export is many) was drawn out there
+with it, left of the numbered margin.
+
+The numbered margin is the outer boundary of anything the grid does, and it
+should be straight down the page and the same on every page. So:
+
+- `bodyLeftOf` reads the margin the rows SHARE — the left most of them begin
+  at, to the nearest few points — instead of the least left of any of them.
+- `docBodyLeft` takes one margin for the WHOLE PDF, from its pages' read
+  geometries (`pleadingGeometry.bodyX`, which already ignores anything at or
+  left of the numbers) or from the rows where none has been read. `--body-x`
+  and the layout's floor both come from it, so the numbers stand in one column
+  down the document rather than wandering a point or two a page with the
+  measurement.
+- `rowLayout` holds every line at that floor, matched or not, and the spill
+  pass — which slides a too-long line back into the blank in front of it —
+  gives back the indent and not a pixel more.
+
+Measured in Chromium on a pleading whose PDF has the firm printed down the
+margin and whose export has lines the rows do not match: the text column
+started 36 px into the left margin and now starts at the body margin, with
+real indents still indented.
+
 ### Opening ONE FILE is not opening its folder
 
 A file opened on its own used to bring its whole folder with it: the reader
