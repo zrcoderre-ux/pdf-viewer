@@ -389,6 +389,36 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### THE HANG: a page's text had no ceiling
+
+Chrome's own code for it was `RESULT_CODE_HUNG` — the tab killed for not
+answering, not for memory — and the breadcrumb named the place: the line grid,
+page 2 of a 54-page Complaint.pdf.
+
+A page's text layer is usually a few hundred items, a word or a line each. A
+page set character by character is a different animal: a caption positioned
+glyph by glyph, or a scan whose OCR wrote an item per letter, carries hundreds
+of thousands. Nothing downstream was bounded against that. `getTextContent`
+accumulates every one; the grid sorts and groups them; the selectable layer
+builds a DOM node for each. Built as a test — a 54-page PDF whose page 2 holds
+500,000 text items — the reader held the thread for 10.3 seconds on that one
+page and the tab stopped answering for twelve, on a fast machine with nothing
+else to do.
+
+`textItemsOf` reads the text as the stream pdf.js already has and stops at a
+ceiling. Past `PAGE_ITEMS_MAX` (20,000) the grid leaves the page off the grid
+and the pane draws it without a selection layer — which is what a page with no
+text layer at all already looks like — and the console says which page and
+why. Same page, same test: no holds at all, and 19 ms the worst the tab took
+to answer.
+
+The redaction sweep takes the same reading through a far higher ceiling
+(`REDACT_ITEMS_MAX`, 200,000) and REPORTS reaching it, because there the
+question is different: text the sweep never read is a value never blacked out,
+and a copy made to hide something must not quietly skip a page. Slow is the
+right answer for a check the operator asked for and is watching; silently
+short is not. Any such page is named in the toast, to be marked by hand.
+
 ### THE FREEZE: a party's words were unbounded
 
 Four rounds of this were spent on memory, on the PDFs and on the passes, and

@@ -7215,6 +7215,64 @@ async function measurePdfNow(info) {
   }
 }
 /**
+ * A page's text, WITH A CEILING ON HOW MUCH OF IT IS TAKEN.
+ *
+ * A page's text layer is usually a few hundred items — a line or a word each.
+ * A page set character by character is a different animal: a caption page
+ * positioned glyph by glyph, or a scan whose OCR wrote one item per letter,
+ * carries hundreds of thousands. Nothing downstream is bounded against that.
+ * `getTextContent` accumulates every one of them; the line grid then sorts
+ * and groups them; the selectable layer builds a DOM node for each. Measured
+ * on a page of 120,000 items, the drawing alone holds the thread for two and
+ * a half seconds on a fast machine — and a page can carry several times that,
+ * which is a tab the browser kills for not answering.
+ *
+ * So the text is read as the STREAM pdf.js already has, and the reading stops
+ * at `cap`. A page over the cap is a page whose text is not usable as text
+ * anyway: the grid leaves it off the grid and the pane draws it without a
+ * selection layer, both of which are what the page already looks like where
+ * there is no text layer at all.
+ */
+const PAGE_ITEMS_MAX = 20000;
+// …and what the REDACTION sweep will take, which is a different question:
+// there, text not read is a value not blacked out, so the ceiling is high and
+// reaching it is reported.
+const REDACT_ITEMS_MAX = 200000;
+const hugePagesSaid = new Set();
+async function textItemsOf(page, cap = PAGE_ITEMS_MAX) {
+  const out = { items: [], styles: Object.create(null), truncated: false };
+  let reader = null;
+  try { reader = page.streamTextContent().getReader(); }
+  catch { /* an older build with no stream: fall back below */ }
+  if (!reader) {
+    const tc = await page.getTextContent();
+    return { items: tc.items || [], styles: tc.styles || Object.create(null), truncated: false };
+  }
+  for (;;) {
+    let step;
+    try { step = await reader.read(); } catch { break; }
+    if (step.done) break;
+    const v = step.value;
+    if (v) {
+      if (v.styles) Object.assign(out.styles, v.styles);
+      for (const it of v.items || []) {
+        if (out.items.length >= cap) { out.truncated = true; break; }
+        out.items.push(it);
+      }
+    }
+    if (out.truncated) { try { await reader.cancel(); } catch { /* it is done with */ } break; }
+  }
+  return out;
+}
+/** Said once per page: a page whose text the reader would not read to the end. */
+function sayHugePage(name, pageNo) {
+  const k = name + "|" + pageNo;
+  if (hugePagesSaid.has(k)) return;
+  hugePagesSaid.add(k);
+  console.warn(`[Text Reader] ${name} page ${pageNo} carries more than ${PAGE_ITEMS_MAX} pieces of text — ` +
+    "set character by character, most likely. It is drawn as a page, without the grid and without selectable text.");
+}
+/**
  * Where each page's FIRST printed line sits (the side-by-side anchor) and its
  * LINE GRID (pdfsync.pleadingGeometry, from the numbers down its margin).
  */
@@ -7262,7 +7320,7 @@ async function readPdfGridNow(info, pass) {
       // here should say what it was reading, not just that it was reading.
       noteDoing(pass, `reading the PDF's line grid (page ${i} of ${info.count}, ${info.name})`);
       const page = await pdf.getPage(i);
-      const tc = await page.getTextContent();
+      const tc = await textItemsOf(page);
       // Read and handed straight back. The grid reads EVERY page of the PDF,
       // and reading one leaves the worker holding what it parsed to answer —
       // on a three-hundred-page exhibit set, the whole document, for the sake
@@ -7276,6 +7334,9 @@ async function readPdfGridNow(info, pass) {
         const v = page.getViewport({ scale: 1 });
         sz = sizes[i - 1] = { w: v.width, h: v.height };
       }
+      // Past the ceiling the text is not a page's text in any useful sense,
+      // and grouping a few hundred thousand pieces into rows is the hold.
+      if (tc.truncated) { info.lines[i - 1] = null; sayHugePage(info.name, i); continue; }
       const items = [];
       let top = Infinity;
       for (const it of tc.items) {
@@ -7861,7 +7922,9 @@ async function renderIntoNow(el, src, pageNo, cssWidth) {
     layer.style.setProperty("--scale-factor", String(cssScale));
     layer.style.setProperty("--total-scale-factor", String(cssScale));
     try {
-      const tl = new pdfjsLib.TextLayer({ textContentSource: await page.getTextContent(), container: layer, viewport: page.getViewport({ scale: cssScale }) });
+      const tc = await textItemsOf(page);
+      if (tc.truncated) { sayHugePage(src.name, pageNo); return; } // drawn, but not laid out as text
+      const tl = new pdfjsLib.TextLayer({ textContentSource: { items: tc.items, styles: tc.styles }, container: layer, viewport: page.getViewport({ scale: cssScale }) });
       if (el.dataset.want !== want) return;
       el.__text = tl;
       await tl.render();
@@ -9521,7 +9584,15 @@ async function keyBoxesForPage(page) {
   box.style.height = vp.height + "px";
   box.style.setProperty("--scale-factor", "1");
   box.style.setProperty("--total-scale-factor", "1");
-  const tl = new pdfjsLib.TextLayer({ textContentSource: await page.getTextContent(), container: box, viewport: vp });
+  // A FAR HIGHER CEILING HERE, and a page that reaches it is reported rather
+  // than passed over. This is the redaction sweep: it finds where the key's
+  // values stand on the page so they can be blacked out, and a value it never
+  // looked at is a value left in a copy made to hide it. Slow is the right
+  // answer for a check the operator asked for and is watching the progress
+  // of; silently short is not. The ceiling is here at all because the layout
+  // is a node per piece of text, and a page can carry half a million.
+  const tc = await textItemsOf(page, REDACT_ITEMS_MAX);
+  const tl = new pdfjsLib.TextLayer({ textContentSource: { items: tc.items, styles: tc.styles }, container: box, viewport: vp });
   await tl.render();
   const spans = box.querySelectorAll("span");
   const { text, map } = RD.pageTextFromSpans(RD.measureSpans(box));
@@ -9559,7 +9630,7 @@ async function keyBoxesForPage(page) {
     else missed++;
   }
   box.innerHTML = "";
-  return { boxes: out, missed, chars };
+  return { boxes: out, missed, chars, truncated: tc.truncated };
 }
 
 // Per "pdf|page", how much text the sweep found on it. A page with none is a
@@ -9579,6 +9650,10 @@ async function scanForKeyValues() {
   updateRedactBar();
   sweptText = new Map();
   let found = 0, missed = 0, pagesRead = 0;
+  // Pages whose text ran past what the sweep will lay out. Named in the toast:
+  // a page the sweep did not read to the end is a page whose values it cannot
+  // vouch for, and that is the operator's to know rather than ours to bury.
+  const unchecked = [];
   try {
     for (const name of names) {
       const src = pdfSourceFor(name);
@@ -9597,6 +9672,7 @@ async function scanForKeyValues() {
         try { hits = await keyBoxesForPage(page); } catch { continue; }
         sweptText.set(name + "|" + pn, hits.chars);
         missed += hits.missed;
+        if (hits.truncated) unchecked.push(`${name} p. ${pn}`);
         for (const h of hits.boxes) {
           if (store.add(pn, h.rects, { kind: "key", label: h.label })) found++;
         }
@@ -9618,8 +9694,11 @@ async function scanForKeyValues() {
     : `The key binds nothing that stands in ${names.length === 1 ? "this PDF" : "these PDFs"} — ${pagesRead} page${pagesRead === 1 ? "" : "s"} read.`) +
     (missWalk.length
       ? ` The export places ${missOutstanding()} more that the sweep could not find — “Check against the export” walks ${missWalk.length === missOutstanding() ? "them" : `the ${missWalk.length} places they could be`}.`
+      : "") +
+    (unchecked.length
+      ? ` ${unchecked.length} page${unchecked.length === 1 ? "" : "s"} carr${unchecked.length === 1 ? "ies" : "y"} more text than the sweep reads to the end (${unchecked.slice(0, 3).join(", ")}${unchecked.length > 3 ? ", and more" : ""}) — mark those by hand.`
       : ""),
-    { ms: missWalk.length ? 9000 : 5000 });
+    { ms: missWalk.length || unchecked.length ? 9000 : 5000 });
 }
 
 /** The source behind a PDF name: the open document's, else one picked by hand, else the folder's. */
