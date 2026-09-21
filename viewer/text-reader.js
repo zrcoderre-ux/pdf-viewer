@@ -3893,6 +3893,7 @@ function folderRest() {
 // drops it. So there it waits for a gap, as the documents built ahead do, and
 // what the bar says in the meantime is the last reading's answer.
 const SWEEP_QUIET = 1200;
+const SWEEP_DOC_SAY = 1500; // ms one document may take before the console names it
 let sweepTimer = 0;
 async function sweepFolder() {
   if (!dirHandle || !reals || sweep.running || !sweepStale()) return;
@@ -3930,6 +3931,7 @@ async function sweepFolder() {
       // document nobody is looking at. Its pseudonyms are still left to
       // fakeStandsInFile, which reads the page.
       const open = d.handle === fileHandle;
+      const readFrom = performance.now();
       try {
         const text = await (await d.handle.getFile()).text();
         const masked = TD.blankRanges(maskKept(text), TD.citedNameSpans(text));
@@ -3949,6 +3951,17 @@ async function sweepFolder() {
         // fake cannot say whose it is, and does not have to.
         if (fakesFor && fakesRx && !open) for (const w of PK.findReals(fakesRx, text)) fakesFor.set.add(PK.fold(w.fake));
       } catch { readAll = false; /* unreadable: it is not a document this review can answer */ }
+      // A DOCUMENT THAT TOOK TOO LONG SAYS WHICH ONE IT WAS. The sweep reads
+      // every file in the folder, and one file whose shape is expensive holds
+      // the whole tab — which is how a declaration of capitals took the reader
+      // down, and which took four rounds to find because nothing said which
+      // file it had been reading. One line names it the first time now.
+      const readMs = Math.round(performance.now() - readFrom);
+      if (readMs > SWEEP_DOC_SAY) {
+        console.warn(`[Text Reader] ${d.name} took ${readMs} ms to read for names in the clear ` +
+          `(${Math.round(((await d.handle.getFile().catch(() => ({ size: 0 }))).size || 0) / 1024)} KB). ` +
+          `A file that takes seconds here is the shape of it, not its size — say so if the reader stops on it.`);
+      }
       if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
     }
   });

@@ -281,14 +281,27 @@ export function serializeHeld(root) {
 // the forward pass writes no pseudonym over it.
 
 // A party: capitalised words, the small words a name carries, a corporate tail.
-const PARTY = "[A-Z][\\w.'\u2019-]*(?:(?:\\s+(?:of|the|and|&|de|la|le|van|von|del|da|dos|ex|rel\\.)\\s+|\\s+)[A-Z\\d][\\w.'\u2019-]*|,\\s+(?:Inc|LLC|L\\.L\\.C|Corp|Co|Ltd|N\\.A|LP|L\\.P)\\.?)*";
+//
+// COUNTED, NOT UNBOUNDED. A party's words used to be `*`, and a run of
+// capitalised words that is NOT a case name — a declaration's "I, JOHN
+// ANDREW FORSYTHE, DECLARE AS FOLLOWS UNDER PENALTY OF PERJURY…", a caption
+// block, a signature block, a table of exhibits — is exactly what that costs
+// most: from every word in the run, the engine tries every length the party
+// could have been before it gives up for want of a " v. " after it. That is
+// the run squared. Measured on a declaration's capitals: 2,000 words a second,
+// 4,000 in four — and a tab that never comes back on a declaration of any
+// length. A party is a few words (the citation engine allows four and five),
+// so the words are COUNTED here, and the work from each place is a fixed
+// handful rather than the rest of the paragraph.
+const PARTY_WORDS = 8;
+const PARTY = "[A-Z][\\w.'\u2019-]*(?:(?:\\s+(?:of|the|and|&|de|la|le|van|von|del|da|dos|ex|rel\\.)\\s+|\\s+)[A-Z\\d][\\w.'\u2019-]*|,\\s+(?:Inc|LLC|L\\.L\\.C|Corp|Co|Ltd|N\\.A|LP|L\\.P)\\.?){0," + PARTY_WORDS + "}";
 const CASE_NAME_RE = new RegExp(PARTY + "\\s+v(?:s?\\.|s\\b|\\.|\\b)\\s+" + PARTY, "g");
 // What must follow the name for it to be a citation and not a caption: a year
 // in parentheses, a volume and reporter, or supra. A page or pin may come
 // first ("at p. 220"), and a comma or an opening bracket may sit between.
 const CITE_AFTER_RE = /^[\s,;]*(?:\((?:[^)]{0,40}\b\d{4})\)|\d{1,4}\s+[A-Z][\w.]*\s*\d|supra\b|\[\d)/i;
 // A short form: the party alone, with supra after it.
-const SUPRA_RE = new RegExp("[A-Z][\\w.'\u2019-]*(?:\\s+[A-Z][\\w.'\u2019-]*)*(?=,?\\s+supra\\b)", "g");
+const SUPRA_RE = new RegExp("[A-Z][\\w.'\u2019-]*(?:\\s+[A-Z][\\w.'\u2019-]*){0," + PARTY_WORDS + "}(?=,?\\s+supra\\b)", "g");
 
 /**
  * Where `text` names a decided case: `[start, end]` per span, in order. A span

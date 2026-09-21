@@ -264,6 +264,32 @@ console.log("cited case names");
     [spans("The declaration of Helen Rasho, served on Vazqez."), citedNameSpans(""), citedNameSpans(null)], [[], [], []]);
   check("a value that STRADDLES a case name's edge is not inside it",
     at("...said Rasho v. Quillmark (1977) 70 Cal.App.3d 216", "said Rasho"), false);
+  // A DECLARATION'S CAPITALS, which is what a party's words being unbounded
+  // cost. A run of capitalised words that is not a case name — the jurat, a
+  // caption block, a signature block, a list of exhibits — made the scanner
+  // try every length the party could have been, from every word in the run,
+  // before giving up for want of a " v. " after it: the run squared. It read
+  // 2,000 words in a second, 4,000 in four, and a declaration of any length
+  // not at all. The words are counted now, so the work from each place is a
+  // fixed handful.
+  {
+    const JURAT = "I JOHN ANDREW FORSYTHE DECLARE AS FOLLOWS UNDER PENALTY OF PERJURY UNDER THE "
+      + "LAWS OF THE STATE OF CALIFORNIA THAT THE FOREGOING IS TRUE AND CORRECT AND THAT THIS "
+      + "DECLARATION WAS EXECUTED AT LOS ANGELES CALIFORNIA ";
+    const short8 = JURAT.repeat(80), long8 = JURAT.repeat(320);   // ~17 KB and ~67 KB
+    const ms = (t) => { const from = Date.now(); citedNameSpans(t); return Date.now() - from; };
+    const a = ms(short8), b = ms(long8);
+    check(`a declaration's capitals are read in step with their length (${a} ms then ${b} ms for four times the text)`,
+      b < Math.max(60, a * 12), true);
+    check("…and at the size a real declaration is, it is not seconds", ms(JURAT.repeat(1280)) < 3000, true);
+    check("nothing in the jurat is taken for a case name", citedNameSpans(JURAT), []);
+  }
+  // The bound is a party's WORDS, and a long one still reads as it did: this
+  // name always began at "Department", the pattern being unable to cross the
+  // two small words of "of the State" whatever the count allows.
+  check("a long institutional party is spanned as before",
+    spans("People of the State of California ex rel. Department of Transportation v. Quillmark Industries, Inc. (2019) 31 Cal.App.5th 1121"),
+    ["Department of Transportation v. Quillmark Industries, Inc."]);
 }
 
 // ---- the values file ---------------------------------------------------------------

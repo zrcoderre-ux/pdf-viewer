@@ -389,6 +389,47 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### THE FREEZE: a party's words were unbounded
+
+Four rounds of this were spent on memory, on the PDFs and on the passes, and
+the answer was one regular expression.
+
+`citedNameSpans` blanks the names of DECIDED CASES out of a document before
+the folder sweep looks for names left in the clear — a party of a cited
+decision is that decision's, not this matter's. A party was written as
+capitalised words repeated without a bound:
+
+    [A-Z][\w.'-]*(?:(?:\s+(?:of|the|and|…)\s+|\s+)[A-Z\d][\w.'-]*|…)*
+
+A run of capitalised words that is NOT a case name is what that costs most.
+From every word in the run the engine tries every length the party could have
+been, and gives up on each only for want of a " v. " after it: the run
+squared. A declaration is full of such runs — the jurat, the caption block,
+the signature block, a list of exhibits — and a gap spans a newline and the
+pleading gutter number with it, so a page of capitalised lines is ONE run, not
+thirty. Measured: 2,000 words of a jurat in a second, 4,000 in four, 5,700 in
+four and a quarter; a caption block of 400 pleading lines in 678 ms, growing
+fourfold for every doubling. Extrapolated to a few thousand lines it is the
+twenty-one-second task the operator's console reported, and the tab does not
+come back from it.
+
+The citation engine proper had this right — `citation-linker.js` writes
+`(?:\s+${_PARTY_NEXT}){0,4}` and `{0,5}` — so the fix is the house's own:
+`PARTY_WORDS` counts them. Eight, which is longer than the engine allows and
+still a fixed handful of work from each place. The same bound goes on
+`SUPRA_RE`, which has the same shape and the same appetite.
+
+The result is linear: the jurat at 34 KB falls from 4,175 ms to 13 ms, 533 KB
+of it reads in 252 ms, the caption block falls from 678 ms to 7 ms, and the
+whole per-document sweep pass over a 419 KB declaration is 40 ms. A long
+institutional party spans exactly what it spanned before — the pattern could
+never cross the two small words of "of the State", whatever the count allowed,
+so the bound took nothing away.
+
+And the sweep names a document that took more than `SWEEP_DOC_SAY` to read.
+Nothing said which file was being read when the reader went down, which is
+most of why this took four rounds.
+
 ### A pass IN FLIGHT is a pass, and it is not an extension
 
 The first report said `NOT one of the reader's own passes: something else on
