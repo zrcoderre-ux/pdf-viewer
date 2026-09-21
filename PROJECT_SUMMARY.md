@@ -389,6 +389,43 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### The reader says what held it, in the console
+
+Three rounds of this were diagnosed from a synthetic folder, and each round
+fixed something real that was not the thing the operator was hitting. The
+report existed — `__textReaderBlocked()` — but asking somebody whose tab has
+stopped answering to type a function call into a console is asking them to
+diagnose it themselves.
+
+So a hold says so where it can be copied. Past `HOLD_SAY` (300 ms) the long-
+task observer writes one line, at most one every `HOLD_QUIET` (1.5 s) with the
+rest collapsed into a count: the pass that did it and what the reader was
+carrying at the time (`holding()`: pages live of pages held, members on the
+reel, PDFs open, pages drawn, documents read ahead, the js heap where the
+browser reports it, the worksheet's rows, the key's bindings). The line
+distinguishes the two kinds of hold, which is the thing worth knowing:
+
+    [Text Reader] held the thread 315 ms — opening the document · 200 of 200
+    pages live, 1 on the reel, 0 PDFs open, 0 drawn, 0 read ahead, 14 MB of js,
+    key 156
+
+    [Text Reader] held the thread 700 ms — NOT one of the reader's own passes:
+    something else on the page (an extension, most likely) · …
+
+For the second line to mean anything, the reader's own heavy passes have to be
+named, or one of them would be reported as somebody else's: `reelAllLive`
+(which the leak review asks for, and which builds back every page of the reel),
+`reelTrim`, `buildPdfPane`, `applySwaps`, `applyPageWidth`, `paintRowMarks`,
+`renderDocList`, `markDocAlerts` and `renderLeaksTab` now run under `during`
+with the rest.
+
+And `oneDocAtATime` is size-aware, which is the count-versus-size mistake made
+a third time: six two-hundred-page exhibit sets are four exports short of
+`BIG_FOLDER` and carry six times the pages the number was drawn for, so the
+leak walk fetching one document at a time, the reel's lower ceiling and the
+sweep waiting for a gap all stayed off for exactly the folder that needed them.
+`BIG_PAGES` (120 pages on screen) turns them on.
+
 ### The extension reading its own reader
 
 The reader hosted over https is an ordinary website to this extension's own

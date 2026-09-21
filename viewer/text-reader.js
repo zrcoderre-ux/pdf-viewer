@@ -306,6 +306,42 @@ function passAt(start, end) {
   for (const p of passes) if (p.from <= end && p.to >= start) best = p.what;
   return best;
 }
+// …AND IT SAYS SO IN THE CONSOLE, WHERE IT CAN BE COPIED.
+//
+// The report has always been there to ask for (__textReaderBlocked), which is
+// no use to somebody whose tab is the thing that has stopped answering — and
+// asking an operator to type a function call into a console is asking them to
+// diagnose it themselves. A tab that holds now writes a line per hold, with
+// the pass that did it and what the reader was carrying at the time, so the
+// console they can already copy says which of the two kinds it is: a pass of
+// the reader's own, which is ours to fix, or a task with no pass of ours
+// anywhere in it — something else on the page, an extension most often.
+const HOLD_SAY = 300;      // ms a task has to hold before it is worth a line
+const HOLD_QUIET = 1500;   // …and how long the console is left alone after one
+let heldSaidAt = 0, heldSince = 0, heldRuns = 0;
+function sayHeld(ms, what) {
+  heldSince += ms;
+  heldRuns++;
+  const now = Date.now();
+  if (now - heldSaidAt < HOLD_QUIET) return;
+  heldSaidAt = now;
+  const runs = heldRuns > 1 ? ` (${heldRuns} holds, ${(heldSince / 1000).toFixed(1)}s in all)` : "";
+  heldSince = 0;
+  heldRuns = 0;
+  console.warn(`[Text Reader] held the thread ${ms} ms — ` +
+    (what || "NOT one of the reader's own passes: something else on the page (an extension, most likely)") +
+    runs + ` · ${holding()}`);
+}
+/** What the reader is carrying, for the line above: the sizes that explain it. */
+function holding() {
+  const live = pagesEl ? pagesEl.querySelectorAll(".tpage:not(.shed)").length : 0;
+  const all = pagesEl ? pagesEl.querySelectorAll(".tpage").length : 0;
+  const open = [...pdfCache.keys()].filter((n) => { const p = pdfCache.get(n); return !!(p && p.__info); }).length;
+  const mem = performance.memory ? `, ${Math.round(performance.memory.usedJSHeapSize / 1e6)} MB of js` : "";
+  return `${live} of ${all} pages live, ${reel.length} on the reel, ${open} PDF${open === 1 ? "" : "s"} open, ` +
+    `${drawnSlots.size} drawn, ${ready.size} read ahead${mem}` +
+    (leaks ? `, LEAKS ${leakRows().length} rows` : "") + (key ? `, key ${key.pairs.length}` : ", no key");
+}
 if (typeof PerformanceObserver === "function") {
   try {
     new PerformanceObserver((list) => {
@@ -315,6 +351,7 @@ if (typeof PerformanceObserver === "function") {
         const what = passAt(e.startTime, e.startTime + e.duration);
         blocked.push({ ms, what, at: new Date().toLocaleTimeString() });
         if (blocked.length > 60) blocked.shift();
+        if (ms >= HOLD_SAY) sayHeld(ms, what);
         // Long enough that the operator felt it: say so, and say what it was.
         if (ms >= 2500) {
           const line = `The reader held the page for ${(ms / 1000).toFixed(1)} seconds${what ? " — " + what : ""}.`;
@@ -332,6 +369,8 @@ if (typeof PerformanceObserver === "function") {
 }
 /** Every long task since the page was opened, worst first — for a bug report. */
 window.__textReaderBlocked = () => blocked.slice().sort((a, b) => b.ms - a.ms);
+/** …and what it was carrying, the line the holds are reported with. */
+window.__textReaderHolding = () => holding();
 function idleClock() {
   return new Promise((res) => {
     if (typeof requestIdleCallback === "function") requestIdleCallback(res, { timeout: 250 });
@@ -1425,6 +1464,9 @@ async function openFolderDoc(d) {
 }
 
 function renderDocList() {
+  return during("listing the folder's documents", () => renderDocListNow());
+}
+function renderDocListNow() {
   docsList.innerHTML = "";
   for (const d of folderDocs) {
     const li = document.createElement("li");
@@ -1505,6 +1547,9 @@ function alertTitle(a) {
 }
 /** The mark itself, put beside each document that has one and taken off the rest. */
 function markDocAlerts() {
+  return during('marking what each document carries', () => markDocAlertsNow());
+}
+function markDocAlertsNow() {
   const alerts = docAlerts();
   for (const li of docsList.children) {
     const a = alerts.get(li.dataset.name);
@@ -2818,6 +2863,9 @@ function pageWidthNow() {
   return Math.round(paperWidth() * zoomNow());
 }
 function applyPageWidth() {
+  return during('laying the pages out at their width', () => applyPageWidthNow());
+}
+function applyPageWidthNow() {
   const root = document.documentElement.style;
   root.setProperty("--reader-size-eff", (settings.fontSize * zoomNow()) + "px");
   const w = pageWidthNow();
@@ -3137,6 +3185,9 @@ function giveUpOnMarks(spent, page, pages) {
 
 /** The current LEAKS row's value, marked wherever it stands. */
 function paintRowMarks() {
+  return during("marking the worksheet's rows", () => paintRowMarksNow());
+}
+function paintRowMarksNow() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   leakRowRanges = [];
   if (leakRowValue) for (const body of pageBodies()) for (const r of leakMatches(body, leakRowValue)) leakRowRanges.push({ body, range: r });
@@ -5163,6 +5214,9 @@ function renderLeaksTabState() {
 }
 /** The whole list, from scratch: a worksheet attached, or dropped. */
 function renderLeaksTab() {
+  return during("listing the worksheet's rows", () => renderLeaksTabNow());
+}
+function renderLeaksTabNow() {
   const rows = leakRows();
   const frag = document.createDocumentFragment();
   leakLis = rows.map((r, i) => {
@@ -6710,6 +6764,9 @@ function sectionsByIndex() {
  * already in the state it should be in costs a comparison.
  */
 function reelTrim() {
+  return during('letting go of the pages the reading has left', () => reelTrimNow());
+}
+function reelTrimNow() {
   // Two documents are worth shedding between where the documents are long:
   // two exhibit sets of two hundred pages is four hundred sections held for
   // the sake of the one being read.
@@ -6776,6 +6833,9 @@ function afterShedChange() {
  * nothing is shed at all (`reelTrim`), so this is asked once, as it opens.
  */
 function reelAllLive() {
+  return during("building the reel's pages back for the review", () => reelAllLiveNow());
+}
+function reelAllLiveNow() {
   if (!reel.some((m) => m.shed)) return false;
   const byIndex = sectionsByIndex();
   for (const m of reel) if (m.shed) unshedMember(m, memberSections(m, byIndex));
@@ -7348,8 +7408,18 @@ function paintWarmInto(key) {
 // them is what makes stepping between them instant. It is the big folder —
 // hundreds of text files, each with a PDF behind it — that cannot be held at
 // once and must not be asked for at once.
-const BIG_FOLDER = 24; // exports past which the review goes one document at a time
-function oneDocAtATime() { return folderDocs.length > BIG_FOLDER; }
+// A folder is big by its COUNT of exports or by the LENGTH of what is open —
+// the same mistake as counting PDFs would be, made about documents. Six
+// two-hundred-page exhibit sets is four exports short of "big" and carries six
+// times the pages of the two dozen pleadings this number was drawn for, so
+// every gate hanging off this question — the leak walk fetching one document
+// at a time, the reel's lower ceiling, the folder sweep waiting for a gap —
+// stayed off for exactly the folder that needed them.
+const BIG_FOLDER = 24;  // exports past which the review goes one document at a time
+const BIG_PAGES = 120;  // …or pages on screen, however few documents they are
+function oneDocAtATime() {
+  return folderDocs.length > BIG_FOLDER || !!(doc && doc.pages.length > BIG_PAGES);
+}
 /**
  * The documents the worksheet's pages may be fetched from, in visit order —
  * the document in front alone until its rows are answered, then it and the
@@ -8111,6 +8181,9 @@ function inlineWidth(sec) { return Math.max(200, sec.clientWidth); }
 
 // ── side by side ──
 function buildPdfPane() {
+  return during('building the PDF pane', () => buildPdfPaneNow());
+}
+function buildPdfPaneNow() {
   // The slots about to be thrown away are holding pdf.js pages — their
   // operator lists and their decoded images, fifteen megabytes a page of a
   // scan. Dropped with the pane they would never be given back, and reading
@@ -8911,6 +8984,9 @@ function refreshSwapButtons() {
 }
 /** Show or hide the PDF page inside each swapped text page (never while side by side). */
 function applySwaps() {
+  return during('putting the PDF pages into the text', () => applySwapsNow());
+}
+function applySwapsNow() {
   // A PDF page coming into a text page, or leaving it, moves the text below
   // it and the citation underlines with it. Nothing swapped, nothing moved:
   // a document that opens with no pages swapped — which is most of them —
