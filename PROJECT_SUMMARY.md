@@ -389,6 +389,25 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### Letting go of the case folder
+
+Everything the reader does BESIDES the document in front of it hangs off
+having a folder: the sweep that reads every other export for names in the
+clear, the documents built ahead of a review, the reel hanging the next export
+under this one, the PDFs matched by name. That is what a case folder is for —
+and it is also every pass that can take a folder's worth of work on a file the
+reader has not seen yet. Short of closing the tab there was no way to say
+"this one file, and nothing else".
+
+`forgetFolder` (the button under the Documents list) drops the folder and
+everything read from it or through it, and KEEPS THE KEY: the marks are the
+reason to use this reader at all, and they belong to the key, which the key
+library holds. A reel of several documents collapses to the one being read,
+since there is no longer anywhere to read on to. The folder is FORGOTTEN as
+well as dropped (`forgetDir`) — the reader re-attaches a remembered folder as
+soon as a file from it is opened, so one merely dropped would be back on the
+next document.
+
 ### THE HANG: a page's text had no ceiling
 
 Chrome's own code for it was `RESULT_CODE_HUNG` — the tab killed for not

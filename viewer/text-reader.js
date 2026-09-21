@@ -1178,6 +1178,19 @@ async function rememberDir(handle) {
     db.close();
   } catch { /* the folder simply is not remembered */ }
 }
+/** …and the opposite: a folder the reader is to stop remembering. */
+async function forgetDir(name) {
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(DIRS_STORE, "readwrite");
+      tx.objectStore(DIRS_STORE).delete(name);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch { /* it was not remembered, which is where we wanted to get to */ }
+}
 async function rememberedDirs() {
   try {
     const db = await openDb();
@@ -1494,6 +1507,72 @@ async function openFolder(startIn) {
 $("open-folder").addEventListener("click", () => openFolder());
 
 /**
+ * LET GO OF THE CASE FOLDER, and read what is opened on its own.
+ *
+ * Everything the reader does BESIDES the document in front of it hangs off
+ * having a folder: the sweep that reads every other export for names in the
+ * clear, the documents built ahead of a review, the reel hanging the next
+ * export under this one, the PDFs matched by name. That is the whole point of
+ * a case folder — and it is also every pass that can take a folder's worth of
+ * work on a file the reader has not seen yet. A reader who wants one file at
+ * a time, because one file at a time is what is working, has no way to say so
+ * short of closing the tab.
+ *
+ * So: the folder goes, and the KEY STAYS. The marks are the reason to use
+ * this reader at all, and they are the key's, not the folder's — a key, once
+ * loaded, is the key library's. What goes is the folder and everything read
+ * from it or through it.
+ *
+ * It is forgotten as well as dropped. The reader re-attaches a folder it
+ * remembers as soon as a file from it is opened (attachKeyForFile), so a
+ * folder merely dropped would be back on the next document. Open case folder
+ * brings it back when it is wanted.
+ */
+async function forgetFolder() {
+  if (!dirHandle) return;
+  const was = folderName;
+  await forgetDir(dirHandle.name);
+  forgetPdfs();
+  dropReady();
+  dropSweep();
+  clearTimeout(sweepTimer);
+  caseFakes = { key: null, docs: null, set: null };
+  findRows = [];
+  findScanFor = null;
+  dirHandle = null;
+  folderName = "";
+  folderDocs = [];
+  folderPdfs = [];
+  flagsFor = null;
+  // The reel is the folder read as one document: with no folder there is
+  // nothing to read on to, so what is open becomes the whole of it. The pages
+  // hanging off it belong to files this reader is no longer holding.
+  if (doc && reel.length > 1) {
+    const m = reelCurrent() || reel[0];
+    await openFolderDocLike(m);
+  } else {
+    reelDone = true;
+    reelDoneUp = true;
+  }
+  renderDocList();
+  renderFlags();
+  renderReelState();
+  refreshPdf();
+  renderNamesBar();
+  renderLeakStatus();
+  toast(`${was} is let go. The reader reads what you open, on its own — the key stays attached. “Open case folder” brings it back.`, { ms: 7000 });
+}
+/** The one member of a reel, opened on its own: what is left when the folder goes. */
+async function openFolderDocLike(m) {
+  if (!m || !m.handle) { reelDone = true; reelDoneUp = true; return; }
+  try {
+    const f = await m.handle.getFile();
+    await openFile(f, m.handle);
+  } catch { reelDone = true; reelDoneUp = true; }
+}
+$("forget-folder").addEventListener("click", () => { forgetFolder(); });
+
+/**
  * Whether what was picked is the Text Files subfolder rather than the case
  * folder: named as PDF-Linker names it, or carrying exports and none of the
  * things that only a case folder has.
@@ -1539,6 +1618,8 @@ function renderDocListNow() {
   renderDocReady();
   markDocList();
   markDocAlerts();
+  const acts = $("docs-actions");
+  if (acts) acts.hidden = !dirHandle;
 }
 function markDocList() {
   for (const li of docsList.children) li.classList.toggle("current", li.dataset.name === fileName);
@@ -3933,13 +4014,27 @@ async function sweepFolder() {
       const open = d.handle === fileHandle;
       const readFrom = performance.now();
       try {
+        // EVERY STEP SAYS ITS OWN NAME. The pass alone said "reading the rest
+        // of the folder", which names the file but not what was being done to
+        // it — and what was being done to it is the fix. Each of these is a
+        // whole-document pass over the text, any one of which can be the hold.
+        const step = (what, size) => noteDoing(pass,
+          `reading the rest of the folder (${sweep.at} of ${folderDocs.length}: ${d.name}${size ? ", " + Math.round(size / 1024) + " KB" : ""}) — ${what}`);
+        step("opening the file");
         const text = await (await d.handle.getFile()).text();
-        const masked = TD.blankRanges(maskKept(text), TD.citedNameSpans(text));
+        step("finding the names of cited decisions", text.length);
+        const spans = TD.citedNameSpans(text);
+        step("masking the values kept as they read", text.length);
+        const kept = maskKept(text);
+        step("blanking the cited names", text.length);
+        const masked = TD.blankRanges(kept, spans);
+        step("looking for the key's real values", text.length);
         const found = PK.findReals(reals, masked);
         // …and the values flagged for the next run, counted the way the page
         // counts them: over the file's own text, where a value that stands is
         // really standing — a fake is a fake on disk, with no real name
         // painted over it.
+        step("counting the values flagged for the next run", text.length);
         const flags = flagRx ? countMatches(flagRx, text) : 0;
         if (found.length || flags) sweep.rows.push({ doc: d, values: found.map((f) => f.real), flags });
         // …and, from the same reading, which PSEUDONYMS stand here. That is
@@ -3949,7 +4044,10 @@ async function sweepFolder() {
         // and a party of a cited decision is not spared either, the run having
         // faked it all the same. Only `fake` is read off the row: an ambiguous
         // fake cannot say whose it is, and does not have to.
-        if (fakesFor && fakesRx && !open) for (const w of PK.findReals(fakesRx, text)) fakesFor.set.add(PK.fold(w.fake));
+        if (fakesFor && fakesRx && !open) {
+          step("looking for the pseudonyms the run wrote", text.length);
+          for (const w of PK.findReals(fakesRx, text)) fakesFor.set.add(PK.fold(w.fake));
+        }
       } catch { readAll = false; /* unreadable: it is not a document this review can answer */ }
       // A DOCUMENT THAT TOOK TOO LONG SAYS WHICH ONE IT WAS. The sweep reads
       // every file in the folder, and one file whose shape is expensive holds

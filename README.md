@@ -1600,6 +1600,13 @@ app, which routes it to the reader tab.
   document over again, and is a reel already), and it stops after 25 documents
   in all, either end — a page of a long export is not free, and a folder can
   hold three hundred — saying so, with the next one a click away in the list.
+  **Forget this folder** (under the Documents list) lets go of the case
+  folder and reads whatever you open on its own: no sweep of the other
+  exports, nothing read ahead, no reel reading on, no PDFs matched by name.
+  **The key stays attached**, so the marks stand. The folder is not remembered
+  either, so opening a file from it does not bring it back — **Open case
+  folder** does, whenever you want it again.
+
   In a **big case folder** (more than two dozen exports) it stops at 8: there
   every document has a PDF behind it, and a review holds every page of the
   reel live. It also stops at **600 pages** however few documents that is,
