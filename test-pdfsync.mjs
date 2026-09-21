@@ -5,7 +5,7 @@ import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout,
-  matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers,
+  matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -218,6 +218,26 @@ console.log("the type a page is set in: the PDF's own sizes at the reading size"
   check("a line with no place is passed over, not pushed", spreadTops([0, null, 3], 14), [0, null, 14]);
   check("each line's own box: a heading's tall box pushes, a footnote's small one does not", spreadTops([0, 10, 30, 36], [22, 14, 14, 9]), [0, 22, 36, 50]);
   check("no box, nothing moves", spreadTops([0, 5], 0), [0, 5]);
+}
+
+console.log("the PDFs the reading has reached");
+{
+  // A reel, or a combined file: three pages of each document, one PDF behind each.
+  const many = [];
+  for (let d = 0; d < 20; d++) for (let p = 0; p < 3; p++) many.push({ name: `D${d}.pdf` });
+  check("the page under the reading line comes first", pdfsNear(many, 7, 40, 4)[0], "D2.pdf");
+  check("then outward, a page at a time, either side", pdfsNear(many, 7, 40, 4), ["D2.pdf", "D1.pdf", "D3.pdf", "D0.pdf"]);
+  check("the limit is what stops it, not the document", pdfsNear(many, 30, 40, 2), ["D10.pdf", "D9.pdf"]);
+  check("reach is in pages: one document either side at three pages each", pdfsNear(many, 9, 3, 9), ["D3.pdf", "D2.pdf", "D4.pdf"]);
+  check("a folder of three hundred is still a handful", pdfsNear(new Array(900).fill(0).map((_, i) => ({ name: `D${Math.floor(i / 3)}.pdf` })), 450, 40, 4).length, 4);
+  check("at the head of the document it reads forward", pdfsNear(many, 0, 40, 3), ["D0.pdf", "D1.pdf", "D2.pdf"]);
+  check("at the foot it reads back", pdfsNear(many, 59, 40, 3), ["D19.pdf", "D18.pdf", "D17.pdf"]);
+  check("a page with no PDF is passed over", pdfsNear([null, null, { name: "A.pdf" }, null], 0, 40, 4), ["A.pdf"]);
+  check("plain names are names too", pdfsNear(["A.pdf", "B.pdf"], 0, 40, 4), ["A.pdf", "B.pdf"]);
+  check("no pages, nothing to hold", pdfsNear([], 0, 40, 4), []);
+  check("a limit of none holds none", pdfsNear(many, 0, 40, 0), []);
+  check("a reading line past the end is the end", pdfsNear(many, 999, 40, 1), ["D19.pdf"]);
+  check("…and before the start is the start", pdfsNear(many, -5, 40, 1), ["D0.pdf"]);
 }
 
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");

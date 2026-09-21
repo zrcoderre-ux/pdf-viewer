@@ -304,11 +304,51 @@ a case of a document or two and fatal for a folder of three hundred: each
 holds its bytes, its pages as pdf.js holds them and the line grid read off
 every one of them, and a review that hops from document to document opened
 them all. `trimPdfs` (called as the document changes and as the worksheet's
-window moves) destroys the PDFs nothing points at any more — `pdfsInUse` is
-the open document's own sources, the swapped-in pages, the PDFs picked by
-hand and the warm window — keeping the PDF_HELD most recently asked for
-past those, since stepping back to the document just answered should not
-read it again. `loadPdf` moves a PDF it hands back to the end of the map,
+window moves, and as the reading scrolls) destroys the PDFs nothing points at
+any more, keeping the PDF_HELD most recently asked for past those, since
+stepping back to the document just answered should not read it again.
+
+`pdfsInUse` is WHAT THE READING HAS REACHED, not what the document names.
+Naming the open document's every source pinned the whole case again by
+another road: the reel hangs twenty exports off one document and a
+`Combined Text.txt` names three hundred, so every PDF the reader had ever
+scrolled past stayed open and the trim had nothing left to close. The window
+is `pdfsync.pdfsNear` instead — the page the reading line sits on
+(`readingPage`, the same line the reel reads "which document" from), out to
+`PDF_REACH` pages either side and `PDF_NEAR` documents at the most — plus
+whatever an IntersectionObserver says is on screen (`pdfInView`, so a page is
+never closed under the drawing), the swapped-in pages, the warm window and
+any PDF carrying redaction boxes. A PDF picked by hand is no longer pinned:
+the File it was picked from is still held, so closing it costs a re-read and
+nothing else. A folder of three hundred holds four to seven open, whatever it
+holds: 40 open → 4 on a combined file of forty documents read end to end.
+
+The pane no longer asks every slot for its page size as it is built. That ask
+was a `loadPdf` per slot, so a combined file of a big folder read, parsed and
+measured the whole case folder before a page could be looked at. `buildPdfPane`
+opens only what `pdfsInUse` already allows; the rest stand at letter until the
+reading comes near (`renderInto` opens the PDF of a slot coming into view) or
+their PDF is opened for something else. Page sizes are then kept by name in
+`pdfSizes` AFTER the PDF is closed — two numbers a page, and a page's size
+cannot change under a reader who is only reading — so a PDF read once leaves
+the pane its geometry for the session and `sizeSlotsFor` gives every slot of
+it its height at once. A slot with nothing known about its own page stands at
+`pageRatioGuess`: the paper the first PDF of this folder actually had, since a
+case folder's filings are printed on one paper, and the slots standing at the
+wrong guess are restood on it once, as that first PDF lands — never again,
+because a slot the reader has scrolled past is holding the column up under
+them. On a combined file of forty documents that is every slot at the real
+page shape with four PDFs open, where it used to take forty.
+
+Two more ceilings follow the folder's size. The reel stops at `REEL_MAX_BIG`
+(8) rather than `REEL_MAX` (25) in a folder of more than `BIG_FOLDER` exports,
+since nothing is shed under a review and every member there has a PDF behind
+it. And the folder sweep, which is an answer about the keeps and so is thrown
+away at every decision, waits `SWEEP_QUIET` for a gap in a big folder before
+reading the folder again: three hundred files re-read for each decision of a
+walk that takes one every few seconds is the folder read over and over while
+the operator waits, and the bar shows the last reading's answer in the
+meantime. `loadPdf` moves a PDF it hands back to the end of the map,
 which makes the insertion order least-recently-used first, and destroys one
 that was closed while it was still opening; `readPdfGrid` stops when its own
 PDF is no longer the cached one.

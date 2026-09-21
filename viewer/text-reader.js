@@ -3780,8 +3780,26 @@ function folderRest() {
   const n = rest.reduce((t, r) => t + r.count, 0);
   return `\u00b7 ${n} more in ${rest.length} other document${rest.length === 1 ? "" : "s"}`;
 }
+// How long a BIG folder is left alone after the operator does something
+// before it is read again.
+//
+// The sweep is an answer about the keeps and the flags, so taking either
+// throws it away and the next paint asks for it again. In a folder of a dozen
+// that is a dozen files read in the gaps between keystrokes and nobody
+// notices. In one of three hundred it is three hundred files opened, read and
+// matched for every decision of a walk that takes one every few seconds — the
+// folder read over and over, and never finishing before the next decision
+// drops it. So there it waits for a gap, as the documents built ahead do, and
+// what the bar says in the meantime is the last reading's answer.
+const SWEEP_QUIET = 1200;
+let sweepTimer = 0;
 async function sweepFolder() {
   if (!dirHandle || !reals || sweep.running || !sweepStale()) return;
+  if (oneDocAtATime()) {
+    const quiet = Date.now() - busyAt;
+    clearTimeout(sweepTimer);
+    if (quiet < SWEEP_QUIET) { sweepTimer = setTimeout(sweepFolder, SWEEP_QUIET - quiet); return; }
+  }
   sweep = { stamp: { reals, keeps, master: masterKeeps, docs: folderDocs, flagged }, rows: [], at: 0, running: true };
   const mine = sweep.stamp;
   // …and the fakes, only where the folder has not already been read for them
@@ -6103,7 +6121,16 @@ const REEL_AHEAD_SCREENS = 2;
 // folder can hold three hundred of them: read end to end that is a tab that
 // stops answering. At the ceiling the reel stops and says so, and opening the
 // next document on its own starts a fresh reel from there.
+//
+// FEWER IN A BIG FOLDER. A dozen exports of a small case are a reel a reader
+// can hold in mind and a tab can hold in memory. A folder of hundreds is a
+// document with a PDF behind it every time, and a review holds every page of
+// the reel live (nothing is shed under one). So the ceiling there is the few
+// documents either side of the one being read, which is as far as a reading
+// goes before it wants a different document anyway.
 const REEL_MAX = 25;
+const REEL_MAX_BIG = 8;
+function reelMax() { return oneDocAtATime() ? REEL_MAX_BIG : REEL_MAX; }
 
 let reel = [];          // [{ name, handle, newline, trailingNewline, from, count, dirty, spots }]
 let reelAt = 0;         // the member being read: an index into `reel`
@@ -6197,10 +6224,10 @@ function reelPrevDoc() {
 
 /** Whether another document may go on the reel at all — either end of it. */
 function reelRoom() {
-  if (reel.length < REEL_MAX) return true;
+  if (reel.length < reelMax()) return true;
   reelDone = true;
   reelDoneUp = true;
-  toast(`${REEL_MAX} documents is as far as one reel goes — open another from the Documents list to read on from there.`, { ms: 6000 });
+  toast(`${reelMax()} documents is as far as one reel goes${oneDocAtATime() ? " in a folder this size" : ""} — open another from the Documents list to read on from there.`, { ms: 6000 });
   renderReelState();
   return false;
 }
@@ -6484,6 +6511,21 @@ function reelOn() {
 }
 
 /**
+ * The page the reading line sits on — a third of the way down the stage,
+ * where the eye is. Which document is being read and which PDFs are in use
+ * are both asked from here, so both mean the same page.
+ */
+function readingPage() {
+  const line = stageEl.scrollTop + stageEl.clientHeight * 0.35;
+  let at = 0;
+  for (const sec of pagesEl.querySelectorAll(".tpage")) {
+    if (sec.offsetTop > line) break;
+    at = Number(sec.dataset.index) || 0;
+  }
+  return at;
+}
+
+/**
  * The document being read, from where the reading line sits. The status bar,
  * the Documents list, the spot keeps and the file a save adopts all mean "this
  * document", and with several on screen the one meant is the one being looked
@@ -6491,13 +6533,7 @@ function reelOn() {
  */
 function reelSyncCurrent() {
   if (reel.length < 2) return;
-  const line = stageEl.scrollTop + stageEl.clientHeight * 0.35;
-  let at = 0;
-  const secs = pagesEl.querySelectorAll(".tpage");
-  for (const sec of secs) {
-    if (sec.offsetTop > line) break;
-    at = reelIndexOf(Number(sec.dataset.index));
-  }
+  const at = reelIndexOf(readingPage());
   if (at === reelAt) return;
   // The one being left keeps its own spot keeps; the one being entered brings
   // its own back, and becomes the document a save adopts and the list marks.
@@ -6532,7 +6568,7 @@ function renderReelState() {
  * document before this one, and the answer is the same either way.
  */
 function reelEndNote() {
-  if (reel.length >= REEL_MAX) return " (as far as one reel goes)";
+  if (reel.length >= reelMax()) return " (as far as one reel goes)";
   const on = !!reelNextDoc(), back = !!reelPrevDoc();
   if (!on && !back) return " (the folder is read out)";
   if (!on) return " (read to the end of the folder)";
@@ -6765,12 +6801,23 @@ let pickedPdfs = new Map(); // PDFs picked by hand for a combined file, by name:
 let pickedByMember = new Map(); // …and the member each was matched to by ORDER, where names could not
 let swaps = new Set();      // "<pdf name>|<page>" swapped in
 const pdfCache = new Map(); // name → Promise<{ pdf, count, sizes, name }>
+const pdfInView = new Set(); // text pages whose PDF page an observer says is on screen
+// Every page's size, by PDF name, KEPT AFTER THE PDF IS CLOSED. Two numbers a
+// page: what a slot needs to stand at the right height is nothing beside what
+// it costs to open the file again for them, and a page's size cannot change
+// under a reader who is only reading. So a PDF read once leaves the pane its
+// geometry for the session, and a slot the reading has not reached yet is the
+// only one still guessing.
+const pdfSizes = new Map(); // name → [{ w, h }]
 
 function forgetPdfs() {
   cancelPdfJobs();
   dropWarmPages();
   for (const p of pdfCache.values()) p.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }).catch(() => {});
   pdfCache.clear();
+  pdfInView.clear();
+  pdfSizes.clear();
+  pageRatioKnown = false; // another folder, another paper
   pdfPicked = null;
   pickedPdfs = new Map();
   pickedByMember = new Map();
@@ -6785,20 +6832,33 @@ function forgetPdfs() {
 // own PDF behind it, and every hop opened another and closed none: the tab
 // took the whole folder into memory a document at a time until it went down.
 //
-// So a PDF nothing points at any more is destroyed. What points at one: the
-// open document (its pages are drawn from it), a page swapped into the text,
-// a PDF picked by hand, and the window of pages held ready for the worksheet.
+// So a PDF nothing points at any more is destroyed. What points at one: a
+// page ON SCREEN (its bitmap is drawn from it), the pages the READING has
+// reached either side of that, a page swapped into the text, the window of
+// pages held ready for the worksheet, and a PDF carrying redaction boxes.
 // Past those, the few most recently opened are kept — stepping back to the
 // document just answered should not read it again — and the rest go.
-const PDF_HELD = 3; // PDFs kept open past the ones in use
+//
+// WHAT THE READING HAS REACHED, not what the document names. The reel hangs
+// twenty exports off one document and a Combined Text.txt of a big case
+// folder names three hundred; every page of every one of them named its own
+// PDF here, so every PDF the reader ever scrolled past was pinned open and
+// the trim had nothing to close. The window is what is near instead
+// (pdfsync.pdfsNear): the page the reading line sits on, out to PDF_REACH
+// pages either side, and PDF_NEAR documents at the most. A PDF picked by
+// hand is not pinned either — the File it was picked from is still held, so
+// closing it costs a re-read and nothing else.
+const PDF_HELD = 3;    // PDFs kept open past the ones in use
+const PDF_REACH = 40;  // pages either side of the reading whose PDFs are in use
+const PDF_NEAR = 4;    // …and the most documents that may come to
 function pdfsInUse() {
-  const keep = new Set(pdfSourceNames());
+  const keep = new Set(PS.pdfsNear(pdfSources, readingPage(), PDF_REACH, PDF_NEAR));
+  // Whatever an observer says is on screen, wherever the reading line is: a
+  // page being drawn now is never closed under the drawing.
+  for (const i of pdfInView) { const s = pdfSources[i]; if (s) keep.add(s.name); }
   const nameOf = (k) => k.slice(0, k.lastIndexOf("|"));
   for (const k of warmWanted) keep.add(nameOf(k));
   for (const k of swaps) keep.add(nameOf(k));
-  if (pdfPicked) keep.add(pdfPicked.name);
-  for (const p of pickedPdfs.values()) keep.add(p.name);
-  for (const p of pickedByMember.values()) keep.add(p.name);
   // …and a PDF carrying redaction boxes: the copy is written from the pages
   // themselves, and the review walking past it is not a decision to drop them.
   for (const [name, store] of redactStores) if (store.count().boxes) keep.add(name);
@@ -6903,6 +6963,9 @@ async function openPdfNow(src) {
     sizes.push({ w: v.width, h: v.height });
   }
   const info = { pdf, count: pdf.numPages, sizes, name: src.name, lines: sizes.map(() => null), geoms: sizes.map(() => null), rows: sizes.map(() => null) };
+  pdfSizes.set(src.name, sizes); // kept after this PDF is closed: a slot's height, without the file
+  noteRatio(sizes);
+  sizeSlotsFor(src.name);
   // The line grid comes after the documents already waiting: a page is worth
   // seeing before it is worth aligning, and the pane re-aligns as it lands.
   pdfJobs.push({ name: src.name, run: () => readPdfGrid(info) });
@@ -7011,6 +7074,10 @@ function setupPdfForDoc() {
 /** Re-resolve the PDFs (the key or the folder changed) and redraw. */
 function refreshPdf() {
   resolvePdfSources();
+  // The slots and the inline pages are both about to be made again, so what
+  // was on screen is named by pages that are going: the observers fill this
+  // back in as the new ones land.
+  pdfInView.clear();
   trimPdfs(); // the document changed: the last one's PDFs are nobody's now
   const any = pdfSources.some(Boolean);
   sbsBtn.disabled = !doc;
@@ -7714,8 +7781,63 @@ function docTypeSize(info) {
   return info.__base;
 }
 
-/** The height a page box should have before its bitmap arrives, from the PDF's page sizes. */
+/**
+ * The shape a slot stands at before anything is known about its own page:
+ * the last page this folder's PDFs actually had, else letter. A case folder's
+ * filings are printed on one paper, so the guess is usually right — and the
+ * pane no longer opens every PDF to find out (buildPdfPane), so the guess is
+ * what a document the reading has not reached yet is laid out at.
+ */
+let pageRatioGuess = 11 / 8.5;
+let pageRatioKnown = false;
+function noteRatio(sizes) {
+  const sz = sizes && sizes[0];
+  if (!sz || !(sz.w > 0) || !(sz.h > 0)) return;
+  const was = pageRatioGuess;
+  pageRatioGuess = sz.h / sz.w;
+  // The FIRST PDF read says what this folder's paper is, and the slots
+  // standing at the wrong guess are restood on it — once, while the pane is
+  // still being laid out. Never again: a slot the reader has scrolled past is
+  // holding the column up under them, and restanding it moves the reading.
+  if (pageRatioKnown) return;
+  pageRatioKnown = true;
+  if (Math.abs(was - pageRatioGuess) < 0.01) return;
+  let any = false;
+  for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) {
+    const src = pdfSources[Number(el.dataset.index)];
+    if (!src || pdfSizes.has(src.name) || el.dataset.rendered) continue;
+    sheetOf(el).style.height = Math.round((parseFloat(el.style.width) || paneWidth()) * pageRatioGuess) + "px";
+    any = true;
+  }
+  if (any) applyMatchedLayoutSoon();
+}
+/** The height a page box should have before its bitmap arrives, from sizes already in hand. */
+function sizeFromKnown(el, src, pageNo, cssWidth) {
+  const sizes = pdfSizes.get(src.name);
+  const sz = sizes && sizes[pageNo - 1];
+  if (!sz || el.dataset.rendered) return !!sz;
+  sheetOf(el).style.height = Math.round((cssWidth * sz.h) / sz.w) + "px";
+  return true;
+}
+/**
+ * Every slot in the pane drawn from this PDF, at the height its page really
+ * has. Asked once, as the PDF's sizes land: the pane no longer asks slot by
+ * slot, so the slots that were standing at the letter default when it opened
+ * are given their heights here.
+ */
+function sizeSlotsFor(name) {
+  if (!pdfSizes.has(name)) return;
+  let any = false;
+  for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) {
+    const src = pdfSources[Number(el.dataset.index)];
+    if (!src || src.name !== name) continue;
+    if (sizeFromKnown(el, src, Number(el.dataset.page), parseFloat(el.style.width) || paneWidth())) any = true;
+  }
+  if (any) applyMatchedLayoutSoon();
+}
+/** …and the same for one box, opening the PDF where its sizes are not in hand. */
 async function presize(el, src, pageNo, cssWidth) {
+  if (sizeFromKnown(el, src, pageNo, cssWidth)) { if (el.classList.contains("pdf-slot")) applyMatchedLayoutSoon(); return; }
   try {
     const info = await loadPdf(src);
     const sz = info.sizes[pageNo - 1];
@@ -7726,18 +7848,19 @@ async function presize(el, src, pageNo, cssWidth) {
 const paneObserver = new IntersectionObserver((entries) => {
   for (const en of entries) {
     const el = en.target;
+    const i = Number(el.dataset.index);
     // The slot's own width: beside a matched text page that is the PDF
     // page's scale, which the reading size sets, not the pane's.
-    if (en.isIntersecting) renderInto(el, pdfSources[Number(el.dataset.index)], Number(el.dataset.page), parseFloat(el.style.width) || paneWidth());
-    else releaseCanvas(el);
+    if (en.isIntersecting) { pdfInView.add(i); renderInto(el, pdfSources[i], Number(el.dataset.page), parseFloat(el.style.width) || paneWidth()); }
+    else { pdfInView.delete(i); releaseCanvas(el); }
   }
 }, { root: pdfPane, rootMargin: PDF_MARGIN + "px 0px" });
 const inlineObserver = new IntersectionObserver((entries) => {
   for (const en of entries) {
     const el = en.target;
     const sec = el.closest(".tpage");
-    if (en.isIntersecting) renderInto(el, pdfSources[Number(sec.dataset.index)], Number(el.dataset.page), inlineWidth(sec));
-    else releaseCanvas(el);
+    if (en.isIntersecting) { pdfInView.add(Number(sec.dataset.index)); renderInto(el, pdfSources[Number(sec.dataset.index)], Number(el.dataset.page), inlineWidth(sec)); }
+    else { pdfInView.delete(Number(sec.dataset.index)); releaseCanvas(el); }
   }
 }, { root: stageEl, rootMargin: PDF_MARGIN + "px 0px" });
 
@@ -7747,6 +7870,7 @@ function inlineWidth(sec) { return Math.max(200, sec.clientWidth); }
 // ── side by side ──
 function buildPdfPane() {
   pdfPane.innerHTML = "";
+  pdfInView.clear(); // the slots those indices named are gone with the pane
   pdfPane.hidden = !sbsOn || !doc;
   document.body.classList.toggle("sbs", sbsOn && !!doc);
   sbsBtn.setAttribute("aria-pressed", String(sbsOn && !!doc));
@@ -7791,6 +7915,19 @@ function buildPdfPane() {
     return;
   }
   const w = paneWidth();
+  // Which PDFs this pass may OPEN. A slot used to ask for its page's real
+  // size as it was built, and a pane of three hundred slots asked three
+  // hundred PDFs for theirs at once — the whole case folder read, parsed and
+  // measured before a page could be looked at. Only what the reading has
+  // reached is opened here; the rest stand at letter until it comes near
+  // (renderInto, which opens the PDF of a slot coming into view) or until
+  // their PDF is opened for something else, which gives every slot of it its
+  // height at once (sizeSlotsFor).
+  const mayOpen = pdfsInUse();
+  // …and whether a slot's label has to name its PDF, asked once rather than
+  // once per slot: it reads every page's source, and a combined file of a big
+  // case folder has thousands of them.
+  const manyPdfs = pdfSourceNames().length > 1;
   doc.pages.forEach((p, i) => {
     const t = pdfTarget(i);
     let el;
@@ -7804,10 +7941,10 @@ function buildPdfPane() {
         : i === 0 && members.length > 1 ? "The file's own list of its documents — no PDF page"
         : "No PDF page for this part";
     } else {
-      el = slotShell("pdf-slot", "PDF p. " + t.page + (pdfSourceNames().length > 1 ? " · " + t.src.name : ""), { label: true });
+      el = slotShell("pdf-slot", "PDF p. " + t.page + (manyPdfs ? " · " + t.src.name : ""), { label: true });
       el.dataset.page = String(t.page);
-      sheetOf(el).style.height = Math.round(w * 11 / 8.5) + "px"; // letter, until the PDF says
-      presize(el, t.src, t.page, w);
+      sheetOf(el).style.height = Math.round(w * pageRatioGuess) + "px"; // the folder's paper, until this PDF says
+      if (!sizeFromKnown(el, t.src, t.page, w) && mayOpen.has(t.src.name)) presize(el, t.src, t.page, w);
       paneObserver.observe(el);
       // While the redaction tool is on, a drag over the page is the TOOL's,
       // whichever way it is set to mark: the rectangle is drawn as it is
@@ -8400,10 +8537,14 @@ function syncScroll(from, force) {
   // margins are not the PDF's, so one box's run is not the other's. Each
   // scrolls sideways on its own.
 }
-stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); }, { passive: true });
+stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); }, { passive: true });
 // Coalesced: a scroll fires continuously, and a pass over the members that
 // builds pages back is not something to do sixty times a second.
 const reelTrimSoon = debounce(reelTrim, 200);
+// …and the PDFs behind the documents the reading has left: the window moves
+// with the reading, so what falls out of it is closed as it does, and not
+// only when the document changes.
+const pdfTrimSoon = debounce(trimPdfs, 500);
 pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });
 
 /** Widths changed (a resize, the panel): re-fit every shown PDF page. */
@@ -9616,6 +9757,14 @@ window.__textReaderPdfQueue = () => ({
   queued: pdfJobs.map((j) => j.name),
   busy: pdfJobBusy,
   open: [...pdfCache.keys()].filter((n) => { const p = pdfCache.get(n); return !!(p && p.__info); }),
+  // …and the window they are kept inside: what the reading has reached, what
+  // an observer says is on screen, and which PDFs have left their page sizes
+  // behind. A folder of three hundred should never show more than a handful
+  // open, whatever it holds.
+  inUse: [...pdfsInUse()],
+  near: PS.pdfsNear(pdfSources, readingPage(), PDF_REACH, PDF_NEAR),
+  inView: [...pdfInView],
+  sized: [...pdfSizes.keys()],
 });
 // …and what has been drawn ahead of the review: the pages held ready, the
 // ones being drawn now, and the exports read ahead of the hop to them.

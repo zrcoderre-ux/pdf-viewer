@@ -152,6 +152,43 @@ export function pageSources(pages, fileName) {
   return out;
 }
 
+/**
+ * The PDFs the reading has reached, nearest first.
+ *
+ * `sources` is one entry per text page — the PDF that page is drawn from, or
+ * null — `at` the page the reading line sits on, `reach` how many pages
+ * either side of it still count as reached, and `limit` the most documents
+ * that may be named at once.
+ *
+ * A reel of twenty exports has twenty PDFs behind it and a Combined Text.txt
+ * of a big case folder has three hundred. Every one of them opened is the
+ * whole case in memory — its bytes, its pages as pdf.js holds them, and the
+ * line grid read off each. What the READING is at is a handful, and this
+ * says which: the page under the line, then outward from it a page at a
+ * time, until `limit` documents are named or `reach` is spent.
+ */
+export function pdfsNear(sources, at, reach, limit) {
+  const out = [];
+  const list = Array.isArray(sources) ? sources : [];
+  if (!list.length || !(limit > 0)) return out;
+  const nameAt = (i) => {
+    const s = list[i];
+    return s ? (typeof s === "string" ? s : s.name) : null;
+  };
+  const add = (i) => {
+    const name = nameAt(i);
+    if (name && !out.includes(name)) out.push(name);
+  };
+  const start = Math.max(0, Math.min(list.length - 1, Math.round(Number(at) || 0)));
+  add(start);
+  for (let d = 1; d <= reach && out.length < limit; d++) {
+    if (start - d >= 0) add(start - d);
+    if (out.length >= limit) break;
+    if (start + d < list.length) add(start + d);
+  }
+  return out.slice(0, limit);
+}
+
 // The list a Combined Text.txt opens with (_combined_text_body):
 //   # Documents in this file:
 //   #   1. Brief.txt
