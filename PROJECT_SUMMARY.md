@@ -420,6 +420,36 @@ margin and whose export has lines the rows do not match: the text column
 started 36 px into the left margin and now starts at the body margin, with
 real indents still indented.
 
+**…and the caption box obeys it too.** The first page of a pleading is the
+one page with a box on it, and it went on being drawn out over the line
+numbers after the rest of the page had come back to the margin. A box row is
+not the numbered grid: `rules.js` makes it a TABLE, and the cell standing in
+for the gutter is sized in the stylesheet — to `--gutter-w`, the reader's own
+gutter, which on the PDF's grid is not the margin. So every ordinary line
+began at `--body-x` and the box began 55 px to the left of it, with the
+numbered rule jogging out to meet it and the line numbers drawn inside the
+box.
+
+The cell takes `--body-x` itself now, a plain width in the page's own pixels:
+
+- Not `calc(var(--body-x) - 1.1em)` with the first cell's padding making up
+  the rest, which is what the numbered grid does. The two ems are different
+  sizes — the gutter is set at `0.8em` so the numbers are smaller than the
+  text — so the padding never gave back what the width took, and a box
+  squared up that way landed a pixel or two out, which down a caption is a
+  visible step in its side. The first cell's padding goes to zero instead.
+- The rule and the number keep their places INSIDE the cell: the rule drawn
+  as a hairline `1.1em` in from its right edge, where the grid's own gutter
+  margin puts it, and the number `1.6em` — so the numbered margin runs
+  straight down past the box, and `gutter-off` (which sets the gutter at the
+  text's own size) still moves both together.
+
+Measured on the same pleading, its caption page: the box's first character
+stood at x = 23.5 against the body's 70.9 and its bar column stepped between
+261 and 265 down the page, with the numbered rule at 15.4 beside the rest of
+the page's 64.4. It now starts at 70.9 like every other line, its bar column
+is one value, and the rule is 64.4 on every line of the page.
+
 ### Opening ONE FILE is not opening its folder
 
 A file opened on its own used to bring its whole folder with it: the reader

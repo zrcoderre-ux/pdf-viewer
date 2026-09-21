@@ -645,6 +645,27 @@ body.sbs .line.trailer { display: none; }
    whole of it — and a rule row keeps the slot the PDF gave it. */
 .page-body.fixed .line.rl { display: table; }
 .page-body.fixed .rc { vertical-align: top; }
+/* …and it begins where the page's text begins. A box row is a table and not
+   the numbered grid, so the cell standing in for the gutter is sized here —
+   and it was sized to the READER's gutter, which on the PDF's grid is not
+   the margin: the caption box was drawn out over the line numbers while
+   every ordinary line began at the PDF's own margin.
+   It takes the body margin itself instead, a plain width in the page's own
+   pixels with no em left over for the first cell's padding to make up — the
+   padding and the margin are ems of two different sizes (the numbers are set
+   smaller than the text), so a box squared up that way lands a pixel or two
+   off, which down a caption is a visible step in its side. The rule and the
+   number keep their places inside the cell: the rule drawn 1.1em in from its
+   right edge, where the grid's own gutter margin puts it, and the number
+   half an em to the left of that — so the numbered margin runs straight down
+   past the box, as it does everywhere else. */
+.page-body.numbered.fixed .line.rl > .gutter,
+.page-body.numbered.fixed .line.rl:not(.num)::before { width: var(--body-x, 3.7em); }
+.page-body.numbered.fixed .line.rl > .gutter {
+  border-right: 0; padding-right: calc(1.6em + 1px);
+  background: linear-gradient(#c4c7cb, #c4c7cb) right 1.1em top / 1px 100% no-repeat;
+}
+.page-body.numbered.fixed .line.rl > .lt > .rc:first-child { padding-left: 0; }
 .page-body.fixed .line.rr > .lt { line-height: inherit; }
 .line.rl.fit .rc.hf { font-size: 0; }
 /* A line that is nothing but rules is a hairline on the page: half a line tall. */

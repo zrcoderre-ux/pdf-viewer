@@ -1605,6 +1605,11 @@ app, which routes it to the reader tab.
   printed down the side, a seal, a stamp — and the body's margin is the one
   its rows share, not the leftmost thing on the page. One margin serves the
   whole document, so the numbers stand in a single straight column down it.
+  **A caption box starts at that margin too**, and its column of bars runs
+  straight down: a box is drawn as a table rather than on the numbered grid,
+  and beside a PDF it used to take the reader's own gutter instead of the
+  PDF's margin — the one page with a box on it drawn out over its own line
+  numbers while every other line sat at the margin.
 
   **A file opened on its own brings in its key, and nothing else.** Where the
   reader knows the case folder a file sits in, opening that file attaches the
