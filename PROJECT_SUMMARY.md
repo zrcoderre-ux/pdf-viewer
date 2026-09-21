@@ -450,6 +450,54 @@ stood at x = 23.5 against the body's 70.9 and its bar column stepped between
 the page's 64.4. It now starts at 70.9 like every other line, its bar column
 is one value, and the rule is 64.4 on every line of the page.
 
+### The hold: a key value carrying a run of blank
+
+This is the one that took the tab down. The breadcrumb finally named it:
+
+    Forsythe Decl..txt took 120518 ms to read for names in the clear (271 KB)
+    — looking for the pseudonyms the run wrote
+
+That step is `findReals(fakesRx, text)`: which of the key's pseudonyms stand
+in this document. `altFor` builds a value's pattern by writing each SPACE in
+it as a gap — and a gap is itself `(?:[ \t]|\r?\n<gutter>)+`, a `+` over
+whitespace. So a value carrying a RUN of blank became a chain of those
+quantifiers reading one run of blank between the same two words, which is
+every way of cutting that run into that many pieces.
+
+Measured on a page of pleading paper whose columns put a wide blank right
+after the value's first word:
+
+| spaces in the value | one page |
+| --- | --- |
+| 1 | 1 ms |
+| 2 | 2 ms |
+| 4 | 18 ms |
+| 8 | 2,062 ms |
+
+Each extra space roughly QUADRUPLES it. A key holds what the run captured,
+and what the run captured is sometimes a name standing in two columns of a
+caption or wrapped at the margin — the operator's key held `"Set"` and
+`"Hepworth"` a line break and fifty-two spaces apart. Eight was two seconds;
+fifty-two never finishes.
+
+A run of blank is now ONE gap, which is what `fold` has always done on the
+other side of the question — it reads every run as a single space before
+looking a match up — so the two sides finally agree. The same change goes
+through `buildFindMatcher` and `compileTypeahead`, which had the same chain,
+and `buildMatcher` trims its values so one with a space in front of it is
+still filed under its first word rather than falling to the loose alternation
+the index exists to avoid.
+
+It fixes a quiet wrong answer as well: a run holding a LINE BREAK was left in
+the pattern as a literal newline, so such a value only ever matched text
+broken in the very same place — which is to say, almost never. Three of the
+new tests in `test-pseudo-key.mjs` fail on the old code for that reason
+alone, before the timing guard does.
+
+Measured on the operator's own declaration (238 KB) with a key the size of
+theirs: the step ran **19 ms**, and the whole reading is linear in the key
+again — 50 values 11 ms, 343 values 19 ms, 1,101 values 50 ms.
+
 ### Opening ONE FILE is not opening its folder
 
 A file opened on its own used to bring its whole folder with it: the reader

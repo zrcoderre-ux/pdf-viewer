@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PDF Viewer",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Detects legal citations (Bluebook + CSM) in PDFs opened in Chrome and overlays clickable links to Westlaw or Lexis+. Faithful port of pdf_linker.py. Includes a text reader for PDF-Linker's scrubbed exports.",
   "permissions": [
     "declarativeNetRequest",

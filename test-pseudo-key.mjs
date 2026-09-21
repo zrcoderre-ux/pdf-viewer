@@ -356,5 +356,42 @@ console.log("\nin handfuls");
     [{ spans: [], next: -1 }, { spans: [], next: -1 }]);
 }
 
+// ---- a value carrying a RUN of blank ------------------------------------------
+//
+// A key holds what the run captured, and what the run captured is sometimes a
+// name standing in two columns of a caption or wrapped at the margin: "Set"
+// and "Hepworth" a line break and fifty-two spaces apart. Every space in a
+// value used to become a gap of its own, and a gap is a `+` over whitespace —
+// so a dozen of them in a row reading ONE run of blank is every way of cutting
+// that run into a dozen pieces. Each extra space quadrupled the work, and the
+// operator's key held one that took the sweep two minutes on one declaration.
+console.log("\na value carrying a run of blank");
+{
+  const k = keyOf([
+    ["person", "Real Name", "Set    Hepworth", "", "", "", 9],
+    ["person", "Other Name", "Quenby Vale", "", "", "", 9],
+  ]);
+  const fakes = compileFakes(k);
+  const names = (t) => findReals(fakes, t).map((w) => w.real);
+  check("the run is a gap: the words one space apart", names("the matter was Set Hepworth on Tuesday"), ["Real Name"]);
+  check("…any run of blank between them", names("the matter was Set      Hepworth on Tuesday"), ["Real Name"]);
+  check("…and a line break with the gutter number after it",
+    names("the matter was Set\n 9  Hepworth on Tuesday"), ["Real Name"]);
+  check("a value whose OWN run holds a line break reads the same",
+    findReals(compileFakes(keyOf([["person", "R", "Set\n            Hepworth", "", "", "", 9]])),
+      "the matter was Set Hepworth on Tuesday").map((w) => w.real), ["R"]);
+  check("a word that is not the value is still not found", names("the matter was Set Quenby on Tuesday"), []);
+  check("…and the other value still is", names("Quenby Vale appeared"), ["Other Name"]);
+
+  // The guard: a page of pleading paper whose blank columns stand right after
+  // the value's first word — the shape that made it exponential.
+  const page = ("15  the matter was Set                          | CASE NO. 24STZV98883\n").repeat(200);
+  const deep = compileFakes(keyOf([["person", "R", "Set        Hepworth", "", "", "", 9]]));
+  const t0 = Date.now();
+  findReals(deep, page);
+  const ms = Date.now() - t0;
+  check(`eight spaces in the value read a page of columns in ${ms} ms, not seconds`, ms < 500, true);
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);
