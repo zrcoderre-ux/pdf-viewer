@@ -636,6 +636,8 @@ function printTitle() {
 }
 window.addEventListener("beforeprint", () => {
   fakesForPrint();
+  shapePages({ all: true }); // every page, not only the ones the reading is at
+
   let w = 0;
   for (const t of pagesEl.querySelectorAll(".tpage")) w = Math.max(w, t.offsetWidth);
   document.documentElement.style.setProperty("--print-zoom", String(w > PRINT_WIDTH_PX ? PRINT_WIDTH_PX / w : 1));
@@ -7021,30 +7023,74 @@ function loadPdf(src, { now = false } = {}) {
 async function openPdf(src) {
   return duringAsync("opening a PDF", () => openPdfNow(src));
 }
+/**
+ * The PDF, HANDED BACK THE MOMENT IT IS OPEN.
+ *
+ * It used to measure every page before it answered — the pane needs a page's
+ * size to lay its slot out, so the size of all of them was got first. Each
+ * one is a round trip to the worker, and after every round trip the idle
+ * deadline the loop was holding had expired, so it waited for another: one
+ * idle callback per page, up to a quarter-second each. A pleading of a dozen
+ * pages never showed it. A two-hundred-page exhibit set spends a MINUTE that
+ * way, and the whole of it is a slot on screen saying "Loading…", because
+ * nothing can be drawn until the document is handed back — and every other
+ * PDF the pane asked for is behind it in the same queue.
+ *
+ * Nothing about drawing a page needs those sizes: the render asks the
+ * document for the page itself. So the document is handed back as soon as
+ * pdf.js has it, and the measuring goes on afterwards, in batches, in the
+ * queue with everything else. Until a page has been measured its slot stands
+ * at the folder's paper (pageRatioGuess), which is what it stood at anyway.
+ */
 async function openPdfNow(src) {
   const file = src.file || await src.handle.getFile();
   const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
-  // Every page's size, which the pane needs before it can lay a slot out. The
-  // pages come back from a document already parsed, so an `await` per page is
-  // no yield at all — five hundred of them is one task of a second or more —
-  // and the clock is looked at as it goes.
-  const sizes = [];
-  let clock = null;
-  for (let i = 1; i <= pdf.numPages; i++) {
-    if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
-    const v = (await pdf.getPage(i)).getViewport({ scale: 1 });
-    sizes.push({ w: v.width, h: v.height });
-  }
-  const info = { pdf, count: pdf.numPages, sizes, name: src.name, lines: sizes.map(() => null), geoms: sizes.map(() => null), rows: sizes.map(() => null) };
-  pdfSizes.set(src.name, sizes); // kept after this PDF is closed: a slot's height, without the file
+  const n = pdf.numPages;
+  const hole = () => new Array(n).fill(null);
+  const info = { pdf, count: n, sizes: hole(), name: src.name, lines: hole(), geoms: hole(), rows: hole() };
+  // The same array the measuring fills, so a slot sized from it later gets
+  // the pages as they land — and keeps them after the PDF itself is closed.
+  pdfSizes.set(src.name, info.sizes);
   pdfBytes.set(src.name, file.size || 0);
-  noteRatio(sizes);
-  sizeSlotsFor(src.name);
-  // The line grid comes after the documents already waiting: a page is worth
-  // seeing before it is worth aligning, and the pane re-aligns as it lands.
+  pdfJobs.push({ name: src.name, run: () => measurePdf(info) });
+  // The line grid comes after: a page is worth seeing before it is worth
+  // aligning, and the pane re-aligns as it lands.
   pdfJobs.push({ name: src.name, run: () => readPdfGrid(info) });
   pumpPdfJobs();
   return info;
+}
+
+/** Whether this reading of a PDF is still the one the reader holds. */
+function stillOpen(info) {
+  const held = pdfCache.get(info.name);
+  return !!held && (!held.__info || held.__info === info);
+}
+
+// Pages measured per task. The asks are the worker's work rather than this
+// thread's, so they go together and the thread is given back between batches
+// — measured off the clock, not off an idle deadline that every await spends.
+const SIZE_BATCH = 32;
+/** Every page's size at scale 1, filled in behind the open. */
+async function measurePdf(info) {
+  return duringAsync("measuring the PDF's pages", () => measurePdfNow(info));
+}
+async function measurePdfNow(info) {
+  const { pdf, sizes } = info;
+  for (let at = 0; at < info.count; at += SIZE_BATCH) {
+    if (!stillOpen(info)) return;
+    const upto = Math.min(at + SIZE_BATCH, info.count);
+    const want = [];
+    for (let i = at; i < upto; i++) if (!sizes[i]) want.push(i);
+    const got = await Promise.all(want.map((i) => pdf.getPage(i + 1).catch(() => null)));
+    got.forEach((page, k) => {
+      if (!page) return;
+      const v = page.getViewport({ scale: 1 });
+      sizes[want[k]] = { w: v.width, h: v.height };
+    });
+    if (at === 0) noteRatio(sizes); // the folder's paper, from the first page read
+    sizeSlotsFor(info.name);
+    if (upto < info.count) await idleClock();
+  }
 }
 /**
  * Where each page's FIRST printed line sits (the side-by-side anchor) and its
@@ -7053,13 +7099,42 @@ async function openPdfNow(src) {
 async function readPdfGrid(info) {
   return duringAsync("reading the PDF's line grid", () => readPdfGridNow(info));
 }
+// The grid is read in READING ORDER — from the page the reader is at, on to
+// the end, then back over what is behind them — because the page whose grid
+// is worth having first is the one on screen. Page 1 first was fine on a
+// twelve-page pleading and useless on a two-hundred-page exhibit set opened
+// at page 150, where the pages being looked at came last.
+function gridOrder(info) {
+  let start = 1;
+  for (let i = readingPage(); i < pdfSources.length; i++) {
+    const t = pdfTarget(i);
+    if (t && t.src && t.src.name === info.name) { start = t.page; break; }
+  }
+  const out = [];
+  for (let p = start; p <= info.count; p++) out.push(p);
+  for (let p = start - 1; p >= 1; p--) out.push(p);
+  return out;
+}
+const GRID_SLICE = 10; // ms of this thread's own work before it gives it back
 async function readPdfGridNow(info) {
   const { pdf, sizes } = info;
   const gridFrom = performance.now();
-  for (let i = 1; i <= pdf.numPages; i++) {
+  // Paced off the CLOCK, not off an idle deadline: every await here is a
+  // round trip to the worker, and a deadline taken before one has expired by
+  // the time it comes back — which turned a page's worth of work into a wait
+  // for the next idle callback, a page at a time, for as long as the PDF is.
+  let since = performance.now();
+  for (const i of gridOrder(info)) {
     // Closed behind the review (trimPdfs): there is nothing left to align to.
-    const held = pdfCache.get(info.name);
-    if (!held || (held.__info && held.__info !== info)) return;
+    if (!stillOpen(info)) return;
+    if (performance.now() - since > GRID_SLICE) {
+      // The pages read so far are laid on their grid now rather than when the
+      // whole document has been read: in reading order, those are the ones on
+      // screen. It is debounced, so asking often costs one pass.
+      if (sbsOn && !pdfPane.hidden) applyMatchedLayoutSoon();
+      await idleClock();
+      since = performance.now();
+    }
     try {
       const page = await pdf.getPage(i);
       const tc = await page.getTextContent();
@@ -7069,7 +7144,13 @@ async function readPdfGridNow(info) {
       // of where each page's first line sits. A page being DRAWN is left
       // alone: it is holding a bitmap somebody is looking at.
       if (!pageIsDrawn(page)) { try { page.cleanup(); } catch { /* it is drawing */ } }
-      const sz = sizes[i - 1];
+      // …and the page's own size, where the measuring has not reached it yet:
+      // the page is in hand here, so asking it costs nothing.
+      let sz = sizes[i - 1];
+      if (!sz) {
+        const v = page.getViewport({ scale: 1 });
+        sz = sizes[i - 1] = { w: v.width, h: v.height };
+      }
       const items = [];
       let top = Infinity;
       for (const it of tc.items) {
@@ -8231,6 +8312,8 @@ function applyMatchedLayoutNow() {
   const slots = new Map();
   if (on) for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) slots.set(Number(el.dataset.index), el);
   const paneW = on ? paneWidth() : 0;
+  const bases = new Map(); // each open PDF's body type, asked once for the pass
+  const w0 = pageWidthNow(); // …and the page width, which every plan is made at
   for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
     const i = Number(sec.dataset.index);
     const slot = grid ? slots.get(i) || null : null;
@@ -8249,7 +8332,27 @@ function applyMatchedLayoutNow() {
     // body text; the page's own where the document has nothing read yet, and
     // (numbers with no body read) the reader's leading filling the pitch, as
     // it does off the grid.
-    let base = docTypeSize(info) || PS.pageTypeSize(rows);
+    //
+    // Asked once per PDF rather than once per page: it reads every page's
+    // rows to see how many have landed, and a pass over two hundred pages
+    // asked it two hundred times for the same answer.
+    if (!bases.has(info)) bases.set(info, docTypeSize(info));
+    let base = bases.get(info) || PS.pageTypeSize(rows);
+    // WHERE THIS PAGE'S LINES GO, worked out once and kept on the page. The
+    // pass is asked for again every time a batch of the PDF's sizes lands and
+    // every time more of its grid does — twenty times over on a long exhibit
+    // set — and aligning a page's lines to the PDF's rows (rowLayout) is the
+    // bulk of what it costs. Nothing about a page's answer changes unless its
+    // width, its text, its type or its grid does, so a page whose answer is in
+    // hand is not worked out again.
+    const planKey = [textEpoch, w0, info.name, t.page, base, geom ? 1 : 0, rows ? rows.length : -1,
+      settings.lineHeight, settings.font, settings.customFont].join("|");
+    if (sec.__planFor === planKey && sec.__plan) {
+      const had = sec.__plan;
+      matchedSlots.add(slot);
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, pitch: had.pitch, scale: 1 });
+      continue;
+    }
     if (numbered) {
       tops = PS.slotTops(lines.map((l) => ({ num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null })), geom);
       pitch = geom.pitch;
@@ -8277,6 +8380,8 @@ function applyMatchedLayoutNow() {
     // below sets it from the page's own width (and the magnification with it),
     // so the grid is drawn at whatever size the paper is being read at.
     matchedSlots.add(slot);
+    sec.__planFor = planKey;
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch };
     plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, scale: 1 });
   }
   // Every slot the layout did not claim keeps the pane's own width, and gives
@@ -8518,7 +8623,33 @@ function withBaseSize(fn) {
     else root.removeProperty("--reader-size-eff");
   }
 }
-function shapePages() {
+// WHAT A PAGE'S SHAPE DEPENDS ON, as one string. The fit is measured by
+// reading every page's scrollHeight after writing every page's minHeight, four
+// times over, and a read after a write lays the whole document out — which on
+// a two-hundred-page exhibit set is a quarter of a second a pass, and the pass
+// is asked for again as each batch of the PDF's page sizes lands. Almost every
+// one of those asks would measure pages whose answer cannot have changed. So a
+// page remembers what it was shaped for, and a page shaped for this already is
+// passed over: the ask costs the pages that actually moved.
+// The width is the MEASURED one, not the one the settings ask for: the two
+// differ for a moment while a column is being re-laid (the pane closing, the
+// window dragged), and a fit measured in that moment must not be remembered
+// as the answer for the width that arrives a frame later. `clipped` is in it
+// for the same reason — a page shaped beside the PDF is not shaped the way
+// the same page is on its own.
+function shapeKey(ratio, width, clipped) {
+  return [
+    Math.round(width), clipped ? 1 : 0, ratio || 0, textEpoch, zoomNow(),
+    settings.lineHeight, settings.font, settings.customFont,
+  ].join("|");
+}
+// How far either side of the reading a page is FITTED. The shape itself — the
+// paper's height and the PDF's type — is written for every page, since it is
+// a write and no reading; what costs is measuring whether the words fit, and
+// that is worth knowing for the pages somebody is about to look at. The rest
+// are fitted as the reading comes to them (fitNearSoon, on the scroll).
+const FIT_SCREENS = 3;
+function shapePages({ all = false } = {}) {
   // A page the reel has shed carries a pinned height and no body: its shape is
   // the shape it had, and the moment it is built back it is shaped with the
   // rest. Touching it here is what would move the column under the reader.
@@ -8537,6 +8668,10 @@ function shapePages() {
     if (loose) {
       if (body.style.minHeight) body.style.minHeight = "";
       if (sec.style.getPropertyValue("--fit")) sec.style.removeProperty("--fit");
+      // Its shape has just been taken off it, so what it was shaped for no
+      // longer describes it: coming off the grid (the pane closed) has to
+      // shape it again, whatever else is unchanged.
+      sec.__shapedFor = null;
       continue;
     }
     shapes.push({ sec, body, ratio: pdfRatioOf(Number(sec.dataset.index)), fit: 1 });
@@ -8552,13 +8687,31 @@ function shapePages() {
   for (const s of shapes) if (s.ratio) counts.set(s.ratio, (counts.get(s.ratio) || 0) + 1);
   let common = PAGE_RATIO, most = 0;
   for (const [r, n] of counts) if (n > most) { most = n; common = r; }
+  // The window the measuring is worth doing in, and the pages already shaped
+  // for exactly this. Both are decided before anything is written, so the
+  // geometry below is read once.
+  const top = stageEl.scrollTop, seen = stageEl.clientHeight;
+  const pad = Math.max(seen * FIT_SCREENS, 1500);
+  const todo = [];
   for (const s of shapes) {
+    s.key = shapeKey(s.ratio || common, width, clipped);
+    if (s.sec.__shapedFor === s.key) continue; // its answer cannot have changed
+    s.near = all || (s.sec.offsetTop + s.sec.offsetHeight > top - pad && s.sec.offsetTop < top + seen + pad);
+    todo.push(s);
+  }
+  if (!todo.length) return;
+  for (const s of todo) {
     s.target = Math.round(width * (s.ratio || common));
     const want = s.target + "px";
     if (s.body.style.minHeight !== want) s.body.style.minHeight = want;
     if (s.sec.style.getPropertyValue("--fit")) s.sec.style.removeProperty("--fit"); // measured at its own size first
     applyPdfTypeSizes(s.sec, s.body);
+    // Only a page that has been MEASURED is finished with: one written but
+    // left unfitted is asked for again when the reading comes near it.
+    s.sec.__shapedFor = s.near ? s.key : null;
   }
+  const measure = todo.filter((s) => s.near);
+  if (!measure.length) return;
   // THE SHAPE IS A CEILING. A page whose words want more room than the PDF
   // page gave them — the reading size is the reader's own, and the filing was
   // set in whatever it was set in — is drawn smaller until they fit, the way
@@ -8574,7 +8727,7 @@ function shapePages() {
   withBaseSize(() => {
     for (let pass = 0; pass < FIT_PASSES; pass++) {
       const over = [];
-      for (const s of shapes) {
+      for (const s of measure) {
         if (!(s.target > 0)) continue;
         // Too tall for the paper: the type gives. Too WIDE is not the type's
         // fault and is not paid for by the whole page — one runaway line
@@ -8704,7 +8857,7 @@ function syncScroll(from, force) {
   // margins are not the PDF's, so one box's run is not the other's. Each
   // scrolls sideways on its own.
 }
-stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); }, { passive: true });
+stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); fitNearSoon(); }, { passive: true });
 // Coalesced: a scroll fires continuously, and a pass over the members that
 // builds pages back is not something to do sixty times a second.
 const reelTrimSoon = debounce(reelTrim, 200);
@@ -8712,6 +8865,10 @@ const reelTrimSoon = debounce(reelTrim, 200);
 // with the reading, so what falls out of it is closed as it does, and not
 // only when the document changes.
 const pdfTrimSoon = debounce(trimPdfs, 500);
+// The pages the reading is coming to, fitted before it gets there: shapePages
+// measures only what is near (FIT_SCREENS) and passes over what it has already
+// answered, so asking on the scroll costs the pages that have just come near.
+const fitNearSoon = debounce(() => { if (doc) shapePages(); }, 150);
 // …and the pages that were still drawing when the reading left them.
 const releasePagesSoon = debounce(sweepPagesToRelease, 700);
 pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });

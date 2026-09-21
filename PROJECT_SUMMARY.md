@@ -389,6 +389,59 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### The thread, not the memory: "Loading…" and the freeze
+
+A folder of huge PDFs held the tab still even where it did not fill it, and the
+first slot sat on "Loading…" while nothing answered. Three passes were holding
+the thread, all of them invisible on a twelve-page pleading and crippling on a
+two-hundred-page exhibit set.
+
+**The open measured every page before it answered.** `openPdfNow` got every
+page's size first, because the pane needs a size to lay a slot out. Each is a
+round trip to the worker, and after each one the idle deadline the loop was
+holding had expired — so it waited for another, one idle callback per page, up
+to a quarter-second each. Nothing about DRAWING a page needs those sizes (the
+render asks the document for the page itself), so the document is handed back
+as soon as pdf.js has it and `measurePdf` fills the sizes afterwards, in
+batches of `SIZE_BATCH`, in the queue with everything else. Slots stand at the
+folder's paper until their own page is measured. `pdfSizes` holds the same
+array the measuring fills, so a slot sized later gets the pages as they land.
+
+**The grid read the whole PDF, page 1 first, with no yields.** `readPdfGridNow`
+now runs in READING ORDER (`gridOrder`: from the page the reader is at, on to
+the end, then back over what is behind) and is paced off the clock rather than
+off a spent idle deadline, laying the pages read so far on their grid at each
+yield. Opening a 200-page exhibit set at page 150 no longer reads 149 pages
+nobody is looking at first.
+
+**The layout pass re-measured the whole document every time it was asked.**
+`applyMatchedLayout` is asked again as each batch of sizes lands and as each
+slice of grid does — twenty times over on a long document — and the pass held
+the thread for 1.5 seconds at a time. Two memos and a window fix it:
+
+- `shapePages` writes each page's shape (a write, no reading) but MEASURES the
+  fit only within `FIT_SCREENS` of the reading, since the fit is four passes of
+  reading every page's scrollHeight after writing every page's minHeight, and
+  a read after a write lays out the whole document. `fitNearSoon` fits the
+  pages the reading comes to, on the scroll; printing asks for `{all: true}`.
+- A page remembers what it was shaped for (`__shapedFor`, `shapeKey`) and one
+  shaped for this already is passed over. The key is the MEASURED width, not
+  the width the settings ask for — they differ for a moment while a column is
+  re-laid, and a fit measured in that moment must not be remembered as the
+  answer — plus whether the page is beside the PDF, its ratio, `textEpoch`,
+  the zoom, the leading and the font.
+- A page's place on the PDF's grid is worked out once and kept (`__planFor`,
+  `__plan`): aligning lines to the PDF's rows is the bulk of the pass, and
+  nothing about a page's answer changes unless its width, text, type or grid
+  does. `docTypeSize` is asked once per PDF per pass rather than once per page.
+
+Measured on a 200-page, 38 MB scan: the first PDF page appears after 1.1 s
+rather than 6.1 s, and the longest task that holds the thread falls from
+1,507 ms to about 250 ms — one pass over the document rather than twenty. The
+rendered result is unchanged: screenshots of the pane at the top of a document,
+deep into it, after a zoom, after a leading change and with the pane closed
+again are byte-identical to the build before.
+
 Two more ceilings follow the folder's size. The reel stops at `REEL_MAX_BIG`
 (8) rather than `REEL_MAX` (25) in a folder of more than `BIG_FOLDER` exports,
 since nothing is shed under a review and every member there has a PDF behind
