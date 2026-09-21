@@ -389,6 +389,31 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### Opening ONE FILE is not opening its folder
+
+A file opened on its own used to bring its whole folder with it: the reader
+finds the folder it sits in among the ones it remembers, adopts it, and from
+that moment every pass the folder makes possible is running — the sweep
+reading every other export for names in the clear, the documents built ahead,
+the reel hanging the next export under this one, the folder's PDFs matched by
+name and opened, their line grids read. On a folder with something expensive
+in it, the file the operator actually asked for is the one thing that is not
+the trouble, and they never get as far as saying so.
+
+So adoption comes in two weights. `adoptFolder(h, { light: true })` takes the
+pseudonym key, the flagged values and the LEAKS worksheet — what belongs to
+the CASE rather than to the document, and what the marks and the review need —
+and stops: `scanFolder` collects no documents and no PDFs, so none of the
+passes that run off them exist. `attachKeyForFile`, which is what a file
+opened on its own goes through, takes that weight. "Open case folder" is still
+the whole folder, and the Documents tab says which happened and offers **Read
+the whole folder** when it was the light one.
+
+Driven in Chromium over the operator's own 244 KB declaration and a 343-
+binding key built from the names it carries: the whole folder lists 19
+documents; the light attach lists none, holds the key and the worksheet, and
+records no long task at all.
+
 ### Letting go of the case folder
 
 Everything the reader does BESIDES the document in front of it hangs off

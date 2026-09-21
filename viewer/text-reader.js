@@ -110,6 +110,7 @@ let fileHandle = null;       // FileSystemFileHandle for in-place save
 let dirHandle = null;        // the case folder, when one was opened
 let folderName = "";
 let folderDocs = [];         // [{ name, handle, quarantined }]
+let folderLight = false;     // …attached for its key alone, a file having been opened on its own
 let folderPdfs = [];         // [{ name, handle }] — the case folder's PDFs
 let key = null;              // parsed key (PK.parseKey)
 let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
@@ -1232,11 +1233,11 @@ async function caseFolderFor(fileHandle) {
 }
 
 /** Read a case folder: its key, its exports and its flagged values. */
-async function scanFolder(h) {
+async function scanFolder(h, { light = false } = {}) {
   const found = { keyHandle: null, valuesHandle: null, leaksHandle: null, combined: null, textDir: null, docs: [], rootDocs: [], pdfs: [] };
   for await (const [name, entry] of h.entries()) {
     if (entry.kind === "file") {
-      if (/\.pdf$/i.test(name) && !/_temp\.pdf$/i.test(name)) found.pdfs.push({ name, handle: entry });
+      if (/\.pdf$/i.test(name) && !/_temp\.pdf$/i.test(name)) { if (!light) found.pdfs.push({ name, handle: entry }); }
       else if (TD.isKeyName(name) && !found.keyHandle) found.keyHandle = entry;
       // The leak worksheet: the current name over the legacy one PDF-Linker still reads.
       else if (LK.isLeaksName(name) && (!found.leaksHandle || LK.leaksRank(name) < LK.leaksRank(found.leaksHandle.name))) found.leaksHandle = entry;
@@ -1248,7 +1249,7 @@ async function scanFolder(h) {
       found.textDir = entry;
     }
   }
-  if (found.textDir) {
+  if (found.textDir && !light) {
     for await (const [name, entry] of found.textDir.entries()) {
       if (entry.kind === "file" && TD.isExportName(name)) found.docs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
     }
@@ -1262,10 +1263,30 @@ async function scanFolder(h) {
 }
 
 /** Make `h` the current case folder: key attached, documents listed, flags loaded. */
-async function adoptFolder(h, { quiet = false } = {}) {
-  return duringAsync("reading the case folder", () => adoptFolderNow(h, { quiet }));
+async function adoptFolder(h, { quiet = false, light = false } = {}) {
+  return duringAsync("reading the case folder", () => adoptFolderNow(h, { quiet, light }));
 }
-async function adoptFolderNow(h, { quiet = false } = {}) {
+/**
+ * TWO WEIGHTS OF ADOPTION, because opening ONE FILE is not the same act as
+ * opening a case folder.
+ *
+ * A file opened on its own used to bring its whole folder with it: the reader
+ * finds the folder it sits in (the remembered ones), adopts it, and from that
+ * moment everything the folder makes possible is running — the sweep reading
+ * every other export for names in the clear, the documents built ahead, the
+ * reel hanging the next export under this one, the folder's PDFs matched by
+ * name and opened. On a folder with something expensive in it, the file the
+ * operator actually asked for is the one thing that is not the trouble, and
+ * they never get as far as saying so.
+ *
+ * So a file opened on its own takes the LIGHT attach: the pseudonym key, the
+ * flagged values, and the LEAKS worksheet — the three things that belong to
+ * the case rather than to the document, and that the marks and the review
+ * need. No list of documents, no PDFs, and so none of the passes that run off
+ * them. "Open case folder" is still the whole folder, and the Documents tab
+ * offers to read it when the light attach is what happened.
+ */
+async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // Another matter: the PDFs go, and with them any redaction proposed over
   // them — boxes are a thing you are in the middle of, and this folder's
   // pages are not that folder's.
@@ -1273,11 +1294,12 @@ async function adoptFolderNow(h, { quiet = false } = {}) {
   dirHandle = h;
   folderName = h.name;
   await rememberDir(h);
-  const found = await scanFolder(h);
+  const found = await scanFolder(h, { light });
   // The combined file, when the folder has one, listed first: it is the one
   // file holding every export, and the one the drafting model was handed.
-  folderDocs = found.combined ? [found.combined].concat(found.docs) : found.docs;
-  folderPdfs = found.pdfs;
+  folderDocs = light ? [] : (found.combined ? [found.combined].concat(found.docs) : found.docs);
+  folderPdfs = light ? [] : found.pdfs;
+  folderLight = light;
   if (found.keyHandle) {
     try {
       const f = await found.keyHandle.getFile();
@@ -1366,10 +1388,12 @@ async function attachKeyForFile(handle) {
         if (perm !== "granted") { toast("Access to " + at.dir.name + " was not granted; the key stays unattached.", { error: true }); return; }
       } catch (e) { toast("Could not reopen " + at.dir.name + ": " + (e.message || e), { error: true }); return; }
     }
-    await adoptFolder(at.dir, { quiet: true });
+    await adoptFolder(at.dir, { quiet: true, light: true });
     if (doc) retranslate();
     markDocList();
-    toast(key ? "Attached the key from " + at.dir.name : "No pseudonym_key.xlsx in " + at.dir.name);
+    toast(key
+      ? `Attached the key from ${at.dir.name}${leaks ? " and its LEAKS worksheet" : ""} — this file alone. “Read the whole folder” in Documents brings the rest in.`
+      : "No pseudonym_key.xlsx in " + at.dir.name, { ms: 6000 });
   };
   if (at.needs) showKeyOffer("This file is in " + at.dir.name + ". Attach its pseudonym key?", "Attach key", attach);
   else await attach();
@@ -1571,6 +1595,12 @@ async function openFolderDocLike(m) {
   } catch { reelDone = true; reelDoneUp = true; }
 }
 $("forget-folder").addEventListener("click", () => { forgetFolder(); });
+/** …and the other way: bring the rest of the folder in after all. */
+$("read-folder").addEventListener("click", async () => {
+  if (!dirHandle) return;
+  await adoptFolder(dirHandle, { quiet: true, light: false });
+  toast(`${folderName} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}. The reader reads the rest of the folder from here.`, { ms: 6000 });
+});
 
 /**
  * Whether what was picked is the Text Files subfolder rather than the case
@@ -1620,6 +1650,8 @@ function renderDocListNow() {
   markDocAlerts();
   const acts = $("docs-actions");
   if (acts) acts.hidden = !dirHandle;
+  const read = $("read-folder");
+  if (read) read.hidden = !dirHandle || !folderLight;
 }
 function markDocList() {
   for (const li of docsList.children) li.classList.toggle("current", li.dataset.name === fileName);
@@ -7930,7 +7962,10 @@ function renderDocReady() {
     li.classList.toggle("ready", !!(e && e.nodes));
     li.title = li.dataset.name + (e && e.nodes ? " — built and waiting" : e && e.skipped ? " — not held (" + e.skipped + ")" : "");
   }
-  const base = folderDocs.length ? folderName + " · " + folderDocs.length + " document" + (folderDocs.length === 1 ? "" : "s") : "Open a case folder to list its exports here.";
+  const base = folderDocs.length ? folderName + " · " + folderDocs.length + " document" + (folderDocs.length === 1 ? "" : "s")
+    : dirHandle && folderLight
+      ? `${folderName}: the key${leaks ? ", its LEAKS worksheet" : ""} and the flagged values are attached. The rest of the folder is left alone — this file is read on its own.`
+      : "Open a case folder to list its exports here.";
   const want = readyWanted.length;
   const note = !leaks ? ""
     : want ? ` · ${held.length} of ${want} with leaks ready to open` + (readyBusy ? ", building…" : "")
@@ -10412,7 +10447,7 @@ window.__textReaderLeaks = () => (leaks ? {
   marks: leakRowRanges.length, keeps: keeps.slice(), leakMarks: leakHits.length,
 } : null);
 window.__textReaderLeaksBytes = async () => Array.from(await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, LK.fixEdits(leaks.parsed)));
-window.__textReaderAdoptFolder = (h) => adoptFolder(h, { quiet: true });
+window.__textReaderAdoptFolder = (h, opts) => adoptFolder(h, Object.assign({ quiet: true }, opts));
 window.__textReaderOpenDoc = (name) => { const d = folderDocs.find((x) => x.name === name); return d ? openFolderDoc(d) : null; };
 window.__textReaderPickPdfs = (files) => usePickedPdfs(files);
 window.__textReaderPdfSources = () => pdfSources.map((s) => (s ? s.name : null));

@@ -1600,6 +1600,16 @@ app, which routes it to the reader tab.
   document over again, and is a reel already), and it stops after 25 documents
   in all, either end — a page of a long export is not free, and a folder can
   hold three hundred — saying so, with the next one a click away in the list.
+  **A file opened on its own brings in its key, and nothing else.** Where the
+  reader knows the case folder a file sits in, opening that file attaches the
+  folder's **pseudonym key**, its **flagged values** and its **LEAKS
+  worksheet** — the three things that belong to the case rather than to the
+  document — and leaves the folder alone: no list of its exports, no sweep of
+  the others for names in the clear, nothing read ahead, no reel reading on,
+  no PDFs matched by name. **Read the whole folder** (under the Documents
+  list) brings the rest in when you want it, and **Open case folder** still
+  opens the whole thing as it always did.
+
   **Forget this folder** (under the Documents list) lets go of the case
   folder and reads whatever you open on its own: no sweep of the other
   exports, nothing read ahead, no reel reading on, no PDFs matched by name.
