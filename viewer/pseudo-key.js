@@ -337,9 +337,29 @@ export function foldGaps(s) {
 // the work is proportional to the DOCUMENT rather than to the document times
 // the key.
 
-/** One value as a pattern: its spaces as gaps, a possessive allowed after it. */
+/**
+ * One value as a pattern: the blank between its words as a gap, a possessive
+ * allowed after it.
+ *
+ * THE BLANK BETWEEN ITS WORDS, not each space in it. A gap is itself a `+`
+ * over whitespace, so a value carrying a RUN of it — "Set" and "Hepworth"
+ * twelve spaces apart, which is what a key holds when the run captured a name
+ * standing in two columns of a caption, or wrapped at the margin — became a
+ * dozen of those quantifiers in a row, and a dozen `+`s reading one run of
+ * blank between them is every way of cutting that run into a dozen pieces.
+ * Each extra space QUADRUPLED the work: four spaces read a page in 18 ms,
+ * eight in two seconds, and the operator's key had one with a line break and
+ * fifty-two — the sweep held the tab for two minutes on a single declaration
+ * and the browser offered to kill it.
+ *
+ * One run is one gap, which is also what `fold` has always done on the other
+ * side of the question (it reads every run as a single space before looking a
+ * match up), so the two now agree. It fixes a quiet wrong answer as well: a
+ * run holding a LINE BREAK was left in the pattern as a literal newline, so
+ * the value only ever matched text broken in the very same place.
+ */
 function altFor(v) {
-  return escapeRe(v).replace(/ /g, GAP) + (POSS_TAIL_RE.test(v) ? "" : "(?:['’][sS])?");
+  return escapeRe(String(v).trim()).replace(/\s+/g, GAP) + (POSS_TAIL_RE.test(v) ? "" : "(?:['’][sS])?");
 }
 const WORD_CLASS = "[A-Za-z0-9_]";
 const LEAD_WORD_RE = new RegExp("^" + WORD_CLASS + "+");
@@ -472,12 +492,15 @@ function oneMatcher(alts) {
 export function buildFindMatcher(values) {
   const list = (values || []).filter((v) => String(v || "").trim());
   if (!list.length) return null;
-  const alts = list.slice().sort((a, b) => b.length - a.length).map((v) => escapeRe(String(v).trim()).replace(/ +/g, GAP));
+  const alts = list.slice().sort((a, b) => b.length - a.length).map((v) => escapeRe(String(v).trim()).replace(/\s+/g, GAP));
   return new RegExp("(?:" + alts.join("|") + ")", "gi");
 }
 
 export function buildMatcher(values) {
-  const list = (values || []).filter((v) => v);
+  // Trimmed, because a value with a space in front of it has no first word to
+  // be filed under and would fall to `loose` — the one big alternation the
+  // index exists to avoid.
+  const list = (values || []).map((v) => (v == null ? "" : String(v).trim())).filter((v) => v);
   if (!list.length) return null;
   // One value is one small pattern, and the reader asks for those by the
   // thousand (the LEAKS row in front, a flagged value): it stays a regex.
@@ -809,7 +832,9 @@ export function compileTypeahead(key, alsoLonger) {
       real: w.real,
       fake: w.fake,
       partial: openings.has(fold(w.real)),
-      rx: new RegExp("(?<![A-Za-z0-9_])" + escapeRe(w.real).replace(/ /g, "\\s+") + (POSS_TAIL_RE.test(w.real) ? "" : "(?:['’][sS])?") + "$", "i"),
+      // One run of blank is one `\s+`, for the reason altFor gives: a chain of
+      // them over a single run is every way of cutting that run up.
+      rx: new RegExp("(?<![A-Za-z0-9_])" + escapeRe(String(w.real).trim()).replace(/\s+/g, "\\s+") + (POSS_TAIL_RE.test(w.real) ? "" : "(?:['’][sS])?") + "$", "i"),
     }));
 }
 // Every folded value that OPENS a longer one at a word edge: "helen" opens

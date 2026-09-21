@@ -1621,6 +1621,14 @@ app, which routes it to the reader tab.
   list) brings the rest in when you want it, and **Open case folder** still
   opens the whole thing as it always did.
 
+  The folder sweep — which reads every other export in the case for names
+  standing in the clear — **is proportional to the folder, not to the key**.
+  A key value holding a run of blank between its words (a name the run
+  captured standing in two columns of a caption, or wrapped at the margin)
+  used to be read as one gap per space, which on a page of columns quadrupled
+  in cost with each space: eight of them took two seconds a page, and one
+  export took **two minutes** and hung the tab. A run of blank is one gap.
+
   **Forget this folder** (under the Documents list) lets go of the case
   folder and reads whatever you open on its own: no sweep of the other
   exports, nothing read ahead, no reel reading on, no PDFs matched by name.
