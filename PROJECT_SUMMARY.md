@@ -340,6 +340,55 @@ because a slot the reader has scrolled past is holding the column up under
 them. On a combined file of forty documents that is every slot at the real
 page shape with four PDFs open, where it used to take forty.
 
+### A PDF's SIZE, not just how many there are
+
+Counting documents cannot tell a folder of pleadings from a folder of scanned
+exhibits. A scan is forty megabytes a file, and what it costs while it is open
+is far more than that: the bytes, the worker's parse of them, and — the large
+one — every page that has been DRAWN, since pdf.js decodes a page's image at
+the resolution it was scanned at (fifteen megabytes for a letter page at 300
+dpi) whatever size the canvas it goes into. Measured in Chromium over four
+19 MB / 100-page scans, rendering a hundred pages and never handing them back
+costs 677 MB; handing each back as it goes costs 62 MB.
+
+So, past the window above:
+
+- **A budget of bytes.** `pdfBytes` remembers what each PDF weighed (kept
+  after it is closed, like `pdfSizes`), `pdfSize` guesses an unopened one at
+  the heaviest seen in this folder, and `pdfsInUse` takes the window in
+  priority order — on screen, then the worksheet's next pages, then what the
+  reading is near — stopping at `PDF_BYTES` (48 MB), with the first always let
+  in since a document cannot be read without its PDF. `trimPdfs` keeps the
+  `PDF_HELD` spares only while the budget still holds, so a folder of scans
+  holds none and a folder of pleadings holds three as before. A folder of
+  40 MB exhibit sets ends up with ONE PDF open while it is read.
+- **A cap on pages drawn at once** (`DRAWN_MAX`, 6). The observer's margin
+  normally keeps three or four, but reading fast down a long document leaves
+  more behind than it lets go of — fourteen, measured. `noteDrawn` counts them
+  oldest-first and gives back the oldest ones nothing is looking at, never one
+  on screen and never one being drawn again.
+- **Pages handed back to pdf.js** (`releasePage` → `page.cleanup()`). It
+  refuses, by answering false, while a page is still drawing, so a page that
+  will not go joins `pagesToRelease` and is asked again when the scrolling
+  settles. `releasePagesIn` hands back every page a box is holding before the
+  box is thrown away — a pane rebuilt at every document is otherwise the whole
+  case kept a page at a time — and `readPdfGridNow` hands each page back as
+  soon as it has read its text, since the grid reads every page of the PDF.
+  `trimPdfs` also tells an open PDF with nothing of its own on screen to put
+  down what it was holding (`pdf.cleanup()`), swallowing the refusal it
+  answers with while a page is drawing.
+- **A reel ceiling in PAGES** (`REEL_MAX_PAGES`, 600) beside the one in
+  documents: twenty-five one-page proofs of service and twenty-five
+  hundred-page exhibit sets are not the same reel. `reelTrim` now sheds
+  between TWO members as well, which is where two two-hundred-page documents
+  live.
+
+Measured over four 38 MB / 200-page scans read end to end: peak 1335 MB → 1163
+MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six open
+→ two. `__textReaderPdfQueue` reports the bytes against the budget and the
+pages drawn against the cap; `__textReaderReel` reports what the reel is
+carrying.
+
 Two more ceilings follow the folder's size. The reel stops at `REEL_MAX_BIG`
 (8) rather than `REEL_MAX` (25) in a folder of more than `BIG_FOLDER` exports,
 since nothing is shed under a review and every member there has a PDF behind

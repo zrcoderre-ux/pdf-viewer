@@ -1602,7 +1602,9 @@ app, which routes it to the reader tab.
   hold three hundred — saying so, with the next one a click away in the list.
   In a **big case folder** (more than two dozen exports) it stops at 8: there
   every document has a PDF behind it, and a review holds every page of the
-  reel live.
+  reel live. It also stops at **600 pages** however few documents that is,
+  since twenty-five hundred-page exhibit sets are not the same reel as
+  twenty-five proofs of service.
   The status bar says where the reel stands: `3 of 5 on the reel`, and where it
   has read the folder out at one end or both.
 - **Auto-scroll at a reading pace, not a pixel speed.** **↓ Auto-scroll** (or

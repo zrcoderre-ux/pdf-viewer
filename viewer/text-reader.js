@@ -6131,6 +6131,12 @@ const REEL_AHEAD_SCREENS = 2;
 const REEL_MAX = 25;
 const REEL_MAX_BIG = 8;
 function reelMax() { return oneDocAtATime() ? REEL_MAX_BIG : REEL_MAX; }
+// …and in PAGES, which is what a reel actually costs. Counting documents says
+// a folder of one-page proofs of service and a folder of hundred-page exhibit
+// sets are the same reel; the first is twenty-five pages and the second two
+// and a half thousand, each with its lines, its pseudonym spans and its
+// citation underlines. Either ceiling stops the reel, and it says which.
+const REEL_MAX_PAGES = 600;
 
 let reel = [];          // [{ name, handle, newline, trailingNewline, from, count, dirty, spots }]
 let reelAt = 0;         // the member being read: an index into `reel`
@@ -6224,10 +6230,14 @@ function reelPrevDoc() {
 
 /** Whether another document may go on the reel at all — either end of it. */
 function reelRoom() {
-  if (reel.length < reelMax()) return true;
+  const pages = doc ? doc.pages.length : 0;
+  if (reel.length < reelMax() && pages < REEL_MAX_PAGES) return true;
   reelDone = true;
   reelDoneUp = true;
-  toast(`${reelMax()} documents is as far as one reel goes${oneDocAtATime() ? " in a folder this size" : ""} — open another from the Documents list to read on from there.`, { ms: 6000 });
+  toast(pages >= REEL_MAX_PAGES
+    ? `${pages} pages is as far as one reel goes — open another from the Documents list to read on from there.`
+    : `${reelMax()} documents is as far as one reel goes${oneDocAtATime() ? " in a folder this size" : ""} — open another from the Documents list to read on from there.`,
+  { ms: 6000 });
   renderReelState();
   return false;
 }
@@ -6568,7 +6578,7 @@ function renderReelState() {
  * document before this one, and the answer is the same either way.
  */
 function reelEndNote() {
-  if (reel.length >= reelMax()) return " (as far as one reel goes)";
+  if (reel.length >= reelMax() || (doc && doc.pages.length >= REEL_MAX_PAGES)) return " (as far as one reel goes)";
   const on = !!reelNextDoc(), back = !!reelPrevDoc();
   if (!on && !back) return " (the folder is read out)";
   if (!on) return " (read to the end of the folder)";
@@ -6698,7 +6708,10 @@ function sectionsByIndex() {
  * already in the state it should be in costs a comparison.
  */
 function reelTrim() {
-  if (reel.length < 3 || !doc) return;
+  // Two documents are worth shedding between where the documents are long:
+  // two exhibit sets of two hundred pages is four hundred sections held for
+  // the sake of the one being read.
+  if (!doc || reel.length < 2) return;
   // A review is a walk over the whole document: nothing is let go of under it.
   // The redaction tool is one too — its check reads every pseudonym the export
   // carries, and a shed page carries none.
@@ -6817,6 +6830,8 @@ function forgetPdfs() {
   pdfCache.clear();
   pdfInView.clear();
   pdfSizes.clear();
+  pdfBytes.clear();
+  pagesToRelease.clear(); // their documents are going with them
   pageRatioKnown = false; // another folder, another paper
   pdfPicked = null;
   pickedPdfs = new Map();
@@ -6848,31 +6863,89 @@ function forgetPdfs() {
 // pages either side, and PDF_NEAR documents at the most. A PDF picked by
 // hand is not pinned either — the File it was picked from is still held, so
 // closing it costs a re-read and nothing else.
+// …AND WITHIN A BUDGET OF BYTES, which is the ceiling that actually binds.
+// Four documents is nothing in a folder of pleadings and it is the tab in a
+// folder of scanned exhibits: forty megabytes a file, held as bytes, as the
+// worker's parse of them, and as the decoded image of every page that has
+// been drawn. Counting documents cannot tell those folders apart. So the
+// window is taken in order — what is on screen, then what the review is
+// about to want, then what the reading is near — and stops at PDF_BYTES,
+// with the first always let in, since a document cannot be read without it.
 const PDF_HELD = 3;    // PDFs kept open past the ones in use
 const PDF_REACH = 40;  // pages either side of the reading whose PDFs are in use
 const PDF_NEAR = 4;    // …and the most documents that may come to
+const PDF_BYTES = 48 * 1024 * 1024; // …and the most they may weigh between them
+const pdfBytes = new Map(); // name → the file's size, kept after it is closed
+/** What a PDF weighs: what it weighed when it was opened, else the heaviest so far. */
+function pdfSize(name) {
+  if (pdfBytes.has(name)) return pdfBytes.get(name);
+  let most = 0;
+  for (const n of pdfBytes.values()) if (n > most) most = n;
+  return most; // a folder of scans is scans throughout; 0 while none is known
+}
 function pdfsInUse() {
-  const keep = new Set(PS.pdfsNear(pdfSources, readingPage(), PDF_REACH, PDF_NEAR));
-  // Whatever an observer says is on screen, wherever the reading line is: a
-  // page being drawn now is never closed under the drawing.
-  for (const i of pdfInView) { const s = pdfSources[i]; if (s) keep.add(s.name); }
+  // Never let go of: a page an observer says is on screen (it is being drawn
+  // from), a page swapped into the text, and a PDF carrying redaction boxes —
+  // the copy is written from the pages themselves, and the review walking
+  // past it is not a decision to drop them.
+  const must = new Set();
+  for (const i of pdfInView) { const s = pdfSources[i]; if (s) must.add(s.name); }
   const nameOf = (k) => k.slice(0, k.lastIndexOf("|"));
-  for (const k of warmWanted) keep.add(nameOf(k));
-  for (const k of swaps) keep.add(nameOf(k));
-  // …and a PDF carrying redaction boxes: the copy is written from the pages
-  // themselves, and the review walking past it is not a decision to drop them.
-  for (const [name, store] of redactStores) if (store.count().boxes) keep.add(name);
+  for (const k of swaps) must.add(nameOf(k));
+  for (const [name, store] of redactStores) if (store.count().boxes) must.add(name);
+  // Then, in this order and while the budget lasts: the worksheet's next
+  // pages, and the documents the reading has reached either side of it.
+  const then = [];
+  const want = (n) => { if (n && !must.has(n) && !then.includes(n)) then.push(n); };
+  for (const k of warmWanted) want(nameOf(k));
+  for (const n of PS.pdfsNear(pdfSources, readingPage(), PDF_REACH, PDF_NEAR)) want(n);
+  const keep = new Set(must);
+  let bytes = 0;
+  for (const n of must) bytes += pdfSize(n);
+  for (const n of then) {
+    const size = pdfSize(n);
+    if (keep.size && bytes + size > PDF_BYTES) break;
+    keep.add(n);
+    bytes += size;
+  }
   return keep;
 }
 function trimPdfs() {
   const keep = pdfsInUse();
+  const shown = new Set();
+  for (const i of pdfInView) { const s = pdfSources[i]; if (s) shown.add(s.name); }
+  let bytes = 0;
+  for (const n of keep) bytes += pdfSize(n);
   // Insertion order is least-recently-used first: loadPdf moves a PDF it is
-  // handed back to the end.
+  // handed back to the end. The few kept past the window are kept from the
+  // recent end and only while the budget holds — on a folder of scans it
+  // holds none, and stepping back re-reads the file rather than the tab
+  // carrying three more of them for the chance.
   const spare = [...pdfCache.keys()].filter((n) => !keep.has(n));
-  for (const name of spare.slice(0, Math.max(0, spare.length - PDF_HELD))) {
+  const held = new Set();
+  for (let i = spare.length - 1; i >= 0 && held.size < PDF_HELD; i--) {
+    const size = pdfSize(spare[i]);
+    if (bytes + size > PDF_BYTES) break;
+    held.add(spare[i]);
+    bytes += size;
+  }
+  for (const name of spare) {
+    if (held.has(name)) continue;
     const p = pdfCache.get(name);
     pdfCache.delete(name);
     if (p) p.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }).catch(() => {});
+  }
+  // …and the ones that stay, but with nothing of theirs on screen, are told
+  // to put down what they were holding for the pages that WERE: the operator
+  // lists, the fonts and the decoded images. The document stays open, so
+  // coming back to it is a re-render and not a re-read; pdf.js refuses while
+  // a page of it is still drawing, which is the answer we want.
+  for (const [name, p] of pdfCache) {
+    if (shown.has(name)) continue;
+    // It ANSWERS by refusing — a rejected promise naming the page still
+    // drawing — so the refusal is swallowed here and the next pass asks
+    // again, rather than reaching the window's error handler as a fault.
+    p.then((info) => info.pdf.cleanup()).catch(() => {});
   }
 }
 
@@ -6964,6 +7037,7 @@ async function openPdfNow(src) {
   }
   const info = { pdf, count: pdf.numPages, sizes, name: src.name, lines: sizes.map(() => null), geoms: sizes.map(() => null), rows: sizes.map(() => null) };
   pdfSizes.set(src.name, sizes); // kept after this PDF is closed: a slot's height, without the file
+  pdfBytes.set(src.name, file.size || 0);
   noteRatio(sizes);
   sizeSlotsFor(src.name);
   // The line grid comes after the documents already waiting: a page is worth
@@ -6987,7 +7061,14 @@ async function readPdfGridNow(info) {
     const held = pdfCache.get(info.name);
     if (!held || (held.__info && held.__info !== info)) return;
     try {
-      const tc = await (await pdf.getPage(i)).getTextContent();
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      // Read and handed straight back. The grid reads EVERY page of the PDF,
+      // and reading one leaves the worker holding what it parsed to answer —
+      // on a three-hundred-page exhibit set, the whole document, for the sake
+      // of where each page's first line sits. A page being DRAWN is left
+      // alone: it is holding a bitmap somebody is looking at.
+      if (!pageIsDrawn(page)) { try { page.cleanup(); } catch { /* it is drawing */ } }
       const sz = sizes[i - 1];
       const items = [];
       let top = Infinity;
@@ -7516,6 +7597,7 @@ async function renderInto(el, src, pageNo, cssWidth) {
   let page;
   try { page = await info.pdf.getPage(pageNo); } catch { return; }
   if (el.dataset.want !== want) return;
+  el.__page = page; // …so the page can be let go of when the slot is released
   const base = page.getViewport({ scale: 1 });
   const cssScale = cssWidth / base.width;
   // What a redaction box is drawn through, and the page's own box it is held
@@ -7540,6 +7622,7 @@ async function renderInto(el, src, pageNo, cssWidth) {
   el.dataset.rendered = want;
   delete el.dataset.preview;
   el.classList.add("ready");
+  noteDrawn(el);
   // The page is up: its boxes go back on it at the width it was drawn at.
   // Before the text layer, which may yet fail — a page with no text layer can
   // still carry an area box over a signature.
@@ -7705,8 +7788,84 @@ function blankLineNumbers(layer) {
   if (Math.max(...tops) - Math.min(...tops) < H * 0.4) return;
   for (const c of best) c.sp.textContent = "";
 }
+// HOW MANY PAGES MAY BE DRAWN AT ONCE. A page of a scanned exhibit decodes to
+// fifteen megabytes — the image at the resolution it was scanned, not the size
+// it is drawn at — and it is held for as long as the bitmap is. The window
+// beyond the viewport (PDF_MARGIN) usually keeps three or four, which is what
+// makes scrolling smooth; reading fast down a long document leaves more than
+// that behind, since the pages come into view faster than the observer lets
+// them go. So the drawn pages are counted, oldest first, and the oldest ones
+// nothing is looking at are given back until the count holds again.
+const DRAWN_MAX = 6;
+const drawnSlots = new Set(); // the slots holding a bitmap, oldest drawn first
+/** The text page a slot belongs to — the pane's own index, or its section's. */
+function slotIndex(el) {
+  if (el.classList.contains("pdf-slot")) return Number(el.dataset.index);
+  const sec = el.closest && el.closest(".tpage");
+  return sec ? Number(sec.dataset.index) : -1;
+}
+/** A page went up: the ones drawn longest ago and out of sight come down. */
+function noteDrawn(el) {
+  drawnSlots.delete(el);
+  drawnSlots.add(el);
+  if (drawnSlots.size <= DRAWN_MAX) return;
+  for (const old of drawnSlots) {
+    if (drawnSlots.size <= DRAWN_MAX) break;
+    if (old === el) continue;
+    if (!old.isConnected) { drawnSlots.delete(old); continue; }
+    // Never one on screen: a viewport showing more pages than the cap keeps
+    // every one of them, and the cap simply does not bite. Never one being
+    // drawn again either — emptying its canvas under the drawing would leave
+    // a page that reports itself drawn and shows nothing.
+    if (old.__task || pdfInView.has(slotIndex(old))) continue;
+    releaseCanvas(old);
+  }
+}
+
+/** Whether a page is holding a bitmap on screen, and so is not ours to clear. */
+function pageIsDrawn(page) {
+  for (const el of drawnSlots) if (el.__page === page) return true;
+  return false;
+}
+
+const pagesToRelease = new Set(); // pages that refused, to be asked again
+/**
+ * A page drawn and scrolled past, given back to pdf.js.
+ *
+ * Dropping the bitmap is not the end of what a page costs. pdf.js holds the
+ * page's operator list and its DECODED IMAGES — and a scanned exhibit's page
+ * decodes to fifteen megabytes whatever the canvas it was drawn into — until
+ * it is told the page is done with. `page.cleanup()` is that telling; it
+ * answers false and keeps everything where a render is still running, so the
+ * page being drawn right now is never pulled out from under it.
+ */
+function releasePage(el) {
+  const page = el.__page;
+  el.__page = null;
+  if (!page) return;
+  // It refuses while the page is still drawing — a render cancelled a moment
+  // ago is still winding up — and refusing is an answer, not a failure. So a
+  // page that will not go now is asked again when the scrolling settles.
+  let done = false;
+  try { done = page.cleanup(); } catch { done = true; /* the document is gone */ }
+  if (!done) { pagesToRelease.add(page); releasePagesSoon(); }
+}
+/** The pages that would not go when they were let go of, asked again. */
+function sweepPagesToRelease() {
+  for (const page of [...pagesToRelease]) {
+    let done = false;
+    try { done = page.cleanup(); } catch { done = true; }
+    if (done) pagesToRelease.delete(page);
+  }
+  if (pagesToRelease.size) releasePagesSoon();
+}
+/** Every page a slot is holding in this box, before the box is thrown away. */
+function releasePagesIn(box) {
+  if (!box) return;
+  for (const el of box.querySelectorAll(".pdf-slot, .pdf-inline")) releasePage(el);
+}
 function releaseCanvas(el) {
-  if (!el.dataset.rendered && !el.dataset.preview) return;
+  if (!el.dataset.rendered && !el.dataset.preview) { releasePage(el); return; }
   const sheet = sheetOf(el);
   const canvas = sheet.querySelector("canvas");
   // Keep the box its size, drop the bitmap and the text.
@@ -7725,6 +7884,8 @@ function releaseCanvas(el) {
   delete el.dataset.preview;
   delete el.dataset.warm;
   el.classList.remove("ready");
+  drawnSlots.delete(el);
+  releasePage(el);
 }
 /**
  * A slot: for the pane, a page label like the text page's (so the two are
@@ -7869,6 +8030,12 @@ function inlineWidth(sec) { return Math.max(200, sec.clientWidth); }
 
 // ── side by side ──
 function buildPdfPane() {
+  // The slots about to be thrown away are holding pdf.js pages — their
+  // operator lists and their decoded images, fifteen megabytes a page of a
+  // scan. Dropped with the pane they would never be given back, and reading
+  // on rebuilds this pane at every document: the case ends up in memory a
+  // page at a time. So they are handed back before the pane goes.
+  releasePagesIn(pdfPane);
   pdfPane.innerHTML = "";
   pdfInView.clear(); // the slots those indices named are gone with the pane
   pdfPane.hidden = !sbsOn || !doc;
@@ -8545,6 +8712,8 @@ const reelTrimSoon = debounce(reelTrim, 200);
 // with the reading, so what falls out of it is closed as it does, and not
 // only when the document changes.
 const pdfTrimSoon = debounce(trimPdfs, 500);
+// …and the pages that were still drawing when the reading left them.
+const releasePagesSoon = debounce(sweepPagesToRelease, 700);
 pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });
 
 /** Widths changed (a resize, the panel): re-fit every shown PDF page. */
@@ -8624,6 +8793,7 @@ function applySwaps() {
     } else if (inline) {
       inlineObserver.unobserve(inline);
       if (inline.__task) { try { inline.__task.cancel(); } catch { /* done */ } }
+      releasePage(inline);
       inline.remove();
       moved = true;
     }
@@ -9753,6 +9923,14 @@ window.__textReaderAdoptFolder = (h) => adoptFolder(h, { quiet: true });
 window.__textReaderOpenDoc = (name) => { const d = folderDocs.find((x) => x.name === name); return d ? openFolderDoc(d) : null; };
 window.__textReaderPickPdfs = (files) => usePickedPdfs(files);
 window.__textReaderPdfSources = () => pdfSources.map((s) => (s ? s.name : null));
+// The reel as it stands: which documents are hanging off it, how many pages
+// each is carrying, and which of them have been shed. What a folder of long
+// documents is actually holding, in one look.
+window.__textReaderReel = () => ({
+  members: reel.map((m) => ({ name: m.name, from: m.from, count: m.count, shed: !!m.shed, dirty: !!m.dirty })),
+  at: reelAt, pages: doc ? doc.pages.length : 0, ceiling: { docs: reelMax(), pages: REEL_MAX_PAGES },
+  held: !namesBar.hidden || !leaksBar.hidden || redactOn ? "a review is open: nothing is shed under one" : "",
+});
 window.__textReaderPdfQueue = () => ({
   queued: pdfJobs.map((j) => j.name),
   busy: pdfJobBusy,
@@ -9765,6 +9943,13 @@ window.__textReaderPdfQueue = () => ({
   near: PS.pdfsNear(pdfSources, readingPage(), PDF_REACH, PDF_NEAR),
   inView: [...pdfInView],
   sized: [...pdfSizes.keys()],
+  // …and what the ceilings are made of: the bytes the open ones weigh
+  // against the budget, and the pages drawn against the cap.
+  bytes: [...pdfCache.keys()].reduce((t, n) => t + pdfSize(n), 0),
+  budget: PDF_BYTES,
+  drawn: drawnSlots.size,
+  drawnMax: DRAWN_MAX,
+  releasing: pagesToRelease.size,
 });
 // …and what has been drawn ahead of the review: the pages held ready, the
 // ones being drawn now, and the exports read ahead of the hop to them.
