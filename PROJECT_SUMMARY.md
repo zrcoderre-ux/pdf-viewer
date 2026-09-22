@@ -498,6 +498,68 @@ Measured on the operator's own declaration (238 KB) with a key the size of
 theirs: the step ran **19 ms**, and the whole reading is linear in the key
 again — 50 values 11 ms, 343 values 19 ms, 1,101 values 50 ms.
 
+### The walk clicking through documents on its own
+
+Reported from a real review: clicking through the real names standing unfaked,
+and **towards the end** the reader starts opening one document after another by
+itself, as fast as files open.
+
+TWO READINGS say where the names are, and they are not the same reading. The
+marks on the PAGE (`scanPassNow` → `leakHits`) answer for the document open:
+they know the spot keeps taken in it, the names the walk has settled, and the
+edits the file has not been given yet. The folder SWEEP (`sweepFolder` →
+`sweep.rows`) answers for the FILES on disk, which know none of that — a
+`keepRangeHere` in particular is one occurrence in one document and is not in
+`maskKept`, so the file goes on carrying that name and the sweep goes on
+counting it.
+
+The walk read "what is here" off the first and "where next" off the second:
+
+    stepLeak → no live hits → jumpToDoc(rest[0]) → leakJump = true
+    renderLeakStatus → leakJump && no leaks → stepLeak → jumpToDoc(rest[0]) → …
+
+`restOfFolder` leaves out the document that is open, so a document whose row
+the page disagrees with is offered again the moment the walk is somewhere else.
+Nothing broke the circuit: opening a document does not move `reals`, `keeps`,
+`folderDocs` or `flagged`, so `sweepStale()` stays false and the row that sent
+the walk there is still there next time round. Two such documents and it
+ping-pongs between them for ever. It shows up at the END of a walk because by
+then every document that really was carrying a name has been answered, and the
+rows left over are exactly the ones the page disagrees with.
+
+A second path drove the same loop faster: `renderLeakStatus` is called by the
+SWEEP as well as by the paint, and between a document opening and its own paint
+landing, `leakHits` still holds the document just LEFT — hanging off pages that
+are gone, so `liveLeaks()` is empty. A sweep finishing in that window took that
+for "nothing here" and sent the walk out of a document it had never read.
+
+The decision is now one pure, tested place — `leaks.walkStops` and
+`leaks.walkStep` (`test-leaks.mjs`, "the walk from one document to the next") —
+and it is made off BOTH readings:
+
+- The page's own verdict is kept (`pageEmpty`, written by the paint beside
+  `scannedDocs`) and honoured: a document it has read and found nothing live in
+  is not offered as a stop again. Held only as long as the question it answers —
+  a new key or a new folder drops it, a keep deliberately does not, since a keep
+  only ever takes a name OUT of the clear. The **⚠** in Documents still reports
+  what the file itself carries; that is the honest place for it.
+- A document whose own reading has not landed is not called empty at all
+  (`readHere()`: `paintedSeq === docSeq`). The bar says it is being read and
+  waits, rather than leaving a document nobody read.
+- A document whose marks cannot run — plain reading, or one they gave up on
+  (`marksCanRead()`) — has no answer to give either way, so the walk stops and
+  says so. `giveUpOnMarks` tells a waiting walk directly, rather than leaving
+  it on a bar that says "reading".
+- And a run of documents opened one after another with nothing found in any of
+  them stops at `WALK_BOUNCE_LIMIT` (8), whatever the reason: a disagreement
+  nobody has thought of yet cannot walk the folder on its own.
+- Stepping by hand is never a runaway, and none of it applies (`auto: false`):
+  › goes where › says it goes.
+
+A document that will not open is no longer left with `leakJump` set either —
+`openFolderDoc` says whether it opened, and `jumpToDoc` stands the walk down
+and stops offering that document rather than waiting on one that is not coming.
+
 ### Opening ONE FILE is not opening its folder
 
 A file opened on its own used to bring its whole folder with it: the reader

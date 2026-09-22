@@ -1435,6 +1435,28 @@ app, which routes it to the reader tab.
   says the folder is being read and goes on by itself the moment it answers.
   And it goes round the folder in reading order, the document *after* this one
   first, rather than back to the top of the list each time.
+- **And it does not walk the folder on its own.** Two readings say where the
+  names are, and they are not the same reading: the marks answer for the
+  document open — they know the spot keeps taken in it, the names the walk has
+  settled, and the edits the file has not been given yet — while the folder
+  sweep answers for the files on disk, which know none of that. Where the two
+  disagreed about a document, the walk landed there, found nothing and went
+  straight out again; and since opening a document does not change what the
+  sweep read, the row that sent it there was still there the next time round.
+  Two such documents and the reader clicked between them as fast as files
+  open — at the *end* of a review, when every document that really was carrying
+  a name had been answered and the rows left over were exactly the ones the
+  page disagreed with. The page's own reading is kept and honoured now: a
+  document it has read and found nothing standing in is not offered as a stop
+  again until the key or the folder moves, and the **⚠** in **Documents** goes
+  on saying what that file itself carries. A document whose reading has not
+  landed yet is not called empty at all — the bar says it is being read and
+  waits, rather than leaving a document nobody read. One whose marks cannot run
+  (plain reading, or a document they cost too much on) has no answer to give
+  either way, so the walk stops there and says so. And a run of documents
+  opened one after another with nothing found in any of them stops at eight,
+  whatever the reason. Stepping the walk by hand is never a runaway and none of
+  it applies: › goes where › says it goes.
 - **And the question is the case's, not the document's.** A keep applies to
   every export in the folder, so "was it faked?" is asked of every export in
   the folder: a pseudonym standing in one of the other forty is a name the next
