@@ -1435,6 +1435,7 @@ function openText(text, name, handle, built) {
   document.body.classList.remove("editing");
   $("edit-toggle").setAttribute("aria-pressed", "false");
   document.title = name + " — Text Reader";
+  docSeq++;      // …whose own reading of what stands in its clear has yet to be made
   leakStep = -1; // a new document, a new walk through what stands in its clear
   answered = 0;
   decidedHere = 0;
@@ -1616,7 +1617,8 @@ async function openFolderDoc(d) {
   try {
     const f = await d.handle.getFile();
     await openFile(f, d.handle);
-  } catch (e) { toast("Could not open " + d.name + ": " + (e.message || e), { error: true }); }
+    return true;
+  } catch (e) { toast("Could not open " + d.name + ": " + (e.message || e), { error: true }); return false; }
 }
 
 function renderDocList() {
@@ -3329,12 +3331,16 @@ async function scanDocument() {
  */
 function giveUpOnMarks(spent, page, pages) {
   marksOff = true;
+  leakHits = [];
   flaggedHits = new Map();
   scannedDocs = new Set();
   scanSoon.cancel();
   try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); } catch { /* none to clear */ }
   $("st-leaks").textContent = "";
   $("st-kept").textContent = "";
+  // A walk waiting on this document's reading is waiting on one that is not
+  // coming now. It is told so here rather than left on a bar saying "reading".
+  if (leakJump || walkOn) { leakJump = false; walkOn = false; stepLeak(1, { auto: true }); }
   const line = `The marks over the text took more than ${Math.round(spent / 1000)} seconds on this document (page ${page} of ${pages}) and are off for it. The words are all here; the names are not marked.`;
   showKeyOffer(line + " Read plainly?", "Read plainly", async () => {
     setPlain(true);
@@ -3499,6 +3505,21 @@ async function scanPassNow(pass) {
   scannedDocs = docsSeen;
   keptSeen = seen;
   scanned = mark;
+  paintedSeq = docSeq;
+  // …AND WHICH OF THE DOCUMENTS READ ARE CARRYING NOTHING. Where the walk goes
+  // next is the folder SWEEP's answer, read off the files; this is the PAGE's
+  // own answer about the documents it has just read, and where the two
+  // disagree — a spot keep taken here, a name settled, an edit the file has
+  // not been given yet — the page is the one that knows. Without it the walk
+  // is sent back to a document it has just finished, finds nothing, and is
+  // sent on again: the folder walked in a loop, on its own (leaks.walkStops).
+  if (marksCanRead()) {
+    const empty = emptyHere();
+    for (const name of docsSeen) {
+      if (hits.some((h) => h.doc === name && !isSettled(h.real))) empty.delete(name);
+      else empty.add(name);
+    }
+  }
   CSS.highlights.set("flagged", highlightOf(flaggedRanges));
   CSS.highlights.set("leak", highlightOf(leakRanges));
   CSS.highlights.set("kept", highlightOf(keptRanges));
@@ -3514,6 +3535,36 @@ async function scanPassNow(pass) {
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
 let flaggedHits = new Map(); // …and per document on the page, how many flagged values stand in its clear
 let scannedDocs = new Set(); // …and which documents that paint actually read (the reel sheds the far end)
+let docSeq = 0;              // documents opened, counted: what a reading was made OF
+let paintedSeq = -1;         // …and the one the last whole paint was made of
+/**
+ * Whether the open document's own reading is in — or is never coming, the
+ * marks being off for it. Until it is, "nothing here" is the LAST document's
+ * answer, hanging off pages that are gone, and it is not an answer about this
+ * one: a walk that acts on it leaves a document it never read.
+ */
+function readHere() { return paintedSeq === docSeq || !marksCanRead(); }
+/** Whether the marks — the walk's only reading of the open document — can run here at all. */
+function marksCanRead() {
+  return !marksOff && !plain && "highlights" in CSS && typeof Highlight !== "undefined";
+}
+// The documents the page has read for itself and found nothing live in — the
+// walk does not go back to them. Kept only as long as the question it answers:
+// a new key makes every document's reading again, and a new folder is not this
+// one. A KEEP does not clear it, and deliberately — a keep only ever takes a
+// name out of the clear, so a document found carrying nothing is still
+// carrying nothing, and re-opening it to prove that is the very walk this is
+// here to stop.
+let pageEmpty = new Set();
+let emptyStamp = { reals: null, docs: null };
+function emptyHere() {
+  if (emptyStamp.reals !== reals || emptyStamp.docs !== folderDocs) {
+    emptyStamp = { reals, docs: folderDocs };
+    pageEmpty = new Set();
+  }
+  return pageEmpty;
+}
+let bounces = 0; // documents the walk has opened since it last found anything
 /** The document a page belongs to: the reel's member where the folder is read on, else the open file. */
 function docNameOfBody(body) {
   if (reel.length < 2) return fileName;
@@ -3541,22 +3592,34 @@ function renderLeakStatus() {
     : rest.length ? `⚠ none left here, and ${restN} in ${rest.length} other document${rest.length === 1 ? "" : "s"} — click to go on`
     : done ? `⚠ ${done} settled and waiting on the save — Save writes them` : "";
   leakEl.classList.toggle("step", !!leaks || rest.length > 0);
+  if (leaks) walkOn = false; // something is standing here: the walk waits on nothing
   if (leakJump && leaks) {
     // A document opened to go on with the walk: stand on its first name.
     leakJump = false;
     leakStep = -1;
+    bounces = 0; // …and the walk is getting somewhere, so it is not bouncing
     showNamesBar(true);
   } else if (!leaks) {
-    if (leakJump) { leakJump = false; leakStep = -1; if (rest.length) stepLeak(1); else showNamesBar(false); }
-    else if (walkOn && !folderPending()) {
+    // A DOCUMENT IS NOT EMPTY UNTIL IT HAS BEEN READ. `leakHits` is the last
+    // paint's, and between a document opening and its own paint landing the
+    // hits in hand belong to the document just left, hanging off pages that
+    // are gone — which counts here as none. This is called by the folder sweep
+    // as well as by the paint, and a sweep finishing in that window used to
+    // take that count for an answer and send the walk straight out of a
+    // document it had never read; since opening a document does not change
+    // what the sweep read, it went round the folder as fast as files open.
+    // The jump waits for the reading made of THIS document (readHere).
+    if (leakJump && !readHere()) renderNamesBar();
+    else if (leakJump) { leakJump = false; leakStep = -1; stepLeak(1, { auto: true }); }
+    else if (walkOn && readHere() && !folderPending()) {
       // The folder has been read again since the last decision: on to whatever
       // it turned out to be carrying, or down if it is carrying nothing.
       walkOn = false;
       leakStep = -1;
-      if (rest.length) stepLeak(1);
+      if (rest.length) stepLeak(1, { auto: true });
       else { showNamesBar(false); toast("Nothing the key binds is standing in the clear now."); }
     }
-    else if (!rest.length && !folderPending()) showNamesBar(false);
+    else if (!rest.length && !folderPending() && !walkOn && readHere()) showNamesBar(false);
     else if (!namesBar.hidden) renderNamesBar(); // …else the bar says which document is next
   } else if (!namesBar.hidden) renderNamesBar(); // the paint moved the ranges under it
   if (leaks || rest.length) {
@@ -3592,22 +3655,43 @@ function renderLeakStatus() {
 let leakStep = -1;
 let leakJump = false; // a document opened for the walk: stand on its first name
 let walkOn = false;   // …and the walk waiting on the folder to say which document is next
-function stepLeak(dir = 1) {
+function stepLeak(dir = 1, { auto = false } = {}) {
   // The ranges of the last paint, minus any whose page has been rebuilt under
   // them (an edit, a key change) before the next paint has caught up.
   const hits = liveLeaks();
   const rest = restOfFolder();
   if (!hits.length) {
     // Nothing here, but the folder is not this document: the walk goes on in
-    // the next one that has something standing in the clear.
-    if (rest.length) { jumpToDoc(dir < 0 ? rest[rest.length - 1] : rest[0]); return; }
-    if (folderPending()) { walkOn = true; renderNamesBar(); toast("The rest of the folder is being read \u2014 the walk goes on as soon as it says what is next."); return; }
+    // the next one that has something standing in the clear — as far as it is
+    // this document's OWN reading that says there is nothing here. Where it is
+    // not, leaks.walkStep says what to do instead of going on.
+    const step = LK.walkStep({
+      next: rest.length ? (dir < 0 ? rest[rest.length - 1] : rest[0]) : null,
+      read: readHere(),
+      marks: marksCanRead(),
+      pending: folderPending(),
+      bounces,
+      auto,
+    });
+    if (step.go) { jumpToDoc(step.go); return; }
+    if (step.wait) {
+      // Waiting is not stopping: the bar stays up, says what is being read,
+      // and the walk goes on by itself the moment the answer lands (walkOn,
+      // and leakJump where a document was opened for it).
+      walkOn = true;
+      renderNamesBar();
+      if (step.wait === "folder" && !auto) toast("The rest of the folder is being read \u2014 the walk goes on as soon as it says what is next.");
+      return;
+    }
+    walkOn = false;
     showNamesBar(false);
-    toast(marksOff
-      ? "The marks are off for this document, so the names standing in the clear are not being read."
+    toast(step.stop === "marks"
+      ? "The marks are off for this document, so the names standing in the clear are not being read \u2014 the walk has stopped here."
+      : step.stop === "bounced"
+      ? `The walk opened ${LK.WALK_BOUNCE_LIMIT} documents in a row without finding a name standing in the clear in any of them, so it has stopped here. The \u26a0 beside a document in the list says what its own text is still carrying.`
       : sweep.running ? "None here. The rest of the folder is still being read…"
       : dirHandle ? "No real name from the key is standing unfaked, here or anywhere else in the folder."
-      : "No real name from the key is standing unfaked.");
+      : "No real name from the key is standing unfaked.", { error: step.stop === "bounced" });
     return;
   }
   // Off the end of this document, with another in the folder still carrying
@@ -3639,7 +3723,7 @@ function stepLeak(dir = 1) {
 const namesBar = $("names-bar");
 function showNamesBar(on) {
   const was = !namesBar.hidden;
-  if (on && !was) reelAllLive(); // the walk looks at every page of the reel
+  if (on && !was) { reelAllLive(); bounces = 0; } // the walk looks at every page of the reel
   namesBar.hidden = !on;
   setBarHeight();
   if (was !== !!on) relayout();
@@ -3978,13 +4062,11 @@ function countMatches(rx, text) {
  * on: `leakHits` is the key's names).
  */
 function restOfFolder() {
-  const out = [];
-  for (const r of sweep.rows) {
-    if (r.doc.handle === fileHandle) continue;
-    const count = r.values.filter((v) => !isSettled(v)).length;
-    if (count) out.push({ doc: r.doc, count, values: r.values });
-  }
-  return roundFromHere(out);
+  return roundFromHere(LK.walkStops(sweep.rows, {
+    isOpen: (d) => d.handle === fileHandle,
+    empty: emptyHere(),
+    settled: isSettled,
+  }));
 }
 function folderRest() {
   if (!dirHandle || !reals) return "";
@@ -4127,8 +4209,14 @@ async function sweepFolder() {
 async function jumpToDoc(row) {
   if (!(await saveOnTheWayOut())) return;
   leakJump = true;
+  bounces++; // …and nothing found in it yet: the walk counts the documents it opens
   toast(`Opening ${row.doc.name} — ${row.count} name${row.count === 1 ? "" : "s"} standing in the clear there.`);
-  openFolderDoc(row.doc);
+  if (await openFolderDoc(row.doc)) return;
+  // It would not open. The walk does not stand waiting on a document that is
+  // not coming, and does not offer it again: openFolderDoc has said why.
+  leakJump = false;
+  emptyHere().add(row.doc.name);
+  renderNamesBar();
 }
 // What has been DECIDED in the document on screen: a name answered in the
 // names walk, a Fix? cell answered in the worksheet review. Not an edit, not a
@@ -4173,7 +4261,11 @@ function renderNamesBar() {
     // about the keeps — so the moment AFTER the last name here is answered is
     // exactly the moment the folder cannot say what is next. The bar waits for
     // it, and goes on by itself when it arrives (walkOn).
-    if (folderPending()) { renderWaiting(); return; }
+    if (folderPending()) { renderWaiting("folder"); return; }
+    // …nor is a document whose own reading has not landed a document with
+    // nothing in it: the bar waits for that too rather than going down on an
+    // answer about the document just left.
+    if (!readHere()) { renderWaiting("document"); return; }
     showNamesBar(false);
     return;
   }
@@ -4193,14 +4285,20 @@ function renderNamesBar() {
 function folderPending() {
   return !!dirHandle && !!reals && (sweep.running || sweepStale());
 }
-/** The bar while the folder is being read: the walk is not over, it is waiting. */
-function renderWaiting() {
+/**
+ * The bar while a reading is being made: the walk is not over, it is waiting —
+ * on the rest of the folder, or on the open document's own marks.
+ */
+function renderWaiting(on = "folder") {
+  const here = on === "document";
   setOnward(true);
   $("nb-count").textContent = "none left here" + (answered ? ` · ${answered} answered here` : "");
   $("nb-type").textContent = "reading";
-  $("nb-value").textContent = folderName || "the folder";
-  $("nb-value").title = "The rest of the folder is being read for names standing in the clear";
-  $("nb-where").textContent = sweep.running ? `${sweep.at} of ${folderDocs.length}\u2026` : "\u2026";
+  $("nb-value").textContent = here ? TD.docLabel(fileName) : folderName || "the folder";
+  $("nb-value").title = here
+    ? "This document is being read for names standing in the clear"
+    : "The rest of the folder is being read for names standing in the clear";
+  $("nb-where").textContent = here ? "\u2026" : sweep.running ? `${sweep.at} of ${folderDocs.length}\u2026` : "\u2026";
   $("nb-rest").textContent = "";
   $("nb-prev").disabled = $("nb-next").disabled = true;
 }
@@ -4239,6 +4337,7 @@ function decideName(what) {
   const same = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
   answered++;
   decidedHere++;
+  bounces = 0;
   if (what === "here") {
     keepRangeHere(h.range, h.real);
     leakHits = leakHits.filter((x) => x !== h);
@@ -4254,7 +4353,7 @@ function decideName(what) {
     // just taken threw the folder's answer away, the walk says so and goes on
     // the moment it is read again.
     leakStep = -1;
-    if (restOfFolder().length) { stepLeak(1); return; }
+    if (restOfFolder().length) { stepLeak(1, { auto: true }); return; }
     if (folderPending()) { walkOn = true; renderNamesBar(); return; }
     showNamesBar(false);
     toast("Nothing the key binds is standing in the clear now.");
@@ -4293,12 +4392,13 @@ function fakeName() {
   settled.add(settledKey(h.real));
   answered++;
   decidedHere++;
+  bounces = 0;
   const n = leakHits.filter((x) => settledKey(x.real) === settledKey(h.real)).length;
   toast(`“${h.real}” will be written as ${h.fake ? `“${h.fake}”` : "its pseudonym"} on save`
     + (n > 1 ? ` — all ${n} of them here` : "") + ". Noted; the walk moves on.");
   renderLeakStatus();
   const left = liveLeaks();
-  if (!left.length) { stepLeak(1); return; }
+  if (!left.length) { stepLeak(1, { auto: true }); return; }
   leakStep = Math.min(leakStep, left.length - 1) - 1;
   stepLeak(1);
 }

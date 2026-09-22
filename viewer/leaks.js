@@ -635,3 +635,77 @@ export function leakPages(rows, from, files) {
   }
   return out;
 }
+
+// ── the walk from one document to the next ─────────────────────────────────────
+//
+// A review walks the folder: every name standing in the clear in the document
+// in front, then on to the next document carrying one. TWO READINGS say what
+// is where, and they are not the same reading. The marks on the PAGE answer
+// for the document open — they know the spot keeps taken in it, the names the
+// walk has settled, and the edits the file has not been given yet. The folder
+// SWEEP answers for the files on disk, which know none of that.
+//
+// Where the two disagree about a document, the walk lands there, finds
+// nothing, and goes straight out again — and since opening a document does not
+// change what the sweep read, the row saying "a name stands here" is still
+// there the next time round. Two such documents and the walk goes between them
+// as fast as files open, which is what it looks like from the operator's seat:
+// the reader clicking through documents on its own. It shows up at the END of a
+// walk because by then every document that really was carrying one has been
+// answered, and the rows left over are exactly the ones the page disagrees with.
+//
+// So the walk decides here, in one place, off both readings:
+//   · a document the page has read for itself and found nothing live in is not
+//     offered as a stop (`walkStops`, `empty`),
+//   · a document whose own reading has not landed yet is not called empty at
+//     all — the answer is not in, and the walk waits for it rather than leaving
+//     a document it never read,
+//   · a document the marks cannot read (plain reading, or the marks given up on
+//     it) has no answer to give either way, and the walk stops and says so,
+//   · and a run of documents opened one after another with nothing found in any
+//     of them stops at WALK_BOUNCE_LIMIT whatever the reason, so no disagreement
+//     nobody has thought of yet can walk the folder on its own.
+// An operator stepping the walk by hand (`auto: false`) is not a runaway and
+// none of it applies: › goes where › says it goes.
+
+/** Documents opened one after another, nothing found in any of them, before the walk stops. */
+export const WALK_BOUNCE_LIMIT = 8;
+
+/**
+ * The documents a walk may go on to: the sweep's rows, minus the one open,
+ * minus the values already settled, minus the documents the page has read for
+ * itself and found nothing live in. → [{ doc, count, values }], each row's own
+ * `doc` carried through so the caller can order them from where it stands.
+ */
+export function walkStops(rows, { isOpen = null, empty = null, settled = null } = {}) {
+  const out = [];
+  for (const r of rows || []) {
+    if (!r || !r.doc) continue;
+    if (isOpen && isOpen(r.doc)) continue;
+    if (empty && empty.has(r.doc.name)) continue;
+    const values = r.values || [];
+    const count = settled ? values.filter((v) => !settled(v)).length : values.length;
+    if (count) out.push({ doc: r.doc, count, values });
+  }
+  return out;
+}
+
+/**
+ * What the walk does when the document in front has nothing standing in it.
+ * Pure: the caller says what it can see, this says what to do about it.
+ *   next      the document it would go on to, or null
+ *   read      the open document's own reading is in — or is never coming
+ *   marks     …and the marks can read this document at all
+ *   pending   the folder has still to say what it is carrying
+ *   bounces   documents the walk has opened since it last found anything
+ *   auto      the walk moving itself on, rather than the operator stepping it
+ * → { go: row } | { wait: "paint" | "folder" } | { stop: "marks" | "bounced" | "done" }
+ */
+export function walkStep({ next = null, read = true, marks = true, pending = false, bounces = 0, auto = true } = {}) {
+  if (!auto) return next ? { go: next } : pending ? { wait: "folder" } : { stop: "done" };
+  if (!marks) return { stop: "marks" };
+  if (!read) return { wait: "paint" };
+  if (next) return bounces >= WALK_BOUNCE_LIMIT ? { stop: "bounced" } : { go: next };
+  if (pending) return { wait: "folder" };
+  return { stop: "done" };
+}

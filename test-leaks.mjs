@@ -12,6 +12,7 @@ import {
   packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE, isSuggested, isPending,
   rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
+  walkStops, walkStep, WALK_BOUNCE_LIMIT,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
 
@@ -312,6 +313,54 @@ check("the workbook by name", [isMasterName("Master Leaks.xlsx"), isMasterName("
   let threw = "";
   try { parseMasterKeeps([{ name: "Sheet1", rows: [["a"]] }], "Book.xlsx"); } catch (e) { threw = e.message; }
   check("a workbook with no KEEP sheet says so", /no "KEEP" sheet/.test(threw), true);
+}
+
+console.log("the walk from one document to the next");
+{
+  // The sweep's rows, as it collects them: the FILES' answer.
+  const A = { name: "A.txt", handle: "hA" }, B = { name: "B.txt", handle: "hB" }, C = { name: "C.txt", handle: "hC" };
+  const rows = [
+    { doc: A, values: ["Helen Rasho"], flags: 0 },
+    { doc: B, values: ["Helen Rasho", "Quillmark"], flags: 0 },
+    { doc: C, values: ["Vazquez"], flags: 0 },
+  ];
+  const open = (d) => d.name === "A.txt";
+  const names = (stops) => stops.map((r) => r.doc.name + ":" + r.count);
+
+  check("the open document is not a stop on the walk", names(walkStops(rows, { isOpen: open })), ["B.txt:2", "C.txt:1"]);
+  check("a value already settled is not counted, and a row of nothing but settled ones is no stop",
+    names(walkStops(rows, { isOpen: open, settled: (v) => v === "Helen Rasho" })), ["B.txt:1", "C.txt:1"]);
+  check("…and a document carrying only settled values drops out altogether",
+    names(walkStops(rows, { isOpen: open, settled: (v) => v !== "Quillmark" })), ["B.txt:1"]);
+  // THE PING-PONG. The page has read B and C and found nothing live standing
+  // in either — a spot keep taken there, a name settled, an edit the file has
+  // not been given yet — while the sweep's rows, read off the files, still say
+  // they are carrying one. Offering them is what sends the walk round the
+  // folder on its own.
+  check("a document the page has read and found nothing in is not offered again",
+    names(walkStops(rows, { isOpen: open, empty: new Set(["B.txt"]) })), ["C.txt:1"]);
+  check("…and a walk with nothing left to disagree about has nowhere to go",
+    walkStops(rows, { isOpen: open, empty: new Set(["B.txt", "C.txt"]) }), []);
+
+  const stops = walkStops(rows, { isOpen: open });
+  const next = stops[0];
+  check("a document read, with one carrying a name: the walk goes on to it",
+    walkStep({ next, read: true }), { go: next });
+  check("a document whose own reading has not landed is not one to leave",
+    walkStep({ next, read: false }), { wait: "paint" });
+  check("…and the marks being off for it is not an answer either",
+    walkStep({ next, read: true, marks: false }), { stop: "marks" });
+  check("nothing left, and the folder still being read: the walk waits",
+    walkStep({ next: null, read: true, pending: true }), { wait: "folder" });
+  check("nothing left, and the folder has said so: the walk is over",
+    walkStep({ next: null, read: true, pending: false }), { stop: "done" });
+  check("a run of documents opened with nothing found in any of them stops",
+    walkStep({ next, read: true, bounces: WALK_BOUNCE_LIMIT }), { stop: "bounced" });
+  check("…one short of it does not", walkStep({ next, read: true, bounces: WALK_BOUNCE_LIMIT - 1 }), { go: next });
+  // The operator pressing › is not a runaway: none of the guards apply to it.
+  check("a step taken by hand goes where it says, unread marks and all",
+    [walkStep({ next, read: false, marks: false, bounces: 99, auto: false }), walkStep({ next: null, pending: true, auto: false })],
+    [{ go: next }, { wait: "folder" }]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
