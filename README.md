@@ -1741,6 +1741,18 @@ app, which routes it to the reader tab.
   sideways to read. Your width caps it: past that the page is drawn at your
   own width and the scale follows the sheet, so the grid inside it still lands
   on the PDF, and the status bar says so.
+  **The top margin is the PDF's, not the export's.** PDF-Linker writes a
+  page's top margin as blank lines above its first line, and those used to be
+  stacked at the head of the sheet a line's height apiece, pushing line 1 and
+  everything under it down the page — a band of white above the text that the
+  PDF beside it does not have — while the blank lines under the last line
+  grew the sheet past its PDF page. An empty line (no words, no margin number)
+  now takes no room on the grid, so the first line stands where the PDF's
+  does and the two sheets are the same height. A page with no grid to lay
+  its lines on (a scan with no text layer) hides those leading blank lines
+  while the pane is open — they are still in the file and still saved — and
+  starts its text where the PDF's first printed line is, or an inch down
+  where the PDF cannot say.
   **A line too long for the page comes back onto it.** The reader's font is
   not the filing's, and the same characters set in it run a little wider than
   the column the PDF gave them; past the sheet's edge they are gone, and the

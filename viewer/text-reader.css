@@ -589,6 +589,10 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
    open so the last sheet keeps the shape the rest of them hold. Hidden, never
    removed — the DOM still carries it and a save still writes it. */
 body.sbs .line.trailer { display: none; }
+/* The blank lines PDF-Linker writes for a page's top margin, on a page beside
+   its PDF that has no grid to lay them on: the sheet's own top stands in for
+   them (applyMatchedLayout). Hidden, never removed, like the trailer. */
+.tpage.matched .page-body:not(.fixed) > .line.lead { display: none; }
 /* The reading size is the size of a page that FITS: a page whose words want
    more room than its PDF page gave them is drawn smaller (--fit, set per
    sheet) until they do. The file is one size; this is the paper's zoom. */

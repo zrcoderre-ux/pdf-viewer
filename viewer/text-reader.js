@@ -8706,6 +8706,16 @@ function buildPdfPaneNow() {
 // Display only — no line moves in the file, and the layout is lifted the
 // moment the pane closes.
 const LINE_BOX = 1.2;  // a line's box, in its own type size: what the next line must clear
+/** A line with nothing on it: no text and no margin number. */
+function isEmptyLine(l) {
+  return !l.classList.contains("num") && !l.textContent.trim();
+}
+/** How many of a page's lines are empty before the first that is not. */
+function leadingEmpty(lines) {
+  let n = 0;
+  while (n < lines.length && isEmptyLine(lines[n])) n++;
+  return n < lines.length ? n : 0; // an empty page keeps its lines
+}
 /** A pane slot at a width: re-rendered where its bitmap is up, pre-sized where it is not. */
 function fitSlot(el, w) {
   const prev = parseFloat(el.style.width);
@@ -8816,7 +8826,7 @@ function applyMatchedLayoutNow() {
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, pitch: had.pitch, bodyX: had.bodyX, scale: 1 });
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, firstY: info.lines[t.page - 1], scale: 1 });
       continue;
     }
     if (numbered) {
@@ -8839,7 +8849,17 @@ function applyMatchedLayoutNow() {
     // is pushed down to clear it, and out of register with the PDF by that
     // much — reading the text beats lining it up (pdfsync.spreadTops).
     const boxes = sizes ? sizes.map((h) => h * LINE_BOX) : null;
-    if (tops) tops = PS.spreadTops(tops, boxes);
+    // …but an EMPTY line holds no room. PDF-Linker writes the page's top
+    // margin as blank lines above line 1 — six, ten, more — and stacked up
+    // from the first numbered line they run off the top of the sheet, are
+    // held at its edge, and were then each given a line's box: a column of
+    // nothing that pushed line 1 and everything under it down the page, a
+    // band of white at the top of the text that the PDF beside it does not
+    // have. The blank lines under the last one did the same at the foot,
+    // growing the sheet past its PDF page. A line with nothing on it — no
+    // words and no margin number — is a gap, and a gap pushes nothing.
+    const room = boxes ? boxes.map((b, k) => (isEmptyLine(lines[k]) ? 0 : b)) : null;
+    if (tops) tops = PS.spreadTops(tops, room);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
     // The scale is the sheet's, and the sheet is the paper: the write pass
@@ -8847,8 +8867,8 @@ function applyMatchedLayoutNow() {
     // so the grid is drawn at whatever size the paper is being read at.
     matchedSlots.add(slot);
     sec.__planFor = planKey;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, bodyX };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, pitch, bodyX, scale: 1 });
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // Every slot the layout did not claim keeps the pane's own width, and gives
   // back whatever a grid before it levelled: its label's height, and the box
@@ -8879,10 +8899,25 @@ function applyMatchedLayoutNow() {
     // …or more, where a pushed line runs past the PDF's own foot. The slot
     // grows with it (below), so the two boxes stay the same box.
     let foot = 0;
-    if (p.tops) p.tops.forEach((y, k) => { if (y != null) foot = Math.max(foot, y + p.boxes[k] + p.pitch); });
+    // An empty line is not something that runs past it (room, above).
+    if (p.tops) p.tops.forEach((y, k) => { if (y != null && p.room[k] > 0) foot = Math.max(foot, y + p.room[k] + p.pitch); });
     p.h = Math.max(pageH, Math.round(foot * p.scale));
     p.sec.querySelector(".page-inner").style.height = p.h + "px";
     p.body.classList.toggle("fixed", !!p.tops);
+    // A page with no grid to draw to (a scan with no text layer, a page
+    // nothing on it matched) flows — and its first lines are the blank ones
+    // PDF-Linker wrote for the top margin, each a full line at the reading
+    // size, under the sheet's own padding: a band of white several inches
+    // deep above text the PDF starts an inch down. So beside the PDF those
+    // lines are put away (hidden, never removed: a save still writes them,
+    // as with the trailer) and the text starts where the PDF's first printed
+    // line does — read off its text layer, else an inch down, which is
+    // where the scroll sync takes it to be (pdfFirstLine).
+    const lead = p.tops ? 0 : leadingEmpty(p.lines);
+    for (let k = 0; k < Math.max(lead, p.sec.__lead || 0) && k < p.lines.length; k++) p.lines[k].classList.toggle("lead", k < lead);
+    p.sec.__lead = lead;
+    const padTop = p.tops ? "" : ((p.firstY != null ? p.firstY : PDF_LINE_DEFAULT * p.sz.h) * p.scale) + "px";
+    if (p.body.style.paddingTop !== padTop) p.body.style.paddingTop = padTop;
     if (p.bodyX > 0) p.sec.style.setProperty("--body-x", (p.bodyX * p.scale) + "px");
     else p.sec.style.removeProperty("--body-x");
     // Only the lines that MOVE are written to. A pass over a seventy-page
@@ -9240,6 +9275,9 @@ function clearMatched(sec) {
   const body = sec.querySelector(".page-body");
   if (!body) return; // shed: there are no lines left to un-lay
   body.classList.remove("fixed");
+  body.style.paddingTop = "";
+  for (const l of body.querySelectorAll(":scope > .line.lead")) l.classList.remove("lead");
+  sec.__lead = 0;
   for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
 }
 function setSideBySide(on, { remember = true } = {}) {
