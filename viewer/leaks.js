@@ -660,8 +660,8 @@ export function leakPages(rows, from, files) {
 //   · a document whose own reading has not landed yet is not called empty at
 //     all — the answer is not in, and the walk waits for it rather than leaving
 //     a document it never read,
-//   · a document the marks cannot read (plain reading, or the marks given up on
-//     it) has no answer to give either way, and the walk stops and says so,
+//   · a document the marks cannot read (the marks given up on it) has no
+//     answer to give either way, and the walk stops and says so,
 //   · and a run of documents opened one after another with nothing found in any
 //     of them stops at WALK_BOUNCE_LIMIT whatever the reason, so no disagreement
 //     nobody has thought of yet can walk the folder on its own.

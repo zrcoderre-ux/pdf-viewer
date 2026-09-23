@@ -110,7 +110,20 @@ let fileHandle = null;       // FileSystemFileHandle for in-place save
 let dirHandle = null;        // the case folder, when one was opened
 let folderName = "";
 let folderDocs = [];         // [{ name, handle, quarantined }]
-let folderLight = false;     // …attached for its key alone, a file having been opened on its own
+let folderLight = false;     // …attached for its key alone, the whole folder having taken the reader down last time
+// THE WHOLE FOLDER IS THE DEFAULT, UNTIL IT CRASHES. A file opened from a case
+// folder the reader knows brings the whole folder with it — the other exports,
+// their PDFs, the reel, the sweep — as it always did. A session that went down
+// holding a whole folder says so at the next open (reportLastStuck, off the
+// breadcrumb's `whole`), and from then on a file comes in on its own, with the
+// key, and the reader ASKS before reading the rest. Choosing the whole folder
+// again (the offer, or "Read the whole folder" in Documents) goes back to the
+// default; if it goes down again, the next open is asking again.
+const ASK_FOLDER_KEY = "textReader.askFolder";
+function askBeforeFolder() { try { return !!localStorage.getItem(ASK_FOLDER_KEY); } catch { return false; } }
+function setAskBeforeFolder(on) {
+  try { if (on) localStorage.setItem(ASK_FOLDER_KEY, "1"); else localStorage.removeItem(ASK_FOLDER_KEY); } catch { /* no storage: the default stands */ }
+}
 let folderPdfs = [];         // [{ name, handle }] — the case folder's PDFs
 let key = null;              // parsed key (PK.parseKey)
 let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
@@ -240,7 +253,7 @@ function noteCarrying(force) {
 function markDoing() {
   try {
     const top = doingStack[doingStack.length - 1];
-    if (top) localStorage.setItem(DOING_KEY, JSON.stringify({ what: top.what, file: fileName || "", at: Date.now(), carrying: noteCarrying() }));
+    if (top) localStorage.setItem(DOING_KEY, JSON.stringify({ what: top.what, file: fileName || "", at: Date.now(), carrying: noteCarrying(), whole: !!dirHandle && !folderLight }));
     else localStorage.removeItem(DOING_KEY);
   } catch { /* a browser with no storage says nothing, and that is all */ }
 }
@@ -271,29 +284,12 @@ function duringSlice(what, fn) {
   const from = performance.now();
   try { return fn(); } finally { notePass(what, from); }
 }
-// PLAIN READING. A reader that will not come back is no use at all, and the
-// operator cannot wait on a diagnosis: this turns off everything the document
-// does not strictly need — the marks over the text, the citation underlines,
-// the PDF beside it, anything read ahead — and leaves the words on the page.
-// It lasts as long as the tab does, and the bar says it is on.
-let plain = false;
-function setPlain(on) {
-  plain = !!on;
-  document.body.classList.toggle("plain-reading", plain);
-  if (plain) {
-    if (sbsOn) setSideBySide(false, { remember: false });
-    dropWarmPages();
-    dropReady();
-    try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); } catch { /* none to clear */ }
-  }
-  updatePlainStatus();
-  if (doc) { paintHighlights(); placeCitationsSoon(); }
-}
-function updatePlainStatus() {
-  const el = $("st-plain");
-  if (el) el.textContent = plain ? "Plain reading: the marks, the citation links and the PDF are off" : "";
-  const box = $("plain-toggle");
-  if (box) box.checked = plain;
+/** A line in the offer bar with a button that puts it on the clipboard. */
+function offerToCopy(line) {
+  showKeyOffer(line, "Copy", async () => {
+    try { await navigator.clipboard.writeText(line); toast("On the clipboard."); }
+    catch { toast("The clipboard would not take it.", { error: true }); }
+  });
 }
 
 /** What the reader was in the middle of when it last stopped, if it did. */
@@ -305,6 +301,9 @@ function reportLastStuck() {
     localStorage.removeItem(DOING_KEY);
   } catch { /* nothing to report */ }
   window.__textReaderLastStuck = stuck;
+  // Down with the whole of a case folder open: the next file asks first. A
+  // breadcrumb from before `whole` was written cannot say, and is taken as yes.
+  if (stuck && stuck.what && stuck.whole !== false) setAskBeforeFolder(true);
   if (!stuck || !stuck.what) {
     console.info("[Text Reader] opened; the last session closed cleanly (nothing left unfinished).");
     return;
@@ -321,12 +320,7 @@ function reportLastStuck() {
   // Not a toast: a toast is gone in a few seconds and under the document, and
   // this is the one line that says what to fix. It stands in the offer bar
   // until it is read, and the button puts it on the clipboard.
-  const line = `Last time, the reader stopped while ${stuck.what}${stuck.file ? " — " + stuck.file : ""}, and did not finish.`;
-  showKeyOffer(line + " Read plainly to get past it?", "Read plainly", async () => {
-    setPlain(true);
-    try { await navigator.clipboard.writeText(line); toast("Plain reading is on, and that line is on the clipboard."); }
-    catch { toast("Plain reading is on."); }
-  });
+  offerToCopy(`Last time, the reader stopped while ${stuck.what}${stuck.file ? " — " + stuck.file : ""}, and did not finish.`);
 }
 function passAt(start, end) {
   let best = "";
@@ -400,17 +394,6 @@ if (typeof PerformanceObserver === "function") {
         blocked.push({ ms, what, at: new Date().toLocaleTimeString() });
         if (blocked.length > 60) blocked.shift();
         if (ms >= HOLD_SAY) sayHeld(ms, what, passesInFlight(e.startTime));
-        // Long enough that the operator felt it: say so, and say what it was.
-        if (ms >= 2500) {
-          const line = `The reader held the page for ${(ms / 1000).toFixed(1)} seconds${what ? " — " + what : ""}.`;
-          if (!plain) {
-            showKeyOffer(line + " Read plainly instead?", "Read plainly", async () => {
-              setPlain(true);
-              try { await navigator.clipboard.writeText(line); toast("Plain reading is on, and that line is on the clipboard."); }
-              catch { toast("Plain reading is on."); }
-            });
-          }
-        }
       }
     }).observe({ entryTypes: ["longtask"] });
   } catch { /* a browser that does not report them */ }
@@ -1279,12 +1262,13 @@ async function adoptFolder(h, { quiet = false, light = false } = {}) {
  * operator actually asked for is the one thing that is not the trouble, and
  * they never get as far as saying so.
  *
- * So a file opened on its own takes the LIGHT attach: the pseudonym key, the
- * flagged values, and the LEAKS worksheet — the three things that belong to
- * the case rather than to the document, and that the marks and the review
- * need. No list of documents, no PDFs, and so none of the passes that run off
- * them. "Open case folder" is still the whole folder, and the Documents tab
- * offers to read it when the light attach is what happened.
+ * So there is a LIGHT attach: the pseudonym key, the flagged values, and the
+ * LEAKS worksheet — the three things that belong to the case rather than to
+ * the document, and that the marks and the review need. No list of documents,
+ * no PDFs, and so none of the passes that run off them. A file opened on its
+ * own still brings the whole folder by default; it takes the light attach
+ * after a session went down holding a whole folder (askBeforeFolder), and the
+ * offer bar and the Documents tab then ask before reading the rest.
  */
 async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // Another matter: the PDFs go, and with them any redaction proposed over
@@ -1388,12 +1372,18 @@ async function attachKeyForFile(handle) {
         if (perm !== "granted") { toast("Access to " + at.dir.name + " was not granted; the key stays unattached.", { error: true }); return; }
       } catch (e) { toast("Could not reopen " + at.dir.name + ": " + (e.message || e), { error: true }); return; }
     }
-    await adoptFolder(at.dir, { quiet: true, light: true });
+    const ask = askBeforeFolder();
+    await adoptFolder(at.dir, { quiet: true, light: ask });
     if (doc) retranslate();
     markDocList();
-    toast(key
-      ? `Attached the key from ${at.dir.name}${leaks ? " and its LEAKS worksheet" : ""} — this file alone. “Read the whole folder” in Documents brings the rest in.`
-      : "No pseudonym_key.xlsx in " + at.dir.name, { ms: 6000 });
+    if (!ask) {
+      toast(key
+        ? `${at.dir.name} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}, key attached${leaks ? " with its LEAKS worksheet" : ""}.`
+        : `${at.dir.name} · no pseudonym_key.xlsx in it.`, { ms: 5000 });
+      return;
+    }
+    showKeyOffer(`Last time the reader went down with the whole of a case folder open, so this file came in on its own${key ? `, with ${at.dir.name}'s key` : ""}. Read the rest of the folder too?`,
+      "Read the whole folder", readWholeFolder);
   };
   if (at.needs) showKeyOffer("This file is in " + at.dir.name + ". Attach its pseudonym key?", "Attach key", attach);
   else await attach();
@@ -1596,12 +1586,14 @@ async function openFolderDocLike(m) {
   } catch { reelDone = true; reelDoneUp = true; }
 }
 $("forget-folder").addEventListener("click", () => { forgetFolder(); });
-/** …and the other way: bring the rest of the folder in after all. */
-$("read-folder").addEventListener("click", async () => {
+/** …and the other way: bring the rest of the folder in after all — the default again from here. */
+async function readWholeFolder() {
   if (!dirHandle) return;
+  setAskBeforeFolder(false);
   await adoptFolder(dirHandle, { quiet: true, light: false });
   toast(`${folderName} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}. The reader reads the rest of the folder from here.`, { ms: 6000 });
-});
+}
+$("read-folder").addEventListener("click", readWholeFolder);
 
 /**
  * Whether what was picked is the Text Files subfolder rather than the case
@@ -1675,8 +1667,8 @@ function markDocList() {
  * What each document of the folder is carrying, by file name: { leaks, flags }.
  * The folder's documents come from the sweep, which reads each file's own
  * text; the ones ON THE PAGE are taken from the marks over them instead.
- * Where the marks are off — plain reading, or a document they cost too much
- * on — the page has no answer to give and the file's stands.
+ * Where the marks are off — a document they cost too much on — the page has
+ * no answer to give and the file's stands.
  */
 function docAlerts() {
   const out = new Map();
@@ -1690,7 +1682,7 @@ function docAlerts() {
   // the walk has settled. Only the ones that were READ — with the folder read
   // on, the reel sheds the far end of itself, and a document off the page has
   // no count of its own to give.
-  if (scanned && !marksOff && !plain) {
+  if (scanned && !marksOff) {
     const live = liveLeaks();
     for (const name of scannedDocs) {
       const leaks = live.filter((h) => h.doc === name).length;
@@ -3112,9 +3104,6 @@ function clearCitationLinks() {
 function placeCitationsNow() {
   placeCitationsSoon.cancel();
   if (!doc) return;
-  // Plain reading: no underlines, and the ones already drawn go with the rest
-  // of what that mode turns off.
-  if (plain) { clearCitationLinks(); return; }
   const bodies = pageBodies();
   const parts = [];
   const maps = [];
@@ -3301,7 +3290,7 @@ function scanStale() {
 function paintHighlights() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   paintRowMarks();
-  if (plain || marksOff) return; // the words, and nothing read over them
+  if (marksOff) return; // the words, and nothing read over them
   if (scanStale()) scanSoon();
 }
 const scanSoon = debounce(() => { if (scanStale()) scanDocument(); }, 150);
@@ -3325,9 +3314,8 @@ async function scanDocument() {
 }
 /**
  * The marks cost more than they are worth on this document: stop, leave the
- * words on the page, and say so where it will be read. The operator can turn
- * plain reading on from the bar or the rail; the marks come back with the next
- * document, or with the next key.
+ * words on the page, and say so where it will be read. The marks come back
+ * with the next document, or with the next key.
  */
 function giveUpOnMarks(spent, page, pages) {
   marksOff = true;
@@ -3341,12 +3329,7 @@ function giveUpOnMarks(spent, page, pages) {
   // A walk waiting on this document's reading is waiting on one that is not
   // coming now. It is told so here rather than left on a bar saying "reading".
   if (leakJump || walkOn) { leakJump = false; walkOn = false; stepLeak(1, { auto: true }); }
-  const line = `The marks over the text took more than ${Math.round(spent / 1000)} seconds on this document (page ${page} of ${pages}) and are off for it. The words are all here; the names are not marked.`;
-  showKeyOffer(line + " Read plainly?", "Read plainly", async () => {
-    setPlain(true);
-    try { await navigator.clipboard.writeText(line); toast("Plain reading is on, and that line is on the clipboard."); }
-    catch { toast("Plain reading is on."); }
-  });
+  offerToCopy(`The marks over the text took more than ${Math.round(spent / 1000)} seconds on this document (page ${page} of ${pages}) and are off for it. The words are all here; the names are not marked.`);
 }
 
 /** The current LEAKS row's value, marked wherever it stands. */
@@ -3546,7 +3529,7 @@ let paintedSeq = -1;         // …and the one the last whole paint was made of
 function readHere() { return paintedSeq === docSeq || !marksCanRead(); }
 /** Whether the marks — the walk's only reading of the open document — can run here at all. */
 function marksCanRead() {
-  return !marksOff && !plain && "highlights" in CSS && typeof Highlight !== "undefined";
+  return !marksOff && "highlights" in CSS && typeof Highlight !== "undefined";
 }
 // The documents the page has read for itself and found nothing live in — the
 // walk does not go back to them. Kept only as long as the question it answers:
@@ -7399,14 +7382,15 @@ async function openPdfNow(src) {
   const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
   const n = pdf.numPages;
   const hole = () => new Array(n).fill(null);
-  const info = { pdf, count: n, sizes: hole(), name: src.name, lines: hole(), geoms: hole(), rows: hole() };
+  const info = { pdf, count: n, sizes: hole(), name: src.name, lines: hole(), geoms: hole(), rows: hole(), gridRead: new Set(), gridQueued: true };
   // The same array the measuring fills, so a slot sized from it later gets
   // the pages as they land — and keeps them after the PDF itself is closed.
   pdfSizes.set(src.name, info.sizes);
   pdfBytes.set(src.name, file.size || 0);
   pdfJobs.push({ name: src.name, run: () => measurePdf(info) });
-  // The line grid comes after: a page is worth seeing before it is worth
-  // aligning, and the pane re-aligns as it lands.
+  // The line grid comes after — for the pages the reading is at, and no
+  // others (gridNear): a page is worth seeing before it is worth aligning,
+  // and the pane re-aligns as it lands.
   pdfJobs.push({ name: src.name, run: () => readPdfGrid(info) });
   pumpPdfJobs();
   return info;
@@ -7509,21 +7493,55 @@ function sayHugePage(name, pageNo) {
 async function readPdfGrid(info) {
   return duringAsync("reading the PDF's line grid", (e) => readPdfGridNow(info, e));
 }
-// The grid is read in READING ORDER — from the page the reader is at, on to
-// the end, then back over what is behind them — because the page whose grid
-// is worth having first is the one on screen. Page 1 first was fine on a
-// twelve-page pleading and useless on a two-hundred-page exhibit set opened
-// at page 150, where the pages being looked at came last.
-function gridOrder(info) {
-  let start = 1;
-  for (let i = readingPage(); i < pdfSources.length; i++) {
-    const t = pdfTarget(i);
-    if (t && t.src && t.src.name === info.name) { start = t.page; break; }
-  }
-  const out = [];
-  for (let p = start; p <= info.count; p++) out.push(p);
-  for (let p = start - 1; p >= 1; p--) out.push(p);
+// THE GRID IS READ WHERE THE READING IS, AND NOWHERE ELSE: the page the
+// reading line sits on and the page either side of it (GRID_REACH).
+//
+// It used to be read for every page of every PDF, in reading order, behind the
+// open. That is every page's text pulled through the worker, grouped into rows
+// and kept — on a two-hundred-page exhibit set, or a combined file naming a
+// case folder's worth of PDFs, work and memory the tab went down under. And
+// the crash fixes that followed (trimPdfs closing what the reading has left)
+// took each closed PDF's grid with it, so a page the reader came back to stood
+// off its PDF's grid for good. Three pages is all the eye is on: those are
+// read, laid on their grid and kept laid (applyMatchedLayout keeps a page's
+// placement once worked out); the reading moving on asks for the next ones
+// (gridNear, on the scroll).
+const GRID_REACH = 1;
+/** The text pages the grid is worth having for: the reading page and its neighbours. */
+function nearPages() {
+  if (!doc) return [];
+  const r = readingPage(), out = [];
+  for (let i = r - GRID_REACH; i <= r + GRID_REACH; i++) if (i >= 0 && i < doc.pages.length) out.push(i);
   return out;
+}
+/** The pages of this PDF the reading is at whose grid has not been read yet. */
+function gridPagesFor(info) {
+  const out = [];
+  for (const i of nearPages()) {
+    const t = pdfTarget(i);
+    if (t && t.src.name === info.name && t.page <= info.count && !info.gridRead.has(t.page) && !out.includes(t.page)) out.push(t.page);
+  }
+  return out;
+}
+/**
+ * Ask for the grid of the pages the reading is at: queued at the head of the
+ * PDF queue for a PDF that is open, the PDF opened (which queues its grid)
+ * for one that is not.
+ */
+function gridNear() {
+  if (!doc || !gridOn()) return;
+  const seen = new Set();
+  for (const i of nearPages()) {
+    const t = pdfTarget(i);
+    if (!t || seen.has(t.src.name)) continue;
+    seen.add(t.src.name);
+    const info = infoFor(t.src);
+    if (!info) { loadPdf(t.src, { now: true }).catch(() => {}); continue; }
+    if (info.gridQueued || !gridPagesFor(info).length) continue;
+    info.gridQueued = true;
+    pdfJobs.unshift({ name: info.name, run: () => readPdfGrid(info) });
+    pumpPdfJobs();
+  }
 }
 const GRID_SLICE = 10; // ms of this thread's own work before it gives it back
 async function readPdfGridNow(info, pass) {
@@ -7534,13 +7552,14 @@ async function readPdfGridNow(info, pass) {
   // the time it comes back — which turned a page's worth of work into a wait
   // for the next idle callback, a page at a time, for as long as the PDF is.
   let since = performance.now();
-  for (const i of gridOrder(info)) {
+  info.gridQueued = false; // a reading that moves on from here asks again
+  for (const i of gridPagesFor(info)) {
     // Closed behind the review (trimPdfs): there is nothing left to align to.
     if (!stillOpen(info)) return;
+    info.gridRead.add(i);
     if (performance.now() - since > GRID_SLICE) {
-      // The pages read so far are laid on their grid now rather than when the
-      // whole document has been read: in reading order, those are the ones on
-      // screen. It is debounced, so asking often costs one pass.
+      // The pages read so far are laid on their grid now rather than when
+      // the rest are. It is debounced, so asking often costs one pass.
       if (sbsOn && !pdfPane.hidden) applyMatchedLayoutSoon();
       await idleClock();
       since = performance.now();
@@ -7551,11 +7570,10 @@ async function readPdfGridNow(info, pass) {
       noteDoing(pass, `reading the PDF's line grid (page ${i} of ${info.count}, ${info.name})`);
       const page = await pdf.getPage(i);
       const tc = await textItemsOf(page);
-      // Read and handed straight back. The grid reads EVERY page of the PDF,
-      // and reading one leaves the worker holding what it parsed to answer —
-      // on a three-hundred-page exhibit set, the whole document, for the sake
-      // of where each page's first line sits. A page being DRAWN is left
-      // alone: it is holding a bitmap somebody is looking at.
+      // Read and handed straight back: reading a page leaves the worker
+      // holding what it parsed to answer, and the reading moving on reads
+      // the next ones. A page being DRAWN is left alone: it is holding a
+      // bitmap somebody is looking at.
       if (!pageIsDrawn(page)) { try { page.cleanup(); } catch { /* it is drawing */ } }
       // …and the page's own size, where the measuring has not reached it yet:
       // the page is in hand here, so asking it costs nothing.
@@ -7832,7 +7850,7 @@ function planWarmPages() {
   // Nothing to hold where no review is running, or where the PDF side is put
   // away: a page nobody is going to be shown is a bitmap for nothing — and
   // the PDF it would be drawn from is a file to read and a grid to measure.
-  if (plain || !leaks || leaksBar.hidden || !doc || (!(sbsOn && !pdfPane.hidden) && !swaps.size)) { dropWarmPages(); return; }
+  if (!leaks || leaksBar.hidden || !doc || (!(sbsOn && !pdfPane.hidden) && !swaps.size)) { dropWarmPages(); return; }
   const cssWidth = warmWidth();
   const targets = leakWarmTargets(WARM_PAGES);
   warmWanted.clear();
@@ -7973,7 +7991,7 @@ function planReadyDocs() {
   // reader that opens a file and immediately goes off to read ANOTHER one —
   // parsing it, building it, opening its PDF — is a page that stops answering
   // for no reason the operator can see.
-  if (plain || !leaks || leaksBar.hidden || !folderDocs.length) { dropReady(); return; }
+  if (!leaks || leaksBar.hidden || !folderDocs.length) { dropReady(); return; }
   readyWanted = leakDocNames().slice(0, READY_DOCS);
   // In visit order, keep what fits; the rest go — the furthest from the row in
   // front being the ones the review will want last.
@@ -8784,15 +8802,35 @@ function applyMatchedLayoutNow() {
   const bases = new Map(); // each open PDF's body type, asked once for the pass
   const margins = new Map(); // …and its numbered margin, for the same reason
   const w0 = pageWidthNow(); // …and the page width, which every plan is made at
+  // THE GRID IS WORKED OUT WHERE THE READING IS: the reading page and the one
+  // either side (nearPages). Every other page keeps the placement it was given
+  // when the reading was last on it, or — never reached, or its text changed
+  // since — stands at its PDF page's own size with its lines flowing, so the
+  // two columns are the same pages whatever the grid has got to.
+  const near = new Set(grid ? nearPages() : []);
+  const lite = [textEpoch, w0, settings.lineHeight, settings.font, settings.customFont].join("|");
   for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
     const i = Number(sec.dataset.index);
     const slot = grid ? slots.get(i) || null : null;
     const t = slot && pdfTarget(i);
-    const info = t && infoFor(t.src);
-    const sz = info && info.sizes[t.page - 1];
-    if (!slot || !sz) { clearMatched(sec); continue; }
+    if (!slot || !t) { clearMatched(sec); continue; }
+    const info = infoFor(t.src);
+    // The page's size from the PDF, open or not: the sizes are kept after a
+    // PDF is closed (pdfSizes), and the folder's paper stands in before then.
+    const known = pdfSizes.get(t.src.name);
+    const sz = (info && info.sizes[t.page - 1]) || (known && known[t.page - 1]) || null;
     const body = sec.querySelector(".page-body");
     const lines = [...body.querySelectorAll(":scope > .line")];
+    if (!near.has(i) || !info || !sz) {
+      matchedSlots.add(slot);
+      const had = sec.__plan;
+      if (had && sz && sec.__planLite === lite) {
+        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, firstY: had.firstY, scale: 1 });
+        continue;
+      }
+      plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
+      continue;
+    }
     const geom = info.geoms[t.page - 1];
     const rows = info.rows[t.page - 1];
     const numbered = !!geom && body.classList.contains("numbered");
@@ -8830,10 +8868,14 @@ function applyMatchedLayoutNow() {
       continue;
     }
     if (numbered) {
-      tops = PS.slotTops(lines.map((l) => ({ num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null })), geom);
+      const nums = lines.map((l) => (l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null));
+      tops = PS.slotTops(nums.map((num) => ({ num })), geom);
+      // The lines off the grid — a footer, a stamp — on the rows that print them.
+      const off = PS.offGridTops(lines.map((l) => l.textContent), nums, tops, rows, geom.pitch);
+      tops = off.tops;
       pitch = geom.pitch;
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
-      sizes = PS.typeSizes(lines.map(() => null), base);
+      sizes = PS.typeSizes(off.sizes, base);
     } else {
       const lay = rows && rows.length ? PS.rowLayout(lines.map((l) => l.textContent), rows, { bodyLeft: bodyX }) : null;
       if (lay) {
@@ -8860,6 +8902,11 @@ function applyMatchedLayoutNow() {
     // words and no margin number — is a gap, and a gap pushes nothing.
     const room = boxes ? boxes.map((b, k) => (isEmptyLine(lines[k]) ? 0 : b)) : null;
     if (tops) tops = PS.spreadTops(tops, room);
+    // …and nothing pushed past the foot of the paper: the page is the PDF
+    // page's height, the same as the sheet beside it, and a line that would
+    // run past it is brought back up (pdfsync.holdWithin). The page grows
+    // only where its lines cannot all fit on it at all.
+    if (tops) tops = PS.holdWithin(tops, room, sz.h);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
     // The scale is the sheet's, and the sheet is the paper: the write pass
@@ -8867,7 +8914,8 @@ function applyMatchedLayoutNow() {
     // so the grid is drawn at whatever size the paper is being read at.
     matchedSlots.add(slot);
     sec.__planFor = planKey;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX };
+    sec.__planLite = lite;
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, firstY: info.lines[t.page - 1] };
     plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // Every slot the layout did not claim keeps the pane's own width, and gives
@@ -8896,11 +8944,12 @@ function applyMatchedLayoutNow() {
     // pixel a page is a centimetre by the fortieth — one column sliding under
     // the other with nothing visibly wrong on either.
     const pageH = Math.round((w * p.sz.h) / p.sz.w);
-    // …or more, where a pushed line runs past the PDF's own foot. The slot
-    // grows with it (below), so the two boxes stay the same box.
+    // …or more, only where the page's lines cannot all fit on it (holdWithin,
+    // above, brings back everything that can). The slot grows with it
+    // (below), so the two boxes stay the same box.
     let foot = 0;
     // An empty line is not something that runs past it (room, above).
-    if (p.tops) p.tops.forEach((y, k) => { if (y != null && p.room[k] > 0) foot = Math.max(foot, y + p.room[k] + p.pitch); });
+    if (p.tops) p.tops.forEach((y, k) => { if (y != null && p.room[k] > 0) foot = Math.max(foot, y + p.room[k]); });
     p.h = Math.max(pageH, Math.round(foot * p.scale));
     p.sec.querySelector(".page-inner").style.height = p.h + "px";
     p.body.classList.toggle("fixed", !!p.tops);
@@ -9017,6 +9066,31 @@ function applyMatchedLayoutNow() {
       x.l.__laid = null;
     }
   }
+  // A LINE STILL TOO LONG IS NARROWED, NEVER CUT. What overran the sheet after
+  // giving back its indent used to be cut off at the edge, and the words at
+  // the end of a line are words like any other. The line is drawn narrower
+  // instead — its own type, its own height, squeezed across by what it
+  // overruns, the way pdf.js fits its own text layer to the page — so it ends
+  // at the sheet's edge and stays beside its row. Measured for the reading
+  // page and its neighbours only (the rest keep what they were given there);
+  // a line's own transform does not change what it measures, so a pass that
+  // finds it already narrowed finds the same answer.
+  const squeeze = [];
+  for (const p of plans) {
+    if (!near.has(Number(p.sec.dataset.index))) continue;
+    for (const l of p.lines) {
+      if (l.classList.contains("rl")) continue; // a ruled box is squared up by fitRuleRows
+      const lt = l.querySelector(":scope > .lt");
+      if (lt) squeeze.push({ lt });
+    }
+  }
+  for (const x of squeeze) x.fit = x.lt.clientWidth > 0 && x.lt.scrollWidth > x.lt.clientWidth + 0.5 ? x.lt.clientWidth / x.lt.scrollWidth : 1;
+  for (const x of squeeze) {
+    const want = x.fit < 1 ? `scaleX(${x.fit.toFixed(4)})` : "";
+    if (x.lt.style.transform === want) continue;
+    x.lt.style.transform = want;
+    x.lt.style.transformOrigin = want ? "0 0" : "";
+  }
   // A text page with NO PDF page keeps the pane level with it. A combined file
   // always has two kinds: its own contents page at the top, and a banner page
   // before each member — and each of those used to stand beside a stub of a
@@ -9040,6 +9114,8 @@ function applyMatchedLayoutNow() {
   // every line stands where this pass put it (rules.js).
   fitRuleRows(pagesEl);
   textAnchors = null; textLineTops = null;
+  // …and the grid asked for wherever the reading has come to without one.
+  if (on) gridNear();
 }
 // ── the sheet as a page ──────────────────────────────────────────────────────
 //
@@ -9279,6 +9355,7 @@ function clearMatched(sec) {
   for (const l of body.querySelectorAll(":scope > .line.lead")) l.classList.remove("lead");
   sec.__lead = 0;
   for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
+  for (const lt of body.querySelectorAll(":scope > .line > .lt")) if (lt.style.transform) { lt.style.transform = ""; lt.style.transformOrigin = ""; }
 }
 function setSideBySide(on, { remember = true } = {}) {
   sbsOn = !!on;
@@ -9295,7 +9372,6 @@ function setSideBySide(on, { remember = true } = {}) {
   relayout();
 }
 sbsBtn.addEventListener("click", () => setSideBySide(!sbsOn));
-$("plain-toggle").addEventListener("change", (e) => setPlain(e.target.checked));
 
 // The two boxes at one place: whichever the reader scrolls leads, and the
 // other follows. The place is measured from each page's FIRST PRINTED LINE
@@ -9365,7 +9441,7 @@ function syncScroll(from, force) {
   // margins are not the PDF's, so one box's run is not the other's. Each
   // scrolls sideways on its own.
 }
-stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); fitNearSoon(); }, { passive: true });
+stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); fitNearSoon(); gridNearSoon(); }, { passive: true });
 // Coalesced: a scroll fires continuously, and a pass over the members that
 // builds pages back is not something to do sixty times a second.
 const reelTrimSoon = debounce(reelTrim, 200);
@@ -9377,6 +9453,17 @@ const pdfTrimSoon = debounce(trimPdfs, 500);
 // measures only what is near (FIT_SCREENS) and passes over what it has already
 // answered, so asking on the scroll costs the pages that have just come near.
 const fitNearSoon = debounce(() => { if (doc) shapePages(); }, 150);
+// …and the grid, which is worked out for the reading page and its neighbours
+// only: the reading moving to another page lays that one (and asks for its
+// grid where it has none).
+let gridNearAt = -1;
+const gridNearSoon = debounce(() => {
+  if (!doc || !gridOn()) return;
+  const r = readingPage();
+  if (r === gridNearAt) return;
+  gridNearAt = r;
+  applyMatchedLayoutSoon();
+}, 150);
 // …and the pages that were still drawing when the reading left them.
 const releasePagesSoon = debounce(sweepPagesToRelease, 700);
 pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });

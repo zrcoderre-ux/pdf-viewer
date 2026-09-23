@@ -1181,11 +1181,6 @@ app, which routes it to the reader tab.
   one go — and if it has spent more than eight seconds on one document it stops
   altogether, says so in the bar, and leaves the words on the page. The next
   document gets a fresh start.
-- **Plain reading**, in the Review group of the tools rail: the words and
-  nothing else. No marks over the text, no citation links, no PDF beside it,
-  nothing read ahead — for a document too big for the rest of it, or a reader
-  that will not answer. It is also what the bar offers you after a freeze, so
-  there is always a way to get the file open and keep working.
 - **The pages a leak stands on are drawn before you reach them.** Every page
   a review will visit is named in the worksheet's rows before it gets to any
   of them, so with a worksheet attached the reader goes and gets them: the
@@ -1252,8 +1247,8 @@ app, which routes it to the reader tab.
   documents on the page are counted from the marks over them — which know the
   edits the file has not been given yet, and the names the walk has settled —
   and the rest from the folder sweep, which reads each file's own text. Where
-  the marks are off (plain reading, or a document they cost too much on) the
-  file's own reading stands.
+  the marks are off (a document they cost too much on) the file's own
+  reading stands.
   Gradually, and within a budget: one document at a time, in idle time, each
   built in slices of pages, so the building never stands between you and the
   page you are reading. How many are held is what fits — up to six of them and
@@ -1452,7 +1447,7 @@ app, which routes it to the reader tab.
   on saying what that file itself carries. A document whose reading has not
   landed yet is not called empty at all — the bar says it is being read and
   waits, rather than leaving a document nobody read. One whose marks cannot run
-  (plain reading, or a document they cost too much on) has no answer to give
+  (a document they cost too much on) has no answer to give
   either way, so the walk stops there and says so. And a run of documents
   opened one after another with nothing found in any of them stops at eight,
   whatever the reason. Stepping the walk by hand is never a runaway and none of
@@ -1633,15 +1628,16 @@ app, which routes it to the reader tab.
   PDF's margin — the one page with a box on it drawn out over its own line
   numbers while every other line sat at the margin.
 
-  **A file opened on its own brings in its key, and nothing else.** Where the
-  reader knows the case folder a file sits in, opening that file attaches the
-  folder's **pseudonym key**, its **flagged values** and its **LEAKS
-  worksheet** — the three things that belong to the case rather than to the
-  document — and leaves the folder alone: no list of its exports, no sweep of
-  the others for names in the clear, nothing read ahead, no reel reading on,
-  no PDFs matched by name. **Read the whole folder** (under the Documents
-  list) brings the rest in when you want it, and **Open case folder** still
-  opens the whole thing as it always did.
+  **A file opened on its own brings its whole folder, unless that crashed
+  last time.** Where the reader knows the case folder a file sits in, opening
+  that file adopts the folder as **Open case folder** does: the key, the
+  flagged values, the LEAKS worksheet, the list of exports, the sweep, the
+  reel and the PDFs matched by name. If a session **went down with a whole
+  folder open**, the next file comes in on its own instead — the folder's
+  **pseudonym key**, **flagged values** and **LEAKS worksheet** and nothing
+  else — and the offer bar asks before reading the rest. **Read the whole
+  folder** (there, or under the Documents list) brings it in and makes it the
+  default again; if it goes down again, the reader is back to asking.
 
   The folder sweep — which reads every other export in the case for names
   standing in the clear — **is proportional to the folder, not to the key**.
@@ -1760,10 +1756,22 @@ app, which routes it to the reader tab.
   space **in front of** the text — the indent the PDF put it at — the line
   slides back into it, by what it overruns or by what the indent has to give,
   whichever is less. Its top never moves, so it still stands beside its own
-  row; the indent is what gives. Whatever is still past the edge after that is
-  cut off there. Pleading paper — whose lines all start at the body margin
-  with the numbers in front of them — has nothing to give and is cut at the
-  edge like any other. **One scale for every page of a filing.** The scale is
+  row; the indent is what gives. **Whatever is still past the edge after that
+  is narrowed, never cut**: the line is drawn squeezed across by what it
+  overruns, in its own type and at its own height, the way pdf.js fits its
+  text layer to the page — so pleading paper, whose lines all start at the
+  body margin and have no indent to give, ends every line at the sheet's edge
+  with its last words still on it.
+  **The grid follows the reading.** A page's line grid is read, and its lines
+  laid on it, for the page the reading is on and the page either side —
+  never the whole PDF at once, which on a long exhibit set or a combined file
+  was work and memory the tab could go down under. A page keeps its placement
+  once it has had it; one the reading has not reached yet stands at its PDF
+  page's own size with its lines flowing, and is laid on its grid as the
+  reading comes to it. Every page, laid or not, is its PDF page's height, and
+  footer lines under the last numbered line (the page number, the document's
+  title) go to the rows the PDF prints them on rather than running the sheet
+  past the foot of the paper. **One scale for every page of a filing.** The scale is
   the PDF's body type drawn at the reading size, and the body was read off
   each page on its own — so an exhibit's **title page**, which carries
   "EXHIBIT A" and nothing else, was drawn to put a 36-point heading at fifteen

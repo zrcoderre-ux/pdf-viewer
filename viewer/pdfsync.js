@@ -406,6 +406,90 @@ export function slotTops(lines, geom) {
   return out;
 }
 
+/**
+ * The lines OFF the grid on a numbered page — a footer under line 28 (the
+ * page number, the document's title), a stamp or a caption above line 1 —
+ * put on the PDF's row that prints their words. slotTops can only stack them
+ * a pitch apart from the nearest number, blank lines and all, and a footer
+ * three or four lines under 28 lands past the foot of the paper: the sheet
+ * grew to hold it, by a different amount on every page. The PDF prints them
+ * like any other row, so where the words match one, that row is where they go.
+ *
+ * `texts` and `nums` are per line (nums null off the grid), `tops` from
+ * slotTops, `rows` from pdfRows, `pitch` the grid's. A match is taken only where it falls
+ * between the numbered lines either side of it, so a footer is never pulled
+ * up among the body. Returns { tops, sizes } — sizes the matched row's own
+ * type height, null elsewhere.
+ */
+export function offGridTops(texts, nums, tops, rows, pitch = 0) {
+  const out = (tops || []).slice();
+  const sizes = out.map(() => null);
+  if (!rows || !rows.length || !texts || !texts.length) return { tops: out, sizes };
+  const n = out.length;
+  const inWindow = (k, top) => {
+    let above = null, below = null;
+    for (let i = k - 1; i >= 0; i--) if (nums[i] && out[i] != null) { above = out[i]; break; }
+    for (let i = k + 1; i < n; i++) if (nums[i] && out[i] != null) { below = out[i]; break; }
+    return (above == null || top > above) && (below == null || top < below);
+  };
+  const used = new Set();
+  const take = (k, j) => { out[k] = rows[j].top; sizes[k] = rows[j].height; used.add(j); };
+  const map = alignLines(texts.map((t, k) => (nums[k] ? "" : t)), rows.map((r) => r.text));
+  map.forEach((j, k) => { if (j != null && !nums[k] && inWindow(k, rows[j].top)) take(k, j); });
+  // A line with no word in it to match by — the page number, "- 3 -" — is
+  // matched by its characters instead: the same marks, the spacing aside.
+  const bare = (t) => String(t || "").replace(/\s+/g, "");
+  for (let k = 0; k < n; k++) {
+    if (nums[k] || sizes[k] != null || !bare(texts[k])) continue;
+    const j = rows.findIndex((r, i) => !used.has(i) && bare(r.text) === bare(texts[k]) && inWindow(k, r.top));
+    if (j >= 0) take(k, j);
+  }
+  // What is still unplaced beside a placed footer or stamp is stacked off
+  // the NUMBERED line, as though the rows between were not there: a blank
+  // line or two a pitch apart, and they land under the title they sit above.
+  // So a run between two placed lines is spread evenly between them, and one
+  // after the last placed row (or before the first) stacks off that row.
+  const placed = out.map((t, k) => t != null && (!!nums[k] || sizes[k] != null));
+  const matched = (k) => !nums[k] && sizes[k] != null;
+  let prev = -1;
+  for (let k = 0; k < n; k++) {
+    if (!placed[k]) continue;
+    if (prev >= 0 && k - prev > 1 && (matched(prev) || matched(k))) {
+      for (let i = prev + 1; i < k; i++) if (out[i] != null) out[i] = out[prev] + ((out[k] - out[prev]) * (i - prev)) / (k - prev);
+    } else if (prev < 0 && matched(k) && pitch > 0) {
+      for (let i = 0; i < k; i++) if (out[i] != null) out[i] = Math.max(0, out[k] - (k - i) * pitch);
+    }
+    prev = k;
+  }
+  if (prev >= 0 && matched(prev) && pitch > 0) {
+    for (let i = prev + 1; i < n; i++) if (out[i] != null) out[i] = out[prev] + (i - prev) * pitch;
+  }
+  return { tops: out, sizes };
+}
+
+/**
+ * Lines held ON THE PAPER: worked up from the foot, each line's top is held
+ * at least its own box above the line below it and the lowest one its box
+ * above `height` — so a line spreadTops pushed, or a pitch-stacked one the
+ * PDF has no row for, is brought back onto the page instead of the page
+ * growing to reach it. `room` per line (0 for an empty line, which holds
+ * nothing). Where the lines cannot all fit — their boxes are taller than the
+ * page — `tops` is handed back as it was: the words come first.
+ */
+export function holdWithin(tops, room, height) {
+  if (!tops || !(height > 0)) return tops;
+  const out = tops.slice();
+  let limit = height;
+  for (let i = out.length - 1; i >= 0; i--) {
+    const t = out[i];
+    if (t == null) continue;
+    const r = room && room[i] > 0 ? room[i] : 0;
+    out[i] = Math.min(t, limit - r);
+    if (r > 0) limit = out[i];
+  }
+  return out.some((t) => t != null && t < 0) ? tops : out;
+}
+
 // ---- a page with no numbers: the PDF's printed rows, matched by their words ------
 //
 // An exhibit, a letter, an order: no margin numbers to hang the lines on,

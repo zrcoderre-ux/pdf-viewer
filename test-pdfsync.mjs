@@ -6,6 +6,7 @@ import {
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft,
   matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
+  offGridTops, holdWithin,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -270,6 +271,38 @@ console.log("the PDFs the reading has reached");
   check("a limit of none holds none", pdfsNear(many, 0, 40, 0), []);
   check("a reading line past the end is the end", pdfsNear(many, 999, 40, 1), ["D19.pdf"]);
   check("…and before the start is the start", pdfsNear(many, -5, 40, 1), ["D0.pdf"]);
+}
+
+console.log("lines off the grid, and lines held on the paper");
+{
+  // A pleading page: 27 and 28 on the grid, then the footer PDF-Linker writes
+  // under 28 — blanks, the page number, the document's title.
+  const rows = [
+    { top: 696, left: 100, height: 12, text: "Line 27 of the motion" },
+    { top: 720, left: 50, height: 12, text: "28" },
+    { top: 742, left: 290, height: 10, text: "- 1 -" },
+    { top: 757, left: 170, height: 9, text: "PLAINTIFF'S NOTICE OF MOTION AND MOTION TO COMPEL" },
+  ];
+  const texts = ["Line 27 of the motion", "", "", "", "   - 1 -", "", "  PLAINTIFF'S NOTICE OF MOTION AND MOTION TO COMPEL", ""];
+  const nums = [27, 28, null, null, null, null, null, null];
+  const stacked = [696, 720, 744, 768, 792, 816, 840, 864];
+  const got = offGridTops(texts, nums, stacked, rows, 24);
+  check("the footer's title goes to its row", got.tops[6], 757);
+  check("…at its own type size", got.sizes[6], 9);
+  check("a page number with no word in it is matched by its characters", [got.tops[4], got.sizes[4]], [742, 10]);
+  check("the numbered lines are left on the grid", got.tops.slice(0, 2), [696, 720]);
+  check("a blank between two placed lines goes between them", got.tops[5], 749.5);
+  check("a blank after the last placed row stacks off that row", got.tops[7], 781);
+  check("a line whose words are in the body is not pulled up among it",
+    offGridTops(["", "Line 27 of the motion"], [27, null], [696, 720], rows, 24).tops[1], 720);
+  check("no rows, nothing moves", offGridTops(texts, nums, stacked, null, 24).tops, stacked);
+
+  check("lines that fit are left where they are", holdWithin([0, 20, 40], [14, 14, 14], 100), [0, 20, 40]);
+  check("a line past the foot is brought back onto the page", holdWithin([0, 20, 95], [14, 14, 14], 100), [0, 20, 86]);
+  check("…and pushes the line above it up only as far as it must", holdWithin([0, 80, 90], [14, 14, 14], 100), [0, 72, 86]);
+  check("an empty line holds no room", holdWithin([0, 80, 90], [14, 0, 14], 100), [0, 80, 86]);
+  check("lines that cannot all fit are handed back as they were", holdWithin([0, 50, 120], [60, 60, 60], 100), [0, 50, 120]);
+  check("a line with no place passes through", holdWithin([null, 95], [14, 14], 100), [null, 86]);
 }
 
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");

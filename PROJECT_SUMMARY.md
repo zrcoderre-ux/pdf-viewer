@@ -241,20 +241,18 @@ stopped while reading the marks over the text (Exhibit 12.txt) and did not
 finish." That survives the freeze, the kill and the reload, which is the whole
 point of it. It goes in the OFFER BAR rather than the toast: a toast is gone in
 seconds and sits behind the document, and this is the one line that says what to
-fix. Its button turns on PLAIN READING (`setPlain`) and copies the line.
-
-Plain reading is the way through a reader that will not answer: `plain` turns
-off the document-wide mark pass, the citation underlines, the PDF pane and
-everything read ahead, leaving the words on the page. It is offered by the bar
-after a freeze and by the bar when a pass holds the thread for more than a
-couple of seconds, and it sits in the tools rail (`#plain-toggle`) to be chosen
-deliberately. It lasts as long as the tab.
+fix. Its button copies the line (`offerToCopy`). (A "plain reading" mode that
+turned everything but the words off was offered here too; it went unused and
+was removed.) The same breadcrumb records whether a whole case folder was open
+(`whole`): a session that went down holding one makes the next file opened on
+its own come in with its key alone and ASK before reading the rest
+(`askBeforeFolder`), until the operator chooses the whole folder again.
 
 And when a pass does hold the thread but comes back, the reader says which one: the heavy
 passes name themselves while they run (`during`, `duringAsync`, `notePass`), a
 `PerformanceObserver` on `longtask` attributes each blocked stretch to the pass
-it fell in, anything past two and a half seconds goes to the toast bar in those
-words, and `window.__textReaderBlocked()` hands back the whole ledger, worst
+it fell in, each hold goes to the console in those words (the bar no longer
+interrupts for one), and `window.__textReaderBlocked()` hands back the whole ledger, worst
 first. A reader that is slow can now be asked where.
 
 Two long passes were also being made in ONE TASK each, which is a reader that
@@ -277,7 +275,7 @@ thread back before it runs out (`idleClock`, `SLICE_LEFT`):
 - And it gives up rather than hang. Past MARK_BUDGET of work on one document
   the marks stop (`giveUpOnMarks`), the highlights are cleared, `marksOff`
   keeps the pass from starting again for that document, and the bar says what
-  happened and offers plain reading. The next document — or the next key —
+  happened, with the line to copy. The next document — or the next key —
   gets another chance (`marksGetAnotherChance`). A pass that cannot finish is
   worse than no marks at all, since the page it is reading is a page nobody can
   scroll.
@@ -546,7 +544,7 @@ and it is made off BOTH readings:
 - A document whose own reading has not landed is not called empty at all
   (`readHere()`: `paintedSeq === docSeq`). The bar says it is being read and
   waits, rather than leaving a document nobody read.
-- A document whose marks cannot run — plain reading, or one they gave up on
+- A document whose marks cannot run — one they gave up on
   (`marksCanRead()`) — has no answer to give either way, so the walk stops and
   says so. `giveUpOnMarks` tells a waiting walk directly, rather than leaving
   it on a bar that says "reading".
