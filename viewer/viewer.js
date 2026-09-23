@@ -94,6 +94,8 @@ const cropBarEl    = document.getElementById("crop-bar");
 const cropResetEl  = document.getElementById("crop-reset");
 const cropDoneEl   = document.getElementById("crop-done");
 const pageIndicatorEl  = document.getElementById("page-indicator");
+const pageInputEl      = document.getElementById("page-input");
+const pageTotalEl      = document.getElementById("page-total");
 const redactToggleEl  = document.getElementById("redact-toggle");
 const redactBarEl     = document.getElementById("redact-bar");
 const redactMarkEl    = document.getElementById("redact-mark");
@@ -2416,10 +2418,34 @@ function visiblePageNumber() {
 
 function updatePageIndicator() {
   if (!pdfDoc || !pageIndicatorEl) return;
-  pageIndicatorEl.textContent = `${visiblePageNumber()} / ${pdfDoc.numPages}`;
+  const total = pdfDoc.numPages;
+  pageTotalEl.textContent = total;
+  pageInputEl.style.width = `${Math.max(2, String(total).length) + 2}ch`;
+  // While the reader is typing a page number, scrolling must not overwrite it.
+  if (document.activeElement !== pageInputEl) pageInputEl.value = visiblePageNumber();
 }
 
 document.addEventListener("scroll", updatePageIndicator, { passive: true });
+
+// The page number in the toolbar doubles as a go-to-page field: type a number,
+// Enter jumps there (clamped to the document), Escape or leaving the field puts
+// back the page actually on screen.
+pageInputEl.addEventListener("focus", () => pageInputEl.select());
+pageInputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    const n = parseInt(pageInputEl.value, 10);
+    if (pdfDoc && Number.isFinite(n)) {
+      const pn = Math.min(Math.max(n, 1), pdfDoc.numPages);
+      scrollToPage(pn, { smooth: false });
+    }
+    pageInputEl.blur();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    pageInputEl.blur();
+  }
+});
+pageInputEl.addEventListener("blur", updatePageIndicator);
 
 // Overlay clickable elements for the PDF's own link annotations (external URLs
 // and internal go-to-page links), so the document's native hyperlinks work here
