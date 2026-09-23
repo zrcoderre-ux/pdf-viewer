@@ -9116,6 +9116,8 @@ function applyMatchedLayoutNow() {
   textAnchors = null; textLineTops = null;
   // …and the grid asked for wherever the reading has come to without one.
   if (on) gridNear();
+  // The slots have just taken their widths: the pane keeps its own middle.
+  if (on) holdSideways(pdfPane);
 }
 // ── the sheet as a page ──────────────────────────────────────────────────────
 //
@@ -9441,7 +9443,7 @@ function syncScroll(from, force) {
   // margins are not the PDF's, so one box's run is not the other's. Each
   // scrolls sideways on its own.
 }
-stageEl.addEventListener("scroll", () => { syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); fitNearSoon(); gridNearSoon(); }, { passive: true });
+stageEl.addEventListener("scroll", () => { noteSideways(stageEl); syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); fitNearSoon(); gridNearSoon(); }, { passive: true });
 // Coalesced: a scroll fires continuously, and a pass over the members that
 // builds pages back is not something to do sixty times a second.
 const reelTrimSoon = debounce(reelTrim, 200);
@@ -9466,7 +9468,50 @@ const gridNearSoon = debounce(() => {
 }, 150);
 // …and the pages that were still drawing when the reading left them.
 const releasePagesSoon = debounce(sweepPagesToRelease, 700);
-pdfPane.addEventListener("scroll", () => syncScroll("pdf"), { passive: true });
+pdfPane.addEventListener("scroll", () => { syncScroll("pdf"); noteSideways(pdfPane); }, { passive: true });
+
+// ── sideways: each column holds its own centre ──────────────────────────────────
+//
+// A page wider than its column (zoomed in, or side by side on a narrow window)
+// is scrolled to sideways, and the column held its scrollLeft in PIXELS while
+// the widths under it changed: zooming, the find bar re-laying the column, the
+// grid landing, the window resizing. Each of those moved the page under a
+// scroll position that no longer meant what it had — and a width that dipped
+// for a moment clamped it to the edge, where it stayed when the width came
+// back. The page wandered off centre without anybody touching the scroll bar.
+//
+// So each column remembers WHERE ITS MIDDLE IS, as a fraction of how wide its
+// content is — centred until the reader scrolls it sideways — and whenever the
+// width changes it is put back there. Only a sideways scroll made while the
+// widths stood still is the reader's, and moves the remembered middle.
+const sideways = new Map(); // box → { mid, w, cw }
+function sidewaysOf(box) {
+  if (!sideways.has(box)) sideways.set(box, { mid: 0.5, w: box.scrollWidth, cw: box.clientWidth });
+  return sideways.get(box);
+}
+/** A scroll: where the widths have not moved, a sideways one is the reader's. */
+function noteSideways(box) {
+  const s = sidewaysOf(box);
+  if (box.scrollWidth !== s.w || box.clientWidth !== s.cw) { holdSideways(box); return; }
+  if (s.w > s.cw) s.mid = (box.scrollLeft + s.cw / 2) / s.w;
+}
+/** Put the column's middle back where it was, at whatever width it has now. */
+function holdSideways(box) {
+  const s = sidewaysOf(box);
+  const w = box.scrollWidth, cw = box.clientWidth;
+  s.w = w; s.cw = cw;
+  if (w <= cw) return; // it all fits: there is no sideways to hold
+  const want = Math.max(0, Math.min(w - cw, Math.round(s.mid * w - cw / 2)));
+  if (Math.abs(box.scrollLeft - want) > 1) box.scrollLeft = want;
+}
+if (typeof ResizeObserver !== "undefined") {
+  // The pages' own width (the zoom, the grid, the reel) and the stage's (the
+  // window, the panel, the pane opening): either one is the column changing.
+  const sidewaysWatch = new ResizeObserver(() => { holdSideways(stageEl); holdSideways(pdfPane); });
+  sidewaysWatch.observe(pagesEl);
+  sidewaysWatch.observe(stageEl);
+  sidewaysWatch.observe(pdfPane);
+}
 
 /** Widths changed (a resize, the panel): re-fit every shown PDF page. */
 function refitPdf() {

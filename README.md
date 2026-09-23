@@ -1762,6 +1762,12 @@ app, which routes it to the reader tab.
   text layer to the page — so pleading paper, whose lines all start at the
   body margin and have no indent to give, ends every line at the sheet's edge
   with its last words still on it.
+  **A page wider than its column stays centred.** Zoomed in, or side by side
+  on a narrow window, the page is scrolled to sideways — and each column now
+  remembers where its middle is and puts it back whenever a width changes
+  (zooming, the find bar, the grid landing, the window), where it used to keep
+  a pixel position that drifted the page off to one side. A sideways scroll
+  you make yourself is what moves that middle.
   **The grid follows the reading.** A page's line grid is read, and its lines
   laid on it, for the page the reading is on and the page either side —
   never the whole PDF at once, which on a long exhibit set or a combined file
