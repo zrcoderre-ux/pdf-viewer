@@ -3642,6 +3642,9 @@ function renderLeakStatus() {
   }
   markDocAlerts(); // …and which documents of the folder are still carrying one
   updateDirty();   // …and whether a save would rewrite this one on its own
+  // The paint found the names again (an edit, a keep, a document opened for
+  // the walk): the pages drawn ahead follow where they now stand.
+  if (!namesBar.hidden) planForLeaks();
 }
 
 // ── stepping the names standing in the clear ─────────────────────────────────
@@ -3660,6 +3663,7 @@ function renderLeakStatus() {
 // rows; this steps what is standing in the text, which is not the same list —
 // a worksheet is one row per value, and a value leaks wherever it leaks.
 let leakStep = -1;
+let leakDir = 1;      // which way the walk last went: its next stops are drawn ahead that way
 let leakJump = false; // a document opened for the walk: stand on its first name
 let walkOn = false;   // …and the walk waiting on the folder to say which document is next
 function stepLeak(dir = 1, { auto = false } = {}) {
@@ -3711,12 +3715,14 @@ function stepLeak(dir = 1, { auto = false } = {}) {
     return;
   }
   leakStep = (((leakStep + dir) % hits.length) + hits.length) % hits.length;
+  leakDir = dir < 0 ? -1 : 1;
   const h = hits[leakStep];
   leakHere = h.range;
   markLeakHere();
   scrollRangeTo(h.range);
   if (namesBar.hidden) showNamesBar(true);
   else renderNamesBar();
+  warmForLeaks(); // …and the PDF pages of this stop and the next are drawn ahead
 }
 /**
  * THE BAR OVER THE TEXT, for the names the key binds that the run left in the
@@ -3734,6 +3740,7 @@ function showNamesBar(on) {
   namesBar.hidden = !on;
   setBarHeight();
   if (was !== !!on) relayout();
+  if (was !== !!on) warmForLeaks(); // the walk starting starts the drawing ahead; closing it lets go
   if (!on) { leakHere = null; walkOn = false; markLeakHere(); return; }
   if (leakStep < 0) stepLeak(1);
   else renderNamesBar();
@@ -7849,7 +7856,20 @@ function updatePdfStatus() {
 // rather than being the page anybody reads. And the drawing goes through the
 // same queue as everything else (pdfJobs) and at the BACK of it, so whatever
 // is actually in front of the reader is still served first.
+//
+// The walk through the names standing in the clear (the names bar, the key's
+// own detection of real values) is the same walk by another list: its stops
+// are known the moment the paint has found them, so the page of the name in
+// front and of the ones the walk reaches next are held the same way.
+//
+// And held whether or not the PDF is showing. The operator turns side by side
+// on, or swaps the text page for its PDF page, AT the stop they have reached —
+// that is the moment the page is wanted, and a page drawn only once the PDF
+// side is already open was a "Loading…" box at exactly that moment. With the
+// PDF side put away the window is the stop in front and the next (WARM_AWAY)
+// for each walk that is running, rather than a dozen pages nobody may ask for.
 const WARM_PAGES = 12;   // pages held ready at once
+const WARM_AWAY = 2;     // …per walk, while neither side by side nor a swap is showing
 const WARM_WIDTH = 900;  // css px a held page is drawn at, at most
 const warmPages = new Map();  // "<pdf name>|<page>" → ImageBitmap
 const warmWanted = new Set(); // the keys the window holds, as it stands
@@ -7971,14 +7991,59 @@ function leakWarmTargets(limit) {
   return out;
 }
 
-/** Hold the worksheet's next pages ready — and close the ones the review has left behind. */
+/**
+ * The PDF pages of the names walk's stops, in the order it will reach them:
+ * the name in front, then the next ones in the direction it is going — round
+ * again where the document is the whole walk, and only to its end where the
+ * walk goes on into another document (whose names are not found until it is
+ * opened and painted).
+ */
+function namesWarmTargets(limit) {
+  const hits = liveLeaks();
+  const n = hits.length;
+  if (!n || !doc) return [];
+  const wrap = !restOfFolder().length;
+  const start = leakStep >= 0 ? Math.min(leakStep, n - 1) : leakDir < 0 ? n - 1 : 0;
+  const out = [], seen = new Set();
+  for (let k = 0; k < n && out.length < limit; k++) {
+    const at = start + k * leakDir;
+    if (!wrap && (at < 0 || at >= n)) break;
+    const node = hits[((at % n) + n) % n].range.startContainer;
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    const sec = el && el.closest(".tpage");
+    const t = sec ? pdfTarget(Number(sec.dataset.index)) : null;
+    if (!t || seen.has(t.key)) continue;
+    seen.add(t.key);
+    out.push({ src: t.src, page: t.page });
+  }
+  return out;
+}
+
+/** Hold the walks' next pages ready — and close the ones the review has left behind. */
 function planWarmPages() {
-  // Nothing to hold where no review is running, or where the PDF side is put
-  // away: a page nobody is going to be shown is a bitmap for nothing — and
-  // the PDF it would be drawn from is a file to read and a grid to measure.
-  if (!leaks || leaksBar.hidden || !doc || (!(sbsOn && !pdfPane.hidden) && !swaps.size)) { dropWarmPages(); return; }
+  // Nothing to hold where no walk is running: with neither bar up there is no
+  // next stop, and a page nobody is walking towards is a bitmap for nothing —
+  // and the PDF it would be drawn from is a file to read and a grid to measure.
+  const rowsOn = !!leaks && !leaksBar.hidden;
+  const namesOn = !namesBar.hidden;
+  if (!doc || (!rowsOn && !namesOn)) { dropWarmPages(); return; }
+  const shown = (sbsOn && !pdfPane.hidden) || swaps.size > 0;
+  const limit = shown ? WARM_PAGES : WARM_AWAY * (rowsOn + namesOn);
+  // The two walks take turns, so the stop in front of each is drawn first
+  // where both bars are up.
+  const lists = [rowsOn ? leakWarmTargets(limit) : [], namesOn ? namesWarmTargets(limit) : []];
+  const targets = [], seen = new Set();
+  for (let k = 0; targets.length < limit && (k < lists[0].length || k < lists[1].length); k++) {
+    for (const list of lists) {
+      const t = list[k];
+      if (!t || targets.length >= limit) continue;
+      const key = warmKey(t.src.name, t.page);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targets.push(t);
+    }
+  }
   const cssWidth = warmWidth();
-  const targets = leakWarmTargets(WARM_PAGES);
   warmWanted.clear();
   for (const t of targets) warmWanted.add(warmKey(t.src.name, t.page));
   for (const [k, bmp] of [...warmPages]) {

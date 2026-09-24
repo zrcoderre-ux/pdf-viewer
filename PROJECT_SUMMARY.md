@@ -131,7 +131,14 @@ whatever is on screen is still served first. A slot coming into view paints
 the held bitmap (`data-preview`, cleared when its own render lands), so the
 `Loading…` box never stands on a page the worksheet already named; the
 window moves with the review, closing what it leaves behind, and is emptied
-whenever the PDF side is put away. The exports the rows name are read ahead
+when no walk is running. The names walk (the bar for real values from the key
+standing in the clear) feeds the same window: `namesWarmTargets` reads the
+pages of the name in front and the next ones in the direction the walk is
+going (`leakDir`) off the last paint's hits, and the two walks take turns in
+it. It is held whether or not the PDF is showing, because side by side and the
+⇄ PDF swap are turned on AT the stop the operator has reached; with neither
+showing, the window is the stop in front and the next (`WARM_AWAY`, 2) per
+walk rather than twelve pages. The exports the rows name are read ahead
 the same way — held against name, size and modification time, so a file
 written since is read again — and an open takes the text from there instead
 of going to disk; in a big folder that is the ONE document the walk will
