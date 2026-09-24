@@ -7,11 +7,10 @@
 //
 //   * The window is the scroller (see viewer.css: "Body owns scroll"), not an
 //     inner element or an iframe body.
-//   * Speed is derived from the TEXT DENSITY OF THE PAGE YOU ARE ON rather than
-//     one figure for the whole document. A sparse caption page and a dense
-//     block-quote page need very different pixel speeds to read at the same
-//     words-per-minute, and a PDF mixes both. Density is re-derived on zoom,
-//     since it is measured per rendered pixel.
+//   * Speed is set in PAGES PER MINUTE and converted page by page: each page
+//     crosses the reading line in 60 / ppm seconds, whatever height it renders
+//     at. A landscape exhibit and a portrait brief page take the same time, and
+//     the zoom takes care of itself, since heights are re-measured on render.
 //   * Interruption is mouse/keyboard-shaped: wheel, trackpad, scrollbar drag,
 //     arrows/PageDown. Auto-scroll yields instantly and resumes ~1.2s after you
 //     stop — and it will not resume while you're holding a text selection or a
@@ -27,25 +26,25 @@
 // The mode is sticky: turn it on and it stays on for the next document you
 // open, so a reading session doesn't need re-arming per file.
 
-const WPM_KEY = "pdfViewerAutoScrollWpm";
+const PPM_KEY = "pdfViewerAutoScrollPpm";
+const OLD_WPM_KEY = "pdfViewerAutoScrollWpm"; // the words-per-minute pace this replaced
 const ON_KEY = "pdfViewerAutoScrollOn";
-const MIN_WPM = 80;
-const MAX_WPM = 700;
-const WPM_STEP = 25;
+const MIN_PPM = 0.2;
+const MAX_PPM = 5;
+const PPM_STEP = 0.1;
+const DEFAULT_PPM = 1;
+// What an old words-per-minute setting is carried over as: a page of body text
+// holds about this many words, so 300 wpm opens as 1 page a minute.
+const WORDS_PER_PAGE = 300;
 
-// Pixels/second guard rails. The low end keeps a very dense page from stalling
-// to a standstill; the high end keeps a nearly-empty page (a signature block, a
-// scanned exhibit divider) from flinging past.
+// Pixels/second guard rails: the low end keeps a slow pace at a small zoom from
+// stalling to a standstill; the high end keeps a fast one at a big zoom from
+// flinging pages past.
 const MIN_PX_PER_SEC = 6;
 const MAX_PX_PER_SEC = 600;
 
-// Words a text page is assumed to hold when we can't measure it — a scan that
-// hasn't been OCR'd yet, or a page of pure figures. Divided by that page's real
-// rendered height, so the assumption tracks zoom instead of fighting it.
-const ASSUMED_WORDS_PER_PAGE = 450;
-
 // How far down the viewport the "reading line" sits. The page under this line
-// is the one whose density sets the current speed.
+// is the one whose height sets the current speed.
 const READING_LINE = 0.45;
 
 // A frame longer than this (GC, a tab switch, a slow re-render) is capped so
@@ -64,7 +63,7 @@ let enabled = false;   // the mode itself (persisted, sticky across documents)
 let paused = false;    // explicit play/pause inside the mode
 let suspended = false; // temporary yield to a manual scroll
 let held = false;      // frozen while pages re-render (zoom, new document)
-let wpm = 250;
+let ppm = DEFAULT_PPM;
 
 let raf = 0;
 let lastTs = 0;
@@ -75,14 +74,13 @@ let idleTimer = 0;
 let curPxPerSec = 0;  // eased toward the target so page changes don't jolt
 let appliedFrac = 0;  // sub-pixel remainder currently carried by the transform
 
-const pageWords = new Map(); // 1-based page number -> word count
-let metrics = null;          // { pages: [{ top, bottom, density }], fallback }
+let metrics = null;          // { pages: [{ top, bottom, height }] }
 
 let onStatus = () => {};
 let pagesEl = null;
 
 // Toolbar button + floating control bar.
-let btnEl, barEl, playEl, slowerEl, fasterEl, sliderEl, wpmEl, closeEl;
+let btnEl, barEl, playEl, slowerEl, fasterEl, sliderEl, ppmEl, closeEl;
 
 const scroller = () => document.scrollingElement || document.documentElement;
 const maxScroll = () =>
@@ -91,10 +89,17 @@ const maxScroll = () =>
 // ── Persistence ─────────────────────────────────────────────────────────────
 // localStorage, like the theme toggle: it works identically in the extension
 // page and in the hosted PWA, with no chrome.storage round-trip.
+const clampPpm = (v) =>
+  Math.max(MIN_PPM, Math.min(MAX_PPM, Math.round(Number(v) * 10) / 10));
+
 function loadPrefs() {
   try {
-    const w = parseInt(localStorage.getItem(WPM_KEY) || "", 10);
-    if (w >= MIN_WPM && w <= MAX_WPM) wpm = w;
+    const p = parseFloat(localStorage.getItem(PPM_KEY) || "");
+    if (p >= MIN_PPM && p <= MAX_PPM) ppm = clampPpm(p);
+    else {
+      const w = parseInt(localStorage.getItem(OLD_WPM_KEY) || "", 10);
+      if (w > 0) ppm = clampPpm(w / WORDS_PER_PAGE);
+    }
   } catch { /* ok */ }
   try { enabled = localStorage.getItem(ON_KEY) === "1"; } catch { /* ok */ }
 }
@@ -104,9 +109,10 @@ function savePref(key, value) {
 }
 
 // ── Speed model ─────────────────────────────────────────────────────────────
-// Words per rendered pixel, page by page. Scrolling one pixel reveals `density`
-// new words, so reading at W words/minute means moving (W / 60) / density
-// pixels per second — independent of window size, and correct whatever the zoom.
+// Rendered page heights, page by page. At P pages/minute a page of height H
+// crosses the reading line in 60 / P seconds, so the speed over it is
+// H * P / 60 pixels per second — independent of window size, and correct
+// whatever the zoom.
 function refreshMetrics() {
   metrics = null;
   if (!pagesEl) return;
@@ -114,34 +120,15 @@ function refreshMetrics() {
   if (!wrappers.length) return;
 
   const pages = [];
-  let totalWords = 0;
-  let totalHeight = 0;
-  wrappers.forEach((w, i) => {
+  wrappers.forEach((w) => {
     const top = w.offsetTop;
     const height = w.offsetHeight || 1;
-    const pn = Number(w.dataset.pageNumber) || i + 1;
-    const words = pageWords.get(pn);
-    pages.push({ top, bottom: top + height, height, words });
-    if (words != null) { totalWords += words; totalHeight += height; }
+    pages.push({ top, bottom: top + height, height });
   });
-
-  // Fallback density for pages we couldn't measure: the document's own average
-  // where we have one, otherwise a typical page of body text at this zoom.
-  const medianHeight = pages[Math.floor(pages.length / 2)].height;
-  const fallback = totalWords > 0 && totalHeight > 0
-    ? totalWords / totalHeight
-    : ASSUMED_WORDS_PER_PAGE / medianHeight;
-
-  for (const p of pages) {
-    // A page with a handful of words is a divider or an unOCR'd scan, not a
-    // page you read 20x faster — treat it as average rather than letting it
-    // spike the speed.
-    p.density = p.words != null && p.words >= 25 ? p.words / p.height : fallback;
-  }
-  metrics = { pages, fallback };
+  metrics = { pages };
 }
 
-function densityAt(y) {
+function pageHeightAt(y) {
   if (!metrics || !metrics.pages.length) return null;
   const pages = metrics.pages;
   let lo = 0, hi = pages.length - 1;
@@ -149,13 +136,13 @@ function densityAt(y) {
     const mid = (lo + hi) >> 1;
     if (pages[mid].bottom < y) lo = mid + 1; else hi = mid;
   }
-  return pages[lo].density || metrics.fallback;
+  return pages[lo].height || null;
 }
 
 function targetPxPerSec() {
-  const density = densityAt(pos + window.innerHeight * READING_LINE);
-  if (!density) return null;
-  const px = (wpm / 60) / density;
+  const height = pageHeightAt(pos + window.innerHeight * READING_LINE);
+  if (!height) return null;
+  const px = height * ppm / 60;
   return Math.max(MIN_PX_PER_SEC, Math.min(MAX_PX_PER_SEC, px));
 }
 
@@ -336,17 +323,22 @@ function togglePlay() {
   updateUi();
 }
 
-function setWpm(next) {
-  const w = Math.max(MIN_WPM, Math.min(MAX_WPM, Math.round(Number(next) || 250)));
-  if (w === wpm) { updateUi(); return; }
-  wpm = w;
-  savePref(WPM_KEY, String(wpm));
+function setPpm(next) {
+  const p = clampPpm(Number(next) || DEFAULT_PPM);
+  if (p === ppm) { updateUi(); return; }
+  ppm = p;
+  savePref(PPM_KEY, String(ppm));
   updateUi();
 }
 
-function nudgeWpm(delta) {
-  setWpm(Math.round((wpm + delta) / WPM_STEP) * WPM_STEP);
-  if (enabled) onStatus(`Auto-scroll ${wpm} wpm`);
+function nudgePpm(delta) {
+  setPpm(ppm + delta);
+  if (enabled) onStatus(`Auto-scroll ${ppmLabel()}`);
+}
+
+// "1.0 ppm", "0.5 ppm": always one decimal, so the readout doesn't jitter.
+function ppmLabel() {
+  return `${ppm.toFixed(1)} ppm`;
 }
 
 // ── UI ──────────────────────────────────────────────────────────────────────
@@ -365,8 +357,8 @@ function updateUi() {
   playEl.textContent = paused ? PLAY_ICON : PAUSE_ICON;
   playEl.title = paused ? "Resume (Space)" : "Pause (Space)";
   playEl.setAttribute("aria-label", playEl.title);
-  if (Number(sliderEl.value) !== wpm) sliderEl.value = String(wpm);
-  wpmEl.textContent = `${wpm} wpm`;
+  if (Number(sliderEl.value) !== ppm) sliderEl.value = String(ppm);
+  ppmEl.textContent = ppmLabel();
   barEl.classList.toggle("paused", paused);
 }
 
@@ -408,7 +400,7 @@ function onKeyDown(e) {
   if (plain && !e.shiftKey && (e.key === "a" || e.key === "A")) {
     e.preventDefault();
     setEnabled(!enabled);
-    onStatus(enabled ? `Auto-scroll on · ${wpm} wpm` : "Auto-scroll off");
+    onStatus(enabled ? `Auto-scroll on · ${ppmLabel()}` : "Auto-scroll off");
     markBarActive();
     return;
   }
@@ -423,7 +415,7 @@ function onKeyDown(e) {
   }
   if (enabled && plain && (e.key === "[" || e.key === "]")) {
     e.preventDefault();
-    nudgeWpm(e.key === "]" ? WPM_STEP : -WPM_STEP);
+    nudgePpm(e.key === "]" ? PPM_STEP : -PPM_STEP);
     markBarActive();
     return;
   }
@@ -446,24 +438,24 @@ export const autoScroll = {
     slowerEl = document.getElementById("as-slower");
     fasterEl = document.getElementById("as-faster");
     sliderEl = document.getElementById("as-speed");
-    wpmEl = document.getElementById("as-wpm");
+    ppmEl = document.getElementById("as-ppm");
     closeEl = document.getElementById("as-close");
 
     loadPrefs();
-    sliderEl.min = String(MIN_WPM);
-    sliderEl.max = String(MAX_WPM);
-    sliderEl.step = String(10);
-    sliderEl.value = String(wpm);
+    sliderEl.min = String(MIN_PPM);
+    sliderEl.max = String(MAX_PPM);
+    sliderEl.step = String(PPM_STEP);
+    sliderEl.value = String(ppm);
 
     btnEl.addEventListener("click", () => {
       setEnabled(!enabled);
       markBarActive();
     });
     playEl.addEventListener("click", () => { togglePlay(); markBarActive(); });
-    slowerEl.addEventListener("click", () => { nudgeWpm(-WPM_STEP); markBarActive(); });
-    fasterEl.addEventListener("click", () => { nudgeWpm(WPM_STEP); markBarActive(); });
+    slowerEl.addEventListener("click", () => { nudgePpm(-PPM_STEP); markBarActive(); });
+    fasterEl.addEventListener("click", () => { nudgePpm(PPM_STEP); markBarActive(); });
     closeEl.addEventListener("click", () => setEnabled(false));
-    sliderEl.addEventListener("input", () => { setWpm(sliderEl.value); markBarActive(); });
+    sliderEl.addEventListener("input", () => { setPpm(sliderEl.value); markBarActive(); });
     // The bar's own controls must not count as "the user scrolled".
     barEl.addEventListener("wheel", (e) => e.stopPropagation());
     barEl.addEventListener("mousedown", (e) => e.stopPropagation());
@@ -475,7 +467,7 @@ export const autoScroll = {
     }
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("mousemove", markBarActive, { passive: true });
-    // Page heights (and therefore density) change with the window. Debounced:
+    // Page heights (and therefore speed) change with the window. Debounced:
     // a resize drag fires continuously, and re-measuring every page is not free.
     let resizeTimer = 0;
     window.addEventListener("resize", () => {
@@ -493,9 +485,8 @@ export const autoScroll = {
     markBarActive();
   },
 
-  // A new document is loading: forget the old one's word counts.
+  // A new document is loading: forget the old one's page heights.
   resetDocument() {
-    pageWords.clear();
     metrics = null;
     paused = false;
   },
@@ -509,22 +500,8 @@ export const autoScroll = {
     if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = 0; }
   },
 
-  // Word count for one page, taken from the text PDF.js already extracted for
-  // the citation linker — no second pass over the document.
-  notePageText(pageNumber, textContent) {
-    let words = 0;
-    try {
-      for (const item of (textContent && textContent.items) || []) {
-        if (typeof item.str !== "string") continue;
-        const t = item.str.trim();
-        if (t) words += t.split(/\s+/).length;
-      }
-    } catch { /* leave the page unmeasured; it falls back to the average */ }
-    pageWords.set(pageNumber, words);
-  },
-
-  // Pages are on screen and measurable again: re-derive density (heights just
-  // changed with the zoom) and pick the motion back up if the mode is on.
+  // Pages are on screen and measurable again: re-measure page heights (they
+  // just changed with the zoom) and pick the motion back up if the mode is on.
   endRender() {
     held = false;
     refreshMetrics();
@@ -540,7 +517,7 @@ export const autoScroll = {
     updateUi();
   },
 
-  // OCR just added a text layer, or anything else changed the page text/heights.
+  // Anything that changed the page heights.
   refresh() {
     refreshMetrics();
     pos = scroller().scrollTop;

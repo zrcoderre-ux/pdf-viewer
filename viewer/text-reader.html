@@ -213,7 +213,7 @@
         <button id="find-btn" class="tool-btn" title="Find (Ctrl+F) — in this document and on through every export in the case folder. Names are looked for as they READ, the real value on screen, and the rest of the folder is searched through the key, so the same name is found in a document that still carries its pseudonym. Enter goes to the next, and on into the next document when this one runs out."><span class="ti">🔍</span><span class="tl">Find</span></button>
         <button id="flag-btn" class="tool-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead."><span class="ti">🚩</span><span class="tl">Flag real value</span></button>
         <button id="leaks-btn" class="tool-btn" title="Review PDF-Linker's LEAKS.xlsx row by row: each row shown above the text, the text opened at its page and line, the decision written into the worksheet's Fix? cell. The case folder's own worksheet is attached when the folder is opened; click to open it, or to load one."><span class="ti">⚠</span><span class="tl">Leaks</span><span id="leaks-count" class="badge" hidden>0</span></button>
-        <button id="autoscroll" class="tool-btn" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses. The pace is a reading pace in words per minute: each page moves at the speed its own text needs, so a dense page goes slower than a caption page. A scroll of your own suspends it and it picks up again a second later; remembered between documents." aria-pressed="false"><span class="ti">↓</span><span class="tl">Auto-scroll</span></button>
+        <button id="autoscroll" class="tool-btn" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses. The pace is set in pages per minute: each page takes the same time to cross the screen, whatever its height. A scroll of your own suspends it and it picks up again a second later; remembered between documents." aria-pressed="false"><span class="ti">↓</span><span class="tl">Auto-scroll</span></button>
 
         <div class="tools-group-label">PDF</div>
         <button id="sbs-toggle" class="tool-btn" title="Show the PDF this export came from beside the text, page for page, scrolling together — and each text page laid on its PDF page's own geometry: the same sheet size, every numbered line at its number's height on the PDF, the PDF's own type sizes and leading, so line 7 stands beside line 7. The citation underlines are off while the pane is open, being strips measured off lines the grid has moved; the Authorities panel still lists every one of them and its links still open. Closing the pane puts every page back as it reads on its own (remembered)" aria-pressed="false" disabled><span class="ti">⇔</span><span class="tl">Side by side</span></button>
@@ -295,9 +295,9 @@
     <span class="asp-grip" title="Drag the pill out of the way — where you leave it is remembered" aria-hidden="true">⠿</span>
     <button id="asp-play" type="button" title="Pause (Space)" aria-label="Pause auto-scroll">❙❙</button>
     <button id="asp-slower" type="button" title="Slower ([)" aria-label="Slower">−</button>
-    <input id="asp-speed" type="range" min="80" max="700" step="10" value="250" aria-label="Reading speed in words per minute">
+    <input id="asp-speed" type="range" min="0.2" max="5" step="0.1" value="1" aria-label="Reading speed in pages per minute">
     <button id="asp-faster" type="button" title="Faster (])" aria-label="Faster">+</button>
-    <span id="asp-wpm" class="asp-wpm">250 wpm</span>
+    <span id="asp-ppm" class="asp-ppm">1.0 ppm</span>
     <button id="asp-close" type="button" title="Turn auto-scroll off (A)" aria-label="Turn auto-scroll off">×</button>
   </div>
 

@@ -177,13 +177,12 @@ desktop viewer. Turn it on with the **↓ Auto-scroll** toolbar button or the **
 key and the page creeps upward continuously, so reading a long PDF costs no
 scrolling at all.
 
-Speed is set as a **reading pace in words per minute**, not pixels per second,
-and the viewer converts it per page: it already extracts each page's text for
-citation linking, so it knows how many words a page holds and how tall that page
-renders. A dense block-quote page therefore creeps, a caption page or a scanned
-exhibit divider slides past quickly, and both are on screen for about as long as
-reading them takes. Change the zoom and the pace re-derives itself, because
-density is measured per rendered pixel.
+Speed is set in **pages per minute** (0.2 to 5), not pixels per second, and the
+viewer converts it per page from the height that page renders at: at 1 ppm every
+page takes a minute to cross the screen, whether it is a landscape exhibit or a
+portrait brief page. Change the zoom and the pace re-derives itself, because
+page heights are re-measured after every render. A pace set in words per minute
+by an earlier version carries over at 300 words to the page.
 
 It stays out of the way:
 
@@ -201,7 +200,7 @@ It stays out of the way:
 |-----|---|
 | **A** | Auto-scroll on / off |
 | **Space** | Pause / resume (only while auto-scroll is on — otherwise it's the browser's page-down) |
-| **[** / **]** | Slower / faster, in 25-wpm steps |
+| **[** / **]** | Slower / faster, in 0.1-ppm steps |
 | **Esc** | Turn auto-scroll off |
 
 The floating bar at the bottom has the same controls, and fades back to a
@@ -1679,15 +1678,13 @@ app, which routes it to the reader tab.
   twenty-five proofs of service.
   The status bar says where the reel stands: `3 of 5 on the reel`, and where it
   has read the folder out at one end or both.
-- **Auto-scroll at a reading pace, not a pixel speed.** **↓ Auto-scroll** (or
+- **Auto-scroll in pages per minute, not a pixel speed.** **↓ Auto-scroll** (or
   **A**) creeps the document so you stop reaching for the wheel, and what you
-  set is **words per minute** — **[** and **]** by 25 at a time, remembered.
-  The pixels follow from the page: each page's own **density**, the words it
-  holds per rendered pixel, sets the speed under the reading line, so a dense
-  block-quoted page of a brief goes slowly and a caption page with nine words
-  on it is crossed in a second or two, both at the pace you asked for. The
+  set is **pages per minute** — **[** and **]** by 0.1 at a time, remembered.
+  The pixels follow from the page: each page's own rendered **height** sets the
+  speed under the reading line, so every page crosses it in the same time. The
   zoom, the leading, the page width and the PDF grid then take care of
-  themselves — they change the pixels a page takes, the density is measured in
+  themselves — they change the pixels a page takes, the height is measured in
   those pixels, and the pace stays put. Speeds ease over about half a second
   between pages, so a page boundary is not a gear change.
   **A scroll of your own is not a stop.** Reading is not one-directional — a
