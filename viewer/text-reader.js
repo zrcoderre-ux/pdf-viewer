@@ -6044,15 +6044,13 @@ document.addEventListener("keydown", (e) => {
 // engine the PDF viewer carries (viewer/autoscroll.js), rebuilt around #stage
 // rather than the window, and around a text page rather than a rendered one.
 //
-// THE PACE IS A READING PACE, not a pixel speed. What a reader sets is words
-// per minute, and the pixels follow from the page: a page of a dense
-// block-quoted brief and a page of a caption with six lines on it have to move
-// at very different speeds to be read at the same pace, and a filing is full of
-// both. So each page's own DENSITY — the words it holds per rendered pixel — is
-// measured, and the speed under the reading line is (wpm / 60) / density. It
-// falls out of that arithmetic that the zoom, the leading, the page width and
-// the PDF grid all take care of themselves: they change the pixels a page
-// takes, the density is measured in those pixels, and the pace stays what was
+// THE PACE IS PAGES PER MINUTE, not a pixel speed. What a reader sets is how
+// many pages go by in a minute, and the pixels follow from the page: each
+// page's own rendered HEIGHT is measured, and the speed under the reading line
+// is height * ppm / 60, so every page crosses it in the same 60 / ppm seconds.
+// It falls out of that arithmetic that the zoom, the leading, the page width
+// and the PDF grid all take care of themselves: they change the pixels a page
+// takes, the height is measured in those pixels, and the pace stays what was
 // asked for.
 //
 // A MANUAL SCROLL IS NOT A STOP. Reading is not one-directional — a name is
@@ -6074,24 +6072,21 @@ document.addEventListener("keydown", (e) => {
 // screen, and on a 1x screen exactly the stepping there would have been anyway.
 const autoBtn = $("autoscroll");
 
-const AUTO_WPM_KEY = "textReader.autoWpm";
+const AUTO_PPM_KEY = "textReader.autoPpm";
+const AUTO_OLD_WPM_KEY = "textReader.autoWpm"; // the words-per-minute pace this replaced
 const AUTO_ON_KEY = "textReader.autoOn";
-const MIN_WPM = 80, MAX_WPM = 700, WPM_STEP = 25;
-// The slowest it will go. A page dense enough to want less than this is being
-// read a little faster than asked rather than appearing frozen — and ] is
-// there for a reader who meant it.
+const MIN_PPM = 0.2, MAX_PPM = 5, PPM_STEP = 0.1, DEFAULT_PPM = 1;
+// What an old words-per-minute setting is carried over as: a page of a filing
+// holds about this many words, so 300 wpm opens as 1 page a minute.
+const WORDS_PER_PAGE = 300;
+// The slowest it will go. A slow pace on a short page is read a little faster
+// than asked rather than appearing frozen — and ] is there for a reader who
+// meant it.
 const MIN_PX_PER_SEC = 4;
 // …and the fastest, which is not a pixel figure but a SCREEN figure: however
-// little a page holds, it may not go by faster than a reader can see it go by,
-// and what "a screenful" is depends on the window.
+// tall a page is, it may not go by faster than a reader can see it go by, and
+// what "a screenful" is depends on the window.
 const MAX_SCREEN_SECONDS = 1.5;
-// A page holds at least this much attention whatever its word count says. A
-// banner, a caption, a combined file's list of its own documents: little to
-// read, still a page you look at rather than one to be teleported through.
-const MIN_PAGE_WORDS = 8;
-// What a page is taken to hold where its words cannot be counted at all,
-// divided by that page's own rendered height so the guess tracks the layout.
-const ASSUMED_WORDS_PER_PAGE = 350;
 // How far down the box the reading line sits: the page under it sets the pace.
 const READING_LINE = 0.45;
 // A frame longer than this (a citation pass, a garbage collection, a tab
@@ -6105,96 +6100,62 @@ const RESUME_DELAY_MS = 1200;
 let autoOn = false;        // the mode itself, remembered between documents
 let autoPaused = false;    // Space: an explicit pause, which does not time out
 let autoSuspended = false; // a manual scroll, which does
-let autoWpm = 250;
+let autoPpm = DEFAULT_PPM;
 let autoRaf = 0, autoLast = 0;
 let autoPos = 0;           // the fractional position the engine drives
 let autoWritten = null;    // …and the whole one it last wrote, for the backstop
 let autoResume = 0;
 let autoPxPerSec = 0;      // eased toward the target, so a page change is not a gear change
 let autoFrac = 0;          // the sub-pixel remainder the transform is carrying
-let autoMetrics = null;    // [{ top, bottom, density }] down the document
-let autoWords = null;      // { doc, counts } — the words each page holds
+let autoMetrics = null;    // [{ top, bottom, height }] down the document
 
 // Remembered, and the mode with it: turning it on is arming a reading
 // session, not a document, so the next export opens already moving.
+const clampPpm = (v) => Math.max(MIN_PPM, Math.min(MAX_PPM, Math.round(Number(v) * 10) / 10));
+const ppmLabel = () => autoPpm.toFixed(1) + " ppm";
 {
-  const w = lsGet(AUTO_WPM_KEY, 0);
-  if (typeof w === "number" && w >= MIN_WPM && w <= MAX_WPM) autoWpm = w;
+  const p = lsGet(AUTO_PPM_KEY, 0);
+  const w = lsGet(AUTO_OLD_WPM_KEY, 0);
+  if (typeof p === "number" && p >= MIN_PPM && p <= MAX_PPM) autoPpm = clampPpm(p);
+  else if (typeof w === "number" && w > 0) autoPpm = clampPpm(w / WORDS_PER_PAGE);
   autoOn = lsGet(AUTO_ON_KEY, false) === true;
 }
 
 const autoMax = () => Math.max(stageEl.scrollHeight - stageEl.clientHeight, 0);
 
-// ── how many words a page holds ──
-//
-// Counted off the parsed export rather than the DOM: the model is already in
-// hand, a page of it is a handful of strings, and the DOM's own text carries
-// the gutter numbers down a pleading margin — twenty-eight "words" a page that
-// nobody reads and that would have the creep run a third too fast.
-function wordCounts() {
-  if (autoWords && autoWords.doc === doc) return autoWords.counts;
-  const counts = (doc ? doc.pages : []).map((p) => {
-    let n = 0;
-    for (const line of p.lines || []) {
-      const g = TD.gutterPrefix(line);
-      const text = g ? g.rest : line;
-      for (const w of String(text).trim().split(/\s+/)) if (w) n++;
-    }
-    return n;
-  });
-  autoWords = { doc, counts };
-  return counts;
-}
-
 /**
  * The document as the engine reads it: where each page stands in the scroll
- * box and how many words a pixel of it is worth. Measured from the DOM, so it
- * is the pace of the layout actually on screen — the zoom, the leading, the
- * page width and the PDF grid are all already in these numbers.
+ * box and how tall it renders. Measured from the DOM, so it is the pace of the
+ * layout actually on screen — the zoom, the leading, the page width and the PDF
+ * grid are all already in these numbers.
  */
 function refreshAutoMetrics() {
   autoMetrics = null;
   const secs = pagesEl.querySelectorAll(".tpage");
   if (!secs.length) return;
-  const counts = wordCounts();
   const pages = [];
-  let totalWords = 0, totalHeight = 0;
   for (const sec of secs) {
     const height = sec.offsetHeight || 1;
-    const words = counts[Number(sec.dataset.index)];
-    pages.push({ top: sec.offsetTop, bottom: sec.offsetTop + height, height, words: words == null ? null : words });
-    if (words != null) { totalWords += words; totalHeight += height; }
-  }
-  // A page the model has no count for at all is read at the document's own
-  // average, where there is one. A page it counts as nearly empty is NOT: a
-  // caption page really does hold nine words, and a reader really does cross it
-  // in a second or two. It is held to MIN_PAGE_WORDS so that "nearly empty"
-  // does not become "instantaneous", and the screen cap above does the rest.
-  const median = pages[Math.floor(pages.length / 2)].height;
-  const fallback = totalWords > 0 && totalHeight > 0
-    ? totalWords / totalHeight
-    : ASSUMED_WORDS_PER_PAGE / median;
-  for (const p of pages) {
-    p.density = p.words == null ? fallback : Math.max(p.words, MIN_PAGE_WORDS) / p.height;
+    pages.push({ top: sec.offsetTop, bottom: sec.offsetTop + height, height });
   }
   autoMetrics = pages;
 }
 
-function autoDensityAt(y) {
+function autoPageHeightAt(y) {
   if (!autoMetrics || !autoMetrics.length) return null;
   let lo = 0, hi = autoMetrics.length - 1;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
     if (autoMetrics[mid].bottom < y) lo = mid + 1; else hi = mid;
   }
-  return autoMetrics[lo].density || null;
+  return autoMetrics[lo].height || null;
 }
 
 function autoTarget() {
-  const d = autoDensityAt(autoPos + stageEl.clientHeight * READING_LINE);
-  if (!d) return null;
+  const h = autoPageHeightAt(autoPos + stageEl.clientHeight * READING_LINE);
+  if (!h) return null;
   const ceiling = Math.max(MIN_PX_PER_SEC * 4, stageEl.clientHeight / MAX_SCREEN_SECONDS);
-  return Math.max(MIN_PX_PER_SEC, Math.min(ceiling, (autoWpm / 60) / d));
+  return Math.max(MIN_PX_PER_SEC, Math.min(ceiling, (h * autoPpm) / 60));
 }
 
 // ── the engine ──
@@ -6236,7 +6197,7 @@ function autoTick(ts) {
 
   const target = autoTarget();
   if (target == null) { autoRaf = requestAnimationFrame(autoTick); return; }
-  // Eased over about half a second, so crossing into a denser page slows the
+  // Eased over about half a second, so crossing into a shorter page slows the
   // document rather than shifting gear under the eye.
   if (!autoPxPerSec) autoPxPerSec = target;
   else autoPxPerSec += (target - autoPxPerSec) * Math.min(1, dt / 500);
@@ -6361,7 +6322,7 @@ function setAutoScroll(on) {
 
 /** Space: a pause that sticks, against the manual-scroll one that does not. */
 function toggleAutoPlay() {
-  if (!autoOn) { setAutoScroll(true); toast(`Auto-scroll on · ${autoWpm} wpm`); return; }
+  if (!autoOn) { setAutoScroll(true); toast(`Auto-scroll on · ${ppmLabel()}`); return; }
   autoPaused = !autoPaused;
   autoSuspended = false;
   clearTimeout(autoResume);
@@ -6371,23 +6332,23 @@ function toggleAutoPlay() {
   updateAutoUi();
 }
 
-function setAutoWpm(next) {
-  const w = Math.max(MIN_WPM, Math.min(MAX_WPM, Math.round(Number(next) || 250)));
-  if (w === autoWpm) return;
-  autoWpm = w;
-  lsSet(AUTO_WPM_KEY, autoWpm);
+function setAutoPpm(next) {
+  const p = clampPpm(Number(next) || DEFAULT_PPM);
+  if (p === autoPpm) return;
+  autoPpm = p;
+  lsSet(AUTO_PPM_KEY, autoPpm);
   updateAutoUi();
 }
 
 function nudgeAutoSpeed(delta) {
-  setAutoWpm(Math.round((autoWpm + delta) / WPM_STEP) * WPM_STEP);
-  toast(`Auto-scroll ${autoWpm} wpm` + (autoOn ? "" : " (off — A starts it)"));
+  setAutoPpm(autoPpm + delta);
+  toast(`Auto-scroll ${ppmLabel()}` + (autoOn ? "" : " (off — A starts it)"));
 }
 
 // ── the pill ──
 //
-// A reading pace is not a thing you can see: 250 and 400 look the same until
-// the page moves, so a wpm engine with no readout is a setting you cannot aim.
+// A reading pace is not a thing you can see: 1 and 1.5 look the same until
+// the page moves, so a ppm engine with no readout is a setting you cannot aim.
 // The pill is that readout and the controls beside it, over the text because
 // that is where the eye already is — and draggable, because it will cover
 // something eventually, with the spot remembered as fractions of the free
@@ -6455,10 +6416,10 @@ function applyPillPos() {
   window.addEventListener("resize", () => { if (!asPill.hidden) applyPillPos(); }, { passive: true });
 
   $("asp-play").addEventListener("click", () => { toggleAutoPlay(); pillAwake(); });
-  $("asp-slower").addEventListener("click", () => { nudgeAutoSpeed(-WPM_STEP); pillAwake(); });
-  $("asp-faster").addEventListener("click", () => { nudgeAutoSpeed(WPM_STEP); pillAwake(); });
+  $("asp-slower").addEventListener("click", () => { nudgeAutoSpeed(-PPM_STEP); pillAwake(); });
+  $("asp-faster").addEventListener("click", () => { nudgeAutoSpeed(PPM_STEP); pillAwake(); });
   $("asp-close").addEventListener("click", () => { setAutoScroll(false); toast("Auto-scroll off"); });
-  $("asp-speed").addEventListener("input", (e) => { setAutoWpm(e.target.value); pillAwake(); });
+  $("asp-speed").addEventListener("input", (e) => { setAutoPpm(e.target.value); pillAwake(); });
 }
 
 // It sits over the reading, so it fades while the pointer is still and comes
@@ -6487,23 +6448,23 @@ function updateAutoUi() {
     $("asp-play").textContent = autoPaused ? "▶" : "❙❙";
     $("asp-play").title = autoPaused ? "Resume (Space)" : "Pause (Space)";
     const sl = $("asp-speed");
-    if (Number(sl.value) !== autoWpm) sl.value = String(autoWpm);
-    $("asp-wpm").textContent = autoWpm + " wpm";
+    if (Number(sl.value) !== autoPpm) sl.value = String(autoPpm);
+    $("asp-ppm").textContent = ppmLabel();
     asPill.classList.toggle("paused", autoPaused);
   }
   autoBtn.setAttribute("aria-pressed", String(autoOn));
-  const state = !autoOn ? `Auto-scroll while reading (A) — ${autoWpm} wpm`
-    : !doc ? `Auto-scroll is on at ${autoWpm} wpm — it starts with the next document`
-    : autoPaused ? `Auto-scroll paused at ${autoWpm} wpm — Space reads on`
-    : `Auto-scrolling at ${autoWpm} wpm`;
+  const state = !autoOn ? `Auto-scroll while reading (A) — ${ppmLabel()}`
+    : !doc ? `Auto-scroll is on at ${ppmLabel()} — it starts with the next document`
+    : autoPaused ? `Auto-scroll paused at ${ppmLabel()} — Space reads on`
+    : `Auto-scrolling at ${ppmLabel()}`;
   autoBtn.title = state +
-    "; [ slower, ] faster, Space pauses. The pace is a reading pace: each page moves at the speed its own text needs.";
+    "; [ slower, ] faster, Space pauses. The pace is pages per minute: each page takes the same time to cross the screen.";
 }
 
 // ── what the reader does ──
 autoBtn.addEventListener("click", () => {
   setAutoScroll(!autoOn);
-  toast(autoOn ? `Auto-scroll on · ${autoWpm} wpm` : "Auto-scroll off");
+  toast(autoOn ? `Auto-scroll on · ${ppmLabel()}` : "Auto-scroll off");
 });
 // Observed, never blocked: the browser scrolls as it always would and the
 // creep gets out of the way. On the document rather than on the stage, because
@@ -6529,9 +6490,9 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "a" || e.key === "A") {
     e.preventDefault();
     setAutoScroll(!autoOn);
-    toast(autoOn ? `Auto-scroll on · ${autoWpm} wpm` : "Auto-scroll off");
-  } else if (e.key === "[") { e.preventDefault(); nudgeAutoSpeed(-WPM_STEP); }
-  else if (e.key === "]") { e.preventDefault(); nudgeAutoSpeed(WPM_STEP); }
+    toast(autoOn ? `Auto-scroll on · ${ppmLabel()}` : "Auto-scroll off");
+  } else if (e.key === "[") { e.preventDefault(); nudgeAutoSpeed(-PPM_STEP); }
+  else if (e.key === "]") { e.preventDefault(); nudgeAutoSpeed(PPM_STEP); }
   // Shift+Space belongs to the link opener, as it does in the viewer.
   else if (e.key === " " && !e.shiftKey && autoOn) { e.preventDefault(); toggleAutoPlay(); }
   else if (AUTO_SCROLL_KEYS.has(e.key)) autoInterrupt();
@@ -6547,7 +6508,7 @@ function autoRemeasure({ newDoc = false } = {}) {
   // A short document does not fill the box, and nothing will ever scroll to
   // ask for the next one: the reel reaches once as the document goes up.
   if (newDoc && reelJustOpened) { reelJustOpened = false; setTimeout(reelMaybeExtend, 0); }
-  if (newDoc) { autoWords = null; autoPaused = false; autoSuspended = false; }
+  if (newDoc) { autoPaused = false; autoSuspended = false; }
   autoMetrics = null;
   updateAutoUi();
   if (!autoOn || !doc) return;
@@ -6820,7 +6781,6 @@ async function reelExtend() {
 /** The reel grew: everything measured off the document is measured again. */
 function reelChanged() {
   textAnchors = null; textLineTops = null;
-  autoWords = null;
   applyMatchedLayout();
   applyPageWidth();
   placeCitationsSoon();
@@ -6873,7 +6833,6 @@ function reelShift(n) {
   for (const sn of undoStack) { sn.page += n; bump(sn.spots); }
   for (const sn of redoStack) { sn.page += n; bump(sn.spots); }
   if (lastSnapPage >= 0) lastSnapPage += n;
-  autoWords = null;        // counted per page, by the numbers that just moved
   textAnchors = null; textLineTops = null;
 }
 
@@ -7107,7 +7066,7 @@ function reelMarkDirty(pageIndex) {
 // its index and pinned to the height it had. That is what makes this safe
 // rather than clever: the pages are still one element per page, in order, at
 // the right heights, so the PDF pane beside them stays page-for-page, the
-// scroll position does not move by a pixel, auto-scroll's density is still
+// scroll position does not move by a pixel, auto-scroll's pace is still
 // measured off the real heights, and every index already handed out still
 // finds its page. Only the contents go.
 //

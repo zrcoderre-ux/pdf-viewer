@@ -1160,7 +1160,7 @@ select.form-field { padding: 0; }
   accent-color: #1a73e8;
   cursor: pointer;
 }
-#as-wpm {
+#as-ppm {
   min-width: 62px;
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -1331,7 +1331,7 @@ select.form-field { padding: 0; }
 :root[data-theme="light"] #autoscroll-bar.paused #as-play {
   background: var(--l-btn); border-color: var(--l-btn-border); color: var(--l-text);
 }
-:root[data-theme="light"] #as-wpm { color: var(--l-text-muted); }
+:root[data-theme="light"] #as-ppm { color: var(--l-text-muted); }
 :root[data-theme="light"] #autoscroll-bar #as-close {
   background: transparent; border-color: transparent; color: var(--l-text-muted);
 }

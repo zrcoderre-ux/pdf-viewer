@@ -535,7 +535,7 @@ body.side-hidden #side { display: none; }
 #as-pill #asp-play { width: 30px; height: 30px; font-size: 11px; }
 #as-pill #asp-close { background: transparent; font-size: 16px; color: rgba(255, 255, 255, 0.6); }
 #as-pill #asp-close:hover { background: rgba(255, 255, 255, 0.16); color: #fff; }
-#as-pill .asp-wpm { min-width: 62px; text-align: right; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.92); }
+#as-pill .asp-ppm { min-width: 62px; text-align: right; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.92); }
 #as-pill input[type="range"] { width: 110px; accent-color: #8ab4f8; cursor: pointer; }
 /* Paused reads as paused at a glance, not only on the icon. */
 #as-pill.paused { background: rgba(70, 40, 20, 0.85); }

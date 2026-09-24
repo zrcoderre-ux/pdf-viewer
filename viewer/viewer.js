@@ -2092,9 +2092,6 @@ async function renderAllPages() {
     const refs = await renderPageCanvasAndText(pageNum);
     if (signal.aborted) return;
     ingestPage(pageNum, refs.textContent, { italicFontNames: refs.italicFontNames });
-    // Same extracted text the linker just ingested — auto-scroll paces itself
-    // by how many words each rendered page actually holds.
-    autoScroll.notePageText(pageNum, refs.textContent);
     pageRefs.push(refs);
     // Capture the footer band of the first two pages so we can detect a
     // running-footer title. We only look at those — that's enough signal

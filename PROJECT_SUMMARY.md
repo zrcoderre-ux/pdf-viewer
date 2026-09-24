@@ -1484,21 +1484,15 @@ The same engine `viewer/autoscroll.js` runs for the viewer, rebuilt around
 one. It replaced a px/s counter that stepped in whole pixels and turned itself
 off on the first wheel notch. The parts that carry their weight:
 
-- **The pace is wpm; the pixels are derived.** Each `.tpage`'s density — its
-  words per rendered pixel — is measured from the DOM, and the speed under the
-  reading line is `(wpm / 60) / density`. Because the density is measured in
-  the pixels the layout actually uses, the zoom, the leading, the page width
-  and the PDF grid need no special handling at all.
-- **Words come from the parsed export, not the DOM.** `doc.pages[i].lines`
-  with `TD.gutterPrefix` stripped. The DOM's own text carries the pleading
-  numbers down the margin — twenty-eight "words" a page nobody reads, which
-  would run the creep about a third too fast on every pleading page.
-- **A near-empty page is crossed, not flown past.** The viewer guards against
-  un-OCR'd scans by reading any page under 25 words at the document average;
-  the reader has no such uncertainty (a caption page really does hold nine
-  words), so it uses the real count with a `MIN_PAGE_WORDS` floor, and the
-  ceiling is a SCREEN figure — `clientHeight / MAX_SCREEN_SECONDS` — rather
-  than a pixel one, so "fast" means the same on any window.
+- **The pace is pages per minute; the pixels are derived.** Each `.tpage`'s
+  rendered height is measured from the DOM, and the speed under the reading
+  line is `height * ppm / 60`, so every page crosses it in `60 / ppm` seconds.
+  Because the height is measured in the pixels the layout actually uses, the
+  zoom, the leading, the page width and the PDF grid need no special handling
+  at all. The range is 0.2–5 ppm in 0.1 steps; a pace saved under the old
+  `textReader.autoWpm` key carries over at 300 words to the page.
+- **The ceiling is a SCREEN figure** — `clientHeight / MAX_SCREEN_SECONDS` —
+  rather than a pixel one, so "fast" means the same on any window.
 - **Manual scroll suspends; it does not stop.** The reliable signal is not the
   event but `autoWritten`: the tick compares `scrollTop` against the integer
   it last wrote, so the scrollbar, a find, a leak row being scrolled to, and
@@ -1514,7 +1508,7 @@ off on the first wheel notch. The parts that carry their weight:
 
 `autoRemeasure()` is the one hook the rest of the reader needs: `afterTextChange`
 and `relayout` call it (the pages moved), and `render`/`showPages` call it with
-`newDoc` (the words changed too).
+`newDoc` (a new document: its pause and suspension are cleared).
 
 ## Keeps that ask nothing of PDF-Linker (`textdoc.keepNeedsRun`)
 
@@ -1674,7 +1668,7 @@ viewer/leaks.js                          LEAKS.xlsx model for the review bar (pu
 viewer/web-shim.js                       chrome.* shim for the hosted pages (was inline in viewer.js)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing
-viewer/autoscroll.js                 Auto-scroll: wpm-paced reading scroll + its control bar
+viewer/autoscroll.js                 Auto-scroll: ppm-paced reading scroll + its control bar
 viewer/rotation.js                   Page rotation: per-page angles, rotate bar, rotated geometry
 viewer/ocr-store.js                  Saved OCR: recognized pages in IndexedDB by file hash, kept N days since last use
 viewer/citation-linker.js            Detection + placement + URL resolution
