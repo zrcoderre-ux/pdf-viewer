@@ -42,6 +42,9 @@ import {
   pageNeedsOcr,
   ocrPageToTextLayer,
   resetOcr,
+  openOcrDocument,
+  remapOcrPages,
+  rememberOcrFor,
 } from "./ocr.js";
 import * as PK from "./pseudo-key.js";
 import { parseXlsx } from "./xlsx-read.js";
@@ -1624,7 +1627,10 @@ async function saveEditedPdf() {
     const rotated = pageRotation.any();
     if (rotated) edited = await applyRotationToBytes(edited, pageRotation.deltas());
     const ok = await writeOutPdf(edited, sanitizePdfFilename(serverFilename || "document"), { inPlace: true });
-    if (ok && rotated) await reloadEditedBytes(edited);
+    if (ok && rotated) await reloadEditedBytes(edited, rotationPlan(pageRotation.deltas()));
+    // Not reloaded: the saved file differs from the open one only by its
+    // highlights, so its OCR'd pages are the ones already recognized.
+    else if (ok) await rememberOcrFor(edited);
     statusEl.textContent = ok ? "Saved." : "";
   } catch (e) {
     console.error("[pdf-viewer] save failed:", e);
@@ -1941,6 +1947,9 @@ async function renderBytes(buf, { sourceName } = {}) {
   // Stash a copy for the Download handler. PDF.js takes ownership of the
   // buffer it's handed (some versions transfer it), so we keep our own.
   pdfBytes = buf.slice(0);
+  // Pages OCR'd on an earlier visit are saved under a hash of these bytes;
+  // hashing runs alongside the parse.
+  const ocrSaved = openOcrDocument(pdfBytes);
   const loadingTask = pdfjsLib.getDocument({ data: buf });
   pdfDoc = await loadingTask.promise;
   // Bring any existing /Highlight annotations into the removable overlay before
@@ -1958,6 +1967,9 @@ async function renderBytes(buf, { sourceName } = {}) {
   // under it) without being clicked. The later render pass re-runs the same
   // resolution once geometry is real; it's idempotent.
   await resolveNameEarly();
+  // A scan OCR'd before opens with its text back, without the button — the
+  // saved pages are shown, not recognized again.
+  if (await ocrSaved && !ocrEnabled) { ocrEnabled = true; markOcrActive(); }
   statusEl.textContent = `Rendering ${pdfDoc.numPages} pages…`;
   await renderAllPages();
   statusEl.textContent = "Done";
@@ -4338,7 +4350,11 @@ async function exitOrganize() {
 
 // Reload the viewer from freshly-edited bytes, refreshing pages, highlights,
 // and thumbnails while leaving the display name/naming choice intact.
-async function reloadEditedBytes(out) {
+// `plan`, when the edit moved or turned pages, is the page plan it applied, so
+// OCR'd pages follow their page (see remapOcrPages); without one, every page is
+// where it was.
+async function reloadEditedBytes(out, plan = null) {
+  if (plan) remapOcrPages(plan);
   resetOrganizeState();
   // The bytes we're about to load already carry whatever rotation was pending,
   // so keeping the view angles would turn every page a second time.
@@ -4360,7 +4376,7 @@ async function applyOrganize() {
     const plan = pagePlan.map((p) => ({ srcIndex: p.srcIndex, rotate: p.rotate }));
     const out = await applyPagePlan({ srcBytes: baked, plan });
     const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
-    if (ok) { await reloadEditedBytes(out); statusEl.textContent = "Saved."; }
+    if (ok) { await reloadEditedBytes(out, plan); statusEl.textContent = "Saved."; }
     else statusEl.textContent = "";
   } catch (e) {
     console.error("[pdf-viewer] organize failed:", e);
@@ -4999,12 +5015,16 @@ autoScroll.init({ pagesEl, status: flashStatus });
 // Rotate pages in `bytes` by the per-page angles in `deltas`
 // (Map<pageNumber, degrees>). Same operation Organize pages applies, so a
 // rotation saved from either place lands in the file identically.
-async function applyRotationToBytes(bytes, deltas) {
+function rotationPlan(deltas) {
   const plan = [];
   for (let i = 0; i < pdfDoc.numPages; i++) {
     plan.push({ srcIndex: i, rotate: deltas.get(i + 1) || 0 });
   }
-  return applyPagePlan({ srcBytes: bytes, plan });
+  return plan;
+}
+
+async function applyRotationToBytes(bytes, deltas) {
+  return applyPagePlan({ srcBytes: bytes, plan: rotationPlan(deltas) });
 }
 
 // Re-draw every page at the current angles, then put the reader back on the
@@ -5037,7 +5057,7 @@ async function saveRotationToFile(deltas) {
     if (!ok) { statusEl.textContent = ""; return; }
     // Saved in place: reload from the result so the file and the view agree
     // (and the angles reset to zero). A downloaded copy leaves this tab alone.
-    if (editingAllowed) await reloadEditedBytes(out);
+    if (editingAllowed) await reloadEditedBytes(out, rotationPlan(deltas));
     statusEl.textContent = editingAllowed ? "Rotation saved." : "Saved a rotated copy.";
   } catch (e) {
     console.error("[pdf-viewer] rotation save failed:", e);

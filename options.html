@@ -271,8 +271,24 @@ https://example.gov/getfile?id=*</pre>
       0 = no exclusion. 8 (default) skips roughly the leftmost half-inch
       of a letter-size page. Maximum 30.
     </p>
+    <p class="lede" style="margin:10px 0 0;">
+      Recognized pages are saved in this browser, so a scan you've OCR'd opens
+      with its text already there instead of being recognized again. A saved
+      document is forgotten once it hasn't been opened for this many days.
+    </p>
+    <label style="display:flex;align-items:center;gap:10px;font-size:13px;margin-top:8px;">
+      Keep OCR results for
+      <input type="number" id="ocr-cache-days" min="0" max="365" step="1" value="30"
+             style="width:60px;padding:3px 6px;border:1px solid #ccc;border-radius:4px;font-size:13px;">
+      days
+    </label>
+    <p class="lede" style="font-size:12px;margin-top:8px;">
+      0 = don't keep OCR results (and forget any already saved). 30 by default.
+      Maximum 365.
+    </p>
     <div style="margin-top:8px;">
       <button id="ocr-save" type="button">Save</button>
+      <button id="ocr-forget" type="button">Forget saved OCR</button>
       <span class="status" id="ocr-status"></span>
     </div>
   </div>

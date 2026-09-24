@@ -70,6 +70,7 @@
         "viewer/federal-codes.js",
         "viewer/code-tables.js",
         "viewer/ocr.js",
+        "viewer/ocr-store.js",
         "viewer/rotation.js",
         "viewer/web-shim.js",
         "viewer/theme-boot.js",

@@ -11,6 +11,10 @@
 
 import Tesseract from "./vendor/tesseract/tesseract.esm.min.js";
 import { rotatedRunPlacement, normalizeAngle } from "./rotation.js";
+import {
+  documentKey, loadPage, savePages, hasDocument, sweep, carriedPages, keepDaysFrom,
+  DEFAULT_KEEP_DAYS,
+} from "./ocr-store.js";
 const { createWorker } = Tesseract;
 
 const V = (p) => chrome.runtime.getURL(`viewer/vendor/tesseract/${p}`);
@@ -30,6 +34,11 @@ const MIN_CHARS = 8;
 
 let workerPromise = null;          // lazy singleton Tesseract worker
 const cacheByPage = new Map();     // pageNumber -> { words, hadText:false }
+// The open document's content hash, under which recognized pages are saved
+// between visits (ocr-store.js), and how many days they're kept. A null key
+// saves nothing: the document isn't open yet, or keeping is off.
+let docKey = null;
+let keepDays = 0;
 
 export function pageNeedsOcr(textContent) {
   if (!textContent || !textContent.items) return true;
@@ -46,11 +55,64 @@ export function pageNeedsOcr(textContent) {
 // worker so a new PDF doesn't inherit stale boxes or leak a worker per load.
 export async function resetOcr() {
   cacheByPage.clear();
+  docKey = null;
   if (workerPromise) {
     const w = await workerPromise.catch(() => null);
     workerPromise = null;
     if (w) { try { await w.terminate(); } catch { /* already gone */ } }
   }
+}
+
+function getKeepDays() {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get({ ocrCacheDays: DEFAULT_KEEP_DAYS }, ({ ocrCacheDays }) => {
+      resolve(keepDaysFrom(ocrCacheDays));
+    });
+  });
+}
+
+// Tell OCR which document is open, by its bytes, before its pages render.
+// Sweeps out saved pages past the keep window, and returns true when this
+// document has recognized pages to show — saved from an earlier visit, or
+// carried over from the version of it just edited (see remapOcrPages) — so
+// the viewer can turn OCR on for it without the button being clicked again.
+export async function openOcrDocument(bytes) {
+  docKey = null;
+  let key = null;
+  try {
+    [key, keepDays] = await Promise.all([documentKey(bytes), getKeepDays()]);
+  } catch { return cacheByPage.size > 0; }
+  await sweep(keepDays);
+  if (!keepDays) return cacheByPage.size > 0;
+  docKey = key;
+  // An in-place edit reloads the document without resetOcr, so the pages
+  // already recognized are still in memory: they belong to the new file too.
+  await savePages(key, [...cacheByPage].map(([n, { words }]) => [n, words]));
+  return cacheByPage.size > 0 || await hasDocument(key);
+}
+
+// Before an edited file replaces the open one, carry recognized pages to where
+// the edit put them. `plan` is the page plan the edit applied
+// ([{ srcIndex, rotate }] per output page); a page the plan turns, or one new
+// to the file, is recognized again. Edits that keep every page where it was
+// (stamps, form fill, appended pages) don't need to call this.
+export function remapOcrPages(plan) {
+  const old = new Map(cacheByPage);
+  cacheByPage.clear();
+  for (const [page, from] of carriedPages(plan)) {
+    if (from != null && old.has(from)) cacheByPage.set(page, old.get(from));
+  }
+}
+
+// Save the recognized pages under a file just written from this one without
+// reloading it (Save with only highlights added), so reopening that file finds
+// them. The pages are unchanged; only the bytes around them differ.
+export async function rememberOcrFor(bytes) {
+  if (!keepDays || !cacheByPage.size) return;
+  try {
+    const key = await documentKey(bytes);
+    await savePages(key, [...cacheByPage].map(([n, { words }]) => [n, words]));
+  } catch { /* recognized again next time */ }
 }
 
 function getWorker() {
@@ -79,6 +141,18 @@ function getWorker() {
 // display scale. Each word: { text, x0, y0, x1, y1, eol, par }.
 async function ocrWords(page, pageNumber, setStatus) {
   if (cacheByPage.has(pageNumber)) return cacheByPage.get(pageNumber).words;
+
+  // Recognized on an earlier visit? The key is captured now: if another
+  // document opens while this page is being recognized, its words must not
+  // land in that document's cache.
+  const key = docKey;
+  if (key) {
+    const saved = await loadPage(key, pageNumber, keepDays);
+    if (saved) {
+      if (key === docKey) cacheByPage.set(pageNumber, { words: saved, hadText: false });
+      return saved;
+    }
+  }
 
   const viewport = page.getViewport({ scale: OCR_SCALE });
   const canvas = document.createElement("canvas");
@@ -113,8 +187,9 @@ async function ocrWords(page, pageNumber, setStatus) {
       parIndex++;
     }
   }
-  cacheByPage.set(pageNumber, { words, hadText: false });
   canvas.width = canvas.height = 0; // release the OCR bitmap
+  if (key === docKey) cacheByPage.set(pageNumber, { words, hadText: false });
+  if (key) await savePages(key, [[pageNumber, words]]);
   return words;
 }
 

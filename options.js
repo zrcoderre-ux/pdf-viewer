@@ -340,21 +340,47 @@ if (autoOcrEl) {
   });
 }
 
-// OCR left-margin cutoff
+// OCR left-margin cutoff, and how long recognized pages are kept
 const ocrLeftMarginInput = document.getElementById("ocr-left-margin");
+const ocrCacheDaysInput  = document.getElementById("ocr-cache-days");
 const ocrSaveBtn         = document.getElementById("ocr-save");
+const ocrForgetBtn       = document.getElementById("ocr-forget");
 const ocrStatus          = document.getElementById("ocr-status");
 
-chrome.storage.sync.get({ ocrLeftMarginPct: 8 }, ({ ocrLeftMarginPct }) => {
+// Saved OCR lives in the viewer's IndexedDB database (viewer/ocr-store.js,
+// OCR_DB_NAME), which this page shares as the same extension origin.
+const OCR_DB_NAME = "ocrCache";
+
+function flashOcrStatus(msg) {
+  ocrStatus.textContent = msg;
+  ocrStatus.className = "status";
+  setTimeout(() => { ocrStatus.textContent = ""; }, 2000);
+}
+
+function forgetSavedOcr(done) {
+  try {
+    const req = indexedDB.deleteDatabase(OCR_DB_NAME);
+    req.onsuccess = req.onerror = req.onblocked = () => done();
+  } catch { done(); }
+}
+
+chrome.storage.sync.get({ ocrLeftMarginPct: 8, ocrCacheDays: 30 }, ({ ocrLeftMarginPct, ocrCacheDays }) => {
   ocrLeftMarginInput.value = ocrLeftMarginPct;
+  ocrCacheDaysInput.value = ocrCacheDays;
 });
 
 ocrSaveBtn.addEventListener("click", () => {
   const v = Math.min(30, Math.max(0, parseInt(ocrLeftMarginInput.value, 10) || 0));
   ocrLeftMarginInput.value = v;
-  chrome.storage.sync.set({ ocrLeftMarginPct: v }, () => {
-    ocrStatus.textContent = "Saved.";
-    ocrStatus.className = "status";
-    setTimeout(() => { ocrStatus.textContent = ""; }, 2000);
+  const parsed = parseInt(ocrCacheDaysInput.value, 10);
+  const days = Math.min(365, Math.max(0, Number.isFinite(parsed) ? parsed : 30));
+  ocrCacheDaysInput.value = days;
+  chrome.storage.sync.set({ ocrLeftMarginPct: v, ocrCacheDays: days }, () => {
+    if (days === 0) forgetSavedOcr(() => flashOcrStatus("Saved."));
+    else flashOcrStatus("Saved.");
   });
+});
+
+ocrForgetBtn.addEventListener("click", () => {
+  forgetSavedOcr(() => flashOcrStatus("Saved OCR forgotten."));
 });
