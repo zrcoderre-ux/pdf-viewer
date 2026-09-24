@@ -548,6 +548,21 @@ and it is made off BOTH readings:
   a new key or a new folder drops it, a keep deliberately does not, since a keep
   only ever takes a name OUT of the clear. The **⚠** in Documents still reports
   what the file itself carries; that is the honest place for it.
+
+The two readings were also made of different TEXT, which is where most of the
+disagreement came from, and which left documents marked **⚠** that the walk
+found nothing in. The page blanks every pseudonym span and every spot keep
+before it looks for names; the sweep read the raw file. So a key whose real
+"Jones" is a word of another name's fake ("Mary Jones") found a leak in every
+"Mary Jones" on disk, and a name kept just where it stood went on being counted
+for as long as the file carried it. The sweep now reads each file through
+`textdoc.clearReading` — page by page, as `buildBody` gets it: the fakes
+`translateRuns` finds and the document's stored spot keeps blanked to spaces as
+`flatten` blanks them, the case keeps masked, cited decisions' parties spared,
+and every occurrence counted as the page counts them. The flagged values are
+counted over the same text. The open document's spot keeps are part of the
+sweep's stamp (`spotsSig`, by content, since the list is rebuilt on every
+edit), so keeping a name here re-reads the folder's answer about it.
 - A document whose own reading has not landed is not called empty at all
   (`readHere()`: `paintedSeq === docSeq`). The bar says it is being read and
   waits, rather than leaving a document nobody read.

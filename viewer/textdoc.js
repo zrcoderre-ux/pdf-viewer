@@ -27,7 +27,7 @@
 //   isExportName / isKeyName   which files in a case folder are documents.
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
-import { caseShape, applyCase } from "./pseudo-key.js";
+import { caseShape, applyCase, translateRuns, findRealSpans } from "./pseudo-key.js";
 
 // ---- the file as pages ---------------------------------------------------------
 
@@ -341,7 +341,7 @@ export function insideSpans(spans, start, end) {
 }
 
 /**
- * `text` with each range blanked to NULs — the same length out as in, so every
+ * `text` with each range blanked to NULs (or to `fill`) — the same length out as in, so every
  * offset a caller has read off the original still points at the same character.
  *
  * ONE PASS, not one per range. It used to rebuild the whole string for each
@@ -356,7 +356,7 @@ export function insideSpans(spans, start, end) {
  * idempotent and order cannot change the answer, so a caller handing them over
  * in any order — or running past the end of the text — gets the same string.
  */
-export function blankRanges(text, ranges) {
+export function blankRanges(text, ranges, fill = "\u0000") {
   if (!ranges || !ranges.length) return text;
   const src = String(text == null ? "" : text);
   const spans = [];
@@ -374,11 +374,70 @@ export function blankRanges(text, ranges) {
     if (b <= at) continue;          // inside one already blanked
     const from = a > at ? a : at;   // …or overlapping the end of it
     if (from > at) out.push(src.slice(at, from));
-    out.push("\u0000".repeat(b - from));
+    out.push(fill.repeat(b - from));
     at = b;
   }
   out.push(src.slice(at));
   return out.join("");
+}
+
+/**
+ * What a document's FILE is carrying in the clear, read THE WAY THE PAGE READS
+ * IT — so the ⚠ beside a document in the folder's list and the walk through
+ * the names, which reads the page, give the same answer about it.
+ *
+ * They used to read two different texts. The page is built a page at a time,
+ * each pseudonym the run wrote made a span of its own and each spot keep ("keep
+ * just this one") a span of its own, and the marks read it with both blanked:
+ * a pseudonym is the fake in the file, whatever real name is painted over it,
+ * and a spot keep is a real name left there on purpose. The folder sweep read
+ * the raw file, so a key whose real "Jones" is a word of the fake "Mary Jones"
+ * found a leak inside every "Mary Jones", and a name kept where it stood was
+ * counted as long as the file carried it. The document got its ⚠, and walking
+ * into it found nothing.
+ *
+ * `rev` is the key's fake → real matcher (what the page is built with), `reals`
+ * the key less its keeps, `flagRx` the flagged values' matcher, `spots` the
+ * document's own spot keeps ({ page, value, nth }, page by page of this file),
+ * `mask` the case-wide keeps (the same length out as in). Each page is read on
+ * its own, as the page is: its text as buildBody gets it, the pseudonyms and
+ * the spot keeps blanked to spaces as flatten blanks them, the names of cited
+ * decisions spared from the leaks.
+ * → { values: [the real value of every occurrence], flags: count }
+ */
+export function clearReading(text, { rev = null, reals = null, flagRx = null, spots = null, mask = null } = {}) {
+  const values = [];
+  let flags = 0;
+  if (!reals && !flagRx) return { values, flags };
+  const pages = parseExport(text).pages;
+  for (let i = 0; i < pages.length; i++) {
+    const raw = pages[i].lines.join("\n");
+    const blank = spotRanges(raw, spotsOnPage(spots, i));
+    if (rev) {
+      let at = 0;
+      for (const r of translateRuns(rev, raw)) {
+        const len = r.t === "swap" ? r.from.length : r.s.length;
+        if (r.t === "swap") blank.push([at, at + len]);
+        at += len;
+      }
+    }
+    const flat = blankRanges(raw, blank, " ");
+    if (reals) {
+      const cited = citedNameSpans(flat);
+      for (const h of findRealSpans(reals, mask ? mask(flat) : flat)) {
+        if (!insideSpans(cited, h.start, h.end)) values.push(h.real);
+      }
+    }
+    if (flagRx) {
+      flagRx.lastIndex = 0;
+      let m;
+      while ((m = flagRx.exec(flat))) {
+        flags++;
+        if (m.index === flagRx.lastIndex) flagRx.lastIndex++;
+      }
+    }
+  }
+  return { values, flags };
 }
 
 function escapeRe(s) {
