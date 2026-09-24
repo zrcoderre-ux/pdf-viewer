@@ -11,7 +11,7 @@ import {
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
-  addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem,
+  addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape,
@@ -311,7 +311,7 @@ check("keptControl", [keptControl(keeps, "PALERMO"), keptControl(keeps, "x")], [
 check("removeKeep", removeKeep(keeps, "palermo"), [{ control: "never", value: "Stockton Theatres" }]);
 const both = formatValuesFile(list, keeps);
 check("keeps written as control lines", both.endsWith("\nno: Palermo\nnever: Stockton Theatres\n"), true);
-check("both halves read back", parseReaderFile(both), { values: list, keeps });
+check("both halves read back", parseReaderFile(both), { values: list, keeps, phrases: [] });
 check("parseValuesFile ignores the keeps", parseValuesFile(both), list);
 // ── a keep that asks nothing of PDF-Linker ─────────────────────────────────
 //
@@ -370,6 +370,26 @@ check("flag: nothing selected", flagProblem("  ", false) !== "", true);
 check("flag: a pseudonym", flagProblem("Strangeways", true) !== "", true);
 check("flag: a passage", flagProblem("x".repeat(200), false) !== "", true);
 check("flag: a name", flagProblem("Rosa Delgado", false), "");
+
+// A phrase is the words TOGETHER: two of them at least, and it may take in a
+// pseudonym — the word faked on its own is usually why the question comes up.
+console.log("phrases");
+check("phrase: nothing selected", phraseProblem("  ") !== "", true);
+check("phrase: one word is not a phrase", phraseProblem("River") !== "", true);
+check("phrase: a passage", phraseProblem("word ".repeat(40)) !== "", true);
+check("phrase: several words", phraseProblem("Cross  River\nBank"), "");
+check("a phrase is written with its control word, a plain flag bare",
+  formatValuesFile(["Cross River Bank", "Rosa Delgado"], [{ control: "no", value: "Semole" }], ["cross river bank"]).split("\n").filter((l) => l && l[0] !== "#"),
+  ["phrase: Cross River Bank", "Rosa Delgado", "no: Semole"]);
+check("…and read back as a value to fake that goes whole",
+  parseReaderFile("# c\nphrase:  Cross River Bank \nRosa Delgado\nno: Semole\n"),
+  { values: ["Cross River Bank", "Rosa Delgado"], keeps: [{ control: "no", value: "Semole" }], phrases: ["Cross River Bank"] });
+check("the round trip holds", (() => {
+  const t = formatValuesFile(["Bank of America", "Helen Rasho"], [], ["Bank of America"]);
+  const r = parseReaderFile(t);
+  return formatValuesFile(r.values, r.keeps, r.phrases) === t;
+})(), true);
+check("isPhrase folds case and spacing", [isPhrase(["Bank of  America"], "bank of america"), isPhrase([], "Bank of America"), isPhrase(["Bank of America"], "")], [true, false, false]);
 
 // A flag is a job for PDF-Linker's next run, and the key coming back with the
 // name in it is the run's answer: the value is faked, and the flag has nothing

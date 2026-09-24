@@ -1370,7 +1370,21 @@ app, which routes it to the reader tab.
   the clear — and a flagged "David W. Slayton" is marked where it really
   stands and not where the key's "David" has already been swapped out
   underneath it. (Selecting a pseudonym and flagging it was already refused
-  for the same reason.) The opposite mistake, a value
+  for the same reason.) **Several words that go together are a phrase.**
+  Select them — "Cross River Bank", where the key fakes or marks "River" on
+  its own, or a phrase around a value already flagged — and the pop-up
+  offers **Phrase** beside Flag. It is PDF-Linker's own `phrase`: the words
+  faked **whole**, as one name, a keep on one of them notwithstanding (a
+  `never: River` would otherwise ride through inside the bank's fake). It is
+  read as the real names read, a pseudonym in it as the name it stands for,
+  joins the **Flagged** panel tagged *phrase*, and is written into `New Real
+  Values.txt` as `phrase: Cross River Bank`. Where the phrase stands in the
+  clear, a save **holds it whole** — it does not fake the one word the key
+  knows, which would leave "Cross Zed Bank" and nothing for Apply Fixes to
+  find — and the orange mark on the word inside gives way to the phrase's
+  red one. Where a word of it is already faked in the file, the export
+  carries that fake, so it takes **Re-run PDF-Linker** rather than Apply
+  Fixes, and the reader says so. The opposite mistake, a value
   that should never have been faked (a word of a cited decision's name,
   usually), is **right-clicked**: "Keep in this case" is PDF-Linker's `no`,
   "Never fake it anywhere" its `never`. The keep takes effect in the reader
