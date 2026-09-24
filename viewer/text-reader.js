@@ -4036,8 +4036,12 @@ let caseFakes = { key: null, docs: null, set: null };
 function sweepStale() {
   return !sweep.stamp || sweep.stamp.reals !== reals || sweep.stamp.keeps !== keeps
     || sweep.stamp.master !== masterKeeps || sweep.stamp.docs !== folderDocs
-    || sweep.stamp.flagged !== flagged;
+    || sweep.stamp.flagged !== flagged || sweep.stamp.spots !== spotsSig();
 }
+// The open document's spot keeps as the sweep read them. By what they SAY and
+// not by identity: the list is made again on every edit of a page, and a
+// sweep thrown away per keystroke is the folder read per keystroke.
+function spotsSig() { return spots.length ? JSON.stringify(spots) : ""; }
 function dropSweep() {
   sweep = { stamp: null, rows: [], at: 0, running: false };
   settled = new Set(); // the question has changed; so have the answers to it
@@ -4111,7 +4115,7 @@ async function sweepFolder() {
     clearTimeout(sweepTimer);
     if (quiet < SWEEP_QUIET) { sweepTimer = setTimeout(sweepFolder, SWEEP_QUIET - quiet); return; }
   }
-  sweep = { stamp: { reals, keeps, master: masterKeeps, docs: folderDocs, flagged }, rows: [], at: 0, running: true };
+  sweep = { stamp: { reals, keeps, master: masterKeeps, docs: folderDocs, flagged, spots: spotsSig() }, rows: [], at: 0, running: true };
   const mine = sweep.stamp;
   // …and the fakes, only where the folder has not already been read for them
   // under this key. A walk through the names drops the sweep at every decision;
@@ -4150,21 +4154,17 @@ async function sweepFolder() {
           `reading the rest of the folder (${sweep.at} of ${folderDocs.length}: ${d.name}${size ? ", " + Math.round(size / 1024) + " KB" : ""}) — ${what}`);
         step("opening the file");
         const text = await (await d.handle.getFile()).text();
-        step("finding the names of cited decisions", text.length);
-        const spans = TD.citedNameSpans(text);
-        step("masking the values kept as they read", text.length);
-        const kept = maskKept(text);
-        step("blanking the cited names", text.length);
-        const masked = TD.blankRanges(kept, spans);
-        step("looking for the key's real values", text.length);
-        const found = PK.findReals(reals, masked);
-        // …and the values flagged for the next run, counted the way the page
-        // counts them: over the file's own text, where a value that stands is
-        // really standing — a fake is a fake on disk, with no real name
-        // painted over it.
-        step("counting the values flagged for the next run", text.length);
-        const flags = flagRx ? countMatches(flagRx, text) : 0;
-        if (found.length || flags) sweep.rows.push({ doc: d, values: found.map((f) => f.real), flags });
+        // Read THE WAY THE PAGE READS IT (textdoc.clearReading): page by page,
+        // the pseudonyms the run wrote and the spots kept where they stand
+        // blanked, the keeps masked, the names of cited decisions spared. The
+        // ⚠ beside a document is this reading, and the walk into it is the
+        // page's; read differently, a document was marked that the walk found
+        // nothing in — a real name that is a word of some other name's fake
+        // ("Jones" in "Mary Jones"), or a name kept just there.
+        step("looking for the key's real values and the flagged ones", text.length);
+        const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + d.name, []));
+        const { values, flags } = TD.clearReading(text, { rev, reals, flagRx, spots: theirSpots, mask: maskKept });
+        if (values.length || flags) sweep.rows.push({ doc: d, values, flags });
         // …and, from the same reading, which PSEUDONYMS stand here. That is
         // the other half of the folder's answer: a name in the clear is a leak,
         // and a name the run faked is work only a run can undo. Over the raw

@@ -14,9 +14,9 @@ import {
   addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
-  ruleParts, ruleShape,
+  ruleParts, ruleShape, clearReading,
 } from "./viewer/textdoc.js";
-import { parseKey, compileForward } from "./viewer/pseudo-key.js";
+import { parseKey, compileForward, compile, compileReals, buildMatcher } from "./viewer/pseudo-key.js";
 
 let fails = 0;
 function check(label, got, want) {
@@ -466,6 +466,34 @@ check("the parts join back to the text", ruleParts("\u250c\u2500\u2500\u252c\u25
   check("a dressed line serializes as the file's own text, fakes underneath",
     serializeNodes(body), " NAME: Wren Ashby   \u2502\u2500\u2500\u2500\nplain");
   check("…and displays the real name", textOf(body), " NAME: Rosa Delgado   \u2502\u2500\u2500\u2500\nplain");
+}
+
+// ---- what a file carries in the clear, read as the page reads it ------------
+// The ⚠ beside a document in the folder list is this reading and the walk into
+// it reads the page: the two must agree, or a document is marked that the walk
+// finds nothing in.
+console.log("clear reading (the folder's ⚠ and the page agree)");
+{
+  const key = parseKey([{ rows: [["Real Value", "Replacement"], ["Quillmark", "Mary Jones"], ["Jones", "Pat Doe"], ["Hepworth", "Sam Roe"]] }], "k");
+  const opts = { rev: compile(key), reals: compileReals(key) };
+  const pg = (n, lines) => `====== Page ${n} ======\n` + lines.map((l, i) => String(i + 1).padStart(2) + "  " + l).join("\n") + "\n";
+  check("a real name that is a word of another name's fake is not a leak inside that fake",
+    clearReading(pg(1, ["Mary Jones signed the lease."]), opts).values, []);
+  check("…and the same name standing on its own is",
+    clearReading(pg(1, ["Mary Jones met Jones."]), opts).values, ["Jones"]);
+  check("every occurrence is counted, as the page counts them",
+    clearReading(pg(1, ["Quillmark and", "Quillmark again."]), opts).values, ["Quillmark", "Quillmark"]);
+  const two = pg(1, ["Hepworth was there."]) + pg(2, ["Hepworth was there.", "And Hepworth left."]);
+  check("a spot keep is not a leak: only its own occurrence, on its own page",
+    clearReading(two, { ...opts, spots: [makeSpot(1, "Hepworth", 0)] }).values, ["Hepworth", "Hepworth"]);
+  check("…and a keep for the case masks every one",
+    clearReading(two, { ...opts, mask: (t) => t.replace(/Hepworth/g, (m) => "\u0000".repeat(m.length)) }).values, []);
+  check("a cited decision's party is spared",
+    clearReading(pg(1, ["See Hepworth v. Smith (2001) 90 Cal.App.4th 12."]), opts).values, []);
+  const flagRx = buildMatcher(["Jones"]);
+  check("a flagged value inside a fake is not standing in the clear",
+    clearReading(pg(1, ["Mary Jones and Jones."]), { rev: opts.rev, flagRx }).flags, 1);
+  check("no key and no flags, nothing to read", clearReading(pg(1, ["Quillmark"]), {}), { values: [], flags: 0 });
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
