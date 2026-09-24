@@ -444,6 +444,7 @@ body.side-hidden #side { display: none; }
 .side-body li.current { background: var(--accent); color: #fff; }
 .side-body li .tag { font-size: 10px; padding: 1px 5px; border-radius: 8px; background: #b71c1c; color: #fff; flex: none; }
 .side-body li .tag.keep { background: #546e7a; }
+.side-body li .tag.phrase { background: #6a1b9a; }
 /* A keep the file already carries out: nothing goes to PDF-Linker, nothing is
    re-run, and the tag says so rather than sitting beside the ones that are
    still owed. */
@@ -725,7 +726,7 @@ body.marks-off [data-here]:hover { background: transparent; }
 #flag-pop {
   position: fixed; z-index: 30; display: flex; align-items: center; gap: 8px;
   background: var(--chrome); border: 1px solid var(--btn-border); border-radius: 6px; padding: 4px 6px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); font-size: 12px; max-width: 360px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3); font-size: 12px; max-width: 480px;
 }
 #flag-pop button:disabled { opacity: 0.5; cursor: default; }
 #flag-pop button.secondary { background: var(--btn); color: var(--text); border-color: var(--btn-border); }
@@ -738,7 +739,7 @@ body.marks-off [data-here]:hover { background: transparent; }
 #keep-menu button { text-align: left; background: var(--btn); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 5px 8px; cursor: pointer; font-size: 12px; }
 #keep-menu button:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
 #keep-menu button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
-#flag-pop-note { color: var(--text-muted); }
+#flag-pop-note { color: var(--text-muted); min-width: 12em; }
 #swap-pop {
   position: fixed; z-index: 35; display: flex; flex-direction: column; gap: 6px; width: 340px;
   background: var(--chrome); border: 1px solid var(--btn-border); border-radius: 6px; padding: 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-size: 12px;

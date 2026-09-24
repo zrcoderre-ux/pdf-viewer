@@ -131,6 +131,7 @@ let fakesRx = null;          // …and one over the key's FAKES: which pseudonym
 let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let flagsFor = null;         // …the storage key that list was read from, while a folder is being adopted
+let phrases = [];            // …which of them are PHRASES: several words faked whole (`phrase:`)
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
 let spots = [];              // spot keeps for the open document: [{ page, value, nth }]
 let masterKeeps = [];        // standing keeps from PDF-Linker's master workbook (its KEEP sheet)
@@ -898,7 +899,27 @@ function keyLessKeeps(k) {
 // One matcher per set of keeps, not per call. Both lists are replaced rather
 // than edited in place whenever they change, and so is the key, so their
 // identity is the whole test.
-function keptMatcher() { return keptMarkMatcher(); }
+function keptMatcher() {
+  const held = heldPhrases();
+  if (!held.length) return keptMarkMatcher();
+  if (maskMemo.keeps !== keeps || maskMemo.master !== masterKeeps || maskMemo.key !== key || maskMemo.phrases !== phrases || maskMemo.flagged !== flagged) {
+    const mine = allKeeps().filter((k) => keyBinds(k.value)).map((k) => k.value);
+    maskMemo = { keeps, master: masterKeeps, key, phrases, flagged, rx: PK.buildMatcher(mine.concat(held)) };
+  }
+  return maskMemo.rx;
+}
+// …and a flagged PHRASE the key binds only part of. The words go to PDF-Linker
+// to be faked WHOLE, so a save must not fake the one word it knows on its own
+// first: the file would carry "Cross Zed Bank", and the pass that fakes the
+// phrase would find nothing left to fake. So the phrase is held in the clear
+// the way a keep is — not faked by the save, not counted as a leak, not
+// refused by the save's last check — and wears the red mark of any flag, until
+// the key comes back with the whole phrase in it (dropFlagsNowFaked).
+let maskMemo = { keeps: null, master: null, key: null, phrases: null, flagged: null, rx: null };
+function heldPhrases() {
+  if (!phrases.length || !key) return [];
+  return phrases.filter((v) => TD.isPhrase(flagged, v) && keyBinds(v) && !TD.fakeFor(fwd, v));
+}
 // Does a kept value carry anything the key binds? `reals` cannot answer it —
 // the kept values are taken out of the key's forward side, which is the whole
 // point of a keep — so the question goes to the key's own warning rows, every
@@ -1003,6 +1024,7 @@ function dropFlagsNowFaked() {
   const { kept, dropped } = TD.dropFlagsInKey(flagged, fwd);
   if (!dropped.length) return;
   flagged = kept;
+  phrases = phrases.filter((v) => TD.isPhrase(kept, v));
   persistValues();
   renderFlags();
   paintHighlights(); // the red marks go with the flags
@@ -1296,6 +1318,7 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   flagged = stored.values;
   flagsFor = valuesStoreKey();
   keeps = stored.keeps;
+  phrases = stored.phrases;
   if (found.valuesHandle) {
     try {
       const onDisk = TD.parseReaderFile(await (await found.valuesHandle.getFile()).text());
@@ -1305,6 +1328,7 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
       // own list moving — the list itself is pruned where it is compiled,
       // which says so once.
       for (const v of onDisk.values) if (!TD.fakeFor(fwd, v)) flagged = TD.addValue(flagged, v);
+      for (const v of onDisk.phrases) if (TD.isPhrase(flagged, v)) phrases = TD.addValue(phrases, v);
       for (const k of onDisk.keeps) if (!TD.keptControl(keeps, k.value)) keeps = TD.addKeep(keeps, k.control, k.value);
     } catch { /* unreadable: the in-memory list stands */ }
   }
@@ -4933,6 +4957,15 @@ function showFlagPop() {
     flagPopNote.textContent = "\u201c" + leak.real + "\u201d is in the key and stands unfaked. Leave it so?";
     $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu({ real: leak.real, fake: leak.fake, leak: true, range: leak.range }, e.clientX, e.clientY); };
   }
+  // Several words, one of which the key already fakes or flags on its own, or
+  // one already flagged: the question may be whether they go TOGETHER.
+  const phrase = hereIn ? null : phraseIn(s, leak);
+  $("flag-pop-phrase").hidden = !phrase;
+  if (phrase) {
+    $("flag-pop-phrase").title = TD.isPhrase(phrases, phrase)
+      ? `\u201c${phrase}\u201d is already flagged as one phrase`
+      : `\u201c${phrase}\u201d is one name: fake the words whole, together (PDF-Linker's phrase)`;
+  }
   const rects = s.range.getClientRects();
   const r = rects.length ? rects[rects.length - 1] : s.range.getBoundingClientRect();
   flagPop.hidden = false;
@@ -4942,6 +4975,8 @@ function showFlagPop() {
 }
 flagPopBtn.addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
 $("flag-pop-keep").addEventListener("mousedown", (e) => e.preventDefault());
+$("flag-pop-phrase").addEventListener("mousedown", (e) => e.preventDefault());
+$("flag-pop-phrase").addEventListener("click", phraseSelection);
 flagPopBtn.addEventListener("click", flagSelection);
 $("flag-btn").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-btn").addEventListener("click", flagSelection);
@@ -4961,6 +4996,70 @@ function flagSelection() {
   toast(flagged.length > before ? `Flagged "${v}" — ${flagged.length} value${flagged.length === 1 ? "" : "s"} to hand to PDF-Linker` : `"${v}" is already flagged`);
 }
 
+/**
+ * A selection as the real names read: each pseudonym as the name it stands
+ * for (whole, where the selection starts or ends inside one), the gutter
+ * numbers out, and a line break a space — a phrase wrapped at the margin is
+ * still one phrase.
+ */
+function realTextOf(range) {
+  const frag = range.cloneContents();
+  for (const g of frag.querySelectorAll(".gutter")) g.remove();
+  for (const pn of frag.querySelectorAll(".pn")) pn.textContent = pn.dataset.real || pn.textContent;
+  const lines = frag.querySelectorAll(".line");
+  return TD.normalizeValue(lines.length ? [...lines].map((l) => l.textContent).join(" ") : frag.textContent);
+}
+/** Whether `inner` stands in `outer` as whole words. */
+function holdsWords(outer, inner) {
+  const a = TD.foldValue(outer), b = TD.foldValue(inner);
+  if (!b || a === b) return false;
+  const esc = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp("(?<![\\p{L}\\p{N}])" + esc + "(?![\\p{L}\\p{N}])", "u").test(a);
+}
+/**
+ * The phrase a selection could be marked as, or null. Several words, and a
+ * reason to ask: a word of them the key already fakes (a pseudonym), stands
+ * unfaked and marked (a leak), or a value already flagged on its own.
+ */
+function phraseIn(s, leak) {
+  if (!/\S\s+\S/.test(s.text) || s.text.length > 4 * TD.VALUE_MAX) return null;
+  const v = realTextOf(s.range);
+  if (TD.phraseProblem(v)) return null;
+  // The key fakes these words whole already: there is nothing to put together.
+  if (TD.fakeFor(fwd, v)) return null;
+  const touches = s.pn || leak || leakIn(s.range) || flagged.some((f) => holdsWords(v, f));
+  return touches || TD.isPhrase(phrases, v) ? v : null;
+}
+/**
+ * Mark the selection as one phrase: flagged as a value like any other, and
+ * written as `phrase: VALUE`, which PDF-Linker reads as the worksheet's own
+ * `phrase` — the words faked whole, as one name, a word of them it fakes or
+ * keeps on its own notwithstanding.
+ */
+function phraseSelection() {
+  const s = currentSelection();
+  const v = s ? realTextOf(s.range) : "";
+  const problem = TD.phraseProblem(v);
+  if (problem) { toast(problem, { error: true }); return; }
+  if (TD.isPhrase(phrases, v) && TD.isPhrase(flagged, v)) { flagPop.hidden = true; toast(`"${v}" is already flagged as one phrase`); return; }
+  // A word of it already faked in the file: the export carries that word's
+  // fake, so the text-only pass has no real phrase left to find there.
+  const faked = !!s.pn;
+  flagged = TD.addValue(flagged, v);
+  phrases = TD.addValue(phrases, v);
+  persistValues();
+  renderFlags();
+  paintHighlights();
+  sweepFolder(); // a phrase held whole changes what the rest of the folder is carrying
+  flagPop.hidden = true;
+  noteInFlagged();
+  const alone = flagged.filter((f) => holdsWords(v, f));
+  toast(`Flagged "${v}" as one phrase — PDF-Linker fakes the words whole, together.`
+    + (faked ? " A word of it is already faked in the file, so it takes Re-run PDF-Linker; Apply Fixes cannot find the phrase in the export."
+      : heldPhrases().includes(v) ? " Until then a save leaves it standing whole." : "")
+    + (alone.length ? ` ${alone.map((f) => `"${f}"`).join(", ")} ${alone.length === 1 ? "is" : "are"} still flagged on ${alone.length === 1 ? "its" : "their"} own — withdraw ${alone.length === 1 ? "it" : "them"} in the Flagged list if ${alone.length === 1 ? "it" : "they"} only ever stood here.` : ""));
+}
+
 function valuesStoreKey() { return VALUES_PREFIX + (folderName || fileName || "loose"); }
 function valuesSavedKey() { return VALUES_SAVED_PREFIX + (folderName || fileName || "loose"); }
 /**
@@ -4975,7 +5074,7 @@ function valuesDirty() {
   // A local keep is not in the file and never will be, so a list that holds
   // nothing else is a list the case folder is owed nothing from.
   if (!flagged.length && !TD.owedKeeps(keeps).length) return false;
-  return TD.formatValuesFile(flagged, keeps) !== lsGet(valuesSavedKey(), "");
+  return TD.formatValuesFile(flagged, keeps, phrases) !== lsGet(valuesSavedKey(), "");
 }
 /** …and the same list, as it stands, marked as written. */
 function markValuesSaved(text) { lsSet(valuesSavedKey(), text); renderFlags(); }
@@ -4992,14 +5091,15 @@ function persistSpots() {
 }
 /** …and the same list read back, as pages of the reel a member starts at `from` of. */
 function spotsFrom(list, from) { return from ? list.map((x) => ({ ...x, page: x.page + from })) : list; }
-// Stored as { values, keeps }; an older build stored the values list bare.
+// Stored as { values, keeps, phrases }; an older build stored the values list
+// bare, and one before phrases stored no `phrases`.
 function readStoredValues(k) {
   const v = lsGet(k, null);
-  if (Array.isArray(v)) return { values: v, keeps: [] };
-  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [] };
+  if (Array.isArray(v)) return { values: v, keeps: [], phrases: [] };
+  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [], phrases: (v && v.phrases) || [] };
 }
-function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; compileKey(); renderFlags(); }
-function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps }); }
+function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; phrases = st.phrases; compileKey(); renderFlags(); }
+function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps, phrases }); }
 
 function renderFlags() {
   updateDirty(); // a flag, a keep or one of them written is a save's business
@@ -5036,13 +5136,20 @@ function renderFlags() {
   for (const v of flagged) {
     const li = document.createElement("li");
     li.textContent = v;
+    if (TD.isPhrase(phrases, v)) {
+      const t = document.createElement("span");
+      t.className = "tag phrase";
+      t.textContent = "phrase";
+      t.title = "Faked whole, as one name (phrase) — a word of it the key fakes or keeps on its own notwithstanding";
+      li.appendChild(t);
+    }
     li.title = "Click to find it in the document";
     li.addEventListener("click", () => findInPages(v));
     const x = document.createElement("button");
     x.className = "x";
     x.textContent = "×";
     x.title = "Withdraw this value";
-    x.addEventListener("click", (e) => { e.stopPropagation(); flagged = TD.removeValue(flagged, v); persistValues(); renderFlags(); paintHighlights(); });
+    x.addEventListener("click", (e) => { e.stopPropagation(); flagged = TD.removeValue(flagged, v); phrases = TD.removeValue(phrases, v); persistValues(); renderFlags(); paintHighlights(); });
     li.appendChild(x);
     flagsList.appendChild(li);
   }
@@ -5185,7 +5292,7 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
     if (!quiet) toast("Nothing flagged yet — select an unfaked name and press Flag, or right-click a pseudonym to keep it.", { error: true });
     return false;
   }
-  const text = TD.formatValuesFile(flagged, keeps);
+  const text = TD.formatValuesFile(flagged, keeps, phrases);
   if (dirHandle) {
     try {
       if (dirHandle.requestPermission) {
@@ -5210,7 +5317,7 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
 }
 $("flags-save").addEventListener("click", () => saveValuesFile());
 $("flags-copy").addEventListener("click", async () => {
-  try { await navigator.clipboard.writeText(flagged.concat(keeps.map((k) => k.control + ": " + k.value)).join("\n") + "\n"); toast("Copied " + (flagged.length + keeps.length) + " line" + (flagged.length + keeps.length === 1 ? "" : "s")); }
+  try { await navigator.clipboard.writeText(flagged.map((v) => (TD.isPhrase(phrases, v) ? "phrase: " + v : v)).concat(keeps.map((k) => k.control + ": " + k.value)).join("\n") + "\n"); toast("Copied " + (flagged.length + keeps.length) + " line" + (flagged.length + keeps.length === 1 ? "" : "s")); }
   catch { toast("Copy failed", { error: true }); }
 });
 

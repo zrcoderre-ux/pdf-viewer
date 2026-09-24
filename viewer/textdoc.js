@@ -514,12 +514,18 @@ const VALUES_HEAD = [
   "# Apply Fixes) and pseudonymizes each value as if it had been given",
   "# with --term. A line 'no: VALUE' is the opposite — a value the run faked",
   "# that should be left as it is in this case (a cited decision's name); a",
-  "# line 'never: VALUE' keeps it in every case. Lines beginning with # are",
+  "# line 'never: VALUE' keeps it in every case. A line 'phrase: VALUE' is a",
+  "# value of several words faked WHOLE, as one name, a word of it the key",
+  "# fakes or keeps on its own notwithstanding. Lines beginning with # are",
   "# ignored. Delete a line to withdraw it.",
 ];
 
 // A keep line: `no: VALUE` (this case) or `never: VALUE` (every case).
 export const KEEP_RE = /^(no|never)\s*:\s*(.+?)\s*$/i;
+// A phrase line: `phrase: VALUE` — the worksheet's own `phrase`, a value of
+// several words faked whole. It is a value to fake like any other line, so it
+// is on the flagged list; the prefix is what says the words go together.
+export const PHRASE_RE = /^phrase\s*:\s*(.+?)\s*$/i;
 export const KEEP_CONTROLS = ["no", "never"];
 
 /**
@@ -683,8 +689,9 @@ export function dropFlagsInKey(list, compiledForward) {
   return { kept: dropped.length ? kept : (list || []).slice(), dropped };
 }
 
-export function formatValuesFile(values, keeps) {
-  const body = (values || []).map(normalizeValue).filter(Boolean);
+export function formatValuesFile(values, keeps, phrases) {
+  const body = (values || []).map(normalizeValue).filter(Boolean)
+    .map((v) => (isPhrase(phrases, v) ? `phrase: ${v}` : v));
   // A local keep is left out on purpose: the file it would go into is a list of
   // work for the next run, and that keep is work the run has already done
   // (keepNeedsRun). Writing it would hand PDF-Linker a value to leave exactly
@@ -698,22 +705,34 @@ export function parseValuesFile(text) {
   return parseReaderFile(text).values;
 }
 
-/** Both halves of the file: { values, keeps }. */
+/**
+ * The file's lines: { values, keeps, phrases }. A phrase line is a value to
+ * fake, so it is in `values` too; `phrases` says which of them go whole.
+ */
 export function parseReaderFile(text) {
   const values = [];
   const keeps = [];
+  const phrases = [];
   const seen = new Set();
   for (const raw of String(text == null ? "" : text).split(/\r?\n/)) {
     const line = raw.replace(/^\ufeff/, "").trim();
     if (!line || line[0] === "#") continue;
     const m = line.match(KEEP_RE);
-    const v = normalizeValue(m ? m[2] : line);
+    const p = m ? null : line.match(PHRASE_RE);
+    const v = normalizeValue(m ? m[2] : p ? p[1] : line);
     if (!v || seen.has(foldKey(v))) continue;
     seen.add(foldKey(v));
     if (m) keeps.push(makeKeep(m[1], v));
     else values.push(v);
+    if (p) phrases.push(v);
   }
-  return { values, keeps };
+  return { values, keeps, phrases };
+}
+
+/** Whether a flagged value is one to fake whole (`phrase:`). */
+export function isPhrase(phrases, value) {
+  const k = foldKey(value);
+  return !!k && (phrases || []).some((x) => foldKey(x) === k);
 }
 
 /**
@@ -727,6 +746,21 @@ export function flagProblem(selectionText, touchesPseudonym) {
   if (!v) return "Select the unfaked name first.";
   if (touchesPseudonym) return "That is already a pseudonym — its real name is shown over the fake.";
   if (v.length > VALUE_MAX) return `That is ${v.length} characters; a real value is a name, a number or an address, not a passage.`;
+  return "";
+}
+
+/**
+ * Whether a selection may be marked a phrase, and why not. A phrase is the
+ * words TOGETHER, so it takes two of them at least — PDF-Linker reads
+ * `phrase` on a single word as an ordinary yes. Unlike a flag it may take in a
+ * pseudonym: the word the key already fakes on its own is usually the reason
+ * to say the words go together. `text` is the selection as the real names read.
+ */
+export function phraseProblem(text) {
+  const v = normalizeValue(text);
+  if (!v) return "Select the words of the phrase first.";
+  if (!/\S\s+\S/.test(v)) return "A phrase is two words or more.";
+  if (v.length > VALUE_MAX) return `That is ${v.length} characters; a phrase is a name, not a passage.`;
   return "";
 }
 
