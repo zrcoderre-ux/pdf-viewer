@@ -75,7 +75,11 @@ In addition to citation linking, the viewer supports:
   reads without touching the wheel. See below.
 - **OCR** scanned PDFs on demand with the toolbar **⛶ OCR** button — text
   becomes selectable and citations get linked. Enable "Automatically OCR
-  scanned documents" in Options to run it without the button.
+  scanned documents" in Options to run it without the button. Recognized
+  pages are saved in the browser, so reopening the same scan (same file, any
+  URL or name) brings its text straight back without recognizing it again;
+  a scan not opened for 30 days is forgotten (Options → "Keep OCR results
+  for", 0 = don't keep; "Forget saved OCR" clears them now).
 - **Rotate pages** — the **⟳ Rotate pages** tool (or the **R** key) turns a
   sideways scan or an upside-down page the right way up, on any document. The
   rotation is on screen straight away; writing it into the file is a separate
@@ -1975,6 +1979,7 @@ viewer/viewer.css                    Page + textLayer + linkLayer styles
 viewer/viewer.js                     PDF.js loader, two-pass renderer
 viewer/autoscroll.js                 Auto-scroll engine + control bar
 viewer/rotation.js                   Page rotation: angles, bar, geometry
+viewer/ocr-store.js                  Saved OCR: recognized pages kept by file hash for N days (pure parts; test-ocr-store.mjs)
 viewer/redact.js                     Redaction: boxes in PDF points, a store per document, the key sweep's decisions, the copy's name (pure parts; test-redact.mjs)
 viewer/pdf-edit.js                   PDF writing (pdf-lib): highlights, page plans, stamps, the flattened redacted copy
 viewer/key-library.js                The pseudonym keys this browser has been shown — one library, reader and viewer
