@@ -726,16 +726,29 @@ body.thumbs-open #thumb-resize { display: block; }
      content left when the thumbnail panel is open. */
   padding: var(--toolbar-height, 48px) 24px 24px calc(var(--tools-rail-cur) + 24px);
   transition: padding-left 0.12s ease, padding-right 0.15s ease;
+  /* As wide as the page column plus both reserves, so a page wider than the
+     room between the panels can be scrolled clear of the panel on the right
+     as well as the rail on the left. */
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
 }
 body.thumbs-open #viewer-container {
   padding-right: calc(var(--thumb-panel-width) + 24px);
 }
 
+/* The column is as wide as its widest page and never narrower than the room
+   between the panels, so a page zoomed past that room overflows into the
+   window's sideways scroll — every edge of it reachable — instead of being
+   centred out past both edges, the left one under the tools rail. Which part
+   of it is in view is held by holdSideways() in viewer.js. */
 #pages {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 16px;
+  width: max-content;
+  min-width: 100%;
 }
 
 .page-wrapper {

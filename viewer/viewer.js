@@ -5000,8 +5000,83 @@ if (thumbResizeEl) {
 // Hands-free reading: the document creeps upward at your reading pace so long
 // PDFs don't need constant wheeling. Toolbar button, the floating speed bar,
 // and the A / Space / [ / ] / Esc shortcuts all live in autoscroll.js; the
-// render pipeline feeds it page text and tells it when layout changed.
+// render pipeline tells it when layout changed.
 autoScroll.init({ pagesEl, status: flashStatus });
+
+// ── Sideways: the view holds its centre between the panels ──────────────────
+// A page zoomed wider than the room between the tools rail and the Pages /
+// Bookmarks panel is scrolled to sideways, with the window as the scroller.
+// Opening or closing either panel, zooming, or resizing the window changes
+// that room, and a scrollX kept in pixels no longer points at the same part
+// of the page — so the page slid sideways under the reader.
+//
+// So the view remembers WHICH PART OF THE PAGE COLUMN sits in the middle of
+// the room between the panels, as a fraction of the column's width (centred
+// until the reader scrolls sideways), and puts it back there whenever a width
+// changes. Only a sideways scroll made while the widths stood still is the
+// reader's, and moves that remembered middle.
+const viewerContainerEl = document.getElementById("viewer-container");
+const sideways = { mid: 0.5, sig: "", x: 0, edge: null };
+// The room between the panels, in viewport x. The container's padding
+// reserves the rail and the panel (and follows their transitions); both are
+// fixed to the window, so the room runs from the rail's reserve to the
+// window's right edge less the panel's, however far the page is scrolled.
+function sidewaysRoom() {
+  const r = viewerContainerEl.getBoundingClientRect();
+  const cs = getComputedStyle(viewerContainerEl);
+  const left = r.left + scrollX + parseFloat(cs.paddingLeft);
+  const right = document.documentElement.clientWidth - parseFloat(cs.paddingRight);
+  return { left, right, mid: (left + right) / 2, width: right - left };
+}
+function sidewaysSig(room, w) {
+  return `${Math.round(room.left)}|${Math.round(room.width)}|${Math.round(w)}`;
+}
+/** Put the remembered middle back in the middle of the room, at today's widths. */
+function holdSideways() {
+  const room = sidewaysRoom();
+  const pr = pagesEl.getBoundingClientRect();
+  sideways.sig = sidewaysSig(room, pr.width);
+  if (pr.width > room.width + 1) {
+    const s = document.scrollingElement || document.documentElement;
+    const max = Math.max(0, s.scrollWidth - s.clientWidth);
+    // Scrolled all the way to one edge, the reader is reading that edge: it
+    // stays against the rail (or the panel) rather than being slid under it.
+    const want = sideways.edge === "start" ? 0
+      : sideways.edge === "end" ? max
+      : Math.max(0, Math.min(max, Math.round(scrollX + pr.left + sideways.mid * pr.width - room.mid)));
+    if (Math.abs(scrollX - want) > 1) window.scrollTo({ left: want, top: scrollY, behavior: "instant" });
+  }
+  // Where the view now stands. The browser clamps scrollX when the widths
+  // shrink and reports it a frame later; that report lands here, and is not
+  // the reader scrolling.
+  sideways.x = scrollX;
+}
+/** A scroll: where the widths have not moved, a sideways one is the reader's. */
+function noteSideways() {
+  const room = sidewaysRoom();
+  const pr = pagesEl.getBoundingClientRect();
+  if (sidewaysSig(room, pr.width) !== sideways.sig) { holdSideways(); return; }
+  if (Math.abs(scrollX - sideways.x) <= 1) return; // ours, or not sideways at all
+  sideways.x = scrollX;
+  if (pr.width > room.width + 1) {
+    sideways.mid = (room.mid - pr.left) / pr.width;
+    const s = document.scrollingElement || document.documentElement;
+    const max = Math.max(0, s.scrollWidth - s.clientWidth);
+    sideways.edge = scrollX <= 1 ? "start" : scrollX >= max - 1 ? "end" : null;
+  }
+}
+document.addEventListener("scroll", noteSideways, { passive: true });
+if (typeof ResizeObserver !== "undefined") {
+  // The column's own width (zoom, a render landing) and the room's (a panel
+  // opening, closing or being dragged wider, the rail collapsing, the window).
+  // The container is watched by both boxes: while the page fits, a panel
+  // changes its content box; once the page overflows, the container is as wide
+  // as the page plus both reserves, and a panel changes only its border box.
+  const sidewaysWatch = new ResizeObserver(() => holdSideways());
+  sidewaysWatch.observe(pagesEl);
+  sidewaysWatch.observe(viewerContainerEl);
+  new ResizeObserver(() => holdSideways()).observe(viewerContainerEl, { box: "border-box" });
+}
 
 // ── Page rotation ───────────────────────────────────────────────────────────
 // Sideways scans and landscape exhibits. The angles live in rotation.js (with
