@@ -5258,8 +5258,7 @@ function goToSpot(sp) {
   const sel = document.getSelection();
   sel.removeAllRanges();
   sel.addRange(r);
-  const rect = span.getBoundingClientRect();
-  stageEl.scrollBy({ top: rect.top - stageEl.getBoundingClientRect().top - stageEl.clientHeight / 3, behavior: "smooth" });
+  scrollRangeTo(r);
 }
 
 function findInPages(v) {
@@ -5274,8 +5273,7 @@ function findInPages(v) {
     const sel = document.getSelection();
     sel.removeAllRanges();
     sel.addRange(r);
-    const rect = r.getBoundingClientRect();
-    stageEl.scrollBy({ top: rect.top - stageEl.getBoundingClientRect().top - stageEl.clientHeight / 3, behavior: "smooth" });
+    scrollRangeTo(r);
     return;
   }
   toast(`"${v}" is not in this document`);
@@ -5768,19 +5766,81 @@ async function locateLeak(row) {
   scrollRangeTo(best.range);
   if (bestScore < 2 && wheres.length) toast(`Found "${row.value}" on ${TD.pageLabel(doc.pages[Number(sec.dataset.index)]) || "the page"}, not at ${row.where}.`);
 }
-/** A range brought onto the screen, a third of the way down the stage. */
+/**
+ * A range brought onto the screen, a third of the way down the stage — and
+ * KEPT there until it has landed.
+ *
+ * Where the range stands is not known when the scroll sets off. The pages it
+ * passes and the pages it arrives at are fitted (shapePages), laid on the
+ * PDF's grid (applyMatchedLayout) and built back from the reel only as the
+ * reading comes near them, and each of those moves everything below it. A
+ * scroll aimed once at where the range stood when it was asked for arrives
+ * where the range USED to be: past it, as a rule, since a page fitted on the
+ * way is a page shorter than the height it stood at. That was the leak walk
+ * overshooting, and Find having to be pressed once or twice more to land.
+ *
+ * So the aim is taken again every frame: the scroll is re-aimed whenever the
+ * range has moved, and it is over once the range has stood at the mark for a
+ * while (the grid arrives from the PDF a beat after the scroll does), or when
+ * the reader takes the scroll over themselves.
+ */
+let landing = null;
 function scrollRangeTo(range) {
-  let rect = range.getBoundingClientRect();
-  if (!rect.height) {
+  if (landing) landing.stop();
+  const node = range.startContainer;
+  const el = node && (node.nodeType === 1 ? node : node.parentElement);
+  const sec = el && el.closest(".tpage");
+  /** Where the stage has to stand for the range to sit at the mark, clamped to what it can scroll to. */
+  const dest = () => {
+    let rect = range.getBoundingClientRect();
     // The page is swapped for its PDF page: the words are in the DOM and not
     // on the screen, so the sheet itself is what there is to scroll to.
-    const node = range.startContainer;
-    const el = node && (node.nodeType === 1 ? node : node.parentElement);
-    const sec = el && el.closest(".tpage");
-    if (sec) rect = sec.getBoundingClientRect();
-  }
-  const st = stageEl.getBoundingClientRect();
-  stageEl.scrollTo({ top: stageEl.scrollTop + rect.top - st.top - Math.max(40, stageEl.clientHeight / 3), behavior: "smooth" });
+    if (!rect.height && sec) rect = sec.getBoundingClientRect();
+    const st = stageEl.getBoundingClientRect();
+    const top = stageEl.scrollTop + rect.top - st.top - Math.max(40, stageEl.clientHeight / 3);
+    return Math.round(Math.max(0, Math.min(top, stageEl.scrollHeight - stageEl.clientHeight)));
+  };
+  let aim = dest();
+  stageEl.scrollTo({ top: aim, behavior: "smooth" });
+  const started = performance.now();
+  let steadySince = 0, frame = 0, lastTop = -1, still = 0;
+  const me = {};
+  const quit = (e) => {
+    // A modifier on its own is the start of a shortcut, not a scroll.
+    if (e.type === "keydown" && /^(Alt|Control|Shift|Meta)$/.test(e.key)) return;
+    me.stop();
+  };
+  const USER = ["wheel", "touchstart", "pointerdown", "keydown"];
+  me.stop = () => {
+    cancelAnimationFrame(frame);
+    for (const t of USER) window.removeEventListener(t, quit, true);
+    if (landing === me) landing = null;
+  };
+  for (const t of USER) window.addEventListener(t, quit, { capture: true, passive: true });
+  const tick = (now) => {
+    if (!range.startContainer.isConnected || !doc) { me.stop(); return; }
+    const want = dest();
+    if (Math.abs(want - aim) > 2) {
+      // The range moved under the scroll: aim again, from wherever it has got to.
+      aim = want;
+      stageEl.scrollTo({ top: aim, behavior: "smooth" });
+      steadySince = 0;
+    } else if (Math.abs(stageEl.scrollTop - aim) <= 2) {
+      if (!steadySince) steadySince = now;
+      else if (now - steadySince > 500) { me.stop(); return; }
+    } else {
+      steadySince = 0;
+      // Short of the mark and not moving: the smooth scroll was cut off (a
+      // document hung above puts the scroll back by hand). Set it off again.
+      if (stageEl.scrollTop === lastTop && ++still > 6) { stageEl.scrollTo({ top: aim, behavior: "smooth" }); still = 0; }
+      else if (stageEl.scrollTop !== lastTop) still = 0;
+    }
+    lastTop = stageEl.scrollTop;
+    if (now - started > 5000) { me.stop(); return; }
+    frame = requestAnimationFrame(tick);
+  };
+  landing = me;
+  frame = requestAnimationFrame(tick);
 }
 function markLeakHere() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
