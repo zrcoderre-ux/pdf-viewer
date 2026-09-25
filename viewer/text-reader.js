@@ -1079,6 +1079,25 @@ function forwardText(text, held) {
   }).join("");
   return { text: out, swaps };
 }
+/**
+ * The names standing in the clear that nobody has decided on — the orange
+ * marks, read off `text` the way the save reads it: every real name the key
+ * binds, past the values kept for the case, the spot keeps (`held`) and the
+ * parties of cited decisions, less the ones the walk has settled with "fake
+ * it". [{ start, end, real, fake }]
+ *
+ * THE SAVE FAKES ONLY WHAT HAS BEEN DECIDED. It used to write every one of
+ * them as its pseudonym, looked at or not, which made a save before the review
+ * was over a review answered "fake" throughout — a party's surname in a
+ * citation the walk had not reached yet included. These are what it leaves
+ * exactly as they stand, and says so.
+ */
+function undecidedSpans(text, held) {
+  if (!reals) return [];
+  const cited = TD.citedNameSpans(text);
+  return PK.findRealSpans(reals, TD.blankRanges(maskKept(text), held || []))
+    .filter((h) => !isSettled(h.real) && !TD.insideSpans(cited, h.start, h.end));
+}
 function compileKey() {
   const out = during("compiling the key", () => compileKeyNow());
   dropSweep(); // the folder was read under the key that has just changed
@@ -1151,6 +1170,10 @@ function warmMatchers() {
   }, 0);
 }
 function setKey(parsed) {
+  // "Fake it" is a decision about a name in THIS case. A key refreshed by a
+  // re-run is the same case and the decisions stand; another case's key
+  // starts with none.
+  if (key !== parsed && (!key || !parsed || !PK.sameCaseKey(key, parsed))) settled = new Set();
   key = parsed || null;
   // Pages built ahead of time carry this key's translation: under another one
   // they are simply wrong, so they go, and the window fills again.
@@ -1657,6 +1680,7 @@ async function forgetFolder() {
   forgetPdfs();
   dropReady();
   dropSweep();
+  settled = new Set();
   clearTimeout(sweepTimer);
   caseFakes = { key: null, docs: null, set: null };
   findRows = [];
@@ -2232,32 +2256,39 @@ function pendingWrites() {
  * unlocking a protected document to make the button work is exactly what the
  * protection exists to prevent.
  *
- * Every hit of the last paint, settled or not: "fake it" answers the WALK,
- * not the save, and a name nobody has looked at is rewritten just the same.
- * Kept values, spot keeps and the parties of cited decisions are not in this
- * count, because the save does not touch them either.
+ * Every hit of the last paint, settled or not — what a closing tab would
+ * leave in the file. Kept values, spot keeps and the parties of cited
+ * decisions are not in this count, because nothing is owed on them.
  */
 function standingInTheClear() {
   return leakHits.filter((h) => h.range && h.range.startContainer && h.range.startContainer.isConnected).length;
 }
+/**
+ * …and the share of them the SAVE will write: the ones the walk has settled
+ * with "fake it". A name nobody has decided on is left as it stands
+ * (undecidedSpans), so it is no work for the save and does not light it.
+ */
+function settledInTheClear() {
+  return leakHits.filter((h) => isSettled(h.real) && h.range && h.range.startContainer && h.range.startContainer.isConnected).length;
+}
 function updateDirty() {
   const pending = pendingWrites();
-  const clear = doc ? standingInTheClear() : 0;
-  const names = `${clear} real name${clear === 1 ? "" : "s"}`;
+  const clear = doc ? settledInTheClear() : 0;
+  const names = `${clear} decided name${clear === 1 ? "" : "s"}`;
   const asPn = clear === 1 ? "its pseudonym" : "pseudonyms";
   // Enabled whenever a save would DO something: the text edited, the document
   // unlocked for editing, a decision waiting to be written into the folder, or
-  // a real name standing in the clear for the save to write as its pseudonym.
+  // a real name the walk has said to fake, for the save to write as its pseudonym.
   saveBtn.disabled = !doc || !(editing || dirty || pending.length || clear);
   saveBtn.title = dirty || editing
-    ? "Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)" +
+    ? "Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)" +
       (pending.length ? ` · ${pending.join(" and ")} too` : "")
     : pending.length
       ? `Write ${pending.join(" and ")} into the case folder (Ctrl+S)` +
         (clear ? ` — and ${names} standing in the clear, written as ${asPn}` : " — the text is unchanged and is not rewritten")
       : clear
         ? `Write ${names} standing in the clear as ${asPn} (Ctrl+S) — the save does it on its own; nothing has to be edited first`
-        : "Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)";
+        : "Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)";
   $("edit-toggle").disabled = !doc;
   rawBtn.disabled = !doc;
   $("st-dirty").textContent = dirty ? "● Unsaved edits"
@@ -2844,10 +2875,11 @@ document.addEventListener("keydown", (e) => {
 // folder, and the folder has not been told.
 //
 // THE LAST ONE IS THE FILE ITSELF. A name the run left in the clear is a real
-// value sitting in a scrubbed export, and the save is what writes the
-// pseudonym over it (standingInTheClear). Closing on one loses no decision —
-// the name is still there to be found again — but it leaves the file carrying
-// a real value while the operator believes the document has been read, and
+// value sitting in a scrubbed export, and until someone decides it — fake it,
+// or keep it — not even a save writes the pseudonym over it (undecidedSpans).
+// Closing on one that was decided and not yet saved loses the decision;
+// closing on one nobody decided loses nothing, but leaves the file carrying a
+// real value while the operator believes the document has been read, and
 // that is the mistake this whole tool exists to prevent. Better a prompt that
 // sometimes says what you already knew than a close that quietly leaves a
 // name in a filing.
@@ -2926,21 +2958,33 @@ async function saveDocument() {
   const scan = [];
   // The members the forward pass changed, on top of the ones already edited.
   const touched = new Set();
+  // The names left standing because nobody has decided on them (undecidedSpans):
+  // by member, for the sweep, and all together, for the warning.
+  const waitingIn = new Set();
+  const waiting = [];
   for (const body of pageBodies()) {
     const i = pageIndexOf(body);
     let { text, held } = TD.serializeHeld(body);
+    let left = undecidedSpans(text, held);
     if (fwd && fwd.rx) {
-      const fw = forwardText(text, held);
+      const fw = forwardText(text, held.concat(left.map((h) => [h.start, h.end])));
       if (fw.swaps) {
         snapshot(body, true);
         forwarded += fw.swaps;
         buildBody(body, fw.text, i);
         ({ text, held } = TD.serializeHeld(body)); // the rebuilt page, its spots found again
+        left = undecidedSpans(text, held); // …and the names left, where they now stand
         touched.add(reelMemberOf(i));
       }
     }
+    if (left.length) {
+      waitingIn.add(reelMemberOf(i));
+      for (const h of left) waiting.push(h.real);
+    }
     doc.pages[i].lines = text.split("\n");
-    scan[i] = TD.blankRanges(text, held).split("\n");
+    // The undecided names are in the file because the save left them there,
+    // as it leaves a kept one: the assertion reads past them too.
+    scan[i] = TD.blankRanges(text, held.concat(left.map((h) => [h.start, h.end]))).split("\n");
   }
   let write = reel.filter((m) => m.dirty || touched.has(m));
   // Nothing about the TEXT changed. If the save was asked for because a flag,
@@ -2948,13 +2992,14 @@ async function saveDocument() {
   // bytes and timestamp alone; only an otherwise-empty Ctrl+S falls through to
   // rewriting the document being read, which is what it has always meant.
   if (!write.length && !pendingWrites().length && reelCurrent()) write = [reelCurrent()];
-  // The standing assertion, per file. Nothing above should let a bound real
+  // The standing assertion, per file. Nothing above should let a DECIDED real
   // value through, and if something did the save must not — and it must not
   // write any of the others on the strength of this one being clean, so every
   // file about to be written is read first and one failure stops the lot. A
-  // value kept where it stands is the one thing that may pass: it is in the
-  // file because the operator put it there, so the assertion reads the export
-  // with those places blanked.
+  // value kept where it stands may pass: it is in the file because the
+  // operator put it there, so the assertion reads the export with those places
+  // blanked. So may a name nobody has decided on yet, which the save left
+  // where it found it and the warning below names.
   if (reals) {
     for (const m of write) {
       const held = TD.serializeExport(memberDoc(m, (p, i) => Object.assign({}, p, { lines: scan[i] || p.lines })));
@@ -2974,9 +3019,11 @@ async function saveDocument() {
     }
     m.dirty = false;
     wrote.push(m.name);
-    // The save wrote every name that was standing in the clear in this one, so
-    // the folder's answer for that document is that it has none.
-    sweep.rows = sweep.rows.filter((r) => r.doc.handle !== m.handle);
+    // The save wrote every DECIDED name standing in the clear in this one;
+    // where that was all of them, the folder's answer for the document is that
+    // it has none. Where undecided ones are left, its row stands — the walk
+    // reads it past the settled names, which are the ones just written.
+    if (!waitingIn.has(m)) sweep.rows = sweep.rows.filter((r) => r.doc.handle !== m.handle);
   }
   setDirty(false);
   // THE LIST GOES WITH IT. The flags and keeps are half of the same decision
@@ -3005,10 +3052,23 @@ async function saveDocument() {
   }
   if (forwarded) afterTextChange();
   updateDirty();
-  toast(!wrote.length
+  // THE WARNING. A save before the review is over is allowed — the edits and
+  // the decisions taken so far are worth having on disk — but it must not pass
+  // for a finished one: the names nobody has looked at are still real names in
+  // a scrubbed export, and the save says so, by name, in red.
+  const names = [...new Set(waiting.map((v) => String(v).trim()))];
+  const warn = waiting.length
+    ? ` · ⚠ ${waiting.length} real name${waiting.length === 1 ? "" : "s"} not yet reviewed ${waiting.length === 1 ? "was" : "were"} NOT faked — `
+      + names.slice(0, 4).join(", ") + (names.length > 4 ? "…" : "")
+      + (waiting.length === 1
+        ? ". It stands in the file as it did; step to it from the ⚠ count, decide it, and save again."
+        : ". They stand in the file as they did; step through them from the ⚠ count, decide each, and save again.")
+    : "";
+  toast((!wrote.length
     ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : "Nothing to save.")
     : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + wrote.join(", ") +
-      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList);
+      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList) + warn,
+    { error: !!warn, ms: warn ? 12000 : undefined });
   return true;
 }
 saveBtn.addEventListener("click", saveDocument);
@@ -3678,7 +3738,7 @@ function renderLeakStatus() {
   const more = rest.length ? ` (and ${restN} in ${rest.length} other document${rest.length === 1 ? "" : "s"} of the folder)` : "";
   const settledSay = done ? `, ${done} settled and waiting on the save` : "";
   leakEl.textContent = leaks
-    ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked${more}${settledSay} — written as pseudonyms on save; click to step through them, right-click one to keep it`
+    ? `⚠ ${leaks} real name${leaks === 1 ? "" : "s"} from the key standing unfaked${more}${settledSay} — the save leaves each as it stands until you decide it; click to step through them, right-click one to keep it`
     : rest.length ? `⚠ none left here, and ${restN} in ${rest.length} other document${rest.length === 1 ? "" : "s"} — click to go on`
     : done ? `⚠ ${done} settled and waiting on the save — Save writes them` : "";
   leakEl.classList.toggle("step", !!leaks || rest.length > 0);
@@ -4125,9 +4185,13 @@ function sweepStale() {
 // not by identity: the list is made again on every edit of a page, and a
 // sweep thrown away per keystroke is the folder read per keystroke.
 function spotsSig() { return spots.length ? JSON.stringify(spots) : ""; }
+// The "fake it" answers are NOT thrown away with it. They used to be — the
+// question had changed — but the save now fakes only what has been answered,
+// so a keep taken on one name would have quietly un-decided every name faked
+// before it. A name kept since is out of the key's reach and its answer moot;
+// the rest still stand. Another case's key clears them (setKey).
 function dropSweep() {
   sweep = { stamp: null, rows: [], at: 0, running: false };
-  settled = new Set(); // the question has changed; so have the answers to it
 }
 /**
  * Rows of the folder in the order a walk meets them: the document AFTER the
@@ -4325,7 +4389,7 @@ let decidedHere = 0;
 async function saveOnTheWayOut() {
   if (!doc) return true;
   if (!decidedHere) return true;
-  const owed = dirty || pendingWrites().length > 0 || standingInTheClear() > 0;
+  const owed = dirty || pendingWrites().length > 0 || settledInTheClear() > 0;
   if (!owed) return true;
   const ok = await saveDocument();
   if (!ok) {
@@ -4373,7 +4437,7 @@ function renderNamesBar() {
   $("nb-value").textContent = h.real;
   $("nb-value").title = "A real name from the key, standing in the clear";
   $("nb-where").textContent = leakWhere(h);
-  $("nb-answer").textContent = h.fake ? `the save writes \u201c${h.fake}\u201d` : "the save writes its pseudonym";
+  $("nb-answer").textContent = "undecided — the save leaves it as it stands; " + (h.fake ? `fake it writes \u201c${h.fake}\u201d` : "fake it writes its pseudonym");
   $("nb-fake").disabled = !h.fake;
   $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2 && !restOfFolder().length;
   $("nb-rest").textContent = folderRest();
@@ -4471,20 +4535,18 @@ $("nb-next").addEventListener("click", () => stepLeak(1));
 $("nb-find").addEventListener("click", () => { const h = liveLeaks()[Math.max(0, leakStep)]; if (h) scrollRangeTo(h.range); });
 $("nb-close").addEventListener("click", () => { if (pageSweep) finishPageSweep(); else showNamesBar(false); });
 /**
- * "Fake it": the decision, not the deed.
+ * "Fake it": the decision, and the save's licence to act on it.
  *
- * A save writes every name standing in the clear — that is what the forward
- * pass is for — so this one was always going to be faked. What the walk is
- * missing is a way to SAY so: the keeps answer the names that must stay, and
- * without an answer for the rest the operator has no way to tell the ones
- * they have looked at from the ones they have not, and circles back over the
- * same names. So this settles the name, the walk stops offering it, and the
- * save writes the pseudonym in its own time, along with everything else.
+ * The keeps answer the names that must stay; this answers the ones that must
+ * go. The save fakes ONLY names answered so — a name nobody has decided on is
+ * left in the file exactly as it stands, and the save warns about it
+ * (undecidedSpans) — so this settles the name, the walk stops offering it, and
+ * the next save writes the pseudonym along with everything else.
  *
  * By VALUE, not by place: the save fakes every occurrence of a name alike, so
- * a decision about one is a decision about all of them. Held for the session
- * and dropped whenever the key or the keeps move, both of which change what
- * the question was.
+ * a decision about one is a decision about all of them. Held for the session,
+ * through keeps taken on other names, and dropped when another case's key is
+ * chosen or the folder is forgotten.
  */
 let settled = new Set(); // folded values the operator has said to fake
 function settledKey(v) { return String(v == null ? "" : v).trim().toLowerCase(); }
@@ -4498,7 +4560,7 @@ function fakeName() {
   decidedHere++;
   bounces = 0;
   const n = leakHits.filter((x) => settledKey(x.real) === settledKey(h.real)).length;
-  toast(`“${h.real}” will be written as ${h.fake ? `“${h.fake}”` : "its pseudonym"} on save`
+  toast(`“${h.real}” will be written as ${h.fake ? `“${h.fake}”` : "its pseudonym"} on the next save`
     + (n > 1 ? ` — all ${n} of them here` : "") + ". Noted; the walk moves on.");
   renderLeakStatus();
   if (continuePageSweep()) return;
@@ -4650,7 +4712,7 @@ function showKeepMenu(target, x, y) {
   $("keep-menu-sub").childNodes[0].nodeValue = master ? "Left alone in every case by " + (masterInfo ? masterInfo.name : "the master workbook") + "; "
     : t.here ? "The file carries it as it reads here; elsewhere " : t.leak ? "Written as " : "The file carries ";
   $("keep-menu-sub").childNodes[2].nodeValue = master ? " — withdraw it there, not here."
-    : t.here ? " still stands for it." : t.leak ? " on save, unless it is kept." : " until PDF-Linker re-runs.";
+    : t.here ? " still stands for it." : t.leak ? (isSettled(t.real) ? " on the next save — you said to fake it." : " once you say to fake it — until then the save leaves it as it stands.") : " until PDF-Linker re-runs.";
   if (master) $("keep-menu-fake").textContent = "its KEEP sheet says so";
   // The narrowest keep: this occurrence, and no other. Already one, or already
   // kept for the whole case (or by the master), and there is nothing narrower
@@ -11086,7 +11148,7 @@ function showRawFile(on) {
   if (m.dirty) notes.push("● with your unsaved edits — the file on disk is still the version before them");
   const typed = reals ? PK.findReals(reals, TD.blankRanges(maskKept(text), TD.citedNameSpans(text))) : [];
   if (typed.length) {
-    notes.push(`⚠ ${typed.length} real value${typed.length === 1 ? "" : "s"} the key binds stand${typed.length === 1 ? "s" : ""} here (${typed.slice(0, 3).map((w) => w.real).join(", ")}${typed.length > 3 ? "…" : ""}) — a save writes the pseudonym instead`);
+    notes.push(`⚠ ${typed.length} real value${typed.length === 1 ? "" : "s"} the key binds stand${typed.length === 1 ? "s" : ""} here (${typed.slice(0, 3).map((w) => w.real).join(", ")}${typed.length > 3 ? "…" : ""}) — a save writes the pseudonym only over the ones you have said to fake`);
   }
   $("raw-note").textContent = notes.join(" · ");
 

@@ -1042,7 +1042,8 @@ app, which routes it to the reader tab.
   Clicking it (or **Alt+L**, with **Shift** for the one before) goes to each
   in the order they stand in the document, marks it, and gives the decisions
   as buttons — **keep just this one**, **keep in this case**, **never fake it
-  anywhere**, or leave it, which the save writes as its pseudonym. The bar
+  anywhere**, **fake it**, or leave it for now, which the save leaves as it
+  stands until you decide. The bar
   says which of how many, and the page and line it stands on, and the walk
   wraps at the end. Where the case folder has no `LEAKS.xlsx` that is the
   whole review: the key is attached, the names it binds are underlined, and
@@ -1057,16 +1058,15 @@ app, which routes it to the reader tab.
   has one** and goes on there; a document with none of its own still steps
   into the folder. The sweep is thrown away whenever the key or the keeps
   move, being an answer about them, and a document that has been saved is
-  struck from it. **fake it** is the other half of the bar: the keeps answer
-  the names that must stay, and this answers the rest. It is the decision and
-  not the deed — a save writes every name standing in the clear anyway, so
-  this one was always going to be faked; what the walk was missing was a way
-  to **say so**. The name is settled, the walk stops offering it, and the save
-  writes the pseudonym in its own time. By value and not by place, since a
-  save fakes every occurrence of a name alike. The count says how many are
-  settled and waiting on the save, the bar counts what has been answered here,
-  and the settling is dropped whenever the key or the keeps move, both of
-  which change what the question was. Where there IS a worksheet the bar above
+  struck from it once nothing undecided is left in it. **fake it** is the
+  other half of the bar: the keeps answer the names that must stay, and this
+  answers the ones that must go. **The save fakes only what has been decided.**
+  The name is settled, the walk stops offering it, and the next save writes
+  the pseudonym. By value and not by place, since a save fakes every
+  occurrence of a name alike. The count says how many are settled and waiting
+  on the save, the bar counts what has been answered here, and the settling
+  holds for the session — through keeps taken on other names — and is dropped
+  when another case's key is chosen or the folder is forgotten. Where there IS a worksheet the bar above
   the text is still the way through its rows; this steps what is standing in
   the text, which is not the same list (a worksheet is one row per value, and
   a value leaks wherever it leaks).
@@ -1239,9 +1239,11 @@ app, which routes it to the reader tab.
   of you, **Ctrl+Z** and **Ctrl+Y** undo and redo through the reader's own
   history (the browser's cannot survive the pseudonym rewrites), and **Save**
   (Ctrl+S) writes the text back to the same file. A
-  pseudonym span always writes its **fake**; anything typed as a real name
-  and left plain is written as its pseudonym on save. The save refuses
-  outright rather than write a real value the key binds. Deleting a marked
+  pseudonym span always writes its **fake**; a real name typed in is marked
+  as its pseudonym as soon as the caret leaves it. A real name the key binds
+  that is standing in the clear and **not yet decided** is left exactly as it
+  stands (see *A save before the review is over*, below); the save refuses
+  outright rather than write one you **did** say to fake. Deleting a marked
   name deletes the fake.
 - **The numbers are the paper.** On a numbered page the line numbers are
   fixed and the text moves between them. **Enter** sends the text after the
@@ -1602,19 +1604,26 @@ app, which routes it to the reader tab.
   (`● New Real Values.txt to write`), and such a save writes **only** those —
   the document's own bytes and timestamp are left alone, since its text never
   changed.
-  **And a name standing in the clear is a save that would do something too.**
-  A real value the run left unfaked is rewritten by the save on its own — that
-  is what the forward pass is for, and the file is written whether or not a
-  character was typed — but Save did not say so: a document whose only
-  outstanding work was the run's own leftovers sat greyed, and the way to get
-  at it was to press **✎ Edit**, change nothing, and save. Unlocking a
-  protected document to make a button work is the one thing the protection
-  exists to prevent. Save is lit by those names now, and the status bar counts
-  them (`● 3 real names to write as pseudonyms — Save does it`). Every one of
-  them, settled or not: **fake it** answers the *walk*, not the save, and a
-  name nobody has looked at yet is rewritten just the same. Values **kept**,
-  the ones kept where they stand, and the parties of cited decisions are not
-  counted, because the save does not touch them either.
+  **And a name you have said to fake is a save that would do something too.**
+  A real value the run left unfaked and the walk settled with **fake it** is
+  rewritten by the save on its own, and the file is written whether or not a
+  character was typed. Save is lit by those names, and the status bar counts
+  them (`● 3 decided names to write as pseudonyms — Save does it`), so there
+  is no pressing **✎ Edit** and changing nothing just to get at the button.
+  Values **kept**, the ones kept where they stand, and the parties of cited
+  decisions are not counted, because the save does not touch them either.
+  **A save before the review is over fakes nothing you have not decided.** It
+  used to write every orange name as its pseudonym, looked at or not, so a
+  save mid-review answered "fake" for every name the walk had not reached —
+  a party's surname in a citation included. Now a name nobody has decided on
+  (not kept, not settled with **fake it**) is left in the file exactly as it
+  stood, and the save **warns** in red, by name: `⚠ 3 real names not yet
+  reviewed were NOT faked — …; step through them from the ⚠ count, decide
+  each, and save again.` Everything else — your edits, the decisions taken so
+  far, the folder's lists — is written as usual. The ⚠ count and the names
+  bar say the same thing: *undecided — the save leaves it as it stands*.
+  Where the marks are off for a document (too expensive to read), nothing on
+  it can be decided, so a save there fakes none of its names and says so.
   **And closing on one asks first.** Nothing is lost by the close — the name
   is still in the file, to be found again the next time the document is opened
   — but what is left behind is a scrubbed export carrying a real value, with
