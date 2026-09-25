@@ -20,7 +20,7 @@
     <button id="open-file" title="Open a text export (.txt or .txt.LEAK) from disk">📄 Open file</button>
     <button id="open-folder" title="Open a case folder: its pseudonym key and every export under Text Files">📁 Open case folder</button>
     <button id="edit-toggle" title="Allow editing — a document opens protected; turn this on to type in it (the real names still never reach the file)" aria-pressed="false" disabled>✎ Edit</button>
-    <button id="save" class="primary" title="Write your edits back to the file — pseudonyms underneath, never the real names (Ctrl+S)" disabled>💾 Save</button>
+    <button id="save" class="primary" title="Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)" disabled>💾 Save</button>
     <button id="raw-btn" title="The file itself — what you would see opening it in Notepad. The pseudonyms as PDF-Linker wrote them, not the real names this reader shows; the page headers, the margin numbers and the spacing exactly as they sit on disk." disabled>📄 File as text</button>
     <button id="print-btn" title="Print the pages as they are shown, always in their pseudonyms — the printout carries the fakes whichever way Show fakes sits, and the document is left as it was; choose “Save as PDF” in the print dialog to keep a copy (Ctrl+P)">🖨 Print</button>
     <button id="shot-btn" title="Screenshot the whole reader window exactly as it stands — toolbar, panels, bars and pages, real names and all if Show fakes is off — saved as a PNG, for looking at the design; not the print, which is the pages alone and always in their pseudonyms">📷 Screenshot</button>
@@ -114,8 +114,8 @@
       <button id="nb-here">keep just this one</button>
       <button id="nb-no">keep in this case</button>
       <button id="nb-never">never fake it anywhere</button>
-      <button id="nb-fake" class="primary" title="Say that this one is to be faked: the save writes the pseudonym, as it always would, and the walk stops offering it so you need not come back to it">fake it</button>
-      <button id="nb-skip" class="secondary">leave it for now</button>
+      <button id="nb-fake" class="primary" title="Say that this one is to be faked: the next save writes the pseudonym (it fakes nothing you have not decided), and the walk stops offering it so you need not come back to it">fake it</button>
+      <button id="nb-skip" class="secondary" title="Go on without deciding — a save leaves this one in the file as it stands, and warns that it did">leave it for now</button>
     </div>
   </div>
   <!-- Redacting the case folder's own PDF, from beside the export. The pane
