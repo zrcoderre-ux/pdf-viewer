@@ -452,6 +452,22 @@ async function openBackgroundTabs(urls, opener, deliberate, group, groupTitle) {
   return { opened, asked: clean.length, failed };
 }
 
+// The text reader's 📷 Screenshot: the tab it sits in, as the eye sees it —
+// the window's visible area, a PNG data: URL. Only the extension's own pages
+// may ask; a content script on a website has no business photographing tabs.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || msg.type !== "capture-visible-tab") return; // not ours
+  if (!sender || sender.id !== chrome.runtime.id || !sender.url || !sender.url.startsWith(chrome.runtime.getURL("")) || !sender.tab) {
+    sendResponse({ error: "not an extension page" });
+    return;
+  }
+  chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: "png" }).then(
+    (dataUrl) => sendResponse({ dataUrl }),
+    (e) => sendResponse({ error: String((e && e.message) || e) })
+  );
+  return true; // sendResponse is called asynchronously
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg || msg.type !== "open-background-tabs") return; // not ours
   // `deliberate` says the reader named these tabs — a button that carried the

@@ -953,6 +953,14 @@ app, which routes it to the reader tab.
   remember. The document itself is not touched: the pages go back as they were
   when the dialog closes, nothing is written, and a real name standing unfaked
   is still standing and still orange, to be dealt with before a save.
+- **Screenshot the window, for the design.** **📷 Screenshot** saves the
+  whole reader window as it stands — toolbar, panels, bars, the PDF pane and
+  the pages — as a PNG in Downloads, named after the document and the time.
+  It is a picture of the screen for looking at the layout, not a copy of the
+  document: unlike the print it changes nothing, so it carries whatever is
+  shown, real names included when *Show fakes* is off. In the extension the
+  tab is taken directly; in the hosted app the browser asks to share this
+  tab, keeps one frame and stops.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**

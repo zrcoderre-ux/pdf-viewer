@@ -734,6 +734,88 @@ window.addEventListener("afterprint", () => {
   }
 });
 
+// ── screenshot ───────────────────────────────────────────────────────────────
+// The whole window as it stands, for looking at the design: the toolbar, the
+// panels, the bars, the PDF pane, the pages — what the eye gets, saved as a
+// PNG. Not the print: the print is the pages alone, re-dressed in their
+// pseudonyms for leaving the room; the screenshot changes nothing and so
+// carries whatever the screen shows, real names included when Show fakes is off.
+//
+// In the extension the background worker takes the tab (captureVisibleTab), no
+// questions asked. Hosted, there is no such thing, so the browser's own screen
+// share is asked for this tab, one frame is kept and the share is stopped —
+// asked of the shell above the reader's iframe, the shell being the window.
+function shotName() {
+  const d = new Date();
+  const p2 = (n) => String(n).padStart(2, "0");
+  const when = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}.${p2(d.getMinutes())}.${p2(d.getSeconds())}`;
+  return `${doc ? printTitle() : "Text Reader"} - screenshot ${when}.png`;
+}
+
+/** The tab through the extension's background worker: a data: URL, or null. */
+function shotByExtension() {
+  if (typeof chrome === "undefined" || chrome.__pwaShim || !chrome.runtime || !chrome.runtime.sendMessage) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "capture-visible-tab" }, (res) => {
+        const err = chrome.runtime.lastError;
+        resolve(!err && res && res.dataUrl ? res.dataUrl : null);
+      });
+    } catch { resolve(null); }
+  });
+}
+
+/** The tab through the browser's screen share, one frame of it: a PNG blob, or null. */
+async function shotByScreenShare() {
+  let host = window;
+  try { if (window.top !== window && window.top.navigator.mediaDevices) host = window.top; } catch { /* another origin above */ }
+  const md = host.navigator.mediaDevices;
+  if (!md || !md.getDisplayMedia) return null;
+  const stream = await md.getDisplayMedia({ video: { displaySurface: "browser" }, audio: false, preferCurrentTab: true, selfBrowserSurface: "include" });
+  try {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.srcObject = stream;
+    await video.play();
+    // The share dialog has only just closed; give the tab a moment to be drawn without it.
+    await new Promise((r) => setTimeout(r, 300));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const c = document.createElement("canvas");
+    c.width = video.videoWidth;
+    c.height = video.videoHeight;
+    c.getContext("2d").drawImage(video, 0, 0);
+    return await new Promise((r) => c.toBlob(r, "image/png"));
+  } finally {
+    for (const t of stream.getTracks()) t.stop();
+  }
+}
+
+function saveShot(blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = shotName();
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+$("shot-btn").addEventListener("click", async (e) => {
+  e.currentTarget.blur(); // no focus ring on the button in the picture
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  try {
+    const dataUrl = await shotByExtension();
+    const blob = dataUrl ? await (await fetch(dataUrl)).blob() : await shotByScreenShare();
+    if (!blob) { toast("This browser cannot take a screenshot of the page.", { error: true }); return; }
+    saveShot(blob);
+    toast("Screenshot saved to Downloads.");
+  } catch (err) {
+    if (err && err.name === "NotAllowedError") return; // the share was declined
+    toast(`The screenshot failed: ${(err && err.message) || err}`, { error: true });
+  }
+});
+
 // ── theme (shared with the PDF viewer) ───────────────────────────────────────
 const themeToggle = $("theme-toggle");
 function applyTheme(theme) {
