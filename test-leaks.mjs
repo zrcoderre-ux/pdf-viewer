@@ -12,7 +12,7 @@ import {
   packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE, isSuggested, isPending,
   rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
-  walkStops, walkStep, WALK_BOUNCE_LIMIT,
+  walkStops, walkStep, WALK_BOUNCE_LIMIT, sweepSpan,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
 
@@ -361,6 +361,33 @@ console.log("the walk from one document to the next");
   check("a step taken by hand goes where it says, unread marks and all",
     [walkStep({ next, read: false, marks: false, bounces: 99, auto: false }), walkStep({ next: null, pending: true, auto: false })],
     [{ go: next }, { wait: "folder" }]);
+}
+
+console.log("finishing the page before leaving it");
+{
+  const P = [{ index: 0, number: 1 }, { index: 1, number: 2 }, { index: 2, number: 3 }, { index: 3, number: 5 }, { index: 4, number: 6 }];
+  check("the next row on the same page: nothing is left behind",
+    sweepSpan(P, 1, { same: true, page: 2 }), null);
+  check("the next row a page on: the page in front",
+    sweepSpan(P, 1, { same: true, page: 3 }), { lo: 1, hi: 2 });
+  check("…and every page passed over on the way",
+    sweepSpan(P, 0, { same: true, page: 5 }), { lo: 0, hi: 3 });
+  check("a page the document skips lands on the first page past it",
+    sweepSpan(P, 0, { same: true, page: 4 }), { lo: 0, hi: 3 });
+  check("a page past the end: the rest of the document",
+    sweepSpan(P, 2, { same: true, page: 99 }), { lo: 2, hi: 5 });
+  check("another document: the rest of this one",
+    [sweepSpan(P, 3, { same: false }), sweepSpan(P, 3, null)], [{ lo: 3, hi: 5 }, { lo: 3, hi: 5 }]);
+  check("the walk coming round to a row further up leaves nothing",
+    sweepSpan(P, 3, { same: true, page: 1 }), null);
+  check("a row naming no page leaves nothing",
+    [sweepSpan(P, 1, { same: true, page: null }), sweepSpan(P, 1, { same: true, page: Infinity })], [null, null]);
+  check("a Word body is one page: left only for another document",
+    [sweepSpan([{ index: 0, number: null }], 0, { same: true, page: null }), sweepSpan([{ index: 0, number: null }], 0, { same: false })],
+    [null, { lo: 0, hi: 1 }]);
+  check("in a reel the span keeps to the document's own pages",
+    sweepSpan([{ index: 7, number: 1 }, { index: 8, number: 2 }], 7, { same: false }), { lo: 7, hi: 9 });
+  check("a page not in the list: no span", sweepSpan(P, 9, { same: false }), null);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

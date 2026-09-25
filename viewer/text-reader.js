@@ -130,6 +130,7 @@ let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
 let fakesRx = null;          // …and one over the key's FAKES: which pseudonyms stand
 let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
+let pageSweep = null;        // the page a LEAKS review is finishing before it leaves (see advanceLeak)
 let flagsFor = null;         // …the storage key that list was read from, while a folder is being adopted
 let phrases = [];            // …which of them are PHRASES: several words faked whole (`phrase:`)
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
@@ -4294,6 +4295,12 @@ function renderNamesBar() {
   $("nb-fake").disabled = !h.fake;
   $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2 && !restOfFolder().length;
   $("nb-rest").textContent = folderRest();
+  if (pageSweep && pageSweep.seq === docSeq) {
+    // Finishing the page: what is left on it, and what comes after.
+    const k = sweepStops().length + 1;
+    $("nb-count").textContent = `${k} left on ${pageSweep.label}` + (answered ? ` · ${answered} answered here` : "");
+    $("nb-rest").textContent = "· then the worksheet\u2019s next row";
+  }
 }
 /** Whether the folder has still to say what it is carrying. */
 function folderPending() {
@@ -4359,6 +4366,7 @@ function decideName(what) {
     setKeep(h.real, what, { leak: true });
     leakHits = leakHits.filter((x) => !same(x.real, h.real));
   }
+  if (continuePageSweep()) return; // finishing a page: its next name, or the worksheet's next row
   const left = liveLeaks();
   if (!left.length) {
     // Answered the last one HERE: the walk goes straight on to the next
@@ -4379,7 +4387,7 @@ function decideName(what) {
 $("nb-prev").addEventListener("click", () => stepLeak(-1));
 $("nb-next").addEventListener("click", () => stepLeak(1));
 $("nb-find").addEventListener("click", () => { const h = liveLeaks()[Math.max(0, leakStep)]; if (h) scrollRangeTo(h.range); });
-$("nb-close").addEventListener("click", () => showNamesBar(false));
+$("nb-close").addEventListener("click", () => { if (pageSweep) finishPageSweep(); else showNamesBar(false); });
 /**
  * "Fake it": the decision, not the deed.
  *
@@ -4411,6 +4419,7 @@ function fakeName() {
   toast(`“${h.real}” will be written as ${h.fake ? `“${h.fake}”` : "its pseudonym"} on save`
     + (n > 1 ? ` — all ${n} of them here` : "") + ". Noted; the walk moves on.");
   renderLeakStatus();
+  if (continuePageSweep()) return;
   const left = liveLeaks();
   if (!left.length) { stepLeak(1, { auto: true }); return; }
   leakStep = Math.min(leakStep, left.length - 1) - 1;
@@ -4421,7 +4430,7 @@ $("nb-fake").addEventListener("click", fakeName);
 $("nb-here").addEventListener("click", () => decideName("here"));
 $("nb-no").addEventListener("click", () => decideName("no"));
 $("nb-never").addEventListener("click", () => decideName("never"));
-$("nb-skip").addEventListener("click", () => stepLeak(1));
+$("nb-skip").addEventListener("click", () => { if (!continuePageSweep()) stepLeak(1); });
 // The count opens the bar on the first name; once it is open, it steps.
 function leaksFromCount(e) {
   if (namesBar.hidden) showNamesBar(true);
@@ -5354,6 +5363,7 @@ let leaks = null;          // { parsed, bytes, name, handle, folder, at, mirrore
 let leakRowValue = "";     // the current row's value, marked wherever it stands
 let leakRowRanges = [];    // where it stands, from the last paint: [{ body, range }]
 let leakHere = null;       // the occurrence the bar scrolled to
+let rowHere = null;        // …the worksheet row's own, which the names walk does not move
 
 function leaksStoreKey() { return LK.decisionsKey(leaks.folder || folderName || fileName, leaks.name); }
 function persistLeaks() { if (leaks) lsSet(leaksStoreKey(), LK.packDecisions(leaks.parsed.rows)); }
@@ -5632,11 +5642,14 @@ function renderLeaksTabNow() {
 async function goToLeak(i, { locate = true } = {}) {
   const rows = leakRows();
   if (!rows.length) return;
+  // Going to a row by any road is leaving the page it was being finished on.
+  if (pageSweep) { const sw = pageSweep; pageSweep = null; if (sw.opened) showNamesBar(false); }
   const was = leaks.at;
   leaks.at = ((i % rows.length) + rows.length) % rows.length;
   const row = rows[leaks.at];
   leakRowValue = row.value;
   leakHere = null;
+  rowHere = null;
   leaks.problem = ""; // a new row is a new question; locateLeak answers it
   showLeaksBar(true);
   renderLeaksBar();
@@ -5767,7 +5780,7 @@ async function locateLeak(row) {
     toast(leaks.problem, { error: true, ms: 9000 });
     return;
   }
-  leakHere = best.range;
+  leakHere = rowHere = best.range;
   markLeakHere();
   const sec = best.body.closest(".tpage");
   scrollRangeTo(best.range);
@@ -5871,8 +5884,7 @@ function decideLeak(text, { advance = false } = {}) {
   warmForLeaks();
   if (!advance) return;
   const n = LK.nextUndecided(leakRows(), leaks.at);
-  if (n >= 0 && n !== leaks.at) goToLeak(n);
-  else if (n < 0) toast("Every row is answered — save the worksheet, then Apply Fixes.");
+  if (n < 0 || n !== leaks.at) advanceLeak(n);
 }
 
 /**
@@ -5893,8 +5905,122 @@ function acceptLeak() {
   updateLeaksButton();
   warmForLeaks();
   const n = LK.nextUndecided(leakRows(), leaks.at);
-  if (n >= 0 && n !== leaks.at) goToLeak(n);
-  else if (n < 0) toast("Every row is answered — save the worksheet, then Apply Fixes.");
+  if (n < 0 || n !== leaks.at) advanceLeak(n);
+}
+
+// ── finishing the page before the review leaves it ──────────────────────────
+//
+// The worksheet is one row per VALUE; the orange on the page is every name the
+// key binds that the run left in the clear, and most of those have no row. A
+// review that answered a page's last row and moved on left them standing on a
+// page just read, to be found again from the status bar later — or not at all.
+// So a decision that takes the review OFF a page first stands on the names
+// still in the clear there (and on any page it would pass over on its way to
+// the next row, LK.sweepSpan), in the names bar, with its buttons. When the
+// page has nothing left the review goes on to its next row.
+//
+// Not stopped on: a name the worksheet has a row for — that row is where it
+// is answered, before or after — and the red flagged values, which are
+// decisions already taken. A name skipped (the bar's skip) is left for the
+// status bar's walk; closing the names bar leaves the rest of the page.
+// pageSweep (declared at the head of the file): { from, doc, seq, lo, hi, label, rowVals, cursor: [page, offset] | null, opened }
+/** A range's place in the document: its page's index and its offset in that page's text. */
+function rangePos(range) {
+  const node = range && range.startContainer;
+  const el = node && (node.nodeType === 1 ? node : node.parentElement);
+  const sec = el && el.closest && el.closest(".tpage");
+  if (!sec) return null;
+  const body = el.closest(".page-body");
+  let off = 0;
+  try {
+    const r = document.createRange();
+    r.setStart(body, 0);
+    r.setEnd(range.startContainer, range.startOffset);
+    off = r.toString().length;
+  } catch { /* a range from a page since rebuilt: the head of its page */ }
+  return [Number(sec.dataset.index), off];
+}
+/** The names the sweep has still to stand on, in the order they stand. */
+function sweepStops() {
+  const sw = pageSweep;
+  if (!sw || !doc || sw.seq !== docSeq) return [];
+  const out = [];
+  for (const h of liveLeaks()) {
+    if (h.doc !== sw.doc || sw.rowVals.has(LK.fold(h.real))) continue;
+    const p = rangePos(h.range);
+    if (!p || p[0] < sw.lo || p[0] >= sw.hi) continue;
+    const c = sw.cursor;
+    if (c && (p[0] < c[0] || (p[0] === c[0] && p[1] <= c[1]))) continue;
+    out.push(h);
+  }
+  return out;
+}
+/** What the review leaves behind going from the row in front to row `n` (-1: none left): a sweep, or null. */
+function pageSweepFor(n) {
+  if (!doc || !marksCanRead() || !reals || !readHere()) return null;
+  if (!rowHere || !rowHere.startContainer.isConnected) return null;
+  const rows = leakRows();
+  const cur = rows[leaks.at];
+  const at = rangePos(rowHere);
+  if (!cur || !at) return null;
+  const sec = pagesEl.querySelector(`.tpage[data-index="${at[0]}"]`);
+  if (!sec) return null;
+  const dname = docNameOfBody(sec);
+  const pages = [...pagesEl.querySelectorAll(".tpage")]
+    .filter((t) => docNameOfBody(t) === dname)
+    .map((t) => { const i = Number(t.dataset.index); return { index: i, number: doc.pages[i] ? doc.pages[i].number : null }; });
+  const next = rows[n];
+  const same = !!next && LK.fold(LK.rowFile(next)) === LK.fold(LK.rowFile(cur));
+  const place = same ? LK.rowPlace(next) : null;
+  const span = LK.sweepSpan(pages, at[0], { same, page: place ? place.page : null });
+  if (!span) return null;
+  const pageName = (i) => TD.pageLabel(doc.pages[i]) || `Page ${i + 1}`;
+  const last = pages.filter((q) => q.index < span.hi).pop();
+  pageSweep = {
+    from: leaks.at, doc: dname, seq: docSeq, lo: span.lo, hi: span.hi, cursor: null,
+    label: last && last.index > span.lo ? `${pageName(span.lo)} to ${pageName(last.index)}` : pageName(span.lo),
+    rowVals: new Set(rows.map((r) => LK.fold(r.value)).filter(Boolean)),
+    opened: namesBar.hidden,
+  };
+  if (sweepStops().length) return pageSweep;
+  pageSweep = null;
+  return null;
+}
+/** On from the row just answered to row `n` — by way of the names still standing on the page it leaves. */
+function advanceLeak(n) {
+  if (pageSweepFor(n)) {
+    const k = sweepStops().length;
+    toast(`${k} name${k === 1 ? "" : "s"} from the key still standing in the clear on ${pageSweep.label} \u2014 answering ${k === 1 ? "it" : "them"} before the next row.`);
+    goSweepStop(sweepStops()[0]);
+    return;
+  }
+  if (n >= 0) goToLeak(n);
+  else toast("Every row is answered — save the worksheet, then Apply Fixes.");
+}
+function goSweepStop(h) {
+  const hits = liveLeaks();
+  pageSweep.cursor = rangePos(h.range);
+  leakStep = hits.indexOf(h) - 1;
+  stepLeak(1);
+}
+/** After a name on the page is answered or skipped: the next one, or on to the worksheet's next row. */
+function continuePageSweep() {
+  if (!pageSweep) return false;
+  if (pageSweep.seq !== docSeq) { pageSweep = null; return false; }
+  const stops = sweepStops();
+  if (stops.length) goSweepStop(stops[0]);
+  else finishPageSweep();
+  return true;
+}
+function finishPageSweep() {
+  const sw = pageSweep;
+  pageSweep = null;
+  if (!sw) return;
+  if (sw.opened) showNamesBar(false);
+  else renderNamesBar();
+  const n = LK.nextUndecided(leakRows(), sw.from);
+  if (n >= 0) goToLeak(n);
+  else toast("Every row is answered — save the worksheet, then Apply Fixes.");
 }
 
 /** Write the decisions into the workbook: the same file, the Fix? cells changed, read back before it is written. */

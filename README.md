@@ -1126,6 +1126,23 @@ app, which routes it to the reader tab.
   one** — never the folder at once, which is what used to take the tab down.
   (Under two dozen exports it keeps working further ahead, as it always has;
   there is nothing to protect you from in a folder that small.)
+- **And a page is finished before the review leaves it.** The worksheet is one
+  row per value; the orange on the page is every name the key binds that the
+  run left in the clear, and most of those have no row. A review that answered
+  a page's last row and moved on left them standing on a page just read. Now a
+  decision that would take the review **off** a page — to a later page, to
+  another document, or to the end of the worksheet — first stands on each name
+  still in the clear there, and on any page it would pass over on its way to
+  the next row, in the names bar with its own buttons (**keep just this one**,
+  **keep in this case**, **never fake it anywhere**, **fake it**). The bar
+  says how many are left on the page and that the worksheet's next row comes
+  after; when the page has none left the review goes on to that row. **skip**
+  leaves a name for the status bar's walk, and closing the names bar leaves
+  the rest of the page. Not stopped on: a name the worksheet has a row for —
+  that row is where it gets answered — and the red flagged values, which are
+  answers already given. Moving by hand (‹ ›, Alt+↑/↓, the Leaks tab, **next
+  open**) never stops; only a decision does. A Word export is one page, so
+  its names come up when the review leaves the document.
 - **A case of thousands of leaks, under a key of thousands of names, opens and
   answers.** The reader builds one matcher out of every name in the key, and it
   used to look for them the way you would with a list in your hand: at every
