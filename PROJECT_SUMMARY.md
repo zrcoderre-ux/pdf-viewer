@@ -580,6 +580,30 @@ A document that will not open is no longer left with `leakJump` set either —
 `openFolderDoc` says whether it opened, and `jumpToDoc` stands the walk down
 and stops offering that document rather than waiting on one that is not coming.
 
+### The LEAKS review finishes a page before leaving it
+
+The worksheet walk and the names walk were two lists that never met: the
+worksheet is one row per VALUE, the orange is every key name standing in the
+clear, and most of the orange has no row. Answering a page's last row moved the
+review on and left that orange behind, to be found later from the status bar
+(whose walk keeps its own place, `leakStep`, nowhere near the page just read).
+
+Now `decideLeak` / `acceptLeak` go on through `advanceLeak`, not `goToLeak`.
+`pageSweepFor` asks `leaks.sweepSpan` (pure, tested) which pages the move
+leaves behind — the page in front and any passed over on the way to the next
+row's page; the rest of the document for another document or for the end of
+the worksheet; nothing for the same page, an unknown page, or a row further up
+— and if live orange stands there, the names bar is walked over it first
+(`goSweepStop` sets `leakStep` and calls `stepLeak`, so the bar and its buttons
+are the ordinary ones). `decideName`, `fakeName` and **skip** hand back to
+`continuePageSweep`, which takes the next name after a cursor kept as
+[page index, text offset] — so a rescan replacing `leakHits` mid-sweep does not
+lose the place — and `finishPageSweep` goes to `nextUndecided` from the row
+that started it. Passed over: names with a worksheet row (answered there) and
+flagged values (already answered). `goToLeak` by any other road cancels the
+sweep. `rowHere` holds the worksheet row's own occurrence, since `leakHere` is
+shared with the names walk.
+
 ### Opening ONE FILE is not opening its folder
 
 A file opened on its own used to bring its whole folder with it: the reader

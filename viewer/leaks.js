@@ -555,6 +555,42 @@ export function nextUndecided(rows, from, dir) {
   return -1;
 }
 
+// ---- finishing the page before leaving it ---------------------------------------
+//
+// The worksheet is one row per value, and the key's names standing in the
+// clear are another list altogether: a page can carry orange a review has no
+// row for. A walk that answers the page's last row and moves on leaves those
+// behind on a page the operator has just read, to be found again later from
+// the status bar. So before a decision takes the review OFF a page, the names
+// still standing on it are asked about first — on it, and on any page the
+// review would pass over on the way to its next row.
+
+/**
+ * The pages a review leaves behind when it goes from the row in front to the
+ * next, as a span of page indices [lo, hi) — or null where it stays put.
+ *   pages   the open document's pages in order: [{ index, number }] (a Word
+ *           body has one page, numbered null)
+ *   at      the index of the page the row in front stands on
+ *   next    where the next row stands: { same: false } for another document
+ *           (or none), else { same: true, page } with the page it names
+ * Another document leaves the rest of this one behind: from the page in front
+ * to its end. A later page leaves the pages up to it. The same page, a page
+ * nobody can say, or a page further up (the walk coming round to a row it
+ * passed) leaves nothing — a review going back up is not leaving the page.
+ */
+export function sweepSpan(pages, at, next) {
+  const list = pages || [];
+  const k = list.findIndex((p) => p.index === at);
+  if (k < 0) return null;
+  const end = list[list.length - 1].index + 1;
+  if (!next || !next.same) return { lo: at, hi: end };
+  const here = list[k].number;
+  const p = next.page;
+  if (here == null || p == null || !isFinite(p) || p <= here) return null;
+  const to = list.slice(k + 1).find((q) => q.number != null && q.number >= p);
+  return { lo: at, hi: to ? to.index : end };
+}
+
 /** The cell edits a save writes: only the rows whose decision moved. */
 export function fixEdits(parsed) {
   const col = parsed && parsed.cols ? parsed.cols.fix : -1;
