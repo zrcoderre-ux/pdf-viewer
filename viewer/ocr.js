@@ -11,6 +11,7 @@
 
 import Tesseract from "./vendor/tesseract/tesseract.esm.min.js";
 import { rotatedRunPlacement, normalizeAngle } from "./rotation.js";
+import { renderPageOnto } from "./pdf-fonts.js";
 import {
   documentKey, loadPage, savePages, hasDocument, sweep, carriedPages, keepDaysFrom,
   DEFAULT_KEEP_DAYS,
@@ -158,7 +159,9 @@ async function ocrWords(page, pageNumber, setStatus) {
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
-  await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+  // Drawn by way of the document the PDF's fonts are in (pdf-fonts.js), then
+  // handed to the recognizer as a canvas of this one.
+  await renderPageOnto(page, canvas, { viewport }).promise;
 
   if (setStatus) setStatus(`OCR page ${pageNumber}…`);
   const worker = await getWorker();

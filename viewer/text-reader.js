@@ -51,28 +51,9 @@ import * as RD from "./redact.js";
 import { buildRedactedPdf } from "./pdf-edit.js";
 import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
+import { fontDocument, fontCanvas, renderPageOnto } from "./pdf-fonts.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdfjs/build/pdf.worker.mjs");
-// THE PDFs' FONTS LIVE IN A DOCUMENT OF THEIR OWN. pdf.js loads a PDF's fonts
-// as FontFaces into `document.fonts`, and Chrome answers every change to that
-// set — a font added as a page is first drawn, the fonts taken away again by
-// `cleanup()` and `destroy()` — by laying out EVERY LINE OF TEXT in the
-// document again ("fonts changed": all sixty thousand layout objects of a
-// combined file of forty filings, a third of a second each time). Side by
-// side, that is the text column: every hop to another member's PDF, and every
-// trim that told a PDF off the screen to put its fonts down, laid the whole
-// reel out again, and the page the reader had scrolled to waited behind it.
-// So pdf.js is handed this frame's document instead (`ownerDocument`): the
-// fonts go into ITS set, which lays out nothing, and a page is drawn on a
-// canvas of that document (renderPage), the one place its fonts can be
-// found, then copied onto the pane's own. Measured in Chromium: the same
-// pixels, and a jump across a combined file 620 ms → 60 ms.
-const fontFrame = document.createElement("iframe");
-fontFrame.setAttribute("aria-hidden", "true");
-fontFrame.tabIndex = -1;
-fontFrame.style.cssText = "position:fixed;left:-10px;top:-10px;width:1px;height:1px;border:0;visibility:hidden;pointer-events:none";
-document.body.appendChild(fontFrame);
-const fontDoc = fontFrame.contentDocument;
 
 const $ = (id) => document.getElementById(id);
 const toolbar = $("toolbar");
@@ -7869,7 +7850,10 @@ function sharedPdfWorker() {
  */
 async function openPdfNow(src) {
   const file = src.file || await src.handle.getFile();
-  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer(), worker: sharedPdfWorker(), ownerDocument: fontDoc }).promise;
+  // The fonts go into a document of their own (pdf-fonts.js): loaded into this
+  // one, every font a PDF brought in or took away laid the whole text column
+  // out again — 620 ms → 60 ms a jump across a combined file of forty.
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer(), worker: sharedPdfWorker(), ownerDocument: fontDocument() }).promise;
   const n = pdf.numPages;
   const hole = () => new Array(n).fill(null);
   const info = { pdf, count: n, sizes: hole(), name: src.name, lines: hole(), geoms: hole(), rows: hole(), gridRead: new Set(), gridQueued: true };
@@ -8448,9 +8432,7 @@ async function warmPageNow(opened, key, pageNo, cssWidth) {
     if (!warmWanted.has(key)) return;
     const base = page.getViewport({ scale: 1 });
     const vp = page.getViewport({ scale: cssWidth / base.width });
-    const canvas = fontDoc.createElement("canvas"); // where the PDF's fonts are (fontFrame)
-    canvas.width = Math.round(vp.width);
-    canvas.height = Math.round(vp.height);
+    const canvas = fontCanvas(Math.round(vp.width), Math.round(vp.height)); // where the PDF's fonts are (pdf-fonts.js)
     let bmp = null;
     try {
       await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
@@ -8667,25 +8649,6 @@ function warmForLeaks() {
 }
 
 // ── rendering a page into a canvas ──
-/**
- * A page drawn onto a canvas of THIS document, by way of one of fontDoc's —
- * the only document its fonts are in (fontFrame). Answers a RenderTask's
- * shape: `promise`, and `cancel`.
- */
-function renderPage(page, canvas, viewport) {
-  const off = fontDoc.createElement("canvas");
-  off.width = canvas.width;
-  off.height = canvas.height;
-  const task = page.render({ canvasContext: off.getContext("2d"), viewport });
-  const promise = task.promise
-    .then(() => {
-      // Let go of, or drawn again at another size, while it was drawing: the
-      // canvas is somebody else's now.
-      if (canvas.width === off.width && canvas.height === off.height) canvas.getContext("2d").drawImage(off, 0, 0);
-    })
-    .finally(() => { off.width = off.height = 0; });
-  return { promise, cancel: () => task.cancel() };
-}
 async function renderInto(el, src, pageNo, cssWidth) {
   // Named for the breadcrumb: a tab killed while a page was being drawn says
   // WHICH page of which PDF, which is the difference between "a scan did it"
@@ -8752,7 +8715,7 @@ async function drawPage(el, src, pageNo, cssWidth, want, page) {
   canvas.style.width = cssWidth + "px";
   canvas.style.height = Math.round(vp.height / dpr) + "px";
   sheet.style.height = "";
-  const task = renderPage(page, canvas, vp);
+  const task = renderPageOnto(page, canvas, { viewport: vp }); // by way of the fonts' document (pdf-fonts.js)
   el.__task = task;
   try { await task.promise; } catch (e) { if (!(e && e.name === "RenderingCancelledException")) console.warn(e); return; }
   finally { if (el.__task === task) el.__task = null; }
@@ -10954,12 +10917,10 @@ async function renderRedactedPageNow(pdf, store, pageNumber, scale) {
   const page = await pdf.getPage(pageNumber);
   const vp = page.getViewport({ scale });
   const pts = page.getViewport({ scale: 1 });
-  // A canvas of the document the PDF's fonts are in (fontFrame): drawn on one
-  // of this document's, a font embedded in the PDF is not found and its text
-  // comes out in whatever the browser falls back to.
-  const canvas = fontDoc.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(vp.width));
-  canvas.height = Math.max(1, Math.round(vp.height));
+  // A canvas of the document the PDF's fonts are in (pdf-fonts.js): drawn on
+  // one of this document's, a font embedded in the PDF is not found and its
+  // text comes out in whatever the browser falls back to.
+  const canvas = fontCanvas(Math.max(1, Math.round(vp.width)), Math.max(1, Math.round(vp.height)));
   const ctx = canvas.getContext("2d");
   // A page with no background of its own would encode as black otherwise.
   ctx.fillStyle = "#ffffff";

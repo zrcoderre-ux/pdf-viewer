@@ -745,17 +745,17 @@ body.thumbs-open #viewer-container {
   scroll-margin-top: calc(var(--toolbar-height) + 8px);
   background: #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  /* A page off the screen is not painted. Every page is drawn as the document
-     opens, one after another, and each page drawn asked the browser to paint
-     and composite the whole column of them again — six seconds of a
-     three-hundred-page brief's twenty, before its citations could be linked.
-     The wrapper carries its own width and height, so a page skipped here
-     keeps its size and nothing moves; it is painted as it comes near the
-     screen, printed like any other, and found by the browser's own Find.
-     Measured in Chromium on that brief: links in 18 s → 11 s, the same pixels
-     on screen and the same pages in a print. Everything that floats over a
-     page (menus, the citation popover, the marquees) hangs off <body>, so the
-     containment this brings has nothing inside a page to clip. */
+  /* A page off the screen is not painted. Every page's text, links and
+     highlights are built as the document opens, and each page added asked the
+     browser to paint the whole column of them again. The wrapper carries its
+     own width and height, so a page skipped here keeps its size and nothing
+     moves; it is painted as it comes near the screen, printed like any other,
+     and found by the browser's own Find. Measured in Chromium on a
+     three-hundred-page brief: every page set up in 4.6 s → 3.3 s, with the
+     same pixels on screen and the same pages in a print. Everything that
+     floats over a page (menus, the citation popover, the marquees) hangs off
+     <body>, so the containment this brings has nothing inside a page to
+     clip. */
   content-visibility: auto;
 }
 

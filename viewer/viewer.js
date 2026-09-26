@@ -52,6 +52,7 @@ import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
 import * as RD from "./redact.js";
 import { autoScroll } from "./autoscroll.js";
 import { pageRotation } from "./rotation.js";
+import { fontDocument, fontCanvas, renderPageOnto } from "./pdf-fonts.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
   "pdfjs/build/pdf.worker.mjs"
@@ -1950,7 +1951,9 @@ async function renderBytes(buf, { sourceName } = {}) {
   // Pages OCR'd on an earlier visit are saved under a hash of these bytes;
   // hashing runs alongside the parse.
   const ocrSaved = openOcrDocument(pdfBytes);
-  const loadingTask = pdfjsLib.getDocument({ data: buf });
+  // The document's fonts go into a document of their own (pdf-fonts.js), and
+  // so every page of it is drawn on one of that document's canvases.
+  const loadingTask = pdfjsLib.getDocument({ data: buf, ownerDocument: fontDocument() });
   pdfDoc = await loadingTask.promise;
   // Bring any existing /Highlight annotations into the removable overlay before
   // the first paint, so a saved-and-reopened file shows its highlights as
@@ -2077,6 +2080,7 @@ async function renderAllPages() {
   // collapses to nothing, which would read as "reached the end".
   autoScroll.beginRender();
 
+  forgetPageDrawing();
   pagesEl.innerHTML = "";
   totalLinks = 0;
   _footerByPage.clear();
@@ -2502,6 +2506,137 @@ async function placeNativeLinksForPage(page, viewport, layerDiv) {
   }
 }
 
+// ── drawing the pages that are looked at ──
+//
+// Every page used to be DRAWN as the document opened, one after the other,
+// and every canvas kept: a three-hundred-page brief was three hundred bitmaps
+// (well over a gigabyte at 150%), and its citation links — which need only
+// the text layers — waited for the last of them, twenty seconds in. The pass
+// over the pages (renderAllPages) now builds each page's box, text, links and
+// highlights as it did, and leaves its canvas empty; the bitmap is drawn when
+// the page comes within DRAW_MARGIN of the screen and handed back when it
+// goes further than that. A page ON the screen is drawn at once; the ones
+// only near it wait until nothing on screen is still drawing, and then go one
+// at a time, nearest first and below before above — the order the reading
+// wants them in (pdf.js serves its asks in the order they come).
+//
+// What this does to a print: a page far from the screen prints as its box,
+// with its text layer and nothing drawn. Printing from here is for looking at
+// the page in front of you, which is always drawn.
+const DRAW_MARGIN = 1200; // px beyond the screen a page is drawn ahead and kept drawn
+const pagesOnScreen = new Set(); // page wrappers some part of which is on screen
+const pagesToDraw = new Set();   // near the screen and not drawn yet
+let drawingOnScreen = 0;         // draws in flight for pages on screen
+let drawingAhead = 0;            // …and for pages only near it (at most one)
+// The viewport itself as the root (`root: document`), so the margin holds in
+// the hosted app too, where the viewer is an iframe and an implicit root
+// would clip the margin away at the iframe's edge.
+const pageNearObserver = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    const w = en.target;
+    if (!en.isIntersecting) { pagesOnScreen.delete(w); releasePageBitmap(w); continue; }
+    // On screen, margin aside — read off the report itself, since the order
+    // two observers report in is not promised.
+    const r = en.boundingClientRect, rb = en.rootBounds;
+    if (rb && r.bottom > rb.top + DRAW_MARGIN && r.top < rb.bottom - DRAW_MARGIN) pagesOnScreen.add(w);
+    if (!w.__drawn && !w.__task) pagesToDraw.add(w);
+  }
+  pumpPageDraws();
+}, { root: document, rootMargin: `${DRAW_MARGIN}px 0px` });
+// …and which of them are on it, followed as they scroll onto it.
+const pageSeenObserver = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    if (en.isIntersecting) pagesOnScreen.add(en.target); else pagesOnScreen.delete(en.target);
+  }
+  pumpPageDraws();
+}, { root: document });
+
+function watchPageForDrawing(wrapper) {
+  pageNearObserver.observe(wrapper);
+  pageSeenObserver.observe(wrapper);
+}
+/** Every page let go of: the pages are about to be built again (a zoom, a new document). */
+function forgetPageDrawing() {
+  pageNearObserver.disconnect();
+  pageSeenObserver.disconnect();
+  for (const w of pagesEl.querySelectorAll(".page-wrapper")) releasePageBitmap(w);
+  pagesOnScreen.clear();
+  pagesToDraw.clear();
+}
+/** Start what may start: every page on screen, then — with none of those still drawing — the nearest one waiting. */
+function pumpPageDraws() {
+  for (const w of [...pagesToDraw]) {
+    if (!w.isConnected) { pagesToDraw.delete(w); continue; }
+    if (pagesOnScreen.has(w)) { pagesToDraw.delete(w); drawPage(w, true); }
+  }
+  if (drawingOnScreen || drawingAhead || !pagesToDraw.size) return;
+  const num = (w) => Number(w.dataset.pageNumber);
+  let lo = Infinity, hi = -Infinity;
+  for (const w of pagesOnScreen) { lo = Math.min(lo, num(w)); hi = Math.max(hi, num(w)); }
+  let best = null, bestD = Infinity;
+  for (const w of pagesToDraw) {
+    const n = num(w);
+    const d = !isFinite(lo) ? n : n > hi ? n - hi : n < lo ? lo - n + 0.5 : 0;
+    if (d < bestD) { bestD = d; best = w; }
+  }
+  pagesToDraw.delete(best);
+  drawPage(best, false);
+}
+async function drawPage(w, seen) {
+  const d = w.__draw;
+  if (!d || w.__drawn || w.__task) return;
+  if (seen) drawingOnScreen++; else drawingAhead++;
+  const canvas = w.querySelector("canvas");
+  try {
+    canvas.width = d.viewport.width;
+    canvas.height = d.viewport.height;
+    // When the document carries /Highlight annotations we've pulled into the
+    // removable overlay, tell PDF.js NOT to paint annotations onto the canvas —
+    // otherwise each highlight is drawn twice and the canvas copy can't be
+    // deleted. We only do this when there ARE such highlights, so ordinary PDFs
+    // (including local ones with form fields) keep PDF.js's normal annotation
+    // rendering; the only tradeoff is a doc that has both highlights and other
+    // annotations, where the latter won't paint.
+    const annotationMode = docHasAnnotationHighlights
+      ? pdfjsLib.AnnotationMode.DISABLE
+      : pdfjsLib.AnnotationMode.ENABLE;
+    const task = renderPageOnto(d.page, canvas, { viewport: d.viewport, annotationMode });
+    w.__task = task;
+    try {
+      await task.promise;
+      if (w.__task === task) w.__drawn = true;
+    } catch (e) {
+      if (!(e && e.name === "RenderingCancelledException")) console.warn(e);
+    } finally {
+      if (w.__task === task) w.__task = null;
+    }
+  } finally {
+    if (seen) drawingOnScreen--; else drawingAhead--;
+    pumpPageDraws();
+  }
+}
+/**
+ * A page gone far from the screen: its bitmap is dropped (the wrapper keeps
+ * its size, so nothing moves) and pdf.js is told it may let go of what it
+ * decoded for it — a scanned page's image is fifteen megabytes whatever the
+ * size it was drawn at.
+ */
+function releasePageBitmap(w) {
+  pagesToDraw.delete(w);
+  const task = w.__task;
+  w.__task = null;
+  if (task) { try { task.cancel(); } catch { /* done */ } }
+  const canvas = w.querySelector("canvas");
+  if (canvas && (canvas.width || canvas.height)) canvas.width = canvas.height = 0;
+  w.__drawn = false;
+  const page = w.__draw && w.__draw.page;
+  if (!page) return;
+  // It refuses while a render is still winding down; asked again a moment on.
+  let done = false;
+  try { done = page.cleanup(); } catch { done = true; }
+  if (!done) setTimeout(() => { if (!w.__drawn && !w.__task) { try { page.cleanup(); } catch { /* gone */ } } }, 1000);
+}
+
 async function renderPageCanvasAndText(pageNumber) {
   const page = await pdfDoc.getPage(pageNumber);
   // The rotate tool's angle rides on top of the page's own /Rotate, so a page
@@ -2532,9 +2667,10 @@ async function renderPageCanvasAndText(pageNumber) {
   wrapper.style.width  = `${viewport.width}px`;
   wrapper.style.height = `${viewport.height}px`;
 
+  // Empty until the page comes near the screen (drawPage): a canvas with no
+  // size holds no bitmap, and the wrapper's own size holds the page's place.
   const canvas = document.createElement("canvas");
-  canvas.width  = viewport.width;
-  canvas.height = viewport.height;
+  canvas.width = canvas.height = 0;
   wrapper.appendChild(canvas);
 
   const textLayerDiv = document.createElement("div");
@@ -2605,18 +2741,9 @@ async function renderPageCanvasAndText(pageNumber) {
 
   pagesEl.appendChild(wrapper);
 
-  const ctx = canvas.getContext("2d");
-  // When the document carries /Highlight annotations we've pulled into the
-  // removable overlay, tell PDF.js NOT to paint annotations onto the canvas —
-  // otherwise each highlight is drawn twice and the canvas copy can't be
-  // deleted. We only do this when there ARE such highlights, so ordinary PDFs
-  // (including local ones with form fields) keep PDF.js's normal annotation
-  // rendering; the only tradeoff is a doc that has both highlights and other
-  // annotations, where the latter won't paint.
-  const annotationMode = docHasAnnotationHighlights
-    ? pdfjsLib.AnnotationMode.DISABLE
-    : pdfjsLib.AnnotationMode.ENABLE;
-  await page.render({ canvasContext: ctx, viewport, annotationMode }).promise;
+  // The bitmap is drawn when the page comes near the screen, not here.
+  wrapper.__draw = { page, viewport };
+  watchPageForDrawing(wrapper);
 
   // Make the PDF's own hyperlinks clickable (PDF.js paints their visuals but
   // doesn't wire up clicks unless we overlay them ourselves).
@@ -3604,9 +3731,8 @@ async function renderRedactedPage(pageNumber, scale) {
   const rotation = (((page.rotate + delta) % 360) + 360) % 360;
   const vp = page.getViewport({ scale, rotation });
   const pts = page.getViewport({ scale: 1, rotation });
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(vp.width));
-  canvas.height = Math.max(1, Math.round(vp.height));
+  // Where the PDF's fonts are (pdf-fonts.js); read back as a JPEG, never shown.
+  const canvas = fontCanvas(Math.max(1, Math.round(vp.width)), Math.max(1, Math.round(vp.height)));
   const ctx = canvas.getContext("2d");
   // A page with no background of its own would encode as black otherwise.
   ctx.fillStyle = "#ffffff";
@@ -4034,7 +4160,7 @@ async function renderThumbnails() {
     const canvas = document.createElement("canvas");
     canvas.width  = Math.round(vp.width);
     canvas.height = Math.round(vp.height);
-    await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+    await renderPageOnto(page, canvas, { viewport: vp }).promise; // by way of the fonts' document (pdf-fonts.js)
     const label = document.createElement("span");
     label.className = "thumb-label";
     label.textContent = pn;
@@ -4186,11 +4312,10 @@ async function buildThumbCache() {
     if (thumbDataUrlCache.has(i)) continue;
     const page = await pdfDoc.getPage(i + 1);
     const vp = page.getViewport({ scale: THUMB_SCALE });
-    const c = document.createElement("canvas");
-    c.width = Math.round(vp.width);
-    c.height = Math.round(vp.height);
+    const c = fontCanvas(Math.round(vp.width), Math.round(vp.height)); // where the PDF's fonts are (pdf-fonts.js)
     await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
     thumbDataUrlCache.set(i, c.toDataURL());
+    c.width = c.height = 0;
   }
 }
 
