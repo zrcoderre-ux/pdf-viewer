@@ -113,19 +113,6 @@ export function dressLines(body) {
   }
 }
 
-/** The consecutive lines of one box: runs of `.line.rl` siblings sharing a bar key. */
-function ruleBlocks(root) {
-  const blocks = [];
-  let run = null;
-  for (const line of root.querySelectorAll(".line")) {
-    const rl = line.classList.contains("rl");
-    if (rl && run && !line.classList.contains("rt") && run.key === line.dataset.rk && run.lines[run.lines.length - 1].nextElementSibling === line) run.lines.push(line);
-    else if (rl) { run = { key: line.dataset.rk, lines: [line] }; blocks.push(run); }
-    else run = null;
-  }
-  return blocks;
-}
-
 const cellsOf = (line) => [...line.querySelectorAll(":scope > .lt > .rc")];
 /** A laid line's record: "top|left|size|box" (text-reader.js, applyMatchedLayout). */
 const laidOf = (line) => String(line.__laid || "").split("|").map(parseFloat);
@@ -146,50 +133,110 @@ const laidOf = (line) => String(line.__laid || "").split("|").map(parseFloat);
  * top rule, and the top rule of the second, drawn alone, would take its `─`
  * glyphs' own width, right in a monospace font and not in any other.
  *
- * A box never wraps (a wrapped cell is a box with a hole in it), so a box
- * wider than its sheet has the SHEET widened for it, as line lock widens a
- * page for its longest numbered line; the stage scrolls sideways.
+ * A box never wraps (a wrapped cell is a box with a hole in it), and the
+ * sheet never widens for one either: every other page is centred in a column
+ * as wide as the widest sheet, so one wide table in an exhibit set the whole
+ * document off to the side of the stage in a field of grey. A box wider than
+ * its paper is DRAWN SMALLER until it fits (fitWide) — its type, not its
+ * sheet — the way the PDF itself holds that table on the page.
  *
  * On a page laid on its PDF's grid (side by side) every line is positioned on
  * its own, so no two rows share an anonymous table and nothing holds a box
  * together but this pass: there the stack is given one left edge as well, and
  * each row made as tall as the gap to the row below it, so its bar meets the
  * next row's.
+ *
+ * `root` is the column, a page, or a list of pages.
  */
 export function fitRuleRows(root) {
-  for (const line of root.querySelectorAll(".line.rl")) {
-    line.classList.remove("fit");
-    line.style.height = "";
-    for (const c of cellsOf(line)) c.style.width = "";
-    // The left a pass of its own put back: this one's is written over it
-    // below, and a row that is no longer part of a stack keeps the layout's.
-    const l = laidOf(line);
-    if (!isNaN(l[0])) line.style.left = isNaN(l[1]) ? "" : l[1] + "px";
+  const roots = Array.isArray(root) ? root : [root];
+  for (const line of roots.flatMap((r) => [...r.querySelectorAll(".line.rl")])) {
+    const lt = line.querySelector(":scope > .lt");
+    if (lt && lt.style.fontSize) lt.style.fontSize = ""; // measured at its own size again
+    unfit(line);
   }
-  for (const sec of root.querySelectorAll(".tpage")) {
-    if (!sec.__ruleWide) continue;
-    sec.__ruleWide = false;
-    sec.style.width = ""; sec.style.maxWidth = "";
+  const stacks = roots.flatMap((r) => ruleStacks(r));
+  fitStacks(stacks);
+  fitWide(stacks);
+}
+
+/** A row as the table layout would draw it on its own: what a fit wrote, taken off. */
+function unfit(line) {
+  line.classList.remove("fit");
+  line.style.height = "";
+  for (const c of cellsOf(line)) c.style.width = "";
+  // The left a pass of its own put back: this one's is written over it
+  // below, and a row that is no longer part of a stack keeps the layout's.
+  const l = laidOf(line);
+  if (!isNaN(l[0])) line.style.left = isNaN(l[1]) ? "" : l[1] + "px";
+}
+
+// How many times a box too wide for its paper is measured and drawn smaller.
+// The first answer is nearly exact (only the one-pixel bars do not shrink with
+// the type); the rest take up what rounding leaves over.
+const WIDE_PASSES = 3;
+
+/**
+ * A box wider than its paper, drawn smaller until it fits.
+ *
+ * The TYPE in the box gives and the sheet does not: every row's cells take
+ * one smaller size, so the box keeps its shape — its columns squared up
+ * again at that size (fitStacks) — and ends at the page's right margin. The
+ * numbered margin beside it is not part of the box and keeps its size. On
+ * the PDF's grid (side by side) a sheet is the PDF page's width and every row
+ * is set at its PDF row's own size, so nothing is changed there.
+ *
+ * Every stack is measured before any is written, so a pass lays the document
+ * out once however many boxes it has.
+ */
+function fitWide(stacks) {
+  let todo = stacks.map((lines) => ({ lines, f: 1 }));
+  for (let pass = 0; pass < WIDE_PASSES && todo.length; pass++) {
+    const over = [];
+    for (const s of todo) {
+      const m = overrun(s.lines);
+      if (!m) continue;
+      // Only the text shrinks with the type; the bars are a pixel at any size.
+      const want = Math.floor(s.f * ((m.room - m.bars) / (m.need - m.bars)) * 1000) / 1000;
+      if (want > 0 && want < s.f) { s.f = want; over.push(s); }
+    }
+    for (const s of over) {
+      const size = (s.f * 100).toFixed(1) + "%";
+      for (const line of s.lines) {
+        const lt = line.querySelector(":scope > .lt");
+        if (lt) lt.style.fontSize = size;
+        unfit(line); // its cells measured again at the new size, not at the widths they were given
+      }
+    }
+    fitStacks(over.map((s) => s.lines));
+    todo = over;
   }
-  for (const stack of ruleStacks(root)) fitStack(stack);
-  const widen = new Map();
-  for (const block of ruleBlocks(root)) {
-    const line = block.lines[0];
-    const body = line.closest(".page-body");
-    if (!body) continue;
-    const sec = body.closest(".tpage");
-    if (!sec || sec.classList.contains("matched")) continue;
-    const limit = body.getBoundingClientRect().right - parseFloat(getComputedStyle(body).paddingRight || 0);
-    let right = 0;
-    for (const l of block.lines) right = Math.max(right, l.getBoundingClientRect().right);
-    const over = right - limit;
-    if (over > 0.5) widen.set(sec, Math.max(widen.get(sec) || 0, over));
+}
+
+/**
+ * How far a box runs past its paper: `need`, the width from its first cell to
+ * its right edge, against `room`, the width from there to the page's right
+ * margin; `bars`, the pixels of it that are bars. Null for a box that fits,
+ * or one on a page that is not a flowing sheet laid out on the screen.
+ */
+function overrun(lines) {
+  const body = lines[0].closest(".page-body");
+  const sec = body && body.closest(".tpage");
+  if (!sec || sec.classList.contains("matched") || sec.classList.contains("swapped")) return null;
+  const b = body.getBoundingClientRect();
+  if (!b.width) return null; // not laid out
+  const limit = b.right - parseFloat(getComputedStyle(body).paddingRight || 0);
+  let right = -Infinity, left = Infinity, bars = 0;
+  for (const line of lines) {
+    right = Math.max(right, line.getBoundingClientRect().right);
+    const first = line.querySelector(":scope > .lt > :first-child");
+    if (first) left = Math.min(left, first.getBoundingClientRect().left);
+    bars = Math.max(bars, line.querySelectorAll(":scope > .lt > .rb").length);
   }
-  for (const [sec, over] of widen) {
-    sec.__ruleWide = true;
-    sec.style.width = Math.ceil(sec.getBoundingClientRect().width + over) + "px";
-    sec.style.maxWidth = "none";
-  }
+  if (!(right - limit > 0.5) || !isFinite(left)) return null;
+  const need = right - left, room = limit - left;
+  if (room <= bars || need <= bars) return null;
+  return { need, room, bars };
 }
 
 /** The consecutive rule rows of a page: one box, whatever its rows' own bars say. */
@@ -267,8 +314,20 @@ const barsOf = (line) => String(line.dataset.rk || "").split(",").filter((s) => 
 // width of ninety glyphs in a font that was never meant to draw them.
 const needOf = (c) => (!c || c.classList.contains("hf") ? 0 : c.getBoundingClientRect().width);
 
-function fitStack(lines) {
-  if (lines.length < 2) return;
+/**
+ * Stacks squared up: every one MEASURED, then every one written. Measured
+ * and written a stack at a time, each measure after the last one's writes
+ * laid the whole document out again — a second and a half for a hundred
+ * boxes in an exhibit set, on every layout pass.
+ */
+function fitStacks(stacks) {
+  const plans = stacks.map(planStack);
+  for (const plan of plans) if (plan) applyStack(plan);
+}
+
+/** A stack's grid, measured (reads only). Null for one left to the table layout. */
+function planStack(lines) {
+  if (lines.length < 2) return null;
   const rows = [], cells = [], kept = [];
   for (const line of lines) {
     const bars = barsOf(line), cs = cellsOf(line);
@@ -278,7 +337,7 @@ function fitStack(lines) {
     if (!bars.length || cs.length !== bars.length + 1) continue;
     rows.push(bars); cells.push(cs); kept.push(line);
   }
-  if (kept.length < 2) return;
+  if (kept.length < 2) return null;
   const { lead, spans } = ruleGrid(rows, cells.map((cs) => cs.map(needOf)));
   // Side by side each row stands where the PDF's grid put it, so the stack is
   // squared up there as well: one left for all of them, and each row as tall
@@ -288,6 +347,11 @@ function fitStack(lines) {
   const laid = body && body.classList.contains("fixed") ? kept.map(laidOf) : null;
   let left = null;
   if (laid) for (const l of laid) if (!isNaN(l[1])) left = left == null ? l[1] : Math.min(left, l[1]);
+  return { kept, cells, lead, spans, laid, left };
+}
+
+/** …and written. */
+function applyStack({ kept, cells, lead, spans, laid, left }) {
   kept.forEach((line, k) => {
     line.classList.add("fit");
     const cs = cells[k];

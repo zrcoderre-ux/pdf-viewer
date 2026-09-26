@@ -930,8 +930,12 @@ app, which routes it to the reader tab.
   exactly what the file says, and the bars are located in the file's own
   text, so a row whose real name is longer than its fake is still a row of
   the same box. A box never wraps — a wrapped cell is a box with a hole in it
-  — so a box wider than its sheet widens the sheet, as line lock does for a
-  long numbered line, and the stage scrolls sideways. Two boxes stacked with
+  — and it **never widens its sheet** either: a box wider than its paper is
+  **drawn smaller** until it ends at the page's right margin, its columns
+  squared up again at that size and the numbered margin beside it left at its
+  own. (A sheet widened for one wide table put every other page in the
+  document off centre, in a column as wide as that table, with the stage
+  scrolled sideways into grey.) Two boxes stacked with
   different widths keep their own columns; the one row between them that
   belongs to neither is drawn on its own and sized to the box under it. A
   page laid on its PDF's grid (side by side) positions every line on its own,

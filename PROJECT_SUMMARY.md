@@ -1127,6 +1127,22 @@ edge there and each row the height of the gap to the row below, so its bars
 meet the next row's. `test-rules.html` reads the geometry back out of a page
 in both views.
 
+A box never widens its sheet. It used to (the line-lock rule, applied to
+boxes), and since `#pages` is `width: max-content` with every sheet centred
+in it, one wide table in an exhibit set put every other page of the document
+off centre in a column thousands of pixels wide. `fitWide` draws a box wider
+than its paper smaller instead: the rows' `.lt` (`display: contents`) take
+one percentage font size, so only the cells shrink and the numbered margin
+keeps its size, and the stack is squared up again at that size. Up to three
+passes (the one-pixel bars do not shrink). Not on the grid: a matched sheet
+is the PDF page's width and each row is at its PDF row's size. Every stack is
+measured before any is written (`planStack` / `applyStack`), so a pass costs
+a handful of layouts rather than one per box. The fit is redone when the
+paper's width changes (`applyPageWidthNow`, which runs after the layout pass
+on a zoom or resize) and for the pages `shapePages` has just fitted, whose
+type may have given. `fitRuleRows` takes the column, a page, or a list of
+pages.
+
 ## Fixes applied in earlier sessions
 
 All in `viewer/` unless noted. Each fix is documented inline at the call

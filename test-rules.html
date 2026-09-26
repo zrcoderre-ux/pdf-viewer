@@ -100,6 +100,17 @@ for (const [id, name] of [["laid", "side by side, on the PDF's grid"], ["flow", 
   if (id === "laid") {
     check("every row is given one left edge", same(rows.map((r) => r.left)), rows.map((r) => r.left).join(" "));
     check("each row reaches the row below it", rows.slice(0, -1).every((r, k) => Math.abs(r.top + r.height - rows[k + 1].top) <= 1), rows.map((r) => `${r.top}+${r.height}`).join(" "));
+  } else {
+    // A box wider than its paper is drawn smaller, and the paper keeps its
+    // width: a sheet widened for it put every other page off centre, in a
+    // column as wide as the widest box.
+    const body = document.getElementById(id);
+    const sec = body.closest(".tpage");
+    const margin = body.getBoundingClientRect().right - parseFloat(getComputedStyle(body).paddingRight);
+    const right = Math.max(...rows.map((r) => r.right));
+    check("the sheet keeps the paper's width", Math.abs(sec.getBoundingClientRect().width - 816) <= 1 && !sec.style.width, `${sec.getBoundingClientRect().width} "${sec.style.width}"`);
+    check("the box is drawn smaller than the reading size", parseFloat(body.querySelector(".line.rl > .lt").style.fontSize) < 100, body.querySelector(".line.rl > .lt").style.fontSize);
+    check("…and ends at the page's right margin", right <= margin + 1 && right >= margin - 4, `${right} vs ${margin}`);
   }
 }
 out.push("", `${"=".repeat(52)}`, `FAILURES: ${fails}`);
