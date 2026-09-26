@@ -3210,6 +3210,7 @@ function applyPageWidthNow() {
   const root = document.documentElement.style;
   root.setProperty("--reader-size-eff", (settings.fontSize * zoomNow()) + "px");
   const w = pageWidthNow();
+  const was = getComputedStyle(document.documentElement).getPropertyValue("--reader-width-eff").trim();
   root.setProperty("--reader-width", w + "px");
   root.setProperty("--reader-width-eff", w + "px");
   const st = $("st-lock");
@@ -3218,6 +3219,9 @@ function applyPageWidthNow() {
       ? "Side by side: the text in the PDF's own type sizes, on the PDF's own grid — the reading size has no say while the grid is on"
       : "";
   shapePages();
+  // The boxes were last fitted to the paper as it stood (the layout pass runs
+  // before this on a zoom or a resize): paper of another width fits them again.
+  if (doc && was !== w + "px") fitRuleRows(pagesEl);
 }
 
 // ── citations ────────────────────────────────────────────────────────────────────────
@@ -10031,6 +10035,11 @@ function shapePages({ all = false } = {}) {
       if (!moved) break;
     }
   });
+  // A box too wide for its paper is drawn to fit it (rules.js), and it was
+  // fitted at the type its page had before this: fitted again at the type the
+  // page has now, so it still ends at the margin.
+  const boxed = measure.filter((s) => s.sec.querySelector(".line.rl")).map((s) => s.sec);
+  if (boxed.length) fitRuleRows(boxed);
 }
 
 /** A slot back as the pane built it: the levelling and the held-open box go. */
