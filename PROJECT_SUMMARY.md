@@ -408,14 +408,15 @@ stood between the reader and the PDF page they had scrolled to:
    — sixty thousand layout objects on the combined file, a third of a second
    each time. Every hop to another member's PDF, and every trim that told a
    PDF off the screen to put its fonts down, paid it. pdf.js now gets a hidden
-   same-origin iframe's document as its `ownerDocument` (`fontFrame`,
-   `fontDoc`): the fonts go into THAT set, and a page is drawn on a canvas of
-   that document (`renderPage`) and copied onto the pane's. Checked pixel for
-   pixel against a plain render, embedded and non-embedded fonts, in the
-   hosted page and in the unpacked extension. **Every pdf.js `page.render` in
-   the reader must draw on a `fontDoc` canvas** — on one of this document's, a
-   font embedded in the PDF is not found and its text comes out in a fallback
-   (27,000 pixels of difference on a one-page test; see "Things to know").
+   same-origin iframe's document as its `ownerDocument` (`viewer/pdf-fonts.js`,
+   `fontDocument`, shared with the viewer): the fonts go into THAT set, and a
+   page is drawn on a canvas of that document and copied onto the pane's
+   (`renderPageOnto`). Checked pixel for pixel against a plain render,
+   embedded and non-embedded fonts, in the hosted page and in the unpacked
+   extension. **Every pdf.js `page.render` must draw on a canvas of that
+   document** — on one of the page's own, a font embedded in the PDF is not
+   found and its text comes out in a fallback (27,000 pixels of difference on
+   a one-page test; see "Things to know").
 2. **A new pdf.js worker per PDF.** `getDocument` starts (and `destroy`
    ends) a worker for every document it opens unless handed one: two
    megabytes of script compiled into a new thread, 95 ms an open. One
@@ -465,21 +466,52 @@ open → 11 at most, 6 or 7 once it settles).
 A scanned page's 350 ms is now the page itself: pdf.js 4.6 decoding a
 300-dpi JPEG in its own worker.
 
-**The PDF viewer (`viewer.css`).** The viewer draws every page as a document
-opens and keeps every canvas, and each page drawn had the browser paint and
-composite the whole column again: six of the twenty seconds before a
-300-page brief's citations were linked. `.page-wrapper` takes
-`content-visibility: auto` (it carries its own width and height, so a skipped
-page keeps its size): links in 17.3–19.7 s → 11.1–11.9 s, with no long tasks.
-The screen is byte-identical, a print carries the same pages, and everything
-that floats over a page hangs off `<body>`, so the containment has nothing to
-clip.
+### The PDF viewer draws what is looked at (`viewer.js`, `viewer.css`)
 
-What is left, largest first: opening a long export still holds the thread
-about a second (300 pages) — the text is laid out once without the pane and
-again beside it; and the viewer still draws and holds every page's canvas up
-front (a lazy canvas would have to be drawn for a print, which prints what is
-on screen).
+The viewer used to DRAW every page as a document opened, one after the other,
+and keep every canvas: a 300-page brief was 300 bitmaps (well over a gigabyte
+at 150%), and its citation links — which need only the text layers — waited
+for the last of them. `renderAllPages` now builds each page's box, text layer,
+links and highlights as before and leaves its canvas empty (0 × 0, so it holds
+no bitmap; the wrapper's own size holds the page's place). Two observers with
+the viewport as their root (`root: document`, so the margin also holds inside
+the hosted app's iframe) draw a page when it comes within `DRAW_MARGIN` of the
+screen and hand its bitmap back, with `page.cleanup()`, when it goes further.
+A page on screen is drawn at once; the ones only near it wait until nothing on
+screen is drawing and go one at a time, nearest first (`pumpPageDraws`).
+
+The consequence the operator agreed to: **a print carries only the pages near
+the screen drawn**; the rest print as their boxes. Printing from the viewer is
+for looking at the page in front of you, which is always drawn.
+
+Drawing late made the font problem above the viewer's too: a page far into a
+document drawing with a font nothing before it used (an exhibit set in another
+face) walked all 300 text layers — a 360 ms hold on the first visit to such a
+page. The viewer opens its PDF into the same fonts' document
+(`pdf-fonts.js`), so its page canvases, the thumbnails, the thumbnail cache,
+the redacted copy and OCR's recognition image are all drawn by way of it.
+
+`.page-wrapper` also takes `content-visibility: auto`: it carries its own
+width and height, so a skipped page keeps its size, and a page is not painted
+until it comes near the screen. The screen is byte-identical, a print carries
+the same pages, and everything that floats over a page hangs off `<body>`, so
+the containment has nothing to clip.
+
+| PDF viewer | before | after |
+|---|---|---|
+| 300-page brief, page 1 drawn | 0.34–0.41 s | 0.40–0.47 s |
+| 300-page brief, every page set up (links placed) | 17.3–19.7 s | 3.2–3.4 s |
+| 100-page 38 MB scan, every page set up | 39.4 s | 1.3 s |
+| 300-page brief, bitmaps held after opening | 300 | 2 |
+| a jump to a page bringing new fonts, longest hold | 495 ms | none |
+
+A jump to a far page of a SCAN now costs that page's decode (under a second
+at 300 dpi), where before every page had been decoded up front.
+
+What is left, largest first: opening a long export in the reader still holds
+the thread about a second (300 pages) — the text is laid out once without the
+pane and again beside it; and a scanned page's decode is pdf.js 4.6's own JPEG
+decoder.
 
 ### The numbered margin is the boundary
 
@@ -1703,14 +1735,16 @@ counts as standing.
   rectsForRange rewrite specifically works around 4.x TextLayer behavior.
   If upgrading PDF.js, re-verify the placement logic against a long
   document.
-- **The text reader's PDF fonts are not in its own document.** pdf.js is
-  handed `fontDoc` (a hidden iframe's document) as `ownerDocument`, so every
-  `page.render` in `text-reader.js` must draw on a canvas made by
-  `fontDoc.createElement("canvas")` — `renderPage` for the pane and the
-  swapped-in pages, and the warm pages and the redacted copy directly. A
-  canvas of the reader's own document renders an embedded font in a
-  fallback. The text layer (`pdfjsLib.TextLayer`) is unaffected: it sets
-  generic families only.
+- **A PDF's fonts are not in the page's own document** — in the viewer or
+  the reader. pdf.js is handed `fontDocument()` (`viewer/pdf-fonts.js`, a
+  hidden iframe's document) as `ownerDocument`, so every `page.render` must
+  draw on a canvas of that document: `renderPageOnto` for one that is shown
+  (it draws there and copies onto yours), `fontCanvas` for one that is read
+  back (toBlob, toDataURL, createImageBitmap). A canvas of the page's own
+  document renders an embedded font in a fallback. A new render site that
+  forgets this looks right on a PDF with system fonts and wrong on one with
+  embedded ones — test with both. The text layer (`pdfjsLib.TextLayer`) is
+  unaffected: it sets generic families only.
 - **The citation-detection layer is a line-by-line port of `pdf_linker.py`**
   and has been validated citation-for-citation. Don't refactor regexes
   without a side-by-side diff against the Python.
@@ -1808,7 +1842,8 @@ viewer/xlsx-write.js                     Fix? cells written back into the same .
 viewer/leaks.js                          LEAKS.xlsx model for the review bar (pure; test-leaks.mjs)
 viewer/web-shim.js                       chrome.* shim for the hosted pages (was inline in viewer.js)
 viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
-viewer/viewer.js                     PDF.js loader, two-pass renderer, naming plumbing
+viewer/viewer.js                     PDF.js loader, two-pass renderer (pages drawn as they near the screen), naming plumbing
+viewer/pdf-fonts.js                  The document pdf.js loads fonts into, and drawing a page by way of it (viewer + reader)
 viewer/autoscroll.js                 Auto-scroll: ppm-paced reading scroll + its control bar
 viewer/rotation.js                   Page rotation: per-page angles, rotate bar, rotated geometry
 viewer/ocr-store.js                  Saved OCR: recognized pages in IndexedDB by file hash, kept N days since last use
