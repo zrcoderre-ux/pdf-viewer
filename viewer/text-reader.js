@@ -53,6 +53,26 @@ import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdfjs/build/pdf.worker.mjs");
+// THE PDFs' FONTS LIVE IN A DOCUMENT OF THEIR OWN. pdf.js loads a PDF's fonts
+// as FontFaces into `document.fonts`, and Chrome answers every change to that
+// set — a font added as a page is first drawn, the fonts taken away again by
+// `cleanup()` and `destroy()` — by laying out EVERY LINE OF TEXT in the
+// document again ("fonts changed": all sixty thousand layout objects of a
+// combined file of forty filings, a third of a second each time). Side by
+// side, that is the text column: every hop to another member's PDF, and every
+// trim that told a PDF off the screen to put its fonts down, laid the whole
+// reel out again, and the page the reader had scrolled to waited behind it.
+// So pdf.js is handed this frame's document instead (`ownerDocument`): the
+// fonts go into ITS set, which lays out nothing, and a page is drawn on a
+// canvas of that document (renderPage), the one place its fonts can be
+// found, then copied onto the pane's own. Measured in Chromium: the same
+// pixels, and a jump across a combined file 620 ms → 60 ms.
+const fontFrame = document.createElement("iframe");
+fontFrame.setAttribute("aria-hidden", "true");
+fontFrame.tabIndex = -1;
+fontFrame.style.cssText = "position:fixed;left:-10px;top:-10px;width:1px;height:1px;border:0;visibility:hidden;pointer-events:none";
+document.body.appendChild(fontFrame);
+const fontDoc = fontFrame.contentDocument;
 
 const $ = (id) => document.getElementById(id);
 const toolbar = $("toolbar");
@@ -1537,7 +1557,26 @@ async function openFileNow(file, handle) {
     warmForLeaks();
     return;
   }
+  openPdfAhead(file.name);
   openText(await file.text(), file.name, handle || null);
+}
+/**
+ * The PDF beside an export, opened WHILE ITS TEXT IS BEING BUILT rather than
+ * after. Building a long export's pages holds this thread for a second, and
+ * the PDF used to be asked for only once they were up — so reading the file,
+ * starting pdf.js's worker and parsing the document all came after that
+ * second, one after the other. Asked for first, the worker starts and the
+ * file is read on threads of their own while the pages are built, and the
+ * PDF is open, or nearly, by the time the pane asks for it. Only side by side
+ * (the pane is what wants it), and only the PDF the export's own name
+ * matches: a combined file's members are not known until it is parsed.
+ */
+function openPdfAhead(name) {
+  if (!sbsOn) return;
+  sharedPdfWorker();
+  const hit = pdfForName(name);
+  const src = hit ? folderPdfs.find((p) => p.name === hit) : null;
+  if (src) loadPdf(src, { now: true }).catch(() => { /* the pane reports it when it asks */ });
 }
 
 function openText(text, name, handle, built) {
@@ -7703,19 +7742,49 @@ function trimPdfs() {
 // turn. Whatever the reader has actually scrolled to jumps the queue: a slot
 // coming into view asks with `now`, which moves that PDF (and the reading of its
 // grid) to the front.
+//
+// …AND WHAT CAN WAIT FOR THE SCREEN, DOES. Opening a PDF queues two more jobs
+// behind it: measuring every page and reading the grid of the pages the
+// reading is at. Both were run the moment the open was, which is the moment
+// the page on screen had just started to draw — so the sizes landed first,
+// the whole document was laid out again for them (four hundred milliseconds
+// on a three-hundred-page export, in one task), and the page the reader was
+// waiting to see was drawn after that. Those jobs are marked `later`, and
+// while a page on screen is still being drawn (drawingSeen) the queue runs
+// only what is not: another PDF's OPEN goes ahead of them, since a page on
+// screen may be waiting on it, and the rest wait for the drawing to finish
+// (seenEnd pumps the queue again) — or for DRAW_WAIT_MAX, so reading down a
+// document without stopping still gets its grid.
 const pdfJobs = [];        // queued work, each tagged with the PDF it is for
 let pdfJobBusy = false;
+const DRAW_WAIT_MAX = 1500; // ms the `later` work waits on the screen at most
+let pdfJobWake = 0;
 function pumpPdfJobs() {
   if (pdfJobBusy) return;
   pdfJobBusy = true;
   (async () => {
     try {
-      while (pdfJobs.length) {
-        const job = pdfJobs.shift();
+      for (;;) {
+        const k = nextPdfJob();
+        if (k < 0) break;
+        const job = pdfJobs.splice(k, 1)[0];
         try { await job.run(); } catch { /* whoever asked for it reports it */ }
       }
     } finally { pdfJobBusy = false; }
   })();
+}
+/** Which queued job runs next: the first, unless it can wait for the screen (-1: nothing now). */
+function nextPdfJob() {
+  if (!pdfJobs.length) return -1;
+  if (!drawingSeen || performance.now() - drawingSeenSince > DRAW_WAIT_MAX) return 0;
+  const k = pdfJobs.findIndex((j) => !j.later);
+  if (k < 0) {
+    // Everything left can wait: the drawing's end pumps again, and this is
+    // the backstop in case it never says so.
+    clearTimeout(pdfJobWake);
+    pdfJobWake = setTimeout(pumpPdfJobs, Math.max(0, DRAW_WAIT_MAX - (performance.now() - drawingSeenSince)) + 20);
+  }
+  return k;
 }
 /** Everything queued for one PDF to the front, keeping the order it was asked in. */
 function bumpPdfJobs(name) {
@@ -7761,6 +7830,24 @@ function loadPdf(src, { now = false } = {}) {
 async function openPdf(src) {
   return duringAsync("opening a PDF", () => openPdfNow(src));
 }
+// ONE pdf.js WORKER FOR EVERY PDF. Left to itself, `getDocument` starts a
+// worker of its own for each document — a thread, and two megabytes of
+// script loaded and compiled into it — and `destroy` ends it. That is a
+// tenth of a second on every open before a byte of the PDF is read, and the
+// reader opens a lot of them: a combined file names a PDF per member, and
+// trimPdfs closes what the reading has left, so reading back up the folder
+// opens them again. Handed a worker, pdf.js leaves it running when the
+// document is destroyed, and the next open talks to a worker that is
+// already there: 95 ms an open → 4, measured in Chromium. The documents
+// already went through one queue (pdfJobs) a document at a time; what one
+// thread does cost is two documents DRAWN at once taking turns rather than
+// running side by side, which is the seam between two members of a combined
+// file, and there the page on screen is drawn first either way (drawTurn).
+let pdfWorker = null;
+function sharedPdfWorker() {
+  if (!pdfWorker || pdfWorker.destroyed) pdfWorker = new pdfjsLib.PDFWorker();
+  return pdfWorker;
+}
 /**
  * The PDF, HANDED BACK THE MOMENT IT IS OPEN.
  *
@@ -7782,7 +7869,7 @@ async function openPdf(src) {
  */
 async function openPdfNow(src) {
   const file = src.file || await src.handle.getFile();
-  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer(), worker: sharedPdfWorker(), ownerDocument: fontDoc }).promise;
   const n = pdf.numPages;
   const hole = () => new Array(n).fill(null);
   const info = { pdf, count: n, sizes: hole(), name: src.name, lines: hole(), geoms: hole(), rows: hole(), gridRead: new Set(), gridQueued: true };
@@ -7790,11 +7877,11 @@ async function openPdfNow(src) {
   // the pages as they land — and keeps them after the PDF itself is closed.
   pdfSizes.set(src.name, info.sizes);
   pdfBytes.set(src.name, file.size || 0);
-  pdfJobs.push({ name: src.name, run: () => measurePdf(info) });
+  pdfJobs.push({ name: src.name, later: true, run: () => measurePdf(info) });
   // The line grid comes after — for the pages the reading is at, and no
   // others (gridNear): a page is worth seeing before it is worth aligning,
   // and the pane re-aligns as it lands.
-  pdfJobs.push({ name: src.name, run: () => readPdfGrid(info) });
+  pdfJobs.push({ name: src.name, later: true, run: () => readPdfGrid(info) });
   pumpPdfJobs();
   return info;
 }
@@ -7813,22 +7900,36 @@ const SIZE_BATCH = 32;
 async function measurePdf(info) {
   return duringAsync("measuring the PDF's pages", () => measurePdfNow(info));
 }
+// A BATCH IS A JOB. The measuring used to be one job for the whole document,
+// every batch of it, with the idle waits between them — and the queue is one
+// job at a time, so a page coming onto the screen from ANOTHER PDF waited for
+// every page of this one to be measured before its PDF could even be opened:
+// seconds, on an exhibit set of a thousand pages. Each batch is its own job
+// now, and the next is queued (at the back, and `later`) once the thread has
+// had its idle moment — outside the queue, which is free in the meantime.
 async function measurePdfNow(info) {
   const { pdf, sizes } = info;
-  for (let at = 0; at < info.count; at += SIZE_BATCH) {
-    if (!stillOpen(info)) return;
-    const upto = Math.min(at + SIZE_BATCH, info.count);
-    const want = [];
-    for (let i = at; i < upto; i++) if (!sizes[i]) want.push(i);
-    const got = await Promise.all(want.map((i) => pdf.getPage(i + 1).catch(() => null)));
-    got.forEach((page, k) => {
-      if (!page) return;
-      const v = page.getViewport({ scale: 1 });
-      sizes[want[k]] = { w: v.width, h: v.height };
+  if (!stillOpen(info)) return;
+  const at = info.measured || 0;
+  if (at >= info.count) return;
+  const upto = Math.min(at + SIZE_BATCH, info.count);
+  const want = [];
+  for (let i = at; i < upto; i++) if (!sizes[i]) want.push(i);
+  const got = await Promise.all(want.map((i) => pdf.getPage(i + 1).catch(() => null)));
+  got.forEach((page, k) => {
+    if (!page) return;
+    const v = page.getViewport({ scale: 1 });
+    sizes[want[k]] = { w: v.width, h: v.height };
+  });
+  info.measured = upto;
+  if (at === 0) noteRatio(sizes); // the folder's paper, from the first page read
+  sizeSlotsFor(info.name);
+  if (upto < info.count) {
+    idleClock().then(() => {
+      if (!stillOpen(info)) return;
+      pdfJobs.push({ name: info.name, later: true, run: () => measurePdf(info) });
+      pumpPdfJobs();
     });
-    if (at === 0) noteRatio(sizes); // the folder's paper, from the first page read
-    sizeSlotsFor(info.name);
-    if (upto < info.count) await idleClock();
   }
 }
 /**
@@ -7942,7 +8043,7 @@ function gridNear() {
     if (!info) { loadPdf(t.src, { now: true }).catch(() => {}); continue; }
     if (info.gridQueued || !gridPagesFor(info).length) continue;
     info.gridQueued = true;
-    pdfJobs.unshift({ name: info.name, run: () => readPdfGrid(info) });
+    pdfJobs.unshift({ name: info.name, later: true, run: () => readPdfGrid(info) });
     pumpPdfJobs();
   }
 }
@@ -8330,7 +8431,7 @@ function planWarmPages() {
     // The open is asked for HERE and so is queued ahead of the drawing, which
     // then never waits on the queue from inside a job the queue is running.
     const opened = loadPdf(t.src);
-    pdfJobs.push({ name: t.src.name, run: () => warmPage(opened, key, t.page, cssWidth) });
+    pdfJobs.push({ name: t.src.name, later: true, run: () => warmPage(opened, key, t.page, cssWidth) });
   }
   pumpPdfJobs();
 }
@@ -8347,7 +8448,7 @@ async function warmPageNow(opened, key, pageNo, cssWidth) {
     if (!warmWanted.has(key)) return;
     const base = page.getViewport({ scale: 1 });
     const vp = page.getViewport({ scale: cssWidth / base.width });
-    const canvas = document.createElement("canvas");
+    const canvas = fontDoc.createElement("canvas"); // where the PDF's fonts are (fontFrame)
     canvas.width = Math.round(vp.width);
     canvas.height = Math.round(vp.height);
     let bmp = null;
@@ -8566,6 +8667,25 @@ function warmForLeaks() {
 }
 
 // ── rendering a page into a canvas ──
+/**
+ * A page drawn onto a canvas of THIS document, by way of one of fontDoc's —
+ * the only document its fonts are in (fontFrame). Answers a RenderTask's
+ * shape: `promise`, and `cancel`.
+ */
+function renderPage(page, canvas, viewport) {
+  const off = fontDoc.createElement("canvas");
+  off.width = canvas.width;
+  off.height = canvas.height;
+  const task = page.render({ canvasContext: off.getContext("2d"), viewport });
+  const promise = task.promise
+    .then(() => {
+      // Let go of, or drawn again at another size, while it was drawing: the
+      // canvas is somebody else's now.
+      if (canvas.width === off.width && canvas.height === off.height) canvas.getContext("2d").drawImage(off, 0, 0);
+    })
+    .finally(() => { off.width = off.height = 0; });
+  return { promise, cancel: () => task.cancel() };
+}
 async function renderInto(el, src, pageNo, cssWidth) {
   // Named for the breadcrumb: a tab killed while a page was being drawn says
   // WHICH page of which PDF, which is the difference between "a scan did it"
@@ -8575,6 +8695,16 @@ async function renderInto(el, src, pageNo, cssWidth) {
 async function renderIntoNow(el, src, pageNo, cssWidth) {
   const want = src.name + "|" + pageNo + "|" + cssWidth + "|" + (window.devicePixelRatio || 1);
   if (el.dataset.rendered === want) return;
+  // A page ON SCREEN counts as being drawn from the moment it is asked for,
+  // not from the moment its bitmap starts: until then it is waiting for its
+  // PDF to open, and the work queued behind that open (the measuring, the
+  // grid) is exactly what must not go ahead of it (nextPdfJob).
+  const seen = onScreen.has(el);
+  if (seen) seenBegin();
+  try { await drawSlot(el, src, pageNo, cssWidth, want, seen); }
+  finally { if (seen) seenEnd(); }
+}
+async function drawSlot(el, src, pageNo, cssWidth, want, seen) {
   el.dataset.want = want;
   // A page warmed for the LEAKS worksheet is already drawn: it goes up now,
   // in place of the "Loading…" box, and the sharp one is drawn over it below.
@@ -8596,6 +8726,16 @@ async function renderIntoNow(el, src, pageNo, cssWidth) {
   try { page = await info.pdf.getPage(pageNo); } catch { return; }
   if (el.dataset.want !== want) return;
   el.__page = page; // …so the page can be let go of when the slot is released
+  // A page only NEAR the screen waits here for the pages on it (drawTurn) —
+  // before its canvas is touched, so whatever it is showing meanwhile (the
+  // worksheet's held bitmap, the last drawing at another width) stays up.
+  const done = seen ? null : await drawTurn(el);
+  if (!seen && !done) return; // let go of while it waited
+  try { await drawPage(el, src, pageNo, cssWidth, want, page); }
+  finally { if (done) done(); }
+}
+async function drawPage(el, src, pageNo, cssWidth, want, page) {
+  if (el.dataset.want !== want) return;
   const base = page.getViewport({ scale: 1 });
   const cssScale = cssWidth / base.width;
   // What a redaction box is drawn through, and the page's own box it is held
@@ -8612,7 +8752,7 @@ async function renderIntoNow(el, src, pageNo, cssWidth) {
   canvas.style.width = cssWidth + "px";
   canvas.style.height = Math.round(vp.height / dpr) + "px";
   sheet.style.height = "";
-  const task = page.render({ canvasContext: canvas.getContext("2d"), viewport: vp });
+  const task = renderPage(page, canvas, vp);
   el.__task = task;
   try { await task.promise; } catch (e) { if (!(e && e.name === "RenderingCancelledException")) console.warn(e); return; }
   finally { if (el.__task === task) el.__task = null; }
@@ -8788,6 +8928,98 @@ function blankLineNumbers(layer) {
   if (Math.max(...tops) - Math.min(...tops) < H * 0.4) return;
   for (const c of best) c.sp.textContent = "";
 }
+// ── the page on screen is drawn first ──
+//
+// A slot is drawn when the pane's observer says it is NEAR the screen —
+// within PDF_MARGIN of it, so the next page is ready before it is scrolled
+// to. Every slot in that band asked at once, in the order they stand, and
+// pdf.js serves the asks in the order they come: jump to page fifty of a
+// scanned exhibit and pages 48 and 49, above the screen, were decoded first —
+// a third of a second each at 300 dpi — and the page the reader jumped TO
+// appeared a second after the jump, behind both of them.
+//
+// So a slot actually ON SCREEN is drawn at once, and one only near it waits
+// its turn: while a page on screen is still being drawn none of the pages
+// around it start, and then they go one at a time (DRAW_AHEAD), nearest the
+// screen first and below it before above — so a page that scrolls on while it
+// waits is never more than one page's drawing behind. What is on screen is
+// the observers' answer, so knowing it costs no layout: the pane's and the
+// inline pages' own say so as they ask for a page (entryOnScreen — the order
+// the browser runs two observers' reports in is not promised), and
+// screenObserver (no margin, the viewport as its root, which clips to the
+// pane and to the stage) follows a page from near the screen onto it.
+const onScreen = new Set();   // slots the screen shows some part of
+let drawingSeen = 0;          // pages on screen being drawn (renderIntoNow)
+let drawingSeenSince = 0;     // …since when: the backstop is DRAW_WAIT_MAX
+let drawingAhead = 0;         // pages near the screen being drawn
+const DRAW_AHEAD = 1;         // …and how many of those at once
+const drawWaiting = [];       // [{ el, go }] near the screen, waiting their turn
+let drawWake = 0;
+const screenObserver = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    if (en.isIntersecting) onScreen.add(en.target); else onScreen.delete(en.target);
+  }
+  if (drawWaiting.length) nextDraw();
+});
+/** Whether a report from an observer with PDF_MARGIN of margin shows its page on screen, margin aside. */
+function entryOnScreen(en) {
+  const r = en.boundingClientRect, rb = en.rootBounds;
+  return !!rb && en.isIntersecting && r.height > 0 && r.bottom > rb.top + PDF_MARGIN && r.top < rb.bottom - PDF_MARGIN;
+}
+function seenBegin() { if (!drawingSeen++) drawingSeenSince = performance.now(); }
+function seenEnd() {
+  if (--drawingSeen > 0) return;
+  drawingSeen = 0;
+  nextDraw();
+  if (pdfJobs.length) pumpPdfJobs(); // what waited for the screen goes now
+}
+/**
+ * A page near the screen asks for its turn to draw. Answers the function
+ * that hands the turn back — or null, where the slot was let go of while it
+ * waited (dropDrawTurn).
+ */
+function drawTurn(el) {
+  return new Promise((go) => { drawWaiting.push({ el, go }); nextDraw(); });
+}
+function dropDrawTurn(el) {
+  for (let k = drawWaiting.length - 1; k >= 0; k--) {
+    if (drawWaiting[k].el === el) drawWaiting.splice(k, 1)[0].go(null);
+  }
+}
+/** The waiting page the reading is likeliest to want next: nearest the screen, below it before above. */
+function nearestWaiting() {
+  let lo = Infinity, hi = -Infinity;
+  for (const el of onScreen) { const i = slotIndex(el); if (i < lo) lo = i; if (i > hi) hi = i; }
+  let best = 0, bestD = Infinity;
+  drawWaiting.forEach((w, k) => {
+    const i = slotIndex(w.el);
+    const d = !isFinite(lo) ? k : i > hi ? i - hi : i < lo ? lo - i + 0.5 : 0;
+    if (d < bestD) { bestD = d; best = k; }
+  });
+  return best;
+}
+function nextDraw() {
+  clearTimeout(drawWake);
+  // A page that has come onto the screen while it waited goes now, as one on
+  // screen — and one thrown away with its pane goes nowhere.
+  for (let k = drawWaiting.length - 1; k >= 0; k--) {
+    const w = drawWaiting[k];
+    if (!w.el.isConnected) { drawWaiting.splice(k, 1); w.go(null); continue; }
+    if (onScreen.has(w.el)) { drawWaiting.splice(k, 1); seenBegin(); w.go(seenEnd); }
+  }
+  const blocked = () => drawingSeen > 0 && performance.now() - drawingSeenSince <= DRAW_WAIT_MAX;
+  while (drawWaiting.length && drawingAhead < DRAW_AHEAD && !blocked()) {
+    const w = drawWaiting.splice(nearestWaiting(), 1)[0];
+    drawingAhead++;
+    let given = false;
+    w.go(() => { if (given) return; given = true; drawingAhead--; nextDraw(); });
+  }
+  // Held back by a page on screen that is taking its time: the backstop.
+  if (drawWaiting.length && drawingAhead < DRAW_AHEAD && blocked()) {
+    drawWake = setTimeout(nextDraw, DRAW_WAIT_MAX - (performance.now() - drawingSeenSince) + 20);
+  }
+}
+
 // HOW MANY PAGES MAY BE DRAWN AT ONCE. A page of a scanned exhibit decodes to
 // fifteen megabytes — the image at the resolution it was scanned, not the size
 // it is drawn at — and it is held for as long as the bitmap is. The window
@@ -8862,9 +9094,21 @@ function sweepPagesToRelease() {
 /** Every page a slot is holding in this box, before the box is thrown away. */
 function releasePagesIn(box) {
   if (!box) return;
-  for (const el of box.querySelectorAll(".pdf-slot, .pdf-inline")) releasePage(el);
+  for (const el of box.querySelectorAll(".pdf-slot, .pdf-inline")) {
+    releasePage(el);
+    dropDrawTurn(el);
+    paneObserver.unobserve(el);
+    screenObserver.unobserve(el);
+    onScreen.delete(el);
+  }
 }
 function releaseCanvas(el) {
+  // No longer WANTED either. The mark used to outlive the release, and a
+  // change of width redraws every slot carrying it (fitSlot) — every page
+  // the reading had ever passed, on a long read, drawn again at once and far
+  // off the screen. A drawing still on its way sees the mark gone and stops.
+  delete el.dataset.want;
+  dropDrawTurn(el);
   if (!el.dataset.rendered && !el.dataset.preview) { releasePage(el); return; }
   const sheet = sheetOf(el);
   const canvas = sheet.querySelector("canvas");
@@ -8993,24 +9237,35 @@ function sizeFromKnown(el, src, pageNo, cssWidth) {
   const sizes = pdfSizes.get(src.name);
   const sz = sizes && sizes[pageNo - 1];
   if (!sz || el.dataset.rendered) return !!sz;
-  sheetOf(el).style.height = Math.round((cssWidth * sz.h) / sz.w) + "px";
+  const want = Math.round((cssWidth * sz.h) / sz.w) + "px";
+  const sheet = sheetOf(el);
+  if (sheet.style.height !== want) { sheet.style.height = want; slotMoved = true; }
   return true;
 }
+let slotMoved = false; // a slot's height was changed by sizeFromKnown
 /**
  * Every slot in the pane drawn from this PDF, at the height its page really
  * has. Asked once, as the PDF's sizes land: the pane no longer asks slot by
  * slot, so the slots that were standing at the letter default when it opened
  * are given their heights here.
+ *
+ * …and the columns matched again ONLY WHERE A SLOT MOVED. The sizes land a
+ * batch at a time, and a batch of pages the size the slots were already
+ * standing at (the folder's paper, which is nearly every page of a filing)
+ * changes nothing on the screen — but asking for the pass anyway laid the
+ * whole document out again for every batch: ten passes on a three-hundred-
+ * page export, the first of them standing between the reader and the first
+ * page drawn.
  */
 function sizeSlotsFor(name) {
   if (!pdfSizes.has(name)) return;
-  let any = false;
+  slotMoved = false;
   for (const el of pdfPane.querySelectorAll(".pdf-slot:not(.blank)")) {
     const src = pdfSources[Number(el.dataset.index)];
     if (!src || src.name !== name) continue;
-    if (sizeFromKnown(el, src, Number(el.dataset.page), parseFloat(el.style.width) || paneWidth())) any = true;
+    sizeFromKnown(el, src, Number(el.dataset.page), parseFloat(el.style.width) || paneWidth());
   }
-  if (any) applyMatchedLayoutSoon();
+  if (slotMoved) applyMatchedLayoutSoon();
 }
 /** …and the same for one box, opening the PDF where its sizes are not in hand. */
 async function presize(el, src, pageNo, cssWidth) {
@@ -9028,16 +9283,22 @@ const paneObserver = new IntersectionObserver((entries) => {
     const i = Number(el.dataset.index);
     // The slot's own width: beside a matched text page that is the PDF
     // page's scale, which the reading size sets, not the pane's.
-    if (en.isIntersecting) { pdfInView.add(i); renderInto(el, pdfSources[i], Number(el.dataset.page), parseFloat(el.style.width) || paneWidth()); }
-    else { pdfInView.delete(i); releaseCanvas(el); }
+    if (en.isIntersecting) {
+      if (entryOnScreen(en)) onScreen.add(el);
+      pdfInView.add(i);
+      renderInto(el, pdfSources[i], Number(el.dataset.page), parseFloat(el.style.width) || paneWidth());
+    } else { onScreen.delete(el); pdfInView.delete(i); releaseCanvas(el); }
   }
 }, { root: pdfPane, rootMargin: PDF_MARGIN + "px 0px" });
 const inlineObserver = new IntersectionObserver((entries) => {
   for (const en of entries) {
     const el = en.target;
     const sec = el.closest(".tpage");
-    if (en.isIntersecting) { pdfInView.add(Number(sec.dataset.index)); renderInto(el, pdfSources[Number(sec.dataset.index)], Number(el.dataset.page), inlineWidth(sec)); }
-    else { pdfInView.delete(Number(sec.dataset.index)); releaseCanvas(el); }
+    if (en.isIntersecting) {
+      if (entryOnScreen(en)) onScreen.add(el);
+      pdfInView.add(Number(sec.dataset.index));
+      renderInto(el, pdfSources[Number(sec.dataset.index)], Number(el.dataset.page), inlineWidth(sec));
+    } else { onScreen.delete(el); pdfInView.delete(Number(sec.dataset.index)); releaseCanvas(el); }
   }
 }, { root: stageEl, rootMargin: PDF_MARGIN + "px 0px" });
 
@@ -9131,6 +9392,7 @@ function buildPdfPaneNow() {
       el.dataset.page = String(t.page);
       sheetOf(el).style.height = Math.round(w * pageRatioGuess) + "px"; // the folder's paper, until this PDF says
       if (!sizeFromKnown(el, t.src, t.page, w) && mayOpen.has(t.src.name)) presize(el, t.src, t.page, w);
+      screenObserver.observe(el);
       paneObserver.observe(el);
       // While the redaction tool is on, a drag over the page is the TOOL's,
       // whichever way it is set to mark: the rectangle is drawn as it is
@@ -9206,7 +9468,21 @@ function fitSlot(el, w) {
   // A render already up, or on its way, is redone at the new width (the
   // one in flight lands at the old one otherwise, cropped by the sheet).
   if (el.dataset.rendered || el.dataset.want) renderInto(el, src, page, w);
-  else presize(el, src, page, w);
+  // …and one nobody has asked to see takes its height from what is already
+  // known, and NEVER OPENS ITS PDF to find out. This is asked of every slot
+  // the layout pass touches, which on a combined file is a slot per page of
+  // every member: opening the PDF of each one it did not know the size of
+  // queued the whole case folder to be read — forty PDFs for a combined file
+  // of forty, opened one after the other and closed again by trimPdfs — and
+  // the PDF of the page on screen waited behind them. The folder's paper
+  // stands in until the reading comes near (renderInto) or the PDF is opened
+  // for something else (sizeSlotsFor).
+  else if (sizeFromKnown(el, src, page, w)) applyMatchedLayoutSoon();
+  else {
+    const want = Math.round(w * pageRatioGuess) + "px";
+    const sheet = sheetOf(el);
+    if (sheet.style.height !== want) sheet.style.height = want;
+  }
 }
 // The columns are re-matched ONCE a frame, however many things ask for it.
 // The pane asks a slot at a time as each PDF's page sizes arrive, and the
@@ -9911,7 +10187,17 @@ const reelTrimSoon = debounce(reelTrim, 200);
 // …and the PDFs behind the documents the reading has left: the window moves
 // with the reading, so what falls out of it is closed as it does, and not
 // only when the document changes.
-const pdfTrimSoon = debounce(trimPdfs, 500);
+// At most every half second WHILE the reading moves, not half a second after
+// it stops. Waiting for the scroll to settle was safe while opening a PDF was
+// slow; with one worker for them all (sharedPdfWorker) an open is a few
+// milliseconds, and reading straight down a combined file without pausing
+// opened every member's PDF and closed none of them until the scrolling
+// stopped: forty open at once in a folder of forty, which in a folder of
+// scanned exhibits is the tab. The most open at once over that scroll: 41 → 11.
+let pdfTrimTimer = 0;
+function pdfTrimSoon() {
+  if (!pdfTrimTimer) pdfTrimTimer = setTimeout(() => { pdfTrimTimer = 0; trimPdfs(); }, 500);
+}
 // The pages the reading is coming to, fitted before it gets there: shapePages
 // measures only what is near (FIT_SCREENS) and passes over what it has already
 // answered, so asking on the scroll costs the pages that have just come near.
@@ -10050,9 +10336,13 @@ function applySwapsNow() {
         presize(inline, t.src, t.page, inlineWidth(sec));
         moved = true;
       }
+      screenObserver.observe(inline);
       inlineObserver.observe(inline);
     } else if (inline) {
       inlineObserver.unobserve(inline);
+      screenObserver.unobserve(inline);
+      onScreen.delete(inline);
+      dropDrawTurn(inline);
       if (inline.__task) { try { inline.__task.cancel(); } catch { /* done */ } }
       releasePage(inline);
       inline.remove();
@@ -10664,7 +10954,10 @@ async function renderRedactedPageNow(pdf, store, pageNumber, scale) {
   const page = await pdf.getPage(pageNumber);
   const vp = page.getViewport({ scale });
   const pts = page.getViewport({ scale: 1 });
-  const canvas = document.createElement("canvas");
+  // A canvas of the document the PDF's fonts are in (fontFrame): drawn on one
+  // of this document's, a font embedded in the PDF is not found and its text
+  // comes out in whatever the browser falls back to.
+  const canvas = fontDoc.createElement("canvas");
   canvas.width = Math.max(1, Math.round(vp.width));
   canvas.height = Math.max(1, Math.round(vp.height));
   const ctx = canvas.getContext("2d");

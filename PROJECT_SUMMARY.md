@@ -394,6 +394,93 @@ MB and two PDFs open → one; over six 34 MB files: 898 MB → 644 MB and six op
 pages drawn against the cap; `__textReaderReel` reports what the reel is
 carrying.
 
+### Side by side, drawn in the order it is looked at
+
+Measured in Chromium against a generated case folder — a 300-page pleading
+export and its PDF, a 100-page 38 MB scanned exhibit, and forty 8-page filings
+with a `Combined Text.txt` naming them all — with side by side on. Five things
+stood between the reader and the PDF page they had scrolled to:
+
+1. **The PDFs' fonts relaid the whole text column.** pdf.js loads a PDF's
+   fonts as FontFaces into `document.fonts`, and Chrome answers any change to
+   that set (a font added as a page is first drawn, the fonts removed by
+   `cleanup()` and `destroy()`) by laying out every line of the document again
+   — sixty thousand layout objects on the combined file, a third of a second
+   each time. Every hop to another member's PDF, and every trim that told a
+   PDF off the screen to put its fonts down, paid it. pdf.js now gets a hidden
+   same-origin iframe's document as its `ownerDocument` (`fontFrame`,
+   `fontDoc`): the fonts go into THAT set, and a page is drawn on a canvas of
+   that document (`renderPage`) and copied onto the pane's. Checked pixel for
+   pixel against a plain render, embedded and non-embedded fonts, in the
+   hosted page and in the unpacked extension. **Every pdf.js `page.render` in
+   the reader must draw on a `fontDoc` canvas** — on one of this document's, a
+   font embedded in the PDF is not found and its text comes out in a fallback
+   (27,000 pixels of difference on a one-page test; see "Things to know").
+2. **A new pdf.js worker per PDF.** `getDocument` starts (and `destroy`
+   ends) a worker for every document it opens unless handed one: two
+   megabytes of script compiled into a new thread, 95 ms an open. One
+   `PDFWorker` is shared (`sharedPdfWorker`), 4 ms an open.
+3. **The pages beside the screen were drawn before the page on it.** Every
+   slot within `PDF_MARGIN` asked at once, in DOM order, and pdf.js serves
+   in order: a jump to page 50 of the scan decoded pages 48 and 49 first.
+   A slot ON screen now draws at once and one only near it waits its turn
+   (`drawTurn`, `DRAW_AHEAD` = 1, nearest first, below before above). Whether
+   a slot is on screen comes from the observers, never from a layout read:
+   the pane and inline observers' own entries (`entryOnScreen`, since the
+   order two observers report in is not promised) and `screenObserver`. And
+   `releaseCanvas` now clears `data-want`: the mark outlived the release, and
+   `fitSlot` redraws every slot carrying it, so a resize redrew every page the
+   reading had ever passed.
+4. **What could wait did not.** The measuring and the grid queued behind a
+   PDF's open ran while the page on screen was still drawing, and the sizes
+   landing laid the whole document out again first (400 ms on the 300-page
+   export). Those jobs are `later`: while a page on screen is drawing
+   (`drawingSeen`) the queue runs only opens (`nextPdfJob`), up to
+   `DRAW_WAIT_MAX`. The measuring is a job per batch of 32, so a thousand-page
+   PDF no longer holds the queue while another PDF's page waits to be opened,
+   and `sizeSlotsFor` asks for the layout pass only where a slot's height
+   actually changed.
+5. **`fitSlot` opened a PDF to size a slot.** The layout pass fits every slot,
+   and a slot whose page size was not known opened its PDF to find out — on
+   the combined file, all forty PDFs queued at once (70+ jobs), each opened
+   and closed again by `trimPdfs`, with the page on screen behind them. A slot
+   nobody has asked to see now stands at the folder's paper
+   (`pageRatioGuess`) until its PDF is opened for a reason of its own.
+
+Two smaller ones: the PDF matching an export's own name is asked for before
+its text is built (`openPdfAhead`), so the worker starts and the file is read
+during the build (about 90 ms on the 300-page export); and `pdfTrimSoon` runs
+at most every half second WHILE the reading moves instead of half a second
+after it stops — with opens now cheap, reading straight down the combined
+file without pausing held all forty PDFs open until the scroll stopped (41
+open → 11 at most, 6 or 7 once it settles).
+
+| side by side | before | after |
+|---|---|---|
+| 300-page export, first PDF page drawn | 2,592 ms | 1,510 ms |
+| 300-page export, jump to a page | 86–94 ms | 25–37 ms |
+| 38 MB scan, jump to a page | 1,043–1,259 ms | 351–382 ms |
+| combined file of 40, jump to a page | 814–980 ms | 35–88 ms |
+
+A scanned page's 350 ms is now the page itself: pdf.js 4.6 decoding a
+300-dpi JPEG in its own worker.
+
+**The PDF viewer (`viewer.css`).** The viewer draws every page as a document
+opens and keeps every canvas, and each page drawn had the browser paint and
+composite the whole column again: six of the twenty seconds before a
+300-page brief's citations were linked. `.page-wrapper` takes
+`content-visibility: auto` (it carries its own width and height, so a skipped
+page keeps its size): links in 17.3–19.7 s → 11.1–11.9 s, with no long tasks.
+The screen is byte-identical, a print carries the same pages, and everything
+that floats over a page hangs off `<body>`, so the containment has nothing to
+clip.
+
+What is left, largest first: opening a long export still holds the thread
+about a second (300 pages) — the text is laid out once without the pane and
+again beside it; and the viewer still draws and holds every page's canvas up
+front (a lazy canvas would have to be drawn for a print, which prints what is
+on screen).
+
 ### The numbered margin is the boundary
 
 A pleading's PDF carries furniture its export does not: the firm's name
@@ -1616,6 +1703,14 @@ counts as standing.
   rectsForRange rewrite specifically works around 4.x TextLayer behavior.
   If upgrading PDF.js, re-verify the placement logic against a long
   document.
+- **The text reader's PDF fonts are not in its own document.** pdf.js is
+  handed `fontDoc` (a hidden iframe's document) as `ownerDocument`, so every
+  `page.render` in `text-reader.js` must draw on a canvas made by
+  `fontDoc.createElement("canvas")` — `renderPage` for the pane and the
+  swapped-in pages, and the warm pages and the redacted copy directly. A
+  canvas of the reader's own document renders an embedded font in a
+  fallback. The text layer (`pdfjsLib.TextLayer`) is unaffected: it sets
+  generic families only.
 - **The citation-detection layer is a line-by-line port of `pdf_linker.py`**
   and has been validated citation-for-citation. Don't refactor regexes
   without a side-by-side diff against the Python.
