@@ -33,6 +33,7 @@ import {
   PageSizes,
 } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
 import { readAnnotations, writeAnnotations, flattenAnnotations } from "./annot-pdf.js";
+import { applyTextEdits } from "./pdf-text-edit.js";
 
 // Build an edited copy of a PDF.
 //   srcBytes:    Uint8Array/ArrayBuffer of the original PDF.
@@ -43,10 +44,18 @@ import { readAnnotations, writeAnnotations, flattenAnnotations } from "./annot-p
 //   appendBytes: Array<Uint8Array> of further PDFs to merge in (Combine).
 //   insertAt:    0-based page index the merged pages go in at (default: end).
 // Returns a Uint8Array of the saved PDF.
-export async function buildEditedPdf({ srcBytes, annotations = null, appendBytes = [], insertAt = null }) {
+export async function buildEditedPdf({ srcBytes, annotations = null, appendBytes = [], insertAt = null, report = null }) {
   const doc = await PDFDocument.load(srcBytes);
   if (annotations) {
-    await writeAnnotations(doc, annotations.annots || [], { removeRefs: annotations.removeRefs || new Set() });
+    // Paragraphs edited in place are not annotations: their old glyphs come
+    // out of the page and the new text goes in (pdf-text-edit.js).
+    const all = annotations.annots || [];
+    const edits = all.filter((a) => a.type === "textedit");
+    if (edits.length) {
+      const res = await applyTextEdits(doc, edits);
+      if (report) report.covered = res.covered;
+    }
+    await writeAnnotations(doc, all.filter((a) => a.type !== "textedit"), { removeRefs: annotations.removeRefs || new Set() });
   }
   let at = insertAt == null ? doc.getPageCount() : Math.max(0, Math.min(doc.getPageCount(), insertAt));
   for (const bytes of appendBytes) {

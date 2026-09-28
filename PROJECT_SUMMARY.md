@@ -128,6 +128,27 @@ page (`inFlight`), so a zoom mid-OCR waits for it rather than reading the page
 again. Before this, a scan appeared one page at a time as OCR finished each
 page, since each page's shell waited on its own recognition.
 
+**Edit text is not an annotation** (`viewer/pdf-text-edit.js`, the
+`textedit` type in `annotations.js`). `findTextBlocks` turns pdf.js text items
+into paragraphs (rows by baseline with superscripts kept in their row,
+segments split at gaps wider than 1.5 em, lines stacked at a steady spacing
+under one left margin; a line that ends where the next line's first word
+would have fitted ends its paragraph, which is how word processors break),
+with runs of bold / italic / superscript from the fonts' names. The edit
+lives in the annotation set so undo, move and resize come free: `orig` is the
+area whose glyphs go, `rect` is the new box. `layoutText` lays it out with
+pdf-lib's standard-font metrics, and both the screen (`paintTextLines`) and
+the save use it, so lines break in the same places. On save
+(`buildEditedPdf` → `applyTextEdits`) `removeGlyphs` walks the page's content
+with a small interpreter (CTM, text matrices, Tc/Tw/Tz/Ts, font widths from
+/Widths, /W for Type0, standard metrics for the base 14) and replaces each
+glyph whose centre is in `orig` with a TJ offset of its own advance, so the
+glyphs left on the line do not move; a Form XObject with glyphs in the area
+is copied for that page before it is changed. The new text is written after
+the old content, wrapped in q/Q, in Times / Helvetica / Courier. An edit
+whose old glyphs cannot be found (text drawn as outlines) is painted over and
+the save says so. Tests: `test-pdf-text-edit.mjs`.
+
 **Find** (`viewer/find.js`) searches the text layers' DOM and paints matches
 with the CSS Custom Highlight API (`::highlight(find-match)`), so it never
 touches the layer's spans. **Print** (`viewer/print.js`) renders every page
@@ -1934,6 +1955,7 @@ test-redact.mjs                      Node-runnable redaction tests: span mapping
 test-annot-pdf.mjs                   Node-runnable comment round trips (write, save, read back, edit, flatten) + page tools
 test-pdf-crypt.mjs                   Node-runnable cipher vectors + protect/open round trips (+ pikepdf interop when installed)
 test-textlayout.mjs                  Node-runnable page reading, Word/text export, Compare diff, Find matching, zip
+test-pdf-text-edit.mjs               Node-runnable Edit text: content parsing, layout, paragraphs, edits saved and read back
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
 viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)
@@ -1963,6 +1985,7 @@ viewer/print.js                      Print: every page rendered to an image, the
 viewer/signature.js                  Signature / initials dialog, saved signatures
 viewer/textlayout.js                 Lines/paragraphs, .docx and text export, word diff (pure; test-textlayout.mjs)
 viewer/zip.js                        Zip writer (deflate-raw via CompressionStream)
+viewer/pdf-text-edit.js              Edit text: paragraphs, layout, glyph removal from content streams, new text (pure; test-pdf-text-edit.mjs)
 viewer/redact.js                     Redaction: the boxes, a store per document, the copy's name (pure parts; test-redact.mjs)
 viewer/key-library.js                The pseudonym keys in storage, shared by the reader and the viewer
 viewer/pdf-edit.js                   PDF writing via pdf-lib: comments, page plans, stamps, crop, blank pages, metadata, sanitize, the redacted copy

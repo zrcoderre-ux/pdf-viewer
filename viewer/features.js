@@ -1173,7 +1173,7 @@ export function createFeatures(ctx) {
       ["Zoom in / out", "Ctrl + / Ctrl −"], ["Fit page / Actual size / Fit width", "Ctrl 0 / 1 / 2"],
       ["Zoom with the wheel", "Ctrl + wheel"], ["Next / previous page", "→ / ←"],
       ["Document properties", "Ctrl D"], ["Presentation mode", "Ctrl L"],
-      ["Highlight / Underline / Strikethrough", "H / U / K"], ["Sticky note / Text box / Draw", "N / T / D"],
+      ["Highlight / Underline / Strikethrough", "H / U / K"], ["Sticky note / Text box / Draw", "N / T / D"], ["Edit text", "E"],
       ["Delete the selected comment", "Delete"], ["Nudge the selected item", "Arrows (Shift: ×10)"],
       ["Leave a tool / deselect", "Esc"], ["Rotate page / back", "R / Shift R"],
       ["Auto-scroll on / off", "A"], ["Pause auto-scroll", "Space"],
