@@ -1,11 +1,14 @@
 # PDF Viewer PWA
 
-An installable Progressive Web App that runs the **full citation-linking PDF
-viewer** in a dedicated, standalone window — its own icon, no browser tab strip
-or address bar. It reuses the **same** viewer code as the Chrome extension
-(`viewer/` at the repo root): citation links to Lexis+/Westlaw, Table of
-Authorities, OCR, highlighting, box-select, thumbnails/bookmarks, source/footer
-naming, auto-scroll, and download — all working on PDFs you open from disk.
+An installable Progressive Web App that runs the **full PDF editor and
+citation-linking viewer** in a dedicated, standalone window — its own icon, no
+browser tab strip or address bar. It reuses the **same** viewer code as the
+Chrome extension (`viewer/` at the repo root): comments and markup, Fill &
+Sign, text edits, page organizing, redaction, password protection, Bates
+numbering, export to Word, compression, Compare, citation links to
+Lexis+/Westlaw, Table of Authorities and OCR — all working on PDFs you open from
+disk, and saved back into the same file. See the root README's *PDF editor*
+section for the tools.
 
 **Live:** https://zrcoderre-ux.github.io/pdf-viewer/
 
@@ -17,9 +20,9 @@ isolated viewer instance (its own zoom, highlights, OCR…) with no shared state
 
 | File | Purpose |
 |------|---------|
-| `index.html` | Tab-manager shell: a tab strip + iframe stage + empty state. Hosts no viewer markup itself. |
+| `index.html` | Tab-manager shell: a tab strip (with a Home tab) + iframe stage + the Home screen (Open, Open case folder, Combine files, Images to PDF, recent files). Hosts no viewer markup itself. |
 | `app-web.js` | Tab manager: opens PDFs in new tabs (+ button, drag-drop, OS file handler, or a routed `?file=` URL), switches/closes tabs, syncs tab titles, registers the service worker. Local files reach a tab's viewer via `iframe.contentWindow.__pdfViewerLoadLocal`; tabs load lazily the first time they're shown so overlays get correct geometry. The active tab's iframe takes keyboard focus, so the viewer's shortcuts (auto-scroll's A / Space / [ / ], Shift+Space) work without clicking into the page. |
-| `app-web.css` | Styles the tab strip, iframe stage, and empty-state drop zone. |
+| `app-web.css` | Styles the tab strip, iframe stage and Home screen, in the viewer's dark and light themes. |
 | `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
 | `sw.js` | Service worker — **network-first** (auto-updates when online) with offline fallback. |
 | `build-site.sh` | Assembles the deployable site: this shell **+** the canonical `viewer/` and `pdfjs/` copied from the repo root. |
@@ -77,19 +80,23 @@ the root README's "Text reader" section. The tab manager feeds it through
 
 ## Editing local documents
 
-Because every PDF in the app is one you opened from disk, the app is where
-editing lives. The viewer's toolbar shows **Save** instead of **Download**:
-Save writes your highlights into the PDF and back to the same file (via the
-file's handle from the picker / OS file handler), and **Combine** merges other
-PDFs onto the end. Highlights are stored as real **PDF highlight annotations**,
-not baked-in drawings, so they survive as *removable* highlights — reopen the
-file and you can right-click any of them to delete it, then Save again (Adobe and
-Preview can delete them too). The browser extension stays view-only for web PDFs
-you haven't downloaded — a clean split: extension for browsing, app for editing.
+Every PDF in the app is one you opened from disk, so **Save** (Ctrl S) writes
+your changes back into the same file through the file's handle from the picker
+or the OS file handler; a dot on the Save button and on the tab marks unsaved
+changes, and
+closing a tab or the window with unsaved changes asks first. Comments,
+signatures and text edits are stored as standard PDF annotations, so they
+reopen editable here and show in Acrobat and Preview. A password-protected
+file opens with a prompt and is saved back protected.
 
-> The old "route web PDFs to the app" path (an extension→app redirect with a
-> brokered fetch) has been removed. The extension always opens PDFs in its own
-> viewer; the app is only for files opened from disk.
+The Home screen adds three things that do not need an open document:
+**Combine files** (several PDFs into one, in file-name order — rearrange the
+pages afterwards with Organize pages), **Images to PDF**, and a **Recent files** list that reopens a file without the picker
+(the browser asks for permission again when needed). Ctrl O opens a file from
+anywhere in the app.
+
+In the extension, a web PDF can be edited too: **Save as…** saves a copy with
+the changes, and later saves go to that copy.
 
 ## Notes / limitations
 

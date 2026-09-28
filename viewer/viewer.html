@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PDF Viewer</title>
   <!-- This page runs the citation engine itself (citation-linker.js). Hosted
        over https it is an ordinary website to the extension's content script,
@@ -16,80 +17,354 @@
   <script src="theme-boot.js"></script>
 </head>
 <body>
-  <!-- Pages / Bookmarks column down the right margin. -->
+  <!-- ══ Top bar ══════════════════════════════════════════════════════════
+       Left: the tools panel toggle and the document's name (click to rename,
+       caret for the document menu). Centre: page navigation and zoom. Right:
+       undo/redo, find, print, the citation provider, and Save / Download. -->
+  <header id="toolbar">
+    <div class="tb-group tb-left">
+      <button id="tools-rail-collapse" class="icon-btn" title="Hide the tools panel" aria-label="Toggle the tools panel" aria-expanded="true"><i data-icon="panel-left"></i></button>
+      <div class="doc-title">
+        <i class="doc-icon" data-icon="file-text" data-icon-size="16"></i>
+        <span id="filename">PDF</span>
+        <button id="doc-menu-btn" class="icon-btn sm" title="Document options" aria-label="Document options" aria-haspopup="menu" aria-expanded="false"><i data-icon="chevron-down" data-icon-size="16"></i></button>
+      </div>
+      <span id="status" role="status" aria-live="polite"></span>
+      <span id="link-count"></span>
+    </div>
+
+    <div class="tb-group tb-center">
+      <div class="seg" role="group" aria-label="Page navigation">
+        <button id="page-prev" class="icon-btn" title="Previous page (←)" aria-label="Previous page"><i data-icon="chevron-up"></i></button>
+        <span id="page-indicator" title="Current page — type a page number and press Enter to go to it"><input id="page-input" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Page number"><span class="of">of</span><span id="page-total">–</span></span>
+        <button id="page-next" class="icon-btn" title="Next page (→)" aria-label="Next page"><i data-icon="chevron-down"></i></button>
+      </div>
+      <div class="seg" role="group" aria-label="Zoom">
+        <button id="zoom-out" class="icon-btn" title="Zoom out (Ctrl −)" aria-label="Zoom out"><i data-icon="minus"></i></button>
+        <button id="zoom-level" class="zoom-btn" title="Zoom presets" aria-haspopup="menu" aria-expanded="false">100%</button>
+        <button id="zoom-in" class="icon-btn" title="Zoom in (Ctrl +)" aria-label="Zoom in"><i data-icon="plus"></i></button>
+      </div>
+    </div>
+
+    <div class="tb-group tb-right">
+      <button id="undo-btn" class="icon-btn" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><i data-icon="undo"></i></button>
+      <button id="redo-btn" class="icon-btn" title="Redo (Ctrl+Y)" aria-label="Redo" disabled><i data-icon="redo"></i></button>
+      <span class="tb-sep"></span>
+      <button id="find-toggle" class="icon-btn" title="Find in document (Ctrl+F)" aria-label="Find" aria-pressed="false"><i data-icon="search"></i></button>
+      <button id="print-btn" class="icon-btn" title="Print (Ctrl+P)" aria-label="Print"><i data-icon="printer"></i></button>
+      <label class="provider-pick" title="Where citation links open">
+        <i data-icon="link" data-icon-size="15"></i>
+        <select id="provider" aria-label="Citation links open in">
+          <option value="lexis">Lexis+</option>
+          <option value="westlaw">Westlaw</option>
+        </select>
+      </label>
+      <button id="autoscroll-toggle" class="icon-btn" title="Auto-scroll while reading — the page creeps upward at your reading pace (A)" aria-label="Auto-scroll" aria-pressed="false"><i data-icon="chevrons-down"></i></button>
+      <button id="theme-toggle" class="icon-btn" title="Switch to light mode" aria-label="Switch color theme"><i data-icon="sun"></i></button>
+      <button id="more-btn" class="icon-btn" title="More" aria-label="More options" aria-haspopup="menu" aria-expanded="false"><i data-icon="more"></i></button>
+      <span class="tb-sep"></span>
+      <button id="download" class="btn" title="Download PDF"><i data-icon="download" data-icon-size="16"></i><span>Download</span></button>
+      <button id="save-edits" class="btn primary" title="Save your changes into the PDF (Ctrl+S)" hidden><i data-icon="save" data-icon-size="16"></i><span>Save</span></button>
+    </div>
+  </header>
+
+  <!-- Document menu (the caret beside the name). -->
+  <div id="doc-menu" class="menu" role="menu" hidden>
+    <button class="menu-item" id="rename-item" role="menuitem"><i data-icon="pencil"></i><span>Rename…</span></button>
+    <div class="menu-row">
+      <span class="menu-row-label">Name from</span>
+      <select id="naming-mode" title="Choose how this document is named in the toolbar and on download. This setting applies only to the current document; the global default is set in the popup or options page.">
+        <option value="source">Source file name</option>
+        <option value="footer">Document footer</option>
+      </select>
+    </div>
+    <div class="menu-sep"></div>
+    <button class="menu-item" id="props-item" role="menuitem"><i data-icon="info"></i><span>Document properties…</span><kbd>Ctrl D</kbd></button>
+    <button class="menu-item" id="open-original" role="menuitem" title="Open in the browser's built-in viewer (no citation links)"><i data-icon="external"></i><span>Open in browser viewer</span></button>
+  </div>
+
+  <!-- Zoom presets. -->
+  <div id="zoom-menu" class="menu" role="menu" hidden>
+    <button class="menu-item" data-zoom="fit-width" role="menuitem"><i data-icon="fit-width"></i><span>Fit width</span><kbd>Ctrl 2</kbd></button>
+    <button class="menu-item" data-zoom="fit-page" role="menuitem"><i data-icon="fit-page"></i><span>Fit page</span><kbd>Ctrl 0</kbd></button>
+    <button class="menu-item" data-zoom="1" role="menuitem"><i data-icon="file"></i><span>Actual size</span><kbd>Ctrl 1</kbd></button>
+    <div class="menu-sep"></div>
+    <button class="menu-item" data-zoom="0.5" role="menuitem"><span class="no-icon"></span><span>50%</span></button>
+    <button class="menu-item" data-zoom="0.75" role="menuitem"><span class="no-icon"></span><span>75%</span></button>
+    <button class="menu-item" data-zoom="1.25" role="menuitem"><span class="no-icon"></span><span>125%</span></button>
+    <button class="menu-item" data-zoom="1.5" role="menuitem"><span class="no-icon"></span><span>150%</span></button>
+    <button class="menu-item" data-zoom="2" role="menuitem"><span class="no-icon"></span><span>200%</span></button>
+    <button class="menu-item" data-zoom="3" role="menuitem"><span class="no-icon"></span><span>300%</span></button>
+    <button class="menu-item" data-zoom="4" role="menuitem"><span class="no-icon"></span><span>400%</span></button>
+  </div>
+
+  <!-- Overflow menu. -->
+  <div id="more-menu" class="menu" role="menu" hidden>
+    <div class="menu-label">Page display</div>
+    <button class="menu-item" data-layout="single" role="menuitemradio" aria-checked="true"><i data-icon="file"></i><span>Single page, scrolling</span></button>
+    <button class="menu-item" data-layout="two" role="menuitemradio" aria-checked="false"><i data-icon="book-open"></i><span>Two pages</span></button>
+    <button class="menu-item" data-layout="two-cover" role="menuitemradio" aria-checked="false"><i data-icon="book-open"></i><span>Two pages, cover alone</span></button>
+    <div class="menu-sep"></div>
+    <button class="menu-item" id="present-item" role="menuitem"><i data-icon="maximize"></i><span>Presentation mode</span><kbd>Ctrl L</kbd></button>
+    <button class="menu-item" id="read-aloud-item" role="menuitem"><i data-icon="volume"></i><span>Read aloud from this page</span></button>
+    <div class="menu-sep"></div>
+    <button class="menu-item" id="shortcuts-item" role="menuitem"><i data-icon="keyboard"></i><span>Keyboard shortcuts</span><kbd>?</kbd></button>
+  </div>
+
+  <!-- ══ Tools panel (left) ════════════════════════════════════════════════
+       Every tool, grouped the way Acrobat groups them. A tool whose data-tool
+       names an annotation kind is driven by annotations.js; the rest are wired
+       by id in viewer.js. The filter box narrows the list as you type. -->
+  <aside id="tools-rail" aria-label="Tools">
+    <div class="rail-head">
+      <div class="rail-search">
+        <i data-icon="search" data-icon-size="15"></i>
+        <input id="tool-filter" type="search" placeholder="Find a tool" aria-label="Find a tool" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <div id="tools-rail-body">
+      <section class="tool-group" data-group="comment">
+        <button class="tool-group-head" aria-expanded="true"><span>Comment</span><i data-icon="chevron-down" data-icon-size="14"></i></button>
+        <div class="tool-group-body">
+          <button id="highlight-toggle" class="tool-btn" data-tool="highlight" aria-pressed="false" title="Highlight text (H). Drag over text to highlight it; right-click selected text any time."><i class="ti" data-icon="highlighter"></i><span class="tl">Highlight</span><kbd>H</kbd></button>
+          <button class="tool-btn" data-tool="underline" aria-pressed="false" title="Underline text (U)"><i class="ti" data-icon="underline"></i><span class="tl">Underline</span><kbd>U</kbd></button>
+          <button class="tool-btn" data-tool="strikeout" aria-pressed="false" title="Strike through text (K)"><i class="ti" data-icon="strikethrough"></i><span class="tl">Strikethrough</span><kbd>K</kbd></button>
+          <button class="tool-btn" data-tool="note" aria-pressed="false" title="Add a sticky note (N). Click where it belongs."><i class="ti" data-icon="note"></i><span class="tl">Sticky note</span><kbd>N</kbd></button>
+          <button class="tool-btn" data-tool="freetext" aria-pressed="false" title="Add a text box (T). Click or drag on the page, then type."><i class="ti" data-icon="text-box"></i><span class="tl">Text box</span><kbd>T</kbd></button>
+          <button class="tool-btn" data-tool="ink" aria-pressed="false" title="Draw freehand (D)"><i class="ti" data-icon="scribble"></i><span class="tl">Draw</span><kbd>D</kbd></button>
+          <button class="tool-btn" data-tool="square" aria-pressed="false" title="Draw a rectangle"><i class="ti" data-icon="square"></i><span class="tl">Rectangle</span></button>
+          <button class="tool-btn" data-tool="circle" aria-pressed="false" title="Draw an ellipse"><i class="ti" data-icon="circle"></i><span class="tl">Ellipse</span></button>
+          <button class="tool-btn" data-tool="line" aria-pressed="false" title="Draw a line (hold Shift to snap)"><i class="ti" data-icon="line"></i><span class="tl">Line</span></button>
+          <button class="tool-btn" data-tool="arrow" aria-pressed="false" title="Draw an arrow (hold Shift to snap)"><i class="ti" data-icon="arrow"></i><span class="tl">Arrow</span></button>
+          <button class="tool-btn" data-tool="stamp" aria-pressed="false" title="Stamp the page — Approved, Draft, Confidential…"><i class="ti" data-icon="stamp"></i><span class="tl">Stamp</span></button>
+        </div>
+      </section>
+
+      <section class="tool-group" data-group="sign">
+        <button class="tool-group-head" aria-expanded="true"><span>Fill &amp; Sign</span><i data-icon="chevron-down" data-icon-size="14"></i></button>
+        <div class="tool-group-body">
+          <button id="fill-form" class="tool-btn" title="Fill in this PDF's form fields" hidden><i class="ti" data-icon="form"></i><span class="tl">Fill form fields</span></button>
+          <button class="tool-btn" data-tool="typewriter" aria-pressed="false" title="Type text anywhere on the page — for forms that have no fields"><i class="ti" data-icon="type"></i><span class="tl">Add text</span></button>
+          <button id="sign-btn" class="tool-btn" data-tool="signature" aria-pressed="false" title="Sign: draw, type or upload your signature and place it"><i class="ti" data-icon="signature"></i><span class="tl">Signature</span></button>
+          <button id="initials-btn" class="tool-btn" data-tool="initials" aria-pressed="false" title="Place your initials"><i class="ti" data-icon="initials"></i><span class="tl">Initials</span></button>
+          <button class="tool-btn" data-tool="check" aria-pressed="false" title="Place a checkmark"><i class="ti" data-icon="check"></i><span class="tl">Checkmark</span></button>
+          <button class="tool-btn" data-tool="cross" aria-pressed="false" title="Place a cross"><i class="ti" data-icon="x"></i><span class="tl">Cross</span></button>
+          <button class="tool-btn" data-tool="date" aria-pressed="false" title="Place today's date"><i class="ti" data-icon="calendar"></i><span class="tl">Date</span></button>
+        </div>
+      </section>
+
+      <section class="tool-group" data-group="edit">
+        <button class="tool-group-head" aria-expanded="true"><span>Edit PDF</span><i data-icon="chevron-down" data-icon-size="14"></i></button>
+        <div class="tool-group-body">
+          <button class="tool-btn" data-tool="replacetext" aria-pressed="false" title="Click a line of text to type over it. The new text covers the old; the old text stays in the file underneath — use Redact to remove it for good."><i class="ti" data-icon="text-cursor"></i><span class="tl">Edit text</span></button>
+          <button class="tool-btn" data-tool="image" aria-pressed="false" title="Place an image on the page"><i class="ti" data-icon="image"></i><span class="tl">Add image</span></button>
+          <button class="tool-btn" data-tool="whiteout" aria-pressed="false" title="Cover part of the page with white"><i class="ti" data-icon="eraser"></i><span class="tl">Whiteout</span></button>
+          <button class="tool-btn" data-tool="link" aria-pressed="false" title="Draw a link to a web address or another page"><i class="ti" data-icon="link"></i><span class="tl">Add link</span></button>
+        </div>
+      </section>
+
+      <section class="tool-group" data-group="pages">
+        <button class="tool-group-head" aria-expanded="true"><span>Organize Pages</span><i data-icon="chevron-down" data-icon-size="14"></i></button>
+        <div class="tool-group-body">
+          <button id="organize-pages" class="tool-btn" aria-pressed="false" title="Reorder, rotate, delete, or extract pages"><i class="ti" data-icon="grid"></i><span class="tl">Organize pages</span></button>
+          <button id="insert-blank-btn" class="tool-btn" title="Insert blank pages"><i class="ti" data-icon="file-plus"></i><span class="tl">Insert blank page…</span></button>
+          <button id="combine-pdfs" class="tool-btn" title="Merge other PDFs into this one"><i class="ti" data-icon="files"></i><span class="tl">Insert from file…</span></button>
+          <button id="images-btn" class="tool-btn" title="Add image files (JPG/PNG…) as new pages"><i class="ti" data-icon="images"></i><span class="tl">Add images as pages…</span></button>
+          <button id="extract-btn" class="tool-btn" title="Save some of the pages as a new PDF"><i class="ti" data-icon="file-output"></i><span class="tl">Extract pages…</span></button>
+          <button id="split-btn" class="tool-btn" title="Split this document into several PDFs"><i class="ti" data-icon="scissors"></i><span class="tl">Split…</span></button>
+          <button id="crop-pages-btn" class="tool-btn" title="Trim the margins of pages"><i class="ti" data-icon="crop"></i><span class="tl">Crop pages…</span></button>
+          <button id="rotate-pages" class="tool-btn" aria-pressed="false" title="Turn sideways or upside-down pages the right way up (R clockwise, Shift+R back). Rotation shows immediately; saving it into the file is a separate click."><i class="ti" data-icon="rotate-cw"></i><span class="tl">Rotate pages</span><kbd>R</kbd></button>
+        </div>
+      </section>
+
+      <section class="tool-group" data-group="protect">
+        <button class="tool-group-head" aria-expanded="true"><span>Protect</span><i data-icon="chevron-down" data-icon-size="14"></i></button>
+        <div class="tool-group-body">
+          <button id="redact-toggle" class="tool-btn" aria-pressed="false" title="Redaction: mark what has to go — every real value the pseudonym key binds, plus anything you drag over — then save a flattened copy with it blacked out. Never writes the original."><i class="ti" data-icon="redact"></i><span class="tl">Redact</span></button>
+          <button id="protect-btn" class="tool-btn" title="Require a password to open this PDF, and limit printing, copying and editing"><i class="ti" data-icon="lock"></i><span class="tl">Protect with password…</span></button>
+          <button id="unprotect-btn" class="tool-btn" title="Save a copy of this document with its password removed" hidden><i class="ti" data-icon="unlock"></i><span class="tl">Remove password</span></button>
+          <button id="sanitize-btn" class="tool-btn" title="Remove metadata, attachments, scripts, comments and other hidden content"><i class="ti" data-icon="shield-check"></i><span class="tl">Remove hidden info…</span></button>
+          <button id="flatten-btn" class="tool-btn" title="Make comments, drawings, signatures and form entries a permanent part of the page"><i class="ti" data-icon="layers"></i><span class="tl">Flatten…</span></button>
+        </div>
+      </section>
+
+      <section class="tool-group" data-group="stamp">
+        <button class="tool-group-head" aria-expanded="true"><span>Numbering &amp; Marks</span><i data-icon="chevron-down" data-icon-size="14"></i></button>
+        <div class="tool-group-body">
+          <button id="bates-number" class="tool-btn" title="Add Bates numbers to every page"><i class="ti" data-icon="hash"></i><span class="tl">Bates numbering…</span></button>
+          <button id="pagenum-btn" class="tool-btn" title="Number the pages"><i class="ti" data-icon="list-ordered"></i><span class="tl">Page numbers…</span></button>
+          <button id="headerfooter-btn" class="tool-btn" title="Add header/footer text"><i class="ti" data-icon="header-footer"></i><span class="tl">Header &amp; footer…</span></button>
+          <button id="watermark-btn" class="tool-btn" title="Add a translucent watermark to every page"><i class="ti" data-icon="droplet"></i><span class="tl">Watermark…</span></button>
+        </div>
+      </section>
+
+      <section class="tool-group" data-group="export">
+        <button class="tool-group-head" aria-expanded="true"><span>Export &amp; Optimize</span><i data-icon="chevron-down" data-icon-size="14"></i></button>
+        <div class="tool-group-body">
+          <button id="export-word-btn" class="tool-btn" title="Export the text to a Word document (.docx)"><i class="ti" data-icon="file-word"></i><span class="tl">Export to Word…</span></button>
+          <button id="export-text-btn" class="tool-btn" title="Export the text to a plain-text file"><i class="ti" data-icon="file-text"></i><span class="tl">Export to text…</span></button>
+          <button id="export-images-btn" class="tool-btn" title="Save pages as PNG or JPEG images"><i class="ti" data-icon="images"></i><span class="tl">Export as images…</span></button>
+          <button id="compress-btn" class="tool-btn" title="Make the file smaller"><i class="ti" data-icon="shrink"></i><span class="tl">Compress PDF…</span></button>
+        </div>
+      </section>
+
+      <section class="tool-group" data-group="review">
+        <button class="tool-group-head" aria-expanded="true"><span>Read &amp; Review</span><i data-icon="chevron-down" data-icon-size="14"></i></button>
+        <div class="tool-group-body">
+          <button id="rect-select-toggle" class="tool-btn" aria-pressed="false" title="Rectangle select: drag a box to select text by region. You can also hold Alt and drag at any time."><i class="ti" data-icon="box-select"></i><span class="tl">Box select</span></button>
+          <button id="crop-select" class="tool-btn" aria-pressed="false" title="Set the selectable text area: toggle on, then drag a box. Text outside the box (e.g. margin line numbers) won't be selectable. Applies to every document until you change or reset it."><i class="ti" data-icon="text-area"></i><span class="tl">Selectable text area</span></button>
+          <button id="ocr-run" class="tool-btn" aria-pressed="false" title="Run OCR on this scanned document so its text becomes selectable and citations are linked"><i class="ti" data-icon="ocr"></i><span class="tl">Recognize text (OCR)</span></button>
+          <button id="compare-btn" class="tool-btn" title="Compare this document with another version"><i class="ti" data-icon="compare"></i><span class="tl">Compare files…</span></button>
+          <button id="read-aloud-btn" class="tool-btn" aria-pressed="false" title="Read the document aloud from the page you are on"><i class="ti" data-icon="volume"></i><span class="tl">Read aloud</span></button>
+        </div>
+      </section>
+      <p id="tool-filter-empty" class="rail-empty" hidden>No tool matches.</p>
+    </div>
+  </aside>
+
+  <!-- ══ Panels (right) ═══════════════════════════════════════════════════
+       An icon rail down the right edge opens the panel beside it: page
+       thumbnails, bookmarks, comments, attachments. -->
+  <nav id="side-rail" aria-label="Panels">
+    <button id="thumbnail-toggle" class="rail-btn" data-panel="pages" title="Page thumbnails" aria-label="Page thumbnails" aria-pressed="false"><i data-icon="thumbnails"></i></button>
+    <button id="bookmarks-toggle" class="rail-btn" data-panel="bookmarks" title="Bookmarks" aria-label="Bookmarks" aria-pressed="false"><i data-icon="bookmark"></i></button>
+    <button id="comments-toggle" class="rail-btn" data-panel="comments" title="Comments" aria-label="Comments" aria-pressed="false"><i data-icon="message"></i><span id="comments-badge" class="rail-badge" hidden></span></button>
+    <button id="attachments-toggle" class="rail-btn" data-panel="attachments" title="Attachments" aria-label="Attachments" aria-pressed="false" hidden><i data-icon="paperclip"></i></button>
+  </nav>
+
   <aside id="thumbnail-panel" aria-label="Page panel">
-    <div id="panel-tabs">
+    <div class="panel-head">
+      <span id="panel-title">Pages</span>
+      <button id="panel-close" class="icon-btn sm" title="Close panel" aria-label="Close panel"><i data-icon="x" data-icon-size="16"></i></button>
+    </div>
+    <!-- The rail's buttons switch panels now; the old tab strip stays for the
+         code that still addresses it by id. -->
+    <div id="panel-tabs" hidden>
       <button id="tab-pages" class="panel-tab active" aria-pressed="true">Pages</button>
-      <button id="tab-bookmarks" class="panel-tab" aria-pressed="false" hidden>Bookmarks</button>
+      <button id="tab-bookmarks" class="panel-tab" aria-pressed="false">Bookmarks</button>
     </div>
     <div id="organize-bar" hidden>
-      <div class="org-hint">Drag to reorder · rotate/delete each page · check pages to extract</div>
+      <div class="org-hint">Drag to reorder · rotate or delete each page · check pages to extract</div>
       <div class="org-actions">
-        <button id="org-apply" title="Apply these page changes and save the document">Apply &amp; Save</button>
-        <button id="org-extract" title="Save the checked pages as a new PDF">Extract ✓</button>
-        <button id="org-reset" title="Undo all pending page changes">Reset</button>
-        <button id="org-done" title="Leave organize mode">Done</button>
+        <button id="org-apply" class="btn primary sm" title="Apply these page changes and save the document">Apply &amp; save</button>
+        <button id="org-extract" class="btn sm" title="Save the checked pages as a new PDF">Extract checked</button>
+        <button id="org-reset" class="btn sm" title="Undo all pending page changes">Reset</button>
+        <button id="org-done" class="btn sm" title="Leave organize mode">Done</button>
       </div>
     </div>
     <div id="panel-pages"></div>
     <div id="panel-bookmarks" hidden></div>
+    <div id="panel-comments" hidden>
+      <div class="comments-tools">
+        <input id="comments-filter" type="search" placeholder="Search comments" aria-label="Search comments">
+      </div>
+      <div id="comments-list"></div>
+    </div>
+    <div id="panel-attachments" hidden></div>
   </aside>
+  <div id="thumb-resize" title="Drag to resize the panel"></div>
 
-  <div id="crop-bar" hidden>
-    <span class="crop-bar-label">Drag a box over the page to set the selectable text area.</span>
-    <button id="crop-reset" title="Make the whole page selectable again">Reset to full page</button>
-    <button id="crop-done" class="primary">Done</button>
+  <!-- ══ Floating tool bars ═══════════════════════════════════════════════ -->
+  <div id="find-bar" class="float-bar find-bar" role="search" hidden>
+    <i data-icon="search" data-icon-size="16"></i>
+    <input id="find-input" type="text" placeholder="Find in document" aria-label="Find in document" autocomplete="off" spellcheck="false">
+    <span id="find-count" class="fb-state">&nbsp;</span>
+    <button id="find-prev" class="icon-btn sm" title="Previous match (Shift+Enter)" aria-label="Previous match"><i data-icon="chevron-up" data-icon-size="16"></i></button>
+    <button id="find-next" class="icon-btn sm" title="Next match (Enter)" aria-label="Next match"><i data-icon="chevron-down" data-icon-size="16"></i></button>
+    <span class="fb-sep"></span>
+    <label class="fb-check" title="Match case"><input id="find-case" type="checkbox"><span>Aa</span></label>
+    <label class="fb-check" title="Whole words only"><input id="find-word" type="checkbox"><span>Whole word</span></label>
+    <button id="find-close" class="icon-btn sm" title="Close (Esc)" aria-label="Close find"><i data-icon="x" data-icon-size="16"></i></button>
   </div>
 
-  <div id="rotate-bar" hidden>
-    <span class="rotate-bar-label">Rotate</span>
+  <div id="annot-bar" class="float-bar" hidden>
+    <div class="fb-labelblock">
+      <span id="annot-bar-label" class="fb-label">Highlight</span>
+      <span id="annot-hint" class="fb-hint"></span>
+    </div>
+    <div id="annot-colors" class="swatches" role="radiogroup" aria-label="Color"></div>
+    <label class="fb-field" id="annot-width-wrap">Width <input id="annot-width" type="range" min="0.5" max="12" step="0.5" value="2"></label>
+    <label class="fb-field" id="annot-opacity-wrap">Opacity <input id="annot-opacity" type="range" min="10" max="100" step="5" value="100"></label>
+    <label class="fb-field" id="annot-size-wrap">Size
+      <select id="annot-fontsize">
+        <option>8</option><option>9</option><option>10</option><option>11</option><option selected>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>36</option><option>48</option><option>72</option>
+      </select>
+    </label>
+    <label class="fb-field" id="annot-font-wrap">Font
+      <select id="annot-font">
+        <option value="sans">Sans serif</option>
+        <option value="serif">Serif</option>
+        <option value="mono">Monospace</option>
+      </select>
+    </label>
+    <label class="fb-check" id="annot-fill-wrap"><input id="annot-fill" type="checkbox"><span>Fill</span></label>
+    <label class="fb-field" id="annot-stamp-wrap">Stamp
+      <select id="annot-stamp">
+        <option>APPROVED</option><option>NOT APPROVED</option><option>DRAFT</option><option>FINAL</option><option>CONFIDENTIAL</option><option>FOR COMMENT</option><option>RECEIVED</option><option>REVIEWED</option><option>COMPLETED</option><option>VOID</option><option>SIGN HERE</option><option value="__custom">Custom…</option>
+      </select>
+    </label>
+    <span class="fb-sep"></span>
+    <button id="annot-delete" class="icon-btn sm" title="Delete the selected item (Delete)" aria-label="Delete" hidden><i data-icon="trash" data-icon-size="16"></i></button>
+    <button id="annot-done" class="btn sm">Done</button>
+  </div>
+
+  <div id="crop-bar" class="float-bar" hidden>
+    <span class="crop-bar-label fb-label">Drag a box over the page to set the selectable text area.</span>
+    <button id="crop-reset" class="btn sm" title="Make the whole page selectable again">Reset to full page</button>
+    <button id="crop-done" class="btn sm primary">Done</button>
+  </div>
+
+  <div id="rotate-bar" class="float-bar" hidden>
+    <span class="rotate-bar-label fb-label">Rotate</span>
     <select id="rot-scope" title="Which pages the rotate buttons turn">
       <option value="page">This page</option>
       <option value="all">All pages</option>
       <option value="odd">Odd pages</option>
       <option value="even">Even pages</option>
     </select>
-    <button id="rot-left" title="Rotate counter-clockwise (Shift+R)" aria-label="Rotate counter-clockwise">↺</button>
-    <button id="rot-right" title="Rotate clockwise (R)" aria-label="Rotate clockwise">↻</button>
-    <span id="rot-state" class="rotate-bar-state">No rotation.</span>
-    <button id="rot-reset" title="Put every page back the way it was">Reset</button>
-    <button id="rot-save" class="primary" title="Write the rotation into the PDF">Save rotation</button>
-    <button id="rot-done" title="Leave the rotate tool (the rotation stays on screen)">Done</button>
+    <button id="rot-left" class="icon-btn sm" title="Rotate counter-clockwise (Shift+R)" aria-label="Rotate counter-clockwise"><i data-icon="rotate-ccw" data-icon-size="16"></i></button>
+    <button id="rot-right" class="icon-btn sm" title="Rotate clockwise (R)" aria-label="Rotate clockwise"><i data-icon="rotate-cw" data-icon-size="16"></i></button>
+    <span id="rot-state" class="rotate-bar-state fb-state">No rotation.</span>
+    <button id="rot-reset" class="btn sm" title="Put every page back the way it was">Reset</button>
+    <button id="rot-save" class="btn sm primary" title="Write the rotation into the PDF">Save rotation</button>
+    <button id="rot-done" class="btn sm" title="Leave the rotate tool (the rotation stays on screen)">Done</button>
   </div>
 
-  <div id="redact-bar" hidden>
-    <span class="redact-bar-label">Redact</span>
+  <div id="redact-bar" class="float-bar" hidden>
+    <span class="redact-bar-label fb-label">Redact</span>
     <select id="redact-mark" title="What a drag over a page marks: the text it covers, or the area itself (for a signature, a photo, a page with no text layer)">
       <option value="text">Drag marks text</option>
       <option value="area">Drag marks an area</option>
     </select>
-    <label class="toolbar-label">Key:
+    <label class="fb-field">Key
       <select id="redact-key" title="The pseudonym key whose real values are marked automatically. Keys loaded in the text reader are offered here."></select>
     </label>
-    <button id="redact-load-key" title="Load a pseudonym_key.xlsx">Load key…</button>
-    <button id="redact-scan" title="Mark every real value the key binds, wherever it stands in this document">Mark from key</button>
-    <span id="redact-state" class="redact-bar-state">Nothing marked.</span>
+    <button id="redact-load-key" class="btn sm" title="Load a pseudonym_key.xlsx">Load key…</button>
+    <button id="redact-scan" class="btn sm" title="Mark every real value the key binds, wherever it stands in this document">Mark from key</button>
+    <button id="redact-search" class="btn sm" title="Mark every place a word or phrase appears">Mark text…</button>
+    <span id="redact-state" class="redact-bar-state fb-state">Nothing marked.</span>
     <select id="redact-dpi" title="How finely the redacted copy is rendered. Every page becomes an image, so this is the resolution of the saved file.">
       <option value="150">150 dpi</option>
       <option value="200" selected>200 dpi</option>
       <option value="300">300 dpi</option>
     </select>
-    <button id="redact-clear" title="Take every box back off">Clear</button>
-    <button id="redact-save" class="primary" title="Save a flattened, redacted copy — never the original">Save redacted copy…</button>
-    <button id="redact-done" title="Leave the redaction tool (the boxes stay)">Done</button>
+    <button id="redact-clear" class="btn sm" title="Take every box back off">Clear</button>
+    <button id="redact-save" class="btn sm danger" title="Save a flattened, redacted copy — never the original">Save redacted copy…</button>
+    <button id="redact-done" class="btn sm" title="Leave the redaction tool (the boxes stay)">Done</button>
   </div>
   <input id="redact-key-input" type="file" accept=".xlsx" hidden>
 
-  <div id="form-bar" hidden>
-    <span class="form-bar-label">Filling form — edit the fields, then:</span>
-    <button id="form-save" title="Save the document with your entries (fields stay editable)">Save filled</button>
-    <button id="form-flatten" class="primary" title="Save and make the entries permanent (fields removed)">Save &amp; flatten</button>
-    <button id="form-cancel" title="Discard your entries and leave form mode">Cancel</button>
+  <div id="form-bar" class="float-bar" hidden>
+    <span class="form-bar-label fb-label">Filling form — edit the fields, then:</span>
+    <button id="form-save" class="btn sm" title="Save the document with your entries (fields stay editable)">Save filled</button>
+    <button id="form-flatten" class="btn sm primary" title="Save and make the entries permanent (fields removed)">Save &amp; flatten</button>
+    <button id="form-cancel" class="btn sm" title="Discard your entries and leave form mode">Cancel</button>
   </div>
 
+  <!-- ══ Dialogs ═════════════════════════════════════════════════════════ -->
   <div id="bates-modal" class="modal-backdrop" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="bates-title">
-      <h3 id="bates-title">Bates numbering</h3>
+      <div class="modal-head"><i data-icon="hash"></i><h3 id="bates-title">Bates numbering</h3></div>
       <p class="modal-sub">Stamps a sequential number on every page.</p>
       <label class="modal-row">Prefix <input id="bates-prefix" type="text" placeholder="e.g. ABC" maxlength="24"></label>
       <label class="modal-row">Start at <input id="bates-start" type="number" value="1" min="0" step="1"></label>
@@ -104,15 +379,15 @@
       </label>
       <p class="modal-preview">Preview: <span id="bates-preview">ABC000001</span></p>
       <div class="modal-actions">
-        <button id="bates-cancel">Cancel</button>
-        <button id="bates-apply" class="primary">Apply &amp; Save</button>
+        <button id="bates-cancel" class="btn">Cancel</button>
+        <button id="bates-apply" class="btn primary">Apply &amp; save</button>
       </div>
     </div>
   </div>
 
   <div id="hf-modal" class="modal-backdrop" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="hf-title">
-      <h3 id="hf-title">Header &amp; footer</h3>
+    <div class="modal wide" role="dialog" aria-modal="true" aria-labelledby="hf-title">
+      <div class="modal-head"><i data-icon="header-footer"></i><h3 id="hf-title">Header &amp; footer</h3></div>
       <p class="modal-sub">Leave any box blank. Use <code>{n}</code> for the page number and <code>{N}</code> for the total.</p>
       <div class="hf-grid">
         <span class="hf-lbl">Header</span>
@@ -125,15 +400,15 @@
         <input id="hf-fr" type="text" placeholder="right" maxlength="80">
       </div>
       <div class="modal-actions">
-        <button id="hf-cancel">Cancel</button>
-        <button id="hf-apply" class="primary">Apply &amp; Save</button>
+        <button id="hf-cancel" class="btn">Cancel</button>
+        <button id="hf-apply" class="btn primary">Apply &amp; save</button>
       </div>
     </div>
   </div>
 
   <div id="watermark-modal" class="modal-backdrop" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="wm-title">
-      <h3 id="wm-title">Watermark</h3>
+      <div class="modal-head"><i data-icon="droplet"></i><h3 id="wm-title">Watermark</h3></div>
       <p class="modal-sub">Stamps translucent text across every page.</p>
       <label class="modal-row">Text <input id="wm-text" type="text" placeholder="CONFIDENTIAL" maxlength="40"></label>
       <label class="modal-row">Size <input id="wm-size" type="number" value="60" min="8" max="200" step="1"></label>
@@ -148,15 +423,15 @@
       </label>
       <label class="modal-row">Diagonal <input id="wm-diagonal" type="checkbox" checked></label>
       <div class="modal-actions">
-        <button id="wm-cancel">Cancel</button>
-        <button id="wm-apply" class="primary">Apply &amp; Save</button>
+        <button id="wm-cancel" class="btn">Cancel</button>
+        <button id="wm-apply" class="btn primary">Apply &amp; save</button>
       </div>
     </div>
   </div>
 
   <div id="split-modal" class="modal-backdrop" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="split-title">
-      <h3 id="split-title">Split document</h3>
+      <div class="modal-head"><i data-icon="scissors"></i><h3 id="split-title">Split document</h3></div>
       <p class="modal-sub">Saves several PDFs — into a folder you pick, or as downloads.</p>
       <label class="modal-row">Split by
         <select id="split-mode">
@@ -169,80 +444,15 @@
       <label class="modal-row" id="split-ranges-row" hidden>Ranges <input id="split-ranges" type="text" placeholder="1-3, 4-8, 9-"></label>
       <p class="modal-preview">Result: <span id="split-summary">—</span></p>
       <div class="modal-actions">
-        <button id="split-cancel">Cancel</button>
-        <button id="split-apply" class="primary">Split &amp; Save</button>
+        <button id="split-cancel" class="btn">Cancel</button>
+        <button id="split-apply" class="btn primary">Split &amp; save</button>
       </div>
     </div>
   </div>
-  <div id="thumb-resize" title="Drag to resize the panel"></div>
-  <header id="toolbar">
-    <button id="thumbnail-toggle" title="Toggle page thumbnails">☰</button>
-    <span id="filename">PDF</span>
-    <label class="toolbar-label">
-      Name from:
-      <select id="naming-mode" title="Choose how this document is named in the toolbar and on download. This setting applies only to the current document; the global default is set in the popup or options page.">
-        <option value="source">Source</option>
-        <option value="footer">Footer</option>
-      </select>
-    </label>
-    <span id="status">Loading…</span>
-    <span id="link-count"></span>
-    <span class="spacer"></span>
-    <span id="page-indicator" title="Current page — type a page number and press Enter to go to it"><input id="page-input" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Page number"> / <span id="page-total"></span></span>
-    <span class="spacer"></span>
-    <label class="toolbar-label">
-      Links to:
-      <select id="provider">
-        <option value="lexis">Lexis+</option>
-        <option value="westlaw">Westlaw</option>
-      </select>
-    </label>
-    <button id="zoom-out" title="Zoom out">−</button>
-    <span id="zoom-level">100%</span>
-    <button id="zoom-in" title="Zoom in">+</button>
-    <button id="autoscroll-toggle" title="Auto-scroll while reading — the page creeps upward at your reading pace (A)" aria-pressed="false">↓ Auto-scroll</button>
-    <button id="save-edits" title="Save your highlights and edits into the PDF (local documents only)" hidden>💾 Save</button>
-    <button id="download" title="Download PDF">⬇ Download</button>
-    <button id="open-original" title="Open in Chrome's built-in viewer (no citation links)">Open original</button>
-    <button id="theme-toggle" title="Switch to light mode" aria-label="Switch color theme">☀</button>
-  </header>
 
-  <!-- Adobe-Acrobat-style vertical tools rail down the left margin. Holds the
-       annotation/selection tools always, and the document-editing tools when the
-       document is editable (local/downloaded). -->
-  <aside id="tools-rail" aria-label="Tools">
-    <button id="tools-rail-collapse" title="Collapse the tools panel" aria-expanded="true">Tools <span class="chev">‹</span></button>
-
-    <div id="tools-rail-body">
-      <div class="tools-group-label">Comment</div>
-      <button id="highlight-toggle" class="tool-btn" title="Highlight tool: click to toggle. When active, drag to highlight text. Right-click selected text anytime to highlight." aria-pressed="false"><span class="ti">✏</span><span class="tl">Highlight</span></button>
-      <button id="rect-select-toggle" class="tool-btn" title="Rectangle select: click to toggle. When active, drag a box to select text by region. You can also hold Alt and drag at any time." aria-pressed="false"><span class="ti">▭</span><span class="tl">Box select</span></button>
-      <button id="crop-select" class="tool-btn" title="Set the selectable text area: toggle on, then drag a box. Text outside the box (e.g. margin line numbers) won't be selectable. Applies to every document until you change or reset it." aria-pressed="false"><span class="ti">⬚</span><span class="tl">Text area</span></button>
-      <button id="ocr-run" class="tool-btn" title="Run OCR on this scanned document so its text becomes selectable and citations are linked" aria-pressed="false"><span class="ti">⛶</span><span class="tl">OCR</span></button>
-
-      <div class="tools-group-label">Redact</div>
-      <button id="redact-toggle" class="tool-btn" title="Redaction: mark what has to go — every real value the pseudonym key binds, plus anything you drag over — then save a flattened copy with it blacked out. Never writes the original." aria-pressed="false"><span class="ti">▬</span><span class="tl">Redact</span></button>
-
-      <div class="tools-group-label">View</div>
-      <button id="rotate-pages" class="tool-btn" title="Turn sideways or upside-down pages the right way up (R clockwise, Shift+R back). Rotation shows immediately; saving it into the file is a separate click." aria-pressed="false"><span class="ti">⟳</span><span class="tl">Rotate pages</span></button>
-
-      <div id="tools-edit-section" hidden>
-        <div class="tools-group-label">Edit</div>
-        <button id="fill-form" class="tool-btn" title="Fill in this PDF's form fields" hidden><span class="ti">📝</span><span class="tl">Fill form…</span></button>
-        <button id="combine-pdfs" class="tool-btn" title="Merge other PDFs onto the end of this one and save"><span class="ti">⧉</span><span class="tl">Combine PDFs…</span></button>
-        <button id="images-btn" class="tool-btn" title="Add image files (JPG/PNG…) as new pages"><span class="ti">🖼</span><span class="tl">Add images…</span></button>
-
-        <div class="tools-group-label">Organize</div>
-        <button id="organize-pages" class="tool-btn" title="Reorder, rotate, delete, or extract pages"><span class="ti">▦</span><span class="tl">Organize pages</span></button>
-        <button id="split-btn" class="tool-btn" title="Split this document into several PDFs"><span class="ti">✂</span><span class="tl">Split…</span></button>
-
-        <div class="tools-group-label">Stamp</div>
-        <button id="bates-number" class="tool-btn" title="Add Bates numbers to every page"><span class="ti">▤</span><span class="tl">Bates numbering…</span></button>
-        <button id="headerfooter-btn" class="tool-btn" title="Add header/footer text or page numbers"><span class="ti">🔖</span><span class="tl">Header &amp; footer…</span></button>
-        <button id="watermark-btn" class="tool-btn" title="Add a translucent watermark to every page"><span class="ti">🌊</span><span class="tl">Watermark…</span></button>
-      </div>
-    </div>
-  </aside>
+  <!-- Dialogs built by features.js share this host (signature, password,
+       properties, export, compress, …). -->
+  <div id="dialog-host"></div>
 
   <main id="viewer-container">
     <div id="pages"></div>
@@ -258,6 +468,10 @@
     <span id="as-ppm">1.0 ppm</span>
     <button id="as-close" title="Turn auto-scroll off (Esc)" aria-label="Turn auto-scroll off">✕</button>
   </div>
+
+  <div id="toast-host" aria-live="polite"></div>
+  <div id="print-root" aria-hidden="true"></div>
+
   <!-- Shift+Space = middle click: opens the link under the pointer, or every
        link in the selection, in unfocused background tabs. Shared verbatim with
        the web content script; a classic script so both can load it. -->

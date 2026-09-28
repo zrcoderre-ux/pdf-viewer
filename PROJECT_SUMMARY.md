@@ -57,6 +57,75 @@ paints only part of what it knows — `claude-citations.js` skips citations
 scrolled out of their container — registers a source on
 `window.__shiftSpaceLinkSources` so a selection still reaches the undrawn ones.
 
+## The editor (Acrobat-style tools)
+
+The viewer's chrome is `viewer.html` + `viewer.css` (design tokens on `:root`,
+dark by default, `[data-theme=light]` flips them) with icons from
+`viewer/icons.js` (`<i data-icon="name">` placeholders filled by
+`hydrateIcons`) and menus / toasts / dialogs from `viewer/ui.js`
+(`openDialog`, `confirmDialog`, `promptDialog`, `contextMenu`, `toast`). Three
+fixed regions: the top bar, the tools rail (`#tools-rail`, groups of
+`.tool-btn`, searchable; `body.tools-collapsed` makes it an icon strip and a
+window under 1100px starts it collapsed), and the side rail + panel
+(thumbnails, bookmarks, comments, attachments). Floating property bars
+(`.float-bar`: find, annotation properties, crop, rotate, redact, form) sit
+under the top bar.
+
+**Comments are a model in PDF user space** (`viewer/annotations.js`): one
+array of plain objects (`{ id, page, type, rect, quads, color, … }`), drawn as
+DOM in each page's `.annotLayer` by `paintPage`, with undo / redo as
+snapshots of the array. Types: highlight underline strikeout note freetext
+typewriter ink square circle whiteout line arrow stamp symbol image link.
+`viewer/annot-pdf.js` is the file side: `readAnnotations` turns a document's
+annotations into model objects (anything this viewer wrote carries an `/NM`
+starting `pdfv-`; stamps, symbols and images keep their model as JSON in a
+private `/PDFV` key), `writeAnnotations` writes each dirty one with an
+appearance stream and removes what was deleted (`removeRefs`),
+`flattenAnnotations` draws appearance streams into the page content. pdf.js
+must not draw the annotations the model owns, or they would show twice:
+pages render with `AnnotationMode.ENABLE_STORAGE` and every owned id is set
+`{ noView: true, noPrint: true }` in `pdfDoc.annotationStorage`.
+
+**Every document tool starts from `bakeCurrentEdits()`** — the document's
+bytes with the current comments written in — so a tool never loses unsaved
+comments. The tools in `viewer/features.js` go through its `applyEdit`: bake,
+transform (pdf-lib functions in `pdf-edit.js`), write out in place
+(`writeOutPdf` with `inPlace`), reload keeping the scroll place, and mark
+saved; the older ones in `viewer.js` (Organize, Bates, header / footer,
+watermark, insert from file, images, rotation) follow the same steps
+inline. In place
+means the file handle when there is one (the app); otherwise the save picker,
+whose file then becomes the document (`adoptSavedFile`) — that is how a web
+PDF in the extension becomes editable.
+
+**Passwords** (`viewer/pdf-crypt.js`) are handled before pdf-lib ever sees
+the file: `decryptPdf` hooks pdf-lib's parser to decrypt each top-level
+object as it is parsed (before object streams are unpacked), so RC4-40/128,
+AES-128 and AES-256 files load as plain documents. The document keeps its
+security (`docSecurity`) and `protectForSave` re-encrypts on the way out, so
+a file that came in protected is saved protected. `encryptPdf` always writes
+AES-256 (V5 R6). Permission bits are honoured by `Features.guard(kind)`; the
+owner password unlocks them.
+
+**Selection vs. overlays.** Citation links, comments, redaction boxes and
+form fields all sit above the text layer. While a text drag is in progress
+(`body.text-dragging`, set on a left mousedown in a text layer) they take no
+pointer events, so a drag across a link does not hand the selection to it,
+and the text layer carries pdf.js's `endOfContent` guard so a drag past the
+end of a line does not select the page. Keep both when adding a new overlay.
+
+**Find** (`viewer/find.js`) searches the text layers' DOM and paints matches
+with the CSS Custom Highlight API (`::highlight(find-match)`), so it never
+touches the layer's spans. **Print** (`viewer/print.js`) renders every page
+to an image in `#print-root` (comments baked in) and prints that, rather than
+the browser's page, which would print only what has been drawn.
+
+`textlayout.js` (lines, paragraphs, .docx parts, plain text, Myers word diff)
+and `zip.js` are pure and tested in Node (`test-textlayout.mjs`), as are the
+annotation writer and page tools (`test-annot-pdf.mjs`) and the ciphers and
+password round trips (`test-pdf-crypt.mjs`, with pikepdf interop when
+present).
+
 ## The text reader (`viewer/text-reader.html`)
 
 A second page in the same extension and the same PWA: PDF-Linker's scrubbed
@@ -1745,8 +1814,8 @@ counts as standing.
   Chrome extension. `chrome.storage.sync` for global prefs/patterns,
   `chrome.storage.session` for per-doc overrides and cross-tab
   disambiguation, `chrome.storage.local` for the citation repo.
-  Highlights are intentionally in-memory only (closes-with-tab); the
-  README documents this.
+  Comments live in the document model until saved; they are written into
+  the PDF as annotations, never kept in browser storage.
 - **PDF.js version is pinned** in `fetch-pdfjs.py` (currently 4.6.82). The
   rectsForRange rewrite specifically works around 4.x TextLayer behavior.
   If upgrading PDF.js, re-verify the placement logic against a long
@@ -1848,6 +1917,9 @@ test-page-rotation.mjs               Node-runnable page-rotation geometry + scop
 test-citation-memory.mjs             Node-runnable per-URL citation-memory tests (stubbed DOM)
 test-section-lists.mjs               Node-runnable chained section-list tests (and / or / & connectors)
 test-redact.mjs                      Node-runnable redaction tests: span mapping, box merging, a store per document, and the saved copy read back for text and metadata
+test-annot-pdf.mjs                   Node-runnable comment round trips (write, save, read back, edit, flatten) + page tools
+test-pdf-crypt.mjs                   Node-runnable cipher vectors + protect/open round trips (+ pikepdf interop when installed)
+test-textlayout.mjs                  Node-runnable page reading, Word/text export, Compare diff, Find matching, zip
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
 viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)
@@ -1857,18 +1929,29 @@ viewer/xlsx-read.js                      Minimal .xlsx reader (pure; test-xlsx-r
 viewer/xlsx-write.js                     Fix? cells written back into the same .xlsx (pure; test-xlsx-write.mjs)
 viewer/leaks.js                          LEAKS.xlsx model for the review bar (pure; test-leaks.mjs)
 viewer/web-shim.js                       chrome.* shim for the hosted pages (was inline in viewer.js)
-viewer/viewer.css                    Page / textLayer / linkLayer styles; body owns scroll
-viewer/viewer.js                     PDF.js loader, two-pass renderer (pages drawn as they near the screen), naming plumbing
+viewer/viewer.css                    Design tokens (dark/light), chrome, page / textLayer / linkLayer / annotLayer styles; body owns scroll
+viewer/viewer.js                     PDF.js loader, two-pass renderer (pages drawn as they near the screen), naming plumbing, zoom, panels, saving, app wiring
 viewer/pdf-fonts.js                  The document pdf.js loads fonts into, and drawing a page by way of it (viewer + reader)
 viewer/autoscroll.js                 Auto-scroll: ppm-paced reading scroll + its control bar
 viewer/rotation.js                   Page rotation: per-page angles, rotate bar, rotated geometry
 viewer/ocr-store.js                  Saved OCR: recognized pages in IndexedDB by file hash, kept N days since last use
 viewer/citation-linker.js            Detection + placement + URL resolution
 viewer/citation-memory.js            Per-URL memory: cumulative TOA + remembered cases, saved across reloads
-viewer/highlights.js                 Selection, highlight, context menu
+viewer/highlights.js                 Selection, markup from a selection, box select
+viewer/icons.js                      SVG icon set + [data-icon] hydration
+viewer/ui.js                         Menus, context menus, toasts, dialogs
+viewer/annotations.js                Comment model on screen: tools, drawing, selection, editing, undo, comments list
+viewer/annot-pdf.js                  Comment model <-> PDF annotations; appearance streams; flatten (test-annot-pdf.mjs)
+viewer/features.js                   Document tools (applyEdit): password, pages, crop, numbering, sanitize, flatten, export, compress, compare, properties, presentation
+viewer/pdf-crypt.js                  Standard security handler: open RC4/AES, protect AES-256 (test-pdf-crypt.mjs)
+viewer/find.js                       Find in document (CSS Custom Highlight API)
+viewer/print.js                      Print: every page rendered to an image, then window.print()
+viewer/signature.js                  Signature / initials dialog, saved signatures
+viewer/textlayout.js                 Lines/paragraphs, .docx and text export, word diff (pure; test-textlayout.mjs)
+viewer/zip.js                        Zip writer (deflate-raw via CompressionStream)
 viewer/redact.js                     Redaction: the boxes, a store per document, the copy's name (pure parts; test-redact.mjs)
 viewer/key-library.js                The pseudonym keys in storage, shared by the reader and the viewer
-viewer/pdf-edit.js                   PDF writing via pdf-lib: highlights, page plans, stamps, the redacted copy
+viewer/pdf-edit.js                   PDF writing via pdf-lib: comments, page plans, stamps, crop, blank pages, metadata, sanitize, the redacted copy
 viewer/footer-naming.js              Footer-title rule engine + iterative disambiguator
 viewer/disambiguation.js             Cross-tab collision registry (storage.session)
 viewer/naming-override.js            Per-document naming-mode override (storage.session)

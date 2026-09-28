@@ -9,6 +9,8 @@
 // drag-and-drop, and the OS file handler (launchQueue). The app is for files
 // you open from disk; viewing web PDFs is the browser extension's job.
 
+import { icon, hydrateIcons } from "./viewer/icons.js";
+
 const tabsEl = document.getElementById("tabs");
 const viewsEl = document.getElementById("tab-views");
 const dropzone = document.getElementById("dropzone");
@@ -39,13 +41,32 @@ function cleanTitle(t) {
   return (t || "").replace(/\s*[—-]\s*(PDF Viewer|Text Reader)\s*$/, "").trim() || "PDF";
 }
 
+// Home is the page with nothing open, and a tab of its own once something is:
+// the Home button shows it over the documents without closing any of them.
+let homeOpen = false;
+const homeTab = document.getElementById("home-tab");
+
 function updateChrome() {
-  dropzone.hidden = tabs.length > 0;
+  const showHome = tabs.length === 0 || homeOpen;
+  dropzone.hidden = !showHome;
   document.body.classList.toggle("has-tabs", tabs.length > 0);
+  document.body.classList.toggle("home-open", showHome && tabs.length > 0);
+  homeTab.classList.toggle("active", showHome);
+  if (showHome) renderRecent();
 }
+function showHome(on) {
+  homeOpen = on;
+  for (const t of tabs) t.btn.classList.toggle("active", !on && t.id === activeId);
+  updateChrome();
+  if (on) document.title = "PDF Viewer";
+  else syncShellTitle();
+}
+homeTab.addEventListener("click", () => showHome(tabs.length ? !homeOpen : true));
 
 function activate(id) {
   activeId = id;
+  homeOpen = false;
+  updateChrome();
   syncShellTitle();
   for (const t of tabs) {
     const on = t.id === id;
@@ -108,9 +129,14 @@ function syncShellTitle() {
   document.title = name && name !== "PDF" ? name : "PDF Viewer";
 }
 
+function tabHasUnsaved(tab) {
+  try { return !!tab.iframe.contentWindow?.__pdfViewerHasUnsaved?.(); } catch { return false; }
+}
+
 function closeTab(id) {
   const idx = tabs.findIndex((t) => t.id === id);
   if (idx < 0) return;
+  if (tabHasUnsaved(tabs[idx]) && !confirm(`“${tabs[idx].labelEl.textContent}” has changes that are not saved. Close it anyway?`)) return;
   const [tab] = tabs.splice(idx, 1);
   // Removing an iframe discards its document without firing unload handlers,
   // so tell the viewer to drop its cross-tab naming-registry entry first —
@@ -126,20 +152,26 @@ function closeTab(id) {
   updateChrome();
 }
 
-function makeTabButton(id, initialLabel) {
+function makeTabButton(id, initialLabel, text = false) {
   const btn = document.createElement("div");
-  btn.className = "tab";
+  btn.className = "tab" + (text ? " text" : "");
   btn.setAttribute("role", "tab");
+  const ic = document.createElement("span");
+  ic.className = "tab-icon";
+  ic.innerHTML = icon(text ? "file-text" : "file", { size: 15 });
   const labelEl = document.createElement("span");
   labelEl.className = "tab-label";
   labelEl.textContent = initialLabel;
   const close = document.createElement("button");
   close.className = "tab-close";
   close.title = "Close tab";
-  close.textContent = "×";
+  close.setAttribute("aria-label", "Close tab");
+  close.innerHTML = icon("x", { size: 14 });
   close.addEventListener("click", (e) => { e.stopPropagation(); closeTab(id); });
-  btn.append(labelEl, close);
+  btn.append(ic, labelEl, close);
   btn.addEventListener("click", () => activate(id));
+  // A middle click closes a tab, as in a browser.
+  btn.addEventListener("auxclick", (e) => { if (e.button === 1) { e.preventDefault(); closeTab(id); } });
   tabsEl.appendChild(btn);
   return { btn, labelEl };
 }
@@ -153,7 +185,7 @@ function newTab({ initialLabel, file, handle, text, dir, focus = true }) {
   iframe.className = "tab-view";
   iframe.src = text ? READER_SRC : VIEWER_SRC;
   viewsEl.appendChild(iframe);
-  const { btn, labelEl } = makeTabButton(id, initialLabel || "Loading…");
+  const { btn, labelEl } = makeTabButton(id, initialLabel || "Loading…", !!text);
   const tab = { id, iframe, btn, labelEl, file, handle, text: !!text, dir: dir || null, fed: false, reflowed: false };
   tabs.push(tab);
   feedWhenReady(tab);
@@ -185,8 +217,12 @@ function feedWhenReady(tab) {
 // overwrite the same file.
 function openLocalFile(file, handle) {
   if (!file) return;
-  newTab({ initialLabel: file.name, file, handle, text: isTextFile(file) && !isPdfFile(file) });
+  const text = isTextFile(file) && !isPdfFile(file);
+  newTab({ initialLabel: file.name, file, handle, text });
+  if (handle) rememberRecent(handle, text);
 }
+// The viewer's Ctrl+O and the Home page's button come here.
+window.__appOpenFile = () => pickFiles();
 
 // ---- Open affordances ------------------------------------------------------
 
@@ -275,7 +311,9 @@ async function pickCaseFolder() {
 }
 
 newTabBtn.addEventListener("click", pickFiles);
-dropzone.addEventListener("click", pickFiles);
+document.getElementById("open-file")?.addEventListener("click", pickFiles);
+document.getElementById("combine-files")?.addEventListener("click", combineFiles);
+document.getElementById("images-to-pdf")?.addEventListener("click", imagesToPdf);
 const caseBtn = document.getElementById("open-case");
 if (caseBtn) caseBtn.addEventListener("click", (e) => { e.stopPropagation(); pickCaseFolder(); });
 const caseBtn2 = document.getElementById("open-case-tab");
@@ -309,6 +347,180 @@ if ("launchQueue" in window) {
   });
 }
 
+// ---- Home: combine, create, recent ----------------------------------------
+
+function shellToast(msg, ms = 3200) {
+  const el = document.getElementById("shell-toast");
+  if (!el) return;
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(shellToast.t);
+  shellToast.t = setTimeout(() => { el.hidden = true; }, ms);
+}
+
+function pickRaw({ multiple = true, accept }) {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = multiple;
+    input.accept = accept;
+    input.addEventListener("change", () => resolve(input.files ? [...input.files] : []));
+    input.addEventListener("cancel", () => resolve([]));
+    input.click();
+  });
+}
+
+// Several PDFs into one, opened as a new (unsaved) document: Save asks where.
+async function combineFiles() {
+  const files = (await pickRaw({ accept: "application/pdf,.pdf" })).filter(isPdfFile);
+  if (!files.length) return;
+  if (files.length < 2) { shellToast("Choose two or more PDFs to combine."); return; }
+  files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  shellToast(`Combining ${files.length} files…`, 60000);
+  try {
+    const { PDFDocument } = await import("./viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+    const { decryptPdf, detectEncryption } = await import("./viewer/pdf-crypt.js");
+    const out = await PDFDocument.create();
+    const skipped = [];
+    for (const f of files) {
+      let bytes = new Uint8Array(await f.arrayBuffer());
+      if (detectEncryption(bytes)) {
+        try { bytes = (await decryptPdf(bytes, "")).bytes; } catch { skipped.push(f.name); continue; }
+      }
+      const src = await PDFDocument.load(bytes);
+      for (const p of await out.copyPages(src, src.getPageIndices())) out.addPage(p);
+    }
+    const bytes = await out.save();
+    const file = new File([bytes], "Combined.pdf", { type: "application/pdf" });
+    openLocalFile(file, null);
+    shellToast(skipped.length ? `Combined. Skipped (password-protected): ${skipped.join(", ")}` : `Combined ${files.length} files — Save to keep the result.`, 5000);
+  } catch (e) {
+    console.error(e);
+    shellToast(`Could not combine the files: ${e.message || e}`, 6000);
+  }
+}
+
+// Images, one per page, each fitted to a US Letter page.
+async function imagesToPdf() {
+  const files = await pickRaw({ accept: "image/*" });
+  if (!files.length) return;
+  shellToast(`Creating a PDF from ${files.length} image${files.length === 1 ? "" : "s"}…`, 60000);
+  try {
+    const { PDFDocument } = await import("./viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+    const doc = await PDFDocument.create();
+    for (const f of files) {
+      let bytes = new Uint8Array(await f.arrayBuffer());
+      let type = (f.type || "").toLowerCase();
+      if (type !== "image/jpeg" && type !== "image/png") {
+        const bmp = await createImageBitmap(f);
+        const c = document.createElement("canvas");
+        c.width = bmp.width; c.height = bmp.height;
+        c.getContext("2d").drawImage(bmp, 0, 0);
+        bytes = new Uint8Array(await (await new Promise((r) => c.toBlob(r, "image/png"))).arrayBuffer());
+        type = "image/png";
+      }
+      const img = type === "image/jpeg" ? await doc.embedJpg(bytes) : await doc.embedPng(bytes);
+      const land = img.width > img.height;
+      const [PW, PH] = land ? [792, 612] : [612, 792];
+      const s = Math.min((PW - 36) / img.width, (PH - 36) / img.height, 1);
+      const page = doc.addPage([PW, PH]);
+      page.drawImage(img, { x: (PW - img.width * s) / 2, y: (PH - img.height * s) / 2, width: img.width * s, height: img.height * s });
+    }
+    const out = await doc.save();
+    openLocalFile(new File([out], files.length === 1 ? files[0].name.replace(/\.[^.]+$/, "") + ".pdf" : "Images.pdf", { type: "application/pdf" }), null);
+    shellToast("Created — Save to keep the PDF.", 4000);
+  } catch (e) {
+    console.error(e);
+    shellToast(`Could not create the PDF: ${e.message || e}`, 6000);
+  }
+}
+
+// Recent files: the handles of files opened with the picker or from the
+// system, kept in IndexedDB (a handle is all it takes to open the file again,
+// with the browser asking for permission once).
+const RECENT_DB = "pdfviewer-recent";
+function recentDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(RECENT_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("files", { keyPath: "key" });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function recentAll() {
+  try {
+    const db = await recentDb();
+    return await new Promise((resolve) => {
+      const r = db.transaction("files").objectStore("files").getAll();
+      r.onsuccess = () => resolve((r.result || []).sort((a, b) => b.when - a.when));
+      r.onerror = () => resolve([]);
+    });
+  } catch { return []; }
+}
+async function rememberRecent(handle, text) {
+  try {
+    const list = await recentAll();
+    // One entry per file: a handle that is the same file replaces the old one.
+    let key = null;
+    for (const r of list) { try { if (await r.handle.isSameEntry(handle)) { key = r.key; break; } } catch { /* stale */ } }
+    const db = await recentDb();
+    const tx = db.transaction("files", "readwrite");
+    const store = tx.objectStore("files");
+    store.put({ key: key || `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: handle.name, handle, text: !!text, when: Date.now() });
+    for (const old of list.slice(11)) store.delete(old.key);
+  } catch { /* storage unavailable: no recent list */ }
+}
+async function renderRecent() {
+  const section = document.getElementById("recent");
+  const listEl = document.getElementById("recent-list");
+  if (!section || !listEl) return;
+  const list = (await recentAll()).slice(0, 10);
+  section.hidden = !list.length;
+  listEl.textContent = "";
+  for (const r of list) {
+    const b = document.createElement("button");
+    b.className = "recent-item" + (r.text ? " text" : "");
+    b.innerHTML = `<span class="ri-icon">${icon(r.text ? "file-text" : "file", { size: 18 })}</span><span class="ri-name"></span><span class="ri-when"></span>`;
+    b.querySelector(".ri-name").textContent = r.name;
+    b.querySelector(".ri-when").textContent = new Date(r.when).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    b.addEventListener("click", async () => {
+      try {
+        if (r.handle.requestPermission && (await r.handle.queryPermission({ mode: "readwrite" })) !== "granted") {
+          if ((await r.handle.requestPermission({ mode: "readwrite" })) !== "granted") return;
+        }
+        openLocalFile(await r.handle.getFile(), r.handle);
+      } catch (e) {
+        shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000);
+      }
+    });
+    listEl.appendChild(b);
+  }
+}
+document.getElementById("recent-clear")?.addEventListener("click", async () => {
+  try {
+    const db = await recentDb();
+    db.transaction("files", "readwrite").objectStore("files").clear();
+  } catch { /* ok */ }
+  renderRecent();
+});
+
+// The theme follows the viewer's toggle (same-origin storage events).
+window.addEventListener("storage", (e) => {
+  if (e.key === "pdfViewerTheme") document.documentElement.setAttribute("data-theme", e.newValue === "light" ? "light" : "dark");
+});
+
+// Unsaved work: a tab says so with a dot, and closing the window asks first.
+setInterval(() => {
+  for (const t of tabs) t.btn.classList.toggle("dirty", tabHasUnsaved(t));
+}, 1500);
+window.addEventListener("beforeunload", (e) => {
+  if (tabs.some(tabHasUnsaved)) { e.preventDefault(); e.returnValue = ""; }
+});
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "o" || e.key === "O")) { e.preventDefault(); pickFiles(); }
+});
+
+hydrateIcons();
 updateChrome();
 
 // Service worker: installability, offline, and auto-update when online.

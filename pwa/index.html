@@ -3,9 +3,10 @@
 <!--
   PWA shell with a tab bar. This page is only a tab manager: each open PDF is a
   separate <iframe> running the canonical viewer (viewer/viewer.html), so every
-  tab is a fully isolated viewer instance (its own zoom, highlights, OCR, etc.)
+  tab is a fully isolated viewer instance (its own zoom, comments, OCR, etc.)
   with no shared state. The shell hosts no viewer markup itself — that lives in
   the iframes — so there is nothing here to keep in sync with the extension.
+  The Home page (#dropzone) is the shell's own: open, combine, create, recent.
 -->
 <head>
   <meta charset="utf-8">
@@ -14,31 +15,68 @@
        own citations. Nothing here needs linking (isOwnLinker). -->
   <meta name="citation-linker" content="own">
   <title>PDF Viewer</title>
-  <meta name="theme-color" content="#1e293b">
+  <meta name="theme-color" content="#16181c">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="app-web.css">
+  <script src="viewer/theme-boot.js"></script>
 </head>
 <body>
   <div id="tabstrip">
+    <button id="home-tab" class="home-tab" title="Home" aria-label="Home"><i data-icon="logo" data-icon-size="18"></i><span>Home</span></button>
     <div id="tabs" role="tablist"></div>
-    <button id="new-tab" title="Open another PDF">+</button>
-    <button id="open-case-tab" title="Open a whole case folder in ONE reader: the combined file where the run made one, else the first export, with the folder's pseudonym key, PDFs and LEAKS worksheet attached — and every other export listed in its Documents panel, a click away, searched by Find and walked by the leak review without leaving the tab">📁 Case folder</button>
+    <button id="new-tab" class="strip-btn" title="Open a file (Ctrl+O)" aria-label="Open a file"><i data-icon="plus" data-icon-size="18"></i></button>
+    <button id="open-case-tab" class="strip-btn text" title="Open a whole case folder in ONE reader: the combined file where the run made one, else the first export, with the folder's pseudonym key, PDFs and LEAKS worksheet attached — and every other export listed in its Documents panel, a click away, searched by Find and walked by the leak review without leaving the tab"><i data-icon="folder" data-icon-size="16"></i><span>Case folder</span></button>
     <span class="strip-spacer"></span>
   </div>
 
   <div id="tab-views"></div>
 
   <div id="dropzone">
-    <div class="dz-inner">
-      <div class="dz-icon" aria-hidden="true">📄</div>
-      <p class="dz-title">Open a case folder, a PDF, or a text export</p>
-      <p class="dz-case"><button id="open-case" type="button">📁 Open a case folder…</button></p>
-      <p class="dz-sub"><strong>A whole matter in one pick:</strong> the case folder opens as <em>one</em> reader — the <strong>Combined Text.txt</strong> where the run made one, else the first export in its <strong>Text Files</strong> folder — with the folder's <strong>pseudonym_key.xlsx</strong>, its PDFs and its <strong>LEAKS.xlsx</strong> already attached. Every other export is listed in that reader's Documents panel, a click away, and Find and the leak review read straight through the folder without leaving the tab. Or click here (or the <strong>+</strong> tab) to browse your computer, or drop files in. Each PDF opens in its own tab — with citation links, OCR, highlighting, and the Table of Authorities. A <strong>.txt</strong> export from PDF-Linker opens in the text reader: real names on screen from the pseudonym key, citations linked, editable. Once installed, files you open from your system land here too.</p>
+    <div class="home-inner">
+      <header class="home-hero">
+        <div class="home-logo"><i data-icon="logo" data-icon-size="30"></i></div>
+        <div>
+          <h1>PDF Viewer</h1>
+          <p>Read, comment, fill &amp; sign, organize and protect PDFs — with every citation linked to Lexis+ or Westlaw.</p>
+        </div>
+      </header>
+
+      <div class="home-actions">
+        <button id="open-file" class="home-action primary">
+          <span class="ha-icon"><i data-icon="file" data-icon-size="22"></i></span>
+          <span class="ha-text"><b>Open a file</b><small>A PDF, or a PDF-Linker text export</small></span>
+        </button>
+        <button id="open-case" class="home-action">
+          <span class="ha-icon"><i data-icon="folder" data-icon-size="22"></i></span>
+          <span class="ha-text"><b>Open a case folder</b><small>The whole matter in one reader</small></span>
+        </button>
+        <button id="combine-files" class="home-action">
+          <span class="ha-icon"><i data-icon="files" data-icon-size="22"></i></span>
+          <span class="ha-text"><b>Combine files</b><small>Merge several PDFs into one</small></span>
+        </button>
+        <button id="images-to-pdf" class="home-action">
+          <span class="ha-icon"><i data-icon="images" data-icon-size="22"></i></span>
+          <span class="ha-text"><b>Create PDF from images</b><small>Photos and scans, one per page</small></span>
+        </button>
+      </div>
+
+      <p class="home-drop"><i data-icon="upload" data-icon-size="16"></i> Or drop files anywhere in this window. Once installed, PDFs you open from your computer land here too.</p>
+
+      <section id="recent" class="home-recent" hidden>
+        <div class="recent-head"><h2>Recent</h2><button id="recent-clear" class="link-btn">Clear</button></div>
+        <div id="recent-list"></div>
+      </section>
+
+      <details class="home-more">
+        <summary>How case folders open</summary>
+        <p><strong>A whole matter in one pick:</strong> the case folder opens as <em>one</em> reader — the <strong>Combined Text.txt</strong> where the run made one, else the first export in its <strong>Text Files</strong> folder — with the folder's <strong>pseudonym_key.xlsx</strong>, its PDFs and its <strong>LEAKS.xlsx</strong> already attached. Every other export is listed in that reader's Documents panel, a click away, and Find and the leak review read straight through the folder without leaving the tab. A <strong>.txt</strong> export from PDF-Linker opens in the text reader: real names on screen from the pseudonym key, citations linked, editable. Each PDF opens in its own tab with citation links, comments, OCR and the Table of Authorities.</p>
+      </details>
     </div>
   </div>
 
+  <div id="shell-toast" role="status" aria-live="polite" hidden></div>
   <input id="file-input" type="file" accept="application/pdf,.pdf,text/plain,.txt,.LEAK" multiple hidden>
 
   <script type="module" src="app-web.js"></script>

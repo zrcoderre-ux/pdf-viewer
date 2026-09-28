@@ -2,18 +2,15 @@
 //
 // PDF *writing* — the read/write layer on top of PDF.js's read-only rendering.
 // Uses the vendored pdf-lib (pure JS, CSP-safe) to produce a new PDF with
-// in-viewer edits applied. Kept deliberately small: callers pass plain data
-// (highlight rectangles already in PDF points, extra PDFs to append) and get
-// back bytes ready to write to disk.
+// in-viewer edits applied. Callers pass plain data (the annotation set, page
+// plans, stamps, extra PDFs to merge) and get back bytes ready to write.
 //
-// Highlights are written as real PDF **/Highlight annotations** (the same
-// object type Adobe uses), NOT rectangles baked into the page content. That
-// matters because annotations stay *separable*: this viewer reloads them as
-// removable highlights when the file is reopened, and Adobe / Preview / any
-// annotation-aware viewer can delete them too. Baked-in drawings would be
-// permanent. Because we round-trip, every save first strips the highlight
-// annotations already in the file and rewrites the current set — so the
-// in-viewer highlights are the single source of truth (deletions stick).
+// Comments and markup are written as real PDF annotations (annot-pdf.js), NOT
+// drawings baked into the page content. That matters because annotations stay
+// *separable*: this viewer reloads them as editable ones when the file is
+// reopened, and Acrobat / Preview / any annotation-aware viewer can edit or
+// delete them too. Flatten (below) is the deliberate step that makes them
+// permanent.
 
 import {
   PDFDocument,
@@ -30,101 +27,34 @@ import {
   PDFRadioGroup,
   PDFDropdown,
   PDFOptionList,
+  PDFRef,
+  PDFStream,
+  PDFHexString,
+  PageSizes,
 } from "./vendor/pdf-lib/pdf-lib.esm.min.js";
-
-// Yellow, matching the on-screen highlight, at 40% so text stays readable.
-const HL_SUBTYPE = PDFName.of("Highlight");
-const HL_COLOR = [1, 0.85, 0];
-const HL_OPACITY = 0.4;
-
-// Remove any /Highlight annotations already on a page, so a re-save doesn't
-// duplicate the highlights we're about to (re)write from the live set.
-function stripHighlightAnnots(page) {
-  const annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray);
-  if (!annots) return;
-  for (let i = annots.size() - 1; i >= 0; i--) {
-    let a;
-    try { a = annots.lookupMaybe(i, PDFDict); } catch { continue; }
-    if (a && a.get(PDFName.of("Subtype")) === HL_SUBTYPE) annots.remove(i);
-  }
-}
-
-// Add one /Highlight annotation covering `rects` (an array of {x,y,w,h} in PDF
-// points, origin bottom-left) — a multi-line highlight becomes one annotation
-// with several quadrilaterals.
-function addHighlightAnnot(doc, page, rects) {
-  const ctx = doc.context;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  const quads = [];
-  for (const r of rects) {
-    if (!(r.w > 0 && r.h > 0)) continue;
-    const left = r.x, right = r.x + r.w, bottom = r.y, top = r.y + r.h;
-    // QuadPoints order per the PDF spec / Adobe convention: the four corners
-    // as (x1 y1)=top-left, (x2 y2)=top-right, (x3 y3)=bottom-left,
-    // (x4 y4)=bottom-right.
-    quads.push(left, top, right, top, left, bottom, right, bottom);
-    if (left < minX) minX = left;
-    if (bottom < minY) minY = bottom;
-    if (right > maxX) maxX = right;
-    if (top > maxY) maxY = top;
-  }
-  if (!quads.length) return;
-
-  const dict = ctx.obj({});
-  dict.set(PDFName.of("Type"), PDFName.of("Annot"));
-  dict.set(PDFName.of("Subtype"), HL_SUBTYPE);
-  dict.set(PDFName.of("Rect"), ctx.obj([minX, minY, maxX, maxY]));
-  dict.set(PDFName.of("QuadPoints"), ctx.obj(quads));
-  dict.set(PDFName.of("C"), ctx.obj(HL_COLOR));
-  dict.set(PDFName.of("CA"), PDFNumber.of(HL_OPACITY));
-  dict.set(PDFName.of("F"), PDFNumber.of(4)); // Print flag
-  dict.set(PDFName.of("T"), PDFString.of("PDF Viewer"));
-  const ref = ctx.register(dict);
-
-  let annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray);
-  if (!annots) {
-    annots = ctx.obj([]);
-    page.node.set(PDFName.of("Annots"), annots);
-  }
-  annots.push(ref);
-}
+import { readAnnotations, writeAnnotations, flattenAnnotations } from "./annot-pdf.js";
 
 // Build an edited copy of a PDF.
-//   srcBytes:         Uint8Array/ArrayBuffer of the original PDF.
-//   highlightsByPage: Map<pageNumber(1-based), Array<{rects:[{x,y,w,h}]}>> in
-//                     PDF points (origin bottom-left), already converted by the
-//                     caller — each entry is one highlight (its own annotation).
-//   appendBytes:      Array<Uint8Array> of further PDFs to merge in after the
-//                     current document's pages (Combine / merge).
+//   srcBytes:    Uint8Array/ArrayBuffer of the original PDF.
+//   annotations: { annots, removeRefs } from annotations.saveData() — the
+//                comment/markup set to write (annot-pdf.js writes each as a
+//                real annotation with its own appearance), and the ids of the
+//                file's own annotations that were deleted or changed.
+//   appendBytes: Array<Uint8Array> of further PDFs to merge in (Combine).
+//   insertAt:    0-based page index the merged pages go in at (default: end).
 // Returns a Uint8Array of the saved PDF.
-export async function buildEditedPdf({ srcBytes, highlightsByPage = new Map(), appendBytes = [] }) {
+export async function buildEditedPdf({ srcBytes, annotations = null, appendBytes = [], insertAt = null }) {
   const doc = await PDFDocument.load(srcBytes);
-  const pages = doc.getPages();
-
-  // Rewrite highlights on every page that has (or had) any, so removed
-  // highlights disappear and the current set is authoritative.
-  const touched = new Set([
-    ...highlightsByPage.keys(),
-    ...pages.map((_, i) => i + 1),
-  ]);
-  for (const pageNumber of touched) {
-    const page = pages[pageNumber - 1];
-    if (!page) continue;
-    stripHighlightAnnots(page);
-    const list = highlightsByPage.get(pageNumber);
-    if (!list) continue;
-    for (const hl of list) {
-      if (hl && hl.rects && hl.rects.length) addHighlightAnnot(doc, page, hl.rects);
-    }
+  if (annotations) {
+    await writeAnnotations(doc, annotations.annots || [], { removeRefs: annotations.removeRefs || new Set() });
   }
-
+  let at = insertAt == null ? doc.getPageCount() : Math.max(0, Math.min(doc.getPageCount(), insertAt));
   for (const bytes of appendBytes) {
     if (!bytes) continue;
     const other = await PDFDocument.load(bytes);
     const copied = await doc.copyPages(other, other.getPageIndices());
-    for (const p of copied) doc.addPage(p);
+    for (const p of copied) doc.insertPage(at++, p);
   }
-
   return doc.save();
 }
 
@@ -179,7 +109,7 @@ function placeInBox({ angle, W, H, tw, fontSize, margin, halign, valign }) {
   return { x, y, rot: angle };
 }
 
-const norm360 = (a) => ((a || 0) % 360 + 360) % 360;
+function norm360(a) { return ((a || 0) % 360 + 360) % 360; }
 
 // Stamp a Bates number on every page (bottom-right by default). Numbers run
 // `start`, `start+1`, … zero-padded to `digits`, with an optional `prefix`
@@ -214,18 +144,22 @@ export async function stampBates({
 //   hl hc hr — header left / center / right   (top of page)
 //   fl fc fr — footer left / center / right   (bottom of page)
 // Each string may contain the tokens {n} (page number) and {N} (page count).
+// `fromPage` is the first page stamped (1-based) and `startAt` the number it
+// gets, so a brief can number its body from 1 after an unnumbered cover.
 // Placement is /Rotate-aware, matching Bates.
-export async function stampHeaderFooter({ srcBytes, slots = {}, fontSize = 9, margin = 24 }) {
+export async function stampHeaderFooter({ srcBytes, slots = {}, fontSize = 9, margin = 24, startAt = 1, fromPage = 1 }) {
   const doc = await PDFDocument.load(srcBytes);
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const pages = doc.getPages();
-  const total = pages.length;
+  const first = Math.max(1, Math.floor(fromPage));
+  const total = startAt + (pages.length - first);
   const layout = [
     ["hl", "l", "top"], ["hc", "c", "top"], ["hr", "r", "top"],
     ["fl", "l", "bottom"], ["fc", "c", "bottom"], ["fr", "r", "bottom"],
   ];
   pages.forEach((page, i) => {
-    const n = i + 1;
+    if (i + 1 < first) return;
+    const n = startAt + (i + 1 - first);
     const { width: W, height: H } = page.getSize();
     const angle = norm360(page.getRotation().angle);
     for (const [key, halign, valign] of layout) {
@@ -371,6 +305,324 @@ export async function hasFormFields(bytes) {
   } catch {
     return false;
   }
+}
+
+// Everything the viewer wants to know about a document that pdf.js does not
+// hand it directly, from ONE parse: whether it has form fields, the
+// annotations the comment tools can edit, its attachments and its /Info.
+// Returns null when pdf-lib cannot read the file (the viewer carries on with
+// what pdf.js shows).
+export async function inspectDocument(bytes) {
+  let doc;
+  try { doc = await PDFDocument.load(bytes, { updateMetadata: false }); } catch { return null; }
+  let hasForm = false;
+  try { hasForm = doc.getForm().getFields().length > 0; } catch { hasForm = false; }
+  let annotations = [];
+  try { annotations = await readAnnotations(doc); } catch (e) { console.warn("[pdf-edit] annotations unreadable:", e); }
+  let attachments = [];
+  try { attachments = listAttachments(doc); } catch { attachments = []; }
+  return { hasForm, annotations, attachments, info: readInfo(doc), pageCount: doc.getPageCount() };
+}
+
+function infoText(doc, key) {
+  try {
+    const v = doc.getInfoDict().get(PDFName.of(key));
+    if (v instanceof PDFString || v instanceof PDFHexString) return v.decodeText();
+  } catch { /* none */ }
+  return "";
+}
+function readInfo(doc) {
+  const d = (fn) => { try { const v = fn(); return v ? v.getTime() : null; } catch { return null; } };
+  return {
+    title: infoText(doc, "Title"),
+    author: infoText(doc, "Author"),
+    subject: infoText(doc, "Subject"),
+    keywords: infoText(doc, "Keywords"),
+    creator: infoText(doc, "Creator"),
+    producer: infoText(doc, "Producer"),
+    created: d(() => doc.getCreationDate()),
+    modified: d(() => doc.getModificationDate()),
+  };
+}
+
+// Write the document's Title / Author / Subject / Keywords. An empty value
+// takes the entry out rather than leaving an empty one.
+export async function setMetadata({ srcBytes, info }) {
+  const doc = await PDFDocument.load(srcBytes, { updateMetadata: false });
+  const dict = doc.getInfoDict();
+  const put = (key, value) => {
+    const v = String(value || "").trim();
+    if (v) dict.set(PDFName.of(key), PDFHexString.fromText(v));
+    else dict.delete(PDFName.of(key));
+  };
+  put("Title", info.title);
+  put("Author", info.author);
+  put("Subject", info.subject);
+  put("Keywords", info.keywords);
+  doc.setModificationDate(new Date());
+  // Show the title, not the file name, in a reader's window bar.
+  if (String(info.title || "").trim()) doc.setTitle(String(info.title).trim(), { showInWindowTitleBar: true });
+  return doc.save();
+}
+
+// ── Attachments ──────────────────────────────────────────────────────────────
+// Files embedded in the document: the catalog's /EmbeddedFiles name tree, and
+// file-attachment annotations on the pages.
+
+function walkNameTree(ctx, node, out) {
+  if (!node) return;
+  const names = node.lookupMaybe(PDFName.of("Names"), PDFArray);
+  if (names) {
+    for (let i = 0; i + 1 < names.size(); i += 2) {
+      const k = names.lookup(i);
+      const spec = names.lookup(i + 1);
+      out.push({ key: k instanceof PDFString || k instanceof PDFHexString ? k.decodeText() : "", spec });
+    }
+  }
+  const kids = node.lookupMaybe(PDFName.of("Kids"), PDFArray);
+  if (kids) for (let i = 0; i < kids.size(); i++) walkNameTree(ctx, kids.lookup(i, PDFDict), out);
+}
+function fileSpecInfo(ctx, spec) {
+  if (!(spec instanceof PDFDict)) return null;
+  const nameObj = spec.lookup(PDFName.of("UF")) || spec.lookup(PDFName.of("F"));
+  const name = nameObj && (nameObj instanceof PDFString || nameObj instanceof PDFHexString) ? nameObj.decodeText() : "attachment";
+  const ef = spec.lookupMaybe(PDFName.of("EF"), PDFDict);
+  const stream = ef && (ef.lookup(PDFName.of("UF")) || ef.lookup(PDFName.of("F")));
+  let size = null;
+  if (stream instanceof PDFStream) {
+    const params = stream.dict.lookupMaybe(PDFName.of("Params"), PDFDict);
+    const sz = params && params.get(PDFName.of("Size"));
+    size = sz instanceof PDFNumber ? sz.asNumber() : null;
+  }
+  const descObj = spec.lookup(PDFName.of("Desc"));
+  const desc = descObj && (descObj instanceof PDFString || descObj instanceof PDFHexString) ? descObj.decodeText() : "";
+  return { name, size, desc, stream };
+}
+export function listAttachments(doc) {
+  const out = [];
+  const names = doc.catalog.lookupMaybe(PDFName.of("Names"), PDFDict);
+  const ef = names && names.lookupMaybe(PDFName.of("EmbeddedFiles"), PDFDict);
+  const entries = [];
+  if (ef) walkNameTree(doc.context, ef, entries);
+  entries.forEach(({ spec }, i) => {
+    const info = fileSpecInfo(doc.context, spec);
+    if (info) out.push({ id: `ef${i}`, name: info.name, size: info.size, desc: info.desc });
+  });
+  doc.getPages().forEach((page, pi) => {
+    const annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray);
+    if (!annots) return;
+    for (let i = 0; i < annots.size(); i++) {
+      const a = annots.lookupMaybe(i, PDFDict);
+      if (!a || a.get(PDFName.of("Subtype")) !== PDFName.of("FileAttachment")) continue;
+      const info = fileSpecInfo(doc.context, a.lookup(PDFName.of("FS")));
+      if (info) out.push({ id: `fa${pi}_${i}`, name: info.name, size: info.size, desc: info.desc, page: pi + 1 });
+    }
+  });
+  return out;
+}
+/** The bytes of one attachment (by the id listAttachments gave it). */
+export async function readAttachment(bytes, id) {
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+  let spec = null;
+  if (id.startsWith("ef")) {
+    const names = doc.catalog.lookupMaybe(PDFName.of("Names"), PDFDict);
+    const ef = names && names.lookupMaybe(PDFName.of("EmbeddedFiles"), PDFDict);
+    const entries = [];
+    if (ef) walkNameTree(doc.context, ef, entries);
+    spec = entries[Number(id.slice(2))] && entries[Number(id.slice(2))].spec;
+  } else {
+    const [pi, i] = id.slice(2).split("_").map(Number);
+    const annots = doc.getPages()[pi].node.lookupMaybe(PDFName.of("Annots"), PDFArray);
+    const a = annots && annots.lookupMaybe(i, PDFDict);
+    spec = a && a.lookup(PDFName.of("FS"));
+  }
+  const info = fileSpecInfo(doc.context, spec);
+  if (!info || !info.stream) return null;
+  const { decodePDFRawStream } = await import("./vendor/pdf-lib/pdf-lib.esm.min.js");
+  try { return { name: info.name, bytes: decodePDFRawStream(info.stream).decode() }; }
+  catch { return { name: info.name, bytes: info.stream.getContents() }; }
+}
+
+// ── Pages ────────────────────────────────────────────────────────────────────
+
+// Insert `count` blank pages at 0-based index `at`, each `size` = [w, h] in
+// points (default: the size of the page they follow, or US Letter).
+export async function insertBlankPages({ srcBytes, at, count = 1, size = null }) {
+  const doc = await PDFDocument.load(srcBytes);
+  const n = doc.getPageCount();
+  let idx = Math.max(0, Math.min(n, at == null ? n : at));
+  let dims = size;
+  if (!dims) {
+    const ref = doc.getPages()[Math.max(0, Math.min(n - 1, idx - 1))];
+    if (ref) {
+      const { width, height } = ref.getSize();
+      const rot = norm360(ref.getRotation().angle);
+      dims = rot % 180 ? [height, width] : [width, height];
+    } else dims = PageSizes.Letter;
+  }
+  for (let i = 0; i < Math.max(1, count); i++) doc.insertPage(idx++, dims);
+  return doc.save();
+}
+
+// Trim pages: `margins` = { top, right, bottom, left } in points, measured on
+// the page as it is DISPLAYED (so "top" is the top the reader sees, whatever
+// the page's /Rotate). `pages` is a Set of 1-based page numbers, or null for
+// every page. The crop is a new /CropBox inside the page's current one; the
+// content outside is hidden, not deleted.
+export async function cropPages({ srcBytes, margins, pages = null, boxes = null }) {
+  const doc = await PDFDocument.load(srcBytes);
+  doc.getPages().forEach((page, i) => {
+    if (pages && !pages.has(i + 1)) return;
+    const cb = page.getCropBox();
+    let x = cb.x, y = cb.y, w = cb.width, h = cb.height;
+    if (boxes && boxes.get(i + 1)) {
+      const b = boxes.get(i + 1); // already in user space
+      x = b.x; y = b.y; w = b.width; h = b.height;
+    } else {
+      const rot = norm360(page.getRotation().angle);
+      // Map the displayed edges onto the page's own ones.
+      const m = { ...margins };
+      // A page turned a quarter clockwise shows its own left edge at the top.
+      const byEdge = rot === 90 ? { left: m.top, bottom: m.left, top: m.right, right: m.bottom }
+        : rot === 180 ? { left: m.right, top: m.bottom, right: m.left, bottom: m.top }
+        : rot === 270 ? { left: m.bottom, top: m.left, right: m.top, bottom: m.right }
+        : m;
+      x += byEdge.left || 0;
+      y += byEdge.bottom || 0;
+      w -= (byEdge.left || 0) + (byEdge.right || 0);
+      h -= (byEdge.top || 0) + (byEdge.bottom || 0);
+    }
+    if (w < 18 || h < 18) return; // nothing sensible left: leave the page alone
+    page.setCropBox(x, y, w, h);
+  });
+  return doc.save();
+}
+
+// ── Flatten, sanitize ────────────────────────────────────────────────────────
+
+// Make comments, drawings, stamps, signatures (and, with `forms`, form
+// entries) a permanent part of the page. Links stay links.
+export async function flattenPdf({ srcBytes, annotations = true, forms = true }) {
+  const doc = await PDFDocument.load(srcBytes);
+  if (forms) { try { doc.getForm().flatten(); } catch { /* no usable form */ } }
+  if (annotations) flattenAnnotations(doc);
+  return doc.save();
+}
+
+// Remove hidden information. Each option removes one kind:
+//   metadata    — /Info and the XMP packet
+//   attachments — embedded files and file-attachment annotations
+//   scripts     — document JavaScript, open actions, additional actions
+//   comments    — every annotation except links and form fields
+//   forms       — flatten the form (entries become page content)
+//   bookmarks   — the outline
+//   links       — link annotations
+//   hiddenText  — text drawn invisibly (render mode 3), e.g. an OCR layer
+// Returns { bytes, removed: [labels] }.
+export async function sanitizePdf({ srcBytes, options = {} }) {
+  const doc = await PDFDocument.load(srcBytes, { updateMetadata: false });
+  const ctx = doc.context;
+  const removed = [];
+  const cat = doc.catalog;
+  const N = (s) => PDFName.of(s);
+
+  if (options.metadata) {
+    const had = !!(ctx.trailerInfo.Info || cat.get(N("Metadata")));
+    stripMetadata(doc);
+    // A page or image can carry its own XMP packet and piece info.
+    for (const page of doc.getPages()) {
+      page.node.delete(N("Metadata"));
+      page.node.delete(N("PieceInfo"));
+    }
+    cat.delete(N("PieceInfo"));
+    if (had) removed.push("metadata");
+  }
+  if (options.scripts) {
+    let n = 0;
+    const names = cat.lookupMaybe(N("Names"), PDFDict);
+    if (names && names.get(N("JavaScript"))) { names.delete(N("JavaScript")); n++; }
+    if (cat.get(N("OpenAction"))) { cat.delete(N("OpenAction")); n++; }
+    if (cat.get(N("AA"))) { cat.delete(N("AA")); n++; }
+    for (const page of doc.getPages()) {
+      if (page.node.get(N("AA"))) { page.node.delete(N("AA")); n++; }
+      const annots = page.node.lookupMaybe(N("Annots"), PDFArray);
+      if (!annots) continue;
+      for (let i = 0; i < annots.size(); i++) {
+        const a = annots.lookupMaybe(i, PDFDict);
+        if (!a) continue;
+        if (a.get(N("AA"))) { a.delete(N("AA")); n++; }
+        const act = a.lookupMaybe(N("A"), PDFDict);
+        const s = act && act.get(N("S"));
+        if (s && (s === N("JavaScript") || s === N("Launch") || s === N("SubmitForm") || s === N("ImportData"))) { a.delete(N("A")); n++; }
+      }
+    }
+    try {
+      const acro = cat.lookupMaybe(N("AcroForm"), PDFDict);
+      for (const f of acro ? doc.getForm().getFields() : []) {
+        for (const w of f.acroField.getWidgets()) { if (w.dict.get(N("AA"))) { w.dict.delete(N("AA")); n++; } }
+        if (f.acroField.dict.get(N("AA"))) { f.acroField.dict.delete(N("AA")); n++; }
+      }
+    } catch { /* no form */ }
+    if (n) removed.push("scripts and actions");
+  }
+  if (options.attachments) {
+    let n = 0;
+    const names = cat.lookupMaybe(N("Names"), PDFDict);
+    if (names && names.get(N("EmbeddedFiles"))) { names.delete(N("EmbeddedFiles")); n++; }
+    if (cat.get(N("AF"))) { cat.delete(N("AF")); n++; }
+    for (const page of doc.getPages()) {
+      const annots = page.node.lookupMaybe(N("Annots"), PDFArray);
+      if (!annots) continue;
+      for (let i = annots.size() - 1; i >= 0; i--) {
+        const a = annots.lookupMaybe(i, PDFDict);
+        if (a && a.get(N("Subtype")) === N("FileAttachment")) { annots.remove(i); n++; }
+      }
+    }
+    if (n) removed.push("attachments");
+  }
+  if (options.forms) {
+    try {
+      const form = doc.getForm();
+      if (form.getFields().length) { form.flatten(); removed.push("form fields (flattened)"); }
+    } catch { /* no usable form */ }
+  }
+  if (options.comments) {
+    let n = 0;
+    for (const page of doc.getPages()) {
+      const annots = page.node.lookupMaybe(N("Annots"), PDFArray);
+      if (!annots) continue;
+      for (let i = annots.size() - 1; i >= 0; i--) {
+        const a = annots.lookupMaybe(i, PDFDict);
+        const st = a && a.get(N("Subtype"));
+        if (!a || st === N("Link") || st === N("Widget")) continue;
+        annots.remove(i);
+        n++;
+      }
+      if (annots.size() === 0) page.node.delete(N("Annots"));
+    }
+    if (n) removed.push(`${n} comment${n === 1 ? "" : "s"}`);
+  }
+  if (options.links) {
+    let n = 0;
+    for (const page of doc.getPages()) {
+      const annots = page.node.lookupMaybe(N("Annots"), PDFArray);
+      if (!annots) continue;
+      for (let i = annots.size() - 1; i >= 0; i--) {
+        const a = annots.lookupMaybe(i, PDFDict);
+        if (a && a.get(N("Subtype")) === N("Link")) { annots.remove(i); n++; }
+      }
+    }
+    if (n) removed.push(`${n} link${n === 1 ? "" : "s"}`);
+  }
+  if (options.bookmarks && cat.get(N("Outlines"))) {
+    cat.delete(N("Outlines"));
+    removed.push("bookmarks");
+  }
+  // Thumbnails embedded per page are old renders of the page, and can show
+  // what the page used to say.
+  for (const page of doc.getPages()) if (page.node.get(N("Thumb"))) page.node.delete(N("Thumb"));
+  const bytes = await doc.save({ useObjectStreams: true });
+  return { bytes, removed };
 }
 
 // Build a REDACTED copy: a new document made of page images, carrying nothing

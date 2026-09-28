@@ -18,13 +18,24 @@ import {
 } from "./citation-linker.js";
 import { createToaPanel } from "./toa.js";
 import {
-  clearAllHighlights,
   attachHighlightHandlers,
-  repaintHighlightsForPage,
-  getHighlightRectGroups,
-  addImportedHighlight,
+  setMarkupSink,
+  markupSelection,
+  selectionByPage,
+  clearBoxSelPreview,
 } from "./highlights.js";
-import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages, fillForm, hasFormFields, buildRedactedPdf } from "./pdf-edit.js";
+import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages, fillForm, inspectDocument, buildRedactedPdf } from "./pdf-edit.js";
+import * as Annots from "./annotations.js";
+import { hydrateIcons, setIcon, icon } from "./icons.js";
+import { toggleMenu, closeMenus, contextMenu, toast, dialogOpen, menuIsOpen, promptDialog } from "./ui.js";
+import { createFind } from "./find.js";
+import { printDocument } from "./print.js";
+import { createFeatures } from "./features.js";
+import { pickSignature, pickImage } from "./signature.js";
+
+// Built at the end of this module, once everything they reach is defined.
+let Find = null;
+let Features = null;
 import { extractTitle, citationShortForm, extractPartVolume, appendPartVol } from "./footer-naming.js";
 import {
   registerEntry,
@@ -86,9 +97,7 @@ const headerFooterEl = document.getElementById("headerfooter-btn");
 const watermarkEl = document.getElementById("watermark-btn");
 const splitEl     = document.getElementById("split-btn");
 const imagesEl    = document.getElementById("images-btn");
-// Right-margin tools rail: the container for the document-editing tools (shown
-// only for editable docs) and the collapse toggle.
-const toolsEditSection = document.getElementById("tools-edit-section");
+// The tools panel's collapse toggle (now at the head of the top bar).
 const toolsRailCollapseEl = document.getElementById("tools-rail-collapse");
 const zoomLevelEl = document.getElementById("zoom-level");
 const highlightToggleEl = document.getElementById("highlight-toggle");
@@ -168,11 +177,6 @@ let renderAbort = null;
 // whether or not a title was actually found — caller falls back gracefully.
 let footerTitleResolved = null;
 let _resolveFooterTitle = null;
-// Highlight mode: when true, drag-selecting text on a page captures a
-// yellow highlight on mouseup. When false (the default), drag-select
-// produces a normal browser text selection that the user can copy with
-// Ctrl+C — no highlight is created. Toggled by the toolbar button.
-let highlightMode = false;
 // Rectangle-select tool: when on, a left-drag sweeps a marquee box instead of
 // a flowing text selection. Alt+drag does the same regardless of this toggle.
 let rectSelectMode = false;
@@ -1497,79 +1501,49 @@ if (ocrRunEl) {
 
 // ── Editing: save edits into the file (downloaded / local documents only) ───
 //
-// Editing is offered only for documents you've already downloaded — a PDF
-// opened from disk: file:// in the extension, or handed in via
-// __pdfViewerLoadLocal in the app. Web PDFs you're only viewing stay read-only.
-// When editing is on, the toolbar shows Save (bakes the in-viewer highlights
-// into the PDF via pdf-lib) and Combine (merges other PDFs in after it), and
-// the Download button is replaced by Save. Save writes in place when we have a
-// writable file handle (the app), otherwise through the Save-file picker.
+// A document opened from disk — file:// in the extension, or handed in via
+// __pdfViewerLoadLocal in the app — is EDITABLE IN PLACE: Save writes back to
+// the same file (through its handle in the app, else the save picker). A web
+// PDF you are only viewing can be commented on and edited just the same, but
+// its first save is a Save As: the picker asks where the copy goes, and from
+// then on the viewer is working on that copy — which is how Acrobat treats a
+// document it did not open from disk. Download stays for the untouched
+// original.
 let editingAllowed = false;
 let localFileHandle = null; // FileSystemFileHandle for in-place save, if provided
 
 function setEditingEnabled(on) {
   editingAllowed = on;
-  // Save is a primary button; every other document-editing action lives in the
-  // tools rail's Edit section, so we gate that section (and Save) here.
-  if (saveEditsEl) saveEditsEl.hidden = !on;
-  if (toolsEditSection) toolsEditSection.hidden = !on;
-  if (downloadEl)  downloadEl.hidden  = on; // Save stands in for Download when editable
+  if (saveEditsEl) saveEditsEl.hidden = false;
+  if (downloadEl) downloadEl.hidden = on; // Save stands in for Download once the file is yours
+  if (saveEditsEl) {
+    const label = saveEditsEl.querySelector("span");
+    if (label) label.textContent = on ? "Save" : "Save as…";
+    saveEditsEl.title = on
+      ? "Save your changes into the PDF (Ctrl+S)"
+      : "Save a copy of this PDF with your changes (Ctrl+S)";
+  }
 }
 // A file:// document in the extension is already a local/downloaded file.
 setEditingEnabled(isLocalDocument);
 
-// Collect on-screen highlight rectangles converted to PDF points, per page.
-// Collect the current highlights as PDF-space quads, grouped per highlight, so
-// each becomes one /Highlight annotation. Inverse of the paint transform: the
-// page's display viewport maps layer px back to PDF points, which is a ÷ scale
-// and a Y-flip on an upright page and the right thing on a rotated one.
-function collectHighlightPdfRects() {
-  const byPage = new Map();
-  const wrappers = pagesEl.querySelectorAll(".page-wrapper");
-  wrappers.forEach((w, i) => {
-    const pn = i + 1;
-    const tl = w.querySelector(".textLayer");
-    const hlLayer = w.querySelector(".highlightLayer");
-    const hPts = pageHeightPtsByNum.get(pn);
-    const vp = pageViewportByNum.get(pn);
-    if (!tl || !hlLayer || !hPts) return;
-    const s = currentScale;
-    const groups = getHighlightRectGroups(pn, tl, hlLayer,
-      { scale: s, pageHeightPts: hPts, viewport: vp });
-    if (!groups.length) return;
-    const out = [];
-    for (const g of groups) {
-      const rects = g.rects.map((r) => {
-        if (vp) {
-          const [x1, y1] = vp.convertToPdfPoint(r.left, r.top);
-          const [x2, y2] = vp.convertToPdfPoint(r.left + r.width, r.top + r.height);
-          return {
-            x: Math.min(x1, x2),
-            y: Math.min(y1, y2),
-            w: Math.abs(x2 - x1),
-            h: Math.abs(y2 - y1),
-          };
-        }
-        return {
-          x: r.left / s,
-          y: hPts - (r.top / s) - (r.height / s),
-          w: r.width / s,
-          h: r.height / s,
-        };
-      });
-      if (rects.length) out.push({ rects });
-    }
-    if (out.length) byPage.set(pn, out);
-  });
-  return byPage;
+/** Everything on screen that belongs in the file: the annotation set. */
+function annotationSaveData() {
+  Annots.finishEditing();
+  return Annots.saveData();
 }
 
 // Write bytes to the document. Order of preference:
 //   1. inPlace + a writable file handle (the app) → overwrite the same file.
 //   2. the Save-file picker (lets the user choose / overwrite).
 //   3. a normal blob download.
+// With `inPlace`, the picker is a Save As of THE document: the file it names
+// becomes the one this viewer saves to from then on.
 async function writeOutPdf(bytes, suggestedName, { inPlace = false } = {}) {
   const name = /\.pdf$/i.test(suggestedName) ? suggestedName : `${suggestedName}.pdf`;
+  // A document that arrived password-protected goes back out protected; the
+  // viewer itself works on the opened (decrypted) bytes.
+  if (inPlace) bytes = await Features.protectForSave(bytes);
   const blob = new Blob([bytes], { type: "application/pdf" });
 
   if (inPlace && localFileHandle && localFileHandle.createWritable) {
@@ -1597,6 +1571,7 @@ async function writeOutPdf(bytes, suggestedName, { inPlace = false } = {}) {
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
+      if (inPlace) adoptSavedFile(handle);
       return true;
     } catch (e) {
       if (e && e.name === "AbortError") return false; // user cancelled
@@ -1609,74 +1584,109 @@ async function writeOutPdf(bytes, suggestedName, { inPlace = false } = {}) {
   a.href = url;
   a.download = name;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
   return true;
 }
 
+// After a Save As, the saved file is the document: later saves go to it.
+function adoptSavedFile(handle) {
+  const wasEditable = editingAllowed;
+  localFileHandle = handle;
+  setEditingEnabled(true);
+  if (!wasEditable && handle && handle.name) {
+    const shown = handle.name.replace(/\.pdf$/i, "");
+    userOverrodeName = true;
+    serverFilename = shown;
+    paintDisplayName(shown);
+  }
+}
+
+// Save: the annotation set (and any rotation on screen) into the file.
 async function saveEditedPdf() {
-  if (!editingAllowed || !saveEditsEl) return;
+  if (!saveEditsEl) return;
   if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return; }
   saveEditsEl.disabled = true;
   try {
     statusEl.textContent = "Saving…";
     let edited = await buildEditedPdf({
       srcBytes: pdfBytes.slice(0),
-      highlightsByPage: collectHighlightPdfRects(),
+      annotations: annotationSaveData(),
     });
     // Rotation the user applied on screen is part of "my edits" too, so Save
     // writes it into the file rather than leaving the page sideways on disk.
     const rotated = pageRotation.any();
     if (rotated) edited = await applyRotationToBytes(edited, pageRotation.deltas());
     const ok = await writeOutPdf(edited, sanitizePdfFilename(serverFilename || "document"), { inPlace: true });
-    if (ok && rotated) await reloadEditedBytes(edited, rotationPlan(pageRotation.deltas()));
-    // Not reloaded: the saved file differs from the open one only by its
-    // highlights, so its OCR'd pages are the ones already recognized.
-    else if (ok) await rememberOcrFor(edited);
-    statusEl.textContent = ok ? "Saved." : "";
+    if (ok) {
+      // Reload from what was written: the annotations are now the file's own,
+      // and the rotation is in the pages. OCR'd pages follow their pages.
+      await reloadEditedBytes(edited, rotated ? rotationPlan(pageRotation.deltas()) : null, { keepPlace: true });
+      Annots.markSaved();
+      toast("Saved", { kind: "success" });
+    }
+    statusEl.textContent = "";
   } catch (e) {
     console.error("[pdf-viewer] save failed:", e);
     statusEl.textContent = "Save failed.";
+    toast(`Save failed: ${e.message || e}`, { kind: "error", timeout: 6000 });
   } finally {
     saveEditsEl.disabled = false;
+    syncUndoButtons();
   }
 }
 
+// Insert from file: merges other PDFs into this one, at the end or after the
+// page on screen, and the result becomes the document.
 async function combinePdfs() {
-  if (!editingAllowed || !combineEl) return;
+  if (!combineEl) return;
   if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return; }
-  if (!window.showOpenFilePicker) { statusEl.textContent = "File picker unavailable here."; return; }
-  let handles;
-  try {
-    handles = await window.showOpenFilePicker({
-      multiple: true,
-      types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }],
-    });
-  } catch (e) {
-    if (e && e.name === "AbortError") return;
-    throw e;
-  }
-  if (!handles || !handles.length) return;
+  const files = await pickFiles({ multiple: true, accept: { "application/pdf": [".pdf"] }, description: "PDF" });
+  if (!files || !files.length) return;
+  const where = await Features.askInsertPosition(`Insert ${files.length === 1 ? `“${files[0].name}”` : `${files.length} files`}`);
+  if (!where) return;
   combineEl.disabled = true;
   try {
     statusEl.textContent = "Combining…";
     const appendBytes = [];
-    for (const h of handles) {
-      const f = await h.getFile();
-      appendBytes.push(new Uint8Array(await f.arrayBuffer()));
-    }
+    for (const f of files) appendBytes.push(await Features.openableBytes(new Uint8Array(await f.arrayBuffer())));
     const edited = await buildEditedPdf({
       srcBytes: pdfBytes.slice(0),
-      highlightsByPage: collectHighlightPdfRects(),
+      annotations: annotationSaveData(),
       appendBytes,
+      insertAt: where.at,
     });
-    const ok = await writeOutPdf(edited, "combined.pdf");
-    statusEl.textContent = ok ? `Combined ${handles.length + 1} files.` : "";
+    const ok = await writeOutPdf(edited, saveNameForDoc(), { inPlace: true });
+    if (ok) {
+      await reloadEditedBytes(edited);
+      toast(`Inserted ${files.length} file${files.length === 1 ? "" : "s"}`, { kind: "success" });
+    }
+    statusEl.textContent = "";
   } catch (e) {
     console.error("[pdf-viewer] combine failed:", e);
     statusEl.textContent = "Combine failed.";
+    toast("Combine failed — is one of the files password-protected or damaged?", { kind: "error" });
   } finally {
     combineEl.disabled = false;
   }
+}
+
+// Files from the user: the File System Access picker where there is one, a
+// plain <input type=file> where there is not. Resolves an array of File.
+function pickFiles({ multiple = false, accept = {}, description = "Files" } = {}) {
+  if (window.showOpenFilePicker) {
+    return window.showOpenFilePicker({ multiple, types: [{ description, accept }] })
+      .then((hs) => Promise.all(hs.map((h) => h.getFile())))
+      .catch((e) => { if (e && e.name === "AbortError") return null; throw e; });
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = multiple;
+    input.accept = Object.entries(accept).flatMap(([mime, exts]) => [mime, ...exts]).join(",");
+    input.addEventListener("change", () => resolve(input.files ? [...input.files] : null));
+    input.addEventListener("cancel", () => resolve(null));
+    input.click();
+  });
 }
 
 if (saveEditsEl) saveEditsEl.addEventListener("click", saveEditedPdf);
@@ -1796,10 +1806,15 @@ window.addEventListener("beforeunload", () => {
 // Reset per-document state before rendering a new PDF (whether it arrived by
 // URL fetch or as a local file). Shared by loadAndRender and loadLocalFile.
 function resetForNewDocument() {
-  // New PDF -> drop any highlights from a previously loaded document.
-  // (renderAllPages is also called on zoom, where we DO want them retained;
-  // hence clearing here, not there.)
-  clearAllHighlights();
+  // New PDF -> drop the previous document's comments and markup (and their
+  // undo history). renderAllPages also runs on zoom, where they are kept;
+  // hence clearing here, not there.
+  Annots.clear();
+  docInfo = null;
+  docAttachments = [];
+  docSecurity = null;
+  sourceBytes = null;
+  if (Find) Find.reset();
   // …and with it every proposed redaction, and the span text they were found
   // in. A box belongs to the page it was drawn on, and this is another page.
   RD.clearRedactions();
@@ -1843,45 +1858,34 @@ function resetForNewDocument() {
   unregisterEntry();
 }
 
-// Load the document's existing /Highlight annotations into the removable
-// highlight overlay. Only for editable (downloaded/local) docs — those are the
-// ones we render annotations for ourselves and let the user delete/re-save.
-// Read-only web PDFs let PDF.js draw their annotations on the canvas as usual.
-const HIGHLIGHT_ANNOTATION_TYPE = 9; // pdfjsLib.AnnotationType.HIGHLIGHT
-// True once we've imported at least one /Highlight annotation from the current
-// document. Gates whether the canvas render skips annotations (so we own the
-// highlights) — see renderPageCanvasAndText.
-let docHasAnnotationHighlights = false;
-async function importHighlightAnnotations() {
-  docHasAnnotationHighlights = false;
-  if (!editingAllowed || !pdfDoc) return;
-  for (let pn = 1; pn <= pdfDoc.numPages; pn++) {
-    let annots;
-    try {
-      const page = await pdfDoc.getPage(pn);
-      annots = await page.getAnnotations({ intent: "display" });
-    } catch {
-      continue;
-    }
-    for (const a of annots) {
-      if (!a || a.annotationType !== HIGHLIGHT_ANNOTATION_TYPE) continue;
-      const q = a.quadPoints;
-      if (!q || !q.length) continue;
-      // PDF.js normalizes QuadPoints to 8 numbers per quad, laid out
-      // [minX, maxY, maxX, maxY, minX, minY, maxX, minY]. Recover {x,y,w,h}
-      // in PDF points (origin bottom-left).
-      const pdfRects = [];
-      for (let i = 0; i + 7 < q.length; i += 8) {
-        const left = q[i], top = q[i + 1], right = q[i + 2], bottom = q[i + 5];
-        const x = Math.min(left, right);
-        const y = Math.min(top, bottom);
-        const w = Math.abs(right - left);
-        const h = Math.abs(top - bottom);
-        if (w > 0 && h > 0) pdfRects.push({ x, y, w, h });
-      }
-      if (pdfRects.length) { addImportedHighlight(pn, pdfRects); docHasAnnotationHighlights = true; }
-    }
+// What pdf-lib reads out of the document on open (inspectDocument): its /Info,
+// its attachments, and — the reason it is read at all — the annotations the
+// comment tools can edit. Those are drawn by the annotation layer from then
+// on, so pdf.js is told not to paint them (annotationStorage noView): the
+// canvas and the layer would otherwise each draw one.
+let docInfo = null;         // { title, author, … } from /Info
+let docAttachments = [];    // [{ id, name, size, desc, page? }]
+let docSecurity = null;     // { needsPassword, password, permissions, … } when it arrived encrypted
+let sourceBytes = null;     // the file exactly as it came (Download hands out this)
+// Past this size the parse is skipped: the document still opens and shows its
+// annotations (pdf.js paints them), they just are not editable.
+const INSPECT_MAX_BYTES = 120 * 1024 * 1024;
+
+async function inspectAndImport() {
+  let found = null;
+  if (pdfBytes && pdfBytes.byteLength <= INSPECT_MAX_BYTES) {
+    try { found = await inspectDocument(pdfBytes); } catch (e) { console.warn("[pdf-viewer] inspect failed:", e); }
   }
+  docInfo = found ? found.info : null;
+  docAttachments = found ? found.attachments : [];
+  docHasForm = !!(found && found.hasForm);
+  const list = found ? found.annotations : [];
+  try {
+    for (const a of list) if (a.origRef) pdfDoc.annotationStorage.setValue(a.origRef, { noView: true, noPrint: true });
+  } catch (e) { console.warn("[pdf-viewer] could not hide imported annotations:", e); }
+  Annots.load(list);
+  updateFormMenuItem();
+  syncAttachmentsRail();
 }
 
 // Resolve the document's display/download name from page text alone — no
@@ -1947,6 +1951,7 @@ async function renderBytes(buf, { sourceName } = {}) {
   if (sourceName) setDisplayName(sourceName);
   // Stash a copy for the Download handler. PDF.js takes ownership of the
   // buffer it's handed (some versions transfer it), so we keep our own.
+  sourceBytes = buf.slice(0);
   pdfBytes = buf.slice(0);
   // Pages OCR'd on an earlier visit are saved under a hash of these bytes;
   // hashing runs alongside the parse.
@@ -1954,15 +1959,35 @@ async function renderBytes(buf, { sourceName } = {}) {
   // The document's fonts go into a document of their own (pdf-fonts.js), and
   // so every page of it is drawn on one of that document's canvases.
   const loadingTask = pdfjsLib.getDocument({ data: buf, ownerDocument: fontDocument() });
-  pdfDoc = await loadingTask.promise;
-  // Bring any existing /Highlight annotations into the removable overlay before
-  // the first paint, so a saved-and-reopened file shows its highlights as
-  // deletable ones (and we don't double-draw them — the canvas render skips
-  // annotations for editable docs).
-  await importHighlightAnnotations();
-  // Does this document have fillable form fields? Gates the "Fill form" action.
-  docHasForm = editingAllowed ? await hasFormFields(pdfBytes) : false;
-  updateFormMenuItem();
+  // A password-protected document asks for its password; a wrong one asks
+  // again, and Cancel leaves the viewer empty with a line saying why.
+  let typedPassword = "";
+  loadingTask.onPassword = (update, reason) => {
+    const retry = reason === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD;
+    Features.askPassword({ retry, name: filenameEl.textContent }).then((pw) => {
+      if (pw == null) { loadingTask.destroy(); return; }
+      typedPassword = pw;
+      update(pw);
+    });
+  };
+  try {
+    pdfDoc = await loadingTask.promise;
+  } catch (e) {
+    if (e && (e.name === "PasswordException" || /destroyed|password/i.test(e.message || ""))) {
+      statusEl.textContent = "";
+      Features.showLocked();
+      throw Object.assign(new Error("This document needs its password to open."), { quiet: true });
+    }
+    throw e;
+  }
+  // Encrypted (with or without an open password): everything that writes the
+  // file works on the plain bytes, and a save puts the protection back.
+  const opened = await Features.openEncrypted(pdfBytes, typedPassword);
+  if (opened) { pdfBytes = opened.bytes; docSecurity = opened.security; }
+  syncSecurityTools();
+  // The annotations the tools can edit, the form, the attachments and /Info,
+  // before the first paint, so nothing is drawn twice.
+  await inspectAndImport();
   // Resolve the document's name from its text BEFORE rendering. getTextContent
   // runs in the PDF.js Web Worker, so it completes even when this viewer lives
   // in a hidden (display:none) iframe — where Chrome suspends canvas rendering
@@ -1974,9 +1999,17 @@ async function renderBytes(buf, { sourceName } = {}) {
   // saved pages are shown, not recognized again.
   if (await ocrSaved && !ocrEnabled) { ocrEnabled = true; markOcrActive(); }
   statusEl.textContent = `Rendering ${pdfDoc.numPages} pages…`;
+  // Fit width / fit page are measured against this document's first page.
+  if (zoomMode) {
+    pageViewportByNum.clear();
+    try { pageViewportByNum.set(1, (await pdfDoc.getPage(1)).getViewport({ scale: 1 })); } catch { /* guess */ }
+    currentScale = scaleForMode(zoomMode) || currentScale;
+  }
   await renderAllPages();
-  statusEl.textContent = "Done";
+  statusEl.textContent = "";
   updatePageIndicator();
+  syncZoomLabel();
+  if (thumbnailPanelEl.classList.contains("open")) refreshOpenPanel();
 }
 
 async function loadAndRender() {
@@ -2007,8 +2040,11 @@ async function loadAndRender() {
     const buf = await resp.arrayBuffer();
     await renderBytes(buf);
   } catch (err) {
-    console.error(err);
-    statusEl.textContent = "Error: " + err.message;
+    if (!err.quiet) {
+      console.error(err);
+      statusEl.textContent = "Error: " + err.message;
+      toast(`Could not open the PDF: ${err.message}`, { kind: "error", timeout: 8000 });
+    }
   }
 }
 
@@ -2040,11 +2076,21 @@ async function loadLocalFile(file, handle) {
     bytes.set(new Uint8Array(ab));
     await renderBytes(bytes, { sourceName: file.name });
   } catch (err) {
-    console.error(err);
-    statusEl.textContent = "Error: " + err.message;
+    if (!err.quiet) {
+      console.error(err);
+      statusEl.textContent = "Error: " + err.message;
+      toast(`Could not open the PDF: ${err.message}`, { kind: "error", timeout: 8000 });
+    }
   }
 }
 window.__pdfViewerLoadLocal = loadLocalFile;
+
+// Whether this tab holds changes that are not in the file yet — the PWA shell
+// asks before closing a tab, and a reload or a closed window is warned below.
+window.__pdfViewerHasUnsaved = () => Annots.hasUnsaved();
+window.addEventListener("beforeunload", (e) => {
+  if (Annots.hasUnsaved()) { e.preventDefault(); e.returnValue = ""; }
+});
 
 // Re-render at the current zoom. The PWA tab shell calls this when a tab that
 // was loaded while hidden (display:none, so overlays landed with zero geometry)
@@ -2081,6 +2127,7 @@ async function renderAllPages() {
   autoScroll.beginRender();
 
   forgetPageDrawing();
+  Annots.detachAll();
   pagesEl.innerHTML = "";
   totalLinks = 0;
   _footerByPage.clear();
@@ -2157,26 +2204,18 @@ async function renderAllPages() {
 
   if (signal.aborted) return;
 
-  // Pass 4: hook up text-highlight handlers and repaint any existing
-  // highlights. After a zoom, renderAllPages re-creates all DOM from
-  // scratch — but the in-memory highlight store survives, so this pass
-  // restores them onto the freshly rendered pages.
-  const repaintCb = (pn) => {
-    const r = pageRefs.find((x) => x.pageNumber === pn);
-    if (r) repaintHighlightsForPage(pn, r.textLayerDiv, r.highlightLayerDiv,
-      { scale: currentScale, pageHeightPts: pageHeightPtsByNum.get(pn),
-        viewport: pageViewportByNum.get(pn) });
-  };
+  // Pass 4: the selection handlers (markup from a selection, box select) and
+  // the annotation layer. After a zoom every layer is rebuilt from scratch,
+  // but the annotation set lives in PDF coordinates, so this pass simply
+  // redraws it onto the new pages.
   for (const refs of pageRefs) {
     if (signal.aborted) return;
     attachHighlightHandlers(
       refs.pageNumber, refs.pageWrapper, refs.textLayerDiv,
-      refs.highlightLayerDiv, () => highlightMode, repaintCb,
-      () => rectSelectMode
+      () => Annots.markupKind(), () => rectSelectMode,
+      (text, rects) => redactMode ? [{ label: "Mark for redaction", icon: "redact", action: () => redactClientRects(refs.pageNumber, rects) }] : [],
     );
-    repaintHighlightsForPage(refs.pageNumber, refs.textLayerDiv, refs.highlightLayerDiv,
-      { scale: currentScale, pageHeightPts: pageHeightPtsByNum.get(refs.pageNumber),
-        viewport: pageViewportByNum.get(refs.pageNumber) });
+    Annots.attachPage(refs.pageNumber, refs.pageWrapper, refs.annotLayerDiv);
     // Redactions are stored in PDF points, so a zoom (which rebuilds every
     // layer from scratch) repaints them onto the same words at the new scale.
     RD.attachAreaDrag({
@@ -2187,6 +2226,7 @@ async function renderAllPages() {
     });
     repaintRedactionsOnPage(refs.pageNumber);
   }
+  if (Find) Find.pagesRebuilt();
 
   updateLinkCount();
   // Pages are measurable again: re-derive the reading pace (page heights just
@@ -2403,13 +2443,14 @@ function updateLinkCount() {
   // Zero links because the reader excepted this site reads as a failure to
   // detect anything unless the toolbar says which it was.
   if (linkingSuppressed) {
-    linkCountEl.textContent = "· citation links off for this site";
+    linkCountEl.textContent = "Citation links off for this site";
     return;
   }
   const providerLabel = provider === "lexis" ? "Lexis+" : "Westlaw";
   linkCountEl.textContent = totalLinks > 0
-    ? `· ${totalLinks} citation${totalLinks === 1 ? "" : "s"} → ${providerLabel}`
+    ? `${totalLinks} citation${totalLinks === 1 ? "" : "s"} · ${providerLabel}`
     : "";
+  linkCountEl.title = totalLinks > 0 ? `${totalLinks} citations linked to ${providerLabel}` : "";
 }
 
 // The page the reader is on: the wrapper whose midpoint is closest to the
@@ -2590,16 +2631,11 @@ async function drawPage(w, seen) {
   try {
     canvas.width = d.viewport.width;
     canvas.height = d.viewport.height;
-    // When the document carries /Highlight annotations we've pulled into the
-    // removable overlay, tell PDF.js NOT to paint annotations onto the canvas —
-    // otherwise each highlight is drawn twice and the canvas copy can't be
-    // deleted. We only do this when there ARE such highlights, so ordinary PDFs
-    // (including local ones with form fields) keep PDF.js's normal annotation
-    // rendering; the only tradeoff is a doc that has both highlights and other
-    // annotations, where the latter won't paint.
-    const annotationMode = docHasAnnotationHighlights
-      ? pdfjsLib.AnnotationMode.DISABLE
-      : pdfjsLib.AnnotationMode.ENABLE;
+    // Annotations the comment tools own are drawn by the annotation layer; the
+    // storage mode lets pdf.js skip exactly those (noView, set on open) and
+    // paint every other annotation — form fields, links, stamps from other
+    // programs — as usual.
+    const annotationMode = pdfjsLib.AnnotationMode.ENABLE_STORAGE;
     const task = renderPageOnto(d.page, canvas, { viewport: d.viewport, annotationMode });
     w.__task = task;
     try {
@@ -2686,17 +2722,12 @@ async function renderPageCanvasAndText(pageNumber) {
   textLayerDiv.style.setProperty("--total-scale-factor", String(viewport.scale));
   wrapper.appendChild(textLayerDiv);
 
-  // Highlight layer is appended AFTER the text layer so highlight rects sit
-  // above textLayer in DOM order. Visually this is identical to "behind text"
-  // because textLayer glyphs are transparent — but it means a click on a
-  // highlight rect actually reaches the rect (and our delete handler) instead
-  // of being absorbed by the textLayer's span. The layer container itself is
-  // pointer-events: none, so it doesn't block text selection elsewhere.
-  const highlightLayerDiv = document.createElement("div");
-  highlightLayerDiv.className = "highlightLayer";
-  highlightLayerDiv.style.width  = `${viewport.width}px`;
-  highlightLayerDiv.style.height = `${viewport.height}px`;
-  wrapper.appendChild(highlightLayerDiv);
+  // Comments and markup (annotations.js). Above the text layer; the layer
+  // itself takes no pointer events (text selection runs straight through it)
+  // except while a drawing tool is on, and each annotation takes its own.
+  const annotLayerDiv = document.createElement("div");
+  annotLayerDiv.className = "annotLayer";
+  wrapper.appendChild(annotLayerDiv);
 
   // Custom selection tint. The native ::selection is made transparent (see CSS)
   // and we paint the selection ourselves here as solid rects with the layer's
@@ -2740,6 +2771,7 @@ async function renderPageCanvasAndText(pageNumber) {
   wrapper.appendChild(formLayerDiv);
 
   pagesEl.appendChild(wrapper);
+  applyRestoreScroll(pageNumber, wrapper);
 
   // The bitmap is drawn when the page comes near the screen, not here.
   wrapper.__draw = { page, viewport };
@@ -2779,6 +2811,8 @@ async function renderPageCanvasAndText(pageNumber) {
     await textLayer.render();
   }
 
+  guardSelection(textLayerDiv);
+
   // Capture line-number / paragraph-marker positions for citation references
   // BEFORE applySelectableArea clears any span text (line numbers, cropped-out
   // margins). Reads the intact text layer.
@@ -2789,12 +2823,78 @@ async function renderPageCanvasAndText(pageNumber) {
   updateCropOverlay(wrapper);
 
   return {
-    pageNumber, textContent, textLayerDiv, linkLayerDiv, highlightLayerDiv,
+    pageNumber, textContent, textLayerDiv, linkLayerDiv, annotLayerDiv,
     redactLayerDiv,
     pageWrapper: wrapper, viewport: userSpaceViewport,
     italicFontNames: italicFontNamesFor(page, textContent),
   };
 }
+
+// ── Keeping a drag-selection where the pointer is ──
+//
+// A text layer is spans floating in an empty box. When a drag passes over the
+// box between spans — the gap between two words, the margin — the browser has
+// no text under the pointer and extends the selection to the END of the
+// layer: a drag across half a line selected the rest of the page, and a
+// highlight made from it covered everything. pdf.js's own viewer answers this
+// with an "end of content" block that follows the selection's moving end, so
+// empty space always resolves to the point the drag has reached. The same is
+// done here for every page.
+const textLayerEnds = new Map(); // textLayer div -> its endOfContent div
+let prevSelRange = null;
+function guardSelection(textLayerDiv) {
+  const end = document.createElement("div");
+  end.className = "endOfContent";
+  textLayerDiv.appendChild(end);
+  textLayerEnds.set(textLayerDiv, end);
+  textLayerDiv.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    textLayerDiv.classList.add("selecting");
+    document.body.classList.add("text-dragging");
+  });
+}
+function resetTextLayerEnd(end, div) {
+  div.appendChild(end);
+  end.style.width = "";
+  end.style.height = "";
+  div.classList.remove("selecting");
+}
+document.addEventListener("pointerup", () => {
+  document.body.classList.remove("text-dragging");
+  for (const [div, end] of textLayerEnds) resetTextLayerEnd(end, div);
+  prevSelRange = null;
+});
+window.addEventListener("blur", () => {
+  for (const [div, end] of textLayerEnds) resetTextLayerEnd(end, div);
+  prevSelRange = null;
+});
+document.addEventListener("selectionchange", () => {
+  for (const div of textLayerEnds.keys()) if (!div.isConnected) textLayerEnds.delete(div);
+  const sel = document.getSelection();
+  // A caret is not a selection being made: nothing to guard.
+  if (!sel || sel.rangeCount === 0 || (sel.isCollapsed && !document.body.classList.contains("text-dragging"))) {
+    for (const [div, end] of textLayerEnds) resetTextLayerEnd(end, div);
+    prevSelRange = null;
+    return;
+  }
+  const range = sel.getRangeAt(0);
+  for (const [div, end] of textLayerEnds) {
+    if (range.intersectsNode(div)) div.classList.add("selecting");
+    else resetTextLayerEnd(end, div);
+  }
+  const modifyStart = prevSelRange && (range.compareBoundaryPoints(Range.END_TO_END, prevSelRange) === 0 ||
+    range.compareBoundaryPoints(Range.START_TO_END, prevSelRange) === 0);
+  let anchor = modifyStart ? range.startContainer : range.endContainer;
+  if (anchor.nodeType === Node.TEXT_NODE) anchor = anchor.parentNode;
+  const layer = anchor && anchor.parentElement && anchor.parentElement.closest(".textLayer");
+  const end = layer && textLayerEnds.get(layer);
+  if (end && anchor.parentElement) {
+    end.style.width = layer.style.width;
+    end.style.height = layer.style.height;
+    anchor.parentElement.insertBefore(end, modifyStart ? anchor : anchor.nextSibling);
+  }
+  prevSelRange = range.cloneRange();
+});
 
 // Which of a page's fonts are italic. The text layer is no help here — PDF.js
 // gives its spans only a generic fallback family ("serif") — so posture has to
@@ -3123,26 +3223,51 @@ document.addEventListener("selectionchange", () => {
 // it copies "{selected text} {parenthetical}" to the clipboard.
 // =====================================================================
 
-const citePopover = document.createElement("button");
+// The selection toolbar: a small bar under any text selected on a page, with
+// the markup tools and the two copies (plain, and with its record citation) —
+// Acrobat's quick-actions bar, and the old "Copy with citation" button's home.
+const citePopover = document.createElement("div");
 citePopover.id = "cite-popover";
-citePopover.type = "button";
-citePopover.textContent = "❝ Copy with citation";
-citePopover.title = "Copy the selected text with a record citation appended";
+citePopover.className = "sel-toolbar";
+citePopover.setAttribute("role", "toolbar");
+citePopover.setAttribute("aria-label", "Selection");
 citePopover.hidden = true;
-// Don't let pressing the button collapse the page selection before we read it.
-citePopover.addEventListener("mousedown", (e) => e.preventDefault());
-citePopover.addEventListener("click", copyWithCitation);
+{
+  const btn = (ic, title, action, text = "") => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = text ? "sel-btn text" : "sel-btn";
+    b.title = title;
+    b.setAttribute("aria-label", title);
+    b.innerHTML = icon(ic, { size: 16 }) + (text ? `<span>${text}</span>` : "");
+    // Don't let pressing a button collapse the page selection before we read it.
+    b.addEventListener("mousedown", (e) => e.preventDefault());
+    b.addEventListener("click", action);
+    return b;
+  };
+  const sep = () => { const d = document.createElement("span"); d.className = "sel-sep"; return d; };
+  citePopover.append(
+    btn("highlighter", "Highlight (H)", () => { markupSelection("highlight"); hideCitePopover(); }),
+    btn("underline", "Underline (U)", () => { markupSelection("underline"); hideCitePopover(); }),
+    btn("strikethrough", "Strikethrough (K)", () => { markupSelection("strikeout"); hideCitePopover(); }),
+    sep(),
+    btn("copy", "Copy (Ctrl+C)", async () => { const t = (window.getSelection() || "").toString(); const ok = await writeClipboard(t); flashStatus(ok ? "Copied" : "Copy failed"); hideCitePopover(); }),
+    btn("quote", "Copy the selected text with a record citation appended", copyWithCitation, "Cite"),
+  );
+}
 document.body.appendChild(citePopover);
 
 function hideCitePopover() { citePopover.hidden = true; }
 
-// Show the button just below the end of the current selection, if that
-// selection lives inside the rendered pages. Repositioned on selectionchange
-// and on scroll so it tracks the passage.
+// Show the bar just below the end of the current selection, if that selection
+// lives inside the rendered pages. Repositioned on selectionchange and on
+// scroll so it tracks the passage. A markup tool turns the selection into
+// markup by itself, and the redaction tool marks it, so neither needs the bar.
 function updateCitePopover() {
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0 || sel.isCollapsed ||
-      !sel.anchorNode || !pagesEl.contains(sel.anchorNode)) {
+      !sel.anchorNode || !pagesEl.contains(sel.anchorNode) ||
+      Annots.markupKind() || redactMode || Annots.currentTool()) {
     hideCitePopover();
     return;
   }
@@ -3151,16 +3276,57 @@ function updateCitePopover() {
   for (const r of rects) if (r.width > 0.5 && r.height > 0.5) last = r;
   if (!last) { hideCitePopover(); return; }
   citePopover.hidden = false;
-  const w = citePopover.offsetWidth || 160;
-  const left = Math.min(last.right + 4, window.innerWidth - w - 6);
-  const top = Math.min(last.bottom + 6, window.innerHeight - 34);
-  citePopover.style.left = `${Math.max(6, left)}px`;
-  citePopover.style.top = `${Math.max(6, top)}px`;
+  const w = citePopover.offsetWidth || 200;
+  const left = Math.min(last.right - w / 2, window.innerWidth - w - 8);
+  let top = last.bottom + 8;
+  if (top + 40 > window.innerHeight) top = Math.max(8, rects[0].top - 44);
+  citePopover.style.left = `${Math.max(8, left)}px`;
+  citePopover.style.top = `${Math.max(8, top)}px`;
 }
 
-// Keep the button glued to the selection as the page scrolls.
-document.getElementById("viewer-container")
-  ?.addEventListener("scroll", () => { if (!citePopover.hidden) updateCitePopover(); }, { passive: true });
+// Keep the bar glued to the selection as the page scrolls.
+document.addEventListener("scroll", () => { if (!citePopover.hidden) updateCitePopover(); }, { passive: true });
+
+// Right-click on selected text: the same actions as a menu.
+document.addEventListener("contextmenu", (e) => {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.anchorNode || !pagesEl.contains(sel.anchorNode)) return;
+  if (!e.target.closest || !e.target.closest(".page-wrapper") || e.altKey) return;
+  e.preventDefault();
+  const text = sel.toString();
+  hideCitePopover();
+  contextMenu(e.clientX, e.clientY, [
+    { label: "Copy", icon: "copy", kbd: "Ctrl C", action: () => writeClipboard(text) },
+    { label: "Copy with citation", icon: "quote", action: copyWithCitation },
+    "-",
+    { label: "Highlight", icon: "highlighter", action: () => markupSelection("highlight") },
+    { label: "Underline", icon: "underline", action: () => markupSelection("underline") },
+    { label: "Strikethrough", icon: "strikethrough", action: () => markupSelection("strikeout") },
+    { label: "Add note to selection", icon: "message", action: () => {
+      const a = markupSelectionThen("highlight");
+      if (a) Annots.select(a.id);
+    } },
+    "-",
+    { label: "Mark for redaction", icon: "redact", action: () => { if (redactCurrentSelection()) { updateRedactState(); if (!redactMode) setRedactMode(true); } } },
+    { label: "Find in document", icon: "search", action: () => Find.open(text.replace(/\s+/g, " ").trim().slice(0, 200)) },
+  ]);
+}, true);
+
+function markupSelectionThen(kind) {
+  const parts = selectionByPage();
+  let made = null;
+  for (const p of parts) made = Annots.createMarkup(p.pageNumber, p.rects, kind, p.text) || made;
+  window.getSelection()?.removeAllRanges();
+  return made;
+}
+
+// Box select's "Mark for redaction": the marquee's glyph rects become boxes.
+function redactClientRects(pageNumber, rects) {
+  if (storeBoxesFromClientRects(pageNumber, rects, { kind: "text", label: "boxed text" })) {
+    repaintRedactionsOnPage(pageNumber);
+    updateRedactState();
+  }
+}
 
 async function copyWithCitation() {
   const ref = buildCitationReference();
@@ -3171,11 +3337,10 @@ async function copyWithCitation() {
   hideCitePopover();
 }
 
-let _statusTimer = 0;
+// A short message that needs no answer: a toast at the foot of the window.
 function flashStatus(msg) {
-  statusEl.textContent = msg;
-  if (_statusTimer) clearTimeout(_statusTimer);
-  _statusTimer = setTimeout(() => { statusEl.textContent = "Done"; }, 2500);
+  if (!msg) return;
+  toast(msg, { timeout: 2600 });
 }
 
 async function writeClipboard(text) {
@@ -3323,14 +3488,172 @@ function lineLocator(bands, pages) {
   return { kind: "line", str: `pp. ${startStr}-${endStr}` };
 }
 
-// --- Zoom controls ---
-function setZoom(newScale) {
-  currentScale = Math.max(0.5, Math.min(4.0, newScale));
-  zoomLevelEl.textContent = `${Math.round(currentScale * 100)}%`;
-  if (pdfDoc) renderAllPages();
+// --- Zoom ---
+//
+// A zoom rebuilds every page at the new scale, so the reading position is
+// carried across it: the page on screen and how far down it the window was
+// (restoreScroll, applied the moment that page is rebuilt). Fit width and fit
+// page are modes rather than numbers — they are worked out again when the
+// window or the panels change size.
+const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5, 6];
+const ZOOM_MIN = 0.25, ZOOM_MAX = 6;
+let zoomMode = null;          // "fit-width" | "fit-page" | null
+let pendingZoomMode = null;   // a mode chosen before any document was open
+let restoreScroll = null;     // { pn, frac, xfrac } for the rebuild in flight
+let pageLayout = "single";    // "single" | "two" | "two-cover"
+
+function availableSize() {
+  const cont = document.getElementById("viewer-container");
+  const cs = getComputedStyle(cont);
+  const w = cont.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const h = window.innerHeight - (parseFloat(cs.paddingTop) || 0) - 24;
+  return { w: Math.max(100, w), h: Math.max(100, h) };
 }
-zoomInEl.addEventListener("click",  () => setZoom(currentScale + 0.25));
-zoomOutEl.addEventListener("click", () => setZoom(currentScale - 0.25));
+function scaleForMode(mode) {
+  if (!pdfDoc) return null;
+  const pn = pageViewportByNum.size ? visiblePageNumber() : 1;
+  const vp = pageViewportByNum.get(pn) || pageViewportByNum.get(1);
+  const baseW = vp ? vp.width / vp.scale : 612;
+  const baseH = vp ? vp.height / vp.scale : 792;
+  const { w, h } = availableSize();
+  const perPage = pageLayout === "single" ? w : (w - 14) / 2;
+  const s = mode === "fit-page" ? Math.min(perPage / baseW, h / baseH) : perPage / baseW;
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.floor(s * 1000) / 1000));
+}
+
+function toolbarHeightPx() {
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--toolbar-height")) || 52;
+}
+function captureScroll() {
+  if (!pdfDoc || !pagesEl.children.length) return null;
+  const pn = visiblePageNumber();
+  const w = pageWrapperFor(pn);
+  if (!w) return null;
+  const r = w.getBoundingClientRect();
+  return { pn, frac: (toolbarHeightPx() + 14 - r.top) / (r.height || 1), xfrac: (window.innerWidth / 2 - r.left) / (r.width || 1) };
+}
+/** Called as each page is rebuilt: the one the reader was on is put back where it was. */
+function applyRestoreScroll(pageNumber, wrapper) {
+  if (!restoreScroll || restoreScroll.pn !== pageNumber) return;
+  const rs = restoreScroll;
+  restoreScroll = null;
+  const r = wrapper.getBoundingClientRect();
+  window.scrollTo({
+    top: window.scrollY + r.top + rs.frac * r.height - toolbarHeightPx() - 14,
+    left: Math.max(0, window.scrollX + r.left + rs.xfrac * r.width - window.innerWidth / 2),
+    behavior: "auto",
+  });
+}
+
+function syncZoomLabel() {
+  if (zoomLevelEl) zoomLevelEl.textContent = `${Math.round(currentScale * 100)}%`;
+  for (const b of document.querySelectorAll("#zoom-menu [data-zoom]")) {
+    const z = b.dataset.zoom;
+    const on = zoomMode ? z === zoomMode : Math.abs(Number(z) - currentScale) < 0.001;
+    b.setAttribute("aria-checked", String(on));
+  }
+}
+
+function setZoom(newScale, { mode = null } = {}) {
+  zoomMode = mode;
+  try { localStorage.setItem("pdfViewerZoom", mode || String(newScale)); } catch { /* ok */ }
+  const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(newScale * 1000) / 1000));
+  if (!pdfDoc) { currentScale = next; pendingZoomMode = mode; syncZoomLabel(); return; }
+  if (Math.abs(next - currentScale) < 0.001 && pagesEl.children.length) { syncZoomLabel(); return; }
+  restoreScroll = captureScroll();
+  currentScale = next;
+  syncZoomLabel();
+  renderAllPages();
+}
+function setZoomMode(mode) {
+  const s = scaleForMode(mode);
+  if (s == null) { pendingZoomMode = mode; zoomMode = mode; syncZoomLabel(); return; }
+  setZoom(s, { mode });
+}
+function stepZoom(dir) {
+  const cur = currentScale;
+  const next = dir > 0 ? ZOOM_STEPS.find((z) => z > cur + 0.001) : [...ZOOM_STEPS].reverse().find((z) => z < cur - 0.001);
+  setZoom(next || (dir > 0 ? ZOOM_MAX : ZOOM_MIN));
+}
+zoomInEl.addEventListener("click",  () => stepZoom(1));
+zoomOutEl.addEventListener("click", () => stepZoom(-1));
+zoomLevelEl.addEventListener("click", () => toggleMenu(document.getElementById("zoom-menu"), zoomLevelEl, { align: "center" }));
+for (const b of document.querySelectorAll("#zoom-menu [data-zoom]")) {
+  b.setAttribute("role", "menuitemradio");
+  b.addEventListener("click", () => {
+    const z = b.dataset.zoom;
+    if (z === "fit-width" || z === "fit-page") setZoomMode(z); else setZoom(Number(z));
+  });
+}
+// The last zoom is the next document's zoom.
+try {
+  const z = localStorage.getItem("pdfViewerZoom");
+  if (z === "fit-width" || z === "fit-page") { zoomMode = z; pendingZoomMode = z; }
+  else if (z && Number(z) > 0) currentScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Number(z)));
+} catch { /* ok */ }
+
+// Ctrl + wheel (and a trackpad pinch, which arrives as one) zooms the pages,
+// not the window. Rebuilding every page per notch would stall, so the label
+// follows the wheel and the pages follow a beat after it stops.
+let wheelZoomTimer = 0, wheelTarget = null;
+window.addEventListener("wheel", (e) => {
+  if (!e.ctrlKey && !e.metaKey) return;
+  e.preventDefault();
+  if (!pdfDoc) return;
+  const base = wheelTarget ?? currentScale;
+  const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0022));
+  wheelTarget = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, base * factor));
+  if (zoomLevelEl) zoomLevelEl.textContent = `${Math.round(wheelTarget * 100)}%`;
+  clearTimeout(wheelZoomTimer);
+  wheelZoomTimer = setTimeout(() => { const t = wheelTarget; wheelTarget = null; setZoom(t); }, 220);
+}, { passive: false });
+
+// Fit modes follow the window and the panels.
+let fitTimer = 0;
+function refitSoon() {
+  if (!zoomMode || !pdfDoc) return;
+  clearTimeout(fitTimer);
+  fitTimer = setTimeout(() => {
+    const s = scaleForMode(zoomMode);
+    if (s && Math.abs(s - currentScale) > 0.004) setZoom(s, { mode: zoomMode });
+  }, 200);
+}
+window.addEventListener("resize", refitSoon);
+{
+  // The panels opening or closing changes the room the pages have.
+  let lastPanels = "";
+  new MutationObserver(() => {
+    const k = `${document.body.classList.contains("thumbs-open")}|${document.body.classList.contains("tools-collapsed")}`;
+    if (k !== lastPanels) { lastPanels = k; refitSoon(); }
+  }).observe(document.body, { attributes: true, attributeFilter: ["class"] });
+}
+
+// Previous / next page.
+function goToPage(pn) {
+  if (!pdfDoc) return;
+  scrollToPage(Math.max(1, Math.min(pdfDoc.numPages, pn)), { smooth: false });
+}
+const pagePrevEl = document.getElementById("page-prev");
+const pageNextEl = document.getElementById("page-next");
+if (pagePrevEl) pagePrevEl.addEventListener("click", () => goToPage(visiblePageNumber() - (pageLayout === "single" ? 1 : 2)));
+if (pageNextEl) pageNextEl.addEventListener("click", () => goToPage(visiblePageNumber() + (pageLayout === "single" ? 1 : 2)));
+
+// Page display: one column, or two pages side by side (with or without the
+// cover page alone, the way a bound brief opens).
+function setPageLayout(layout) {
+  pageLayout = layout === "two" || layout === "two-cover" ? layout : "single";
+  pagesEl.classList.toggle("two-up", pageLayout !== "single");
+  pagesEl.classList.toggle("cover", pageLayout === "two-cover");
+  for (const b of document.querySelectorAll("#more-menu [data-layout]")) b.setAttribute("aria-checked", String(b.dataset.layout === pageLayout));
+  try { localStorage.setItem("pdfViewerLayout", pageLayout); } catch { /* ok */ }
+  if (zoomMode) refitSoon();
+}
+for (const b of document.querySelectorAll("#more-menu [data-layout]")) b.addEventListener("click", () => {
+  const pn = visiblePageNumber();
+  setPageLayout(b.dataset.layout);
+  requestAnimationFrame(() => scrollToPage(pn, { smooth: false }));
+});
+try { setPageLayout(localStorage.getItem("pdfViewerLayout") || "single"); } catch { setPageLayout("single"); }
 
 // --- Click-to-rename for the toolbar filename ---
 //
@@ -3403,22 +3726,9 @@ function startRename() {
 filenameEl.addEventListener("click", startRename);
 if (!filenameEl.title) filenameEl.title = "Click to rename";
 
-// Toggle highlight mode. We don't need to re-render — the handlers
-// installed by attachHighlightHandlers read the mode through a getter on
-// each mouseup, so the new value takes effect immediately.
-//
-// Guarded: viewer.html may not (yet) contain a #highlight-toggle button.
-// Without this guard, a missing button throws at module top-level, which
-// aborts the rest of viewer.js and silently kills every listener below
-// (Download, Open Original). Skip-if-absent is safe because highlight
-// mode just stays in its default (off) state.
-if (highlightToggleEl) {
-  highlightToggleEl.addEventListener("click", () => {
-    highlightMode = !highlightMode;
-    highlightToggleEl.setAttribute("aria-pressed", String(highlightMode));
-    document.body.classList.toggle("highlight-mode", highlightMode);
-  });
-}
+// The Highlight button (and every other [data-tool] button) is wired by
+// annotations.js: the markup tools read their state through
+// Annots.markupKind() on each mouseup, so a toggle takes effect at once.
 
 // Rectangle-select tool toggle. Same guard rationale as the highlight toggle:
 // skip if the button is absent so the rest of the listeners still wire up. The
@@ -3699,11 +4009,7 @@ function setRedactMode(on) {
     // the mouse, exactly as the crop tool does when it opens.
     pageRotation.close();
     if (cropMode) setCropMode(false);
-    if (highlightMode) {
-      highlightMode = false;
-      if (highlightToggleEl) highlightToggleEl.setAttribute("aria-pressed", "false");
-      document.body.classList.remove("highlight-mode");
-    }
+    if (Annots.currentTool()) Annots.setTool(null);
     if (rectSelectMode) {
       rectSelectMode = false;
       if (rectSelectToggleEl) rectSelectToggleEl.setAttribute("aria-pressed", "false");
@@ -3740,9 +4046,7 @@ async function renderRedactedPage(pageNumber, scale) {
   await page.render({
     canvasContext: ctx,
     viewport: vp,
-    annotationMode: docHasAnnotationHighlights
-      ? pdfjsLib.AnnotationMode.DISABLE
-      : pdfjsLib.AnnotationMode.ENABLE,
+    annotationMode: pdfjsLib.AnnotationMode.ENABLE_STORAGE,
   }).promise;
   ctx.fillStyle = "#000000";
   for (const box of RD.redactionsFor(pageNumber)) {
@@ -3922,11 +4226,7 @@ function setCropMode(on) {
     pageRotation.close();
     if (redactMode) setRedactMode(false);
     // Turn off the other drag tools so their marquees don't fight the crop drag.
-    if (highlightMode) {
-      highlightMode = false;
-      if (highlightToggleEl) highlightToggleEl.setAttribute("aria-pressed", "false");
-      document.body.classList.remove("highlight-mode");
-    }
+    if (Annots.currentTool()) Annots.setTool(null);
     if (rectSelectMode) {
       rectSelectMode = false;
       if (rectSelectToggleEl) rectSelectToggleEl.setAttribute("aria-pressed", "false");
@@ -4051,7 +4351,9 @@ downloadEl.addEventListener("click", async () => {
     // Now stop the citation pipeline. Pages 1–2 have rendered (or the
     // 3s budget elapsed); we don't need pages 3+, link detection, or
     // link placement to finish. The user wants the file, not the links.
-    if (renderAbort) renderAbort.abort();
+    // (Unless there are unsaved comments: then the tab stays open, and so
+    // does its rendering.)
+    if (renderAbort && !Annots.hasUnsaved()) renderAbort.abort();
 
     // Pick the best source name from this priority chain:
     //   1. serverFilename — already-simplified name set by setDisplayName
@@ -4069,7 +4371,7 @@ downloadEl.addEventListener("click", async () => {
 
     // Build a blob from the cached bytes. .slice(0) so we don't transfer
     // ownership of pdfBytes — a subsequent Download click should still work.
-    const blob = new Blob([pdfBytes.slice(0)], { type: "application/pdf" });
+    const blob = new Blob([(sourceBytes || pdfBytes).slice(0)], { type: "application/pdf" });
     const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = blobUrl;
@@ -4078,7 +4380,12 @@ downloadEl.addEventListener("click", async () => {
     a.click();
     a.remove();
 
-    statusEl.textContent = "Downloaded.";
+    statusEl.textContent = "";
+    // Comments not saved yet stay on screen: the tab is not closed under them.
+    if (Annots.hasUnsaved() || !fileUrl) {
+      toast("Downloaded the original. Use Save as… to keep your changes.", { timeout: 5000 });
+      return;
+    }
 
     // Autoclose the viewer tab. The download is a separate Chrome
     // transaction by the time a.click() returns (the blob's been handed
@@ -4128,46 +4435,89 @@ openOriginalEl.addEventListener("click", () => {
   const bypassUrl = fileUrl + sep + "citationlinker=skip";
   window.open(bypassUrl, "_blank");
 });
-zoomLevelEl.textContent = `${Math.round(currentScale * 100)}%`;
+syncZoomLabel();
 
-// ── Thumbnail / bookmark panel ─────────────────────────────────────────────
+// ── The page panel (right): thumbnails, bookmarks, comments, attachments ────
+//
+// An icon rail down the right edge switches the panel beside it, the way
+// Acrobat's right-hand pane does. Clicking the open panel's icon again closes
+// it. Thumbnails are drawn as they scroll into view, so a three-hundred-page
+// document opens its panel at once.
 
 const thumbnailToggleEl = document.getElementById("thumbnail-toggle");
 const thumbnailPanelEl  = document.getElementById("thumbnail-panel");
 const panelPagesEl      = document.getElementById("panel-pages");
 const panelBookmarksEl  = document.getElementById("panel-bookmarks");
+const panelCommentsEl   = document.getElementById("panel-comments");
+const panelAttachmentsEl = document.getElementById("panel-attachments");
+const commentsListEl    = document.getElementById("comments-list");
+const commentsFilterEl  = document.getElementById("comments-filter");
+const commentsBadgeEl   = document.getElementById("comments-badge");
+const attachmentsToggleEl = document.getElementById("attachments-toggle");
+const panelTitleEl      = document.getElementById("panel-title");
+const panelCloseEl      = document.getElementById("panel-close");
 const tabPagesEl        = document.getElementById("tab-pages");
 const tabBookmarksEl    = document.getElementById("tab-bookmarks");
 const THUMB_SCALE = 0.15;
+const PANELS = { pages: panelPagesEl, bookmarks: panelBookmarksEl, comments: panelCommentsEl, attachments: panelAttachmentsEl };
+const PANEL_TITLES = { pages: "Pages", bookmarks: "Bookmarks", comments: "Comments", attachments: "Attachments" };
+let activePanel = "pages";
 
 let thumbsRendered = false;
+const thumbObserver = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    if (!en.isIntersecting) continue;
+    thumbObserver.unobserve(en.target);
+    drawThumb(en.target);
+  }
+}, { root: panelPagesEl, rootMargin: "400px 0px" });
+
+async function drawThumb(item) {
+  const pn = Number(item.dataset.page);
+  if (!pdfDoc || item.__drawn) return;
+  item.__drawn = true;
+  try {
+    const page = await pdfDoc.getPage(pn);
+    const rotation = (((page.rotate + pageRotation.delta(pn)) % 360) + 360) % 360;
+    const base = page.getViewport({ scale: 1, rotation });
+    const cssW = Math.max(60, (panelPagesEl.clientWidth || 200) - 44);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const vp = page.getViewport({ scale: (cssW / base.width) * dpr, rotation });
+    const canvas = item.querySelector("canvas");
+    canvas.width = Math.round(vp.width);
+    canvas.height = Math.round(vp.height);
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${Math.round(cssW * base.height / base.width)}px`;
+    await renderPageOnto(page, canvas, { viewport: vp }).promise; // by way of the fonts' document (pdf-fonts.js)
+  } catch { item.__drawn = false; }
+}
 
 async function renderThumbnails() {
   if (!pdfDoc || thumbsRendered) return;
   thumbsRendered = true;
+  thumbObserver.disconnect();
   panelPagesEl.innerHTML = "";
+  const cssW = Math.max(60, (panelPagesEl.clientWidth || 200) - 44);
   for (let pn = 1; pn <= pdfDoc.numPages; pn++) {
-    const page = await pdfDoc.getPage(pn);
-    // Thumbnails show the pages the way the viewer is showing them, pending
-    // rotation included.
-    const vp = page.getViewport({
-      scale: THUMB_SCALE,
-      rotation: (((page.rotate + pageRotation.delta(pn)) % 360) + 360) % 360,
-    });
+    const vp = pageViewportByNum.get(pn);
     const item = document.createElement("div");
     item.className = "thumb-item";
     item.dataset.page = pn;
+    item.tabIndex = 0;
     const canvas = document.createElement("canvas");
-    canvas.width  = Math.round(vp.width);
-    canvas.height = Math.round(vp.height);
-    await renderPageOnto(page, canvas, { viewport: vp }).promise; // by way of the fonts' document (pdf-fonts.js)
+    canvas.width = canvas.height = 0;
+    const ratio = vp ? vp.height / vp.width : 1.294;
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${Math.round(cssW * ratio)}px`;
     const label = document.createElement("span");
     label.className = "thumb-label";
     label.textContent = pn;
     item.appendChild(canvas);
     item.appendChild(label);
     item.addEventListener("click", () => scrollToPage(pn));
+    item.addEventListener("keydown", (e) => { if (e.key === "Enter") scrollToPage(pn); });
     panelPagesEl.appendChild(item);
+    thumbObserver.observe(item);
   }
   updateActiveThumbnail();
 }
@@ -4179,24 +4529,24 @@ function scrollToPage(pn, { smooth = true } = {}) {
 }
 
 function updateActiveThumbnail() {
-  if (!pdfDoc || !thumbnailPanelEl.classList.contains("open")) return;
-  const wrappers = pagesEl.querySelectorAll(".page-wrapper");
-  if (!wrappers.length) return;
-  const mid = window.scrollY + window.innerHeight / 2;
-  let activePage = 1;
-  let minDist = Infinity;
-  wrappers.forEach((w, i) => {
-    const rect = w.getBoundingClientRect();
-    const pageMid = window.scrollY + rect.top + rect.height / 2;
-    const dist = Math.abs(pageMid - mid);
-    if (dist < minDist) { minDist = dist; activePage = i + 1; }
-  });
-  panelPagesEl.querySelectorAll(".thumb-item").forEach(el => {
-    el.classList.toggle("active", Number(el.dataset.page) === activePage);
+  if (!pdfDoc || !thumbnailPanelEl.classList.contains("open") || activePanel !== "pages") return;
+  const activePage = visiblePageNumber();
+  panelPagesEl.querySelectorAll(".thumb-item").forEach((el) => {
+    const on = Number(el.dataset.page) === activePage;
+    if (on === el.classList.contains("active")) return;
+    el.classList.toggle("active", on);
+    if (on) {
+      const pr = panelPagesEl.getBoundingClientRect(), r = el.getBoundingClientRect();
+      if (r.top < pr.top || r.bottom > pr.bottom) el.scrollIntoView({ block: "nearest" });
+    }
   });
 }
 
-document.addEventListener("scroll", updateActiveThumbnail, { passive: true });
+let _thumbScrollRaf = 0;
+document.addEventListener("scroll", () => {
+  if (_thumbScrollRaf) return;
+  _thumbScrollRaf = requestAnimationFrame(() => { _thumbScrollRaf = 0; updateActiveThumbnail(); });
+}, { passive: true });
 
 // Resolve a PDF.js outline destination to a 1-based page number.
 async function destToPageNum(dest) {
@@ -4222,6 +4572,7 @@ function buildBookmarkTree(items, container) {
     btn.addEventListener("click", async () => {
       const pn = await destToPageNum(item.dest);
       if (pn) scrollToPage(pn);
+      else if (item.url) window.open(item.url, "_blank", "noopener");
     });
     container.appendChild(btn);
     if (item.items && item.items.length) {
@@ -4233,47 +4584,109 @@ function buildBookmarkTree(items, container) {
   }
 }
 
+function panelEmpty(el, ic, text) {
+  el.innerHTML = `<div class="panel-empty">${icon(ic, { size: 26 })}<div></div></div>`;
+  el.querySelector(".panel-empty div").textContent = text;
+}
+
 async function loadBookmarks() {
   if (!pdfDoc || panelBookmarksEl.dataset.loaded) return;
   panelBookmarksEl.dataset.loaded = "1";
   const outline = await pdfDoc.getOutline();
-  if (!outline || !outline.length) return;
   panelBookmarksEl.innerHTML = "";
+  if (!outline || !outline.length) { panelEmpty(panelBookmarksEl, "bookmark", "This document has no bookmarks."); return; }
   buildBookmarkTree(outline, panelBookmarksEl);
 }
 
-async function maybeShowBookmarksTab() {
-  if (!pdfDoc || !tabBookmarksEl) return;
-  const outline = await pdfDoc.getOutline();
-  tabBookmarksEl.hidden = !outline || !outline.length;
+// Kept for the code that still speaks in the old tab names.
+function switchTab(tab) { showPanel(tab, { open: thumbnailPanelEl.classList.contains("open") }); }
+
+function showPanel(name, { open = true } = {}) {
+  activePanel = PANELS[name] ? name : "pages";
+  for (const [k, el] of Object.entries(PANELS)) if (el) el.hidden = k !== activePanel;
+  if (panelTitleEl) panelTitleEl.textContent = organizeMode && activePanel === "pages" ? "Organize pages" : PANEL_TITLES[activePanel];
+  thumbnailPanelEl.classList.toggle("open", open);
+  document.body.classList.toggle("thumbs-open", open);
+  for (const b of document.querySelectorAll("#side-rail .rail-btn")) b.setAttribute("aria-pressed", String(open && b.dataset.panel === activePanel));
+  if (tabPagesEl) tabPagesEl.classList.toggle("active", activePanel === "pages");
+  if (tabBookmarksEl) tabBookmarksEl.classList.toggle("active", activePanel === "bookmarks");
 }
 
-function switchTab(tab) {
-  const showPages = tab === "pages";
-  tabPagesEl.classList.toggle("active", showPages);
-  tabPagesEl.setAttribute("aria-pressed", String(showPages));
-  tabBookmarksEl.classList.toggle("active", !showPages);
-  tabBookmarksEl.setAttribute("aria-pressed", String(!showPages));
-  panelPagesEl.hidden = !showPages;
-  panelBookmarksEl.hidden = showPages;
+async function openPanel(name) {
+  if (organizeMode && name !== "pages") await exitOrganize();
+  showPanel(name, { open: true });
+  try { chrome.storage.local.set({ sidePanel: name }); } catch { /* ok */ }
+  await refreshOpenPanel();
+}
+async function closePanel() {
+  if (organizeMode) await exitOrganize();
+  showPanel(activePanel, { open: false });
+  try { chrome.storage.local.set({ sidePanel: null }); } catch { /* ok */ }
+}
+async function refreshOpenPanel() {
+  if (!thumbnailPanelEl.classList.contains("open")) return;
+  switch (activePanel) {
+    case "pages": if (!organizeMode) await renderThumbnails(); updateActiveThumbnail(); break;
+    case "bookmarks": await loadBookmarks(); break;
+    case "comments": renderCommentsPanel(); break;
+    case "attachments": renderAttachments(); break;
+  }
 }
 
-if (tabPagesEl)     tabPagesEl.addEventListener("click",     () => switchTab("pages"));
-if (tabBookmarksEl) tabBookmarksEl.addEventListener("click", async () => {
-  switchTab("bookmarks");
-  await loadBookmarks();
+for (const b of document.querySelectorAll("#side-rail .rail-btn")) {
+  b.addEventListener("click", () => {
+    const open = thumbnailPanelEl.classList.contains("open") && activePanel === b.dataset.panel;
+    if (open) closePanel(); else openPanel(b.dataset.panel);
+  });
+}
+if (panelCloseEl) panelCloseEl.addEventListener("click", closePanel);
+chrome.storage.local.get({ sidePanel: null }, ({ sidePanel }) => {
+  if (sidePanel && PANELS[sidePanel] && sidePanel !== "attachments") openPanel(sidePanel);
 });
 
-if (thumbnailToggleEl) {
-  thumbnailToggleEl.addEventListener("click", async () => {
-    const open = thumbnailPanelEl.classList.toggle("open");
-    document.body.classList.toggle("thumbs-open", open);
-    thumbnailToggleEl.setAttribute("aria-pressed", String(open));
-    if (open) {
-      await renderThumbnails();
-      await maybeShowBookmarksTab();
-    }
-  });
+// Comments: the list follows the annotation set, a beat behind it.
+let _commentsTimer = 0;
+function renderCommentsPanel() {
+  Annots.renderComments(commentsListEl, commentsFilterEl ? commentsFilterEl.value : "");
+}
+function syncCommentsBadge() {
+  const n = Annots.all().filter((a) => a.type !== "link").length;
+  if (commentsBadgeEl) { commentsBadgeEl.hidden = !n; commentsBadgeEl.textContent = n > 99 ? "99+" : String(n); }
+}
+Annots.onChange((what = {}) => {
+  syncCommentsBadge();
+  syncUndoButtons();
+  syncSaveButton();
+  if (what.text) return; // typing in a note: the list catches up on the next change
+  if (activePanel !== "comments" || !thumbnailPanelEl.classList.contains("open")) return;
+  clearTimeout(_commentsTimer);
+  _commentsTimer = setTimeout(renderCommentsPanel, what.selection ? 0 : 120);
+});
+if (commentsFilterEl) commentsFilterEl.addEventListener("input", renderCommentsPanel);
+
+// Attachments: files embedded in the PDF, saved out on a click.
+function syncAttachmentsRail() {
+  if (attachmentsToggleEl) attachmentsToggleEl.hidden = !docAttachments.length;
+  if (!docAttachments.length && activePanel === "attachments" && thumbnailPanelEl.classList.contains("open")) openPanel("pages");
+}
+function renderAttachments() {
+  panelAttachmentsEl.innerHTML = "";
+  if (!docAttachments.length) { panelEmpty(panelAttachmentsEl, "paperclip", "This document has no attachments."); return; }
+  for (const att of docAttachments) {
+    const b = document.createElement("button");
+    b.className = "attachment-item";
+    b.innerHTML = `${icon("file", { size: 18 })}<span class="att-name"></span><span class="att-size"></span>${icon("download", { size: 16 })}`;
+    b.querySelector(".att-name").textContent = att.name + (att.page ? ` · p. ${att.page}` : "");
+    b.querySelector(".att-size").textContent = att.size != null ? formatSize(att.size) : "";
+    b.title = att.desc || `Save ${att.name}`;
+    b.addEventListener("click", () => Features.saveAttachment(att));
+    panelAttachmentsEl.appendChild(b);
+  }
+}
+function formatSize(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1048576) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1048576).toFixed(1)} MB`;
 }
 
 // ── Organize pages: reorder / rotate / delete / extract ─────────────────────
@@ -4301,9 +4714,10 @@ function saveNameForDoc() {
   return sanitizePdfFilename(serverFilename || "document");
 }
 
-async function bakeCurrentHighlights() {
-  // Highlights → annotations in the bytes, so page moves/rotations carry them.
-  return buildEditedPdf({ srcBytes: pdfBytes.slice(0), highlightsByPage: collectHighlightPdfRects() });
+async function bakeCurrentEdits() {
+  // Comments and markup → annotations in the bytes, so page moves, rotations
+  // and stamps carry them along with their pages.
+  return buildEditedPdf({ srcBytes: pdfBytes.slice(0), annotations: annotationSaveData() });
 }
 
 async function buildThumbCache() {
@@ -4311,7 +4725,7 @@ async function buildThumbCache() {
   for (let i = 0; i < pdfDoc.numPages; i++) {
     if (thumbDataUrlCache.has(i)) continue;
     const page = await pdfDoc.getPage(i + 1);
-    const vp = page.getViewport({ scale: THUMB_SCALE });
+    const vp = page.getViewport({ scale: THUMB_SCALE * 2 });
     const c = fontCanvas(Math.round(vp.width), Math.round(vp.height)); // where the PDF's fonts are (pdf-fonts.js)
     await page.render({ canvasContext: c.getContext("2d"), viewport: vp }).promise;
     thumbDataUrlCache.set(i, c.toDataURL());
@@ -4322,9 +4736,10 @@ async function buildThumbCache() {
 function ctrlBtn(glyph, title, onClick) {
   const b = document.createElement("button");
   b.type = "button";
-  b.className = "org-ctrl";
-  b.textContent = glyph;
+  b.className = "org-ctrl" + (glyph === "trash" ? " danger" : "");
+  b.innerHTML = icon(glyph, { size: 14 });
   b.title = title;
+  b.setAttribute("aria-label", title);
   b.addEventListener("click", (e) => { e.stopPropagation(); onClick(); });
   return b;
 }
@@ -4369,10 +4784,10 @@ function renderOrganizeList() {
     const controls = document.createElement("div");
     controls.className = "org-controls";
     controls.append(
-      ctrlBtn("↑", "Move up", () => moveEntry(idx, -1)),
-      ctrlBtn("↓", "Move down", () => moveEntry(idx, 1)),
-      ctrlBtn("⟳", "Rotate 90°", () => rotateEntry(idx)),
-      ctrlBtn("✕", "Delete page", () => deleteEntry(idx)),
+      ctrlBtn("arrow-up", "Move up", () => moveEntry(idx, -1)),
+      ctrlBtn("arrow-down", "Move down", () => moveEntry(idx, 1)),
+      ctrlBtn("rotate-cw", "Rotate 90°", () => rotateEntry(idx)),
+      ctrlBtn("trash", "Delete page", () => deleteEntry(idx)),
     );
 
     item.append(chk, box, label, controls);
@@ -4443,15 +4858,11 @@ function resetOrganizeState() {
 }
 
 async function enterOrganize() {
-  if (!editingAllowed || !pdfDoc || organizeMode) return;
-  // Open the panel WITHOUT the toggle handler's normal-thumbnail render — that
-  // runs async and would interleave with the organize list we build below.
-  if (!thumbnailPanelEl.classList.contains("open")) {
-    thumbnailPanelEl.classList.add("open");
-    document.body.classList.add("thumbs-open");
-    if (thumbnailToggleEl) thumbnailToggleEl.setAttribute("aria-pressed", "true");
-  }
-  switchTab("pages");
+  if (!pdfDoc || organizeMode) return;
+  // Open the panel WITHOUT the normal thumbnail render — that runs async and
+  // would interleave with the organize list we build below.
+  showPanel("pages", { open: true });
+  if (panelTitleEl) panelTitleEl.textContent = "Organize pages";
   statusEl.textContent = "Preparing pages…";
   await buildThumbCache();
   resetPlanToIdentity();
@@ -4467,7 +4878,8 @@ async function exitOrganize() {
   resetOrganizeState();
   thumbsRendered = false;
   panelPagesEl.innerHTML = "";
-  if (thumbnailPanelEl.classList.contains("open")) await renderThumbnails();
+  if (panelTitleEl) panelTitleEl.textContent = PANEL_TITLES[activePanel];
+  if (thumbnailPanelEl.classList.contains("open") && activePanel === "pages") await renderThumbnails();
 }
 
 // Reload the viewer from freshly-edited bytes, refreshing pages, highlights,
@@ -4475,18 +4887,32 @@ async function exitOrganize() {
 // `plan`, when the edit moved or turned pages, is the page plan it applied, so
 // OCR'd pages follow their page (see remapOcrPages); without one, every page is
 // where it was.
-async function reloadEditedBytes(out, plan = null) {
+async function reloadEditedBytes(out, plan = null, { keepPlace = false } = {}) {
   if (plan) remapOcrPages(plan);
+  const pn = keepPlace ? visiblePageNumber() : null;
+  const y = keepPlace ? window.scrollY : 0;
   resetOrganizeState();
   // The bytes we're about to load already carry whatever rotation was pending,
   // so keeping the view angles would turn every page a second time.
   pageRotation.clear();
-  clearAllHighlights();
   thumbDataUrlCache.clear();
   thumbsRendered = false;
   panelPagesEl.innerHTML = "";
+  // The document on disk keeps the protection it had; the viewer goes on
+  // working on the plain bytes, so the security survives the reload.
+  const security = docSecurity;
+  const src = sourceBytes;
   await renderBytes(out.slice(0));
-  if (thumbnailPanelEl.classList.contains("open")) await renderThumbnails();
+  if (security && !docSecurity) docSecurity = security;
+  if (src && !editingAllowed) sourceBytes = src;
+  syncSecurityTools();
+  // Same pages, same sizes: back to the same spot. Turned pages change
+  // height, so then it is back to the same page.
+  if (keepPlace && pn) {
+    if (plan) scrollToPage(pn, { smooth: false });
+    else window.scrollTo(0, y);
+  }
+  if (thumbnailPanelEl.classList.contains("open")) refreshOpenPanel();
 }
 
 async function applyOrganize() {
@@ -4494,7 +4920,7 @@ async function applyOrganize() {
   if (orgApplyEl) orgApplyEl.disabled = true;
   try {
     statusEl.textContent = "Applying page changes…";
-    const baked = await bakeCurrentHighlights();
+    const baked = await bakeCurrentEdits();
     const plan = pagePlan.map((p) => ({ srcIndex: p.srcIndex, rotate: p.rotate }));
     const out = await applyPagePlan({ srcBytes: baked, plan });
     const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
@@ -4515,7 +4941,7 @@ async function extractSelectedPages() {
   if (orgExtractEl) orgExtractEl.disabled = true;
   try {
     statusEl.textContent = "Extracting…";
-    const baked = await bakeCurrentHighlights();
+    const baked = await bakeCurrentEdits();
     const out = await applyPagePlan({
       srcBytes: baked,
       plan: sel.map((p) => ({ srcIndex: p.srcIndex, rotate: p.rotate })),
@@ -4557,7 +4983,7 @@ function updateBatesPreview() {
 }
 
 function openBatesModal() {
-  if (!editingAllowed || !batesModalEl) return;
+  if (!pdfBytes || !batesModalEl) return;
   updateBatesPreview();
   batesModalEl.hidden = false;
 }
@@ -4568,7 +4994,7 @@ async function applyBates() {
   if (batesApplyEl) batesApplyEl.disabled = true;
   try {
     statusEl.textContent = "Adding Bates numbers…";
-    const baked = await bakeCurrentHighlights();
+    const baked = await bakeCurrentEdits();
     const out = await stampBates({
       srcBytes: baked,
       prefix: batesPrefixEl.value || "",
@@ -4602,7 +5028,7 @@ async function runStampAndSave(makeBytes, busyMsg, applyBtn) {
   if (applyBtn) applyBtn.disabled = true;
   try {
     statusEl.textContent = busyMsg;
-    const baked = await bakeCurrentHighlights();
+    const baked = await bakeCurrentEdits();
     const out = await makeBytes(baked);
     const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
     if (ok) { await reloadEditedBytes(out); statusEl.textContent = "Saved."; }
@@ -4625,7 +5051,7 @@ const hfInputs = {
   hl: document.getElementById("hf-hl"), hc: document.getElementById("hf-hc"), hr: document.getElementById("hf-hr"),
   fl: document.getElementById("hf-fl"), fc: document.getElementById("hf-fc"), fr: document.getElementById("hf-fr"),
 };
-function openHfModal()  { if (editingAllowed && hfModalEl) hfModalEl.hidden = false; }
+function openHfModal()  { if (pdfBytes && hfModalEl) { hfModalEl.hidden = false; hfInputs.hl?.focus(); } }
 function closeHfModal() { if (hfModalEl) hfModalEl.hidden = true; }
 async function applyHeaderFooter() {
   const slots = {};
@@ -4656,7 +5082,7 @@ const wmDiagonalEl = document.getElementById("wm-diagonal");
 const wmCancelEl   = document.getElementById("wm-cancel");
 const wmApplyEl    = document.getElementById("wm-apply");
 const WM_COLORS = { gray: [0.5, 0.5, 0.5], red: [0.8, 0.1, 0.1], blue: [0.1, 0.3, 0.8], black: [0, 0, 0] };
-function openWmModal()  { if (editingAllowed && wmModalEl) wmModalEl.hidden = false; }
+function openWmModal()  { if (pdfBytes && wmModalEl) { wmModalEl.hidden = false; wmTextEl?.focus(); } }
 function closeWmModal() { if (wmModalEl) wmModalEl.hidden = true; }
 async function applyWatermark() {
   const text = wmTextEl ? wmTextEl.value.trim() : "";
@@ -4750,7 +5176,7 @@ function partName(base, indices) {
 }
 
 function openSplitModal() {
-  if (!editingAllowed || !splitModalEl) return;
+  if (!pdfBytes || !splitModalEl) return;
   updateSplitUi();
   splitModalEl.hidden = false;
 }
@@ -4776,7 +5202,7 @@ async function applySplit() {
       }
     }
     statusEl.textContent = "Splitting…";
-    const baked = await bakeCurrentHighlights();
+    const baked = await bakeCurrentEdits();
     const parts = await splitPdf({ srcBytes: baked, groups });
     if (!parts.length) { statusEl.textContent = "Nothing to split."; return; }
     let written = 0;
@@ -4853,29 +5279,19 @@ async function normalizeImageFile(file) {
 }
 
 async function addImagesAsPages() {
-  if (!editingAllowed || !pdfBytes) return;
-  if (!window.showOpenFilePicker) { statusEl.textContent = "File picker unavailable here."; return; }
-  let handles;
-  try {
-    handles = await window.showOpenFilePicker({
-      multiple: true,
-      types: [{ description: "Images", accept: { "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"] } }],
-    });
-  } catch (e) {
-    if (e && e.name === "AbortError") return;
-    throw e;
-  }
-  if (!handles || !handles.length) return;
+  if (!pdfBytes) return;
+  const files = await pickFiles({ multiple: true, description: "Images", accept: { "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"] } });
+  if (!files || !files.length) return;
   if (imagesEl) imagesEl.disabled = true;
   try {
     statusEl.textContent = "Adding images…";
     const images = [];
-    for (const h of handles) {
-      const norm = await normalizeImageFile(await h.getFile());
+    for (const f of files) {
+      const norm = await normalizeImageFile(f);
       if (norm) images.push(norm);
     }
     if (!images.length) { statusEl.textContent = "No usable images."; return; }
-    const baked = await bakeCurrentHighlights();
+    const baked = await bakeCurrentEdits();
     const out = await appendImagesAsPages({ srcBytes: baked, images });
     const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
     if (ok) {
@@ -4904,14 +5320,36 @@ function applyToolsCollapsed(on) {
     toolsRailCollapseEl.title = on ? "Expand the tools panel" : "Collapse the tools panel";
   }
 }
+// A narrow window starts with the rail collapsed so the page keeps its room;
+// expanding it there lasts until the window crosses the width again.
+const NARROW_RAIL = 1100;
+let railPref = false;   // the stored choice for wide windows
+let railNarrowOverride = null;
+const isNarrow = () => window.innerWidth < NARROW_RAIL;
+function syncToolsRail() {
+  applyToolsCollapsed(isNarrow() ? (railNarrowOverride ?? true) : railPref);
+}
 if (toolsRailCollapseEl) {
   toolsRailCollapseEl.addEventListener("click", () => {
     const on = !document.body.classList.contains("tools-collapsed");
+    if (isNarrow()) {
+      railNarrowOverride = on;
+    } else {
+      railPref = on;
+      try { chrome.storage.local.set({ toolsRailCollapsed: on }); } catch { /* ok */ }
+    }
     applyToolsCollapsed(on);
-    try { chrome.storage.local.set({ toolsRailCollapsed: on }); } catch { /* ok */ }
   });
+  let wasNarrow = isNarrow();
+  window.addEventListener("resize", () => {
+    if (isNarrow() === wasNarrow) return;
+    wasNarrow = isNarrow();
+    railNarrowOverride = null;
+    syncToolsRail();
+  });
+  syncToolsRail();
   try {
-    chrome.storage.local.get({ toolsRailCollapsed: false }, (s) => applyToolsCollapsed(!!s.toolsRailCollapsed));
+    chrome.storage.local.get({ toolsRailCollapsed: false }, (s) => { railPref = !!s.toolsRailCollapsed; syncToolsRail(); });
   } catch { /* ok */ }
 }
 
@@ -4925,7 +5363,7 @@ function applyTheme(theme) {
   const light = theme === "light";
   document.documentElement.setAttribute("data-theme", light ? "light" : "dark");
   if (themeToggleEl) {
-    themeToggleEl.textContent = light ? "🌙" : "☀";
+    setIcon(themeToggleEl.querySelector("[data-icon]") || themeToggleEl, light ? "moon" : "sun");
     themeToggleEl.title = light ? "Switch to dark mode" : "Switch to light mode";
   }
 }
@@ -5046,7 +5484,7 @@ function clearAllFormOverlays() {
 }
 
 async function enterFormMode() {
-  if (!editingAllowed || !docHasForm || formMode) return;
+  if (!docHasForm || formMode) return;
   pageRotation.close(); // shares the strip under the toolbar with the form bar
   formMode = true;
   formValues.clear();
@@ -5071,7 +5509,7 @@ async function saveFilledForm(flatten) {
   try {
     statusEl.textContent = flatten ? "Flattening form…" : "Saving form…";
     const values = Object.fromEntries(formValues);
-    const baked = await bakeCurrentHighlights();
+    const baked = await bakeCurrentEdits();
     const out = await fillForm({ srcBytes: baked, values, flatten });
     const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
     if (ok) {
@@ -5169,18 +5607,19 @@ async function saveRotationToFile(deltas) {
   if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return; }
   try {
     statusEl.textContent = "Saving rotation…";
-    // For an editable document the highlights go in first, so page rotation
-    // carries them along. A read-only web PDF keeps its own annotations
-    // untouched — we only turn its pages and hand back a copy.
-    const src = editingAllowed ? await bakeCurrentHighlights() : pdfBytes.slice(0);
+    // The comments go in first, so page rotation carries them along. A web
+    // PDF's first save is a Save As (writeOutPdf), and the copy becomes the
+    // document from then on.
+    const src = await bakeCurrentEdits();
     const out = await applyRotationToBytes(src, deltas);
-    const name = editingAllowed ? saveNameForDoc() : `${saveNameForDoc()} (rotated).pdf`;
-    const ok = await writeOutPdf(out, name, { inPlace: editingAllowed });
+    const ok = await writeOutPdf(out, saveNameForDoc(), { inPlace: true });
     if (!ok) { statusEl.textContent = ""; return; }
-    // Saved in place: reload from the result so the file and the view agree
-    // (and the angles reset to zero). A downloaded copy leaves this tab alone.
-    if (editingAllowed) await reloadEditedBytes(out, rotationPlan(deltas));
-    statusEl.textContent = editingAllowed ? "Rotation saved." : "Saved a rotated copy.";
+    // Reload from the result so the file and the view agree (and the angles
+    // reset to zero).
+    await reloadEditedBytes(out, rotationPlan(deltas), { keepPlace: true });
+    Annots.markSaved();
+    statusEl.textContent = "";
+    toast("Rotation saved", { kind: "success" });
   } catch (e) {
     console.error("[pdf-viewer] rotation save failed:", e);
     statusEl.textContent = "Saving the rotation failed.";
@@ -5200,4 +5639,300 @@ pageRotation.init({
   canSave: () => !!pdfBytes,
   currentPage: visiblePageNumber,
   numPages: () => (pdfDoc ? pdfDoc.numPages : 0),
+});
+
+// ══ App wiring ═══════════════════════════════════════════════════════════════
+// The pieces built in their own modules, joined to the document here: the
+// annotation engine, the document tools, Find, print, the menus, the tools
+// panel's search, and the keyboard.
+
+hydrateIcons();
+
+// Which permission each tool needs, when the document's security restricts
+// what can be done with it (features.js: allowed / guard).
+function permissionFor(tool) {
+  if (["replacetext", "image", "whiteout", "link"].includes(tool)) return "modify";
+  if (["signature", "initials", "typewriter", "check", "cross", "date"].includes(tool)) return "fill";
+  return "annotate";
+}
+
+Annots.init({
+  getViewport: (pn) => pageViewportByNum.get(pn),
+  scrollToPage,
+  numPages: () => (pdfDoc ? pdfDoc.numPages : 0),
+  status: (m) => { if (m) toast(m, { timeout: 2200 }); },
+  canUse: (tool) => Features.guard(permissionFor(tool)),
+  pickImageFor: (kind) => (kind === "image" ? pickImage() : pickSignature(kind)),
+});
+setMarkupSink((pn, rects, kind, text) => (Features.guard("annotate") ? Annots.createMarkup(pn, rects, kind, text) : null));
+
+Features = createFeatures({
+  getBytes: () => pdfBytes,
+  getSourceBytes: () => sourceBytes,
+  getDoc: () => pdfDoc,
+  fileName: () => saveNameForDoc(),
+  writeOut: writeOutPdf,
+  reload: reloadEditedBytes,
+  bake: bakeCurrentEdits,
+  status: (m) => { statusEl.textContent = m || ""; },
+  currentPage: () => visiblePageNumber(),
+  numPages: () => (pdfDoc ? pdfDoc.numPages : 0),
+  scrollToPage,
+  rotations: () => pageRotation.deltas(),
+  getInfo: () => docInfo,
+  getSecurity: () => docSecurity,
+  setSecurity: (sec) => { docSecurity = sec; syncSecurityTools(); },
+  pickFiles,
+  markSaved: () => Annots.markSaved(),
+  getAuthor: () => Annots.getAuthor(),
+  setAuthor: (n) => Annots.setAuthor(n),
+  getZoom: () => ({ scale: currentScale, mode: zoomMode }),
+  restoreZoom: async (z) => { if (z.mode) setZoomMode(z.mode); else setZoom(z.scale); },
+  presentZoom: async () => { const sc = scaleForMode("fit-page"); if (sc) { restoreScroll = captureScroll(); currentScale = sc; syncZoomLabel(); await renderAllPages(); } },
+  getLayout: () => pageLayout,
+  setLayout: (l) => setPageLayout(l),
+});
+
+Find = createFind({ pagesEl, scrollToPage });
+
+// ── Security: which tools show ───────────────────────────────────────────────
+function syncSecurityTools() {
+  const un = document.getElementById("unprotect-btn");
+  const pr = document.getElementById("protect-btn");
+  if (un) un.hidden = !docSecurity;
+  if (pr) {
+    const label = pr.querySelector(".tl");
+    if (label) label.textContent = docSecurity ? "Change password…" : "Protect with password…";
+  }
+}
+
+// Tools that change the document are held to its permissions.
+const TOOL_GUARDS = {
+  "organize-pages": "assemble", "combine-pdfs": "assemble", "images-btn": "assemble", "split-btn": "assemble",
+  "bates-number": "modify", "headerfooter-btn": "modify", "watermark-btn": "modify",
+  "fill-form": "fill", "redact-toggle": "modify", "rot-save": "assemble",
+};
+for (const [id, kind] of Object.entries(TOOL_GUARDS)) {
+  document.getElementById(id)?.addEventListener("click", (e) => {
+    if (!Features.guard(kind)) { e.stopImmediatePropagation(); e.preventDefault(); }
+  }, true);
+}
+
+// ── The document tools in the panel ──────────────────────────────────────────
+const TOOL_ACTIONS = {
+  "insert-blank-btn": () => Features.insertBlank(),
+  "extract-btn": () => Features.extractPages(),
+  "crop-pages-btn": () => Features.cropDialog(),
+  "protect-btn": () => Features.protect(),
+  "unprotect-btn": () => Features.unprotect(),
+  "sanitize-btn": () => Features.sanitize(),
+  "flatten-btn": () => Features.flatten(),
+  "pagenum-btn": () => Features.pageNumbers(),
+  "export-word-btn": () => Features.exportWord(),
+  "export-text-btn": () => Features.exportText(),
+  "export-images-btn": () => Features.exportImages(),
+  "compress-btn": () => Features.compress(),
+  "compare-btn": () => Features.compare(),
+  "read-aloud-btn": () => Features.toggleReadAloud(),
+  "read-aloud-item": () => Features.toggleReadAloud(),
+  "props-item": () => Features.showProperties(),
+  "present-item": () => Features.togglePresentation(),
+  "shortcuts-item": () => Features.showShortcuts(),
+  "rename-item": () => startRename(),
+};
+for (const [id, fn] of Object.entries(TOOL_ACTIONS)) {
+  document.getElementById(id)?.addEventListener("click", () => {
+    if (!pdfDoc && !/item$/.test(id)) { toast("Open a PDF first."); return; }
+    fn();
+  });
+}
+
+// ── Menus ────────────────────────────────────────────────────────────────────
+const docMenuBtn = document.getElementById("doc-menu-btn");
+const docMenuEl = document.getElementById("doc-menu");
+const moreBtn = document.getElementById("more-btn");
+const moreMenuEl = document.getElementById("more-menu");
+docMenuBtn?.addEventListener("click", () => toggleMenu(docMenuEl, docMenuBtn));
+moreBtn?.addEventListener("click", () => toggleMenu(moreMenuEl, moreBtn, { align: "end" }));
+// The naming select lives in the menu; picking from it must not close it.
+namingModeEl?.addEventListener("click", (e) => e.stopPropagation());
+// "Open in browser viewer" is for a PDF that came from the web.
+if (openOriginalEl) openOriginalEl.hidden = !fileUrl;
+
+// ── Print ────────────────────────────────────────────────────────────────────
+async function doPrint() {
+  if (!pdfDoc) return;
+  if (!Features.guard("print")) return;
+  const dismiss = toast("Preparing to print…", { timeout: 120000 });
+  try {
+    const bytes = await bakeCurrentEdits();
+    await printDocument({
+      bytes,
+      rotations: pageRotation.deltas(),
+      onProgress: (i, n) => { statusEl.textContent = `Preparing to print… ${i} of ${n}`; },
+    });
+  } catch (e) {
+    console.error("[pdf-viewer] print failed:", e);
+    toast(`Print failed: ${e.message || e}`, { kind: "error" });
+  } finally {
+    if (dismiss) dismiss();
+    statusEl.textContent = "";
+  }
+}
+document.getElementById("print-btn")?.addEventListener("click", doPrint);
+
+// ── Undo / redo, and the Save button's "changed" dot ─────────────────────────
+const undoBtnEl = document.getElementById("undo-btn");
+const redoBtnEl = document.getElementById("redo-btn");
+function syncUndoButtons() {
+  if (undoBtnEl) undoBtnEl.disabled = !Annots.canUndo();
+  if (redoBtnEl) redoBtnEl.disabled = !Annots.canRedo();
+}
+function syncSaveButton() {
+  if (saveEditsEl) saveEditsEl.classList.toggle("dirty", Annots.hasUnsaved());
+}
+function doUndo() { if (Annots.undo()) syncUndoButtons(); }
+function doRedo() { if (Annots.redo()) syncUndoButtons(); }
+undoBtnEl?.addEventListener("click", doUndo);
+redoBtnEl?.addEventListener("click", doRedo);
+syncUndoButtons();
+
+// ── Redact: mark every place a phrase appears ────────────────────────────────
+document.getElementById("redact-search")?.addEventListener("click", async () => {
+  const q = await promptDialog({ title: "Mark text for redaction", message: "Every place this word or phrase appears in the document is marked. Check the marks before saving the redacted copy.", placeholder: "e.g. a name, an account number", confirm: "Mark all", icon: "redact" });
+  if (!q || !q.trim()) return;
+  const matches = Find.findAll(q.trim(), { caseSensitive: false });
+  const byPage = new Map();
+  for (const m of matches) {
+    const rects = [...m.range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5);
+    if (!byPage.has(m.pn)) byPage.set(m.pn, []);
+    byPage.get(m.pn).push(rects);
+  }
+  let n = 0;
+  for (const [pn, groups] of byPage) {
+    for (const rects of groups) if (storeBoxesFromClientRects(pn, rects, { kind: "text", label: q.trim() })) n++;
+    repaintRedactionsOnPage(pn);
+  }
+  updateRedactState();
+  toast(n ? `Marked ${n} place${n === 1 ? "" : "s"} for redaction` : `“${q.trim()}” does not appear in the document's text.`, { kind: n ? "success" : "info", timeout: 5000 });
+});
+
+// ── The tools panel: search and collapsible groups ───────────────────────────
+const toolFilterEl = document.getElementById("tool-filter");
+const toolFilterEmpty = document.getElementById("tool-filter-empty");
+function filterTools() {
+  const q = (toolFilterEl?.value || "").trim().toLowerCase();
+  let any = false;
+  for (const group of document.querySelectorAll("#tools-rail .tool-group")) {
+    let groupAny = false;
+    for (const b of group.querySelectorAll(".tool-btn")) {
+      if (b.dataset.forceHidden === "1") continue;
+      const text = `${b.querySelector(".tl")?.textContent || ""} ${b.title}`.toLowerCase();
+      const hit = !q || q.split(/\s+/).every((w) => text.includes(w));
+      b.classList.toggle("filtered-out", !hit);
+      b.style.display = hit ? "" : "none";
+      if (hit && !b.hidden) groupAny = true;
+    }
+    group.style.display = groupAny ? "" : "none";
+    if (q) group.querySelector(".tool-group-head")?.setAttribute("aria-expanded", "true");
+    any = any || groupAny;
+  }
+  if (toolFilterEmpty) toolFilterEmpty.hidden = any;
+  if (!q) restoreGroupState();
+}
+toolFilterEl?.addEventListener("input", filterTools);
+toolFilterEl?.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { toolFilterEl.value = ""; filterTools(); toolFilterEl.blur(); }
+  if (e.key === "Enter") {
+    const first = [...document.querySelectorAll("#tools-rail .tool-btn")].find((b) => b.style.display !== "none" && !b.hidden);
+    if (first) { first.click(); toolFilterEl.blur(); }
+  }
+});
+function restoreGroupState() {
+  let closed = [];
+  try { closed = JSON.parse(localStorage.getItem("pdfViewerClosedGroups") || "[]"); } catch { closed = []; }
+  for (const g of document.querySelectorAll("#tools-rail .tool-group")) {
+    g.querySelector(".tool-group-head")?.setAttribute("aria-expanded", String(!closed.includes(g.dataset.group)));
+  }
+}
+for (const g of document.querySelectorAll("#tools-rail .tool-group")) {
+  g.querySelector(".tool-group-head")?.addEventListener("click", (e) => {
+    const head = e.currentTarget;
+    const open = head.getAttribute("aria-expanded") !== "true";
+    head.setAttribute("aria-expanded", String(open));
+    let closed = [];
+    try { closed = JSON.parse(localStorage.getItem("pdfViewerClosedGroups") || "[]"); } catch { closed = []; }
+    closed = closed.filter((x) => x !== g.dataset.group);
+    if (!open) closed.push(g.dataset.group);
+    try { localStorage.setItem("pdfViewerClosedGroups", JSON.stringify(closed)); } catch { /* ok */ }
+  });
+}
+restoreGroupState();
+
+// ── Keyboard ─────────────────────────────────────────────────────────────────
+function typingTarget(t) {
+  return !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+}
+const TOOL_KEYS = { h: "highlight", u: "underline", k: "strikeout", n: "note", t: "freetext", d: "ink" };
+document.addEventListener("keydown", (e) => {
+  if (Features.isPresenting()) return;
+  const mod = e.ctrlKey || e.metaKey;
+  const k = (e.key || "").toLowerCase();
+  if (mod && !e.altKey) {
+    if (k === "f") { e.preventDefault(); closeMenus(); Find.open(((window.getSelection() || "") + "").replace(/\s+/g, " ").trim().slice(0, 200)); return; }
+    if (k === "p") { e.preventDefault(); doPrint(); return; }
+    if (k === "o") {
+      // Inside the web app, Open belongs to the app (a new tab per file).
+      let open = null;
+      try { open = window.top !== window && window.top.__appOpenFile; } catch { /* other origin */ }
+      if (open) { e.preventDefault(); open(); }
+      return;
+    }
+    if (k === "s") { e.preventDefault(); if (pdfDoc) saveEditedPdf(); return; }
+    if (k === "d" && !e.shiftKey) { e.preventDefault(); if (pdfDoc) Features.showProperties(); return; }
+    if (k === "l" && !e.shiftKey) { e.preventDefault(); Features.togglePresentation(); return; }
+    if (k === "=" || k === "+") { e.preventDefault(); stepZoom(1); return; }
+    if (k === "-" || k === "_") { e.preventDefault(); stepZoom(-1); return; }
+    if (k === "0") { e.preventDefault(); setZoomMode("fit-page"); return; }
+    if (k === "1") { e.preventDefault(); setZoom(1); return; }
+    if (k === "2") { e.preventDefault(); setZoomMode("fit-width"); return; }
+    if (!typingTarget(e.target) && !dialogOpen()) {
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); doUndo(); return; }
+      if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); doRedo(); return; }
+    }
+    return;
+  }
+  if (typingTarget(e.target) || e.altKey || dialogOpen() || menuIsOpen()) return;
+  if (e.key === "?") { e.preventDefault(); Features.showShortcuts(); return; }
+  if (!e.shiftKey && TOOL_KEYS[k] && pdfDoc) { e.preventDefault(); Annots.setTool(TOOL_KEYS[k]); return; }
+  if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && !Annots.selected() && pdfDoc) {
+    // Left and right turn the page, unless the page is wider than the window
+    // (then they scroll it, as they always did).
+    if (document.documentElement.scrollWidth > window.innerWidth + 2) return;
+    e.preventDefault();
+    const step = pageLayout === "single" ? 1 : 2;
+    goToPage(visiblePageNumber() + (e.key === "ArrowRight" ? step : -step));
+    return;
+  }
+  if (e.key === "Escape") {
+    if (Find.isOpen()) { Find.close(); return; }
+    hideCitePopover();
+  }
+});
+
+// The selection toolbar steps aside while a tool owns the mouse.
+Annots.onChange((what = {}) => { if (what.tool) hideCitePopover(); });
+
+// Drag a PDF onto the viewer (the extension page) to open it here.
+document.addEventListener("dragover", (e) => {
+  if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) e.preventDefault();
+});
+document.addEventListener("drop", (e) => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!f || !/\.pdf$/i.test(f.name) && f.type !== "application/pdf") return;
+  // The hosted app handles drops itself (a tab per file); inside it, leave it.
+  if (window.top !== window) return;
+  e.preventDefault();
+  if (Annots.hasUnsaved() && !confirm("Open another PDF here? Changes not yet saved will be lost.")) return;
+  loadLocalFile(f, null);
 });

@@ -1,10 +1,97 @@
 # Legal Citation Linker — Chrome Extension
 
-A Chrome extension version of `pdf_linker.py`. Open any PDF in Chrome and the
-extension renders it with PDF.js, runs the same citation detection algorithm
-your Python script uses, and overlays clickable links on every detected
-citation. The PDF itself is **not modified** — overlays disappear when the
-tab closes.
+A PDF editor for Chrome and the web, built around a port of `pdf_linker.py`:
+every legal citation in a PDF becomes a clickable link to Westlaw or Lexis+.
+Beyond reading, it covers the everyday work of Adobe Acrobat Pro — comments
+and markup, signatures, form filling, text edits, page organizing,
+redaction, password protection, Bates numbering, compression, comparison
+and export to Word. The Chrome extension opens PDFs from the web in the
+viewer; the web app (`pwa/`) opens files from disk in tabs and saves back to
+the same file.
+
+Nothing is written into a PDF until you save, and citation links are never
+written into it — they are overlays, drawn fresh each time.
+
+## PDF editor
+
+The window has three parts: the **top bar** (document name, page and zoom
+controls, undo / redo, Find, Print and Save), the **tools rail** down the left
+(every tool, grouped, with a *Find a tool* search box at the top; the button
+at the far left of the top bar collapses it to icons, and a narrow window
+starts it collapsed), and the **side rail** on the right (page thumbnails,
+bookmarks, the comments list and attachments).
+
+| Group | Tools |
+|---|---|
+| Comment | Highlight, Underline, Strikethrough, Sticky note, Text box, Draw, Rectangle, Ellipse, Line, Arrow, Stamp |
+| Fill & Sign | Fill form fields (when the PDF has them), Add text, Signature, Initials, Checkmark, Cross, Date |
+| Edit PDF | Edit text, Add image, Whiteout, Add link |
+| Organize Pages | Organize pages, Insert blank page, Insert from file, Add images as pages, Extract pages, Split, Crop pages, Rotate pages |
+| Protect | Redact, Protect with password, Remove password, Remove hidden info, Flatten |
+| Numbering & Marks | Bates numbering, Page numbers, Header & footer, Watermark |
+| Export & Optimize | Export to Word, Export to text, Export as images, Compress PDF |
+| Read & Review | Box select, Selectable text area, Recognize text (OCR), Compare files, Read aloud |
+
+**Comments are real PDF annotations.** Highlights, notes, text boxes, shapes,
+ink, stamps, signatures and links are saved as the standard annotation types
+(`/Highlight`, `/Text`, `/FreeText`, `/Ink`, `/Square`, `/Line`, `/Stamp`, …),
+each with its own appearance stream, so Acrobat, Preview and Chrome show them
+exactly as drawn here, and reopening the file here brings them back editable.
+Comments another program made show up in the comments list and can be
+edited or deleted the same way.
+
+- **Comment.** Pick a markup tool and drag across text, or select text first
+  and choose Highlight / Underline / Strikethrough from the small toolbar that
+  appears over the selection. Click a comment to select it: drag to move, pull
+  a handle to resize, arrow keys to nudge (Shift for ×10), Delete to remove,
+  double-click to edit its text or note. The bar at the top of the page sets
+  colour, line width, opacity, font and size for the selection or the next
+  one. Right-click a comment for more (change markup type, colour, duplicate,
+  delete). **Undo / Redo** (Ctrl Z / Ctrl Y) cover every change.
+- **Comments list.** The speech-bubble button on the right lists every
+  comment by page, with its author, date and text; search it, and click one to
+  go to it. The author name is set under Document properties.
+- **Fill & Sign.** Signatures and initials can be drawn, typed (in a choice of
+  script fonts) or taken from an image, and are remembered for next time.
+  Add text types straight onto the page (for flat forms); Checkmark, Cross and
+  Date drop in with one click. PDFs with real form fields get **Fill form
+  fields**, with Save (fields stay editable) or Save & flatten.
+- **Edit PDF.** **Edit text** covers a line of the page with an editable copy
+  of its words, so you can retype it; **Whiteout** hides whatever is under it;
+  **Add image** places a picture; **Add link** makes a region link to a page
+  or a web address.
+- **Organize pages.** Reorder by dragging thumbnails, rotate, delete, or
+  extract; insert blank pages or another PDF's pages at any position; add
+  images as new pages; split into several files; crop margins (with *Remove
+  white margins* detecting them for you). Comments move with their pages.
+- **Protect.** **Protect with password** encrypts with 256-bit AES, with an
+  optional owner password that restricts printing, copying and editing.
+  Password-protected PDFs open with a prompt (RC4 and AES files alike), and a
+  document that came in protected is saved back protected. **Redact** removes
+  text for good (see below); **Remove hidden info** strips metadata, scripts,
+  attachments, comments, links and bookmarks; **Flatten** burns comments and
+  form fields into the page.
+- **Numbering & marks.** Bates numbers, page numbers (`Page {n} of {N}`),
+  headers and footers in six positions, and diagonal watermarks.
+- **Export & optimize.** **Export to Word** writes a `.docx` with the PDF's
+  paragraphs, headings and page breaks; **Export to text** writes the page
+  text in the text reader's page format; **Export as images** saves pages as
+  PNG or JPEG (several pages as a folder or a `.zip`). **Compress PDF**
+  re-encodes large images at a chosen quality and drops unused objects.
+- **Compare files** lists every word-level change between this PDF and
+  another version, page by page, and can save the report.
+- **Find** (Ctrl F) highlights every match on every page, with match-case and
+  whole-word options. **Print** (Ctrl P) prints every page, comments included.
+- **View.** Fit width, fit page, actual size or any zoom (Ctrl + wheel);
+  single page, two pages, or two pages with a cover; **Presentation mode**
+  (Ctrl L) shows one page at a time full screen. **Document properties**
+  (Ctrl D) edits the title, author, subject and keywords. **Read aloud** reads
+  the document with the system voice.
+- **Saving.** A file opened from disk in the app is saved in place (Ctrl S),
+  with a dot on the Save button while there are unsaved changes. A PDF opened
+  from the web shows **Download** (the original) and **Save as…**, which saves
+  a copy with your changes and then keeps saving to that copy. Closing a tab
+  with unsaved changes asks first. Press **?** for every keyboard shortcut.
 
 ## Viewer Features
 
@@ -31,11 +118,11 @@ In addition to citation linking, the viewer supports:
   proposed, then save a flattened copy with it blacked out — no text layer, no
   metadata, and never over the original. In the viewer, and in the text reader
   from beside the export the PDF was scrubbed into. See below.
-- **Persistent highlighting** — select any text and release the mouse to
-  apply a yellow highlight. Right-click a highlight to remove it. Highlights
-  persist across zoom changes; for editable documents they can be saved into
-  the file and stay removable after reopening (see below), otherwise they vanish
-  when the tab closes.
+- **Highlighting** — select text and pick **Highlight** from the toolbar that
+  appears over the selection (or turn on the Highlight tool, **H**, and every
+  selection is highlighted as you release the mouse). Highlights are saved into
+  the file as real PDF highlights and stay editable after reopening; see
+  *PDF editor* above.
 - **Repeated section numbers** — a brief that names a code once ("Code of Civil
   Procedure section 425.16") and then drops it gets its later bare references
   linked too: on that page, `§ 425.16(b)` and `section 425.16` resolve to the
@@ -84,56 +171,31 @@ In addition to citation linking, the viewer supports:
   sideways scan or an upside-down page the right way up, on any document. The
   rotation is on screen straight away; writing it into the file is a separate
   click, and is offered for web PDFs too (as a copy). See below.
-The tools live in an Adobe-Acrobat-style **tools rail** down the left margin:
-annotation tools (Highlight, Box select, Text area, OCR) and **Rotate pages**
-are always there, and
-for editable documents an **Edit** section adds every document operation
-(Combine, Add images, Organize pages, Split, Bates, Header/Footer, Watermark).
-Click **TOOLS** at the top of the rail to collapse it to an icon-only strip.
-Editable documents also show **💾 Save** in the top toolbar. The **☀ / 🌙**
-button toggles between dark (default) and light themes; the choice is remembered.
+The **☀ / 🌙** button in the top bar toggles between dark (default) and light
+themes; the choice is remembered. The **document name** menu renames the file,
+sets how it is named, shows its properties, and (for a web PDF) opens the
+original in Chrome's built-in viewer, skipping the linker. For a web PDF,
+**Download** saves the original with a smart filename (see below).
 
-- **Edit &amp; save — local documents only.** For a PDF you've already
-  downloaded — opened from disk (`file://` in the extension) or via the app —
-  the toolbar replaces **Download** with **💾 Save** (writes your highlights into
-  the PDF) and adds **⧉ Combine** (merges other PDFs onto the end, then saves).
-  Highlights are saved as real **PDF highlight annotations** (the same kind Adobe
-  uses), not baked-in drawings, so they stay editable: reopen the file and they
-  come back as removable highlights (right-click to delete, then Save again), and
-  Adobe/Preview can delete them too. In the app, Save writes back to the same
-  file in place using its file handle; otherwise it goes through the browser's
-  save dialog. Both are powered by the bundled `pdf-lib` writer. Web PDFs you're
-  only viewing stay read-only — edit access is granted only to documents you've
-  already downloaded.
-- **Organize pages — local documents only.** The **▦ Pages** button turns the
-  page panel into an editor: drag thumbnails to reorder, rotate or delete
-  individual pages, or check pages and **Extract** them to a new PDF. **Apply &
-  Save** rewrites the document (your highlights ride along with their pages).
-- **Bates numbering — local documents only.** The **▤ Bates** button stamps a
-  sequential number on every page — set a prefix, starting number, digit count,
-  and corner. Placement is exact on standard pages and rotation-aware.
-- **Header / footer — local documents only.** The **🔖 Header/Footer** button
-  adds text to any of six slots (header/footer × left/center/right); use `{n}`
-  for the page number and `{N}` for the total (e.g. `Page {n} of {N}`).
-- **Watermark — local documents only.** The **🌊 Watermark** button stamps
-  translucent text (e.g. `CONFIDENTIAL`) diagonally across every page, with
-  adjustable size, opacity, and color.
-- **Split — local documents only.** The **✂ Split** button breaks the document
-  into several PDFs — every N pages, one page per file, or custom ranges like
-  `1-3, 4-8, 9-`. Parts save into a folder you pick (or as downloads), and each
-  part keeps the highlights on its pages.
-- **Add images as pages — local documents only.** The **🖼 Images** button adds
-  image files (JPG/PNG, plus WebP/GIF/BMP via automatic conversion) as new pages
-  at the end, each sized to fit US Letter. Reorder them afterward with **▦
-  Pages**.
-- **Fill forms — local documents only.** When a PDF has fillable AcroForm
-  fields, **📝 Fill form** appears in the tools rail's Edit section and lays editable controls
-  over the fields (text, checkbox, radio, dropdown). Fill them in, then **Save
-  filled** (fields stay editable) or **Save &amp; flatten** (entries baked in
-  permanently, fields removed).
-- **Zoom in / out** with the toolbar buttons.
-- **Download** the original PDF with a smart filename (see below).
-- **Open original** in Chrome's built-in PDF viewer (skips the linker).
+Every document tool works on any PDF. For a file opened from disk the result is
+written back into it; for a web PDF the first save asks where to put the copy,
+and later saves go to that copy. Bates numbering, header / footer, watermark,
+split, organize, insert and add-images are described under *PDF editor* above;
+a few details:
+
+- **Bates numbering** — prefix, starting number, digit count and corner;
+  placement is exact on standard pages and rotation-aware.
+- **Header / footer** — six slots (header/footer × left/center/right); `{n}` is
+  the page number and `{N}` the total (e.g. `Page {n} of {N}`).
+- **Split** — every N pages, one page per file, or ranges like `1-3, 4-8, 9-`.
+  Parts save into a folder you pick (or as downloads), and each part keeps the
+  comments on its pages.
+- **Add images as pages** — JPG/PNG, plus WebP/GIF/BMP by automatic
+  conversion, each sized to fit US Letter.
+- **Fill form fields** — appears when the PDF has AcroForm fields; lays
+  editable controls over them (text, checkbox, radio, dropdown). **Save
+  filled** keeps the fields editable; **Save &amp; flatten** bakes the entries
+  in and removes the fields.
 
 ## Shift + Space = middle click
 
@@ -1994,11 +2056,28 @@ python fetch-pdfjs.py
 For local PDFs (`file://`), enable **Allow access to file URLs** on the
 extension's details page.
 
+## Tests for the editor
+
+`node test-annot-pdf.mjs` writes every kind of comment, saves, reopens and
+compares, checks the file holds standard annotation types with appearance
+streams, and runs the page tools (blank pages, insert from file, crop on
+plain and turned pages, properties, flatten, sanitize) on real output.
+`node test-pdf-crypt.mjs` checks MD5 / RC4 / AES against published vectors
+and Node's crypto, protects and reopens a document with user, owner and wrong
+passwords, and — when Python's `pikepdf` is installed — opens RC4-40,
+RC4-128, AES-128 and AES-256 files it made and has it open a file protected
+here. `node test-textlayout.mjs` covers page reading, the Word and text
+exports, Compare's diff, Find's matching and the zip writer.
+
 ## What it does not do
 
-- It does **not** write a `*_linked.pdf` file. (That's the whole point of
-  the extension version.) Keep using `pdf_linker.py` if you need a
-  permanent linked PDF.
+- It does **not** write citation links into the PDF (they are overlays).
+  Keep using `pdf_linker.py` if you need a permanent linked PDF.
+- It does **not** re-flow or re-font existing page text. **Edit text** covers
+  a line with an editable replacement, which suits corrections; it is not a
+  word processor over the page.
+- It does **not** make digital (certificate) signatures. Signatures are
+  images of your signature, as with Acrobat's Fill & Sign.
 - It does **not** run any code on remote servers. Everything happens
   locally in the browser. The only network requests are the PDF fetch
   itself and any Westlaw / Lexis link the user clicks.
@@ -2024,15 +2103,26 @@ viewer/xlsx-write.js                 Writes cells back into an .xlsx, the rest c
 viewer/leaks.js                      Text reader's LEAKS.xlsx model: rows, Fix? cells, where a row points (pure; test-leaks.mjs)
 viewer/web-shim.js                   chrome.* shim for the hosted (PWA) pages
 viewer/theme-boot.js                 Saved theme applied before first paint (viewer + reader)
-viewer/viewer.css                    Page + textLayer + linkLayer styles
-viewer/viewer.js                     PDF.js loader, two-pass renderer
+viewer/viewer.css                    Design tokens (dark / light), chrome, page + textLayer + linkLayer styles
+viewer/viewer.js                     PDF.js loader, two-pass renderer, top bar, panels, zoom, saving, app wiring
+viewer/icons.js                      SVG icon set; [data-icon] placeholders filled on load
+viewer/ui.js                         Menus, context menus, toasts, dialogs
+viewer/annotations.js                Comment tools on screen: drawing, selecting, moving, editing, undo, comments list
+viewer/annot-pdf.js                  Comments as PDF annotations: read, write with appearance streams, flatten (test-annot-pdf.mjs)
+viewer/features.js                   Document tools: password, pages, crop, numbering, sanitize, flatten, export, compress, compare, properties, presentation
+viewer/pdf-crypt.js                  PDF password security: RC4 / AES-128 / AES-256 open, AES-256 protect (test-pdf-crypt.mjs)
+viewer/find.js                       Find in document over the text layers (matching pure; test-textlayout.mjs)
+viewer/print.js                      Print every page at print resolution
+viewer/signature.js                  Signature / initials dialog: draw, type, image; saved signatures
+viewer/textlayout.js                 Page text as lines and paragraphs; Word / text export; Compare's word diff (pure; test-textlayout.mjs)
+viewer/zip.js                        Small zip writer for .docx and image exports (test-textlayout.mjs)
 viewer/autoscroll.js                 Auto-scroll engine + control bar
 viewer/rotation.js                   Page rotation: angles, bar, geometry
 viewer/ocr-store.js                  Saved OCR: recognized pages kept by file hash for N days (pure parts; test-ocr-store.mjs)
 viewer/redact.js                     Redaction: boxes in PDF points, a store per document, the key sweep's decisions, the copy's name (pure parts; test-redact.mjs)
-viewer/pdf-edit.js                   PDF writing (pdf-lib): highlights, page plans, stamps, the flattened redacted copy
+viewer/pdf-edit.js                   PDF writing (pdf-lib): comments, page plans, stamps, crop, blank pages, metadata, sanitize, the flattened redacted copy
 viewer/key-library.js                The pseudonym keys this browser has been shown — one library, reader and viewer
-viewer/highlights.js                 Selection, highlight, context menu
+viewer/highlights.js                 Selection, markup from a selection, box select
 viewer/citation-linker.js            Detection + URL resolution
 viewer/footer-naming.js              Footer-derived naming rule engine
 viewer/disambiguation.js             Cross-tab collision registry
