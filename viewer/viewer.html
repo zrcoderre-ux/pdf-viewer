@@ -156,7 +156,7 @@
       <section class="tool-group" data-group="edit">
         <button class="tool-group-head" aria-expanded="true"><span>Edit PDF</span><i data-icon="chevron-down" data-icon-size="14"></i></button>
         <div class="tool-group-body">
-          <button class="tool-btn" data-tool="replacetext" aria-pressed="false" title="Click a line of text to type over it. The new text covers the old; the old text stays in the file underneath — use Redact to remove it for good."><i class="ti" data-icon="text-cursor"></i><span class="tl">Edit text</span></button>
+          <button class="tool-btn" data-tool="edittext" aria-pressed="false" title="Edit the document's own text: click a paragraph and retype it; it rewraps in its box. On save the old words are taken out of the file and the new ones written in."><i class="ti" data-icon="text-cursor"></i><span class="tl">Edit text</span></button>
           <button class="tool-btn" data-tool="image" aria-pressed="false" title="Place an image on the page"><i class="ti" data-icon="image"></i><span class="tl">Add image</span></button>
           <button class="tool-btn" data-tool="whiteout" aria-pressed="false" title="Cover part of the page with white"><i class="ti" data-icon="eraser"></i><span class="tl">Whiteout</span></button>
           <button class="tool-btn" data-tool="link" aria-pressed="false" title="Draw a link to a web address or another page"><i class="ti" data-icon="link"></i><span class="tl">Add link</span></button>
@@ -297,6 +297,13 @@
         <option value="mono">Monospace</option>
       </select>
     </label>
+    <div class="fb-group" id="annot-style-wrap" hidden>
+      <button id="annot-bold" class="icon-btn sm fb-toggle" type="button" title="Bold (Ctrl+B)" aria-label="Bold" aria-pressed="false"><b>B</b></button>
+      <button id="annot-italic" class="icon-btn sm fb-toggle" type="button" title="Italic (Ctrl+I)" aria-label="Italic" aria-pressed="false"><em>I</em></button>
+      <select id="annot-align" title="Alignment" aria-label="Alignment">
+        <option value="left">Left</option><option value="justify">Justify</option><option value="center">Center</option><option value="right">Right</option>
+      </select>
+    </div>
     <label class="fb-check" id="annot-fill-wrap"><input id="annot-fill" type="checkbox"><span>Fill</span></label>
     <label class="fb-field" id="annot-stamp-wrap">Stamp
       <select id="annot-stamp">

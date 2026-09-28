@@ -56,10 +56,19 @@ edited or deleted the same way.
   Add text types straight onto the page (for flat forms); Checkmark, Cross and
   Date drop in with one click. PDFs with real form fields get **Fill form
   fields**, with Save (fields stay editable) or Save & flatten.
-- **Edit PDF.** **Edit text** covers a line of the page with an editable copy
-  of its words, so you can retype it; **Whiteout** hides whatever is under it;
-  **Add image** places a picture; **Add link** makes a region link to a page
-  or a web address.
+- **Edit PDF.** **Edit text** (E) edits the document's own text. The page's
+  paragraphs are outlined; click one and type — it rewraps inside its box,
+  keeps its first-line indent, line spacing and alignment (left, justified,
+  centred), and keeps its bold, italic and superscript runs (an italicized
+  case name stays italic; Ctrl+B / Ctrl+I, or the **B** / **I** buttons,
+  change them). Drag the box's side handles to rewrap it wider or narrower,
+  or drag it to move it; Delete empties a paragraph; right-click → *Restore
+  original text* takes an edit back. On save the paragraph's old glyphs are
+  taken **out** of the page's content (including text inside form XObjects),
+  and the new words are written in as real, searchable text — nothing is
+  covered up, so search, copy and every other reader see only the new words.
+  **Whiteout** hides whatever is under it; **Add image** places a picture;
+  **Add link** makes a region link to a page or a web address.
 - **Organize pages.** Reorder by dragging thumbnails, rotate, delete, or
   extract; insert blank pages or another PDF's pages at any position; add
   images as new pages; split into several files; crop margins (with *Remove
@@ -1656,7 +1665,10 @@ app, which routes it to the reader tab.
   ends with a newline. Where the two states differ it says so: a document with
   unsaved edits is labelled as such, and a real value the key binds standing in
   the text is flagged with the note that a save would write the pseudonym
-  instead. **Copy** takes the whole thing, pseudonyms and all.
+  instead. It opens at the page you are reading — that page's header at the
+  top of the panel and marked, with one line of the page before it above —
+  and the footer says which page that is; the whole file is still there to
+  scroll. **Copy** takes the whole thing, pseudonyms and all.
 - **A flag does not rearrange the page.** Flagging a value, or keeping a
   wrongly faked one, used to open the Documents / Flagged panel to show the
   list growing. Flagging is done *while reading*, often several in a row, and
@@ -2074,14 +2086,24 @@ passwords, and — when Python's `pikepdf` is installed — opens RC4-40,
 RC4-128, AES-128 and AES-256 files it made and has it open a file protected
 here. `node test-textlayout.mjs` covers page reading, the Word and text
 exports, Compare's diff, Find's matching and the zip writer.
+`node test-pdf-text-edit.mjs` covers Edit text: the content-stream reader,
+line layout, finding paragraphs, and edits saved and read back with pdf.js —
+old words gone and new ones present on a standard-font page, inside a form
+shared by two pages (only the edited page changes), in a kerned TJ line
+(the words either side stay put) and in a composite (Type0) font.
 
 ## What it does not do
 
 - It does **not** write citation links into the PDF (they are overlays).
   Keep using `pdf_linker.py` if you need a permanent linked PDF.
-- It does **not** re-flow or re-font existing page text. **Edit text** covers
-  a line with an editable replacement, which suits corrections; it is not a
-  word processor over the page.
+- **Edit text** works a paragraph at a time: an edited paragraph rewraps in
+  its own box and the rest of the page does not move to make room, as in
+  Acrobat. The new words are set in the standard font nearest the original
+  (Times, Helvetica or Courier, each in bold and italic) rather than the
+  document's own embedded font, whose subset seldom holds the letters a new
+  word needs; characters outside the Western European set become "?". Text
+  that is part of a scanned image has no text to edit (use Whiteout and Add
+  text), and text set at an angle is left alone.
 - It does **not** make digital (certificate) signatures. Signatures are
   images of your signature, as with Acrobat's Fill & Sign.
 - It does **not** run any code on remote servers. Everything happens
@@ -2122,6 +2144,7 @@ viewer/print.js                      Print every page at print resolution
 viewer/signature.js                  Signature / initials dialog: draw, type, image; saved signatures
 viewer/textlayout.js                 Page text as lines and paragraphs; Word / text export; Compare's word diff (pure; test-textlayout.mjs)
 viewer/zip.js                        Small zip writer for .docx and image exports (test-textlayout.mjs)
+viewer/pdf-text-edit.js              Edit text: paragraphs from pdf.js text, line layout, glyphs taken out of content streams, new text written (pure; test-pdf-text-edit.mjs)
 viewer/autoscroll.js                 Auto-scroll engine + control bar
 viewer/rotation.js                   Page rotation: angles, bar, geometry
 viewer/ocr-store.js                  Saved OCR: recognized pages kept by file hash for N days (pure parts; test-ocr-store.mjs)

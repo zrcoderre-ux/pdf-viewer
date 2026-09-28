@@ -838,6 +838,10 @@ body.thumbs-open #thumb-resize { display: block; }
 .fb-sep { width: 1px; height: 20px; background: var(--c-border-strong); }
 .fb-field { display: inline-flex; align-items: center; gap: 7px; color: var(--c-text-2); font-size: 12px; white-space: nowrap; }
 .fb-field input[type="range"] { width: 86px; }
+.fb-group { display: inline-flex; align-items: center; gap: 4px; }
+.fb-group b, .fb-group em { font-size: 14px; line-height: 1; }
+.fb-group em { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-weight: 600; }
+.fb-toggle[aria-pressed="true"] { background: var(--c-accent-soft); color: var(--c-accent); }
 .fb-check { display: inline-flex; align-items: center; gap: 5px; color: var(--c-text-2); font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; }
 #redact-bar select { max-width: 200px; }
 #rotate-bar .rotate-bar-state, #redact-bar .redact-bar-state { min-width: 120px; }
@@ -1482,7 +1486,7 @@ body.annot-drawing[data-annot-tool="date"] .annotLayer,
 body.annot-drawing[data-annot-tool="image"] .annotLayer { cursor: copy; }
 body.annot-drawing[data-annot-tool="freetext"] .annotLayer,
 body.annot-drawing[data-annot-tool="typewriter"] .annotLayer { cursor: text; }
-body.annot-drawing[data-annot-tool="replacetext"] .annotLayer { cursor: text; }
+body.annot-drawing[data-annot-tool="edittext"] .annotLayer { cursor: text; }
 .annot {
   position: absolute;
   pointer-events: auto;
@@ -1534,6 +1538,34 @@ body:not(.annot-editing) .annot.link { border-color: transparent; background: tr
 .annot-handle[data-h="e"], .annot-handle[data-h="w"] { cursor: ew-resize; }
 .annot-handle[data-h="p0"], .annot-handle[data-h="p1"] { cursor: move; border-radius: 50%; }
 .annot-draft { position: absolute; pointer-events: none; }
+
+/* Edit text: the page's paragraphs outlined, the one under the pointer
+   picked out; an edited paragraph's old words hidden until the save takes
+   them out; its new lines set where the save will set them. */
+.te-block {
+  position: absolute;
+  border: 1px dashed rgba(37, 99, 235, 0.45);
+  border-radius: 3px;
+  pointer-events: none;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.te-block.hover { border: 1.5px solid rgba(37, 99, 235, 0.9); background: rgba(37, 99, 235, 0.05); }
+.te-cover { position: absolute; background: #fff; pointer-events: none; }
+.annot.textedit { cursor: text; }
+.annot.textedit > div { overflow: visible; }
+.annot.textedit .te-body { overflow: visible; }
+.te-line { position: absolute; white-space: pre; line-height: 1; }
+.te-editor {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  outline: none;
+  user-select: text;
+  cursor: text;
+  caret-color: #2563eb;
+}
+.te-editor sup { font-size: 65%; vertical-align: baseline; position: relative; top: -0.5em; }
+body[data-annot-tool="edittext"] .annot.textedit:not(.selected) { outline: 1px dashed rgba(37, 99, 235, 0.45); outline-offset: 2px; }
+.annot.textedit.editing { outline: 1.5px solid #2563eb; outline-offset: 3px; }
 .annot-draft svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 
 /* A sticky note's popup: the comment itself, beside its icon. */

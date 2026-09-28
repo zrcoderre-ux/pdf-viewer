@@ -26,6 +26,7 @@ import {
 } from "./highlights.js";
 import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWatermark, splitPdf, appendImagesAsPages, fillForm, inspectDocument, buildRedactedPdf } from "./pdf-edit.js";
 import * as Annots from "./annotations.js";
+import { findTextBlocks, fontStyleFromName } from "./pdf-text-edit.js";
 import { hydrateIcons, setIcon, icon } from "./icons.js";
 import { toggleMenu, closeMenus, contextMenu, toast, dialogOpen, menuIsOpen, promptDialog } from "./ui.js";
 import { createFind } from "./find.js";
@@ -1611,10 +1612,15 @@ async function saveEditedPdf() {
   saveEditsEl.disabled = true;
   try {
     statusEl.textContent = "Saving…";
+    const report = {};
     let edited = await buildEditedPdf({
       srcBytes: pdfBytes.slice(0),
       annotations: annotationSaveData(),
+      report,
     });
+    if (report.covered) {
+      toast(`${report.covered} edited paragraph${report.covered === 1 ? "'s" : "s'"} old text could not be found in the file's text (it may be drawn as shapes) and was painted over instead.`, { timeout: 8000 });
+    }
     // Rotation the user applied on screen is part of "my edits" too, so Save
     // writes it into the file rather than leaving the page sideways on disk.
     const rotated = pageRotation.any();
@@ -4749,7 +4755,7 @@ function renderCommentsPanel() {
   Annots.renderComments(commentsListEl, commentsFilterEl ? commentsFilterEl.value : "");
 }
 function syncCommentsBadge() {
-  const n = Annots.all().filter((a) => a.type !== "link").length;
+  const n = Annots.all().filter((a) => a.type !== "link" && a.type !== "textedit").length;
   if (commentsBadgeEl) { commentsBadgeEl.hidden = !n; commentsBadgeEl.textContent = n > 99 ? "99+" : String(n); }
 }
 Annots.onChange((what = {}) => {
@@ -5750,7 +5756,7 @@ hydrateIcons();
 // Which permission each tool needs, when the document's security restricts
 // what can be done with it (features.js: allowed / guard).
 function permissionFor(tool) {
-  if (["replacetext", "image", "whiteout", "link"].includes(tool)) return "modify";
+  if (["edittext", "image", "whiteout", "link"].includes(tool)) return "modify";
   if (["signature", "initials", "typewriter", "check", "cross", "date"].includes(tool)) return "fill";
   return "annotate";
 }
@@ -5762,6 +5768,8 @@ Annots.init({
   status: (m) => { if (m) toast(m, { timeout: 2200 }); },
   canUse: (tool) => Features.guard(permissionFor(tool)),
   pickImageFor: (kind) => (kind === "image" ? pickImage() : pickSignature(kind)),
+  getTextBlocks: textBlocksForPage,
+  sampleTextColor,
 });
 setMarkupSink((pn, rects, kind, text) => (Features.guard("annotate") ? Annots.createMarkup(pn, rects, kind, text) : null));
 
@@ -5968,11 +5976,49 @@ for (const g of document.querySelectorAll("#tools-rail .tool-group")) {
 }
 restoreGroupState();
 
+// ── Edit text: the page's paragraphs, and the colour they are printed in ────
+async function textBlocksForPage(pn) {
+  if (!pdfDoc) return [];
+  const page = await pdfDoc.getPage(pn);
+  const tc = await page.getTextContent();
+  // A font's name reaches this side once the page has been drawn; a page not
+  // drawn yet is read through first.
+  if (Object.keys(tc.styles).some((f) => !page.commonObjs.has(f))) await page.getOperatorList();
+  const fontInfo = (fn) => {
+    let f = null;
+    try { if (page.commonObjs.has(fn)) f = page.commonObjs.get(fn); } catch { f = null; }
+    return fontStyleFromName(f && f.name, { generic: (f && f.fallbackName) || (tc.styles[fn] || {}).fontFamily || "" });
+  };
+  return findTextBlocks(tc.items, { fontInfo, pageBox: page.view });
+}
+function sampleTextColor(pn, rect) {
+  const w = pageWrapperFor(pn);
+  const c = w && w.querySelector("canvas");
+  const vp = pageViewportByNum.get(pn);
+  if (!c || !c.width || !vp) return null;
+  const [ax, ay, bx, by] = vp.convertToViewportRectangle(rect);
+  const k = c.width / vp.width;
+  const l = Math.max(0, Math.floor(Math.min(ax, bx) * k)), t = Math.max(0, Math.floor(Math.min(ay, by) * k));
+  const wd = Math.min(c.width - l, Math.ceil(Math.abs(bx - ax) * k)), ht = Math.min(c.height - t, Math.ceil(Math.abs(by - ay) * k));
+  if (wd <= 0 || ht <= 0) return null;
+  let data;
+  try { data = c.getContext("2d").getImageData(l, t, wd, ht).data; } catch { return null; }
+  let best = null, bestSum = 766;
+  for (let i = 0; i < data.length; i += 8) {
+    const sum = data[i] + data[i + 1] + data[i + 2];
+    if (sum < bestSum) { bestSum = sum; best = [data[i], data[i + 1], data[i + 2]]; }
+  }
+  if (!best || bestSum > 600) return null;
+  // Near-black type is black; the darkest pixel of anti-aliased text is not quite.
+  if (Math.max(...best) - Math.min(...best) < 40 && bestSum < 210) return [0, 0, 0];
+  return best.map((v) => v / 255);
+}
+
 // ── Keyboard ─────────────────────────────────────────────────────────────────
 function typingTarget(t) {
   return !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 }
-const TOOL_KEYS = { h: "highlight", u: "underline", k: "strikeout", n: "note", t: "freetext", d: "ink" };
+const TOOL_KEYS = { h: "highlight", u: "underline", k: "strikeout", n: "note", t: "freetext", d: "ink", e: "edittext" };
 document.addEventListener("keydown", (e) => {
   if (Features.isPresenting()) return;
   const mod = e.ctrlKey || e.metaKey;

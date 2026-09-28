@@ -101,6 +101,7 @@
         "viewer/pdf-crypt.js",
         "viewer/textlayout.js",
         "viewer/zip.js",
+        "viewer/pdf-text-edit.js",
         "viewer/vendor/pdf-lib/pdf-lib.esm.min.js",
         "viewer/vendor/tesseract/tesseract.esm.min.js",
         "viewer/vendor/tesseract/worker.min.js",

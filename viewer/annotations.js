@@ -17,6 +17,7 @@ import {
   quadForRect, quadBox, markupEdge, arrowHead, lineRect, inkRect,
   uprightSize, FREETEXT_PAD, LINE_HEIGHT,
 } from "./annot-pdf.js";
+import { layoutEdit, SUP_SCALE, SUP_RISE } from "./pdf-text-edit.js";
 
 // ── Tools ────────────────────────────────────────────────────────────────────
 
@@ -45,13 +46,13 @@ const TOOLS = {
   date:        { label: "Date", type: "typewriter", props: ["color", "fontSize", "font"], hint: "Click to place today's date" },
   image:       { label: "Image", type: "image", props: [], hint: "Click to place the image, or drag to size it" },
   whiteout:    { label: "Whiteout", type: "whiteout", props: [], hint: "Drag over what should be covered" },
-  replacetext: { label: "Edit text", type: "freetext", props: ["color", "fontSize", "font"], hint: "Click a line of text to type over it" },
+  edittext:    { label: "Edit text", type: "textedit", sticky: true, props: [], hint: "Click a paragraph to edit it · Ctrl+B bold · Ctrl+I italic · Esc when done" },
   link:        { label: "Link", type: "link", props: [], hint: "Drag a box over what should be clickable" },
 };
 const TYPE_LABEL = {
   highlight: "Highlight", underline: "Underline", strikeout: "Strikethrough", note: "Note", freetext: "Text box",
   typewriter: "Text", ink: "Drawing", square: "Rectangle", circle: "Ellipse", whiteout: "Whiteout", line: "Line",
-  arrow: "Arrow", stamp: "Stamp", symbol: "Mark", image: "Image", link: "Link",
+  arrow: "Arrow", stamp: "Stamp", symbol: "Mark", image: "Image", link: "Link", textedit: "Edited text",
 };
 const TYPE_PROPS = {
   highlight: ["color", "opacity"], underline: ["color"], strikeout: ["color"], note: ["color"],
@@ -59,6 +60,7 @@ const TYPE_PROPS = {
   ink: ["color", "width", "opacity"], square: ["color", "width", "fill", "opacity"],
   circle: ["color", "width", "fill", "opacity"], whiteout: [], line: ["color", "width", "opacity"],
   arrow: ["color", "width", "opacity"], stamp: ["color", "opacity"], symbol: ["color"], image: ["opacity"], link: [],
+  textedit: ["style", "color", "fontSize", "font"],
 };
 const DEFAULTS = {
   highlight: { color: "#ffd400", opacity: 1 },
@@ -76,7 +78,6 @@ const DEFAULTS = {
   stamp: { color: "", opacity: 1, stamp: "APPROVED" },
   check: { color: "#111827" },
   cross: { color: "#111827" },
-  replacetext: { color: "#111827", fontSize: 11, font: "serif" },
 };
 const STAMP_COLORS = {
   "APPROVED": "#15803d", "COMPLETED": "#15803d", "FINAL": "#15803d", "REVIEWED": "#15803d", "RECEIVED": "#15803d",
@@ -97,7 +98,9 @@ let selectedId = null;
 let tool = null;                 // key of TOOLS, or null
 let pendingImage = null;         // { data, format, w, h, role } waiting to be placed
 let inkSession = null;           // { id, page } strokes drawn in this tool session
-let editingId = null;            // freetext being typed into
+let editingId = null;            // freetext (or text edit) being typed into
+const blockCache = new Map();    // page -> { blocks, promise }: its paragraphs, for Edit text
+const scanNoticeShown = new Set();
 const history = [];
 const future = [];
 let editSeq = 0, savedSeq = 0;
@@ -189,7 +192,8 @@ function scaleInto(a, nr) {
 
 function clone(a) {
   const c = { ...a };
-  for (const k of ["rect", "color", "fill", "borderColor", "line"]) if (Array.isArray(a[k])) c[k] = a[k].slice();
+  for (const k of ["rect", "color", "fill", "borderColor", "line", "orig"]) if (Array.isArray(a[k])) c[k] = a[k].slice();
+  if (a.runs) c.runs = a.runs.map((r) => ({ ...r }));
   if (a.quads) c.quads = a.quads.map((q) => q.slice());
   if (a.inkList) c.inkList = a.inkList.map((p) => p.slice());
   return c;
@@ -453,6 +457,12 @@ function renderAnnot(a, pn) {
     case "link":
       el.title = a.url ? a.url : a.destPage ? `Go to page ${a.destPage}` : "Link";
       break;
+    case "textedit": {
+      const { inner } = uprightBox(el, a, pn);
+      inner.classList.add("te-body");
+      paintTextLines(inner, a, s);
+      break;
+    }
   }
 
   if (a.id === selectedId) {
@@ -474,7 +484,7 @@ function renderAnnot(a, pn) {
   return el;
 }
 
-const RESIZABLE = new Set(["freetext", "typewriter", "square", "circle", "whiteout", "stamp", "symbol", "image", "link", "ink"]);
+const RESIZABLE = new Set(["freetext", "typewriter", "square", "circle", "whiteout", "stamp", "symbol", "image", "link", "ink", "textedit"]);
 function addHandles(el, a, pn, box) {
   if (a.type === "line" || a.type === "arrow") {
     const [x0, y0] = viewPt(pn, a.line[0], a.line[1]);
@@ -490,7 +500,7 @@ function addHandles(el, a, pn, box) {
     return;
   }
   if (!RESIZABLE.has(a.type)) return;
-  const hs = a.type === "typewriter" ? ["e", "w"] : ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+  const hs = a.type === "typewriter" || a.type === "textedit" ? ["e", "w"] : ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
   for (const h of hs) {
     const d = document.createElement("div");
     d.className = "annot-handle";
@@ -518,6 +528,16 @@ export function paintPage(pn) {
     if (live && a.id === editingId) continue;
     p.layer.insertBefore(renderAnnot(a, pn), first);
   }
+  // An edited paragraph's old words are hidden on screen until the save
+  // takes them out of the file.
+  for (const a of annots.values()) {
+    if (a.page !== pn || a.type !== "textedit") continue;
+    const c = document.createElement("div");
+    c.className = "te-cover";
+    place(c, viewBox(pn, a.orig));
+    p.layer.insertBefore(c, p.layer.firstChild);
+  }
+  if (tool === "edittext") paintBlocks(pn);
 }
 export function paintAll() { for (const pn of pages.keys()) paintPage(pn); }
 
@@ -528,6 +548,13 @@ export function attachPage(pn, wrapper, layer) {
   pages.set(pn, { wrapper, layer, editingEl: null });
   layer.dataset.page = String(pn);
   layer.addEventListener("pointerdown", (e) => onLayerDown(e, pn, layer));
+  layer.addEventListener("pointermove", (e) => {
+    if (tool !== "edittext") return;
+    const pt = layerPoint(e, layer);
+    const [x, y] = pdfPt(pn, pt.x, pt.y);
+    const b = blockAt(pn, x, y);
+    for (const d of layer.querySelectorAll(".te-block")) d.classList.toggle("hover", d.__block === b);
+  });
   // A click on a markup (which never takes the pointer itself, so the text
   // under it stays selectable) selects it, when it is a click and not a drag.
   let down = null;
@@ -545,7 +572,11 @@ export function attachPage(pn, wrapper, layer) {
   paintPage(pn);
 }
 
-export function detachAll() { pages.clear(); }
+export function detachAll() {
+  // A zoom rebuilds every page: text being typed is kept, not dropped.
+  if (editingId) finishEditing();
+  pages.clear();
+}
 
 function markupAt(pn, x, y) {
   const list = [...annots.values()].filter((a) => a.page === pn && a.quads).reverse();
@@ -591,8 +622,9 @@ export function selected() { return selectedId ? annots.get(selectedId) : null; 
 function wireAnnot(el, a, pn) {
   el.addEventListener("pointerdown", (e) => {
     if (e.button !== 0) return;
-    // A drawing tool draws over whatever is there; markup tools select.
-    if (tool && !TOOLS[tool].markup) return;
+    // A drawing tool draws over whatever is there; markup tools select. In
+    // Edit text an edited paragraph is clicked into (or dragged, or resized).
+    if (tool && !TOOLS[tool].markup && !(tool === "edittext" && a.type === "textedit")) return;
     const handle = e.target.closest(".annot-handle");
     if (editingId === a.id && !handle) return; // clicks inside the text being typed
     e.stopPropagation();
@@ -602,7 +634,7 @@ function wireAnnot(el, a, pn) {
   });
   el.addEventListener("dblclick", (e) => {
     e.stopPropagation();
-    if (a.type === "freetext" || a.type === "typewriter") startEditing(a.id);
+    if (a.type === "freetext" || a.type === "typewriter" || a.type === "textedit") startEditing(a.id, { clientX: e.clientX, clientY: e.clientY });
     else if (a.type === "note") openNotePopup(a.id);
     else if (a.type === "link") editLink(a);
     else if (a.type === "stamp") editStampLabel(a);
@@ -657,13 +689,16 @@ function startDrag(e, a, pn, handle) {
     touch(target);
     paintPage(pn);
   };
-  const onUp = () => {
+  const onUp = (ev) => {
     window.removeEventListener("pointermove", onMove, true);
     window.removeEventListener("pointerup", onUp, true);
     if (moved) {
       const t = annots.get(a.id);
       if (t && (t.type === "freetext") && handle && handle !== "p0" && handle !== "p1") fitTextHeight(t, pn);
+      if (t && t.type === "textedit") relayout(t);
       changed({ page: pn });
+    } else if (a.type === "textedit" && tool === "edittext" && !handle) {
+      startEditing(a.id, { clientX: ev.clientX, clientY: ev.clientY });
     }
   };
   window.addEventListener("pointermove", onMove, true);
@@ -696,7 +731,7 @@ function onLayerDown(e, pn, layer) {
   const s = scaleOf(pn);
   const R = rotationOf(pn);
 
-  if (tool === "replacetext") { replaceTextAt(e, pn); return; }
+  if (tool === "edittext") { editTextAt(e, pn, start); return; }
   if (tool === "ink") { drawInk(e, pn, layer, start); return; }
 
   const click = new Set(["note", "typewriter", "date", "check", "cross", "signature", "initials"]);
@@ -1021,58 +1056,334 @@ function simplify(pts, eps) {
   return pts.filter((_, i) => keep[i]);
 }
 
-// "Edit text": the line under the click is covered by a white text box that
-// starts out holding the same words, in about the same size and face.
-function replaceTextAt(e, pn) {
+// ── Edit text: the document's own paragraphs ─────────────────────────────────
+//
+// In Edit text the page's paragraphs are outlined; a click opens one for
+// typing, where it reflows in its box as it would in a word processor. The
+// edit is a "textedit" in the set (so undo, moving and resizing work as for
+// anything else) and is not an annotation: a save takes the paragraph's old
+// glyphs out of the page and writes the new text in (pdf-text-edit.js). The
+// lines on screen are laid out by the same function the save uses.
+
+function ensureBlocks(pn) {
+  const c = blockCache.get(pn);
+  if (c && c.blocks) return Promise.resolve(c.blocks);
+  if (c && c.promise) return c.promise;
+  const promise = Promise.resolve(host.getTextBlocks ? host.getTextBlocks(pn) : [])
+    .catch((e) => { console.warn("[annotations] paragraphs unreadable:", e); return []; })
+    .then((blocks) => { blockCache.set(pn, { blocks: blocks || [] }); return blocks || []; });
+  blockCache.set(pn, { promise });
+  return promise;
+}
+const overlap = (r, q) => {
+  const w = Math.min(r[2], q[2]) - Math.max(r[0], q[0]), h = Math.min(r[3], q[3]) - Math.max(r[1], q[1]);
+  return w > 0 && h > 0 ? w * h : 0;
+};
+const area = (r) => Math.max(0, r[2] - r[0]) * Math.max(0, r[3] - r[1]);
+function editFor(pn, block) {
+  return [...annots.values()].find((a) => a.page === pn && a.type === "textedit" && overlap(a.orig, block.orig) > 0.5 * Math.min(area(a.orig), area(block.orig)));
+}
+function paintBlocks(pn) {
   const p = pages.get(pn);
-  const hits = document.elementsFromPoint(e.clientX, e.clientY);
-  const span = hits.find((el) => el.tagName === "SPAN" && el.closest(".textLayer") && p.wrapper.contains(el) && el.textContent.trim());
-  if (!span) { host.status("Click on a line of text to edit it."); return; }
-  const tl = span.closest(".textLayer");
-  const base = span.getBoundingClientRect();
-  const lineSpans = [...tl.querySelectorAll("span")].filter((sp) => {
-    if (!sp.textContent) return false;
-    const r = sp.getBoundingClientRect();
-    return Math.abs((r.top + r.bottom) / 2 - (base.top + base.bottom) / 2) < base.height * 0.35 && r.height < base.height * 1.6;
-  }).sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-  // Only the run of spans touching the clicked one: a gap wider than a few
-  // characters is another column.
-  const rects = lineSpans.map((sp) => ({ sp, r: sp.getBoundingClientRect() }));
-  let i0 = rects.findIndex((x) => x.sp === span), i1 = i0;
-  const gapMax = base.height * 1.8;
-  while (i0 > 0 && rects[i0].r.left - rects[i0 - 1].r.right < gapMax) i0--;
-  while (i1 < rects.length - 1 && rects[i1 + 1].r.left - rects[i1].r.right < gapMax) i1++;
-  const run = rects.slice(i0, i1 + 1);
-  let text = "";
-  run.forEach((x, k) => {
-    if (k) text += x.r.left - run[k - 1].r.right > base.height * 0.12 && !/\s$/.test(text) ? " " : "";
-    text += x.sp.textContent;
+  const c = blockCache.get(pn);
+  if (!c || !c.blocks) {
+    ensureBlocks(pn).then(() => { if (tool === "edittext") paintPage(pn); });
+    return;
+  }
+  for (const b of c.blocks) {
+    if (editFor(pn, b)) continue;
+    const d = document.createElement("div");
+    d.className = "te-block";
+    d.__block = b;
+    place(d, viewBox(pn, [b.orig[0] - 2, b.orig[1] - 1, b.orig[2] + 2, b.orig[3] + 1]));
+    p.layer.appendChild(d);
+  }
+}
+function blockAt(pn, x, y) {
+  const c = blockCache.get(pn);
+  const list = (c && c.blocks) || [];
+  return list.find((b) => x >= b.orig[0] - 2 && x <= b.orig[2] + 2 && y >= b.orig[1] - 1 && y <= b.orig[3] + 1) || null;
+}
+
+// Where the baseline sits in a line box of line-height 1, as a share of the
+// font size, for a CSS font family — measured once.
+const baselineCache = new Map();
+function baselineRatio(family) {
+  if (baselineCache.has(family)) return baselineCache.get(family);
+  const d = document.createElement("div");
+  d.style.cssText = `position:absolute;visibility:hidden;left:-9999px;top:0;font-size:100px;line-height:1;white-space:nowrap;font-family:${family}`;
+  d.innerHTML = 'Hg<span style="display:inline-block;width:0;height:0;vertical-align:baseline"></span>';
+  document.body.appendChild(d);
+  const r = d.lastChild.offsetTop / 100 || 0.8;
+  d.remove();
+  baselineCache.set(family, r);
+  return r;
+}
+function styleSpan(seg, size, s) {
+  const sp = document.createElement("span");
+  sp.textContent = seg.text;
+  if (seg.bold) sp.style.fontWeight = "700";
+  if (seg.italic) sp.style.fontStyle = "italic";
+  if (seg.sup) {
+    sp.style.fontSize = `${size * SUP_SCALE * s}px`;
+    sp.style.position = "relative";
+    sp.style.top = `${-size * SUP_RISE * s}px`;
+  }
+  return sp;
+}
+function paintTextLines(inner, a, s) {
+  const L = layoutEdit(a);
+  const fam = FONT_CSS[a.font] || FONT_CSS.serif;
+  const size = a.fontSize || 12;
+  const ratio = baselineRatio(fam);
+  inner.style.color = css(a.color || [0, 0, 0]);
+  L.lines.forEach((line, i) => {
+    const div = document.createElement("div");
+    div.className = "te-line";
+    const baseY = (a.rect[3] - (L.firstBaseline - i * L.lineHeight)) * s;
+    div.style.left = `${line.x * s}px`;
+    div.style.top = `${baseY - ratio * size * s}px`;
+    div.style.fontFamily = fam;
+    div.style.fontSize = `${size * s}px`;
+    if (line.wordSpacing) div.style.wordSpacing = `${line.wordSpacing * s}px`;
+    for (const seg of line.segs) div.appendChild(styleSpan(seg, size, s));
+    inner.appendChild(div);
   });
-  const lr = p.layer.getBoundingClientRect();
-  const left = Math.min(...run.map((x) => x.r.left)) - lr.left;
-  const right = Math.max(...run.map((x) => x.r.right)) - lr.left;
-  const top = Math.min(...run.map((x) => x.r.top)) - lr.top;
-  const bottom = Math.max(...run.map((x) => x.r.bottom)) - lr.top;
-  const s = scaleOf(pn);
-  const size = Math.max(4, Math.round(((bottom - top) / s) * 0.92 * 2) / 2);
-  const fam = (span.style.fontFamily || "").toLowerCase();
-  const font = fam.includes("mono") ? "mono" : fam.includes("sans") ? "sans" : fam.includes("serif") ? "serif" : (toolPref("replacetext", "font") || "serif");
-  const pad = FREETEXT_PAD.typewriter;
-  const h = size * LINE_HEIGHT + 2 * pad;
-  const cy = (top + bottom) / 2;
-  const rect = pdfRect(pn, left - (pad + 1.5) * s, cy - (h * s) / 2, right + (pad + 3) * s, cy + (h * s) / 2);
-  pushHistory();
+}
+function relayout(a) {
+  if (a.type !== "textedit") return;
+  a.rect = layoutEdit(a).rect;
+}
+
+/** A click in Edit text: into an edit already made, or a new one from the paragraph under it. */
+async function editTextAt(e, pn, pt) {
+  const [x, y] = pdfPt(pn, pt.x, pt.y);
+  const at = { clientX: e.clientX, clientY: e.clientY };
+  const here = [...annots.values()].reverse().find((a) => a.page === pn && a.type === "textedit"
+    && x >= a.rect[0] && x <= a.rect[2] && y >= a.rect[1] && y <= a.rect[3]);
+  if (here) { startEditing(here.id, at); return; }
+  if (editingId) finishEditing();
+  await ensureBlocks(pn);
+  if (tool !== "edittext") return;
+  const b = blockAt(pn, x, y);
+  if (!b) {
+    if (selectedId) select(null);
+    const c = blockCache.get(pn);
+    if (c && c.blocks && !c.blocks.length && !scanNoticeShown.has(pn)) {
+      scanNoticeShown.add(pn);
+      host.status("This page has no text of its own to edit — it is a scanned image. Use Whiteout and Add text to change it.");
+    }
+    return;
+  }
+  const done = editFor(pn, b);
+  if (done) { startEditing(done.id, at); return; }
+  const color = host.sampleTextColor ? host.sampleTextColor(pn, b.orig) : null;
   const a = add({
-    page: pn, type: "freetext", rect, text: text.trim(), fontSize: size, font,
-    color: currentColor("replacetext"), borderColor: null, width: 0, fill: [1, 1, 1], rotate: rotationOf(pn), replaced: text.trim(),
+    page: pn, type: "textedit", rect: b.rect.slice(), orig: b.orig.slice(),
+    runs: b.runs.map((r) => ({ ...r })), origRuns: JSON.stringify(b.runs),
+    font: b.font, fontSize: b.fontSize, lineHeight: b.lineHeight, indent: b.indent, align: b.align,
+    color: color || [0, 0, 0], colorAuto: true, fresh: true, origText: b.text,
   });
-  afterCreate(a, { edit: true });
+  relayout(a);
+  selectedId = a.id;
+  paintPage(pn);
+  startEditing(a.id, at);
+}
+
+function runsToNodes(runs) {
+  const out = [];
+  for (const r of runs || []) {
+    const parts = String(r.text || "").split("\n");
+    parts.forEach((t, i) => {
+      if (i) out.push(document.createElement("br"));
+      if (!t) return;
+      let node = document.createTextNode(t);
+      if (r.sup) { const el = document.createElement("sup"); el.appendChild(node); node = el; }
+      if (r.italic) { const el = document.createElement("i"); el.appendChild(node); node = el; }
+      if (r.bold) { const el = document.createElement("b"); el.appendChild(node); node = el; }
+      out.push(node);
+    });
+  }
+  return out;
+}
+function runsFromEditor(ed) {
+  const runs = [];
+  let text = "";
+  const push = (t, st) => {
+    t = t.replace(/ /g, " ").replace(/​/g, "");
+    if (!t) return;
+    const last = runs[runs.length - 1];
+    if (last && !!last.bold === !!st.bold && !!last.italic === !!st.italic && !!last.sup === !!st.sup) last.text += t;
+    else runs.push({ text: t, bold: !!st.bold, italic: !!st.italic, sup: !!st.sup });
+    text += t;
+  };
+  const walk = (node, st) => {
+    for (const ch of node.childNodes) {
+      if (ch.nodeType === 3) { push(ch.data, st); continue; }
+      if (ch.nodeType !== 1) continue;
+      const tag = ch.tagName;
+      if (tag === "BR") { push("\n", st); continue; }
+      const cs = ch.style || {};
+      const n = { ...st };
+      if (tag === "B" || tag === "STRONG" || cs.fontWeight === "bold" || Number(cs.fontWeight) >= 600) n.bold = true;
+      if (cs.fontWeight === "normal" || Number(cs.fontWeight) && Number(cs.fontWeight) < 600) n.bold = false;
+      if (tag === "I" || tag === "EM" || cs.fontStyle === "italic") n.italic = true;
+      if (cs.fontStyle === "normal") n.italic = false;
+      if (tag === "SUP" || cs.verticalAlign === "super") n.sup = true;
+      if ((tag === "DIV" || tag === "P") && text && !text.endsWith("\n")) push("\n", st);
+      walk(ch, n);
+    }
+  };
+  walk(ed, { bold: false, italic: false, sup: false });
+  const last = runs[runs.length - 1];
+  if (last && last.text.endsWith("\n")) { last.text = last.text.slice(0, -1); if (!last.text) runs.pop(); }
+  return runs;
+}
+const runsKey = (runs) => JSON.stringify((runs || []).map((r) => [r.text, !!r.bold, !!r.italic, !!r.sup]));
+
+function startTextEditor(a, at) {
+  const id = a.id;
+  const p = pages.get(a.page);
+  if (!p) return;
+  if (editingId && editingId !== id) finishEditing();
+  if (editingId === id) return;
+  selectedId = id;
+  paintPage(a.page);
+  const el = p.layer.querySelector(`.annot[data-id="${id}"]`);
+  const inner = el && el.querySelector(".te-body");
+  if (!inner) return;
+  editingId = id;
+  p.editingEl = el;
+  el.classList.add("editing");
+  for (const h of el.querySelectorAll(".annot-handle")) h.style.display = "none";
+  inner.textContent = "";
+  const ed = document.createElement("div");
+  ed.className = "te-editor";
+  ed.contentEditable = "true";
+  ed.spellcheck = true;
+  ed.append(...runsToNodes(a.runs));
+  inner.appendChild(ed);
+  styleTextEditor(a, ed);
+  // The caret goes where the click was.
+  ed.focus({ preventScroll: true });
+  const sel = window.getSelection();
+  let range = null;
+  if (at && document.caretRangeFromPoint) range = document.caretRangeFromPoint(at.clientX, at.clientY);
+  if (!range || !ed.contains(range.startContainer)) { range = document.createRange(); range.selectNodeContents(ed); range.collapse(false); }
+  sel.removeAllRanges();
+  sel.addRange(range);
+  const before = clone(a);
+  let pushed = false;
+  const onInput = () => {
+    if (!pushed) {
+      // Undo takes a new edit away entirely, and an earlier one back to how it was.
+      history.push(a.fresh ? snapshot().filter((x) => x.id !== id) : [...snapshot().filter((x) => x.id !== id), before]);
+      future.length = 0;
+      pushed = true;
+    }
+    a.runs = runsFromEditor(ed);
+    touch(a);
+    editSeq++;
+  };
+  ed.addEventListener("input", onInput);
+  ed.__onInput = onInput;
+  ed.addEventListener("keydown", (ev) => {
+    // Save, print and find are the app's, typing or not.
+    if ((ev.ctrlKey || ev.metaKey) && /^[spf]$/i.test(ev.key)) return;
+    if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); finishEditing(); return; }
+    if (ev.key === "Enter" && !ev.ctrlKey && !ev.metaKey) { ev.preventDefault(); document.execCommand("insertLineBreak"); }
+    else if (ev.key === "Enter") { ev.preventDefault(); finishEditing(); }
+    ev.stopPropagation();
+  });
+  ed.addEventListener("paste", (ev) => {
+    ev.preventDefault();
+    const t = (ev.clipboardData || window.clipboardData).getData("text/plain");
+    document.execCommand("insertText", false, t.replace(/\r\n?/g, "\n"));
+  });
+  ed.addEventListener("blur", () => setTimeout(() => {
+    const act = document.activeElement;
+    if (editingId === id && act !== ed && !(act && act.closest && act.closest("#annot-bar"))) finishEditing();
+  }, 0));
+  syncBar();
+}
+/** Size, face and alignment of the editor, with its first baseline on the paragraph's. */
+function styleTextEditor(a, ed) {
+  const s = scaleOf(a.page);
+  const size = a.fontSize || 12;
+  Object.assign(ed.style, {
+    position: "absolute", left: "0", top: "0",
+    width: `${(a.rect[2] - a.rect[0]) * s}px`,
+    fontFamily: FONT_CSS[a.font] || FONT_CSS.serif,
+    fontSize: `${size * s}px`,
+    lineHeight: `${(a.lineHeight || size * 1.2) * s}px`,
+    textIndent: `${(a.indent || 0) * s}px`,
+    textAlign: a.align === "justify" ? "justify" : a.align || "left",
+    color: css(a.color || [0, 0, 0]),
+  });
+  const probe = document.createElement("span");
+  probe.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+  ed.insertBefore(probe, ed.firstChild);
+  const base = probe.offsetTop;
+  probe.remove();
+  ed.style.top = `${0.8 * size * s - base}px`;
+}
+function finishTextEdit(a) {
+  const p = pages.get(a.page);
+  const ed = p && p.editingEl && p.editingEl.querySelector(".te-editor");
+  if (ed) a.runs = runsFromEditor(ed);
+  // Opened and left as it was: no edit at all.
+  if (a.fresh && runsKey(a.runs) === runsKey(JSON.parse(a.origRuns || "[]")) && !a.restyled) {
+    annots.delete(a.id);
+    if (selectedId === a.id) selectedId = null;
+    changed({ page: a.page });
+    return;
+  }
+  delete a.fresh;
+  relayout(a);
+  changed({ page: a.page });
+}
+/** Bold or italic: on the selection while typing, on the whole paragraph otherwise. */
+function toggleTextStyle(kind) {
+  const a = selected();
+  if (!a || a.type !== "textedit") return;
+  if (editingId === a.id) {
+    const ed = pages.get(a.page)?.editingEl?.querySelector(".te-editor");
+    if (!ed) return;
+    ed.focus({ preventScroll: true });
+    document.execCommand(kind === "bold" ? "bold" : "italic");
+    if (ed.__onInput) ed.__onInput();
+    syncBar();
+    return;
+  }
+  pushHistory();
+  const on = !a.runs.every((r) => !r.text.trim() || r[kind]);
+  a.runs = a.runs.map((r) => ({ ...r, [kind]: on }));
+  delete a.fresh;
+  touch(a);
+  relayout(a);
+  changed({ page: a.page });
+}
+function setTextAlign(value) {
+  const a = selected();
+  if (!a || a.type !== "textedit") return;
+  pushHistory();
+  a.align = value;
+  a.restyled = true;
+  touch(a);
+  relayout(a);
+  if (editingId === a.id) {
+    const ed = pages.get(a.page)?.editingEl?.querySelector(".te-editor");
+    if (ed) { styleTextEditor(a, ed); ed.focus({ preventScroll: true }); }
+    editSeq++;
+    syncBar();
+  } else changed({ page: a.page });
 }
 
 // ── Typing into a text box ───────────────────────────────────────────────────
 
-export function startEditing(id) {
+export function startEditing(id, at = null) {
   const a = annots.get(id);
+  if (a && a.type === "textedit") { startTextEditor(a, at); return; }
   if (!a || (a.type !== "freetext" && a.type !== "typewriter")) return;
   const p = pages.get(a.page);
   if (!p) return;
@@ -1109,6 +1420,7 @@ export function startEditing(id) {
     editSeq++;
   });
   body.addEventListener("keydown", (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && /^[spf]$/i.test(ev.key)) return;
     if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); finishEditing(); }
     else if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); finishEditing(); }
     ev.stopPropagation();
@@ -1178,6 +1490,7 @@ export function finishEditing() {
   const a = annots.get(id);
   if (!a) return;
   const p = pages.get(a.page);
+  if (a.type === "textedit") { finishTextEdit(a); if (p) p.editingEl = null; paintPage(a.page); syncBar(); return; }
   if (p) p.editingEl = null;
   const empty = !String(a.text || "").trim();
   if (empty) {
@@ -1241,6 +1554,21 @@ function openNotePopup(id, { focus = true } = {}) {
 export function deleteAnnot(id) {
   const a = annots.get(id);
   if (!a) return;
+  if (a.type === "textedit") {
+    // Deleting an edited paragraph deletes the paragraph: its old words still
+    // go from the file, and nothing is written in their place. (Restore
+    // original text, on the right-click menu, takes the edit back instead.)
+    if (editingId === id) finishEditing();
+    const t = annots.get(id);
+    if (!t) return;
+    pushHistory();
+    t.runs = [];
+    delete t.fresh;
+    touch(t);
+    relayout(t);
+    changed({ page: t.page });
+    return;
+  }
   pushHistory();
   annots.delete(id);
   if (selectedId === id) selectedId = null;
@@ -1249,6 +1577,16 @@ export function deleteAnnot(id) {
   changed({ page: a.page });
 }
 export function deleteSelected() { if (selectedId) deleteAnnot(selectedId); }
+/** Take an edited paragraph's edit back: the page shows (and keeps) what it had. */
+export function restoreOriginal(id) {
+  const a = annots.get(id);
+  if (!a || a.type !== "textedit") return;
+  if (editingId === id) { editingId = null; const p = pages.get(a.page); if (p) p.editingEl = null; }
+  pushHistory();
+  annots.delete(id);
+  if (selectedId === id) selectedId = null;
+  changed({ page: a.page });
+}
 
 function applyProp(key, value) {
   const a = selected();
@@ -1273,7 +1611,13 @@ function applyProp(key, value) {
       if (a.inkList) a.rect = inkRect(a.inkList, a.width);
       break;
     case "opacity": a.opacity = Number(value) / 100; break;
-    case "fontSize": a.fontSize = Number(value); if (a.type === "freetext") fitTextHeight(a, a.page); break;
+    case "fontSize": {
+      const next = Number(value);
+      if (a.type === "textedit" && a.fontSize) a.lineHeight = (a.lineHeight || a.fontSize * 1.2) * (next / a.fontSize);
+      a.fontSize = next;
+      if (a.type === "freetext") fitTextHeight(a, a.page);
+      break;
+    }
     case "font": a.font = value; break;
     case "fill":
       a.fill = value ? (a.type === "freetext" ? [1, 1, 1] : tint(a.color || [0, 0, 0])) : null;
@@ -1281,6 +1625,19 @@ function applyProp(key, value) {
     case "stamp":
       if (a.type === "stamp" && value !== "__custom") { a.label = value; if (STAMP_COLORS[value]) a.color = hexToRgb(STAMP_COLORS[value]); }
       break;
+  }
+  if (a.type === "textedit") {
+    if (key === "color") a.colorAuto = false;
+    a.restyled = true;
+    relayout(a);
+    if (editingId === a.id) {
+      touch(a);
+      editSeq++;
+      const ed = pages.get(a.page)?.editingEl?.querySelector(".te-editor");
+      if (ed) { styleTextEditor(a, ed); ed.focus({ preventScroll: true }); }
+      syncBar();
+      return;
+    }
   }
   touch(a);
   changed({ page: a.page });
@@ -1324,6 +1681,7 @@ function barEls() {
     fill: $("annot-fill"), fillWrap: $("annot-fill-wrap"),
     stamp: $("annot-stamp"), stampWrap: $("annot-stamp-wrap"),
     hint: $("annot-hint"), del: $("annot-delete"), done: $("annot-done"),
+    styleWrap: $("annot-style-wrap"), bold: $("annot-bold"), italic: $("annot-italic"), align: $("annot-align"),
   };
   if (!bar.root) return bar;
   for (const hex of PALETTE) {
@@ -1357,6 +1715,14 @@ function barEls() {
     syncBar();
   });
   bar.del.addEventListener("click", () => deleteSelected());
+  if (bar.bold) {
+    // These keep the focus (and the selection) in the text being typed.
+    for (const [btn, kind] of [[bar.bold, "bold"], [bar.italic, "italic"]]) {
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => toggleTextStyle(kind));
+    }
+    bar.align.addEventListener("change", () => setTextAlign(bar.align.value));
+  }
   bar.done.addEventListener("click", () => { finishEditing(); setTool(null); select(null); });
   bar.root.addEventListener("pointerdown", (e) => e.stopPropagation());
   return bar;
@@ -1369,9 +1735,13 @@ function syncBar() {
   const t = tool;
   if (!t && !a) { b.root.hidden = true; return; }
   b.root.hidden = false;
-  const props = t ? TOOLS[t].props : (TYPE_PROPS[a.type] || []);
-  b.label.textContent = t ? TOOLS[t].label : TYPE_LABEL[a.type] || "Annotation";
-  b.hint.textContent = t ? TOOLS[t].hint : a.type === "freetext" || a.type === "typewriter" ? "Double-click to edit the text" : a.type === "note" ? "Double-click to open" : "";
+  // In Edit text, a paragraph being edited shows its own properties.
+  const own = a && (!t || (t === "edittext" && a.type === "textedit"));
+  const props = own ? (TYPE_PROPS[a.type] || []) : TOOLS[t].props;
+  b.label.textContent = own ? TYPE_LABEL[a.type] || "Annotation" : TOOLS[t].label;
+  b.hint.textContent = !own ? TOOLS[t].hint
+    : a.type === "textedit" ? (editingId === a.id ? "Ctrl+B bold · Ctrl+I italic · Esc when done" : t ? "Click to edit · drag an edge to rewrap" : "Double-click to edit · drag an edge to rewrap")
+    : a.type === "freetext" || a.type === "typewriter" ? "Double-click to edit the text" : a.type === "note" ? "Double-click to open" : "";
   b.hint.hidden = !b.hint.textContent;
   const has = (k) => props.includes(k);
   b.colors.hidden = !has("color");
@@ -1381,6 +1751,24 @@ function syncBar() {
   b.fontWrap.hidden = !has("font");
   b.fillWrap.hidden = !has("fill");
   b.stampWrap.hidden = !has("stamp");
+  if (b.styleWrap) {
+    b.styleWrap.hidden = !has("style");
+    if (a && a.type === "textedit") {
+      let bold = false, italic = false;
+      const sel = window.getSelection();
+      if (editingId === a.id && sel && sel.rangeCount) {
+        bold = document.queryCommandState("bold");
+        italic = document.queryCommandState("italic");
+      } else {
+        const words = (a.runs || []).filter((r) => r.text.trim());
+        bold = words.length > 0 && words.every((r) => r.bold);
+        italic = words.length > 0 && words.every((r) => r.italic);
+      }
+      b.bold.setAttribute("aria-pressed", String(bold));
+      b.italic.setAttribute("aria-pressed", String(italic));
+      b.align.value = a.align || "left";
+    }
+  }
   b.del.hidden = !a;
   let color, width, opacity, size, font, fill, stamp;
   if (a) {
@@ -1412,12 +1800,14 @@ export async function setTool(name, { keepSelection = false } = {}) {
   if (name && host && host.canUse && !host.canUse(name)) return;
   if (editingId) finishEditing();
   if (tool === "ink" || name !== "ink") inkSession = null;
+  const prevTool = tool;
   tool = name && TOOLS[name] ? name : null;
   if (!keepSelection && tool) select(null);
   document.body.classList.toggle("annot-drawing", !!tool && !TOOLS[tool].markup);
   document.body.classList.toggle("annot-markup", !!tool && !!TOOLS[tool].markup);
   document.body.classList.toggle("annot-editing", !!(selectedId || tool));
   if (tool) document.body.dataset.annotTool = tool; else delete document.body.dataset.annotTool;
+  if (tool === "edittext" || prevTool === "edittext") paintAll();
   for (const btn of document.querySelectorAll("[data-tool]")) btn.setAttribute("aria-pressed", String(btn.dataset.tool === tool));
   syncBar();
   for (const fn of listeners) { try { fn({ tool: true }); } catch { /* listener */ } }
@@ -1481,6 +1871,7 @@ export function createMarkup(pn, clientRects, kind = "highlight", quote = "") {
 /** Replace the set with what was read from a newly opened file. */
 export function load(list = []) {
   annots.clear();
+  blockCache.clear();
   importedRefs = new Set();
   for (const a of list) {
     const m = { ...a, id: a.id || newId(), dirty: false };
@@ -1515,7 +1906,9 @@ export function hasChanges() {
 export function hasUnsaved() { return editSeq !== savedSeq && hasChanges(); }
 export function markSaved() { savedSeq = editSeq; }
 export function all() { return [...annots.values()]; }
-export function count() { return annots.size; }
+export function count() { return [...annots.values()].filter((a) => a.type !== "textedit").length; }
+/** The paragraphs edited and not yet saved. */
+export function textEditCount() { return [...annots.values()].filter((a) => a.type === "textedit").length; }
 export function refsToHide() { return [...importedRefs]; }
 
 export function undo() {
@@ -1557,7 +1950,7 @@ function onKey(e) {
   }
   if (!a) return;
   if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelected(); return; }
-  if (e.key === "Enter" && (a.type === "freetext" || a.type === "typewriter")) { e.preventDefault(); startEditing(a.id); return; }
+  if (e.key === "Enter" && (a.type === "freetext" || a.type === "typewriter" || a.type === "textedit")) { e.preventDefault(); startEditing(a.id); return; }
   if (/^Arrow/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && !a.quads) {
     e.preventDefault();
     e.stopPropagation();
@@ -1592,6 +1985,14 @@ function onContextMenu(e) {
   e.stopPropagation();
   select(a.id);
   const items = [];
+  if (a.type === "textedit") {
+    items.push({ label: "Edit text", icon: "text-cursor", action: () => startEditing(a.id) });
+    items.push({ label: "Restore original text", icon: "undo", action: () => restoreOriginal(a.id) });
+    items.push("-");
+    items.push({ label: "Delete paragraph", icon: "trash", danger: true, kbd: "Del", action: () => deleteAnnot(a.id) });
+    contextMenu(e.clientX, e.clientY, items);
+    return;
+  }
   if (a.type === "freetext" || a.type === "typewriter") items.push({ label: "Edit text", icon: "type", action: () => startEditing(a.id) });
   if (a.type === "link") items.push({ label: "Edit link…", icon: "link", action: () => editLink(a) });
   if (a.type === "stamp") items.push({ label: "Change stamp text…", icon: "stamp", action: () => editStampLabel(a) });
@@ -1634,7 +2035,7 @@ export function renderComments(listEl, query = "") {
   if (!listEl) return;
   const q = query.trim().toLowerCase();
   const items = [...annots.values()]
-    .filter((a) => a.type !== "link")
+    .filter((a) => a.type !== "link" && a.type !== "textedit")
     .filter((a) => !q || [a.contents, a.text, a.quote, a.label, a.author, TYPE_LABEL[a.type]].some((v) => v && String(v).toLowerCase().includes(q)))
     .sort((a, b) => a.page - b.page || b.rect[3] - a.rect[3] || a.rect[0] - b.rect[0]);
   listEl.textContent = "";
