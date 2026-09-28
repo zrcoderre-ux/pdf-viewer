@@ -160,9 +160,15 @@ In addition to citation linking, the viewer supports:
 - **Auto-scroll while reading** — the **↓ Auto-scroll** toolbar button (or the
   **A** key) creeps the document upward at your reading pace, so a long brief
   reads without touching the wheel. See below.
-- **OCR** scanned PDFs on demand with the toolbar **⛶ OCR** button — text
-  becomes selectable and citations get linked. Enable "Automatically OCR
-  scanned documents" in Options to run it without the button. Recognized
+- **OCR** scanned PDFs on demand with **Recognize text (OCR)** in the tools
+  rail — text becomes selectable and citations get linked. Enable
+  "Automatically OCR scanned documents" in Options to run it without the
+  button. The whole document stays on screen while it is read: every page is
+  shown at once, the page you are looking at is recognized next (scroll ahead
+  and OCR follows you), each page's text becomes selectable as soon as that
+  page is done, and a progress chip in the lower left counts the pages.
+  Comments can be added while it runs. Citation links appear once every page
+  has been read, since a short cite can point back to any earlier page. Recognized
   pages are saved in the browser, so reopening the same scan (same file, any
   URL or name) brings its text straight back without recognizing it again;
   a scan not opened for 30 days is forgotten (Options → "Keep OCR results
