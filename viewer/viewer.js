@@ -161,6 +161,9 @@ const applyToaEnabled = () => toaPanel.setEnabled(toaOptionOn && !linkingSuppres
 // OCR runs on scanned pages only when enabled. Default is manual (the toolbar
 // "OCR" button); the auto-OCR option flips the default to on.
 let ocrEnabled = false;
+let ocrFailureShown = false;        // one "could not be recognized" toast per document
+const ocrProgressEl = document.getElementById("ocr-progress");
+let ocrProgressOwner = null;        // the render showing the OCR progress chip
 // Raw bytes of the loaded PDF, stashed during loadAndRender so the Download
 // button doesn't have to re-fetch from the server. eCMS-style URLs are slow
 // and sometimes single-use; the second fetch failing was the source of the
@@ -1824,6 +1827,7 @@ function resetForNewDocument() {
   // (Deliberately here and not in renderAllPages, which also runs on zoom —
   // the per-page OCR cache is what makes zoom cheap, so it must survive zoom.)
   resetOcr();
+  ocrFailureShown = false;
   // New document → forget the previous one's per-page word counts, which are
   // what auto-scroll paces itself by.
   autoScroll.resetDocument();
@@ -2135,35 +2139,87 @@ async function renderAllPages() {
 
   resetDocument({ repo: citationRepo, provider });
 
-  // Pass 1: render canvases + text layers, ingest text into the linker.
-  // We hold per-page DOM refs so pass 2 can place overlays in the right divs.
+  // Pass 1a: every page, in place and sized, drawn as it nears the screen.
+  // We hold per-page DOM refs so the passes below can fill the right divs.
   const pageRefs = [];
   for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
     if (signal.aborted) return;
-    const refs = await renderPageCanvasAndText(pageNum);
+    const refs = await buildPageShell(pageNum);
     if (signal.aborted) return;
-    ingestPage(pageNum, refs.textContent, { italicFontNames: refs.italicFontNames });
+    attachPageTools(refs);
     pageRefs.push(refs);
+  }
+  if (Find) Find.pagesRebuilt();
+  // The whole document is on screen and measurable, text or not.
+  autoScroll.endRender();
+
+  // Pass 1b: each page's text. A page with its own text gets it now; a scan
+  // waiting on OCR is recognized after, the page nearest the one being read
+  // first, while the rest of the document stays on screen around it.
+  let footerPassDone = false;
+  const footerPass = () => {
     // Capture the footer band of the first two pages so we can detect a
     // running-footer title. We only look at those — that's enough signal
     // and avoids slowing renders of long documents.
-    if (pageNum <= 2 && refs.textContent && refs.viewport) {
-      _footerByPage.set(pageNum, footerLines(refs.textContent, refs.viewport));
+    const [p1, p2] = pageRefs;
+    if (footerPassDone || !p1 || !p1.textContent || (p2 && !p2.textContent)) return;
+    footerPassDone = true;
+    for (const refs of [p1, p2]) {
+      if (refs && refs.textContent && refs.viewport) {
+        _footerByPage.set(refs.pageNumber, footerLines(refs.textContent, refs.viewport));
+      }
     }
-    if (pageNum === 1 && refs.textContent && refs.viewport) {
-      pageOneCaptionTitle = captionTitle(refs.textContent, refs.viewport);
-    }
-    // Once we have page 1 (or pages 1 and 2), try to resolve a title.
-    if (pageNum === 2 || (pageNum === 1 && pdfDoc.numPages === 1)) {
-      tryResolveFooterTitle();
-      logPdfHistory();
-      // Whether or not a title was found, the footer pass is now complete.
-      // Unblock any Download handler that's waiting.
-      if (_resolveFooterTitle) { _resolveFooterTitle(); _resolveFooterTitle = null; }
+    if (p1.viewport) pageOneCaptionTitle = captionTitle(p1.textContent, p1.viewport);
+    tryResolveFooterTitle();
+    logPdfHistory();
+    // Whether or not a title was found, the footer pass is now complete.
+    // Unblock any Download handler that's waiting.
+    if (_resolveFooterTitle) { _resolveFooterTitle(); _resolveFooterTitle = null; }
+  };
+
+  const ocrQueue = [];
+  for (const refs of pageRefs) {
+    if (signal.aborted) return;
+    refs.textContent = await refs.page.getTextContent();
+    if (signal.aborted) return;
+    if (ocrEnabled && pageNeedsOcr(refs.textContent)) { refs.textContent = null; ocrQueue.push(refs); continue; }
+    await pageTextFromPdf(refs);
+    footerPass();
+  }
+  if (signal.aborted) return;
+  if (Find) Find.pagesRebuilt();
+
+  if (ocrQueue.length) {
+    const total = ocrQueue.length;
+    try {
+      while (ocrQueue.length) {
+        showOcrProgress(signal, total - ocrQueue.length, total);
+        const here = visiblePageNumber();
+        let pick = 0;
+        for (let i = 1; i < ocrQueue.length; i++) {
+          if (Math.abs(ocrQueue[i].pageNumber - here) < Math.abs(ocrQueue[pick].pageNumber - here)) pick = i;
+        }
+        const [refs] = ocrQueue.splice(pick, 1);
+        await pageTextFromOcr(refs);
+        if (signal.aborted) return;
+        footerPass();
+        if (Find) Find.pagesRebuilt();
+      }
+    } finally {
+      hideOcrProgress(signal);
     }
   }
+  footerPass();
 
-  if (signal.aborted) return;
+  // The linker reads the document in page order, whichever order the pages
+  // were read in.
+  for (const refs of pageRefs) {
+    ingestPage(refs.pageNumber, refs.textContent, { italicFontNames: refs.italicFontNames });
+  }
+  // Page structures (line numbers, paragraph markers) likewise.
+  const structures = [...pageStructures].sort((a, b) => a[0] - b[0]);
+  pageStructures.clear();
+  for (const [pn, st] of structures) pageStructures.set(pn, st);
 
   // Assemble the doc-wide numbered-paragraph sequence from the per-page markers
   // captured during render — used to decide page:line vs ¶ references.
@@ -2204,34 +2260,11 @@ async function renderAllPages() {
 
   if (signal.aborted) return;
 
-  // Pass 4: the selection handlers (markup from a selection, box select) and
-  // the annotation layer. After a zoom every layer is rebuilt from scratch,
-  // but the annotation set lives in PDF coordinates, so this pass simply
-  // redraws it onto the new pages.
-  for (const refs of pageRefs) {
-    if (signal.aborted) return;
-    attachHighlightHandlers(
-      refs.pageNumber, refs.pageWrapper, refs.textLayerDiv,
-      () => Annots.markupKind(), () => rectSelectMode,
-      (text, rects) => redactMode ? [{ label: "Mark for redaction", icon: "redact", action: () => redactClientRects(refs.pageNumber, rects) }] : [],
-    );
-    Annots.attachPage(refs.pageNumber, refs.pageWrapper, refs.annotLayerDiv);
-    // Redactions are stored in PDF points, so a zoom (which rebuilds every
-    // layer from scratch) repaints them onto the same words at the new scale.
-    RD.attachAreaDrag({
-      pageNumber: refs.pageNumber,
-      pageWrapper: refs.pageWrapper,
-      getActive: () => redactMode && redactMark === "area",
-      onBox: addAreaRedaction,
-    });
-    repaintRedactionsOnPage(refs.pageNumber);
-  }
-  if (Find) Find.pagesRebuilt();
-
+  // (The selection handlers, comments and redaction boxes were attached with
+  // each page in pass 1a. After a zoom every layer is rebuilt from scratch,
+  // but comments and redactions live in PDF coordinates, so attaching them
+  // simply redraws them onto the new pages.)
   updateLinkCount();
-  // Pages are measurable again: re-derive the reading pace (page heights just
-  // changed with the zoom) and resume if the mode is on.
-  autoScroll.endRender();
 }
 
 // Extract and set the filename from the document footer. Whether this
@@ -2673,7 +2706,11 @@ function releasePageBitmap(w) {
   if (!done) setTimeout(() => { if (!w.__drawn && !w.__task) { try { page.cleanup(); } catch { /* gone */ } } }, 1000);
 }
 
-async function renderPageCanvasAndText(pageNumber) {
+// A page's box and every layer in it, sized and in place, with its bitmap
+// drawn when it nears the screen. No text yet: that is pageTextFromPdf's or
+// pageTextFromOcr's job, so a scan being recognized shows every page at once
+// and fills in their text as it goes.
+async function buildPageShell(pageNumber) {
   const page = await pdfDoc.getPage(pageNumber);
   // The rotate tool's angle rides on top of the page's own /Rotate, so a page
   // that already ships sideways turns from where it actually sits. PDF.js takes
@@ -2785,32 +2822,79 @@ async function renderPageCanvasAndText(pageNumber) {
   // this also runs on zoom re-renders, prefilled from any in-progress edits.
   if (formMode) await renderFormOverlaysForPage(page, viewport, formLayerDiv);
 
-  let textContent = await page.getTextContent();
-  if (ocrEnabled && pageNeedsOcr(textContent)) {
-    // No usable PDF.js text layer (scan / image-only export). Recognize the
-    // page and synthesize both the textLayer spans and a textContent-shaped
-    // object so the linker, highlights, and footer naming work unchanged.
-    // ocrPageToTextLayer caches per page, so this only OCRs once even though
-    // renderAllPages re-runs on every zoom.
-    textContent = await ocrPageToTextLayer({
-      page,
-      pageNumber,
-      displayScale: viewport.scale,
-      userHeight: userSpaceViewport.height,
-      userWidth: userSpaceViewport.width,
-      rotation: rotationDelta,
-      textLayerDiv,
-      setStatus: (msg) => { statusEl.textContent = msg; },
-    });
-  } else {
-    const textLayer = new pdfjsLib.TextLayer({
-      textContentSource: textContent,
-      container: textLayerDiv,
-      viewport,
-    });
-    await textLayer.render();
-  }
+  return {
+    pageNumber, page, displayViewport: viewport, rotationDelta,
+    textContent: null, textLayerDiv, linkLayerDiv, annotLayerDiv,
+    redactLayerDiv,
+    pageWrapper: wrapper, viewport: userSpaceViewport,
+    italicFontNames: new Set(),
+  };
+}
 
+// The page's own text, laid out by PDF.js.
+async function pageTextFromPdf(refs) {
+  const textLayer = new pdfjsLib.TextLayer({
+    textContentSource: refs.textContent,
+    container: refs.textLayerDiv,
+    viewport: refs.displayViewport,
+  });
+  await textLayer.render();
+  finishPageText(refs);
+}
+
+// No usable PDF.js text layer (scan / image-only export). Recognize the page
+// and synthesize both the textLayer spans and a textContent-shaped object so
+// the linker, highlights, and footer naming work unchanged. ocrPageToTextLayer
+// caches per page, so this only OCRs once even though renderAllPages re-runs
+// on every zoom.
+async function pageTextFromOcr(refs) {
+  refs.pageWrapper.classList.add("ocr-running");
+  try {
+    refs.textContent = await ocrPageToTextLayer({
+      page: refs.page,
+      pageNumber: refs.pageNumber,
+      displayScale: refs.displayViewport.scale,
+      userHeight: refs.viewport.height,
+      userWidth: refs.viewport.width,
+      rotation: refs.rotationDelta,
+      textLayerDiv: refs.textLayerDiv,
+      setStatus: null, // the progress chip says which pages are being read
+    });
+  } catch (e) {
+    // One page the recognizer could not read leaves that page without text;
+    // the rest of the document is still read.
+    console.warn(`[pdf-viewer] OCR failed on page ${refs.pageNumber}:`, e);
+    refs.textLayerDiv.textContent = "";
+    refs.textContent = { items: [] };
+    if (!ocrFailureShown) {
+      ocrFailureShown = true;
+      toast(`Text could not be recognized on page ${refs.pageNumber}.`, { kind: "error", timeout: 6000 });
+    }
+  } finally {
+    refs.pageWrapper.classList.remove("ocr-running");
+  }
+  finishPageText(refs);
+}
+
+// OCR progress: a chip over the page area while scanned pages are read. The
+// render that shows it owns it, so a render cut short by a zoom does not hide
+// the chip the next render has just put up.
+function showOcrProgress(owner, done, total) {
+  ocrProgressOwner = owner;
+  if (!ocrProgressEl) return;
+  ocrProgressEl.hidden = false;
+  ocrProgressEl.querySelector(".op-text").textContent =
+    `Recognizing text (OCR) · ${done} of ${total} page${total === 1 ? "" : "s"}`;
+  ocrProgressEl.querySelector(".op-bar > i").style.width = `${Math.round((done / total) * 100)}%`;
+}
+function hideOcrProgress(owner) {
+  if (owner !== ocrProgressOwner) return;
+  ocrProgressOwner = null;
+  if (ocrProgressEl) ocrProgressEl.hidden = true;
+}
+
+function finishPageText(refs) {
+  const { pageNumber, textLayerDiv } = refs;
   guardSelection(textLayerDiv);
 
   // Capture line-number / paragraph-marker positions for citation references
@@ -2820,14 +2904,29 @@ async function renderPageCanvasAndText(pageNumber) {
   capturePageSpans(pageNumber, textLayerDiv);
 
   applySelectableArea(textLayerDiv);
-  updateCropOverlay(wrapper);
+  updateCropOverlay(refs.pageWrapper);
+  refs.italicFontNames = italicFontNamesFor(refs.page, refs.textContent);
+}
 
-  return {
-    pageNumber, textContent, textLayerDiv, linkLayerDiv, annotLayerDiv,
-    redactLayerDiv,
-    pageWrapper: wrapper, viewport: userSpaceViewport,
-    italicFontNames: italicFontNamesFor(page, textContent),
-  };
+// Everything on a page that works without its text: the selection handlers,
+// comments, and redaction boxes. Attached as soon as the page is built, so a
+// page can be commented on while OCR is still reading the document.
+function attachPageTools(refs) {
+  attachHighlightHandlers(
+    refs.pageNumber, refs.pageWrapper, refs.textLayerDiv,
+    () => Annots.markupKind(), () => rectSelectMode,
+    (text, rects) => redactMode ? [{ label: "Mark for redaction", icon: "redact", action: () => redactClientRects(refs.pageNumber, rects) }] : [],
+  );
+  Annots.attachPage(refs.pageNumber, refs.pageWrapper, refs.annotLayerDiv);
+  // Redactions are stored in PDF points, so a zoom (which rebuilds every
+  // layer from scratch) repaints them onto the same words at the new scale.
+  RD.attachAreaDrag({
+    pageNumber: refs.pageNumber,
+    pageWrapper: refs.pageWrapper,
+    getActive: () => redactMode && redactMark === "area",
+    onBox: addAreaRedaction,
+  });
+  repaintRedactionsOnPage(refs.pageNumber);
 }
 
 // ── Keeping a drag-selection where the pointer is ──

@@ -35,6 +35,10 @@ const MIN_CHARS = 8;
 
 let workerPromise = null;          // lazy singleton Tesseract worker
 const cacheByPage = new Map();     // pageNumber -> { words, hadText:false }
+// Pages being recognized right now. A zoom rebuilds every page while OCR is
+// still working through them; the rebuilt page waits for the recognition
+// already under way instead of queueing the same page again.
+const inFlight = new Map();        // pageNumber -> Promise<words>
 // The open document's content hash, under which recognized pages are saved
 // between visits (ocr-store.js), and how many days they're kept. A null key
 // saves nothing: the document isn't open yet, or keeping is off.
@@ -56,6 +60,7 @@ export function pageNeedsOcr(textContent) {
 // worker so a new PDF doesn't inherit stale boxes or leak a worker per load.
 export async function resetOcr() {
   cacheByPage.clear();
+  inFlight.clear();
   docKey = null;
   if (workerPromise) {
     const w = await workerPromise.catch(() => null);
@@ -100,6 +105,8 @@ export async function openOcrDocument(bytes) {
 export function remapOcrPages(plan) {
   const old = new Map(cacheByPage);
   cacheByPage.clear();
+  // A recognition still running belongs to the page's old place.
+  inFlight.clear();
   for (const [page, from] of carriedPages(plan)) {
     if (from != null && old.has(from)) cacheByPage.set(page, old.get(from));
   }
@@ -142,6 +149,17 @@ function getWorker() {
 // display scale. Each word: { text, x0, y0, x1, y1, eol, par }.
 async function ocrWords(page, pageNumber, setStatus) {
   if (cacheByPage.has(pageNumber)) return cacheByPage.get(pageNumber).words;
+  if (inFlight.has(pageNumber)) return inFlight.get(pageNumber);
+  const job = recognizeWords(page, pageNumber, setStatus);
+  inFlight.set(pageNumber, job);
+  try {
+    return await job;
+  } finally {
+    if (inFlight.get(pageNumber) === job) inFlight.delete(pageNumber);
+  }
+}
+
+async function recognizeWords(page, pageNumber, setStatus) {
 
   // Recognized on an earlier visit? The key is captured now: if another
   // document opens while this page is being recognized, its words must not

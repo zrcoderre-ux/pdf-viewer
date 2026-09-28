@@ -469,6 +469,15 @@
     <button id="as-close" title="Turn auto-scroll off (Esc)" aria-label="Turn auto-scroll off">✕</button>
   </div>
 
+  <!-- OCR progress: shown while a scan's pages are being recognized. -->
+  <div id="ocr-progress" role="status" aria-live="polite" hidden>
+    <i data-icon="ocr" data-icon-size="16"></i>
+    <div class="op-body">
+      <span class="op-text">Recognizing text…</span>
+      <span class="op-bar"><i></i></span>
+    </div>
+  </div>
+
   <div id="toast-host" aria-live="polite"></div>
   <div id="print-root" aria-hidden="true"></div>
 

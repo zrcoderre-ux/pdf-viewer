@@ -114,6 +114,20 @@ pointer events, so a drag across a link does not hand the selection to it,
 and the text layer carries pdf.js's `endOfContent` guard so a drag past the
 end of a line does not select the page. Keep both when adding a new overlay.
 
+**A page is built before its text** (`renderAllPages`). Pass 1a builds every
+page's box and layers (`buildPageShell`) and attaches the tools that need no
+text (`attachPageTools`: selection handlers, comments, redaction boxes), so
+the whole document is on screen at once. Pass 1b then gives each page its
+text: PDF.js's own (`pageTextFromPdf`) where it has some, and OCR
+(`pageTextFromOcr`) where it is a scan — those queued and taken nearest to
+the page in view first, with `#ocr-progress` counting them. The linker is fed
+(`ingestPage`) only after every page has text, in page order, because
+`documentText` is built in call order; `pageStructures` is re-sorted by page
+for the same reason. `ocr.js` shares a recognition already running for a
+page (`inFlight`), so a zoom mid-OCR waits for it rather than reading the page
+again. Before this, a scan appeared one page at a time as OCR finished each
+page, since each page's shell waited on its own recognition.
+
 **Find** (`viewer/find.js`) searches the text layers' DOM and paints matches
 with the CSS Custom Highlight API (`::highlight(find-match)`), so it never
 touches the layer's spans. **Print** (`viewer/print.js`) renders every page
