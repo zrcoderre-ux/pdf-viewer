@@ -3401,7 +3401,7 @@ function placeCitationsNow() {
     const strips = [];
     for (const r of rects) {
       if (boxes.some((g) => r.left >= g.left - 0.5 && r.right <= g.right + 0.5 && r.top >= g.top - 0.5 && r.bottom <= g.bottom + 0.5)) continue;
-      strips.push({ left: r.left - bodyRect.left, top: r.bottom - bodyRect.top - 6, width: r.width });
+      strips.push({ left: r.left - bodyRect.left, top: r.bottom - bodyRect.top - 6, width: r.width, height: r.height });
     }
     if (strips.length) {
       plans.push({
@@ -3427,7 +3427,7 @@ function placeCitationsNow() {
   }
   for (const [layer, mine] of byLayer) {
     const sig = mine.map((p) => p.kind + " " + p.url + " " + p.key + " " +
-      p.strips.map((r) => Math.round(r.left) + "," + Math.round(r.top) + "," + Math.round(r.width)).join(";")).join("\n");
+      p.strips.map((r) => Math.round(r.left) + "," + Math.round(r.top) + "," + Math.round(r.width) + "," + Math.round(r.height)).join(";")).join("\n");
     if (layer.__cites === sig) continue;
     layer.__cites = sig;
     layer.innerHTML = "";
@@ -3442,6 +3442,10 @@ function placeCitationsNow() {
         a.style.left = r.left + "px";
         a.style.top = r.top + "px";
         a.style.width = r.width + "px";
+        // The strip is only the underline; Shift+Space (shift-space-open.js)
+        // grows it up over the words by the height of the line it sits under,
+        // so pointing at a citation, or selecting it, is enough.
+        a.dataset.textHeight = String(Math.round(r.height));
         layer.appendChild(a);
       }
     }

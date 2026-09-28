@@ -86,6 +86,10 @@ function makeEl(tag, opts = {}) {
       walk(this, (n) => { if (matches(n, sel)) out.push(n); });
       return out;
     },
+    contains(n) {
+      while (n) { if (n === this) return true; n = n.parent; }
+      return false;
+    },
     appendChild(child) { child.parent = this; child.isConnected = true; this.children.push(child); return child; },
     remove() {
       this.isConnected = false;
@@ -146,18 +150,23 @@ function selectionOverBothLines(page) {
 // its id doesn't); "pwa" — the hosted build's shim; false — no chrome at all.
 // `worker`: "answers" — the background worker replies; "silent" — it doesn't,
 // and the call comes back with runtime.lastError set.
+// `popups`: "allowed" — every window.open opens; "one" — Chrome's default,
+// where a keypress buys the first and the rest are blocked; "none" — all are.
 function load(page, {
   selection = null, storage = {}, chromeApi = true, sources = [], worker = "answers",
+  popups = "allowed",
 } = {}) {
   const sent = [];
   const openedWindows = [];
+  const windows = [];
+  const listeners = {};
   const doc = {
     baseURI: BASE,
     documentElement: page.html,
     activeElement: null,
     createElement: (tag) => makeEl(tag),
     querySelectorAll: (sel) => page.html.querySelectorAll(sel),
-    addEventListener() {},
+    addEventListener(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
     elementFromPoint(x, y) {
       let hit = null; // later in tree order = painted on top
       walk(page.html, (n) => {
@@ -174,7 +183,13 @@ function load(page, {
     document: doc,
     getSelection: () => selection,
     addEventListener() {},
-    open: (url) => openedWindows.push(url),
+    open: (url) => {
+      if (popups === "none" || (popups === "one" && openedWindows.length)) return null;
+      openedWindows.push(url);
+      const win = { opener: "the page" };
+      windows.push(win);
+      return win;
+    },
   };
   if (chromeApi === "pwa") {
     // web-shim.js: a chrome object with no worker behind it, and no id.
@@ -228,8 +243,10 @@ function load(page, {
     api: ctx.ShiftSpaceOpen,
     sent,
     openedWindows,
+    windows,
     doc,
     hover,
+    fire: (type, e) => { for (const fn of listeners[type] || []) fn(e); },
     fireStorage: (changes) => storageListener && storageListener(changes, "sync"),
   };
 }
@@ -695,6 +712,163 @@ console.log("\n--- with no worker to ask ---");
   check("one link, one line", toast.textContent, "Opened link in a background tab");
 }
 
+{
+  // Chrome gives a page one tab per keypress: the first window.open spends it
+  // and the rest are blocked as pop-ups, unless the site may open them. The
+  // PWA used to announce every link it had asked for, having opened one.
+  const many = [];
+  for (let i = 0; i < 3; i++) {
+    many.push(link(`https://cite.test/${i}`, [rect(10, 100 + i * 20, 100, 20)], { className: "citation-link" }));
+  }
+  const article = makeEl("article");
+  const page = { html: makeEl("html", { children: [makeEl("body", { children: [article, makeEl("div", { children: many })] })] }), article };
+  const selection = {
+    isCollapsed: false, rangeCount: 1,
+    getRangeAt: () => ({ commonAncestorContainer: article, getClientRects: () => [rect(0, 90, 200, 80)] }),
+  };
+  const { api, openedWindows } = load(page, { selection, chromeApi: "pwa", popups: "one" });
+  api.setPointer(null, null);
+  api.onKeyDown(keyEvent());
+  check("with pop-ups blocked, the first one opens", openedWindows, ["https://cite.test/0"]);
+  const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
+  check("...and the toast counts what opened, and says how to get the rest",
+    toast.textContent, "Opened 1 of 3 links in new tabs — allow pop-ups for this site to open them all");
+}
+{
+  const page = makePage();
+  const { api, openedWindows } = load(page, { chromeApi: "pwa", popups: "none" });
+  api.setPointer(50, 110);
+  api.onKeyDown(keyEvent());
+  check("a link the browser refused is not announced as opened", openedWindows, []);
+  const toast = page.html.children.find((c) => c.tagName === "DIV" && c.textContent);
+  check("...the toast says nothing opened, and why",
+    toast.textContent, "No links opened — allow pop-ups for this site");
+}
+{
+  // Counting needs window.open's answer, which `noopener` withholds; the tab
+  // is cut loose from this one by hand instead.
+  const page = makePage();
+  const { api, windows } = load(page, { chromeApi: "pwa" });
+  api.setPointer(50, 110);
+  api.onKeyDown(keyEvent());
+  check("a tab the page opened can't reach back into it", windows.map((w) => w.opener), [null]);
+}
+
+// ---------------------------------------------------------------------------
+// The text reader's underlines stand for the words above them
+// ---------------------------------------------------------------------------
+//
+// Its links are strips six pixels high at the foot of each line, so the text
+// stays selectable and editable. The strip carries the height of its line
+// (data-text-height) and is measured as the whole line fragment.
+
+// One page: a line of text at y 100–120 whose citation (x 100–300) is
+// underlined by a strip at y 114–120, and an ordinary link in the text.
+function makeReaderPage() {
+  const strip = makeEl("a", {
+    className: "cite-link kind-case",
+    attrs: { href: "https://cite.test/smith", "data-text-height": "20" },
+    rects: [rect(100, 114, 200, 6)],
+  });
+  const plain = link("https://plain.test/", [rect(320, 100, 60, 20)]);
+  const body = makeEl("div", { className: "page-body", contentEditable: true, children: [plain] });
+  const layer = makeEl("div", { className: "link-layer", children: [strip] });
+  const html = makeEl("html", { children: [makeEl("body", { children: [body, layer] })] });
+  return { html, body, layer, strip, plain };
+}
+const readerSelection = (page, rects, anchorNode) => ({
+  isCollapsed: false, rangeCount: 1, anchorNode: anchorNode === undefined ? page.body : anchorNode,
+  getRangeAt: () => ({ commonAncestorContainer: page.body, getClientRects: () => rects }),
+});
+const caret = (page) => ({ isCollapsed: true, rangeCount: 1, anchorNode: page.body, getRangeAt: () => null });
+
+console.log("\n--- the text reader's underlines ---");
+{
+  const page = makeReaderPage();
+  const { api } = load(page);
+  api.setPointer(150, 105); // on the words, well above the strip
+  check("the pointer on a citation's words is on its link", api.collectUrls(), ["https://cite.test/smith"]);
+  api.setPointer(150, 95); // the line above
+  check("...and the line above it is not", api.collectUrls(), []);
+  api.setPointer(350, 105); // past the citation's end, on the ordinary link
+  check("an ordinary link beside it is still its own", api.collectUrls(), ["https://plain.test/"]);
+}
+{
+  const page = makeReaderPage();
+  const { api } = load(page);
+  check("a selection over the words covers the underline",
+    api.coverage(page.strip, [rect(100, 100, 200, 20)]), 1);
+  check("...half the words, half the link", api.coverage(page.strip, [rect(100, 100, 100, 20)]), 0.5);
+  check("...a strip with no line height is only a strip",
+    api.coverage(link("https://x.test/", [rect(100, 114, 200, 6)]), [rect(100, 100, 200, 12)]), 0);
+}
+{
+  const page = makeReaderPage();
+  const selection = readerSelection(page, [rect(90, 100, 230, 20)]);
+  const { api } = load(page, { selection });
+  api.setPointer(null, null);
+  check("selecting a line opens the citation it holds",
+    api.collectUrls(), ["https://cite.test/smith"]);
+}
+{
+  // Edit is on: the pages are the text box. A caret there means typing, and
+  // the pointer rests where the caret was put — Shift held early for the
+  // next word's capital must type the space, not open the citation.
+  const page = makeReaderPage();
+  const loaded = load(page, { selection: caret(page) });
+  loaded.doc.activeElement = page.body;
+  loaded.api.setPointer(150, 105);
+  const e = keyEvent();
+  loaded.api.onKeyDown(e);
+  check("typing with the pointer on a citation's words types the space",
+    [loaded.sent.length, e.prevented], [0, false]);
+  loaded.hover(page.strip);
+  const e2 = keyEvent();
+  loaded.api.onKeyDown(e2);
+  check("...the underline itself under the cursor still opens",
+    [loaded.sent.length, e2.prevented], [1, true]);
+}
+{
+  // A selection made in the pages while Edit is on is a selection of links,
+  // not text to type a space over.
+  const page = makeReaderPage();
+  const selection = readerSelection(page, [rect(90, 100, 300, 20)]);
+  const loaded = load(page, { selection });
+  loaded.doc.activeElement = page.body;
+  loaded.api.setPointer(null, null);
+  const e = keyEvent();
+  loaded.api.onKeyDown(e);
+  check("a selection in the box being edited opens its citations — ours only, not the editor's own link",
+    loaded.sent.map((m) => m.urls), [["https://cite.test/smith"]]);
+  check("...instead of typing a space over them", e.prevented, true);
+}
+{
+  // The composer case, spelled out: the selection is in the conversation,
+  // the focus in the box.
+  const page = makeReaderPage();
+  const elsewhere = makeEl("div");
+  const selection = readerSelection(page, [rect(90, 100, 300, 20)], elsewhere);
+  const loaded = load(page, { selection });
+  loaded.doc.activeElement = makeEl("div", { contentEditable: true });
+  loaded.api.setPointer(null, null);
+  const e = keyEvent();
+  loaded.api.onKeyDown(e);
+  check("a selection behind the box still doesn't eat the space",
+    [loaded.sent.length, e.prevented], [0, false]);
+}
+{
+  // In the PWA the pointer leaves the document's frame for the tab bar; its
+  // last position there must not stand in for it.
+  const page = makeReaderPage();
+  const loaded = load(page);
+  loaded.fire("mousemove", { clientX: 150, clientY: 105 });
+  check("the pointer is where it last moved", loaded.api.collectUrls(), ["https://cite.test/smith"]);
+  loaded.fire("mouseout", { relatedTarget: page.body });
+  check("...moving within the page keeps it", loaded.api.collectUrls(), ["https://cite.test/smith"]);
+  loaded.fire("mouseout", { relatedTarget: null });
+  check("...leaving the page forgets it", loaded.api.collectUrls(), []);
+}
+
 // ---------------------------------------------------------------------------
 // The worker that opens the tabs
 // ---------------------------------------------------------------------------
@@ -921,6 +1095,10 @@ console.log("\n--- wiring ---");
   check("...before viewer.js",
     read("viewer/viewer.html").indexOf("shift-space-open.js") <
       read("viewer/viewer.html").indexOf('src="viewer.js"'), true);
+  check("the text reader loads it too",
+    read("viewer/text-reader.html").includes('<script src="shift-space-open.js">'), true);
+  check("...and its underlines carry the height of their line",
+    /\.dataset\.textHeight\s*=/.test(read("viewer/text-reader.js")), true);
 }
 {
   const optionsHtml = read("options.html");
