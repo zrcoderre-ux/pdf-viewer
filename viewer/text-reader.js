@@ -3972,7 +3972,14 @@ function findNeedles(q) {
 // The page is searched for BOTH faces of the query too: with "Show fakes" on
 // the text on screen is the pseudonyms, and a find that only knew the real
 // name would come back empty on a page plainly carrying it.
-function findMatcherFor(q) { return PK.buildFindMatcher(findNeedles(q)); }
+//
+// MATCH CASE holds for both faces. The key writes a pseudonym in the case of
+// the name it stands for (mirrorCase), so "RASHO" in a caption is looked for
+// as the fake in capitals in the files, and a case-sensitive find of the real
+// name is the same find of the fake. Off (the default, and every new tab),
+// case is ignored.
+function matchCase() { return $("fb-case").checked; }
+function findMatcherFor(q) { return PK.buildFindMatcher(findNeedles(q), { caseSensitive: matchCase() }); }
 
 /** The open document's hits, read off the page the way the marks are. */
 function scanFindHere() {
@@ -4021,15 +4028,15 @@ function clearFindMarks() {
  * the query, the folder or the key moves.
  */
 function findScanStale() {
-  return !findScanFor || findScanFor.q !== findQuery || findScanFor.docs !== folderDocs || findScanFor.key !== key;
+  return !findScanFor || findScanFor.q !== findQuery || findScanFor.docs !== folderDocs || findScanFor.key !== key || findScanFor.cs !== matchCase();
 }
 async function scanFindFolder() {
   if (!dirHandle || !findQuery || findScanning || !findScanStale()) return;
   findScanning = true;
-  const mine = { q: findQuery, docs: folderDocs, key };
+  const mine = { q: findQuery, docs: folderDocs, key, cs: matchCase() };
   findScanFor = mine;
   const rows = [];
-  const rx = PK.buildFindMatcher(findNeedles(findQuery));
+  const rx = findMatcherFor(findQuery);
   try {
     await duringAsync("reading the rest of the folder for what you are looking for", async (pass) => {
       let clock = await idleClock();
@@ -4050,7 +4057,10 @@ async function scanFindFolder() {
       }
     });
   } finally { findScanning = false; }
-  if (findScanFor !== mine) return;
+  // The question moved while this one was being read (a word typed, Match
+  // case ticked): the new one could not start while this held the folder, so
+  // it starts now.
+  if (findScanFor !== mine) { scanFindFolder(); return; }
   findRows = rows;
   renderFindBar();
   // A find that opened on a document with nothing in it waits for this answer
@@ -4159,6 +4169,10 @@ function setFindQuery(q) {
   const t = String(q || "");
   if (t.trim() === findQuery) return;
   findQuery = t.trim();
+  restartFind();
+}
+/** The question changed — its words, or whether case counts: the page again, and the folder behind it. */
+function restartFind() {
   findStep = -1;
   findRows = [];
   findScanFor = null;
@@ -4191,6 +4205,15 @@ $("fb-input").addEventListener("input", (e) => setFindQuery(e.target.value));
 $("fb-input").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); }
   else if (e.key === "Escape") { e.preventDefault(); showFindBar(false); }
+});
+$("fb-case").addEventListener("change", restartFind);
+// Alt+C flips Match case from either box of the bar. On a Mac, Option+C types
+// "ç", which is left to type.
+findBar.addEventListener("keydown", (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.key.toLowerCase() !== "c") return;
+  e.preventDefault();
+  $("fb-case").checked = !$("fb-case").checked;
+  restartFind();
 });
 $("fb-prev").addEventListener("click", () => stepFind(-1));
 $("fb-next").addEventListener("click", () => stepFind(1));

@@ -88,6 +88,7 @@
     <div class="lb-row">
       <span id="fb-type" class="lb-type find">find</span>
       <input id="fb-input" type="text" spellcheck="false" autocomplete="off" placeholder="Find in this document, and on through the case folder…" title="Enter goes to the next; Shift+Enter the one before; Esc closes. Names are searched as they READ — the real value on screen — and the rest of the folder is searched through the key, so the same name is found in a document that still carries its pseudonym.">
+      <label class="fb-check" title="Match case (Alt+C) — find only what is written in the same capitals, here and through the folder; Replace and Replace all follow it. Off, “court” also finds “Court” and “COURT”."><input id="fb-case" type="checkbox"><span>Match case</span></label>
       <span id="fb-count" class="lb-count"></span>
       <span id="fb-where" class="lb-where"></span>
       <span id="fb-rest" class="lb-where"></span>
@@ -101,7 +102,7 @@
       <span class="lb-type find">replace</span>
       <input id="fb-with" type="text" spellcheck="false" autocomplete="off" placeholder="Replace with…" title="Enter replaces the hit in front and goes on to the next; Esc closes. Typed as it is to read: a real name typed here is marked as a pseudonym, and the file carries the fake, exactly as if it had been typed on the page. Left empty, a replace deletes.">
       <button id="fb-replace" class="primary" title="Replace the hit in front and go on to the next (Enter in the box). With nothing left here, the next document of the folder that has one is opened. Ctrl+Z undoes it.">Replace</button>
-      <button id="fb-replace-all" title="Replace every hit on the pages on screen: this document, and any the folder has hung under it (each is saved to its own file). The other documents in the folder are not touched. Ctrl+Z undoes it at once.">Replace all</button>
+      <button id="fb-replace-all" title="Replace every hit on the pages on screen: this document, and any the folder has hung under it (each is saved to its own file). The other documents in the folder are not touched. Match case decides whether “court” also replaces “Court”. Ctrl+Z undoes it at once.">Replace all</button>
       <span id="fb-rnote" class="lb-where"></span>
     </div>
   </div>

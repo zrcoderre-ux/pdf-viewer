@@ -207,7 +207,11 @@ typing runs (`normalizeLines`, `convertTypedReals`, `syncSpots`, `setDirty`).
 Replace all plans every hit before changing anything, snapshots every page it
 touches under one `batch` id (`snapshotPages`), so `stepHistory` undoes and
 redoes them as one step, and applies each page's plans last first so the
-earlier hits' nodes and offsets still hold.
+earlier hits' nodes and offsets still hold. Match case (`#fb-case`, Alt+C)
+is `buildFindMatcher(values, { caseSensitive })`, which drops the `i` flag;
+`findMatcherFor` is the one place the page, the folder scan and Replace get
+their matcher, and the folder scan's `findScanFor` carries the flag so a
+toggle reads the folder again.
 
 The LEAKS review bar works PDF-Linker's `LEAKS.xlsx` row by row from the
 text: `leaks.js` (pure) reads the worksheet by header name, classifies a

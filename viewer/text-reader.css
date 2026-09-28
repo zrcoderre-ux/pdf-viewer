@@ -132,9 +132,11 @@ body {
 #find-bar .lb-count { min-width: 9ch; }
 /* Replace is a second row under Find, shown by Replace… or Ctrl+H. The chips
    are one width so the two boxes line up. */
-#find-bar .lb-type.find { min-width: 7.5ch; text-align: center; }
+#find-bar .lb-type.find { min-width: 6.5em; text-align: center; }
 #find-bar #fb-replace-row[hidden] { display: none; }
 #find-bar #fb-replace-toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+#find-bar .fb-check { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; flex: none; }
+#find-bar .fb-check:has(input:checked) { color: var(--text); }
 .revbar .lb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .revbar .lb-row .spacer { flex: 1; min-width: 8px; }
 .revbar button {
