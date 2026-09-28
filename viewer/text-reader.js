@@ -11382,8 +11382,8 @@ $("rb-miss-close").addEventListener("click", () => showMissRow(false));
 const rawModal = $("raw-modal");
 const rawBtn = $("raw-btn");
 
-/** One member's text exactly as a save would write it. */
-function memberDiskText(m) {
+/** One member's pages exactly as a save would write them. */
+function memberDiskPages(m) {
   const pages = [];
   for (let i = m.from; i < m.from + m.count; i++) {
     // A page on screen is read off the page; one the reel has shed was read
@@ -11392,7 +11392,40 @@ function memberDiskText(m) {
     const lines = body ? TD.serializeHeld(body).text.split("\n") : (doc.pages[i].lines || []);
     pages.push(Object.assign({}, doc.pages[i], { lines }));
   }
-  return TD.serializeExport({ newline: m.newline, trailingNewline: m.trailingNewline, pages });
+  return pages;
+}
+
+/** One member's text exactly as a save would write it. */
+function memberDiskText(m) {
+  return TD.serializeExport({ newline: m.newline, trailingNewline: m.trailingNewline, pages: memberDiskPages(m) });
+}
+
+// The file is shown whole — it is the file — but opened where the reading
+// is: the page being read is scrolled to the top of the view and its header
+// line marked. Each page is written as its own text, so the pre holds the
+// same characters in the same order (and Copy copies the file); only the
+// header of the page being read sits in a span of its own.
+function fillRawText(pre, m, text, here) {
+  pre.textContent = text;
+  const pages = memberDiskPages(m);
+  const nl = m.newline || "\n";
+  const chunks = pages.map((p) => [p.banner, p.header, ...(p.lines || [])].filter((l) => l != null).join(nl));
+  // Pages with nothing in them at all (no banner, header or line) are not
+  // written, and a page's place is then not a place in the text.
+  if (chunks.some((c, i) => !c && !pages[i].lines.length)) return null;
+  if (chunks.join(nl) + (m.trailingNewline ? nl : "") !== text) return null;
+  if (here < 0 || here >= pages.length) return null;
+  pre.textContent = "";
+  const before = chunks.slice(0, here).join(nl) + (here ? nl : "");
+  const page = pages[here];
+  const headLine = page.banner != null ? page.banner : page.header;
+  const rest = chunks[here].slice(headLine != null ? headLine.length : 0);
+  const after = (here < chunks.length - 1 ? nl + chunks.slice(here + 1).join(nl) : "") + (m.trailingNewline ? nl : "");
+  const mark = document.createElement("span");
+  mark.className = "raw-here";
+  mark.textContent = headLine != null ? headLine : "";
+  pre.append(document.createTextNode(before), mark, document.createTextNode(rest + after));
+  return mark;
 }
 
 function showRawFile(on) {
@@ -11402,9 +11435,18 @@ function showRawFile(on) {
   if (!doc || !m) { rawModal.hidden = true; return; }
   const text = memberDiskText(m);
   $("raw-title").textContent = m.name;
-  $("raw-text").textContent = text;
-  $("raw-text").scrollTop = 0;
-  $("raw-text").scrollLeft = 0;
+  const pre = $("raw-text");
+  const here = Math.max(0, Math.min(m.count - 1, readingPage() - m.from));
+  const mark = fillRawText(pre, m, text, here);
+  pre.scrollLeft = 0;
+  pre.scrollTop = 0;
+  if (mark && here > 0) {
+    // One whole line of the page before stays in view above the header.
+    const cs = getComputedStyle(pre);
+    const line = parseFloat(cs.lineHeight) || 18;
+    const top = mark.getBoundingClientRect().top - pre.getBoundingClientRect().top;
+    pre.scrollTop = Math.max(0, Math.round(top - (parseFloat(cs.paddingTop) || 0) - line));
+  }
 
   // What a reader of this ought to be told, in the order it matters.
   const notes = [];
@@ -11421,6 +11463,7 @@ function showRawFile(on) {
     `${lines.toLocaleString()} line${lines === 1 ? "" : "s"} · ${text.length.toLocaleString()} character${text.length === 1 ? "" : "s"} · ` +
     `${crlf ? "CRLF" : "LF"} line endings · UTF-8` +
     (m.trailingNewline ? " · ends with a newline" : " · no newline at the end") +
+    (mark && m.count > 1 ? ` · opened at ${TD.pageLabel(doc.pages[m.from + here]) || `page ${here + 1}`}, the page you are reading` : "") +
     (reel.length > 1 ? ` · this is ${m.name}, the document you are reading; the others on the reel are their own files` : "");
   $("raw-text").focus({ preventScroll: true });
 }
