@@ -125,11 +125,16 @@ body {
    decides, so its edge is the accent rather than a warning colour. */
 #find-bar { top: calc(var(--toolbar-height) + var(--bar-redact, 0px)); border-bottom-color: var(--accent); }
 #find-bar .lb-type.find { background: var(--accent); }
-#fb-input {
+#fb-input, #fb-with {
   background: var(--inset); color: var(--text); border: 1px solid var(--btn-border);
   border-radius: 4px; padding: 3px 8px; font-size: 13px; min-width: 260px; flex: 1; max-width: 520px;
 }
 #find-bar .lb-count { min-width: 9ch; }
+/* Replace is a second row under Find, shown by Replace… or Ctrl+H. The chips
+   are one width so the two boxes line up. */
+#find-bar .lb-type.find { min-width: 7.5ch; text-align: center; }
+#find-bar #fb-replace-row[hidden] { display: none; }
+#find-bar #fb-replace-toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 .revbar .lb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .revbar .lb-row .spacer { flex: 1; min-width: 8px; }
 .revbar button {

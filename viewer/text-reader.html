@@ -80,7 +80,10 @@
   <!-- Find, across every document of the case folder. The browser's own
        Ctrl+F reads the pages that are IN THE DOM, which is this document and,
        with the folder read on, only the part of the reel that has not been
-       shed. A case is forty documents; the folder is the thing being read. -->
+       shed. A case is forty documents; the folder is the thing being read.
+       Replace edits only the pages on screen (this document, and the ones the
+       folder has hung under it); a document in the folder is changed when it
+       is opened, never from here. -->
   <div id="find-bar" class="revbar" hidden>
     <div class="lb-row">
       <span id="fb-type" class="lb-type find">find</span>
@@ -91,7 +94,15 @@
       <span class="spacer"></span>
       <button id="fb-prev" title="The one before it (Shift+Enter)">‹</button>
       <button id="fb-next" title="The next one — on into the next document of the folder when this one runs out (Enter)">›</button>
+      <button id="fb-replace-toggle" aria-pressed="false" title="Replace (Ctrl+H)">Replace…</button>
       <button id="fb-close" title="Close (Esc)">×</button>
+    </div>
+    <div id="fb-replace-row" class="lb-row" hidden>
+      <span class="lb-type find">replace</span>
+      <input id="fb-with" type="text" spellcheck="false" autocomplete="off" placeholder="Replace with…" title="Enter replaces the hit in front and goes on to the next; Esc closes. Typed as it is to read: a real name typed here is marked as a pseudonym, and the file carries the fake, exactly as if it had been typed on the page. Left empty, a replace deletes.">
+      <button id="fb-replace" class="primary" title="Replace the hit in front and go on to the next (Enter in the box). With nothing left here, the next document of the folder that has one is opened. Ctrl+Z undoes it.">Replace</button>
+      <button id="fb-replace-all" title="Replace every hit on the pages on screen: this document, and any the folder has hung under it (each is saved to its own file). The other documents in the folder are not touched. Ctrl+Z undoes it at once.">Replace all</button>
+      <span id="fb-rnote" class="lb-where"></span>
     </div>
   </div>
 
@@ -211,7 +222,7 @@
         <label class="tool-btn tool-toggle" title="Show the document as it is on disk — the fakes — instead of the real names"><input id="fakes-toggle" type="checkbox"><span class="ti">🎭</span><span class="tl">Show fakes</span></label>
 
         <div class="tools-group-label">Review</div>
-        <button id="find-btn" class="tool-btn" title="Find (Ctrl+F) — in this document and on through every export in the case folder. Names are looked for as they READ, the real value on screen, and the rest of the folder is searched through the key, so the same name is found in a document that still carries its pseudonym. Enter goes to the next, and on into the next document when this one runs out."><span class="ti">🔍</span><span class="tl">Find</span></button>
+        <button id="find-btn" class="tool-btn" title="Find (Ctrl+F) — in this document and on through every export in the case folder. Names are looked for as they READ, the real value on screen, and the rest of the folder is searched through the key, so the same name is found in a document that still carries its pseudonym. Enter goes to the next, and on into the next document when this one runs out. Ctrl+H opens it with Replace."><span class="ti">🔍</span><span class="tl">Find</span></button>
         <button id="flag-btn" class="tool-btn" title="Add the selected text to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass (Ctrl+Shift+F). Right-click a pseudonym to keep a wrongly faked one instead."><span class="ti">🚩</span><span class="tl">Flag real value</span></button>
         <button id="leaks-btn" class="tool-btn" title="Review PDF-Linker's LEAKS.xlsx row by row: each row shown above the text, the text opened at its page and line, the decision written into the worksheet's Fix? cell. The case folder's own worksheet is attached when the folder is opened; click to open it, or to load one."><span class="ti">⚠</span><span class="tl">Leaks</span><span id="leaks-count" class="badge" hidden>0</span></button>
         <button id="autoscroll" class="tool-btn" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses. The pace is set in pages per minute: each page takes the same time to cross the screen, whatever its height. A scroll of your own suspends it and it picks up again a second later; remembered between documents." aria-pressed="false"><span class="ti">↓</span><span class="tl">Auto-scroll</span></button>

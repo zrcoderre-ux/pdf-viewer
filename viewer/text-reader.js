@@ -2764,6 +2764,9 @@ const UNDO_COALESCE_MS = 800;
 const UNDO_MAX = 200;
 let undoStack = [], redoStack = [], lastSnapAt = 0, lastSnapPage = -1;
 let batchEdit = false; // one snapshot covers a multi-step edit (a paste)
+// An edit of several pages at once (Replace all) is one snapshot per page, all
+// carrying the same `batch`, and one Ctrl+Z puts every one of them back.
+let batchSeq = 0;
 
 function pageIndexOf(body) { return Number(body.closest(".tpage").dataset.index); }
 function caretOffsetIn(body) {
@@ -2834,7 +2837,16 @@ function snapshot(body, force) {
   redoStack = [];
   lastSnapAt = now; lastSnapPage = i;
 }
-function restoreSnapshot(snap) {
+/** Record several pages before one edit that changes them all: one undo step. */
+function snapshotPages(bodies) {
+  const batch = ++batchSeq;
+  for (const body of bodies) undoStack.push({ ...snapshotOf(body), batch });
+  // The cap trims the oldest history, never the step just taken.
+  while (undoStack.length > UNDO_MAX && undoStack[0].batch !== batch) undoStack.shift();
+  redoStack = [];
+  lastSnapPage = -1;
+}
+function restoreSnapshot(snap, { settle = true } = {}) {
   const body = bodyForPage(snap.page);
   if (!body) return;
   convertTypedRealsSoon.cancel();
@@ -2852,24 +2864,24 @@ function restoreSnapshot(snap) {
   }
   body.focus({ preventScroll: true });
   setDirty(true, pageIndexOf(body));
-  afterTextChange();
+  if (settle) afterTextChange();
 }
-function undo() {
-  const snap = undoStack.pop();
-  if (!snap) return;
-  const body = bodyForPage(snap.page);
-  if (body) redoStack.push(snapshotOf(body));
-  restoreSnapshot(snap);
+/** One step back (or forward): a page, or every page of a batch. */
+function stepHistory(from, to) {
+  const top = from[from.length - 1];
+  if (!top) return;
+  const pages = top.batch ? [] : [from.pop()];
+  while (top.batch && from.length && from[from.length - 1].batch === top.batch) pages.push(from.pop());
+  for (const snap of pages) {
+    const body = bodyForPage(snap.page);
+    if (body) to.push({ ...snapshotOf(body), batch: snap.batch });
+    restoreSnapshot(snap, { settle: pages.length === 1 });
+  }
+  if (pages.length > 1) afterTextChange();
   lastSnapPage = -1;
 }
-function redo() {
-  const snap = redoStack.pop();
-  if (!snap) return;
-  const body = bodyForPage(snap.page);
-  if (body) undoStack.push(snapshotOf(body));
-  restoreSnapshot(snap);
-  lastSnapPage = -1;
-}
+function undo() { stepHistory(undoStack, redoStack); }
+function redo() { stepHistory(redoStack, undoStack); }
 function clearHistory() { undoStack = []; redoStack = []; lastSnapPage = -1; }
 pagesEl.addEventListener("beforeinput", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
@@ -2919,8 +2931,9 @@ window.addEventListener("beforeunload", (e) => {
  * still inside is left alone (it may be the front of a longer name).
  */
 const convertTypedRealsSoon = debounce(convertTypedReals, 250);
-function convertTypedReals(body) {
-  if (!fwd || !fwd.rx || !body.isConnected) return;
+/** How many it marked; `quiet` leaves the toast and the re-read to the caller (a replace). */
+function convertTypedReals(body, { quiet = false } = {}) {
+  if (!fwd || !fwd.rx || !body.isConnected) return 0;
   body.normalize();
   const sel = document.getSelection();
   const caretNode = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
@@ -2942,10 +2955,11 @@ function convertTypedReals(body) {
     mid.replaceWith(makePn(h.fake, h.matched));
     made++;
   }
-  if (made) {
+  if (made && !quiet) {
     toast(`${made} real name${made === 1 ? "" : "s"} marked — the file will carry the pseudonym${made === 1 ? "" : "s"}`);
     afterTextChange();
   }
+  return made;
 }
 
 /** Text nodes of a page body that are NOT inside a pseudonym span. */
@@ -4065,6 +4079,8 @@ function renderFindBar() {
     : others.length ? `· ${rest} in ${others.length} other document${others.length === 1 ? "" : "s"}${n ? "" : ` — › opens ${TD.docLabel(others[0].doc.name)}`}`
     : dirHandle ? "· nowhere else in the folder" : "";
   $("fb-prev").disabled = $("fb-next").disabled = !findQuery || (n < 2 && !others.length);
+  $("fb-replace").disabled = !doc || !findQuery || (!n && !others.length);
+  $("fb-replace-all").disabled = !doc || !findQuery || !n;
 }
 /**
  * Where a range stands, as a reader would say it: the page's own label and its
@@ -4146,13 +4162,16 @@ function setFindQuery(q) {
   findStep = -1;
   findRows = [];
   findScanFor = null;
+  $("fb-rnote").textContent = "";
   if (!findQuery) { findHits = []; clearFindMarks(); renderFindBar(); return; }
   findSoon();
 }
-function showFindBar(on) {
+function showFindBar(on, { replace = false } = {}) {
   const was = !findBar.hidden;
   if (on && !was) reelAllLive(); // the search looks at every page of the reel
   findBar.hidden = !on;
+  // Closing puts Replace away with it; Ctrl+H brings the bar back with it open.
+  showReplaceRow(on && (replace || (was && replaceOpen())));
   setBarHeight();
   if (was !== !!on) relayout();
   if (!on) { findHits = []; findStep = -1; findJump = false; clearFindMarks(); return; }
@@ -4160,8 +4179,11 @@ function showFindBar(on) {
   // Opened over a selection, that is what is being looked for.
   const sel = String(document.getSelection() || "").trim();
   if (sel && sel.length <= 120 && !sel.includes("\n")) input.value = sel;
-  input.focus();
-  input.select();
+  // Ctrl+H with something to look for already in the box goes straight to
+  // what to put in its place.
+  const box = replace && input.value.trim() ? $("fb-with") : input;
+  box.focus();
+  box.select();
   setFindQuery(input.value);
   renderFindBar();
 }
@@ -4176,9 +4198,258 @@ $("fb-close").addEventListener("click", () => showFindBar(false));
 $("find-btn").addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection to search for
 $("find-btn").addEventListener("click", () => showFindBar(findBar.hidden));
 document.addEventListener("keydown", (e) => {
-  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== "f") return;
+  if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k !== "f" && !(k === "h" && e.ctrlKey)) return; // Cmd+H is the Mac's Hide, not ours
   e.preventDefault(); // the reader's find, not the browser's: the browser's cannot leave this document
-  showFindBar(true);
+  showFindBar(true, { replace: k === "h" });
+});
+
+// ── Replace ──────────────────────────────────────────────────────────────────
+//
+// Find's second row. It edits what Find marks, and only on the pages that are
+// on screen — this document, and whatever the folder has hung under it, each
+// of which is saved to its own file. The other documents of the folder are
+// only COUNTED from disk; a replace there would be a write to a file nobody
+// has opened, under a key, with nothing on screen to check it by. › opens the
+// next one and Replace goes on in it.
+//
+// A REPLACE IS TYPING. The words go into the page as plain text, where a real
+// name the key binds is marked as a pseudonym exactly as a typed one is (the
+// file carries the fake), the edit is one step of the undo history (a Replace
+// all is one step however many pages it touched), and the document is dirty
+// until it is saved. It works on a protected document without lifting the
+// protection: the protection is against a stray keystroke in the page, and a
+// replace is not one.
+//
+// A PSEUDONYM IS TAKEN WHOLE OR NOT AT ALL, the way the page itself treats
+// one: its span takes no keystroke. A hit that covers a whole pseudonym (or
+// every piece of one wrapped across lines) replaces it; a hit that is only
+// part of one — "Rasho" inside a span that fakes "Helen Rasho" as one name —
+// is left as it stands and said so, since what would be left of the span is a
+// piece of a real name with no fake of its own to be written as. A spot keep
+// (a value kept where it stands) is the same.
+//
+// The numbers of a pleading page are never touched: a phrase wrapped across
+// a numbered line loses its words on both lines, the replacement goes where
+// it began, and the line numbers stay where they are.
+const replaceRow = $("fb-replace-row");
+function replaceOpen() { return !replaceRow.hidden; }
+function showReplaceRow(on) {
+  replaceRow.hidden = !on;
+  $("fb-replace-toggle").setAttribute("aria-pressed", String(!!on));
+  if (!on) $("fb-rnote").textContent = "";
+  setBarHeight();
+}
+
+/** The pseudonym or spot keep a text node is the text of, if it is one. */
+function atomOf(n) { return n.parentElement ? n.parentElement.closest(".pn, [data-here]") : null; }
+/**
+ * What replacing [start, end) of a page would take out, line by line — or null
+ * where the hit is only part of a pseudonym or a spot keep. `segs` are the
+ * page's text nodes as flatten reads them.
+ */
+function planReplace(body, segs, start, end) {
+  const parts = [];
+  const wrapped = new Map(); // a name wrapped across lines: which of its pieces the hit covers
+  let held = false;
+  for (const g of segs) {
+    if (g.end <= start || g.start >= end || g.end === g.start) continue;
+    if (g.node.parentElement && g.node.parentElement.closest(".gutter")) continue;
+    const atom = atomOf(g.node);
+    if (atom && (g.start < start || g.end > end)) return null;
+    if (atom && atom.dataset.piece) {
+      const [k, n] = atom.dataset.piece.split("/").map(Number);
+      const id = atom.dataset.wholeFake + "\u0000" + atom.dataset.wholeReal;
+      if (!wrapped.has(id)) wrapped.set(id, { n, seen: new Set() });
+      wrapped.get(id).seen.add(k);
+    }
+    if (atom && atom.hasAttribute("data-here")) held = true;
+    const line = lineOfNode(body, g.node) || body;
+    const last = parts[parts.length - 1];
+    if (last && last.line === line) last.to = g;
+    else parts.push({ line, from: g, to: g });
+  }
+  if (!parts.length) return null;
+  // Every piece, or the name is only partly in the hit.
+  for (const { n, seen } of wrapped.values()) if (!seen.has(0) || !seen.has(n - 1)) return null;
+  return { body, start, end, parts, held };
+}
+
+/**
+ * Carry a plan out: the hit's text off each of its lines, the replacement
+ * where it began. Returns a collapsed range just after the replacement, which
+ * the edits that follow (the typed-name pass) keep in its place.
+ */
+function applyReplace(plan, withText) {
+  const { start, end, parts } = plan;
+  let at = null;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const { line, from, to } = parts[i];
+    const r = document.createRange();
+    const a = atomOf(from.node), b = atomOf(to.node);
+    if (a) r.setStartBefore(a); else r.setStart(from.node, Math.max(0, start - from.start));
+    if (b) r.setEndAfter(b); else r.setEnd(to.node, Math.min(end, to.end) - to.start);
+    r.deleteContents();
+    const lt = line !== plan.body ? ltOf(line) : null;
+    if (i > 0) {
+      // A wrapped phrase leaves the head of its next line bare: the space
+      // that stood after it there goes too, so the line does not open on one.
+      if (lt) {
+        lt.normalize();
+        const f = lt.firstChild;
+        if (f && f.nodeType === 3) f.data = f.data.replace(/^[ \t]+/, "");
+      }
+    }
+    // A numbered line the replace has emptied is written as PDF-Linker writes
+    // one, the number alone, without the two spaces that stood before its text.
+    if (lt && !lt.textContent.length && !(i === 0 && withText)) {
+      const gs = line.querySelector(":scope > .gutter > .gs");
+      if (gs) gs.textContent = "";
+    }
+    if (i > 0) continue;
+    if (withText) {
+      const t = document.createTextNode(withText);
+      r.insertNode(t);
+      r.setStartAfter(t);
+    }
+    r.collapse(true);
+    at = r;
+  }
+  return at;
+}
+
+/** A page once its replacements are in: what typing on it would have done. How many real names that marked. */
+function settleReplaced(body, held) {
+  normalizeLines(body);
+  const marked = convertTypedReals(body, { quiet: true });
+  if (held) syncSpots(body);
+  setDirty(true, pageIndexOf(body));
+  return marked;
+}
+function markedNote(n) {
+  return n ? ` ${n} real name${n === 1 ? "" : "s"} marked — the file will carry the pseudonym${n === 1 ? "" : "s"}.` : "";
+}
+
+/** A hit's place in its page's text now, read off its live range — null where the page has moved under it. */
+function hitNow(hit, rx) {
+  const r = hit && hit.range;
+  const body = r && r.startContainer.parentElement && r.startContainer.parentElement.closest(".page-body");
+  if (!body || !body.isConnected) return null;
+  const { text, segs } = flatten(body, { blankGutters: true });
+  const a = segs.find((g) => g.node === r.startContainer);
+  const b = segs.find((g) => g.node === r.endContainer);
+  if (!a || !b) return null;
+  const start = a.start + r.startOffset, end = b.start + r.endOffset;
+  rx.lastIndex = start;
+  const m = rx.exec(text);
+  if (!m || m.index !== start || m.index + m[0].length !== end) return null;
+  return { body, segs, start, end };
+}
+
+const PART_OF_NAME = "is part of a longer name the key fakes as one (or of a value kept where it stands), which is replaced whole or not at all";
+
+/** Replace the hit in front and stand on the next; with none in front, go to one first. */
+function replaceOne() {
+  if (!doc || !findQuery) return;
+  const rx = findMatcherFor(findQuery);
+  if (!rx) return;
+  if (findStep < 0 || !findHits[findStep]) { stepFind(1); return; }
+  const cur = findHits[findStep];
+  const hit = hitNow(cur, rx);
+  if (!hit) {
+    // The page moved under the hit since it was read (an edit a beat ago):
+    // read it again and show what is in front now, rather than guess.
+    scanFindHere();
+    if (!findLandHere() && findHits[findStep]) scrollRangeTo(findHits[findStep].range);
+    renderFindBar();
+    return;
+  }
+  const plan = planReplace(hit.body, hit.segs, hit.start, hit.end);
+  if (!plan) {
+    $("fb-rnote").textContent = `This one ${PART_OF_NAME} — left as it stands.`;
+    stepFind(1);
+    return;
+  }
+  snapshot(hit.body, true);
+  let after, marked = 0;
+  batchEdit = true;
+  try {
+    after = applyReplace(plan, $("fb-with").value);
+    marked = settleReplaced(hit.body, plan.held);
+  } finally { batchEdit = false; }
+  if (marked) toast(markedNote(marked).trim());
+  lastSnapPage = -1; // what is typed next is its own step
+  afterTextChange();
+  // On to the hit after the one just replaced — past the replacement itself,
+  // which may carry what is being looked for — and round to the top of the
+  // document where that was the last.
+  scanFindHere();
+  const next = after ? findHits.findIndex((h) => { try { return h.range.compareBoundaryPoints(Range.START_TO_START, after) >= 0; } catch { return false; } }) : -1;
+  findStep = next >= 0 ? next : findHits.length ? 0 : -1;
+  paintFind();
+  if (findStep >= 0) scrollRangeTo(findHits[findStep].range);
+  $("fb-rnote").textContent = "";
+  renderFindBar();
+}
+
+/** Every hit on the pages on screen, in one step of the undo history. */
+function replaceAll() {
+  if (!doc || !findQuery) return;
+  const rx = findMatcherFor(findQuery);
+  if (!rx) return;
+  reelAllLive(); // a page the reel has let go of is a page with no hit to replace
+  const withText = $("fb-with").value;
+  const edits = [];
+  let skipped = 0;
+  for (const body of pageBodies()) {
+    const { text, segs } = flatten(body, { blankGutters: true });
+    const plans = [];
+    rx.lastIndex = 0;
+    let m;
+    while ((m = rx.exec(text))) {
+      if (!m[0].length) { rx.lastIndex++; continue; }
+      const plan = planReplace(body, segs, m.index, m.index + m[0].length);
+      if (plan) plans.push(plan); else skipped++;
+    }
+    if (plans.length) edits.push({ body, plans });
+  }
+  const note = skipped ? `${skipped} left as ${skipped === 1 ? "it stands" : "they stand"}: ${skipped === 1 ? "it" : "each"} ${PART_OF_NAME}.` : "";
+  $("fb-rnote").textContent = note;
+  if (!edits.length) {
+    toast(skipped ? `Nothing replaced — ${note}` : `“${findQuery}” is not on the pages on screen.`, { error: !!skipped });
+    return;
+  }
+  snapshotPages(edits.map((e) => e.body));
+  let done = 0, marked = 0;
+  batchEdit = true;
+  try {
+    for (const { body, plans } of edits) {
+      // Last first, so each earlier hit's text nodes and offsets still stand.
+      for (let i = plans.length - 1; i >= 0; i--) applyReplace(plans[i], withText);
+      marked += settleReplaced(body, plans.some((p) => p.held));
+      done += plans.length;
+    }
+  } finally { batchEdit = false; }
+  afterTextChange();
+  findStep = -1;
+  scanFindHere();
+  findLandHere();
+  renderFindBar();
+  const pages = edits.length;
+  toast(`Replaced ${done} in ${pages} page${pages === 1 ? "" : "s"} — Ctrl+Z puts ${done === 1 ? "it" : "them all"} back.` + markedNote(marked) + (skipped ? ` ${skipped} left as ${skipped === 1 ? "it stands" : "they stand"}.` : ""));
+}
+
+$("fb-replace-toggle").addEventListener("click", () => {
+  const on = !replaceOpen();
+  showReplaceRow(on);
+  (on ? $("fb-with") : $("fb-input")).focus();
+});
+$("fb-replace").addEventListener("click", replaceOne);
+$("fb-replace-all").addEventListener("click", replaceAll);
+$("fb-with").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); replaceOne(); }
+  else if (e.key === "Escape") { e.preventDefault(); showFindBar(false); }
 });
 
 // ── the rest of the folder ───────────────────────────────────────────────────

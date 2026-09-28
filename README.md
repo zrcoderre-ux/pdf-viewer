@@ -1448,6 +1448,26 @@ app, which routes it to the reader tab.
   — a name standing in the clear in one export and faked in another is found
   in both. Esc closes; 🔍 Find in the tools rail opens it over whatever is
   selected.
+- **Replace, under Find (Ctrl+H).** **Replace…** on the find bar, or
+  **Ctrl+H**, opens a second row: what to put in place of the hit.
+  **Replace** (or Enter in that box) replaces the hit in front and stands on
+  the next; **Replace all** replaces every hit on the pages on screen. A
+  replace is an edit like typing: one step of the undo history (**Replace all
+  is one Ctrl+Z**, however many pages it touched), the document marked unsaved
+  until it is saved, and a real name typed as the replacement marked as a
+  pseudonym, so the file carries the fake. It works on a protected document
+  and leaves it protected. It edits **only the pages on screen**: this
+  document, and whatever the folder has hung under it, each saved to its own
+  file. The other documents in the folder are counted from disk and never
+  written from the bar; › opens the next one and Replace goes on there. **A
+  pseudonym is replaced whole or not at all.** Find "Helen Rasho" and the
+  name is replaced; find "Rasho" inside a span that fakes "Helen Rasho" as one
+  name and that hit is left standing, and the bar says so, because what would
+  remain is half a real name with no fake to write in its place. A value kept
+  where it stands is treated the same way. On pleading paper the line numbers
+  never move: a phrase wrapped across numbered lines loses its words on both
+  lines, and the replacement goes where the phrase began. Find is not
+  case-sensitive, so neither is Replace all.
 - **Flag what the run missed — and un-flag what it got wrong.** The point of
   reading the real names is to spot the ones that are *not* marked. Select
   such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the

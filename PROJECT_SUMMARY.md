@@ -194,6 +194,21 @@ box itself is visually hidden and `:has(input:checked)` paints the pressed
 state. The key-offer bar now takes its own height through `--offer-h`, the way
 the LEAKS bar takes `--bar-h`, so neither covers the head of the rail.
 
+Find's bar has a second row, Replace (`#fb-replace-row`, Ctrl+H). It edits
+only the page bodies in the DOM; the folder is never written from the bar.
+`planReplace` maps a hit (`[start, end)` of `flatten(body, { blankGutters:
+true })`) onto one part per line, skipping the gutter spans, and returns null
+for a hit that covers only part of a `.pn` or `[data-here]` span, or some but
+not all pieces of a name wrapped across lines (`data-piece`). `applyReplace`
+deletes each part with a DOM Range, last line first, trims the head of a
+continuation line, empties the `.gs` of a numbered line it leaves blank, and
+puts the replacement in as a plain text node; `settleReplaced` then runs what
+typing runs (`normalizeLines`, `convertTypedReals`, `syncSpots`, `setDirty`).
+Replace all plans every hit before changing anything, snapshots every page it
+touches under one `batch` id (`snapshotPages`), so `stepHistory` undoes and
+redoes them as one step, and applies each page's plans last first so the
+earlier hits' nodes and offsets still hold.
+
 The LEAKS review bar works PDF-Linker's `LEAKS.xlsx` row by row from the
 text: `leaks.js` (pure) reads the worksheet by header name, classifies a
 Fix? cell the way `_pn_parse_decision_rows` will read it, parses the Where
