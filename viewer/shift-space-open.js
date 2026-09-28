@@ -72,7 +72,21 @@
   //   citation-link     PDF viewer citation overlay
   //   pdf-link          PDF viewer's overlay for the document's own links
   //   cl-citation-link  website citation overlay (content script)
-  const OVERLAY_LINKS = "a.citation-link, a.pdf-link, a.cl-citation-link";
+  //   cite-link         text reader's citation underline
+  const OVERLAY_LINKS = "a.citation-link, a.pdf-link, a.cl-citation-link, a.cite-link";
+
+  // An underline that stands for the words above it. The text reader's links
+  // are strips six pixels high at the foot of each line, because its text is
+  // selectable and editable and a link covering the words would take every
+  // click meant for them. So the strip is all the pointer can hover, and the
+  // words — what the reader is actually pointing at — belong to no link at all.
+  // A strip that says how tall its line is (data-text-height, in CSS pixels)
+  // is measured as the whole line fragment instead: its box grows up from its
+  // bottom edge to cover the words, for the pointer and the selection alike.
+  // The attribute lives in the DOM rather than in a registry of this script's,
+  // so the extension's copy, running in the page's isolated world where the
+  // PWA's own copy can't reach it, reads it too.
+  const UNDERLINES = "a[data-text-height]";
 
   // Protocols worth a new tab. A middle click on mailto:/tel:/javascript:
   // doesn't open a background tab either.
@@ -122,9 +136,27 @@
   // line, as are a link's own rects, so at most one of them meaningfully
   // overlaps each link rect and the largest single overlap is the answer.
   function coverage(el, selRects) {
+    return coverageOfRects(hitRects(el), selRects);
+  }
+
+  // The boxes a link answers for on screen: its own, or for an underline, the
+  // line fragment it underlines (see UNDERLINES).
+  function hitRects(el) {
     let rects;
-    try { rects = el.getClientRects(); } catch (e) { return 0; }
-    return coverageOfRects(rects, selRects);
+    try { rects = el.getClientRects(); } catch (e) { return []; }
+    const tall = parseFloat(el.getAttribute("data-text-height"));
+    if (!(tall > 0)) return rects;
+    const out = [];
+    for (const r of rects) {
+      if (tall <= r.height) { out.push(r); continue; }
+      const top = r.bottom - tall;
+      out.push({ left: r.left, right: r.right, top, bottom: r.bottom, width: r.width, height: tall });
+    }
+    return out;
+  }
+
+  function contains(r, x, y) {
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
   }
 
   function coverageOfRects(rects, selRects) {
@@ -163,7 +195,14 @@
   // when you point at one.) Nested anchors aren't valid HTML, so the last match
   // in document order is the innermost one. The remembered pointer position is
   // only a fallback for the odd case where hover state is unavailable.
-  function linkAtPointer() {
+  //
+  // Then the words an underline stands for, which no hover state reaches: the
+  // pointer is on the text, and the link is the strip under it. Not while the
+  // reader is typing (`typing`), though. The pointer rests where the caret was
+  // put, and Shift held a beat early for the next word's capital is the most
+  // common slip there is; over a citation being edited it would open a tab
+  // instead of typing the space. A real link under the pointer still counts.
+  function linkAtPointer(typing) {
     let hovered = null;
     try {
       const hits = doc.querySelectorAll("a[href]:hover");
@@ -173,11 +212,24 @@
       const el = doc.elementFromPoint(mouseX, mouseY);
       hovered = el && el.closest ? el.closest("a[href]") : null;
     }
+    if (!hovered && !typing) hovered = underlineAtPointer();
     return isOpenableLink(hovered) ? hovered : null;
   }
 
-  // Every link the selection paints over, in reading order.
-  function linksInSelection(sel) {
+  function underlineAtPointer() {
+    if (mouseX == null || mouseY == null || !doc.querySelectorAll) return null;
+    for (const a of doc.querySelectorAll(UNDERLINES)) {
+      for (const r of hitRects(a)) {
+        if (contains(r, mouseX, mouseY)) return a;
+      }
+    }
+    return null;
+  }
+
+  // Every link the selection paints over, in reading order. `ownOnly` leaves
+  // out the page's ordinary links and counts only our own overlays (see
+  // collectUrls for when).
+  function linksInSelection(sel, ownOnly) {
     if (!sel || sel.isCollapsed || !sel.rangeCount) return [];
 
     const selRects = [];
@@ -190,6 +242,7 @@
       }
       // Ordinary page links: only the selection's own subtree can hold them,
       // plus an enclosing link when the whole selection sits inside one.
+      if (ownOnly) continue;
       const node = range.commonAncestorContainer;
       const el = node && node.nodeType === 1 ? node : node && node.parentElement;
       if (!el) continue;
@@ -272,14 +325,27 @@
   // which is the ordinary case right after a drag-select and means "all of
   // these", not "this one".
   function collectUrls() {
-    const hovered = linkAtPointer();
-    // While the focus is in a text box, only the pointer counts. Shift+Space
-    // has to keep typing a space there, and a selection sitting behind the box
-    // (chat composers hold the focus almost all the time) must not eat the key
-    // — but a cursor parked on a hyperlink is unambiguous.
-    const selected = isEditable(doc.activeElement)
-      ? []
-      : urlsOf(linksInSelection(root.getSelection ? root.getSelection() : null));
+    const sel = root.getSelection ? root.getSelection() : null;
+    // While the focus is in a text box, the pointer counts and a selection
+    // mostly doesn't. Shift+Space has to keep typing a space there, and a
+    // selection sitting behind the box (chat composers hold the focus almost
+    // all the time) must not eat the key — but a cursor parked on a hyperlink
+    // is unambiguous.
+    //
+    // The exception is a selection made IN the box: the text reader's pages
+    // are the box once Edit is on, and a reader who drags across three
+    // citations there and presses Shift+Space means the three citations, not
+    // a space typed over them. It was started inside the box (its anchor is
+    // there), which a selection behind a composer never is, and it counts
+    // only our own links — an ordinary link in a page's editor is left to be
+    // typed over, as it always was.
+    const box = isEditable(doc.activeElement) ? doc.activeElement : null;
+    const ownSelection = !!box && !!sel && !sel.isCollapsed && !!sel.anchorNode &&
+      !!box.contains && box.contains(sel.anchorNode);
+    const hovered = linkAtPointer(!!box && !ownSelection);
+    const selected = !box ? urlsOf(linksInSelection(sel))
+      : ownSelection ? urlsOf(linksInSelection(sel, true))
+      : [];
     if (hovered) {
       const url = hovered.href;
       if (selected.indexOf(url) === -1) return [url];
@@ -318,13 +384,34 @@
   // All a page can do by itself: open the tab in front of the reader. Not what
   // the shortcut promises, and better than nothing happening — the toast is
   // what carries the difference.
+  //
+  // And a page gets ONE tab per keypress. Chrome spends the keypress on the
+  // first window.open and blocks the rest as pop-ups, unless the site is
+  // allowed to open them — so in the PWA a selection over three citations
+  // opened the first and announced all three. The count is what opened: each
+  // call's own answer, a window or null. That rules out `noopener`, which
+  // answers null either way; the new tab is cut loose by hand instead, while
+  // it still holds the blank page it starts on and the property can be set.
   function openHere(urls) {
+    let opened = 0;
     for (const url of urls) {
-      // `noopener` keeps the new tab from reaching back into this one. It also
-      // makes window.open return null whether it opened or was refused, so
-      // there is nothing here worth counting; the toast reports what was sent.
-      try { root.open(url, "_blank", "noopener"); } catch (e) { /* pop-up blocked */ }
+      let win = null;
+      try { win = root.open(url, "_blank"); } catch (e) { win = null; }
+      if (!win) continue;
+      opened++;
+      try { win.opener = null; } catch (e) { /* already cross-origin */ }
     }
+    return opened;
+  }
+
+  // What the toast says when the page opened the tabs itself: `tried` is how
+  // many it asked the browser for, `asked` how many the gesture named.
+  function openedHere(opened, tried, asked) {
+    if (opened === 0) return "No links opened — allow pop-ups for this site";
+    const done = countPhrase(opened, asked, "new tab");
+    return opened < tried
+      ? `${done} — allow pop-ups for this site to open them all`
+      : `${done} — ${whyInFront()}`;
   }
 
   // Hand the links to the worker and report what it did with them: the number
@@ -422,8 +509,7 @@
     // Done inside the keypress, where the browser still counts the gesture as
     // the reason for the tabs and lets them through.
     if (!canOpenUnfocused()) {
-      openHere(opening);
-      toast(`${countPhrase(opening.length, urls.length, "new tab")} — ${whyInFront()}`);
+      toast(openedHere(openHere(opening), opening.length, urls.length));
       return;
     }
 
@@ -431,8 +517,7 @@
       // Asked, and no answer came: the worker went away, or the extension did.
       // The links are worth more open than owed, so they open the other way.
       if (!result) {
-        openHere(opening);
-        toast(`${countPhrase(opening.length, urls.length, "new tab")} — ${whyInFront()}`);
+        toast(openedHere(openHere(opening), opening.length, urls.length));
         return;
       }
       // The worker counts what it opened — the page's ceiling, its own
@@ -446,11 +531,19 @@
 
   function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; }
 
+  // A pointer that has left the page is over nothing on it. Its last position
+  // would otherwise stand in for it (underlineAtPointer), and in the PWA the
+  // pointer leaves the document's frame for the tab bar all the time.
+  function onMouseOut(e) {
+    if (!e.relatedTarget) { mouseX = null; mouseY = null; }
+  }
+
   function install() {
     // Capture on the window so the shortcut is read before the page's own
     // handlers — many sites bind Space themselves.
     root.addEventListener("keydown", onKeyDown, true);
     doc.addEventListener("mousemove", onMouseMove, { capture: true, passive: true });
+    doc.addEventListener("mouseout", onMouseOut, { capture: true, passive: true });
 
     const api = extensionApi();
     if (!api || !api.storage) return;

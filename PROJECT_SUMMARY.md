@@ -56,6 +56,16 @@ hit-test state) rather than tracked mouse coordinates, and an overlay that
 paints only part of what it knows — `claude-citations.js` skips citations
 scrolled out of their container — registers a source on
 `window.__shiftSpaceLinkSources` so a selection still reaches the undrawn ones.
+The text reader's citation links are six-pixel strips at the foot of each line
+(the text above stays selectable and editable), so each strip carries
+`data-text-height`, the height of the line it underlines, and the shortcut
+measures it as the whole line fragment for the pointer and the selection. That
+contract is a DOM attribute rather than a source, because the extension's copy
+of the script, running in the PWA's pages in an isolated world, can't see the
+page's own `window`. Without a worker the links open by `window.open`, counted
+from each call's answer (not `noopener`, which answers null either way): Chrome
+lets a page open one tab per keypress unless the site is allowed pop-ups, and
+the toast says so when the rest were blocked.
 
 ## The editor (Acrobat-style tools)
 
@@ -1959,7 +1969,7 @@ background.js                        DNR redirect rules + eCMS exclusion
 popup.html / popup.js                Provider toggle + naming mode + legend
 options.html / options.js            Web citation sites + URL patterns + naming default
 citation-site-rules.js               Site defaults + match-pattern matcher (shared)
-viewer/shift-space-open.js           Shift+Space = middle click (viewer + every site)
+viewer/shift-space-open.js           Shift+Space = middle click (viewer, text reader + every site)
 fetch-pdfjs.py / .sh                 One-time PDF.js download
 test-naming.mjs                      Node-runnable rule-engine tests
 test-citation-sites.mjs              Node-runnable web-citation-site tests

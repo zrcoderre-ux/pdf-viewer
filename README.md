@@ -229,8 +229,15 @@ scroll wheel. **Shift + Space** does the same thing from the keyboard:
 - If the mouse is resting on a link *outside* the selection, that link wins —
   the pointer is what a middle click would have acted on.
 
-It works on **every website** and in the PDF viewer, on the page's own
-hyperlinks and on the citation underlines this extension adds — both alike.
+It works on **every website**, in the PDF viewer and in the text reader, on
+the page's own hyperlinks and on the citation underlines this extension adds —
+both alike. In the text reader the underline is a thin strip under the words
+(so the text stays selectable and editable), and Shift + Space treats the
+words above it as the link: point anywhere on a citation, or select the lines
+it sits on. With **Edit** on, a selection made in the text opens its citations
+rather than typing a space over them, while a plain caret still types the space
+even with the pointer resting on a citation — only the underline strip itself
+opens then.
 **One tab per destination**, always: a citation that wraps across two lines is
 two underline strips but still one tab, a case cited three times in the
 selection is one tab, and two links that differ only in the anchor they jump to
@@ -246,6 +253,17 @@ text box it still types a space; a chat composer keeps the keyboard focus
 almost all the time, so there the shortcut answers to the mouse pointer alone
 and a selection behind the box is ignored. Turn the shortcut off entirely in
 Options → "Shift + Space opens links".
+
+**In the PWA** (no extension to ask) the links open in new tabs in front of the
+reader, because only the extension can open a tab that stays behind. Chrome also
+lets a page open just **one** tab per keypress unless the site is allowed pop-ups,
+so a selection over several links opens the first and the note says
+`Opened 1 of 3 links in new tabs — allow pop-ups for this site to open them all`.
+Allow pop-ups for the PWA's site once (the blocked-pop-up icon in the address
+bar, or Site settings → Pop-ups and redirects) and every link opens. With the
+extension installed in the same browser, the PWA gets background tabs like
+everywhere else: the extension's copy of the shortcut runs on the PWA's pages
+and hands the links to its worker.
 
 ## Auto-scroll while reading
 
@@ -2144,7 +2162,7 @@ popup.html / popup.js                Toolbar popup (provider toggle + legend)
 options.html / options.js            Options page (provider, naming, sites, OCR)
 viewer/reader-options.js             Options page: the text reader's default font and leading (module)
 citation-site-rules.js               Where web citation links may run (shared)
-viewer/shift-space-open.js           Shift+Space = middle click (viewer + all sites)
+viewer/shift-space-open.js           Shift+Space = middle click (viewer, text reader + all sites)
 viewer/viewer.html                   PDF viewer shell
 viewer/text-reader.html / .js / .css Text reader for PDF-Linker's exports (pages, cites, key)
 viewer/textdoc.js                    Text reader's document model (pure; test-textdoc.mjs)
