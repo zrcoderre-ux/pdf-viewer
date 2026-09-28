@@ -1466,8 +1466,13 @@ app, which routes it to the reader tab.
   remain is half a real name with no fake to write in its place. A value kept
   where it stands is treated the same way. On pleading paper the line numbers
   never move: a phrase wrapped across numbered lines loses its words on both
-  lines, and the replacement goes where the phrase began. Find is not
-  case-sensitive, so neither is Replace all.
+  lines, and the replacement goes where the phrase began.
+- **Match case.** The checkbox on the find bar (or **Alt+C** in either box)
+  finds only what is written in the same capitals: "Court" and not "court"
+  or "COURT". It holds for the rest of the folder too, which is searched
+  through the key, because the key writes each pseudonym in the capitals of
+  the name it stands for. Replace and Replace all follow it. It is off when a
+  reader opens, and off, case is ignored.
 - **Flag what the run missed — and un-flag what it got wrong.** The point of
   reading the real names is to spot the ones that are *not* marked. Select
   such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the

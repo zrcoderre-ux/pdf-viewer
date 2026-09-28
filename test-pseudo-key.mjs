@@ -9,7 +9,7 @@
 import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, compileFakes, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
-  compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher,
+  compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -391,6 +391,19 @@ console.log("\na value carrying a run of blank");
   findReals(deep, page);
   const ms = Date.now() - t0;
   check(`eight spaces in the value read a page of columns in ${ms} ms, not seconds`, ms < 500, true);
+}
+
+// ---- the find bar's matcher, and Match case ----------------------------------
+console.log("find matcher");
+{
+  const hits = (rx, s) => (s.match(rx) || []);
+  const text = "The Court held. COURT OF APPEAL. the court below.";
+  check("case is ignored by default", hits(buildFindMatcher(["court"]), text), ["Court", "COURT", "court"]);
+  check("Match case finds only what is written that way", hits(buildFindMatcher(["Court"], { caseSensitive: true }), text), ["Court"]);
+  check("…for every needle, the fake's face included", hits(buildFindMatcher(["Rasho", "Melbury"], { caseSensitive: true }), "Rasho, RASHO, Melbury, melbury"), ["Rasho", "Melbury"]);
+  check("a phrase still reads across a numbered line under Match case", hits(buildFindMatcher(["Superior Court"], { caseSensitive: true }), "the Superior\n 3  Court held"), ["Superior\n 3  Court"]);
+  check("part of a word is found either way", hits(buildFindMatcher(["our"], { caseSensitive: true }), "Court, OUR court"), ["our", "our"]);
+  check("nothing to look for, no matcher", buildFindMatcher(["  "], { caseSensitive: true }), null);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -487,13 +487,14 @@ function oneMatcher(alts) {
  * types part of a word on purpose, and a find that only answered on whole
  * words would be a find that misses what is plainly on the page. So: no word
  * boundaries, no possessive, and the spaces still read as gaps, so a phrase
- * wrapped at the margin over a gutter number is found as one phrase.
+ * wrapped at the margin over a gutter number is found as one phrase. Case is
+ * ignored unless `caseSensitive` (the find bar's Match case) asks for it.
  */
-export function buildFindMatcher(values) {
+export function buildFindMatcher(values, { caseSensitive = false } = {}) {
   const list = (values || []).filter((v) => String(v || "").trim());
   if (!list.length) return null;
   const alts = list.slice().sort((a, b) => b.length - a.length).map((v) => escapeRe(String(v).trim()).replace(/\s+/g, GAP));
-  return new RegExp("(?:" + alts.join("|") + ")", "gi");
+  return new RegExp("(?:" + alts.join("|") + ")", caseSensitive ? "g" : "gi");
 }
 
 export function buildMatcher(values) {
