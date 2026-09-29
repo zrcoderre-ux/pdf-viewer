@@ -587,6 +587,12 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 .page-label .swap-page:hover { background: #e3e5e8; }
 .page-label .swap-page.nopdf { opacity: 0.55; }
 .tpage.swapped .page-label .swap-page { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* ⊘ Did not OCR, beside it: strips the page's text for [DID NOT OCR]. */
+.page-label .nocr-page {
+  float: right; margin-right: 6px; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.page-label .nocr-page:hover { background: #e3e5e8; }
 /* A swapped page: the PDF page stands where its text was; the text is still
    in the DOM (and still saves) but is not shown. */
 .tpage.swapped .page-body, .tpage.swapped .link-layer { display: none; }
@@ -822,7 +828,7 @@ body.marks-off [data-here]:hover { background: transparent; }
   #pages { zoom: var(--print-zoom, 1); }
   .tpage { max-width: none; margin: 0 auto 18px; box-shadow: none; border-radius: 0; break-after: page; }
   .tpage:last-child { break-after: auto; }
-  .page-label .swap-page { display: none; }
+  .page-label .swap-page, .page-label .nocr-page { display: none; }
   .link-layer { display: none; }
   .page-body:focus { box-shadow: none; }
   .rb, .rc.hf, .rh, .pn, .held, .page-body.numbered .gutter, .page-label { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

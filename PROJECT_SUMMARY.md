@@ -223,6 +223,15 @@ is `buildFindMatcher(values, { caseSensitive })`, which drops the `i` flag;
 their matcher, and the folder scan's `findScanFor` carries the flag so a
 toggle reads the folder again.
 
+**⊘ Did not OCR** (`.nocr-page` on every label with a page header, beside
+the ⇄ PDF swap) replaces the page's lines with `textdoc.didNotOcrLines`:
+`[DID NOT OCR]` alone, except that PDF-Linker's "Authorities cited" trailer
+(`TD.TRAILER_RE`, now shared with `markTrailer`) and the blank lines before it
+stay. `markDidNotOcr` makes the edit the way `restoreSnapshot` puts a page
+back: `snapshot(body, true)`, the page's spot keeps dropped, `buildBody` from
+the new text, `doc.pages[i].lines` set, `syncSpots`, `setDirty`. One undo step;
+the page index is read off the section at the click, as the swap button's is.
+
 The LEAKS review bar works PDF-Linker's `LEAKS.xlsx` row by row from the
 text: `leaks.js` (pure) reads the worksheet by header name, classifies a
 Fix? cell the way `_pn_parse_decision_rows` will read it, parses the Where

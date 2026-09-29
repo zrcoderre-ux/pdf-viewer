@@ -14,7 +14,7 @@ import {
   addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
-  ruleParts, ruleShape, clearReading,
+  ruleParts, ruleShape, clearReading, didNotOcrLines, DID_NOT_OCR,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher } from "./viewer/pseudo-key.js";
 
@@ -494,6 +494,26 @@ console.log("clear reading (the folder's ⚠ and the page agree)");
   check("a flagged value inside a fake is not standing in the clear",
     clearReading(pg(1, ["Mary Jones and Jones."]), { rev: opts.rev, flagRx }).flags, 1);
   check("no key and no flags, nothing to read", clearReading(pg(1, ["Quillmark"]), {}), { values: [], flags: 0 });
+}
+
+// ---- a page that did not OCR ------------------------------------------------
+// The page's text goes and one line saying so takes its place; the header is
+// not a line, and PDF-Linker's trailer is not the page's text.
+console.log("did not OCR");
+{
+  check("the marker", DID_NOT_OCR, "[DID NOT OCR]");
+  check("a page of noise is one line",
+    didNotOcrLines([" 1  ~~ /l|; ,,.", " 2  rn ll1 ;:", "", " 3"]), ["[DID NOT OCR]"]);
+  check("an empty page gains the line", didNotOcrLines([]), ["[DID NOT OCR]"]);
+  check("the trailer stays, with the blank line before it",
+    didNotOcrLines(["garble", "", "====== Authorities cited (public verification links) ======", "Civ. Code, § 1717: https://example.test"]),
+    ["[DID NOT OCR]", "", "====== Authorities cited (public verification links) ======", "Civ. Code, § 1717: https://example.test"]);
+  const doc = parseExport("====== Page 1 ======\nkept\n====== Page 2 ======\n 1  a;;l\n 2  xx\n====== Page 3 ======\nkept too\n");
+  doc.pages[1].lines = didNotOcrLines(doc.pages[1].lines);
+  check("the file keeps every header and the other pages",
+    serializeExport(doc), "====== Page 1 ======\nkept\n====== Page 2 ======\n[DID NOT OCR]\n====== Page 3 ======\nkept too\n");
+  check("…and reads back as the same pages", parseExport(serializeExport(doc)).pages.map((p) => p.lines), [["kept"], ["[DID NOT OCR]"], ["kept too"]]);
+  check("a stripped page is stripped again to the same lines", didNotOcrLines(["[DID NOT OCR]"]), ["[DID NOT OCR]"]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

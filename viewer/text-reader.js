@@ -1945,6 +1945,17 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         b.addEventListener("click", (e) => { e.preventDefault(); toggleSwap(Number(sec.dataset.index)); });
         lab.appendChild(b);
       }
+      if (p.header != null) {
+        // Strip this page's text for DID_NOT_OCR (a page that did not OCR,
+        // below); read off the section at the click for the same reason.
+        const b = document.createElement("button");
+        b.className = "nocr-page";
+        b.type = "button";
+        b.textContent = "⊘ Did not OCR";
+        b.title = `Strip this page's text and write ${TD.DID_NOT_OCR} in its place — for a page the OCR mangled. The page header stays, and so does PDF-Linker's Authorities cited list at the end of the file. Ctrl+Z puts the text back; Save writes it.`;
+        b.addEventListener("click", (e) => { e.preventDefault(); markDidNotOcr(Number(sec.dataset.index)); });
+        lab.appendChild(b);
+      }
       sec.appendChild(lab);
     }
     const inner = document.createElement("div");
@@ -2083,7 +2094,7 @@ function buildBody(body, text, page, theirSpots) {
 // rest of them hold. So the lines are marked here and hidden by the
 // stylesheet while the PDF pane is open. Marked, never removed: the file
 // still carries it and a save still writes it.
-const TRAILER_RE = /^\s*=+\s*Authorities cited\b.*?=+\s*$/i;
+const TRAILER_RE = TD.TRAILER_RE;
 function markTrailer(body) {
   let inside = false;
   for (const line of body.querySelectorAll(":scope > .line")) {
@@ -4478,6 +4489,42 @@ $("fb-with").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); replaceOne(); }
   else if (e.key === "Escape") { e.preventDefault(); showFindBar(false); }
 });
+
+// ── a page that did not OCR ──────────────────────────────────────────────────────
+//
+// ⊘ Did not OCR on a page's label: the page loses its text and carries
+// TD.DID_NOT_OCR instead. It is an edit like any other — one undo step, the
+// document dirty, a save writes it — and it is made the way an undo puts a
+// page back: the body built again from its new text, the page's spot keeps
+// with it.
+function markDidNotOcr(i) {
+  if (!doc) return;
+  const p = doc.pages[i];
+  // A page is a PDF page by its header; text before the first one, a combined
+  // file's banner, or a Word export with no pages at all is not one, and its
+  // label carries no button.
+  if (!p || p.header == null) return;
+  ensurePageLive(i);
+  const body = bodyForPage(i);
+  if (!body) return;
+  const was = TD.serializeNodes(body);
+  const lines = TD.didNotOcrLines(was.split("\n"));
+  const text = lines.join("\n");
+  const m = reel.length > 1 ? reelMemberOf(i) : null;
+  const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
+  if (text === was) { toast(`${where} already reads ${TD.DID_NOT_OCR}.`); return; }
+  snapshot(body, true);
+  convertTypedRealsSoon.cancel();
+  hideTypeTip();
+  spots = spots.filter((x) => x.page !== i);
+  buildBody(body, text, i);
+  doc.pages[i].lines = lines;
+  syncSpots(body);
+  setDirty(true, i);
+  lastSnapPage = -1; // what is typed next is its own step
+  afterTextChange();
+  toast(`${where}: text stripped, ${TD.DID_NOT_OCR} in its place — Ctrl+Z puts it back.`);
+}
 
 // ── the rest of the folder ───────────────────────────────────────────────────
 //
