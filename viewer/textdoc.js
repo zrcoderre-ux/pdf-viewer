@@ -602,8 +602,10 @@ const VALUES_HEAD = [
   "# that should be left as it is in this case (a cited decision's name); a",
   "# line 'never: VALUE' keeps it in every case. A line 'phrase: VALUE' is a",
   "# value of several words faked WHOLE, as one name, a word of it the key",
-  "# fakes or keeps on its own notwithstanding. Lines beginning with # are",
-  "# ignored. Delete a line to withdraw it.",
+  "# fakes or keeps on its own notwithstanding. A line 'did not ocr: FILE |",
+  "# page N' is a page marked Did not OCR: PDF-Linker marks it in the PDF,",
+  "# never OCRs it again and exports it as [DID NOT OCR]. Lines beginning",
+  "# with # are ignored. Delete a line to withdraw it.",
 ];
 
 // A keep line: `no: VALUE` (this case) or `never: VALUE` (every case).
@@ -775,7 +777,7 @@ export function dropFlagsInKey(list, compiledForward) {
   return { kept: dropped.length ? kept : (list || []).slice(), dropped };
 }
 
-export function formatValuesFile(values, keeps, phrases) {
+export function formatValuesFile(values, keeps, phrases, noOcr) {
   const body = (values || []).map(normalizeValue).filter(Boolean)
     .map((v) => (isPhrase(phrases, v) ? `phrase: ${v}` : v));
   // A local keep is left out on purpose: the file it would go into is a list of
@@ -783,7 +785,64 @@ export function formatValuesFile(values, keeps, phrases) {
   // (keepNeedsRun). Writing it would hand PDF-Linker a value to leave exactly
   // as it already is.
   const kept = owedKeeps(keeps).map((k) => makeKeep(k.control, k.value)).filter((k) => k.value).map((k) => `${k.control}: ${k.value}`);
-  return VALUES_HEAD.concat(body, kept).join("\n") + "\n";
+  const pages = (noOcr || []).map(makeNoOcrEntry).filter(Boolean).map(noOcrLine);
+  return VALUES_HEAD.concat(body, kept, pages).join("\n") + "\n";
+}
+
+// ---- a page PDF-Linker is to leave unread -------------------------------------
+//
+// ⊘ Did not OCR strips a page in the export the reader saves, and a full
+// PDF-Linker run rebuilds every export from its PDF — so without telling it,
+// the page is OCR'd again and its noise comes back. The page is handed over as
+// one line of New Real Values.txt, `did not ocr: FILE | page N`: FILE is the
+// source PDF's name where the reader knows it (the side-by-side pane's own
+// match), else the export's, which PDF-Linker maps back to its PDF; N is the
+// PDF page, as the export's header numbers it; and a pipe separates the two
+// because no Windows file name can carry one. PDF-Linker writes a mark into
+// the PDF's page and spends the line, and from then on exports the page as
+// [DID NOT OCR] under a header saying so (headerSaysDidNotOcr) — which is how
+// the reader knows a page is PDF-Linker's now and drops it from the list.
+
+export const NOOCR_RE = /^did[\s-]*not[\s-]*ocr\s*:\s*(.+?)\s*\|\s*(?:pages?|pp?\.?)?\s*(\d+)\s*$/i;
+
+/** A page to leave unread: { doc, pdf, page }, or null without a doc and a page. */
+export function makeNoOcrEntry(e) {
+  const doc = normalizeValue(e && e.doc);
+  const pdf = normalizeValue(e && e.pdf);
+  const page = Number(e && e.page);
+  if (!(doc || pdf) || !Number.isInteger(page) || page < 1) return null;
+  return { doc: doc || pdf, pdf, page };
+}
+/** Its line in New Real Values.txt. */
+export function noOcrLine(e) {
+  const x = makeNoOcrEntry(e);
+  return x ? `did not ocr: ${x.pdf || x.doc} | page ${x.page}` : "";
+}
+/** Whether two entries name the same page: by the export, or by the file named. */
+export function sameNoOcr(a, b) {
+  const x = makeNoOcrEntry(a), y = makeNoOcrEntry(b);
+  if (!x || !y || x.page !== y.page) return false;
+  return foldKey(x.doc) === foldKey(y.doc) || foldKey(x.pdf || x.doc) === foldKey(y.pdf || y.doc);
+}
+/** The list with `entry` in it (`on`) or out of it; the same list when nothing moves. */
+export function setNoOcr(list, entry, on) {
+  const x = makeNoOcrEntry(entry);
+  const have = list || [];
+  if (!x) return have;
+  const hit = have.some((e) => sameNoOcr(e, x));
+  if (on) return hit ? have : have.concat([x]);
+  return hit ? have.filter((e) => !sameNoOcr(e, x)) : have;
+}
+/** Whether a page's lines read DID_NOT_OCR and nothing else (the trailer aside). */
+export function readsDidNotOcr(lines) {
+  const src = (lines || []).map((l) => String(l == null ? "" : l));
+  const t = src.findIndex((l) => TRAILER_RE.test(l));
+  const body = (t < 0 ? src : src.slice(0, t)).map((l) => l.trim()).filter(Boolean);
+  return body.length === 1 && body[0] === DID_NOT_OCR;
+}
+/** Whether PDF-Linker wrote the page as DID_NOT_OCR itself (its header says so). */
+export function headerSaysDidNotOcr(page) {
+  return /\bDID NOT OCR\b/.test(String((page && (page.review || page.header)) || ""));
 }
 
 /** The file's values to fake, in order (the keeps are parseReaderFile's). */
@@ -792,17 +851,26 @@ export function parseValuesFile(text) {
 }
 
 /**
- * The file's lines: { values, keeps, phrases }. A phrase line is a value to
- * fake, so it is in `values` too; `phrases` says which of them go whole.
+ * The file's lines: { values, keeps, phrases, noOcr }. A phrase line is a
+ * value to fake, so it is in `values` too; `phrases` says which of them go
+ * whole; `noOcr` is the pages marked Did not OCR ({ doc, pdf: "", page },
+ * `doc` being whatever file the line names).
  */
 export function parseReaderFile(text) {
   const values = [];
   const keeps = [];
   const phrases = [];
+  let noOcr = [];
   const seen = new Set();
   for (const raw of String(text == null ? "" : text).split(/\r?\n/)) {
     const line = raw.replace(/^\ufeff/, "").trim();
     if (!line || line[0] === "#") continue;
+    // A page, not a value: never flagged, whether or not it reads as one.
+    if (/^did[\s-]*not[\s-]*ocr\s*:/i.test(line)) {
+      const n = line.match(NOOCR_RE);
+      if (n) noOcr = setNoOcr(noOcr, { doc: n[1], page: Number(n[2]) }, true);
+      continue;
+    }
     const m = line.match(KEEP_RE);
     const p = m ? null : line.match(PHRASE_RE);
     const v = normalizeValue(m ? m[2] : p ? p[1] : line);
@@ -812,7 +880,7 @@ export function parseReaderFile(text) {
     else values.push(v);
     if (p) phrases.push(v);
   }
-  return { values, keeps, phrases };
+  return { values, keeps, phrases, noOcr };
 }
 
 /** Whether a flagged value is one to fake whole (`phrase:`). */

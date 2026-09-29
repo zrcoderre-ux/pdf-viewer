@@ -280,6 +280,10 @@
           <p class="side-hint">Wrongly faked — kept as they really read. Un-marked here now; PDF-Linker restores them in the files on its next run.</p>
           <ul id="keeps-list"></ul>
         </div>
+        <div id="nocr-block" hidden>
+          <p class="side-hint">Pages marked <strong>⊘ Did not OCR</strong>. Saved to <code>New Real Values.txt</code>; PDF-Linker marks each page in its PDF on its next run, never OCRs it again, and exports it as <code>[DID NOT OCR]</code>. Ctrl+Z on the page takes it back before a save.</p>
+          <ul id="nocr-list"></ul>
+        </div>
         <div id="master-block">
           <p class="side-hint" id="master-hint"></p>
           <ul id="master-list"></ul>

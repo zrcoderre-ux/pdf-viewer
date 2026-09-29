@@ -15,6 +15,7 @@ import {
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, didNotOcrLines, DID_NOT_OCR,
+  noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher } from "./viewer/pseudo-key.js";
 
@@ -311,7 +312,7 @@ check("keptControl", [keptControl(keeps, "PALERMO"), keptControl(keeps, "x")], [
 check("removeKeep", removeKeep(keeps, "palermo"), [{ control: "never", value: "Stockton Theatres" }]);
 const both = formatValuesFile(list, keeps);
 check("keeps written as control lines", both.endsWith("\nno: Palermo\nnever: Stockton Theatres\n"), true);
-check("both halves read back", parseReaderFile(both), { values: list, keeps, phrases: [] });
+check("both halves read back", parseReaderFile(both), { values: list, keeps, phrases: [], noOcr: [] });
 check("parseValuesFile ignores the keeps", parseValuesFile(both), list);
 // ── a keep that asks nothing of PDF-Linker ─────────────────────────────────
 //
@@ -383,7 +384,7 @@ check("a phrase is written with its control word, a plain flag bare",
   ["phrase: Cross River Bank", "Rosa Delgado", "no: Semole"]);
 check("…and read back as a value to fake that goes whole",
   parseReaderFile("# c\nphrase:  Cross River Bank \nRosa Delgado\nno: Semole\n"),
-  { values: ["Cross River Bank", "Rosa Delgado"], keeps: [{ control: "no", value: "Semole" }], phrases: ["Cross River Bank"] });
+  { values: ["Cross River Bank", "Rosa Delgado"], keeps: [{ control: "no", value: "Semole" }], phrases: ["Cross River Bank"], noOcr: [] });
 check("the round trip holds", (() => {
   const t = formatValuesFile(["Bank of America", "Helen Rasho"], [], ["Bank of America"]);
   const r = parseReaderFile(t);
@@ -514,6 +515,45 @@ console.log("did not OCR");
     serializeExport(doc), "====== Page 1 ======\nkept\n====== Page 2 ======\n[DID NOT OCR]\n====== Page 3 ======\nkept too\n");
   check("…and reads back as the same pages", parseExport(serializeExport(doc)).pages.map((p) => p.lines), [["kept"], ["[DID NOT OCR]"], ["kept too"]]);
   check("a stripped page is stripped again to the same lines", didNotOcrLines(["[DID NOT OCR]"]), ["[DID NOT OCR]"]);
+}
+
+// A page marked Did not OCR is handed to PDF-Linker as a line of New Real
+// Values.txt, or its next full run rebuilds the export from the PDF and OCRs
+// the page again. The line names the PDF where the reader knows it, else the
+// export, and the PDF page; PDF-Linker marks the page in the PDF and spends
+// the line, and from then on writes the page's header as DID NOT OCR itself.
+console.log("did not OCR, handed to PDF-Linker");
+{
+  const e = { doc: "Kingscote Decl..txt", pdf: "Feit Decl.pdf", page: 43 };
+  check("the line names the PDF where it is known", noOcrLine(e), "did not ocr: Feit Decl.pdf | page 43");
+  check("…and the export where it is not", noOcrLine({ doc: "Kingscote Decl..txt", pdf: "", page: 7 }), "did not ocr: Kingscote Decl..txt | page 7");
+  check("an entry with no page is not a line", noOcrLine({ doc: "X.txt", page: 0 }), "");
+  let list = setNoOcr([], e, true);
+  list = setNoOcr(list, { doc: "kingscote decl..txt", pdf: "", page: 43 }, true);
+  list = setNoOcr(list, { doc: "Feit Decl.pdf", pdf: "", page: 43 }, true);
+  check("one page, one entry, however it is named", list.length, 1);
+  check("another page of it is another entry", setNoOcr(list, { ...e, page: 44 }, true).length, 2);
+  check("off again", setNoOcr(list, e, false), []);
+  check("nothing moves, the same list", setNoOcr(list, e, true) === list, true);
+  check("sameNoOcr needs the page", sameNoOcr(e, { ...e, page: 1 }), false);
+  const file = formatValuesFile(["Rosa Delgado"], [{ control: "no", value: "Semole" }], [], list);
+  check("written after the values and the keeps",
+    file.split("\n").filter((l) => l && l[0] !== "#"),
+    ["Rosa Delgado", "no: Semole", "did not ocr: Feit Decl.pdf | page 43"]);
+  const back = parseReaderFile(file);
+  check("read back, never as a value", [back.values, back.noOcr], [["Rosa Delgado"], [{ doc: "Feit Decl.pdf", pdf: "", page: 43 }]]);
+  check("…and written again the same", formatValuesFile(back.values, back.keeps, back.phrases, back.noOcr), file);
+  check("a line PDF-Linker would write back reads too",
+    parseReaderFile("DID NOT OCR:  Exhibits.pdf  |  p. 9\n").noOcr, [{ doc: "Exhibits.pdf", pdf: "", page: 9 }]);
+  check("an unreadable one is still no value", parseReaderFile("did not ocr: Exhibits page nine\n"), { values: [], keeps: [], phrases: [], noOcr: [] });
+  check("NOOCR_RE takes the pipe form", NOOCR_RE.test("did not ocr: A.pdf | page 2"), true);
+  check("a stripped page reads Did not OCR", readsDidNotOcr(didNotOcrLines([" 1  soup"])), true);
+  check("…the trailer aside", readsDidNotOcr(["[DID NOT OCR]", "", "====== Authorities cited (public verification links) ======", "x"]), true);
+  check("a page of text does not", readsDidNotOcr(["[DID NOT OCR]", "more"]), false);
+  const ran = parseExport("====== Page 2 — NOTE: marked DID NOT OCR; the page's text is left out ======\n[DID NOT OCR]\n");
+  check("PDF-Linker's own header says the page is its now", headerSaysDidNotOcr(ran.pages[0]), true);
+  check("…and an ordinary one does not", headerSaysDidNotOcr(parseExport("====== Page 2 ======\n[DID NOT OCR]\n").pages[0]), false);
+  check("…and the header round-trips byte for byte", serializeExport(ran), "====== Page 2 — NOTE: marked DID NOT OCR; the page's text is left out ======\n[DID NOT OCR]\n");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
