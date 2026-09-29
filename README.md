@@ -2037,6 +2037,20 @@ app, which routes it to the reader tab.
   stays, and so does PDF-Linker's *Authorities cited* list when it is the
   last page that is stripped. It is an edit like any other: Ctrl+Z puts the
   text back, and 💾 Save writes it.
+  **And PDF-Linker is told, so the page stays stripped.** A full PDF-Linker
+  run rebuilds every export from its PDF, so on its own the strip lasted until
+  the next run, which OCR'd the page again and wrote the noise back. The page
+  now also goes on `New Real Values.txt`, as a line `did not ocr: FILE | page
+  N` — FILE is the PDF's name where the reader knows it (the side-by-side
+  pane's own match) and the export's otherwise, N the PDF page — and 💾 Save
+  writes it with the document. PDF-Linker's next run (or **Apply Fixes**)
+  marks the page in the PDF itself, never OCRs it again, and exports it as
+  `[DID NOT OCR]` under a header saying so; the line is spent from the file
+  as the mark lands. The Flagged panel lists the pages waiting to be handed
+  over, and a page comes off that list when Ctrl+Z puts its text back or
+  when an export PDF-Linker wrote shows it as its own. The list is read off
+  the pages, so a reload, an undo or another session's save cannot leave it
+  saying something the text does not.
 
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and

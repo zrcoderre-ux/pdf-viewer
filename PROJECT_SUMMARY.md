@@ -231,6 +231,24 @@ stay. `markDidNotOcr` makes the edit the way `restoreSnapshot` puts a page
 back: `snapshot(body, true)`, the page's spot keeps dropped, `buildBody` from
 the new text, `doc.pages[i].lines` set, `syncSpots`, `setDirty`. One undo step;
 the page index is read off the section at the click, as the swap button's is.
+The page is also handed to PDF-Linker, whose next full run would otherwise
+rebuild the export from the PDF and OCR the page again: `noOcr` (beside
+`flagged` and `keeps`, persisted with them, merged from the file on disk at
+adoption) is written by `formatValuesFile` as `did not ocr: FILE | page N`
+(`textdoc.noOcrLine`; FILE is `pdfForName(doc) || doc`, N `PS.pdfPageOf`) and
+read back by `parseReaderFile` into `noOcr`, never into `values`.
+`syncNoOcr(indices, { drop })` keeps the list following the PAGES: a page
+reading `[DID NOT OCR]` (`readsDidNotOcr`, the trailer aside) under a header
+PDF-Linker did not write is owed; one whose header PDF-Linker wrote as DID NOT
+OCR (`headerSaysDidNotOcr`) is the run's and comes off; with `drop`, a page
+that no longer reads it comes off too. Asked by `markDidNotOcr`, by
+`restoreSnapshot` (with `drop`, so an undo takes the entry back), by
+`openText` and adoption, and by `saveDocument` — with `drop` for the pages of
+the files it writes, since those are the text's last word. Entries are equal
+by page and by either name (`sameNoOcr`), so a line read back naming the PDF
+and one made from the open export are one. `#nocr-block` in the Flagged
+panel lists them. PDF-Linker marks the page in the PDF (`_NO_OCR_MARK_KEY`)
+and spends the line.
 
 The LEAKS review bar works PDF-Linker's `LEAKS.xlsx` row by row from the
 text: `leaks.js` (pure) reads the worksheet by header name, classifies a
