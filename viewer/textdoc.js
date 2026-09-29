@@ -141,6 +141,33 @@ export function gutterPrefix(line) {
   return { gutter: m[0], rest: line.slice(m[0].length) };
 }
 
+// PDF-Linker ends an export with a trailer of its own: a
+// "====== Authorities cited (public verification links) ======" rule and a
+// line per authority under it, riding on the last page's lines.
+export const TRAILER_RE = /^\s*=+\s*Authorities cited\b.*?=+\s*$/i;
+
+// ---- a page that did not OCR ----------------------------------------------------
+//
+// A page whose text is not worth keeping — an exhibit the OCR mangled, a
+// photograph read as letters — is written as this one line instead, so whoever
+// reads the export next (PDF-Linker, a model, a person) is told the page is
+// there and its text is not, rather than handed the noise.
+export const DID_NOT_OCR = "[DID NOT OCR]";
+
+/**
+ * A page's lines with its text stripped and DID_NOT_OCR in its place. The
+ * page header is not a line and is untouched; the trailer is PDF-Linker's and
+ * not the page's text, so it stays, with the blank lines that stood before it.
+ */
+export function didNotOcrLines(lines) {
+  const src = (lines || []).map((l) => String(l == null ? "" : l));
+  const t = src.findIndex((l) => TRAILER_RE.test(l));
+  if (t < 0) return [DID_NOT_OCR];
+  let from = t;
+  while (from > 0 && !src[from - 1].trim()) from--;
+  return [DID_NOT_OCR, ...src.slice(from)];
+}
+
 // ---- the page body's DOM, both ways ---------------------------------------------
 //
 // The reader renders a page body as text nodes, gutter spans (decoration

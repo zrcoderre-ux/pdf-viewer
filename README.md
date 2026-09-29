@@ -2029,6 +2029,15 @@ app, which routes it to the reader tab.
   by PDF page number. Rendered pages are dropped as they scroll far out of
   view, so a long PDF costs no more than the pages in reach.
 
+- **⊘ Did not OCR strips a page's text for good.** Where ⇄ PDF hides a
+  mangled page's text and still saves it, **⊘ Did not OCR** on the page's
+  label (beside ⇄ PDF) takes the text out and writes one line in its place,
+  `[DID NOT OCR]`, so whoever reads the export next is told the page is there
+  and its text is not, instead of being handed the noise. The page header
+  stays, and so does PDF-Linker's *Authorities cited* list when it is the
+  last page that is stripped. It is an edit like any other: Ctrl+Z puts the
+  text back, and 💾 Save writes it.
+
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and
   saves a flattened copy with what has to go blacked out. It is the same
