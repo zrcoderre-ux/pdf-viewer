@@ -31,9 +31,9 @@
      same job, not the same value. */
   --note: #ffd97d;        /* a decision waiting, a count, a state (10.2:1 here) */
   --note-strong: #ffb094; /* the same, urgent: a leak, a warning (7.8:1) */
-  --pn-bg: rgba(245, 197, 24, 0.18);      /* set from the settings at run time */
-  --pn-bg-hover: rgba(245, 197, 24, 0.48);
-  --pn-ring: rgba(245, 197, 24, 0.11);
+  --pn-bg: rgba(25, 220, 250, 0.18);      /* set from the settings at run time */
+  --pn-bg-hover: rgba(25, 220, 250, 0.48);
+  --pn-ring: rgba(25, 220, 250, 0.11);
   --flag-bg: rgba(244, 67, 54, 0.22);
   --leak-bg: rgba(255, 112, 67, 0.35);
   --reader-font: Georgia, serif;
