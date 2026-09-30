@@ -2051,6 +2051,17 @@ app, which routes it to the reader tab.
   when an export PDF-Linker wrote shows it as its own. The list is read off
   the pages, so a reload, an undo or another session's save cannot leave it
   saying something the text does not.
+  **…and ↻ OCR This Page undoes it.** On a page that already reads
+  `[DID NOT OCR]` the same button reads **↻ OCR This Page**. Where the strip
+  is the reader's own and its line never reached the case folder, the page's
+  text comes straight back (one undo step; Ctrl+Z strips it again). Otherwise
+  PDF-Linker may already have marked the page in its PDF, so the page goes on
+  `New Real Values.txt` as `ocr again: FILE | page N`: PDF-Linker takes the
+  mark off and its next full run reads the page again and exports its text.
+  Until then the page still reads `[DID NOT OCR]`, the button shows the
+  request as made (**✓ OCR This Page**), and a second click withdraws it. The
+  Flagged panel lists these pages too, and a page comes off that list once an
+  export shows it read again.
 
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and

@@ -250,6 +250,25 @@ and one made from the open export are one. `#nocr-block` in the Flagged
 panel lists them. PDF-Linker marks the page in the PDF (`_NO_OCR_MARK_KEY`)
 and spends the line.
 
+The button toggles (`nocrButtonClick`, `setNocrButton`, `refreshNocrButtons`):
+on a page that reads `[DID NOT OCR]` (`pageReadsDidNotOcr` — the lines, or a
+short page's live body while it is typed into) it is **↻ OCR This Page**
+(`ocrPageAgain`). Where the header is not PDF-Linker's DID NOT OCR one and the
+page's `did not ocr` line never reached the folder (it is not in the saved
+file's text, `valuesSavedKey`), the text the strip took is put back
+(`strippedTextOf`: the newest undo snapshot of that page tagged `nocr` by
+`markDidNotOcr`, whose text does not read `[DID NOT OCR]`; `stepHistory`
+carries the tag to the other stack) by `putStrippedBack`, one undo step.
+Otherwise the page's `noOcr` entry comes off and an `ocrAgain` entry goes on
+(persisted, merged at adoption only for a page neither list names, written by
+`formatValuesFile` as `ocr again: FILE | page N`, `textdoc.ocrAgainLine`, and
+read back into `ocrAgain`); the button then reads **✓ OCR This Page** (`.on`,
+`aria-pressed`) and a click withdraws it. `syncNoOcr` keeps both lists: a page
+with a request is not also owed as not to OCR, and the request comes off once
+the page reads as read under a header that is not DID NOT OCR (PDF-Linker's
+full run has taken the mark off). `markDidNotOcr` withdraws a request for the
+page it strips. `#ocr-again-block` lists them.
+
 The LEAKS review bar works PDF-Linker's `LEAKS.xlsx` row by row from the
 text: `leaks.js` (pure) reads the worksheet by header name, classifies a
 Fix? cell the way `_pn_parse_decision_rows` will read it, parses the Where

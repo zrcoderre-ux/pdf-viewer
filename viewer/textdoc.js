@@ -604,8 +604,10 @@ const VALUES_HEAD = [
   "# value of several words faked WHOLE, as one name, a word of it the key",
   "# fakes or keeps on its own notwithstanding. A line 'did not ocr: FILE |",
   "# page N' is a page marked Did not OCR: PDF-Linker marks it in the PDF,",
-  "# never OCRs it again and exports it as [DID NOT OCR]. Lines beginning",
-  "# with # are ignored. Delete a line to withdraw it.",
+  "# never OCRs it again and exports it as [DID NOT OCR]. A line 'ocr again:",
+  "# FILE | page N' undoes that: PDF-Linker takes the mark off the page and",
+  "# its next full run reads the page again. Lines beginning with # are",
+  "# ignored. Delete a line to withdraw it.",
 ];
 
 // A keep line: `no: VALUE` (this case) or `never: VALUE` (every case).
@@ -777,7 +779,7 @@ export function dropFlagsInKey(list, compiledForward) {
   return { kept: dropped.length ? kept : (list || []).slice(), dropped };
 }
 
-export function formatValuesFile(values, keeps, phrases, noOcr) {
+export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain) {
   const body = (values || []).map(normalizeValue).filter(Boolean)
     .map((v) => (isPhrase(phrases, v) ? `phrase: ${v}` : v));
   // A local keep is left out on purpose: the file it would go into is a list of
@@ -786,7 +788,8 @@ export function formatValuesFile(values, keeps, phrases, noOcr) {
   // as it already is.
   const kept = owedKeeps(keeps).map((k) => makeKeep(k.control, k.value)).filter((k) => k.value).map((k) => `${k.control}: ${k.value}`);
   const pages = (noOcr || []).map(makeNoOcrEntry).filter(Boolean).map(noOcrLine);
-  return VALUES_HEAD.concat(body, kept, pages).join("\n") + "\n";
+  const again = (ocrAgain || []).map(makeNoOcrEntry).filter(Boolean).map(ocrAgainLine);
+  return VALUES_HEAD.concat(body, kept, pages, again).join("\n") + "\n";
 }
 
 // ---- a page PDF-Linker is to leave unread -------------------------------------
@@ -833,6 +836,28 @@ export function setNoOcr(list, entry, on) {
   if (on) return hit ? have : have.concat([x]);
   return hit ? have.filter((e) => !sameNoOcr(e, x)) : have;
 }
+// ---- …and a page PDF-Linker is to read again ------------------------------------
+//
+// ↻ OCR This Page undoes ⊘ Did not OCR. Where the strip is the reader's own and
+// never reached the case folder, the reader puts the page's text back itself;
+// otherwise the page may already be marked in its PDF, and only PDF-Linker can
+// take the mark off. It is handed over the same way, one line of New Real
+// Values.txt naming the page the same way: `ocr again: FILE | page N`.
+// PDF-Linker takes the mark off (and its own record of having read the page),
+// spends the line, and its next full run reads the page and exports its text —
+// which is how the reader knows the request is done and drops it.
+export const OCRAGAIN_RE = /^ocr[\s-]*(?:this[\s-]*page[\s-]*)?again\s*:\s*(.+?)\s*\|\s*(?:pages?|pp?\.?)?\s*(\d+)\s*$/i;
+// Any line opening that way is a page, never a value, whether or not it reads.
+const OCRAGAIN_LEAD_RE = /^ocr[\s-]*(?:this[\s-]*page[\s-]*)?again\s*:/i;
+
+/** Its line in New Real Values.txt (an entry as makeNoOcrEntry reads it). */
+export function ocrAgainLine(e) {
+  const x = makeNoOcrEntry(e);
+  return x ? `ocr again: ${x.pdf || x.doc} | page ${x.page}` : "";
+}
+/** The list with `entry` in it or out of it — the same page list setNoOcr keeps. */
+export const setOcrAgain = setNoOcr;
+
 /** Whether a page's lines read DID_NOT_OCR and nothing else (the trailer aside). */
 export function readsDidNotOcr(lines) {
   const src = (lines || []).map((l) => String(l == null ? "" : l));
@@ -851,16 +876,18 @@ export function parseValuesFile(text) {
 }
 
 /**
- * The file's lines: { values, keeps, phrases, noOcr }. A phrase line is a
- * value to fake, so it is in `values` too; `phrases` says which of them go
- * whole; `noOcr` is the pages marked Did not OCR ({ doc, pdf: "", page },
- * `doc` being whatever file the line names).
+ * The file's lines: { values, keeps, phrases, noOcr, ocrAgain }. A phrase
+ * line is a value to fake, so it is in `values` too; `phrases` says which of
+ * them go whole; `noOcr` is the pages marked Did not OCR and `ocrAgain` the
+ * pages to read again ({ doc, pdf: "", page }, `doc` being whatever file the
+ * line names).
  */
 export function parseReaderFile(text) {
   const values = [];
   const keeps = [];
   const phrases = [];
   let noOcr = [];
+  let ocrAgain = [];
   const seen = new Set();
   for (const raw of String(text == null ? "" : text).split(/\r?\n/)) {
     const line = raw.replace(/^\ufeff/, "").trim();
@@ -869,6 +896,11 @@ export function parseReaderFile(text) {
     if (/^did[\s-]*not[\s-]*ocr\s*:/i.test(line)) {
       const n = line.match(NOOCR_RE);
       if (n) noOcr = setNoOcr(noOcr, { doc: n[1], page: Number(n[2]) }, true);
+      continue;
+    }
+    if (OCRAGAIN_LEAD_RE.test(line)) {
+      const n = line.match(OCRAGAIN_RE);
+      if (n) ocrAgain = setOcrAgain(ocrAgain, { doc: n[1], page: Number(n[2]) }, true);
       continue;
     }
     const m = line.match(KEEP_RE);
@@ -880,7 +912,7 @@ export function parseReaderFile(text) {
     else values.push(v);
     if (p) phrases.push(v);
   }
-  return { values, keeps, phrases, noOcr };
+  return { values, keeps, phrases, noOcr, ocrAgain };
 }
 
 /** Whether a flagged value is one to fake whole (`phrase:`). */
