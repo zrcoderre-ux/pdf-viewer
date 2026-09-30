@@ -902,6 +902,16 @@ flagged values (already answered). `goToLeak` by any other road cancels the
 sweep. `rowHere` holds the worksheet row's own occurrence, since `leakHere` is
 shared with the names walk.
 
+Only a names bar the operator opened stops the review: `pageSweepFor` returns
+null while `namesBar` is hidden, so with the bar down a decision goes straight
+to `goToLeak` and the review never puts the bar up for a sweep (the sweep's
+old `opened` flag, which put back down a bar the sweep had opened, went with
+that). **×** on the names bar during a sweep closes the bar and then
+`finishPageSweep`s on to the worksheet's next row, so the review stops on no
+more names until the bar is opened again (`leaksFromCount`, Alt+L). `goToLeak`
+dropping a sweep re-renders the bar, which is up, so its count stops reading
+"left on page N".
+
 ### Opening ONE FILE is not opening its folder
 
 A file opened on its own used to bring its whole folder with it: the reader

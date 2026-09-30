@@ -5086,7 +5086,10 @@ function decideName(what) {
 $("nb-prev").addEventListener("click", () => stepLeak(-1));
 $("nb-next").addEventListener("click", () => stepLeak(1));
 $("nb-find").addEventListener("click", () => { const h = liveLeaks()[Math.max(0, leakStep)]; if (h) scrollRangeTo(h.range); });
-$("nb-close").addEventListener("click", () => { if (pageSweep) finishPageSweep(); else showNamesBar(false); });
+// Closing the bar puts the names walk away, a page being finished with it: the
+// LEAKS review goes on to its next row, and stops on no more names until the
+// bar is opened again (pageSweepFor).
+$("nb-close").addEventListener("click", () => { const sweeping = !!pageSweep; showNamesBar(false); if (sweeping) finishPageSweep(); });
 /**
  * "Fake it": the decision, and the save's licence to act on it.
  *
@@ -6421,7 +6424,7 @@ async function goToLeak(i, { locate = true } = {}) {
   const rows = leakRows();
   if (!rows.length) return;
   // Going to a row by any road is leaving the page it was being finished on.
-  if (pageSweep) { const sw = pageSweep; pageSweep = null; if (sw.opened) showNamesBar(false); }
+  if (pageSweep) { pageSweep = null; renderNamesBar(); }
   const was = leaks.at;
   leaks.at = ((i % rows.length) + rows.length) % rows.length;
   const row = rows[leaks.at];
@@ -6697,11 +6700,19 @@ function acceptLeak() {
 // the next row, LK.sweepSpan), in the names bar, with its buttons. When the
 // page has nothing left the review goes on to its next row.
 //
+// ONLY WHERE THE OPERATOR HAS THE NAMES BAR UP. The names are the reader's own
+// finding, not the worksheet's, and a review that is working the worksheet is
+// working the worksheet: a decision there goes straight on to the next row.
+// The bar opened by hand (the status bar's count, Alt+L) is the operator
+// asking for the names as well, and then the page is finished before the
+// review leaves it. The review never opens the bar for this itself.
+//
 // Not stopped on: a name the worksheet has a row for — that row is where it
 // is answered, before or after — and the red flagged values, which are
 // decisions already taken. A name skipped (the bar's skip) is left for the
-// status bar's walk; closing the names bar leaves the rest of the page.
-// pageSweep (declared at the head of the file): { from, doc, seq, lo, hi, label, rowVals, cursor: [page, offset] | null, opened }
+// status bar's walk; closing the names bar leaves the rest of the page, and
+// the review stops on no more names until it is opened again.
+// pageSweep (declared at the head of the file): { from, doc, seq, lo, hi, label, rowVals, cursor: [page, offset] | null }
 /** A range's place in the document: its page's index and its offset in that page's text. */
 function rangePos(range) {
   const node = range && range.startContainer;
@@ -6735,6 +6746,7 @@ function sweepStops() {
 }
 /** What the review leaves behind going from the row in front to row `n` (-1: none left): a sweep, or null. */
 function pageSweepFor(n) {
+  if (namesBar.hidden) return null; // the names walk is not up: the worksheet alone
   if (!doc || !marksCanRead() || !reals || !readHere()) return null;
   if (!rowHere || !rowHere.startContainer.isConnected) return null;
   const rows = leakRows();
@@ -6758,7 +6770,6 @@ function pageSweepFor(n) {
     from: leaks.at, doc: dname, seq: docSeq, lo: span.lo, hi: span.hi, cursor: null,
     label: last && last.index > span.lo ? `${pageName(span.lo)} to ${pageName(last.index)}` : pageName(span.lo),
     rowVals: new Set(rows.map((r) => LK.fold(r.value)).filter(Boolean)),
-    opened: namesBar.hidden,
   };
   if (sweepStops().length) return pageSweep;
   pageSweep = null;
@@ -6794,8 +6805,7 @@ function finishPageSweep() {
   const sw = pageSweep;
   pageSweep = null;
   if (!sw) return;
-  if (sw.opened) showNamesBar(false);
-  else renderNamesBar();
+  renderNamesBar();
   const n = LK.nextUndecided(leakRows(), sw.from);
   if (n >= 0) goToLeak(n);
   else toast("Every row is answered — save the worksheet, then Apply Fixes.");
