@@ -593,6 +593,8 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
   font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 .page-label .nocr-page:hover { background: #e3e5e8; }
+/* ↻ OCR This Page, asked: the request is on the list for PDF-Linker. */
+.page-label .nocr-page.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 /* A swapped page: the PDF page stands where its text was; the text is still
    in the DOM (and still saves) but is not shown. */
 .tpage.swapped .page-body, .tpage.swapped .link-layer { display: none; }

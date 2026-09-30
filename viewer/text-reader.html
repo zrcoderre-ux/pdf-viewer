@@ -284,6 +284,10 @@
           <p class="side-hint">Pages marked <strong>⊘ Did not OCR</strong>. Saved to <code>New Real Values.txt</code>; PDF-Linker marks each page in its PDF on its next run, never OCRs it again, and exports it as <code>[DID NOT OCR]</code>. Ctrl+Z on the page takes it back before a save.</p>
           <ul id="nocr-list"></ul>
         </div>
+        <div id="ocr-again-block" hidden>
+          <p class="side-hint">Pages marked <strong>↻ OCR This Page</strong>. Saved to <code>New Real Values.txt</code> as <code>ocr again</code>; PDF-Linker takes each page's DID NOT OCR mark off, and its next full run reads the page again and exports its text. Click the page's button again to withdraw.</p>
+          <ul id="ocr-again-list"></ul>
+        </div>
         <div id="master-block">
           <p class="side-hint" id="master-hint"></p>
           <ul id="master-list"></ul>

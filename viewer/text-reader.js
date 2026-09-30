@@ -136,6 +136,7 @@ let flagsFor = null;         // …the storage key that list was read from, whil
 let phrases = [];            // …which of them are PHRASES: several words faked whole (`phrase:`)
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
 let noOcr = [];              // …and the pages marked ⊘ Did not OCR: [{ doc, pdf, page }] (syncNoOcr)
+let ocrAgain = [];           // …and the pages to read again, ↻ OCR This Page (ocrPageAgain)
 let spots = [];              // spot keeps for the open document: [{ page, value, nth }]
 let masterKeeps = [];        // standing keeps from PDF-Linker's master workbook (its KEEP sheet)
 let masterInfo = null;       // { name, sheet, rows, partial } once it is attached
@@ -1428,6 +1429,7 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   keeps = stored.keeps;
   phrases = stored.phrases;
   noOcr = stored.noOcr;
+  ocrAgain = stored.ocrAgain;
   if (found.valuesHandle) {
     try {
       const onDisk = TD.parseReaderFile(await (await found.valuesHandle.getFile()).text());
@@ -1439,7 +1441,12 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
       for (const v of onDisk.values) if (!TD.fakeFor(fwd, v)) flagged = TD.addValue(flagged, v);
       for (const v of onDisk.phrases) if (TD.isPhrase(flagged, v)) phrases = TD.addValue(phrases, v);
       for (const k of onDisk.keeps) if (!TD.keptControl(keeps, k.value)) keeps = TD.addKeep(keeps, k.control, k.value);
-      for (const e of onDisk.noOcr) noOcr = TD.setNoOcr(noOcr, e, true);
+      // A page line on disk is the list as it was last written; the list in
+      // hand is newer, so a page either list already names is left to it —
+      // or a page asked to be read again since would come back as not to OCR.
+      const named = (e) => noOcr.some((x) => TD.sameNoOcr(x, e)) || ocrAgain.some((x) => TD.sameNoOcr(x, e));
+      for (const e of onDisk.noOcr) if (!named(e)) noOcr = TD.setNoOcr(noOcr, e, true);
+      for (const e of onDisk.ocrAgain) if (!named(e)) ocrAgain = TD.setOcrAgain(ocrAgain, e, true);
     } catch { /* unreadable: the in-memory list stands */ }
   }
   persistValues();
@@ -1952,14 +1959,16 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
       }
       if (p.header != null) {
         // Strip this page's text for DID_NOT_OCR (a page that did not OCR,
-        // below); read off the section at the click for the same reason.
+        // below), or — on a page that already reads it — ask for it to be
+        // read again; read off the section at the click for the same reason.
         const b = document.createElement("button");
         b.className = "nocr-page";
         b.type = "button";
-        b.textContent = "⊘ Did not OCR";
-        b.title = `Strip this page's text and write ${TD.DID_NOT_OCR} in its place — for a page the OCR mangled. The page header stays, and so does PDF-Linker's Authorities cited list at the end of the file. Save writes it, and puts the page on ${TD.VALUES_FILE} so PDF-Linker never OCRs it again and exports it as ${TD.DID_NOT_OCR}. Ctrl+Z puts the text back.`;
-        b.addEventListener("click", (e) => { e.preventDefault(); markDidNotOcr(Number(sec.dataset.index)); });
+        b.addEventListener("click", (e) => { e.preventDefault(); nocrButtonClick(Number(sec.dataset.index)); });
         lab.appendChild(b);
+        // As the page reads; whether a request is already made is settled
+        // once the document is up and its lists are in hand (syncNoOcr).
+        setNocrButton(b, TD.readsDidNotOcr(p.lines), false, TD.headerSaysDidNotOcr(p));
       }
       sec.appendChild(lab);
     }
@@ -2248,6 +2257,7 @@ pagesEl.addEventListener("input", (e) => {
   if (!body) return;
   normalizeLines(body);
   setDirty(true, pageIndexOf(body));
+  refreshNocrButtons([pageIndexOf(body)]); // typed onto a [DID NOT OCR] page, or down to one
   offerAtCaret(body);
   convertTypedRealsSoon(body);
   afterTextChangeSoon();
@@ -2891,7 +2901,8 @@ function stepHistory(from, to) {
   while (top.batch && from.length && from[from.length - 1].batch === top.batch) pages.push(from.pop());
   for (const snap of pages) {
     const body = bodyForPage(snap.page);
-    if (body) to.push({ ...snapshotOf(body), batch: snap.batch });
+    // …with the strip's tag: the two sides of one step (strippedTextOf).
+    if (body) to.push({ ...snapshotOf(body), batch: snap.batch, nocr: snap.nocr });
     restoreSnapshot(snap, { settle: pages.length === 1 });
   }
   if (pages.length > 1) afterTextChange();
@@ -3095,7 +3106,7 @@ async function saveDocument() {
   let alsoList = "";
   if (valuesDirty()) {
     alsoList = await saveValuesFile({ quiet: true, folderOnly: true })
-      ? ` · ${TD.VALUES_FILE} written too (${flagged.length} to fake, ${keeps.length} to keep${noOcr.length ? `, ${noOcr.length} page${noOcr.length === 1 ? "" : "s"} not to OCR` : ""})`
+      ? ` · ${TD.VALUES_FILE} written too (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()})`
       : " · the flagged list is still unwritten — no case folder is open, so save it from the Flagged panel";
   }
   // …and the worksheet, for the same reason: the rows answered while reading
@@ -4528,6 +4539,17 @@ function markDidNotOcr(i) {
   const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
   if (text === was) { toast(`${where} already reads ${TD.DID_NOT_OCR}.`); return; }
   snapshot(body, true);
+  // The step remembers that it is a strip: its snapshot is the page's text as
+  // it read BEFORE, which ↻ OCR This Page puts back (strippedTextOf).
+  const top = undoStack[undoStack.length - 1];
+  if (top && top.page === i) top.nocr = true;
+  // A request to read the page again is withdrawn by stripping it again.
+  const entry = pageEntryAt(i);
+  if (entry && ocrAgain.some((e) => TD.sameNoOcr(e, entry))) {
+    ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
+    persistValues();
+    renderFlags();
+  }
   convertTypedRealsSoon.cancel();
   hideTypeTip();
   spots = spots.filter((x) => x.page !== i);
@@ -4541,6 +4563,151 @@ function markDidNotOcr(i) {
   lastSnapPage = -1; // what is typed next is its own step
   afterTextChange();
   toast(`${where}: text stripped, ${TD.DID_NOT_OCR} in its place — Save writes it, and puts the page on ${TD.VALUES_FILE} so PDF-Linker never OCRs it again. Ctrl+Z puts it back.`);
+}
+
+// ── …and a page to read again ────────────────────────────────────────────────────
+//
+// On a page that already reads TD.DID_NOT_OCR the same button is ↻ OCR This
+// Page, and it undoes the strip. Two cases, told apart by what PDF-Linker can
+// already have been told.
+//
+//   The strip is the reader's own and never reached the case folder: its line
+//   was never written to New Real Values.txt and the page's header is not
+//   PDF-Linker's DID NOT OCR one. The reader still holds the text it stripped
+//   (the strip's undo step, strippedTextOf), so it puts that text straight
+//   back — one undo step, Ctrl+Z strips it again — and the page is off the list
+//   of pages not to OCR. Nothing is owed to PDF-Linker: its PDF was never
+//   marked.
+//
+//   Anything else — PDF-Linker marked the page (its header says so), the line
+//   was written to the folder and may have been spent, or the text is no
+//   longer in hand — only PDF-Linker can put the page back, since the mark may
+//   be in the PDF. The page goes on New Real Values.txt as `ocr again: FILE |
+//   page N` (TD.ocrAgainLine); PDF-Linker takes the mark off the page, and its
+//   next full run reads it and exports its text. The page reads
+//   TD.DID_NOT_OCR until then, so the button shows the request as made
+//   (✓ OCR This Page), and a second click withdraws it. The request is done
+//   once the page reads as read, off a header that is not DID NOT OCR
+//   (syncNoOcr).
+function ocrPageAgain(i) {
+  if (!doc) return;
+  const p = doc.pages[i];
+  if (!p || p.header == null) return;
+  const m = reel.length > 1 ? reelMemberOf(i) : null;
+  const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
+  const entry = pageEntryAt(i);
+  if (entry && ocrAgain.some((e) => TD.sameNoOcr(e, entry))) {
+    ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
+    persistValues();
+    renderFlags();
+    syncNoOcr([i]); // …and a strip of the reader's own is owed as not to OCR again
+    toast(`${where}: the request to OCR it again is withdrawn — the page stays ${TD.DID_NOT_OCR}.`);
+    return;
+  }
+  if (!TD.headerSaysDidNotOcr(p)) {
+    const had = entry && noOcr.find((e) => TD.sameNoOcr(e, entry));
+    const reached = !!had && lsGet(valuesSavedKey(), "").split("\n").includes(TD.noOcrLine(had));
+    const sn = reached ? null : strippedTextOf(i);
+    if (sn && putStrippedBack(i, sn)) {
+      toast(`${where}: its text is back, as it read before ⊘ Did not OCR — the mark never reached the case folder, so PDF-Linker has nothing to undo. Ctrl+Z strips it again.`);
+      return;
+    }
+  }
+  if (!entry) {
+    toast(`${where} carries no PDF page number, so PDF-Linker cannot be told which page to read again.`, { error: true });
+    return;
+  }
+  if (flagsFor !== valuesStoreKey()) {
+    toast("The case folder's list is still being read — try again in a moment.", { error: true });
+    return;
+  }
+  noOcr = TD.setNoOcr(noOcr, entry, false);
+  ocrAgain = TD.setOcrAgain(ocrAgain, entry, true);
+  persistValues();
+  renderFlags();
+  toast(`${where}: asked to be OCR'd again — Save puts it on ${TD.VALUES_FILE}; PDF-Linker takes its DID NOT OCR mark off, and its next full run reads the page and exports its text. Click again to withdraw.`);
+}
+
+/** The page's text from before its latest ⊘ Did not OCR, while the undo history holds it. */
+function strippedTextOf(i) {
+  for (let k = undoStack.length - 1; k >= 0; k--) {
+    const sn = undoStack[k];
+    if (sn.page === i && sn.nocr && !TD.readsDidNotOcr(sn.text.split("\n"))) return sn;
+  }
+  return null;
+}
+
+/** Put a stripped page's text back, as an edit of its own: one undo step. */
+function putStrippedBack(i, sn) {
+  ensurePageLive(i);
+  const body = bodyForPage(i);
+  if (!body) return false;
+  snapshot(body, true);
+  convertTypedRealsSoon.cancel();
+  hideTypeTip();
+  spots = spots.filter((x) => x.page !== i).concat(sn.spots || []);
+  buildBody(body, sn.text, i);
+  doc.pages[i].lines = sn.text.split("\n");
+  syncSpots(body);
+  setDirty(true, i);
+  syncNoOcr([i], { drop: true }); // off the list of pages not to OCR
+  lastSnapPage = -1;
+  afterTextChange();
+  return true;
+}
+
+/** The label's button: ⊘ Did not OCR on a page of text, ↻ OCR This Page on one that reads DID_NOT_OCR. */
+function nocrButtonClick(i) {
+  if (!doc || !doc.pages[i]) return;
+  if (pageReadsDidNotOcr(i)) ocrPageAgain(i);
+  else markDidNotOcr(i);
+}
+/**
+ * Whether page `i` reads DID_NOT_OCR as it stands. Its lines are the text as
+ * last settled; typing does not settle them, so a short page being edited is
+ * read off its body (a page long enough not to be the one line is not, and
+ * its lines answer — the Authorities cited trailer is what makes one long).
+ */
+function pageReadsDidNotOcr(i) {
+  const p = doc && doc.pages[i];
+  if (!p) return false;
+  const body = bodyForPage(i);
+  if (body && body.textContent.length < 400) return TD.readsDidNotOcr(TD.serializeNodes(body).split("\n"));
+  return TD.readsDidNotOcr(p.lines);
+}
+function setNocrButton(b, reads, asked, marked) {
+  const on = reads && asked;
+  b.classList.toggle("on", on);
+  if (reads) b.setAttribute("aria-pressed", on ? "true" : "false");
+  else b.removeAttribute("aria-pressed");
+  if (!reads) {
+    b.textContent = "⊘ Did not OCR";
+    b.title = `Strip this page's text and write ${TD.DID_NOT_OCR} in its place — for a page the OCR mangled. The page header stays, and so does PDF-Linker's Authorities cited list at the end of the file. Save writes it, and puts the page on ${TD.VALUES_FILE} so PDF-Linker never OCRs it again and exports it as ${TD.DID_NOT_OCR}. Ctrl+Z puts the text back.`;
+  } else if (on) {
+    b.textContent = "✓ OCR This Page";
+    b.title = `Asked: PDF-Linker takes this page's DID NOT OCR mark off, and its next full run reads the page again and exports its text. ${TD.VALUES_FILE} carries the request once it is written — Save writes it. Click to withdraw the request.`;
+  } else {
+    b.textContent = "↻ OCR This Page";
+    b.title = marked
+      ? `PDF-Linker marked this page DID NOT OCR in its PDF. Ask for it to be read again: the page goes on ${TD.VALUES_FILE}, PDF-Linker takes the mark off, and its next full run reads the page and exports its text.`
+      : `Undo ⊘ Did not OCR. Where the reader still holds the page's text and the mark never reached the case folder, the text comes straight back; otherwise the page goes on ${TD.VALUES_FILE} and PDF-Linker's next full run reads it again.`;
+  }
+}
+/** Set each page label's button from its page (`indices`, or every page on screen). */
+function refreshNocrButtons(indices) {
+  if (!doc) return;
+  const buttons = indices && indices.length <= 20
+    ? indices.map((i) => pagesEl.querySelector(`.tpage[data-index="${i}"] > .page-label .nocr-page`)).filter(Boolean)
+    : [...pagesEl.querySelectorAll(".tpage > .page-label .nocr-page")];
+  if (!buttons.length) return;
+  const sources = ocrAgain.length ? docPageSources() : null;
+  for (const b of buttons) {
+    const i = Number(b.closest(".tpage").dataset.index);
+    const p = doc.pages[i];
+    if (!p) continue;
+    const e = sources ? pageEntryAt(i, sources) : null;
+    setNocrButton(b, pageReadsDidNotOcr(i), !!e && ocrAgain.some((x) => TD.sameNoOcr(x, e)), TD.headerSaysDidNotOcr(p));
+  }
 }
 
 // ── the rest of the folder ───────────────────────────────────────────────────
@@ -5619,8 +5786,8 @@ function valuesSavedKey() { return VALUES_SAVED_PREFIX + (folderName || fileName
 function valuesDirty() {
   // A local keep is not in the file and never will be, so a list that holds
   // nothing else is a list the case folder is owed nothing from.
-  if (!flagged.length && !TD.owedKeeps(keeps).length && !noOcr.length) return false;
-  return TD.formatValuesFile(flagged, keeps, phrases, noOcr) !== lsGet(valuesSavedKey(), "");
+  if (!flagged.length && !TD.owedKeeps(keeps).length && !noOcr.length && !ocrAgain.length) return false;
+  return TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain) !== lsGet(valuesSavedKey(), "");
 }
 /** …and the same list, as it stands, marked as written. */
 function markValuesSaved(text) { lsSet(valuesSavedKey(), text); renderFlags(); }
@@ -5641,11 +5808,11 @@ function spotsFrom(list, from) { return from ? list.map((x) => ({ ...x, page: x.
 // bare, and one before phrases stored no `phrases`.
 function readStoredValues(k) {
   const v = lsGet(k, null);
-  if (Array.isArray(v)) return { values: v, keeps: [], phrases: [], noOcr: [] };
-  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [], phrases: (v && v.phrases) || [], noOcr: (v && v.noOcr) || [] };
+  if (Array.isArray(v)) return { values: v, keeps: [], phrases: [], noOcr: [], ocrAgain: [] };
+  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [], phrases: (v && v.phrases) || [], noOcr: (v && v.noOcr) || [], ocrAgain: (v && v.ocrAgain) || [] };
 }
-function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; phrases = st.phrases; noOcr = st.noOcr; compileKey(); renderFlags(); }
-function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps, phrases, noOcr }); }
+function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; phrases = st.phrases; noOcr = st.noOcr; ocrAgain = st.ocrAgain; compileKey(); renderFlags(); }
+function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps, phrases, noOcr, ocrAgain }); }
 
 /**
  * The pages marked ⊘ Did not OCR, as the list PDF-Linker is owed follows them.
@@ -5662,29 +5829,56 @@ function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps, phr
  * folder waiting on a run.
  */
 function syncNoOcr(indices, { drop = false } = {}) {
-  if (!doc || flagsFor !== valuesStoreKey()) return;
-  const sources = docPageSources();
-  let list = noOcr;
-  for (const i of indices) {
-    const p = doc.pages[i];
-    const page = PS.pdfPageOf(p);
-    if (!p || p.header == null || !page) continue;
-    const name = sources[i] || fileName;
-    const entry = { doc: name, pdf: pdfForName(name) || "", page };
-    if (TD.headerSaysDidNotOcr(p)) list = TD.setNoOcr(list, entry, false);
-    else if (TD.readsDidNotOcr(p.lines)) list = TD.setNoOcr(list, entry, true);
-    else if (drop) list = TD.setNoOcr(list, entry, false);
+  if (!doc) return;
+  if (flagsFor === valuesStoreKey()) {
+    const sources = docPageSources();
+    let list = noOcr, again = ocrAgain;
+    for (const i of indices) {
+      const p = doc.pages[i];
+      const entry = pageEntryAt(i, sources);
+      if (!entry) continue;
+      const marked = TD.headerSaysDidNotOcr(p), reads = TD.readsDidNotOcr(p.lines);
+      const asked = again.some((e) => TD.sameNoOcr(e, entry));
+      if (marked) list = TD.setNoOcr(list, entry, false);
+      // A page asked to be read again is not also owed as not to OCR.
+      else if (reads) { if (!asked) list = TD.setNoOcr(list, entry, true); }
+      else if (drop) list = TD.setNoOcr(list, entry, false);
+      // …and the request is done once the page reads as read under a header
+      // that is not DID NOT OCR: PDF-Linker has taken the mark off and
+      // exported the page's text (or the page was never marked, and its text
+      // is back).
+      if (asked && !marked && !reads) again = TD.setOcrAgain(again, entry, false);
+    }
+    if (list !== noOcr || again !== ocrAgain) {
+      noOcr = list;
+      ocrAgain = again;
+      persistValues();
+      renderFlags();
+    }
   }
-  if (list === noOcr) return;
-  noOcr = list;
-  persistValues();
-  renderFlags();
+  refreshNocrButtons(indices);
+}
+
+/** A page's entry on the lists PDF-Linker is owed ({ doc, pdf, page }), or null for a page with no PDF page. */
+function pageEntryAt(i, sources = docPageSources()) {
+  const p = doc && doc.pages[i];
+  const page = p && PS.pdfPageOf(p);
+  if (!p || p.header == null || !page) return null;
+  const name = sources[i] || fileName;
+  return { doc: name, pdf: pdfForName(name) || "", page };
+}
+/** The page lists, as a save's toast counts them. */
+function pageListsNote() {
+  const parts = [];
+  if (noOcr.length) parts.push(`${noOcr.length} page${noOcr.length === 1 ? "" : "s"} not to OCR`);
+  if (ocrAgain.length) parts.push(`${ocrAgain.length} to OCR again`);
+  return parts.length ? ", " + parts.join(", ") : "";
 }
 
 function renderFlags() {
   updateDirty(); // a flag, a keep or one of them written is a save's business
   flagsList.innerHTML = "";
-  flagCount.textContent = String(flagged.length + keeps.length + spots.length + noOcr.length);
+  flagCount.textContent = String(flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length);
   const nocrList = $("nocr-list");
   nocrList.innerHTML = "";
   $("nocr-block").hidden = !noOcr.length;
@@ -5694,6 +5888,16 @@ function renderFlags() {
     li.title = TD.noOcrLine(e);
     nocrList.appendChild(li);
   }
+  const againList = $("ocr-again-list");
+  againList.innerHTML = "";
+  $("ocr-again-block").hidden = !ocrAgain.length;
+  for (const e of ocrAgain) {
+    const li = document.createElement("li");
+    li.textContent = `${TD.docLabel(e.pdf || e.doc)} — page ${e.page}`;
+    li.title = TD.ocrAgainLine(e);
+    againList.appendChild(li);
+  }
+  refreshNocrButtons();
   renderSpots();
   renderMaster();
   const keepsList = $("keeps-list");
@@ -5875,11 +6079,11 @@ function findInPages(v) {
  * of somebody who never asked for one.
  */
 async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
-  if (!flagged.length && !keeps.length && !noOcr.length) {
+  if (!flagged.length && !keeps.length && !noOcr.length && !ocrAgain.length) {
     if (!quiet) toast("Nothing flagged yet — select an unfaked name and press Flag, or right-click a pseudonym to keep it.", { error: true });
     return false;
   }
-  const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr);
+  const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain);
   if (dirHandle) {
     try {
       if (dirHandle.requestPermission) {
@@ -5891,7 +6095,7 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
       await w.write(new Blob([text], { type: "text/plain" }));
       await w.close();
       markValuesSaved(text);
-      if (!quiet) toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep${noOcr.length ? `, ${noOcr.length} page${noOcr.length === 1 ? "" : "s"} not to OCR` : ""}) into ${folderName} — re-run PDF-Linker to apply them to the files.`);
+      if (!quiet) toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()}) into ${folderName} — re-run PDF-Linker to apply them to the files.`);
       return true;
     } catch (e) {
       if (quiet) return false;
@@ -5904,8 +6108,8 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
 }
 $("flags-save").addEventListener("click", () => saveValuesFile());
 $("flags-copy").addEventListener("click", async () => {
-  const n = flagged.length + keeps.length + noOcr.length;
-  try { await navigator.clipboard.writeText(flagged.map((v) => (TD.isPhrase(phrases, v) ? "phrase: " + v : v)).concat(keeps.map((k) => k.control + ": " + k.value), noOcr.map(TD.noOcrLine)).join("\n") + "\n"); toast("Copied " + n + " line" + (n === 1 ? "" : "s")); }
+  const n = flagged.length + keeps.length + noOcr.length + ocrAgain.length;
+  try { await navigator.clipboard.writeText(flagged.map((v) => (TD.isPhrase(phrases, v) ? "phrase: " + v : v)).concat(keeps.map((k) => k.control + ": " + k.value), noOcr.map(TD.noOcrLine), ocrAgain.map(TD.ocrAgainLine)).join("\n") + "\n"); toast("Copied " + n + " line" + (n === 1 ? "" : "s")); }
   catch { toast("Copy failed", { error: true }); }
 });
 
@@ -7487,6 +7691,7 @@ async function reelExtend() {
 
 /** The reel grew: everything measured off the document is measured again. */
 function reelChanged() {
+  refreshNocrButtons(); // a member hung is built with no list in hand
   textAnchors = null; textLineTops = null;
   applyMatchedLayout();
   applyPageWidth();
