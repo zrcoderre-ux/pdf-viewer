@@ -431,7 +431,9 @@ const s = normalizeSettings({ font: "nope", fontSize: 200, lineHeight: "x", mark
 check("bad settings fall back", [s.font, s.fontSize, s.lineHeight, s.marks], ["georgia", 40, 1.5, false]);
 const mk = normalizeSettings({ markColor: "#0000FF", markAlpha: 5 });
 check("highlight colour normalised and intensity bounded", [mk.markColor, mk.markAlpha], ["#0000ff", 0.9]);
-check("a bad colour falls back", normalizeSettings({ markColor: "blue" }).markColor, "#f5c518");
+check("a bad colour falls back", normalizeSettings({ markColor: "blue" }).markColor, "#19dcfa");
+check("a stored old default yellow reads as the new default", normalizeSettings({ markColor: "#F5C518" }).markColor, "#19dcfa");
+check("the default highlight is #19dcfa", markCss(normalizeSettings(null)).bg, "rgba(25, 220, 250, 0.180)");
 check("markCss", markCss({ markColor: "#ff0000", markAlpha: 0.2 }), { bg: "rgba(255, 0, 0, 0.200)", hover: "rgba(255, 0, 0, 0.500)", ring: "rgba(255, 0, 0, 0.120)" });
 check("custom font css", fontCss(normalizeSettings({ font: "custom", customFont: "Baskerville, serif" })), "Baskerville, serif");
 check("empty custom falls back to the first preset", fontCss(normalizeSettings({ font: "custom", customFont: " " })), "Georgia, 'Times New Roman', serif");

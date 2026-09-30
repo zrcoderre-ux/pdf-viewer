@@ -1067,7 +1067,7 @@ export const DEFAULT_SETTINGS = {
   fontSize: 15,      // px
   lineHeight: 1.5,   // ratio
   marks: true,       // highlight pseudonyms and show the fake on hover
-  markColor: "#f5c518", // the highlight's colour
+  markColor: "#19dcfa", // the highlight's colour
   markAlpha: 0.18,   // …and how strong it is (0 = invisible, 1 = solid); subtle by default
   showFakes: false,  // display the fakes instead of the real names
   gutter: true,      // dim the pleading line numbers
@@ -1084,6 +1084,9 @@ export function normalizeSettings(raw) {
   s.lineHeight = clamp(Number(s.lineHeight), 1, 3, DEFAULT_SETTINGS.lineHeight);
   s.marks = s.marks !== false;
   s.markColor = /^#[0-9a-fA-F]{6}$/.test(String(s.markColor || "")) ? String(s.markColor).toLowerCase() : DEFAULT_SETTINGS.markColor;
+  // The old default yellow was saved with every settings write, chosen or
+  // not: a stored copy of it is the old default, and reads as the new one.
+  if (s.markColor === "#f5c518") s.markColor = DEFAULT_SETTINGS.markColor;
   s.markAlpha = clamp(Number(s.markAlpha), 0.04, 0.9, DEFAULT_SETTINGS.markAlpha);
   s.showFakes = s.showFakes === true;
   s.gutter = s.gutter !== false;
