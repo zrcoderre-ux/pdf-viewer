@@ -563,7 +563,9 @@ export function nextUndecided(rows, from, dir) {
 // behind on a page the operator has just read, to be found again later from
 // the status bar. So before a decision takes the review OFF a page, the names
 // still standing on it are asked about first — on it, and on any page the
-// review would pass over on the way to its next row.
+// review would pass over on the way to its next row — where the operator has
+// the names bar up (text-reader.js pageSweepFor; with it down the review keeps
+// to the worksheet).
 
 /**
  * The pages a review leaves behind when it goes from the row in front to the
