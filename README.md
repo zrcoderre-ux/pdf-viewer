@@ -41,8 +41,9 @@ Comments another program made show up in the comments list and can be
 edited or deleted the same way.
 
 - **Comment.** Pick a markup tool and drag across text, or select text first
-  and choose Highlight / Underline / Strikethrough from the small toolbar that
-  appears over the selection. Click a comment to select it: drag to move, pull
+  and choose Highlight / Underline / Strikethrough / Comment from the small
+  toolbar that appears under the selection (Comment highlights the passage and
+  opens its note to type in). Click a comment to select it: drag to move, pull
   a handle to resize, arrow keys to nudge (Shift for ×10), Delete to remove,
   double-click to edit its text or note. The bar at the top of the page sets
   colour, line width, opacity, font and size for the selection or the next
@@ -106,9 +107,22 @@ edited or deleted the same way.
 
 In addition to citation linking, the viewer supports:
 
-- **Text selection and copy** — click and drag to select text, then Ctrl+C
-  (Cmd+C on macOS) to copy. Selection geometry now correctly aligns with the
+- **Text selection and copy** — text is selectable as soon as a page is
+  shown: click and drag, and a small toolbar opens under the selection with
+  **Highlight**, **Underline**, **Strikethrough**, **Comment**, **Copy** and
+  **Cite** (copy with a record citation). Ctrl+C (Cmd+C on macOS) copies too,
+  and right-click offers the same and more. Selection geometry aligns with the
   rendered glyphs at every zoom level.
+  - A drag may **start on a citation link** (or a link the PDF carries): once
+    the pointer moves, it selects the words under the link, as a drag begun
+    anywhere else does. A click that stays put still opens the link.
+  - A PDF opened in a **background tab** of the app (several files or a case
+    folder opened at once) has selectable text when you switch to it. pdf.js
+    measures a "minimum font size" once per window, and a hidden tab measured
+    0, which left every word a box of no size; `viewer/text-layer.js` writes
+    the sizes back.
+  - A **scanned page** has no text until it is recognized. Dragging over one
+    while OCR is off says so once, with a **Recognize text** button.
 - **Rectangle (marquee) selection** — sweep a box to select text by region
   (handy for columns and tables); the boxed text can then be copied or
   highlighted. Start a box either by holding **Alt** and dragging (either mouse
@@ -128,7 +142,7 @@ In addition to citation linking, the viewer supports:
   metadata, and never over the original. In the viewer, and in the text reader
   from beside the export the PDF was scrubbed into. See below.
 - **Highlighting** — select text and pick **Highlight** from the toolbar that
-  appears over the selection (or turn on the Highlight tool, **H**, and every
+  appears under the selection (or turn on the Highlight tool, **H**, and every
   selection is highlighted as you release the mouse). Highlights are saved into
   the file as real PDF highlights and stay editable after reopening; see
   *PDF editor* above.
@@ -2171,6 +2185,8 @@ passwords, and — when Python's `pikepdf` is installed — opens RC4-40,
 RC4-128, AES-128 and AES-256 files it made and has it open a file protected
 here. `node test-textlayout.mjs` covers page reading, the Word and text
 exports, Compare's diff, Find's matching and the zip writer.
+`node test-text-layer.mjs` covers the text layer repair: spans laid out with
+no layout get their items' heights back, and a sound layer is left alone.
 `node test-pdf-text-edit.mjs` covers Edit text: the content-stream reader,
 line layout, finding paragraphs, and edits saved and read back with pdf.js —
 old words gone and new ones present on a standard-font page, inside a form
@@ -2237,6 +2253,7 @@ viewer/redact.js                     Redaction: boxes in PDF points, a store per
 viewer/pdf-edit.js                   PDF writing (pdf-lib): comments, page plans, stamps, crop, blank pages, metadata, sanitize, the flattened redacted copy
 viewer/key-library.js                The pseudonym keys this browser has been shown — one library, reader and viewer
 viewer/highlights.js                 Selection, markup from a selection, box select
+viewer/text-layer.js                 pdf.js text layer spans given their size back when laid out in a hidden tab (test-text-layer.mjs)
 viewer/citation-linker.js            Detection + URL resolution
 viewer/footer-naming.js              Footer-derived naming rule engine
 viewer/disambiguation.js             Cross-tab collision registry
