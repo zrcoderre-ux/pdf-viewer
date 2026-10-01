@@ -52,6 +52,7 @@ import { buildRedactedPdf } from "./pdf-edit.js";
 import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
 import { fontDocument, fontCanvas, renderPageOnto } from "./pdf-fonts.js";
+import { repairTextLayer } from "./text-layer.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdfjs/build/pdf.worker.mjs");
 
@@ -9368,6 +9369,7 @@ async function drawPage(el, src, pageNo, cssWidth, want, page) {
       if (el.dataset.want !== want) return;
       el.__text = tl;
       await tl.render();
+      repairTextLayer(tl, tc.items);
       if (el.__text === tl) el.__text = null;
       if (el.dataset.want === want) { blankLineNumbers(layer); bindSelection(layer); }
     } catch (e) { if (!(e && e.name === "AbortException")) console.warn(e); }
@@ -11368,6 +11370,7 @@ async function keyBoxesForPage(page) {
   const tc = await textItemsOf(page, REDACT_ITEMS_MAX);
   const tl = new pdfjsLib.TextLayer({ textContentSource: { items: tc.items, styles: tc.styles }, container: box, viewport: vp });
   await tl.render();
+  repairTextLayer(tl, tc.items);
   const spans = box.querySelectorAll("span");
   const { text, map } = RD.pageTextFromSpans(RD.measureSpans(box));
   const chars = text.replace(/\s+/g, "").length;

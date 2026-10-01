@@ -65,6 +65,7 @@ import * as RD from "./redact.js";
 import { autoScroll } from "./autoscroll.js";
 import { pageRotation } from "./rotation.js";
 import { fontDocument, fontCanvas, renderPageOnto } from "./pdf-fonts.js";
+import { repairTextLayer } from "./text-layer.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
   "pdfjs/build/pdf.worker.mjs"
@@ -163,6 +164,7 @@ const applyToaEnabled = () => toaPanel.setEnabled(toaOptionOn && !linkingSuppres
 // "OCR" button); the auto-OCR option flips the default to on.
 let ocrEnabled = false;
 let ocrFailureShown = false;        // one "could not be recognized" toast per document
+let scanHintShown = false;          // one "this page is a scan" toast per document
 const ocrProgressEl = document.getElementById("ocr-progress");
 let ocrProgressOwner = null;        // the render showing the OCR progress chip
 // Raw bytes of the loaded PDF, stashed during loadAndRender so the Download
@@ -1834,6 +1836,7 @@ function resetForNewDocument() {
   // the per-page OCR cache is what makes zoom cheap, so it must survive zoom.)
   resetOcr();
   ocrFailureShown = false;
+  scanHintShown = false;
   // New document → forget the previous one's per-page word counts, which are
   // what auto-scroll paces itself by.
   autoScroll.resetDocument();
@@ -2189,6 +2192,7 @@ async function renderAllPages() {
     refs.textContent = await refs.page.getTextContent();
     if (signal.aborted) return;
     if (ocrEnabled && pageNeedsOcr(refs.textContent)) { refs.textContent = null; ocrQueue.push(refs); continue; }
+    refs.pageWrapper.classList.toggle("no-text", pageNeedsOcr(refs.textContent));
     await pageTextFromPdf(refs);
     footerPass();
   }
@@ -2845,6 +2849,8 @@ async function pageTextFromPdf(refs) {
     viewport: refs.displayViewport,
   });
   await textLayer.render();
+  // A tab opened behind another lays its text out with no size (text-layer.js).
+  repairTextLayer(textLayer, refs.textContent.items);
   finishPageText(refs);
 }
 
@@ -2999,6 +3005,105 @@ document.addEventListener("selectionchange", () => {
     anchor.parentElement.insertBefore(end, modifyStart ? anchor : anchor.nextSibling);
   }
   prevSelRange = range.cloneRange();
+});
+
+// ── A selection begun on a link ──
+//
+// A citation link, and a link the PDF carries itself, is a box laid over the
+// words it names, above the text layer, so a press there lands on the link and
+// not on the text: a drag begun on a cited case selected nothing at all, and
+// in a brief the citations are a good share of the page. A press on a link
+// that moves now selects from the word under it, as a drag begun anywhere else
+// on the page does; a press that stays put is still a click on the link.
+const LINK_DRAG_PX = 4;
+
+// The place in a page's text under a point, or null off the text layers.
+function caretAtPoint(x, y) {
+  let node = null, offset = 0;
+  if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(x, y);
+    if (p) { node = p.offsetNode; offset = p.offset; }
+  } else if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(x, y);
+    if (r) { node = r.startContainer; offset = r.startOffset; }
+  }
+  if (!node) return null;
+  const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+  const layer = el && el.closest(".textLayer");
+  if (!layer || !pagesEl.contains(layer)) return null;
+  // Over the space between words the point finds the end-of-content block,
+  // which guardSelection keeps just after where the drag has reached.
+  if (el.classList.contains("endOfContent")) {
+    return { node: el.parentNode, offset: Array.prototype.indexOf.call(el.parentNode.childNodes, el) };
+  }
+  return { node, offset };
+}
+
+pagesEl.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || e.altKey || e.shiftKey || e.ctrlKey || e.metaKey) return;
+  const link = e.target.closest && e.target.closest(".linkLayer a");
+  if (!link) return;
+  const mode = document.body.classList;
+  if (mode.contains("annot-drawing") || mode.contains("rect-select-mode") ||
+      mode.contains("crop-mode") || mode.contains("redact-area-mode")) return;
+  // The link has no text of its own for the browser to start a selection in,
+  // and a selection it started would fight the one made here. What a press
+  // would otherwise do still happens: the old selection goes, and so does the
+  // focus from a box in the top bar.
+  e.preventDefault();
+  window.getSelection()?.removeAllRanges();
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  window.focus();
+  const x0 = e.clientX, y0 = e.clientY;
+  let start = null, dragged = false;
+  const onMove = (ev) => {
+    if (!dragged) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < LINK_DRAG_PX) return;
+      dragged = true;
+      // From here it is a selection: the links stand aside (see the CSS), so
+      // the point finds the words under them.
+      document.body.classList.add("text-dragging");
+    }
+    const sel = window.getSelection();
+    if (!sel) return;
+    if (!start) {
+      start = caretAtPoint(x0, y0) || caretAtPoint(ev.clientX, ev.clientY);
+      if (!start) return;
+      sel.collapse(start.node, start.offset);
+    }
+    const cur = caretAtPoint(ev.clientX, ev.clientY);
+    if (cur) sel.setBaseAndExtent(start.node, start.offset, cur.node, cur.offset);
+  };
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove, true);
+    document.removeEventListener("mouseup", onUp, true);
+    if (!dragged) return;
+    // The click that ends a drag is not a click on the link.
+    const swallow = (ev) => { ev.preventDefault(); ev.stopImmediatePropagation(); };
+    window.addEventListener("click", swallow, true);
+    setTimeout(() => window.removeEventListener("click", swallow, true), 0);
+  };
+  document.addEventListener("mousemove", onMove, true);
+  document.addEventListener("mouseup", onUp, true);
+});
+
+// A scan has no text to select until it is recognized. A drag over one while
+// OCR is off says so once, with the button that reads it.
+pagesEl.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || ocrEnabled || scanHintShown || !ocrRunEl) return;
+  const wrapper = e.target.closest && e.target.closest(".page-wrapper.no-text");
+  if (!wrapper || Annots.currentTool() || redactMode || rectSelectMode || cropMode) return;
+  const x0 = e.clientX, y0 = e.clientY;
+  const onUp = (ev) => {
+    document.removeEventListener("mouseup", onUp, true);
+    if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < LINK_DRAG_PX || ocrEnabled || scanHintShown) return;
+    scanHintShown = true;
+    toast("This page is a scanned image, so it has no text to select until it is recognized.", {
+      timeout: 9000,
+      action: { label: "Recognize text", run: () => ocrRunEl.click() },
+    });
+  };
+  document.addEventListener("mouseup", onUp, true);
 });
 
 // Which of a page's fonts are italic. The text layer is no help here — PDF.js
@@ -3355,6 +3460,7 @@ citePopover.hidden = true;
     btn("highlighter", "Highlight (H)", () => { markupSelection("highlight"); hideCitePopover(); }),
     btn("underline", "Underline (U)", () => { markupSelection("underline"); hideCitePopover(); }),
     btn("strikethrough", "Strikethrough (K)", () => { markupSelection("strikeout"); hideCitePopover(); }),
+    btn("message", "Comment: highlight the selection and add a note to it", () => { hideCitePopover(); commentOnSelection(); }),
     sep(),
     btn("copy", "Copy (Ctrl+C)", async () => { const t = (window.getSelection() || "").toString(); const ok = await writeClipboard(t); flashStatus(ok ? "Copied" : "Copy failed"); hideCitePopover(); }),
     btn("quote", "Copy the selected text with a record citation appended", copyWithCitation, "Cite"),
@@ -3407,15 +3513,20 @@ document.addEventListener("contextmenu", (e) => {
     { label: "Highlight", icon: "highlighter", action: () => markupSelection("highlight") },
     { label: "Underline", icon: "underline", action: () => markupSelection("underline") },
     { label: "Strikethrough", icon: "strikethrough", action: () => markupSelection("strikeout") },
-    { label: "Add note to selection", icon: "message", action: () => {
-      const a = markupSelectionThen("highlight");
-      if (a) Annots.select(a.id);
-    } },
+    { label: "Add note to selection", icon: "message", action: commentOnSelection },
     "-",
     { label: "Mark for redaction", icon: "redact", action: () => { if (redactCurrentSelection()) { updateRedactState(); if (!redactMode) setRedactMode(true); } } },
     { label: "Find in document", icon: "search", action: () => Find.open(text.replace(/\s+/g, " ").trim().slice(0, 200)) },
   ]);
 }, true);
+
+// A comment on a passage: the passage highlighted, and its note open to type in.
+function commentOnSelection() {
+  const a = markupSelectionThen("highlight");
+  if (!a) return;
+  Annots.select(a.id);
+  Annots.openComment(a.id);
+}
 
 function markupSelectionThen(kind) {
   const parts = selectionByPage();

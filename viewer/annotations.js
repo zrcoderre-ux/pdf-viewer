@@ -618,6 +618,8 @@ export function select(id, { scroll = false } = {}) {
   }
 }
 export function selected() { return selectedId ? annots.get(selectedId) : null; }
+/** Open an annotation's comment box, ready to type in. */
+export function openComment(id) { openNotePopup(id); }
 
 function wireAnnot(el, a, pn) {
   el.addEventListener("pointerdown", (e) => {

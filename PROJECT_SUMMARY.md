@@ -124,6 +124,32 @@ pointer events, so a drag across a link does not hand the selection to it,
 and the text layer carries pdf.js's `endOfContent` guard so a drag past the
 end of a line does not select the page. Keep both when adding a new overlay.
 
+A drag can also START on a link (`a` in any `.linkLayer`): pressing there
+lands on the link, which has no text, so the browser began no selection. A
+`mousedown` on `#pages` takes that press (`preventDefault`), and once the
+pointer has moved `LINK_DRAG_PX` it sets `text-dragging` and makes the
+selection itself, `caretAtPoint` (caretPositionFromPoint, with the
+`endOfContent` block read as the place before it) at the press and at the
+pointer, `setBaseAndExtent` between them; the `click` that ends such a drag is
+swallowed. A press that does not move is left to be a click on the link. It
+stands down with Alt, Shift, Ctrl or Meta and in the drawing, box-select,
+crop and redact-area modes.
+
+**Text layers made in a hidden tab** (`viewer/text-layer.js`). pdf.js's
+TextLayer measures a minimum font size once per window (`#minFontSize`, the
+height of a 1px "X") and keeps it. In a display:none frame — an app tab
+opened behind another — that is 0, and every span pdf.js makes in that window
+for the rest of its life has `font-size: …*0.00px`: no box to select, even
+after the tab is shown and redrawn. `repairTextLayer(textLayer, items)`,
+called after every `TextLayer.render()` in the viewer and the reader, finds
+spans pdf.js sized at 0 and writes the item's own height
+(`hypot(transform[2], transform[3])`) times the measure taken again now (1
+when there is still no layout); `textDivs` has one span per item with a
+`str`, so the two are walked together. A layer pdf.js sized properly is left
+untouched. Pages of a scan, while OCR is off, carry `.no-text`; a drag over
+one says once per document that it needs recognizing, with the OCR button
+as the toast's action.
+
 **A page is built before its text** (`renderAllPages`). Pass 1a builds every
 page's box and layers (`buildPageShell`) and attaches the tools that need no
 text (`attachPageTools`: selection handlers, comments, redaction boxes), so
@@ -2040,6 +2066,7 @@ test-redact.mjs                      Node-runnable redaction tests: span mapping
 test-annot-pdf.mjs                   Node-runnable comment round trips (write, save, read back, edit, flatten) + page tools
 test-pdf-crypt.mjs                   Node-runnable cipher vectors + protect/open round trips (+ pikepdf interop when installed)
 test-textlayout.mjs                  Node-runnable page reading, Word/text export, Compare diff, Find matching, zip
+test-text-layer.mjs                  Node-runnable text layer repair: zero-size spans resized from their items
 test-pdf-text-edit.mjs               Node-runnable Edit text: content parsing, layout, paragraphs, edits saved and read back
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
@@ -2053,6 +2080,7 @@ viewer/web-shim.js                       chrome.* shim for the hosted pages (was
 viewer/viewer.css                    Design tokens (dark/light), chrome, page / textLayer / linkLayer / annotLayer styles; body owns scroll
 viewer/viewer.js                     PDF.js loader, two-pass renderer (pages drawn as they near the screen), naming plumbing, zoom, panels, saving, app wiring
 viewer/pdf-fonts.js                  The document pdf.js loads fonts into, and drawing a page by way of it (viewer + reader)
+viewer/text-layer.js                 pdf.js text layer spans given their size back when laid out in a hidden tab (viewer + reader)
 viewer/autoscroll.js                 Auto-scroll: ppm-paced reading scroll + its control bar
 viewer/rotation.js                   Page rotation: per-page angles, rotate bar, rotated geometry
 viewer/ocr-store.js                  Saved OCR: recognized pages in IndexedDB by file hash, kept N days since last use

@@ -71,6 +71,7 @@
         "viewer/code-tables.js",
         "viewer/ocr.js",
         "viewer/pdf-fonts.js",
+        "viewer/text-layer.js",
         "viewer/ocr-store.js",
         "viewer/rotation.js",
         "viewer/web-shim.js",
