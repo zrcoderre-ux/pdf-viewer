@@ -943,7 +943,7 @@ app, which routes it to the reader tab.
 - **The tools stand down the left margin.** The reading, pseudonym, review and
   PDF tools are in a **Tools** panel on the left — the same rail the PDF viewer
   carries — in labelled groups: *Reading* (font, size, leading, width, line
-  lock), *Pseudonyms* (key, mark and its colour and intensity, show fakes),
+  lock), *Pseudonyms* (key, mark and its colour and intensity, show fakes, key terms),
   *Review* (flag a real value, the LEAKS worksheet, auto-scroll) and *PDF*
   (side by side, PDF pages). The top bar keeps only the document's own
   actions — open a file or a case folder, Edit, Save — and the settings that
@@ -1201,6 +1201,22 @@ app, which routes it to the reader tab.
   the text is still the way through its rows; this steps what is standing in
   the text, which is not the same list (a worksheet is one row per value, and
   a value leaks wherever it leaks).
+- **The key, term by term.** **🗝 Key terms** in the tools panel (or a click
+  on the pseudonym count in the status bar) puts a bar over the text that
+  walks the pseudonym key as it stands on the page. A **term** is one row of
+  the key — its real name and the pseudonym the file carries, however the case
+  is written — and the terms come in the order each first appears; the list on
+  the bar names every one with how many times it stands, and picking one goes
+  to it. **Term ‹ ›** (Alt+J, Shift+Alt+J back) goes to the next term's first
+  appearance; **Appearance ‹ ›** (Alt+K, Shift+Alt+K back) goes to the place the
+  current term next stands, round to its first after its last, a name wrapped
+  across two lines being one place. The bar says which appearance of how many,
+  which term of how many, and the page and line; the term is underlined
+  wherever it stands and the one in front is marked solidly. It opens on the
+  first name at the top of the window, so it starts where you are reading. It
+  walks the pages on screen — this document, and with the folder read on, what
+  hangs under it — and only the pseudonyms: the names the run left in the
+  clear are the names walk's (Alt+L).
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and Apply Fixes reads the cells back. The

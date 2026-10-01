@@ -137,6 +137,13 @@ body {
 #find-bar #fb-replace-toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 #find-bar .fb-check { display: inline-flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; flex: none; }
 #find-bar .fb-check:has(input:checked) { color: var(--text); }
+/* …and the key walk under Find: another reading of the text rather than a
+   decision about it, so the same accent edge. The term list is the widest
+   thing on it and gives way first. */
+#key-bar { top: calc(var(--toolbar-height) + var(--bar-find, 0px)); border-bottom-color: var(--accent); }
+#key-bar .lb-type.key { background: var(--accent); min-width: 6.5em; text-align: center; }
+#key-bar #kb-term { flex: 0 1 auto; min-width: 12em; max-width: 460px; font-size: 13px; }
+#key-bar .lb-count { min-width: 9ch; }
 .revbar .lb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .revbar .lb-row .spacer { flex: 1; min-width: 8px; }
 .revbar button {
@@ -202,11 +209,19 @@ body {
    search never reads as a finding about the text. */
 ::highlight(find) { background-color: rgba(26, 115, 232, 0.28); }
 ::highlight(findhere) { background-color: rgba(26, 115, 232, 0.72); color: #fff; }
+/* The key walk: every appearance of the term it is on, ringed under the
+   pseudonym's own mark, and the appearance in front solidly. Violet, so it
+   reads apart from a find's blue and the reviews' orange. */
+::highlight(keyterm) { text-decoration: underline solid #7b1fa2 2px; }
+::highlight(keyhere) { background-color: rgba(123, 31, 162, 0.7); color: #fff; text-decoration: none; }
 ::highlight(leakrow) { background-color: rgba(230, 81, 0, 0.22); text-decoration: underline solid #e65100 2px; }
 /* The count of names standing in the clear is a control: it steps through
    them. Marked as one, and only while there are any. */
 #st-leaks.step { cursor: pointer; text-decoration: underline dotted; }
 #st-leaks.step:hover, #st-leaks.step:focus-visible { text-decoration: underline solid; outline: none; }
+/* …and so is the count of pseudonyms: it opens the key walk. */
+#st-pn.step { cursor: pointer; text-decoration: underline dotted; }
+#st-pn.step:hover, #st-pn.step:focus-visible { text-decoration: underline solid; outline: none; }
 ::highlight(leakrow-here) { background-color: rgba(230, 81, 0, 0.55); text-decoration: underline solid #e65100 2px; }
 /* The Leaks tab: one row per worksheet row, its type and its decision. */
 .side-body li .tag.type { background: #546e7a; }

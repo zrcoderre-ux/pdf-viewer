@@ -88,6 +88,8 @@ const toastEl = $("toast");
 const redactBar = $("redact-bar");
 // …and the find bar, measured with them.
 const findBar = $("find-bar");
+// …and the key walk's, under Find.
+const keyBar = $("key-bar");
 
 // ── state ──────────────────────────────────────────────────────────────────
 // The reading defaults — font, size, leading, page width, whether pseudonyms
@@ -2233,6 +2235,7 @@ function afterTextChange() {
   textEpoch++;
   paintHighlights();
   refindSoon(); // …and the find's own ranges, which the rebuilt pages have dropped
+  rekeySoon(); // …and the key walk's, for the same reason
   // The pages are where they are now: auto-scroll takes its pace from them
   // again rather than from the layout it started under.
   autoRemeasure();
@@ -2250,11 +2253,25 @@ function updateCounts() {
   const n = all.length;
   const k = all.filter((s) => s.classList.contains("kept")).length;
   const h = pagesEl.querySelectorAll("[data-here]").length;
-  $("st-pn").textContent = key
+  const pnEl = $("st-pn");
+  pnEl.textContent = key
     ? `${n} pseudonym${n === 1 ? "" : "s"} shown as real names`
       + (k ? ` · ${k} kept (un-faked on the next run)` : "")
       + (h ? ` · ${h} kept where ${h === 1 ? "it stands" : "they stand"}` : "")
     : "";
+  // The count is the way into the key walk, while there is something to walk.
+  const walk = !!key && n > 0;
+  pnEl.classList.toggle("step", walk);
+  if (walk) {
+    pnEl.setAttribute("role", "button");
+    pnEl.setAttribute("tabindex", "0");
+    pnEl.title = "Step through the key: term by term (Alt+J) and appearance by appearance (Alt+K)";
+  } else {
+    pnEl.removeAttribute("role");
+    pnEl.removeAttribute("tabindex");
+    pnEl.title = "";
+  }
+  $("key-walk-btn").disabled = !walk;
 }
 
 // ── editing ──────────────────────────────────────────────────────────────────────
@@ -4274,6 +4291,242 @@ document.addEventListener("keydown", (e) => {
   showFindBar(true, { replace: k === "h" });
 });
 
+// ── the key, term by term ────────────────────────────────────────────────────────
+//
+// THE PSEUDONYM KEY AS IT STANDS IN THE TEXT. The key is a list of names, and
+// the question a reader brings to it is where each one is: every name the key
+// fakes on these pages, one after another, and every place each of them
+// stands. So the walk has two steps. A TERM is one row of the key — one
+// pseudonym, whatever the case it is written in — and the terms come in the
+// order each first appears, so stepping through them is reading down the
+// document a name at a time; › on Term goes to the next one's first
+// appearance (Alt+J). An APPEARANCE is one place a term stands, a name
+// wrapped across two lines being one place; › on Appearance goes to the term's
+// next one, round to its first after its last (Alt+K).
+//
+// What is walked is the pages on screen: this document, and with the folder
+// read on, what the reel has hung under it. It reads the pseudonyms — the
+// names the run faked. The ones it left standing in the clear are the names
+// walk's (Alt+L), being a different question: not where a name is, but
+// whether it should be.
+let keyTerm = null;   // the term the walk stands on: its pseudonym, folded
+let keyIdx = 0;       // …the appearance, by number
+let keyAt = null;     // …and by its first span, which survives the list being read again
+let keyDoc = null;    // the document all that is about
+let keyPairsFor = null, keyPairs = null;
+
+/** The key's own row for a term: its real value and fake as the key writes them. */
+function keyPairOf(term) {
+  if (keyPairsFor !== key) {
+    keyPairsFor = key;
+    keyPairs = new Map(((key && key.pairs) || []).map((p) => [PK.fold(p.fake), p]));
+  }
+  return keyPairs.get(term) || null;
+}
+/**
+ * Every pseudonym on the pages, as terms in the order each first appears:
+ * [{ term, real, fake, kept, at: [[span, …], …] }] — each appearance its
+ * spans, more than one where a name is wrapped across lines.
+ */
+function keyTerms() {
+  const terms = new Map();
+  let open = null; // a wrapped name: its later pieces belong to the place its first piece opened
+  for (const s of pagesEl.querySelectorAll(".pn")) {
+    const term = PK.fold(pnFake(s));
+    const piece = s.dataset.piece;
+    if (piece && !piece.startsWith("0/") && open && open.term === term) { open.spans.push(s); continue; }
+    let t = terms.get(term);
+    if (!t) {
+      const p = keyPairOf(term);
+      t = { term, real: p ? p.real : pnReal(s), fake: p ? p.fake : pnFake(s), kept: s.classList.contains("kept"), at: [] };
+      terms.set(term, t);
+    }
+    const spans = [s];
+    t.at.push(spans);
+    open = piece ? { term, spans } : null;
+  }
+  return [...terms.values()];
+}
+/** An appearance as a range, from its first piece to its last. */
+function keyRange(spans) {
+  const r = document.createRange();
+  r.setStartBefore(spans[0]);
+  r.setEndAfter(spans[spans.length - 1]);
+  return r;
+}
+/** Where the walk stands in the terms just read: { ti, ai }, or null where it stands nowhere. */
+function keyLocate(terms) {
+  if (keyTerm == null || keyDoc !== doc) return null;
+  const ti = terms.findIndex((t) => t.term === keyTerm);
+  if (ti < 0) return null;
+  const at = terms[ti].at;
+  let ai = keyAt ? at.findIndex((a) => a[0] === keyAt) : -1;
+  // Its page rebuilt by an edit: the same appearance by number, as near as there is one.
+  if (ai < 0) ai = Math.min(keyIdx, at.length - 1);
+  return { ti, ai };
+}
+/** The appearance at the reading — the first one at or under the top of the stage — or the first of all. */
+function keyHere(terms) {
+  if (!terms.length) return null;
+  const first = new Map(); // span → { ti, ai }
+  terms.forEach((t, ti) => t.at.forEach((a, ai) => first.set(a[0], { ti, ai })));
+  const y = stageEl.getBoundingClientRect().top;
+  for (const s of pagesEl.querySelectorAll(".pn")) {
+    const at = first.get(s);
+    if (!at) continue;
+    const r = s.getBoundingClientRect();
+    if (r.height && r.bottom > y) return at;
+  }
+  return { ti: 0, ai: 0 };
+}
+/** Stand on an appearance: mark it, scroll to it (`go`), and say so in the bar. */
+function keyStand(terms, ti, ai, { go = true } = {}) {
+  const t = terms[ti];
+  if (!t) return;
+  keyTerm = t.term;
+  keyIdx = ai;
+  keyAt = t.at[ai][0];
+  keyDoc = doc;
+  paintKey(terms);
+  renderKeyBar(terms);
+  if (go) scrollRangeTo(keyRange(t.at[ai]));
+}
+function paintKey(terms) {
+  if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
+  const loc = keyBar.hidden ? null : keyLocate(terms);
+  try {
+    const t = loc ? terms[loc.ti] : null;
+    CSS.highlights.set("keyterm", highlightOf(t ? t.at.map(keyRange) : []));
+    CSS.highlights.set("keyhere", highlightOf(t ? [keyRange(t.at[loc.ai])] : []));
+  } catch { /* a span from a page since rebuilt */ }
+}
+function clearKeyMarks() {
+  try { CSS.highlights.delete("keyterm"); CSS.highlights.delete("keyhere"); } catch { /* none to clear */ }
+}
+let keyListSig = "";
+/** The bar: the term list, which appearance of how many, and where it stands. */
+function renderKeyBar(terms) {
+  if (keyBar.hidden) return;
+  const sel = $("kb-term");
+  const sig = terms.map((t) => t.term + ":" + t.at.length + (t.kept ? "k" : "")).join("|");
+  if (sig !== keyListSig) {
+    keyListSig = sig;
+    sel.textContent = "";
+    for (const t of terms) {
+      const o = document.createElement("option");
+      o.value = t.term;
+      o.textContent = `${t.real} → ${t.fake} · ${t.at.length}${t.kept ? " · kept" : ""}`;
+      sel.appendChild(o);
+    }
+  }
+  const loc = keyLocate(terms);
+  sel.value = loc ? terms[loc.ti].term : "";
+  sel.disabled = !terms.length;
+  const t = loc ? terms[loc.ti] : null;
+  $("kb-count").textContent = !terms.length ? "no pseudonyms on these pages"
+    : t ? `${loc.ai + 1} of ${t.at.length} · term ${loc.ti + 1} of ${terms.length}` : "";
+  $("kb-where").textContent = t ? whereInText(keyRange(t.at[loc.ai])) : "";
+  $("kb-term-prev").disabled = $("kb-term-next").disabled = terms.length < 2;
+  $("kb-prev").disabled = $("kb-next").disabled = !t || t.at.length < 2;
+  $("kb-find").disabled = !t;
+}
+/** The next term (dir 1) or the one before (dir -1), at its first appearance. */
+function stepKeyTerm(dir) {
+  if (keyBar.hidden) { showKeyBar(true); return; }
+  const terms = keyTerms();
+  if (!terms.length) { renderKeyBar(terms); return; }
+  const loc = keyLocate(terms);
+  const n = terms.length;
+  const ti = loc ? (((loc.ti + dir) % n) + n) % n : (keyHere(terms) || { ti: 0 }).ti;
+  keyStand(terms, ti, 0);
+}
+/** The term's next appearance (dir 1) or the one before (dir -1), round at either end. */
+function stepKeyAppearance(dir) {
+  if (keyBar.hidden) { showKeyBar(true); return; }
+  const terms = keyTerms();
+  if (!terms.length) { renderKeyBar(terms); return; }
+  const loc = keyLocate(terms);
+  if (!loc) { const h = keyHere(terms); keyStand(terms, h.ti, h.ai); return; }
+  const n = terms[loc.ti].at.length;
+  keyStand(terms, loc.ti, (((loc.ai + dir) % n) + n) % n);
+}
+function showKeyBar(on) {
+  const was = !keyBar.hidden;
+  if (on && !doc) return;
+  if (on && !was) reelAllLive(); // the walk reads every page of the reel
+  keyBar.hidden = !on;
+  setBarHeight();
+  if (was !== !!on) relayout();
+  if (!on) { keyTerm = null; keyAt = null; clearKeyMarks(); return; }
+  if (was) return;
+  // Opened: it starts where the reading is, on the first name at or under the
+  // top of the stage, rather than at the head of the document.
+  keyListSig = "";
+  const terms = keyTerms();
+  const h = keyHere(terms);
+  if (h) keyStand(terms, h.ti, h.ai);
+  else renderKeyBar(terms);
+}
+// The pages were rebuilt (an edit, the key changed, Show fakes, a document
+// opened or hung on the reel): the spans the walk held are gone, so it reads
+// the terms again and stands where it stood — or, in another document, where
+// the reading is, without moving it.
+const rekeySoon = debounce(() => {
+  if (keyBar.hidden) return;
+  const terms = keyTerms();
+  if (!keyLocate(terms)) {
+    const h = keyHere(terms);
+    if (h) { keyStand(terms, h.ti, h.ai, { go: false }); return; }
+    keyTerm = null; keyAt = null;
+  }
+  paintKey(terms);
+  renderKeyBar(terms);
+}, 200);
+$("kb-term").addEventListener("change", () => {
+  const terms = keyTerms();
+  const ti = terms.findIndex((t) => t.term === $("kb-term").value);
+  if (ti >= 0) keyStand(terms, ti, 0);
+});
+$("kb-term-prev").addEventListener("click", () => stepKeyTerm(-1));
+$("kb-term-next").addEventListener("click", () => stepKeyTerm(1));
+$("kb-prev").addEventListener("click", () => stepKeyAppearance(-1));
+$("kb-next").addEventListener("click", () => stepKeyAppearance(1));
+$("kb-find").addEventListener("click", () => {
+  const terms = keyTerms();
+  const loc = keyLocate(terms);
+  if (loc) keyStand(terms, loc.ti, loc.ai);
+});
+$("kb-close").addEventListener("click", () => showKeyBar(false));
+keyBar.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { e.preventDefault(); showKeyBar(false); }
+});
+$("key-walk-btn").addEventListener("click", () => showKeyBar(keyBar.hidden));
+// The count of pseudonyms opens the walk on the name at the reading; once it
+// is open, it steps on through the term.
+function keyFromCount(e) {
+  if (!$("st-pn").classList.contains("step")) return;
+  if (keyBar.hidden) showKeyBar(true);
+  else stepKeyAppearance(e && e.shiftKey ? -1 : 1);
+}
+$("st-pn").addEventListener("click", keyFromCount);
+$("st-pn").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  keyFromCount(e);
+});
+// Alt+J for the next term, Alt+K for the next appearance, Shift for the one
+// before. By the key's place on the keyboard (`code`), not the character it
+// types: on a Mac, Option+J types "∆".
+document.addEventListener("keydown", (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || (e.code !== "KeyJ" && e.code !== "KeyK")) return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return; // a field being typed in
+  if (!doc || !key) return;
+  e.preventDefault();
+  if (e.code === "KeyJ") stepKeyTerm(e.shiftKey ? -1 : 1);
+  else stepKeyAppearance(e.shiftKey ? -1 : 1);
+});
+
 // ── Replace ──────────────────────────────────────────────────────────────────
 //
 // Find's second row. It edits what Find marks, and only on the pages that are
@@ -6256,11 +6509,13 @@ function setBarHeight() {
   const b = namesBar.hidden ? 0 : namesBar.offsetHeight;
   const c = redactBar.hidden ? 0 : redactBar.offsetHeight;
   const d = findBar.hidden ? 0 : findBar.offsetHeight;
+  const e = keyBar.hidden ? 0 : keyBar.offsetHeight;
   const root = document.documentElement.style;
   root.setProperty("--bar-leaks", a + "px");          // where the second bar starts
   root.setProperty("--bar-names", a + b + "px");      // …and the third
   root.setProperty("--bar-redact", a + b + c + "px"); // …and the fourth
-  root.setProperty("--bar-h", a + b + c + d + "px");  // …and what the four take together
+  root.setProperty("--bar-find", a + b + c + d + "px"); // …and the fifth
+  root.setProperty("--bar-h", a + b + c + d + e + "px"); // …and what the five take together
 }
 if (typeof ResizeObserver !== "undefined") {
   const barSizes = new ResizeObserver(setBarHeight);
@@ -6268,6 +6523,7 @@ if (typeof ResizeObserver !== "undefined") {
   barSizes.observe(namesBar);
   barSizes.observe(redactBar);
   barSizes.observe(findBar);
+  barSizes.observe(keyBar);
 }
 function showLeaksBar(on) {
   const was = !leaksBar.hidden;
@@ -7841,6 +8097,7 @@ function reelChanged() {
   textEpoch++;
   paintHighlights();
   refindSoon(); // the pages hung on the end are pages the find has not read
+  rekeySoon(); // …nor the key walk
   refreshPdf();
   autoRemeasure();
   renderReelState();
