@@ -107,6 +107,28 @@
     </div>
   </div>
 
+  <!-- The pseudonym key, term by term, as it stands in the text: every name
+       the key fakes on the pages on screen, in the order each first appears,
+       and every place each one stands. A reading, not a review: the keep and
+       flag choices are where they always are, on the name's own right-click. -->
+  <div id="key-bar" class="revbar" hidden>
+    <div class="lb-row">
+      <span class="lb-type key">key</span>
+      <select id="kb-term" title="Every name the key fakes on these pages, in the order each first appears: the real name, the pseudonym the file carries, and how many times it stands. Pick one to go to its first appearance."></select>
+      <span id="kb-count" class="lb-count"></span>
+      <span id="kb-where" class="lb-where"></span>
+      <span class="spacer"></span>
+      <span class="tb-label">Term</span>
+      <button id="kb-term-prev" title="The term before this one, at its first appearance (Shift+Alt+J)">‹</button>
+      <button id="kb-term-next" title="The next term, at its first appearance (Alt+J)">›</button>
+      <span class="tb-label">Appearance</span>
+      <button id="kb-prev" title="This term where it appears before this (Shift+Alt+K)">‹</button>
+      <button id="kb-next" title="This term where it next appears (Alt+K)">›</button>
+      <button id="kb-find" title="Scroll back to it">Find in text</button>
+      <button id="kb-close" title="Close (Esc). Key terms in the tools panel, the pseudonym count in the status bar, or Alt+J / Alt+K brings it back">×</button>
+    </div>
+  </div>
+
   <div id="names-bar" class="revbar" hidden>
     <div class="lb-row">
       <span id="nb-count" class="lb-count"></span>
@@ -221,6 +243,7 @@
           <input id="mark-alpha" type="range" class="short" min="0.04" max="0.9" step="0.02" title="Highlight intensity — remembered">
         </div>
         <label class="tool-btn tool-toggle" title="Show the document as it is on disk — the fakes — instead of the real names"><input id="fakes-toggle" type="checkbox"><span class="ti">🎭</span><span class="tl">Show fakes</span></label>
+        <button id="key-walk-btn" class="tool-btn" title="Step through the pseudonym key as it stands in the text: from one name the key fakes to the next (Alt+J, Shift+Alt+J back), and from one place a name appears to the next (Alt+K, Shift+Alt+K back)" disabled><span class="ti">🗝</span><span class="tl">Key terms</span></button>
 
         <div class="tools-group-label">Review</div>
         <button id="find-btn" class="tool-btn" title="Find (Ctrl+F) — in this document and on through every export in the case folder. Names are looked for as they READ, the real value on screen, and the rest of the folder is searched through the key, so the same name is found in a document that still carries its pseudonym. Enter goes to the next, and on into the next document when this one runs out. Ctrl+H opens it with Replace."><span class="ti">🔍</span><span class="tl">Find</span></button>
