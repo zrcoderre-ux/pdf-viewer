@@ -978,6 +978,15 @@ app, which routes it to the reader tab.
   in the page's own pixels rather than as a picture blown up, so the type is
   drawn at its real size and stays sharp at any magnification, and everything
   the reader measures goes on being measured in one space.
+- **The page you are reading stays on the screen.** Zooming, Side by side,
+  the font, the leading, a panel or a bar opening, the window resized, a page
+  fitted or laid on the PDF's grid as the reading comes near it, a page shown
+  from its PDF — each of these lays pages out again, and every page above the
+  reading that changes height used to move the reading with it, a zoom on
+  page 12 leaving you on page 11 or 14. The line at the top of the window is
+  noted as you scroll and held there while the pages settle, the PDF pane
+  following it side by side. Scrolling, a jump to a word, and auto-scroll
+  each take the scroll back at once.
 - **A page is a page.** Each sheet takes the **shape of the PDF page it came
   from** — its proportions at whatever width you are reading at — so an export
   reads as the document it was filed as instead of a stack of notes: a caption
@@ -1003,7 +1012,11 @@ app, which routes it to the reader tab.
 - **The shape is a ceiling: the type gives way, not the page.** A page whose
   words want more room than its PDF page gave them — the reading size is
   yours, and the filing was set in whatever it was set in — is **drawn
-  smaller** until they fit, the way the PDF itself is at that zoom. Display
+  smaller** until they fit, the way the PDF itself is at that zoom: the
+  **largest** size that holds the page, searched for, so a dense page whose
+  long lines wrap at the reading size is taken down only until they stop
+  wrapping and the words fill the sheet, not halved to the floor. A page shown
+  from its PDF (⇄ PDF) keeps its fit, and comes back at that size. Display
   only: the file is one size. **The fit is measured at the default size, not
   at the size you have zoomed to** — measured at the zoomed size it would take
   back exactly what the zoom had just added, and zooming in would do nothing —

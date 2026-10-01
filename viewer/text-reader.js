@@ -144,6 +144,8 @@ let masterInfo = null;       // { name, sheet, rows, partial } once it is attach
 let masterHandle = null;     // its file handle, remembered between sessions
 let masterNeeds = null;      // …the same handle, when the browser wants it re-authorised first
 let dirty = false;
+let place = null;            // where the reading is, as last noted: { el, frac, sec, secFrac } (readingPlace)
+let placeHold = null;        // …and the hold keeping it there through a re-layout, while one is (holdReading)
 
 // ── the same names, matched once ───────────────────────────────────────────────
 //
@@ -2237,7 +2239,10 @@ function afterTextChange() {
 }
 const afterTextChangeSoon = debounce(afterTextChange, 400);
 const placeCitationsSoon = debounce(() => placeCitations(), 450);
-const relayout = debounce(() => { reelAllLive(); syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); autoRemeasure(); reelTrimSoon(); }, 150);
+// Whatever asks for the pages to be laid out again has the reading held
+// through it (holdReading): the page being read stays the page on the screen.
+function relayout() { holdReading(); relayoutSoon(); }
+const relayoutSoon = debounce(() => { reelAllLive(); syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); autoRemeasure(); reelTrimSoon(); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -6589,6 +6594,7 @@ async function locateLeak(row) {
 let landing = null;
 function scrollRangeTo(range) {
   if (landing) landing.stop();
+  releaseReading(); // going somewhere: the place held is not the place wanted
   const node = range.startContainer;
   const el = node && (node.nodeType === 1 ? node : node.parentElement);
   const sec = el && el.closest(".tpage");
@@ -6643,6 +6649,129 @@ function scrollRangeTo(range) {
   };
   landing = me;
   frame = requestAnimationFrame(tick);
+}
+
+// ── the reading holds its place ─────────────────────────────────────────────────
+/**
+ * THE PAGE BEING READ STAYS ON THE SCREEN. A zoom, Side by side, the font, the
+ * leading, a panel or a bar opening, the window resized, a page fitted or laid
+ * on the PDF's grid as the reading comes near it, a page swapped for its PDF
+ * page: each of these lays pages out again, and every page laid out again
+ * above the reading moves the reading. The stage keeps the browser's own
+ * scroll anchoring off (the reel does its own arithmetic: #stage in the
+ * stylesheet), so nothing put it back, and a zoom on page 12 left the reader
+ * on page 11 or 14.
+ *
+ * So the reading's place is noted each time the stage scrolls — the line at
+ * the top of the stage, and how far into it the edge falls — and a change that
+ * lays pages out again HOLDS it: every frame the line has moved, the stage is
+ * scrolled by what it moved, until the layout has stood still for a while. The
+ * place is noted on the scroll, not when the change is asked for, because most
+ * changes are already made by then (a class toggled, the window resized) and a
+ * place read then would be read off the new layout.
+ *
+ * Anything else that moves the stage — the reader, a jump to a word
+ * (scrollRangeTo), the reel putting the scroll back after hanging a document
+ * above, auto-scroll — is going somewhere on purpose, and ends the hold.
+ */
+const PLACE_STILL_MS = 700;  // the layout still this long: settled
+const PLACE_MAX_MS = 8000;   // …and never held longer than this
+const PLACE_QUIT = ["wheel", "touchstart", "pointerdown", "keydown"];
+/** The line at the top edge of the stage and how far into it the edge falls — the page, where no line is there. */
+function readingPlace() {
+  if (!doc) return null;
+  // The pages and the reel's dividers between documents, in order: the
+  // column's own children, not a search of it — this is asked on every frame
+  // of a scroll, and a query walks every line of every page.
+  const kids = pagesEl.children;
+  if (!kids.length) return null;
+  const y = stageEl.getBoundingClientRect().top;
+  let lo = 0, hi = kids.length - 1; // the first one whose foot is below the edge
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (kids[mid].getBoundingClientRect().bottom > y) hi = mid; else lo = mid + 1;
+  }
+  let sec = kids[lo];
+  while (sec && !sec.classList.contains("tpage")) sec = sec.nextElementSibling; // a divider: the page under it
+  if (!sec) return null;
+  const sr = sec.getBoundingClientRect();
+  if (!sr.height) return null;
+  const at = { el: sec, frac: (y - sr.top) / sr.height, sec, secFrac: (y - sr.top) / sr.height };
+  if (sr.top >= y) return at; // the edge is in the gap above it: the page is the place
+  for (const l of sec.querySelectorAll(".page-body > .line")) {
+    const r = l.getBoundingClientRect();
+    if (!r.height || r.bottom <= y) continue;
+    // The edge in the line, or just above it (the label, a gap between rows).
+    if (r.top - y <= r.height) { at.el = l; at.frac = (y - r.top) / r.height; }
+    break;
+  }
+  return at;
+}
+/** How far the place has moved from the stage's top edge: down the screen is positive; null where it is gone. */
+function placeDrift(p) {
+  let r = p.el.isConnected ? p.el.getBoundingClientRect() : null;
+  let frac = p.frac;
+  // The line put away (a margin line beside the PDF) or rebuilt: its page.
+  if (!r || !r.height) {
+    r = p.sec.isConnected ? p.sec.getBoundingClientRect() : null;
+    frac = p.secFrac;
+    if (!r || !r.height) return null;
+  }
+  return r.top + frac * r.height - stageEl.getBoundingClientRect().top;
+}
+let placeFrame = 0;
+/** The place noted once the frame's scrolling is done — never while a hold has it. */
+function notePlaceSoon() {
+  if (placeHold || placeFrame) return;
+  placeFrame = requestAnimationFrame(() => { placeFrame = 0; if (!placeHold) place = readingPlace(); });
+}
+/** Keep the reading where it is through whatever is about to lay the pages out again. */
+function holdReading() {
+  if (!doc || landing || autoRunning()) return;
+  const now = performance.now();
+  if (placeHold) { placeHold.touched = now; return; }
+  const p = place && place.sec.isConnected ? place : readingPlace();
+  if (!p) return;
+  const me = { p, top: stageEl.scrollTop, started: now, touched: now, frame: 0 };
+  me.quit = (e) => {
+    // Ctrl or Cmd with it is a zoom or a shortcut, not a scroll; a modifier
+    // on its own is the start of one.
+    if (e.ctrlKey || e.metaKey) return;
+    if (e.type === "keydown" && /^(Alt|Control|Shift|Meta)$/.test(e.key)) return;
+    releaseReading();
+  };
+  for (const t of PLACE_QUIT) window.addEventListener(t, me.quit, { capture: true, passive: true });
+  const tick = (t) => {
+    if (placeHold !== me) return;
+    if (!doc || landing || autoRunning()) { releaseReading(); return; }
+    // Moved by something else: going somewhere on purpose. Its place is
+    // wherever it has gone.
+    if (Math.abs(stageEl.scrollTop - me.top) > 1) { releaseReading({ renote: true }); return; }
+    const d = placeDrift(p);
+    if (d == null) { releaseReading({ renote: true }); return; }
+    if (Math.abs(d) >= 1) {
+      const max = stageEl.scrollHeight - stageEl.clientHeight;
+      const want = Math.max(0, Math.min(max, stageEl.scrollTop + d));
+      if (Math.abs(want - stageEl.scrollTop) >= 1) {
+        stageEl.scrollTop = want;
+        me.top = stageEl.scrollTop;
+        me.touched = Math.max(me.touched, t);
+      }
+    }
+    if (t - me.touched > PLACE_STILL_MS || t - me.started > PLACE_MAX_MS) { releaseReading(); return; }
+    me.frame = requestAnimationFrame(tick);
+  };
+  placeHold = me;
+  me.frame = requestAnimationFrame(tick);
+}
+/** The hold let go: the place is where it held it, or — `renote` — wherever the reading is now. */
+function releaseReading({ renote = false } = {}) {
+  const me = placeHold;
+  if (!me) return;
+  placeHold = null;
+  cancelAnimationFrame(me.frame);
+  for (const t of PLACE_QUIT) window.removeEventListener(t, me.quit, true);
+  place = renote ? readingPlace() : me.p;
 }
 function markLeakHere() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
@@ -10112,6 +10241,7 @@ function applyMatchedLayout() {
   return during("lining the text up with the PDF", () => applyMatchedLayoutNow());
 }
 function applyMatchedLayoutNow() {
+  holdReading(); // pages laid on the grid, or taken off it, move everything below them
   const on = sbsOn && !pdfPane.hidden;
   // The pane and the grid are one thing: a page beside its PDF page is laid on
   // that page's geometry, and with the pane closed it is not. So `grid` is
@@ -10516,7 +10646,12 @@ function applyPdfTypeSizes(sec, body) {
 // many passes it gets. Past the floor the page grows taller instead: a sheet
 // the right shape with nothing legible on it is no use to anyone.
 const MIN_FIT = 0.5;
-const FIT_PASSES = 4;
+// How close the fit comes to the largest size that holds the page: a
+// hundredth of the type, which nobody reading can see. The search below
+// usually lands in three or four passes; eight is the bound on a page whose
+// lines keep wrapping and unwrapping on the way down.
+const FIT_STEP = 0.01;
+const FIT_PASSES = 8;
 // THE FIT IS MEASURED AT THE SIZE A PAGE IS MEANT TO HOLD, not at the size
 // the reader has zoomed to. A fit measured at the zoomed size would shrink
 // the type by exactly what the zoom had just added, and zooming in would do
@@ -10575,7 +10710,12 @@ function shapePages({ all = false } = {}) {
   const shapes = [];
   for (const sec of secs) {
     const body = sec.querySelector(".page-body");
-    const loose = sec.classList.contains("matched") || sec.classList.contains("swapped")
+    // A swapped page's text is put away under its PDF page, not re-laid, so
+    // it keeps the shape it had: swapped back, it comes up at the size it was
+    // fitted to. Taking the fit off it drew it at the full reading size the
+    // moment it came back, and then the next pass shrank it again.
+    if (sec.classList.contains("swapped")) continue;
+    const loose = sec.classList.contains("matched")
       || (!clipped && sec.querySelector(".line.trailer"));
     if (loose) {
       if (body.style.minHeight) body.style.minHeight = "";
@@ -10612,6 +10752,7 @@ function shapePages({ all = false } = {}) {
     todo.push(s);
   }
   if (!todo.length) return;
+  holdReading(); // a page above the reading changing height moves the reading
   for (const s of todo) {
     s.target = Math.round(width * (s.ratio || common));
     const want = s.target + "px";
@@ -10633,32 +10774,58 @@ function shapePages({ all = false } = {}) {
   // Every page is measured, THEN every page is written. Shrinking one page and
   // measuring the next lays the whole document out again for each page in
   // turn, which on a long export is most of the time an open takes; this way
-  // a pass costs one layout however many pages there are. Four of them
-  // converge, the first guess always overshooting a little because the page's
-  // margins do not shrink with its type.
+  // a pass costs one layout however many pages there are.
+  //
+  // THE FIT IS THE LARGEST SIZE THAT HOLDS THE PAGE, searched for, not one cut
+  // by how far over the page ran. Type taken down by that ratio is right only
+  // while the page's height follows its type, and it does not where lines
+  // wrap: a dense page whose long lines each wrap once at the reading size is
+  // twice the paper's height, the ratio halves the type, and at half the size
+  // nothing wraps and the words fill half the sheet — down to the floor, on a
+  // page whose lines stop wrapping a few percent under the reading size. The
+  // fit only ever went down, so the page stayed there. So each page keeps the
+  // largest size seen to hold it and the smallest seen not to, and the next
+  // size tried lies between them: the ratio's guess while nothing smaller has
+  // been tried, half way between the two once the guess has fallen short.
   withBaseSize(() => {
-    for (let pass = 0; pass < FIT_PASSES; pass++) {
-      const over = [];
-      for (const s of measure) {
-        if (!(s.target > 0)) continue;
-        // Too tall for the paper: the type gives. Too WIDE is not the type's
-        // fault and is not paid for by the whole page — one runaway line
-        // would take every word on the sheet down with it — so a line that
-        // runs past the edge is cut off there by the stylesheet instead.
-        const h = s.body.scrollHeight;
-        if (h > s.target + 0.5) over.push([s, s.target / h]);
-      }
-      if (!over.length) break;
-      let moved = false;
-      for (const [s, ratio] of over) {
-        const want = Math.max(MIN_FIT, s.fit * ratio);
-        if (want >= s.fit - 0.002) continue; // at the floor, or as close as it comes
-        s.fit = want;
-        s.sec.style.setProperty("--fit", want.toFixed(3));
-        moved = true;
-      }
-      if (!moved) break;
+    let live = measure.filter((s) => s.target > 0);
+    for (const s of live) { s.lo = 0; s.hi = Infinity; }
+    const put = (s, f) => { s.fit = Number(f.toFixed(3)); s.sec.style.setProperty("--fit", s.fit.toFixed(3)); };
+    for (let pass = 0; pass < FIT_PASSES && live.length; pass++) {
+      // Too tall for the paper: the type gives. Too WIDE is not the type's
+      // fault and is not paid for by the whole page — one runaway line
+      // would take every word on the sheet down with it — so a line that
+      // runs past the edge is cut off there by the stylesheet instead.
+      const heights = live.map((s) => s.body.scrollHeight);
+      const next = [];
+      live.forEach((s, k) => {
+        const h = heights[k];
+        const over = h > s.target + 0.5;
+        if (over) s.hi = s.fit; else s.lo = s.fit;
+        if (!over) {
+          // It holds: done, unless a larger size not yet tried might too.
+          if (s.hi === Infinity || s.hi - s.lo <= FIT_STEP) return;
+          put(s, (s.lo + s.hi) / 2);
+        } else if (!s.lo) {
+          // Nothing smaller tried yet: the ratio's guess, down to the floor.
+          if (s.fit <= MIN_FIT) return; // at the floor: the page grows instead
+          put(s, Math.max(MIN_FIT, s.fit * (s.target / h)));
+        } else if (s.hi - s.lo <= FIT_STEP) {
+          put(s, s.lo); // as close as it comes: the size known to hold
+          return;
+        } else {
+          // The ratio's guess, just under the size that ran over (the margins
+          // do not shrink with the type, so the guess falls a little short of
+          // fitting) — or half way, where the guess is no closer than that.
+          const guess = Math.min(s.fit * (s.target / h), s.hi - FIT_STEP / 2);
+          put(s, guess > s.lo + FIT_STEP / 2 ? guess : (s.lo + s.hi) / 2);
+        }
+        next.push(s);
+      });
+      live = next;
     }
+    // Out of passes between two sizes: the larger one known to hold.
+    for (const s of live) if (s.lo && s.fit !== s.lo) put(s, s.lo);
   });
   // A box too wide for its paper is drawn to fit it (rules.js), and it was
   // fitted at the type its page had before this: fitted again at the type the
@@ -10763,6 +10930,9 @@ function pdfGeometry() {
 }
 function syncScroll(from, force) {
   if (!sbsOn || pdfPane.hidden) return;
+  // While the reading is held through a re-layout the text leads: the PDF
+  // pane moving as its own slots are re-sized is not the reader scrolling it.
+  if (placeHold && from === "pdf") { from = "text"; force = true; }
   if (!force && syncLead && syncLead !== from) return;
   syncLead = from;
   clearTimeout(syncTimer);
@@ -10777,7 +10947,7 @@ function syncScroll(from, force) {
   // margins are not the PDF's, so one box's run is not the other's. Each
   // scrolls sideways on its own.
 }
-stageEl.addEventListener("scroll", () => { noteSideways(stageEl); syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); fitNearSoon(); gridNearSoon(); }, { passive: true });
+stageEl.addEventListener("scroll", () => { notePlaceSoon(); noteSideways(stageEl); syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); fitNearSoon(); gridNearSoon(); }, { passive: true });
 // Coalesced: a scroll fires continuously, and a pass over the members that
 // builds pages back is not something to do sixty times a second.
 const reelTrimSoon = debounce(reelTrim, 200);
@@ -10949,7 +11119,13 @@ function applySwapsNow() {
   refreshSwapButtons();
   updatePdfStatus();
   warmForLeaks();
-  if (moved) placeCitations();
+  if (!moved) return;
+  // A page coming back from its PDF page is fitted before it is drawn: one
+  // the paper or the type has changed under while it was away would
+  // otherwise show at the full reading size until the next pass.
+  holdReading();
+  shapePages();
+  placeCitations();
 }
 function persistSwaps() { lsSet(PS.swapStoreKey(folderName, fileName), [...swaps]); }
 function setSwaps(indices, on) {
@@ -11023,7 +11199,7 @@ function applyRange(on) {
   setSwaps(idx, on);
   if (on && sbsOn) setSideBySide(false);
   hideSwapPop();
-  if (on && idx.length) { const sec = pagesEl.querySelector(`.tpage[data-index="${idx[0]}"]`); if (sec) stageEl.scrollTo({ top: sec.offsetTop - 12, behavior: "smooth" }); }
+  if (on && idx.length) { const sec = pagesEl.querySelector(`.tpage[data-index="${idx[0]}"]`); if (sec) { releaseReading(); stageEl.scrollTo({ top: sec.offsetTop - 12, behavior: "smooth" }); } }
 }
 swapBtn.addEventListener("click", () => { if (swapPop.hidden) showSwapPop(); else hideSwapPop(); });
 $("swap-show").addEventListener("click", () => applyRange(true));
