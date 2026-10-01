@@ -118,6 +118,16 @@ i[data-icon] { display: inline-flex; font-style: normal; }
   opacity: 0;
 }
 .tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
+/* A tab being dragged rides over the others, which slide aside for it. */
+#tabs.reordering .tab { transition: transform 0.15s ease; }
+#tabs.reordering .tab.dragging {
+  transition: none;
+  z-index: 1;
+  cursor: grabbing;
+  background: var(--c-tab-active);
+  color: var(--c-text);
+}
+.tab.settling { transition: transform 0.15s ease; }
 .tab-close:hover { background: var(--c-tab-hover); color: var(--c-text); }
 
 .strip-btn {

@@ -172,8 +172,118 @@ function makeTabButton(id, initialLabel, text = false) {
   btn.addEventListener("click", () => activate(id));
   // A middle click closes a tab, as in a browser.
   btn.addEventListener("auxclick", (e) => { if (e.button === 1) { e.preventDefault(); closeTab(id); } });
+  btn.addEventListener("pointerdown", (e) => dragTab(e, btn, id));
   tabsEl.appendChild(btn);
   return { btn, labelEl };
+}
+
+// ---- Dragging a tab to a new place in the strip ----------------------------
+//
+// Pointer events rather than HTML drag and drop: the shell takes every native
+// drag as files coming in (the drop overlay, openLocalFile), and a native drag
+// carries a ghost image instead of the tab itself. A press that moves past
+// DRAG_SLOP is a drag: the tab follows the pointer along the strip, the tabs
+// it passes slide aside to make its room, and on release it is put down there
+// and `tabs` takes the new order, so closing a tab still hands over to its
+// neighbour on screen. A press that does not move is still a click. A drag
+// selects the tab as it starts, as a browser's does (Chrome sends no click
+// for a press released somewhere else). Held near either end of a strip too
+// long to show, the strip scrolls.
+const DRAG_SLOP = 4;  // px the pointer moves before a press is a drag
+const EDGE_ZONE = 32; // px in from either end of the strip that scroll it
+
+function dragTab(e, btn, id) {
+  if (e.button !== 0 || e.target.closest(".tab-close")) return;
+  const x0 = e.clientX;
+  let lastX = x0;
+  let drag = null; // set once the press has moved past DRAG_SLOP
+  let raf = 0;
+  btn.setPointerCapture(e.pointerId);
+
+  const begin = () => {
+    const els = [...tabsEl.querySelectorAll(".tab")];
+    const sl = tabsEl.scrollLeft;
+    // Every tab's place along the strip's content, measured before anything
+    // moves (a transform would show in a rect taken later).
+    const slots = els.map((el) => { const r = el.getBoundingClientRect(); return { left: r.left + sl, width: r.width }; });
+    const from = els.indexOf(btn);
+    const gap = parseFloat(getComputedStyle(tabsEl).columnGap) || 0;
+    drag = { els, slots, from, to: from, step: slots[from].width + gap, grab: x0 + sl - slots[from].left };
+    tabsEl.classList.add("reordering");
+    btn.classList.add("dragging");
+    if (activeId !== id || homeOpen) activate(id);
+  };
+  const place = () => {
+    const { els, slots, from, step, grab } = drag;
+    const me = slots[from], last = slots[slots.length - 1];
+    const left = Math.max(slots[0].left, Math.min(last.left + last.width - me.width, lastX + tabsEl.scrollLeft - grab));
+    btn.style.transform = `translateX(${left - me.left}px)`;
+    // It goes past a tab once its leading edge crosses that tab's middle — not
+    // its own middle, which a wide tab held against the end of the strip
+    // would never get past a narrow one's.
+    let to = from;
+    for (let i = from + 1; i < els.length; i++) if (left + me.width > slots[i].left + slots[i].width / 2) to = i;
+    for (let i = from - 1; i >= 0; i--) if (left < slots[i].left + slots[i].width / 2) to = i;
+    drag.to = to;
+    els.forEach((el, i) => {
+      if (el === btn) return;
+      const shift = from < i && i <= to ? -step : to <= i && i < from ? step : 0;
+      el.style.transform = shift ? `translateX(${shift}px)` : "";
+    });
+  };
+  const edgeScroll = () => {
+    raf = 0;
+    if (!drag) return;
+    const r = tabsEl.getBoundingClientRect();
+    const over = lastX < r.left + EDGE_ZONE ? lastX - (r.left + EDGE_ZONE)
+      : lastX > r.right - EDGE_ZONE ? lastX - (r.right - EDGE_ZONE) : 0;
+    if (!over) return;
+    const before = tabsEl.scrollLeft;
+    tabsEl.scrollLeft += Math.sign(over) * Math.min(14, 2 + Math.abs(over) / 3);
+    if (tabsEl.scrollLeft === before) return; // at the end already
+    place();
+    raf = requestAnimationFrame(edgeScroll);
+  };
+  const onMove = (ev) => {
+    lastX = ev.clientX;
+    if (!drag) {
+      if (Math.abs(lastX - x0) < DRAG_SLOP) return;
+      begin();
+    }
+    place();
+    if (!raf) raf = requestAnimationFrame(edgeScroll);
+  };
+  const finish = (ev) => {
+    btn.removeEventListener("pointermove", onMove);
+    btn.removeEventListener("pointerup", finish);
+    btn.removeEventListener("pointercancel", finish);
+    if (raf) cancelAnimationFrame(raf);
+    if (!drag) return;
+    const { els, from } = drag;
+    const to = ev.type === "pointercancel" ? from : drag.to;
+    drag = null;
+    // Where it was let go of, so it can glide from there into its slot.
+    const shown = btn.getBoundingClientRect().left;
+    tabsEl.classList.remove("reordering");
+    btn.classList.remove("dragging");
+    for (const el of els) el.style.transform = "";
+    if (to !== from) {
+      if (to > from) els[to].after(btn); else els[to].before(btn);
+      const order = [...tabsEl.querySelectorAll(".tab")];
+      tabs.sort((a, b) => order.indexOf(a.btn) - order.indexOf(b.btn));
+    }
+    const dx = shown - btn.getBoundingClientRect().left;
+    if (Math.abs(dx) >= 1) {
+      btn.style.transform = `translateX(${dx}px)`;
+      btn.getBoundingClientRect(); // the start of the glide, laid out
+      btn.classList.add("settling");
+      btn.style.transform = "";
+      btn.addEventListener("transitionend", () => btn.classList.remove("settling"), { once: true });
+    }
+  };
+  btn.addEventListener("pointermove", onMove);
+  btn.addEventListener("pointerup", finish);
+  btn.addEventListener("pointercancel", finish);
 }
 
 // Create a tab and feed its PDF to the viewer as soon as the viewer is ready —
