@@ -113,7 +113,18 @@ let author = loadAuthor();
 let lastPropPush = { key: "", t: 0 };
 
 function loadPrefs() {
-  try { return JSON.parse(localStorage.getItem("pdfViewerAnnotPrefs") || "{}") || {}; } catch { return {}; }
+  let p;
+  try { p = JSON.parse(localStorage.getItem("pdfViewerAnnotPrefs") || "{}") || {}; } catch { return {}; }
+  // Opacity is a 0–1 fraction. The slider's percent (e.g. "50") was once
+  // stored as is and read back as 5000%, so the slider and the next mark
+  // came out at 100; read such a value as the percent it was.
+  for (const v of Object.values(p)) {
+    if (!v || v.opacity === undefined) continue;
+    const n = Number(v.opacity);
+    if (!Number.isFinite(n)) delete v.opacity;
+    else v.opacity = n > 1 ? n / 100 : n;
+  }
+  return p;
 }
 function savePrefs() {
   try { localStorage.setItem("pdfViewerAnnotPrefs", JSON.stringify(prefs)); } catch { /* storage blocked */ }
@@ -1593,7 +1604,7 @@ export function restoreOriginal(id) {
 function applyProp(key, value) {
   const a = selected();
   const t = tool || (a ? toolKeyFor(a) : null);
-  if (t) setToolPref(t, key, key === "color" && typeof value !== "string" ? rgbToHex(value) : value);
+  if (t) setToolPref(t, key, key === "color" && typeof value !== "string" ? rgbToHex(value) : key === "opacity" ? Number(value) / 100 : value);
   if (!a) return;
   const now = Date.now();
   if (lastPropPush.key !== `${a.id}:${key}` || now - lastPropPush.t > 800) pushHistory();
