@@ -7262,9 +7262,11 @@ function setAutoPpm(next) {
   updateAutoUi();
 }
 
+// No toast for a change of pace: the pill's readout shows it while the creep
+// is on (and the button's tooltip while it is off), and a toast for every step
+// of [ / ] was a pop-up per keypress.
 function nudgeAutoSpeed(delta) {
   setAutoPpm(autoPpm + delta);
-  toast(`Auto-scroll ${ppmLabel()}` + (autoOn ? "" : " (off — A starts it)"));
 }
 
 // ── the pill ──

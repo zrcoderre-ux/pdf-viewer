@@ -331,9 +331,10 @@ function setPpm(next) {
   updateUi();
 }
 
+// No status line for a change of pace: the bar's own readout already shows it,
+// and a toast for every step of [ / ] was a pop-up per keypress.
 function nudgePpm(delta) {
   setPpm(ppm + delta);
-  if (enabled) onStatus(`Auto-scroll ${ppmLabel()}`);
 }
 
 // "1.0 ppm", "0.5 ppm": always one decimal, so the readout doesn't jitter.

@@ -21,7 +21,7 @@ isolated viewer instance (its own zoom, highlights, OCR…) with no shared state
 | File | Purpose |
 |------|---------|
 | `index.html` | Tab-manager shell: a tab strip (with a Home tab) + iframe stage + the Home screen (Open, Open case folder, Combine files, Images to PDF, recent files). Hosts no viewer markup itself. |
-| `app-web.js` | Tab manager: opens PDFs in new tabs (+ button, drag-drop, OS file handler, or a routed `?file=` URL), switches/closes tabs, syncs tab titles, registers the service worker. Local files reach a tab's viewer via `iframe.contentWindow.__pdfViewerLoadLocal`; tabs load lazily the first time they're shown so overlays get correct geometry. The active tab's iframe takes keyboard focus, so the viewer's shortcuts (auto-scroll's A / Space / [ / ], Shift+Space) work without clicking into the page. |
+| `app-web.js` | Tab manager: opens PDFs in new tabs (+ button, drag-drop, OS file handler, or a routed `?file=` URL), switches/closes tabs, reorders them (drag a tab along the strip: the others slide aside, and the strip scrolls when a tab is held at either end), syncs tab titles, registers the service worker. Local files reach a tab's viewer via `iframe.contentWindow.__pdfViewerLoadLocal`; tabs load lazily the first time they're shown so overlays get correct geometry. The active tab's iframe takes keyboard focus, so the viewer's shortcuts (auto-scroll's A / Space / [ / ], Shift+Space) work without clicking into the page. |
 | `app-web.css` | Styles the tab strip, iframe stage and Home screen, in the viewer's dark and light themes. |
 | `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
 | `sw.js` | Service worker — **network-first** (auto-updates when online) with offline fallback. |
