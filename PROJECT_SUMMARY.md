@@ -718,6 +718,39 @@ the thread about a second (300 pages) — the text is laid out once without the
 pane and again beside it; and a scanned page's decode is pdf.js 4.6's own JPEG
 decoder.
 
+### The page is drawn in the screen's own pixels (`viewer.js`)
+
+A page's canvas used to be sized to the page's CSS size, one bitmap pixel to
+the CSS pixel, whatever the window's `devicePixelRatio` — the display's scaling
+times the browser's zoom for the site. On any window not at exactly 1× (a
+Retina or 150%-scaled screen, or a window zoomed to 110%) the browser stretched
+that bitmap to fit, and every word on the page came out soft beside Acrobat.
+The thumbnails and the text reader's page pane already drew at the ratio; the
+viewer's own pages never had. `drawPage` now sizes the canvas at the page's
+size times the ratio (`pageOutputScale`), shows it at the page's CSS size, and
+has pdf.js draw through a matching `transform`. Past `MAX_PAGE_PIXELS`
+(4096 × 4096, 64 MB of bitmap) the ratio is let down toward 1, never below it:
+a page at 600% on a Retina screen would otherwise be a quarter of a gigabyte.
+When the ratio changes — the window goes to a screen of another scaling, or the
+browser's zoom is changed — every page drawn at the old one is drawn again
+(`redrawForPixelRatio`).
+
+The extension and the installed app draw the same bitmap at the same ratio,
+checked pixel for pixel in Chromium; the app's iframe changes nothing. Chrome
+keeps a zoom per site, though, so the two windows can sit at different ratios
+on the same screen, and before this the one not at 1× was the soft one.
+
+Measured in Chromium on a Letter page at 150% (918 CSS px wide); edge contrast
+is the mean step in brightness between neighbouring screen pixels over the
+type, and falls as type blurs:
+
+| ratio | bitmap width before → after | edge contrast before → after |
+|---|---|---|
+| 1 | 918 → 918 | 8.86 → 8.86 (unchanged) |
+| 1.25 | 918 → 1147 | 6.04 → 7.33 |
+| 1.5 | 918 → 1377 | 5.05 → 5.83 |
+| 2 | 918 → 1836 | 3.66 → 5.14 |
+
 ### The numbered margin is the boundary
 
 A pleading's PDF carries furniture its export does not: the firm's name

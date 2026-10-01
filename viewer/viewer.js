@@ -2608,6 +2608,19 @@ async function placeNativeLinksForPage(page, viewport, layerDiv) {
 // with its text layer and nothing drawn. Printing from here is for looking at
 // the page in front of you, which is always drawn.
 const DRAW_MARGIN = 1200; // px beyond the screen a page is drawn ahead and kept drawn
+// A page's bitmap is drawn in the screen's own pixels — devicePixelRatio of
+// them to the CSS pixel, which is the display's scaling times the browser's
+// zoom — and shown at the page's CSS size. Drawn one to the CSS pixel, as it
+// used to be, the bitmap was stretched to fit on any window not at exactly
+// 1×: a Retina or 150%-scaled screen, or a window zoomed to 110%, and every
+// word on the page came out soft beside Acrobat. Past MAX_PAGE_PIXELS (64 MB
+// of bitmap) the ratio is let down toward 1, never below it: a page at 600%
+// on a Retina screen would otherwise be a quarter of a gigabyte.
+const MAX_PAGE_PIXELS = 4096 * 4096;
+function pageOutputScale(viewport) {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.min(dpr, Math.max(1, Math.sqrt(MAX_PAGE_PIXELS / (viewport.width * viewport.height))));
+}
 const pagesOnScreen = new Set(); // page wrappers some part of which is on screen
 const pagesToDraw = new Set();   // near the screen and not drawn yet
 let drawingOnScreen = 0;         // draws in flight for pages on screen
@@ -2672,14 +2685,21 @@ async function drawPage(w, seen) {
   if (seen) drawingOnScreen++; else drawingAhead++;
   const canvas = w.querySelector("canvas");
   try {
-    canvas.width = d.viewport.width;
-    canvas.height = d.viewport.height;
+    const s = pageOutputScale(d.viewport);
+    canvas.width = Math.floor(d.viewport.width * s);
+    canvas.height = Math.floor(d.viewport.height * s);
+    // Its CSS size is its bitmap's over the ratio, so each bitmap pixel lands
+    // on one of the screen's; the box it sits in is white past its edge.
+    canvas.style.width = `${canvas.width / s}px`;
+    canvas.style.height = `${canvas.height / s}px`;
+    w.__drawnAt = window.devicePixelRatio || 1;
     // Annotations the comment tools own are drawn by the annotation layer; the
     // storage mode lets pdf.js skip exactly those (noView, set on open) and
     // paint every other annotation — form fields, links, stamps from other
     // programs — as usual.
     const annotationMode = pdfjsLib.AnnotationMode.ENABLE_STORAGE;
-    const task = renderPageOnto(d.page, canvas, { viewport: d.viewport, annotationMode });
+    const transform = s === 1 ? null : [s, 0, 0, s, 0, 0];
+    const task = renderPageOnto(d.page, canvas, { viewport: d.viewport, annotationMode, transform });
     w.__task = task;
     try {
       await task.promise;
@@ -2715,6 +2735,27 @@ function releasePageBitmap(w) {
   try { done = page.cleanup(); } catch { done = true; }
   if (!done) setTimeout(() => { if (!w.__drawn && !w.__task) { try { page.cleanup(); } catch { /* gone */ } } }, 1000);
 }
+/**
+ * The ratio changes when the window goes to a screen of another scaling or the
+ * browser's zoom is changed, and every page drawn at the old one is drawn again
+ * at the new: those on screen at once, the rest as pumpPageDraws takes them.
+ */
+function redrawForPixelRatio() {
+  const dpr = window.devicePixelRatio || 1;
+  for (const w of pagesEl.querySelectorAll(".page-wrapper")) {
+    if (!(w.__drawn || w.__task) || w.__drawnAt === dpr) continue;
+    const task = w.__task;
+    w.__task = null;
+    if (task) { try { task.cancel(); } catch { /* done */ } }
+    w.__drawn = false;
+    pagesToDraw.add(w);
+  }
+  pumpPageDraws();
+}
+(function watchPixelRatio() {
+  matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+    .addEventListener("change", () => { redrawForPixelRatio(); watchPixelRatio(); }, { once: true });
+})();
 
 // A page's box and every layer in it, sized and in place, with its bitmap
 // drawn when it nears the screen. No text yet: that is pageTextFromPdf's or

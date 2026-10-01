@@ -107,6 +107,11 @@ edited or deleted the same way.
 
 In addition to citation linking, the viewer supports:
 
+- **Sharp type at any screen scaling** — pages are drawn in the screen's own
+  pixels, so on a Retina or 125%/150%-scaled display, or in a window zoomed
+  past 100%, the page is no longer stretched to fit and its type stays crisp.
+  Moving the window to another screen, or changing the browser's zoom, draws
+  the pages again at the new resolution.
 - **Text selection and copy** — text is selectable as soon as a page is
   shown: click and drag, and a small toolbar opens under the selection with
   **Highlight**, **Underline**, **Strikethrough**, **Comment**, **Copy** and
