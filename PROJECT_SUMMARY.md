@@ -1391,6 +1391,45 @@ on a zoom or resize) and for the pages `shapePages` has just fitted, whose
 type may have given. `fitRuleRows` takes the column, a page, or a list of
 pages.
 
+### Columns laid out with spaces (`viewer/columns.js`)
+
+The same character grid lays a page's columns out with SPACES: a Westlaw
+printout's right-hand column, a caption's case number, a filing stamp, a
+centred heading, an indent. In a proportional font a space is about half an
+average character, so a column began wherever the text to its left ended —
+ragged where the page is straight. `textdoc.columnCuts` says where a line's
+spaces cut it: after its indent, and after each gap of `COLUMN_GAP` (3)
+spaces or more, or a two-space gap landing on a column two lines of the page
+begin at (`columnStops`), so a sentence's double space is never a column.
+`columnWidths` gives each piece its width in grid characters; on pleading
+paper the first is counted from the body margin, since the number and its
+spacing are drawn in the margin (and a numbered line's indent stays out of the
+layout, as it was). All three are pure and tested in `test-textdoc.mjs`.
+
+`dressColumns(body)` runs in `dressBody` after `dressLines`, after a replace
+(`settleReplaced`), and 400 ms after typing stops (`recolumnSoon`, the caret
+kept by text offset). The grid's character is the reader font's average,
+measured on canvas (`charWidth` → `--col-w`, with the font's space as
+`--col-sp`). An indented line gets `.lt.ci` and a `text-indent` of what its
+spaces fall short of the grid — no element, since most indented lines are
+nothing else. Each piece before a column gap is a `.cc` (`inline-block`,
+`white-space: pre`, `min-width` of `--cols` grid characters, a two-character
+right padding), its gap's spaces in a `.cg` that takes no width out of the
+editor: the column after it starts at its own column on every line, and a
+piece too wide for its cell pushes only its own line on, by the padding. In
+the editor `.cg` is drawn so typing into a gap shows. A line already dressed
+as its text says is left as it is (`dressedAs`), and a line with no run of
+spaces is passed over on its `textContent` without serializing it. `rules.js`
+takes the cells off a line carrying rule glyphs before wrapping the glyphs,
+and box rows (`.rl`) never get cells. A line with a column gap is `.line.cols`:
+`shapePages` reads those unwrapped (`.cols-measure`, every page at once in
+`columnCaps`) and starts the page's fit no larger than its widest column line
+fits across the paper, since a wrapped column comes back at the left margin.
+On the PDF's grid (`.fixed`) all of it is inert. The cells are wrappers with
+no `data-fake`: serialization, Find, the LEAKS walk and every offset into the
+page are unchanged. Cost: about 2.5 ms per two-column page at open, nothing
+measurable on a pleading.
+
 ## Fixes applied in earlier sessions
 
 All in `viewer/` unless noted. Each fix is documented inline at the call
@@ -2104,6 +2143,7 @@ test-pdf-text-edit.mjs               Node-runnable Edit text: content parsing, l
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
 viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)
+viewer/columns.js                        Its space-aligned columns laid out on the font's own grid (cuts pure in textdoc.js)
 viewer/pdfsync.js                        Its PDF pane: which PDF an export came from, page ranges, scroll sync (pure; test-pdfsync.mjs)
 viewer/pseudo-key.js                     pseudonym_key.xlsx reader, fake<->real swaps (pure; test-pseudo-key.mjs)
 viewer/xlsx-read.js                      Minimal .xlsx reader (pure; test-xlsx-read.mjs)

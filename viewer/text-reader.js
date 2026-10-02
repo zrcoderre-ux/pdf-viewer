@@ -44,6 +44,7 @@ import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
 import { dressLines, fitRuleRows, placeholderIn } from "./rules.js";
+import { dressColumns, charWidth } from "./columns.js";
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
@@ -522,9 +523,21 @@ chrome.storage.onChanged.addListener((changes, area) => {
   relayout();
 });
 
+// The grid an export's columns are laid out on (columns.js): its character is
+// the reader font's own average one, and its space the font's own, measured
+// again whenever the font changes or a font it names finishes loading.
+function setColumnWidth() {
+  const w = charWidth(TD.fontCss(settings));
+  const root = document.documentElement.style;
+  root.setProperty("--col-w", w.char.toFixed(4) + "em");
+  root.setProperty("--col-sp", w.space.toFixed(4) + "em");
+}
+if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener("loadingdone", () => setColumnWidth());
+
 function applySettings() {
   const root = document.documentElement.style;
   root.setProperty("--reader-font", TD.fontCss(settings));
+  setColumnWidth();
   root.setProperty("--reader-size", (settings.fontSize * zoomNow()) + "px");
   root.setProperty("--reader-lh", String(settings.lineHeight));
   // The EFFECTIVE size is what the pages use: the size set here, less
@@ -2121,9 +2134,10 @@ function markTrailer(body) {
     line.classList.toggle("trailer", inside);
   }
 }
-/** Everything a rebuilt page body needs before it is measured: the boxes, then the trailer. */
+/** Everything a rebuilt page body needs before it is measured: the boxes, the columns, then the trailer. */
 function dressBody(body) {
   dressLines(body);
+  dressColumns(body);
   markTrailer(body);
 }
 
@@ -2283,8 +2297,27 @@ pagesEl.addEventListener("input", (e) => {
   refreshNocrButtons([pageIndexOf(body)]); // typed onto a [DID NOT OCR] page, or down to one
   offerAtCaret(body);
   convertTypedRealsSoon(body);
+  recolumnSoon(body, e.isComposing);
   afterTextChangeSoon();
 });
+
+// Typing changes where a line's spaces cut it into columns (columns.js) — a
+// gap typed into, a gap closed up — and the cells it is laid out in are cut
+// again once the typing stops, the caret kept at its place in the text: the
+// cells are wrappers, so the text and its offsets are the same either side.
+const recolumnPending = new Set();
+const recolumnLater = debounce(() => {
+  for (const body of recolumnPending) {
+    if (!body.isConnected) continue;
+    const at = caretOffsetIn(body);
+    if (dressColumns(body) && at >= 0) { const pt = pointAtOffset(body, at); if (pt) placeCaret(pt.node, pt.offset); }
+  }
+  recolumnPending.clear();
+}, 400);
+function recolumnSoon(body, composing) {
+  recolumnPending.add(body);
+  if (!composing) recolumnLater();
+}
 
 function setDirty(on, pageIndex) {
   // A reel holds several files: the edit is the business of the one whose page
@@ -2606,9 +2639,12 @@ function insertLinesAtCaret(body, pieces) {
       if (i === frags.length - 1) caretSlot = slot;
     });
   }
+  // The caret's place in its line's text, read before the line is cut into
+  // column cells (dressBody), which can split the node it stands in.
+  const caretAt = caretNode && caretSlot ? offsetOfPoint(ltOf(caretSlot), caretNode, caretNode.data.length) : -1;
   dressBody(body);
   fixGutterSpacing(body);
-  if (caretNode) placeCaret(caretNode, caretNode.data.length);
+  if (caretAt >= 0) { const pt = pointAtOffset(ltOf(caretSlot), caretAt); if (pt) placeCaret(pt.node, pt.offset); }
   else if (caretSlot) placeCaret(ltOf(caretSlot), 0);
   setDirty(true, pageIndexOf(body));
   afterTextChange();
@@ -4618,7 +4654,9 @@ function applyReplace(plan, withText) {
       // that stood after it there goes too, so the line does not open on one.
       if (lt) {
         lt.normalize();
-        const f = lt.firstChild;
+        // Its first text, which a column cell (columns.js) may hold.
+        let f = lt.firstChild;
+        while (f && f.nodeType === 1 && f.matches(".cc, .cg")) f = f.firstChild;
         if (f && f.nodeType === 3) f.data = f.data.replace(/^[ \t]+/, "");
       }
     }
@@ -4645,6 +4683,7 @@ function settleReplaced(body, held) {
   normalizeLines(body);
   const marked = convertTypedReals(body, { quiet: true });
   if (held) syncSpots(body);
+  dressColumns(body);
   setDirty(true, pageIndexOf(body));
   return marked;
 }
@@ -4697,7 +4736,16 @@ function replaceOne() {
   batchEdit = true;
   try {
     after = applyReplace(plan, $("fb-with").value);
+    // Kept as a place in the text across the settling: the line may be cut
+    // into its columns again (columns.js), which moves the node it stands in.
+    const afterAt = after ? offsetOfPoint(hit.body, after.startContainer, after.startOffset) : -1;
     marked = settleReplaced(hit.body, plan.held);
+    if (afterAt >= 0) {
+      const pt = pointAtOffset(hit.body, afterAt);
+      after = document.createRange();
+      after.setStart(pt.node, pt.offset);
+      after.collapse(true);
+    }
   } finally { batchEdit = false; }
   if (marked) toast(markedNote(marked).trim());
   lastSnapPage = -1; // what is typed next is its own step
@@ -11108,6 +11156,16 @@ function shapePages({ all = false } = {}) {
     let live = measure.filter((s) => s.target > 0);
     for (const s of live) { s.lo = 0; s.hi = Infinity; }
     const put = (s, f) => { s.fit = Number(f.toFixed(3)); s.sec.style.setProperty("--fit", s.fit.toFixed(3)); };
+    // THE COLUMNS ARE A CEILING TOO. A page laid out in columns (columns.js)
+    // holds them only while each of its column lines fits across the paper:
+    // one that wraps brings its right-hand column back at the left margin,
+    // under the column it belongs beside. So such a page starts no larger than
+    // the size its widest column line fits at, and the search below goes down
+    // from there. Unlike one runaway line, this is the page's own layout, and
+    // the type paying for it is the PDF's own answer: a two-column page is set
+    // small.
+    const caps = columnCaps(live.map((s) => s.body));
+    live.forEach((s, k) => { if (caps[k] < 1) put(s, caps[k]); });
     for (let pass = 0; pass < FIT_PASSES && live.length; pass++) {
       // Too tall for the paper: the type gives. Too WIDE is not the type's
       // fault and is not paid for by the whole page — one runaway line
@@ -11149,6 +11207,25 @@ function shapePages({ all = false } = {}) {
   // page has now, so it still ends at the margin.
   const boxed = measure.filter((s) => s.sec.querySelector(".line.rl")).map((s) => s.sec);
   if (boxed.length) fitRuleRows(boxed);
+}
+
+/**
+ * Per page body, the largest fit at which its widest column line is drawn on
+ * one line (1 where every one fits, or there are none). The lines are read
+ * unwrapped, every page at once, so the pass lays the document out once.
+ */
+function columnCaps(bodies) {
+  const rows = bodies.map((b) => [...b.querySelectorAll(":scope > .line.cols > .lt")]);
+  const on = bodies.filter((b, k) => rows[k].length);
+  if (!on.length) return bodies.map(() => 1);
+  for (const b of on) b.classList.add("cols-measure");
+  const caps = rows.map((lts) => {
+    let need = 0, room = 0;
+    for (const lt of lts) { need = Math.max(need, lt.scrollWidth); room = room || lt.clientWidth; }
+    return room > 0 && need > room + 0.5 ? Math.max(MIN_FIT, Math.floor((room / need) * 1000) / 1000) : 1;
+  });
+  for (const b of on) b.classList.remove("cols-measure");
+  return caps;
 }
 
 /** A slot back as the pane built it: the levelling and the held-open box go. */
