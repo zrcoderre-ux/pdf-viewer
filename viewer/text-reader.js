@@ -3606,8 +3606,7 @@ function paintRowMarks() {
 }
 function paintRowMarksNow() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
-  leakRowRanges = [];
-  if (leakRowValue) for (const body of pageBodies()) for (const r of leakMatches(body, leakRowValue)) leakRowRanges.push({ body, range: r });
+  leakRowRanges = rowRanges(leakRowValue);
   CSS.highlights.set("leakrow", highlightOf(leakRowRanges.map((x) => x.range)));
   markLeakHere();
 }
@@ -6746,26 +6745,45 @@ async function goToLeak(i, { locate = true } = {}) {
   warmForLeaks();
 }
 
-/** Every place `value` stands on a page body: DOM ranges, the value's own spelling or a bare substring of it. */
-function leakMatches(body, value) {
+/**
+ * Every place the row's `value` stands in the open text: [{ body, range }].
+ * Whole words first — "Tim" is the "Tim" on page 4, never the "time" on page 1.
+ * Only a document with no whole-word occurrence on any of its pages (each
+ * member of a combined file counted on its own) is searched inside words, for
+ * the welded or reduced finding that has no other kind. The fallback used to
+ * be asked page by page, so any page without the whole word answered with the
+ * word it sits inside, and the walk stood on the first of those instead.
+ */
+function rowRanges(value) {
+  if (!value) return [];
+  const sources = docPageSources();
+  const per = pageBodies().map((body) => ({ body, member: sources[pageIndexOf(body)] || "", whole: leakMatches(body, value) }));
+  const found = new Set(per.filter((p) => p.whole.length).map((p) => p.member));
+  const out = [];
+  for (const p of per) for (const range of found.has(p.member) ? p.whole : leakMatches(p.body, value, { inside: true })) out.push({ body: p.body, range });
+  return out;
+}
+/** Every place `value` stands on a page body as DOM ranges: as a whole word, or (`inside`) as a bare substring of one. */
+function leakMatches(body, value, { inside = false } = {}) {
   const out = [];
   const v = TD.normalizeValue(value);
-  if (!v) return out;
+  if (!v || (inside && v.length < 3)) return out;
   // Pseudonym spans blanked: a span SHOWS the real name, and a worksheet
   // value standing inside one is the faked occurrence, not the leak.
   const { text, segs } = flatten(body, { blankPn: true });
   const push = (s, e) => { const r = rangeFor(segs, s, e); if (r) out.push(r); };
+  if (inside) {
+    // A welded or reduced finding has no bounded occurrence by construction.
+    const low = text.toLowerCase(), needle = v.toLowerCase();
+    let at = 0;
+    while ((at = low.indexOf(needle, at)) >= 0) { push(at, at + needle.length); at += needle.length; }
+    return out;
+  }
   const rx = PK.buildMatcher([v]);
   if (rx) {
     let m;
     rx.lastIndex = 0;
     while ((m = rx.exec(text))) { push(m.index, m.index + m[0].length); if (m.index === rx.lastIndex) rx.lastIndex++; }
-  }
-  if (!out.length && v.length >= 3) {
-    // A welded or reduced finding has no bounded occurrence by construction.
-    const low = text.toLowerCase(), needle = v.toLowerCase();
-    let at = 0;
-    while ((at = low.indexOf(needle, at)) >= 0) { push(at, at + needle.length); at += needle.length; }
   }
   return out;
 }
