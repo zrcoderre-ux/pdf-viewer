@@ -29,7 +29,7 @@ BAND = (220, 38, 38)     # red-600 (the "PDF" band)
 SAMPLES = 4  # per axis: 16 samples per pixel
 
 # Sheet box as fractions of the icon: (left, top, right, bottom).
-FULL = (0.164, 0.08, 0.836, 0.92)        # a page (0.8 wide to 1 tall), 8% above and below
+FULL = (0.1345, 0.07, 0.8655, 0.93)      # a page (0.85 wide to 1 tall), 7% above and below
 SAFE = (0.24, 0.216, 0.76, 0.784)        # inside the maskable safe zone
 
 
