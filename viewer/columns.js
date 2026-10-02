@@ -12,13 +12,19 @@
 // headings all drew at half their depth.
 //
 // So each line is cut where its spaces lay it out (textdoc.columnCuts), and
-// the grid's character is the reader font's own average one (--col-w, from
-// charWidth; --col-sp is the font's space):
+// the grid's character is the reader font's own average one (--col-n ems,
+// from charWidth; --col-sp-n is the font's space), measured in the page's
+// body type so a line set in a smaller size keeps the page's columns:
 //
-//   .lt.ci  a line that opens with an indent: its spaces stay as they are,
-//           and the line is indented by what they fall short of the grid
-//           (--lead characters' worth). A text-indent and no element: most
-//           indented lines are nothing else, and it costs the layout nothing.
+//   .lt.ci  an indented line: its text stands --ind grid characters in from
+//           the body margin. The --lead spaces it opens with stay as they
+//           are and a text-indent makes up the rest — no element, since most
+//           indented lines are nothing else and it costs the layout nothing.
+//           On pleading paper a numbered line's spaces belong to its number
+//           and are drawn in the margin (none of them is the line's), so its
+//           indent is all text-indent: the centred heading, the "Plaintiff,"
+//           under the party's name, the caption's right-hand column on a
+//           number of its own, each where the export set it.
 //   .cc     a piece of a line before a gap between columns — its text and
 //           the gap — drawn at least as wide as the characters it spans on
 //           the grid (--cols of them). The column after it then begins at its
@@ -34,12 +40,15 @@
 // The cells are wrappers and nothing else: the text, the pseudonym spans and
 // the rule spans are inside them as they were, so serializeNodes, a copy and
 // every offset into the page read exactly what they did. On the PDF's grid
-// (side by side) each line is placed on its PDF row and all of it is inert.
+// (side by side) pleading paper keeps its columns, measured in the PDF's own
+// body type at the grid's scale, since every line there starts at the body
+// margin; a page with no numbers places each line at its PDF row's own left,
+// and the cells are inert on it.
 // Like the rule spans they are re-derived on every pass — but a line already
 // dressed as its text says is left exactly as it is, so the editor's caret
 // text node on any other line is never replaced.
 
-import { columnCuts, columnStops, columnWidths, serializeNodes } from "./textdoc.js";
+import { columnCuts, columnStops, columnWidths, lineIndent, serializeNodes } from "./textdoc.js";
 
 /** A node's length in the file: a pseudonym span counts its fake, as the cuts were made on. */
 const fileLength = (n) => (n.nodeType === 3 ? n.data.length : n.nodeType === 1 ? serializeNodes(n).length : 0);
@@ -47,16 +56,17 @@ const fileLength = (n) => (n.nodeType === 3 ? n.data.length : n.nodeType === 1 ?
 /** The cells and the indent taken back off a line. */
 export function undressColumns(lt) {
   for (const c of [...lt.querySelectorAll(".cc, .cg")]) c.replaceWith(...c.childNodes);
-  if (lt.classList.contains("ci")) { lt.classList.remove("ci"); lt.style.removeProperty("--lead"); }
+  if (lt.classList.contains("ci")) { lt.classList.remove("ci"); lt.style.removeProperty("--lead"); lt.style.removeProperty("--ind"); }
 }
+const indentOf = (lt) => (lt.classList.contains("ci") ? lt.style.getPropertyValue("--ind") + "/" + lt.style.getPropertyValue("--lead") : "");
 
 /**
  * Whether the line is already dressed as `shape` says: the same indent, and
  * the same cells — each where it should start, as long, as wide, its gap the
  * spaces it should be — one after the other.
  */
-function dressedAs(lt, { lead, cuts, widths, gaps }) {
-  if ((lt.classList.contains("ci") ? lt.style.getPropertyValue("--lead") : "") !== (lead ? String(lead) : "")) return false;
+function dressedAs(lt, { ind, lead, cuts, widths, gaps }) {
+  if (indentOf(lt) !== (ind || lead ? ind + "/" + lead : "")) return false;
   if (lt.querySelectorAll(".cc").length !== cuts.length || lt.querySelectorAll(".cg").length !== cuts.length) return false;
   let off = 0, k = 0;
   for (const n of lt.childNodes) {
@@ -103,16 +113,18 @@ function splitAt(lt, marks) {
 }
 
 /**
- * A line dressed as `shape` says: { lead, the indent's depth in characters
- * (0 for none); cuts, the file offsets at which each column after a gap
- * begins; widths, each cell's width in characters; gaps, where each cell's
- * gap begins }. Returns whether it changed anything.
+ * A line dressed as `shape` says: { ind, how many grid characters its text
+ * stands in from the body margin; lead, the spaces its text opens with, which
+ * stay where they are and are made up to that depth; cuts, the file offsets
+ * at which each column after a gap begins; widths, each cell's width in
+ * characters; gaps, where each cell's gap begins }. Returns whether it
+ * changed anything.
  */
 export function dressLineColumns(lt, shape) {
   if (dressedAs(lt, shape)) return false;
   undressColumns(lt);
-  const { lead, cuts, widths, gaps } = shape;
-  if (lead) { lt.classList.add("ci"); lt.style.setProperty("--lead", String(lead)); }
+  const { ind, lead, cuts, widths, gaps } = shape;
+  if (ind || lead) { lt.classList.add("ci"); lt.style.setProperty("--ind", String(ind)); lt.style.setProperty("--lead", String(lead)); }
   if (!cuts.length) return true;
   const marks = [];
   if (lead) marks.push(lead);
@@ -141,16 +153,16 @@ export function dressLineColumns(lt, shape) {
  * Every line of a page body cut into its columns. A line that is a row of a
  * drawn box (.rl) is the box's (rules.js) and is left alone. On pleading paper
  * the margin number and the spaces after it are drawn in the margin, so the
- * grid is counted from the body margin there, and an indent is not the
- * reader's to draw (the stylesheet keeps it out of the layout); the gaps
- * between columns are. Returns whether any line was dressed afresh — whose
- * text nodes may have moved, so a caret or a range in it is to be put back
- * by its place in the text.
+ * grid is counted from the body margin there (`origin`, the narrowest
+ * number's width) and each line is indented by where its text stands from
+ * it. Returns whether any line was dressed afresh — whose text nodes may have
+ * moved, so a caret or a range in it is to be put back by its place in the
+ * text.
  */
 export function dressColumns(body) {
-  let changed = false;
   const numbered = body.classList.contains("numbered");
-  const lines = [];
+  let changed = false;
+  const all = [];
   let origin = Infinity;
   for (const line of body.querySelectorAll(":scope > .line")) {
     const lt = line.querySelector(":scope > .lt");
@@ -164,25 +176,28 @@ export function dressColumns(body) {
     const start = g ? g.textContent.length : 0;
     const shown = lt.textContent;
     if (g && shown.trim()) origin = Math.min(origin, start);
-    // Most lines have no run of spaces at all — a pleading's body, a letter —
-    // and are passed over on what they show: a name on screen is no more a run
-    // of spaces than the fake it stands for. One dressed before is dressed again.
-    if (!shown.includes("  ") && !(!numbered && shown[0] === " ") && !lt.querySelector(".cc") && !lt.classList.contains("ci")) {
-      line.classList.remove("cols");
-      continue;
-    }
-    lines.push({ line, lt, text: serializeNodes(lt), start, lead: !numbered });
+    all.push({ line, lt, start, shown });
   }
   if (!numbered || origin === Infinity) origin = 0;
+  const lines = [];
+  for (const l of all) {
+    // Most lines have no run of spaces and no indent — a pleading's body, a
+    // letter — and are passed over on what they show: a name on screen is no
+    // more a run of spaces than the fake it stands for. One dressed before is
+    // dressed again.
+    if (!l.shown.includes("  ") && l.shown[0] !== " " && !(l.start > origin && l.shown.trim()) && !l.lt.querySelector(".cc") && !l.lt.classList.contains("ci")) {
+      l.line.classList.remove("cols");
+      continue;
+    }
+    l.text = serializeNodes(l.lt);
+    lines.push(l);
+  }
   const stops = columnStops(lines);
   for (const l of lines) {
-    let cuts = columnCuts(l.text, { lead: l.lead, stops, start: l.start });
-    let widths = columnWidths(cuts, { start: l.start, origin });
-    // The indent is the line's own (.ci); the cells are the gaps after it.
-    const lead = l.lead && /^\s/.test(l.text) && cuts.length ? cuts[0] : 0;
-    if (lead) { cuts = cuts.slice(1); widths = widths.slice(1); }
+    const { ind, lead } = lineIndent(l.text, { start: l.start, origin });
+    const cuts = columnCuts(l.text, { stops, start: l.start });
     const gaps = cuts.map((c) => l.text.slice(0, c).replace(/ +$/, "").length);
-    if (dressLineColumns(l.lt, { lead, cuts, widths, gaps })) changed = true;
+    if (dressLineColumns(l.lt, { ind, lead, cuts, widths: columnWidths(cuts, lead), gaps })) changed = true;
     // A line with a gap between columns, not just an indent: what the page's
     // type has to be small enough to hold on one line (text-reader.js,
     // shapePages), since a column that wraps comes back at the left margin.

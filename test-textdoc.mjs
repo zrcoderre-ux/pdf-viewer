@@ -15,7 +15,7 @@ import {
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, didNotOcrLines, DID_NOT_OCR,
-  columnCuts, columnStops, columnWidths, COLUMN_GAP,
+  columnCuts, columnStops, columnWidths, lineIndent, COLUMN_GAP,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
 } from "./viewer/textdoc.js";
@@ -480,9 +480,9 @@ check("the parts join back to the text", ruleParts("\u250c\u2500\u2500\u252c\u25
 console.log("columns laid out with spaces");
 {
   const R = " ".repeat(62);
-  check("a right-hand column alone on its line: the indent is the cut", columnCuts(R + "and its Executive Director, John Tomlinson"), [62]);
-  check("an indented left column and a right-hand one: two cuts",
-    columnCuts("                 Barbara DELO, Plaintiff,                     \u201cDefendants\u201d). Delo alleges"), [17, 62]);
+  check("a right-hand column alone on its line: no cut, an indent", [columnCuts(R + "and its Executive Director"), lineIndent(R + "and its Executive Director")], [[], { lead: 62, ind: 62 }]);
+  check("an indented left column and a right-hand one: one cut, after the gap",
+    columnCuts("                 Barbara DELO, Plaintiff,                     \u201cDefendants\u201d). Delo alleges"), [62]);
   check("a left column running close to the right one: three spaces are still a gap",
     columnCuts("company and its executive director, alleging discrimination   I. Factual Allegations"), [62]);
   check("the gap is three spaces", COLUMN_GAP, 3);
@@ -490,18 +490,27 @@ console.log("columns laid out with spaces");
   check("…unless it lands on one of the page's columns", columnCuts("Holdings: held that:  costumer", { stops: new Set([22]) }), [22]);
   check("a page's column counts from its own left edge, past a margin number",
     columnCuts("Plaintiff,  DECLARATION", { stops: new Set([16]), start: 4 }), [12]);
-  check("without the indent: pleading paper keeps its indents out of the layout", columnCuts("    Plaintiff,          CASE NO.", { lead: false }), [24]);
   check("trailing spaces are not a column, and an empty line has none", [columnCuts("Synopsis     "), columnCuts("      "), columnCuts("")], [[], [], []]);
   const lines = [
     { text: R + "Barbara Delo, a former costumer" },
-    { text: "company and its executive director   I. Factual" + " ".repeat(0) },
+    { text: "company and its executive director   I. Factual" },
     { text: "       United States District Court" },
     { text: "Holdings:" + " ".repeat(53) + "costumer who holds" },
   ];
   check("a page's columns are the ones two lines or more begin at", [...columnStops(lines)].sort((a, b) => a - b), [62]);
-  check("each cell spans to the next cut", columnWidths([17, 62]), [17, 45]);
-  check("on pleading paper the first cell counts from the body margin",
-    [columnWidths([12], { start: 4, origin: 4 }), columnWidths([30], { start: 0, origin: 4 }), columnWidths([2], { start: 0, origin: 4 })], [[12], [26], [0]]);
+  check("…counted from the page's edge, a numbered line's text where its number's spaces end",
+    [...columnStops([{ text: "COMPLAINT FOR:", start: 44 }, { text: R.slice(0, 44) + "1. BREACH;" }])], [44]);
+  check("each cell spans to the next cut, the first from past the indent", [columnWidths([62], 17), columnWidths([40, 62])], [[45], [40, 22]]);
+}
+console.log("indents on the grid");
+{
+  check("an indent off pleading paper is its spaces", lineIndent("     The Court has read"), { lead: 5, ind: 5 });
+  check("pleading paper: a numbered line's spaces are its number's, its text stands where they end",
+    [lineIndent("Plaintiff,", { start: 18, origin: 4 }), lineIndent("JANE DOE,", { start: 4, origin: 4 })], [{ lead: 0, ind: 14 }, { ind: 0, lead: 0 }].map((x) => ({ lead: x.lead, ind: x.ind })));
+  check("…the caption's right-hand column alone on a number of its own", lineIndent("DEMAND FOR JURY TRIAL", { start: 44, origin: 4 }), { lead: 0, ind: 40 });
+  check("…and a line between two numbers is counted from the same margin", lineIndent(" ".repeat(44) + "1. BREACH", { origin: 4 }), { lead: 44, ind: 40 });
+  check("…never in front of it", lineIndent("  (cont.)", { origin: 4 }), { lead: 2, ind: 0 });
+  check("an empty line has no indent", lineIndent("    ", { origin: 4 }), { lead: 0, ind: 0 });
 }
 // The cells are wrappers with no data-fake: a line cut into them serializes as
 // the line the file holds, the gap spaces included.

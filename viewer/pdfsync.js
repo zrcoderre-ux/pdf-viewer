@@ -755,16 +755,59 @@ export function matchedScale(unit, px, { min = 0.15, max = 8 } = {}) {
  * text beats lining it up: a pushed line is out of register with the PDF
  * by that much and legible, an overlapped one is neither. Nulls (lines
  * with no place) pass through. `tops` in order.
+ *
+ * `fixed`, per line, marks the lines that are the page's grid — a pleading's
+ * numbered lines, each standing beside its own number on the PDF — and those
+ * never move: a line between two of them makes room for itself within the
+ * space they leave, and is never what pushes the next one off its number.
+ * The caption's single-spaced lines between two numbers used to do exactly
+ * that, a little each, until the numbers down the side were out of step with
+ * the PDF's and two of them stood crowded together where the push ran out.
+ * Where the lines between two fixed ones cannot all have their boxes there,
+ * they share the space evenly instead.
  */
-export function spreadTops(tops, box) {
+export function spreadTops(tops, box, fixed = null) {
   const boxes = Array.isArray(box) ? box : null;
   const one = !boxes && Number(box) > 0 ? Number(box) : 0;
+  const boxOf = (i) => (boxes ? (Number(boxes[i]) > 0 ? Number(boxes[i]) : 0) : one);
+  const placed = (t) => t != null && Number.isFinite(t);
+  const isFixed = (i) => !!(fixed && fixed[i]);
   let last = null, lastBox = 0;
-  return (tops || []).map((t, i) => {
-    if (t == null || !Number.isFinite(t)) return t == null ? null : t;
-    const y = last == null ? t : Math.max(t, last + lastBox);
+  const out = (tops || []).map((t, i) => {
+    if (!placed(t)) return t == null ? null : t;
+    const y = last == null || isFixed(i) ? t : Math.max(t, last + lastBox);
     last = y;
-    lastBox = boxes ? (Number(boxes[i]) > 0 ? Number(boxes[i]) : 0) : one;
+    lastBox = boxOf(i);
     return y;
   });
+  if (!fixed) return out;
+  // Back from each fixed line: what runs into it is held above it, and a run
+  // that cannot be is spread evenly from the line before it down to this one.
+  let next = null; // the index of the fixed line below
+  for (let i = out.length - 1; i >= 0; i--) {
+    if (!placed(out[i])) continue;
+    if (isFixed(i)) { next = i; continue; }
+    if (next == null) continue;
+    // The run of free lines above `next`, back to the fixed line before it.
+    let a = i;
+    while (a - 1 >= 0 && !(placed(out[a - 1]) && isFixed(a - 1))) a--;
+    const run = [];
+    for (let k = a; k <= i; k++) if (placed(out[k])) run.push(k);
+    const prev = a - 1 >= 0 ? a - 1 : null;
+    const start = prev != null ? out[prev] + boxOf(prev) : -Infinity;
+    const end = out[next];
+    let limit = end;
+    const held = run.map(() => 0);
+    for (let r = run.length - 1; r >= 0; r--) { held[r] = Math.min(out[run[r]], limit - boxOf(run[r])); if (boxOf(run[r]) > 0) limit = held[r]; }
+    if (!run.length || held[0] >= start || !Number.isFinite(start)) run.forEach((k, r) => { out[k] = held[r]; });
+    else {
+      const total = run.reduce((sum, k) => sum + boxOf(k), 0);
+      const share = total > 0 ? Math.max(0, end - start) / total : 0;
+      let y = start;
+      for (const k of run) { out[k] = y; y += boxOf(k) * share; }
+    }
+    i = a; // the run is placed; carry on above it
+    next = null;
+  }
+  return out;
 }

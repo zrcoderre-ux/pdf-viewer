@@ -1086,8 +1086,14 @@ app, which routes it to the reader tab.
   run wide — pushes only its own line's right-hand column on, by a small
   margin, and never runs into it. A page in columns is set no larger than its
   widest column line fits across the paper, so a column never wraps back to the
-  left margin. On pleading paper the columns are counted from the body margin.
-  Display only: the spaces are all still there, and a save, a copy, Find and
+  left margin. On pleading paper the columns are counted from the body margin,
+  and a numbered line now keeps its indent too — the spaces after the number
+  used to be dropped with the number, so a centred heading sat at the margin
+  and a line of the caption's right-hand column alone on its number (a cause
+  of action, "DEMAND FOR JURY TRIAL") fell back to the left side of the page.
+  The caption's columns hold side by side as well, measured in the PDF's body
+  type, so the list of causes of action stands in one column down the caption
+  there too. Display only: the spaces are all still there, and a save, a copy, Find and
   the LEAKS walk read exactly what the file says. In the editor the gaps' own
   spaces are drawn, so what is typed into one is seen, and a line is laid out
   again once the typing stops.
@@ -2081,7 +2087,15 @@ app, which routes it to the reader tab.
   not the PDF's. **Never on top of itself:** where the PDF's own rows sit
   closer than a line of type is tall (a scan's text layer, a signature under
   its rule) the line is pushed down to clear the one above, a line out of
-  register with the PDF and legible — reading the text beats lining it up. The
+  register with the PDF and legible — reading the text beats lining it up.
+  **On pleading paper the numbers never move:** a numbered line stays at its
+  number's height whatever stands between it and the one above, and the
+  caption's single-spaced lines between two numbers clear each other by their
+  type size, as the PDF sets them. (They used to be given a whole line's box
+  apiece, which pushed each one a few points down into the next and the
+  numbers with them, until the numbers down the side were out of step with the
+  PDF's and two of them stood crowded together where the push ran out.) Lines
+  with no room between two numbers share the space evenly. The
   two panes scroll together, anchored on each page's first printed line. **The
   PDF's text is selectable and copies**, in the pane and on a swapped-in page:
   drag from the margin, from the space before a word, or let go after the

@@ -663,21 +663,37 @@ body.sbs .line.trailer { display: none; }
    one long line does not take the whole page's type down with it. */
 .page-body.numbered .line.num > .lt { white-space: pre; }
 /* The columns an export lays out with spaces, laid out (columns.js), on a
-   grid whose character is the reader font's average one (--col-w; --col-sp
-   is its space). An indented line keeps its spaces and is indented by what
-   they fall short of the grid. Each piece of a line before a gap between
-   columns is at least as wide as the characters it spans, so the column after
-   it begins at the same place on every line, and a piece too wide for its
-   cell pushes the rest of its line on instead of running into it. On the
-   PDF's grid every line stands on its own PDF row, and all of it is inert. */
-.page-body:not(.fixed) .lt.ci { text-indent: max(0em, calc(var(--lead) * (var(--col-w, 0.5em) - var(--col-sp, 0.25em)))); }
-.page-body:not(.fixed) .cc {
+   grid whose character is the reader font's average one (--col-n, in ems;
+   --col-sp-n is its space). An indented line keeps its spaces and is
+   indented by what they fall short of the grid. Each piece of a line before
+   a gap between columns is at least as wide as the characters it spans, so
+   the column after it begins at the same place on every line, and a piece
+   too wide for its cell pushes the rest of its line on instead of running
+   into it. On pleading paper a numbered line's own spaces are its number's,
+   kept out of the layout with it (.gs), so its indent is all text-indent.
+   The cells are measured in the page's BODY type (--body-em), not
+   each line's own: a line set smaller (a stamp, an exhibit's small print)
+   still has its column where the page's is. On the PDF's grid the body type
+   is the PDF's own at the grid's scale (--grid-em, set with the grid), and
+   the columns hold there too on pleading paper, where every line starts at
+   the body margin; elsewhere on the grid each line stands at its PDF row's
+   own left and the cells are inert. */
+@property --body-em { syntax: "<length>"; inherits: true; initial-value: 0px; }
+.page-body { --body-em: 1em; }
+.page-body.fixed { --body-em: var(--grid-em, 1em); }
+.page-body:not(.fixed) .lt.ci, .page-body.numbered.fixed .lt.ci {
+  text-indent: calc(var(--ind) * var(--col-n, 0.5) * var(--body-em) - var(--lead) * var(--col-sp-n, 0.25) * 1em);
+}
+.page-body:not(.fixed) .cc, .page-body.numbered.fixed .cc {
   display: inline-block; white-space: pre; box-sizing: border-box; text-indent: 0;
-  min-width: calc(var(--cols) * var(--col-w, 0.5em)); padding-right: calc(2 * var(--col-w, 0.5em));
+  min-width: calc(var(--cols) * var(--col-n, 0.5) * var(--body-em)); padding-right: calc(2 * var(--col-n, 0.5) * var(--body-em));
 }
 /* The gap's own spaces: the cell's width does their work, so they take no
-   room — except in the editor, where what is typed into a gap must show. */
-body:not(.editing) .page-body:not(.fixed) .cg { font-size: 0; }
+   room — except in the editor, where what is typed into a gap must show. No
+   height either: on the PDF's grid a line's leading is set in pixels, which a
+   span of no size would still stand on, and drop the line's text below its
+   number by half of it. */
+body:not(.editing) .page-body:not(.fixed) .cg, body:not(.editing) .page-body.numbered.fixed .cg { font-size: 0; line-height: 0; }
 /* …read unwrapped for a moment, for how wide its widest column line is
    (shapePages: a page in columns is set no larger than that fits). */
 .page-body.cols-measure .line.cols > .lt { white-space: pre; }

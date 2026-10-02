@@ -1394,41 +1394,68 @@ pages.
 ### Columns laid out with spaces (`viewer/columns.js`)
 
 The same character grid lays a page's columns out with SPACES: a Westlaw
-printout's right-hand column, a caption's case number, a filing stamp, a
-centred heading, an indent. In a proportional font a space is about half an
-average character, so a column began wherever the text to its left ended —
-ragged where the page is straight. `textdoc.columnCuts` says where a line's
-spaces cut it: after its indent, and after each gap of `COLUMN_GAP` (3)
-spaces or more, or a two-space gap landing on a column two lines of the page
-begin at (`columnStops`), so a sentence's double space is never a column.
-`columnWidths` gives each piece its width in grid characters; on pleading
-paper the first is counted from the body margin, since the number and its
-spacing are drawn in the margin (and a numbered line's indent stays out of the
-layout, as it was). All three are pure and tested in `test-textdoc.mjs`.
+printout's right-hand column, a caption's case number and causes of action, a
+filing stamp, a centred heading, an indent. In a proportional font a space is
+about half an average character, so a column began wherever the text to its
+left ended — ragged where the page is straight. `textdoc.columnCuts` says
+where a line's spaces cut it between columns: after each gap of `COLUMN_GAP`
+(3) spaces or more, or a two-space gap landing on a column two lines of the
+page begin at (`columnStops`), so a sentence's double space is never a column.
+`lineIndent` says how deep its text stands from the body margin: its leading
+spaces off pleading paper; on pleading paper, where the margin is `origin`
+characters in (the narrowest number's prefix) and a numbered line's spaces
+are all its number's (`GUTTER_RE`, drawn in the hidden `.gs`), `start + lead −
+origin` — so a centred heading, "Plaintiff," under the party's name, and a
+line of the caption's right-hand column alone on its number stand where the
+export set them (they used to fall back to the margin with the number's
+spaces). `columnWidths` gives each cell its width from past the indent. All
+pure, tested in `test-textdoc.mjs`.
 
 `dressColumns(body)` runs in `dressBody` after `dressLines`, after a replace
-(`settleReplaced`), and 400 ms after typing stops (`recolumnSoon`, the caret
-kept by text offset). The grid's character is the reader font's average,
-measured on canvas (`charWidth` → `--col-w`, with the font's space as
-`--col-sp`). An indented line gets `.lt.ci` and a `text-indent` of what its
-spaces fall short of the grid — no element, since most indented lines are
-nothing else. Each piece before a column gap is a `.cc` (`inline-block`,
-`white-space: pre`, `min-width` of `--cols` grid characters, a two-character
-right padding), its gap's spaces in a `.cg` that takes no width out of the
-editor: the column after it starts at its own column on every line, and a
-piece too wide for its cell pushes only its own line on, by the padding. In
-the editor `.cg` is drawn so typing into a gap shows. A line already dressed
-as its text says is left as it is (`dressedAs`), and a line with no run of
-spaces is passed over on its `textContent` without serializing it. `rules.js`
-takes the cells off a line carrying rule glyphs before wrapping the glyphs,
-and box rows (`.rl`) never get cells. A line with a column gap is `.line.cols`:
+(`settleReplaced`, the next hit kept by text offset), and 400 ms after typing
+stops (`recolumnSoon`, the caret kept by text offset when anything moved). The
+grid's character is the reader font's average, measured on canvas
+(`charWidth` → `--col-n`, with the font's space as `--col-sp-n`, both in ems).
+An indented line gets `.lt.ci` with `--ind` (grid characters in) and `--lead`
+(its own spaces, which stay drawn) and a `text-indent` making up the
+difference — no element, since most indented lines are nothing else. Each
+piece before a column gap is a `.cc` (`inline-block`, `white-space: pre`,
+`min-width` of `--cols` grid characters, a two-character right padding), its
+gap's spaces in a `.cg` that takes no width and no height out of the editor
+(on the grid a line's leading is in pixels, which a sizeless span still stood
+on, dropping the line's text below its number). Cells are measured in the
+page's BODY type, `--body-em` (a registered `<length>` property, so `1em` on
+`.page-body` reaches every line as pixels): a line set in its own row's size
+keeps the page's columns. A line already dressed as its text says is left as
+it is (`dressedAs`), and a line with no run of spaces and no indent is passed
+over on its `textContent` without serializing it. `rules.js` takes the cells
+off a line carrying rule glyphs before wrapping the glyphs, and box rows
+(`.rl`) never get cells. A line with a column gap is `.line.cols`:
 `shapePages` reads those unwrapped (`.cols-measure`, every page at once in
 `columnCaps`) and starts the page's fit no larger than its widest column line
 fits across the paper, since a wrapped column comes back at the left margin.
-On the PDF's grid (`.fixed`) all of it is inert. The cells are wrappers with
-no `data-fake`: serialization, Find, the LEAKS walk and every offset into the
-page are unchanged. Cost: about 2.5 ms per two-column page at open, nothing
-measurable on a pleading.
+
+Side by side, pleading paper keeps all of it: every line there starts at the
+body margin, and `--body-em` is the PDF's body type at the grid's scale
+(`--grid-em`, written with the grid). On a page with no numbers each line is
+placed at its PDF row's own left (`rowLayout`) and the cells and indents are
+inert. The cells are wrappers with no `data-fake`: serialization, Find, the
+LEAKS walk and every offset into the page are unchanged. Cost: about 2.5 ms per
+two-column page at open, about 0.4 ms per pleading page.
+
+### The numbers never move on the grid (`pdfsync.spreadTops`)
+
+`spreadTops(tops, box, fixed)` keeps lines from landing on each other; with
+`fixed` (a pleading page's numbered lines) those lines are never moved, and the
+lines between two of them are held above the next — spread evenly between
+them where they cannot all have their room. On a numbered page the room a
+line needs is its TYPE size, not `LINE_BOX` × it: a caption's single-spaced
+lines between two numbers are set a type size apart, and a box apiece pushed
+each a few points down into the next — and every number after them, until the
+numbers down the side were out of step with the PDF's and two stood crowded
+together where the push ran out. `holdWithin` takes the same room, or it
+pulled the caption back up past its numbers from the foot. Tested in
+`test-pdfsync.mjs`.
 
 ## Fixes applied in earlier sessions
 
