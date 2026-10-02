@@ -311,6 +311,10 @@
           <p class="side-hint">Pages marked <strong>↻ OCR This Page</strong>. Saved to <code>New Real Values.txt</code> as <code>ocr again</code>; PDF-Linker takes each page's DID NOT OCR mark off, and its next full run reads the page again and exports its text. Click the page's button again to withdraw.</p>
           <ul id="ocr-again-list"></ul>
         </div>
+        <div id="text-fixed-block" hidden>
+          <p class="side-hint">Pages marked <strong>✎ Use my text</strong> — the OCR was bad and the text was typed in by hand. Saved to <code>New Real Values.txt</code> as <code>text corrected</code>, with the page's text as saved; PDF-Linker's next run writes that text into the PDF as the page's own and never OCRs the page again. Save the page before the run, and click the page's button again to withdraw.</p>
+          <ul id="text-fixed-list"></ul>
+        </div>
         <div id="master-block">
           <p class="side-hint" id="master-hint"></p>
           <ul id="master-list"></ul>

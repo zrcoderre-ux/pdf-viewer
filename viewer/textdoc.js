@@ -606,8 +606,11 @@ const VALUES_HEAD = [
   "# page N' is a page marked Did not OCR: PDF-Linker marks it in the PDF,",
   "# never OCRs it again and exports it as [DID NOT OCR]. A line 'ocr again:",
   "# FILE | page N' undoes that: PDF-Linker takes the mark off the page and",
-  "# its next full run reads the page again. Lines beginning with # are",
-  "# ignored. Delete a line to withdraw it.",
+  "# its next full run reads the page again. A line 'text corrected: FILE |",
+  "# page N | sum …' is a page whose text was typed in by hand: PDF-Linker",
+  "# writes that text into the PDF as the page's text layer and never OCRs the",
+  "# page again. Lines beginning with # are ignored. Delete a line to withdraw",
+  "# it.",
 ];
 
 // A keep line: `no: VALUE` (this case) or `never: VALUE` (every case).
@@ -779,7 +782,7 @@ export function dropFlagsInKey(list, compiledForward) {
   return { kept: dropped.length ? kept : (list || []).slice(), dropped };
 }
 
-export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain) {
+export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain, textFixed) {
   const body = (values || []).map(normalizeValue).filter(Boolean)
     .map((v) => (isPhrase(phrases, v) ? `phrase: ${v}` : v));
   // A local keep is left out on purpose: the file it would go into is a list of
@@ -789,7 +792,8 @@ export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain) {
   const kept = owedKeeps(keeps).map((k) => makeKeep(k.control, k.value)).filter((k) => k.value).map((k) => `${k.control}: ${k.value}`);
   const pages = (noOcr || []).map(makeNoOcrEntry).filter(Boolean).map(noOcrLine);
   const again = (ocrAgain || []).map(makeNoOcrEntry).filter(Boolean).map(ocrAgainLine);
-  return VALUES_HEAD.concat(body, kept, pages, again).join("\n") + "\n";
+  const fixed = (textFixed || []).map(makeTextFixedEntry).filter(Boolean).map(textFixedLine);
+  return VALUES_HEAD.concat(body, kept, pages, again, fixed).join("\n") + "\n";
 }
 
 // ---- a page PDF-Linker is to leave unread -------------------------------------
@@ -858,6 +862,79 @@ export function ocrAgainLine(e) {
 /** The list with `entry` in it or out of it — the same page list setNoOcr keeps. */
 export const setOcrAgain = setNoOcr;
 
+// ---- …and a page the operator TRANSCRIBED -------------------------------------
+//
+// ✎ Use my text is the sibling of ⊘ Did not OCR, for the page whose OCR was bad
+// and whose text the operator has typed in by hand until it says what the page
+// says. A full PDF-Linker run rebuilds every export from its PDF, so the
+// transcription has to reach the PDF itself: the page is handed over as
+// `text corrected: FILE | page N | sum XXXXXXXX`, FILE and N as for a DID NOT
+// OCR line. PDF-Linker reads the page out of the export the reader saved, reads
+// its pseudonyms back through the key, and draws it as the page's text layer
+// in the PDF; it marks the page so no OCR pass reads over it again, spends the
+// line, and from then on exports the page off that layer under a header saying
+// TEXT CORRECTED (headerSaysTextCorrected).
+//
+// The SUM is the page's text as the reader last SAVED it (pageTextSum, which
+// PDF-Linker's _pn_page_text_sum computes the same way over the same lines).
+// PDF-Linker applies the line only where the export's page still reads that
+// way, so a line that outlived its text — the export rewritten by a run since,
+// or the page typed over and not saved — never freezes the wrong text into the
+// PDF; it is left in the file, and the page is saved and marked again.
+export const TEXTFIXED_RE = /^text[\s-]*corrected\s*:\s*(.+?)\s*\|\s*(?:pages?|pp?\.?)?\s*(\d+)\s*(?:\|\s*sum\s*([0-9a-f]{8})\s*)?$/i;
+const TEXTFIXED_LEAD_RE = /^text[\s-]*corrected\s*:/i;
+// A rule line ends a page's text, for the sum, as it does in PDF-Linker's own
+// cut (the authorities trailer an older build wrote rides on the last page).
+const PAGE_RULE_RE = /^=+ .* =+$/;
+
+/** A page transcribed by hand: { doc, pdf, page, sum }, or null without a doc and a page. */
+export function makeTextFixedEntry(e) {
+  const x = makeNoOcrEntry(e);
+  if (!x) return null;
+  const sum = String((e && e.sum) || "").toLowerCase();
+  return { ...x, sum: /^[0-9a-f]{8}$/.test(sum) ? sum : "" };
+}
+/** Its line in New Real Values.txt. */
+export function textFixedLine(e) {
+  const x = makeTextFixedEntry(e);
+  return x ? `text corrected: ${x.pdf || x.doc} | page ${x.page}` + (x.sum ? ` | sum ${x.sum}` : "") : "";
+}
+/** The list with `entry` in it (`on`, its sum taking the entry's) or out of it; the same list when nothing moves. */
+export function setTextFixed(list, entry, on) {
+  const x = makeTextFixedEntry(entry);
+  const have = list || [];
+  if (!x) return have;
+  const at = have.findIndex((e) => sameNoOcr(e, x));
+  if (!on) return at < 0 ? have : have.filter((_, k) => k !== at);
+  if (at < 0) return have.concat([x]);
+  if (have[at].sum === x.sum) return have;
+  return have.map((e, k) => (k === at ? { ...e, sum: x.sum } : e));
+}
+/**
+ * The page's text as a checksum: FNV-1a, 32 bits, over the UTF-8 bytes of its
+ * lines up to the first rule line, joined by newlines — each line's trailing
+ * spaces, tabs and carriage returns dropped, and the blank lines at either end.
+ * PDF-Linker's _pn_page_text_sum is the same function; the two are pinned to
+ * the same values on both sides.
+ */
+export function pageTextSum(lines) {
+  const src = (lines || []).map((l) => String(l == null ? "" : l));
+  const r = src.findIndex((l) => PAGE_RULE_RE.test(l));
+  const body = (r < 0 ? src : src.slice(0, r)).map((l) => l.replace(/[ \t\r]+$/, ""));
+  while (body.length && !body[0]) body.shift();
+  while (body.length && !body[body.length - 1]) body.pop();
+  let h = 2166136261;
+  for (const b of new TextEncoder().encode(body.join("\n"))) {
+    h ^= b;
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+/** Whether PDF-Linker wrote the page off the operator's transcription (its header says so). */
+export function headerSaysTextCorrected(page) {
+  return /\bTEXT CORRECTED\b/.test(String((page && (page.review || page.header)) || ""));
+}
+
 /** Whether a page's lines read DID_NOT_OCR and nothing else (the trailer aside). */
 export function readsDidNotOcr(lines) {
   const src = (lines || []).map((l) => String(l == null ? "" : l));
@@ -876,11 +953,12 @@ export function parseValuesFile(text) {
 }
 
 /**
- * The file's lines: { values, keeps, phrases, noOcr, ocrAgain }. A phrase
- * line is a value to fake, so it is in `values` too; `phrases` says which of
- * them go whole; `noOcr` is the pages marked Did not OCR and `ocrAgain` the
- * pages to read again ({ doc, pdf: "", page }, `doc` being whatever file the
- * line names).
+ * The file's lines: { values, keeps, phrases, noOcr, ocrAgain, textFixed }. A
+ * phrase line is a value to fake, so it is in `values` too; `phrases` says
+ * which of them go whole; `noOcr` is the pages marked Did not OCR, `ocrAgain`
+ * the pages to read again and `textFixed` the pages transcribed by hand
+ * ({ doc, pdf: "", page }, `doc` being whatever file the line names, and a
+ * transcribed page's `sum`).
  */
 export function parseReaderFile(text) {
   const values = [];
@@ -888,6 +966,7 @@ export function parseReaderFile(text) {
   const phrases = [];
   let noOcr = [];
   let ocrAgain = [];
+  let textFixed = [];
   const seen = new Set();
   for (const raw of String(text == null ? "" : text).split(/\r?\n/)) {
     const line = raw.replace(/^\ufeff/, "").trim();
@@ -903,6 +982,11 @@ export function parseReaderFile(text) {
       if (n) ocrAgain = setOcrAgain(ocrAgain, { doc: n[1], page: Number(n[2]) }, true);
       continue;
     }
+    if (TEXTFIXED_LEAD_RE.test(line)) {
+      const n = line.match(TEXTFIXED_RE);
+      if (n) textFixed = setTextFixed(textFixed, { doc: n[1], page: Number(n[2]), sum: n[3] }, true);
+      continue;
+    }
     const m = line.match(KEEP_RE);
     const p = m ? null : line.match(PHRASE_RE);
     const v = normalizeValue(m ? m[2] : p ? p[1] : line);
@@ -912,7 +996,7 @@ export function parseReaderFile(text) {
     else values.push(v);
     if (p) phrases.push(v);
   }
-  return { values, keeps, phrases, noOcr, ocrAgain };
+  return { values, keeps, phrases, noOcr, ocrAgain, textFixed };
 }
 
 /** Whether a flagged value is one to fake whole (`phrase:`). */
@@ -953,8 +1037,9 @@ export function phraseProblem(text) {
 // ---- which files in a case folder are documents -----------------------------------
 
 // PDF-Linker's own non-export .txt files (its _is_tool_txt_artifact plus the
-// authorities list and this tool's values file).
-const TOOL_TXT = new Set(["leaks.txt", "pdf_linker_leaks.txt", "combined text.txt", "authorities cited.txt", VALUES_FILE.toLowerCase()]);
+// authorities list, the transcriptions a run could not apply and this tool's
+// values file).
+const TOOL_TXT = new Set(["leaks.txt", "pdf_linker_leaks.txt", "combined text.txt", "authorities cited.txt", "edited pages not applied.txt", VALUES_FILE.toLowerCase()]);
 const MARKER_RE = /^(ETA|DONE) .*\.txt$/i;
 
 /** A scrubbed export (or its quarantined *.txt.LEAK twin) by name. */

@@ -2174,6 +2174,32 @@ app, which routes it to the reader tab.
   Flagged panel lists these pages too, and a page comes off that list once an
   export shows it read again.
 
+- **✎ Use my text hands PDF-Linker a page you transcribed.** Beside ⊘ Did not
+  OCR, for the other answer to a mangled page: the OCR was bad, so you type
+  the page's text in by hand until it says what the page says, and the text
+  is to replace what the PDF carries. A full PDF-Linker run rebuilds every
+  export from its PDF, so on its own the transcription lasted until the next
+  run, which read the bad text layer again and wrote it back over your work.
+  **✎ Use my text** puts the page on `New Real Values.txt` as `text
+  corrected: FILE | page N | sum …`, FILE and N as for a DID NOT OCR line, and
+  💾 Save writes it with the document. PDF-Linker's next run (or **Apply
+  Fixes**) reads the page out of the export you saved, puts the real names
+  back where the export carries their pseudonyms (through the folder's own
+  key), and writes the text into the PDF as the page's text layer, word by
+  word where the old layer put its words; it marks the page so no OCR pass
+  reads over it again, spends the line, and from then on exports the page
+  off that layer under a header saying TEXT CORRECTED. The **sum** is the
+  page's text as you last saved it: PDF-Linker applies the line only where
+  the export's page still reads that way, so a line that outlived its text
+  (the page typed over and not saved, or the export rewritten since) never
+  writes the wrong text into the PDF — it stays in the file, and the page is
+  saved and marked again. A transcription a run could not apply is kept in
+  `Edited Pages Not Applied.txt` in the case folder before that run rewrites
+  its export. The button reads **✓ Use my text** while the request stands, a
+  second click withdraws it, ⊘ Did not OCR on the page withdraws it too, and
+  it is off on a page that reads `[DID NOT OCR]`. ⊘ Did not OCR stays for the
+  page you cannot read, or that is not worth the typing.
+
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and
   saves a flattened copy with what has to go blacked out. It is the same

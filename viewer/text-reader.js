@@ -141,6 +141,7 @@ let phrases = [];            // …which of them are PHRASES: several words fake
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
 let noOcr = [];              // …and the pages marked ⊘ Did not OCR: [{ doc, pdf, page }] (syncNoOcr)
 let ocrAgain = [];           // …and the pages to read again, ↻ OCR This Page (ocrPageAgain)
+let textFixed = [];          // …and the pages transcribed by hand, ✎ Use my text: [{ doc, pdf, page, sum }] (useMyText)
 let spots = [];              // spot keeps for the open document: [{ page, value, nth }]
 let masterKeeps = [];        // standing keeps from PDF-Linker's master workbook (its KEEP sheet)
 let masterInfo = null;       // { name, sheet, rows, partial } once it is attached
@@ -1448,6 +1449,22 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   phrases = stored.phrases;
   noOcr = stored.noOcr;
   ocrAgain = stored.ocrAgain;
+  textFixed = stored.textFixed;
+  // A transcribed page is DONE once its line has been written to the folder
+  // and is no longer there: PDF-Linker spends the line the moment the text is
+  // in the PDF, and carries back one it could not apply. (Its header says TEXT
+  // CORRECTED from that run on, but a page already corrected can be typed over
+  // and marked again, so the header alone cannot say the request is done.)
+  const written = TD.parseReaderFile(lsGet(valuesSavedKey(), "")).textFixed;
+  let onDiskFixed = [];
+  if (found.valuesHandle) {
+    try { onDiskFixed = TD.parseReaderFile(await (await found.valuesHandle.getFile()).text()).textFixed; }
+    catch { onDiskFixed = null; /* unreadable: nothing is taken as spent */ }
+  }
+  if (onDiskFixed) {
+    textFixed = textFixed.filter((e) => !(written.some((w) => TD.sameNoOcr(w, e) && w.sum === e.sum)
+      && !onDiskFixed.some((d) => TD.sameNoOcr(d, e))));
+  }
   if (found.valuesHandle) {
     try {
       const onDisk = TD.parseReaderFile(await (await found.valuesHandle.getFile()).text());
@@ -1465,6 +1482,9 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
       const named = (e) => noOcr.some((x) => TD.sameNoOcr(x, e)) || ocrAgain.some((x) => TD.sameNoOcr(x, e));
       for (const e of onDisk.noOcr) if (!named(e)) noOcr = TD.setNoOcr(noOcr, e, true);
       for (const e of onDisk.ocrAgain) if (!named(e)) ocrAgain = TD.setOcrAgain(ocrAgain, e, true);
+      // …and a transcribed page the file names that the list does not is one
+      // written in another session, owed until PDF-Linker spends it.
+      for (const e of onDisk.textFixed) if (!named(e) && !textFixed.some((x) => TD.sameNoOcr(x, e))) textFixed = TD.setTextFixed(textFixed, e, true);
     } catch { /* unreadable: the in-memory list stands */ }
   }
   persistValues();
@@ -1987,6 +2007,14 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         // As the page reads; whether a request is already made is settled
         // once the document is up and its lists are in hand (syncNoOcr).
         setNocrButton(b, TD.readsDidNotOcr(p.lines), false, TD.headerSaysDidNotOcr(p));
+        // ✎ Use my text beside it: the page's text, as typed in here, is to
+        // become the PDF's own (a page transcribed by hand, below).
+        const f = document.createElement("button");
+        f.className = "fix-page";
+        f.type = "button";
+        f.addEventListener("click", (e) => { e.preventDefault(); useMyText(Number(sec.dataset.index)); });
+        lab.appendChild(f);
+        setFixButton(f, TD.readsDidNotOcr(p.lines), false, TD.headerSaysTextCorrected(p));
       }
       sec.appendChild(lab);
     }
@@ -3155,6 +3183,10 @@ async function saveDocument() {
     if (!waitingIn.has(m)) sweep.rows = sweep.rows.filter((r) => r.doc.handle !== m.handle);
   }
   setDirty(false);
+  // A transcribed page's line carries the page's text as it was just WRITTEN
+  // (TD.pageTextSum), so PDF-Linker applies the text the operator saved and
+  // nothing older or newer.
+  refreshTextFixedSums();
   // THE LIST GOES WITH IT. The flags and keeps are half of the same decision
   // the document carries — a value kept is a value this save left standing —
   // and a list still sitting in the browser is a run's worth of work the next
@@ -4849,10 +4881,12 @@ function markDidNotOcr(i) {
   // it read BEFORE, which ↻ OCR This Page puts back (strippedTextOf).
   const top = undoStack[undoStack.length - 1];
   if (top && top.page === i) top.nocr = true;
-  // A request to read the page again is withdrawn by stripping it again.
+  // A request to read the page again is withdrawn by stripping it again —
+  // and so is a transcription: the page's text is not worth keeping after all.
   const entry = pageEntryAt(i);
-  if (entry && ocrAgain.some((e) => TD.sameNoOcr(e, entry))) {
+  if (entry && (ocrAgain.some((e) => TD.sameNoOcr(e, entry)) || textFixed.some((e) => TD.sameNoOcr(e, entry)))) {
     ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
+    textFixed = TD.setTextFixed(textFixed, entry, false);
     persistValues();
     renderFlags();
   }
@@ -4962,6 +4996,97 @@ function putStrippedBack(i, sn) {
   return true;
 }
 
+// ── …and a page transcribed by hand ───────────────────────────────────────────────
+//
+// ✎ Use my text, beside ⊘ Did not OCR, is for the page whose OCR was bad and
+// whose text the operator has typed in here until it says what the page says.
+// The export is the reader's to edit, but a full PDF-Linker run rebuilds every
+// export from its PDF — so the page goes on New Real Values.txt as `text
+// corrected: FILE | page N | sum …` (TD.textFixedLine), and PDF-Linker writes
+// the page's text, as saved, into the PDF as its text layer (its pseudonyms
+// read back through the key), marks the page so it is never OCR'd again, and
+// from then on exports it off that layer under a TEXT CORRECTED header. The
+// sum is the page's text as last saved (refreshTextFixedSums); PDF-Linker
+// applies the line only where the export still reads that way. A second click
+// withdraws the request. ⊘ Did not OCR stays for the page not worth the typing.
+function useMyText(i) {
+  if (!doc) return;
+  const p = doc.pages[i];
+  if (!p || p.header == null) return;
+  const m = reel.length > 1 ? reelMemberOf(i) : null;
+  const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
+  const entry = pageEntryAt(i);
+  if (entry && textFixed.some((e) => TD.sameNoOcr(e, entry))) {
+    textFixed = TD.setTextFixed(textFixed, entry, false);
+    persistValues();
+    renderFlags();
+    toast(`${where}: no longer handed to PDF-Linker as text typed in by hand.`);
+    return;
+  }
+  if (pageReadsDidNotOcr(i)) {
+    toast(`${where} reads ${TD.DID_NOT_OCR} — type its text in first (or ↻ OCR This Page to have it read again).`, { error: true });
+    return;
+  }
+  if (!entry) {
+    toast(`${where} carries no PDF page number, so PDF-Linker cannot be told which page the text is for.`, { error: true });
+    return;
+  }
+  if (flagsFor !== valuesStoreKey()) {
+    toast("The case folder's list is still being read — try again in a moment.", { error: true });
+    return;
+  }
+  const body = bodyForPage(i);
+  const lines = body ? TD.serializeNodes(body).split("\n") : p.lines;
+  noOcr = TD.setNoOcr(noOcr, entry, false);
+  ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
+  textFixed = TD.setTextFixed(textFixed, { ...entry, sum: TD.pageTextSum(lines) }, true);
+  persistValues();
+  renderFlags();
+  toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run writes the text into the PDF and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
+}
+/** Each transcribed page of the open document takes the sum of its text as it now stands — what a save just wrote. */
+function refreshTextFixedSums() {
+  if (!doc || !textFixed.length || flagsFor !== valuesStoreKey()) return;
+  const sources = docPageSources();
+  let list = textFixed;
+  doc.pages.forEach((p, i) => {
+    const entry = pageEntryAt(i, sources);
+    if (entry && list.some((e) => TD.sameNoOcr(e, entry))) list = TD.setTextFixed(list, { ...entry, sum: TD.pageTextSum(p.lines) }, true);
+  });
+  if (list !== textFixed) {
+    textFixed = list;
+    persistValues();
+  }
+}
+function setFixButton(b, reads, asked, corrected) {
+  b.classList.toggle("on", asked);
+  b.setAttribute("aria-pressed", asked ? "true" : "false");
+  b.disabled = reads && !asked;
+  b.textContent = asked ? "✓ Use my text" : "✎ Use my text";
+  b.title = asked
+    ? `Asked: PDF-Linker's next run writes this page's text, as you saved it, into the PDF as the page's own and never OCRs the page again. ${TD.VALUES_FILE} carries the request once it is written — Save writes it. Click to withdraw.`
+    : reads
+      ? `The page reads ${TD.DID_NOT_OCR}: there is no text to hand over. Type the page's text in first.`
+      : (corrected ? "PDF-Linker already uses your transcription for this page. Typed over it again? " : "The OCR was bad and you have typed this page's text in by hand? ")
+        + `Hand it to PDF-Linker: Save puts the page on ${TD.VALUES_FILE}, and its next run writes the text into the PDF as the page's own and never OCRs the page again.`;
+}
+/** Set each page label's ✎ button from its page (`indices`, or every page on screen). */
+function refreshFixButtons(indices) {
+  if (!doc) return;
+  const buttons = indices && indices.length <= 20
+    ? indices.map((i) => pagesEl.querySelector(`.tpage[data-index="${i}"] > .page-label .fix-page`)).filter(Boolean)
+    : [...pagesEl.querySelectorAll(".tpage > .page-label .fix-page")];
+  if (!buttons.length) return;
+  const sources = textFixed.length ? docPageSources() : null;
+  for (const b of buttons) {
+    const i = Number(b.closest(".tpage").dataset.index);
+    const p = doc.pages[i];
+    if (!p) continue;
+    const e = sources ? pageEntryAt(i, sources) : null;
+    setFixButton(b, pageReadsDidNotOcr(i), !!e && textFixed.some((x) => TD.sameNoOcr(x, e)), TD.headerSaysTextCorrected(p));
+  }
+}
+
 /** The label's button: ⊘ Did not OCR on a page of text, ↻ OCR This Page on one that reads DID_NOT_OCR. */
 function nocrButtonClick(i) {
   if (!doc || !doc.pages[i]) return;
@@ -5014,6 +5139,7 @@ function refreshNocrButtons(indices) {
     const e = sources ? pageEntryAt(i, sources) : null;
     setNocrButton(b, pageReadsDidNotOcr(i), !!e && ocrAgain.some((x) => TD.sameNoOcr(x, e)), TD.headerSaysDidNotOcr(p));
   }
+  refreshFixButtons(indices);
 }
 
 // ── the rest of the folder ───────────────────────────────────────────────────
@@ -6130,8 +6256,8 @@ function valuesSavedKey() { return VALUES_SAVED_PREFIX + (folderName || fileName
 function valuesDirty() {
   // A local keep is not in the file and never will be, so a list that holds
   // nothing else is a list the case folder is owed nothing from.
-  if (!flagged.length && !TD.owedKeeps(keeps).length && !noOcr.length && !ocrAgain.length) return false;
-  return TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain) !== lsGet(valuesSavedKey(), "");
+  if (!flagged.length && !TD.owedKeeps(keeps).length && !noOcr.length && !ocrAgain.length && !textFixed.length) return false;
+  return TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed) !== lsGet(valuesSavedKey(), "");
 }
 /** …and the same list, as it stands, marked as written. */
 function markValuesSaved(text) { lsSet(valuesSavedKey(), text); renderFlags(); }
@@ -6152,11 +6278,11 @@ function spotsFrom(list, from) { return from ? list.map((x) => ({ ...x, page: x.
 // bare, and one before phrases stored no `phrases`.
 function readStoredValues(k) {
   const v = lsGet(k, null);
-  if (Array.isArray(v)) return { values: v, keeps: [], phrases: [], noOcr: [], ocrAgain: [] };
-  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [], phrases: (v && v.phrases) || [], noOcr: (v && v.noOcr) || [], ocrAgain: (v && v.ocrAgain) || [] };
+  if (Array.isArray(v)) return { values: v, keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] };
+  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [], phrases: (v && v.phrases) || [], noOcr: (v && v.noOcr) || [], ocrAgain: (v && v.ocrAgain) || [], textFixed: (v && v.textFixed) || [] };
 }
-function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; phrases = st.phrases; noOcr = st.noOcr; ocrAgain = st.ocrAgain; compileKey(); renderFlags(); }
-function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps, phrases, noOcr, ocrAgain }); }
+function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; phrases = st.phrases; noOcr = st.noOcr; ocrAgain = st.ocrAgain; textFixed = st.textFixed; compileKey(); renderFlags(); }
+function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps, phrases, noOcr, ocrAgain, textFixed }); }
 
 /**
  * The pages marked ⊘ Did not OCR, as the list PDF-Linker is owed follows them.
@@ -6176,7 +6302,7 @@ function syncNoOcr(indices, { drop = false } = {}) {
   if (!doc) return;
   if (flagsFor === valuesStoreKey()) {
     const sources = docPageSources();
-    let list = noOcr, again = ocrAgain;
+    let list = noOcr, again = ocrAgain, fixed = textFixed;
     for (const i of indices) {
       const p = doc.pages[i];
       const entry = pageEntryAt(i, sources);
@@ -6192,10 +6318,13 @@ function syncNoOcr(indices, { drop = false } = {}) {
       // exported the page's text (or the page was never marked, and its text
       // is back).
       if (asked && !marked && !reads) again = TD.setOcrAgain(again, entry, false);
+      // A page that reads DID_NOT_OCR has no transcription to hand over.
+      if (reads) fixed = TD.setTextFixed(fixed, entry, false);
     }
-    if (list !== noOcr || again !== ocrAgain) {
+    if (list !== noOcr || again !== ocrAgain || fixed !== textFixed) {
       noOcr = list;
       ocrAgain = again;
+      textFixed = fixed;
       persistValues();
       renderFlags();
     }
@@ -6216,13 +6345,14 @@ function pageListsNote() {
   const parts = [];
   if (noOcr.length) parts.push(`${noOcr.length} page${noOcr.length === 1 ? "" : "s"} not to OCR`);
   if (ocrAgain.length) parts.push(`${ocrAgain.length} to OCR again`);
+  if (textFixed.length) parts.push(`${textFixed.length} transcribed by hand`);
   return parts.length ? ", " + parts.join(", ") : "";
 }
 
 function renderFlags() {
   updateDirty(); // a flag, a keep or one of them written is a save's business
   flagsList.innerHTML = "";
-  flagCount.textContent = String(flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length);
+  flagCount.textContent = String(flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length + textFixed.length);
   const nocrList = $("nocr-list");
   nocrList.innerHTML = "";
   $("nocr-block").hidden = !noOcr.length;
@@ -6240,6 +6370,15 @@ function renderFlags() {
     li.textContent = `${TD.docLabel(e.pdf || e.doc)} — page ${e.page}`;
     li.title = TD.ocrAgainLine(e);
     againList.appendChild(li);
+  }
+  const fixedList = $("text-fixed-list");
+  fixedList.innerHTML = "";
+  $("text-fixed-block").hidden = !textFixed.length;
+  for (const e of textFixed) {
+    const li = document.createElement("li");
+    li.textContent = `${TD.docLabel(e.pdf || e.doc)} — page ${e.page}`;
+    li.title = TD.textFixedLine(e);
+    fixedList.appendChild(li);
   }
   refreshNocrButtons();
   renderSpots();
@@ -6430,11 +6569,11 @@ function findInPages(v) {
  * of somebody who never asked for one.
  */
 async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
-  if (!flagged.length && !keeps.length && !noOcr.length && !ocrAgain.length) {
+  if (!flagged.length && !keeps.length && !noOcr.length && !ocrAgain.length && !textFixed.length) {
     if (!quiet) toast("Nothing flagged yet — select an unfaked name and press Flag, or right-click a pseudonym to keep it.", { error: true });
     return false;
   }
-  const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain);
+  const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed);
   if (dirHandle) {
     try {
       if (dirHandle.requestPermission) {
@@ -6459,8 +6598,8 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
 }
 $("flags-save").addEventListener("click", () => saveValuesFile());
 $("flags-copy").addEventListener("click", async () => {
-  const n = flagged.length + keeps.length + noOcr.length + ocrAgain.length;
-  try { await navigator.clipboard.writeText(flagged.map((v) => (TD.isPhrase(phrases, v) ? "phrase: " + v : v)).concat(keeps.map((k) => k.control + ": " + k.value), noOcr.map(TD.noOcrLine), ocrAgain.map(TD.ocrAgainLine)).join("\n") + "\n"); toast("Copied " + n + " line" + (n === 1 ? "" : "s")); }
+  const n = flagged.length + keeps.length + noOcr.length + ocrAgain.length + textFixed.length;
+  try { await navigator.clipboard.writeText(flagged.map((v) => (TD.isPhrase(phrases, v) ? "phrase: " + v : v)).concat(keeps.map((k) => k.control + ": " + k.value), noOcr.map(TD.noOcrLine), ocrAgain.map(TD.ocrAgainLine), textFixed.map(TD.textFixedLine)).join("\n") + "\n"); toast("Copied " + n + " line" + (n === 1 ? "" : "s")); }
   catch { toast("Copy failed", { error: true }); }
 });
 

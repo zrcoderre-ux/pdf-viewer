@@ -295,6 +295,30 @@ the page reads as read under a header that is not DID NOT OCR (PDF-Linker's
 full run has taken the mark off). `markDidNotOcr` withdraws a request for the
 page it strips. `#ocr-again-block` lists them.
 
+**✎ Use my text** (`.fix-page`, beside `.nocr-page` on every label with a
+page header; `useMyText`, `setFixButton`, `refreshFixButtons`, called from
+`refreshNocrButtons`) hands a page TRANSCRIBED by hand to PDF-Linker:
+`textFixed` (beside `noOcr` and `ocrAgain`, persisted with them) is written
+by `formatValuesFile` as `text corrected: FILE | page N | sum XXXXXXXX`
+(`textdoc.textFixedLine`) and read back by `parseReaderFile` into
+`textFixed`, never into `values`. The sum is `textdoc.pageTextSum` — FNV-1a
+over the UTF-8 bytes of the page's lines up to the first rule line, trailing
+blanks and the blank lines at the ends dropped — which PDF-Linker's
+`_pn_page_text_sum` computes identically; both sides pin the same values.
+`useMyText` takes the sum of the page as it reads at the click, and
+`saveDocument` refreshes every entry's sum off the lines it just wrote
+(`refreshTextFixedSums`) before the values file is written, so the line
+names the text on disk. PDF-Linker applies a line only where the export's
+page still sums to it, writes the page into the PDF's text layer, marks the
+page (`_TEXT_FIXED_MARK_KEY`), spends the line, and exports the page under a
+`TEXT CORRECTED` header (`headerSaysTextCorrected`). Adoption drops an entry
+whose line was WRITTEN (it is in `valuesSavedKey`'s text with the same sum)
+and is gone from the file on disk — spent by PDF-Linker — and takes in a
+line on disk the list does not name. A page that reads `[DID NOT OCR]` has
+no transcription: the button is disabled there, `markDidNotOcr` withdraws an
+entry for the page it strips, and `syncNoOcr` drops one for a page that
+reads it. `#text-fixed-block` lists them.
+
 The LEAKS review bar works PDF-Linker's `LEAKS.xlsx` row by row from the
 text: `leaks.js` (pure) reads the worksheet by header name, classifies a
 Fix? cell the way `_pn_parse_decision_rows` will read it, parses the Where
