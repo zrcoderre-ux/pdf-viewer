@@ -1489,12 +1489,16 @@ spaces fall short of the grid. Without (`.rowleft`): each line at its row's
 left as before, its leading spaces cancelled by a negative `text-indent` — the
 row's left IS where its text begins, and the spaces on top of it set every
 indented line in twice as far. On every grid page a cell whose text runs wider
-than its cell (the reader's font set at the PDF's size runs wide) is squeezed
-into it (`scaleX`, no narrower than `CELL_SQUEEZE_MIN`, 0.75; `width` = its
-`min-width`, or past the floor what the squeezed text needs, which pushes the
-column), measured and written for the
-pages near the reading before the existing slide-back and line squeeze, so a
-column is never pushed there; `clearMatched` undoes it.
+than its cell (the reader's font set at the PDF's size runs wide) is held to
+it by `columns.fitCells`: where the text fits in the blank before the next
+column's text a space short of it (`min-width` less one space), it keeps its
+own width over the cell's margin and `width` = `min-width` holds the column;
+past that it is squeezed into that blank (`scaleX`, no narrower than
+`CELL_SQUEEZE_MIN`, 0.75; past the floor `width` is what the squeezed text and
+a space need, which pushes the column). Measured and written for the pages
+near the reading before the existing slide-back and line squeeze; every cell
+with a `width` or a transform is let out before it is measured, and
+`clearMatched` undoes both. `test-columns.html` checks each case in a page.
 
 Two more fixes made a two-column page stand where its PDF does. `pdfRows`
 keeps an item out of a row when it shares no baseline with anything in it (by

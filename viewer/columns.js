@@ -231,6 +231,51 @@ export function dressColumns(body) {
   return changed;
 }
 
+/** The narrowest a piece before a column is drawn to hold its column (fitCells): three quarters of its width still reads. */
+export const CELL_SQUEEZE_MIN = 0.75;
+
+/**
+ * Side by side, each piece before a column held to its cell on the grid
+ * (text-reader.js, applyMatchedLayout), so the column after it stands where
+ * the PDF prints it.
+ *
+ * ONLY WHERE IT WOULD RUN INTO SOMETHING. The cell's two characters of margin
+ * are not a boundary; the next column's text, which begins at the cell's
+ * edge, is. A piece that fits in the blank before that text with a space to
+ * spare is drawn at its own width across the margin, and nothing moves. One
+ * that does not is squeezed across into that blank — but no narrower than
+ * CELL_SQUEEZE_MIN. The grid is the FILE's, so a cell is as wide as the fakes
+ * in it, and a real name twice its fake's length squeezed into the fake's
+ * room is letters drawn on top of one another. Past that the piece is drawn
+ * at the narrowest that still reads and takes the room it needs, a space
+ * short of its column, which it pushes: reading the words beats lining them
+ * up.
+ *
+ * Every cell let out to its own width first, every cell read, then every one
+ * written, so the page is laid out once whatever the number of cells.
+ */
+export function fitCells(cells) {
+  const xs = [...cells].map((c) => ({ c }));
+  for (const x of xs) if (x.c.style.width || x.c.style.transform) { x.c.style.width = ""; x.c.style.transform = ""; x.c.style.transformOrigin = ""; }
+  for (const x of xs) {
+    const cs = getComputedStyle(x.c);
+    x.min = parseFloat(cs.minWidth) || 0;
+    x.pad = parseFloat(cs.paddingRight) || 0;
+    x.space = (parseFloat(cs.getPropertyValue("--col-sp-n")) || 0.25) * (parseFloat(cs.fontSize) || 0);
+    x.w = x.c.offsetWidth;
+  }
+  for (const x of xs) {
+    if (!(x.min > x.pad) || x.w <= x.min + 0.5) continue;
+    const text = x.w - x.pad; // the piece's own width, without the margin
+    const room = x.min - x.space; // up to the next column's text, a space short of it
+    if (text <= room) { x.c.style.width = x.min + "px"; continue; } // fits: drawn as it is, the column held
+    const fit = Math.max(CELL_SQUEEZE_MIN, room / text);
+    x.c.style.width = Math.max(x.min, text * fit + x.space) + "px";
+    x.c.style.transform = `scaleX(${fit.toFixed(4)})`;
+    x.c.style.transformOrigin = "0 0";
+  }
+}
+
 // A stretch of the kind of text a filing is made of, to take the font's
 // average character from: the width a grid of N characters is drawn at.
 const SAMPLE = "The Court has read the moving papers, the opposition and the reply. Defendants’ motion to compel "
