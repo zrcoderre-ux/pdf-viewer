@@ -216,7 +216,14 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
   z-index: 20;
   height: var(--toolbar-height);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* Page navigation and zoom sit in the middle while the two sides fit in
+     equal halves beside them. Where half the bar is too little for the
+     right group's buttons, the middle group moves left: that column never
+     gets less than its min-content. With a floor of 0 the buttons slid
+     left under zoom instead, so at 1280px a click on + was Redo or Undo.
+     The left column can have 0, because everything in it gives way (see
+     .doc-title, #status and #link-count). */
+  grid-template-columns: minmax(0, 1fr) auto minmax(min-content, 1fr);
   align-items: center;
   gap: 12px;
   padding: 0 10px;
@@ -225,6 +232,19 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
   font-size: 13px;
 }
 .tb-group { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* A side group's icon buttons give up their padding, down to the bare icon,
+   before the middle group has to move. Their 32px is a flex-basis, not a
+   width, so that the right group's min-content (its column's floor above) is
+   that squeezed size, and wherever the group fitted its half the bar is laid
+   out as it was. */
+.tb-group > .icon-btn { width: auto; flex: 0 1 32px; }
+/* The least the name's box keeps (see .doc-title): its 16px icon, 28px menu
+   button, two 4px gaps and the name's 12px of padding; while the name is
+   being edited, 160px of input in place of the padding. The room is what
+   the link pill leaves it: the floor and some 70px of the name, or just the
+   floor while editing, since that has 160px to type in. */
+.tb-left { --name-floor: 64px; --name-room: 136px; }
+.tb-left:has(#filename-input) { --name-floor: 212px; --name-room: 212px; }
 .tb-right { justify-content: flex-end; }
 .tb-center { gap: 10px; }
 .tb-sep { width: 1px; height: 22px; background: var(--c-border-strong); margin: 0 4px; flex: none; }
@@ -233,7 +253,10 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
   display: flex;
   align-items: center;
   gap: 4px;
-  min-width: 0;
+  /* The name shortens with an ellipsis, but the box keeps its floor (or
+     what the group has beside the panel button, if that is less): any
+     narrower and the menu button would be pushed out over the status. */
+  min-width: min(var(--name-floor), 100% - 40px);
   margin-left: 4px;
 }
 .doc-title .doc-icon { color: var(--c-accent); flex: none; }
@@ -254,7 +277,10 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
   font-weight: 600;
   font-size: 13.5px;
   height: 28px;
-  min-width: 160px;
+  /* It fills the box, which is as wide as the name needs and at least the
+     floor: 160px or more to type in, until the bar runs short of room. */
+  flex-grow: 1;
+  min-width: 0;
   background: var(--c-field);
   color: var(--c-text);
   border: 1px solid var(--c-accent);
@@ -275,21 +301,32 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
 }
 #link-count {
   flex: none;
+  /* The pill keeps its length while the rest of the left group still has
+     the name's room beside it, and 40px for the panel button at its
+     narrowest and the gaps and margins. Below that it shortens with an
+     ellipsis rather than pushing the group over the page navigation. */
+  max-width: calc(100% - var(--name-room) - 40px);
   font-size: 11.5px;
   font-weight: 500;
   color: var(--c-text-2);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #link-count:not(:empty) {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px 3px 8px;
+  display: block;
+  position: relative;
+  padding: 3px 9px 3px 20px;
   border-radius: 999px;
   background: var(--c-field);
 }
+/* The dot is placed, not a flex item, so the count is plain inline text that
+   text-overflow can shorten. */
 #link-count:not(:empty)::before {
   content: "";
+  position: absolute;
+  left: 8px;
+  top: calc(50% - 3px);
   width: 6px;
   height: 6px;
   border-radius: 50%;

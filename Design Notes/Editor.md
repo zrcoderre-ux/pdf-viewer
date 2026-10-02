@@ -12,6 +12,27 @@ window under 1100px starts it collapsed), and the side rail + panel
 (`.float-bar`: find, annotation properties, crop, rotate, redact, form) sit
 under the top bar.
 
+**The top bar is a three-column grid** (`#toolbar` in `viewer.css`): the
+document's name, status and link pill on the left, page navigation and zoom
+in the middle, the actions on the right. The middle group is centred while
+both sides fit in equal halves beside it. The right column's floor is its
+min-content, so where half the bar is too little for the actions the middle
+group moves left; with a floor of 0 the actions slid left under zoom instead
+(at 1280px a click on zoom-in was Redo or Undo). The side groups' icon
+buttons take their 32px as a flex-basis with `width: auto`: they can still
+give up their padding, down to the icon, before the middle group moves, and
+the right group's min-content is that squeezed size, so wherever the
+actions fitted their half the bar is laid out exactly as before. The left column's floor is 0
+because everything in it gives way: the name and status shorten with an
+ellipsis, the name's box keeps `--name-floor` (its icon, menu button and
+padding, or those and 160px of input while it is being renamed), and the
+link pill shortens with an ellipsis once the rest of the group would have
+less than `--name-room` (the floor and some 70px of the name; just the floor
+while renaming). The window-width rules after it (at 1180px and narrower
+the status and the button labels go, at 1100 the pill, at 960 the provider
+and auto-scroll, at 800 the zoom and theme buttons) choose what is shown;
+they do not decide whether controls overlap.
+
 **Comments are a model in PDF user space** (`viewer/annotations.js`): one
 array of plain objects (`{ id, page, type, rect, quads, color, … }`), drawn as
 DOM in each page's `.annotLayer` by `paintPage`, with undo / redo as
