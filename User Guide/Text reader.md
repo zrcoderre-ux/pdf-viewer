@@ -1196,7 +1196,11 @@ app, which routes it to the reader tab.
   the right-hand column straight down the page, including the half of a line
   whose left-hand column runs up to it with a single space between. A piece of
   a line too wide for its place in the reader's font is drawn narrower into it
-  rather than push its column along. A page that gives no grid (no line begins
+  rather than push its column along — but never below three quarters of its
+  width: a real name much longer than its fake takes the room it needs and
+  moves the column over instead of being drawn with its letters on top of each
+  other. A name is never cut between columns, even where one of its words
+  happens to begin where the page's second column does. A page that gives no grid (no line begins
   anywhere but the margin) keeps each line at its own row's left, its leading
   spaces no longer added on top. The two halves of a two-column page are set to
   their own leading, a few points apart, and are now two rows and two lines that

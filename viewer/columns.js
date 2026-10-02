@@ -53,6 +53,27 @@ import { columnCuts, columnStops, columnWidths, hasFirmColumn, lineIndent, seria
 /** A node's length in the file: a pseudonym span counts its fake, as the cuts were made on. */
 const fileLength = (n) => (n.nodeType === 3 ? n.data.length : n.nodeType === 1 ? serializeNodes(n).length : 0);
 
+/**
+ * Where a line's spans stand in the file, [from, to) each: a pseudonym, a
+ * spot keep. A line is split between columns only in its text nodes
+ * (splitAt), so these are the stretches no cut may fall inside. A line dressed
+ * already is read through its cells.
+ */
+function spanRanges(lt) {
+  const out = [];
+  let off = 0;
+  const visit = (parent) => {
+    for (const n of parent.childNodes) {
+      if (n.nodeType === 1 && (n.classList.contains("cc") || n.classList.contains("cg"))) { visit(n); continue; }
+      const len = fileLength(n);
+      if (n.nodeType === 1 && len) out.push([off, off + len]);
+      off += len;
+    }
+  };
+  visit(lt);
+  return out;
+}
+
 /** The cells and the indent taken back off a line. */
 export function undressColumns(lt) {
   for (const c of [...lt.querySelectorAll(".cc, .cg")]) c.replaceWith(...c.childNodes);
@@ -199,7 +220,7 @@ export function dressColumns(body) {
   for (const l of plain) l.line.classList.remove("cols");
   for (const l of lines) {
     const { ind, lead } = lineIndent(l.text, { start: l.start, origin });
-    const cuts = columnCuts(l.text, { stops, start: l.start });
+    const cuts = columnCuts(l.text, { stops, start: l.start, atoms: spanRanges(l.lt) });
     const gaps = cuts.map((c) => l.text.slice(0, c).replace(/ +$/, "").length);
     if (dressLineColumns(l.lt, { ind, lead, cuts, widths: columnWidths(cuts, lead), gaps })) changed = true;
     // A line with a gap between columns, not just an indent: what the page's

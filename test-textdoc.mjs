@@ -510,6 +510,15 @@ console.log("columns laid out with spaces");
     columnCuts("costumer's sexual harassment claim accrued after the effectiv Jo Marine", { stops: second }), [62]);
   check("…but one space onto an indent's column is two words", columnCuts("It is so ordered.", { stops: new Map([[3, 9]]) }), []);
   check("…or onto a column too few lines begin at", columnCuts("x".repeat(61) + " y", { stops: new Map([[62, 2]]) }), []);
+  // A pseudonym is one span on screen: a word of it on the second column is
+  // a word of the name, and the line is cut after the name or not at all.
+  const named = "Defendant Weddell Of Sharnbrook Of Livesey Brindley moved to dismiss.";
+  const name = [10, 51];
+  check("a name's word on the second column is not a cut inside the name",
+    [columnCuts(named, { stops: new Map([[21, 3]]) }), columnCuts(named, { stops: new Map([[21, 3]]), atoms: [name] })], [[21], []]);
+  check("…the column after the name still is", columnCuts(named, { stops: new Map([[52, 3]]), atoms: [name] }), [52]);
+  check("…and a gap of spaces inside a span is not one either",
+    columnCuts("Plaintiff Pat    Doe     Case No. 1", { atoms: [[10, 20]] }), [25]);
   check("a page has a second column where enough lines begin far enough in", [hasFirmColumn(second), hasFirmColumn(new Map([[5, 20]])), hasFirmColumn(new Map([[40, 2]]))], [true, false, false]);
   check("each cell spans to the next cut, the first from past the indent", [columnWidths([62], 17), columnWidths([40, 62])], [[45], [40, 22]]);
 }
