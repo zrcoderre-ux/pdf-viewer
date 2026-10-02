@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Column cell test</title>
+<!-- The columns an export lays out with spaces, held to the PDF's grid side
+     by side (viewer/columns.js: dressColumns, fitCells). Where a line is cut
+     is tested in node (test-textdoc.mjs); what needs a page is the measuring:
+     a piece before a column drawn at its own width wherever the blank before
+     the next column has room for it, squeezed only where it would run into
+     that column's text and never below three quarters, and a pseudonym never
+     cut. Each case is its own page, its grid's character chosen from the
+     piece's own measured width so the case lands where it is meant to.
+     Open it over http (an ES module will not import from a file:// page):
+       npx http-server -p 8080 . → http://127.0.0.1:8080/test-columns.html -->
+<link rel="stylesheet" href="viewer/text-reader.css">
+<style>
+  #report { font-family: monospace; padding: 16px 20px; white-space: pre; }
+  #report .pass { color: #1b7f3b; }
+  #report .fail { color: #b3261e; font-weight: 700; }
+  #stage { position: absolute; left: -4000px; top: 0; width: 1400px; font-family: Georgia, serif; }
+  .page-inner { height: 160px; }
+</style>
+</head>
+<body>
+<div id="report">running…</div>
+<div id="stage"><div id="pages"></div></div>
+<script type="module">
+import { dressColumns, fitCells, charWidth, CELL_SQUEEZE_MIN } from "./viewer/columns.js";
+
+const stage = document.getElementById("stage");
+const pages = document.getElementById("pages");
+const SIZE = 16;
+const cw = charWidth(getComputedStyle(stage).fontFamily);
+document.documentElement.style.setProperty("--col-n", String(cw.char));
+document.documentElement.style.setProperty("--col-sp-n", String(cw.space));
+const SPACE = cw.space * SIZE;
+
+/** A page laid on the PDF's grid, its lines given as strings and { fake, real, shown } pseudonyms. */
+function page(rows, unit) {
+  const sec = document.createElement("section");
+  sec.className = "tpage matched";
+  sec.innerHTML = '<div class="page-inner"><div class="page-body fixed cgrid"></div></div>';
+  const body = sec.querySelector(".page-body");
+  body.style.setProperty("--grid-em", SIZE + "px");
+  body.style.setProperty("--grid-col", unit + "px");
+  rows.forEach((parts, k) => {
+    const line = document.createElement("div");
+    line.className = "line";
+    line.style.top = k * 24 + "px";
+    line.style.fontSize = SIZE + "px";
+    line.style.lineHeight = "20px";
+    const lt = document.createElement("span");
+    lt.className = "lt";
+    for (const p of parts) {
+      if (typeof p === "string") { lt.append(p); continue; }
+      const s = document.createElement("span");
+      s.className = "pn";
+      s.contentEditable = "false";
+      s.dataset.fake = p.fake;
+      s.dataset.real = p.real;
+      s.textContent = p.shown === "real" ? p.real : p.fake;
+      lt.append(s);
+    }
+    line.append(lt);
+    body.append(line);
+  });
+  pages.append(sec);
+  dressColumns(body);
+  return body;
+}
+/** A piece's own width in the reader's font, at the line's size. */
+function natural(parts) {
+  const probe = document.createElement("span");
+  probe.style.cssText = `position:absolute;white-space:pre;font-size:${SIZE}px`;
+  probe.textContent = parts.map((p) => (typeof p === "string" ? p : p.shown === "real" ? p.real : p.fake)).join("");
+  stage.append(probe);
+  const w = probe.getBoundingClientRect().width;
+  probe.remove();
+  return w;
+}
+/** Where a two-column line's cell, its text, and the next column's text stand. */
+function measure(body) {
+  const cell = body.querySelector(".cc");
+  const r = document.createRange();
+  r.setStart(cell, 0);
+  r.setEndBefore(cell.querySelector(".cg"));
+  const next = cell.nextSibling;
+  const n = document.createRange();
+  n.setStart(next, 0);
+  n.setEnd(next, 1);
+  const m = /scaleX\(([\d.]+)\)/.exec(cell.style.transform);
+  return {
+    left: cell.getBoundingClientRect().left,
+    textRight: r.getBoundingClientRect().right,
+    nextLeft: n.getBoundingClientRect().left,
+    min: parseFloat(getComputedStyle(cell).minWidth),
+    pad: parseFloat(getComputedStyle(cell).paddingRight),
+    scale: m ? parseFloat(m[1]) : 1,
+  };
+}
+
+const out = [];
+let fails = 0;
+const check = (label, ok, note = "") => {
+  if (!ok) fails++;
+  out.push(`<span class="${ok ? "pass" : "fail"}">  ${ok ? "PASS" : "FAIL"}  ${label}${note && !ok ? "\n        " + note : ""}</span>`);
+};
+const near = (a, b, tol = 1) => Math.abs(a - b) <= tol;
+const r1 = (x) => Math.round(x * 10) / 10;
+
+// A two-column line: its left-hand piece, three spaces, the next column. The
+// grid's character is chosen so the blank before the next column, a space
+// short of it, is `share` of the piece's own width.
+const LEFT = "Defendant Acme Holdings Group, Inc.";
+const twoCol = (left, share, shown) => {
+  const fileLen = left.reduce((n, p) => n + (typeof p === "string" ? p : p.fake).length, 0);
+  const cols = fileLen + 3;
+  const t = natural(left);
+  const unit = (share * t + SPACE) / cols;
+  const body = page([[...left, "   ", "Case No. 24STCV01234"]], unit);
+  return { body, t, unit, cols };
+};
+
+out.push("a piece that fits in the blank before the next column:");
+{
+  const { body, t } = twoCol([LEFT], 1.03);
+  const cell = body.querySelector(".cc");
+  const before = measure(body);
+  check("the case is one the cell's margin alone would have squeezed", t > before.min - before.pad, `${r1(t)} vs ${r1(before.min - before.pad)}`);
+  fitCells([cell]);
+  const m = measure(body);
+  check("it is drawn at its own width", m.scale === 1 && !cell.style.transform, cell.style.transform);
+  check("the next column stays on the grid", near(m.nextLeft - m.left, m.min), `${r1(m.nextLeft - m.left)} vs ${r1(m.min)}`);
+  check("…with at least a space between them", m.textRight <= m.nextLeft - SPACE + 1, `${r1(m.textRight)} vs ${r1(m.nextLeft - SPACE)}`);
+  fitCells([cell]);
+  const again = measure(body);
+  check("a second pass finds the same", again.scale === 1 && near(again.nextLeft, m.nextLeft, 0.5), `${again.scale} ${r1(again.nextLeft)} vs ${r1(m.nextLeft)}`);
+  cell.firstChild.data += " and Affiliates";
+  fitCells([cell]);
+  const longer = measure(body);
+  check("…and a piece grown since is measured afresh, not held to the old width", longer.scale < 1 && longer.textRight <= longer.nextLeft - SPACE + 1, `${longer.scale} ${r1(longer.textRight)} vs ${r1(longer.nextLeft)}`);
+}
+
+out.push("a piece that would run into the next column:");
+{
+  const { body } = twoCol([LEFT], 0.9);
+  fitCells([body.querySelector(".cc")]);
+  const m = measure(body);
+  check("it is squeezed by what it would overrun, no more", near(m.scale, 0.9, 0.01), String(m.scale));
+  check("the next column stays on the grid", near(m.nextLeft - m.left, m.min), `${r1(m.nextLeft - m.left)} vs ${r1(m.min)}`);
+  check("…with a space between them", m.textRight <= m.nextLeft - SPACE + 1, `${r1(m.textRight)} vs ${r1(m.nextLeft - SPACE)}`);
+}
+
+out.push("a piece far too wide (a real name twice its fake's length):");
+{
+  const left = ["Plaintiff ", { fake: "Pat Doe", real: "Weddell Of Sharnbrook Of Livesey Brindley", shown: "real" }];
+  const { body, t } = twoCol(left, 0.5);
+  fitCells([body.querySelector(".cc")]);
+  const m = measure(body);
+  check(`it is squeezed no further than ${CELL_SQUEEZE_MIN}`, m.scale === CELL_SQUEEZE_MIN, String(m.scale));
+  check("the next column moves over only as far as it must", near(m.nextLeft - m.left, t * CELL_SQUEEZE_MIN + SPACE), `${r1(m.nextLeft - m.left)} vs ${r1(t * CELL_SQUEEZE_MIN + SPACE)}`);
+  check("…and the two never touch", m.textRight <= m.nextLeft - SPACE + 1, `${r1(m.textRight)} vs ${r1(m.nextLeft - SPACE)}`);
+}
+
+out.push("a pseudonym with a word on the page's second column:");
+{
+  const pad = " ".repeat(21);
+  const body = page([
+    [pad + "1200 Main Street"], [pad + "Suite 400"], [pad + "Los Angeles, CA 90012"],
+    ["Defendant ", { fake: "Weddell Of Sharnbrook Of Livesey Brindley", real: "Acme Holdings Group" }, " moved to dismiss the complaint."],
+  ], cw.char * SIZE);
+  const pn = body.querySelector(".pn");
+  check("the name is not cut into a column", !pn.closest(".cc"), pn.parentElement.outerHTML.slice(0, 120));
+  fitCells([...body.querySelectorAll(".cc")]);
+  let squeezed = null;
+  for (let el = pn; el && el !== body; el = el.parentElement) if (el.style.transform) squeezed = el;
+  check("…and is drawn at its own width", !squeezed, squeezed ? squeezed.style.transform : "");
+}
+
+out.push("", `${"=".repeat(52)}`, `FAILURES: ${fails}`);
+document.getElementById("report").innerHTML = out.join("\n");
+document.title = fails ? `FAIL (${fails})` : "PASS";
+window.__fails = fails;
+</script>
+</body>
+</html>

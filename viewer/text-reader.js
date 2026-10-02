@@ -44,7 +44,7 @@ import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
 import { dressLines, fitRuleRows, placeholderIn } from "./rules.js";
-import { dressColumns, charWidth } from "./columns.js";
+import { dressColumns, charWidth, fitCells } from "./columns.js";
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
@@ -10741,9 +10741,6 @@ function applyMatchedLayoutSoon() {
 // to get it was a step between the reader and the thing they opened the pane
 // to do. One control, one result.
 function gridOn() { return sbsOn && !pdfPane.hidden; }
-// The narrowest a piece of a line before a column is drawn to keep its column
-// (applyMatchedLayout): three quarters of its width still reads.
-const CELL_SQUEEZE_MIN = 0.75;
 function applyMatchedLayout() {
   return during("lining the text up with the PDF", () => applyMatchedLayoutNow());
 }
@@ -11062,37 +11059,18 @@ function applyMatchedLayoutNow() {
   // font is not the filing's: set at the PDF's own size it runs a little
   // wider, and a left-hand half too wide for its cell pushed its line's
   // right-hand half off the column the lines above and below it stand on.
-  // Beside the PDF the column is the point, so the piece is drawn narrower
-  // instead — squeezed across into its cell, the way an over-long line is
-  // below and the way pdf.js fits its own text to the page. Measured with
-  // every cell let out to its own width first, every cell read, then every
-  // one written; the reading page and its neighbours only.
-  //
-  // …but only so far (CELL_SQUEEZE_MIN). The grid is the FILE's, so a cell is
-  // as wide as the fakes in it, and a real name twice its fake's length
-  // squeezed into the fake's room is letters drawn on top of one another.
-  // Past that the cell is drawn at the narrowest that still reads and takes
-  // the room it needs, and its column is pushed: reading the words beats
-  // lining them up.
+  // Beside the PDF the column is the point, so the piece is held to its cell
+  // instead: drawn across the cell's margin where the blank before the next
+  // column has room for it, squeezed across only where it would run into that
+  // column's text, the way an over-long line is below and the way pdf.js fits
+  // its own text to the page — and only so far (columns.js, fitCells). The
+  // reading page and its neighbours only.
   const cells = [];
   for (const p of plans) {
     if (!p.tops || !near.has(Number(p.sec.dataset.index))) continue;
-    for (const c of p.body.querySelectorAll(".line > .lt > .cc")) cells.push({ c });
+    for (const c of p.body.querySelectorAll(".line > .lt > .cc")) cells.push(c);
   }
-  for (const x of cells) if (x.c.style.transform) { x.c.style.width = ""; x.c.style.transform = ""; x.c.style.transformOrigin = ""; }
-  for (const x of cells) {
-    const cs = getComputedStyle(x.c);
-    x.min = parseFloat(cs.minWidth) || 0;
-    x.pad = parseFloat(cs.paddingRight) || 0;
-    x.w = x.c.offsetWidth;
-  }
-  for (const x of cells) {
-    if (!(x.min > x.pad) || x.w <= x.min + 0.5) continue;
-    const fit = Math.max(CELL_SQUEEZE_MIN, (x.min - x.pad) / (x.w - x.pad));
-    x.c.style.width = (x.pad + (x.w - x.pad) * fit) + "px";
-    x.c.style.transform = `scaleX(${fit.toFixed(4)})`;
-    x.c.style.transformOrigin = "0 0";
-  }
+  fitCells(cells);
   // A LINE THAT RUNS OFF THE PAGE COMES BACK ONTO IT. The reader's font is not
   // the filing's, and the same characters set in it run a little wider than
   // the column the PDF gave them; past the sheet's edge they are gone, and the
@@ -11492,7 +11470,7 @@ function clearMatched(sec) {
   body.style.paddingTop = "";
   body.style.removeProperty("--grid-em");
   body.style.removeProperty("--grid-col");
-  for (const c of body.querySelectorAll(".cc")) if (c.style.transform) { c.style.width = ""; c.style.transform = ""; c.style.transformOrigin = ""; }
+  for (const c of body.querySelectorAll(".cc")) if (c.style.width || c.style.transform) { c.style.width = ""; c.style.transform = ""; c.style.transformOrigin = ""; }
   for (const l of body.querySelectorAll(":scope > .line.lead")) l.classList.remove("lead");
   sec.__lead = 0;
   for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
