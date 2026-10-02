@@ -26,7 +26,7 @@ isolated viewer instance (its own zoom, highlights, OCR…) with no shared state
 | `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
 | `sw.js` | Service worker — **network-first** (auto-updates when online) with offline fallback. |
 | `build-site.sh` | Assembles the deployable site: this shell **+** the canonical `viewer/` and `pdfjs/` copied from the repo root. |
-| `icons/`, `gen-icons.py` | App icons (regenerate: `python3 gen-icons.py`): the sheet filling the square inside a narrow border, plus a maskable copy kept inside the safe zone for platforms that crop icons to a circle. A new drawing needs a new `?v=` on the icon URLs, since Chrome keeps an installed app's icon until the URLs change. |
+| `icons/`, `gen-icons.py` | App icons (regenerate: `python3 gen-icons.py`): a page-shaped sheet inside a narrow border, plus a maskable copy kept inside the safe zone for platforms that crop icons to a circle. A new drawing needs a new `?v=` on the icon URLs, since Chrome keeps an installed app's icon until the URLs change. |
 | `windows-file-icon.ps1`, `.cmd` | Windows only, run on your machine (not deployed): puts the app icon on the files PDF Viewer opens. See *File icons on Windows*. |
 
 **Single source of truth:** the viewer logic lives once, at the repo root. The

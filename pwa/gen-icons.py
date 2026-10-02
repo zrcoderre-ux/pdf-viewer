@@ -7,9 +7,10 @@ colors only, no text rendering; edges are smoothed by sampling each pixel on a
 grid.
 
 Two layouts:
-  icon-192.png, icon-512.png   the sheet fills the square, leaving a narrow
-                               slate border ("any" purpose: desktop, taskbar,
-                               the file icon set by windows-file-icon.ps1).
+  icon-192.png, icon-512.png   the sheet a page's shape, as tall as the icon
+                               less a narrow slate border ("any" purpose:
+                               desktop, taskbar, the file icon set by
+                               windows-file-icon.ps1).
   icon-maskable-512.png        the sheet kept inside the inner 80% safe zone,
                                so a platform that crops icons to a circle or
                                squircle does not cut the sheet off.
@@ -28,7 +29,7 @@ BAND = (220, 38, 38)     # red-600 (the "PDF" band)
 SAMPLES = 4  # per axis: 16 samples per pixel
 
 # Sheet box as fractions of the icon: (left, top, right, bottom).
-FULL = (0.06, 0.06, 0.94, 0.94)          # narrow border
+FULL = (0.164, 0.08, 0.836, 0.92)        # a page (0.8 wide to 1 tall), 8% above and below
 SAFE = (0.24, 0.216, 0.76, 0.784)        # inside the maskable safe zone
 
 

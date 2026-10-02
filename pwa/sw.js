@@ -19,8 +19,8 @@ const CORE = [
   "./manifest.webmanifest",
   "./app-web.js",
   "./app-web.css",
-  "./icons/icon-192.png?v=2",
-  "./icons/icon-512.png?v=2",
+  "./icons/icon-192.png?v=3",
+  "./icons/icon-512.png?v=3",
 ];
 
 self.addEventListener("install", (event) => {
