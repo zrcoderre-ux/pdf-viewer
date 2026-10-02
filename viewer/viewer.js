@@ -64,7 +64,7 @@ import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
 import * as RD from "./redact.js";
 import { autoScroll } from "./autoscroll.js";
 import { pageRotation } from "./rotation.js";
-import { fontDocument, fontCanvas, renderPageOnto } from "./pdf-fonts.js";
+import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRatio } from "./pdf-fonts.js";
 import { repairTextLayer } from "./text-layer.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
@@ -2610,17 +2610,10 @@ async function placeNativeLinksForPage(page, viewport, layerDiv) {
 const DRAW_MARGIN = 1200; // px beyond the screen a page is drawn ahead and kept drawn
 // A page's bitmap is drawn in the screen's own pixels — devicePixelRatio of
 // them to the CSS pixel, which is the display's scaling times the browser's
-// zoom — and shown at the page's CSS size. Drawn one to the CSS pixel, as it
-// used to be, the bitmap was stretched to fit on any window not at exactly
-// 1×: a Retina or 150%-scaled screen, or a window zoomed to 110%, and every
-// word on the page came out soft beside Acrobat. Past MAX_PAGE_PIXELS (64 MB
-// of bitmap) the ratio is let down toward 1, never below it: a page at 600%
-// on a Retina screen would otherwise be a quarter of a gigabyte.
-const MAX_PAGE_PIXELS = 4096 * 4096;
-function pageOutputScale(viewport) {
-  const dpr = window.devicePixelRatio || 1;
-  return Math.min(dpr, Math.max(1, Math.sqrt(MAX_PAGE_PIXELS / (viewport.width * viewport.height))));
-}
+// zoom — and shown at its own size over that ratio (pageOutputScale, in
+// pdf-fonts.js, shared with the text reader's PDF pane). Drawn one to the CSS
+// pixel, as it used to be, the bitmap was stretched to fit on any window not
+// at exactly 1×, and every word on the page came out soft beside Acrobat.
 const pagesOnScreen = new Set(); // page wrappers some part of which is on screen
 const pagesToDraw = new Set();   // near the screen and not drawn yet
 let drawingOnScreen = 0;         // draws in flight for pages on screen
@@ -2752,10 +2745,7 @@ function redrawForPixelRatio() {
   }
   pumpPageDraws();
 }
-(function watchPixelRatio() {
-  matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
-    .addEventListener("change", () => { redrawForPixelRatio(); watchPixelRatio(); }, { once: true });
-})();
+watchPixelRatio(redrawForPixelRatio);
 
 // A page's box and every layer in it, sized and in place, with its bitmap
 // drawn when it nears the screen. No text yet: that is pageTextFromPdf's or
