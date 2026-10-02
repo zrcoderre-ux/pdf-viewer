@@ -5786,10 +5786,18 @@ if (formSaveEl)   formSaveEl.addEventListener("click", () => saveFilledForm(fals
 if (formFlattenEl) formFlattenEl.addEventListener("click", () => saveFilledForm(true));
 if (formCancelEl) formCancelEl.addEventListener("click", exitFormMode);
 
-// Drag the Pages / Bookmarks column's left edge to resize it. The panel is
-// pinned to the right, so its width is the window width minus the pointer's x.
+// Drag the Pages / Bookmarks column's left edge to resize it.
 // --thumb-panel-width drives both the panel and the content offset; persist it
 // across sessions.
+//
+// The panel's right edge is pinned beside the side rail, so its width is that
+// edge's x minus the pointer's x. Measured from the window's right edge it
+// would also count the side rail and a classic scrollbar, and a grab with no
+// move would widen the panel by 48 to 63px. The gap between the pointer and
+// the panel's edge at the grab is kept for the whole drag, so a grab anywhere
+// on the 8px handle moves nothing until the pointer does; and the right edge
+// is read on every move, so the edge stays under the pointer even if the
+// window or its scrollbar changes mid-drag.
 const thumbResizeEl = document.getElementById("thumb-resize");
 function setThumbPanelWidth(px) {
   const w = Math.max(100, Math.min(px, Math.round(window.innerWidth * 0.6)));
@@ -5803,14 +5811,20 @@ if (thumbResizeEl) {
   thumbResizeEl.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     thumbResizeEl.setPointerCapture(e.pointerId);
-    const onMove = (ev) => setThumbPanelWidth(window.innerWidth - ev.clientX);
-    const onUp = (ev) => {
+    const rightEdge = () => thumbnailPanelEl.getBoundingClientRect().right;
+    const w0 = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--thumb-panel-width"));
+    const gap = rightEdge() - e.clientX - w0;
+    let w = null;
+    const onMove = (ev) => { w = setThumbPanelWidth(rightEdge() - ev.clientX - gap); };
+    // Losing the capture ends the drag on a release and on a cancelled pointer
+    // alike, so no listener is left behind to resize the panel on a later hover.
+    const onEnd = () => {
       thumbResizeEl.removeEventListener("pointermove", onMove);
-      thumbResizeEl.removeEventListener("pointerup", onUp);
-      chrome.storage.local.set({ thumbPanelWidth: setThumbPanelWidth(window.innerWidth - ev.clientX) });
+      thumbResizeEl.removeEventListener("lostpointercapture", onEnd);
+      if (w != null) chrome.storage.local.set({ thumbPanelWidth: w });
     };
     thumbResizeEl.addEventListener("pointermove", onMove);
-    thumbResizeEl.addEventListener("pointerup", onUp);
+    thumbResizeEl.addEventListener("lostpointercapture", onEnd);
   });
 }
 
