@@ -467,6 +467,11 @@ body.side-hidden #side { display: none; }
 .side-body li .tag { font-size: 10px; padding: 1px 5px; border-radius: 8px; background: #b71c1c; color: #fff; flex: none; }
 .side-body li .tag.keep { background: #546e7a; }
 .side-body li .tag.phrase { background: #6a1b9a; }
+/* On a flagged value of several words the phrase tag is a switch: lit, the
+   words are faked whole; outlined, they are an ordinary flag that could be. */
+.side-body li button.tag.phrase { border: 1px solid #6a1b9a; font: inherit; font-size: 10px; line-height: inherit; cursor: pointer; }
+.side-body li button.tag.phrase.off { background: transparent; border-color: var(--btn-border); color: var(--text-muted); }
+.side-body li button.tag.phrase.off:hover { border-color: #6a1b9a; color: var(--text); }
 /* A keep the file already carries out: nothing goes to PDF-Linker, nothing is
    re-run, and the tag says so rather than sitting beside the ones that are
    still owed. */
