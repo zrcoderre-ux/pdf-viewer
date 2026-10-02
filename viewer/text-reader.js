@@ -529,8 +529,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
 function setColumnWidth() {
   const w = charWidth(TD.fontCss(settings));
   const root = document.documentElement.style;
-  root.setProperty("--col-w", w.char.toFixed(4) + "em");
-  root.setProperty("--col-sp", w.space.toFixed(4) + "em");
+  root.setProperty("--col-n", w.char.toFixed(4));
+  root.setProperty("--col-sp-n", w.space.toFixed(4));
 }
 if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener("loadingdone", () => setColumnWidth());
 
@@ -10649,7 +10649,7 @@ function applyMatchedLayoutNow() {
       matchedSlots.add(slot);
       const had = sec.__plan;
       if (had && sz && sec.__planLite === lite) {
-        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, firstY: had.firstY, scale: 1 });
+        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, firstY: had.firstY, scale: 1 });
         continue;
       }
       plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
@@ -10658,7 +10658,7 @@ function applyMatchedLayoutNow() {
     const geom = info.geoms[t.page - 1];
     const rows = info.rows[t.page - 1];
     const numbered = !!geom && body.classList.contains("numbered");
-    let tops = null, lefts = null, sizes = null, pitch = 0;
+    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null;
     // The body type: the DOCUMENT's, so every page of one filing is drawn at
     // one scale and a title page is not sized as though its heading were
     // body text; the page's own where the document has nothing read yet, and
@@ -10688,11 +10688,12 @@ function applyMatchedLayoutNow() {
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, firstY: info.lines[t.page - 1], scale: 1 });
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, firstY: info.lines[t.page - 1], scale: 1 });
       continue;
     }
     if (numbered) {
       const nums = lines.map((l) => (l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null));
+      fixed = nums.map((n) => n != null && !isNaN(n));
       tops = PS.slotTops(nums.map((num) => ({ num })), geom);
       // The lines off the grid — a footer, a stamp — on the rows that print them.
       const off = PS.offGridTops(lines.map((l) => l.textContent), nums, tops, rows, geom.pitch);
@@ -10725,12 +10726,19 @@ function applyMatchedLayoutNow() {
     // growing the sheet past its PDF page. A line with nothing on it — no
     // words and no margin number — is a gap, and a gap pushes nothing.
     const room = boxes ? boxes.map((b, k) => (isEmptyLine(lines[k]) ? 0 : b)) : null;
-    if (tops) tops = PS.spreadTops(tops, room);
+    // ON PLEADING PAPER THE NUMBERS ARE THE GRID, and a numbered line stays on
+    // its number whatever stands between it and the one above (fixed). A
+    // caption's single-spaced lines between two numbers are set a type size
+    // apart, and they clear each other by that — their TYPE, as the PDF sets
+    // it — not by a whole line's box apiece, which pushed each one down a few
+    // points into the next, and the numbers down the side with them.
+    const clear = fixed ? sizes.map((h, k) => (isEmptyLine(lines[k]) ? 0 : h)) : room;
+    if (tops) tops = PS.spreadTops(tops, clear, fixed);
     // …and nothing pushed past the foot of the paper: the page is the PDF
     // page's height, the same as the sheet beside it, and a line that would
     // run past it is brought back up (pdfsync.holdWithin). The page grows
     // only where its lines cannot all fit on it at all.
-    if (tops) tops = PS.holdWithin(tops, room, sz.h);
+    if (tops) tops = PS.holdWithin(tops, clear, sz.h);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
     // The scale is the sheet's, and the sheet is the paper: the write pass
@@ -10739,8 +10747,8 @@ function applyMatchedLayoutNow() {
     matchedSlots.add(slot);
     sec.__planFor = planKey;
     sec.__planLite = lite;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, firstY: info.lines[t.page - 1] };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, firstY: info.lines[t.page - 1], scale: 1 });
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, firstY: info.lines[t.page - 1] };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // Every slot the layout did not claim keeps the pane's own width, and gives
   // back whatever a grid before it levelled: its label's height, and the box
@@ -10793,6 +10801,13 @@ function applyMatchedLayoutNow() {
     if (p.body.style.paddingTop !== padTop) p.body.style.paddingTop = padTop;
     if (p.bodyX > 0) p.sec.style.setProperty("--body-x", (p.bodyX * p.scale) + "px");
     else p.sec.style.removeProperty("--body-x");
+    // The page's body type, which the grid's columns are measured in
+    // (columns.js): each line is set in its own row's size, and a column
+    // has to stand at one place down the page whatever size that is.
+    const gridEm = p.tops && p.base > 0 ? (p.base * p.scale) + "px" : "";
+    if (p.body.style.getPropertyValue("--grid-em") !== gridEm) {
+      if (gridEm) p.body.style.setProperty("--grid-em", gridEm); else p.body.style.removeProperty("--grid-em");
+    }
     // Only the lines that MOVE are written to. A pass over a seventy-page
     // complaint sets four properties on two thousand lines, and the passes
     // repeat — as each PDF's sizes arrive, as its grid lands, after every
@@ -11249,6 +11264,7 @@ function clearMatched(sec) {
   if (!body) return; // shed: there are no lines left to un-lay
   body.classList.remove("fixed");
   body.style.paddingTop = "";
+  body.style.removeProperty("--grid-em");
   for (const l of body.querySelectorAll(":scope > .line.lead")) l.classList.remove("lead");
   sec.__lead = 0;
   for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }

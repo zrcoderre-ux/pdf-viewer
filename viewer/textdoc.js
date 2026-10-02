@@ -1196,19 +1196,18 @@ export const COLUMN_GAP = 3;
 const GAP_RUN_RE = / {2,}(?=\S)/g;
 
 /**
- * Where a line's spaces cut it: the offsets at which a column begins, after
- * its indent (`lead`) and after each gap between columns. A two-space gap is
- * one only where it lands on one of the page's own columns (`stops`, by
- * columnStops) — a double space after a full stop lands nowhere in
- * particular. `start` is the column the text begins at on the page, for a
- * line whose margin number stands before it.
+ * Where a line's spaces cut it between columns: the offsets at which a column
+ * begins after a gap. A two-space gap is one only where it lands on one of the
+ * page's own columns (`stops`, by columnStops) — a double space after a full
+ * stop lands nowhere in particular. `start` is the column the line's text
+ * begins at on the page, for a line whose margin number stands before it.
+ * The line's own indent is not a cut; lineIndent says how deep it is.
  */
-export function columnCuts(text, { lead = true, stops = null, start = 0 } = {}) {
+export function columnCuts(text, { stops = null, start = 0 } = {}) {
   const s = String(text == null ? "" : text);
   const cuts = [];
   const first = s.search(/\S/);
   if (first < 0) return cuts;
-  if (lead && first > 0) cuts.push(first);
   GAP_RUN_RE.lastIndex = first;
   let m;
   while ((m = GAP_RUN_RE.exec(s))) {
@@ -1220,14 +1219,18 @@ export function columnCuts(text, { lead = true, stops = null, start = 0 } = {}) 
 
 /**
  * A page's columns: each column, counted from the page's left edge, that two
- * lines or more begin a piece at after an indent or a gap of COLUMN_GAP.
- * `lines` [{ text, start, lead }], as columnCuts takes them.
+ * lines or more begin at — where a line's text starts, or after a gap of
+ * COLUMN_GAP. `lines` [{ text, start }], as columnCuts takes them.
  */
 export function columnStops(lines) {
   const seen = new Map();
+  const add = (col) => seen.set(col, (seen.get(col) || 0) + 1);
   for (const l of lines || []) {
     const start = l.start || 0;
-    for (const c of columnCuts(l.text, { lead: l.lead !== false })) seen.set(start + c, (seen.get(start + c) || 0) + 1);
+    const first = String(l.text == null ? "" : l.text).search(/\S/);
+    if (first < 0) continue;
+    if (start + first > 0) add(start + first);
+    for (const c of columnCuts(l.text)) add(start + c);
   }
   const out = new Set();
   for (const [col, n] of seen) if (n >= 2) out.add(col);
@@ -1235,12 +1238,26 @@ export function columnStops(lines) {
 }
 
 /**
- * Each piece's width on the grid, in characters: the piece before each cut
- * spans up to it. The first begins where the line's text is drawn (`origin`,
- * the body margin of a numbered page, whose margin number and the spaces after
- * it are drawn in the margin), so a column a line reaches is the same column
- * on every line, numbered or not.
+ * How deep a line is indented on the grid: { lead, the spaces its text opens
+ * with; ind, the characters its text stands in from the body margin }. On
+ * pleading paper the margin is `origin` characters in (the number and the two
+ * spaces after it), and a numbered line's own spaces are its number's
+ * (`start`, the length of the number and every space after it): its text
+ * stands start − origin in, which is where a centred heading, a "Plaintiff,"
+ * under the party's name, or a line of the caption's right-hand column alone
+ * on its number is set.
  */
-export function columnWidths(cuts, { start = 0, origin = 0 } = {}) {
-  return cuts.map((c, i) => (i ? c - cuts[i - 1] : Math.max(0, start + c - origin)));
+export function lineIndent(text, { start = 0, origin = 0 } = {}) {
+  const first = String(text == null ? "" : text).search(/\S/);
+  const lead = first > 0 ? first : 0;
+  return { lead, ind: first < 0 ? 0 : Math.max(0, start + lead - origin) };
+}
+
+/**
+ * Each piece's width on the grid, in characters: the piece before each cut
+ * spans up to it, the first from where the line's text begins (`from`, past
+ * its indent).
+ */
+export function columnWidths(cuts, from = 0) {
+  return cuts.map((c, i) => c - (i ? cuts[i - 1] : from));
 }

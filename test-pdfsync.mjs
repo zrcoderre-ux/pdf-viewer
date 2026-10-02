@@ -251,6 +251,21 @@ console.log("the type a page is set in: the PDF's own sizes at the reading size"
   check("a line with no place is passed over, not pushed", spreadTops([0, null, 3], 14), [0, null, 14]);
   check("each line's own box: a heading's tall box pushes, a footnote's small one does not", spreadTops([0, 10, 30, 36], [22, 14, 14, 9]), [0, 22, 36, 50]);
   check("no box, nothing moves", spreadTops([0, 5], 0), [0, 5]);
+  // Pleading paper: numbered at 0, 24, 48, 72, the caption's single-spaced
+  // lines between them half a pitch down, every line 12 points of type.
+  const caption = [0, 24, 36, 48, 60, 72];
+  const numbered = [true, true, false, true, false, true];
+  check("the numbered lines stay on their numbers, the lines between them on their rows",
+    spreadTops(caption, 12, numbered), [0, 24, 36, 48, 60, 72]);
+  check("…where a whole line's box apiece pushed every number after them down",
+    spreadTops(caption, 14.4).map((y) => Math.round(y * 10) / 10), [0, 24, 38.4, 52.8, 67.2, 81.6]);
+  check("a line between two numbers too tall for the gap is held above the next, never pushes it",
+    spreadTops([0, 24, 36, 48], 14.4, [true, true, false, true]), [0, 24, 38.4, 48]);
+  check("lines that cannot all have their room share the space between the numbers evenly",
+    spreadTops([0, 24, 25, 26, 27, 48], 12, [true, true, false, false, false, true]), [0, 24, 36, 40, 44, 48]);
+  check("a numbered line printed too close under the one above still keeps its number",
+    spreadTops([0, 5, 24], 12, [true, true, true]), [0, 5, 24]);
+  check("lines above the first number are held above it", spreadTops([20, 22, 24], 12, [false, false, true]), [0, 12, 24]);
 }
 
 console.log("the PDFs the reading has reached");
