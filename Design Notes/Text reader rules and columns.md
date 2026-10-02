@@ -59,8 +59,8 @@ filing stamp, a centred heading, an indent. In a proportional font a space is
 about half an average character, so a column began wherever the text to its
 left ended — ragged where the page is straight. `textdoc.columnCuts` says
 where a line's spaces cut it between columns: after each gap of `COLUMN_GAP`
-(3) spaces or more, or a two-space gap landing on a column two lines of the
-page begin at (`columnStops`), so a sentence's double space is never a column.
+(3) spaces or more, or a two-space gap landing on a column two lines around
+it begin at (`columnBands`), so a sentence's double space is never a column.
 `lineIndent` says how deep its text stands from the body margin: its leading
 spaces off pleading paper; on pleading paper, where the margin is `origin`
 characters in (the narrowest number's prefix) and a numbered line's spaces
@@ -95,12 +95,26 @@ off a line carrying rule glyphs before wrapping the glyphs, and box rows
 `columnCaps`) and starts the page's fit no larger than its widest column line
 fits across the paper, since a wrapped column comes back at the left margin.
 
-`columnCuts` cuts at a gap of 3+ spaces always; at 2 where two lines of the
-page begin at that column; at 1 where the page's SECOND column is — a column
-`COLUMN_FIRM` (3) lines begin at, `COLUMN_FIRM_AT` (12) characters in or more
-(`hasFirmColumn`) — since a justified left-hand column runs right up to it.
-`columnStops` returns column → lines. A page with a second column has every
-line read, not only those with a run of spaces. No cut falls inside a span
+`columnCuts` cuts at a gap of 3+ spaces always; at 2 where two lines begin at
+that column; at 1 where the line stands beside a SECOND column — since a
+justified left-hand column runs right up to it. Both are read per line from
+`columnBands(lines)`: a column is where lines begin (text start, or after a
+3+ gap, counted from the page's edge), and it runs down the lines that begin
+at it, across `COLUMN_REACH` (3) lines or fewer that do not, and stops; a run
+of two lines or more covers every line from its first to its last (`stops`,
+column → the run's lines). It is a second column there (`second`) with
+`COLUMN_FIRM` (3) lines, `COLUMN_FIRM_AT` (12) in or further, and text on both
+sides of it on one of them at least. A form's columns are pieces of its page
+— the box beside the caption, the party boxes beside a signature — and lines
+that only START at a column are an indent, not a column beside another. They
+used to be counted down the whole page (`columnStops`, `hasFirmColumn`), and
+on the 49 Judicial Council forms in the user's templates (145 pages through
+`pdftotext -layout`) that cut prose at a single space 652 times
+("ATTORNEY OR PARTY | WITHOUT ATTORNEY", the caption run across the checkbox
+items' column 18 thirty lines below); by bands, 8, the cuts at 3+ spaces
+(2,313) unchanged. `dressColumns` builds the bands over every line in page
+order (a plain line, which begins nothing, still counts for distance) and
+reads a plain line only where its own band has a second column. No cut falls inside a span
 (`atoms`: the line's pseudonym and spot-keep spans, from `spanRanges` in
 columns.js) — `splitAt` splits text nodes only, so a cut inside a name put the
 whole name in a cell sized for the characters before the cut, and side by side

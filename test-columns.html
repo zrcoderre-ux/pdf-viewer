@@ -163,19 +163,48 @@ out.push("a piece far too wide (a real name twice its fake's length):");
   check("…and the two never touch", m.textRight <= m.nextLeft - SPACE + 1, `${r1(m.textRight)} vs ${r1(m.nextLeft - SPACE)}`);
 }
 
-out.push("a pseudonym with a word on the page's second column:");
+out.push("a pseudonym with a word on a second column:");
 {
-  const pad = " ".repeat(21);
+  // Column 21 is a second column here: text beside it on two lines, a third
+  // line beginning at it. The name's third word stands on it.
+  const fake = "Weddell Of Sharnbrook Of Livesey Brindley";
+  const prose = ["Defendant ", { fake, real: "Acme Holdings Group" }, " moved to dismiss."];
   const body = page([
-    [pad + "1200 Main Street"], [pad + "Suite 400"], [pad + "Los Angeles, CA 90012"],
-    ["Defendant ", { fake: "Weddell Of Sharnbrook Of Livesey Brindley", real: "Acme Holdings Group" }, " moved to dismiss the complaint."],
+    ["Plaintiff:" + " ".repeat(11) + "Jane Roe"],
+    ["Counsel:" + " ".repeat(13) + "Pat Smith"],
+    prose,
+    ["Defendant " + fake + " moved to dismiss."],
+    [" ".repeat(21) + "Los Angeles, CA 90012"],
   ], cw.char * SIZE);
-  const pn = body.querySelector(".pn");
-  check("the name is not cut into a column", !pn.closest(".cc"), pn.parentElement.outerHTML.slice(0, 120));
+  const [, , named, plain] = body.querySelectorAll(".line");
+  check("the same words as plain text are cut there (the column is real)", !!plain.querySelector(".cc"), plain.innerHTML.slice(0, 120));
+  const pn = named.querySelector(".pn");
+  check("the name is not cut into a column", !pn.closest(".cc"), named.innerHTML.slice(0, 120));
   fitCells([...body.querySelectorAll(".cc")]);
   let squeezed = null;
   for (let el = pn; el && el !== body; el = el.parentElement) if (el.style.transform) squeezed = el;
   check("…and is drawn at its own width", !squeezed, squeezed ? squeezed.style.transform : "");
+}
+
+out.push("a form whose column runs down part of the page:");
+{
+  // A caption with its box at column 37 beside three lines, then the form's
+  // prose further down, with a word that happens to stand at 37.
+  const prose = "1. TO THE CLERK: Please dismiss this action as follows";
+  const rows = [
+    ["ATTORNEY OR PARTY WITHOUT ATTORNEY" + " ".repeat(3) + "FOR COURT USE ONLY"],
+    ["NAME:" + " ".repeat(32) + "(court stamp)"],
+    [prose],
+    ["FIRM NAME:" + " ".repeat(27) + "(court stamp)"],
+    ...Array.from({ length: 8 }, () => [""]),
+    [prose],
+    ["   and of all parties."],
+  ];
+  const body = page(rows, cw.char * SIZE);
+  const lines = body.querySelectorAll(".line");
+  check("the prose sits on the column (a word at 37, one space before it)", prose[37 - 1] === " " && prose[37] !== " " && prose[37 - 2] !== " ", JSON.stringify(prose.slice(32, 42)));
+  check("beside the caption's box, it is cut at the box's column", !!lines[2].querySelector(".cc"), lines[2].innerHTML.slice(0, 120));
+  check("under the caption, where the box does not run, it is one line of prose", !lines[12].querySelector(".cc"), lines[12].innerHTML.slice(0, 120));
 }
 
 out.push("", `${"=".repeat(52)}`, `FAILURES: ${fails}`);

@@ -48,7 +48,7 @@
 // dressed as its text says is left exactly as it is, so the editor's caret
 // text node on any other line is never replaced.
 
-import { columnCuts, columnStops, columnWidths, hasFirmColumn, lineIndent, serializeNodes } from "./textdoc.js";
+import { columnBands, columnCuts, columnWidths, lineIndent, serializeNodes } from "./textdoc.js";
 
 /** A node's length in the file: a pseudonym span counts its fake, as the cuts were made on. */
 const fileLength = (n) => (n.nodeType === 3 ? n.data.length : n.nodeType === 1 ? serializeNodes(n).length : 0);
@@ -185,7 +185,9 @@ export function dressColumns(body) {
   let changed = false;
   const all = [];
   let origin = Infinity;
+  let count = 0; // every line of the page, a box row too: how far apart lines are
   for (const line of body.querySelectorAll(":scope > .line")) {
+    const at = count++;
     const lt = line.querySelector(":scope > .lt");
     if (!lt) continue;
     if (line.classList.contains("rl")) {
@@ -197,7 +199,7 @@ export function dressColumns(body) {
     const start = g ? g.textContent.length : 0;
     const shown = lt.textContent;
     if (g && shown.trim()) origin = Math.min(origin, start);
-    all.push({ line, lt, start, shown });
+    all.push({ line, lt, start, shown, at });
   }
   if (!numbered || origin === Infinity) origin = 0;
   const lines = [], plain = [];
@@ -213,14 +215,24 @@ export function dressColumns(body) {
     l.text = serializeNodes(l.lt);
     lines.push(l);
   }
-  const stops = columnStops(lines);
-  // …unless the page has a second column, which a line's left-hand half can
-  // run right up to with a single space between: then every line is read.
-  if (plain.length && hasFirmColumn(stops)) for (const l of plain.splice(0)) { l.text = serializeNodes(l.lt); lines.push(l); }
-  for (const l of plain) l.line.classList.remove("cols");
+  // The columns each line stands in: where the lines around it begin, for as
+  // far down the page as they run (textdoc.columnBands). A plain line begins
+  // none, but still stands between the lines that do.
+  const page = Array.from({ length: count }, () => ({ text: "" }));
+  for (const l of lines) page[l.at] = { text: l.text, start: l.start };
+  const bands = columnBands(page);
+  // …and a plain line is read after all where it stands beside a second
+  // column, which its left-hand half can run right up to with a single space
+  // between. Only there: a form's column down its caption says nothing about
+  // the prose under it.
+  for (const l of plain) {
+    if (bands[l.at].second.size) { l.text = serializeNodes(l.lt); lines.push(l); }
+    else l.line.classList.remove("cols");
+  }
   for (const l of lines) {
     const { ind, lead } = lineIndent(l.text, { start: l.start, origin });
-    const cuts = columnCuts(l.text, { stops, start: l.start, atoms: spanRanges(l.lt) });
+    const { stops, second } = bands[l.at];
+    const cuts = columnCuts(l.text, { stops, second, start: l.start, atoms: spanRanges(l.lt) });
     const gaps = cuts.map((c) => l.text.slice(0, c).replace(/ +$/, "").length);
     if (dressLineColumns(l.lt, { ind, lead, cuts, widths: columnWidths(cuts, lead), gaps })) changed = true;
     // A line with a gap between columns, not just an indent: what the page's

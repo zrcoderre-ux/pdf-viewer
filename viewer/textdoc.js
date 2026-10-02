@@ -1278,21 +1278,27 @@ export function ruleShape(line) {
 
 /** A gap this many spaces wide is a gap between columns; a narrower one is two words' (a sentence's double space). */
 export const COLUMN_GAP = 3;
-// A column the page's lines begin at this often, this far in, is the page's
-// second column: a line whose left-hand half runs up to it is still cut there,
-// even with only a space between (a justified left column fills its width).
+// A column the lines around it begin at this often, this far in, with text
+// beside it on one of them, is a second column there: a line whose left-hand
+// half runs up to it is still cut there, even with only a space between (a
+// justified left column fills its width).
 export const COLUMN_FIRM = 3;
 export const COLUMN_FIRM_AT = 12;
+// A column runs down the lines that begin at it, across this many lines or
+// fewer that do not, and stops. A form's columns are pieces of its page — the
+// box beside the caption, the party boxes beside a signature — and the prose
+// above and below them is not in them.
+export const COLUMN_REACH = 3;
 const GAP_RUN_RE = / +(?=\S)/g;
 
 /**
  * Where a line's spaces cut it between columns: the offsets at which a column
  * begins after a gap. A gap of COLUMN_GAP spaces always cuts; a narrower one
- * only where it lands on one of the page's own columns (`stops`, by
- * columnStops: column → how many lines begin there) — two spaces on a column
- * two lines begin at, one space on the page's second column (COLUMN_FIRM
- * lines, COLUMN_FIRM_AT in or further). A double space after a full stop
- * lands nowhere in particular. `start` is the column the line's text begins
+ * only where it lands on one of the columns the line stands in (columnBands:
+ * `stops`, column → how many lines of its run begin there; `second`, the
+ * line's second columns) — two spaces on a column two lines begin at, one
+ * space on a second column. A double space after a full stop lands nowhere
+ * in particular. `start` is the column the line's text begins
  * at on the page, for a line whose margin number stands before it. The
  * line's own indent is not a cut; lineIndent says how deep it is.
  *
@@ -1301,7 +1307,7 @@ const GAP_RUN_RE = / +(?=\S)/g;
  * middle of a name, and a word of one that happens to stand on the page's
  * second column is still a word of the name.
  */
-export function columnCuts(text, { stops = null, start = 0, atoms = null } = {}) {
+export function columnCuts(text, { stops = null, second = null, start = 0, atoms = null } = {}) {
   const s = String(text == null ? "" : text);
   const cuts = [];
   const first = s.search(/\S/);
@@ -1313,36 +1319,62 @@ export function columnCuts(text, { stops = null, start = 0, atoms = null } = {})
   while ((m = GAP_RUN_RE.exec(s))) {
     const at = m.index + m[0].length, col = start + at, gap = m[0].length;
     if (within(m.index) || within(at)) continue;
-    if (gap >= COLUMN_GAP || (gap === 2 && begun(col) >= 2) || (gap === 1 && col >= COLUMN_FIRM_AT && begun(col) >= COLUMN_FIRM)) cuts.push(at);
+    if (gap >= COLUMN_GAP || (gap === 2 && begun(col) >= 2) || (gap === 1 && !!second && second.has(col))) cuts.push(at);
   }
   return cuts;
 }
 
 /**
- * A page's columns, and how many lines begin at each: every column, counted
- * from the page's left edge, that two lines or more begin at — where a line's
- * text starts, or after a gap of COLUMN_GAP. `lines` [{ text, start }], as
- * columnCuts takes them. A Map, column → lines.
+ * The columns each line of a page stands in. A column is where lines begin —
+ * where a line's text starts, or after a gap of COLUMN_GAP, counted from the
+ * page's left edge — and it runs down the lines that begin at it, across
+ * COLUMN_REACH lines or fewer that do not, and stops: a form's box beside the
+ * caption runs down the caption, not down the prose under it.
+ *
+ * `lines` [{ text, start }] in page order, as columnCuts takes them; a line
+ * with no text begins nothing but still counts for how far apart the others
+ * are. One { stops, second } per line: `stops`, column → how many lines of
+ * its run begin there, for each run of two lines or more the line stands in
+ * (from the run's first line to its last); `second`, those that are a second
+ * column there — COLUMN_FIRM lines or more, COLUMN_FIRM_AT in or further, and
+ * text on both sides of it on one of them at least. Lines that only START at
+ * a column are an indent (a form's checkbox items, a quotation), not a column
+ * beside another, and a line of prose that runs across an indent is not cut
+ * at it.
  */
-export function columnStops(lines) {
-  const seen = new Map();
-  const add = (col) => seen.set(col, (seen.get(col) || 0) + 1);
-  for (const l of lines || []) {
-    const start = l.start || 0;
-    const first = String(l.text == null ? "" : l.text).search(/\S/);
-    if (first < 0) continue;
-    if (start + first > 0) add(start + first);
-    for (const c of columnCuts(l.text)) add(start + c);
+export function columnBands(lines, { reach = COLUMN_REACH } = {}) {
+  const list = lines || [];
+  const at = new Map(); // column → [{ i, beside }], in page order
+  list.forEach((l, i) => {
+    const s = String(l && l.text != null ? l.text : "");
+    const first = s.search(/\S/);
+    if (first < 0) return;
+    const start = (l && l.start) || 0;
+    const add = (col, beside) => { if (!at.has(col)) at.set(col, []); at.get(col).push({ i, beside }); };
+    if (start + first > 0) add(start + first, false);
+    for (const c of columnCuts(s)) add(start + c, true);
+  });
+  const out = list.map(() => ({ stops: new Map(), second: new Set() }));
+  for (const [col, hits] of at) {
+    let run = [];
+    const close = () => {
+      if (run.length >= 2) {
+        const n = run.length;
+        const second = n >= COLUMN_FIRM && col >= COLUMN_FIRM_AT && run.some((h) => h.beside);
+        for (let i = run[0].i; i <= run[run.length - 1].i; i++) {
+          out[i].stops.set(col, n);
+          if (second) out[i].second.add(col);
+        }
+      }
+      run = [];
+    };
+    for (const h of hits) {
+      if (run.length && h.i - run[run.length - 1].i > reach + 1) close();
+      run.push(h);
+    }
+    close();
   }
-  const out = new Map();
-  for (const [col, n] of seen) if (n >= 2) out.set(col, n);
   return out;
-}
-
-/** Whether a page's columns include its second column, where a line is cut even at one space. */
-export function hasFirmColumn(stops) {
-  for (const [col, n] of stops || []) if (col >= COLUMN_FIRM_AT && n >= COLUMN_FIRM) return true;
-  return false;
 }
 
 /**

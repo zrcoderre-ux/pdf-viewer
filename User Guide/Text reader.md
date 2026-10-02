@@ -169,8 +169,8 @@ app, which routes it to the reader tab.
   wherever the text to its left happened to end, a different place on every
   line, and indents and centred headings drew at half their depth. The reader
   now lays the grid out in the font it is reading in: a gap of three spaces or
-  more (or two, where other lines of the page begin a column at the same
-  place) starts a column, every column stands at its own place on every line,
+  more (or two, where the lines around it begin a column at the same place)
+  starts a column, every column stands at its own place on every line,
   an indent is as deep as the export made it, and a sentence's double space is
   left alone. A left-hand piece too wide for its share of the grid — capitals
   run wide — pushes only its own line's right-hand column on, by a small
@@ -1194,7 +1194,11 @@ app, which routes it to the reader tab.
   line is set on that grid, so an indent, a centred heading, a signature block
   and a two-column page's right-hand column stand where the PDF prints them —
   the right-hand column straight down the page, including the half of a line
-  whose left-hand column runs up to it with a single space between. A piece of
+  whose left-hand column runs up to it with a single space between. A column
+  covers only the lines it runs down: a form's box beside its caption, or the
+  party boxes beside a signature, say nothing about the prose above and below
+  them, and an indent that several lines share (a form's checkbox items, an
+  address block) is not a column at all. A piece of
   a line wider than its place in the reader's font is drawn at its own width
   wherever the blank before the next column has room for it, a space to spare,
   and nothing moves. Only a piece that would run into the next column's text is

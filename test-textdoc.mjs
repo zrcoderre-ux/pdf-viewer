@@ -15,7 +15,7 @@ import {
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, didNotOcrLines, DID_NOT_OCR,
-  columnCuts, columnStops, columnWidths, lineIndent, hasFirmColumn, COLUMN_GAP,
+  columnCuts, columnBands, columnWidths, lineIndent, COLUMN_GAP, COLUMN_REACH,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
   textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
@@ -498,28 +498,79 @@ console.log("columns laid out with spaces");
     { text: "       United States District Court" },
     { text: "Holdings:" + " ".repeat(53) + "costumer who holds" },
   ];
-  check("a page's columns are the ones two lines or more begin at, and how many", [...columnStops(lines)], [[62, 2]]);
+  const stopsOf = (bands) => bands.map((b) => [...b.stops]);
+  check("a column is where two lines or more begin, and it covers the lines between them",
+    stopsOf(columnBands(lines)), [[[62, 2]], [[62, 2]], [[62, 2]], [[62, 2]]]);
   check("…counted from the page's edge, a numbered line's text where its number's spaces end",
-    [...columnStops([{ text: "COMPLAINT FOR:", start: 44 }, { text: R.slice(0, 44) + "1. BREACH;" }])], [[44, 2]]);
+    stopsOf(columnBands([{ text: "COMPLAINT FOR:", start: 44 }, { text: R.slice(0, 44) + "1. BREACH;" }])), [[[44, 2]], [[44, 2]]]);
   // A justified left-hand column fills its width, and its long lines run up
   // to the second column with a space or two between.
-  const second = new Map([[62, 9], [5, 4]]);
+  const westlaw = [
+    { text: R + "Barbara Delo, a former costumer" },
+    { text: "company and its executive director, alleging discrimination   I. Factual Allegations" },
+    { text: "costumer's sexual harassment claim accrued after the effectiv Jo Marine" },
+    { text: "                 Barbara DELO, Plaintiff,                     \u201cDefendants\u201d). Delo alleges" },
+  ];
+  const wb = columnBands(westlaw);
+  check("lines beside a second column make it one: three begin at it, text to its left on some",
+    wb.map((b) => [...b.second]), [[62], [62], [62], [62]]);
+  check("one space onto the second column is a gap", columnCuts(westlaw[2].text, wb[2]), [62]);
   const full = "could invoke the Ending Forced Arbitration of Sexual Assault  Compl. \u00b6 15.";
-  check("two spaces onto a column the page begins lines at is a gap", columnCuts(full, { stops: second }), [62]);
-  check("one space onto the page's second column is a gap too",
-    columnCuts("costumer's sexual harassment claim accrued after the effectiv Jo Marine", { stops: second }), [62]);
-  check("…but one space onto an indent's column is two words", columnCuts("It is so ordered.", { stops: new Map([[3, 9]]) }), []);
-  check("…or onto a column too few lines begin at", columnCuts("x".repeat(61) + " y", { stops: new Map([[62, 2]]) }), []);
+  check("…and two spaces onto a column lines begin at", columnCuts(full, wb[2]), [62]);
+  // A column covers the lines it runs down, and stops: a form's column is a
+  // piece of its page.
+  const below = westlaw.concat(Array.from({ length: COLUMN_REACH + 2 }, () => ({ text: "" })), [westlaw[2]]);
+  const bb = columnBands(below);
+  check("the same line further down the page, past where the column runs, is two words",
+    [[...bb[bb.length - 1].second], columnCuts(westlaw[2].text, bb[bb.length - 1])], [[], []]);
+  check("…though a few lines with none beginning at it do not stop a column",
+    columnCuts(westlaw[2].text, columnBands(westlaw.slice(0, 2).concat([{ text: "" }, { text: "" }, westlaw[2], westlaw[3]]))[4]), [62]);
+  // Lines that only START at a column are an indent, not a column beside
+  // another: an address block, a form's checkbox items.
+  const pad = " ".repeat(21);
+  const named = "Defendant Weddell Of Sharnbrook Of Livesey Brindley moved to dismiss.";
+  const indented = columnBands([{ text: pad + "1200 Main Street" }, { text: named }, { text: pad + "Suite 400" }, { text: pad + "Los Angeles, CA 90012" }]);
+  check("an indent three lines share is a column lines begin at, but not a second column",
+    [[...indented[1].stops], [...indented[1].second]], [[[21, 3]], []]);
+  check("…so prose running across it is not cut there", columnCuts(named, indented[1]), []);
+  check("…nor onto a column too few lines begin at, or too near the margin", [
+    columnCuts("x".repeat(61) + " y", { stops: new Map([[62, 2]]), second: new Set() }),
+    columnCuts("The court is to rule.", columnBands([{ text: "a.        Text one" }, { text: "The court is to rule." }, { text: "          Text two" }, { text: "b.        Text three" }])[1]),
+  ], [[], []]);
+  // A Judicial Council form (APP-003) on the character grid: its checkbox
+  // items stand at column 18 down the middle of the page, and the caption at
+  // the top runs across that column with a single space ("ATTORNEY OR PARTY
+  // WITHOUT", "SUPERIOR COURT OF CALIFORNIA"). Counted down the whole page,
+  // the items made 18 the page's second column and cut the caption there.
+  const app003 = [
+    "ATTORNEY OR PARTY WITHOUT ATTORNEY                            STATE BAR NUMBER:",
+    " ".repeat(118) + "FOR COURT USE ONLY",
+    "NAME:", "FIRM NAME:", "STREET ADDRESS:",
+    "CITY:                                                        STATE:         ZIP CODE:",
+    "TELEPHONE NO.:                                               FAX NO.:",
+    "E-MAIL ADDRESS:", "ATTORNEY FOR (name):", "",
+    "SUPERIOR COURT OF CALIFORNIA, COUNTY OF",
+    " STREET ADDRESS:", " MAILING ADDRESS:", "CITY AND ZIP CODE:", "     BRANCH NAME:",
+    ...Array.from({ length: 12 }, () => ""),
+    "     b.           An appendix under rule 8.124.",
+    "",
+    "     c.           The original superior court file under rule 8.128. (NOTE: Local rules in the Court of Appeal, First, Third, and Fourth",
+    "                  Appellate Districts, permit parties to stipulate (agree) to use the original superior court file instead of a clerk's",
+    "                  you may select this option if your appeal is in one of these districts and all the parties have stipulated to use the",
+    "                  superior court file instead of a clerk's transcript in this case. Attach a copy of this stipulation.)",
+  ].map((text) => ({ text }));
+  const fb = columnBands(app003);
+  const band = fb.length - 1;
+  check("a form's checkbox column is a second column down the items it stands beside", [...fb[band].second], [18]);
+  check("…and the caption above them is not cut at it", [columnCuts(app003[0].text, fb[0]), columnCuts(app003[10].text, fb[10])], [[62], []]);
   // A pseudonym is one span on screen: a word of it on the second column is
   // a word of the name, and the line is cut after the name or not at all.
-  const named = "Defendant Weddell Of Sharnbrook Of Livesey Brindley moved to dismiss.";
   const name = [10, 51];
   check("a name's word on the second column is not a cut inside the name",
-    [columnCuts(named, { stops: new Map([[21, 3]]) }), columnCuts(named, { stops: new Map([[21, 3]]), atoms: [name] })], [[21], []]);
-  check("…the column after the name still is", columnCuts(named, { stops: new Map([[52, 3]]), atoms: [name] }), [52]);
+    [columnCuts(named, { second: new Set([21]) }), columnCuts(named, { second: new Set([21]), atoms: [name] })], [[21], []]);
+  check("…the column after the name still is", columnCuts(named, { second: new Set([52]), atoms: [name] }), [52]);
   check("…and a gap of spaces inside a span is not one either",
     columnCuts("Plaintiff Pat    Doe     Case No. 1", { atoms: [[10, 20]] }), [25]);
-  check("a page has a second column where enough lines begin far enough in", [hasFirmColumn(second), hasFirmColumn(new Map([[5, 20]])), hasFirmColumn(new Map([[40, 2]]))], [true, false, false]);
   check("each cell spans to the next cut, the first from past the indent", [columnWidths([62], 17), columnWidths([40, 62])], [[45], [40, 22]]);
 }
 console.log("indents on the grid");
