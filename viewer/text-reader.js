@@ -52,7 +52,7 @@ import * as RD from "./redact.js";
 import { buildRedactedPdf } from "./pdf-edit.js";
 import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
-import { fontDocument, fontCanvas, renderPageOnto } from "./pdf-fonts.js";
+import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRatio } from "./pdf-fonts.js";
 import { repairTextLayer } from "./text-layer.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdfjs/build/pdf.worker.mjs");
@@ -8659,10 +8659,21 @@ function memberSections(m, byIndex) {
 
 function shedMember(m, secs) {
   if (m.shed) return;
-  for (const sec of secs) {
+  // The height each page is pinned at is the height it STANDS at, read before
+  // the grid comes off it. Side by side that is its PDF page's height, the
+  // same as the slot beside it; read after, it was whatever its text came to
+  // flowing off the grid, with nothing yet giving it its paper's shape — a
+  // legal-size exhibit page pinned at 2,475 px beside a 906 px slot, a
+  // landscape one at three times its slot — and every shed page put the two
+  // columns that much further out of step. To the fraction of a pixel: a pixel
+  // rounded away on every shed page is the columns sliding apart too. Read for
+  // every page before any is touched, which is one layout rather than one a
+  // page.
+  const heights = secs.map((sec) => sec.getBoundingClientRect().height);
+  secs.forEach((sec, k) => {
     const inner = sec.querySelector(".page-inner");
     const body = inner && inner.querySelector(".page-body");
-    if (!inner || !body) continue;
+    if (!inner || !body) return;
     const i = Number(sec.dataset.index);
     // Off the PDF's grid first, while the lines it laid out are still there.
     clearMatched(sec);
@@ -8671,10 +8682,10 @@ function shedMember(m, secs) {
     // and the places this document keeps in the clear.
     m.spots = m.spots.filter((x) => x.page !== i).concat(spotsFromBody(body, i));
     doc.pages[i].lines = TD.serializeNodes(body).split("\n");
-    sec.style.height = sec.offsetHeight + "px"; // measured before it is emptied
+    sec.style.height = (Math.round(heights[k] * 100) / 100) + "px"; // measured before it is emptied
     inner.innerHTML = "";
     sec.classList.add("shed");
-  }
+  });
   m.shed = true;
   // An undo step names a page that has no body to put back. The reading has
   // been four screens away from this document; the history of it is over.
@@ -9511,15 +9522,13 @@ function paintWarm(el, bmp, cssWidth) {
   const sheet = sheetOf(el);
   const canvas = sheet.querySelector("canvas");
   if (!canvas) return false;
-  const dpr = Math.min(3, window.devicePixelRatio || 1);
-  const w = Math.round(cssWidth * dpr);
-  const h = Math.round((w * bmp.height) / bmp.width);
-  canvas.width = w;
-  canvas.height = h;
-  canvas.style.width = cssWidth + "px";
-  canvas.style.height = Math.round(h / dpr) + "px";
-  sheet.style.height = "";
-  canvas.getContext("2d").drawImage(bmp, 0, 0, w, h);
+  // The box the page drawn over it will have (sizeCanvas): the page's own
+  // size where it is known, the held bitmap's shape where it is not.
+  const at = el.dataset.warm ? el.dataset.warm.lastIndexOf("|") : -1;
+  const sizes = at > 0 ? pdfSizes.get(el.dataset.warm.slice(0, at)) : null;
+  const sz = sizes && sizes[Number(el.dataset.warm.slice(at + 1)) - 1];
+  sizeCanvas(sheet, canvas, cssWidth, sz ? (cssWidth * sz.h) / sz.w : (cssWidth * bmp.height) / bmp.width);
+  canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
   el.dataset.preview = "1";
   el.classList.add("ready");
   return true;
@@ -9910,6 +9919,54 @@ function warmForLeaks() {
 }
 
 // ── rendering a page into a canvas ──
+//
+// THE BITMAP IS SHOWN AT ITS OWN SIZE, in the screen's own pixels — the fix the
+// PDF viewer had first (pdf-fonts.js, pageOutputScale). The pane drew at the
+// ratio already, but showed the bitmap at the page's CSS size: wherever that
+// size times the ratio is not a whole number of the screen's pixels (most
+// sizes, at any ratio but a whole one), the browser fitted the page to the
+// pixels it landed on, a pixel more or fewer than the bitmap, and a page
+// fitted by a pixel is every pixel on it resampled. Which pages that hit
+// depended on where each fell on the screen's grid: measured in Chromium, two
+// pages in ten at 110%, five in ten at 150%, every page at 175%. The ratio was
+// also held to 3, so a Retina screen zoomed past 150% had its pages stretched
+// outright; and a page drawn before the ratio changed (the window moved to a
+// screen of another scaling, the zoom changed) stayed drawn at the old one,
+// stretched to twice its bitmap going from 1× to 2×, until it happened to be
+// drawn again.
+//
+// The BOX is the page's height rounded — the same arithmetic the text page
+// beside it is given (applyMatchedLayout) and a slot not yet drawn stands at
+// (sizeFromKnown) — and the canvas never runs past it: a sheet a fraction of a
+// pixel taller than its text page is one column sliding under the other by
+// the fortieth page.
+/** Size a slot's canvas to show `width` × `height` css px in the screen's own pixels. Answers the scale. */
+function sizeCanvas(sheet, canvas, width, height) {
+  const s = pageOutputScale({ width, height });
+  const boxH = Math.round(height);
+  canvas.width = Math.max(1, Math.floor(width * s + 1e-6));
+  canvas.height = Math.max(1, Math.floor(Math.min(height, boxH) * s + 1e-6));
+  canvas.style.width = (canvas.width / s) + "px";
+  canvas.style.height = (canvas.height / s) + "px";
+  sheet.style.height = boxH + "px";
+  return s;
+}
+/**
+ * The screen's ratio changed — the window moved to a screen of another
+ * scaling, or the browser's zoom changed — and every page drawn or being drawn
+ * at the old one is drawn again at the new: the one on screen at once, the
+ * rest in their turn (renderInto; the mark a drawing is made for carries the
+ * ratio, so a page already drawn at the new one is left alone).
+ */
+watchPixelRatio(() => {
+  for (const el of document.querySelectorAll(".pdf-slot[data-want], .pdf-inline[data-want]")) {
+    const slot = el.classList.contains("pdf-slot");
+    const sec = slot ? null : el.closest(".tpage");
+    const src = pdfSources[Number(slot ? el.dataset.index : sec && sec.dataset.index)];
+    if (!src) continue; // a slot the PDFs have moved out from under: its pane is being built again
+    renderInto(el, src, Number(el.dataset.page), slot ? parseFloat(el.style.width) || paneWidth() : inlineWidth(sec));
+  }
+});
 async function renderInto(el, src, pageNo, cssWidth) {
   // Named for the breadcrumb: a tab killed while a page was being drawn says
   // WHICH page of which PDF, which is the difference between "a scan did it"
@@ -9966,17 +10023,13 @@ async function drawPage(el, src, pageNo, cssWidth, want, page) {
   // inside: kept on the slot because the boxes are in the PDF's points and
   // the pane re-renders at a new width whenever the panes are resized.
   el.__view = page.view;
-  const dpr = Math.min(3, window.devicePixelRatio || 1);
-  const vp = page.getViewport({ scale: cssScale * dpr });
+  const vp = page.getViewport({ scale: cssScale });
   const sheet = sheetOf(el);
   const canvas = sheet.querySelector("canvas");
   if (el.__task) { try { el.__task.cancel(); } catch { /* done */ } }
-  canvas.width = Math.round(vp.width);
-  canvas.height = Math.round(vp.height);
-  canvas.style.width = cssWidth + "px";
-  canvas.style.height = Math.round(vp.height / dpr) + "px";
-  sheet.style.height = "";
-  const task = renderPageOnto(page, canvas, { viewport: vp }); // by way of the fonts' document (pdf-fonts.js)
+  const s = sizeCanvas(sheet, canvas, vp.width, vp.height);
+  // By way of the fonts' document (pdf-fonts.js), at the bitmap's own scale.
+  const task = renderPageOnto(page, canvas, { viewport: vp, transform: s === 1 ? null : [s, 0, 0, s, 0, 0] });
   el.__task = task;
   try { await task.promise; } catch (e) { if (!(e && e.name === "RenderingCancelledException")) console.warn(e); return; }
   finally { if (el.__task === task) el.__task = null; }
@@ -9988,7 +10041,7 @@ async function drawPage(el, src, pageNo, cssWidth, want, page) {
   // The page is up: its boxes go back on it at the width it was drawn at.
   // Before the text layer, which may yet fail — a page with no text layer can
   // still carry an area box over a signature.
-  el.__vp = page.getViewport({ scale: cssScale });
+  el.__vp = vp;
   paintRedactions(el);
   // The page's text, selectable over the bitmap (pdf.js's own text layer).
   const layer = sheet.querySelector(".textLayer");
@@ -10000,7 +10053,7 @@ async function drawPage(el, src, pageNo, cssWidth, want, page) {
     try {
       const tc = await textItemsOf(page);
       if (tc.truncated) { sayHugePage(src.name, pageNo); return; } // drawn, but not laid out as text
-      const tl = new pdfjsLib.TextLayer({ textContentSource: { items: tc.items, styles: tc.styles }, container: layer, viewport: page.getViewport({ scale: cssScale }) });
+      const tl = new pdfjsLib.TextLayer({ textContentSource: { items: tc.items, styles: tc.styles }, container: layer, viewport: vp });
       if (el.dataset.want !== want) return;
       el.__text = tl;
       await tl.render();
@@ -10337,8 +10390,8 @@ function releaseCanvas(el) {
   if (!el.dataset.rendered && !el.dataset.preview) { releasePage(el); return; }
   const sheet = sheetOf(el);
   const canvas = sheet.querySelector("canvas");
-  // Keep the box its size, drop the bitmap and the text.
-  sheet.style.height = canvas.style.height;
+  // Keep the box its size (sizeCanvas gave the sheet it), drop the bitmap and the text.
+  if (!sheet.style.height) sheet.style.height = canvas.style.height;
   canvas.width = canvas.height = 0;
   canvas.style.height = "0px";
   const layer = sheet.querySelector(".textLayer");
@@ -10925,6 +10978,23 @@ function applyMatchedLayoutNow() {
     sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, firstY: info.lines[t.page - 1] };
     plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, firstY: info.lines[t.page - 1], scale: 1 });
   }
+  // A page the reel has SHED has no lines to lay and stands at the height it
+  // was pinned at (shedMember). Its slot used to fall to the pane's width —
+  // which is not the page's width wherever the two columns are not the same
+  // size, or the reader is zoomed — and to its PDF page's height, beside a
+  // page pinned at whatever it had been. A slot is the page beside it, built
+  // or not: it takes the page's width here, and its height below with the
+  // slots that have no PDF page at all.
+  const shedSlots = [];
+  if (on) {
+    for (const sec of pagesEl.querySelectorAll(".tpage.shed")) {
+      const el = slots.get(Number(sec.dataset.index));
+      if (!el) continue;
+      matchedSlots.add(el);
+      fitSlot(el, w0);
+      shedSlots.push([el, sec]);
+    }
+  }
   // Every slot the layout did not claim keeps the pane's own width, and gives
   // back whatever a grid before it levelled: its label's height, and the box
   // its sheet was held open to.
@@ -10943,6 +11013,7 @@ function applyMatchedLayoutNow() {
     p.scale = w / p.sz.w; // the sheet leads; the grid follows it
     p.w = w;
     fitSlot(p.slot, w);
+    if (p.slot.style.height) p.slot.style.height = ""; // held to a shed page's height, and the page is back
     p.sec.classList.add("matched");
     p.sec.style.width = w + "px";
     // The page's height from the SAME arithmetic the bitmap is drawn by
@@ -11025,6 +11096,18 @@ function applyMatchedLayoutNow() {
   //
   // Read every pair, then write every pair: asking one page for its label
   // height after writing the last one lays the document out again each time.
+  //
+  // EACH LABEL IS MEASURED AT ITS OWN HEIGHT. The height read used to be the
+  // one this pass had written the time before, so a label levelled up to its
+  // neighbour read back as tall as it had been made: the next pass found the
+  // two equal and took the levelling off, the pass after put it back, and a
+  // page whose label wraps (a REVIEW clause on a narrow sheet) stood beside
+  // its PDF page a line's height out of step every other pass. And once the
+  // wrap went away (a wider window, a zoom), the stale height was the taller
+  // one and was handed to the other label for good. So whatever a pass before
+  // set is taken off first, and both are read as their words make them — to
+  // the fraction of a pixel, since a pixel rounded away on every levelled page
+  // is the two columns sliding apart down the document.
   if (plans.length) {
     const pairs = plans.map((p) => ({
       p,
@@ -11033,14 +11116,18 @@ function applyMatchedLayoutNow() {
       sheet: p.slot.querySelector(".pdf-sheet"),
     }));
     for (const x of pairs) {
-      x.hl = x.lt ? x.lt.offsetHeight : 0;
-      x.hs = x.ls ? x.ls.offsetHeight : 0;
+      if (x.lt && x.lt.style.height) x.lt.style.height = "";
+      if (x.ls && x.ls.style.height) x.ls.style.height = "";
+    }
+    for (const x of pairs) {
+      x.hl = x.lt ? x.lt.getBoundingClientRect().height : 0;
+      x.hs = x.ls ? x.ls.getBoundingClientRect().height : 0;
     }
     for (const x of pairs) {
       const lead = Math.max(x.hl, x.hs);
       for (const [el, h] of [[x.lt, x.hl], [x.ls, x.hs]]) {
         if (!el) continue;
-        const want = lead && h !== lead ? lead + "px" : "";
+        const want = lead - h > 0.01 ? (Math.round(lead * 100) / 100) + "px" : "";
         if (el.style.height !== want) el.style.height = want;
       }
       // The bitmap keeps its own height; the sheet holds the box open under it
@@ -11144,14 +11231,21 @@ function applyMatchedLayoutNow() {
   // page's own height instead: nothing to show, but the same amount of it.
   //
   // Read first, written after, so the heights come from pages that have already
-  // taken their matched sizes above.
+  // taken their matched sizes above. A shed page's slot is held to that page's
+  // pinned height the same way. To the fraction of a pixel: a page's height
+  // rounded away on every such slot is the columns sliding apart down a
+  // combined file.
   if (on) {
     const blanks = [];
     for (const el of pdfPane.querySelectorAll(".pdf-slot.blank")) {
       const sec = pagesEl.querySelector(`.tpage[data-index="${el.dataset.index}"]`);
-      if (sec) blanks.push([el, sec.offsetHeight]);
+      if (sec) blanks.push([el, sec]);
     }
-    for (const [el, h] of blanks) el.style.height = h + "px";
+    const held = blanks.concat(shedSlots).map(([el, sec]) => [el, sec.getBoundingClientRect().height]);
+    for (const [el, h] of held) {
+      const want = (Math.round(h * 100) / 100) + "px";
+      if (el.style.height !== want) el.style.height = want;
+    }
   }
   // The boxes the export draws: their columns and sheets, measured now that
   // every line stands where this pass put it (rules.js).
@@ -11453,6 +11547,7 @@ function unlevelSlot(el) {
   if (lab && lab.style.height) lab.style.height = "";
   const sheet = el.querySelector(".pdf-sheet");
   if (sheet && sheet.style.minHeight) sheet.style.minHeight = "";
+  if (el.style.height) el.style.height = ""; // …and a shed page's height
 }
 function clearMatched(sec) {
   if (!sec.classList.contains("matched")) return;

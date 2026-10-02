@@ -201,6 +201,75 @@ type, and falls as type blurs:
 | 1.5 | 918 → 1377 | 5.05 → 5.83 |
 | 2 | 918 → 1836 | 3.66 → 5.14 |
 
+### Side by side: one size beside its PDF page, drawn in the screen's own pixels (`text-reader.js`)
+
+Two things let a text page and its PDF page stand at different sizes, and three
+let the PDF page come out soft.
+
+**The labels were levelled against themselves.** A text page's label can wrap
+(a REVIEW clause on a narrow sheet) where the slot's "PDF p. N" does not, so
+`applyMatchedLayout` levels the two to the taller. It read each label's height
+with whatever height the pass before had written still on it: a slot label
+levelled up read back as tall as it was made, the next pass found the pair equal
+and took the levelling off, and the pass after put it back — every other pass a
+line's height out of step. Once the wrap went away (a wider window, a zoom), the
+stale height was the taller one and was handed across for good. Each pass now
+clears what it set, reads both labels at their own heights with
+`getBoundingClientRect` (a pixel rounded away per page drifts the columns), and
+levels from there.
+
+**A shed page was pinned at the wrong height, beside a slot of the wrong
+width.** `shedMember` took the page off the grid (`clearMatched`) and THEN read
+the height to pin, which was whatever its text came to flowing off the grid; and
+`applyMatchedLayout`, which passes over shed pages, sent their slots back to the
+pane's own width, which differs from the page's wherever the two columns differ
+or the reader is zoomed. The height is now read before the grid comes off, and a
+shed page's slot takes the page's width and, like a slot with no PDF page, the
+page's pinned height (cleared again when the page is built back).
+
+Measured in Chromium, a pleading with REVIEW clauses on two pages, and a reel of
+four ten-page filings:
+
+| side by side | before | after |
+|---|---|---|
+| narrow window, a REVIEW page (text / PDF height) | 498 / 482 | 498 / 498 |
+| the window widened again | 561 / 530 | 530 / 530 |
+| then zoomed in a step | 580 / 611 | 580 / 580 |
+| reel of four, pairs of different size | 30 of 40 (a legal page pinned at 2,475 beside 906) | 0 of 40 |
+
+**The PDF page in the screen's own pixels.** The pane drew at
+`devicePixelRatio` already, but showed the bitmap at the page's CSS size. Where
+that size times the ratio is not a whole number (most sizes, at any ratio but a
+whole one), the bitmap lands on a pixel more or fewer than it has and the
+browser resamples the whole page to fit; which pages that hits depends on where
+each falls on the screen's grid. The ratio was also held to 3, and a page drawn
+before the ratio changed (the window moved to a screen of another scaling, the
+zoom changed) stayed drawn at the old one until it happened to be drawn again.
+`drawPage` and `paintWarm` now size the canvas through `sizeCanvas`: the bitmap
+at `pageOutputScale` (moved to `pdf-fonts.js` and shared with the viewer, so the
+pixel cap is the viewer's 4096 × 4096 rather than a ratio of 3), shown at
+exactly `canvas.width / scale`, never taller than the box. The box — the sheet —
+is the page's height rounded, the arithmetic the text page beside it is given,
+so the two columns still agree to the pixel. `watchPixelRatio` (also shared)
+redraws every slot drawn or being drawn when the ratio changes.
+
+| ratio | before | after |
+|---|---|---|
+| 1.1 | 2 pages of 10 shown resampled | 0 of 10 |
+| 1.25 | 1 of 10 | 0 of 10 |
+| 1.5 | 5 of 10 | 0 of 10 |
+| 1.75 | 10 of 10 | 0 of 10 |
+| 1 → 2, a 602 px page already drawn | bitmap 602 × 779, stretched 2× | redrawn at 1204 × 1558 |
+
+"Resampled" is the screen's copy of the page differing from the bitmap at every
+whole-pixel offset. **Measure this in a real screen's scaling, not an emulated
+one:** Playwright's `deviceScaleFactor` (headless shell) snaps a canvas to whole
+CSS pixels rather than to the screen's, so a canvas sized exactly right still
+shows resampled there, and one sized wrong can look fine. Launch Chromium in its
+new headless mode (`channel: "chromium"`) with `--force-device-scale-factor` and
+a `--window-size`, and a one-pixel checkerboard canvas shows whole-pixel
+placement the way a 125% Windows screen does.
+
 ### The numbered margin is the boundary
 
 A pleading's PDF carries furniture its export does not: the firm's name

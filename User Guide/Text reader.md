@@ -1146,7 +1146,18 @@ app, which routes it to the reader tab.
   the text page taller than its PDF page (an export's footer or stamp below
   the last numbered line), **the slot grows with it** rather than the columns
   parting; the bitmap keeps its size and the box is held open under it. The
-  page labels are levelled to the taller of the two for the same reason. **A
+  page labels are levelled to the taller of the two for the same reason, and
+  measured afresh each time: a label that wraps (a REVIEW clause on a narrow
+  sheet) used to hold its pair a line out of step every other time the layout
+  ran, and for good once the wrap went away. A document the reel has put down
+  keeps its pages at their PDF pages' size, beside slots of the same width, so
+  the columns stay level past it. **The PDF page is drawn in your screen's own
+  pixels**, the fix the PDF viewer had first: on a scaled screen (125%, 150%,
+  a browser zoom) its bitmap is shown at exactly its own size, where a rounded
+  size had the browser resample some pages and leave others sharp; it is drawn
+  again when the window moves to a screen of another scaling or the zoom
+  changes, where it used to stay stretched until it happened to be redrawn;
+  and a Retina screen zoomed past 150% is no longer held at three times. **A
   text page with no PDF page keeps the pane level with it.** A combined file
   always has two kinds: its own list of the documents in it, at the top, and a
   banner page before each member. Each of those used to stand beside a stub of
