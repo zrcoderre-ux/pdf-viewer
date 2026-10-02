@@ -2112,6 +2112,14 @@ window.addEventListener("beforeunload", (e) => {
 // about overlay geometry.
 window.__pdfViewerReflow = () => { if (pdfDoc) renderAllPages(); };
 
+// The PWA shell moves a tab into a window of its own by opening the document
+// again there, so it asks what to open and where the reader was: the file
+// this viewer saves to (after a Save As, not the one it was opened from) and
+// the page on screen. A document goes to its new window as it stands on disk,
+// which is why the shell only moves one with nothing unsaved.
+window.__pdfViewerSource = () => ({ handle: localFileHandle, page: pdfDoc ? visiblePageNumber() : 0 });
+window.__pdfViewerGoToPage = (pn) => goToPage(pn);
+
 // Test hook: build the citation for the current selection (used by e2e checks).
 window.__pdfViewerBuildCitation = () => buildCitationReference();
 
