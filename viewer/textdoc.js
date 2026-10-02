@@ -1179,3 +1179,68 @@ export function ruleShape(line) {
   for (let i = 0; i < line.length; i++) if (RULE_BARS.includes(line[i])) bars.push(i);
   return { bars, rule: RULE_ONLY_RE.test(line) };
 }
+
+// ---- columns laid out with spaces ----------------------------------------------------
+//
+// The same character grid lays a page's COLUMNS out with spaces: a second
+// column, a caption's right half, a centred heading, an indent stands where it
+// does because of how many spaces come before it. That too is a layout only in
+// a monospace font. In the reader's own a space is a quarter of an em and a
+// letter about half of one, so every run of spaces drew short, and a column
+// began wherever the text to its left happened to end — a different place on
+// every line. These say where a line's spaces cut it into columns, and how
+// wide each piece is on the grid; viewer/columns.js lays the pieces out.
+
+/** A gap this many spaces wide is a gap between columns; a narrower one is two words' (a sentence's double space). */
+export const COLUMN_GAP = 3;
+const GAP_RUN_RE = / {2,}(?=\S)/g;
+
+/**
+ * Where a line's spaces cut it: the offsets at which a column begins, after
+ * its indent (`lead`) and after each gap between columns. A two-space gap is
+ * one only where it lands on one of the page's own columns (`stops`, by
+ * columnStops) — a double space after a full stop lands nowhere in
+ * particular. `start` is the column the text begins at on the page, for a
+ * line whose margin number stands before it.
+ */
+export function columnCuts(text, { lead = true, stops = null, start = 0 } = {}) {
+  const s = String(text == null ? "" : text);
+  const cuts = [];
+  const first = s.search(/\S/);
+  if (first < 0) return cuts;
+  if (lead && first > 0) cuts.push(first);
+  GAP_RUN_RE.lastIndex = first;
+  let m;
+  while ((m = GAP_RUN_RE.exec(s))) {
+    const at = m.index + m[0].length;
+    if (m[0].length >= COLUMN_GAP || (stops && stops.has(start + at))) cuts.push(at);
+  }
+  return cuts;
+}
+
+/**
+ * A page's columns: each column, counted from the page's left edge, that two
+ * lines or more begin a piece at after an indent or a gap of COLUMN_GAP.
+ * `lines` [{ text, start, lead }], as columnCuts takes them.
+ */
+export function columnStops(lines) {
+  const seen = new Map();
+  for (const l of lines || []) {
+    const start = l.start || 0;
+    for (const c of columnCuts(l.text, { lead: l.lead !== false })) seen.set(start + c, (seen.get(start + c) || 0) + 1);
+  }
+  const out = new Set();
+  for (const [col, n] of seen) if (n >= 2) out.add(col);
+  return out;
+}
+
+/**
+ * Each piece's width on the grid, in characters: the piece before each cut
+ * spans up to it. The first begins where the line's text is drawn (`origin`,
+ * the body margin of a numbered page, whose margin number and the spaces after
+ * it are drawn in the margin), so a column a line reaches is the same column
+ * on every line, numbered or not.
+ */
+export function columnWidths(cuts, { start = 0, origin = 0 } = {}) {
+  return cuts.map((c, i) => (i ? c - cuts[i - 1] : Math.max(0, start + c - origin)));
+}

@@ -82,6 +82,7 @@
         "viewer/reader-options.js",
         "viewer/textdoc.js",
         "viewer/rules.js",
+        "viewer/columns.js",
         "viewer/pdfsync.js",
         "viewer/pseudo-key.js",
         "viewer/key-library.js",

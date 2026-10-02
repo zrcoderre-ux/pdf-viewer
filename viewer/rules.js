@@ -25,6 +25,7 @@
 // pass (undressed first), because an edit can split or join a cell.
 
 import { ruleParts, ruleShape, serializeNodes } from "./textdoc.js";
+import { undressColumns } from "./columns.js";
 
 /** An empty slot carries a <br> so the caret can stand in it; one with text does not need it. */
 export function placeholderIn(lt) {
@@ -102,6 +103,9 @@ export function dressLines(body) {
     // longer than its fake is still a row of the same box.
     const shape = ruleShape(serializeNodes(line));
     if (!shape) { prevKey = null; continue; }
+    // The glyphs are wrapped where they stand among the line's own nodes, so
+    // the column cells (columns.js) come off first and go back on after.
+    undressColumns(lt);
     const cells = dressRules(lt);
     if (shape.rule) line.classList.add("rr");
     if (!cells) { prevKey = null; continue; }

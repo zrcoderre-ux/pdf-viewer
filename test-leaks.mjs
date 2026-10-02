@@ -81,6 +81,8 @@ console.log("locating");
 check("Where: pages, lines, ranges, a printed page, a wrap onto the next page, a Word line", parseWhere("p.4:7-8, p.9, p.43 (printed p.1):16, p.7:27-p.8:1, line 12-14, (not located), p.2:3 …"),
   [{ page: 4, printed: null, line: 7, lineEnd: 8 }, { page: 9, printed: null, line: null, lineEnd: null }, { page: 43, printed: "1", line: 16, lineEnd: null },
    { page: 7, printed: null, line: 27, lineEnd: 1 }, { page: null, printed: null, line: 12, lineEnd: 14 }, { page: 2, printed: null, line: 3, lineEnd: null }]);
+check("Where: a page typed with a space after p. is the same page", parseWhere("p. 3, p. 26 (printed p. 1):4"),
+  [{ page: 3, printed: null, line: null, lineEnd: null }, { page: 26, printed: "1", line: 4, lineEnd: null }]);
 check("Where: sentinels yield nothing", [parseWhere("(no longer present)"), parseWhere(""), parseWhere("(not located)")], [[], [], []]);
 check("File: names, or nothing to open", [parseFiles("A.pdf, B v C.docx"), parseFiles("4 files"), parseFiles("—"), parseFiles(""), parseFiles("Brief.pdf")], [["A.pdf", "B v C.docx"], [], [], [], ["Brief.pdf"]]);
 check("Context: the two halves, or the original alone", [splitContext("a\n" + CONTEXT_RULE + "\nb"), splitContext("only"), splitContext("")], [{ original: "a", exported: "b" }, { original: "only", exported: "" }, { original: "", exported: "" }]);

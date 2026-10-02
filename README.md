@@ -1070,6 +1070,27 @@ app, which routes it to the reader tab.
   every column set to its widest cell, the rows given one left edge, and each
   row made as tall as the gap to the next so the bars meet — the box is a box
   there too.
+- **Columns stand where the export put them, whatever the font.** A
+  two-column page — a Westlaw printout, a caption with the case number beside
+  the parties, the clerk's filing stamp beside the attorney block — reaches the
+  export as one character grid, its second column held apart by a run of
+  spaces. That is a layout only in a monospace font: in Georgia a space is
+  about half as wide as a letter, so the right-hand column used to begin
+  wherever the text to its left happened to end, a different place on every
+  line, and indents and centred headings drew at half their depth. The reader
+  now lays the grid out in the font it is reading in: a gap of three spaces or
+  more (or two, where other lines of the page begin a column at the same
+  place) starts a column, every column stands at its own place on every line,
+  an indent is as deep as the export made it, and a sentence's double space is
+  left alone. A left-hand piece too wide for its share of the grid — capitals
+  run wide — pushes only its own line's right-hand column on, by a small
+  margin, and never runs into it. A page in columns is set no larger than its
+  widest column line fits across the paper, so a column never wraps back to the
+  left margin. On pleading paper the columns are counted from the body margin.
+  Display only: the spaces are all still there, and a save, a copy, Find and
+  the LEAKS walk read exactly what the file says. In the editor the gaps' own
+  spaces are drawn, so what is typed into one is seen, and a line is laid out
+  again once the typing stops.
 - **Print what you see — in its pseudonyms.** **🖨 Print** (Ctrl+P) sends the
   pages as they are shown to the browser's print dialog, where "Save as PDF"
   keeps a copy: the font and leading in force, the drawn boxes, the pseudonym
@@ -2264,6 +2285,7 @@ viewer/text-reader.html / .js / .css Text reader for PDF-Linker's exports (pages
 viewer/textdoc.js                    Text reader's document model (pure; test-textdoc.mjs)
 viewer/pdfsync.js                    Text reader's PDF pane decisions: matching, ranges, scroll sync (pure; test-pdfsync.mjs)
 viewer/rules.js                      Text reader's box-drawing glyphs drawn as boxes (column grid pure; test-rules.mjs)
+viewer/columns.js                    Text reader's space-aligned columns laid out on the font's own grid (cuts pure in textdoc.js; test-textdoc.mjs)
 viewer/pseudo-key.js                 pseudonym_key.xlsx reader + fake↔real swaps (pure; test-pseudo-key.mjs)
 viewer/xlsx-read.js                  Minimal .xlsx reader (pure; test-xlsx-read.mjs)
 viewer/xlsx-write.js                 Writes cells back into an .xlsx, the rest copied through (pure; test-xlsx-write.mjs)

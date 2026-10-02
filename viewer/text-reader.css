@@ -662,6 +662,25 @@ body.sbs .line.trailer { display: none; }
    column instead and is CUT at the edge of the paper (.page-inner clips) —
    one long line does not take the whole page's type down with it. */
 .page-body.numbered .line.num > .lt { white-space: pre; }
+/* The columns an export lays out with spaces, laid out (columns.js), on a
+   grid whose character is the reader font's average one (--col-w; --col-sp
+   is its space). An indented line keeps its spaces and is indented by what
+   they fall short of the grid. Each piece of a line before a gap between
+   columns is at least as wide as the characters it spans, so the column after
+   it begins at the same place on every line, and a piece too wide for its
+   cell pushes the rest of its line on instead of running into it. On the
+   PDF's grid every line stands on its own PDF row, and all of it is inert. */
+.page-body:not(.fixed) .lt.ci { text-indent: max(0em, calc(var(--lead) * (var(--col-w, 0.5em) - var(--col-sp, 0.25em)))); }
+.page-body:not(.fixed) .cc {
+  display: inline-block; white-space: pre; box-sizing: border-box; text-indent: 0;
+  min-width: calc(var(--cols) * var(--col-w, 0.5em)); padding-right: calc(2 * var(--col-w, 0.5em));
+}
+/* The gap's own spaces: the cell's width does their work, so they take no
+   room — except in the editor, where what is typed into a gap must show. */
+body:not(.editing) .page-body:not(.fixed) .cg { font-size: 0; }
+/* …read unwrapped for a moment, for how wide its widest column line is
+   (shapePages: a page in columns is set no larger than that fits). */
+.page-body.cols-measure .line.cols > .lt { white-space: pre; }
 /* The boxes the export draws with line glyphs, DRAWN (rules.js). A line
    carrying vertical bars is a table row of cells split at its bars, and
    consecutive rows whose bars agree share one anonymous table — so a bar

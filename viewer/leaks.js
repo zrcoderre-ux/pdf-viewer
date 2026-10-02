@@ -255,7 +255,9 @@ export function parseMasterKeeps(sheets, name) {
 
 // ---- the locating columns ------------------------------------------------------------
 
-const WHERE_RE = /^p\.(\d+)(?:\s*\(printed p\.\s*([^)]*)\))?(?::(\d+)(?:-(?:p\.\d+:)?(\d+))?)?$/i;
+// PDF-Linker writes "p.4:7"; a cell typed by hand as "p. 4" means the same
+// page and is read as it, rather than as no place at all.
+const WHERE_RE = /^p\.\s*(\d+)(?:\s*\(printed p\.\s*([^)]*)\))?(?::(\d+)(?:-(?:p\.\s*\d+:)?(\d+))?)?$/i;
 const LINE_RE = /^line (\d+)(?:-(\d+))?$/i;
 /**
  * The Where cell's locations, in order: [{ page, printed, line, lineEnd }] —
