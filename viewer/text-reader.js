@@ -10741,6 +10741,9 @@ function applyMatchedLayoutSoon() {
 // to get it was a step between the reader and the thing they opened the pane
 // to do. One control, one result.
 function gridOn() { return sbsOn && !pdfPane.hidden; }
+// The narrowest a piece of a line before a column is drawn to keep its column
+// (applyMatchedLayout): three quarters of its width still reads.
+const CELL_SQUEEZE_MIN = 0.75;
 function applyMatchedLayout() {
   return during("lining the text up with the PDF", () => applyMatchedLayoutNow());
 }
@@ -11064,6 +11067,13 @@ function applyMatchedLayoutNow() {
   // below and the way pdf.js fits its own text to the page. Measured with
   // every cell let out to its own width first, every cell read, then every
   // one written; the reading page and its neighbours only.
+  //
+  // …but only so far (CELL_SQUEEZE_MIN). The grid is the FILE's, so a cell is
+  // as wide as the fakes in it, and a real name twice its fake's length
+  // squeezed into the fake's room is letters drawn on top of one another.
+  // Past that the cell is drawn at the narrowest that still reads and takes
+  // the room it needs, and its column is pushed: reading the words beats
+  // lining them up.
   const cells = [];
   for (const p of plans) {
     if (!p.tops || !near.has(Number(p.sec.dataset.index))) continue;
@@ -11078,8 +11088,9 @@ function applyMatchedLayoutNow() {
   }
   for (const x of cells) {
     if (!(x.min > x.pad) || x.w <= x.min + 0.5) continue;
-    x.c.style.width = x.min + "px";
-    x.c.style.transform = `scaleX(${((x.min - x.pad) / (x.w - x.pad)).toFixed(4)})`;
+    const fit = Math.max(CELL_SQUEEZE_MIN, (x.min - x.pad) / (x.w - x.pad));
+    x.c.style.width = (x.pad + (x.w - x.pad) * fit) + "px";
+    x.c.style.transform = `scaleX(${fit.toFixed(4)})`;
     x.c.style.transformOrigin = "0 0";
   }
   // A LINE THAT RUNS OFF THE PAGE COMES BACK ONTO IT. The reader's font is not

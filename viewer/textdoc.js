@@ -1295,17 +1295,24 @@ const GAP_RUN_RE = / +(?=\S)/g;
  * lands nowhere in particular. `start` is the column the line's text begins
  * at on the page, for a line whose margin number stands before it. The
  * line's own indent is not a cut; lineIndent says how deep it is.
+ *
+ * `atoms` are [from, to) stretches of the line that are one thing on screen
+ * and are never cut: a pseudonym, a spot keep. A column does not begin in the
+ * middle of a name, and a word of one that happens to stand on the page's
+ * second column is still a word of the name.
  */
-export function columnCuts(text, { stops = null, start = 0 } = {}) {
+export function columnCuts(text, { stops = null, start = 0, atoms = null } = {}) {
   const s = String(text == null ? "" : text);
   const cuts = [];
   const first = s.search(/\S/);
   if (first < 0) return cuts;
   const begun = (col) => (!stops ? 0 : stops instanceof Map ? stops.get(col) || 0 : stops.has(col) ? 2 : 0);
+  const within = (i) => !!atoms && atoms.some(([a, b]) => i > a && i < b);
   GAP_RUN_RE.lastIndex = first;
   let m;
   while ((m = GAP_RUN_RE.exec(s))) {
     const at = m.index + m[0].length, col = start + at, gap = m[0].length;
+    if (within(m.index) || within(at)) continue;
     if (gap >= COLUMN_GAP || (gap === 2 && begun(col) >= 2) || (gap === 1 && col >= COLUMN_FIRM_AT && begun(col) >= COLUMN_FIRM)) cuts.push(at);
   }
   return cuts;

@@ -1464,7 +1464,11 @@ page begin at that column; at 1 where the page's SECOND column is — a column
 `COLUMN_FIRM` (3) lines begin at, `COLUMN_FIRM_AT` (12) characters in or more
 (`hasFirmColumn`) — since a justified left-hand column runs right up to it.
 `columnStops` returns column → lines. A page with a second column has every
-line read, not only those with a run of spaces.
+line read, not only those with a run of spaces. No cut falls inside a span
+(`atoms`: the line's pseudonym and spot-keep spans, from `spanRanges` in
+columns.js) — `splitAt` splits text nodes only, so a cut inside a name put the
+whole name in a cell sized for the characters before the cut, and side by side
+squeezed it to a smear.
 
 The grid unit is `--col-u`: in the flowing view and on pleading paper,
 `--col-n` × `--body-em`; side by side `--body-em` is the PDF's body type at the
@@ -1486,7 +1490,9 @@ left as before, its leading spaces cancelled by a negative `text-indent` — the
 row's left IS where its text begins, and the spaces on top of it set every
 indented line in twice as far. On every grid page a cell whose text runs wider
 than its cell (the reader's font set at the PDF's size runs wide) is squeezed
-into it (`width` = its `min-width`, `scaleX`), measured and written for the
+into it (`scaleX`, no narrower than `CELL_SQUEEZE_MIN`, 0.75; `width` = its
+`min-width`, or past the floor what the squeezed text needs, which pushes the
+column), measured and written for the
 pages near the reading before the existing slide-back and line squeeze, so a
 column is never pushed there; `clearMatched` undoes it.
 
