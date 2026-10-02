@@ -22,16 +22,32 @@ group moves left; with a floor of 0 the actions slid left under zoom instead
 buttons take their 32px as a flex-basis with `width: auto`: they can still
 give up their padding, down to the icon, before the middle group moves, and
 the right group's min-content is that squeezed size, so wherever the
-actions fitted their half the bar is laid out exactly as before. The left column's floor is 0
-because everything in it gives way: the name and status shorten with an
-ellipsis, the name's box keeps `--name-floor` (its icon, menu button and
-padding, or those and 160px of input while it is being renamed), and the
-link pill shortens with an ellipsis once the rest of the group would have
-less than `--name-room` (the floor and some 70px of the name; just the floor
-while renaming). The window-width rules after it (at 1180px and narrower
-the status and the button labels go, at 1100 the pill, at 960 the provider
-and auto-scroll, at 800 the zoom and theme buttons) choose what is shown;
-they do not decide whether controls overlap.
+actions fitted their half the bar is laid out exactly as before.
+
+The left column has no floor, so its group must fit whatever it is given.
+The name and status shorten with an ellipsis, and the link pill shortens
+with an ellipsis once the rest of the group would have less than
+`--name-room` (the floor and some 70px of the name; just the floor while
+renaming). What cannot shrink is budgeted in the name's box: it keeps
+`--name-floor` (its icon, menu button and padding, or those and 160px of
+input while it is being renamed), or less where the group is too narrow,
+namely what is left beside 40px for the panel button's icon, the gaps and
+the margins, and `--pill-floor`, the pill's 29px of padding while it is
+shown. Without that last term, while the name was being renamed, the
+pill's bare padding was pushed out of the column: 9px into the gap at
+1181px with a five-digit page total, and over the page navigation had the
+right group's floor been a little wider (the icon buttons' 32px kept as a
+width).
+
+The window-width rules below the top bar's CSS (at 1180px and narrower the
+status and the button labels go, at 1100 the pill, at 960 the provider and
+auto-scroll, at 800 the zoom and theme buttons) choose what is shown; they
+do not decide whether controls overlap. Just above 1180 the Download and
+Save as… labels come back before the right group fits its half again (at
+about 1380 for a web PDF), so there the middle group sits up to about 100px
+left of centre, and it steps back to the centre when the window narrows
+past 1180. Moving the label rule up to 1380 would keep it centred, but
+would take the labels away at 1280 and 1366, the common laptop widths.
 
 **Comments are a model in PDF user space** (`viewer/annotations.js`): one
 array of plain objects (`{ id, page, type, rect, quads, color, … }`), drawn as
