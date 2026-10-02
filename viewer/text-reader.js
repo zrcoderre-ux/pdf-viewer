@@ -3553,7 +3553,7 @@ let textEpoch = 0;   // bumped whenever the text under the marks changes
 let scanned = null;  // what the last document-wide pass was made of
 function scanStale() {
   return !scanned || scanned.epoch !== textEpoch || scanned.reals !== reals || scanned.flagged !== flagged
-    || scanned.keeps !== keeps || scanned.master !== masterKeeps || scanned.spots !== spots;
+    || scanned.phrases !== phrases || scanned.keeps !== keeps || scanned.master !== masterKeeps || scanned.spots !== spots;
 }
 function paintHighlights() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
@@ -3623,9 +3623,9 @@ async function scanPass() {
 const MARK_BUDGET = 8000; // ms of work, added up across the slices
 let marksOff = false;     // …and whether it has given up
 async function scanPassNow(pass) {
-  const mark = { epoch: textEpoch, reals, flagged, keeps, master: masterKeeps, spots };
+  const mark = { epoch: textEpoch, reals, flagged, phrases, keeps, master: masterKeeps, spots };
   const moved = () => mark.epoch !== textEpoch || mark.reals !== reals || mark.flagged !== flagged
-    || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots;
+    || mark.phrases !== phrases || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots;
   const flaggedRanges = [];
   const leakRanges = [];
   const hits = [];
@@ -6003,7 +6003,26 @@ function phraseIn(s, leak) {
   // The key fakes these words whole already: there is nothing to put together.
   if (TD.fakeFor(fwd, v)) return null;
   const touches = s.pn || leak || leakIn(s.range) || flagged.some((f) => holdsWords(v, f));
-  return touches || TD.isPhrase(phrases, v) ? v : null;
+  // …or the words ARE a value flagged already, and the question left is
+  // whether that flag goes whole.
+  return touches || TD.isPhrase(flagged, v) || TD.isPhrase(phrases, v) ? v : null;
+}
+/**
+ * Whether the open document carries the phrase with a word of it already
+ * faked — "Cross Zed Bank" where the key fakes "River" — which only a full
+ * re-run puts back together: Apply Fixes reads the export, and the export
+ * holds no phrase there to find.
+ */
+function phraseFakedInFile(v) {
+  if (!doc || !fwd) return false;
+  const words = TD.findRealsInPlain(fwd, [{ node: null, text: v }]);
+  if (!words.length) return false;
+  let carried = "", at = 0;
+  for (const w of words) { carried += v.slice(at, w.start) + w.fake; at = w.end; }
+  const rx = PK.buildMatcher([carried + v.slice(at)]);
+  if (!rx) return false;
+  rx.lastIndex = 0;
+  return rx.test(TD.serializeExport(doc));
 }
 /**
  * Mark the selection as one phrase: flagged as a value like any other, and
@@ -6016,23 +6035,39 @@ function phraseSelection() {
   const v = s ? realTextOf(s.range) : "";
   const problem = TD.phraseProblem(v);
   if (problem) { toast(problem, { error: true }); return; }
-  if (TD.isPhrase(phrases, v) && TD.isPhrase(flagged, v)) { flagPop.hidden = true; toast(`"${v}" is already flagged as one phrase`); return; }
+  flagPop.hidden = true;
+  if (TD.isPhrase(phrases, v) && TD.isPhrase(flagged, v)) { toast(`"${v}" is already flagged as one phrase`); return; }
   // A word of it already faked in the file: the export carries that word's
   // fake, so the text-only pass has no real phrase left to find there.
-  const faked = !!s.pn;
+  markPhrase(v, !!s.pn || phraseFakedInFile(v));
+  noteInFlagged();
+}
+/**
+ * The phrase marked, from a selection or from a value already on the Flagged
+ * list: flagged if it is not yet, and written as `phrase:` from now on.
+ */
+function markPhrase(v, faked) {
+  const was = TD.isPhrase(flagged, v);
   flagged = TD.addValue(flagged, v);
   phrases = TD.addValue(phrases, v);
   persistValues();
   renderFlags();
   paintHighlights();
   sweepFolder(); // a phrase held whole changes what the rest of the folder is carrying
-  flagPop.hidden = true;
-  noteInFlagged();
   const alone = flagged.filter((f) => holdsWords(v, f));
-  toast(`Flagged "${v}" as one phrase — PDF-Linker fakes the words whole, together.`
+  toast((was ? `"${v}" is flagged as one phrase now` : `Flagged "${v}" as one phrase`) + " — PDF-Linker fakes the words whole, together."
     + (faked ? " A word of it is already faked in the file, so it takes Re-run PDF-Linker; Apply Fixes cannot find the phrase in the export."
       : heldPhrases().includes(v) ? " Until then a save leaves it standing whole." : "")
     + (alone.length ? ` ${alone.map((f) => `"${f}"`).join(", ")} ${alone.length === 1 ? "is" : "are"} still flagged on ${alone.length === 1 ? "its" : "their"} own — withdraw ${alone.length === 1 ? "it" : "them"} in the Flagged list if ${alone.length === 1 ? "it" : "they"} only ever stood here.` : ""));
+}
+/** …and back to an ordinary flag: the words still faked, each as the key has it. */
+function unmarkPhrase(v) {
+  phrases = TD.removeValue(phrases, v);
+  persistValues();
+  renderFlags();
+  paintHighlights();
+  sweepFolder(); // a phrase no longer held whole is the folder's business too
+  toast(`"${v}" is an ordinary flag again — PDF-Linker fakes it as a value, not as one phrase.`);
 }
 
 function valuesStoreKey() { return VALUES_PREFIX + (folderName || fileName || "loose"); }
@@ -6191,11 +6226,18 @@ function renderFlags() {
   for (const v of flagged) {
     const li = document.createElement("li");
     li.textContent = v;
-    if (TD.isPhrase(phrases, v)) {
-      const t = document.createElement("span");
-      t.className = "tag phrase";
-      t.textContent = "phrase";
-      t.title = "Faked whole, as one name (phrase) — a word of it the key fakes or keeps on its own notwithstanding";
+    // Several words can be made one phrase here, after they were flagged, as
+    // well as from the selection — and made an ordinary flag again.
+    const on = TD.isPhrase(phrases, v);
+    if (on || !TD.phraseProblem(v)) {
+      const t = document.createElement("button");
+      t.className = "tag phrase" + (on ? "" : " off");
+      t.textContent = on ? "phrase" : "+ phrase";
+      t.setAttribute("aria-pressed", String(on));
+      t.title = on
+        ? "Faked whole, as one name (phrase) — a word of it the key fakes or keeps on its own notwithstanding. Click to make it an ordinary flag again."
+        : "Make it one phrase: PDF-Linker fakes the words whole, together, as one name";
+      t.addEventListener("click", (e) => { e.stopPropagation(); if (on) unmarkPhrase(v); else markPhrase(v, phraseFakedInFile(v)); });
       li.appendChild(t);
     }
     li.title = "Click to find it in the document";
