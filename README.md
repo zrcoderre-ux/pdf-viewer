@@ -2095,7 +2095,23 @@ app, which routes it to the reader tab.
   apiece, which pushed each one a few points down into the next and the
   numbers with them, until the numbers down the side were out of step with the
   PDF's and two of them stood crowded together where the push ran out.) Lines
-  with no room between two numbers share the space evenly. The
+  with no room between two numbers share the space evenly.
+  **A page with no numbers stands where the PDF prints it, columns and all.**
+  An exhibit, a letter, a Westlaw printout is matched to the PDF's printed
+  rows, and the export's character grid is read back off the PDF: where each
+  line's text begins in characters, against where its row begins on the page,
+  gives the grid's left edge and the width of one of its characters there. Every
+  line is set on that grid, so an indent, a centred heading, a signature block
+  and a two-column page's right-hand column stand where the PDF prints them —
+  the right-hand column straight down the page, including the half of a line
+  whose left-hand column runs up to it with a single space between. A piece of
+  a line too wide for its place in the reader's font is drawn narrower into it
+  rather than push its column along. A page that gives no grid (no line begins
+  anywhere but the margin) keeps each line at its own row's left, its leading
+  spaces no longer added on top. The two halves of a two-column page are set to
+  their own leading, a few points apart, and are now two rows and two lines that
+  stand beside each other rather than one pushed under the other: the page no
+  longer runs a third again past its PDF. The
   two panes scroll together, anchored on each page's first printed line. **The
   PDF's text is selectable and copies**, in the pane and on a swapped-in page:
   drag from the margin, from the space before a word, or let go after the

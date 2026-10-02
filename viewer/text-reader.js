@@ -10649,7 +10649,7 @@ function applyMatchedLayoutNow() {
       matchedSlots.add(slot);
       const had = sec.__plan;
       if (had && sz && sec.__planLite === lite) {
-        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, firstY: had.firstY, scale: 1 });
+        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, firstY: had.firstY, scale: 1 });
         continue;
       }
       plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
@@ -10658,7 +10658,7 @@ function applyMatchedLayoutNow() {
     const geom = info.geoms[t.page - 1];
     const rows = info.rows[t.page - 1];
     const numbered = !!geom && body.classList.contains("numbered");
-    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null;
+    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null;
     // The body type: the DOCUMENT's, so every page of one filing is drawn at
     // one scale and a title page is not sized as though its heading were
     // body text; the page's own where the document has nothing read yet, and
@@ -10688,7 +10688,7 @@ function applyMatchedLayoutNow() {
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, firstY: info.lines[t.page - 1], scale: 1 });
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, firstY: info.lines[t.page - 1], scale: 1 });
       continue;
     }
     if (numbered) {
@@ -10702,13 +10702,49 @@ function applyMatchedLayoutNow() {
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
       sizes = PS.typeSizes(off.sizes, base);
     } else {
-      const lay = rows && rows.length ? PS.rowLayout(lines.map((l) => l.textContent), rows, { bodyLeft: bodyX }) : null;
+      const texts = lines.map((l) => l.textContent);
+      // Where across the page each line stands, in the export's characters:
+      // a line only makes room for the lines above it that it stands under
+      // (pdfsync.spreadTops), so a two-column page's halves, set to their own
+      // leading, are never read as one line on top of another.
+      spans = texts.map((t) => { const a = t.search(/\S/); return a < 0 ? null : [a, t.trimEnd().length]; });
+      const lay = rows && rows.length ? PS.rowLayout(texts, rows, { bodyLeft: bodyX }) : null;
       if (lay) {
         tops = lay.positions.map((p) => (p ? p.top : null));
         lefts = lay.positions.map((p) => (p ? p.left : null));
+        // THE EXPORT'S CHARACTER GRID, read back off the PDF (pdfsync.charGrid):
+        // where each line's text begins in characters, against where its row
+        // begins on the page, for the lines whose row begins with the same
+        // word. A page with one — any page whose lines begin anywhere but the
+        // margin — has every line set on it from the grid's own left edge:
+        // its indent, a centred heading, a second column all stand where the
+        // PDF prints them, and a two-column line's right-hand half (whose own
+        // place no row says) on the same column as the lines that are nothing
+        // else. A page without one keeps each line at its row's own left.
+        const firstWord = (t) => (String(t).toLowerCase().match(/[a-z0-9]+/) || [""])[0];
+        const pairs = [];
+        lay.rowOf.forEach((j, k) => {
+          if (j == null) return;
+          const w = firstWord(texts[k]);
+          if (w && firstWord(rows[j].text) === w) pairs.push({ col: texts[k].search(/\S/), x: rows[j].left });
+        });
+        charGridFit = PS.charGrid(pairs);
+        if (charGridFit) lefts = lefts.map((l) => (l == null ? null : charGridFit.x0));
         pitch = lay.pitch;
         if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
         sizes = PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base);
+        // A row of a drawn box (rules.js) is a table, not cut into columns,
+        // and draws the spaces it opens with in its first cell at their own
+        // width: it stands that much further in, by what they fall short of
+        // the grid — the bar under a docket number where the PDF draws it.
+        if (charGridFit) {
+          const sp = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--col-sp-n")) || 0.25;
+          lines.forEach((l, k) => {
+            if (lefts[k] == null || !l.classList.contains("rl")) return;
+            const lead = Math.max(0, texts[k].search(/\S/));
+            lefts[k] = charGridFit.x0 + lead * Math.max(0, charGridFit.unit - sp * sizes[k]);
+          });
+        }
       }
     }
     // Never on top of each other: a row the PDF (a scan's text layer, most
@@ -10733,12 +10769,12 @@ function applyMatchedLayoutNow() {
     // it — not by a whole line's box apiece, which pushed each one down a few
     // points into the next, and the numbers down the side with them.
     const clear = fixed ? sizes.map((h, k) => (isEmptyLine(lines[k]) ? 0 : h)) : room;
-    if (tops) tops = PS.spreadTops(tops, clear, fixed);
+    if (tops) tops = PS.spreadTops(tops, clear, fixed, spans);
     // …and nothing pushed past the foot of the paper: the page is the PDF
     // page's height, the same as the sheet beside it, and a line that would
     // run past it is brought back up (pdfsync.holdWithin). The page grows
     // only where its lines cannot all fit on it at all.
-    if (tops) tops = PS.holdWithin(tops, clear, sz.h);
+    if (tops) tops = PS.holdWithin(tops, clear, sz.h, spans);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
     // The scale is the sheet's, and the sheet is the paper: the write pass
@@ -10747,8 +10783,8 @@ function applyMatchedLayoutNow() {
     matchedSlots.add(slot);
     sec.__planFor = planKey;
     sec.__planLite = lite;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, firstY: info.lines[t.page - 1] };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, firstY: info.lines[t.page - 1], scale: 1 });
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, firstY: info.lines[t.page - 1] };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // Every slot the layout did not claim keeps the pane's own width, and gives
   // back whatever a grid before it levelled: its label's height, and the box
@@ -10807,6 +10843,18 @@ function applyMatchedLayoutNow() {
     const gridEm = p.tops && p.base > 0 ? (p.base * p.scale) + "px" : "";
     if (p.body.style.getPropertyValue("--grid-em") !== gridEm) {
       if (gridEm) p.body.style.setProperty("--grid-em", gridEm); else p.body.style.removeProperty("--grid-em");
+    }
+    // …and a page with no numbers, its lines set on the export's own grid
+    // where the PDF gave one (.cgrid, its character --grid-col), else each at
+    // its own row's left with the spaces it opens with taken back out of it
+    // (.rowleft): the row's left IS where its text begins, and the spaces
+    // drawn in front of it as well set every indented line in twice as far.
+    const onGrid = !!(p.tops && !p.geom && p.grid);
+    const gridCol = onGrid ? (p.grid.unit * p.scale) + "px" : "";
+    p.body.classList.toggle("cgrid", onGrid);
+    p.body.classList.toggle("rowleft", !!(p.tops && !p.geom && !p.grid));
+    if (p.body.style.getPropertyValue("--grid-col") !== gridCol) {
+      if (gridCol) p.body.style.setProperty("--grid-col", gridCol); else p.body.style.removeProperty("--grid-col");
     }
     // Only the lines that MOVE are written to. A pass over a seventy-page
     // complaint sets four properties on two thousand lines, and the passes
@@ -10867,6 +10915,34 @@ function applyMatchedLayoutNow() {
   }
   // The sheets take their page shape before anything reads their heights.
   shapePages();
+  // A COLUMN IS NOT PUSHED ON THE GRID. A piece of a line before a column
+  // (columns.js) is as wide as the export's grid gives it, and the reader's
+  // font is not the filing's: set at the PDF's own size it runs a little
+  // wider, and a left-hand half too wide for its cell pushed its line's
+  // right-hand half off the column the lines above and below it stand on.
+  // Beside the PDF the column is the point, so the piece is drawn narrower
+  // instead — squeezed across into its cell, the way an over-long line is
+  // below and the way pdf.js fits its own text to the page. Measured with
+  // every cell let out to its own width first, every cell read, then every
+  // one written; the reading page and its neighbours only.
+  const cells = [];
+  for (const p of plans) {
+    if (!p.tops || !near.has(Number(p.sec.dataset.index))) continue;
+    for (const c of p.body.querySelectorAll(".line > .lt > .cc")) cells.push({ c });
+  }
+  for (const x of cells) if (x.c.style.transform) { x.c.style.width = ""; x.c.style.transform = ""; x.c.style.transformOrigin = ""; }
+  for (const x of cells) {
+    const cs = getComputedStyle(x.c);
+    x.min = parseFloat(cs.minWidth) || 0;
+    x.pad = parseFloat(cs.paddingRight) || 0;
+    x.w = x.c.offsetWidth;
+  }
+  for (const x of cells) {
+    if (!(x.min > x.pad) || x.w <= x.min + 0.5) continue;
+    x.c.style.width = x.min + "px";
+    x.c.style.transform = `scaleX(${((x.min - x.pad) / (x.w - x.pad)).toFixed(4)})`;
+    x.c.style.transformOrigin = "0 0";
+  }
   // A LINE THAT RUNS OFF THE PAGE COMES BACK ONTO IT. The reader's font is not
   // the filing's, and the same characters set in it run a little wider than
   // the column the PDF gave them; past the sheet's edge they are gone, and the
@@ -11262,9 +11338,11 @@ function clearMatched(sec) {
   if (inner) inner.style.height = "";
   const body = sec.querySelector(".page-body");
   if (!body) return; // shed: there are no lines left to un-lay
-  body.classList.remove("fixed");
+  body.classList.remove("fixed", "cgrid", "rowleft");
   body.style.paddingTop = "";
   body.style.removeProperty("--grid-em");
+  body.style.removeProperty("--grid-col");
+  for (const c of body.querySelectorAll(".cc")) if (c.style.transform) { c.style.width = ""; c.style.transform = ""; c.style.transformOrigin = ""; }
   for (const l of body.querySelectorAll(":scope > .line.lead")) l.classList.remove("lead");
   sec.__lead = 0;
   for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }

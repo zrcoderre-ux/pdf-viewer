@@ -218,6 +218,21 @@ console.log("a row's own type: one tall glyph does not set the line's size or pl
     [["1 ORDER", 60, 24]]);
   check("a row of one item is that item's, whatever size it is", pdfRows([{ str: "x", x: 10, top: 20, w: 4, h: 30 }], null), [{ top: 20, left: 10, height: 30, text: "x" }]);
   check("no items, no rows", [pdfRows([], null), pdfRows(null, null)], [[], []]);
+  // A two-column page: the left-hand column's line and the right-hand one's
+  // beside it, three points apart and a gutter away — two rows, as the export
+  // writes them; a superscript up against its word, and a second column on the
+  // same baseline, stay in their row.
+  const cols = pdfRows([
+    { str: "United States District Court", x: 54, top: 100, w: 150, h: 9.5 },
+    { str: "Barbara Delo, a former costumer", x: 318, top: 103, w: 160, h: 9.5 },
+    { str: "Barbara DELO, Plaintiff,", x: 90, top: 112, w: 110, h: 9.5 },
+  ], null);
+  check("two columns on two baselines are two rows", cols.map((r) => [r.text, r.left]),
+    [["United States District Court", 54], ["Barbara Delo, a former costumer", 318], ["Barbara DELO, Plaintiff,", 90]]);
+  check("a superscript up against its word stays in the row",
+    pdfRows([{ str: "Id.", x: 54, top: 100, w: 12, h: 9.5 }, { str: "1", x: 66.5, top: 100.5, w: 3, h: 6 }], null).map((r) => r.text), ["Id. 1"]);
+  check("a second column on the same baseline stays in the row",
+    pdfRows([{ str: "JANE DOE,", x: 90, top: 300, w: 60, h: 12 }, { str: "Case No.: 25STCV12345", x: 330, top: 300, w: 120, h: 12 }], null).map((r) => r.text), ["JANE DOE, Case No.: 25STCV12345"]);
 }
 
 console.log("the type a page is set in: the PDF's own sizes at the reading size");
@@ -266,6 +281,19 @@ console.log("the type a page is set in: the PDF's own sizes at the reading size"
   check("a numbered line printed too close under the one above still keeps its number",
     spreadTops([0, 5, 24], 12, [true, true, true]), [0, 5, 24]);
   check("lines above the first number are held above it", spreadTops([20, 22, 24], 12, [false, false, true]), [0, 12, 24]);
+  // A two-column page: a left-hand line, the right-hand line three points
+  // under it, then the next of each.
+  const halves = [[0, 45], [60, 110], [0, 50], [60, 105]];
+  check("the two halves of a two-column page are never one line on top of the other",
+    spreadTops([0, 3, 12, 15], 11.4, null, halves), [0, 3, 12, 15]);
+  check("…where read as one column they pushed every line after them down",
+    spreadTops([0, 3, 12, 15], 11.4).map((y) => Math.round(y * 10) / 10), [0, 11.4, 22.8, 34.2]);
+  check("a line under both halves clears both", spreadTops([0, 3, 9], 11.4, null, [[0, 45], [60, 110], [0, 110]]), [0, 3, 14.4]);
+  check("a left-hand line a character or two into the right-hand column does not touch it",
+    spreadTops([0, 3], 11.4, null, [[0, 62], [60, 76]]), [0, 3]);
+  check("…but a short line under a long one does", spreadTops([0, 3], 11.4, null, [[17, 41], [27, 29]]), [0, 11.4]);
+  check("held on the paper, a half is held only above the lines it stands over",
+    holdWithin([0, 3, 12, 15], [11.4, 11.4, 11.4, 11.4], 100, halves), [0, 3, 12, 15]);
 }
 
 console.log("the PDFs the reading has reached");
