@@ -26,7 +26,8 @@ isolated viewer instance (its own zoom, highlights, OCR…) with no shared state
 | `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
 | `sw.js` | Service worker — **network-first** (auto-updates when online) with offline fallback. |
 | `build-site.sh` | Assembles the deployable site: this shell **+** the canonical `viewer/` and `pdfjs/` copied from the repo root. |
-| `icons/`, `gen-icons.py` | App icons (regenerate: `python3 gen-icons.py`). |
+| `icons/`, `gen-icons.py` | App icons (regenerate: `python3 gen-icons.py`): the sheet filling the square inside a narrow border, plus a maskable copy kept inside the safe zone for platforms that crop icons to a circle. A new drawing needs a new `?v=` on the icon URLs, since Chrome keeps an installed app's icon until the URLs change. |
+| `windows-file-icon.ps1`, `.cmd` | Windows only, run on your machine (not deployed): puts the app icon on the files PDF Viewer opens. See *File icons on Windows*. |
 
 **Single source of truth:** the viewer logic lives once, at the repo root. The
 only extension-file change is a small, guarded shim at the top of
@@ -56,6 +57,27 @@ python3 -m http.server 8100 --directory _site
 
 Open <http://localhost:8100/>, install from the address-bar icon, then
 "Open with → PDF Viewer" on any local PDF.
+
+## File icons on Windows
+
+With PDF Viewer set as the default app for PDFs, File Explorer still shows
+them as a blank white page with a folded corner. That is Chrome, not the
+manifest: when it registers an installed app's file types it leaves their
+file icon (`DefaultIcon`) empty, and it ignores the manifest's file-handler
+icons on Windows. The app's own icon is already on disk, in the `.ico` Chrome
+made for the Start menu shortcut.
+
+Double-click `pwa\windows-file-icon.cmd` in your copy of the repo. It points
+each file type PDF Viewer registered at that `.ico`, for your Windows user only
+(no administrator rights), and has Explorer redraw. Run it again if the blank
+page comes back: Chrome writes the registration afresh when it reinstalls the
+app or the app's file types change. When the app icon itself changes, the
+files follow on their own once the app takes the update, since they point at
+the `.ico` Chrome keeps current.
+
+Chrome does not swap an installed app's icon by itself when the new one looks
+different: the app window shows **App update available** beside its ⋮ menu,
+and **Review app update** → **Update** applies it.
 
 ## Deploying
 

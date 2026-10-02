@@ -1,60 +1,70 @@
 #!/usr/bin/env python3
 """Generate flat PWA icons with no external libraries.
 
-Draws a simple "document" glyph (white sheet with a folded corner and a red
-PDF band) on a dark slate background. Pure-Python PNG encoder — solid colors
-only, no text rendering. Emits maskable-safe icons (glyph kept within the
-inner 80% safe zone) at 192 and 512 px.
+Draws a simple "document" glyph (white sheet with a cut top-right corner and a
+red PDF band) on a dark slate background. Pure-Python PNG encoder — solid
+colors only, no text rendering; edges are smoothed by sampling each pixel on a
+grid.
+
+Two layouts:
+  icon-192.png, icon-512.png   the sheet fills the square, leaving a narrow
+                               slate border ("any" purpose: desktop, taskbar,
+                               the file icon set by windows-file-icon.ps1).
+  icon-maskable-512.png        the sheet kept inside the inner 80% safe zone,
+                               so a platform that crops icons to a circle or
+                               squircle does not cut the sheet off.
+
+After changing the drawing, bump the ?v= on the icon URLs in
+manifest.webmanifest, index.html and sw.js: Chrome keeps an installed app's
+icon until the manifest's icon URLs change.
 """
 import struct
 import zlib
 
-BG = (30, 41, 59)       # slate-800
+BG = (30, 41, 59)        # slate-800
 SHEET = (248, 250, 252)  # near-white
-FOLD = (203, 213, 225)   # slate-300 (folded corner shadow)
 BAND = (220, 38, 38)     # red-600 (the "PDF" band)
 
+SAMPLES = 4  # per axis: 16 samples per pixel
 
-def blend(dst, src, a):
-    return tuple(round(d + (s - d) * a) for d, s in zip(dst, src))
+# Sheet box as fractions of the icon: (left, top, right, bottom).
+FULL = (0.06, 0.06, 0.94, 0.94)          # narrow border
+SAFE = (0.24, 0.216, 0.76, 0.784)        # inside the maskable safe zone
 
 
-def render(size):
-    px = [[BG for _ in range(size)] for _ in range(size)]
+def color_at(x, y, box):
+    left, top, right, bottom = box
+    if not (left <= x <= right and top <= y <= bottom):
+        return BG
+    w, h = right - left, bottom - top
+    # Top-right corner cut away along a 45-degree line.
+    fold = w * 0.32
+    if (x - (right - fold)) > (y - top):
+        return BG
+    # Red PDF band across the lower part of the sheet.
+    band_top = top + h * 0.58
+    if band_top <= y <= band_top + h * 0.20 and left + w * 0.08 <= x <= right - w * 0.08:
+        return BAND
+    return SHEET
 
-    # Document sheet occupies the central safe zone.
-    m = size * 0.24            # outer margin
-    left, right = m, size - m
-    top, bottom = m * 0.9, size - m * 0.9
-    fold = (right - left) * 0.32   # folded-corner leg length
 
-    for y in range(size):
-        for x in range(size):
-            if not (left <= x <= right and top <= y <= bottom):
-                continue
-            # Folded top-right corner: the triangle x+y beyond the fold line
-            # is cut away (shows background), and a small inner triangle is the
-            # darker fold.
-            fold_line = (right - fold) + (y - top)
-            if x >= fold_line and y <= top + fold:
-                # distance into the corner decides fold vs cut
-                if x - (right - fold) <= (y - top):
-                    px[y][x] = FOLD
-                else:
-                    px[y][x] = BG
-                continue
-            px[y][x] = SHEET
-
-    # Red PDF band across the lower third of the sheet.
-    band_top = top + (bottom - top) * 0.58
-    band_bot = band_top + (bottom - top) * 0.20
-    bx0, bx1 = left + (right - left) * 0.08, right - (right - left) * 0.08
-    for y in range(size):
-        for x in range(size):
-            if band_top <= y <= band_bot and bx0 <= x <= bx1:
-                px[y][x] = BAND
-
-    return px
+def render(size, box):
+    px_box = tuple(v * size for v in box)
+    n = SAMPLES * SAMPLES
+    rows = []
+    for py in range(size):
+        row = []
+        for px in range(size):
+            acc = [0, 0, 0]
+            for sy in range(SAMPLES):
+                for sx in range(SAMPLES):
+                    c = color_at(px + (sx + 0.5) / SAMPLES, py + (sy + 0.5) / SAMPLES, px_box)
+                    acc[0] += c[0]
+                    acc[1] += c[1]
+                    acc[2] += c[2]
+            row.append(tuple(round(v / n) for v in acc))
+        rows.append(row)
+    return rows
 
 
 def write_png(path, px):
@@ -77,6 +87,10 @@ def write_png(path, px):
         f.write(sig + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b""))
 
 
-for s in (192, 512):
-    write_png(f"icons/icon-{s}.png", render(s))
-    print(f"wrote icons/icon-{s}.png")
+for name, size, box in (
+    ("icon-192.png", 192, FULL),
+    ("icon-512.png", 512, FULL),
+    ("icon-maskable-512.png", 512, SAFE),
+):
+    write_png(f"icons/{name}", render(size, box))
+    print(f"wrote icons/{name}")
