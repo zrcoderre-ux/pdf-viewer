@@ -5811,19 +5811,32 @@ if (thumbResizeEl) {
   thumbResizeEl.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     thumbResizeEl.setPointerCapture(e.pointerId);
-    const rightEdge = () => thumbnailPanelEl.getBoundingClientRect().right;
     const w0 = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--thumb-panel-width"));
-    const gap = rightEdge() - e.clientX - w0;
+    const gap = thumbnailPanelEl.getBoundingClientRect().right - e.clientX - w0;
     let w = null;
-    const onMove = (ev) => { w = setThumbPanelWidth(rightEdge() - ev.clientX - gap); };
+    // The capture outlives the panel being hidden mid-drag (Ctrl+L's
+    // presentation mode, or a second finger on the Pages button), and a hidden
+    // panel's box is all zeros. Measuring from that would shrink the panel to
+    // its 100px minimum and save it, so moves are skipped while it has no box.
+    const onMove = (ev) => {
+      const r = thumbnailPanelEl.getBoundingClientRect();
+      if (!r.width) return;
+      w = setThumbPanelWidth(r.right - ev.clientX - gap);
+    };
+    // Chrome can release at a point no pointermove reached, so the release is
+    // applied too, unless the pointer never left the grab point.
+    const onUp = (ev) => { if (w != null || ev.clientX !== e.clientX) onMove(ev); };
     // Losing the capture ends the drag on a release and on a cancelled pointer
     // alike, so no listener is left behind to resize the panel on a later hover.
+    // It fires after pointerup, so the release point is in w by then.
     const onEnd = () => {
       thumbResizeEl.removeEventListener("pointermove", onMove);
+      thumbResizeEl.removeEventListener("pointerup", onUp);
       thumbResizeEl.removeEventListener("lostpointercapture", onEnd);
       if (w != null) chrome.storage.local.set({ thumbPanelWidth: w });
     };
     thumbResizeEl.addEventListener("pointermove", onMove);
+    thumbResizeEl.addEventListener("pointerup", onUp);
     thumbResizeEl.addEventListener("lostpointercapture", onEnd);
   });
 }
