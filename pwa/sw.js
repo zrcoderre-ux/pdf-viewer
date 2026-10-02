@@ -3,7 +3,11 @@
 // Strategy: NETWORK-FIRST for same-origin GETs. When online, every asset
 // (index.html, viewer modules, pdf.js, tesseract, icons) is fetched fresh and
 // a copy is stashed in the cache. So an installed app picks up new deploys the
-// next time it's opened with a connection — no reinstall needed. When offline,
+// next time it's opened with a connection — no reinstall needed. FRESH means
+// asked of the site every time (`cache: "no-cache"`: an unchanged file comes
+// back as a bodiless 304): GitHub Pages lets a browser keep its files for ten
+// minutes, and a manifest kept that long had Chrome install and update the
+// app with the icons of the deploy before. When offline,
 // requests fall back to whatever was cached during previous online use, and
 // navigations fall back to the cached shell.
 //
@@ -16,7 +20,7 @@ const CACHE = "pdf-viewer-v2";
 const CORE = [
   "./",
   "./index.html",
-  "./manifest.webmanifest",
+  "./manifest.webmanifest?v=4",
   "./app-web.js",
   "./app-web.css",
   "./icons/icon-192.png?v=4",
@@ -46,7 +50,7 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return; // never touch cross-origin (e.g. user PDFs)
 
   event.respondWith(
-    fetch(request)
+    fetch(request, { cache: "no-cache" })
       .then((resp) => {
         // Cache a fresh copy of successful, cacheable responses.
         if (resp && resp.ok && (resp.type === "basic" || resp.type === "default")) {

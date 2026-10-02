@@ -26,7 +26,7 @@ isolated viewer instance (its own zoom, highlights, OCR…) with no shared state
 | `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
 | `sw.js` | Service worker — **network-first** (auto-updates when online) with offline fallback. |
 | `build-site.sh` | Assembles the deployable site: this shell **+** the canonical `viewer/` and `pdfjs/` copied from the repo root. |
-| `icons/`, `gen-icons.py` | App icons (regenerate: `python3 gen-icons.py`): a page-shaped sheet inside a narrow border, plus a maskable copy kept inside the safe zone for platforms that crop icons to a circle. A new drawing needs a new `?v=` on the icon URLs, since Chrome keeps an installed app's icon until the URLs change. |
+| `icons/`, `gen-icons.py` | App icons (regenerate: `python3 gen-icons.py`): a page-shaped sheet inside a narrow border, plus a maskable copy kept inside the safe zone for platforms that crop icons to a circle. A new drawing needs a new `?v=` on the icon URLs and on the manifest's own URL, since Chrome keeps an installed app's icon until the URLs change. |
 | `windows-file-icon.ps1`, `.cmd` | Windows only, run on your machine (not deployed): puts the app icon on the files PDF Viewer opens. See *File icons on Windows*. |
 
 **Single source of truth:** the viewer logic lives once, at the repo root. The
@@ -44,7 +44,12 @@ arbitrary *cross-origin* PDFs by URL remains the extension's job.)
 The service worker is network-first: whenever the installed app is opened
 **online**, it fetches the latest deployed assets and refreshes its cache, so
 improvements show up on the next launch — no reinstall or re-download. Offline,
-it serves the last-cached version.
+it serves the last-cached version. "Latest" means asked of the site every
+time (`cache: "no-cache"`; an unchanged file comes back as a bodiless 304):
+GitHub Pages lets a browser keep its files for ten minutes, and a manifest kept
+that long had Chrome install, or check for an update, with the icons of the
+deploy before. An app still running an older service worker takes the new one
+on its first launch after a deploy and sees the new files from the next.
 
 ## Build & run locally
 

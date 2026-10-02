@@ -16,8 +16,10 @@ Two layouts:
                                squircle does not cut the sheet off.
 
 After changing the drawing, bump the ?v= on the icon URLs in
-manifest.webmanifest, index.html and sw.js: Chrome keeps an installed app's
-icon until the manifest's icon URLs change.
+manifest.webmanifest, index.html and sw.js, and on the manifest's own URL in
+index.html and sw.js: Chrome keeps an installed app's icon until the
+manifest's icon URLs change, and a manifest at a new URL is never one a
+browser kept from before.
 """
 import struct
 import zlib
