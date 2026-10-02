@@ -6,8 +6,8 @@ Beyond reading, it covers the everyday work of Adobe Acrobat Pro — comments
 and markup, signatures, form filling, text edits, page organizing,
 redaction, password protection, Bates numbering, compression, comparison
 and export to Word. The Chrome extension opens PDFs from the web in the
-viewer; the web app (`pwa/`) opens files from disk in tabs and saves back to
-the same file.
+viewer; the web app (`pwa/`) opens files from disk in tabs, in as many
+windows as you like, and saves back to the same file.
 
 Nothing is written into a PDF until you save, and citation links are never
 written into it — they are overlays, drawn fresh each time.

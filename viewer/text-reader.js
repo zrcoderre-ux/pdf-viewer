@@ -112,6 +112,7 @@ const SPOTS_PREFIX = "textReader.spots.";
 let doc = null;              // TD.parseExport result
 let fileName = "";
 let fileHandle = null;       // FileSystemFileHandle for in-place save
+let openedFile = null;       // the File the open document was read from (__textReaderSource)
 let dirHandle = null;        // the case folder, when one was opened
 let folderName = "";
 let folderDocs = [];         // [{ name, handle, quarantined }]
@@ -1576,6 +1577,7 @@ async function openFile(file, handle) {
 async function openFileNow(file, handle) {
   if (!file) return;
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
+  openedFile = file;
   hideKeyOffer();
   // The case folder first, so the document renders under its own key — and so
   // a document built ahead of time is judged against the key it will open under.
@@ -13005,6 +13007,14 @@ window.__textReaderLoadLocal = async (file, handle, dir) => {
   return openFile(file, handle);
 };
 window.__textReaderRememberDir = (h) => rememberDir(h);
+// What a tab would lose if it went: the shell asks before closing one, and
+// moves one to a window of its own only with nothing unsaved. The flagged
+// values are not in it — they are kept in storage, whatever happens.
+window.__textReaderHasUnsaved = () => dirty || leaksDirty();
+// …and what to open in that new window: the document on screen (which may be
+// one this reader opened itself, from Documents or its own picker), its file
+// and the case folder it came from.
+window.__textReaderSource = () => ({ file: openedFile && openedFile.name === fileName ? openedFile : null, handle: fileHandle, dir: dirHandle });
 window.__textReaderReflow = () => { if (doc) placeCitations(); };
 window.__pdfViewerUnregister = () => {};
 // For the smoke test: the geometry the side-by-side sync reads.

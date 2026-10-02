@@ -6,8 +6,9 @@
 // fully isolated viewer instances; closing one tears its iframe down.
 //
 // Entry points that create tabs: the + button, the empty-state drop zone,
-// drag-and-drop, and the OS file handler (launchQueue). The app is for files
-// you open from disk; viewing web PDFs is the browser extension's job.
+// drag-and-drop, the OS file handler (launchQueue), and another window of the
+// app handing a tab over (see "Separate windows"). The app is for files you
+// open from disk; viewing web PDFs is the browser extension's job.
 
 import { icon, hydrateIcons } from "./viewer/icons.js";
 
@@ -130,7 +131,10 @@ function syncShellTitle() {
 }
 
 function tabHasUnsaved(tab) {
-  try { return !!tab.iframe.contentWindow?.__pdfViewerHasUnsaved?.(); } catch { return false; }
+  try {
+    const w = tab.iframe.contentWindow;
+    return !!(tab.text ? w?.__textReaderHasUnsaved?.() : w?.__pdfViewerHasUnsaved?.());
+  } catch { return false; }
 }
 
 function closeTab(id) {
@@ -173,6 +177,7 @@ function makeTabButton(id, initialLabel, text = false) {
   // A middle click closes a tab, as in a browser.
   btn.addEventListener("auxclick", (e) => { if (e.button === 1) { e.preventDefault(); closeTab(id); } });
   btn.addEventListener("pointerdown", (e) => dragTab(e, btn, id));
+  btn.addEventListener("contextmenu", (e) => showTabMenu(e, id));
   tabsEl.appendChild(btn);
   return { btn, labelEl };
 }
@@ -189,15 +194,23 @@ function makeTabButton(id, initialLabel, text = false) {
 // selects the tab as it starts, as a browser's does (Chrome sends no click
 // for a press released somewhere else). Held near either end of a strip too
 // long to show, the strip scrolls.
+//
+// Pulled up or down out of the strip, the tab comes away from it, as a
+// browser's does: the others close up, a card with its name follows the
+// pointer, and letting go there opens it in a window of its own at that spot
+// (moveTabToWindow). Brought back to the strip, it is a reorder again. A lone
+// tab stays put: its window is already its own.
 const DRAG_SLOP = 4;  // px the pointer moves before a press is a drag
 const EDGE_ZONE = 32; // px in from either end of the strip that scroll it
+const TEAR_OFF = 30;  // px above or below the strip that pull a tab out of it
 
 function dragTab(e, btn, id) {
   if (e.button !== 0 || e.target.closest(".tab-close")) return;
-  const x0 = e.clientX;
+  const x0 = e.clientX, y0 = e.clientY;
   let lastX = x0;
   let drag = null; // set once the press has moved past DRAG_SLOP
   let raf = 0;
+  let ghost = null; // the card that follows the pointer while the tab is out of the strip
   btn.setPointerCapture(e.pointerId);
 
   const begin = () => {
@@ -208,7 +221,11 @@ function dragTab(e, btn, id) {
     const slots = els.map((el) => { const r = el.getBoundingClientRect(); return { left: r.left + sl, width: r.width }; });
     const from = els.indexOf(btn);
     const gap = parseFloat(getComputedStyle(tabsEl).columnGap) || 0;
-    drag = { els, slots, from, to: from, step: slots[from].width + gap, grab: x0 + sl - slots[from].left };
+    const strip = document.getElementById("tabstrip").getBoundingClientRect();
+    drag = {
+      els, slots, from, to: from, step: slots[from].width + gap, grab: x0 + sl - slots[from].left,
+      top: strip.top - TEAR_OFF, bottom: strip.bottom + TEAR_OFF, canTear: tabs.length > 1, tear: false,
+    };
     tabsEl.classList.add("reordering");
     btn.classList.add("dragging");
     if (activeId !== id || homeOpen) activate(id);
@@ -231,9 +248,22 @@ function dragTab(e, btn, id) {
       el.style.transform = shift ? `translateX(${shift}px)` : "";
     });
   };
+  // Out of the strip or back into it.
+  const tear = (on) => {
+    drag.tear = on;
+    btn.classList.toggle("tearing", on);
+    if (on) {
+      for (const el of drag.els) if (el !== btn) el.style.transform = "";
+      btn.style.transform = "";
+      ghost = tabGhost(btn);
+    } else {
+      ghost.remove();
+      ghost = null;
+    }
+  };
   const edgeScroll = () => {
     raf = 0;
-    if (!drag) return;
+    if (!drag || drag.tear) return;
     const r = tabsEl.getBoundingClientRect();
     const over = lastX < r.left + EDGE_ZONE ? lastX - (r.left + EDGE_ZONE)
       : lastX > r.right - EDGE_ZONE ? lastX - (r.right - EDGE_ZONE) : 0;
@@ -247,8 +277,14 @@ function dragTab(e, btn, id) {
   const onMove = (ev) => {
     lastX = ev.clientX;
     if (!drag) {
-      if (Math.abs(lastX - x0) < DRAG_SLOP) return;
+      if (Math.hypot(lastX - x0, ev.clientY - y0) < DRAG_SLOP) return;
       begin();
+    }
+    const out = drag.canTear && (ev.clientY < drag.top || ev.clientY > drag.bottom);
+    if (out !== drag.tear) tear(out);
+    if (drag.tear) {
+      ghost.style.transform = `translate(${ev.clientX - drag.grab}px, ${ev.clientY - 17}px)`;
+      return;
     }
     place();
     if (!raf) raf = requestAnimationFrame(edgeScroll);
@@ -259,6 +295,17 @@ function dragTab(e, btn, id) {
     btn.removeEventListener("pointercancel", finish);
     if (raf) cancelAnimationFrame(raf);
     if (!drag) return;
+    if (drag.tear) {
+      const { els, grab } = drag;
+      drag = null;
+      ghost.remove();
+      ghost = null;
+      tabsEl.classList.remove("reordering");
+      btn.classList.remove("dragging", "tearing");
+      for (const el of els) el.style.transform = "";
+      if (ev.type !== "pointercancel") moveTabToWindow(id, tornWindowAt(ev, grab));
+      return;
+    }
     const { els, from } = drag;
     const to = ev.type === "pointercancel" ? from : drag.to;
     drag = null;
@@ -289,14 +336,19 @@ function dragTab(e, btn, id) {
 // Create a tab and feed its PDF to the viewer as soon as the viewer is ready —
 // even while the tab is hidden — so every open PDF resolves its real name (and
 // download filename) automatically, without waiting to be clicked.
-function newTab({ initialLabel, file, handle, text, dir, focus = true }) {
+function newTab({ initialLabel, file, handle, text, dir, page = 0, focus = true }) {
   const id = ++seq;
   const iframe = document.createElement("iframe");
   iframe.className = "tab-view";
   iframe.src = text ? READER_SRC : VIEWER_SRC;
+  // Ctrl+N is the app's wherever the keyboard is, and it is mostly in a tab.
+  iframe.addEventListener("load", () => {
+    try { iframe.contentWindow.addEventListener("keydown", newWindowKey, true); } catch { /* not ours */ }
+  });
   viewsEl.appendChild(iframe);
   const { btn, labelEl } = makeTabButton(id, initialLabel || "Loading…", !!text);
-  const tab = { id, iframe, btn, labelEl, file, handle, text: !!text, dir: dir || null, fed: false, reflowed: false };
+  // `page`: where the reader was, for a PDF brought over from another window.
+  const tab = { id, iframe, btn, labelEl, file, handle, text: !!text, dir: dir || null, page, fed: false, reflowed: false };
   tabs.push(tab);
   feedWhenReady(tab);
   if (focus) activate(id);
@@ -315,7 +367,10 @@ function feedWhenReady(tab) {
     if (activeId === tab.id) tab.reflowed = true; // rendered while visible
     // The case folder goes with the document where the tab came from one: the
     // reader remembers it and attaches its key by itself.
-    load(tab.file, tab.handle, tab.dir || undefined);
+    const opened = load(tab.file, tab.handle, tab.dir || undefined);
+    if (tab.page > 1 && !tab.text) {
+      Promise.resolve(opened).then(() => { try { w.__pdfViewerGoToPage?.(tab.page); } catch { /* gone */ } });
+    }
     watchTitle(tab);
   } else {
     setTimeout(() => feedWhenReady(tab), 30);
@@ -456,6 +511,240 @@ if ("launchQueue" in window) {
     for (const handle of params.files) openLocalFile(await handle.getFile(), handle);
   });
 }
+
+// ---- Separate windows ------------------------------------------------------
+//
+// New window (the strip's button, Ctrl+N) opens another window of the app at
+// Home; Move to new window (a tab's right-click menu, or pulling the tab out
+// of the strip) takes a document there. Each window is this same shell with
+// its own tabs, so nothing else in the app needs to know there are several.
+//
+// HOW THE WINDOW IS OPENED. window.open with popup features, and never
+// noopener. From an installed app's window Chrome opens a popup as a window
+// of the app (an "app popup": the app's frame, no browser chrome), and takes
+// the features' size and place, which is what puts a torn-off tab where it
+// was let go of. A noopener open is worse than no window: with the manifest's
+// launch_handler `focus-existing`, Chrome's navigation capturing treats an
+// in-scope open with no opener as a launch of the app, focuses the window
+// already open and queues the URL to its launchQueue, so no window appears at
+// all. In a browser tab (the site, not installed) the same call opens a popup
+// window.
+//
+// HOW A DOCUMENT GETS THERE. A tab's iframe cannot be moved between windows
+// (adopting it into another document reloads it), so a move opens the
+// document again in the new window and then closes the tab here. The new
+// window is opened with ?window=<token>, says hello to its opener with the
+// token, and is posted the documents: File, file handle and case-folder
+// handle all survive postMessage, cloned into the new window's own realm (an
+// object handed across directly would die with this window). It answers
+// "took" once its tabs are up, and only then does the tab close here; a
+// window that never answers leaves the tab where it was.
+//
+// WHAT IS OPENED is the document as it stands on disk: the file the tab saves
+// to (after a Save As, not the one it was opened from), read afresh here
+// before it goes, so the new window shows what was on screen. That is why a
+// tab with unsaved changes is not moved (the toast says to save it first),
+// and why a password-protected PDF asks for its password again there. A PDF
+// opens at the page it was on.
+const WINDOW_PARAM = "window";
+const handoffs = new Map(); // token → { items: Promise<item[]>, ids, timer }
+const HANDOFF_WAIT = 30000; // ms a window has to take its documents before the tab is put back
+
+function newWindowKey(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || (e.key !== "n" && e.key !== "N")) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openWindow();
+}
+
+/** Open another window of the app, the size of this one. `items`, a promise
+ *  of documents, makes it a move; `at` is its top left corner on the screen
+ *  (a step down and right of this window, as a browser cascades its own). */
+function openWindow({ items = null, at = null } = {}) {
+  const url = new URL("index.html", location.href);
+  let token = null;
+  if (items) {
+    token = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    url.searchParams.set(WINDOW_PARAM, token);
+  }
+  const left = Math.round(at ? at.x : window.screenX + 32);
+  const top = Math.round(at ? at.y : window.screenY + 32);
+  const win = window.open(url.href, "_blank", `popup,width=${window.innerWidth},height=${window.innerHeight},left=${left},top=${top}`);
+  if (!win) {
+    shellToast("The new window was blocked. Allow pop-ups for this app, then try again.", 6000);
+    return null;
+  }
+  if (token) handoffs.set(token, { items, ids: [], timer: 0 });
+  return token;
+}
+
+/** Move a tab into a window of its own. */
+function moveTabToWindow(id, at = null) {
+  const tab = tabs.find((t) => t.id === id);
+  if (!tab || tabs.length < 2) return;
+  if (tabHasUnsaved(tab)) {
+    activate(id);
+    shellToast(`Save “${tab.labelEl.textContent}” first: a document moves to its new window as it is on disk.`, 6000);
+    return;
+  }
+  // The window opens now, while the click or the drop still counts as one
+  // (Chrome blocks a window opened later); the document follows it. A file
+  // that cannot be read is reported when the window asks for it.
+  const items = tabItem(tab).then((item) => [item]);
+  items.catch(() => {});
+  const token = openWindow({ items, at });
+  if (!token) return;
+  const h = handoffs.get(token);
+  h.ids = [id];
+  tab.btn.classList.add("moving");
+  h.timer = setTimeout(() => handoffFailed(token, "the new window did not open it"), HANDOFF_WAIT);
+}
+
+/** What a new window needs to open this tab's document as it is now. */
+async function tabItem(tab) {
+  let src = null;
+  try {
+    const w = tab.iframe.contentWindow;
+    src = (tab.text ? w.__textReaderSource : w.__pdfViewerSource)?.() || null;
+  } catch { src = null; }
+  const handle = src ? src.handle || null : tab.handle || null;
+  // Read here: this window holds the permission to, and the file on disk is
+  // what the tab shows when nothing is unsaved.
+  const file = handle ? await handle.getFile() : (src && src.file) || tab.file;
+  return {
+    file,
+    handle,
+    text: tab.text,
+    dir: src ? src.dir || null : tab.dir,
+    page: (src && src.page) || 0,
+    label: tab.labelEl.textContent,
+  };
+}
+
+function handoffFailed(token, why) {
+  const h = handoffs.get(token);
+  if (!h) return;
+  clearTimeout(h.timer);
+  handoffs.delete(token);
+  for (const id of h.ids) {
+    const t = tabs.find((x) => x.id === id);
+    if (!t) continue;
+    t.btn.classList.remove("moving");
+    shellToast(`“${t.labelEl.textContent}” stays here: ${why}.`, 6000);
+  }
+}
+
+/** Where a torn-off tab's window goes: with the tab under the pointer, as if
+ *  it had been carried there. `grab` is where along the tab it was held. */
+function tornWindowAt(ev, grab) {
+  const side = Math.max(0, (window.outerWidth - window.innerWidth) / 2);
+  const titleBar = Math.max(0, window.outerHeight - window.innerHeight - side);
+  const firstTab = homeTab.getBoundingClientRect().right + 2; // where the tab will sit in the new strip
+  return { x: ev.screenX - side - firstTab - grab, y: ev.screenY - titleBar - 20 };
+}
+
+/** The card that follows a tab pulled out of the strip. */
+function tabGhost(btn) {
+  const g = document.createElement("div");
+  g.className = "tab-ghost";
+  const t = btn.cloneNode(true);
+  t.classList.remove("dragging", "tearing", "settling", "moving");
+  t.classList.add("active");
+  t.style.transform = "";
+  t.querySelector(".tab-close")?.remove();
+  const hint = document.createElement("div");
+  hint.className = "tab-ghost-hint";
+  hint.innerHTML = `${icon("window-plus", { size: 14 })}<span>Drop to open in a new window</span>`;
+  g.append(t, hint);
+  document.body.appendChild(g);
+  return g;
+}
+
+// The window that opened this one hands its documents over.
+window.addEventListener("message", async (e) => {
+  if (e.origin !== location.origin || !e.data || !handoffs.has(e.data.token)) return;
+  const { type, token } = e.data;
+  const h = handoffs.get(token);
+  if (type === "pdfviewer:hello") {
+    let items;
+    try { items = await h.items; }
+    catch (err) {
+      handoffFailed(token, `it could not be read (${err.message || err})`);
+      try { e.source.postMessage({ type: "pdfviewer:items", token, items: [] }, location.origin); } catch { /* closed */ }
+      return;
+    }
+    try { e.source.postMessage({ type: "pdfviewer:items", token, items }, location.origin); }
+    catch (err) {
+      handoffFailed(token, `it could not be handed over (${err.message || err})`);
+      try { e.source.postMessage({ type: "pdfviewer:items", token, items: [] }, location.origin); } catch { /* closed */ }
+    }
+  } else if (type === "pdfviewer:took") {
+    clearTimeout(h.timer);
+    handoffs.delete(token);
+    // Nothing was unsaved when it left; closeTab asks only if something has
+    // been typed into it since.
+    for (const id of h.ids) closeTab(id);
+  }
+});
+
+// This window was opened to take documents from another one.
+const arrival = new URLSearchParams(location.search).get(WINDOW_PARAM);
+if (arrival) {
+  // A reload is a fresh window at Home, not a second helping of the documents.
+  history.replaceState(null, "", location.pathname + location.hash);
+  const from = window.opener;
+  if (from) {
+    window.addEventListener("message", (e) => {
+      if (e.origin !== location.origin || e.source !== from || !e.data) return;
+      if (e.data.type !== "pdfviewer:items" || e.data.token !== arrival) return;
+      const items = e.data.items || [];
+      // Nothing came: the window it came from says why. An empty window
+      // left behind would be one more to close.
+      if (!items.length) { window.close(); return; }
+      items.forEach((it, i) => newTab({
+        initialLabel: it.label || (it.file && it.file.name), file: it.file, handle: it.handle,
+        text: it.text, dir: it.dir, page: it.page, focus: i === 0,
+      }));
+      from.postMessage({ type: "pdfviewer:took", token: arrival }, location.origin);
+    });
+    from.postMessage({ type: "pdfviewer:hello", token: arrival }, location.origin);
+  }
+}
+
+document.getElementById("new-window")?.addEventListener("click", () => openWindow());
+
+// A tab's right-click menu.
+const tabMenu = document.createElement("div");
+tabMenu.className = "shell-menu";
+tabMenu.setAttribute("role", "menu");
+tabMenu.hidden = true;
+tabMenu.innerHTML = `<button role="menuitem" data-act="window">${icon("window-plus", { size: 16 })}<span>Move to new window</span></button>`
+  + `<button role="menuitem" data-act="close">${icon("x", { size: 16 })}<span>Close tab</span></button>`;
+document.body.appendChild(tabMenu);
+let menuTab = null;
+function showTabMenu(e, id) {
+  e.preventDefault();
+  menuTab = id;
+  // A lone tab is in a window of its own already.
+  tabMenu.querySelector('[data-act="window"]').disabled = tabs.length < 2;
+  tabMenu.hidden = false;
+  const r = tabMenu.getBoundingClientRect();
+  tabMenu.style.left = `${Math.max(4, Math.min(e.clientX, window.innerWidth - r.width - 4))}px`;
+  tabMenu.style.top = `${Math.max(4, Math.min(e.clientY, window.innerHeight - r.height - 4))}px`;
+}
+function hideTabMenu() { tabMenu.hidden = true; menuTab = null; }
+tabMenu.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (!b || b.disabled) return;
+  const id = menuTab;
+  hideTabMenu();
+  if (b.dataset.act === "window") moveTabToWindow(id);
+  else closeTab(id);
+});
+document.addEventListener("pointerdown", (e) => { if (!tabMenu.hidden && !tabMenu.contains(e.target)) hideTabMenu(); }, true);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !tabMenu.hidden) hideTabMenu(); });
+window.addEventListener("blur", hideTabMenu); // a click into a document goes to its frame, not here
+window.addEventListener("resize", hideTabMenu);
 
 // ---- Home: combine, create, recent ----------------------------------------
 
@@ -629,6 +918,7 @@ window.addEventListener("beforeunload", (e) => {
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "o" || e.key === "O")) { e.preventDefault(); pickFiles(); }
 });
+document.addEventListener("keydown", newWindowKey);
 
 hydrateIcons();
 updateChrome();

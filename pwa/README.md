@@ -21,7 +21,7 @@ isolated viewer instance (its own zoom, highlights, OCR…) with no shared state
 | File | Purpose |
 |------|---------|
 | `index.html` | Tab-manager shell: a tab strip (with a Home tab) + iframe stage + the Home screen (Open, Open case folder, Combine files, Images to PDF, recent files). Hosts no viewer markup itself. |
-| `app-web.js` | Tab manager: opens PDFs in new tabs (+ button, drag-drop, OS file handler, or a routed `?file=` URL), switches/closes tabs, reorders them (drag a tab along the strip: the others slide aside, and the strip scrolls when a tab is held at either end), syncs tab titles, registers the service worker. Local files reach a tab's viewer via `iframe.contentWindow.__pdfViewerLoadLocal`; tabs load lazily the first time they're shown so overlays get correct geometry. The active tab's iframe takes keyboard focus, so the viewer's shortcuts (auto-scroll's A / Space / [ / ], Shift+Space) work without clicking into the page. |
+| `app-web.js` | Tab manager: opens PDFs in new tabs (+ button, drag-drop, OS file handler, or a routed `?file=` URL), switches/closes tabs, reorders them (drag a tab along the strip: the others slide aside, and the strip scrolls when a tab is held at either end), opens new windows and moves tabs between them (see *Separate windows*), syncs tab titles, registers the service worker. Local files reach a tab's viewer via `iframe.contentWindow.__pdfViewerLoadLocal`; tabs load lazily the first time they're shown so overlays get correct geometry. The active tab's iframe takes keyboard focus, so the viewer's shortcuts (auto-scroll's A / Space / [ / ], Shift+Space) work without clicking into the page. |
 | `app-web.css` | Styles the tab strip, iframe stage and Home screen, in the viewer's dark and light themes. |
 | `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
 | `sw.js` | Service worker — **network-first** (auto-updates when online) with offline fallback. |
@@ -124,6 +124,29 @@ anywhere in the app.
 
 In the extension, a web PDF can be edited too: **Save as…** saves a copy with
 the changes, and later saves go to that copy.
+
+## Separate windows
+
+The app opens as many windows as you want, each with its own tabs:
+
+- **New window** — the window button at the right end of the tab strip, or
+  Ctrl N (⌘ N on a Mac). It opens at Home, the size of the window you are in.
+- **Move a document to its own window** — pull its tab down out of the strip
+  and let go where you want the window (the tab's card says *Drop to open in
+  a new window*; bring it back over the strip to just reorder), or right-click
+  the tab → **Move to new window**. A window's only tab stays where it is.
+
+A tab cannot be carried between windows as it is, so a move opens the document
+again in the new window, from the file on disk, and closes the tab here once
+it has. That has three consequences: a document with unsaved changes is not
+moved (save it first; the app says so), a password-protected PDF asks for its
+password again, and a PDF opens at the page it was on. A text export takes its
+case folder with it, so the key, PDFs and LEAKS worksheet attach as before.
+Save in the new window writes to the same file.
+
+How it is done (`window.open` as a popup, the handoff by `postMessage`, and why
+a `noopener` window would never appear) is explained at the top of the
+*Separate windows* section of `app-web.js`.
 
 ## Notes / limitations
 

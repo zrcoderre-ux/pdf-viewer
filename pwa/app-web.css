@@ -129,6 +129,62 @@ i[data-icon] { display: inline-flex; font-style: normal; }
 }
 .tab.settling { transition: transform 0.15s ease; }
 .tab-close:hover { background: var(--c-tab-hover); color: var(--c-text); }
+/* Pulled out of the strip: its place stays, faint, while a card with its name
+   follows the pointer; going to another window, it stays faint until it has. */
+#tabs.reordering .tab.dragging.tearing, .tab.moving { opacity: 0.4; }
+.tab.moving { pointer-events: none; }
+.tab-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  width: 240px;
+  pointer-events: none;
+  border: 1px solid var(--c-border-strong);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--c-page);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+}
+.tab-ghost .tab { max-width: none; border-radius: 0; box-shadow: none; }
+.tab-ghost .tab::after { display: none; }
+.tab-ghost-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--c-border);
+  color: var(--c-text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* A tab's right-click menu. */
+.shell-menu {
+  position: fixed;
+  z-index: 70;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--c-border-strong);
+  border-radius: 10px;
+  background: var(--c-card);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+}
+.shell-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.shell-menu button:hover:not(:disabled), .shell-menu button:focus-visible { background: var(--c-tab-hover); }
+.shell-menu button:disabled { color: var(--c-text-3); cursor: default; }
+.shell-menu .icon { color: var(--c-text-2); }
 
 .strip-btn {
   flex: none;
