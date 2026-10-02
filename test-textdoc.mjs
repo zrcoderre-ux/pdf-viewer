@@ -18,6 +18,7 @@ import {
   columnCuts, columnStops, columnWidths, lineIndent, hasFirmColumn, COLUMN_GAP,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
+  textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher } from "./viewer/pseudo-key.js";
 
@@ -314,7 +315,7 @@ check("keptControl", [keptControl(keeps, "PALERMO"), keptControl(keeps, "x")], [
 check("removeKeep", removeKeep(keeps, "palermo"), [{ control: "never", value: "Stockton Theatres" }]);
 const both = formatValuesFile(list, keeps);
 check("keeps written as control lines", both.endsWith("\nno: Palermo\nnever: Stockton Theatres\n"), true);
-check("both halves read back", parseReaderFile(both), { values: list, keeps, phrases: [], noOcr: [], ocrAgain: [] });
+check("both halves read back", parseReaderFile(both), { values: list, keeps, phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
 check("parseValuesFile ignores the keeps", parseValuesFile(both), list);
 // ── a keep that asks nothing of PDF-Linker ─────────────────────────────────
 //
@@ -386,7 +387,7 @@ check("a phrase is written with its control word, a plain flag bare",
   ["phrase: Cross River Bank", "Rosa Delgado", "no: Semole"]);
 check("…and read back as a value to fake that goes whole",
   parseReaderFile("# c\nphrase:  Cross River Bank \nRosa Delgado\nno: Semole\n"),
-  { values: ["Cross River Bank", "Rosa Delgado"], keeps: [{ control: "no", value: "Semole" }], phrases: ["Cross River Bank"], noOcr: [], ocrAgain: [] });
+  { values: ["Cross River Bank", "Rosa Delgado"], keeps: [{ control: "no", value: "Semole" }], phrases: ["Cross River Bank"], noOcr: [], ocrAgain: [], textFixed: [] });
 check("the round trip holds", (() => {
   const t = formatValuesFile(["Bank of America", "Helen Rasho"], [], ["Bank of America"]);
   const r = parseReaderFile(t);
@@ -610,7 +611,7 @@ console.log("did not OCR, handed to PDF-Linker");
   check("…and written again the same", formatValuesFile(back.values, back.keeps, back.phrases, back.noOcr), file);
   check("a line PDF-Linker would write back reads too",
     parseReaderFile("DID NOT OCR:  Exhibits.pdf  |  p. 9\n").noOcr, [{ doc: "Exhibits.pdf", pdf: "", page: 9 }]);
-  check("an unreadable one is still no value", parseReaderFile("did not ocr: Exhibits page nine\n"), { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [] });
+  check("an unreadable one is still no value", parseReaderFile("did not ocr: Exhibits page nine\n"), { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
   check("NOOCR_RE takes the pipe form", NOOCR_RE.test("did not ocr: A.pdf | page 2"), true);
   check("a stripped page reads Did not OCR", readsDidNotOcr(didNotOcrLines([" 1  soup"])), true);
   check("…the trailer aside", readsDidNotOcr(["[DID NOT OCR]", "", "====== Authorities cited (public verification links) ======", "x"]), true);
@@ -646,11 +647,58 @@ console.log("OCR this page again");
     parseReaderFile("OCR this page again: Exhibits.pdf | p. 9\nocr-again:  B.pdf  |  page 3\n").ocrAgain,
     [{ doc: "Exhibits.pdf", pdf: "", page: 9 }, { doc: "B.pdf", pdf: "", page: 3 }]);
   check("an unreadable one is still no value", parseReaderFile("ocr again: Exhibits page nine\n"),
-    { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [] });
+    { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
   check("OCRAGAIN_RE takes the pipe form", OCRAGAIN_RE.test("ocr again: A.pdf | page 2"), true);
   check("…and is not a did-not-ocr line", NOOCR_RE.test("ocr again: A.pdf | page 2"), false);
   check("a file with neither list writes neither", formatValuesFile(["X Y"], [], [], [], []).includes("ocr again: "), false);
   check("the header says what the line does", formatValuesFile([], [], [], [], []).includes("'ocr again:"), true);
+}
+
+// ✎ Use my text hands a page TRANSCRIBED by hand to PDF-Linker as `text
+// corrected: FILE | page N | sum …`; PDF-Linker writes the page's text, as
+// saved, into the PDF as its text layer, and applies the line only where the
+// export's page still reads as the sum says.
+console.log("a page transcribed by hand");
+{
+  // PDF-Linker's _pn_page_text_sum pins the same three values
+  // (tests/test_text_corrected_page.py): the two sides must never disagree.
+  check("the sum is PDF-Linker's", pageTextSum(["The lease was signed."]), "46d66a09");
+  check("…for an empty page", pageTextSum([]), "811c9dc5");
+  check("…and past ASCII", pageTextSum(["Rent: $900 — paid"]), "a1d0b975");
+  check("blank lines at the ends and trailing blanks do not count",
+    pageTextSum(["", "  The lease was signed.  ", "Rent: $900 — paid\t", "", ""]),
+    pageTextSum(["  The lease was signed.", "Rent: $900 — paid"]));
+  check("a rule line ends the page", pageTextSum(["The lease was signed.", "", "====== Authorities cited (public verification links) ======", "Smith v. Jones"]), "46d66a09");
+  check("…and any change to the text moves it", pageTextSum(["The lease was signed!"]) === "46d66a09", false);
+  const e = { doc: "Kingscote Decl..txt", pdf: "Feit Decl.pdf", page: 4, sum: "0A1B2C3D" };
+  check("the line names the PDF and carries the sum", textFixedLine(e), "text corrected: Feit Decl.pdf | page 4 | sum 0a1b2c3d");
+  check("…and is written without one where there is none", textFixedLine({ doc: "X.txt", page: 2 }), "text corrected: X.txt | page 2");
+  check("a sum that is not one is dropped", textFixedLine({ doc: "X.txt", page: 2, sum: "zz" }), "text corrected: X.txt | page 2");
+  let list = setTextFixed([], e, true);
+  list = setTextFixed(list, { doc: "Feit Decl.pdf", pdf: "", page: 4, sum: "0a1b2c3d" }, true);
+  check("one page, one entry", list.length, 1);
+  check("nothing moves, the same list", setTextFixed(list, e, true) === list, true);
+  const moved = setTextFixed(list, { ...e, sum: "ffffffff" }, true);
+  check("a new save moves the sum", [moved.length, moved[0].sum], [1, "ffffffff"]);
+  check("off again", setTextFixed(list, e, false), []);
+  const file = formatValuesFile(["Rosa Delgado"], [], [], [{ doc: "Exhibits.pdf", page: 2 }], [], list);
+  check("written last, after the page lists",
+    file.split("\n").filter((l) => l && l[0] !== "#"),
+    ["Rosa Delgado", "did not ocr: Exhibits.pdf | page 2", "text corrected: Feit Decl.pdf | page 4 | sum 0a1b2c3d"]);
+  const back = parseReaderFile(file);
+  check("read back, never as a value", [back.values, back.textFixed],
+    [["Rosa Delgado"], [{ doc: "Feit Decl.pdf", pdf: "", page: 4, sum: "0a1b2c3d" }]]);
+  check("…and written again the same", formatValuesFile(back.values, back.keeps, back.phrases, back.noOcr, back.ocrAgain, back.textFixed), file);
+  check("a line typed by hand, without a sum, reads too",
+    parseReaderFile("Text-Corrected:  Exhibits.pdf  |  p. 9\n").textFixed, [{ doc: "Exhibits.pdf", pdf: "", page: 9, sum: "" }]);
+  check("an unreadable one is still no value", parseReaderFile("text corrected: Exhibits page nine\n"),
+    { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
+  check("TEXTFIXED_RE is not a did-not-ocr line", NOOCR_RE.test("text corrected: A.pdf | page 2"), false);
+  check("…and takes the sum", TEXTFIXED_RE.exec("text corrected: A.pdf | page 2 | sum 0a1b2c3d")[3], "0a1b2c3d");
+  const ran = parseExport("====== Page 4 — NOTE: TEXT CORRECTED by hand in the text reader; this page's text layer is the operator's transcription ======\nThe lease.\n");
+  check("PDF-Linker's header says the page is its now", headerSaysTextCorrected(ran.pages[0]), true);
+  check("…and an ordinary one does not", headerSaysTextCorrected(parseExport("====== Page 4 ======\nThe lease.\n").pages[0]), false);
+  check("the header says what the line does", formatValuesFile([], [], [], [], [], []).includes("'text corrected:"), true);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
