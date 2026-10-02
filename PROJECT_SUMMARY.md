@@ -1435,12 +1435,50 @@ off a line carrying rule glyphs before wrapping the glyphs, and box rows
 `columnCaps`) and starts the page's fit no larger than its widest column line
 fits across the paper, since a wrapped column comes back at the left margin.
 
-Side by side, pleading paper keeps all of it: every line there starts at the
-body margin, and `--body-em` is the PDF's body type at the grid's scale
-(`--grid-em`, written with the grid). On a page with no numbers each line is
-placed at its PDF row's own left (`rowLayout`) and the cells and indents are
-inert. The cells are wrappers with no `data-fake`: serialization, Find, the
-LEAKS walk and every offset into the page are unchanged. Cost: about 2.5 ms per
+`columnCuts` cuts at a gap of 3+ spaces always; at 2 where two lines of the
+page begin at that column; at 1 where the page's SECOND column is — a column
+`COLUMN_FIRM` (3) lines begin at, `COLUMN_FIRM_AT` (12) characters in or more
+(`hasFirmColumn`) — since a justified left-hand column runs right up to it.
+`columnStops` returns column → lines. A page with a second column has every
+line read, not only those with a run of spaces.
+
+The grid unit is `--col-u`: in the flowing view and on pleading paper,
+`--col-n` × `--body-em`; side by side `--body-em` is the PDF's body type at the
+grid's scale (`--grid-em`, written with the grid). Pleading paper keeps all of
+it there: every line starts at the body margin.
+
+A page with NO numbers side by side is set on the export's own grid read back
+off the PDF (`pdfsync.charGrid`): for each line whose matched row (`rowLayout`
+now returns `rowOf`) begins with the line's first word, a pair (the column its
+text begins at, the row's left), fitted Theil–Sen (median slope over pairs
+4+ columns apart, then median intercept) to { x0, unit } in PDF units; no
+grid with fewer than two lines 4+ columns in, a slope outside 1.5–15 pt, or
+under 60% of the pairs within 1.5 units. With one (`.cgrid`, `--grid-col` =
+unit × scale): every line's left is x0, its indent and cells are in the
+grid's unit, so a right-hand column stands where the PDF prints it on every
+line; a box row (`.rl`, not cut into columns) is set in by what its leading
+spaces fall short of the grid. Without (`.rowleft`): each line at its row's
+left as before, its leading spaces cancelled by a negative `text-indent` — the
+row's left IS where its text begins, and the spaces on top of it set every
+indented line in twice as far. On every grid page a cell whose text runs wider
+than its cell (the reader's font set at the PDF's size runs wide) is squeezed
+into it (`width` = its `min-width`, `scaleX`), measured and written for the
+pages near the reading before the existing slide-back and line squeeze, so a
+column is never pushed there; `clearMatched` undoes it.
+
+Two more fixes made a two-column page stand where its PDF does. `pdfRows`
+keeps an item out of a row when it shares no baseline with anything in it (by
+1 pt or 0.15 of the type) and stands a gutter (1.5 × the type) from all of
+it: the halves are set to their own leading and sat a few points apart, close
+enough for the superscript tolerance to make them one row, which left one of
+the export's two lines nothing to match. And `spreadTops` / `holdWithin` take
+`spans` ([from, to) in the export's characters, per line): a line clears only
+the lines it stands under, by more than `SPAN_SLOP` (3) characters or half the
+shorter line, so the halves are never one line pushed under the other — that
+push ran the page a third again past its PDF.
+
+The cells are wrappers with no `data-fake`: serialization, Find, the LEAKS
+walk and every offset into the page are unchanged. Cost: about 2.5 ms per
 two-column page at open, about 0.4 ms per pleading page.
 
 ### The numbers never move on the grid (`pdfsync.spreadTops`)

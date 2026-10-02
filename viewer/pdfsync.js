@@ -474,20 +474,46 @@ export function offGridTops(texts, nums, tops, rows, pitch = 0) {
  * PDF has no row for, is brought back onto the page instead of the page
  * growing to reach it. `room` per line (0 for an empty line, which holds
  * nothing). Where the lines cannot all fit — their boxes are taller than the
- * page — `tops` is handed back as it was: the words come first.
+ * page — `tops` is handed back as it was: the words come first. `spans`, as
+ * spreadTops takes them: a line is held above only the lines it stands over.
  */
-export function holdWithin(tops, room, height) {
+export function holdWithin(tops, room, height, spans = null) {
   if (!tops || !(height > 0)) return tops;
   const out = tops.slice();
-  let limit = height;
-  for (let i = out.length - 1; i >= 0; i--) {
-    const t = out[i];
-    if (t == null) continue;
-    const r = room && room[i] > 0 ? room[i] : 0;
-    out[i] = Math.min(t, limit - r);
-    if (r > 0) limit = out[i];
+  const roomOf = (i) => (room && room[i] > 0 ? room[i] : 0);
+  if (!spans) {
+    let limit = height;
+    for (let i = out.length - 1; i >= 0; i--) {
+      const t = out[i];
+      if (t == null) continue;
+      const r = roomOf(i);
+      out[i] = Math.min(t, limit - r);
+      if (r > 0) limit = out[i];
+    }
+  } else {
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (out[i] == null) continue;
+      let limit = height;
+      for (let k = i + 1; k < out.length; k++) if (out[k] != null && roomOf(k) > 0 && overlaps(spans[i], spans[k])) limit = Math.min(limit, out[k]);
+      out[i] = Math.min(out[i], limit - roomOf(i));
+    }
   }
   return out.some((t) => t != null && t < 0) ? tops : out;
+}
+
+/**
+ * Whether two lines stand over each other across the page: [from, to) each, a
+ * missing one standing over everything. By more than a few characters: the
+ * export's grid is the PDF's rounded, and a left-hand column's long line runs
+ * a character or two into the column beside it that it never touches on the
+ * page. Never by less than half the shorter of the two, so a line of one or
+ * two characters ("v.") still stands over the line it is under.
+ */
+const SPAN_SLOP = 3;
+function overlaps(a, b) {
+  if (!a || !b) return true;
+  const shared = Math.min(a[1], b[1]) - Math.max(a[0], b[0]);
+  return shared > Math.min(SPAN_SLOP, 0.5 * Math.min(a[1] - a[0], b[1] - b[0]));
 }
 
 // ---- a page with no numbers: the PDF's printed rows, matched by their words ------
@@ -517,16 +543,36 @@ export function holdWithin(tops, room, height) {
  * line is drawn at its row's own size (applyMatchedLayout), so a height read
  * off the wrong glyph is a line of small print set three times too big,
  * running off the sheet and widening every sheet in the document with it.
+ *
+ * TWO COLUMNS ARE TWO ROWS. A two-column page's halves are set to their own
+ * leading, so a line of the left-hand column and the line of the right-hand
+ * one beside it sit a few points apart — close enough to read as one row by
+ * the tolerance a superscript needs, and the export writes them as the two
+ * lines they are. One row for two lines left one of them with nothing to
+ * match, stacked a line lower, and every line after it pushed down with it.
+ * So an item joins a row only where it shares a baseline with something in
+ * it, or stands up against something in it as a superscript does; one on
+ * another baseline a column's gutter away from everything in the row is a
+ * row of its own.
  */
 export function pdfRows(items, size) {
   const rows = [];
   const sorted = (items || []).filter((it) => it.str && it.str.trim()).map((it) => {
     const h = it.h > 0 ? it.h : 10;
-    return { str: it.str, x: it.x, h, base: it.top + h };
+    return { str: it.str, x: it.x, w: it.w > 0 ? it.w : 0, h, base: it.top + h };
   }).sort((a, b) => a.base - b.base || a.x - b.x);
+  const apart = (row, it) => {
+    const h = Math.min(it.h, row.tall);
+    const level = Math.max(1, h * 0.15), gutter = h * 1.5;
+    for (const o of row.items) {
+      if (Math.abs(o.base - it.base) <= level) return false;
+      if (Math.max(it.x - (o.x + o.w), o.x - (it.x + it.w)) <= gutter) return false;
+    }
+    return true;
+  };
   for (const it of sorted) {
     const last = rows[rows.length - 1];
-    if (last && Math.abs(it.base - last.base) <= Math.max(2, Math.min(it.h, last.tall) * 0.6)) {
+    if (last && Math.abs(it.base - last.base) <= Math.max(2, Math.min(it.h, last.tall) * 0.6) && !apart(last, it)) {
       last.items.push(it);
       last.base = Math.min(last.base, it.base);
       last.tall = Math.max(last.tall, it.h);
@@ -671,7 +717,43 @@ export function rowLayout(lineTexts, rows, { bodyLeft = null } = {}) {
   });
   const first = matched[0];
   for (let i = 0; i < first; i++) out[i] = { top: Math.max(0, rows[map[first]].top - (first - i) * pitch), left: left0, size: null };
-  return { positions: out, pitch };
+  return { positions: out, pitch, rowOf: map };
+}
+
+/**
+ * The character grid PDF-Linker set a page's text on, read back off the PDF:
+ * { x0, unit } in PDF units, so that a line whose text begins at column c of
+ * the export stands at x0 + c × unit on the page — or null where the page
+ * does not say.
+ *
+ * An export lays a page out in characters: its indents, its centred headings
+ * and a two-column page's second column are runs of spaces, each standing
+ * for the width of a character on the PDF. `pairs` are [{ col, x }]: where a
+ * line's text begins in the export, and where the PDF row it was matched to
+ * begins on the page. Those lie on one straight line, and the line is
+ * fitted robustly (Theil–Sen: the median slope between every two lines that
+ * begin columns apart), since a line matched to the wrong row — a two-column
+ * line to its right-hand half — is a point far off it. Too few lines that
+ * begin anywhere but the margin, a slope no font has, or a fit most lines
+ * miss by more than a character and a half, and there is no grid.
+ */
+export function charGrid(pairs) {
+  const pts = (pairs || []).filter((p) => p && p.col >= 0 && Number.isFinite(p.x));
+  if (pts.length < 3 || pts.filter((p) => p.col >= 4).length < 2) return null;
+  const slopes = [];
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const dc = pts[j].col - pts[i].col;
+      if (Math.abs(dc) >= 4) slopes.push((pts[j].x - pts[i].x) / dc);
+    }
+  }
+  if (!slopes.length) return null;
+  const unit = median(slopes);
+  if (!(unit >= 1.5 && unit <= 15)) return null;
+  const x0 = median(pts.map((p) => p.x - unit * p.col));
+  const near = pts.filter((p) => Math.abs(p.x - (x0 + unit * p.col)) <= Math.max(1.5 * unit, 3)).length;
+  if (near < Math.max(3, pts.length * 0.6)) return null;
+  return { x0, unit };
 }
 
 // ---- the type a text page is set in beside its PDF page ----------------------
@@ -765,20 +847,32 @@ export function matchedScale(unit, px, { min = 0.15, max = 8 } = {}) {
  * the PDF's and two of them stood crowded together where the push ran out.
  * Where the lines between two fixed ones cannot all have their boxes there,
  * they share the space evenly instead.
+ *
+ * `spans`, per line, is where across the page it stands ([from, to), in the
+ * export's characters): a line clears only the lines above it that it stands
+ * UNDER. A two-column page sets its halves to their own leading, and a line of
+ * the left-hand column and the right-hand line beside it can be printed three
+ * points apart; read as one above the other, the second was pushed a whole
+ * line down, and every line after it, until the page ran a third again past
+ * its PDF. Side by side they never touch.
  */
-export function spreadTops(tops, box, fixed = null) {
+export function spreadTops(tops, box, fixed = null, spans = null) {
   const boxes = Array.isArray(box) ? box : null;
   const one = !boxes && Number(box) > 0 ? Number(box) : 0;
   const boxOf = (i) => (boxes ? (Number(boxes[i]) > 0 ? Number(boxes[i]) : 0) : one);
   const placed = (t) => t != null && Number.isFinite(t);
   const isFixed = (i) => !!(fixed && fixed[i]);
   let last = null, lastBox = 0;
-  const out = (tops || []).map((t, i) => {
-    if (!placed(t)) return t == null ? null : t;
-    const y = last == null || isFixed(i) ? t : Math.max(t, last + lastBox);
+  const out = [];
+  (tops || []).forEach((t, i) => {
+    if (!placed(t)) { out.push(t == null ? null : t); return; }
+    let y = t;
+    if (!isFixed(i) && spans) {
+      for (let j = 0; j < i; j++) if (placed(out[j]) && overlaps(spans[j], spans[i])) y = Math.max(y, out[j] + boxOf(j));
+    } else if (last != null && !isFixed(i)) y = Math.max(t, last + lastBox);
+    out.push(y);
     last = y;
     lastBox = boxOf(i);
-    return y;
   });
   if (!fixed) return out;
   // Back from each fixed line: what runs into it is held above it, and a run

@@ -48,7 +48,7 @@
 // dressed as its text says is left exactly as it is, so the editor's caret
 // text node on any other line is never replaced.
 
-import { columnCuts, columnStops, columnWidths, lineIndent, serializeNodes } from "./textdoc.js";
+import { columnCuts, columnStops, columnWidths, hasFirmColumn, lineIndent, serializeNodes } from "./textdoc.js";
 
 /** A node's length in the file: a pseudonym span counts its fake, as the cuts were made on. */
 const fileLength = (n) => (n.nodeType === 3 ? n.data.length : n.nodeType === 1 ? serializeNodes(n).length : 0);
@@ -179,20 +179,24 @@ export function dressColumns(body) {
     all.push({ line, lt, start, shown });
   }
   if (!numbered || origin === Infinity) origin = 0;
-  const lines = [];
+  const lines = [], plain = [];
   for (const l of all) {
     // Most lines have no run of spaces and no indent — a pleading's body, a
     // letter — and are passed over on what they show: a name on screen is no
     // more a run of spaces than the fake it stands for. One dressed before is
     // dressed again.
     if (!l.shown.includes("  ") && l.shown[0] !== " " && !(l.start > origin && l.shown.trim()) && !l.lt.querySelector(".cc") && !l.lt.classList.contains("ci")) {
-      l.line.classList.remove("cols");
+      plain.push(l);
       continue;
     }
     l.text = serializeNodes(l.lt);
     lines.push(l);
   }
   const stops = columnStops(lines);
+  // …unless the page has a second column, which a line's left-hand half can
+  // run right up to with a single space between: then every line is read.
+  if (plain.length && hasFirmColumn(stops)) for (const l of plain.splice(0)) { l.text = serializeNodes(l.lt); lines.push(l); }
+  for (const l of plain) l.line.classList.remove("cols");
   for (const l of lines) {
     const { ind, lead } = lineIndent(l.text, { start: l.start, origin });
     const cuts = columnCuts(l.text, { stops, start: l.start });

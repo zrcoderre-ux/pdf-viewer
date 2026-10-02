@@ -15,7 +15,7 @@ import {
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, didNotOcrLines, DID_NOT_OCR,
-  columnCuts, columnStops, columnWidths, lineIndent, COLUMN_GAP,
+  columnCuts, columnStops, columnWidths, lineIndent, hasFirmColumn, COLUMN_GAP,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
 } from "./viewer/textdoc.js";
@@ -497,9 +497,19 @@ console.log("columns laid out with spaces");
     { text: "       United States District Court" },
     { text: "Holdings:" + " ".repeat(53) + "costumer who holds" },
   ];
-  check("a page's columns are the ones two lines or more begin at", [...columnStops(lines)].sort((a, b) => a - b), [62]);
+  check("a page's columns are the ones two lines or more begin at, and how many", [...columnStops(lines)], [[62, 2]]);
   check("…counted from the page's edge, a numbered line's text where its number's spaces end",
-    [...columnStops([{ text: "COMPLAINT FOR:", start: 44 }, { text: R.slice(0, 44) + "1. BREACH;" }])], [44]);
+    [...columnStops([{ text: "COMPLAINT FOR:", start: 44 }, { text: R.slice(0, 44) + "1. BREACH;" }])], [[44, 2]]);
+  // A justified left-hand column fills its width, and its long lines run up
+  // to the second column with a space or two between.
+  const second = new Map([[62, 9], [5, 4]]);
+  const full = "could invoke the Ending Forced Arbitration of Sexual Assault  Compl. \u00b6 15.";
+  check("two spaces onto a column the page begins lines at is a gap", columnCuts(full, { stops: second }), [62]);
+  check("one space onto the page's second column is a gap too",
+    columnCuts("costumer's sexual harassment claim accrued after the effectiv Jo Marine", { stops: second }), [62]);
+  check("…but one space onto an indent's column is two words", columnCuts("It is so ordered.", { stops: new Map([[3, 9]]) }), []);
+  check("…or onto a column too few lines begin at", columnCuts("x".repeat(61) + " y", { stops: new Map([[62, 2]]) }), []);
+  check("a page has a second column where enough lines begin far enough in", [hasFirmColumn(second), hasFirmColumn(new Map([[5, 20]])), hasFirmColumn(new Map([[40, 2]]))], [true, false, false]);
   check("each cell spans to the next cut, the first from past the indent", [columnWidths([62], 17), columnWidths([40, 62])], [[45], [40, 22]]);
 }
 console.log("indents on the grid");
