@@ -521,11 +521,21 @@ app, which routes it to the reader tab.
   history (the browser's cannot survive the pseudonym rewrites), and **Save**
   (Ctrl+S) writes the text back to the same file. A
   pseudonym span always writes its **fake**; a real name typed in is marked
-  as its pseudonym as soon as the caret leaves it. A real name the key binds
-  that is standing in the clear and **not yet decided** is left exactly as it
-  stands (see *A save before the review is over*, below); the save refuses
-  outright rather than write one you **did** say to fake. Deleting a marked
-  name deletes the fake.
+  as its pseudonym as soon as the caret leaves it. **Only the name typed** —
+  or pasted, or put in by Replace: typing on a page used to mark every real
+  name standing in it, so a word added on line 1 marked line 2's missed name
+  and turned a cited decision's party into a pseudonym, a citation to a case
+  that does not exist. Now a name the page already had is left for the
+  review, wherever the typing was and whatever an Enter moved, and a cited
+  decision's party is never marked, typed or not (a citation pasted whole keeps
+  its names). A party marked at the Space prompt before the rest of its
+  citation was typed goes back to the name as typed once the citation is
+  whole, and the toast says so; Ctrl+Z puts the mark back. After a save, what
+  the file holds counts as already there. A
+  real name the key binds that is standing in the clear and **not yet
+  decided** is left exactly as it stands (see *A save before the review is
+  over*, below); the save refuses outright rather than write one you **did**
+  say to fake. Deleting a marked name deletes the fake.
 - **The numbers are the paper.** On a numbered page the line numbers are
   fixed and the text moves between them. **Enter** sends the text after the
   caret down into the next numbered slot, and the slot below takes what was
