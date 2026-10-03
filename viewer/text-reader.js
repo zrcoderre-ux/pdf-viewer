@@ -7195,10 +7195,14 @@ function renderLeaksBar() {
   ans.textContent = c.label
     + (sug ? " — PDF-Linker's own reading, not yet accepted" : "")
     + (row.fix !== row.fix0 ? " (unsaved)" : "");
+  ans.title = ans.textContent; // the slot is one width, and a long answer is cut short in it
   // A pre-filled cell reads as answered and is not: it is marked like an empty
   // one until the operator has said so.
   ans.className = "lb-answer" + (c.kind && !sug ? "" : " undecided");
-  $("lb-accept").hidden = !sug;
+  // Not offered, it keeps its place (.off): the controls never move.
+  const acc = $("lb-accept");
+  acc.classList.toggle("off", !sug);
+  acc.disabled = !sug;
   for (const b of leaksBar.querySelectorAll("button[data-fix]")) b.classList.toggle("on", c.kind === b.dataset.fix);
   const typed = $("lb-typed");
   if (document.activeElement !== typed) typed.value = LK.CONTROLS.includes(c.kind) || !c.kind ? "" : row.fix;

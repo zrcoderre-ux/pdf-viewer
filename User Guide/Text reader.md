@@ -362,8 +362,12 @@ app, which routes it to the reader tab.
   Notes — and the text **opens the row's own document and scrolls to its page
   and line**, the value marked wherever it stands (the occurrence the bar went
   to strongest). The page stays editable underneath, and side by side the PDF
-  follows as it always does. **yes / no / never / phrase** are buttons;
-  anything else the cell takes — the replacement, `~CORRECT SPELLING`,
+  follows as it always does. **yes / no / never / phrase** are buttons, in
+  one row at the top of the bar with the walk's own (‹ ›, Next unanswered,
+  Find in text, Save), and that row holds still: the row's value, Context
+  and notes are under it at whatever length they run, so each button stays
+  where it was as you click through. Anything else the cell takes — the
+  replacement, `~CORRECT SPELLING`,
   `*CORRECT TEXT` (`**` in every folder), a `[part to keep]` — is typed and
   applied with Enter; **Alt+Y**, **Alt+N**, **Alt+↑/↓** work from the page.
   **A row PDF-Linker answered for you is still a row to answer.** Where the

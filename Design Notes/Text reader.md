@@ -217,6 +217,21 @@ among a folder's documents, and `pdfsync.combinedMembers` reads its
 `# Documents in this file:` list so picked PDFs are matched member by
 member, by name through the key or by order.
 
+The bar's controls are one row at its TOP (`.lb-controls`: Fix? yes no never
+phrase accept, the answer, the typed cell, Apply, clear, then ‹ › Next
+unanswered, Find in text, Save, open, close), with the row's own text under
+them — count, type, value, where, the problem, the Context quotes and notes.
+They used to be the last row, after all of that and after the answer in
+words, so yes, no, never and phrase stood somewhere else on every worksheet
+row and the hand clicking through had to find them again. Nothing in the
+control row changes size from one worksheet row to the next: `#lb-answer`
+has one width (`flex: 0 0 16em`, cut short, the whole of it as its title),
+`#lb-accept` is put out of sight with `.off` (`visibility: hidden`, and
+disabled) rather than `hidden`, which the stylesheet's `[hidden]` rule would
+take out of the layout, and `#lb-save` is as wide as a three-figure count. A
+window too narrow for the row wraps it at the same place on every worksheet
+row, the last buttons right-aligned on their own line.
+
 The review walks the folder ONE DOCUMENT AT A TIME. A row stands in the
 document its File cell names first (`leaks.rowFile` — one row is one
 decision, made where the reader opens it), and `leaks.reviewOrder` puts the

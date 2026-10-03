@@ -38,15 +38,28 @@
 
   <!-- The LEAKS review bar: the worksheet's current row above the text, the
        text opened at the row's page and line. The decision goes into the
-       row's Fix? cell exactly as PDF-Linker's Apply Fixes reads it. -->
+       row's Fix? cell exactly as PDF-Linker's Apply Fixes reads it.
+       Its controls are ONE ROW AT THE TOP, and nothing in that row changes
+       size from one worksheet row to the next. They used to come after the
+       row's own text (its value and where it stands above them, its Context
+       quotes and notes, the answer in words before the buttons), which is a
+       different length on every row: yes, no, never and phrase stood
+       somewhere else each time the walk moved on. The row's text is under
+       them now at whatever length it runs to; the answer has a slot of one
+       width (the whole of it on hover), accept keeps its place when it is not
+       offered, and the save button is as wide as its count makes it. -->
   <div id="leaks-bar" class="revbar" hidden>
-    <div class="lb-row">
-      <span id="lb-count" class="lb-count"></span>
-      <span id="lb-type" class="lb-type"></span>
-      <b id="lb-value" class="lb-value" title="The flagged value"></b>
-      <span id="lb-where" class="lb-where"></span>
-      <span id="lb-problem" class="lb-problem"></span>
-      <span class="spacer"></span>
+    <div class="lb-row lb-controls">
+      <span class="tb-label">Fix?</span>
+      <button data-fix="yes" title="Fake it with an auto pseudonym (Alt+Y)">yes</button>
+      <button data-fix="no" title="Leave it as it stands in this case (Alt+N)">no</button>
+      <button data-fix="never" title="Leave it as it stands in every case — the nuclear keep">never</button>
+      <button data-fix="phrase" title="Fake it whole, kept words inside it too">phrase</button>
+      <button id="lb-accept" class="off" disabled title="Accept PDF-Linker's own reading of this row, written into the sheet before you saw it — the cell stays exactly as it is and the row stops coming back (Alt+A)">accept</button>
+      <span id="lb-answer" class="lb-answer"></span>
+      <input id="lb-typed" type="text" spellcheck="false" placeholder="or type: the replacement · ~CORRECT SPELLING (this is a misspelling of it) · *CORRECT TEXT (a scan error; ** in every folder) · [part to keep]" title="Anything else PDF-Linker's Fix? cell accepts. Enter applies it and moves on.">
+      <button id="lb-apply" title="Write the typed text into the Fix? cell">Apply</button>
+      <button id="lb-clear" class="secondary" title="Clear the cell — decide later">clear</button>
       <button id="lb-prev" title="The row before this one in the document (Alt+↑)">‹</button>
       <button id="lb-next" title="The next row down the document — the review walks the document, not the worksheet's own order (Alt+↓)">›</button>
       <button id="lb-next-open" title="The next row still to answer: nothing typed in its Fix? cell, or PDF-Linker's own ~suggestion sitting there unaccepted">Next unanswered</button>
@@ -55,21 +68,16 @@
       <button id="lb-open" title="Load another LEAKS.xlsx">📂</button>
       <button id="lb-close" title="Hide the bar (the worksheet stays loaded; ⚠ Leaks brings it back)">×</button>
     </div>
+    <div class="lb-row">
+      <span id="lb-count" class="lb-count"></span>
+      <span id="lb-type" class="lb-type"></span>
+      <b id="lb-value" class="lb-value" title="The flagged value"></b>
+      <span id="lb-where" class="lb-where"></span>
+      <span id="lb-problem" class="lb-problem"></span>
+    </div>
     <div class="lb-row lb-context-row">
       <div id="lb-context" class="lb-context"></div>
       <div id="lb-notes" class="lb-notes"></div>
-    </div>
-    <div class="lb-row lb-decide">
-      <span class="tb-label">Fix?</span>
-      <span id="lb-answer" class="lb-answer"></span>
-      <button data-fix="yes" title="Fake it with an auto pseudonym (Alt+Y)">yes</button>
-      <button data-fix="no" title="Leave it as it stands in this case (Alt+N)">no</button>
-      <button data-fix="never" title="Leave it as it stands in every case — the nuclear keep">never</button>
-      <button data-fix="phrase" title="Fake it whole, kept words inside it too">phrase</button>
-      <button id="lb-accept" hidden title="Accept PDF-Linker's own reading of this row, written into the sheet before you saw it — the cell stays exactly as it is and the row stops coming back (Alt+A)">accept</button>
-      <input id="lb-typed" type="text" spellcheck="false" placeholder="or type: the replacement · ~CORRECT SPELLING (this is a misspelling of it) · *CORRECT TEXT (a scan error; ** in every folder) · [part to keep]" title="Anything else PDF-Linker's Fix? cell accepts. Enter applies it and moves on.">
-      <button id="lb-apply" title="Write the typed text into the Fix? cell">Apply</button>
-      <button id="lb-clear" class="secondary" title="Clear the cell — decide later">clear</button>
     </div>
   </div>
 
