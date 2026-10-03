@@ -106,7 +106,8 @@ app, which routes it to the reader tab.
   **largest** size that holds the page, searched for, so a dense page whose
   long lines wrap at the reading size is taken down only until they stop
   wrapping and the words fill the sheet, not halved to the floor. A page shown
-  from its PDF (⇄ PDF) keeps its fit, and comes back at that size. Display
+  from its PDF (⇄ PDF) or as the file has it (⇄ Raw) keeps its fit, and
+  comes back at that size. Display
   only: the file is one size. **The fit is measured at the default size, not
   at the size you have zoomed to** — measured at the zoomed size it would take
   back exactly what the zoom had just added, and zooming in would do nothing —
@@ -877,26 +878,33 @@ app, which routes it to the reader tab.
   go nowhere near `New Real Values.txt`: a place in one file is not something
   PDF-Linker's value-level rules can be told, so a re-run of PDF-Linker, which
   writes the exports again from the PDFs, fakes it once more.
-- **📄 File as text — the file itself, as Notepad would open it.** Everything
+- **⇄ Raw — the page as the file has it, in the page's place.** Everything
   the reader does is a view: the fakes are shown as the **real** names, the
   lines are laid out as sheets, the margin numbers get a ruled gutter, the
   citations are underlined. That is the point of it — and it is the reason it
   is worth being able to see what is actually *in* the file, because what goes
   to the court, to PDF-Linker and to anyone the export is handed to is the
   bytes, not the view, and the two are meant to differ in exactly one way: the
-  file carries the pseudonyms. The panel is that text, fixed-pitch, wrapping
-  off as a plain editor opens it, with the page headers and the gutter spacing
-  exactly as they sit on disk — and it is not a rendering of the file but the
-  same text a save writes, built the same way, so on a document nobody has
-  edited it *is* the disk, character for character. The footer counts the lines
-  and characters and names the line endings (CRLF or LF) and whether the file
-  ends with a newline. Where the two states differ it says so: a document with
-  unsaved edits is labelled as such, and a real value the key binds standing in
-  the text is flagged with the note that a save would write the pseudonym
-  instead. It opens at the page you are reading — that page's header at the
-  top of the panel and marked, with one line of the page before it above —
-  and the footer says which page that is; the whole file is still there to
-  scroll. **Copy** takes the whole thing, pseudonyms and all.
+  file carries the pseudonyms. **⇄ Raw** on a page's label, between **⊘ Did
+  not OCR** and **⇄ PDF**, works the way ⇄ PDF does: the page is replaced, in
+  the reader, by its own text — fixed-pitch, wrapping off as a plain editor
+  opens it, with the page header, the margin numbers and the spacing exactly
+  as they sit on disk, and the pseudonyms as PDF-Linker wrote them. It is not
+  a rendering of the file but the same text a save writes, built the same
+  way, so on a page nobody has edited it *is* the disk, character for
+  character; a line longer than the sheet scrolls rather than wraps. **⇄ Text**
+  puts the page back. The page's text is hidden, not removed, and still saves.
+  Where the page and the disk differ it says so: the corner reads *The file
+  with your unsaved edits* while there are edits to write, and a real name
+  from the key standing in the text (one the run missed) carries the same
+  orange mark it has on the page. One view of a page at a time: ⇄ Raw on a
+  page showing its PDF page takes the PDF page off (and out of the remembered
+  swaps), and ⇄ PDF takes the raw text off. Beside the PDF the page leaves
+  the grid while it is raw, at the height it stood at, with its PDF page held
+  level beside it. A raw page prints and screenshots in its pseudonyms like
+  every other. It is not remembered: reopening the document shows its text. A
+  document with no page headers (a Word export) has no page label and so no
+  ⇄ Raw.
 - **A flag does not rearrange the page.** Flagging a value, or keeping a
   wrongly faked one, used to open the Documents / Flagged panel to show the
   list growing. Flagging is done *while reading*, often several in a row, and
@@ -1262,7 +1270,8 @@ app, which routes it to the reader tab.
 
 - **⊘ Did not OCR strips a page's text for good.** Where ⇄ PDF hides a
   mangled page's text and still saves it, **⊘ Did not OCR** on the page's
-  label (beside ⇄ PDF) takes the text out and writes one line in its place,
+  label (beside ⇄ Raw and ⇄ PDF) takes the text out and writes one line in
+  its place,
   `[DID NOT OCR]`, so whoever reads the export next is told the page is there
   and its text is not, instead of being handed the noise. The page header
   stays, and so does PDF-Linker's *Authorities cited* list when it is the

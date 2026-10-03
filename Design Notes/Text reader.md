@@ -72,6 +72,29 @@ is `buildFindMatcher(values, { caseSensitive })`, which drops the `i` flag;
 their matcher, and the folder scan's `findScanFor` carries the flag so a
 toggle reads the folder again.
 
+**⇄ Raw** (`.raw-page`, on every page label, between `.swap-page` and
+`.nocr-page`; it replaced the toolbar's 📄 File as text panel) puts the page's
+own text in the page's place, the way ⇄ PDF puts its PDF page there.
+`setRaw(sec, on)` adds `.tpage.raw` and a `.raw-sheet` (a corner `.raw-tag`
+and a `pre.raw-text`) to `.page-inner`; CSS hides the body and the link layer,
+which stay in the DOM and still save. `rawPageText` is the save's own text:
+the banner or header line, then `TD.serializeHeld(body)` (fakes, never the
+real names), with the spot keeps' places shifted past the head so `fillRaw`
+can mark the names standing in the clear as `scanPassNow` does (keeps
+masked, spot keeps blanked, cited parties out). `fillRaw` rewrites only when
+its signature (tag, text, marks) moved, so a selection made in it survives;
+`refreshRawPages` runs it over `rawPages` from `paintHighlights` (every text,
+key or keep change) and `updateDirty` (the corner's unsaved note), and from
+`fakesForPrint`, so a print reads the scrubbed bodies. State lives on the
+section, not in an index, so `reelShift` leaves it alone; `shedMember` drops
+it with the rest of the page's contents. The sheet's `minHeight` is the
+page's height at the click, so nothing below moves. One view at a time:
+`toggleRaw` deletes the page's PDF swap (and persists that), and
+`applySwapsNow` turns raw off on a page it swaps in. `shapePages` passes over
+a raw page as it does a swapped one, and `applyMatchedLayoutNow` takes it off
+the grid (`clearMatched`) and holds its slot to the page's height with the
+shed slots (`rawSlots`), so the two columns stay level. Not persisted.
+
 **⊘ Did not OCR** (`.nocr-page` on every label with a page header, beside
 the ⇄ PDF swap) replaces the page's lines with `textdoc.didNotOcrLines`:
 `[DID NOT OCR]` alone, except that PDF-Linker's "Authorities cited" trailer

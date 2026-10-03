@@ -501,50 +501,6 @@ body.side-hidden #side { display: none; }
 .side-actions { display: flex; gap: 6px; margin: 8px 0; }
 .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--btn-border); color: var(--text); font-size: 11px; text-align: center; }
 
-/* ── the file as text ──────────────────────────────────────────────────────── */
-#raw-modal {
-  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.55); padding: 28px;
-}
-#raw-modal[hidden] { display: none; }
-.raw-panel {
-  display: flex; flex-direction: column; width: min(1000px, 100%); height: min(88vh, 100%);
-  background: var(--chrome); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); overflow: hidden;
-}
-.raw-head {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 13px;
-}
-.raw-head .spacer { flex: 1; min-width: 8px; }
-.raw-head .raw-note { color: var(--note); font-size: 12px; }
-.raw-head .raw-wrap { color: var(--text-muted); font-size: 12px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
-.raw-head button {
-  background: var(--btn); color: var(--text); border: 1px solid var(--btn-border);
-  border-radius: 4px; padding: 3px 9px; font-size: 12px; cursor: pointer;
-}
-.raw-head button:hover { background: var(--btn-hover); }
-.raw-head #raw-close { font-size: 15px; line-height: 1; padding: 2px 8px; }
-/* The file itself: one fixed-pitch column, wrapping off, exactly as a plain
-   text editor opens it. The page it is scrolled in is its own. */
-#raw-text {
-  flex: 1; margin: 0; padding: 12px 14px; overflow: auto;
-  background: var(--inset); color: var(--text);
-  font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  white-space: pre; tab-size: 8; user-select: text;
-}
-#raw-modal.wrap #raw-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-/* The header of the page being read, where the view opens. */
-#raw-text .raw-here {
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
-  border-radius: 2px;
-}
-.raw-foot {
-  padding: 7px 12px; border-top: 1px solid var(--border);
-  color: var(--text-muted); font-size: 11.5px; font-variant-numeric: tabular-nums;
-}
-
 /* ── the auto-scroll pill ──────────────────────────────────────────────────── */
 /* Fixed rather than inside the stage: the stage is the scroll box, and a
    control that scrolled away with the text would be gone the moment it was
@@ -613,6 +569,14 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 .page-label .swap-page:hover { background: #e3e5e8; }
 .page-label .swap-page.nopdf { opacity: 0.55; }
 .tpage.swapped .page-label .swap-page { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* ⇄ Raw, beside it: this page as the file has it, in the page's place. */
+.page-label .raw-page {
+  float: right; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.page-label .swap-page + .raw-page { margin-right: 6px; }
+.page-label .raw-page:hover { background: #e3e5e8; }
+.tpage.raw .page-label .raw-page { background: var(--accent); border-color: var(--accent); color: #fff; }
 /* ⊘ Did not OCR, beside it: strips the page's text for [DID NOT OCR]. */
 .page-label .nocr-page {
   float: right; margin-right: 6px; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
@@ -632,6 +596,21 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 /* A swapped page: the PDF page stands where its text was; the text is still
    in the DOM (and still saves) but is not shown. */
 .tpage.swapped .page-body, .tpage.swapped .link-layer { display: none; }
+/* A raw page the same way: the file's text stands where the page's was. One
+   fixed-pitch column, wrapping off, exactly as a plain text editor opens it;
+   a line longer than the sheet is scrolled to, not cut. */
+.tpage.raw .page-body, .tpage.raw .link-layer { display: none; }
+.raw-sheet { background: #fafaf8; color: #111; padding: 6px 24px 18px; }
+.raw-sheet .raw-tag {
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #666; text-align: right; padding-bottom: 6px; user-select: none;
+}
+.raw-sheet .raw-text {
+  margin: 0; overflow-x: auto; white-space: pre; tab-size: 8; user-select: text;
+  font: calc(var(--reader-size-eff) * 0.84)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+/* A real name from the key standing in the file: the page's own leak mark. */
+.raw-sheet .raw-leak { background-color: var(--leak-bg); text-decoration: underline double #e65100; }
 .pdf-inline { position: relative; min-height: 120px; background: #fff; }
 /* NOTHING LEAVES THE PAPER. A line too long for its column — a numbered line,
    which is never wrapped, or a line the PDF's grid has placed — is cut where
@@ -905,7 +884,9 @@ body.marks-off [data-here]:hover { background: transparent; }
   #pages { zoom: var(--print-zoom, 1); }
   .tpage { max-width: none; margin: 0 auto 18px; box-shadow: none; border-radius: 0; break-after: page; }
   .tpage:last-child { break-after: auto; }
-  .page-label .swap-page, .page-label .nocr-page, .page-label .fix-page { display: none; }
+  .page-label .swap-page, .page-label .raw-page, .page-label .nocr-page, .page-label .fix-page { display: none; }
+  .raw-sheet .raw-text { overflow: visible; white-space: pre-wrap; }
+  .raw-sheet, .raw-sheet .raw-leak { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .link-layer { display: none; }
   .page-body:focus { box-shadow: none; }
   .rb, .rc.hf, .rh, .pn, .held, .page-body.numbered .gutter, .page-label { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

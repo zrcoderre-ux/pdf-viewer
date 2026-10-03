@@ -21,7 +21,6 @@
     <button id="open-folder" title="Open a case folder: its pseudonym key and every export under Text Files">📁 Open case folder</button>
     <button id="edit-toggle" title="Allow editing — a document opens protected; turn this on to type in it (the real names still never reach the file)" aria-pressed="false" disabled>✎ Edit</button>
     <button id="save" class="primary" title="Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)" disabled>💾 Save</button>
-    <button id="raw-btn" title="The file itself — what you would see opening it in Notepad. The pseudonyms as PDF-Linker wrote them, not the real names this reader shows; the page headers, the margin numbers and the spacing exactly as they sit on disk." disabled>📄 File as text</button>
     <button id="print-btn" title="Print the pages as they are shown, always in their pseudonyms — the printout carries the fakes whichever way Show fakes sits, and the document is left as it was; choose “Save as PDF” in the print dialog to keep a copy (Ctrl+P)">🖨 Print</button>
     <button id="shot-btn" title="Screenshot the whole reader window as it stands — toolbar, panels, bars, the PDF pane and the pages — saved as a PNG, for looking at the design. The names are in their pseudonyms whichever way Show fakes sits: every real name the key binds is shown as its fake for the picture, then put back">📷 Screenshot</button>
     <span class="spacer"></span>
@@ -382,25 +381,6 @@
     <div class="sp-actions"><button id="pdf-pick" class="secondary" title="Choose the PDF by hand — for a combined file, select every member's PDF at once and each is matched to its document">Pick PDFs…</button><button id="swap-close" class="secondary">Close</button></div>
     <p class="sp-note" id="swap-pop-note"></p>
   </div>
-  <!-- The file as it is on disk. The reader shows the REAL names over the
-       fakes and lays the lines out as sheets, which is the whole point of it
-       and also the reason it is worth being able to see what is actually in
-       the file — the pseudonyms, the page headers, the gutter spacing. -->
-  <div id="raw-modal" hidden>
-    <div class="raw-panel" role="dialog" aria-modal="true" aria-labelledby="raw-title">
-      <div class="raw-head">
-        <b id="raw-title"></b>
-        <span id="raw-note" class="raw-note"></span>
-        <span class="spacer"></span>
-        <label class="raw-wrap" title="Notepad opens with wrapping off, and so does this: a long line runs past the edge and is scrolled to."><input id="raw-wrap" type="checkbox"> Wrap lines</label>
-        <button id="raw-copy" title="Copy the whole file to the clipboard, pseudonyms and all">Copy</button>
-        <button id="raw-close" title="Close (Esc)">×</button>
-      </div>
-      <pre id="raw-text" tabindex="0"></pre>
-      <div class="raw-foot" id="raw-foot"></div>
-    </div>
-  </div>
-
   <div id="pn-tip" hidden></div>
   <div id="type-tip" hidden></div>
   <div id="toast" hidden></div>

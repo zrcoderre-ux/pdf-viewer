@@ -149,6 +149,7 @@ let masterInfo = null;       // { name, sheet, rows, partial } once it is attach
 let masterHandle = null;     // its file handle, remembered between sessions
 let masterNeeds = null;      // …the same handle, when the browser wants it re-authorised first
 let dirty = false;
+const rawPages = new Set();  // the page sections shown as the file has them, ⇄ Raw (setRaw)
 let place = null;            // where the reading is, as last noted: { el, frac, sec, secFrac } (readingPlace)
 let placeHold = null;        // …and the hold keeping it there through a re-layout, while one is (holdReading)
 
@@ -695,6 +696,9 @@ function fakesForPrint() {
     document.body.classList.add("show-fakes");
     moved = true;
   }
+  // A page shown as the file has it is read again off its scrubbed text: a
+  // name the run missed stands in the file's text too.
+  refreshRawPages();
   printPut = moved ? was : null;
 }
 
@@ -2273,6 +2277,17 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         b.addEventListener("click", (e) => { e.preventDefault(); toggleSwap(Number(sec.dataset.index)); });
         lab.appendChild(b);
       }
+      {
+        // ⇄ Raw: this page as the file has it, in the page's place (a page as
+        // the file has it, below); read off the section at the click for the
+        // same reason.
+        const b = document.createElement("button");
+        b.className = "raw-page";
+        b.type = "button";
+        b.addEventListener("click", (e) => { e.preventDefault(); toggleRaw(Number(sec.dataset.index)); });
+        setRawButton(b, false);
+        lab.appendChild(b);
+      }
       if (p.header != null) {
         // Strip this page's text for DID_NOT_OCR (a page that did not OCR,
         // below), or — on a page that already reads it — ask for it to be
@@ -2698,7 +2713,7 @@ function updateDirty() {
         ? `Write ${names} standing in the clear as ${asPn} (Ctrl+S) — the save does it on its own; nothing has to be edited first`
         : "Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)";
   $("edit-toggle").disabled = !doc;
-  rawBtn.disabled = !doc;
+  refreshRawPages(); // a raw page says whether it is the disk or the edits
   $("st-dirty").textContent = dirty ? "● Unsaved edits"
     : pending.length ? "● " + pending.join(" and ") + " to write" + (clear ? `, and ${names} to fake` : "")
     : clear ? `● ${names} to write as ${asPn} — Save does it`
@@ -3903,6 +3918,7 @@ function scanStale() {
     || scanned.phrases !== phrases || scanned.keeps !== keeps || scanned.master !== masterKeeps || scanned.spots !== spots;
 }
 function paintHighlights() {
+  refreshRawPages(); // a raw page's text, and the names standing in it
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   paintRowMarks();
   if (marksOff) return; // the words, and nothing read over them
@@ -8965,6 +8981,8 @@ function shedMember(m, secs) {
     doc.pages[i].lines = TD.serializeNodes(body).split("\n");
     sec.style.height = (Math.round(heights[k] * 100) / 100) + "px"; // measured before it is emptied
     inner.innerHTML = "";
+    sec.classList.remove("raw"); // the file's text went with the rest; it comes back as text
+    rawPages.delete(sec);
     sec.classList.add("shed");
   });
   m.shed = true;
@@ -11106,8 +11124,18 @@ function applyMatchedLayoutNow() {
   // two columns are the same pages whatever the grid has got to.
   const near = new Set(grid ? nearPages() : []);
   const lite = [textEpoch, w0, settings.lineHeight, settings.font, settings.customFont].join("|");
+  // Pages shown as the file has them (⇄ Raw): the file's lines, fixed-pitch,
+  // with no grid to lay them on. Each flows at the height it stood at, and its
+  // slot is held to it the way a shed page's is, so the columns stay in step.
+  const rawSlots = [];
   for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
     const i = Number(sec.dataset.index);
+    if (sec.classList.contains("raw")) {
+      clearMatched(sec);
+      const el = on ? slots.get(i) : null;
+      if (el) { matchedSlots.add(el); fitSlot(el, w0); rawSlots.push([el, sec]); }
+      continue;
+    }
     const slot = grid ? slots.get(i) || null : null;
     const t = slot && pdfTarget(i);
     if (!slot || !t) { clearMatched(sec); continue; }
@@ -11522,7 +11550,7 @@ function applyMatchedLayoutNow() {
       const sec = pagesEl.querySelector(`.tpage[data-index="${el.dataset.index}"]`);
       if (sec) blanks.push([el, sec]);
     }
-    const held = blanks.concat(shedSlots).map(([el, sec]) => [el, sec.getBoundingClientRect().height]);
+    const held = blanks.concat(shedSlots, rawSlots).map(([el, sec]) => [el, sec.getBoundingClientRect().height]);
     for (const [el, h] of held) {
       const want = (Math.round(h * 100) / 100) + "px";
       if (el.style.height !== want) el.style.height = want;
@@ -11673,7 +11701,7 @@ function shapePages({ all = false } = {}) {
     // it keeps the shape it had: swapped back, it comes up at the size it was
     // fitted to. Taking the fit off it drew it at the full reading size the
     // moment it came back, and then the next pass shrank it again.
-    if (sec.classList.contains("swapped")) continue;
+    if (sec.classList.contains("swapped") || sec.classList.contains("raw")) continue;
     const loose = sec.classList.contains("matched")
       || (!clipped && sec.querySelector(".line.trailer"));
     if (loose) {
@@ -12078,6 +12106,8 @@ function applySwapsNow() {
     const t = pdfTarget(i);
     const on = !sbsOn && !!t && swaps.has(t.key);
     if (sec.classList.contains("swapped") !== on) moved = true;
+    // One view of a page at a time: the PDF page shown takes the file's text off.
+    if (on && sec.classList.contains("raw")) setRaw(sec, false);
     sec.classList.toggle("swapped", on);
     let inline = inlines.get(sec) || null;
     if (on) {
@@ -13149,7 +13179,7 @@ $("rb-miss-find").addEventListener("click", findMissInText);
 $("rb-miss-close").addEventListener("click", () => showMissRow(false));
 
 
-// ── the file as text ─────────────────────────────────────────────────────────────────
+// ── a page as the file has it (⇄ Raw) ──────────────────────────────────────────────
 //
 // Everything the reader does is a view: the fakes are shown as the REAL names,
 // the lines are laid out as sheets, the margin numbers are given a ruled
@@ -13159,122 +13189,133 @@ $("rb-miss-close").addEventListener("click", () => showMissRow(false));
 // is the bytes, not the view, and the two are meant to differ in exactly one
 // way: the file carries the pseudonyms.
 //
-// So this is the file. Not a rendering of it — the same text a save writes,
-// built the same way a save builds it (`serializeHeld` per page, which writes
-// a pseudonym span's FAKE and never the real name it shows), through the same
-// `serializeExport` that round-trips a document byte for byte. Opened on a
-// document nobody has edited, what is on screen here is what is on the disk,
-// character for character.
+// So ⇄ Raw on a page's label puts that page's own text in the page's place,
+// the way ⇄ PDF puts its PDF page there: the header line, the margin numbers
+// and the spacing exactly as they sit in the file, fixed-pitch and wrapping
+// off as a plain editor opens it, the pseudonyms as PDF-Linker wrote them.
+// Not a rendering of the file: the text a save writes, built the way a save
+// builds it (`serializeHeld`, which writes a pseudonym span's FAKE and never
+// the real name it shows), so on a page nobody has edited it is the disk,
+// character for character. The page's own text stays in the DOM under it,
+// hidden, and still saves; ⇄ Text puts it back. One view of a page at a time:
+// the PDF page shown takes the file's text off, and the file's text the PDF
+// page. Beside the PDF the page leaves the grid while it is raw — the file's
+// lines are the file's, and there is no grid to lay them on.
 //
-// WHERE THEY DIFFER IT SAYS SO. With edits not yet written the disk still
-// holds the version before them, and the header says which this is. And a real
-// value the key binds, typed in and not yet saved, stands here as itself —
-// because it is what the document holds at this moment — with a line under it
-// saying that a save would write the pseudonym instead. Both are the truth
-// about a file that is in two states at once, which is a thing a reader should
-// say rather than hide.
-const rawModal = $("raw-modal");
-const rawBtn = $("raw-btn");
+// WHERE THE PAGE AND THE DISK DIFFER IT SAYS SO. With edits not yet written the
+// disk still holds the version before them, and the corner says which this is.
+// A real value the key binds standing in the text — a name the run missed — is
+// marked as it is on the page, because it is what the file carries now.
 
-/** One member's pages exactly as a save would write them. */
-function memberDiskPages(m) {
-  const pages = [];
-  for (let i = m.from; i < m.from + m.count; i++) {
-    // A page on screen is read off the page; one the reel has shed was read
-    // off it as it was shed, and doc.pages has carried it since.
-    const body = bodyForPage(i);
-    const lines = body ? TD.serializeHeld(body).text.split("\n") : (doc.pages[i].lines || []);
-    pages.push(Object.assign({}, doc.pages[i], { lines }));
-  }
-  return pages;
+/** A page's text exactly as a save would write it — banner or header line, then its lines — and its spot keeps' places in it. */
+function rawPageText(sec) {
+  const p = (doc && doc.pages[Number(sec.dataset.index)]) || {};
+  const body = sec.querySelector(".page-body");
+  const own = body ? TD.serializeHeld(body) : { text: (p.lines || []).join("\n"), held: [] };
+  const head = [p.banner, p.header].filter((l) => l != null);
+  // A page that is its header alone writes no line under it.
+  const parts = own.text === "" && !(p.lines || []).length ? head : head.concat(own.text);
+  const lead = head.length && parts.length > head.length ? head.join("\n").length + 1 : 0;
+  return { text: parts.join("\n"), held: own.held.map(([a, b]) => [a + lead, b + lead]) };
 }
 
-/** One member's text exactly as a save would write it. */
-function memberDiskText(m) {
-  return TD.serializeExport({ newline: m.newline, trailingNewline: m.trailingNewline, pages: memberDiskPages(m) });
+/** The ⇄ Raw button, as the page stands. */
+function setRawButton(b, on) {
+  const label = on ? "⇄ Text" : "⇄ Raw";
+  if (b.textContent !== label) b.textContent = label;
+  b.title = on
+    ? "Back to the text of this page"
+    : "This page as the file has it, in its place — the pseudonyms as PDF-Linker wrote them, the page header, the margin numbers and the spacing exactly as they sit on disk";
+  b.setAttribute("aria-pressed", String(on));
 }
 
-// The file is shown whole — it is the file — but opened where the reading
-// is: the page being read is scrolled to the top of the view and its header
-// line marked. Each page is written as its own text, so the pre holds the
-// same characters in the same order (and Copy copies the file); only the
-// header of the page being read sits in a span of its own.
-function fillRawText(pre, m, text, here) {
-  pre.textContent = text;
-  const pages = memberDiskPages(m);
-  const nl = m.newline || "\n";
-  const chunks = pages.map((p) => [p.banner, p.header, ...(p.lines || [])].filter((l) => l != null).join(nl));
-  // Pages with nothing in them at all (no banner, header or line) are not
-  // written, and a page's place is then not a place in the text.
-  if (chunks.some((c, i) => !c && !pages[i].lines.length)) return null;
-  if (chunks.join(nl) + (m.trailingNewline ? nl : "") !== text) return null;
-  if (here < 0 || here >= pages.length) return null;
+/** A raw page's text, written again where the page, its edits or the names standing in it have moved. */
+function fillRaw(sec) {
+  const view = sec.querySelector(".page-inner > .raw-sheet");
+  if (!view) return;
+  const { text, held } = rawPageText(sec);
+  const m = reelMemberOf(Number(sec.dataset.index));
+  const tag = m && m.dirty
+    ? "The file with your unsaved edits — the disk still has the version before them"
+    : "The file as it is on disk";
+  // The marks are the page's own leak marks (scanPassNow): every real name the
+  // key binds, past the values kept for the case, the spot keeps and the
+  // parties of cited decisions.
+  const cited = TD.citedNameSpans(text);
+  const leaks = reals
+    ? PK.findRealSpans(reals, TD.blankRanges(maskKept(text), held)).filter((h) => !TD.insideSpans(cited, h.start, h.end))
+    : [];
+  // Nothing moved, nothing written: a selection being made in it to copy survives.
+  const sig = [tag, text, leaks.map((h) => h.start + "-" + h.end).join(",")].join("\u0000");
+  if (view.__sig === sig) return;
+  view.__sig = sig;
+  view.querySelector(".raw-tag").textContent = tag;
+  const pre = view.querySelector(".raw-text");
   pre.textContent = "";
-  const before = chunks.slice(0, here).join(nl) + (here ? nl : "");
-  const page = pages[here];
-  const headLine = page.banner != null ? page.banner : page.header;
-  const rest = chunks[here].slice(headLine != null ? headLine.length : 0);
-  const after = (here < chunks.length - 1 ? nl + chunks.slice(here + 1).join(nl) : "") + (m.trailingNewline ? nl : "");
-  const mark = document.createElement("span");
-  mark.className = "raw-here";
-  mark.textContent = headLine != null ? headLine : "";
-  pre.append(document.createTextNode(before), mark, document.createTextNode(rest + after));
-  return mark;
+  let at = 0;
+  for (const h of leaks) {
+    if (h.start > at) pre.append(text.slice(at, h.start));
+    const mark = document.createElement("span");
+    mark.className = "raw-leak";
+    mark.title = "A real name from the key, standing in the file — a save writes its pseudonym only once you have said to fake it";
+    mark.textContent = text.slice(h.start, h.end);
+    pre.append(mark);
+    at = h.end;
+  }
+  pre.append(text.slice(at));
+}
+function refreshRawPages() {
+  for (const sec of rawPages) {
+    if (!sec.isConnected) rawPages.delete(sec); // a document closed, or built again
+    else fillRaw(sec);
+  }
 }
 
-function showRawFile(on) {
-  rawModal.hidden = !on;
-  if (!on) return;
-  const m = reelCurrent();
-  if (!doc || !m) { rawModal.hidden = true; return; }
-  const text = memberDiskText(m);
-  $("raw-title").textContent = m.name;
-  const pre = $("raw-text");
-  const here = Math.max(0, Math.min(m.count - 1, readingPage() - m.from));
-  const mark = fillRawText(pre, m, text, here);
-  pre.scrollLeft = 0;
-  pre.scrollTop = 0;
-  if (mark && here > 0) {
-    // One whole line of the page before stays in view above the header.
-    const cs = getComputedStyle(pre);
-    const line = parseFloat(cs.lineHeight) || 18;
-    const top = mark.getBoundingClientRect().top - pre.getBoundingClientRect().top;
-    pre.scrollTop = Math.max(0, Math.round(top - (parseFloat(cs.paddingTop) || 0) - line));
+/** Show a page as the file has it, or as text again. */
+function setRaw(sec, on) {
+  const inner = sec.querySelector(".page-inner");
+  if (!inner || sec.classList.contains("raw") === on) return;
+  let view = inner.querySelector(":scope > .raw-sheet");
+  if (on) {
+    // The sheet keeps the height the page had, so the pages below it stay put.
+    const h = inner.getBoundingClientRect().height;
+    if (!view) {
+      view = document.createElement("div");
+      view.className = "raw-sheet";
+      const tag = document.createElement("div");
+      tag.className = "raw-tag";
+      const pre = document.createElement("pre");
+      pre.className = "raw-text";
+      view.append(tag, pre);
+      inner.appendChild(view);
+    }
+    view.style.minHeight = h > 0 ? h + "px" : "";
+    sec.classList.add("raw");
+    rawPages.add(sec);
+    fillRaw(sec);
+  } else {
+    if (view) view.remove();
+    sec.classList.remove("raw");
+    rawPages.delete(sec);
   }
-
-  // What a reader of this ought to be told, in the order it matters.
-  const notes = [];
-  if (m.dirty) notes.push("● with your unsaved edits — the file on disk is still the version before them");
-  const typed = reals ? PK.findReals(reals, TD.blankRanges(maskKept(text), TD.citedNameSpans(text))) : [];
-  if (typed.length) {
-    notes.push(`⚠ ${typed.length} real value${typed.length === 1 ? "" : "s"} the key binds stand${typed.length === 1 ? "s" : ""} here (${typed.slice(0, 3).map((w) => w.real).join(", ")}${typed.length > 3 ? "…" : ""}) — a save writes the pseudonym only over the ones you have said to fake`);
-  }
-  $("raw-note").textContent = notes.join(" · ");
-
-  const lines = text.length ? text.split(/\r\n|\n/).length : 0;
-  const crlf = m.newline === "\r\n";
-  $("raw-foot").textContent =
-    `${lines.toLocaleString()} line${lines === 1 ? "" : "s"} · ${text.length.toLocaleString()} character${text.length === 1 ? "" : "s"} · ` +
-    `${crlf ? "CRLF" : "LF"} line endings · UTF-8` +
-    (m.trailingNewline ? " · ends with a newline" : " · no newline at the end") +
-    (mark && m.count > 1 ? ` · opened at ${TD.pageLabel(doc.pages[m.from + here]) || `page ${here + 1}`}, the page you are reading` : "") +
-    (reel.length > 1 ? ` · this is ${m.name}, the document you are reading; the others on the reel are their own files` : "");
-  $("raw-text").focus({ preventScroll: true });
+  const b = sec.querySelector(":scope > .page-label .raw-page");
+  if (b) setRawButton(b, on);
 }
-
-rawBtn.addEventListener("click", () => showRawFile(true));
-$("raw-close").addEventListener("click", () => showRawFile(false));
-rawModal.addEventListener("mousedown", (e) => { if (e.target === rawModal) showRawFile(false); });
-$("raw-wrap").addEventListener("change", (e) => rawModal.classList.toggle("wrap", e.target.checked));
-$("raw-copy").addEventListener("click", async () => {
-  try {
-    await navigator.clipboard.writeText($("raw-text").textContent);
-    toast("The file copied — pseudonyms and all, exactly as it sits on disk.");
-  } catch { toast("The clipboard refused it — select the text and copy it by hand.", { error: true }); }
-});
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !rawModal.hidden) { e.preventDefault(); showRawFile(false); }
-}, true);
+function toggleRaw(i) {
+  const sec = pagesEl.querySelector(`.tpage[data-index="${i}"]`);
+  if (!sec || sec.classList.contains("shed")) return;
+  const on = !sec.classList.contains("raw");
+  holdReading(); // the page changes size under the reading; the reading stays where it is
+  setRaw(sec, on);
+  // …and the PDF page off it, where it was showing one: the swap is undone
+  // and forgotten, as ⇄ Text on it would.
+  const t = on ? pdfTarget(i) : null;
+  if (t && swaps.has(t.key)) { swaps.delete(t.key); persistSwaps(); applySwaps(); }
+  textAnchors = null; textLineTops = null;
+  if (gridOn()) applyMatchedLayout(); else shapePages();
+  placeCitations(); // a raw page's text carries no underlines; back as text, it does again
+  autoRemeasure();
+}
 
 // ── hooks for the PWA tab shell ───────────────────────────────────────────────────────
 // The shell hands a document in, and — where it opened a whole case folder —
