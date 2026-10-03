@@ -583,6 +583,10 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
   font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 .page-label .nocr-page:hover { background: #e3e5e8; }
+/* ↻ OCR This Page: the page reads [DID NOT OCR] — stripped here, or marked so
+   by PDF-Linker — and is red, so a page with no text in it stands out. */
+.page-label .nocr-page.stripped { background: #c62828; border-color: #c62828; color: #fff; }
+.page-label .nocr-page.stripped:hover { background: #a61d1d; border-color: #a61d1d; }
 /* ↻ OCR This Page, asked: the request is on the list for PDF-Linker. */
 .page-label .nocr-page.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 /* ✎ Use my text, beside it: the page's typed-in text is to be the PDF's own. */
@@ -687,6 +691,15 @@ body.sbs .line.trailer { display: none; }
   display: inline-block; white-space: pre; box-sizing: border-box; text-indent: 0;
   min-width: calc(var(--cols) * var(--col-u)); padding-right: calc(2 * var(--col-u));
 }
+/* Off the PDF's grid, a SECOND column — a page set in two — stands where the
+   reader's own font needs it: at one place down every line beside it, a
+   gutter clear of the widest text to its left (columns.js, alignColumns). The
+   grid's character is the font's average one, and a justified left-hand
+   column or a page in capitals ran past it into the column beside. --cx is a
+   cell's width and --ind-x where an indented line's text begins, in the
+   page's body type, so the fit to the paper scales them with the rest. */
+.page-body:not(.fixed) .lt.ci.cx { text-indent: calc(var(--ind-x) * var(--body-em) - var(--lead) * var(--col-sp-n, 0.25) * 1em); }
+.page-body:not(.fixed) .cc.cx { min-width: calc(var(--cx) * var(--body-em)); }
 /* The gap's own spaces: the cell's width does their work, so they take no
    room — except in the editor, where what is typed into a gap must show. No
    height either: on the PDF's grid a line's leading is set in pixels, which a

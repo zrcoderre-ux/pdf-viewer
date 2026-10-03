@@ -233,6 +233,15 @@ console.log("a row's own type: one tall glyph does not set the line's size or pl
     pdfRows([{ str: "Id.", x: 54, top: 100, w: 12, h: 9.5 }, { str: "1", x: 66.5, top: 100.5, w: 3, h: 6 }], null).map((r) => r.text), ["Id. 1"]);
   check("a second column on the same baseline stays in the row",
     pdfRows([{ str: "JANE DOE,", x: 90, top: 300, w: 60, h: 12 }, { str: "Case No.: 25STCV12345", x: 330, top: 300, w: 120, h: 12 }], null).map((r) => r.text), ["JANE DOE, Case No.: 25STCV12345"]);
+  // …and the row says where it begins: a page whose every line has both
+  // halves has its grid read off them (text-reader.js, charGrid's pairs).
+  check("…and the row says where that column begins, and the word it begins with",
+    pdfRows([{ str: "JANE DOE,", x: 90, top: 300, w: 60, h: 12 }, { str: "Case No.: 25STCV12345", x: 330, top: 300, w: 120, h: 12 }], null)[0].breaks,
+    [{ x: 330, word: "case" }]);
+  check("words a space apart are no column",
+    pdfRows([{ str: "JANE", x: 90, top: 300, w: 30, h: 12 }, { str: "DOE,", x: 123, top: 300, w: 30, h: 12 }], null)[0].breaks, undefined);
+  check("…nor an item clear of the one before it but not of a longer one that began first",
+    pdfRows([{ str: "A line that runs on", x: 90, top: 300, w: 300, h: 12 }, { str: "x", x: 100, top: 300, w: 5, h: 12 }, { str: "Next", x: 400, top: 300, w: 30, h: 12 }], null)[0].breaks, undefined);
 }
 
 console.log("the type a page is set in: the PDF's own sizes at the reading size");

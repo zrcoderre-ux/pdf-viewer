@@ -120,6 +120,62 @@ columns.js) — `splitAt` splits text nodes only, so a cut inside a name put the
 whole name in a cell sized for the characters before the cut, and side by side
 squeezed it to a smear.
 
+A JUSTIFIED page in two columns (the user's contract terms: a left-hand
+column filling its width, the second at 62) reaches its second column with a
+space or two on most lines, and those begin nothing there; the run is only the
+lines that fall short of it. Its first three lines were above the first such
+line, so out of the band, and were drawn as one line, the right-hand column
+straight on from the left. So a second column's band now runs on past its run
+(`columnBands`, the `close` of a run): over each line, one at a time, that
+LANDS on it — text at the column, one or two spaces before it, text before
+those — where the column is TIGHT (a line of its run comes within
+`COLUMN_TIGHT`, 4, of it, or a line inside the run lands on it), and over a
+line within `reach` that begins a character either side of it (an OCR'd page
+sets the column a character off on some lines). A blank line, or one that
+does not land, ends it. A form's box, whose labels stand well clear of their
+column, is not tight, so the prose beside it is not cut on a space that
+happens to fall there; landings PAST the ends do not make a column tight
+either, since one line of prose beside a box can put a word on its column by
+chance (tested both ways in `test-textdoc.mjs`).
+
+Off the PDF's grid the cells' widths on the font's AVERAGE character did not
+hold such a page: a justified left-hand piece runs up to its column, and
+capitals run half as wide again, so each piece overran its cell by its own
+amount and pushed its own line's right-hand column on — ragged, and run into
+the left. Each SECOND column is now placed for the font (`textdoc.placeColumns`,
+pure; `columns.alignColumns`): columns within `COLUMN_SNAP` (2) of each other
+are one, a line's cut a character either side of one is on it, and the column
+stands at the same place down every line beside it — its place on the grid,
+or the widest text to its left plus a gutter of `COLUMN_GUTTER` (4) grid
+characters, whichever is further, but no further than `COLUMN_STRETCH` (1.5)
+times its place on the grid (a line far past that pushes only itself). Every
+other place on such a line keeps its grid distance from the column before it,
+so a gap or an indent in the right-hand column moves with it; a third column
+is placed past the second the same way. The widths are the pieces' own, read
+off the font on a canvas (`textEm`, cached per font; a name as it is shown,
+the gap's spaces left out, a line the PDF set apart at its own size), so a
+pass costs no layout: about a millisecond for a page, where reading them off
+the page cost five. `dressColumns` places a page as it dresses it, and
+`shapePages` places the pages it fits (after their line sizes, which
+`applyPdfTypeSizes` sets there) and the trailer's page it leaves to flow.
+The places are written in the page's body type, `--cx` on a cell (its width)
+and `--ind-x` on an indented line (where its text begins), both under `.cx`,
+which `.page-body:not(.fixed)` reads, so the fit to the paper scales them and
+side by side ignores them. A line or cell placed before and not now is put
+back on the grid (`unplace`), and `undressColumns` takes the place off with
+the cells. `test-columns.html` checks the straight column, the gutter with a
+line of capitals beside it, the page set smaller, and a line put back.
+
+Side by side, a page whose every line has both halves begins no line anywhere
+but the margin, so `pdfsync.charGrid` had no two lines four columns apart to
+fit and the page fell back to `.rowleft`, ragged as above. `pdfRows` now keeps,
+on a row whose halves share a baseline, where each half after the first
+begins (`breaks`: an item a gutter of 1.5 × the type clear of everything
+before it, and its first word), and the grid's pairs take a two-column line's
+right-hand half too: the break whose word the half begins with, or the row
+itself where the line was matched to its right-hand half. That page gets a
+grid, and its right-hand column stands where the PDF prints it.
+
 The grid unit is `--col-u`: in the flowing view and on pleading paper,
 `--col-n` × `--body-em`; side by side `--body-em` is the PDF's body type at the
 grid's scale (`--grid-em`, written with the grid). Pleading paper keeps all of

@@ -15,7 +15,7 @@ import {
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, didNotOcrLines, DID_NOT_OCR,
-  columnCuts, columnBands, columnWidths, lineIndent, COLUMN_GAP, COLUMN_REACH,
+  columnCuts, columnBands, columnWidths, lineIndent, placeColumns, COLUMN_GAP, COLUMN_REACH, COLUMN_SNAP, COLUMN_GUTTER, COLUMN_STRETCH,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
   textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
@@ -646,6 +646,104 @@ console.log("columns laid out with spaces");
   check("…and a gap of spaces inside a span is not one either",
     columnCuts("Plaintiff Pat    Doe     Case No. 1", { atoms: [[10, 20]] }), [25]);
   check("each cell spans to the next cut, the first from past the indent", [columnWidths([62], 17), columnWidths([40, 62])], [[45], [40, 22]]);
+}
+// A JUSTIFIED page in two columns (the user's contract, page 15): the left-hand
+// column fills its width, so most of its lines reach the second column with a
+// space or two and begin nothing there. The lines above the first that falls
+// short of it, and below the last, were left out of its band and drawn as one
+// line, the right-hand column run straight on from the left.
+console.log("a justified page in two columns");
+{
+  const L = (left, right, at = 62, lead = 1) => {
+    const s = " ".repeat(lead) + left;
+    return s + " ".repeat(Math.max(1, at - s.length)) + right;
+  };
+  const page = [
+    "                   BUSINESS LOAN AND SECURITY          AGREEMENT TERMS AND CONDITIONS",
+    "",
+    L("each Guarantor authorize Windermere to use its, his, or her", "not waive any other Event of Default. None of the"),
+    L("name, city, and state in a listing of Windermere's customers", "provisions of this Agreement may be waived except by a"),
+    L("and in Windermere's advertising and marketing materials. To", "specific written waiver signed by an officer of Windermere"),
+    L("ensure proper service, Windermere may choose to monitor", "and delivered to Borrower. The provisions of this"),
+    L("and/or record telephone calls between Windermere and its", "Agreement may not be amended, except in a writing"),
+    L("customers or other third parties. Borrower agrees that any", "signed by   Borrower   and   Windermere. Borrower will"),
+    L("call between Windermere and Borrower (or its representative)", "reimburse Windermere for all reasonable attorneys'"),
+    L("may be monitored and/or recorded for this purpose.", "fees (in the event Windermere utilizes a third party law"),
+    L("principal balance and all lawful interest and fees are paid", "Agreement for convenience. Borrower and Windermere"),
+    "",
+    L("name, city, and state in a listing of Windermere's customers", "provisions of this Agreement may be waived except by a"),
+  ].map((text) => ({ text }));
+  check("the case: the top three lines reach the column with two spaces, one, two",
+    [2, 3, 4].map((i) => page[i].text.slice(59, 62).split("").filter((c) => c === " ").length), [2, 1, 2]);
+  const bands = columnBands(page);
+  check("a second column's band runs up over the lines that reach it, and down past its last",
+    bands.map((b) => b.second.has(62)), [false, false, true, true, true, true, true, true, true, true, true, false, false]);
+  check("…so each of them is cut there", [2, 3, 4, 8, 10].map((i) => columnCuts(page[i].text, bands[i])), [[62], [62], [62], [62], [62]]);
+  check("…and a blank line ends it: the same words under it are two words",
+    [bands[12].second.has(62), columnCuts(page[12].text, bands[12])], [false, []]);
+  check("…as does a line that does not land on the column: the heading above is its own",
+    columnCuts(page[0].text, bands[0]).includes(62), false);
+  // A form's box stands well clear of its labels: no line of it runs up to
+  // its column, and the prose beside it is not cut on a space that happens
+  // to fall there.
+  const prose = "Plaintiff dismisses the entire action of all parties and all causes of action.";
+  const box = [
+    prose,
+    "ATTORNEY OR PARTY WITHOUT ATTORNEY" + " ".repeat(7) + "FOR COURT USE ONLY",
+    "NAME:" + " ".repeat(36) + "(court stamp)",
+    "FIRM NAME:" + " ".repeat(31) + "(court stamp)",
+    prose,
+  ].map((text) => ({ text }));
+  const fb = columnBands(box);
+  check("the case: the prose has a word at the box's column, one space before it", [prose[40], prose[41] !== " ", prose[39] !== " ", fb[2].second.has(41)], [" ", true, true, true]);
+  check("a box whose labels stand clear of its column does not run past its lines",
+    [columnCuts(prose, fb[0]), columnCuts(prose, fb[4])], [[], []]);
+  // An OCR'd page sets a column a character off on some lines: a line at the
+  // edge of the run that begins one character from the column stands beside
+  // it all the same.
+  const caption = [
+    L("WINDERMERE HAVENWOOD, LLC, a California", ")  Case No.: 25STCV59720", 51, 0),
+    L("limited liability company,", ")", 50, 0),
+    L("", ")  COMPLAINT FOR:", 50, 0),
+    L("Plaintiff,", ")", 50, 16),
+    L("vs.", ")  1. BREACH OF CONTRACT;", 50, 8),
+  ].map((text) => ({ text }));
+  check("a line at the edge of the run that begins a character off the column is beside it",
+    columnBands(caption).map((b) => [...b.second]), [[50], [50], [50], [50], [50]]);
+}
+console.log("a second column placed for the reader's own font");
+{
+  const at = (second) => new Set(second);
+  const opts = { unit: 10, gutter: 40, pad: 20 };
+  const placed = placeColumns([
+    { from: 0, cuts: [20], second: at([20]), w: [150] },
+    { from: 0, cuts: [20], second: at([20]), w: [230] },
+    { from: 20, cuts: [], second: at([20]) },
+    { from: 0, cuts: [21], second: at([20]), w: [100] },
+    { from: 24, cuts: [], second: at([20]) },
+    { from: 0, cuts: [20, 32], second: at([20]), w: [120, 50] },
+    null,
+    { from: 5, cuts: [], second: at([]) },
+  ], opts);
+  check("the column stands where the widest text to its left ends, a gutter on, on every line beside it",
+    placed.slice(0, 2).map((p) => p.ends), [[270], [270]]);
+  check("…a line beginning at it, and one whose column is a character off, there too",
+    [placed[2], placed[3].ends], [{ ind: 270, ends: [] }, [270]]);
+  check("…an indent in the right-hand column and a gap inside it keep their grid distance from it",
+    [placed[4].ind, placed[5].ends], [310, [270, 390]]);
+  check("a line beside no second column keeps the plain grid", [placed[6], placed[7]], [null, null]);
+  check("no further in than the grid has it where everything to its left fits",
+    placeColumns([{ from: 0, cuts: [20], second: at([20]), w: [100] }], opts)[0].ends, [200]);
+  check(`…and no further out than ${COLUMN_STRETCH} times that for one line far too wide: it pushes its own line`,
+    placeColumns([{ from: 0, cuts: [20], second: at([20]), w: [400] }, { from: 0, cuts: [20], second: at([20]), w: [150] }], opts).map((p) => p.ends), [[300], [300]]);
+  check(`second columns within ${COLUMN_SNAP} of each other are one column`,
+    placeColumns([{ from: 0, cuts: [62], second: at([62]), w: [600] }, { from: 0, cuts: [61], second: at([61]), w: [500] }], opts).map((p) => p.ends), [[640], [640]]);
+  check("a third column is placed past the second, from where the second stands",
+    placeColumns([{ from: 0, cuts: [20, 50], second: at([20, 50]), w: [250, 300] }, { from: 0, cuts: [20, 50], second: at([20, 50]), w: [100, 100] }], opts).map((p) => p.ends),
+    [[290, 630], [290, 630]]);
+  check("on pleading paper the grid is counted from the body margin",
+    placeColumns([{ from: 4, cuts: [50], second: at([50]), w: [100], origin: 4 }], opts)[0], { ind: 0, ends: [460] });
+  check("the gutter is four grid characters", COLUMN_GUTTER, 4);
 }
 console.log("indents on the grid");
 {

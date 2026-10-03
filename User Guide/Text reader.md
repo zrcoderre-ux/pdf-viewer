@@ -175,16 +175,25 @@ app, which routes it to the reader tab.
   an indent is as deep as the export made it, and a sentence's double space is
   left alone. A left-hand piece too wide for its share of the grid — capitals
   run wide — pushes only its own line's right-hand column on, by a small
-  margin, and never runs into it. A page in columns is set no larger than its
-  widest column line fits across the paper, so a column never wraps back to the
-  left margin. On pleading paper the columns are counted from the body margin,
+  margin, and never runs into it. **A page set in two columns reads as two
+  columns.** Its right-hand column stands at one place on every line beside
+  it, set out past the widest line of the left-hand column with a gutter of
+  four characters' width, so a justified left column or a page in capitals no
+  longer runs into the column beside it or leaves it ragged. The lines of a
+  justified column that reach the right-hand one with a single space or two
+  are split there too, above and below the lines that fall short of it, and a
+  column an OCR'd page sets a character off on some lines is still one column.
+  A page in columns is set no larger than its widest column line fits across
+  the paper, so a column never wraps back to the left margin. On pleading paper the columns are counted from the body margin,
   and a numbered line now keeps its indent too — the spaces after the number
   used to be dropped with the number, so a centred heading sat at the margin
   and a line of the caption's right-hand column alone on its number (a cause
   of action, "DEMAND FOR JURY TRIAL") fell back to the left side of the page.
   The caption's columns hold side by side as well, measured in the PDF's body
   type, so the list of causes of action stands in one column down the caption
-  there too. Display only: the spaces are all still there, and a save, a copy, Find and
+  there too. Side by side, a page whose every line has both columns takes its
+  grid from where the PDF prints the right-hand halves, so that column stands
+  where the PDF has it instead of wherever each left-hand line ends. Display only: the spaces are all still there, and a save, a copy, Find and
   the LEAKS walk read exactly what the file says. In the editor the gaps' own
   spaces are drawn, so what is typed into one is seen, and a line is laid out
   again once the typing stops.
@@ -1285,8 +1294,11 @@ app, which routes it to the reader tab.
   `[DID NOT OCR]`, so whoever reads the export next is told the page is there
   and its text is not, instead of being handed the noise. The page header
   stays, and so does PDF-Linker's *Authorities cited* list when it is the
-  last page that is stripped. It is an edit like any other: Ctrl+Z puts the
-  text back, and 💾 Save writes it.
+  last page that is stripped. A page stripped while it shows its text turns
+  to its PDF page (as ⇄ PDF would), since the mark is all its text now says;
+  side by side the PDF page is beside it already, and a page shown raw stays
+  raw. It is an edit like any other: Ctrl+Z puts the text back, on screen
+  again rather than under the PDF page, and 💾 Save writes it.
   **And PDF-Linker is told, so the page stays stripped.** A full PDF-Linker
   run rebuilds every export from its PDF, so on its own the strip lasted until
   the next run, which OCR'd the page again and wrote the noise back. The page
@@ -1302,9 +1314,11 @@ app, which routes it to the reader tab.
   the pages, so a reload, an undo or another session's save cannot leave it
   saying something the text does not.
   **…and ↻ OCR This Page undoes it.** On a page that already reads
-  `[DID NOT OCR]` the same button reads **↻ OCR This Page**. Where the strip
+  `[DID NOT OCR]` the same button reads **↻ OCR This Page**, in red, so a page
+  with no text in it stands out down the document. Where the strip
   is the reader's own and its line never reached the case folder, the page's
-  text comes straight back (one undo step; Ctrl+Z strips it again). Otherwise
+  text comes straight back (one undo step; Ctrl+Z strips it again), and shown,
+  where the strip had turned the page to its PDF page. Otherwise
   PDF-Linker may already have marked the page in its PDF, so the page goes on
   `New Real Values.txt` as `ocr again: FILE | page N`: PDF-Linker takes the
   mark off and its next full run reads the page again and exports its text.

@@ -26,7 +26,7 @@
 <div id="report">running…</div>
 <div id="stage"><div id="pages"></div></div>
 <script type="module">
-import { dressColumns, fitCells, charWidth, CELL_SQUEEZE_MIN } from "./viewer/columns.js";
+import { dressColumns, alignColumns, fitCells, charWidth, CELL_SQUEEZE_MIN } from "./viewer/columns.js";
 
 const stage = document.getElementById("stage");
 const pages = document.getElementById("pages");
@@ -205,6 +205,74 @@ out.push("a form whose column runs down part of the page:");
   check("the prose sits on the column (a word at 37, one space before it)", prose[37 - 1] === " " && prose[37] !== " " && prose[37 - 2] !== " ", JSON.stringify(prose.slice(32, 42)));
   check("beside the caption's box, it is cut at the box's column", !!lines[2].querySelector(".cc"), lines[2].innerHTML.slice(0, 120));
   check("under the caption, where the box does not run, it is one line of prose", !lines[12].querySelector(".cc"), lines[12].innerHTML.slice(0, 120));
+}
+
+out.push("off the PDF's grid, a second column at one place down a justified page:");
+{
+  // The flowing view (no .fixed): the user's contract, a justified page in two
+  // columns, with a line of capitals among it. On the font's average grid the
+  // left-hand pieces ran past the column by their own amounts, and the lines
+  // that reach it with a space or two were not cut at all.
+  const L = (left, right, at = 62, lead = 1) => { const s = " ".repeat(lead) + left; return s + " ".repeat(Math.max(1, at - s.length)) + right; };
+  const rows = [
+    L("each Guarantor authorize Windermere to use its, his, or her", "not waive any other Event of Default. None of the"),
+    L("name, city, and state in a listing of Windermere's customers", "provisions of this Agreement may be waived except by a"),
+    L("ensure proper service, Windermere may choose to monitor", "and delivered to Borrower. The provisions of this"),
+    L("call between Windermere and Borrower (or its representative)", "reimburse Windermere for all reasonable attorneys'"),
+    L("CUSTOMERS OR OTHER THIRD PARTIES. BORROWER AGREES THAT", "signed by   Borrower   and   Windermere. Borrower will"),
+    L("", "firm specializing in debt collection in connection", 62, 0),
+    L("may be monitored and/or recorded for this purpose.", "fees (in the event Windermere utilizes a third party law", 61, 0),
+  ];
+  const sec = document.createElement("section");
+  sec.className = "tpage";
+  sec.style.setProperty("--reader-size-eff", SIZE + "px");
+  sec.style.width = "1300px"; // a page fitted so its column lines are each one line (shapePages)
+  sec.innerHTML = '<div class="page-inner" style="height:auto"><div class="page-body"></div></div>';
+  const body = sec.querySelector(".page-body");
+  for (const text of rows) {
+    const line = document.createElement("div");
+    line.className = "line";
+    const lt = document.createElement("span");
+    lt.className = "lt";
+    lt.textContent = text;
+    line.append(lt);
+    body.append(line);
+  }
+  pages.append(sec);
+  dressColumns(body);
+  alignColumns([body]);
+  const lts = [...body.querySelectorAll(".lt")];
+  const at = (node, i) => { const r = document.createRange(); r.setStart(node, i); r.setEnd(node, i + 1); return r.getBoundingClientRect().left; };
+  /** Where the right-hand column's text begins on a line, and where the text to its left ends. */
+  const cols = () => lts.map((lt) => {
+    const cell = lt.querySelector(".cc");
+    if (!cell) { const t = lt.firstChild; return { col: at(t, t.data.search(/\S/)), end: null }; }
+    const r = document.createRange();
+    r.setStart(cell, 0);
+    r.setEndBefore(cell.querySelector(".cg"));
+    return { col: at(cell.nextSibling, 0), end: r.getBoundingClientRect().right };
+  });
+  const unit = cw.char * SIZE;
+  const c = cols();
+  const xs = c.map((x) => x.col);
+  const cut = lts.filter((lt) => lt.querySelector(".cc")).length;
+  check("every line is cut at the column, the ones running up to it with a space or two as well", cut === rows.length - 1, `${cut} of ${rows.length - 1}`);
+  check("the right-hand column begins at one place on every line", Math.max(...xs) - Math.min(...xs) <= 1, xs.map(r1).join(" "));
+  const gap = Math.min(...c.filter((x) => x.end != null).map((x) => x.col - x.end));
+  check("…a gutter of four grid characters clear of the widest text to its left, capitals and all", gap >= 4 * unit - 1, `${r1(gap)} vs ${r1(4 * unit)}`);
+  // The places are written in the body's type: the page fitted smaller to its
+  // paper takes them with it.
+  sec.style.setProperty("--fit", "0.6");
+  const small = cols().map((x) => x.col);
+  check("the page set smaller keeps its column straight", Math.max(...small) - Math.min(...small) <= 1, small.map(r1).join(" "));
+  sec.style.removeProperty("--fit");
+  // A line no longer beside the column goes back on the plain grid.
+  lts[2].textContent = "ensure proper service, Windermere may choose to monitor";
+  for (const lt of lts.slice(3)) lt.textContent = "";
+  dressColumns(body);
+  alignColumns([body]);
+  const left = body.querySelectorAll(".cx").length;
+  check("a line no longer beside a second column is back on the plain grid", left === 0, `${left} still placed`);
 }
 
 out.push("", `${"=".repeat(52)}`, `FAILURES: ${fails}`);

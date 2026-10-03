@@ -554,6 +554,14 @@ function overlaps(a, b) {
  * it, or stands up against something in it as a superscript does; one on
  * another baseline a column's gutter away from everything in the row is a
  * row of its own.
+ *
+ * …and where the halves DO share a baseline, as a justified page set in two
+ * columns has them, the row says where each half after the first begins:
+ * `breaks`, [{ x, word }] — an item standing a column's gutter clear of the
+ * one before it, and the first word it prints (lower case, letters and
+ * digits). The grid a two-column line is laid on is read off them
+ * (text-reader.js, charGrid's pairs) where no line of the page begins
+ * anywhere but the margin. Only on a row that has one.
  */
 export function pdfRows(items, size) {
   const rows = [];
@@ -587,7 +595,20 @@ export function pdfRows(items, size) {
     // with it.
     const body = its.filter((i) => Math.abs(i.h - height) <= height * 0.2);
     const base = Math.min(...(body.length ? body : its).map((i) => i.base));
-    return { top: base - height, left: its[0].x, height, text: its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim() };
+    const row = { top: base - height, left: its[0].x, height, text: its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim() };
+    // Clear of everything before it, not only of the item before it: a long
+    // item can start first and end last. An item of no width says nothing.
+    const breaks = [];
+    let right = its[0].x + its[0].w, known = its[0].w > 0;
+    for (let k = 1; k < its.length; k++) {
+      const it = its[k];
+      const word = (String(it.str).toLowerCase().match(/[a-z0-9]+/) || [""])[0];
+      if (known && word && it.x - right > Math.min(it.h, height) * 1.5) breaks.push({ x: it.x, word });
+      right = Math.max(right, it.x + it.w);
+      known = known && it.w > 0;
+    }
+    if (breaks.length) row.breaks = breaks;
+    return row;
   });
 }
 

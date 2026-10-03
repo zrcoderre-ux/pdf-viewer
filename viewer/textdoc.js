@@ -1471,6 +1471,11 @@ export const COLUMN_FIRM_AT = 12;
 // box beside the caption, the party boxes beside a signature — and the prose
 // above and below them is not in them.
 export const COLUMN_REACH = 3;
+// A second column whose left-hand half runs up to it — a gap this narrow on
+// one of its lines — is a page set in two columns, justified: its lines
+// above and below the run, which reach the column with a space or two, are
+// still beside it.
+export const COLUMN_TIGHT = 4;
 const GAP_RUN_RE = / +(?=\S)/g;
 
 /**
@@ -1523,19 +1528,45 @@ export function columnCuts(text, { stops = null, second = null, start = 0, atoms
  * a column are an indent (a form's checkbox items, a quotation), not a column
  * beside another, and a line of prose that runs across an indent is not cut
  * at it.
+ *
+ * A JUSTIFIED page in two columns fills its left-hand column's width, so most
+ * of its lines reach the second column with a space or two and begin nothing
+ * there; the run is only the lines that fall short of it. The lines above its
+ * first and below its last were left out of it, and drawn as one line with
+ * the right-hand column straight after the left. So a second column whose
+ * left-hand half comes within COLUMN_TIGHT of it on one of its lines runs on
+ * past its run, line by line, for as long as each line reaches it exactly
+ * with a gap of a space or two and text on both sides. A blank line, or one
+ * that does not land on the column, ends it there. A form's box, whose labels
+ * stand well clear of its column, is not tight, and the prose beside it is
+ * not cut on a space that happens to fall there.
  */
 export function columnBands(lines, { reach = COLUMN_REACH } = {}) {
   const list = lines || [];
-  const at = new Map(); // column → [{ i, beside }], in page order
+  const texts = list.map((l) => String(l && l.text != null ? l.text : ""));
+  const starts = list.map((l) => (l && l.start) || 0);
+  const at = new Map(); // column → [{ i, beside, gap }], in page order
+  const begins = list.map(() => []); // line → the columns it begins at
   list.forEach((l, i) => {
-    const s = String(l && l.text != null ? l.text : "");
+    const s = texts[i];
     const first = s.search(/\S/);
     if (first < 0) return;
-    const start = (l && l.start) || 0;
-    const add = (col, beside) => { if (!at.has(col)) at.set(col, []); at.get(col).push({ i, beside }); };
-    if (start + first > 0) add(start + first, false);
-    for (const c of columnCuts(s)) add(start + c, true);
+    const start = starts[i];
+    const add = (col, beside, gap) => { if (!at.has(col)) at.set(col, []); at.get(col).push({ i, beside, gap }); begins[i].push(col); };
+    if (start + first > 0) add(start + first, false, Infinity);
+    for (const c of columnCuts(s)) add(start + c, true, c - s.slice(0, c).trimEnd().length);
   });
+  // Whether line i reaches `col` as a justified left-hand column does: text
+  // there, one or two spaces before it, and text before them.
+  const lands = (i, col) => {
+    const s = texts[i], j = col - starts[i];
+    if (j < 2 || j >= s.length || s[j] === " " || s[j - 1] !== " ") return false;
+    const left = s.slice(0, j).trimEnd();
+    return left.trim().length > 0 && j - left.length <= 2;
+  };
+  // …and whether it begins a character either side of it: the same column,
+  // where an OCR'd page set it a little off on that line.
+  const nearly = (i, col) => begins[i].some((c) => c !== col && Math.abs(c - col) <= 1);
   const out = list.map(() => ({ stops: new Map(), second: new Set() }));
   for (const [col, hits] of at) {
     let run = [];
@@ -1543,7 +1574,26 @@ export function columnBands(lines, { reach = COLUMN_REACH } = {}) {
       if (run.length >= 2) {
         const n = run.length;
         const second = n >= COLUMN_FIRM && col >= COLUMN_FIRM_AT && run.some((h) => h.beside);
-        for (let i = run[0].i; i <= run[run.length - 1].i; i++) {
+        let from = run[0].i, to = run[run.length - 1].i;
+        // Tight: a line of its run runs up to it, or a line inside the run
+        // reaches it with a space or two. Lines PAST its ends say nothing of
+        // the kind: prose beside a form's box puts a word on the box's column
+        // by chance, and taken into the box's band it would carry the box's
+        // column out past its own left-hand half.
+        const tight = second && (run.some((h) => h.beside && h.gap <= COLUMN_TIGHT)
+          || Array.from({ length: to - from }, (_, k) => from + k).some((i) => lands(i, col)));
+        // A second column runs on past its run over the lines that still
+        // stand beside it: those that reach it as its own left-hand column
+        // does (a tight one), and those that begin a character off it, as
+        // its own lines do, within `reach` of the last.
+        for (let moved = second; moved;) {
+          moved = false;
+          while (tight && from > 0 && lands(from - 1, col)) { from--; moved = true; }
+          while (tight && to < list.length - 1 && lands(to + 1, col)) { to++; moved = true; }
+          for (let d = 1; d <= reach + 1 && from - d >= 0; d++) if (nearly(from - d, col)) { from -= d; moved = true; break; }
+          for (let d = 1; d <= reach + 1 && to + d < list.length; d++) if (nearly(to + d, col)) { to += d; moved = true; break; }
+        }
+        for (let i = from; i <= to; i++) {
           out[i].stops.set(col, n);
           if (second) out[i].second.add(col);
         }
@@ -1582,4 +1632,102 @@ export function lineIndent(text, { start = 0, origin = 0 } = {}) {
  */
 export function columnWidths(cuts, from = 0) {
   return cuts.map((c, i) => c - (i ? cuts[i - 1] : from));
+}
+
+// Second columns this close together are ONE column: an OCR'd page sets the
+// same column a character either side of where it stands on the lines around.
+export const COLUMN_SNAP = 2;
+// The white a second column keeps from the widest text to its left, in grid
+// characters, at the least: two columns read as two, not as one line.
+export const COLUMN_GUTTER = 4;
+// …and how far out a second column is taken for that text: no further than
+// this times its place on the grid. A line wider than that (a cut in the wrong
+// place, a run of capitals past any column) pushes the rest of its own line
+// on rather than take the whole column out to the edge of the paper.
+export const COLUMN_STRETCH = 1.5;
+
+/**
+ * Where a page's columns stand when its text is set in the reader's own font,
+ * whose letters are not the grid's: the left-hand column's lines run wider or
+ * narrower than the characters the export gave them, and a justified column
+ * running up to the second one, or a page in capitals, ran into it. Each
+ * SECOND column (columnBands) is placed once for the lines it stands beside:
+ * as far in as the grid has it, or as far as the widest text to its left on
+ * any of them reaches and a gutter more (`gutter`, at most `stretch` times
+ * its place on the grid). Columns within `snap` of each other are one. Every
+ * other place on such a line keeps its distance on the grid from the column
+ * before it, so an indent in the right-hand column, a gap inside it and the
+ * next column along all move with it.
+ *
+ * `lines` in page order, null for a line with nothing to place:
+ * { from, the page column its text begins at; cuts, the page columns where
+ * each piece after a gap begins (columnCuts, plus the line's start); second,
+ * its second columns; w, each piece's width before its cut, its text only;
+ * origin, the body margin's column (pleading paper) }. `unit` is the grid's
+ * character, and `pad` what a piece keeps after its text where it is not on a
+ * second column (the cell's own margin) — all in one unit, whichever it is
+ * (columns.js works in ems of the page's body type).
+ *
+ * One { ind, ends } per line, from the body margin in that unit — where its
+ * text begins and where each piece ends — or null for a line beside no second
+ * column, which keeps the plain grid.
+ */
+export function placeColumns(lines, { unit = 8, gutter = COLUMN_GUTTER * unit, pad = 2 * unit, snap = COLUMN_SNAP, stretch = COLUMN_STRETCH } = {}) {
+  const list = lines || [];
+  const all = new Set();
+  for (const l of list) if (l && l.second) for (const c of l.second) all.add(c);
+  const groups = [];
+  for (const c of [...all].sort((a, b) => a - b)) {
+    const g = groups[groups.length - 1];
+    if (g && c - g.hi <= snap) g.hi = c;
+    else groups.push({ lo: c, hi: c, x: null });
+  }
+  const mine = list.map((l) => {
+    if (!l || !l.second) return [];
+    const s = [...l.second];
+    return groups.filter((g) => s.some((c) => c >= g.lo && c <= g.hi));
+  });
+  // A line's piece begins on a column a character either side of it, as an
+  // OCR'd line sets it (columnBands runs the column over such lines).
+  const groupAt = (gs, p) => gs.find((g) => p >= g.lo - 1 && p <= g.hi + 1) || null;
+  // Where page column p stands on line i: on the nearest column placed at or
+  // before it, at its distance on the grid from it — else on the grid.
+  const xOf = (i, p) => {
+    let g = null;
+    for (const h of mine[i]) if (h.x != null && h.lo - 1 <= p) g = h;
+    if (!g) return Math.max(0, p - (list[i].origin || 0)) * unit;
+    return p <= g.hi + 1 ? g.x : g.x + (p - g.hi) * unit;
+  };
+  // Line i's pieces laid left to right, up to the one cut on `stop` (a column
+  // not placed yet): where each ends, and where that one begins. The first
+  // cut on a column is the column; another on it is a gap inside a piece.
+  const lay = (i, stop) => {
+    const l = list[i];
+    const ends = [];
+    const seen = new Set();
+    let x = xOf(i, l.from);
+    for (let k = 0; k < l.cuts.length; k++) {
+      const p = l.cuts[k];
+      if (stop && p > stop.hi + 1) break;
+      let g = groupAt(mine[i], p);
+      if (g && seen.has(g)) g = null;
+      if (g) seen.add(g);
+      if (g && g === stop) return { x, k, ends };
+      const e = g && g.x != null ? g.x : Math.max(xOf(i, p), x + ((l.w && l.w[k]) || 0) + pad);
+      ends.push(e);
+      x = e;
+    }
+    return { x, k: -1, ends };
+  };
+  for (const g of groups) {
+    let floor = 0, need = 0;
+    list.forEach((l, i) => {
+      if (!mine[i].includes(g)) return;
+      floor = Math.max(floor, xOf(i, g.hi));
+      const r = lay(i, g);
+      if (r.k >= 0) need = Math.max(need, r.x + ((l.w && l.w[r.k]) || 0) + gutter);
+    });
+    g.x = Math.max(floor, Math.min(need, floor * stretch));
+  }
+  return list.map((l, i) => (mine[i].length ? { ind: xOf(i, l.from), ends: lay(i, null).ends } : null));
 }

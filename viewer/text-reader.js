@@ -44,7 +44,7 @@ import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
 import { dressLines, fitRuleRows, placeholderIn } from "./rules.js";
-import { dressColumns, charWidth, fitCells } from "./columns.js";
+import { dressColumns, alignColumns, charWidth, fitCells } from "./columns.js";
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
@@ -3286,8 +3286,15 @@ function stepHistory(from, to) {
   for (const snap of pages) {
     const body = bodyForPage(snap.page);
     // …with the strip's tag: the two sides of one step (strippedTextOf).
-    if (body) to.push({ ...snapshotOf(body), batch: snap.batch, nocr: snap.nocr });
+    if (body) to.push({ ...snapshotOf(body), batch: snap.batch, nocr: snap.nocr, view: snap.view });
+    // A step that also turned the page's PDF view on or off (⊘ Did not OCR,
+    // ↻ OCR This Page) turns it back with the text, so what comes back is
+    // seen: the text shown before it is put back (it takes the caret), the
+    // PDF page after.
+    const shown = snap.view ? (from === undoStack ? !snap.view.on : snap.view.on) : null;
+    if (shown === false) setPageSwap(snap.view.key, false);
     restoreSnapshot(snap, { settle: pages.length === 1 });
+    if (shown === true) setPageSwap(snap.view.key, true);
   }
   if (pages.length > 1) afterTextChange();
   lastSnapPage = -1;
@@ -5212,8 +5219,9 @@ function markDidNotOcr(i) {
   snapshot(body, true);
   // The step remembers that it is a strip: its snapshot is the page's text as
   // it read BEFORE, which ↻ OCR This Page puts back (strippedTextOf).
-  const top = undoStack[undoStack.length - 1];
+  let top = undoStack[undoStack.length - 1];
   if (top && top.page === i) top.nocr = true;
+  else top = null;
   // A request to read the page again is withdrawn by stripping it again —
   // and so is a transcription: the page's text is not worth keeping after all.
   const entry = pageEntryAt(i);
@@ -5235,7 +5243,26 @@ function markDidNotOcr(i) {
   syncNoOcr([i]);
   lastSnapPage = -1; // what is typed next is its own step
   afterTextChange();
-  toast(`${where}: text stripped, ${TD.DID_NOT_OCR} in its place — Save writes it, and puts the page on ${TD.VALUES_FILE} so PDF-Linker never OCRs it again. Ctrl+Z puts it back.`);
+  // …and the page is shown as its PDF page, where it was showing its text: a
+  // page that did not OCR reads as nothing but the mark, and the PDF page is
+  // what there is to read. Side by side the PDF page stands beside it
+  // already, and a page shown raw stays raw. The step carries the swap, so
+  // Ctrl+Z puts the text back on screen and not under the PDF page.
+  const t = pdfTarget(i);
+  const sec = pagesEl.querySelector(`.tpage[data-index="${i}"]`);
+  const swapped = !!t && !!sec && !sbsOn && !sec.classList.contains("raw") && !swaps.has(t.key);
+  if (swapped) {
+    if (top) top.view = { key: t.key, on: true };
+    setPageSwap(t.key, true);
+  }
+  toast(`${where}: text stripped, ${TD.DID_NOT_OCR} in its place${swapped ? ", and its PDF page shown" : ""} — Save writes it, and puts the page on ${TD.VALUES_FILE} so PDF-Linker never OCRs it again. Ctrl+Z puts it back.`);
+}
+/** A page's ⇄ PDF swap turned on or off by `key`, remembered and shown (or held for when side by side closes). */
+function setPageSwap(key, on) {
+  if (swaps.has(key) === on) return;
+  if (on) swaps.add(key); else swaps.delete(key);
+  persistSwaps();
+  applySwaps();
 }
 
 // ── …and a page to read again ────────────────────────────────────────────────────
@@ -5316,6 +5343,11 @@ function putStrippedBack(i, sn) {
   const body = bodyForPage(i);
   if (!body) return false;
   snapshot(body, true);
+  // The PDF view the strip turned on comes off with it: the text is back, and
+  // shown. Carried on the step, so Ctrl+Z strips it and shows the PDF again.
+  const top = undoStack[undoStack.length - 1];
+  const view = sn.view && sn.view.on && swaps.has(sn.view.key) ? { key: sn.view.key, on: false } : null;
+  if (view && top && top.page === i) top.view = view;
   convertTypedRealsSoon.cancel();
   hideTypeTip();
   spots = spots.filter((x) => x.page !== i).concat(sn.spots || []);
@@ -5326,6 +5358,7 @@ function putStrippedBack(i, sn) {
   syncNoOcr([i], { drop: true }); // off the list of pages not to OCR
   lastSnapPage = -1;
   afterTextChange();
+  if (view) setPageSwap(view.key, false);
   return true;
 }
 
@@ -5442,6 +5475,8 @@ function pageReadsDidNotOcr(i) {
 function setNocrButton(b, reads, asked, marked) {
   const on = reads && asked;
   b.classList.toggle("on", on);
+  // ↻ OCR This Page is red: a page with no text in it is the thing to see.
+  b.classList.toggle("stripped", reads && !on);
   if (reads) b.setAttribute("aria-pressed", on ? "true" : "false");
   else b.removeAttribute("aria-pressed");
   if (!reads) {
@@ -11264,8 +11299,21 @@ function applyMatchedLayoutNow() {
         const pairs = [];
         lay.rowOf.forEach((j, k) => {
           if (j == null) return;
-          const w = firstWord(texts[k]);
-          if (w && firstWord(rows[j].text) === w) pairs.push({ col: texts[k].search(/\S/), x: rows[j].left });
+          const w = firstWord(texts[k]), rw = firstWord(rows[j].text);
+          if (w && rw === w) pairs.push({ col: texts[k].search(/\S/), x: rows[j].left });
+          // …and where a two-column line's right-hand half begins: a page
+          // whose every line has both halves begins none of them anywhere but
+          // the margin, and gave no grid — its right-hand column drawn wherever
+          // the left-hand text ended. The PDF says where the half begins: the
+          // row's break that prints its first word, or the row itself where
+          // the line was matched to its right-hand half.
+          for (const c of TD.columnCuts(texts[k])) {
+            const cw = firstWord(texts[k].slice(c));
+            if (!cw) continue;
+            if (cw === rw && w !== rw) { pairs.push({ col: c, x: rows[j].left }); continue; }
+            const b = (rows[j].breaks || []).find((x) => x.word === cw);
+            if (b) pairs.push({ col: c, x: b.x });
+          }
         });
         charGridFit = PS.charGrid(pairs);
         if (charGridFit) lefts = lefts.map((l) => (l == null ? null : charGridFit.x0));
@@ -11733,6 +11781,7 @@ function shapePages({ all = false } = {}) {
   // flow rather than have the filing squeezed to make room for the links.
   const clipped = document.body.classList.contains("sbs");
   const shapes = [];
+  const flowing = [];
   for (const sec of secs) {
     const body = sec.querySelector(".page-body");
     // A swapped page's text is put away under its PDF page, not re-laid, so
@@ -11749,9 +11798,20 @@ function shapePages({ all = false } = {}) {
       // longer describes it: coming off the grid (the pane closed) has to
       // shape it again, whatever else is unchanged.
       sec.__shapedFor = null;
+      // A page left to flow (the trailer's, with the pane closed) is not
+      // fitted, but its columns are placed all the same (columns.js).
+      if (!sec.classList.contains("matched")) flowing.push(sec);
       continue;
     }
     shapes.push({ sec, body, ratio: pdfRatioOf(Number(sec.dataset.index)), fit: 1 });
+  }
+  if (flowing.length) {
+    const key = [textEpoch, settings.font, settings.customFont].join("|");
+    const due = flowing.filter((sec) => sec.__placedFor !== key);
+    if (due.length) {
+      alignColumns(due.map((sec) => sec.querySelector(".page-body")));
+      for (const sec of due) sec.__placedFor = key;
+    }
   }
   if (!shapes.length) return;
   const width = shapes[0].sec.clientWidth; // one read: every free sheet is this wide
@@ -11824,6 +11884,12 @@ function shapePages({ all = false } = {}) {
     // from there. Unlike one runaway line, this is the page's own layout, and
     // the type paying for it is the PDF's own answer: a two-column page is set
     // small.
+    //
+    // …and its columns are first placed where this font needs them (columns.js,
+    // alignColumns): a second column one place down the lines beside it, a
+    // gutter clear of the widest text to its left. Written in the body's type,
+    // so the fit found below takes them with it.
+    alignColumns(live.map((s) => s.body));
     const caps = columnCaps(live.map((s) => s.body));
     live.forEach((s, k) => { if (caps[k] < 1) put(s, caps[k]); });
     for (let pass = 0; pass < FIT_PASSES && live.length; pass++) {

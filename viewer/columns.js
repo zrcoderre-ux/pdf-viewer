@@ -36,6 +36,10 @@
 //           piece too wide for its cell is followed by the cell's margin, two
 //           characters, not by every space the grid gave it as well. In the
 //           editor they are drawn, so what is typed into one is seen.
+//   .cx     a cell or a line beside a SECOND column, placed for the font
+//           (alignColumns): off the PDF's grid the column stands at one place
+//           down every line beside it, a gutter clear of the widest text to
+//           its left, however far past the grid that text runs.
 //
 // The cells are wrappers and nothing else: the text, the pseudonym spans and
 // the rule spans are inside them as they were, so serializeNodes, a copy and
@@ -48,7 +52,7 @@
 // dressed as its text says is left exactly as it is, so the editor's caret
 // text node on any other line is never replaced.
 
-import { columnBands, columnCuts, columnWidths, lineIndent, serializeNodes } from "./textdoc.js";
+import { columnBands, columnCuts, columnWidths, lineIndent, placeColumns, serializeNodes, COLUMN_GUTTER } from "./textdoc.js";
 
 /** A node's length in the file: a pseudonym span counts its fake, as the cuts were made on. */
 const fileLength = (n) => (n.nodeType === 3 ? n.data.length : n.nodeType === 1 ? serializeNodes(n).length : 0);
@@ -78,6 +82,8 @@ function spanRanges(lt) {
 export function undressColumns(lt) {
   for (const c of [...lt.querySelectorAll(".cc, .cg")]) c.replaceWith(...c.childNodes);
   if (lt.classList.contains("ci")) { lt.classList.remove("ci"); lt.style.removeProperty("--lead"); lt.style.removeProperty("--ind"); }
+  unplace(lt);
+  lt.__colPlan = null;
 }
 const indentOf = (lt) => (lt.classList.contains("ci") ? lt.style.getPropertyValue("--ind") + "/" + lt.style.getPropertyValue("--lead") : "");
 
@@ -193,6 +199,7 @@ export function dressColumns(body) {
     if (line.classList.contains("rl")) {
       if (lt.querySelector(".cc") || lt.classList.contains("ci")) { undressColumns(lt); changed = true; }
       line.classList.remove("cols");
+      lt.__colPlan = null;
       continue;
     }
     const g = numbered && line.classList.contains("num") ? line.querySelector(":scope > .gutter") : null;
@@ -227,7 +234,7 @@ export function dressColumns(body) {
   // the prose under it.
   for (const l of plain) {
     if (bands[l.at].second.size) { l.text = serializeNodes(l.lt); lines.push(l); }
-    else l.line.classList.remove("cols");
+    else { l.line.classList.remove("cols"); l.lt.__colPlan = null; }
   }
   for (const l of lines) {
     const { ind, lead } = lineIndent(l.text, { start: l.start, origin });
@@ -235,12 +242,114 @@ export function dressColumns(body) {
     const cuts = columnCuts(l.text, { stops, second, start: l.start, atoms: spanRanges(l.lt) });
     const gaps = cuts.map((c) => l.text.slice(0, c).replace(/ +$/, "").length);
     if (dressLineColumns(l.lt, { ind, lead, cuts, widths: columnWidths(cuts, lead), gaps })) changed = true;
+    // What alignColumns needs to place the line's second columns, in the
+    // page's own columns: where its text begins and each piece after a gap.
+    l.lt.__colPlan = second.size ? { from: l.start + lead, cuts: cuts.map((c) => l.start + c), second, origin } : null;
     // A line with a gap between columns, not just an indent: what the page's
     // type has to be small enough to hold on one line (text-reader.js,
     // shapePages), since a column that wraps comes back at the left margin.
     l.line.classList.toggle("cols", cuts.length > 0);
   }
+  // …and each second column placed for the font the page is read in.
+  alignColumns([body]);
   return changed;
+}
+
+/** A place alignColumns wrote taken back off: the line or cell is on the plain grid again. */
+function unplace(el) {
+  if (!el.classList.contains("cx")) return;
+  el.classList.remove("cx");
+  el.style.removeProperty("--cx");
+  el.style.removeProperty("--ind-x");
+}
+function put(el, name, value) {
+  const v = value.toFixed(3);
+  if (el.style.getPropertyValue(name) !== v) el.style.setProperty(name, v);
+  if (!el.classList.contains("cx")) el.classList.add("cx");
+}
+
+// A piece's width in ems of its font, read off the font's own metrics on a
+// canvas: the same widths the page draws it at, and no layout asked for.
+// Kept per font; a page's pieces are mostly the same lines over and over.
+let sizer = null, sizerFont = "", sized = new Map();
+function textEm(text, font) {
+  if (font !== sizerFont) {
+    sizer = sizer || document.createElement("canvas").getContext("2d");
+    sizer.font = "100px " + font;
+    sizerFont = font;
+    sized = new Map();
+  }
+  let w = sized.get(text);
+  if (w == null) {
+    w = sizer.measureText(text).width / 100;
+    if (sized.size >= 50000) sized.clear();
+    sized.set(text, w);
+  }
+  return w;
+}
+/** A cell's text as the page shows it: a pseudonym as it reads, the gap's spaces left out. */
+function pieceText(cell) {
+  let s = "";
+  for (const n of cell.childNodes) if (!(n.nodeType === 1 && n.classList.contains("cg"))) s += n.textContent;
+  return s;
+}
+
+/**
+ * Off the PDF's grid, each SECOND column placed where the reader's own font
+ * needs it (textdoc.placeColumns): one place down every line beside it, clear
+ * of the widest text to its left by a gutter. The grid's character is the
+ * font's AVERAGE one, and a line's letters are not average: a justified
+ * left-hand column runs up to the second with a space between, and a page in
+ * capitals runs half as wide again, so each line's piece overran its cell by
+ * its own amount and pushed its own right-hand half on by that much — a
+ * column ragged by a word, run into the one beside it.
+ *
+ * Each piece is measured as it reads (a name as it is shown) in the page's
+ * font, at its line's own size where the PDF set it apart, and the places are
+ * written in the page's BODY type — --cx on a cell, its width; --ind-x on an
+ * indented line, where its text begins — so the type fitted to the paper
+ * afterwards takes them with it. The widths come off the font itself, not
+ * the layout, so a page is placed as it is dressed (dressColumns) and again
+ * when it is laid out (text-reader.js, shapePages: the names shown, a line's
+ * size) at no cost to either. A line or cell placed before and not now is put
+ * back on the grid. Nothing here touches the text.
+ */
+export function alignColumns(bodies) {
+  // The grid's character and the reader's font as text-reader.js writes them
+  // on the root (setColumnWidth, applySettings): read off its own style, so
+  // placing a page asks for no style to be worked out.
+  const rs = document.documentElement.style;
+  const colN = parseFloat(rs.getPropertyValue("--col-n")) || 0.5;
+  const readerFont = rs.getPropertyValue("--reader-font").trim();
+  for (const body of bodies) {
+    if (!body || body.classList.contains("fixed")) continue;
+    const rows = [];
+    for (const lt of body.querySelectorAll(":scope > .line > .lt")) {
+      const plan = lt.__colPlan;
+      if (!plan) continue;
+      const cells = [...lt.children].filter((c) => c.classList.contains("cc"));
+      if (cells.length === plan.cuts.length) rows.push({ lt, plan, cells });
+    }
+    const placed = body.querySelectorAll(".cx");
+    if (!rows.length && !placed.length) continue;
+    const keep = new Set();
+    if (rows.length) {
+      const font = readerFont || (body.isConnected && getComputedStyle(body).fontFamily) || "serif";
+      const places = placeColumns(rows.map((r) => {
+        const size = r.lt.parentElement.style.fontSize; // a line the PDF sets apart, in ems of the body
+        const f = /em$/.test(size) ? parseFloat(size) || 1 : 1;
+        return Object.assign({}, r.plan, { w: r.cells.map((c) => textEm(pieceText(c), font) * f) });
+      }), { unit: colN, gutter: COLUMN_GUTTER * colN, pad: 2 * colN });
+      rows.forEach((r, k) => {
+        const p = places[k];
+        if (!p) return;
+        if (r.lt.classList.contains("ci")) { put(r.lt, "--ind-x", p.ind); keep.add(r.lt); }
+        let from = p.ind;
+        r.cells.forEach((c, j) => { put(c, "--cx", p.ends[j] - from); keep.add(c); from = p.ends[j]; });
+      });
+    }
+    for (const el of placed) if (!keep.has(el)) unplace(el);
+  }
 }
 
 /** The narrowest a piece before a column is drawn to hold its column (fitCells): three quarters of its width still reads. */

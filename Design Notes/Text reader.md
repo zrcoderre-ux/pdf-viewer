@@ -127,6 +127,17 @@ stay. `markDidNotOcr` makes the edit the way `restoreSnapshot` puts a page
 back: `snapshot(body, true)`, the page's spot keeps dropped, `buildBody` from
 the new text, `doc.pages[i].lines` set, `syncSpots`, `setDirty`. One undo step;
 the page index is read off the section at the click, as the swap button's is.
+A page stripped while it shows its text (not side by side, not ⇄ Raw, with a
+PDF page matched) is then shown as its PDF page (`setPageSwap`, the ⇄ PDF
+swap, remembered with the rest), and the undo step carries it as `view`
+(`{ key, on }`, the swap the step left): `stepHistory` turns the swap back
+with the text, taking it off BEFORE `restoreSnapshot` (the body must be on
+screen to take the caret) and putting it on after, and carries `view` to the
+other stack. `putStrippedBack` takes off a swap its strip's step made and
+tags its own step the other way, so Ctrl+Z on the put-back shows the PDF
+page again. Without that, an undo restored the text under the PDF page, and
+the press looked like it did nothing — the complaint that started it, the
+other way round.
 The page is also handed to PDF-Linker, whose next full run would otherwise
 rebuild the export from the PDF and OCR the page again: `noOcr` (beside
 `flagged` and `keeps`, persisted with them, merged from the file on disk at
@@ -149,7 +160,8 @@ and spends the line.
 The button toggles (`nocrButtonClick`, `setNocrButton`, `refreshNocrButtons`):
 on a page that reads `[DID NOT OCR]` (`pageReadsDidNotOcr` — the lines, or a
 short page's live body while it is typed into) it is **↻ OCR This Page**
-(`ocrPageAgain`). Where the header is not PDF-Linker's DID NOT OCR one and the
+(`ocrPageAgain`), red (`.stripped`) so a page with no text stands out,
+whoever stripped it; asked (`.on`, below) it takes the accent instead. Where the header is not PDF-Linker's DID NOT OCR one and the
 page's `did not ocr` line never reached the folder (it is not in the saved
 file's text, `valuesSavedKey`), the text the strip took is put back
 (`strippedTextOf`: the newest undo snapshot of that page tagged `nocr` by
