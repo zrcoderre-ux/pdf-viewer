@@ -10,7 +10,7 @@ import {
   markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
-  serializeHeld, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
+  serializeHeld, serializeMapped, editedSpans, spanEdited, typedReals, typedPseudonymsCited, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
@@ -294,6 +294,80 @@ console.log("cited case names");
   check("a long institutional party is spanned as before",
     spans("People of the State of California ex rel. Department of Transportation v. Quillmark Industries, Inc. (2019) 31 Cal.App.5th 1121"),
     ["Department of Transportation v. Quillmark Industries, Inc."]);
+}
+
+// ---- what an edit wrote ------------------------------------------------------------
+console.log("what an edit wrote");
+{
+  // Each run the edit put in, as the text it put in; a place it took text out as ^at.
+  const wrote = (a, b, o) => editedSpans(a, b, o).map(([x, y]) => (x === y ? "^" + x : b.slice(x, y)));
+  check("nothing changed, nothing written", editedSpans("Counsel for Helen Rasho.", "Counsel for Helen Rasho."), []);
+  check("typing in the middle of a line is the typing",
+    wrote("Counsel for Helen Rasho appeared.", "Counsel for Rasho and Helen Rasho appeared."), ["Rasho and "]);
+  check("a line put in is that line", wrote("x\ny\nz", "x\nNEW\ny\nz"), ["NEW\n"]);
+  check("a line taken out is a place", wrote("x\ny\nz", "x\nz"), ["^2"]);
+  // AN ENTER ON PLEADING PAPER moves the text down the numbered slots and leaves
+  // the numbers where they were: every line below it differs, and the words in
+  // them are still the words that were there.
+  check("an Enter's cascade writes the break and the numbers, not the words",
+    wrote("5  AAA\n6  BBB\n7  CCC\n8\n9  DDD", "5  A\n6  AA\n7  BBB\n8  CCC\n9  DDD"), ["\n6  ", "7", "8", "^24"]);
+  // Replace all: the lines it did not touch are not written, whatever lies between.
+  const ra = "one Rasho two\nkeep Rasho\nthree Rasho", rb = "one Strangeways two\nkeep Rasho\nthree Strangeways";
+  const kept = rb.indexOf("keep Rasho") + 5;
+  check("a line between two edits is left as it was", spanEdited(editedSpans(ra, rb), kept, kept + 5), false);
+  check("…and the edited ones are written", [rb.indexOf("Strangeways"), rb.lastIndexOf("Strangeways")].map((i) => spanEdited(editedSpans(ra, rb), i, i + 11)), [true, true]);
+  check("an edit too long to place is all written",
+    wrote("a\nb\nc\nd", "1\n2\n3\n4", { maxD: 2 }), ["1\n2\n3\n4"]);
+  check("a place taken out of a span's middle is in it, one at its edge is not",
+    [spanEdited([[5, 5]], 3, 8), spanEdited([[3, 3]], 3, 8), spanEdited([[8, 8]], 3, 8)], [true, false, false]);
+  check("text put in beside a span is not in it", [spanEdited([[0, 3]], 3, 8), spanEdited([[8, 9]], 3, 8), spanEdited([[7, 9]], 3, 8)], [false, false, true]);
+
+  // The converter's question, asked of a page as the reader builds one.
+  const g = (s) => E("SPAN", { class: "gutter" }, [T(s)]);
+  const page = (lines) => E("DIV", {}, lines.map((kids) => E("DIV", {}, kids)));
+  const segsOf = (nodes) => nodes.map((n) => ({ node: n, text: n.data }));
+  const n1 = T("Plaintiff "), pn = E("SPAN", { "data-fake": "Ingrid Strangeways" }, [T("Helen Rasho")]), n2 = T(" brings this motion.");
+  const n3 = T("Counsel for Helen Rasho appeared."), n4 = T("See Rasho v. Quillmark (2017) 13 Cal.App.5th 1152.");
+  const body = page([[g("1   "), n1, pn, n2], [g("2   "), n3], [g("3   "), n4]]);
+  const built = serializeMapped(body);
+  check("the disk text, the pseudonym as its fake",
+    built.text, "1   Plaintiff Ingrid Strangeways brings this motion.\n2   Counsel for Helen Rasho appeared.\n3   See Rasho v. Quillmark (2017) 13 Cal.App.5th 1152.");
+  check("each text node where its text stands in it", [built.at.get(n1), built.at.get(n3), built.at.get(n4)],
+    [4, built.text.indexOf("Counsel"), built.text.indexOf("See Rasho")]);
+  check("a pseudonym's own text is not one of them", built.at.has(pn.childNodes[0]), false);
+  const typed = () => typedReals(findRealsInPlain(fwd, segsOf([n1, n2, n3, n4])), serializeMapped(body), built.text)
+    .map((h) => [h.node === n2 ? "typed line" : h.node === n3 ? "line 2" : "citation", h.matched]);
+  check("a page nobody typed on has nothing typed", typed(), []);
+  n2.data = " brings this motion. Rasho agrees.";
+  // THE BUG THIS ANSWERS: typing on line 1 marked line 2's leak and the cited
+  // decision's party on line 3 as pseudonyms too.
+  check("typing on one line marks the name typed, and only that", typed(), [["typed line", "Rasho"]]);
+  n2.data = " brings this motion. See Rasho v. Quillmark (2017) 13 Cal.App.5th 1152.";
+  check("a citation typed whole keeps its parties", typed(), []);
+  n2.data = " brings this motion.";
+  check("no text it was built from, nothing counts as typed",
+    typedReals(findRealsInPlain(fwd, segsOf([n2, n3])), serializeMapped(body), null), []);
+  // The Enter's cascade, as the reader makes it: the text after the caret goes
+  // down a slot, and the empty slot below takes the last of it.
+  const m5 = T("Counsel for Helen Rasho appeared."), m6 = T("The end.");
+  const before = serializeMapped(page([[g(" 5  "), m5], [g(" 6  "), m6], [g(" 7")]])).text;
+  const k6 = T("Counsel for Helen Rasho appeared."), k7 = T("The end.");
+  const after = page([[g(" 5")], [g(" 6  "), k6], [g(" 7  "), k7]]);
+  check("an Enter above a leak does not make it typed",
+    typedReals(findRealsInPlain(fwd, segsOf([k6, k7])), serializeMapped(after), before), []);
+  // A party marked at the Space prompt before the rest of its citation was typed.
+  const pnOf = (fake, real) => E("SPAN", { "data-fake": fake, "data-real": real }, [T(real)]);
+  const filed = pnOf("Strangeways", "Rasho"), early = pnOf("Strangeways", "Rasho"), plain = pnOf("Strangeways", "Rasho");
+  const cbody = page([
+    [g("1   "), T("Cf. "), filed, T(" v. Quillmark (2017) 13 Cal.App.5th 1152.")],
+    [g("2   "), T("See "), early, T(" v. Quillmark (2017) 13 Cal.App.5th 1152.")],
+    [g("3   "), plain, T(" agrees.")],
+  ]);
+  const cbuilt = "1   Cf. Strangeways v. Quillmark (2017) 13 Cal.App.5th 1152.\n2   See\n3   ";
+  const back = typedPseudonymsCited(serializeMapped(cbody), cbuilt);
+  check("a party marked while its citation was typed goes back; the page's own and a typed one outside a citation stay",
+    [back.includes(early), back.includes(filed), back.includes(plain), back.length], [true, false, false, 1]);
+  check("nothing typed, nothing goes back", typedPseudonymsCited(serializeMapped(cbody), serializeMapped(cbody).text), []);
 }
 
 // ---- the values file ---------------------------------------------------------------

@@ -72,6 +72,30 @@ is `buildFindMatcher(values, { caseSensitive })`, which drops the `i` flag;
 their matcher, and the folder scan's `findScanFor` carries the flag so a
 toggle reads the folder again.
 
+**A typed real name, and only a typed one** (`convertTypedReals`): the
+debounced converter marks a real name standing in a page's plain text as a
+pseudonym only where an edit wrote it. `buildBody` keeps the text the page
+was built from as `body.__built` (the round trip is exact, so it is also the
+page's disk text until something is typed), and a save sets it to what it
+wrote. `textdoc.typedReals` reads the page now with `serializeMapped` (the
+disk text, and each text node's offset in it) and keeps a hit only where
+`editedSpans(__built, now)` puts something of the edit in it (`spanEdited`:
+text put in that overlaps it, or text taken out of its middle) and it stands
+outside every `citedNameSpans`. `editedSpans` trims the common head and tail,
+then runs Myers line by line and again character by character inside the
+changed lines, so an Enter on pleading paper (the numbers stay, the text moves
+a slot) writes only the break and the numbers. Past `maxD` the changed region
+counts as written whole. It used to mark every real name in the page on any
+edit, a missed name and a cited party with it. The Space prompt (`offerAtCaret`,
+`acceptTyped`) still marks the name the caret has just finished, before the
+citation it may open has been typed; so the converter also asks
+`typedPseudonymsCited` (`serializeMapped` gives each pseudonym span's offset
+as `pn`) for the marks an edit made that now stand in a cited name, and puts
+each back as the name typed (`dataset.real`), one undo step, with a toast. The
+same catches a short form the converter marked in a pause before "supra". A
+mark the page was built with is never one of them, so an undo that restores
+one leaves it.
+
 **⇄ Raw** (`.raw-page`, on every page label, between `.swap-page` and
 `.nocr-page`; it replaced the toolbar's 📄 File as text panel) puts the page's
 own text in the page's place, the way ⇄ PDF puts its PDF page there.

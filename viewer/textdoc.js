@@ -195,8 +195,14 @@ function walk(node, emit, opts) {
   // emitted (see serializeHeld): a value the operator said to leave alone at
   // this one place, which is therefore plain text on disk like any other.
   const mark = opts && opts.mark;
+  // `text` is told of each text node as its text is about to be emitted, and
+  // `fake` of each pseudonym span as its fake is (see serializeMapped). A
+  // pseudonym span's own text is never one of the text nodes.
+  const onText = opts && opts.text;
+  const onFake = opts && opts.fake;
   const rec = (n, atStart) => {
     if (n.nodeType === TEXT_NODE) {
+      if (onText) onText(n);
       emit(n.data != null ? n.data : n.nodeValue || "");
       return;
     }
@@ -216,6 +222,7 @@ function walk(node, emit, opts) {
     if (fake != null) {
       // A pseudonym span: the file gets the fake, the screen gets whatever
       // the span shows (its real name, or the fake while fakes are shown).
+      if (onFake) onFake(n);
       if (fakes) emit(fake);
       else {
         let shown = "";
@@ -284,6 +291,23 @@ export function serializeHeld(root) {
     },
   });
   return { text: out, held };
+}
+
+/**
+ * What a page body writes to disk, with where each of its text nodes and
+ * pseudonym spans stands in it: { text, at, pn } — Maps from a text node, and
+ * from a pseudonym span, to the offset its text (its fake) begins at. A
+ * pseudonym span's own text node is not in `at`.
+ */
+export function serializeMapped(root) {
+  let out = "";
+  const at = new Map(), pn = new Map();
+  walk(root, (s) => { out += s; }, {
+    fakes: true,
+    text: (n) => at.set(n, out.length),
+    fake: (n) => pn.set(n, out.length),
+  });
+  return { text: out, at, pn };
 }
 
 /** `text` with each range blanked to the same length, so offsets still hold. */
@@ -526,6 +550,164 @@ export function spotRanges(text, spots) {
  */
 export function linesFromNodes(root) {
   return serializeNodes(root).split("\n");
+}
+
+// ---- what an edit wrote ------------------------------------------------------------
+//
+// A real name TYPED into a page is marked as a pseudonym once the caret has
+// left it (the reader's convertTypedReals), so the file carries the fake as if
+// the run had written it. A real name the page already carried was not typed:
+// one the run missed is the review's to decide, and a save leaves an undecided
+// one where it stands; a cited decision's party is never faked at all
+// (citedNameSpans). Typing anywhere on a page used to mark every real name in
+// its plain text, which made both decisions for the operator — a citation
+// rewritten into a case that does not exist among them.
+//
+// So the question is put to the edit: which places in the page's text did it
+// write? A diff of the page's disk text against the text it was built from
+// answers it, line by line first, so a page that kept most of its lines finds
+// them kept whatever moved around them, then character by character inside
+// the lines that changed, so the words of a changed line that the edit did not
+// touch are not taken for typed. An Enter on pleading paper moves the text
+// down the numbered slots and leaves the numbers where they were: every line
+// below it differs, and the character pass finds the words still there and
+// only the numbers and the break moved.
+
+/**
+ * Myers' shortest edit script between two sequences (strings, or arrays of
+ * numbers), as the runs where they differ, in order: [{ a0, a1, b0, b1 }] —
+ * `a`'s [a0, a1) became `b`'s [b0, b1), either side possibly empty. Null where
+ * the script is longer than `maxD`: past that, where the edit fell is not
+ * worth the memory of finding out.
+ */
+function editHunks(a, b, maxD) {
+  const n = a.length, m = b.length;
+  const lim = Math.min(n + m, maxD);
+  const off = lim + 1;
+  const v = new Int32Array(2 * lim + 3);
+  const trace = [];
+  let D = -1;
+  for (let d = 0; d <= lim && D < 0; d++) {
+    // Each diagonal's furthest reach after d - 1 steps, kept for the walk back.
+    trace.push(v.slice(off - d - 1, off + d + 2));
+    for (let k = -d; k <= d; k += 2) {
+      let x = k === -d || (k !== d && v[off + k - 1] < v[off + k + 1]) ? v[off + k + 1] : v[off + k - 1] + 1;
+      let y = x - k;
+      while (x < n && y < m && a[x] === b[y]) { x++; y++; }
+      v[off + k] = x;
+      if (x >= n && y >= m) { D = d; break; }
+    }
+  }
+  if (D < 0) return null;
+  // Walked back from the end, a step at a time; steps with nothing in common
+  // between them are one run.
+  const hunks = [];
+  let cur = null;
+  let x = n, y = m;
+  for (let d = D; d > 0; d--) {
+    const w = trace[d];
+    const k = x - y;
+    const prevK = k === -d || (k !== d && w[k - 1 + d + 1] < w[k + 1 + d + 1]) ? k + 1 : k - 1;
+    const prevX = w[prevK + d + 1], prevY = prevX - prevK;
+    let same = false;
+    while (x > prevX && y > prevY) { x--; y--; same = true; }
+    if (same || !cur) { cur = { a0: x, a1: x, b0: y, b1: y }; hunks.push(cur); }
+    cur.a0 = prevX;
+    cur.b0 = prevY;
+    x = prevX;
+    y = prevY;
+  }
+  return hunks.reverse();
+}
+
+/**
+ * Where `after` differs from `before`, in `after`'s own places: [start, end)
+ * for text an edit put in, [at, at] for a place it took text out. What
+ * spanEdited asks of.
+ */
+export function editedSpans(before, after, { maxD = 1000 } = {}) {
+  const a0 = String(before == null ? "" : before), b0 = String(after == null ? "" : after);
+  const out = [];
+  if (a0 === b0) return out;
+  // The head and tail the two have in common: an edit made in one place,
+  // which is most of them, is what is left between.
+  const lim = Math.min(a0.length, b0.length);
+  let p = 0;
+  while (p < lim && a0.charCodeAt(p) === b0.charCodeAt(p)) p++;
+  let s = 0;
+  while (s < lim - p && a0.charCodeAt(a0.length - 1 - s) === b0.charCodeAt(b0.length - 1 - s)) s++;
+  const a = a0.slice(p, a0.length - s), b = b0.slice(p, b0.length - s);
+  const put = (from, to) => out.push([p + from, p + to]);
+  if (!a.length || !b.length) { put(0, b.length); return out; }
+  // Line by line.
+  const al = a.split("\n"), bl = b.split("\n");
+  const ids = new Map();
+  const id = (l) => { let k = ids.get(l); if (k == null) { k = ids.size; ids.set(l, k); } return k; };
+  const starts = (lines) => { const st = []; let at = 0; for (const l of lines) { st.push(at); at += l.length + 1; } return st; };
+  const bAt = starts(bl);
+  const lineHunks = editHunks(al.map(id), bl.map(id), maxD);
+  if (!lineHunks) { put(0, b.length); return out; }
+  for (const h of lineHunks) {
+    const from = h.b0 < bl.length ? bAt[h.b0] : b.length;
+    if (h.b1 === h.b0) { put(from, from); continue; }
+    const bText = bl.slice(h.b0, h.b1).join("\n");
+    if (h.a1 === h.a0) { put(from, from + bText.length); continue; }
+    // …then character by character inside the lines that changed.
+    const chars = editHunks(al.slice(h.a0, h.a1).join("\n"), bText, maxD);
+    if (!chars) { put(from, from + bText.length); continue; }
+    for (const c of chars) put(from + c.b0, from + c.b1);
+  }
+  return out;
+}
+
+/** Whether an edit (editedSpans) wrote any of [start, end): put text inside it, or took text out of its middle. */
+export function spanEdited(spans, start, end) {
+  for (const [a, b] of spans || []) {
+    if (a === b ? start < a && a < end : a < end && b > start) return true;
+  }
+  return false;
+}
+
+/**
+ * Of the real names found standing in a page's plain text (findRealsInPlain),
+ * the ones an edit wrote: something of the edit is in each, and none stands in
+ * a cited decision's name, which no pseudonym is ever written over — a
+ * citation typed whole keeps its parties. `page` is serializeMapped of the page
+ * as it stands, `built` the text the page was built from (or last saved as);
+ * with none, nothing counts as typed.
+ */
+export function typedReals(hits, page, built) {
+  if (!hits || !hits.length || built == null) return [];
+  const spans = editedSpans(built, page.text);
+  const where = [];
+  for (const h of hits) {
+    const o = page.at.get(h.node);
+    if (o != null && spanEdited(spans, o + h.start, o + h.end)) where.push([h, o + h.start, o + h.end]);
+  }
+  if (!where.length) return [];
+  const cited = citedNameSpans(page.text);
+  return where.filter(([, s, e]) => !insideSpans(cited, s, e)).map(([h]) => h);
+}
+
+/**
+ * The pseudonym spans an edit made that now stand in a cited decision's name:
+ * a party marked at the as-you-type prompt, or by the converter in a pause,
+ * before the rest of the citation was typed after it. [span element] — each
+ * to go back to the name as typed, since a pseudonym there is a citation to a
+ * case that does not exist. Spans the page was built with are not an edit's.
+ */
+export function typedPseudonymsCited(page, built) {
+  if (built == null || !page.pn || !page.pn.size) return [];
+  const spans = editedSpans(built, page.text);
+  if (!spans.length) return [];
+  const made = [];
+  for (const [el, o] of page.pn) {
+    const len = String(el.getAttribute("data-fake") || "").length;
+    if (spanEdited(spans, o, o + len)) made.push([el, o, o + len]);
+  }
+  if (!made.length) return [];
+  const cited = citedNameSpans(page.text);
+  return made.filter(([, s, e]) => insideSpans(cited, s, e)).map(([el]) => el);
 }
 
 // ---- real values in the plain text ----------------------------------------------

@@ -2377,6 +2377,10 @@ function showPages(nodes, built) {
  */
 function buildBody(body, text, page, theirSpots) {
   body.innerHTML = "";
+  // The text the page was built from: what an edit is measured against when
+  // a real name typed into it is marked (convertTypedReals). It is what the
+  // page writes to disk until something is typed — the round trip is exact.
+  body.__built = text;
   body.classList.toggle("numbered", TD.pageIsNumbered(text.split("\n")));
   const runs = rev ? PK.translateRuns(rev, text) : [{ t: "text", s: text }];
   const pageSpots = theirSpots || spots;
@@ -3338,6 +3342,15 @@ window.addEventListener("beforeunload", (e) => {
  * the caret has left it — the real name stays on screen, the fake goes
  * underneath, exactly as if the document had carried it. A match the caret is
  * still inside is left alone (it may be the front of a longer name).
+ *
+ * TYPED, AND ONLY TYPED. A real name the page already carried is not marked
+ * because something else on the page was typed: one the run missed is the
+ * review's to decide (the save leaves an undecided one where it stands), and
+ * a cited decision's party is never faked, typed or not — the pseudonym would
+ * be a citation to a case that does not exist. It used to mark every real
+ * name in the page's plain text on any edit of the page, both of those with
+ * it. What the edit wrote is read off the page's text against the text it was
+ * built from (textdoc.typedReals).
  */
 const convertTypedRealsSoon = debounce(convertTypedReals, 250);
 /** How many it marked; `quiet` leaves the toast and the re-read to the caller (a replace). */
@@ -3348,7 +3361,8 @@ function convertTypedReals(body, { quiet = false } = {}) {
   const caretNode = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
   const caretOff = sel && sel.rangeCount ? sel.getRangeAt(0).startOffset : -1;
   const segs = plainSegments(body).map((seg) => ({ node: seg.node, text: maskKept(seg.text) }));
-  const hits = TD.findRealsInPlain(fwd, segs);
+  const found = TD.findRealsInPlain(fwd, segs);
+  const hits = found.length ? TD.typedReals(found, TD.serializeMapped(body), body.__built) : found;
   // Last hit first, so the offsets of the earlier ones in the same node
   // stay valid as the node is split.
   hits.reverse();
@@ -3364,8 +3378,25 @@ function convertTypedReals(body, { quiet = false } = {}) {
     mid.replaceWith(makePn(h.fake, h.matched));
     made++;
   }
-  if (made && !quiet) {
-    toast(`${made} real name${made === 1 ? "" : "s"} marked — the file will carry the pseudonym${made === 1 ? "" : "s"}`);
+  // A name marked while the citation it belongs to was still being typed — at
+  // the Space prompt, or in a pause before the "supra" — goes back to the name
+  // typed once the citation is whole: a pseudonym there would be a citation to
+  // a case that does not exist. Only a mark an edit made; the page's own stay.
+  let back = 0;
+  if (body.querySelector(".pn")) {
+    for (const el of TD.typedPseudonymsCited(TD.serializeMapped(body), body.__built)) {
+      if (!el.isConnected) continue;
+      if (!made && !back) snapshot(body, true);
+      el.replaceWith(document.createTextNode(el.dataset.real));
+      back++;
+    }
+    if (back) body.normalize();
+  }
+  if ((made || back) && !quiet) {
+    const notes = [];
+    if (made) notes.push(`${made} real name${made === 1 ? "" : "s"} marked — the file will carry the pseudonym${made === 1 ? "" : "s"}`);
+    if (back) notes.push(`${back} left as typed — ${back === 1 ? "a party" : "parties"} to a cited decision, never a pseudonym`);
+    toast(notes.join(" · "));
     afterTextChange();
   }
   return made;
@@ -3470,6 +3501,13 @@ async function saveDocument() {
     }
     m.dirty = false;
     wrote.push(m.name);
+    // What was written is what each page of it now is: a real name typed and
+    // left standing went into the file with it, and is the review's from here
+    // on, not the typing's (convertTypedReals).
+    for (let i = m.from; i < m.from + m.count; i++) {
+      const b = bodyForPage(i);
+      if (b) b.__built = doc.pages[i].lines.join("\n");
+    }
     // The save wrote every DECIDED name standing in the clear in this one;
     // where that was all of them, the folder's answer for the document is that
     // it has none. Where undecided ones are left, its row stands — the walk
