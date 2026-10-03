@@ -395,6 +395,12 @@ body.tools-collapsed #tools-rail .tool-btn { position: relative; }
 /* A box the key proposed is marked off from one drawn by hand, so a sweep of
    the document says which are the run's and which are yours. */
 .redactLayer .redact-rect.from-key { background: rgba(197, 34, 31, 0.24); outline-style: dashed; }
+/* A screenshot's fakes over the PDF's own real names (fakesForShot): on the
+   page for the length of the capture only. Under the redaction boxes, which
+   stay to be seen in the picture. */
+.shot-covers { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
+.shot-cover { position: absolute; background: #fff; color: #000; white-space: pre; overflow: hidden; }
+.shot-cover > span { display: inline-block; transform-origin: 0 50%; }
 body.redact-on .redactLayer .redact-rect { pointer-events: auto; }
 body.redact-on .redactLayer .redact-rect:hover { background: rgba(197, 34, 31, 0.5); }
 /* While the tool is on the drag belongs to it, in either mode, and the pointer

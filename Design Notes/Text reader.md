@@ -20,6 +20,28 @@ the `chrome.*` shim that used to sit at the top of `viewer.js`, moved out so
 both pages import it first. The PWA shell (`pwa/app-web.js`) routes a `.txt`
 to a reader iframe and feeds it through `__textReaderLoadLocal`.
 
+**📷 Screenshot** leaves the room like a print, so it is taken in the
+pseudonyms whichever way Show fakes sits (`fakesForShot`, which answers the
+function that puts the screen back). On the pages within a screen of the
+window every `.pn` shows its `data-fake`, and the forward pass
+(`forwardSwaps`, the places `forwardText` writes) is made in the text nodes
+themselves by `swapInNodes`: nothing is rebuilt, so the grid, the columns and
+the rule fits stand, and the fake goes in ahead of the name before the name
+comes out (`insertData`, then `deleteData`), so a live highlight range over
+the name (a leak, a find) ends up over the fake. Off the grid the underlines
+are placed again over the faked words. `swapChrome` does the same to the
+window's other text (everything outside `.page-body`, `.textLayer` and
+`[hidden]`) and to typed `input`/`textarea` values, in the reader and in a
+same-origin shell above it. The PDF pane shows the filing, which nothing
+scrubbed: `pdfNamesOn` reads each drawn sheet's pdf.js text layer the way
+`keyBoxesForPage` does, and `coverPdfNames` paints a white box over each name
+with its fake in the layer's type, under the redaction boxes. Put back: each
+node's own text, `afterTextChange()`, and the underlines at once. While
+`shotPut` is set, `beforeinput` on the pages is refused and the reel hangs
+nothing above. Hosted, the fakes go on only once the screen share is granted
+(`shareThisTab` answers the frame-taker), and a share that sends no frame is
+given up after five seconds, so the fakes never stay on.
+
 The tools live in a left-margin rail (`#tools-rail`), the PDF viewer's
 Acrobat-style panel carried over to this page: the top bar had grown to some
 two dozen controls, so the reading, pseudonym, review and PDF tools moved into

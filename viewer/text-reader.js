@@ -760,14 +760,25 @@ window.addEventListener("afterprint", () => {
 // ── screenshot ───────────────────────────────────────────────────────────────
 // The whole window as it stands, for looking at the design: the toolbar, the
 // panels, the bars, the PDF pane, the pages — what the eye gets, saved as a
-// PNG. Not the print: the print is the pages alone, re-dressed in their
-// pseudonyms for leaving the room; the screenshot changes nothing and so
-// carries whatever the screen shows, real names included when Show fakes is off.
+// PNG. Not the print: the print is the pages alone.
+//
+// BUT IN ITS PSEUDONYMS, like the print. A screenshot is taken to be shown to
+// somebody, and a picture of the screen with Show fakes off is a picture of
+// the real names. So for the moment of the capture every real name the key
+// binds that is on screen is shown as its fake, whichever way the toggle sits
+// (fakesForShot), and the screen goes back the moment the picture is taken.
+// It is the forward pass the save and the print make, with the same
+// exceptions — the values kept for the case, the spot keeps and the parties
+// of cited decisions read as they stand — and it reaches what the print never
+// shows: the bars, the panels, the shell's tabs and the PDF pane, whose PDF is
+// the filing itself and was never scrubbed.
 //
 // In the extension the background worker takes the tab (captureVisibleTab), no
 // questions asked. Hosted, there is no such thing, so the browser's own screen
 // share is asked for this tab, one frame is kept and the share is stopped —
 // asked of the shell above the reader's iframe, the shell being the window.
+// The names change only once the share is granted: a share declined leaves
+// the screen exactly as it was.
 function shotName() {
   const d = new Date();
   const p2 = (n) => String(n).padStart(2, "0");
@@ -775,10 +786,14 @@ function shotName() {
   return `${doc ? printTitle() : "Text Reader"} - screenshot ${when}.png`;
 }
 
-/** The tab through the extension's background worker: a data: URL, or null. */
-function shotByExtension() {
-  if (typeof chrome === "undefined" || chrome.__pwaShim || !chrome.runtime || !chrome.runtime.sendMessage) return Promise.resolve(null);
-  return new Promise((resolve) => {
+/** Whether the extension's background worker is there to take the tab. */
+function extensionShoots() {
+  return typeof chrome !== "undefined" && !chrome.__pwaShim && !!(chrome.runtime && chrome.runtime.sendMessage);
+}
+
+/** The tab through the extension's background worker: a PNG blob, or null. */
+async function shotByExtension() {
+  const dataUrl = await new Promise((resolve) => {
     try {
       chrome.runtime.sendMessage({ type: "capture-visible-tab" }, (res) => {
         const err = chrome.runtime.lastError;
@@ -786,31 +801,281 @@ function shotByExtension() {
       });
     } catch { resolve(null); }
   });
+  return dataUrl ? (await fetch(dataUrl)).blob() : null;
 }
 
-/** The tab through the browser's screen share, one frame of it: a PNG blob, or null. */
-async function shotByScreenShare() {
+/**
+ * This tab through the browser's screen share, asked for now: answers how to
+ * take one frame of it (a PNG blob, the share stopped after), or null where
+ * the browser has no screen share.
+ */
+async function shareThisTab() {
   let host = window;
   try { if (window.top !== window && window.top.navigator.mediaDevices) host = window.top; } catch { /* another origin above */ }
   const md = host.navigator.mediaDevices;
   if (!md || !md.getDisplayMedia) return null;
   const stream = await md.getDisplayMedia({ video: { displaySurface: "browser" }, audio: false, preferCurrentTab: true, selfBrowserSurface: "include" });
-  try {
-    const video = document.createElement("video");
-    video.muted = true;
-    video.srcObject = stream;
-    await video.play();
-    // The share dialog has only just closed; give the tab a moment to be drawn without it.
-    await new Promise((r) => setTimeout(r, 300));
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const c = document.createElement("canvas");
-    c.width = video.videoWidth;
-    c.height = video.videoHeight;
-    c.getContext("2d").drawImage(video, 0, 0);
-    return await new Promise((r) => c.toBlob(r, "image/png"));
-  } finally {
-    for (const t of stream.getTracks()) t.stop();
+  return async () => {
+    try {
+      const video = document.createElement("video");
+      video.muted = true;
+      video.srcObject = stream;
+      // A share that never sends a frame is given up on: the fakes are on the
+      // screen until this answers, and typing is held off with them.
+      await Promise.race([
+        video.play(),
+        new Promise((_, no) => setTimeout(() => no(new Error("the screen share sent no picture")), 5000)),
+      ]);
+      // The share dialog has only just closed; give the tab a moment to be drawn without it.
+      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const c = document.createElement("canvas");
+      c.width = video.videoWidth;
+      c.height = video.videoHeight;
+      c.getContext("2d").drawImage(video, 0, 0);
+      return await new Promise((r) => c.toBlob(r, "image/png"));
+    } finally {
+      for (const t of stream.getTracks()) t.stop();
+    }
+  };
+}
+
+let shotPut = null; // while a screenshot is being taken: how the screen goes back
+
+/** An element within `margin` screens of the window, above or below. */
+function nearWindow(rect, margin) {
+  const h = window.innerHeight;
+  return rect.width > 0 && rect.bottom > -h * margin && rect.top < h * (1 + margin);
+}
+
+/**
+ * The screenshot's edits, made in the text nodes themselves and undone the
+ * same way. Nothing is rebuilt: the lines, the columns and the grid stand as
+ * they are. The new text goes in AHEAD of the old before the old comes out,
+ * so a live range over the old — a leak's orange, a find — ends up over the
+ * new, both ways: the picture shows the page marked as it is, and the marks
+ * are still standing when the names come back. `edits` holds each as
+ * [node, at, put in, taken out], in the order made.
+ */
+function shotEdit(edits, n, at, put, cut) {
+  n.insertData(at, put);
+  n.deleteData(at + put.length, cut.length);
+  edits.push([n, at, put, cut]);
+}
+function undoShotEdits(edits) {
+  // A node changed since (rewritten by the reader itself) is left as it is now.
+  const now = new Map();
+  for (const [n] of edits) if (!now.has(n)) now.set(n, n.data);
+  const done = new Map(edits.map(([n]) => [n, now.get(n)]));
+  for (let i = edits.length - 1; i >= 0; i--) {
+    const [n, at, put, cut] = edits[i];
+    if (n.data !== done.get(n)) continue;
+    n.insertData(at, cut);
+    n.deleteData(at + cut.length, put.length);
+    done.set(n, n.data);
   }
+}
+
+/**
+ * `swaps` ([{ start, end, to }] into the text `segs` was read as) made in the
+ * text nodes, last first so the places before each still hold.
+ */
+function swapInNodes(segs, swaps, edits) {
+  for (let k = swaps.length - 1; k >= 0; k--) {
+    const s = swaps[k];
+    let first = true;
+    for (const g of segs) {
+      const from = Math.max(s.start, g.start), to = Math.min(s.end, g.end);
+      if (to <= from) continue;
+      const n = g.node;
+      const p = n.parentElement;
+      if (p && p.closest(".pn, [data-here]")) continue; // a pseudonym, or a spot keep: not this pass's
+      const put = first ? s.to : "";
+      first = false;
+      shotEdit(edits, n, from - g.start, put, n.data.slice(from - g.start, to - g.start));
+    }
+  }
+}
+
+/**
+ * The window's own words — the bars, the panels, the lists, the status line,
+ * the shell's tabs — with every real name in them as its fake, and the text
+ * typed into its boxes. The pages are not read here (fakesForShot reads them
+ * whole, which the citations need), and neither is anything hidden.
+ */
+function swapChrome(root, edits, fields) {
+  const skip = ".page-body, .textLayer, script, style, [hidden]";
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => n.nodeType === 1
+      ? (n.matches(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP)
+      : (/\p{L}/u.test(n.data) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP),
+  });
+  const nodes = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+  for (const n of nodes) {
+    const swaps = forwardSwaps(n.data);
+    if (swaps.length) swapInNodes([{ node: n, start: 0, end: n.data.length }], swaps, edits);
+  }
+  for (const el of root.querySelectorAll("input, textarea")) {
+    if (!(el.tagName === "TEXTAREA" || el.type === "text" || el.type === "search") || !el.value || el.closest("[hidden]")) continue;
+    const fw = forwardText(el.value);
+    if (!fw.swaps) continue;
+    fields.push([el, el.value, fw.text]);
+    el.value = fw.text;
+  }
+}
+
+/**
+ * Where a PDF page's real names stand, each with the fake to paint over it.
+ *
+ * The PDF is the filing, and nothing ever scrubbed it, so its names are read
+ * where they stand in the page's own text layer, the way the redaction's key
+ * sweep reads them (keyBoxesForPage). A page with no text — a scan — has
+ * nothing to read, and keeps its names. Measuring only; coverPdfNames paints.
+ */
+function pdfNamesOn(sheet) {
+  const layer = sheet.querySelector(".textLayer");
+  const spans = layer ? layer.querySelectorAll("span") : [];
+  if (!spans.length) return null;
+  const { text, map } = RD.pageTextFromSpans(RD.measureSpans(layer));
+  const swaps = forwardSwaps(text);
+  if (!swaps.length) return null;
+  const base = sheet.getBoundingClientRect();
+  const out = [];
+  for (const s of swaps) {
+    const r = RD.spanRangeFor(map, s.start, s.end);
+    const a = r && spans[r.startSpan], b = r && spans[r.endSpan];
+    const an = a && a.firstChild, bn = b && b.firstChild;
+    if (!an || !bn) continue;
+    const range = document.createRange();
+    try {
+      range.setStart(an, Math.min(r.startOffset, an.length || 0));
+      range.setEnd(bn, Math.min(r.endOffset, bn.length || 0));
+    } catch { continue; }
+    const local = [];
+    for (const cr of range.getClientRects()) {
+      if (cr.width > 0.5 && cr.height > 0.5) local.push({ x: cr.left - base.left, y: cr.top - base.top, w: cr.width, h: cr.height });
+    }
+    const cs = getComputedStyle(a);
+    const rects = RD.mergeRects(local, 2);
+    if (rects.length) out.push({ rects, to: s.to, font: cs.fontFamily, size: parseFloat(cs.fontSize) || 0 });
+  }
+  return out.length ? { sheet, names: out } : null;
+}
+/**
+ * …and each painted over: a white box a pixel past the name all round, the
+ * fake in it in the text layer's own type, drawn narrower where it is longer
+ * than the name, the way pdf.js fits its own text to the page. Under the
+ * redaction's boxes, which stay to be seen. Answers the layer, to be taken off.
+ */
+function coverPdfNames({ sheet, names }) {
+  const box = document.createElement("div");
+  box.className = "shot-covers";
+  for (const n of names) {
+    n.rects.forEach((m, k) => {
+      const c = document.createElement("div");
+      c.className = "shot-cover";
+      c.style.left = (m.x - 1) + "px";
+      c.style.top = (m.y - 1) + "px";
+      c.style.width = (m.w + 2) + "px";
+      c.style.height = c.style.lineHeight = (m.h + 2) + "px";
+      c.style.fontFamily = n.font;
+      c.style.fontSize = (n.size || m.h * 0.85) + "px";
+      // A name the PDF wrapped is one name: its fake on the first line, the rest covered.
+      if (k === 0 && n.to) {
+        const t = document.createElement("span");
+        t.textContent = n.to;
+        c.appendChild(t);
+      }
+      box.appendChild(c);
+    });
+  }
+  sheet.appendChild(box);
+  return box;
+}
+
+/**
+ * Every real name the key binds that is on screen, shown as its fake for the
+ * picture; answers how to put the screen back.
+ *
+ * The pages near the window, not all of them: the picture holds a screen of
+ * them, and the forward pass over a long reel is seconds. Their pseudonym
+ * spans show the fake, as Show fakes would, and a real name standing in the
+ * clear is written over in its text node; the citation underlines are laid
+ * again over the words as they now read. The document is not touched — no
+ * undo step, nothing dirty, nothing written — and typing is held off until
+ * the screen is back.
+ */
+function fakesForShot() {
+  hideTip();
+  if (!key || shotPut) return () => {};
+  const edits = [];  // see shotEdit
+  const fields = []; // [input, its value, the value faked]
+  const showed = document.body.classList.contains("show-fakes");
+  const sel = window.getSelection();
+  const caret = sel && sel.rangeCount ? [sel.anchorNode, sel.anchorOffset, sel.focusNode, sel.focusOffset] : null;
+
+  // Every page measured before any is written: one layout, not one a page.
+  const near = [...pagesEl.querySelectorAll(".tpage:not(.shed)")].filter((sec) => nearWindow(sec.getBoundingClientRect(), 1));
+  for (const sec of near) {
+    const body = sec.querySelector(".page-body");
+    if (!body) continue;
+    for (const s of body.querySelectorAll(".pn")) {
+      const t = s.firstChild;
+      if (s.childNodes.length !== 1 || t.nodeType !== 3 || t.data === s.dataset.fake) continue;
+      shotEdit(edits, t, 0, s.dataset.fake, t.data);
+    }
+    if (fwd && fwd.rx) {
+      const { text, segs } = flatten(body, { blankPn: true });
+      swapInNodes(segs, forwardSwaps(text), edits);
+    }
+  }
+  document.body.classList.add("show-fakes");
+  const pagesMoved = edits.length > 0;
+  const relink = pagesMoved && !gridOn();
+  if (relink) placeCitations();
+
+  if (fwd && fwd.rx) {
+    swapChrome(document.body, edits, fields);
+    try { if (window.top !== window && window.top.document.body) swapChrome(window.top.document.body, edits, fields); } catch { /* another origin above */ }
+  }
+  const plans = fwd && fwd.rx
+    ? [...document.querySelectorAll(".pdf-sheet")].filter((s) => nearWindow(s.getBoundingClientRect(), 0)).map(pdfNamesOn).filter(Boolean)
+    : [];
+  const covers = plans.map(coverPdfNames);
+  // A fake longer than its box: read every one, then write.
+  const fits = [];
+  for (const c of covers) for (const t of c.querySelectorAll(".shot-cover > span")) fits.push([t, t.parentElement.clientWidth / (t.offsetWidth || 1)]);
+  for (const [t, f] of fits) if (f < 1) t.style.transform = `scaleX(${f})`;
+
+  const back = () => {
+    shotPut = null;
+    for (const c of covers) c.remove();
+    for (const [el, v, f] of fields) if (el.value === f) el.value = v;
+    undoShotEdits(edits);
+    document.body.classList.toggle("show-fakes", showed);
+    const touched = new Set(edits.map(([n]) => n));
+    if (caret && (touched.has(caret[0]) || touched.has(caret[2])) && caret[0].isConnected && caret[2].isConnected) {
+      try { sel.setBaseAndExtent(...caret); } catch { /* moved on */ }
+    }
+    if (pagesMoved) {
+      // Anything that read the pages while they were faked read the wrong
+      // words: read again. The marks still standing stand until it has.
+      afterTextChange();
+      if (relink) placeCitations(); // …and the underlines go back under the real names now, not in a beat
+    }
+  };
+  shotPut = back;
+  return back;
+}
+
+/** One picture taken with the names in their pseudonyms, and the screen put back. */
+async function withFakes(take) {
+  const back = fakesForShot();
+  try {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    return await take();
+  } finally { back(); }
 }
 
 function saveShot(blob) {
@@ -824,19 +1089,24 @@ function saveShot(blob) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+let shooting = false;
 $("shot-btn").addEventListener("click", async (e) => {
   e.currentTarget.blur(); // no focus ring on the button in the picture
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  if (shooting) return;
+  shooting = true;
   try {
-    const dataUrl = await shotByExtension();
-    const blob = dataUrl ? await (await fetch(dataUrl)).blob() : await shotByScreenShare();
+    let blob = extensionShoots() ? await withFakes(shotByExtension) : null;
+    if (!blob) {
+      const take = await shareThisTab();
+      if (take) blob = await withFakes(take);
+    }
     if (!blob) { toast("This browser cannot take a screenshot of the page.", { error: true }); return; }
     saveShot(blob);
-    toast("Screenshot saved to Downloads.");
+    toast(key ? "Screenshot saved to Downloads, the names in their pseudonyms." : "Screenshot saved to Downloads.");
   } catch (err) {
     if (err && err.name === "NotAllowedError") return; // the share was declined
     toast(`The screenshot failed: ${(err && err.message) || err}`, { error: true });
-  }
+  } finally { shooting = false; }
 });
 
 // ── theme (shared with the PDF viewer) ───────────────────────────────────────
@@ -1087,20 +1357,26 @@ function maskKept(text) {
  * whose places in this very text the caller read off the page.
  */
 function forwardText(text, held) {
+  const swaps = forwardSwaps(text, held);
+  let out = "", at = 0;
+  for (const s of swaps) { out += text.slice(at, s.start) + s.to; at = s.end; }
+  return { text: out + text.slice(at), swaps: swaps.length };
+}
+/** …and the same pass as places: [{ start, end, to }] into `text`, in order. */
+function forwardSwaps(text, held) {
   // The names of decided cases are blanked with the keeps: a party of a
   // decision this brief cites is that decision's, not this matter's, and a
   // save that wrote a pseudonym over it would put out a citation to a case
   // that does not exist (textdoc.citedNameSpans).
   const spared = (held || []).concat(TD.citedNameSpans(text));
-  const runs = PK.forwardRuns(fwd, TD.blankRanges(maskKept(text), spared));
-  let off = 0, swaps = 0;
-  const out = runs.map((r) => {
+  const out = [];
+  let off = 0;
+  for (const r of PK.forwardRuns(fwd, TD.blankRanges(maskKept(text), spared))) {
     const len = r.t === "swap" ? r.from.length : r.s.length;
-    const piece = r.t === "swap" ? (swaps++, r.to) : text.slice(off, off + len);
+    if (r.t === "swap") out.push({ start: off, end: off + len, to: r.to });
     off += len;
-    return piece;
-  }).join("");
-  return { text: out, swaps };
+  }
+  return out;
 }
 /**
  * The names standing in the clear that nobody has decided on — the orange
@@ -3003,6 +3279,7 @@ function clearHistory() { undoStack = []; redoStack = []; lastSnapPage = -1; }
 pagesEl.addEventListener("beforeinput", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body) return;
+  if (shotPut) { e.preventDefault(); return; } // the screenshot's fakes are on the page, not in it
   if (e.inputType === "historyUndo" || e.inputType === "historyRedo") { e.preventDefault(); return; }
   if (selectionCrossesGutter(body)) { e.preventDefault(); toast(GUTTER_FIXED, { error: true }); return; }
   // A deletion after typing, or typing after a deletion, is its own step.
@@ -8402,10 +8679,12 @@ function reelShift(n) {
  * A pass that is holding page numbers of its own — the leak review, the names
  * walk, the redaction's misses, a print being prepared — would be holding the
  * numbers of OTHER pages a moment later, so nothing goes in above one while it
- * is open. Reading down is never held up this way: nothing moves under it.
+ * is open. Nor while a screenshot is being taken: the pages it has faked would
+ * be pushed out of the picture by pages it has not. Reading down is never held
+ * up this way: nothing moves under it.
  */
 function reelCanRenumber() {
-  return leaksBar.hidden && namesBar.hidden && !redactOn && !missWalk.length && !printPut;
+  return leaksBar.hidden && namesBar.hidden && !redactOn && !missWalk.length && !printPut && !shotPut;
 }
 
 /**

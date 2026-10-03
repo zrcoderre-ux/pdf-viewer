@@ -205,10 +205,18 @@ app, which routes it to the reader tab.
   whole reader window as it stands — toolbar, panels, bars, the PDF pane and
   the pages — as a PNG in Downloads, named after the document and the time.
   It is a picture of the screen for looking at the layout, not a copy of the
-  document: unlike the print it changes nothing, so it carries whatever is
-  shown, real names included when *Show fakes* is off. In the extension the
-  tab is taken directly; in the hosted app the browser asks to share this
-  tab, keeps one frame and stops.
+  document. **It is taken in the pseudonyms**, whichever way *Show fakes*
+  sits: a screenshot is made to be shown to somebody, so for the moment of
+  the capture every real name the key binds that is on screen is shown as
+  its fake — on the pages (names the run missed included), in the bars and
+  panels, in the Find box, and over the PDF in the pane, where each name is
+  covered with its fake. The values kept for the case, the spot keeps and the
+  parties of cited decisions read as they stand, as in the print. The screen
+  goes back the moment the picture is taken; nothing is written. A PDF page
+  with no text (a scan) cannot be read for names and keeps them. In the
+  extension the tab is taken directly; in the hosted app the browser asks to
+  share this tab, keeps one frame and stops, and the names change only once
+  the share is allowed.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
