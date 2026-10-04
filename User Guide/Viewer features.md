@@ -17,19 +17,20 @@ In addition to citation linking, the viewer supports:
   than the rest, such as a landscape exhibit, every page scrolls as far as it.
   With one page to a row the view also keeps its place: opening or closing the
   panel, dragging its edge, collapsing the tools rail, zooming or resizing the
-  window keeps the same part of the page in the middle, and a page scrolled
-  all the way to one edge stays at that edge. A document opens at the page's
-  left edge, where a pleading's line numbers are, and so does a switch back to
-  one page to a row; a page that fits keeps its left edge in view when it is
-  zoomed past the room or the panel opens over it, and leaving a presentation
-  brings back the place you were at. In Fit width and Fit page, dragging the
-  panel's edge refits the page, as opening or closing the panel does. With two
-  pages side by side the view keeps its scroll position instead, so the panel
-  opens over the pages and they shift when the tools rail collapses. **←** and
-  **→** turn the page; where the pages are too wide for the window they scroll
-  sideways first, and at the edge they turn the page (with one page to a row,
-  keeping the same edge in view). Holding the key stops at the edge; press it
-  again to turn the page.
+  window keeps the same part of the page in the middle, and a page scrolled all
+  the way to one edge stays at that edge (in Fit width and Fit page it can
+  slide back for a moment while the page refits). A document opens at the
+  page's left edge, where a pleading's line numbers are, and so does a switch
+  back to one page to a row; a page that fits keeps its left edge in view when
+  it is zoomed past the room or the panel opens over it, and leaving a
+  presentation brings back the place you were at. In Fit width and Fit page,
+  dragging the panel's edge refits the page, as opening or closing the panel
+  does. With two pages side by side the view keeps its scroll position instead,
+  so the panel opens over the pages and they shift when the tools rail
+  collapses. **←** and **→** turn the page; where the pages are too wide for
+  the window they scroll sideways first, and at the edge they turn the page
+  (with one page to a row, keeping the same edge in view). Holding the key
+  stops at the edge; press it again to turn the page.
 - **Text selection and copy** — text is selectable as soon as a page is
   shown: click and drag, and a small toolbar opens under the selection with
   **Highlight**, **Underline**, **Strikethrough**, **Comment**, **Copy** and

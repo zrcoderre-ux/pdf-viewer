@@ -1260,8 +1260,8 @@ body.thumbs-open { --right-cur: calc(var(--side-rail-width) + var(--thumb-panel-
   pointer-events: none;
 }
 /* Not for the password-locked message, a presentation, or a fit mode's pages
-   until the refit lands (refitSoon in viewer.js), which slide under the panel
-   rather than bring a sideways scroll bar for those frames. */
+   until the refit timer fires (refitSoon in viewer.js), which slide under the
+   panel rather than bring a sideways scroll bar for those frames. */
 #viewer-container:has(> #pages > .panel-empty)::after,
 body.presenting #viewer-container::after,
 body.refitting #viewer-container::after { display: none; }

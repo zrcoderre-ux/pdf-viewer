@@ -2167,19 +2167,23 @@ async function renderAllPages() {
   // Pass 1a: every page, in place and sized, drawn as it nears the screen.
   // We hold per-page DOM refs so the passes below can fill the right divs.
   const pageRefs = [];
-  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-    if (signal.aborted) return;
-    const refs = await buildPageShell(pageNum);
-    if (signal.aborted) return;
-    attachPageTools(refs);
-    pageRefs.push(refs);
+  try {
+    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+      if (signal.aborted) return;
+      const refs = await buildPageShell(pageNum);
+      if (signal.aborted) return;
+      attachPageTools(refs);
+      pageRefs.push(refs);
+    }
+  } finally {
+    // Landed, abandoned or stopped by a page that failed to load: the hold's
+    // frame loop ends and the observer is back.
+    if (sideways.building === signal) { sideways.building = null; watchSideways(); }
   }
   // Every page in place, the column as wide as it will be: held once more.
   // A page being read that fits the room is held at the left edge from here,
   // as at a new document, so a zoom past the room or a room narrowed past it
   // keeps its left edge in view and puts its right side out.
-  sideways.building = null;
-  watchSideways();
   holdSideways();
   const read = pageWrapperFor(visiblePageNumber());
   if (sidewaysHeld() && read && read.getBoundingClientRect().width <= sidewaysRoom().width + 1) sideways.edge = "start";
@@ -3848,8 +3852,9 @@ function noteSideways() {
   if (!sidewaysHeld() || sideways.jump) return;
   const room = sidewaysRoom();
   const col = sidewaysColumn();
-  // The browser clamps scrollX when the widths shrink: not the reader.
-  if (sidewaysSig(room, col) !== sideways.sig) { holdSideways(); return; }
+  // The browser clamps scrollX when the widths shrink, or while a refit takes
+  // the box away (refitSoon): not the reader.
+  if (sidewaysSig(room, col) !== sideways.sig || document.body.classList.contains("refitting")) { holdSideways(); return; }
   if (Math.abs(window.scrollX - sideways.x) > 1) readSideways(room, col);
 }
 document.addEventListener("scroll", () => { if (Math.abs(window.scrollX - sideways.x) > 1) noteSideways(); }, { passive: true });
@@ -4013,10 +4018,13 @@ window.addEventListener("wheel", (e) => {
   wheelZoomTimer = setTimeout(() => { const t = wheelTarget; wheelTarget = null; setZoom(t); }, 220);
 }, { passive: false });
 
-// Fit modes follow the window and the panels. Until the refit lands the page
-// is the old fit for the new room, and meanwhile (body.refitting) the scroll
-// width stops at the window's edge (viewer.css), so the page slides under the
-// panel for those frames rather than bring a sideways scroll bar with it.
+// Fit modes follow the window and the panels. Until the refit timer fires
+// the page is the old fit for the new room, and meanwhile (body.refitting) the
+// scroll width ends at the widest page's right edge, as it does without the
+// box (viewer.css), so the page slides under the panel for those frames rather
+// than bring a sideways scroll bar with it. In one column the place clamped
+// meanwhile is not the reader's (noteSideways): a refit that changes no zoom
+// puts the held place back as the box returns.
 let fitTimer = 0;
 function refitSoon() {
   if (!zoomMode || !pdfDoc) return;
@@ -4026,6 +4034,7 @@ function refitSoon() {
     document.body.classList.remove("refitting");
     const s = scaleForMode(zoomMode);
     if (s && Math.abs(s - currentScale) > 0.004) setZoom(s, { mode: zoomMode });
+    else holdSideways();
   }, 200);
 }
 window.addEventListener("resize", refitSoon);
@@ -6170,9 +6179,12 @@ Features = createFeatures({
   setAuthor: (n) => Annots.setAuthor(n),
   getZoom: () => ({ scale: currentScale, mode: zoomMode }),
   // A presentation is not held sideways (sidewaysHeld) from its zoom until
-  // the zoom it ends with, the layout before it put back.
-  restoreZoom: async (z) => { sideways.presenting = false; if (z.mode) setZoomMode(z.mode); else setZoom(z.scale); },
-  presentZoom: async () => { sideways.presenting = true; const sc = scaleForMode("fit-page"); if (sc) { restoreScroll = captureScroll(); currentScale = sc; syncZoomLabel(); await renderAllPages(); } },
+  // the zoom it ends with, the layout before it put back; the widths the hold
+  // last saw are from before it, so the first scroll after it holds rather
+  // than reads. A presentation left before its zoom (Esc within its first
+  // 250ms) does not turn the hold off again.
+  restoreZoom: async (z) => { Object.assign(sideways, { presenting: false, sig: "" }); if (z.mode) setZoomMode(z.mode); else setZoom(z.scale); },
+  presentZoom: async () => { sideways.presenting = document.body.classList.contains("presenting"); const sc = scaleForMode("fit-page"); if (sc) { restoreScroll = captureScroll(); currentScale = sc; syncZoomLabel(); await renderAllPages(); } },
   getLayout: () => pageLayout,
   setLayout: (l) => setPageLayout(l),
 });

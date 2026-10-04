@@ -74,12 +74,16 @@ and a page that reaches only into the margin gets no sideways scroll. With it:
   the panel open, 205px at 150%. The widest page sets it for every page: a
   landscape exhibit in a document fitted to its portrait pages gives them all
   the scroll and the bar.
-- In a fit mode, from the room changing until the refit lands 200ms later,
-  `body.refitting` (from `refitSoon`) takes the box away, so the old fit slides
-  under the panel for those frames and brings no sideways scroll bar. Dragging
-  the panel's edge refits too (`setThumbPanelWidth`), or a fit left under the
-  panel would keep one. The password-locked message and a presentation have no
-  box.
+- In a fit mode, from the room changing until the refit timer fires 200ms
+  later, `body.refitting` (from `refitSoon`) takes the box away, so the old fit
+  slides under the panel for those frames and brings no sideways scroll bar. A
+  view scrolled past the window's own range is pulled back to its end
+  meanwhile. In one column that is held, not taken as the reader's
+  (`noteSideways`), and when the timer fires without a zoom change (a
+  height-only resize) the hold puts the place back with the box; two side by
+  side the view stays where it was pulled back. Dragging the panel's edge
+  refits too (`setThumbPanelWidth`), or a fit left under the panel would keep
+  a bar. The password-locked message and a presentation have no box.
 - ← and → ask whether the pages' own right edge is past the window
   (`sidewaysColumn()`), not the window's `scrollWidth`, which counts the box.
   Where it is not, they turn the page. Where it is, they scroll sideways, and
@@ -101,57 +105,64 @@ back only the vertical place, and the hold the rest). Kept in pixels, `scrollX`
 lets the room's centre move across the page by half the change (116px for the
 panel at 1280px, 94px for the rail), and a zoom anchored on the window's centre
 takes the left edge out (123px for a step from 300%). A ResizeObserver on the
-container sees the room and the window change, every frame of the rails'
-transition, so the page moves with the panel. While a rebuild lands its pages
-the observer is off and the hold is asked once a frame from
-`requestAnimationFrame` (`holdWhileBuilding`), until the pages are in place or
-the rebuild is abandoned with none after it. The hold writes only `scrollX`. A
-scroll is the reader's, and moves the point, only where the widths
-(`sidewaysSig`) have not moved since the last hold; otherwise it is the browser
-clamping, and is held. The left edge (`edge = "start"`, `scrollX` 0, where a
-pleading's line numbers are) is held for a new document
-(`resetForNewDocument`), a switch into one column from the More menu, and,
-after a rebuild, a page being read that fits the room, so a zoom past the room,
-or a room narrowed past that page, keeps its left edge in view and puts its
-right side out. A presentation is not held (`sideways.presenting`, from its
-zoom to the one it ends with, since its class comes off before the layout is
-put back), so leaving it brings back the place held before it. A jump to a page
-is `scrollIntoView`, and the hold takes where it lands (`readSideways`); a
-smooth jump is waited for until `scrollend` (`sideways.jump`), since a scroll
-write would stop it short.
+container sees the room and the window change, every frame of the 0.16s padding
+transition, so the page eases aside as the panel opens or the rail collapses.
+While a rebuild lands its pages the observer is off and the hold is asked once
+a frame from `requestAnimationFrame` (`holdWhileBuilding`), until the pages are
+in place, the rebuild is abandoned or a page fails to load (the `finally`
+around pass 1a in `renderAllPages`). The hold writes only `scrollX`. A scroll
+is the reader's, and moves the point, only where the widths (`sidewaysSig`)
+have not moved since the last hold and no refit is pending (`body.refitting`);
+otherwise it is the browser clamping, and is held. The left edge
+(`edge = "start"`, `scrollX` 0, where a pleading's line numbers are) is held
+for a new document (`resetForNewDocument`), a switch into one column from the
+More menu, and, after a rebuild, a page being read that fits the room, so a
+zoom past the room, or a room narrowed past that page, keeps its left edge in
+view and puts its right side out. A presentation is not held
+(`sideways.presenting`, from its zoom to the one it ends with, since its class
+comes off before the layout is put back; one left before its zoom never sets
+it), and as it ends the widths the hold last saw are forgotten
+(`sideways.sig`), so the first scroll after it holds rather than reads and
+leaving it brings back the place held before it. A jump to a page is
+`scrollIntoView`, and the hold takes where it lands (`readSideways`); a smooth
+jump is waited for until `scrollend` (`sideways.jump`), since a scroll write
+would stop it short.
 
-What is left as it was, or worse (measured at 1280px with classic scroll bars;
-"between the rails" is from the tools rail's right edge to the side rail's or
-the open panel's left edge):
+Limits (measured at 1280px with classic scroll bars; "between the rails" is
+from the tools rail's right edge to the side rail's or the open panel's left
+edge; "the window's own range" is the sideways scroll the window has with the
+box taken away):
 
 - Two-up and the cover keep their own code paths: `scrollX` 0 at open,
   `scrollIntoView`, a zoom anchored on the window's centre (`xfrac`), the pages
-  sliding under a panel or rail change. The box and the arrows' turn are new
-  there, and the longer range clamps less: scrolled to the right end of a
-  spread at 100%, collapsing the tools rail leaves 0.87 of the left page
-  between the rails where the shorter range pulls the view back to 0.95, and
-  closing the panel 0.57 where the shorter range leaves 0.65. A zoom's anchor
-  is in reach where the shorter range holds the spread at the room's left edge:
-  at 1024px with the panel open, 100% to 110% puts the left page's edge 14px
-  under the tools rail, where the shorter range keeps it 28px clear.
+  sliding under a panel or rail change. The box, the arrows' turn and the
+  refit on a panel-edge drag apply there too, and the box's longer range clamps
+  less: scrolled to the right end of a spread at 100%, collapsing the tools
+  rail leaves 0.87 of the left page between the rails where the window's own
+  range would pull the view back to 0.95, and closing the panel 0.57 where it
+  would leave 0.65. A zoom's anchor is in reach where the window's own range
+  would hold the spread at the room's left edge: at 1024px with the panel
+  open, 100% to 110% puts the left page's edge 14px under the tools rail, where
+  the window's own range would keep it 28px clear.
 - A jump lines a page whose edge is out of the window up with the window's
   edge, under a rail, as `scrollIntoView` does, and from the right end that
   takes in a page narrower than the window: Letter at 200%, the next page lands
-  at `scrollX` 272 with 244px of it under the tools rail, where from the
-  shorter range's end it stays at 231 with 203px under it (0.80 between the
-  rails either way).
+  at `scrollX` 272 with 244px of it under the tools rail, where from the end
+  of the window's own range it would stay at 231 with 203px under it (0.80
+  between the rails either way).
 - Holding the middle moves the page: opening the panel takes it left by half
   the panel's width, where with `scrollX` kept it stands still and the panel
   covers its right side. With pages of mixed widths the point and the right
   edge are the column's, so a reader scrolled toward the widest page's right
   edge keeps that place on a narrower page through a width change: at 150%,
   from a landscape page's right edge on to a portrait page, opening the panel
-  leaves 0.51 of the portrait page between the rails, where with `scrollX` kept
-  it shows 0.81.
+  leaves 0.51 of the portrait page between the rails, where keeping `scrollX`
+  would show 0.77.
 - Zoomed past the room from a page that fits, the page keeps its left edge
-  where an anchor on the window's centre puts the page's middle there: Letter
-  from 150% to 175% shows 0.88 of the page between the rails where the centred
-  view shows 0.91 with 33px of its left edge under the tools rail.
+  where an anchor on the window's centre (`xfrac`) keeps the part of the page
+  at the window's centre there: Letter from 150% to 175% shows 0.88 of the page
+  between the rails where that anchor shows 0.91 with 33px of its left edge
+  under the tools rail.
 
 **Comments are a model in PDF user space** (`viewer/annotations.js`): one
 array of plain objects (`{ id, page, type, rect, quads, color, … }`), drawn as
