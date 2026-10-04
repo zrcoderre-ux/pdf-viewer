@@ -8,7 +8,9 @@
      the setting, so this one builds a form's caption and notice out of the
      same glyphs PDF-Linker writes and reads back where every bar landed —
      both ways the reader draws a page: side by side on a PDF's grid, where
-     each row is positioned on its own, and the ordinary flowing view.
+     each row is positioned on its own, and the ordinary flowing view. Then a
+     pleading's caption on numbered paper, where a row's indent is in its
+     number's spaces and its first cell is set in by it (columns.js).
      Open it over http (an ES module will not import from a file:// page):
        npx http-server -p 8080 . → http://127.0.0.1:8080/test-rules.html -->
 <link rel="stylesheet" href="viewer/text-reader.css">
@@ -26,9 +28,18 @@
     <div class="page-body fixed" id="laid"></div></div></section>
   <section class="tpage" data-index="1"><div class="page-inner">
     <div class="page-body" id="flow"></div></div></section>
+  <section class="tpage" data-index="2" style="--reader-size-eff:16px"><div class="page-inner" style="height:auto">
+    <div class="page-body numbered" id="caption"></div></div></section>
 </div></div>
 <script type="module">
 import { dressLines, fitRuleRows } from "./viewer/rules.js";
+import { dressColumns, charWidth } from "./viewer/columns.js";
+import { gutterPrefix } from "./viewer/textdoc.js";
+
+// The grid's character in the page's font, as the reader sets it on the root.
+const cw = charWidth(getComputedStyle(document.getElementById("flow")).fontFamily);
+document.documentElement.style.setProperty("--col-n", String(cw.char));
+document.documentElement.style.setProperty("--col-sp-n", String(cw.space));
 
 // An MC-350EX caption and its NOTICE TO PETITIONER as PDF-Linker writes them:
 // bars at 5, 95 and 146 down the caption, at 5 and 146 through the notice —
@@ -68,7 +79,57 @@ for (const id of ["laid", "flow"]) {
     line.style.lineHeight = "13px";
     line.__laid = `${top}|${left}|11|13`;   // as applyMatchedLayout records it
   }
+  dressLines(body);   // …as dressBody does it: the boxes, then the columns
+  dressColumns(body);
+}
+
+// A caption on pleading paper, as the reader builds a numbered line: the
+// number and the spaces after it in the margin (.gutter), the text in .lt.
+// "Plaintiff," is fifteen characters in, and those fifteen are its number's
+// spaces. Below it, a rule the export starts sixteen characters in, over a
+// row whose bar stands a character to the left of the rule's (its own table,
+// .rt) and whose text is narrower than the rule's indent.
+const L = 40;
+const cap = (n, a, b = "") => (n ? String(n).padStart(2) + "  " : "    ") + cell(a, L) + "│" + (b ? " " + b : "");
+const capRule = (n, m) => String(n).padStart(2) + "  " + "─".repeat(L) + m + "─".repeat(38);
+const caption = [
+  capRule(11, "┬"),
+  cap(12, "WINDERMERE HAVENWOOD, LLC, a California", "Case No.: 25STCV59720"),
+  cap(13, "limited liability company,"),
+  cap(0, "", "[Assigned to Hon. A. Judge, Dept. 15]"),
+  cap(14, " ".repeat(15) + "Plaintiff,", "COMPLAINT FOR:"),
+  cap(15, " ".repeat(6) + "vs.", "1. BREACH OF CONTRACT;"),
+  cap(16, "BORROWER ENTERPRISES, INC., a Delaware", "2. BREACH OF GUARANTY"),
+  cap(17, " ".repeat(15) + "Defendants.", "DEMAND FOR JURY TRIAL"),
+  capRule(18, "┴"),
+  "19",
+  "20                 Plaintiff alleges as follows:",
+  "21",
+  "22" + " ".repeat(18) + "─".repeat(5) + "┬" + "─".repeat(6),
+  "23  ab" + " ".repeat(18) + "│ cd",
+];
+{
+  const body = document.getElementById("caption");
+  for (const text of caption) {
+    const line = document.createElement("div");
+    line.className = "line";
+    const lt = document.createElement("span");
+    lt.className = "lt";
+    const g = gutterPrefix(text);
+    if (g) {
+      const gutter = document.createElement("span");
+      gutter.className = "gutter";
+      const m = g.gutter.match(/^( ?\d{1,2})( *)$/);
+      gutter.innerHTML = `<span class="gn">${m[1]}</span>` + (m[2] ? `<span class="gs">${m[2]}</span>` : "");
+      line.append(gutter);
+      line.classList.add("num");
+    }
+    lt.textContent = g ? g.rest : text;
+    line.append(lt);
+    body.append(line);
+  }
   dressLines(body);
+  dressColumns(body);
 }
 fitRuleRows(document.getElementById("pages"));
 
@@ -88,6 +149,7 @@ const check = (label, ok, note = "") => {
   out.push(`<span class="${ok ? "pass" : "fail"}">  ${ok ? "PASS" : "FAIL"}  ${label}${note && !ok ? "\n        " + note : ""}</span>`);
 };
 const same = (xs) => xs.every((x) => Math.abs(x - xs[0]) <= 1);
+const r1 = (x) => Math.round(x * 10) / 10;
 
 for (const [id, name] of [["laid", "side by side, on the PDF's grid"], ["flow", "the flowing page"]]) {
   const rows = rowsOf(id);
@@ -111,7 +173,48 @@ for (const [id, name] of [["laid", "side by side, on the PDF's grid"], ["flow", 
     check("the sheet keeps the paper's width", Math.abs(sec.getBoundingClientRect().width - 816) <= 1 && !sec.style.width, `${sec.getBoundingClientRect().width} "${sec.style.width}"`);
     check("the box is drawn smaller than the reading size", parseFloat(body.querySelector(".line.rl > .lt").style.fontSize) < 100, body.querySelector(".line.rl > .lt").style.fontSize);
     check("…and ends at the page's right margin", right <= margin + 1 && right >= margin - 4, `${right} vs ${margin}`);
+    // Its rows open with five spaces, which the grid sets in five of its
+    // characters (indentBoxRow) — and drawn smaller, by as much less.
+    const lt = body.querySelector(".line.rl > .lt");
+    const f = parseFloat(lt.style.fontSize) / 100;
+    const pad = parseFloat(getComputedStyle(lt.firstElementChild).paddingLeft);
+    const unit = cw.char * parseFloat(getComputedStyle(body).fontSize);
+    check("…its indent drawn smaller with it", Math.abs(pad - 5 * unit * f) <= 0.5, `${r1(pad)} vs ${r1(5 * unit * f)} (×${f})`);
   }
+}
+
+// Where a line's text begins: its first character that is not a space.
+const textX = (el) => {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const i = n.data.search(/\S/);
+    if (i < 0) continue;
+    const r = document.createRange();
+    r.setStart(n, i); r.setEnd(n, i + 1);
+    return r.getBoundingClientRect().left;
+  }
+  return NaN;
+};
+{
+  out.push("a caption on numbered paper:");
+  const body = document.getElementById("caption");
+  const lines = [...body.querySelectorAll(":scope > .line")];
+  const firstCell = (k) => lines[k].querySelector(":scope > .lt > .rc");
+  const f = parseFloat(lines[1].querySelector(".lt").style.fontSize || "100") / 100;
+  const unit = cw.char * parseFloat(getComputedStyle(body).fontSize) * f;
+  const name = textX(firstCell(1));
+  const inBy = (k) => textX(firstCell(k)) - name;
+  check("\"Plaintiff,\" stands fifteen of the grid's characters in from the party's name", Math.abs(inBy(4) - 15 * unit) <= 1, `${r1(inBy(4))} vs ${r1(15 * unit)}`);
+  check("\"vs.\" six", Math.abs(inBy(5) - 6 * unit) <= 1, `${r1(inBy(5))} vs ${r1(6 * unit)}`);
+  check("\"Defendants.\" fifteen", Math.abs(inBy(7) - 15 * unit) <= 1, `${r1(inBy(7))} vs ${r1(15 * unit)}`);
+  check("…where a line of the page's own indented as far begins", Math.abs(textX(firstCell(4)) - textX(lines[10].querySelector(".lt"))) <= 1, `${r1(textX(firstCell(4)))} vs ${r1(textX(lines[10].querySelector(".lt")))}`);
+  const bars = lines.slice(0, 9).map((l) => Math.round(l.querySelector(".rb").getBoundingClientRect().left));
+  check("the caption's bar stands in one column down every row, the unnumbered one too", same(bars), bars.join(" "));
+  const rule = firstCell(12);
+  const pad = parseFloat(getComputedStyle(rule).paddingLeft);
+  check("a rule the export indents starts that far in", rule.classList.contains("hf") && Math.abs(pad - 16 * unit) <= 1, `${rule.className} ${r1(pad)} vs ${r1(16 * unit)}`);
+  const under = lines.slice(12, 14).map((l) => Math.round(l.querySelector(".rb").getBoundingClientRect().left));
+  check("…and the bar of the row under it, its own table, stands under the rule's", same(under), under.join(" "));
 }
 out.push("", `${"=".repeat(52)}`, `FAILURES: ${fails}`);
 document.getElementById("report").innerHTML = out.join("\n");

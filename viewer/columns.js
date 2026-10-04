@@ -189,26 +189,30 @@ export function dressLineColumns(lt, shape) {
 export function dressColumns(body) {
   const numbered = body.classList.contains("numbered");
   let changed = false;
-  const all = [];
+  const all = [], boxes = [];
   let origin = Infinity;
   let count = 0; // every line of the page, a box row too: how far apart lines are
   for (const line of body.querySelectorAll(":scope > .line")) {
     const at = count++;
     const lt = line.querySelector(":scope > .lt");
     if (!lt) continue;
-    if (line.classList.contains("rl")) {
-      if (lt.querySelector(".cc") || lt.classList.contains("ci")) { undressColumns(lt); changed = true; }
-      line.classList.remove("cols");
-      lt.__colPlan = null;
-      continue;
-    }
     const g = numbered && line.classList.contains("num") ? line.querySelector(":scope > .gutter") : null;
     const start = g ? g.textContent.length : 0;
     const shown = lt.textContent;
     if (g && shown.trim()) origin = Math.min(origin, start);
+    if (line.classList.contains("rl")) {
+      if (lt.querySelector(".cc") || lt.classList.contains("ci")) { undressColumns(lt); changed = true; }
+      line.classList.remove("cols");
+      lt.__colPlan = null;
+      boxes.push({ lt, start });
+      continue;
+    }
     all.push({ line, lt, start, shown, at });
   }
   if (!numbered || origin === Infinity) origin = 0;
+  // A box row is the box's (rules.js) and is not cut into columns, but its
+  // first cell stands where the export indents it all the same.
+  for (const b of boxes) indentBoxRow(b.lt, lineIndent(serializeNodes(b.lt), { start: b.start, origin }));
   const lines = [], plain = [];
   for (const l of all) {
     // Most lines have no run of spaces and no indent — a pleading's body, a
@@ -253,6 +257,28 @@ export function dressColumns(body) {
   // …and each second column placed for the font the page is read in.
   alignColumns([body]);
   return changed;
+}
+
+/**
+ * A box row's first cell set where the export indents its text: `ind` grid
+ * characters in from the body margin, the `lead` spaces it opens with (an
+ * unnumbered row's, which it draws) taken back off, as an indented line's
+ * text-indent does. A numbered row's spaces are its number's and kept out of
+ * the layout with it, so its text stood flush against the side of the box —
+ * "Plaintiff," under the party's name, "vs.", "Defendants." — however far in
+ * the caption set them. The cell itself carries it (--ind and --lead, .ci): a
+ * row's cells are made afresh on every pass (rules.js), and this runs after.
+ */
+function indentBoxRow(lt, { ind, lead }) {
+  const cell = lt.firstElementChild;
+  if (!cell || !cell.classList.contains("rc")) return;
+  const want = ind || lead ? ind + "/" + lead : "";
+  const had = cell.classList.contains("ci") ? cell.style.getPropertyValue("--ind") + "/" + cell.style.getPropertyValue("--lead") : "";
+  if (want === had) return;
+  if (!want) { cell.classList.remove("ci"); cell.style.removeProperty("--ind"); cell.style.removeProperty("--lead"); return; }
+  cell.classList.add("ci");
+  cell.style.setProperty("--ind", String(ind));
+  cell.style.setProperty("--lead", String(lead));
 }
 
 /** A place alignColumns wrote taken back off: the line or cell is on the plain grid again. */

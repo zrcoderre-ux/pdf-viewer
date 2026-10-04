@@ -156,7 +156,7 @@ export function fitRuleRows(root) {
   const roots = Array.isArray(root) ? root : [root];
   for (const line of roots.flatMap((r) => [...r.querySelectorAll(".line.rl")])) {
     const lt = line.querySelector(":scope > .lt");
-    if (lt && lt.style.fontSize) lt.style.fontSize = ""; // measured at its own size again
+    if (lt && lt.style.fontSize) { lt.style.fontSize = ""; lt.style.removeProperty("--box-fit"); } // measured at its own size again
     unfit(line);
   }
   const stacks = roots.flatMap((r) => ruleStacks(r));
@@ -208,7 +208,8 @@ function fitWide(stacks) {
       const size = (s.f * 100).toFixed(1) + "%";
       for (const line of s.lines) {
         const lt = line.querySelector(":scope > .lt");
-        if (lt) lt.style.fontSize = size;
+        // …and the indent of its first cell (columns.js, indentBoxRow) with it.
+        if (lt) { lt.style.fontSize = size; lt.style.setProperty("--box-fit", String(s.f)); }
         unfit(line); // its cells measured again at the new size, not at the widths they were given
       }
     }
@@ -315,8 +316,14 @@ export function ruleGrid(rows, widths, slop = RULE_COL_SLOP) {
 const barsOf = (line) => String(line.dataset.rk || "").split(",").filter((s) => s !== "").map(Number);
 // A `─` run needs no width of its own: it is a line drawn across whatever its
 // cell is given, and measured before the box is fitted it would ask for the
-// width of ninety glyphs in a font that was never meant to draw them.
-const needOf = (c) => (!c || c.classList.contains("hf") ? 0 : c.getBoundingClientRect().width);
+// width of ninety glyphs in a font that was never meant to draw them. One the
+// export indents (columns.js, indentBoxRow) needs its indent: the rule starts
+// that far in, and a cell is never narrower than its padding.
+const needOf = (c) => {
+  if (!c) return 0;
+  if (!c.classList.contains("hf")) return c.getBoundingClientRect().width;
+  return c.classList.contains("ci") ? parseFloat(getComputedStyle(c).paddingLeft) || 0 : 0;
+};
 
 /**
  * Stacks squared up: every one MEASURED, then every one written. Measured

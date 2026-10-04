@@ -41,8 +41,11 @@ in it, one wide table in an exhibit set put every other page of the document
 off centre in a column thousands of pixels wide. `fitWide` draws a box wider
 than its paper smaller instead: the rows' `.lt` (`display: contents`) take
 one percentage font size, so only the cells shrink and the numbered margin
-keeps its size, and the stack is squared up again at that size. Up to three
-passes (the one-pixel bars do not shrink). Not on the grid: a matched sheet
+keeps its size, and the stack is squared up again at that size; the first
+cell's indent (`indentBoxRow`, below) shrinks by the same factor
+(`--box-fit` on the `.lt`), or the first pass falls short of the margin by
+the indent's share and three passes do not make it up. Up to three passes
+(the one-pixel bars do not shrink). Not on the grid: a matched sheet
 is the PDF page's width and each row is at its PDF row's size. Every stack is
 measured before any is written (`planStack` / `applyStack`), so a pass costs
 a handful of layouts rather than one per box. The fit is redone when the
@@ -63,7 +66,7 @@ where a line's spaces cut it between columns: after each gap of `COLUMN_GAP`
 it begin at (`columnBands`), so a sentence's double space is never a column.
 `lineIndent` says how deep its text stands from the body margin: its leading
 spaces off pleading paper; on pleading paper, where the margin is `origin`
-characters in (the narrowest number's prefix) and a numbered line's spaces
+characters in (the narrowest number's prefix, a box row's included) and a numbered line's spaces
 are all its number's (`GUTTER_RE`, drawn in the hidden `.gs`), `start + lead −
 origin` — so a centred heading, "Plaintiff," under the party's name, and a
 line of the caption's right-hand column alone on its number stand where the
@@ -90,7 +93,21 @@ keeps the page's columns. A line already dressed as its text says is left as
 it is (`dressedAs`), and a line with no run of spaces and no indent is passed
 over on its `textContent` without serializing it. `rules.js` takes the cells
 off a line carrying rule glyphs before wrapping the glyphs, and box rows
-(`.rl`) never get cells. A line with a column gap is `.line.cols`:
+(`.rl`) never get cells. A box row's FIRST cell is still set in where the
+export indents it (`indentBoxRow`, after the rows are counted for `origin`):
+`.rc.ci` with `--ind` and `--lead` from `lineIndent`, drawn as a
+`padding-left` of `--ind` grid characters with the `--lead` spaces an
+unnumbered row opens with taken back off by `text-indent`. A numbered row's
+spaces are its number's, so "Plaintiff," under the party's name, "vs." and
+"Defendants." stood flush against the side of the caption box however far in
+the export set them. Padding, not `text-indent`, so an empty first cell (a box
+the export draws in from the margin) and a rule across its cell take it too:
+an indented `.hf` draws its line over its content box only, and `needOf`
+(`fitStacks`) counts its padding, since a cell is never narrower than that and
+a row that is its own table (`.rt`) would push its bar out past the stack's.
+Off the grid and on numbered pages beside the PDF; an unnumbered page beside
+the PDF places a box row by its own left instead (below). Checked in
+`test-rules.html` ("a caption on numbered paper"). A line with a column gap is `.line.cols`:
 `shapePages` reads those unwrapped (`.cols-measure`, every page at once in
 `columnCaps`) and starts the page's fit no larger than its widest column line
 fits across the paper, since a wrapped column comes back at the left margin.

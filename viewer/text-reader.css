@@ -757,6 +757,22 @@ body:not(.editing) .page-body .cg { font-size: 0; line-height: 0; }
   border-right: 0; padding-right: calc(1.28 * var(--gutter-em) + 1px);
   background: linear-gradient(#c4c7cb, #c4c7cb) right calc(0.88 * var(--gutter-em)) top / 1px 100% no-repeat;
 }
+/* …and the text in a box row's first cell stands where the export indents it
+   (columns.js, indentBoxRow). A numbered row's spaces are its number's, kept
+   out of the layout with it, so "Plaintiff," under the party's name stood
+   flush against the side of the caption box. --ind grid characters in from
+   the body margin, as padding (an empty cell before the box's own side, and a
+   rule drawn across its cell, take it as well as text), with the --lead
+   spaces an unnumbered row opens with taken back off. A box drawn smaller to
+   fit its paper (rules.js, fitWide) takes its indent down with its type
+   (--box-fit). Beside the PDF on a page with no numbers the row is placed by
+   its own left instead (applyMatchedLayout). */
+.page-body:not(.fixed) .line.rl > .lt > .rc.ci,
+.page-body.numbered.fixed .line.rl > .lt > .rc.ci {
+  padding-left: calc(var(--ind) * var(--col-u) * var(--box-fit, 1));
+  text-indent: calc(var(--lead) * var(--col-sp-n, 0.25) * -1em);
+}
+.line.rl > .lt > .rc.ci.hf { background-origin: content-box; background-clip: content-box; }
 .rc { display: table-cell; padding: 0; white-space: pre; box-sizing: border-box; }
 .rc.hf { font-size: 0; background: linear-gradient(currentColor, currentColor) 0 50% / 100% 1px no-repeat; }
 .rb { display: table-cell; width: 1px; min-width: 1px; padding: 0; font-size: 0; background: currentColor; }
