@@ -3191,8 +3191,10 @@ pagesEl.addEventListener("mousedown", (e) => {
 // pointer is over one after that, staying put while it is over blank space.
 // Between the two it takes what the PDF wrote between them, as any selection
 // does: on a page written in reading order, only text the pointer passed
-// over; on one written out of it (a footer before the body, a caption after
-// it, two columns), all that lies between in the file's order.
+// over; on one written out of it (a footer before the body, a header or a
+// caption after it, two columns), all that lies between in the file's order:
+// a drag begun beyond a running header or footer crosses it first and starts
+// there (Design Notes/Editor.md, "Written order").
 // Near the window's top or bottom edge the pages scroll under it, and the
 // selection is read again where the pointer then is.
 //
@@ -3210,10 +3212,12 @@ const toolbarEl = document.getElementById("toolbar");
 const DRAG_EDGE_PX = 20;
 const DRAG_WALK_PX = 2;
 
-// Whether a press's target is a page's blank space or the grey around them.
+// Whether a press's target is a page's blank space or the grey around them
+// (under a document shorter than the window, and in the strip under the last
+// page, that grey is <body> or <html>: see the listener below).
 function isBlankTarget(t) {
   if (!t || !t.classList) return false;
-  if (t === pagesEl || t === viewerContainerEl) return true;
+  if (t === pagesEl || t === viewerContainerEl || t === document.body || t === document.documentElement) return true;
   const p = t.parentElement;
   if (!p || !pagesEl.contains(p)) return false;
   if (t.classList.contains("page-wrapper")) return true;
@@ -3234,7 +3238,7 @@ function caretOnWord(x, y) {
   return c && c.node.nodeType === Node.TEXT_NODE && el.contains(c.node) ? c : null;
 }
 
-viewerContainerEl.addEventListener("mousedown", (e) => {
+function onBlankPress(e) {
   if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
   const mode = document.body.classList;
   if (mode.contains("presenting") || mode.contains("organize-mode") || mode.contains("annot-drawing") ||
@@ -3251,6 +3255,18 @@ viewerContainerEl.addEventListener("mousedown", (e) => {
   const at = caretAtPoint(e.clientX, e.clientY);
   if (sel) { if (at) sel.collapse(at.node, at.offset); else sel.removeAllRanges(); }
   blankDrag(e.clientX, e.clientY);
+}
+viewerContainerEl.addEventListener("mousedown", onBlankPress, true);
+// The grey outside #viewer-container is <body> (or <html>): under a document
+// shorter than the window, and the strip under the last page. The browser's
+// press there anchored at the last page's text, and a drag from there up
+// onto the page took the whole of it. A press on the window's own scrollbar
+// has <html> for its target too, and is left alone.
+document.addEventListener("mousedown", (e) => {
+  if (e.target !== document.body && e.target !== document.documentElement) return;
+  const room = document.documentElement;
+  if (e.clientX >= room.clientWidth || e.clientY >= room.clientHeight) return;
+  onBlankPress(e);
 }, true);
 
 let endBlankDrag = null; // the drag below that is under way
@@ -3744,6 +3760,20 @@ citePopover.hidden = true;
   );
 }
 document.body.appendChild(citePopover);
+// A plain press on the bar's own padding or a separator, between its buttons,
+// drops the selection and begins none. The bar stands 8px under the
+// selection's last word, where a click to dismiss it lands, and the browser's
+// press there began a selection in the bar, which hangs off <body> after the
+// pages: a 2-3px wobble took everything from the selection's end to the end of
+// the document. The buttons keep the selection (their own mousedown, above),
+// and a drag begun on a word that strays onto the bar is no press on it.
+citePopover.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target !== citePopover && !e.target.classList.contains("sel-sep")) return;
+  e.preventDefault();
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  window.getSelection()?.removeAllRanges();
+});
 
 function hideCitePopover() { citePopover.hidden = true; }
 

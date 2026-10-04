@@ -10544,11 +10544,13 @@ function bindSelection(layer) {
 // A press on the PDF pane's grey, around and between the pages, begins no
 // selection: the browser anchored it at some page's first word, or in the line
 // numbers written first, and a drag from there onto a line took everything
-// above it. It drops the selection there was, as a click there did (Shift
-// keeps it). A press on the pane's own scrollbar, whose target is the pane
-// too, is left alone.
+// above it. The page's label over each sheet ("Page 3"), half the band between
+// two pages, is the same. It drops the selection there was, as a click there
+// did (Shift keeps it). A press on the pane's own scrollbar, whose target is
+// the pane too, is left alone.
 pdfPane.addEventListener("mousedown", (e) => {
-  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.altKey || e.target !== pdfPane) return;
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target !== pdfPane && !(e.target.classList?.contains("pdf-label") && pdfPane.contains(e.target))) return;
   const r = pdfPane.getBoundingClientRect();
   const x = e.clientX - r.left - pdfPane.clientLeft, y = e.clientY - r.top - pdfPane.clientTop;
   if (x < 0 || y < 0 || x >= pdfPane.clientWidth || y >= pdfPane.clientHeight) return;
