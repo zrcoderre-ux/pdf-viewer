@@ -1359,20 +1359,24 @@ body.refitting #pages-end { display: none; }
 body.text-dragging :is(.linkLayer a, .annotLayer .annot, .annotLayer .annot *, .redactLayer .redact-rect, .formLayer .form-field) {
   pointer-events: none !important;
 }
-/* The selection bar too. It follows the selection's end, 8px under it, which
-   is where a drag making for the next line goes; under the pointer it became
-   the selection's end, and since it hangs off <body> after every page, the
-   selection ran to the end of the document. */
-body.text-dragging :is(.sel-toolbar, .sel-toolbar *) { pointer-events: none !important; }
+/* The selection bar too, while a drag begun in blank space is under way
+   (blankDrag in viewer.js): it follows the selection's end, 8px under the
+   last word, which is where a drag making for the next line goes, and over
+   it the drag found no word, so it stuck. */
+body.blank-dragging :is(.sel-toolbar, .sel-toolbar *) { pointer-events: none !important; }
 /* Nothing around the pages is text to select: the toolbar, the rails, the
    side panel, menus, the bars and notices. A drag from a page that strayed
    onto one took the buttons' labels, and since they stand before the pages
    (or after them, hung off <body>), the whole of page 1 or everything to the
    end of the document with them. A box to type in stays selectable, and so do
    a comment's own text and quote in the side panel, the Table of Authorities
-   panel (its citations are copied from it) and a dialog's text. */
+   panel (its citations are copied from it) and a dialog's text. The selection
+   bar is left as it was: it stands under the selection's end, where a drag
+   begun on a word strays onto it, and made unselectable it held such a drag
+   at the end of the page's text where the browser's own drag, with the bar
+   moving off, came back to the words (Design Notes/Editor.md). */
 :is(#toolbar, #tools-rail, #side-rail, #thumbnail-panel, #thumb-resize, .menu, .float-bar,
-  #ocr-progress, #toast-host, .sel-toolbar) {
+  #ocr-progress, #toast-host) {
   user-select: none;
 }
 :is(#toolbar, #tools-rail, #side-rail, #thumbnail-panel, .menu, .float-bar)

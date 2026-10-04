@@ -3189,7 +3189,10 @@ pagesEl.addEventListener("mousedown", (e) => {
 // is over a word: the selection begins at the browser's caret where the
 // pointer first is over one, and ends at the browser's caret wherever the
 // pointer is over one after that, staying put while it is over blank space.
-// A drag begun in blank space so selects only text the pointer passed over.
+// Between the two it takes what the PDF wrote between them, as any selection
+// does: on a page written in reading order, only text the pointer passed
+// over; on one written out of it (a footer before the body, a caption after
+// it, two columns), all that lies between in the file's order.
 // Near the window's top or bottom edge the pages scroll under it, and the
 // selection is read again where the pointer then is.
 //
@@ -3257,33 +3260,7 @@ function blankDrag(x0, y0) {
   let dragged = false, anchor = null, last = null, raf = 0, stamp = 0;
   // Where the pointer was last read, in the document (the pages may scroll),
   // and the word it was over there.
-  const sy0 = window.scrollY;
-  let prev = { x: x0 + window.scrollX, y: y0 + sy0 }, prevWord = null;
-  // The text of the page the drag began on (its first word's), read once,
-  // when the press was under or over all of it: { index: span -> its place in
-  // written order, n, under, edge }.
-  let order, fromEdge = null;
-  const pageOrder = () => {
-    if (order !== undefined) return order;
-    order = null;
-    const layer = anchor.node.parentElement && anchor.node.parentElement.closest(".textLayer");
-    if (!layer) return order;
-    const index = new Map();
-    let top = Infinity, bottom = -Infinity, firstNode = null, lastNode = null;
-    for (const sp of layer.querySelectorAll("span")) {
-      const t = sp.firstChild;
-      if (!t || t.nodeType !== Node.TEXT_NODE || !t.data.trim()) continue;
-      const r = sp.getBoundingClientRect();
-      index.set(sp, index.size);
-      top = Math.min(top, r.top); bottom = Math.max(bottom, r.bottom);
-      firstNode = firstNode || t; lastNode = t;
-    }
-    const py = y0 + sy0 - window.scrollY;
-    if (!index.size || (py <= bottom && py >= top)) return order;
-    const under = py > bottom;
-    order = { index, n: index.size, under, edge: under ? { node: lastNode, offset: lastNode.data.length } : { node: firstNode, offset: 0 } };
-    return order;
-  };
+  let prev = { x: x0 + window.scrollX, y: y0 + window.scrollY }, prevWord = null;
   // The selection's end where the pointer is: over a word, the browser's caret
   // there; over blank space, where it was. The two edges are read along the
   // pointer's way, every DRAG_WALK_PX, on the one word under it alone: the
@@ -3331,20 +3308,7 @@ function blankDrag(x0, y0) {
       f = caretOnWord(e.x, e.y);
     }
     if (!f || !anchor) return;
-    // A press under every word of the page, or over every one (in its margin
-    // or the gap beyond it), means that end of the page's text as much as the
-    // first word the pointer reached: a running footer is often written before
-    // the body (a header after it), so a drag from under it up into the body,
-    // anchored on it, took the whole body above. Once the page's text from
-    // that end to the pointer's word is the shorter of the two, in the order
-    // it is written, the selection runs from there for the rest of the drag.
-    const o = !fromEdge && pageOrder();
-    if (o) {
-      const i = o.index.get(anchor.node.parentElement), j = o.index.get(f.node.parentElement);
-      if (i != null && j != null && (o.under ? o.n - 1 - j : j) < Math.abs(i - j)) fromEdge = o.edge;
-    }
-    const a = fromEdge && fromEdge.node.isConnected ? fromEdge : anchor;
-    try { sel.setBaseAndExtent(a.node, a.offset, f.node, f.offset); } catch { /* the page was rebuilt under the drag */ }
+    try { sel.setBaseAndExtent(anchor.node, anchor.offset, f.node, f.offset); } catch { /* the page was rebuilt under the drag */ }
   };
   const follow = (now) => {
     raf = 0;
@@ -3368,8 +3332,9 @@ function blankDrag(x0, y0) {
       if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < LINK_DRAG_PX) return;
       dragged = true;
       // From here it is a selection: whatever floats over the words stands
-      // aside (see the CSS), so a point finds the words under it.
-      document.body.classList.add("text-dragging");
+      // aside (see the CSS), the selection bar too, so a point finds the
+      // words under it.
+      document.body.classList.add("text-dragging", "blank-dragging");
     }
     last = { x: ev.clientX, y: ev.clientY };
     extend();
@@ -3384,7 +3349,7 @@ function blankDrag(x0, y0) {
     if (raf) cancelAnimationFrame(raf);
     raf = 0;
     last = null;
-    if (dragged) document.body.classList.remove("text-dragging");
+    if (dragged) document.body.classList.remove("text-dragging", "blank-dragging");
   };
   endBlankDrag = end;
   document.addEventListener("mousemove", onMove, true);
@@ -3794,24 +3759,15 @@ function updateCitePopover() {
     hideCitePopover();
     return;
   }
-  // Its first and last glyphs: never a layer, a canvas or the end-of-content
-  // block a selection swept up (glyphRects, pageSized), whose box is the page.
-  const rects = glyphRects(sel.getRangeAt(sel.rangeCount - 1));
-  const pageBoxes = [...pagesEl.querySelectorAll(".page-wrapper")].map((w) => w.getBoundingClientRect());
-  const glyph = (r) => {
-    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-    const b = pageBoxes.find((p) => cx >= p.left && cx <= p.right && cy >= p.top && cy <= p.bottom);
-    return !b || !pageSized(r, b);
-  };
-  let first = null, last = null;
-  for (let k = 0; k < rects.length && !first; k++) if (glyph(rects[k])) first = rects[k];
-  for (let k = rects.length - 1; k >= 0 && !last; k--) if (glyph(rects[k])) last = rects[k];
+  const rects = sel.getRangeAt(sel.rangeCount - 1).getClientRects();
+  let last = null;
+  for (const r of rects) if (r.width > 0.5 && r.height > 0.5) last = r;
   if (!last) { hideCitePopover(); return; }
   citePopover.hidden = false;
   const w = citePopover.offsetWidth || 200;
   const left = Math.min(last.right - w / 2, window.innerWidth - w - 8);
   let top = last.bottom + 8;
-  if (top + 40 > window.innerHeight) top = Math.max(8, first.top - 44);
+  if (top + 40 > window.innerHeight) top = Math.max(8, rects[0].top - 44);
   citePopover.style.left = `${Math.max(8, left)}px`;
   citePopover.style.top = `${Math.max(8, top)}px`;
 }

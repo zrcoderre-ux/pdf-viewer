@@ -40,14 +40,18 @@ In addition to citation linking, the viewer supports:
     pages) selects nothing, even if the mouse wobbles; it only clears the
     selection there was. A drag **begun in blank space** selects nothing until
     the pointer is on a word, and then runs from that word to the last word
-    the pointer was on (begun under a page's last line, from the page's end).
-    Between the two it takes the text in the order the PDF wrote it, as any
-    drag does, so on a two-column page a drag that reaches both columns takes
-    the rest of the one and the top of the other. A drag that never reaches a
-    word selects nothing: to take whole lines, begin on the first word. A drag
-    begun on a word, Shift+click, Ctrl+A and double and triple clicks work as
-    before, and a drag from a word that leaves the page can still run on past
-    it.
+    the pointer was on. Between the two it takes the text in the order the
+    PDF wrote it, as any drag does. On most pages that is the text the
+    pointer passed over, but not where the PDF wrote the page out of order: on
+    a two-column page a drag that reaches both columns takes the rest of the
+    one and the top of the other; a drag up from under a running footer that
+    the PDF wrote before the body starts on the footer and takes the body
+    above; and one let go of on such a footer, or on a header or caption the
+    PDF wrote after the body, takes the body in between. A drag that never
+    reaches a word selects nothing: to take whole lines, begin on the first
+    word. A drag begun on a word, Shift+click, Ctrl+A and double and triple
+    clicks work as before, and a drag from a word that leaves the page, or
+    runs onto the selection bar, can still run on past it.
   - The toolbar, rails, side panel, menus and notices are never part of a
     selection; boxes to type in, a comment's text and the Table of
     Authorities can still be selected and copied.

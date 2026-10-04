@@ -266,76 +266,132 @@ it was, except that a move from a word out into blank space ends at that
 word's edge, read the same way. A word crossed between two moves, and never
 under the pointer when one landed, is not taken: read along the whole way, a
 quick flick from under a page's footer took the footer, which the PDF wrote
-before the body, and so the body above. A drag begun in blank space so selects
-only text from a word the pointer was on to a word it was on. A press under
-every word of the page the drag first reaches (its bottom margin, the gap
-under it), or over every one, means that end of the page's text as well
-(`pageOrder`, `fromEdge`): a running footer is often written before the body,
-so a drag up from under it, anchored on it, took the whole body above (a drag
-up 160px from under the footer or the gap below took 84-97% of a select.pdf
-page, and 85-90% of CIV-110's first, whose footer is written first too). Once
-the page's text from that end to the pointer's word is the shorter of the two
-in written order, the selection runs from that end for the rest of the drag;
-it never takes more than the first word's anchor would. Those drags now take
-2-16% of the page on select.pdf and 0-10% on CIV-110, where the browser's took
-82-99% and 0-99% (sweep set `bd`, rows `bm`, `ul` and `gapb`). A point past
-the window or over the toolbar is read at the nearest place the pages show.
-Within `DRAG_EDGE_PX` of the window's edge the pages scroll, 0.85px a frame
-for every pixel into the band, about Chromium's own pace for a drag begun on a
-word (460-770px a second 15px into the band, 2,700-3,500 60px in, on
-select.pdf), and on every `scroll` (that, or the wheel) the selection is read
-again where the pointer is. `text-dragging` is set as for a link drag. The
-drag ends on `mouseup`, on a move with no button down, or on `blur`. The
-Highlight, Underline and Strikethrough tools and Redact (text) read the
-selection it made on `mouseup`, as they read the browser's.
+before the body, and so the body above. A drag begun in blank space so runs
+from a word the pointer was on to a word it was on, and takes what the PDF
+wrote between the two, as any selection does: on a page written in reading
+order, only text the pointer passed over; on one written out of it, more (see
+"Written order" below). A point past the window or over the toolbar is read
+at the nearest place the pages show. Within `DRAG_EDGE_PX` of the window's
+edge the pages scroll, 0.85px a frame for every pixel into the band, about
+Chromium's own pace for a drag begun on a word (460-770px a second 15px into
+the band, 2,700-3,500 60px in, on select.pdf), and on every `scroll` (that,
+or the wheel) the selection is read again where the pointer is.
+`text-dragging` is set as for a link drag, and `blank-dragging` with it (the
+selection bar stands aside, below). The drag ends on `mouseup`, on a move
+with no button down, or on `blur`. The Highlight, Underline and Strikethrough
+tools and Redact (text) read the selection it made on `mouseup`, as they read
+the browser's.
 
 Left to the browser, as before: a press on a span, a link, a comment or a form
 field; Shift, Ctrl, Meta or Alt; any other button; presenting, organizing, the
 drawing tools, box select, crop and area redaction. Left as they were: a drag
 begun on a word that leaves the page (onto the grey, the next page's top, the
 window's edge) or begins on a running header or footer still takes what the
-browser gives it; Ctrl+A selects everything; a triple-click is the browser's
-paragraph, which in a text layer can be the page; a Shift+click in blank space
-is the browser's. Where the selection bar, placed by the end-of-content
-block's rect (below), stood in the grey to the right of a page, a drag from a
-word out there ended in the bar and took the rest of the page; with the bar
-under the selection's end the browser's own answer shows, the page from its
-top (rows `exit.grfar` on CIV-110 p2, cols2.pdf p3 and a privilege-log table:
-60-97% of the page, where main took 4-40%). A blank drag's ends are whatever
-word is under the pointer: on a two-column page, or one whose footnotes are
-written after its columns, a drag that reaches words of both takes everything
-between in written order (select.pdf p3, from its margins, across both columns
-or up to the toolbar: 49-71% of the page, where the browser's took 0-34%), and
-one let go of on a watermark written over the words ends in it (op-wm.pdf:
-56%, the browser's under 1%), as a drag begun on a word and let go of there
-does. A drag that never reaches a word (margin to margin beside the lines)
-selects nothing; the browser's took nothing or half the page (row B5: 0, 1,090
-and 1,268 characters in three runs on main), never the lines beside it. To
-take whole lines, begin on the first word.
+browser gives it, and so does one whose end strays onto the selection bar,
+which stands under the selection's last word as it did (select.pdf p2, a drag
+from a word to the blank just under its line: 10,439 characters, to the bar's
+own label after the pages); Ctrl+A selects everything; a triple-click is the
+browser's paragraph, which in a text layer can be the page; a Shift+click in
+blank space is the browser's. A drag that never reaches a word (margin to
+margin beside the lines) selects nothing; the browser's took nothing or half
+the page (row B5: 0, 1,090 and 1,268 characters in three runs on main), never
+the lines beside it. To take whole lines, begin on the first word.
+
+**Written order.** A blank drag's two ends are words the pointer was on, but
+what lies between them is the order the PDF wrote the page in, as for a drag
+begun on a word, so on a page written out of reading order it takes text the
+pointer never passed over. Measured (blank-drag sweeps, select.pdf at 150%
+unless named; "main" is the browser's own drag from the same press, whose
+anchor was arbitrary):
+
+- A running footer written before the body. A drag up from under it (the
+  bottom margin, the gap under the last line) is anchored on the footer and
+  takes the body above the pointer. 220px up on select.pdf p1 and p2 that is
+  1,190-1,818 characters, nearly all above the pointer's travel, about what
+  main took there (1,226-2,055); on CIV-110 p1, whose footer is written
+  first too, 1,556-2,681 of its 2,952 characters in 10 of 264 rows, where
+  main's arbitrary anchor took 65-1,202. One let go of on the footer takes
+  from its first word to the end of the body: from the grey beside the
+  middle of select.pdf p2, 1,684 characters (1,432 outside the pointer's
+  travel), where main took 22. With autoscroll, one whose end passes over
+  the previous or next page's footer does the same (p2 `ch.eol.winT` 2,527
+  characters, main 991; `au.bl.dnBack` 1,259, main 503).
+- A header or caption block written after the body (brief.pdf p1, whose
+  "POINTS AND AUTHORITIES / Date / Time / Dept." items come last). A drag
+  that ends on it takes the body after the first word (p1 `bd.bl.UR400s16`
+  925 characters, 546 outside the travel, main 51; six rows worse than
+  main).
+- Two columns, or footnotes written after the columns. A drag that reaches
+  words of both takes everything between (select.pdf p3 from its margins,
+  across both columns or up to the toolbar: 49-71% of the page, main 0-34%;
+  in two-up at 75%, 22 rows worse than main, 15 of them on the two-column
+  p3, e.g. `p4.ch.lm.winL` 2,745 characters where main took none).
+- A watermark written over the words. A drag let go of on it ends in it
+  (op-wm.pdf: 56% of the page, main under 1%), and Redact (text) boxes the
+  words between (30-65 boxes over body text, where main made one box the
+  size of the page).
+
+Accidents (over 120 characters outside the pointer's vertical travel, or any
+text from a press that never moved 4px) still fell: select.pdf's blank-drag
+rows 375 to 49 of 766, CIV-110's 105 to 12 of 264, a page set written out of
+order (footer first, header last, lines bottom to top) 98 to 18 of 198; rows
+worse than main 2, 10 and 4. Main's lower numbers in those rows are luck: its
+anchor was arbitrary. An earlier draft kept the anchor off a footer written
+first (`fromEdge`: a press under, or over, all of a page's text began the
+selection at that end of the written text once that was the shorter way to the
+pointer's word), which brought those counts to 11, 0 and 4. It was left out:
+it anchored at text the pointer never passed over in its own cases (a header
+written last, at the top: a drag up from under the page took its 49
+characters; lines written bottom to top; a drag up the margin from under the
+text, in at mid-page and down, took the lines below the pointer to the page's
+end instead of those it passed, 159 and 103 characters where this design takes
+the 642 and 306 it passed), and it is the kind of rule the minimal design set
+out to avoid. A narrower form (switch only while the pointer's word lies past
+the first word, away from the press) kept its gains on the footer drags in a
+verifier's sweep and took the passed lines in the last case, but not the lines
+written bottom to top; whether to add it is the owner's call.
 
 **Selection paint** (`glyphRects`, `pageSized`). The tint
-(`repaintSelectionOverlay`), the selection bar's place (`updateCitePopover`),
-the record-citation bands (`buildCitationReference`) and Redact (text)
-(`redactCurrentSelection`) read the selection's client rects without the
-`endOfContent` block's (the whole layer while a drag is under way, and inside
-the selection once the drag's end resolved past it: the page turned blue under
-a drag that took one line) and without any rect over a quarter of the page
-both ways (a layer or canvas that a selection crossing a page sweeps up). Text
-turned across the page, a watermark or a large stamp, has such a box too: it
-is not tinted and not marked, and Redact (text) says so and points to Area
-(`turnedTextIn`). Placed from the glyphs, the bar stands 8px under the
-selection's end, which is where a drag going down goes next, so while
-`text-dragging` it takes no pointer events: under the pointer it became the
-selection's end, and since it hangs off `<body>` after the pages, the
-selection ran to the end of the document.
+(`repaintSelectionOverlay`), the record-citation bands
+(`buildCitationReference`) and Redact (text) (`redactCurrentSelection`) read
+the selection's client rects without the `endOfContent` block's (the whole
+layer while a drag is under way, and inside the selection once the drag's end
+resolved past it: the page turned blue under a drag that took one line) and
+without any rect over a quarter of the page both ways (a layer or canvas that
+a selection crossing a page sweeps up). Text turned across the page, a
+watermark or a large stamp, has such a box too: it is not tinted and not
+marked, and Redact (text) says so and points to Area (`turnedTextIn`).
+
+The selection bar (`updateCitePopover`) is placed as before, from the
+selection's last client rect, the end-of-content block's included. Placed
+from the glyphs instead, it stood 8px under the end of a drag let go of in
+blank space (the right margin, a line's end, the gap between lines), over the
+start of the next line, and the Shift+click or click that followed there hit
+the bar's Comment or Highlight button instead of extending the selection or
+placing the caret (select.pdf p2-p3, 20 rows; CIV-110 p1, 18 of 30). While a
+blank drag is under way (`body.blank-dragging`) the bar takes no pointer
+events: it stands under the selection's last word, where the drag is going,
+and over it the drag found no word. The class is the blank drag's own, set
+and cleared by `blankDrag`. Keyed to `text-dragging` instead, which is cleared
+only on `pointerup`, the rule left the bar click-through after a native drag
+of selected text (`pointercancel`, no `pointerup`) or a touch tap on a word
+(its `mousedown` comes after the `pointerup`), and a click on its Highlight
+button fell through to the page and dropped the selection.
 
 **Chrome is not text** (viewer.css). The toolbar, the tools and side rails,
-the side panel, menus, the float bars, `#ocr-progress`, the toasts and the
-selection bar are `user-select: none`: a drag from a page that strayed onto
-one took the buttons' labels, and since they stand before the pages (or after
-them), page 1 or everything to the end with them. Boxes to type in, a
-comment's text and quote in the side panel, the Table of Authorities panel
-(`#__cl_toa`, whose citations are copied) and dialogs stay selectable. In the
+the side panel, menus, the float bars, `#ocr-progress` and the toasts are
+`user-select: none`: a drag from a page that strayed onto one took the
+buttons' labels, and since they stand before the pages (or after them), page 1
+or everything to the end with them. Boxes to type in, a comment's text and
+quote in the side panel, the Table of Authorities panel (`#__cl_toa`, whose
+citations are copied) and dialogs stay selectable. The selection bar is left
+selectable, as it was. Made `user-select: none`, it still caught a drag begun
+on a word that strayed onto it, and the browser then held that drag at the end
+of the page's text, with the bar standing still under the pointer: a drag from
+mid-page into the grey 40px right of select.pdf p3 took 7,821 characters in 4
+runs of 4, where the browser's own, its end moving into the bar and the bar
+moving off, came back to 1,622 (CIV-110 p1: 2,922 against 1,312 or 2,929).
+Left selectable, a click on its padding drops the selection as before. In the
 text reader the PDF pane is as it was, except that a press on its grey around
 the pages (`#pdf-pane` itself, its scrollbar aside) selects nothing.
 
