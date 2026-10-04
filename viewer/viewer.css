@@ -1243,14 +1243,28 @@ body.thumbs-open { --right-cur: calc(var(--side-rail-width) + var(--thumb-panel-
   padding: calc(var(--toolbar-height) + 20px) 28px 40px calc(var(--tools-rail-cur) + 28px);
   padding-right: calc(var(--right-cur) + 28px);
   transition: padding-left 0.16s ease, padding-right 0.16s ease;
-  /* As wide as the pages plus both reserves, and never narrower than the
-     window, so a page wider than the room scrolls from its left edge clear of
-     the tools rail to its right edge clear of the side rail or the open panel.
-     A window-wide container left the right reserve out of the scroll width,
-     and the page's right edge stayed under the side rail. */
-  width: max-content;
-  min-width: 100%;
 }
+/* The scroll width's right end: past the widest page (or spread) by the side
+   rail and any open panel, so a page whose right edge would stand under them
+   scrolls on until that edge meets them, where the window's edge alone would
+   leave it under them; one that reaches only into the margin beside them gets
+   no sideways scroll. It moves no page. --pages-w is the pages' width, kept by
+   viewer.js (notePageWidth). 1px tall, since a box with no height adds
+   nothing to the scroll width, and pulled up over the column's last pixel. */
+#viewer-container::after {
+  content: "";
+  display: block;
+  width: calc(var(--pages-w, 0px) + var(--right-cur));
+  height: 1px;
+  margin-top: -1px;
+  pointer-events: none;
+}
+/* Not for the password-locked message, a presentation, or a fit mode's pages
+   until the refit lands (refitSoon in viewer.js), which slide under the panel
+   rather than bring a sideways scroll bar for those frames. */
+#viewer-container:has(> #pages > .panel-empty)::after,
+body.presenting #viewer-container::after,
+body.refitting #viewer-container::after { display: none; }
 
 #pages {
   display: flex;
@@ -1259,20 +1273,7 @@ body.thumbs-open { --right-cur: calc(var(--side-rail-width) + var(--thumb-panel-
      can be scrolled to, instead of hanging off both sides. */
   align-items: safe center;
   gap: 18px;
-  width: max-content;
-  min-width: 100%;
 }
-/* Two side by side, the width the grid's columns come to, stated by viewer.js
-   (measureTwoUp) rather than measured over every page at each layout. */
-#pages.two-up { width: calc(var(--two-up-left, 0px) + 14px + var(--two-up-right, 0px)); }
-/* Window-wide as before: the password-locked message, which wraps rather
-   than widening the window, and a fit mode's pages until the refit lands
-   (refitSoon in viewer.js), which slide under the panel as they did rather
-   than bring a sideways scroll bar for those frames. */
-#viewer-container:has(> #pages > .panel-empty),
-#pages:has(> .panel-empty),
-body.refitting #viewer-container,
-body.refitting #pages { width: auto; }
 /* Two pages side by side: a two-column grid so each row is exactly a spread.
    With the cover alone, page 1 sits in the right-hand column like a book. */
 #pages.two-up {
