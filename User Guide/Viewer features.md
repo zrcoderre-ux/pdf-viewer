@@ -36,6 +36,21 @@ In addition to citation linking, the viewer supports:
   - A drag may **start on a citation link** (or a link the PDF carries): once
     the pointer moves, it selects the words under the link, as a drag begun
     anywhere else does. A click that stays put still opens the link.
+  - A **click in blank space** (the margin, between lines, the grey around the
+    pages) selects nothing, even if the mouse wobbles; it only clears the
+    selection there was. A drag **begun in blank space** selects nothing until
+    the pointer is on a word, and then runs from that word to the last word
+    the pointer was on (begun under a page's last line, from the page's end).
+    Between the two it takes the text in the order the PDF wrote it, as any
+    drag does, so on a two-column page a drag that reaches both columns takes
+    the rest of the one and the top of the other. A drag that never reaches a
+    word selects nothing: to take whole lines, begin on the first word. A drag
+    begun on a word, Shift+click, Ctrl+A and double and triple clicks work as
+    before, and a drag from a word that leaves the page can still run on past
+    it.
+  - The toolbar, rails, side panel, menus and notices are never part of a
+    selection; boxes to type in, a comment's text and the Table of
+    Authorities can still be selected and copied.
   - A PDF opened in a **background tab** of the app (several files or a case
     folder opened at once) has selectable text when you switch to it. pdf.js
     measures a "minimum font size" once per window, and a hidden tab measured

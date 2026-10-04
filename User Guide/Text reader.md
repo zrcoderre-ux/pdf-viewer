@@ -1305,7 +1305,10 @@ app, which routes it to the reader tab.
   period — every point snaps to the nearest character on its own row, so the
   clipboard carries the passage under the pointer and never the line numbers
   down the side (they are blanked in the text layer, as the PDF viewer blanks
-  them); a double click takes the word, a triple the row. Display only — the
+  them); a double click takes the word, a triple the row. A click or a drag
+  begun on the pane's grey, around and between the pages, selects nothing (it
+  used to start at some page's first word and take everything above the line
+  the drag reached). Display only — the
   layout lifts when the pane closes; remembered. **The members' PDFs open one
   at a time, in the order the file lists them.** A combined export names two
   dozen documents, each with a PDF of its own, and asking for them all as the

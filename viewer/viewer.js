@@ -3016,13 +3016,15 @@ function attachPageTools(refs) {
 // done here for every page.
 const textLayerEnds = new Map(); // textLayer div -> its endOfContent div
 let prevSelRange = null;
+let blankPressEvent = null; // the last press in a page's blank space, which the viewer took
 function guardSelection(textLayerDiv) {
   const end = document.createElement("div");
   end.className = "endOfContent";
   textLayerDiv.appendChild(end);
   textLayerEnds.set(textLayerDiv, end);
   textLayerDiv.addEventListener("mousedown", (e) => {
-    if (e.button !== 0) return;
+    // (A press in the page's blank space is the viewer's own: see below.)
+    if (e.button !== 0 || e === blankPressEvent) return;
     textLayerDiv.classList.add("selecting");
     document.body.classList.add("text-dragging");
   });
@@ -3168,6 +3170,228 @@ pagesEl.addEventListener("mousedown", (e) => {
   };
   document.addEventListener("mouseup", onUp, true);
 });
+
+// ── A press in a page's blank space ──
+//
+// A text layer is spans floating in an empty box, and a press that lands on
+// the box (the margin, the gap between two lines, the space after a short
+// line), on the page's own box or canvas, or on the grey around the pages has
+// no word under it. The browser put the caret at an arbitrary place in the
+// layer, and the pointer moving at all from there (a click that wobbled two
+// pixels, the click meant to dismiss a selection) selected from it to wherever
+// the drag resolved: often the rest of the page, or the whole of it.
+//
+// So a plain left press there, in plain reading (the Redact tool marking text
+// and the markup tools too), is the viewer's. Until the pointer has moved
+// LINK_DRAG_PX it is a click: it drops the selection, leaving the caret where
+// the browser's own press would have left it (none off the text), and selects
+// nothing. Past that it is a drag, and nothing is selected until the pointer
+// is over a word: the selection begins at the browser's caret where the
+// pointer first is over one, and ends at the browser's caret wherever the
+// pointer is over one after that, staying put while it is over blank space.
+// A drag begun in blank space so selects only text the pointer passed over.
+// Near the window's top or bottom edge the pages scroll under it, and the
+// selection is read again where the pointer then is.
+//
+// Everything else is the browser's, as it was: a press on a word, a link or a
+// comment, any press with Shift, Ctrl, Meta or Alt, any other button, and
+// every press while presenting, organizing, drawing, box-selecting, cropping
+// or redacting an area.
+const viewerContainerEl = document.getElementById("viewer-container");
+const toolbarEl = document.getElementById("toolbar");
+// Within this many px of the window's edge, and past it, a blank drag scrolls
+// the pages at about the pace of Chromium's own drag-selection: 0.85px a
+// frame (at 60 frames a second) for every pixel into the band. (Chromium's,
+// for a drag begun on a word on select.pdf, ran 460-770px a second held 15px
+// into the band and 2,700-3,500 held 60px in, with the machine's load.)
+const DRAG_EDGE_PX = 20;
+const DRAG_WALK_PX = 2;
+
+// Whether a press's target is a page's blank space or the grey around them.
+function isBlankTarget(t) {
+  if (!t || !t.classList) return false;
+  if (t === pagesEl || t === viewerContainerEl) return true;
+  const p = t.parentElement;
+  if (!p || !pagesEl.contains(p)) return false;
+  if (t.classList.contains("page-wrapper")) return true;
+  if (p.classList.contains("page-wrapper")) return t.tagName === "CANVAS" || t.classList.contains("textLayer");
+  return t.classList.contains("endOfContent") && p.classList.contains("textLayer");
+}
+
+// Whether an element is one of the pages' words (a span of a text layer).
+function isWordEl(el) {
+  return !!el && el.tagName === "SPAN" && !!el.closest(".textLayer") && pagesEl.contains(el);
+}
+// The browser's caret at a window point over one of the pages' words, or null
+// over anything else.
+function caretOnWord(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!isWordEl(el)) return null;
+  const c = caretAtPoint(x, y);
+  return c && c.node.nodeType === Node.TEXT_NODE && el.contains(c.node) ? c : null;
+}
+
+viewerContainerEl.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  const mode = document.body.classList;
+  if (mode.contains("presenting") || mode.contains("organize-mode") || mode.contains("annot-drawing") ||
+      mode.contains("rect-select-mode") || mode.contains("crop-mode") || mode.contains("redact-area-mode")) return;
+  if (!isBlankTarget(e.target)) return;
+  // No selection of the browser's begins, and guardSelection is not armed.
+  e.preventDefault();
+  blankPressEvent = e;
+  // What the press would otherwise do still happens: the focus leaves a box
+  // in the top bar, and the selection goes.
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  window.focus();
+  const sel = window.getSelection();
+  const at = caretAtPoint(e.clientX, e.clientY);
+  if (sel) { if (at) sel.collapse(at.node, at.offset); else sel.removeAllRanges(); }
+  blankDrag(e.clientX, e.clientY);
+}, true);
+
+let endBlankDrag = null; // the drag below that is under way
+function blankDrag(x0, y0) {
+  if (endBlankDrag) endBlankDrag(); // (one whose button came up out of hearing)
+  const sel = window.getSelection();
+  let dragged = false, anchor = null, last = null, raf = 0, stamp = 0;
+  // Where the pointer was last read, in the document (the pages may scroll),
+  // and the word it was over there.
+  const sy0 = window.scrollY;
+  let prev = { x: x0 + window.scrollX, y: y0 + sy0 }, prevWord = null;
+  // The text of the page the drag began on (its first word's), read once,
+  // when the press was under or over all of it: { index: span -> its place in
+  // written order, n, under, edge }.
+  let order, fromEdge = null;
+  const pageOrder = () => {
+    if (order !== undefined) return order;
+    order = null;
+    const layer = anchor.node.parentElement && anchor.node.parentElement.closest(".textLayer");
+    if (!layer) return order;
+    const index = new Map();
+    let top = Infinity, bottom = -Infinity, firstNode = null, lastNode = null;
+    for (const sp of layer.querySelectorAll("span")) {
+      const t = sp.firstChild;
+      if (!t || t.nodeType !== Node.TEXT_NODE || !t.data.trim()) continue;
+      const r = sp.getBoundingClientRect();
+      index.set(sp, index.size);
+      top = Math.min(top, r.top); bottom = Math.max(bottom, r.bottom);
+      firstNode = firstNode || t; lastNode = t;
+    }
+    const py = y0 + sy0 - window.scrollY;
+    if (!index.size || (py <= bottom && py >= top)) return order;
+    const under = py > bottom;
+    order = { index, n: index.size, under, edge: under ? { node: lastNode, offset: lastNode.data.length } : { node: firstNode, offset: 0 } };
+    return order;
+  };
+  // The selection's end where the pointer is: over a word, the browser's caret
+  // there; over blank space, where it was. The two edges are read along the
+  // pointer's way, every DRAG_WALK_PX, on the one word under it alone: the
+  // drag begins where the pointer came onto the first word it is over (not
+  // where the move happened to land, a letter or two in), and a move from a
+  // word out into blank space ends the selection at that word's edge. A word
+  // crossed between two moves, and never under the pointer when a move landed,
+  // is not taken. A point past the window's edge, or over the toolbar, is read
+  // at the nearest place the pages show. After a scroll (`still`), only where
+  // the pointer is.
+  const extend = (still = false) => {
+    if (!sel || !last) return;
+    const room = document.documentElement;
+    const W = room.clientWidth, H = room.clientHeight;
+    const top = toolbarEl ? Math.max(0, toolbarEl.getBoundingClientRect().bottom) : 0;
+    const at = (x, y) => ({ x: Math.max(0, Math.min(W - 1, x)), y: Math.max(Math.min(top + 1, H - 1), Math.min(H - 1, y)) });
+    const sx = window.scrollX, sy = window.scrollY;
+    const p = at(last.x, last.y), q = still ? p : at(prev.x - sx, prev.y - sy);
+    prev = { x: last.x + sx, y: last.y + sy };
+    const el = document.elementFromPoint(p.x, p.y);
+    const word = isWordEl(el) ? el : null;
+    const was = prevWord;
+    prevWord = word;
+    // From (ax, ay) toward (bx, by): the last point still on `w`.
+    const edge = (w, ax, ay, bx, by) => {
+      const n = Math.min(400, Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / DRAG_WALK_PX)));
+      let e = { x: ax, y: ay };
+      for (let k = 1; k <= n; k++) {
+        const x = ax + ((bx - ax) * k) / n, y = ay + ((by - ay) * k) / n;
+        if (document.elementFromPoint(x, y) !== w) break;
+        e = { x, y };
+      }
+      return e;
+    };
+    let f = null;
+    if (word) {
+      f = caretOnWord(p.x, p.y);
+      // (A zoom mid-drag rebuilds the pages: the drag begins again where it is.)
+      if (f && (!anchor || !anchor.node.isConnected)) {
+        const e = edge(word, p.x, p.y, q.x, q.y);
+        anchor = caretOnWord(e.x, e.y) || f;
+      }
+    } else if (anchor && was && was.isConnected) {
+      const e = edge(was, q.x, q.y, p.x, p.y);
+      f = caretOnWord(e.x, e.y);
+    }
+    if (!f || !anchor) return;
+    // A press under every word of the page, or over every one (in its margin
+    // or the gap beyond it), means that end of the page's text as much as the
+    // first word the pointer reached: a running footer is often written before
+    // the body (a header after it), so a drag from under it up into the body,
+    // anchored on it, took the whole body above. Once the page's text from
+    // that end to the pointer's word is the shorter of the two, in the order
+    // it is written, the selection runs from there for the rest of the drag.
+    const o = !fromEdge && pageOrder();
+    if (o) {
+      const i = o.index.get(anchor.node.parentElement), j = o.index.get(f.node.parentElement);
+      if (i != null && j != null && (o.under ? o.n - 1 - j : j) < Math.abs(i - j)) fromEdge = o.edge;
+    }
+    const a = fromEdge && fromEdge.node.isConnected ? fromEdge : anchor;
+    try { sel.setBaseAndExtent(a.node, a.offset, f.node, f.offset); } catch { /* the page was rebuilt under the drag */ }
+  };
+  const follow = (now) => {
+    raf = 0;
+    if (!last) return;
+    const dt = stamp ? Math.min(100, now - stamp) : 1000 / 60;
+    stamp = now;
+    const room = document.documentElement;
+    const W = room.clientWidth, H = room.clientHeight;
+    const speed = (into) => Math.min(240, (0.85 * into * dt) / (1000 / 60));
+    const dx = last.x > W - DRAG_EDGE_PX ? speed(last.x - (W - DRAG_EDGE_PX)) : last.x < DRAG_EDGE_PX ? -speed(DRAG_EDGE_PX - last.x) : 0;
+    const dy = last.y > H - DRAG_EDGE_PX ? speed(last.y - (H - DRAG_EDGE_PX)) : last.y < DRAG_EDGE_PX ? -speed(DRAG_EDGE_PX - last.y) : 0;
+    if (!dx && !dy) { stamp = 0; return; }
+    window.scrollBy(dx, dy); // (the scroll listener reads the selection again)
+    raf = requestAnimationFrame(follow);
+  };
+  // The pages scrolled under a still pointer (the edge above, the wheel).
+  const onScroll = () => { if (dragged) extend(true); };
+  const onMove = (ev) => {
+    if (!(ev.buttons & 1)) { end(); return; } // the button came up out of the page's hearing
+    if (!dragged) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < LINK_DRAG_PX) return;
+      dragged = true;
+      // From here it is a selection: whatever floats over the words stands
+      // aside (see the CSS), so a point finds the words under it.
+      document.body.classList.add("text-dragging");
+    }
+    last = { x: ev.clientX, y: ev.clientY };
+    extend();
+    if (!raf) { stamp = 0; raf = requestAnimationFrame(follow); }
+  };
+  const end = () => {
+    if (endBlankDrag === end) endBlankDrag = null;
+    document.removeEventListener("mousemove", onMove, true);
+    document.removeEventListener("mouseup", end, true);
+    window.removeEventListener("scroll", onScroll, true);
+    window.removeEventListener("blur", end);
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    last = null;
+    if (dragged) document.body.classList.remove("text-dragging");
+  };
+  endBlankDrag = end;
+  document.addEventListener("mousemove", onMove, true);
+  document.addEventListener("mouseup", end, true);
+  window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+  window.addEventListener("blur", end);
+}
 
 // Which of a page's fonts are italic. The text layer is no help here — PDF.js
 // gives its spans only a generic fallback family ("serif") — so posture has to
@@ -3454,13 +3678,12 @@ function repaintSelectionOverlay() {
   if (!boxes.length) return;
 
   for (let i = 0; i < sel.rangeCount; i++) {
-    for (const cr of sel.getRangeAt(i).getClientRects()) {
-      if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+    for (const cr of glyphRects(sel.getRangeAt(i))) {
       const cx = cr.left + cr.width / 2;
       const cy = cr.top + cr.height / 2;
       const hit = boxes.find(({ rect }) =>
         cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom);
-      if (!hit) continue;
+      if (!hit || pageSized(cr, hit.rect)) continue;
       const d = document.createElement("div");
       d.className = "selection-rect";
       d.style.left   = `${cr.left - hit.rect.left}px`;
@@ -3470,6 +3693,32 @@ function repaintSelectionOverlay() {
       hit.layer.appendChild(d);
     }
   }
+}
+
+// The client rects of a selected range that can be glyphs: none of no size,
+// and none that is a text layer's end-of-content block (guardSelection), which
+// while a drag is under way is the size of the whole layer and stands just
+// after the drag's moving end: once the end resolved past it (a drag let go
+// of in the margin, in a column's gutter, between pages) the block was inside
+// the selection, and painted, it turned the whole page blue under a drag that
+// had taken one line.
+function glyphRects(range) {
+  const ends = new Set();
+  for (const end of textLayerEnds.values()) {
+    if (!end.isConnected || !range.intersectsNode(end)) continue;
+    const b = end.getBoundingClientRect();
+    ends.add(`${b.left},${b.top},${b.width},${b.height}`);
+  }
+  return [...range.getClientRects()].filter((cr) => cr.width > 0.5 && cr.height > 0.5 &&
+    !ends.has(`${cr.left},${cr.top},${cr.width},${cr.height}`));
+}
+// Whether a client rect is more than a quarter of the page `box` both ways,
+// which a line of text never is: a layer or a canvas swept up by a selection
+// that crosses a page, or the block above at a size from before a zoom. (So
+// is a watermark's or a stamp's text turned across the page, whose box is the
+// square around it: it is not painted, and not marked for redaction.)
+function pageSized(cr, box) {
+  return cr.height > box.height * 0.25 && cr.width > box.width * 0.25;
 }
 
 // selectionchange fires rapidly while dragging — coalesce to one repaint per
@@ -3545,15 +3794,24 @@ function updateCitePopover() {
     hideCitePopover();
     return;
   }
-  const rects = sel.getRangeAt(sel.rangeCount - 1).getClientRects();
-  let last = null;
-  for (const r of rects) if (r.width > 0.5 && r.height > 0.5) last = r;
+  // Its first and last glyphs: never a layer, a canvas or the end-of-content
+  // block a selection swept up (glyphRects, pageSized), whose box is the page.
+  const rects = glyphRects(sel.getRangeAt(sel.rangeCount - 1));
+  const pageBoxes = [...pagesEl.querySelectorAll(".page-wrapper")].map((w) => w.getBoundingClientRect());
+  const glyph = (r) => {
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const b = pageBoxes.find((p) => cx >= p.left && cx <= p.right && cy >= p.top && cy <= p.bottom);
+    return !b || !pageSized(r, b);
+  };
+  let first = null, last = null;
+  for (let k = 0; k < rects.length && !first; k++) if (glyph(rects[k])) first = rects[k];
+  for (let k = rects.length - 1; k >= 0 && !last; k--) if (glyph(rects[k])) last = rects[k];
   if (!last) { hideCitePopover(); return; }
   citePopover.hidden = false;
   const w = citePopover.offsetWidth || 200;
   const left = Math.min(last.right - w / 2, window.innerWidth - w - 8);
   let top = last.bottom + 8;
-  if (top + 40 > window.innerHeight) top = Math.max(8, rects[0].top - 44);
+  if (top + 40 > window.innerHeight) top = Math.max(8, first.top - 44);
   citePopover.style.left = `${Math.max(8, left)}px`;
   citePopover.style.top = `${Math.max(8, top)}px`;
 }
@@ -3658,12 +3916,11 @@ function buildCitationReference() {
   }
   const bands = new Map(); // page -> { top, bottom } fractions
   for (let i = 0; i < sel.rangeCount; i++) {
-    for (const cr of sel.getRangeAt(i).getClientRects()) {
-      if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+    for (const cr of glyphRects(sel.getRangeAt(i))) {
       const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
       const hit = wrapInfo.find(({ rect }) =>
         cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom);
-      if (!hit || hit.rect.height <= 0) continue;
+      if (!hit || hit.rect.height <= 0 || pageSized(cr, hit.rect)) continue;
       // Bands are fractions down the page as the PAGE is written, not as it is
       // currently displayed — the line-number rows they get compared against
       // come from the text layer, which PDF.js lays out in the page's own
@@ -4332,12 +4589,15 @@ function redactCurrentSelection() {
     pageNumber: Number(w.dataset.pageNumber), box: w.getBoundingClientRect(),
   }));
   const byPage = new Map();
-  for (const cr of range.getClientRects()) {
-    if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+  let wide = false;
+  for (const cr of glyphRects(range)) {
     const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
     const hit = pages.find((p) => cx >= p.box.left && cx <= p.box.right &&
                                   cy >= p.box.top && cy <= p.box.bottom);
     if (!hit) continue;
+    // A rect the size of the page is a layer or a canvas the selection swept
+    // up, not a line: marked, it blacked out the page.
+    if (pageSized(cr, hit.box)) { wide = true; continue; }
     if (!byPage.has(hit.pageNumber)) byPage.set(hit.pageNumber, []);
     byPage.get(hit.pageNumber).push(cr);
   }
@@ -4349,7 +4609,26 @@ function redactCurrentSelection() {
     }
   }
   if (added) sel.removeAllRanges();
+  // Text turned across the page (a watermark, a stamp) has a box that size
+  // too, and is left unmarked: said, so it is not taken for marked.
+  if (wide && turnedTextIn(range)) {
+    toast("Text turned across the page (a watermark or a stamp) was not marked from the selection: mark it with Area.", { timeout: 9000 });
+  }
   return added;
+}
+// Whether a range takes in a span of text whose own box is more than a
+// quarter of its page both ways.
+function turnedTextIn(range) {
+  for (const layer of pagesEl.querySelectorAll(".page-wrapper > .textLayer")) {
+    if (!range.intersectsNode(layer)) continue;
+    const box = layer.parentElement.getBoundingClientRect();
+    for (const sp of layer.querySelectorAll("span")) {
+      const t = sp.firstChild;
+      if (t && t.nodeType === Node.TEXT_NODE && t.data.trim() && range.intersectsNode(t) &&
+          pageSized(sp.getBoundingClientRect(), box)) return true;
+    }
+  }
+  return false;
 }
 
 // The key, over the whole document: every place a real value stands.
