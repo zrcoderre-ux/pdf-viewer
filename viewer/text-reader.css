@@ -164,10 +164,12 @@ body {
 .revbar .lb-type.reid { background: #e65100; }
 .revbar .lb-type.redact { background: #c5221f; }
 .revbar .lb-type.miss { background: #e65100; }
-/* The names bar BETWEEN documents: nothing here to decide on, so the decide
-   row goes and the bar is the one sentence that matters — which document is
-   next, and the arrow that goes to it. */
-#names-bar.onward .lb-decide, #names-bar.onward #nb-find { display: none; }
+/* The names bar BETWEEN documents: nothing here to decide on, so the
+   decisions go out of sight and the bar is the one sentence that matters —
+   which document is next, and the arrow that goes to it. Out of sight, not
+   out of the row: › stays where it was (text-reader.html). */
+#names-bar.onward .nb-decide { visibility: hidden; }
+#names-bar .lb-controls .lb-answer { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #names-bar.onward .lb-type { background: #546e7a; }
 /* Why the row's value is not marked on the page. It belongs IN THE BAR and
    not in a toast: a toast is gone in three seconds, and the operator needs it
@@ -665,6 +667,19 @@ body.sbs .line.trailer { display: none; }
   border-right: 1px solid #c4c7cb; white-space: pre; user-select: text; align-self: stretch;
 }
 .page-body.numbered .gutter .gs { display: none; }
+/* THE NUMBERS STAND ONE ON TOP OF THE OTHER, down the page and from one page
+   to the next. The margin is measured in a unit of its own, --gutter-em: off
+   the PDF's grid the reading size, which no page's fit to its paper changes,
+   so the rule and the numbers' right edge stand at one place on every page;
+   beside the PDF the PDF's body type at the grid's scale (--body-em). Never
+   in a line's own type: a margin two and a half ems of each line's type put
+   a line set larger or smaller than the body out of line with the rest. The
+   numbers are set in the page's body type, eight tenths of it, so a page
+   fitted smaller is not held open by them. */
+.page-body.numbered { --gutter-em: var(--reader-size-eff, 1em); --gutter-w: calc(2.6 * var(--gutter-em)); }
+.page-body.numbered.fixed { --gutter-em: var(--body-em); }
+.page-body.numbered .gutter { font-size: calc(0.8 * var(--body-em)); padding-right: calc(0.4 * var(--gutter-em)); margin-right: calc(0.88 * var(--gutter-em)); }
+body.gutter-off .page-body.numbered .gutter { font-size: var(--body-em); }
 /* A numbered line is never wrapped: its tail would fall on a screen line with
    no number, which read across to the PDF is one line off. It runs past the
    column instead and is CUT at the edge of the paper (.page-inner clips) —
@@ -731,7 +746,17 @@ body:not(.editing) .page-body .cg { font-size: 0; line-height: 0; }
 .line.rl > .lt { display: contents; }
 .line.rl > .gutter { display: table-cell; width: var(--gutter-w); box-sizing: border-box; }
 .page-body.numbered .line.rl:not(.num)::before { content: ""; display: table-cell; width: var(--gutter-w); }
-.page-body.numbered .line.rl > .lt > .rc:first-child { padding-left: 1.1em; }
+/* …and a box row's number stands where every other line's does. A box row
+   is a table and not the numbered grid, and a table cell takes no margin: the
+   number stood at the cell's right edge, the grid's margin past the numbers
+   above and below it, and the rule out there with it. So the cell draws what
+   the grid's gutter does, in either view — the rule in from its right edge
+   by the grid's margin, and the number its padding to the left of that — and
+   the box begins where every line's text does. */
+.page-body.numbered .line.rl > .gutter {
+  border-right: 0; padding-right: calc(1.28 * var(--gutter-em) + 1px);
+  background: linear-gradient(#c4c7cb, #c4c7cb) right calc(0.88 * var(--gutter-em)) top / 1px 100% no-repeat;
+}
 .rc { display: table-cell; padding: 0; white-space: pre; box-sizing: border-box; }
 .rc.hf { font-size: 0; background: linear-gradient(currentColor, currentColor) 0 50% / 100% 1px no-repeat; }
 .rb { display: table-cell; width: 1px; min-width: 1px; padding: 0; font-size: 0; background: currentColor; }
@@ -761,15 +786,11 @@ body:not(.editing) .page-body .cg { font-size: 0; line-height: 0; }
    off, which down a caption is a visible step in its side. The rule and the
    number keep their places inside the cell: the rule drawn 1.1em in from its
    right edge, where the grid's own gutter margin puts it, and the number
-   half an em to the left of that — so the numbered margin runs straight down
-   past the box, as it does everywhere else. */
+   half an em to the left of that (the box row's own rule, above) — so the
+   numbered margin runs straight down past the box, as it does everywhere
+   else. */
 .page-body.numbered.fixed .line.rl > .gutter,
 .page-body.numbered.fixed .line.rl:not(.num)::before { width: var(--body-x, 3.7em); }
-.page-body.numbered.fixed .line.rl > .gutter {
-  border-right: 0; padding-right: calc(1.6em + 1px);
-  background: linear-gradient(#c4c7cb, #c4c7cb) right 1.1em top / 1px 100% no-repeat;
-}
-.page-body.numbered.fixed .line.rl > .lt > .rc:first-child { padding-left: 0; }
 .page-body.fixed .line.rr > .lt { line-height: inherit; }
 .line.rl.fit .rc.hf { font-size: 0; }
 /* A line that is nothing but rules is a hairline on the page: half a line tall. */

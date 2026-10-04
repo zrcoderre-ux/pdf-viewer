@@ -309,7 +309,10 @@ app, which routes it to the reader tab.
   in the order they stand in the document, marks it, and gives the decisions
   as buttons — **keep just this one**, **keep in this case**, **never fake it
   anywhere**, **fake it**, or leave it for now, which the save leaves as it
-  stands until you decide. The bar
+  stands until you decide. The buttons and the arrows are one row at the top
+  of the bar that holds still from one name to the next, as the worksheet's
+  does; between documents the decisions go out of sight and › stays where it
+  was. Under them the bar
   says which of how many, and the page and line it stands on, and the walk
   wraps at the end. Where the case folder has no `LEAKS.xlsx` that is the
   whole review: the key is attached, the names it binds are underlined, and
@@ -1020,7 +1023,12 @@ app, which routes it to the reader tab.
   straight down: a box is drawn as a table rather than on the numbered grid,
   and beside a PDF it used to take the reader's own gutter instead of the
   PDF's margin — the one page with a box on it drawn out over its own line
-  numbers while every other line sat at the margin.
+  numbers while every other line sat at the margin. **And the numbers stand
+  one on top of the other**, in the flowing page as beside the PDF: the
+  caption box's numbered rows had their numbers, and the margin's rule, a
+  little to the right of the rest; and a page set smaller to fit its paper
+  had its margin a little to the left of the next page's. The margin and
+  the numbers' right edge are at one place on every line of every page.
 
   **A file opened on its own brings its whole folder, unless that crashed
   last time.** Where the reader knows the case folder a file sits in, opening

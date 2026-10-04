@@ -230,7 +230,12 @@ has one width (`flex: 0 0 16em`, cut short, the whole of it as its title),
 disabled) rather than `hidden`, which the stylesheet's `[hidden]` rule would
 take out of the layout, and `#lb-save` is as wide as a three-figure count. A
 window too narrow for the row wraps it at the same place on every worksheet
-row, the last buttons right-aligned on their own line.
+row, the last buttons right-aligned on their own line. The names bar is laid
+out the same way: its decisions and arrows one row at the top, `#nb-answer`
+taking the room between them (`flex: 1 1 0`, cut short, its title the whole),
+and between documents (`.onward`) the decisions and Find in text, all
+`.nb-decide`, go out of sight with `visibility` rather than `display`, so ›
+stays where it was and the bar keeps its height.
 
 The review walks the folder ONE DOCUMENT AT A TIME. A row stands in the
 document its File cell names first (`leaks.rowFile` — one row is one

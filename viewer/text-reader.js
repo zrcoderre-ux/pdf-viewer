@@ -5791,6 +5791,7 @@ function renderNamesBar() {
   $("nb-value").title = "A real name from the key, standing in the clear";
   $("nb-where").textContent = leakWhere(h);
   $("nb-answer").textContent = "undecided — the save leaves it as it stands; " + (h.fake ? `fake it writes \u201c${h.fake}\u201d` : "fake it writes its pseudonym");
+  $("nb-answer").title = $("nb-answer").textContent; // it takes the room there is, and a long one is cut short
   $("nb-fake").disabled = !h.fake;
   $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2 && !restOfFolder().length;
   $("nb-rest").textContent = folderRest();
@@ -5844,7 +5845,7 @@ function setOnward(on) {
   onward = !!on;
   namesBar.classList.toggle("onward", onward);
   if (!onward) $("nb-type").textContent = "unfaked";
-  setBarHeight(); // the decide row goes with it, and the stage sits under both
+  setBarHeight(); // the stage sits under the bar, whatever its rows now hold
 }
 /** A decision taken on the name in front, and on to the next. */
 function decideName(what) {
