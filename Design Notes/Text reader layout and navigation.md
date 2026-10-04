@@ -331,6 +331,24 @@ stood at x = 23.5 against the body's 70.9 and its bar column stepped between
 the page's 64.4. It now starts at 70.9 like every other line, its bar column
 is one value, and the rule is 64.4 on every line of the page.
 
+**…and off the grid, the numbers stand one on top of the other.** The
+flowing page had the same box rows with the old geometry: the gutter cell
+`--gutter-w` wide with the rule as its right border and the number half an
+em in from it, where every grid line has the rule a margin further in (a
+table cell takes no margin). On a caption page the numbers of the box rows
+stood 13 px right of the rest and the rule jogged out with them. The cell
+draws what the grid's gutter does in both views now (the hairline and the
+padding above, no longer only on `.fixed`), and the box's first cell has no
+padding of its own. And the margin is measured in a unit of its own,
+`--gutter-em`: the reading size off the grid, which no page's `--fit` to its
+paper changes, so the rule and the numbers' right edge stand at one place on
+every page of the document (a page fitted to 0.525 had its numbers 9 px left
+of the next page's and its text 18 px); the PDF's body type at the grid's
+scale beside it. The numbers are set in the page's body type (`0.8 *
+--body-em`), never a line's own, so a line set larger or smaller keeps its
+number in line, and a fitted page is not held open by its numbers' line
+boxes.
+
 ### The hold: a key value carrying a run of blank
 
 This is the one that took the tab down. The breadcrumb finally named it:
