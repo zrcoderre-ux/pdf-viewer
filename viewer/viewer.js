@@ -1840,6 +1840,9 @@ function resetForNewDocument() {
   // New document → forget the previous one's per-page word counts, which are
   // what auto-scroll paces itself by.
   autoScroll.resetDocument();
+  // New document → in one column it shows its first page where the old
+  // viewer did, sideways (showSideways), and is centred where it fits.
+  Object.assign(sideways, { open: 1, mid: 0.5, edge: null });
   // Clear stashed bytes from any prior PDF. If the new load fails, the
   // Download button has nothing stale to save.
   pdfBytes = null;
@@ -2149,7 +2152,12 @@ async function renderAllPages() {
 
   forgetPageDrawing();
   Annots.detachAll();
+  // A smooth jump still under way was headed among the old pages, and the
+  // sideways hold is asked once a frame while the pages land.
+  sideways.jump = false;
+  holdWhileBuilding(signal);
   pagesEl.innerHTML = "";
+  measureTwoUp();
   totalLinks = 0;
   _footerByPage.clear();
   pageStructures.clear();
@@ -2166,6 +2174,13 @@ async function renderAllPages() {
     attachPageTools(refs);
     pageRefs.push(refs);
   }
+  // Every page in place, the column as wide as it will be: held once more,
+  // and a new document's first page has been shown (unless built hidden, in
+  // an app tab, until it is first shown).
+  sideways.building = null;
+  watchSideways();
+  holdSideways();
+  if (document.documentElement.clientWidth) sideways.open = 0;
   if (Find) Find.pagesRebuilt();
   // The whole document is on screen and measurable, text or not.
   autoScroll.endRender();
@@ -2788,6 +2803,7 @@ async function buildPageShell(pageNumber) {
   wrapper.dataset.pageNumber = String(pageNumber);
   wrapper.style.width  = `${viewport.width}px`;
   wrapper.style.height = `${viewport.height}px`;
+  noteTwoUpWidth(pageNumber, viewport.width);
 
   // Empty until the page comes near the screen (drawPage): a canvas with no
   // size holds no bitmap, and the wrapper's own size holds the page's place.
@@ -3743,13 +3759,150 @@ function lineLocator(bands, pages) {
   return { kind: "line", str: `pp. ${startStr}-${endStr}` };
 }
 
+// ── Sideways: in one column, a zoomed page holds its place between the rails ─
+//
+// A page zoomed wider than the room (the window less the tools rail on the
+// left, the side rail and any open panel on the right, and a margin beside
+// each) is scrolled to sideways, with the window as the scroller. Opening or
+// closing the panel, dragging its edge, collapsing the rail and resizing the
+// window change the room, and a zoom the page; a scrollX kept in pixels then
+// pointed at another part of the page, and a panel slid the page under the
+// reader by half its width. So in one column the view remembers which part of
+// the column is in the middle of the room (mid, a fraction of its width), or
+// that the reader is at its left or right edge (edge), and puts that back
+// whenever a width changes. Only a sideways scroll made while the widths stood
+// still is the reader's, and moves it. Two pages side by side, and a
+// presentation, keep the old viewer's ways (sidewaysHeld).
+const viewerContainerEl = document.getElementById("viewer-container");
+// open: the page a new document shows where the old viewer did, until its
+//   pages are all in place (showSideways).
+// jump: a smooth jump to a page is under way: the hold waits for its end
+//   (scrollend), since any scroll write stops a smooth scroll short, and
+//   takes the view it ends on.
+// building: the signal of a rebuild whose pages are still landing
+//   (holdWhileBuilding).
+// presenting: from a presentation's zoom to the one it ends with; leaving
+//   it, the layout before it is put back only after its class comes off.
+// sig, x: the widths and the scrollX the view was last held at.
+const sideways = { mid: 0.5, edge: null, open: 0, jump: false, building: null, presenting: false, sig: "", x: 0 };
+function sidewaysHeld() {
+  return pageLayout === "single" && !sideways.presenting && !document.body.classList.contains("presenting");
+}
+/** The room, in viewport x: inside the container's reserves, which are fixed to the window. */
+function sidewaysRoom() {
+  const cs = getComputedStyle(viewerContainerEl);
+  const left = viewerContainerEl.getBoundingClientRect().left + window.scrollX + parseFloat(cs.paddingLeft);
+  const right = document.documentElement.clientWidth - parseFloat(cs.paddingRight);
+  return { left, right, mid: (left + right) / 2, width: right - left };
+}
+function sidewaysSig(room, pr) {
+  return `${Math.round(room.left)}|${Math.round(room.width)}|${Math.round(pr.width)}`;
+}
+function sidewaysMax() {
+  const s = document.scrollingElement || document.documentElement;
+  return Math.max(0, s.scrollWidth - s.clientWidth);
+}
+/** The view at scrollX `left` taken as the one to hold. */
+function takeSideways(left, room, pr) {
+  sideways.mid = (room.mid + left - window.scrollX - pr.left) / pr.width;
+  sideways.edge = left <= 1 ? "start" : left >= sidewaysMax() - 1 ? "end" : null;
+}
+/**
+ * Page pn where the old viewer stood it, taken as the view to hold: its left
+ * edge at the room's left edge where it is wider than the room, else centred
+ * in the room. In a column of one width, that is the left edge (scrollX 0),
+ * where a pleading's line numbers are. A column that fits is centred.
+ */
+function showSideways(pn, room = sidewaysRoom(), pr = pagesEl.getBoundingClientRect()) {
+  const r = pageWrapperFor(pn)?.getBoundingClientRect();
+  if (!r) return;
+  if (pr.width <= room.width + 1) { sideways.mid = 0.5; sideways.edge = null; return; }
+  const left = window.scrollX + (r.width > room.width + 1 ? r.left - room.left : (r.left + r.right) / 2 - room.mid);
+  takeSideways(Math.max(0, Math.min(sidewaysMax(), Math.round(left))), room, pr);
+}
+/** Put the remembered part of the column back in the middle of the room, or at its edge. */
+function holdSideways() {
+  // An app tab opened behind another is display:none and has no widths yet;
+  // it is held when it is first shown (the root's size changes then).
+  if (!sidewaysHeld() || sideways.jump || !document.documentElement.clientWidth) return;
+  const room = sidewaysRoom();
+  const pr = pagesEl.getBoundingClientRect();
+  sideways.sig = sidewaysSig(room, pr);
+  if (pr.width > room.width + 1) {
+    if (sideways.open) showSideways(sideways.open, room, pr);
+    const max = sidewaysMax();
+    const want = sideways.edge === "start" ? 0 : sideways.edge === "end" ? max
+      : Math.max(0, Math.min(max, Math.round(window.scrollX + pr.left + sideways.mid * pr.width - room.mid)));
+    // Sideways only: the vertical place is the reader's, and auto-scroll
+    // tells its own writes from the reader's by it.
+    if (Math.abs(window.scrollX - want) >= 1) window.scrollTo({ left: want, behavior: "instant" });
+  }
+  sideways.x = window.scrollX;
+}
+/** The view as it stands taken as the one to hold. */
+function readSideways(room = sidewaysRoom(), pr = pagesEl.getBoundingClientRect()) {
+  sideways.sig = sidewaysSig(room, pr);
+  sideways.x = window.scrollX;
+  sideways.open = 0;
+  if (pr.width > room.width + 1) takeSideways(window.scrollX, room, pr);
+}
+/** A sideways scroll: where the widths have not moved, it is the reader's. */
+function noteSideways() {
+  if (!sidewaysHeld() || sideways.jump) return;
+  const room = sidewaysRoom();
+  const pr = pagesEl.getBoundingClientRect();
+  // The browser clamps scrollX when the widths shrink: not the reader.
+  if (sidewaysSig(room, pr) !== sideways.sig) { holdSideways(); return; }
+  if (Math.abs(window.scrollX - sideways.x) > 1) readSideways(room, pr);
+}
+document.addEventListener("scroll", () => { if (Math.abs(window.scrollX - sideways.x) > 1) noteSideways(); }, { passive: true });
+// A smooth jump that has ended, landed or cut short, is where the view is
+// held from: a width change on the way is not held, as it never was.
+document.addEventListener("scrollend", () => {
+  if (!sideways.jump) { noteSideways(); return; }
+  sideways.jump = false;
+  if (sidewaysHeld() && document.documentElement.clientWidth) readSideways();
+});
+// The room (the panel opening, closing or dragged, the rail collapsing), the
+// column and the window. The container is watched by both boxes: while the
+// page fits, the panel changes its content box; once the page overflows, only
+// its border box. A window resize then changes neither, nor does a classic
+// scroll bar: the root's box sees those.
+const sidewaysWatch = typeof ResizeObserver === "undefined" ? [] : [new ResizeObserver(() => holdSideways()), new ResizeObserver(() => holdSideways())];
+function watchSideways() {
+  if (!sidewaysWatch.length) return;
+  sidewaysWatch[0].observe(viewerContainerEl);
+  sidewaysWatch[0].observe(document.documentElement);
+  sidewaysWatch[1].observe(viewerContainerEl, { box: "border-box" });
+}
+watchSideways();
+/**
+ * While a rebuild lands its pages, each one grows the container and the
+ * window, and the observers made the browser lay out every frame twice: a
+ * zoom of two thousand pages in one column took up to twice as long. So they
+ * rest until the rebuild is over (renderAllPages) or abandoned with none after
+ * it, and the hold is asked once a frame instead, before the frame's layout.
+ */
+function holdWhileBuilding(signal) {
+  sideways.building = signal;
+  for (const o of sidewaysWatch) o.disconnect();
+  const tick = () => {
+    if (sideways.building !== signal) return;
+    if (signal.aborted) { sideways.building = null; watchSideways(); return; }
+    holdSideways();
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 // --- Zoom ---
 //
 // A zoom rebuilds every page at the new scale, so the reading position is
 // carried across it: the page on screen and how far down it the window was
-// (restoreScroll, applied the moment that page is rebuilt). Fit width and fit
-// page are modes rather than numbers — they are worked out again when the
-// window or the panels change size.
+// (restoreScroll, applied the moment that page is rebuilt); in one column the
+// sideways place is the hold's (holdSideways, above). Fit width and fit page
+// are modes rather than numbers — they are worked out again when the window
+// or the panels change size.
 const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5, 6];
 const ZOOM_MIN = 0.25, ZOOM_MAX = 6;
 let zoomMode = null;          // "fit-width" | "fit-page" | null
@@ -3757,12 +3910,29 @@ let pendingZoomMode = null;   // a mode chosen before any document was open
 let restoreScroll = null;     // { pn, frac, xfrac } for the rebuild in flight
 let pageLayout = "single";    // "single" | "two" | "two-cover"
 
+// The room the pages have: the window less the container's reserves, not the
+// container's own width, which grows with a page zoomed past the room. And
+// less the window's vertical scroll bar where it takes room (a classic one,
+// as on Windows) whether or not it shows yet: a document is fitted before its
+// pages are there to overflow the window, and the bar that comes with them
+// fires no resize, so the fit stayed 15px too wide, a sideways scroll bar
+// under every page. A document too short to scroll keeps the 15px as margin.
 function availableSize() {
   const cont = document.getElementById("viewer-container");
   const cs = getComputedStyle(cont);
-  const w = cont.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const cw = Math.min(document.documentElement.clientWidth, window.innerWidth - scrollbarWidth());
+  const w = cw - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
   const h = window.innerHeight - (parseFloat(cs.paddingTop) || 0) - 24;
   return { w: Math.max(100, w), h: Math.max(100, h) };
+}
+/** The width a vertical scroll bar takes: 0 where scroll bars overlay the page. */
+function scrollbarWidth() {
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:fixed;top:0;left:0;width:100px;height:100px;overflow-y:scroll;visibility:hidden;pointer-events:none";
+  document.documentElement.appendChild(probe);
+  const w = probe.offsetWidth - probe.clientWidth;
+  probe.remove();
+  return w;
 }
 function scaleForMode(mode) {
   if (!pdfDoc) return null;
@@ -3784,6 +3954,13 @@ function captureScroll() {
   const pn = visiblePageNumber();
   const w = pageWrapperFor(pn);
   if (!w) return null;
+  // One column: the held view is the one the new scale comes back to, the
+  // same part of the column in the middle of the room, or the same edge; a
+  // column that fits comes back centred.
+  if (sidewaysHeld()) {
+    sideways.open = 0;
+    if (pagesEl.getBoundingClientRect().width <= sidewaysRoom().width + 1) { sideways.mid = 0.5; sideways.edge = null; }
+  }
   const r = w.getBoundingClientRect();
   return { pn, frac: (toolbarHeightPx() + 14 - r.top) / (r.height || 1), xfrac: (window.innerWidth / 2 - r.left) / (r.width || 1) };
 }
@@ -3793,6 +3970,12 @@ function applyRestoreScroll(pageNumber, wrapper) {
   const rs = restoreScroll;
   restoreScroll = null;
   const r = wrapper.getBoundingClientRect();
+  // One column: down to the place on the page; sideways, the hold.
+  if (sidewaysHeld()) {
+    window.scrollTo({ top: window.scrollY + r.top + rs.frac * r.height - toolbarHeightPx() - 14, behavior: "auto" });
+    holdSideways();
+    return;
+  }
   window.scrollTo({
     top: window.scrollY + r.top + rs.frac * r.height - toolbarHeightPx() - 14,
     left: Math.max(0, window.scrollX + r.left + rs.xfrac * r.width - window.innerWidth / 2),
@@ -3863,12 +4046,33 @@ window.addEventListener("wheel", (e) => {
   wheelZoomTimer = setTimeout(() => { const t = wheelTarget; wheelTarget = null; setZoom(t); }, 220);
 }, { passive: false });
 
-// Fit modes follow the window and the panels.
+// Fit modes follow the window and the panels. Until the refit lands the page
+// is the old fit for the new room, and meanwhile (body.refitting) the
+// container and the column are window-wide as they used to be, so the page
+// slides under the panel for those frames rather than bring a sideways scroll
+// bar with it.
 let fitTimer = 0;
+// The column changing width moves every page narrower than it, so the page
+// in view is put back where it stood (a scroll the hold takes as its own),
+// lest in a document with a wider page elsewhere it jump aside and back.
+function setRefitting(on) {
+  if (document.body.classList.contains("refitting") === on) return;
+  const w = pageWrapperFor(visiblePageNumber());
+  const before = w ? w.getBoundingClientRect().left : null;
+  document.body.classList.toggle("refitting", on);
+  if (before == null || sideways.jump) return;
+  const dx = w.getBoundingClientRect().left - before;
+  if (Math.abs(dx) >= 1) {
+    window.scrollTo({ left: window.scrollX + dx, behavior: "instant" });
+    sideways.x = window.scrollX;
+  }
+}
 function refitSoon() {
   if (!zoomMode || !pdfDoc) return;
+  setRefitting(true);
   clearTimeout(fitTimer);
   fitTimer = setTimeout(() => {
+    setRefitting(false);
     const s = scaleForMode(zoomMode);
     if (s && Math.abs(s - currentScale) > 0.004) setZoom(s, { mode: zoomMode });
   }, 200);
@@ -3895,18 +4099,40 @@ if (pageNextEl) pageNextEl.addEventListener("click", () => goToPage(visiblePageN
 
 // Page display: one column, or two pages side by side (with or without the
 // cover page alone, the way a bound brief opens).
+//
+// Two side by side, the column's width is stated (viewer.css): the widest
+// left page and the widest right page with the gap between them, which is
+// what the grid's max-content columns come to. Left to max-content, the
+// column was measured over every page at each layout as pages were added: a
+// zoom of two thousand pages took about three times as long.
+const twoUpWidths = { left: 0, right: 0 };
+function noteTwoUpWidth(pn, w) {
+  // The cover alone sits in the right-hand column.
+  const c = (pageLayout === "two-cover") === (pn % 2 === 1) ? "right" : "left";
+  if (w > twoUpWidths[c]) { twoUpWidths[c] = w; pagesEl.style.setProperty(`--two-up-${c}`, `${w}px`); }
+}
+/** Again from the pages in the column: a rebuild, or a layout switch moving them between the columns. */
+function measureTwoUp() {
+  for (const c of ["left", "right"]) { twoUpWidths[c] = 0; pagesEl.style.setProperty(`--two-up-${c}`, "0px"); }
+  for (const w of pagesEl.querySelectorAll(":scope > .page-wrapper")) noteTwoUpWidth(Number(w.dataset.pageNumber), parseFloat(w.style.width) || 0);
+}
 function setPageLayout(layout) {
   pageLayout = layout === "two" || layout === "two-cover" ? layout : "single";
   pagesEl.classList.toggle("two-up", pageLayout !== "single");
   pagesEl.classList.toggle("cover", pageLayout === "two-cover");
+  measureTwoUp();
   for (const b of document.querySelectorAll("#more-menu [data-layout]")) b.setAttribute("aria-checked", String(b.dataset.layout === pageLayout));
   try { localStorage.setItem("pdfViewerLayout", pageLayout); } catch { /* ok */ }
   if (zoomMode) refitSoon();
 }
 for (const b of document.querySelectorAll("#more-menu [data-layout]")) b.addEventListener("click", () => {
   const pn = visiblePageNumber();
+  const was = pageLayout;
   setPageLayout(b.dataset.layout);
   requestAnimationFrame(() => scrollToPage(pn, { smooth: false }));
+  // Into one column, the page is shown sideways as a new document's first
+  // page is (showSideways): one as wide as the column at its left edge.
+  if (was !== "single" && pageLayout === "single") requestAnimationFrame(() => { showSideways(pn); holdSideways(); });
 });
 try { setPageLayout(localStorage.getItem("pdfViewerLayout") || "single"); } catch { setPageLayout("single"); }
 
@@ -4780,7 +5006,20 @@ async function renderThumbnails() {
 function scrollToPage(pn, { smooth = true } = {}) {
   const wrappers = pagesEl.querySelectorAll(".page-wrapper");
   const target = wrappers[pn - 1];
-  if (target) target.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  if (!target) return;
+  // One column: a smooth jump down the page is waited for until it ends
+  // (scrollend), since a scroll write by the sideways hold would stop it
+  // short; one that does not move down has no end to wait for.
+  const held = sidewaysHeld();
+  if (held && smooth && "onscrollend" in window) {
+    const s = document.scrollingElement || document.documentElement;
+    const top = window.scrollY + target.getBoundingClientRect().top - (parseFloat(getComputedStyle(target).scrollMarginTop) || 0);
+    sideways.jump = Math.abs(Math.max(0, Math.min(top, s.scrollHeight - s.clientHeight)) - window.scrollY) >= 1;
+  }
+  target.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  // Where it lands sideways is the view held from there (a hidden app tab
+  // has no widths to read).
+  if (held && !smooth && document.documentElement.clientWidth) readSideways();
 }
 
 function updateActiveThumbnail() {
@@ -5802,6 +6041,9 @@ const thumbResizeEl = document.getElementById("thumb-resize");
 function setThumbPanelWidth(px) {
   const w = Math.max(100, Math.min(px, Math.round(window.innerWidth * 0.6)));
   document.documentElement.style.setProperty("--thumb-panel-width", `${w}px`);
+  // A fit mode follows the panel's width too: left at the old fit, the page
+  // past the room brought a sideways scroll bar with it (refitSoon).
+  refitSoon();
   return w;
 }
 chrome.storage.local.get({ thumbPanelWidth: null }, ({ thumbPanelWidth }) => {
@@ -5971,8 +6213,10 @@ Features = createFeatures({
   getAuthor: () => Annots.getAuthor(),
   setAuthor: (n) => Annots.setAuthor(n),
   getZoom: () => ({ scale: currentScale, mode: zoomMode }),
-  restoreZoom: async (z) => { if (z.mode) setZoomMode(z.mode); else setZoom(z.scale); },
-  presentZoom: async () => { const sc = scaleForMode("fit-page"); if (sc) { restoreScroll = captureScroll(); currentScale = sc; syncZoomLabel(); await renderAllPages(); } },
+  // A presentation keeps the old viewer's ways sideways from its zoom until
+  // the zoom it ends with, the layout before it put back (sidewaysHeld).
+  restoreZoom: async (z) => { sideways.presenting = false; if (z.mode) setZoomMode(z.mode); else setZoom(z.scale); },
+  presentZoom: async () => { sideways.presenting = true; const sc = scaleForMode("fit-page"); if (sc) { restoreScroll = captureScroll(); currentScale = sc; syncZoomLabel(); await renderAllPages(); } },
   getLayout: () => pageLayout,
   setLayout: (l) => setPageLayout(l),
 });
@@ -6229,8 +6473,17 @@ document.addEventListener("keydown", (e) => {
   if (!e.shiftKey && TOOL_KEYS[k] && pdfDoc) { e.preventDefault(); Annots.setTool(TOOL_KEYS[k]); return; }
   if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && !Annots.selected() && pdfDoc) {
     // Left and right turn the page, unless the page is wider than the window
-    // (then they scroll it, as they always did).
-    if (document.documentElement.scrollWidth > window.innerWidth + 2) return;
+    // (then they scroll it, as they always did, and turn the page once the
+    // window scrolls no further that way). The window's scroll width now
+    // carries the right reserve as well, so the pages' own right edge is
+    // asked, or the window's while a refit holds the container to it. A held
+    // key stops at the edge, as it always did: the next press turns the page.
+    const s = document.scrollingElement || document.documentElement;
+    const right = document.body.classList.contains("refitting") ? s.scrollWidth : pagesEl.getBoundingClientRect().right + window.scrollX;
+    if (right > window.innerWidth + 2) {
+      if (e.key === "ArrowRight" ? window.scrollX < sidewaysMax() - 1 : window.scrollX > 1) return;
+      if (e.repeat) { e.preventDefault(); return; }
+    }
     e.preventDefault();
     const step = pageLayout === "single" ? 1 : 2;
     goToPage(visiblePageNumber() + (e.key === "ArrowRight" ? step : -step));

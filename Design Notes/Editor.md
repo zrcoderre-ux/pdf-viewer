@@ -49,6 +49,130 @@ left of centre, and it steps back to the centre when the window narrows
 past 1180. Moving the label rule up to 1380 would keep it centred, but
 would take the labels away at 1280 and 1366, the common laptop widths.
 
+**The page area** is `#viewer-container` around the `#pages` column, and the
+window is its only scroller. The container reserves the fixed regions as
+padding, the tools rail on the left and the side rail and any open panel on the
+right, with a 28px margin beside each; what is left is the room
+(`sidewaysRoom()` in `viewer.js`). The container and the column are `width:
+max-content; min-width: 100%`, so a page wider than the room scrolls sideways
+from its left edge clear of the tools rail to its right edge clear of the side
+rail or the open panel. The window-wide container before it (`safe center` kept
+the left edge reachable) left the right reserve out of the scroll width: at the
+furthest scroll a page's right 48px stayed under the side rail, and 280px under
+the open panel (300%, 1280px). In two-up the column's width is stated instead
+(`measureTwoUp`, `noteTwoUpWidth`: `--two-up-left` and `--two-up-right`, the
+widest left and right page, with the 14px gap what the grid's columns come to):
+measured as `max-content` over every page at each layout as pages were added, a
+zoom of two thousand pages took 13-17 s where the old viewer took 5-7 s;
+stated, 4.6-7.6 s where it took 4.9-9.3 s. What the wider container brings with
+it:
+
+- `availableSize()` (fit width, fit page) measures the window, not the
+  container, less a classic vertical scroll bar whether it shows yet or not
+  (`scrollbarWidth()`, a probe). A document is fitted before its pages are
+  there to overflow the window, and the bar that comes with them fires no
+  resize, so the fit stayed 15px too wide, which the container would turn into
+  a sideways scroll bar. Fit width is now 150% where it was 152% (Letter,
+  1280px, classic scroll bars), and a document too short to scroll keeps the
+  15px as margin.
+- In a fit mode, from the room changing until the refit lands 200ms later,
+  `body.refitting` (`setRefitting`, from `refitSoon`) holds the container and
+  the column to the window's width as before, so the old fit slides under the
+  panel for those frames rather than bring a sideways scroll bar with it. The
+  class changes the column's width, which moves a page narrower than a wider
+  one elsewhere, so the page in view is put back where it stood. Dragging the
+  panel's edge refits too (`setThumbPanelWidth`): the old viewer kept the old
+  fit there for good, which past the room now brought a sideways scroll bar.
+- The password-locked message (`#pages:has(> .panel-empty)`) stays window-wide
+  and wraps.
+- ← and → asked whether the window scrolls sideways (its `scrollWidth`), which
+  now counts the right reserve, so they ask whether the pages' own right edge
+  is past the window's (the window's scroll width while `body.refitting`
+  holds). Where it is not, they turn the page as before. Where it is, they
+  scroll sideways as before, and turn the page once the window scrolls no
+  further that way, where they went dead; a held key (`e.repeat`) stops at that
+  edge as before, and the next press turns the page.
+- A page wider than the room by no more than the right reserve (the margin and
+  the side rail or open panel) had no sideways scroll in the old viewer, part
+  of it standing in the margin or under the side rail or panel. It now gets a
+  short one, with classic scroll bars a 15px bar under it: a Letter page at
+  150% at 1280px has 1px of it, at 160% 62px where the old viewer hid 34px
+  under the side rail; a landscape page in a fit-width document with the panel
+  open, 202px where the old viewer left 174px of it under the panel.
+
+**In one column the view holds its place sideways** (`holdSideways`,
+`noteSideways`, `readSideways`, `showSideways` in `viewer.js`), never in two-up
+or while presenting (`sidewaysHeld()`). `sideways.mid` is the fraction of the
+column at the room's centre and `sideways.edge` is `start` or `end` while the
+view is at one side. A width change puts that part of the column back in the
+middle of the new room, or keeps the edge: opening or closing the panel,
+dragging its edge, collapsing the rail and resizing the window, where the old
+viewer kept `scrollX` and the page slid by half the change (116px for the panel
+at 1280px, 94px for the rail). ResizeObservers watch the container, both boxes
+(while the page fits, the panel changes the content box; once it overflows,
+only the border box), and `<html>` (a window resize, a classic scroll bar);
+they fire every frame of the rails' transition, so the page moves with the
+panel. While a rebuild lands its pages they rest and the hold is asked once a
+frame from `requestAnimationFrame` (`holdWhileBuilding`, until the pages are in
+place or the rebuild is abandoned with none after it): watching the growing
+column, they made the browser lay out twice a frame, and a zoom of two thousand
+pages took 4.5-6.1 s where the old viewer took 2.8-3.4 s; resting, six zooms of
+two thousand pages take 22-33 s where it took 19-34 s (medians 25.8 and 23.3 s,
+on a machine shared with other runs). The hold writes only `scrollX`. A scroll
+is the reader's, and moves the middle, only where the widths (`sidewaysSig`)
+have not moved since the last hold; otherwise it is the browser clamping, and
+is held. A zoom keeps the held view (`captureScroll`; a column that fits comes
+back centred) and `applyRestoreScroll` puts back only the vertical place, so a
+zoom anchors on the room's centre or keeps its edge, where the old viewer
+anchored on the window's centre and a zoom step at 300% took the left edge
+123px out. A jump to a page is `scrollIntoView` as before, and where it lands
+is held from then on (`readSideways`); a smooth jump is waited for until
+`scrollend` (`sideways.jump`), since a scroll write would stop it short, and
+the view it ends on is held, so a panel or rail change on its way is not (as
+before): held then, the old place undid the jump's own sideways move, and with
+pages of mixed widths left 0.29-0.63 of the page jumped to in the room where
+0.46-0.80 was. A new document shows its first page where the old viewer did
+(`sideways.open`, asked at each hold until its pages are all in place, or in an
+app tab built hidden until it is first shown): one wider than the room with its
+left edge at the room's left edge, in a column of one width at `scrollX` 0,
+where a pleading's line numbers are; one narrower centred in the room. A switch
+to one column (the More menu) shows the page being read the same way, so at
+200% the line numbers are in view where the old viewer lined the page's right
+edge up with the window's (0.77 of the page in the room against 0.80). A
+presentation keeps the old viewer's ways from its zoom until the zoom it ends
+with (`sideways.presenting`), since leaving it puts the layout back only after
+its class comes off; leaving it for one column, a page that fit the window
+comes back centred in the room (at 200% 126px out on each side, where the old
+viewer left 16px of the left edge out and 235px of the right; at 300% its place
+varied by 140px between runs, with the frame of the rails' transition it read).
+
+What is left as it was, or worse. Two-up and the cover keep the old viewer's
+code paths: open at `scrollX` 0, `scrollIntoView`, a zoom anchored on the
+window's centre (`xfrac`), the pages sliding under a panel or rail change; only
+the reachable edge, the arrows, the fit's 15px and the drag refit are new
+there. The wider scroll range clamps less: when the tools rail collapses, the
+panel closes or the window widens, a spread at 100% or 110% scrolled right
+stays where the old viewer's narrower range pulled the view back over its left
+page, 0.60-0.83 of that page in the room where 0.78-0.95 was. In one column a
+jump is `scrollIntoView` as before, so it still lines a page wider than the
+window up with the window's edge, under a rail, and the hold keeps that view;
+holding the place instead would show the margin's width less of such a page,
+and could leave a page narrower than the column out of the room. Scrolled all
+the way right, a page's right edge now stands at the margin where it stood
+under the side rail, so at 200% 0.77 of the page is in the room where 0.80 was
+(0.58 against 0.61 with the panel open). With pages of mixed widths the middle
+is a fraction of the column, which the widest page sets, and a narrower page is
+centred in the column rather than in the room: from the left edge of a
+landscape page, a portrait page reached by scrolling stands at 163/-108 from
+the rails at 150% (0.88 of it in the room; the old viewer 28/27, all of it),
+208/-459 at 200% (0.63; 0.77) and 253/-810 at 250% (0.47; 0.62), and a jump to
+it from there with the panel open leaves 0.70 of it in the room (0.78). A
+reader at the column's right edge stays at it, and a narrower page stands left
+of the room's middle: in fit width, through the refit when the panel opens,
+0.89 of the portrait page in the room, where the old viewer, its sideways
+scroll gone, centred it; at 200% with a page turned to landscape, 0.69 of the
+next portrait page where the old viewer showed 0.80.
+
 **Comments are a model in PDF user space** (`viewer/annotations.js`): one
 array of plain objects (`{ id, page, type, rect, quads, color, … }`), drawn as
 DOM in each page's `.annotLayer` by `paintPage`, with undo / redo as
