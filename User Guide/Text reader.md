@@ -309,7 +309,10 @@ app, which routes it to the reader tab.
   in the order they stand in the document, marks it, and gives the decisions
   as buttons — **keep just this one**, **keep in this case**, **never fake it
   anywhere**, **fake it**, or leave it for now, which the save leaves as it
-  stands until you decide. The bar
+  stands until you decide. The buttons and the arrows are one row at the top
+  of the bar that holds still from one name to the next, as the worksheet's
+  does; between documents the decisions go out of sight and › stays where it
+  was. Under them the bar
   says which of how many, and the page and line it stands on, and the walk
   wraps at the end. Where the case folder has no `LEAKS.xlsx` that is the
   whole review: the key is attached, the names it binds are underlined, and

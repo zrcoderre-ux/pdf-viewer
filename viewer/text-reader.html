@@ -83,7 +83,12 @@
 
   <!-- The names the key binds that the run left standing in the text. The same
        bar the LEAKS worksheet gets, for the case folder that has no worksheet:
-       one name at a time, where it stands, and what may be done with it. -->
+       one name at a time, where it stands, and what may be done with it. Its
+       controls are one row at the top, as the worksheet's are, and hold still
+       from one name to the next: the answer in words takes the room left
+       between the decisions and the arrows, cut short (the whole of it on
+       hover), and between documents the decisions are put out of sight
+       without giving up their places, so › is where it was. -->
   <!-- Find, across every document of the case folder. The browser's own
        Ctrl+F reads the pages that are IN THE DOM, which is this document and,
        with the folder read on, only the part of the reel that has not been
@@ -137,26 +142,25 @@
   </div>
 
   <div id="names-bar" class="revbar" hidden>
+    <div class="lb-row lb-controls">
+      <span class="tb-label nb-decide">Leave it?</span>
+      <button id="nb-here" class="nb-decide">keep just this one</button>
+      <button id="nb-no" class="nb-decide">keep in this case</button>
+      <button id="nb-never" class="nb-decide">never fake it anywhere</button>
+      <button id="nb-fake" class="primary nb-decide" title="Say that this one is to be faked: the next save writes the pseudonym (it fakes nothing you have not decided), and the walk stops offering it so you need not come back to it">fake it</button>
+      <button id="nb-skip" class="secondary nb-decide" title="Go on without deciding — a save leaves this one in the file as it stands, and warns that it did">leave it for now</button>
+      <span id="nb-answer" class="lb-answer nb-decide"></span>
+      <button id="nb-prev" title="The one before it, up the document (Shift+Alt+L)">‹</button>
+      <button id="nb-next" title="The next one, down the document (Alt+L)">›</button>
+      <button id="nb-find" class="nb-decide" title="Scroll back to it">Find in text</button>
+      <button id="nb-close" title="Hide the bar — the names stay marked, and the count in the status bar brings it back">×</button>
+    </div>
     <div class="lb-row">
       <span id="nb-count" class="lb-count"></span>
       <span id="nb-type" class="lb-type leak">unfaked</span>
       <b id="nb-value" class="lb-value" title="A real name from the key, standing in the clear"></b>
       <span id="nb-where" class="lb-where"></span>
       <span id="nb-rest" class="lb-where"></span>
-      <span class="spacer"></span>
-      <button id="nb-prev" title="The one before it, up the document (Shift+Alt+L)">‹</button>
-      <button id="nb-next" title="The next one, down the document (Alt+L)">›</button>
-      <button id="nb-find" title="Scroll back to it">Find in text</button>
-      <button id="nb-close" title="Hide the bar — the names stay marked, and the count in the status bar brings it back">×</button>
-    </div>
-    <div class="lb-row lb-decide">
-      <span class="tb-label">Leave it?</span>
-      <span id="nb-answer" class="lb-answer"></span>
-      <button id="nb-here">keep just this one</button>
-      <button id="nb-no">keep in this case</button>
-      <button id="nb-never">never fake it anywhere</button>
-      <button id="nb-fake" class="primary" title="Say that this one is to be faked: the next save writes the pseudonym (it fakes nothing you have not decided), and the walk stops offering it so you need not come back to it">fake it</button>
-      <button id="nb-skip" class="secondary" title="Go on without deciding — a save leaves this one in the file as it stands, and warns that it did">leave it for now</button>
     </div>
   </div>
   <!-- Redacting the case folder's own PDF, from beside the export. The pane
