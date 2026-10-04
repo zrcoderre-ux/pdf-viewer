@@ -160,7 +160,13 @@ app, which routes it to the reader tab.
   so there each box's rows are measured together after every layout pass —
   every column set to its widest cell, the rows given one left edge, and each
   row made as tall as the gap to the next so the bars meet — the box is a box
-  there too.
+  there too. **Text inside a box keeps the export's indent**: on pleading
+  paper "Plaintiff," under the party's name, "vs." and "Defendants." used to
+  stand flush against the side of the caption box; they now stand as far in
+  as the export sets them, on the same grid as the page's other indented
+  lines, in the reading view and side by side. A box or a rule the export
+  draws in from the margin is drawn that far in too, and a box drawn smaller
+  to fit its paper takes its indents down with its type.
 - **Columns stand where the export put them, whatever the font.** A
   two-column page — a Westlaw printout, a caption with the case number beside
   the parties, the clerk's filing stamp beside the attorney block — reaches the
