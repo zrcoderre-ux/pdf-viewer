@@ -1505,7 +1505,7 @@ function handOwner() { return folderName || fileName ? valuesStoreKey() : null; 
 // is not the open folder's own, so that none of its flags come off under it.
 function notOwnKeyNote() {
   if (!key || !folderName || TD.keyAnswersFlags(keyFolder, valuesStoreKey())) return "";
-  return ` The key in hand was not read from ${folderName} or chosen with it open, so none of ${folderName}'s flags come off under it — Load key… makes it ${folderName}'s.`;
+  return ` The key in hand was not read from ${folderName} or chosen with it open, so none of the flags here come off under it — load this case's own key with Load key… to take them off.`;
 }
 
 keySelect.addEventListener("change", () => {
@@ -1741,13 +1741,16 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   folderDocs = light ? [] : (found.combined ? [found.combined].concat(found.docs) : found.docs);
   folderPdfs = light ? [] : found.pdfs;
   folderLight = light;
+  // Not in the Text Files folder: its remedy is the folder above (openFolder's
+  // offer bar), and every case's Text Files shares one flag list by name.
+  const ownNote = () => (looksLikeTextFiles(h, found) ? "" : notOwnKeyNote());
   if (found.keyHandle) {
     try {
       const f = await found.keyHandle.getFile();
       await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, folderName, { quiet, owner: own });
-    } catch (e) { toast("The folder's key could not be read: " + (e.message || e) + notOwnKeyNote(), { error: true }); }
+    } catch (e) { toast("The folder's key could not be read: " + (e.message || e) + ownNote(), { error: true }); }
   } else if (!quiet) {
-    const note = notOwnKeyNote();
+    const note = ownNote();
     toast("No pseudonym_key.xlsx in " + folderName + (note ? " — the documents read under the key in hand." + note : " — the documents will read in their fakes."), note ? { ms: 9000 } : undefined);
   }
   const stored = readStoredValues(VALUES_PREFIX + folderName);

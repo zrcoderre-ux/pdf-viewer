@@ -730,13 +730,19 @@ app, which routes it to the reader tab.
   or one Excel is holding — is opened, and the documents read under it as
   before, but another case's key that happens to bind the same name takes
   none of this folder's flags off; the reader says so where it mentions the
-  key, and **Load key…** makes a key the folder's. A key dropped together with
-  a document, and the key offered when the reader starts, belong to no folder
-  until loaded or chosen like that (choosing the key already shown in the
-  list does nothing: pick another and back, or use Load key…). A flag kept
-  for want of the case's key is only asked about again; a flag taken off
-  wrongly could let the name ship. The whole value has to be in the key:
-  a key that binds "David" has not pseudonymized a flagged "David W. Slayton",
+  key, and loading the case's own key with **Load key…** takes them off. A key
+  dropped together with a document, and the key offered when the reader
+  starts, belong to no folder until loaded or chosen like that: use **Load
+  key…** with it (choosing the key already shown in the list does nothing; to
+  go through the list, choose "(no key)" and back — never another key, which
+  would take off every flag it binds — though "(no key)" also forgets this
+  session's **fake it** answers in the names bar). Folders of one name share
+  one flag list, and so does every case's Text Files folder, and lone
+  documents of one file name from different cases; a key chosen with one of
+  them open answers them all. A flag kept for want of the case's key is only
+  asked about again; a flag taken off wrongly could let the name ship. The
+  whole value has to be in the key: a key that binds "David" has not
+  pseudonymized a flagged "David W. Slayton",
   half of which would still be standing, and a value **kept** is not in the
   key's forward side at all — both stay flagged. **But a red mark never
   stands over a pseudonym.** The red mark says *this value is standing in the

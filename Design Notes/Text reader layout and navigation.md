@@ -604,8 +604,13 @@ the documents read under it rather than "in their fakes") and its "could not
 be read" line, the lone-file attach's summary toast and its ask-first offer
 bar (which no longer calls the key "the folder's"), and "Key loaded" —
 `notOwnKeyNote` adds one sentence when a folder is open and the key in hand is
-not its own: none of the folder's flags come off under it, and Load key…
-makes it the folder's.
+not its own: none of the flags there come off under it, and loading the
+case's own key with Load key… takes them off. It points at the case's OWN key,
+not the key in hand: loading the key in hand by Load key… would make another
+case's key the folder's. Adoption leaves it out where the folder picked looks
+like the Text Files subfolder (`looksLikeTextFiles`): there the remedy is the
+folder above, which `openFolder`'s offer bar already says, and a key loaded
+into it would own the one list every case's Text Files folder shares.
 
 Left as they are, on purpose (each keeps a flag main would have dropped,
 never the other way):
@@ -616,12 +621,25 @@ never the other way):
   document opened under it.
 - A key dropped together with the open folder's own export is nobody's until
   loaded or chosen by hand. Choosing it again in the Key list does nothing — a
-  select fires no change for the option already chosen — so it is Load key…,
-  or another key and back.
+  select fires no change for the option already chosen — so it is Load key…
+  with that key. The detour through the list is "(no key)" and back, never
+  another key: choosing a key with the folder open makes it the folder's and
+  takes off every flag it binds, and choosing the first again does not put
+  them back. "(no key)" also clears this session's names-bar "fake it" answers
+  (`setKey(null)` resets `settled`); Load key… with the same case's key keeps
+  them.
 - After "Let go of the folder" the key keeps its owner, the folder: the lone
   document's own list is not answered until a key is chosen with it open.
 - The identity is the folder's NAME, as the flag store's is: two case folders
   of one name share one list and one owner, exactly as they share the list.
+  So does every case's Text Files folder (`textReader.values.Text Files`).
+  A lone document's list is stored by its FILE name, so lone documents of one
+  name from different cases (`Motion.txt`, `Complaint.txt`) share one list,
+  and a key chosen while one was open answers the others too — as on main,
+  which shares the list the same way. A key loaded with no folder open could
+  have belonged to none; `handOwner` gives it the lone document's list
+  instead, so that a lone document's flags can still come off under its
+  case's key.
 
 Measured in Chromium on PWA builds of main and of this change. A probe for
 this design (19 scenarios: key-less B after A by Open case folder, through its
@@ -635,3 +653,15 @@ flags kept that main took off — Case A's key binding the invented "Jane Roe"
 no longer takes B's flag off, by any path — and the toasts and offer line
 above. A key from B's own case loaded or chosen by hand in B, and B's own key
 file, take the flag off exactly as main does.
+
+Measured again after the note was reworded and left out of the Text Files
+folder: the probe, now 21 scenarios with the Text Files subfolder and a flat
+key-less export folder picked after A (the toast there is main's word for
+word, the key and the text main's), and the parity probe's 38 scenarios
+seeded both ways (214 steps). The key shown, the Key list and its options, the
+library and the document text match main at every step, and no flag main kept
+is lost. One status line differs: two adoptions overlapping with no document
+open, where main's drop repainted the marks (`paintHighlights`), which starts
+the folder sweep, and the sweep counted Case A's "Jane Roe" standing in B's
+export. Dropping nothing, the branch has not swept yet when the probe looks;
+the paint of the first document opened sweeps in both.
