@@ -11,7 +11,7 @@ import {
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, editedSpans, spanEdited, typedReals, typedPseudonymsCited, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
-  addValue, removeValue, dropFlagsInKey, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
+  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, didNotOcrLines, DID_NOT_OCR,
@@ -493,6 +493,18 @@ check("nothing in the key, nothing dropped \u2014 and the list stands as it is",
   dropFlagsInKey(STANDS, RUN), { kept: STANDS, dropped: [] });
 check("no key, nothing dropped", dropFlagsInKey(["Rosa Delgado"], null), { kept: ["Rosa Delgado"], dropped: [] });
 check("no list, nothing to drop", dropFlagsInKey(null, RUN), { kept: [], dropped: [] });
+
+// …and only the folder's OWN key answers them: the key in hand outlives the
+// folder it was read from, and another case's key binds that case's names.
+// Both sides are the list's storage name (the reader's valuesStoreKey).
+console.log("whose key answers the flags");
+check("the key read from this folder, or chosen with it open, answers its list",
+  keyAnswersFlags("textReader.values.Case B", "textReader.values.Case B"), true);
+check("another folder's key does not",
+  keyAnswersFlags("textReader.values.Case A", "textReader.values.Case B"), false);
+check("a key that is nobody's (dropped with a document, or offered at start) answers no list",
+  [keyAnswersFlags(null, "textReader.values.Case B"), keyAnswersFlags("", "textReader.values.Case B"), keyAnswersFlags(undefined, "textReader.values.Case B")], [false, false, false]);
+check("…not even no list", [keyAnswersFlags(null, null), keyAnswersFlags("", "")], [false, false]);
 
 // ---- folder listing ------------------------------------------------------------------
 console.log("folder");

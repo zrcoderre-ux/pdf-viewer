@@ -23,7 +23,7 @@
 //   formatValuesFile / parseValuesFile / addValue / dropFlagsInKey   the New
 //       Real Values.txt list: names the operator flagged as unfaked, handed to
 //       PDF-Linker for its next pass over the folder, and dropped again once a
-//       key comes back with them in it.
+//       key comes back with them in it — that case's own key (keyAnswersFlags).
 //   isExportName / isKeyName   which files in a case folder are documents.
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
@@ -962,6 +962,20 @@ export function dropFlagsInKey(list, compiledForward) {
   const kept = [], dropped = [];
   for (const v of list || []) (fakeFor(compiledForward, v) ? dropped : kept).push(v);
   return { kept: dropped.length ? kept : (list || []).slice(), dropped };
+}
+
+/**
+ * Whether the key in hand may answer a flag list: take a flag off it
+ * (dropFlagsInKey) or keep a value of the folder's New Real Values.txt out of
+ * it. Only a key read from that very list's case folder, or chosen by hand
+ * while it was open, may — `keyOwner` and `listId` are both the list's storage
+ * name. The key in hand outlives the folder it came from, and another case's
+ * key binds that case's names: a flag it took off here would be a name nothing
+ * has faked here and nobody is asking to fake any more. A flag left on is only
+ * asked about again.
+ */
+export function keyAnswersFlags(keyOwner, listId) {
+  return !!keyOwner && keyOwner === listId;
 }
 
 export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain, textFixed) {

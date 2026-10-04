@@ -722,7 +722,20 @@ app, which routes it to the reader tab.
   value is dropped from the **Flagged** panel (the reader says which), takes
   its red mark off the text, and stops being handed over in the next `New Real
   Values.txt` — and a `New Real Values.txt` on disk still listing it from
-  before the run does not bring it back. The whole value has to be in the key:
+  before the run does not bring it back. **Only the case's own key answers
+  them**: the one read from the folder's `pseudonym_key.xlsx`, or one loaded
+  (**Load key…**, a key dropped on its own) or chosen in the Key list while
+  the folder is open (with no folder open, while the lone document whose
+  list it is is open). The key in hand stays when a folder with no key file —
+  or one Excel is holding — is opened, and the documents read under it as
+  before, but another case's key that happens to bind the same name takes
+  none of this folder's flags off; the reader says so where it mentions the
+  key, and **Load key…** makes a key the folder's. A key dropped together with
+  a document, and the key offered when the reader starts, belong to no folder
+  until loaded or chosen like that (choosing the key already shown in the
+  list does nothing: pick another and back, or use Load key…). A flag kept
+  for want of the case's key is only asked about again; a flag taken off
+  wrongly could let the name ship. The whole value has to be in the key:
   a key that binds "David" has not pseudonymized a flagged "David W. Slayton",
   half of which would still be standing, and a value **kept** is not in the
   key's forward side at all — both stay flagged. **But a red mark never

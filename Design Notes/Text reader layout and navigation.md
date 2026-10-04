@@ -551,3 +551,87 @@ since there is no longer anywhere to read on to. The folder is FORGOTTEN as
 well as dropped (`forgetDir`) — the reader re-attaches a remembered folder as
 soon as a file from it is opened, so one merely dropped would be back on the
 next document.
+
+### Only the folder's own key takes its flags off (`keyFolder`)
+
+The key in hand outlives the folder it was read from. A folder with no
+`pseudonym_key.xlsx` — or one whose key Excel is holding — leaves whatever key
+was in hand where it was, usually the last case's, and the documents read
+under it. That part is unchanged. What was wrong was the flags: adoption names
+the folder, reads its key, then its flagged list, and compiles, and
+`dropFlagsNowFaked` took off every flag the key in hand fakes. Under the last
+case's key that is a name of THIS case which that case's run happened to fake:
+nothing has faked it here, and the flag was the only thing still asking for
+it. The merge of the folder's own `New Real Values.txt` on disk
+(`TD.fakeFor(fwd, v)`) kept the same names out of the list, silently.
+
+Three earlier designs moved the key itself — put it down, recalled the
+folder's from the library, claimed a dropped one — and each round of checks
+found the display moved with it somewhere main's did not (a folder whose key
+Excel holds losing its own case's key, a newer key swapped for an older one).
+So this one moves nothing but WHO MAY ANSWER THE FLAGS. The key in hand, what
+the documents read in, the key library (`storeKey`), every key-attach path and
+every toast but the note below are main's.
+
+`keyFolder` records the flag list the key in hand belongs to, by the name the
+list is stored under (`valuesStoreKey()`, the flag store's own identity):
+
+- adoption reading the folder's key file sets it to that folder (`own`, taken
+  as adoption names the folder, so an adoption overtaken by another still
+  files its key as its own folder's and not the later one's);
+- a key loaded by hand (Load key…, a key dropped ON ITS OWN) or chosen in the
+  Key list sets it to the list open at that moment (`handOwner`): the case
+  folder's, or with no folder open the lone document's, or none with nothing
+  open;
+- a key dropped TOGETHER WITH a document (`.txt`/`.LEAK`) belongs to none: the
+  drop loads the key first and opens the document after, while the folder open
+  is still the last one, and the document may bring its own folder in;
+- adoption that finds no key file, or cannot read it, leaves it where it was —
+  another folder, or none;
+- the key offered at start belongs to none (it is initialised so, and boot
+  calls `setKey` directly).
+
+`TD.keyAnswersFlags(keyFolder, list)` — true only for a non-empty owner equal
+to the list — gates `dropFlagsNowFaked` (against `valuesStoreKey()`, beside its
+`flagsFor` check) and the on-disk merge (against the adopting folder's `own`,
+the folder whose file it is). Where it says no, the flags simply stay: a flag
+left on the list never exposes a name, it is only asked about again; a flag
+wrongly taken off can let one ship.
+
+The one visible change: where the key is already being spoken of —
+adoption's "No pseudonym_key.xlsx" line (which, with a key in hand, now says
+the documents read under it rather than "in their fakes") and its "could not
+be read" line, the lone-file attach's summary toast and its ask-first offer
+bar (which no longer calls the key "the folder's"), and "Key loaded" —
+`notOwnKeyNote` adds one sentence when a folder is open and the key in hand is
+not its own: none of the folder's flags come off under it, and Load key…
+makes it the folder's.
+
+Left as they are, on purpose (each keeps a flag main would have dropped,
+never the other way):
+
+- The key offered at start belongs to no list. In a new session a folder whose
+  key file Excel is holding keeps its flags under the library's key, even when
+  that key is the same case's, until the key is loaded by hand; so does a lone
+  document opened under it.
+- A key dropped together with the open folder's own export is nobody's until
+  loaded or chosen by hand. Choosing it again in the Key list does nothing — a
+  select fires no change for the option already chosen — so it is Load key…,
+  or another key and back.
+- After "Let go of the folder" the key keeps its owner, the folder: the lone
+  document's own list is not answered until a key is chosen with it open.
+- The identity is the folder's NAME, as the flag store's is: two case folders
+  of one name share one list and one owner, exactly as they share the list.
+
+Measured in Chromium on PWA builds of main and of this change. A probe for
+this design (19 scenarios: key-less B after A by Open case folder, through its
+`New Real Values.txt`, as a lone file and ask-first; B's key file locked after
+A, after B itself, and in the next session; B's own key loaded or chosen by
+hand; a key dropped alone and with B's export; B with its own key; lone
+files; overlapping adoptions; Let go) and the 22 probes of the earlier rounds
+(195 scenarios): in all 214 the key shown, the Key list's choice and the
+document text are main's, and no flag main kept is lost. What differs is
+flags kept that main took off — Case A's key binding the invented "Jane Roe"
+no longer takes B's flag off, by any path — and the toasts and offer line
+above. A key from B's own case loaded or chosen by hand in B, and B's own key
+file, take the flag off exactly as main does.
