@@ -89,8 +89,11 @@ that reaches only into the margin gets no sideways scroll. With it:
   (`noteSideways`), and when the timer fires without a zoom change (in Fit
   width, a height-only resize) the hold puts the place back with the box; two
   side by side the view stays where it was pulled back. Dragging the panel's
-  edge refits too (`setThumbPanelWidth`), or a fit left under the panel would
-  keep a bar. The password-locked message and a presentation have no box.
+  edge refits too, once, when the drag ends (the `#thumb-resize` handler; the
+  drag holds `refitting` meanwhile), or a fit left under the panel would keep a
+  bar. A refit on every move started a rebuild at each pause in the drag, and
+  the next one read the page in view from a column still filling: in Fit width
+  a 1000-page document dragged with two 300ms pauses landed on page 1-3. The password-locked message and a presentation have no box.
 - ← and → ask whether the pages' own right edge is past the window
   (`sidewaysColumn()`), not the window's `scrollWidth`, which counts the box.
   Where it is not, they turn the page. Where it is, they scroll sideways, and

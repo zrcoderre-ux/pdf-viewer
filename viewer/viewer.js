@@ -6011,9 +6011,6 @@ const thumbResizeEl = document.getElementById("thumb-resize");
 function setThumbPanelWidth(px) {
   const w = Math.max(100, Math.min(px, Math.round(window.innerWidth * 0.6)));
   document.documentElement.style.setProperty("--thumb-panel-width", `${w}px`);
-  // A fit mode follows the panel's width too: left at the old fit, the page
-  // would pass the room and bring a sideways scroll bar with it (refitSoon).
-  refitSoon();
   return w;
 }
 chrome.storage.local.get({ thumbPanelWidth: null }, ({ thumbPanelWidth }) => {
@@ -6023,6 +6020,13 @@ if (thumbResizeEl) {
   thumbResizeEl.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     thumbResizeEl.setPointerCapture(e.pointerId);
+    // A fit mode follows the panel's width too, but once, when the drag ends:
+    // a refit on every move started a rebuild at each pause, and the next one
+    // read the page in view from a column still filling, so a long document
+    // landed on page 1. Until then `refitting` keeps the old fit from bringing
+    // a sideways scroll bar with it (refitSoon).
+    const fitting = !!(zoomMode && pdfDoc);
+    if (fitting) document.body.classList.add("refitting");
     const w0 = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--thumb-panel-width"));
     const gap = thumbnailPanelEl.getBoundingClientRect().right - e.clientX - w0;
     let w = null;
@@ -6046,6 +6050,8 @@ if (thumbResizeEl) {
       thumbResizeEl.removeEventListener("pointerup", onUp);
       thumbResizeEl.removeEventListener("lostpointercapture", onEnd);
       if (w != null) chrome.storage.local.set({ thumbPanelWidth: w });
+      if (fitting && w != null && zoomMode && pdfDoc) refitSoon();
+      else if (fitting) document.body.classList.remove("refitting");
     };
     thumbResizeEl.addEventListener("pointermove", onMove);
     thumbResizeEl.addEventListener("pointerup", onUp);
