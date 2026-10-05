@@ -3234,6 +3234,12 @@ function isWordEl(el) {
 function caretOnWord(x, y) {
   const el = document.elementFromPoint(x, y);
   if (!isWordEl(el)) return null;
+  // On a span's top pixel row Chromium's hit test finds the word but its
+  // caret reads the start of the span, so a drag that came onto a line from
+  // above began at the line's first word. Read the caret up to 2px inside.
+  const r = el.getBoundingClientRect(), cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+  x += Math.sign(cx - x) * Math.min(2, Math.abs(cx - x));
+  y += Math.sign(cy - y) * Math.min(2, Math.abs(cy - y));
   const c = caretAtPoint(x, y);
   return c && c.node.nodeType === Node.TEXT_NODE && el.contains(c.node) ? c : null;
 }

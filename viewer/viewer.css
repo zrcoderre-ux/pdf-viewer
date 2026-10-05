@@ -1375,8 +1375,13 @@ body.blank-dragging :is(.sel-toolbar, .sel-toolbar *) { pointer-events: none !im
    begun on a word strays onto it, and made unselectable it held such a drag
    at the end of the page's text where the browser's own drag, with the bar
    moving off, came back to the words (Design Notes/Editor.md). */
-:is(#toolbar, #tools-rail, #side-rail, #thumbnail-panel, #thumb-resize, .menu, .float-bar,
-  #ocr-progress, #toast-host) {
+/* Not while the Redact tool is on: there a document mouseup marks whatever is
+   selected, and with the chrome unselectable a drag released on the toolbar,
+   or Ctrl+A and then a click on it, kept a selection reaching into the pages
+   and marked all of it. Selectable, the chrome takes the selection's end as it
+   always did, and nothing is marked. */
+body:not(.redact-mode) :is(#toolbar, #tools-rail, #side-rail, #thumbnail-panel, #thumb-resize,
+  .menu, .float-bar, #ocr-progress, #toast-host) {
   user-select: none;
 }
 :is(#toolbar, #tools-rail, #side-rail, #thumbnail-panel, .menu, .float-bar)

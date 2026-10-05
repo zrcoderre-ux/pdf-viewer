@@ -273,7 +273,10 @@ makes the selection, with no snapping. Each move is read where it lands
 The anchor is the browser's caret (`caretOnWord`, caretPositionFromPoint) where
 the pointer came onto that first word, read back along its way every
 `DRAG_WALK_PX` on that word alone (where the move landed was a letter or two
-in). After that the focus is the browser's caret wherever the pointer is over a
+in). Every such read is taken up to 2px inside the word's box: on a span's
+top pixel row Chromium's hit test already finds the word but its caret reads
+the span's first character, so a drag that came onto a line from above, or
+left it upward, began or ended at the line's first word. After that the focus is the browser's caret wherever the pointer is over a
 word, and over blank space it stays where it was, except that a move from a
 word out into blank space ends at that word's edge, read the same way. A word
 crossed between two moves, and never under the pointer when one landed, is not
@@ -471,9 +474,9 @@ of selected text (`pointercancel`, no `pointerup`) or a touch tap on a word
 (its `mousedown` comes after the `pointerup`), and a click on its Highlight
 button fell through to the page and dropped the selection.
 
-**Chrome is not text** (viewer.css). The toolbar, the tools and side rails,
-the side panel, menus, the float bars, `#ocr-progress` and the toasts are
-`user-select: none`: a drag from a page that strayed onto one took the
+**Chrome is not text** (viewer.css), except while the Redact tool is on. The
+toolbar, the tools and side rails, the side panel, menus, the float bars,
+`#ocr-progress` and the toasts are `user-select: none`: a drag from a page that strayed onto one took the
 buttons' labels, and since they stand before the pages (or after them), page 1
 or everything to the end with them. Boxes to type in, a comment's text and
 quote in the side panel, the Table of Authorities panel (`#__cl_toa`, whose
@@ -497,6 +500,15 @@ sweeps (17,116 rows over ten configurations) those were the last presses under
 (main 728). The buttons keep the selection (each `preventDefault`s its own
 `mousedown`), and a drag begun on a word that strays onto the bar is no press
 on it, so it meets the bar as before.
+
+Redact (text) marks whatever is selected on every `mouseup`, and keeps the
+rule off (`body:not(.redact-mode)`). Unselectable, the chrome left a drag
+released on the toolbar or a rail, or Ctrl+A followed by a click there, with a
+selection reaching into the pages, and all of it was marked: select.pdf, a
+drag from p3 released on the toolbar, 219 boxes on pages 1-3; Ctrl+A and a
+click on the toolbar's background, 709 boxes on all 6 pages; heavy.pdf, 63
+pages. Selectable, the chrome takes the selection's end as it always did, and
+`redactCurrentSelection` marks nothing outside `#pages`.
 
 A click on the chrome's own background or its labels (the toolbar's empty
 stretch, "of N" by the page number, the side rail, the side panel's title or
