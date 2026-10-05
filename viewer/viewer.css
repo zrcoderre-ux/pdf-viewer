@@ -1248,23 +1248,25 @@ body.thumbs-open { --right-cur: calc(var(--side-rail-width) + var(--thumb-panel-
    rail and any open panel, so a page whose right edge would stand under them
    scrolls on until that edge meets them, where the window's edge alone would
    leave it under them; one that reaches only into the margin beside them gets
-   no sideways scroll. It moves no page. --pages-w is the pages' width, kept by
-   viewer.js (notePageWidth). 1px tall, since a box with no height adds
-   nothing to the scroll width, and pulled up over the column's last pixel. */
-#viewer-container::after {
-  content: "";
-  display: block;
-  width: calc(var(--pages-w, 0px) + var(--right-cur));
+   no sideways scroll. It moves no page. Its width is set by viewer.js
+   (setPagesWidth) on this empty box itself, not as a variable on the
+   container, which every span on every page would inherit and have its style
+   worked out again. 1px tall, since a box with no height adds nothing to the
+   scroll width, and pulled up over the column's last pixel. */
+#pages-end {
+  width: var(--right-cur);
   height: 1px;
   margin-top: -1px;
   pointer-events: none;
 }
 /* Not for the password-locked message, a presentation, or a fit mode's pages
    until the refit timer fires (refitSoon in viewer.js), which slide under the
-   panel rather than bring a sideways scroll bar for those frames. */
-#viewer-container:has(> #pages > .panel-empty)::after,
-body.presenting #viewer-container::after,
-body.refitting #viewer-container::after { display: none; }
+   panel for those frames rather than bring a sideways scroll bar of the box's
+   making (a window narrowed past the old fit has the window's own until the
+   refit). */
+#pages:has(> .panel-empty) + #pages-end,
+body.presenting #pages-end,
+body.refitting #pages-end { display: none; }
 
 #pages {
   display: flex;

@@ -8,29 +8,25 @@ In addition to citation linking, the viewer supports:
   Moving the window to another screen, or changing the browser's zoom, draws
   the pages again at the new resolution.
 - **A zoomed page can be scrolled clear of the panels** — a page zoomed wider
-  than the room between the tools rail and the side rail (or the open Pages,
-  Bookmarks, Comments or Attachments panel) scrolls sideways until its right
-  edge meets the side rail or the panel, so neither edge has to stay under
-  them. A page that only reaches into the margin beside them does not scroll;
-  one that reaches under them gets a short sideways scroll, such as a
-  letter-size page at 160% in a 1280-pixel window, and where one page is wider
-  than the rest, such as a landscape exhibit, every page scrolls as far as it.
-  With one page to a row the view also keeps its place: opening or closing the
-  panel, dragging its edge, collapsing the tools rail, zooming or resizing the
-  window keeps the same part of the page in the middle, and a page scrolled all
-  the way to one edge stays at that edge (in Fit width and Fit page it can
-  slide back for a moment while the page refits). A document opens at the
+  than the room between the tools rail and the side rail (or an open panel)
+  scrolls sideways until its right edge meets the side rail or the panel. A
+  page that only reaches into the margin beside them does not scroll; one that
+  reaches under them gets a short sideways scroll, such as a letter-size page
+  at 160% in a 1280-pixel window, and where one page is wider than the rest,
+  such as a landscape exhibit, every page scrolls as far as it. With one page
+  to a row the view keeps its place sideways: opening or closing the panel,
+  collapsing the tools rail, zooming or resizing the window keeps the same part
+  of the page in the middle, or the edge you were at (with a landscape page
+  among portrait ones that place is the widest page's, so after scrolling
+  across it a narrower page can stand further left). A document opens at the
   page's left edge, where a pleading's line numbers are, and so does a switch
-  back to one page to a row; a page that fits keeps its left edge in view when
-  it is zoomed past the room or the panel opens over it, and leaving a
-  presentation brings back the place you were at. In Fit width and Fit page,
-  dragging the panel's edge refits the page, as opening or closing the panel
-  does. With two pages side by side the view keeps its scroll position instead,
-  so the panel opens over the pages and they shift when the tools rail
-  collapses. **←** and **→** turn the page; where the pages are too wide for
-  the window they scroll sideways first, and at the edge they turn the page
-  (with one page to a row, keeping the same edge in view). Holding the key
-  stops at the edge; press it again to turn the page.
+  back to one page to a row. With two pages side by side, opening the panel or
+  collapsing the tools rail leaves the scroll position as it is, so the panel
+  opens over the pages and they shift when the rail collapses; a zoom keeps
+  the part of the pages at the window's centre. **←** and **→** turn the page;
+  where the pages are too wide for the window they scroll sideways, and with
+  one page to a row, at the edge, a fresh press turns the page and keeps that
+  edge in view.
 - **Text selection and copy** — text is selectable as soon as a page is
   shown: click and drag, and a small toolbar opens under the selection with
   **Highlight**, **Underline**, **Strikethrough**, **Comment**, **Copy** and

@@ -2185,8 +2185,10 @@ async function renderAllPages() {
   // as at a new document, so a zoom past the room or a room narrowed past it
   // keeps its left edge in view and puts its right side out.
   holdSideways();
-  const read = pageWrapperFor(visiblePageNumber());
-  if (sidewaysHeld() && read && read.getBoundingClientRect().width <= sidewaysRoom().width + 1) sideways.edge = "start";
+  if (sidewaysHeld()) {
+    const read = pageWrapperFor(visiblePageNumber());
+    if (read && read.getBoundingClientRect().width <= sidewaysRoom().width + 1) sideways.edge = "start";
+  }
   if (Find) Find.pagesRebuilt();
   // The whole document is on screen and measurable, text or not.
   autoScroll.endRender();
@@ -3771,17 +3773,17 @@ function lineLocator(bands, pages) {
 // left, the side rail and any open panel on the right, and a margin beside
 // each) stands at the room's left edge at scrollX 0 and is scrolled to
 // sideways, with the window as the scroller, until its right edge meets the
-// side rail or the panel (viewer.css, #viewer-container::after). Opening
-// or closing the panel, dragging its edge, collapsing the rail and resizing
-// the window change the room, and a zoom the page; a scrollX kept in pixels
-// then points at another part of the page. So in one column the view
-// remembers which part of the column is in the middle of the room (mid: how
-// far it is from the column's left edge, where every page wider than the room
-// stands, in the pages' own units, so a page of another width landing or a
-// zoom does not move it), or that the reader is at its left or right edge
-// (edge), and puts that back whenever a width changes. Only a sideways scroll
-// made while the widths stood still is the reader's, and moves it. Two pages
-// side by side, and a presentation, are not held (sidewaysHeld).
+// side rail or the panel (viewer.css, #pages-end). Opening or closing the
+// panel, dragging its edge, collapsing the rail and resizing the window change
+// the room, and a zoom the page; a scrollX kept in pixels then points at
+// another part of the page. So in one column the view remembers which part of
+// the column is in the middle of the room (mid: how far it is from the
+// column's left edge, where every page wider than the room stands, in the
+// pages' own units, so a page of another width landing or a zoom does not move
+// it), or that the reader is at its left or right edge (edge), and puts that
+// back whenever a width changes. Only a sideways scroll made while the widths
+// stood still is the reader's, and moves it. Two pages side by side, and a
+// presentation, are not held (sidewaysHeld).
 const viewerContainerEl = document.getElementById("viewer-container");
 // jump: a smooth jump to a page is under way: the hold waits for its end
 //   (scrollend), since any scroll write stops a smooth scroll short, and
@@ -4021,8 +4023,9 @@ window.addEventListener("wheel", (e) => {
 // Fit modes follow the window and the panels. Until the refit timer fires
 // the page is the old fit for the new room, and meanwhile (body.refitting) the
 // scroll width ends at the widest page's right edge, as it does without the
-// box (viewer.css), so the page slides under the panel for those frames rather
-// than bring a sideways scroll bar with it. In one column the place clamped
+// box (viewer.css), so the page slides under the panel for those frames and
+// the box adds no sideways scroll bar (a window narrowed past the old fit has
+// the window's own until the refit). In one column the place clamped
 // meanwhile is not the reader's (noteSideways): a refit that changes no zoom
 // puts the held place back as the box returns.
 let fitTimer = 0;
@@ -4061,10 +4064,11 @@ if (pageNextEl) pageNextEl.addEventListener("click", () => goToPage(visiblePageN
 // cover page alone, the way a bound brief opens).
 //
 // The pages' width, which the scroll width reaches past by the side rail and
-// any open panel (viewer.css, --pages-w): the widest page, or two side by side
-// the widest left page and the widest right page with the 14px gap between
-// them, which is what the grid's max-content columns come to.
+// any open panel (viewer.css, #pages-end): the widest page, or two side by
+// side the widest left page and the widest right page with the 14px gap
+// between them, which is what the grid's max-content columns come to.
 const pageWidths = { one: 0, left: 0, right: 0, w: 0 };
+const pagesEndEl = document.getElementById("pages-end");
 function notePageWidth(pn, w) {
   // The cover alone sits in the right-hand column.
   const c = (pageLayout === "two-cover") === (pn % 2 === 1) ? "right" : "left";
@@ -4074,7 +4078,7 @@ function notePageWidth(pn, w) {
 }
 function setPagesWidth() {
   const w = pageLayout === "single" ? pageWidths.one : pageWidths.left + 14 + pageWidths.right;
-  if (w !== pageWidths.w) { pageWidths.w = w; viewerContainerEl.style.setProperty("--pages-w", `${w}px`); }
+  if (w !== pageWidths.w) { pageWidths.w = w; pagesEndEl.style.width = `calc(${w}px + var(--right-cur))`; }
 }
 /** Again from the pages in the column: a rebuild, or a layout switch moving them between the columns. */
 function measurePageWidths() {
@@ -4983,8 +4987,9 @@ function scrollToPage(pn, { smooth = true } = {}) {
   }
   target.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
   // Where it lands sideways is the view held from there (a hidden app tab
-  // has no widths to read).
-  if (held && !smooth && document.documentElement.clientWidth) readSideways();
+  // has no widths to read); while a rebuild is landing its pages, the place
+  // held before it is put back instead, as for a page not landed yet.
+  if (held && !smooth && !sideways.building && document.documentElement.clientWidth) readSideways();
 }
 
 function updateActiveThumbnail() {
@@ -6179,10 +6184,11 @@ Features = createFeatures({
   setAuthor: (n) => Annots.setAuthor(n),
   getZoom: () => ({ scale: currentScale, mode: zoomMode }),
   // A presentation is not held sideways (sidewaysHeld) from its zoom until
-  // the zoom it ends with, the layout before it put back; the widths the hold
-  // last saw are from before it, so the first scroll after it holds rather
-  // than reads. A presentation left before its zoom (Esc within its first
-  // 250ms) does not turn the hold off again.
+  // the zoom it ends with, the layout before it put back. The widths the hold
+  // last saw (sig) are forgotten as it ends: they are from before it and would
+  // match again once its layout is back, so a scroll while the pages land
+  // would be taken as the reader's. A presentation left before its zoom (Esc
+  // within its first 250ms) does not turn the hold off again.
   restoreZoom: async (z) => { Object.assign(sideways, { presenting: false, sig: "" }); if (z.mode) setZoomMode(z.mode); else setZoom(z.scale); },
   presentZoom: async () => { sideways.presenting = document.body.classList.contains("presenting"); const sc = scaleForMode("fit-page"); if (sc) { restoreScroll = captureScroll(); currentScale = sc; syncZoomLabel(); await renderAllPages(); } },
   getLayout: () => pageLayout,
@@ -6441,24 +6447,23 @@ document.addEventListener("keydown", (e) => {
   if (!e.shiftKey && TOOL_KEYS[k] && pdfDoc) { e.preventDefault(); Annots.setTool(TOOL_KEYS[k]); return; }
   if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && !Annots.selected() && pdfDoc) {
     // Left and right turn the page, unless the pages are wider than the
-    // window (then they scroll it, and turn the page once the window scrolls
-    // no further that way). The scroll width reaches past the pages by the
-    // side rail and any open panel (viewer.css), so the pages' own right edge
-    // is asked. A held key stops at the edge; the next press turns the page.
-    // In one column the new page keeps the sideways place, so the edge the
-    // reader was at stays in view; two side by side, it lands as the page
-    // buttons land it, lined up with the window's edge.
+    // window (then they scroll it). The scroll width reaches past the pages
+    // by the side rail and any open panel (viewer.css), so the pages' own
+    // right edge is asked. In one column they turn the page once the window
+    // scrolls no further that way (a held key stops at the edge; the next
+    // press turns the page), and the new page keeps the sideways place, so
+    // the edge the reader was at stays in view.
     const col = sidewaysColumn();
     const wide = col.left + window.scrollX + col.width > window.innerWidth + 2;
     if (wide) {
-      if (e.key === "ArrowRight" ? window.scrollX < sidewaysMax() - 1 : window.scrollX > 1) return;
+      if (!sidewaysHeld() || (e.key === "ArrowRight" ? window.scrollX < sidewaysMax() - 1 : window.scrollX > 1)) return;
       if (e.repeat) { e.preventDefault(); return; }
     }
     e.preventDefault();
     const step = pageLayout === "single" ? 1 : 2;
     const x = window.scrollX;
     goToPage(visiblePageNumber() + (e.key === "ArrowRight" ? step : -step));
-    if (wide && sidewaysHeld() && Math.abs(window.scrollX - x) >= 1) {
+    if (wide && Math.abs(window.scrollX - x) >= 1) {
       window.scrollTo({ left: x, behavior: "instant" });
       readSideways();
     }
