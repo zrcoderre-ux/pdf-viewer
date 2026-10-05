@@ -12,7 +12,11 @@ memorandum (10/10 match, identical keys). The port includes:
   (`of`, `the`, `and`, `&`, `de`, `la`, `du`, `von`, `van`), and corporate
   suffixes (`Co.`, `Inc.`, `Corp.`, `Ltd.`, `Ass'n.`).
 
-  Signal words in front of the name (`See`, `In`, `the`) are dropped. Court
+  Signal words in front of the name (`See`, `In`, `the`) are dropped, and so
+  is the word a sentence opens on before it: `Discussing Quilala v.
+  Securitas ...` links from `Quilala`, as do `Citing`, `Applying`, `Relying
+  on`, `Under`, `However,` and the like. Words a party name opens on are
+  left out of that list (`First American Title`, `Contra Costa`). Court
   and jurisdiction words (`State`, `California`, `Federal`, `Supreme`,
   `Court`) are dropped only when their own period or comma sets them off from
   the name (`as held by the Supreme Court. Smith v. Jones`, `In California,

@@ -194,6 +194,7 @@ test-page-rotation.mjs               Node-runnable page-rotation geometry + scop
 test-citation-memory.mjs             Node-runnable per-URL citation-memory tests (stubbed DOM)
 test-section-lists.mjs               Node-runnable chained section-list tests (and / or / & connectors)
 test-lead-in-names.mjs               Node-runnable party names opening with State / California / Court, writ real-party short names
+test-sentence-openers.mjs            Node-runnable sentence-opening words (Discussing, Citing, However,) kept out of case names
 test-redact.mjs                      Node-runnable redaction tests: span mapping, box merging, a store per document, and the saved copy read back for text and metadata
 test-annot-pdf.mjs                   Node-runnable comment round trips (write, save, read back, edit, flatten) + page tools
 test-pdf-crypt.mjs                   Node-runnable cipher vectors + protect/open round trips (+ pikepdf interop when installed)
