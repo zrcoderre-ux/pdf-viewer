@@ -457,6 +457,24 @@ and every occurrence counted as the page counts them. The flagged values are
 counted over the same text. The open document's spot keeps are part of the
 sweep's stamp (`spotsSig`, by content, since the list is rebuilt on every
 edit), so keeping a name here re-reads the folder's answer about it.
+
+The SAVE read a third text, and disagreed with the marks the same two ways. It
+read each page off `serializeHeld` with the run's fakes standing in it and
+only the spot keeps held, so a real that is a word of a fake ("Volunteers" in a
+fake "Volunteers of Columbia") was a name it found and the page never marked:
+undecided, it was named in the "not yet reviewed" warning, which no walk could
+step to; decided, the forward pass wrote a pseudonym into the middle of the
+fake. And `citedNameSpans` over the text with the fakes in could read an orange
+name and the fake beside it as a cited decision ("Volunteers v. Quillmark Corp.
+(2019) …"), which the save spares: a name the page marked and the walk had
+settled stayed in the file and stayed orange, out of the walk, save after save,
+with nothing said. `serializeHeld` now returns the fakes' places too (`pns`),
+and the save, the print and the warning read the page through `diskReading`
+(text-reader.js): the fakes and spot keeps blanked to spaces as `flatten`
+blanks them, cited names found in that, matches read off it
+(`standingSpans`), and the forward pass run with those blanks as NULs so no
+swap reaches into a fake. A settled name still standing once the pass is done
+is named in the save's toast rather than left silently.
 - A document whose own reading has not landed is not called empty at all
   (`readHere()`: `paintedSeq === docSeq`). The bar says it is being read and
   waits, rather than leaving a document nobody read.

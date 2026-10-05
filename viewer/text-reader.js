@@ -684,8 +684,8 @@ function fakesForPrint() {
   if (fwd && fwd.rx) {
     during("scrubbing the pages for print", () => {
       for (const body of bodies) {
-        const { text, held } = TD.serializeHeld(body);
-        const fw = forwardText(text, held);
+        const { text, held, pns } = TD.serializeHeld(body);
+        const fw = forwardText(text, held, pns);
         if (!fw.swaps) continue;
         buildBody(body, fw.text, pageIndexOf(body));
         moved = true;
@@ -1357,26 +1357,53 @@ function maskKept(text) {
   return rx ? text.replace(rx, (m) => "\u0000".repeat(m.length)) : text;
 }
 /**
- * real → fake over `text`, kept occurrences left exactly as they stand: the
- * values kept for the whole case, and the ranges `held` names — the spot keeps,
- * whose places in this very text the caller read off the page.
+ * A page's DISK text read the way its marks read it — flatten with blankPn,
+ * and the folder sweep's TD.clearReading: the run's pseudonyms (`pns`) and the
+ * spot keeps (`held`) blanked to spaces, and the names of cited decisions
+ * found in what is left. → { flat, blank, cited }
+ *
+ * The save used to read the text with the fakes standing in it, and so
+ * disagreed with the orange marks both ways. A real the key binds that is a
+ * word of a fake ("Volunteers" in a fake "Volunteers of Columbia") was a name
+ * the save found and the page never marked: it warned about a name no walk
+ * could reach, and once the name was decided it wrote a pseudonym into the
+ * middle of the fake. And a fake beside an orange name could make the two read
+ * as a cited decision's name ("Volunteers v. Quillmark (2019) …"), which the
+ * save spares: a name the page marked and the walk had settled was left
+ * standing, save after save, with nothing said.
  */
-function forwardText(text, held) {
-  const swaps = forwardSwaps(text, held);
+function diskReading(text, held, pns) {
+  const blank = (held || []).concat(pns || []);
+  const flat = blank.length ? TD.blankRanges(text, blank, " ") : text;
+  return { flat, blank, cited: TD.citedNameSpans(flat) };
+}
+/**
+ * real → fake over `text`, kept occurrences left exactly as they stand: the
+ * values kept for the whole case, the ranges `held` names — the spot keeps,
+ * whose places in this very text the caller read off the page — and the
+ * run's own fakes (`pns`), which are never written into. `spare`: more ranges
+ * to leave as they stand (the save's undecided names), which are not part of
+ * how the page reads.
+ */
+function forwardText(text, held, pns, spare) {
+  const swaps = forwardSwaps(text, held, pns, spare);
   let out = "", at = 0;
   for (const s of swaps) { out += text.slice(at, s.start) + s.to; at = s.end; }
   return { text: out + text.slice(at), swaps: swaps.length };
 }
 /** …and the same pass as places: [{ start, end, to }] into `text`, in order. */
-function forwardSwaps(text, held) {
+function forwardSwaps(text, held, pns, spare) {
   // The names of decided cases are blanked with the keeps: a party of a
   // decision this brief cites is that decision's, not this matter's, and a
   // save that wrote a pseudonym over it would put out a citation to a case
-  // that does not exist (textdoc.citedNameSpans).
-  const spared = (held || []).concat(TD.citedNameSpans(text));
+  // that does not exist (textdoc.citedNameSpans). Which names those are is
+  // read off the page as its marks read it (diskReading), and the blanks are
+  // NULs here, so no match runs across a fake or a spot keep.
+  const { flat, blank, cited } = diskReading(text, held, pns);
+  const spared = blank.concat(cited, spare || []);
   const out = [];
   let off = 0;
-  for (const r of PK.forwardRuns(fwd, TD.blankRanges(maskKept(text), spared))) {
+  for (const r of PK.forwardRuns(fwd, TD.blankRanges(maskKept(flat), spared))) {
     const len = r.t === "swap" ? r.from.length : r.s.length;
     if (r.t === "swap") out.push({ start: off, end: off + len, to: r.to });
     off += len;
@@ -1384,23 +1411,21 @@ function forwardSwaps(text, held) {
   return out;
 }
 /**
- * The names standing in the clear that nobody has decided on — the orange
- * marks, read off `text` the way the save reads it: every real name the key
- * binds, past the values kept for the case, the spot keeps (`held`) and the
- * parties of cited decisions, less the ones the walk has settled with "fake
- * it". [{ start, end, real, fake }]
+ * Every name standing in the clear as the page reads it (diskReading) — the
+ * orange marks, settled or not: every real name the key binds, past the values
+ * kept for the case, the spot keeps (`held`), the run's fakes (`pns`) and the
+ * parties of cited decisions. [{ start, end, real, fake }]
  *
  * THE SAVE FAKES ONLY WHAT HAS BEEN DECIDED. It used to write every one of
  * them as its pseudonym, looked at or not, which made a save before the review
  * was over a review answered "fake" throughout — a party's surname in a
- * citation the walk had not reached yet included. These are what it leaves
- * exactly as they stand, and says so.
+ * citation the walk had not reached yet included. The ones not settled with
+ * "fake it" are what it leaves exactly as they stand, and says so.
  */
-function undecidedSpans(text, held) {
+function standingSpans(text, held, pns) {
   if (!reals) return [];
-  const cited = TD.citedNameSpans(text);
-  return PK.findRealSpans(reals, TD.blankRanges(maskKept(text), held || []))
-    .filter((h) => !isSettled(h.real) && !TD.insideSpans(cited, h.start, h.end));
+  const { flat, cited } = diskReading(text, held, pns);
+  return PK.findRealSpans(reals, maskKept(flat)).filter((h) => !TD.insideSpans(cited, h.start, h.end));
 }
 function compileKey() {
   const out = during("compiling the key", () => compileKeyNow());
@@ -2743,7 +2768,7 @@ function standingInTheClear() {
 /**
  * …and the share of them the SAVE will write: the ones the walk has settled
  * with "fake it". A name nobody has decided on is left as it stands
- * (undecidedSpans), so it is no work for the save and does not light it.
+ * (standingSpans), so it is no work for the save and does not light it.
  */
 function settledInTheClear() {
   return leakHits.filter((h) => isSettled(h.real) && h.range && h.range.startContainer && h.range.startContainer.isConnected).length;
@@ -3378,7 +3403,7 @@ document.addEventListener("keydown", (e) => {
 //
 // THE LAST ONE IS THE FILE ITSELF. A name the run left in the clear is a real
 // value sitting in a scrubbed export, and until someone decides it — fake it,
-// or keep it — not even a save writes the pseudonym over it (undecidedSpans).
+// or keep it — not even a save writes the pseudonym over it (standingSpans).
 // Closing on one that was decided and not yet saved loses the decision;
 // closing on one nobody decided loses nothing, but leaves the file carrying a
 // real value while the operator believes the document has been read, and
@@ -3489,33 +3514,43 @@ async function saveDocument() {
   const scan = [];
   // The members the forward pass changed, on top of the ones already edited.
   const touched = new Set();
-  // The names left standing because nobody has decided on them (undecidedSpans):
+  // The names left standing because nobody has decided on them (standingSpans):
   // by member, for the sweep, and all together, for the warning.
   const waitingIn = new Set();
   const waiting = [];
+  // …and the names SETTLED that are standing all the same once the forward
+  // pass is done. There should be none; a settled name the save could not
+  // reach used to stay orange, out of the walk, save after save, with nothing
+  // said. Now it is named.
+  const stuck = [];
   for (const body of pageBodies()) {
     const i = pageIndexOf(body);
-    let { text, held } = TD.serializeHeld(body);
-    let left = undecidedSpans(text, held);
+    let { text, held, pns } = TD.serializeHeld(body);
+    let standing = standingSpans(text, held, pns);
+    let left = standing.filter((h) => !isSettled(h.real));
     if (fwd && fwd.rx) {
-      const fw = forwardText(text, held.concat(left.map((h) => [h.start, h.end])));
+      const fw = forwardText(text, held, pns, left.map((h) => [h.start, h.end]));
       if (fw.swaps) {
         snapshot(body, true);
         forwarded += fw.swaps;
         buildBody(body, fw.text, i);
-        ({ text, held } = TD.serializeHeld(body)); // the rebuilt page, its spots found again
-        left = undecidedSpans(text, held); // …and the names left, where they now stand
+        ({ text, held, pns } = TD.serializeHeld(body)); // the rebuilt page, its spots and fakes found again
+        standing = standingSpans(text, held, pns); // …and the names left, where they now stand
+        left = standing.filter((h) => !isSettled(h.real));
         touched.add(reelMemberOf(i));
       }
     }
+    for (const h of standing) if (isSettled(h.real)) stuck.push(h.real);
     if (left.length) {
       waitingIn.add(reelMemberOf(i));
       for (const h of left) waiting.push(h.real);
     }
     doc.pages[i].lines = text.split("\n");
     // The undecided names are in the file because the save left them there,
-    // as it leaves a kept one: the assertion reads past them too.
-    scan[i] = TD.blankRanges(text, held.concat(left.map((h) => [h.start, h.end]))).split("\n");
+    // as it leaves a kept one: the assertion reads past them too — and past
+    // the run's fakes and the cited decisions' names, read as the page reads
+    // them, which are what the forward pass left alone.
+    scan[i] = TD.blankRanges(text, held.concat(pns, diskReading(text, held, pns).cited, left.map((h) => [h.start, h.end]))).split("\n");
   }
   let write = reel.filter((m) => m.dirty || touched.has(m));
   // The pages marked ⊘ Did not OCR follow the text that is about to be
@@ -3614,11 +3649,17 @@ async function saveDocument() {
         ? ". It stands in the file as it did; step to it from the ⚠ count, decide it, and save again."
         : ". They stand in the file as they did; step through them from the ⚠ count, decide each, and save again.")
     : "";
+  const stuckNames = [...new Set(stuck.map((v) => String(v).trim()))];
+  const stuckWarn = stuck.length
+    ? ` · ⚠ ${stuck.length} name${stuck.length === 1 ? "" : "s"} you said to fake could not be written as ${stuck.length === 1 ? "its pseudonym" : "pseudonyms"} where ${stuck.length === 1 ? "it stands" : "they stand"} — `
+      + stuckNames.slice(0, 4).join(", ") + (stuckNames.length > 4 ? "…" : "")
+      + ". Retype or keep " + (stuck.length === 1 ? "it" : "them") + " by hand."
+    : "";
   toast((!wrote.length
     ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : "Nothing to save.")
     : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + wrote.join(", ") +
-      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList) + warn,
-    { error: !!warn, ms: warn ? 12000 : undefined });
+      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList) + warn + stuckWarn,
+    { error: !!(warn || stuckWarn), ms: warn || stuckWarn ? 12000 : undefined });
   return true;
 }
 saveBtn.addEventListener("click", saveDocument);
@@ -5960,7 +6001,7 @@ $("nb-close").addEventListener("click", () => { const sweeping = !!pageSweep; sh
  * The keeps answer the names that must stay; this answers the ones that must
  * go. The save fakes ONLY names answered so — a name nobody has decided on is
  * left in the file exactly as it stands, and the save warns about it
- * (undecidedSpans) — so this settles the name, the walk stops offering it, and
+ * (standingSpans) — so this settles the name, the walk stops offering it, and
  * the next save writes the pseudonym along with everything else.
  *
  * By VALUE, not by place: the save fakes every occurrence of a name alike, so
@@ -5983,18 +6024,26 @@ function refreshSheetFakes() {
   sheetFakes = leaks ? LK.fakeDecisions(leaks.parsed.rows) : new Set();
   return was.size !== sheetFakes.size || [...was].some((v) => !sheetFakes.has(v));
 }
+/**
+ * One name settled, from the names bar or from a right click on it: noted,
+ * said, and counted. The right click is the way to it where the walk is not —
+ * past it, closed, or stepping a worksheet that has a row for it.
+ */
+function settleName(real, fake, then = "") {
+  settled.add(settledKey(real));
+  answered++;
+  decidedHere++;
+  bounces = 0;
+  const n = leakHits.filter((x) => settledKey(x.real) === settledKey(real)).length;
+  toast(`“${real}” will be written as ${fake ? `“${fake}”` : "its pseudonym"} on the next save`
+    + (n > 1 ? ` — all ${n} of them here` : "") + "." + (then ? " " + then : ""));
+  renderLeakStatus();
+}
 function fakeName() {
   const hits = liveLeaks();
   if (!hits.length) { showNamesBar(false); return; }
   const h = hits[Math.min(Math.max(leakStep, 0), hits.length - 1)];
-  settled.add(settledKey(h.real));
-  answered++;
-  decidedHere++;
-  bounces = 0;
-  const n = leakHits.filter((x) => settledKey(x.real) === settledKey(h.real)).length;
-  toast(`“${h.real}” will be written as ${h.fake ? `“${h.fake}”` : "its pseudonym"} on the next save`
-    + (n > 1 ? ` — all ${n} of them here` : "") + ". Noted; the walk moves on.");
-  renderLeakStatus();
+  settleName(h.real, h.fake, "Noted; the walk moves on.");
   if (continuePageSweep()) return;
   const left = liveLeaks();
   if (!left.length) { stepLeak(1, { auto: true }); return; }
@@ -6149,6 +6198,10 @@ function showKeepMenu(target, x, y) {
   // The narrowest keep: this occurrence, and no other. Already one, or already
   // kept for the whole case (or by the master), and there is nothing narrower
   // to ask for.
+  // A name standing unfaked can be faked from here too, as the names bar's
+  // "fake it" fakes it: it was the one answer a right click could not give.
+  $("keep-menu-fake-it").hidden = !t.leak || isSettled(t.real) || !t.fake;
+  $("keep-menu-fake-it").textContent = `Fake it — write \u201c${t.fake}\u201d on the next save`;
   $("keep-menu-here").hidden = !!t.here || !!c || master;
   $("keep-menu-no").hidden = c === "no" || master;
   $("keep-menu-never").hidden = c === "never" || master;
@@ -6501,6 +6554,11 @@ $("keep-menu-here").addEventListener("click", () => {
   if (!t) return;
   if (t.span) keepSpanHere(t.span);
   else if (t.range) keepRangeHere(t.range, t.real);
+});
+$("keep-menu-fake-it").addEventListener("click", () => {
+  const t = keepMenuFor;
+  hideKeepMenu();
+  if (t) settleName(t.real, t.fake);
 });
 $("keep-menu-no").addEventListener("click", () => keepChosen("no"));
 $("keep-menu-never").addEventListener("click", () => keepChosen("never"));
