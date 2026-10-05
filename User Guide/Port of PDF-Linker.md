@@ -11,6 +11,16 @@ memorandum (10/10 match, identical keys). The port includes:
   honors sentence punctuation, paragraph breaks, name-connector words
   (`of`, `the`, `and`, `&`, `de`, `la`, `du`, `von`, `van`), and corporate
   suffixes (`Co.`, `Inc.`, `Corp.`, `Ltd.`, `Ass'n.`).
+
+  Signal words in front of the name (`See`, `In`, `the`) are dropped. Court
+  and jurisdiction words (`State`, `California`, `Federal`, `Supreme`,
+  `Court`) are dropped only when their own period or comma sets them off from
+  the name (`as held by the Supreme Court. Smith v. Jones`, `In California,
+  Smith v. Jones`). Otherwise they begin it: `State of California v. Superior
+  Court (Flynn) (2016) 4 Cal.App.5th 94`, `State Farm Mut. Auto. Ins. Co.`,
+  `California Teachers Assn.`, `Federal Deposit Ins. Corp.`. Before this, the
+  first of those went unlinked because every word of its plaintiff was
+  stripped, and the rest lost their first word.
 - All 29 California codes (long forms, CSM short forms, and bare uppercase
   abbreviations such as `CCP § 664.6`, `PEN § 187`, `BPC § 17200`), section
   number shapes including `437c` and `1714.45(b)(1)`.
@@ -148,7 +158,9 @@ memorandum (10/10 match, identical keys). The port includes:
   Marriage of Davis` — gets the same link the full citation got. The fragment
   may be the plaintiff's first word, any leading run of the plaintiff's name,
   the whole case name, the short name a court announced in a parenthetical
-  (`... 222 Cal.App.4th 924 (Market Lofts)`), or the defendant where the
+  (`... 222 Cal.App.4th 924 (Market Lofts)`), the real party in interest a
+  writ caption names (`Flynn` for `State of California v. Superior Court
+  (Flynn)`, which also answers `Flynn, supra`), or the defendant where the
   plaintiff is an institution the short form is never built from (`People v.
   Smith` is `Smith`). Signals and pin cites caught inside the same italic run
   (`see Aguilar`, `Market Lofts, supra`) are stepped over, and the longest

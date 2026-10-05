@@ -641,6 +641,19 @@ const SIGNAL_PREFIXES = new Set([
   "see", "cf", "cf.", "per", "in", "but", "compare", "accord", "e.g.",
   "also", "n", "of", "the", "and", "to", "by", "for", "on", "with", "from",
   "as", "if", "when", "while", "since", "because", "though", "although",
+]);
+
+// Words that name a court or a jurisdiction. Walk-back collects them when they
+// end the sentence or clause before a case name ("as held by the Supreme
+// Court. Smith v. Jones", "In California, Smith v. Jones": "Court." passes as
+// an abbreviation and a comma never stops the walk). But they also OPEN real
+// party names: "State of California", "State Farm Mut. Auto. Ins. Co.",
+// "California Teachers Assn.", "Federal Deposit Ins. Corp.". Stripped like
+// SIGNAL_PREFIXES, "State of California v. Superior Court (Flynn) (2016) 4
+// Cal.App.5th 94" lost every word of its plaintiff and was not linked at all.
+// So these are stripped only through a run that ends in its own period or
+// comma, which is what sets a lead-in off from the name that follows it.
+const LEAD_IN_WORDS = new Set([
   "court", "supreme", "federal", "state", "california",
 ]);
 
@@ -904,19 +917,32 @@ function walkBackForName(text, vPos, minPos = 0) {
   if (!tokens.length) return null;
   tokens.reverse();
 
-  // Strip leading signal words, but preserve "In re"
-  while (tokens.length) {
-    const first = tokens[0].tok
-      .toLowerCase()
-      .replace(/[(.,;:"']+$/, "")
-      .replace(/^[(.,;:"']+/, "");
-    if (SIGNAL_PREFIXES.has(first)) {
-      if (first === "in" && tokens.length > 1) {
-        const second = tokens[1].tok.toLowerCase().replace(/[,.;:]+$/, "");
-        if (second === "re") break;
-      }
-      tokens.shift();
-    } else break;
+  const bareWord = (tok) => tok
+    .toLowerCase()
+    .replace(/[(.,;:"']+$/, "")
+    .replace(/^[(.,;:"']+/, "");
+  for (;;) {
+    // Strip leading signal words, but preserve "In re"
+    while (tokens.length) {
+      const first = bareWord(tokens[0].tok);
+      if (SIGNAL_PREFIXES.has(first)) {
+        if (first === "in" && tokens.length > 1) {
+          const second = tokens[1].tok.toLowerCase().replace(/[,.;:]+$/, "");
+          if (second === "re") break;
+        }
+        tokens.shift();
+      } else break;
+    }
+    // A court or jurisdiction lead-in goes only through its closing period or
+    // comma (see LEAD_IN_WORDS); without one, those words begin the name.
+    let cut = -1;
+    for (let i = 0; i < tokens.length; i++) {
+      const w = bareWord(tokens[i].tok);
+      if (!LEAD_IN_WORDS.has(w) && !SIGNAL_PREFIXES.has(w)) break;
+      if (/[.,]$/.test(tokens[i].tok)) cut = i;
+    }
+    if (cut < 0) break;
+    tokens.splice(0, cut + 1);
   }
   if (!tokens.length) return null;
 
@@ -947,6 +973,42 @@ function shortName(plaintiff) {
   p = p.replace(SHORT_NAME_PREFIX_RE, "");
   const parts = p.split(/\s+/);
   return parts[0] ? parts[0].replace(/[,.;:]+$/, "") : p;
+}
+
+// How many words open `words` as a court or jurisdiction would (LEAD_IN_WORDS,
+// with the connectors between them): 1 for "State Farm Mut. Auto. Ins. Co.",
+// 3 for "State of California". 0 when the first word is not one of them.
+function leadInLength(words) {
+  const bare = (w) => w.toLowerCase().replace(/[,.;:]+$/, "");
+  if (!words.length || !LEAD_IN_WORDS.has(bare(words[0]))) return 0;
+  let n = 0;
+  while (n < words.length &&
+         (LEAD_IN_WORDS.has(bare(words[n])) || NAME_CONNECTORS.has(bare(words[n])))) n++;
+  return n;
+}
+
+// The name a supra may use besides the first word. "State Farm, supra" reaches
+// SUPRA_RE as "Farm, supra", since its capture is one word; and a writ case is
+// short-cited by its real party in interest, "Flynn, supra" for "State of
+// California v. Superior Court (Flynn)".
+function extraSupraNames(cite) {
+  const out = [];
+  if (cite.plaintiff) {
+    const words = cite.plaintiff.split(/\s+/);
+    const n = leadInLength(words);
+    if (n && n < words.length) out.push(shortName(words.slice(n).join(" ")));
+  }
+  const rp = realPartyName(cite.defendant);
+  if (rp) out.push(shortName(rp));
+  return out;
+}
+
+// The real party in interest a writ caption names after the court: "Superior
+// Court (Flynn)" -> "Flynn". Null for any other defendant.
+const REAL_PARTY_RE = /\bCourt\s*\(([A-Z][^()\d]*)\)$/;
+function realPartyName(defendant) {
+  const m = defendant ? REAL_PARTY_RE.exec(defendant.trim()) : null;
+  return m ? m[1].trim() : null;
 }
 
 // A parenthetical directly after a full citation that ANNOUNCES the short
@@ -1693,8 +1755,9 @@ function findSupraCitations(text, fullCitesInOrder) {
   // decision is still WL-only.
   const seen = new Map();
   for (const c of fullCitesInOrder) {
-    if (c.kind === "case" && c.short && !seen.has(c.short)) {
-      seen.set(c.short, c);
+    if (c.kind !== "case" || !c.short) continue;
+    for (const name of [c.short, ...extraSupraNames(c)]) {
+      if (name && !seen.has(name)) seen.set(name, c);
     }
   }
 
@@ -1932,8 +1995,14 @@ function partyAliases(name) {
 
   const words = noCorp.split(/\s+/);
   if (!words.length) return out;
-  if (GENERIC_PARTY_WORDS.has(normalizeParty(words[0]))) return out;
-  for (let n = 1; n < Math.min(words.length, 5); n++) {
+  // A name that opens with a court or jurisdiction word is still distinctive
+  // from its next word on: "State Farm" and "California Teachers" are how
+  // those cases are short-named, while "State of California" has no such word.
+  const lead = leadInLength(words);
+  if (GENERIC_PARTY_WORDS.has(normalizeParty(words[0])) && !(lead && lead < words.length)) {
+    return out;
+  }
+  for (let n = lead + 1; n < Math.min(words.length, 5); n++) {
     // A prefix ending on a generic word adds nothing the shorter one didn't
     // already say ("Farmers' Insurance" over "Farmers'"), so skip it — but
     // keep going, because the word after it may well be distinctive.
@@ -1962,6 +2031,13 @@ function caseAliases(cite) {
   if (cite.parenName) {
     for (const a of partyAliases(cite.parenName)) add(a);
     add(normalizeParty(cite.parenName));
+  }
+  // A writ case goes by its real party in interest: "*Flynn*" for "State of
+  // California v. Superior Court (Flynn)".
+  const realParty = realPartyName(cite.defendant);
+  if (realParty) {
+    for (const a of partyAliases(realParty)) add(a);
+    add(normalizeParty(realParty));
   }
   out.delete("");
   return out;
