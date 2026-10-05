@@ -1503,9 +1503,11 @@ function setKey(parsed) {
 function handOwner() { return folderName || fileName ? valuesStoreKey() : null; }
 // …and said, where the key is already being talked about, when the key in hand
 // is not the open folder's own, so that none of its flags come off under it.
-function notOwnKeyNote() {
+// `remedy`: what takes them off — the case's own key loaded by hand, or, where
+// the folder's key file could not be read, that file read again.
+function notOwnKeyNote(remedy = "load this case's own key with Load key… to take them off.") {
   if (!key || !folderName || TD.keyAnswersFlags(keyFolder, valuesStoreKey())) return "";
-  return ` The key in hand was not read from ${folderName} or chosen with it open, so none of the flags here come off under it — load this case's own key with Load key… to take them off.`;
+  return ` The key in hand was not read from ${folderName} or chosen with it open, so none of the flags here come off under it — ${remedy}`;
 }
 
 keySelect.addEventListener("change", () => {
@@ -1743,12 +1745,18 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   folderLight = light;
   // Not in the Text Files folder: its remedy is the folder above (openFolder's
   // offer bar), and every case's Text Files shares one flag list by name.
-  const ownNote = () => (looksLikeTextFiles(h, found) ? "" : notOwnKeyNote());
+  const ownNote = (remedy) => (looksLikeTextFiles(h, found) ? "" : notOwnKeyNote(remedy));
   if (found.keyHandle) {
     try {
       const f = await found.keyHandle.getFile();
       await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, folderName, { quiet, owner: own });
-    } catch (e) { toast("The folder's key could not be read: " + (e.message || e) + ownNote(), { error: true }); }
+    } catch (e) {
+      // Load key… on a file Excel is holding fails the same way: the remedy
+      // here is the file read again, by opening the folder once it can be.
+      const msg = String(e.message || e);
+      const note = ownNote("close the key in Excel, or replace a damaged one, and open the folder again to take them off.");
+      toast("The folder's key could not be read: " + msg + (note && !/[.!?]$/.test(msg) ? "." : "") + note, { error: true });
+    }
   } else if (!quiet) {
     const note = ownNote();
     toast("No pseudonym_key.xlsx in " + folderName + (note ? " — the documents read under the key in hand." + note : " — the documents will read in their fakes."), note ? { ms: 9000 } : undefined);
@@ -1867,10 +1875,11 @@ async function attachKeyForFile(handle) {
       } catch (e) { toast("Could not reopen " + at.dir.name + ": " + (e.message || e), { error: true }); return; }
     }
     const ask = askBeforeFolder();
-    await adoptFolder(at.dir, { quiet: true, light: ask });
+    const found = await adoptFolder(at.dir, { quiet: true, light: ask });
     if (doc) retranslate();
     markDocList();
-    const note = notOwnKeyNote();
+    // Left out of the Text Files folder, as adoption leaves it out (ownNote).
+    const note = looksLikeTextFiles(at.dir, found) ? "" : notOwnKeyNote();
     if (!ask) {
       toast(key
         ? `${at.dir.name} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}, key attached${leaks ? " with its LEAKS worksheet" : ""}.` + note

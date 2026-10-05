@@ -724,14 +724,17 @@ app, which routes it to the reader tab.
   Values.txt` — and a `New Real Values.txt` on disk still listing it from
   before the run does not bring it back. **Only the case's own key answers
   them**: the one read from the folder's `pseudonym_key.xlsx`, or one loaded
-  (**Load key…**, a key dropped on its own) or chosen in the Key list while
-  the folder is open (with no folder open, while the lone document whose
-  list it is is open). The key in hand stays when a folder with no key file —
-  or one Excel is holding — is opened, and the documents read under it as
-  before, but another case's key that happens to bind the same name takes
-  none of this folder's flags off; the reader says so where it mentions the
-  key, and loading the case's own key with **Load key…** takes them off. A key
-  dropped together with a document, and the key offered when the reader
+  (**Load key…**, a key dropped on its own or with a PDF or a workbook) or
+  chosen in the Key list while the folder is open (with no folder open, while
+  the lone document whose list it is is open). The key in hand stays when a
+  folder with no key file — or one Excel is holding — is opened, and the
+  documents read under it as before, but another case's key that happens to
+  bind the same name takes none of this folder's flags off; the reader says so
+  where it mentions the key (not in a Text Files folder, whose case folder is
+  the one to open), and loading the case's own key with **Load key…** takes
+  them off — or, where the folder's key file could not be read, closing it in
+  Excel and opening the folder again. A key dropped together with an export
+  (a `.txt` or `.LEAK` document), and the key offered when the reader
   starts, belong to no folder until loaded or chosen like that: use **Load
   key…** with it (choosing the key already shown in the list does nothing; to
   go through the list, choose "(no key)" and back — never another key, which

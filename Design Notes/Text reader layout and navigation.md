@@ -579,13 +579,15 @@ list is stored under (`valuesStoreKey()`, the flag store's own identity):
 - adoption reading the folder's key file sets it to that folder (`own`, taken
   as adoption names the folder, so an adoption overtaken by another still
   files its key as its own folder's and not the later one's);
-- a key loaded by hand (Load key…, a key dropped ON ITS OWN) or chosen in the
-  Key list sets it to the list open at that moment (`handOwner`): the case
-  folder's, or with no folder open the lone document's, or none with nothing
-  open;
-- a key dropped TOGETHER WITH a document (`.txt`/`.LEAK`) belongs to none: the
-  drop loads the key first and opens the document after, while the folder open
-  is still the last one, and the document may bring its own folder in;
+- a key loaded by hand (Load key…, a key dropped ON ITS OWN or with a PDF or
+  a workbook) or chosen in the Key list sets it to the list open at that
+  moment (`handOwner`): the case folder's, or with no folder open the lone
+  document's, or none with nothing open;
+- a key dropped TOGETHER WITH an export (`.txt`/`.LEAK`) belongs to none: the
+  drop loads the key first and opens the export after, while the folder open
+  is still the last one, and the export may bring its own folder in. A PDF
+  or a LEAKS or master workbook brings no folder in, so a key dropped with
+  one is loaded by hand into the folder open, as one dropped alone is;
 - adoption that finds no key file, or cannot read it, leaves it where it was —
   another folder, or none;
 - the key offered at start belongs to none (it is initialised so, and boot
@@ -607,10 +609,16 @@ bar (which no longer calls the key "the folder's"), and "Key loaded" —
 not its own: none of the flags there come off under it, and loading the
 case's own key with Load key… takes them off. It points at the case's OWN key,
 not the key in hand: loading the key in hand by Load key… would make another
-case's key the folder's. Adoption leaves it out where the folder picked looks
-like the Text Files subfolder (`looksLikeTextFiles`): there the remedy is the
-folder above, which `openFolder`'s offer bar already says, and a key loaded
-into it would own the one list every case's Text Files folder shares.
+case's key the folder's. Where the folder's key file could not be read, the
+remedy it names is that file read again — closed in Excel (or a damaged one
+replaced) and the folder opened again — since Load key… on a file Excel is
+holding fails the same way; and it adds the full stop an error message without
+one lacks. Adoption, and the lone-file attach after it (on the `found` that
+adoption returns), leave it out where the folder picked looks like the Text
+Files subfolder (`looksLikeTextFiles`): there the remedy is the folder above,
+which `openFolder`'s offer bar already says, and a key loaded into it would own
+the one list every case's Text Files folder shares. Without the note each of
+these toasts and the offer line is main's word for word.
 
 Left as they are, on purpose (each keeps a flag main would have dropped,
 never the other way):
@@ -665,3 +673,13 @@ open, where main's drop repainted the marks (`paintHighlights`), which starts
 the folder sweep, and the sweep counted Case A's "Jane Roe" standing in B's
 export. Dropping nothing, the branch has not swept yet when the probe looks;
 the paint of the first document opened sweeps in both.
+
+Measured a third time after the note was left out of the lone-file attach in a
+Text Files folder and the unreadable-key remedy reworded: the parity probe's 56
+scenarios and its 69 later ones (PWA tabs among them), each seeded both ways.
+The lone-file toast and the ask-first offer line from a remembered Text Files
+folder are main's word for word, and so is the toast of a Text Files folder
+picked in a new PWA tab; the "could not be read" line of a key that is not a
+zip reads with its full stop. Key, Key list, library and document text match
+main throughout; the status line of the overlapping adoptions above, and the
+note's longer toast, are the only other differences.
