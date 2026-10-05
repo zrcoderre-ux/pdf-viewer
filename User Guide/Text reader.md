@@ -678,8 +678,11 @@ app, which routes it to the reader tab.
   therefore looks for the name as it reads in the open document, and for
   whatever the key writes instead of it in the forty files it has not opened
   — a name standing in the clear in one export and faked in another is found
-  in both. Esc closes; 🔍 Find in the tools rail opens it over whatever is
-  selected.
+  in both. **With Show fakes on, a real name is found only where it stands
+  unfaked** — a leak, or a value kept where it stands — since the screen is
+  then the pseudonyms and a hit on one would mark a name the key did its job
+  on; the rest of the folder is counted the same way. Esc closes; 🔍 Find in
+  the tools rail opens it over whatever is selected.
 - **Replace, under Find (Ctrl+H).** **Replace…** on the find bar, or
   **Ctrl+H**, opens a second row: what to put in place of the hit.
   **Replace** (or Enter in that box) replaces the hit in front and stands on

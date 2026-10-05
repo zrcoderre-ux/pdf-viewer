@@ -70,7 +70,13 @@ earlier hits' nodes and offsets still hold. Match case (`#fb-case`, Alt+C)
 is `buildFindMatcher(values, { caseSensitive })`, which drops the `i` flag;
 `findMatcherFor` is the one place the page, the folder scan and Replace get
 their matcher, and the folder scan's `findScanFor` carries the flag so a
-toggle reads the folder again.
+toggle reads the folder again. `findNeedles` adds the key's fake of the query
+(`forwardText`) only with Show fakes off; on, the screen is the disk text, so
+the query is looked for as typed and a real name is hit only where it stands
+unfaked, in the page and in the folder count alike. `findScanFor.fakes`
+carries that view, and a scan whose question went stale while it ran
+(`findScanStale`, the view or the key turned) starts again rather than
+keeping counts that would walk into documents with no hit on screen.
 
 **A typed real name, and only a typed one** (`convertTypedReals`): the
 debounced converter marks a real name standing in a page's plain text as a
