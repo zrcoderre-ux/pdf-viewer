@@ -374,18 +374,49 @@ whose line lies more than a line beyond the pointer's vertical travel):
   (op-wm.pdf: 56% of the page, main under 1%), and Redact (text) boxes the
   words between (30-65 boxes over body text, where main made one box the
   size of the page).
+- A table written column by column, or a form's caption boxes written after
+  its body, as the drag's end. order.pdf p2, a drag right across the gutter
+  of its table (`p2.bd.gut.R400s16`): 368 characters, 330 outside (main 161,
+  144 outside). MC-050 p1, a drag up and left that ends on the "BRANCH NAME"
+  box (`p1.bd.bl.UL400s16`): 1,579, 1,318 outside (main 45, 11 outside; in
+  one of three later runs main too took 1,318 outside).
+- The grey under a document shorter than the window (`<body>`) is a blank
+  press as well, so the same holds from there. APP-005 at 75%, a drag up and
+  right from under the page (`p1.bd.gb30l.UR400s16`) is anchored on the
+  form's "please press the Clear This Form button" line, which is written
+  after the body, and takes 688 characters, 458 outside, where main took
+  none. That is 3 of the 150 rows from that grey, whose accidents fell from
+  37 to 6.
+- A double-click drag begun in blank space: its second press is a blank
+  press like the first. On CIV-110 p1, from under the footer and dragged up:
+  2,637 characters, 2,512 outside (main 107, none). Over the 108 double- and
+  triple-click drags from blank spots on select.pdf p2-p3 and CIV-110 p1,
+  main had 62 accidents (478-5,565 characters from the margins and the grey)
+  and here there are 4, those two the only ones main did not have.
+- Autoscroll that carries the drag's end past a caption written after the
+  body: select.pdf p1 `au.bl.dnOut` 6,105 characters, 1,014 outside (main
+  601, none).
 
 Accidents (over 120 characters outside the pointer's travel, any text from a
 press that never moved 4px, or a Redact box outside the travel or the size of
-the page) fell over a verifier's sweep of 26,666 viewer rows (select.pdf at
-50%, 150% and 200%, two-up at 75% and 150%, CIV-110, MC-050, table2, cols2,
-op-wm, brief, r2, order.pdf, Redact on three of them, autoscroll and wheel)
-from 12,435 on main to 883. 306 rows are worse than main, the cases above:
-of a verifier's 304, 271 a page's written order and 24 a drag let go of on a
-watermark.
+the page) fell over a verifier's sweep of 27,018 viewer rows (select.pdf at
+50% and 150%, two-up at 75% and 150%, CIV-110, APP-005 at 75%, MC-050, table2
+at 100% and 50%, cols2, op-wm, brief, r2, order.pdf, Redact on three of them,
+and autoscroll) from 12,394 on main to 791: 11,793 rows better than main, 190
+accidents main did not have. 283 rows are worse than main, all the cases
+above: in 266 both ends are words the pointer was on and what lies between is
+the page's written order; the other 17 end on a span of bare space or at the
+toolbar's edge, where a point over the toolbar is read. Run three more times,
+main gave an accident on 95 of those 283 rows at least once and on 71 every
+time (taking less than here, but over the line): main's anchor there was
+wherever the browser's first reading landed, and on CIV-110 p1 a drag 220px
+up from under the footer (`p1.bd.bm.U220s12`, main 322 characters in the
+sweep) took 2,441, 2,300 outside, anchored on the same footer, in 5 of 6
+fresh runs on main. This design's answer hardly varies: the same length
+again, within two characters, in 233 of the 262 rows re-run.
 Taken by where the press is: for presses under all of a page's text dragged
-up, main 587 accidents and here 170 of 1,350 rows, 33 of them here only; for
-presses above the text dragged down, main 308 and here 69 of 612, 13 here
+up, main 766 accidents and here 229 of 1,760 rows, 44 of them here only; for
+presses above the text dragged down, main 395 and here 72 of 812, 12 here
 only. The rows here only are on pages with a footer written first or a header
 written last.
 
@@ -417,7 +448,12 @@ resolved past it: the page turned blue under a drag that took one line) and
 without any rect over a quarter of the page both ways (a layer or canvas that
 a selection crossing a page sweeps up). Text turned across the page, a
 watermark or a large stamp, has such a box too: it is not tinted and not
-marked, and Redact (text) says so and points to Area (`turnedTextIn`).
+marked. Redact (text) says so, points to Area (`turnedTextIn`) and drops the
+selection, as it does after marking. Left in place, that untinted
+selection was reported again by every later `mouseup` in Redact (text): each
+click on a toolbar button, which keeps a selection, or on the toolbar's
+background (op-wm.pdf, a selection of the "CONFIDENTIAL" watermark: three
+toasts for three clicks, now one).
 
 The selection bar (`updateCitePopover`) is placed as before, from the
 selection's last client rect, the end-of-content block's included. Placed
@@ -462,16 +498,38 @@ sweeps (17,116 rows over ten configurations) those were the last presses under
 `mousedown`), and a drag begun on a word that strays onto the bar is no press
 on it, so it meets the bar as before.
 
+A click on the chrome's own background or its labels (the toolbar's empty
+stretch, "of N" by the page number, the side rail, the side panel's title or
+the empty part of its page list) leaves a selection on the page in place,
+with its bar: Chrome moves no selection on a press in `user-select: none`
+content. Main's press there began a new, empty selection in the chrome, so it
+dropped the page's (probe `p-chromeclick`: 4 and 34 characters kept in all 10
+cases, none on main; main plus only this CSS does the same as here). The
+toolbar's and the rails' buttons, a thumbnail, a tools-rail label and the
+file name kept the selection on main too. A click on the page drops it; Escape
+hides the bar and keeps the selection. No listener was added to restore main's
+drop there: it would be new logic beside every chrome control, and a click on
+the page drops a selection as it always did.
+
 Ctrl+A is the browser's, but with the chrome unselectable it no longer starts
 in the toolbar: it takes the pages' text (select.pdf: 13,141 characters from
 page 1, where main took 13,944 from the toolbar's labels), so it is a page
 selection like any other, tinted, with the selection bar and a record citation
 ("(Opp. at pp. 1:1-6:28.)"). The bar is placed by `updateCitePopover`'s own
 rule, above the selection's first line when its end is off screen, and no
-higher than 8px from the window's top: there it covers the lower half of the
-toolbar's Download and Save as buttons until a click dismisses the
-selection or Escape hides the bar. Main showed no tint and no bar, since its
-selection began outside the pages.
+higher than 8px from the window's top: there it covers part or all of the
+toolbar's Download and Save as buttons (the lower half at scroll 0, the bar at
+27-63px; all of Download, 10-42px, once the page is scrolled and the bar
+stands at 8-44px) until a click on a page dismisses the selection or Escape
+hides the bar. Main showed no tint and no bar, since its selection began
+outside the pages. On a long document that costs time while the bar shows:
+`updateCitePopover` runs on every scroll and reads the whole range's client
+rects. long300.pdf (300 pages, 916k characters): 54ms a scroll event against
+3ms on main, thirty wheel steps 13.0s against 9.3s; Ctrl+A itself 2.3s
+against 1.7s, painting 13,243 tint divs (heavy.pdf, 63 pages: wheel 12.0s
+against 9.0s). Escape or a click on the page ends it. Coalescing the scroll
+listener to a frame would not help: the browser sends one scroll event a frame
+already, and each reads the whole range.
 
 In the text reader the PDF pane is as it was, except that a press on its grey
 around the pages (`#pdf-pane` itself, its scrollbar aside) or on a page's

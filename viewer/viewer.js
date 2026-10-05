@@ -4596,9 +4596,13 @@ function redactCurrentSelection() {
   }
   if (added) sel.removeAllRanges();
   // Text turned across the page (a watermark, a stamp) has a box that size
-  // too, and is left unmarked: said, so it is not taken for marked.
+  // too, and is left unmarked: said, so it is not taken for marked. The
+  // selection goes too, as after a mark: its turned text is not tinted
+  // (pageSized), and kept, every later mouseup in Redact (text), a click on
+  // the toolbar's background or a button among them, said it again.
   if (wide && turnedTextIn(range)) {
     toast("Text turned across the page (a watermark or a stamp) was not marked from the selection: mark it with Area.", { timeout: 9000 });
+    sel.removeAllRanges();
   }
   return added;
 }

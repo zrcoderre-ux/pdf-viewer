@@ -49,20 +49,26 @@ In addition to citation linking, the viewer supports:
     body takes the body above the pointer, even a short one across the gap
     between two pages at a small zoom; a drag down from above a header that
     the PDF wrote after the body takes the body below the pointer, to the
-    page's end. One let go of on such a footer, header or caption takes the
-    body in between, and on a two-column page a drag that reaches both
-    columns takes the rest of the one and the top of the other. To take lines
-    under a header or above a footer, begin the drag on the first word. A drag
-    that never reaches a word selects nothing. A drag begun on a word,
-    Shift+click and double and triple clicks work as before, and a drag from a
-    word that leaves the page, or runs onto the selection bar, can still run
-    on past it.
+    page's end. One let go of on such a footer, header or caption, or on a
+    table the PDF wrote column by column, takes the text in between, and on a
+    two-column page a drag that reaches both columns takes the rest of the
+    one and the top of the other. To take lines under a header or above a
+    footer, begin the drag on the first word. A drag that never reaches a
+    word selects nothing, and a double-click drag begun in blank space is a
+    blank drag like any other. A drag begun on a word, Shift+click, and double
+    and triple clicks on a word work as before, and a drag from a word that
+    leaves the page, or runs onto the selection bar, can still run on past
+    it.
   - The toolbar, rails, side panel, menus and notices are never part of a
     selection; boxes to type in, a comment's text and the Table of
-    Authorities can still be selected and copied. So **Ctrl+A** takes the
-    pages' text alone: it is tinted and gets the selection bar like any
-    selection on a page, and the bar can sit over the toolbar's Download and
-    Save as buttons until you click a page or press Escape.
+    Authorities can still be selected and copied. A click on their
+    background or a label no longer clears a selection on the page (it used
+    to); click the page to clear it, or press Escape to hide its bar. So
+    **Ctrl+A** takes the pages' text alone: it is tinted and gets the
+    selection bar like any selection on a page, and the bar can sit over the
+    toolbar's Download and Save as buttons until you click a page or press
+    Escape. On a document of a few hundred pages, scrolling is slower while
+    that bar shows.
   - A PDF opened in a **background tab** of the app (several files or a case
     folder opened at once) has selectable text when you switch to it. pdf.js
     measures a "minimum font size" once per window, and a hidden tab measured
