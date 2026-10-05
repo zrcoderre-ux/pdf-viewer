@@ -7,6 +7,26 @@ In addition to citation linking, the viewer supports:
   past 100%, the page is no longer stretched to fit and its type stays crisp.
   Moving the window to another screen, or changing the browser's zoom, draws
   the pages again at the new resolution.
+- **A zoomed page can be scrolled clear of the panels** — a page zoomed wider
+  than the room between the tools rail and the side rail (or an open panel)
+  scrolls sideways until its right edge meets the side rail or the panel. A
+  page that only reaches into the margin beside them does not scroll; one that
+  reaches under them gets a short sideways scroll, such as a letter-size page
+  at 160% in a 1280-pixel window, and where one page is wider than the rest,
+  such as a landscape exhibit, every page scrolls as far as it. With one page
+  to a row the view keeps its place sideways: opening or closing the panel,
+  collapsing the tools rail, zooming or resizing the window keeps the same part
+  of the page in the middle, or the edge you were at (with a landscape page
+  among portrait ones that place is the widest page's, so after scrolling
+  across it a narrower page can stand further left). A document opens at the
+  page's left edge, where a pleading's line numbers are, and so does a switch
+  back to one page to a row. With two pages side by side, opening the panel or
+  collapsing the tools rail leaves the scroll position as it is, so the panel
+  opens over the pages and they shift when the rail collapses; a zoom keeps
+  the part of the pages at the window's centre. **←** and **→** turn the page;
+  where the pages are too wide for the window they scroll sideways, and with
+  one page to a row, at the edge, a fresh press turns the page and keeps that
+  edge in view.
 - **Text selection and copy** — text is selectable as soon as a page is
   shown: click and drag, and a small toolbar opens under the selection with
   **Highlight**, **Underline**, **Strikethrough**, **Comment**, **Copy** and
@@ -16,6 +36,39 @@ In addition to citation linking, the viewer supports:
   - A drag may **start on a citation link** (or a link the PDF carries): once
     the pointer moves, it selects the words under the link, as a drag begun
     anywhere else does. A click that stays put still opens the link.
+  - A **click in blank space** (the margin, between lines, the grey around and
+    below the pages, the selection bar's edge between its buttons) selects
+    nothing, even if the mouse wobbles; it only clears the selection there
+    was. A drag **begun in blank space** selects nothing until the pointer is
+    on a word, and then runs from that word to the last word the pointer was
+    on. Between the two it takes the text in the order the PDF wrote it, as
+    any drag does. On most pages that is the text the pointer passed over, but
+    not where the PDF wrote the page out of order, and the usual case is a
+    running header or footer: a drag begun beyond one crosses it first and
+    starts there. A drag up from under a footer that the PDF wrote before the
+    body takes the body above the pointer, even a short one across the gap
+    between two pages at a small zoom; a drag down from above a header that
+    the PDF wrote after the body takes the body below the pointer, to the
+    page's end. One let go of on such a footer, header or caption, or on a
+    table the PDF wrote column by column, takes the text in between, and on a
+    two-column page a drag that reaches both columns takes the rest of the
+    one and the top of the other. To take lines under a header or above a
+    footer, begin the drag on the first word. A drag that never reaches a
+    word selects nothing, and a double-click drag begun in blank space is a
+    blank drag like any other. A drag begun on a word, Shift+click, and double
+    and triple clicks on a word work as before, and a drag from a word that
+    leaves the page, or runs onto the selection bar, can still run on past
+    it.
+  - The toolbar, rails, side panel, menus and notices are never part of a
+    selection; boxes to type in, a comment's text and the Table of
+    Authorities can still be selected and copied. A click on their
+    background or a label no longer clears a selection on the page (it used
+    to); click the page to clear it, or press Escape to hide its bar. So
+    **Ctrl+A** takes the pages' text alone: it is tinted and gets the
+    selection bar like any selection on a page, and the bar can sit over the
+    toolbar's Download and Save as buttons until you click a page or press
+    Escape. On a document of a few hundred pages, scrolling is slower while
+    that bar shows.
   - A PDF opened in a **background tab** of the app (several files or a case
     folder opened at once) has selectable text when you switch to it. pdf.js
     measures a "minimum font size" once per window, and a hidden tab measured

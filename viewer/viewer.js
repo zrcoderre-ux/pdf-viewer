@@ -1840,6 +1840,9 @@ function resetForNewDocument() {
   // New document → forget the previous one's per-page word counts, which are
   // what auto-scroll paces itself by.
   autoScroll.resetDocument();
+  // New document → in one column it opens at its left edge (scrollX 0),
+  // where a pleading's line numbers are.
+  Object.assign(sideways, { mid: 0, edge: "start" });
   // Clear stashed bytes from any prior PDF. If the new load fails, the
   // Download button has nothing stale to save.
   pdfBytes = null;
@@ -2149,7 +2152,12 @@ async function renderAllPages() {
 
   forgetPageDrawing();
   Annots.detachAll();
+  // A smooth jump still under way was headed among the old pages, and the
+  // sideways hold is asked once a frame while the pages land.
+  sideways.jump = false;
+  holdWhileBuilding(signal);
   pagesEl.innerHTML = "";
+  measurePageWidths();
   totalLinks = 0;
   _footerByPage.clear();
   pageStructures.clear();
@@ -2159,12 +2167,27 @@ async function renderAllPages() {
   // Pass 1a: every page, in place and sized, drawn as it nears the screen.
   // We hold per-page DOM refs so the passes below can fill the right divs.
   const pageRefs = [];
-  for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
-    if (signal.aborted) return;
-    const refs = await buildPageShell(pageNum);
-    if (signal.aborted) return;
-    attachPageTools(refs);
-    pageRefs.push(refs);
+  try {
+    for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
+      if (signal.aborted) return;
+      const refs = await buildPageShell(pageNum);
+      if (signal.aborted) return;
+      attachPageTools(refs);
+      pageRefs.push(refs);
+    }
+  } finally {
+    // Landed, abandoned or stopped by a page that failed to load: the hold's
+    // frame loop ends and the observer is back.
+    if (sideways.building === signal) { sideways.building = null; watchSideways(); }
+  }
+  // Every page in place, the column as wide as it will be: held once more.
+  // A page being read that fits the room is held at the left edge from here,
+  // as at a new document, so a zoom past the room or a room narrowed past it
+  // keeps its left edge in view and puts its right side out.
+  holdSideways();
+  if (sidewaysHeld()) {
+    const read = pageWrapperFor(visiblePageNumber());
+    if (read && read.getBoundingClientRect().width <= sidewaysRoom().width + 1) sideways.edge = "start";
   }
   if (Find) Find.pagesRebuilt();
   // The whole document is on screen and measurable, text or not.
@@ -2788,6 +2811,7 @@ async function buildPageShell(pageNumber) {
   wrapper.dataset.pageNumber = String(pageNumber);
   wrapper.style.width  = `${viewport.width}px`;
   wrapper.style.height = `${viewport.height}px`;
+  notePageWidth(pageNumber, viewport.width);
 
   // Empty until the page comes near the screen (drawPage): a canvas with no
   // size holds no bitmap, and the wrapper's own size holds the page's place.
@@ -2992,13 +3016,15 @@ function attachPageTools(refs) {
 // done here for every page.
 const textLayerEnds = new Map(); // textLayer div -> its endOfContent div
 let prevSelRange = null;
+let blankPressEvent = null; // the last press in a page's blank space, which the viewer took
 function guardSelection(textLayerDiv) {
   const end = document.createElement("div");
   end.className = "endOfContent";
   textLayerDiv.appendChild(end);
   textLayerEnds.set(textLayerDiv, end);
   textLayerDiv.addEventListener("mousedown", (e) => {
-    if (e.button !== 0) return;
+    // (A press in the page's blank space is the viewer's own: see below.)
+    if (e.button !== 0 || e === blankPressEvent) return;
     textLayerDiv.classList.add("selecting");
     document.body.classList.add("text-dragging");
   });
@@ -3144,6 +3170,215 @@ pagesEl.addEventListener("mousedown", (e) => {
   };
   document.addEventListener("mouseup", onUp, true);
 });
+
+// ── A press in a page's blank space ──
+//
+// A text layer is spans floating in an empty box, and a press that lands on
+// the box (the margin, the gap between two lines, the space after a short
+// line), on the page's own box or canvas, or on the grey around the pages has
+// no word under it. The browser put the caret at an arbitrary place in the
+// layer, and the pointer moving at all from there (a click that wobbled two
+// pixels, the click meant to dismiss a selection) selected from it to wherever
+// the drag resolved: often the rest of the page, or the whole of it.
+//
+// So a plain left press there, in plain reading (the Redact tool marking text
+// and the markup tools too), is the viewer's. Until the pointer has moved
+// LINK_DRAG_PX it is a click: it drops the selection, leaving the caret where
+// the browser's own press would have left it (none off the text), and selects
+// nothing. Past that it is a drag, and nothing is selected until the pointer
+// is over a word: the selection begins at the browser's caret where the
+// pointer first is over one, and ends at the browser's caret wherever the
+// pointer is over one after that, staying put while it is over blank space.
+// Between the two it takes what the PDF wrote between them, as any selection
+// does: on a page written in reading order, only text the pointer passed
+// over; on one written out of it (a footer before the body, a header or a
+// caption after it, two columns), all that lies between in the file's order:
+// a drag begun beyond a running header or footer crosses it first and starts
+// there (Design Notes/Editor.md, "Written order").
+// Near the window's top or bottom edge the pages scroll under it, and the
+// selection is read again where the pointer then is.
+//
+// Everything else is the browser's, as it was: a press on a word, a link or a
+// comment, any press with Shift, Ctrl, Meta or Alt, any other button, and
+// every press while presenting, organizing, drawing, box-selecting, cropping
+// or redacting an area.
+const viewerContainerEl = document.getElementById("viewer-container");
+const toolbarEl = document.getElementById("toolbar");
+// Within this many px of the window's edge, and past it, a blank drag scrolls
+// the pages at about the pace of Chromium's own drag-selection: 0.85px a
+// frame (at 60 frames a second) for every pixel into the band. (Chromium's,
+// for a drag begun on a word on select.pdf, ran 460-770px a second held 15px
+// into the band and 2,700-3,500 held 60px in, with the machine's load.)
+const DRAG_EDGE_PX = 20;
+const DRAG_WALK_PX = 2;
+
+// Whether a press's target is a page's blank space or the grey around them
+// (under a document shorter than the window, and in the strip under the last
+// page, that grey is <body> or <html>: see the listener below).
+function isBlankTarget(t) {
+  if (!t || !t.classList) return false;
+  if (t === pagesEl || t === viewerContainerEl || t === document.body || t === document.documentElement) return true;
+  const p = t.parentElement;
+  if (!p || !pagesEl.contains(p)) return false;
+  if (t.classList.contains("page-wrapper")) return true;
+  if (p.classList.contains("page-wrapper")) return t.tagName === "CANVAS" || t.classList.contains("textLayer");
+  return t.classList.contains("endOfContent") && p.classList.contains("textLayer");
+}
+
+// Whether an element is one of the pages' words (a span of a text layer).
+function isWordEl(el) {
+  return !!el && el.tagName === "SPAN" && !!el.closest(".textLayer") && pagesEl.contains(el);
+}
+// The browser's caret at a window point over one of the pages' words, or null
+// over anything else.
+function caretOnWord(x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!isWordEl(el)) return null;
+  // On a span's top pixel row Chromium's hit test finds the word but its
+  // caret reads the start of the span, so a drag that came onto a line from
+  // above began at the line's first word. Read the caret up to 2px inside.
+  const r = el.getBoundingClientRect(), cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
+  x += Math.sign(cx - x) * Math.min(2, Math.abs(cx - x));
+  y += Math.sign(cy - y) * Math.min(2, Math.abs(cy - y));
+  const c = caretAtPoint(x, y);
+  return c && c.node.nodeType === Node.TEXT_NODE && el.contains(c.node) ? c : null;
+}
+
+function onBlankPress(e) {
+  if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  const mode = document.body.classList;
+  if (mode.contains("presenting") || mode.contains("organize-mode") || mode.contains("annot-drawing") ||
+      mode.contains("rect-select-mode") || mode.contains("crop-mode") || mode.contains("redact-area-mode")) return;
+  if (!isBlankTarget(e.target)) return;
+  // No selection of the browser's begins, and guardSelection is not armed.
+  e.preventDefault();
+  blankPressEvent = e;
+  // What the press would otherwise do still happens: the focus leaves a box
+  // in the top bar, and the selection goes.
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  window.focus();
+  const sel = window.getSelection();
+  const at = caretAtPoint(e.clientX, e.clientY);
+  if (sel) { if (at) sel.collapse(at.node, at.offset); else sel.removeAllRanges(); }
+  blankDrag(e.clientX, e.clientY);
+}
+viewerContainerEl.addEventListener("mousedown", onBlankPress, true);
+// The grey outside #viewer-container is <body> (or <html>): under a document
+// shorter than the window, and the strip under the last page. The browser's
+// press there anchored at the last page's text, and a drag from there up
+// onto the page took the whole of it. A press on the window's own scrollbar
+// has <html> for its target too, and is left alone.
+document.addEventListener("mousedown", (e) => {
+  if (e.target !== document.body && e.target !== document.documentElement) return;
+  const room = document.documentElement;
+  if (e.clientX >= room.clientWidth || e.clientY >= room.clientHeight) return;
+  onBlankPress(e);
+}, true);
+
+let endBlankDrag = null; // the drag below that is under way
+function blankDrag(x0, y0) {
+  if (endBlankDrag) endBlankDrag(); // (one whose button came up out of hearing)
+  const sel = window.getSelection();
+  let dragged = false, anchor = null, last = null, raf = 0, stamp = 0;
+  // Where the pointer was last read, in the document (the pages may scroll),
+  // and the word it was over there.
+  let prev = { x: x0 + window.scrollX, y: y0 + window.scrollY }, prevWord = null;
+  // The selection's end where the pointer is: over a word, the browser's caret
+  // there; over blank space, where it was. The two edges are read along the
+  // pointer's way, every DRAG_WALK_PX, on the one word under it alone: the
+  // drag begins where the pointer came onto the first word it is over (not
+  // where the move happened to land, a letter or two in), and a move from a
+  // word out into blank space ends the selection at that word's edge. A word
+  // crossed between two moves, and never under the pointer when a move landed,
+  // is not taken. A point past the window's edge, or over the toolbar, is read
+  // at the nearest place the pages show. After a scroll (`still`), only where
+  // the pointer is.
+  const extend = (still = false) => {
+    if (!sel || !last) return;
+    const room = document.documentElement;
+    const W = room.clientWidth, H = room.clientHeight;
+    const top = toolbarEl ? Math.max(0, toolbarEl.getBoundingClientRect().bottom) : 0;
+    const at = (x, y) => ({ x: Math.max(0, Math.min(W - 1, x)), y: Math.max(Math.min(top + 1, H - 1), Math.min(H - 1, y)) });
+    const sx = window.scrollX, sy = window.scrollY;
+    const p = at(last.x, last.y), q = still ? p : at(prev.x - sx, prev.y - sy);
+    prev = { x: last.x + sx, y: last.y + sy };
+    const el = document.elementFromPoint(p.x, p.y);
+    const word = isWordEl(el) ? el : null;
+    const was = prevWord;
+    prevWord = word;
+    // From (ax, ay) toward (bx, by): the last point still on `w`.
+    const edge = (w, ax, ay, bx, by) => {
+      const n = Math.min(400, Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / DRAG_WALK_PX)));
+      let e = { x: ax, y: ay };
+      for (let k = 1; k <= n; k++) {
+        const x = ax + ((bx - ax) * k) / n, y = ay + ((by - ay) * k) / n;
+        if (document.elementFromPoint(x, y) !== w) break;
+        e = { x, y };
+      }
+      return e;
+    };
+    let f = null;
+    if (word) {
+      f = caretOnWord(p.x, p.y);
+      // (A zoom mid-drag rebuilds the pages: the drag begins again where it is.)
+      if (f && (!anchor || !anchor.node.isConnected)) {
+        const e = edge(word, p.x, p.y, q.x, q.y);
+        anchor = caretOnWord(e.x, e.y) || f;
+      }
+    } else if (anchor && was && was.isConnected) {
+      const e = edge(was, q.x, q.y, p.x, p.y);
+      f = caretOnWord(e.x, e.y);
+    }
+    if (!f || !anchor) return;
+    try { sel.setBaseAndExtent(anchor.node, anchor.offset, f.node, f.offset); } catch { /* the page was rebuilt under the drag */ }
+  };
+  const follow = (now) => {
+    raf = 0;
+    if (!last) return;
+    const dt = stamp ? Math.min(100, now - stamp) : 1000 / 60;
+    stamp = now;
+    const room = document.documentElement;
+    const W = room.clientWidth, H = room.clientHeight;
+    const speed = (into) => Math.min(240, (0.85 * into * dt) / (1000 / 60));
+    const dx = last.x > W - DRAG_EDGE_PX ? speed(last.x - (W - DRAG_EDGE_PX)) : last.x < DRAG_EDGE_PX ? -speed(DRAG_EDGE_PX - last.x) : 0;
+    const dy = last.y > H - DRAG_EDGE_PX ? speed(last.y - (H - DRAG_EDGE_PX)) : last.y < DRAG_EDGE_PX ? -speed(DRAG_EDGE_PX - last.y) : 0;
+    if (!dx && !dy) { stamp = 0; return; }
+    window.scrollBy(dx, dy); // (the scroll listener reads the selection again)
+    raf = requestAnimationFrame(follow);
+  };
+  // The pages scrolled under a still pointer (the edge above, the wheel).
+  const onScroll = () => { if (dragged) extend(true); };
+  const onMove = (ev) => {
+    if (!(ev.buttons & 1)) { end(); return; } // the button came up out of the page's hearing
+    if (!dragged) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < LINK_DRAG_PX) return;
+      dragged = true;
+      // From here it is a selection: whatever floats over the words stands
+      // aside (see the CSS), the selection bar too, so a point finds the
+      // words under it.
+      document.body.classList.add("text-dragging", "blank-dragging");
+    }
+    last = { x: ev.clientX, y: ev.clientY };
+    extend();
+    if (!raf) { stamp = 0; raf = requestAnimationFrame(follow); }
+  };
+  const end = () => {
+    if (endBlankDrag === end) endBlankDrag = null;
+    document.removeEventListener("mousemove", onMove, true);
+    document.removeEventListener("mouseup", end, true);
+    window.removeEventListener("scroll", onScroll, true);
+    window.removeEventListener("blur", end);
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+    last = null;
+    if (dragged) document.body.classList.remove("text-dragging", "blank-dragging");
+  };
+  endBlankDrag = end;
+  document.addEventListener("mousemove", onMove, true);
+  document.addEventListener("mouseup", end, true);
+  window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+  window.addEventListener("blur", end);
+}
 
 // Which of a page's fonts are italic. The text layer is no help here — PDF.js
 // gives its spans only a generic fallback family ("serif") — so posture has to
@@ -3430,13 +3665,12 @@ function repaintSelectionOverlay() {
   if (!boxes.length) return;
 
   for (let i = 0; i < sel.rangeCount; i++) {
-    for (const cr of sel.getRangeAt(i).getClientRects()) {
-      if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+    for (const cr of glyphRects(sel.getRangeAt(i))) {
       const cx = cr.left + cr.width / 2;
       const cy = cr.top + cr.height / 2;
       const hit = boxes.find(({ rect }) =>
         cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom);
-      if (!hit) continue;
+      if (!hit || pageSized(cr, hit.rect)) continue;
       const d = document.createElement("div");
       d.className = "selection-rect";
       d.style.left   = `${cr.left - hit.rect.left}px`;
@@ -3446,6 +3680,32 @@ function repaintSelectionOverlay() {
       hit.layer.appendChild(d);
     }
   }
+}
+
+// The client rects of a selected range that can be glyphs: none of no size,
+// and none that is a text layer's end-of-content block (guardSelection), which
+// while a drag is under way is the size of the whole layer and stands just
+// after the drag's moving end: once the end resolved past it (a drag let go
+// of in the margin, in a column's gutter, between pages) the block was inside
+// the selection, and painted, it turned the whole page blue under a drag that
+// had taken one line.
+function glyphRects(range) {
+  const ends = new Set();
+  for (const end of textLayerEnds.values()) {
+    if (!end.isConnected || !range.intersectsNode(end)) continue;
+    const b = end.getBoundingClientRect();
+    ends.add(`${b.left},${b.top},${b.width},${b.height}`);
+  }
+  return [...range.getClientRects()].filter((cr) => cr.width > 0.5 && cr.height > 0.5 &&
+    !ends.has(`${cr.left},${cr.top},${cr.width},${cr.height}`));
+}
+// Whether a client rect is more than a quarter of the page `box` both ways,
+// which a line of text never is: a layer or a canvas swept up by a selection
+// that crosses a page, or the block above at a size from before a zoom. (So
+// is a watermark's or a stamp's text turned across the page, whose box is the
+// square around it: it is not painted, and not marked for redaction.)
+function pageSized(cr, box) {
+  return cr.height > box.height * 0.25 && cr.width > box.width * 0.25;
 }
 
 // selectionchange fires rapidly while dragging — coalesce to one repaint per
@@ -3506,6 +3766,20 @@ citePopover.hidden = true;
   );
 }
 document.body.appendChild(citePopover);
+// A plain press on the bar's own padding or a separator, between its buttons,
+// drops the selection and begins none. The bar stands 8px under the
+// selection's last word, where a click to dismiss it lands, and the browser's
+// press there began a selection in the bar, which hangs off <body> after the
+// pages: a 2-3px wobble took everything from the selection's end to the end of
+// the document. The buttons keep the selection (their own mousedown, above),
+// and a drag begun on a word that strays onto the bar is no press on it.
+citePopover.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target !== citePopover && !e.target.classList.contains("sel-sep")) return;
+  e.preventDefault();
+  if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
+  window.getSelection()?.removeAllRanges();
+});
 
 function hideCitePopover() { citePopover.hidden = true; }
 
@@ -3634,12 +3908,11 @@ function buildCitationReference() {
   }
   const bands = new Map(); // page -> { top, bottom } fractions
   for (let i = 0; i < sel.rangeCount; i++) {
-    for (const cr of sel.getRangeAt(i).getClientRects()) {
-      if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+    for (const cr of glyphRects(sel.getRangeAt(i))) {
       const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
       const hit = wrapInfo.find(({ rect }) =>
         cx >= rect.left && cx <= rect.right && cy >= rect.top && cy <= rect.bottom);
-      if (!hit || hit.rect.height <= 0) continue;
+      if (!hit || hit.rect.height <= 0 || pageSized(cr, hit.rect)) continue;
       // Bands are fractions down the page as the PAGE is written, not as it is
       // currently displayed — the line-number rows they get compared against
       // come from the text layer, which PDF.js lays out in the page's own
@@ -3743,13 +4016,140 @@ function lineLocator(bands, pages) {
   return { kind: "line", str: `pp. ${startStr}-${endStr}` };
 }
 
+// ── Sideways: in one column, a zoomed page holds its place between the rails ─
+//
+// A page zoomed wider than the room (the window less the tools rail on the
+// left, the side rail and any open panel on the right, and a margin beside
+// each) stands at the room's left edge at scrollX 0 and is scrolled to
+// sideways, with the window as the scroller, until its right edge meets the
+// side rail or the panel (viewer.css, #pages-end). Opening or closing the
+// panel, dragging its edge, collapsing the rail and resizing the window change
+// the room, and a zoom the page; a scrollX kept in pixels then points at
+// another part of the page. So in one column the view remembers which part of
+// the column is in the middle of the room (mid: how far it is from the
+// column's left edge, where every page wider than the room stands, in the
+// pages' own units, so a page of another width landing or a zoom does not move
+// it), or that the reader is at its left or right edge (edge), and puts that
+// back whenever a width changes. Only a sideways scroll made while the widths
+// stood still is the reader's, and moves it. Two pages side by side, and a
+// presentation, are not held (sidewaysHeld). viewerContainerEl is declared
+// with the blank-press handling above.
+// jump: a smooth jump to a page is under way: the hold waits for its end
+//   (scrollend), since any scroll write stops a smooth scroll short, and
+//   takes the view it ends on.
+// building: the signal of a rebuild whose pages are still landing
+//   (holdWhileBuilding).
+// presenting: from a presentation's zoom to the one it ends with; leaving
+//   it, the layout before it is put back only after its class comes off.
+// sig, x: the widths and the scrollX the view was last held at.
+const sideways = { mid: 0, edge: null, jump: false, building: null, presenting: false, sig: "", x: 0 };
+function sidewaysHeld() {
+  return pageLayout === "single" && !sideways.presenting && !document.body.classList.contains("presenting");
+}
+/** The room, in viewport x: inside the container's reserves, which are fixed to the window. */
+function sidewaysRoom() {
+  const cs = getComputedStyle(viewerContainerEl);
+  const left = viewerContainerEl.getBoundingClientRect().left + window.scrollX + parseFloat(cs.paddingLeft);
+  const right = document.documentElement.clientWidth - parseFloat(cs.paddingRight);
+  return { left, right, mid: (left + right) / 2, width: right - left };
+}
+/**
+ * The column, in viewport x: from the left edge of #pages, which is the
+ * room's at scrollX 0, as wide as the room or the widest page (two side by
+ * side, the widest pair), which stands at that edge.
+ */
+function sidewaysColumn() {
+  const pr = pagesEl.getBoundingClientRect();
+  return { left: pr.left, width: Math.max(pr.width, pageWidths.w) };
+}
+function sidewaysSig(room, col) {
+  return `${Math.round(room.left)}|${Math.round(room.width)}|${Math.round(col.width)}`;
+}
+function sidewaysMax() {
+  const s = document.scrollingElement || document.documentElement;
+  return Math.max(0, s.scrollWidth - s.clientWidth);
+}
+/** The view at scrollX `left` taken as the one to hold. */
+function takeSideways(left, room, col) {
+  sideways.mid = (room.mid + left - window.scrollX - col.left) / currentScale;
+  sideways.edge = left <= 1 ? "start" : left >= sidewaysMax() - 1 ? "end" : null;
+}
+/** Put the remembered part of the column back in the middle of the room, or at its edge. */
+function holdSideways() {
+  // An app tab opened behind another is display:none and has no widths yet;
+  // it is held when it is first shown (the container's size changes then).
+  if (!sidewaysHeld() || sideways.jump || !document.documentElement.clientWidth) return;
+  const room = sidewaysRoom();
+  const col = sidewaysColumn();
+  sideways.sig = sidewaysSig(room, col);
+  if (col.width > room.width + 1) {
+    const max = sidewaysMax();
+    const want = sideways.edge === "start" ? 0 : sideways.edge === "end" ? max
+      : Math.max(0, Math.min(max, Math.round(window.scrollX + col.left + sideways.mid * currentScale - room.mid)));
+    // Sideways only: the vertical place is the reader's, and auto-scroll
+    // tells its own writes from the reader's by it.
+    if (Math.abs(window.scrollX - want) >= 1) window.scrollTo({ left: want, behavior: "instant" });
+  }
+  sideways.x = window.scrollX;
+}
+/** The view as it stands taken as the one to hold. */
+function readSideways(room = sidewaysRoom(), col = sidewaysColumn()) {
+  sideways.sig = sidewaysSig(room, col);
+  sideways.x = window.scrollX;
+  if (col.width > room.width + 1) takeSideways(window.scrollX, room, col);
+}
+/** A sideways scroll: where the widths have not moved, it is the reader's. */
+function noteSideways() {
+  if (!sidewaysHeld() || sideways.jump) return;
+  const room = sidewaysRoom();
+  const col = sidewaysColumn();
+  // The browser clamps scrollX when the widths shrink, or while a refit takes
+  // the box away (refitSoon): not the reader.
+  if (sidewaysSig(room, col) !== sideways.sig || document.body.classList.contains("refitting")) { holdSideways(); return; }
+  if (Math.abs(window.scrollX - sideways.x) > 1) readSideways(room, col);
+}
+document.addEventListener("scroll", () => { if (Math.abs(window.scrollX - sideways.x) > 1) noteSideways(); }, { passive: true });
+// A smooth jump that has ended, landed or cut short, is where the view is
+// held from: a width change on the way is not held.
+document.addEventListener("scrollend", () => {
+  if (!sideways.jump) { noteSideways(); return; }
+  sideways.jump = false;
+  if (sidewaysHeld() && document.documentElement.clientWidth) readSideways();
+});
+// The room (the panel opening, closing or dragged, the rail collapsing) and
+// the window (a resize, a classic scroll bar) change the container's content
+// box.
+const sidewaysWatch = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => holdSideways());
+function watchSideways() {
+  if (sidewaysWatch) sidewaysWatch.observe(viewerContainerEl);
+}
+watchSideways();
+/**
+ * While a rebuild lands its pages they grow the container every frame, and
+ * the observer would ask the hold after each frame's layout. So it rests
+ * until the rebuild is over (renderAllPages) or abandoned with none after it,
+ * and the hold is asked once a frame instead, before the frame's layout.
+ */
+function holdWhileBuilding(signal) {
+  sideways.building = signal;
+  if (sidewaysWatch) sidewaysWatch.disconnect();
+  const tick = () => {
+    if (sideways.building !== signal) return;
+    if (signal.aborted) { sideways.building = null; watchSideways(); return; }
+    holdSideways();
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 // --- Zoom ---
 //
 // A zoom rebuilds every page at the new scale, so the reading position is
 // carried across it: the page on screen and how far down it the window was
-// (restoreScroll, applied the moment that page is rebuilt). Fit width and fit
-// page are modes rather than numbers — they are worked out again when the
-// window or the panels change size.
+// (restoreScroll, applied the moment that page is rebuilt); in one column the
+// sideways place is the hold's (holdSideways, above). Fit width and fit page
+// are modes rather than numbers — they are worked out again when the window
+// or the panels change size.
 const ZOOM_STEPS = [0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5, 6];
 const ZOOM_MIN = 0.25, ZOOM_MAX = 6;
 let zoomMode = null;          // "fit-width" | "fit-page" | null
@@ -3793,6 +4193,12 @@ function applyRestoreScroll(pageNumber, wrapper) {
   const rs = restoreScroll;
   restoreScroll = null;
   const r = wrapper.getBoundingClientRect();
+  // One column: down to the place on the page; sideways, the hold.
+  if (sidewaysHeld()) {
+    window.scrollTo({ top: window.scrollY + r.top + rs.frac * r.height - toolbarHeightPx() - 14, behavior: "auto" });
+    holdSideways();
+    return;
+  }
   window.scrollTo({
     top: window.scrollY + r.top + rs.frac * r.height - toolbarHeightPx() - 14,
     left: Math.max(0, window.scrollX + r.left + rs.xfrac * r.width - window.innerWidth / 2),
@@ -3863,14 +4269,24 @@ window.addEventListener("wheel", (e) => {
   wheelZoomTimer = setTimeout(() => { const t = wheelTarget; wheelTarget = null; setZoom(t); }, 220);
 }, { passive: false });
 
-// Fit modes follow the window and the panels.
+// Fit modes follow the window and the panels. Until the refit timer fires
+// the page is the old fit for the new room, and meanwhile (body.refitting) the
+// scroll width ends at the widest page's right edge, as it does without the
+// box (viewer.css), so the page slides under the panel for those frames and
+// the box adds no sideways scroll bar (a window narrowed past the old fit has
+// the window's own until the refit). In one column the place clamped
+// meanwhile is not the reader's (noteSideways): a refit that changes no zoom
+// puts the held place back as the box returns.
 let fitTimer = 0;
 function refitSoon() {
   if (!zoomMode || !pdfDoc) return;
+  document.body.classList.add("refitting");
   clearTimeout(fitTimer);
   fitTimer = setTimeout(() => {
+    document.body.classList.remove("refitting");
     const s = scaleForMode(zoomMode);
     if (s && Math.abs(s - currentScale) > 0.004) setZoom(s, { mode: zoomMode });
+    else holdSideways();
   }, 200);
 }
 window.addEventListener("resize", refitSoon);
@@ -3895,18 +4311,46 @@ if (pageNextEl) pageNextEl.addEventListener("click", () => goToPage(visiblePageN
 
 // Page display: one column, or two pages side by side (with or without the
 // cover page alone, the way a bound brief opens).
+//
+// The pages' width, which the scroll width reaches past by the side rail and
+// any open panel (viewer.css, #pages-end): the widest page, or two side by
+// side the widest left page and the widest right page with the 14px gap
+// between them, which is what the grid's max-content columns come to.
+const pageWidths = { one: 0, left: 0, right: 0, w: 0 };
+const pagesEndEl = document.getElementById("pages-end");
+function notePageWidth(pn, w) {
+  // The cover alone sits in the right-hand column.
+  const c = (pageLayout === "two-cover") === (pn % 2 === 1) ? "right" : "left";
+  pageWidths[c] = Math.max(pageWidths[c], w);
+  pageWidths.one = Math.max(pageWidths.one, w);
+  setPagesWidth();
+}
+function setPagesWidth() {
+  const w = pageLayout === "single" ? pageWidths.one : pageWidths.left + 14 + pageWidths.right;
+  if (w !== pageWidths.w) { pageWidths.w = w; pagesEndEl.style.width = `calc(${w}px + var(--right-cur))`; }
+}
+/** Again from the pages in the column: a rebuild, or a layout switch moving them between the columns. */
+function measurePageWidths() {
+  Object.assign(pageWidths, { one: 0, left: 0, right: 0 });
+  for (const w of pagesEl.querySelectorAll(":scope > .page-wrapper")) notePageWidth(Number(w.dataset.pageNumber), parseFloat(w.style.width) || 0);
+  setPagesWidth();
+}
 function setPageLayout(layout) {
   pageLayout = layout === "two" || layout === "two-cover" ? layout : "single";
   pagesEl.classList.toggle("two-up", pageLayout !== "single");
   pagesEl.classList.toggle("cover", pageLayout === "two-cover");
+  measurePageWidths();
   for (const b of document.querySelectorAll("#more-menu [data-layout]")) b.setAttribute("aria-checked", String(b.dataset.layout === pageLayout));
   try { localStorage.setItem("pdfViewerLayout", pageLayout); } catch { /* ok */ }
   if (zoomMode) refitSoon();
 }
 for (const b of document.querySelectorAll("#more-menu [data-layout]")) b.addEventListener("click", () => {
   const pn = visiblePageNumber();
+  const was = pageLayout;
   setPageLayout(b.dataset.layout);
   requestAnimationFrame(() => scrollToPage(pn, { smooth: false }));
+  // Into one column, at the left edge, as a new document opens.
+  if (was !== "single" && pageLayout === "single") requestAnimationFrame(() => { sideways.edge = "start"; holdSideways(); });
 });
 try { setPageLayout(localStorage.getItem("pdfViewerLayout") || "single"); } catch { setPageLayout("single"); }
 
@@ -4137,12 +4581,15 @@ function redactCurrentSelection() {
     pageNumber: Number(w.dataset.pageNumber), box: w.getBoundingClientRect(),
   }));
   const byPage = new Map();
-  for (const cr of range.getClientRects()) {
-    if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+  let wide = false;
+  for (const cr of glyphRects(range)) {
     const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
     const hit = pages.find((p) => cx >= p.box.left && cx <= p.box.right &&
                                   cy >= p.box.top && cy <= p.box.bottom);
     if (!hit) continue;
+    // A rect the size of the page is a layer or a canvas the selection swept
+    // up, not a line: marked, it blacked out the page.
+    if (pageSized(cr, hit.box)) { wide = true; continue; }
     if (!byPage.has(hit.pageNumber)) byPage.set(hit.pageNumber, []);
     byPage.get(hit.pageNumber).push(cr);
   }
@@ -4154,7 +4601,30 @@ function redactCurrentSelection() {
     }
   }
   if (added) sel.removeAllRanges();
+  // Text turned across the page (a watermark, a stamp) has a box that size
+  // too, and is left unmarked: said, so it is not taken for marked. The
+  // selection goes too, as after a mark: its turned text is not tinted
+  // (pageSized), and kept, every later mouseup in Redact (text), a click on
+  // the toolbar's background or a button among them, said it again.
+  if (wide && turnedTextIn(range)) {
+    toast("Text turned across the page (a watermark or a stamp) was not marked from the selection: mark it with Area.", { timeout: 9000 });
+    sel.removeAllRanges();
+  }
   return added;
+}
+// Whether a range takes in a span of text whose own box is more than a
+// quarter of its page both ways.
+function turnedTextIn(range) {
+  for (const layer of pagesEl.querySelectorAll(".page-wrapper > .textLayer")) {
+    if (!range.intersectsNode(layer)) continue;
+    const box = layer.parentElement.getBoundingClientRect();
+    for (const sp of layer.querySelectorAll("span")) {
+      const t = sp.firstChild;
+      if (t && t.nodeType === Node.TEXT_NODE && t.data.trim() && range.intersectsNode(t) &&
+          pageSized(sp.getBoundingClientRect(), box)) return true;
+    }
+  }
+  return false;
 }
 
 // The key, over the whole document: every place a real value stands.
@@ -4780,7 +5250,21 @@ async function renderThumbnails() {
 function scrollToPage(pn, { smooth = true } = {}) {
   const wrappers = pagesEl.querySelectorAll(".page-wrapper");
   const target = wrappers[pn - 1];
-  if (target) target.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  if (!target) return;
+  // One column: a smooth jump up or down is waited for until it ends
+  // (scrollend), since a scroll write by the sideways hold would stop it
+  // short; one that does not move vertically has no end to wait for.
+  const held = sidewaysHeld();
+  if (held && smooth && "onscrollend" in window) {
+    const s = document.scrollingElement || document.documentElement;
+    const top = window.scrollY + target.getBoundingClientRect().top - (parseFloat(getComputedStyle(target).scrollMarginTop) || 0);
+    sideways.jump = Math.abs(Math.max(0, Math.min(top, s.scrollHeight - s.clientHeight)) - window.scrollY) >= 1;
+  }
+  target.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "start" });
+  // Where it lands sideways is the view held from there (a hidden app tab
+  // has no widths to read); while a rebuild is landing its pages, the place
+  // held before it is put back instead, as for a page not landed yet.
+  if (held && !smooth && !sideways.building && document.documentElement.clientWidth) readSideways();
 }
 
 function updateActiveThumbnail() {
@@ -5786,10 +6270,18 @@ if (formSaveEl)   formSaveEl.addEventListener("click", () => saveFilledForm(fals
 if (formFlattenEl) formFlattenEl.addEventListener("click", () => saveFilledForm(true));
 if (formCancelEl) formCancelEl.addEventListener("click", exitFormMode);
 
-// Drag the Pages / Bookmarks column's left edge to resize it. The panel is
-// pinned to the right, so its width is the window width minus the pointer's x.
+// Drag the Pages / Bookmarks column's left edge to resize it.
 // --thumb-panel-width drives both the panel and the content offset; persist it
 // across sessions.
+//
+// The panel's right edge is pinned beside the side rail, so its width is that
+// edge's x minus the pointer's x. Measured from the window's right edge it
+// would also count the side rail and a classic scrollbar, and a grab with no
+// move would widen the panel by 48 to 63px. The gap between the pointer and
+// the panel's edge at the grab is kept for the whole drag, so a grab anywhere
+// on the 8px handle moves nothing until the pointer does; and the right edge
+// is read on every move, so the edge stays under the pointer even if the
+// window or its scrollbar changes mid-drag.
 const thumbResizeEl = document.getElementById("thumb-resize");
 function setThumbPanelWidth(px) {
   const w = Math.max(100, Math.min(px, Math.round(window.innerWidth * 0.6)));
@@ -5803,14 +6295,42 @@ if (thumbResizeEl) {
   thumbResizeEl.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     thumbResizeEl.setPointerCapture(e.pointerId);
-    const onMove = (ev) => setThumbPanelWidth(window.innerWidth - ev.clientX);
-    const onUp = (ev) => {
+    // A fit mode follows the panel's width too, but once, when the drag ends:
+    // a refit on every move started a rebuild at each pause, and the next one
+    // read the page in view from a column still filling, so a long document
+    // landed on page 1. Until then `refitting` keeps the old fit from bringing
+    // a sideways scroll bar with it (refitSoon).
+    const fitting = !!(zoomMode && pdfDoc);
+    if (fitting) document.body.classList.add("refitting");
+    const w0 = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--thumb-panel-width"));
+    const gap = thumbnailPanelEl.getBoundingClientRect().right - e.clientX - w0;
+    let w = null;
+    // The capture outlives the panel being hidden mid-drag (Ctrl+L's
+    // presentation mode, or a second finger on the Pages button), and a hidden
+    // panel's box is all zeros. Measuring from that would shrink the panel to
+    // its 100px minimum and save it, so moves are skipped while it has no box.
+    const onMove = (ev) => {
+      const r = thumbnailPanelEl.getBoundingClientRect();
+      if (!r.width) return;
+      w = setThumbPanelWidth(r.right - ev.clientX - gap);
+    };
+    // Chrome can release at a point no pointermove reached, so the release is
+    // applied too, unless the pointer never left the grab point.
+    const onUp = (ev) => { if (w != null || ev.clientX !== e.clientX) onMove(ev); };
+    // Losing the capture ends the drag on a release and on a cancelled pointer
+    // alike, so no listener is left behind to resize the panel on a later hover.
+    // It fires after pointerup, so the release point is in w by then.
+    const onEnd = () => {
       thumbResizeEl.removeEventListener("pointermove", onMove);
       thumbResizeEl.removeEventListener("pointerup", onUp);
-      chrome.storage.local.set({ thumbPanelWidth: setThumbPanelWidth(window.innerWidth - ev.clientX) });
+      thumbResizeEl.removeEventListener("lostpointercapture", onEnd);
+      if (w != null) chrome.storage.local.set({ thumbPanelWidth: w });
+      if (fitting && w != null && zoomMode && pdfDoc) refitSoon();
+      else if (fitting) document.body.classList.remove("refitting");
     };
     thumbResizeEl.addEventListener("pointermove", onMove);
     thumbResizeEl.addEventListener("pointerup", onUp);
+    thumbResizeEl.addEventListener("lostpointercapture", onEnd);
   });
 }
 
@@ -5944,8 +6464,14 @@ Features = createFeatures({
   getAuthor: () => Annots.getAuthor(),
   setAuthor: (n) => Annots.setAuthor(n),
   getZoom: () => ({ scale: currentScale, mode: zoomMode }),
-  restoreZoom: async (z) => { if (z.mode) setZoomMode(z.mode); else setZoom(z.scale); },
-  presentZoom: async () => { const sc = scaleForMode("fit-page"); if (sc) { restoreScroll = captureScroll(); currentScale = sc; syncZoomLabel(); await renderAllPages(); } },
+  // A presentation is not held sideways (sidewaysHeld) from its zoom until
+  // the zoom it ends with, the layout before it put back. The widths the hold
+  // last saw (sig) are forgotten as it ends: they are from before it and would
+  // match again once its layout is back, so a scroll while the pages land
+  // would be taken as the reader's. A presentation left before its zoom (Esc
+  // within its first 250ms) does not turn the hold off again.
+  restoreZoom: async (z) => { Object.assign(sideways, { presenting: false, sig: "" }); if (z.mode) setZoomMode(z.mode); else setZoom(z.scale); },
+  presentZoom: async () => { sideways.presenting = document.body.classList.contains("presenting"); const sc = scaleForMode("fit-page"); if (sc) { restoreScroll = captureScroll(); currentScale = sc; syncZoomLabel(); await renderAllPages(); } },
   getLayout: () => pageLayout,
   setLayout: (l) => setPageLayout(l),
 });
@@ -6201,12 +6727,27 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "?") { e.preventDefault(); Features.showShortcuts(); return; }
   if (!e.shiftKey && TOOL_KEYS[k] && pdfDoc) { e.preventDefault(); Annots.setTool(TOOL_KEYS[k]); return; }
   if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && !Annots.selected() && pdfDoc) {
-    // Left and right turn the page, unless the page is wider than the window
-    // (then they scroll it, as they always did).
-    if (document.documentElement.scrollWidth > window.innerWidth + 2) return;
+    // Left and right turn the page, unless the pages are wider than the
+    // window (then they scroll it). The scroll width reaches past the pages
+    // by the side rail and any open panel (viewer.css), so the pages' own
+    // right edge is asked. In one column they turn the page once the window
+    // scrolls no further that way (a held key stops at the edge; the next
+    // press turns the page), and the new page keeps the sideways place, so
+    // the edge the reader was at stays in view.
+    const col = sidewaysColumn();
+    const wide = col.left + window.scrollX + col.width > window.innerWidth + 2;
+    if (wide) {
+      if (!sidewaysHeld() || (e.key === "ArrowRight" ? window.scrollX < sidewaysMax() - 1 : window.scrollX > 1)) return;
+      if (e.repeat) { e.preventDefault(); return; }
+    }
     e.preventDefault();
     const step = pageLayout === "single" ? 1 : 2;
+    const x = window.scrollX;
     goToPage(visiblePageNumber() + (e.key === "ArrowRight" ? step : -step));
+    if (wide && Math.abs(window.scrollX - x) >= 1) {
+      window.scrollTo({ left: x, behavior: "instant" });
+      readSideways();
+    }
     return;
   }
   if (e.key === "Escape") {

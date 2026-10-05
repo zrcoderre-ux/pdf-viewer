@@ -216,7 +216,16 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
   z-index: 20;
   height: var(--toolbar-height);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  /* Page navigation and zoom sit in the middle while the two sides fit in
+     equal halves beside them. Where half the bar is too little for the
+     right group's buttons, the middle group moves left: that column never
+     gets less than its min-content. With a floor of 0 the buttons slid
+     left under zoom instead, so at 1280px a click on + was Redo or Undo.
+     The left column needs no floor: the name, status and pill shorten, and
+     the name's box keeps only what the group has left once the panel
+     button, the gaps and the pill's padding have theirs (see .doc-title,
+     #status and #link-count). */
+  grid-template-columns: minmax(0, 1fr) auto minmax(min-content, 1fr);
   align-items: center;
   gap: 12px;
   padding: 0 10px;
@@ -225,6 +234,22 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
   font-size: 13px;
 }
 .tb-group { display: flex; align-items: center; gap: 4px; min-width: 0; }
+/* A side group's icon buttons give up their padding, down to the bare icon,
+   before the middle group has to move. Their 32px is a flex-basis, not a
+   width, so that the right group's min-content (its column's floor above) is
+   that squeezed size, and wherever the group fitted its half the bar is laid
+   out as it was. */
+.tb-group > .icon-btn { width: auto; flex: 0 1 32px; }
+/* The least the name's box keeps (see .doc-title): its 16px icon, 28px menu
+   button, two 4px gaps and the name's 12px of padding; while the name is
+   being edited, 160px of input in place of the padding. The room is what
+   the link pill leaves it: the floor and some 70px of the name, or just the
+   floor while editing, since that has 160px to type in. The pill's own
+   floor is its padding, which no ellipsis can take back: 29px while it is
+   shown. */
+.tb-left { --name-floor: 64px; --name-room: 136px; --pill-floor: 0px; }
+.tb-left:has(#filename-input) { --name-floor: 212px; --name-room: 212px; }
+.tb-left:has(#link-count:not(:empty)) { --pill-floor: 29px; }
 .tb-right { justify-content: flex-end; }
 .tb-center { gap: 10px; }
 .tb-sep { width: 1px; height: 22px; background: var(--c-border-strong); margin: 0 4px; flex: none; }
@@ -233,7 +258,12 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
   display: flex;
   align-items: center;
   gap: 4px;
-  min-width: 0;
+  /* The name shortens with an ellipsis, but the box keeps its floor (or,
+     if that is less, what the group has beside 40px for the panel button
+     at its narrowest and the gaps and margins, and the pill's padding):
+     any narrower and the menu button would be pushed out over the status,
+     any wider and the pill would be pushed out over the page navigation. */
+  min-width: min(var(--name-floor), 100% - 40px - var(--pill-floor));
   margin-left: 4px;
 }
 .doc-title .doc-icon { color: var(--c-accent); flex: none; }
@@ -254,7 +284,10 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
   font-weight: 600;
   font-size: 13.5px;
   height: 28px;
-  min-width: 160px;
+  /* It fills the box, which is as wide as the name needs and at least the
+     floor: 160px or more to type in, until the bar runs short of room. */
+  flex-grow: 1;
+  min-width: 0;
   background: var(--c-field);
   color: var(--c-text);
   border: 1px solid var(--c-accent);
@@ -275,21 +308,33 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
 }
 #link-count {
   flex: none;
+  /* The pill keeps its length while the rest of the left group still has
+     the name's room beside it, and 40px for the panel button at its
+     narrowest and the gaps and margins. Below that it shortens with an
+     ellipsis, down to its padding (--pill-floor, which the name's box gives
+     up in turn), rather than pushing the group over the page navigation. */
+  max-width: calc(100% - var(--name-room) - 40px);
   font-size: 11.5px;
   font-weight: 500;
   color: var(--c-text-2);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #link-count:not(:empty) {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px 3px 8px;
+  display: block;
+  position: relative;
+  padding: 3px 9px 3px 20px;
   border-radius: 999px;
   background: var(--c-field);
 }
+/* The dot is placed, not a flex item, so the count is plain inline text that
+   text-overflow can shorten. */
 #link-count:not(:empty)::before {
   content: "";
+  position: absolute;
+  left: 8px;
+  top: calc(50% - 3px);
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -371,6 +416,7 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
 }
 @media (max-width: 1100px) {
   #link-count:not(:empty) { display: none; }
+  .tb-left:has(#link-count:not(:empty)) { --pill-floor: 0px; }
 }
 @media (max-width: 960px) {
   .provider-pick, #autoscroll-toggle { display: none; }
@@ -1198,6 +1244,29 @@ body.thumbs-open { --right-cur: calc(var(--side-rail-width) + var(--thumb-panel-
   padding-right: calc(var(--right-cur) + 28px);
   transition: padding-left 0.16s ease, padding-right 0.16s ease;
 }
+/* The scroll width's right end: past the widest page (or spread) by the side
+   rail and any open panel, so a page whose right edge would stand under them
+   scrolls on until that edge meets them, where the window's edge alone would
+   leave it under them; one that reaches only into the margin beside them gets
+   no sideways scroll. It moves no page. Its width is set by viewer.js
+   (setPagesWidth) on this empty box itself, not as a variable on the
+   container, which every span on every page would inherit and have its style
+   worked out again. 1px tall, since a box with no height adds nothing to the
+   scroll width, and pulled up over the column's last pixel. */
+#pages-end {
+  width: var(--right-cur);
+  height: 1px;
+  margin-top: -1px;
+  pointer-events: none;
+}
+/* Not for the password-locked message, a presentation, or a fit mode's pages
+   until the refit timer fires (refitSoon in viewer.js), which slide under the
+   panel for those frames rather than bring a sideways scroll bar of the box's
+   making (a window narrowed past the old fit has the window's own until the
+   refit). */
+#pages:has(> .panel-empty) + #pages-end,
+body.presenting #pages-end,
+body.refitting #pages-end { display: none; }
 
 #pages {
   display: flex;
@@ -1289,6 +1358,36 @@ body.thumbs-open { --right-cur: calc(var(--side-rail-width) + var(--thumb-panel-
    text layer in the page, so the selection ran on to the end of the page. */
 body.text-dragging :is(.linkLayer a, .annotLayer .annot, .annotLayer .annot *, .redactLayer .redact-rect, .formLayer .form-field) {
   pointer-events: none !important;
+}
+/* The selection bar too, while a drag begun in blank space is under way
+   (blankDrag in viewer.js): it follows the selection's end, 8px under the
+   last word, which is where a drag making for the next line goes, and over
+   it the drag found no word, so it stuck. */
+body.blank-dragging :is(.sel-toolbar, .sel-toolbar *) { pointer-events: none !important; }
+/* Nothing around the pages is text to select: the toolbar, the rails, the
+   side panel, menus, the bars and notices. A drag from a page that strayed
+   onto one took the buttons' labels, and since they stand before the pages
+   (or after them, hung off <body>), the whole of page 1 or everything to the
+   end of the document with them. A box to type in stays selectable, and so do
+   a comment's own text and quote in the side panel, the Table of Authorities
+   panel (its citations are copied from it) and a dialog's text. The selection
+   bar is left as it was: it stands under the selection's end, where a drag
+   begun on a word strays onto it, and made unselectable it held such a drag
+   at the end of the page's text where the browser's own drag, with the bar
+   moving off, came back to the words (Design Notes/Editor.md). */
+/* Not while the Redact tool is on: there a document mouseup marks whatever is
+   selected, and with the chrome unselectable a drag released on the toolbar,
+   or Ctrl+A and then a click on it, kept a selection reaching into the pages
+   and marked all of it. Selectable, the chrome takes the selection's end as it
+   always did, and nothing is marked. */
+body:not(.redact-mode) :is(#toolbar, #tools-rail, #side-rail, #thumbnail-panel, #thumb-resize,
+  .menu, .float-bar, #ocr-progress, #toast-host) {
+  user-select: none;
+}
+:is(#toolbar, #tools-rail, #side-rail, #thumbnail-panel, .menu, .float-bar)
+  :is(input, textarea, [contenteditable]:not([contenteditable="false"])),
+#thumbnail-panel :is(.cc-text, .cc-quote) {
+  user-select: text;
 }
 .textLayer > :not(.endOfContent) { z-index: 1; }
 

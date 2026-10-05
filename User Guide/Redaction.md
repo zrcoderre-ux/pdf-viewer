@@ -110,7 +110,15 @@ words under a drag are found by **geometry, not by a selection**: a selection
 snaps to the nearest character on a row, which is right for reading and wrong
 for marking, and a drag over a signature would hand back words nowhere near the
 pointer. (It used to. A drag over a signature blacked out a line of text above
-it and reported success.)
+it and reported success.) In the PDF viewer, text turned across the page — a
+diagonal watermark, a large stamp — is not boxed from a selection: its box is
+the square around it, which covers the body text under it too. The tool says
+so when a selection holds some, and lets that selection go; an area drag
+covers it. A viewer drag that marks text and begins in blank space marks what
+a selection from there takes (see Viewer features): begun under a running
+footer that the PDF wrote before the body and dragged up, it marks the body
+above the pointer too. Check the boxes before applying, or begin the drag on
+the first word.
 
 **The same tool from the case folder.** The text reader redacts too, from
 beside the export: open a case folder, put the PDF beside the text with **⇔

@@ -722,8 +722,30 @@ app, which routes it to the reader tab.
   value is dropped from the **Flagged** panel (the reader says which), takes
   its red mark off the text, and stops being handed over in the next `New Real
   Values.txt` — and a `New Real Values.txt` on disk still listing it from
-  before the run does not bring it back. The whole value has to be in the key:
-  a key that binds "David" has not pseudonymized a flagged "David W. Slayton",
+  before the run does not bring it back. **Only the case's own key answers
+  them**: the one read from the folder's `pseudonym_key.xlsx`, or one loaded
+  (**Load key…**, a key dropped on its own or with a PDF or a workbook) or
+  chosen in the Key list while the folder is open (with no folder open, while
+  the lone document whose list it is is open). The key in hand stays when a
+  folder with no key file — or one Excel is holding — is opened, and the
+  documents read under it as before, but another case's key that happens to
+  bind the same name takes none of this folder's flags off; the reader says so
+  where it mentions the key (not in a Text Files folder, whose case folder is
+  the one to open), and loading the case's own key with **Load key…** takes
+  them off — or, where the folder's key file could not be read, closing it in
+  Excel and opening the folder again. A key dropped together with an export
+  (a `.txt` or `.LEAK` document), and the key offered when the reader
+  starts, belong to no folder until loaded or chosen like that: use **Load
+  key…** with it (choosing the key already shown in the list does nothing; to
+  go through the list, choose "(no key)" and back — never another key, which
+  would take off every flag it binds — though "(no key)" also forgets this
+  session's **fake it** answers in the names bar). Folders of one name share
+  one flag list, and so does every case's Text Files folder, and lone
+  documents of one file name from different cases; a key chosen with one of
+  them open answers them all. A flag kept for want of the case's key is only
+  asked about again; a flag taken off wrongly could let the name ship. The
+  whole value has to be in the key: a key that binds "David" has not
+  pseudonymized a flagged "David W. Slayton",
   half of which would still be standing, and a value **kept** is not in the
   key's forward side at all — both stay flagged. **But a red mark never
   stands over a pseudonym.** The red mark says *this value is standing in the
@@ -1283,7 +1305,10 @@ app, which routes it to the reader tab.
   period — every point snaps to the nearest character on its own row, so the
   clipboard carries the passage under the pointer and never the line numbers
   down the side (they are blanked in the text layer, as the PDF viewer blanks
-  them); a double click takes the word, a triple the row. Display only — the
+  them); a double click takes the word, a triple the row. A click or a drag
+  begun on the pane's grey, around and between the pages, or on a page's
+  label above it, selects nothing (it used to start at some page's first word
+  and take everything above the line the drag reached). Display only — the
   layout lifts when the pane closes; remembered. **The members' PDFs open one
   at a time, in the order the file lists them.** A combined export names two
   dozen documents, each with a PDF of its own, and asking for them all as the

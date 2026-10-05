@@ -138,6 +138,7 @@ let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let pageSweep = null;        // the page a LEAKS review is finishing before it leaves (see advanceLeak)
 let flagsFor = null;         // …the storage key that list was read from, while a folder is being adopted
+let keyFolder = null;        // …the storage key of the list the key in hand was read from or chosen for; null, none (TD.keyAnswersFlags)
 let phrases = [];            // …which of them are PHRASES: several words faked whole (`phrase:`)
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
 let noOcr = [];              // …and the pages marked ⊘ Did not OCR: [{ doc, pdf, page }] (syncNoOcr)
@@ -1426,6 +1427,12 @@ function dropFlagsNowFaked() {
   // folder's, and dropping from it here would write one matter's flags into
   // another's.
   if (flagsFor !== valuesStoreKey()) return;
+  // …and only under this folder's OWN key: one read from its key file, or
+  // chosen by hand while it was open (keyFolder). The key in hand outlives the
+  // folder it came from — a folder with no key file, or one Excel is holding,
+  // reads under the last case's — and that key binds the last case's names. A
+  // flag here it happens to bind is a name nothing has faked here.
+  if (!TD.keyAnswersFlags(keyFolder, valuesStoreKey())) return;
   const { kept, dropped } = TD.dropFlagsInKey(flagged, fwd);
   if (!dropped.length) return;
   flagged = kept;
@@ -1490,20 +1497,38 @@ function setKey(parsed) {
   if (doc) { retranslate(); refreshPdf(); }
 }
 
+// A key chosen by hand is the key of the list open at that moment: the case
+// folder's, or with no folder open the lone document's; with nothing open, of
+// none.
+function handOwner() { return folderName || fileName ? valuesStoreKey() : null; }
+// …and said, where the key is already being talked about, when the key in hand
+// is not the open folder's own, so that none of its flags come off under it.
+// `remedy`: what takes them off — the case's own key loaded by hand, or, where
+// the folder's key file could not be read, that file read again.
+function notOwnKeyNote(remedy = "load this case's own key with Load key… to take them off.") {
+  if (!key || !folderName || TD.keyAnswersFlags(keyFolder, valuesStoreKey())) return "";
+  return ` The key in hand was not read from ${folderName} or chosen with it open, so none of the flags here come off under it — ${remedy}`;
+}
+
 keySelect.addEventListener("change", () => {
   const lib = keyLibrary();
+  keyFolder = handOwner();
   setKey(keySelect.value ? lib[keySelect.value] : null);
 });
 
-async function loadKeyFromBytes(bytes, name, folder, { quiet = false } = {}) {
+// `owner`: the list the key answers flags for (keyFolder), set before the key
+// is compiled, since compiling it is what takes flags off.
+async function loadKeyFromBytes(bytes, name, folder, { quiet = false, owner = null } = {}) {
   const wb = await parseXlsx(bytes);
   if (!PK.sheetsLookLikeKey(wb.sheets)) throw new Error(`${name} has no "Real Value" / "Replacement" header — not a pseudonym key.`);
   const parsed = PK.parseKey(wb.sheets, name);
   const id = storeKey(parsed, folder);
   fillKeys(id);
+  keyFolder = owner;
   setKey(keyLibrary()[id]);
+  const note = notOwnKeyNote();
   if (!quiet) toast(`Key loaded: ${PK.keyTitle(key)} — ${key.pairs.length} reversible binding${key.pairs.length === 1 ? "" : "s"}` +
-    (key.dropped.ambiguous ? `, ${key.dropped.ambiguous} ambiguous retired` : ""));
+    (key.dropped.ambiguous ? `, ${key.dropped.ambiguous} ambiguous retired` : "") + (note ? "." + note : ""), note ? { ms: 9000 } : undefined);
 }
 
 async function pickKey() {
@@ -1511,7 +1536,7 @@ async function pickKey() {
     try {
       const [h] = await window.showOpenFilePicker({ types: [{ description: "Pseudonym key", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }] });
       const f = await h.getFile();
-      await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, "");
+      await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, "", { owner: handOwner() });
       return;
     } catch (e) {
       if (e && e.name === "AbortError") return;
@@ -1525,7 +1550,7 @@ $("key-input").addEventListener("change", async () => {
   const f = $("key-input").files[0];
   $("key-input").value = "";
   if (!f) return;
-  try { await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, ""); }
+  try { await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, "", { owner: handOwner() }); }
   catch (e) { toast(String(e.message || e), { error: true }); }
 });
 
@@ -1708,6 +1733,9 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   if (dirHandle !== h) { forgetPdfs(); dropReady(); clearRedactions("the case folder changed"); }
   dirHandle = h;
   folderName = h.name;
+  // The name this folder's flags are kept under, taken now: the key file read
+  // below is this folder's own even should another folder be opened meanwhile.
+  const own = valuesStoreKey();
   await rememberDir(h);
   const found = await scanFolder(h, { light });
   // The combined file, when the folder has one, listed first: it is the one
@@ -1715,13 +1743,23 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   folderDocs = light ? [] : (found.combined ? [found.combined].concat(found.docs) : found.docs);
   folderPdfs = light ? [] : found.pdfs;
   folderLight = light;
+  // Not in the Text Files folder: its remedy is the folder above (openFolder's
+  // offer bar), and every case's Text Files shares one flag list by name.
+  const ownNote = (remedy) => (looksLikeTextFiles(h, found) ? "" : notOwnKeyNote(remedy));
   if (found.keyHandle) {
     try {
       const f = await found.keyHandle.getFile();
-      await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, folderName, { quiet });
-    } catch (e) { toast("The folder's key could not be read: " + (e.message || e), { error: true }); }
+      await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, folderName, { quiet, owner: own });
+    } catch (e) {
+      // Load key… on a file Excel is holding fails the same way: the remedy
+      // here is the file read again, by opening the folder once it can be.
+      const msg = String(e.message || e);
+      const note = ownNote("close the key in Excel, or replace a damaged one, and open the folder again to take them off.");
+      toast("The folder's key could not be read: " + msg + (note && !/[.!?]$/.test(msg) ? "." : "") + note, { error: true });
+    }
   } else if (!quiet) {
-    toast("No pseudonym_key.xlsx in " + folderName + " — the documents will read in their fakes.");
+    const note = ownNote();
+    toast("No pseudonym_key.xlsx in " + folderName + (note ? " — the documents read under the key in hand." + note : " — the documents will read in their fakes."), note ? { ms: 9000 } : undefined);
   }
   const stored = readStoredValues(VALUES_PREFIX + folderName);
   flagged = stored.values;
@@ -1754,7 +1792,10 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
       // answered it since. Silently, because the file is not the operator's
       // own list moving — the list itself is pruned where it is compiled,
       // which says so once.
-      for (const v of onDisk.values) if (!TD.fakeFor(fwd, v)) flagged = TD.addValue(flagged, v);
+      // …by this folder's own key only (keyFolder, as dropFlagsNowFaked): another
+      // case's key binds that case's names, and nothing has faked them here.
+      const answers = TD.keyAnswersFlags(keyFolder, own);
+      for (const v of onDisk.values) if (!answers || !TD.fakeFor(fwd, v)) flagged = TD.addValue(flagged, v);
       for (const v of onDisk.phrases) if (TD.isPhrase(flagged, v)) phrases = TD.addValue(phrases, v);
       for (const k of onDisk.keeps) if (!TD.keptControl(keeps, k.value)) keeps = TD.addKeep(keeps, k.control, k.value);
       // A page line on disk is the list as it was last written; the list in
@@ -1834,16 +1875,18 @@ async function attachKeyForFile(handle) {
       } catch (e) { toast("Could not reopen " + at.dir.name + ": " + (e.message || e), { error: true }); return; }
     }
     const ask = askBeforeFolder();
-    await adoptFolder(at.dir, { quiet: true, light: ask });
+    const found = await adoptFolder(at.dir, { quiet: true, light: ask });
     if (doc) retranslate();
     markDocList();
+    // Left out of the Text Files folder, as adoption leaves it out (ownNote).
+    const note = looksLikeTextFiles(at.dir, found) ? "" : notOwnKeyNote();
     if (!ask) {
       toast(key
-        ? `${at.dir.name} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}, key attached${leaks ? " with its LEAKS worksheet" : ""}.`
-        : `${at.dir.name} · no pseudonym_key.xlsx in it.`, { ms: 5000 });
+        ? `${at.dir.name} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}, key attached${leaks ? " with its LEAKS worksheet" : ""}.` + note
+        : `${at.dir.name} · no pseudonym_key.xlsx in it.`, { ms: note ? 9000 : 5000 });
       return;
     }
-    showKeyOffer(`Last time the reader went down with the whole of a case folder open, so this file came in on its own${key ? `, with ${at.dir.name}'s key` : ""}. Read the rest of the folder too?`,
+    showKeyOffer(`Last time the reader went down with the whole of a case folder open, so this file came in on its own${key && !note ? `, with ${at.dir.name}'s key` : ""}.${note} Read the rest of the folder too?`,
       "Read the whole folder", readWholeFolder);
   };
   if (at.needs) showKeyOffer("This file is in " + at.dir.name + ". Attach its pseudonym key?", "Attach key", attach);
@@ -2214,10 +2257,16 @@ document.addEventListener("drop", (e) => {
   const handles = [...(dt.items || [])].map((i) => {
     try { return i.kind === "file" && i.getAsFileSystemHandle ? i.getAsFileSystemHandle() : null; } catch { return null; }
   });
+  // A key dropped WITH a document is nobody's until it is chosen by hand: the
+  // document may bring its own case folder in, and the key is loaded first,
+  // while the folder open is still the last one. On its own it is a key loaded
+  // by hand, the open folder's.
+  const isDoc = (f) => /\.(txt|leak)$/i.test(f.name) || f.type === "text/plain";
+  const owner = files.some(isDoc) ? null : handOwner();
   (async () => {
     for (const f of files) {
       if (TD.isKeyName(f.name)) {
-        try { await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, ""); }
+        try { await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, "", { owner }); }
         catch (err) { toast(String(err.message || err), { error: true }); }
       } else if (LK.isMasterName(f.name)) {
         try { await readMasterBytes(new Uint8Array(await f.arrayBuffer()), f.name); }
@@ -2234,7 +2283,7 @@ document.addEventListener("drop", (e) => {
     // — several at once for a combined file, each matched to its member.
     const pdfs = files.filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
     if (pdfs.length && doc) await usePickedPdfs(pdfs);
-    const at = files.findIndex((f) => /\.(txt|leak)$/i.test(f.name) || f.type === "text/plain");
+    const at = files.findIndex(isDoc);
     if (at === -1) return;
     let handle = null;
     try { handle = await handles[at]; } catch { handle = null; }
@@ -10492,6 +10541,23 @@ function bindSelection(layer) {
     window.addEventListener("mouseup", up);
   });
 }
+// A press on the PDF pane's grey, around and between the pages, begins no
+// selection: the browser anchored it at some page's first word, or in the line
+// numbers written first, and a drag from there onto a line took everything
+// above it. The page's label over each sheet ("Page 3"), half the band between
+// two pages, is the same. It drops the selection there was, as a click there
+// did (Shift keeps it). A press on the pane's own scrollbar, whose target is
+// the pane too, is left alone.
+pdfPane.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target !== pdfPane && !(e.target.classList?.contains("pdf-label") && pdfPane.contains(e.target))) return;
+  const r = pdfPane.getBoundingClientRect();
+  const x = e.clientX - r.left - pdfPane.clientLeft, y = e.clientY - r.top - pdfPane.clientTop;
+  if (x < 0 || y < 0 || x >= pdfPane.clientWidth || y >= pdfPane.clientHeight) return;
+  e.preventDefault();
+  if (document.activeElement && document.activeElement !== document.body && !pdfPane.contains(document.activeElement)) document.activeElement.blur();
+  if (!e.shiftKey) document.getSelection()?.removeAllRanges();
+});
 /** The text spans of a layer with their boxes, in DOM order: [{ span, node, rect }]. A span of bare space (pdf.js writes one for a gap) is nothing to snap to. */
 function layerSpans(layer) {
   const out = [];
@@ -13452,7 +13518,7 @@ window.__textReaderSetKey = (parsed) => setKey(parsed);
 // …and the leak worksheet's: attach, walk, decide, and the bytes a save
 // would write (verified, not written), so the round trip into PDF-Linker's
 // own reader can be checked from outside.
-window.__textReaderLoadKey = (bytes, name) => loadKeyFromBytes(new Uint8Array(bytes), name, "", { quiet: true });
+window.__textReaderLoadKey = (bytes, name) => loadKeyFromBytes(new Uint8Array(bytes), name, "", { quiet: true, owner: handOwner() });
 window.__textReaderAttachLeaks = (bytes, name) => attachLeaks(new Uint8Array(bytes), name, null, { quiet: true });
 window.__textReaderGoToLeak = (i) => goToLeak(i);
 window.__textReaderDecide = (text, advance) => decideLeak(text, { advance: !!advance });

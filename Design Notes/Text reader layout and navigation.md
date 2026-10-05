@@ -551,3 +551,135 @@ since there is no longer anywhere to read on to. The folder is FORGOTTEN as
 well as dropped (`forgetDir`) — the reader re-attaches a remembered folder as
 soon as a file from it is opened, so one merely dropped would be back on the
 next document.
+
+### Only the folder's own key takes its flags off (`keyFolder`)
+
+The key in hand outlives the folder it was read from. A folder with no
+`pseudonym_key.xlsx` — or one whose key Excel is holding — leaves whatever key
+was in hand where it was, usually the last case's, and the documents read
+under it. That part is unchanged. What was wrong was the flags: adoption names
+the folder, reads its key, then its flagged list, and compiles, and
+`dropFlagsNowFaked` took off every flag the key in hand fakes. Under the last
+case's key that is a name of THIS case which that case's run happened to fake:
+nothing has faked it here, and the flag was the only thing still asking for
+it. The merge of the folder's own `New Real Values.txt` on disk
+(`TD.fakeFor(fwd, v)`) kept the same names out of the list, silently.
+
+Three earlier designs moved the key itself — put it down, recalled the
+folder's from the library, claimed a dropped one — and each round of checks
+found the display moved with it somewhere main's did not (a folder whose key
+Excel holds losing its own case's key, a newer key swapped for an older one).
+So this one moves nothing but WHO MAY ANSWER THE FLAGS. The key in hand, what
+the documents read in, the key library (`storeKey`), every key-attach path and
+every toast but the note below are main's.
+
+`keyFolder` records the flag list the key in hand belongs to, by the name the
+list is stored under (`valuesStoreKey()`, the flag store's own identity):
+
+- adoption reading the folder's key file sets it to that folder (`own`, taken
+  as adoption names the folder, so an adoption overtaken by another still
+  files its key as its own folder's and not the later one's);
+- a key loaded by hand (Load key…, a key dropped ON ITS OWN or with a PDF or
+  a workbook) or chosen in the Key list sets it to the list open at that
+  moment (`handOwner`): the case folder's, or with no folder open the lone
+  document's, or none with nothing open;
+- a key dropped TOGETHER WITH an export (`.txt`/`.LEAK`) belongs to none: the
+  drop loads the key first and opens the export after, while the folder open
+  is still the last one, and the export may bring its own folder in. A PDF
+  or a LEAKS or master workbook brings no folder in, so a key dropped with
+  one is loaded by hand into the folder open, as one dropped alone is;
+- adoption that finds no key file, or cannot read it, leaves it where it was —
+  another folder, or none;
+- the key offered at start belongs to none (it is initialised so, and boot
+  calls `setKey` directly).
+
+`TD.keyAnswersFlags(keyFolder, list)` — true only for a non-empty owner equal
+to the list — gates `dropFlagsNowFaked` (against `valuesStoreKey()`, beside its
+`flagsFor` check) and the on-disk merge (against the adopting folder's `own`,
+the folder whose file it is). Where it says no, the flags simply stay: a flag
+left on the list never exposes a name, it is only asked about again; a flag
+wrongly taken off can let one ship.
+
+The one visible change: where the key is already being spoken of —
+adoption's "No pseudonym_key.xlsx" line (which, with a key in hand, now says
+the documents read under it rather than "in their fakes") and its "could not
+be read" line, the lone-file attach's summary toast and its ask-first offer
+bar (which no longer calls the key "the folder's"), and "Key loaded" —
+`notOwnKeyNote` adds one sentence when a folder is open and the key in hand is
+not its own: none of the flags there come off under it, and loading the
+case's own key with Load key… takes them off. It points at the case's OWN key,
+not the key in hand: loading the key in hand by Load key… would make another
+case's key the folder's. Where the folder's key file could not be read, the
+remedy it names is that file read again — closed in Excel (or a damaged one
+replaced) and the folder opened again — since Load key… on a file Excel is
+holding fails the same way; and it adds the full stop an error message without
+one lacks. Adoption, and the lone-file attach after it (on the `found` that
+adoption returns), leave it out where the folder picked looks like the Text
+Files subfolder (`looksLikeTextFiles`): there the remedy is the folder above,
+which `openFolder`'s offer bar already says, and a key loaded into it would own
+the one list every case's Text Files folder shares. Without the note each of
+these toasts and the offer line is main's word for word.
+
+Left as they are, on purpose (each keeps a flag main would have dropped,
+never the other way):
+
+- The key offered at start belongs to no list. In a new session a folder whose
+  key file Excel is holding keeps its flags under the library's key, even when
+  that key is the same case's, until the key is loaded by hand; so does a lone
+  document opened under it.
+- A key dropped together with the open folder's own export is nobody's until
+  loaded or chosen by hand. Choosing it again in the Key list does nothing — a
+  select fires no change for the option already chosen — so it is Load key…
+  with that key. The detour through the list is "(no key)" and back, never
+  another key: choosing a key with the folder open makes it the folder's and
+  takes off every flag it binds, and choosing the first again does not put
+  them back. "(no key)" also clears this session's names-bar "fake it" answers
+  (`setKey(null)` resets `settled`); Load key… with the same case's key keeps
+  them.
+- After "Let go of the folder" the key keeps its owner, the folder: the lone
+  document's own list is not answered until a key is chosen with it open.
+- The identity is the folder's NAME, as the flag store's is: two case folders
+  of one name share one list and one owner, exactly as they share the list.
+  So does every case's Text Files folder (`textReader.values.Text Files`).
+  A lone document's list is stored by its FILE name, so lone documents of one
+  name from different cases (`Motion.txt`, `Complaint.txt`) share one list,
+  and a key chosen while one was open answers the others too — as on main,
+  which shares the list the same way. A key loaded with no folder open could
+  have belonged to none; `handOwner` gives it the lone document's list
+  instead, so that a lone document's flags can still come off under its
+  case's key.
+
+Measured in Chromium on PWA builds of main and of this change. A probe for
+this design (19 scenarios: key-less B after A by Open case folder, through its
+`New Real Values.txt`, as a lone file and ask-first; B's key file locked after
+A, after B itself, and in the next session; B's own key loaded or chosen by
+hand; a key dropped alone and with B's export; B with its own key; lone
+files; overlapping adoptions; Let go) and the 22 probes of the earlier rounds
+(195 scenarios): in all 214 the key shown, the Key list's choice and the
+document text are main's, and no flag main kept is lost. What differs is
+flags kept that main took off — Case A's key binding the invented "Jane Roe"
+no longer takes B's flag off, by any path — and the toasts and offer line
+above. A key from B's own case loaded or chosen by hand in B, and B's own key
+file, take the flag off exactly as main does.
+
+Measured again after the note was reworded and left out of the Text Files
+folder: the probe, now 21 scenarios with the Text Files subfolder and a flat
+key-less export folder picked after A (the toast there is main's word for
+word, the key and the text main's), and the parity probe's 38 scenarios
+seeded both ways (214 steps). The key shown, the Key list and its options, the
+library and the document text match main at every step, and no flag main kept
+is lost. One status line differs: two adoptions overlapping with no document
+open, where main's drop repainted the marks (`paintHighlights`), which starts
+the folder sweep, and the sweep counted Case A's "Jane Roe" standing in B's
+export. Dropping nothing, the branch has not swept yet when the probe looks;
+the paint of the first document opened sweeps in both.
+
+Measured a third time after the note was left out of the lone-file attach in a
+Text Files folder and the unreadable-key remedy reworded: the parity probe's 56
+scenarios and its 69 later ones (PWA tabs among them), each seeded both ways.
+The lone-file toast and the ask-first offer line from a remembered Text Files
+folder are main's word for word, and so is the toast of a Text Files folder
+picked in a new PWA tab; the "could not be read" line of a key that is not a
+zip reads with its full stop. Key, Key list, library and document text match
+main throughout; the status line of the overlapping adoptions above, and the
+note's longer toast, are the only other differences.
