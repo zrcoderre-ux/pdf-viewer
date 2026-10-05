@@ -4032,8 +4032,8 @@ function lineLocator(bands, pages) {
 // it), or that the reader is at its left or right edge (edge), and puts that
 // back whenever a width changes. Only a sideways scroll made while the widths
 // stood still is the reader's, and moves it. Two pages side by side, and a
-// presentation, are not held (sidewaysHeld).
-const viewerContainerEl = document.getElementById("viewer-container");
+// presentation, are not held (sidewaysHeld). viewerContainerEl is declared
+// with the blank-press handling above.
 // jump: a smooth jump to a page is under way: the hold waits for its end
 //   (scrollend), since any scroll write stops a smooth scroll short, and
 //   takes the view it ends on.
