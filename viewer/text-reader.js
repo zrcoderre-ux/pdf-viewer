@@ -2080,6 +2080,7 @@ async function forgetFolder() {
   caseFakes = { key: null, docs: null, set: null };
   findRows = [];
   findScanFor = null;
+  findShown = { rev: null, docs: null, texts: new Map() };
   dirHandle = null;
   folderName = "";
   folderDocs = [];
@@ -4456,55 +4457,58 @@ function showNamesBar(on) {
 // hit here is passed the walk opens the next document of the folder that has
 // one and stands on its first.
 //
-// THE FOLDER IS SEARCHED THROUGH THE KEY. What is on screen is the real names;
-// what is on disk is the pseudonyms. A search for "Rasho" typed while reading
-// must therefore look for "Rasho" in the open document (where it is what the
-// page says) and for whatever the key writes instead of it in the forty files
-// it has not opened — otherwise the answer would be "only in the document you
-// happen to have open", which is worse than no answer. Both needles are put to
-// every file, so a name standing in the clear in one and faked in another is
-// found in both.
+// FIND LOOKS FOR WHAT THE SCREEN SHOWS. The query is looked for as typed,
+// and only in text that says it: the open document's pages as they read, and
+// every other export as it would read if the walk opened it. With the real
+// names on screen that is a file read THROUGH THE KEY — what is on disk is the
+// pseudonyms, so a search for "Rasho" is a search of each file with its fakes
+// turned back, and a name standing in the clear in one export and faked in
+// another is found in both. Otherwise the answer would be "only in the
+// document you happen to have open", which is worse than no answer. With Show
+// fakes on, the screen is the files as they are on disk, and they are read
+// as they are.
 //
-// WITH SHOW FAKES ON, ONLY THE QUERY AS TYPED. The screen is then the
-// document as it is on disk, and a real name on it is one standing UNFAKED —
-// a leak the run missed, or a value kept where it stands. That is what a
-// search for the real name is asking for: a hit on its pseudonym would mark
-// text that does not say what was typed, and would bury the leaks among the
-// names the key did its job on. The rest of the folder is read the same way,
-// since every document the walk opens is shown under the same view; counting
-// the fakes there would send the walk into documents with nothing on screen
-// that matches.
+// So a real name with Show fakes on is found only where it stands UNFAKED —
+// a leak the run missed, or a value kept where it stands — and a pseudonym
+// with it off only where the key leaves it standing. A hit on the other face
+// would mark text that does not say what was typed (and bury the leaks among
+// the names the key did its job on), and a folder counted that way would send
+// the walk into documents with nothing on screen that matches.
 let findQuery = "";
 let findHits = [];    // the open document's hits, in order: [{ range }]
 let findStep = -1;
 let findJump = false; // a document opened by the walk: stand on its first hit
 let findRows = [];    // the rest of the folder: [{ doc, count }]
-let findScanFor = null; // …the query and the folder that answer was about
+let findScanFor = null; // …the query, the folder and the view that answer was about
 let findScanning = false;
 
-/** The needles a query stands for: as it reads, and — with the real names on screen — as the key writes it. */
-function findNeedles(q) {
-  const t = String(q || "").trim();
-  if (!t) return [];
-  const out = [t];
-  // The same words as the file carries them. `forwardText` is the save's own
-  // translation, so what is looked for is exactly what a save would have
-  // written — including a phrase only part of which the key binds.
-  if (fwd && !settings.showFakes) {
-    try {
-      const { text, swaps } = forwardText(t, []);
-      if (swaps && text && PK.fold(text) !== PK.fold(t)) out.push(text);
-    } catch { /* an odd query is searched as it reads */ }
-  }
-  return out;
-}
-// MATCH CASE holds for both faces. The key writes a pseudonym in the case of
-// the name it stands for (mirrorCase), so "RASHO" in a caption is looked for
-// as the fake in capitals in the files, and a case-sensitive find of the real
-// name is the same find of the fake. Off (the default, and every new tab),
-// case is ignored.
+// MATCH CASE reads the text as shown. The key writes a real name back in the
+// case of the pseudonym it replaces (mirrorCase), so a caption's "RASHO" is
+// found by a case-sensitive "RASHO" in a file that carries the fake in
+// capitals. Off (the default, and every new tab), case is ignored.
 function matchCase() { return $("fb-case").checked; }
-function findMatcherFor(q) { return PK.buildFindMatcher(findNeedles(q), { caseSensitive: matchCase() }); }
+function findMatcherFor(q) { return PK.buildFindMatcher([String(q || "").trim()], { caseSensitive: matchCase() }); }
+
+/**
+ * Another document of the folder as the screen would show it: the file as it
+ * is with Show fakes on, its fakes turned back to the real names with it off.
+ * The turning back is the page's own (`translate` is the run `buildBody` lays
+ * out) and costs a pass of the key over the whole file, so what it gives is
+ * kept per file while the file, the key and the folder stay as they were: a
+ * query asks every document again at each word typed.
+ */
+let findShown = { rev: null, docs: null, texts: new Map() };
+async function findTextOf(d) {
+  const file = await d.handle.getFile();
+  if (settings.showFakes || !rev) return file.text();
+  if (findShown.rev !== rev || findShown.docs !== folderDocs) findShown = { rev, docs: folderDocs, texts: new Map() };
+  const stamp = fileKeyOf(file);
+  const had = findShown.texts.get(d.handle);
+  if (had && had.stamp === stamp) return had.text;
+  const text = PK.translate(rev, await file.text()).text;
+  findShown.texts.set(d.handle, { stamp, text });
+  return text;
+}
 
 /** The open document's hits, read off the page the way the marks are. */
 function scanFindHere() {
@@ -4578,7 +4582,7 @@ async function scanFindFolder() {
         // into the document it had just left. The row is filtered out of the
         // "rest" instead, at the moment it is asked for (findRest).
         try {
-          const text = await (await d.handle.getFile()).text();
+          const text = await findTextOf(d);
           const n = rx ? countMatches(rx, text) : 0;
           if (n) rows.push({ doc: d, count: n });
         } catch { /* unreadable: it is not a document this search can answer */ }

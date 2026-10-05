@@ -673,15 +673,16 @@ app, which routes it to the reader tab.
   that has one** and stands on its first hit, round the folder from wherever
   it was started and back again. The bar says which hit of how many is in
   front, where it stands, and how many are in how many other documents.
-  **The folder is searched through the key.** What is on screen is the real
-  names; what is on disk is the pseudonyms. A search for a party's real name
-  therefore looks for the name as it reads in the open document, and for
-  whatever the key writes instead of it in the forty files it has not opened
-  — a name standing in the clear in one export and faked in another is found
-  in both. **With Show fakes on, a real name is found only where it stands
-  unfaked** — a leak, or a value kept where it stands — since the screen is
-  then the pseudonyms and a hit on one would mark a name the key did its job
-  on; the rest of the folder is counted the same way. Esc closes; 🔍 Find in
+  **Find finds what the screen shows.** The query is looked for as typed:
+  in this document as it reads, and in every other export as it would read
+  if the walk opened it. With the real names on screen, the other exports
+  are read **through the key**: the files carry the pseudonyms, so each is
+  searched with its fakes turned back to the names, and a name standing in
+  the clear in one export and faked in another is found in both. **With
+  Show fakes on, a real name is found only where it stands unfaked** (a
+  leak, or a value kept where it stands), and with it off a pseudonym is
+  found only where the key leaves it standing. A hit on the other face
+  would mark text that does not say what was typed. Esc closes; 🔍 Find in
   the tools rail opens it over whatever is selected.
 - **Replace, under Find (Ctrl+H).** **Replace…** on the find bar, or
   **Ctrl+H**, opens a second row: what to put in place of the hit.

@@ -70,13 +70,20 @@ earlier hits' nodes and offsets still hold. Match case (`#fb-case`, Alt+C)
 is `buildFindMatcher(values, { caseSensitive })`, which drops the `i` flag;
 `findMatcherFor` is the one place the page, the folder scan and Replace get
 their matcher, and the folder scan's `findScanFor` carries the flag so a
-toggle reads the folder again. `findNeedles` adds the key's fake of the query
-(`forwardText`) only with Show fakes off; on, the screen is the disk text, so
-the query is looked for as typed and a real name is hit only where it stands
-unfaked, in the page and in the folder count alike. `findScanFor.fakes`
-carries that view, and a scan whose question went stale while it ran
-(`findScanStale`, the view or the key turned) starts again rather than
-keeping counts that would walk into documents with no hit on screen.
+toggle reads the folder again. Find looks for the query as typed in the
+text as the screen shows it, never for the key's other face of it: the page
+is read off the DOM, and the folder scan reads each other export through
+`findTextOf`, which gives the file as it is with Show fakes on and
+`PK.translate(rev, …)` of it (the run `buildBody` lays out) with it off. So
+a real name with Show fakes on is hit only where it stands unfaked, and a
+pseudonym with it off only where the key leaves it standing (an ambiguous
+fake). The translated texts are kept in `findShown` per file handle, by
+`fileKeyOf` stamp, and dropped when `rev` or `folderDocs` changes: a pass of
+the key costs about 200 ms a megabyte under a 3,000-name key, and the folder
+is asked again at each word typed. `findScanFor.fakes` carries the view, and
+a scan whose question went stale while it ran (`findScanStale`, the view or
+the key turned) starts again rather than keeping counts that would walk into
+documents with no hit on screen.
 
 **A typed real name, and only a typed one** (`convertTypedReals`): the
 debounced converter marks a real name standing in a page's plain text as a
