@@ -637,10 +637,40 @@ const SHORTFORM_LEAD_RE =
 // Walk-back for plaintiff name (port of _walk_back_for_name)
 // ============================================================================
 
+// Capitalized words that open a SENTENCE ahead of a case name and never open a
+// party name. Walk-back takes any capitalized word for part of the name, so
+// "Discussing Quilala v. Securitas Security Services USA, Inc. (2025) 117
+// Cal.App.5th 75" was linked from "Discussing", and "However, Smith v. Jones"
+// from "However,". Words a party name does open on stay off this list, even
+// where a sentence opens on them too: "First" (First American Title), "Beyond"
+// (Beyond Meat), "Rather" (Rather v. CBS), "Building" (Building Industry Assn.).
+const SENTENCE_OPENERS = [
+  // A participle introducing what the court did with the case.
+  "addressing", "adopting", "affirming", "agreeing", "analyzing", "analysing",
+  "applying", "approving", "assessing", "characterizing", "citing",
+  "clarifying", "collecting", "comparing", "concluding", "considering",
+  "construing", "contrasting", "criticizing", "declining", "describing",
+  "disagreeing", "disapproving", "discussing", "distinguishing", "echoing",
+  "emphasizing", "endorsing", "evaluating", "examining", "explaining",
+  "extending", "following", "harmonizing", "highlighting", "interpreting",
+  "invoking", "noting", "observing", "overruling", "paraphrasing", "quoting",
+  "reaffirming", "reconciling", "recognizing", "rejecting", "relying",
+  "reversing", "reviewing", "summarizing", "tracing", "underscoring",
+  "upholding",
+  // A preposition or sentence adverb.
+  "absent", "accordingly", "additionally", "after", "alternatively", "before",
+  "consequently", "conversely", "despite", "finally", "furthermore", "hence",
+  "here", "however", "importantly", "indeed", "instead", "like", "likewise",
+  "moreover", "nevertheless", "nonetheless", "notably", "notwithstanding",
+  "regarding", "similarly", "specifically", "there", "therefore", "thus",
+  "ultimately", "under", "unlike", "whereas", "where", "whether",
+];
+
 const SIGNAL_PREFIXES = new Set([
   "see", "cf", "cf.", "per", "in", "but", "compare", "accord", "e.g.",
   "also", "n", "of", "the", "and", "to", "by", "for", "on", "with", "from",
   "as", "if", "when", "while", "since", "because", "though", "although",
+  ...SENTENCE_OPENERS,
 ]);
 
 // Words that name a court or a jurisdiction. Walk-back collects them when they
