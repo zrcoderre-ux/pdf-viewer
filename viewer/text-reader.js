@@ -5967,10 +5967,22 @@ $("nb-close").addEventListener("click", () => { const sweeping = !!pageSweep; sh
  * a decision about one is a decision about all of them. Held for the session,
  * through keeps taken on other names, and dropped when another case's key is
  * chosen or the folder is forgotten.
+ *
+ * A LEAKS row answered `yes` or `phrase` is the same answer given on the
+ * worksheet, and counts here for as long as the cell says it (sheetFakes): the
+ * walk does not stop on a name the worksheet has a row for, so a name answered
+ * there was otherwise never settled, and every save left it standing.
  */
 let settled = new Set(); // folded values the operator has said to fake
+let sheetFakes = new Set(); // …and the ones the LEAKS worksheet has (LK.fakeDecisions), LK.fold-ed
 function settledKey(v) { return String(v == null ? "" : v).trim().toLowerCase(); }
-function isSettled(v) { return settled.has(settledKey(v)); }
+function isSettled(v) { return settled.has(settledKey(v)) || sheetFakes.has(LK.fold(v)); }
+/** The worksheet's fakes read again off its rows: on attach, on every decision, on drop. True where they moved. */
+function refreshSheetFakes() {
+  const was = sheetFakes;
+  sheetFakes = leaks ? LK.fakeDecisions(leaks.parsed.rows) : new Set();
+  return was.size !== sheetFakes.size || [...was].some((v) => !sheetFakes.has(v));
+}
 function fakeName() {
   const hits = liveLeaks();
   if (!hits.length) { showNamesBar(false); return; }
@@ -7055,8 +7067,10 @@ $("flags-copy").addEventListener("click", async () => {
 // A `no` or `never` on a value the key binds is mirrored as one of the
 // reader's own keeps, so the orange mark goes and a save of the document
 // leaves the value as it stands — the two channels agreeing on the one
-// thing they both say. A `yes` is the worksheet's alone: it is never also
-// flagged into New Real Values.txt, which would hand PDF-Linker the same
+// thing they both say. A `yes` (or `phrase`) on one is the names walk's "fake
+// it" too, for the same reason (sheetFakes): the save writes its pseudonym
+// rather than leaving it and warning that nobody has decided it. It is never
+// also flagged into New Real Values.txt, which would hand PDF-Linker the same
 // value twice under two different rules.
 const leaksBar = $("leaks-bar");
 let leaks = null;          // { parsed, bytes, name, handle, folder, at, mirrored: Set }
@@ -7084,6 +7098,7 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" 
   if (leaks) persistLeaks();
   leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", at: -1, mirrored: new Set() };
   const remembered = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));
+  const faked = refreshSheetFakes(); // its `yes` rows, the sheet's own and the ones remembered
   mirrorLeakKeeps(parsed.rows.filter((r) => r.fix !== r.fix0));
   // A value PDF-Linker has now raised is a question asked on the worksheet, and
   // a keep that was answering nobody has a row to answer: it goes back on the
@@ -7095,6 +7110,7 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" 
   updateLeaksButton();
   if (!leaksBar.hidden) { const i = LK.nextUndecided(parsed.rows, null); await goToLeak(i >= 0 ? i : 0, { locate: false }); }
   else paintHighlights();
+  if (faked && doc) renderLeakStatus();
   warmForLeaks();
   const und = LK.undecidedCount(parsed.rows);
   if (!quiet) toast(`${name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}, ${und} to answer` + (remembered ? `, ${remembered} answered here and not yet saved` : "") + " — ⚠ Leaks to review them.");
@@ -7109,6 +7125,7 @@ function dropLeaks() {
   showLeaksBar(false);
   renderLeaksTab();
   updateLeaksButton();
+  if (refreshSheetFakes() && doc) renderLeakStatus(); // its `yes` rows are undecided again, and the count says so
 }
 
 function updateLeaksButton() {
@@ -7725,12 +7742,17 @@ function decideLeak(text, { advance = false } = {}) {
   row.fix = String(text == null ? "" : text).trim();
   decidedHere++;
   persistLeaks();
+  // A `yes` settles the name for the save; withdrawn, it is undecided again.
+  // Nothing on the page moves, so no paint follows to recount: the count, the
+  // walk and the Save button are told here, as "fake it" tells them.
+  const faked = refreshSheetFakes();
   mirrorLeakKeep(row);
   renderLeaksBar();
   paintLeakRow(leaks.at);
   renderLeaksTabState();
   updateLeaksButton();
   paintHighlights();
+  if (faked && doc) renderLeakStatus();
   warmForLeaks();
   if (!advance) return;
   const n = LK.nextUndecided(leakRows(), leaks.at);
