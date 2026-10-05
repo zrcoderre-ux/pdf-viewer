@@ -251,7 +251,11 @@ app, which routes it to the reader tab.
   gutter number and any blank line between — is matched as one: the reader
   shows the real name half on each line (the tooltip names the whole), a
   wrapped real is one leak, and a save writes the fake line by line with
-  the numbers untouched. A real name that should stay — a cited decision
+  the numbers untouched. A pseudonym wrapped inside a COLUMN — a caption's
+  party name with the `)` and the case number beside its first half, or a
+  name at the end of a line of a page set in two columns — is shown the same
+  way, half on each line and the other column left where it stands. (A real
+  name wrapped that way is not yet marked as a leak.) A real name that should stay — a cited decision
   bearing a party's surname — is **kept** from the orange mark itself:
   right-click it (or select it and take **Keep…**), and *keep in this case*
   or *never fake it* leaves it as it stands, on save and on PDF-Linker's

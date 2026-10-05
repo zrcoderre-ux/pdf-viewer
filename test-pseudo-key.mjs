@@ -167,6 +167,67 @@ console.log("across lines");
   check("foldGaps reads the gap as a space", foldGaps("Helen\n 5  Rasho"), "Helen Rasho");
 }
 
+// ---- a name wrapped inside a column ---------------------------------------------
+//
+// A caption's left-hand column wraps a name with the other column between its
+// halves: "…; and QUARRY     )  Case No.", then "OPALRIDGE DOVEWOOD CASCADIA,"
+// under it. The gap reading could not cross the ")" and the case number, so
+// the name stood in its fake.
+console.log("\ninside a column");
+{
+  const k = keyOf([
+    ["person", "Jonathan Avery Smith Walker", "Quarry Opalridge Dovewood Cascadia", "", "", "", 5],
+    ["person-token", "Walker", "Cascadia", "", "", "", 9],
+    ["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 12],
+  ]);
+  const c = compile(k);
+  const show = (t) => translateRuns(c, t).map((x) => x.t === "swap" ? "[" + x.from + ">" + x.to + "]" : x.s).join("");
+  const swaps = (t) => translateRuns(c, t).filter((x) => x.t === "swap").map((x) => x.from + ">" + x.to + (x.whole ? " " + x.piece + "/" + x.pieces : ""));
+  const L = (n, a, b) => String(n).padStart(2) + "  " + a.padEnd(50) + b;
+  const caption = [
+    L(10, "INGRID STRANGEWAYS, an individual; and QUARRY", ")  Case No.: 25STCV59720"),
+    L(11, "OPALRIDGE DOVEWOOD CASCADIA, an", ")"),
+    L(12, "individual,", ")  COMPLAINT FOR:"),
+  ].join("\n");
+  check("a caption's ')' column between the halves: one name, a piece per line",
+    swaps(caption), ["INGRID STRANGEWAYS>HELEN RASHO", "QUARRY>JONATHAN 0/2", "OPALRIDGE DOVEWOOD CASCADIA>AVERY SMITH WALKER 1/2"]);
+  check("…the other column, the line break and the number stay as they stand",
+    translateRuns(c, caption).map((x) => x.t === "swap" ? x.from : x.s).join(""), caption);
+  check("…the whole name rides on each piece",
+    translateRuns(c, caption).filter((x) => x.whole).map((x) => foldGaps(x.whole.from)), ["QUARRY OPALRIDGE DOVEWOOD CASCADIA", "QUARRY OPALRIDGE DOVEWOOD CASCADIA"]);
+  check("…counted once", translate(c, caption).count, 2);
+  check("a box's bar between the halves",
+    swaps(" 4  Plaintiff Quarry            │ Case No.\n 5  Opalridge Dovewood Cascadia,  │"), ["Quarry>Jonathan 0/2", "Opalridge Dovewood Cascadia>Avery Smith Walker 1/2"]);
+  check("a wide blank before the other column",
+    swaps(" 4  Plaintiff Quarry                Case No. 1\n 5  Opalridge Dovewood Cascadia,"), ["Quarry>Jonathan 0/2", "Opalridge Dovewood Cascadia>Avery Smith Walker 1/2"]);
+  check("a name wrapped in the RIGHT-hand column, its rest under it there",
+    swaps(L(4, "INGRID STRANGEWAYS,", ")  Plaintiff QUARRY") + "\n" + L(5, "", ")  OPALRIDGE DOVEWOOD CASCADIA")),
+    ["INGRID STRANGEWAYS>HELEN RASHO", "QUARRY>JONATHAN 0/2", "OPALRIDGE DOVEWOOD CASCADIA>AVERY SMITH WALKER 1/2"]);
+  const two = L(4, "the left column runs to Quarry", "Ingrid Strangeways said") + "\n" + L(5, "Opalridge Dovewood Cascadia went", "so on the right");
+  check("the other column's name between the pieces is swapped where it stands",
+    show(two), two.replace("Quarry", "[Quarry>Jonathan]").replace("Ingrid Strangeways", "[Ingrid Strangeways>Helen Rasho]").replace("Opalridge Dovewood Cascadia", "[Opalridge Dovewood Cascadia>Avery Smith Walker]"));
+  const J = (n, a, b) => String(n).padStart(2) + "  " + a.padEnd(36) + "  " + b;
+  check("a page in two columns two spaces apart, the lines beside it starting there too",
+    swaps([J(4, "the left column ends on a Quarry", "the right column"), J(5, "Opalridge Dovewood Cascadia went on", "runs down here"), J(6, "and the left column goes on", "and so on")].join("\n")),
+    ["Quarry>Jonathan 0/2", "Opalridge Dovewood Cascadia>Avery Smith Walker 1/2"]);
+  check("two spaces after a full stop are no column: only the surname token",
+    swaps(" 4  He sued Quarry  and others\n 5  Opalridge Dovewood Cascadia said."), ["Cascadia>Walker"]);
+  check("down three lines of a column",
+    swaps([L(10, "QUARRY", ")  Case"), L(11, "OPALRIDGE DOVEWOOD", ")  No."), L(12, "CASCADIA, an", ")  1")].join("\n")),
+    ["QUARRY>JONATHAN 0/3", "OPALRIDGE DOVEWOOD>AVERY SMITH 1/3", "CASCADIA>WALKER 2/3"]);
+  check("a blank numbered line between the halves is passed over",
+    swaps([L(10, "and QUARRY", ")  Case"), "11", L(12, "OPALRIDGE DOVEWOOD CASCADIA", ")")].join("\n")),
+    ["QUARRY>JONATHAN 0/2", "OPALRIDGE DOVEWOOD CASCADIA>AVERY SMITH WALKER 1/2"]);
+  check("the rest indented past the column's start is not its rest",
+    swaps([L(10, "and QUARRY", ")  Case"), L(11, "        OPALRIDGE DOVEWOOD CASCADIA", ")")].join("\n")), ["CASCADIA>WALKER"]);
+  check("the rest in the other column is not its rest",
+    swaps([L(10, "and QUARRY", ")  Case"), L(11, "", ")  OPALRIDGE DOVEWOOD CASCADIA")].join("\n")), ["CASCADIA>WALKER"]);
+  check("the plain wrap is read as it always was",
+    translateRuns(c, " 8  Plaintiff Ingrid\n 9  Strangeways moved.").map((x) => x.t === "text" ? x.s : "*"), [" 8  Plaintiff ", "*", "\n 9  ", "*", " moved."]);
+  check("a save's forward pass is not read in columns",
+    forwardRuns(compileForward(k), L(10, "and Jonathan", ")  Case") + "\n" + L(11, "Avery Smith Walker, an", ")")).filter((x) => x.t === "swap").map((x) => x.to), ["Cascadia"]);
+}
+
 // ---- a key of thousands of names -------------------------------------------------
 //
 // One alternation over every value was two disasters at a few thousand of

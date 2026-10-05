@@ -4841,11 +4841,14 @@ function keyPairOf(term) {
  */
 function keyTerms() {
   const terms = new Map();
-  let open = null; // a wrapped name: its later pieces belong to the place its first piece opened
+  // A wrapped name: its later pieces belong to the place its first piece
+  // opened. By name, because a name wrapped down a column can have the other
+  // column's names between its pieces.
+  const open = new Map();
   for (const s of pagesEl.querySelectorAll(".pn")) {
     const term = PK.fold(pnFake(s));
     const piece = s.dataset.piece;
-    if (piece && !piece.startsWith("0/") && open && open.term === term) { open.spans.push(s); continue; }
+    if (piece && !piece.startsWith("0/") && open.has(term)) { open.get(term).push(s); continue; }
     let t = terms.get(term);
     if (!t) {
       const p = keyPairOf(term);
@@ -4854,7 +4857,7 @@ function keyTerms() {
     }
     const spans = [s];
     t.at.push(spans);
-    open = piece ? { term, spans } : null;
+    if (piece) open.set(term, spans); else open.delete(term);
   }
   return [...terms.values()];
 }
@@ -6342,13 +6345,19 @@ function wrappedPieces(span) {
   const mine = pieceOf(span);
   const at = all.indexOf(span);
   const out = [span];
-  for (let i = at - 1, want = mine - 1; i >= 0 && want >= 0; i--, want--) {
-    if (!same(all[i]) || pieceOf(all[i]) !== want) break;
+  // Another name can stand between two pieces — the other column's, where the
+  // name is wrapped down a column — so those are passed over.
+  for (let i = at - 1, want = mine - 1; i >= 0 && want >= 0; i--) {
+    if (!same(all[i])) continue;
+    if (pieceOf(all[i]) !== want) break;
     out.unshift(all[i]);
+    want--;
   }
-  for (let i = at + 1, want = mine + 1; i < all.length && want < count; i++, want++) {
-    if (!same(all[i]) || pieceOf(all[i]) !== want) break;
+  for (let i = at + 1, want = mine + 1; i < all.length && want < count; i++) {
+    if (!same(all[i])) continue;
+    if (pieceOf(all[i]) !== want) break;
     out.push(all[i]);
+    want++;
   }
   return out;
 }

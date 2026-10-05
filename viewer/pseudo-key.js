@@ -24,7 +24,9 @@
 //                   reading both retires the live one.
 //   compile / translate / translateRuns   fake → real for DISPLAY. Longest
 //                   fake first, whole words only, case-insensitive, and the
-//                   real is written in the case the fake was written in.
+//                   real is written in the case the fake was written in. A
+//                   name wrapped down a column (a caption's, with the other
+//                   column between its halves) is one name (columnHits).
 //   compileForward / forwardRuns   real → fake, the direction a SAVE needs:
 //                   a real name typed into the reader is written to disk as
 //                   its pseudonym, never as itself.
@@ -661,26 +663,38 @@ function lookup(compiled, m) {
 }
 
 /**
- * A match that crosses lines, as one swap PER LINE: the matched text is cut
- * at its line gaps (the gutter numbers stay in the text between), and the
- * replacement's words are dealt out to the pieces by the words each piece
- * carried — word for word where the counts agree, else the whole
- * replacement on the first piece and nothing on the rest. Every piece
- * carries `whole`, the match and its replacement entire, for a tooltip or a
- * keep that is about the name and not its half.
+ * The places a match covers, a piece per line: the matched text cut at its
+ * line gaps, which stay in the text between (the gutter numbers with them).
+ * → [[start, end), …] into the text the match was made in.
  */
-function pieceRuns(matched, to) {
-  const gaps = [...matched.matchAll(LINE_GAP_RE)];
-  if (!gaps.length) return [{ t: "swap", from: matched, to }];
-  const pieces = [];
+function lineRanges(start, matched) {
+  const out = [];
   let at = 0;
-  for (const g of gaps) {
-    if (g.index > at) pieces.push({ t: "swap", from: matched.slice(at, g.index) });
-    pieces.push({ t: "text", s: g[0] });
+  for (const g of matched.matchAll(LINE_GAP_RE)) {
+    if (g.index > at) out.push([start + at, start + g.index]);
     at = g.index + g[0].length;
   }
-  if (at < matched.length) pieces.push({ t: "swap", from: matched.slice(at) });
-  const swaps = pieces.filter((r) => r.t === "swap");
+  if (at < matched.length) out.push([start + at, start + matched.length]);
+  return out;
+}
+
+/** The replacement for a match, in the case the match was written in. */
+function swapTo(hit, matched) {
+  const core = hit.suffix ? matched.slice(0, -hit.suffix.length) : matched;
+  const shape = caseShape(foldGaps(core));
+  return applyCase(shape, hit.mapped) + casedSuffix(shape, hit.suffix);
+}
+
+/**
+ * A match that crosses lines is one swap PER LINE, and the replacement's
+ * words are dealt out to the pieces by the words each piece carried — word
+ * for word where the counts agree, else the whole replacement on the first
+ * piece and nothing on the rest. Every piece carries `whole`, the match and
+ * its replacement entire, for a tooltip or a keep that is about the name and
+ * not its half.
+ */
+function dealOut(swaps, to, matched) {
+  if (swaps.length === 1) { swaps[0].to = to; return; }
   const counts = swaps.map((r) => r.from.trim().split(/\s+/).filter(Boolean).length);
   const words = to.split(" ").filter(Boolean);
   const whole = { from: matched, to };
@@ -689,7 +703,227 @@ function pieceRuns(matched, to) {
     swaps.forEach((r, k) => { r.to = words.slice(i, i + counts[k]).join(" "); i += counts[k]; });
   } else swaps.forEach((r, k) => { r.to = k === 0 ? to : ""; });
   swaps.forEach((r, k) => { r.whole = whole; r.piece = k; r.pieces = swaps.length; });
-  return pieces;
+}
+
+/** Every match the key makes in `text`: [{ ranges, whole, to }], in order. */
+function matchHits(compiled, text) {
+  const hits = [];
+  const rx = compiled.rx;
+  rx.lastIndex = 0;
+  let m;
+  while ((m = rx.exec(text))) {
+    const hit = lookup(compiled, m[0]);
+    if (hit) hits.push({ ranges: lineRanges(m.index, m[0]), whole: m[0], to: swapTo(hit, m[0]) });
+    if (m.index === rx.lastIndex) rx.lastIndex++;
+  }
+  return hits;
+}
+
+// ---- a name wrapped inside a column ------------------------------------------
+//
+// A caption sets the parties in a column of their own and the case number
+// beside them, and the export writes each line of the page as one line of
+// text: the left-hand column's words, a ")" or a "│" or a wide blank, then the
+// right-hand column's. A name wrapped INSIDE the left-hand column — "…; and
+// QUARRY" on one line, "OPALRIDGE DOVEWOOD CASCADIA, an" under it — has the
+// rest of its first line between its halves ("     )  Case No.: 25STCV59720",
+// the line break, the next gutter number). A gap is not that, so the matcher
+// saw two halves no row binds, and the name stood in its fake. A page set in
+// two columns does the same to a name at the end of a line of either one.
+//
+// So the display reads each line in CELLS as well: its text cut where a
+// column is drawn — a caption's ")" standing in a blank, a box's bar, three
+// spaces or more, or two where a line beside it has a column starting at the
+// same place — and a cell that stands beside another is read
+// on into the cell under it: the first cell of the next line (blank lines
+// passed over) that starts inside the same column and no further in than it
+// does. A name found across that seam is one name, a swap per cell, and the
+// text between the pieces stays where it stands, the other column's names
+// still swapped in it. The cells are read only where a column is: a plain
+// line's wrap is the gap's, and the plain pass above already has it.
+
+const CELL_MARK = "\u0000";
+const CELL_GUTTER_RE = /^ ?\d{1,2}(?=[ ]{2,}\S|[ ]*$)/;
+const CAPTION_PAREN_RE = /(^|[ \t]{2,})\)(?=[ \t]|$)/g;
+const CELL_BAR_RE = /[│┃║|]/g;
+const CELL_TEXT_RE = /[^ \t\u0000]+(?: [^ \t\u0000]+)*/g;
+const MAY_CUT_RE = /\S(?:[ \t]{2,}|\t)\S|[│┃║|]|^[ \t]*\)/;
+// How much further in than the cell above its continuation may start: an
+// OCR'd page sets a column a character or two off from line to line.
+const CELL_SLACK = 2;
+// The most lines one name is read down a column, and the blank lines passed
+// over between two of them.
+const CELL_CHAIN = 4;
+const CELL_BLANKS = 2;
+
+/**
+ * A line's cells: [{ from, to, edge, sep }], offsets into the line. `edge` is
+ * where the column's blank begins — the end of the text before the cell, or
+ * the ")" or bar that opens a line whose left-hand column is empty; -1 for a
+ * cell at the margin. `sep` is the blank before it: "margin", "weak" (two
+ * spaces, a column only if a line beside it says so) or "strong".
+ */
+function rawCells(line) {
+  let s = line.endsWith("\r") ? line.slice(0, -1) : line;
+  const g = s.match(CELL_GUTTER_RE);
+  if (g) s = " ".repeat(g[0].length) + s.slice(g[0].length);
+  // Most lines are one run of prose: no wide blank, tab or bar past the
+  // margin, so one cell at the margin, or none.
+  if (!MAY_CUT_RE.test(s)) {
+    const from = s.search(/\S/);
+    return from < 0 ? [] : [{ from, to: s.trimEnd().length, edge: -1, sep: "margin" }];
+  }
+  s = s.replace(CAPTION_PAREN_RE, (all, pre) => pre + CELL_MARK).replace(CELL_BAR_RE, CELL_MARK);
+  const cells = [];
+  let prev = -1;
+  for (const m of s.matchAll(CELL_TEXT_RE)) {
+    const from = m.index;
+    const blank = s.slice(prev < 0 ? 0 : prev, from);
+    const mark = blank.indexOf(CELL_MARK);
+    let sep;
+    if (prev < 0 && mark < 0) sep = "margin";
+    else if (mark >= 0 || blank.length >= 3 || blank.indexOf("\t") >= 0) sep = "strong";
+    else sep = "weak";
+    cells.push({ from, to: from + m[0].length, edge: prev >= 0 ? prev : mark, sep });
+    prev = from + m[0].length;
+  }
+  return cells;
+}
+
+/**
+ * Every line's cells, a weak cut kept only where a line next to it has a
+ * column starting there too — two spaces after a full stop are not a column.
+ */
+function pageCells(lines) {
+  const raw = lines.map(rawCells);
+  const opens = (i, at) => i >= 0 && i < raw.length &&
+    raw[i].some((c) => c.sep !== "margin" && Math.abs(c.from - at) <= 1);
+  return raw.map((cells, i) => {
+    const out = [];
+    for (const c of cells) {
+      if (c.sep === "weak" && out.length && !opens(i - 1, c.from) && !opens(i + 1, c.from)) {
+        out[out.length - 1] = Object.assign({}, out[out.length - 1], { to: c.to });
+      } else out.push(c);
+    }
+    return out;
+  });
+}
+
+// The most words any value of a compiled key runs to: a name that crosses out
+// of a cell begins no further back in it than that, less one.
+const MOST_WORDS = new WeakMap();
+function mostWords(compiled) {
+  let n = MOST_WORDS.get(compiled);
+  if (n == null) {
+    n = 1;
+    for (const k of compiled.map.keys()) n = Math.max(n, k.split(" ").length);
+    MOST_WORDS.set(compiled, n);
+  }
+  return n;
+}
+/** Where in `s` its last `n` words begin. */
+function lastWordsAt(s, n) {
+  let at = s.length;
+  for (let k = 0; k < n; k++) {
+    let sp = s.lastIndexOf(" ", at - 1);
+    if (sp < 0) return 0;
+    while (sp > 0 && s[sp - 1] === " ") sp--; // two spaces are one gap
+    at = sp;
+  }
+  while (s[at] === " ") at++;
+  return at;
+}
+
+/**
+ * The names the key makes across a column's line breaks:
+ * [{ ranges, whole, to }], one range per cell the name stands in.
+ */
+function columnHits(compiled, text) {
+  const hits = [];
+  if (text.indexOf("\n") < 0) return hits;
+  const lines = text.split("\n");
+  const starts = [];
+  for (let i = 0, at = 0; i < lines.length; i++) { starts.push(at); at += lines[i].length + 1; }
+  const cells = pageCells(lines);
+  const rx = compiled.rx;
+  const reach = mostWords(compiled) - 1;
+  if (reach < 1) return hits;
+  // The cell under `c` (on line `i`): the next line with text, passing over
+  // blank ones, and in it the first cell that starts inside c's column.
+  const below = (i, c) => {
+    for (let j = i + 1, blanks = 0; j < lines.length; j++) {
+      if (!cells[j].length) { if (++blanks > CELL_BLANKS) return null; continue; }
+      const next = cells[j].find((d) => d.from > c.edge && d.from <= c.from + CELL_SLACK);
+      return next ? { i: j, c: next } : null;
+    }
+    return null;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const row = cells[i];
+    for (let k = 0; k < row.length; k++) {
+      const cell = row[k];
+      // A cell alone on its line, at the margin, is a plain line.
+      if (k === row.length - 1 && cell.sep === "margin") continue;
+      const chain = [{ i, c: cell }];
+      for (let at = chain[0]; chain.length < CELL_CHAIN && (at = below(at.i, at.c));) chain.push(at);
+      if (chain.length < 2) continue;
+      // The column as one text, its cells a line apart, so the gap between
+      // the words of a value crosses from one cell into the next. The first
+      // cell from as far back as a crossing name can begin, and no further.
+      let v = "";
+      const parts = chain.map(({ i: li, c }, q) => {
+        if (q) v += "\n";
+        const p = { abs: starts[li] + c.from, len: c.to - c.from, v: v.length };
+        if (!q) {
+          const cut = lastWordsAt(text.substr(p.abs, p.len), reach);
+          p.abs += cut;
+          p.len -= cut;
+        }
+        v += text.substr(p.abs, p.len);
+        return p;
+      });
+      const end0 = parts[0].v + parts[0].len;
+      rx.lastIndex = 0;
+      let m;
+      while ((m = rx.exec(v))) {
+        if (m.index >= end0) break;
+        const end = m.index + m[0].length;
+        const hit = end > parts[1].v ? lookup(compiled, m[0]) : null;
+        if (hit) {
+          const ranges = parts
+            .filter((p) => p.v < end && p.v + p.len > m.index)
+            .map((p) => [p.abs + Math.max(m.index, p.v) - p.v, p.abs + Math.min(end, p.v + p.len) - p.v]);
+          hits.push({ ranges, whole: m[0], to: swapTo(hit, m[0]) });
+        }
+        if (m.index === rx.lastIndex) rx.lastIndex++;
+      }
+    }
+  }
+  rx.lastIndex = 0;
+  return hits;
+}
+
+const overlaps = (a, b) => a.ranges.some(([s, e]) => b.ranges.some(([t, f]) => s < f && t < e));
+
+/**
+ * The column's names laid over the plain pass's. A name across a column's
+ * seam is the longer reading of the words it covers, so it takes them from
+ * whatever the plain pass made of them (a surname token, say) — unless the
+ * plain pass found a name that starts BEFORE it and runs into its first
+ * piece, which was the leftmost reading there. Two column readings that
+ * share a word keep the earlier.
+ */
+function withColumns(hits, cols) {
+  if (!cols.length) return hits;
+  const taken = [];
+  cols.sort((a, b) => a.ranges[0][0] - b.ranges[0][0]);
+  for (const c of cols) {
+    const [s0, e0] = c.ranges[0];
+    if (taken.some((t) => overlaps(t, c))) continue;
+    if (hits.some((h) => h.ranges[0][0] < s0 && h.ranges.some(([s, e]) => s < e0 && s0 < e))) continue;
+    taken.push(c);
+  }
+  return hits.filter((h) => !taken.some((t) => overlaps(t, h))).concat(taken);
 }
 
 /**
@@ -699,28 +933,28 @@ function pieceRuns(matched, to) {
  *                                             `to` written in its case
  * A single pass — replaced text is never re-scanned. The reader renders a
  * `swap` as a marked span and writes `from` back to disk, which is how the
- * real names live on top of the file and never in it.
+ * real names live on top of the file and never in it. `columns`: read names
+ * wrapped inside a column too (columnHits), whose pieces can have another
+ * column's text, and its names, between them.
  */
-function runsWith(compiled, text) {
+function runsWith(compiled, text, { columns = false } = {}) {
   const out = [];
   if (!text) return out;
   if (!compiled || !compiled.rx) return [{ t: "text", s: text }];
-  const rx = compiled.rx;
-  rx.lastIndex = 0;
+  let hits = matchHits(compiled, text);
+  if (columns) hits = withColumns(hits, columnHits(compiled, text));
+  const places = [];
+  for (const h of hits) {
+    const swaps = h.ranges.map(([a, b]) => ({ t: "swap", from: text.slice(a, b) }));
+    dealOut(swaps, h.to, h.whole);
+    swaps.forEach((r, k) => places.push({ at: h.ranges[k], run: r }));
+  }
+  places.sort((a, b) => a.at[0] - b.at[0]);
   let at = 0;
-  let m;
-  while ((m = rx.exec(text))) {
-    const hit = lookup(compiled, m[0]);
-    if (!hit) {
-      if (m.index === rx.lastIndex) rx.lastIndex++;
-      continue;
-    }
-    if (m.index > at) out.push({ t: "text", s: text.slice(at, m.index) });
-    const core = hit.suffix ? m[0].slice(0, -hit.suffix.length) : m[0];
-    const shape = caseShape(foldGaps(core));
-    out.push(...pieceRuns(m[0], applyCase(shape, hit.mapped) + casedSuffix(shape, hit.suffix)));
-    at = m.index + m[0].length;
-    if (m.index === rx.lastIndex) rx.lastIndex++;
+  for (const { at: [a, b], run } of places) {
+    if (a > at) out.push({ t: "text", s: text.slice(at, a) });
+    out.push(run);
+    at = b;
   }
   if (at < text.length) out.push({ t: "text", s: text.slice(at) });
   return out;
@@ -728,7 +962,7 @@ function runsWith(compiled, text) {
 
 /** fake → real, as runs. The reader's display. */
 export function translateRuns(compiled, text) {
-  return runsWith(compiled, text);
+  return runsWith(compiled, text, { columns: true });
 }
 
 /** real → fake, as runs. What a save writes. */
@@ -738,7 +972,7 @@ export function forwardRuns(compiledForward, text) {
 
 /** Display translation as one string. Returns { text, count }. */
 export function translate(compiled, text) {
-  const runs = runsWith(compiled, text);
+  const runs = runsWith(compiled, text, { columns: true });
   let count = 0;
   let out = "";
   for (const r of runs) {

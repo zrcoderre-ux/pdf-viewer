@@ -109,6 +109,34 @@ same catches a short form the converter marked in a pause before "supra". A
 mark the page was built with is never one of them, so an undo that restores
 one leaves it.
 
+**A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
+the parties in a column beside the case number, and the export writes each
+line whole — "…; and QUARRY", the blank, ")  Case No.: 25STCV59720" — with
+"OPALRIDGE DOVEWOOD CASCADIA, an" on the next line. The value's gap (a run of
+blank, a line break, the next gutter number) cannot cross the other column, so
+the halves were two words no row binds and the name stood in its fake. The
+display direction (`translateRuns`, `translate`) now also reads each line in
+cells (`rawCells`, `pageCells`): cut at a caption's ")" or a box's bar with a
+blank before it, at three spaces or more, or at two where a line beside it has
+a column starting at the same place (so two spaces after a full stop are not a
+column). A cell with another cell beside it is read on into the cell under it:
+the next line with text (up to CELL_BLANKS blank lines passed over), its first
+cell that starts inside the same column and no more than CELL_SLACK further in.
+Only the last `mostWords - 1` words of the first cell are read, since nothing
+earlier can cross. A name found across that seam is one swap per cell, with
+`whole` on each piece as for a plain wrap, and the text between the pieces
+(the other column, the break, the number) stays in place with its own names
+swapped. `withColumns` lets such a name take its words from the plain pass's
+reading (a surname token), except where the plain pass found a name that
+starts earlier and runs into the first piece. Because another column's names
+can now sit between the pieces of one name, `keyTerms` collects later pieces
+by name, not by the previous span, and `wrappedPieces` passes over other
+spans. The forward pass (`forwardRuns`, the save) and the leak scan
+(`findRealSpans`) still read only plain wraps, so a REAL name wrapped down a
+column is not marked. Cost: about 6 ms on 567 KB of prose under a 3,000-name
+key, because a line with no wide blank or bar past its gutter is one cell
+(`MAY_CUT_RE`) and is never cut.
+
 **⇄ Raw** (`.raw-page`, on every page label, between `.swap-page` and
 `.nocr-page`; it replaced the toolbar's 📄 File as text panel) puts the page's
 own text in the page's place, the way ⇄ PDF puts its PDF page there.
