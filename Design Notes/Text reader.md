@@ -114,28 +114,77 @@ the parties in a column beside the case number, and the export writes each
 line whole — "…; and QUARRY", the blank, ")  Case No.: 25STCV59720" — with
 "OPALRIDGE DOVEWOOD CASCADIA, an" on the next line. The value's gap (a run of
 blank, a line break, the next gutter number) cannot cross the other column, so
-the halves were two words no row binds and the name stood in its fake. The
-display direction (`translateRuns`, `translate`) now also reads each line in
-cells (`rawCells`, `pageCells`): cut at a caption's ")" or a box's bar with a
-blank before it, at three spaces or more, or at two where a line beside it has
-a column starting at the same place (so two spaces after a full stop are not a
+the halves were two words no row binds: a fake stood on screen as itself, and a
+REAL name wrapped that way was neither marked nor faked by the save. Every
+reading now goes through one scan, `hitsFrom`, which can also read each line in
+cells (`rawCells`, `pageCells`): cut at a caption's ")" standing in a blank or a
+box's bar, at three spaces or more, or at two where a line beside it has a
+column starting at the same place (so two spaces after a full stop are not a
 column). A cell with another cell beside it is read on into the cell under it:
 the next line with text (up to CELL_BLANKS blank lines passed over), its first
-cell that starts inside the same column and no more than CELL_SLACK further in.
-Only the last `mostWords - 1` words of the first cell are read, since nothing
-earlier can cross. A name found across that seam is one swap per cell, with
-`whole` on each piece as for a plain wrap, and the text between the pieces
-(the other column, the break, the number) stays in place with its own names
-swapped. `withColumns` lets such a name take its words from the plain pass's
-reading (a surname token), except where the plain pass found a name that
-starts earlier and runs into the first piece. Because another column's names
-can now sit between the pieces of one name, `keyTerms` collects later pieces
-by name, not by the previous span, and `wrappedPieces` passes over other
-spans. The forward pass (`forwardRuns`, the save) and the leak scan
-(`findRealSpans`) still read only plain wraps, so a REAL name wrapped down a
-column is not marked. Cost: about 6 ms on 567 KB of prose under a 3,000-name
-key, because a line with no wide blank or bar past its gutter is one cell
-(`MAY_CUT_RE`) and is never cut.
+cell in the same drawn column (`col`, the marks before it) that starts no more
+than CELL_SLACK further in, measured from its mark (`rel`). Following the mark
+rather than the character position matters because a name swapped earlier on a
+line moves the ")" with it. Only the last `mostWords - 1` words of the first
+cell are read, since nothing earlier can cross, and a seam whose cell ends or
+starts in a blanked stretch (a fake, a keep) is not crossed. A column name takes
+its words from whatever the plain pass made of them (a surname token): the
+plain hits it touches are dropped (`touchesPieces`), and two column names that
+share a word keep the earlier. It comes out as a range per cell (`ranges`, and
+`start`/`end` spanning the other column between them), and the column names are
+memoised per text (`columnNames`) so the marks' handfuls read them once.
+
+The cells are read off a LAYOUT, the text as it stands in the file, because
+the readings that find real names blank the fakes and spot keeps to spaces
+(`diskReading`), and a blanked fake would otherwise look like a wide gap and
+cut a false column. The display (`translateRuns`, `translate`) uses its own
+text. The save's forward pass (`forwardSwaps`, `forwardRuns(..., { layout })`),
+`standingSpans`, the save's final check (`findReals` against the export about
+to be written), the folder sweep (`textdoc.clearReading`, `mask(flat, raw)`),
+the ⇄ Raw marks (`fillRaw`) and `maskKept` (a kept value wrapped down a column
+is masked piece by piece, `findColumnSpans`) all pass the unblanked text. The
+orange marks (`scanPassNow`) now read the DISK text exactly as `standingSpans`
+does, through `serializeHeld(body, { mapped: true })`, whose `segs` map each
+hit's pieces back to the page's text nodes. Read off the screen instead, a real
+name painted over a fake moves the rest of its line, and the save would find a
+column name the marks did not. Each leak hit carries `pieces`
+(`piecesOf`): the highlight, `leakAt`/`leakIn` (right-click, selection), the
+walk's current stop (`leakHerePieces`) and keep-here (`keepRangeHere` takes a
+list) use the pieces, so the other column's words are never marked or kept.
+The screenshot reads the disk text the same way. `forwardText` counts names,
+not pieces. Because another column's names can sit between the pieces of one
+name, `keyTerms` collects later pieces by name, not by the previous span, and
+`wrappedPieces` passes over other spans. Cost: about 6 ms on 567 KB of prose
+under a 3,000-name key for the display, and a few ms for the leak reading,
+because a line with no wide blank or bar past its gutter is one cell
+(`MAY_CUT_RE`) and is never cut. Not read in columns: the LEAKS worksheet's row
+marks (`leakMatches`), the flagged values' red marks, and the redaction sweep
+over a PDF's text layer, whose text has no column gaps to read.
+
+**Taking a value off the Master Keep** (`withdrawMaster`): a value the master
+workbook (`Master Leaks.xlsx`, its KEEP sheet) keeps is left alone in every
+case, so the reader does not mark it, the walk does not stop on it and the save
+does not fake it. It can be withdrawn from the reader three ways: the × beside
+it in the Flagged panel's list of values held against the key (`renderMaster`),
+**Remove from Master Keep** in the selection pop-up when the selection stands
+in one (`masterHeldIn`: a pseudonym whose real value it keeps, or a kept value
+the key binds whose occurrence overlaps the selection), and **Remove from the
+Master Keep** in the right-click menu over one. After a `confirm` (it is a
+decision about every case; write access is asked for first, while the click is
+fresh), the value leaves `masterKeeps` and the key is compiled again, so where
+it stands in the clear it is marked and can be faked. The workbook is then
+written where the reader can (`masterWritable`, `writeMasterWithdrawn`): the
+file is read again as it is now, `leaks.masterWithdrawEdits` empties the Fix?
+cell of each KEEP row that keeps the value whole, and `XW.writeSheetCells`
+writes just those cells into the original zip. The result is read back, and
+written only if every other keep is unchanged. The row and its history stay,
+because removing a row would shift every row below it and the ranges
+PDF-Linker hangs on the sheet. An empty Fix? is no decision, so PDF-Linker's
+next run no longer keeps the value either. A workbook opened as a copy (the
+file input, `masterInfo.loose`), a refused permission or a failed write leaves
+the value off for this session only, and the toast says so. The list is drawn
+again whenever a marks pass changes which kept values stand on the page
+(`keptSeen`); it used to wait for the next `renderFlags`.
 
 **⇄ Raw** (`.raw-page`, on every page label, between `.swap-page` and
 `.nocr-page`; it replaced the toolbar's 📄 File as text panel) puts the page's

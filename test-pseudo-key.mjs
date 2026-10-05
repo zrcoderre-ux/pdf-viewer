@@ -224,8 +224,78 @@ console.log("\ninside a column");
     swaps([L(10, "and QUARRY", ")  Case"), L(11, "", ")  OPALRIDGE DOVEWOOD CASCADIA")].join("\n")), ["CASCADIA>WALKER"]);
   check("the plain wrap is read as it always was",
     translateRuns(c, " 8  Plaintiff Ingrid\n 9  Strangeways moved.").map((x) => x.t === "text" ? x.s : "*"), [" 8  Plaintiff ", "*", "\n 9  ", "*", " moved."]);
-  check("a save's forward pass is not read in columns",
+  check("a forward pass not asked to is not read in columns",
     forwardRuns(compileForward(k), L(10, "and Jonathan", ")  Case") + "\n" + L(11, "Avery Smith Walker, an", ")")).filter((x) => x.t === "swap").map((x) => x.to), ["Cascadia"]);
+  // A name swapped earlier on a line moves everything after it on that line,
+  // the ")" with it: the column the ")" draws is followed by the mark, not by
+  // where the mark happens to stand.
+  check("the column a ')' draws is followed by the ')', wherever a swap has moved it",
+    swaps(" 4  INGRID STRANGEWAYS, an individual,   )  Plaintiff QUARRY\n 5  and others,                 )  OPALRIDGE DOVEWOOD CASCADIA"),
+    ["INGRID STRANGEWAYS>HELEN RASHO", "QUARRY>JONATHAN 0/2", "OPALRIDGE DOVEWOOD CASCADIA>AVERY SMITH WALKER 1/2"]);
+}
+
+// ---- a REAL name wrapped inside a column: the leak, and the save ---------------
+//
+// The same column, the other way: a real name the run missed, wrapped down a
+// caption's left-hand column. The marks read the text with the run's fakes,
+// the keeps and the cited names blanked out of it, so the column is read off
+// the text as it stands (`layout`), and a blank where a fake was is no column.
+console.log("\na real name inside a column");
+{
+  const k = keyOf([
+    ["person", "Jonathan Avery Smith Walker", "Quarry Opalridge Dovewood Cascadia", "", "", "", 5],
+    ["person-token", "Walker", "Cascadia", "", "", "", 9],
+    ["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 12],
+  ]);
+  const r = compileReals(k), f = compileForward(k);
+  const L = (n, a, b) => String(n).padStart(2) + "  " + a.padEnd(50) + b;
+  const caption = [
+    L(10, "Ingrid Strangeways, an individual; and Jonathan", ")  Case No.: 25STCV59720"),
+    L(11, "Avery Smith Walker, an", ")"),
+    L(12, "individual,", ")  COMPLAINT FOR:"),
+  ].join("\n");
+  const spans = (t, o) => findRealSpans(r, t, o).map((h) => [h.real, h.ranges.map(([a, b]) => t.slice(a, b))]);
+  check("without columns, only the surname token is a leak", spans(caption), [["Walker", ["Walker"]]]);
+  check("with columns, the whole name, a piece per cell",
+    spans(caption, { columns: true }), [["Jonathan Avery Smith Walker", ["Jonathan", "Avery Smith Walker"]]]);
+  const h = findRealSpans(r, caption, { columns: true })[0];
+  check("…its start and end take in the other column between the pieces",
+    [caption.slice(h.start, h.start + 8), caption.slice(h.end - 6, h.end), caption.slice(h.start, h.end).includes("Case No.")], ["Jonathan", "Walker", true]);
+  check("findReals reads it the same way", findReals(r, caption, { columns: true }).map((w) => w.real), ["Jonathan Avery Smith Walker"]);
+  // The fake on the first line blanked to spaces, as the marks and the save
+  // read the page: the blank is the matcher's, the column is the file's.
+  const fakeAt = caption.indexOf("Ingrid Strangeways");
+  const blanked = caption.slice(0, fakeAt) + " ".repeat(18) + caption.slice(fakeAt + 18);
+  check("read off the layout, a blanked fake moves no column",
+    spans(blanked, { layout: caption }), [["Jonathan Avery Smith Walker", ["Jonathan", "Avery Smith Walker"]]]);
+  // A blank where a fake stood is not a column of its own: "Jonathan" before
+  // a fake, the rest of the name at the start of the next line, is two things.
+  const before = " 4  signed by Jonathan Ingrid Strangeways and\n 5  Avery Smith Walker came";
+  const fk = before.indexOf("Ingrid");
+  const gone = before.slice(0, fk) + " ".repeat(18) + before.slice(fk + 18);
+  check("a fake blanked out of the reading is no column to cross",
+    spans(gone, { layout: before }), [["Walker", ["Walker"]]]);
+  check("…though the same text read as its own layout would have cut one there",
+    spans(gone, { columns: true }).map((x) => x[0]), ["Jonathan Avery Smith Walker"]);
+  const kept = caption.replace("Jonathan", "\u0000".repeat(8));
+  check("a kept word blanked at the end of the cell is no name crossing out of it", spans(kept, { layout: caption }), [["Walker", ["Walker"]]]);
+  check("a handful at a time, the same names in the same places",
+    (() => {
+      const text = [caption, caption, caption].join("\n");
+      const all = findRealSpans(r, text, { columns: true }).map((x) => x.ranges.join(";"));
+      const got = [];
+      for (let at = 0; ;) {
+        const { spans: s, next } = findRealSpansFrom(r, text, at, 1, { columns: true });
+        for (const x of s) got.push(x.ranges.join(";"));
+        if (next < 0) break;
+        at = next;
+      }
+      return [got.length, JSON.stringify(got) === JSON.stringify(all)];
+    })(), [3, true]);
+  const fw = forwardRuns(f, caption, { layout: caption }).map((x) => x.t === "swap" ? x.to : x.s).join("");
+  check("the save writes it as its fake, a piece per cell, the other column where it stands",
+    fw, caption.replace("Ingrid Strangeways", "Ingrid Strangeways").replace("Jonathan", "Quarry").replace("Avery Smith Walker", "Opalridge Dovewood Cascadia"));
+  check("…and nothing of the name is left for the reals to find", findReals(r, fw, { columns: true }).map((w) => w.real), []);
 }
 
 // ---- a key of thousands of names -------------------------------------------------

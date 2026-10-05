@@ -807,6 +807,30 @@ console.log("clear reading (the folder's ⚠ and the page agree)");
   check("a flagged value inside a fake is not standing in the clear",
     clearReading(pg(1, ["Mary Jones and Jones."]), { rev: opts.rev, flagRx }).flags, 1);
   check("no key and no flags, nothing to read", clearReading(pg(1, ["Quillmark"]), {}), { values: [], flags: 0 });
+  // A real name wrapped down a caption's left-hand column, the ")" and the
+  // case number between its halves: one leak, as the page marks it.
+  const k2 = parseKey([{ rows: [["Real Value", "Replacement"], ["Jonathan Avery Smith Walker", "Quarry Opalridge Dovewood Cascadia"], ["Walker", "Cascadia"], ["Helen Rasho", "Ingrid Strangeways"]] }], "k");
+  const o2 = { rev: compile(k2), reals: compileReals(k2) };
+  const cap = (a, b) => a.padEnd(56) + b;
+  check("a real name wrapped down a caption's column is one leak, not its surname token",
+    clearReading(pg(1, [cap("Ingrid Strangeways, an individual; and Jonathan", ")  Case No.: 25STCV59720"), cap("Avery Smith Walker, an", ")")]), o2).values,
+    ["Jonathan Avery Smith Walker"]);
+  check("…and the fake wrapped the same way is no leak at all",
+    clearReading(pg(1, [cap("Helen Rasho, an individual; and Quarry", ")  Case No.: 25STCV59720"), cap("Opalridge Dovewood Cascadia, an", ")")]), o2).values,
+    ["Helen Rasho"]);
+}
+// The disk text with each text node's place in it, for a reading of the disk
+// text to put its marks back on the page.
+{
+  const T = (s) => ({ nodeType: 3, data: s });
+  const E = (name, kids, attrs) => ({ nodeType: 1, nodeName: name, childNodes: kids, getAttribute: (k) => (attrs && k in attrs ? attrs[k] : null) });
+  const a = T("Helen "), b = T("Rasho"), c = T(" met "), d = T("Quillmark");
+  const body = E("DIV", [E("DIV", [a, E("SPAN", [T("Mary Jones")], { "data-fake": "Pat Doe" }), c]), E("DIV", [E("SPAN", [d], { "data-here": "" }), b])]);
+  const got = serializeHeld(body, { mapped: true });
+  check("mapped: the disk text, the fake's place, the spot's, and every text node but the fake's own",
+    [got.text, got.pns, got.held, got.segs.map((g) => [g.node.data, g.start, g.end])],
+    ["Helen Pat Doe met \nQuillmarkRasho", [[6, 13]], [[19, 28]], [["Helen ", 0, 6], [" met ", 13, 18], ["Quillmark", 19, 28], ["Rasho", 28, 33]]]);
+  check("…and without it, what it always gave", Object.keys(serializeHeld(body)), ["text", "held", "pns"]);
 }
 
 // ---- a page that did not OCR ------------------------------------------------

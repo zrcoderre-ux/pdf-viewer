@@ -251,11 +251,13 @@ app, which routes it to the reader tab.
   gutter number and any blank line between — is matched as one: the reader
   shows the real name half on each line (the tooltip names the whole), a
   wrapped real is one leak, and a save writes the fake line by line with
-  the numbers untouched. A pseudonym wrapped inside a COLUMN — a caption's
+  the numbers untouched. A name wrapped inside a COLUMN — a caption's
   party name with the `)` and the case number beside its first half, or a
-  name at the end of a line of a page set in two columns — is shown the same
-  way, half on each line and the other column left where it stands. (A real
-  name wrapped that way is not yet marked as a leak.) A real name that should stay — a cited decision
+  name at the end of a line of a page set in two columns — is read the same
+  way, half on each line and the other column left where it stands: a
+  pseudonym shows the real name, and a real name standing in the clear is
+  marked orange as one leak (both halves), walked to, kept or faked like any
+  other, and written as its fake piece by piece when you save. A real name that should stay — a cited decision
   bearing a party's surname — is **kept** from the orange mark itself:
   right-click it (or select it and take **Keep…**), and *keep in this case*
   or *never fake it* leaves it as it stands, on save and on PDF-Linker's
@@ -929,6 +931,17 @@ app, which routes it to the reader tab.
   same handful; and the blanking that protects a keep from the forward pass is
   narrowed to them as well, which takes an alternation over hundreds of values
   out of every save and every repaint.
+- **Taking a value off the Master Keep.** A master keep that is wrong for this
+  case stops the value being faked. Click the **×** beside it in that list,
+  select it in the text and press **Remove from Master Keep**, or right-click
+  it and choose **Remove from the Master Keep**. After you confirm, the reader
+  stops keeping it at once: where it stands unfaked it is marked orange, ready
+  to fake and save. The workbook is changed too, if it was attached with
+  **Load master workbook…**: that row's Fix? cell on the KEEP sheet is emptied
+  (the row and its history stay, nothing else in the file is touched), so
+  PDF-Linker's next run fakes it as well. A workbook opened as a copy, or one
+  Excel is holding open, is not changed, and the reader says the value is off
+  for this session only.
 - **Or keep it at one place only.** Both of those keeps are decisions about a
   *value*, and neither fits the name on every document: the Clerk's own
   signature block. Fake the "David" of *David W. Slayton* and the pseudonym

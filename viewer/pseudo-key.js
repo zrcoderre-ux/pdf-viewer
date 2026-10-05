@@ -31,6 +31,8 @@
 //                   a real name typed into the reader is written to disk as
 //                   its pseudonym, never as itself.
 //   compileReals / findReals   which real values stand in a text.
+//   All of them read through one scan (hitsFrom); the save and the leak
+//   readings ask for the column names with a `layout`, the text as it stands.
 //
 // Pure: no DOM. Tested by test-pseudo-key.mjs.
 
@@ -705,20 +707,6 @@ function dealOut(swaps, to, matched) {
   swaps.forEach((r, k) => { r.whole = whole; r.piece = k; r.pieces = swaps.length; });
 }
 
-/** Every match the key makes in `text`: [{ ranges, whole, to }], in order. */
-function matchHits(compiled, text) {
-  const hits = [];
-  const rx = compiled.rx;
-  rx.lastIndex = 0;
-  let m;
-  while ((m = rx.exec(text))) {
-    const hit = lookup(compiled, m[0]);
-    if (hit) hits.push({ ranges: lineRanges(m.index, m[0]), whole: m[0], to: swapTo(hit, m[0]) });
-    if (m.index === rx.lastIndex) rx.lastIndex++;
-  }
-  return hits;
-}
-
 // ---- a name wrapped inside a column ------------------------------------------
 //
 // A caption sets the parties in a column of their own and the case number
@@ -728,25 +716,33 @@ function matchHits(compiled, text) {
 // QUARRY" on one line, "OPALRIDGE DOVEWOOD CASCADIA, an" under it — has the
 // rest of its first line between its halves ("     )  Case No.: 25STCV59720",
 // the line break, the next gutter number). A gap is not that, so the matcher
-// saw two halves no row binds, and the name stood in its fake. A page set in
-// two columns does the same to a name at the end of a line of either one.
+// saw two halves no row binds: the fake stood on screen as itself, and a real
+// name wrapped the same way was no leak the marks could see or the save could
+// fake. A page set in two columns does the same to a name at the end of a line
+// of either one.
 //
-// So the display reads each line in CELLS as well: its text cut where a
-// column is drawn — a caption's ")" standing in a blank, a box's bar, three
-// spaces or more, or two where a line beside it has a column starting at the
-// same place — and a cell that stands beside another is read
-// on into the cell under it: the first cell of the next line (blank lines
-// passed over) that starts inside the same column and no further in than it
-// does. A name found across that seam is one name, a swap per cell, and the
-// text between the pieces stays where it stands, the other column's names
-// still swapped in it. The cells are read only where a column is: a plain
-// line's wrap is the gap's, and the plain pass above already has it.
+// So a reading that asks for it (`columns`, or a `layout`) also takes each
+// line in CELLS: its text cut where a column is drawn — a caption's ")"
+// standing in a blank, a box's bar, three spaces or more, or two where a line
+// beside it has a column starting at the same place — and a cell that stands
+// beside another is read on into the cell under it: the next line's cell in
+// the same column (blank lines passed over) that starts no further in than it
+// does. A column the export DRAWS — a ")" or a bar — is followed by its mark,
+// not by where it stands on the line: a name swapped earlier on one line moves
+// everything after it, the mark included. A name found across that seam is one
+// name, a piece per cell, and the text between the pieces (the other column,
+// the break, the number) stays where it stands, its own names read in it.
+//
+// The cells are read off the LAYOUT: the text as it stands in the file. A
+// reading over text with the fakes, the keeps and the cited names blanked out
+// of it would see a wide blank wherever one had been taken out and cut a
+// column there; the blanks are the matcher's business, not the page's shape.
 
-const CELL_MARK = "\u0000";
+const CELL_MARK = "";
 const CELL_GUTTER_RE = /^ ?\d{1,2}(?=[ ]{2,}\S|[ ]*$)/;
 const CAPTION_PAREN_RE = /(^|[ \t]{2,})\)(?=[ \t]|$)/g;
 const CELL_BAR_RE = /[│┃║|]/g;
-const CELL_TEXT_RE = /[^ \t\u0000]+(?: [^ \t\u0000]+)*/g;
+const CELL_TEXT_RE = /[^ \t]+(?: [^ \t]+)*/g;
 const MAY_CUT_RE = /\S(?:[ \t]{2,}|\t)\S|[│┃║|]|^[ \t]*\)/;
 // How much further in than the cell above its continuation may start: an
 // OCR'd page sets a column a character or two off from line to line.
@@ -757,11 +753,13 @@ const CELL_CHAIN = 4;
 const CELL_BLANKS = 2;
 
 /**
- * A line's cells: [{ from, to, edge, sep }], offsets into the line. `edge` is
- * where the column's blank begins — the end of the text before the cell, or
- * the ")" or bar that opens a line whose left-hand column is empty; -1 for a
- * cell at the margin. `sep` is the blank before it: "margin", "weak" (two
- * spaces, a column only if a line beside it says so) or "strong".
+ * A line's cells: [{ from, to, col, rel, edge, sep }], `from` and `to` offsets
+ * into the line. `col` is which drawn column the cell stands in (the marks
+ * before it on the line), `rel` where it starts within that column (past its
+ * mark; from the line's start in the first), and `edge` where the text before
+ * it in the same column ends, in the same terms (-1: none). `sep` is the blank
+ * before it: "margin", "weak" (two spaces, a column only if a line beside it
+ * says so) or "strong".
  */
 function rawCells(line) {
   let s = line.endsWith("\r") ? line.slice(0, -1) : line;
@@ -771,20 +769,25 @@ function rawCells(line) {
   // margin, so one cell at the margin, or none.
   if (!MAY_CUT_RE.test(s)) {
     const from = s.search(/\S/);
-    return from < 0 ? [] : [{ from, to: s.trimEnd().length, edge: -1, sep: "margin" }];
+    return from < 0 ? [] : [{ from, to: s.trimEnd().length, col: 0, rel: from, edge: -1, sep: "margin" }];
   }
   s = s.replace(CAPTION_PAREN_RE, (all, pre) => pre + CELL_MARK).replace(CELL_BAR_RE, CELL_MARK);
   const cells = [];
-  let prev = -1;
+  let prev = -1; // where the text before the cell ends
+  let col = 0;   // the marks passed
+  let base = 0;  // where the column they open begins: just past its mark
   for (const m of s.matchAll(CELL_TEXT_RE)) {
     const from = m.index;
-    const blank = s.slice(prev < 0 ? 0 : prev, from);
-    const mark = blank.indexOf(CELL_MARK);
+    const head = prev < 0 ? 0 : prev;
+    const blank = s.slice(head, from);
+    let marks = 0, last = -1;
+    for (let k = blank.indexOf(CELL_MARK); k >= 0; k = blank.indexOf(CELL_MARK, k + 1)) { marks++; last = k; }
+    if (marks) { col += marks; base = head + last + 1; }
     let sep;
-    if (prev < 0 && mark < 0) sep = "margin";
-    else if (mark >= 0 || blank.length >= 3 || blank.indexOf("\t") >= 0) sep = "strong";
+    if (prev < 0 && !marks) sep = "margin";
+    else if (marks || blank.length >= 3 || blank.indexOf("\t") >= 0) sep = "strong";
     else sep = "weak";
-    cells.push({ from, to: from + m[0].length, edge: prev >= 0 ? prev : mark, sep });
+    cells.push({ from, to: from + m[0].length, col, rel: from - base, edge: marks || prev < 0 ? -1 : prev - base, sep });
     prev = from + m[0].length;
   }
   return cells;
@@ -796,13 +799,14 @@ function rawCells(line) {
  */
 function pageCells(lines) {
   const raw = lines.map(rawCells);
-  const opens = (i, at) => i >= 0 && i < raw.length &&
-    raw[i].some((c) => c.sep !== "margin" && Math.abs(c.from - at) <= 1);
+  const opens = (i, c) => i >= 0 && i < raw.length &&
+    raw[i].some((d) => d.sep !== "margin" && d.col === c.col && Math.abs(d.rel - c.rel) <= 1);
   return raw.map((cells, i) => {
     const out = [];
     for (const c of cells) {
-      if (c.sep === "weak" && out.length && !opens(i - 1, c.from) && !opens(i + 1, c.from)) {
-        out[out.length - 1] = Object.assign({}, out[out.length - 1], { to: c.to });
+      const last = out[out.length - 1];
+      if (c.sep === "weak" && last && !opens(i - 1, c) && !opens(i + 1, c)) {
+        out[out.length - 1] = Object.assign({}, last, { to: c.to });
       } else out.push(c);
     }
     return out;
@@ -833,39 +837,53 @@ function lastWordsAt(s, n) {
   while (s[at] === " ") at++;
   return at;
 }
+// A character the matcher reads as nothing: a blank, or a stretch blanked out
+// of the reading (a fake, a keep, a cited name).
+function blankAt(text, k) {
+  const c = text.charCodeAt(k);
+  return c === 32 || c === 9 || c === 0;
+}
 
 /**
- * The names the key makes across a column's line breaks:
- * [{ ranges, whole, to }], one range per cell the name stands in.
+ * The names the key makes across a column's line breaks, cells off `layout`
+ * and words off `text`: [{ ranges, whole, hit, start }], one range per cell
+ * the name stands in.
  */
-function columnHits(compiled, text) {
+function columnHits(compiled, text, layout) {
   const hits = [];
-  if (text.indexOf("\n") < 0) return hits;
-  const lines = text.split("\n");
+  if (layout.indexOf("\n") < 0) return hits;
+  const reach = mostWords(compiled) - 1;
+  if (reach < 1) return hits;
+  const lines = layout.split("\n");
   const starts = [];
   for (let i = 0, at = 0; i < lines.length; i++) { starts.push(at); at += lines[i].length + 1; }
   const cells = pageCells(lines);
   const rx = compiled.rx;
-  const reach = mostWords(compiled) - 1;
-  if (reach < 1) return hits;
   // The cell under `c` (on line `i`): the next line with text, passing over
-  // blank ones, and in it the first cell that starts inside c's column.
+  // blank ones, and in it the first cell of c's column that starts there.
   const below = (i, c) => {
     for (let j = i + 1, blanks = 0; j < lines.length; j++) {
       if (!cells[j].length) { if (++blanks > CELL_BLANKS) return null; continue; }
-      const next = cells[j].find((d) => d.from > c.edge && d.from <= c.from + CELL_SLACK);
+      const next = cells[j].find((d) => d.col === c.col && d.rel > c.edge && d.rel <= c.rel + CELL_SLACK);
       return next ? { i: j, c: next } : null;
     }
     return null;
   };
   for (let i = 0; i < lines.length; i++) {
     const row = cells[i];
-    for (let k = 0; k < row.length; k++) {
-      const cell = row[k];
-      // A cell alone on its line, at the margin, is a plain line.
-      if (k === row.length - 1 && cell.sep === "margin") continue;
+    // A line that is one cell at the margin is a plain line: its wrap is the
+    // gap's, and the plain pass has it.
+    if (row.length === 1 && row[0].sep === "margin") continue;
+    for (const cell of row) {
       const chain = [{ i, c: cell }];
-      for (let at = chain[0]; chain.length < CELL_CHAIN && (at = below(at.i, at.c));) chain.push(at);
+      for (let at = chain[0]; chain.length < CELL_CHAIN && (at = below(at.i, at.c));) {
+        // A name crosses a seam only between words: where the reading has
+        // blanked the end of one cell or the start of the next (a fake, a
+        // keep), nothing that crosses there is a name.
+        const prev = chain[chain.length - 1];
+        if (blankAt(text, starts[prev.i] + prev.c.to - 1) || blankAt(text, starts[at.i] + at.c.from)) break;
+        chain.push(at);
+      }
       if (chain.length < 2) continue;
       // The column as one text, its cells a line apart, so the gap between
       // the words of a value crosses from one cell into the next. The first
@@ -893,7 +911,7 @@ function columnHits(compiled, text) {
           const ranges = parts
             .filter((p) => p.v < end && p.v + p.len > m.index)
             .map((p) => [p.abs + Math.max(m.index, p.v) - p.v, p.abs + Math.min(end, p.v + p.len) - p.v]);
-          hits.push({ ranges, whole: m[0], to: swapTo(hit, m[0]) });
+          hits.push({ ranges, whole: m[0], hit, start: ranges[0][0] });
         }
         if (m.index === rx.lastIndex) rx.lastIndex++;
       }
@@ -906,24 +924,77 @@ function columnHits(compiled, text) {
 const overlaps = (a, b) => a.ranges.some(([s, e]) => b.ranges.some(([t, f]) => s < f && t < e));
 
 /**
- * The column's names laid over the plain pass's. A name across a column's
- * seam is the longer reading of the words it covers, so it takes them from
- * whatever the plain pass made of them (a surname token, say) — unless the
- * plain pass found a name that starts BEFORE it and runs into its first
- * piece, which was the leftmost reading there. Two column readings that
- * share a word keep the earlier.
+ * A text's column names, read once per text and kept for the next handful
+ * (see findRealSpansFrom): the names in place order, two that share a word
+ * keeping the earlier, and their pieces in order for the plain pass to step
+ * around.
  */
-function withColumns(hits, cols) {
-  if (!cols.length) return hits;
-  const taken = [];
-  cols.sort((a, b) => a.ranges[0][0] - b.ranges[0][0]);
-  for (const c of cols) {
-    const [s0, e0] = c.ranges[0];
-    if (taken.some((t) => overlaps(t, c))) continue;
-    if (hits.some((h) => h.ranges[0][0] < s0 && h.ranges.some(([s, e]) => s < e0 && s0 < e))) continue;
-    taken.push(c);
+const COLUMN_MEMO = new WeakMap(); // compiled → { text, layout, cols, pieces }
+function columnNames(compiled, text, layout) {
+  const memo = COLUMN_MEMO.get(compiled);
+  if (memo && memo.text === text && memo.layout === layout) return memo;
+  const cols = [];
+  for (const c of columnHits(compiled, text, layout).sort((a, b) => a.start - b.start)) {
+    if (!cols.some((t) => overlaps(t, c))) cols.push(c);
   }
-  return hits.filter((h) => !taken.some((t) => overlaps(t, h))).concat(taken);
+  const pieces = [];
+  for (const c of cols) for (const r of c.ranges) pieces.push(r);
+  pieces.sort((a, b) => a[0] - b[0]);
+  const out = { text, layout, cols, pieces };
+  COLUMN_MEMO.set(compiled, out);
+  return out;
+}
+const NO_COLUMNS = { cols: [], pieces: [] };
+/** Whether any of `ranges` shares a character with one of the (sorted, apart) `pieces`. */
+function touchesPieces(pieces, ranges) {
+  for (const [a, b] of ranges) {
+    let lo = 0, hi = pieces.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (pieces[mid][1] <= a) lo = mid + 1; else hi = mid; }
+    if (lo < pieces.length && pieces[lo][0] < b) return true;
+  }
+  return false;
+}
+
+/**
+ * The names the key makes in `text`, from `from`, in place order, at most
+ * `max` of them, and where to carry on from (`next`, -1 once read out):
+ * [{ ranges, whole, hit, start }], a range per line or cell the name stands in.
+ *
+ * ONE READING FOR EVERY DIRECTION, so the screen, the marks and the save agree
+ * on what is a name. The plain pass reads the text as it always has; with
+ * `columns` (or a `layout`, the text as it stands in the file where `text` has
+ * things blanked out of it) the names wrapped down a column are read as well,
+ * and a column name takes its words from whatever the plain pass made of them
+ * — the longer reading, its surname token being no name of its own there. A
+ * column name is handed over where the reading reaches its first piece, and
+ * one whose first piece the handful has passed goes out with it rather than be
+ * lost between two handfuls.
+ */
+function hitsFrom(compiled, text, from, max, opts) {
+  const out = [];
+  const rx = compiled.rx;
+  const layout = opts && opts.layout != null ? String(opts.layout) : opts && opts.columns ? text : null;
+  const { cols, pieces } = layout != null && layout.length === text.length ? columnNames(compiled, text, layout) : NO_COLUMNS;
+  let ci = 0;
+  while (ci < cols.length && cols[ci].start < from) ci++;
+  rx.lastIndex = from > 0 ? from : 0;
+  let m;
+  while ((m = rx.exec(text))) {
+    while (ci < cols.length && cols[ci].start <= m.index) out.push(cols[ci++]);
+    const hit = lookup(compiled, m[0]);
+    if (hit) {
+      const ranges = lineRanges(m.index, m[0]);
+      if (!pieces.length || !touchesPieces(pieces, ranges)) out.push({ ranges, whole: m[0], hit, start: m.index });
+    }
+    if (m.index === rx.lastIndex) rx.lastIndex++;
+    if (out.length >= max) {
+      const next = rx.lastIndex;
+      while (ci < cols.length && cols[ci].start < next) out.push(cols[ci++]);
+      return { hits: out, next };
+    }
+  }
+  while (ci < cols.length) out.push(cols[ci++]);
+  return { hits: out, next: -1 };
 }
 
 /**
@@ -933,20 +1004,18 @@ function withColumns(hits, cols) {
  *                                             `to` written in its case
  * A single pass — replaced text is never re-scanned. The reader renders a
  * `swap` as a marked span and writes `from` back to disk, which is how the
- * real names live on top of the file and never in it. `columns`: read names
- * wrapped inside a column too (columnHits), whose pieces can have another
+ * real names live on top of the file and never in it. A name wrapped down a
+ * column (`opts`, as hitsFrom takes them) is a swap per piece, with another
  * column's text, and its names, between them.
  */
-function runsWith(compiled, text, { columns = false } = {}) {
+function runsWith(compiled, text, opts) {
   const out = [];
   if (!text) return out;
   if (!compiled || !compiled.rx) return [{ t: "text", s: text }];
-  let hits = matchHits(compiled, text);
-  if (columns) hits = withColumns(hits, columnHits(compiled, text));
   const places = [];
-  for (const h of hits) {
+  for (const h of hitsFrom(compiled, text, 0, Infinity, opts).hits) {
     const swaps = h.ranges.map(([a, b]) => ({ t: "swap", from: text.slice(a, b) }));
-    dealOut(swaps, h.to, h.whole);
+    dealOut(swaps, swapTo(h.hit, h.whole), h.whole);
     swaps.forEach((r, k) => places.push({ at: h.ranges[k], run: r }));
   }
   places.sort((a, b) => a.at[0] - b.at[0]);
@@ -960,14 +1029,18 @@ function runsWith(compiled, text, { columns = false } = {}) {
   return out;
 }
 
-/** fake → real, as runs. The reader's display. */
+/** fake → real, as runs. The reader's display: a name wrapped down a column included. */
 export function translateRuns(compiled, text) {
   return runsWith(compiled, text, { columns: true });
 }
 
-/** real → fake, as runs. What a save writes. */
-export function forwardRuns(compiledForward, text) {
-  return runsWith(compiledForward, text);
+/**
+ * real → fake, as runs. What a save writes. `opts.layout`: the text as it
+ * stands in the file, where `text` has the keeps and fakes blanked out of it,
+ * so a real name wrapped down a column is written as its fake as well.
+ */
+export function forwardRuns(compiledForward, text, opts) {
+  return runsWith(compiledForward, text, opts);
 }
 
 /** Display translation as one string. Returns { text, count }. */
@@ -987,30 +1060,46 @@ export function translate(compiled, text) {
 /**
  * Which real values stand in `text` — distinct, in first-seen order, each
  * with the fake to write instead. Longest-first matching means a full name
- * standing whole reports once, not once more per surname token.
+ * standing whole reports once, not once more per surname token. `opts` as
+ * hitsFrom takes them.
  */
-export function findReals(compiledReals, text) {
+export function findReals(compiledReals, text, opts) {
   if (!compiledReals || !compiledReals.rx || !text) return [];
   const seen = new Set();
   const out = [];
-  const rx = compiledReals.rx;
-  rx.lastIndex = 0;
-  let m;
-  while ((m = rx.exec(text))) {
-    const hit = lookup(compiledReals, m[0]);
-    const w = hit && hit.mapped;
+  for (const h of hitsFrom(compiledReals, text, 0, Infinity, opts).hits) {
+    const w = h.hit.mapped;
     if (w && !seen.has(fold(w.real))) {
       seen.add(fold(w.real));
       out.push(w);
     }
-    if (m.index === rx.lastIndex) rx.lastIndex++;
   }
   return out;
 }
 
-/** Every real value standing in `text`, with where: [{ start, end, matched, real, fake }], lines crossed included. */
-export function findRealSpans(compiledReals, text) {
-  return findRealSpansFrom(compiledReals, text, 0, Infinity).spans;
+/**
+ * Every real value standing in `text`, with where:
+ * [{ start, end, matched, real, fake, ranges }], lines crossed included.
+ * `ranges` are its pieces, a range per line or cell; `start` and `end` take in
+ * whatever stands between them, which for a name wrapped down a column is the
+ * other column's text. `opts` as hitsFrom takes them.
+ */
+export function findRealSpans(compiledReals, text, opts) {
+  return findRealSpansFrom(compiledReals, text, 0, Infinity, opts).spans;
+}
+
+/**
+ * Only the names wrapped down a column, cells off `layout`: [{ start, end,
+ * real, ranges }] as findRealSpans gives them, the plain pass not made. For a
+ * reading that has already blanked whatever stands plain (the keeps) and wants
+ * the rest of its values where they are wrapped down a column.
+ */
+export function findColumnSpans(compiled, text, layout) {
+  if (!compiled || !compiled.rx || !text || layout == null || String(layout).length !== text.length) return [];
+  return columnNames(compiled, text, String(layout)).cols.map((h) => {
+    const r = h.ranges;
+    return { start: r[0][0], end: r[r.length - 1][1], matched: h.whole, real: h.hit.mapped.real, fake: h.hit.mapped.fake, ranges: r };
+  });
 }
 
 /**
@@ -1023,20 +1112,16 @@ export function findRealSpans(compiledReals, text) {
  * document in one go. Reading it in handfuls is what lets the reader put the
  * thread down wherever it has got to.
  */
-export function findRealSpansFrom(compiledReals, text, from, max) {
+export function findRealSpansFrom(compiledReals, text, from, max, opts) {
   const spans = [];
   if (!compiledReals || !compiledReals.rx || !text) return { spans, next: -1 };
-  const rx = compiledReals.rx;
-  rx.lastIndex = from > 0 ? from : 0;
-  const lim = max > 0 ? max : 1;
-  let m;
-  while ((m = rx.exec(text))) {
-    const hit = lookup(compiledReals, m[0]);
-    if (hit && hit.mapped) spans.push({ start: m.index, end: m.index + m[0].length, matched: m[0], real: hit.mapped.real, fake: hit.mapped.fake });
-    if (m.index === rx.lastIndex) rx.lastIndex++;
-    if (spans.length >= lim) return { spans, next: rx.lastIndex };
+  const { hits, next } = hitsFrom(compiledReals, text, from, max > 0 ? max : 1, opts);
+  for (const h of hits) {
+    const w = h.hit.mapped;
+    const r = h.ranges;
+    spans.push({ start: r[0][0], end: r[r.length - 1][1], matched: h.whole, real: w.real, fake: w.fake, ranges: r });
   }
-  return { spans, next: -1 };
+  return { spans, next };
 }
 
 // ---- the as-you-type prompt (the Claude extension's compileTypeahead) ----------

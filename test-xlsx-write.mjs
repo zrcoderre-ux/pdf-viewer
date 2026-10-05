@@ -139,5 +139,37 @@ for (const stored of [false, true]) {
   check("a part the workbook lacks is refused", /no part/.test(err), true);
 }
 
+// The master workbook: a value taken off its KEEP sheet from the reader. Only
+// that row's Fix? cell changes; the tally sheet and the row's history stay.
+console.log("the master workbook, a keep withdrawn");
+{
+  const { masterWithdrawEdits, parseMasterKeeps } = await import("./viewer/leaks.js");
+  const MWB = `<?xml version="1.0"?><workbook xmlns="x" xmlns:r="r"><sheets><sheet name="Master Leaks" sheetId="1" r:id="rId1"/><sheet name="KEEP" sheetId="2" r:id="rId2"/></sheets></workbook>`;
+  const MRELS = `<?xml version="1.0"?><Relationships><Relationship Id="rId1" Type="t" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="t" Target="worksheets/sheet2.xml"/></Relationships>`;
+  const istr = (ref, t, st = "") => `<c r="${ref}"${st ? ` s="${st}"` : ""} t="inlineStr"><is><t>${t}</t></is></c>`;
+  const TALLY = `<worksheet><sheetData><row r="1">${istr("A1", "Value")}${istr("B1", "Times Seen")}</row><row r="2">${istr("A2", "Court")}<c r="B2"><v>40</v></c></row></sheetData></worksheet>`;
+  const KEEP = `<worksheet><sheetData>` +
+    `<row r="1">${istr("A1", "Value")}${istr("B1", "Fix? (yes/no)")}${istr("C1", "Notes")}</row>` +
+    `<row r="2">${istr("A2", "Court", "2")}${istr("B2", "no", "3")}${istr("C2", "the Court itself", "2")}</row>` +
+    `<row r="3">${istr("A3", "David W. Slayton", "2")}${istr("B3", "never", "3")}${istr("C3", "Executive Officer", "2")}</row>` +
+    `</sheetData><dataValidations count="1"><dataValidation type="list" sqref="B2:B99"><formula1>"yes,no,never"</formula1></dataValidation></dataValidations></worksheet>`;
+  const src = new Uint8Array(buildZip([
+    { name: "[Content_Types].xml", text: `<Types/>` },
+    { name: "xl/workbook.xml", text: MWB },
+    { name: "xl/_rels/workbook.xml.rels", text: MRELS },
+    { name: "xl/worksheets/sheet1.xml", text: TALLY },
+    { name: "xl/worksheets/sheet2.xml", text: KEEP },
+  ]));
+  const before = await parseXlsx(src);
+  const w = masterWithdrawEdits(before.sheets, "Master Leaks.xlsx", ["court"]);
+  check("the KEEP sheet's part and the one cell", [w.part, w.edits], ["xl/worksheets/sheet2.xml", [{ row: 2, col: 1, text: "" }]]);
+  const out = await writeSheetCells(src, w.part, w.edits);
+  const after = await parseXlsx(out);
+  check("read back, Court is no longer kept; the other keep stands", parseMasterKeeps(after.sheets, "Master Leaks.xlsx").keeps.map((k) => k.control + ":" + k.value), ["never:David W. Slayton"]);
+  check("…its row is still there, value and notes and all", after.sheets[1].rows[1], ["Court", "", "the Court itself"]);
+  check("…the empty cell keeps its style, and the dropdown is untouched", (await readEntry(out, zipEntries(out).find((e) => e.name === w.part))).includes(`<c r="B2" s="3"/>`) && (await readEntry(out, zipEntries(out).find((e) => e.name === w.part))).includes(`sqref="B2:B99"`), true);
+  check("…the tally sheet is copied through untouched", after.sheets[0].rows, before.sheets[0].rows);
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

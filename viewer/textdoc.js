@@ -278,11 +278,15 @@ const HERE_ATTR = "data-here";
  * What a page body writes to disk, and where its spot keeps landed in it:
  * { text, held: [[start, end), …], pns: [[start, end), …] } — `held` the
  * ranges a save must leave as they read rather than write back to their
- * pseudonyms, `pns` the fakes the run wrote.
+ * pseudonyms, `pns` the fakes the run wrote. With `mapped`, `segs` as well:
+ * each text node and where its text stands in `text` ([{ node, start, end }],
+ * in order; a pseudonym span's own text is not one), which is what a reading
+ * of the disk text needs to put its marks back on the page.
  */
-export function serializeHeld(root) {
+export function serializeHeld(root, { mapped = false } = {}) {
   let out = "";
   const held = [];
+  const segs = mapped ? [] : null;
   // …and where each PSEUDONYM's fake stands in it. The marks read the page with
   // these blanked (the reader's flatten, clearReading): a fake is what the run
   // wrote, and a word of it that happens to be a real the key binds is not a
@@ -293,6 +297,10 @@ export function serializeHeld(root) {
   let open = -1;
   walk(root, (s) => { out += s; }, {
     fakes: true,
+    text: mapped ? (n) => {
+      const d = n.data != null ? n.data : n.nodeValue || "";
+      segs.push({ node: n, start: out.length, end: out.length + d.length });
+    } : null,
     mark: (phase) => {
       if (phase === "in") open = out.length;
       else if (open >= 0) { if (out.length > open) held.push([open, out.length]); open = -1; }
@@ -302,7 +310,7 @@ export function serializeHeld(root) {
       if (f) pns.push([out.length, out.length + f.length]);
     },
   });
-  return { text: out, held, pns };
+  return mapped ? { text: out, held, pns, segs } : { text: out, held, pns };
 }
 
 /**
@@ -404,6 +412,17 @@ export function insideSpans(spans, start, end) {
 }
 
 /**
+ * Whether a name found in the text stands in a cited decision's name: the
+ * whole of it, or — a name wrapped down a column, with the other column's text
+ * between its pieces — each of its pieces (`ranges`).
+ */
+export function insideCited(cited, h) {
+  if (insideSpans(cited, h.start, h.end)) return true;
+  const r = h.ranges;
+  return !!r && r.length > 1 && r.every(([a, b]) => insideSpans(cited, a, b));
+}
+
+/**
  * `text` with each range blanked to NULs (or to `fill`) — the same length out as in, so every
  * offset a caller has read off the original still points at the same character.
  *
@@ -462,7 +481,8 @@ export function blankRanges(text, ranges, fill = "\u0000") {
  * `rev` is the key's fake → real matcher (what the page is built with), `reals`
  * the key less its keeps, `flagRx` the flagged values' matcher, `spots` the
  * document's own spot keeps ({ page, value, nth }, page by page of this file),
- * `mask` the case-wide keeps (the same length out as in). Each page is read on
+ * `mask(flat, raw)` the case-wide keeps (the same length out as in; `raw`, the
+ * page as it stands, for a kept value wrapped down a column). Each page is read on
  * its own, as the page is: its text as buildBody gets it, the pseudonyms and
  * the spot keeps blanked to spaces as flatten blanks them, the names of cited
  * decisions spared from the leaks.
@@ -486,9 +506,11 @@ export function clearReading(text, { rev = null, reals = null, flagRx = null, sp
     }
     const flat = blankRanges(raw, blank, " ");
     if (reals) {
+      // A name wrapped down a column is read too, its cells off the page as
+      // it stands (`layout`), not off the reading with its fakes blanked out.
       const cited = citedNameSpans(flat);
-      for (const h of findRealSpans(reals, mask ? mask(flat) : flat)) {
-        if (!insideSpans(cited, h.start, h.end)) values.push(h.real);
+      for (const h of findRealSpans(reals, mask ? mask(flat, raw) : flat, { layout: raw })) {
+        if (!insideCited(cited, h)) values.push(h.real);
       }
     }
     if (flagRx) {

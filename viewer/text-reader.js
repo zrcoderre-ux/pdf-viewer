@@ -1031,8 +1031,10 @@ function fakesForShot() {
       shotEdit(edits, t, 0, s.dataset.fake, t.data);
     }
     if (fwd && fwd.rx) {
-      const { text, segs } = flatten(body, { blankPn: true });
-      swapInNodes(segs, forwardSwaps(text), edits);
+      // The names the marks show, read as the save reads them: the disk text,
+      // its fakes and spot keeps blanked, put back through its text nodes.
+      const disk = TD.serializeHeld(body, { mapped: true });
+      swapInNodes(disk.segs, forwardSwaps(disk.text, disk.held, disk.pns), edits);
     }
   }
   document.body.classList.add("show-fakes");
@@ -1285,7 +1287,7 @@ function keptMatcher() {
   if (!held.length) return keptMarkMatcher();
   if (maskMemo.keeps !== keeps || maskMemo.master !== masterKeeps || maskMemo.key !== key || maskMemo.phrases !== phrases || maskMemo.flagged !== flagged) {
     const mine = allKeeps().filter((k) => keyBinds(k.value)).map((k) => k.value);
-    maskMemo = { keeps, master: masterKeeps, key, phrases, flagged, rx: PK.buildMatcher(mine.concat(held)) };
+    maskMemo = { keeps, master: masterKeeps, key, phrases, flagged, values: mine.concat(held), rx: PK.buildMatcher(mine.concat(held)) };
   }
   return maskMemo.rx;
 }
@@ -1296,7 +1298,7 @@ function keptMatcher() {
 // the way a keep is — not faked by the save, not counted as a leak, not
 // refused by the save's last check — and wears the red mark of any flag, until
 // the key comes back with the whole phrase in it (dropFlagsNowFaked).
-let maskMemo = { keeps: null, master: null, key: null, phrases: null, flagged: null, rx: null };
+let maskMemo = { keeps: null, master: null, key: null, phrases: null, flagged: null, values: null, rx: null };
 function heldPhrases() {
   if (!phrases.length || !key) return [];
   return phrases.filter((v) => TD.isPhrase(flagged, v) && keyBinds(v) && !TD.fakeFor(fwd, v));
@@ -1333,11 +1335,11 @@ function keyBinds(value) {
 // been faked or flagged. Marking the rest would underline half the page to no
 // purpose, and masking the rest is work done to prevent something that was
 // never going to happen.
-let keptMarkMemo = { keeps: null, master: null, key: null, rx: null };
+let keptMarkMemo = { keeps: null, master: null, key: null, values: null, rx: null };
 function keptMarkMatcher() {
   if (keptMarkMemo.keeps !== keeps || keptMarkMemo.master !== masterKeeps || keptMarkMemo.key !== key) {
-    const mine = allKeeps().filter((k) => keyBinds(k.value));
-    keptMarkMemo = { keeps, master: masterKeeps, key, rx: mine.length ? PK.buildMatcher(mine.map((k) => k.value)) : null };
+    const mine = allKeeps().filter((k) => keyBinds(k.value)).map((k) => k.value);
+    keptMarkMemo = { keeps, master: masterKeeps, key, values: mine, rx: mine.length ? PK.buildMatcher(mine) : null };
   }
   return keptMarkMemo.rx;
 }
@@ -1352,9 +1354,29 @@ function flaggedMatcher() {
   }
   return flagRxMemo.rx;
 }
-function maskKept(text) {
+/**
+ * `text` with every kept value blanked, the same length out as in. With
+ * `layout` — the text as it stands, where `text` has things blanked out of it
+ * — a kept value wrapped down a column is blanked too, piece by piece: kept as
+ * the whole name, it is not left to be found again by its own surname token.
+ */
+function maskKept(text, layout) {
   const rx = keptMatcher();
-  return rx ? text.replace(rx, (m) => "\u0000".repeat(m.length)) : text;
+  if (!rx) return text;
+  const out = text.replace(rx, (m) => "\u0000".repeat(m.length));
+  if (layout == null) return out;
+  const cols = PK.findColumnSpans(keptCompiled(), out, layout);
+  return cols.length ? TD.blankRanges(out, cols.flatMap((h) => h.ranges)) : out;
+}
+// The kept values as a key the column reading can look a match up in.
+let keptColMemo = { rx: null, compiled: null };
+function keptCompiled() {
+  const rx = keptMatcher();
+  if (keptColMemo.rx !== rx) {
+    const values = (rx === maskMemo.rx ? maskMemo.values : keptMarkMemo.values) || [];
+    keptColMemo = { rx, compiled: { rx, map: new Map(values.map((v) => [PK.fold(v), { real: v, fake: "" }])) } };
+  }
+  return keptColMemo.compiled;
 }
 /**
  * A page's DISK text read the way its marks read it — flatten with blankPn,
@@ -1389,9 +1411,10 @@ function forwardText(text, held, pns, spare) {
   const swaps = forwardSwaps(text, held, pns, spare);
   let out = "", at = 0;
   for (const s of swaps) { out += text.slice(at, s.start) + s.to; at = s.end; }
-  return { text: out + text.slice(at), swaps: swaps.length };
+  // Names, not places: a name wrapped over lines is written a piece a line.
+  return { text: out + text.slice(at), swaps: swaps.filter((s) => !s.piece).length };
 }
-/** …and the same pass as places: [{ start, end, to }] into `text`, in order. */
+/** …and the same pass as places: [{ start, end, to, piece }] into `text`, in order — `piece` past the first of a wrapped name. */
 function forwardSwaps(text, held, pns, spare) {
   // The names of decided cases are blanked with the keeps: a party of a
   // decision this brief cites is that decision's, not this matter's, and a
@@ -1403,9 +1426,12 @@ function forwardSwaps(text, held, pns, spare) {
   const spared = blank.concat(cited, spare || []);
   const out = [];
   let off = 0;
-  for (const r of PK.forwardRuns(fwd, TD.blankRanges(maskKept(flat), spared))) {
+  // A name wrapped down a column is written too, a fake per piece: its cells
+  // are read off the text as it stands (`layout`), where the reading has its
+  // fakes and keeps blanked out of it (see pseudo-key's columnHits).
+  for (const r of PK.forwardRuns(fwd, TD.blankRanges(maskKept(flat, text), spared), { layout: text })) {
     const len = r.t === "swap" ? r.from.length : r.s.length;
-    if (r.t === "swap") out.push({ start: off, end: off + len, to: r.to });
+    if (r.t === "swap") out.push({ start: off, end: off + len, to: r.to, piece: r.piece || 0 });
     off += len;
   }
   return out;
@@ -1414,7 +1440,9 @@ function forwardSwaps(text, held, pns, spare) {
  * Every name standing in the clear as the page reads it (diskReading) — the
  * orange marks, settled or not: every real name the key binds, past the values
  * kept for the case, the spot keeps (`held`), the run's fakes (`pns`) and the
- * parties of cited decisions. [{ start, end, real, fake }]
+ * parties of cited decisions. [{ start, end, real, fake, ranges }] — `ranges`
+ * the name's pieces, which for one wrapped down a column have the other
+ * column's text between them, inside `start` and `end`.
  *
  * THE SAVE FAKES ONLY WHAT HAS BEEN DECIDED. It used to write every one of
  * them as its pseudonym, looked at or not, which made a save before the review
@@ -1425,7 +1453,7 @@ function forwardSwaps(text, held, pns, spare) {
 function standingSpans(text, held, pns) {
   if (!reals) return [];
   const { flat, cited } = diskReading(text, held, pns);
-  return PK.findRealSpans(reals, maskKept(flat)).filter((h) => !TD.insideSpans(cited, h.start, h.end));
+  return PK.findRealSpans(reals, maskKept(flat, text), { layout: text }).filter((h) => !TD.insideCited(cited, h));
 }
 function compileKey() {
   const out = during("compiling the key", () => compileKeyNow());
@@ -3529,7 +3557,7 @@ async function saveDocument() {
     let standing = standingSpans(text, held, pns);
     let left = standing.filter((h) => !isSettled(h.real));
     if (fwd && fwd.rx) {
-      const fw = forwardText(text, held, pns, left.map((h) => [h.start, h.end]));
+      const fw = forwardText(text, held, pns, left.flatMap((h) => h.ranges));
       if (fw.swaps) {
         snapshot(body, true);
         forwarded += fw.swaps;
@@ -3550,7 +3578,7 @@ async function saveDocument() {
     // as it leaves a kept one: the assertion reads past them too — and past
     // the run's fakes and the cited decisions' names, read as the page reads
     // them, which are what the forward pass left alone.
-    scan[i] = TD.blankRanges(text, held.concat(pns, diskReading(text, held, pns).cited, left.map((h) => [h.start, h.end]))).split("\n");
+    scan[i] = TD.blankRanges(text, held.concat(pns, diskReading(text, held, pns).cited, left.flatMap((h) => h.ranges))).split("\n");
   }
   let write = reel.filter((m) => m.dirty || touched.has(m));
   // The pages marked ⊘ Did not OCR follow the text that is about to be
@@ -3577,7 +3605,10 @@ async function saveDocument() {
   if (reals) {
     for (const m of write) {
       const held = TD.serializeExport(memberDoc(m, (p, i) => Object.assign({}, p, { lines: scan[i] || p.lines })));
-      const left = PK.findReals(reals, TD.blankRanges(maskKept(held), TD.citedNameSpans(held)));
+      // …a name wrapped down a column included, its cells read off the file
+      // as it is about to be written (the blanks above are the same length).
+      const plain = TD.serializeExport(memberDoc(m));
+      const left = PK.findReals(reals, TD.blankRanges(maskKept(held, plain), TD.citedNameSpans(held)), { layout: plain });
       if (left.length) {
         toast(`Not saved: ${m.name} still carries a real name the key binds — ` + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again.", { error: true });
         return false;
@@ -4175,28 +4206,36 @@ async function scanPassNow(pass) {
     // over a line break and its gutter number is found as one. The spots kept
     // where they stand are blanked with them: they carry their own mark.
     //
-    // ALL THREE READINGS ARE MADE OF IT — the names in the clear, the kept
-    // values and the flagged ones. What a pseudonym span holds is the fake
-    // that is IN THE FILE, with the real name painted over it for reading
-    // only; no mark that says "this real value is still standing here" may
-    // be drawn over one, whichever mark it is.
-    const flat = reals || keptRx || flagRx ? flatten(body, { blankPn: true }) : null;
+    // ALL THREE READINGS BLANK THEM — the names in the clear, the kept values
+    // and the flagged ones. What a pseudonym span holds is the fake that is IN
+    // THE FILE, with the real name painted over it for reading only; no mark
+    // that says "this real value is still standing here" may be drawn over
+    // one, whichever mark it is. The kept and flagged values are read off the
+    // page as it shows; the names in the clear off the disk text, below.
+    const flat = keptRx || flagRx ? flatten(body, { blankPn: true }) : null;
     if (reals) {
-      const { text, segs } = flat;
-      const masked = maskKept(text);
+      // The names in the clear are read off the DISK text, exactly as the save
+      // reads them (standingSpans): the run's fakes and the spot keeps blanked,
+      // the keeps masked, and a name wrapped down a column found with its
+      // cells read off the page as the file has it. Read off the screen
+      // instead, a real name painted over a fake moves the rest of its line,
+      // and a column the save finds the marks would not. Each piece is put
+      // back on the page through the text nodes it stands in.
+      const disk = TD.serializeHeld(body, { mapped: true });
+      const { flat: diskFlat, cited } = diskReading(disk.text, disk.held, disk.pns);
+      const masked = maskKept(diskFlat, disk.text);
       // Most of what a key matches in a brief belongs to the decisions it
       // cites, not to this matter. Those are not leaks and are not marked:
       // see textdoc.citedNameSpans, which the save reads the same way.
-      const cited = TD.citedNameSpans(text);
       let at = 0;
       for (;;) {
-        const { spans, next } = PK.findRealSpansFrom(reals, masked, at, HANDFUL);
+        const { spans, next } = PK.findRealSpansFrom(reals, masked, at, HANDFUL, { layout: disk.text });
         for (const h of spans) {
-          if (TD.insideSpans(cited, h.start, h.end)) continue; // a cited decision's party
-          const r = rangeFor(segs, h.start, h.end);
-          if (!r) continue;
-          leakRanges.push(r);
-          hits.push({ range: r, real: h.real, fake: h.fake, doc: dname });
+          if (TD.insideCited(cited, h)) continue; // a cited decision's party
+          const pieces = h.ranges.map(([a, b]) => rangeFor(disk.segs, a, b));
+          if (!pieces.length || pieces.some((r) => !r)) continue;
+          for (const r of pieces) leakRanges.push(r);
+          hits.push({ range: pieces[0], pieces, real: h.real, fake: h.fake, doc: dname });
           leaks++;
         }
         if (next < 0) break;
@@ -4252,7 +4291,11 @@ async function scanPassNow(pass) {
   leakHits = hits;
   flaggedHits = flagCounts;
   scannedDocs = docsSeen;
+  // The master workbook's list says which of its keeps stand here, and this
+  // reading is the answer: it is drawn again when the answer moved.
+  const keptMoved = seen.size !== keptSeen.size || [...seen].some((v) => !keptSeen.has(v));
   keptSeen = seen;
+  if (keptMoved && masterInfo) renderMaster();
   scanned = mark;
   paintedSeq = docSeq;
   // …AND WHICH OF THE DOCUMENTS READ ARE CARRYING NOTHING. Where the walk goes
@@ -4460,6 +4503,7 @@ function stepLeak(dir = 1, { auto = false } = {}) {
   leakDir = dir < 0 ? -1 : 1;
   const h = hits[leakStep];
   leakHere = h.range;
+  leakHerePieces = piecesOf(h);
   markLeakHere();
   scrollRangeTo(h.range);
   if (namesBar.hidden) showNamesBar(true);
@@ -5781,7 +5825,7 @@ async function sweepFolder() {
         // fake cannot say whose it is, and does not have to.
         if (fakesFor && fakesRx && !open) {
           step("looking for the pseudonyms the run wrote", text.length);
-          for (const w of PK.findReals(fakesRx, text)) fakesFor.set.add(PK.fold(w.fake));
+          for (const w of PK.findReals(fakesRx, text, { columns: true })) fakesFor.set.add(PK.fold(w.fake));
         }
       } catch { readAll = false; /* unreadable: it is not a document this review can answer */ }
       // A DOCUMENT THAT TOOK TOO LONG SAYS WHICH ONE IT WAS. The sweep reads
@@ -5967,7 +6011,7 @@ function decideName(what) {
   decidedHere++;
   bounces = 0;
   if (what === "here") {
-    keepRangeHere(h.range, h.real);
+    keepRangeHere(piecesOf(h), h.real);
     leakHits = leakHits.filter((x) => x !== h);
   } else if (what === "no" || what === "never") {
     setKeep(h.real, what, { leak: true });
@@ -6086,18 +6130,24 @@ function leakAt(x, y) {
     else if (document.caretRangeFromPoint) { const r = document.caretRangeFromPoint(x, y); if (r) { node = r.startContainer; offset = r.startOffset; } }
   } catch { return null; }
   if (!node) return null;
-  for (const h of leakHits) { try { if (h.range.isPointInRange(node, offset)) return h; } catch { /* a range from a page since rebuilt */ } }
+  for (const h of leakHits) { try { if (piecesOf(h).some((r) => r.isPointInRange(node, offset))) return h; } catch { /* a range from a page since rebuilt */ } }
   return null;
 }
 /** The unfaked real name a selection touches, or null. */
 function leakIn(range) {
   for (const h of leakHits) {
     try {
-      if (h.range.compareBoundaryPoints(Range.END_TO_START, range) < 0 && h.range.compareBoundaryPoints(Range.START_TO_END, range) > 0) return h;
+      if (piecesOf(h).some((r) => r.compareBoundaryPoints(Range.END_TO_START, range) < 0 && r.compareBoundaryPoints(Range.START_TO_END, range) > 0)) return h;
     } catch { /* a range from a page since rebuilt */ }
   }
   return null;
 }
+/**
+ * A name's pieces on the page: one range, or one per line or cell where it is
+ * wrapped. A name wrapped down a column has the other column's words between
+ * its pieces, and they are not part of it — not to point at, not to keep.
+ */
+function piecesOf(h) { return h.pieces && h.pieces.length ? h.pieces : [h.range]; }
 
 // ── pseudonym tooltip ──────────────────────────────────────────────────────────────────
 pagesEl.addEventListener("mouseover", (e) => {
@@ -6125,7 +6175,7 @@ pagesEl.addEventListener("mouseover", (e) => {
   tipEl.append(settings.showFakes ? "Real name: " : "Pseudonym: ", b);
   if (pn.dataset.piece) tipEl.append(` (wrapped over ${pn.dataset.piece.split("/")[1]} lines; this line: ${settings.showFakes ? pn.dataset.real : pn.dataset.fake})`);
   if (pn.dataset.keptBy === "master") {
-    tipEl.append(document.createElement("br"), `Kept by ${masterInfo ? masterInfo.name : "the master workbook"} — left alone in every case, and not flagged as a leak. Withdraw it in that workbook's KEEP sheet.`);
+    tipEl.append(document.createElement("br"), `Kept by ${masterInfo ? masterInfo.name : "the master workbook"} — left alone in every case, and not flagged as a leak. Right-click it to take it off the Master Keep.`);
   } else if (pn.dataset.kept) {
     tipEl.append(document.createElement("br"), `Kept (${pn.dataset.kept === "never" ? "every case" : "this case"}): PDF-Linker leaves it un-faked on its next run. Right-click to change.`);
   }
@@ -6195,7 +6245,7 @@ function showKeepMenu(target, x, y) {
   $("keep-menu-fake").textContent = t.fake || "its pseudonym";
   $("keep-menu-sub").childNodes[0].nodeValue = master ? "Left alone in every case by " + (masterInfo ? masterInfo.name : "the master workbook") + "; "
     : t.here ? "The file carries it as it reads here; elsewhere " : t.leak ? "Written as " : "The file carries ";
-  $("keep-menu-sub").childNodes[2].nodeValue = master ? " — withdraw it there, not here."
+  $("keep-menu-sub").childNodes[2].nodeValue = master ? " — take it off the Master Keep to fake it."
     : t.here ? " still stands for it." : t.leak ? (isSettled(t.real) ? " on the next save — you said to fake it." : " once you say to fake it — until then the save leaves it as it stands.") : " until PDF-Linker re-runs.";
   if (master) $("keep-menu-fake").textContent = "its KEEP sheet says so";
   // The narrowest keep: this occurrence, and no other. Already one, or already
@@ -6209,6 +6259,7 @@ function showKeepMenu(target, x, y) {
   $("keep-menu-no").hidden = c === "no" || master;
   $("keep-menu-never").hidden = c === "never" || master;
   $("keep-menu-undo").hidden = (!c && !t.here) || master;
+  $("keep-menu-unmaster").hidden = !master;
   $("keep-menu-undo").textContent = t.here && !c ? "Fake it here after all" : "It is a pseudonym after all";
   keepMenu.hidden = false;
   keepMenu.style.left = Math.max(4, Math.min(window.innerWidth - keepMenu.offsetWidth - 4, x)) + "px";
@@ -6217,7 +6268,7 @@ function showKeepMenu(target, x, y) {
 function hideKeepMenu() { keepMenu.hidden = true; keepMenuFor = null; }
 pagesEl.addEventListener("contextmenu", (e) => {
   const pn = e.target.closest && e.target.closest(".pn, [data-here]");
-  const target = pn || (() => { const h = leakAt(e.clientX, e.clientY); return h ? { real: h.real, fake: h.fake, leak: true, range: h.range } : null; })();
+  const target = pn || (() => { const h = leakAt(e.clientX, e.clientY); return h ? { real: h.real, fake: h.fake, leak: true, range: h.range, pieces: piecesOf(h) } : null; })();
   if (!target) return;
   e.preventDefault();
   hideTip();
@@ -6315,6 +6366,143 @@ async function readMasterBytes(bytes, name) {
   toast(`${name}: ${masterKeeps.length} standing keep${masterKeeps.length === 1 ? "" : "s"} in force for this session.`);
 }
 
+// ── taking a value off the Master Keep ──────────────────────────────────────────
+//
+// A standing keep is a decision made in some other matter, and sometimes it is
+// the wrong one here: the master workbook keeps a name in every case, so the
+// reader will not mark it, the walk will not stop on it and the save will not
+// fake it — and PDF-Linker's next run un-fakes it. The operator used to be told
+// to go and withdraw it in the workbook's KEEP sheet. It is withdrawn from here
+// now: from the × beside it in the Flagged panel's list, from a selection that
+// stands in it, or from the right-click menu over it.
+//
+// It goes from the reader at once — the key is compiled again without it, so a
+// name it was holding in the clear is marked and can be faked — and from the
+// workbook where the reader can write it (attached with Load master workbook…,
+// and the browser allows the write): that row's Fix? cell is emptied, which is
+// no decision at all, and nothing else in the file is touched (see
+// leaks.masterWithdrawEdits). Where the workbook cannot be written, the reader
+// says so: the keep is gone for this session only, and PDF-Linker still has it.
+
+/** Take `values` off the Master Keep, asked first: it is a decision about every case. */
+async function withdrawMaster(values) {
+  const want = new Set((values || []).map((v) => LK.fold(v)).filter(Boolean));
+  const named = masterKeeps.filter((k) => want.has(LK.fold(k.value))).map((k) => k.value);
+  if (!named.length) return false;
+  const name = masterInfo ? masterInfo.name : "the master workbook";
+  const what = named.length === 1 ? `\u201c${named[0]}\u201d` : named.map((v) => `\u201c${v}\u201d`).join(", ");
+  const it = named.length === 1 ? "it" : "them";
+  // Leave to change the file is asked for FIRST, while the click that asked is
+  // fresh: the browser will not put its own question once a dialog has stood
+  // between the click and it.
+  const writable = await masterWritable();
+  if (!confirm(`Remove ${what} from the Master Keep in ${name}?\n\n` +
+    `${name} keeps ${it} in every case. Removed, ${it} ${named.length === 1 ? "is" : "are"} no longer left alone: ` +
+    `here ${it} ${named.length === 1 ? "is" : "are"} marked wherever ${it} ${named.length === 1 ? "stands" : "stand"} unfaked, ready to fake, ` +
+    `and PDF-Linker's next run fakes ${it} wherever a case's key binds ${it}.`)) return false;
+  // Here and now: the reader stops holding them…
+  masterKeeps = masterKeeps.filter((k) => !want.has(LK.fold(k.value)));
+  compileKey();
+  if (doc) { remarkKept(); paintHighlights(); }
+  renderFlags();
+  // …and the workbook is told, where it can be.
+  const w = writable.ok ? await writeMasterWithdrawn(named) : writable;
+  if (w.ok) {
+    toast(`${what} ${named.length === 1 ? "is" : "are"} off the Master Keep \u2014 ${name}'s KEEP sheet no longer keeps ${it} (the Fix? cell is empty; the row and its history stay). ` +
+      `Where ${it} ${named.length === 1 ? "stands" : "stand"} unfaked here, ${named.length === 1 ? "it is" : "they are"} marked: fake ${it}, and save.`, { ms: 9000 });
+    // The file is the truth: read it again, a run that wrote it meanwhile included.
+    if (masterHandle) { try { await readMaster(masterHandle, { quiet: true }); } catch (e) { console.warn(e); } }
+  } else {
+    const why = w.why === "loose" ? `${name} was opened as a copy, so the reader cannot change it \u2014 attach it with Load master workbook\u2026 and remove ${it} again`
+      : w.why === "permission" ? `the browser did not let the reader change ${name}`
+      : `${name} could not be changed (${(w.error && (w.error.message || w.error)) || "unknown error"}) \u2014 if Excel has it open, close it and remove ${it} again`;
+    toast(`${what} ${named.length === 1 ? "is" : "are"} off the Master Keep for this session only: ${why}. Its KEEP sheet still keeps ${it}, and PDF-Linker's next run will too.`, { error: true, ms: 12000 });
+  }
+  return true;
+}
+/** Whether the attached workbook may be written, asking the browser where it has to: { ok, why }. */
+async function masterWritable() {
+  const handle = masterHandle;
+  if (!handle || !masterInfo || masterInfo.loose || !handle.createWritable) return { ok: false, why: "loose" };
+  try {
+    if (handle.queryPermission && (await handle.queryPermission({ mode: "readwrite" })) === "granted") return { ok: true };
+    if (!handle.requestPermission || (await handle.requestPermission({ mode: "readwrite" })) === "granted") return { ok: true };
+    return { ok: false, why: "permission" };
+  } catch (e) {
+    return { ok: false, why: "permission", error: e };
+  }
+}
+/** The workbook with `values` taken off its KEEP sheet, written where it came from: { ok, why, error }. */
+async function writeMasterWithdrawn(values) {
+  const handle = masterHandle;
+  if (!handle || !masterInfo || masterInfo.loose || !handle.createWritable) return { ok: false, why: "loose" };
+  try {
+    // The file as it is NOW, not as it was read: a run may have written it since.
+    const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+    const name = handle.name || masterInfo.name;
+    const wb = await parseXlsx(bytes);
+    const w = LK.masterWithdrawEdits(wb.sheets, name, values);
+    if (!w.edits.length) return { ok: true }; // the file no longer keeps them
+    if (!w.part) throw new Error("its KEEP sheet has no part to write");
+    const out = await XW.writeSheetCells(bytes, w.part, w.edits);
+    // Read back before it is written: these are no longer kept, every other
+    // keep is exactly as it was.
+    const gone = new Set(values.map((v) => LK.fold(v)));
+    const was = LK.parseMasterKeeps(wb.sheets, name).keeps.map((k) => k.control + ":" + LK.fold(k.value)).filter((k) => !gone.has(k.slice(k.indexOf(":") + 1)));
+    const now = LK.parseMasterKeeps((await parseXlsx(out)).sheets, name).keeps.map((k) => k.control + ":" + LK.fold(k.value));
+    if (now.join("\n") !== was.join("\n")) throw new Error("the edited workbook did not read back as it should, so it was not written");
+    const writer = await handle.createWritable();
+    await writer.write(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    await writer.close();
+    return { ok: true };
+  } catch (e) {
+    if (e && e.name === "NotAllowedError") return { ok: false, why: "permission" };
+    return { ok: false, why: "error", error: e };
+  }
+}
+/** The Master Keep's values the key binds, matched: what a selection may be standing in. */
+let masterRxMemo = { master: null, key: null, rx: null };
+function masterMatcher() {
+  if (masterRxMemo.master !== masterKeeps || masterRxMemo.key !== key) {
+    const mine = masterKeeps.filter((k) => keyBinds(k.value)).map((k) => k.value);
+    masterRxMemo = { master: masterKeeps, key, rx: mine.length ? PK.buildMatcher(mine) : null };
+  }
+  return masterRxMemo.rx;
+}
+/**
+ * The Master Keep's values that keep a selection from being faked: a pseudonym
+ * whose real value it keeps, a kept value the selection takes in, or a kept
+ * phrase standing around the words selected. Only values the key binds — a
+ * keep of anything else is keeping nothing from being faked.
+ */
+function masterHeldIn(s) {
+  if (!masterInfo || !masterKeeps.length || !s) return [];
+  const out = [];
+  const add = (v) => {
+    const k = masterKeeps.find((x) => LK.fold(x.value) === LK.fold(v));
+    if (k && keyBinds(k.value) && !out.includes(k.value)) out.push(k.value);
+  };
+  if (s.pn && keptBy(pnReal(s.pn)) === "master") add(pnReal(s.pn));
+  const rx = masterMatcher();
+  const at = s.range.commonAncestorContainer;
+  const body = (at.nodeType === 1 ? at : at.parentElement) && (at.nodeType === 1 ? at : at.parentElement).closest(".page-body");
+  if (rx && body) {
+    const { text, segs } = flatten(body, { blankPn: true });
+    rx.lastIndex = 0;
+    let m;
+    while ((m = rx.exec(text))) {
+      const r = rangeFor(segs, m.index, m.index + m[0].length);
+      try {
+        if (r && r.compareBoundaryPoints(Range.END_TO_START, s.range) < 0 && r.compareBoundaryPoints(Range.START_TO_END, s.range) > 0) add(PK.foldGaps(m[0]));
+      } catch { /* a range from a page since rebuilt */ }
+      if (m.index === rx.lastIndex) rx.lastIndex++;
+    }
+    rx.lastIndex = 0;
+  }
+  add(realTextOf(s.range));
+  return out;
+}
+
 // ── spot keeps: this one occurrence, left as it reads ─────────────────────────────
 //
 // The page's spans are the truth: after any change to them the page's spots are
@@ -6372,20 +6560,27 @@ function keepSpanHere(span) {
   for (const el of wrappedPieces(span)) el.replaceWith(makeHeld(el.dataset.real));
   afterSpotChange(body, real);
 }
-/** Keep an unfaked real name where it stands: the save leaves this one as it reads. */
-function keepRangeHere(range, real) {
+/**
+ * Keep an unfaked real name where it stands: the save leaves this one as it
+ * reads. `ranges`: the name, or its pieces where it is wrapped (piecesOf) — a
+ * name wrapped down a column is kept piece by piece, and the other column's
+ * words between them are left alone.
+ */
+function keepRangeHere(ranges, real) {
   const parts = [];
-  const root = range.commonAncestorContainer;
-  const add = (n) => {
-    if (n.nodeType !== 3 || !range.intersectsNode(n)) return;
-    // The gutter number a wrapped name runs across is the file's own, not part of the name.
-    if (n.parentElement && n.parentElement.closest(".gutter, [data-here]")) return;
-    const from = n === range.startContainer ? range.startOffset : 0;
-    const to = n === range.endContainer ? range.endOffset : n.data.length;
-    if (to > from) parts.push({ node: n, from, to });
-  };
-  if (root.nodeType === 3) add(root);
-  else { const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) add(n); }
+  for (const range of Array.isArray(ranges) ? ranges : [ranges]) {
+    const root = range.commonAncestorContainer;
+    const add = (n) => {
+      if (n.nodeType !== 3 || !range.intersectsNode(n)) return;
+      // The gutter number a wrapped name runs across is the file's own, not part of the name.
+      if (n.parentElement && n.parentElement.closest(".gutter, [data-here]")) return;
+      const from = n === range.startContainer ? range.startOffset : 0;
+      const to = n === range.endContainer ? range.endOffset : n.data.length;
+      if (to > from) parts.push({ node: n, from, to });
+    };
+    if (root.nodeType === 3) add(root);
+    else { const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) add(n); }
+  }
   if (!parts.length) return;
   const body = parts[0].node.parentElement.closest(".page-body");
   if (!body) return;
@@ -6562,7 +6757,12 @@ $("keep-menu-here").addEventListener("click", () => {
   hideKeepMenu();
   if (!t) return;
   if (t.span) keepSpanHere(t.span);
-  else if (t.range) keepRangeHere(t.range, t.real);
+  else if (t.range) keepRangeHere(t.pieces || t.range, t.real);
+});
+$("keep-menu-unmaster").addEventListener("click", () => {
+  const t = keepMenuFor;
+  hideKeepMenu();
+  if (t) withdrawMaster([t.real]);
 });
 $("keep-menu-fake-it").addEventListener("click", () => {
   const t = keepMenuFor;
@@ -6614,7 +6814,17 @@ function showFlagPop() {
   } else if (leak) {
     flagPopBtn.disabled = true;
     flagPopNote.textContent = "\u201c" + leak.real + "\u201d is in the key and stands unfaked. Leave it so?";
-    $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu({ real: leak.real, fake: leak.fake, leak: true, range: leak.range }, e.clientX, e.clientY); };
+    $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu({ real: leak.real, fake: leak.fake, leak: true, range: leak.range, pieces: piecesOf(leak) }, e.clientX, e.clientY); };
+  }
+  // Kept by the master workbook: that is what stands between it and a fake,
+  // and the answer is to take it off the Master Keep.
+  const held = hereIn ? [] : masterHeldIn(s);
+  $("flag-pop-master").hidden = !held.length;
+  if (held.length) {
+    const what = held.map((v) => "\u201c" + v + "\u201d").join(", ");
+    flagPopNote.textContent = `${what} ${held.length === 1 ? "is" : "are"} kept in every case by ${masterInfo ? masterInfo.name : "the master workbook"} \u2014 that is what keeps ${held.length === 1 ? "it" : "them"} from being faked.`;
+    $("flag-pop-master").title = `Take ${what} off the Master Keep: ${held.length === 1 ? "it" : "they"} can then be faked here, and PDF-Linker fakes ${held.length === 1 ? "it" : "them"} on its next run`;
+    $("flag-pop-master").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; withdrawMaster(held); };
   }
   // Several words, one of which the key already fakes or flags on its own, or
   // one already flagged: the question may be whether they go TOGETHER.
@@ -6634,6 +6844,7 @@ function showFlagPop() {
 }
 flagPopBtn.addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
 $("flag-pop-keep").addEventListener("mousedown", (e) => e.preventDefault());
+$("flag-pop-master").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("click", phraseSelection);
 flagPopBtn.addEventListener("click", flagSelection);
@@ -6989,10 +7200,16 @@ function renderMaster() {
     const t = document.createElement("span");
     t.className = "tag keep";
     t.textContent = "master";
-    t.title = "Kept by the master workbook, in every case — withdraw it there, not here";
+    t.title = "Kept by the master workbook, in every case — × takes it off the Master Keep";
     li.appendChild(t);
     li.title = "Click to find it in the document";
     li.addEventListener("click", () => findInPages(k.value));
+    const x = document.createElement("button");
+    x.className = "x";
+    x.textContent = "×";
+    x.title = `Remove it from the Master Keep — ${masterInfo.name} keeps it in every case; removed, it can be faked here, and PDF-Linker fakes it on its next run`;
+    x.addEventListener("click", (e) => { e.stopPropagation(); withdrawMaster([k.value]); });
+    li.appendChild(x);
     list.appendChild(li);
   }
   if (here.length > 60) {
@@ -7144,6 +7361,7 @@ let leaks = null;          // { parsed, bytes, name, handle, folder, at, mirrore
 let leakRowValue = "";     // the current row's value, marked wherever it stands
 let leakRowRanges = [];    // where it stands, from the last paint: [{ body, range }]
 let leakHere = null;       // the occurrence the bar scrolled to
+let leakHerePieces = null; // …and, where the names walk put it there, every piece of that name
 let rowHere = null;        // …the worksheet row's own, which the names walk does not move
 
 function leaksStoreKey() { return LK.decisionsKey(leaks.folder || folderName || fileName, leaks.name); }
@@ -7798,7 +8016,10 @@ function releaseReading({ renote = false } = {}) {
 }
 function markLeakHere() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
-  if (leakHere && leakHere.startContainer.isConnected) CSS.highlights.set("leakrow-here", new Highlight(leakHere));
+  // The names walk stands on every piece of a wrapped name; the worksheet's
+  // walk sets leakHere alone, and stands on that.
+  const all = leakHerePieces && leakHerePieces[0] === leakHere ? leakHerePieces : [leakHere];
+  if (leakHere && leakHere.startContainer.isConnected) CSS.highlights.set("leakrow-here", highlightOf(all));
   else CSS.highlights.delete("leakrow-here");
 }
 
@@ -13520,25 +13741,28 @@ function fillRaw(sec) {
   // key binds, past the values kept for the case, the spot keeps and the
   // parties of cited decisions.
   const cited = TD.citedNameSpans(text);
+  // A name wrapped down a column is marked piece by piece: the other column's
+  // words between them are not part of it.
   const leaks = reals
-    ? PK.findRealSpans(reals, TD.blankRanges(maskKept(text), held)).filter((h) => !TD.insideSpans(cited, h.start, h.end))
+    ? PK.findRealSpans(reals, TD.blankRanges(maskKept(text, text), held), { layout: text }).filter((h) => !TD.insideCited(cited, h))
     : [];
+  const marks = leaks.flatMap((h) => h.ranges).sort((a, b) => a[0] - b[0]);
   // Nothing moved, nothing written: a selection being made in it to copy survives.
-  const sig = [tag, text, leaks.map((h) => h.start + "-" + h.end).join(",")].join("\u0000");
+  const sig = [tag, text, marks.map(([a, b]) => a + "-" + b).join(",")].join("\u0000");
   if (view.__sig === sig) return;
   view.__sig = sig;
   view.querySelector(".raw-tag").textContent = tag;
   const pre = view.querySelector(".raw-text");
   pre.textContent = "";
   let at = 0;
-  for (const h of leaks) {
-    if (h.start > at) pre.append(text.slice(at, h.start));
+  for (const [a, b] of marks) {
+    if (a > at) pre.append(text.slice(at, a));
     const mark = document.createElement("span");
     mark.className = "raw-leak";
     mark.title = "A real name from the key, standing in the file — a save writes its pseudonym only once you have said to fake it";
-    mark.textContent = text.slice(h.start, h.end);
+    mark.textContent = text.slice(a, b);
     pre.append(mark);
-    at = h.end;
+    at = b;
   }
   pre.append(text.slice(at));
 }

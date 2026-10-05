@@ -256,24 +256,58 @@ export function sheetsLookLikeMaster(sheets) {
  * counted in `partial` and reported rather than applied.
  */
 export function parseMasterKeeps(sheets, name) {
+  const { sheet, parsed } = masterRows(sheets, name);
+  const keeps = [];
+  const partial = [];
+  for (const row of parsed.rows) {
+    const control = wholeKeep(row);
+    if (control) { keeps.push({ value: row.value, control, note: row.notes }); continue; }
+    const c = classifyFix(row.fix, row.value);
+    if (c.kind === "keep") partial.push({ value: row.value, parts: c.parts || [] });
+  }
+  return { name: name || "", sheet: sheet.name, keeps, partial, rows: parsed.rows.length };
+}
+function masterRows(sheets, name) {
   const sheet = masterKeepSheet(sheets);
   if (!sheet) {
     throw new Error((name || "The workbook") + ' has no "KEEP" sheet with a Value / Fix? header — not PDF-Linker\'s master workbook.');
   }
-  const parsed = parseLeaks([sheet], name);
-  const keeps = [];
-  const partial = [];
+  return { sheet, parsed: parseLeaks([sheet], name) };
+}
+/** A KEEP row that keeps its WHOLE value: "no" or "never", else "" (a part kept, or no keep at all). */
+function wholeKeep(row) {
+  const c = classifyFix(row.fix, row.value);
+  if (isKeepKind(c.kind)) return c.kind === "never" ? "never" : "no";
+  if (c.kind === "keep" && (c.parts || []).some((part) => fold(part) === fold(row.value))) return "no";
+  return "";
+}
+/**
+ * Taking `values` off the master workbook's keeps, as the cells to write:
+ * the Fix? cell of every KEEP row that keeps one of them whole, emptied.
+ * { part, edits: [{ row, col, text: "" }], values: the values found kept }.
+ *
+ * THE DECISION GOES, THE ROW STAYS. A row's Fix? cell is what makes it a keep
+ * — parseMasterKeeps reads it, and PDF-Linker's own pass reads it the same
+ * way — so an empty one is no decision at all: the value is not left alone
+ * any more, here or on PDF-Linker's next run in any folder. The row itself,
+ * with its history (times seen, the cases, the notes), is left where it is,
+ * and so is every other cell of the sheet; taking a row OUT would move every
+ * row under it, and the dropdown, the filter and anything else PDF-Linker hung
+ * on the sheet's ranges with them.
+ */
+export function masterWithdrawEdits(sheets, name, values) {
+  const { parsed } = masterRows(sheets, name);
+  const col = parsed.cols.fix;
+  const want = new Set((values || []).map(fold));
+  const edits = [];
+  const found = [];
+  if (col < 0) return { part: parsed.part, edits, values: found };
   for (const row of parsed.rows) {
-    const c = classifyFix(row.fix, row.value);
-    if (isKeepKind(c.kind)) {
-      keeps.push({ value: row.value, control: c.kind === "never" ? "never" : "no", note: row.notes });
-    } else if (c.kind === "keep") {
-      const whole = (c.parts || []).some((part) => fold(part) === fold(row.value));
-      if (whole) keeps.push({ value: row.value, control: "no", note: row.notes });
-      else partial.push({ value: row.value, parts: c.parts || [] });
-    }
+    if (!want.has(fold(row.value)) || !wholeKeep(row)) continue;
+    edits.push({ row: row.n, col, text: "" });
+    if (!found.some((v) => fold(v) === fold(row.value))) found.push(row.value);
   }
-  return { name: name || "", sheet: sheet.name, keeps, partial, rows: parsed.rows.length };
+  return { part: parsed.part, edits, values: found };
 }
 
 // ---- the locating columns ------------------------------------------------------------

@@ -11,7 +11,7 @@ import {
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
   packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE, isSuggested, isPending,
   rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
-  isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
+  isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps, masterWithdrawEdits,
   walkStops, walkStep, WALK_BOUNCE_LIMIT, sweepSpan, isFakeKind, fakeDecisions,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
@@ -336,6 +336,18 @@ check("the workbook by name", [isMasterName("Master Leaks.xlsx"), isMasterName("
   let threw = "";
   try { parseMasterKeeps([{ name: "Sheet1", rows: [["a"]] }], "Book.xlsx"); } catch (e) { threw = e.message; }
   check("a workbook with no KEEP sheet says so", /no "KEEP" sheet/.test(threw), true);
+  // Taking a value off the keeps: its Fix? cell emptied, in the KEEP sheet's
+  // own rows and column, and nothing else.
+  const w = masterWithdrawEdits(sheets, "Master Leaks.xlsx", ["david w. slayton", "Careau"]);
+  check("withdrawing: the Fix? cell of each row that keeps the value whole, emptied",
+    w.edits, [{ row: 2, col: 1, text: "" }, { row: 4, col: 1, text: "" }]);
+  check("…named as the sheet spells them", w.values, ["David W. Slayton", "Careau"]);
+  check("…a row that keeps only part of a value, or fakes it, is not a keep to withdraw",
+    masterWithdrawEdits(sheets, "Master Leaks.xlsx", ["David W. Slayton Jr", "Quillmark"]).edits, []);
+  const twice = [{ name: "KEEP", rows: [["Value", "Fix? (yes/no)"], ["Court", "no"], ["Clerk", "never"], ["COURT", "never"]] }];
+  check("…every row keeping it, whatever its case", masterWithdrawEdits(twice, "m.xlsx", ["Court"]).edits.map((e) => e.row), [2, 4]);
+  const after = twice.map((sh) => ({ name: sh.name, rows: sh.rows.map((r, i) => (i === 1 || i === 3 ? [r[0], ""] : r)) }));
+  check("…and read back, the value is no longer kept, the others are", parseMasterKeeps(after, "m.xlsx").keeps.map((k) => k.value), ["Clerk"]);
 }
 
 console.log("the walk from one document to the next");
