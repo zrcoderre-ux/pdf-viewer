@@ -198,7 +198,7 @@ export function isFakeKind(kind) {
  * The values the worksheet has said to fake, folded: every row whose Fix?
  * cell reads `yes` or `phrase`, typed in the reader or standing in the sheet
  * as it arrived. The reader's save fakes only the names it has been told to
- * (text-reader.js, undecidedSpans), and a row answered `yes` IS that answer —
+ * (text-reader.js, standingSpans), and a row answered `yes` IS that answer —
  * the names walk does not stop on a name with a row, so without this the name
  * was answered on the worksheet, never in the walk, and every save left it
  * standing and called it not yet reviewed. A cell still pending (a suggestion

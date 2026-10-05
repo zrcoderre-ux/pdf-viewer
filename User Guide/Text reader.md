@@ -255,7 +255,11 @@ app, which routes it to the reader tab.
   bearing a party's surname — is **kept** from the orange mark itself:
   right-click it (or select it and take **Keep…**), and *keep in this case*
   or *never fake it* leaves it as it stands, on save and on PDF-Linker's
-  next run, the same keep a wrongly faked pseudonym takes.
+  next run, the same keep a wrongly faked pseudonym takes. The same
+  right-click offers **Fake it**, the names bar's answer: every occurrence of
+  the name is written as its pseudonym on the next save. It reaches a name
+  the walk has gone past, or one it does not stop on because the LEAKS
+  worksheet has a row for it.
 - **Real names from the key.** **Open case folder** picks the matter's folder
   and takes only `pseudonym_key.xlsx` and the exports out of it (a
   `*.txt.LEAK` quarantined by PDF-Linker's leak gate is listed too, marked,
@@ -1009,6 +1013,17 @@ app, which routes it to the reader tab.
   bar say the same thing: *undecided — the save leaves it as it stands*.
   Where the marks are off for a document (too expensive to read), nothing on
   it can be decided, so a save there fakes none of its names and says so.
+  **The save reads the page as the orange marks do.** It used to read the
+  text with the run's fakes standing in it, so it disagreed with the marks
+  two ways: a real name that is a word of a fake (`Volunteers` inside a fake
+  `Volunteers of Columbia`) was warned about as unreviewed though nothing on
+  the page marked it, and once decided it was written into the middle of the
+  fake; and an orange name beside a fake in a citation (`Volunteers v.
+  Quillmark Corp. (2019) …`) read to the save as a cited decision's party and
+  was left standing, still orange, after you had said to fake it. Now what
+  is orange is what the save writes once decided, the run's fakes are never
+  written into, and a name you said to fake that the save still cannot write
+  is named in red rather than left silently.
   **And closing on one asks first.** Nothing is lost by the close — the name
   is still in the file, to be found again the next time the document is opened
   — but what is left behind is a scrubbed export carrying a real value, with

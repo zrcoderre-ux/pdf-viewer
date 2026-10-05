@@ -165,6 +165,8 @@ console.log("spot keeps");
   check("serializeHeld gives the same text as a plain save", held.text, serializeNodes(page));
   check("…and where the kept spot landed in it", held.held, [[31, 36]]);
   check("the range is the value itself", held.text.slice(31, 36), "David");
+  check("…and where the run's fake landed, which the marks read blanked", [held.pns, held.text.slice(14, 20)], [[[14, 20]], "Party7"]);
+  check("a page with no pseudonym holds none", serializeHeld(E("DIV", {}, [T("plain")])).pns, []);
   check("a page with no spot keep holds none", serializeHeld(E("DIV", {}, [T("plain")])).held, []);
   check("an empty spot span is not a range", serializeHeld(E("DIV", {}, [E("SPAN", { "data-here": "" }, [])])).held, []);
 

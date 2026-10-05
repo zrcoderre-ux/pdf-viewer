@@ -276,12 +276,20 @@ const HERE_ATTR = "data-here";
 
 /**
  * What a page body writes to disk, and where its spot keeps landed in it:
- * { text, held: [[start, end), …] } — the ranges a save must leave as they
- * read rather than write back to their pseudonyms.
+ * { text, held: [[start, end), …], pns: [[start, end), …] } — `held` the
+ * ranges a save must leave as they read rather than write back to their
+ * pseudonyms, `pns` the fakes the run wrote.
  */
 export function serializeHeld(root) {
   let out = "";
   const held = [];
+  // …and where each PSEUDONYM's fake stands in it. The marks read the page with
+  // these blanked (the reader's flatten, clearReading): a fake is what the run
+  // wrote, and a word of it that happens to be a real the key binds is not a
+  // name standing in the clear. A save that reads the page must read it the
+  // same way, or it finds names the page never marks — and rewrites them
+  // inside the fake.
+  const pns = [];
   let open = -1;
   walk(root, (s) => { out += s; }, {
     fakes: true,
@@ -289,8 +297,12 @@ export function serializeHeld(root) {
       if (phase === "in") open = out.length;
       else if (open >= 0) { if (out.length > open) held.push([open, out.length]); open = -1; }
     },
+    fake: (n) => {
+      const f = n.getAttribute("data-fake") || "";
+      if (f) pns.push([out.length, out.length + f.length]);
+    },
   });
-  return { text: out, held };
+  return { text: out, held, pns };
 }
 
 /**
