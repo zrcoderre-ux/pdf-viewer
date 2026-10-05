@@ -4464,6 +4464,16 @@ function showNamesBar(on) {
 // happen to have open", which is worse than no answer. Both needles are put to
 // every file, so a name standing in the clear in one and faked in another is
 // found in both.
+//
+// WITH SHOW FAKES ON, ONLY THE QUERY AS TYPED. The screen is then the
+// document as it is on disk, and a real name on it is one standing UNFAKED —
+// a leak the run missed, or a value kept where it stands. That is what a
+// search for the real name is asking for: a hit on its pseudonym would mark
+// text that does not say what was typed, and would bury the leaks among the
+// names the key did its job on. The rest of the folder is read the same way,
+// since every document the walk opens is shown under the same view; counting
+// the fakes there would send the walk into documents with nothing on screen
+// that matches.
 let findQuery = "";
 let findHits = [];    // the open document's hits, in order: [{ range }]
 let findStep = -1;
@@ -4472,7 +4482,7 @@ let findRows = [];    // the rest of the folder: [{ doc, count }]
 let findScanFor = null; // …the query and the folder that answer was about
 let findScanning = false;
 
-/** The needles a query stands for: as it reads, and as the key writes it. */
+/** The needles a query stands for: as it reads, and — with the real names on screen — as the key writes it. */
 function findNeedles(q) {
   const t = String(q || "").trim();
   if (!t) return [];
@@ -4480,7 +4490,7 @@ function findNeedles(q) {
   // The same words as the file carries them. `forwardText` is the save's own
   // translation, so what is looked for is exactly what a save would have
   // written — including a phrase only part of which the key binds.
-  if (fwd) {
+  if (fwd && !settings.showFakes) {
     try {
       const { text, swaps } = forwardText(t, []);
       if (swaps && text && PK.fold(text) !== PK.fold(t)) out.push(text);
@@ -4488,10 +4498,6 @@ function findNeedles(q) {
   }
   return out;
 }
-// The page is searched for BOTH faces of the query too: with "Show fakes" on
-// the text on screen is the pseudonyms, and a find that only knew the real
-// name would come back empty on a page plainly carrying it.
-//
 // MATCH CASE holds for both faces. The key writes a pseudonym in the case of
 // the name it stands for (mirrorCase), so "RASHO" in a caption is looked for
 // as the fake in capitals in the files, and a case-sensitive find of the real
@@ -4544,15 +4550,19 @@ function clearFindMarks() {
 /**
  * The rest of the folder, read once per query: which documents carry it and
  * how many times. Idle-sliced like the leak sweep, and thrown away whenever
- * the query, the folder or the key moves.
+ * the query, the folder, the key or Show fakes moves.
  */
 function findScanStale() {
-  return !findScanFor || findScanFor.q !== findQuery || findScanFor.docs !== folderDocs || findScanFor.key !== key || findScanFor.cs !== matchCase();
+  return !findScanFor || findScanFor.q !== findQuery || findScanFor.docs !== folderDocs || findScanFor.key !== key || findScanFor.cs !== matchCase() || findScanFor.fakes !== settings.showFakes;
 }
 async function scanFindFolder() {
   if (!dirHandle || !findQuery || findScanning || !findScanStale()) return;
   findScanning = true;
-  const mine = { q: findQuery, docs: folderDocs, key, cs: matchCase() };
+  // Counts made under another key or the other face of the names are no
+  // answer to walk by while the new ones are read: they name documents with
+  // nothing on screen that matches.
+  if (findScanFor && (findScanFor.key !== key || findScanFor.fakes !== settings.showFakes)) findRows = [];
+  const mine = { q: findQuery, docs: folderDocs, key, cs: matchCase(), fakes: settings.showFakes };
   findScanFor = mine;
   const rows = [];
   const rx = findMatcherFor(findQuery);
@@ -4561,7 +4571,7 @@ async function scanFindFolder() {
       let clock = await idleClock();
       for (const d of folderDocs) {
         noteDoing(pass, `searching the folder (${d.name})`);
-        if (findScanFor !== mine) return; // the query moved under it
+        if (findScanFor !== mine || findScanStale()) return; // the question moved under it
         // The open one is READ HERE TOO, though its hits come from the page:
         // the walk moves from document to document, and a row set that left
         // out whichever was open when it was made would send the walk back
@@ -4577,9 +4587,9 @@ async function scanFindFolder() {
     });
   } finally { findScanning = false; }
   // The question moved while this one was being read (a word typed, Match
-  // case ticked): the new one could not start while this held the folder, so
-  // it starts now.
-  if (findScanFor !== mine) { scanFindFolder(); return; }
+  // case ticked, Show fakes turned): the new one could not start while this
+  // held the folder, so it starts now.
+  if (findScanFor !== mine || findScanStale()) { scanFindFolder(); return; }
   findRows = rows;
   renderFindBar();
   // A find that opened on a document with nothing in it waits for this answer
