@@ -393,7 +393,14 @@ app, which routes it to the reader tab.
   you to the next row still to answer; the **Leaks** tab lists every row with
   its state and jumps to any of them. A `no` or `never` on a value the key
   binds is mirrored as one of the reader's keeps, so the orange mark goes and
-  a save of the document leaves the value as it stands. **A save of the
+  a save of the document leaves the value as it stands. A `yes` or `phrase`
+  on one is the names bar's **fake it**: the save writes its pseudonym, the
+  walk stops offering it and the ⚠ count calls it settled, whether the cell
+  was answered here or arrived in the sheet that way. It used to count for
+  nothing in the reader, and since the walk does not stop on a name the
+  worksheet has a row for, the name was answered on the worksheet and never
+  in the walk: every save left it in the file and warned it was `not yet
+  reviewed`. Clearing the cell makes the name undecided again. **A save of the
   document writes the worksheet too**: the rows answered while reading a
   document are decisions about that document, and a decision left in the
   browser is one PDF-Linker's next run will not see, so **Save** (or Ctrl+S)
@@ -404,8 +411,8 @@ app, which routes it to the reader tab.
   place** — only the Fix? cells change; every other part of the file, the
   Context quotes, the column widths and the dropdown come back byte for byte,
   and the file is read back before it is written — after which Apply Fixes (or
-  a re-run) applies them to the files. A `yes` here is the worksheet's alone:
-  it is never also flagged into `New Real Values.txt`.
+  a re-run) applies them to the files. A `yes` here is never also flagged
+  into `New Real Values.txt`.
 - **And through a document in the order the rows stand in it.** PDF-Linker
   writes one row per **value**, so the worksheet's own order is the order the
   values were first found — which sent a review to page 4, then page 31, then

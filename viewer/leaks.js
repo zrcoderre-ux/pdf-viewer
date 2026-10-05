@@ -190,6 +190,29 @@ export function classifyFix(cell, value) {
 export function isKeepKind(kind) {
   return kind === "no" || kind === "never";
 }
+/** …and whether it is a FAKE of the whole value, which the reader takes as its own "fake it". */
+export function isFakeKind(kind) {
+  return kind === "yes" || kind === "phrase";
+}
+/**
+ * The values the worksheet has said to fake, folded: every row whose Fix?
+ * cell reads `yes` or `phrase`, typed in the reader or standing in the sheet
+ * as it arrived. The reader's save fakes only the names it has been told to
+ * (text-reader.js, undecidedSpans), and a row answered `yes` IS that answer —
+ * the names walk does not stop on a name with a row, so without this the name
+ * was answered on the worksheet, never in the walk, and every save left it
+ * standing and called it not yet reviewed. A cell still pending (a suggestion
+ * not yet accepted) is no answer and is left out.
+ */
+export function fakeDecisions(rows) {
+  const out = new Set();
+  for (const r of rows || []) {
+    if (!r || isPending(r) || !isFakeKind(classifyFix(r.fix, r.value).kind)) continue;
+    const f = fold(r.value);
+    if (f) out.add(f);
+  }
+  return out;
+}
 
 // ---- the master workbook: the keeps PDF-Linker carries between cases -------------
 //

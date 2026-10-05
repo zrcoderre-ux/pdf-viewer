@@ -222,7 +222,11 @@ and File cells, and matches a File name to its export (the reverse of
 the stage (it takes its own height through `--bar-h`), opens the row's
 document, scrolls to its page and gutter line and marks the value
 (`::highlight(leakrow)`), mirrors a `no`/`never` on a bound value as a
-reader keep, and saves through `xlsx-write.js`, which rewrites ONLY the
+reader keep and counts a `yes`/`phrase` as the names bar's "fake it"
+(`LK.fakeDecisions` into `sheetFakes`, read by `isSettled`, so the save's
+`undecidedSpans` fakes it; the walk skips a name with a row, so without this
+it was never settled and every save warned about it), and saves through
+`xlsx-write.js`, which rewrites ONLY the
 Fix? cells as inline strings inside the original zip — every other entry
 copied through with its compressed bytes, CRC and stamp — and reads the
 result back before it is written. A `Combined Text.txt` is listed first

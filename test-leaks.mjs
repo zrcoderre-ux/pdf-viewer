@@ -12,7 +12,7 @@ import {
   packDecisions, unpackDecisions, decisionsKey, leakPages, CONTEXT_RULE, isSuggested, isPending,
   rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps,
-  walkStops, walkStep, WALK_BOUNCE_LIMIT, sweepSpan,
+  walkStops, walkStep, WALK_BOUNCE_LIMIT, sweepSpan, isFakeKind, fakeDecisions,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
 
@@ -282,6 +282,27 @@ check("unsaved decisions remembered with the cell they replace", packed, { 2: { 
   check("…but never over a cell somebody typed since", [unpackDecisions(changed, packed), changed[0].fix], [1, "never"]);
 }
 check("the store key names folder and file", decisionsKey("Rasho v Quillmark", "LEAKS.xlsx"), "textReader.leaks.Rasho v Quillmark/LEAKS.xlsx");
+{
+  // A `yes` on the worksheet is the names walk's "fake it": the walk does not
+  // stop on a name with a row, so the save had nothing else to go on and left
+  // the name standing — "1 real name not yet reviewed was NOT faked —
+  // Volunteers", save after save.
+  check("yes and phrase fake the whole value; the rest do not",
+    ["yes", "phrase", "no", "never", "phrase-part", "replacement", "alias", "ocr", "keep", ""].map(isFakeKind),
+    [true, true, false, false, false, false, false, false, false, false]);
+  const sheet = [
+    { value: "Volunteers", fix: "yes", fix0: "" },             // answered here
+    { value: "Helen  Rasho", fix: "Y", fix0: "Y" },             // the sheet's own cell, as it arrived
+    { value: "Pasadena Unified", fix: "phrase", fix0: "" },
+    { value: "Court", fix: "no", fix0: "" },                    // a keep, not a fake
+    { value: "Vazqez", fix: "~Vazquez", fix0: "~Vazquez" },     // a suggestion not yet accepted
+    { value: "Marin", fix: "Martin", fix0: "" },                // a replacement: PDF-Linker writes it, not the key's fake
+    { value: "Quillmark", fix: "", fix0: "yes" },               // a yes withdrawn
+  ];
+  check("the values the worksheet says to fake, folded as the key's reals are looked up",
+    [...fakeDecisions(sheet)], ["volunteers", "helen rasho", "pasadena unified"]);
+  check("…none from no rows", [fakeDecisions(null).size, fakeDecisions([]).size], [0, 0]);
+}
 
 // ---- the master workbook's KEEP sheet -------------------------------------------
 console.log("\nthe master workbook");
