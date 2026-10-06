@@ -302,7 +302,15 @@ app, which routes it to the reader tab.
   **Show fakes** shows the document as it is on disk. The key is read the way
   `DeAnonymize.bas` and the Claude extension read it: columns by header name,
   operator keeps skipped, alt spellings forward-only, an ambiguous fake
-  retired, the pinned tab out of the reversal. The last few keys are
+  retired, the pinned tab out of the reversal. **A pseudonym that is an
+  ordinary word is shown as written.** An older PDF-Linker could cut a
+  surname's stand-in down to a word ("We"), and nothing in the text says which
+  "we" the run wrote, so the reader used to paint the surname over every "we"
+  in the case. It now leaves those words as they are, says so in the status
+  bar and in a message naming the pair, and keeps writing the name as the key
+  says when you type it. A full **Re-run PDF-Linker** gives the name a
+  stand-in of its own (current PDF-Linker repairs such a key as it reads it).
+  The last few keys are
   remembered, so a lone `.txt` can be read under a key already loaded. A real
   name from the key standing **unfaked** in an export is counted in the status
   bar and underlined — that is a leak the run missed. **The names of decided

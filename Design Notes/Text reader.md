@@ -7,7 +7,8 @@ pure, Node-tested modules — `textdoc.js` (the export as pages by its
 serializes a pseudonym span as its FAKE; the `New Real Values.txt` list),
 `pseudo-key.js` (a port of the Claude extension's `src/pseudo.js`: parseKey
 by header name, keeps dropped, pinned tab out of the reversal, ambiguous fake
-retired, case-mirrored swaps in both directions) and `xlsx-read.js` (a port
+retired, a fake that is an ordinary word retired, case-mirrored swaps in both
+directions) and `xlsx-read.js` (a port
 of its `src/xlsxread.js`). It reuses `citation-linker.js` and `toa.js`
 directly; citation underlines are painted as thin overlay strips from DOM
 Ranges so the text stays editable, and the pleading gutter numbers are
@@ -182,6 +183,24 @@ the same way, off the text with each fake translated to its real name and
 spot keeps mapped into it. `flagSelection` tells the operator such a flag
 takes a full re-run (`s.touches` or `phraseFakedInFile`), as `markPhrase`
 does.
+
+**A fake that is an ordinary word** (`parseKey`'s `wordFakes`,
+`PK.wordFakesOf`, `PK.compile`): an older PDF-Linker's nickname rule cut a
+surname's stand-in to "We" (the front of a longer name's fake, six letters
+off) and the key bound it, so the reversal painted the surname over every
+"we" of the case — case-insensitive and whole-word, which is right for a
+stand-in and wrong for a word. Nothing in an export records where the run
+wrote a stand-in, so the reader cannot tell the run's "We" from the word:
+such a pair (its fake `isCommonReal`, whose list now carries the pronouns
+and the rest of the two-letter words) is retired from the display like an
+ambiguous one, and `compile` drops it too, for a key parsed and kept in the
+library before the rule. The forward direction (`warn`, `compileForward`)
+keeps it, so a real name typed is still written as the key says, and a
+composed fake carrying the word ("Delacroix We") still reverses whole,
+longest first. `setKey` says so in the status bar and a toast naming the
+pairs, pointing at a full PDF-Linker run, which drops such rows on load
+(PDF-Linker's `_pn_key_word_stand_ins`) and no longer draws them
+(`_nick_front`, `fold_onto`).
 
 **Taking a value off the Master Keep** (`withdrawMaster`): a value the master
 workbook (`Master Leaks.xlsx`, its KEEP sheet) keeps is left alone in every

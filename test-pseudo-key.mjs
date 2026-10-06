@@ -10,6 +10,7 @@ import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, compileFakes, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
+  wordFakesOf,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -535,6 +536,26 @@ console.log("find matcher");
   check("a phrase still reads across a numbered line under Match case", hits(buildFindMatcher(["Superior Court"], { caseSensitive: true }), "the Superior\n 3  Court held"), ["Superior\n 3  Court"]);
   check("part of a word is found either way", hits(buildFindMatcher(["our"], { caseSensitive: true }), "Court, OUR court"), ["our", "our"]);
   check("nothing to look for, no matcher", buildFindMatcher(["  "], { caseSensitive: true }), null);
+}
+
+console.log("a fake that is an ordinary word");
+{
+  // An older PDF-Linker cut "We" for the surname "Dax" off the front of a
+  // longer name's fake, and composed "Ilse Dax" -> "Delacroix We" from it.
+  const k = keyOf([
+    ["person-token", "Dax", "We", "…", "", "document", 9],
+    ["person", "Ilse Dax", "Delacroix We", "…", "", "spreadsheet", 4],
+    ["person-token", "Ilse", "Delacroix", "…", "", "spreadsheet", 4],
+  ]);
+  check("retired from the display, and said", [k.pairs.some((p) => p.fake === "We"), k.wordFakes, k.dropped.words],
+    [false, [{ fake: "We", real: "Dax" }], 1]);
+  const t = translate(compile(k), "We respectfully submit that we and Delacroix We agree.").text;
+  check("every 'we' reads as written; the composed name still reverses whole", t, "We respectfully submit that we and Ilse Dax agree.");
+  check("…and a real name typed is still written as the key says", forwardRuns(compileForward(k), "Dax signed.").filter((r) => r.t === "swap").map((r) => r.to), ["We"]);
+  // A key parsed and kept in the library before the rule: its pairs carry the word.
+  const old = { ...k, wordFakes: undefined, pairs: k.pairs.concat([{ fake: "We", real: "Dax" }]) };
+  check("a key kept from before is guarded too", [wordFakesOf(old), translate(compile(old), "we agree").text], [[{ fake: "We", real: "Dax" }], "we agree"]);
+  check("an ordinary key has none", wordFakesOf(keyOf([["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 1]])), []);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

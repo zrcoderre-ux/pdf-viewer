@@ -1549,6 +1549,16 @@ function setKey(parsed) {
   staleReady();
   compileKey();
   $("st-key").textContent = key ? "Key: " + PK.keyTitle(key) + (key.dropped.ambiguous ? ` (${key.dropped.ambiguous} ambiguous fake${key.dropped.ambiguous === 1 ? "" : "s"} retired)` : "") : "";
+  // A fake that is an ordinary word ("We" for a surname): the reader cannot
+  // tell the run's "We" from the word, so it shows every one as written
+  // (PK.compile) — and says why, since the name it stands for is then shown
+  // nowhere. A full PDF-Linker run gives the name a stand-in of its own.
+  const wordy = PK.wordFakesOf(key);
+  if (wordy.length) {
+    const which = wordy.slice(0, 3).map((w) => `\u201c${w.fake}\u201d for \u201c${w.real}\u201d`).join(", ") + (wordy.length > 3 ? ` and ${wordy.length - 3} more` : "");
+    $("st-key").textContent += ` (${wordy.length} pseudonym${wordy.length === 1 ? " is an ordinary word" : "s are ordinary words"}: shown as written)`;
+    toast(`The key fakes ${which} — ${wordy.length === 1 ? "a pseudonym that is" : "pseudonyms that are"} an ordinary word, so nothing tells the run's from the word itself. The reader shows ${wordy.length === 1 ? "it" : "them"} as written rather than turning every one into the name. Re-run PDF-Linker (a full run, not Apply Fixes) to give ${wordy.length === 1 ? "that name a stand-in" : "those names stand-ins"} of ${wordy.length === 1 ? "its" : "their"} own.`, { ms: 12000 });
+  }
   // Another key binds other values: what the last one proposed over a PDF is
   // its reading, not this one's, and goes. Boxes drawn by hand stay — they
   // were never the key's to propose.

@@ -178,6 +178,7 @@ export function parseKey(sheets, name) {
     byFake.get(k).push(e);
   }
   const pairs = [];
+  const wordFakes = [];
   let ambiguous = 0;
   for (const group of byFake.values()) {
     const owners = group.filter((e) => !e.alt);
@@ -193,6 +194,13 @@ export function parseKey(sheets, name) {
     }
     const e = own[0];
     if (fold(e.fake) === fold(e.real)) continue; // never map a value onto itself
+    // A fake that is itself an ordinary WORD — "We", which an older PDF-Linker
+    // cut for a surname off the front of a longer name's fake — is retired
+    // from the display like an ambiguous one: nothing in the text says which
+    // "we" the run wrote, so reversing it painted the real name over every
+    // "we" in the case. The forward direction keeps it (`warn`), so a real
+    // name typed is still written as the key says.
+    if (isCommonReal(e.fake)) { wordFakes.push({ fake: e.fake, real: e.real }); continue; }
     pairs.push({ fake: e.fake, real: e.real });
   }
 
@@ -233,9 +241,11 @@ export function parseKey(sheets, name) {
     pairs,
     warn,
     hint,
+    wordFakes,
     dropped: {
       keeps,
       ambiguous,
+      words: wordFakes.length,
       pinned: entries.filter((e) => e.pinned).length,
     },
   };
@@ -588,7 +598,11 @@ const COMMON_WORDS = new Set(
     "them his her their this that these those there here who whom whose which what when " +
     "where why how all any each every some most more less few both other another same such " +
     "only also very just about above below between during before after again further once " +
-    "per via etc et al mr mrs ms dr jr sr no. vs v"
+    "per via etc et al mr mrs ms dr jr sr no. vs v " +
+    // The pronouns and the rest of the two-letter words: a fake that is one
+    // of them reads as the word wherever it stands (parseKey's wordFakes).
+    "i me my mine we us our ours you your yours him hers theirs itself myself " +
+    "ourselves yourself themselves am go hi oh ok up ye"
   ).split(/\s+/)
 );
 
@@ -597,9 +611,20 @@ export function isCommonReal(value) {
   return f.length < 2 || (COMMON_WORDS.has(f) && f.indexOf(" ") === -1);
 }
 
-/** Reversal matcher: fake → real. */
+/**
+ * The key's fakes that are ordinary words, as { fake, real }: retired from the
+ * display (parseKey). Read off the pairs as well, for a key parsed and kept in
+ * the library before the rule existed.
+ */
+export function wordFakesOf(key) {
+  if (!key) return [];
+  if (Array.isArray(key.wordFakes) && key.wordFakes.length) return key.wordFakes;
+  return (key.pairs || []).filter((p) => isCommonReal(p.fake)).map((p) => ({ fake: p.fake, real: p.real }));
+}
+
+/** Reversal matcher: fake → real. A fake that is an ordinary word is never reversed (wordFakesOf). */
 export function compile(key) {
-  const pairs = (key && key.pairs) || [];
+  const pairs = ((key && key.pairs) || []).filter((p) => !isCommonReal(p.fake));
   const map = new Map(pairs.map((p) => [fold(p.fake), p.real]));
   const rx = buildMatcher(pairs.map((p) => p.fake));
   return { rx, map };
