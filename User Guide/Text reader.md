@@ -736,8 +736,19 @@ app, which routes it to the reader tab.
   nothing has to re-read the PDFs to find it: double-clicking `Apply Fixes` in
   the case folder scrubs it straight into the `.txt` exports and writes its
   row into the key. That launcher sits beside `pseudonym_key.xlsx` whether or
-  not the folder still has a `LEAKS.xlsx` to triage. **A flag the run has
-  answered comes off the list.** The flag is a job: this name
+  not the folder still has a `LEAKS.xlsx` to triage. **A name the run half
+  faked is flagged whole.** Where the run faked one word of a name and missed
+  the rest — "Rosa" in the clear beside "Delgado" faked, or beside "Delgado"
+  standing orange — select the whole name and flag it: the selection is
+  flagged as the real names read ("Rosa Delgado", never the fake), the red
+  mark goes on the words standing in the clear and not on the pseudonym, and
+  the pop-up still offers to keep the faked or orange word if that was the
+  mistake. Only a selection that is nothing but a pseudonym, or nothing but
+  the orange name, is refused: the first is faked already, and the second is
+  the names bar's question (fake it, or keep it). A word of the name already
+  faked means the export carries its fake, so that flag takes **Re-run
+  PDF-Linker** rather than Apply Fixes, and the reader says so. **A flag the
+  run has answered comes off the list.** The flag is a job: this name
   is in the clear, fake it. When the key comes back with the name in it — the
   folder opened after a run, a key chosen by hand — the job is done, and the
   value is dropped from the **Flagged** panel (the reader says which), takes

@@ -14,7 +14,7 @@ import {
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
-  ruleParts, ruleShape, clearReading, didNotOcrLines, DID_NOT_OCR,
+  ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
   columnCuts, columnBands, columnWidths, lineIndent, placeColumns, COLUMN_GAP, COLUMN_REACH, COLUMN_SNAP, COLUMN_GUTTER, COLUMN_STRETCH,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
@@ -448,7 +448,8 @@ check("a keep read back from the file is owed, with no state at all",
   parseReaderFile("no: Helen Rasho\n").keeps, [{ control: "no", value: "Helen Rasho" }]);
 
 check("flag: nothing selected", flagProblem("  ", false) !== "", true);
-check("flag: a pseudonym", flagProblem("Strangeways", true) !== "", true);
+check("flag: wholly a pseudonym", flagProblem("Strangeways", true) !== "", true);
+check("flag: partly a pseudonym is a name the run half missed", flagProblem("Rosa Strangeways", false), "");
 check("flag: a passage", flagProblem("x".repeat(200), false) !== "", true);
 check("flag: a name", flagProblem("Rosa Delgado", false), "");
 
@@ -808,6 +809,19 @@ console.log("clear reading (the folder's ⚠ and the page agree)");
   check("a flagged value inside a fake is not standing in the clear",
     clearReading(pg(1, ["Mary Jones and Jones."]), { rev: opts.rev, flagRx }).flags, 1);
   check("no key and no flags, nothing to read", clearReading(pg(1, ["Quillmark"]), {}), { values: [], flags: 0 });
+  // A flagged NAME with a pseudonym in it: "Rosa" in the clear, "Quillmark"
+  // faked as "Mary Jones". Read as the page shows it, it stands half in the clear.
+  const partly = buildMatcher(["Rosa Quillmark"]);
+  check("a flagged name with a pseudonym in it counts where some of it stands in the clear",
+    clearReading(pg(1, ["Rosa Mary Jones testified.", "Rosa Quillmark signed."]), { rev: opts.rev, flagRx: partly }).flags, 2);
+  check("…and one wholly inside a fake does not",
+    clearReading(pg(1, ["Mary Jones testified."]), { rev: opts.rev, flagRx: buildMatcher(["Quillmark"]) }).flags, 0);
+  check("…nor one kept where it stands",
+    clearReading(pg(1, ["Rosa signed.", "Rosa left."]), { flagRx: buildMatcher(["Rosa"]), spots: [makeSpot(0, "Rosa", 0)] }).flags, 1);
+  check("clearPieces: the match less what is held, trimmed", clearPieces("Rosa Quillmark signed", 0, 14, [[5, 14]]), [[0, 4]]);
+  check("…none where it is all held", clearPieces("Rosa Quillmark", 5, 14, [[5, 14]]), []);
+  check("…and a margin number or bare punctuation is no piece", clearPieces("Rosa\n 5  Quillmark,", 0, 19, [[5, 9]]), [[0, 4], [9, 19]]);
+  check("…but blank and a comma alone are not", clearPieces("Rosa , Quill", 0, 12, [[0, 4], [7, 12]]), []);
   // A real name wrapped down a caption's left-hand column, the ")" and the
   // case number between its halves: one leak, as the page marks it.
   const k2 = parseKey([{ rows: [["Real Value", "Replacement"], ["Jonathan Avery Smith Walker", "Quarry Opalridge Dovewood Cascadia"], ["Walker", "Cascadia"], ["Helen Rasho", "Ingrid Strangeways"]] }], "k");

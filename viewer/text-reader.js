@@ -4023,6 +4023,43 @@ function flatten(body, { blankGutters = false, blankPn = false } = {}) {
   return { text, segs };
 }
 
+/**
+ * A page as the flagged values are read off it: its text with each pseudonym
+ * as the real name it stands for, whichever way Show fakes sits, and `held` —
+ * the places of the pseudonyms, the spot keeps and the margin numbers, which
+ * no red mark is drawn over (textdoc.clearPieces). A flagged name with a
+ * pseudonym in it ("Rosa" in the clear, "Delgado" faked) is found whole and
+ * marked where it stands in the clear. A pseudonym's text is in `text` and
+ * not in `segs`: nothing is ever put back inside one.
+ */
+function flagReading(body) {
+  const segs = [], held = [];
+  let text = "";
+  const rec = (n, atStart) => {
+    if (n.nodeType === 3) {
+      const p = n.parentElement;
+      const start = text.length;
+      segs.push({ node: n, start, end: start + n.data.length });
+      text += n.data;
+      if (p && p.closest("[data-here], .gutter")) held.push([start, text.length]);
+      return;
+    }
+    if (n.nodeType !== 1) return;
+    if (n.classList && n.classList.contains("pn")) {
+      const real = n.dataset.real || n.textContent;
+      held.push([text.length, text.length + real.length]);
+      text += real;
+      return;
+    }
+    if (n.nodeName === "BR") { if (n.nextSibling) text += "\n"; return; }
+    if ((n.nodeName === "DIV" || n.nodeName === "P" || n.nodeName === "LI") && !atStart) text += "\n";
+    let first = true;
+    for (const c of n.childNodes) { rec(c, first && atStart); first = false; }
+  };
+  rec(body, true);
+  return { text, segs, held };
+}
+
 function rangeFor(segs, start, end) {
   const find = (off, isEnd) => {
     // The last segment starting at or before `off`.
@@ -4368,13 +4405,15 @@ async function scanPassNow(pass) {
     // over a line break and its gutter number is found as one. The spots kept
     // where they stand are blanked with them: they carry their own mark.
     //
-    // ALL THREE READINGS BLANK THEM — the names in the clear, the kept values
-    // and the flagged ones. What a pseudonym span holds is the fake that is IN
-    // THE FILE, with the real name painted over it for reading only; no mark
-    // that says "this real value is still standing here" may be drawn over
-    // one, whichever mark it is. The kept and flagged values are read off the
-    // page as it shows; the names in the clear off the disk text, below.
-    const flat = keptRx || flagRx ? flatten(body, { blankPn: true }) : null;
+    // NO MARK IS DRAWN OVER THEM — the names in the clear, the kept values or
+    // the flagged ones. What a pseudonym span holds is the fake that is IN THE
+    // FILE, with the real name painted over it for reading only; no mark that
+    // says "this real value is still standing here" may be drawn over one,
+    // whichever mark it is. The kept values are read off the page as it shows,
+    // pseudonyms blanked; the flagged ones with each pseudonym as its real
+    // name, marked only outside it (below); the names in the clear off the
+    // disk text.
+    const flat = keptRx ? flatten(body, { blankPn: true }) : null;
     if (reals) {
       // The names in the clear are read off the DISK text, exactly as the save
       // reads them (standingSpans): the run's fakes and the spot keeps blanked,
@@ -4422,21 +4461,26 @@ async function scanPassNow(pass) {
       }
     }
     if (flagRx) {
-      // The same reading as the others, and for the reason above: the red
-      // mark says the flagged value is standing in the clear and the next run
+      // For the reason above, the red mark is never drawn over a pseudonym:
+      // it says the flagged value is standing in the clear and the next run
       // has yet to fake it, and inside a pseudonym span the run has already
       // faked it — the file carries the fake, and only the screen shows the
-      // real name. A mark there says the opposite of what is true. (The
-      // flag pop-up refuses such a selection for the same reason; see
-      // textdoc.flagProblem.) A spot keep is blanked with them: the value
-      // stands there because the operator put it back, and it carries its
-      // own mark.
-      const { text, segs: all } = flat;
+      // real name. But a flagged NAME may have a pseudonym in it — "Rosa
+      // Delgado" flagged where the run faked "Delgado" and missed "Rosa" — so
+      // the values are read with each pseudonym as its real name (flagReading)
+      // and marked only where they stand in the clear (textdoc.clearPieces):
+      // "Rosa", not "Delgado". One standing wholly inside a pseudonym is not
+      // marked or counted. A spot keep is held with them: the value stands
+      // there because the operator put it back, and it carries its own mark;
+      // and so is a margin number a wrapped name runs across.
+      const { text, segs: all, held } = flagReading(body);
       flagRx.lastIndex = 0;
       let m, n = 0, mine = 0;
       while ((m = flagRx.exec(text))) {
-        const r = rangeFor(all, m.index, m.index + m[0].length);
-        if (r) { flaggedRanges.push(r); mine++; }
+        const pieces = TD.clearPieces(text, m.index, m.index + m[0].length, held);
+        let marked = false;
+        for (const [a, b] of pieces) { const r = rangeFor(all, a, b); if (r) { flaggedRanges.push(r); marked = true; } }
+        if (marked) mine++;
         if (m.index === flagRx.lastIndex) flagRx.lastIndex++;
         if (++n % HANDFUL === 0) {
           const held = flagRx.lastIndex;
@@ -7161,7 +7205,27 @@ function currentSelection() {
   let here = (range.startContainer.parentElement && range.startContainer.parentElement.closest("[data-here]"))
     || (range.endContainer.parentElement && range.endContainer.parentElement.closest("[data-here]")) || null;
   if (!here && inHere) here = [...body.querySelectorAll("[data-here]")].find((el) => range.intersectsNode(el)) || null;
-  return { text: sel.toString(), touches, range, pn, here };
+  // What of it stands in the clear: the selection less its pseudonyms (and the
+  // margin numbers). A selection that is pseudonyms through and through has
+  // nothing to flag; one that is only partly faked is a name the run half
+  // missed ("Rosa" in the clear beside "Delgado" faked), and is flagged whole.
+  if (inFrag || startPn || endPn) {
+    for (const el of frag.querySelectorAll(".pn, .gutter")) el.remove();
+  }
+  const clear = !startPn && !endPn ? !!(inFrag ? /[\p{L}\p{N}]/u.test(frag.textContent) : true)
+    : (() => {
+      // A selection that starts or ends inside a pseudonym holds a piece of it
+      // as plain text in the fragment: what is left once the span's own text
+      // is taken off its ends is what stands in the clear.
+      const f = range.cloneRange();
+      if (startPn) f.setStartAfter(startPn);
+      if (endPn) f.setEndBefore(endPn);
+      if (f.collapsed || (startPn && endPn && startPn === endPn)) return false;
+      const rest = f.cloneContents();
+      for (const el of rest.querySelectorAll(".pn, .gutter")) el.remove();
+      return /[\p{L}\p{N}]/u.test(rest.textContent);
+    })();
+  return { text: realTextOf(range), touches, allFaked: touches && !clear, range, pn, here };
 }
 
 // ── un-flagging a wrongly faked value ───────────────────────────────────────────
@@ -7745,11 +7809,14 @@ document.addEventListener("selectionchange", showFlagPopSoon);
 function showFlagPop() {
   const s = currentSelection();
   if (!s) { flagPop.hidden = true; return; }
-  const problem = TD.flagProblem(s.text, s.touches);
+  const problem = TD.flagProblem(s.text, s.allFaked);
   flagPopBtn.disabled = !!problem;
   flagPopNote.textContent = problem || "";
   // A pseudonym in the selection: the question is the other one. An
-  // unfaked real name in it: whether to leave it so.
+  // unfaked real name in it: whether to leave it so. Either way, where more
+  // of the selection stands in the clear than the name the question is
+  // about, the selection is still flagged as it reads, whole: the name the
+  // run half missed.
   const pnIn = s.pn;
   const hereIn = pnIn ? null : s.here;
   const leak = pnIn || hereIn ? null : leakIn(s.range);
@@ -7759,11 +7826,18 @@ function showFlagPop() {
     flagPopNote.textContent = "\u201c" + hereIn.textContent + "\u201d is kept where it stands. Change it?";
     $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu(hereIn, e.clientX, e.clientY); };
   } else if (pnIn) {
-    flagPopNote.textContent = "Wrongly faked? Keep \u201c" + pnIn.dataset.real + "\u201d:";
+    flagPopNote.textContent = s.allFaked
+      ? "Wrongly faked? Keep \u201c" + pnIn.dataset.real + "\u201d:"
+      : "\u201c" + pnIn.dataset.real + "\u201d is faked already; the flag hands PDF-Linker the whole name. Wrongly faked? Keep it:";
     $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu(pnIn, e.clientX, e.clientY); };
   } else if (leak) {
-    flagPopBtn.disabled = true;
-    flagPopNote.textContent = "\u201c" + leak.real + "\u201d is in the key and stands unfaked. Leave it so?";
+    // The leak alone is the names bar's question (fake it, or keep it); a
+    // selection with more than the leak in it is a name to flag.
+    const only = sameWords(s.text, leak.real);
+    flagPopBtn.disabled = only || !!problem;
+    flagPopNote.textContent = only
+      ? "\u201c" + leak.real + "\u201d is in the key and stands unfaked. Leave it so?"
+      : "\u201c" + leak.real + "\u201d is in the key and stands unfaked here; the flag hands PDF-Linker the whole name. Leave \u201c" + leak.real + "\u201d so?";
     $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu({ real: leak.real, fake: leak.fake, leak: true, range: leak.range, pieces: piecesOf(leak) }, e.clientX, e.clientY); };
   }
   // Kept by the master workbook: that is what stands between it and a fake,
@@ -7801,10 +7875,20 @@ flagPopBtn.addEventListener("click", flagSelection);
 $("flag-btn").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-btn").addEventListener("click", flagSelection);
 
+/** Whether two values are the same words, case, spacing and punctuation aside. */
+function sameWords(a, b) {
+  const w = (x) => (String(x).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).join(" ");
+  return w(a) === w(b);
+}
 function flagSelection() {
   const s = currentSelection();
-  const problem = s ? TD.flagProblem(s.text, s.touches) : "Select the unfaked name first.";
+  const problem = s ? TD.flagProblem(s.text, s.allFaked) : "Select the unfaked name first.";
   if (problem) { toast(problem, { error: true }); return; }
+  // An unfaked name from the key, selected alone, is the names bar's to
+  // decide (fake it, or keep it): a flag would hand PDF-Linker a name it
+  // already has. With more of the name around it, it is flagged whole.
+  const leak = s.pn || s.here ? null : leakIn(s.range);
+  if (leak && sameWords(s.text, leak.real)) { toast(`"${leak.real}" is in the key already and stands unfaked here: fake it from the names bar, or keep it (right-click).`, { error: true }); return; }
   const before = flagged.length;
   flagged = TD.addValue(flagged, s.text);
   const v = TD.normalizeValue(s.text);
@@ -7813,7 +7897,11 @@ function flagSelection() {
   paintHighlights();
   flagPop.hidden = true;
   noteInFlagged();
-  toast(flagged.length > before ? `Flagged "${v}" — ${flagged.length} value${flagged.length === 1 ? "" : "s"} to hand to PDF-Linker` : `"${v}" is already flagged`);
+  // A word of it already faked: the export carries that word's fake, so the
+  // name is not there for Apply Fixes to find (as with a phrase, markPhrase).
+  const faked = flagged.length > before && (!!s.touches || phraseFakedInFile(v));
+  toast((flagged.length > before ? `Flagged "${v}" — ${flagged.length} value${flagged.length === 1 ? "" : "s"} to hand to PDF-Linker` : `"${v}" is already flagged`)
+    + (faked ? ". A word of it is already faked in the file, so it takes Re-run PDF-Linker; Apply Fixes cannot find the name in the export." : ""), { ms: faked ? 7000 : 3200 });
 }
 
 /**

@@ -161,6 +161,28 @@ because a line with no wide blank or bar past its gutter is one cell
 marks (`leakMatches`), the flagged values' red marks, and the redaction sweep
 over a PDF's text layer, whose text has no column gaps to read.
 
+**Flagging a name the run half faked**: a selection with a pseudonym in it
+was refused outright (`flagProblem`'s second argument was "touches a
+pseudonym"), and one with an orange leak in it had the flag button disabled,
+so "Rosa Delgado" with "Delgado" faked or leaking could not be flagged at all.
+`currentSelection` now answers `allFaked` (the selection less its `.pn` and
+`.gutter` clones has no letter or digit; a selection inside one pseudonym's
+text node clones no span, so it is read off `startPn`/`endPn`) and `text` as
+`realTextOf` (each pseudonym as its real name, gutters out, lines joined), so
+the flag is the real name. `flagProblem` refuses only `allFaked`; a leak
+refuses only where the selection is the leak's own words (`sameWords`), in
+the pop-up and in `flagSelection`. The value's red mark is read by
+`flagReading` — the page with each `.pn` as `dataset.real` (whichever way
+Show fakes sits; no `segs` inside a pseudonym) and `held` the pseudonyms',
+spot keeps' and gutters' places — and drawn over `textdoc.clearPieces` only:
+the match less what is held, trimmed, with a letter or digit, so "Rosa" is
+marked and "Delgado" is not, and a match wholly inside a pseudonym is neither
+marked nor counted, as before. The folder sweep (`clearReading`) counts flags
+the same way, off the text with each fake translated to its real name and
+spot keeps mapped into it. `flagSelection` tells the operator such a flag
+takes a full re-run (`s.touches` or `phraseFakedInFile`), as `markPhrase`
+does.
+
 **Taking a value off the Master Keep** (`withdrawMaster`): a value the master
 workbook (`Master Leaks.xlsx`, its KEEP sheet) keeps is left alone in every
 case, so the reader does not mark it, the walk does not stop on it and the save

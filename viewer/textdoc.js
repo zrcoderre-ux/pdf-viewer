@@ -734,15 +734,67 @@ export function clearReading(text, { rev = null, reals = null, flagRx = null, sp
       }
     }
     if (flagRx) {
+      // The flagged values are read as the page shows the text — each fake as
+      // the real name it stands for — so a flagged name with a pseudonym in
+      // it ("Rosa" in the clear, "Delgado" faked) is found, and counted where
+      // any of it stands in the clear (clearPieces): what is inside a fake the
+      // run has faked already, and a spot keep stands on purpose.
+      let shown = "", rawAt = 0;
+      const held = [], plain = []; // plain: [raw start, shown start, length] per run of the file's own text
+      for (const r of rev ? translateRuns(rev, raw) : [{ t: "text", s: raw }]) {
+        if (r.t === "swap") {
+          held.push([shown.length, shown.length + r.to.length]);
+          shown += r.to;
+          rawAt += r.from.length;
+        } else {
+          plain.push([rawAt, shown.length, r.s.length]);
+          shown += r.s;
+          rawAt += r.s.length;
+        }
+      }
+      const toShown = (o) => { for (const [rs, ss, len] of plain) if (o >= rs && o <= rs + len) return ss + (o - rs); return null; };
+      for (const [x, y] of spotRanges(raw, spotsOnPage(spots, i))) {
+        const a = toShown(x), b = toShown(y);
+        if (a != null && b != null) held.push([a, b]);
+      }
+      held.sort((p, q) => p[0] - q[0]);
       flagRx.lastIndex = 0;
       let m;
-      while ((m = flagRx.exec(flat))) {
-        flags++;
+      while ((m = flagRx.exec(shown))) {
+        if (clearPieces(shown, m.index, m.index + m[0].length, held).length) flags++;
         if (m.index === flagRx.lastIndex) flagRx.lastIndex++;
       }
     }
   }
   return { values, flags };
+}
+
+/**
+ * The parts of `text`[a, b) that stand in the clear: the match less every
+ * place in `held` ([from, to) pairs sorted by `from`: a pseudonym's real name
+ * shown over its fake, a spot keep, a margin number), each trimmed of blank,
+ * and only the parts with a letter or a digit in them. None for a match
+ * standing wholly inside what is held — a value the run has faked already.
+ * What a flagged value's red mark is drawn over, and what makes it count.
+ */
+export function clearPieces(text, a, b, held) {
+  const raw = [];
+  let at = a;
+  for (const [x, y] of held || []) {
+    if (y <= at) continue;
+    if (x >= b) break;
+    if (x > at) raw.push([at, x]);
+    at = Math.max(at, y);
+    if (at >= b) break;
+  }
+  if (at < b) raw.push([at, b]);
+  const out = [];
+  for (let [x, y] of raw) {
+    while (x < y && /\s/.test(text[x])) x++;
+    while (y > x && /\s/.test(text[y - 1])) y--;
+    if (y > x && /[\p{L}\p{N}]/u.test(text.slice(x, y))) out.push([x, y]);
+  }
+  return out;
 }
 
 function escapeRe(s) {
@@ -1461,10 +1513,17 @@ export function isPhrase(phrases, value) {
  * be a name rather than a paragraph.
  */
 export const VALUE_MAX = 120;
-export function flagProblem(selectionText, touchesPseudonym) {
+/**
+ * Why a selection may not be flagged as a real value, or "". `selectionText`
+ * is the selection as the real names read; `allFaked`, that every word of it
+ * is a pseudonym already — there is nothing left in the clear to hand over. A
+ * selection only PARTLY faked ("Rosa" in the clear, "Delgado" a pseudonym) is
+ * a name the run half missed, and is flagged whole.
+ */
+export function flagProblem(selectionText, allFaked) {
   const v = normalizeValue(selectionText);
   if (!v) return "Select the unfaked name first.";
-  if (touchesPseudonym) return "That is already a pseudonym — its real name is shown over the fake.";
+  if (allFaked) return "That is already a pseudonym — its real name is shown over the fake.";
   if (v.length > VALUE_MAX) return `That is ${v.length} characters; a real value is a name, a number or an address, not a passage.`;
   return "";
 }
