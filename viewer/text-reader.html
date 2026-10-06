@@ -285,7 +285,8 @@
 
     <aside id="side" aria-label="Panel">
       <div class="side-tabs">
-        <button id="tab-docs" class="side-tab active" aria-pressed="true">Documents</button>
+        <button id="tab-docs" class="side-tab active" aria-pressed="true"><span class="tab-long">Documents</span><span class="tab-short">Docs</span></button>
+        <button id="tab-pages" class="side-tab" aria-pressed="false" title="Every page of the document on screen: click one to go to it, tick several to mark them ⊘ Did not OCR at once">Pages</button>
         <button id="tab-flags" class="side-tab" aria-pressed="false">Flagged <span id="flag-count" class="badge">0</span></button>
         <button id="tab-leaks" class="side-tab" aria-pressed="false">Leaks <span id="leaks-tab-count" class="badge">0</span></button>
         <button id="side-collapse" class="side-tab collapse" title="Collapse the panel (▤ Panel in the toolbar brings it back)">»</button>
@@ -297,6 +298,16 @@
           <button id="read-folder" class="primary" hidden title="Read the rest of this case folder: list its exports, match its PDFs, sweep the others for names left in the clear, and read the folder on under this document. Opening a file on its own attaches the key alone; this is the whole folder.">Read the whole folder</button>
           <button id="forget-folder" title="Let go of this case folder: the reader stops reading the rest of it — the folder sweep, the documents read ahead, the reel reading on — and reads whatever you open on its own. The key stays attached, so the marks stand. The folder is not remembered either, so opening a file from it does not bring it back; Open case folder does.">Forget this folder</button>
         </div>
+      </div>
+      <div id="side-pages" class="side-body" hidden>
+        <p class="side-hint" id="pages-hint">Open a text export to list its pages here.</p>
+        <div class="pages-bar" id="pages-bar" hidden>
+          <label class="pages-all" title="Tick every page, or none"><input id="pages-all" type="checkbox"><span>All</span></label>
+          <span id="pages-picked" class="pages-picked"></span>
+          <button id="pages-nocr" type="button" class="primary" disabled title="Strip the text of every ticked page and write [DID NOT OCR] in its place, as ⊘ Did not OCR does on one page. One step: Ctrl+Z puts every page back.">⊘ Did not OCR</button>
+        </div>
+        <p class="side-hint" id="pages-how" hidden>Click a page to go to it. Tick pages to mark them ⊘ Did not OCR together: Shift+click ticks a run, Ctrl+click one more.</p>
+        <ul id="pages-list"></ul>
       </div>
       <div id="side-leaks" class="side-body" hidden>
         <p class="side-hint" id="leaks-hint">Open a case folder with a <code>LEAKS.xlsx</code> in it, or load one, to review its rows here.</p>

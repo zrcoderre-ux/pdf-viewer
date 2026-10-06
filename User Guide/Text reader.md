@@ -1163,7 +1163,7 @@ app, which routes it to the reader tab.
 - **The rest of the reading tools from the PDF viewer.** **Shift + Space**
   opens the citation under the pointer, or every citation in the selection, in
   background tabs, as on a PDF; the theme toggle and the Authorities panel are
-  the viewer's own. The Documents / Flagged panel collapses on its **»**
+  the viewer's own. The Documents / Pages / Flagged panel collapses on its **»**
   chevron (or **▤ Panel**), stays closed until it has something to show, and
   remembers your choice.
 - **The PDF it came from, beside the text or swapped into it.** PDF-Linker
@@ -1412,6 +1412,22 @@ app, which routes it to the reader tab.
   request as made (**✓ OCR This Page**), and a second click withdraws it. The
   Flagged panel lists these pages too, and a page comes off that list once an
   export shows it read again.
+
+- **The Pages tab: every page, and ⊘ Did not OCR on several at once.** The
+  side panel's **Pages** tab (beside Documents) is the PDF viewer's Pages
+  panel for a text export: a row per page, with its label, its first two
+  lines as the screen shows them, and a tag where it reads **DID NOT OCR**,
+  is asked to be **OCR'd again**, or is handed over as **Use my text**. A
+  click on a row goes to the page, and the row of the page you are reading is
+  marked as you scroll. A reel or a `Combined Text.txt` lists each document
+  under its own name. Tick the pages that did not OCR — **Shift+click** ticks
+  a run from the last one, **Ctrl+click** (⌘ on a Mac) one more, **All** the
+  lot — and **⊘ Did not OCR** at the head of the list strips every ticked page
+  as the label button strips one: `[DID NOT OCR]` in its place, each page
+  turned to its PDF page, each put on `New Real Values.txt` by 💾 Save. It is
+  one step: Ctrl+Z puts every page back, and ↻ OCR This Page on any one of
+  them puts that page's own text back. A ticked page that already reads
+  `[DID NOT OCR]` is passed over.
 
 - **✎ Use my text hands PDF-Linker a page you transcribed.** Beside ⊘ Did not
   OCR, for the other answer to a mangled page: the OCR was bad, so you type

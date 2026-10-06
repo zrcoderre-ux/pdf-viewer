@@ -267,6 +267,40 @@ the page reads as read under a header that is not DID NOT OCR (PDF-Linker's
 full run has taken the mark off). `markDidNotOcr` withdraws a request for the
 page it strips. `#ocr-again-block` lists them.
 
+**The Pages tab** (`#side-pages`, `renderPagesTab`) lists every page of
+`doc.pages`: a row per page with a header or with text before the first one,
+a `.pages-doc` heading per reel member (`reelIndexOf`) and per combined-file
+banner, each row's label, a tag read off the page lists (`setPageRowTag`:
+`readsDidNotOcr(p.lines)`, `ocrAgain`, `textFixed`) and its first two lines.
+Rows are keyed by the page OBJECT (`pagesRowOf`, `pagesPicked`), never the
+index, since `reelShift` renumbers every page below a document hung above;
+`pagesShape` is the list of objects the rows were built for, so the same pages
+update in place and a changed list (another document, a reel member added) is
+built again. The first lines are read only as a row comes into view
+(`pagesSnipObserver`, rooted on the tab) and as the screen shows them: off the
+body's `.line`s, gutter dropped, so in real names where Show fakes is off,
+like the rest of the chrome `swapChrome` fakes for a screenshot (nothing is
+filled in while `shotPut` is set); a page the reel has shed reads its lines
+through `PK.translate(rev, …)`. The list is drawn only while it is in sight
+(`pagesTabShown`): `afterTextChange` and `renderFlags` call `pagesTabSoon`,
+which marks it stale and, in sight, redraws it a beat later; `showSideTab` and
+`showSidePanel` draw a stale one. The stage's scroll marks the row of
+`readingPage()` (`.here`, `markPagesHere`) and keeps it in sight under the
+sticky bar. A click goes to the page (`goToPageFromList`, `scrollRangeTo` with
+a `margin` of 8 rather than the reading third); the tick, Shift (a run from
+`pagesAnchor`) and Ctrl/⌘ tick. **⊘ Did not OCR** on the bar is
+`markDidNotOcrPages`, `markDidNotOcr` for several pages: the pages built back
+(`ensurePageLive`), one `snapshotPages` batch with every snapshot tagged
+`nocr` (so `strippedTextOf` still finds each page's text for ↻ OCR This Page),
+`ocrAgain` and `textFixed` withdrawn, each body built from `didNotOcrLines`,
+one `syncNoOcr` and one `afterTextChange`, and every page turned to its PDF
+page in one `setPageSwaps` with each step's `view` set. One page goes through
+`markDidNotOcr` itself. `stepHistory` turns a batch's views in two passes
+(off before the restores, on after) and asks `restoreSnapshot` to leave the
+page lists (`lists: false`) for one `syncNoOcr` over the batch: page by page,
+an undo of 153 stripped pages re-rendered the Flagged lists 153 times and
+took six seconds; batched, under one.
+
 **✎ Use my text** (`.fix-page`, beside `.nocr-page` on every label with a
 page header; `useMyText`, `setFixButton`, `refreshFixButtons`, called from
 `refreshNocrButtons`) hands a page TRANSCRIBED by hand to PDF-Linker:

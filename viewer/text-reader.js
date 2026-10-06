@@ -1173,6 +1173,7 @@ function showSidePanel(on, { remember = false } = {}) {
   document.body.classList.toggle("side-hidden", !on);
   $("panel-toggle").setAttribute("aria-pressed", String(!!on));
   if (remember) { sideChoice = !!on; lsSet("textReader.side", sideChoice); }
+  if (on && pagesStale) renderPagesTab();
   relayout();
 }
 function autoShowSidePanel() { if (sideChoice !== false) showSidePanel(true); }
@@ -1220,7 +1221,7 @@ $("side-collapse").addEventListener("click", () => showSidePanel(false, { rememb
   btn.hidden = !canOpen;
   btn.addEventListener("click", () => { try { chrome.runtime.openOptionsPage(); } catch { /* not an extension page */ } });
 }
-const SIDE_TABS = [["tab-docs", "side-docs"], ["tab-flags", "side-flags"], ["tab-leaks", "side-leaks"]];
+const SIDE_TABS = [["tab-docs", "side-docs"], ["tab-pages", "side-pages"], ["tab-flags", "side-flags"], ["tab-leaks", "side-leaks"]];
 function showSideTab(tab) {
   for (const [t, b] of SIDE_TABS) {
     const on = t === tab;
@@ -1228,6 +1229,7 @@ function showSideTab(tab) {
     $(t).setAttribute("aria-pressed", String(on));
     $(b).hidden = !on;
   }
+  if (tab === "tab-pages") renderPagesTab(); // drawn only while it is in sight (pagesTabSoon)
 }
 for (const [tab] of SIDE_TABS) $(tab).addEventListener("click", () => showSideTab(tab));
 
@@ -2678,6 +2680,7 @@ function afterTextChange() {
   paintHighlights();
   refindSoon(); // …and the find's own ranges, which the rebuilt pages have dropped
   rekeySoon(); // …and the key walk's, for the same reason
+  pagesTabSoon(); // …and the Pages tab's rows: a page stripped, typed into, or hung on the reel
   // The pages are where they are now: auto-scroll takes its pace from them
   // again rather than from the layout it started under.
   autoRemeasure();
@@ -3359,7 +3362,7 @@ function snapshotPages(bodies) {
   redoStack = [];
   lastSnapPage = -1;
 }
-function restoreSnapshot(snap, { settle = true } = {}) {
+function restoreSnapshot(snap, { settle = true, lists = true } = {}) {
   const body = bodyForPage(snap.page);
   if (!body) return;
   convertTypedRealsSoon.cancel();
@@ -3371,7 +3374,7 @@ function restoreSnapshot(snap, { settle = true } = {}) {
   doc.pages[snap.page].lines = snap.text.split("\n");
   // …and what actually landed is what is remembered.
   syncSpots(body);
-  syncNoOcr([snap.page], { drop: true }); // an undone ⊘ Did not OCR comes off the list
+  if (lists) syncNoOcr([snap.page], { drop: true }); // an undone ⊘ Did not OCR comes off the list
   if (snap.caret >= 0) {
     const at = pointAtOffset(body, snap.caret);
     try { const r = document.createRange(); r.setStart(at.node, at.offset); r.collapse(true); const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(r); } catch { /* the caret is simply not restored */ }
@@ -3386,19 +3389,23 @@ function stepHistory(from, to) {
   if (!top) return;
   const pages = top.batch ? [] : [from.pop()];
   while (top.batch && from.length && from[from.length - 1].batch === top.batch) pages.push(from.pop());
+  // A step that also turned the page's PDF view on or off (⊘ Did not OCR,
+  // ↻ OCR This Page) turns it back with the text, so what comes back is
+  // seen: the text shown before it is put back (it takes the caret), the
+  // PDF page after. A batch (⊘ Did not OCR on the Pages tab's ticked pages)
+  // turns all of its views in one pass, not a pass of every page per page.
+  const shown = (snap) => (snap.view ? (from === undoStack ? !snap.view.on : snap.view.on) : null);
+  setPageSwaps(pages.filter((snap) => shown(snap) === false).map((snap) => snap.view.key), false);
   for (const snap of pages) {
     const body = bodyForPage(snap.page);
     // …with the strip's tag: the two sides of one step (strippedTextOf).
     if (body) to.push({ ...snapshotOf(body), batch: snap.batch, nocr: snap.nocr, view: snap.view });
-    // A step that also turned the page's PDF view on or off (⊘ Did not OCR,
-    // ↻ OCR This Page) turns it back with the text, so what comes back is
-    // seen: the text shown before it is put back (it takes the caret), the
-    // PDF page after.
-    const shown = snap.view ? (from === undoStack ? !snap.view.on : snap.view.on) : null;
-    if (shown === false) setPageSwap(snap.view.key, false);
-    restoreSnapshot(snap, { settle: pages.length === 1 });
-    if (shown === true) setPageSwap(snap.view.key, true);
+    restoreSnapshot(snap, { settle: pages.length === 1, lists: pages.length === 1 });
   }
+  // …and a batch's pages go on or off the page lists in one pass: page by
+  // page, a hundred stripped pages were a hundred passes over the lists.
+  if (pages.length > 1) syncNoOcr(pages.map((snap) => snap.page), { drop: true });
+  setPageSwaps(pages.filter((snap) => shown(snap) === true).map((snap) => snap.view.key), true);
   if (pages.length > 1) afterTextChange();
   lastSnapPage = -1;
 }
@@ -5409,9 +5416,16 @@ function markDidNotOcr(i) {
   toast(`${where}: text stripped, ${TD.DID_NOT_OCR} in its place${swapped ? ", and its PDF page shown" : ""} — Save writes it, and puts the page on ${TD.VALUES_FILE} so PDF-Linker never OCRs it again. Ctrl+Z puts it back.`);
 }
 /** A page's ⇄ PDF swap turned on or off by `key`, remembered and shown (or held for when side by side closes). */
-function setPageSwap(key, on) {
-  if (swaps.has(key) === on) return;
-  if (on) swaps.add(key); else swaps.delete(key);
+function setPageSwap(key, on) { setPageSwaps([key], on); }
+/** …and several pages' at once, in one pass over the pages. */
+function setPageSwaps(keys, on) {
+  let moved = false;
+  for (const key of keys) {
+    if (swaps.has(key) === on) continue;
+    if (on) swaps.add(key); else swaps.delete(key);
+    moved = true;
+  }
+  if (!moved) return;
   persistSwaps();
   applySwaps();
 }
@@ -5660,6 +5674,414 @@ function refreshNocrButtons(indices) {
   }
   refreshFixButtons(indices);
 }
+
+// ── several pages that did not OCR ────────────────────────────────────────────────
+//
+// ⊘ Did not OCR on every page ticked in the Pages tab (below): each page
+// stripped as markDidNotOcr strips one — the text gone for TD.DID_NOT_OCR, a
+// request to read it again or a transcription withdrawn, the page put on the
+// list for PDF-Linker and shown as its PDF page — and the lot ONE step of the
+// undo history (snapshotPages), each page's snapshot tagged as a strip so ↻ OCR
+// This Page still puts that page's own text back. A page that already reads
+// the mark is passed over.
+function markDidNotOcrPages(indices) {
+  if (!doc) return;
+  const want = indices.filter((i) => doc.pages[i] && doc.pages[i].header != null);
+  if (!want.length) return;
+  for (const i of want) ensurePageLive(i);
+  const todo = [];
+  for (const i of want) {
+    const body = bodyForPage(i);
+    if (!body) continue;
+    const was = TD.serializeNodes(body);
+    const lines = TD.didNotOcrLines(was.split("\n"));
+    const text = lines.join("\n");
+    if (text !== was) todo.push({ i, body, lines, text });
+  }
+  if (!todo.length) { toast(`${want.length === 1 ? "That page already reads" : "Those pages already read"} ${TD.DID_NOT_OCR}.`); return; }
+  // One page is the label button's own strip, toast and all.
+  if (todo.length === 1) { markDidNotOcr(todo[0].i); return; }
+  snapshotPages(todo.map((t) => t.body));
+  const steps = new Map(undoStack.slice(-todo.length).map((sn) => [sn.page, sn]));
+  for (const sn of steps.values()) sn.nocr = true;
+  const sources = docPageSources();
+  let again = ocrAgain, fixed = textFixed;
+  for (const t of todo) {
+    const e = pageEntryAt(t.i, sources);
+    if (e) { again = TD.setOcrAgain(again, e, false); fixed = TD.setTextFixed(fixed, e, false); }
+  }
+  if (again !== ocrAgain || fixed !== textFixed) {
+    ocrAgain = again;
+    textFixed = fixed;
+    persistValues();
+    renderFlags();
+  }
+  convertTypedRealsSoon.cancel();
+  hideTypeTip();
+  const stripped = new Set(todo.map((t) => t.i));
+  spots = spots.filter((x) => !stripped.has(x.page));
+  for (const t of todo) {
+    buildBody(t.body, t.text, t.i);
+    doc.pages[t.i].lines = t.lines;
+    syncSpots(t.body);
+    setDirty(true, t.i);
+  }
+  syncNoOcr(todo.map((t) => t.i));
+  lastSnapPage = -1; // what is typed next is its own step
+  afterTextChange();
+  // Each page shown as its PDF page where it was showing its text, as one
+  // strip does, and each step carries its swap so Ctrl+Z shows the text again.
+  const shown = [];
+  if (!sbsOn) {
+    for (const t of todo) {
+      const tg = pdfTarget(t.i);
+      const sec = t.body.closest(".tpage");
+      if (!tg || !sec || sec.classList.contains("raw") || swaps.has(tg.key)) continue;
+      const sn = steps.get(t.i);
+      if (sn) sn.view = { key: tg.key, on: true };
+      shown.push(tg.key);
+    }
+  }
+  setPageSwaps(shown, true);
+  const passed = want.length - todo.length;
+  toast(`${todo.length} pages: text stripped, ${TD.DID_NOT_OCR} in its place${shown.length ? `, and ${shown.length === todo.length ? "each" : shown.length} shown as its PDF page` : ""}${passed ? ` (${passed} already read it)` : ""} — Save writes them, and puts them on ${TD.VALUES_FILE} so PDF-Linker never OCRs them again. Ctrl+Z puts every one back.`, { ms: 9000 });
+}
+
+// ── the Pages tab ──────────────────────────────────────────────────────────────────
+//
+// Every page of the document on screen, in the side panel: the PDF viewer's
+// Pages panel, for a text export. A row is the page's label, what it carries
+// for PDF-Linker (DID NOT OCR, OCR again, Use my text) and its first lines; a
+// click goes to the page, and the row of the page being read is marked as the
+// stage scrolls. Ticked rows are a selection — a tick, Shift+click for a run,
+// Ctrl+click for one more — and ⊘ Did not OCR at the head of the list strips
+// every ticked page at once (markDidNotOcrPages).
+//
+// The rows are keyed by the PAGE OBJECT, not its index: a document hung above
+// the reel renumbers every page below it (reelShift), and a tick held by number
+// would then name another page. A page's first lines are read as the screen
+// shows them — off its body, so in real names where Show fakes is off, like
+// the rest of the chrome the screenshot fakes (swapChrome) — and only as its
+// row comes into view, so a combined file of two thousand pages lists at once.
+// The list is drawn only while it is in sight; a change made while it is not
+// leaves it stale, and showing it draws it.
+const pagesSideEl = $("side-pages");
+const pagesListEl = $("pages-list");
+const PAGES_SNIP_LINES = 2;
+let pagesPicked = new Set(); // the ticked pages: doc.pages objects
+let pagesAnchor = null;      // the page a Shift+click runs from
+let pagesShape = null;       // the doc.pages objects the rows were built for, in order
+let pagesRowOf = new Map();  // page object → its row
+let pagesStale = true;       // something moved while the tab was out of sight
+let pagesHere = null;        // the row of the page being read
+const pagesVisible = new Set();
+const pagesSnipObserver = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    if (en.isIntersecting) { pagesVisible.add(en.target); fillPageSnip(en.target); }
+    else pagesVisible.delete(en.target);
+  }
+}, { root: pagesSideEl, rootMargin: "300px 0px" });
+
+function pagesTabShown() {
+  return !pagesSideEl.hidden && !document.body.classList.contains("side-hidden");
+}
+const renderPagesTabSoon = debounce(() => renderPagesTab(), 250);
+function pagesTabSoon() {
+  pagesStale = true;
+  if (pagesTabShown()) renderPagesTabSoon();
+}
+
+function renderPagesTab() {
+  if (!pagesTabShown()) { pagesStale = true; return; }
+  renderPagesTabSoon.cancel();
+  pagesStale = false;
+  const hint = $("pages-hint");
+  if (!doc) {
+    pagesSnipObserver.disconnect();
+    pagesVisible.clear();
+    pagesListEl.innerHTML = "";
+    pagesShape = null;
+    pagesRowOf = new Map();
+    pagesPicked.clear();
+    pagesAnchor = null;
+    pagesHere = null;
+    hint.hidden = false;
+    $("pages-bar").hidden = true;
+    $("pages-how").hidden = true;
+    return;
+  }
+  hint.hidden = true;
+  $("pages-bar").hidden = false;
+  $("pages-how").hidden = false;
+  const pages = doc.pages;
+  // A tick on a page no longer in the document (another one opened) goes.
+  if (pagesPicked.size || pagesAnchor) {
+    const inDoc = new Set(pages);
+    for (const p of pagesPicked) if (!inDoc.has(p)) pagesPicked.delete(p);
+    if (pagesAnchor && !inDoc.has(pagesAnchor)) pagesAnchor = null;
+  }
+  const same = !!pagesShape && pagesShape.length === pages.length && pagesShape.every((p, i) => p === pages[i]);
+  if (!same) buildPagesRows();
+  else updatePagesRows();
+  updatePagesPicked();
+  markPagesHere();
+}
+
+/** The rows from scratch: the document changed, or pages went on or came off it. */
+function buildPagesRows() {
+  pagesSnipObserver.disconnect();
+  pagesVisible.clear();
+  pagesListEl.innerHTML = "";
+  pagesRowOf = new Map();
+  pagesHere = null;
+  pagesShape = doc.pages.slice();
+  const frag = document.createDocumentFragment();
+  const sources = docPageSources();
+  let member = -1;
+  doc.pages.forEach((p, i) => {
+    // A reel's documents each under their own name; a combined file's banner
+    // page names its member itself.
+    if (reel.length > 1 && reelIndexOf(i) !== member) {
+      member = reelIndexOf(i);
+      frag.appendChild(pagesHeading(TD.docLabel(reel[member].name), p, reel[member].name));
+    }
+    if (p.banner != null) { frag.appendChild(pagesHeading(TD.pageLabel(p), p, p.banner)); return; }
+    // Text before the first page header is listed only where there is some.
+    if (p.header == null && !p.lines.some((l) => l.trim())) return;
+    const li = document.createElement("li");
+    li.className = "page-row";
+    li.__page = p;
+    if (p.header != null) {
+      const tick = document.createElement("input");
+      tick.type = "checkbox";
+      tick.className = "pr-tick";
+      tick.setAttribute("aria-label", "Tick " + TD.pageLabel(p));
+      tick.checked = pagesPicked.has(p);
+      li.appendChild(tick);
+    } else li.classList.add("untickable");
+    li.classList.toggle("picked", pagesPicked.has(p));
+    const main = document.createElement("div");
+    main.className = "pr-main";
+    const head = document.createElement("div");
+    head.className = "pr-head";
+    const label = document.createElement("span");
+    label.className = "pr-label";
+    label.textContent = p.header != null ? TD.pageLabel(p) : "Before the first page";
+    const tag = document.createElement("span");
+    tag.className = "tag pr-tag";
+    head.append(label, tag);
+    const snip = document.createElement("div");
+    snip.className = "pr-snip";
+    main.append(head, snip);
+    li.appendChild(main);
+    setPageRowTag(li, i, sources);
+    pagesRowOf.set(p, li);
+    frag.appendChild(li);
+  });
+  pagesListEl.appendChild(frag);
+  for (const li of pagesRowOf.values()) pagesSnipObserver.observe(li);
+}
+function pagesHeading(text, p, title) {
+  const li = document.createElement("li");
+  li.className = "pages-doc";
+  li.textContent = text;
+  li.title = title + " — click to go to it";
+  li.__page = p;
+  return li;
+}
+
+/** The same pages as last time: each row's tag and tick read again, its first lines read again as it comes into view. */
+function updatePagesRows() {
+  const sources = docPageSources();
+  doc.pages.forEach((p, i) => {
+    const li = pagesRowOf.get(p);
+    if (!li) return;
+    setPageRowTag(li, i, sources);
+    li.__snip = false;
+  });
+  for (const li of pagesVisible) fillPageSnip(li);
+}
+
+/** A row's tag: what the page carries for PDF-Linker, if anything. */
+function setPageRowTag(li, i, sources) {
+  const p = doc.pages[i];
+  const tag = li.querySelector(".pr-tag");
+  if (!tag) return;
+  const e = (ocrAgain.length || textFixed.length) ? pageEntryAt(i, sources) : null;
+  const reads = TD.readsDidNotOcr(p.lines);
+  let cls = "", text = "", title = "";
+  if (reads && e && ocrAgain.some((x) => TD.sameNoOcr(x, e))) {
+    cls = "again"; text = "OCR again";
+    title = `Asked to be OCR'd again — ${TD.VALUES_FILE} carries the request once it is saved.`;
+  } else if (reads) {
+    cls = "nocr"; text = "DID NOT OCR";
+    title = TD.headerSaysDidNotOcr(p) ? "PDF-Linker marked this page DID NOT OCR." : `The page reads ${TD.DID_NOT_OCR}.`;
+  } else if (e && textFixed.some((x) => TD.sameNoOcr(x, e))) {
+    cls = "fixed"; text = "Use my text";
+    title = "Handed to PDF-Linker as text typed in by hand.";
+  }
+  tag.className = "tag pr-tag" + (cls ? " " + cls : "");
+  tag.textContent = text;
+  tag.title = title;
+  tag.hidden = !cls;
+  li.classList.toggle("nocr", reads);
+}
+
+/** A row's first lines, as the screen shows the page. */
+function fillPageSnip(li) {
+  if (li.__snip || shotPut || !doc) return; // the screenshot fakes the chrome as it stands; nothing is written into it meanwhile
+  const i = doc.pages.indexOf(li.__page);
+  const snip = li.querySelector(".pr-snip");
+  if (i < 0 || !snip) return;
+  li.__snip = true;
+  const lines = pageSnippet(i);
+  snip.textContent = lines.length ? lines.join("\n") : "(no text)";
+  snip.classList.toggle("empty", !lines.length);
+}
+function pageSnippet(i) {
+  const out = [];
+  const take = (t) => {
+    t = t.replace(/\s+/g, " ").trim();
+    if (t) out.push(t.length > 120 ? t.slice(0, 120) + "…" : t);
+    return out.length >= PAGES_SNIP_LINES;
+  };
+  const body = bodyForPage(i);
+  if (body) {
+    for (const line of body.querySelectorAll(".line")) {
+      if (line.classList.contains("trailer")) break;
+      const g = line.querySelector(".gutter");
+      let t = line.textContent;
+      if (g && t.startsWith(g.textContent)) t = t.slice(g.textContent.length);
+      if (take(t)) break;
+    }
+    return out;
+  }
+  // A page the reel has let go of has no body: its lines, as the file has them,
+  // through the key as the page would show them.
+  for (const l of doc.pages[i].lines) {
+    if (TRAILER_RE.test(l)) break;
+    const g = TD.gutterPrefix(l);
+    if (take(g ? g.rest : l)) break;
+  }
+  if (rev && !settings.showFakes && out.length) return PK.translate(rev, out.join("\n")).text.split("\n");
+  return out;
+}
+
+/** The pages ticked, by index, in the document's order. */
+function pagesPickedIndices() {
+  const out = [];
+  if (!doc || !pagesPicked.size) return out;
+  doc.pages.forEach((p, i) => { if (pagesPicked.has(p)) out.push(i); });
+  return out;
+}
+function setPagePicked(p, on) {
+  if (!p || p.header == null) return;
+  if (on) pagesPicked.add(p); else pagesPicked.delete(p);
+  const li = pagesRowOf.get(p);
+  if (!li) return;
+  li.classList.toggle("picked", on);
+  const tick = li.querySelector(".pr-tick");
+  if (tick) tick.checked = on;
+}
+/** Every page from `from` to `to`, both ends in, ticked or not. */
+function pickPagesRun(from, to, on) {
+  let a = doc.pages.indexOf(from), b = doc.pages.indexOf(to);
+  if (a < 0 || b < 0) { setPagePicked(to, on); return; }
+  if (a > b) [a, b] = [b, a];
+  for (let i = a; i <= b; i++) setPagePicked(doc.pages[i], on);
+}
+/** The head of the list: how many are ticked, All as all, some or none, and what ⊘ Did not OCR would strip. */
+function updatePagesPicked() {
+  if (!doc) return;
+  let tickable = 0, todo = 0;
+  for (const p of doc.pages) {
+    if (p.header == null) continue;
+    tickable++;
+    if (pagesPicked.has(p) && !TD.readsDidNotOcr(p.lines)) todo++;
+  }
+  const n = pagesPicked.size;
+  const all = $("pages-all");
+  all.checked = n > 0 && n === tickable;
+  all.indeterminate = n > 0 && n < tickable;
+  all.disabled = !tickable;
+  const read = n - todo;
+  $("pages-picked").textContent = n
+    ? `${n} ticked` + (read ? ` · ${read} already ${TD.DID_NOT_OCR}` : "")
+    : "None ticked";
+  const btn = $("pages-nocr");
+  btn.disabled = !todo;
+  btn.textContent = todo ? `⊘ Did not OCR (${todo})` : "⊘ Did not OCR";
+}
+
+/** Go to a page from its row: its head at the top of the stage. */
+function goToPageFromList(p) {
+  const i = doc ? doc.pages.indexOf(p) : -1;
+  if (i < 0) return;
+  ensurePageLive(i);
+  const sec = pagesEl.querySelector(`.tpage[data-index="${i}"]`);
+  if (!sec) return;
+  // A banner page goes to its divider where the reel hung one above it.
+  const at = sec.previousElementSibling && sec.previousElementSibling.classList.contains("reel-divider") && reelMemberOf(i).from === i
+    ? sec.previousElementSibling : sec;
+  const r = document.createRange();
+  r.selectNode(at);
+  scrollRangeTo(r, { margin: 8 });
+}
+
+/** The row of the page being read, marked and kept in sight in the list. */
+function markPagesHere() {
+  if (!doc || !pagesShape || !pagesTabShown()) return;
+  let i = readingPage();
+  // A page with no row of its own (a banner, blank text before the first
+  // header) marks the next one that has.
+  let li = null;
+  while (i < doc.pages.length && !(li = pagesRowOf.get(doc.pages[i]))) i++;
+  if (li === pagesHere) return;
+  if (pagesHere) pagesHere.classList.remove("here");
+  pagesHere = li;
+  if (!li) return;
+  li.classList.add("here");
+  const box = pagesSideEl.getBoundingClientRect(), r = li.getBoundingClientRect();
+  const under = $("pages-bar").getBoundingClientRect().bottom;
+  if (r.top < under) pagesSideEl.scrollTop -= under - r.top + 6;
+  else if (r.bottom > box.bottom) pagesSideEl.scrollTop += r.bottom - box.bottom + 6;
+}
+const markPagesHereSoon = debounce(markPagesHere, 80);
+stageEl.addEventListener("scroll", () => { if (pagesShape && pagesTabShown()) markPagesHereSoon(); }, { passive: true });
+
+pagesListEl.addEventListener("click", (e) => {
+  const li = e.target.closest("li");
+  if (!li || !doc || !li.__page) return;
+  const p = li.__page;
+  const tick = e.target.closest(".pr-tick");
+  // A document's heading only ever goes to it.
+  const pick = !li.classList.contains("pages-doc") && (!!tick || ((e.ctrlKey || e.metaKey || e.shiftKey) && p.header != null));
+  if (!pick) { goToPageFromList(p); return; }
+  // A tick has turned itself already; Shift or Ctrl on the row turns it here.
+  const on = tick ? tick.checked : e.shiftKey ? true : !pagesPicked.has(p);
+  if (e.shiftKey && pagesAnchor) pickPagesRun(pagesAnchor, p, on);
+  else setPagePicked(p, on);
+  pagesAnchor = p;
+  updatePagesPicked();
+});
+// Shift+click on the list ticks a run; it is not a text selection.
+pagesListEl.addEventListener("mousedown", (e) => { if (e.shiftKey) e.preventDefault(); });
+$("pages-all").addEventListener("change", (e) => {
+  if (!doc) return;
+  const on = e.target.checked;
+  for (const p of doc.pages) setPagePicked(p, on);
+  pagesAnchor = null;
+  updatePagesPicked();
+});
+$("pages-nocr").addEventListener("click", () => {
+  const picked = pagesPickedIndices();
+  if (!picked.length) return;
+  markDidNotOcrPages(picked);
+  // Done with: the ticks come off, and Ctrl+Z is the way back.
+  for (const p of [...pagesPicked]) setPagePicked(p, false);
+  pagesAnchor = null;
+  renderPagesTab();
+});
 
 // ── the rest of the folder ───────────────────────────────────────────────────
 //
@@ -7073,6 +7495,7 @@ function pageListsNote() {
 
 function renderFlags() {
   updateDirty(); // a flag, a keep or one of them written is a save's business
+  pagesTabSoon(); // …and the Pages tab's tags read the page lists
   flagsList.innerHTML = "";
   flagCount.textContent = String(flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length + textFixed.length);
   const nocrList = $("nocr-list");
@@ -7833,7 +8256,7 @@ async function locateLeak(row) {
  * the reader takes the scroll over themselves.
  */
 let landing = null;
-function scrollRangeTo(range) {
+function scrollRangeTo(range, { margin = null } = {}) {
   if (landing) landing.stop();
   releaseReading(); // going somewhere: the place held is not the place wanted
   const node = range.startContainer;
@@ -7846,7 +8269,9 @@ function scrollRangeTo(range) {
     // on the screen, so the sheet itself is what there is to scroll to.
     if (!rect.height && sec) rect = sec.getBoundingClientRect();
     const st = stageEl.getBoundingClientRect();
-    const top = stageEl.scrollTop + rect.top - st.top - Math.max(40, stageEl.clientHeight / 3);
+    // A third of the way down, where the eye is — or `margin` from the top,
+    // for a page gone to whole (the Pages tab).
+    const top = stageEl.scrollTop + rect.top - st.top - (margin != null ? margin : Math.max(40, stageEl.clientHeight / 3));
     return Math.round(Math.max(0, Math.min(top, stageEl.scrollHeight - stageEl.clientHeight)));
   };
   let aim = dest();
