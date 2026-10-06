@@ -475,6 +475,10 @@ body.side-hidden #side { display: none; }
   border-bottom: 2px solid transparent;
 }
 .side-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.side-tab .tab-short { display: none; }
+/* Four tabs and the chevron in the panel's width: each as wide as its name,
+   on one line, and cut short rather than wrapped where the panel is narrow. */
+.side-tabs .side-tab:not(.collapse) { flex: 1 1 auto; min-width: 0; padding: 8px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .side-body { flex: 1; overflow-y: auto; padding: 10px; }
 .side-hint, .side-note { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; line-height: 1.4; }
 .side-body ul { list-style: none; margin: 0; padding: 0; }
@@ -512,6 +516,44 @@ body.side-hidden #side { display: none; }
   margin-left: auto; flex: none; background: transparent; border: none; color: inherit; cursor: pointer; font-size: 14px; padding: 0 4px;
 }
 .side-actions { display: flex; gap: 6px; margin: 8px 0; }
+
+/* ── the Pages tab ─────────────────────────────────────────────────────────── */
+/* Its head stays put over the list: the ticks are made far down it. */
+.pages-bar {
+  position: sticky; top: -10px; z-index: 1; margin: -10px -10px 8px; padding: 8px 10px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--chrome-2); border-bottom: 1px solid var(--border);
+}
+.pages-all { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
+.pages-picked { flex: 1; min-width: 0; color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pages-nocr {
+  margin-left: auto; background: var(--accent); border: 1px solid var(--accent); color: #fff;
+  border-radius: 4px; padding: 3px 9px; cursor: pointer; font-size: 12px;
+}
+#pages-nocr:disabled { background: transparent; border-color: var(--btn-border); color: var(--text-muted); cursor: default; }
+#pages-list li { user-select: none; }
+#pages-list li.pages-doc {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted);
+  padding: 10px 6px 4px; border-radius: 0; border-bottom: 1px solid var(--border); margin-bottom: 2px;
+}
+#pages-list li.page-row { align-items: flex-start; padding: 5px 6px 6px; }
+#pages-list li.page-row.untickable { padding-left: 25px; }
+#pages-list .pr-tick { margin: 2px 0 0; flex: none; cursor: pointer; }
+#pages-list .pr-main { flex: 1; min-width: 0; }
+#pages-list .pr-head { display: flex; align-items: center; gap: 6px; }
+#pages-list .pr-label { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pages-list .pr-tag.nocr { background: #c62828; }
+#pages-list .pr-tag.again { background: var(--accent); }
+#pages-list .pr-tag.fixed { background: #2e7d32; }
+#pages-list .pr-snip {
+  margin-top: 2px; font: 11px/1.35 var(--reader-font); color: var(--text-muted); white-space: pre-line;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.7em;
+}
+#pages-list .pr-snip.empty { font-style: italic; }
+/* Ticked: tinted. Being read: a bar down its edge, as the PDF viewer marks its page. */
+#pages-list li.picked { background: rgba(26, 115, 232, 0.22); }
+#pages-list li.picked:hover { background: rgba(26, 115, 232, 0.32); }
+#pages-list li.here { box-shadow: inset 3px 0 0 var(--accent); }
 .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--btn-border); color: var(--text); font-size: 11px; text-align: center; }
 
 /* ── the auto-scroll pill ──────────────────────────────────────────────────── */
@@ -925,6 +967,11 @@ body.marks-off [data-here]:hover { background: transparent; }
 
 @media (max-width: 900px) {
   :root { --side-width: 240px; --tools-rail-width: 168px; }
+  /* The four tabs in the narrower panel: Documents goes by its short name. */
+  .side-tab .tab-long { display: none; }
+  .side-tab .tab-short { display: inline; }
+  .side-tabs .side-tab:not(.collapse) { padding: 8px 2px; font-size: 12px; }
+  .side-tab.collapse { width: 26px; }
 }
 
 /* ── print ───────────────────────────────────────────────────────────────────
