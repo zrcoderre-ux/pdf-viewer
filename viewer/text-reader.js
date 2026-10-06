@@ -1936,10 +1936,11 @@ function showKeyOffer(text, action, onAct) {
   const btn = $("key-offer-btn");
   btn.textContent = action;
   btn.onclick = async () => { hideKeyOffer(); await onAct(); };
+  delete keyOffer.dataset.master; // whose offer it is (offerMasterRenew marks its own)
   keyOffer.hidden = false;
   syncOfferHeight();
 }
-function hideKeyOffer() { keyOffer.hidden = true; syncOfferHeight(); }
+function hideKeyOffer() { keyOffer.hidden = true; delete keyOffer.dataset.master; syncOfferHeight(); }
 $("key-offer-close").addEventListener("click", hideKeyOffer);
 
 /**
@@ -2390,7 +2391,11 @@ document.addEventListener("drop", (e) => {
         try { await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, "", { owner }); }
         catch (err) { toast(String(err.message || err), { error: true }); }
       } else if (LK.isMasterName(f.name)) {
-        try { await readMasterBytes(new Uint8Array(await f.arrayBuffer()), f.name); }
+        // Attached and remembered where the drop carries the file's handle, as
+        // a pick does; read for the session only where it does not.
+        let h = null;
+        try { h = await handles[files.indexOf(f)]; } catch { h = null; }
+        try { if (h && h.kind === "file") await adoptMaster(h); else await readMasterBytes(new Uint8Array(await f.arrayBuffer()), f.name); }
         catch (err) { toast(String(err.message || err), { error: true }); }
       } else if (LK.isLeaksName(f.name)) {
         // A dropped worksheet is attached, with its handle where the drop carries one.
@@ -7331,10 +7336,34 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") { hideKeep
 //
 // The browser will not read a path on its own, so the workbook is chosen once
 // and its handle remembered here (IndexedDB keeps file handles); from then on
-// every reader tab attaches it at startup. Where the browser wants the grant
-// renewed — after it is restarted, usually — the Flagged panel offers it in one
-// click rather than asking silently.
+// every reader tab attaches it at startup, from wherever it was chosen.
+//
+// SET UP ONCE. The workbook stands in one place (beside pdf_linker.config), and
+// the operator should never have to find it again. Three things stood in the
+// way, and each is answered here:
+//
+//   Reading was all that was asked for. A withdrawal (withdrawMaster) writes
+//   the file, and the leave to write was asked for only then — or, where the
+//   browser would not put the question, the withdrawal held for the session
+//   only. So the write is asked for with the setup, while the click that chose
+//   the file is fresh (askMasterWrite), and the renewal asks for both at once.
+//
+//   The renewal waited in the Flagged panel. A browser restarted wants the grant
+//   renewed, and the button for it was where nobody was looking, so the keeps
+//   were simply not in force. It is offered in the bar at the top as well
+//   (offerMasterRenew). Chrome's own question then offers "Allow on every
+//   visit", and once that is chosen — or in the installed app, which keeps the
+//   grant by itself — restoreMaster finds the file granted and asks nothing.
+//
+//   PDF-Linker writes the workbook too: a run adds the keeps it was handed. The
+//   reader read it once, at startup, and held that reading for as long as the
+//   tab stood open. Coming back to the window it looks at the file's date
+//   (refreshMaster) and reads it again where it has changed.
 const MASTER_FILE = "master";
+
+// Values taken off the Master Keep for this session only — the workbook could
+// not be written — which a reading of the file must not put back.
+const masterOffHere = new Set();
 
 async function readMaster(handle, { quiet = false } = {}) {
   const file = await handle.getFile();
@@ -7343,10 +7372,11 @@ async function readMaster(handle, { quiet = false } = {}) {
     throw new Error(file.name + ' has no "KEEP" sheet — PDF-Linker\'s master workbook holds the standing keeps there.');
   }
   const m = LK.parseMasterKeeps(wb.sheets, file.name);
-  masterKeeps = m.keeps.map((k) => TD.makeKeep(k.control, k.value));
-  masterInfo = { name: file.name, sheet: m.sheet, rows: m.rows, partial: m.partial.length };
+  masterKeeps = m.keeps.filter((k) => !masterOffHere.has(LK.fold(k.value))).map((k) => TD.makeKeep(k.control, k.value));
+  masterInfo = { name: file.name, sheet: m.sheet, rows: m.rows, partial: m.partial.length, modified: file.lastModified };
   masterHandle = handle;
   masterNeeds = null;
+  if (keyOffer.dataset.master) hideKeyOffer(); // renewed from the panel instead
   compileKey();
   if (doc) { remarkKept(); paintHighlights(); }
   renderFlags();
@@ -7354,6 +7384,24 @@ async function readMaster(handle, { quiet = false } = {}) {
     toast(`${masterInfo.name}: ${masterKeeps.length} standing keep${masterKeeps.length === 1 ? "" : "s"} in force`
       + (masterInfo.partial ? ` (${masterInfo.partial} keep${masterInfo.partial === 1 ? "" : "s"} of part of a value left to PDF-Linker)` : "") + ".");
   }
+}
+/**
+ * Leave to write the workbook, asked for while a click is fresh: a withdrawal
+ * then goes straight to the file. Best effort — where the browser will not ask
+ * now, the withdrawal asks again (masterWritable).
+ */
+async function askMasterWrite(handle) {
+  try {
+    if ((await permissionOf(handle, "readwrite")) === "granted") return true;
+    return !!handle.requestPermission && (await handle.requestPermission({ mode: "readwrite" })) === "granted";
+  } catch { return false; }
+}
+/** A workbook handle chosen or dropped: asked to write, read, and attached from now on. */
+async function adoptMaster(handle) {
+  await askMasterWrite(handle);
+  masterOffHere.clear(); // chosen afresh: the file is the truth again
+  await readMaster(handle);
+  await rememberFile(MASTER_FILE, handle);
 }
 /** Choose the master workbook: read now, and attached from now on. */
 async function attachMaster() {
@@ -7369,10 +7417,7 @@ async function attachMaster() {
     }
   }
   if (!handle) { $("master-input").click(); return; }
-  try {
-    await readMaster(handle);
-    await rememberFile(MASTER_FILE, handle);
-  } catch (e) { toast(String(e.message || e), { error: true }); }
+  try { await adoptMaster(handle); } catch (e) { toast(String(e.message || e), { error: true }); }
 }
 /** The workbook chosen in an earlier session, attached again. */
 async function restoreMaster() {
@@ -7380,23 +7425,64 @@ async function restoreMaster() {
   if (!handle) return;
   const perm = await permissionOf(handle, "read");
   if (perm === "granted") {
-    try { await readMaster(handle, { quiet: true }); } catch (e) { console.warn(e); }
+    try { await readMaster(handle, { quiet: true }); } catch (e) { masterUnread(handle, e); }
     return;
   }
   // Not silently: the grant is asked for on a click.
   masterNeeds = handle;
   masterInfo = null;
   renderFlags();
+  offerMasterRenew();
+}
+/** The renewal, offered in the bar at the top — unless something else is being offered there. */
+function offerMasterRenew() {
+  if (!masterNeeds || !keyOffer.hidden) return;
+  showKeyOffer(`The master workbook (${masterNeeds.name}) needs the browser's leave again before its standing keeps are in force. Choose "Allow on every visit" and it will not ask again.`,
+    "Allow", renewMaster);
+  keyOffer.dataset.master = "1";
+}
+/** The remembered workbook could not be read: said, not swallowed — its keeps are not in force. */
+function masterUnread(handle, e) {
+  console.warn(e);
+  const name = (handle && handle.name) || "The master workbook";
+  toast(e && e.name === "NotFoundError"
+    ? `${name} is no longer where it was chosen, so its standing keeps are not in force. Load it again from the Flagged panel.`
+    : `${name} could not be read (${(e && e.message) || e}), so its standing keeps are not in force.`, { error: true, ms: 9000 });
 }
 async function renewMaster() {
   const handle = masterNeeds;
   if (!handle) return;
   try {
-    const perm = await handle.requestPermission({ mode: "read" });
-    if (perm !== "granted") { toast("The master workbook stays unattached.", { error: true }); return; }
+    // Reading and writing in one question, so a withdrawal later asks nothing.
+    // Refused the write, the file is still read where reading was allowed.
+    const perm = await handle.requestPermission({ mode: "readwrite" });
+    if (perm !== "granted" && (await permissionOf(handle, "read")) !== "granted") {
+      toast("The master workbook stays unattached.", { error: true });
+      return;
+    }
     await readMaster(handle);
   } catch (e) { toast(String(e.message || e), { error: true }); }
 }
+/**
+ * The workbook read again where it has changed since it was read — a run of
+ * PDF-Linker's, which adds to its KEEP sheet. Only its date is looked at
+ * otherwise, and nothing is asked: a grant the browser has taken back waits
+ * for the renewal.
+ */
+let masterChecking = false;
+async function refreshMaster() {
+  const handle = masterHandle;
+  if (!handle || !masterInfo || masterInfo.loose || masterChecking) return;
+  masterChecking = true;
+  try {
+    if ((await permissionOf(handle, "read")) !== "granted") return;
+    const file = await handle.getFile();
+    if (masterHandle === handle && file.lastModified !== masterInfo.modified) await readMaster(handle, { quiet: true });
+  } catch (e) { console.warn(e); }
+  finally { masterChecking = false; }
+}
+window.addEventListener("focus", () => { refreshMaster(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshMaster(); });
 /** A master workbook opened as plain bytes (dropped, or through the file input): read, not remembered. */
 async function readMasterBytes(bytes, name) {
   const wb = await parseXlsx(bytes);
@@ -7450,7 +7536,12 @@ async function withdrawMaster(values) {
   if (doc) { remarkKept(); paintHighlights(); }
   renderFlags();
   // …and the workbook is told, where it can be.
+  // Held off while the file is told, and for the session where it cannot be:
+  // a reading of the file meanwhile (refreshMaster — the window regains focus
+  // as the dialog closes) must not put them back while it still keeps them.
+  for (const v of named) masterOffHere.add(LK.fold(v));
   const w = writable.ok ? await writeMasterWithdrawn(named) : writable;
+  if (w.ok) for (const v of named) masterOffHere.delete(LK.fold(v));
   if (w.ok) {
     toast(`${what} ${named.length === 1 ? "is" : "are"} off the Master Keep \u2014 ${name}'s KEEP sheet no longer keeps ${it} (the Fix? cell is empty; the row and its history stay). ` +
       `Where ${it} ${named.length === 1 ? "stands" : "stand"} unfaked here, ${named.length === 1 ? "it is" : "they are"} marked: fake ${it}, and save.`, { ms: 9000 });
@@ -8244,7 +8335,7 @@ function renderMaster() {
   $("master-renew").hidden = !masterNeeds;
   $("master-load").textContent = masterInfo ? "Load another…" : "Load master workbook…";
   if (masterNeeds) {
-    hint.textContent = "The master workbook is remembered but needs authorising again — its standing keeps are not in force until it is.";
+    hint.textContent = "The master workbook is remembered but needs the browser's leave again — its standing keeps are not in force until it has it. Choose \u201cAllow on every visit\u201d and it will not ask again.";
     return;
   }
   if (!masterInfo) {

@@ -227,6 +227,30 @@ the value off for this session only, and the toast says so. The list is drawn
 again whenever a marks pass changes which kept values stand on the page
 (`keptSeen`); it used to wait for the next `renderFlags`.
 
+**The master workbook, attached once** (`adoptMaster`, `restoreMaster`,
+`offerMasterRenew`, `renewMaster`, `refreshMaster`): the workbook stands in one
+place (beside `pdf_linker.config`), so it is chosen once — **Load master
+workbook…** or a drop that carries the file's handle — and its handle is kept
+in IndexedDB (`rememberFile`, the `files` store, key `master`). The setup asks
+for write access as well as read while the click is fresh (`askMasterWrite`),
+so a later withdrawal writes the file without a prompt; where the browser will
+not ask then, `masterWritable` asks at the withdrawal as before. At startup
+`restoreMaster` reads the file with nothing asked where read access stands —
+Chrome 122+ keeps it for an installed app, and in a tab once "Allow on every
+visit" has been chosen. Where it does not, the renewal is offered in the bar at
+the top (`showKeyOffer`, marked `data-master` so that a renewal from the panel
+takes it down and another offer is never covered) as well as by the panel's
+**Allow** button, and asks for `readwrite` in one question; refused the write,
+the file is still read where reading was allowed. A remembered file that is
+gone or unreadable is said in a toast (`masterUnread`), not left in the
+console. PDF-Linker writes the workbook too, so on `focus` and on becoming
+visible `refreshMaster` compares the file's `lastModified` with
+`masterInfo.modified` and reads it again only where it changed (a stat, no
+read, no prompt). A value taken off for this session only (`masterOffHere`) is
+held off through those re-reads, and a fresh choice of the workbook clears it.
+The extension's reader and the installed app are different origins, so each is
+set up once on its own.
+
 **⇄ Raw** (`.raw-page`, on every page label, between `.swap-page` and
 `.nocr-page`; it replaced the toolbar's 📄 File as text panel) puts the page's
 own text in the page's place, the way ⇄ PDF puts its PDF page there.

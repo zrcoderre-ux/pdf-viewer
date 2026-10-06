@@ -953,17 +953,30 @@ app, which routes it to the reader tab.
   same handful; and the blanking that protects a keep from the forward pass is
   narrowed to them as well, which takes an alternation over hundreds of values
   out of every save and every repaint.
+- **The master workbook is set up once.** Choose it once with **Load master
+  workbook…** in the Flagged panel (or drop it on the window) and the reader
+  remembers where it is: from then on it is read every time the reader opens,
+  read again whenever you come back to the window after a PDF-Linker run has
+  changed it, and written in place when you take a value off the Master Keep.
+  The setup asks the browser for leave to read **and** write the file, so a
+  later removal goes straight to it. In the installed app the browser keeps
+  that leave; in a browser tab it may ask again after a restart, in a bar at the
+  top (and on the panel's **Allow** button) — choose **Allow on every visit**
+  and it does not ask again. If the file has been moved or deleted, the reader
+  says so rather than going on without its keeps. The extension's reader and
+  the installed app are set up separately.
 - **Taking a value off the Master Keep.** A master keep that is wrong for this
   case stops the value being faked. Click the **×** beside it in that list,
   select it in the text and press **Remove from Master Keep**, or right-click
   it and choose **Remove from the Master Keep**. After you confirm, the reader
   stops keeping it at once: where it stands unfaked it is marked orange, ready
   to fake and save. The workbook is changed too, if it was attached with
-  **Load master workbook…**: that row's Fix? cell on the KEEP sheet is emptied
-  (the row and its history stay, nothing else in the file is touched), so
-  PDF-Linker's next run fakes it as well. A workbook opened as a copy, or one
-  Excel is holding open, is not changed, and the reader says the value is off
-  for this session only.
+  **Load master workbook…** or dropped on the window: that row's Fix? cell on
+  the KEEP sheet is emptied (the row and its history stay, nothing else in the
+  file is touched), so PDF-Linker's next run fakes it as well. A workbook
+  opened as a copy, or one Excel is holding open, is not changed, and the
+  reader says the value is off for this session only; it stays off when the
+  reader reads the workbook again.
 - **Or keep it at one place only.** Both of those keeps are decisions about a
   *value*, and neither fits the name on every document: the Clerk's own
   signature block. Fake the "David" of *David W. Slayton* and the pseudonym
