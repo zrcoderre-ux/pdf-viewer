@@ -374,19 +374,44 @@ input[type="range"] { accent-color: var(--c-accent-strong); }
 }
 #page-input:focus { border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-soft); }
 #page-input::selection { background: var(--c-accent-soft); }
-.zoom-btn {
-  min-width: 58px;
+/* The zoom: a field to type a percentage in, and beside it the presets. */
+.zoom-box {
+  display: inline-flex;
+  align-items: center;
   height: 28px;
-  padding: 0 6px;
-  border: none;
+  padding: 0 2px;
   border-radius: 7px;
-  background: transparent;
-  color: var(--c-text);
+}
+.zoom-box:hover { background: var(--c-hover); }
+#zoom-level {
+  width: 6ch;
+  height: 24px;
+  padding: 0 2px;
+  text-align: center;
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--c-text);
+  cursor: text;
+}
+#zoom-level:focus { background: var(--c-app); border-color: var(--c-accent); box-shadow: 0 0 0 3px var(--c-accent-soft); outline: none; }
+#zoom-level::selection { background: var(--c-accent-soft); }
+.zoom-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--c-text-2);
   cursor: pointer;
 }
-.zoom-btn:hover, .zoom-btn[aria-expanded="true"] { background: var(--c-hover); }
+.zoom-caret:hover, .zoom-caret[aria-expanded="true"] { background: var(--c-hover); color: var(--c-text); }
 
 .provider-pick {
   display: inline-flex;

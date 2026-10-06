@@ -14,7 +14,13 @@ under the top bar.
 
 **The top bar is a three-column grid** (`#toolbar` in `viewer.css`): the
 document's name, status and link pill on the left, page navigation and zoom
-in the middle, the actions on the right. The middle group is centred while
+in the middle, the actions on the right. The zoom percentage is a field
+(`#zoom-level`, an input like `#page-input`: Enter applies a typed
+percentage through `setZoom`, Escape or blur restores) with the presets menu
+on the arrow beside it (`#zoom-presets`); `syncZoomLabel` and the wheel
+leave the field alone while it has focus, so a zoom landing mid-typing does
+not overwrite what is being typed. The text reader's `#size-label` is the
+same kind of field over `zoomTo`. The middle group is centred while
 both sides fit in equal halves beside it. The right column's floor is its
 min-content, so where half the bar is too little for the actions the middle
 group moves left; with a floor of 0 the actions slid left under zoom instead

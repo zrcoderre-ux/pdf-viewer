@@ -27,6 +27,11 @@ In addition to citation linking, the viewer supports:
   where the pages are too wide for the window they scroll sideways, and with
   one page to a row, at the edge, a fresh press turns the page and keeps that
   edge in view.
+- **Type a zoom** — the percentage between the zoom buttons is a field, the
+  way the page number is: type a number ("150" or "150%") and press **Enter**
+  for that zoom, from 25% to 600%; **Escape** or clicking away puts back the
+  zoom in force. The arrow beside it opens the presets (Fit width, Fit page,
+  Actual size and the usual percentages).
 - **Text selection and copy** — text is selectable as soon as a page is
   shown: click and drag, and a small toolbar opens under the selection with
   **Highlight**, **Underline**, **Strikethrough**, **Comment**, **Copy** and

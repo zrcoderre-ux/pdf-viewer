@@ -102,6 +102,7 @@ const imagesEl    = document.getElementById("images-btn");
 // The tools panel's collapse toggle (now at the head of the top bar).
 const toolsRailCollapseEl = document.getElementById("tools-rail-collapse");
 const zoomLevelEl = document.getElementById("zoom-level");
+const zoomPresetsEl = document.getElementById("zoom-presets");
 const highlightToggleEl = document.getElementById("highlight-toggle");
 const rectSelectToggleEl = document.getElementById("rect-select-toggle");
 const cropSelectEl = document.getElementById("crop-select");
@@ -4207,7 +4208,8 @@ function applyRestoreScroll(pageNumber, wrapper) {
 }
 
 function syncZoomLabel() {
-  if (zoomLevelEl) zoomLevelEl.textContent = `${Math.round(currentScale * 100)}%`;
+  // While the reader is typing a zoom, nothing overwrites it.
+  if (zoomLevelEl && document.activeElement !== zoomLevelEl) zoomLevelEl.value = `${Math.round(currentScale * 100)}%`;
   for (const b of document.querySelectorAll("#zoom-menu [data-zoom]")) {
     const z = b.dataset.zoom;
     const on = zoomMode ? z === zoomMode : Math.abs(Number(z) - currentScale) < 0.001;
@@ -4238,7 +4240,24 @@ function stepZoom(dir) {
 }
 zoomInEl.addEventListener("click",  () => stepZoom(1));
 zoomOutEl.addEventListener("click", () => stepZoom(-1));
-zoomLevelEl.addEventListener("click", () => toggleMenu(document.getElementById("zoom-menu"), zoomLevelEl, { align: "center" }));
+zoomPresetsEl.addEventListener("click", () => toggleMenu(document.getElementById("zoom-menu"), zoomPresetsEl, { align: "center" }));
+// The zoom in the toolbar doubles as a field, the way the page number does:
+// type a percentage ("150", "150%"), Enter applies it (held to 25–600%),
+// Escape or leaving the field puts back the zoom in force. A typed zoom is a
+// number, so it ends a fit mode.
+zoomLevelEl.addEventListener("focus", () => zoomLevelEl.select());
+zoomLevelEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    const pct = parseFloat(String(zoomLevelEl.value).replace(/[%\s]/g, ""));
+    if (Number.isFinite(pct) && pct > 0) setZoom(pct / 100);
+    zoomLevelEl.blur();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    zoomLevelEl.blur();
+  }
+});
+zoomLevelEl.addEventListener("blur", syncZoomLabel);
 for (const b of document.querySelectorAll("#zoom-menu [data-zoom]")) {
   b.setAttribute("role", "menuitemradio");
   b.addEventListener("click", () => {
@@ -4264,7 +4283,7 @@ window.addEventListener("wheel", (e) => {
   const base = wheelTarget ?? currentScale;
   const factor = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0022));
   wheelTarget = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, base * factor));
-  if (zoomLevelEl) zoomLevelEl.textContent = `${Math.round(wheelTarget * 100)}%`;
+  if (zoomLevelEl && document.activeElement !== zoomLevelEl) zoomLevelEl.value = `${Math.round(wheelTarget * 100)}%`;
   clearTimeout(wheelZoomTimer);
   wheelZoomTimer = setTimeout(() => { const t = wheelTarget; wheelTarget = null; setZoom(t); }, 220);
 }, { passive: false });

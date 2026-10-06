@@ -61,7 +61,10 @@ app, which routes it to the reader tab.
   the layout at 100% under a magnifying glass — the same words on the same
   lines, in the same places on the paper — and what no longer fits the window
   is scrolled to. A PDF gives you no way to reflow its text when you zoom, and
-  neither does this. **Ctrl+0** puts the page back to its own size. The
+  neither does this. **Ctrl+0** puts the page back to its own size, and the
+  percentage between the **Zoom** buttons is a field: type a number ("150" or
+  "150%") and press **Enter** for that zoom, from 25% to 500%; **Escape** or
+  clicking away puts back the zoom in force. The
   gesture is caught before the browser can scale the whole window — toolbar,
   tools panel, status bar — which is the part nobody wanted bigger, and a
   trackpad pinch is added up and spent a step at a time. The scale is applied

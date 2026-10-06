@@ -561,7 +561,8 @@ function applySettings() {
   fontSelect.value = settings.font;
   fontCustom.hidden = settings.font !== "custom";
   fontCustom.value = settings.customFont;
-  sizeLabel.textContent = Math.round(zoomNow() * 100) + "%";
+  // While the reader is typing a zoom, nothing overwrites it.
+  if (document.activeElement !== sizeLabel) sizeLabel.value = Math.round(zoomNow() * 100) + "%";
   lhRange.value = String(settings.lineHeight);
   marksToggle.checked = settings.marks;
   fakesToggle.checked = settings.showFakes;
@@ -585,6 +586,22 @@ fontCustom.addEventListener("input", () => {
 });
 $("size-down").addEventListener("click", () => zoomText(-1));
 $("size-up").addEventListener("click", () => zoomText(1));
+// The percentage between them is a field as well as a label: type a number
+// ("150", "150%"), Enter applies it (held to 25–500%), Escape or leaving the
+// field puts back the zoom in force.
+sizeLabel.addEventListener("focus", () => sizeLabel.select());
+sizeLabel.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    const pct = parseFloat(String(sizeLabel.value).replace(/[%\s]/g, ""));
+    if (Number.isFinite(pct) && pct > 0) zoomTo(pct / 100);
+    sizeLabel.blur();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    sizeLabel.blur();
+  }
+});
+sizeLabel.addEventListener("blur", () => { sizeLabel.value = Math.round(zoomNow() * 100) + "%"; });
 
 // ── zoom: the words, not the window ──────────────────────────────────────────
 //
@@ -603,9 +620,12 @@ $("size-up").addEventListener("click", () => zoomText(1));
 // A step of a tenth each way, the way a PDF viewer steps, and Ctrl+0 back to
 // the page at its own size.
 function zoomText(step) {
-  const now = zoomNow();
-  const next = step === 0 ? 1 : Math.min(5, Math.max(0.25, Math.round(now * Math.pow(1.1, step) * 100) / 100));
-  if (Math.abs(next - now) < 0.001) return;
+  zoomTo(step === 0 ? 1 : zoomNow() * Math.pow(1.1, step));
+}
+/** The zoom set to `z` (1 is 100%), held to 25–500% — a step's, or one typed. */
+function zoomTo(z) {
+  const next = Math.min(5, Math.max(0.25, Math.round(z * 100) / 100));
+  if (Math.abs(next - zoomNow()) < 0.001) return;
   settings.zoom = next;
   saveSettings();
   applySettings();
