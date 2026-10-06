@@ -1014,6 +1014,9 @@ function coverPdfNames({ sheet, names }) {
 function fakesForShot() {
   hideTip();
   if (!key || shotPut) return () => {};
+  // The Pages tab's pictures are pictures: no fake reaches into one, so they
+  // are blurred for the shot.
+  document.body.classList.add("shot-taking");
   const edits = [];  // see shotEdit
   const fields = []; // [input, its value, the value faked]
   const showed = document.body.classList.contains("show-fakes");
@@ -1057,6 +1060,7 @@ function fakesForShot() {
 
   const back = () => {
     shotPut = null;
+    document.body.classList.remove("shot-taking");
     for (const c of covers) c.remove();
     for (const [el, v, f] of fields) if (el.value === f) el.value = v;
     undoShotEdits(edits);
@@ -1989,8 +1993,35 @@ function openPdfAhead(name) {
   if (src) loadPdf(src, { now: true }).catch(() => { /* the pane reports it when it asks */ });
 }
 
+/**
+ * The export as pages, with the margin numbers the OCR missed put back on
+ * every page that carries enough of its numbers to be pleading paper
+ * (TD.restoreMarginNumbers, to the number the document's pages run to). The
+ * file is not touched: the pages are what the reader shows, lays beside the
+ * PDF and saves, so a save writes the numbers and closing without one loses
+ * nothing that the next open does not put back. Each page keeps the numbers
+ * put back on it (`restored`), which the margin marks (buildBody), and the
+ * document how many there were, for the toast.
+ */
+function readExport(text) {
+  const parsed = TD.parseExport(text);
+  const last = TD.pleadingLast(parsed.pages);
+  let pages = 0, numbers = 0;
+  for (const p of parsed.pages) {
+    if (p.header == null) continue;
+    const r = TD.restoreMarginNumbers(p.lines, { last });
+    if (!r) continue;
+    p.lines = r.lines;
+    p.restored = r.added;
+    pages++;
+    numbers += r.added.length;
+  }
+  parsed.restored = { pages, numbers };
+  return parsed;
+}
+
 function openText(text, name, handle, built) {
-  doc = built ? built.doc : TD.parseExport(text);
+  doc = built ? built.doc : readExport(text);
   fileName = name;
   fileHandle = handle;
   // A document opened is the head of a new reel, whatever was hanging off the
@@ -2018,6 +2049,10 @@ function openText(text, name, handle, built) {
   marksGetAnotherChance();
   if (built && JSON.stringify(built.spots) === JSON.stringify(spots)) showPages(built.nodes, built);
   else render();
+  const fixedUp = doc.restored;
+  if (fixedUp && fixedUp.numbers) {
+    toast(`${fixedUp.numbers} margin number${fixedUp.numbers === 1 ? "" : "s"} the OCR missed or misread ${fixedUp.numbers === 1 ? "is" : "are"} put back, on ${fixedUp.pages} page${fixedUp.pages === 1 ? "" : "s"} (in italics in the margin). The file has them once it is saved.`, { ms: 7000 });
+  }
   setupPdfForDoc();
   markDocList();
   renderReelState();
@@ -2422,6 +2457,9 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
     body.className = "page-body";
     body.contentEditable = editable ? "plaintext-only" : "false";
     body.spellcheck = false;
+    // The margin numbers put back on this page (readExport), marked as the
+    // body is built — and built again, since the body element stays.
+    body.__restored = p.restored ? new Set(p.restored) : null;
     buildBody(body, p.lines.join("\n"), i, theirSpots);
     const layer = document.createElement("div");
     layer.className = "link-layer";
@@ -2536,7 +2574,12 @@ function buildBody(body, text, page, theirSpots) {
       const last = i === pieces.length - 1 && ri + 1 < runs.length;
       const g = lineStart ? TD.gutterPrefix(last ? piece + "\u0001" : piece) : null;
       if (g && g.gutter.length <= piece.length) {
-        line.insertBefore(makeGutter(g.gutter), lt);
+        const gutter = makeGutter(g.gutter);
+        if (body.__restored && body.__restored.has(parseInt(g.gutter, 10))) {
+          gutter.classList.add("restored");
+          gutter.title = "Put back: the OCR missed or misread this margin number. A save writes it into the file.";
+        }
+        line.insertBefore(gutter, lt);
         line.classList.add("num");
         appendText(piece.slice(g.gutter.length), at + g.gutter.length);
       } else appendText(piece, at);
@@ -3268,6 +3311,98 @@ document.addEventListener("selectionchange", () => {
 });
 stageEl.addEventListener("scroll", () => { if (typeHit) hideTypeTip(); }, { passive: true });
 
+// ── the numbered margin is not text ───────────────────────────────────────────────────
+//
+// The pleading line numbers are the paper, not the filing's words, and a passage
+// copied off a numbered page should come away as the passage — not as "3", the
+// line, "4", the next line, a number on a line of its own between every two. So
+// the margin is unselectable (the stylesheet: `user-select: none` on a numbered
+// page's .gutter): a selection across lines paints and copies the text and none
+// of the numbers. Unselectable, though, a press on a number began no selection
+// at all, and a drag from the margin down across the lines — the usual way to
+// take whole lines — took nothing. So a press in the margin is the reader's: the
+// selection begins at the start of that line's text and follows the pointer as
+// the browser's own drag would, a point over the margin standing for the start
+// of its line's text; the stage scrolls under a drag held past its top or foot,
+// or turned with the wheel; Shift extends the selection there was, and a double
+// click takes the line's text whole.
+const MARGIN_EDGE = 28; // px inside the stage's top and foot where a held drag scrolls it
+/** The place in the text at a point on the pages, a point in the margin read as its line's start; null off the text. */
+function textPointAt(x, y) {
+  let node = null, offset = 0;
+  if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(x, y);
+    if (r) { node = r.startContainer; offset = r.startOffset; }
+  } else if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(x, y);
+    if (p) { node = p.offsetNode; offset = p.offset; }
+  }
+  const el = node && (node.nodeType === 1 ? node : node.parentElement);
+  if (!el || !el.closest(".page-body") || !pagesEl.contains(el)) return null;
+  const line = el.closest(".line");
+  if (el.closest(".gutter")) { const lt = line && ltOf(line); return lt ? { node: lt, offset: 0 } : null; }
+  if (line && node === line) {
+    // On the line block itself, beside its text: the text's near edge.
+    const lt = ltOf(line);
+    if (!lt) return null;
+    return offset <= [...line.childNodes].indexOf(lt) ? { node: lt, offset: 0 } : { node: lt, offset: lt.childNodes.length };
+  }
+  return { node, offset };
+}
+pagesEl.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.altKey) return;
+  const g = e.target.closest && e.target.closest(".page-body.numbered .gutter");
+  const line = g && g.closest(".line");
+  const lt = line && ltOf(line);
+  if (!lt) return;
+  e.preventDefault();
+  const body = line.closest(".page-body");
+  if (editing && document.activeElement !== body) body.focus({ preventScroll: true });
+  const sel = document.getSelection();
+  if (e.detail >= 2) { sel.setBaseAndExtent(lt, 0, lt, lt.childNodes.length); return; }
+  const anchor = e.shiftKey && sel.rangeCount ? { node: sel.anchorNode, offset: sel.anchorOffset } : { node: lt, offset: 0 };
+  sel.setBaseAndExtent(anchor.node, anchor.offset, lt, 0);
+  // Followed sideways inside the sheet the drag began on: down the margin or
+  // past the edge of the paper, a point is its line's start or end.
+  const sheet = body.getBoundingClientRect();
+  let x = e.clientX, y = e.clientY, raf = 0;
+  const follow = () => {
+    const st = stageEl.getBoundingClientRect();
+    const f = textPointAt(Math.max(sheet.left + 1, Math.min(sheet.right - 1, x)), Math.max(st.top + 1, Math.min(st.bottom - 1, y)));
+    if (f) { try { sel.setBaseAndExtent(anchor.node, anchor.offset, f.node, f.offset); } catch { /* a node gone under it */ } }
+  };
+  const speed = () => {
+    const st = stageEl.getBoundingClientRect();
+    if (y < st.top + MARGIN_EDGE) return -Math.min(40, Math.ceil((st.top + MARGIN_EDGE - y) / 2));
+    if (y > st.bottom - MARGIN_EDGE) return Math.min(40, Math.ceil((y - (st.bottom - MARGIN_EDGE)) / 2));
+    return 0;
+  };
+  const tick = () => {
+    raf = 0;
+    const v = speed();
+    if (!v) return;
+    stageEl.scrollTop += v; // the scroll reads the point again (onScroll)
+    raf = requestAnimationFrame(tick);
+  };
+  const move = (ev) => {
+    if (!(ev.buttons & 1)) { up(); return; }
+    x = ev.clientX;
+    y = ev.clientY;
+    follow();
+    if (!raf && speed()) raf = requestAnimationFrame(tick);
+  };
+  const onScroll = () => follow();
+  const up = () => {
+    window.removeEventListener("mousemove", move);
+    window.removeEventListener("mouseup", up);
+    stageEl.removeEventListener("scroll", onScroll);
+    if (raf) cancelAnimationFrame(raf);
+  };
+  window.addEventListener("mousemove", move);
+  window.addEventListener("mouseup", up);
+  stageEl.addEventListener("scroll", onScroll, { passive: true });
+});
+
 // ── undo / redo ───────────────────────────────────────────────────────────────────────
 //
 // The reader's own history, because the browser's cannot be trusted here:
@@ -3587,6 +3722,18 @@ async function saveDocument() {
     // them, which are what the forward pass left alone.
     scan[i] = TD.blankRanges(text, held.concat(pns, diskReading(text, held, pns).cited, left.flatMap((h) => h.ranges))).split("\n");
   }
+  // A page handed to PDF-Linker as typed in by hand (✎ Use my text) carries
+  // its text's sum, and PDF-Linker applies it only where the file reads that
+  // way: where the reader put margin numbers back on the page (readExport),
+  // the file is written with them, or the two would never agree.
+  if (textFixed.length) {
+    const sources = docPageSources();
+    doc.pages.forEach((p, i) => {
+      if (!p.restored || !p.restored.length) return;
+      const e = pageEntryAt(i, sources);
+      if (e && textFixed.some((x) => TD.sameNoOcr(x, e))) touched.add(reelMemberOf(i));
+    });
+  }
   let write = reel.filter((m) => m.dirty || touched.has(m));
   // The pages marked ⊘ Did not OCR follow the text that is about to be
   // written: a page in a file this save writes reads what the file will say.
@@ -3637,6 +3784,14 @@ async function saveDocument() {
     for (let i = m.from; i < m.from + m.count; i++) {
       const b = bodyForPage(i);
       if (b) b.__built = doc.pages[i].lines.join("\n");
+      // …and the margin numbers put back on it are the file's own now.
+      if (doc.pages[i].restored) {
+        doc.pages[i].restored = null;
+        if (b) {
+          b.__restored = null;
+          for (const g of b.querySelectorAll(".gutter.restored")) { g.classList.remove("restored"); g.removeAttribute("title"); }
+        }
+      }
     }
     // The save wrote every DECIDED name standing in the clear in this one;
     // where that was all of them, the folder's answer for the document is that
@@ -5749,38 +5904,46 @@ function markDidNotOcrPages(indices) {
 
 // ── the Pages tab ──────────────────────────────────────────────────────────────────
 //
-// Every page of the document on screen, in the side panel: the PDF viewer's
-// Pages panel, for a text export. A row is the page's label, what it carries
-// for PDF-Linker (DID NOT OCR, OCR again, Use my text) and its first lines; a
-// click goes to the page, and the row of the page being read is marked as the
-// stage scrolls. Ticked rows are a selection — a tick, Shift+click for a run,
-// Ctrl+click for one more — and ⊘ Did not OCR at the head of the list strips
-// every ticked page at once (markDidNotOcrPages).
+// Every page of the document on screen, in the side panel, the way the PDF
+// viewer's Pages panel shows a PDF: a picture of each page with its label
+// under it. The picture is the page of the PDF the export came from, where one
+// is matched (pdfTarget), and a miniature of the text page where none is; the
+// label carries what the page carries for PDF-Linker (DID NOT OCR, OCR again,
+// Use my text). A click goes to the page, and the row of the page being read is
+// marked as the stage scrolls.
+//
+// Ticked rows are a selection, made the way a list's rows are: a DRAG over the
+// pictures ticks every page from the one it started on to the one under the
+// pointer, and the list scrolls under it — held past the top or the foot of the
+// list, or with the wheel — so a run of pages longer than the panel is one
+// drag. Ctrl (⌘) adds the run to the ticks there were rather than starting
+// again, Shift+click ticks a run from the last page, Ctrl+click or a page's box
+// ticks one. ⊘ Did not OCR at the head of the list strips every ticked page at
+// once (markDidNotOcrPages). There is no tick-everything: a document that did
+// not OCR from end to end is one not to run at all.
 //
 // The rows are keyed by the PAGE OBJECT, not its index: a document hung above
 // the reel renumbers every page below it (reelShift), and a tick held by number
-// would then name another page. A page's first lines are read as the screen
-// shows them — off its body, so in real names where Show fakes is off, like
-// the rest of the chrome the screenshot fakes (swapChrome) — and only as its
-// row comes into view, so a combined file of two thousand pages lists at once.
-// The list is drawn only while it is in sight; a change made while it is not
-// leaves it stale, and showing it draws it.
+// would then name another page. A picture is drawn only as its row comes into
+// view, so a combined file of two thousand pages lists at once. The list is
+// drawn only while it is in sight; a change made while it is not leaves it
+// stale, and showing it draws it.
 const pagesSideEl = $("side-pages");
 const pagesListEl = $("pages-list");
-const PAGES_SNIP_LINES = 2;
 let pagesPicked = new Set(); // the ticked pages: doc.pages objects
 let pagesAnchor = null;      // the page a Shift+click runs from
 let pagesShape = null;       // the doc.pages objects the rows were built for, in order
 let pagesRowOf = new Map();  // page object → its row
 let pagesStale = true;       // something moved while the tab was out of sight
 let pagesHere = null;        // the row of the page being read
-const pagesVisible = new Set();
-const pagesSnipObserver = new IntersectionObserver((entries) => {
+const pagesVisible = new Set(); // rows in or near the panel's view
+const pagesThumbObserver = new IntersectionObserver((entries) => {
   for (const en of entries) {
-    if (en.isIntersecting) { pagesVisible.add(en.target); fillPageSnip(en.target); }
-    else pagesVisible.delete(en.target);
+    if (en.isIntersecting) { pagesVisible.add(en.target); fillPageThumb(en.target); }
+    else { pagesVisible.delete(en.target); dropTextThumb(en.target); }
   }
-}, { root: pagesSideEl, rootMargin: "300px 0px" });
+  pumpPageThumbs();
+}, { root: pagesSideEl, rootMargin: "400px 0px" });
 
 function pagesTabShown() {
   return !pagesSideEl.hidden && !document.body.classList.contains("side-hidden");
@@ -5797,7 +5960,7 @@ function renderPagesTab() {
   pagesStale = false;
   const hint = $("pages-hint");
   if (!doc) {
-    pagesSnipObserver.disconnect();
+    pagesThumbObserver.disconnect();
     pagesVisible.clear();
     pagesListEl.innerHTML = "";
     pagesShape = null;
@@ -5825,11 +5988,12 @@ function renderPagesTab() {
   else updatePagesRows();
   updatePagesPicked();
   markPagesHere();
+  pumpPageThumbs();
 }
 
 /** The rows from scratch: the document changed, or pages went on or came off it. */
 function buildPagesRows() {
-  pagesSnipObserver.disconnect();
+  pagesThumbObserver.disconnect();
   pagesVisible.clear();
   pagesListEl.innerHTML = "";
   pagesRowOf = new Map();
@@ -5851,17 +6015,19 @@ function buildPagesRows() {
     const li = document.createElement("li");
     li.className = "page-row";
     li.__page = p;
+    li.classList.toggle("picked", pagesPicked.has(p));
+    // The picture, standing at its page's shape until it is drawn.
+    const thumb = document.createElement("div");
+    thumb.className = "pr-thumb";
+    thumb.style.aspectRatio = `1 / ${pageThumbRatio(i)}`;
     if (p.header != null) {
       const tick = document.createElement("input");
       tick.type = "checkbox";
       tick.className = "pr-tick";
       tick.setAttribute("aria-label", "Tick " + TD.pageLabel(p));
       tick.checked = pagesPicked.has(p);
-      li.appendChild(tick);
-    } else li.classList.add("untickable");
-    li.classList.toggle("picked", pagesPicked.has(p));
-    const main = document.createElement("div");
-    main.className = "pr-main";
+      thumb.appendChild(tick);
+    }
     const head = document.createElement("div");
     head.className = "pr-head";
     const label = document.createElement("span");
@@ -5870,16 +6036,13 @@ function buildPagesRows() {
     const tag = document.createElement("span");
     tag.className = "tag pr-tag";
     head.append(label, tag);
-    const snip = document.createElement("div");
-    snip.className = "pr-snip";
-    main.append(head, snip);
-    li.appendChild(main);
+    li.append(thumb, head);
     setPageRowTag(li, i, sources);
     pagesRowOf.set(p, li);
     frag.appendChild(li);
   });
   pagesListEl.appendChild(frag);
-  for (const li of pagesRowOf.values()) pagesSnipObserver.observe(li);
+  for (const li of pagesRowOf.values()) pagesThumbObserver.observe(li);
 }
 function pagesHeading(text, p, title) {
   const li = document.createElement("li");
@@ -5890,16 +6053,21 @@ function pagesHeading(text, p, title) {
   return li;
 }
 
-/** The same pages as last time: each row's tag and tick read again, its first lines read again as it comes into view. */
+/** The same pages as last time: each row's tag read again, its picture checked again as it is in view. */
 function updatePagesRows() {
   const sources = docPageSources();
   doc.pages.forEach((p, i) => {
     const li = pagesRowOf.get(p);
     if (!li) return;
     setPageRowTag(li, i, sources);
-    li.__snip = false;
+    // A picture of the wrong page, or of the text where a PDF is now matched,
+    // is drawn again; a text page's is read again (drawTextThumb redraws only
+    // where its lines changed).
+    const t = pdfTarget(i);
+    const kind = t && !pagesThumbFailed.has(t.key) ? "pdf:" + t.key : "text";
+    if (li.__thumb !== kind || kind === "text") li.__thumb = null;
   });
-  for (const li of pagesVisible) fillPageSnip(li);
+  for (const li of pagesVisible) fillPageThumb(li);
 }
 
 /** A row's tag: what the page carries for PDF-Linker, if anything. */
@@ -5927,24 +6095,251 @@ function setPageRowTag(li, i, sources) {
   li.classList.toggle("nocr", reads);
 }
 
-/** A row's first lines, as the screen shows the page. */
-function fillPageSnip(li) {
-  if (li.__snip || shotPut || !doc) return; // the screenshot fakes the chrome as it stands; nothing is written into it meanwhile
-  const i = doc.pages.indexOf(li.__page);
-  const snip = li.querySelector(".pr-snip");
-  if (i < 0 || !snip) return;
-  li.__snip = true;
-  const lines = pageSnippet(i);
-  snip.textContent = lines.length ? lines.join("\n") : "(no text)";
-  snip.classList.toggle("empty", !lines.length);
+// ── its pictures ──
+//
+// A page with a PDF matched to it is pictured as that PDF page — what the PDF
+// viewer's panel shows, and the way to see at a glance which pages are scans
+// the OCR made nothing of. The picture is drawn once, at a fixed width, read
+// back as a JPEG and kept by its PDF page (pagesThumbs): scrolling back up the
+// list is the picture, not the page decoded again, and a scanned page decodes
+// at the resolution it was scanned at whatever the size it is drawn. The
+// drawing goes through the PDF queue at its back (`later`), so a page on the
+// stage is always drawn first, one picture at a time and the rows on screen
+// before the ones only near it; the page is handed back to pdf.js once it is
+// pictured, unless the stage is showing it. A page with no PDF, or whose PDF
+// page could not be drawn, is pictured as its text, drawn small: the lines as
+// the screen shows them, so in real names where Show fakes is off.
+//
+// A picture is a picture: the screenshot's fakes cannot reach into it, so it
+// is blurred while one is taken (fakesForShot, body.shot-taking).
+const PAGES_THUMB_PX = 400;   // the width a PDF page is pictured at, in pixels (two to the CSS pixel)
+const PAGES_THUMB_HELD = 600; // …and how many pictures are kept, the longest unshown let go first
+const PAGES_TEXT_LINES = 80;  // the most lines a text page's picture draws
+const pagesThumbs = new Map(); // "<pdf name>|<page>" → { url, ratio }, least recently shown first
+const pagesThumbFailed = new Set(); // PDF pages that could not be drawn: pictured as text until the PDFs change
+let pagesThumbBusy = null;    // the PDF a picture is being drawn from — trimPdfs leaves it open (pdfsInUse)
+let pagesThumbPumping = false;
+
+/** The shape a row's picture stands at: its PDF page's, where known, else the folder's paper. */
+function pageThumbRatio(i) {
+  const t = pdfTarget(i);
+  const held = t && pagesThumbs.get(t.key);
+  if (held) return held.ratio;
+  const sz = t && pdfSizes.get(t.src.name);
+  const s = sz && sz[t.page - 1];
+  return s && s.w > 0 && s.h > 0 ? s.h / s.w : pageRatioGuess;
 }
-function pageSnippet(i) {
+
+/** A row in view: its picture, drawn or held, or asked for (pumpPageThumbs). */
+function fillPageThumb(li) {
+  if (li.__thumb || !doc || !li.isConnected) return;
+  const i = doc.pages.indexOf(li.__page);
+  if (i < 0) return;
+  const t = pdfTarget(i);
+  if (t && !pagesThumbFailed.has(t.key)) {
+    const held = pagesThumbs.get(t.key);
+    if (held) showPdfThumb(li, t.key, held);
+    else li.__want = t.key;
+    return;
+  }
+  li.__want = null;
+  drawTextThumb(li, i);
+}
+
+function showPdfThumb(li, key, held) {
+  const box = li.querySelector(".pr-thumb");
+  const cv = box.querySelector("canvas");
+  if (cv) cv.remove();
+  let img = box.querySelector("img");
+  if (!img) {
+    img = document.createElement("img");
+    img.alt = "";
+    img.draggable = false; // a drag over the pictures ticks them; it does not carry one off
+    box.prepend(img);
+  }
+  if (img.src !== held.url) img.src = held.url;
+  box.style.aspectRatio = `1 / ${held.ratio}`;
+  li.__thumb = "pdf:" + key;
+  li.__want = null;
+  li.__text = null;
+  pagesThumbs.delete(key); // shown: the most recent now
+  pagesThumbs.set(key, held);
+}
+
+/** The pictures being drawn, one at a time: the rows on screen first, top down, then the ones near it. */
+async function pumpPageThumbs() {
+  if (pagesThumbPumping) return;
+  pagesThumbPumping = true;
+  try {
+    for (;;) {
+      const li = nextThumbRow();
+      if (!li) break;
+      const i = doc.pages.indexOf(li.__page);
+      const t = i >= 0 ? pdfTarget(i) : null;
+      // The PDFs moved under it since it asked: asked again, as it stands now.
+      if (!t || t.key !== li.__want) { li.__want = null; li.__thumb = null; fillPageThumb(li); continue; }
+      pagesThumbBusy = t.src.name;
+      const held = await drawPdfThumb(t);
+      pagesThumbBusy = null;
+      if (held) {
+        pagesThumbs.set(t.key, held);
+        letGoOfPageThumbs();
+      } else pagesThumbFailed.add(t.key);
+      for (const row of pagesVisible) {
+        if (row.__want !== t.key) continue;
+        if (held) showPdfThumb(row, t.key, held);
+        else { row.__want = null; row.__thumb = null; fillPageThumb(row); }
+      }
+      // Asked for and not answered (the row went out of view meanwhile): asked again when it is back.
+      if (li.__want === t.key && !pagesVisible.has(li)) li.__want = null;
+    }
+  } finally {
+    pagesThumbPumping = false;
+    pagesThumbBusy = null;
+  }
+}
+function nextThumbRow() {
+  if (!doc || !pagesTabShown()) return null;
+  const box = pagesSideEl.getBoundingClientRect();
+  let best = null, bestAway = Infinity, bestTop = Infinity;
+  for (const li of pagesVisible) {
+    if (!li.__want || !li.isConnected) continue;
+    const r = li.getBoundingClientRect();
+    const away = r.bottom < box.top ? box.top - r.bottom : r.top > box.bottom ? r.top - box.bottom : 0;
+    if (away < bestAway || (away === bestAway && r.top < bestTop)) { best = li; bestAway = away; bestTop = r.top; }
+  }
+  return best;
+}
+
+/** One PDF page pictured: { url, ratio }, or null where it could not be. */
+async function drawPdfThumb(t) {
+  let info;
+  try { info = await loadPdf(t.src); } catch { return null; }
+  if (t.page > info.count) return null;
+  return new Promise((resolve) => {
+    pdfJobs.push({
+      name: t.src.name, later: true,
+      run: () => renderPdfThumb(info, t.page).then(resolve, () => resolve(null)),
+      cancel: () => resolve(null),
+    });
+    pumpPdfJobs();
+  });
+}
+async function renderPdfThumb(info, pageNo) {
+  return duringAsync(`picturing page ${pageNo} of ${info.name} for the Pages tab`, async () => {
+    if (!stillOpen(info)) return null;
+    const page = await info.pdf.getPage(pageNo);
+    const base = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: PAGES_THUMB_PX / base.width });
+    // Drawn where the PDF's fonts are and read back from there (pdf-fonts.js).
+    const canvas = fontCanvas(Math.round(vp.width), Math.round(vp.height));
+    try {
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.85));
+      return blob ? { url: URL.createObjectURL(blob), ratio: base.height / base.width } : null;
+    } finally {
+      canvas.width = canvas.height = 0; // the JPEG is the copy that is kept
+      // …and the page given back, decoded scan and all — unless the stage is
+      // showing it, where its own slot gives it back when it lets go.
+      if (!pageIsDrawn(page)) {
+        let done = false;
+        try { done = page.cleanup(); } catch { done = true; }
+        if (!done) { pagesToRelease.add(page); releasePagesSoon(); }
+      }
+    }
+  });
+}
+
+/** Past PAGES_THUMB_HELD, the pictures shown longest ago go — never one a row in view is showing. */
+function letGoOfPageThumbs() {
+  if (pagesThumbs.size <= PAGES_THUMB_HELD) return;
+  const shown = new Set();
+  for (const li of pagesVisible) if (li.__thumb && li.__thumb.startsWith("pdf:")) shown.add(li.__thumb.slice(4));
+  const gone = new Set();
+  for (const [key, held] of pagesThumbs) {
+    if (pagesThumbs.size - gone.size <= PAGES_THUMB_HELD) break;
+    if (shown.has(key)) continue;
+    gone.add(key);
+    URL.revokeObjectURL(held.url);
+  }
+  for (const key of gone) pagesThumbs.delete(key);
+  // A row out of view still holding one of them asks again when it is back.
+  for (const li of pagesRowOf.values()) {
+    if (!li.__thumb || !li.__thumb.startsWith("pdf:") || !gone.has(li.__thumb.slice(4))) continue;
+    const img = li.querySelector(".pr-thumb img");
+    if (img) img.remove();
+    li.__thumb = null;
+  }
+}
+/** Every picture let go of: the PDFs are another folder's now (forgetPdfs). */
+function forgetPageThumbs() {
+  for (const held of pagesThumbs.values()) URL.revokeObjectURL(held.url);
+  pagesThumbs.clear();
+  pagesThumbFailed.clear();
+  for (const li of pagesRowOf.values()) {
+    const img = li.querySelector(".pr-thumb img");
+    if (img) img.remove();
+    li.__thumb = null;
+    li.__want = null;
+  }
+}
+/** The PDFs matched to the pages changed (refreshPdf): every row's picture is looked at again. */
+function pageThumbsMoved() {
+  pagesThumbFailed.clear();
+  pagesTabSoon();
+}
+
+/** A text page pictured: its lines as the screen shows them, drawn small on a sheet. */
+function drawTextThumb(li, i) {
+  const box = li.querySelector(".pr-thumb");
+  const lines = pageLinesShown(i, PAGES_TEXT_LINES);
+  const text = lines.join("\n");
+  let cv = box.querySelector("canvas");
+  if (cv && cv.width && li.__text === text) { li.__thumb = "text"; return; }
+  const img = box.querySelector("img");
+  if (img) img.remove();
+  if (!cv) { cv = document.createElement("canvas"); box.prepend(cv); }
+  box.style.aspectRatio = `1 / ${pageRatioGuess}`;
+  const w = box.clientWidth || 180;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = Math.round(w * dpr), H = Math.round(w * pageRatioGuess * dpr);
+  cv.width = W;
+  cv.height = H;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, W, H);
+  // As wide as its longest line, within reason, and as many lines as fit at
+  // no tighter than the type's own height.
+  const mx = W * 0.08, my = H * 0.06;
+  let cols = 60;
+  for (const l of lines) if (l.length > cols) cols = l.length;
+  cols = Math.min(cols, 100);
+  const fs = (W - 2 * mx) / (cols * 0.6);
+  const lh = Math.min(fs * 2.2, Math.max(fs * 1.15, (H - 2 * my) / Math.max(lines.length, 1)));
+  ctx.font = `${fs}px ui-monospace, Menlo, Consolas, monospace`;
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#3c4043";
+  let y = my;
+  for (const l of lines) {
+    if (y + fs > H - my) break;
+    if (l) ctx.fillText(l, mx, y, W - 2 * mx);
+    y += lh;
+  }
+  li.__thumb = "text";
+  li.__text = text;
+}
+/** A text page's picture let go of as its row leaves the view: it is cheap to draw again, and a bitmap is not. */
+function dropTextThumb(li) {
+  if (li.__thumb !== "text") return;
+  const cv = li.querySelector(".pr-thumb canvas");
+  if (cv) cv.width = cv.height = 0;
+  li.__thumb = null;
+  li.__text = null;
+}
+/** A page's lines as the screen shows them, line numbers and footer left off. */
+function pageLinesShown(i, max) {
   const out = [];
-  const take = (t) => {
-    t = t.replace(/\s+/g, " ").trim();
-    if (t) out.push(t.length > 120 ? t.slice(0, 120) + "…" : t);
-    return out.length >= PAGES_SNIP_LINES;
-  };
+  const tidy = (t) => t.replace(/\t/g, "    ").replace(/\s+$/, "");
   const body = bodyForPage(i);
   if (body) {
     for (const line of body.querySelectorAll(".line")) {
@@ -5952,20 +6347,25 @@ function pageSnippet(i) {
       const g = line.querySelector(".gutter");
       let t = line.textContent;
       if (g && t.startsWith(g.textContent)) t = t.slice(g.textContent.length);
-      if (take(t)) break;
+      out.push(tidy(t));
+      if (out.length >= max) break;
     }
-    return out;
+  } else {
+    // A page the reel has let go of has no body: its lines, as the file has
+    // them, through the key as the page would show them.
+    for (const l of doc.pages[i].lines) {
+      if (TRAILER_RE.test(l)) break;
+      const g = TD.gutterPrefix(l);
+      out.push(tidy(g ? g.rest : l));
+      if (out.length >= max) break;
+    }
+    if (rev && !settings.showFakes && out.length) out.splice(0, out.length, ...PK.translate(rev, out.join("\n")).text.split("\n"));
   }
-  // A page the reel has let go of has no body: its lines, as the file has them,
-  // through the key as the page would show them.
-  for (const l of doc.pages[i].lines) {
-    if (TRAILER_RE.test(l)) break;
-    const g = TD.gutterPrefix(l);
-    if (take(g ? g.rest : l)) break;
-  }
-  if (rev && !settings.showFakes && out.length) return PK.translate(rev, out.join("\n")).text.split("\n");
+  while (out.length && !out[out.length - 1]) out.pop();
   return out;
 }
+
+// ── its ticks ──
 
 /** The pages ticked, by index, in the document's order. */
 function pagesPickedIndices() {
@@ -5990,27 +6390,24 @@ function pickPagesRun(from, to, on) {
   if (a > b) [a, b] = [b, a];
   for (let i = a; i <= b; i++) setPagePicked(doc.pages[i], on);
 }
-/** The head of the list: how many are ticked, All as all, some or none, and what ⊘ Did not OCR would strip. */
+/** The head of the list: how many are ticked, and what ⊘ Did not OCR would strip. */
 function updatePagesPicked() {
   if (!doc) return;
-  let tickable = 0, todo = 0;
-  for (const p of doc.pages) {
-    if (p.header == null) continue;
-    tickable++;
-    if (pagesPicked.has(p) && !TD.readsDidNotOcr(p.lines)) todo++;
-  }
+  let todo = 0;
+  for (const p of pagesPicked) if (!TD.readsDidNotOcr(p.lines)) todo++;
   const n = pagesPicked.size;
-  const all = $("pages-all");
-  all.checked = n > 0 && n === tickable;
-  all.indeterminate = n > 0 && n < tickable;
-  all.disabled = !tickable;
   const read = n - todo;
   $("pages-picked").textContent = n
     ? `${n} ticked` + (read ? ` · ${read} already ${TD.DID_NOT_OCR}` : "")
     : "None ticked";
+  $("pages-clear").hidden = !n;
   const btn = $("pages-nocr");
   btn.disabled = !todo;
   btn.textContent = todo ? `⊘ Did not OCR (${todo})` : "⊘ Did not OCR";
+}
+function clearPagesPicked() {
+  for (const p of [...pagesPicked]) setPagePicked(p, false);
+  pagesAnchor = null;
 }
 
 /** Go to a page from its row: its head at the top of the stage. */
@@ -6041,6 +6438,7 @@ function markPagesHere() {
   pagesHere = li;
   if (!li) return;
   li.classList.add("here");
+  if (pagesDrag) return; // the list is the drag's to scroll
   const box = pagesSideEl.getBoundingClientRect(), r = li.getBoundingClientRect();
   const under = $("pages-bar").getBoundingClientRect().bottom;
   if (r.top < under) pagesSideEl.scrollTop -= under - r.top + 6;
@@ -6049,11 +6447,147 @@ function markPagesHere() {
 const markPagesHereSoon = debounce(markPagesHere, 80);
 stageEl.addEventListener("scroll", () => { if (pagesShape && pagesTabShown()) markPagesHereSoon(); }, { passive: true });
 
+// ── a drag over the pictures ticks them ──
+//
+// Pressed on a page and dragged onto another, every page between the two is
+// ticked, the run following the pointer back and forth until it is let go. A
+// press let go on the page it began on is a click (the click handler below
+// goes to the page), so the drag starts only once the pointer is over another
+// row — or held at the list's edge, which scrolls it. Held past the top of the
+// list (under its sticky head) or past its foot, the list scrolls, faster the
+// further out the pointer is; turned with the wheel, it scrolls too, and either
+// way the run is read again against whatever row is under the pointer now.
+const PAGES_EDGE = 36;   // px inside the list's top and foot where a held drag scrolls it
+let pagesDrag = null;    // the drag in progress
+let pagesDragged = false; // the click that ends a drag is the drag's, not a go-to
+
+pagesListEl.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || !doc) return;
+  // Shift+click on the list ticks a run (the click below); it is not a text selection.
+  if (e.shiftKey) { e.preventDefault(); return; }
+  const li = e.target.closest("li");
+  if (!li || !li.__page) return;
+  // No text selection and no picture carried off; a page's box still turns on its click.
+  if (!e.target.closest(".pr-tick")) e.preventDefault();
+  pagesDrag = {
+    from: li.__page, row: li, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
+    add: e.ctrlKey || e.metaKey, moved: false, on: true, base: null, lo: -1, hi: -1, v: 0, raf: 0, frame: 0,
+  };
+  window.addEventListener("mousemove", pagesDragMove);
+  window.addEventListener("mouseup", pagesDragEnd);
+  window.addEventListener("blur", pagesDragEnd);
+  pagesSideEl.addEventListener("scroll", pagesDragFollow, { passive: true });
+});
+function pagesDragMove(e) {
+  const d = pagesDrag;
+  if (!d) return;
+  if (!(e.buttons & 1)) { pagesDragEnd(); return; } // let go of outside the window
+  d.x = e.clientX;
+  d.y = e.clientY;
+  if (!d.frame) d.frame = requestAnimationFrame(() => { if (pagesDrag === d) { d.frame = 0; pagesDragRead(); } });
+}
+/** The list scrolled under a held drag (the wheel, or the edge): the run read against the row under the pointer now. */
+function pagesDragFollow() {
+  if (pagesDrag) pagesDragRead();
+}
+function pagesDragRead() {
+  const d = pagesDrag;
+  const li = pagesRowAtY(d.y);
+  const far = Math.abs(d.x - d.x0) > 8 || Math.abs(d.y - d.y0) > 8;
+  if (!d.moved) {
+    if (!(li && li !== d.row) && !(far && pagesDragSpeed(d.y))) return;
+    d.moved = true;
+    // Ctrl adds the run to the ticks there were (or takes it off them, from a
+    // ticked page); a plain drag is a new selection.
+    d.on = d.add ? !pagesPicked.has(d.from) : true;
+    if (!d.add) clearPagesPicked();
+    d.base = new Set(pagesPicked);
+    pagesListEl.classList.add("dragging");
+  }
+  if (li) pagesDragRun(li.__page);
+  d.v = pagesDragSpeed(d.y);
+  if (d.v && !d.raf) d.raf = requestAnimationFrame(pagesDragTick);
+}
+/** Every page from where the drag began to `to` ticked; any the run has let go of since, as they were. */
+function pagesDragRun(to) {
+  const d = pagesDrag;
+  const a = doc.pages.indexOf(d.from), b = doc.pages.indexOf(to);
+  if (a < 0 || b < 0) return;
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  if (lo === d.lo && hi === d.hi) return;
+  const from = d.lo < 0 ? lo : Math.min(lo, d.lo), end = d.lo < 0 ? hi : Math.max(hi, d.hi);
+  for (let i = from; i <= end; i++) {
+    const p = doc.pages[i];
+    setPagePicked(p, i >= lo && i <= hi ? d.on : d.base.has(p));
+  }
+  d.lo = lo;
+  d.hi = hi;
+  updatePagesPicked();
+}
+/** How fast a drag held at `y` scrolls the list: px a frame, up (-) or down (+), 0 inside it. */
+function pagesDragSpeed(y) {
+  const box = pagesSideEl.getBoundingClientRect();
+  const bar = $("pages-bar");
+  const top = bar.hidden ? box.top : bar.getBoundingClientRect().bottom;
+  if (y < top + PAGES_EDGE) return -Math.min(40, Math.ceil((top + PAGES_EDGE - y) / 3));
+  if (y > box.bottom - PAGES_EDGE) return Math.min(40, Math.ceil((y - (box.bottom - PAGES_EDGE)) / 3));
+  return 0;
+}
+function pagesDragTick() {
+  const d = pagesDrag;
+  if (!d) return;
+  d.raf = 0;
+  d.v = pagesDragSpeed(d.y);
+  if (!d.v) return;
+  // The scroll event reads the run again (pagesDragFollow).
+  pagesSideEl.scrollTop += d.v;
+  d.raf = requestAnimationFrame(pagesDragTick);
+}
+/** The row at height `y` in the list, held inside what is in view — a gap between two reads the nearer. */
+function pagesRowAtY(y) {
+  const box = pagesSideEl.getBoundingClientRect();
+  const bar = $("pages-bar");
+  const top = bar.hidden ? box.top : bar.getBoundingClientRect().bottom;
+  const at = Math.max(top + 2, Math.min(box.bottom - 2, y));
+  const lr = pagesListEl.getBoundingClientRect();
+  const x = lr.left + lr.width / 2;
+  for (let k = 0; k <= 48; k += 6) {
+    for (const yy of k ? [at + k, at - k] : [at]) {
+      if (yy < top || yy > box.bottom) continue;
+      const el = document.elementFromPoint(x, yy);
+      const li = el && el.closest && el.closest("#pages-list li");
+      if (li && li.__page) return li;
+    }
+  }
+  return null;
+}
+function pagesDragEnd() {
+  const d = pagesDrag;
+  if (!d) return;
+  pagesDrag = null;
+  window.removeEventListener("mousemove", pagesDragMove);
+  window.removeEventListener("mouseup", pagesDragEnd);
+  window.removeEventListener("blur", pagesDragEnd);
+  pagesSideEl.removeEventListener("scroll", pagesDragFollow);
+  if (d.raf) cancelAnimationFrame(d.raf);
+  if (d.frame) cancelAnimationFrame(d.frame);
+  pagesListEl.classList.remove("dragging");
+  if (!d.moved) return; // a click: the click handler has it
+  pagesAnchor = d.from;
+  pagesDragged = true;
+  setTimeout(() => { pagesDragged = false; }, 0);
+}
+
 pagesListEl.addEventListener("click", (e) => {
+  const tick = e.target.closest(".pr-tick");
+  if (pagesDragged) {
+    // A drag that began and ended on a page's box: the box is not turned by it.
+    if (tick) e.preventDefault();
+    return;
+  }
   const li = e.target.closest("li");
   if (!li || !doc || !li.__page) return;
   const p = li.__page;
-  const tick = e.target.closest(".pr-tick");
   // A document's heading only ever goes to it.
   const pick = !li.classList.contains("pages-doc") && (!!tick || ((e.ctrlKey || e.metaKey || e.shiftKey) && p.header != null));
   if (!pick) { goToPageFromList(p); return; }
@@ -6064,13 +6598,8 @@ pagesListEl.addEventListener("click", (e) => {
   pagesAnchor = p;
   updatePagesPicked();
 });
-// Shift+click on the list ticks a run; it is not a text selection.
-pagesListEl.addEventListener("mousedown", (e) => { if (e.shiftKey) e.preventDefault(); });
-$("pages-all").addEventListener("change", (e) => {
-  if (!doc) return;
-  const on = e.target.checked;
-  for (const p of doc.pages) setPagePicked(p, on);
-  pagesAnchor = null;
+$("pages-clear").addEventListener("click", () => {
+  clearPagesPicked();
   updatePagesPicked();
 });
 $("pages-nocr").addEventListener("click", () => {
@@ -6078,8 +6607,7 @@ $("pages-nocr").addEventListener("click", () => {
   if (!picked.length) return;
   markDidNotOcrPages(picked);
   // Done with: the ticks come off, and Ctrl+Z is the way back.
-  for (const p of [...pagesPicked]) setPagePicked(p, false);
-  pagesAnchor = null;
+  clearPagesPicked();
   renderPagesTab();
 });
 
@@ -9473,7 +10001,7 @@ async function reelExtend() {
     let parsed = null;
     const built = ready.get(next.name);
     if (built && built.doc && built.epoch === readyEpoch) parsed = built.doc;
-    if (!parsed) parsed = TD.parseExport(await (await next.handle.getFile()).text());
+    if (!parsed) parsed = readExport(await (await next.handle.getFile()).text());
     if (doc !== was) return false;
     const from = doc.pages.length;
     const theirSpots = spotsFrom(TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + next.name, [])), from);
@@ -9616,7 +10144,7 @@ async function reelPrepend() {
     let parsed = null;
     const built = ready.get(prev.name);
     if (built && built.doc && built.epoch === readyEpoch) parsed = built.doc;
-    if (!parsed) parsed = TD.parseExport(await (await prev.handle.getFile()).text());
+    if (!parsed) parsed = readExport(await (await prev.handle.getFile()).text());
     if (doc !== was || reel[0] !== head || !reelCanRenumber()) return false;
     const n = parsed.pages.length;
     // Where the reading stands, before anything goes in above it.
@@ -10039,6 +10567,7 @@ function forgetPdfs() {
   pdfSizes.clear();
   pdfBytes.clear();
   pagesToRelease.clear(); // their documents are going with them
+  forgetPageThumbs(); // …and the Pages tab's pictures of them
   pageRatioKnown = false; // another folder, another paper
   pdfPicked = null;
   pickedPdfs = new Map();
@@ -10100,6 +10629,8 @@ function pdfsInUse() {
   const nameOf = (k) => k.slice(0, k.lastIndexOf("|"));
   for (const k of swaps) must.add(nameOf(k));
   for (const [name, store] of redactStores) if (store.count().boxes) must.add(name);
+  // …and the one the Pages tab is drawing a picture from, for as long as it is.
+  if (pagesThumbBusy) must.add(pagesThumbBusy);
   // Then, in this order and while the budget lasts: the worksheet's next
   // pages, and the documents the reading has reached either side of it.
   const then = [];
@@ -10621,6 +11152,7 @@ function refreshPdf() {
   applySwaps();
   buildPdfPane();
   updatePdfStatus();
+  pageThumbsMoved(); // the Pages tab pictures each page from its PDF, where it now has one
   if (!any && !doc) hideSwapPop();
 }
 function updatePdfStatus() {
@@ -11020,7 +11552,7 @@ async function buildAheadNow(d) {
   const file = await d.handle.getFile();
   const text = await file.text();
   if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
-  const parsed = during("reading the next document ahead", () => TD.parseExport(text));
+  const parsed = during("reading the next document ahead", () => readExport(text));
   if (parsed.pages.length > READY_MAX_PAGES) { ready.set(d.name, { name: d.name, skipped: `${parsed.pages.length} pages — too long to hold ready` }); return; }
   const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + d.name, []));
   const nodes = document.createDocumentFragment();
@@ -12086,8 +12618,19 @@ function applyMatchedLayoutNow() {
       continue;
     }
     if (numbered) {
-      const nums = lines.map((l) => (l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null));
-      fixed = nums.map((n) => n != null && !isNaN(n));
+      // The margin numbers in their order down the page, and only those
+      // (TD.numberChain): a number the OCR misread out of its order — line 17
+      // read as 11 — would pin its line up at line 11, cram every line between
+      // into the space above it, and leave the lines it stands among no PDF row
+      // to be matched to (offGridTops looks between the numbers either side).
+      // It is a line like any unnumbered one here, placed by its words.
+      // …and none past the last number the PDF's own margin carries: an 88
+      // where 28 was printed is a line the grid would put off the paper.
+      let nums = lines.map((l) => (l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null))
+        .map((n) => (n > 0 && n <= geom.last ? n : null));
+      const inOrder = TD.numberChain(nums);
+      nums = nums.map((n, k) => (inOrder[k] && n > 0 ? n : null));
+      fixed = nums.map((n) => n != null);
       tops = PS.slotTops(nums.map((num) => ({ num })), geom);
       // The lines off the grid — a footer, a stamp — on the rows that print them.
       const off = PS.offGridTops(lines.map((l) => l.textContent), nums, tops, rows, geom.pitch);

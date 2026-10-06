@@ -524,8 +524,11 @@ body.side-hidden #side { display: none; }
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
   background: var(--chrome-2); border-bottom: 1px solid var(--border);
 }
-.pages-all { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
 .pages-picked { flex: 1; min-width: 0; color: var(--text-muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pages-clear {
+  background: transparent; border: 1px solid var(--btn-border); color: var(--text); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: 12px;
+}
+#pages-clear:hover { background: var(--btn-hover); }
 #pages-nocr {
   margin-left: auto; background: var(--accent); border: 1px solid var(--accent); color: #fff;
   border-radius: 4px; padding: 3px 9px; cursor: pointer; font-size: 12px;
@@ -536,24 +539,32 @@ body.side-hidden #side { display: none; }
   font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted);
   padding: 10px 6px 4px; border-radius: 0; border-bottom: 1px solid var(--border); margin-bottom: 2px;
 }
-#pages-list li.page-row { align-items: flex-start; padding: 5px 6px 6px; }
-#pages-list li.page-row.untickable { padding-left: 25px; }
-#pages-list .pr-tick { margin: 2px 0 0; flex: none; cursor: pointer; }
-#pages-list .pr-main { flex: 1; min-width: 0; }
-#pages-list .pr-head { display: flex; align-items: center; gap: 6px; }
-#pages-list .pr-label { flex: 1; min-width: 0; font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A row is a picture of the page with its label under it, as the PDF
+   viewer's Pages panel shows a PDF. */
+#pages-list li.page-row { flex-direction: column; align-items: center; gap: 5px; padding: 8px 6px 6px; border-radius: 8px; }
+#pages-list .pr-thumb {
+  position: relative; width: min(100%, 190px); aspect-ratio: 8.5 / 11; flex: none; overflow: hidden;
+  background: #fff; border-radius: 3px; box-shadow: 0 0 0 1px var(--btn-border), 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+#pages-list .pr-thumb > :is(img, canvas) { display: block; width: 100%; height: 100%; }
+#pages-list .pr-tick { position: absolute; top: 6px; left: 6px; margin: 0; width: 16px; height: 16px; cursor: pointer; }
+#pages-list .pr-head { display: flex; align-items: center; justify-content: center; gap: 6px; max-width: 100%; }
+#pages-list .pr-label { min-width: 0; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #pages-list .pr-tag.nocr { background: #c62828; }
 #pages-list .pr-tag.again { background: var(--accent); }
 #pages-list .pr-tag.fixed { background: #2e7d32; }
-#pages-list .pr-snip {
-  margin-top: 2px; font: 11px/1.35 var(--reader-font); color: var(--text-muted); white-space: pre-line;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.7em;
-}
-#pages-list .pr-snip.empty { font-style: italic; }
-/* Ticked: tinted. Being read: a bar down its edge, as the PDF viewer marks its page. */
+/* Ticked: tinted, the picture ringed. Being read: the picture ringed and the
+   label lit, as the PDF viewer marks its page. */
 #pages-list li.picked { background: rgba(26, 115, 232, 0.22); }
 #pages-list li.picked:hover { background: rgba(26, 115, 232, 0.32); }
-#pages-list li.here { box-shadow: inset 3px 0 0 var(--accent); }
+#pages-list li.picked .pr-thumb { box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.75), 0 1px 3px rgba(0, 0, 0, 0.3); }
+#pages-list li.here .pr-thumb { box-shadow: 0 0 0 2px var(--accent), 0 1px 3px rgba(0, 0, 0, 0.3); }
+#pages-list li.here .pr-label { color: var(--accent); font-weight: 600; }
+/* While a drag ticks pages the rows do not light up under the pointer. */
+#pages-list.dragging li:hover { background: transparent; }
+#pages-list.dragging li.picked:hover { background: rgba(26, 115, 232, 0.22); }
+/* No fake reaches into a picture: blurred while a screenshot is taken. */
+body.shot-taking #pages-list .pr-thumb > :is(img, canvas) { filter: blur(5px); }
 .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--btn-border); color: var(--text); font-size: 11px; text-align: center; }
 
 /* ── the auto-scroll pill ──────────────────────────────────────────────────── */
@@ -704,9 +715,13 @@ body.sbs .line.trailer { display: none; }
    trip needs it) and out of the layout. */
 .page-body.numbered .line { display: grid; grid-template-columns: var(--gutter-w) minmax(0, 1fr); align-items: baseline; }
 .page-body.numbered .line:not(.num) > .lt { grid-column: 2; }
+/* The numbers are the paper, not the filing's words: a selection across
+   lines takes the text and none of them, painted or copied. A press in the
+   margin begins the selection at its line's text instead (text-reader.js,
+   "the numbered margin is not text"). */
 .page-body.numbered .gutter {
   grid-column: 1; text-align: right; padding-right: 0.5em; margin-right: 1.1em;
-  border-right: 1px solid #c4c7cb; white-space: pre; user-select: text; align-self: stretch;
+  border-right: 1px solid #c4c7cb; white-space: pre; user-select: none; align-self: stretch; cursor: default;
 }
 .page-body.numbered .gutter .gs { display: none; }
 /* THE NUMBERS STAND ONE ON TOP OF THE OTHER, down the page and from one page
@@ -858,6 +873,9 @@ body:not(.editing) .page-body { caret-color: transparent; }
 body.editing .tpage { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(26, 115, 232, 0.35); }
 .gutter { color: #9aa0a6; font-size: 0.8em; user-select: text; }
 body.gutter-off .gutter { color: inherit; font-size: inherit; }
+/* A margin number the OCR missed, put back (readExport): in italics, the
+   reader's until a save writes it into the file. */
+.gutter.restored .gn { font-style: italic; }
 
 /* A pseudonym: the real name shown, the fake underneath. Lightly marked, and
    brighter under the pointer, so an unmarked name-shaped word reads as what

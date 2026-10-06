@@ -19,6 +19,7 @@ import {
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
   textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
+  marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher } from "./viewer/pseudo-key.js";
 
@@ -969,6 +970,74 @@ console.log("a page transcribed by hand");
   check("PDF-Linker's header says the page is its now", headerSaysTextCorrected(ran.pages[0]), true);
   check("…and an ordinary one does not", headerSaysTextCorrected(parseExport("====== Page 4 ======\nThe lease.\n").pages[0]), false);
   check("the header says what the line does", formatValuesFile([], [], [], [], [], []).includes("'text corrected:"), true);
+}
+
+console.log("margin numbers the OCR missed");
+{
+  // A pleading page as PDF-Linker writes it: a number, two spaces, the line;
+  // a bare number on an empty numbered line; an unnumbered line four places in.
+  const num = (n, t = "") => String(n).padStart(2) + (t ? "  " + t : "");
+  const body = (n) => `Line ${n} of the motion.`;
+  const page = (skip = new Set(), over = {}) => {
+    const out = ["", "", ""];
+    for (let n = 1; n <= 28; n++) {
+      if (over[n] !== undefined) { if (over[n] !== null) out.push(over[n]); continue; }
+      out.push(skip.has(n) ? "    " + body(n) : num(n, body(n)));
+    }
+    out.push("", "", "                                  - 2 -", "", "            NOTICE OF MOTION");
+    return out;
+  };
+  const whole = page();
+  check("marginNumber reads the gutter", [marginNumber(" 7  text"), marginNumber("17"), marginNumber("    text"), marginNumber(" 0  x")], [7, 17, null, null]);
+  check("numberChain keeps the numbers in their order", numberChain([1, 2, null, 3, 4]), [true, true, false, true, true]);
+  check("…and drops one read out of it", numberChain([14, 15, null, 11, 18, 19]), [true, true, false, false, true, true]);
+  check("…of two runs as long, the one that steps with the lines", numberChain([15, 18, 17, 19]), [true, false, true, true]);
+  check("misreadNumber reads OCR's letters for digits", [misreadNumber("l2  corporation,"), misreadNumber("I7"), misreadNumber("2O  the")].map((m) => m && m.n), [12, 17, 20]);
+  check("…but an all-digit gutter is not misread, and a word is not a number", [misreadNumber("12  x"), misreadNumber("Line 4")], [null, null]);
+  check("a page with every number has nothing to put back", restoreMarginNumbers(whole, { last: 28 }), null);
+  const one = restoreMarginNumbers(page(new Set([9])), { last: 28 });
+  check("a line between two numbers that lost its own gets it back", [one.lines[3 + 8], one.added], [" 9  Line 9 of the motion.", [9]]);
+  check("…and nothing else on the page moves", one.lines.filter((l, i) => i !== 11), whole.filter((l, i) => i !== 11));
+  const dropped = restoreMarginNumbers(page(new Set(), { 6: null }), { last: 28 });
+  check("an empty numbered line the OCR dropped comes back as a bare number", [dropped.lines.slice(7, 10), dropped.added], [[" 5  " + body(5), " 6", " 7  " + body(7)], [6]]);
+  const blankLine = restoreMarginNumbers(page(new Set(), { 6: "" }), { last: 28 });
+  check("…and one it left blank takes its number", blankLine.lines[8], " 6");
+  const misread = restoreMarginNumbers(page(new Set(), { 12: "l2  " + body(12) }), { last: 28 });
+  check("a number read as letters is put right", misread.lines[14], "12  " + body(12));
+  const swapped = restoreMarginNumbers(page(new Set([16]), { 17: "11  " + body(17) }), { last: 28 });
+  check("a number read out of its order is put right with the one missing beside it", [swapped.lines.slice(18, 20), swapped.added], [["16  " + body(16), "17  " + body(17)], [16, 17]]);
+  const head = restoreMarginNumbers(page(new Set([1, 2])), { last: 28 });
+  check("above the first number read: the lines against it, one each", head.lines.slice(2, 6), ["", " 1  " + body(1), " 2  " + body(2), " 3  " + body(3)]);
+  const headBlank = restoreMarginNumbers(page(new Set(), { 1: "", 2: "" }), { last: 28 });
+  check("…and empty numbered lines above it take theirs from the blank lines", headBlank.lines.slice(0, 6), ["", "", "", " 1", " 2", " 3  " + body(3)]);
+  const foot = restoreMarginNumbers(page(new Set([27, 28])), { last: 28 });
+  check("below the last: the lines against it, to the number the pages run to", foot.lines.slice(28, 32), ["26  " + body(26), "27  " + body(27), "28  " + body(28), ""]);
+  check("…and the footer under the blank lines is left alone", foot.lines.slice(-5), whole.slice(-5));
+  check("…but without the number the pages run to, nothing is put back at the foot", restoreMarginNumbers(page(new Set([27, 28])), {}), null);
+  const footBlank = restoreMarginNumbers(page(new Set(), { 27: null, 28: null }), { last: 28 });
+  check("empty lines at the foot come back on the blank lines before the footer", [footBlank.lines.slice(28, 31), footBlank.lines.slice(-3)], [["26  " + body(26), "27", "28"], whole.slice(-3)]);
+  const footer = ["", "", "", ...Array.from({ length: 27 }, (_, k) => num(k + 1, body(k + 1))), "- 2 -", "NOTICE OF MOTION"];
+  check("text straight under the last number, more lines than numbers missing, is not numbered", restoreMarginNumbers(footer, { last: 28 }), null);
+  // A caption's single-spaced lines: more lines than numbers between 1 and 3.
+  const capOf = (third) => ["", " 1  JANE ATTORNEY", "    jane@law.example", third, "    100 Main Street", ...Array.from({ length: 26 }, (_, k) => num(k + 3, body(k + 3)))];
+  check("between two numbers with more lines than numbers missing, nothing is guessed", restoreMarginNumbers(capOf("    LAW OFFICES"), { last: 28 }), null);
+  check("…and a number read among them is the paper's own, so nothing is missing", restoreMarginNumbers(capOf("2   LAW OFFICES"), { last: 28 }), null);
+  check("…not a misreading that reads as another number", restoreMarginNumbers(capOf("l   LAW OFFICES"), { last: 28 }), null);
+  check("…and one that does is its line's number", restoreMarginNumbers(capOf("Z   LAW OFFICES"), { last: 28 }).lines[3], " 2   LAW OFFICES");
+  const few = ["", ...Array.from({ length: 28 }, (_, k) => (k % 3 ? "    " + body(k + 1) : num(k + 1, body(k + 1))))];
+  check("too few numbers read to be sure it is pleading paper: left as it is", restoreMarginNumbers(few, { last: 28 }), null);
+  const trailer = [...page(new Set([5])), "====== Authorities cited (public verification links) ======", " 3  Smith v. Jones (2020) 1 Cal.5th 1"];
+  const tr = restoreMarginNumbers(trailer, { last: 28 });
+  check("the Authorities trailer is not the page's", [tr.added, tr.lines.slice(-2)], [[5], trailer.slice(-2)]);
+  const high = [...whole.slice(0, 30), num(88, body(28)), ...whole.slice(31)];
+  check("a number misread past the one the pages run to is put right", restoreMarginNumbers(high, { last: 28 }).lines[30], "28  " + body(28));
+  check("…and with no such number known, is no reason to put back sixty lines", restoreMarginNumbers(high.map((l, i) => (i === 5 || i === 9 ? "    " + l.slice(4) : l))), null);
+  const doc = parseExport(["====== Page 1 ======", ...whole, "====== Page 2 ======", ...page(new Set([3])), "====== Page 3 ======", "EXHIBIT A"].join("\n") + "\n");
+  check("pleadingLast: the number the document's pages run to", pleadingLast(doc.pages), 28);
+  check("…and none from a page or none", [pleadingLast(parseExport(["====== Page 1 ======", ...whole].join("\n")).pages), pleadingLast([])], [null, null]);
+  const tops = (...ns) => ns.map((t) => ({ header: "x", lines: Array.from({ length: t }, (_, k) => num(k + 1, "x")) }));
+  check("…the highest that two pages reach: the OCR loses numbers at the foot, never adds them", [pleadingLast(tops(28, 27, 26)), pleadingLast(tops(28, 26, 28))], [27, 28]);
+  check("…so one number misread high at the foot of one page is not it", pleadingLast([...tops(28, 28), { header: "x", lines: [...Array.from({ length: 27 }, (_, k) => num(k + 1, "x")), num(88, "x")] }]), 28);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

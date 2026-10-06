@@ -268,27 +268,63 @@ full run has taken the mark off). `markDidNotOcr` withdraws a request for the
 page it strips. `#ocr-again-block` lists them.
 
 **The Pages tab** (`#side-pages`, `renderPagesTab`) lists every page of
-`doc.pages`: a row per page with a header or with text before the first one,
-a `.pages-doc` heading per reel member (`reelIndexOf`) and per combined-file
-banner, each row's label, a tag read off the page lists (`setPageRowTag`:
-`readsDidNotOcr(p.lines)`, `ocrAgain`, `textFixed`) and its first two lines.
-Rows are keyed by the page OBJECT (`pagesRowOf`, `pagesPicked`), never the
-index, since `reelShift` renumbers every page below a document hung above;
+`doc.pages` the way the PDF viewer's Pages panel lists a PDF's: a row per page
+with a header or with text before the first one, each a picture of the page
+(`.pr-thumb`) with its label and a tag under it read off the page lists
+(`setPageRowTag`: `readsDidNotOcr(p.lines)`, `ocrAgain`, `textFixed`), and a
+`.pages-doc` heading per reel member (`reelIndexOf`) and per combined-file
+banner. Rows are keyed by the page OBJECT (`pagesRowOf`, `pagesPicked`), never
+the index, since `reelShift` renumbers every page below a document hung above;
 `pagesShape` is the list of objects the rows were built for, so the same pages
 update in place and a changed list (another document, a reel member added) is
-built again. The first lines are read only as a row comes into view
-(`pagesSnipObserver`, rooted on the tab) and as the screen shows them: off the
-body's `.line`s, gutter dropped, so in real names where Show fakes is off,
-like the rest of the chrome `swapChrome` fakes for a screenshot (nothing is
-filled in while `shotPut` is set); a page the reel has shed reads its lines
-through `PK.translate(rev, …)`. The list is drawn only while it is in sight
-(`pagesTabShown`): `afterTextChange` and `renderFlags` call `pagesTabSoon`,
-which marks it stale and, in sight, redraws it a beat later; `showSideTab` and
+built again.
+
+The pictures are drawn only as a row comes within 400px of the tab's view
+(`pagesThumbObserver`, rooted on the tab; `pagesVisible`). A page with a PDF
+matched (`pdfTarget`) is pictured as that PDF page (`fillPageThumb`): drawn by
+`pumpPageThumbs` one at a time, the rows on screen first, through
+`drawPdfThumb` — `loadPdf`, then a `later` job at the back of `pdfJobs`, so a
+page on the stage is always drawn first — at `PAGES_THUMB_PX` (400) wide on a
+`fontCanvas` (`renderPdfThumb`), read back as a JPEG and kept as an object URL
+by PDF page (`pagesThumbs`, at most `PAGES_THUMB_HELD`, the longest unshown
+revoked first and never one a row in view shows; `letGoOfPageThumbs`). The
+page is handed back to pdf.js once pictured (`page.cleanup()`, unless
+`pageIsDrawn`; a refusal joins `pagesToRelease`), since a scan decodes at its
+scanned resolution whatever it is drawn at, and `pagesThumbBusy` is in
+`pdfsInUse`'s must-keep set while its picture is drawn. A page with no PDF, or
+whose PDF page could not be drawn (`pagesThumbFailed`, cleared by
+`pageThumbsMoved` from `refreshPdf`), is pictured as its text
+(`drawTextThumb`): `pageLinesShown`, the body's `.line`s as the screen shows
+them (gutter dropped, so in real names where Show fakes is off; a page the reel
+has shed reads its lines through `PK.translate(rev, …)`), drawn small on a
+white sheet, redrawn only where its lines changed (`li.__text`) and let go of
+as the row leaves the view (`dropTextThumb`). `forgetPdfs` revokes every
+picture (`forgetPageThumbs`). A picture is pixels, so no fake reaches into it:
+`fakesForShot` sets `body.shot-taking` and the stylesheet blurs them for the
+screenshot.
+
+The list is drawn only while it is in sight (`pagesTabShown`):
+`afterTextChange`, `renderFlags` and `refreshPdf` call `pagesTabSoon`, which
+marks it stale and, in sight, redraws it a beat later; `showSideTab` and
 `showSidePanel` draw a stale one. The stage's scroll marks the row of
 `readingPage()` (`.here`, `markPagesHere`) and keeps it in sight under the
-sticky bar. A click goes to the page (`goToPageFromList`, `scrollRangeTo` with
-a `margin` of 8 rather than the reading third); the tick, Shift (a run from
-`pagesAnchor`) and Ctrl/⌘ tick. **⊘ Did not OCR** on the bar is
+sticky bar, except during a drag. A click goes to the page
+(`goToPageFromList`, `scrollRangeTo` with a `margin` of 8 rather than the
+reading third). Ticks are made as a list's rows are selected: a drag
+(`pagesDrag`, from the row pressed) becomes one once the pointer is over
+another row, or 8px out and held at the edge (`pagesDragRead`), and from there
+`pagesDragRun` ticks every page from the one it began on to the one under the
+pointer (`pagesRowAtY`, a gap read as the nearer row), putting back as they
+were (`base`) the pages the run lets go of; held within `PAGES_EDGE` of the
+list's top (under its sticky bar) or foot it scrolls the list
+(`pagesDragTick`, faster the further out), and a scroll of the list from the
+wheel reads the run again (`pagesDragFollow`). A plain drag starts a new set
+of ticks, Ctrl/⌘ adds the run (or takes it off, from a ticked page); the click
+that ends a drag is swallowed (`pagesDragged`, and a page's box it began and
+ended on is not turned). Shift+click (a run from `pagesAnchor`), Ctrl/⌘+click
+and the box tick as before. There is no tick-everything: the operator asked
+for it to go, a document that did not OCR from end to end being one not to run
+at all; **Clear** (`clearPagesPicked`) unticks. **⊘ Did not OCR** on the bar is
 `markDidNotOcrPages`, `markDidNotOcr` for several pages: the pages built back
 (`ensurePageLive`), one `snapshotPages` batch with every snapshot tagged
 `nocr` (so `strippedTextOf` still finds each page's text for ↻ OCR This Page),
@@ -324,6 +360,54 @@ line on disk the list does not name. A page that reads `[DID NOT OCR]` has
 no transcription: the button is disabled there, `markDidNotOcr` withdraws an
 entry for the page it strips, and `syncNoOcr` drops one for a page that
 reads it. `#text-fixed-block` lists them.
+
+**Margin numbers the OCR missed** are put back as the export is read:
+`readExport` (every parse site: `openText`, the reel's `reelExtend` and
+`reelPrepend`, `buildAheadNow`) runs `textdoc.restoreMarginNumbers` on each
+page with a header, to `pleadingLast` — the highest last number that two or
+more well-numbered pages reach (the OCR loses numbers at a page's foot and
+never adds one past it; two, so one number misread high is not it). The
+paper's own numbers are `numberChain`'s: the longest run climbing down the
+page, ties going to the run whose numbers step with the lines, so a number
+read out of its order (17 as 11) is a misreading. A page is touched only with
+`RESTORE_MIN` (8) numbers in the chain and half of the numbers it should
+carry (`RESTORE_SHARE`), and a number goes back only where it cannot be
+anything else: between two chain numbers, one per line where the lines
+between are exactly as many as the numbers missing (blank → bare number;
+`misreadNumber` reads `l2`, `I7`, `2O` and is replaced only where it reads as
+the number given); with no line between, bare lines, at most `RESTORE_BARE`
+(4); with more lines than numbers (a caption's single-spaced lines), only
+where exactly that many open with a misread number; above the first and below
+the last (to `pleadingLast`), the run of lines against it and then the blank
+lines beyond, never past text standing apart (a stamp, the footer). An
+unnumbered line's four leading spaces are the number's place (`numberedAs`).
+The Authorities trailer is never a page's. The page keeps the numbers put back
+(`p.restored`); `buildPages` hands them to its body (`body.__restored`) and
+`buildBody` marks those gutters `.restored` (italic, with a title). The file
+is untouched and the document not dirty: a save writes the numbers, and
+clears the marks of every member it wrote. One exception: a page handed over
+by ✎ Use my text carries the sum of its text WITH the numbers, so
+`saveDocument` writes the member of any such restored page (`touched`)
+whether or not it was edited — otherwise a save that wrote only the values
+file left the sum naming text that was never on disk, and PDF-Linker would
+never apply it.
+
+**The numbered margin is not text** (`.page-body.numbered .gutter` is
+`user-select: none`): a selection across numbered lines paints the text only,
+and Chrome leaves `user-select: none` content out of the clipboard, so a copy
+is the passage without a number on a line of its own between every two (it
+was `user-select: text` explicitly before; `getSelection().toString()` still
+reads them, which only `realTextOf` and the like see, and those drop
+`.gutter` themselves). Unselectable, a press on a number began no selection,
+and a drag from the margin took nothing, so `pagesEl`'s `mousedown` on a
+numbered gutter is the reader's: the selection starts at its line's `.lt`
+(offset 0), Shift extends the one there was, a double click takes the line's
+text, and the drag follows the pointer with `textPointAt` (`caretRangeFromPoint`,
+a point in a `.gutter` or beside a line's text read as that text's near edge),
+`x` held inside the sheet the drag began on so the margin and the grey beside
+the sheet are whole lines, the stage scrolled within `MARGIN_EDGE` of its top
+or foot and on the wheel. In Edit mode the body is focused first, so a click on
+a number puts the caret at the start of its line's text.
 
 The LEAKS review bar works PDF-Linker's `LEAKS.xlsx` row by row from the
 text: `leaks.js` (pure) reads the worksheet by header name, classifies a

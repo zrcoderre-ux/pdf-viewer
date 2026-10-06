@@ -349,6 +349,23 @@ scale beside it. The numbers are set in the page's body type (`0.8 *
 number in line, and a fitted page is not held open by its numbers' line
 boxes.
 
+**…and only the numbers in their order are the grid.** A numbered line is
+`fixed` at its number's height (`slotTops`, `spreadTops`), so the number has to
+be right. On an OCR'd pleading it is not always: line 17 read as 11 pinned its
+line up at line 11's height, `spreadTops` and `holdWithin` squeezed every line
+from 3 to 17 into the space above it, the page below stood empty, and the
+unnumbered lines around it could not be matched to their PDF rows either
+(`offGridTops` takes a match only between the numbered lines either side, and
+"11" stood below them). Measured on a generated pleading with that one misread
+and four numbers missing: lines 3-17 drawn 13 px apart against the PDF's 25.
+`applyMatchedLayoutNow` now keeps a number only where it is in
+`textdoc.numberChain` (the longest run climbing down the page, ties to the run
+that steps with the lines) and not past `geom.last`, the last number the PDF's
+own margin carries; any other is laid out as an unnumbered line, by its words.
+The same page lays out line for line beside its PDF. The numbers themselves are
+put back as the export is read (`readExport`, Text reader.md), so this matters
+where too few were read to put any back.
+
 ### The hold: a key value carrying a run of blank
 
 This is the one that took the tab down. The breadcrumb finally named it:

@@ -1314,7 +1314,13 @@ app, which routes it to the reader tab.
   apiece, which pushed each one a few points down into the next and the
   numbers with them, until the numbers down the side were out of step with the
   PDF's and two of them stood crowded together where the push ran out.) Lines
-  with no room between two numbers share the space evenly.
+  with no room between two numbers share the space evenly. **Only the numbers
+  in their order count**: a number the OCR misread out of its order (line 17
+  read as 11) used to pin its line at the wrong height and cram every line
+  from there to it into the space above, leaving the rest of the page empty;
+  a number out of order, or past the last one the PDF's margin carries, is now
+  laid out like an unnumbered line, by its words, and the page stands line
+  for line beside its PDF.
   **A page with no numbers stands where the PDF prints it, columns and all.**
   An exhibit, a letter, a Westlaw printout is matched to the PDF's printed
   rows, and the export's character grid is read back off the PDF: where each
@@ -1415,19 +1421,58 @@ app, which routes it to the reader tab.
 
 - **The Pages tab: every page, and ⊘ Did not OCR on several at once.** The
   side panel's **Pages** tab (beside Documents) is the PDF viewer's Pages
-  panel for a text export: a row per page, with its label, its first two
-  lines as the screen shows them, and a tag where it reads **DID NOT OCR**,
-  is asked to be **OCR'd again**, or is handed over as **Use my text**. A
-  click on a row goes to the page, and the row of the page you are reading is
-  marked as you scroll. A reel or a `Combined Text.txt` lists each document
-  under its own name. Tick the pages that did not OCR — **Shift+click** ticks
-  a run from the last one, **Ctrl+click** (⌘ on a Mac) one more, **All** the
-  lot — and **⊘ Did not OCR** at the head of the list strips every ticked page
-  as the label button strips one: `[DID NOT OCR]` in its place, each page
-  turned to its PDF page, each put on `New Real Values.txt` by 💾 Save. It is
-  one step: Ctrl+Z puts every page back, and ↻ OCR This Page on any one of
-  them puts that page's own text back. A ticked page that already reads
-  `[DID NOT OCR]` is passed over.
+  panel for a text export: a **picture of every page** with its label under
+  it, and a tag where it reads **DID NOT OCR**, is asked to be **OCR'd
+  again**, or is handed over as **Use my text**. Where the export's PDF is
+  matched, the picture is that PDF page, so a scan the OCR made nothing of is
+  plain at a glance; where none is, it is the text page drawn small. A click
+  on a page goes to it, and the page you are reading is ringed as you scroll.
+  A reel or a `Combined Text.txt` lists each document under its own name.
+  **Drag over the pages that did not OCR** to tick them: press on one and
+  drag onto another, and every page between is ticked; hold the drag past the
+  top or foot of the list, or turn the wheel while you hold it, and the list
+  scrolls on with the ticks following, so a run longer than the panel is one
+  drag. A new drag starts the ticks again; **Ctrl+drag** (⌘ on a Mac) adds a
+  run to the ones you have, **Shift+click** ticks a run from the last page,
+  and a page's box (or **Ctrl+click**) ticks one. **Clear** unticks them all;
+  there is no tick-everything, since a document that did not OCR from end to
+  end is one not to run at all. **⊘ Did not OCR** at the head of the list
+  strips every ticked page as the label button strips one: `[DID NOT OCR]` in
+  its place, each page turned to its PDF page, each put on
+  `New Real Values.txt` by 💾 Save. It is one step: Ctrl+Z puts every page
+  back, and ↻ OCR This Page on any one of them puts that page's own text back.
+  A ticked page that already reads `[DID NOT OCR]` is passed over. The
+  pictures are blurred while 📷 Screenshot takes its picture, since its fakes
+  cannot reach into them.
+
+- **Margin numbers the OCR missed are put back.** On a scanned pleading the
+  OCR loses some of the numbers down the margin: a line comes out with no
+  number, an empty numbered line comes out blank or not at all, a 12 comes
+  out as `l2`, or as another number out of its order. Where a page carries at
+  least half of its numbers (and eight or more), the reader takes the missing
+  ones for an OCR defect and puts them back as the file is opened: between
+  two numbers it read, one to a line where the lines match the numbers
+  missing, as bare numbers where no line stands for them, and `l2`, `I7` or a
+  number out of order put right; above the first number and below the last,
+  on the lines that stand against them, to the number the document's pages
+  run to (28 on California pleading paper). Where it cannot tell which line a
+  number belongs to — a caption's single-spaced lines between two numbers —
+  it leaves the page as the OCR wrote it, since a number on the wrong line is
+  worse than one missing. The numbers put back are in *italics* in the margin
+  and a toast says how many; the file has them once you save, and closing
+  without saving loses nothing (they are put back again next time). A page you
+  hand over with ✎ Use my text is saved with them, so the text PDF-Linker is
+  told to use is the text in the file.
+
+- **The margin numbers stay out of a selection.** On pleading paper the line
+  numbers are not selectable: drag across several lines and only the text is
+  highlighted, and a copy is the passage without a number on a line of its own
+  between every two. Press in the margin, on a number or beside it, to start
+  the selection at the start of that line's text and drag from there, down the
+  margin for whole lines; hold past the top or foot of the window and it
+  scrolls. A double click on a number selects that line's text, Shift+click on
+  one extends the selection to the start of its line, and in ✎ Edit a click on
+  a number puts the caret at the start of the line.
 
 - **✎ Use my text hands PDF-Linker a page you transcribed.** Beside ⊘ Did not
   OCR, for the other answer to a mangled page: the OCR was bad, so you type

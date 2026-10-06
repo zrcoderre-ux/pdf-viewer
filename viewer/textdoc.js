@@ -146,6 +146,226 @@ export function gutterPrefix(line) {
 // line per authority under it, riding on the last page's lines.
 export const TRAILER_RE = /^\s*=+\s*Authorities cited\b.*?=+\s*$/i;
 
+// ---- margin numbers the OCR missed ----------------------------------------------
+//
+// A scanned pleading reaches its export through OCR, and the OCR misses some
+// of the numbers down the margin: a line that is plainly line 17 comes out
+// with no number, an empty numbered line comes out blank or not at all, and a
+// 12 is read as "l2", or as another number altogether. Side by side, a number
+// read out of its order pinned its line at the wrong height and crammed every
+// line between into the space above it; in the margin, the gaps read as lines
+// that are not on the paper. Where a page carries enough of its numbers to be
+// sure it is pleading paper, the missing ones are taken for what they are, an
+// OCR defect, and put back (restoreMarginNumbers).
+
+/** A line's margin number, or null: the gutter number it opens with, 1 or more. */
+export function marginNumber(line) {
+  const g = gutterPrefix(line);
+  const n = g ? parseInt(g.gutter, 10) : NaN;
+  return n > 0 ? n : null;
+}
+
+/**
+ * The longest run of margin numbers that climbs down the page: the numbers
+ * that are the paper's own, every other one a misreading. `nums` per line
+ * (null where a line has none); answers a boolean per line. Of two runs as
+ * long, the one whose numbers step with the lines (a number a line) is taken,
+ * so a 16 read as 18 gives way to the 17 under it rather than the other way
+ * round.
+ */
+export function numberChain(nums) {
+  const n = (nums || []).length;
+  // Numbers that already climb are their own run: the page as nearly every
+  // page reads, and no reason to weigh one run against another.
+  let climbs = true, was = 0;
+  for (let j = 0; j < n && climbs; j++) if (nums[j] > 0) { climbs = nums[j] > was; was = nums[j]; }
+  if (climbs) return Array.from({ length: n }, (_, j) => nums[j] > 0);
+  const len = new Array(n).fill(0), pen = new Array(n).fill(0), prev = new Array(n).fill(-1);
+  let best = -1;
+  for (let j = 0; j < n; j++) {
+    if (!(nums[j] > 0)) continue;
+    len[j] = 1;
+    for (let i = 0; i < j; i++) {
+      if (!(nums[i] > 0) || !(nums[i] < nums[j])) continue;
+      const l = len[i] + 1, p = pen[i] + Math.abs((nums[j] - nums[i]) - (j - i));
+      if (l > len[j] || (l === len[j] && p < pen[j])) { len[j] = l; pen[j] = p; prev[j] = i; }
+    }
+    if (best < 0 || len[j] > len[best] || (len[j] === len[best] && pen[j] < pen[best])) best = j;
+  }
+  const out = new Array(n).fill(false);
+  for (let j = best; j >= 0; j = prev[j]) out[j] = true;
+  return out;
+}
+
+// What OCR reads a margin digit as, most often: a 1 as l, I or |, a 0 as O,
+// a 5 as S, a 2 as Z, an 8 as B, a 6 as b or G, a 9 as g or q.
+const OCR_DIGITS = { l: "1", I: "1", "|": "1", "!": "1", o: "0", O: "0", s: "5", S: "5", z: "2", Z: "2", B: "8", b: "6", G: "6", g: "9", q: "9" };
+const MISREAD_RE = /^( ?)([0-9lI|!oOsSzZBbGgq]{1,2})(?:( {2,})(?=\S)|( *)$)/;
+/**
+ * A margin number the OCR misread into letters ("l2", "I7", "2O"), opening a
+ * line where a number stands: { n, rest, spacing } — what it reads as, the
+ * line after it and the spacing between — or null. Only a token with at least
+ * one such letter in it; an all-digit one is a gutter number already.
+ */
+export function misreadNumber(line) {
+  const m = String(line == null ? "" : line).match(MISREAD_RE);
+  if (!m || /^\d+$/.test(m[2])) return null;
+  const digits = [...m[2]].map((c) => (/\d/.test(c) ? c : OCR_DIGITS[c])).join("");
+  const n = parseInt(digits, 10);
+  if (!(n > 0)) return null;
+  return { n, rest: line.slice(m[0].length), spacing: m[3] || "" };
+}
+
+/** The line as numbered `n`: its misread number replaced, or the number put in front of it in the margin's two places. */
+function numberedAs(line, n) {
+  const num = String(n).padStart(2);
+  const g = line.match(GUTTER_RE);
+  if (g) return g[2] ? num + g[2] + line.slice(g[0].length) : num;
+  const mis = misreadNumber(line);
+  if (mis && mis.n === n) return mis.rest ? num + (mis.spacing || "  ") + mis.rest : num;
+  if (!line.trim()) return num;
+  // An unnumbered line stands four places in, where the number and its two
+  // spaces would be: those four are the number's now.
+  return num + "  " + (line.startsWith("    ") ? line.slice(4) : line);
+}
+
+const RESTORE_MIN = 8;      // margin numbers read on a page, at least, before any is put back
+const RESTORE_SHARE = 0.5;  // …and at least this share of the numbers the page should carry
+const RESTORE_BARE = 4;     // …and at most this many put back as bare lines where no line stands for them
+
+/**
+ * The number the document's pleading pages run to — 28 on California
+ * pleading paper — read off its pages: the highest last number that two or
+ * more of its pages reach, of the pages numbered well enough to count. The
+ * OCR loses numbers at the foot of a page and never adds one past it, so the
+ * highest is the paper's; two pages, so that one number misread high at the
+ * foot of one page is not. Null where no two pages can say, and then nothing
+ * is put back at the foot of a page.
+ */
+export function pleadingLast(pages) {
+  const tops = [];
+  for (const p of pages || []) {
+    if (!p || p.header == null) continue;
+    const nums = (p.lines || []).map(marginNumber);
+    const chain = numberChain(nums);
+    let count = 0, top = 0;
+    chain.forEach((on, i) => { if (on) { count++; top = nums[i]; } });
+    if (count < RESTORE_MIN || count < top * RESTORE_SHARE) continue;
+    tops.push(top);
+  }
+  tops.sort((a, b) => b - a);
+  return tops.length >= 2 ? tops[1] : null;
+}
+
+/**
+ * A page's lines with the margin numbers the OCR missed put back, as
+ * { lines, added } (`added`, the numbers put back, in order), or null where
+ * nothing is — where the page does not carry enough of its numbers to be
+ * pleading paper (RESTORE_MIN, and RESTORE_SHARE of the numbers it should
+ * have), or where every number is there. `last` is the number the document's
+ * pages run to (pleadingLast); without one, nothing is put back below the
+ * last number read.
+ *
+ * A number is put back only where it cannot be anything else:
+ * - between two numbers read, as many lines as numbers missing: one each, in
+ *   order — a blank line becomes the bare number, a misread one its number;
+ * - between two numbers with no line between them: each missing number as a
+ *   bare line of its own (an empty numbered line the OCR dropped), up to
+ *   RESTORE_BARE of them — more is a number misread high, not lines lost;
+ * - between two with more lines than numbers missing (a caption's single-
+ *   spaced lines among them): only where exactly that many of those lines
+ *   open with a misread number;
+ * - above the first number read and below the last: the run of lines that
+ *   stands against it, one each, and any number left over on the blank lines
+ *   beyond them, or as a bare line of its own — never past a line of text
+ *   standing apart from the numbered lines (a filing stamp, the footer).
+ * Anything else is left as the OCR wrote it: a number on the wrong line puts
+ * that line at the wrong height, which is worse than a number missing. A
+ * number read out of its order (one that is not in numberChain), or past the
+ * one the pages run to, is put right where its line takes a number here, and
+ * left as it reads otherwise.
+ */
+export function restoreMarginNumbers(lines, { last = 0 } = {}) {
+  const src = (lines || []).map((l) => String(l == null ? "" : l));
+  let end = src.findIndex((l) => TRAILER_RE.test(l));
+  if (end < 0) end = src.length;
+  const nums = src.slice(0, end).map(marginNumber);
+  // A number past the one the pages run to is a misreading, whatever its order.
+  const chain = numberChain(last > 0 ? nums.map((n) => (n > last ? null : n)) : nums);
+  const at = [];
+  chain.forEach((on, i) => { if (on) at.push([i, nums[i]]); });
+  if (!at.length) return null;
+  const top = at[at.length - 1][1];
+  if (at.length < RESTORE_MIN || at.length < Math.max(top, last || 0) * RESTORE_SHARE) return null;
+  const give = new Map();   // line index → the number it takes
+  const insert = new Map(); // line index → the bare numbers that go in before it
+  const blank = (i) => !src[i].trim();
+  const put = (i, ns) => { if (ns.length) insert.set(i, (insert.get(i) || []).concat(ns)); };
+  const run = (from, to) => { const out = []; for (let n = from; n <= to; n++) out.push(n); return out; };
+  // Between two numbers read.
+  for (let c = 1; c < at.length; c++) {
+    const [p, a] = at[c - 1], [q, b] = at[c];
+    const k = b - a - 1;
+    if (k <= 0) continue;
+    const between = [];
+    for (let i = p + 1; i < q; i++) between.push(i);
+    let pick = null;
+    if (between.length === k) pick = between;
+    else if (!between.length) { if (k <= RESTORE_BARE) put(q, run(a + 1, b - 1)); }
+    else if (between.length > k) {
+      const marked = between.filter((i) => {
+        if (nums[i] != null) return true;
+        const mis = misreadNumber(src[i]);
+        return !!mis && mis.n > a && mis.n < b;
+      });
+      if (marked.length === k) pick = marked;
+    }
+    if (pick) pick.forEach((i, j) => give.set(i, a + 1 + j));
+  }
+  // Above the first number read: the lines standing against it, nearest
+  // first, then the blank lines above them; whatever is left, bare lines.
+  {
+    const [p, a] = at[0];
+    const k = a - 1;
+    let i = p - 1;
+    const text = [];
+    while (i >= 0 && !blank(i)) text.push(i--);
+    if (k > 0 && text.length <= k) {
+      let n = a - 1;
+      for (const t of text) give.set(t, n--);
+      while (n >= 1 && i >= 0 && blank(i)) give.set(i--, n--);
+      if (n >= 1 && n <= RESTORE_BARE) put(i + 1, run(1, n));
+    }
+  }
+  // Below the last: the same, down the page, to the number the pages run to.
+  if (last > top) {
+    const [q, b] = at[at.length - 1];
+    const k = last - b;
+    let i = q + 1;
+    const text = [];
+    while (i < end && !blank(i)) text.push(i++);
+    if (text.length <= k) {
+      let n = b + 1;
+      for (const t of text) give.set(t, n++);
+      while (n <= last && i < end && blank(i)) give.set(i++, n++);
+      if (n <= last && last - n < RESTORE_BARE) put(i, run(n, last));
+    }
+  }
+  if (!give.size && !insert.size) return null;
+  const out = [];
+  const added = [];
+  for (let i = 0; i <= src.length; i++) {
+    for (const n of insert.get(i) || []) { out.push(String(n).padStart(2)); added.push(n); }
+    if (i === src.length) break;
+    if (give.has(i)) {
+      const n = give.get(i);
+      out.push(numberedAs(src[i], n));
+      added.push(n);
+    } else out.push(src[i]);
+  }
+  return { lines: out, added: added.sort((x, y) => x - y) };
+}
+
 // ---- a page that did not OCR ----------------------------------------------------
 //
 // A page whose text is not worth keeping — an exhibit the OCR mangled, a
