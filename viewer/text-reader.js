@@ -4316,7 +4316,8 @@ let textEpoch = 0;   // bumped whenever the text under the marks changes
 let scanned = null;  // what the last document-wide pass was made of
 function scanStale() {
   return !scanned || scanned.epoch !== textEpoch || scanned.reals !== reals || scanned.flagged !== flagged
-    || scanned.phrases !== phrases || scanned.keeps !== keeps || scanned.master !== masterKeeps || scanned.spots !== spots;
+    || scanned.phrases !== phrases || scanned.keeps !== keeps || scanned.master !== masterKeeps || scanned.spots !== spots
+    || scanned.sheet !== sheetParsed();
 }
 function paintHighlights() {
   refreshRawPages(); // a raw page's text, and the names standing in it
@@ -4352,10 +4353,11 @@ async function scanDocument() {
 function giveUpOnMarks(spent, page, pages) {
   marksOff = true;
   leakHits = [];
+  sheetHits = [];
   flaggedHits = new Map();
   scannedDocs = new Set();
   scanSoon.cancel();
-  try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); } catch { /* none to clear */ }
+  try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); CSS.highlights.delete("leakrows"); } catch { /* none to clear */ }
   $("st-leaks").textContent = "";
   $("st-kept").textContent = "";
   // A walk waiting on this document's reading is waiting on one that is not
@@ -4364,7 +4366,7 @@ function giveUpOnMarks(spent, page, pages) {
   offerToCopy(`The marks over the text took more than ${Math.round(spent / 1000)} seconds on this document (page ${page} of ${pages}) and are off for it. The words are all here; the names are not marked.`);
 }
 
-/** The current LEAKS row's value, marked wherever it stands. */
+/** The current LEAKS row's value, marked wherever it stands — and every other row still to answer. */
 function paintRowMarks() {
   return during("marking the worksheet's rows", () => paintRowMarksNow());
 }
@@ -4372,6 +4374,7 @@ function paintRowMarksNow() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   leakRowRanges = rowRanges(leakRowValue);
   CSS.highlights.set("leakrow", highlightOf(leakRowRanges.map((x) => x.range)));
+  CSS.highlights.set("leakrows", highlightOf(pendingSheetRanges()));
   markLeakHere();
 }
 /** One reading of the whole document; false where it gave up part-way. */
@@ -4386,9 +4389,10 @@ async function scanPass() {
 const MARK_BUDGET = 8000; // ms of work, added up across the slices
 let marksOff = false;     // …and whether it has given up
 async function scanPassNow(pass) {
-  const mark = { epoch: textEpoch, reals, flagged, phrases, keeps, master: masterKeeps, spots };
+  const mark = { epoch: textEpoch, reals, flagged, phrases, keeps, master: masterKeeps, spots, sheet: sheetParsed() };
   const moved = () => mark.epoch !== textEpoch || mark.reals !== reals || mark.flagged !== flagged
-    || mark.phrases !== phrases || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots;
+    || mark.phrases !== phrases || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots
+    || mark.sheet !== sheetParsed();
   const flaggedRanges = [];
   const leakRanges = [];
   const hits = [];
@@ -4409,6 +4413,13 @@ async function scanPassNow(pass) {
   // page read later shows which names were left alone on purpose.
   const keptRx = keptMarkMatcher();
   const keptRanges = [];
+  // Every value the LEAKS worksheet has a row for, wherever it stands, so the
+  // rows the walk has yet to reach are orange before it gets there. All of
+  // them, answered or not: which are still to answer moves with every
+  // decision, and is sorted out when the marks are painted
+  // (pendingSheetRanges), which a decision does not make this pass again for.
+  const sheetRx = sheetMatcher();
+  const sheetFound = [];
   let markFrom = performance.now();
   let spent = 0;
   let page = 0;
@@ -4448,7 +4459,7 @@ async function scanPassNow(pass) {
     // pseudonyms blanked; the flagged ones with each pseudonym as its real
     // name, marked only outside it (below); the names in the clear off the
     // disk text.
-    const flat = keptRx ? flatten(body, { blankPn: true }) : null;
+    const flat = keptRx || sheetRx ? flatten(body, { blankPn: true }) : null;
     if (reals) {
       // The names in the clear are read off the DISK text, exactly as the save
       // reads them (standingSpans): the run's fakes and the spot keeps blanked,
@@ -4495,6 +4506,24 @@ async function scanPassNow(pass) {
         }
       }
     }
+    if (sheetRx) {
+      // Off the page as it shows, pseudonyms blanked, as the row in front is
+      // (leakMatches): a value standing inside a pseudonym is faked already.
+      const { text, segs } = flat;
+      sheetRx.lastIndex = 0;
+      let m, n = 0;
+      while ((m = sheetRx.exec(text))) {
+        const fold = sheetFold(m[0]);
+        const r = fold && rangeFor(segs, m.index, m.index + m[0].length);
+        if (r) sheetFound.push({ range: r, fold });
+        if (m.index === sheetRx.lastIndex) sheetRx.lastIndex++;
+        if (++n % HANDFUL === 0) {
+          const held = sheetRx.lastIndex;
+          if (!(await breathe(`reading the marks over the text${where} — the worksheet's values`))) return gaveUp;
+          sheetRx.lastIndex = held;
+        }
+      }
+    }
     if (flagRx) {
       // For the reason above, the red mark is never drawn over a pseudonym:
       // it says the flagged value is standing in the clear and the next run
@@ -4530,6 +4559,7 @@ async function scanPassNow(pass) {
   // Whole, so it goes up: the ranges, what the right-click menu reads off them,
   // and the state this reading was made of.
   leakHits = hits;
+  sheetHits = sheetFound;
   flaggedHits = flagCounts;
   scannedDocs = docsSeen;
   // The master workbook's list says which of its keeps stand here, and this
@@ -4566,6 +4596,7 @@ async function scanPassNow(pass) {
   return true;
 }
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
+let sheetHits = []; // …and each value the LEAKS worksheet has a row for: [{ range, fold }]
 let flaggedHits = new Map(); // …and per document on the page, how many flagged values stand in its clear
 let scannedDocs = new Set(); // …and which documents that paint actually read (the reel sheds the far end)
 let docSeq = 0;              // documents opened, counted: what a reading was made OF
@@ -7964,6 +7995,17 @@ function showFlagPop() {
       : "\u201c" + leak.real + "\u201d is in the key and stands unfaked here; the flag hands PDF-Linker the whole name. Leave \u201c" + leak.real + "\u201d so?";
     $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu({ real: leak.real, fake: leak.fake, leak: true, range: leak.range, pieces: piecesOf(leak) }, e.clientX, e.clientY); };
   }
+  // A value the worksheet has a row for, still to answer (orange, dashed): the
+  // row is where it is answered, and the bar opens on it where the text stands.
+  const row = pnIn || hereIn || leak ? -1 : pendingRowIn(s);
+  $("flag-pop-row").hidden = row < 0;
+  if (row >= 0) {
+    const r = leakRows()[row];
+    flagPopBtn.disabled = true;
+    flagPopNote.textContent = "\u201c" + r.value + "\u201d has a row in " + leaks.name + " still to answer.";
+    $("flag-pop-row").title = `Open row ${row + 1} in the worksheet's bar, without moving the text, and answer it there`;
+    $("flag-pop-row").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; goToLeak(row, { locate: false }); };
+  }
   // Kept by the master workbook: that is what stands between it and a fake,
   // and the answer is to take it off the Master Keep.
   const held = hereIn ? [] : masterHeldIn(s);
@@ -7993,6 +8035,7 @@ function showFlagPop() {
 flagPopBtn.addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
 $("flag-pop-keep").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-master").addEventListener("mousedown", (e) => e.preventDefault());
+$("flag-pop-row").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("click", phraseSelection);
 flagPopBtn.addEventListener("click", flagSelection);
@@ -8028,6 +8071,7 @@ function flagTakes(s) {
   if (hereIn) return false;
   const leak = s.pn ? null : leakIn(s.range);
   if (leak && sameWords(s.text, leak.real)) return false;
+  if (!leak && pendingRowIn(s) >= 0) return false;
   return !masterHeldIn(s).length;
 }
 /** The selection flagged, or its question asked; whether it was flagged. */
@@ -8063,8 +8107,11 @@ document.addEventListener("mouseup", (e) => {
 
 /** Whether two values are the same words, case, spacing and punctuation aside. */
 function sameWords(a, b) {
-  const w = (x) => (String(x).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).join(" ");
-  return w(a) === w(b);
+  return wordsOf(a) === wordsOf(b);
+}
+/** A value's words, lowercased, one space between: what sameWords compares. */
+function wordsOf(x) {
+  return (String(x).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).join(" ");
 }
 function flagSelection() {
   const s = currentSelection();
@@ -8075,6 +8122,10 @@ function flagSelection() {
   // already has. With more of the name around it, it is flagged whole.
   const leak = s.pn || s.here ? null : leakIn(s.range);
   if (leak && sameWords(s.text, leak.real)) { toast(`"${leak.real}" is in the key already and stands unfaked here: fake it from the names bar, or keep it (right-click).`, { error: true }); return; }
+  // A value the worksheet has a row for is answered on that row: a flag would
+  // hand PDF-Linker the value it raised itself, under a second rule.
+  const row = leak ? -1 : pendingRowIn(s);
+  if (row >= 0) { toast(`"${leakRows()[row].value}" has a row in ${leaks.name} still to answer: answer it there (⚠ Leaks).`, { error: true }); return; }
   const before = flagged.length;
   flagged = TD.addValue(flagged, s.text);
   const v = TD.normalizeValue(s.text);
@@ -8593,6 +8644,64 @@ function leaksStoreKey() { return LK.decisionsKey(leaks.folder || folderName || 
 function persistLeaks() { if (leaks) lsSet(leaksStoreKey(), LK.packDecisions(leaks.parsed.rows)); }
 function leaksDirty() { return !!leaks && leaks.parsed.rows.some((r) => r.fix !== r.fix0); }
 function leakRows() { return leaks ? leaks.parsed.rows : []; }
+/** The worksheet as parsed, or null: its identity is what the marks were read against. */
+function sheetParsed() { return leaks ? leaks.parsed : null; }
+
+// The rows the walk has yet to reach. Only the row in front used to be marked,
+// so a name the worksheet was already asking about stood unmarked on the page,
+// was flagged as a find, and turned up as a row a few clicks later — a flag
+// that handed PDF-Linker a value it had raised itself. Every value with a row
+// is now read with the document-wide marks (scanPassNow, one matcher per
+// worksheet), and the ones still to answer are painted orange beside the row
+// in front; a decision repaints them without reading the page again.
+let sheetRxMemo = { parsed: null, values: new Map(), rx: null };
+function sheetMatcher() {
+  const parsed = sheetParsed();
+  if (sheetRxMemo.parsed !== parsed) {
+    const values = new Map(); // folded → as written
+    for (const r of parsed ? parsed.rows : []) {
+      const v = TD.normalizeValue(r.value);
+      if (/[\p{L}\p{N}]/u.test(v)) values.set(TD.foldValue(v), v);
+    }
+    sheetRxMemo = { parsed, values, rx: values.size ? PK.buildMatcher([...values.values()]) : null };
+  }
+  return sheetRxMemo.rx;
+}
+/** The worksheet value a match is, folded: a gap read as a space, a possessive let go. "" if none. */
+function sheetFold(found) {
+  const { values } = sheetRxMemo;
+  const f = TD.foldValue(PK.foldGaps(found));
+  if (values.has(f)) return f;
+  const bare = f.replace(/['’]s$/, "");
+  return values.has(bare) ? bare : "";
+}
+/**
+ * Where the rows still to answer stand, less the row in front (it has its own
+ * mark) and the values the key binds: standing unfaked, those are the key's
+ * orange already, and inside a cited decision they are no leak at all.
+ */
+function pendingSheetRanges() {
+  if (!leaks || !sheetHits.length) return [];
+  const open = new Set();
+  for (const r of leakRows()) if (LK.isPending(r)) open.add(TD.foldValue(r.value));
+  open.delete(TD.foldValue(leakRowValue));
+  const bound = new Map();
+  const out = [];
+  for (const h of sheetHits) {
+    if (!open.has(h.fold)) continue;
+    let b = bound.get(h.fold);
+    if (b === undefined) bound.set(h.fold, (b = boundByKey(h.fold)));
+    if (!b) out.push(h.range);
+  }
+  return out;
+}
+/** The row still to answer whose value the selection is, word for word: its index, or -1. */
+function pendingRowIn(s) {
+  if (!leaks || !s || s.pn || s.here) return -1;
+  const want = wordsOf(s.text);
+  if (!want) return -1;
+  return leakRows().findIndex((r) => LK.isPending(r) && wordsOf(r.value) === want);
+}
 
 /** Attach a worksheet: its bytes (kept for the rewrite), its handle (for the save in place). */
 async function attachLeaks(bytes, name, handle, { quiet = false, folder = "" } = {}) {
@@ -15096,6 +15205,7 @@ window.__textReaderLeaks = () => (leaks ? {
   rows: leaks.parsed.rows.map((r) => ({ n: r.n, value: r.value, fix: r.fix, fix0: r.fix0 })),
   here: leakHere ? { text: leakHere.toString(), gutter: gutterOf(leakHere), page: Number(leakHere.startContainer.parentElement.closest(".tpage").dataset.index) } : null,
   marks: leakRowRanges.length, keeps: keeps.slice(), leakMarks: leakHits.length,
+  pendingMarks: pendingSheetRanges().map((r) => r.toString()),
 } : null);
 window.__textReaderLeaksBytes = async () => Array.from(await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, LK.fixEdits(leaks.parsed)));
 window.__textReaderAdoptFolder = (h, opts) => adoptFolder(h, Object.assign({ quiet: true }, opts));

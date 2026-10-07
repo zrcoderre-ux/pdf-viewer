@@ -512,6 +512,31 @@ among a folder's documents, and `pdfsync.combinedMembers` reads its
 `# Documents in this file:` list so picked PDFs are matched member by
 member, by name through the key or by order.
 
+**The rows still to answer are marked before the walk reaches them**
+(`sheetMatcher`, `pendingSheetRanges`, `::highlight(leakrows)`). Only the row
+in front used to be marked (`leakrow`), so a value the worksheet was already
+asking about stood unmarked on the page, was flagged as a find, and turned up
+as a row a few clicks later: a flag handing PDF-Linker a value it had raised
+itself. Every value with a row is now read in the document-wide pass
+(`scanPassNow`, off `flatten(body, { blankPn: true })` as `leakMatches` reads
+the row in front, under one `PK.buildMatcher` per worksheet, memoised on
+`leaks.parsed`), and `scanStale` counts the worksheet's identity with the
+text, key and keeps. The pass reads every row, answered or not, and keeps
+`sheetHits` (`{ range, fold }`, a possessive and a gap folded back to the
+row's value by `sheetFold`); which of them are pending is sorted out when the
+marks are painted (`paintRowMarksNow`), so a decision repaints them without
+reading the page again. Left out: the row in front (it has its own mark) and a
+value the key binds (`boundByKey`), which standing unfaked is the key's
+orange already and inside a cited decision is no leak. They show whenever a
+worksheet is attached, the bar open or not, and go with `giveUpOnMarks`.
+Lighter than the row in front, with a dashed underline. The flag follows the
+mark: a selection that is a pending row's value word for word
+(`pendingRowIn`, `wordsOf`) is not flagged by 🚩's release or Ctrl+Shift+F,
+and the pop-up says so with **Answer its row…**, which opens that row in the
+bar without moving the text (`goToLeak(i, { locate: false })`). A selection
+with more than the value in it is still flagged whole, as with the key's
+orange.
+
 The bar's controls are one row at its TOP (`.lb-controls`: Fix? yes no never
 phrase accept, the answer, the typed cell, Apply, clear, then ‹ › Next
 unanswered, Find in text, Save, open, close), with the row's own text under
