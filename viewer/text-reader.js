@@ -1433,10 +1433,39 @@ document.addEventListener("cut", (e) => {
   snapshot(body, true);
   document.execCommand("delete");
 });
+// WHICH DRAG IS THE SELECTION'S. This listener first took a drag only where it
+// started on a Text node, on the reading that a drag of the selection starts
+// on its words and anything else dragged is a link or a picture. Chrome does
+// not see it that way. It drags the selection wherever the press lands inside
+// it, and the drag's target is whatever the press hit: a Text node only where
+// that was a word. Past a selected line's last word it is the `.line` div;
+// on the space under the text, the `.page-body`; on a line's margin, its
+// `.lt`; on a citation link of the link layer, where the selection runs over
+// it (Ctrl+A, or two pages). Pressed and dragged at a grid of points over a
+// selected page (2,087 drags), 57 started on a Text node and went out in the
+// pseudonyms, and 2,027 started on an element and went out as the browser's
+// own drag — "Plaintiff Helen Rasho moves to compel …" as text/plain with
+// Show fakes off, and every `data-real` in the text/html with it on.
+//
+// So a drag is the selection's when it starts on a Text node, or on an
+// element the selection holds any of (`containsNode(t, true)`): every element
+// in those 2,027 did. A link the selection does not reach — a citation
+// dragged off a page whose text alone is selected — is dragged as the link,
+// its address and nothing else, as before. NOT EVEN A PICTURE is let off. The
+// fix as first proposed spared an <img>, on the reading that Chrome drags an
+// image as itself even inside a selection; put one in a selected line and
+// pressed, Chrome dragged the SELECTION from it, target the <img>, "Plaintiff
+// Helen Rasho moves to compel …" in its text/plain, whether the pointer moved
+// at once or after 400 ms. A picture the selection holds therefore goes as
+// the selection's pseudonyms too, and one it does not hold drags as itself.
+// And copyOfSelection still answers null where the selection does not reach
+// a page, so a drag anywhere else is the browser's.
 document.addEventListener("dragstart", (e) => {
-  // A drag of the selection starts on its text; a link or a picture dragged
-  // is that, and keeps its own data.
-  if (!key || !e.dataTransfer || !e.target || e.target.nodeType !== 3) return;
+  const t = e.target;
+  if (!key || !e.dataTransfer || !t) return;
+  const sel = document.getSelection();
+  const ofSelection = t.nodeType === 3 || (t.nodeType === 1 && !!sel && !sel.isCollapsed && sel.containsNode(t, true));
+  if (!ofSelection) return;
   const c = during("copying the selection in its pseudonyms", () => copyOfSelection());
   if (!c) return;
   e.dataTransfer.clearData();

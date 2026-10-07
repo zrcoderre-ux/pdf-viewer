@@ -270,7 +270,11 @@ app, which routes it to the reader tab.
   marked as pseudonyms again), and pasted into Find it is what the screen
   showed. A cut works as the browser's own: in ✎ Edit it takes the selection
   away (one undo step; only the first page's part of a selection that runs
-  onto the next), and read-only it does nothing. The PDF — in the pane and on
+  onto the next), and read-only it does nothing. A drag carries the
+  pseudonyms wherever you press inside the selection — on a word, past the
+  end of a line, in the space under the text, on a citation link or a picture
+  the selection takes in; a link or picture outside the selection drags as
+  itself. The PDF — in the pane and on
   a page swapped for its PDF page — is the filing itself and still copies as
   it reads.
 - **Citations linked.** The same detector the PDF viewer runs underlines every

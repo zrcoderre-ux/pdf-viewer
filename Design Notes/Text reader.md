@@ -128,9 +128,23 @@ away — which, like Chrome's `deleteByCut`, takes only the first page's part
 of a selection running on into the next. That deletion fires `input` but not
 `beforeinput`, so the cut asks the beforeinput handler's questions itself:
 the gutter guard, `shotPut`, and `snapshot(body, true)` for one undo step. A
-drag of the selection starts on a Text node (a link or picture dragged is
-left its own data). The cost is one forward pass per page the selection
-touches — the save's own pass, named `copying the selection in its
+drag is the selection's where it starts on a Text node or on an element the
+selection holds any of (`sel.containsNode(target, true)`). It first took only
+a Text node, on the reading that a drag of the selection starts on its
+words; but Chrome drags the selection wherever the press lands inside it,
+and the drag's target is whatever the press hit — the `.line` past a line's
+last word, the `.page-body` under the text, a line's `.lt` margin, a
+citation link of the link layer under a Ctrl+A. Pressed and dragged at a
+grid of points over a selected page, 2,027 of 2,087 drags started on such an
+element and went out as Chrome's own, the real names in text/plain and every
+`data-real` in text/html; every one of those elements is one the selection
+holds. A link the selection does not reach drags as the link. A picture the
+selection holds is no exception: pressed on an `<img>` in a selected line,
+held 0 to 400 ms before the pointer moved, Chrome dragged the selection
+from it every time (target the `<img>`, the real names in the text), so
+sparing pictures, as the review proposed, would have kept the leak; one
+outside the selection drags as itself. The cost is one forward pass per page
+the selection touches — the save's own pass, named `copying the selection in its
 pseudonyms` for the hold report; Ctrl+A over 200 pleading pages (810 KB, a
 name and a cite on every line) copies in about 125 ms. What the reader puts out it can take back
 (`lastCopy`, `ownCopy`): a paste in a page whose `text/plain` is exactly the
