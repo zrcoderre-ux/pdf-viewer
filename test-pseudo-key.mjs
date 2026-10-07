@@ -10,7 +10,7 @@ import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, compileFakes, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
-  wordFakesOf,
+  wordFakesOf, keyCellKind,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -40,13 +40,16 @@ const key = keyOf([
   ["person", "Angela White", "Marlow Kestrel", "", "", "prescan", 2],
   ["person", "Angie White", "Marlow Kestrel", "", "", "prescan", 1],
 ]);
-check("keeps dropped, counted", key.dropped.keeps, 3);
+// "[Law]" on "Alder Law, P.C." keeps only PART of the value — PDF-Linker fakes
+// "Alder" around it (`_pn_bracket_keep`) — so it is no keep of the whole and
+// the row stays, marked, as an instruction (see "control words" below).
+check("keeps dropped, counted", [key.dropped.keeps, key.dropped.controls], [2, 1]);
 check("pairs: the alt row does not own, the ambiguous fake is retired", key.pairs.map((p) => p.fake + ">" + p.real).sort(),
   ["Ingrid Strangeways>Helen Rasho", "Sedgwick-Linford>Ardeshirpour-Zartoshti", "Strangeways>Rasho"]);
 check("ambiguous count", key.dropped.ambiguous, 1);
 check("hint is the most-used applied real", key.hint, "Rasho");
 check("sheet named", key.sheet, "Pseudonym Key");
-check("warn carries every real, alt spellings included", key.warn.length, 6);
+check("warn carries every real, alt spellings included", key.warn.length, 7);
 
 const colOrder = parseKey([{ name: "Key", rows: [["Replacement", "Real Value"], ["Strangeways", "Rasho"]] }]);
 check("columns by header name, any order", colOrder.pairs, [{ fake: "Strangeways", real: "Rasho" }]);
@@ -556,6 +559,151 @@ console.log("a fake that is an ordinary word");
   const old = { ...k, wordFakes: undefined, pairs: k.pairs.concat([{ fake: "We", real: "Dax" }]) };
   check("a key kept from before is guarded too", [wordFakesOf(old), translate(compile(old), "we agree").text], [[{ fake: "We", real: "Dax" }], "we agree"]);
   check("an ordinary key has none", wordFakesOf(keyOf([["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 1]])), []);
+}
+
+// ---- control words in the Replacement cell ---------------------------------------
+//
+// The key's Replacement column takes the worksheet's control words: the
+// operator types "~Rasho" over a misspelling's stand-in, "*Strangeways" over a
+// scan error's, "phrase", "(Cross River Bank)", "[Law]", and the cell sits in
+// the key until the next full run. Read as pseudonyms, a save wrote "~Rasho"
+// for "Rashoe" — the canonical real name, inside a pseudonym span that the
+// marks and the save's last check never look into. PDF-Linker reads every one
+// of them as no binding (`_pn_key_reverse_pairs`), and so does the reader now:
+// a whole-value keep is dropped, every other instruction keeps its real MARKED
+// and is never reversed, forwarded or offered.
+console.log("control words in the Replacement cell");
+{
+  const kinds = (cells, real) => cells.map((c) => keyCellKind(c, real));
+  check("no, n and never keep the whole value", kinds(["no", "N", " never "], "Rashoe"), ["keep", "keep", "keep"]);
+  check("yes, y and phrase are instructions", kinds(["yes", "Y", "PHRASE"], "Rashoe"), ["control", "control", "control"]);
+  check("a misspelling, the old alias mark, a scan error, a durable one",
+    kinds(["~Rasho", "=Rasho", "*Strangeways", "**Strangeways", "~", "*David {said}"], "Rashoe"),
+    ["control", "control", "control", "control", "control", "control"]);
+  check("Excel's error text, and any cell opening with #", kinds(["#NAME?", "#SPILL!", "#GETTING_DATA", "#4"], "Rashoe"),
+    ["control", "control", "control", "control"]);
+  check("a phrase part, in the value or not", kinds(["(Cross River Bank)", "(Lakeshore)"], "Cross River Bank Tower"), ["control", "control"]);
+  check("keep-specs: the whole value kept is a keep, a part kept is an instruction",
+    kinds(["[Alder Law, P.C.]", "{Alder} [Law, P.C.]", "[Law]", "{Law}", "[Alder] Law", "Alder {Law}"], "Alder Law, P.C."),
+    ["keep", "keep", "control", "control", "control", "control"]);
+  check("a keep-spec naming text the value does not hold is no pseudonym either",
+    kinds(["[Lawyer]", "Quill {Esq}"], "Alder Law, P.C."), ["control", "control"]);
+  // `_pn_keep_spec_parts` hands the cut the [bracketed] parts first and the
+  // {braced} ones after, whatever order they were typed in; taken as typed,
+  // "{Law}" went first, took the "Law" of "Law Firm", and "[Law Firm]" was no
+  // longer in what was left — a value PDF-Linker keeps whole, marked here.
+  check("brackets are cut before braces, as PDF-Linker cuts them",
+    kinds(["{Law} [Law Firm]", "[Law Firm] {Law}", "{Law} [Firm]"], "Law Firm Law"), ["keep", "keep", "control"]);
+  check("a pseudonym is a pseudonym, brackets inside a name or not",
+    kinds(["Strangeways", "Ingrid Strangeways", "Smith (Jr.)", "Deverell5", "quenby3@postbox9.org", "O'Hara-Vale"], "Rashoe"),
+    ["fake", "fake", "fake", "fake", "fake", "fake"]);
+  check("an empty cell is nothing", keyCellKind("  ", "Rashoe"), "");
+
+  const k = keyOf([
+    ["person", "Helen Rasho", "Ingrid Strangeways", "", "replaced", "spreadsheet", 12],
+    ["person-token", "Rasho", "Strangeways", "", "replaced", "spreadsheet", 30],
+    ["person-token", "Helen", "Ingrid", "", "replaced", "spreadsheet", 14],
+    ["person-token", "Rashoe", "~Rasho", "", "leaked", "document", 1],
+    ["person", "Helen Rashoe", "~Helen Rasho", "", "leaked", "document", 1],
+    ["person-token", "Rasbo", "*Rasho", "", "leaked", "document", 1],
+    ["entity", "Cross River Bank Tower", "(Cross River Bank)", "", "replaced", "", 2],
+    ["person", "Odile Varnum", "#NAME?", "", "replaced", "", 2],
+    ["person-token", "Quillon", "n", "", "replaced", "", 2],
+    ["entity", "Alder Law, P.C.", "Alder {Law}", "", "replaced", "", 2],
+    ["person", "Dana Okafor", "phrase", "", "replaced", "", 2],
+    ["person", "Rashoe's", "~Rasho's", "", "leaked", "document", 1],
+  ]);
+  check("only the pseudonyms reverse", k.pairs.map((p) => p.fake + ">" + p.real).sort(),
+    ["Ingrid Strangeways>Helen Rasho", "Ingrid>Helen", "Strangeways>Rasho"]);
+  check("the keep is dropped, the instructions counted", [k.dropped.keeps, k.dropped.controls], [1, 8]);
+  check("every instruction's real is still bound, with no fake and the cell as `control`",
+    k.warn.filter((w) => w.control).map((w) => [w.real, w.fake, w.control]),
+    [["Rashoe", "", "~Rasho"], ["Helen Rashoe", "", "~Helen Rasho"], ["Rasbo", "", "*Rasho"],
+      ["Cross River Bank Tower", "", "(Cross River Bank)"], ["Odile Varnum", "", "#NAME?"],
+      ["Alder Law, P.C.", "", "Alder {Law}"], ["Dana Okafor", "", "phrase"], ["Rashoe's", "", "~Rasho's"]]);
+  check("the kept value binds nothing", k.warn.some((w) => w.real === "Quillon"), false);
+  check("a possessive instruction derives no bare row of its own",
+    keyOf([["person", "Zachary's", "~Zackary's", "", "leaked", "", 1]]).warn.map((w) => w.real), ["Zachary's"]);
+
+  // The save: what the verifier's sentence wrote before was "~Rasho and
+  // *Rasho met #Name? at (Cross River Bank)…". Now nothing is written for any
+  // of them, and every one is still there to be marked and refused.
+  const text = "Rashoe and Rasbo met Odile Varnum at Cross River Bank Tower; Quillon and Dana Okafor of Alder Law, P.C. agreed with Rasho.";
+  const out = forwardRuns(compileForward(k), text);
+  check("a save writes no instruction, and fakes only the pseudonyms",
+    out.filter((r) => r.t === "swap").map((r) => r.from + ">" + r.to), ["Rasho>Strangeways"]);
+  check("every instruction's real stands to be marked; the kept one is not marked",
+    findReals(compileReals(k), text).map((w) => w.real + (w.control ? " [" + w.control + "]" : "")),
+    ["Rashoe [~Rasho]", "Rasbo [*Rasho]", "Odile Varnum [#NAME?]", "Cross River Bank Tower [(Cross River Bank)]",
+      "Dana Okafor [phrase]", "Alder Law, P.C. [Alder {Law}]", "Rasho"]);
+  check("on screen, the word 'phrase' and a stray '~Rasho' are only what they say",
+    translate(compile(k), "the phrase used; ~Rasho; n of section 2").text, "the phrase used; ~Rasho; n of section 2");
+  check("an instruction is no pseudonym standing", findReals(compileFakes(k), "~Rasho said phrase").length, 0);
+
+  // HALF SCRUBBED. "Helen" is bound and "Helen Rashoe" holds an instruction:
+  // read through its own shorter word, the save wrote "Ingrid Rashoe", and with
+  // the longer name gone from the text nothing was left to mark or refuse.
+  const fw = compileForward(k);
+  check("a name holding an instruction is never written through its shorter words",
+    forwardRuns(fw, "Helen Rashoe signed; Helen wrote; HELEN RASHOE'S reply").map((r) => r.t === "swap" ? "[" + r.to + "]" : r.s).join(""),
+    "Helen Rashoe signed; [Ingrid] wrote; HELEN RASHOE'S reply");
+  check("…and is marked whole", findReals(compileReals(k), "Helen Rashoe signed").map((w) => w.real), ["Helen Rashoe"]);
+
+  const ahead = compileTypeahead(k);
+  check("nothing offers an instruction as you type", ahead.filter((e) => !e.fake).length, 0);
+  check("…and an instruction typed out is offered nothing", endingReal(ahead, "Plaintiff Rashoe"), null);
+  check("…and the shorter name it opens is partial, so Space types on toward it", (endingReal(ahead, "Plaintiff Helen") || {}).partial, true);
+
+  // Which wins where one value has both: the applied sheet over the pinned,
+  // and on one sheet the instruction, typed over that value's stand-in.
+  const both = parseKey([
+    sheet("Pseudonym Key", [
+      ["person-token", "Rashoe", "Strangeways", "", "replaced", "", 2],
+      ["person", "Rashoe", "~Rasho", "", "leaked", "", 1],
+      ["person", "Vela Quist", "~Vela Quiste", "", "leaked", "", 1],
+    ]),
+    sheet("Pinned (never in text)", [["person", "Vela Quist", "Marlow Kestrel", "", "", "", 0], ["person", "Odile Varnum", "phrase", "", "", "", 0]]),
+  ]);
+  check("one sheet: the instruction stands; applied over pinned either way",
+    both.warn.map((w) => [w.real, w.fake, w.control || "", w.pinned]),
+    [["Rashoe", "", "~Rasho", false], ["Vela Quist", "", "~Vela Quiste", false], ["Odile Varnum", "", "phrase", true]]);
+  check("…and nothing of either is forwarded", forwardRuns(compileForward(both), "Rashoe, Vela Quist, Odile Varnum").filter((r) => r.t === "swap").length, 0);
+
+  // A key parsed before this rule and kept in the library: its pairs and its
+  // warning rows carry the instruction as the fake, and its `dropped` has no
+  // `controls` count. It answers as a fresh parse.
+  const old = {
+    ...k,
+    dropped: { keeps: 0, ambiguous: 0, words: 0, pinned: 0 },
+    pairs: k.pairs.concat([{ fake: "~Rasho", real: "Rashoe" }, { fake: "phrase", real: "Dana Okafor" }, { fake: "#NAME?", real: "Odile Varnum" }]),
+    warn: [
+      { real: "Rasho", fake: "Strangeways", pinned: false },
+      { real: "Rashoe", fake: "~Rasho", pinned: false },
+      { real: "Dana Okafor", fake: "phrase", pinned: false },
+      { real: "Quillon", fake: "n", pinned: false },
+    ],
+  };
+  check("a key kept from before: no instruction reverses",
+    translate(compile(old), "~Rasho and the phrase and #NAME?").text, "~Rasho and the phrase and #NAME?");
+  check("…none is written", forwardRuns(compileForward(old), "Rashoe and Dana Okafor and Quillon").filter((r) => r.t === "swap").length, 0);
+  check("…the instructions' reals are still marked, the old keep is not",
+    findReals(compileReals(old), "Rashoe and Dana Okafor and Quillon").map((w) => [w.real, w.fake, w.control]),
+    [["Rashoe", "", "~Rasho"], ["Dana Okafor", "", "phrase"]]);
+  check("…nothing is offered or counted as a pseudonym standing",
+    [compileTypeahead(old).map((e) => e.real), findReals(compileFakes(old), "~Rasho phrase n").length], [["Rasho"], 0]);
+  check("…while a key this build parsed is taken as it stands, its count saying so",
+    [typeof k.dropped.controls, typeof old.dropped.controls], ["number", "undefined"]);
+  // …and its ordinary-word fakes, where "n" or "yes" typed over a stand-in was
+  // listed as one, and the reader's toast told the operator a full run would
+  // give "Quillon" a stand-in in place of "n".
+  check("a key kept from before names no instruction as an ordinary-word fake",
+    wordFakesOf({ ...old, wordFakes: [{ fake: "n", real: "Quillon" }, { fake: "yes", real: "Odile Varnum" }, { fake: "We", real: "Dax" }] }),
+    [{ fake: "We", real: "Dax" }]);
+  check("…and a fresh parse lists none", keyOf([
+    ["person-token", "Quillon", "n", "", "replaced", "", 2],
+    ["person", "Odile Varnum", "yes", "", "replaced", "", 2],
+    ["person-token", "Dax", "We", "", "", "document", 9],
+  ]).wordFakes, [{ fake: "We", real: "Dax" }]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

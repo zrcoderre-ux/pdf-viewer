@@ -6,9 +6,9 @@ pure, Node-tested modules — `textdoc.js` (the export as pages by its
 `====== Page N ======` headers, byte-exact round trip; the DOM walk that
 serializes a pseudonym span as its FAKE; the `New Real Values.txt` list),
 `pseudo-key.js` (a port of the Claude extension's `src/pseudo.js`: parseKey
-by header name, keeps dropped, pinned tab out of the reversal, ambiguous fake
-retired, a fake that is an ordinary word retired, case-mirrored swaps in both
-directions) and `xlsx-read.js` (a port
+by header name, keeps dropped, control words held as instructions, pinned tab
+out of the reversal, ambiguous fake retired, a fake that is an ordinary word
+retired, case-mirrored swaps in both directions) and `xlsx-read.js` (a port
 of its `src/xlsxread.js`). It reuses `citation-linker.js` and `toa.js`
 directly; citation underlines are painted as thin overlay strips from DOM
 Ranges so the text stays editable, and the pleading gutter numbers are
@@ -201,6 +201,96 @@ longest first. `setKey` says so in the status bar and a toast naming the
 pairs, pointing at a full PDF-Linker run, which drops such rows on load
 (PDF-Linker's `_pn_key_word_stand_ins`) and no longer draws them
 (`_nick_front`, `fold_onto`).
+
+**A control word in the key's Replacement cell** (`PK.keyCellKind`,
+`parseKey`'s `control` and `dropped.controls`): the key's Replacement column
+takes the LEAKS Fix? column's control words, and PDF-Linker's own notes tell
+the operator to answer a leak there — "~" and the canonical spelling typed
+over a misspelling's stand-in. `--fix-leaks` refuses a control typed in the
+key, so the cell stands until a full run. `isKeepCell` knew "no", "never" and
+a cell wholly bracketed or braced; every other control was read as the row's
+PSEUDONYM. A save then wrote "~Rasho" for the real "Rashoe" — the canonical
+real name, in the export, inside a `.pn` span that the marks and the save's
+last check blank — and counted it "written as pseudonym"; "*Rasho" over a scan
+error wrote the corrected real spelling, "(Cross River Bank)" the phrase, and
+"n", "phrase" and "#NAME?" wrote rubbish, while on screen every "phrase" in
+the case read as a party. Every cell is now read as PDF-Linker reads it back
+for the reader's own text (`_pn_key_reverse_pairs`, whose `control()` is the
+twin of `keyCellKind`) and applies it (`_pn_load_key`). A whole-value keep —
+"no"/"n"/"never", or a keep-spec whose kept parts are the whole value
+(`_pn_bracket_keep` → []) — is dropped as before. Any other instruction —
+"yes"/"y", "phrase", a cell opening with ~ * = #, one wrapped whole in ( ),
+[ ] or { }, and any cell carrying a [kept] or {kept} part (a keep-spec of PART
+of the value, which PDF-Linker reads as keep-that, fake-the-rest; the old rule
+dropped "[Law]" on "Alder Law, P.C." whole) — keeps its row in `warn` with
+`fake: ""` and the cell as `control`: marked where it stands, refused by a
+save that would write it, and out of the pairs, `compileFakes`, the forward
+map and the typeahead. The kept parts are cut out of the value [bracketed]
+first and {braced} after, as `_pn_keep_spec_parts` hands them over, so a
+value holding one part's text twice ("{Law} [Law Firm]" on "Law Firm Law")
+is a keep of the whole here as it is there. Never "~V forwarded to V's fake":
+PDF-Linker gives a misspelling a SLIP of the canonical's fake, and two Real
+Values on one Replacement cannot be reversed; the reader has no slip to give,
+so the value waits for the run. A keep-spec naming text the value does not
+hold is a literal replacement to `_pn_load_key` (with a warning that it was
+surely not meant); the reader writes nothing for it, the text around a
+mistyped bracket being usually the real value copied in. One sheet holding
+both an instruction and a fake for one value: the instruction stands (applied
+still beats pinned). Three things follow:
+
+- Nothing writes the instruction's real through its own shorter words.
+  `compileForward` MATCHES it and maps it to nothing: left out, "Helen" bound
+  to "Ingrid" and "~Helen Rasho" over "Helen Rashoe" made the save (and the
+  typed converter, `findRealsInPlain`) write "Ingrid Rashoe", a half-scrubbed
+  name with nothing left to mark it. Matched longest first, the name is
+  skipped whole, the same protection a keep has from `maskKept`;
+  `compileTypeahead` counts it as a longer value too, so the space bar does
+  not swap "Helen" on the way to typing it. That does not reach a name
+  wrapped down a caption's COLUMN, for which no column hit is made with no
+  fake to make it with, so `saveDocument` spares every standing name with no
+  fake, settled or not: a LEAKS `yes` on "Jonathan Avery Smith Walker",
+  wrapped "…and Jonathan" / "Avery Smith Walker, an" and holding an
+  instruction, with "Walker" bound on its own, was saved as "Jonathan / Avery
+  Smith Cascadia" and called done, the full name being gone from the text
+  that the last check reads. Spared, it stands whole and the save refuses it
+  (checked in Chromium, both ways).
+- A key kept in the library from before is read the same way (`pairRows`,
+  `warnRows`, and `wordFakesOf`, which had listed "n" and "yes" as fakes that
+  are ordinary words): its instructions sit in its pairs and warning rows as
+  fakes, and the compilers classify each row again. A key this parseKey made
+  carries `dropped.controls` and is taken as it stands, so the compiles cost
+  what they did (4,000 rows, every compiler ten times, three runs each:
+  780–870 ms before, 760–860 ms after; an older key classified again on
+  every compile, 810–950 ms), and `keyCellKind` answers a cell with no
+  leading mark and no bracket of any kind with one test.
+- The operator is told. A settled value with no fake is refused by the save's
+  last check (`saveDocument`), and the refusal — and the `stuck` warning, should
+  that ever be reached — adds `instructionNote`: the key holds no pseudonym for
+  it, only "~Rasho", an instruction to PDF-Linker that only a full run (not
+  Apply Fixes) carries out; until then retype it, or keep it where it stands
+  (right-click: Keep just this one). The spot keep is named because it is the
+  narrowest way through: the first draft said "keep it", which reads as "Keep
+  in this case", and that keep stops the marks and the refusal for the value
+  in every export of the folder, for a value the operator had said to fake.
+  The names bar (whose **Fake it** was already disabled for a hit with no
+  fake) and the right-click menu say what the key holds (`keyInstruction`)
+  instead of "fake it writes its pseudonym".
+
+Measured: a sentence carrying one value of each kind was saved as "~Rasho
+and *Rasho met #Name? at (Cross River Bank); N and Phrase of Alder {Law}
+agreed." and the save's last check found nothing in it; now nothing is
+written for any of them and each but the `n` keep is marked
+(test-pseudo-key.mjs, "control words in the Replacement cell"). Where the two
+still differ it is PDF-Linker's to close. `_pn_key_reverse_pairs` does not
+read "n" or "y" as a control (`_pn_load_key` reads "n" as `no`, and has no
+branch for "y" or "yes"), nor a cell carrying a keep-spec beside other text
+("Alder {Law}"). The second is harmless — such a cell stands in no text the
+reader writes. The first is not: with "n" typed over a row's stand-in, the
+transcription a ✎ Use my text line hands it is read back with every
+standalone "n" turned into that row's real value, a "(n)" subdivision
+included, in the PDF's own text layer. The reader cannot mend that from its
+side; reading "n" as a pseudonym again would only put the same word on
+screen.
 
 **Taking a value off the Master Keep** (`withdrawMaster`): a value the master
 workbook (`Master Leaks.xlsx`, its KEEP sheet) keeps is left alone in every

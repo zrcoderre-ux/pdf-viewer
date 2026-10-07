@@ -497,6 +497,23 @@ check("nothing in the key, nothing dropped \u2014 and the list stands as it is",
   dropFlagsInKey(STANDS, RUN), { kept: STANDS, dropped: [] });
 check("no key, nothing dropped", dropFlagsInKey(["Rosa Delgado"], null), { kept: ["Rosa Delgado"], dropped: [] });
 check("no list, nothing to drop", dropFlagsInKey(null, RUN), { kept: [], dropped: [] });
+{
+  // A key row whose Replacement is an INSTRUCTION ("~Rosa Delgado" typed over
+  // a misspelling's stand-in) binds no fake (pseudo-key keyCellKind): the run
+  // has not answered that flag, the reader has nothing to write for it, and a
+  // name typed out is not marked through its shorter words either.
+  const CTL = compileForward(parseKey([{ name: "Pseudonym Key", rows: [HEADERS,
+    ["person", "Rosa Delgado", "Wilma Trent", "", "", "spreadsheet", 4],
+    ["person-token", "Rosa", "Wilma", "", "", "spreadsheet", 6],
+    ["person", "Rosa Delgadoe", "~Rosa Delgado", "", "leaked", "document", 1],
+    ["person", "Marisol Ybarra", "phrase", "", "", "", 1],
+  ] }], "pseudonym_key.xlsx"));
+  check("a flag the key holds only an instruction for stays on the list",
+    dropFlagsInKey(["Rosa Delgadoe", "Marisol Ybarra", "Rosa Delgado"], CTL), { kept: ["Rosa Delgadoe", "Marisol Ybarra"], dropped: ["Rosa Delgado"] });
+  check("…it has no fake", [fakeFor(CTL, "Rosa Delgadoe"), fakeFor(CTL, "Marisol Ybarra")], [null, null]);
+  check("…and typed out, neither it nor the shorter name inside it is marked",
+    findRealsInPlain(CTL, [{ node: "n1", text: "Rosa Delgadoe signed; Rosa wrote" }]).map((h) => [h.matched, h.fake]), [["Rosa", "Wilma"]]);
+}
 
 // …and only the folder's OWN key answers them: the key in hand outlives the
 // folder it was read from, and another case's key binds that case's names.

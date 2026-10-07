@@ -13,15 +13,17 @@
 //   parseKey        key workbook rows → the map. Columns are found by HEADER
 //                   NAME, never position (the DeAnonymize.bas rule); an
 //                   operator keep in the Replacement cell ("no", "never",
-//                   "[bracketed]", "{braced}") is an instruction, not a
-//                   pseudonym, and is dropped; an "alt spelling" row is
-//                   forward-only (its fake belongs to the canonical row); a
-//                   fake claimed by two canonical reals is ambiguous and is
-//                   RETIRED from reversal rather than guessed at; and the
-//                   reversible bindings come off the APPLIED sheet only, never
-//                   the "Pinned (never in text)" tab — a pinned row can bind a
-//                   real the applied sheet binds under a different fake, and
-//                   reading both retires the live one.
+//                   a keep-spec of the whole value) is dropped, and every
+//                   other control word there ("~V", "*V", "phrase", "(x)",
+//                   "#NAME?"…) is an instruction, not a pseudonym: its real
+//                   is still marked, never written (keyCellKind); an "alt
+//                   spelling" row is forward-only (its fake belongs to the
+//                   canonical row); a fake claimed by two canonical reals is
+//                   ambiguous and is RETIRED from reversal rather than guessed
+//                   at; and the reversible bindings come off the APPLIED
+//                   sheet only, never the "Pinned (never in text)" tab — a
+//                   pinned row can bind a real the applied sheet binds under a
+//                   different fake, and reading both retires the live one.
 //   compile / translate / translateRuns   fake → real for DISPLAY. Longest
 //                   fake first, whole words only, case-insensitive, and the
 //                   real is written in the case the fake was written in. A
@@ -89,16 +91,110 @@ export function appliedSheet(sheets) {
   return null;
 }
 
-// An operator KEEP typed into the Replacement cell — "no"/"never" (leave the
-// Real Value verbatim), "[bracketed]"/"{braced}" keep-specs. Not a pseudonym.
-export function isKeepCell(v) {
-  const f = fold(v);
-  if (f === "no" || f === "never") return true;
-  const t = trim(v);
-  return (
-    (t.length > 1 && t[0] === "[" && t[t.length - 1] === "]") ||
-    (t.length > 1 && t[0] === "{" && t[t.length - 1] === "}")
-  );
+// ---- what a Replacement cell IS ----------------------------------------------
+//
+// The key's Replacement column and the LEAKS worksheet's Fix? column take ONE
+// set of control words (PDF-Linker's rule, and leaks.js classifyFix reads the
+// worksheet's half of it): the operator answers a leak by typing over the fake
+// in the key as readily as in the worksheet, and PDF-Linker's own notes tell
+// them to — "~Rasho" over a misspelling's stand-in, "*Rasho" over a scan
+// error's, "phrase", "(Cross River Bank)", "[Law]". Until the next full run
+// those cells sit in the key where a pseudonym used to be, and `--fix-leaks`
+// leaves them there (it refuses a control typed in the key).
+//
+// This used to know two of them. "no", "never" and a cell wholly bracketed or
+// braced were dropped as keeps; EVERY OTHER control was read as the row's
+// pseudonym. A save then wrote "~Rasho" for the real "Rashoe" — the canonical
+// real name, in the export — and wrapped it in a pseudonym span, which the
+// marks and the save's own last check blank: nothing marked it, nothing
+// refused it, and the toast counted it as a real name written as its
+// pseudonym. "*Rasho" put the corrected real spelling in the file the same
+// way, "(Cross River Bank)" the phrase, and "n", "phrase" and "#NAME?" put
+// rubbish in it — and on screen every "phrase" in the case read as a party.
+//
+// So every cell is read the way PDF-Linker reads it back for the reader's own
+// text (`_pn_key_reverse_pairs`, whose `control()` is this rule's twin — the
+// two must answer alike) and the way `_pn_load_key` applies it:
+//
+//   keep      "no" / "n" / "never", and a keep-spec whose kept parts are the
+//             whole value (`_pn_bracket_keep` → []). The value stays verbatim
+//             in every export: the row is dropped, as it always was.
+//   control   any other instruction — "yes" / "y", "phrase", a cell opening
+//             with ~ * = (a misspelling, a scan error, the old alias mark) or
+//             # (Excel's error text where an `=` formula could not be read
+//             back: `_PN_XL_ERROR_VALUES`, and the mirror reads any # cell so),
+//             a cell wrapped whole in ( ), [ ] or { }, and any cell carrying a
+//             [kept] or {kept} part. The run will fake the value (or its
+//             unkept rest) under a stand-in it has not drawn yet, so the key
+//             holds NO pseudonym for it: the row binds nothing to reverse, to
+//             forward or to offer, but its real is still a value the key
+//             binds — marked where it stands, and refused by a save that
+//             would write it.
+//   fake      everything else: a pseudonym.
+//
+// Never "~V forwarded to V's fake": PDF-Linker gives a misspelling a SLIP of
+// the canonical's fake, never the fake itself, since two Real Values on one
+// Replacement cannot be reversed. The reader has no slip to give, so the value
+// waits for the run. A keep-spec naming text the value does not hold is a
+// literal replacement to `_pn_load_key` (it warns that the operator almost
+// certainly did not mean one): the reader writes nothing for it, the cell
+// being a keep-spec typed wrong far more often than a stand-in — and the text
+// around a mistyped bracket is usually the real value copied in.
+const KEY_KEEP_WORDS = new Set(["no", "n", "never"]);
+const KEY_CONTROL_WORDS = new Set(["yes", "y", "phrase"]);
+const KEY_CONTROL_LEADS = "~*=#";
+const KEY_WRAPS = { "(": ")", "[": "]", "{": "}" };
+const KEY_KEEP_PART_RE = /\[([^[\]]*)\]|\{([^{}]*)\}/g;
+const KEY_HAS_KEEP_PART_RE = /\[[^[\]]*\]|\{[^{}]*\}/;
+const KEY_BRACKET_RE = /[[\]{}()]/;
+const KEY_FRAG_EDGE_RE = /^[\s,.;:'’"\-–—]+|[\s,.;:'’"\-–—]+$/g;
+/**
+ * A keep-spec's faked remainder, `_pn_bracket_keep`'s answer: null where the
+ * cell holds no [kept] or {kept} part or names one the value does not hold,
+ * else the fragments of `real` left once each kept part is cut out — [] where
+ * the parts are the whole value.
+ *
+ * The [bracketed] parts are cut first and the {braced} ones after, in that
+ * order whatever order they were typed in, because that is the order
+ * `_pn_keep_spec_parts` hands them to the cut: a value holding one part's
+ * text twice ("{Law} [Law Firm]" on "Law Firm Law") is cut down to nothing
+ * one way and left with a part not found the other, and PDF-Linker's answer —
+ * the whole value kept — is the one that stands.
+ */
+function keepSpecRest(real, cell) {
+  const brackets = [], braces = [];
+  for (const m of String(cell).matchAll(KEY_KEEP_PART_RE)) {
+    const p = (m[1] != null ? m[1] : m[2]).trim();
+    if (p) (m[1] != null ? brackets : braces).push(p);
+  }
+  const parts = brackets.concat(braces);
+  if (!parts.length) return null;
+  let work = String(real == null ? "" : real);
+  for (const p of parts) {
+    const i = work.toLowerCase().indexOf(p.toLowerCase());
+    if (i < 0) return null;
+    work = work.slice(0, i) + "\u0000" + work.slice(i + p.length);
+  }
+  return work.split("\u0000").map((f) => f.replace(KEY_FRAG_EDGE_RE, "")).filter((f) => /[A-Za-z0-9]/.test(f));
+}
+/** What a Replacement cell is to the row whose Real Value is `real`: "keep", "control" or "fake" ("" for an empty cell). */
+export function keyCellKind(cell, real) {
+  const t = trim(cell);
+  if (!t) return "";
+  if (KEY_CONTROL_LEADS.indexOf(t[0]) !== -1) return "control";
+  // The words are one word each, "phrase" the longest; and a cell with no
+  // bracket of any kind in it is a pseudonym from here, which is nearly every
+  // row of a key — asked first, so a key of thousands costs a test a row.
+  if (t.length <= 6) {
+    const f = t.toLowerCase();
+    if (KEY_KEEP_WORDS.has(f)) return "keep";
+    if (KEY_CONTROL_WORDS.has(f)) return "control";
+  }
+  if (!KEY_BRACKET_RE.test(t)) return "fake";
+  const rest = keepSpecRest(real, t);
+  if (rest) return rest.length ? "control" : "keep";
+  if (t.length > 1 && KEY_WRAPS[t[0]] === t[t.length - 1]) return "control";
+  return KEY_HAS_KEEP_PART_RE.test(t) ? "control" : "fake";
 }
 
 const ALT_STATUS = "alt spelling"; // forward-only: fake belongs to the canonical row
@@ -113,13 +209,17 @@ const POSS_MATCH_RE = /['’][sS]$/;
  *
  * Returns { name, sheet, rows, pairs, warn, hint, dropped }:
  *   pairs — [{fake, real}] for display reversal, unambiguous APPLIED owners
- *   warn  — [{real, fake, pinned}] every real value the key binds, with the
- *           stand-in to write instead. A real bound on BOTH tabs keeps the
- *           APPLIED fake, whatever order the sheets came in.
+ *   warn  — [{real, fake, pinned, control?}] every real value the key binds,
+ *           with the stand-in to write instead. A real bound on BOTH tabs
+ *           keeps the APPLIED fake, whatever order the sheets came in. A row
+ *           whose Replacement is an instruction (keyCellKind) has fake "" and
+ *           the cell's text as `control`.
+ *   dropped — { keeps, controls, ambiguous, words, pinned }: what was set aside.
  */
 export function parseKey(sheets, name) {
   const entries = [];
   let keeps = 0;
+  let controls = 0;
   const applied = appliedSheet(sheets);
   for (const sheet of sheets || []) {
     const rows = (sheet && sheet.rows) || [];
@@ -136,14 +236,20 @@ export function parseKey(sheets, name) {
       const real = trim(row[realCol]);
       const fake = trim(row[fakeCol]);
       if (!real || !fake) continue;
-      if (isKeepCell(fake)) {
+      const kind = keyCellKind(fake, real);
+      if (kind === "keep") {
         keeps++;
         continue;
       }
+      // An instruction is no pseudonym (keyCellKind): the row keeps its REAL,
+      // which the key still binds, and holds the cell's text as `control` —
+      // never as its fake.
+      if (kind === "control") controls++;
       const occ = occCol !== -1 ? parseInt(row[occCol], 10) : 0;
       entries.push({
         real,
-        fake,
+        fake: kind === "control" ? "" : fake,
+        control: kind === "control" ? fake : "",
         alt: statusCol !== -1 && fold(row[statusCol]) === ALT_STATUS,
         occ: isFinite(occ) && occ > 0 ? occ : 0,
         pinned,
@@ -157,7 +263,7 @@ export function parseKey(sheets, name) {
   const haveReal = new Set(entries.map((e) => fold(e.real)));
   const derived = [];
   for (const e of entries) {
-    if (!POSS_TAIL_RE.test(e.real)) continue;
+    if (e.control || !POSS_TAIL_RE.test(e.real)) continue;
     const baseReal = e.real.replace(POSS_TAIL_RE, "");
     const baseFake = e.fake.replace(POSS_TAIL_RE, "");
     if (!baseReal || !baseFake || haveReal.has(fold(baseReal))) continue;
@@ -169,10 +275,11 @@ export function parseKey(sheets, name) {
   // Reversal: exactly one row may own each fake. Pinned rows are out of this
   // direction entirely. Alt-spelling rows never own. What is left is the
   // macro's own guard: two CANONICAL rows claiming one fake, and the mapping
-  // is retired rather than restored to a coin flip.
+  // is retired rather than restored to a coin flip. A row holding an
+  // instruction has no fake to own (keyCellKind).
   const byFake = new Map();
   for (const e of entries) {
-    if (e.pinned) continue;
+    if (e.pinned || e.control) continue;
     const k = fold(e.fake);
     if (!byFake.has(k)) byFake.set(k, []);
     byFake.get(k).push(e);
@@ -207,20 +314,29 @@ export function parseKey(sheets, name) {
   // The warning / forward list: every real value the key binds, alt
   // spellings and pinned rows included. A real bound on both tabs takes the
   // APPLIED row's fake.
+  //
+  // …and a row holding an INSTRUCTION (keyCellKind) is here with no fake and
+  // the instruction as `control`: its real is still a value the key binds, so
+  // the marks find it and a save that would write it refuses, but nothing
+  // forwards it (compileForward) or offers it as you type (compileTypeahead).
+  // Where one sheet holds both an instruction and a fake for the same value,
+  // the instruction stands: it is what the operator typed last over that
+  // row's stand-in, and the fake beside it is the one the next run re-derives.
   const warn = [];
   const seenReal = new Map();
+  const rowOf = (e) => (e.control
+    ? { real: e.real, fake: "", pinned: !!e.pinned, control: e.control }
+    : { real: e.real, fake: e.fake, pinned: !!e.pinned });
   for (const e of entries) {
     const k = fold(e.real);
     const at = seenReal.get(k);
     if (at === undefined) {
       seenReal.set(k, warn.length);
-      warn.push({ real: e.real, fake: e.fake, pinned: !!e.pinned });
+      warn.push(rowOf(e));
       continue;
     }
-    if (warn[at].pinned && !e.pinned) {
-      warn[at].fake = e.fake;
-      warn[at].pinned = false;
-    }
+    const w = warn[at];
+    if ((w.pinned && !e.pinned) || (w.pinned === !!e.pinned && e.control && !w.control)) warn[at] = rowOf(e);
   }
 
   // Which CASE this key belongs to, in one value: the real name the exports
@@ -244,6 +360,9 @@ export function parseKey(sheets, name) {
     wordFakes,
     dropped: {
       keeps,
+      // Rows whose Replacement is an instruction rather than a pseudonym: in
+      // `warn` (marked, refused) and nowhere else.
+      controls,
       ambiguous,
       words: wordFakes.length,
       pinned: entries.filter((e) => e.pinned).length,
@@ -615,16 +734,49 @@ export function isCommonReal(value) {
  * The key's fakes that are ordinary words, as { fake, real }: retired from the
  * display (parseKey). Read off the pairs as well, for a key parsed and kept in
  * the library before the rule existed.
+ *
+ * A key kept from before its control cells were read (pairRows, below) took
+ * "n", "y" and "yes" typed over a stand-in for fakes that are ordinary words,
+ * and the reader's toast named them as stand-ins a full run would replace —
+ * "The key fakes “n” for “Quillon”". They are instructions, and are left out.
  */
 export function wordFakesOf(key) {
   if (!key) return [];
-  if (Array.isArray(key.wordFakes) && key.wordFakes.length) return key.wordFakes;
-  return (key.pairs || []).filter((p) => isCommonReal(p.fake)).map((p) => ({ fake: p.fake, real: p.real }));
+  const words = Array.isArray(key.wordFakes) && key.wordFakes.length ? key.wordFakes
+    : (key.pairs || []).filter((p) => isCommonReal(p.fake)).map((p) => ({ fake: p.fake, real: p.real }));
+  return readsControls(key) ? words : words.filter((p) => p && keyCellKind(p.fake, p.real) === "fake");
+}
+
+// A key parsed before its control cells were read (keyCellKind), and kept in
+// the library since — the reader opens a lone file under the last key it was
+// given, without the workbook to read again — carries an instruction as a
+// row's FAKE: "~Rasho" bound to "Rashoe" in its pairs and its warning rows
+// alike. The keys are read through these two, so such a key answers as a
+// fresh parse would: the instruction reverses nothing and is never written,
+// its real is still marked, and a keep ("n") binds nothing at all. A key this
+// parseKey made says so (`dropped.controls` is a number) and is taken as it
+// stands; an older one costs one classification a row, on a compile — no
+// matcher is touched.
+const readsControls = (key) => !!(key && key.dropped && typeof key.dropped.controls === "number");
+function pairRows(key) {
+  const pairs = (key && key.pairs) || [];
+  return readsControls(key) ? pairs : pairs.filter((p) => p && keyCellKind(p.fake, p.real) === "fake");
+}
+function warnRows(key) {
+  if (readsControls(key)) return key.warn || [];
+  const out = [];
+  for (const w of (key && key.warn) || []) {
+    if (!w || w.control || !w.fake) { if (w) out.push(w); continue; }
+    const kind = keyCellKind(w.fake, w.real);
+    if (kind === "fake") out.push(w);
+    else if (kind === "control") out.push({ real: w.real, fake: "", pinned: !!w.pinned, control: w.fake });
+  }
+  return out;
 }
 
 /** Reversal matcher: fake → real. A fake that is an ordinary word is never reversed (wordFakesOf). */
 export function compile(key) {
-  const pairs = ((key && key.pairs) || []).filter((p) => !isCommonReal(p.fake));
+  const pairs = pairRows(key).filter((p) => !isCommonReal(p.fake));
   const map = new Map(pairs.map((p) => [fold(p.fake), p.real]));
   const rx = buildMatcher(pairs.map((p) => p.fake));
   return { rx, map };
@@ -634,18 +786,28 @@ export function compile(key) {
  * FORWARD matcher: real → fake, the ReAnonymize direction. Built from the
  * same rows the warning watches (alt spellings included — real→fake is exactly
  * what they are for; keeps and common words excluded), longest real first.
+ *
+ * A row holding an INSTRUCTION (parseKey's `control`) has no fake, and gets
+ * none here: its real is MATCHED, so the matcher stops on it longest first,
+ * and maps to nothing, so nothing is written there. Matched rather than left
+ * out, because left out it would be read through its own shorter words: the
+ * key binding "Helen" to "Ingrid" and holding "~Helen Rasho" over "Helen
+ * Rashoe" made a save write "Ingrid Rashoe" — the surname in the clear beside
+ * a stand-in, a name half scrubbed that reads as done, and with the longer
+ * name gone from the text no mark and no refusal left to say so. The same
+ * protection a keep has from being blanked before this side reads the text.
  */
 export function compileForward(key) {
-  const warn = ((key && key.warn) || []).filter((w) => !isCommonReal(w.real));
+  const warn = warnRows(key).filter((w) => !isCommonReal(w.real));
   const map = new Map();
-  for (const w of warn) if (!map.has(fold(w.real))) map.set(fold(w.real), w.fake);
+  for (const w of warn) if (w.fake && !map.has(fold(w.real))) map.set(fold(w.real), w.fake);
   const rx = buildMatcher(warn.map((w) => w.real));
   return { rx, map };
 }
 
-/** Warning matcher over the REAL values — common English left out. */
+/** Warning matcher over the REAL values — common English left out; a row holding an instruction kept in, `control` and all. */
 export function compileReals(key) {
-  const warn = ((key && key.warn) || []).filter((w) => !isCommonReal(w.real));
+  const warn = warnRows(key).filter((w) => !isCommonReal(w.real));
   const map = new Map();
   for (const w of warn) if (!map.has(fold(w.real))) map.set(fold(w.real), w);
   const rx = buildMatcher(warn.map((w) => w.real));
@@ -667,7 +829,7 @@ export function compileReals(key) {
  * an ambiguous fake cannot answer for.
  */
 export function compileFakes(key) {
-  const warn = ((key && key.warn) || []).filter((w) => w.fake);
+  const warn = warnRows(key).filter((w) => w.fake);
   const map = new Map();
   for (const w of warn) if (!map.has(fold(w.fake))) map.set(fold(w.fake), w);
   const rx = buildMatcher(warn.map((w) => w.fake));
@@ -1165,10 +1327,14 @@ export function findRealSpansFrom(compiledReals, text, from, max, opts) {
  * finished.
  */
 export function compileTypeahead(key, alsoLonger) {
-  const warn = ((key && key.warn) || []).filter((w) => !isCommonReal(w.real));
+  const rows = warnRows(key).filter((w) => !isCommonReal(w.real));
+  // A row holding an instruction has no pseudonym to offer…
+  const warn = rows.filter((w) => w.fake);
   // `alsoLonger`: values not offered themselves (a kept "Helen Rasho") that a
-  // shorter real may still be the opening of — "Helen" stays partial.
-  const folded = warn.map((w) => fold(w.real)).concat((alsoLonger || []).map((v) => fold(v)));
+  // shorter real may still be the opening of — "Helen" stays partial. …and
+  // its real is one of those: the space bar swapping "Helen" the moment it is
+  // typed would leave "Rashoe" to be typed after it in the clear.
+  const folded = rows.map((w) => fold(w.real)).concat((alsoLonger || []).map((v) => fold(v)));
   const openings = openingsOf(folded);
   return warn
     .slice()

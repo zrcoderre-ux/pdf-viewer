@@ -305,7 +305,22 @@ app, which routes it to the reader tab.
   **Show fakes** shows the document as it is on disk. The key is read the way
   `DeAnonymize.bas` and the Claude extension read it: columns by header name,
   operator keeps skipped, alt spellings forward-only, an ambiguous fake
-  retired, the pinned tab out of the reversal. **A pseudonym that is an
+  retired, the pinned tab out of the reversal. **A control word typed over a
+  pseudonym in the key is not a pseudonym.** `~Rasho`, `*Rasho`, `phrase`,
+  `(Cross River Bank)`, `[Law]` or Excel's `#NAME?` in a Replacement cell is
+  an instruction for PDF-Linker's next full run, and the reader reads it as
+  PDF-Linker does: it is never shown in place of a name or written into a
+  file, and the real value it stands against is still marked orange where it
+  stands in the clear. The names bar and the right-click menu say what the key
+  holds for it instead of offering **Fake it**. A save that would write it —
+  you answered it `yes` on the LEAKS worksheet, say — is refused with a
+  message saying why: only a full PDF-Linker run (not Apply Fixes) gives it a
+  stand-in, and until then you retype it, or keep that one where it stands
+  (right-click it: **Keep just this one**). A longer name holding an
+  instruction is left whole, never written as a stand-in for one of its words
+  with the rest in the clear, wrapped down a caption's column or not. (A `no`,
+  `n` or `never`, or a bracket around the whole value, is a keep, as
+  before.) **A pseudonym that is an
   ordinary word is shown as written.** An older PDF-Linker could cut a
   surname's stand-in down to a word ("We"), and nothing in the text says which
   "we" the run wrote, so the reader used to paint the surname over every "we"

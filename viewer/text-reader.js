@@ -1481,6 +1481,52 @@ function standingSpans(text, held, pns) {
   const { flat, cited } = diskReading(text, held, pns);
   return PK.findRealSpans(reals, maskKept(flat, text), { layout: text }).filter((h) => !TD.insideCited(cited, h));
 }
+/**
+ * The INSTRUCTION the key holds for a real value where a pseudonym would be —
+ * "~Rasho", "phrase", "#NAME?" typed over the row's stand-in (PK.keyCellKind)
+ * — or "". Such a value is bound, so it is marked and a save refuses to write
+ * it, but the key has no fake for it until PDF-Linker's next full run carries
+ * the instruction out. "Fake it writes its pseudonym" was the wrong thing to
+ * tell the operator about it; the bar, the menu and the save say this instead.
+ */
+function keyInstruction(real) {
+  const w = reals && real != null ? reals.map.get(PK.fold(real)) : null;
+  return (w && w.control) || "";
+}
+/**
+ * A sentence for a toast naming the values in `realValues` the key holds only
+ * an instruction for, or "". A cell opening with "#" is Excel's error text,
+ * which PDF-Linker ignores (`_PN_XL_ERROR_VALUES`): no run turns that one into
+ * a stand-in until the cell is typed again, so the note says so rather than
+ * promise one.
+ *
+ * It is read where the save REFUSES — a value answered "fake it" (a LEAKS
+ * `yes`, or settled under the key as it read before the operator typed over
+ * the row) that the forward pass has nothing to write for — and its advice is
+ * what lets that save through without undoing the answer: retype the name, or
+ * keep that one where it stands, the file then reading there as it did before
+ * the save. It names the spot keep and nothing wider. The first draft said
+ * "keep it", which reads as the menu's "Keep in this case (no)" — and that
+ * keep stops the marks and the save's refusal for the value in every export of
+ * the folder, so each save after it leaves the name in the clear and says
+ * nothing, for a value the operator had said to FAKE.
+ */
+function instructionNote(realValues) {
+  const told = [];
+  let excel = false;
+  for (const v of new Set((realValues || []).map((x) => String(x).trim()))) {
+    const c = keyInstruction(v);
+    if (!c) continue;
+    told.push(`${v} (\u201c${c}\u201d)`);
+    if (c[0] === "#") excel = true;
+  }
+  if (!told.length) return "";
+  const one = told.length === 1;
+  const it = one ? "it" : "them";
+  return ` The key holds no pseudonym for ${told.slice(0, 3).join(", ")}${told.length > 3 ? "…" : ""}: ${one ? "its Replacement cell holds an instruction" : "their Replacement cells hold instructions"} to PDF-Linker`
+    + (excel ? " (one reading #… is Excel's error text, which PDF-Linker ignores: type that cell again in the key)" : "")
+    + `, and only a full run (not Apply Fixes) gives ${it} a stand-in. Until then retype ${it}, or keep ${it} where ${one ? "it stands" : "they stand"} (right-click: Keep just this one).`;
+}
 function compileKey() {
   const out = during("compiling the key", () => compileKeyNow());
   dropSweep(); // the folder was read under the key that has just changed
@@ -3734,7 +3780,20 @@ async function saveDocument() {
     let standing = standingSpans(text, held, pns);
     let left = standing.filter((h) => !isSettled(h.real));
     if (fwd && fwd.rx) {
-      const fw = forwardText(text, held, pns, left.flatMap((h) => h.ranges));
+      // A name the key holds an INSTRUCTION for (no fake: PK.keyCellKind) is
+      // spared whole too, settled or not. Nothing can be written for it, and
+      // left in the pass its shorter words were: compileForward matches such a
+      // name and maps it to nothing, which keeps "Helen" inside "Helen Rashoe"
+      // on one line, but no column hit is made for a name with no fake, so one
+      // wrapped down a caption's column ("…and Jonathan" / "Avery Smith
+      // Walker, an") was read through the bound "Walker" alone. Settled — a
+      // LEAKS `yes` on the full name — the save wrote "Jonathan / Avery Smith
+      // Cascadia", and with the full name gone from the text nothing was left
+      // to mark or refuse: a name half scrubbed that read as finished. Spared,
+      // it stands whole, the stuck list holds it, and the last check below
+      // refuses it and says why (instructionNote).
+      const spare = standing.filter((h) => !h.fake || !isSettled(h.real));
+      const fw = forwardText(text, held, pns, spare.flatMap((h) => h.ranges));
       if (fw.swaps) {
         snapshot(body, true);
         forwarded += fw.swaps;
@@ -3799,7 +3858,7 @@ async function saveDocument() {
       const plain = TD.serializeExport(memberDoc(m));
       const left = PK.findReals(reals, TD.blankRanges(maskKept(held, plain), TD.citedNameSpans(held)), { layout: plain });
       if (left.length) {
-        toast(`Not saved: ${m.name} still carries a real name the key binds — ` + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again.", { error: true });
+        toast(`Not saved: ${m.name} still carries a real name the key binds — ` + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again." + instructionNote(left.map((w) => w.real)), { error: true });
         return false;
       }
     }
@@ -3881,7 +3940,7 @@ async function saveDocument() {
   const stuckWarn = stuck.length
     ? ` · ⚠ ${stuck.length} name${stuck.length === 1 ? "" : "s"} you said to fake could not be written as ${stuck.length === 1 ? "its pseudonym" : "pseudonyms"} where ${stuck.length === 1 ? "it stands" : "they stand"} — `
       + stuckNames.slice(0, 4).join(", ") + (stuckNames.length > 4 ? "…" : "")
-      + ". Retype or keep " + (stuck.length === 1 ? "it" : "them") + " by hand."
+      + ". Retype or keep " + (stuck.length === 1 ? "it" : "them") + " by hand." + instructionNote(stuckNames)
     : "";
   toast((!wrote.length
     ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : "Nothing to save.")
@@ -6970,7 +7029,10 @@ function renderNamesBar() {
   $("nb-value").textContent = h.real;
   $("nb-value").title = "A real name from the key, standing in the clear";
   $("nb-where").textContent = leakWhere(h);
-  $("nb-answer").textContent = "undecided — the save leaves it as it stands; " + (h.fake ? `fake it writes \u201c${h.fake}\u201d` : "fake it writes its pseudonym");
+  const told = h.fake ? "" : keyInstruction(h.real);
+  $("nb-answer").textContent = "undecided — the save leaves it as it stands; " + (h.fake ? `fake it writes \u201c${h.fake}\u201d`
+    : told ? `the key holds \u201c${told}\u201d for it, an instruction to PDF-Linker and not a pseudonym, so there is nothing to fake it with until a full run`
+      : "fake it writes its pseudonym");
   $("nb-answer").title = $("nb-answer").textContent; // it takes the room there is, and a long one is cut short
   $("nb-fake").disabled = !h.fake;
   $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2 && !restOfFolder().length;
@@ -7297,6 +7359,13 @@ function showKeepMenu(target, x, y) {
   $("keep-menu-sub").childNodes[2].nodeValue = master ? " — take it off the Master Keep to fake it."
     : t.here ? " still stands for it." : t.leak ? (isSettled(t.real) ? " on the next save — you said to fake it." : " once you say to fake it — until then the save leaves it as it stands.") : " until PDF-Linker re-runs.";
   if (master) $("keep-menu-fake").textContent = "its KEEP sheet says so";
+  // A value the key holds an instruction for has no pseudonym to be written as.
+  const told = !master && !t.here && t.leak && !t.fake ? keyInstruction(t.real) : "";
+  if (told) {
+    $("keep-menu-sub").childNodes[0].nodeValue = "The key holds ";
+    $("keep-menu-fake").textContent = `\u201c${told}\u201d`;
+    $("keep-menu-sub").childNodes[2].nodeValue = " for it, an instruction to PDF-Linker and not a pseudonym: nothing can be written for it until a full run carries it out.";
+  }
   // The narrowest keep: this occurrence, and no other. Already one, or already
   // kept for the whole case (or by the master), and there is nothing narrower
   // to ask for.
