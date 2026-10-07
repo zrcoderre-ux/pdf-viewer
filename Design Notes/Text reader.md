@@ -269,6 +269,47 @@ held off through those re-reads, and a fresh choice of the workbook clears it.
 The extension's reader and the installed app are different origins, so each is
 set up once on its own.
 
+**A PDF-Linker run going in the case folder** (`checkRun`, `runMarkersIn`,
+`showRunning`, `showRunEnded`, `readFolderAfterRun`, `textdoc.runMarker`; the
+`#run-bar` under `#key-offer`, taking its own height through `--run-h`). A run
+rewrites the case folder as it goes: every export in Text Files, one PDF after
+another, then the key and LEAKS.xlsx at its end. A document opened meanwhile is
+the last run's text, or text the run is part-way through, read under a key it
+is about to replace, and a save made before it finishes can be overwritten by
+it or overwrite what it has just written. PDF-Linker already says it is going,
+to the operator in Explorer: a zero-byte `ETA <estimate>.txt` in the case
+folder, rewritten after each PDF (`_write_eta_marker`), and replaced by
+`DONE <clock>.txt` on a clean finish (`_write_done_marker`). So `openFileNow`
+looks for one each time an export opens (not awaited: the document is never
+held for it), as does the attach a click gives a folder that needed
+re-authorising. Only EMPTY files count, as PDF-Linker scopes its own
+(`_clear_eta_markers`, `_marker_mtime`), so a real "ETA notes.txt" is not a
+run; and a run is going where the newest ETA is newer than any DONE stamp,
+which is the test PDF-Linker makes of a copied folder (`_copy_is_ahead`). The
+marker's clock is written colon-free for Windows ("6.04PM"); `runMarker` puts
+the colon back for the bar. While the bar is up it looks again every
+`RUN_RECHECK_MS` and on `focus` and becoming visible (as `refreshMaster`
+does), so it says when the run has ended instead of warning about one that is
+over — with the DONE time, or that it stopped without one (a crashed
+`--fix-leaks` clears its marker and writes no stamp) — and offers **Read the
+folder again** (`readFolderAfterRun`: the PDFs and built-ahead pages dropped,
+the folder adopted again for the new key and worksheet, the open export
+reopened, found again by its label where the run renamed it to or from
+`.txt.LEAK`). A full run that dies leaves its ETA marker standing until the
+next run clears it, and the reader cannot tell that from a slow OCR file; the
+bar gives the marker's age past `RUN_STALE_MS` and points at
+`pdf_linker.log` rather than guessing. **×** stops the rechecks; the next
+export opened looks again and brings the bar back while the run is still
+going. The ended bar stays up across exports opened after it, until the
+folder is read again or put away: such an export is the run's new text, but
+an open inside the folder held attaches no key (`attachKeyForFile` returns
+early), so the key in hand is still the one read before the run. `runSeq`
+lets only the latest look answer (a recheck with no bar up does not count,
+or a focus landing during an open would silence it), and `forgetFolder` takes
+the bar down with the folder it was about. Nothing is blocked: the bar warns
+and the operator decides. The marker names are a format read outside
+PDF-Linker, recorded in its CLAUDE.md beside the export headers and the key.
+
 **⇄ Raw** (`.raw-page`, on every page label, between `.swap-page` and
 `.nocr-page`; it replaced the toolbar's 📄 File as text panel) puts the page's
 own text in the page's place, the way ⇄ PDF puts its PDF page there.

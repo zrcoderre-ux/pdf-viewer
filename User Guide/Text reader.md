@@ -366,6 +366,26 @@ app, which routes it to the reader tab.
   the text is still the way through its rows; this steps what is standing in
   the text, which is not the same list (a worksheet is one row per value, and
   a value leaks wherever it leaks).
+- **A warning while PDF-Linker is running on the folder.** A run leaves an
+  `ETA ~6.04PM (6 of 13).txt` file in the case folder while it works and
+  replaces it with `DONE 6.12PM.txt` when it finishes. Open an export while
+  the ETA file is there and a red bar under the toolbar says so, with the
+  estimate: the run is rewriting the exports, and then the key and LEAKS.xlsx,
+  so what you are reading may be replaced under you and anything you save
+  before it finishes can be overwritten. **×** puts the bar away; it comes back
+  with the next document you open while the run is still going. While it is
+  up the reader looks at the folder again every half minute and whenever you
+  come back to the window, and when the run ends the bar says so (with its
+  DONE time, or that it stopped without one) and offers **Read the folder
+  again**, which reloads the key, the worksheet and the PDFs and reopens the
+  document as the run left it. That bar stays up until you do (or put it
+  away), since until then the reader is still holding the key from before the
+  run. A run that crashed leaves its ETA file behind
+  until the next run clears it; the bar then adds how long ago the file was
+  last updated (the run rewrites it after every PDF), and `pdf_linker.log`
+  says whether anything is still going. The reader can only look while it
+  holds the case folder, so a file opened on its own, with no folder known,
+  gets no warning.
 - **The key, term by term.** **🗝 Key terms** in the tools panel (or a click
   on the pseudonym count in the status bar) puts a bar over the text that
   walks the pseudonym key as it stands on the page. A **term** is one row of
