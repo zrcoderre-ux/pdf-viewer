@@ -4846,12 +4846,14 @@ async function saveRedactedCopy() {
     }
     statusEl.textContent = "Writing the redacted copy…";
     const bytes = await buildRedactedPdf({ pages });
-    // Forward through the key so the copy carries the pseudonymized name, and
-    // never in place: this save has no path to the open file at all.
-    const name = sanitizePdfFilename(RD.redactedName(
-      currentDocumentName(),
-      redactFwd ? (t) => PK.translate(redactFwd, t).text : null,
-    ));
+    // Forward through the key so the copy carries the pseudonymized name — or
+    // a neutral one, where a bound value would still stand in it
+    // (redact.scrubbedStem) — and never in place: this save has no path to the
+    // open file at all.
+    const name = sanitizePdfFilename(RD.redactedName(currentDocumentName(), {
+      forward: redactFwd ? (t) => PK.translate(redactFwd, t).text : null,
+      rows: redactKey ? PK.boundRows(redactKey) : [],
+    }));
     const ok = await writeOutPdf(bytes, name);
     statusEl.textContent = ok
       ? `Saved ${name} — ${boxes} box${boxes === 1 ? "" : "es"} blacked out, no text layer, no metadata.`

@@ -318,20 +318,272 @@ export function coveredClaims(claims, labels) {
   return out;
 }
 
+// ── the name the copy is saved under ────────────────────────────────────────
+//
+// THE NAME GOES WHERE THE COPY GOES. A redacted copy is the one file made to
+// be handed on — attached to a letter, uploaded to a court, given to a drafting
+// model — and its name travels with it. A copy with every party blacked out of
+// its pages and "Helen_Rasho_Decl (redacted).pdf" on the outside has hidden
+// nothing.
+//
+// The name used to be the stem run forward through the key as it stood, and
+// the key only finds a name standing as a WORD. A file name is not a sentence:
+//
+//   AN UNDERSCORE IS A LETTER to the matcher (a word character, like \w), so
+//     "Rasho_v_Quillmark_MTC" was one word with no name in it, and
+//     "25STCV59720_Complaint" carried the docket the same way.
+//   A WELD HAS NO BOUNDARY AT ALL. People drop the space between names in a
+//     file name as a matter of course — "HelenRasho Decl", "RashoDecl" — and a
+//     whole-word match cannot land inside one.
+//
+// Each came out exactly as it went in, the party's name and the case number on
+// the outside of a copy whose pages were black over both. PDF-Linker met the
+// same file names first, naming the exports (_pn_scrubbed_stem: "the family's
+// surname rode out in the name of the one file that is shared"), and the copy
+// is named the way it names an export:
+//
+//   1. Runs of _ and - are spaces, so every word of the stem is a word to the
+//      key (pdfsync.spaceStem is the same normalisation, for matching an export
+//      to its PDF). Spaces, never underscores: the name of a document is
+//      written with spaces.
+//   2. The stem is run forward through the key.
+//   3. A run of letters made only of two or three bound name words joined
+//      exactly — "HelenRasho", "HELENRASHO" — is their fakes joined the same
+//      way (unweldNames, _pn_unweld_stem_names).
+//   4. And then the name is CHECKED: where a bound value still stands in it,
+//      the copy takes a neutral name instead, "document 3fa9c1 (redacted).pdf".
+//      A useful name is worth having. It is not worth a party's name.
+//
+// ONE DEPARTURE FROM PDF-LINKER, in step 1. The reader's matcher reads a value
+// exactly as the key spells it — a space as any gap, but a hyphen as a hyphen
+// — so a federal docket "23-cv-01234" spaced out is a docket the forward no
+// longer knows, and the check would send the copy to the neutral name for a
+// value the key could have faked. A bound value spelled WITH a hyphen keeps its
+// hyphens and is faked whole.
+
+const SEPARATORS_RE = /[_-]+/g;
+const WORDS_RE = /[\p{L}\p{N}]+/gu;
+const ALNUM_RE = /[\p{L}\p{N}]/u;
+// PDF-Linker's own reach: a weld of at least six letters, ASCII as there.
+const WELD_RUN_RE = /[A-Za-z]{6,}/g;
+const NAME_WORD_RE = /^\p{L}{3,}$/u;
+const LETTERS_RE = /^\p{L}+$/u;
+// PDF-Linker's _PN_WELD_CORE_MIN: a value this long (letters and digits) does
+// not turn up inside an ordinary word by coincidence.
+const WELD_CORE_MIN = 8;
+
+/** A text's words: every run of letters and digits, folded, whatever stands between them. */
+function wordsOf(s) {
+  return String(s == null ? "" : s).toLowerCase().match(WORDS_RE) || [];
+}
+
 /**
- * The name a redacted copy is saved under: the document's own stem run FORWARD
- * through the key where one is in hand — a copy of "Rasho v Quillmark - MTC.pdf"
- * is saved as "Strangeways v Melbury - MTC (redacted).pdf" — and marked
- * redacted either way, so the copy is never mistaken for the file it came from.
- * The mark is written once however many times a copy is copied.
+ * The stem with its separators spaced (step 1), save inside a bound value whose
+ * own spelling carries them. `rows` as scrubbedStem takes them.
  */
-export function redactedName(name, forward, mark = "redacted") {
-  let stem = String(name == null ? "" : name).split(/[\\/]/).pop().replace(/\.pdf$/i, "").trim();
-  if (typeof forward === "function") {
-    try { const faked = forward(stem); if (faked) stem = faked; } catch { /* the name it has */ }
+function spacedStem(stem, rows) {
+  const s = String(stem == null ? "" : stem);
+  let keep = null;
+  const low = s.toLowerCase();
+  // (A letter whose lower case is longer than itself puts every place after it
+  // out by one; such a stem is simply spaced.)
+  if (s.indexOf("-") !== -1 && low.length === s.length) {
+    for (const w of rows) {
+      const v = String((w && w.real) || "").trim().toLowerCase();
+      if (v.indexOf("-") === -1 || v.length > low.length) continue;
+      for (let at = low.indexOf(v); at !== -1; at = low.indexOf(v, at + 1)) {
+        // Whole words only, as the forward reads it.
+        if (ALNUM_RE.test(low[at - 1] || "") || ALNUM_RE.test(low[at + v.length] || "")) continue;
+        (keep || (keep = new Uint8Array(s.length))).fill(1, at, at + v.length);
+      }
+    }
   }
+  return s.replace(SEPARATORS_RE, (m, at) => (keep && keep[at] ? m : " ")).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The stem with its welds PARTED where a person leaves a seam running two words
+ * together: where the case turns ("RashoDecl", "MSJRasho") and where letters
+ * meet digits ("Rasho2023"). PDF-Linker's hard seam (_pn_span_has_hard_seam).
+ * Read by the check, never written: "McDonald" parted is no name of anyone's.
+ */
+export function partWelds(s) {
+  return String(s == null ? "" : s)
+    .replace(/(\p{Ll})(?=\p{Lu})/gu, "$1 ")
+    .replace(/(\p{Lu})(?=\p{Lu}\p{Ll})/gu, "$1 ")
+    .replace(/(\p{L})(?=\p{N})/gu, "$1 ")
+    .replace(/(\p{N})(?=\p{L})/gu, "$1 ");
+}
+
+/**
+ * {folded real word → its fake word} for every row whose fake was composed
+ * word for word: "Helen Rasho" → "Ingrid Strangeways" gives helen → Ingrid and
+ * rasho → Strangeways. Words of three letters or more, letters only, and only
+ * where the word was actually replaced — firm furniture carried into the fake
+ * ("Holdings") is no name. PDF-Linker's _pn_name_token_fakes, which reads only
+ * the person rows: the key as the reader has it carries no category, so every
+ * row composed word for word is read, and the corroboration below is what holds.
+ */
+export function nameWordFakes(rows) {
+  const out = new Map();
+  for (const w of rows || []) {
+    if (!w || !w.fake || w.control) continue;
+    const reals = String(w.real).trim().split(/\s+/);
+    const fakes = String(w.fake).trim().split(/\s+/);
+    if (reals.length !== fakes.length) continue;
+    reals.forEach((r, i) => {
+      const f = fakes[i];
+      const k = r.toLowerCase();
+      if (NAME_WORD_RE.test(r) && LETTERS_RE.test(f) && k !== f.toLowerCase() && !out.has(k)) out.set(k, f);
+    });
+  }
+  return out;
+}
+
+/**
+ * `stem` with every run of letters that is two or three bound name words run
+ * together replaced by their fakes run together the same way, each in its own
+ * word's case: "HelenRasho" → "IngridStrangeways", "HELENRASHO" →
+ * "INGRIDSTRANGEWAYS". PDF-Linker's _pn_unweld_stem_names.
+ *
+ * The corroboration is the CONCATENATION: the run is nothing but bound words,
+ * joined exactly, and no ordinary word is two names end to end. A run that is
+ * ONE bound word is the forward's business and is left to it; a run with any
+ * letter no bound word accounts for ("RashoDecl") is left whole, for the check.
+ */
+export function unweldNames(stem, words) {
+  const s = String(stem == null ? "" : stem);
+  if (!words || !words.size) return s;
+  // Three words at most, so no run longer than three of the longest is one.
+  let longest = 0;
+  for (const k of words.keys()) if (k.length > longest) longest = k.length;
+  const split = (run, left) => {
+    const low = run.toLowerCase();
+    if (!low) return [];
+    if (left === 0) return null;
+    for (let k = low.length - 2; k > 2; k--) {
+      const head = low.slice(0, k);
+      if (!words.has(head)) continue;
+      const rest = split(run.slice(k), left - 1);
+      if (rest) return [[run.slice(0, k), words.get(head)], ...rest];
+    }
+    return words.has(low) ? [[run, words.get(low)]] : null;
+  };
+  return s.replace(WELD_RUN_RE, (run) => {
+    if (run.length > 3 * longest || words.has(run.toLowerCase())) return run;
+    const parts = split(run, 3);
+    if (!parts || parts.length < 2) return run;
+    return parts.map(([real, fake]) => (real === real.toUpperCase() ? fake.toUpperCase()
+      : real === real.toLowerCase() ? fake.toLowerCase() : fake)).join("");
+  });
+}
+
+/**
+ * Whether a bound value still stands in a (scrubbed) stem. `rows` as
+ * scrubbedStem takes them.
+ *
+ * WHOLE WORDS, NEVER LETTERS. A test for every bound word anywhere inside the
+ * name would answer yes for "Release" in a matter with a party named Lee, and
+ * for "Annual" with one named Ann, and a folder's worth of copies would come
+ * out named "document …" for nothing. So the name is asked three ways, each
+ * the reader's own form of a reading PDF-Linker's check makes:
+ *
+ *   AS WRITTEN, every run of letters and digits a word whatever stands between
+ *     them: "Rasho's", "23 cv 01234" (a docket that lost its hyphens), "J.
+ *     Smith". A value is found where all its words stand in a row.
+ *   WITH ITS WELDS PARTED (partWelds): "RashoDecl" read as "Rasho Decl". The
+ *     seam is the evidence — "Release" has none to part.
+ *   A LONG VALUE INSIDE A WORD: eight letters and digits or more, anywhere in
+ *     one — "HELENRASHODECL", "25STCV59720Complaint". PDF-Linker's long weld
+ *     tier, and for the same reason: a core that long is not a coincidence.
+ *
+ * What is NOT caught is a short name welded at no seam, all in one case:
+ * "RASHODECL". PDF-Linker tells that from "MARKETING" with a dictionary the
+ * reader does not have, and without one the only test is the substring test
+ * above. The name is offered in the Save dialog and named once it is saved.
+ */
+export function boundValueStands(stem, rows) {
+  const byFirst = new Map();
+  const cores = [];
+  for (const w of rows || []) {
+    const words = wordsOf(w && w.real);
+    if (!words.length) continue;
+    const list = byFirst.get(words[0]);
+    if (list) list.push(words); else byFirst.set(words[0], [words]);
+    const core = words.join("");
+    if (core.length >= WELD_CORE_MIN) cores.push(core);
+  }
+  const standsIn = (words) => {
+    for (let i = 0; i < words.length; i++) {
+      for (const want of byFirst.get(words[i]) || []) {
+        let k = 0;
+        while (k < want.length && words[i + k] === want[k]) k++;
+        if (k === want.length) return true;
+      }
+    }
+    return false;
+  };
+  const plain = wordsOf(stem);
+  return standsIn(plain) || standsIn(wordsOf(partWelds(stem)))
+    || cores.some((c) => plain.some((w) => w.length >= c.length && w.indexOf(c) !== -1));
+}
+
+/**
+ * The neutral name's few characters: FNV-1a over the stem — the same document
+ * always takes the same one, two documents rarely one — MIXED WITH THE KEY'S
+ * REAL VALUES. A hash of the stem alone would let anyone holding the copy test
+ * a guess at the name it came from ("is it Rasho_Decl?"); the key is never a
+ * file to share, so with it folded in a guess has nothing to be tested against.
+ */
+function stemDigest(stem, rows) {
+  let h = 2166136261;
+  const eat = (s) => {
+    for (const b of new TextEncoder().encode(s)) { h ^= b; h = Math.imul(h, 16777619) >>> 0; }
+  };
+  for (const w of rows) eat(String((w && w.real) || "") + "\n");
+  eat(String(stem));
+  return h.toString(16).padStart(8, "0").slice(0, 6);
+}
+
+/**
+ * A document's stem made fit to name a shared copy: steps 1 to 4 above.
+ *
+ * `scrub` is `{ forward, rows }`: `forward(text)` writes real → fake (the
+ * caller's compiled key), and `rows` are the values the key binds as
+ * pseudo-key.boundRows gives them (`{ real, fake }`, an instruction row with no
+ * fake) — what the welds are read against and what the check looks for. A bare
+ * function is a forward with no rows: its own reading of the name, as written
+ * and parted, is then the check. No key, no forward and no check, but the
+ * separators are spaces all the same.
+ */
+export function scrubbedStem(stem, scrub) {
+  const { forward, rows } = typeof scrub === "function" ? { forward: scrub, rows: null } : (scrub || {});
+  const bound = Array.isArray(rows) ? rows : [];
+  const fwd = typeof forward === "function" ? forward : null;
+  let s = spacedStem(stem, bound);
+  if (!s) return "";
+  if (fwd) {
+    try { const faked = fwd(s); if (faked) s = faked; } catch { /* the name it has */ }
+  }
+  s = unweldNames(s, nameWordFakes(bound)).replace(/\s+/g, " ").trim();
+  const stands = bound.length ? boundValueStands(s, bound)
+    : fwd ? [s, partWelds(s)].some((t) => { try { return fwd(t) !== t; } catch { return false; } })
+    : false;
+  return stands || !s ? "document " + stemDigest(stem, bound) : s;
+}
+
+/**
+ * The name a redacted copy is saved under: the document's own stem made fit to
+ * share (scrubbedStem) — a copy of "Helen_Rasho_Decl.pdf" is saved as "Ingrid
+ * Strangeways Decl (redacted).pdf", one of "RashoDecl.pdf" as "document 3fa9c1
+ * (redacted).pdf" — and marked redacted either way, so the copy is never
+ * mistaken for the file it came from. The mark is written once however many
+ * times a copy is copied. `scrub` as scrubbedStem takes it.
+ */
+export function redactedName(name, scrub, mark = "redacted") {
+  let stem = String(name == null ? "" : name).split(/[\\/]/).pop().replace(/\.pdf$/i, "").trim();
   stem = stem.replace(new RegExp("\\s*\\(\\s*" + mark.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\s*\\)\\s*$", "i"), "").trim();
-  return (stem || "document") + " (" + mark + ").pdf";
+  return (scrubbedStem(stem, scrub) || "document") + " (" + mark + ").pdf";
 }
 
 /** How many pages and how many boxes, said the way a bar says it. */

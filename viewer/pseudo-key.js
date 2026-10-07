@@ -32,7 +32,8 @@
 //   compileForward / forwardRuns   real → fake, the direction a SAVE needs:
 //                   a real name typed into the reader is written to disk as
 //                   its pseudonym, never as itself.
-//   compileReals / findReals   which real values stand in a text.
+//   compileReals / findReals   which real values stand in a text; boundRows
+//                   the same values as rows, for a question asked of a name.
 //   All of them read through one scan (hitsFrom); the save and the leak
 //   readings ask for the column names with a `layout`, the text as it stands.
 //
@@ -805,9 +806,20 @@ export function compileForward(key) {
   return { rx, map };
 }
 
+/**
+ * Every real value the key binds, as rows — `{ real, fake, pinned, control? }`,
+ * the instruction rows with no fake — common English left out: the rows the
+ * warning matcher below is built from, for a reader that asks its question of
+ * a few words rather than of a page (redact.scrubbedStem, a file's name). A key
+ * kept from before its control cells were read answers as a fresh parse.
+ */
+export function boundRows(key) {
+  return warnRows(key).filter((w) => !isCommonReal(w.real));
+}
+
 /** Warning matcher over the REAL values — common English left out; a row holding an instruction kept in, `control` and all. */
 export function compileReals(key) {
-  const warn = warnRows(key).filter((w) => !isCommonReal(w.real));
+  const warn = boundRows(key);
   const map = new Map();
   for (const w of warn) if (!map.has(fold(w.real))) map.set(fold(w.real), w);
   const rx = buildMatcher(warn.map((w) => w.real));

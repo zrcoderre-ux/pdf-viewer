@@ -14544,7 +14544,9 @@ async function saveRedactedCopiesNow() {
   try {
     const dpi = parseInt(rbDpi.value, 10) || 200;
     const scale = dpi / 72;
-    const fwdN = fwdName();
+    // The copy's name is run forward and then CHECKED against every value the
+    // key binds (redact.scrubbedStem): the same key the name is faked by.
+    const nameScrub = { forward: fwdName(), rows: key ? PK.boundRows(key) : [] };
     for (const m of marked) {
       const src = pdfSourceFor(m.name);
       if (!src) { toast(`${m.name} is no longer open — its boxes are still marked.`, { error: true }); continue; }
@@ -14562,9 +14564,10 @@ async function saveRedactedCopiesNow() {
       }
       rbState.textContent = `Writing the redacted copy of ${m.name}…`;
       const bytes = await buildRedactedPdf({ pages });
-      // Forward through the key so the copy carries the pseudonymized name,
-      // and never in place: this save has no path to the PDF in the folder.
-      const name = RD.redactedName(m.name, fwdN);
+      // Forward through the key so the copy carries the pseudonymized name —
+      // or a neutral one, where a bound value would still stand in it — and
+      // never in place: this save has no path to the PDF in the folder.
+      const name = RD.redactedName(m.name, nameScrub);
       const ok = await writeBlob(new Blob([bytes], { type: "application/pdf" }), name, null,
         { description: "PDF", accept: { "application/pdf": [".pdf"] } });
       if (ok) written.push({ name, boxes: m.boxes });

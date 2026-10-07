@@ -16,8 +16,10 @@ import {
   addRedaction, removeRedaction, redactionsFor, redactionPages,
   redactionCount, clearRedactions, createRedactionStore, pageBoxFromView,
   valueWords, wordsOwed, coveredClaims,
+  scrubbedStem, unweldNames, nameWordFakes, partWelds, boundValueStands,
 } from "./viewer/redact.js";
 import { buildRedactedPdf } from "./viewer/pdf-edit.js";
+import { parseKey, compileForward, forwardRuns, translate, boundRows } from "./viewer/pseudo-key.js";
 
 let fails = 0;
 function check(label, got, want) {
@@ -125,11 +127,14 @@ console.log("a box grown, and held on its page");
 
 console.log("the name the copy is saved under");
 {
+  // The copy is named as PDF-Linker names the export (_pn_scrubbed_stem): its
+  // separators spaced, then faked — so "Rasho v Quillmark - MTC" is named as
+  // its export is, "Strangeways v Melbury MTC".
   const fake = (t) => t.replace(/Rasho/g, "Strangeways").replace(/Quillmark/g, "Melbury");
   check("no key, and the copy is still marked",
-    redactedName("Rasho v Quillmark - MTC.pdf", null), "Rasho v Quillmark - MTC (redacted).pdf");
+    redactedName("Rasho v Quillmark - MTC.pdf", null), "Rasho v Quillmark MTC (redacted).pdf");
   check("with a key the copy carries the pseudonymized name",
-    redactedName("Rasho v Quillmark - MTC.pdf", fake), "Strangeways v Melbury - MTC (redacted).pdf");
+    redactedName("Rasho v Quillmark - MTC.pdf", fake), "Strangeways v Melbury MTC (redacted).pdf");
   check("a copy of a copy is marked once",
     redactedName("Strangeways v Melbury (redacted).pdf", null), "Strangeways v Melbury (redacted).pdf");
   check("a path is not part of the name",
@@ -137,6 +142,121 @@ console.log("the name the copy is saved under");
   check("a key that throws leaves the name it had",
     redactedName("MTC.pdf", () => { throw new Error("no"); }), "MTC (redacted).pdf");
   check("a nameless file is still a file", redactedName("", null), "document (redacted).pdf");
+  check("with no key at all, a document's name is written with spaces, never underscores",
+    redactedName("Motion_to_Compel__Further.pdf", null), "Motion to Compel Further (redacted).pdf");
+}
+
+// THE NAME GOES WHERE THE COPY GOES. The stem used to be run forward as it
+// stood, and the key finds a name only standing as a word: an underscore is a
+// letter to its matcher and a weld has no boundary, so "Helen_Rasho_Decl",
+// "RashoDecl" and "25STCV59720_Complaint" were the names of copies whose pages
+// were black over every one of those values. Both of the readers' forwards are
+// run here — the text reader's (forwardRuns) and the viewer's (translate) —
+// over the key the review found it with.
+console.log("the copy's name hides what its pages hide");
+{
+  const key = parseKey([{ name: "Pseudonym Key", rows: [
+    ["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"],
+    ["person", "Helen Rasho", "Ingrid Strangeways", "", "", "spreadsheet", 12],
+    ["person-token", "Rasho", "Strangeways", "", "", "spreadsheet", 30],
+    ["entity", "Quillmark Holdings", "Melbury Partners", "", "", "spreadsheet", 4],
+    ["entity-token", "Quillmark", "Melbury", "", "", "spreadsheet", 4],
+    ["docket", "25STCV59720", "25STZV11111", "", "", "spreadsheet", 4],
+    ["docket", "23-cv-01234", "23-cv-05678", "", "", "spreadsheet", 2],
+    ["person-token", "Lee", "Hartwell", "", "", "spreadsheet", 4],
+    ["person-token", "Ann", "Corvina", "", "", "spreadsheet", 4],
+    ["person-token", "Bill", "Tamsin", "", "", "spreadsheet", 3],
+    ["person-token", "Rashoe", "~Rasho", "", "leaked", "document", 1],
+  ] }], "pseudonym_key.xlsx");
+  const f = compileForward(key);
+  const rows = boundRows(key);
+  const readers = {
+    reader: { forward: (t) => forwardRuns(f, t).map((r) => (r.t === "swap" ? r.to : r.s)).join(""), rows },
+    viewer: { forward: (t) => translate(f, t).text, rows },
+  };
+  const both = (name) => {
+    const a = redactedName(name, readers.reader);
+    const b = redactedName(name, readers.viewer);
+    return a === b ? a : `reader ${a} / viewer ${b}`;
+  };
+  const NEUTRAL = /^document [0-9a-f]{6} \(redacted\)\.pdf$/;
+
+  check("underscores are spaces, and the names between them are faked",
+    both("Rasho_v_Quillmark_MTC.pdf"), "Strangeways v Melbury MTC (redacted).pdf");
+  check("a full name joined by underscores is faked whole",
+    both("Helen_Rasho_Decl.pdf"), "Ingrid Strangeways Decl (redacted).pdf");
+  check("a docket before an underscore is faked",
+    both("25STCV59720_Complaint.pdf"), "25STZV11111 Complaint (redacted).pdf");
+  check("a hyphen is a space too, as PDF-Linker spaces it",
+    both("Rasho-Decl.pdf"), "Strangeways Decl (redacted).pdf");
+  check("…save inside a value spelled with one: the docket keeps its hyphens and is faked whole",
+    both("23-cv-01234_Order.pdf"), "23-cv-05678 Order (redacted).pdf");
+
+  // Two or three bound name words run together, and nothing else, are their
+  // fakes run together the same way, each in its own case.
+  check("a welded full name is its fakes welded",
+    both("HelenRasho Decl.pdf"), "IngridStrangeways Decl (redacted).pdf");
+  check("…in capitals", both("HELENRASHO_DECL.pdf"), "INGRIDSTRANGEWAYS DECL (redacted).pdf");
+  check("…in lower case", both("helenrasho.pdf"), "ingridstrangeways (redacted).pdf");
+  check("…two parties' words alike", both("QuillmarkRasho Opp.pdf"), "MelburyStrangeways Opp (redacted).pdf");
+
+  // A value the key cannot fake where it stands takes the copy to a neutral
+  // name: a name welded to a word no key binds, at a seam where the case or
+  // the digits turn; a long value inside a word; a docket that lost its
+  // hyphens; a value whose row holds an instruction rather than a fake.
+  for (const n of ["RashoDecl.pdf", "MSJRasho.pdf", "Rasho2023.pdf", "HELENRASHODECL.pdf",
+    "25STCV59720Complaint.pdf", "23_cv_01234 Order.pdf", "Rashoe_Decl.pdf"]) {
+    const got = both(n);
+    ok(`${n} takes a neutral name (${got})`, NEUTRAL.test(got));
+  }
+  const n1 = redactedName("RashoDecl.pdf", readers.reader);
+  check("the same document always takes the same neutral name", redactedName("RashoDecl.pdf", readers.reader), n1);
+  ok("…and another document another", redactedName("RashoReply.pdf", readers.reader) !== n1);
+  check("re-redacting a neutral copy keeps its name, marked once", redactedName(n1, readers.reader), n1);
+  // The hash carries the key: a guess at the original name cannot be tested
+  // against the copy by anyone who does not hold the key.
+  ok("…and the hash is not the stem's alone", redactedName("RashoDecl.pdf", { forward: readers.reader.forward, rows: rows.slice(1) }) !== n1);
+
+  // WHOLE WORDS, NEVER LETTERS: a short name inside an ordinary word is no name.
+  check("a party named Lee does not make Release a leak, nor Ann Annual",
+    both("Release_Annual_Report.pdf"), "Release Annual Report (redacted).pdf");
+  check("a word with a name inside it at no seam is the word", both("Billing Statement.pdf"), "Billing Statement (redacted).pdf");
+  check("a possessive is faked as before", both("Quillmark's MSJ.pdf"), "Melbury's MSJ (redacted).pdf");
+  check("a date's hyphens are spaces, as in the export's own name",
+    both("2023-01-05 RASHO DECL.pdf"), "2023 01 05 STRANGEWAYS DECL (redacted).pdf");
+  // The residual, pinned so it is known: a short name welded to a word no key
+  // binds, all in one case, with no seam to part — PDF-Linker reads that with
+  // a dictionary the reader does not have.
+  check("RESIDUAL: an all-capital short weld is not caught", both("RASHODECL.pdf"), "RASHODECL (redacted).pdf");
+
+  // A bare forward (no rows) still checks with its own reading of the name.
+  ok("a bare forward still sends a seam weld to a neutral name",
+    NEUTRAL.test(redactedName("RashoDecl.pdf", readers.reader.forward)));
+}
+
+console.log("the pieces of the name's scrub");
+{
+  const words = nameWordFakes([
+    { real: "Helen Rasho", fake: "Ingrid Strangeways" },
+    { real: "Quillmark Holdings", fake: "Melbury Holdings" },
+    { real: "Rashoe", fake: "", control: "~Rasho" },
+    { real: "J. Doe", fake: "K. Wilde" },
+  ]);
+  check("a word the fake carries over is no name; an instruction is no fake; a word under three letters is none",
+    [...words.entries()], [["helen", "Ingrid"], ["rasho", "Strangeways"], ["quillmark", "Melbury"], ["doe", "Wilde"]]);
+  check("a run that is one bound word is the forward's business", unweldNames("Rasho Quillmark", words), "Rasho Quillmark");
+  check("a run with a letter no bound word accounts for is left whole", unweldNames("RashoDecl HelenRashoX", words), "RashoDecl HelenRashoX");
+  check("three words run together, and no more", unweldNames("HelenRashoQuillmark DoeHelenRashoQuillmark", words),
+    "IngridStrangewaysMelbury DoeHelenRashoQuillmark");
+  check("welds part where the case and the digits turn", partWelds("RashoDecl MSJRasho Rasho2023 25STCV59720"),
+    "Rasho Decl MSJ Rasho Rasho 2023 25 STCV 59720");
+  const rows = [{ real: "Helen Rasho" }, { real: "Rasho" }, { real: "25STCV59720" }, { real: "Lee" }];
+  check("a value is found whatever stands between its words",
+    ["Helen-Rasho", "helen.rasho", "Rasho's", "HelenRasho"].map((s) => boundValueStands(s, rows)), [true, true, true, true]);
+  check("…and never inside a word at no seam",
+    ["Release", "Rashomon", "Strangeways"].map((s) => boundValueStands(s, rows)), [false, false, false]);
+  check("a long value inside a word is found", boundValueStands("Complaint25STCV59720", rows), true);
+  check("scrubbedStem with nothing to scrub is the stem spaced", scrubbedStem("A_B-C", null), "A B C");
 }
 
 console.log("what the bar says");

@@ -39,11 +39,25 @@ images become a new document that has never held anything else:
 - **no metadata** — no `/Info` dictionary and no XMP packet, so nothing in the
   file carries the author, the software, the times, or the original filename.
 
-The copy is named for the document it came from, run forward through the key
-where one is loaded and marked redacted either way:
-`Rasho v Quillmark - MTC.pdf` is saved as
-`Strangeways v Melbury - MTC (redacted).pdf`. Re-redacting a redacted copy
-marks it once, not twice.
+The copy is named for the document it came from, the way PDF-Linker names
+its text export: underscores and hyphens become spaces, the name is run
+forward through the key where one is loaded, and it is marked redacted either
+way. `Rasho v Quillmark - MTC.pdf` is saved as
+`Strangeways v Melbury MTC (redacted).pdf`, and `Helen_Rasho_Decl.pdf` as
+`Ingrid Strangeways Decl (redacted).pdf`. Names run together are read too:
+`HelenRasho Decl.pdf` becomes `IngridStrangeways Decl (redacted).pdf`.
+Re-redacting a redacted copy marks it once, not twice.
+
+**The name hides what the pages hide.** After faking, the name is checked for
+anything the key binds, and where a real value would still stand in it — a
+name welded to another word (`RashoDecl.pdf`, `Rasho2023.pdf`), a long name
+or a case number inside one (`25STCV59720Complaint.pdf`), a value the key
+holds an instruction for rather than a pseudonym — the copy is saved under a
+neutral name instead, such as `document 3fa9c1 (redacted).pdf`. The same
+document always gets the same neutral name. One shape is not caught: a short
+name run into another word all in capitals with nothing to mark the join
+(`RASHODECL.pdf`) — look at the name the Save dialog offers before you share
+the copy.
 
 Pages render at **200 dpi** by default; 150 makes a smaller file and 300 a
 sharper one. Because the result is images, it is larger than the original and

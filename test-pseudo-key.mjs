@@ -10,7 +10,7 @@ import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, compileFakes, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
-  wordFakesOf, keyCellKind,
+  wordFakesOf, keyCellKind, boundRows,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -704,6 +704,32 @@ console.log("control words in the Replacement cell");
     ["person", "Odile Varnum", "yes", "", "replaced", "", 2],
     ["person-token", "Dax", "We", "", "", "document", 9],
   ]).wordFakes, [{ fake: "We", real: "Dax" }]);
+}
+
+// A redacted copy's NAME is asked whether a bound value still stands in it
+// (redact.scrubbedStem), and a name is a few words, not a page: the question
+// is put to the rows themselves. They must be the rows the warning matcher is
+// built from, or the name is checked against a different key from the page.
+console.log("the bound values as rows");
+{
+  const k = keyOf([
+    ["person", "Helen Rasho", "Ingrid Strangeways", "", "replaced", "spreadsheet", 12],
+    ["person-token", "Rashoe", "~Rasho", "", "leaked", "document", 1],
+    ["person-token", "Quillon", "n", "", "replaced", "", 2],
+    ["person-token", "And", "Ferris", "", "", "document", 3],
+  ]);
+  check("every value the key binds, an instruction with no fake; the keep and the common word out",
+    boundRows(k).map((w) => [w.real, w.fake, w.control || ""]),
+    [["Helen Rasho", "Ingrid Strangeways", ""], ["Rashoe", "", "~Rasho"]]);
+  check("…which is what the warning matcher finds",
+    findReals(compileReals(k), "Helen Rasho, Rashoe, Quillon and And").map((w) => w.real),
+    boundRows(k).map((w) => w.real));
+  // A key kept from before its control cells were read carries the instruction
+  // as the fake; it answers as a fresh parse.
+  const old = { pairs: [], warn: [{ real: "Rashoe", fake: "~Rasho", pinned: false }, { real: "Quillon", fake: "n", pinned: false }],
+    dropped: { keeps: 0, ambiguous: 0, words: 0, pinned: 0 } };
+  check("a key kept from before: the instruction is no fake, the old keep binds nothing",
+    boundRows(old).map((w) => [w.real, w.fake, w.control || ""]), [["Rashoe", "", "~Rasho"]]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
