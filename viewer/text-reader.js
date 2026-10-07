@@ -1032,17 +1032,41 @@ function pdfNamesOn(sheet) {
   const layer = sheet.querySelector(".textLayer");
   const spans = layer ? layer.querySelectorAll("span") : [];
   if (!spans.length) return null;
-  const { text, map } = RD.pageTextFromSpans(RD.measureSpans(layer));
+  // Words that do not stand over the picture (layerOnSheet) are asked
+  // nothing, and the sheet goes out of the picture whole. A cover placed by
+  // such a layer goes where the layer is, and the name stays in the picture
+  // under a toast saying it was in its pseudonym. This was asked only once
+  // names had been read off the layer, and the frame bug it looks for — a
+  // turn gone missing — breaks the reading as surely as the placing: with
+  // the rotation rules taken off, the surname at a line's end ran into the
+  // line under it, nothing was found, and the 90, 180 and 270 fixtures went
+  // into the PNG as they stood, the name readable (70 to 127 red pixels of
+  // it) under "the names in their pseudonyms". Words read off a layer that
+  // is not over its picture cannot vouch that the picture has no names.
+  if (!layerOnSheet(sheet, layer)) return { sheet, names: [], whole: true };
+  const measured = RD.measureSpans(layer);
+  const { text, map } = RD.pageTextFromSpans(measured);
   // A name the key holds only an instruction for is covered with WITHHELD
   // (egressSwaps), as on the pages beside it.
   const swaps = egressSwaps(text);
+  // Nor can words that do not run across the screen (RD.sidewaysSpans): the
+  // join reads lines by where spans sit on screen, and a portrait page turned
+  // a quarter has its lines side by side, so it welds each line's end to the
+  // next one's start. "Nadia Quillfeather" came back as "Nadia" alone, or as
+  // nothing, and the surname or the whole name went out in the PNG under the
+  // same toast; the redaction's check reports such a page as not found, and a
+  // screenshot has no check. So a sheet with such words and a name in either
+  // reading of it — the join's, or each span on a line of its own, where a
+  // name inside one span or wrapped from one to the next is found whatever
+  // the welds — goes out whole. The cost is a page with a stamp up its margin
+  // and a name in its body, left out when its names might all have been
+  // found; the toast counts it, and the export's page is the one to show.
+  if (sidewaysOn(layer, spans, measured)
+      && (swaps.length || egressSwaps(measured.map((m) => m.text).join("\n")).length)) {
+    return { sheet, names: [], whole: true };
+  }
   if (!swaps.length) return null;
   for (const v of withheldIn(swaps)) shotWithheld.add(v);
-  // Names that are there, and words that do not stand over the picture: a
-  // cover placed by the layer would go where the layer is, and the name would
-  // stay in the picture under a toast saying it was in its pseudonym. The
-  // sheet goes out of the picture whole instead (layerOnSheet).
-  if (!layerOnSheet(sheet, layer)) return { sheet, names: [], whole: true };
   const base = sheet.getBoundingClientRect();
   const out = [];
   for (const s of swaps) {
@@ -12300,15 +12324,33 @@ function layerOnSheet(sheet, layer) {
  */
 function layerTurned(layer) {
   const want = (((Number(layer.getAttribute("data-main-rotation")) || 0) % 360) + 360) % 360;
-  const t = getComputedStyle(layer).transform;
-  let have = 0;
-  if (t && t !== "none") {
-    try {
-      const m = new DOMMatrixReadOnly(t);
-      have = ((Math.round(Math.atan2(m.b, m.a) * 180 / Math.PI) % 360) + 360) % 360;
-    } catch { return false; }
-  }
-  return have === want;
+  return Math.round(turnOf(layer)) % 360 === want; // NaN, unread, is never the turn asked for
+}
+/**
+ * The turn an element's own transform gives it, as the browser computed it:
+ * degrees clockwise, 0 up to 360, NaN where the transform could not be read.
+ * pdf.js writes a span's slant as rotate() ahead of the scaleX that fits it
+ * to the page, and a stretch along the line does not move the angle.
+ */
+function turnOf(el) {
+  const t = getComputedStyle(el).transform;
+  if (!t || t === "none") return 0;
+  try {
+    const m = new DOMMatrixReadOnly(t);
+    return ((Math.atan2(m.b, m.a) * 180 / Math.PI) % 360 + 360) % 360;
+  } catch { return NaN; }
+}
+/**
+ * Whether a sheet holds words that do not run left to right across the
+ * screen (RD.sidewaysSpans): each span's turn is the layer's and its own, so
+ * a page turned a quarter whose words read upright is upright, and the same
+ * page with its words still portrait is not. `measured` (RD.measureSpans of
+ * the same layer, in the same order as `spans`) takes each span's turn.
+ */
+function sidewaysOn(layer, spans, measured) {
+  const turn = turnOf(layer);
+  for (let i = 0; i < measured.length; i++) measured[i].turn = turn + turnOf(spans[i]);
+  return RD.sidewaysSpans(measured).length > 0;
 }
 function pdfFirstLine(el) {
   const src = pdfSources[Number(el.dataset.index)];

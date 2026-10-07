@@ -39,8 +39,15 @@ scrubbed: `pdfNamesOn` reads each drawn sheet's pdf.js text layer the way
 with its fake in the layer's type, under the redaction boxes. A sheet whose
 layer does not stand over its bitmap (`layerOnSheet`: the same box, and the
 quarter turn pdf.js asked for, see Design Notes/Redaction.md) has names that
-cannot be placed, so it is covered whole (`whole`), saying why, and the toast
-counts it (`shotLeftOut`) rather than say only "in their pseudonyms". A name
+cannot be placed, so it is covered whole (`whole`) before anything is read off
+it, since words read off a layer standing elsewhere cannot vouch that it has
+none, saying why, and the toast counts it (`shotLeftOut`) rather than say only
+"in their pseudonyms". So is a sheet with words that do not run left to right
+on screen (`sidewaysOn`: portrait text on a page turned a quarter, a stamp up
+the margin, a slant past a degree) and a name in either of its readings — the
+join welds such lines, so a name there is found in part or not at all (Design
+Notes/Redaction.md, "Text that runs sideways ON SCREEN"). Only a sheet that is
+covered name by name adds its `WITHHELD` names to the toast. A name
 the key holds only an instruction for is covered with `WITHHELD`, on the pages,
 in the chrome and over the PDF alike (`egressSwaps`, under **A control word in
 the key's Replacement cell** below), and the toast names it (`shotWithheld`). Put

@@ -121,6 +121,57 @@ export function spanRangeFor(map, start, end) {
   };
 }
 
+// ── text that does not run across the screen ─────────────────────────────────
+//
+// spanGap reads where the spans sit on SCREEN: a new line is a span that has
+// dropped, a word gap is a span that has moved right. That is the geometry of
+// text running left to right, and it is the only geometry it knows. Text that
+// runs down the screen — portrait words on a page turned a quarter in Acrobat,
+// a filing stamp up the margin — has its lines side by side, at one top, and
+// the join welds the last word of one line onto the first of the next: on a
+// /Rotate 90 fixture "Counsel for Ms. Quillfeather" and "Dated this day…" read
+// as "QuillfeatherDated", which no key finds. Upside down it is the same
+// weld, and text set at a slant is not far behind: measured on an upright
+// page, a slant of 1.5° still read every line apart, 2° ran a full-width line
+// into the one under it and 3° welded the name at a line's end to the next.
+// Until the join learns each span's own direction, the reader has to know
+// which text it cannot read — offUpright and sidewaysSpans are that.
+
+/**
+ * How far a run of text stands from upright ON SCREEN, 0 to 180 degrees: the
+ * turns it is drawn through, summed — a pdf.js text layer's own, which the
+ * stylesheet gives it on a /Rotate page, and the span's, which pdf.js gives
+ * text the PDF sets at an angle — with the full turns taken off. A turn that
+ * could not be read is no evidence of upright, and answers 180.
+ */
+export function offUpright(...turns) {
+  let d = 0;
+  for (const t of turns) {
+    const n = typeof t === "number" ? t : NaN;
+    if (!Number.isFinite(n)) return 180;
+    d += n;
+  }
+  d = ((d % 360) + 360) % 360;
+  return Math.min(d, 360 - d);
+}
+/**
+ * How far off upright the join still reads lines apart (measured above).
+ * Where an OCR layer gives its words the paper's lean, a sheet fed straight
+ * stays under it and one fed crooked past it is taken for the slant it is; a
+ * stamp, a margin note or a page turned in Acrobat is past it by a long way.
+ */
+export const UPRIGHT_SLACK_DEG = 1;
+/**
+ * The spans whose words do not run left to right across the screen — `turn`
+ * (their summed turn, as offUpright reads it) more than `slack` off upright —
+ * and that hold a letter. A name can be set a letter to a span, so one letter
+ * counts; a sideways page number or Bates stamp, all digits, cannot be a name.
+ */
+export function sidewaysSpans(spans, slack = UPRIGHT_SLACK_DEG) {
+  return (spans || []).filter((s) => s && offUpright(s.turn) > slack
+    && /\p{L}/u.test(String(s.text == null ? "" : s.text)));
+}
+
 // ── the boxes ────────────────────────────────────────────────────────────────
 
 const overlap = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0);

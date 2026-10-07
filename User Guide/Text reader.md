@@ -245,7 +245,11 @@ app, which routes it to the reader tab.
   with no text (a scan) cannot be read for names and keeps them. A PDF page
   whose text does not stand over the page as it is drawn — so that a cover
   would land somewhere other than the name — is left out of the picture
-  whole, white with a line saying why, and the toast counts it. In the
+  whole, white with a line saying why, and the toast counts it. So is a PDF
+  page with a name on it whose text runs sideways, upside down or at a slant
+  on screen — a portrait page turned in Acrobat, a stamp up the margin — since
+  the names in such text cannot all be found: it is left out rather than shown
+  with one half covered. Take that page from the export beside it. In the
   extension the tab is taken directly; in the hosted app the browser asks to
   share this tab, keeps one frame and stops, and the names change only once
   the share is allowed.

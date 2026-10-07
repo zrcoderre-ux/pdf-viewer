@@ -149,18 +149,56 @@ sweep's toast names the page to be marked by hand, and `whyNotFound` gives the
 check's walk that reason (`sweptAskew`); `textRectsUnder` answers no words, so
 a text drag marks the area drawn and says why; `redactCurrentSelection` marks
 nothing and says why; `pdfNamesOn` leaves the sheet out of the screenshot
-whole. Taking the three rules back off in Chromium, every one of those fired on
-the 90, 180 and 270 fixtures and no real pixel reached the copy or the PNG. The
-check costs two rectangles and one computed style per page; it answers false
-for the frame between a pane resize and the layer laid again at the new width,
-which is true then too.
+whole, and asks before it reads the layer for names at all. It asked only
+after names had been read, at first, and that is not the same guard: a missing
+turn breaks the reading as surely as the placing. With the three rules taken
+back off in Chromium and the surname at the end of a line, the next line under
+it, the 90, 180 and 270 pages read no name, the screenshot's guard was never
+asked, and the PNG kept the name (70 to 127 red pixels) under "the names in
+their pseudonyms" while the sweep's guard, asked first, fired on the same
+pages. What holds with the rules off now, on those pages and on the ones with
+the name on a line of its own: the sweep boxes nothing there and names the page
+to be marked by hand, a text drag marks the area drawn (0 red pixels in the
+copy), a selection marks nothing, and the screenshot leaves the sheet out whole
+whatever its reading found (0 in the PNG). The check costs two rectangles and
+one computed style per page; it answers false for the frame between a pane
+resize and the layer laid again at the new width, which is true then too, and a
+screenshot taken in that frame leaves the sheet out.
 
-**Residual: text that runs sideways ON SCREEN** — portrait text on a page
-turned a quarter, a margin note set vertically. `RD.pageTextFromSpans` joins
-spans by the display-frame geometry, which reads such lines as columns: a name
-can be run into the line beside it and boxed only in part (the fixture: 150 red
-pixels left in the copy, 98 in the screenshot). The check does report it ("1
-not found — review"); the screenshot has no check and does not.
+**Text that runs sideways ON SCREEN** (`RD.offUpright`, `RD.sidewaysSpans`,
+`sidewaysOn`) — portrait text on a page turned a quarter, a filing stamp set up
+the margin, a page upside down, words set at a slant. `RD.pageTextFromSpans`
+joins spans by the display-frame geometry, which reads such lines as columns:
+a line's last word is welded to the next line's first ("QuillfeatherDated"),
+and a name is found in part or not at all. Measured on an upright page with its
+words set at a slant: 1° and 1.5° read every line apart, 2° ran a full-width
+line into the one under it, 3° welded the surname at a line's end to the next
+line, so `UPRIGHT_SLACK_DEG` is 1. A span's turn is the layer's computed one
+plus its own (pdf.js writes a slant as `rotate()`), so a page turned a quarter
+whose words read upright is upright, and the same page with its words still
+portrait is a quarter off.
+
+- **The screenshot leaves such a sheet out.** It has no check, so it said "the
+  names in their pseudonyms" over a PNG with the name in it: on a portrait page
+  under `/Rotate` 90, 60 red pixels of the surname and no cover; with the whole
+  name on one line, an "Odile" cover over "Nadia" and "Quillfeather" readable
+  beside it (98); upside down, 125. `pdfNamesOn` now leaves out whole, the toast
+  counting it, a sheet with such words and a name in either reading of it: the
+  join's, or each span on a line of its own, which finds a name inside one span
+  or wrapped from one to the next whatever the welds. 0 red pixels on all of
+  them and on slants from 1.5° to 45°; the upright pages, the pages turned a
+  quarter whose words read upright and a 1° slant are covered as before, and a
+  sideways sheet with no name on it is taken as it stands. The cost: a sheet
+  with a stamp up its margin and a name in its body goes out whole although
+  its body was read right, and so does a turned page whose join happened to
+  read (portrait under 180 and 270, where it did). Reading 20,000 spans' turns
+  costs about a tenth of measuring them, once a sheet, on a screenshot.
+- **The sweep and the copy keep it.** A name there can be boxed only in part
+  (the fixture: 150 red pixels left in the copy). The check reports it ("1 not
+  found — review"), and an area drag over it is the answer. The fix for both is
+  a join that reads each span along its own direction, not yet written.
+- **Left for the screenshot:** a name split mid-word across two spans of
+  sideways text, which neither reading finds, on a sheet with no other name.
 
 ## Checking a redaction against the export (`text-reader.js`)
 

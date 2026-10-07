@@ -11,7 +11,7 @@
 
 import zlib from "node:zlib";
 import {
-  spanGap, pageTextFromSpans, spanRangeFor,
+  spanGap, pageTextFromSpans, spanRangeFor, offUpright, sidewaysSpans, UPRIGHT_SLACK_DEG,
   mergeRects, padRect, clampRect, redactedName, countLabel,
   addRedaction, removeRedaction, redactionsFor, redactionPages,
   redactionCount, clearRedactions, createRedactionStore, pageBoxFromView,
@@ -74,6 +74,48 @@ console.log("the page as one string, and the way back");
   check("a range past the end is what there is of it",
     spanRangeFor(map, text.length - 5, text.length + 50),
     { startSpan: 2, startOffset: 0, endSpan: 2, endOffset: 5 });
+}
+
+console.log("text that does not run across the screen");
+{
+  // The pane's spans on a portrait page turned a quarter (/Rotate 90), as the
+  // reader measured them in Chromium: each line a tall strip, the lines side
+  // by side at one top. The join reads screen geometry for upright text, so
+  // it welds each line's end to the next one's start — the surname with it.
+  // This is why the screenshot leaves such a sheet out (sidewaysSpans): the
+  // reading here cannot say where a name is, or that there is none.
+  const side = [
+    S("NOTICE OF ERRATA", 540, 46, 9, 89),
+    S("Counsel for Ms. Quillfeather", 512, 46, 9, 113),
+    S("Dated this day in the county.", 502, 46, 9, 115),
+  ];
+  const welded = pageTextFromSpans(side).text;
+  ok("a sideways page's lines weld, the surname into the next line", welded.includes("QuillfeatherDated"));
+  ok("…so the surname is no word there", !/\bQuillfeather\b/.test(welded));
+  ok("each span on a line of its own keeps it a word",
+    /\bQuillfeather\b/.test(side.map((s) => s.text).join("\n")));
+
+  check("upright is no turn", offUpright(0), 0);
+  check("a layer turned a quarter with its words turned back reads upright", offUpright(90, 270), 0);
+  check("…and with its words left portrait, a quarter off", offUpright(90, 0), 90);
+  check("a quarter the other way is as far off", offUpright(270), 90);
+  check("upside down is as far off as it goes", offUpright(180), 180);
+  check("a turn past a full one is taken back", offUpright(450), 90);
+  check("a slant either way is its size", [offUpright(359.5), offUpright(0.5)], [0.5, 0.5]);
+  check("a turn that could not be read is no evidence of upright", offUpright(90, NaN), 180);
+  check("…nor is one never given", offUpright(undefined), 180);
+
+  const sp = (text, turn) => ({ text, turn });
+  check("a span a quarter off is sideways", sidewaysSpans([sp("Counsel for Ms. Quillfeather", 90)]).length, 1);
+  check("an upright one is not", sidewaysSpans([sp("Counsel for Ms. Quillfeather", 0)]).length, 0);
+  check("a scan's lean under the slack is upright", sidewaysSpans([sp("Quillfeather", 0.6), sp("Dated", 359.4)]).length, 0);
+  ok("the slack is a degree or so: a lean of 2° already ran a line into the next", UPRIGHT_SLACK_DEG >= 0.5 && UPRIGHT_SLACK_DEG < 2);
+  check("a slant past it is sideways", sidewaysSpans([sp("Quillfeather", 3)]).length, 1);
+  check("one letter can be a name set a letter to a span", sidewaysSpans([sp("Q", 90)]).length, 1);
+  check("a sideways page number or Bates stamp cannot", sidewaysSpans([sp("000123", 90), sp("12.", 270)]).length, 0);
+  check("a span whose turn was not read counts as sideways", sidewaysSpans([sp("Quillfeather", NaN)]).length, 1);
+  check("the slack is the caller's to set", sidewaysSpans([sp("Quillfeather", 3)], 5).length, 0);
+  check("no spans, none sideways", sidewaysSpans(null), []);
 }
 
 console.log("one line of text, one box");
