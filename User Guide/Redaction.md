@@ -50,14 +50,25 @@ Re-redacting a redacted copy marks it once, not twice.
 
 **The name hides what the pages hide.** After faking, the name is checked for
 anything the key binds, and where a real value would still stand in it — a
-name welded to another word (`RashoDecl.pdf`, `Rasho2023.pdf`), a long name
-or a case number inside one (`25STCV59720Complaint.pdf`), a value the key
+name welded to another word (`RashoDecl.pdf`, `RASHODECL.pdf`,
+`Rashodecl.pdf`, `Rasho2023.pdf`), a possessive written without its
+apostrophe (`RASHOS OPP.pdf`), a long name or a case number inside a word or
+spaced out (`25STCV59720Complaint.pdf`, `25 STCV 59720 Complaint.pdf`), a name
+typed without its accents or its apostrophe (`Jose Garcia`, `OBRIEN`), an
+e-mail address spelled otherwise than the key spells it, a value the key
 holds an instruction for rather than a pseudonym — the copy is saved under a
 neutral name instead, such as `document 3fa9c1 (redacted).pdf`. The same
-document always gets the same neutral name. One shape is not caught: a short
-name run into another word all in capitals with nothing to mark the join
-(`RASHODECL.pdf`) — look at the name the Save dialog offers before you share
-the copy.
+document always gets the same neutral name. An e-mail address in the name is
+faked whole, underscores and all: `Letter to helen_rasho@rashofamilylaw.com.pdf`
+is saved as `Letter to quenby3@postbox9.org (redacted).pdf`.
+
+The check errs toward the neutral name. With no dictionary to consult, a
+capitalised word with a party's short name inside it is read as the name:
+`Marketing Plan.pdf` in a matter with a party named Mark is saved as
+`document … (redacted).pdf`; rename the copy yourself if you need a better one.
+One shape is not caught: a short name run into another word with no capital
+in the name itself (`rashodecl.pdf`, `Declrasho.pdf`) — look at the name the
+Save dialog offers before you share the copy.
 
 Pages render at **200 dpi** by default; 150 makes a smaller file and 300 a
 sharper one. Because the result is images, it is larger than the original and

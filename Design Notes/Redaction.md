@@ -246,32 +246,86 @@ PDF-Linker had met the same names first, naming the exports
    binds still stands in it the copy takes a neutral name, `document 3fa9c1
    (redacted).pdf`.
 
-The check asks **whole words, never letters.** The review proposed a
-case-folded substring test for every bound word of three letters or more; it
-would call `Release` a leak in a matter with a party named Lee and `Annual`
-one with a party named Ann, and send a folder's copies to `document …` for
-nothing. So the name is read three ways, each a reading PDF-Linker's own
-check makes: as written, every run of letters and digits a word whatever
-stands between them (`Rasho's`, `23 cv 01234`, `J. Smith`), a value found
-where all its words stand in a row; with its welds parted where the case or
-the digits turn (`partWelds`, PDF-Linker's hard seam — `RashoDecl` read as
-`Rasho Decl`, `MSJRasho`, `Rasho2023`), a seam `Release` does not have; and a
-value of eight letters and digits or more anywhere inside a word
-(`HELENRASHODECL`, `25STCV59720Complaint`), PDF-Linker's long weld tier
-(`_PN_WELD_CORE_MIN`). The rows are `pseudo-key.boundRows(key)`: the rows the
-warning matcher is built from, so a row holding an instruction (`~Rasho`) is
-in it with no fake — the forward writes nothing for it, the check finds it, and
-the copy goes neutral. The same key fakes the name and checks it: the whole
-key in the text reader (`fwdName`), the chosen key in the viewer.
+The check reads the name four ways, each a reading PDF-Linker's own check
+makes (`surviving_reals`, and `surviving_reals_reduced` as `_pn_scrubbed_stem`
+asks it, spliced):
+
+- **As written**, every run of letters and digits a word whatever stands
+  between them, accents off (`Rasho's`, `23 cv 01234`, `J. Smith`, `Jose
+  Garcia` for `José García`, as PDF-Linker's reduced scan folds them with
+  `_pn_ascii_fold`): a value is found where all its words stand in a row, or
+  run together as one word (`OBRIEN` for `O'Brien`, the apostrophe a file name
+  drops). An e-mail address's **host** is a value of its own here as well: an
+  address spelled any way but the key's (`helen.rasho@…` where the key binds
+  `helen_rasho@…`, an `@` written `at`) has its handle faked word by word by
+  the person rows and its host left standing.
+- **With its welds parted** where the case or the digits turn (`partWelds`,
+  PDF-Linker's hard seam): `RashoDecl` read as `Rasho Decl`, `MSJRasho`,
+  `Rasho2023`.
+- **A long value inside a word**, eight letters and digits or more, any case
+  (`HELENRASHODECL`, `25STCV59720Complaint`), PDF-Linker's long weld tier
+  (`_PN_WELD_CORE_MIN`) — or spaced out across whole words, starting and
+  ending on a word's edge: `25 STCV 59720` (a docket PDF-Linker reads as one
+  identity however it is spaced, and the forward knows only as the key
+  spells it), `Mc Allister`.
+- **A short name inside a word**: a one-word value of four to seven letters,
+  or a name word of a longer value (`nameWordFakes`, the words the unweld
+  reads), run into other letters where its own letters carry a capital —
+  `RASHODECL`, `Rashodecl`, `RASHOS OPP` (a possessive written without its
+  apostrophe). PDF-Linker's short weld tier (`_PN_WELD_SHORT_CORE_MIN`,
+  `_pn_span_is_welded`, `_pn_span_is_cased`). The name words are in it
+  because the forward reads a word as ASCII letters and parts `JoséGarcía` at
+  the accent: the surname faked, `JoséVelarde`, and the given name of a party
+  the key binds only whole left welded to its pseudonym.
+
+The short tier was left out at first, and `RASHODECL (redacted).pdf` was
+pinned in `test-redact.mjs` as the expected name, on the reasoning that a test
+for a name inside a word would call `Release` a leak in a matter with a party
+named Lee. It would not — `release` has no `lee` in it — and `Annual` for a
+party named Ann is under the four-letter floor. A review caught the
+rationale, and `Rashodecl`, `RASHOS OPP` and `Rashos_Opp` all came out as
+their copies' names in both readers. What the tier does cost is a name the
+reader cannot tell from a word. PDF-Linker screens a capitalised hit through
+its dictionary (`_pn_span_in_vocab_word`: `Marketing` is a word, not Mark);
+the reader has no dictionary, so `Marketing Plan.pdf` in a matter with a party
+named Mark takes the neutral name, as does `Billing Statement.pdf` with one
+named Bill — and so does a pseudonym the forward wrote with a party's short
+name inside it (`Hartwell`, in a matter with a party named Hart), as it does
+to PDF-Linker's own reduced scan. Measured over 134 words that name legal documents (`Declaration`,
+`Opposition`, `Summary`, `Billing`, `Settlement` …) against 204 common
+American given names and surnames of four to seven letters: in title case one
+name hits one word (Mark, `Marketing`); in capitals three (Mary in `SUMMARY`,
+Ross in `CROSS`, Mark). Against PDF-Linker's own list of surnames that are
+also English words (`Word Lists/Surname Words.txt`, 4,038 of four to seven
+letters), 21 hit one of those 134 words in title case and 58 in capitals. A
+name lost costs the operator a rename; a party's name kept goes out with the
+one file made to be handed on.
+
+The rows are `pseudo-key.boundRows(key)`: the rows the warning matcher is
+built from, so a row holding an instruction (`~Rasho`) is in it with no fake —
+the forward writes nothing for it, the check finds it, and the copy goes
+neutral. The same key fakes the name and checks it: the whole key in the text
+reader (`fwdName`), the chosen key in the viewer.
 
 **One departure from PDF-Linker, in step 1.** The reader's matcher reads a
 value exactly as the key spells it — a space as any gap, but a hyphen as a
-hyphen. A federal docket `23-cv-01234` spaced out was a docket the forward no
-longer knew, which the check then sent to a neutral name — a useful name lost
-for a value the key could fake. So `spacedStem` leaves the
-hyphens inside a bound value spelled with them (found whole-word in the stem
-by plain search, only when the stem carries a hyphen), and the docket is faked
-whole: `23-cv-01234_Order.pdf` → `23-cv-05678 Order (redacted).pdf`.
+hyphen and an underscore as an underscore. A federal docket `23-cv-01234`
+spaced out was a docket the forward no longer knew, which the check then sent
+to a neutral name — a useful name lost for a value the key could fake. So
+`spacedStem` leaves the separators inside a bound value spelled with them
+(found whole-word in the stem by plain search, only when the stem carries a
+`-` or `_`), and the value is faked whole: `23-cv-01234_Order.pdf` →
+`23-cv-05678 Order (redacted).pdf`. The underscore was left out of this at
+first, and that cost more than a name: an address whose handle carries one,
+`helen_rasho@rashofamilylaw.com`, spaced out was no address the key binds, but
+its handle was two words it does, so the forward faked the person and left the
+firm's domain — `Letter to ingrid strangeways@rashofamilylaw.com
+(redacted).pdf`, the surname in the host, under a name that reads as
+scrubbed, where the commit before had faked the whole address. The check did
+not see it either: the row's words no longer stood in a row. Both are closed
+— the address keeps its underscore and is faked whole (`Letter to
+quenby3@postbox9.org (redacted).pdf`), and the host is read as a value of its
+own. PDF-Linker fakes every e-mail address whole.
 
 **The neutral name's hash** (`stemDigest`) is FNV-1a over the stem, so the
 same document always takes the same name and two documents rarely one — mixed
@@ -279,14 +333,15 @@ with the key's real values first. A hash of the stem alone would let anyone
 holding the copy test a guess at the name it came from; the key is never a
 file to share. Re-redacting a neutral copy keeps its name, marked once.
 
-**Residual, pinned in `test-redact.mjs`:** a short name welded to a word no
-key binds, all in one case, with no seam to part — `RASHODECL`. PDF-Linker
-tells that from `MARKETING` with a dictionary the reader does not have, and
-the only test left without one is the substring test above. The name is
-offered in the Save dialog and named once it is saved.
+**Residual:** a short name welded in lower case (`rashodecl`, `Declrasho`),
+which PDF-Linker's short tier leaves too — the capital is what keeps a
+four-letter name out of the letters of ordinary words. The name is offered in
+the Save dialog and named once it is saved.
 
 A bare forward function (no rows) is still taken, the forward then being its
 own check over the name as written and parted; both callers pass
 `{ forward, rows }`. Filenames are a few words, so none of this is near the
 per-page budget (Design Notes/Text reader hangs and freezes.md): the check is one pass
-over the key's rows per saved copy, the unweld bounded at three words.
+over the key's rows per saved copy, the unweld bounded at three words, every
+search a plain `indexOf` and no pattern built from the key. Measured with the
+four readings: 15 ms a name, the forward included, under a key of 6,112 rows.

@@ -356,12 +356,24 @@ export function coveredClaims(claims, labels) {
 //
 // ONE DEPARTURE FROM PDF-LINKER, in step 1. The reader's matcher reads a value
 // exactly as the key spells it — a space as any gap, but a hyphen as a hyphen
-// — so a federal docket "23-cv-01234" spaced out is a docket the forward no
-// longer knows, and the check would send the copy to the neutral name for a
-// value the key could have faked. A bound value spelled WITH a hyphen keeps its
-// hyphens and is faked whole.
+// and an underscore as an underscore — so a federal docket "23-cv-01234"
+// spaced out is a docket the forward no longer knows, and the check would send
+// the copy to the neutral name for a value the key could have faked. A bound
+// value spelled WITH either keeps it and is faked whole.
+//
+// The underscore was left out at first, and that was worse than a lost name.
+// An e-mail address whose handle carries one ("helen_rasho@rashofamilylaw.com")
+// spaced out is no address the key binds, but its handle is two words the key
+// DOES bind, so the forward faked the person and left the host: "Letter to
+// ingrid strangeways@rashofamilylaw.com (redacted).pdf", the surname riding
+// out in the firm's domain under a name that reads as scrubbed. The check did
+// not see it either — the row's words no longer stood in a row, and the host
+// is no value of its own — so the address's host is now read as one too
+// (boundValueStands). PDF-Linker fakes an address whole or not at all.
 
 const SEPARATORS_RE = /[_-]+/g;
+// The separators a bound value may carry and keep (spacedStem).
+const KEPT_SEPARATOR_RE = /[_-]/;
 const WORDS_RE = /[\p{L}\p{N}]+/gu;
 const ALNUM_RE = /[\p{L}\p{N}]/u;
 // PDF-Linker's own reach: a weld of at least six letters, ASCII as there.
@@ -371,10 +383,23 @@ const LETTERS_RE = /^\p{L}+$/u;
 // PDF-Linker's _PN_WELD_CORE_MIN: a value this long (letters and digits) does
 // not turn up inside an ordinary word by coincidence.
 const WELD_CORE_MIN = 8;
+// PDF-Linker's _PN_WELD_SHORT_CORE_MIN: the floor of its short weld tier. Under
+// it a name is too short to tell from the letters of an ordinary word: "Ann"
+// is in "Annual".
+const WELD_SHORT_CORE_MIN = 4;
+const CAPITAL_RE = /\p{Lu}/u;
+
+// A letter's accents off, so "Garcia" in a name is the "García" the key binds,
+// as it is to PDF-Linker's reduced scan (_pn_ascii_fold): a file name is
+// typed, and typed without its accents as often as with them.
+const MARKS_RE = /\p{M}+/gu;
+function unmarked(s) {
+  return String(s == null ? "" : s).normalize("NFD").replace(MARKS_RE, "");
+}
 
 /** A text's words: every run of letters and digits, folded, whatever stands between them. */
 function wordsOf(s) {
-  return String(s == null ? "" : s).toLowerCase().match(WORDS_RE) || [];
+  return unmarked(s).toLowerCase().match(WORDS_RE) || [];
 }
 
 /**
@@ -387,10 +412,10 @@ function spacedStem(stem, rows) {
   const low = s.toLowerCase();
   // (A letter whose lower case is longer than itself puts every place after it
   // out by one; such a stem is simply spaced.)
-  if (s.indexOf("-") !== -1 && low.length === s.length) {
+  if (KEPT_SEPARATOR_RE.test(s) && low.length === s.length) {
     for (const w of rows) {
       const v = String((w && w.real) || "").trim().toLowerCase();
-      if (v.indexOf("-") === -1 || v.length > low.length) continue;
+      if (!KEPT_SEPARATOR_RE.test(v) || v.length > low.length) continue;
       for (let at = low.indexOf(v); at !== -1; at = low.indexOf(v, at + 1)) {
         // Whole words only, as the forward reads it.
         if (ALNUM_RE.test(low[at - 1] || "") || ALNUM_RE.test(low[at + v.length] || "")) continue;
@@ -482,36 +507,83 @@ export function unweldNames(stem, words) {
  * Whether a bound value still stands in a (scrubbed) stem. `rows` as
  * scrubbedStem takes them.
  *
- * WHOLE WORDS, NEVER LETTERS. A test for every bound word anywhere inside the
- * name would answer yes for "Release" in a matter with a party named Lee, and
- * for "Annual" with one named Ann, and a folder's worth of copies would come
- * out named "document …" for nothing. So the name is asked three ways, each
- * the reader's own form of a reading PDF-Linker's check makes:
+ * The name is asked four ways, each the reader's own form of a reading
+ * PDF-Linker's check makes (surviving_reals, and surviving_reals_reduced as
+ * _pn_scrubbed_stem calls it, spliced):
  *
  *   AS WRITTEN, every run of letters and digits a word whatever stands between
- *     them: "Rasho's", "23 cv 01234" (a docket that lost its hyphens), "J.
- *     Smith". A value is found where all its words stand in a row.
- *   WITH ITS WELDS PARTED (partWelds): "RashoDecl" read as "Rasho Decl". The
- *     seam is the evidence — "Release" has none to part.
+ *     them, accents off: "Rasho's", "23 cv 01234" (a docket that lost its
+ *     hyphens), "J. Smith", "Jose Garcia". A value is found where all its
+ *     words stand in a row, or run together as one word ("OBRIEN" for
+ *     "O'Brien", the apostrophe dropped as a file name drops it). An e-mail
+ *     address's HOST is read as a value of its own as well: an address spelled
+ *     any way but the key's — a handle with a dot for its underscore, an "@"
+ *     written "at" — had its handle faked word by word and its host left, and
+ *     "ingrid strangeways@rashofamilylaw.com" reads as scrubbed.
+ *   WITH ITS WELDS PARTED (partWelds): "RashoDecl" read as "Rasho Decl", where
+ *     the case or the digits turn (PDF-Linker's hard seam).
  *   A LONG VALUE INSIDE A WORD: eight letters and digits or more, anywhere in
- *     one — "HELENRASHODECL", "25STCV59720Complaint". PDF-Linker's long weld
- *     tier, and for the same reason: a core that long is not a coincidence.
+ *     one, any case — "HELENRASHODECL", "25STCV59720Complaint". PDF-Linker's
+ *     long weld tier, and for the same reason: a core that long is not a
+ *     coincidence. Or spaced out across whole words, edge to edge: "25 STCV
+ *     59720", "Mc Allister" — PDF-Linker reads a spaced docket as the docket
+ *     (one canonical identity for every spelling), and the forward does not.
+ *   A SHORT NAME INSIDE A WORD: a one-word value of four to seven letters, or
+ *     a name word of a longer one, run into other letters, where the letters
+ *     it stands on carry a capital — "RASHODECL", "Rashodecl", "RASHOS OPP"
+ *     (the possessive written without its apostrophe). PDF-Linker's short
+ *     weld tier (_PN_WELD_SHORT_CORE_MIN, _pn_span_is_welded,
+ *     _pn_span_is_cased).
  *
- * What is NOT caught is a short name welded at no seam, all in one case:
- * "RASHODECL". PDF-Linker tells that from "MARKETING" with a dictionary the
- * reader does not have, and without one the only test is the substring test
- * above. The name is offered in the Save dialog and named once it is saved.
+ * The short tier was left out at first, and "RASHODECL (redacted).pdf" was
+ * pinned in the tests as the expected name, on the reasoning that a test for
+ * a name inside a word would call "Release" a leak for a party named Lee. It
+ * would not — "release" has no "lee" in it — and "Annual" for Ann is under the
+ * four-letter floor. What the tier does cost is a name the reader cannot tell
+ * from a word: PDF-Linker screens a capitalised hit through its dictionary
+ * (_pn_span_in_vocab_word, so "Marketing" is a word and not Mark), and the
+ * reader has no dictionary. So "Marketing Plan" in a matter with a party
+ * named Mark takes the neutral name. Measured over 134 words that name legal
+ * documents ("Declaration", "Opposition", "Summary", "Billing" …) and 204
+ * common American given names and surnames of four to seven letters: in title
+ * case one name hits one word (Mark, "Marketing"); in capitals three (Mary in
+ * "SUMMARY", Ross in "CROSS", Mark). A name lost is the right side of that:
+ * the copy is the file that is handed on.
+ *
+ * Still not caught, as PDF-Linker does not catch it: a short name welded in
+ * lower case ("rashodecl", "Declrasho"). The capital is what keeps a
+ * four-letter name out of ordinary lower-case letters. The name is offered in
+ * the Save dialog and named once it is saved.
  */
 export function boundValueStands(stem, rows) {
   const byFirst = new Map();
   const cores = [];
-  for (const w of rows || []) {
-    const words = wordsOf(w && w.real);
-    if (!words.length) continue;
+  const shorts = new Set();
+  const joined = new Set();
+  const add = (words) => {
+    if (!words.length) return;
     const list = byFirst.get(words[0]);
     if (list) list.push(words); else byFirst.set(words[0], [words]);
     const core = words.join("");
     if (core.length >= WELD_CORE_MIN) cores.push(core);
+    else if (core.length < WELD_SHORT_CORE_MIN) return;
+    else if (words.length > 1) joined.add(core);
+    else if (LETTERS_RE.test(core)) shorts.add(core);
+  };
+  for (const w of rows || []) {
+    const real = String((w && w.real) || "");
+    add(wordsOf(real));
+    const at = real.lastIndexOf("@");
+    if (at > 0) add(wordsOf(real.slice(at + 1)));
+  }
+  // …and each NAME WORD of a longer value, as the unweld reads them
+  // (nameWordFakes: a word the fake replaced, never furniture it carried).
+  // The forward reads a word as ASCII letters, so it parts "JoséGarcía" at
+  // the accent and fakes the surname alone: "JoséVelarde", the given name of
+  // a party the key binds only whole, welded to a pseudonym.
+  for (const k of nameWordFakes(rows).keys()) {
+    const c = unmarked(k);
+    if (c.length >= WELD_SHORT_CORE_MIN && c.length < WELD_CORE_MIN) shorts.add(c);
   }
   const standsIn = (words) => {
     for (let i = 0; i < words.length; i++) {
@@ -523,9 +595,38 @@ export function boundValueStands(stem, rows) {
     }
     return false;
   };
+  // Read off the stem as written, for its case: a run of letters and digits
+  // longer than the name (so the name runs into something), the name's own
+  // letters carrying a capital. (A run whose lower case is longer than itself
+  // cannot have its places read back; it counts as cased.)
+  const weldedShort = () => {
+    if (!shorts.size) return false;
+    for (const run of unmarked(stem).match(WORDS_RE) || []) {
+      const low = run.toLowerCase();
+      for (const c of shorts) {
+        if (low.length <= c.length) continue;
+        for (let at = low.indexOf(c); at !== -1; at = low.indexOf(c, at + 1)) {
+          if (low.length !== run.length || CAPITAL_RE.test(run.slice(at, at + c.length))) return true;
+        }
+      }
+    }
+    return false;
+  };
   const plain = wordsOf(stem);
-  return standsIn(plain) || standsIn(wordsOf(partWelds(stem)))
-    || cores.some((c) => plain.some((w) => w.length >= c.length && w.indexOf(c) !== -1));
+  // The stem's words run together, and where each one starts: a long value
+  // read across words must start and end on a word's edge.
+  const run = plain.join("");
+  const edges = new Set([run.length]);
+  for (let i = 0, at = 0; i < plain.length; at += plain[i].length, i++) edges.add(at);
+  const acrossWords = (c) => {
+    for (let at = run.indexOf(c); at !== -1; at = run.indexOf(c, at + 1)) {
+      if (edges.has(at) && edges.has(at + c.length)) return true;
+    }
+    return false;
+  };
+  return standsIn(plain) || plain.some((w) => joined.has(w)) || standsIn(wordsOf(partWelds(stem)))
+    || cores.some((c) => plain.some((w) => w.length >= c.length && w.indexOf(c) !== -1) || acrossWords(c))
+    || weldedShort();
 }
 
 /**

@@ -167,6 +167,10 @@ console.log("the copy's name hides what its pages hide");
     ["person-token", "Ann", "Corvina", "", "", "spreadsheet", 4],
     ["person-token", "Bill", "Tamsin", "", "", "spreadsheet", 3],
     ["person-token", "Rashoe", "~Rasho", "", "leaked", "document", 1],
+    ["email", "helen_rasho@rashofamilylaw.com", "quenby3@postbox9.org", "", "", "", 2],
+    ["person", "José García", "Tomás Velarde", "", "", "", 2],
+    ["person-token", "García", "Velarde", "", "", "", 2],
+    ["person-token", "O'Brien", "Fairweather", "", "", "", 2],
   ] }], "pseudonym_key.xlsx");
   const f = compileForward(key);
   const rows = boundRows(key);
@@ -191,6 +195,14 @@ console.log("the copy's name hides what its pages hide");
     both("Rasho-Decl.pdf"), "Strangeways Decl (redacted).pdf");
   check("…save inside a value spelled with one: the docket keeps its hyphens and is faked whole",
     both("23-cv-01234_Order.pdf"), "23-cv-05678 Order (redacted).pdf");
+  // …and an underscore the same: an address whose handle carries one, spaced
+  // out, was no address the key binds, and its handle two words it does — the
+  // forward faked the person and left the firm's domain, the surname in it:
+  // "Letter to ingrid strangeways@rashofamilylaw.com (redacted).pdf".
+  check("…an e-mail address whose handle has an underscore keeps it, and is faked whole",
+    both("Letter to helen_rasho@rashofamilylaw.com.pdf"), "Letter to quenby3@postbox9.org (redacted).pdf");
+  check("…wherever it stands in the name",
+    both("RE_helen_rasho@rashofamilylaw.com_thread.pdf"), "RE quenby3@postbox9.org thread (redacted).pdf");
 
   // Two or three bound name words run together, and nothing else, are their
   // fakes run together the same way, each in its own case.
@@ -205,7 +217,13 @@ console.log("the copy's name hides what its pages hide");
   // the digits turn; a long value inside a word; a docket that lost its
   // hyphens; a value whose row holds an instruction rather than a fake.
   for (const n of ["RashoDecl.pdf", "MSJRasho.pdf", "Rasho2023.pdf", "HELENRASHODECL.pdf",
-    "25STCV59720Complaint.pdf", "23_cv_01234 Order.pdf", "Rashoe_Decl.pdf"]) {
+    "25STCV59720Complaint.pdf", "23_cv_01234 Order.pdf", "Rashoe_Decl.pdf",
+    // An address spelled otherwise than the key spells it: its handle faked
+    // word by word, its host would stand.
+    "helen.rasho@rashofamilylaw.com thread.pdf",
+    // A value spaced out, its accents dropped, its apostrophe dropped; a weld
+    // the forward parts at an accent and half fakes ("JoséVelarde").
+    "25_STCV_59720 Complaint.pdf", "Jose_Garcia_Decl.pdf", "OBRIEN_DECL.pdf", "JoséGarcía Decl.pdf"]) {
     const got = both(n);
     ok(`${n} takes a neutral name (${got})`, NEUTRAL.test(got));
   }
@@ -217,17 +235,27 @@ console.log("the copy's name hides what its pages hide");
   // against the copy by anyone who does not hold the key.
   ok("…and the hash is not the stem's alone", redactedName("RashoDecl.pdf", { forward: readers.reader.forward, rows: rows.slice(1) }) !== n1);
 
-  // WHOLE WORDS, NEVER LETTERS: a short name inside an ordinary word is no name.
-  check("a party named Lee does not make Release a leak, nor Ann Annual",
-    both("Release_Annual_Report.pdf"), "Release Annual Report (redacted).pdf");
-  check("a word with a name inside it at no seam is the word", both("Billing Statement.pdf"), "Billing Statement (redacted).pdf");
+  // A SHORT NAME RUN INTO OTHER LETTERS, its own letters carrying a capital,
+  // is the name: PDF-Linker's short weld tier. The commit before pinned
+  // "RASHODECL (redacted).pdf" here as the expected name, on the reasoning
+  // that such a test would call "Release" a leak for a party named Lee; it
+  // would not, "release" having no "lee" in it.
+  for (const n of ["RASHODECL.pdf", "Rashodecl.pdf", "RASHOS OPP.pdf", "Rashos_Opp.pdf", "DECLRASHO.pdf"]) {
+    const got = both(n);
+    ok(`${n} takes a neutral name (${got})`, NEUTRAL.test(got));
+  }
+  // Under four letters a name is too short to tell from a word's letters.
+  check("a name under four letters inside a word is no name: Lee in Leeward, Ann in Annual",
+    both("Leeward_Annual_Report.pdf"), "Leeward Annual Report (redacted).pdf");
+  // The cost: with no dictionary, a capitalised word with a party's short name
+  // in it is the name — a useful name lost, not a party's name kept.
+  ok("a capitalised word with a short name in it takes a neutral name: Bill in Billing",
+    NEUTRAL.test(both("Billing Statement.pdf")));
+  check("…never a lower-case one, as PDF-Linker reads it (_pn_span_is_cased)",
+    both("billing statement.pdf"), "billing statement (redacted).pdf");
   check("a possessive is faked as before", both("Quillmark's MSJ.pdf"), "Melbury's MSJ (redacted).pdf");
   check("a date's hyphens are spaces, as in the export's own name",
     both("2023-01-05 RASHO DECL.pdf"), "2023 01 05 STRANGEWAYS DECL (redacted).pdf");
-  // The residual, pinned so it is known: a short name welded to a word no key
-  // binds, all in one case, with no seam to part — PDF-Linker reads that with
-  // a dictionary the reader does not have.
-  check("RESIDUAL: an all-capital short weld is not caught", both("RASHODECL.pdf"), "RASHODECL (redacted).pdf");
 
   // A bare forward (no rows) still checks with its own reading of the name.
   ok("a bare forward still sends a seam weld to a neutral name",
@@ -253,9 +281,21 @@ console.log("the pieces of the name's scrub");
   const rows = [{ real: "Helen Rasho" }, { real: "Rasho" }, { real: "25STCV59720" }, { real: "Lee" }];
   check("a value is found whatever stands between its words",
     ["Helen-Rasho", "helen.rasho", "Rasho's", "HelenRasho"].map((s) => boundValueStands(s, rows)), [true, true, true, true]);
-  check("…and never inside a word at no seam",
-    ["Release", "Rashomon", "Strangeways"].map((s) => boundValueStands(s, rows)), [false, false, false]);
+  check("a short name inside a word, where its letters carry a capital and it is four letters or more",
+    ["RASHODECL", "Rashomon", "DeclRASHO", "rashomon", "Leeward", "Strangeways"].map((s) => boundValueStands(s, rows)),
+    [true, true, true, false, false, false]);
   check("a long value inside a word is found", boundValueStands("Complaint25STCV59720", rows), true);
+  check("…and spaced out across whole words, edge to edge, but not from the middle of one",
+    ["25 STCV 59720 Complaint", "x25 STCV 597201"].map((s) => boundValueStands(s, rows)), [true, false]);
+  check("a value is read with its accents off",
+    ["Jose Garcia", "GARCIA DECL"].map((s) => boundValueStands(s, [{ real: "José García" }, { real: "García" }])), [true, true]);
+  check("…and with the apostrophe a file name drops", boundValueStands("OBRIEN DECL", [{ real: "O'Brien" }]), true);
+  check("an e-mail address's host is a value of its own",
+    boundValueStands("ingrid strangeways@rashofamilylaw.com", [{ real: "helen_rasho@rashofamilylaw.com" }]), true);
+  // The forward reads a word as ASCII letters and parts "JoséGarcía" at the
+  // accent: the surname faked, the given name welded to its pseudonym.
+  check("a name word of a longer value welded to anything is found",
+    boundValueStands("JoséVelarde Decl", [{ real: "José García", fake: "Tomás Velarde" }]), true);
   check("scrubbedStem with nothing to scrub is the stem spaced", scrubbedStem("A_B-C", null), "A B C");
 }
 
