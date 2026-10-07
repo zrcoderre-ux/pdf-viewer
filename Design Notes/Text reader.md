@@ -46,7 +46,15 @@ none, saying why, and the toast counts it (`shotLeftOut`) rather than say only
 on screen (`sidewaysOn`: portrait text on a page turned a quarter, a stamp up
 the margin, a slant past a degree) and a name in either of its readings — the
 join welds such lines, so a name there is found in part or not at all (Design
-Notes/Redaction.md, "Text that runs sideways ON SCREEN"). Only a sheet that is
+Notes/Redaction.md, "Text that runs sideways ON SCREEN"). Under a degree the
+join reads each span along its own line (`RD.spanFrame`, with the turns
+`sidewaysOn` reads, which it now reads first): read by its box on screen, a
+name alone in a short span at a line's far end ran into the next line's first
+word from 0.85°, and its surname went into the PNG beside an "Odile" cover
+(Design Notes/Redaction.md, "A slant under the slack"). A name only in an
+annotation's appearance (a FreeText note, a filled form field) is drawn on the
+page but is in no text layer, and is not covered (same file, the residual
+after it). Only a sheet that is
 covered name by name adds its `WITHHELD` names to the toast. A name
 the key holds only an instruction for is covered with `WITHHELD`, on the pages,
 in the chrome and over the PDF alike (`egressSwaps`, under **A control word in
@@ -177,7 +185,9 @@ citation link of the link layer under a Ctrl+A. Pressed and dragged at a
 grid of points over a selected page, 2,027 of 2,087 drags started on such an
 element and went out as Chrome's own, the real names in text/plain and every
 `data-real` in text/html; every one of those elements is one the selection
-holds. A link the selection does not reach drags as the link. A picture the
+holds. A link the selection does not reach drags as the link — unless its
+address carries a real name the file holds as a pseudonym (`veiledUrls`, below).
+A picture the
 selection holds is no exception: pressed on an `<img>` in a selected line,
 held 0 to 400 ms before the pointer moved, Chrome dragged the selection
 from it every time (target the `<img>`, the real names in the text), so
@@ -196,6 +206,34 @@ it by the next save. Find gets what the screen showed (`shown`), since Find
 finds what the screen shows. No other box does: a real name pasted into a
 LEAKS answer would be a real value written into the worksheet as a
 replacement.
+
+**A citation link built from names the file does not carry** (`veiledUrls`,
+`veiledLinkAt`, `selectionHoldsVeiled`, `veiledLinkNote`). The citations are
+found in the pages' SHOWN text (`flatten`), so with Show fakes off a citation
+whose parties the export holds as pseudonyms — this case's own prior appeal,
+which PDF-Linker fakes as the caption (`_side_is_trusted`) — gets an `href` and
+a `title` built from the real names
+(`…pdsearchterms=Rasho%20v.%20Quillmark%20Holdings…`). The click is the
+operator's own lookup, in the operator's browser, and opens that. But the
+drag handler let a link the selection does not reach go as itself, and it went
+with that address in text/uri-list and text/plain and the title in its
+text/html; the browser's "Copy link address" put the address on the clipboard;
+and the § Authorities panel, filled from the same reading, carried the same
+address and the names as its entry's text to a drag or a copy of the panel
+(measured on 6303b39, and so on main, which had no drag handler at all). Now
+`placeCitationsNow` notes where a pseudonym span shows a name other than its
+fake (a binary search over those places per citation) and lists the address of
+every citation that reaches one. A drag of such a link (an underline or a panel
+entry) is refused, so is the browser's context menu on it (the keep menu, whose
+listener runs first, still answers where it does), and a copy or drag of a
+selection off the pages that takes in such an entry puts nothing on the
+clipboard; each says why in a toast. A published decision's parties (the same
+in the file), a spot keep, and every link with Show fakes on (built from the
+fakes) go as before. Measured in Chromium: the prior appeal's underline drag
+refused with Show fakes off and dragged as its pseudonyms with it on, its
+context menu refused, a published decision beside it dragged and offered as
+before, the panel's text copied to an empty clipboard and its entry's drag
+refused.
 
 The tools live in a left-margin rail (`#tools-rail`), the PDF viewer's
 Acrobat-style panel carried over to this page: the top bar had grown to some
@@ -368,7 +406,10 @@ on that build:
   its offset in `serializeMapped`'s `pn`) — and flags the marks it writes for
   a TYPED name (`TD.typedSpans`) the same way; a mark it writes for a name the
   run left and the review settled is not the typing's and is not flagged. An undo builds from
-  text and drops the flag, as an undo that restores a mark leaves it.
+  text and dropped the flag, as an undo that restores a mark leaves it — which
+  is how one Ctrl+Z after a save, or of an unrelated typo, let the renamed
+  authority through after all; it now carries the flag (and `__built`, and the
+  Esc'd names) with its snapshot ("What was typed survives an undo", below).
 - *Esc protected nothing in the file, and the prompt still said "Esc leaves
   it".* Where it matters is a citation the reader does not read as one. A
   short cite with no "supra" — "(Jones, 30 Cal.App.5th at p. 5.)" — is
@@ -420,16 +461,74 @@ PDF-Linker protects, so such a name typed and NOT dismissed is still marked
 by the converter and written as its pseudonym, and one the run left in the
 clear there is orange and, once settled, written over; matching PDF-Linker
 needs its reporter list, a matcher change of its own to be measured under the
-hang rules. An undo or a key change rebuilds a page from its text
-(`restoreSnapshot`, `retranslate`), which resets `__built` and drops
-`data-typed`, so a name typed and Esc'd before an undo is the page's own
-afterwards and the save leaves it, named, as unreviewed, and a mark typed
-before an undo of later typing is the page's own; carrying either through an
-undo would also undo the rule above that a mark an undo restores is left
-alone. A member the reel sheds and builds again (`unshedMember`) loses its
-flags the same way. The Space prompt reads the line it is on, so a surname
-typed at the head of a line under a given name on the line before is
-offered, and marked, alone.
+hang rules. An undo or a key change rebuilt a page from its text
+(`restoreSnapshot`, `retranslate`), resetting `__built` and dropping
+`data-typed`; both now carry what was typed ("What was typed survives an
+undo", below). A member the reel sheds and builds again (`unshedMember`)
+still loses its flags: it is shed only once saved, and its pages are built
+from the file's text, so a mark typed and saved before its citation was
+finished is the page's own when the member comes back, and a citation typed
+round it then is written with the pseudonym in it. The Space prompt reads the
+line it is on, so a surname typed at the head of a line under a given name on
+the line before is offered, and marked, alone.
+
+**What was typed survives an undo** (`typingOf`, `restoreTyping`, the
+snapshot's `built`, `typed`, `left` and `esc`; `retranslate`; `data-left` in
+`TD.typedPseudonymsCited`). Three things say which of a page's names the
+operator wrote, and none is in its text: `__built` (what `TD.typedSpans` and
+`TD.typedReals` measure an edit against), `data-typed` on the typing's marks,
+and the Esc'd names. `restoreSnapshot` built the page from the snapshot's text
+alone, which made `__built` that text and dropped the rest; the save's forward
+pass is an undo step (`snapshot(body, true)` before its rebuild), so one Ctrl+Z
+after a save broke three guarantees the User Guide gives. Measured in Chromium
+on 6303b39 (`attack.mjs`, `attack2.mjs` of the final review): a name typed and
+saved at once was written as its pseudonym, Ctrl+Z took the save's marking
+off, and Ctrl+S wrote "Served on Helen Rasho" over the pseudonym already in the
+file, saying in red that it "stands in the file as it did"; a save refused for
+a typed name the key holds only an instruction for, Ctrl+Z, Ctrl+S wrote it and
+the other typed name in the clear; "See Jones" Space-marked and saved, " x"
+typed on another line and undone, then "v. Smith (2019) 30 Cal.App.5th 1."
+typed and saved wrote "See Pratt v. Smith (2019) 30 Cal.App.5th 1." under a
+plain "Saved", a renamed authority. And a name typed before the key was loaded
+(`retranslate`) was written in the clear as "not yet reviewed".
+
+Each snapshot (`snapshotOf`, so `snapshot`, `snapshotPages` and the other
+stack's step in `stepHistory` alike) now carries the page's `__built`, the
+places in its own text of its `data-typed` marks, and its Esc'd names (their
+places noted by `escNote` first), and `restoreTyping` puts all three back once
+`buildBody` has built the page from the same text: `__built` as it stood, the
+flags on the marks at those places, the Esc'd names found again exactly there.
+`putStrippedBack` (↻ OCR This Page from a strip of the reader's own) does the
+same with the strip's step, and `retranslate` with the page as it stood, since
+the file's text and what was typed into it are the same under any key. So the
+page after an undo is measured, marked and Esc'd as it was when the step was
+taken, and a redo brings back what the undo left. Putting `__built` back would,
+alone, have turned an Esc'd short cite's party deleted and put back by Ctrl+Z
+into a typed name, written as its pseudonym — "(Pratt, 30 Cal.App.5th at p.
+5.)", where the old undo left it as the page's own; the Esc'd names coming back
+with the step is what keeps it as typed (measured: Esc'd, the cite deleted,
+Ctrl+Z, Ctrl+S writes "(Jones, …)" and names it in red; with the Esc'd names
+left off the step, "(Pratt, 30 Cal.App.5th at p. 5.)" under "1 real name
+written as pseudonym").
+
+The one rule an undo kept by dropping the flags was the guide's "Ctrl+Z puts
+the mark back": a party marked at the Space prompt and put back as the name
+once its citation was typed (`typedPseudonymsCited`) came back as a mark, and
+an undo that restores a mark leaves it. With the flag and `__built` restored,
+that mark is the typing's and stands in an edited place, and the next pause or
+save put it back again (measured: "See Pratt v. Smith" on the baseline, "See
+Jones v. Smith" with the flags alone carried). So the put-back's own step
+records which marks it took out (`left`), and `restoreTyping` gives each of
+them `data-left`, the operator's: `TD.typedPseudonymsCited` passes over it
+however the page reads, `typingOf` carries it, and the save's forward pass
+flags it again after a rebuild as it does `data-typed`. Checked in Chromium,
+each failing on 6303b39 and passing after: the three of the review, the key
+loaded after the typing, and undo, redo and undo of a save. Each as on
+6303b39: an Esc'd cite deleted and undone, and one with an unrelated edit
+undone (both keep "(Jones, …)" and name it in red); the page's own undecided
+name deleted, saved and undone (back in the clear, named in red, not faked);
+and "Ctrl+Z puts the mark back" ("See Pratt v. Smith", an unrelated edit
+undone after it too). `test-textdoc.mjs` pins `data-left`.
 
 **Every Esc is kept, by place** (`escaped`, `escapeTyped`, `escapesIn`,
 `escNote`, `escFindAgain`, `TD.withoutEscaped`, `TD.escapedPlaces`). The

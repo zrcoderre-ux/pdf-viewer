@@ -12,6 +12,7 @@
 import zlib from "node:zlib";
 import {
   spanGap, pageTextFromSpans, spanRangeFor, offUpright, sidewaysSpans, UPRIGHT_SLACK_DEG,
+  spanFrame, SPAN_FRAME_MAX_DEG,
   mergeRects, padRect, clampRect, redactedName, countLabel,
   addRedaction, removeRedaction, redactionsFor, redactionPages,
   redactionCount, clearRedactions, createRedactionStore, pageBoxFromView,
@@ -116,6 +117,75 @@ console.log("text that does not run across the screen");
   check("a span whose turn was not read counts as sideways", sidewaysSpans([sp("Quillfeather", NaN)]).length, 1);
   check("the slack is the caller's to set", sidewaysSpans([sp("Quillfeather", 3)], 5).length, 0);
   check("no spans, none sideways", sidewaysSpans(null), []);
+}
+
+console.log("a span at a slant, read along its own line");
+{
+  // A span as Chromium measures it on screen: the upright box round the box
+  // pdf.js turned through `deg` (clockwise, y down) about its top-left corner
+  // (ox, oy), w by h — with the turn the screenshot reads (sidewaysOn).
+  const T = (text, ox, oy, w, h, deg) => {
+    const t = (deg * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+    const xs = [0, w * c, -h * s, w * c - h * s].map((v) => ox + v);
+    const ys = [0, w * s, h * c, w * s + h * c].map((v) => oy + v);
+    return { text, left: Math.min(...xs), top: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys), turn: deg };
+  };
+  // …and a point (x, y) of the page as laid out upright, turned the same way about the origin.
+  const at = (x, y, deg) => { const t = (deg * Math.PI) / 180; return [x * Math.cos(t) - y * Math.sin(t), x * Math.sin(t) + y * Math.cos(t)]; };
+  const near = (x, y) => Math.abs(x - y) < 1e-6;
+  for (const deg of [0, 0.9, -0.9, 12]) {
+    const f = spanFrame(T("Quillfeather", 560, 40, 90, 11, deg));
+    ok(`the box turned ${deg}° is worked back out of the box round it`,
+      f && near(f.x, 560) && near(f.y, 40) && near(f.w, 90) && near(f.h, 11));
+  }
+  check("no turn given, no frame: the screen reading stands", spanFrame(S("Quillfeather", 560, 40, 90, 11)), null);
+  check("…nor past the turn a box can be worked back from", spanFrame(T("Quillfeather", 560, 40, 90, 11, SPAN_FRAME_MAX_DEG + 1)), null);
+  check("…a quarter off included", spanFrame(T("Quillfeather", 560, 40, 90, 11, 90)), null);
+
+  // The landscape service list of the review (11 pt on 14): the served
+  // party's name alone in the right-hand column at x = 560, the next row at
+  // the left margin. Read by the boxes on screen, a lean of under a degree
+  // welded the surname into the next row; read along the line it does not.
+  const row = (deg) => {
+    const [ax, ay] = at(560, 0, deg), [bx, by] = at(0, 14, deg), [cx, cy] = at(300, 0, deg), [dx, dy] = at(0, 0, deg);
+    return [
+      T("Respondent (by counsel of record)", dx, dy, 190, 11, deg),
+      T("First-class mail, postage prepaid", cx, cy, 180, 11, deg),
+      T("Nadia Quillfeather", ax, ay, 98, 11, deg),
+      T("Dated this day in the county of Los Angeles, California.", bx, by, 300, 11, deg),
+    ];
+  };
+  for (const deg of [0.85, 0.9, 0.99, -0.99]) {
+    const spans = row(deg);
+    const screen = pageTextFromSpans(spans.map(({ turn, ...s }) => s)).text;
+    const along = pageTextFromSpans(spans).text;
+    if (deg > 0) ok(`${deg}°: read by the boxes on screen, the surname runs into the next row`, screen.includes("QuillfeatherDated"));
+    check(`${deg}°: read along the line, each row is a line and the name a name`, along,
+      "Respondent (by counsel of record) First-class mail, postage prepaid Nadia Quillfeather\nDated this day in the county of Los Angeles, California.");
+  }
+  check("…and at no turn the two readings are one",
+    pageTextFromSpans(row(0)).text, pageTextFromSpans(row(0).map(({ turn, ...s }) => s)).text);
+  // A line's far end sinks by its width's worth of the slant: at a degree,
+  // 560 pt out is nearly ten points down — the screen reading broke the line
+  // there; along it, the words are one line with a space.
+  {
+    const [ax, ay] = at(0, 0, 1), [bx, by] = at(560, 0, 1);
+    check("a degree's slant: the far word of the same line is the same line",
+      spanGap(T("Served on", ax, ay, 50, 11, 1), T("Quillfeather", bx, by, 60, 11, 1)), " ");
+    check("…where the boxes on screen broke the line there",
+      spanGap({ ...T("Served on", ax, ay, 50, 11, 1), turn: undefined }, { ...T("Quillfeather", bx, by, 60, 11, 1), turn: undefined }), "\n");
+  }
+  // An OCR layer leans each line its own way: the drop is measured from the
+  // first span's line, wherever the next one's starts.
+  {
+    const [ax, ay] = at(560, 0, 0.9), [bx, by] = at(0, 14, 0.4);
+    check("lines leaning a little differently are still two lines",
+      spanGap(T("Quillfeather", ax, ay, 60, 11, 0.9), T("Dated", bx, by, 40, 11, 0.4)), "\n");
+  }
+  check("a word cut in two at a slant is still one word",
+    spanGap(T("Quill", ...at(560, 0, 0.9), 30, 11, 0.9), T("feather", ...at(590, 0, 0.9), 40, 11, 0.9)), "");
+  check("one span with no turn: both read on screen, as before",
+    spanGap(T("Helen", 100, 100, 40, 10, 0.9), S("Rasho", 150, 100, 40)), spanGap(S("Helen", 100, 100, 40), S("Rasho", 150, 100, 40)));
 }
 
 console.log("one line of text, one box");

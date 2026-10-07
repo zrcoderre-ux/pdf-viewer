@@ -70,6 +70,16 @@ export function spanGap(a, b) {
   const at = String(a.text == null ? "" : a.text);
   const bt = String(b.text == null ? "" : b.text);
   if (!at || !bt) return "";
+  // Along the first span's own line, where both say how they are turned
+  // (spanFrame, below): exactly the reading underneath at no turn at all.
+  const fa = spanFrame(a), fb = fa && spanFrame(b);
+  if (fa && fb) {
+    const h = fa.h > 0 ? fa.h : (fb.h > 0 ? fb.h : 1);
+    const dx = fb.x - fa.x, dy = fb.y - fa.y;
+    if (-dx * fa.sin + dy * fa.cos > h * 0.5) return "\n";
+    if (/\s$/.test(at) || /^\s/.test(bt)) return "";
+    return dx * fa.cos + dy * fa.sin - fa.w > h * 0.2 ? " " : "";
+  }
   const h = a.height > 0 ? a.height : (b.height > 0 ? b.height : 1);
   // A new line: the next span has dropped by more than half a line.
   if ((b.top - a.top) > h * 0.5) return "\n";
@@ -77,6 +87,61 @@ export function spanGap(a, b) {
   if (/\s$/.test(at) || /^\s/.test(bt)) return "";
   const gap = b.left - (a.left + a.width);
   return gap > h * 0.2 ? " " : "";
+}
+
+// A SPAN READ ALONG ITS OWN LINE. The join above reads where spans sit on
+// screen, and a span set at a slant does not sit where its line does: its box
+// on screen (getBoundingClientRect, which is what `left`/`top`/`width`/
+// `height` are) is the upright box round the turned one, its top the top of
+// its highest corner. A slant of under a degree was taken as upright
+// (UPRIGHT_SLACK_DEG, below), measured on full-width lines, whose boxes grow
+// tall with their width and so raised the half-a-line a drop is measured
+// against. A name in a short span of its own far to the right — a service
+// list's right-hand column on a landscape page, at 11 pt on 14 — keeps a
+// short box, and by the end of the line its top has sunk x·tan(θ), so the
+// next row's first span, at the left margin, had dropped less than half a
+// line below it: "Nadia QuillfeatherDated this day…", an "Odile" cover over
+// "Nadia" and the surname readable in the PNG under "the names in their
+// pseudonyms" from 0.85° to 0.99° (measured on 6303b39, as the review did on
+// c45bde3).
+//
+// So where a span says how it is turned on screen (`turn`, degrees clockwise:
+// the layer's turn and its own, as the screenshot's sidewaysOn reads them),
+// the box it was turned from is worked back out of the upright box round it —
+// for a box w by h turned through θ about its top-left corner, the box round
+// it is w·cos θ + h·|sin θ| wide and w·|sin θ| + h·cos θ tall, and that
+// top-left corner is the turned box's highest point (θ ≥ 0) or its leftmost
+// (θ < 0) — and the next span's drop and gap are measured from that corner,
+// across the line and along it. At θ = 0 that is the reading above to the letter; up to
+// SPAN_FRAME_MAX_DEG it reads a slant's lines as lines. Past it (a page turned
+// a quarter, a stamp up the margin) the box cannot be worked back reliably
+// and the screen reading stands, as before — the screenshot leaves such a
+// sheet out anyway (sidewaysSpans). A span with no `turn` (the redaction
+// sweep's, the PDF viewer's) is read on screen as before.
+export const SPAN_FRAME_MAX_DEG = 30;
+/**
+ * The box a span was turned from, and its line's direction, out of the
+ * upright box round it and its `turn`: { x, y } its top-left corner, `w` and
+ * `h` its own width and height, `cos` and `sin` of the turn — or null where it
+ * says no turn, or one more than SPAN_FRAME_MAX_DEG off upright.
+ */
+export function spanFrame(s) {
+  const t = s && typeof s.turn === "number" ? s.turn : NaN;
+  if (!Number.isFinite(t)) return null;
+  let d = ((t % 360) + 360) % 360;
+  if (d > 180) d -= 360;
+  if (Math.abs(d) > SPAN_FRAME_MAX_DEG) return null;
+  const th = (d * Math.PI) / 180;
+  const cos = Math.cos(th), sin = Math.sin(th), as = Math.abs(sin);
+  const W = Number(s.width) || 0, H = Number(s.height) || 0;
+  const det = cos * cos - as * as;
+  const w = Math.max(0, (W * cos - H * as) / det);
+  const h = (H * cos - W * as) / det;
+  if (!(h > 0)) return null; // a box too small to work back: read on screen
+  const left = Number(s.left) || 0, top = Number(s.top) || 0;
+  return sin >= 0
+    ? { x: left + h * sin, y: top, w, h, cos, sin }
+    : { x: left, y: top - w * sin, w, h, cos, sin };
 }
 
 /**

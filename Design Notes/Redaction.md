@@ -173,7 +173,9 @@ a line's last word is welded to the next line's first ("QuillfeatherDated"),
 and a name is found in part or not at all. Measured on an upright page with its
 words set at a slant: 1° and 1.5° read every line apart, 2° ran a full-width
 line into the one under it, 3° welded the surname at a line's end to the next
-line, so `UPRIGHT_SLACK_DEG` is 1. A span's turn is the layer's computed one
+line, so `UPRIGHT_SLACK_DEG` is 1. That measure held for FULL-WIDTH lines only
+(see "A slant under the slack" below: a short span at a line's far end welded
+from 0.85°). A span's turn is the layer's computed one
 plus its own (pdf.js writes a slant as `rotate()`), so a page turned a quarter
 whose words read upright is upright, and the same page with its words still
 portrait is a quarter off.
@@ -195,10 +197,56 @@ portrait is a quarter off.
   costs about a tenth of measuring them, once a sheet, on a screenshot.
 - **The sweep and the copy keep it.** A name there can be boxed only in part
   (the fixture: 150 red pixels left in the copy). The check reports it ("1 not
-  found — review"), and an area drag over it is the answer. The fix for both is
-  a join that reads each span along its own direction, not yet written.
+  found — review"), and an area drag over it is the answer. A join that reads
+  each span along its own direction is now written (`RD.spanFrame`, below),
+  but only the screenshot gives its spans their turns; the sweep's spans carry
+  none and are read on screen as before.
 - **Left for the screenshot:** a name split mid-word across two spans of
   sideways text, which neither reading finds, on a sheet with no other name.
+
+**A slant under the slack** (`RD.spanFrame`, `SPAN_FRAME_MAX_DEG`, the
+direction-aware branch of `RD.spanGap`; `pdfNamesOn` hands the join the turns
+`sidewaysOn` reads). The 1° slack was measured on full-width lines. A turned
+span's screen box (`getBoundingClientRect`) is the upright box round it, w·|sin
+θ| + h·cos θ tall, so a long span's box is tall, its half-a-line threshold with
+it, and a drop of under half a line is easy to clear. A name in a short span
+of its own far to the right keeps a short box and a small threshold, and its
+top has sunk x·tan θ by the end of the line: on a landscape service list at
+11 pt on 14 with "Nadia Quillfeather" alone at x = 560 pt, the next row's first
+span at the left margin read as the same line from 0.85° to 0.99°, the join
+gave "…prepaid Nadia QuillfeatherDated this day…", an "Odile" cover went over
+"Nadia" and about 40 red pixels of the surname went into the PNG under "the
+names in their pseudonyms" (6303b39, as the review found on c45bde3; the page was taken for upright, so
+nothing left it out); at 10 pt on 12 and 12 on 13, 0.99°, the same (36 and
+39). Five harder sheets of the same kind (9 pt on 10 and 12 on 13, the name at
+x = 600 to 680, in one span or two, from 0.6°) leaked 8 to 47 red pixels the
+same way.
+
+Now, where a span says how it is turned on screen (`turn`, degrees clockwise,
+the layer's and its own), `spanFrame` works the box it was turned from back out
+of the box round it — for w by h turned through θ about its top-left corner the
+box round it is w·cos θ + h·|sin θ| by w·|sin θ| + h·cos θ, solved for w and h,
+and the corner is the turned box's highest point (θ ≥ 0) or its leftmost (θ < 0) — and `spanGap`
+measures the next span's drop across the first span's line and its gap along
+it, from that corner. At θ = 0 it is the screen reading to the letter (Node:
+"…and at no turn the two readings are one"); a span with no `turn` (the sweep's,
+the PDF viewer's), or one more than 30° off, is read on screen as before. The
+slack stays a degree: past it the sheet is still left out (`sidewaysOn`), as
+measured above. Measured in Chromium, 119 sheets before and after: the six
+that leaked on the service list and the five harder ones each now a full "Odile
+Brackenbury" cover and 0 red pixels; the other 108 (turned, upright, OCR word
+by word, slants to 45° either way, a negative lean) gave the same covers, toast
+and pixels as before. `test-redact.mjs` pins the working back, the service
+list read both ways, a line's far word kept on its line, lines leaning a
+little differently, and a word cut in two at a slant.
+
+**Left for the screenshot: a name only in an annotation.** A FreeText note's
+appearance, or a filled form field's, is drawn on the page by pdf.js but is not
+in the text layer the screenshot reads, so it is not covered: the `ftext` and
+`widg` fixtures put 260 red pixels of "Nadia Quillfeather" into the PNG under
+"the names in their pseudonyms" (on this branch before and after these
+changes). Covering it needs the annotations' own text read and placed, not
+written.
 
 ## Checking a redaction against the export (`text-reader.js`)
 

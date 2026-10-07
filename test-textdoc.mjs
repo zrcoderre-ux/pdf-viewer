@@ -404,6 +404,16 @@ console.log("what an edit wrote");
     typedPseudonymsCited(serializeMapped(sbody), serializeMapped(sbody).text), [savedTyped]);
   check("…and a typed mark outside a citation stays",
     typedPseudonymsCited(serializeMapped(page([[g("1   "), E("SPAN", { "data-fake": "Strangeways", "data-real": "Rasho", "data-typed": "1" }, [T("Rasho")]), T(" agrees.")]])), "1   Strangeways agrees."), []);
+  // CTRL+Z PUTS THE MARK BACK. An undo now restores the text a page is
+  // measured against and the typing's flags with its text (the reader's
+  // restoreTyping), so a mark the put-back took out, brought back by Ctrl+Z on
+  // that step, would be typed and in an edited place — and put back again at
+  // the next pause. The put-back's own step marks what it took out
+  // `data-left`, the operator's, and it is passed over however it reads.
+  const leftMark = E("SPAN", { "data-fake": "Strangeways", "data-real": "Rasho", "data-left": "1" }, [T("Rasho")]);
+  const lbody = page([[g("1   "), T("See "), leftMark, T(" v. Quillmark (2017) 13 Cal.App.5th 1152.")]]);
+  check("a mark Ctrl+Z took back from a put-back stays, though its place was typed",
+    typedPseudonymsCited(serializeMapped(lbody), "1   See"), []);
 
   // THE SAVE'S QUESTION, of the names it reads standing in the page whole. A
   // name typed and saved inside the converter's wait — or with the caret still

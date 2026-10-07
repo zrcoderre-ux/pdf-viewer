@@ -213,6 +213,7 @@ let provider = "lexis";
 let citationRepo = {};
 let toaOn = false;
 let lastCites = [];
+let veiledUrls = new Set(); // the citation links whose address carries a real name the file holds as a pseudonym (placeCitationsNow)
 
 // ── small helpers ───────────────────────────────────────────────────────────
 let toastTimer = null;
@@ -1058,6 +1059,12 @@ function pdfNamesOn(sheet) {
   // is not over its picture cannot vouch that the picture has no names.
   if (!layerOnSheet(sheet, layer)) return { sheet, names: [], whole: true };
   const measured = RD.measureSpans(layer);
+  // Each span's turn on screen first (sidewaysOn writes it on `measured`):
+  // the join reads a span at a slant along its own line (RD.spanFrame), where
+  // read by its box on screen a name at a line's end in a short span of its
+  // own ran into the next line's first word under a slant of less than a
+  // degree, and was found in part.
+  const sideways = sidewaysOn(layer, spans, measured);
   const { text, map } = RD.pageTextFromSpans(measured);
   // A name the key holds only an instruction for is covered with WITHHELD
   // (egressSwaps), as on the pages beside it.
@@ -1074,7 +1081,7 @@ function pdfNamesOn(sheet) {
   // the welds — goes out whole. The cost is a page with a stamp up its margin
   // and a name in its body, left out when its names might all have been
   // found; the toast counts it, and the export's page is the one to show.
-  if (sidewaysOn(layer, spans, measured)
+  if (sideways
       && (swaps.length || egressSwaps(measured.map((m) => m.text).join("\n")).length)) {
     return { sheet, names: [], whole: true };
   }
@@ -1485,13 +1492,55 @@ function copyToast(c, verb) {
     toast(`${verb} in the pseudonyms — except ${withheldList(c.withheld)}, which went as ${WITHHELD}: the key holds an instruction for ${one ? "it" : "them"}, not a pseudonym to write.`, { error: true });
   } else if (c.faked !== c.shown) toast(`${verb} in the pseudonyms, as the file has it.`);
 }
+/**
+ * The citation link at `node` (an underline on a page, an entry of the
+ * § Authorities panel) whose address is built from a real name the file holds
+ * as a pseudonym (veiledUrls), or null.
+ */
+function veiledLinkAt(node) {
+  if (!veiledUrls.size || !node) return null;
+  const el = node.nodeType === 1 ? node : node.parentElement;
+  const a = el && el.closest ? el.closest("a[href]") : null;
+  return a && veiledUrls.has(a.getAttribute("href")) ? a : null;
+}
+/** Whether a selection off the pages (the § Authorities panel) takes in any of such a link's text. */
+function selectionHoldsVeiled(sel) {
+  if (!veiledUrls.size || !sel || !sel.rangeCount || sel.isCollapsed) return false;
+  const r = sel.getRangeAt(0);
+  for (const a of document.querySelectorAll("a[href]")) {
+    if (veiledUrls.has(a.getAttribute("href")) && !pagesEl.contains(a) && r.intersectsNode(a)) return true;
+  }
+  return false;
+}
+function veiledLinkNote(verb) {
+  const what = verb === "drag" ? "Not dragged" : verb === "copy" ? "Not copied" : "No link menu here";
+  return `${what}: this citation's link is built from the real names on the screen, which the file holds as pseudonyms, and its address carries them. A click still opens it; turn Show fakes on to take the citation as the file has it.`;
+}
+// …and the browser's own menu on such a link, whose "Copy link address" puts
+// the real names on the clipboard. The keep menu (pagesEl's contextmenu, which
+// runs first) is left to answer where it does.
+document.addEventListener("contextmenu", (e) => {
+  if (e.defaultPrevented || !veiledLinkAt(e.target)) return;
+  e.preventDefault();
+  toast(veiledLinkNote("menu"), { error: true });
+});
 /** Our copy for a copy or cut event in the pages, written to its clipboard; null where the browser's own stands. */
 function copyFor(e, verb) {
   if (!key || !e.clipboardData) return null;
   const t = e.target;
   if (t && t.nodeType === 1 && t.closest("input, textarea")) return null; // a box's own text is the box's
   const c = during("copying the selection in its pseudonyms", () => copyOfSelection());
-  if (!c) return null;
+  if (!c) {
+    // A selection off the pages is the browser's to copy — but not the
+    // § Authorities panel's entry for a citation built from real names the
+    // file holds as pseudonyms: nothing goes on the clipboard (veiledUrls).
+    if (selectionHoldsVeiled(document.getSelection())) {
+      e.preventDefault();
+      e.clipboardData.setData("text/plain", "");
+      toast(veiledLinkNote("copy"), { error: true });
+    }
+    return null;
+  }
   e.preventDefault();
   e.clipboardData.setData("text/plain", c.faked);
   lastCopy = c;
@@ -1540,7 +1589,14 @@ document.addEventListener("cut", (e) => {
 // element the selection holds any of (`containsNode(t, true)`): every element
 // in those 2,027 did. A link the selection does not reach — a citation
 // dragged off a page whose text alone is selected — is dragged as the link,
-// its address and nothing else, as before. NOT EVEN A PICTURE is let off. The
+// its address and nothing else, as before — UNLESS that address is built from
+// a real name the file holds as a pseudonym (veiledUrls, placeCitationsNow:
+// a citation of this case's own prior appeal, Show fakes off), whose address
+// and title carry the real names: that drag is refused, and so is the
+// browser's context menu on such a link (its "Copy link address") and a copy
+// or drag of the § Authorities panel's text where it takes in such an entry.
+// The click still opens it: that is the operator's own lookup, in the
+// operator's own browser. NOT EVEN A PICTURE is let off. The
 // fix as first proposed spared an <img>, on the reading that Chrome drags an
 // image as itself even inside a selection; put one in a selected line and
 // pressed, Chrome dragged the SELECTION from it, target the <img>, "Plaintiff
@@ -1554,9 +1610,15 @@ document.addEventListener("dragstart", (e) => {
   if (!key || !e.dataTransfer || !t) return;
   const sel = document.getSelection();
   const ofSelection = t.nodeType === 3 || (t.nodeType === 1 && !!sel && !sel.isCollapsed && sel.containsNode(t, true));
-  if (!ofSelection) return;
+  if (!ofSelection) {
+    if (veiledLinkAt(t)) { e.preventDefault(); toast(veiledLinkNote("drag"), { error: true }); }
+    return;
+  }
   const c = during("copying the selection in its pseudonyms", () => copyOfSelection());
-  if (!c) return;
+  if (!c) {
+    if (selectionHoldsVeiled(sel)) { e.preventDefault(); toast(veiledLinkNote("drag"), { error: true }); }
+    return;
+  }
   e.dataTransfer.clearData();
   e.dataTransfer.setData("text/plain", c.faked);
   lastCopy = c;
@@ -3991,7 +4053,17 @@ function pageBodies() { return [...pagesEl.querySelectorAll(".page-body")]; }
 
 /** Re-translate every page under the current key, keeping the edits. */
 function retranslate() {
-  for (const body of pageBodies()) buildBody(body, TD.serializeNodes(body), pageIndexOf(body));
+  // The file's text is the same under any key, and so is what was typed into
+  // it: the page is measured, marked and Esc'd as it was (typingOf), not from
+  // the text it is rebuilt from. Built as the text alone, a name typed before
+  // the key was loaded or attached ("Served on Helen Rasho", then the key
+  // picked by hand) became the page's own: the save wrote it in the clear and
+  // said it "stands in the file as it did" (measured on 6303b39).
+  for (const body of pageBodies()) {
+    const was = typingOf(body);
+    buildBody(body, TD.serializeNodes(body), pageIndexOf(body));
+    restoreTyping(body, was);
+  }
   afterTextChange();
 }
 
@@ -4931,7 +5003,69 @@ function snapshotOf(body) {
   // value in the clear with nothing saying so — which the next save would write
   // back to its pseudonym.
   const page = pageIndexOf(body);
-  return { page, text: TD.serializeNodes(body), caret: caretOffsetIn(body), spots: spotsFromBody(body, page) };
+  return { page, text: TD.serializeNodes(body), caret: caretOffsetIn(body), spots: spotsFromBody(body, page), ...typingOf(body) };
+}
+// WHAT WAS TYPED TRAVELS WITH THE TEXT TOO. Three things on a page say which
+// of its names the operator wrote, and none of them is in its text: the text
+// the page was built from or last saved as (`__built`, what TD.typedSpans and
+// TD.typedReals measure an edit against), the marks the typing made
+// (`data-typed`, which TD.typedPseudonymsCited puts back once a citation is
+// typed round them), and the names Esc left as typed (`escaped`). An undo
+// built the page from the snapshot's text alone, which made all three what
+// that text said: `__built` became the snapshot's text, so every name typed
+// before it was "the page's own"; the marks lost their flag; and an Esc'd
+// name deleted and put back by Ctrl+Z was no longer Esc'd. Measured on
+// 6303b39: Ctrl+Z after a save that wrote a typed "Helen Rasho" as its
+// pseudonym (the save's own rebuild is an undo step) and Ctrl+S wrote "Helen
+// Rasho" over the pseudonym already in the file, under a toast saying it
+// "stands in the file as it did"; a save refused for a typed name the key
+// holds only an instruction for, Ctrl+Z, Ctrl+S wrote it and the other typed
+// name in the clear; and "See Jones" Space-marked and saved, an unrelated typo
+// undone, then "v. Smith (2019) 30 Cal.App.5th 1." typed and saved wrote "See
+// Pratt v. Smith (2019) 30 Cal.App.5th 1." under a plain "Saved" — a renamed
+// authority. So each snapshot carries all three as they stood when it was
+// taken (places in its own text), and restoreTyping puts them back: the page
+// after an undo is measured, marked and Esc'd exactly as it was then, and a
+// redo (its snapshot taken the same way, stepHistory) brings back the state
+// the undo left. The Esc'd names come back with it so that putting `__built`
+// back cannot write an Esc'd short cite's party as its pseudonym where the
+// undo used to leave it as the page's own.
+function typingOf(body) {
+  const typed = [], left = [];
+  if (body.querySelector(".pn[data-typed], .pn[data-left]")) {
+    for (const [el, o] of TD.serializeMapped(body).pn) {
+      if (el.dataset.typed) typed.push(o);
+      if (el.dataset.left) left.push(o);
+    }
+  }
+  let esc = [];
+  const list = escaped.get(body);
+  if (list && list.length) {
+    escNote(body); // each live one's place in the disk text, now
+    esc = (escaped.get(body) || []).filter((d) => d.a >= 0).map((d) => ({ a: d.a, b: d.b, text: d.text, real: d.real }));
+  }
+  return { built: body.__built, typed, left, esc };
+}
+/** …and put back, once buildBody has built the page from the same snapshot's text. */
+function restoreTyping(body, snap) {
+  if (typeof snap.built === "string") body.__built = snap.built;
+  if ((snap.typed && snap.typed.length) || (snap.left && snap.left.length)) {
+    const typed = new Set(snap.typed || []), left = new Set(snap.left || []);
+    for (const [el, o] of TD.serializeMapped(body).pn) {
+      // A mark the operator took back from the put-back by Ctrl+Z (the
+      // put-back's own step carries `left`), or one carried since, is theirs:
+      // TD.typedPseudonymsCited passes over it, as an undo that restored a
+      // mark always left it — "Ctrl+Z puts the mark back".
+      if (left.has(o)) { el.dataset.left = "1"; delete el.dataset.typed; }
+      else if (typed.has(o)) el.dataset.typed = "1";
+    }
+  }
+  if (Array.isArray(snap.esc)) {
+    // Copies, each found again exactly where the snapshot noted it: the
+    // snapshot is kept for a redo, and the live entries are changed in place.
+    escaped.set(body, snap.esc.map((d) => ({ range: null, a: d.a, b: d.b, text: d.text, real: d.real })));
+    escapesIn(body, { exact: true });
+  }
 }
 /** Record the page as it stands, before an edit; `force` skips coalescing. */
 function snapshot(body, force) {
@@ -4962,6 +5096,7 @@ function restoreSnapshot(snap, { settle = true, lists = true } = {}) {
   // back where the text it is building from carries them.
   spots = spots.filter((x) => x.page !== snap.page).concat(snap.spots || []);
   buildBody(body, snap.text, snap.page);
+  restoreTyping(body, snap); // …measured, marked and Esc'd as it was then (typingOf)
   doc.pages[snap.page].lines = snap.text.split("\n");
   // …and what actually landed is what is remembered.
   syncSpots(body);
@@ -5161,9 +5296,22 @@ function convertTypedReals(body, { quiet = false, tally = null } = {}) {
   // a case that does not exist. Only a mark an edit made; the page's own stay.
   let back = 0;
   if (body.querySelector(".pn")) {
-    for (const el of TD.typedPseudonymsCited(TD.serializeMapped(body), body.__built)) {
+    const mapped = TD.serializeMapped(body);
+    let step = null;
+    for (const el of TD.typedPseudonymsCited(mapped, body.__built)) {
       if (!el.isConnected) continue;
-      if (!made && !back) snapshot(body, true);
+      if (!made && !back) {
+        // The step this put-back is, told so: Ctrl+Z on it puts the marks
+        // back as the OPERATOR's, which this pass then leaves alone
+        // (`data-left`, restoreTyping) — "Ctrl+Z puts the mark back" — where
+        // the typing's own flag, which the undo also restores, would have
+        // them put back again at the next pause or save. (A step taken
+        // before marking in this same pass goes back before the marks too.)
+        const was = undoStack.length;
+        snapshot(body, true);
+        if (undoStack.length > was) { step = undoStack[undoStack.length - 1]; step.left = []; }
+      }
+      if (step && mapped.pn.has(el)) step.left.push(mapped.pn.get(el));
       el.replaceWith(document.createTextNode(el.dataset.real));
       back++;
     }
@@ -5384,12 +5532,18 @@ async function saveDocument() {
         // pass writes for a TYPED name, are found again in the rebuilt page by
         // where their fakes begin in the text written (placeAfterSwaps) and
         // flagged again; a page the pass leaves alone keeps its nodes and its
-        // flags. An undo builds from text and drops the flag, as an undo that
-        // restores a mark leaves it.
+        // flags. An undo builds from text too, and puts the flags, the
+        // `__built` and the Esc'd names back as its snapshot had them
+        // (typingOf / restoreTyping) — this pass's own snapshot below
+        // included, so Ctrl+Z after a save undoes the save's marking and
+        // leaves the names it marked typed, to be marked again.
         const typedRanges = [...typed].flatMap((h) => h.ranges);
-        const flagAt = new Set();
-        if (body.querySelector(".pn[data-typed]")) {
-          for (const [el, o] of TD.serializeMapped(body).pn) if (el.dataset.typed) flagAt.add(placeAfterSwaps(o, fw.places));
+        const flagAt = new Set(), leftAt = new Set();
+        if (body.querySelector(".pn[data-typed], .pn[data-left]")) {
+          for (const [el, o] of TD.serializeMapped(body).pn) {
+            if (el.dataset.typed) flagAt.add(placeAfterSwaps(o, fw.places));
+            if (el.dataset.left) leftAt.add(placeAfterSwaps(o, fw.places)); // …and the marks Ctrl+Z took back from a put-back (restoreTyping)
+          }
         }
         if (typedRanges.length) {
           for (const sw of fw.places) if (typedRanges.some(([a, b]) => sw.start < b && sw.end > a)) flagAt.add(placeAfterSwaps(sw.start, fw.places));
@@ -5403,7 +5557,12 @@ async function saveDocument() {
         // the page: the next Ctrl+S took the instruction's name for one the
         // file had carried, "not yet reviewed", and wrote it in the clear.
         if (base != null) body.__built = base;
-        if (flagAt.size) for (const [el, o] of TD.serializeMapped(body).pn) if (flagAt.has(o)) el.dataset.typed = "1";
+        if (flagAt.size || leftAt.size) {
+          for (const [el, o] of TD.serializeMapped(body).pn) {
+            if (leftAt.has(o)) el.dataset.left = "1";
+            else if (flagAt.has(o)) el.dataset.typed = "1";
+          }
+        }
         if (caretK >= 0 && at[caretK] >= 0) placeCaretOnDisk(body, placeAfterSwaps(at[caretK], fw.places));
         escAt = escAt.map(([s, e]) => { const a = placeAfterSwaps(s, fw.places); return [a, a + (e - s)]; }); // the names Esc left are spared, so each moves only with the names before it
         ({ text, held, pns } = TD.serializeHeld(body)); // the rebuilt page, its spots and fakes found again
@@ -5834,10 +5993,18 @@ function placeCitationsNow() {
   const bodies = pageBodies();
   const parts = [];
   const maps = [];
+  // Where the screen shows a name the file holds as its pseudonym: a
+  // pseudonym span showing its real name (Show fakes off). Places in `full`,
+  // in order, for `veiled` below.
+  const veils = [];
   let base = 0;
   for (const body of bodies) {
     const { text, segs } = flatten(body, { blankGutters: true });
     maps.push({ body, base, segs, len: text.length });
+    for (const g of segs) {
+      const p = g.node.parentElement;
+      if (p && p.classList.contains("pn") && g.node.data !== p.dataset.fake) veils.push([base + g.start, base + g.end]);
+    }
     parts.push(text);
     base += text.length + 2;
   }
@@ -5846,6 +6013,34 @@ function placeCitationsNow() {
   try { found = findAllCitations(full); } catch (e) { console.error(e); }
   const seen = new Map();
   let linked = 0;
+  // A LINK BUILT OFF A NAME THE FILE DOES NOT CARRY. The citations are found
+  // in the text the pages SHOW, so with Show fakes off a citation whose
+  // parties the export holds as pseudonyms — this case's own prior appeal,
+  // which PDF-Linker fakes as the caption (_side_is_trusted) — gets an address
+  // and a title built from the real names ("…pdsearchterms=Rasho%20v.%20
+  // Quillmark%20Holdings…"). The click is the operator's own lookup and opens
+  // that, as it should; but a drag of the underline, or of its entry in the
+  // § Authorities panel, carried the address (and, in its text/html, the
+  // title) to wherever it was dropped, and the right-click "Copy link
+  // address" put it on the clipboard: the real names leaving the reader with
+  // nothing said (measured on 6303b39; main, with no drag handler at all, the
+  // same). Each such address is
+  // listed here, and the drag, the context menu and a copy of the panel's
+  // text refuse it (veiledLinkAt). A citation that reads the same in the file
+  // — a published decision's parties, a spot keep, Show fakes on — is not.
+  veiledUrls = new Set();
+  const veiled = (s, e) => {
+    let lo = 0, hi = veils.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (veils[mid][1] <= s) lo = mid + 1; else hi = mid; }
+    return lo < veils.length && veils[lo][0] < e;
+  };
+  if (veils.length) {
+    for (const c of found) {
+      if (!veiled(c.span[0], c.span[1])) continue;
+      const url = resolveUrl(c, citationRepo, provider);
+      if (url) veiledUrls.add(url);
+    }
+  }
   // ON THE PDF'S GRID: the authorities are still read, and nothing is drawn
   // over the text. An underline is a strip measured off the line it sits
   // under, and the grid moves that line — against a body it has shifted, and
@@ -7482,6 +7677,7 @@ function putStrippedBack(i, sn) {
   hideTypeTip();
   spots = spots.filter((x) => x.page !== i).concat(sn.spots || []);
   buildBody(body, sn.text, i);
+  restoreTyping(body, sn); // what was typed in it, as it was before the strip (typingOf)
   doc.pages[i].lines = sn.text.split("\n");
   syncSpots(body);
   setDirty(true, i);

@@ -177,7 +177,11 @@ and a sweep stored its box on the wrong part of the page while the check said
 the name was covered. Two things are worth knowing. A page whose text runs
 **sideways** on screen (portrait text on a page turned a quarter) is read in
 columns rather than lines, so a name on it may be boxed only in part; the check
-reports it as not found, and an area drag over it is the answer. A screenshot
+reports it as not found, and an area drag over it is the answer. The same goes
+for a page set at a slant, even of under a degree, where a name stands in a
+short run of its own at the far end of a line (a service list's right-hand
+column): the sweep may box its first name alone, and the check reports the
+rest. A screenshot
 of the PDF pane leaves such a page out whole when a name is on it. And should a
 page's text ever not stand over the page as it is drawn, the reader marks
 nothing there rather than mark the wrong place: the sweep's message names the

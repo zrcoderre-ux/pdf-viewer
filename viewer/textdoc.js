@@ -1181,12 +1181,20 @@ export function escapedPlaces(text, name, near, taken) {
  * citation was finished was "See Pratt" built, and the "v. Smith (2019) 30
  * Cal.App.5th 1." typed after the save left the mark standing in it, to be
  * written as a renamed authority by the next save.
+ *
+ * …and never a span carrying `data-left`: a mark this put back that the
+ * operator took back with Ctrl+Z. The undo puts back the text the page was
+ * measured against (`built`) and the typing's flags with the mark (the
+ * reader's restoreTyping), which would have it put back again at the next
+ * pause; the guide's "Ctrl+Z puts the mark back" is the operator saying the
+ * citation is one whose parties the file holds as pseudonyms.
  */
 export function typedPseudonymsCited(page, built) {
   if (!page.pn || !page.pn.size) return [];
   const spans = built == null ? [] : editedSpans(built, page.text);
   const made = [];
   for (const [el, o] of page.pn) {
+    if (el.getAttribute("data-left") != null) continue; // the operator's: Ctrl+Z took it back from a put-back
     const len = String(el.getAttribute("data-fake") || "").length;
     if (el.getAttribute("data-typed") != null || spanEdited(spans, o, o + len)) made.push([el, o, o + len]);
   }

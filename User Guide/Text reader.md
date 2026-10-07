@@ -253,9 +253,14 @@ app, which routes it to the reader tab.
   would land somewhere other than the name — is left out of the picture
   whole, white with a line saying why, and the toast counts it. So is a PDF
   page with a name on it whose text runs sideways, upside down or at a slant
-  on screen — a portrait page turned in Acrobat, a stamp up the margin — since
-  the names in such text cannot all be found: it is left out rather than shown
-  with one half covered. Take that page from the export beside it. In the
+  of more than a degree on screen — a portrait page turned in Acrobat, a stamp
+  up the margin — since the names in such text cannot all be found: it is left
+  out rather than shown with one half covered. Take that page from the export
+  beside it. (A scan's slight lean, under a degree, is read along its lines and
+  covered name by name.) A name that stands only in a PDF annotation — a
+  typed-on note, a filled-in form field — is drawn on the page but is not in
+  its text, and is **not** covered: check such a page, or take it from the
+  export. In the
   extension the tab is taken directly; in the hosted app the browser asks to
   share this tab, keeps one frame and stops, and the names change only once
   the share is allowed.
@@ -280,7 +285,9 @@ app, which routes it to the reader tab.
   pseudonyms wherever you press inside the selection — on a word, past the
   end of a line, in the space under the text, on a citation link or a picture
   the selection takes in; a link or picture outside the selection drags as
-  itself. The PDF — in the pane and on
+  itself — except a citation link built from real names the file holds as
+  pseudonyms (*Citations linked*, below), which does not drag at all. The PDF —
+  in the pane and on
   a page swapped for its PDF page — is the filing itself and still copies as
   it reads.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
@@ -295,7 +302,16 @@ app, which routes it to the reader tab.
   fills as always and a cite opened from the panel opens the same page; the
   status bar says the links are off, and they come back the moment the grid
   does. Side by side without the grid leaves every line where it flows, so
-  there the links are drawn and are right.
+  there the links are drawn and are right. **A citation whose parties the
+  file holds as pseudonyms** — this case's own prior appeal, say, which
+  PDF-Linker fakes like the caption — is linked as the screen reads it: with
+  *Show fakes* off its address and its panel entry carry the real names, so a
+  click looks up the real decision. That address stays on this machine: the
+  link does not drag, its right-click menu (with *Copy link address*) does
+  not open, and a copy or drag of its entry in **§ Authorities** puts nothing
+  on the clipboard; a toast says why each time. Turn *Show fakes* on to take
+  it as the file has it. A published decision's link, whose names the file
+  carries too, drags and copies as before.
 - **A name wrapped across lines is one name.** A pseudonym or a real value
   whose halves sit on two numbered lines — the line break, the next line's
   gutter number and any blank line between — is matched as one: the reader
@@ -809,8 +825,9 @@ app, which routes it to the reader tab.
   Backspace, print or take a screenshot. Change the name itself (type over
   its letters, or type a different name where it stood) and it is no longer
   the one you pressed Esc on: it is offered again, and marked if you leave
-  it. (After an undo that rebuilds the page, it is the page's own text, left
-  as it stands and named in red like any name nobody has decided.) A real
+  it. Ctrl+Z and Ctrl+Y keep it so: an undo puts the names you pressed Esc on
+  back with the text they stand in, so a short cite deleted by mistake and
+  brought back with Ctrl+Z still keeps its name. A real
   that opens a longer name in the key ("Helen" beside
   "Helen Rasho"), or a kept one, is never space-marked: the space types on,
   and the whole name is offered the moment it is finished. A name typed and
@@ -830,7 +847,13 @@ app, which routes it to the reader tab.
   save, and on the next save when you saved halfway ("See Jones", Ctrl+S,
   then the rest of the citation). A name the key holds only an instruction
   for (no pseudonym yet) is not written at all: the save stops and names it,
-  every time you save, until you retype it or keep it. The names the run left
+  every time you save, until you retype it or keep it. **Undo and redo keep
+  all of this.** Ctrl+Z after a save that marked the names you typed takes
+  that marking off — they show as typed again — and the next save writes them
+  as pseudonyms again; a refused save undone refuses again; a party saved
+  before its citation was finished still goes back to the name once the
+  citation is, whatever was undone in between; and a name typed before the key
+  was loaded is written as its pseudonym once it is. The names the run left
   in the clear are still yours to decide — the save leaves those where they
   stand and says so.
 - **A row that cannot be located says so, once, and keeps saying it.** A LEAKS
