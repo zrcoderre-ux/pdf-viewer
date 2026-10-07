@@ -784,7 +784,8 @@ const CELL_BLANKS = 2;
  * mark; from the line's start in the first), and `edge` where the text before
  * it in the same column ends, in the same terms (-1: none). `sep` is the blank
  * before it: "margin", "weak" (two spaces, a column only if a line beside it
- * says so) or "strong".
+ * says so) or "strong". The array's `marked`: whether the line draws a column
+ * at all — a ")" or a bar, even with nothing beside it in the other column.
  */
 function rawCells(line) {
   let s = line.endsWith("\r") ? line.slice(0, -1) : line;
@@ -815,6 +816,7 @@ function rawCells(line) {
     cells.push({ from, to: from + m[0].length, col, rel: from - base, edge: marks || prev < 0 ? -1 : prev - base, sep });
     prev = from + m[0].length;
   }
+  cells.marked = s.indexOf(CELL_MARK) >= 0;
   return cells;
 }
 
@@ -834,6 +836,7 @@ function pageCells(lines) {
         out[out.length - 1] = Object.assign({}, last, { to: c.to });
       } else out.push(c);
     }
+    out.marked = !!cells.marked;
     return out;
   });
 }
@@ -897,8 +900,10 @@ function columnHits(compiled, text, layout) {
   for (let i = 0; i < lines.length; i++) {
     const row = cells[i];
     // A line that is one cell at the margin is a plain line: its wrap is the
-    // gap's, and the plain pass has it.
-    if (row.length === 1 && row[0].sep === "margin") continue;
+    // gap's, and the plain pass has it. Not where the line draws a column
+    // after it — "…; and QUARRY   )" with the case number's side empty on that
+    // line: the ")" stands between the name and the line under it.
+    if (row.length === 1 && row[0].sep === "margin" && !row.marked) continue;
     for (const cell of row) {
       const chain = [{ i, c: cell }];
       for (let at = chain[0]; chain.length < CELL_CHAIN && (at = below(at.i, at.c));) {
@@ -993,15 +998,19 @@ function touchesPieces(pieces, ranges) {
  * — the longer reading, its surname token being no name of its own there. A
  * column name is handed over where the reading reaches its first piece, and
  * one whose first piece the handful has passed goes out with it rather than be
- * lost between two handfuls.
+ * lost between two handfuls. `columnsOnly`: those names alone.
  */
 function hitsFrom(compiled, text, from, max, opts) {
   const out = [];
   const rx = compiled.rx;
-  const layout = opts && opts.layout != null ? String(opts.layout) : opts && opts.columns ? text : null;
+  const layout = opts && opts.layout != null ? String(opts.layout) : opts && (opts.columns || opts.columnsOnly) ? text : null;
   const { cols, pieces } = layout != null && layout.length === text.length ? columnNames(compiled, text, layout) : NO_COLUMNS;
   let ci = 0;
   while (ci < cols.length && cols[ci].start < from) ci++;
+  // `columnsOnly`: the names wrapped down a column and nothing else — for a
+  // reading that has the plain names already, off a text of its own (the
+  // PDF's text in the order it was drawn; see redact.pageLayoutFromSpans).
+  if (opts && opts.columnsOnly) return { hits: cols.slice(ci), next: -1 };
   rx.lastIndex = from > 0 ? from : 0;
   let m;
   while ((m = rx.exec(text))) {

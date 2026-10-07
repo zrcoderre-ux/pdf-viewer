@@ -180,9 +180,27 @@ name, `keyTerms` collects later pieces by name, not by the previous span, and
 `wrappedPieces` passes over other spans. Cost: about 6 ms on 567 KB of prose
 under a 3,000-name key for the display, and a few ms for the leak reading,
 because a line with no wide blank or bar past its gutter is one cell
-(`MAY_CUT_RE`) and is never cut. Not read in columns: the LEAKS worksheet's row
-marks (`leakMatches`), the flagged values' red marks, and the redaction sweep
-over a PDF's text layer, whose text has no column gaps to read.
+(`MAY_CUT_RE`) and is never cut. A line whose one cell at the margin has
+only a ")" or a bar after it ("…; and QUARRY   )", the case number's side empty
+on that line) is still a column (`cells.marked`); it used to be taken for a
+plain line and skipped.
+
+The LEAKS worksheet's marks read columns too. The row in front (`leakMatches`)
+keeps its whole-word reading off the page as it shows and adds, on a page that
+carries the value's first and last words at all, the value wrapped down a
+column off the disk text (`findColumnSpans` with a one-value key). Each match
+is `{ range, pieces }`, so the row's mark and the walk's stop
+(`leakHerePieces`) cover both halves. Before, the walk reported such a value as
+"not in" the document and blamed an edit. The rows still to answer
+(`sheetFound` in `scanPassNow`) add the same column reading with
+`sheetCompiled`, the worksheet's values as a key, sharing the page's disk
+reading (`pageDisk`) with the names in the clear. Both are additive: only names
+that cross a column's line break are taken from the column reading. The
+flagged values' red marks are not read in columns: a flag is a value handed to
+the next run, and once the run puts it in the key, an occurrence it missed is a
+leak, which the orange marks read in columns. The PDF readings (both Redact
+tools and the screenshot's cover over the PDF pane) read columns of the page as
+it is laid out; see `Design Notes/Redaction.md`.
 
 **Flagging a name the run half faked**: a selection with a pseudonym in it
 was refused outright (`flagProblem`'s second argument was "touches a

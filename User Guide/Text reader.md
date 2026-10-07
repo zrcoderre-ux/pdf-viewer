@@ -229,7 +229,8 @@ app, which routes it to the reader tab.
   the capture every real name the key binds that is on screen is shown as
   its fake — on the pages (names the run missed included), in the bars and
   panels, in the Find box, and over the PDF in the pane, where each name is
-  covered with its fake. The values kept for the case, the spot keeps and the
+  covered with its fake (a name wrapped inside a caption's column there is
+  covered half on each line). The values kept for the case, the spot keeps and the
   parties of cited decisions read as they stand, as in the print. The screen
   goes back the moment the picture is taken; nothing is written. A PDF page
   with no text (a scan) cannot be read for names and keeps them. In the
@@ -464,7 +465,9 @@ app, which routes it to the reader tab.
   the way was wasted work (and handed PDF-Linker a value it had raised
   itself). Now each value with a row still to answer is marked wherever it
   stands, in a lighter orange with a dashed underline; the row in front keeps
-  its stronger mark. The marks show whenever a worksheet is attached, with the
+  its stronger mark. A value wrapped inside a caption's column is marked half
+  on each line, and the review stands on both halves rather than saying the
+  value is not in the document. The marks show whenever a worksheet is attached, with the
   bar open or closed, and a value goes unmarked once its row is answered. A
   name the key binds is left to the key's own orange. Selecting one of these
   values on its own does not flag it (🚩 on, or Ctrl+Shift+F): the pop-up says

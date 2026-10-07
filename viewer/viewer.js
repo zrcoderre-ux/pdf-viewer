@@ -4671,23 +4671,40 @@ function scanForKeyValues() {
       if (el && el.textContent !== t) { emptied.push(i); el.textContent = t; }
     });
     try {
-      const { text, map } = RD.pageTextFromSpans(pageSpanBoxes(textLayerDiv, texts));
-      const hits = PK.findRealSpans(redactReals, text);
-      for (const hit of hits) {
-        const r = RD.spanRangeFor(map, hit.start, hit.end);
-        const a = r && spans[r.startSpan], b = r && spans[r.endSpan];
-        const an = a && a.firstChild, bn = b && b.firstChild;
-        if (!an || !bn) { missed++; continue; }
-        const range = document.createRange();
-        try {
-          range.setStart(an, Math.max(0, Math.min(r.startOffset, an.length || 0)));
-          range.setEnd(bn, Math.max(0, Math.min(r.endOffset, bn.length || 0)));
-        } catch { missed++; continue; }
-        const rects = [...range.getClientRects()];
-        if (!rects.length) { missed++; continue; }
-        if (storeBoxesFromClientRects(pageNumber, rects, { kind: "key", label: hit.real })) found++;
+      const measured = pageSpanBoxes(textLayerDiv, texts);
+      const { text, map } = RD.pageTextFromSpans(measured);
+      // A name's rectangles on screen, from its pieces of the page's spans
+      // ({ startSpan, startOffset, endSpan, endOffset }); null where a piece
+      // cannot be placed.
+      const rectsOf = (parts) => {
+        const rects = [];
+        for (const r of parts) {
+          const a = r && spans[r.startSpan], b = r && spans[r.endSpan];
+          const an = a && a.firstChild, bn = b && b.firstChild;
+          if (!an || !bn) return null;
+          const range = document.createRange();
+          try {
+            range.setStart(an, Math.max(0, Math.min(r.startOffset, an.length || 0)));
+            range.setEnd(bn, Math.max(0, Math.min(r.endOffset, bn.length || 0)));
+          } catch { return null; }
+          rects.push(...range.getClientRects());
+        }
+        return rects;
+      };
+      const mark = (parts, label) => {
+        const rects = rectsOf(parts);
+        if (!rects || !rects.length) { missed++; return; }
+        if (storeBoxesFromClientRects(pageNumber, rects, { kind: "key", label })) found++;
         else missed++;
-      }
+      };
+      // …a name wrapped down a column included, read off the page as it is
+      // LAID OUT (redact.columnNamesOver): a caption drawn a line at a time
+      // across its columns has the other column between its halves in the
+      // order the page was drawn in.
+      const names = RD.columnNamesOver(
+        PK.findRealSpans(redactReals, text).map((hit) => ({ label: hit.real, parts: [RD.spanRangeFor(map, hit.start, hit.end)], keys: RD.charKeys(map, hit.start, hit.end) })),
+        measured, (lay) => PK.findColumnSpans(redactReals, lay.text, lay.text));
+      for (const n of names) mark(n.parts, n.label);
     } finally {
       for (const i of emptied) if (spans[i]) spans[i].textContent = "";
     }

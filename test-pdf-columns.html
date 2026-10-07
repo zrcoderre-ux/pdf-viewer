@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PDF column test</title>
+<!-- A name wrapped down a caption's column on a PDF page, as pdf.js lays the
+     page out (redact.pageLayoutFromSpans, pseudo-key.findColumnSpans): what
+     the redaction's key sweep, the PDF viewer's Redact tool and the
+     screenshot's cover over the PDF pane read. The pages are made here with
+     pdf-lib, the same caption drawn a LINE at a time across its columns, a
+     COLUMN at a time, and with only the ")" beside the first half, and laid
+     out by pdf.js's own text layer at the sweep's scale. What needs a page is
+     the layout: where pdf.js puts each span, and the order it draws them in.
+     Open it over http (an ES module will not import from a file:// page):
+       npx http-server -p 8080 . → http://127.0.0.1:8080/test-pdf-columns.html -->
+<link rel="stylesheet" href="viewer/text-reader.css">
+<style>
+  #report { font-family: monospace; padding: 16px 20px; white-space: pre; }
+  #report .pass { color: #1b7f3b; }
+  #report .fail { color: #b3261e; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="report">running…</div>
+<script type="module">
+import * as pdfjsLib from "./pdfjs/build/pdf.mjs";
+import { PDFDocument, StandardFonts } from "./viewer/vendor/pdf-lib/pdf-lib.esm.min.js";
+import * as RD from "./viewer/redact.js";
+import * as PK from "./viewer/pseudo-key.js";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdfjs/build/pdf.worker.mjs";
+
+const out = [];
+let fails = 0;
+const check = (label, ok, note = "") => {
+  if (!ok) fails++;
+  out.push(`<span class="${ok ? "pass" : "fail"}">  ${ok ? "PASS" : "FAIL"}  ${label}${note && !ok ? "\n        " + note : ""}</span>`);
+};
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+const key = PK.parseKey([{ name: "Pseudonym Key", rows: [
+  ["Real Value", "Replacement"],
+  ["Jonathan Avery Smith Walker", "Quarry Opalridge Dovewood Cascadia"],
+  ["Walker", "Cascadia"],
+  ["Helen Rasho", "Ingrid Strangeways"],
+] }], "k.xlsx");
+const reals = PK.compileReals(key);
+const fwd = PK.compileForward(key);
+
+// The caption: the parties at 72, the ")" at 330, the case and the title at 345.
+const LEFT = 72, PAREN = 330, RIGHT = 345, SIZE = 10;
+const CAPTION = [
+  ["HELEN RASHO, an individual; and JONATHAN", "Case No.: 25STCV59720"],
+  ["AVERY SMITH WALKER, an individual,", ""],
+  ["Plaintiffs,", "COMPLAINT FOR:"],
+];
+/** A page carrying the caption, drawn in the order `order` gives its pieces. */
+async function captionPdf(order, caption = CAPTION) {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pieces = [];
+  caption.forEach(([left, right], k) => {
+    const y = 700 - k * 14;
+    pieces.push({ k, col: 0, text: left, x: LEFT, y });
+    pieces.push({ k, col: 1, text: ")", x: PAREN, y });
+    if (right) pieces.push({ k, col: 2, text: right, x: RIGHT, y });
+  });
+  const drawn = order === "rows" ? pieces : pieces.slice().sort((a, b) => a.col - b.col || a.k - b.k);
+  for (const p of drawn) page.drawText(p.text, { x: p.x, y: p.y, size: SIZE, font });
+  // …and a line of the body, well below, with the surname standing on its own.
+  page.drawText("Walker signed the guaranty.", { x: LEFT, y: 500, size: SIZE, font });
+  return doc.save();
+}
+/** The page laid out by pdf.js's text layer, as the sweep lays it out: { spans, measured }. */
+async function laidOut(bytes) {
+  const pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const page = await pdf.getPage(1);
+  const vp = page.getViewport({ scale: 1 });
+  const box = document.createElement("div");
+  box.className = "textLayer redact-sweep";
+  box.style.width = vp.width + "px";
+  box.style.height = vp.height + "px";
+  box.style.setProperty("--scale-factor", "1");
+  box.style.setProperty("--total-scale-factor", "1");
+  document.body.appendChild(box);
+  const tc = await page.getTextContent();
+  const tl = new pdfjsLib.TextLayer({ textContentSource: tc, container: box, viewport: vp });
+  await tl.render();
+  return { box, spans: box.querySelectorAll("span"), measured: RD.measureSpans(box) };
+}
+/** The rectangles a list of span pieces covers, relative to the page box. */
+function rectsOf(box, spans, parts) {
+  const base = box.getBoundingClientRect();
+  const local = [];
+  for (const r of parts) {
+    const a = spans[r.startSpan], b = spans[r.endSpan];
+    const range = document.createRange();
+    range.setStart(a.firstChild, r.startOffset);
+    range.setEnd(b.firstChild, r.endOffset);
+    for (const cr of range.getClientRects()) if (cr.width > 0.5 && cr.height > 0.5) local.push({ x: cr.left - base.left, y: cr.top - base.top, w: cr.width, h: cr.height });
+  }
+  return RD.mergeRects(local, 2);
+}
+
+for (const order of ["rows", "columns"]) {
+  out.push(`the caption drawn ${order === "rows" ? "a line at a time" : "a column at a time"}:`);
+  const { box, spans, measured } = await laidOut(await captionPdf(order));
+  const drawn = RD.pageTextFromSpans(measured);
+  const plain = PK.findRealSpans(reals, drawn.text);
+  const lay = RD.pageLayoutFromSpans(measured);
+  const cols = PK.findColumnSpans(reals, lay.text, lay.text);
+  if (order === "rows") {
+    check("in the order it is drawn, only Helen Rasho and the surname tokens are found",
+      same(plain.map((h) => h.real), ["Helen Rasho", "Walker", "Walker"]), JSON.stringify(plain.map((h) => h.real)));
+  } else {
+    check("in the order it is drawn, the name is found whole already",
+      plain.some((h) => h.real === "Jonathan Avery Smith Walker"), JSON.stringify(plain.map((h) => h.real)));
+  }
+  check("laid out as it looks, the name is read down its column",
+    same(cols.map((h) => h.real), ["Jonathan Avery Smith Walker"]), JSON.stringify(cols.map((h) => h.real)) + "\n        " + JSON.stringify(lay.text));
+  const parts = cols.length ? cols[0].ranges.flatMap(([a, b]) => RD.spanPiecesFor(lay.map, a, b)) : [];
+  const words = parts.map((p) => measured[p.startSpan].text.slice(p.startOffset, p.endOffset)).join(" ");
+  check("…its pieces are the two halves, in the spans pdf.js drew them in", words === "JONATHAN AVERY SMITH WALKER", words);
+  const rects = rectsOf(box, spans, parts);
+  check("…boxed on two lines, in the left-hand column and nowhere near the ')'",
+    rects.length === 2 && rects.every((r) => r.x >= LEFT - 2 && r.x + r.w < PAREN - 4) && rects[1].y > rects[0].y + 5,
+    JSON.stringify(rects.map((r) => [Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h)])));
+  // The readers take a column name only where the drawing order did not find
+  // it whole (charKeys): drawn a column at a time, it is the same characters.
+  const plainKeys = new Set(plain.flatMap((h) => RD.charKeys(drawn.map, h.start, h.end)));
+  const keys = cols.length ? cols[0].ranges.flatMap(([a, b]) => RD.charKeys(lay.map, a, b)) : [];
+  check(order === "rows" ? "…and it is not what the drawing order found" : "…the same characters the drawing order found, so it is not boxed twice",
+    keys.length > 0 && keys.every((k) => plainKeys.has(k)) === (order === "columns"));
+  // The screenshot's cover reads the same layout the forward way: a fake per piece.
+  const fw = PK.forwardRuns(fwd, lay.text, { layout: lay.text, columnsOnly: true }).filter((r) => r.t === "swap").map((r) => r.to);
+  check("the screenshot's fake goes over it a piece at a time", same(fw, ["QUARRY", "OPALRIDGE DOVEWOOD CASCADIA"]), JSON.stringify(fw));
+  box.remove();
+}
+{
+  out.push("only the ')' beside the first half:");
+  const lone = [["HELEN RASHO, an individual; and JONATHAN", ""], ["AVERY SMITH WALKER, an individual,", "Case No.: 25STCV59720"]];
+  const { box, measured } = await laidOut(await captionPdf("rows", lone));
+  const lay = RD.pageLayoutFromSpans(measured);
+  check("still read down the column", same(PK.findColumnSpans(reals, lay.text, lay.text).map((h) => h.real), ["Jonathan Avery Smith Walker"]), JSON.stringify(lay.text));
+  box.remove();
+}
+
+out.push("", `${"=".repeat(52)}`, `FAILURES: ${fails}`);
+document.getElementById("report").innerHTML = out.join("\n");
+document.title = fails ? `FAIL (${fails})` : "PASS";
+window.__fails = fails;
+</script>
+</body>
+</html>

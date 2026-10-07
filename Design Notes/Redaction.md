@@ -38,9 +38,35 @@ span texts are captured before that (`capturePageSpans`, text only — no layout
 read) and put back for the length of the measurement. A name is no less
 printed on the page for being unselectable.
 
+**A name wrapped down a caption's column** (`redact.pageLayoutFromSpans`,
+`columnNamesOver`). `pageTextFromSpans` keeps the order the PDF DRAWS its
+text in. A caption drawn a line at a time across its columns comes out as
+"…; and JONATHAN ) Case No.: 25STCV59720" then "AVERY SMITH WALKER, an )", so
+the name is two halves with the other column between, and the sweep boxed
+only what the key binds on its own (the surname). Drawn a column at a time (a
+Word caption table usually is), the left column's lines are consecutive and
+the drawing order finds the name as before. So each sweep also writes the page
+out the way it LOOKS: lines by where the spans' middles stand, each span at
+the column its left edge stands at, counted in the page's median character
+width, a word gap at least one blank, and a wide vertical gap as enough blank
+lines that nothing is read down a column across it. `pseudo-key.findColumnSpans`
+reads names down a column of that transcript exactly as it does in an export
+(the ")" and the bars are column marks; a line with only the ")" beside the
+name counts). `columnNamesOver` merges the two readings by the characters they
+stand on (`charKeys`, "span:offset"): a column name the drawing order already
+found whole is not taken twice, one it did not comes in with a piece per span
+(`spanPiecesFor`; a range from the first span to the last would take in
+everything drawn between), and a drawing-order name wholly inside it (the
+surname token) goes. Both Redact tools use it. The screenshot's cover over the
+PDF pane (`pdfNamesOn`) reads the same transcript the forward way
+(`forwardSwaps(..., { columnsOnly: true })`), so each half gets its own fake.
+`test-pdf-columns.html` checks all of this against pages made with pdf-lib and
+laid out by pdf.js: the caption drawn a line at a time, a column at a time, and
+with only the ")" beside the first half.
+
 `redact.js` is the store and the painting; its decisions (span joining, char
-range to span range, line merging, padding, clamping, the copy's name) are pure
-and covered by `test-redact.mjs`.
+range to span range, line merging, padding, clamping, the copy's name, the
+page as it is laid out) are pure and covered by `test-redact.mjs`.
 
 ### The same tool in the text reader (`text-reader.js`, "redacting the PDF beside the text")
 

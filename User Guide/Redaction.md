@@ -7,7 +7,10 @@ Open **▬ Redact** in the tools rail. The key is the baseline: choose the case'
 already offered there — and the viewer sweeps the document for every real value
 the key binds and proposes a box over each one, wherever it stands. That is the
 same list PDF-Linker scrubs the case's text exports by, applied to the PDF
-nobody scrubbed. Anything the key cannot reach you mark by hand: with **Drag
+nobody scrubbed. A name wrapped inside a caption's column — "…; and JONATHAN"
+beside the `)` and the case number, "AVERY SMITH WALKER" on the line under it —
+is found as one name and boxed half on each line, whichever order the PDF
+happens to draw its caption in. Anything the key cannot reach you mark by hand: with **Drag
 marks text** a drag over the page proposes the words it covers, and with **Drag
 marks an area** it proposes the box itself — a signature, a photograph, an
 exhibit stamp, a scanned page whose text layer knows nothing.

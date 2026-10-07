@@ -15,8 +15,9 @@ import {
   mergeRects, padRect, clampRect, redactedName, countLabel,
   addRedaction, removeRedaction, redactionsFor, redactionPages,
   redactionCount, clearRedactions, createRedactionStore, pageBoxFromView,
-  valueWords, wordsOwed, coveredClaims,
+  valueWords, wordsOwed, coveredClaims, pageLayoutFromSpans, spanPiecesFor, charKeys, columnNamesOver,
 } from "./viewer/redact.js";
+import { parseKey, compileReals, findRealSpans, findColumnSpans } from "./viewer/pseudo-key.js";
 import { buildRedactedPdf } from "./viewer/pdf-edit.js";
 
 let fails = 0;
@@ -387,6 +388,80 @@ console.log("the redacted copy is a document with nothing in it but pictures");
   let threw = "";
   try { await buildRedactedPdf({ pages: [] }); } catch (e) { threw = e.message; }
   ok("a copy with no pages is refused rather than written", /at least one page/.test(threw));
+}
+
+// ---- the page as it is laid out: a name wrapped down a caption's column ----------
+//
+// A caption drawn a LINE at a time, across its columns: the left-hand column's
+// words, the ")", the case number, then the next line. In the order the PDF
+// draws it the name is two halves with the other column between; laid out as
+// the page looks, it is a column, and the key reads down it.
+console.log("\nthe page as it is laid out");
+{
+  const key = parseKey([{ name: "Pseudonym Key", rows: [
+    ["Real Value", "Replacement"],
+    ["Jonathan Avery Smith Walker", "Quarry Opalridge Dovewood Cascadia"],
+    ["Walker", "Cascadia"],
+    ["Helen Rasho", "Ingrid Strangeways"],
+  ] }], "k.xlsx");
+  const reals = compileReals(key);
+  // Six points a character, twelve to a line; the left column at 72, the ")" at 330.
+  const W = (t) => t.length * 6;
+  const L = (t, top) => S(t, 72, top, W(t), 12);
+  const P = (top) => S(")", 330, top, 4, 12);
+  const R = (t, top) => S(t, 345, top, W(t), 12);
+  const rows = [
+    L("HELEN RASHO, an individual; and JONATHAN", 100), P(100), R("Case No.: 25STCV59720", 100),
+    L("AVERY SMITH WALKER, an", 114), P(114),
+    L("individual,", 128), P(128), R("COMPLAINT FOR:", 128),
+  ];
+  const drawn = pageTextFromSpans(rows);
+  check("drawn a line at a time, the drawing order finds only the surname token",
+    findRealSpans(reals, drawn.text).map((h) => h.real), ["Helen Rasho", "Walker"]);
+  const lay = pageLayoutFromSpans(rows);
+  check("laid out: a line per line, the ')' column where it is drawn",
+    lay.text.split("\n").map((l) => l.replace(/ +/g, " ")), ["HELEN RASHO, an individual; and JONATHAN ) Case No.: 25STCV59720", "AVERY SMITH WALKER, an )", "individual, ) COMPLAINT FOR:"]);
+  check("…each span at the column its left edge stands at",
+    lay.text.split("\n").map((l) => l.indexOf(")")), [43, 43, 43]);
+  const cols = findColumnSpans(reals, lay.text, lay.text);
+  check("read down the column, the whole name", cols.map((h) => h.real), ["Jonathan Avery Smith Walker"]);
+  check("…its pieces, each within one span, in the spans the page drew",
+    cols[0].ranges.flatMap(([a, b]) => spanPiecesFor(lay.map, a, b)).map((p) => [p.startSpan, rows[p.startSpan].text.slice(p.startOffset, p.endOffset)]),
+    [[0, "JONATHAN"], [3, "AVERY SMITH WALKER"]]);
+  // The same page drawn a COLUMN at a time: the left-hand column's lines one
+  // after another. The drawing order finds the name already, and the layout
+  // finds the same characters — which is how a reader knows not to box it twice.
+  const byCol = [rows[0], rows[3], rows[5], rows[1], rows[4], rows[6], rows[2], rows[7]];
+  const drawnCol = pageTextFromSpans(byCol);
+  const plain = findRealSpans(reals, drawnCol.text);
+  check("drawn a column at a time, the drawing order finds the name", plain.map((h) => h.real), ["Helen Rasho", "Jonathan Avery Smith Walker"]);
+  const layCol = pageLayoutFromSpans(byCol);
+  const colCol = findColumnSpans(reals, layCol.text, layCol.text);
+  const keysOf = (map, h) => h.ranges.flatMap(([a, b]) => charKeys(map, a, b)).sort();
+  check("…and the layout finds the same characters of the same spans",
+    keysOf(layCol.map, colCol[0]), charKeys(drawnCol.map, plain[1].start, plain[1].end).sort());
+  check("…a span is placed by where it stands, whatever order it came in",
+    layCol.text.split("\n").map((l) => l.replace(/ +/g, " ")), lay.text.split("\n").map((l) => l.replace(/ +/g, " ")));
+  // A wide gap down the page: nothing is read down a column across it.
+  const apart = [L("and JONATHAN", 100), P(100), L("AVERY SMITH WALKER", 160), P(160)];
+  check("a gap of several lines is not crossed", findColumnSpans(reals, pageLayoutFromSpans(apart).text, pageLayoutFromSpans(apart).text).length, 0);
+  // Two spans of one word, kerned apart by nothing: still one word.
+  const kern = [S("JONA", 72, 100, 24, 12), S("THAN", 96, 100, 24, 12), P(100), L("AVERY SMITH WALKER", 114), P(114)];
+  const lk = pageLayoutFromSpans(kern);
+  const ck = findColumnSpans(reals, lk.text, lk.text);
+  check("a word cut into two spans is one word, its pieces in both",
+    ck.length && ck[0].ranges.flatMap(([a, b]) => spanPiecesFor(lk.map, a, b)).map((p) => kern[p.startSpan].text.slice(p.startOffset, p.endOffset)), ["JONA", "THAN", "AVERY SMITH WALKER"]);
+  check("nothing on the page, nothing laid out", pageLayoutFromSpans([S("  ", 1, 1, 4)]), { text: "", map: [] });
+  // What a sweep boxes: the drawing order's names, the column's beside them.
+  const plainOf = (spans) => { const d = pageTextFromSpans(spans); return findRealSpans(reals, d.text).map((h) => ({ label: h.real, parts: [spanRangeFor(d.map, h.start, h.end)], keys: charKeys(d.map, h.start, h.end) })); };
+  const find = (l) => findColumnSpans(reals, l.text, l.text);
+  check("drawn a line at a time: the column's name comes in, the surname token inside it goes, the rest stand",
+    columnNamesOver(plainOf(rows), rows, find).map((n) => n.label + ":" + n.parts.length), ["Helen Rasho:1", "Jonathan Avery Smith Walker:2"]);
+  check("drawn a column at a time: the name the drawing order found whole is not taken twice",
+    columnNamesOver(plainOf(byCol), byCol, find).map((n) => n.label), ["Helen Rasho", "Jonathan Avery Smith Walker"]);
+  check("a page with nothing down a column is the drawing order's names, untouched",
+    columnNamesOver(plainOf([L("Helen Rasho signed.", 100)]), [L("Helen Rasho signed.", 100)], find).map((n) => n.label), ["Helen Rasho"]);
+  check("a piece across a blank is two pieces", spanPiecesFor([{ span: 0, off: 3 }, null, { span: 0, off: 5 }], 0, 3).length, 2);
 }
 
 console.log(`\n${"=".repeat(60)}\nFAILURES: ${fails}`);

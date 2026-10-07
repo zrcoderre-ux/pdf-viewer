@@ -213,6 +213,14 @@ console.log("\ninside a column");
     ["Quarry>Jonathan 0/2", "Opalridge Dovewood Cascadia>Avery Smith Walker 1/2"]);
   check("two spaces after a full stop are no column: only the surname token",
     swaps(" 4  He sued Quarry  and others\n 5  Opalridge Dovewood Cascadia said."), ["Cascadia>Walker"]);
+  // The case number's side is empty on the first half's line: only the ")"
+  // stands there. The line is still a column — the ")" is between the name
+  // and the line under it.
+  check("only the ')' beside the first half: still a column",
+    swaps([L(10, "INGRID STRANGEWAYS, an individual; and QUARRY", ")"), L(11, "OPALRIDGE DOVEWOOD CASCADIA, an", ")  Case No.: 25STCV59720")].join("\n")),
+    ["INGRID STRANGEWAYS>HELEN RASHO", "QUARRY>JONATHAN 0/2", "OPALRIDGE DOVEWOOD CASCADIA>AVERY SMITH WALKER 1/2"]);
+  check("…a box's bar the same", swaps(" 4  and Quarry                     │\n 5  Opalridge Dovewood Cascadia,   │ Case No."),
+    ["Quarry>Jonathan 0/2", "Opalridge Dovewood Cascadia>Avery Smith Walker 1/2"]);
   check("down three lines of a column",
     swaps([L(10, "QUARRY", ")  Case"), L(11, "OPALRIDGE DOVEWOOD", ")  No."), L(12, "CASCADIA, an", ")  1")].join("\n")),
     ["QUARRY>JONATHAN 0/3", "OPALRIDGE DOVEWOOD>AVERY SMITH 1/3", "CASCADIA>WALKER 2/3"]);
@@ -257,6 +265,8 @@ console.log("\na real name inside a column");
   ].join("\n");
   const spans = (t, o) => findRealSpans(r, t, o).map((h) => [h.real, h.ranges.map(([a, b]) => t.slice(a, b))]);
   check("without columns, only the surname token is a leak", spans(caption), [["Walker", ["Walker"]]]);
+  const lone = [L(10, "Ingrid Strangeways and Jonathan", ")"), L(11, "Avery Smith Walker, an", ")  Case No.")].join("\n");
+  check("a real name with only the ')' beside its first half is one leak", spans(lone, { columns: true }).map((x) => x[0]), ["Jonathan Avery Smith Walker"]);
   check("with columns, the whole name, a piece per cell",
     spans(caption, { columns: true }), [["Jonathan Avery Smith Walker", ["Jonathan", "Avery Smith Walker"]]]);
   const h = findRealSpans(r, caption, { columns: true })[0];
@@ -297,6 +307,10 @@ console.log("\na real name inside a column");
   check("the save writes it as its fake, a piece per cell, the other column where it stands",
     fw, caption.replace("Ingrid Strangeways", "Ingrid Strangeways").replace("Jonathan", "Quarry").replace("Avery Smith Walker", "Opalridge Dovewood Cascadia"));
   check("…and nothing of the name is left for the reals to find", findReals(r, fw, { columns: true }).map((w) => w.real), []);
+  const both = caption + "\n 4  Helen Rasho signed.";
+  check("columnsOnly: the names down a column and nothing else",
+    forwardRuns(f, both, { layout: both, columnsOnly: true }).filter((x) => x.t === "swap").map((x) => x.from + ">" + x.to),
+    ["Jonathan>Quarry", "Avery Smith Walker>Opalridge Dovewood Cascadia"]);
 }
 
 // ---- a key of thousands of names -------------------------------------------------

@@ -121,6 +121,144 @@ export function spanRangeFor(map, start, end) {
   };
 }
 
+// ── the page as it is laid out ───────────────────────────────────────────────
+//
+// pageTextFromSpans reads a page in the order the PDF DRAWS it, which is the
+// right order for almost everything and the wrong one for a caption drawn a
+// line at a time across its columns: "…; and JONATHAN", the ")" and "Case No.:
+// 25STCV59720" come out as one line, "AVERY SMITH WALKER, an" as the next, and
+// the name is two halves with the other column between them. The sweep missed
+// it (or boxed the surname alone), and so did the screenshot's cover over the
+// PDF pane — a name left standing in the copy, or the picture, made to hide it.
+//
+// So the page is also written out the way it LOOKS: each line of text a line,
+// by where the spans stand on the page, each span at the column its left edge
+// stands at — a fixed-width transcript, wide blanks where the page has wide
+// gaps, the ")" of a caption where it is drawn. pseudo-key reads names down a
+// column of THAT (columnHits, findColumnSpans), exactly as it reads them down a
+// column of an export. Only those are taken from it: what the drawing order
+// already finds stays found as it was.
+
+/**
+ * A page's spans as a fixed-width transcript of the page: { text, map } as
+ * pageTextFromSpans gives them (`map[i]` = { span, off }, or null for a blank
+ * or a line break put in here). Lines are the spans whose middles stand within
+ * half a line of each other, read left to right; a span stands at the column
+ * its left edge is at, counted in the page's own character width (the median
+ * width per character over the spans long enough to say), and never closer to
+ * the one before than the page sets it (a word gap is a blank at least). A
+ * wide gap down the page is blank lines enough that nothing is read down a
+ * column across it.
+ */
+export function pageLayoutFromSpans(spans) {
+  const list = [];
+  (spans || []).forEach((s, i) => {
+    const text = String(s && s.text != null ? s.text : "");
+    const h = Number(s && s.height) || 0;
+    if (!text.trim() || h <= 0 || /[\r\n]/.test(text)) return;
+    list.push({ i, text, left: Number(s.left) || 0, top: Number(s.top) || 0, width: Number(s.width) || 0, height: h });
+  });
+  if (!list.length) return { text: "", map: [] };
+  const median = (xs) => { const v = xs.slice().sort((a, b) => a - b); return v[v.length >> 1]; };
+  const per = list.filter((s) => s.text.length >= 3 && s.width > 0).map((s) => s.width / s.text.length);
+  const unit = per.length ? median(per) : median(list.map((s) => s.height)) * 0.5;
+  if (!(unit > 0)) return { text: "", map: [] };
+  const lines = [];
+  for (const s of list.slice().sort((a, b) => (a.top + a.height / 2) - (b.top + b.height / 2) || a.left - b.left)) {
+    const mid = s.top + s.height / 2;
+    const line = lines[lines.length - 1];
+    if (line && Math.abs(mid - line.mid) <= Math.max(line.h, s.height) * 0.5) {
+      line.mid = (line.mid * line.spans.length + mid) / (line.spans.length + 1);
+      line.h = Math.max(line.h, s.height);
+      line.spans.push(s);
+    } else lines.push({ mid, h: s.height, spans: [s] });
+  }
+  let x0 = Infinity; // a loop, not a spread: a page can carry hundreds of thousands of spans
+  for (const s of list) if (s.left < x0) x0 = s.left;
+  let text = "";
+  const map = [];
+  const put = (ch, at) => { text += ch; map.push(at); };
+  lines.forEach((line, k) => {
+    if (k) {
+      const prev = lines[k - 1];
+      const far = line.mid - prev.mid > 2.5 * Math.max(line.h, prev.h);
+      for (let b = far ? 4 : 1; b > 0; b--) put("\n", null);
+    }
+    line.spans.sort((a, b) => a.left - b.left);
+    let col = 0, right = null;
+    for (const s of line.spans) {
+      let at = Math.max(0, Math.round((s.left - x0) / unit));
+      if (right != null) {
+        const min = s.left - right > s.height * 0.2 ? col + 1 : col; // a word gap is a blank at least
+        if (at < min) at = min;
+      } else if (at < col) at = col;
+      while (col < at) { put(" ", null); col++; }
+      for (let off = 0; off < s.text.length; off++) put(s.text[off], { span: s.i, off });
+      col += s.text.length;
+      right = s.left + s.width;
+    }
+  });
+  return { text, map };
+}
+
+/**
+ * A [start, end) of a page's text as the spans it covers, each piece within
+ * one span: [{ startSpan, startOffset, endSpan, endOffset }] as spanRangeFor
+ * gives one (endOffset exclusive), in the order they read. A name read down a
+ * column of the transcript is pieces of several spans that are not neighbours
+ * in the page's own order, and a range from the first to the last of them
+ * would take in everything drawn between.
+ */
+export function spanPiecesFor(map, start, end) {
+  const m = map || [];
+  const out = [];
+  let cur = null;
+  for (let i = Math.max(0, start | 0); i < Math.min(m.length, end | 0); i++) {
+    const at = m[i];
+    if (!at) { cur = null; continue; }
+    if (cur && cur.startSpan === at.span && cur.endOffset === at.off) { cur.endOffset = at.off + 1; continue; }
+    cur = { startSpan: at.span, startOffset: at.off, endSpan: at.span, endOffset: at.off + 1 };
+    out.push(cur);
+  }
+  return out;
+}
+
+/**
+ * The names a sweep found in the order the page was drawn (`plain`: [{ label,
+ * parts, keys }], `parts` as spanRangeFor gives one and `keys` as charKeys
+ * does), with the names wrapped down a column of the page as it is laid out
+ * put beside them: `find(layout)` reads those (pseudo-key's findColumnSpans
+ * over pageLayoutFromSpans). A column name the drawing order already found
+ * whole — a page drawn a column at a time — is not taken twice; one it did not
+ * comes in a piece per span, and a name of the drawing order's that stands
+ * wholly inside it (its surname token, read on its own) goes, since the column
+ * name's own boxes cover it. → [{ label, parts, keys }]
+ */
+export function columnNamesOver(plain, spans, find) {
+  const list = plain || [];
+  const lay = pageLayoutFromSpans(spans);
+  if (!lay.text) return list;
+  const found = new Set();
+  for (const p of list) for (const k of p.keys || []) found.add(k);
+  const cols = [];
+  for (const h of find(lay) || []) {
+    const keys = h.ranges.flatMap(([a, b]) => charKeys(lay.map, a, b));
+    if (!keys.length || keys.every((k) => found.has(k))) continue;
+    cols.push({ label: h.real, parts: h.ranges.flatMap(([a, b]) => spanPiecesFor(lay.map, a, b)), keys });
+  }
+  if (!cols.length) return list;
+  const inCol = new Set(cols.flatMap((c) => c.keys));
+  return list.filter((p) => !(p.keys && p.keys.length && p.keys.every((k) => inCol.has(k)))).concat(cols);
+}
+
+/** The characters of the page a [start, end) of its text stands on, as "span:offset" keys. */
+export function charKeys(map, start, end) {
+  const m = map || [];
+  const out = [];
+  for (let i = Math.max(0, start | 0); i < Math.min(m.length, end | 0); i++) if (m[i]) out.push(m[i].span + ":" + m[i].off);
+  return out;
+}
+
 // ── the boxes ────────────────────────────────────────────────────────────────
 
 const overlap = (a0, a1, b0, b1) => Math.min(a1, b1) - Math.max(a0, b0);

@@ -995,26 +995,49 @@ function pdfNamesOn(sheet) {
   const layer = sheet.querySelector(".textLayer");
   const spans = layer ? layer.querySelectorAll("span") : [];
   if (!spans.length) return null;
-  const { text, map } = RD.pageTextFromSpans(RD.measureSpans(layer));
-  const swaps = forwardSwaps(text);
+  const measured = RD.measureSpans(layer);
+  const { text, map } = RD.pageTextFromSpans(measured);
+  let swaps = forwardSwaps(text).map((s) => ({ to: s.to, parts: [RD.spanRangeFor(map, s.start, s.end)], keys: RD.charKeys(map, s.start, s.end) }));
+  // …and a name wrapped down a column of the page as it is LAID OUT, which the
+  // order the page was drawn in can have the other column between the halves
+  // of (redact.pageLayoutFromSpans). Where that order found the same name
+  // whole it stands as it was found; where it found part of it (a surname
+  // token), the column's name takes its words, so one cover says one name.
+  const lay = RD.pageLayoutFromSpans(measured);
+  const names = new Map();
+  for (const s of forwardSwaps(lay.text, null, null, null, { columnsOnly: true })) {
+    if (!names.has(s.whole)) names.set(s.whole, []);
+    names.get(s.whole).push(s);
+  }
+  const found = new Set(swaps.flatMap((w) => w.keys));
+  for (const pieces of names.values()) {
+    const keys = new Set(pieces.flatMap((s) => RD.charKeys(lay.map, s.start, s.end)));
+    if (!keys.size || [...keys].every((k) => found.has(k))) continue;
+    swaps = swaps.filter((w) => !w.keys.some((k) => keys.has(k)));
+    for (const s of pieces) swaps.push({ to: s.to, parts: RD.spanPiecesFor(lay.map, s.start, s.end), keys: [] });
+  }
   if (!swaps.length) return null;
   const base = sheet.getBoundingClientRect();
   const out = [];
   for (const s of swaps) {
-    const r = RD.spanRangeFor(map, s.start, s.end);
-    const a = r && spans[r.startSpan], b = r && spans[r.endSpan];
-    const an = a && a.firstChild, bn = b && b.firstChild;
-    if (!an || !bn) continue;
-    const range = document.createRange();
-    try {
-      range.setStart(an, Math.min(r.startOffset, an.length || 0));
-      range.setEnd(bn, Math.min(r.endOffset, bn.length || 0));
-    } catch { continue; }
     const local = [];
-    for (const cr of range.getClientRects()) {
-      if (cr.width > 0.5 && cr.height > 0.5) local.push({ x: cr.left - base.left, y: cr.top - base.top, w: cr.width, h: cr.height });
+    let first = null;
+    for (const r of s.parts) {
+      const a = r && spans[r.startSpan], b = r && spans[r.endSpan];
+      const an = a && a.firstChild, bn = b && b.firstChild;
+      if (!an || !bn) continue;
+      const range = document.createRange();
+      try {
+        range.setStart(an, Math.min(r.startOffset, an.length || 0));
+        range.setEnd(bn, Math.min(r.endOffset, bn.length || 0));
+      } catch { continue; }
+      if (!first) first = a;
+      for (const cr of range.getClientRects()) {
+        if (cr.width > 0.5 && cr.height > 0.5) local.push({ x: cr.left - base.left, y: cr.top - base.top, w: cr.width, h: cr.height });
+      }
     }
-    const cs = getComputedStyle(a);
+    if (!first) continue;
+    const cs = getComputedStyle(first);
     const rects = RD.mergeRects(local, 2);
     if (rects.length) out.push({ rects, to: s.to, font: cs.fontFamily, size: parseFloat(cs.fontSize) || 0 });
   }
@@ -1474,8 +1497,13 @@ function forwardText(text, held, pns, spare) {
   // …and the swaps themselves, which a spot keep after them is moved by (textdoc.spotsAfterSwaps).
   return { text: out + text.slice(at), swaps: swaps.filter((s) => !s.piece).length, places: swaps };
 }
-/** …and the same pass as places: [{ start, end, to, piece }] into `text`, in order — `piece` past the first of a wrapped name. */
-function forwardSwaps(text, held, pns, spare) {
+/**
+ * …and the same pass as places: [{ start, end, to, piece, whole }] into `text`,
+ * in order — `piece` past the first of a wrapped name, `whole` the same object
+ * on every piece of one. `opts.columnsOnly`: the names wrapped down a column
+ * alone (the PDF's page laid out, redact.pageLayoutFromSpans).
+ */
+function forwardSwaps(text, held, pns, spare, opts) {
   // The names of decided cases are blanked with the keeps: a party of a
   // decision this brief cites is that decision's, not this matter's, and a
   // save that wrote a pseudonym over it would put out a citation to a case
@@ -1489,9 +1517,9 @@ function forwardSwaps(text, held, pns, spare) {
   // A name wrapped down a column is written too, a fake per piece: its cells
   // are read off the text as it stands (`layout`), where the reading has its
   // fakes and keeps blanked out of it (see pseudo-key's columnHits).
-  for (const r of PK.forwardRuns(fwd, TD.blankRanges(maskKept(flat, text), spared), { layout: text })) {
+  for (const r of PK.forwardRuns(fwd, TD.blankRanges(maskKept(flat, text), spared), { layout: text, columnsOnly: !!(opts && opts.columnsOnly) })) {
     const len = r.t === "swap" ? r.from.length : r.s.length;
-    if (r.t === "swap") out.push({ start: off, end: off + len, to: r.to, piece: r.piece || 0 });
+    if (r.t === "swap") out.push({ start: off, end: off + len, to: r.to, piece: r.piece || 0, whole: r.whole || null });
     off += len;
   }
   return out;
@@ -5696,7 +5724,7 @@ function paintRowMarks() {
 function paintRowMarksNow() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   leakRowRanges = rowRanges(leakRowValue);
-  CSS.highlights.set("leakrow", highlightOf(leakRowRanges.map((x) => x.range)));
+  CSS.highlights.set("leakrow", highlightOf(leakRowRanges.flatMap((x) => x.pieces || [x.range])));
   CSS.highlights.set("leakrows", highlightOf(pendingSheetRanges()));
   markLeakHere();
 }
@@ -5783,6 +5811,18 @@ async function scanPassNow(pass) {
     // name, marked only outside it (below); the names in the clear off the
     // disk text.
     const flat = keptRx || sheetRx ? flatten(body, { blankPn: true }) : null;
+    // The DISK text, read once for the page where a reading below wants it:
+    // the run's fakes and the spot keeps blanked (diskReading), each text node's
+    // place in it (`segs`) to put a mark back on the page.
+    let diskMemo = null;
+    const pageDisk = () => {
+      if (!diskMemo) {
+        const d = TD.serializeHeld(body, { mapped: true });
+        const { flat: dflat, cited } = diskReading(d.text, d.held, d.pns);
+        diskMemo = { text: d.text, segs: d.segs, flat: dflat, cited };
+      }
+      return diskMemo;
+    };
     if (reals) {
       // The names in the clear are read off the DISK text, exactly as the save
       // reads them (standingSpans): the run's fakes and the spot keeps blanked,
@@ -5791,8 +5831,8 @@ async function scanPassNow(pass) {
       // instead, a real name painted over a fake moves the rest of its line,
       // and a column the save finds the marks would not. Each piece is put
       // back on the page through the text nodes it stands in.
-      const disk = TD.serializeHeld(body, { mapped: true });
-      const { flat: diskFlat, cited } = diskReading(disk.text, disk.held, disk.pns);
+      const disk = pageDisk();
+      const { flat: diskFlat, cited } = disk;
       const masked = maskKept(diskFlat, disk.text);
       // Most of what a key matches in a brief belongs to the decisions it
       // cites, not to this matter. Those are not leaks and are not marked:
@@ -5845,6 +5885,22 @@ async function scanPassNow(pass) {
           if (!(await breathe(`reading the marks over the text${where} — the worksheet's values`))) return gaveUp;
           sheetRx.lastIndex = held;
         }
+      }
+      // …and a value wrapped down a column — "…and JONATHAN  )  Case No." over
+      // "AVERY SMITH WALKER, an" — which the page as it shows has with the
+      // other column between its halves: read off the disk text, as the names
+      // in the clear are, and marked piece by piece.
+      const sc = sheetCompiled();
+      if (sc) {
+        const disk = pageDisk();
+        for (const h of PK.findColumnSpans(sc, disk.flat, disk.text)) {
+          const fold = TD.foldValue(h.real);
+          for (const [a, b] of h.ranges) {
+            const r = rangeFor(disk.segs, a, b);
+            if (r) sheetFound.push({ range: r, fold });
+          }
+        }
+        sheetRx.lastIndex = 0;
       }
     }
     if (flagRx) {
@@ -11211,7 +11267,7 @@ $("flags-copy").addEventListener("click", async () => {
 const leaksBar = $("leaks-bar");
 let leaks = null;          // { parsed, bytes, name, handle, folder, at, trail, mirrored: Set }
 let leakRowValue = "";     // the current row's value, marked wherever it stands
-let leakRowRanges = [];    // where it stands, from the last paint: [{ body, range }]
+let leakRowRanges = [];    // where it stands, from the last paint: [{ body, range, pieces }] — `pieces` where it is wrapped down a column
 let leakHere = null;       // the occurrence the bar scrolled to
 let leakHerePieces = null; // …and, where the names walk put it there, every piece of that name
 let rowHere = null;        // …the worksheet row's own, which the names walk does not move
@@ -11242,6 +11298,17 @@ function sheetMatcher() {
     sheetRxMemo = { parsed, values, rx: values.size ? PK.buildMatcher([...values.values()]) : null };
   }
   return sheetRxMemo.rx;
+}
+// …and the same values as a key the column reading can look a match up in
+// (pseudo-key's findColumnSpans), for a value wrapped down a column.
+let sheetColMemo = { rx: null, compiled: null };
+function sheetCompiled() {
+  const rx = sheetMatcher();
+  if (!rx) return null;
+  if (sheetColMemo.rx !== rx) {
+    sheetColMemo = { rx, compiled: { rx, map: new Map([...sheetRxMemo.values].map(([f, v]) => [f, { real: v, fake: "" }])) } };
+  }
+  return sheetColMemo.compiled;
 }
 /** The worksheet value a match is, folded: a gap read as a space, a possessive let go. "" if none. */
 function sheetFold(found) {
@@ -11595,7 +11662,8 @@ async function goToLeak(i, { locate = true, trail = true } = {}) {
 }
 
 /**
- * Every place the row's `value` stands in the open text: [{ body, range }].
+ * Every place the row's `value` stands in the open text: [{ body, range, pieces }],
+ * `pieces` the ranges of a value wrapped down a column (leakMatches).
  * Whole words first — "Tim" is the "Tim" on page 4, never the "time" on page 1.
  * Only a document with no whole-word occurrence on any of its pages (each
  * member of a combined file counted on its own) is searched inside words, for
@@ -11609,10 +11677,14 @@ function rowRanges(value) {
   const per = pageBodies().map((body) => ({ body, member: sources[pageIndexOf(body)] || "", whole: leakMatches(body, value) }));
   const found = new Set(per.filter((p) => p.whole.length).map((p) => p.member));
   const out = [];
-  for (const p of per) for (const range of found.has(p.member) ? p.whole : leakMatches(p.body, value, { inside: true })) out.push({ body: p.body, range });
+  for (const p of per) for (const m of found.has(p.member) ? p.whole : leakMatches(p.body, value, { inside: true })) out.push({ body: p.body, range: m.range, pieces: m.pieces });
   return out;
 }
-/** Every place `value` stands on a page body as DOM ranges: as a whole word, or (`inside`) as a bare substring of one. */
+/**
+ * Every place `value` stands on a page body: as a whole word, or (`inside`) as
+ * a bare substring of one. [{ range, pieces }] — `pieces` the range alone, or
+ * one per cell where the value is wrapped down a column.
+ */
 function leakMatches(body, value, { inside = false } = {}) {
   const out = [];
   const v = TD.normalizeValue(value);
@@ -11620,7 +11692,7 @@ function leakMatches(body, value, { inside = false } = {}) {
   // Pseudonym spans blanked: a span SHOWS the real name, and a worksheet
   // value standing inside one is the faked occurrence, not the leak.
   const { text, segs } = flatten(body, { blankPn: true });
-  const push = (s, e) => { const r = rangeFor(segs, s, e); if (r) out.push(r); };
+  const push = (s, e) => { const r = rangeFor(segs, s, e); if (r) out.push({ range: r, pieces: [r] }); };
   if (inside) {
     // A welded or reduced finding has no bounded occurrence by construction.
     const low = text.toLowerCase(), needle = v.toLowerCase();
@@ -11633,6 +11705,23 @@ function leakMatches(body, value, { inside = false } = {}) {
     let m;
     rx.lastIndex = 0;
     while ((m = rx.exec(text))) { push(m.index, m.index + m[0].length); if (m.index === rx.lastIndex) rx.lastIndex++; }
+    rx.lastIndex = 0;
+    // …and wrapped down a column: "…and JONATHAN  )  Case No." over "AVERY
+    // SMITH WALKER, an", the other column between the halves. Read off the
+    // disk text as the orange marks read it (pseudo-key's columnHits), and
+    // only on a page that carries the value's first and last words at all.
+    const words = v.split(" ");
+    const low = words.length > 1 ? text.toLowerCase() : "";
+    if (low && low.includes(words[0].toLowerCase()) && low.includes(words[words.length - 1].toLowerCase())) {
+      const d = TD.serializeHeld(body, { mapped: true });
+      const blank = d.held.concat(d.pns);
+      const flat = blank.length ? TD.blankRanges(d.text, blank, " ") : d.text;
+      const one = { rx, map: new Map([[PK.fold(v), { real: v, fake: "" }]]) };
+      for (const h of PK.findColumnSpans(one, flat, d.text)) {
+        const pieces = h.ranges.map(([a, b]) => rangeFor(d.segs, a, b));
+        if (pieces.length && pieces.every(Boolean)) out.push({ range: pieces[0], pieces });
+      }
+    }
   }
   return out;
 }
@@ -11733,6 +11822,7 @@ async function locateLeak(row) {
     return;
   }
   leakHere = rowHere = best.range;
+  leakHerePieces = best.pieces || null;
   markLeakHere();
   const sec = best.body.closest(".tpage");
   scrollRangeTo(best.range);
@@ -17089,26 +17179,31 @@ async function keyBoxesForPage(page) {
   await tl.render();
   repairTextLayer(tl, tc.items);
   const spans = box.querySelectorAll("span");
-  const { text, map } = RD.pageTextFromSpans(RD.measureSpans(box));
+  const measured = RD.measureSpans(box);
+  const { text, map } = RD.pageTextFromSpans(measured);
   const chars = text.replace(/\s+/g, "").length;
   const pageBox = RD.pageBoxFromView(page.view);
   const base = box.getBoundingClientRect();
   const out = [];
   let missed = 0;
-  for (const hit of PK.findRealSpans(reals, text)) {
-    const r = RD.spanRangeFor(map, hit.start, hit.end);
-    const a = r && spans[r.startSpan], b = r && spans[r.endSpan];
-    const an = a && a.firstChild, bn = b && b.firstChild;
-    if (!an || !bn) { missed++; continue; }
-    const range = document.createRange();
-    try {
-      range.setStart(an, Math.max(0, Math.min(r.startOffset, an.length || 0)));
-      range.setEnd(bn, Math.max(0, Math.min(r.endOffset, bn.length || 0)));
-    } catch { missed++; continue; }
+  // A name's boxes, in PDF points, from the pieces of the spans it stands in
+  // ({ startSpan, startOffset, endSpan, endOffset }); null where a piece
+  // cannot be placed on the page.
+  const boxesOf = (parts) => {
     const local = [];
-    for (const cr of range.getClientRects()) {
-      if (cr.width <= 0.5 || cr.height <= 0.5) continue;
-      local.push({ x: cr.left - base.left, y: cr.top - base.top, w: cr.width, h: cr.height });
+    for (const r of parts) {
+      const a = r && spans[r.startSpan], b = r && spans[r.endSpan];
+      const an = a && a.firstChild, bn = b && b.firstChild;
+      if (!an || !bn) return null;
+      const range = document.createRange();
+      try {
+        range.setStart(an, Math.max(0, Math.min(r.startOffset, an.length || 0)));
+        range.setEnd(bn, Math.max(0, Math.min(r.endOffset, bn.length || 0)));
+      } catch { return null; }
+      for (const cr of range.getClientRects()) {
+        if (cr.width <= 0.5 || cr.height <= 0.5) continue;
+        local.push({ x: cr.left - base.left, y: cr.top - base.top, w: cr.width, h: cr.height });
+      }
     }
     const rects = [];
     for (const m of RD.mergeRects(local, 2)) {
@@ -17120,7 +17215,14 @@ async function keyBoxesForPage(page) {
       }, 1), pageBox);
       if (kept) rects.push(kept);
     }
-    if (rects.length) out.push({ rects, label: hit.real });
+    return rects;
+  };
+  const names = RD.columnNamesOver(
+    PK.findRealSpans(reals, text).map((hit) => ({ label: hit.real, parts: [RD.spanRangeFor(map, hit.start, hit.end)], keys: RD.charKeys(map, hit.start, hit.end) })),
+    measured, (lay) => PK.findColumnSpans(reals, lay.text, lay.text));
+  for (const n of names) {
+    const rects = boxesOf(n.parts);
+    if (rects && rects.length) out.push({ rects, label: n.label });
     else missed++;
   }
   box.innerHTML = "";
