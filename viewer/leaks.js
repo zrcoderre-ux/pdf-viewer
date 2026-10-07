@@ -663,30 +663,128 @@ export function fixEdits(parsed) {
 export function decisionsKey(folder, name) {
   return "textReader.leaks." + (folder || "") + "/" + (name || "");
 }
+
+// ---- unsaved answers, remembered by the row they answer ---------------------------
+//
+// An answer not yet saved is kept in the browser until it is, and laid back
+// over the worksheet the next time it is attached. It used to be kept by SHEET
+// ROW NUMBER and nothing else, and laid back wherever that row's Fix? cell
+// still read as it had — which for a row nobody has answered is "", on every
+// row of every worksheet. PDF-Linker rewrites LEAKS.xlsx on every run and
+// sorts it as it writes (`_pn_write_leak_report`: undecided rows to the top,
+// decided ones sinking, a misspelling's family pulled together), so a row
+// number names a different value from one run to the next. Measured in
+// Chromium: a `no` left unsaved on row 2, "Riverside County", came back after
+// a re-run on row 2's new value — a witness's name the key binds. The `no`
+// was mirrored as one of the reader's keeps, so the orange mark on the name
+// went; the document save gave no warning, wrote the name in the clear, and
+// wrote `no` into LEAKS.xlsx and `no: <the name>` into New Real Values.txt —
+// a keep on a real party name, which the next run of PDF-Linker obeys. The
+// same store key is shared by two matters whose folders have the same leaf
+// name, so one case's answers landed on the other's rows the same way.
+//
+// So an answer now carries WHICH ROW it answered — the row's value and the
+// File cell it was found in, which is how PDF-Linker itself tells one row
+// from another (one row per value, `grouped` by its lower-cased text) — and
+// is laid back only on a row that is that row, wherever the sort has put it.
+// Kept as a digest of the folded cells, never the cells: this storage is not
+// the case folder, and the value is the real text an export must not carry.
+// A digest that no longer matches anything — the value is gone, or found in
+// other files now, or a different case's sheet is under the same name — is an
+// answer that is thrown away and said so (text-reader.js attachLeaksNow), to
+// be given again: an answer asked twice costs a click, one laid on the wrong
+// name keeps it in the clear. An entry from before this rule, with no digest,
+// cannot be checked at all and is thrown away the same way. What the digest
+// cannot tell apart is two matters in same-named folders whose sheets both
+// flag one value in a file of the same name: that answer is the same answer
+// to the same question, and goes across; the store's own name (decisionsKey,
+// the folder's leaf name) is what would have to change to stop it.
+
+const FNV_BASIS = 2166136261;
+const FNV_PRIME = 16777619;
 /**
- * { rowNumber: { base, fix } } for the rows that moved, and { base, ok: true }
- * for a suggestion accepted as it stands — `base` the sheet's own cell then.
- * An accepted suggestion writes nothing to the workbook (the cell already
- * carries it) and so is remembered HERE or nowhere; a save does not clear it.
+ * The row an answer belongs to, as a digest of its folded Value and File
+ * cells: two FNV-1a passes of 32 bits (as pseudo-key.keySignature), the second
+ * reading the text from its end, so two rows share one only by an accident of
+ * one in 2^64. Synchronous, so the store can be written in the middle of a
+ * decision.
+ */
+export function rowIdentity(row) {
+  const s = fold(row && row.value) + "|" + fold(row && row.file);
+  let a = FNV_BASIS;
+  let b = FNV_BASIS;
+  for (let i = 0, j = s.length - 1; i < s.length; i++, j--) {
+    a = Math.imul(a ^ s.charCodeAt(i), FNV_PRIME);
+    b = Math.imul(b ^ s.charCodeAt(j), FNV_PRIME);
+  }
+  return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+}
+/**
+ * { rowNumber: { id, base, fix } } for the rows that moved, and
+ * { id, base, ok: true } for a suggestion accepted as it stands — `id` the
+ * row's identity (rowIdentity), `base` the sheet's own cell then. An accepted
+ * suggestion writes nothing to the workbook (the cell already carries it) and
+ * so is remembered HERE or nowhere; a save does not clear it.
  */
 export function packDecisions(rows) {
   const out = {};
   for (const r of rows || []) {
-    if (r.fix !== r.fix0) out[r.n] = { base: r.fix0, fix: r.fix };
-    else if (r.ok) out[r.n] = { base: r.fix0, ok: true };
+    if (r.fix !== r.fix0) out[r.n] = { id: rowIdentity(r), base: r.fix0, fix: r.fix };
+    else if (r.ok) out[r.n] = { id: rowIdentity(r), base: r.fix0, ok: true };
   }
   return out;
 }
-/** Remembered decisions laid back over the rows — only where the sheet's cell is still what it was. */
+/**
+ * Remembered decisions laid back over the rows: each on the row with ITS
+ * identity, wherever that row now stands, and only where the sheet's cell is
+ * still what it was. Returns { laid, dropped, legacy }: the answers put back,
+ * the ones that found no row of their own (gone, changed, or answered in the
+ * sheet since), and the ones from before rows had identities, discarded
+ * unread.
+ *
+ * Two rows of one sheet can share an identity — PDF-Linker groups by the
+ * value's lower case, the reader folds runs of spaces too, so "Helen  Rasho"
+ * and "Helen Rasho" in one file are two rows here and one identity. Which of
+ * the two an answer was given to cannot then be told from the identity, and
+ * is not guessed: such answers go back by row number, and only while every
+ * one of them still stands on a row of that identity — the pair has not
+ * moved. Moved, they are dropped like any answer that lost its row.
+ */
 export function unpackDecisions(rows, stored) {
-  let n = 0;
-  for (const r of rows || []) {
-    const s = stored && stored[r.n];
-    if (!s || s.base !== r.fix0) continue;
-    if (typeof s.fix === "string" && s.fix !== r.fix0) { r.fix = s.fix; n++; }
-    else if (s.ok) { r.ok = true; n++; }
+  const got = { laid: 0, dropped: 0, legacy: 0 };
+  const byId = new Map(); // identity -> [{ n, s }] as stored
+  for (const [k, s] of Object.entries(stored && typeof stored === "object" ? stored : {})) {
+    if (!s || typeof s !== "object") continue;
+    if (typeof s.id !== "string" || !s.id) { got.legacy++; continue; }
+    const e = { n: Number(k), s };
+    const list = byId.get(s.id);
+    if (list) list.push(e); else byId.set(s.id, [e]);
   }
-  return n;
+  if (!byId.size) return got;
+  const all = rows || [];
+  const ids = all.map(rowIdentity);
+  const at = new Map(); // identity -> the sheet row numbers carrying it now
+  for (let i = 0; i < all.length; i++) {
+    const here = at.get(ids[i]);
+    if (here) here.add(all[i].n); else at.set(ids[i], new Set([all[i].n]));
+  }
+  for (let i = 0; i < all.length; i++) {
+    const list = byId.get(ids[i]);
+    if (!list) continue;
+    const r = all[i];
+    const here = at.get(ids[i]);
+    let e = null;
+    if (here.size === 1 && list.length === 1) e = list[0]; // the one row it can be, wherever it stands
+    else if (list.every((x) => here.has(x.n))) e = list.find((x) => x.n === r.n) || null;
+    if (!e || e.s.base !== r.fix0) continue;
+    if (typeof e.s.fix === "string" && e.s.fix !== r.fix0) r.fix = e.s.fix;
+    else if (e.s.ok) r.ok = true;
+    else continue;
+    got.laid++;
+  }
+  for (const list of byId.values()) got.dropped += list.length;
+  got.dropped -= got.laid;
+  return got;
 }
 
 // ---- the pages the worksheet points at -------------------------------------------------

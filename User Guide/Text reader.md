@@ -447,8 +447,16 @@ app, which routes it to the reader tab.
   place** — only the Fix? cells change; every other part of the file, the
   Context quotes, the column widths and the dropdown come back byte for byte,
   and the file is read back before it is written — after which Apply Fixes (or
-  a re-run) applies them to the files. A `yes` here is never also flagged
-  into `New Real Values.txt`.
+  a re-run) applies them to the files. **An unsaved answer is remembered with
+  the row it answers**, its value and its file, and goes back on that value
+  wherever a run of PDF-Linker has since sorted it, never on whatever now
+  stands in its old row. An answer whose value has gone, or is now found in
+  other files, is discarded, and the toast on opening the folder says how many
+  were, so you can answer them again. Answers an older reader remembered by
+  row number only are discarded the same way, and said once. The folder's
+  toast also says how many answers are only in the reader and not yet saved,
+  "every row answered" included. A `yes` here is never also flagged into
+  `New Real Values.txt`.
 - **And through a document in the order the rows stand in it.** PDF-Linker
   writes one row per **value**, so the worksheet's own order is the order the
   values were first found — which sent a review to page 4, then page 31, then

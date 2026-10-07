@@ -584,6 +584,56 @@ among a folder's documents, and `pdfsync.combinedMembers` reads its
 `# Documents in this file:` list so picked PDFs are matched member by
 member, by name through the key or by order.
 
+An answer not yet saved is remembered in `localStorage`
+(`leaks.decisionsKey`: the folder's leaf name and the worksheet's) and laid
+back over the sheet at the next attach. It used to be remembered by SHEET ROW
+NUMBER alone (`{ row: { base, fix } }`) and laid back wherever that row's cell
+still read as `base` — which, for a row nobody had answered, is `""` on every
+row of every worksheet. PDF-Linker rewrites `LEAKS.xlsx` on every run and
+sorts it as it writes (`_pn_write_leak_report`: undecided rows first, decided
+ones sinking, a misspelling's family pulled together), so after a run a row
+number names another value. Measured in Chromium: a `no` left unsaved on row
+2, "Riverside County", came back on the witness the run sorted into row 2, a
+name the key binds. `mirrorLeakKeeps` made it one of the reader's keeps, so the
+orange mark went; a one-space edit and Ctrl+S saved without a warning, wrote
+`no` for the witness into `LEAKS.xlsx` and `no: <the name>` into `New Real
+Values.txt`, and left the name in the export, where the next run would keep
+it. The folder toast read "every row answered" on the strength of answers
+given to other values. Two matters whose folders share a leaf name share one
+store entry, so the same happened across cases.
+
+So `packDecisions` stores each answer with `id`, `leaks.rowIdentity` of its
+row: a digest (two FNV-1a passes, one from each end, 64 bits) of the folded
+Value and File cells, which is how PDF-Linker tells one row from another (one
+row per value). It is a digest so that the store gains no real text. The value
+is what an export must not carry, and this storage is the browser's, not the
+case folder's. `unpackDecisions` lays an answer only on the row with that
+identity, wherever it now stands, and only while its cell still reads `base`.
+Accepted suggestions (`{ id, base, ok: true }`) get the same check, so an
+acceptance of "Vazqez"'s pre-filled `~Vazquez` is not taken for a sibling
+spelling sorted into its row with the same cell. Two rows of one sheet can
+share an identity: PDF-Linker groups by lower case, the fold also collapses
+spaces. Those rows take answers by row number, and only while every answer
+stored under that identity still stands on one of them. It returns `{ laid,
+dropped, legacy }`. An answer that found no row of its own (the value gone,
+found in other files since, a different case's sheet under the same name) is
+`dropped`. One stored before identities existed, with no `id`, cannot be
+checked at all and is `legacy`, discarded unread. `attachLeaksNow` writes the
+store again at once with only what was laid back, so the leftovers are said
+once and then gone, and leaves the sentence on `leaks.note`. `leaksNoteOnce`
+hands it to whichever toast follows the attach: the attach's own, the folder's
+(`adoptFolderNow`), the lone file's (`attachKeyForFile`) or Read the whole
+folder's. A toast is a single element, and a notice made inside a quiet attach
+was written over by the folder's own toast a moment later. The folder toast
+also says how many answers are here and not yet saved (`leaks.carried`),
+"every row answered" included, since an answer only the browser holds is one
+the next run will not see. Losing an answer costs a click to give it again;
+laying one on the wrong value keeps a real name in the clear. What the digest
+cannot separate is two same-named folders whose sheets flag one value in a
+file of the same name. That answer goes across, as the same answer to the same
+question. Closing it would take a folder identity in the store's name, which
+is not changed here.
+
 The bar's controls are one row at its TOP (`.lb-controls`: Fix? yes no never
 phrase accept, the answer, the typed cell, Apply, clear, then ‹ › Next
 unanswered, Find in text, Save, open, close), with the row's own text under

@@ -1956,8 +1956,19 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
       const f = await found.leaksHandle.getFile();
       const parsed = await attachLeaks(new Uint8Array(await f.arrayBuffer()), f.name, found.leaksHandle, { quiet: true, folder: folderName });
       if (parsed && !quiet) {
+        // "Every row answered" counts the answers laid back from the browser
+        // as well as the sheet's own, so it says how many of them are only
+        // here: an answer the worksheet does not hold yet is one PDF-Linker's
+        // next run will not see. It used to say nothing of them, and the
+        // answers were laid on by row number — a sheet re-sorted by a run read
+        // as finished on the strength of answers given to other values.
         const und = LK.undecidedCount(parsed.rows);
-        toast(`${f.name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}` + (und ? `, ${und} to answer — ⚠ Leaks to review them.` : ", every row answered."));
+        const here = leaks && leaks.carried ? leaks.carried : 0;
+        const note = leaksNoteOnce();
+        toast(`${f.name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}`
+          + (und ? `, ${und} to answer` + (here ? `, ${here} answered here and not yet saved` : "") + " — ⚠ Leaks to review them."
+            : ", every row answered" + (here ? ` — ${here} of the answers here and not yet saved (Ctrl+Shift+S writes them).` : "."))
+          + note, note || here ? { ms: 9000 } : undefined);
       }
     } catch (e) { toast("The folder's LEAKS.xlsx could not be read: " + (e.message || e), { error: true }); }
   } else if (leaks && leaks.folder && leaks.folder !== folderName) {
@@ -2016,12 +2027,16 @@ async function attachKeyForFile(handle) {
     markDocList();
     // Left out of the Text Files folder, as adoption leaves it out (ownNote).
     const note = looksLikeTextFiles(at.dir, found) ? "" : notOwnKeyNote();
+    // …and what the worksheet's attach threw away of the answers remembered
+    // for it, said here because this toast would write over its own.
+    const gone = leaksNoteOnce();
     if (!ask) {
-      toast(key
+      toast((key
         ? `${at.dir.name} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}, key attached${leaks ? " with its LEAKS worksheet" : ""}.` + note
-        : `${at.dir.name} · no pseudonym_key.xlsx in it.`, { ms: note ? 9000 : 5000 });
+        : `${at.dir.name} · no pseudonym_key.xlsx in it.`) + gone, { ms: note || gone ? 9000 : 5000 });
       return;
     }
+    if (gone) toast(gone.trim(), { ms: 9000 });
     showKeyOffer(`Last time the reader went down with the whole of a case folder open, so this file came in on its own${key && !note ? `, with ${at.dir.name}'s key` : ""}.${note} Read the rest of the folder too?`,
       "Read the whole folder", readWholeFolder);
   };
@@ -2285,7 +2300,8 @@ async function readWholeFolder() {
   if (!dirHandle) return;
   setAskBeforeFolder(false);
   await adoptFolder(dirHandle, { quiet: true, light: false });
-  toast(`${folderName} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}. The reader reads the rest of the folder from here.`, { ms: 6000 });
+  const gone = leaksNoteOnce();
+  toast(`${folderName} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}. The reader reads the rest of the folder from here.` + gone, { ms: gone ? 9000 : 6000 });
 }
 $("read-folder").addEventListener("click", readWholeFolder);
 
@@ -8608,10 +8624,28 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" 
   const parsed = LK.parseLeaks(wb.sheets, name);
   if (!parsed.part) throw new Error(`${name}: the LEAKS sheet could not be placed in the workbook.`);
   // Unsaved decisions are never lost to a re-attach: they are remembered
-  // per worksheet (folder and name) and laid back over the rows below.
+  // per worksheet (folder and name) and laid back over the rows below —
+  // each on the row whose value and file it answered, wherever PDF-Linker's
+  // last run sorted that row to (LK.unpackDecisions). By row number alone a
+  // `no` meant for a county landed on the witness a re-run had put in its
+  // row, and became a keep on a name the key binds.
   if (leaks) persistLeaks();
-  leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", at: -1, mirrored: new Set() };
-  const remembered = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));
+  leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", at: -1, mirrored: new Set(), carried: 0, note: "" };
+  const back = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));
+  const remembered = back.laid;
+  leaks.carried = back.laid;
+  // What could not be put back is thrown away now, and said once: the store
+  // is written again with only what was laid back, so the next attach does
+  // not find the same leftovers and say it again. The toast that follows
+  // this attach says it (leaksNoteOnce) — the one here when it is not quiet,
+  // else the folder's own: a toast here would only be written over by it.
+  const lost = back.dropped + back.legacy;
+  if (lost) {
+    persistLeaks();
+    leaks.note = `${lost} unsaved answer${lost === 1 ? "" : "s"} from an earlier session ${lost === 1 ? "was" : "were"} discarded — `
+      + (back.legacy ? "kept by row number, which a run of PDF-Linker re-sorts, so " + (lost === 1 ? "it" : "they") + " could not be matched to " + (lost === 1 ? "its value" : "their values") : (lost === 1 ? "the row it answered has" : "the rows they answered have") + " changed or gone since")
+      + ". Answer " + (lost === 1 ? "it" : "them") + " again.";
+  }
   const faked = refreshSheetFakes(); // its `yes` rows, the sheet's own and the ones remembered
   mirrorLeakKeeps(parsed.rows.filter((r) => r.fix !== r.fix0));
   // A value PDF-Linker has now raised is a question asked on the worksheet, and
@@ -8627,8 +8661,22 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" 
   if (faked && doc) renderLeakStatus();
   warmForLeaks();
   const und = LK.undecidedCount(parsed.rows);
-  if (!quiet) toast(`${name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}, ${und} to answer` + (remembered ? `, ${remembered} answered here and not yet saved` : "") + " — ⚠ Leaks to review them.");
+  if (!quiet) {
+    const note = leaksNoteOnce();
+    toast(`${name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}, ${und} to answer` + (remembered ? `, ${remembered} answered here and not yet saved` : "") + " — ⚠ Leaks to review them." + note, note ? { ms: 9000 } : undefined);
+  }
   return parsed;
+}
+/**
+ * What the last attach threw away of the answers remembered for it, as a
+ * sentence to end a toast with (" …"), or "" — and only the first time it is
+ * asked, so it is said once whichever toast gets to say it.
+ */
+function leaksNoteOnce() {
+  if (!leaks || !leaks.note) return "";
+  const s = " " + leaks.note;
+  leaks.note = "";
+  return s;
 }
 function dropLeaks() {
   leaks = null;
