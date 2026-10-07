@@ -86,6 +86,32 @@ a scan whose question went stale while it ran (`findScanStale`, the view or
 the key turned) starts again rather than keeping counts that would walk into
 documents with no hit on screen.
 
+**Ctrl+Z on a decision** (`asDecision`, `decisionState`, `stepDecision`,
+`decisionLabel`, `textdoc.decisionDelta`, `textdoc.applyDecisionDelta`), at
+the owner's direction. The undo history held page snapshots only, so a flag,
+a phrase, a keep, a "fake it" and a LEAKS answer were taken back only by
+finding the value in a list. Each decision function is now its own name over
+a `…Now` body run inside `asDecision` (`flagSelection`, `markPhrase`,
+`unmarkPhrase`, `setKeep`, `settleName`, `decideLeak`, `acceptLeak`, and the
+Flagged list's ×), which reads the decision state before and after —
+`flagged`, `phrases`, `keeps`, `settled` and the worksheet rows' `[fix, ok]`
+— and pushes `{ decision: { label, delta, store, sheet } }` onto `undoStack`
+where anything moved; a decision inside another is the outer one's
+(`deciding`). The delta holds only what moved, by value (by row for the
+worksheet), and an undo moves those back over the state as it NOW stands, so
+a value adoption merged in from the file since, or a keep the folder's
+reading settled, is not undone with it. `stepHistory` pops a decision step
+before any page logic; `stepDecision` refuses one taken on another case's
+list (`store`, `flagsFor`) or a worksheet no longer attached (`sheet`) and
+drops it, sets each row's `fix`/`ok` back and lets `moveLeakKeep` put its
+mirrored keep and `leaks.mirrored` right, settles once (persist, compile,
+re-mark, repaint), sends the review back to an answered row it took back
+(`goToLeak`), and says what it did. `reelShift` and a member's shed pass over
+decision steps, which name no page. The page lists (⊘ Did not OCR, ↻ OCR This
+Page, ✎ Use my text) are not decisions here: a strip and its put-back stay page
+steps as before. Checked in Chromium (Playwright, not committed): a flag and a
+LEAKS answer undone and redone, the review back on the row.
+
 **A typed real name, and only a typed one** (`convertTypedReals`): the
 debounced converter marks a real name standing in a page's plain text as a
 pseudonym only where an edit wrote it. `buildBody` keeps the text the page
@@ -484,6 +510,28 @@ line on disk the list does not name. A page that reads `[DID NOT OCR]` has
 no transcription: the button is disabled there, `markDidNotOcr` withdraws an
 entry for the page it strips, and `syncNoOcr` drops one for a page that
 reads it. `#text-fixed-block` lists them.
+**…and without the click** (`autoUseMyText`, `noteTyping`, `forgetTyping`,
+`fixDeclined`, `textdoc.wordsChanged`, `TD.AUTO_TEXT_FIXED_WORDS`), at the
+owner's direction. A page's text just before the first keystroke on it is kept
+on the page object as `typedFrom` (the `beforeinput` handler, after its own
+refusals, and the paste handler), across saves, so two words corrected a save
+apart count as two.
+`saveDocument` takes each typed page's text as the typing left it (before the
+forward pass writes a settled name as its pseudonym), and once the files are
+written hands over every page of a written member whose words differ from
+`typedFrom` in two or more (`wordsChanged`: the larger of the words taken out
+and put in over a longest-common-run alignment, the common head and tail set
+aside, so a line re-broken is no change), before `refreshTextFixedSums` and
+the values file. Never a page that reads `[DID NOT OCR]`, one on `noOcr` or
+`ocrAgain` (the operator's own word on the page stands), one already on the
+list, or one in `fixDeclined` — the pages a click on ✓ Use my text took off
+this session; the button itself asks again and clears that. ⊘ Did not OCR is
+not swept in, at the owner's word: `markDidNotOcr`, `markDidNotOcrPages`,
+`putStrippedBack` and `restoreSnapshot` of a step tagged `nocr` (the strip
+undone or redone) each `forgetTyping`, so neither the strip nor the typing
+before it hands a page over. Checked in Chromium (Playwright, not committed):
+one word typed is not handed over, two are; a page typed on and stripped is
+not; withdrawn, a page is not handed over again; a strip undone is no typing.
 
 **Margin numbers the OCR missed** are put back as the export is read:
 `readExport` (every parse site: `openText`, the reel's `reelExtend` and

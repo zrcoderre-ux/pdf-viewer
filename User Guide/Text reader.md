@@ -601,7 +601,13 @@ app, which routes it to the reader tab.
   A document opens **protected**: reading, selecting and flagging can never
   nudge a character into it. **✎ Edit** lifts that for the document in front
   of you, **Ctrl+Z** and **Ctrl+Y** undo and redo through the reader's own
-  history (the browser's cannot survive the pseudonym rewrites), and **Save**
+  history (the browser's cannot survive the pseudonym rewrites) — the
+  decisions too, in their place among the edits: a flag, a phrase, a value
+  taken off the Flagged list, a keep, a "fake it" and a LEAKS answer (the
+  review goes back to that row) are each one step, and the toast names what
+  was undone. An undo moves back only what that decision moved, so a value
+  the case folder's list brought in since stands. ⊘ Did not OCR and ↻ OCR
+  This Page are undone as page edits, as before — and **Save**
   (Ctrl+S) writes the text back to the same file. A
   pseudonym span always writes its **fake**; a real name typed in is marked
   as its pseudonym as soon as the caret leaves it. **Only the name typed** —
@@ -1575,6 +1581,17 @@ app, which routes it to the reader tab.
   second click withdraws it, ⊘ Did not OCR on the page withdraws it too, and
   it is off on a page that reads `[DID NOT OCR]`. ⊘ Did not OCR stays for the
   page you cannot read, or that is not worth the typing.
+  **A page you type over is handed over by itself.** Where you have typed over
+  two words or more on a page (corrected, put in or taken out, counted against
+  the page as it read before your first keystroke on it), 💾 Save puts it on
+  the list as the button would, and the save's message names the page. One
+  word is not enough: a single correction is what a flag or a `*` fix is for.
+  ⊘ Did not OCR is never swept in: a page that reads `[DID NOT OCR]`, a page
+  on the Did not OCR or OCR This Page list, and a page you strip, put back or
+  take a strip back on (Ctrl+Z) are never handed over on that account, and
+  typing done before the strip does not count. Click **✓ Use my text** on a
+  page to take it back off the list; for the rest of the session the save
+  will not hand that page over again by itself (the button still does).
 
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and

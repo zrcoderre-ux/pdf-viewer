@@ -1249,6 +1249,86 @@ export function removeValue(list, value) {
   return (list || []).filter((x) => foldKey(x) !== k);
 }
 
+// ---- Ctrl+Z on a DECISION ------------------------------------------------------
+//
+// A flag, a phrase, a keep, a "fake it" and a LEAKS answer are decisions, not
+// edits of the text, and Ctrl+Z walked straight past them: the way back was to
+// find the value in a list and take it off by hand. Each is now a step on the
+// reader's undo history, beside the text edits and in the order taken. The step
+// holds only what that one decision MOVED (decisionDelta), and undoing it moves
+// those values back (applyDecisionDelta) — never the whole list, so a value the
+// case folder's file brought in since, or a keep the folder's reading settled,
+// stands. The page lists (⊘ Did not OCR, ↻ OCR This Page, ✎ Use my text) are
+// not decisions here: a strip and its put-back are text edits with undo steps
+// of their own.
+//
+// A state: { flagged: [value], phrases: [value], keeps: [keep], settled: [key],
+// rows: [[fix, ok]] | null } — rows the LEAKS worksheet's, by index.
+
+function listDelta(a, b) {
+  const ka = new Set((a || []).map((x) => foldKey(x)));
+  const kb = new Set((b || []).map((x) => foldKey(x)));
+  return {
+    add: (b || []).filter((x) => !ka.has(foldKey(x))),
+    drop: (a || []).filter((x) => !kb.has(foldKey(x))),
+  };
+}
+function setDelta(a, b) {
+  const sa = new Set(a || []), sb = new Set(b || []);
+  return { add: [...sb].filter((x) => !sa.has(x)), drop: [...sa].filter((x) => !sb.has(x)) };
+}
+function sameKeep(x, y) {
+  return !!x && !!y && x.control === y.control && x.value === y.value && (x.state || "") === (y.state || "");
+}
+/** What moved from decision state `a` to `b`: { flagged, phrases, settled: {add, drop}, keeps: [{before, after}], rows: [{i, before, after}] }, or null where nothing did. */
+export function decisionDelta(a, b) {
+  const flagged = listDelta(a.flagged, b.flagged);
+  const phrases = listDelta(a.phrases, b.phrases);
+  const settled = setDelta(a.settled, b.settled);
+  const ka = new Map((a.keeps || []).map((k) => [foldKey(k.value), k]));
+  const kb = new Map((b.keeps || []).map((k) => [foldKey(k.value), k]));
+  const keeps = [];
+  for (const key of new Set([...ka.keys(), ...kb.keys()])) {
+    const before = ka.get(key) || null, after = kb.get(key) || null;
+    if (!sameKeep(before, after)) keeps.push({ before, after });
+  }
+  const rows = [];
+  if (a.rows && b.rows && a.rows.length === b.rows.length) {
+    a.rows.forEach((r, i) => {
+      const t = b.rows[i];
+      if (r[0] !== t[0] || !!r[1] !== !!t[1]) rows.push({ i, before: [r[0], !!r[1]], after: [t[0], !!t[1]] });
+    });
+  }
+  const moved = flagged.add.length || flagged.drop.length || phrases.add.length || phrases.drop.length
+    || settled.add.length || settled.drop.length || keeps.length || rows.length;
+  return moved ? { flagged, phrases, settled, keeps, rows } : null;
+}
+/** State `state` with `delta` taken back (`undo`) or made again; a new state, `state` untouched. */
+export function applyDecisionDelta(state, delta, undo) {
+  const list = (have, d) => {
+    let out = (have || []).slice();
+    for (const v of undo ? d.add : d.drop) out = removeValue(out, v);
+    for (const v of undo ? d.drop : d.add) out = addValue(out, v);
+    return out;
+  };
+  const settled = new Set(state.settled || []);
+  for (const v of undo ? delta.settled.add : delta.settled.drop) settled.delete(v);
+  for (const v of undo ? delta.settled.drop : delta.settled.add) settled.add(v);
+  let keeps = (state.keeps || []).slice();
+  for (const { before, after } of delta.keeps) {
+    const want = undo ? before : after;
+    keeps = removeKeep(keeps, (before || after).value);
+    if (want) keeps = keeps.concat([{ ...want }]);
+  }
+  const rows = state.rows ? state.rows.map((r) => r.slice()) : null;
+  if (rows) for (const { i, before, after } of delta.rows) if (i < rows.length) rows[i] = (undo ? before : after).slice();
+  return {
+    flagged: list(state.flagged, delta.flagged),
+    phrases: list(state.phrases, delta.phrases),
+    keeps, settled: [...settled], rows,
+  };
+}
+
 /**
  * The flagged values a key now FAKES, split off from the ones it does not.
  *
@@ -1435,6 +1515,45 @@ export function pageTextSum(lines) {
 /** Whether PDF-Linker wrote the page off the operator's transcription (its header says so). */
 export function headerSaysTextCorrected(page) {
   return /\bTEXT CORRECTED\b/.test(String((page && (page.review || page.header)) || ""));
+}
+
+// ✎ Use my text is also asked WITHOUT the click: a page the operator has typed
+// over in this many words or more, by the time a save writes it, is handed to
+// PDF-Linker as a transcription (the reader's autoUseMyText). One word is a
+// correction PDF-Linker's own fixes reach (a `*` fix, a flag); several are a
+// page being transcribed, and a full run would otherwise put the OCR's reading
+// back over every one of them.
+export const AUTO_TEXT_FIXED_WORDS = 2;
+// Past this many word pairs the middle of two texts is not aligned word by
+// word; it is counted as changed in the larger of its two sides.
+const WORDS_CHANGED_MAX_CELLS = 4e6;
+/**
+ * How many words differ between `before` and `after`, two texts of one page:
+ * the words taken out or the words put in, whichever is more, over a word-by-
+ * word alignment (a longest common run), the common head and tail first set
+ * aside. Words are the runs between whitespace, so a line moved or re-broken
+ * is no change, and a word corrected in place counts once.
+ */
+export function wordsChanged(before, after) {
+  const a = String(before == null ? "" : before).split(/\s+/).filter(Boolean);
+  const b = String(after == null ? "" : after).split(/\s+/).filter(Boolean);
+  let lo = 0;
+  while (lo < a.length && lo < b.length && a[lo] === b[lo]) lo++;
+  let ea = a.length, eb = b.length;
+  while (ea > lo && eb > lo && a[ea - 1] === b[eb - 1]) { ea--; eb--; }
+  const n = ea - lo, m = eb - lo;
+  if (!n || !m) return Math.max(n, m);
+  if (n * m > WORDS_CHANGED_MAX_CELLS) return Math.max(n, m);
+  let prev = new Uint32Array(m + 1), cur = new Uint32Array(m + 1);
+  for (let i = 1; i <= n; i++) {
+    const w = a[lo + i - 1];
+    for (let j = 1; j <= m; j++) {
+      cur[j] = w === b[lo + j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]);
+    }
+    [prev, cur] = [cur, prev];
+  }
+  const same = prev[m];
+  return Math.max(n - same, m - same);
 }
 
 /** Whether a page's lines read DID_NOT_OCR and nothing else (the trailer aside). */

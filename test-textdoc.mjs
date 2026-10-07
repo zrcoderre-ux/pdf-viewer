@@ -19,6 +19,7 @@ import {
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
   textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
+  wordsChanged, AUTO_TEXT_FIXED_WORDS, decisionDelta, applyDecisionDelta,
   marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher } from "./viewer/pseudo-key.js";
@@ -1055,6 +1056,55 @@ console.log("margin numbers the OCR missed");
   const tops = (...ns) => ns.map((t) => ({ header: "x", lines: Array.from({ length: t }, (_, k) => num(k + 1, "x")) }));
   check("…the highest that two pages reach: the OCR loses numbers at the foot, never adds them", [pleadingLast(tops(28, 27, 26)), pleadingLast(tops(28, 26, 28))], [27, 28]);
   check("…so one number misread high at the foot of one page is not it", pleadingLast([...tops(28, 28), { header: "x", lines: [...Array.from({ length: 27 }, (_, k) => num(k + 1, "x")), num(88, "x")] }]), 28);
+}
+
+// ✎ Use my text is asked without the click where a page was TYPED over in
+// several words by the time a save writes it.
+console.log("a page typed over is handed over by itself");
+{
+  check("several words, not one", AUTO_TEXT_FIXED_WORDS, 2);
+  check("nothing typed", wordsChanged("The lease was signed.", "The lease was signed."), 0);
+  check("a word corrected in place counts once", wordsChanged("The lease was slgned.", "The lease was signed."), 1);
+  check("two words corrected", wordsChanged("Tbe lease was slgned.", "The lease was signed."), 2);
+  check("a word taken out and one put right", wordsChanged("The the lease was slgned.", "The lease was signed."), 2);
+  check("a word put in", wordsChanged("The lease signed.", "The lease was signed."), 1);
+  check("a line moved or re-broken is no change", wordsChanged("The lease\nwas signed.", "The lease was\n  signed."), 0);
+  check("two corrections far apart on a page count as two",
+    wordsChanged(["Tbe lease", ...Array(50).fill("was signed in full"), "on Monday"].join("\n"),
+      ["The lease", ...Array(50).fill("was signed in full"), "on Mnday"].join("\n")), 2);
+  check("a whole line typed in", wordsChanged("", "Rent is due on the first."), 6);
+}
+
+// Ctrl+Z on a decision: a step holds what the decision moved and moves only
+// that back, so what came in since stands.
+console.log("a decision undone and made again");
+{
+  const st = (o) => ({ flagged: [], phrases: [], keeps: [], settled: [], rows: null, ...o });
+  check("nothing moved, no step", decisionDelta(st({ flagged: ["Rosa Delgado"] }), st({ flagged: ["Rosa Delgado"] })), null);
+  const flag = decisionDelta(st({ flagged: ["Rosa Delgado"] }), st({ flagged: ["Rosa Delgado", "Tamsin Kettleby"] }));
+  check("a flag moves one value", [flag.flagged.add, flag.flagged.drop], [["Tamsin Kettleby"], []]);
+  // A value the folder's file brought in after the flag stands through its undo.
+  const later = st({ flagged: ["Rosa Delgado", "Tamsin Kettleby", "Oswin Halvorsen"] });
+  const back = applyDecisionDelta(later, flag, true);
+  check("undone, the flag alone comes off", back.flagged, ["Rosa Delgado", "Oswin Halvorsen"]);
+  check("…and redone, it goes back on", applyDecisionDelta(back, flag, false).flagged, ["Rosa Delgado", "Oswin Halvorsen", "Tamsin Kettleby"]);
+  check("the state handed in is not touched", later.flagged.length, 3);
+  const off = decisionDelta(st({ flagged: ["Rosa Delgado"], phrases: ["Rosa Delgado"] }), st());
+  const on = applyDecisionDelta(st(), off, true);
+  check("a value taken off the Flagged list, phrase and all, comes back", [on.flagged, on.phrases], [["Rosa Delgado"], ["Rosa Delgado"]]);
+  const keep = decisionDelta(st({ keeps: [{ control: "no", value: "Cal" }] }),
+    st({ keeps: [{ control: "never", value: "Cal" }, { control: "no", value: "Dealer", state: "local" }] }));
+  check("keeps by value, before and after", keep.keeps.length, 2);
+  check("undone, each keep reads as it did", applyDecisionDelta(st({ keeps: [{ control: "never", value: "Cal" }, { control: "no", value: "Dealer", state: "local" }] }), keep, true).keeps,
+    [{ control: "no", value: "Cal" }]);
+  const fake = decisionDelta(st({ settled: ["a"] }), st({ settled: ["a", "rosa delgado"] }));
+  check("a fake-it undone", applyDecisionDelta(st({ settled: ["a", "rosa delgado"] }), fake, true).settled, ["a"]);
+  const rows = decisionDelta(st({ rows: [["", false], ["", false], ["no", false]] }), st({ rows: [["", false], ["yes", false], ["no", true]] }));
+  check("a LEAKS answer by row", rows.rows, [{ i: 1, before: ["", false], after: ["yes", false] }, { i: 2, before: ["no", false], after: ["no", true] }]);
+  check("undone, the rows read as before and no other moves",
+    applyDecisionDelta(st({ rows: [["typed later", false], ["yes", false], ["no", true]] }), rows, true).rows,
+    [["typed later", false], ["", false], ["no", false]]);
+  check("rows of another sheet's length are not compared", decisionDelta(st({ rows: [["", false]] }), st({ rows: [["yes", false], ["", false]] })), null);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
