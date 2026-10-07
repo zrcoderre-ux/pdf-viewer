@@ -228,6 +228,10 @@ body {
 ::highlight(keyterm) { text-decoration: underline solid #7b1fa2 2px; }
 ::highlight(keyhere) { background-color: rgba(123, 31, 162, 0.7); color: #fff; text-decoration: none; }
 ::highlight(leakrow) { background-color: rgba(230, 81, 0, 0.22); text-decoration: underline solid #e65100 2px; }
+/* Every other row still to answer, wherever its value stands: orange before
+   the walk gets there, so a name the worksheet already asks about is not
+   flagged on the way. Lighter than the row in front, and dashed. */
+::highlight(leakrows) { background-color: rgba(230, 81, 0, 0.16); text-decoration: underline dashed #e65100 2px; }
 /* The count of names standing in the clear is a control: it steps through
    them. Marked as one, and only while there are any. */
 #st-leaks.step { cursor: pointer; text-decoration: underline dotted; }

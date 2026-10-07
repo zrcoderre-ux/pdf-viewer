@@ -434,6 +434,19 @@ app, which routes it to the reader tab.
   and the file is read back before it is written — after which Apply Fixes (or
   a re-run) applies them to the files. A `yes` here is never also flagged
   into `New Real Values.txt`.
+- **Every row still to answer is orange before the review reaches it.** Only
+  the row in front used to be marked, so a name the worksheet was already
+  asking about stood unmarked until the review got there, and flagging it on
+  the way was wasted work (and handed PDF-Linker a value it had raised
+  itself). Now each value with a row still to answer is marked wherever it
+  stands, in a lighter orange with a dashed underline; the row in front keeps
+  its stronger mark. The marks show whenever a worksheet is attached, with the
+  bar open or closed, and a value goes unmarked once its row is answered. A
+  name the key binds is left to the key's own orange. Selecting one of these
+  values on its own does not flag it (🚩 on, or Ctrl+Shift+F): the pop-up says
+  the worksheet has a row for it, and **Answer its row…** opens that row in
+  the bar without moving the text. A selection with more than the value in it
+  is still flagged whole.
 - **And through a document in the order the rows stand in it.** PDF-Linker
   writes one row per **value**, so the worksheet's own order is the order the
   values were first found — which sent a review to page 4, then page 31, then
