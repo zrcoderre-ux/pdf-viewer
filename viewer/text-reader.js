@@ -144,7 +144,7 @@ let fakesRx = null;          // …and one over the key's FAKES: which pseudonym
 let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let pageSweep = null;        // the page a LEAKS review is finishing before it leaves (see advanceLeak)
-let flagsFor = null;         // …the storage key that list was read from, while a folder is being adopted
+let flagsFor = null;         // …the storage key that list was read from, and is written back to (persistValues; listAway, docListAway)
 let keyFolder = null;        // …the storage key of the list the key in hand was read from or chosen for; null, none (TD.keyAnswersFlags)
 let phrases = [];            // …which of them are PHRASES: several words faked whole (`phrase:`)
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
@@ -152,6 +152,7 @@ let noOcr = [];              // …and the pages marked ⊘ Did not OCR: [{ doc,
 let ocrAgain = [];           // …and the pages to read again, ↻ OCR This Page (ocrPageAgain)
 let textFixed = [];          // …and the pages transcribed by hand, ✎ Use my text: [{ doc, pdf, page, sum }] (useMyText)
 let spots = [];              // spot keeps for the open document: [{ page, value, nth }]
+let spotsFolder = "";        // …and the folder the open document was opened in, its spots kept under (spotStoreKey; keyAway, docListAway)
 let masterKeeps = [];        // standing keeps from PDF-Linker's master workbook (its KEEP sheet)
 let masterInfo = null;       // { name, sheet, rows, partial } once it is attached
 let masterHandle = null;     // its file handle, remembered between sessions
@@ -729,6 +730,9 @@ function fakesForPrint() {
   // name the print faked read as TYPED afterwards (the converter's measure,
   // and the save's), to be marked and written as its pseudonym unreviewed.
   const was = { html: bodies.map((b) => b.innerHTML), built: bodies.map((b) => b.__built), fakes: document.body.classList.contains("show-fakes"), withheld: [] };
+  // …and the names Esc left as typed, by their places, to be found there again
+  // in the nodes put back (escFindAgain).
+  for (const b of bodies) escNote(b);
   let moved = false;
   if (fwd && fwd.rx) {
     during("scrubbing the pages for print", () => {
@@ -760,7 +764,7 @@ function pagesBackAfterPrint() {
   const was = printPut;
   printPut = null;
   if (!was) return;
-  pageBodies().forEach((b, i) => { if (was.html[i] != null) { b.innerHTML = was.html[i]; b.__built = was.built[i]; } });
+  pageBodies().forEach((b, i) => { if (was.html[i] != null) { b.innerHTML = was.html[i]; b.__built = was.built[i]; escFindAgain(b); } });
   document.body.classList.toggle("show-fakes", was.fakes);
   afterTextChange(); // the marks and the underlines are ranges into the old nodes
   // A printout is not looked at in the dialog's small preview, and a name it
@@ -1159,6 +1163,9 @@ function fakesForShot() {
   for (const sec of near) {
     const body = sec.querySelector(".page-body");
     if (!body) continue;
+    // The names Esc left as typed are written over in their own nodes below,
+    // which takes their ranges with them: noted, to be found again (back).
+    escNote(body);
     for (const s of body.querySelectorAll(".pn")) {
       const t = s.firstChild;
       if (s.childNodes.length !== 1 || t.nodeType !== 3 || t.data === s.dataset.fake) continue;
@@ -1199,6 +1206,7 @@ function fakesForShot() {
     for (const c of covers) c.remove();
     for (const [el, v, f] of fields) if (el.value === f) el.value = v;
     undoShotEdits(edits);
+    for (const sec of near) { const body = sec.querySelector(".page-body"); if (body) escFindAgain(body); }
     document.body.classList.toggle("show-fakes", showed);
     const touched = new Set(edits.map(([n]) => n));
     if (caret && (touched.has(caret[0]) || touched.has(caret[2])) && caret[0].isConnected && caret[2].isConnected) {
@@ -2057,9 +2065,13 @@ keySelect.addEventListener("change", () => {
 });
 
 // `owner`: the list the key answers flags for (keyFolder), set before the key
-// is compiled, since compiling it is what takes flags off.
-async function loadKeyFromBytes(bytes, name, folder, { quiet = false, owner = null } = {}) {
+// is compiled, since compiling it is what takes flags off. `still`: asked once
+// the workbook is parsed, by an adoption, whether its folder is still the one
+// open; where it is not, the key is neither filed nor put in hand, and this
+// says so by returning false (true where it was put in hand).
+async function loadKeyFromBytes(bytes, name, folder, { quiet = false, owner = null, still = null } = {}) {
   const wb = await parseXlsx(bytes);
+  if (still && !still()) return false;
   if (!PK.sheetsLookLikeKey(wb.sheets)) throw new Error(`${name} has no "Real Value" / "Replacement" header — not a pseudonym key.`);
   const parsed = PK.parseKey(wb.sheets, name);
   const id = storeKey(parsed, folder);
@@ -2069,6 +2081,7 @@ async function loadKeyFromBytes(bytes, name, folder, { quiet = false, owner = nu
   const note = notOwnKeyNote();
   if (!quiet) toast(`Key loaded: ${PK.keyTitle(key)} — ${key.pairs.length} reversible binding${key.pairs.length === 1 ? "" : "s"}` +
     (key.dropped.ambiguous ? `, ${key.dropped.ambiguous} ambiguous retired` : "") + (note ? "." + note : ""), note ? { ms: 9000 } : undefined);
+  return true;
 }
 
 async function pickKey() {
@@ -2355,9 +2368,35 @@ async function scanFolder(h, { light = false } = {}) {
   return found;
 }
 
-/** Make `h` the current case folder: key attached, documents listed, flags loaded. */
+/**
+ * Make `h` the current case folder: key attached, documents listed, flags
+ * loaded. What it read comes back (scanFolder's `found`), marked `overtaken`
+ * where another folder was opened before it was done: then it attached
+ * nothing, and the caller is to do nothing more on its account either — the
+ * adoption that took over is the one whose caller opens a document.
+ *
+ * `adopting` counts the adoptions in flight. While one is, the key in hand may
+ * already be the folder's being read while the document on screen is still
+ * the last folder's, and a save of it then writes a name typed into it as the
+ * OTHER case's pseudonym (saveDocument refuses it).
+ */
+let adopting = 0;
+/**
+ * Whether the key in hand may not be the key of the document on screen: a
+ * folder being read (`adopting`), or the document on screen opened in another
+ * case folder than the one open (`spotsFolder`; a lone document reads under
+ * the key in hand, as it always has). The save refuses then, and nothing
+ * marks a typed name with the key in hand (offerAtCaret, convertTypedReals):
+ * marked so, it is the other case's pseudonym in this document's text, and
+ * when the document is next read under its own key that pseudonym stands in
+ * it as plain text — written by the next save, a fake no row of its key
+ * reverses, with nothing said.
+ */
+function keyAway() { return adopting > 0 || (!!spotsFolder && spotsFolder !== stateFolder()); }
 async function adoptFolder(h, { quiet = false, light = false } = {}) {
-  return duringAsync("reading the case folder", () => adoptFolderNow(h, { quiet, light }));
+  adopting++;
+  try { return await duringAsync("reading the case folder", () => adoptFolderNow(h, { quiet, light })); }
+  finally { adopting--; }
 }
 /**
  * TWO WEIGHTS OF ADOPTION, because opening ONE FILE is not the same act as
@@ -2396,6 +2435,17 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // below is this folder's own even should another folder be opened meanwhile,
   // and so is the list — never put in hand once another has been (OVERTAKEN).
   const own = valuesStoreKey();
+  // OVERTAKEN, asked after EVERY wait below and before anything is put in
+  // hand: another folder opened while this one was being read. The first
+  // version asked only before the list, and everything before that went on
+  // regardless — measured in Chromium, case A's key, read slowly while
+  // Open case folder was used on case B, was put in hand over B's and filed
+  // in the Key list under B's name; B's pseudonyms then read as fakes, and a
+  // name typed into B's brief was saved as A's pseudonym for it, a fake no
+  // row of B's key reverses. A folder slow to list (a synced drive) did the
+  // same to the document list: A's documents listed with B open.
+  const gone = () => dirHandle !== h || valuesStoreKey() !== own;
+  const overtaken = () => { found.overtaken = true; return found; };
   const found = await scanFolder(h, { light });
   // What the folder is, now that it has been read: a Text Files folder is
   // never remembered as a case folder (rememberDir), and nothing that belongs
@@ -2403,13 +2453,20 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   const text = looksLikeTextFiles(h, found);
   if (dirHandle === h) folderIsText = text;
   if (rec && rec.role !== (text ? "text" : "case")) await dirIdFor(h, () => (text ? "text" : "case"));
+  // …before an older build's state is moved, too: left where it is, it moves
+  // the next time this folder is opened, and is said then.
+  if (gone()) return overtaken();
   // An older build's state for this folder's NAME, moved under its id where
   // the folder shows it was this folder's (never a Text Files folder's); and
   // the list kept while this case's Text Files folder was the one open,
-  // brought up into this one.
-  listNote = "";
-  if (rec) listNote = await adoptLegacyState(h, rec, text);
-  if (rec && found.textDir && !text) listNote += await carryUpTextFiles(found.textDir, own, h);
+  // brought up into this one. Each writes this folder's own storage only.
+  let note = "";
+  if (rec) note = await adoptLegacyState(h, rec, text);
+  if (rec && found.textDir && !text) note += await carryUpTextFiles(found.textDir, own, h);
+  // Overtaken while that was read, what it moved stays moved — it is this
+  // folder's — and what it has to say is said by the next toast that says it.
+  if (gone()) { listNote += note; return overtaken(); }
+  listNote = note;
   // The combined file, when the folder has one, listed first: it is the one
   // file holding every export, and the one the drafting model was handed.
   folderDocs = light ? [] : (found.combined ? [found.combined].concat(found.docs) : found.docs);
@@ -2421,8 +2478,15 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   if (found.keyHandle) {
     try {
       const f = await found.keyHandle.getFile();
-      await loadKeyFromBytes(new Uint8Array(await f.arrayBuffer()), f.name, folderName, { quiet, owner: own });
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      // A key read for a folder no longer open is not that folder's: it is
+      // neither put in hand nor filed (and filed, it would be under the name
+      // of the folder open now). Asked again once it is parsed (`still`).
+      if (gone()) return overtaken();
+      const put = await loadKeyFromBytes(bytes, f.name, h.name, { quiet, owner: own, still: () => !gone() });
+      if (!put) return overtaken();
     } catch (e) {
+      if (gone()) return overtaken();
       // Load key… on a file Excel is holding fails the same way: the remedy
       // here is the file read again, by opening the folder once it can be.
       const msg = String(e.message || e);
@@ -2464,7 +2528,7 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // its own list in hand; this one leaves this folder's where it is stored,
   // and its file on disk to be merged the next time the folder is opened.
   // Nothing else of it is attached either — its worksheet is this folder's.
-  if (dirHandle !== h || valuesStoreKey() !== own) return found;
+  if (gone()) return overtaken();
   const stored = readStoredValues(own);
   flagged = stored.values;
   flagsFor = own;
@@ -2521,8 +2585,14 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
       const bytes = new Uint8Array(await f.arrayBuffer());
       // Overtaken while the worksheet was read (as above): it is this
       // folder's, and attached now it would be kept under the folder open.
-      if (dirHandle !== h) return found;
-      const parsed = await attachLeaks(bytes, f.name, found.leaksHandle, { quiet: true, folder: folderName });
+      if (gone()) return overtaken();
+      // …or while it is PARSED, which on a sheet of thousands of rows is the
+      // longest wait of all: attachLeaks asks again (`still`) before it lays
+      // a remembered answer back, mirrors a keep or settles one. Going on, it
+      // laid this folder's answers and keeps into the list in hand when that
+      // was already the next folder's, and kept the sheet attached there.
+      const parsed = await attachLeaks(bytes, f.name, found.leaksHandle, { quiet: true, folder: h.name, still: () => !gone() });
+      if (gone()) return overtaken();
       if (parsed && !quiet) {
         // "Every row answered" counts the answers laid back from the browser
         // as well as the sheet's own, so it says how many of them are only
@@ -2538,7 +2608,10 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
             : ", every row answered" + (here ? ` — ${here} of the answers here and not yet saved (Ctrl+Shift+S writes them).` : "."))
           + note, note || here ? { ms: 9000 } : undefined);
       }
-    } catch (e) { toast("The folder's LEAKS.xlsx could not be read: " + (e.message || e), { error: true }); }
+    } catch (e) {
+      if (gone()) return overtaken();
+      toast("The folder's LEAKS.xlsx could not be read: " + (e.message || e), { error: true });
+    }
   } else if (leaks && leaks.store && leaks.store !== stateFolder()) {
     persistLeaks(); // remembered for the folder it belongs to
     dropLeaks();
@@ -2837,8 +2910,8 @@ async function readFolderAfterRun() {
   const name = fileName, was = fileHandle;
   forgetPdfs();
   dropReady();
-  await adoptFolder(dir, { quiet: true, light: folderLight });
-  if (!doc || !name) return;
+  const found = await adoptFolder(dir, { quiet: true, light: folderLight });
+  if (found.overtaken || !doc || !name) return; // overtaken: another folder is the one open now
   let f = null, h = was;
   try { f = h ? await h.getFile() : null; } catch { f = null; }
   if (!f) {
@@ -2855,7 +2928,9 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 
 /**
  * A document opened on its own: attach the key of the case folder it sits
- * in, if the reader has been shown that folder; else say how to.
+ * in, if the reader has been shown that folder; else say how to. Returns
+ * false where that folder's adoption was overtaken — another folder opened
+ * while it was read — and the document is not to be opened after all.
  */
 async function attachKeyForFile(handle) {
   if (dirHandle) {
@@ -2867,7 +2942,7 @@ async function attachKeyForFile(handle) {
     if (!key) showKeyOffer("No key attached. Open this file's case folder once — the picker opens where the file is — and its pseudonym_key.xlsx is attached by itself from then on.", "Open case folder…", () => openFolder(handle || null));
     return;
   }
-  const attach = async () => {
+  const attach = async (fromBar = true) => {
     if (at.needs) {
       try {
         const perm = await at.dir.requestPermission({ mode: "readwrite" });
@@ -2876,6 +2951,13 @@ async function attachKeyForFile(handle) {
     }
     const ask = askBeforeFolder();
     const found = await adoptFolder(at.dir, { quiet: true, light: ask });
+    // Another folder was opened while this one was read: it is the folder
+    // open, and its own opening says what it has to; nothing here was attached.
+    if (found.overtaken) return false;
+    // Attached from the bar, to the document already open in it: its spot
+    // keeps are this folder's from here. (Opening a document, the one on
+    // screen is still the last one's; openText says whose the new one's are.)
+    if (fromBar && doc) spotsFolder = stateFolder();
     checkRun({ opening: true }).catch((e) => console.warn(e));
     if (doc) retranslate();
     markDocList();
@@ -2907,12 +2989,18 @@ async function attachKeyForFile(handle) {
   // there is to offer is the case folder above it, picked from inside it.
   if (at.needs && at.textFiles) offerFolderAbove(at.dir, null, "This file is in " + at.dir.name + ", ");
   else if (at.needs) showKeyOffer("This file is in " + at.dir.name + ". Attach its pseudonym key?", "Attach key", attach);
-  else await attach();
+  else return (await attach(false)) !== false;
+  return true;
 }
 
 // ── opening documents ───────────────────────────────────────────────────────────
 async function openFile(file, handle) {
-  return duringAsync("opening the document", () => openFileNow(file, handle));
+  // `adopting` held through it, as openFolder holds it: a folder its case
+  // folder brings in puts that folder's key in hand before this document is
+  // up, and the one on screen until then is not that folder's.
+  adopting++;
+  try { return await duringAsync("opening the document", () => openFileNow(file, handle)); }
+  finally { adopting--; }
 }
 async function openFileNow(file, handle) {
   if (!file) return;
@@ -2924,7 +3012,23 @@ async function openFileNow(file, handle) {
   if (!(keyOffer.dataset.textFiles && textFolderOpen())) hideKeyOffer();
   // The case folder first, so the document renders under its own key — and so
   // a document built ahead of time is judged against the key it will open under.
-  try { await attachKeyForFile(handle || null); } catch (e) { console.warn(e); }
+  //
+  // …unless another folder was opened while that one was read (an adoption
+  // OVERTAKEN). That folder is the one open now, with its key in hand and its
+  // own document coming, and this file is not in it: opened anyway, it read
+  // under the other case's key, its pseudonyms shown as fakes, and a name
+  // typed into it was saved as the other case's pseudonym. A file the folder
+  // open does hold (the same folder, picked meanwhile) is opened as asked.
+  let attached = true;
+  try { attached = await attachKeyForFile(handle || null); } catch (e) { console.warn(e); }
+  if (attached === false) {
+    let inside = false;
+    try { inside = !!(dirHandle && handle && (await dirHandle.resolve(handle))); } catch { inside = false; }
+    if (!inside) {
+      toast(`${file.name} was not opened: ${folderName || "another folder"} was opened while its case folder was being read. Open it again to read it.`, { ms: 7000 });
+      return;
+    }
+  }
   // …and whether a PDF-Linker run is rewriting that folder now. Not waited
   // for: the warning comes up beside the document, never in its way.
   checkRun({ opening: true }).catch((e) => console.warn(e));
@@ -2994,7 +3098,7 @@ function openText(text, name, handle, built) {
   reelJustOpened = true;
   dirty = false;
   editing = false;
-  typeDismissed = null;
+  escaped = new WeakMap(); // the Esc'd names were the last document's
   clearHistory();
   document.body.classList.remove("editing");
   $("edit-toggle").setAttribute("aria-pressed", "false");
@@ -3005,6 +3109,7 @@ function openText(text, name, handle, built) {
   decidedHere = 0;
   if (!leakJump) showNamesBar(false); // …unless the walk is what opened it
   if (!dirHandle) loadValuesFor(name);
+  spotsFolder = stateFolder();
   spots = TD.normalizeSpots(lsGet(spotStoreKey(), []));
   if (reel[0]) reel[0].spots = spots;
   // A document built ahead of time goes up as it stands, unless its spot keeps
@@ -3074,16 +3179,27 @@ async function openFolder(startIn) {
   }
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
   hideKeyOffer();
+  // Held from the adoption until this folder's document is up: until then the
+  // document on screen is the last folder's, under this folder's key.
+  adopting++;
+  try { await openFolderNow(h); } finally { adopting--; }
+}
+async function openFolderNow(h) {
   // A Text Files folder picked here is said so by the adoption itself
   // (offerFolderAbove), whichever way it came to be the folder open.
   const found = await adoptFolder(h);
+  // Another folder opened while this one was read: that one's opening is the
+  // one to finish, and it opens a document of its own.
+  if (found.overtaken) return;
   if (folderDocs.length) {
     // A file already open from this folder just takes the key; otherwise the
     // quarantined export, the one to read, else the first.
-    if (fileHandle && folderDocs.some((d) => d.handle === fileHandle)) { if (doc) retranslate(); markDocList(); return; }
+    // (Its spot keeps are this folder's from here, as they always were.)
+    if (fileHandle && folderDocs.some((d) => d.handle === fileHandle)) { spotsFolder = stateFolder(); if (doc) retranslate(); markDocList(); return; }
     let mine = null;
     if (fileHandle) { try { mine = (await h.resolve(fileHandle)) ? fileHandle : null; } catch { mine = null; } }
-    if (mine && doc) { retranslate(); markDocList(); return; }
+    if (dirHandle !== h) return; // …and the same, should it come while that is asked
+    if (mine && doc) { spotsFolder = stateFolder(); retranslate(); markDocList(); return; }
     await openFolderDoc(folderDocs.find((d) => d.quarantined) || folderDocs.find((d) => !d.combined) || folderDocs[0]);
   } else {
     doc = null; pagesEl.hidden = true; emptyEl.hidden = false;
@@ -3137,6 +3253,11 @@ async function forgetFolder() {
   folderDocs = [];
   folderPdfs = [];
   flagsFor = null;
+  // The document stays, on its own, under the key that stays: its spots are
+  // kept as a lone document's from here, as they were, and it saves as one
+  // (saveDocument) — whether it stays because the reel was one document or
+  // because the member below could not be opened.
+  spotsFolder = stateFolder();
   hideRunBar(); // the run is that folder's, and the reader no longer holds it
   // The reel is the folder read as one document: with no folder there is
   // nothing to read on to, so what is open becomes the whole of it. The pages
@@ -3169,7 +3290,8 @@ $("forget-folder").addEventListener("click", () => { forgetFolder(); });
 async function readWholeFolder() {
   if (!dirHandle) return;
   setAskBeforeFolder(false);
-  await adoptFolder(dirHandle, { quiet: true, light: false });
+  const found = await adoptFolder(dirHandle, { quiet: true, light: false });
+  if (found.overtaken) return; // another folder opened meanwhile says what it has to
   const gone = leaksNoteOnce() + listNoteOnce();
   toast(`${folderName} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}. The reader reads the rest of the folder from here.` + gone, { ms: gone ? 9000 : 6000 });
 }
@@ -3538,7 +3660,13 @@ function showPages(nodes, built) {
  * never crosses the rule. serializeNodes reads a DIV as a line break, so
  * the file comes back byte for byte.
  */
-function buildBody(body, text, page, theirSpots) {
+function buildBody(body, text, page, theirSpots, carry = null) {
+  // The names Esc left as typed lose their nodes here: their places in the
+  // disk text are noted first — moved with the text where the rebuild writes
+  // names before them (`carry`, the save's forward pass) — and they are found
+  // again there once the page is built (escapesIn).
+  const esc = escaped.has(body);
+  if (esc) escNote(body, { carry, release: true });
   body.innerHTML = "";
   // The text the page was built from: what an edit is measured against when
   // a real name typed into it is marked (convertTypedReals). It is what the
@@ -3609,6 +3737,7 @@ function buildBody(body, text, page, theirSpots) {
     lineStart = r.s.endsWith("\n") || (lineStart && r.s === "");
   });
   dressBody(body);
+  if (esc) escapesIn(body, { exact: true });
 }
 // PDF-Linker ends an export with a trailer of its own: a
 // "====== Authorities cited (public verification links) ======" rule and a
@@ -4207,6 +4336,9 @@ pagesEl.addEventListener("keydown", (e) => {
   if (!editing || e.ctrlKey || e.metaKey || e.altKey) return;
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body) return;
+  // A line pushed down, joined up or cut moves its text into other nodes, and
+  // a name Esc left as typed is found again by where it was (escapesIn).
+  if (e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") escNote(body);
   if (e.key === "Enter") { e.preventDefault(); hideTypeTip(); enterAtCaret(body); }
   else if (e.key === "Backspace") { if (backspaceAtCaret(body)) e.preventDefault(); }
   else if (e.key === "Delete") { if (deleteAtCaret(body)) e.preventDefault(); }
@@ -4227,6 +4359,7 @@ pagesEl.addEventListener("keydown", (e) => {
 pagesEl.addEventListener("paste", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body || !editing) return;
+  escNote(body); // the lines below the caret move down into other nodes (insertLinesAtCaret)
   // A passage this reader copied or cut comes back with its real names (ownCopy, under "copy, cut and drag").
   const text = ownCopy(e.clipboardData ? e.clipboardData.getData("text/plain") : "", "real");
   e.preventDefault();
@@ -4277,9 +4410,27 @@ pagesEl.addEventListener("paste", (e) => {
 // honours the Esc (saveDocument) and the prompt says what Esc does to the
 // file. A name the review has settled is still written as its pseudonym:
 // that answer is about every place the name stands.
+//
+// EVERY ESC IS KEPT, AND IT GOES WHERE THE TEXT TAKES ITS NAME. It was one
+// place, the last Esc, held as an offset into the page's text. A second Esc
+// anywhere replaced the first, and typing anywhere earlier on the page moved
+// the name off the offset; either way the converter's next run marked the
+// first name and the save wrote it as its pseudonym. Measured in Chromium:
+// two short cites in a row, each Esc'd, and the file read "(Pratt, 30
+// Cal.App.5th at p. 5.)"; one Esc'd and "Also, " typed at the head of the page,
+// the same, under a plain "Saved". Now each Esc is kept for its page
+// (`escaped`) as a live Range over the name as typed — the browser carries a
+// Range with its text when anything is typed before it, a mark is cut out of
+// the node beside it or the nodes are merged — and with its place in the
+// page's DISK text, noted before anything that takes the nodes away (a key
+// pressed that moves lines, a paste, a rebuild, a print, a screenshot), so it
+// is found again there, or nearest there, once they are gone (escapesIn). A
+// name is the Esc'd one only where it is that name exactly, at that place: a
+// longer name ending there ("Bob Jones" over an Esc'd "Jones") is not, and one
+// whose letters were typed over is no longer there to keep.
 const typeTip = $("type-tip");
 let typeHit = null;      // { body, node, offset, hit } while the prompt shows
-let typeDismissed = null; // { body, end, real } the user Escaped — `end` a text offset in the page, so it survives a rebuild
+let escaped = new WeakMap(); // page body → [{ range, a, b, text, real }]: the names Esc left as typed (escapesIn)
 function textBeforeCaret(pt) {
   if (pt.container.nodeType !== 3) return "";
   let t = pt.container.data.slice(0, pt.offset);
@@ -4289,7 +4440,7 @@ function textBeforeCaret(pt) {
 }
 function offerAtCaret(body) {
   hideTypeTip();
-  if (!ahead || !editing) return;
+  if (!ahead || !editing || keyAway()) return;
   const pt = caretIn(body);
   if (!pt || pt.container.nodeType !== 3 || (pt.container.parentElement && pt.container.parentElement.closest(".pn, .gutter, [data-here]"))) return;
   const tb = textBeforeCaret(pt);
@@ -4298,7 +4449,7 @@ function offerAtCaret(body) {
   // The name just typed completes a KEPT value ("Rasho" closing a kept "Helen Rasho"): left as it stands.
   const krx = keptMatcher();
   if (krx) { krx.lastIndex = 0; let m; while ((m = krx.exec(tb))) { if (m.index + m[0].length === tb.length) return; if (m.index === krx.lastIndex) krx.lastIndex++; } }
-  if (typeDismissed && typeDismissed.body === body && typeDismissed.end === offsetOfPoint(body, pt.container, pt.offset) && typeDismissed.real === hit.real) return;
+  if (escapesIn(body).some((d) => d.range.endContainer === pt.container && d.range.endOffset === pt.offset && d.real === hit.real)) return;
   typeHit = { body, node: pt.container, offset: pt.offset, hit };
   typeTip.innerHTML = "";
   const b = document.createElement("b");
@@ -4341,8 +4492,121 @@ pagesEl.addEventListener("keydown", (e) => {
   if (!typeHit || e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.key === " " && PK.swapsOnSpace(typeHit.hit)) { if (acceptTyped(" ")) e.preventDefault(); }
   else if (e.key === "ArrowRight") { if (acceptTyped("")) e.preventDefault(); }
-  else if (e.key === "Escape") { typeDismissed = { body: typeHit.body, end: offsetOfPoint(typeHit.body, typeHit.node, typeHit.offset), real: typeHit.hit.real }; hideTypeTip(); e.preventDefault(); }
+  else if (e.key === "Escape") { escapeTyped(typeHit); hideTypeTip(); e.preventDefault(); }
 });
+
+/** Esc at the prompt: the name it names left as typed on this page, from now on — beside every other Esc'd there. */
+function escapeTyped(t) {
+  const { body, node, offset, hit } = t;
+  if (!node.isConnected) return;
+  const r = document.createRange();
+  try { r.setStart(node, offset - hit.matched.length); r.setEnd(node, offset); } catch { return; }
+  const was = (escaped.get(body) || []).filter((d) => !(d.range && d.range.startContainer === node && d.range.startOffset === r.startOffset && d.range.endOffset === r.endOffset));
+  escaped.set(body, was.concat([{ range: r, a: -1, b: -1, text: hit.matched, real: hit.real }]));
+  escNote(body); // its place in the disk text, from the start, should its nodes go before anything else notes it
+}
+/**
+ * The state of an Esc'd name's range: "live" over the name; "gone" where the
+ * name was typed over in place (its letters edited, or deleted, in the node it
+ * stood in) and is not there to keep; "lost" where the node it stood in has
+ * gone, been moved or been written over by a rebuild — the name may well
+ * stand elsewhere on the page, and is looked for by its place. A range grown
+ * by typing against its edge ("See " before it, a "," after it) is cut back
+ * to the name.
+ */
+function escState(d, body) {
+  const r = d.range;
+  const n = r.startContainer;
+  if (n !== r.endContainer || n.nodeType !== 3 || !body.contains(n) || (n.parentElement && n.parentElement.closest(".pn, .gutter, [data-here]"))) return "lost";
+  const s = n.data.slice(r.startOffset, r.endOffset);
+  if (s === d.text) return "live";
+  const word = /[\p{L}\p{N}]/u;
+  if (s.length > d.text.length && s.endsWith(d.text) && !word.test(s[s.length - d.text.length - 1])) { r.setStart(n, r.endOffset - d.text.length); return "live"; }
+  if (s.length > d.text.length && s.startsWith(d.text) && !word.test(s[d.text.length])) { r.setEnd(n, r.startOffset + d.text.length); return "live"; }
+  return "gone";
+}
+/**
+ * The Esc'd names standing on `body` now, each with a live range over it —
+ * one whose nodes went found again by its place in the disk text (`exact`
+ * there only: the place a rebuild carried it to; else the nearest occurrence,
+ * TD.escapedPlaces) or, where the page no longer carries it, left to wait
+ * there. A name typed over in place is dropped. While a print or a
+ * screenshot has the pseudonyms on the page nothing is dropped or moved: the
+ * names are back the moment it is over.
+ */
+function escapesIn(body, { exact = false } = {}) {
+  const list = escaped.get(body);
+  if (!list || !list.length) return [];
+  const frozen = !!(printPut || shotPut);
+  const keep = [], live = [], lost = [];
+  for (const d of list) {
+    const st = d.range ? escState(d, body) : "lost";
+    if (st === "live") { keep.push(d); live.push(d); }
+    else if (st === "gone" && !frozen) continue;
+    else { if (!frozen) d.range = null; keep.push(d); if (d.a >= 0 && !frozen) lost.push(d); }
+  }
+  if (lost.length) {
+    const mapped = TD.serializeMapped(body);
+    const taken = new Set();
+    for (const d of live) { const o = mapped.at.get(d.range.startContainer); if (o != null) taken.add(o + d.range.startOffset); }
+    for (const d of lost) {
+      const places = exact ? (mapped.text.slice(d.a, d.b) === d.text ? [d.a] : []) : TD.escapedPlaces(mapped.text, d.text, d.a, taken);
+      for (const at of places) {
+        const r = escRangeAt(mapped, at, at + d.text.length);
+        if (!r) continue;
+        d.range = r;
+        d.a = at;
+        d.b = at + d.text.length;
+        taken.add(at);
+        live.push(d);
+        break;
+      }
+    }
+  }
+  if (!frozen) escaped.set(body, keep);
+  return live;
+}
+/** A Range over [start, end) of the page's disk text where one plain text node holds all of it, or null. */
+function escRangeAt(mapped, start, end) {
+  for (const [n, o] of mapped.at) {
+    if (o > start) break;
+    if (o + n.data.length < end) continue;
+    if (n.parentElement && n.parentElement.closest(".pn, .gutter, [data-here]")) continue;
+    const r = document.createRange();
+    r.setStart(n, start - o);
+    r.setEnd(n, end - o);
+    return r;
+  }
+  return null;
+}
+/** …and found again exactly where they were noted, once nodes written over and put back (a print, a screenshot) have taken their ranges. */
+function escFindAgain(body) {
+  const list = escaped.get(body);
+  if (!list || !list.length) return;
+  for (const d of list) if (d.a >= 0) d.range = null;
+  escapesIn(body, { exact: true });
+}
+/**
+ * Each Esc'd name's place in the page's disk text noted, against the moment
+ * its nodes go; `carry` (a rebuild that writes names before it) moves the
+ * places with the text, and the ranges are given up, to be found again there.
+ */
+function escNote(body, { carry = null, release = false } = {}) {
+  const list = escaped.get(body);
+  if (!list || !list.length) return;
+  const live = escapesIn(body);
+  if (live.length) {
+    const { at } = TD.serializeMapped(body);
+    for (const d of live) {
+      const o = at.get(d.range.startContainer);
+      if (o != null) { d.a = o + d.range.startOffset; d.b = o + d.range.endOffset; }
+    }
+  }
+  for (const d of escaped.get(body) || []) {
+    if (carry && d.a >= 0) { d.a = carry(d.a); d.b = d.a + d.text.length; }
+    if (release) d.range = null;
+  }
+}
 document.addEventListener("selectionchange", () => {
   if (!typeHit) return;
   const pt = caretIn(typeHit.body);
@@ -4672,6 +4936,11 @@ const caretHeld = new Set(); // page bodies with a typed name the converter pass
  * (a replace, a save), and `tally` ({ made, back }) is given what it did.
  */
 function convertTypedReals(body, { quiet = false, tally = null } = {}) {
+  // Not with a key that may not be this document's (keyAway): the name stays
+  // as typed, orange where the key binds it, until the document is read
+  // under its own key again — the save refuses meanwhile. (Asked first, so a
+  // name held for the caret is still held when this runs again.)
+  if (keyAway()) return 0;
   caretHeld.delete(body);
   if (!fwd || !fwd.rx || !body.isConnected) return 0;
   body.normalize();
@@ -4703,9 +4972,12 @@ function convertTypedReals(body, { quiet = false, tally = null } = {}) {
   // a hit is about to be marked, and before anything is.
   let pieces = null;
   let made = 0;
+  // The names Esc left as typed, as ranges over the nodes the hits are in
+  // (escapesIn, after the normalize above, which carries them).
+  const esc = hits.length ? escapesIn(body) : [];
   for (const h of hits) {
     if (h.node === caretNode && caretOff >= h.start && caretOff <= h.end) { caretHeld.add(body); continue; }
-    if (typeDismissed && typeDismissed.body === body && offsetOfPoint(body, h.node, h.end) === typeDismissed.end) continue;
+    if (esc.some((d) => d.range.startContainer === h.node && d.range.startOffset === h.start && d.range.endOffset === h.end)) continue;
     if (!pieces) {
       const d = TD.serializeHeld(body);
       pieces = standingSpans(d.text, d.held, d.pns).filter((s) => s.ranges.length > 1).flatMap((s) => s.ranges);
@@ -4828,6 +5100,30 @@ function placeCaretOnDisk(body, pos) {
 /** Writes the document (and what the case folder is owed); false where it did not. */
 async function saveDocument() {
   if (!doc) return false;
+  // NOT WHILE A FOLDER IS BEING READ (`adopting`). The key in hand is the new
+  // folder's from the moment its key file is read, and the document on screen
+  // is the last folder's until the new one opens a document of its own: a name
+  // typed into it and saved then went into its file as the OTHER case's
+  // pseudonym — a fake no row of its own key reverses.
+  if (adopting) {
+    toast(`Not saved: ${folderName || "the case folder"} is still being read — save again in a moment.`, { error: true });
+    return false;
+  }
+  // …NOR ONCE IT IS READ, where the document on screen stayed the last
+  // folder's. Opening a folder asks "Discard unsaved edits?" twice for an
+  // edited document — once as the folder is picked, once as its own document
+  // goes up — and the second declined left the last folder's document on
+  // screen, with the new folder open and ITS key in hand: measured in
+  // Chromium, case A's Brief kept so, " Okafor testified." typed into it and
+  // Ctrl+S wrote "Thackeray testified." into A's file, case B's pseudonym for
+  // Okafor, which no row of A's key reverses (and A's own "Pemberly" stood on
+  // the screen as plain text). `spotsFolder` is the folder the document on
+  // screen was opened in; a lone document's (no folder) is "" and reads under
+  // the key in hand as it always has.
+  if (spotsFolder && spotsFolder !== stateFolder()) {
+    toast(`Not saved: ${fileName} was opened from another case folder than ${folderName || "the one open now"}, whose key is the one in hand — a name typed into it would go into its file as that case's pseudonym. Open ${fileName} again from its own case folder, then save.`, { error: true, ms: 9000 });
+    return false;
+  }
   // THE TYPING IS FINISHED FIRST. The converter waits a quarter second after
   // the last key, and a save inside that wait read the page as the typing had
   // left it. Two things went into the export that way. A party marked at the
@@ -4870,23 +5166,23 @@ async function saveDocument() {
     // rebuilds is built afresh, and a name typed and saved at once is the
     // usual reason now, so the caret is put back where the typing left it.
     const caret = caretPoint(body);
-    // …and the place Esc was pressed at the prompt, if it was on this page,
-    // read the same way: the name ending there is the operator's to leave
-    // (the prompt's comment says why), and it waits for the review like any
-    // name nobody has decided on. The converter asks the same of its hits
-    // (typeDismissed); this is that question in the disk text the save reads.
-    const esc = typeDismissed && typeDismissed.body === body ? pointAtOffset(body, typeDismissed.end) : null;
+    // …and the names Esc left as typed on this page, every one, read the
+    // same way: each is the operator's to leave (the prompt's comment says
+    // why), and waits for the review like any name nobody has decided on. The
+    // converter asks the same of its hits (escapesIn); this is that question
+    // in the disk text the save reads — each name exactly where it stands.
+    const esc = escapesIn(body);
     const points = [];
     const caretK = caret ? points.push(caret) - 1 : -1;
-    const escK = esc ? points.push({ node: esc.node, offset: esc.offset, end: true }) - 1 : -1;
+    const escK = esc.map((d) => [points.push({ node: d.range.startContainer, offset: d.range.startOffset }) - 1, points.push({ node: d.range.endContainer, offset: d.range.endOffset, end: true }) - 1]);
     let { text, held, pns, at } = TD.serializeHeld(body, { points: points.length ? points : null });
-    let escAt = escK >= 0 ? at[escK] : -1;
+    let escAt = escK.map(([s, e]) => [at[s], at[e]]).filter(([s, e]) => s >= 0 && e > s);
     let standing = standingSpans(text, held, pns);
     // What the edits wrote is measured against the text the page had before
     // this save, which a rebuild below replaces. Only a document typed in has
     // anything typed: the rest are passed over without the asking.
     const base = body.__built;
-    const typedIn = (st, t) => new Set(edited(i) ? TD.typedSpans(st, t, base).filter((h) => escAt < 0 || h.end !== escAt) : []);
+    const typedIn = (st, t) => new Set(edited(i) ? TD.withoutEscaped(TD.typedSpans(st, t, base), escAt) : []);
     let typed = typedIn(standing, text);
     // A name nobody has decided on waits for the review — unless it was TYPED,
     // which is the operator's own writing and goes to the file as its
@@ -4935,7 +5231,7 @@ async function saveDocument() {
         if (typedRanges.length) {
           for (const sw of fw.places) if (typedRanges.some(([a, b]) => sw.start < b && sw.end > a)) flagAt.add(placeAfterSwaps(sw.start, fw.places));
         }
-        buildBody(body, fw.text, i);
+        buildBody(body, fw.text, i, undefined, (o) => placeAfterSwaps(o, fw.places));
         // …and the page is measured from the text it had before this save
         // until the file is written (the write below sets __built to what it
         // wrote). buildBody set it to the text the pass wrote, so a save
@@ -4946,7 +5242,7 @@ async function saveDocument() {
         if (base != null) body.__built = base;
         if (flagAt.size) for (const [el, o] of TD.serializeMapped(body).pn) if (flagAt.has(o)) el.dataset.typed = "1";
         if (caretK >= 0 && at[caretK] >= 0) placeCaretOnDisk(body, placeAfterSwaps(at[caretK], fw.places));
-        if (escAt >= 0) escAt = placeAfterSwaps(escAt, fw.places); // the name Esc left is spared, so it moves only with the names before it
+        escAt = escAt.map(([s, e]) => { const a = placeAfterSwaps(s, fw.places); return [a, a + (e - s)]; }); // the names Esc left are spared, so each moves only with the names before it
         ({ text, held, pns } = TD.serializeHeld(body)); // the rebuilt page, its spots and fakes found again
         standing = standingSpans(text, held, pns); // …and the names left, where they now stand
         typed = typedIn(standing, text);
@@ -5077,6 +5373,8 @@ async function saveDocument() {
       ? ` · ${TD.VALUES_FILE} written too (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()})`
       // …and never into the Text Files folder, which is uploaded and which
       // PDF-Linker never reads it from: said, and the way up offered again.
+      : listAway()
+        ? ` · the flagged list is still unwritten — ${folderName}'s own list is still being read`
       : textFolderOpen()
         ? ` · the flagged list is still unwritten — ${folderName} is the folder the exports live in, not the case folder; choose the folder above it and the list goes with it`
         : " · the flagged list is still unwritten — no case folder is open, so save it from the Flagged panel";
@@ -8533,8 +8831,41 @@ function currentSelection() {
       for (const el of rest.querySelectorAll(".pn, .gutter")) el.remove();
       return /[\p{L}\p{N}]/u.test(rest.textContent);
     })();
-  return { text: realTextOf(range), touches, allFaked: touches && !clear, range, pn, here };
+  return { text: realTextOf(range), touches, allFaked: touches && !clear, range, pn, here, body };
 }
+/**
+ * Whether the selection falls in a CITED DECISION'S NAME — overlaps one, as
+ * the page reads it (TD.citedNameSpans over its disk text: the run's fakes
+ * standing, and blanked as the marks and the save read it).
+ *
+ * A flag is a line of New Real Values.txt, which PDF-Linker reads as an
+ * authoritative --term: a party of THIS case. A cited decision's party handed
+ * over that way counts toward the words PDF-Linker trusts as the case's own
+ * (_trusted_party_tokens), and where the decision's other side is this case's
+ * party already — "Kremerman v. Ford Motor Co." in a case against Ford — both
+ * sides are trusted, the cite is taken for this case's caption, and the next
+ * run renames the published authority ("Sterling v. Crestline Emberly Co.",
+ * measured against pdf_linker.py). So is a cite whose two sides are both
+ * flagged. The marks, the save, a copy and a print all leave a cited name
+ * alone; the flag paths did not ask, and with 🚩 on a double-click flagged one
+ * with no question at all.
+ */
+function citedIn(s) {
+  if (!s || !s.body || !s.range) return false;
+  const pts = [{ node: s.range.startContainer, offset: s.range.startOffset }, { node: s.range.endContainer, offset: s.range.endOffset, end: true }];
+  let d;
+  try { d = TD.serializeHeld(s.body, { points: pts }); } catch { return false; }
+  const [a, b] = d.at;
+  if (a < 0 || b < 0 || b <= a) return false;
+  for (const reading of [d.text, diskReading(d.text, d.held, d.pns).flat]) {
+    for (const [x, y] of TD.citedNameSpans(reading)) {
+      if (x >= b) break;
+      if (y > a) return true;
+    }
+  }
+  return false;
+}
+const CITED_FLAG = "stands in a cited decision's name. A flag hands it to PDF-Linker as this case's own party, and where the decision's other side is this case's party too, its next run renames the published authority.";
 
 // ── un-flagging a wrongly faked value ───────────────────────────────────────────
 //
@@ -9123,6 +9454,10 @@ function keepWasWrittenOut(k) {
 function refreshKeepLocality() {
   const watched = keeps.filter((k) => k.state);
   if (!watched.length) return;
+  // The facts below are the folder open's — its sweep, its worksheet, what was
+  // last written into it — and the keeps in hand may still be the last
+  // folder's (listAway): they are read again when that folder's list is.
+  if (listAway()) return;
   const text = doc ? TD.serializeExport(doc) : "";
   const read = caseIsRead();
   let moved = keeps;
@@ -9142,6 +9477,9 @@ function refreshKeepLocality() {
 }
 
 function setKeep(real, control, { leak = false } = {}) {
+  // Taken in a document of another case than the list in hand: refused (a
+  // keep withdrawn from the Flagged panel is the list's own, and goes on).
+  if (control && refusedListAway("kept")) return;
   // A keep on a value standing in the clear anywhere in the case, for this
   // case only, that PDF-Linker has not itself raised, is a decision the files
   // already carry out. Anything else is work the case folder has to be handed
@@ -9274,6 +9612,12 @@ function showFlagPop() {
       ? `\u201c${phrase}\u201d is already flagged as one phrase`
       : `\u201c${phrase}\u201d is one name: fake the words whole, together (PDF-Linker's phrase)`;
   }
+  // A name in a cited decision's name: the Flag stands, under the question
+  // (citedIn says why it is one), and the switch's release waits for it.
+  if (!flagPopBtn.disabled && citedIn(s)) {
+    const was = flagPopNote.textContent;
+    flagPopNote.textContent = `\u201c${TD.normalizeValue(s.text)}\u201d ${CITED_FLAG} Flag it only if it is this case's own party.` + (was ? " " + was : "");
+  }
   const rects = s.range.getClientRects();
   const r = rects.length ? rects[rects.length - 1] : s.range.getBoundingClientRect();
   flagPop.hidden = false;
@@ -9287,7 +9631,7 @@ $("flag-pop-master").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-row").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("click", phraseSelection);
-flagPopBtn.addEventListener("click", flagSelection);
+flagPopBtn.addEventListener("click", () => flagSelection({ asked: true }));
 
 // ── flagging by selecting ───────────────────────────────────────────────────────
 //
@@ -9316,6 +9660,8 @@ function setFlagMode(on) {
 /** Whether the selection is flagged as it stands, as the pop-up's Flag would flag it. */
 function flagTakes(s) {
   if (TD.flagProblem(s.text, s.allFaked)) return false;
+  // A cited decision's party: asked, never flagged on a release (citedIn).
+  if (citedIn(s)) return false;
   const hereIn = s.pn ? null : s.here;
   if (hereIn) return false;
   const leak = s.pn ? null : leakIn(s.range);
@@ -9362,10 +9708,20 @@ function sameWords(a, b) {
 function wordsOf(x) {
   return (String(x).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).join(" ");
 }
-function flagSelection() {
+/**
+ * `asked`: the pop-up's own 🚩 Flag, under the question it put (showFlagPop) —
+ * the one way a name in a cited decision's name is flagged. Ctrl+Shift+F and
+ * the switch's release put no question, and refuse it (citedIn).
+ */
+function flagSelection({ asked = false } = {}) {
   const s = currentSelection();
   const problem = s ? TD.flagProblem(s.text, s.allFaked) : "Select the unfaked name first.";
   if (problem) { toast(problem, { error: true }); return; }
+  if (!asked && citedIn(s)) {
+    toast(`Not flagged: "${TD.normalizeValue(s.text)}" ${CITED_FLAG} Where it really is this case's own, select it and use 🚩 Flag in the box beside the selection, which asks.`, { error: true, ms: 9000 });
+    return;
+  }
+  if (refusedListAway("flagged")) return; // a document of another case than the list in hand (docListAway)
   // An unfaked name from the key, selected alone, is the names bar's to
   // decide (fake it, or keep it): a flag would hand PDF-Linker a name it
   // already has. With more of the name around it, it is flagged whole.
@@ -9455,6 +9811,7 @@ function phraseSelection() {
   const problem = TD.phraseProblem(v);
   if (problem) { toast(problem, { error: true }); return; }
   flagPop.hidden = true;
+  if (refusedListAway("flagged")) return; // a document of another case than the list in hand (docListAway)
   if (TD.isPhrase(phrases, v) && TD.isPhrase(flagged, v)) { toast(`"${v}" is already flagged as one phrase`); return; }
   // A word of it already faked in the file: the export carries that word's
   // fake, so the text-only pass has no real phrase left to find there.
@@ -9512,8 +9869,17 @@ function valuesDirty() {
 /** …and the same list, as it stands, marked as written. */
 function markValuesSaved(text) { lsSet(valuesSavedKey(), text); renderFlags(); }
 // Spot keeps belong to ONE document, not to the case: they name a place in it.
-// Remembered per document, like its swapped pages.
-function spotStoreKey() { return spotKeyFor(fileName); }
+// Remembered per document, like its swapped pages — under the folder the
+// document on screen was opened in (`spotsFolder`, set as it is opened, or as
+// the reader takes it into a folder or lets the folder go), not the folder
+// open now. Between an adoption naming its folder and that folder's document
+// going up, the document on screen is the LAST folder's: a spot keep taken in
+// it then, or an edit that read its spots back, was written under the new
+// folder's id and the old document's name. Measured in Chromium: "Keep just
+// this one" on Okafor in case A's Brief while case B's key was read landed on
+// B's Brief.txt, and B's own Okafor, its plaintiff standing in the clear, was
+// unmarked from then on and left as it stood by every save.
+function spotStoreKey() { return SPOTS_PREFIX + spotsFolder + "/" + (fileName || ""); }
 function spotKeyFor(name) { return SPOTS_PREFIX + stateFolder() + "/" + (name || ""); }
 // A spot names a page of its own DOCUMENT. The page numbers in hand are the
 // reel's — one list holding several files — so they are written back rebased
@@ -9533,7 +9899,54 @@ function readStoredValues(k) {
   return { values: (v && v.values) || [], keeps: (v && v.keeps) || [], phrases: (v && v.phrases) || [], noOcr: (v && v.noOcr) || [], ocrAgain: (v && v.ocrAgain) || [], textFixed: (v && v.textFixed) || [] };
 }
 function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; phrases = st.phrases; noOcr = st.noOcr; ocrAgain = st.ocrAgain; textFixed = st.textFixed; compileKey(); renderFlags(); }
-function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps, phrases, noOcr, ocrAgain, textFixed }); }
+/**
+ * The list in hand written back WHERE IT WAS READ FROM (`flagsFor`), not
+ * simply under the folder open. Adoption names its folder first and puts that
+ * folder's list in hand only once the folder has been read, so in between the
+ * list in hand is the last folder's while `valuesStoreKey()` is already the new
+ * one's — and anything that wrote the list then wrote one case's flags and
+ * keeps over the other's stored list, which the adoption then read in as its
+ * own. Measured in Chromium, three ways: a keep taken in case A's document
+ * still on screen while case B's key was read; A's folder sweep ending while B
+ * was still being listed, settling a pending keep (refreshKeepLocality); and
+ * A's worksheet parse finishing after B was opened. Each time B's stored list
+ * became A's, B's plaintiff lost his orange mark, and B's next save wrote A's
+ * `no: Okafor` and A's flags into B's New Real Values.txt. Written here, a
+ * keep taken in A's document is A's. With no list read yet (null: nothing
+ * opened, or a folder just let go) it is the store of what is open, as before.
+ */
+function persistValues() { lsSet(flagsFor || valuesStoreKey(), { values: flagged, keeps, phrases, noOcr, ocrAgain, textFixed }); }
+/**
+ * Whether the list in hand is ANOTHER folder's than the one open: an adoption
+ * between naming its folder and putting that folder's list in hand (or one
+ * that failed in between). Nothing then reads the list against the folder
+ * open (refreshKeepLocality) or writes it into that folder (saveValuesFile).
+ */
+function listAway() { return !!flagsFor && flagsFor !== valuesStoreKey(); }
+/**
+ * …and the other half of the same window: whether the DOCUMENT ON SCREEN is
+ * not the one whose list is in hand. Once an adoption has put the new folder's
+ * list in hand, the document on screen is still the last folder's until the
+ * new folder's own goes up — its worksheet read first, on a synced drive for
+ * seconds — and a keep or a flag taken in it then went into the NEW folder's
+ * list. Measured in Chromium: case A's Brief on screen while case B's
+ * LEAKS.xlsx was read, "Keep in this case" on the Okafor standing there, and
+ * B's list held `no: Okafor`; B's own Okafor, its plaintiff, lost his orange
+ * mark and B's next save wrote `no: Okafor` into its New Real Values.txt. The
+ * same state stays where the second "Discard unsaved edits?" of an opening was
+ * declined. The document's own list is the one its folder keeps
+ * (`spotsFolder`, set as it is opened), or a lone document's by its name; no
+ * list read yet (`flagsFor` null, as after the folder is let go) is no
+ * mismatch. A spot keep is the document's own (spotStoreKey) and is not asked.
+ */
+function docListAway() { return !!flagsFor && flagsFor !== VALUES_PREFIX + (spotsFolder || fileName || "loose"); }
+/** Refused, and said, where a decision taken in the document on screen would go into another case's list (docListAway). */
+function refusedListAway(what) {
+  if (!docListAway()) return false;
+  const there = folderName || "the folder open";
+  toast(`Not ${what}: ${fileName} is not a document of ${there}, whose list is the one in hand now — ${what} here, it would go into that case's list. Open ${fileName} again from its own case folder (or wait for ${there} to open its own document), then decide.`, { error: true, ms: 9000 });
+  return true;
+}
 
 /**
  * The pages marked ⊘ Did not OCR, as the list PDF-Linker is owed follows them.
@@ -9833,6 +10246,14 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
     if (!quiet) toast("Nothing flagged yet — select an unfaked name and press Flag, or right-click a pseudonym to keep it.", { error: true });
     return false;
   }
+  // Never the last folder's list into this one: while an adoption has named
+  // its folder and not yet read that folder's list, the list in hand is the
+  // folder before's (listAway), and written now it went into this folder's
+  // New Real Values.txt, where PDF-Linker obeys it.
+  if (listAway()) {
+    if (!quiet) toast(`${TD.VALUES_FILE} was not written: ${folderName}'s own list is still being read — try again in a moment.`, { error: true });
+    return false;
+  }
   const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed);
   // Never into the Text Files folder (textFolderOpen), and never handed over
   // from it: nothing is written, nothing is marked saved, and no picker is put
@@ -9972,12 +10393,20 @@ function pendingRowIn(s) {
   return leakRows().findIndex((r) => LK.isPending(r) && wordsOf(r.value) === want);
 }
 
-/** Attach a worksheet: its bytes (kept for the rewrite), its handle (for the save in place). */
-async function attachLeaks(bytes, name, handle, { quiet = false, folder = "" } = {}) {
-  return duringAsync("reading LEAKS.xlsx", () => attachLeaksNow(bytes, name, handle, { quiet, folder }));
+/**
+ * Attach a worksheet: its bytes (kept for the rewrite), its handle (for the
+ * save in place). `still`, from an adoption: asked once the workbook is
+ * parsed whether its folder is still the one open — where it is not, nothing
+ * is attached and null comes back, since everything below reads and writes
+ * the folder open NOW (the answers remembered under `stateFolder()`, the keeps
+ * mirrored into the list in hand).
+ */
+async function attachLeaks(bytes, name, handle, { quiet = false, folder = "", still = null } = {}) {
+  return duringAsync("reading LEAKS.xlsx", () => attachLeaksNow(bytes, name, handle, { quiet, folder, still }));
 }
-async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" } = {}) {
+async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "", still = null } = {}) {
   const wb = await parseXlsx(bytes);
+  if (still && !still()) return null;
   if (!LK.sheetsLookLikeLeaks(wb.sheets)) throw new Error(`${name} has no "Value" / "Fix?" header — not a LEAKS worksheet.`);
   const parsed = LK.parseLeaks(wb.sheets, name);
   if (!parsed.part) throw new Error(`${name}: the LEAKS sheet could not be placed in the workbook.`);

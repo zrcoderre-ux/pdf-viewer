@@ -10,7 +10,7 @@ import {
   markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
-  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
+  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlaces, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
@@ -271,6 +271,20 @@ console.log("cited case names");
     [spans("The declaration of Helen Rasho, served on Vazqez."), citedNameSpans(""), citedNameSpans(null)], [[], [], []]);
   check("a value that STRADDLES a case name's edge is not inside it",
     at("...said Rasho v. Quillmark (1977) 70 Cal.App.3d 216", "said Rasho"), false);
+  // WHAT A FLAG ASKS FIRST (citedIn in the reader). A flag is an authoritative
+  // --term to PDF-Linker, a party of THIS case; a cited decision's party
+  // handed over so, where the other side is this case's party already ("Ford
+  // Motor Company" in a lemon-law case), makes the run take the cite for the
+  // case's own caption and rename the published decision. The reader asks
+  // before flagging a selection inside one, and reads it from these spans.
+  {
+    const P = "  1  Plaintiff Ingrid Strangeways bought a Crestline truck.\n"
+      + "  2  Plaintiff relies on Kremerman v. Ford Motor Co. (2019) 30 Cal.App.5th 1, 5.\n";
+    check("a flag's question: either side of a cited decision is inside its name",
+      [at(P, "Kremerman"), at(P, "Ford"), at(P, "Motor Co.")], [true, true, true]);
+    check("…and the case's own party on the line above is not",
+      [at(P, "Strangeways"), at(P, "Crestline")], [false, false]);
+  }
   // A DECLARATION'S CAPITALS, which is what a party's words being unbounded
   // cost. A run of capitalised words that is not a case name — the jurat, a
   // caption block, a signature block, a list of exhibits — made the scanner
@@ -414,6 +428,39 @@ console.log("what an edit wrote");
     typedAt(" 1  Counsel for Helen Rasho appeared.\n 2", " 1  Counsel for Helen\n 2  Rasho appeared."), []);
   check("a citation typed whole keeps its parties, read whole as well",
     typedAt(" 1  Nothing.", " 1  Nothing. See Rasho v. Quillmark (2017) 13 Cal.App.5th 1152."), []);
+
+  // ESC IS KEPT FOR EVERY NAME IT WAS PRESSED ON. A short cite with no
+  // "supra" ("(Rasho, 30 Cal.App.5th at p. 5.)") is not read as one, so the
+  // save writes a name typed there unless Esc left it: one Esc used to be
+  // remembered, the last, and the first of two such cites went to the file as
+  // "(Strangeways, 30 …)", a renamed authority. Each Esc'd name is taken out
+  // of the typed set where it stands exactly; a longer name ending at the same
+  // place is not the Esc'd one.
+  const two = " 1  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 2  End. (Rasho, 31 Cal.App.5th at p. 9.)";
+  const twoBuilt = " 1  Nothing.\n 2  End.";
+  const twoTyped = typedSpans(findRealSpans(sreals, two, { layout: two }), two, twoBuilt);
+  const at1 = two.indexOf("Rasho"), at2 = two.lastIndexOf("Rasho");
+  check("both short cites' names are typed", twoTyped.map((h) => two.slice(h.start, h.end)), ["Rasho", "Rasho"]);
+  check("withoutEscaped: each Esc'd name is left out where it stands — both of two",
+    withoutEscaped(twoTyped, [[at1, at1 + 5], [at2, at2 + 5]]), []);
+  check("…and only that one where one was Esc'd",
+    withoutEscaped(twoTyped, [[at2, at2 + 5]]).map((h) => h.start), [at1]);
+  const longer = " 1  Served on Helen Rasho.";
+  const longerTyped = typedSpans(findRealSpans(sreals, longer, { layout: longer }), longer, " 1  Served on.");
+  const rs = longer.indexOf("Rasho");
+  check("…a longer name ending where an Esc'd one ended is not the Esc'd one",
+    withoutEscaped(longerTyped, [[rs, rs + 5]]).map((h) => longer.slice(h.start, h.end)), ["Helen Rasho"]);
+  check("…nor is a name wrapped over a line, piece for piece",
+    withoutEscaped([{ start: 4, end: 20, ranges: [[4, 9], [15, 20]] }], [[4, 9]]).length, 1);
+  check("…and with nothing Esc'd, the typed set as it was", [withoutEscaped(twoTyped, []).length, withoutEscaped(twoTyped, null).length], [2, 2]);
+  // …and found again by its place where the page moved its nodes: the
+  // nearest occurrence, whole words, of the name to where it was last seen.
+  const moved = " 1  Inserted line.\n 2  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 3  Rasho agrees. Rashomon.";
+  check("escapedPlaces: nearest to where it was first, whole words only",
+    escapedPlaces(moved, "Rasho", 15, null), [moved.indexOf("Rasho"), moved.indexOf("Rasho agrees")]);
+  check("…leaving out a place another Esc'd name holds",
+    escapedPlaces(moved, "Rasho", 15, new Set([moved.indexOf("Rasho")])), [moved.indexOf("Rasho agrees")]);
+  check("…and none where the page no longer carries it", [escapedPlaces(moved, "Quillmark", 0, null), escapedPlaces(moved, "", 0, null)], [[], []]);
 }
 
 // ---- the values file ---------------------------------------------------------------

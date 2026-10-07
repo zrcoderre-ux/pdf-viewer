@@ -796,7 +796,16 @@ app, which routes it to the reader tab.
   Cal.App.5th at p. 5.)": the save leaves that name where it stands, keeps it
   orange and names it in red as not yet reviewed, for you to decide. (A name
   you have already said to fake is written as its pseudonym everywhere, this
-  one included.) A real that opens a longer name in the key ("Helen" beside
+  one included.) Every name you press Esc on is kept so, however many there
+  are on the page — two short cites in a row, each Esc'd, both keep their
+  names — and each goes with its text when you type or paste anywhere
+  earlier on the page, push lines down with Enter or join them with
+  Backspace, print or take a screenshot. Change the name itself (type over
+  its letters, or type a different name where it stood) and it is no longer
+  the one you pressed Esc on: it is offered again, and marked if you leave
+  it. (After an undo that rebuilds the page, it is the page's own text, left
+  as it stands and named in red like any name nobody has decided.) A real
+  that opens a longer name in the key ("Helen" beside
   "Helen Rasho"), or a kept one, is never space-marked: the space types on,
   and the whole name is offered the moment it is finished. A name typed and
   left is marked by the reader on its own once the caret has moved off it —
@@ -892,7 +901,15 @@ app, which routes it to the reader tab.
   between. The selection shows red while it is on. A selection with a
   question to it (a passage, a pseudonym, the orange name alone, a value kept
   where it stands or by the Master Keep) is not flagged; it stays selected
-  with the pop-up asking. Click the button again to turn it off; it is never
+  with the pop-up asking. **Nor is a party of a cited decision** — "Kremerman"
+  in "Kremerman v. Ford Motor Co. (2019) 30 Cal.App.5th 1": a flag hands
+  PDF-Linker the name as one of this case's own parties, and where the
+  decision's other side is this case's party already (Ford, in a case against
+  Ford), or both sides are flagged, its next run takes the citation for this
+  case's own caption and renames the published decision. The pop-up says so,
+  and its own 🚩 Flag flags the name only if you press it, for a name that
+  really is this case's own; Ctrl+Shift+F refuses it outright and says why.
+  Click the button again to turn it off; it is never
   on when a reader opens. The
   **Flagged** panel collects them and **Save list to case folder** writes `New
   Real Values.txt` beside the key, which PDF-Linker reads on its next run —
@@ -947,9 +964,23 @@ app, which routes it to the reader tab.
   folder of the name is known here — never a list that was never written, and
   never to a Text Files folder, whose one list every case shared; otherwise it
   is held aside and the reader says so once, with what it held, to be flagged
-  or kept again. Opening another folder while one is still being read leaves
-  each folder's list its own: the folder you opened last is the one whose list
-  is in hand. Lone documents of one file name from different cases still share
+  or kept again. **Opening another folder while one is still being read**
+  (a synced drive can take seconds) leaves each folder's list, key and
+  documents its own: the folder you opened last is the one whose key and list
+  are in hand, and a file you opened on its own is not opened after all if
+  another folder was opened while its case folder was being read (open it
+  again). Until the new folder's own document is up, the
+  one on screen is still the last folder's: a keep or flag taken in it goes
+  into its own folder's list, or, once the new folder's list is in hand, is
+  refused and said; Ctrl+S is refused while the folder is being read ("save
+  again in a moment"); and nothing typed into it is marked with the new
+  folder's key. Answer Cancel to the "Discard unsaved edits?" the new
+  folder's document asks as it opens, and the last folder's document stays on
+  screen that way — not saved, marked or decided in under the other case's
+  key — until you open it again from its own case folder (where a name typed
+  in the meantime is left as it stands and named in red by the save, not
+  written as its pseudonym).
+  Lone documents of one file name from different cases still share
   one list; a key chosen with one of them open answers them all. A flag kept
   for want of the case's key is only asked about again; a flag taken off
   wrongly could let the name ship. The whole value has to be in the key: a key

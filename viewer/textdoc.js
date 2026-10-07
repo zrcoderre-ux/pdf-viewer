@@ -1129,6 +1129,45 @@ export function typedSpans(spans, text, built) {
 }
 
 /**
+ * The typed names Esc left AS TYPED taken out of `spans` (typedSpans' answer):
+ * `escaped` is [[start, end], …], each the place of one Esc'd name in the same
+ * disk text. A name is the Esc'd one only where it stands EXACTLY there — a
+ * longer name ending at the same place ("Bob Jones" typed over an Esc'd
+ * "Jones"), or one of several pieces wrapped over lines, is not: it is a name
+ * the operator never dismissed, and goes as typed names go.
+ */
+export function withoutEscaped(spans, escaped) {
+  if (!spans || !spans.length || !escaped || !escaped.length) return spans || [];
+  return spans.filter((h) => {
+    if (h.ranges && h.ranges.length > 1) return true;
+    return !escaped.some(([a, b]) => h.start === a && h.end === b);
+  });
+}
+
+/**
+ * Where an Esc'd name stands now, read off the page's disk text, for a name
+ * whose nodes the page moved (a line cascade, a paste, a rebuild): the starts
+ * of `name`'s occurrences there, whole words, nearest to `near` (where it was
+ * last seen) first, leaving out the starts in `taken` (the places of the
+ * page's other Esc'd names). Nearest, with no limit: an occurrence wrongly
+ * taken for the Esc'd one is a name left as typed — orange, named in red by
+ * the save — while the Esc'd one missed is written as its pseudonym, which in
+ * a short cite is a renamed authority, the worse of the two.
+ */
+export function escapedPlaces(text, name, near, taken) {
+  const src = String(text == null ? "" : text);
+  if (!name) return [];
+  const word = /[\p{L}\p{N}]/u;
+  const out = [];
+  for (let i = src.indexOf(name); i >= 0; i = src.indexOf(name, i + 1)) {
+    if ((i > 0 && word.test(src[i - 1])) || word.test(src[i + name.length] || "")) continue;
+    if (taken && taken.has(i)) continue;
+    out.push(i);
+  }
+  return out.sort((x, y) => Math.abs(x - near) - Math.abs(y - near) || x - y);
+}
+
+/**
  * The pseudonym spans an edit made that now stand in a cited decision's name:
  * a party marked at the as-you-type prompt, or by the converter in a pause,
  * before the rest of the citation was typed after it. [span element] — each

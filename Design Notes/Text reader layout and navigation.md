@@ -614,7 +614,8 @@ list is stored under (`valuesStoreKey()`, the flag store's own identity):
 - adoption reading the folder's key file sets it to that folder (`own`, taken
   as adoption names the folder, so an adoption overtaken by another still
   files its key as its own folder's and not the later one's — and, since
-  "An adoption overtaken by another" below, puts none of its list in hand);
+  "An adoption overtaken by another" below, puts neither that key nor its
+  list in hand, and files the key under its own folder's name);
 - a key loaded by hand (Load key…, a key dropped ON ITS OWN or with a PDF or
   a workbook) or chosen in the Key list sets it to the list open at that
   moment (`handOwner`): the case folder's, or with no folder open the lone
@@ -851,6 +852,90 @@ file of A with Open case folder on B, and the takeover landing during A's file
 read — each time B's stored list holds nothing of A's, B's Okafor is marked,
 and B's later save writes no keep for him; A's worksheet, read slowly, is not
 attached while B is open.
+
+**…and what that left open (a review of it).** The paragraph above claimed an
+overtaken adoption "puts nothing in hand and writes nothing". It asked only
+before the list, and the list was not the only thing that crossed. Each of
+these was reproduced in Chromium on that build and on main alike:
+
+- *The key.* `loadKeyFromBytes` ran after the key file's read with nothing
+  asked: A's key, read slowly while Open case folder was used on B, was put
+  in hand over B's and filed in the Key list under `folderName`, by then B's.
+  B's Brief read its pseudonyms as plain text, the status bar said "Key: Lee
+  Opposition" over A's bindings, and " Okafor testified." typed into B's
+  Brief was saved as "Pemberly testified." — A's pseudonym, which no row of
+  B's key reverses. Now `gone()` (`dirHandle !== h` or `valuesStoreKey() !==
+  own`) is asked after EVERY wait in `adoptFolderNow` — the folder listed,
+  the older build's state moved, the key file read, and again once the key is
+  parsed (`loadKeyFromBytes`'s `still`) — and an overtaken adoption returns
+  `found.overtaken` with nothing more put in hand. The key is filed under the
+  adopting folder's own name (`h.name`).
+- *The callers.* `attachKeyForFile` returns false for an overtaken adoption,
+  and `openFileNow` then opens a file of the overtaken folder only where the
+  folder open holds it: a lone file of A whose folder B overtook used to open
+  anyway, under B's key. `openFolderNow`, `readWholeFolder` and
+  `readFolderAfterRun` stop where it is overtaken; the adoption that took over
+  opens its own document.
+- *The list in hand, written under the new folder's id.* Adoption names its
+  folder first and puts that folder's list in hand only once it has been
+  read, so in between `valuesStoreKey()` is the new folder's while the list in
+  hand is still the last one's, and `persistValues()` wrote it there whoever
+  called it: a keep taken in A's Brief still on screen; A's folder sweep
+  ending while B was still listed (`refreshKeepLocality` settling a pending
+  keep); A's worksheet parse finishing after B was opened (`attachLeaksNow`
+  laying answers back and mirroring keeps). Each time B's stored list became
+  A's — B's plaintiff unmarked, `no: Okafor` and A's flags written into B's
+  `New Real Values.txt` by B's next save. Now `persistValues` writes the list
+  where it was READ from (`flagsFor`); `listAway()` (a list in hand that is
+  not the folder open's) keeps `refreshKeepLocality` from reading it against
+  the folder open and `saveValuesFile` from writing it into that folder;
+  `attachLeaks` takes the adoption's `still` and lays nothing back once its
+  parse ends in another folder.
+- *The document on screen.* Until the new folder's own document is up, the
+  one on screen is the last folder's, and four things took it for the
+  new folder's. A keep or flag taken in it once the new folder's list was in
+  hand — B's worksheet being read, on a synced drive for seconds — went into
+  B's list (`no: Okafor` again, by "Keep in this case" on the Okafor standing
+  in A's Brief): `docListAway()` (the list in hand is not the one the
+  document's folder keeps) now refuses `setKeep`, `flagSelection` and
+  `phraseSelection`, and says so. A save of it wrote a name typed into it as
+  B's pseudonym ("Thackeray testified." in A's file): the save refuses while
+  any folder is being read (`adopting`, held by `adoptFolder`, `openFolder`
+  and `openFile` until the new document is up) and wherever the document on
+  screen was opened in another case folder than the one open (`spotsFolder`
+  against `stateFolder()`) — which is also the state the second "Discard
+  unsaved edits?" of an opening leaves when it is declined. And the
+  converter and the Space prompt marked a typed name with the key in hand;
+  marked so, it was B's pseudonym in A's text, and when A's document was next
+  read under A's key it stood there as plain text and went to the file with
+  nothing said. They wait now while `keyAway()` (either of the save's two
+  conditions). A spot keep is the document's own and is kept under the folder
+  the document was opened in (`spotsFolder`, set by `openText`, by
+  `openFolderNow` and the bar's Attach key as they take the document into the
+  folder, and by `forgetFolder`), not the folder open: "Keep just this one"
+  on Okafor in A's Brief while B was read landed on B's Brief.txt, and B's
+  plaintiff was unmarked and left in the clear by every save.
+
+Measured in Chromium, each failing on the build before and passing after: A's
+key slowed with Open case folder on B (B's export carries only B's
+pseudonyms); a lone file of A with B opened meanwhile (not opened; B's Brief
+up); a keep in A's Brief while B's key is read (A's list holds it, B's
+nothing); A's sweep ending while B is listed slowly, and A's worksheet parsed
+after B opened (B's stored list stays B's own, with its own flag); a spot keep
+in A's Brief while B is read; a save of A's Brief while B's worksheet is read
+(refused); a keep and a flag on A's Brief while B's worksheet is read
+(refused, B's list empty, B's Okafor orange); A's edited Brief kept over B's
+opening by Cancel (the save refused, A's file untouched).
+
+Left as it is: a document kept on screen that way and then opened again from
+its own folder is rebuilt under its key (`retranslate`), which takes the page
+as it stands for its own text (`__built`), so a name typed into it meanwhile
+is not written as its pseudonym but left and named in red, as after any key
+change. A lone document — opened with no folder — kept on screen that way
+over a folder opened meanwhile still reads, marks and saves under the key in
+hand, as a lone document always has (a key chosen with one open answers it);
+a keep or flag taken in it is refused, since the list in hand is the
+folder's.
 
 ### Nothing the case is owed is written into Text Files (`textFolderOpen`)
 

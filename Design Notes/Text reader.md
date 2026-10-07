@@ -343,13 +343,15 @@ on that build:
   honours the Esc: the name ending where Esc was pressed (`typeDismissed`,
   found as a DOM point with `pointAtOffset`, read into the disk text as one
   of `serializeHeld`'s points, and carried over the names the pass writes) is
-  left out of the typed set. It waits like any name nobody has decided: it
-  stands in the file as typed, orange on the page, named in red by the save
-  as not yet reviewed, asked about at the tab's close, and the review's to
-  decide. The prompt says so ("Esc leaves it as typed, in the file too"). A
-  name the review has already settled is written as its pseudonym all the
-  same, as before either change: the answer covers every occurrence. The
-  converter skips the same place, so the screen and the file agree.
+  left out of the typed set — one place, which "Every Esc is kept, by place"
+  below replaced with every Esc'd name. It waits like any name nobody has
+  decided: it stands in the file as typed, orange on the page, named in red
+  by the save as not yet reviewed, asked about at the tab's close, and the
+  review's to decide. The prompt says so ("Esc leaves it as typed, in the
+  file too"). A name the review has already settled is written as its
+  pseudonym all the same, as before either change: the answer covers every
+  occurrence. The converter skips the same place, so the screen and the
+  file agree.
 - *A refused save's retry wrote what the first refused.* A typed name the key
   holds only an instruction for is refused by the last check; beside it, a
   typed name the pass wrote made the pass rebuild the page, and `buildBody`
@@ -389,6 +391,61 @@ alone. A member the reel sheds and builds again (`unshedMember`) loses its
 flags the same way. The Space prompt reads the line it is on, so a surname
 typed at the head of a line under a given name on the line before is
 offered, and marked, alone.
+
+**Every Esc is kept, by place** (`escaped`, `escapeTyped`, `escapesIn`,
+`escNote`, `escFindAgain`, `TD.withoutEscaped`, `TD.escapedPlaces`). The
+change above remembered ONE dismissal, `typeDismissed`, as an offset into the
+page's text, compared by its end alone. A review measured in Chromium what
+that let through: two short cites in a row, each Esc'd — "(Jones, 30
+Cal.App.5th at p. 5.)" and "(Vance, 31 …)" — and the second Esc replaced the
+first, so the converter's next pause marked Jones and the save wrote "(Pratt,
+30 Cal.App.5th at p. 5.)", the renamed authority the Esc was for, naming only
+Vance in red; one Esc'd and "Also, " typed at the head of the page, and the
+offset no longer reached the name: the same "(Pratt, …)" under a plain
+"Saved". A different name retyped to end at the dismissed place (Jones
+deleted, Vance typed) was taken for the Esc'd one and written as itself.
+
+Now each Esc is kept, per page body (a WeakMap, reset as a document opens), as
+a live `Range` over the name as typed, with the name and its key value. The
+browser carries a Range with its text node — text typed earlier in the node,
+a mark cut out beside it, `normalize` merging nodes — so typing elsewhere moves
+nothing it does not move. Text typed against the name's front grows the Range
+over it ("See Jones"), and `escState` cuts it back where what was added ends at
+a word boundary; letters typed into the name, or deleted from it, leave no
+Esc'd name there ("gone"), and the prompt offers it afresh. What takes the
+nodes away — Enter, Backspace and Delete moving lines (`enterAtCaret`,
+`backspaceAtCaret`), a paste laying lines (`insertLinesAtCaret`), a rebuild
+(`buildBody`), a print or a screenshot writing fakes into the nodes — first
+notes each name's place in the page's DISK text (`escNote`); a rebuild that
+writes names before it carries the place with the text (the save's forward
+pass hands `buildBody` its `placeAfterSwaps`). A name whose nodes went is
+found again there: exactly, after a rebuild or a print or screenshot put back
+(`escFindAgain`), else at the nearest whole-word occurrence of the name
+(`TD.escapedPlaces`), passing over places another Esc'd name holds. Nearest,
+with no limit, because the two errors are not alike: an occurrence wrongly
+taken for the Esc'd one is a name left as typed — orange, named in red by the
+save — while the Esc'd one missed is written as its pseudonym, which in a short
+cite is a renamed authority. A name not found is kept, its place noted, in
+case the text comes back (an undo). The converter skips a hit whose node and offsets are an Esc'd
+Range's exactly; the save reads every Esc'd name into the disk text as a pair
+of `serializeHeld` points and leaves out of `TD.typedSpans`' answer the typed
+spans that are EXACTLY one of them (`TD.withoutEscaped`) — a longer name ending
+at the same place ("Bob Jones" over an Esc'd "Jones") or one wrapped over lines
+is not the name dismissed. While a print or a screenshot has the fakes on the
+page, nothing is dropped or moved: the names are put back the moment it ends.
+
+Measured in Chromium. Failing on the build before and passing after: the two
+short cites, each Esc'd (both keep their names, the toast names both);
+"Also, " typed at the head of the page after an Esc; Jones Esc'd, deleted and
+Vance typed in its place (Vance marked and written as Corbin); an Enter above
+the Esc'd name, two lines pasted above it, "See " typed against its front, the
+line it is on joined to the one above with Backspace; two Esc'd short cites to
+the same Jones moved by a cascade beside a Jones typed as this case's party
+(the cites keep Jones, the party goes as Pratt); and the name's letters typed
+over (offered again). Passing before and after: a print and a screenshot
+between the Esc and the save, and a save that rebuilt the line for a typed
+name before it, then a second save. `test-textdoc.mjs` pins `withoutEscaped`
+and `escapedPlaces`.
 
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each
@@ -481,6 +538,33 @@ pop-up down (its `selectionchange` finds no selection). Clicking the button
 with a selection already made flags it as the click always did. The mode is
 per tab and never stored, and `body.flag-mode` paints the page's
 `::selection` in the flag's red. Ctrl+Shift+F is still `flagSelection` alone.
+
+**A cited decision's party is asked about, never flagged on a release**
+(`citedIn`, `CITED_FLAG`, `flagSelection({ asked })`). A flag is a line of
+`New Real Values.txt`, which PDF-Linker reads as an authoritative `--term`: a
+party of THIS case, whose words count toward `_trusted_party_tokens`. Where a
+cited decision's other side is already this case's party — "Kremerman v. Ford
+Motor Co. (2019) 30 Cal.App.5th 1" in a case against Ford, the key binding
+"Ford Motor Company" — a flagged "Kremerman" makes `_side_is_trusted` clear
+both sides, the cite is taken for this case's own caption, and the next run
+writes "Sterling v. Crestline Emberly Co. (2019) …": a renamed authority,
+measured against `pdf_linker.py`'s `_pn_build_terms`. Flagging both sides of
+any cite ("Jones" and "Smith") does the same. The marks, the save, a copy and
+a print all leave a cited name alone (`TD.citedNameSpans`); the flag paths
+did not ask, and with 🚩 on a double-click flagged one with no question at
+all. `citedIn` reads the selection into the page's disk text
+(`serializeHeld` with its two ends as points) and asks whether it overlaps a
+cited decision's name there, in the text as it stands and as the marks read
+it (`diskReading`, fakes and spot keeps blanked). `flagTakes` refuses such a
+selection, so the switch's release leaves it selected with the pop-up up;
+`showFlagPop` puts the reason above its buttons; Ctrl+Shift+F refuses it and
+says why; and only the pop-up's own 🚩 Flag (`asked`) flags it, for a name the
+operator knows is this case's own. Checked in Chromium: a double-click on
+"Kremerman" with 🚩 on (the pop-up asks, nothing flagged, the saved `New Real
+Values.txt` holds no "Kremerman"); a drag over "Smith" and over "Jones" inside
+"Jones v. Smith (2019) 30 Cal.App.5th 1" (neither flagged); Ctrl+Shift+F on
+"Jones" there (refused); the pop-up's Flag on it (flagged); "Riverside County"
+outside any cite (flagged on release, as before).
 
 **A fake that is an ordinary word** (`parseKey`'s `wordFakes`,
 `PK.wordFakesOf`, `PK.compile`): an older PDF-Linker's nickname rule cut a
