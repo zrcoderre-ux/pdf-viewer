@@ -184,6 +184,24 @@ spot keeps mapped into it. `flagSelection` tells the operator such a flag
 takes a full re-run (`s.touches` or `phraseFakedInFile`), as `markPhrase`
 does.
 
+**Flagging by selecting** (`setFlagMode`, `flagTakes`, `flagWhereReleased`):
+🚩 in the tools rail is a switch (`aria-pressed`, `body.flag-mode`), not a
+one-shot. On, a left press on `#pages` (taken on the document in the capture
+phase, so the numbered margin's own mousedown cannot hide it; no Ctrl, Meta
+or Alt; not a triple-click, whose line is more often a passage) sets
+`flagDrag`, and the release flags the settled selection on a `setTimeout(0)`,
+as the PDF pane's Redact text mark does. `showFlagPop` stays down while
+`flagDrag` is set, so the pop-up does not flicker up mid-drag. `flagTakes` is
+the pop-up's Flag button reduced to a yes or no — `flagProblem`, a spot keep,
+the orange name alone (`sameWords`), and a value the Master Keep holds
+(`masterHeldIn`), which `flagSelection` itself would flag but which the
+pop-up puts a question to — and a selection it refuses is left selected with
+the pop-up shown. A flagged one is collapsed to its end, which also takes the
+pop-up down (its `selectionchange` finds no selection). Clicking the button
+with a selection already made flags it as the click always did. The mode is
+per tab and never stored, and `body.flag-mode` paints the page's
+`::selection` in the flag's red. Ctrl+Shift+F is still `flagSelection` alone.
+
 **A fake that is an ordinary word** (`parseKey`'s `wordFakes`,
 `PK.wordFakesOf`, `PK.compile`): an older PDF-Linker's nickname rule cut a
 surname's stand-in to "We" (the front of a longer name's fake, six letters
