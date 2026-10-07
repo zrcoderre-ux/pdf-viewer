@@ -237,6 +237,10 @@ console.log("the copy's name hides what its pages hide");
     both("Rasho-Decl.pdf"), "Strangeways Decl (redacted).pdf");
   check("…save inside a value spelled with one: the docket keeps its hyphens and is faked whole",
     both("23-cv-01234_Order.pdf"), "23-cv-05678 Order (redacted).pdf");
+  // …and found with any run of separators where the key has one, written back
+  // as the key spells it: a docket typed with underscores is the docket.
+  check("…a docket typed with underscores for its hyphens is the docket the key binds, faked whole",
+    both("23_cv_01234 Order.pdf"), "23-cv-05678 Order (redacted).pdf");
   // …and an underscore the same: an address whose handle carries one, spaced
   // out, was no address the key binds, and its handle two words it does — the
   // forward faked the person and left the firm's domain, the surname in it:
@@ -259,7 +263,7 @@ console.log("the copy's name hides what its pages hide");
   // the digits turn; a long value inside a word; a docket that lost its
   // hyphens; a value whose row holds an instruction rather than a fake.
   for (const n of ["RashoDecl.pdf", "MSJRasho.pdf", "Rasho2023.pdf", "HELENRASHODECL.pdf",
-    "25STCV59720Complaint.pdf", "23_cv_01234 Order.pdf", "Rashoe_Decl.pdf",
+    "25STCV59720Complaint.pdf", "Rashoe_Decl.pdf",
     // An address spelled otherwise than the key spells it: its handle faked
     // word by word, its host would stand.
     "helen.rasho@rashofamilylaw.com thread.pdf",
@@ -302,6 +306,78 @@ console.log("the copy's name hides what its pages hide");
   // A bare forward (no rows) still checks with its own reading of the name.
   ok("a bare forward still sends a seam weld to a neutral name",
     NEUTRAL.test(redactedName("RashoDecl.pdf", readers.reader.forward)));
+}
+
+// A NAME SPELLED OTHERWISE THAN THE KEY SPELLS IT. The forward fakes what the
+// key binds where it stands, and the check found a value only where its words
+// stood in the key's order: "Rasho_Helen_Decl" came out "Strangeways Helen
+// Decl" (the surname faked by its own row, the given name left beside it),
+// "Mary-Kate_Olsen_Decl" "Mary Kate Pell Decl", and with no shorter row
+// bound "Vrba, Tomas Decl" went out whole — a half-scrubbed name that reads
+// as finished, in the one file made to be handed on. A long name word welded
+// ("KowalczykDecl") fell between the short tier and the long one, and a
+// value whose apostrophe was dropped was found only as a whole word.
+console.log("a name spelled otherwise than the key spells it");
+{
+  const key = parseKey([{ name: "Pseudonym Key", rows: [
+    ["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"],
+    ["person", "Helen Rasho", "Ingrid Strangeways", "", "", "spreadsheet", 12],
+    ["person-token", "Rasho", "Strangeways", "", "", "spreadsheet", 30],
+    ["person", "Mary-Kate Olsen", "Ruth-Ann Pell", "", "", "spreadsheet", 3],
+    ["person-token", "Olsen", "Pell", "", "", "spreadsheet", 3],
+    ["person", "Helena Kowalczyk", "Agatha Brandvold", "", "", "spreadsheet", 3],
+    ["person", "Tomas Vrba", "Elias Quint", "", "", "spreadsheet", 3],
+    ["person", "Mark Ellis", "Peter Hale", "", "", "spreadsheet", 3],
+    ["person-token", "O'Brien", "Fairweather", "", "", "", 2],
+    ["person-token", "D'Souza", "Pemberton", "", "", "", 2],
+    ["docket", "25STCV59720", "25STZV11111", "", "", "spreadsheet", 4],
+  ] }], "pseudonym_key.xlsx");
+  const f = compileForward(key);
+  const rows = boundRows(key);
+  const readers = {
+    reader: { forward: (t) => forwardRuns(f, t).map((r) => (r.t === "swap" ? r.to : r.s)).join(""), rows },
+    viewer: { forward: (t) => translate(f, t).text, rows },
+  };
+  const both = (name) => {
+    const a = redactedName(name, readers.reader);
+    const b = redactedName(name, readers.viewer);
+    return a === b ? a : `reader ${a} / viewer ${b}`;
+  };
+  const NEUTRAL = /^document [0-9a-f]{6} \(redacted\)\.pdf$/;
+  for (const n of [
+    // A name's words in another order, around an initial, run together, or
+    // with only the surname bound on its own.
+    "Rasho_Helen_Decl.pdf", "Helen M. Rasho Decl.pdf", "Vrba, Tomas Decl.pdf", "Tomas_J_Vrba.pdf",
+    "MaryKate Olsen Decl.pdf",
+    // A name word of eight letters or more, welded.
+    "KowalczykDecl.pdf", "KOWALCZYKDECL.pdf",
+    // A value that runs together once its apostrophe is dropped, welded.
+    "OBRIENDECL.pdf", "ObrienDecl.pdf", "DSOUZADECL.pdf",
+    // A long value spaced out once a weld is parted ("Case25" is "Case 25").
+    "Case25_STCV_59720.pdf"]) {
+    const got = both(n);
+    ok(`${n} takes a neutral name (${got})`, NEUTRAL.test(got));
+  }
+  check("a hyphenated given name with an underscore where the key has a space is faked whole",
+    both("Mary-Kate_Olsen_Decl.pdf"), "Ruth-Ann Pell Decl (redacted).pdf");
+  check("…and with a space where the key has its hyphen",
+    both("Mary Kate Olsen Decl.pdf"), "Ruth-Ann Pell Decl (redacted).pdf");
+  check("a name in the key's own order is faked as before",
+    both("Helen_Rasho_Decl.pdf"), "Ingrid Strangeways Decl (redacted).pdf");
+  check("a pseudonym is no real name", both("Ingrid Strangeways Decl.pdf"), "Ingrid Strangeways Decl (redacted).pdf");
+  // The words read in any order need corroboration: two of one name's own
+  // words, or one beside its own fake's. A given name that is a word, alone,
+  // is neither.
+  check("a given name that is a word, alone, is no bound value", both("Mark Up Draft.pdf"), "Mark Up Draft (redacted).pdf");
+  check("a word a fake carries, or a particle pair, corroborates nothing",
+    [boundValueStands("Declaracion de la Parte", [{ real: "Maria de la Cruz", fake: "Elena de la Vega" }]),
+      boundValueStands("Holdings Report Melbury", [{ real: "Quillmark Holdings", fake: "Melbury Holdings" }]),
+      boundValueStands("Declaracion de la Parte", [{ real: "Maria de la Cruz", fake: "Elena Ortiz Vega" }])],
+    [false, false, false]);
+  check("…where two own words, or one and its fake's, stand in any order",
+    [boundValueStands("Cruz Maria", [{ real: "Maria de la Cruz", fake: "Elena de la Vega" }]),
+      boundValueStands("Vega Maria", [{ real: "Maria de la Cruz", fake: "Elena de la Vega" }])],
+    [true, true]);
 }
 
 console.log("the pieces of the name's scrub");

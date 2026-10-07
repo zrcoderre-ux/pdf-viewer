@@ -809,6 +809,45 @@ measured, another case's `no: Okafor` took the mark off this case's plaintiff
 and reached its file. It is held aside, and the toast says to flag or keep
 again in the case folder above.
 
+**…but not the flags, where one folder of the name is known
+(`TD.legacyListSplit`).** Holding the whole list held its flags with its keeps,
+and the ordinary state after a run is a list that "differs": a run spends
+`New Real Values.txt` once it has applied it. So for an operator who had
+flagged, saved and run PDF-Linker, the first open after the upgrade gave
+"differs" even where only one folder of the name had ever existed, and every
+flag went to `textReader.held.*` with the keeps. Measured in Chromium, an
+older build's list of six flags, its file spent: none of the six names was
+marked, and Ctrl+S wrote no `New Real Values.txt`, where main kept all six
+marked and wrote them on the next save. The two halves of a list fail in
+opposite directions: a keep or a page line read into the wrong case takes the
+orange mark off a real name and hands its run a `no:`; a flag read into the
+wrong case only fakes one more name there (a phrase only joins a flag's
+words). So where `sameName` is one ("unwritten", "differs") the flags and
+their phrases are merged into the folder's list (`TD.mergeStoredLists`, so a
+list the id already keeps loses nothing) and only the keeps and page lines
+are held; the record of what that build last wrote is held with them, so the
+next save writes the file. Where the file matches, all of it moves, merged the
+same way. Where two folders of the name are known, or it is a Text Files
+folder's, all of it is still held: no one folder can be told from another, and
+copying the flags into each folder of the name as it opens was judged more
+machinery than it is worth — the residual is flags to give again by hand.
+
+**What was held is said, every value of it, and said whatever happens before
+the toast.** The note named four values, and nothing in the reader reads the
+held list, so the rest were lost to the operator; it names them all now
+(flags, `no:`/`never:` keeps, and page lines by document and page). And it
+was one variable, `listNote`, which the next adoption set to its own note: an
+adoption overtaken by another (A opened, its key slow, B opened meanwhile)
+returned before its toast, B's adoption cleared the note, and the next time A
+opened there was nothing left to move — measured, only the two "Key loaded…"
+toasts, the list under `textReader.held.values.Smith Opposition`, and A
+reopened said nothing. A reload between the move and the toast (which comes
+only after the key and the worksheet are read) lost it the same way. Now
+`adoptLegacyState` and `carryUpTextFiles` queue their notes in storage
+(`queueListNote`, `textReader.listNotes`) in the same step as the move, and
+only the toast that says them takes them off (`listNoteOnce`) — whichever
+folder's toast that is; each note names its folder.
+
 Left as they are: a lone document's list is still kept by its FILE name, so
 lone `Motion.txt`s of two cases share one (no case folder is open, so nothing
 is written for it without a picker). A Text Files folder's spot keeps and

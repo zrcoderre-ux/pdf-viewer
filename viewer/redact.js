@@ -410,7 +410,8 @@ export function coveredClaims(claims, labels) {
 // and an underscore as an underscore — so a federal docket "23-cv-01234"
 // spaced out is a docket the forward no longer knows, and the check would send
 // the copy to the neutral name for a value the key could have faked. A bound
-// value spelled WITH either keeps it and is faked whole.
+// value spelled WITH either is found however the stem separates its words,
+// written back as the key spells it, and faked whole (spacedStem).
 //
 // The underscore was left out at first, and that was worse than a lost name.
 // An e-mail address whose handle carries one ("helen_rasho@rashofamilylaw.com")
@@ -456,25 +457,73 @@ function wordsOf(s) {
 /**
  * The stem with its separators spaced (step 1), save inside a bound value whose
  * own spelling carries them. `rows` as scrubbedStem takes them.
+ *
+ * A value spelled with a hyphen or an underscore is found in the stem with ANY
+ * run of spaces, underscores and hyphens standing where the key's spelling has
+ * a separator, and written back as the key spells it, so the forward fakes it
+ * whole. It was found at first only where the stem spelled it exactly as the
+ * key does, its spaces included, and the stem is a file name: "Mary-Kate_Olsen
+ * _Decl" carries the key's own hyphen, but the underscore where the key has a
+ * space defeated the search, the hyphen was spaced with the rest, and the
+ * forward, finding no "Mary-Kate Olsen", faked the surname by its own row and
+ * left the given names: "Mary Kate Pell Decl (redacted).pdf", a half-scrubbed
+ * name under a name that reads as finished. "Mary Kate Olsen", the hyphen
+ * typed as a space, came out the same. Written back, both are "Ruth-Ann Pell
+ * Decl", and "23_cv_01234 Order" (a docket typed with underscores) is the
+ * docket the key binds, "23-cv-05678 Order", as PDF-Linker reads every
+ * spelling of a docket as one identity. A value found this way that the key
+ * holds an instruction for has no fake; the forward writes nothing there, and
+ * the check finds it standing.
+ *
+ * Every other character of the value is matched as the key spells it,
+ * whole-word, any case; the stem's own letters are kept and only its
+ * separators take the key's. A file name is a few words and every row is asked
+ * with indexOf on its first piece before a pattern is built for it, so this is
+ * one cheap pass over the key per saved copy.
  */
 function spacedStem(stem, rows) {
   const s = String(stem == null ? "" : stem);
-  let keep = null;
   const low = s.toLowerCase();
   // (A letter whose lower case is longer than itself puts every place after it
   // out by one; such a stem is simply spaced.)
-  if (KEPT_SEPARATOR_RE.test(s) && low.length === s.length) {
+  const hits = [];
+  if (low.length === s.length) {
     for (const w of rows) {
-      const v = String((w && w.real) || "").trim().toLowerCase();
-      if (!KEPT_SEPARATOR_RE.test(v) || v.length > low.length) continue;
-      for (let at = low.indexOf(v); at !== -1; at = low.indexOf(v, at + 1)) {
-        // Whole words only, as the forward reads it.
-        if (ALNUM_RE.test(low[at - 1] || "") || ALNUM_RE.test(low[at + v.length] || "")) continue;
-        (keep || (keep = new Uint8Array(s.length))).fill(1, at, at + v.length);
+      const v = String((w && w.real) || "").replace(/^[\s_-]+|[\s_-]+$/g, "");
+      if (!KEPT_SEPARATOR_RE.test(v)) continue;
+      // Alternating pieces and the separators between them, as the key spells them.
+      const parts = v.split(/([\s_-]+)/);
+      if (low.indexOf(parts[0].toLowerCase()) === -1) continue;
+      let src = "(?<![\\p{L}\\p{N}])";
+      for (let i = 0; i < parts.length; i++) {
+        src += i % 2 ? "[\\s_-]+" : "(" + parts[i].replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")";
+      }
+      src += "(?![\\p{L}\\p{N}])";
+      let rx;
+      try { rx = new RegExp(src, "giu"); } catch { continue; }
+      for (let m = rx.exec(s); m; m = rx.exec(s)) {
+        if (!m[0]) { rx.lastIndex++; continue; }
+        // The stem's own pieces (its letters, its case), the key's separators,
+        // a space for any run of whitespace the key carries.
+        let text = "";
+        for (let i = 0; i < parts.length; i++) {
+          text += i % 2 ? (/^\s+$/.test(parts[i]) ? " " : parts[i].replace(/\s+/g, " ")) : m[(i >> 1) + 1];
+        }
+        hits.push({ at: m.index, end: m.index + m[0].length, text });
       }
     }
   }
-  return s.replace(SEPARATORS_RE, (m, at) => (keep && keep[at] ? m : " ")).replace(/\s+/g, " ").trim();
+  // The longest first where two values overlap; each place written once.
+  hits.sort((a, b) => (b.end - b.at) - (a.end - a.at) || a.at - b.at);
+  const taken = [];
+  for (const h of hits) if (!taken.some((t) => h.at < t.end && t.at < h.end)) taken.push(h);
+  taken.sort((a, b) => a.at - b.at);
+  const spaced = (piece) => piece.replace(SEPARATORS_RE, " ");
+  let out = "";
+  let at = 0;
+  for (const t of taken) { out += spaced(s.slice(at, t.at)) + t.text; at = t.end; }
+  out += spaced(s.slice(at));
+  return out.replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -601,16 +650,54 @@ export function unweldNames(stem, words) {
  * "SUMMARY", Ross in "CROSS", Mark). A name lost is the right side of that:
  * the copy is the file that is handed on.
  *
- * Still not caught, as PDF-Linker does not catch it: a short name welded in
- * lower case ("rashodecl", "Declrasho"). The capital is what keeps a
- * four-letter name out of ordinary lower-case letters. The name is offered in
- * the Save dialog and named once it is saved.
+ * and two more readings PDF-Linker has no need of, since it fakes every word of
+ * a person's name as its own token (one word, one fake) and the reader's key
+ * carries only the rows a run wrote:
+ *
+ *   A NAME'S WORDS IN ANY ORDER: two words of one multi-word value, or one of
+ *     its words beside a word of that row's own fake, standing anywhere in the
+ *     name — "Strangeways Helen Decl" (the stem "Rasho_Helen_Decl", the
+ *     surname faked by its own row and the given name left), "Helen M.
+ *     Strangeways", "Mary Kate Pell" (a key spelling "Mary-Kate Olsen"),
+ *     "Vrba, Tomas" and "Tomas J Vrba" (a key binding "Tomas Vrba" and nothing
+ *     shorter). Each passed as finished: the check found a value only where
+ *     its words stood in the key's order, and the forward had faked what it
+ *     could. A half-scrubbed name that reads as done is the failure this check
+ *     exists to stop. The words read are the ones a row's fake REPLACED (a
+ *     word the fake carries, "Holdings", "de", "Dr", corroborates nothing),
+ *     letters only, and a pair of them must hold a word of three letters or
+ *     more ("de la" is no name). An e-mail address or a website is left to
+ *     the readings above: its pieces ("law", "com") are no name's words.
+ *   A NAME WORD OF EIGHT LETTERS OR MORE, anywhere in a word, any case, as a
+ *     long value is: "KowalczykDecl", "KOWALCZYKDECL" for a key binding
+ *     "Helena Kowalczyk". Only the words of four to seven letters were read
+ *     inside a word (the short tier), and the long ones fell between it and
+ *     the long tier, which held whole values only.
+ *
+ * A value whose words run together once its apostrophe is dropped ("O'Brien"
+ * as "OBRIEN") is in the short tier as well when it is four to seven letters:
+ * it was found only as a whole word, and "OBRIENDECL", "ObrienDecl" and
+ * "DSOUZADECL" went out as their copies' names.
+ *
+ * Still not caught, as PDF-Linker does not catch them: a short name welded in
+ * lower case ("rashodecl", "Declrasho"), and a name of three letters or fewer
+ * welded at all ("LEEDECL", "Leedecl"). The capital is what keeps a four-letter
+ * name out of ordinary lower-case letters, and under four letters a name
+ * cannot be told from the letters of a word ("Ann" in "Annual", "Lee" in
+ * "Leeward") — though one welded at a seam, "LeeDecl", is read parted. Nor a
+ * lone word of a longer value standing by itself ("Vrba Decl" for a key
+ * binding only "Tomas Vrba"): the key does not bind it, as the reader does not
+ * mark it on the page. The name is offered in the Save dialog and named once
+ * it is saved.
  */
 export function boundValueStands(stem, rows) {
   const byFirst = new Map();
   const cores = [];
   const shorts = new Set();
   const joined = new Set();
+  // Rows whose name's words are read in any order: { own, fake } — the words
+  // the fake replaced, and the fake's words that replaced them.
+  const scattered = [];
   const add = (words) => {
     if (!words.length) return;
     const list = byFirst.get(words[0]);
@@ -618,24 +705,50 @@ export function boundValueStands(stem, rows) {
     const core = words.join("");
     if (core.length >= WELD_CORE_MIN) cores.push(core);
     else if (core.length < WELD_SHORT_CORE_MIN) return;
-    else if (words.length > 1) joined.add(core);
-    else if (LETTERS_RE.test(core)) shorts.add(core);
+    else if (words.length > 1) {
+      joined.add(core);
+      // "O'Brien" run together, "OBRIENDECL": the short tier, as one word.
+      if (LETTERS_RE.test(core)) shorts.add(core);
+    } else if (LETTERS_RE.test(core)) shorts.add(core);
   };
   for (const w of rows || []) {
     const real = String((w && w.real) || "");
-    add(wordsOf(real));
+    const words = wordsOf(real);
+    add(words);
     const at = real.lastIndexOf("@");
     if (at > 0) add(wordsOf(real.slice(at + 1)));
+    else if (words.length > 1 && !/[@/]/.test(real)) {
+      const fakeWords = new Set(wordsOf((w && w.fake) || ""));
+      const realWords = new Set(words);
+      const own = [...realWords].filter((x) => x.length >= 2 && LETTERS_RE.test(x) && !fakeWords.has(x));
+      const fake = [...fakeWords].filter((x) => x.length >= 2 && LETTERS_RE.test(x) && !realWords.has(x));
+      if (own.length && (own.length > 1 || fake.length)) scattered.push({ own, fake });
+    }
   }
   // …and each NAME WORD of a longer value, as the unweld reads them
   // (nameWordFakes: a word the fake replaced, never furniture it carried).
   // The forward reads a word as ASCII letters, so it parts "JoséGarcía" at
   // the accent and fakes the surname alone: "JoséVelarde", the given name of
-  // a party the key binds only whole, welded to a pseudonym.
+  // a party the key binds only whole, welded to a pseudonym. Eight letters
+  // or more, the long tier: "KowalczykDecl".
   for (const k of nameWordFakes(rows).keys()) {
     const c = unmarked(k);
-    if (c.length >= WELD_SHORT_CORE_MIN && c.length < WELD_CORE_MIN) shorts.add(c);
+    if (c.length >= WELD_CORE_MIN) cores.push(c);
+    else if (c.length >= WELD_SHORT_CORE_MIN) shorts.add(c);
   }
+  // A name's words in any order (above): two of its own words, one of them
+  // three letters or more, or one of its own beside one of its fake's.
+  const scatteredIn = (words) => {
+    if (!scattered.length) return false;
+    const have = new Set(words);
+    for (const { own, fake } of scattered) {
+      const here = own.filter((x) => have.has(x));
+      if (!here.length) continue;
+      if (here.length > 1 && here.some((x) => x.length >= 3)) return true;
+      if (fake.some((x) => have.has(x))) return true;
+    }
+    return false;
+  };
   const standsIn = (words) => {
     for (let i = 0; i < words.length; i++) {
       for (const want of byFirst.get(words[i]) || []) {
@@ -664,20 +777,29 @@ export function boundValueStands(stem, rows) {
     return false;
   };
   const plain = wordsOf(stem);
+  // The words as the welds part them as well: "Case25 STCV 59720" is the
+  // docket spaced out once "Case25" is read "Case 25", and was a copy's name.
+  const parted = wordsOf(partWelds(stem));
   // The stem's words run together, and where each one starts: a long value
   // read across words must start and end on a word's edge.
-  const run = plain.join("");
-  const edges = new Set([run.length]);
-  for (let i = 0, at = 0; i < plain.length; at += plain[i].length, i++) edges.add(at);
-  const acrossWords = (c) => {
-    for (let at = run.indexOf(c); at !== -1; at = run.indexOf(c, at + 1)) {
-      if (edges.has(at) && edges.has(at + c.length)) return true;
-    }
-    return false;
+  const acrossIn = (words) => {
+    const run = words.join("");
+    const edges = new Set([run.length]);
+    for (let i = 0, at = 0; i < words.length; at += words[i].length, i++) edges.add(at);
+    return (c) => {
+      for (let at = run.indexOf(c); at !== -1; at = run.indexOf(c, at + 1)) {
+        if (edges.has(at) && edges.has(at + c.length)) return true;
+      }
+      return false;
+    };
   };
-  return standsIn(plain) || plain.some((w) => joined.has(w)) || standsIn(wordsOf(partWelds(stem)))
-    || cores.some((c) => plain.some((w) => w.length >= c.length && w.indexOf(c) !== -1) || acrossWords(c))
-    || weldedShort();
+  const acrossPlain = acrossIn(plain);
+  const acrossParted = acrossIn(parted);
+  return standsIn(plain) || plain.some((w) => joined.has(w)) || standsIn(parted)
+    || parted.some((w) => joined.has(w))
+    || cores.some((c) => plain.some((w) => w.length >= c.length && w.indexOf(c) !== -1)
+      || acrossPlain(c) || acrossParted(c))
+    || weldedShort() || scatteredIn(plain) || scatteredIn(parted);
 }
 
 /**

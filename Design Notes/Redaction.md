@@ -314,7 +314,39 @@ asks it, spliced):
   `_pn_span_is_welded`, `_pn_span_is_cased`). The name words are in it
   because the forward reads a word as ASCII letters and parts `JoséGarcía` at
   the accent: the surname faked, `JoséVelarde`, and the given name of a party
-  the key binds only whole left welded to its pseudonym.
+  the key binds only whole left welded to its pseudonym. A value that runs
+  together once its apostrophe is dropped (`O'Brien` as `OBRIEN`, four to
+  seven letters) is in this tier too: it was found only as a whole word, and
+  `OBRIENDECL`, `ObrienDecl` and `DSOUZADECL` went out as copies' names.
+- **A name's words in any order**: two words of one multi-word value, or one
+  of its words beside a word of that row's own fake, anywhere in the name,
+  as written or parted. PDF-Linker needs no such reading, since it fakes every
+  word of a person's name as its own token (one word, one fake); the reader's
+  key carries only the rows a run wrote, and the forward fakes what they bind
+  where it stands. So `Rasho_Helen_Decl.pdf`, the surname faked by its own row,
+  came out `Strangeways Helen Decl (redacted).pdf`; `Helen M. Rasho Decl.pdf`
+  `Helen M. Strangeways Decl`; with the key binding `Mary-Kate Olsen`,
+  `Mary Kate Olsen Decl.pdf` `Mary Kate Pell Decl`; and with nothing shorter
+  than `Tomas Vrba` bound, `Vrba, Tomas Decl.pdf` and `Tomas_J_Vrba.pdf` went
+  out whole — each a name half scrubbed that reads as finished, which is the
+  failure the check exists for, and in both readers (Chromium, Redact →
+  Save's `suggestedName`). The check had found a value only where its words
+  stood in the key's order. The words read are the ones a row's fake
+  REPLACED — a word the fake carries (`Holdings`, `de`, `Dr`) corroborates
+  nothing — letters only, a pair holding a word of three letters or more
+  (`de la` is no name); an e-mail address or a website is left to the
+  readings above, its pieces (`law`, `com`) being no name's words. They go to
+  the neutral name rather than being faked word by word: a word faked outside
+  what the key binds could as easily be a cited decision's party in a file
+  named for the decision.
+- **A name word of eight letters or more** of a longer value, anywhere in a
+  word, any case, as a long value is: `KowalczykDecl`, `KOWALCZYKDECL`, and
+  `Kowalczyk Decl`, for a key binding `Helena Kowalczyk`. The name words went
+  only to the short tier, under eight letters, and the long tier held whole
+  values, so the long ones fell between the two.
+- A long value spaced out is read across the PARTED words as well:
+  `Case25_STCV_59720.pdf` was `Case25 STCV 59720 (redacted).pdf`, the docket
+  standing once `Case25` is read `Case 25`.
 
 The short tier was left out at first, and `RASHODECL (redacted).pdf` was
 pinned in `test-redact.mjs` as the expected name, on the reasoning that a test
@@ -365,21 +397,51 @@ not see it either: the row's words no longer stood in a row. Both are closed
 quenby3@postbox9.org (redacted).pdf`), and the host is read as a value of its
 own. PDF-Linker fakes every e-mail address whole.
 
+The value was still found only where the stem spelled it as the key does, its
+spaces included, by plain search: `Mary-Kate_Olsen_Decl.pdf` carries the
+key's own hyphen, but the underscore standing for the key's space defeated
+the search, the hyphen was spaced with the rest, and the forward faked the
+surname by its own row and left the given names — `Mary Kate Pell Decl
+(redacted).pdf`; `Mary Kate Olsen Decl.pdf`, the hyphen typed as a space, the
+same. Now `spacedStem` finds a value spelled with a `-` or `_` with ANY run of
+spaces, underscores and hyphens where the key's spelling has a separator
+(whole-word, any case, every other character as the key has it) and writes it
+back as the key spells it, the stem's own letters kept: both are `Ruth-Ann
+Pell Decl (redacted).pdf`, and `23_cv_01234 Order.pdf`, the docket typed with
+underscores, is the docket the key binds, `23-cv-05678 Order` — PDF-Linker
+reads every spelling of a docket as one identity — where it went neutral
+before. The longest value wins where two overlap. A pattern is built only for
+a row with such a separator whose first piece the stem holds (`indexOf`
+first).
+
 **The neutral name's hash** (`stemDigest`) is FNV-1a over the stem, so the
 same document always takes the same name and two documents rarely one — mixed
 with the key's real values first. A hash of the stem alone would let anyone
 holding the copy test a guess at the name it came from; the key is never a
 file to share. Re-redacting a neutral copy keeps its name, marked once.
 
-**Residual:** a short name welded in lower case (`rashodecl`, `Declrasho`),
-which PDF-Linker's short tier leaves too — the capital is what keeps a
-four-letter name out of the letters of ordinary words. The name is offered in
-the Save dialog and named once it is saved.
+**Residual:** a short name welded in lower case (`rashodecl`, `Declrasho`,
+and an e-mail handle typed without its `@`, `hrasho_quillmark-law.com`, whose
+host the forward fakes and whose handle is the surname welded in lower case),
+and a name of three letters or fewer welded with no seam (`LEEDECL`,
+`Leedecl`; `LeeDecl` is parted at its seam and caught), both of which
+PDF-Linker's short tier leaves too — the capital is what keeps a four-letter
+name out of the letters of ordinary words, and under four letters a name
+cannot be told from a word's (`Ann` in `Annual`, `Lee` in `Leeward`). And a
+lone word of a longer value standing by itself, under eight letters (`Vrba
+Decl.pdf` for a key binding only `Tomas Vrba`): the key does not bind it, as
+the reader does not mark it on the page, and a given name or surname that is
+also a word (`Mark`, `Case`, `Price`) is in file names too often to send them
+neutral. The name is offered in the Save dialog and named once it is saved.
 
 A bare forward function (no rows) is still taken, the forward then being its
 own check over the name as written and parted; both callers pass
 `{ forward, rows }`. Filenames are a few words, so none of this is near the
 per-page budget (Design Notes/Text reader hangs and freezes.md): the check is one pass
 over the key's rows per saved copy, the unweld bounded at three words, every
-search a plain `indexOf` and no pattern built from the key. Measured with the
-four readings: 15 ms a name, the forward included, under a key of 6,112 rows.
+search in the check a plain `indexOf` or a set lookup, and the only patterns
+built from the key `spacedStem`'s, one for each row with a separator whose
+first piece the stem holds, each a literal run of the key's pieces with
+`[\s_-]+` between. Measured with the four readings: 15 ms a name, the forward
+included, under a key of 6,112 rows; with the readings since, 26 ms a name
+under 6,100 (19 ms before them, on the same machine).

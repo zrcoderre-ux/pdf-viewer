@@ -239,8 +239,14 @@ app, which routes it to the reader tab.
   panels, in the Find box, and over the PDF in the pane, where each name is
   covered with its fake. A name the key holds only an instruction for is
   covered with █████ in all of those places, and the message after the
-  picture names it. The values kept for the case, the spot keeps and the
-  parties of cited decisions read as they stand, as in the print. The screen
+  picture names it. A page shown ⇄ Raw is read whole, like the page itself, so
+  a name wrapped down a caption's column is faked or covered as one name. The
+  flag pop-up and the keep menu are taken off the screen for the picture and
+  come back after it; the bar warning that PDF-Linker is running keeps its
+  faked text until the picture is taken, a message that comes up meanwhile is
+  in the pseudonyms, and a save or a flag is refused until the screen is back.
+  The values kept for the case, the spot keeps and the parties of cited
+  decisions read as they stand, as in the print. The screen
   goes back the moment the picture is taken; nothing is written. A PDF page
   with no text (a scan) cannot be read for names and keeps them. A PDF page
   whose text does not stand over the page as it is drawn — so that a cover
@@ -959,13 +965,19 @@ app, which routes it to the reader tab.
   itself, not by its name, so a keep taken in one is never read into the
   other, where it could leave that case's own party unmarked and hand its run
   a `no:` for the name. A list an earlier version kept under the bare name is
-  given to the folder only where that version last wrote it into this very
-  folder (its `New Real Values.txt` is still what was written) and no other
-  folder of the name is known here — never a list that was never written, and
-  never to a Text Files folder, whose one list every case shared; otherwise it
-  is held aside and the reader says so once, with what it held, to be flagged
-  or kept again. **Opening another folder while one is still being read**
-  (a synced drive can take seconds) leaves each folder's list, key and
+  given to the folder whole only where that version last wrote it into this
+  very folder (its `New Real Values.txt` is still what was written) and no
+  other folder of the name is known here. Where no other folder of the name is
+  known but that cannot be shown — a list never written, or its file spent by
+  a PDF-Linker run — its flags (and their phrases) are read into the folder,
+  since a flag in the wrong case only fakes one more name, and its keeps and
+  page lines are held aside. Where two folders of the name are known, or it is
+  a Text Files folder's (whose one list every case shared), all of it is held
+  aside. The reader says so once, naming every value it held, to be flagged or
+  kept again — even when another folder is opened before it can, or the page
+  is reloaded: the notice waits for the next message. **Opening another
+  folder while one is still being read** (a synced drive can take seconds)
+  leaves each folder's list, key and
   documents its own: the folder you opened last is the one whose key and list
   are in hand, and a file you opened on its own is not opened after all if
   another folder was opened while its case folder was being read (open it

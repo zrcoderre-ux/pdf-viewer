@@ -11,7 +11,7 @@ import {
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlaces, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
-  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
+  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
@@ -672,6 +672,25 @@ console.log("a folder's state, by name and by id");
     [legacyStateHold({ sameName: 2, saved: SAVED, onDisk: SAVED }), legacyStateHold({ saved: SAVED, onDisk: SAVED })], ["named", "named"]);
   check("…and always for a Text Files folder, its file matching or not",
     [legacyStateHold({ textFiles: true, sameName: 1, saved: SAVED, onDisk: SAVED }), legacyStateHold({ textFiles: true, sameName: 1 })], ["text", "text"]);
+
+  // …and what is held is the half that fails the dangerous way. A run spends
+  // New Real Values.txt, so after a run every list was "differs" and its
+  // flags were held with its keeps: names flagged as standing in the clear
+  // lost their red mark and were handed to no run again. A flag read into the
+  // wrong case only fakes one more name; a keep takes the mark off one.
+  const OLD = { values: ["Ada Pemberton", "Bram Ellery"], keeps: [{ control: "no", value: "Riverside" }], phrases: ["Bram Ellery", "Cora Whitlow"],
+    noOcr: [{ doc: "Brief.txt", page: 2 }], ocrAgain: [], textFixed: [] };
+  const E = { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] };
+  check("one folder of the name known, the file not what was written: the flags and their phrases move, the keeps and page lines are held",
+    ["differs", "unwritten"].map((h) => legacyListSplit(OLD, h)),
+    [0, 1].map(() => ({ move: { ...E, values: ["Ada Pemberton", "Bram Ellery"], phrases: ["Bram Ellery"] },
+      held: { ...E, keeps: [{ control: "no", value: "Riverside" }], noOcr: [{ doc: "Brief.txt", page: 2 }] } })));
+  check("…last written here, all of it moves; two of the name, or a Text Files folder's, all of it is held",
+    [legacyListSplit(OLD, ""), legacyListSplit(OLD, "named"), legacyListSplit(OLD, "text")],
+    [{ move: OLD, held: null }, { move: null, held: OLD }, { move: null, held: OLD }]);
+  check("…and a half with nothing in it is none",
+    [legacyListSplit({ values: ["Ada Pemberton"] }, "differs").held, legacyListSplit({ keeps: [{ control: "no", value: "X" }] }, "differs").move, legacyListSplit(null, "")],
+    [null, null, { move: null, held: null }]);
 
   // …and the list kept while the Text Files folder was open joins its case
   // folder's, nothing in either lost and the case folder's own winning.

@@ -45,7 +45,11 @@ forward through the key where one is loaded, and it is marked redacted either
 way. `Rasho v Quillmark - MTC.pdf` is saved as
 `Strangeways v Melbury MTC (redacted).pdf`, and `Helen_Rasho_Decl.pdf` as
 `Ingrid Strangeways Decl (redacted).pdf`. Names run together are read too:
-`HelenRasho Decl.pdf` becomes `IngridStrangeways Decl (redacted).pdf`.
+`HelenRasho Decl.pdf` becomes `IngridStrangeways Decl (redacted).pdf`. A value
+the key spells with a hyphen or an underscore is found however the name
+separates its words, and faked whole: `Mary Kate_Olsen Decl.pdf`, where the
+key binds `Mary-Kate Olsen`, is saved as `Ruth-Ann Pell Decl (redacted).pdf`,
+and `23_cv_01234 Order.pdf` as `23-cv-05678 Order (redacted).pdf`.
 Re-redacting a redacted copy marks it once, not twice.
 
 **The name hides what the pages hide.** After faking, the name is checked for
@@ -54,11 +58,15 @@ name welded to another word (`RashoDecl.pdf`, `RASHODECL.pdf`,
 `Rashodecl.pdf`, `Rasho2023.pdf`), a possessive written without its
 apostrophe (`RASHOS OPP.pdf`), a long name or a case number inside a word or
 spaced out (`25STCV59720Complaint.pdf`, `25 STCV 59720 Complaint.pdf`), a name
-typed without its accents or its apostrophe (`Jose Garcia`, `OBRIEN`), an
-e-mail address spelled otherwise than the key spells it, a value the key
-holds an instruction for rather than a pseudonym — the copy is saved under a
-neutral name instead, such as `document 3fa9c1 (redacted).pdf`. The same
-document always gets the same neutral name. An e-mail address in the name is
+typed without its accents or its apostrophe (`Jose Garcia`, `OBRIEN`,
+`ObrienDecl`), a long surname run into a word (`KowalczykDecl.pdf`), a
+name's words in another order or around an initial, where a word of it would
+stand beside a pseudonym or the whole name would stand (`Rasho_Helen_Decl.pdf`,
+`Helen M. Rasho Decl.pdf`, `Vrba, Tomas Decl.pdf`), an e-mail address spelled
+otherwise than the key spells it, a value the key holds an instruction for
+rather than a pseudonym — the copy is saved under a neutral name instead,
+such as `document 3fa9c1 (redacted).pdf`. The same document always gets the
+same neutral name. An e-mail address in the name is
 faked whole, underscores and all: `Letter to helen_rasho@rashofamilylaw.com.pdf`
 is saved as `Letter to quenby3@postbox9.org (redacted).pdf`.
 
@@ -66,9 +74,13 @@ The check errs toward the neutral name. With no dictionary to consult, a
 capitalised word with a party's short name inside it is read as the name:
 `Marketing Plan.pdf` in a matter with a party named Mark is saved as
 `document … (redacted).pdf`; rename the copy yourself if you need a better one.
-One shape is not caught: a short name run into another word with no capital
-in the name itself (`rashodecl.pdf`, `Declrasho.pdf`) — look at the name the
-Save dialog offers before you share the copy.
+Three shapes are not caught: a short name run into another word with no
+capital in the name itself (`rashodecl.pdf`, `Declrasho.pdf`, an e-mail
+address typed without its `@`); a name of three letters or fewer run into
+another word with no change of case to part it (`LEEDECL.pdf`, `Leedecl.pdf`
+— `LeeDecl.pdf` is caught); and one word of a longer name standing alone
+where the key binds only the whole name (`Vrba Decl.pdf` for `Tomas Vrba`) —
+look at the name the Save dialog offers before you share the copy.
 
 Pages render at **200 dpi** by default; 150 makes a smaller file and 300 a
 sharper one. Because the result is images, it is larger than the original and

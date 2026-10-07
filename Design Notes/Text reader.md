@@ -57,6 +57,45 @@ nothing above. Hosted, the fakes go on only once the screen share is granted
 (`shareThisTab` answers the frame-taker), and a share that sends no frame is
 given up after five seconds, so the fakes never stay on.
 
+**A page shown ⇄ Raw is a page, not chrome (`shotRaw`).** It was left to
+`swapChrome`, which runs `egressSwaps` one text node at a time, and the raw
+sheet's orange marks split a name into a node a piece: a name wrapped down a
+caption's column ("…and Jonathan" / "Avery Smith Walker, an") was read as
+"Jonathan", matching nothing, and "Avery Smith Walker", matching the bare
+"Walker" row, so the PNG carried "Jonathan" / "Avery Smith Cascadia" — under
+a toast saying the name was covered with `WITHHELD`, the cover having been
+laid on the hidden `.page-body`. The same for a name with a pseudonym, under
+"the names in their pseudonyms"; on main and before this branch too. Now each
+near raw sheet is read whole before its page's body is touched
+(`rawPageText`, its fakes and spot keeps in their places, after `fillRaw`
+brings it up to date) and its swaps are made in its own text nodes by
+`swapInNodes`, the marks and a selection in it standing; `swapChrome` skips
+`.raw-sheet`. The print of a raw page already read it whole (`refreshRawPages`
+rebuilds it from the covered body), and so did a copy (`copyOfRaw`).
+
+**The window is live while the picture is taken (`shotHeldBack`).** The fakes
+are up from `fakesForShot` until `back()`, the frame drawn 300 ms and two
+frames after the share dialog closes, and anything that wrote into the window
+meanwhile wrote past them. The flag pop-up: the fakes' own edits move the
+selection and fire `selectionchange`, `showFlagPop` rewrote `#flag-pop-note`
+from `leakIn(…).real`, and the PNG said "“Dana Okafor” is in the key and
+stands unfaked here…" — or "“Gregorio Sarvinyan”…" for a name the toast said
+was covered; with 🚩 on, a drag over an orange name leaves exactly that state
+by design. The run bar: `checkRun`, on the focus coming back as the share
+dialog closes or on its 30-second tick, found the bar's text (faked in place)
+not what it would say and wrote the real one back — "PDF-Linker is running on
+Rasho v Quillmark", a case folder being named for its parties. Both on main at
+b0a2d0c too. Now the pop-up and the keep menu are hidden for the picture and
+put back after it; `showFlagPop`, `showRunBar` and the typed-name converter
+(`convertTypedReals`, whose `normalize()` would also take out the empty text
+nodes a wrapped name leaves for the picture, which the put-back then cannot
+find) hold what they would write while `shotPut` is set and write it in
+`back()` (`flagPopHeld`, `runBarHeld`, `caretHeld`); a toast raised meanwhile
+goes up through `egressText`; `saveDocument` and `flagSelection` refuse, the
+page holding the picture's words; the hover tip shows nothing. Residual: a
+writer into the window that is none of these and lands inside the capture
+window writes past the fakes all the same; these are the ones found.
+
 **🖨 Print and a page swapped for its PDF page.** `fakesForPrint` runs every
 page body forward (`egressText`: a name the key holds only an instruction for
 printed as `WITHHELD`, and named in a toast once the dialog closes) and shows

@@ -1519,6 +1519,39 @@ export function legacyStateHold({ textFiles = false, sameName = 0, saved = "", o
 }
 
 /**
+ * An older build's stored list (as readStoredValues gives it) split by what
+ * legacyStateHold answered for it: `{ move, held }`, the part read into the
+ * folder being opened and the part held aside, either null where empty.
+ *
+ * NOT THE FLAGS. The whole list was held aside wherever the folder could not
+ * show it was last written there — and the ordinary state after a run is just
+ * that, since a run spends New Real Values.txt once it has applied it. So for
+ * an operator who had flagged, saved and run PDF-Linker, the first open after
+ * the upgrade held every flag aside with the keeps, though only one folder of
+ * the name had ever been known: the names flagged as standing in the clear
+ * lost their red mark, nothing handed them to PDF-Linker again, and the save
+ * wrote no file. The two halves of the list fail in opposite directions. A
+ * keep or a page line read into the wrong case takes the mark off a real name
+ * and hands its run a `no:` for it; a flag read into the wrong case only fakes
+ * one more name there (and a phrase only joins a flag's words). So where one
+ * folder of the name is known ("unwritten", "differs") the flags and their
+ * phrases move and only the keeps and page lines are held; where the list was
+ * last written here ("") all of it moves; where two folders of the name are
+ * known ("named"), or it is a Text Files folder's ("text" — every case's had
+ * the one name), all of it is held, as no one folder can be told from another.
+ */
+export function legacyListSplit(list, hold) {
+  const l = list || {};
+  const any = (x) => Object.values(x).some((v) => Array.isArray(v) && v.length);
+  const whole = { values: l.values || [], keeps: l.keeps || [], phrases: l.phrases || [], noOcr: l.noOcr || [], ocrAgain: l.ocrAgain || [], textFixed: l.textFixed || [] };
+  if (!hold) return { move: any(whole) ? whole : null, held: null };
+  if (hold === "text" || hold === "named") return { move: null, held: any(whole) ? whole : null };
+  const move = { values: whole.values, keeps: [], phrases: whole.phrases.filter((p) => isPhrase(whole.values, p)), noOcr: [], ocrAgain: [], textFixed: [] };
+  const held = { values: [], keeps: whole.keeps, phrases: [], noOcr: whole.noOcr, ocrAgain: whole.ocrAgain, textFixed: whole.textFixed };
+  return { move: any(move) ? move : null, held: any(held) ? held : null };
+}
+
+/**
  * Two stored lists ({ values, keeps, phrases, noOcr, ocrAgain, textFixed })
  * made one: everything in either, `mine` winning where both name a value or
  * a page — a keep's control, a phrase, a page asked to be read again rather

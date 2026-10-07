@@ -216,7 +216,13 @@ let lastCites = [];
 
 // ── small helpers ───────────────────────────────────────────────────────────
 let toastTimer = null;
+let shotPut = null; // while a screenshot is being taken: how the screen goes back (fakesForShot)
 function toast(msg, { error = false, ms = 3200 } = {}) {
+  // While a screenshot's fakes are up (shotPut) the window is being taken as
+  // a picture, and a toast landing then — a folder's read finishing, a flag —
+  // is in it as written, past swapChrome, which had already read the window.
+  // It goes up in the pseudonyms, as the window does (see fakesForShot).
+  if (shotPut && typeof msg === "string") { try { msg = egressText(msg).text; } catch { /* as written */ } }
   toastEl.textContent = msg;
   toastEl.classList.toggle("error", !!error);
   toastEl.hidden = false;
@@ -934,7 +940,8 @@ async function shareThisTab() {
   };
 }
 
-let shotPut = null; // while a screenshot is being taken: how the screen goes back
+// (shotPut, while a screenshot is being taken: how the screen goes back, is
+// declared with the small helpers, which read it: see toast.)
 let shotLeftOut = 0; // …and how many PDF pages it left out whole (pdfNamesOn), for the toast
 let shotWithheld = new Set(); // …and the names it covered with WITHHELD (egressSwaps), for the toast
 
@@ -1000,7 +1007,9 @@ function swapInNodes(segs, swaps, edits) {
  * whole, which the citations need), and neither is anything hidden.
  */
 function swapChrome(root, edits, fields) {
-  const skip = ".page-body, .textLayer, script, style, [hidden]";
+  // A page shown ⇄ Raw is a page, read whole by fakesForShot (shotRaw), not
+  // node by node here: see there.
+  const skip = ".page-body, .raw-sheet, .textLayer, script, style, [hidden]";
   const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
     acceptNode: (n) => n.nodeType === 1
       ? (n.matches(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_SKIP)
@@ -1134,6 +1143,45 @@ function coverPdfNames({ sheet, names, whole = false }) {
 }
 
 /**
+ * A page shown ⇄ Raw (setRaw), its file's text written over for the picture
+ * the way a page's body is: read WHOLE, as the save reads it (rawPageText,
+ * the fakes and spot keeps in their places), and put back through the raw
+ * sheet's own text nodes, so its orange marks and a selection in it stand.
+ *
+ * It was left to swapChrome, which reads the window's words one text node at
+ * a time, and the raw sheet's marks split a name into a node a piece: a name
+ * wrapped down a caption's column ("…and Jonathan" / "Avery Smith Walker,
+ * an") was read as "Jonathan", which matches nothing, and "Avery Smith
+ * Walker", which matched the bare "Walker" row — the PNG carried "Jonathan" /
+ * "Avery Smith Cascadia", a name half scrubbed that reads as finished, under
+ * a toast saying the name was covered (the cover had been laid on the hidden
+ * body). Read whole, the column's pieces are one name: its pseudonym on the
+ * first piece and nothing on the rest, or WITHHELD where the key holds only
+ * an instruction for it — as the print of a raw page has it (refreshRawPages,
+ * which rebuilds the sheet from the covered body). Done before the page's
+ * body is touched: the raw text is built from it.
+ */
+function shotRaw(sec, edits) {
+  const pre = sec.classList.contains("raw") ? sec.querySelector(".page-inner > .raw-sheet .raw-text") : null;
+  if (!pre) return;
+  fillRaw(sec); // as the page stands now; nothing is written when it already is
+  const { text, held, pns } = rawPageText(sec);
+  const segs = [];
+  let at = 0;
+  const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    segs.push({ node: n, start: at, end: at + n.data.length });
+    at += n.data.length;
+  }
+  // The sheet is the page's text by construction (fillRaw); one that is not
+  // cannot have the page's places laid on it, and is read on its own words.
+  const own = segs.map((g) => g.node.data).join("");
+  const swaps = own === text ? egressSwaps(text, held, pns) : egressSwaps(own);
+  swapInNodes(segs, swaps, edits);
+  for (const v of withheldIn(swaps)) shotWithheld.add(v);
+}
+
+/**
  * Every real name the key binds that is on screen, shown as its fake for the
  * picture; answers how to put the screen back.
  *
@@ -1149,6 +1197,25 @@ function fakesForShot() {
   hideTip();
   if (!key || shotPut) return () => {};
   shotWithheld = new Set();
+  // THE WINDOW IS STILL LIVE WHILE THE PICTURE IS TAKEN. The fakes are up from
+  // here until back(), and the frame is drawn 300 ms and two frames after the
+  // share dialog closes (shareThisTab) — up to five seconds where the share is
+  // slow. Anything that writes into the window meanwhile writes past the
+  // fakes, which were laid on the words as they stood: the flag pop-up,
+  // rewritten by the selectionchange the fakes' own edits fire, put "“Dana
+  // Okafor” is in the key and stands unfaked here…" (leakIn's real value) in
+  // the PNG, and with 🚩 on a drag over an orange name leaves that pop-up up
+  // by design; the run bar, rechecked on the focus coming back as the share
+  // dialog closes or on its 30-second tick, wrote "PDF-Linker is running on
+  // Rasho v Quillmark" back over its faked text — a case folder is named for
+  // its parties. So the pop-up and the keep menu are taken off the screen for
+  // the picture and put back after; the pop-up, the run bar and the typed-name
+  // converter hold what they would write until back(), and write it then
+  // (shotHeld); a toast goes up in the pseudonyms (toast); a flag or a save
+  // is refused, the page holding the picture's words and not the case's.
+  const popWas = !flagPop.hidden, menuWas = !keepMenu.hidden;
+  flagPop.hidden = true;
+  keepMenu.hidden = true;
   // The Pages tab's pictures are pictures: no fake reaches into one, so they
   // are blurred for the shot.
   document.body.classList.add("shot-taking");
@@ -1161,6 +1228,7 @@ function fakesForShot() {
   // Every page measured before any is written: one layout, not one a page.
   const near = [...pagesEl.querySelectorAll(".tpage:not(.shed)")].filter((sec) => nearWindow(sec.getBoundingClientRect(), 1));
   for (const sec of near) {
+    if (fwd && fwd.rx) shotRaw(sec, edits);
     const body = sec.querySelector(".page-body");
     if (!body) continue;
     // The names Esc left as typed are written over in their own nodes below,
@@ -1218,9 +1286,22 @@ function fakesForShot() {
       afterTextChange();
       if (relink) placeCitations(); // …and the underlines go back under the real names now, not in a beat
     }
+    // What was taken off the screen or held for the picture (above).
+    if (menuWas && keepMenuFor) keepMenu.hidden = false;
+    shotHeldBack(popWas);
   };
   shotPut = back;
   return back;
+}
+/** What the screenshot held while its fakes were up, written now they are not (fakesForShot). */
+function shotHeldBack(popWas) {
+  const pop = popWas || flagPopHeld;
+  flagPopHeld = false;
+  if (pop) showFlagPop();
+  const bar = runBarHeld;
+  runBarHeld = null;
+  if (bar && bar[0] === dirHandle) showRunBar(...bar);
+  for (const body of caretHeld) convertTypedRealsSoon(body);
 }
 
 /** One picture taken with the names in their pseudonyms, and the screen put back. */
@@ -2460,13 +2541,14 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // the folder shows it was this folder's (never a Text Files folder's); and
   // the list kept while this case's Text Files folder was the one open,
   // brought up into this one. Each writes this folder's own storage only.
-  let note = "";
-  if (rec) note = await adoptLegacyState(h, rec, text);
-  if (rec && found.textDir && !text) note += await carryUpTextFiles(found.textDir, own, h);
+  // What each moved is said once, by whichever toast comes next: queued in
+  // storage in the same step as the move (queueListNote), so neither an
+  // adoption overtaking this one nor a reload before its toast loses it.
+  if (rec) await adoptLegacyState(h, rec, text);
+  if (rec && found.textDir && !text) await carryUpTextFiles(found.textDir, own, h);
   // Overtaken while that was read, what it moved stays moved — it is this
   // folder's — and what it has to say is said by the next toast that says it.
-  if (gone()) { listNote += note; return overtaken(); }
-  listNote = note;
+  if (gone()) return overtaken();
   // The combined file, when the folder has one, listed first: it is the one
   // file holding every export, and the one the drafting model was handed.
   folderDocs = light ? [] : (found.combined ? [found.combined].concat(found.docs) : found.docs);
@@ -2626,19 +2708,43 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   }
   // What happened to the list, where nothing else this adoption says has
   // said it; a quiet adoption leaves it to the toast its caller makes.
-  if (!quiet && listNote) toast(listNoteOnce().trim(), { ms: 12000 });
+  if (!quiet && listNotePending()) toast(listNoteOnce().trim(), { ms: 15000 });
   return found;
 }
 
 // What an adoption has to say about the folder's list — an older build's
 // held aside, or the Text Files folder's brought up (adoptLegacyState,
 // carryUpTextFiles) — said once, by whichever toast comes next.
-let listNote = "";
+//
+// KEPT IN STORAGE UNTIL IT IS SAID. It was one variable, which the next
+// adoption set to its own note (often none): an adoption overtaken by
+// another — case A opened, its key slow to read, case B opened meanwhile —
+// returned before its toast, B's adoption cleared the note, and the next time
+// A opened there was nothing left to move, so the holding of A's list was
+// never said at all. A reload between the move and the toast lost it the same
+// way, the toast coming only after the key and the worksheet are read. So the
+// note is queued (LIST_NOTES_KEY) in the same step as the move it describes,
+// and taken off only by the toast that says it — of whichever folder: each
+// note names its folder. Where storage is off the queue is this session's.
+const LIST_NOTES_KEY = "textReader.listNotes";
+let listNotesHere = [];
+function queueListNote(note) {
+  const n = String(note || "").trim();
+  if (!n) return;
+  const q = lsGet(LIST_NOTES_KEY, []);
+  try { localStorage.setItem(LIST_NOTES_KEY, JSON.stringify((Array.isArray(q) ? q : []).concat(n))); }
+  catch { listNotesHere.push(n); }
+}
+function listNotePending() {
+  const q = lsGet(LIST_NOTES_KEY, []);
+  return listNotesHere.length > 0 || (Array.isArray(q) && q.length > 0);
+}
 function listNoteOnce() {
-  if (!listNote) return "";
-  const s = " " + listNote.trim();
-  listNote = "";
-  return s;
+  const q = lsGet(LIST_NOTES_KEY, []);
+  const all = (Array.isArray(q) ? q : []).concat(listNotesHere).filter((x) => typeof x === "string" && x);
+  listNotesHere = [];
+  try { localStorage.removeItem(LIST_NOTES_KEY); } catch { /* storage off: the session's queue was all of it */ }
+  return all.length ? " " + all.join(" ") : "";
 }
 
 /**
@@ -2667,7 +2773,21 @@ function listNoteOnce() {
  * list held aside is only flagged again. A slot the id already fills is not
  * written over: that value is held aside too.
  *
- * Returns what to say, or "".
+ * …SAVE THE FLAGS, where one folder of the name is known (TD.legacyListSplit).
+ * Holding the whole list held them too, and a run spends New Real Values.txt,
+ * so after any run the list "differs": the first open after the upgrade took
+ * the red mark off every name the operator had flagged as standing in the
+ * clear and handed none of them to PDF-Linker again, where the build before
+ * kept them marked and wrote them on the next save. A flag in the wrong case
+ * fakes one more name there; it is the keeps and the page lines that are
+ * held. They are merged into the folder's list (TD.mergeStoredLists), so a
+ * list the id already keeps loses nothing; the record of what was last
+ * written stays behind with the rest, and the next save writes the file.
+ *
+ * What it held, it names, every value of it — nothing in the reader reads the
+ * held list, so the note is the operator's only way to know what to flag or
+ * keep again — and the note is queued (queueListNote) in the same step as the
+ * move, to be said by the next toast whatever happens in between.
  */
 async function adoptLegacyState(h, rec, text) {
   const name = h.name;
@@ -2682,35 +2802,61 @@ async function adoptLegacyState(h, rec, text) {
   }
   const hold = TD.legacyStateHold({ textFiles: text, sameName: rec.sameName, saved, onDisk });
   const ours = !hold;
-  let held = null, heldOther = 0;
+  let held = null, moved = null, heldOther = 0;
+  const holdAside = (from, raw) => {
+    let at = "textReader.held." + from.slice("textReader.".length);
+    if (localStorage.getItem(at) != null) at += "#" + Date.now();
+    localStorage.setItem(at, raw);
+  };
   for (const m of moves) {
     try {
       const raw = localStorage.getItem(m.from);
       if (raw == null) continue;
-      if (ours && localStorage.getItem(m.to) == null) localStorage.setItem(m.to, raw);
+      if (m.from === VALUES_PREFIX + name) {
+        // The list itself: split (TD.legacyListSplit), the half that moves
+        // merged into whatever the id keeps, the rest held aside.
+        const split = TD.legacyListSplit(readStoredValues(m.from), hold);
+        if (split.move) {
+          if (localStorage.getItem(m.to) == null) lsSet(m.to, split.move);
+          else lsSet(m.to, TD.mergeStoredLists(readStoredValues(m.to), split.move));
+          moved = split.move;
+        }
+        if (split.held) { holdAside(m.from, JSON.stringify(split.held)); held = split.held; }
+      } else if (ours && localStorage.getItem(m.to) == null) localStorage.setItem(m.to, raw);
       else {
-        let at = "textReader.held." + m.from.slice("textReader.".length);
-        if (localStorage.getItem(at) != null) at += "#" + Date.now();
-        localStorage.setItem(at, raw);
-        if (m.from === VALUES_PREFIX + name) held = readStoredValues(at);
-        else if (m.from !== VALUES_SAVED_PREFIX + name) heldOther++;
+        holdAside(m.from, raw);
+        if (m.from !== VALUES_SAVED_PREFIX + name) heldOther++;
       }
       localStorage.removeItem(m.from);
     } catch { /* storage full: left where it was, and read by nothing */ }
   }
-  const n = held ? held.values.length + held.keeps.length + held.noOcr.length + held.ocrAgain.length + held.textFixed.length : 0;
-  if (!n && !heldOther) return "";
+  const lines = held ? held.noOcr.length + held.ocrAgain.length + held.textFixed.length : 0;
+  const n = held ? held.values.length + held.keeps.length + lines : 0;
+  // Flags read in where the rest was held: said, so the operator knows where
+  // they came from (and they show in the Flagged panel, marked on the page).
+  const came = !ours && moved && moved.values.length
+    ? ` Its ${moved.values.length} flag${moved.values.length === 1 ? " is" : "s are"} read into this folder's list — a flag in the wrong case only fakes one more name.`
+    : "";
+  if (!n && !heldOther) {
+    if (came) queueListNote(`An earlier version kept one list for every folder named “${name}”.` + came);
+    return;
+  }
   const why = ours ? "this folder already keeps one of its own"
     : hold === "text" ? (isTextSub(name) ? "every case's exports are in a folder of that name" : "this one holds a case's exports, not the case")
       : hold === "named" ? `${rec.sameName} folders of that name are known here`
         : hold === "unwritten" ? "it was never written into any of them"
           : `what it last wrote is not the ${TD.VALUES_FILE} in this one`;
+  // Every value named: nothing in the reader reads the held list.
+  const named = n
+    ? held.values.map((v) => `“${v}”`).concat(held.keeps.map((k) => `${k.control}: “${k.value}”`))
+      .concat([...held.noOcr, ...held.ocrAgain, ...held.textFixed].map((e) => `${e.doc || "a document"} p. ${e.page}`))
+    : [];
   const what = n
-    ? `${held.values.length} flag${held.values.length === 1 ? "" : "s"}, ${held.keeps.length} keep${held.keeps.length === 1 ? "" : "s"}`
-      + (held.noOcr.length + held.ocrAgain.length + held.textFixed.length ? ` and ${held.noOcr.length + held.ocrAgain.length + held.textFixed.length} page line${held.noOcr.length + held.ocrAgain.length + held.textFixed.length === 1 ? "" : "s"}` : "")
-      + (held.values.length || held.keeps.length ? ` (${held.values.concat(held.keeps.map((k) => k.value)).slice(0, 4).join(", ")}${held.values.length + held.keeps.length > 4 ? "…" : ""})` : "")
+    ? [held.values.length ? `${held.values.length} flag${held.values.length === 1 ? "" : "s"}` : "",
+      held.keeps.length ? `${held.keeps.length} keep${held.keeps.length === 1 ? "" : "s"}` : "",
+      lines ? `${lines} page line${lines === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ") + ` (${named.join(", ")})`
     : "the spot keeps and page swaps kept for its documents";
-  return `An earlier version kept one list for every folder named “${name}”, and ${why}, so whose it is cannot be told: ${what} are held aside, not read into this folder. Flag or keep again ${text ? "in the case folder above" : "here"} what this case still needs.`;
+  queueListNote(`An earlier version kept one list for every folder named “${name}”, and ${why}, so whose it is cannot be told: ${what} ${n === 1 ? "is" : "are"} held aside, not read into this folder. Flag or keep again ${text ? "in the case folder above it" : `in “${name}”`} what that case still needs.` + came);
 }
 
 /**
@@ -2734,15 +2880,15 @@ async function adoptLegacyState(h, rec, text) {
  */
 async function carryUpTextFiles(textDir, own, h) {
   const rec = await dirIdFor(textDir, null, { mint: false });
-  if (!rec) return "";
+  if (!rec) return;
   const from = VALUES_PREFIX + rec.id;
-  if (lsGet(from, null) == null) return "";
+  if (lsGet(from, null) == null) return;
   const theirs = readStoredValues(from);
   lsSet(own, TD.mergeStoredLists(readStoredValues(own), theirs));
   try { localStorage.removeItem(from); localStorage.removeItem(VALUES_SAVED_PREFIX + rec.id); } catch { /* left: read by nothing but its own folder */ }
   const lines = theirs.noOcr.length + theirs.ocrAgain.length + theirs.textFixed.length;
-  if (!theirs.values.length && !theirs.keeps.length && !lines) return "";
-  return ` The list kept while ${textDir.name} was the folder open — ${theirs.values.length} to fake, ${theirs.keeps.length} to keep${lines ? `, ${lines} page line${lines === 1 ? "" : "s"}` : ""} — is ${h.name}'s now, and the next save writes it into its ${TD.VALUES_FILE}.`;
+  if (!theirs.values.length && !theirs.keeps.length && !lines) return;
+  queueListNote(`The list kept while ${textDir.name} was the folder open — ${theirs.values.length} to fake, ${theirs.keeps.length} to keep${lines ? `, ${lines} page line${lines === 1 ? "" : "s"}` : ""} — is ${h.name}'s now, and the next save writes it into its ${TD.VALUES_FILE}.`);
 }
 
 // The offer bar: a lone file whose case folder is known but needs a click to
@@ -2791,12 +2937,14 @@ const RUN_RECHECK_MS = 30000;
 const RUN_STALE_MS = 30 * 60000; // untouched this long, the marker may be a dead run's
 let runShown = null;  // { dir, state: "running" | "ended" } while the bar is up
 let runTimer = 0;
+let runBarHeld = null; // showRunBar's arguments, held while a screenshot's fakes are up (shotHeldBack)
 let runSeq = 0;       // the latest look wins: an older one answering late says nothing
 function syncRunHeight() {
   document.documentElement.style.setProperty("--run-h", runBar.hidden ? "0px" : runBar.offsetHeight + "px");
 }
 function hideRunBar() {
   runShown = null;
+  runBarHeld = null;
   clearInterval(runTimer);
   runTimer = 0;
   runBar.hidden = true;
@@ -2864,6 +3012,11 @@ async function checkRun({ opening = false } = {}) {
 }
 
 function showRunBar(dir, state, text, action) {
+  // Not while a screenshot's fakes are up: the bar's text was faked in place
+  // for the picture, and the bar compares what it shows with what it would
+  // say — they differ, so it wrote the case folder's real name back into the
+  // picture. Held, the latest look's, and written once the screen is back.
+  if (shotPut) { runBarHeld = [dir, state, text, action]; return; }
   runShown = { dir, state };
   // Set only when it changes: the bar is an alert, and a recheck saying the
   // same again is not news to a screen reader.
@@ -4941,6 +5094,12 @@ function convertTypedReals(body, { quiet = false, tally = null } = {}) {
   // under its own key again — the save refuses meanwhile. (Asked first, so a
   // name held for the caret is still held when this runs again.)
   if (keyAway()) return 0;
+  // Nor while a screenshot's fakes are on the page: it would read the
+  // picture's words as typed ones, and its normalize() takes out the empty
+  // text nodes a name wrapped down a column leaves for the picture, which the
+  // put-back then cannot find. Held, and asked again once the page is back
+  // (shotHeldBack).
+  if (shotPut) { caretHeld.add(body); return 0; }
   caretHeld.delete(body);
   if (!fwd || !fwd.rx || !body.isConnected) return 0;
   body.normalize();
@@ -5100,6 +5259,10 @@ function placeCaretOnDisk(body, pos) {
 /** Writes the document (and what the case folder is owed); false where it did not. */
 async function saveDocument() {
   if (!doc) return false;
+  // Not while a screenshot's fakes are on the page (fakesForShot): the page
+  // holds the picture's words — its pseudonyms and covers written into the
+  // text nodes — and not the case's.
+  if (shotPut) { toast("Not saved: a screenshot is being taken — save again in a moment.", { error: true }); return false; }
   // NOT WHILE A FOLDER IS BEING READ (`adopting`). The key in hand is the new
   // folder's from the moment its key file is read, and the document on screen
   // is the last folder's until the new one opens a document of its own: a name
@@ -8751,6 +8914,8 @@ function piecesOf(h) { return h.pieces && h.pieces.length ? h.pieces : [h.range]
 
 // ── pseudonym tooltip ──────────────────────────────────────────────────────────────────
 pagesEl.addEventListener("mouseover", (e) => {
+  // No tip in a screenshot: with Show fakes on it names the real name.
+  if (shotPut) { hideTip(); return; }
   const here = e.target.closest && e.target.closest("[data-here]");
   if (here && settings.marks) {
     tipEl.innerHTML = "";
@@ -9545,10 +9710,14 @@ $("master-input").addEventListener("change", async () => {
 
 const showFlagPopSoon = debounce(showFlagPop, 120);
 document.addEventListener("selectionchange", showFlagPopSoon);
+let flagPopHeld = false; // asked for while a screenshot's fakes were up (shotHeldBack)
 // A press on the pages with flagging on, not yet let go: the pop-up waits for
 // the release, which flags the selection or asks its question then.
 let flagDrag = false;
 function showFlagPop() {
+  // The selection reads the picture's words while a screenshot's fakes are
+  // up, and the note would name the key's real value over them (fakesForShot).
+  if (shotPut) { flagPopHeld = true; return; }
   const s = flagDrag ? null : currentSelection();
   if (!s) { flagPop.hidden = true; return; }
   const problem = TD.flagProblem(s.text, s.allFaked);
@@ -9671,6 +9840,7 @@ function flagTakes(s) {
 }
 /** The selection flagged, or its question asked; whether it was flagged. */
 function flagWhereReleased() {
+  if (shotPut) return false; // the page holds the picture's words (fakesForShot)
   const s = currentSelection();
   if (!s) return false;
   if (!flagTakes(s)) { showFlagPop(); return false; }
@@ -9714,6 +9884,9 @@ function wordsOf(x) {
  * the switch's release put no question, and refuse it (citedIn).
  */
 function flagSelection({ asked = false } = {}) {
+  // While a screenshot's fakes are up the selection reads them: a flag would
+  // hand PDF-Linker its own pseudonym, or the cover, as a real value.
+  if (shotPut) return;
   const s = currentSelection();
   const problem = s ? TD.flagProblem(s.text, s.allFaked) : "Select the unfaked name first.";
   if (problem) { toast(problem, { error: true }); return; }
