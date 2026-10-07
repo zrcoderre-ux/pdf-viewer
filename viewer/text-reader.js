@@ -2693,6 +2693,166 @@ function showKeyOffer(text, action, onAct) {
 function hideKeyOffer() { keyOffer.hidden = true; delete keyOffer.dataset.master; delete keyOffer.dataset.textFiles; syncOfferHeight(); }
 $("key-offer-close").addEventListener("click", hideKeyOffer);
 
+// ── a PDF-Linker run going in the case folder ──────────────────────────────────
+//
+// A run rewrites the case folder as it goes: every export in Text Files, one
+// PDF after another, then the key and LEAKS.xlsx at its end. A document opened
+// meanwhile is the last run's text, or text this run is part-way through,
+// read under a key it is about to replace; and whatever is saved before it
+// finishes can be overwritten by it, or overwrite what it has just written.
+// The run says it is going the way it says so in Explorer: a zero-byte
+// `ETA <estimate>.txt` in the case folder, rewritten after each PDF and
+// replaced by `DONE <clock>.txt` on a clean finish (TD.runMarker). So every
+// export opened looks for one, and the bar says so while it stands.
+//
+// It is looked for again while the bar is up (RUN_RECHECK_MS, and on coming
+// back to the tab), so the bar says when the run has ended rather than going
+// on warning about one that is over, and offers the folder read again: what
+// is open is what stood before it did. A run that died part-way leaves its
+// marker behind until the next run clears it (a crashed --fix-leaks clears
+// its own), so the bar gives the marker's age — it is rewritten after every
+// PDF, and one untouched for a long while is that — and × puts it away until
+// the next document is opened.
+const runBar = $("run-bar");
+const RUN_RECHECK_MS = 30000;
+const RUN_STALE_MS = 30 * 60000; // untouched this long, the marker may be a dead run's
+let runShown = null;  // { dir, state: "running" | "ended" } while the bar is up
+let runTimer = 0;
+let runSeq = 0;       // the latest look wins: an older one answering late says nothing
+function syncRunHeight() {
+  document.documentElement.style.setProperty("--run-h", runBar.hidden ? "0px" : runBar.offsetHeight + "px");
+}
+function hideRunBar() {
+  runShown = null;
+  clearInterval(runTimer);
+  runTimer = 0;
+  runBar.hidden = true;
+  syncRunHeight();
+}
+$("run-bar-close").addEventListener("click", hideRunBar);
+
+/**
+ * The newest ETA and DONE markers in the case folder `dir`, each
+ * { label, at }, or null where the folder cannot be read now. Empty files
+ * only, as PDF-Linker scopes its own (`_marker_mtime`).
+ */
+async function runMarkersIn(dir) {
+  let eta = null, done = null;
+  try {
+    for await (const [name, entry] of dir.entries()) {
+      if (entry.kind !== "file") continue;
+      const m = TD.runMarker(name);
+      if (!m) continue;
+      let f;
+      try { f = await entry.getFile(); } catch { continue; }
+      if (f.size !== 0) continue;
+      const hit = { label: m.label, at: f.lastModified };
+      if (m.kind === "ETA") { if (!eta || hit.at > eta.at) eta = hit; }
+      else if (!done || hit.at > done.at) done = hit;
+    }
+  } catch { return null; }
+  return { eta, done };
+}
+
+function agoText(ms) {
+  const min = Math.floor(Math.max(0, ms) / 60000);
+  if (min < 1) return "less than a minute ago";
+  if (min < 90) return `${min} minute${min === 1 ? "" : "s"} ago`;
+  const h = Math.round(min / 60);
+  return `${h} hours ago`;
+}
+
+/**
+ * Whether PDF-Linker is running on the case folder, said in the bar.
+ * `opening`: an export has just been opened, so the bar comes up even where
+ * it was put away; otherwise (the recheck) only a bar already up is updated.
+ * An ETA marker newer than any DONE stamp is a run going — the test
+ * PDF-Linker itself makes of a copied folder (`_copy_is_ahead`).
+ */
+async function checkRun({ opening = false } = {}) {
+  const dir = dirHandle;
+  if (!dir) { runSeq++; hideRunBar(); return; }
+  // A recheck with no bar up asks nothing, and must not count as the latest
+  // look either: a focus landing while an opening's look is reading the
+  // folder would otherwise silence it.
+  if (!opening && !(runShown && runShown.dir === dir)) return;
+  const seq = ++runSeq;
+  if ((await permissionOf(dir, "read")) !== "granted") return;
+  const seen = await runMarkersIn(dir);
+  if (seq !== runSeq || dir !== dirHandle || !seen) return;
+  const { eta, done } = seen;
+  if (eta && (!done || eta.at > done.at)) { showRunning(dir, eta); return; }
+  // No run going. A bar that was warning about one says it has ended, and
+  // stays up until the folder is read again or it is put away: an export
+  // opened after the run is the new text, but the key in hand is still the
+  // one read before it. A bar about another folder has nothing to say here.
+  if (runShown && runShown.dir === dir) { if (runShown.state === "running") showRunEnded(dir, done); }
+  else if (runShown) hideRunBar();
+}
+
+function showRunBar(dir, state, text, action) {
+  runShown = { dir, state };
+  // Set only when it changes: the bar is an alert, and a recheck saying the
+  // same again is not news to a screen reader.
+  if ($("run-bar-text").textContent !== text) $("run-bar-text").textContent = text;
+  const btn = $("run-bar-btn");
+  btn.hidden = !action;
+  if (action) { btn.textContent = action.label; btn.onclick = action.run; }
+  runBar.classList.toggle("done", state !== "running");
+  runBar.hidden = false;
+  syncRunHeight();
+  clearInterval(runTimer);
+  runTimer = state === "running" ? setInterval(() => { checkRun(); }, RUN_RECHECK_MS) : 0;
+}
+
+function showRunning(dir, eta) {
+  const age = Date.now() - eta.at;
+  const stale = age > RUN_STALE_MS
+    ? ` Its ETA file was last updated ${agoText(age)}: a run that stopped part-way leaves it behind, and pdf_linker.log says whether one is still going.`
+    : "";
+  showRunBar(dir, "running",
+    `⚠ PDF-Linker is running on ${dir.name} — ETA ${eta.label}. It is rewriting the exports, and then the key and LEAKS.xlsx: what you open now may be replaced while you read it, and anything you save before it finishes can be overwritten.${stale}`);
+}
+
+function showRunEnded(dir, done) {
+  showRunBar(dir, "ended",
+    done
+      ? `PDF-Linker has finished on ${dir.name} — DONE ${done.label}. The key, the worksheet and the documents in hand were read while it was running.`
+      : `PDF-Linker's run on ${dir.name} has stopped without a DONE stamp — pdf_linker.log says why. The key, the worksheet and the documents in hand were read while it was running.`,
+    { label: "Read the folder again", run: readFolderAfterRun });
+}
+
+/**
+ * The case folder read again after a run, and the open document with it: the
+ * run wrote a new key, new exports and new PDFs, and the reader holds the old.
+ * An export the run renamed (quarantined to .txt.LEAK, or released from it)
+ * is found again by its name without the extension.
+ */
+async function readFolderAfterRun() {
+  const dir = dirHandle;
+  if (!dir) { hideRunBar(); return; }
+  if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
+  dirty = false;
+  hideRunBar();
+  const name = fileName, was = fileHandle;
+  forgetPdfs();
+  dropReady();
+  await adoptFolder(dir, { quiet: true, light: folderLight });
+  if (!doc || !name) return;
+  let f = null, h = was;
+  try { f = h ? await h.getFile() : null; } catch { f = null; }
+  if (!f) {
+    const d = folderDocs.find((x) => TD.docLabel(x.name).toLowerCase() === TD.docLabel(name).toLowerCase());
+    h = d ? d.handle : null;
+    try { f = h ? await h.getFile() : null; } catch { f = null; }
+  }
+  if (f) { await openFile(f, h); return; }
+  retranslate();
+  toast(`${dir.name} is read again, but ${name} is not in it any more — open the document again from Documents.`, { ms: 7000 });
+}
+window.addEventListener("focus", () => { checkRun(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkRun(); });
+
 /**
  * A document opened on its own: attach the key of the case folder it sits
  * in, if the reader has been shown that folder; else say how to.
@@ -2716,6 +2876,7 @@ async function attachKeyForFile(handle) {
     }
     const ask = askBeforeFolder();
     const found = await adoptFolder(at.dir, { quiet: true, light: ask });
+    checkRun({ opening: true }).catch((e) => console.warn(e));
     if (doc) retranslate();
     markDocList();
     // Left out of the Text Files folder, as adoption leaves it out (ownNote).
@@ -2764,6 +2925,9 @@ async function openFileNow(file, handle) {
   // The case folder first, so the document renders under its own key — and so
   // a document built ahead of time is judged against the key it will open under.
   try { await attachKeyForFile(handle || null); } catch (e) { console.warn(e); }
+  // …and whether a PDF-Linker run is rewriting that folder now. Not waited
+  // for: the warning comes up beside the document, never in its way.
+  checkRun({ opening: true }).catch((e) => console.warn(e));
   const built = readyFor(file);
   if (built) {
     ready.delete(file.name); // the reader owns it from here: it is about to be edited
@@ -2973,6 +3137,7 @@ async function forgetFolder() {
   folderDocs = [];
   folderPdfs = [];
   flagsFor = null;
+  hideRunBar(); // the run is that folder's, and the reader no longer holds it
   // The reel is the folder read as one document: with no folder there is
   // nothing to read on to, so what is open becomes the whole of it. The pages
   // hanging off it belong to files this reader is no longer holding.
@@ -3588,7 +3753,7 @@ const placeCitationsSoon = debounce(() => placeCitations(), 450);
 // Whatever asks for the pages to be laid out again has the reading held
 // through it (holdReading): the page being read stays the page on the screen.
 function relayout() { holdReading(); relayoutSoon(); }
-const relayoutSoon = debounce(() => { reelAllLive(); syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); autoRemeasure(); reelTrimSoon(); }, 150);
+const relayoutSoon = debounce(() => { reelAllLive(); syncOfferHeight(); syncRunHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); autoRemeasure(); reelTrimSoon(); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -5390,7 +5555,8 @@ let textEpoch = 0;   // bumped whenever the text under the marks changes
 let scanned = null;  // what the last document-wide pass was made of
 function scanStale() {
   return !scanned || scanned.epoch !== textEpoch || scanned.reals !== reals || scanned.flagged !== flagged
-    || scanned.phrases !== phrases || scanned.keeps !== keeps || scanned.master !== masterKeeps || scanned.spots !== spots;
+    || scanned.phrases !== phrases || scanned.keeps !== keeps || scanned.master !== masterKeeps || scanned.spots !== spots
+    || scanned.sheet !== sheetParsed();
 }
 function paintHighlights() {
   refreshRawPages(); // a raw page's text, and the names standing in it
@@ -5426,10 +5592,11 @@ async function scanDocument() {
 function giveUpOnMarks(spent, page, pages) {
   marksOff = true;
   leakHits = [];
+  sheetHits = [];
   flaggedHits = new Map();
   scannedDocs = new Set();
   scanSoon.cancel();
-  try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); } catch { /* none to clear */ }
+  try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); CSS.highlights.delete("leakrows"); } catch { /* none to clear */ }
   $("st-leaks").textContent = "";
   $("st-kept").textContent = "";
   // A walk waiting on this document's reading is waiting on one that is not
@@ -5438,7 +5605,7 @@ function giveUpOnMarks(spent, page, pages) {
   offerToCopy(`The marks over the text took more than ${Math.round(spent / 1000)} seconds on this document (page ${page} of ${pages}) and are off for it. The words are all here; the names are not marked.`);
 }
 
-/** The current LEAKS row's value, marked wherever it stands. */
+/** The current LEAKS row's value, marked wherever it stands — and every other row still to answer. */
 function paintRowMarks() {
   return during("marking the worksheet's rows", () => paintRowMarksNow());
 }
@@ -5446,6 +5613,7 @@ function paintRowMarksNow() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   leakRowRanges = rowRanges(leakRowValue);
   CSS.highlights.set("leakrow", highlightOf(leakRowRanges.map((x) => x.range)));
+  CSS.highlights.set("leakrows", highlightOf(pendingSheetRanges()));
   markLeakHere();
 }
 /** One reading of the whole document; false where it gave up part-way. */
@@ -5460,9 +5628,10 @@ async function scanPass() {
 const MARK_BUDGET = 8000; // ms of work, added up across the slices
 let marksOff = false;     // …and whether it has given up
 async function scanPassNow(pass) {
-  const mark = { epoch: textEpoch, reals, flagged, phrases, keeps, master: masterKeeps, spots };
+  const mark = { epoch: textEpoch, reals, flagged, phrases, keeps, master: masterKeeps, spots, sheet: sheetParsed() };
   const moved = () => mark.epoch !== textEpoch || mark.reals !== reals || mark.flagged !== flagged
-    || mark.phrases !== phrases || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots;
+    || mark.phrases !== phrases || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots
+    || mark.sheet !== sheetParsed();
   const flaggedRanges = [];
   const leakRanges = [];
   const hits = [];
@@ -5483,6 +5652,13 @@ async function scanPassNow(pass) {
   // page read later shows which names were left alone on purpose.
   const keptRx = keptMarkMatcher();
   const keptRanges = [];
+  // Every value the LEAKS worksheet has a row for, wherever it stands, so the
+  // rows the walk has yet to reach are orange before it gets there. All of
+  // them, answered or not: which are still to answer moves with every
+  // decision, and is sorted out when the marks are painted
+  // (pendingSheetRanges), which a decision does not make this pass again for.
+  const sheetRx = sheetMatcher();
+  const sheetFound = [];
   let markFrom = performance.now();
   let spent = 0;
   let page = 0;
@@ -5522,7 +5698,7 @@ async function scanPassNow(pass) {
     // pseudonyms blanked; the flagged ones with each pseudonym as its real
     // name, marked only outside it (below); the names in the clear off the
     // disk text.
-    const flat = keptRx ? flatten(body, { blankPn: true }) : null;
+    const flat = keptRx || sheetRx ? flatten(body, { blankPn: true }) : null;
     if (reals) {
       // The names in the clear are read off the DISK text, exactly as the save
       // reads them (standingSpans): the run's fakes and the spot keeps blanked,
@@ -5569,6 +5745,24 @@ async function scanPassNow(pass) {
         }
       }
     }
+    if (sheetRx) {
+      // Off the page as it shows, pseudonyms blanked, as the row in front is
+      // (leakMatches): a value standing inside a pseudonym is faked already.
+      const { text, segs } = flat;
+      sheetRx.lastIndex = 0;
+      let m, n = 0;
+      while ((m = sheetRx.exec(text))) {
+        const fold = sheetFold(m[0]);
+        const r = fold && rangeFor(segs, m.index, m.index + m[0].length);
+        if (r) sheetFound.push({ range: r, fold });
+        if (m.index === sheetRx.lastIndex) sheetRx.lastIndex++;
+        if (++n % HANDFUL === 0) {
+          const held = sheetRx.lastIndex;
+          if (!(await breathe(`reading the marks over the text${where} — the worksheet's values`))) return gaveUp;
+          sheetRx.lastIndex = held;
+        }
+      }
+    }
     if (flagRx) {
       // For the reason above, the red mark is never drawn over a pseudonym:
       // it says the flagged value is standing in the clear and the next run
@@ -5604,6 +5798,7 @@ async function scanPassNow(pass) {
   // Whole, so it goes up: the ranges, what the right-click menu reads off them,
   // and the state this reading was made of.
   leakHits = hits;
+  sheetHits = sheetFound;
   flaggedHits = flagCounts;
   scannedDocs = docsSeen;
   // The master workbook's list says which of its keeps stand here, and this
@@ -5640,6 +5835,7 @@ async function scanPassNow(pass) {
   return true;
 }
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
+let sheetHits = []; // …and each value the LEAKS worksheet has a row for: [{ range, fold }]
 let flaggedHits = new Map(); // …and per document on the page, how many flagged values stand in its clear
 let scannedDocs = new Set(); // …and which documents that paint actually read (the reel sheds the far end)
 let docSeq = 0;              // documents opened, counted: what a reading was made OF
@@ -9011,8 +9207,11 @@ $("master-input").addEventListener("change", async () => {
 
 const showFlagPopSoon = debounce(showFlagPop, 120);
 document.addEventListener("selectionchange", showFlagPopSoon);
+// A press on the pages with flagging on, not yet let go: the pop-up waits for
+// the release, which flags the selection or asks its question then.
+let flagDrag = false;
 function showFlagPop() {
-  const s = currentSelection();
+  const s = flagDrag ? null : currentSelection();
   if (!s) { flagPop.hidden = true; return; }
   const problem = TD.flagProblem(s.text, s.allFaked);
   flagPopBtn.disabled = !!problem;
@@ -9045,6 +9244,17 @@ function showFlagPop() {
       : "\u201c" + leak.real + "\u201d is in the key and stands unfaked here; the flag hands PDF-Linker the whole name. Leave \u201c" + leak.real + "\u201d so?";
     $("flag-pop-keep").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; showKeepMenu({ real: leak.real, fake: leak.fake, leak: true, range: leak.range, pieces: piecesOf(leak) }, e.clientX, e.clientY); };
   }
+  // A value the worksheet has a row for, still to answer (orange, dashed): the
+  // row is where it is answered, and the bar opens on it where the text stands.
+  const row = pnIn || hereIn || leak ? -1 : pendingRowIn(s);
+  $("flag-pop-row").hidden = row < 0;
+  if (row >= 0) {
+    const r = leakRows()[row];
+    flagPopBtn.disabled = true;
+    flagPopNote.textContent = "\u201c" + r.value + "\u201d has a row in " + leaks.name + " still to answer.";
+    $("flag-pop-row").title = `Open row ${row + 1} in the worksheet's bar, without moving the text, and answer it there`;
+    $("flag-pop-row").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; goToLeak(row, { locate: false }); };
+  }
   // Kept by the master workbook: that is what stands between it and a fake,
   // and the answer is to take it off the Master Keep.
   const held = hereIn ? [] : masterHeldIn(s);
@@ -9074,16 +9284,83 @@ function showFlagPop() {
 flagPopBtn.addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
 $("flag-pop-keep").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-master").addEventListener("mousedown", (e) => e.preventDefault());
+$("flag-pop-row").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("click", phraseSelection);
 flagPopBtn.addEventListener("click", flagSelection);
-$("flag-btn").addEventListener("mousedown", (e) => e.preventDefault());
-$("flag-btn").addEventListener("click", flagSelection);
+
+// ── flagging by selecting ───────────────────────────────────────────────────────
+//
+// 🚩 in the tools panel is a switch. On, a name selected on the page with the
+// mouse is flagged as the button is let go — a drag or a double-click, then
+// straight on to the next, with no button to reach for in between. Only what
+// the pop-up's Flag would take without a question: a selection that asks one
+// (kept where it stands, the orange name alone, held by the Master Keep, a
+// pseudonym through and through, a passage) stays selected with the pop-up
+// asking it. A flagged selection is let go of, the caret left at its end, so
+// the red mark shows and the next drag starts clean. Ctrl+Shift+F still flags
+// the one selection. The switch is not remembered: a reader never opens
+// flagging what is only being read.
+let flagMode = false;
+const flagBtn = $("flag-btn");
+const flagBtnTitle = flagBtn.title;
+function setFlagMode(on) {
+  flagMode = !!on;
+  flagDrag = false;
+  flagBtn.setAttribute("aria-pressed", String(flagMode));
+  flagBtn.title = flagMode
+    ? "Flagging is on: select a name on the page with the mouse and let go, and it is flagged. Click to turn flagging off."
+    : flagBtnTitle;
+  document.body.classList.toggle("flag-mode", flagMode);
+}
+/** Whether the selection is flagged as it stands, as the pop-up's Flag would flag it. */
+function flagTakes(s) {
+  if (TD.flagProblem(s.text, s.allFaked)) return false;
+  const hereIn = s.pn ? null : s.here;
+  if (hereIn) return false;
+  const leak = s.pn ? null : leakIn(s.range);
+  if (leak && sameWords(s.text, leak.real)) return false;
+  if (!leak && pendingRowIn(s) >= 0) return false;
+  return !masterHeldIn(s).length;
+}
+/** The selection flagged, or its question asked; whether it was flagged. */
+function flagWhereReleased() {
+  const s = currentSelection();
+  if (!s) return false;
+  if (!flagTakes(s)) { showFlagPop(); return false; }
+  flagSelection();
+  const sel = document.getSelection();
+  if (sel && sel.rangeCount) sel.collapseToEnd();
+  return true;
+}
+flagBtn.addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
+flagBtn.addEventListener("click", () => {
+  if (flagMode) { setFlagMode(false); toast("Flagging off."); return; }
+  setFlagMode(true);
+  // A name selected before the click is flagged with it, as the button always did.
+  if (!flagWhereReleased()) toast("Flagging on: select a name and let go to flag it. Click 🚩 again to stop.", { ms: 4500 });
+});
+// Taken on the document, in the capture phase, so the page's own handlers
+// (the numbered margin's) cannot keep it from being seen.
+document.addEventListener("mousedown", (e) => {
+  // A triple-click's line is a passage more often than a name: the pop-up asks.
+  flagDrag = flagMode && e.button === 0 && e.detail < 3 && !e.ctrlKey && !e.metaKey && !e.altKey && pagesEl.contains(e.target);
+  if (flagDrag) flagPop.hidden = true;
+}, true);
+// The selection is only final once the browser has finished settling it.
+document.addEventListener("mouseup", (e) => {
+  if (!flagDrag || e.button !== 0) return;
+  flagDrag = false;
+  setTimeout(() => { if (flagMode) flagWhereReleased(); }, 0);
+});
 
 /** Whether two values are the same words, case, spacing and punctuation aside. */
 function sameWords(a, b) {
-  const w = (x) => (String(x).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).join(" ");
-  return w(a) === w(b);
+  return wordsOf(a) === wordsOf(b);
+}
+/** A value's words, lowercased, one space between: what sameWords compares. */
+function wordsOf(x) {
+  return (String(x).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).join(" ");
 }
 function flagSelection() {
   const s = currentSelection();
@@ -9094,6 +9371,10 @@ function flagSelection() {
   // already has. With more of the name around it, it is flagged whole.
   const leak = s.pn || s.here ? null : leakIn(s.range);
   if (leak && sameWords(s.text, leak.real)) { toast(`"${leak.real}" is in the key already and stands unfaked here: fake it from the names bar, or keep it (right-click).`, { error: true }); return; }
+  // A value the worksheet has a row for is answered on that row: a flag would
+  // hand PDF-Linker the value it raised itself, under a second rule.
+  const row = leak ? -1 : pendingRowIn(s);
+  if (row >= 0) { toast(`"${leakRows()[row].value}" has a row in ${leaks.name} still to answer: answer it there (⚠ Leaks).`, { error: true }); return; }
   const before = flagged.length;
   flagged = TD.addValue(flagged, s.text);
   const v = TD.normalizeValue(s.text);
@@ -9632,6 +9913,64 @@ function leaksStoreKey() { return LK.decisionsKey(leaks.store || stateFolder() |
 function persistLeaks() { if (leaks) lsSet(leaksStoreKey(), LK.packDecisions(leaks.parsed.rows)); }
 function leaksDirty() { return !!leaks && leaks.parsed.rows.some((r) => r.fix !== r.fix0); }
 function leakRows() { return leaks ? leaks.parsed.rows : []; }
+/** The worksheet as parsed, or null: its identity is what the marks were read against. */
+function sheetParsed() { return leaks ? leaks.parsed : null; }
+
+// The rows the walk has yet to reach. Only the row in front used to be marked,
+// so a name the worksheet was already asking about stood unmarked on the page,
+// was flagged as a find, and turned up as a row a few clicks later — a flag
+// that handed PDF-Linker a value it had raised itself. Every value with a row
+// is now read with the document-wide marks (scanPassNow, one matcher per
+// worksheet), and the ones still to answer are painted orange beside the row
+// in front; a decision repaints them without reading the page again.
+let sheetRxMemo = { parsed: null, values: new Map(), rx: null };
+function sheetMatcher() {
+  const parsed = sheetParsed();
+  if (sheetRxMemo.parsed !== parsed) {
+    const values = new Map(); // folded → as written
+    for (const r of parsed ? parsed.rows : []) {
+      const v = TD.normalizeValue(r.value);
+      if (/[\p{L}\p{N}]/u.test(v)) values.set(TD.foldValue(v), v);
+    }
+    sheetRxMemo = { parsed, values, rx: values.size ? PK.buildMatcher([...values.values()]) : null };
+  }
+  return sheetRxMemo.rx;
+}
+/** The worksheet value a match is, folded: a gap read as a space, a possessive let go. "" if none. */
+function sheetFold(found) {
+  const { values } = sheetRxMemo;
+  const f = TD.foldValue(PK.foldGaps(found));
+  if (values.has(f)) return f;
+  const bare = f.replace(/['’]s$/, "");
+  return values.has(bare) ? bare : "";
+}
+/**
+ * Where the rows still to answer stand, less the row in front (it has its own
+ * mark) and the values the key binds: standing unfaked, those are the key's
+ * orange already, and inside a cited decision they are no leak at all.
+ */
+function pendingSheetRanges() {
+  if (!leaks || !sheetHits.length) return [];
+  const open = new Set();
+  for (const r of leakRows()) if (LK.isPending(r)) open.add(TD.foldValue(r.value));
+  open.delete(TD.foldValue(leakRowValue));
+  const bound = new Map();
+  const out = [];
+  for (const h of sheetHits) {
+    if (!open.has(h.fold)) continue;
+    let b = bound.get(h.fold);
+    if (b === undefined) bound.set(h.fold, (b = boundByKey(h.fold)));
+    if (!b) out.push(h.range);
+  }
+  return out;
+}
+/** The row still to answer whose value the selection is, word for word: its index, or -1. */
+function pendingRowIn(s) {
+  if (!leaks || !s || s.pn || s.here) return -1;
+  const want = wordsOf(s.text);
+  if (!want) return -1;
+  return leakRows().findIndex((r) => LK.isPending(r) && wordsOf(r.value) === want);
+}
 
 /** Attach a worksheet: its bytes (kept for the rewrite), its handle (for the save in place). */
 async function attachLeaks(bytes, name, handle, { quiet = false, folder = "" } = {}) {
@@ -16302,6 +16641,7 @@ window.__textReaderLeaks = () => (leaks ? {
   rows: leaks.parsed.rows.map((r) => ({ n: r.n, value: r.value, fix: r.fix, fix0: r.fix0 })),
   here: leakHere ? { text: leakHere.toString(), gutter: gutterOf(leakHere), page: Number(leakHere.startContainer.parentElement.closest(".tpage").dataset.index) } : null,
   marks: leakRowRanges.length, keeps: keeps.slice(), leakMarks: leakHits.length,
+  pendingMarks: pendingSheetRanges().map((r) => r.toString()),
 } : null);
 window.__textReaderLeaksBytes = async () => Array.from(await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, LK.fixEdits(leaks.parsed)));
 window.__textReaderAdoptFolder = (h, opts) => adoptFolder(h, Object.assign({ quiet: true }, opts));

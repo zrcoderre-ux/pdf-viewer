@@ -464,6 +464,24 @@ spot keeps mapped into it. `flagSelection` tells the operator such a flag
 takes a full re-run (`s.touches` or `phraseFakedInFile`), as `markPhrase`
 does.
 
+**Flagging by selecting** (`setFlagMode`, `flagTakes`, `flagWhereReleased`):
+🚩 in the tools rail is a switch (`aria-pressed`, `body.flag-mode`), not a
+one-shot. On, a left press on `#pages` (taken on the document in the capture
+phase, so the numbered margin's own mousedown cannot hide it; no Ctrl, Meta
+or Alt; not a triple-click, whose line is more often a passage) sets
+`flagDrag`, and the release flags the settled selection on a `setTimeout(0)`,
+as the PDF pane's Redact text mark does. `showFlagPop` stays down while
+`flagDrag` is set, so the pop-up does not flicker up mid-drag. `flagTakes` is
+the pop-up's Flag button reduced to a yes or no — `flagProblem`, a spot keep,
+the orange name alone (`sameWords`), and a value the Master Keep holds
+(`masterHeldIn`), which `flagSelection` itself would flag but which the
+pop-up puts a question to — and a selection it refuses is left selected with
+the pop-up shown. A flagged one is collapsed to its end, which also takes the
+pop-up down (its `selectionchange` finds no selection). Clicking the button
+with a selection already made flags it as the click always did. The mode is
+per tab and never stored, and `body.flag-mode` paints the page's
+`::selection` in the flag's red. Ctrl+Shift+F is still `flagSelection` alone.
+
 **A fake that is an ordinary word** (`parseKey`'s `wordFakes`,
 `PK.wordFakesOf`, `PK.compile`): an older PDF-Linker's nickname rule cut a
 surname's stand-in to "We" (the front of a longer name's fake, six letters
@@ -682,6 +700,47 @@ read, no prompt). A value taken off for this session only (`masterOffHere`) is
 held off through those re-reads, and a fresh choice of the workbook clears it.
 The extension's reader and the installed app are different origins, so each is
 set up once on its own.
+
+**A PDF-Linker run going in the case folder** (`checkRun`, `runMarkersIn`,
+`showRunning`, `showRunEnded`, `readFolderAfterRun`, `textdoc.runMarker`; the
+`#run-bar` under `#key-offer`, taking its own height through `--run-h`). A run
+rewrites the case folder as it goes: every export in Text Files, one PDF after
+another, then the key and LEAKS.xlsx at its end. A document opened meanwhile is
+the last run's text, or text the run is part-way through, read under a key it
+is about to replace, and a save made before it finishes can be overwritten by
+it or overwrite what it has just written. PDF-Linker already says it is going,
+to the operator in Explorer: a zero-byte `ETA <estimate>.txt` in the case
+folder, rewritten after each PDF (`_write_eta_marker`), and replaced by
+`DONE <clock>.txt` on a clean finish (`_write_done_marker`). So `openFileNow`
+looks for one each time an export opens (not awaited: the document is never
+held for it), as does the attach a click gives a folder that needed
+re-authorising. Only EMPTY files count, as PDF-Linker scopes its own
+(`_clear_eta_markers`, `_marker_mtime`), so a real "ETA notes.txt" is not a
+run; and a run is going where the newest ETA is newer than any DONE stamp,
+which is the test PDF-Linker makes of a copied folder (`_copy_is_ahead`). The
+marker's clock is written colon-free for Windows ("6.04PM"); `runMarker` puts
+the colon back for the bar. While the bar is up it looks again every
+`RUN_RECHECK_MS` and on `focus` and becoming visible (as `refreshMaster`
+does), so it says when the run has ended instead of warning about one that is
+over — with the DONE time, or that it stopped without one (a crashed
+`--fix-leaks` clears its marker and writes no stamp) — and offers **Read the
+folder again** (`readFolderAfterRun`: the PDFs and built-ahead pages dropped,
+the folder adopted again for the new key and worksheet, the open export
+reopened, found again by its label where the run renamed it to or from
+`.txt.LEAK`). A full run that dies leaves its ETA marker standing until the
+next run clears it, and the reader cannot tell that from a slow OCR file; the
+bar gives the marker's age past `RUN_STALE_MS` and points at
+`pdf_linker.log` rather than guessing. **×** stops the rechecks; the next
+export opened looks again and brings the bar back while the run is still
+going. The ended bar stays up across exports opened after it, until the
+folder is read again or put away: such an export is the run's new text, but
+an open inside the folder held attaches no key (`attachKeyForFile` returns
+early), so the key in hand is still the one read before the run. `runSeq`
+lets only the latest look answer (a recheck with no bar up does not count,
+or a focus landing during an open would silence it), and `forgetFolder` takes
+the bar down with the folder it was about. Nothing is blocked: the bar warns
+and the operator decides. The marker names are a format read outside
+PDF-Linker, recorded in its CLAUDE.md beside the export headers and the key.
 
 **⇄ Raw** (`.raw-page`, on every page label, between `.swap-page` and
 `.nocr-page`; it replaced the toolbar's 📄 File as text panel) puts the page's
@@ -1017,6 +1076,31 @@ hashed again): the same 300 decisions take 6 ms. `unpackDecisions` still
 hashes every row once per attach where anything is stored — 0.4 s for 20,000
 rows of such Contexts, about 10 ms for a sheet of 300 — and what it hashes is
 remembered for the decisions after.
+
+**The rows still to answer are marked before the walk reaches them**
+(`sheetMatcher`, `pendingSheetRanges`, `::highlight(leakrows)`). Only the row
+in front used to be marked (`leakrow`), so a value the worksheet was already
+asking about stood unmarked on the page, was flagged as a find, and turned up
+as a row a few clicks later: a flag handing PDF-Linker a value it had raised
+itself. Every value with a row is now read in the document-wide pass
+(`scanPassNow`, off `flatten(body, { blankPn: true })` as `leakMatches` reads
+the row in front, under one `PK.buildMatcher` per worksheet, memoised on
+`leaks.parsed`), and `scanStale` counts the worksheet's identity with the
+text, key and keeps. The pass reads every row, answered or not, and keeps
+`sheetHits` (`{ range, fold }`, a possessive and a gap folded back to the
+row's value by `sheetFold`); which of them are pending is sorted out when the
+marks are painted (`paintRowMarksNow`), so a decision repaints them without
+reading the page again. Left out: the row in front (it has its own mark) and a
+value the key binds (`boundByKey`), which standing unfaked is the key's
+orange already and inside a cited decision is no leak. They show whenever a
+worksheet is attached, the bar open or not, and go with `giveUpOnMarks`.
+Lighter than the row in front, with a dashed underline. The flag follows the
+mark: a selection that is a pending row's value word for word
+(`pendingRowIn`, `wordsOf`) is not flagged by 🚩's release or Ctrl+Shift+F,
+and the pop-up says so with **Answer its row…**, which opens that row in the
+bar without moving the text (`goToLeak(i, { locate: false })`). A selection
+with more than the value in it is still flagged whole, as with the key's
+orange.
 
 The bar's controls are one row at its TOP (`.lb-controls`: Fix? yes no never
 phrase accept, the answer, the typed cell, Apply, clear, then ‹ › Next

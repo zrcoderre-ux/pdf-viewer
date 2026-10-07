@@ -1787,6 +1787,23 @@ export function isQuarantinedName(name) {
   return /\.txt\.leak$/i.test(String(name == null ? "" : name));
 }
 
+/**
+ * PDF-Linker's run-status marker by name: { kind: "ETA" | "DONE", label }, or
+ * null for any other file. A run drops a zero-byte `ETA <estimate>.txt` in the
+ * case folder and rewrites it after each PDF ("ETA ~6.04PM (6 of 13).txt",
+ * `_write_eta_marker`); a clean finish replaces it with `DONE <clock>.txt`.
+ * Its clocks are written colon-free for Windows ("6.04PM"); the label puts
+ * the colon back ("~6:04 PM (6 of 13)"). The SIZE is the caller's to check:
+ * PDF-Linker reads only an empty file as a marker, so a real file the
+ * operator happened to name "ETA notes.txt" is not one.
+ */
+export function runMarker(name) {
+  const m = /^(ETA|DONE) (.*)\.txt$/i.exec(String(name == null ? "" : name).trim());
+  if (!m) return null;
+  const label = m[2].trim().replace(/\b(\d{1,2})\.(\d{2}) ?(AM|PM)\b/gi, (_, h, mm, ap) => `${h}:${mm} ${ap.toUpperCase()}`);
+  return { kind: m[1].toUpperCase(), label };
+}
+
 /** The pseudonym key by name — the macro's pattern plus Windows' copies. */
 /** A document's name as a reader says it: without the export's extension. */
 export function docLabel(name) {

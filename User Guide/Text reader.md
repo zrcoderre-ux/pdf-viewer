@@ -444,6 +444,26 @@ app, which routes it to the reader tab.
   the text is still the way through its rows; this steps what is standing in
   the text, which is not the same list (a worksheet is one row per value, and
   a value leaks wherever it leaks).
+- **A warning while PDF-Linker is running on the folder.** A run leaves an
+  `ETA ~6.04PM (6 of 13).txt` file in the case folder while it works and
+  replaces it with `DONE 6.12PM.txt` when it finishes. Open an export while
+  the ETA file is there and a red bar under the toolbar says so, with the
+  estimate: the run is rewriting the exports, and then the key and LEAKS.xlsx,
+  so what you are reading may be replaced under you and anything you save
+  before it finishes can be overwritten. **×** puts the bar away; it comes back
+  with the next document you open while the run is still going. While it is
+  up the reader looks at the folder again every half minute and whenever you
+  come back to the window, and when the run ends the bar says so (with its
+  DONE time, or that it stopped without one) and offers **Read the folder
+  again**, which reloads the key, the worksheet and the PDFs and reopens the
+  document as the run left it. That bar stays up until you do (or put it
+  away), since until then the reader is still holding the key from before the
+  run. A run that crashed leaves its ETA file behind
+  until the next run clears it; the bar then adds how long ago the file was
+  last updated (the run rewrites it after every PDF), and `pdf_linker.log`
+  says whether anything is still going. The reader can only look while it
+  holds the case folder, so a file opened on its own, with no folder known,
+  gets no warning.
 - **The key, term by term.** **🗝 Key terms** in the tools panel (or a click
   on the pseudonym count in the status bar) puts a bar over the text that
   walks the pseudonym key as it stands on the page. A **term** is one row of
@@ -524,6 +544,19 @@ app, which routes it to the reader tab.
   discarded the same way, and said once. The folder's toast also says how
   many answers are only in the reader and not yet saved, "every row answered"
   included. A `yes` here is never also flagged into `New Real Values.txt`.
+- **Every row still to answer is orange before the review reaches it.** Only
+  the row in front used to be marked, so a name the worksheet was already
+  asking about stood unmarked until the review got there, and flagging it on
+  the way was wasted work (and handed PDF-Linker a value it had raised
+  itself). Now each value with a row still to answer is marked wherever it
+  stands, in a lighter orange with a dashed underline; the row in front keeps
+  its stronger mark. The marks show whenever a worksheet is attached, with the
+  bar open or closed, and a value goes unmarked once its row is answered. A
+  name the key binds is left to the key's own orange. Selecting one of these
+  values on its own does not flag it (🚩 on, or Ctrl+Shift+F): the pop-up says
+  the worksheet has a row for it, and **Answer its row…** opens that row in
+  the bar without moving the text. A selection with more than the value in it
+  is still flagged whole.
 - **And through a document in the order the rows stand in it.** PDF-Linker
   writes one row per **value**, so the worksheet's own order is the order the
   values were first found — which sent a review to page 4, then page 31, then
@@ -852,7 +885,15 @@ app, which routes it to the reader tab.
   reader opens, and off, case is ignored.
 - **Flag what the run missed — and un-flag what it got wrong.** The point of
   reading the real names is to spot the ones that are *not* marked. Select
-  such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the
+  such a name and flag it from the pop-up beside it (or Ctrl+Shift+F). **With
+  many to flag, turn flagging on**: **🚩 Flag real value** in the tools panel
+  is a switch, and while it is lit every name you select with the mouse — a
+  drag or a double-click — is flagged as you let go, with no button in
+  between. The selection shows red while it is on. A selection with a
+  question to it (a passage, a pseudonym, the orange name alone, a value kept
+  where it stands or by the Master Keep) is not flagged; it stays selected
+  with the pop-up asking. Click the button again to turn it off; it is never
+  on when a reader opens. The
   **Flagged** panel collects them and **Save list to case folder** writes `New
   Real Values.txt` beside the key, which PDF-Linker reads on its next run —
   and on Apply Fixes — as if each line had been given with `--term`. **A flag
