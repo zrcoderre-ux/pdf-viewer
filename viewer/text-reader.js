@@ -1413,7 +1413,19 @@ $("shot-btn").addEventListener("click", async (e) => {
 // Nowhere else — a LEAKS answer typed from the clipboard, say, gets the fake
 // it was given, since a real name written there would be written into the
 // worksheet as the value to fake a name WITH.
-let lastCopy = null; // { faked, real, shown, key }: what this reader last put on the clipboard, and from what
+let lastCopy = null; // { faked, real, shown, key, esc }: what this reader last put on the clipboard, and from what
+//
+// …AND WHICH OF ITS NAMES ESC LEFT AS TYPED (`esc`: [{ at, text, real }], each
+// a place in `real`). A cut and a paste of the reader's own copy is a move,
+// not a deletion and a name typed: the clipboard carries no Esc, so the cut
+// took the Esc with the name and the paste put "Jones" back as new text, which
+// the converter marked and the save wrote as its pseudonym — "(Pratt, 30
+// Cal.App.5th at p. 5.)" under a plain "Saved", the renamed authority the Esc
+// was for (measured on 0b35064; a copy pasted as a second cite the same). The
+// copy now notes where in `real` each live Esc'd name it takes stands, and a
+// paste that takes `real` back (ownCopy) leaves each of them Esc'd at its
+// pasted place (escPasted): left as typed, named in red by the save, as at the
+// place it came from.
 let instrMemo = { reals: null, any: false };
 /** Whether the key holds any row with an instruction and no fake (egressSwaps' question; asked once per key). */
 function keyHasInstructions() {
@@ -1428,7 +1440,10 @@ function keyHasInstructions() {
 function copyOfBody(body, range) {
   const s = body.contains(range.startContainer) ? { node: range.startContainer, offset: range.startOffset } : null;
   const e = body.contains(range.endContainer) ? { node: range.endContainer, offset: range.endOffset, end: true } : null;
-  const disk = TD.serializeHeld(body, { mapped: true, points: [s, e].filter(Boolean) });
+  // The names Esc left, live, read into the same text as the selection's ends (`esc`, under lastCopy).
+  const escLive = (escaped.get(body) || []).length && !printPut && !shotPut ? escapesIn(body) : [];
+  const ends = [s, e].filter(Boolean);
+  const disk = TD.serializeHeld(body, { mapped: true, points: ends.concat(escLive.map((d) => ({ node: d.range.startContainer, offset: d.range.startOffset }))) });
   const n = disk.text.length;
   const atS = s ? disk.at[0] : -1, atE = e ? disk.at[s ? 1 : 0] : -1;
   // An end outside the page is the page's end; one the walk could not place, the same — more of the page faked, never less.
@@ -1440,12 +1455,23 @@ function copyOfBody(body, range) {
     : [];
   const swaps = fwd && fwd.rx ? egressSwaps(disk.text, disk.held, disk.pns) : [];
   const spans = (pick) => disk.pnNodes.map((el, k) => ({ start: disk.pns[k][0], end: disk.pns[k][1], to: pick(el) }));
+  const realSpans = spans((el) => el.dataset.real);
+  const real = TD.clipText(disk.text, realSpans, a, b, skip);
+  const esc = [];
+  escLive.forEach((d, k) => {
+    const at = disk.at[ends.length + k];
+    if (!(at >= a && at + d.text.length <= b)) return;
+    // Its place in `real`: the length of what the copy takes before it.
+    const off = TD.clipText(disk.text, realSpans, a, at, skip).length;
+    if (real.slice(off, off + d.text.length) === d.text) esc.push({ at: off, text: d.text, real: d.real });
+  });
   return {
     a, b,
     faked: TD.clipText(disk.text, swaps, a, b, skip),
-    real: TD.clipText(disk.text, spans((el) => el.dataset.real), a, b, skip),
+    real,
     shown: TD.clipText(disk.text, spans((el) => el.textContent), a, b, skip),
     withheld: withheldIn(swaps, a, b),
+    esc,
   };
 }
 /** …and a page shown ⇄ Raw, whose sheet is the file's text: the same, read off that text. */
@@ -1464,7 +1490,7 @@ function copyOfRaw(sec, pre, range) {
   const b = same && pre.contains(range.endContainer) ? off(range.endContainer, range.endOffset) : raw.text.length;
   const swaps = fwd && fwd.rx ? egressSwaps(raw.text, raw.held, raw.pns) : [];
   const shown = TD.clipText(raw.text, [], a, b);
-  return { a, b, faked: TD.clipText(raw.text, swaps, a, b), real: shown, shown, withheld: withheldIn(swaps, a, b) };
+  return { a, b, faked: TD.clipText(raw.text, swaps, a, b), real: shown, shown, withheld: withheldIn(swaps, a, b), esc: [] };
 }
 /** What a copy of the selection carries, where it reaches the pages; null where it does not. */
 function copyOfSelection() {
@@ -1483,7 +1509,10 @@ function copyOfSelection() {
   }
   if (!parts.length) return null;
   const join = (k) => parts.map((p) => p[k]).join("\n");
-  return { faked: join("faked"), real: join("real"), shown: join("shown"), withheld: [...new Set(parts.flatMap((p) => p.withheld))], key };
+  const esc = [];
+  let base = 0;
+  for (const p of parts) { for (const d of p.esc || []) esc.push({ ...d, at: base + d.at }); base += p.real.length + 1; }
+  return { faked: join("faked"), real: join("real"), shown: join("shown"), withheld: [...new Set(parts.flatMap((p) => p.withheld))], key, esc };
 }
 /** A copy's own toast: where the clipboard and the screen differ, it says which the clipboard has. */
 function copyToast(c, verb) {
@@ -1629,11 +1658,15 @@ document.addEventListener("dragstart", (e) => {
   lastCopy = c;
   copyToast(c, "Dragged");
 });
+/** Whether `text` is exactly what this reader last put on the clipboard, under the same case's key. */
+function isOwnCopy(text) {
+  const c = lastCopy;
+  if (!c || !key || !(c.key === key || PK.sameCaseKey(c.key, key))) return false;
+  return String(text == null ? "" : text).replace(/\r\n?/g, "\n") === c.faked;
+}
 /** The text a paste in the reader takes: `which` of `lastCopy` where `text` is exactly what it put out, else `text`. */
 function ownCopy(text, which) {
-  const c = lastCopy;
-  if (!c || !key || !(c.key === key || PK.sameCaseKey(c.key, key))) return text;
-  return String(text == null ? "" : text).replace(/\r\n?/g, "\n") === c.faked ? c[which] : text;
+  return isOwnCopy(text) ? lastCopy[which] : text;
 }
 $("fb-input").addEventListener("paste", (e) => {
   const got = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
@@ -4467,7 +4500,7 @@ function enterAtCaret(body, { snap = true } = {}) {
  * pieces — the blank slots it passes absorbing a piece each, exactly as each
  * Enter's cascade stopped at the first empty line below it.
  */
-function insertLinesAtCaret(body, pieces) {
+function insertLinesAtCaret(body, pieces, laid = null) {
   const cl = caretLine(body);
   if (!cl || !pieces.length) return false;
   const { line } = cl;
@@ -4488,6 +4521,7 @@ function insertLinesAtCaret(body, pieces) {
       const t = document.createTextNode(piece);
       f.appendChild(t);
       if (i === pieces.length - 1) caretNode = t;
+      if (laid) laid[i] = t; // where piece i went, for the Esc'd names it carries (escPasted)
     }
     return f;
   });
@@ -4524,6 +4558,7 @@ function insertLinesAtCaret(body, pieces) {
   dressBody(body);
   fixGutterSpacing(body);
   escCarry(body);
+  if (laid && laid.length) { const m = TD.serializeMapped(body); for (let i = 0; i < pieces.length; i++) if (laid[i]) laid[i] = { node: laid[i], at: m.at.get(laid[i]) }; }
   if (caretAt >= 0) { const pt = pointAtOffset(ltOf(caretSlot), caretAt); if (pt) placeCaret(pt.node, pt.offset); }
   else if (caretSlot) placeCaret(ltOf(caretSlot), 0);
   setDirty(true, pageIndexOf(body));
@@ -4591,6 +4626,29 @@ function selectionCrossesGutter(body) {
   for (const g of body.querySelectorAll(".gutter")) if (r.intersectsNode(g)) return true;
   return false;
 }
+/**
+ * …and a deletion from a COLLAPSED caret that reaches one: Ctrl+Backspace at
+ * the head of a numbered line's text (or Ctrl+Delete at its end; the line-wide
+ * deletions the same) deletes a word across the line break, and the line's
+ * number with it. The keydown guard below stands aside for Ctrl, and the
+ * selection guard asks only of a selection that is not collapsed, so the
+ * guide's "the line numbers are fixed" was broken by one key (measured:
+ * Ctrl+Backspace at the head of line 3 wrote " 2  Nothing else.(Jones, …)"
+ * and line 3's number was gone). Chrome hands such a deletion no target
+ * ranges to ask (getTargetRanges is empty for it), so the caret is asked: a
+ * backward deletion from the head of a numbered line's text, or a forward one
+ * from its end, is refused. Within the line the word goes as before.
+ */
+function caretDeletesGutter(body, e) {
+  const t = e.inputType || "";
+  const back = /^delete(Word|SoftLine|HardLine)Backward$/.test(t), fwd = /^delete(Word|SoftLine|HardLine)Forward$/.test(t);
+  if (!(back || fwd) || !body.classList.contains("numbered")) return false;
+  const cl = caretLine(body);
+  if (!cl) return false;
+  const lt = ltOf(cl.line);
+  const at = offsetOfPoint(lt, cl.pt.container, cl.pt.offset);
+  return back ? at === 0 : at === lt.textContent.length;
+}
 pagesEl.addEventListener("keydown", (e) => {
   if (!editing || e.ctrlKey || e.metaKey || e.altKey) return;
   const body = e.target && e.target.closest && e.target.closest(".page-body");
@@ -4624,20 +4682,33 @@ pagesEl.addEventListener("paste", (e) => {
   // one it typed over goes with its text. The lines after it carry theirs
   // down by their nodes (insertLinesAtCaret).
   escNote(body);
-  // A passage this reader copied or cut comes back with its real names (ownCopy, under "copy, cut and drag").
-  const text = ownCopy(e.clipboardData ? e.clipboardData.getData("text/plain") : "", "real");
+  // A passage this reader copied or cut comes back with its real names (ownCopy, under "copy, cut and drag"),
+  // and with the names Esc left as typed in it (lastCopy's `esc`, escPasted).
+  const got = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+  const own = isOwnCopy(got);
+  const text = own ? lastCopy.real : got;
+  const escs = own && lastCopy.esc ? lastCopy.esc : [];
   e.preventDefault();
   if (!text) return;
   if (selectionCrossesGutter(body)) { toast(GUTTER_FIXED, { error: true }); return; }
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
   snapshot(body, true);
+  // Where the first line goes in: the selection's start, which the text before it keeps.
+  let first = -1;
+  const laid = [];
+  if (escs.length) {
+    const sel = document.getSelection();
+    const r = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    if (r && body.contains(r.startContainer)) first = TD.serializeHeld(body, { points: [{ node: r.startContainer, offset: r.startOffset }] }).at[0];
+  }
   batchEdit = true;
   try {
     const sel = document.getSelection();
     if (lines[0]) document.execCommand("insertText", false, lines[0]);
     else if (sel && !sel.isCollapsed) document.execCommand("delete");
-    if (lines.length > 1) insertLinesAtCaret(body, lines.slice(1));
+    if (lines.length > 1) insertLinesAtCaret(body, lines.slice(1), escs.length ? laid : null);
   } finally { batchEdit = false; }
+  if (escs.length) escPasted(body, lines, first, laid, escs);
   // The document has just been read whole; the settle the typing itself asked
   // for would only read it again.
   afterTextChangeSoon.cancel();
@@ -4661,9 +4732,10 @@ pagesEl.addEventListener("paste", (e) => {
 // ESC LEAVES IT IN THE FILE TOO. Esc is the operator saying "that is not a
 // name to fake here", and the one place that is most often true is the one
 // the reader cannot see: the party of a cited decision in a form
-// citedNameSpans does not read — "(Jones, 30 Cal.App.5th at p. 5.)", the
+// citedNameSpans does not read — as "(Jones, 30 Cal.App.5th at p. 5.)", the
 // short cite with no "supra", which PDF-Linker protects
-// (_pn_short_cite_follows) and the reader takes for this case's party. The
+// (_pn_short_cite_follows), was until citedNameSpans learned it; the reader
+// took its party for this case's. The
 // change that made a typed name saved at once go to the file as its
 // pseudonym took the dismissed one with it, and the export cited "(Pratt, 30
 // Cal.App.5th at p. 5.)" — a renamed authority, under a toast that said only
@@ -4899,7 +4971,10 @@ function escapesIn(body, { exact = false, after = null } = {}) {
         continue;
       }
       keep.splice(keep.indexOf(d), 1);
-      if (sure) continue;
+      // …unless it cannot say: the text the edit took repeats what stands
+      // beside the name, so it may have been taken from either side of it
+      // (r.unsure). Then the name is left as typed and warned, sure or not.
+      if (sure && !r.unsure) continue;
       for (const at of r.within) {
         const u = { range: null, a: -1, b: -1, text: d.text, real: d.real, unsure: true };
         if (found(u, at)) keep.push(u);
@@ -5021,6 +5096,44 @@ function escCarry(body) {
     if (r) { d.range = r; d.a = at; d.b = at + d.text.length; }
   }
   escapesIn(body, { after: "move" });
+}
+/**
+ * The names Esc left in the reader's own copy, Esc'd again where a paste of
+ * that copy laid them (lastCopy's `esc`): `lines` the pasted text's lines,
+ * `first` where the first went into the page's disk text (the selection's
+ * start), `laid[i - 1]` the node and place line i was laid at
+ * (insertLinesAtCaret). A name found there exactly is Esc'd as Esc leaves
+ * one; where it is not there exactly (the browser wrote the line otherwise),
+ * each whole-word occurrence of it in that line's text is left as typed,
+ * `unsure`, and the save names it in red — never the converter's to mark.
+ */
+function escPasted(body, lines, first, laid, escs) {
+  const mapped = TD.serializeMapped(body);
+  const list = escaped.get(body) || [];
+  const taken = new Set(list.filter((d) => d.a >= 0).map((d) => d.a));
+  const word = /[\p{L}\p{N}]/u;
+  const whole = (i, t) => mapped.text.startsWith(t, i) && !(i > 0 && word.test(mapped.text[i - 1])) && !word.test(mapped.text[i + t.length] || "");
+  let lineAt = 0;
+  const starts = lines.map((l) => { const o = lineAt; lineAt += l.length + 1; return o; });
+  for (const d of escs) {
+    let k = 0;
+    while (k + 1 < lines.length && starts[k + 1] <= d.at) k++;
+    const col = d.at - starts[k];
+    const base = k === 0 ? first : laid[k - 1] && laid[k - 1].at != null ? laid[k - 1].at : -1;
+    if (!(base >= 0)) continue;
+    const add = (at, unsure) => {
+      if (taken.has(at)) return;
+      const r = escRangeAt(mapped, at, at + d.text.length);
+      if (!r) return;
+      taken.add(at);
+      list.push(unsure ? { range: r, a: at, b: at + d.text.length, text: d.text, real: d.real, unsure: true } : { range: r, a: at, b: at + d.text.length, text: d.text, real: d.real });
+    };
+    if (whole(base + col, d.text)) { add(base + col, false); continue; }
+    const end = base + lines[k].length + 8;
+    for (let i = mapped.text.indexOf(d.text, base); i >= 0 && i < end; i = mapped.text.indexOf(d.text, i + 1)) if (whole(i, d.text)) add(i, true);
+  }
+  escaped.set(body, list);
+  escSeen.set(body, { text: mapped.text, noted: false });
 }
 document.addEventListener("selectionchange", () => {
   if (!typeHit) return;
@@ -5333,7 +5446,7 @@ pagesEl.addEventListener("beforeinput", (e) => {
   if (!body) return;
   if (shotPut) { e.preventDefault(); return; } // the screenshot's fakes are on the page, not in it
   if (e.inputType === "historyUndo" || e.inputType === "historyRedo") { e.preventDefault(); return; }
-  if (selectionCrossesGutter(body)) { e.preventDefault(); toast(GUTTER_FIXED, { error: true }); return; }
+  if (selectionCrossesGutter(body) || caretDeletesGutter(body, e)) { e.preventDefault(); toast(GUTTER_FIXED, { error: true }); return; }
   // A deletion after typing, or typing after a deletion, is its own step.
   const kind = /delete/i.test(e.inputType) ? "del" : "ins";
   snapshot(body, kind !== snapshot.lastKind);

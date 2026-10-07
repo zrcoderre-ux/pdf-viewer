@@ -305,6 +305,51 @@ console.log("cited case names");
     check("…and at the size a real declaration is, it is not seconds", ms(JURAT.repeat(1280)) < 3000, true);
     check("nothing in the jurat is taken for a case name", citedNameSpans(JURAT), []);
   }
+  // THE SHORT CITE WITH NO "supra", which PDF-Linker protects
+  // (_pn_short_cite_follows) and this did not read: the party's name, a comma,
+  // a volume and a REPORTER, then a pin or a page — or, behind "(", ";" or a
+  // signal, the bare pin "at p." of the Style Manual's short form. A name
+  // typed into one was marked as this case's party and written as its
+  // pseudonym: "(Pratt, 30 Cal.App.5th at p. 5.)", a renamed authority.
+  {
+    const SC = [
+      ["(Jones, 30 Cal.App.5th at p. 5.)", ["Jones"]],
+      ["(Jones, 30 Cal.App.5th at pp. 5-6)", ["Jones"]],
+      ["(Jones, at p. 5)", ["Jones"]],
+      ["(See Jones, 30 Cal.App.5th at p. 5.)", ["Jones"]],
+      ["x; Ruiz, at p. 9", ["Ruiz"]],
+      ["(O'Brien, 5 Cal.5th at 10)", ["O'Brien"]],
+      ["(Pérez, 30 Cal.App.5th at p. 5.)", ["Pérez"]],
+      ["(Acme Corp., 30 Cal.App.5th 1, 5)", ["Acme Corp."]],
+      ["(Jones, 30 Cal.App.5th, 5)", ["Jones"]],
+      ["(Department of Transportation, 30 Cal.App.5th at p. 7)", ["Department of Transportation"]],
+      ["Jones, 30 F. Supp. 2d 100", ["Jones"]],
+      [" 3  Nothing else. (Jones,\n 4  30 Cal.App.5th at p. 5.)", ["Jones"]],
+    ];
+    check("a short cite with no supra: the name alone, whatever the reporter, pin or signal",
+      SC.map(([t]) => spans(t)), SC.map(([, w]) => w));
+    // …and the name ONLY: a span reaching back into the sentence before the
+    // cite would spare a name of this case standing there, unmarked.
+    check("…cut after the sentence before it and after a signal",
+      [spans("Served on Helen Rasho. Jones, 30 Cal.App.5th at p. 5."), spans("Rasho. See Jones, at p. 5")], [["Jones"], ["Jones"]]);
+    const NOT = [
+      "Jones, 2019", "JOHN DOE, DOES 1 through 10", "Jones, 12 March 2020", "Jones, 30 Main Street",
+      "Jones, 25STCV12345", "(Jones, at 5)", "Mr. Jones, at p. 5 of his deposition", "(Jones Decl., at p. 3)",
+      "(Smith Depo., at p. 12)", "Rasho, 30 days later, wrote", "Jones, 30 Cal. App",
+    ];
+    check("…never a name before a bare number, a date, a docket or this case's own record",
+      NOT.map((t) => spans(t)), NOT.map(() => []));
+    // FOUND FROM THE TAIL: linear in the text, a jurat's capitals, a run of
+    // near-miss tails (", 30 days", "Jones, at times"), and a brief dense with
+    // short cites all read in step with their length.
+    const UNIT = "I JOHN ANDREW FORSYTHE DECLARE, 30 DAYS AS FOLLOWS. Jones, at times, said so. "
+      + "(Rasho, 30 Cal.App.5th at p. 5.) Quillmark, 12 March 2020, Vance, 31 Cal. App. 4th, 9; See Ruiz, at p. 4. ";
+    const ms = (t) => { const from = Date.now(); citedNameSpans(t); return Date.now() - from; };
+    const a = ms(UNIT.repeat(300)), b = ms(UNIT.repeat(1200));
+    check(`…and read in step with the text (${a} ms then ${b} ms for four times as much)`, b < Math.max(60, a * 12), true);
+    check("…a long export of them is not seconds", ms(UNIT.repeat(4800)) < 3000, true);
+    check("…and each short cite in it is found", citedNameSpans(UNIT.repeat(10)).length, 30);
+  }
   // The bound is a party's WORDS, and a long one still reads as it did: this
   // name always began at "Department", the pattern being unable to cross the
   // two small words of "of the State" whatever the count allows.
@@ -439,14 +484,15 @@ console.log("what an edit wrote");
   check("a citation typed whole keeps its parties, read whole as well",
     typedAt(" 1  Nothing.", " 1  Nothing. See Rasho v. Quillmark (2017) 13 Cal.App.5th 1152."), []);
 
-  // ESC IS KEPT FOR EVERY NAME IT WAS PRESSED ON. A short cite with no
-  // "supra" ("(Rasho, 30 Cal.App.5th at p. 5.)") is not read as one, so the
-  // save writes a name typed there unless Esc left it: one Esc used to be
+  // ESC IS KEPT FOR EVERY NAME IT WAS PRESSED ON. A citation the reader
+  // does not read as one — this was a short cite with no "supra" ("(Rasho,
+  // 30 Cal.App.5th at p. 5.)") until citedNameSpans read it, below — has the
+  // save write a name typed there unless Esc left it: one Esc used to be
   // remembered, the last, and the first of two such cites went to the file as
   // "(Strangeways, 30 …)", a renamed authority. Each Esc'd name is taken out
   // of the typed set where it stands exactly; a longer name ending at the same
   // place is not the Esc'd one.
-  const two = " 1  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 2  End. (Rasho, 31 Cal.App.5th at p. 9.)";
+  const two = " 1  Nothing. (Rasho, 30 slip op. 5.)\n 2  End. (Rasho, 31 slip op. 9.)";
   const twoBuilt = " 1  Nothing.\n 2  End.";
   const twoTyped = typedSpans(findRealSpans(sreals, two, { layout: two }), two, twoBuilt);
   const at1 = two.indexOf("Rasho"), at2 = two.lastIndexOf("Rasho");
@@ -509,6 +555,38 @@ console.log("what an edit wrote");
     [escapedPlace(twoBefore, twoMoved, "Rasho", tAt, null).within, escapedPlace(twoBefore, twoMoved, "Rasho", tAt, new Set([twoMoved.indexOf("Rasho")])).within],
     [[twoMoved.indexOf("Rasho"), twoMoved.indexOf("Rasho agrees")], [twoMoved.indexOf("Rasho agrees")]]);
   check("…and nothing for no name or no place", [escapedPlace(cite, cascaded, "", at, null), escapedPlace(cite, cascaded, "Rasho", -1, null)], [{ at: -1, within: [] }, { at: -1, within: [] }]);
+  // …and where the edit SLIDES — the text it took repeats what stands beside
+  // the name, so it could have been taken from either side of it — the two
+  // ways of telling it disagree about whether it reached the name. Told head
+  // first only, a deletion from "(Rasho, 30 …)" through to just before
+  // "(Rasho, 31 …)" reached the second, and the reader dropped its Esc: the
+  // save wrote "(Strangeways, 31 …)" under a plain "Saved". It is UNSURE now,
+  // left as typed and warned, never dropped.
+  const twoLines = "Plaintiff filed.\nNothing. (Rasho, 30 slip op. 5.)\nEnd. (Rasho, 31 slip op. 9.)\nSigned.";
+  const second = twoLines.lastIndexOf("Rasho");
+  const firstGone = twoLines.replace("(Rasho, 30 slip op. 5.)\nEnd. ", "");
+  check("escapedPlace: a deletion that slides over the name — unsure, at the place either telling puts it",
+    escapedPlace(twoLines, firstGone, "Rasho", second, null), { at: -1, within: [firstGone.indexOf("Rasho")], unsure: true });
+  const judge = "Plaintiff filed.\nNothing else (Judge so held).\nThe end. (Jones, slip op. 5.)\nSigned.";
+  const judgeGone = judge.replace("(Judge so held).\nThe end. ", "");
+  check("…a deletion whose text begins as the name's does", escapedPlace(judge, judgeGone, "Jones", judge.indexOf("Jones"), null),
+    { at: -1, within: [judgeGone.indexOf("Jones")], unsure: true });
+  const notSlid = judge.replace("so held).\nThe end. ", "");
+  check("…and one that does not slide is followed as before", escapedPlace(judge, notSlid, "Jones", judge.indexOf("Jones"), null), { at: notSlid.indexOf("Jones") });
+  // editedSpans, the measure of what was TYPED, slides a deletion's point to
+  // a place that splits no word: told head first, the point fell inside a
+  // name the file already carried, and the save took it for typed and wrote
+  // its pseudonym over it.
+  const base = "Plaintiff filed.\nThat was error (Judge Whitaker erred).\n(Jones agreed.)\nSigned.";
+  const baseNow = base.replace("(Judge Whitaker erred).\n", "");
+  const bj = baseNow.indexOf("Jones");
+  check("editedSpans: a deletion that slides is placed where it splits no word", spanEdited(editedSpans(base, baseNow), bj, bj + 5), false);
+  const inLine = " 1  Nothing.\n 2  That was error (Judge said) (Jones said).\n 3  x";
+  const inLineNow = inLine.replace("(Judge said) ", "");
+  const ij = inLineNow.indexOf("Jones");
+  check("…inside a changed line too", spanEdited(editedSpans(inLine, inLineNow), ij, ij + 5), false);
+  check("…and a deletion inside a name still reaches it",
+    spanEdited(editedSpans("Served on Jonnes here.", "Served on Jones here."), 10, 15), true);
 }
 
 // ---- the values file ---------------------------------------------------------------

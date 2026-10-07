@@ -67,6 +67,18 @@ institutional party spans exactly what it spanned before — the pattern could
 never cross the two small words of "of the State", whatever the count allowed,
 so the bound took nothing away.
 
+The SHORT CITE with no "supra" ("(Jones, 30 Cal.App.5th at p. 5.)", read since
+the Esc review of 0b35064; "Text reader.md", "The short cite with no supra is
+read") is the same kind of name with a tail after it, and is found the other
+way round so that it cannot cost this again: `SHORT_TAIL_RE` scans for the
+TAIL — a comma, then a volume and a reporter, or "at p." — which prose
+almost never writes, and tries the reporter alternation (some eighty
+literals) only where ", <digits> " has already matched; from each tail the
+name is read backwards over a fixed 160-character window with a counted
+word pattern (`{0,4}`). A constant per tail, linear in the text: a mix of
+jurat capitals, near-miss tails and short cites reads 300 repeats in 7 ms and
+1,200 in 26 ms (`test-textdoc.mjs`).
+
 And the sweep names a document that took more than `SWEEP_DOC_SAY` to read.
 Nothing said which file was being read when the reader went down, which is
 most of why this took four rounds.

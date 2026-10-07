@@ -425,7 +425,14 @@ app, which routes it to the reader tab.
   **citation** that makes it one — a year in parentheses, a volume and
   reporter, or *supra*, and the short form "Semole, supra" with it — is read
   as a decision, and a bound value standing inside it is that decision's
-  party. It is not marked, and **the save writes no pseudonym over it**, which
+  party. So is the **short cite with no *supra***, which PDF-Linker protects
+  too: the party's name, a comma, then the volume and reporter of the
+  decision's own cite and a pin or page — "(Jones, 30 Cal.App.5th at p. 5.)",
+  "(Jones, 30 Cal.App.5th at pp. 5-6)" — and the Style Manual's "(Jones, at
+  p. 5)" where it stands as a citation (after "(", ";" or a signal such as
+  *See*). Only the name is spared, never the words of the sentence before it;
+  a name before a bare number ("Jones, 2019", "DOES 1", a docket, a date) is
+  not, nor one citing this case's own record ("(Jones Decl., at p. 3)"). It is not marked, and **the save writes no pseudonym over it**, which
   is what would have put out a citation to a case that does not exist. That
   was the classic **keep**, made automatic. The citation is the whole test: a
   caption has no reporter, so "Rasho v. Quillmark, Defendant" at the head of a
@@ -744,7 +751,11 @@ app, which routes it to the reader tab.
   down once. So where the export left line 7 empty and the PDF has text on it,
   click line 7 and type: the file gets ` 7  ` and your text, and PDF-Linker's
   next run reads it as line 7. A selection that reaches across a number is
-  refused an edit, and the numbers never take a keystroke.
+  refused an edit, and the numbers never take a keystroke — nor a
+  **Ctrl+Backspace** at the head of a numbered line's text or a
+  **Ctrl+Delete** at its end, which would delete a word across the number:
+  each is refused with the same note (within the line they delete a word as
+  usual).
 - **The documents with leaks in them are ready before you open them.** Open a
   case folder with a `LEAKS.xlsx` in it and the reader starts getting the
   documents its rows name — whichever document you came in on, and whether or
@@ -814,9 +825,11 @@ app, which routes it to the reader tab.
   file, and the space lands after it); **→** marks it without the space;
   **Esc** leaves it as typed — on the page and in the file. Press it for a
   name that belongs to a cited decision in a form the reader does not
-  recognise as a citation, such as a short cite with no *supra*, "(Jones, 30
-  Cal.App.5th at p. 5.)": the save leaves that name where it stands, keeps it
-  orange and names it in red as not yet reviewed, for you to decide. (A name
+  recognise as a citation (a short cite with no *supra*, "(Jones, 30
+  Cal.App.5th at p. 5.)", is recognised now and needs no Esc: its name is
+  spared wherever it stands, however it got there): the save leaves that
+  name where it stands, keeps it orange and names it in red as not yet
+  reviewed, for you to decide. (A name
   you have already said to fake is written as its pseudonym everywhere, this
   one included.) Every name you press Esc on is kept so, however many there
   are on the page — two short cites in a row, each Esc'd, both keep their
@@ -829,11 +842,17 @@ app, which routes it to the reader tab.
   one you pressed Esc on: it is offered again, and marked if you leave it.
   Delete it — its line, a selection or a Ctrl+X that takes it — and the Esc
   goes with it: the same name typed afterwards, anywhere on the page, is a
-  name you typed, offered and marked like any other. Should an edit ever
-  move it in a way the reader cannot follow, the reader does not guess:
-  every place the name may now stand in the text that edit moved is left as
-  typed, and the save says so in red, naming it — check each, and retype
-  one that is this case's own to have it offered again. Ctrl+Z and Ctrl+Y
+  name you typed, offered and marked like any other. **Cut it and paste it
+  back** — or copy it and paste a second copy — within the reader, and the
+  pasted name is Esc'd where it lands, as it was where it came from (text
+  pasted from anywhere else is new text, offered and marked). Should an edit
+  move it in a way the reader cannot follow — a deletion of text that
+  repeats what stands beside the name, say the first of two "(Jones, …)"
+  selected through to just before the second, which the reader cannot tell
+  from a deletion that took the second — the reader does not guess and does
+  not drop it: every place the name may now stand in the text that edit
+  moved is left as typed, and the save says so in red, naming it — check
+  each, and retype one that is this case's own to have it offered again. Ctrl+Z and Ctrl+Y
   keep it so: an undo puts the names you pressed Esc on back with the text
   they stand in, so a short cite deleted by mistake and brought back with
   Ctrl+Z still keeps its name. A real that opens a longer name in the key
@@ -863,7 +882,10 @@ app, which routes it to the reader tab.
   citation is, whatever was undone in between; and a name typed before the key
   was loaded is written as its pseudonym once it is. The names the run left
   in the clear are still yours to decide — the save leaves those where they
-  stand and says so.
+  stand and says so — and a deletion next to one of them does not make it
+  "typed": deleting text that repeats what stands beside a name the file
+  already had (a parenthetical deleted from just before "(Jones agreed.)")
+  leaves that name as the file had it, named in red as not yet reviewed.
 - **A row that cannot be located says so, once, and keeps saying it.** A LEAKS
   row names the **PDF** the value was found in; the review has to open that
   PDF's **text export**, and the two names do not always agree. A stem ending

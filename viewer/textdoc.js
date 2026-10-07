@@ -28,6 +28,7 @@
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
 import { caseShape, applyCase, translateRuns, findRealSpans } from "./pseudo-key.js";
+import { REPORTERS_SORTED } from "./reporters.js";
 
 // ---- the file as pages ---------------------------------------------------------
 
@@ -699,6 +700,108 @@ const CITE_AFTER_RE = /^[\s,;]*(?:\((?:[^)]{0,40}\b\d{4})\)|\d{1,4}\s+[A-Z][\w.]
 // A short form: the party alone, with supra after it.
 const SUPRA_RE = new RegExp("[A-Z][\\w.'\u2019-]*(?:\\s+[A-Z][\\w.'\u2019-]*){0," + PARTY_WORDS + "}(?=,?\\s+supra\\b)", "g");
 
+// …and the SHORT CITE WITH NO "supra", which PDF-Linker protects and this did
+// not read: "(Jones, 30 Cal.App.5th at p. 5.)" — the party's name, a comma,
+// then the volume and reporter of the decision's own cite and the pin
+// (PDF-Linker's `_pn_short_cite_follows` and `_PN_SHORT_CITE_TAIL`). It carries
+// neither a " v. " nor a "supra", so a name typed into one was marked as this
+// case's party and saved as its pseudonym — "(Pratt, 30 Cal.App.5th at p.
+// 5.)", a published authority renamed — unless Esc was pressed on it, and an
+// Esc is a thing the reader then has to follow through every edit that moves
+// the text (escapesIn), which is where each of the last rounds' failures was.
+// Read as a citation, the name is spared wherever it is and however it got
+// there: typed, pasted, carried over a line the browser merged, or a cite the
+// file already held.
+//
+// What is read, the name and then, after ", ":
+// - a VOLUME and a REPORTER from reporters.js (the citation linker's list,
+//   ported from PDF-Linker's), then a pin — "at p. 5", "at pp. 5-6", "at 5"
+//   (PDF-Linker's own shape) — or a page — "30 Cal.App.5th 1", "30
+//   Cal.App.5th, 5". The reporter is what makes it a cite: a bare number after
+//   a name ("Jones, 2019", "DOES 1", a docket, "Jones, 12 March 2020", "Jones,
+//   30 Main Street") is not one, and a name before it is not spared;
+// - or the pin alone, "(Jones, at p. 5)", the California Style Manual's short
+//   form for a decision cited just before. PDF-Linker does not read this one
+//   (its pin needs the reporter before it), so a name the run left there is
+//   its review's, as before; the reader spares it because faking it renames
+//   the authority, which the project ranks above a visible leak. With no
+//   reporter to say "citation", it is read only where a citation stands —
+//   behind "(", ";" or a signal ("See Jones, at p. 5") — and with "p." or
+//   "pp.", never a bare "at 5"; and never after a record word ("Jones Decl.,
+//   at p. 3", "Smith Depo., at p. 12"), which cites this case's own papers by
+//   its own people.
+//
+// FOUND FROM THE TAIL, NOT FROM THE NAME. A scan that tried a name at every
+// capital and then asked for the tail after it is the shape the hang notes
+// forbid ("Text reader hangs and freezes.md": a jurat's capitals). This scans
+// for the tail — a comma, then a volume and reporter, or "at p." — which
+// ordinary prose almost never writes, and the reporter alternation is tried
+// only where ", <digits> " has already been read. From each tail found the
+// name is read BACKWARDS over a fixed window (SHORT_NAME_WINDOW characters)
+// with a counted word pattern, so the work per tail is a constant and the
+// whole is linear in the text.
+//
+// The span is the NAME only, and only the name's own words: PDF-Linker's
+// `_pn_cite_run_start` walks a run read from the left past the words up to the
+// last citation signal ("See", "Cf.", "Accord", "Id.", …) and the last full
+// stop that closes an ordinary word ("…served on Helen Rasho. Jones, 30 …" is
+// "Jones", not "Rasho. Jones"), and so does this — a span too wide would spare
+// a name of THIS case standing before the cite, unmarked and unwarned, which
+// is the one thing a span must never do.
+const SHORT_NAME_WINDOW = 160;
+const SHORT_WS = "(?:[ \\t]*\\n[ \\t]*(?:\\d{1,3}[ \\t]+)?|[ \\t]+)"; // a space, or a line break and the next line's gutter number
+const SHORT_REPORTER = REPORTERS_SORTED.map((r) => r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+const SHORT_TAIL_RE = new RegExp(
+  "(?<=[\\p{L}\\p{N}.'’)]),(?:" + SHORT_WS + ")"
+  + "(?:\\d{1,4}" + SHORT_WS + "(?:" + SHORT_REPORTER + ")(?:[ \\t]*,)?" + SHORT_WS + "?(?:at" + SHORT_WS + "(?:pp?\\.[ \\t]*)?)?\\d"
+  + "|(at" + SHORT_WS + "pp?\\.[ \\t]*\\d))", "gu");
+const SHORT_WORD = "\\p{Lu}[\\p{L}\\p{N}.'’&-]*";
+const SHORT_NAME_RE = new RegExp(
+  "(?<![\\p{L}\\p{N}.'’&-])" + SHORT_WORD
+  + "(?:" + SHORT_WS + "(?:(?:of|the|and|&|de|la|le|van|von|del|da|dos|ex|rel\\.)" + SHORT_WS + ")?" + SHORT_WORD + "){0,4}$", "u");
+// A citation signal (PDF-Linker's _PN_CITE_SIGNAL_WORDS, the capitalised ones a name run can open with).
+const SHORT_SIGNALS = new Set(["see", "cf", "accord", "but", "compare", "citing", "contra", "also", "generally", "in", "quoting", "e.g", "id", "ibid", "and", "or", "the"]);
+// A full stop that is part of a name, not the end of a sentence before it.
+const SHORT_ABBREVS = new Set(["inc", "co", "corp", "ltd", "llc", "llp", "lp", "l.p", "n.a", "bros", "assn", "dept", "servs", "mfg", "natl", "intl", "univ", "cnty", "mr", "mrs", "ms", "dr", "st", "mt", "ft", "jr", "sr", "u.s", "u.s.a"]);
+// What cites this case's own record, not a decision: never spared behind a bare "at p.".
+const SHORT_RECORD = new Set(["decl", "declaration", "depo", "dep", "deposition", "tr", "trans", "transcript", "ex", "exh", "exhibit", "rt", "ct", "aa", "ra", "opp", "reply", "mot", "motion", "compl", "complaint", "brief", "pet", "petition", "answer", "aff", "affidavit"]);
+
+/** The short cites with no supra in `src`: [start, end] of each one's name (see SHORT_TAIL_RE). */
+function shortCiteNames(src, out) {
+  SHORT_TAIL_RE.lastIndex = 0;
+  let m;
+  while ((m = SHORT_TAIL_RE.exec(src))) {
+    const c = m.index; // the comma
+    const from = Math.max(0, c - SHORT_NAME_WINDOW);
+    const nm = SHORT_NAME_RE.exec(src.slice(from, c));
+    if (!nm) continue;
+    const runAt = from + nm.index;
+    // Its words, and where the name really begins: after the last signal, and
+    // after the last full stop that closes an ordinary word.
+    const words = [];
+    for (const w of nm[0].matchAll(/\S+/g)) words.push([w[0], runAt + w.index]);
+    let cut = 0;
+    for (let i = 0; i < words.length - 1; i++) {
+      const w = words[i][0];
+      const base = w.replace(/[.,]+$/, "").toLowerCase();
+      if (SHORT_SIGNALS.has(base)) cut = i + 1;
+      else if (w.endsWith(".") && base.length > 1 && !SHORT_ABBREVS.has(base) && /\p{Ll}/u.test(base)) cut = i + 1;
+    }
+    // A gutter number the run read across a line break is no word of the name.
+    while (cut < words.length && /^\d+$/.test(words[cut][0])) cut++;
+    if (cut >= words.length) continue;
+    const start = words[cut][1];
+    if (m[1]) {
+      // The bare pin: only where a citation stands, and not this case's record.
+      const lastBase = words[words.length - 1][0].replace(/[.,]+$/, "").toLowerCase();
+      if (SHORT_RECORD.has(lastBase)) continue;
+      const before = src.slice(Math.max(0, start - 4), start).replace(/\s+$/, "");
+      if (!(cut > 0 && SHORT_SIGNALS.has(words[cut - 1][0].replace(/[.,]+$/, "").toLowerCase())) && !/[(;]$/.test(before)) continue;
+    }
+    out.push([start, c]);
+  }
+}
+
 /**
  * Where `text` names a decided case: `[start, end]` per span, in order. A span
  * covers the case NAME alone — the citation after it is what proves the name
@@ -717,6 +820,7 @@ export function citedNameSpans(text) {
       out.push([m.index, end]);
     }
   }
+  shortCiteNames(src, out);
   out.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
   // The overlapping ones merged, so a caller has one span to test against.
   const merged = [];
@@ -1049,7 +1153,8 @@ export function editedSpans(before, after, { maxD = 1000 } = {}) {
   while (s < lim - p && a0.charCodeAt(a0.length - 1 - s) === b0.charCodeAt(b0.length - 1 - s)) s++;
   const a = a0.slice(p, a0.length - s), b = b0.slice(p, b0.length - s);
   const put = (from, to) => out.push([p + from, p + to]);
-  if (!a.length || !b.length) { put(0, b.length); return out; }
+  if (!b.length) { const x = slidPoint(a0, p, a0.length - s, b0, p); out.push([x, x]); return out; }
+  if (!a.length) { put(0, b.length); return out; }
   // Line by line.
   const al = a.split("\n"), bl = b.split("\n");
   const ids = new Map();
@@ -1066,9 +1171,52 @@ export function editedSpans(before, after, { maxD = 1000 } = {}) {
     // …then character by character inside the lines that changed.
     const chars = editHunks(al.slice(h.a0, h.a1).join("\n"), bText, maxD);
     if (!chars) { put(from, from + bText.length); continue; }
-    for (const c of chars) put(from + c.b0, from + c.b1);
+    const aText = al.slice(h.a0, h.a1).join("\n");
+    for (const c of chars) {
+      if (c.b1 > c.b0) put(from + c.b0, from + c.b1);
+      else { const x = slidPoint(aText, c.a0, c.a1, b, from + c.b0); put(x, x); }
+    }
   }
   return out;
+}
+
+// WHERE A DELETION WAS, when the text it took repeats what stands beside it.
+// Deleting "(Judge Whitaker erred).\n" from before "(Jones, 30 …)" leaves the
+// same text as deleting "Judge Whitaker erred).\n(" from after the "(", or
+// "udge Whitaker erred).\n(J" from after "(J": the deletion SLIDES, and each
+// of those is as true an account of the edit as the others. Taken head first
+// (the shared head extended as far as it goes) the point it took text out at
+// fell inside "Jones" — "took text out of its middle" — and a name the FILE
+// already carried counted as typed: the save wrote a short cite PDF-Linker had
+// shipped with its real name as "(Pratt, 30 Cal.App.5th at p. 5.)", under a
+// plain "Saved" (the final review's item 3, on b6d82a6 and 0b35064 alike). So
+// a deletion's point is slid, within the places that tell the same story, to
+// the first that splits no word of what is left; where every one splits one,
+// it stays where it was found. A name is then typed only where some of the
+// edit is in it whichever way the edit is told — failing toward a name left as
+// the file had it, which the save names in red, never toward a pseudonym
+// written over a name nobody typed. (Text PUT IN that repeats what is beside
+// it slides the same way; which copy is "the typed one" is then truly
+// undecidable, and the insertion is left where it was found.)
+const SLIDE_MAX = 400;
+const WORDCH = /[\p{L}\p{N}]/u;
+/**
+ * The point in `after` a deletion of `before`'s [d0, d1) is best told at:
+ * `x` is where it was found (the point in `after` that d0 maps to); the
+ * deletion slides left while the character before it equals the last one it
+ * took, right while the first it took equals the one after it, and the first
+ * place, leftmost first, that splits no word in `after` is the answer.
+ */
+function slidPoint(before, d0, d1, after, x) {
+  if (!(d1 > d0)) return x;
+  const splits = (y) => y > 0 && y < after.length && WORDCH.test(after[y - 1]) && WORDCH.test(after[y]);
+  if (!splits(x)) return x;
+  let l = 0;
+  while (l < SLIDE_MAX && d0 - l > 0 && before[d0 - l - 1] === before[d1 - l - 1]) l++;
+  let r = 0;
+  while (r < SLIDE_MAX && d1 + r < before.length && before[d0 + r] === before[d1 + r]) r++;
+  for (let k = -l; k <= r; k++) if (!splits(x + k)) return x + k;
+  return x;
 }
 
 /** Whether an edit (editedSpans) wrote any of [start, end): put text inside it, or took text out of its middle. */
@@ -1160,6 +1308,16 @@ export function withoutEscaped(spans, escaped) {
  *   takes in (any of them between the shared head and tail; where the edit
  *   only took text out, the ones it closed up across), leaving out `taken`
  *   (the places of the page's other Esc'd names).
+ * - { at: -1, within, unsure: true } — it cannot say: told head first and
+ *   tail first, the edit disagrees about whether it reached the name (the
+ *   text it took or wrote repeats what stands beside the name — "(Jones, 30
+ *   …)" deleted from before "(Jones, 31 …)" — so it could have been taken
+ *   from either side). `within` is every place either telling puts the name
+ *   and every whole-word occurrence in the widest region the edit could have
+ *   written; the reader leaves each as typed and warns, and never drops it
+ *   for the browser's own edit (escapesIn). Told head first only, the shared
+ *   head ran on into the name, the Esc was dropped and the save wrote
+ *   "(Pratt, 31 …)" under a plain "Saved" (measured on 0b35064).
  *
  * BOUNDED, BY THE EDIT. This used to be the name's occurrences ANYWHERE on
  * the page, nearest first, with no limit — on the reading that an occurrence
@@ -1181,29 +1339,48 @@ export function escapedPlace(was, now, name, at, taken) {
   const word = /[\p{L}\p{N}]/u;
   const whole = (i) => b0.startsWith(name, i) && !(i > 0 && word.test(b0[i - 1])) && !word.test(b0[i + name.length] || "");
   const lim = Math.min(a0.length, b0.length);
+  const end = at + name.length;
+  // The head and the tail the two share, taken HEAD FIRST (p, s) and TAIL
+  // FIRST (p2, s2): the same edit, placed as late and as early as it can be.
   let p = 0;
   while (p < lim && a0.charCodeAt(p) === b0.charCodeAt(p)) p++;
   let s = 0;
   while (s < lim - p && a0.charCodeAt(a0.length - 1 - s) === b0.charCodeAt(b0.length - 1 - s)) s++;
-  const end = at + name.length;
-  // In the head the two share, or in the tail: the same characters, moved by
-  // the length the edit changed where it lay before it.
-  if (end <= p && whole(at)) return { at };
-  if (at >= a0.length - s && end <= a0.length) {
-    const there = at + (b0.length - a0.length);
-    if (whole(there)) return { at: there };
-  }
-  // The edit reached it: what the edit wrote is [p, e) of `now`, or the
-  // point p where it only took text out.
-  const e = b0.length - s;
+  let s2 = 0;
+  while (s2 < lim && a0.charCodeAt(a0.length - 1 - s2) === b0.charCodeAt(b0.length - 1 - s2)) s2++;
+  let p2 = 0;
+  while (p2 < lim - s2 && a0.charCodeAt(p2) === b0.charCodeAt(p2)) p2++;
+  // Where each alignment says the name stands now, untouched — or -1, reached.
+  const untouched = (hp, hs) => {
+    if (end <= hp && whole(at)) return at;
+    if (at >= a0.length - hs && end <= a0.length) {
+      const there = at + (b0.length - a0.length);
+      if (whole(there)) return there;
+    }
+    return -1;
+  };
+  const one = untouched(p, s), two = untouched(p2, s2);
+  if (one >= 0 && one === two) return { at: one };
+  // The two disagree: the text the edit took or wrote repeats what stands
+  // beside it ("(Jones, 30 …)" deleted from before "(Jones, 31 …)"), so it
+  // could have been taken from either side of the name and nothing here can
+  // say which. The name is UNSURE — left as typed where either reading puts
+  // it, and warned — never dropped: dropping it writes its pseudonym, and the
+  // party of a short cite written so is a renamed authority.
+  const unsure = one >= 0 || two >= 0;
+  // The edit reached it, or may have: what it wrote is, at the widest, [lo,
+  // hi) of `now` — from the earlier start to the later end of the two
+  // placings — or the point lo where it only took text out.
+  const lo = Math.min(p, p2), hi = Math.max(b0.length - s, b0.length - s2);
   const within = [];
+  const add = (i) => { if (i >= 0 && whole(i) && !(taken && taken.has(i)) && !within.includes(i)) within.push(i); };
   for (let i = b0.indexOf(name); i >= 0; i = b0.indexOf(name, i + 1)) {
     const j = i + name.length;
-    if (!(e > p ? i < e && j > p : i < p && j > p)) continue;
-    if (!whole(i) || (taken && taken.has(i))) continue;
-    within.push(i);
+    if (!(hi > lo ? i < hi && j > lo : i < lo && j > lo)) continue;
+    add(i);
   }
-  return { at: -1, within };
+  if (unsure) { add(one); add(two); within.sort((x, y) => x - y); }
+  return unsure ? { at: -1, within, unsure: true } : { at: -1, within };
 }
 
 /**
