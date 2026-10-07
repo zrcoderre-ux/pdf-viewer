@@ -1895,6 +1895,86 @@ export function noteKeepLines(saved, lines) {
   }
   return out;
 }
+// ---- the lines of New Real Values.txt the reader did not write ----------------
+//
+// The reader writes the file whole, from its lists. A line PDF-Linker reads that
+// the lists cannot hold (a page list, "did not ocr: X.pdf | pages 3-5, 9"), and a
+// line written into the file since the folder was opened — typed by hand, or by
+// another reader tab — were lost at the next save. They are kept now: the
+// reader's own lines first (PDF-Linker and parseReaderFile take a value's FIRST
+// line), then every other line of the file as it stands, verbatim, under a
+// comment. A line leaves the file only as one the reader wrote or read and has
+// since withdrawn. See "Files a run changed under the reader" in the design notes.
+
+const KEPT_LINES_HEAD = "# Already in this file, not written by the text reader — kept as they stand:";
+
+/**
+ * A line's identity, for telling the file's lines from the reader's own:
+ * `value:`/`phrase:` and the value, `no:`/`never:` and the value, `noocr:` and
+ * `again:` and the page, `fixed:` and the page and its sum, all folded; `raw:`
+ * and the folded line for one PDF-Linker reads that the reader cannot parse (a
+ * page list); "" for a blank line or a comment.
+ */
+export function valuesLineKey(raw) {
+  const line = String(raw == null ? "" : raw).replace(/^\ufeff/, "").trim();
+  if (!line || line[0] === "#") return "";
+  const p = parseReaderFile(line);
+  const page = (e) => foldKey(e.doc) + "|" + e.page;
+  if (p.noOcr.length) return "noocr:" + page(p.noOcr[0]);
+  if (p.ocrAgain.length) return "again:" + page(p.ocrAgain[0]);
+  if (p.textFixed.length) return "fixed:" + page(p.textFixed[0]) + "|" + foldKey(p.textFixed[0].sum || "");
+  if (p.keeps.length) return p.keeps[0].control + ":" + foldKey(p.keeps[0].value);
+  if (p.values.length) return (p.phrases.length ? "phrase:" : "value:") + foldKey(p.values[0]);
+  return "raw:" + foldKey(line);
+}
+function lineKeys(text) {
+  const out = new Set();
+  for (const raw of String(text == null ? "" : text).split(/\r?\n/)) { const k = valuesLineKey(raw); if (k) out.add(k); }
+  return out;
+}
+/** The keys of every line of a reader file (valuesLineKey), as a Set. */
+export function valuesLineKeys(text) { return lineKeys(text); }
+/**
+ * The lines of `disk` (the file as it stands) the reader is to keep when it
+ * writes `mine` (its own text): verbatim, in order, once each. A line `mine`
+ * carries is its own. A `raw:` line is always kept — the reader cannot read it
+ * into a list, so nothing it holds can stand for it. Any other line is kept only
+ * where the reader neither `written` it (the text this tab last wrote: a line
+ * gone from its lists since is withdrawn) nor `seen` it in the file when the
+ * folder was opened (it was read into the lists then: gone from them since, it
+ * was withdrawn) — every such line goes where `seen` is null, the file never
+ * read — and it is not a keep the operator withdrew (`withdrawn(control, value)`).
+ */
+export function linesNotOurs(disk, { mine = "", written = "", seen = null, withdrawn = null } = {}) {
+  const ours = lineKeys(mine);
+  const wrote = lineKeys(written);
+  const out = [], had = new Set();
+  for (const raw of String(disk == null ? "" : disk).split(/\r?\n/)) {
+    const k = valuesLineKey(raw);
+    if (!k || ours.has(k) || had.has(k)) continue;
+    if (!k.startsWith("raw:")) {
+      if (!seen || wrote.has(k) || seen.has(k)) continue;
+      const m = raw.replace(/^\ufeff/, "").trim().match(KEEP_RE);
+      if (m && withdrawn && withdrawn(m[1].toLowerCase(), normalizeValue(m[2]))) continue;
+    }
+    had.add(k);
+    out.push(raw.replace(/^\ufeff/, "").replace(/\s+$/, ""));
+  }
+  return out;
+}
+/** The file to write: the reader's own text, then the lines kept (linesNotOurs) under their comment. */
+export function withLinesNotOurs(mine, kept) {
+  const text = String(mine == null ? "" : mine);
+  if (!kept || !kept.length) return text;
+  return text + (text && !text.endsWith("\n") ? "\n" : "") + "\n" + KEPT_LINES_HEAD + "\n" + kept.join("\n") + "\n";
+}
+/** Whether two byte arrays hold the same bytes. */
+export function sameBytes(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 /**
  * The keep lines of `record` that `text` still carries — the same control on
  * the same value — as keep lines of their own ("" where `text` is null, a file
@@ -2020,7 +2100,18 @@ export function docLabel(name) {
 }
 
 export function isKeyName(name) {
-  return /^pseudonym[ _-]?key.*\.xlsx$/i.test(String(name == null ? "" : name).split(/[\\/]/).pop().trim());
+  const n = String(name == null ? "" : name).split(/[\\/]/).pop().trim();
+  // …never PDF-Linker's own temporary copy, written beside the key while a
+  // save is going and left behind by one that crashed (`_pn_xl_save`).
+  return /^pseudonym[ _-]?key.*\.xlsx$/i.test(n) && !/\.tmp\.xlsx$/i.test(n);
+}
+// The one name PDF-Linker reads its key under. A copy ("pseudonym_key (1).xlsx",
+// "pseudonym_key - Copy.xlsx") is still a key, but where the real one stands
+// beside it, the real one is the folder's (keyRank 0 over 1): Windows lists a
+// folder in its own order, and the first match was the copy as often as not.
+export const KEY_FILE = "pseudonym_key.xlsx";
+export function keyRank(name) {
+  return String(name == null ? "" : name).split(/[\\/]/).pop().trim().toLowerCase() === KEY_FILE ? 0 : 1;
 }
 
 // The one file holding every export, which PDF-Linker writes into the CASE

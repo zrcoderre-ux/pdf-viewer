@@ -38,9 +38,17 @@ const NAME_RE = /^(leaks|pdf_linker_leaks)(?: ?\(\d+\)| - copy)?\.xlsx$/i;
 export function isLeaksName(name) {
   return NAME_RE.test(String(name == null ? "" : name).split(/[\\/]/).pop().trim());
 }
-/** Lower ranks first: the current name over the legacy one. */
+/**
+ * Lower ranks first, as PDF-Linker picks its worksheet (`_pn_existing_leak_xlsx`):
+ * LEAKS.xlsx itself (0), then a Windows copy of it (1), then the legacy
+ * pdf_linker_leaks.xlsx (2), then a copy of that (3). Ranked alike, the copy a
+ * folder listed first was taken over the file PDF-Linker reads and writes.
+ */
 export function leaksRank(name) {
-  return /^leaks/i.test(String(name == null ? "" : name).split(/[\\/]/).pop().trim()) ? 0 : 1;
+  const n = String(name == null ? "" : name).split(/[\\/]/).pop().trim().toLowerCase();
+  if (n === "leaks.xlsx") return 0;
+  if (/^leaks/.test(n)) return 1;
+  return n === "pdf_linker_leaks.xlsx" ? 2 : 3;
 }
 
 export function fold(s) {

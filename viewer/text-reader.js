@@ -183,6 +183,14 @@ let replaceJournal = [];       // the folder-wide replaces the reader holds, old
 let masterPending = [];        // values the Master Keep workbook would not let go of: owed to the next save
 let masterRestoring = null;    // …the workbook's reading at startup (restoreMaster), awaited before a question is put to it
 let valuesSpentNote = "";      // what the last write of New Real Values.txt retired that the master does not hold, for the save's toast
+// FILES A RUN CHANGED UNDER THE READER (see "Files a run changed under the
+// reader" in the design notes): what the reader read of the key, LEAKS.xlsx and
+// New Real Values.txt, so that nothing is written over a newer copy.
+let leaksSaveNote = "";        // why the last save of LEAKS.xlsx wrote nothing, for the document save's toast
+let leaksSeen = null;          // { leaks, stamp }: the stamp of LEAKS.xlsx last found to hold leaks.bytes
+let keyRead = null;            // { key, sig, name, folder, stamp }: the key in hand as read from a case folder's file
+let valuesSeen = null;         // { list, keys }: the lines of New Real Values.txt as the folder was opened (TD.valuesLineKey)
+let valuesWrote = null;        // { list, text }: the text THIS tab last wrote into the folder's New Real Values.txt
 const rawPages = new Set();  // the page sections shown as the file has them, ⇄ Raw (setRaw)
 let place = null;            // where the reading is, as last noted: { el, frac, sec, secFrac } (readingPlace)
 let placeHold = null;        // …and the hold keeping it there through a re-layout, while one is (holdReading)
@@ -1677,9 +1685,51 @@ async function loadKeyFromBytes(bytes, name, folder, { quiet = false, owner = nu
   fillKeys(id);
   keyFolder = owner;
   setKey(keyLibrary()[id]);
+  keyRead = folder ? { key, sig: keyContentSig(parsed), name, folder, stamp: "" } : null;
   const note = notOwnKeyNote();
   if (!quiet) toast(`Key loaded: ${PK.keyTitle(key)} — ${key.pairs.length} reversible binding${key.pairs.length === 1 ? "" : "s"}` +
     (key.dropped.ambiguous ? `, ${key.dropped.ambiguous} ambiguous retired` : "") + (note ? "." + note : ""), note ? { ms: 9000 } : undefined);
+}
+
+/**
+ * A key's content, for telling whether the folder's file still is the key in
+ * hand: its reversal pairs, every real value it binds and its row count — not
+ * its bytes, which openpyxl rewrites (timestamps) on every save.
+ */
+function keyContentSig(parsed) {
+  return PK.keySignature(parsed) + "|" + PK.keySignature({ pairs: (parsed && parsed.warn) || [] }) + "|" + (parsed ? parsed.rows : "");
+}
+/**
+ * pseudonym_key.xlsx in the open case folder against the key in hand → "same";
+ * "moved" — the file binds otherwise than the key read from it (a PDF-Linker
+ * run rewrote it); "new" — no key in hand, and the folder has one now; or
+ * "unknown" — no key read from this folder in hand, or a file that cannot be
+ * read now (Excel holding it): a run never deletes the key, so that is not
+ * news. By the file's stamp first, its content only where that moved.
+ */
+async function folderKeyState() {
+  const dir = dirHandle;
+  if (!dir) return "unknown";
+  if (keyRead && key && keyRead.folder === folderName && key === keyRead.key) {
+    const was = keyRead;
+    let f;
+    try { f = await (await dir.getFileHandle(was.name)).getFile(); } catch { return "unknown"; }
+    const stamp = fileKeyOf(f);
+    if (stamp === was.stamp) return "same";
+    try {
+      // PDF-Linker writes the key beside it and swaps it in (_pn_xl_save), so a
+      // read is of one whole file or the other.
+      const wb = await parseXlsx(new Uint8Array(await f.arrayBuffer()));
+      if (!PK.sheetsLookLikeKey(wb.sheets)) return "unknown";
+      if (keyContentSig(PK.parseKey(wb.sheets, f.name)) !== was.sig) return "moved";
+      was.stamp = stamp;
+      return "same";
+    } catch { return "unknown"; }
+  }
+  if (!key) {
+    try { await dir.getFileHandle(TD.KEY_FILE); return "new"; } catch { return "unknown"; }
+  }
+  return "unknown";
 }
 
 async function pickKey() {
@@ -1879,6 +1929,11 @@ async function scanFolder(h, { light = false } = {}) {
     } else if (entry.kind === "directory" && name.toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) {
       found.textDir = entry;
     }
+  }
+  // A copy of the key listed before the key itself: the key PDF-Linker reads is
+  // the folder's (TD.keyRank), where it is there.
+  if (found.keyHandle && TD.keyRank(found.keyHandle.name)) {
+    try { found.keyHandle = await h.getFileHandle(TD.KEY_FILE); } catch { /* none: the copy stands, as it always did */ }
   }
   if (found.textDir && !light) {
     for await (const [name, entry] of found.textDir.entries()) {
@@ -2204,7 +2259,10 @@ function hideRunBar() {
   runBar.hidden = true;
   syncRunHeight();
 }
-$("run-bar-close").addEventListener("click", hideRunBar);
+$("run-bar-close").addEventListener("click", () => {
+  if (runShown && runShown.state !== "running") folderChangeHidden = $("run-bar-text").textContent;
+  hideRunBar();
+});
 
 /**
  * The newest ETA and DONE markers in the case folder `dir`, each
@@ -2250,7 +2308,10 @@ async function checkRun({ opening = false } = {}) {
   // A recheck with no bar up asks nothing, and must not count as the latest
   // look either: a focus landing while an opening's look is reading the
   // folder would otherwise silence it.
-  if (!opening && !(runShown && runShown.dir === dir)) return;
+  // It looks at the key and the worksheet instead, by their stamps
+  // (lookForChange): a run that finished while no bar was up left no other
+  // trace the reader would see.
+  if (!opening && !(runShown && runShown.dir === dir)) { lookForChange(dir); return; }
   const seq = ++runSeq;
   if ((await permissionOf(dir, "read")) !== "granted") return;
   const seen = await runMarkersIn(dir);
@@ -2262,7 +2323,57 @@ async function checkRun({ opening = false } = {}) {
   // opened after the run is the new text, but the key in hand is still the
   // one read before it. A bar about another folder has nothing to say here.
   if (runShown && runShown.dir === dir) { if (runShown.state === "running") showRunEnded(dir, done); }
-  else if (runShown) hideRunBar();
+  else {
+    if (runShown) hideRunBar();
+    lookForChange(dir);
+  }
+}
+
+/**
+ * The bar, where the folder's files are not what the reader read: the key
+ * (folderKeyState: "moved" or "new"), the worksheet (leaksOnDisk: "changed"
+ * or "gone"), an export (`docs`). It offers the folder read again.
+ */
+let folderChangeHidden = ""; // the bar's text when × put it away: the same news is not put up again by a look
+function showFolderChanged(dir, { key: k = "", leaks: lk = "", docs = false } = {}, { look = false } = {}) {
+  const parts = [];
+  if (k === "moved") parts.push(`pseudonym_key.xlsx in ${dir.name} has changed on disk since the reader read it — a PDF-Linker run, most likely. The documents in hand read under the key read before, and Save writes nothing until the folder is read again.`);
+  else if (k === "new") parts.push(`${dir.name} has a pseudonym_key.xlsx now, which the reader has not read.`);
+  if (lk === "changed") parts.push("LEAKS.xlsx has changed on disk since the reader read it (answered in Excel, or rewritten by a run); the worksheet in hand is not saved over it.");
+  else if (lk === "gone") parts.push(`LEAKS.xlsx is no longer in ${dir.name} — PDF-Linker removes it once no row needs a look.`);
+  if (docs) parts.push("A document in hand has changed on disk since it was opened (a PDF-Linker run, most likely); nothing was written over it.");
+  if (!parts.length) return;
+  const text = parts.join(" ");
+  if (look && text === folderChangeHidden) return;
+  showRunBar(dir, "ended", text, { label: "Read the folder again", run: readFolderAfterRun });
+}
+/**
+ * One look at whether a run changed the folder under the reader: the key's
+ * content and the worksheet's bytes against what was read, by their stamps.
+ * Read permission only, never a prompt; one look at a time; nothing where a
+ * bar about the folder is up already. A change seen while an ETA marker is
+ * newer than DONE is the run still going (showRunning, whose recheck then
+ * ends in showRunEnded) — and DONE is not taken as settled either way:
+ * PDF-Linker stamps it before it writes the key and LEAKS.xlsx.
+ */
+let lookingForChange = false;
+async function lookForChange(dir) {
+  if (lookingForChange || !dir || dir !== dirHandle || (runShown && runShown.dir === dir)) return;
+  lookingForChange = true;
+  try {
+    if ((await permissionOf(dir, "read")) !== "granted") return;
+    const k = await folderKeyState();
+    const lk = leaks && leaks.folder && leaks.folder === folderName ? (await leaksOnDisk({ cheap: true })).state : "same";
+    const keyNews = k === "moved" || k === "new";
+    const leaksNews = lk === "changed" || lk === "gone";
+    if (!keyNews && !leaksNews) return;
+    if (dir !== dirHandle || (runShown && runShown.dir === dir)) return;
+    const seen = await runMarkersIn(dir);
+    if (dir !== dirHandle || (runShown && runShown.dir === dir)) return;
+    if (seen && seen.eta && (!seen.done || seen.eta.at > seen.done.at)) { showRunning(dir, seen.eta); return; }
+    showFolderChanged(dir, { key: keyNews ? k : "", leaks: leaksNews ? lk : "" }, { look: true });
+  } catch (e) { console.warn(e); }
+  finally { lookingForChange = false; }
 }
 
 function showRunBar(dir, state, text, action) {
@@ -2306,13 +2417,22 @@ function showRunEnded(dir, done) {
 async function readFolderAfterRun() {
   const dir = dirHandle;
   if (!dir) { hideRunBar(); return; }
-  if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
-  dirty = false;
+  // Only the edits with nowhere to be kept: a document of the folder goes to
+  // the store when the open document is read again (openFile → stashReel),
+  // and is checked against the disk when saved, as any is.
+  const loose = folderOpen() ? reel.filter((m) => m.dirty && !m.d).map((m) => m.name) : dirty ? [fileName] : [];
+  if (loose.length && !confirm("Discard unsaved edits to " + loose.join(", ") + "?")) return;
+  for (const m of reel) if (!m.d) m.dirty = false;
+  dirty = reel.some((m) => m.dirty);
+  folderChangeHidden = "";
   hideRunBar();
   const name = fileName, was = fileHandle;
   forgetPdfs();
   dropReady();
   await adoptFolder(dir, { quiet: true, light: folderLight });
+  // A worksheet the run removed is done with: no row needs a look. Its answers
+  // stay remembered, and are not written anywhere.
+  if (leaks && leaks.folder === folderName && (await leaksOnDisk()).state === "gone") dropLeaks();
   if (!doc || !name) return;
   let f = null, h = was;
   try { f = h ? await h.getFile() : null; } catch { f = null; }
@@ -4848,6 +4968,16 @@ async function diskStill(d, base) {
 }
 
 async function saveNow({ inFolder, offscreen, grant, seqAt }) {
+  // NOT UNDER A KEY THE FOLDER NO LONGER HOLDS. A run that rewrote the key
+  // binds names the key in hand does not know (a name typed now would stay
+  // real) or moved one (a name typed now would be written as a pseudonym no
+  // row of the new key turns back). Nothing is written until the folder is
+  // read again (folderKeyState, by content).
+  if (dirHandle && (await folderKeyState()) === "moved") {
+    toast(`Not saved: pseudonym_key.xlsx in ${folderName} has changed on disk since the reader read it (a PDF-Linker run, most likely). Saved under the key read before, a name the new key binds could stay real, or be written as a pseudonym the new key does not turn back. Nothing was written; your edits are kept — Read the folder again (the bar at the top), then save.`, { error: true, ms: 12000 });
+    showFolderChanged(dirHandle, { key: "moved" });
+    return false;
+  }
   const keyAt = { rev, fwd, reals };
   // The names said to be faked reach a member the reel has let go of too: it
   // is built back, so the pass over the pages on screen covers it.
@@ -5029,6 +5159,10 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   }
   const wrote = [];
   const conflicts = [], failed = [];
+  // A clean document the disk has moved under (an empty Ctrl+S after a run
+  // rewrote it): nothing written over it, and no conflict of edits either.
+  const staleClean = [];
+  const looseConflicts = new Set(); // …and the conflicts with no entry in the folder, so no disk's version to take
   const wroteMembers = [];
   let wroteOff = 0;
   // The journal of a folder replace learns what a save wrote of one of its
@@ -5050,8 +5184,10 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
     const text = TD.serializeExport(memberDoc(m));
     saveNote = `Saving… ${TD.docLabel(m.name)}`;
     updateDirty();
+    const clean = !m.dirty && !touched.has(m);
     if (inFolder && m.d) {
       const c = await diskStill(m.d, m.base);
+      if (c === "changed" && clean) { staleClean.push(m.name); continue; }
       if (c !== "ok") {
         m.conflict = c === "changed";
         (c === "changed" ? conflicts : failed).push(c === "changed" ? m.name : { name: m.name, why: "no longer in the folder" });
@@ -5060,6 +5196,20 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
       const w = await writeInPlace(m.d.handle, text);
       if (!w.ok) { failed.push({ name: m.name, why: w.why }); continue; }
     } else {
+      // A light attach, a lone file, a member with no entry in the folder:
+      // the same content check before its handle is written. A run rewrites an
+      // export under it, or renames it to .txt.LEAK — and a write through the
+      // old handle re-created the file the run had taken away, the text from
+      // before the run back in Text Files beside its quarantined copy.
+      if (m.handle && m.base && typeof m.base.text === "string") {
+        const c = await diskStill({ handle: m.handle }, m.base);
+        if (c === "changed" && clean) { staleClean.push(m.name); continue; }
+        if (c !== "ok") {
+          if (c === "changed") { m.conflict = true; conflicts.push(m.name); looseConflicts.add(m.name); }
+          else failed.push({ name: m.name, why: "no longer where it was opened — a PDF-Linker run may have renamed it (.txt.LEAK)" });
+          continue;
+        }
+      }
       const ok = await writeText(text, m.name, m.handle, { adopt: reel.length === 1 });
       if (!ok) {
         if (wrote.length) toast(`Saved ${wrote.join(", ")} — ${m.name} was not written.`, { error: true });
@@ -5183,7 +5333,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
     filesOk = filesOk && !!n;
     alsoList += n
       ? ` · ${leaks.name} written too (${n} decision${n === 1 ? "" : "s"})`
-      : " · the LEAKS decisions are still unwritten — save them from the ⚠ Leaks bar";
+      : " · " + (leaksSaveNote || "the LEAKS decisions are still unwritten — save them from the ⚠ Leaks bar");
   }
   // …and a value taken off the Master Keep that the workbook would not let go
   // of, where the workbook may be written now without asking.
@@ -5220,19 +5370,25 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
       + stuckNames.slice(0, 4).join(", ") + (stuckNames.length > 4 ? "…" : "")
       + ". Retype or keep " + (stuck.length === 1 ? "it" : "them") + " by hand."
     : "";
-  const conflictWarn = conflicts.map((n) => ` · ⚠ ${TD.docLabel(n)} changed on disk after your edits (PDF-Linker or another window wrote it) — not written; still unsaved. Open it to see your version, or take the disk's.`).join("");
+  const conflictWarn = conflicts.map((n) => (!looseConflicts.has(n)
+    ? ` · ⚠ ${TD.docLabel(n)} changed on disk after your edits (PDF-Linker or another window wrote it) — not written; still unsaved. Open it to see your version, or take the disk's.`
+    // …a document with no entry in the folder has no disk's version to take
+    // (takeDiskVersion works on the folder's list).
+    : ` · ⚠ ${TD.docLabel(n)} changed on disk after your edits (PDF-Linker or another window wrote it) — not written; your edits are on screen: copy what you need, then open it again to read the disk's.`)).join("")
+    + staleClean.map((n) => ` · ${TD.docLabel(n)} changed on disk since it was opened (a PDF-Linker run, most likely) — nothing was written over it; Read the folder again (the bar at the top) to read it as it now stands.`).join("");
+  if (staleClean.length && dirHandle) showFolderChanged(dirHandle, { docs: true });
   const failWarn = failed.map((f) => ` · ⚠ ${TD.docLabel(f.name)} could not be written (${f.why}) — still unsaved.`).join("")
     + (unreadable.length ? ` · ⚠ ${nameList(unreadable.map((n) => TD.docLabel(n)))} could not be read, so ${unreadable.length === 1 ? "it was" : "they were"} not written.` : "");
   const combined = wrote.length && folderDocs.some((d) => d.combined) ? ` · ${TD.COMBINED_FILE} is behind the exports until PDF-Linker's next run (or Apply Fixes).` : "";
   const unreadWarn = elsewhereUnread ? ` · ⚠ ${folderName} could not be read through for the names you said to fake, so none was written off the screen — save again.` : "";
-  const red = warn || stuckWarn || conflictWarn || failWarn || unreadWarn || spentWarn;
+  const red = warn || stuckWarn || conflictWarn || failWarn || unreadWarn || spentWarn || (leaksDirty() && leaksSaveNote);
   // Named in the folder's order, six at most: a save of forty documents is not
   // a toast of forty names. And what went wrong first, where it is read — a
   // warning after a long list of names was a warning nobody saw.
   const order = inFolderOrder(wrote);
   const shown = wrote.length > 1 ? nameList(order.map((n) => TD.docLabel(n))) : order.join(", ");
   const said = (!wrote.length
-    ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : conflicts.length || failed.length ? "Nothing was written" : "Nothing to save.")
+    ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : conflicts.length || failed.length || staleClean.length ? "Nothing was written" : "Nothing to save.")
     : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + shown +
       (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList)
     + combined;
@@ -10710,6 +10866,11 @@ async function writtenWhere() {
  * nothing is spent.
  */
 async function spendFromDisk(disk, { settle = true } = {}) {
+  // The adoption — the one caller passing settle: false (adoptFolderNow) — notes
+  // the lines the file held as the folder was opened: read into the lists then,
+  // a line gone from them since was withdrawn, and the next save leaves it out
+  // (TD.linesNotOurs). A line written after this is somebody else's, and kept.
+  if (!settle) valuesSeen = { list: valuesStoreKey(), keys: TD.valuesLineKeys(typeof disk === "string" ? disk : "") };
   const where = await writtenWhere();
   const was = lsGet(valuesSavedKey(), "");
   if (where === "elsewhere") {
@@ -11157,6 +11318,27 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
     return false;
   }
   const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed);
+  // THE LINES THE READER DID NOT WRITE. A page list PDF-Linker reads and the
+  // lists cannot hold, a line typed into the file by hand or written by another
+  // reader tab since the folder was opened: kept, verbatim, after the reader's
+  // own lines (TD.linesNotOurs). What is recorded as written is the reader's
+  // own text alone, so the list reads as in step with the file all the same.
+  // `written` is what THIS tab last wrote here: the record in localStorage is
+  // shared by every tab on the case, and another tab's line in it would read
+  // as one this tab withdrew.
+  const diskNow = !dirHandle ? undefined : disk !== undefined ? disk : await valuesFileText();
+  const kept = typeof diskNow === "string"
+    ? TD.linesNotOurs(diskNow, {
+      mine: text,
+      written: valuesWrote && valuesWrote.list === valuesStoreKey() ? valuesWrote.text : "",
+      seen: valuesSeen && valuesSeen.list === valuesStoreKey() ? valuesSeen.keys : null,
+      withdrawn: keepWithdrawn,
+    })
+    : [];
+  const out = TD.withLinesNotOurs(text, kept);
+  const keptNote = kept.length
+    ? ` · ${kept.length} line${kept.length === 1 ? "" : "s"} already in the file that the reader did not write (typed by hand, or saved by another copy of the reader) kept as ${kept.length === 1 ? "it stands" : "they stand"}`
+    : "";
   // EVERYTHING WITHDRAWN. The file is written with nothing in it (the header
   // alone, which PDF-Linker reads as empty) where it still carries lines; where
   // it carries none, or is not there, there is nothing to tell it, and the list
@@ -11164,7 +11346,7 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
   // list the next time the folder is opened, and handed over again.
   const emptied = !owed;
   if (emptied && dirHandle) {
-    const onDisk = disk !== undefined ? disk : await valuesFileText();
+    const onDisk = diskNow;
     if (onDisk == null || !TD.readerFileHasLines(onDisk)) {
       markValuesSaved(text);
       // …in step with THIS folder's file (writtenWhere), which carries no
@@ -11182,19 +11364,20 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
       }
       const h = await dirHandle.getFileHandle(TD.VALUES_FILE, { create: true });
       const w = await h.createWritable();
-      await w.write(new Blob([text], { type: "text/plain" }));
+      await w.write(new Blob([out], { type: "text/plain" }));
       await w.close();
       markValuesSaved(text);
+      valuesWrote = { list: valuesStoreKey(), text };
       // Written into THIS folder: the record is trusted for what PDF-Linker
       // spends here, and nowhere else (writtenWhere). A withdrawn keep's line is
       // out of the file now.
       await rememberWritten(folderName, dirHandle);
-      trimWithdrawn(text);
+      trimWithdrawn(out);
       if (!quiet) {
         toast((emptied
           ? `Wrote ${TD.VALUES_FILE} with nothing in it — the flags and keeps withdrawn are no longer handed to PDF-Linker.`
           : `Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()}) into ${folderName} — re-run PDF-Linker to apply them to the files.`)
-          + (valuesSpentNote ? " " + valuesSpentNote : ""), valuesSpentNote ? { error: true, ms: 12000 } : undefined);
+          + keptNote + (valuesSpentNote ? " " + valuesSpentNote : ""), valuesSpentNote ? { error: true, ms: 12000 } : undefined);
       }
       return true;
     } catch (e) {
@@ -11204,7 +11387,7 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
   }
   if (folderOnly) return false;
   let pickedFile = null;
-  if (await writeText(text, TD.VALUES_FILE, null, { picked: (h) => { pickedFile = h; } })) {
+  if (await writeText(out, TD.VALUES_FILE, null, { picked: (h) => { pickedFile = h; } })) {
     // SAVED — BUT INTO THE CASE FOLDER? With no folder open there is no other
     // place, and the list is written. With one open, the folder refused the
     // write and the list went to the save picker or a download: the folder's
@@ -11225,8 +11408,9 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
     }
     markValuesSaved(text);
     if (dirHandle) {
+      valuesWrote = { list: valuesStoreKey(), text };
       await rememberWritten(folderName, dirHandle);
-      trimWithdrawn(text);
+      trimWithdrawn(out);
     }
     return true;
   }
@@ -12206,6 +12390,38 @@ function finishPageSweep() {
   else toast("Every row is answered — save the worksheet, then Apply Fixes.");
 }
 
+/**
+ * LEAKS.xlsx as it stands against the bytes the reader holds (leaks.bytes) →
+ * { state, handle }: "same" — the file still is those bytes; "changed" —
+ * answered in Excel, or rewritten by a PDF-Linker run, since it was read;
+ * "gone" — no longer there (PDF-Linker removes it once no row needs a look);
+ * "unread" — a worksheet loaded by hand with no handle, or a file that cannot
+ * be read now, which the save goes on to write as it always did. `cheap`: a
+ * file whose stamp is the one last found to hold those bytes is taken as them
+ * unread (the look on focus, lookForChange). The handle is the worksheet's
+ * own, else the folder's file by its name — never created here.
+ */
+async function leaksOnDisk({ cheap = false } = {}) {
+  const lk = leaks;
+  if (!lk) return { state: "unread", handle: null };
+  let handle = lk.handle;
+  if (!handle && dirHandle && lk.folder && lk.folder === folderName) {
+    try { handle = await dirHandle.getFileHandle(lk.name); }
+    catch (e) { return { state: e && e.name === "NotFoundError" ? "gone" : "unread", handle: null }; }
+  }
+  if (!handle || !handle.getFile) return { state: "unread", handle: null };
+  let f;
+  try { f = await handle.getFile(); }
+  catch (e) { return { state: e && e.name === "NotFoundError" ? "gone" : "unread", handle }; }
+  const stamp = fileKeyOf(f);
+  if (cheap && leaksSeen && leaksSeen.leaks === lk && leaksSeen.stamp === stamp) return { state: "same", handle };
+  let bytes;
+  try { bytes = new Uint8Array(await f.arrayBuffer()); }
+  catch (e) { return { state: e && e.name === "NotFoundError" ? "gone" : "unread", handle }; }
+  if (TD.sameBytes(bytes, lk.bytes)) { leaksSeen = { leaks: lk, stamp }; return { state: "same", handle }; }
+  return { state: "changed", handle };
+}
+
 /** Write the decisions into the workbook: the same file, the Fix? cells changed, read back before it is written. */
 /**
  * The worksheet written back. `quiet` is for the save that carries it along
@@ -12217,6 +12433,25 @@ async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
   if (!leaks) { if (!quiet) toast("No LEAKS.xlsx is loaded.", { error: true }); return false; }
   const edits = LK.fixEdits(leaks.parsed);
   if (!edits.length) { if (!quiet) toast("Nothing to save — no decision has changed."); return false; }
+  // ONLY OVER THE BYTES IT WAS READ AS. The decisions are laid into the
+  // worksheet the reader read (leaks.bytes) and the whole file is written: over
+  // a worksheet answered in Excel since, or rewritten by a run, that undid
+  // those answers; and over one a run removed it put the worksheet back, which
+  // reopened leak triage for PDF-Linker (`_pn_triage_pending`). Neither is
+  // written: the answers stay remembered here, and the folder read again shows
+  // the worksheet as it now stands.
+  leaksSaveNote = "";
+  const disk = await leaksOnDisk();
+  if (disk.state === "changed" || disk.state === "gone") {
+    persistLeaks();
+    const n = edits.length, one = n === 1;
+    leaksSaveNote = disk.state === "changed"
+      ? `${leaks.name} was not saved: it changed on disk since the reader read it — answered in Excel, or rewritten by a PDF-Linker run — and writing the copy read before would undo that. Your ${n} answer${one ? " is" : "s are"} kept here: Read the folder again (the bar at the top), check ${one ? "it" : "them"} on the worksheet as it now stands, and save again.`
+      : `${leaks.name} was not saved: it is no longer in ${leaks.folder || folderName} — PDF-Linker removes it once no row needs a look, and the reader does not put it back. Your ${n} answer${one ? " is" : "s are"} kept here.`;
+    if (!quiet) toast(leaksSaveNote, { error: true, ms: 12000 });
+    if (dirHandle) showFolderChanged(dirHandle, { leaks: disk.state });
+    return false;
+  }
   let out;
   try {
     out = await XW.writeSheetCells(leaks.bytes, leaks.parsed.part, edits);
@@ -12239,7 +12474,7 @@ async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
   }
   if (!handle && folderOnly) return false; // nowhere to put it without asking
   const ok = await writeBlob(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), leaks.name, handle,
-    { description: "LEAKS worksheet", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } });
+    { description: "LEAKS worksheet", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }, { inPlaceOnly: disk.state === "same" });
   if (!ok) return false;
   leaks.bytes = out;
   if (handle) leaks.handle = handle;
@@ -12253,8 +12488,13 @@ async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
   return edits.length;
 }
 
-/** Write bytes: in place through the handle, else the Save picker, else a download. */
-async function writeBlob(blob, name, handle, type) {
+/**
+ * Write bytes: in place through the handle, else the Save picker, else a
+ * download. `inPlaceOnly`: the case folder's own file, read as it stands just
+ * now — a write that fails (Excel holding it) says so and writes nothing else:
+ * a copy picked elsewhere is not the file PDF-Linker reads.
+ */
+async function writeBlob(blob, name, handle, type, { inPlaceOnly = false } = {}) {
   if (handle && handle.createWritable) {
     try {
       if (handle.requestPermission) {
@@ -12267,6 +12507,10 @@ async function writeBlob(blob, name, handle, type) {
       return true;
     } catch (e) {
       if (e && e.name === "AbortError") return false;
+      if (inPlaceOnly) {
+        toast(`Could not write ${name} in place (${e.message || e}) — is it open in Excel? Close it and save again; your answers are kept here.`, { error: true, ms: 12000 });
+        return false;
+      }
       toast("Could not write in place (" + (e.message || e) + ") — choose where to save.", { error: true });
     }
   }
