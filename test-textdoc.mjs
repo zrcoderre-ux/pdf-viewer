@@ -10,7 +10,7 @@ import {
   markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
-  serializeHeld, serializeMapped, editedSpans, spanEdited, typedReals, typedPseudonymsCited, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
+  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
@@ -21,7 +21,7 @@ import {
   textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
   marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
 } from "./viewer/textdoc.js";
-import { parseKey, compileForward, compile, compileReals, buildMatcher } from "./viewer/pseudo-key.js";
+import { parseKey, compileForward, compile, compileReals, buildMatcher, forwardRuns } from "./viewer/pseudo-key.js";
 
 let fails = 0;
 function check(label, got, want) {
@@ -863,6 +863,71 @@ console.log("clear reading (the folder's ⚠ and the page agree)");
     [got.text, got.pns, got.held, got.segs.map((g) => [g.node.data, g.start, g.end])],
     ["Helen Pat Doe met \nQuillmarkRasho", [[6, 13]], [[19, 28]], [["Helen ", 0, 6], [" met ", 13, 18], ["Quillmark", 19, 28], ["Rasho", 28, 33]]]);
   check("…and without it, what it always gave", Object.keys(serializeHeld(body)), ["text", "held", "pns"]);
+}
+
+// ---- a selection, cut out of the text the file carries ------------------------
+// The reader's copy, cut and drag put the PSEUDONYMS on the clipboard: the
+// page is read whole as the save reads it, and the selection's two ends are
+// found in that text (serializeHeld's `points`) and cut out of it (clipText).
+console.log("copying a selection");
+{
+  const T = (s) => ({ nodeType: 3, data: s });
+  const E = (name, kids, attrs) => ({ nodeType: 1, nodeName: name, childNodes: kids, getAttribute: (k) => (attrs && k in attrs ? attrs[k] : null) });
+  const g = T(" 2  "), a = T("Plaintiff "), real = T("Helen Rasho"), b = T(" moves."), c = T("Second line");
+  const pn = E("SPAN", [real], { "data-fake": "Ingrid Strangeways", "data-real": "Helen Rasho" });
+  const gutter = E("SPAN", [g], { class: "gutter" });
+  const line1 = E("DIV", [gutter, a, pn, b]), line2 = E("DIV", [c]);
+  const body = E("DIV", [line1, line2]);
+  const at = (...pts) => serializeHeld(body, { points: pts }).at;
+  const disk = serializeHeld(body, { mapped: true });
+  check("the disk text the points are found in", disk.text, " 2  Plaintiff Ingrid Strangeways moves.\nSecond line");
+  check("…its pseudonym spans in the order of their places", [disk.pnNodes.length, disk.pnNodes[0] === pn], [1, true]);
+  check("a point in a text node is its offset in the disk text", at({ node: a, offset: 4 }, { node: b, offset: 6 }, { node: c, offset: 6 }), [8, 38, 46]);
+  check("a point between children stands where the walk is there: before a line's newline, or after it inside the line",
+    at({ node: body, offset: 1 }, { node: line2, offset: 0 }, { node: body, offset: 2 }), [39, 40, 51]);
+  check("a point inside a pseudonym takes it whole: a start point its start, an end point its end",
+    at({ node: real, offset: 4 }, { node: real, offset: 4, end: true }), [14, 32]);
+  check("…and one at its very start or end is that place either way",
+    at({ node: real, offset: 0, end: true }, { node: real, offset: 11 }, { node: pn, offset: 0 }, { node: pn, offset: 1, end: true }), [14, 32, 14, 32]);
+  check("a point not on the page is -1", at({ node: T("elsewhere"), offset: 2 }), [-1]);
+  check("…and without points there is no `at`", "at" in serializeHeld(body), false);
+
+  const sw = [{ start: 14, end: 32, to: "Helen Rasho" }];
+  check("clipText: the stretch, a swap it reaches written whole", clipText(disk.text, sw, 4, 20), "Plaintiff Helen Rasho");
+  check("…a swap only touched at the stretch's end is not reached", [clipText(disk.text, sw, 4, 14), clipText(disk.text, sw, 32, 39)], ["Plaintiff ", " moves."]);
+  check("…a stretch inside a swap is the swap", clipText(disk.text, sw, 20, 21), "Helen Rasho");
+  check("…the skipped margin number is left out, the newline kept", clipText(disk.text, [], 0, 51, [[0, 4]]), "Plaintiff Ingrid Strangeways moves.\nSecond line");
+  check("…an empty stretch is nothing", clipText(disk.text, sw, 20, 20), "");
+  // A name wrapped over two numbered lines: a swap per piece, the margin between them.
+  const wrapped = " 1  Helen\n 2  Rasho signed";
+  const pieces = [{ start: 4, end: 9, to: "Ingrid" }, { start: 14, end: 19, to: "Strangeways" }];
+  check("…a wrapped name's pieces with the margin numbers out from between them",
+    clipText(wrapped, pieces, 0, wrapped.length, [[0, 4], [10, 14]]), "Ingrid\nStrangeways signed");
+  check("…and a stretch that begins in the margin is the line's text", clipText(wrapped, pieces, 11, wrapped.length, [[0, 4], [10, 14]]), "Strangeways signed");
+
+  // THE CITATION NEEDS THE PAGE. A cited decision's party is the decision's,
+  // and the forward pass spares it only where the reporter after it is in the
+  // text it reads: a selection that stops at the case name, read on its own,
+  // would fake the decision's party — a citation to a case that does not exist
+  // pasted straight into the drafting model.
+  const key = parseKey([{ rows: [["Real Value", "Replacement"], ["Varnell", "Pembrook"], ["Ostrow Freight", "Halden Cartage"]] }], "k");
+  const fwd = compileForward(key);
+  const swaps = (text) => {
+    const out = [];
+    let off = 0;
+    for (const r of forwardRuns(fwd, blankRanges(text, citedNameSpans(text)))) {
+      const n = r.t === "swap" ? r.from.length : r.s.length;
+      if (r.t === "swap") out.push({ start: off, end: off + n, to: r.to });
+      off += n;
+    }
+    return out;
+  };
+  const page = "Varnell signed it. As this Court held in Varnell v. Ostrow Freight (2019) 31 Cal.App.5th 200, the clause binds.";
+  const from = page.indexOf("As this"), to = page.indexOf(" (2019)");
+  const frag = page.slice(from, to);
+  check("read on its own, the fragment fakes the decision's parties", clipText(frag, swaps(frag), 0, frag.length), "As this Court held in Pembrook v. Halden Cartage");
+  check("cut out of the page read whole, it carries them as cited", clipText(page, swaps(page), from, to), "As this Court held in Varnell v. Ostrow Freight");
+  check("…while this case's own Varnell on the same page is faked", clipText(page, swaps(page), 0, 18), "Pembrook signed it.");
 }
 
 // ---- a page that did not OCR ------------------------------------------------

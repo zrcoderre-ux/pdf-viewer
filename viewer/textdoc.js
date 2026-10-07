@@ -420,6 +420,21 @@ function walk(node, emit, opts) {
   // pseudonym span's own text is never one of the text nodes.
   const onText = opts && opts.text;
   const onFake = opts && opts.fake;
+  // `child` is told of each place BETWEEN an element's children as the walk
+  // reaches it — (element, i) before its i-th child, and (element, count)
+  // after the last — which is how a DOM boundary point that sits on an
+  // element rather than in a text node (a selection's end, see serializeHeld)
+  // finds where it stands in what is emitted. A pseudonym span's inside is
+  // not walked, so it is never told of one.
+  const onChild = opts && opts.child;
+  const kids = (n, atStart) => {
+    const list = n.childNodes || [];
+    for (let i = 0; i < list.length; i++) {
+      if (onChild) onChild(n, i);
+      rec(list[i], i === 0 && atStart);
+    }
+    if (onChild) onChild(n, list.length);
+  };
   const rec = (n, atStart) => {
     if (n.nodeType === TEXT_NODE) {
       if (onText) onText(n);
@@ -429,12 +444,13 @@ function walk(node, emit, opts) {
     if (n.nodeType !== ELEMENT_NODE) return;
     const name = String(n.nodeName || "").toUpperCase();
     if (name === "BR") {
+      if (onChild) onChild(n, 0);
       if (n.nextSibling) emit("\n");
       return;
     }
     if (mark && n.getAttribute && n.getAttribute(HERE_ATTR) != null) {
       mark("in");
-      for (const c of n.childNodes || []) rec(c, false);
+      kids(n, false);
       mark("out");
       return;
     }
@@ -452,11 +468,7 @@ function walk(node, emit, opts) {
       return;
     }
     if (BLOCKS.has(name) && !atStart) emit("\n");
-    let first = true;
-    for (const c of n.childNodes || []) {
-      rec(c, first && atStart);
-      first = false;
-    }
+    kids(n, atStart);
   };
   rec(node, true);
 }
@@ -501,12 +513,49 @@ const HERE_ATTR = "data-here";
  * pseudonyms, `pns` the fakes the run wrote. With `mapped`, `segs` as well:
  * each text node and where its text stands in `text` ([{ node, start, end }],
  * in order; a pseudonym span's own text is not one), which is what a reading
- * of the disk text needs to put its marks back on the page.
+ * of the disk text needs to put its marks back on the page, and `pnNodes`,
+ * the pseudonym spans themselves in the order of `pns`.
+ *
+ * With `points` ([{ node, offset, end }], DOM boundary points: a text node and
+ * an offset into it, or an element and a child index), `at` as well: where
+ * each stands in `text`, or -1 for one that is not inside `root`. A point
+ * INSIDE a pseudonym span takes the span whole — the span's start for a
+ * start point, its end for one marked `end` — since the file carries the
+ * fake and a piece of the real name lines up with no piece of it; a point at
+ * the span's very start or end is that place either way. This is how a
+ * selection on the page is cut out of the text the file carries (the reader's
+ * copy, cut and drag).
  */
-export function serializeHeld(root, { mapped = false } = {}) {
+export function serializeHeld(root, { mapped = false, points = null } = {}) {
   let out = "";
   const held = [];
   const segs = mapped ? [] : null;
+  const pnNodes = mapped ? [] : null;
+  const pts = points || [];
+  const at = pts.map(() => -1);
+  const place = (k, pos) => { if (at[k] < 0) at[k] = pos; };
+  const len = (n) => (n.data != null ? n.data : n.nodeValue || "").length;
+  // Where a point stands in a pseudonym span's own text: "start", "end", "mid",
+  // or null where it is not in the span at all.
+  const inSpan = (span, p) => {
+    let before = 0, hit = -1;
+    const visit = (n) => {
+      if (n.nodeType === TEXT_NODE) {
+        if (n === p.node) hit = before + Math.min(Math.max(0, p.offset), len(n));
+        before += len(n);
+        return;
+      }
+      const list = n.childNodes || [];
+      for (let i = 0; i < list.length; i++) {
+        if (n === p.node && p.offset === i) hit = before;
+        visit(list[i]);
+      }
+      if (n === p.node && p.offset >= list.length) hit = before;
+    };
+    visit(span);
+    if (hit < 0) return null;
+    return before > 0 && hit === 0 ? "start" : before > 0 && hit === before ? "end" : "mid";
+  };
   // …and where each PSEUDONYM's fake stands in it. The marks read the page with
   // these blanked (the reader's flatten, clearReading): a fake is what the run
   // wrote, and a word of it that happens to be a real the key binds is not a
@@ -517,20 +566,76 @@ export function serializeHeld(root, { mapped = false } = {}) {
   let open = -1;
   walk(root, (s) => { out += s; }, {
     fakes: true,
-    text: mapped ? (n) => {
+    text: mapped || pts.length ? (n) => {
       const d = n.data != null ? n.data : n.nodeValue || "";
-      segs.push({ node: n, start: out.length, end: out.length + d.length });
+      if (mapped) segs.push({ node: n, start: out.length, end: out.length + d.length });
+      pts.forEach((p, k) => { if (p.node === n) place(k, out.length + Math.min(Math.max(0, p.offset), d.length)); });
     } : null,
+    child: pts.length ? (n, i) => { pts.forEach((p, k) => { if (p.node === n && p.offset === i) place(k, out.length); }); } : null,
     mark: (phase) => {
       if (phase === "in") open = out.length;
       else if (open >= 0) { if (out.length > open) held.push([open, out.length]); open = -1; }
     },
     fake: (n) => {
       const f = n.getAttribute("data-fake") || "";
-      if (f) pns.push([out.length, out.length + f.length]);
+      if (f) {
+        pns.push([out.length, out.length + f.length]);
+        if (mapped) pnNodes.push(n);
+      }
+      pts.forEach((p, k) => {
+        if (at[k] >= 0) return;
+        const where = inSpan(n, p);
+        if (where) place(k, where === "start" || (where === "mid" && !p.end) ? out.length : out.length + f.length);
+      });
     },
   });
-  return mapped ? { text: out, held, pns, segs } : { text: out, held, pns };
+  const res = mapped ? { text: out, held, pns, segs, pnNodes } : { text: out, held, pns };
+  if (points) res.at = at;
+  return res;
+}
+
+/**
+ * `text` from `a` to `b` as a copy of it carries it: each of `swaps` ({ start,
+ * end, to }, places in `text`) that the stretch reaches written WHOLE as its
+ * `to`, and the `skip` ranges ([start, end)) left out.
+ *
+ * Whole, because a selection that ends half way through a name is still a
+ * selection of the name: "Helen Ra" is two thirds of a real name, and there is
+ * no two thirds of its pseudonym that says less. A swap the stretch only
+ * touches at an end (one ending where it begins) is not reached. The skipped
+ * ranges are what the page shows but a selection never takes — the pleading
+ * margin's numbers — and they are cut from the text around the swaps, never
+ * out of a `to`.
+ */
+export function clipText(text, swaps, a, b, skip) {
+  const src = String(text == null ? "" : text);
+  const lo = Math.max(0, Math.min(src.length, a | 0)), hi = Math.max(0, Math.min(src.length, b | 0));
+  if (hi <= lo) return "";
+  const gaps = (skip || []).filter((r) => r && r[1] > r[0]).sort((x, y) => x[0] - y[0]);
+  // Asked with `from` only ever moving on, so the ranges already passed are
+  // passed for good: one walk over them for the whole stretch, not one per
+  // swap (a Word export is one page, its every name a swap).
+  let gi = 0;
+  const plain = (from, to) => {
+    while (gi < gaps.length && gaps[gi][1] <= from) gi++;
+    let out = "", at = from;
+    for (let j = gi; j < gaps.length && gaps[j][0] < to; j++) {
+      const [x, y] = gaps[j];
+      if (y <= at) continue;
+      if (x > at) out += src.slice(at, x);
+      at = Math.max(at, y);
+    }
+    return at < to ? out + src.slice(at, to) : out;
+  };
+  const ws = (swaps || []).filter((w) => w && w.end > w.start).sort((x, y) => x.start - y.start);
+  let out = "", at = lo;
+  for (const w of ws) {
+    if (w.end <= lo || w.end <= at) continue;
+    if (w.start >= hi) break;
+    out += plain(at, Math.max(at, w.start)) + String(w.to == null ? "" : w.to);
+    at = w.end;
+  }
+  return out + plain(at, Math.max(at, hi));
 }
 
 /**

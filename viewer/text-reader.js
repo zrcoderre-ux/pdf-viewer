@@ -1183,6 +1183,206 @@ $("shot-btn").addEventListener("click", async (e) => {
   } finally { shooting = false; }
 });
 
+// ── copy, cut and drag ──────────────────────────────────────────────────────
+// A passage taken off the pages leaves the room the way a printout does, and
+// faster: Ctrl+C, then Ctrl+V into the drafting model. Nothing listened for
+// it. The browser copied what the screen showed, and with Show fakes off —
+// the default — that is the real names: "Plaintiff Helen Rasho moves to
+// compel … Quillmark Holdings" went onto the clipboard as plain text, from an
+// export whose file says Ingrid Strangeways and Melbury Partners. With Show
+// fakes ON the plain text was clean and the HTML beside it was not: the
+// browser serializes each pseudonym span with its attributes, so every
+// `data-real` rode along unseen, into any editor that keeps HTML. A drag of
+// the selection carried the same two flavours, and a cut in ✎ Edit the same.
+//
+// So the clipboard gets what the FILE says, and only as plain text: each
+// pseudonym as its fake, every real name the key binds that stands in the
+// clear (one the run missed) as its fake as well — the forward pass the print
+// and the screenshot make, whichever way the toggle sits — and the values
+// kept for the case, the spot keeps and the parties of cited decisions as
+// they stand, as the save leaves them.
+//
+// NOT THE SELECTION'S TEXT ON ITS OWN. Which names are a cited decision's is
+// read off the citation AFTER the name (TD.citedNameSpans): "Varnell v.
+// Ostrow Freight" is spared in the sentence that goes on "(2019) 31
+// Cal.App.5th 200", and is two names the key binds in a selection that stops
+// before the year — a pseudonym pasted into a citation, a decision that does
+// not exist. So each page the selection reaches is read WHOLE as the save
+// reads it (serializeHeld, forwardSwaps), the selection's two ends are found
+// in that text (serializeHeld's `points`) and its stretch cut out of the
+// faked text (TD.clipText). A name the selection takes only part of goes as
+// its whole fake — "Helen Ra" has no part of a pseudonym that says less — and
+// a selection over several pages is cut page by page and joined with a line
+// break. The margin numbers of a numbered page stay out of it, as they stay
+// out of the browser's selection. A page shown ⇄ Raw is cut out of the text
+// it shows, which is the same file text run forward. The PDF (the pane, and a
+// page swapped for its PDF page) is the filing, which nothing scrubbed, and
+// it copies as it did: that is how a page is transcribed by hand.
+//
+// A name the key holds only an INSTRUCTION for ("~Rasho", PK.keyCellKind) has
+// no fake to write: it goes as it stands, as it stands in the file, and the
+// toast names it rather than let a passage faked all round it pass for done.
+//
+// What the reader itself puts on the clipboard it can take back. A cut and a
+// paste within the pages, or a name copied off a page into Find, are the
+// reader's own round trips, and a pseudonym pasted into a page as plain text
+// is no pseudonym span: it shows the fake where the name was, and a word of
+// it the key happens to bind would be read as a real name in the clear and
+// faked inside the fake by the next save. So a paste that receives exactly
+// the text this reader last put out, under the same case's key, takes the
+// text as the page had it instead (`lastCopy`): into a page the real names,
+// which the paste marks as pseudonyms as it marks any real name typed; into
+// Find what the screen showed, since Find finds what the screen shows.
+// Nowhere else — a LEAKS answer typed from the clipboard, say, gets the fake
+// it was given, since a real name written there would be written into the
+// worksheet as the value to fake a name WITH.
+let lastCopy = null; // { faked, real, shown, key }: what this reader last put on the clipboard, and from what
+let instrMemo = { reals: null, any: false };
+/** Whether the key holds any row with an instruction and no fake (the toast's question; asked once per key). */
+function keyHasInstructions() {
+  if (instrMemo.reals !== reals) instrMemo = { reals, any: !!reals && [...reals.map.values()].some((w) => !w.fake) };
+  return instrMemo.any;
+}
+/** The names standing in the clear between `a` and `b` that the key holds no pseudonym for. */
+function unfakedIn(text, held, pns, a, b) {
+  if (!keyHasInstructions()) return [];
+  return standingSpans(text, held, pns).filter((h) => !h.fake && h.start < b && h.end > a).map((h) => h.real);
+}
+/**
+ * A page body's part of a selection: { a, b } its stretch of the disk text,
+ * `faked` that stretch as the clipboard takes it, `real` and `shown` the same
+ * stretch with each pseudonym as its real name and as the screen shows it.
+ */
+function copyOfBody(body, range) {
+  const s = body.contains(range.startContainer) ? { node: range.startContainer, offset: range.startOffset } : null;
+  const e = body.contains(range.endContainer) ? { node: range.endContainer, offset: range.endOffset, end: true } : null;
+  const disk = TD.serializeHeld(body, { mapped: true, points: [s, e].filter(Boolean) });
+  const n = disk.text.length;
+  const atS = s ? disk.at[0] : -1, atE = e ? disk.at[s ? 1 : 0] : -1;
+  // An end outside the page is the page's end; one the walk could not place, the same — more of the page faked, never less.
+  const a = atS >= 0 ? atS : 0, b = atE >= 0 ? atE : n;
+  // The margin numbers are the paper: on a numbered page the selection never
+  // takes them (the stylesheet), and neither does what it copies.
+  const skip = body.classList.contains("numbered")
+    ? disk.segs.filter((g) => g.node.parentElement && g.node.parentElement.closest(".gutter")).map((g) => [g.start, g.end])
+    : [];
+  const swaps = fwd && fwd.rx ? forwardSwaps(disk.text, disk.held, disk.pns) : [];
+  const spans = (pick) => disk.pnNodes.map((el, k) => ({ start: disk.pns[k][0], end: disk.pns[k][1], to: pick(el) }));
+  return {
+    a, b,
+    faked: TD.clipText(disk.text, swaps, a, b, skip),
+    real: TD.clipText(disk.text, spans((el) => el.dataset.real), a, b, skip),
+    shown: TD.clipText(disk.text, spans((el) => el.textContent), a, b, skip),
+    unfaked: unfakedIn(disk.text, disk.held, disk.pns, a, b),
+  };
+}
+/** …and a page shown ⇄ Raw, whose sheet is the file's text: the same, read off that text. */
+function copyOfRaw(sec, pre, range) {
+  const raw = rawPageText(sec);
+  // The sheet is the text rawPageText gives unless it is a beat behind an
+  // edit: then the places in it are not places in this, and the page goes whole.
+  const same = pre.textContent === raw.text;
+  const off = (node, offset) => {
+    const r = document.createRange();
+    r.setStart(pre, 0);
+    r.setEnd(node, offset);
+    return r.toString().length;
+  };
+  const a = same && pre.contains(range.startContainer) ? off(range.startContainer, range.startOffset) : 0;
+  const b = same && pre.contains(range.endContainer) ? off(range.endContainer, range.endOffset) : raw.text.length;
+  const swaps = fwd && fwd.rx ? forwardSwaps(raw.text, raw.held, raw.pns) : [];
+  const shown = TD.clipText(raw.text, [], a, b);
+  return { a, b, faked: TD.clipText(raw.text, swaps, a, b), real: shown, shown, unfaked: unfakedIn(raw.text, raw.held, raw.pns, a, b) };
+}
+/** What a copy of the selection carries, where it reaches the pages; null where it does not. */
+function copyOfSelection() {
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+  const range = sel.getRangeAt(0);
+  if (!range.intersectsNode(pagesEl)) return null;
+  const parts = [];
+  for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
+    if (!range.intersectsNode(sec)) continue;
+    const pre = sec.classList.contains("raw") ? sec.querySelector(".raw-sheet .raw-text") : null;
+    const el = pre || sec.querySelector(".page-body");
+    if (!el || !range.intersectsNode(el)) continue;
+    const part = pre ? copyOfRaw(sec, pre, range) : copyOfBody(el, range);
+    if (part.b > part.a) parts.push(part);
+  }
+  if (!parts.length) return null;
+  const join = (k) => parts.map((p) => p[k]).join("\n");
+  return { faked: join("faked"), real: join("real"), shown: join("shown"), unfaked: [...new Set(parts.flatMap((p) => p.unfaked))], key };
+}
+/** A copy's own toast: where the clipboard and the screen differ, it says which the clipboard has. */
+function copyToast(c, verb) {
+  if (c.unfaked.length) {
+    const one = c.unfaked.length === 1;
+    const names = c.unfaked.slice(0, 3).map((v) => { const i = keyInstruction(v); return i ? `${v} (“${i}”)` : v; }).join(", ") + (c.unfaked.length > 3 ? "…" : "");
+    toast(`${verb} in the pseudonyms — except ${names}, which went as ${one ? "it stands" : "they stand"}: the key has no pseudonym for ${one ? "it" : "them"} to write.`, { error: true });
+  } else if (c.faked !== c.shown) toast(`${verb} in the pseudonyms, as the file has it.`);
+}
+/** Our copy for a copy or cut event in the pages, written to its clipboard; null where the browser's own stands. */
+function copyFor(e, verb) {
+  if (!key || !e.clipboardData) return null;
+  const t = e.target;
+  if (t && t.nodeType === 1 && t.closest("input, textarea")) return null; // a box's own text is the box's
+  const c = during("copying the selection in its pseudonyms", () => copyOfSelection());
+  if (!c) return null;
+  e.preventDefault();
+  e.clipboardData.setData("text/plain", c.faked);
+  lastCopy = c;
+  copyToast(c, verb);
+  return c;
+}
+/** The page body a node is in, or null. */
+function bodyOfNode(n) {
+  const el = n && (n.nodeType === 1 ? n : n.parentElement);
+  return el ? el.closest(".page-body") : null;
+}
+document.addEventListener("copy", (e) => { copyFor(e, "Copied"); });
+document.addEventListener("cut", (e) => {
+  // The browser cuts only where the selection begins in an editable page —
+  // read-only, it puts nothing on the clipboard and takes nothing away — and
+  // so does this.
+  const sel = document.getSelection();
+  const body = sel && sel.rangeCount ? bodyOfNode(sel.getRangeAt(0).startContainer) : null;
+  if (!editing || !body || !body.isContentEditable) return;
+  if (!copyFor(e, "Cut")) return;
+  // …then the selection goes, as the browser's own cut takes it (a selection
+  // running on into the next page loses only this page's part of it). The
+  // browser's cut asks `beforeinput` first, which this deletion does not, so
+  // the questions it answers are asked here: the margin numbers stay, the
+  // screenshot's fakes are not the page's, and the cut is one undo step.
+  if (shotPut) return;
+  if (selectionCrossesGutter(body)) { toast(GUTTER_FIXED, { error: true }); return; }
+  snapshot(body, true);
+  document.execCommand("delete");
+});
+document.addEventListener("dragstart", (e) => {
+  // A drag of the selection starts on its text; a link or a picture dragged
+  // is that, and keeps its own data.
+  if (!key || !e.dataTransfer || !e.target || e.target.nodeType !== 3) return;
+  const c = during("copying the selection in its pseudonyms", () => copyOfSelection());
+  if (!c) return;
+  e.dataTransfer.clearData();
+  e.dataTransfer.setData("text/plain", c.faked);
+  lastCopy = c;
+  copyToast(c, "Dragged");
+});
+/** The text a paste in the reader takes: `which` of `lastCopy` where `text` is exactly what it put out, else `text`. */
+function ownCopy(text, which) {
+  const c = lastCopy;
+  if (!c || !key || !(c.key === key || PK.sameCaseKey(c.key, key))) return text;
+  return String(text == null ? "" : text).replace(/\r\n?/g, "\n") === c.faked ? c[which] : text;
+}
+$("fb-input").addEventListener("paste", (e) => {
+  const got = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+  const own = ownCopy(got, "shown");
+  if (own === got) return;
+  e.preventDefault();
+  document.execCommand("insertText", false, own); // the box's own way with a line break: a space
+});
+
 // ── theme (shared with the PDF viewer) ───────────────────────────────────────
 const themeToggle = $("theme-toggle");
 function applyTheme(theme) {
@@ -3347,7 +3547,8 @@ pagesEl.addEventListener("keydown", (e) => {
 pagesEl.addEventListener("paste", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body || !editing) return;
-  const text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+  // A passage this reader copied or cut comes back with its real names (ownCopy, under "copy, cut and drag").
+  const text = ownCopy(e.clipboardData ? e.clipboardData.getData("text/plain") : "", "real");
   e.preventDefault();
   if (!text) return;
   if (selectionCrossesGutter(body)) { toast(GUTTER_FIXED, { error: true }); return; }
@@ -15140,16 +15341,17 @@ $("rb-miss-close").addEventListener("click", () => showMissRow(false));
 // A real value the key binds standing in the text — a name the run missed — is
 // marked as it is on the page, because it is what the file carries now.
 
-/** A page's text exactly as a save would write it — banner or header line, then its lines — and its spot keeps' places in it. */
+/** A page's text exactly as a save would write it — banner or header line, then its lines — and its spot keeps' and the run's fakes' places in it. */
 function rawPageText(sec) {
   const p = (doc && doc.pages[Number(sec.dataset.index)]) || {};
   const body = sec.querySelector(".page-body");
-  const own = body ? TD.serializeHeld(body) : { text: (p.lines || []).join("\n"), held: [] };
+  const own = body ? TD.serializeHeld(body) : { text: (p.lines || []).join("\n"), held: [], pns: [] };
   const head = [p.banner, p.header].filter((l) => l != null);
   // A page that is its header alone writes no line under it.
   const parts = own.text === "" && !(p.lines || []).length ? head : head.concat(own.text);
   const lead = head.length && parts.length > head.length ? head.join("\n").length + 1 : 0;
-  return { text: parts.join("\n"), held: own.held.map(([a, b]) => [a + lead, b + lead]) };
+  const past = ([a, b]) => [a + lead, b + lead];
+  return { text: parts.join("\n"), held: own.held.map(past), pns: own.pns.map(past) };
 }
 
 /** The ⇄ Raw button, as the page stands. */

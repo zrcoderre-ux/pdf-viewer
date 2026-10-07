@@ -72,6 +72,65 @@ print keeps that fit, made at its own sheet's width; where the print faked
 anything, `pagesBackAfterPrint`'s `afterTextChange` moves `textEpoch`, so
 swapped back the page is fitted again to its real text (`shapeKey`).
 
+**Copy, cut and drag carry the pseudonyms.** Nothing listened for them, so the
+browser copied what the screen showed: with Show fakes off (the default) the
+real names, as plain text, from an export whose file carries the fakes — a
+passage copied off the reader and pasted into the drafting model took "Helen
+Rasho … Quillmark Holdings" out with it. With Show fakes on the plain text
+was clean and the HTML flavour was not: Chrome serializes each `.pn` with its
+attributes, so every `data-real` rode along unseen. Now `copy`, `cut` and
+`dragstart` on the document call `copyOfSelection`, which takes over wherever
+the selection reaches a page (a box's own text, the PDF pane and a page
+swapped for its PDF page copy as the browser copies them — the filing,
+which is how a page is transcribed by hand), and the clipboard gets
+`text/plain` alone: what the file says, run forward as the print and the
+screenshot run it, whichever way the toggle sits. It is never the
+selection's text run forward on its own: `citedNameSpans` spares a cited
+decision's party only where the citation after the name is in the text it
+reads, so "As this Court held in Varnell v. Ostrow Freight" — a selection
+that stops before "(2019) 31 Cal.App.5th 200" — read alone fakes both
+parties, a decision that does not exist pasted into the draft. Each page the
+selection touches is read whole instead (`copyOfBody`):
+`TD.serializeHeld(body, { mapped: true, points })` gives the disk text, its
+spot keeps and fakes, and where the selection's two ends stand in it (`at`:
+a text node's offset, an element boundary found by the walk's `child` hook,
+and a point inside a `.pn` taking the span whole, its start for a start point
+and its end for an end one); `forwardSwaps` fakes the page as the save reads
+it (keeps masked, spot keeps and fakes blanked, cited parties spared) and
+`TD.clipText` cuts the stretch out, a swap the stretch reaches written whole
+(half of "Helen Rasho" goes as all of its fake) and the gutter's text left out
+on a numbered page, where the stylesheet keeps it out of the selection.
+Pages are joined with a line break. A page shown ⇄ Raw is cut out of
+`rawPageText` (which now gives the fakes' places, `pns`, too) at the
+selection's offsets in its `pre`, by `Range.toString()`, and goes whole if
+the sheet is a beat behind the text. Undecided names standing in the clear
+are faked (the screenshot's rule, not the save's, which leaves them for the
+walk): the clipboard leaves the room. A name the key holds only an
+instruction for (no fake) goes as it stands and the toast names it
+(`unfakedIn`, asked only when `keyHasInstructions`). A cut follows the
+browser's own: read-only, it does nothing at all (Chrome writes no clipboard
+there); in ✎ Edit the selection must begin in an editable page, the faked
+text goes on the clipboard and `execCommand("delete")` takes the selection
+away — which, like Chrome's `deleteByCut`, takes only the first page's part
+of a selection running on into the next. That deletion fires `input` but not
+`beforeinput`, so the cut asks the beforeinput handler's questions itself:
+the gutter guard, `shotPut`, and `snapshot(body, true)` for one undo step. A
+drag of the selection starts on a Text node (a link or picture dragged is
+left its own data). The cost is one forward pass per page the selection
+touches — the save's own pass, named `copying the selection in its
+pseudonyms` for the hold report; Ctrl+A over 200 pleading pages (810 KB, a
+name and a cite on every line) copies in about 125 ms. What the reader puts out it can take back
+(`lastCopy`, `ownCopy`): a paste in a page whose `text/plain` is exactly the
+last text this reader wrote (newlines folded, under the same case's key —
+`PK.sameCaseKey`) gets the real names back, which `convertTypedRealsSoon`
+marks as pseudonyms as it marks any typed real, so a cut and paste writes
+the bytes it wrote before; plain fakes pasted into a page would show the fake
+where the name was, and a word of one the key binds would be faked inside
+it by the next save. Find gets what the screen showed (`shown`), since Find
+finds what the screen shows. No other box does: a real name pasted into a
+LEAKS answer would be a real value written into the worksheet as a
+replacement.
+
 The tools live in a left-margin rail (`#tools-rail`), the PDF viewer's
 Acrobat-style panel carried over to this page: the top bar had grown to some
 two dozen controls, so the reading, pseudonym, review and PDF tools moved into

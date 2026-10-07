@@ -244,6 +244,26 @@ app, which routes it to the reader tab.
   extension the tab is taken directly; in the hosted app the browser asks to
   share this tab, keeps one frame and stops, and the names change only once
   the share is allowed.
+- **Copy what the file says — in its pseudonyms.** **Ctrl+C**, the right-click
+  Copy, **Ctrl+X** in ✎ Edit and a drag of the selected text all carry the
+  passage as the *file* has it, whichever way *Show fakes* sits: every name as
+  its pseudonym, a name the run missed included, and plain text only (the
+  page's formatting stays behind with the names it used to hide). The values
+  kept for the case, the spot keeps and the parties of cited decisions go as
+  they stand, as a save leaves them — and a cited decision stays cited even
+  where your selection stops before its year and reporter, since each page is
+  read whole first. Half a name selected goes as its whole pseudonym; a
+  selection across pages comes away with a line break between them, and
+  without the margin numbers. A toast says the copy is in the pseudonyms,
+  and names any name the key holds no pseudonym for yet (an instruction in
+  its Replacement cell), which goes as it stands. Inside the reader the copy
+  comes back as you saw it: pasted into a page the real names return (and are
+  marked as pseudonyms again), and pasted into Find it is what the screen
+  showed. A cut works as the browser's own: in ✎ Edit it takes the selection
+  away (one undo step; only the first page's part of a selection that runs
+  onto the next), and read-only it does nothing. The PDF — in the pane and on
+  a page swapped for its PDF page — is the filing itself and still copies as
+  it reads.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
