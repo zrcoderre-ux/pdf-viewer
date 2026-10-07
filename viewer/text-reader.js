@@ -7927,8 +7927,11 @@ $("master-input").addEventListener("change", async () => {
 
 const showFlagPopSoon = debounce(showFlagPop, 120);
 document.addEventListener("selectionchange", showFlagPopSoon);
+// A press on the pages with flagging on, not yet let go: the pop-up waits for
+// the release, which flags the selection or asks its question then.
+let flagDrag = false;
 function showFlagPop() {
-  const s = currentSelection();
+  const s = flagDrag ? null : currentSelection();
   if (!s) { flagPop.hidden = true; return; }
   const problem = TD.flagProblem(s.text, s.allFaked);
   flagPopBtn.disabled = !!problem;
@@ -7993,8 +7996,70 @@ $("flag-pop-master").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("click", phraseSelection);
 flagPopBtn.addEventListener("click", flagSelection);
-$("flag-btn").addEventListener("mousedown", (e) => e.preventDefault());
-$("flag-btn").addEventListener("click", flagSelection);
+
+// ── flagging by selecting ───────────────────────────────────────────────────────
+//
+// 🚩 in the tools panel is a switch. On, a name selected on the page with the
+// mouse is flagged as the button is let go — a drag or a double-click, then
+// straight on to the next, with no button to reach for in between. Only what
+// the pop-up's Flag would take without a question: a selection that asks one
+// (kept where it stands, the orange name alone, held by the Master Keep, a
+// pseudonym through and through, a passage) stays selected with the pop-up
+// asking it. A flagged selection is let go of, the caret left at its end, so
+// the red mark shows and the next drag starts clean. Ctrl+Shift+F still flags
+// the one selection. The switch is not remembered: a reader never opens
+// flagging what is only being read.
+let flagMode = false;
+const flagBtn = $("flag-btn");
+const flagBtnTitle = flagBtn.title;
+function setFlagMode(on) {
+  flagMode = !!on;
+  flagDrag = false;
+  flagBtn.setAttribute("aria-pressed", String(flagMode));
+  flagBtn.title = flagMode
+    ? "Flagging is on: select a name on the page with the mouse and let go, and it is flagged. Click to turn flagging off."
+    : flagBtnTitle;
+  document.body.classList.toggle("flag-mode", flagMode);
+}
+/** Whether the selection is flagged as it stands, as the pop-up's Flag would flag it. */
+function flagTakes(s) {
+  if (TD.flagProblem(s.text, s.allFaked)) return false;
+  const hereIn = s.pn ? null : s.here;
+  if (hereIn) return false;
+  const leak = s.pn ? null : leakIn(s.range);
+  if (leak && sameWords(s.text, leak.real)) return false;
+  return !masterHeldIn(s).length;
+}
+/** The selection flagged, or its question asked; whether it was flagged. */
+function flagWhereReleased() {
+  const s = currentSelection();
+  if (!s) return false;
+  if (!flagTakes(s)) { showFlagPop(); return false; }
+  flagSelection();
+  const sel = document.getSelection();
+  if (sel && sel.rangeCount) sel.collapseToEnd();
+  return true;
+}
+flagBtn.addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
+flagBtn.addEventListener("click", () => {
+  if (flagMode) { setFlagMode(false); toast("Flagging off."); return; }
+  setFlagMode(true);
+  // A name selected before the click is flagged with it, as the button always did.
+  if (!flagWhereReleased()) toast("Flagging on: select a name and let go to flag it. Click 🚩 again to stop.", { ms: 4500 });
+});
+// Taken on the document, in the capture phase, so the page's own handlers
+// (the numbered margin's) cannot keep it from being seen.
+document.addEventListener("mousedown", (e) => {
+  // A triple-click's line is a passage more often than a name: the pop-up asks.
+  flagDrag = flagMode && e.button === 0 && e.detail < 3 && !e.ctrlKey && !e.metaKey && !e.altKey && pagesEl.contains(e.target);
+  if (flagDrag) flagPop.hidden = true;
+}, true);
+// The selection is only final once the browser has finished settling it.
+document.addEventListener("mouseup", (e) => {
+  if (!flagDrag || e.button !== 0) return;
+  flagDrag = false;
+  setTimeout(() => { if (flagMode) flagWhereReleased(); }, 0);
+});
 
 /** Whether two values are the same words, case, spacing and punctuation aside. */
 function sameWords(a, b) {

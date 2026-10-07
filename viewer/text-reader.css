@@ -904,6 +904,10 @@ body.marks-off [data-here] { text-decoration: none; }
 body.marks-off [data-here]:hover { background: transparent; }
 
 ::highlight(flagged) { background-color: var(--flag-bg); text-decoration: underline wavy #d32f2f; }
+/* Flagging on (🚩 pressed): a selection on the page is a flag the release
+   will make, and is painted in the flag's red rather than the browser's blue. */
+body.flag-mode .page-body::selection,
+body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38); }
 ::highlight(leak) { background-color: var(--leak-bg); text-decoration: underline double #e65100; }
 /* A value KEPT, standing in the clear on purpose: the same dotted mark a kept
    pseudonym carries, so a decision does not read as an oversight. */

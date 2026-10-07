@@ -739,7 +739,15 @@ app, which routes it to the reader tab.
   reader opens, and off, case is ignored.
 - **Flag what the run missed — and un-flag what it got wrong.** The point of
   reading the real names is to spot the ones that are *not* marked. Select
-  such a name and press **🚩 Flag real value** (or Ctrl+Shift+F); the
+  such a name and flag it from the pop-up beside it (or Ctrl+Shift+F). **With
+  many to flag, turn flagging on**: **🚩 Flag real value** in the tools panel
+  is a switch, and while it is lit every name you select with the mouse — a
+  drag or a double-click — is flagged as you let go, with no button in
+  between. The selection shows red while it is on. A selection with a
+  question to it (a passage, a pseudonym, the orange name alone, a value kept
+  where it stands or by the Master Keep) is not flagged; it stays selected
+  with the pop-up asking. Click the button again to turn it off; it is never
+  on when a reader opens. The
   **Flagged** panel collects them and **Save list to case folder** writes `New
   Real Values.txt` beside the key, which PDF-Linker reads on its next run —
   and on Apply Fixes — as if each line had been given with `--term`. **A flag
