@@ -1101,6 +1101,34 @@ export function typedReals(hits, page, built) {
 }
 
 /**
+ * The same question asked by the SAVE, of the names standing in the page's
+ * disk reading (the reader's standingSpans: findRealSpans hits, a name wrapped
+ * over a line break or down a column one hit with a range per piece): the ones
+ * an edit wrote, none in a cited decision's name. `text` is the page as it is
+ * about to be written, `built` what it was built from or last saved as; with
+ * none, nothing counts as typed.
+ *
+ * The converter answers it for the screen and passes over the name the caret
+ * is still in and the one Esc dismissed at the prompt; it reads a text node at
+ * a time, so a name typed across a line break is not one it can see at all;
+ * and it waits a quarter of a second after the typing. A save inside any of
+ * those wrote the real name into the export and then counted it as a name the
+ * file had carried, "not yet reviewed", from then on. The save asks here
+ * instead, of every name it reads, and writes each one this returns as its
+ * pseudonym. A piece the edit wrote makes the name typed: "Rasho" typed under
+ * a "Helen" the page had is "Helen Rasho" typed, and is faked whole.
+ */
+export function typedSpans(spans, text, built) {
+  if (!spans || !spans.length || built == null) return [];
+  const edits = editedSpans(built, text);
+  if (!edits.length) return [];
+  const mine = spans.filter((h) => (h.ranges && h.ranges.length ? h.ranges : [[h.start, h.end]]).some(([a, b]) => spanEdited(edits, a, b)));
+  if (!mine.length) return [];
+  const cited = citedNameSpans(text);
+  return mine.filter((h) => !insideCited(cited, h));
+}
+
+/**
  * The pseudonym spans an edit made that now stand in a cited decision's name:
  * a party marked at the as-you-type prompt, or by the converter in a pause,
  * before the rest of the citation was typed after it. [span element] — each

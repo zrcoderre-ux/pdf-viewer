@@ -718,11 +718,27 @@ app, which routes it to the reader tab.
   as-you-type correction, for the page. **Space** marks it as an autocorrect
   (the real name stays on screen, the fake goes underneath and into the
   file, and the space lands after it); **→** marks it without the space;
-  **Esc** leaves that one plain, and the save still writes its pseudonym. A
+  **Esc** leaves that one plain on the page, and the save still writes its
+  pseudonym (after the save the page shows it marked, as the file has it). A
   real that opens a longer name in the key ("Helen" beside "Helen Rasho"),
   or a kept one, is never space-marked: the space types on, and the whole
   name is offered the moment it is finished. A name typed and left is
-  marked by the reader on its own once the caret has moved off it.
+  marked by the reader on its own once the caret has moved off it — clicked
+  away, moved with the arrow keys, or the page left for the Find box or a
+  button — whichever page it was typed on.
+- **A name you type never goes into the file as itself, however quickly you
+  save.** Ctrl+S the instant a name is typed — the caret still at its end, a
+  moment before the reader would have marked it, or the name broken over two
+  lines — and the save writes its pseudonym all the same, and the caret stays
+  where you were typing. It used to write the real name and call it "not yet
+  reviewed". A name pasted across a line break stays orange until the save
+  writes it whole, rather than having its surname marked on its own. A party
+  you marked with Space and then typed on into a citation ("See Jones v.
+  Smith (2019) 30 Cal.App.5th 1.") goes back to the name before anything is
+  written, even when you save at once. A name the key holds only an
+  instruction for (no pseudonym yet) is not written at all: the save stops
+  and names it. The names the run left in the clear are still yours to
+  decide — the save leaves those where they stand and says so.
 - **A row that cannot be located says so, once, and keeps saying it.** A LEAKS
   row names the **PDF** the value was found in; the review has to open that
   PDF's **text export**, and the two names do not always agree. A stem ending

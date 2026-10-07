@@ -198,6 +198,91 @@ same catches a short form the converter marked in a pause before "supra". A
 mark the page was built with is never one of them, so an undo that restores
 one leaves it.
 
+**A typed name never reaches the file, however quickly it is saved.** The
+converter was the only thing that turned a typed name into a pseudonym, and
+it could be outrun or passed by. It waits 250 ms after the last key, and it
+was one timer for the reader holding only the page it was last asked about;
+it passes over the name the caret is still in and the one Esc dismissed at
+the prompt; it reads a text node at a time, so a name typed or pasted across
+a line break is not one it can see. `saveDocument` serialized the page as the
+typing had left it, wrote such a name in the clear as "not yet reviewed",
+and then set `__built` to the text it wrote, so the name was the file's own
+from then on and never typed again. Two worse cases came out of the same
+gap. A party marked at the Space prompt and typed on into a whole citation
+("See Jones" — Space — "v. Smith (2019) 30 Cal.App.5th 1.", Ctrl+S inside the
+wait) was written as "See Pratt v. Smith", a renamed authority, and the
+`__built` reset made the mark permanent. And a converter run overdue by the
+time the save had read every page landed inside `await writeText` (a
+permission asked, a picker, a slow synced folder): the page showed a
+pseudonym where the file had the name, nothing was dirty, nothing was orange
+and the tab closed without asking. Checked in Chromium on the old build:
+each of these wrote the real name or the renamed cite. Now:
+
+- The save cancels every page's wait and runs the converter (`quiet`, its
+  `tally` counting what it did) on every page of every edited member before
+  it reads a page, so a mark now standing in a cited name goes back first
+  (`typedPseudonymsCited`). Then, of the names its own reading finds standing
+  (`standingSpans`, a name wrapped over a line or down a column one hit),
+  `TD.typedSpans` gives those an edit wrote — something of the edit in a piece
+  of it, measured against `__built` as it stood before this save (a rebuild
+  replaces it), outside every `citedNameSpans` read with the fakes standing,
+  as `typedReals` reads it — and they go into the forward pass rather than
+  into `left`: written as pseudonyms, not named as unreviewed. A typed name
+  the key holds only an instruction for has no pseudonym to go as, so it is
+  not left either: the last check refuses it, with `instructionNote`. Only
+  a member that is dirty is asked; the rest have nothing typed. Esc, the
+  caret and a line break are exceptions of the screen, not of the file: the
+  guide's "Esc leaves that one plain, and the save still writes its
+  pseudonym" is now true, and after the save the page shows the pseudonym
+  span the file carries.
+- One timer per page body (`debounceEach`): typing on page 2 inside the wait
+  no longer throws page 1's away, and an undo, a strip or a put-back cancels
+  its own page's wait only.
+- A page whose name the converter passed over for the caret is remembered
+  (`caretHeld`); `selectionchange` and `focusout` ask again a beat later, and
+  a page that has lost the focus has no caret in it whatever the selection
+  says (`body.contains(document.activeElement)`), so "a name typed and left
+  is marked once the caret has moved off it" holds before any save — a click
+  away, the arrow keys, the Find box. The same wait means "Helen" on its way
+  to "Helen Rasho" is not marked in pieces.
+- A converter hit that is a piece of a name wrapped over a line break
+  (`standingSpans`, read once the first hit is about to be marked) is left
+  for the save. Pasted out of the filing as "Served on Helen" / "Rasho by
+  mail." under a key binding "Helen Rasho" and the surname token, the
+  converter marked "Rasho" alone and the file read "Helen / Strangeways", a
+  name half faked with "Helen" bound nowhere to mark it — a quarter second
+  after the paste on the old build, and at once had the save's own converter
+  run done it. Now it stands orange and the save writes "Ingrid /
+  Strangeways", one name dealt over its pieces.
+- The page the save rebuilds keeps its caret (`caretPoint`,
+  `placeAfterSwaps`, `placeCaretOnDisk`), read as a place in the DISK text
+  since a name and its pseudonym differ in length with Show fakes on. It used
+  to go to the head of the page, where the next key landed; a save after a
+  decided name did that before, a save while typing a name does it now.
+- After the writes, a written page whose text is no longer what was written
+  stays dirty, so a key typed during the write is not taken for saved.
+- `fakesForPrint` keeps each page's `__built` and `pagesBackAfterPrint` puts
+  it back with the nodes. It was left at the faked text, and every name the
+  print had faked then read as typed: the converter marked the run's
+  undecided leftovers on the next keystroke on that page, and the save would
+  have written them.
+
+The cost is the converter's pass on the pages that were typed on (a page
+whose text is still `__built` returns before reading anything) and one
+`editedSpans` per page of an edited member with a name standing on it, which
+returns at once where the page is as it was built. A 200-page pleading
+export under a 62-name key, one page typed on, saved in the same time as
+before (6.9 s and 6.9 s from Ctrl+S to the write, the rest of the save being
+what it was).
+
+Not done: an undo or a key change rebuilds a page from its text
+(`restoreSnapshot`, `retranslate`), which resets `__built`, so a name typed
+and Esc'd before an undo is the page's own afterwards and the save leaves it,
+named, as unreviewed; carrying `__built` through an undo would also undo the
+rule above that a mark an undo restores is left alone. The Space prompt reads
+the line it is on, so a surname typed at the head of a line under a given
+name on the line before is offered, and marked, alone.
+
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each
 line whole — "…; and QUARRY", the blank, ")  Case No.: 25STCV59720" — with

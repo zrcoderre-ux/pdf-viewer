@@ -221,6 +221,20 @@ function debounce(fn, ms) {
   d.cancel = () => clearTimeout(t);
   return d;
 }
+// …and one timer for each thing it is asked about (`k`, its first argument),
+// where a call about one thing must not put off — or throw away — the call
+// about another. `cancel(k)` stops one; `cancel()` all of them.
+function debounceEach(fn, ms) {
+  const timers = new Map();
+  const d = (k, ...a) => {
+    clearTimeout(timers.get(k));
+    timers.set(k, setTimeout(() => { timers.delete(k); fn(k, ...a); }, ms));
+  };
+  d.cancel = (...k) => {
+    for (const key of k.length ? k : [...timers.keys()]) { clearTimeout(timers.get(key)); timers.delete(key); }
+  };
+  return d;
+}
 // The browser's own answer to "how long may I keep the thread?" — the way the
 // long passes over a document are cut up. A page of a long export under a key
 // of a few thousand names is ten milliseconds to read or to build; a hundred
@@ -699,7 +713,11 @@ let printPut = null; // while a print is being prepared: how the pages go back
 function fakesForPrint() {
   if (!doc || printPut) return; // a dialog over another: the first put-back stands
   const bodies = pageBodies();
-  const was = { html: bodies.map((b) => b.innerHTML), fakes: document.body.classList.contains("show-fakes") };
+  // The pages as they stand, to go back — and with them the text each was
+  // built from, which the rebuild below replaces: left at the faked text, every
+  // name the print faked read as TYPED afterwards (the converter's measure,
+  // and the save's), to be marked and written as its pseudonym unreviewed.
+  const was = { html: bodies.map((b) => b.innerHTML), built: bodies.map((b) => b.__built), fakes: document.body.classList.contains("show-fakes") };
   let moved = false;
   if (fwd && fwd.rx) {
     during("scrubbing the pages for print", () => {
@@ -728,7 +746,7 @@ function pagesBackAfterPrint() {
   const was = printPut;
   printPut = null;
   if (!was) return;
-  pageBodies().forEach((b, i) => { if (was.html[i] != null) b.innerHTML = was.html[i]; });
+  pageBodies().forEach((b, i) => { if (was.html[i] != null) { b.innerHTML = was.html[i]; b.__built = was.built[i]; } });
   document.body.classList.toggle("show-fakes", was.fakes);
   afterTextChange(); // the marks and the underlines are ranges into the old nodes
 }
@@ -1681,7 +1699,9 @@ function forwardText(text, held, pns, spare) {
   let out = "", at = 0;
   for (const s of swaps) { out += text.slice(at, s.start) + s.to; at = s.end; }
   // Names, not places: a name wrapped over lines is written a piece a line.
-  return { text: out + text.slice(at), swaps: swaps.filter((s) => !s.piece).length };
+  // `places` are the swaps themselves, for a caller that has to follow a
+  // place in `text` into the text written (the save, keeping the caret).
+  return { text: out + text.slice(at), swaps: swaps.filter((s) => !s.piece).length, places: swaps };
 }
 /** …and the same pass as places: [{ start, end, to, piece }] into `text`, in order — `piece` past the first of a wrapped name. */
 function forwardSwaps(text, held, pns, spare) {
@@ -3841,7 +3861,7 @@ function snapshotPages(bodies) {
 function restoreSnapshot(snap, { settle = true, lists = true } = {}) {
   const body = bodyForPage(snap.page);
   if (!body) return;
-  convertTypedRealsSoon.cancel();
+  convertTypedRealsSoon.cancel(body);
   hideTypeTip();
   // The page's keeps as that snapshot had them, so buildBody can put the spans
   // back where the text it is building from carries them.
@@ -3944,28 +3964,80 @@ window.addEventListener("beforeunload", (e) => {
  * name in the page's plain text on any edit of the page, both of those with
  * it. What the edit wrote is read off the page's text against the text it was
  * built from (textdoc.typedReals).
+ *
+ * ONE TIMER PER PAGE. It was one timer for the reader, and the call kept only
+ * the page it was last asked about: a name typed on page 1 and a word typed on
+ * page 2 inside the quarter second, and page 1 was never read again — its name
+ * stood in the clear until a save wrote it there. Each page body now waits on
+ * its own (debounceEach), and an undo or a strip on one page cancels that
+ * page's wait and nobody else's.
+ *
+ * …AND THE CARET LEAVING IS A REASON TO LOOK AGAIN. The guide promises that a
+ * name typed and left is marked once the caret has moved off it, and nothing
+ * looked: the converter ran a quarter second after the last key, passed over
+ * the name the caret was still at the end of, and was not asked again until
+ * something more was typed on that page. A click elsewhere, the arrow keys, a
+ * move to the Find box left it plain and orange for good. A page whose name
+ * was passed over for the caret is remembered (`caretHeld`); a move of the
+ * selection asks again a beat later (the same wait, so a name still being
+ * typed — "Helen" on its way to "Helen Rasho" — is not marked in pieces), and
+ * so does the focus leaving the page, which moves no selection: a page that
+ * has lost the focus has no caret in it, whatever the selection still says.
+ * Esc at the prompt still leaves its name plain on the page; the save writes
+ * its pseudonym (saveDocument, TD.typedSpans).
  */
-const convertTypedRealsSoon = debounce(convertTypedReals, 250);
-/** How many it marked; `quiet` leaves the toast and the re-read to the caller (a replace). */
-function convertTypedReals(body, { quiet = false } = {}) {
+const convertTypedRealsSoon = debounceEach(convertTypedReals, 250);
+const caretHeld = new Set(); // page bodies with a typed name the converter passed over for the caret
+/**
+ * How many it marked; `quiet` leaves the toast and the re-read to the caller
+ * (a replace, a save), and `tally` ({ made, back }) is given what it did.
+ */
+function convertTypedReals(body, { quiet = false, tally = null } = {}) {
+  caretHeld.delete(body);
   if (!fwd || !fwd.rx || !body.isConnected) return 0;
   body.normalize();
+  // Nothing written since the page was built or saved, nothing typed and no
+  // mark an edit made — which the two passes below would each find out the
+  // long way. A save asks this of every page of an edited document.
+  const page = TD.serializeMapped(body);
+  if (body.__built == null || page.text === body.__built) return 0;
   const sel = document.getSelection();
-  const caretNode = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
-  const caretOff = sel && sel.rangeCount ? sel.getRangeAt(0).startOffset : -1;
+  const focused = body.contains(document.activeElement);
+  const caretNode = focused && sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+  const caretOff = focused && sel && sel.rangeCount ? sel.getRangeAt(0).startOffset : -1;
   const segs = plainSegments(body).map((seg) => ({ node: seg.node, text: maskKept(seg.text) }));
   const found = TD.findRealsInPlain(fwd, segs);
-  const hits = found.length ? TD.typedReals(found, TD.serializeMapped(body), body.__built) : found;
+  const hits = found.length ? TD.typedReals(found, page, body.__built) : found;
   // Last hit first, so the offsets of the earlier ones in the same node
   // stay valid as the node is split.
   hits.reverse();
+  // A PIECE OF A NAME IS NOT A NAME. The pass above reads a text node at a
+  // time, and a page is a text node a line, so "Served on Helen" / "Rasho by
+  // mail." pasted out of the filing was read as "Rasho" alone, under a key
+  // binding "Helen Rasho" and the surname token: "Rasho" was marked and
+  // "Helen" left, and the file said "Helen / Strangeways" — a name half faked
+  // that read as finished, with "Helen", bound nowhere on its own, marked by
+  // nothing. The save reads the page whole (standingSpans), where the name is
+  // one hit wrapped over the line, and writes it whole (TD.typedSpans), so a
+  // hit that is a piece of a wrapped name is left to it: it stands orange
+  // until then, as a name in the clear does. The page is read whole only once
+  // a hit is about to be marked, and before anything is.
+  let pieces = null;
   let made = 0;
   for (const h of hits) {
-    if (h.node === caretNode && caretOff >= h.start && caretOff <= h.end) continue;
+    if (h.node === caretNode && caretOff >= h.start && caretOff <= h.end) { caretHeld.add(body); continue; }
     if (typeDismissed && typeDismissed.body === body && offsetOfPoint(body, h.node, h.end) === typeDismissed.end) continue;
+    if (!pieces) {
+      const d = TD.serializeHeld(body);
+      pieces = standingSpans(d.text, d.held, d.pns).filter((s) => s.ranges.length > 1).flatMap((s) => s.ranges);
+    }
+    const o = page.at.get(h.node);
+    if (o != null && pieces.some(([a, b]) => o + h.start < b && o + h.end > a)) continue;
     const node = h.node;
     if (!node.isConnected) continue;
     if (!made) snapshot(body, true);
+    // The prompt points into this node by offset, and the node is about to be cut.
+    if (typeHit && typeHit.node === node) hideTypeTip();
     node.splitText(h.end);
     const mid = node.splitText(h.start);
     mid.replaceWith(makePn(h.fake, h.matched));
@@ -3992,8 +4064,16 @@ function convertTypedReals(body, { quiet = false } = {}) {
     toast(notes.join(" · "));
     afterTextChange();
   }
+  if (tally) { tally.made += made; tally.back += back; }
   return made;
 }
+document.addEventListener("selectionchange", () => {
+  for (const body of caretHeld) convertTypedRealsSoon(body);
+});
+pagesEl.addEventListener("focusout", (e) => {
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  if (body && caretHeld.has(body)) convertTypedRealsSoon(body);
+});
 
 /** Text nodes of a page body that are NOT inside a pseudonym span. */
 function plainSegments(body) {
@@ -4004,6 +4084,54 @@ function plainSegments(body) {
   let n;
   while ((n = w.nextNode())) out.push({ node: n, text: n.data });
   return out;
+}
+
+// The caret through a save's rebuild of its page. A page the save writes a
+// pseudonym into is built again from the text it writes (buildBody), and the
+// caret went with the nodes it stood in — to the head of the page, where the
+// next key typed landed. Once that was a save after a decided name; now that a
+// name typed and saved at once is written as its pseudonym, it is most saves
+// made while typing. The caret is read as a place in the DISK text
+// (serializeHeld's points, a caret inside a pseudonym taking its end), carried
+// over the names written (placeAfterSwaps) and found again in the rebuilt page
+// (placeCaretOnDisk). The disk text is the measure because the screen's is not
+// fixed: with Show fakes on, a name and its pseudonym differ in length.
+/** The collapsed caret in `body` as serializeHeld takes a point, or null. */
+function caretPoint(body) {
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount || !sel.isCollapsed) return null;
+  const r = sel.getRangeAt(0);
+  return body.contains(r.startContainer) ? { node: r.startContainer, offset: r.startOffset, end: true } : null;
+}
+/** A place in a page's text, followed into forwardText's text of it (`places`, its swaps): one inside a name written over goes after it. */
+function placeAfterSwaps(at, places) {
+  let shift = 0;
+  for (const s of places || []) {
+    if (s.start >= at) break;
+    if (s.end > at) return s.start + shift + s.to.length;
+    shift += s.to.length - (s.end - s.start);
+  }
+  return at + shift;
+}
+/** The caret put at `pos` in the page's disk text: in the text there (never a margin number), else just after the pseudonym ending there. */
+function placeCaretOnDisk(body, pos) {
+  const { at, pn } = TD.serializeMapped(body);
+  let hit = null;
+  for (const [n, o] of at) {
+    if (o > pos) break;
+    if (o + n.data.length < pos || (n.parentElement && n.parentElement.closest(".gutter"))) continue;
+    hit = { node: n, offset: pos - o }; // the last that holds it: at a seam, the text after it
+  }
+  if (!hit) {
+    for (const [el, o] of pn) {
+      if (o + String(el.dataset.fake || "").length !== pos) continue;
+      let after = el.nextSibling;
+      if (!after || after.nodeType !== 3) { after = document.createTextNode(""); el.after(after); }
+      hit = { node: after, offset: 0 };
+      break;
+    }
+  }
+  if (hit) placeCaret(hit.node, hit.offset);
 }
 
 // ── saving ─────────────────────────────────────────────────────────────────────────
@@ -4019,6 +4147,27 @@ function plainSegments(body) {
 /** Writes the document (and what the case folder is owed); false where it did not. */
 async function saveDocument() {
   if (!doc) return false;
+  // THE TYPING IS FINISHED FIRST. The converter waits a quarter second after
+  // the last key, and a save inside that wait read the page as the typing had
+  // left it. Two things went into the export that way. A party marked at the
+  // Space prompt and then typed on into a whole citation ("See Jones" — Space
+  // — "v. Smith (2019) 30 Cal.App.5th 1.", Ctrl+S) was written as its
+  // pseudonym, a citation to a case that does not exist — and the save then
+  // took the page as it wrote it for the page's own, so the mark was never put
+  // back. And a real name typed and saved at once was written in the clear,
+  // and was "not yet reviewed" from then on. The wait is cancelled — every
+  // page's, since a name typed on page 1 and a word on page 2 are two waits —
+  // and the converter is run now on every page of every edited document, which
+  // puts back each mark that now stands in a cited decision's name and marks
+  // what it can. The names it passes over — the one the caret is still in, the
+  // one Esc dismissed, one typed across a line break, which it cannot read —
+  // the forward pass below writes as their pseudonyms all the same
+  // (TD.typedSpans): a name the operator typed never reaches the file.
+  convertTypedRealsSoon.cancel();
+  hideTypeTip();
+  const typing = { made: 0, back: 0 };
+  const edited = (i) => { const m = reelMemberOf(i); return m ? m.dirty : dirty; };
+  for (const body of pageBodies()) if (edited(pageIndexOf(body))) convertTypedReals(body, { quiet: true, tally: typing });
   let forwarded = 0;
   // Each page as it will be written, and the same text with its spot keeps
   // blanked — what the standing assertion below is allowed to look at.
@@ -4036,9 +4185,24 @@ async function saveDocument() {
   const stuck = [];
   for (const body of pageBodies()) {
     const i = pageIndexOf(body);
-    let { text, held, pns } = TD.serializeHeld(body);
+    // The caret, as a place in the text the page writes: a page the pass below
+    // rebuilds is built afresh, and a name typed and saved at once is the
+    // usual reason now, so the caret is put back where the typing left it.
+    const caret = caretPoint(body);
+    let { text, held, pns, at } = TD.serializeHeld(body, { points: caret ? [caret] : null });
     let standing = standingSpans(text, held, pns);
-    let left = standing.filter((h) => !isSettled(h.real));
+    // What the edits wrote is measured against the text the page had before
+    // this save, which a rebuild below replaces. Only a document typed in has
+    // anything typed: the rest are passed over without the asking.
+    const base = body.__built;
+    const typedIn = (st, t) => new Set(edited(i) ? TD.typedSpans(st, t, base) : []);
+    let typed = typedIn(standing, text);
+    // A name nobody has decided on waits for the review — unless it was TYPED,
+    // which is the operator's own writing and goes to the file as its
+    // pseudonym. One the key holds only an instruction for has no pseudonym to
+    // go as, so it is not waiting either: the last check refuses it, by name.
+    const waits = (h) => !isSettled(h.real) && !typed.has(h);
+    let left = standing.filter(waits);
     if (fwd && fwd.rx) {
       // A name the key holds an INSTRUCTION for (no fake: PK.keyCellKind) is
       // spared whole too, settled or not. Nothing can be written for it, and
@@ -4052,15 +4216,17 @@ async function saveDocument() {
       // to mark or refuse: a name half scrubbed that read as finished. Spared,
       // it stands whole, the stuck list holds it, and the last check below
       // refuses it and says why (instructionNote).
-      const spare = standing.filter((h) => !h.fake || !isSettled(h.real));
+      const spare = standing.filter((h) => !h.fake || waits(h));
       const fw = forwardText(text, held, pns, spare.flatMap((h) => h.ranges));
       if (fw.swaps) {
         snapshot(body, true);
         forwarded += fw.swaps;
         buildBody(body, fw.text, i);
+        if (at && at[0] >= 0) placeCaretOnDisk(body, placeAfterSwaps(at[0], fw.places));
         ({ text, held, pns } = TD.serializeHeld(body)); // the rebuilt page, its spots and fakes found again
         standing = standingSpans(text, held, pns); // …and the names left, where they now stand
-        left = standing.filter((h) => !isSettled(h.real));
+        typed = typedIn(standing, text);
+        left = standing.filter(waits);
         touched.add(reelMemberOf(i));
       }
     }
@@ -4119,6 +4285,9 @@ async function saveDocument() {
       const left = PK.findReals(reals, TD.blankRanges(maskKept(held, plain), TD.citedNameSpans(held)), { layout: plain });
       if (left.length) {
         toast(`Not saved: ${m.name} still carries a real name the key binds — ` + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again." + instructionNote(left.map((w) => w.real)), { error: true });
+        // The pages the save marked or rebuilt on its way here stay as it left
+        // them, and the marks are read again off them.
+        if (forwarded || typing.made || typing.back) afterTextChange();
         return false;
       }
     }
@@ -4132,9 +4301,10 @@ async function saveDocument() {
     }
     m.dirty = false;
     wrote.push(m.name);
-    // What was written is what each page of it now is: a real name typed and
-    // left standing went into the file with it, and is the review's from here
-    // on, not the typing's (convertTypedReals).
+    // What was written is what each page of it now is, and what the next edit
+    // is measured from (convertTypedReals, TD.typedSpans): a name typed before
+    // this save went into the file as its pseudonym, and a page left as built
+    // has nothing typed in it.
     for (let i = m.from; i < m.from + m.count; i++) {
       const b = bodyForPage(i);
       if (b) b.__built = doc.pages[i].lines.join("\n");
@@ -4154,6 +4324,18 @@ async function saveDocument() {
     if (!waitingIn.has(m)) sweep.rows = sweep.rows.filter((r) => r.doc.handle !== m.handle);
   }
   setDirty(false);
+  // …unless a page has moved since it was read for the file. The write is
+  // awaited — a permission asked, a picker, a synced folder slow to open — and
+  // a converter run that lands in it (a key typed while the file was being
+  // written) changes the page after its text was taken: the page then showed a
+  // pseudonym where the file had the name, nothing was dirty, and nothing
+  // asked at the tab's close. Such a page is not the file, and stays unsaved.
+  for (const m of write) {
+    for (let i = m.from; i < m.from + m.count; i++) {
+      const b = bodyForPage(i);
+      if (b && b.__built != null && TD.serializeNodes(b) !== b.__built) setDirty(true, i);
+    }
+  }
   // A transcribed page's line carries the page's text as it was just WRITTEN
   // (TD.pageTextSum), so PDF-Linker applies the text the operator saved and
   // nothing older or newer.
@@ -4182,7 +4364,7 @@ async function saveDocument() {
       ? ` · ${leaks.name} written too (${n} decision${n === 1 ? "" : "s"})`
       : " · the LEAKS decisions are still unwritten — save them from the ⚠ Leaks bar";
   }
-  if (forwarded) afterTextChange();
+  if (forwarded || typing.made || typing.back) afterTextChange();
   updateDirty();
   // THE WARNING. A save before the review is over is allowed — the edits and
   // the decisions taken so far are worth having on disk — but it must not pass
@@ -4202,10 +4384,12 @@ async function saveDocument() {
       + stuckNames.slice(0, 4).join(", ") + (stuckNames.length > 4 ? "…" : "")
       + ". Retype or keep " + (stuck.length === 1 ? "it" : "them") + " by hand." + instructionNote(stuckNames)
     : "";
+  const wroteAs = forwarded + typing.made; // the names the save marked on its way in are written as pseudonyms too
   toast((!wrote.length
     ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : "Nothing to save.")
     : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + wrote.join(", ") +
-      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList) + warn + stuckWarn,
+      (wroteAs ? ` · ${wroteAs} real name${wroteAs === 1 ? "" : "s"} written as pseudonym${wroteAs === 1 ? "" : "s"}` : "")
+      + (typing.back ? ` · ${typing.back} left as typed — ${typing.back === 1 ? "a party" : "parties"} to a cited decision, never a pseudonym` : "") + alsoList) + warn + stuckWarn,
     { error: !!(warn || stuckWarn), ms: warn || stuckWarn ? 12000 : undefined });
   return true;
 }
@@ -5942,7 +6126,7 @@ function markDidNotOcr(i) {
     persistValues();
     renderFlags();
   }
-  convertTypedRealsSoon.cancel();
+  convertTypedRealsSoon.cancel(body);
   hideTypeTip();
   spots = spots.filter((x) => x.page !== i);
   buildBody(body, text, i);
@@ -6066,7 +6250,7 @@ function putStrippedBack(i, sn) {
   const top = undoStack[undoStack.length - 1];
   const view = sn.view && sn.view.on && swaps.has(sn.view.key) ? { key: sn.view.key, on: false } : null;
   if (view && top && top.page === i) top.view = view;
-  convertTypedRealsSoon.cancel();
+  convertTypedRealsSoon.cancel(body);
   hideTypeTip();
   spots = spots.filter((x) => x.page !== i).concat(sn.spots || []);
   buildBody(body, sn.text, i);
@@ -6269,7 +6453,7 @@ function markDidNotOcrPages(indices) {
     persistValues();
     renderFlags();
   }
-  convertTypedRealsSoon.cancel();
+  convertTypedRealsSoon.cancel(...todo.map((t) => t.body));
   hideTypeTip();
   const stripped = new Set(todo.map((t) => t.i));
   spots = spots.filter((x) => !stripped.has(x.page));

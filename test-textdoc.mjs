@@ -10,7 +10,7 @@ import {
   markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
-  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
+  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
@@ -21,7 +21,7 @@ import {
   textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
   marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
 } from "./viewer/textdoc.js";
-import { parseKey, compileForward, compile, compileReals, buildMatcher, forwardRuns } from "./viewer/pseudo-key.js";
+import { parseKey, compileForward, compile, compileReals, buildMatcher, forwardRuns, findRealSpans } from "./viewer/pseudo-key.js";
 
 let fails = 0;
 function check(label, got, want) {
@@ -371,6 +371,30 @@ console.log("what an edit wrote");
   check("a party marked while its citation was typed goes back; the page's own and a typed one outside a citation stay",
     [back.includes(early), back.includes(filed), back.includes(plain), back.length], [true, false, false, 1]);
   check("nothing typed, nothing goes back", typedPseudonymsCited(serializeMapped(cbody), serializeMapped(cbody).text), []);
+
+  // THE SAVE'S QUESTION, of the names it reads standing in the page whole. A
+  // name typed and saved inside the converter's wait — or with the caret still
+  // at its end, or dismissed with Esc, or typed across a line break, which the
+  // converter cannot read — went into the export in the clear and was "not
+  // yet reviewed" from then on. The save writes each name this answers as its
+  // pseudonym.
+  const sreals = compileReals(key);
+  const typedAt = (built, now) => typedSpans(findRealSpans(sreals, now, { layout: now }), now, built).map((h) => now.slice(h.start, h.end));
+  const leftover = " 1  Counsel for Helen Rasho appeared.\n 2  Nothing else.";
+  check("a name typed is the save's to write; the run's leftover beside it is the review's",
+    typedAt(leftover, leftover.replace("else.", "else. Served on Helen Rasho.")), ["Helen Rasho"]);
+  check("…and on a page nobody typed on, nothing", typedAt(leftover, leftover), []);
+  check("…nor where the page has no text it was built from", typedSpans(findRealSpans(sreals, leftover), leftover, null), []);
+  check("a name typed across a line break is one name, typed",
+    typedAt(" 1  Served on\n 2  by mail.", " 1  Served on Helen\n 2  Rasho, by mail."), ["Helen\n 2  Rasho"]);
+  check("the surname typed under a given name the page had makes the whole name typed",
+    typedAt(" 1  Served on Helen\n 2  by mail.", " 1  Served on Helen\n 2  Rasho by mail."), ["Helen\n 2  Rasho"]);
+  // An Enter inside a name the run left writes the break and the number
+  // between its pieces, and nothing of the name: it is still the review's.
+  check("an Enter inside a leftover does not make it typed",
+    typedAt(" 1  Counsel for Helen Rasho appeared.\n 2", " 1  Counsel for Helen\n 2  Rasho appeared."), []);
+  check("a citation typed whole keeps its parties, read whole as well",
+    typedAt(" 1  Nothing.", " 1  Nothing. See Rasho v. Quillmark (2017) 13 Cal.App.5th 1152."), []);
 }
 
 // ---- the values file ---------------------------------------------------------------
