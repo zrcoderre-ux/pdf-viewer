@@ -11209,7 +11209,7 @@ $("flags-copy").addEventListener("click", async () => {
 // also flagged into New Real Values.txt, which would hand PDF-Linker the same
 // value twice under two different rules.
 const leaksBar = $("leaks-bar");
-let leaks = null;          // { parsed, bytes, name, handle, folder, at, mirrored: Set }
+let leaks = null;          // { parsed, bytes, name, handle, folder, at, trail, mirrored: Set }
 let leakRowValue = "";     // the current row's value, marked wherever it stands
 let leakRowRanges = [];    // where it stands, from the last paint: [{ body, range }]
 let leakHere = null;       // the occurrence the bar scrolled to
@@ -11291,7 +11291,7 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" 
   // Unsaved decisions are never lost to a re-attach: they are remembered
   // per worksheet (folder and name) and laid back over the rows below.
   if (leaks) persistLeaks();
-  leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", at: -1, mirrored: new Set() };
+  leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", at: -1, trail: LK.newTrail(), mirrored: new Set() };
   const remembered = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));
   const faked = refreshSheetFakes(); // its `yes` rows, the sheet's own and the ones remembered
   mirrorLeakKeeps(parsed.rows.filter((r) => r.fix !== r.fix0));
@@ -11566,14 +11566,19 @@ function renderLeaksTabNow() {
   renderLeaksTabState();
 }
 
-/** Show row `i` in the bar and take the text to it. */
-async function goToLeak(i, { locate = true } = {}) {
+/**
+ * Show row `i` in the bar and take the text to it. The row left is the way
+ * back for ‹ (LK.trailMove), except where ‹ and › are the ones moving
+ * (`trail: false`): they keep the trail themselves.
+ */
+async function goToLeak(i, { locate = true, trail = true } = {}) {
   const rows = leakRows();
   if (!rows.length) return;
   // Going to a row by any road is leaving the page it was being finished on.
   if (pageSweep) { pageSweep = null; renderNamesBar(); }
   const was = leaks.at;
   leaks.at = ((i % rows.length) + rows.length) % rows.length;
+  if (trail) LK.trailMove(leaks.trail, was, leaks.at);
   const row = rows[leaks.at];
   leakRowValue = row.value;
   leakHere = null;
@@ -12226,11 +12231,25 @@ $("leaks-btn").addEventListener("click", async () => {
 $("lb-close").addEventListener("click", () => showLeaksBar(false));
 $("lb-open").addEventListener("click", pickLeaks);
 $("leaks-load").addEventListener("click", pickLeaks);
-// ‹ and › walk the review, not the worksheet: the next row is the next one
-// DOWN THE DOCUMENT (leaks.js walkOrder), so stepping through a page's rows
-// reads the page instead of hopping about it.
-$("lb-prev").addEventListener("click", () => goToLeak(LK.stepFrom(leakRows(), leaks.at, -1)));
-$("lb-next").addEventListener("click", () => goToLeak(LK.stepFrom(leakRows(), leaks.at, 1)));
+// ‹ goes back the way the review came: after a decision has moved it on, to
+// the row just answered, not to whatever row stands before the new one on the
+// walk (leaks.js trailBack). › retraces what ‹ went back over. With nothing
+// to retrace they walk the review, not the worksheet: the next row is the
+// next one DOWN THE DOCUMENT (leaks.js walkOrder), so stepping through a
+// page's rows reads the page instead of hopping about it.
+function leakBack() {
+  if (!leaks) return;
+  // Finishing the page's names, the bar still shows the row just answered,
+  // and the text has gone off it: back is back to that row.
+  if (pageSweep) { goToLeak(leaks.at, { trail: false }); return; }
+  goToLeak(LK.trailBack(leaks.trail, leakRows(), leaks.at), { trail: false });
+}
+function leakForward() {
+  if (!leaks) return;
+  goToLeak(LK.trailForward(leaks.trail, leakRows(), leaks.at), { trail: false });
+}
+$("lb-prev").addEventListener("click", leakBack);
+$("lb-next").addEventListener("click", leakForward);
 $("lb-next-open").addEventListener("click", () => { const n = LK.nextUndecided(leakRows(), leaks.at); if (n >= 0) goToLeak(n); });
 $("lb-accept").addEventListener("click", acceptLeak);
 $("lb-find").addEventListener("click", () => { if (leaks && leaks.at >= 0) locateLeak(leakRows()[leaks.at]); });
@@ -12252,8 +12271,8 @@ document.addEventListener("keydown", (e) => {
   const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveLeaks(); return; }
   if (!e.altKey || e.ctrlKey || e.metaKey) return;
-  if (e.key === "ArrowDown") { e.preventDefault(); goToLeak(LK.stepFrom(leakRows(), leaks.at, 1)); }
-  else if (e.key === "ArrowUp") { e.preventDefault(); goToLeak(LK.stepFrom(leakRows(), leaks.at, -1)); }
+  if (e.key === "ArrowDown") { e.preventDefault(); leakForward(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); leakBack(); }
   else if (!typing && e.key.toLowerCase() === "a") { e.preventDefault(); acceptLeak(); }
   else if (!typing && e.key.toLowerCase() === "y") { e.preventDefault(); decideLeak("yes", { advance: true }); }
   else if (!typing && e.key.toLowerCase() === "n") { e.preventDefault(); decideLeak("no", { advance: true }); }

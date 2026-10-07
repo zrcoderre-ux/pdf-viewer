@@ -481,6 +481,18 @@ app, which routes it to the reader tab.
   row whose Where names no place — a sentinel, a tally — comes after the rows
   that do. The **Leaks** tab still lists the worksheet in its own order, that
   being what it is a list of.
+- **‹ goes back the way you came.** A decision takes the review to the next
+  row still to answer, which is often not the next row down the page: the rows
+  between are answered, or the walk wraps to the top of the document or goes
+  on to the next one. So **‹** (and **Alt+↑**) goes back to the row you were
+  on before — after a decision, the row you just answered — and not to
+  whatever row stands before the new one, which was often a row still to
+  answer in another document. Press it again to go further back over the rows
+  you have been through. **›** (**Alt+↓**) goes forward again over what ‹
+  went back over, as a browser's Back and Forward do. Where there is nothing
+  to retrace (the worksheet just opened, or you have gone all the way back)
+  they step along the document as before. While the names bar is finishing a
+  page, ‹ takes you back to the row just answered.
 - **A review goes through the folder one document at a time.** A row stands
   in a document — its File cell — and the rows are worked **document by
   document**: every row standing in the document in front is reached before

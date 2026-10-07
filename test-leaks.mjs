@@ -13,6 +13,7 @@ import {
   rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps, masterWithdrawEdits,
   walkStops, walkStep, WALK_BOUNCE_LIMIT, sweepSpan, isFakeKind, fakeDecisions,
+  newTrail, trailMove, trailBack, trailForward,
 } from "./viewer/leaks.js";
 import { parseKey, compileForward, forwardRuns } from "./viewer/pseudo-key.js";
 
@@ -182,6 +183,66 @@ console.log("the walk: one document at a time");
   // Brief's first row DOWN THE DOCUMENT is p.4, not the p.9 the sheet lists first.
   check("…and moves on only where that document has nothing left (row 1 is Guaranty's only row)",
     nextUndecided(walk, 1), 0);
+}
+console.log("‹ goes back the way the review came");
+{
+  const R = (fix, file, where) => ({ fix, file, where });
+  const fresh = () => [
+    R("", "Brief.pdf", "p.4"),        // 0  Brief, undecided
+    R("", "Guaranty.pdf", "p.2"),     // 1  Guaranty, undecided
+    R("yes", "Brief.pdf", "p.31"),    // 2  Brief, decided
+    R("", "Order.docx", "line 12"),   // 3  Order, undecided
+    R("", "Brief.pdf", "p.9"),        // 4  Brief, undecided
+    R("", "—", "p.7"),                // 5  no file named: the open document
+  ];
+  // What the bar does on a decision: write the cell, go to the next row still
+  // to answer, and leave the row answered as the way back.
+  const decide = (rows, trail, at, fix) => {
+    rows[at].fix = fix;
+    const n = nextUndecided(rows, at);
+    trailMove(trail, at, n);
+    return n;
+  };
+  {
+    const rows = fresh(), trail = newTrail();
+    let at = decide(rows, trail, 4, "yes");
+    check("a decision on Brief's p.9 wraps to its p.4, the row still to answer", at, 0);
+    const walkBack = stepFrom(rows, at, -1);
+    check("…where the walk's own step back is a row still to answer, in another document",
+      [walkBack, rows[walkBack].fix], [5, ""]);
+    at = trailBack(trail, rows, at);
+    check("‹ is the row just answered", at, 4);
+    at = trailForward(trail, rows, at);
+    check("› goes forward again to where ‹ went back from", at, 0);
+    at = trailBack(trail, rows, at);
+    at = decide(rows, trail, at, "no");
+    check("a decision changed after ‹ moves on again", at, 0);
+    check("…and ‹ is that row once more", trailBack(trail, rows, at), 4);
+  }
+  {
+    const rows = fresh(), trail = newTrail();
+    let at = decide(rows, trail, 0, "yes");
+    at = decide(rows, trail, at, "yes");
+    check("two decisions: Brief's p.4, then its p.9, then out of Brief", at, 5);
+    const back = [];
+    for (let k = 0; k < 3; k++) back.push((at = trailBack(trail, rows, at)));
+    check("…‹ goes back over them in the order they were made, then down the walk", back, [4, 0, 5]);
+    const fwd = [];
+    for (let k = 0; k < 4; k++) fwd.push((at = trailForward(trail, rows, at)));
+    check("…and › retraces all of it, then steps on down the walk (from the last row, round to the top)",
+      fwd, [0, 4, 5, stepFrom(rows, 5, 1)]);
+  }
+  {
+    const rows = fresh(), trail = newTrail();
+    check("with no trail, ‹ and › step along the walk",
+      [trailBack(trail, rows, 0), trailForward(newTrail(), rows, 0)], [stepFrom(rows, 0, -1), stepFrom(rows, 0, 1)]);
+    const t = newTrail();
+    trailMove(t, -1, 3);
+    trailMove(t, 3, 3);
+    check("no row in front yet, or no move at all, leaves no way back", t, { back: [], fwd: [] });
+    const short = { back: [2, 9], fwd: [] };
+    check("a row the worksheet no longer has is passed over", trailBack(short, rows, 0), 2);
+  }
 }
 {
   // The whole of a big folder's review, answered row by row the way the bar

@@ -810,6 +810,23 @@ never asked for at once. Past BIG_FOLDER (24) exports that window is one
 document; under it the reader works further ahead as it always has, since a
 case of a dozen exports can hold every document with a leak in it.
 
+**‹ goes back the way the review came** (`leaks.trailBack`, `trailForward`,
+`trailMove`, the trail on `leaks.trail`). A decision moves to `nextUndecided`,
+which is seldom the next row down the walk: the rows between are answered, or
+the walk wraps to the top of the document or goes on to the next. ‹ used to be
+`stepFrom(-1)` from where the review had landed, so it went to whatever stood
+before the new row, often a row still to answer in another document, and never
+to the row just answered. `goToLeak` now records the row it leaves
+(`trailMove`, which also drops the way forward) on every move but ‹ and ›
+themselves (`trail: false`, `leakBack`/`leakForward`, the buttons and
+Alt+↑/↓); ‹ goes back to that row and leaves the one it went back from for ›,
+as a browser's Back and Forward do. With nothing to retrace each steps along
+the walk as before (`stepFrom`), and records that step too, so ‹ then › comes
+back to where it started. During a page sweep the bar still shows the row just
+answered while the text stands on a name; ‹ goes to that row. The trail is one
+per worksheet (every attach makes a new `leaks`), its entries being row
+indices.
+
 The pages those rows name are drawn BEFORE the review reaches them.
 `leaks.leakPages` lists every page a row names in that walk order, held to
 the documents the window allows, and `text-reader.js` keeps a

@@ -533,6 +533,61 @@ export function stepFrom(rows, at, dir) {
   const n = walk.length;
   return walk[(((k + (dir < 0 ? -1 : 1)) % n) + n) % n];
 }
+
+// ---- the road the review came by -----------------------------------------------
+//
+// A decision moves the review to the next row still to answer, and that row
+// is seldom the next one down the page: the rows between are answered, or the
+// walk wraps to the top of the document, or it goes on to another document.
+// ‹ used to step back down the walk from wherever the review had landed, so a
+// decision followed by ‹ — the operator going back to see what they had just
+// said — went to whatever row stood before the new one, most often one still
+// unanswered, and never to the row just answered. ‹ now goes back the way the
+// review CAME (`trailBack`), and › retraces it (`trailForward`), the way a
+// browser's Back and Forward do; with nothing to go back over, they step along
+// the walk as they always did.
+
+/** An empty trail: the rows stood on before the one in front, and the ones ‹ went back from. */
+export function newTrail() { return { back: [], fwd: [] }; }
+const TRAIL_MAX = 500;
+/**
+ * The review went from row `from` to row `to` by anything but ‹ and › — a
+ * decision, Next unanswered, the Leaks tab: `from` is the way back, and the
+ * way forward that ‹ had left is gone, as a new page drops a browser's.
+ */
+export function trailMove(trail, from, to) {
+  if (!trail || !Number.isInteger(from) || from < 0 || from === to) return;
+  trailPush(trail.back, from);
+  trail.fwd.length = 0;
+}
+function trailPush(list, i) {
+  if (list[list.length - 1] !== i) list.push(i);
+  if (list.length > TRAIL_MAX) list.splice(0, list.length - TRAIL_MAX);
+}
+// The top of one side of the trail, less what no longer names a row to go to.
+function trailPop(list, at, n) {
+  while (list.length) {
+    const i = list.pop();
+    if (Number.isInteger(i) && i >= 0 && i < n && i !== at) return i;
+  }
+  return -1;
+}
+/** Where ‹ goes from row `at`: the row the review came from, else the one before it on the walk. */
+export function trailBack(trail, rows, at) {
+  const n = (rows || []).length;
+  const i = trail ? trailPop(trail.back, at, n) : -1;
+  const to = i >= 0 ? i : stepFrom(rows, at, -1);
+  if (trail && Number.isInteger(at) && at >= 0 && at < n && to >= 0 && to !== at) trailPush(trail.fwd, at);
+  return to;
+}
+/** Where › goes from row `at`: back to the row ‹ left, else the next one on the walk. */
+export function trailForward(trail, rows, at) {
+  const n = (rows || []).length;
+  const i = trail ? trailPop(trail.fwd, at, n) : -1;
+  const to = i >= 0 ? i : stepFrom(rows, at, 1);
+  if (trail && Number.isInteger(at) && at >= 0 && at < n && to >= 0 && to !== at) trailPush(trail.back, at);
+  return to;
+}
 /**
  * The rows in the order the review will reach them, as indices into `rows`:
  * the row in front, then the rest of ITS document from where that row stands,
