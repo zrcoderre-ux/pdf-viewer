@@ -89,6 +89,15 @@ const toastEl = $("toast");
 const redactBar = $("redact-bar");
 // …and the find bar, measured with them.
 const findBar = $("find-bar");
+// Pages built OFF the screen: a hidden container on the page but outside
+// #pages, where a document that is not on the reel is built a page at a time
+// so the reader's own page code — the replace, the typed-name pass, the save's
+// forward pass — runs on it exactly as it runs on a page on screen. On the
+// page because convertTypedReals refuses a body that is not connected; outside
+// #pages because nothing that walks the pages on screen may meet it.
+const shadowEl = $("shadow-pages");
+/** Whether a page body is one built off the screen (shadowPage). */
+function isShadow(body) { return !!body && !!shadowEl && shadowEl.contains(body); }
 // …and the key walk's, under Find.
 const keyBar = $("key-bar");
 
@@ -107,6 +116,9 @@ const VALUES_PREFIX = "textReader.values.";
 // …and what was last WRITTEN to the case folder, so the list can tell whether
 // PDF-Linker has been handed what is in it.
 const VALUES_SAVED_PREFIX = "textReader.valuesSaved.";
+// …and the keeps WITHDRAWN since, whose lines the folder's file may still
+// carry: never read back in from it (noteWithdrawn).
+const WITHDRAWN_PREFIX = "textReader.keepsWithdrawn.";
 const SPOTS_PREFIX = "textReader.spots.";
 
 let doc = null;              // TD.parseExport result
@@ -149,7 +161,28 @@ let masterKeeps = [];        // standing keeps from PDF-Linker's master workbook
 let masterInfo = null;       // { name, sheet, rows, partial } once it is attached
 let masterHandle = null;     // its file handle, remembered between sessions
 let masterNeeds = null;      // …the same handle, when the browser wants it re-authorised first
+let masterLost = null;       // …or its name, where the remembered workbook could not be read at all (masterUnread)
 let dirty = false;
+// ── the folder's unsaved documents ──
+// A document of a case folder that has been edited and then left — another
+// document opened, the find walk gone on, a folder-wide Replace all — keeps
+// its edits HERE, as the file Save would write, until Save writes it. A
+// document's unsaved text is in exactly one place at a time: on the reel (its
+// pages on screen, its member dirty) or in this store. See "Unsaved documents
+// and the folder save" in the design notes.
+let unsavedDocs = new Map();   // export name → { name, d, handle, base, doc, spots, built, seq, conflict }
+let unsavedSeq = 0;            // bumped on every change to the store
+let saving = false;            // a save is running: nothing opens, replaces or undoes under it
+let savePass = null;           // …its pass over documents off the screen, while one runs: { stop }
+let saveNote = "";             // …and what the status bar says it is doing
+let saveTouched = null;        // …the members its forward pass changed, and those it wrote: { touched, wrote }
+let folderPass = null;         // a folder-wide Replace all being prepared: { stop }
+let seenDocs = new Set();      // the documents opened or hung on the reel this session
+let confirmedDocs = new Set(); // …and the ones a confirm has already named
+let replaceJournal = [];       // the folder-wide replaces the reader holds, oldest first
+let masterPending = [];        // values the Master Keep workbook would not let go of: owed to the next save
+let masterRestoring = null;    // …the workbook's reading at startup (restoreMaster), awaited before a question is put to it
+let valuesSpentNote = "";      // what the last write of New Real Values.txt retired that the master does not hold, for the save's toast
 const rawPages = new Set();  // the page sections shown as the file has them, ⇄ Raw (setRaw)
 let place = null;            // where the reading is, as last noted: { el, frac, sec, secFrac } (readingPlace)
 let placeHold = null;        // …and the hold keeping it there through a re-layout, while one is (holdReading)
@@ -1438,7 +1471,8 @@ function forwardText(text, held, pns, spare) {
   let out = "", at = 0;
   for (const s of swaps) { out += text.slice(at, s.start) + s.to; at = s.end; }
   // Names, not places: a name wrapped over lines is written a piece a line.
-  return { text: out + text.slice(at), swaps: swaps.filter((s) => !s.piece).length };
+  // …and the swaps themselves, which a spot keep after them is moved by (textdoc.spotsAfterSwaps).
+  return { text: out + text.slice(at), swaps: swaps.filter((s) => !s.piece).length, places: swaps };
 }
 /** …and the same pass as places: [{ start, end, to, piece }] into `text`, in order — `piece` past the first of a wrapped name. */
 function forwardSwaps(text, held, pns, spare) {
@@ -1562,7 +1596,7 @@ function setKey(parsed) {
   // "Fake it" is a decision about a name in THIS case. A key refreshed by a
   // re-run is the same case and the decisions stand; another case's key
   // starts with none.
-  if (key !== parsed && (!key || !parsed || !PK.sameCaseKey(key, parsed))) settled = new Set();
+  if (key !== parsed && (!key || !parsed || !PK.sameCaseKey(key, parsed))) { settled = new Set(); renderSettled(); }
   key = parsed || null;
   // Pages built ahead of time carry this key's translation: under another one
   // they are simply wrong, so they go, and the window fills again.
@@ -1714,11 +1748,52 @@ async function forgetDir(name) {
     await new Promise((resolve, reject) => {
       const tx = db.transaction(DIRS_STORE, "readwrite");
       tx.objectStore(DIRS_STORE).delete(name);
+      // …the folder its flagged list was last written into with it (rememberWritten).
+      tx.objectStore(DIRS_STORE).delete(WRITTEN_KEY + name);
       tx.oncomplete = resolve;
       tx.onerror = () => reject(tx.error);
     });
     db.close();
   } catch { /* it was not remembered, which is where we wanted to get to */ }
+}
+// WHICH FOLDER New Real Values.txt was last written into. What was written is
+// remembered by folder NAME (valuesSavedKey), as every per-folder list is, and
+// a name is not a folder: a copy of the case under the same name (a copy_to
+// destination, an archive) shares it, and so does every case's Text Files.
+// Read against the wrong folder, a keep line written into one reads as SPENT in
+// the other — taken out by PDF-Linker — and the keep was retired without ever
+// reaching the folder the run reads. So the folder that took the write is kept
+// beside the name, by its handle ({ written: handle }); writtenWhere asks it.
+// (A list saved through the picker or a download is no write into the folder,
+// and records nothing: saveValuesFile.) Kept in the folders' store under a key
+// no folder can have, and passed over by rememberedDirs, which takes only
+// directory handles.
+const WRITTEN_KEY = "\u0000written:";
+async function rememberWritten(name, dir) {
+  if (!name || !dir) return;
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(DIRS_STORE, "readwrite");
+      tx.objectStore(DIRS_STORE).put({ written: dir }, WRITTEN_KEY + name);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch { /* not remembered: the record is read by name alone, as before */ }
+}
+/** …and read back: { written: handle }, or null where none was kept. */
+async function writtenRecord(name) {
+  try {
+    const db = await openDb();
+    const out = await new Promise((resolve, reject) => {
+      const req = db.transaction(DIRS_STORE, "readonly").objectStore(DIRS_STORE).get(WRITTEN_KEY + name);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return out && typeof out === "object" && out.written ? out : null;
+  } catch { return null; }
 }
 async function rememberedDirs() {
   try {
@@ -1790,8 +1865,13 @@ async function scanFolder(h, { light = false } = {}) {
   return found;
 }
 
-/** Make `h` the current case folder: key attached, documents listed, flags loaded. */
+/**
+ * Make `h` the current case folder: key attached, documents listed, flags
+ * loaded. Null where it is another folder and the documents of this one that
+ * are unsaved keep the reader here (leaveFolderAsk).
+ */
 async function adoptFolder(h, { quiet = false, light = false } = {}) {
+  if (dirHandle && anyUnsavedDocs() && !(await sameFolder(h)) && !(await leaveFolderAsk())) return null;
   return duringAsync("reading the case folder", () => adoptFolderNow(h, { quiet, light }));
 }
 /**
@@ -1816,10 +1896,24 @@ async function adoptFolder(h, { quiet = false, light = false } = {}) {
  * offer bar and the Documents tab then ask before reading the rest.
  */
 async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
+  const same = await sameFolder(h);
   // Another matter: the PDFs go, and with them any redaction proposed over
   // them — boxes are a thing you are in the middle of, and this folder's
   // pages are not that folder's.
   if (dirHandle !== h) { forgetPdfs(); dropReady(); clearRedactions("the case folder changed"); }
+  // …and what the reader held of the last folder's documents: its replaces,
+  // the history of its pages, which documents it had seen. Its unsaved
+  // documents were saved or dropped on the way out (adoptFolder).
+  if (dirHandle && !same) {
+    replaceJournal = [];
+    undoStack = [];
+    redoStack = [];
+    lastSnapPage = -1;
+    seenDocs = new Set();
+    confirmedDocs = new Set();
+    unsavedDocs.clear();
+    unsavedSeq++;
+  }
   dirHandle = h;
   folderName = h.name;
   // The name this folder's flags are kept under, taken now: the key file read
@@ -1832,6 +1926,15 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   folderDocs = light ? [] : (found.combined ? [found.combined].concat(found.docs) : found.docs);
   folderPdfs = light ? [] : found.pdfs;
   folderLight = light;
+  // The same folder read again: the documents on the reel and in the store
+  // are its documents still, found again by name in the list just read.
+  if (same && folderDocs.length) relinkFolderDocs();
+  // …and a document opened on its own before its folder was — or a folder's
+  // document still on screen as another folder comes in — is one of this
+  // folder's documents or none, by the file itself (folderDocOf). Left without
+  // its entry, its edits had nowhere to be kept: moving to another document
+  // asked "Discard unsaved edits?", and Save wrote it without the disk check.
+  await linkReelToFolder();
   // Not in the Text Files folder: its remedy is the folder above (openFolder's
   // offer bar), and every case's Text Files shares one flag list by name.
   const ownNote = (remedy) => (looksLikeTextFiles(h, found) ? "" : notOwnKeyNote(remedy));
@@ -1850,6 +1953,9 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
     const note = ownNote();
     toast("No pseudonym_key.xlsx in " + folderName + (note ? " — the documents read under the key in hand." + note : " — the documents will read in their fakes."), note ? { ms: 9000 } : undefined);
   }
+  // The names said to be faked in this case, kept for it — read after the key,
+  // whose arrival from another case would otherwise clear them (setKey).
+  loadSettled();
   const stored = readStoredValues(VALUES_PREFIX + folderName);
   flagged = stored.values;
   flagsFor = valuesStoreKey();
@@ -1858,24 +1964,18 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   noOcr = stored.noOcr;
   ocrAgain = stored.ocrAgain;
   textFixed = stored.textFixed;
-  // A transcribed page is DONE once its line has been written to the folder
-  // and is no longer there: PDF-Linker spends the line the moment the text is
-  // in the PDF, and carries back one it could not apply. (Its header says TEXT
-  // CORRECTED from that run on, but a page already corrected can be typed over
-  // and marked again, so the header alone cannot say the request is done.)
-  const written = TD.parseReaderFile(lsGet(valuesSavedKey(), "")).textFixed;
-  let onDiskFixed = [];
+  // The folder's New Real Values.txt as it stands, read once: null where there
+  // is none (PDF-Linker deletes it once it has spent every line), undefined
+  // where it cannot be read — which answers nothing, so nothing is taken as
+  // spent and nothing is read in.
+  let diskValues = null;
   if (found.valuesHandle) {
-    try { onDiskFixed = TD.parseReaderFile(await (await found.valuesHandle.getFile()).text()).textFixed; }
-    catch { onDiskFixed = null; /* unreadable: nothing is taken as spent */ }
+    try { diskValues = await found.valuesHandle.getFile().then((f) => f.text()); }
+    catch { diskValues = undefined; }
   }
-  if (onDiskFixed) {
-    textFixed = textFixed.filter((e) => !(written.some((w) => TD.sameNoOcr(w, e) && w.sum === e.sum)
-      && !onDiskFixed.some((d) => TD.sameNoOcr(d, e))));
-  }
-  if (found.valuesHandle) {
+  if (typeof diskValues === "string") {
     try {
-      const onDisk = TD.parseReaderFile(await (await found.valuesHandle.getFile()).text());
+      const onDisk = TD.parseReaderFile(diskValues);
       // A value the key already fakes is not brought back in: the file on disk
       // is the list as it stood when it was last written, and PDF-Linker has
       // answered it since. Silently, because the file is not the operator's
@@ -1886,7 +1986,27 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
       const answers = TD.keyAnswersFlags(keyFolder, own);
       for (const v of onDisk.values) if (!answers || !TD.fakeFor(fwd, v)) flagged = TD.addValue(flagged, v);
       for (const v of onDisk.phrases) if (TD.isPhrase(flagged, v)) phrases = TD.addValue(phrases, v);
-      for (const k of onDisk.keeps) if (!TD.keptControl(keeps, k.value)) keeps = TD.addKeep(keeps, k.control, k.value);
+      // A keep line the list lacks is read in — one written in another session,
+      // or one another reader tab's list was stored over — but never one the
+      // operator WITHDREW since (its ×, "It is a pseudonym after all", Remove
+      // from Master Keep: keepWithdrawn). That line is the file's old copy of a
+      // decision withdrawn: it is recorded as written, so the list without it
+      // reads as owed OUT of the file, and the next save takes it out. Read
+      // back, it came back at every opening, and the save after handed it to
+      // PDF-Linker again. (Asked of the record of withdrawals, never of the list
+      // lacking a line the reader once wrote: a stale tab's list stored over
+      // this one lacks it too, and that keep was never withdrawn.)
+      const withdrawn = [];
+      for (const k of onDisk.keeps) {
+        if (TD.keptControl(keeps, k.value)) continue;
+        if (keepWithdrawn(k.control, k.value)) withdrawn.push(k);
+        else keeps = TD.addKeep(keeps, k.control, k.value);
+      }
+      if (withdrawn.length) {
+        const was = lsGet(valuesSavedKey(), "");
+        const now = TD.noteKeepLines(was, withdrawn);
+        if (now !== was) lsSet(valuesSavedKey(), now);
+      }
       // A page line on disk is the list as it was last written; the list in
       // hand is newer, so a page either list already names is left to it —
       // or a page asked to be read again since would come back as not to OCR.
@@ -1897,6 +2017,24 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
       // written in another session, owed until PDF-Linker spends it.
       for (const e of onDisk.textFixed) if (!named(e) && !textFixed.some((x) => TD.sameNoOcr(x, e))) textFixed = TD.setTextFixed(textFixed, e, true);
     } catch { /* unreadable: the in-memory list stands */ }
+  }
+  // WHAT PDF-LINKER HAS SPENT. A keep or a transcribed page is DONE once its
+  // line has been written to the folder and is no longer there: PDF-Linker puts
+  // a keep on the master workbook's KEEP sheet and takes its line out, and
+  // spends a page's line the moment the text is in the PDF; it carries back a
+  // line it could not apply — a keep whose master row it could not write, one
+  // Apply Fixes holds for the full re-run — and such a line is not spent. (A
+  // transcribed page's header says TEXT CORRECTED from that run on, but a page
+  // already corrected can be typed over and marked again, so the header alone
+  // cannot say the request is done.) A spent keep is retired from the case's
+  // list: written again, it put back on the master a keep the operator had
+  // emptied or deleted there, on every run (TD.spendLines). Only where the
+  // line was written into THIS folder (spendFromDisk). Nothing just read in
+  // from the file is spent: what is spent is not in it.
+  let spentKeeps = [];
+  if (diskValues !== undefined) {
+    spentKeeps = await spendFromDisk(diskValues, { settle: false });
+    trimWithdrawn(diskValues); // a withdrawn line the file no longer carries is nothing left to keep out
   }
   persistValues();
   if (doc) syncNoOcr(doc.pages.map((_, i) => i)); // the open document says what it carries
@@ -1920,7 +2058,66 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   }
   if (folderDocs.length) { autoShowSidePanel(); showSideTab("tab-docs"); }
   if (doc) refreshPdf();
+  // A spent keep the master workbook does not hold is said by name, once the
+  // workbook has been read as it now stands: not left to vanish unremarked.
+  if (spentKeeps.length) {
+    keepsSpentNote(spentKeeps).then((note) => { if (note) toast(note, { error: true, ms: 12000 }); }, (e) => console.warn(e));
+  }
   return found;
+}
+
+/**
+ * The folder read again: each reel member, each document in the store and
+ * each document of a folder replace's journal is linked to its entry in the
+ * new list, by name. One no longer in the folder keeps the entry it had, and
+ * its save fails with the reason.
+ */
+function relinkFolderDocs() {
+  const byName = new Map(folderDocs.map((x) => [x.name, x]));
+  for (const m of reel) {
+    const x = byName.get(m.name);
+    if (!x) continue;
+    if (m.handle === fileHandle) fileHandle = x.handle;
+    m.d = x;
+    m.handle = x.handle;
+  }
+  for (const e of unsavedDocs.values()) {
+    const x = byName.get(e.name);
+    if (x) { e.d = x; e.handle = x.handle; }
+  }
+  // …so an undo still finds a document of the replace on the reel (matched by
+  // its entry) rather than taking it for one in neither place.
+  for (const rec of replaceJournal) {
+    for (const j of rec.docs) { const x = byName.get(j.name); if (x) j.d = x; }
+  }
+}
+/**
+ * Each member of the reel that is not linked to an entry of the folder now
+ * open, linked by the file itself (the same handle, else isSameEntry), or to
+ * none: a document opened on its own and then joined by its folder becomes one
+ * of the folder's — its edits kept in the store when another document opens,
+ * checked against the disk when saved — with the file's text it was read from
+ * as the base the content check compares, read now where it was not kept.
+ */
+async function linkReelToFolder() {
+  for (const m of reel.slice()) {
+    if (m.d && folderDocs.includes(m.d)) continue;
+    const handle = m.handle;
+    const x = folderDocs.length && handle ? await folderDocOf(handle) : null;
+    if (!reel.includes(m)) continue; // the reel moved on meanwhile
+    m.d = x;
+    if (!x) continue;
+    if (m.handle === fileHandle) fileHandle = x.handle;
+    m.handle = x.handle;
+    if (!m.base || typeof m.base.text !== "string") {
+      try {
+        const f = await x.handle.getFile();
+        const text = await f.text();
+        m.base = { text, stamp: fileKeyOf(f), opened: TD.serializeExport(readExport(text)) };
+      } catch { /* unreadable: the save's content check says so */ }
+    }
+  }
+  // (The Documents list and the status bar are drawn again by the adoption.)
 }
 
 // The offer bar: a lone file whose case folder is known but needs a click to
@@ -2126,6 +2323,7 @@ async function attachKeyForFile(handle) {
     }
     const ask = askBeforeFolder();
     const found = await adoptFolder(at.dir, { quiet: true, light: ask });
+    if (!found) return; // the folder open has unsaved documents, and the reader stays in it
     checkRun({ opening: true }).catch((e) => console.warn(e));
     if (doc) retranslate();
     markDocList();
@@ -2145,12 +2343,38 @@ async function attachKeyForFile(handle) {
 }
 
 // ── opening documents ───────────────────────────────────────────────────────────
-async function openFile(file, handle) {
-  return duringAsync("opening the document", () => openFileNow(file, handle));
+//
+// MOVING BETWEEN THE DOCUMENTS OF A CASE FOLDER NEVER DROPS AN EDIT. Opening
+// another document used to ask "Discard unsaved edits?", which left two
+// answers: lose the work, or stay put — and a find walk, a Replace walking on,
+// a LEAKS row in another document or the names walk could not get past a
+// document typed in without saving it first. With a case folder fully open,
+// every document of it that is dirty on the reel is set aside first, its text
+// as Save would write it, in the store of unsaved documents (stashReel); a
+// document opened that is in the store comes back from it, unsaved; and Save
+// writes every one of them. A lone file, a folder attached for its key alone,
+// and a document that is not one of the folder's have nowhere to be kept, and
+// keep the old question.
+/** `opts.d`: the folder's entry for the file, where the caller knows it. */
+async function openFile(file, handle, opts) {
+  return duringAsync("opening the document", () => openFileNow(file, handle, opts));
 }
-async function openFileNow(file, handle) {
-  if (!file) return;
-  if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
+async function openFileNow(file, handle, { d = null } = {}) {
+  if (!file && !d) return;
+  if (refuseWhileBusy()) return;
+  // A file of another case folder leaves this one: its unsaved documents are
+  // saved first, or dropped, or the reader stays.
+  const where = await targetFolderOf(handle);
+  if (where === "other" && anyUnsavedDocs() && !(await leaveFolderAsk())) return;
+  // What has nowhere to be kept is asked about, as it always was.
+  const loose = folderOpen() ? reel.filter((m) => m.dirty && !m.d).map((m) => m.name) : dirty ? [fileName] : [];
+  if (loose.length && !confirm("Discard unsaved edits to " + loose.join(", ") + "?")) return;
+  // From here the reel is about to be let go of: a save waits for it (saveDocument).
+  opening++;
+  try { await openFileTail(file, handle, d); } finally { opening--; }
+}
+let opening = 0; // documents being opened: a save does not start under one
+async function openFileTail(file, handle, d) {
   openedFile = file;
   hideKeyOffer();
   // The case folder first, so the document renders under its own key — and so
@@ -2159,15 +2383,279 @@ async function openFileNow(file, handle) {
   // …and whether a PDF-Linker run is rewriting that folder now. Not waited
   // for: the warning comes up beside the document, never in its way.
   checkRun({ opening: true }).catch((e) => console.warn(e));
-  const built = readyFor(file);
+  const td = d && folderDocs.includes(d) ? d : await folderDocOf(handle);
+  // What is to be opened is read BEFORE anything on screen is let go of: a
+  // file that will not read leaves the reel as it was. A document in the store
+  // (or about to be: dirty on the reel) is not read at all.
+  const fromStore = !!td && (unsavedDocs.has(td.name) || reel.some((m) => m.dirty && m.d === td));
+  let src = file, built = null, text = null;
+  if (!fromStore) {
+    if (!src) src = await td.handle.getFile();
+    built = readyFor(src);
+    if (!built) { openPdfAhead(src.name); text = await src.text(); }
+  }
+  // Nothing holding the reel's documents may have started meanwhile.
+  if (saving || folderPass) { refuseWhileBusy(); return; }
+  if (folderOpen()) stashReel();
+  // …and looked up only now, so a document that was dirty on the reel a
+  // moment ago opens from the store with its edits.
+  const e = td ? unsavedDocs.get(td.name) : null;
+  if (e) {
+    openText("", e.name, e.handle, null, { stash: e, d: td });
+    checkStashConflict(td);
+    return;
+  }
+  if (!src) { src = await td.handle.getFile(); text = await src.text(); }
   if (built) {
-    ready.delete(file.name); // the reader owns it from here: it is about to be edited
-    openText("", file.name, handle || null, built);
+    ready.delete(src.name); // the reader owns it from here: it is about to be edited
+    openText("", src.name, handle || null, built, { d: td, base: { text: built.text, stamp: built.fileKey } });
     warmForLeaks();
     return;
   }
-  openPdfAhead(file.name);
-  openText(await file.text(), file.name, handle || null);
+  openText(text, src.name, handle || null, null, { d: td, base: { text, stamp: fileKeyOf(src) } });
+}
+/** Whether something holds the folder's documents, said where it does: a save, or a folder-wide replace being prepared. */
+function refuseWhileBusy() {
+  if (saving) { toast("Wait for the save to finish."); return true; }
+  if (folderPass) { toast("Wait for the replace to be prepared (Esc stops it)."); return true; }
+  return false;
+}
+/** Whether a case folder is open in full: listed, read, and the reel's to hang. A light attach is not. */
+function folderOpen() { return !!dirHandle && !folderLight && folderDocs.length > 0; }
+/** Whether the document at the head of the reel is Combined Text.txt. */
+function isCombinedHead() {
+  const h = reel[0];
+  return !!h && (h.d ? !!h.d.combined : folderDocs.some((d) => d.combined && d.name === h.name));
+}
+/** Whether a document of the folder is on the reel: open, or hung on it. */
+function onReel(d) { return reel.some((m) => (m.d ? m.d === d : m.name === d.name)); }
+/** The documents of the folder with unsaved edits, by name, in the folder's order (the Documents list's): dirty on the reel, and in the store. */
+function unsavedNames() {
+  const out = reel.filter((m) => m.dirty && m.d).map((m) => m.name);
+  for (const name of unsavedDocs.keys()) if (!out.includes(name)) out.push(name);
+  return inFolderOrder(out);
+}
+/** Names of the folder's documents sorted as the Documents list has them; any it does not list, after, as they came. */
+function inFolderOrder(names) {
+  const at = new Map(folderDocs.map((d, i) => [d.name, i]));
+  return names.map((n, i) => [n, at.has(n) ? at.get(n) : folderDocs.length + i]).sort((a, b) => a[1] - b[1]).map((x) => x[0]);
+}
+function anyUnsavedDocs() { return unsavedDocs.size > 0 || reel.some((m) => m.dirty && m.d); }
+/** A list of names as a sentence carries one: six at most, and how many more. */
+function nameList(names, max = 6) {
+  return names.length <= max ? names.join(", ") : names.slice(0, max).join(", ") + `…, and ${names.length - max} more`;
+}
+/**
+ * Where a file stands to the case folder open: "same" (one of its files),
+ * "other" (in another case folder the reader remembers), or "loose".
+ */
+async function targetFolderOf(handle) {
+  if (!dirHandle || !handle || typeof handle.isSameEntry !== "function") return "loose";
+  try { if (await dirHandle.resolve(handle)) return "same"; } catch { /* not under it */ }
+  const at = await caseFolderFor(handle);
+  if (!at) return "loose";
+  try { if (await at.dir.isSameEntry(dirHandle)) return "same"; } catch { /* another */ }
+  return "other";
+}
+/** The folder's entry for a file handle: the same object, else the same file (isSameEntry, by name first). */
+async function folderDocOf(handle) {
+  if (!handle || !folderDocs.length) return null;
+  const same = folderDocs.find((x) => x.handle === handle);
+  if (same) return same;
+  if (typeof handle.isSameEntry !== "function") return null;
+  for (const x of folderDocs.filter((y) => y.name === handle.name)) {
+    try { if (await x.handle.isSameEntry(handle)) return x; } catch { /* not this one */ }
+  }
+  return null;
+}
+/** Whether `h` is the case folder already open, by handle or by entry. */
+async function sameFolder(h) {
+  if (!dirHandle || !h) return false;
+  if (dirHandle === h) return true;
+  try { return await dirHandle.isSameEntry(h); } catch { return false; }
+}
+/** A document's text as Save would write it, from the store. */
+function docText(e) { return TD.serializeExport(e.doc); }
+/** A document of the folder read: from the store where it has unsaved edits, else from its file. → { text, stamp, entry } */
+async function readDoc(d) {
+  const e = unsavedDocs.get(d.name);
+  if (e) return { text: docText(e), stamp: "unsaved:" + e.seq, entry: e };
+  const file = await d.handle.getFile();
+  return { text: await file.text(), stamp: fileKeyOf(file), entry: null };
+}
+/**
+ * The folder's documents dirty on the reel, set aside in the store before the
+ * reel is let go of: each page's text as the file will carry it (a real name
+ * typed and not yet marked is marked now — the page is going, and the caret
+ * the converter was waiting on goes with it), its spot keeps, and the text
+ * each page was built from, which is what an edit is still measured against
+ * when it comes back (convertTypedReals).
+ */
+function stashReel() {
+  convertTypedRealsSoon.cancel();
+  hideTypeTip();
+  let moved = false;
+  for (const m of reel) {
+    if (!m.dirty || !m.d) continue;
+    const list = m === reelCurrent() ? spots : m.spots || [];
+    const built = [], rel = [];
+    for (let k = 0; k < m.count; k++) {
+      const i = m.from + k;
+      const body = bodyForPage(i);
+      if (body) {
+        convertTypedReals(body, { quiet: true, caret: false });
+        doc.pages[i].lines = TD.serializeNodes(body).split("\n");
+        built.push(body.__built != null ? body.__built : doc.pages[i].lines.join("\n"));
+        for (const s of spotsFromBody(body, i)) rel.push({ ...s, page: k });
+      } else {
+        built.push(m.built && m.built[k] != null ? m.built[k] : doc.pages[i].lines.join("\n"));
+        for (const s of TD.spotsOnPage(list, i)) rel.push({ ...s, page: k });
+      }
+    }
+    unsavedDocs.set(m.name, {
+      name: m.name, d: m.d, handle: m.d.handle, base: m.base || null,
+      doc: TD.cloneDoc(memberDoc(m)), spots: rel, built, seq: ++unsavedSeq, conflict: !!m.conflict,
+    });
+    m.dirty = false;
+    moved = true;
+  }
+  if (moved) dirty = reel.some((m) => m.dirty);
+}
+/**
+ * A document opened from the store, checked against its file: written since
+ * the edits began (the stamp first, then the text), the offer bar says so and
+ * offers the disk's version. Save will not write over it either way.
+ */
+async function checkStashConflict(d) {
+  const m = reel[0];
+  if (!m || !d || m.d !== d || !m.base) return;
+  const base = m.base;
+  let gone = false;
+  try {
+    const f = await d.handle.getFile();
+    if (base.stamp && fileKeyOf(f) === base.stamp) return;
+    if (typeof base.text === "string" && (await f.text()) === base.text) return;
+  } catch { gone = true; }
+  if (reel[0] !== m) return; // another document opened meanwhile
+  m.conflict = true;
+  markDocList();
+  updateDirty();
+  if (gone) {
+    toast(`${m.name} is no longer in ${folderName}, so Save cannot write it back. What is on screen is your version.`, { error: true, ms: 9000 });
+    return;
+  }
+  showKeyOffer(`${m.name} changed on disk after your edits — PDF-Linker or another window wrote it — so Save will not write over it. What is on screen is your version.`,
+    "Take the disk's version", () => takeDiskVersion(m.name));
+}
+/** Drop the edits to a document and open it as its file now reads. */
+async function takeDiskVersion(name) {
+  if (refuseWhileBusy()) return;
+  if (!confirm(`Drop your edits to ${name} and open it as it is on disk now?`)) return;
+  unsavedDocs.delete(name);
+  unsavedSeq++;
+  journalDropped(name);
+  for (const m of reel) if (m.name === name) { m.dirty = false; m.conflict = false; }
+  dirty = reel.some((m) => m.dirty);
+  storeChanged();
+  const d = folderDocs.find((x) => x.name === name);
+  if (d) await openFolderDoc(d);
+}
+/**
+ * The journal of the folder replaces told that a document's unsaved edits
+ * went: its file reads as it did before them, so an undo has nothing to put
+ * back in it (revertFolderReplace) — where nothing was saved of it since.
+ */
+function journalDropped(name) {
+  for (const rec of replaceJournal) for (const x of rec.docs) if (x.name === name) x.dropped = true;
+}
+/** One document of the store, not on screen, dropped: its file is left as it is. */
+function dropUnsaved(name) {
+  if (!unsavedDocs.has(name)) return;
+  if (refuseWhileBusy()) return;
+  if (!confirm(`Drop your unsaved edits to ${name}? The file stays as it is on disk.`)) return;
+  unsavedDocs.delete(name);
+  unsavedSeq++;
+  journalDropped(name);
+  storeChanged();
+  toast(`Your edits to ${name} are dropped — the file is as it is on disk.`);
+}
+/**
+ * Every unsaved document of the folder let go of: the store, and the reel's
+ * dirty members — each put back on the page as its file reads (the text its
+ * edits started from), so what is on screen is what is on disk. Merely marked
+ * clean, the edits stayed on the page with nothing saying so, and the next
+ * plain Ctrl+S wrote what had just been "dropped". A member whose file's text
+ * is not in hand stays as it is, unsaved, as a file the folder does not hold.
+ */
+function dropAllUnsaved() {
+  for (const name of unsavedDocs.keys()) journalDropped(name);
+  unsavedDocs.clear();
+  unsavedSeq++;
+  let back = false;
+  for (const m of reel) {
+    if (!m.d) continue;
+    m.conflict = false;
+    if (!m.dirty) continue;
+    journalDropped(m.name);
+    if (putMemberToFile(m)) back = true;
+    else m.d = null; // nowhere to put it back from: kept, and asked about as a loose file is
+  }
+  dirty = reel.some((m) => m.dirty);
+  if (back && doc) afterTextChange();
+  storeChanged();
+}
+/**
+ * A member's pages put back to its file's text as it was read (`m.base`), its
+ * own undo steps dropped with the edits they led to. False where that text is
+ * not in hand.
+ */
+function putMemberToFile(m) {
+  if (!m.base || typeof m.base.text !== "string") return false;
+  const parsed = readExport(m.base.text);
+  const rel = TD.normalizeSpots(lsGet(spotKeyOf(m.name), []));
+  if (!putMemberBack(m, parsed, rel)) return false;
+  for (let k = 0; k < m.count; k++) {
+    const b = bodyForPage(m.from + k);
+    if (b) b.__built = parsed.pages[k].lines.join("\n"); // typing is measured against the file again
+  }
+  m.dirty = false;
+  m.built = null;
+  const mine = (snap) => snap.page != null && snap.page >= m.from && snap.page < m.from + m.count;
+  undoStack = undoStack.filter((snap) => !mine(snap));
+  redoStack = redoStack.filter((snap) => !mine(snap));
+  lastSnapPage = -1;
+  return true;
+}
+/** What follows any change to the store: the status bar, the Documents list, the find's counts. */
+function storeChanged() {
+  updateDirty();
+  markDocList();
+  renderUndoFolder();
+  if (!findBar.hidden && findQuery) { renderFindBar(); scanFindFolder(); }
+}
+/**
+ * LEAVING THE CASE FOLDER with documents of it unsaved: save them all first,
+ * or drop them, or stay. Decisions alone do not ask — the flags, the keeps
+ * and the LEAKS answers are remembered for the folder whatever happens. True
+ * where the reader may go on.
+ */
+async function leaveFolderAsk() {
+  const names = unsavedNames();
+  if (!names.length) return true;
+  const labels = names.map((n) => TD.docLabel(n));
+  const parts = [`${names.length} document${names.length === 1 ? "" : "s"} (${nameList(labels)})`].concat(pendingWrites());
+  const owed = decidedOwed();
+  if (owed.names) parts.push(`${owed.names} decided name${owed.names === 1 ? "" : "s"} to write`);
+  // Two questions, each saying what its buttons do: the first's Cancel does
+  // not save, and leads to the second — leave without saving, or stay — rather
+  // than promising to stay and then asking whether to drop everything.
+  if (confirm(`${folderName} has work not yet saved: ${parts.join(", ")}.\n\nOK — save it all first, then go on.\nCancel — do not save: next, choose between leaving without saving and staying in ${folderName}.`)) {
+    const ok = await saveDocument();
+    return ok && !anyUnsavedDocs();
+  }
+  if (!confirm(`Leave ${folderName} without saving? The unsaved edits to ${nameList(labels)} are dropped. (Flags, keeps and LEAKS answers stay remembered here.)\n\nOK — leave, and drop those edits.\nCancel — stay in ${folderName}; nothing is dropped.`)) return false;
+  dropAllUnsaved();
+  return true;
 }
 /**
  * The PDF beside an export, opened WHILE ITS TEXT IS BEING BUILT rather than
@@ -2189,39 +2677,31 @@ function openPdfAhead(name) {
 }
 
 /**
- * The export as pages, with the margin numbers the OCR missed put back on
- * every page that carries enough of its numbers to be pleading paper
- * (TD.restoreMarginNumbers, to the number the document's pages run to). The
- * file is not touched: the pages are what the reader shows, lays beside the
- * PDF and saves, so a save writes the numbers and closing without one loses
- * nothing that the next open does not put back. Each page keeps the numbers
- * put back on it (`restored`), which the margin marks (buildBody), and the
- * document how many there were, for the toast.
+ * The export as pages, with the margin numbers the OCR missed put back
+ * (textdoc.readExport, where it lives now: a document the folder-wide Replace
+ * all or Save works on off the screen is read the same way). The file is not
+ * touched; a save writes the numbers.
  */
-function readExport(text) {
-  const parsed = TD.parseExport(text);
-  const last = TD.pleadingLast(parsed.pages);
-  let pages = 0, numbers = 0;
-  for (const p of parsed.pages) {
-    if (p.header == null) continue;
-    const r = TD.restoreMarginNumbers(p.lines, { last });
-    if (!r) continue;
-    p.lines = r.lines;
-    p.restored = r.added;
-    pages++;
-    numbers += r.added.length;
-  }
-  parsed.restored = { pages, numbers };
-  return parsed;
-}
+function readExport(text) { return TD.readExport(text); }
 
-function openText(text, name, handle, built) {
-  doc = built ? built.doc : readExport(text);
+/**
+ * A document up on the page: `text` read and parsed, a document `built` ahead
+ * of time, or one out of the store of unsaved documents (`stash`), which comes
+ * back exactly as it was left — unsaved, its spot keeps, each page's typing
+ * still measured against the text it was built from — and leaves the store.
+ * `d` is the folder's entry for it, `base` the file it was read from ({ text,
+ * stamp }), which Save checks the disk against before it writes.
+ */
+function openText(text, name, handle, built, { stash = null, d = null, base = null } = {}) {
+  doc = stash ? TD.cloneDoc(stash.doc) : built ? built.doc : readExport(text);
   fileName = name;
   fileHandle = handle;
   // A document opened is the head of a new reel, whatever was hanging off the
   // last one. `doc.pages` grows from here as the folder is read on.
-  reelReset(doc, name, handle, []);
+  reelReset(doc, name, handle, [], {
+    d,
+    base: stash ? stash.base : base ? { text: base.text, stamp: base.stamp || null, opened: TD.serializeExport(doc) } : null,
+  });
   reelJustOpened = true;
   dirty = false;
   editing = false;
@@ -2235,8 +2715,8 @@ function openText(text, name, handle, built) {
   answered = 0;
   decidedHere = 0;
   if (!leakJump) showNamesBar(false); // …unless the walk is what opened it
-  if (!dirHandle) loadValuesFor(name);
-  spots = TD.normalizeSpots(lsGet(spotStoreKey(), []));
+  if (!dirHandle) { loadValuesFor(name); loadSettled(); }
+  spots = stash ? TD.normalizeSpots(stash.spots) : TD.normalizeSpots(lsGet(spotStoreKey(), []));
   if (reel[0]) reel[0].spots = spots;
   // A document built ahead of time goes up as it stands, unless its spot keeps
   // have moved since it was built — then its pages are built again from the
@@ -2244,6 +2724,16 @@ function openText(text, name, handle, built) {
   marksGetAnotherChance();
   if (built && JSON.stringify(built.spots) === JSON.stringify(spots)) showPages(built.nodes, built);
   else render();
+  if (stash) {
+    // Unsaved, as it was left, and out of the store: its text is on the reel now.
+    stash.built.forEach((t, k) => { const b = bodyForPage(k); if (b && t != null) b.__built = t; });
+    reel[0].dirty = true;
+    reel[0].conflict = !!stash.conflict;
+    dirty = true;
+    unsavedDocs.delete(name);
+    unsavedSeq++;
+  }
+  seenDocs.add(name);
   const fixedUp = doc.restored;
   if (fixedUp && fixedUp.numbers) {
     toast(`${fixedUp.numbers} margin number${fixedUp.numbers === 1 ? "" : "s"} the OCR missed or misread ${fixedUp.numbers === 1 ? "is" : "are"} put back, on ${fixedUp.pages} page${fixedUp.pages === 1 ? "" : "s"} (in italics in the margin). The file has them once it is saved.`, { ms: 7000 });
@@ -2303,9 +2793,13 @@ async function openFolder(startIn) {
     if (opts.startIn) { try { h = await window.showDirectoryPicker({ mode: "readwrite" }); } catch (e2) { if (e2 && e2.name !== "AbortError") toast(String(e2.message || e2), { error: true }); return; } }
     else { toast(String(e.message || e), { error: true }); return; }
   }
-  if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
+  // Another case folder is leaving this one: its unsaved documents are saved,
+  // dropped, or the reader stays. Without a folder open in full, what is on
+  // screen has nowhere to be kept, and the question is the old one.
+  if (folderOpen() ? !(await sameFolder(h)) && !(await leaveFolderAsk()) : dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
   hideKeyOffer();
   const found = await adoptFolder(h);
+  if (!found) return;
   // THE TEXT FILES FOLDER IS NOT THE CASE FOLDER. It is the easy mistake —
   // the documents are in it, so it looks like the place — and everything that
   // makes a case folder a case folder is one level up: the key, the PDFs, the
@@ -2355,12 +2849,25 @@ $("open-folder").addEventListener("click", () => openFolder());
  */
 async function forgetFolder() {
   if (!dirHandle) return;
+  if (refuseWhileBusy()) return;
+  // Its unsaved documents are saved first, or dropped — or the folder stays.
+  if (!(await leaveFolderAsk())) return;
   const was = folderName;
   await forgetDir(dirHandle.name);
   forgetPdfs();
   dropReady();
   dropSweep();
   settled = new Set();
+  renderSettled();
+  // What the reader held of this folder's documents goes with it.
+  unsavedDocs.clear();
+  unsavedSeq++;
+  replaceJournal = [];
+  undoStack = undoStack.filter((s) => !s.folderReplace);
+  redoStack = redoStack.filter((s) => !s.folderReplace);
+  seenDocs = new Set();
+  confirmedDocs = new Set();
+  renderUndoFolder();
   clearTimeout(sweepTimer);
   caseFakes = { key: null, docs: null, set: null };
   findRows = [];
@@ -2420,8 +2927,9 @@ function looksLikeTextFiles(h, found) {
 
 async function openFolderDoc(d) {
   try {
-    const f = await d.handle.getFile();
-    await openFile(f, d.handle);
+    // A document with unsaved edits opens from the store: its file is not read.
+    const stored = unsavedDocs.has(d.name) || reel.some((m) => m.dirty && m.d === d);
+    await openFile(stored ? null : await d.handle.getFile(), d.handle, { d });
     return true;
   } catch (e) { toast("Could not open " + d.name + ": " + (e.message || e), { error: true }); return false; }
 }
@@ -2460,8 +2968,46 @@ function renderDocListNow() {
   const read = $("read-folder");
   if (read) read.hidden = !dirHandle || !folderLight;
 }
+/**
+ * The open document marked in the list, and beside every document with
+ * unsaved edits an `unsaved` tag — `changed on disk` where its file has been
+ * written since the edits began, which Save will not write over. The tag is a
+ * label: a click on it opens the document, as a click anywhere on the row
+ * does. Dropping the edits of a document in the store, not on screen, is its
+ * own control, the × after the tag, which asks first. (The tag itself used to
+ * drop them: a click meant to open the document landed on a prompt to throw
+ * the work away, with OK the answer that does.)
+ */
 function markDocList() {
-  for (const li of docsList.children) li.classList.toggle("current", li.dataset.name === fileName);
+  const unsaved = new Map();
+  for (const e of unsavedDocs.values()) unsaved.set(e.name, { conflict: !!e.conflict, stored: true });
+  for (const m of reel) if (m.dirty && m.d) unsaved.set(m.name, { conflict: !!m.conflict, stored: false });
+  for (const li of docsList.children) {
+    li.classList.toggle("current", li.dataset.name === fileName);
+    const u = unsaved.get(li.dataset.name);
+    let tag = li.querySelector(".tag.unsaved");
+    let drop = li.querySelector(".drop-unsaved");
+    if (!u) { if (tag) tag.remove(); if (drop) drop.remove(); continue; }
+    if (!tag) {
+      tag = document.createElement("span");
+      tag.className = "tag unsaved";
+      li.appendChild(tag);
+    }
+    tag.classList.toggle("conflict", u.conflict);
+    tag.textContent = u.conflict ? "changed on disk" : "unsaved";
+    tag.title = u.conflict
+      ? "Its file was written after your edits began (PDF-Linker, or another window), so Save will not write over it. Open it to see your version, or take the disk's."
+      : "Edited and not yet saved — Save (Ctrl+S) writes it with the rest.";
+    if (u.stored && !drop) {
+      drop = document.createElement("button");
+      drop.className = "x drop-unsaved";
+      drop.textContent = "×";
+      drop.title = "Drop your unsaved edits to this document (asks first) — the file stays as it is on disk";
+      drop.setAttribute("aria-label", "Drop unsaved edits to " + TD.docLabel(li.dataset.name));
+      drop.addEventListener("click", (e) => { e.stopPropagation(); dropUnsaved(li.dataset.name); });
+      li.appendChild(drop);
+    } else if (!u.stored && drop) drop.remove();
+  }
 }
 
 // ── the ⚠ beside a document still carrying a real value ──────────────────────
@@ -2726,7 +3272,9 @@ function buildBody(body, text, page, theirSpots) {
   body.__built = text;
   body.classList.toggle("numbered", TD.pageIsNumbered(text.split("\n")));
   const runs = rev ? PK.translateRuns(rev, text) : [{ t: "text", s: text }];
-  const pageSpots = theirSpots || spots;
+  // The spots of the member the page belongs to — on a reel, not always the
+  // open document's — unless the caller hands a document's own.
+  const pageSpots = theirSpots || spotsListOf(page);
   // The page's spot keeps, as places in the text it is being built from. `at`
   // follows the same text as the runs are laid out, so each spot's own
   // characters go into a span of their own — carrying no fake, so the value
@@ -3015,6 +3563,9 @@ function pendingWrites() {
   const out = [];
   if (valuesDirty()) out.push(TD.VALUES_FILE);
   if (leaksDirty()) out.push(leaks ? leaks.name : "LEAKS.xlsx");
+  // …and a value taken off the Master Keep that the workbook refused to let go
+  // of: owed, and the next save tries it again (withdrawMaster).
+  if (masterPending.length) out.push("Master Keep removal");
   return out;
 }
 /**
@@ -3047,30 +3598,121 @@ function standingInTheClear() {
 function settledInTheClear() {
   return leakHits.filter((h) => isSettled(h.real) && h.range && h.range.startContainer && h.range.startContainer.isConnected).length;
 }
+/**
+ * The names said to be faked that a save still has to write: standing in the
+ * clear on screen (the last paint), and in the folder's other documents as
+ * the sweep last read them (settledElsewhere). → { names, docs, list: [{ name,
+ * docs }] } — `names` and `docs` how many of each.
+ */
+function decidedOwed() {
+  const by = new Map();
+  const add = (v, where) => {
+    const k = settledKey(v);
+    if (!by.has(k)) by.set(k, { name: String(v).trim(), docs: new Set() });
+    by.get(k).docs.add(where);
+  };
+  if (doc) for (const h of leakHits) if (isSettled(h.real) && h.range && h.range.startContainer && h.range.startContainer.isConnected) add(h.real, h.doc || fileName);
+  for (const x of settledElsewhere()) for (const v of x.names) add(v, x.d.name);
+  const list = [...by.values()].map((x) => ({ name: x.name, docs: [...x.docs] }));
+  return { names: list.length, docs: new Set(list.flatMap((x) => x.docs)).size, list };
+}
+/**
+ * The folder's documents off the screen where a name said to be faked still
+ * stands unfaked, from the sweep's rows: [{ d, names }]. `fresh`: only from a
+ * sweep made of the folder as it now is (what a save writes from); otherwise
+ * the last sweep's answer stands until the next is in (what the status bar
+ * says).
+ */
+let elsewhereMemo = { key: null, out: [] };
+function settledElsewhere({ fresh = false } = {}) {
+  if (!folderOpen() || (!settled.size && !sheetFakes.size) || !sweep.stamp) return [];
+  if (fresh && (sweep.running || sweepStale())) return [];
+  // Asked on every repaint of the status bar: answered once per state of what
+  // it rests on (the sweep's rows, the decisions, the reel).
+  const memoKey = [sweep.rows, sweep.rows.length, settled, settled.size, sheetFakes, reel.map((m) => m.name).join("\n")];
+  const k = elsewhereMemo.key;
+  if (k && k.every((x, i) => x === memoKey[i])) return elsewhereMemo.out;
+  const out = [];
+  for (const r of sweep.rows) {
+    if (!r.doc || r.doc.combined || onReel(r.doc)) continue;
+    const names = [...new Set(r.values.filter((v) => isSettled(v)).map((v) => String(v).trim()))];
+    if (names.length) out.push({ d: r.doc, names });
+  }
+  elsewhereMemo = { key: memoKey, out };
+  return out;
+}
+// With names said to be faked, the folder is read for where else they stand —
+// a beat after asking, and only where it has not been read as it now is.
+const sweepForOwedSoon = debounce(() => { if (folderOpen() && (settled.size || sheetFakes.size)) sweepFolder(); }, 1500);
+/**
+ * Everything a save owes the files, in one place — what the status bar, the
+ * Save button and the closing prompt read: the unsaved documents (`docs`; a
+ * document that is not one of the folder's counts in `loose`), the decision
+ * files to write, the decided names (here and elsewhere), a Master Keep removal
+ * owed, and the documents whose files changed under their edits.
+ */
+function owedNow() {
+  const docs = unsavedNames();
+  const loose = folderOpen() ? reel.filter((m) => m.dirty && !m.d).length : dirty ? 1 : 0;
+  const conflicts = [];
+  for (const m of reel) if (m.dirty && m.conflict) conflicts.push(m.name);
+  for (const e of unsavedDocs.values()) if (e.conflict && !conflicts.includes(e.name)) conflicts.push(e.name);
+  return { docs, loose, files: pendingWrites(), decided: decidedOwed(), master: masterPending.slice(), conflicts };
+}
+/** The status bar's own line for what is owed, and the Save button's state and title. */
 function updateDirty() {
-  const pending = pendingWrites();
-  const clear = doc ? settledInTheClear() : 0;
+  const o = owedNow();
+  const pending = o.files;
+  const nDocs = o.docs.length + o.loose;
+  const clear = o.decided.names;
   const names = `${clear} decided name${clear === 1 ? "" : "s"}`;
   const asPn = clear === 1 ? "its pseudonym" : "pseudonyms";
-  // Enabled whenever a save would DO something: the text edited, the document
-  // unlocked for editing, a decision waiting to be written into the folder, or
-  // a real name the walk has said to fake, for the save to write as its pseudonym.
-  saveBtn.disabled = !doc || !(editing || dirty || pending.length || clear);
-  saveBtn.title = dirty || editing
-    ? "Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)" +
-      (pending.length ? ` · ${pending.join(" and ")} too` : "")
-    : pending.length
-      ? `Write ${pending.join(" and ")} into the case folder (Ctrl+S)` +
-        (clear ? ` — and ${names} standing in the clear, written as ${asPn}` : " — the text is unchanged and is not rewritten")
-      : clear
-        ? `Write ${names} standing in the clear as ${asPn} (Ctrl+S) — the save does it on its own; nothing has to be edited first`
-        : "Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)";
+  const inDocs = o.decided.docs > 1 || (o.decided.docs === 1 && settledElsewhere().length) ? ` (in ${o.decided.docs} document${o.decided.docs === 1 ? "" : "s"})` : "";
+  const reading = folderOpen() && (settled.size || sheetFakes.size) && sweep.running ? " (reading the folder…)" : "";
+  if (folderOpen() && (settled.size || sheetFakes.size) && !sweep.running && sweepStale()) sweepForOwedSoon();
+  // Enabled whenever a save would DO something: the text edited (here or in
+  // any document of the folder), the document unlocked for editing, a decision
+  // waiting to be written into the folder, or a real name the walk has said to
+  // fake, for the save to write as its pseudonym.
+  saveBtn.disabled = saving || (!doc && !nDocs) || !(editing || dirty || nDocs || pending.length || clear);
+  saveBtn.title = nDocs > 1 || (nDocs && (pending.length || clear))
+    ? "Write every document you have changed and every decision you have taken — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)"
+    : dirty || editing || nDocs
+      ? "Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)" +
+        (pending.length ? ` · ${pending.join(" and ")} too` : "")
+      : pending.length
+        ? `Write ${pending.join(" and ")} into the case folder (Ctrl+S)` +
+          (clear ? ` — and ${names} standing in the clear, written as ${asPn}` : " — the text is unchanged and is not rewritten")
+        : clear
+          ? `Write ${names} standing in the clear as ${asPn} (Ctrl+S) — the save does it on its own; nothing has to be edited first`
+          : "Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)";
   $("edit-toggle").disabled = !doc;
   refreshRawPages(); // a raw page says whether it is the disk or the edits
-  $("st-dirty").textContent = dirty ? "● Unsaved edits"
-    : pending.length ? "● " + pending.join(" and ") + " to write" + (clear ? `, and ${names} to fake` : "")
-    : clear ? `● ${names} to write as ${asPn} — Save does it`
+  const st = $("st-dirty");
+  st.textContent = saving ? (saveNote || "Saving…")
+    // Several things owed, a document among them: all of it, in one line.
+    : nDocs > 1 || (nDocs && (pending.length || clear))
+      ? "● " + [`${nDocs} document${nDocs === 1 ? "" : "s"} unsaved`]
+        .concat(pending.length ? [`${pending.join(" and ")} to write`] : [], clear ? [`${names} to write as pseudonyms${inDocs}`] : [])
+        .join(" · ") + (nDocs > 1 && !pending.length && !clear ? " — Save writes them all" : " — Save writes it all") + reading
+    // One document: the one on screen, as it always said, or one left unsaved
+    // in the store, named.
+    : nDocs && dirty ? "● Unsaved edits"
+    : nDocs ? `● 1 document unsaved (${TD.docLabel(o.docs[0] || fileName)}) — Save writes it`
+    : pending.length ? "● " + pending.join(" and ") + " to write" + (clear ? `, and ${names} to fake${inDocs}` : "") + reading
+    : clear ? `● ${names} to write as ${asPn}${inDocs} — Save does it` + reading
     : (doc && !editing ? "Protected — ✎ Edit to change" : "");
+  // …and the whole of it, an item a line, on hover.
+  const tip = [];
+  for (const n of o.docs) tip.push(`${TD.docLabel(n)} — unsaved${o.conflicts.includes(n) ? " (its file changed on disk since; Save will not write over it)" : ""}`);
+  if (o.loose) tip.push(`${o.loose === 1 ? fileName : o.loose + " documents"} — unsaved`);
+  if (pending.includes(TD.VALUES_FILE)) tip.push(`${TD.VALUES_FILE} to write — ${flagged.length} to fake, ${TD.owedKeeps(keeps).length} to keep${pageListsNote()}`);
+  if (leaksDirty()) { const k = LK.fixEdits(leaks.parsed).length; tip.push(`${leaks.name} to write — ${k} decision${k === 1 ? "" : "s"}`); }
+  for (const x of o.decided.list.slice(0, 12)) tip.push(`“${x.name}” to write as its pseudonym — in ${nameList(x.docs.map((n) => TD.docLabel(n)))}`);
+  if (o.decided.list.length > 12) tip.push(`…and ${o.decided.list.length - 12} more decided names`);
+  if (o.master.length) tip.push(`Master Keep removal to write — ${nameList(o.master.map((v) => `“${v}”`))}`);
+  for (const n of o.conflicts) tip.push(`${TD.docLabel(n)} changed on disk after your edits — open it to see your version, or take the disk's`);
+  st.title = tip.length ? tip.join("\n") + "\nSave (Ctrl+S) writes all of it." : "";
 }
 
 // ── edit protection ────────────────────────────────────────────────────────────────
@@ -3677,34 +4319,63 @@ function snapshotOf(body) {
   const page = pageIndexOf(body);
   return { page, text: TD.serializeNodes(body), caret: caretOffsetIn(body), spots: spotsFromBody(body, page) };
 }
-/** Record the page as it stands, before an edit; `force` skips coalescing. */
+/** Record the page as it stands, before an edit; `force` skips coalescing. A page built off the screen has no history. */
 function snapshot(body, force) {
-  if (batchEdit) return;
+  if (batchEdit || isShadow(body)) return;
   const now = Date.now();
   const i = pageIndexOf(body);
   if (!force && i === lastSnapPage && now - lastSnapAt < UNDO_COALESCE_MS) { lastSnapAt = now; return; }
   undoStack.push(snapshotOf(body));
-  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  trimHistory();
   redoStack = [];
   lastSnapAt = now; lastSnapPage = i;
 }
-/** Record several pages before one edit that changes them all: one undo step. */
-function snapshotPages(bodies) {
-  const batch = ++batchSeq;
-  for (const body of bodies) undoStack.push({ ...snapshotOf(body), batch });
-  // The cap trims the oldest history, never the step just taken.
-  while (undoStack.length > UNDO_MAX && undoStack[0].batch !== batch) undoStack.shift();
+/**
+ * Record several pages before one edit that changes them all: one undo step.
+ * `batch` is for a caller that adds a step of its own to the same one (a
+ * folder-wide replace, whose documents off the screen ride on it).
+ */
+function snapshotPages(bodies, batch = ++batchSeq) {
+  for (const body of bodies) if (!isShadow(body)) undoStack.push({ ...snapshotOf(body), batch });
+  trimHistory();
   redoStack = [];
   lastSnapPage = -1;
+  return batch;
+}
+/**
+ * The history held to UNDO_MAX entries, the oldest going first — a whole step
+ * at a time. A batch cut in half would have Ctrl+Z put back some of its pages
+ * and not the rest; and the step just taken is never what goes.
+ */
+function trimHistory() {
+  while (undoStack.length > UNDO_MAX) {
+    const b = undoStack[0].batch;
+    if (b == null) { undoStack.shift(); continue; }
+    if (undoStack[undoStack.length - 1].batch === b) break;
+    while (undoStack.length && undoStack[0].batch === b) undoStack.shift();
+  }
 }
 function restoreSnapshot(snap, { settle = true, lists = true } = {}) {
   const body = bodyForPage(snap.page);
-  if (!body) return;
+  if (!body) {
+    // A page of a member the reel has shed: its text goes back where the reel
+    // keeps it (`doc.pages`, the member's spots), and is built from there when
+    // the reading comes near it again. Dirty, it is not shed again.
+    const m = reelMemberOf(snap.page);
+    if (!m || !m.shed || !doc.pages[snap.page]) return;
+    doc.pages[snap.page].lines = snap.text.split("\n");
+    m.spots = (m.spots || []).filter((x) => x.page !== snap.page).concat(snap.spots || []);
+    persistMemberSpots(m);
+    setDirty(true, snap.page);
+    syncNoOcr([snap.page], { drop: true });
+    return;
+  }
   convertTypedRealsSoon.cancel();
   hideTypeTip();
   // The page's keeps as that snapshot had them, so buildBody can put the spans
-  // back where the text it is building from carries them.
-  spots = spots.filter((x) => x.page !== snap.page).concat(snap.spots || []);
+  // back where the text it is building from carries them — in the list of the
+  // member the page belongs to, which is not the open document's on a reel.
+  setSpotsListOf(snap.page, spotsListOf(snap.page).filter((x) => x.page !== snap.page).concat(snap.spots || []));
   buildBody(body, snap.text, snap.page);
   doc.pages[snap.page].lines = snap.text.split("\n");
   // …and what actually landed is what is remembered.
@@ -3718,12 +4389,35 @@ function restoreSnapshot(snap, { settle = true, lists = true } = {}) {
   setDirty(true, pageIndexOf(body));
   if (settle) afterTextChange();
 }
-/** One step back (or forward): a page, or every page of a batch. */
+/**
+ * One step back (or forward): a page, or every page of a batch — and where
+ * the batch is a folder-wide replace, every document it changed off the
+ * screen too, through its journal (revertFolderReplace), wherever each
+ * document now is.
+ */
 function stepHistory(from, to) {
+  if (refuseWhileBusy()) return;
   const top = from[from.length - 1];
   if (!top) return;
-  const pages = top.batch ? [] : [from.pop()];
-  while (top.batch && from.length && from[from.length - 1].batch === top.batch) pages.push(from.pop());
+  // A FOLDER REPLACE IS NOT TAKEN BACK BEHIND THE OPERATOR'S BACK. Its step
+  // outlives the document it was made in, so a Ctrl+Z pressed in another
+  // document — one the replace never touched, protected, with no steps of its
+  // own — used to put back every document the replace changed, saved ones
+  // included, with nothing on the page moving and nothing said; the next
+  // Ctrl+S then wrote the old text back into all of them. Where none of its
+  // pages is on screen to be seen coming back, or a document of it has been
+  // written since, the question ↶ Undo replace in folder asks is asked first.
+  if (top.batch) {
+    let k = from.length;
+    while (k > 0 && from[k - 1].batch === top.batch) k--;
+    const step = from.slice(k);
+    const mk = step.find((snap) => snap.folderReplace);
+    if (mk && !askFolderStep(mk.folderReplace, from === undoStack ? "undo" : "redo", step.some((snap) => !snap.folderReplace && bodyForPage(snap.page)))) return;
+  }
+  const all = top.batch ? [] : [from.pop()];
+  while (top.batch && from.length && from[from.length - 1].batch === top.batch) all.push(from.pop());
+  const marker = all.find((snap) => snap.folderReplace);
+  const pages = all.filter((snap) => !snap.folderReplace);
   // A step that also turned the page's PDF view on or off (⊘ Did not OCR,
   // ↻ OCR This Page) turns it back with the text, so what comes back is
   // seen: the text shown before it is put back (it takes the caret), the
@@ -3731,22 +4425,82 @@ function stepHistory(from, to) {
   // turns all of its views in one pass, not a pass of every page per page.
   const shown = (snap) => (snap.view ? (from === undoStack ? !snap.view.on : snap.view.on) : null);
   setPageSwaps(pages.filter((snap) => shown(snap) === false).map((snap) => snap.view.key), false);
+  const restored = new Set();
   for (const snap of pages) {
     const body = bodyForPage(snap.page);
     // …with the strip's tag: the two sides of one step (strippedTextOf).
     if (body) to.push({ ...snapshotOf(body), batch: snap.batch, nocr: snap.nocr, view: snap.view });
+    else {
+      // A shed page: its other side is the text the reel keeps for it.
+      const m = reelMemberOf(snap.page);
+      if (m && m.shed && doc.pages[snap.page]) to.push({ page: snap.page, text: doc.pages[snap.page].lines.join("\n"), caret: -1, spots: TD.spotsOnPage(m.spots || [], snap.page), batch: snap.batch, nocr: snap.nocr, view: snap.view });
+    }
     restoreSnapshot(snap, { settle: pages.length === 1, lists: pages.length === 1 });
+    const m = reelMemberOf(snap.page);
+    if (m) restored.add(m.name);
   }
   // …and a batch's pages go on or off the page lists in one pass: page by
   // page, a hundred stripped pages were a hundred passes over the lists.
   if (pages.length > 1) syncNoOcr(pages.map((snap) => snap.page), { drop: true });
   setPageSwaps(pages.filter((snap) => shown(snap) === true).map((snap) => snap.view.key), true);
-  if (pages.length > 1) afterTextChange();
+  if (marker) {
+    // The documents whose pages were just put back are done; the rest are
+    // found by name in the store, on the reel, or saved since — and what
+    // happened is always said, since most of it happens off the screen.
+    const undoing = from === undoStack;
+    const rec = replaceJournal.find((x) => x.id === marker.folderReplace);
+    const r = revertFolderReplace(marker.folderReplace, undoing ? "undo" : "redo", { skip: restored });
+    to.push(marker);
+    if (r && rec) {
+      const k = r.done.length;
+      const docs = `${k} document${k === 1 ? "" : "s"}`;
+      toast((undoing
+        ? `Put back ${docs} as ${k === 1 ? "it was" : "they were"} before replacing “${rec.q}” — unsaved; Ctrl+S writes ${k === 1 ? "it" : "them"}, Ctrl+Y does the replace again.`
+        : `Replaced “${rec.q}”${rec.withText ? ` with “${rec.withText}”` : ""} again in ${docs} — unsaved; Ctrl+S writes ${k === 1 ? "it" : "them"}, Ctrl+Z puts ${k === 1 ? "it" : "them"} back.`)
+        + (r.left.length ? ` Left as ${r.left.length === 1 ? "it is" : "they are"}: ${nameList(r.left.map((n) => TD.docLabel(n)))} (changed since the replace).` : ""),
+        { error: !!r.left.length, ms: 9000 });
+    }
+  }
+  // A document of the folder taken back to the very text its file holds has
+  // nothing unsaved in it: undoing an edit, or a whole Replace all, clears it.
+  let cleaned = false;
+  for (const m of reel) {
+    if (!m.dirty || !m.d || !m.base || !restored.has(m.name)) continue;
+    if (TD.serializeExport(liveMemberDoc(m)) === m.base.opened) { m.dirty = false; cleaned = true; }
+  }
+  if (cleaned) { dirty = reel.some((m) => m.dirty); updateDirty(); markDocList(); }
+  if (pages.length > 1 || (marker && pages.length !== 1)) afterTextChange();
   lastSnapPage = -1;
 }
 function undo() { stepHistory(undoStack, redoStack); }
 function redo() { stepHistory(redoStack, undoStack); }
-function clearHistory() { undoStack = []; redoStack = []; lastSnapPage = -1; }
+/**
+ * Whether a Ctrl+Z (or Ctrl+Y) may go on into a folder replace: asked where
+ * none of its documents is on screen to be seen changing (`seen`: a page of
+ * the step on the page; else a document of it live on the reel), or a
+ * document of it has been written since — the same question ↶ Undo replace in
+ * folder asks. True where the step goes ahead.
+ */
+function askFolderStep(id, dir, seen) {
+  const rec = replaceJournal.find((x) => x.id === id);
+  if (!rec) return true; // nothing held for it: the step's pages alone
+  const written = rec.docs.some((x) => x.writtenText != null || x.savedOther);
+  const onScreen = seen || rec.docs.some((x) => reel.some((m) => m.name === x.name && !m.shed && (!m.d || !x.d || m.d === x.d)));
+  if (onScreen && !written) return true;
+  const n = rec.docs.length;
+  const docs = `${n} document${n === 1 ? "" : "s"}`;
+  const what = `replacing “${rec.q}”${rec.withText ? ` with “${rec.withText}”` : ""}`;
+  return confirm(dir === "undo"
+    ? `Ctrl+Z here takes back a Replace all across the folder: put back the ${docs} changed by ${what}? They become unsaved; Save writes them.${written ? " Some were saved since: Save writes their old text back." : ""} A document changed since the replace is left as it is.`
+    : `Ctrl+Y here does a Replace all across the folder again: ${what} in the ${docs} it changed? They become unsaved; Save writes them. A document changed since is left as it is.`);
+}
+// A document's own steps end with it; a folder replace's stays, one step of
+// the history wherever its documents have gone (revertFolderReplace).
+function clearHistory() {
+  undoStack = undoStack.filter((s) => s.folderReplace);
+  redoStack = redoStack.filter((s) => s.folderReplace);
+  lastSnapPage = -1;
+}
 pagesEl.addEventListener("beforeinput", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body) return;
@@ -3761,15 +4515,26 @@ pagesEl.addEventListener("beforeinput", (e) => {
 document.addEventListener("keydown", (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const k = e.key.toLowerCase();
+  if (k !== "z" && k !== "y") return;
+  // A field being typed in keeps its own undo: Ctrl+Z in the Replace-with box
+  // takes back the letter typed there, not a Replace all across the folder.
+  // The pages are the reader's — and so is a key pressed with nothing typed
+  // into focused (the page as a whole, a button, a checkbox just ticked).
+  const t = e.target;
+  const typed = "textarea, input:not([type]), input[type=text], input[type=search], input[type=number], input[type=email], input[type=url], input[type=tel], input[type=password]";
+  if (t && t.closest && (t.closest(typed) || (t.isContentEditable && !t.closest("#pages .page-body")))) return;
   if (k === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
-  else if (k === "y" || (k === "z" && e.shiftKey)) { e.preventDefault(); redo(); }
+  else { e.preventDefault(); redo(); }
 }, true);
-// What a closing tab would leave behind: an edited document unsaved, a
+// What a closing tab would leave behind: an edited document unsaved — the one
+// on screen, or any document of the folder edited and left (the store), a
 // flagged list never written to the case folder, LEAKS decisions not yet in
-// the workbook, or a real name the key binds still standing in the clear in
-// the document on screen. The middle two survive the close — they are
-// remembered here — but nothing downstream has them: PDF-Linker reads the
-// folder, and the folder has not been told.
+// the workbook, a name said to be faked that no save has written yet,
+// anywhere in the folder, a Master Keep removal the workbook refused, or a
+// real name the key binds still standing in the clear in the document on
+// screen. The decisions survive the close — they are remembered here — but
+// nothing downstream has them: PDF-Linker reads the folder, and the folder
+// has not been told.
 //
 // THE LAST ONE IS THE FILE ITSELF. A name the run left in the clear is a real
 // value sitting in a scrubbed export, and until someone decides it — fake it,
@@ -3784,10 +4549,14 @@ document.addEventListener("keydown", (e) => {
 // The browser's own dialog is all a page gets; which of the four it is, the
 // panels and the status bar say.
 window.addEventListener("beforeunload", (e) => {
-  if (!dirty && !valuesDirty() && !leaksDirty() && !standingInTheClear()) return;
+  if (!hasUnsaved() && !standingInTheClear()) return;
   e.preventDefault();
   e.returnValue = "";
 });
+/** Whether anything is owed to the files: a document unsaved anywhere in the folder, a decision not yet written. */
+function hasUnsaved() {
+  return dirty || anyUnsavedDocs() || valuesDirty() || leaksDirty() || masterPending.length > 0 || decidedOwed().names > 0;
+}
 
 /**
  * A real value typed into the plain text becomes a pseudonym span as soon as
@@ -3805,11 +4574,15 @@ window.addEventListener("beforeunload", (e) => {
  * built from (textdoc.typedReals).
  */
 const convertTypedRealsSoon = debounce(convertTypedReals, 250);
-/** How many it marked; `quiet` leaves the toast and the re-read to the caller (a replace). */
-function convertTypedReals(body, { quiet = false } = {}) {
+/**
+ * How many it marked; `quiet` leaves the toast and the re-read to the caller
+ * (a replace). `caret: false` marks the name the caret is in too: the page is
+ * being set aside (stashReel), and nothing more will be typed onto that name.
+ */
+function convertTypedReals(body, { quiet = false, caret = true } = {}) {
   if (!fwd || !fwd.rx || !body.isConnected) return 0;
   body.normalize();
-  const sel = document.getSelection();
+  const sel = caret ? document.getSelection() : null;
   const caretNode = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
   const caretOff = sel && sel.rangeCount ? sel.getRangeAt(0).startOffset : -1;
   const segs = plainSegments(body).map((seg) => ({ node: seg.node, text: maskKept(seg.text) }));
@@ -3875,15 +4648,189 @@ function plainSegments(body) {
 // review that changed one line of one of them. A save with nothing edited at
 // all still writes the document being read, which is what Ctrl+S has always
 // meant for a document on its own.
-/** Writes the document (and what the case folder is owed); false where it did not. */
-async function saveDocument() {
-  if (!doc) return false;
+//
+// EVERY DOCUMENT OF THE FOLDER, AND EVERY DECISION, IN ONE SAVE. With a case
+// folder open in full, Save writes every document of it that is owed: the ones
+// on screen that were edited, every one in the store (edited and left, or
+// changed by a folder-wide Replace all), and every one where a name said to be
+// faked still stands unfaked, opened or not — asked first about any never
+// opened this session. The documents off the screen go through the same
+// per-page pass as the ones on it (savePage), on pages built for them where a
+// real name stands (textdoc.pageScan says which). Then the decision files:
+// New Real Values.txt, LEAKS.xlsx, and a Master Keep removal still owed.
+//
+// Nothing is written until every document has passed the standing assertion;
+// in folder mode each is then written in place through its own handle — no
+// picker, no download — and only where the disk still reads the text the edits
+// started from: a file PDF-Linker or another window has written since is not
+// written over, and stays unsaved, named. One that cannot be written is named
+// and the others are written. A save never clears an edit made while it ran.
+/**
+ * Writes what the files are owed; false where anything attempted was not
+ * written. `offscreen: false` is the walks' save on the way out of a document:
+ * the reel and the decision files, nothing off the screen — but written the
+ * folder's way all the same (in place, after the content check, never a picker
+ * or a download), since what it writes is one of the folder's documents.
+ */
+async function saveDocument({ offscreen = true } = {}) {
+  const inFolder = folderOpen();
+  if (!doc && !(inFolder && offscreen && unsavedDocs.size)) return false;
+  if (refuseWhileBusy()) return false;
+  if (opening) { toast("Wait for the document to open."); return false; }
+  // Before anything awaits: the folder's grant, asked while the click or the
+  // key still counts as one (there is no prompt where it is granted already),
+  // and each member's count of edits, so one made while this runs stays unsaved.
+  let grant;
+  try { grant = inFolder && dirHandle.requestPermission ? dirHandle.requestPermission({ mode: "readwrite" }).catch(() => "denied") : Promise.resolve("granted"); }
+  catch { grant = Promise.resolve("denied"); }
+  const seqAt = new Map(reel.map((m) => [m, m.editSeq || 0]));
+  saving = true;
+  saveNote = "";
+  updateDirty();
+  try {
+    return await saveNow({ inFolder, offscreen, grant, seqAt });
+  } finally {
+    saving = false;
+    savePass = null;
+    saveNote = "";
+    clearShadow();
+    // A member the forward pass changed and the save did not then write (the
+    // assertion, the grant, Esc, a conflict, a file that would not take it)
+    // has pages saying what its file does not: unsaved, so the status bar,
+    // the closing prompt and the next save all know it. Left clean, its names
+    // stood as pseudonyms on the page, counted nowhere, while the file still
+    // carried them real — and the next save, finding nothing left to swap,
+    // passed it by.
+    if (saveTouched) {
+      for (const m of saveTouched.touched) if (m && reel.includes(m) && !saveTouched.wrote.has(m)) m.dirty = true;
+      saveTouched = null;
+      dirty = reel.some((m) => m.dirty);
+      markDocList();
+    }
+    updateDirty();
+  }
+}
+
+/**
+ * One page through the save: the decided names standing in its clear written
+ * as their pseudonyms, the undecided ones left and named. `rebuild(text,
+ * spots)` builds the page again from the forwarded text, with its spot keeps
+ * moved to where the pass put them (textdoc.spotsAfterSwaps — counted before
+ * the pass, a keep after a faked occurrence would point past the end). The
+ * page may be on screen or built off it. → { text, swaps, left, stuck, scan,
+ * pageSpots }: the text to write, the names written, the undecided names
+ * standing ({ real, ranges }), the decided ones the pass could not reach, the
+ * text the standing assertion reads, and the page's spots after the pass
+ * (null where it made no swap).
+ */
+function savePage(body, i, rebuild) {
+  let { text, held, pns } = TD.serializeHeld(body);
+  let standing = standingSpans(text, held, pns);
+  let left = standing.filter((h) => !isSettled(h.real));
+  let swaps = 0, pageSpots = null;
+  if (fwd && fwd.rx) {
+    const fw = forwardText(text, held, pns, left.flatMap((h) => h.ranges));
+    if (fw.swaps) {
+      swaps = fw.swaps;
+      pageSpots = TD.spotsAfterSwaps(i, text, held, fw.places, fw.text);
+      rebuild(fw.text, pageSpots);
+      ({ text, held, pns } = TD.serializeHeld(body)); // the rebuilt page, its spots and fakes found again
+      standing = standingSpans(text, held, pns); // …and the names left, where they now stand
+      left = standing.filter((h) => !isSettled(h.real));
+    }
+  }
+  const stuck = standing.filter((h) => isSettled(h.real)).map((h) => h.real);
+  // The undecided names are in the file because the save left them there, as
+  // it leaves a kept one: the assertion reads past them too — and past the
+  // run's fakes and the cited decisions' names, read as the page reads them,
+  // which are what the forward pass left alone.
+  const scan = TD.blankRanges(text, held.concat(pns, diskReading(text, held, pns).cited, left.flatMap((h) => h.ranges)));
+  return { text, swaps, left, stuck, scan, pageSpots };
+}
+
+/**
+ * A document off the screen made ready to write: from the store, or read off
+ * its file for the names said to be faked. Page by page — a page where no real
+ * stands (textdoc.pageScan) is written as it is, and only the rest are built
+ * off the screen and put through savePage. → { d, entry, seq, parsed, base,
+ * spots, scan, swaps, waiting, stuck, before, text }, or null where `pass`
+ * was stopped.
+ */
+async function prepareOffscreenSave(t, pass) {
+  const { d, entry } = t;
+  let parsed, base, built, docSpots;
+  if (entry) {
+    parsed = TD.cloneDoc(entry.doc);
+    base = entry.base;
+    built = entry.built || [];
+    docSpots = TD.normalizeSpots(entry.spots);
+  } else {
+    const r = await readDoc(d);
+    parsed = readExport(r.text);
+    base = { text: r.text, stamp: r.stamp, opened: TD.serializeExport(parsed) };
+    built = parsed.pages.map((p) => p.lines.join("\n"));
+    docSpots = TD.normalizeSpots(lsGet(spotKeyOf(d.name), []));
+  }
+  const before = TD.serializeExport(parsed);
+  const scan = [];
+  let swaps = 0;
+  const waiting = [], stuck = [];
+  let clock = await idleClock();
+  for (let i = 0; i < parsed.pages.length; i++) {
+    if (pass.stop) return null;
+    const raw = parsed.pages[i].lines.join("\n");
+    const ps = TD.pageScan(raw, { rev, reals, spots: TD.spotsOnPage(docSpots, i), mask: maskKept });
+    // A page an edit changed goes through the page too, whatever the scan says.
+    const edited = !!entry && built[i] != null && built[i] !== raw;
+    if (!ps.needs && !edited) { scan.push(ps.scan); continue; }
+    batchEdit = true;
+    try {
+      const body = shadowPage(parsed.pages, i, docSpots, built[i]);
+      const r = savePage(body, i, (text, s) => buildBody(body, text, i, s));
+      swaps += r.swaps;
+      if (r.pageSpots) docSpots = docSpots.filter((x) => x.page !== i).concat(r.pageSpots);
+      parsed.pages[i].lines = r.text.split("\n");
+      scan.push(r.scan);
+      for (const h of r.left) waiting.push(h.real);
+      for (const v of r.stuck) stuck.push(v);
+    } finally { batchEdit = false; clearShadow(); }
+    if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
+  }
+  return { d, entry, seq: entry ? entry.seq : null, parsed, base, spots: docSpots, scan, swaps, waiting, stuck, before, text: TD.serializeExport(parsed) };
+}
+
+/** Write text into a file of the folder, in place: no picker and no download, whatever goes wrong. → { ok, why } */
+async function writeInPlace(handle, text) {
+  let w = null;
+  try {
+    w = await handle.createWritable();
+    await w.write(new Blob([text], { type: "text/plain" }));
+    await w.close();
+    return { ok: true };
+  } catch (e) {
+    try { if (w) await w.abort(); } catch { /* gone already */ }
+    return { ok: false, why: (e && e.name ? e.name + ": " : "") + ((e && e.message) || String(e)) };
+  }
+}
+/** Whether a document's file still reads the text its edits started from: "ok", "changed", or "gone". */
+async function diskStill(d, base) {
+  if (!base || typeof base.text !== "string") return "ok";
+  try { return (await (await d.handle.getFile()).text()) === base.text ? "ok" : "changed"; }
+  catch { return "gone"; }
+}
+
+async function saveNow({ inFolder, offscreen, grant, seqAt }) {
+  const keyAt = { rev, fwd, reals };
+  // The names said to be faked reach a member the reel has let go of too: it
+  // is built back, so the pass over the pages on screen covers it.
+  if (doc && (settled.size || sheetFakes.size) && reel.some((m) => m.shed)) reelAllLive();
   let forwarded = 0;
   // Each page as it will be written, and the same text with its spot keeps
   // blanked — what the standing assertion below is allowed to look at.
   const scan = [];
   // The members the forward pass changed, on top of the ones already edited.
   const touched = new Set();
+  saveTouched = { touched, wrote: new Set() };
   // The names left standing because nobody has decided on them (standingSpans):
   // by member, for the sweep, and all together, for the warning.
   const waitingIn = new Set();
@@ -3893,51 +4840,90 @@ async function saveDocument() {
   // reach used to stay orange, out of the walk, save after save, with nothing
   // said. Now it is named.
   const stuck = [];
-  for (const body of pageBodies()) {
-    const i = pageIndexOf(body);
-    let { text, held, pns } = TD.serializeHeld(body);
-    let standing = standingSpans(text, held, pns);
-    let left = standing.filter((h) => !isSettled(h.real));
-    if (fwd && fwd.rx) {
-      const fw = forwardText(text, held, pns, left.flatMap((h) => h.ranges));
-      if (fw.swaps) {
+  // The documents a folder replace is holding, each member's text as it stood
+  // before the pass: what a save of one tells the replace's journal.
+  const journalled = new Set(replaceJournal.filter((r) => r.state === "done").flatMap((r) => r.docs.map((x) => x.name)));
+  const textBefore = new Map();
+  // The spot keeps the forward pass moves are held in hand until the member is
+  // written, and stored only then (`m.spotsUnstored` — a save that writes
+  // nothing leaves it set, for the save that does). Stored at once, a save
+  // that then wrote nothing (the assertion, the grant, Esc, the content check)
+  // left the store counting occurrences the file on disk does not have yet,
+  // and a keep made at the third "Corwin Ashdale" moved to the first once the
+  // edits went — so the next save kept the one said to be faked, and faked
+  // the one kept.
+  if (doc) {
+    for (const m of reel) if (journalled.has(m.name)) textBefore.set(m, TD.serializeExport(liveMemberDoc(m)));
+    for (const body of pageBodies()) {
+      const i = pageIndexOf(body);
+      const m = reelMemberOf(i);
+      const r = savePage(body, i, (text, s) => {
         snapshot(body, true);
-        forwarded += fw.swaps;
-        buildBody(body, fw.text, i);
-        ({ text, held, pns } = TD.serializeHeld(body)); // the rebuilt page, its spots and fakes found again
-        standing = standingSpans(text, held, pns); // …and the names left, where they now stand
-        left = standing.filter((h) => !isSettled(h.real));
-        touched.add(reelMemberOf(i));
+        setSpotsListOf(i, spotsListOf(i).filter((x) => x.page !== i).concat(s));
+        buildBody(body, text, i, spotsListOf(i));
+        if (m) m.spotsUnstored = true;
+      });
+      if (r.swaps) { forwarded += r.swaps; touched.add(m); }
+      for (const v of r.stuck) stuck.push(v);
+      if (r.left.length) {
+        waitingIn.add(m);
+        for (const h of r.left) waiting.push(h.real);
+      }
+      doc.pages[i].lines = r.text.split("\n");
+      scan[i] = r.scan.split("\n");
+    }
+    // A page handed to PDF-Linker as typed in by hand (✎ Use my text) carries
+    // its text's sum, and PDF-Linker applies it only where the file reads that
+    // way: where the reader put margin numbers back on the page (readExport),
+    // the file is written with them, or the two would never agree.
+    if (textFixed.length) {
+      const sources = docPageSources();
+      doc.pages.forEach((p, i) => {
+        if (!p.restored || !p.restored.length) return;
+        const e = pageEntryAt(i, sources);
+        if (e && textFixed.some((x) => TD.sameNoOcr(x, e))) touched.add(reelMemberOf(i));
+      });
+    }
+  }
+  let write = doc ? reel.filter((m) => m.dirty || touched.has(m)) : [];
+  // OFF THE SCREEN: every document in the store, and every document where a
+  // name said to be faked still stands — the folder read fresh for those first.
+  let off = [];
+  // …and whether the folder could be read for those names at all: a reading
+  // that would not come fresh writes them nowhere off the screen, which the
+  // save says rather than passing for one that found none.
+  let elsewhereUnread = false;
+  if (inFolder && offscreen) {
+    for (const e of unsavedDocs.values()) if (e.d && !onReel(e.d)) off.push({ d: e.d, entry: e, names: [] });
+    if (settled.size || sheetFakes.size) {
+      if (sweep.running || sweepStale()) {
+        saveNote = `Saving… reading ${folderName} for the names you said to fake`;
+        updateDirty();
+        await sweepNow();
+      }
+      elsewhereUnread = !!dirHandle && !!reals && (sweep.running || sweepStale());
+      for (const x of settledElsewhere({ fresh: true })) {
+        const t = off.find((y) => y.d === x.d);
+        if (t) t.names = x.names;
+        else off.push({ d: x.d, entry: null, names: x.names });
       }
     }
-    for (const h of standing) if (isSettled(h.real)) stuck.push(h.real);
-    if (left.length) {
-      waitingIn.add(reelMemberOf(i));
-      for (const h of left) waiting.push(h.real);
+    // A document never opened or hung this session, and named by no confirm
+    // before, is not written without the operator being told which and why.
+    const unseen = off.filter((t) => !t.entry && !seenDocs.has(t.d.name) && !confirmedDocs.has(t.d.name));
+    if (unseen.length) {
+      const lines = unseen.slice(0, 6).map((t) => `• ${TD.docLabel(t.d.name)} — ${t.names.map((v) => `“${v}”`).join(", ")}`);
+      if (unseen.length > 6) lines.push(`• …and ${unseen.length - 6} more`);
+      const n = unseen.length;
+      if (confirm(`Save also writes ${n} document${n === 1 ? "" : "s"} you have not opened, where names you said to fake still stand unfaked:\n${lines.join("\n")}\nEach name is written as its pseudonym, as saving an open document writes it (margin numbers the OCR missed go in with it).\n\nOK — write them too.\nCancel — save the rest; these stay to write.`)) {
+        for (const t of unseen) confirmedDocs.add(t.d.name);
+      } else off = off.filter((t) => !unseen.includes(t));
     }
-    doc.pages[i].lines = text.split("\n");
-    // The undecided names are in the file because the save left them there,
-    // as it leaves a kept one: the assertion reads past them too — and past
-    // the run's fakes and the cited decisions' names, read as the page reads
-    // them, which are what the forward pass left alone.
-    scan[i] = TD.blankRanges(text, held.concat(pns, diskReading(text, held, pns).cited, left.flatMap((h) => h.ranges))).split("\n");
+    off.sort((a, b) => folderDocs.indexOf(a.d) - folderDocs.indexOf(b.d));
   }
-  // A page handed to PDF-Linker as typed in by hand (✎ Use my text) carries
-  // its text's sum, and PDF-Linker applies it only where the file reads that
-  // way: where the reader put margin numbers back on the page (readExport),
-  // the file is written with them, or the two would never agree.
-  if (textFixed.length) {
-    const sources = docPageSources();
-    doc.pages.forEach((p, i) => {
-      if (!p.restored || !p.restored.length) return;
-      const e = pageEntryAt(i, sources);
-      if (e && textFixed.some((x) => TD.sameNoOcr(x, e))) touched.add(reelMemberOf(i));
-    });
-  }
-  let write = reel.filter((m) => m.dirty || touched.has(m));
   // The pages marked ⊘ Did not OCR follow the text that is about to be
   // written: a page in a file this save writes reads what the file will say.
-  {
+  if (doc) {
     const writing = new Set(write);
     const all = doc.pages.map((_, i) => i);
     syncNoOcr(all.filter((i) => writing.has(reelMemberOf(i))), { drop: true });
@@ -3947,7 +4933,39 @@ async function saveDocument() {
   // a keep or a worksheet row is waiting, write those and leave every file's
   // bytes and timestamp alone; only an otherwise-empty Ctrl+S falls through to
   // rewriting the document being read, which is what it has always meant.
-  if (!write.length && !pendingWrites().length && reelCurrent()) write = [reelCurrent()];
+  if (doc && !write.length && !off.length && !pendingWrites().length && reelCurrent()) write = [reelCurrent()];
+  // The documents off the screen, made ready one at a time; Esc stops it with
+  // nothing written.
+  const ready2 = [];
+  const unreadable = [];
+  if (off.length) {
+    const pass = { stop: false };
+    savePass = pass;
+    for (let k = 0; k < off.length; k++) {
+      const t = off[k];
+      saveNote = `Saving… ${TD.docLabel(t.d.name)} (${k + 1} of ${off.length}) — Esc stops`;
+      updateDirty();
+      let r = null;
+      try { r = await prepareOffscreenSave(t, pass); }
+      catch (err) { console.warn(err); unreadable.push(t.d.name); continue; }
+      if (pass.stop) { toast("Save stopped — nothing was written.", { error: true }); return false; }
+      if (!r) continue;
+      // A document only the names said to be faked brought in is written only
+      // where the pass changed something in it.
+      if (!r.entry && !r.swaps) continue;
+      ready2.push(r);
+      forwarded += r.swaps;
+      for (const v of r.stuck) stuck.push(v);
+      for (const v of r.waiting) waiting.push(`${v} (${TD.docLabel(r.d.name)})`);
+    }
+    savePass = null;
+  }
+  // The key moved while the folder was being read: what was made ready was made
+  // under the other one.
+  if (rev !== keyAt.rev || fwd !== keyAt.fwd || reals !== keyAt.reals) {
+    toast("The key changed while the save was running — nothing was written. Save again.", { error: true, ms: 9000 });
+    return false;
+  }
   // The standing assertion, per file. Nothing above should let a DECIDED real
   // value through, and if something did the save must not — and it must not
   // write any of the others on the strength of this one being clean, so every
@@ -3956,28 +4974,80 @@ async function saveDocument() {
   // operator put it there, so the assertion reads the export with those places
   // blanked. So may a name nobody has decided on yet, which the save left
   // where it found it and the warning below names.
+  const many = write.length + ready2.length > 1;
   if (reals) {
     for (const m of write) {
       const held = TD.serializeExport(memberDoc(m, (p, i) => Object.assign({}, p, { lines: scan[i] || p.lines })));
       // …a name wrapped down a column included, its cells read off the file
       // as it is about to be written (the blanks above are the same length).
-      const plain = TD.serializeExport(memberDoc(m));
-      const left = PK.findReals(reals, TD.blankRanges(maskKept(held, plain), TD.citedNameSpans(held)), { layout: plain });
+      const left = TD.realsLeftInExport(TD.serializeExport(memberDoc(m)), held, { reals, mask: maskKept });
       if (left.length) {
-        toast(`Not saved: ${m.name} still carries a real name the key binds — ` + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again.", { error: true });
+        toast(`Not saved: ${m.name} still carries a real name the key binds — ` + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + ". Delete or retype it and save again." + (many ? " Nothing was written." : ""), { error: true, ms: 12000 });
+        return false;
+      }
+    }
+    for (const r of ready2) {
+      const held = TD.serializeExport({ newline: r.parsed.newline, trailingNewline: r.parsed.trailingNewline, pages: r.parsed.pages.map((p, k) => ({ ...p, lines: r.scan[k].split("\n") })) });
+      const left = TD.realsLeftInExport(r.text, held, { reals, mask: maskKept });
+      if (left.length) {
+        toast(`Not saved: ${r.d.name} still carries a real name the key binds — ` + left.slice(0, 4).map((w) => w.real).join(", ") + (left.length > 4 ? "…" : "") + " (not on screen — open it from the Documents list). Delete or retype it and save again. Nothing was written.", { error: true, ms: 12000 });
         return false;
       }
     }
   }
+  if (inFolder && (write.length || ready2.length) && (await grant) !== "granted") {
+    toast(`Not saved: the browser did not let the reader write into ${folderName}. Nothing was written; your edits are kept.`, { error: true, ms: 9000 });
+    return false;
+  }
   const wrote = [];
-  for (const m of write) {
-    const ok = await writeText(TD.serializeExport(memberDoc(m)), m.name, m.handle, { adopt: reel.length === 1 });
-    if (!ok) {
-      if (wrote.length) toast(`Saved ${wrote.join(", ")} — ${m.name} was not written.`, { error: true });
-      return false;
+  const conflicts = [], failed = [];
+  const wroteMembers = [];
+  let wroteOff = 0;
+  // The journal of a folder replace learns what a save wrote of one of its
+  // documents, so a Ctrl+Z after the save finds it (revertFolderReplace): the
+  // text the replace left (or the text a save of it wrote before), written —
+  // or other text, edited since, which an undo must leave as it is and name.
+  const noteWritten = (name, before, written, spotsNow) => {
+    for (const rec of replaceJournal) {
+      if (rec.state !== "done") continue;
+      const x = rec.docs.find((y) => y.name === name);
+      if (!x) continue;
+      x.dropped = false;
+      if (before === x.afterText || (x.writtenText != null && before === x.writtenText)) {
+        x.writtenText = written; x.writtenSpots = spotsNow; x.savedOther = false;
+      } else { x.writtenText = null; x.writtenSpots = null; x.savedOther = true; }
     }
-    m.dirty = false;
+  };
+  for (const m of write) {
+    const text = TD.serializeExport(memberDoc(m));
+    saveNote = `Saving… ${TD.docLabel(m.name)}`;
+    updateDirty();
+    if (inFolder && m.d) {
+      const c = await diskStill(m.d, m.base);
+      if (c !== "ok") {
+        m.conflict = c === "changed";
+        (c === "changed" ? conflicts : failed).push(c === "changed" ? m.name : { name: m.name, why: "no longer in the folder" });
+        continue;
+      }
+      const w = await writeInPlace(m.d.handle, text);
+      if (!w.ok) { failed.push({ name: m.name, why: w.why }); continue; }
+    } else {
+      const ok = await writeText(text, m.name, m.handle, { adopt: reel.length === 1 });
+      if (!ok) {
+        if (wrote.length) toast(`Saved ${wrote.join(", ")} — ${m.name} was not written.`, { error: true });
+        return false;
+      }
+    }
+    // Clean only where nothing was typed into it while the save ran.
+    if ((m.editSeq || 0) === seqAt.get(m)) m.dirty = false;
+    m.conflict = false;
+    // Its spot keeps as the file now counts them, stored now that it does.
+    if (m.spotsUnstored) { persistMemberSpots(m); m.spotsUnstored = false; }
+    saveTouched.wrote.add(m);
+    m.base = { text, stamp: null, opened: text };
+    m.built = null;
     wrote.push(m.name);
+    wroteMembers.push(m);
     // What was written is what each page of it now is: a real name typed and
     // left standing went into the file with it, and is the review's from here
     // on, not the typing's (convertTypedReals).
@@ -3993,17 +5063,66 @@ async function saveDocument() {
         }
       }
     }
+    if (textBefore.has(m)) noteWritten(m.name, textBefore.get(m), text, memberSpotsRel(m));
     // The save wrote every DECIDED name standing in the clear in this one;
     // where that was all of them, the folder's answer for the document is that
     // it has none. Where undecided ones are left, its row stands — the walk
     // reads it past the settled names, which are the ones just written.
     if (!waitingIn.has(m)) sweep.rows = sweep.rows.filter((r) => r.doc.handle !== m.handle);
   }
-  setDirty(false);
+  for (const r of ready2) {
+    saveNote = `Saving… ${TD.docLabel(r.d.name)}`;
+    updateDirty();
+    const c = await diskStill(r.d, r.base);
+    if (c !== "ok") {
+      if (r.entry && c === "changed") r.entry.conflict = true;
+      (c === "changed" ? conflicts : failed).push(c === "changed" ? r.d.name : { name: r.d.name, why: "no longer in the folder" });
+      continue;
+    }
+    const w = await writeInPlace(r.d.handle, r.text);
+    if (!w.ok) { failed.push({ name: r.d.name, why: w.why }); continue; }
+    wrote.push(r.d.name);
+    wroteOff++;
+    const e = unsavedDocs.get(r.d.name);
+    if (e && e === r.entry && e.seq === r.seq) { unsavedDocs.delete(r.d.name); unsavedSeq++; }
+    // Its spot keeps under its own name, as pages of its own — where it has
+    // any, or had a list stored already.
+    if (r.swaps || r.spots.length || lsGet(spotKeyOf(r.d.name), null) != null) lsSet(spotKeyOf(r.d.name), r.spots);
+    noteWritten(r.d.name, r.before, r.text, r.spots.slice());
+    // Its page lists, as the file now reads.
+    if (flagsFor === valuesStoreKey()) {
+      const pdf = pdfForName(r.d.name) || "";
+      const items = [], sums = [];
+      for (const p of r.parsed.pages) {
+        const page = PS.pdfPageOf(p);
+        if (p.header == null || !page) continue;
+        const entry = { doc: r.d.name, pdf, page };
+        items.push({ entry, page: p });
+        sums.push({ entry, lines: p.lines });
+      }
+      const next = TD.pageListsAfter({ noOcr, ocrAgain, textFixed }, items, { drop: true });
+      const fixed = TD.fixedSumsFor(next.textFixed, sums);
+      if (next.noOcr !== noOcr || next.ocrAgain !== ocrAgain || fixed !== textFixed) {
+        noOcr = next.noOcr; ocrAgain = next.ocrAgain; textFixed = fixed;
+        persistValues();
+        renderFlags();
+      }
+    }
+    findShown.texts.delete(r.d.handle);
+    ready.delete(r.d.name);
+  }
+  saveNote = "";
+  dirty = reel.some((m) => m.dirty);
   // A transcribed page's line carries the page's text as it was just WRITTEN
   // (TD.pageTextSum), so PDF-Linker applies the text the operator saved and
-  // nothing older or newer.
-  refreshTextFixedSums();
+  // nothing older or newer — the pages of the documents written, and no others.
+  if (wroteMembers.length) refreshTextFixedSums(wroteMembers);
+  // Written off the screen: what the folder was read for is to be read again.
+  if (wroteOff) {
+    dropSweep();
+    caseFakes = { key: null, docs: null, set: null };
+  }
+  if (wrote.length) { findScanFor = null; findRows = []; scanFindFolder(); }
   // THE LIST GOES WITH IT. The flags and keeps are half of the same decision
   // the document carries — a value kept is a value this save left standing —
   // and a list still sitting in the browser is a run's worth of work the next
@@ -4012,10 +5131,19 @@ async function saveDocument() {
   // write it for, and the save says so rather than opening a picker nobody
   // asked for.
   let alsoList = "";
+  let filesOk = true;
+  let spentWarn = "";
   if (valuesDirty()) {
-    alsoList = await saveValuesFile({ quiet: true, folderOnly: true })
-      ? ` · ${TD.VALUES_FILE} written too (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()})`
-      : " · the flagged list is still unwritten — no case folder is open, so save it from the Flagged panel";
+    const ok = await saveValuesFile({ quiet: true, folderOnly: true });
+    filesOk = filesOk && !!ok;
+    // "spent": PDF-Linker had spent all the list still owed the file, and
+    // nothing was left to write.
+    alsoList = ok === "spent" ? ""
+      : ok ? ` · ${TD.VALUES_FILE} written too (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()})`
+        : " · the flagged list is still unwritten — no case folder is open, so save it from the Flagged panel";
+    // A keep PDF-Linker took out of the file that the master workbook does not
+    // hold is off the list, and the save says so where it is read.
+    if (valuesSpentNote) spentWarn = " · ⚠ " + valuesSpentNote;
   }
   // …and the worksheet, for the same reason: the rows answered while reading
   // this document are decisions about this document, and a decision left in
@@ -4024,12 +5152,28 @@ async function saveDocument() {
   // neither there is nobody to write it for, and the save says so.
   if (leaksDirty()) {
     const n = await saveLeaks({ quiet: true, folderOnly: true });
+    filesOk = filesOk && !!n;
     alsoList += n
       ? ` · ${leaks.name} written too (${n} decision${n === 1 ? "" : "s"})`
       : " · the LEAKS decisions are still unwritten — save them from the ⚠ Leaks bar";
   }
+  // …and a value taken off the Master Keep that the workbook would not let go
+  // of, where the workbook may be written now without asking.
+  if (masterPending.length && masterHandle && (await permissionOf(masterHandle, "readwrite")) === "granted") {
+    const w = await writeMasterWithdrawn(masterPending.slice());
+    if (w.ok) {
+      const n = masterPending.length;
+      masterPending = [];
+      alsoList += ` · the Master Keep removal written too (${n} value${n === 1 ? "" : "s"})`;
+      try { await readMaster(masterHandle, { quiet: true }); } catch (e) { console.warn(e); }
+    } else filesOk = false;
+  }
   if (forwarded) afterTextChange();
   updateDirty();
+  markDocList();
+  // After a save of names said to be faked, the folder is read again for any
+  // still standing, so the status bar can say.
+  if (wroteOff && (settled.size || sheetFakes.size)) sweepFolder();
   // THE WARNING. A save before the review is over is allowed — the edits and
   // the decisions taken so far are worth having on disk — but it must not pass
   // for a finished one: the names nobody has looked at are still real names in
@@ -4048,14 +5192,27 @@ async function saveDocument() {
       + stuckNames.slice(0, 4).join(", ") + (stuckNames.length > 4 ? "…" : "")
       + ". Retype or keep " + (stuck.length === 1 ? "it" : "them") + " by hand."
     : "";
-  toast((!wrote.length
-    ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : "Nothing to save.")
-    : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + wrote.join(", ") +
-      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList) + warn + stuckWarn,
-    { error: !!(warn || stuckWarn), ms: warn || stuckWarn ? 12000 : undefined });
-  return true;
+  const conflictWarn = conflicts.map((n) => ` · ⚠ ${TD.docLabel(n)} changed on disk after your edits (PDF-Linker or another window wrote it) — not written; still unsaved. Open it to see your version, or take the disk's.`).join("");
+  const failWarn = failed.map((f) => ` · ⚠ ${TD.docLabel(f.name)} could not be written (${f.why}) — still unsaved.`).join("")
+    + (unreadable.length ? ` · ⚠ ${nameList(unreadable.map((n) => TD.docLabel(n)))} could not be read, so ${unreadable.length === 1 ? "it was" : "they were"} not written.` : "");
+  const combined = wrote.length && folderDocs.some((d) => d.combined) ? ` · ${TD.COMBINED_FILE} is behind the exports until PDF-Linker's next run (or Apply Fixes).` : "";
+  const unreadWarn = elsewhereUnread ? ` · ⚠ ${folderName} could not be read through for the names you said to fake, so none was written off the screen — save again.` : "";
+  const red = warn || stuckWarn || conflictWarn || failWarn || unreadWarn || spentWarn;
+  // Named in the folder's order, six at most: a save of forty documents is not
+  // a toast of forty names. And what went wrong first, where it is read — a
+  // warning after a long list of names was a warning nobody saw.
+  const order = inFolderOrder(wrote);
+  const shown = wrote.length > 1 ? nameList(order.map((n) => TD.docLabel(n))) : order.join(", ");
+  const said = (!wrote.length
+    ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : conflicts.length || failed.length ? "Nothing was written" : "Nothing to save.")
+    : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + shown +
+      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList)
+    + combined;
+  const reds = (conflictWarn + failWarn + unreadWarn + warn + stuckWarn + spentWarn).replace(/^ · /, "");
+  toast(red ? reds + " — " + said : said, { error: !!red, ms: red ? 12000 : wrote.length > 1 ? 6000 : undefined });
+  return !conflicts.length && !failed.length && !unreadable.length && filesOk;
 }
-saveBtn.addEventListener("click", saveDocument);
+saveBtn.addEventListener("click", () => saveDocument());
 document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "s") { e.preventDefault(); saveDocument(); }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); flagSelection(); }
@@ -4084,7 +5241,7 @@ function memberDoc(m, map) {
  * Values.txt the document's handle: the next Ctrl+S wrote the export over the
  * list.
  */
-async function writeText(text, name, handle, { adopt = false } = {}) {
+async function writeText(text, name, handle, { adopt = false, picked = null } = {}) {
   const blob = new Blob([text], { type: "text/plain" });
   if (handle && handle.createWritable) {
     try {
@@ -4108,6 +5265,7 @@ async function writeText(text, name, handle, { adopt = false } = {}) {
       await w.write(blob);
       await w.close();
       if (adopt && handle == null && h && h.name === name) fileHandle = h;
+      if (picked) picked(h); // …and where it went, for a caller that must know (saveValuesFile)
       return true;
     } catch (e) {
       if (e && e.name === "AbortError") return false;
@@ -5012,24 +6170,27 @@ function matchCase() { return $("fb-case").checked; }
 function findMatcherFor(q) { return PK.buildFindMatcher([String(q || "").trim()], { caseSensitive: matchCase() }); }
 
 /**
- * Another document of the folder as the screen would show it: the file as it
- * is with Show fakes on, its fakes turned back to the real names with it off.
- * The turning back is the page's own (`translate` is the run `buildBody` lays
- * out) and costs a pass of the key over the whole file, so what it gives is
- * kept per file while the file, the key and the folder stay as they were: a
- * query asks every document again at each word typed.
+ * Another document of the folder as the screen would show it, PAGE BY PAGE:
+ * each page's text as its page body reads (textdoc.shownPages — the fakes as
+ * the real names with Show fakes off, as they are with it on, the margin
+ * numbers blanked), the way Find and Replace read a page on screen. Counted
+ * that way, the folder's count is what Replace all replaces plus what it
+ * leaves standing: a page header or a DOCUMENT banner is never a hit, nor a
+ * phrase across a page break, nor a margin number. A document with unsaved
+ * edits is read from the store. The turning back costs a pass of the key over
+ * the whole file, so what it gives is kept per file while the file, the key,
+ * the face and the folder stay as they were: a query asks every document
+ * again at each word typed.
  */
-let findShown = { rev: null, docs: null, texts: new Map() };
-async function findTextOf(d) {
-  const file = await d.handle.getFile();
-  if (settings.showFakes || !rev) return file.text();
-  if (findShown.rev !== rev || findShown.docs !== folderDocs) findShown = { rev, docs: folderDocs, texts: new Map() };
-  const stamp = fileKeyOf(file);
+let findShown = { rev: null, docs: null, fakes: null, texts: new Map() };
+async function findPagesOf(d) {
+  const r = await readDoc(d);
+  if (findShown.rev !== rev || findShown.docs !== folderDocs || findShown.fakes !== settings.showFakes) findShown = { rev, docs: folderDocs, fakes: settings.showFakes, texts: new Map() };
   const had = findShown.texts.get(d.handle);
-  if (had && had.stamp === stamp) return had.text;
-  const text = PK.translate(rev, await file.text()).text;
-  findShown.texts.set(d.handle, { stamp, text });
-  return text;
+  if (had && had.stamp === r.stamp) return had.pages;
+  const pages = TD.shownPages(r.entry ? r.entry.doc : readExport(r.text), { rev, showFakes: settings.showFakes });
+  findShown.texts.set(d.handle, { stamp: r.stamp, pages });
+  return pages;
 }
 
 /** The open document's hits, read off the page the way the marks are. */
@@ -5079,8 +6240,12 @@ function clearFindMarks() {
  * the query, the folder, the key or Show fakes moves.
  */
 function findScanStale() {
-  return !findScanFor || findScanFor.q !== findQuery || findScanFor.docs !== folderDocs || findScanFor.key !== key || findScanFor.cs !== matchCase() || findScanFor.fakes !== settings.showFakes;
+  return !findScanFor || findScanFor.q !== findQuery || findScanFor.docs !== folderDocs || findScanFor.key !== key || findScanFor.cs !== matchCase() || findScanFor.fakes !== settings.showFakes
+    // …and the documents with unsaved edits, which it reads from the store.
+    || findScanFor.unsaved !== unsavedSeq;
 }
+let findScanWaiters = []; // what is waiting on the folder's count being in (awaitFolderScan)
+let findScanDone = null;  // the question whose count `findRows` holds: a reading that broke off holds none
 async function scanFindFolder() {
   if (!dirHandle || !findQuery || findScanning || !findScanStale()) return;
   findScanning = true;
@@ -5088,7 +6253,7 @@ async function scanFindFolder() {
   // answer to walk by while the new ones are read: they name documents with
   // nothing on screen that matches.
   if (findScanFor && (findScanFor.key !== key || findScanFor.fakes !== settings.showFakes)) findRows = [];
-  const mine = { q: findQuery, docs: folderDocs, key, cs: matchCase(), fakes: settings.showFakes };
+  const mine = { q: findQuery, docs: folderDocs, key, cs: matchCase(), fakes: settings.showFakes, unsaved: unsavedSeq };
   findScanFor = mine;
   const rows = [];
   const rx = findMatcherFor(findQuery);
@@ -5104,8 +6269,9 @@ async function scanFindFolder() {
         // into the document it had just left. The row is filtered out of the
         // "rest" instead, at the moment it is asked for (findRest).
         try {
-          const text = await findTextOf(d);
-          const n = rx ? countMatches(rx, text) : 0;
+          // Page by page, as the screen reads a page: never across a break.
+          let n = 0;
+          if (rx) for (const p of await findPagesOf(d)) n += countMatches(rx, p);
           if (n) rows.push({ doc: d, count: n });
         } catch { /* unreadable: it is not a document this search can answer */ }
         if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
@@ -5117,15 +6283,54 @@ async function scanFindFolder() {
   // held the folder, so it starts now.
   if (findScanFor !== mine || findScanStale()) { scanFindFolder(); return; }
   findRows = rows;
+  findScanDone = mine;
   renderFindBar();
+  const w = findScanWaiters;
+  findScanWaiters = [];
+  for (const res of w) res();
   // A find that opened on a document with nothing in it waits for this answer
   // before saying there is nothing anywhere (findJump), and goes on once it is in.
   if (findJump && !findHits.length && findRest().length) { findJump = false; stepFind(1); }
 }
+/**
+ * The folder's count for the question as it stands, in: a reading running is
+ * waited for however long a big folder takes, a stale one started. Gives up
+ * where `pass` is stopped, `moved` says the question moved, or the question
+ * goes (no folder, no query) — and where a reading breaks off three times
+ * running without a count. True only where the count is in.
+ */
+async function awaitFolderScan(pass, moved = null) {
+  let broke = 0;
+  for (;;) {
+    if (!dirHandle || !findQuery || (pass && pass.stop) || (moved && moved())) return false;
+    const fresh = !findScanStale();
+    if (!findScanning && fresh && findScanDone === findScanFor) return true;
+    if (!findScanning) {
+      // Stale, or read under this question and broken off before its count
+      // was in: read again from the start.
+      if (fresh) { if (++broke > 3) return false; findScanFor = null; }
+      scanFindFolder();
+    }
+    await new Promise((res) => {
+      findScanWaiters.push(res);
+      // Woken whatever happens: a stop, or a reading that went stale and gave up.
+      setTimeout(res, 250);
+    });
+  }
+}
 
-/** The documents of the folder that carry it — the open one excepted. */
+/**
+ * The documents of the folder that carry it, off the screen: the documents on
+ * the reel are counted on the page (a row for them too counted them twice, and
+ * a walk past the last hit on screen would open one already hung), and the
+ * combined file is apart (findCombined).
+ */
 function findRest() {
-  return roundFromHere(findRows.filter((r) => r.doc.handle !== fileHandle));
+  return roundFromHere(TD.splitFolderRows(findRows, onReel).rest);
+}
+/** The combined file's count, when it has hits and is not the document on screen. */
+function findCombined() {
+  return TD.splitFolderRows(findRows, onReel).combined.reduce((t, r) => t + r.count, 0);
 }
 /** The bar: which hit of how many, where it stands, and what the folder holds. */
 function renderFindBar() {
@@ -5133,6 +6338,10 @@ function renderFindBar() {
   const n = findHits.length;
   const others = findRest();
   const rest = others.reduce((t, r) => t + r.count, 0);
+  const comb = findCombined();
+  // The combined file is every export over again, and PDF-Linker writes it
+  // from them: counted apart, and never replaced in.
+  const combNote = comb ? ` · ${TD.COMBINED_FILE}: ${comb}, left to PDF-Linker` : "";
   $("fb-count").textContent = !findQuery ? ""
     : n ? `${Math.min(Math.max(findStep, 0) + 1, n)} of ${n} here`
     : findScanning ? "reading the folder…"
@@ -5141,11 +6350,22 @@ function renderFindBar() {
   $("fb-where").textContent = h ? whereInText(h.range) : "";
   $("fb-rest").textContent = !findQuery ? ""
     : findScanning ? `· reading ${folderName || "the folder"}…`
-    : others.length ? `· ${rest} in ${others.length} other document${others.length === 1 ? "" : "s"}${n ? "" : ` — › opens ${TD.docLabel(others[0].doc.name)}`}`
-    : dirHandle ? "· nowhere else in the folder" : "";
+    : others.length ? `· ${rest} in ${others.length} other document${others.length === 1 ? "" : "s"}${n ? "" : ` — › opens ${TD.docLabel(others[0].doc.name)}`}` + combNote
+    : dirHandle ? "· nowhere else in the folder" + combNote : "";
   $("fb-prev").disabled = $("fb-next").disabled = !findQuery || (n < 2 && !others.length);
   $("fb-replace").disabled = !doc || !findQuery || (!n && !others.length);
-  $("fb-replace-all").disabled = !doc || !findQuery || !n;
+  // Replace all: hits here, or — with the case folder open in full — hits in
+  // its other documents, or a folder still being read for them.
+  const folderWide = folderOpen() && !isCombinedHead();
+  $("fb-replace-all").disabled = !folderPass && (!doc || !findQuery || !(n || (folderWide && (others.length || findScanning || findScanStale()))));
+  if (!folderPass) {
+    $("fb-replace-all").title = folderWide
+      ? "Replace every hit in the case folder: the pages on screen and every other export that has one, each left unsaved until you save (Ctrl+S writes them all). A hit inside a longer name the key fakes as one is left as it stands. Combined Text.txt is left to PDF-Linker. Match case decides whether “court” also replaces “Court”. Ctrl+Z, or ↶ Undo replace in folder, puts it all back. Without a case folder open, the pages on screen only."
+      : isCombinedHead()
+        ? "Replace every hit in Combined Text.txt on screen. A replace here stays in it — PDF-Linker writes it again from the exports; open an export to replace across the folder. Ctrl+Z puts it back."
+        : "Replace every hit on the pages on screen (no case folder is open in full, so the rest of the folder is not read). A hit inside a longer name the key fakes as one is left as it stands. Match case decides whether “court” also replaces “Court”. Ctrl+Z puts it all back.";
+  }
+  renderUndoFolder();
 }
 /**
  * Where a range stands, as a reader would say it: the page's own label and its
@@ -5243,6 +6463,8 @@ function showFindBar(on, { replace = false } = {}) {
   showReplaceRow(on && (replace || (was && replaceOpen())));
   setBarHeight();
   if (was !== !!on) relayout();
+  // Closing the bar stops a folder replace being prepared: nothing is changed.
+  if (!on && folderPass) folderPass.stop = true;
   if (!on) { findHits = []; findStep = -1; findJump = false; clearFindMarks(); return; }
   const input = $("fb-input");
   // Opened over a selection, that is what is being looked for.
@@ -5524,20 +6746,24 @@ document.addEventListener("keydown", (e) => {
 
 // ── Replace ──────────────────────────────────────────────────────────────────
 //
-// Find's second row. It edits what Find marks, and only on the pages that are
-// on screen — this document, and whatever the folder has hung under it, each
-// of which is saved to its own file. The other documents of the folder are
-// only COUNTED from disk; a replace there would be a write to a file nobody
-// has opened, under a key, with nothing on screen to check it by. › opens the
-// next one and Replace goes on in it.
+// Find's second row. It edits what Find marks. Replace works on the pages on
+// screen — this document, and whatever the folder has hung under it, each of
+// which is saved to its own file — and › opens the next document that has a
+// hit, the edits of the one left kept in the store of unsaved documents rather
+// than asked about. Replace all, with a case folder open in full, reaches
+// every export of it (below): the documents off the screen are replaced on
+// pages built for them by this same code and left unsaved, in the store. The
+// bar writes no file; Save writes them all. (It used to replace on screen
+// only and leave the folder alone, by design; the owner reversed that — see
+// "Unsaved documents and the folder save" in the design notes.)
 //
 // A REPLACE IS TYPING. The words go into the page as plain text, where a real
 // name the key binds is marked as a pseudonym exactly as a typed one is (the
 // file carries the fake), the edit is one step of the undo history (a Replace
-// all is one step however many pages it touched), and the document is dirty
-// until it is saved. It works on a protected document without lifting the
-// protection: the protection is against a stray keystroke in the page, and a
-// replace is not one.
+// all is one step however many pages and documents it touched), and the
+// document is unsaved until it is saved. It works on a protected document
+// without lifting the protection: the protection is against a stray keystroke
+// in the page, and a replace is not one.
 //
 // A PSEUDONYM IS TAKEN WHOLE OR NOT AT ALL, the way the page itself treats
 // one: its span takes no keystroke. A hit that covers a whole pseudonym (or
@@ -5638,17 +6864,41 @@ function applyReplace(plan, withText) {
   return at;
 }
 
-/** A page once its replacements are in: what typing on it would have done. How many real names that marked. */
-function settleReplaced(body, held) {
+/**
+ * A page once its replacements are in, settled as typing settles one: the
+ * line blocks put right, a real name typed as the replacement marked as its
+ * pseudonym, the columns cut again. How many real names that marked. The page
+ * may be one built off the screen (shadowPage): nothing here touches the
+ * bookkeeping of the pages on screen.
+ */
+function settleBody(body) {
   normalizeLines(body);
   const marked = convertTypedReals(body, { quiet: true });
-  if (held) syncSpots(body);
   dressColumns(body);
+  return marked;
+}
+/**
+ * …and a page ON SCREEN: what typing on it would have done, its spot keeps
+ * read back — whenever it has one, since a replace can add or take away an
+ * occurrence of a kept value before it and so move its ordinal — and its
+ * member dirty.
+ */
+function settleReplaced(body) {
+  const marked = settleBody(body);
+  if (body.querySelector("[data-here]")) syncSpots(body);
   setDirty(true, pageIndexOf(body));
   return marked;
 }
-function markedNote(n) {
-  return n ? ` ${n} real name${n === 1 ? "" : "s"} marked — the file will carry the pseudonym${n === 1 ? "" : "s"}.` : "";
+/**
+ * The toast's word on the real names a replace put in. `names`: how many
+ * distinct names the replacement carries, where known — then the count is of
+ * the places, as "3 occurrences of 1 real name", the unit the confirm's names
+ * and this count can both be read in.
+ */
+function markedNote(n, names = 0) {
+  if (!n) return "";
+  if (names && n !== names) return ` ${n} occurrences of ${names === 1 ? "1 real name" : `${names} real names`} marked — the file will carry the pseudonym${names === 1 ? "" : "s"}.`;
+  return ` ${n} real name${n === 1 ? "" : "s"} marked — the file will carry the pseudonym${n === 1 ? "" : "s"}.`;
 }
 
 /** A hit's place in its page's text now, read off its live range — null where the page has moved under it. */
@@ -5672,6 +6922,7 @@ const PART_OF_NAME = "is part of a longer name the key fakes as one (or of a val
 /** Replace the hit in front and stand on the next; with none in front, go to one first. */
 function replaceOne() {
   if (!doc || !findQuery) return;
+  if (refuseWhileBusy()) return;
   const rx = findMatcherFor(findQuery);
   if (!rx) return;
   if (findStep < 0 || !findHits[findStep]) { stepFind(1); return; }
@@ -5699,7 +6950,7 @@ function replaceOne() {
     // Kept as a place in the text across the settling: the line may be cut
     // into its columns again (columns.js), which moves the node it stands in.
     const afterAt = after ? offsetOfPoint(hit.body, after.startContainer, after.startOffset) : -1;
-    marked = settleReplaced(hit.body, plan.held);
+    marked = settleReplaced(hit.body);
     if (afterAt >= 0) {
       const pt = pointAtOffset(hit.body, afterAt);
       after = document.createRange();
@@ -5722,15 +6973,15 @@ function replaceOne() {
   renderFindBar();
 }
 
-/** Every hit on the pages on screen, in one step of the undo history. */
-function replaceAll() {
-  if (!doc || !findQuery) return;
-  const rx = findMatcherFor(findQuery);
-  if (!rx) return;
+/**
+ * Every hit on the pages on screen, planned and nothing changed yet:
+ * { edits: [{ body, plans }], skipped, skippedIn: Map(document name → count) }.
+ */
+function planHere(rx) {
   reelAllLive(); // a page the reel has let go of is a page with no hit to replace
-  const withText = $("fb-with").value;
   const edits = [];
   let skipped = 0;
+  const skippedIn = new Map();
   for (const body of pageBodies()) {
     const { text, segs } = flatten(body, { blankGutters: true });
     const plans = [];
@@ -5739,34 +6990,492 @@ function replaceAll() {
     while ((m = rx.exec(text))) {
       if (!m[0].length) { rx.lastIndex++; continue; }
       const plan = planReplace(body, segs, m.index, m.index + m[0].length);
-      if (plan) plans.push(plan); else skipped++;
+      if (plan) plans.push(plan);
+      else {
+        skipped++;
+        const mm = reelMemberOf(pageIndexOf(body));
+        const name = mm ? mm.name : fileName;
+        skippedIn.set(name, (skippedIn.get(name) || 0) + 1);
+      }
     }
     if (plans.length) edits.push({ body, plans });
   }
-  const note = skipped ? `${skipped} left as ${skipped === 1 ? "it stands" : "they stand"}: ${skipped === 1 ? "it" : "each"} ${PART_OF_NAME}.` : "";
-  $("fb-rnote").textContent = note;
-  if (!edits.length) {
-    toast(skipped ? `Nothing replaced — ${note}` : `“${findQuery}” is not on the pages on screen.`, { error: !!skipped });
-    return;
-  }
-  snapshotPages(edits.map((e) => e.body));
+  return { edits, skipped, skippedIn };
+}
+/** …carried out: each page's plans last first, so each earlier hit's text nodes and offsets still stand, and each page settled. → { done, marked } */
+function applyHere(edits, withText) {
   let done = 0, marked = 0;
   batchEdit = true;
   try {
     for (const { body, plans } of edits) {
-      // Last first, so each earlier hit's text nodes and offsets still stand.
       for (let i = plans.length - 1; i >= 0; i--) applyReplace(plans[i], withText);
-      marked += settleReplaced(body, plans.some((p) => p.held));
+      marked += settleReplaced(body);
       done += plans.length;
     }
   } finally { batchEdit = false; }
+  return { done, marked };
+}
+
+/**
+ * Every hit on the pages on screen, in one step of the undo history — the
+ * Replace all of a lone file, of a folder attached for its key alone, of
+ * Combined Text.txt, and of a case folder whose other documents have no hit.
+ * `also`: what the toast adds. → { done, pages }, or null where nothing was.
+ */
+function replaceAll({ also = "" } = {}) {
+  if (!doc || !findQuery) return null;
+  if (refuseWhileBusy()) return null;
+  const rx = findMatcherFor(findQuery);
+  if (!rx) return null;
+  const withText = $("fb-with").value;
+  const { edits, skipped } = planHere(rx);
+  const note = skipped ? `${skipped} left as ${skipped === 1 ? "it stands" : "they stand"}: ${skipped === 1 ? "it" : "each"} ${PART_OF_NAME}.` : "";
+  $("fb-rnote").textContent = note;
+  $("fb-rnote").title = "";
+  if (!edits.length) {
+    toast((skipped ? `Nothing replaced — ${note}` : `“${findQuery}” is not on the pages on screen.`) + also, { error: !!skipped });
+    return null;
+  }
+  snapshotPages(edits.map((e) => e.body));
+  const { done, marked } = applyHere(edits, withText);
   afterTextChange();
   findStep = -1;
   scanFindHere();
   findLandHere();
   renderFindBar();
   const pages = edits.length;
-  toast(`Replaced ${done} in ${pages} page${pages === 1 ? "" : "s"} — Ctrl+Z puts ${done === 1 ? "it" : "them all"} back.` + markedNote(marked) + (skipped ? ` ${skipped} left as ${skipped === 1 ? "it stands" : "they stand"}.` : ""));
+  toast(`Replaced ${done} in ${pages} page${pages === 1 ? "" : "s"} — Ctrl+Z puts ${done === 1 ? "it" : "them all"} back.` + markedNote(marked) + (skipped ? ` ${skipped} left as ${skipped === 1 ? "it stands" : "they stand"}.` : "") + also, also ? { ms: 7000 } : undefined);
+  return { done, pages };
+}
+
+// ── Replace all across the case folder ──────────────────────────────────────
+//
+// THE BAR WRITES NO FILE, AND REPLACE ALL REACHES THE WHOLE FOLDER. With a case
+// folder open in full, Replace all replaces in every export of it that has a
+// hit: the pages on screen as before, and every other document on pages built
+// for it off the screen (shadowPage) by the reader's own code — the same plan,
+// the same replace, the same typed-name pass — so a document replaced here
+// reads byte for byte as one opened, replaced and saved. Nothing is written:
+// each changed document goes into the store of unsaved documents, and Save
+// writes them all. It used to edit only the pages on screen and never touch
+// the folder from the bar, deliberately; the owner reversed that. Combined
+// Text.txt is counted and never replaced in: PDF-Linker writes it again from
+// the exports.
+//
+// Order of work: the folder's count in; every document off the screen with a
+// hit prepared, one at a time and in idle slices, with nothing changed (Esc
+// stops it); the screen planned again; one confirm naming every document; then
+// one synchronous commit under one batch id — the pages on screen snapshotted
+// as any Replace all is, the documents off the screen journalled
+// (replaceJournal) — so one Ctrl+Z puts every document back, wherever it has
+// gone by then (revertFolderReplace).
+const CHANGED_UNDER = "The search or the folder changed while the replace was being prepared — nothing was changed. Press Replace all again.";
+const STOPPED = "Replace all stopped — nothing was changed.";
+const COMBINED_STAYS = `Replace all from ${TD.COMBINED_FILE} stays in it — PDF-Linker writes it again from the exports. Open an export to replace across the folder.`;
+/** A page of a document off the screen built in the hidden container: its own spots (always an array), its own typing baseline. */
+function shadowPage(pages, i, theirSpots, built) {
+  shadowEl.textContent = "";
+  buildPages(shadowEl, pages, { from: i, to: i + 1, spots: theirSpots || [] });
+  const body = shadowEl.querySelector(".page-body");
+  if (body && built != null) body.__built = built;
+  return body;
+}
+function clearShadow() { if (shadowEl) shadowEl.textContent = ""; }
+/** A member's document with its live pages read off the screen, as a copy. */
+function liveMemberDoc(m) {
+  const d = TD.cloneDoc(memberDoc(m));
+  for (let k = 0; k < m.count; k++) {
+    const body = bodyForPage(m.from + k);
+    if (body) d.pages[k].lines = TD.serializeNodes(body).split("\n");
+  }
+  return d;
+}
+/** A member's spot keeps as pages of its own document. */
+function memberSpotsRel(m) {
+  const list = m === reelCurrent() ? spots : m.spots || [];
+  return list.filter((x) => x.page >= m.from && x.page < m.from + m.count).map((x) => ({ ...x, page: x.page - m.from }));
+}
+/** The Replace all button while a replace is being prepared: Stop. */
+function setReplaceAllBusy(on) {
+  const b = $("fb-replace-all");
+  b.textContent = on ? "Stop" : "Replace all";
+  if (on) { b.disabled = false; b.title = "Stop preparing the replace (Esc) — nothing has been changed yet"; }
+}
+function replaceAllClick() {
+  if (folderPass) { folderPass.stop = true; return; }
+  replaceAllEverywhere();
+}
+
+/**
+ * One document off the screen, replaced on pages built for it — the pages with
+ * a hit only, a page at a time, the thread given back between pages and never
+ * in the middle of one. Nothing outside the copy is changed. → { d, before,
+ * beforeSpots, parsed, spots, built, base, done, skipped, marked, entry }, or
+ * null where `pass` was stopped.
+ */
+async function prepareDocReplace(d, rx, withText, pass) {
+  const r = await readDoc(d);
+  const e = r.entry;
+  const parsed = e ? TD.cloneDoc(e.doc) : readExport(r.text);
+  const before = TD.cloneDoc(parsed);
+  const built = e && e.built ? e.built.slice() : parsed.pages.map((p) => p.lines.join("\n"));
+  let docSpots = TD.normalizeSpots(e ? e.spots : lsGet(spotKeyOf(d.name), []));
+  const beforeSpots = docSpots.slice();
+  const base = e ? e.base : { text: r.text, stamp: r.stamp, opened: TD.serializeExport(parsed) };
+  const shown = TD.shownPages(parsed, { rev, showFakes: settings.showFakes });
+  let done = 0, skipped = 0, marked = 0;
+  let clock = await idleClock();
+  for (let i = 0; i < parsed.pages.length; i++) {
+    if (pass.stop) return null;
+    if (!countMatches(rx, shown[i])) continue;
+    batchEdit = true; // the typed-name pass takes no snapshot of a page that has no history
+    try {
+      const body = shadowPage(parsed.pages, i, docSpots, built[i]);
+      if (!body) continue;
+      const { text, segs } = flatten(body, { blankGutters: true });
+      const plans = [];
+      rx.lastIndex = 0;
+      let m;
+      while ((m = rx.exec(text))) {
+        if (!m[0].length) { rx.lastIndex++; continue; }
+        const plan = planReplace(body, segs, m.index, m.index + m[0].length);
+        if (plan) plans.push(plan); else skipped++;
+      }
+      if (plans.length) {
+        for (let k = plans.length - 1; k >= 0; k--) applyReplace(plans[k], withText);
+        marked += settleBody(body);
+        parsed.pages[i].lines = TD.serializeNodes(body).split("\n");
+        docSpots = docSpots.filter((x) => x.page !== i).concat(spotsFromBody(body, i));
+        done += plans.length;
+      }
+    } finally { batchEdit = false; clearShadow(); }
+    if (!clock || clock.timeRemaining() < SLICE_LEFT) clock = await idleClock();
+  }
+  return { d, before, beforeSpots, parsed, spots: docSpots, built, base, done, skipped, marked, entry: e };
+}
+
+/** Replace all, with a case folder open in full: every export of it. */
+async function replaceAllEverywhere() {
+  if (!doc || !findQuery) return;
+  if (refuseWhileBusy()) return;
+  if (opening) { toast("Wait for the document to open."); return; }
+  if (!folderOpen()) {
+    // A lone file, or a folder attached for its key alone: the pages on screen.
+    const r = replaceAll();
+    if (r && dirHandle && folderLight) {
+      showKeyOffer(`Replace all changed only the pages on screen: only this file's key is attached; the rest of ${folderName} is not read.`, "Read the whole folder", readWholeFolder);
+    }
+    return;
+  }
+  if (isCombinedHead()) { replaceAll({ also: " " + COMBINED_STAYS }); return; }
+  const rx = findMatcherFor(findQuery);
+  if (!rx) return;
+  const q = findQuery, withText = $("fb-with").value;
+  const reelNames = () => reel.map((m) => m.name).join("\n");
+  const stamp = { q, cs: matchCase(), fakes: settings.showFakes, rev, fwd, keeps: keepsSignature(), reel: reelNames(), unsaved: unsavedSeq };
+  const moved = () => stamp.q !== findQuery || stamp.cs !== matchCase() || stamp.fakes !== settings.showFakes || stamp.rev !== rev
+    || stamp.fwd !== fwd || stamp.keeps !== keepsSignature() || stamp.reel !== reelNames() || stamp.unsaved !== unsavedSeq;
+  const pass = { stop: false };
+  folderPass = pass;
+  setReplaceAllBusy(true);
+  const say = (t, title = "") => { $("fb-rnote").textContent = t; $("fb-rnote").title = title; };
+  const halt = (t) => { say(t); toast(t, { error: t === CHANGED_UNDER }); };
+  let committed = false;
+  try {
+    // The folder's count, for the question as it stands.
+    if (findScanning || findScanStale() || findScanDone !== findScanFor) {
+      say(`Reading ${folderName} for “${q}”…`);
+      const inHand = await awaitFolderScan(pass, moved);
+      if (pass.stop) { halt(STOPPED); return; }
+      if (moved() || findScanStale()) { halt(CHANGED_UNDER); return; }
+      if (!inHand) { halt(`${folderName} could not be read for “${q}” — nothing was changed.`); return; }
+    }
+    const targets = findRest().map((r) => r.doc).sort((a, b) => folderDocs.indexOf(a) - folderDocs.indexOf(b));
+    const comb = findCombined();
+    const combNote = comb ? ` Not touched: ${TD.COMBINED_FILE} (${comb}) — PDF-Linker writes it again from the exports.` : "";
+    if (!targets.length) {
+      // Nothing off the screen: the replace there always was, and no confirm.
+      folderPass = null;
+      setReplaceAllBusy(false);
+      replaceAll({ also: combNote });
+      return;
+    }
+    // Prepared, one document at a time; nothing changes yet.
+    const prepared = [], unreadable = [];
+    for (let k = 0; k < targets.length; k++) {
+      const d = targets[k];
+      say(`Preparing the replace: ${TD.docLabel(d.name)} (${k + 1} of ${targets.length})… Esc stops`);
+      let p = null;
+      try { p = await prepareDocReplace(d, rx, withText, pass); }
+      catch (err) { console.warn(err); unreadable.push(d.name); }
+      if (pass.stop) { clearShadow(); halt(STOPPED); return; }
+      if (moved()) { clearShadow(); halt(CHANGED_UNDER); return; }
+      if (p) prepared.push(p);
+    }
+    // The screen planned again: typing went on while the folder was prepared.
+    const here = planHere(rx);
+    const sum = folderReplaceSummary(q, withText, here, prepared, comb, unreadable);
+    if (!sum.docs) {
+      halt(sum.skipped ? `Nothing replaced — ${sum.skipped} left as ${sum.skipped === 1 ? "it stands" : "they stand"}: ${sum.skipped === 1 ? "it" : "each"} ${PART_OF_NAME}.` : `“${q}” is in no document that can be replaced in.`);
+      return;
+    }
+    if (!confirm(sum.message)) { say(""); return; }
+    if (moved()) { halt(CHANGED_UNDER); return; }
+    commitFolderReplace({ q, withText, here, prepared, sum });
+    committed = true;
+  } finally {
+    if (folderPass === pass) folderPass = null;
+    setReplaceAllBusy(false);
+    if (!committed) renderFindBar();
+  }
+}
+
+/** What a folder replace is about to do, counted and said: the confirm, and the toast and the note after it. */
+function folderReplaceSummary(q, withText, here, prepared, comb, unreadable) {
+  const label = (n) => TD.docLabel(n);
+  const hereBy = new Map(); // member name → hits replaced on screen
+  for (const { body, plans } of here.edits) {
+    const m = reelMemberOf(pageIndexOf(body));
+    const name = m ? m.name : fileName;
+    hereBy.set(name, (hereBy.get(name) || 0) + plans.length);
+  }
+  const hereN = [...hereBy.values()].reduce((t, n) => t + n, 0);
+  const off = prepared.filter((p) => p.done);
+  const offN = off.reduce((t, p) => t + p.done, 0);
+  const skippedBy = new Map(here.skippedIn);
+  for (const p of prepared) if (p.skipped) skippedBy.set(p.d.name, (skippedBy.get(p.d.name) || 0) + p.skipped);
+  const skipped = [...skippedBy.values()].reduce((t, n) => t + n, 0);
+  const docs = hereBy.size + off.length;
+  // The real names the replacement carries, which the file gets as their
+  // pseudonyms: named, and counted as names — the toast after counts the
+  // places each was put in, and says so.
+  const withNames = [];
+  if (withText && fwd) {
+    const seen = new Set();
+    for (const h of TD.findRealsInPlain(fwd, [{ node: null, text: maskKept(withText) }])) {
+      const k = PK.fold(h.matched);
+      if (!seen.has(k)) { seen.add(k); withNames.push(h.matched); }
+    }
+  }
+  const inWith = withNames.length;
+  const s = (n) => (n === 1 ? "" : "s");
+  const head = withText
+    ? `Replace “${q}” with “${withText}” in ${docs} document${s(docs)} of ${folderName}?`
+    : `Delete every “${q}” in ${docs} document${s(docs)} of ${folderName}?`;
+  const bullets = [];
+  if (hereN) bullets.push(`• On screen: ${hereN} in ${hereBy.size} document${s(hereBy.size)} (${nameList([...hereBy.keys()].map(label))})`);
+  if (offN) bullets.push(`• Not on screen: ${offN} in ${off.length} document${s(off.length)} (${nameList(off.map((p) => label(p.d.name)))})`);
+  if (skipped) bullets.push(`• Left as ${skipped === 1 ? "it stands" : "they stand"}: ${skipped} — part of a longer name the key fakes as one, or of a value kept where it stands (${nameList([...skippedBy.keys()].map(label))})`);
+  if (inWith) bullets.push(`• ${nameList(withNames.map((v) => `“${v}”`))} in the replacement ${inWith === 1 ? "is a real name" : `are ${inWith} real names`}: wherever ${inWith === 1 ? "it goes" : "they go"} in, the file gets ${inWith === 1 ? "its pseudonym" : "their pseudonyms"}`);
+  if (comb) bullets.push(`• Not touched: ${TD.COMBINED_FILE} (${comb}) — PDF-Linker writes it again from the exports`);
+  if (unreadable.length) bullets.push(`• Could not be read, so not touched: ${nameList(unreadable.map(label))}`);
+  const message = head + "\n\n" + bullets.join("\n") +
+    "\n\nNothing is written yet. Every changed document stays unsaved until you save — Ctrl+S writes them all. Ctrl+Z, or ↶ Undo replace in folder, puts them all back.";
+  return { message, docs, hereN, hereBy, offN, off, skipped, skippedBy, comb, inWith };
+}
+
+/**
+ * The replace carried out, in one synchronous step under one batch id: the
+ * pages on screen snapshotted and replaced as any Replace all, each prepared
+ * document put in the store, unsaved, and every document's before and after
+ * journalled, with a marker on the undo history that brings them all back.
+ */
+function commitFolderReplace({ q, withText, here, prepared, sum }) {
+  const id = ++batchSeq;
+  const rec = { id, q, withText, folder: folderName, state: "done", docs: [] };
+  const members = [];
+  for (const { body } of here.edits) { const m = reelMemberOf(pageIndexOf(body)); if (m && !members.includes(m)) members.push(m); }
+  const before = new Map(members.map((m) => [m, { doc: liveMemberDoc(m), spots: memberSpotsRel(m) }]));
+  let marked = 0;
+  if (here.edits.length) {
+    snapshotPages(here.edits.map((x) => x.body), id);
+    marked += applyHere(here.edits, withText).marked;
+  }
+  for (const m of members) {
+    if (!m.d) continue; // not one of the folder's: its page steps carry it
+    const b = before.get(m), after = liveMemberDoc(m);
+    rec.docs.push({ name: m.name, d: m.d, base: m.base, beforeDoc: b.doc, beforeText: TD.serializeExport(b.doc), beforeSpots: b.spots,
+      afterDoc: after, afterText: TD.serializeExport(after), afterSpots: memberSpotsRel(m), writtenText: null, writtenSpots: null });
+  }
+  for (const p of prepared) {
+    if (!p.done) continue;
+    unsavedDocs.set(p.d.name, { name: p.d.name, d: p.d, handle: p.d.handle, base: p.base, doc: p.parsed, spots: p.spots, built: p.built, seq: ++unsavedSeq, conflict: !!(p.entry && p.entry.conflict) });
+    confirmedDocs.add(p.d.name);
+    rec.docs.push({ name: p.d.name, d: p.d, base: p.base, beforeDoc: p.before, beforeText: TD.serializeExport(p.before), beforeSpots: p.beforeSpots,
+      afterDoc: TD.cloneDoc(p.parsed), afterText: TD.serializeExport(p.parsed), afterSpots: p.spots.slice(), writtenText: null, writtenSpots: null });
+    marked += p.marked;
+  }
+  for (const m of members) confirmedDocs.add(m.name);
+  undoStack.push({ batch: id, folderReplace: id });
+  trimHistory();
+  redoStack = [];
+  lastSnapPage = -1;
+  replaceJournal.push(rec);
+  trimJournal();
+  afterTextChange();
+  findStep = -1;
+  scanFindHere();
+  findLandHere();
+  storeChanged();
+  // Said: how many where, that nothing is written, and how to take it back.
+  const done = sum.hereN + sum.offN;
+  const where = [];
+  if (sum.hereN) where.push(`${sum.hereN} here`);
+  for (const p of sum.off) where.push(`${p.done} in ${TD.docLabel(p.d.name)}`);
+  const n = sum.docs;
+  toast(`Replaced ${done} in ${n} document${n === 1 ? "" : "s"} (${nameList(where)}) — not saved yet: Ctrl+S writes ${n === 1 ? "it" : `all ${n}`}; Ctrl+Z puts ${n === 1 ? "it" : "them all"} back.`
+    + markedNote(marked, sum.inWith) + (sum.skipped ? ` ${sum.skipped} left as ${sum.skipped === 1 ? "it stands" : "they stand"} (part of a longer name).` : ""), { ms: 9000 });
+  const per = (name, k) => `${TD.docLabel(name)}: ${k} replaced` + (sum.skippedBy.get(name) ? `, ${sum.skippedBy.get(name)} left as ${sum.skippedBy.get(name) === 1 ? "it stands" : "they stand"}` : "");
+  const offLines = sum.off.map((p) => per(p.d.name, p.done));
+  const allLines = [...sum.hereBy].map(([name, k]) => per(name, k)).concat(offLines);
+  $("fb-rnote").textContent = offLines.slice(0, 3).join("; ") + (offLines.length > 3 ? `; and ${offLines.length - 3} more` : "");
+  $("fb-rnote").title = allLines.join("\n");
+}
+
+// The folder replaces the reader holds, for Ctrl+Z and ↶ Undo replace in
+// folder: the last few, and no more text than a tab should carry for them.
+const JOURNAL_MAX = 3;
+const JOURNAL_CHARS = 16 * 1024 * 1024; // about 32 MB as the browser holds a string
+function journalChars(rec) {
+  return rec.docs.reduce((t, x) => t + x.beforeText.length + x.afterText.length + (x.writtenText ? x.writtenText.length : 0), 0);
+}
+/** The oldest records dropped past the caps — and their markers off the history with them. */
+function trimJournal() {
+  while (replaceJournal.length > JOURNAL_MAX || (replaceJournal.length > 1 && replaceJournal.reduce((t, r) => t + journalChars(r), 0) > JOURNAL_CHARS)) {
+    const gone = replaceJournal.shift();
+    undoStack = undoStack.filter((s) => s.folderReplace !== gone.id);
+    redoStack = redoStack.filter((s) => s.folderReplace !== gone.id);
+  }
+  renderUndoFolder();
+}
+/**
+ * A member's pages put back to a document of its own (`d2`, its spots `rel`),
+ * the pages that differ rebuilt, the member dirty where it now differs from
+ * the file it was opened from. False where the page count does not match.
+ */
+function putMemberBack(m, d2, rel) {
+  if (!d2 || d2.pages.length !== m.count) return false;
+  const list = (m === reelCurrent() ? spots : m.spots || []).filter((x) => x.page < m.from || x.page >= m.from + m.count)
+    .concat((rel || []).map((x) => ({ ...x, page: x.page + m.from })));
+  if (m === reelCurrent()) { spots = list; m.spots = list; } else m.spots = list;
+  const changed = [];
+  for (let k = 0; k < m.count; k++) {
+    const i = m.from + k;
+    const p = d2.pages[k];
+    const body = bodyForPage(i);
+    const now = body ? TD.serializeNodes(body) : doc.pages[i].lines.join("\n");
+    doc.pages[i].lines = p.lines.slice();
+    doc.pages[i].restored = p.restored ? p.restored.slice() : null;
+    if (!body || now === p.lines.join("\n")) continue;
+    const was = body.__built;
+    body.__restored = doc.pages[i].restored ? new Set(doc.pages[i].restored) : null;
+    buildBody(body, p.lines.join("\n"), i, list);
+    if (was != null) body.__built = was; // the typing is measured against what the page was built from, as before
+    changed.push(i);
+  }
+  persistMemberSpots(m);
+  m.dirty = !m.base || TD.serializeExport(memberDoc(m)) !== m.base.opened;
+  if (m.dirty) m.editSeq = (m.editSeq || 0) + 1;
+  dirty = reel.some((x) => x.dirty);
+  if (changed.length) syncNoOcr(changed, { drop: true });
+  return true;
+}
+/**
+ * A folder replace taken back (`dir` "undo") or done again ("redo"), document
+ * by document, wherever each one is now — the store, the reel, or written
+ * since — and only where it still reads as the replace left it (`skip`: the
+ * documents whose pages the history has just put back itself). Taken back
+ * after a save, a document is unsaved again with its old text, and Save writes
+ * it only where the disk still reads exactly what the reader wrote.
+ * → { done, left } (document names), or null where the replace is not held.
+ */
+function revertFolderReplace(id, dir, { skip = new Set() } = {}) {
+  const rec = replaceJournal.find((r) => r.id === id);
+  if (!rec) return null;
+  const undoing = dir === "undo";
+  const done = [], left = [];
+  for (const x of rec.docs) {
+    if (skip.has(x.name)) { done.push(x.name); continue; }
+    const want = undoing ? [x.writtenText, x.afterText].filter((t) => t != null) : [x.beforeText];
+    const toDoc = undoing ? x.beforeDoc : x.afterDoc;
+    const toSpots = undoing ? x.beforeSpots : x.afterSpots;
+    const e = unsavedDocs.get(x.name);
+    const m = reel.find((mm) => mm.name === x.name && (!mm.d || !x.d || mm.d === x.d));
+    if (e && want.includes(docText(e))) {
+      e.doc = TD.cloneDoc(toDoc);
+      e.spots = toSpots.slice();
+      e.seq = ++unsavedSeq;
+      if (e.base && docText(e) === e.base.opened) unsavedDocs.delete(x.name); // back to its file: nothing unsaved
+      done.push(x.name);
+      continue;
+    }
+    if (m && !e && want.includes(TD.serializeExport(liveMemberDoc(m))) && putMemberBack(m, toDoc, toSpots)) { done.push(x.name); continue; }
+    if (!e && !m && x.d) {
+      // In neither place. Taken back after a save: unsaved again with its old
+      // text, Save writing it only where the disk still reads what the reader
+      // wrote. Done again where it was put back to its file: unsaved again,
+      // checked against that file. Taken back after its edits were dropped
+      // (dropUnsaved, dropAllUnsaved, takeDiskVersion): the file reads as it
+      // did, and there is nothing to do. Anything else — saved with more edits
+      // on top (`savedOther`), or gone some way the journal did not see — is
+      // left as it is and named: a document said to be put back while its
+      // file still carries the replace is worse than one named.
+      const restore = (toBase) => unsavedDocs.set(x.name, {
+        name: x.name, d: x.d, handle: x.d.handle, base: toBase,
+        doc: TD.cloneDoc(toDoc), spots: toSpots.slice(),
+        built: toDoc.pages.map((p) => p.lines.join("\n")), seq: ++unsavedSeq, conflict: false,
+      });
+      if (undoing && x.writtenText != null) { restore({ text: x.writtenText, stamp: null, opened: x.writtenText }); done.push(x.name); continue; }
+      if (!undoing && x.writtenText == null && !x.savedOther && x.base) { restore(x.base); done.push(x.name); continue; }
+      if (undoing && x.writtenText == null && x.dropped && !x.savedOther) { done.push(x.name); continue; }
+    }
+    left.push(x.name);
+  }
+  rec.state = undoing ? "undone" : "done";
+  unsavedSeq++;
+  // The replace row said what the replace did; it says now what became of it,
+  // rather than "3 replaced" beside counts that have all come back.
+  const k = done.length, s = k === 1 ? "" : "s";
+  $("fb-rnote").textContent = (undoing ? `Put back: ${k} document${s} (unsaved)` : `Replaced again: ${k} document${s} (unsaved)`)
+    + (left.length ? `; left as ${left.length === 1 ? "it is" : "they are"}: ${nameList(left.map((n) => TD.docLabel(n)))}` : "");
+  $("fb-rnote").title = "";
+  if (doc) afterTextChange();
+  storeChanged();
+  return { done, left };
+}
+/** The newest folder replace still in force, which ↶ Undo replace in folder takes back. */
+function latestFolderReplace() {
+  for (let k = replaceJournal.length - 1; k >= 0; k--) {
+    const r = replaceJournal[k];
+    if (r.state === "done" && r.folder === folderName) return r;
+  }
+  return null;
+}
+function renderUndoFolder() {
+  const b = $("fb-undo-folder");
+  if (!b) return;
+  const rec = folderOpen() ? latestFolderReplace() : null;
+  b.hidden = !rec;
+  if (rec) {
+    const n = rec.docs.length;
+    b.title = `Put back the ${n} document${n === 1 ? "" : "s"} changed by replacing “${rec.q}”${rec.withText ? ` with “${rec.withText}”` : ""}, wherever they are now — unsaved; Save writes them. A document changed since the replace is left as it is.`;
+  }
+}
+function undoFolderReplace() {
+  if (refuseWhileBusy()) return;
+  const rec = latestFolderReplace();
+  if (!rec) return;
+  const n = rec.docs.length;
+  if (!confirm(`Put back the ${n} document${n === 1 ? "" : "s"} changed by replacing “${rec.q}”${rec.withText ? ` with “${rec.withText}”` : ""}? They become unsaved; Save writes them. A document changed since the replace is left as it is.`)) return;
+  const r = revertFolderReplace(rec.id, "undo");
+  if (!r) return;
+  // Taken back for good: its steps leave the history, and there is no redo.
+  undoStack = undoStack.filter((s) => s.batch !== rec.id);
+  redoStack = redoStack.filter((s) => s.batch !== rec.id);
+  renderUndoFolder();
+  const k = r.done.length;
+  toast(`Put back ${k} document${k === 1 ? "" : "s"} as ${k === 1 ? "it was" : "they were"} before replacing “${rec.q}” — unsaved; Ctrl+S writes ${k === 1 ? "it" : "them"}.`
+    + (r.left.length ? ` Left as ${r.left.length === 1 ? "it is" : "they are"}: ${nameList(r.left.map((x) => TD.docLabel(x)))} (changed since the replace).` : ""), { error: !!r.left.length, ms: 9000 });
 }
 
 $("fb-replace-toggle").addEventListener("click", () => {
@@ -5775,7 +7484,8 @@ $("fb-replace-toggle").addEventListener("click", () => {
   (on ? $("fb-with") : $("fb-input")).focus();
 });
 $("fb-replace").addEventListener("click", replaceOne);
-$("fb-replace-all").addEventListener("click", replaceAll);
+$("fb-replace-all").addEventListener("click", replaceAllClick);
+$("fb-undo-folder").addEventListener("click", undoFolderReplace);
 $("fb-with").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { e.preventDefault(); replaceOne(); }
   else if (e.key === "Escape") { e.preventDefault(); showFindBar(false); }
@@ -5821,7 +7531,7 @@ function markDidNotOcr(i) {
   }
   convertTypedRealsSoon.cancel();
   hideTypeTip();
-  spots = spots.filter((x) => x.page !== i);
+  setSpotsListOf(i, spotsListOf(i).filter((x) => x.page !== i));
   buildBody(body, text, i);
   doc.pages[i].lines = lines;
   syncSpots(body);
@@ -5945,7 +7655,7 @@ function putStrippedBack(i, sn) {
   if (view && top && top.page === i) top.view = view;
   convertTypedRealsSoon.cancel();
   hideTypeTip();
-  spots = spots.filter((x) => x.page !== i).concat(sn.spots || []);
+  setSpotsListOf(i, spotsListOf(i).filter((x) => x.page !== i).concat(sn.spots || []));
   buildBody(body, sn.text, i);
   doc.pages[i].lines = sn.text.split("\n");
   syncSpots(body);
@@ -6006,14 +7716,18 @@ function useMyText(i) {
   toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run writes the text into the PDF and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
 }
 /** Each transcribed page of the open document takes the sum of its text as it now stands — what a save just wrote. */
-function refreshTextFixedSums() {
+function refreshTextFixedSums(members = null) {
   if (!doc || !textFixed.length || flagsFor !== valuesStoreKey()) return;
+  // `members`: the documents a save just wrote — a page of one it could not
+  // write keeps the sum of what its file still says.
   const sources = docPageSources();
-  let list = textFixed;
+  const items = [];
   doc.pages.forEach((p, i) => {
+    if (members && !members.includes(reelMemberOf(i))) return;
     const entry = pageEntryAt(i, sources);
-    if (entry && list.some((e) => TD.sameNoOcr(e, entry))) list = TD.setTextFixed(list, { ...entry, sum: TD.pageTextSum(p.lines) }, true);
+    if (entry) items.push({ entry, lines: p.lines });
   });
+  const list = TD.fixedSumsFor(textFixed, items);
   if (list !== textFixed) {
     textFixed = list;
     persistValues();
@@ -6148,8 +7862,8 @@ function markDidNotOcrPages(indices) {
   }
   convertTypedRealsSoon.cancel();
   hideTypeTip();
-  const stripped = new Set(todo.map((t) => t.i));
-  spots = spots.filter((x) => !stripped.has(x.page));
+  // Each page's keeps off the list of the member it belongs to.
+  for (const t of todo) setSpotsListOf(t.i, spotsListOf(t.i).filter((x) => x.page !== t.i));
   for (const t of todo) {
     buildBody(t.body, t.text, t.i);
     doc.pages[t.i].lines = t.lines;
@@ -6908,7 +8622,9 @@ let caseFakes = { key: null, docs: null, set: null };
 function sweepStale() {
   return !sweep.stamp || sweep.stamp.reals !== reals || sweep.stamp.keeps !== keeps
     || sweep.stamp.master !== masterKeeps || sweep.stamp.docs !== folderDocs
-    || sweep.stamp.flagged !== flagged || sweep.stamp.spots !== spotsSig();
+    || sweep.stamp.flagged !== flagged || sweep.stamp.spots !== spotsSig()
+    // …and the documents with unsaved edits, which it reads from the store.
+    || sweep.stamp.unsaved !== unsavedSeq;
 }
 // The open document's spot keeps as the sweep read them. By what they SAY and
 // not by identity: the list is made again on every edit of a page, and a
@@ -6930,7 +8646,11 @@ function dropSweep() {
  */
 function roundFromHere(rows) {
   if (rows.length < 2) return rows;
-  const at = folderDocs.findIndex((d) => d.handle === fileHandle);
+  // The document being read by its entry in the list, which a file opened
+  // from a picker has even when its handle is another object than the list's.
+  const cur = reelCurrent();
+  let at = cur && cur.d ? folderDocs.indexOf(cur.d) : -1;
+  if (at < 0) at = folderDocs.findIndex((d) => d.handle === fileHandle);
   if (at < 0) return rows;
   const n = folderDocs.length;
   const pos = (r) => {
@@ -6984,20 +8704,39 @@ function folderRest() {
 const SWEEP_QUIET = 1200;
 const SWEEP_DOC_SAY = 1500; // ms one document may take before the console names it
 let sweepTimer = 0;
-async function sweepFolder() {
+let sweepWaiters = []; // what is waiting on the sweep running to end (sweepNow)
+/** `now`: not left for a gap in a big folder — a save is waiting on the answer. */
+async function sweepFolder({ now = false } = {}) {
   if (!dirHandle || !reals || sweep.running || !sweepStale()) return;
-  if (oneDocAtATime()) {
+  if (oneDocAtATime() && !now) {
     const quiet = Date.now() - busyAt;
     clearTimeout(sweepTimer);
     if (quiet < SWEEP_QUIET) { sweepTimer = setTimeout(sweepFolder, SWEEP_QUIET - quiet); return; }
   }
-  sweep = { stamp: { reals, keeps, master: masterKeeps, docs: folderDocs, flagged, spots: spotsSig() }, rows: [], at: 0, running: true };
+  try { await sweepFolderNow(); }
+  finally { const w = sweepWaiters; sweepWaiters = []; for (const res of w) res(); }
+}
+/**
+ * The folder swept, and the answer fresh, before going on: a sweep already
+ * running is waited for, and one that went stale under it is run again. What
+ * a save writes off the screen for the names said to be faked rests on it.
+ */
+async function sweepNow() {
+  for (let k = 0; k < 4; k++) {
+    if (!dirHandle || !reals) return;
+    if (sweep.running) { await new Promise((res) => sweepWaiters.push(res)); continue; }
+    if (!sweepStale()) return;
+    await sweepFolder({ now: true });
+  }
+}
+async function sweepFolderNow() {
+  sweep = { stamp: { reals, keeps, master: masterKeeps, docs: folderDocs, flagged, spots: spotsSig(), unsaved: unsavedSeq }, rows: [], at: 0, running: true };
   const mine = sweep.stamp;
   // …and the fakes, only where the folder has not already been read for them
   // under this key. A walk through the names drops the sweep at every decision;
   // re-reading forty documents each time for an answer that cannot have changed
   // would be the walk's whole cost.
-  const fakesFor = fakesIndexStale() ? { key, docs: folderDocs, set: new Set() } : null;
+  const fakesFor = fakesIndexStale() ? { key, docs: folderDocs, set: new Set(), seq: unsavedSeq } : null;
   const flagRx = flaggedMatcher();
   // …and whether every one of them was actually read. A document that would
   // not open leaves the leak count a little short, which is a worse count; it
@@ -7029,7 +8768,9 @@ async function sweepFolder() {
         const step = (what, size) => noteDoing(pass,
           `reading the rest of the folder (${sweep.at} of ${folderDocs.length}: ${d.name}${size ? ", " + Math.round(size / 1024) + " KB" : ""}) — ${what}`);
         step("opening the file");
-        const text = await (await d.handle.getFile()).text();
+        // A document with unsaved edits is read as Save will write it.
+        const got = await readDoc(d);
+        const text = got.text;
         // Read THE WAY THE PAGE READS IT (textdoc.clearReading): page by page,
         // the pseudonyms the run wrote and the spots kept where they stand
         // blanked, the keeps masked, the names of cited decisions spared. The
@@ -7038,7 +8779,7 @@ async function sweepFolder() {
         // nothing in — a real name that is a word of some other name's fake
         // ("Jones" in "Mary Jones"), or a name kept just there.
         step("looking for the key's real values and the flagged ones", text.length);
-        const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + d.name, []));
+        const theirSpots = TD.normalizeSpots(got.entry ? got.entry.spots : lsGet(spotKeyOf(d.name), []));
         const { values, flags } = TD.clearReading(text, { rev, reals, flagRx, spots: theirSpots, mask: maskKept });
         if (values.length || flags) sweep.rows.push({ doc: d, values, flags });
         // …and, from the same reading, which PSEUDONYMS stand here. That is
@@ -7120,12 +8861,19 @@ async function saveOnTheWayOut() {
   if (!decidedHere) return true;
   const owed = dirty || pendingWrites().length > 0 || settledInTheClear() > 0;
   if (!owed) return true;
-  const ok = await saveDocument();
+  // The reel and the decision files, as this save always was: nothing off the
+  // screen in the middle of a walk (the walk's next document keeps its own).
+  // Written as every save in the folder writes, though: in place, and never
+  // over a file changed under its edits — a document tagged "changed on disk"
+  // holds the walk here rather than going over what PDF-Linker wrote.
+  const ok = await saveDocument({ offscreen: false });
   if (!ok) {
     // saveDocument has said why. All this adds is that the walk stopped here
-    // because of it, which is not obvious from a message about a save.
+    // because of it, which is not obvious from a message about a save — kept
+    // in front of the why rather than in its place, since a toast is one line.
     leakJump = false;
-    toast(`${fileName} was not written, so the walk has stayed here. Answer that first.`, { error: true });
+    const why = toastEl.hidden ? "" : toastEl.textContent.trim();
+    toast(`${fileName} was not written, so the walk has stayed here.` + (why ? " " + why : " Answer that first."), { error: true, ms: why ? 12000 : 3200 });
   }
   return ok;
 }
@@ -7277,9 +9025,9 @@ $("nb-close").addEventListener("click", () => { const sweeping = !!pageSweep; sh
  * the next save writes the pseudonym along with everything else.
  *
  * By VALUE, not by place: the save fakes every occurrence of a name alike, so
- * a decision about one is a decision about all of them. Held for the session,
- * through keeps taken on other names, and dropped when another case's key is
- * chosen or the folder is forgotten.
+ * a decision about one is a decision about all of them. Held for the case
+ * (below), through keeps taken on other names, and dropped from hand when
+ * another case's key is chosen or the folder is forgotten.
  *
  * A LEAKS row answered `yes` or `phrase` is the same answer given on the
  * worksheet, and counts here for as long as the cell says it (sheetFakes): the
@@ -7290,6 +9038,86 @@ let settled = new Set(); // folded values the operator has said to fake
 let sheetFakes = new Set(); // …and the ones the LEAKS worksheet has (LK.fakeDecisions), LK.fold-ed
 function settledKey(v) { return String(v == null ? "" : v).trim().toLowerCase(); }
 function isSettled(v) { return settled.has(settledKey(v)) || sheetFakes.has(LK.fold(v)); }
+// KEPT FOR THE CASE, NOT THE SESSION. "Fake it" used to live in memory alone:
+// a tab closed on it lost it, and nothing asked, since the decision had not
+// touched the text. Now it is remembered per case folder (per file with no
+// folder), like the flags, and read back when the folder is opened again; the
+// closing prompt and the status bar count every place, in any document of the
+// folder, where a name so decided still stands unwritten (settledElsewhere),
+// and Save writes them all. Once written everywhere the decision simply has
+// nothing left to do — it stays, and holds for a name a later run leaves in
+// the clear again. Another case's key still starts with none (setKey); that
+// clears the set in hand, not the case's own.
+//
+// …AND WITHDRAWN THE SAME WAY. Kept for the case, a mistaken "fake it" no
+// longer goes away with the tab: every later save would write the name as its
+// pseudonym in every document of the folder where it stands. So the decisions
+// are listed in the Flagged panel, each with a × that withdraws it (what a
+// save has already written stays written; the name is the review's again).
+// Kept under the folder's name, as the flags, the spot keeps and the LEAKS
+// answers are.
+const SETTLED_PREFIX = "textReader.settled.";
+function settledStoreKey() { return SETTLED_PREFIX + (folderName || fileName || "loose"); }
+// The decisions as they were spelled when taken, for the panel (the set holds
+// them folded); an older build stored them folded, and they show so.
+let settledShown = new Map();
+/** The case's "fake it" decisions, read into the set in hand. */
+function loadSettled() {
+  const stored = lsGet(settledStoreKey(), []);
+  const list = (Array.isArray(stored) ? stored : []).map((v) => String(v == null ? "" : v).trim()).filter(Boolean);
+  settled = new Set(list.map(settledKey));
+  settledShown = new Map(list.map((v) => [settledKey(v), v]));
+  renderSettled();
+}
+/** …and one more of them remembered for the case, as it was spelled. */
+function persistSettled(v) {
+  const stored = lsGet(settledStoreKey(), []);
+  const list = (Array.isArray(stored) ? stored : []).map((x) => String(x == null ? "" : x).trim()).filter(Boolean);
+  const k = settledKey(v);
+  if (!list.some((x) => settledKey(x) === k)) list.push(String(v).trim());
+  lsSet(settledStoreKey(), list);
+}
+/**
+ * A "fake it" withdrawn: out of the set in hand and out of the case's store.
+ * What a save already wrote as the pseudonym stays written; where the name
+ * still stands in the clear it is the review's again, and no save writes it.
+ */
+function unsettleName(k) {
+  const key = settledKey(k);
+  if (!settled.has(key)) return;
+  const shown = settledShown.get(key) || key;
+  settled.delete(key);
+  settledShown.delete(key);
+  const stored = lsGet(settledStoreKey(), []);
+  lsSet(settledStoreKey(), (Array.isArray(stored) ? stored : []).filter((x) => settledKey(x) !== key));
+  renderSettled();
+  renderLeakStatus();
+  updateDirty();
+  paintHighlights();
+  toast(`“${shown}” is no longer to be faked — no save writes it as its pseudonym now${sheetFakes.has(LK.fold(shown)) ? " (the LEAKS worksheet still answers it yes: change the cell there)" : ""}. Where it stands in the clear it is yours to decide again.`, { ms: 7000 });
+}
+/** The case's "fake it" decisions in the Flagged panel, each with its ×. */
+function renderSettled() {
+  const block = $("settled-block"), list = $("settled-list");
+  if (!block || !list) return;
+  list.innerHTML = "";
+  const keys = [...settled];
+  block.hidden = !keys.length;
+  for (const k of keys) {
+    const v = settledShown.get(k) || k;
+    const li = document.createElement("li");
+    li.textContent = v;
+    li.title = "Click to find it in the document";
+    li.addEventListener("click", () => findInPages(v));
+    const x = document.createElement("button");
+    x.className = "x";
+    x.textContent = "×";
+    x.title = "Withdraw “fake it”: no save writes it as its pseudonym from now on (what is written stays written)";
+    x.addEventListener("click", (e) => { e.stopPropagation(); unsettleName(k); });
+    li.appendChild(x);
+    list.appendChild(li);
+  }
+}
 /** The worksheet's fakes read again off its rows: on attach, on every decision, on drop. True where they moved. */
 function refreshSheetFakes() {
   const was = sheetFakes;
@@ -7303,6 +9131,9 @@ function refreshSheetFakes() {
  */
 function settleName(real, fake, then = "") {
   settled.add(settledKey(real));
+  settledShown.set(settledKey(real), String(real).trim());
+  persistSettled(real);
+  renderSettled();
   answered++;
   decidedHere++;
   bounces = 0;
@@ -7310,6 +9141,9 @@ function settleName(real, fake, then = "") {
   toast(`“${real}” will be written as ${fake ? `“${fake}”` : "its pseudonym"} on the next save`
     + (n > 1 ? ` — all ${n} of them here` : "") + "." + (then ? " " + then : ""));
   renderLeakStatus();
+  // …and the rest of the folder read for where else it stands: Save writes it
+  // there too, and the status bar counts it.
+  if (folderOpen()) sweepFolder();
 }
 function fakeName() {
   const hits = liveLeaks();
@@ -7520,7 +9354,14 @@ pagesEl.addEventListener("contextmenu", (e) => {
   showKeepMenu(target, e.clientX, e.clientY);
 });
 document.addEventListener("mousedown", (e) => { if (!keepMenu.hidden && !keepMenu.contains(e.target)) hideKeepMenu(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { hideKeepMenu(); flagPop.hidden = true; } });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  hideKeepMenu();
+  flagPop.hidden = true;
+  // Esc stops a pass over the folder's documents before it changes or writes anything.
+  if (folderPass) folderPass.stop = true;
+  if (savePass) savePass.stop = true;
+});
 
 // ── the master workbook: the keeps that hold in every case ─────────────────────────
 //
@@ -7572,6 +9413,7 @@ async function readMaster(handle, { quiet = false } = {}) {
   masterInfo = { name: file.name, sheet: m.sheet, rows: m.rows, partial: m.partial.length, modified: file.lastModified };
   masterHandle = handle;
   masterNeeds = null;
+  masterLost = null;
   if (keyOffer.dataset.master) hideKeyOffer(); // renewed from the panel instead
   compileKey();
   if (doc) { remarkKept(); paintHighlights(); }
@@ -7641,6 +9483,7 @@ function offerMasterRenew() {
 function masterUnread(handle, e) {
   console.warn(e);
   const name = (handle && handle.name) || "The master workbook";
+  masterLost = name; // …and a keep PDF-Linker has spent cannot be checked against it (keepsSpentNote)
   toast(e && e.name === "NotFoundError"
     ? `${name} is no longer where it was chosen, so its standing keeps are not in force. Load it again from the Flagged panel.`
     : `${name} could not be read (${(e && e.message) || e}), so its standing keeps are not in force.`, { error: true, ms: 9000 });
@@ -7665,17 +9508,27 @@ async function renewMaster() {
  * otherwise, and nothing is asked: a grant the browser has taken back waits
  * for the renewal.
  */
-let masterChecking = false;
-async function refreshMaster() {
+// One look at a time; a second asker is handed the look in progress, so what it
+// awaits is the file as it now stands (keepsSpentNote asks before it says a
+// keep is not on the master).
+let masterChecking = null;
+function refreshMaster() {
+  if (!masterChecking) masterChecking = refreshMasterNow().finally(() => { masterChecking = null; });
+  return masterChecking;
+}
+async function refreshMasterNow() {
   const handle = masterHandle;
-  if (!handle || !masterInfo || masterInfo.loose || masterChecking) return;
-  masterChecking = true;
+  if (!handle || !masterInfo || masterInfo.loose) return;
   try {
     if ((await permissionOf(handle, "read")) !== "granted") return;
     const file = await handle.getFile();
     if (masterHandle === handle && file.lastModified !== masterInfo.modified) await readMaster(handle, { quiet: true });
   } catch (e) { console.warn(e); }
-  finally { masterChecking = false; }
+}
+/** The workbook as it stands: the reading at startup finished, and read again where a run has changed it since. */
+async function masterSettled() {
+  try { await masterRestoring; } catch { /* said where it failed (masterUnread) */ }
+  await refreshMaster();
 }
 window.addEventListener("focus", () => { refreshMaster(); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshMaster(); });
@@ -7707,8 +9560,11 @@ async function readMasterBytes(bytes, name) {
 // workbook where the reader can write it (attached with Load master workbook…,
 // and the browser allows the write): that row's Fix? cell is emptied, which is
 // no decision at all, and nothing else in the file is touched (see
-// leaks.masterWithdrawEdits). Where the workbook cannot be written, the reader
-// says so: the keep is gone for this session only, and PDF-Linker still has it.
+// leaks.masterWithdrawEdits). Where the workbook was opened as a copy, the
+// reader says so: the keep is gone for this session only, and PDF-Linker still
+// has it. Where it is attached but will not take the write now (Excel holding
+// it, the grant not given), the removal is OWED: the status bar counts it and
+// the next Save writes it once the workbook can be written (masterPending).
 
 /** Take `values` off the Master Keep, asked first: it is a decision about every case. */
 async function withdrawMaster(values) {
@@ -7722,34 +9578,264 @@ async function withdrawMaster(values) {
   // fresh: the browser will not put its own question once a dialog has stood
   // between the click and it.
   const writable = await masterWritable();
+  // …and where the reader itself still holds them as keeps: a case's own keep
+  // is handed to PDF-Linker in New Real Values.txt, and PDF-Linker records
+  // every keep it is handed on the master — so a keep left in any case's list,
+  // or in the open folder's file, put back the very row this takes off.
+  const held = await keepsHeldFor(named);
   if (!confirm(`Remove ${what} from the Master Keep in ${name}?\n\n` +
     `${name} keeps ${it} in every case. Removed, ${it} ${named.length === 1 ? "is" : "are"} no longer left alone: ` +
     `here ${it} ${named.length === 1 ? "is" : "are"} marked wherever ${it} ${named.length === 1 ? "stands" : "stand"} unfaked, ready to fake, ` +
-    `and PDF-Linker's next run fakes ${it} wherever a case's key binds ${it}.`)) return false;
+    `and PDF-Linker's next run fakes ${it} wherever a case's key binds ${it}.` + heldNote(held, it, { asking: true }))) return false;
   // Here and now: the reader stops holding them…
   masterKeeps = masterKeeps.filter((k) => !want.has(LK.fold(k.value)));
+  // …in every case's list it remembers, and in the open folder's file at the
+  // next save (dropKeepsFor) — and in the other folders' files it can reach,
+  // now (takeKeepLinesOut).
+  dropKeepsFor(named, held);
   compileKey();
   if (doc) { remarkKept(); paintHighlights(); }
   renderFlags();
-  // …and the workbook is told, where it can be.
-  // Held off while the file is told, and for the session where it cannot be:
-  // a reading of the file meanwhile (refreshMaster — the window regains focus
-  // as the dialog closes) must not put them back while it still keeps them.
+  // Held off while the files are told, and for the session where the workbook
+  // cannot be: a reading of it meanwhile (refreshMaster — the window regains
+  // focus as the dialog closes) must not put them back while it still keeps
+  // them. Before anything is awaited.
   for (const v of named) masterOffHere.add(LK.fold(v));
+  const out = await takeKeepLinesOut(named, held.others.filter((o) => o.dir));
+  out.unreached.push(...held.others.filter((o) => !o.dir).map((o) => o.name));
+  // …and the workbook is told, where it can be.
   const w = writable.ok ? await writeMasterWithdrawn(named) : writable;
   if (w.ok) for (const v of named) masterOffHere.delete(LK.fold(v));
+  const also = heldNote(held, it, out);
   if (w.ok) {
     toast(`${what} ${named.length === 1 ? "is" : "are"} off the Master Keep \u2014 ${name}'s KEEP sheet no longer keeps ${it} (the Fix? cell is empty; the row and its history stay). ` +
-      `Where ${it} ${named.length === 1 ? "stands" : "stand"} unfaked here, ${named.length === 1 ? "it is" : "they are"} marked: fake ${it}, and save.`, { ms: 9000 });
+      `Where ${it} ${named.length === 1 ? "stands" : "stand"} unfaked here, ${named.length === 1 ? "it is" : "they are"} marked: fake ${it}, and save.` + also,
+    // …in red where a folder out of reach still carries one: that is the operator's to do.
+    out.unreached.length ? { error: true, ms: 12000 } : { ms: 9000 });
     // The file is the truth: read it again, a run that wrote it meanwhile included.
     if (masterHandle) { try { await readMaster(masterHandle, { quiet: true }); } catch (e) { console.warn(e); } }
+  } else if (w.why === "loose") {
+    toast(`${what} ${named.length === 1 ? "is" : "are"} off the Master Keep for this session only: ${name} was opened as a copy, so the reader cannot change it \u2014 attach it with Load master workbook\u2026 and remove ${it} again. Its KEEP sheet still keeps ${it}, and PDF-Linker's next run will too.` + also, { error: true, ms: 12000 });
   } else {
-    const why = w.why === "loose" ? `${name} was opened as a copy, so the reader cannot change it \u2014 attach it with Load master workbook\u2026 and remove ${it} again`
-      : w.why === "permission" ? `the browser did not let the reader change ${name}`
-      : `${name} could not be changed (${(w.error && (w.error.message || w.error)) || "unknown error"}) \u2014 if Excel has it open, close it and remove ${it} again`;
-    toast(`${what} ${named.length === 1 ? "is" : "are"} off the Master Keep for this session only: ${why}. Its KEEP sheet still keeps ${it}, and PDF-Linker's next run will too.`, { error: true, ms: 12000 });
+    // OWED, NOT DROPPED. The workbook would not take it now (Excel holding
+    // it, the grant not given); the removal is a decision like any other, and
+    // the next save tries it again, once the workbook may be written.
+    for (const v of named) if (!masterPending.some((x) => LK.fold(x) === LK.fold(v))) masterPending.push(v);
+    updateDirty();
+    const why = w.why === "permission" ? `the browser did not let the reader change ${name}`
+      : `${name} could not be changed (${(w.error && (w.error.message || w.error)) || "unknown error"}) \u2014 if Excel has it open, close it`;
+    toast(`${what} ${named.length === 1 ? "is" : "are"} off the Master Keep here, and not yet in ${name}: ${why}. The removal is owed \u2014 Save writes it once the workbook can be written; until then PDF-Linker's next run still keeps ${it}.` + also, { error: true, ms: 12000 });
   }
   return true;
+}
+/**
+ * Where the reader holds `values` as keeps of its own, for a Master Keep
+ * removal to take them out of as well: { lists, file, others } \u2014 the case
+ * lists it remembers that keep one of them ([{ k, name }]: the storage key, and
+ * the folder it is kept for), the keep lines on them in the open folder's New
+ * Real Values.txt ([{ control, value }]), and the other case folders whose file
+ * carries such a line (keepsElsewhere).
+ */
+async function keepsHeldFor(values) {
+  const want = new Set((values || []).map((v) => LK.fold(v)));
+  const holds = (list) => (list || []).some((k) => k && want.has(LK.fold(k.value)));
+  const lists = [];
+  for (const k of storedValueKeys()) if (holds(readStoredValues(k).keeps)) lists.push({ k, name: k.slice(VALUES_PREFIX.length) });
+  // The list in hand is the open case's (stored as it moves; asked all the same).
+  const mine = valuesStoreKey();
+  if (flagsFor === mine && holds(keeps) && !lists.some((l) => l.k === mine)) lists.push({ k: mine, name: mine.slice(VALUES_PREFIX.length) });
+  const disk = await valuesFileText();
+  const file = typeof disk === "string" ? TD.keepLines(disk).filter((k) => want.has(LK.fold(k.value))) : [];
+  const others = await keepsElsewhere(values, lists.map((l) => l.name));
+  return { lists, file, others };
+}
+/** The storage keys of every case list the reader remembers. */
+function storedValueKeys(prefix = VALUES_PREFIX) {
+  const out = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) out.push(k);
+    }
+  } catch { /* no storage: nothing is remembered */ }
+  return out;
+}
+/**
+ * The OTHER case folders whose New Real Values.txt carries a keep line on one
+ * of `values`: [{ name, dir, lines }]. PDF-Linker records every keep line it
+ * reads on the master, so a line left in another case's file put a removed
+ * value back on the next run THERE, whatever the reader had done here.
+ *
+ * Looked for in every case the reader keeps a list for (`listed`) or wrote a
+ * keep line on one of them for (its record of what was written carries it).
+ * Where the reader holds the folder (rememberDir) and the browser's leave to
+ * write it stands — asked, never prompted for: one question is already put
+ * by the removal — the file itself is read, and `dir` is the folder to take
+ * the lines out of (takeKeepLinesOut). Where it does not, the record of what
+ * the reader wrote there is all there is to go on, `dir` is null, and the
+ * folder is NAMED, in the confirm and the toast: it is the operator who has
+ * to open it and save before PDF-Linker runs there. A lone document's list
+ * (kept under its file name, or "loose") has no folder, and no file.
+ */
+async function keepsElsewhere(values, listed) {
+  const want = new Set((values || []).map((v) => TD.foldValue(v)).filter(Boolean));
+  const on = (lines) => lines.filter((k) => want.has(TD.foldValue(k.value)));
+  const wrote = new Map();
+  for (const k of storedValueKeys(VALUES_SAVED_PREFIX)) {
+    const lines = on(TD.keepLines(lsGet(k, "")));
+    if (lines.length) wrote.set(k.slice(VALUES_SAVED_PREFIX.length), lines);
+  }
+  const names = [...new Set([...(listed || []), ...wrote.keys()])]
+    .filter((n) => n && n !== folderName && n !== "loose" && !TD.isExportName(n));
+  if (!names.length) return [];
+  const dirs = await rememberedDirs();
+  const out = [];
+  for (const name of names) {
+    const dir = dirs.find((d) => d.name === name);
+    if (dir && (await permissionOf(dir, "readwrite")) === "granted") {
+      // No file is no line — where the folder itself is still there: a folder
+      // moved or deleted since it was remembered answers "not found" too, and
+      // says nothing of the file wherever the folder went.
+      let text = null;
+      try { text = await (await (await dir.getFileHandle(TD.VALUES_FILE)).getFile()).text(); }
+      catch (e) { if (!e || e.name !== "NotFoundError" || !(await dirStands(dir))) text = undefined; }
+      if (text !== undefined) {
+        const lines = text == null ? [] : on(TD.keepLines(text));
+        if (lines.length) out.push({ name, dir, lines });
+        continue;
+      }
+    }
+    if (wrote.has(name)) out.push({ name, dir: null, lines: wrote.get(name) });
+  }
+  return out;
+}
+/** Whether a remembered folder is still where it was: one entry of it can be listed. */
+async function dirStands(dir) {
+  try {
+    await dir.keys().next();
+    return true;
+  } catch { return false; }
+}
+/**
+ * The keep lines on `values` taken out of the files of `others`
+ * (keepsElsewhere) the reader can reach, at once — with the master workbook,
+ * which is written now too, not left to a Save in a folder that is not open.
+ * → { reached, unreached }: the folders' names. A folder's record of what was
+ * written goes with its file, and one whose file a run has taken meanwhile has
+ * nothing left to take out.
+ */
+async function takeKeepLinesOut(values, others) {
+  const reached = [], unreached = [];
+  for (const o of others || []) {
+    let ok = false;
+    if (o.dir) {
+      try {
+        const fh = await o.dir.getFileHandle(TD.VALUES_FILE);
+        const was = await (await fh.getFile()).text();
+        const now = TD.forgetKeepLines(was, values);
+        if (now !== was) {
+          const w = await fh.createWritable();
+          await w.write(new Blob([now], { type: "text/plain" }));
+          await w.close();
+        }
+        ok = true;
+      } catch (e) {
+        // Taken by a run meanwhile: nothing left to take out (the master is
+        // written after this, so the row that run put back goes too).
+        ok = !!e && e.name === "NotFoundError" && (await dirStands(o.dir));
+        if (!ok) console.warn(e);
+      }
+    }
+    if (!ok) { unreached.push(o.name); continue; }
+    const k = VALUES_SAVED_PREFIX + o.name;
+    const was = lsGet(k, null);
+    if (typeof was === "string") {
+      const now = TD.forgetKeepLines(was, values);
+      if (now !== was) lsSet(k, now);
+    }
+    reached.push(o.name);
+  }
+  return { reached, unreached };
+}
+/**
+ * `values` taken out of every case list in `held` (keepsHeldFor), the list in
+ * hand included \u2014 and, where the open folder's file still carries a keep line
+ * on one, that line recorded as handed over (TD.noteKeepLines): the list
+ * without it then reads as owed to the file, so the status bar counts it, the
+ * closing tab asks, and Save writes the file without it \u2014 with nothing in it,
+ * where nothing else is left. Opening the folder again before then does not
+ * read it back in (adoptFolderNow).
+ */
+function dropKeepsFor(values, held) {
+  const want = new Set((values || []).map((v) => LK.fold(v)));
+  const mine = valuesStoreKey();
+  // Each list's keeps on them recorded as WITHDRAWN in its case (noteWithdrawn):
+  // that case's file, opened again, does not hand them back, and another
+  // reader tab holding the case's list lets them go (onWithdrawnElsewhere).
+  for (const l of held.lists) {
+    if (l.k === mine && flagsFor === mine) continue; // the list in hand, below
+    const st = readStoredValues(l.k);
+    const kept = st.keeps.filter((k) => !(k && want.has(LK.fold(k.value))));
+    if (kept.length !== st.keeps.length) {
+      noteKeepsWithdrawn(st.keeps, values, l.name);
+      lsSet(l.k, { ...st, keeps: kept });
+    }
+  }
+  if (flagsFor === mine) {
+    const kept = keeps.filter((k) => !want.has(LK.fold(k.value)));
+    if (kept.length !== keeps.length) {
+      noteKeepsWithdrawn(keeps, values);
+      keeps = kept;
+      persistValues();
+    }
+  }
+  if (held.file.length) {
+    const was = lsGet(valuesSavedKey(), "");
+    const now = TD.noteKeepLines(was, held.file);
+    if (now !== was) lsSet(valuesSavedKey(), now);
+    noteWithdrawn(held.file);
+  }
+  // …and the lines other folders' files carry, whether or not the reader can
+  // take them out now (takeKeepLinesOut): withdrawn there too.
+  for (const o of held.others || []) noteWithdrawn(o.lines, o.name);
+}
+/**
+ * What a Master Keep removal does to the reader's own keeps, said \u2014 before it
+ * (`asking`, the confirm) or after it (the toast) \u2014 or "" where it does nothing
+ * to them.
+ */
+function heldNote(held, it, { asking = false, reached = null, unreached = null } = {}) {
+  const one = it === "it";
+  // A list is kept under its folder's name — or a lone file's, or "loose" for
+  // the documents opened with neither.
+  const lists = held.lists.length ? nameList(held.lists.map((l) => (l.name === "loose" ? "documents opened on their own" : l.name)), 4) : "";
+  const file = held.file.length ? `${folderName}'s ${TD.VALUES_FILE}` : "";
+  // Other folders' files: those the reader takes the lines out of now, and
+  // those out of its reach — before the removal, by whether the folder can be
+  // written; after it, by what was done.
+  const others = held.others || [];
+  const near = reached || others.filter((o) => o.dir).map((o) => o.name);
+  const far = unreached || others.filter((o) => !o.dir).map((o) => o.name);
+  const filesIn = (names) => (names.length === 1 ? `${TD.VALUES_FILE} in ${names[0]}` : `the ${TD.VALUES_FILE} files in ${nameList(names, 4)}`);
+  const nearIn = near.length ? filesIn(near) : "";
+  const farIn = far.length ? filesIn(far) : "";
+  const farDo = far.length ? `${far.length === 1 ? `open ${far[0]}` : "open each of those folders"} here and Save before PDF-Linker runs there` : "";
+  const carry = far.length === 1 ? "carries" : "carry";
+  if (!lists && !file && !nearIn && !farIn) return "";
+  if (asking) {
+    const parts = [];
+    if (lists) parts.push(`off this reader's keeps for ${lists}`);
+    if (file) parts.push(`out of ${file}, which still carries ${it} \u2014 Save writes that`);
+    if (nearIn) parts.push(`out of ${nearIn}`);
+    return `\n\n` +
+      (parts.length ? `${one ? "It also comes" : "They also come"} ${parts.join(", and ")}. ` : "") +
+      (farIn ? `${farIn} still ${carry} ${it}, out of the reader's reach now: ${farDo}. ` : "") +
+      `Left there, PDF-Linker's next run would put ${it} back on the Master Keep.`;
+  }
+  return (lists ? ` ${one ? "It is" : "They are"} off this reader's keeps for ${lists} too${file ? "," : "."}` : "") +
+    (file ? `${lists ? " and" : ""} Save takes ${it} out of ${file}.` : "") +
+    (nearIn ? ` ${one ? "It is" : "They are"} out of ${nearIn}.` : "") +
+    (farIn ? ` \u26a0 ${farIn} still ${carry} ${it}: ${farDo}, or the run puts ${it} back on the Master Keep.` : "");
 }
 /** Whether the attached workbook may be written, asking the browser where it has to: { ok, why }. */
 async function masterWritable() {
@@ -7849,10 +9935,18 @@ function spotsFromBody(body, page) {
     return TD.makeSpot(page, value, at < 0 ? 0 : at);
   });
 }
+/**
+ * The page's spots read back off it, into the list of the MEMBER the page
+ * belongs to and that member's own store. On a reel the page may be another
+ * document's than the open one, and filing its keeps under the open document
+ * — rebased by the open document's first page — put a keep where there was
+ * none and lost the one there was. A page built off the screen keeps its own.
+ */
 function syncSpots(body) {
+  if (isShadow(body)) return;
   const page = pageIndexOf(body);
-  spots = spots.filter((x) => x.page !== page).concat(spotsFromBody(body, page));
-  persistSpots();
+  setSpotsListOf(page, spotsListOf(page).filter((x) => x.page !== page).concat(spotsFromBody(body, page)));
+  persistMemberSpots(reelMemberOf(page));
 }
 /** The spans of the wrapped name one piece belongs to — just the one piece's span where it stands whole. */
 function wrappedPieces(span) {
@@ -7987,9 +10081,9 @@ function fakeStandsInFile(real, text) {
   return rx.test(text == null ? TD.serializeExport(doc) : text);
 }
 
-/** Whether the folder's fakes index is out of step with the key or the folder. */
+/** Whether the folder's fakes index is out of step with the key, the folder, or the documents edited off the screen. */
 function fakesIndexStale() {
-  return !caseFakes.set || caseFakes.key !== key || caseFakes.docs !== folderDocs;
+  return !caseFakes.set || caseFakes.key !== key || caseFakes.docs !== folderDocs || caseFakes.seq !== unsavedSeq;
 }
 
 /** Whether the value's pseudonym stands anywhere in the case: the folder, or here. */
@@ -8021,8 +10115,7 @@ function onLeaksSheet(real) {
  * already standing costs nothing, so it is left there.
  */
 function keepWasWrittenOut(k) {
-  const line = `${k.control}: ${k.value}`;
-  return lsGet(valuesSavedKey(), "").split(/\r?\n/).some((l) => l.trim() === line);
+  return TD.carriesKeep(lsGet(valuesSavedKey(), ""), k.value, k.control);
 }
 
 /**
@@ -8068,6 +10161,14 @@ function setKeep(real, control, { leak = false } = {}) {
     faked: !leak || fakeStandsInCase(real),
     onLeaksSheet: onLeaksSheet(real),
   })) state = caseIsRead() ? "local" : "pending";
+  // A keep taken afresh (or its control changed) is a decision not yet handed
+  // over, whatever was written for the value before: that line may be one
+  // PDF-Linker has spent, and this one would be retired with it unsent.
+  if (control && TD.keptControl(keeps, real) !== control) forgetWrittenKeep(real);
+  // …and is no longer withdrawn; a keep withdrawn is recorded as such, so the
+  // folder's file, which may still carry its line, does not hand it back.
+  if (control) forgetWithdrawn([real]);
+  else noteKeepsWithdrawn(keeps, [real]);
   keeps = control ? TD.addKeep(keeps, control, real, state) : TD.removeKeep(keeps, real);
   persistValues();
   compileKey();
@@ -8408,6 +10509,87 @@ function unmarkPhrase(v) {
 function valuesStoreKey() { return VALUES_PREFIX + (folderName || fileName || "loose"); }
 function valuesSavedKey() { return VALUES_SAVED_PREFIX + (folderName || fileName || "loose"); }
 /**
+ * THE KEEPS WITHDRAWN, case by case (`textReader.keepsWithdrawn.<name>`): the
+ * keep lines the operator took off the list — its ×, "It is a pseudonym after
+ * all", a LEAKS answer that is a keep no longer, Remove from Master Keep —
+ * that New Real Values.txt may still carry. Opening the folder merges the
+ * file's keep lines into the list (a line written in another session, or one
+ * another reader tab's list was stored over), but never a line recorded here:
+ * that is the file's old copy of a decision withdrawn, owed OUT of the file at
+ * the next save. Recorded at the moment it is withdrawn, never inferred from
+ * the list lacking a line the reader once wrote — which is also what another
+ * tab's stale list, stored over this one, looks like, and that keep was not
+ * withdrawn. A line leaves the record when the keep is taken again
+ * (forgetWithdrawn), and when the folder's file is seen, read or written,
+ * without it (trimWithdrawn). Kept as keep lines (TD.noteKeepLines).
+ */
+function withdrawnKey(name = folderName || fileName || "loose") { return WITHDRAWN_PREFIX + name; }
+function setWithdrawn(k, text) {
+  if (String(text || "").trim()) { lsSet(k, text); return; }
+  try { localStorage.removeItem(k); } catch { /* no storage: nothing was kept */ }
+}
+/**
+ * `lines` ({ control, value }) recorded as withdrawn in the case kept under
+ * `name` (the open one by default). Only a case FOLDER has a file to keep
+ * them out of: a lone document's list (kept under its file name, or "loose")
+ * records nothing, which nothing would ever read or trim.
+ */
+function noteWithdrawn(lines, name) {
+  const n = name != null ? name : folderName;
+  if (!n || n === "loose" || TD.isExportName(n)) return;
+  const k = withdrawnKey(n);
+  const was = lsGet(k, "");
+  const now = TD.noteKeepLines(was, lines);
+  if (now !== was) setWithdrawn(k, now);
+}
+/**
+ * The keeps of `list` on `values` recorded as withdrawn in the case kept under
+ * `name` — every one but a local keep, which was never written anywhere.
+ */
+function noteKeepsWithdrawn(list, values, name) {
+  const want = new Set((values || []).map((v) => TD.foldValue(v)).filter(Boolean));
+  const lines = (list || []).filter((k) => k && k.state !== "local" && want.has(TD.foldValue(k.value)));
+  if (lines.length) noteWithdrawn(lines, name);
+}
+/** …and `values` taken again: their lines are no longer withdrawn. */
+function forgetWithdrawn(values, name) {
+  const k = withdrawnKey(name);
+  const was = lsGet(k, "");
+  const now = TD.forgetKeepLines(was, values);
+  if (now !== was) setWithdrawn(k, now);
+}
+/** The open case's record held to what its file, as just read or written (`text`, null for none), still carries. */
+function trimWithdrawn(text) {
+  const k = withdrawnKey();
+  const was = lsGet(k, "");
+  if (!was) return;
+  const now = TD.keepLinesCarried(was, text);
+  if (now !== was) setWithdrawn(k, now);
+}
+/** Whether the keep line `control: value` is one the operator withdrew in the open case. */
+function keepWithdrawn(control, value) {
+  return TD.carriesKeep(lsGet(withdrawnKey(), ""), value, control);
+}
+// ANOTHER READER TAB withdrew a keep this one still holds — its ×, or a Master
+// Keep removal reaching every case's list: it goes here too, at once. Two tabs
+// on one case write their lists over each other, and a tab holding the list as
+// it was before the withdrawal stored the keep straight back, for the next save
+// to hand to PDF-Linker and the next run to put back on the master. Only a
+// withdrawal is followed — nothing is added to this tab's list from another's
+// — and nothing is stored: the tab that withdrew it has stored the list.
+function onWithdrawnElsewhere(e) {
+  if (!e.key || e.key !== withdrawnKey() || flagsFor !== valuesStoreKey()) return;
+  let rec = "";
+  try { rec = e.newValue == null ? "" : JSON.parse(e.newValue); } catch { rec = ""; }
+  const gone = keeps.filter((k) => k && TD.carriesKeep(rec, k.value, k.control));
+  if (!gone.length) return;
+  keeps = keeps.filter((k) => !gone.includes(k));
+  compileKey();
+  if (doc) { remarkKept(); paintHighlights(); }
+  renderFlags();
+}
+window.addEventListener("storage", onWithdrawnElsewhere);
+/**
  * Whether the flagged values and the keeps have been written out since they
  * last moved. The list is remembered here whatever happens — closing the tab
  * loses nothing — but remembered here is not handed over: PDF-Linker reads
@@ -8416,23 +10598,165 @@ function valuesSavedKey() { return VALUES_SAVED_PREFIX + (folderName || fileName
  * file's own text is the signature; nothing else can be out of step with it.
  */
 function valuesDirty() {
+  const now = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed);
+  const saved = lsGet(valuesSavedKey(), "");
+  if (now === saved) return false;
   // A local keep is not in the file and never will be, so a list that holds
-  // nothing else is a list the case folder is owed nothing from.
-  if (!flagged.length && !TD.owedKeeps(keeps).length && !noOcr.length && !ocrAgain.length && !textFixed.length) return false;
-  return TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed) !== lsGet(valuesSavedKey(), "");
+  // nothing else is a list the case folder is owed nothing from — unless what
+  // was last written still holds lines: the last flag withdrawn is owed too,
+  // or PDF-Linker goes on applying a flag nobody wants any more.
+  return valuesOwed() || TD.readerFileHasLines(saved);
+}
+/** Whether the list holds anything New Real Values.txt carries. */
+function valuesOwed() {
+  return !!(flagged.length || TD.owedKeeps(keeps).length || noOcr.length || ocrAgain.length || textFixed.length);
 }
 /** …and the same list, as it stands, marked as written. */
 function markValuesSaved(text) { lsSet(valuesSavedKey(), text); renderFlags(); }
+/**
+ * New Real Values.txt in the open case folder as it stands: its text, null
+ * where there is none, undefined where it cannot be read (or no folder is open).
+ */
+async function valuesFileText() {
+  if (!dirHandle) return undefined;
+  try { return await (await (await dirHandle.getFileHandle(TD.VALUES_FILE)).getFile()).text(); }
+  catch (e) { return e && e.name === "NotFoundError" ? null : undefined; }
+}
+/**
+ * Where the record of what was written (valuesSavedKey) went: "here" — into
+ * the open case folder itself; "elsewhere" — into another folder under the
+ * same name; or "unknown" — nothing kept to say (an older build's write, no
+ * IndexedDB), which is read as here, by the name, as it always was
+ * (rememberWritten).
+ */
+async function writtenWhere() {
+  const dir = dirHandle, name = folderName;
+  if (!dir) return "unknown";
+  const rec = await writtenRecord(name);
+  if (!rec) return "unknown";
+  try { return (await dir.isSameEntry(rec.written)) ? "here" : "elsewhere"; }
+  catch { return "elsewhere"; }
+}
+/**
+ * The case's lists read against the folder's file as it stands (`disk`: its
+ * text, or null where there is none): what PDF-Linker has spent comes off them
+ * (TD.spendLines), and the record of what was written keeps only what the file
+ * still holds. → the keeps retired. `settle`: the key, the marks and the lists
+ * follow at once — not during an adoption, which does all of that itself.
+ *
+ * ONLY WHAT WAS WRITTEN HERE IS SPENT HERE. A line missing from the file is
+ * spent only where the record says it was written into this very folder
+ * (writtenWhere). A record written into another folder — a copy of the case
+ * under the same name — says nothing about this one: a keep line "missing"
+ * from it was never in it, and retiring the keep threw the decision away
+ * unsent. There the folder's own file becomes the record (TD.writtenBaseline),
+ * so whatever the list holds that the file does not reads as owed to it, and
+ * nothing is spent.
+ */
+async function spendFromDisk(disk, { settle = true } = {}) {
+  const where = await writtenWhere();
+  const was = lsGet(valuesSavedKey(), "");
+  if (where === "elsewhere") {
+    const base = TD.writtenBaseline(TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed), disk);
+    if (base !== was) lsSet(valuesSavedKey(), base);
+    // …and from now on the record is this folder's.
+    await rememberWritten(folderName, dirHandle);
+    if (settle && base !== was) renderFlags();
+    return [];
+  }
+  const s = TD.spendLines({ keeps, textFixed }, was, disk);
+  if (s.saved !== was) lsSet(valuesSavedKey(), s.saved);
+  if (s.keeps === keeps && s.textFixed === textFixed) {
+    // Only the record moved (a keep withdrawn whose line the run took out
+    // anyway): the status bar reads it again all the same.
+    if (settle && s.saved !== was) renderFlags();
+    return [];
+  }
+  keeps = s.keeps;
+  textFixed = s.textFixed;
+  persistValues();
+  if (settle) {
+    // A keep retired that the master workbook does not hold is no longer a keep
+    // at all: the key, and the marks it lays, read it again.
+    if (s.spentKeeps.length) { compileKey(); if (doc) { remarkKept(); paintHighlights(); } }
+    renderFlags();
+  }
+  return s.spentKeeps;
+}
+/**
+ * The spent keeps the attached master workbook does not hold, said by name —
+ * or "" where it holds every one of them, or no workbook is attached (then the
+ * file was the only place the reader could look, and a line PDF-Linker took out
+ * of it is spent with nothing to say). Asked of the workbook as it now stands:
+ * the startup reading finished, and read again where a run changed it since.
+ * Retired all the same: the keep was emptied or deleted on the master (or the
+ * run that took its line could not record it there), and writing it into the
+ * file again is what put it back there, run after run.
+ */
+async function keepsSpentNote(spent) {
+  if (!spent || !spent.length) return "";
+  await masterSettled();
+  const said = (off) => {
+    const one = off.length === 1;
+    return { one, what: off.map((v) => `“${v}”`).join(", "), it: one ? "it" : "them" };
+  };
+  // REMEMBERED, BUT NOT READ: the browser wants its leave again (a restarted
+  // browser takes the grant back unless "Allow on every visit" was chosen), or
+  // the file could not be read. Nothing can be checked against it, and that is
+  // said rather than taken for "no workbook attached" — the keeps are retired
+  // all the same, and the operator looks.
+  const unread = !masterInfo && (masterNeeds ? masterNeeds.name : masterLost);
+  if (unread) {
+    const { one, what, it } = said(spent.map((k) => k.value));
+    return `${what} ${one ? "is" : "are"} off this case's keeps: PDF-Linker has taken ${one ? "its line" : "their lines"} out of ${TD.VALUES_FILE}, ` +
+      `and whether ${unread} keeps ${it} could not be checked — ` +
+      (masterNeeds ? "the browser wants its leave to read the workbook again (Allow, in the bar at the top or the Flagged panel)" : "the workbook could not be read") + ". " +
+      `${one ? "It is" : "They are"} not sent again; if the Master Keep does not have ${it}, keep ${it} again here.`;
+  }
+  if (!masterHandle || !masterInfo || masterInfo.loose) return "";
+  const off = spent.filter((k) => !TD.keptControl(masterKeeps, k.value)).map((k) => k.value);
+  if (!off.length) return "";
+  const { one, what, it } = said(off);
+  return `${what} ${one ? "is" : "are"} off this case's keeps: PDF-Linker has taken ${one ? "its line" : "their lines"} out of ${TD.VALUES_FILE}, ` +
+    `and ${masterInfo.name} does not keep ${it} — removed there, or never recorded. ` +
+    `${one ? "It is" : "They are"} not sent again; keep ${it} again if ${one ? "it" : "they"} should stand.`;
+}
+/**
+ * A keep taken AFRESH: the record of a keep on the value written before is let
+ * go of, so that line — which PDF-Linker may have spent — is not taken for this
+ * decision, and the decision retired unsent.
+ */
+function forgetWrittenKeep(value) {
+  const was = lsGet(valuesSavedKey(), "");
+  const now = TD.forgetKeepLines(was, [value]);
+  if (now !== was) lsSet(valuesSavedKey(), now);
+}
 // Spot keeps belong to ONE document, not to the case: they name a place in it.
 // Remembered per document, like its swapped pages.
 function spotStoreKey() { return SPOTS_PREFIX + (folderName || "") + "/" + (fileName || ""); }
+/** …the store of any document of the folder, by name. */
+function spotKeyOf(name) { return SPOTS_PREFIX + (folderName || "") + "/" + name; }
 // A spot names a page of its own DOCUMENT. The page numbers in hand are the
 // reel's — one list holding several files — so they are written back rebased
 // onto the member, which is what the file is opened with again whether it is
 // opened on its own or hung anywhere on a reel.
-function persistSpots() {
-  const m = reelCurrent();
-  lsSet(spotStoreKey(), m && m.from ? spots.map((x) => ({ ...x, page: x.page - m.from })) : spots);
+function persistSpots() { persistMemberSpots(reelCurrent()); }
+/** The spot list a page's keeps are in: the open document's (`spots`) for its pages, else the member's own. */
+function spotsListOf(i) {
+  const m = reelMemberOf(i);
+  return !m || m === reelCurrent() ? spots : m.spots || [];
+}
+/** …and set: the open document's list is the global one and its member's alike. */
+function setSpotsListOf(i, list) {
+  const m = reelMemberOf(i);
+  if (!m || m === reelCurrent()) { spots = list; if (m) m.spots = list; }
+  else m.spots = list;
+}
+/** A member's spots written to its own store, as pages of its own document. */
+function persistMemberSpots(m) {
+  if (!m) return;
+  const list = m === reelCurrent() ? spots : m.spots || [];
+  lsSet(spotKeyOf(m.name), m.from ? list.map((x) => ({ ...x, page: x.page - m.from })) : list);
 }
 /** …and the same list read back, as pages of the reel a member starts at `from` of. */
 function spotsFrom(list, from) { return from ? list.map((x) => ({ ...x, page: x.page + from })) : list; }
@@ -8463,30 +10787,19 @@ function persistValues() { lsSet(valuesStoreKey(), { values: flagged, keeps, phr
 function syncNoOcr(indices, { drop = false } = {}) {
   if (!doc) return;
   if (flagsFor === valuesStoreKey()) {
+    // The rules are textdoc.pageListsAfter's — the same ones a save applies to
+    // the documents it writes off the screen.
     const sources = docPageSources();
-    let list = noOcr, again = ocrAgain, fixed = textFixed;
+    const items = [];
     for (const i of indices) {
-      const p = doc.pages[i];
       const entry = pageEntryAt(i, sources);
-      if (!entry) continue;
-      const marked = TD.headerSaysDidNotOcr(p), reads = TD.readsDidNotOcr(p.lines);
-      const asked = again.some((e) => TD.sameNoOcr(e, entry));
-      if (marked) list = TD.setNoOcr(list, entry, false);
-      // A page asked to be read again is not also owed as not to OCR.
-      else if (reads) { if (!asked) list = TD.setNoOcr(list, entry, true); }
-      else if (drop) list = TD.setNoOcr(list, entry, false);
-      // …and the request is done once the page reads as read under a header
-      // that is not DID NOT OCR: PDF-Linker has taken the mark off and
-      // exported the page's text (or the page was never marked, and its text
-      // is back).
-      if (asked && !marked && !reads) again = TD.setOcrAgain(again, entry, false);
-      // A page that reads DID_NOT_OCR has no transcription to hand over.
-      if (reads) fixed = TD.setTextFixed(fixed, entry, false);
+      if (entry) items.push({ entry, page: doc.pages[i] });
     }
-    if (list !== noOcr || again !== ocrAgain || fixed !== textFixed) {
-      noOcr = list;
-      ocrAgain = again;
-      textFixed = fixed;
+    const next = TD.pageListsAfter({ noOcr, ocrAgain, textFixed }, items, { drop });
+    if (next.noOcr !== noOcr || next.ocrAgain !== ocrAgain || next.textFixed !== textFixed) {
+      noOcr = next.noOcr;
+      ocrAgain = next.ocrAgain;
+      textFixed = next.textFixed;
       persistValues();
       renderFlags();
     }
@@ -8515,7 +10828,7 @@ function renderFlags() {
   updateDirty(); // a flag, a keep or one of them written is a save's business
   pagesTabSoon(); // …and the Pages tab's tags read the page lists
   flagsList.innerHTML = "";
-  flagCount.textContent = String(flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length + textFixed.length);
+  flagCount.textContent = String(flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length + textFixed.length + settled.size);
   const nocrList = $("nocr-list");
   nocrList.innerHTML = "";
   $("nocr-block").hidden = !noOcr.length;
@@ -8546,6 +10859,7 @@ function renderFlags() {
   refreshNocrButtons();
   renderSpots();
   renderMaster();
+  renderSettled();
   const keepsList = $("keeps-list");
   keepsList.innerHTML = "";
   $("keeps-block").hidden = !keeps.length;
@@ -8738,15 +11052,76 @@ function findInPages(v) {
  * of somebody who never asked for one.
  */
 async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
-  if (!flagged.length && !keeps.length && !noOcr.length && !ocrAgain.length && !textFixed.length) {
+  valuesSpentNote = "";
+  // The folder's leave to write, asked before anything awaits, while the click
+  // still counts as one (there is no prompt where it is granted already): the
+  // file is read first now.
+  let grant = null;
+  if (dirHandle && dirHandle.requestPermission) {
+    try { grant = dirHandle.requestPermission({ mode: "readwrite" }).catch(() => "denied"); }
+    catch { grant = Promise.resolve("denied"); }
+  }
+  // WHAT PDF-LINKER HAS SPENT since the list was last written comes off it
+  // before it is written again: a keep whose line PDF-Linker has taken out of
+  // the file is on the master workbook now, or was taken off it there, and
+  // written again it put the master's row back on the next run (spendFromDisk;
+  // the same reading the folder gets when it is opened). A line still in the
+  // file is still owed, and is written as it was.
+  let disk;
+  if (dirHandle && flagsFor === valuesStoreKey()) {
+    const owedBefore = valuesDirty();
+    disk = await valuesFileText();
+    if (disk !== undefined) {
+      const spent = await spendFromDisk(disk);
+      if (spent.length) valuesSpentNote = await keepsSpentNote(spent);
+      trimWithdrawn(disk);
+      // …and where all the list owed the file was what PDF-Linker has spent —
+      // a keep retired, or one withdrawn whose line the run took out anyway —
+      // the file already reads as the list does, and nothing is written. The
+      // Flagged panel's own Save says so — the keeps retired by name, in red
+      // where the master does not hold them — and never "nothing flagged yet"
+      // over a list it has just been through.
+      if ((owedBefore || spent.length) && !valuesDirty()) {
+        if (!quiet) {
+          const one = spent.length === 1;
+          toast(valuesSpentNote
+            || (spent.length
+              ? `${spent.map((k) => `“${k.value}”`).join(", ")} ${one ? "is" : "are"} off this case's keeps: PDF-Linker has applied ${one ? "it" : "them"} and taken ${one ? "its line" : "their lines"} out of ${TD.VALUES_FILE}. Nothing to write.`
+              : `${TD.VALUES_FILE} already reads as the list does: PDF-Linker has taken out the lines that differed. Nothing to write.`),
+          valuesSpentNote ? { error: true, ms: 12000 } : undefined);
+        }
+        return "spent";
+      }
+    }
+  }
+  const owed = valuesOwed();
+  const savedLines = TD.readerFileHasLines(lsGet(valuesSavedKey(), ""));
+  if (!owed && !keeps.length && !savedLines) {
     if (!quiet) toast("Nothing flagged yet — select an unfaked name and press Flag, or right-click a pseudonym to keep it.", { error: true });
     return false;
   }
   const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed);
+  // EVERYTHING WITHDRAWN. The file is written with nothing in it (the header
+  // alone, which PDF-Linker reads as empty) where it still carries lines; where
+  // it carries none, or is not there, there is nothing to tell it, and the list
+  // is simply in step with it. A line left standing would be read back as the
+  // list the next time the folder is opened, and handed over again.
+  const emptied = !owed;
+  if (emptied && dirHandle) {
+    const onDisk = disk !== undefined ? disk : await valuesFileText();
+    if (onDisk == null || !TD.readerFileHasLines(onDisk)) {
+      markValuesSaved(text);
+      // …in step with THIS folder's file (writtenWhere), which carries no
+      // withdrawn line any more.
+      await rememberWritten(folderName, dirHandle);
+      if (onDisk !== undefined) trimWithdrawn(onDisk);
+      return true;
+    }
+  }
   if (dirHandle) {
     try {
-      if (dirHandle.requestPermission) {
-        const perm = await dirHandle.requestPermission({ mode: "readwrite" });
+      if (grant) {
+        const perm = await grant;
         if (perm !== "granted") throw new Error("write permission denied");
       }
       const h = await dirHandle.getFileHandle(TD.VALUES_FILE, { create: true });
@@ -8754,7 +11129,17 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
       await w.write(new Blob([text], { type: "text/plain" }));
       await w.close();
       markValuesSaved(text);
-      if (!quiet) toast(`Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()}) into ${folderName} — re-run PDF-Linker to apply them to the files.`);
+      // Written into THIS folder: the record is trusted for what PDF-Linker
+      // spends here, and nowhere else (writtenWhere). A withdrawn keep's line is
+      // out of the file now.
+      await rememberWritten(folderName, dirHandle);
+      trimWithdrawn(text);
+      if (!quiet) {
+        toast((emptied
+          ? `Wrote ${TD.VALUES_FILE} with nothing in it — the flags and keeps withdrawn are no longer handed to PDF-Linker.`
+          : `Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()}) into ${folderName} — re-run PDF-Linker to apply them to the files.`)
+          + (valuesSpentNote ? " " + valuesSpentNote : ""), valuesSpentNote ? { error: true, ms: 12000 } : undefined);
+      }
       return true;
     } catch (e) {
       if (quiet) return false;
@@ -8762,7 +11147,33 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
     }
   }
   if (folderOnly) return false;
-  if (await writeText(text, TD.VALUES_FILE, null)) { markValuesSaved(text); return true; }
+  let pickedFile = null;
+  if (await writeText(text, TD.VALUES_FILE, null, { picked: (h) => { pickedFile = h; } })) {
+    // SAVED — BUT INTO THE CASE FOLDER? With no folder open there is no other
+    // place, and the list is written. With one open, the folder refused the
+    // write and the list went to the save picker or a download: the folder's
+    // own file, the only one PDF-Linker reads, is still owed it, so the list is
+    // not marked written — the status bar goes on saying so, and the closing
+    // tab asks — and the record of what the folder was last given stays what
+    // it was, so what a run spends of THAT is still read as spent, and a keep
+    // that never reached the folder is never taken for one it took out. Unless
+    // the picker was pointed at the folder's own New Real Values.txt, which is
+    // the folder write after all.
+    let here = !dirHandle;
+    if (dirHandle && pickedFile) {
+      try { here = await (await dirHandle.getFileHandle(TD.VALUES_FILE)).isSameEntry(pickedFile); } catch { here = false; }
+    }
+    if (!here) {
+      toast(`Saved a copy of ${TD.VALUES_FILE} outside ${folderName} — PDF-Linker reads only the case folder's own, so the list is still owed there: put the copy in ${folderName}, or Save again once the folder can be written.`, { error: true, ms: 12000 });
+      return true;
+    }
+    markValuesSaved(text);
+    if (dirHandle) {
+      await rememberWritten(folderName, dirHandle);
+      trimWithdrawn(text);
+    }
+    return true;
+  }
   return false;
 }
 $("flags-save").addEventListener("click", () => saveValuesFile());
@@ -8949,8 +11360,17 @@ function moveLeakKeep(row) {
   const kind = LK.classifyFix(row.fix, row.value).kind;
   const f = PK.fold(row.value);
   const want = LK.isKeepKind(kind) && boundByKey(row.value);
-  if (want) { keeps = TD.addKeep(keeps, kind, row.value); leaks.mirrored.add(f); }
-  else if (leaks.mirrored.has(f)) { keeps = TD.removeKeep(keeps, row.value); leaks.mirrored.delete(f); }
+  if (want) {
+    if (TD.keptControl(keeps, row.value) !== kind) forgetWrittenKeep(row.value); // a decision taken afresh (setKeep)
+    forgetWithdrawn([row.value]);
+    keeps = TD.addKeep(keeps, kind, row.value);
+    leaks.mirrored.add(f);
+  }
+  else if (leaks.mirrored.has(f)) {
+    noteKeepsWithdrawn(keeps, [row.value]); // withdrawn, as a × withdraws it (setKeep)
+    keeps = TD.removeKeep(keeps, row.value);
+    leaks.mirrored.delete(f);
+  }
   else return false;
   return true;
 }
@@ -10400,7 +12820,13 @@ function reelMax() { return oneDocAtATime() ? REEL_MAX_BIG : REEL_MAX; }
 // citation underlines. Either ceiling stops the reel, and it says which.
 const REEL_MAX_PAGES = 600;
 
-let reel = [];          // [{ name, handle, newline, trailingNewline, from, count, dirty, spots }]
+// …each member also carrying `d` (its entry in the folder's list, null for a
+// file that is not one of the folder's), `base` (the file it was read from:
+// { text, stamp, opened } — what Save checks the disk against), `editSeq`
+// (bumped by every edit, so a save that ran while typing went on does not
+// clear the newer edit), `built` (its pages' typing baselines, where it came
+// from the store) and `conflict` (its file written since the edits began).
+let reel = [];          // [{ name, handle, newline, trailingNewline, from, count, dirty, spots, d, base, editSeq, built, conflict }]
 let reelAt = 0;         // the member being read: an index into `reel`
 let reelBusy = false;   // one append at a time — the scroll asks many times
 let reelDone = false;   // the folder is read out downward
@@ -10409,12 +12835,13 @@ let reelJustOpened = false; // a document went up: the first reach happens witho
 let reelLastTop = 0;    // the scroll the last event saw, for which way the reading is going
 
 /** The reel as one member: a document opened on its own, or the head of a folder read. */
-function reelReset(parsed, name, handle, theirSpots) {
+function reelReset(parsed, name, handle, theirSpots, { d = null, base = null } = {}) {
   reel = [{
     name, handle,
     newline: parsed.newline, trailingNewline: parsed.trailingNewline,
     from: 0, count: parsed.pages.length,
     dirty: false, spots: theirSpots || [],
+    d, base, editSeq: 0, built: null, conflict: false,
   }];
   reelAt = 0;
   reelBusy = false;
@@ -10540,23 +12967,24 @@ function reelDivider(m, { back = false } = {}) {
  */
 async function reelExtend() {
   if (reelBusy || reelDone || !doc || !dirHandle) return false;
+  // Not while a folder-wide pass holds the reel's members still.
+  if (saving || folderPass) return false;
   if (!reelRoom()) return false;
   const next = reelNextDoc();
   if (!next) { reelDone = true; return false; }
   reelBusy = true;
   const was = doc; // a document opened while the file was being read is another reel
   try {
-    let parsed = null;
-    const built = ready.get(next.name);
-    if (built && built.doc && built.epoch === readyEpoch) parsed = built.doc;
-    if (!parsed) parsed = readExport(await (await next.handle.getFile()).text());
-    if (doc !== was) return false;
+    const got = await readReelDoc(next);
+    if (doc !== was || !got) return false;
+    const { parsed, base, entry } = got;
     const from = doc.pages.length;
-    const theirSpots = spotsFrom(TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + next.name, [])), from);
+    const theirSpots = spotsFrom(entry ? TD.normalizeSpots(entry.spots) : TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + next.name, [])), from);
     const m = {
       name: next.name, handle: next.handle,
       newline: parsed.newline, trailingNewline: parsed.trailingNewline,
       from, count: parsed.pages.length, dirty: false, spots: theirSpots,
+      d: next, base, editSeq: 0, built: null, conflict: false,
     };
     doc.pages = doc.pages.concat(parsed.pages);
     reel.push(m);
@@ -10566,6 +12994,7 @@ async function reelExtend() {
     during("hanging the next document on the reel", () =>
       buildPages(frag, doc.pages, { from, to: from + m.count, spots: theirSpots, editable: editing }));
     pagesEl.appendChild(frag);
+    hungFromStore(m, entry);
     reelChanged();
     // …and the far end is let go of once this one has been LAID OUT. Never
     // here: a page appended this instant has not been through applyPageWidth
@@ -10579,6 +13008,42 @@ async function reelExtend() {
     reelDone = true; // do not sit in a loop asking for a file that will not open
     return false;
   } finally { reelBusy = false; }
+}
+
+/**
+ * A document the reel is about to hang, read: out of the store where it has
+ * unsaved edits (it is hung with them), else from its file — through the
+ * parse built ahead of time only where that was built from the file as it now
+ * is, since a stale one hung and saved would write the old text back over
+ * whatever wrote the file since. → { parsed, base, entry }
+ */
+async function readReelDoc(d) {
+  const r = await readDoc(d);
+  if (r.entry) return { parsed: TD.cloneDoc(r.entry.doc), base: r.entry.base, entry: r.entry };
+  const built = ready.get(d.name);
+  // A copy: the parse held ready is the one a later open would use.
+  const parsed = built && built.doc && built.epoch === readyEpoch && built.fileKey === r.stamp ? TD.cloneDoc(built.doc) : readExport(r.text);
+  return { parsed, base: { text: r.text, stamp: r.stamp, opened: TD.serializeExport(parsed) }, entry: null };
+}
+/** A member just hung: seen, and — where it came out of the store — unsaved, as it was left. */
+function hungFromStore(m, entry) {
+  seenDocs.add(m.name);
+  if (!entry) return;
+  entry.built.forEach((t, k) => { const b = bodyForPage(m.from + k); if (b && t != null) b.__built = t; });
+  m.built = entry.built.slice();
+  m.dirty = true;
+  m.conflict = !!entry.conflict;
+  dirty = true;
+  unsavedDocs.delete(m.name);
+  unsavedSeq++;
+  markDocList();
+  updateDirty();
+  // …checked against its file, as a document opened from the store is: one
+  // written since its edits began is tagged, and Save will not write over it.
+  const base = m.base;
+  if (base && m.d && !m.conflict) {
+    diskStill(m.d, base).then((c) => { if (c !== "ok" && m.base === base && m.dirty) { m.conflict = true; markDocList(); updateDirty(); } });
+  }
 }
 
 /** The reel grew: everything measured off the document is measured again. */
@@ -10635,8 +13100,9 @@ function reelShift(n) {
   const bump = (list) => { for (const x of list || []) if (!moved.has(x)) { moved.add(x); x.page += n; } };
   for (const m of reel) { m.from += n; bump(m.spots); }
   bump(spots);
-  for (const sn of undoStack) { sn.page += n; bump(sn.spots); }
-  for (const sn of redoStack) { sn.page += n; bump(sn.spots); }
+  // A folder replace's marker names no page (revertFolderReplace finds its documents by name).
+  for (const sn of undoStack) { if (sn.page != null) sn.page += n; bump(sn.spots); }
+  for (const sn of redoStack) { if (sn.page != null) sn.page += n; bump(sn.spots); }
   if (lastSnapPage >= 0) lastSnapPage += n;
   textAnchors = null; textLineTops = null;
 }
@@ -10682,6 +13148,7 @@ function markHeadDivider(m) {
  */
 async function reelPrepend() {
   if (reelBusy || reelDoneUp || !doc || !dirHandle) return false;
+  if (saving || folderPass) return false;
   if (!reelCanRenumber()) return false;
   const prev = reelPrevDoc();
   if (!prev) { reelDoneUp = true; renderReelState(); return false; }
@@ -10689,11 +13156,9 @@ async function reelPrepend() {
   reelBusy = true;
   const was = doc, head = reel[0]; // …and the reel may not be this reel by then
   try {
-    let parsed = null;
-    const built = ready.get(prev.name);
-    if (built && built.doc && built.epoch === readyEpoch) parsed = built.doc;
-    if (!parsed) parsed = readExport(await (await prev.handle.getFile()).text());
-    if (doc !== was || reel[0] !== head || !reelCanRenumber()) return false;
+    const got = await readReelDoc(prev);
+    if (!got || doc !== was || reel[0] !== head || !reelCanRenumber() || saving || folderPass) return false;
+    const { parsed, base, entry } = got;
     const n = parsed.pages.length;
     // Where the reading stands, before anything goes in above it.
     const anchor = pagesEl.querySelector(".tpage");
@@ -10702,11 +13167,12 @@ async function reelPrepend() {
     reelShift(n);
     doc.pages = parsed.pages.concat(doc.pages);
     // Its own spots are already the reel's numbering: it starts the reel.
-    const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + prev.name, []));
+    const theirSpots = entry ? TD.normalizeSpots(entry.spots) : TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + prev.name, []));
     const m = {
       name: prev.name, handle: prev.handle,
       newline: parsed.newline, trailingNewline: parsed.trailingNewline,
       from: 0, count: n, dirty: false, spots: theirSpots,
+      d: prev, base, editSeq: 0, built: null, conflict: false,
     };
     reel.unshift(m);
     reelAt++; // the member being READ is the one it was; its place in the reel is not
@@ -10717,6 +13183,7 @@ async function reelPrepend() {
     during("hanging the document before this one on the reel", () =>
       buildPages(frag, doc.pages, { from: 0, to: n, spots: theirSpots, editable: editing }));
     pagesEl.insertBefore(frag, pagesEl.firstChild);
+    hungFromStore(m, entry);
     reelChanged();
     if (anchor) {
       stageEl.scrollTop = wasTop + (anchor.offsetTop - wasAt);
@@ -10856,7 +13323,12 @@ function reelDirtyMembers() { return reel.filter((m) => m.dirty); }
 /** The member holding a page, marked edited — the file a save has to write. */
 function reelMarkDirty(pageIndex) {
   const m = pageIndex == null ? reelCurrent() : reelMemberOf(pageIndex);
-  if (m) m.dirty = true;
+  if (!m) return;
+  const was = m.dirty;
+  m.dirty = true;
+  // Counted, so a save that was running meanwhile leaves this edit unsaved.
+  m.editSeq = (m.editSeq || 0) + 1;
+  if (!was && m.d) markDocList();
 }
 
 
@@ -10938,10 +13410,11 @@ function shedMember(m, secs) {
     sec.classList.add("shed");
   });
   m.shed = true;
-  // An undo step names a page that has no body to put back. The reading has
-  // been four screens away from this document; the history of it is over.
-  undoStack = undoStack.filter((sn) => sn.page < m.from || sn.page >= m.from + m.count);
-  redoStack = redoStack.filter((sn) => sn.page < m.from || sn.page >= m.from + m.count);
+  // Its undo steps stay. They used to go — the page had no body to put them
+  // back into — which made a Replace all across several members, saved and
+  // then read away from, come back only in part on Ctrl+Z, and say nothing.
+  // A shed page is put back in `doc.pages` instead (restoreSnapshot), and
+  // built from there when it comes near again.
 }
 
 function unshedMember(m, secs) {
@@ -10994,8 +13467,11 @@ function reelTrimNow() {
   if (!doc || reel.length < 2) return;
   // A review is a walk over the whole document: nothing is let go of under it.
   // The redaction tool is one too — its check reads every pseudonym the export
-  // carries, and a shed page carries none.
-  if (!leaksBar.hidden || !namesBar.hidden || redactOn) return;
+  // carries, and a shed page carries none. So is a find: its count of the
+  // reel's documents is read off their pages (the folder's rows leave them
+  // out, onReel), and a member shed under it was counted nowhere — "none here
+  // · nowhere else", Replace all off, and Replace walking on past it.
+  if (!leaksBar.hidden || !namesBar.hidden || !findBar.hidden || redactOn) return;
   const top = stageEl.scrollTop;
   const bottom = top + stageEl.clientHeight;
   const pad = Math.max(stageEl.clientHeight * REEL_KEEP_SCREENS, 1200);
@@ -11051,7 +13527,8 @@ function afterShedChange() {
  * And a REVIEW OPENING. The LEAKS worksheet and the names walk both jump about
  * the whole document looking for a value, and a page with no body is a page
  * they would report as not holding what it holds. While either bar is open
- * nothing is shed at all (`reelTrim`), so this is asked once, as it opens.
+ * nothing is shed at all (`reelTrim`), so this is asked once, as it opens —
+ * and the find bar is the same, whose count of the reel reads its pages.
  */
 function reelAllLive() {
   return during("building the reel's pages back for the review", () => reelAllLiveNow());
@@ -12097,6 +14574,9 @@ async function buildAhead(d) {
 }
 async function buildAheadNow(d) {
   const epoch = readyEpoch;
+  // A document with unsaved edits is opened from the store, never from a page
+  // built off its file.
+  if (unsavedDocs.has(d.name)) { ready.set(d.name, { name: d.name, skipped: "unsaved edits" }); return; }
   const file = await d.handle.getFile();
   const text = await file.text();
   if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
@@ -12124,6 +14604,7 @@ async function buildAheadNow(d) {
   ready.set(d.name, {
     name: d.name, handle: d.handle, fileKey: fileKeyOf(file), doc: parsed, nodes, epoch,
     spots: theirSpots, pages: parsed.pages.length,
+    text, // the file it was built from: what a save checks the disk against once it is opened
     // What its spans were built under: a keep decided since, or the fake/real
     // toggle flipped since, is put right as the document goes up.
     fakes: settings.showFakes, keeps: keepsSignature(),
@@ -12133,6 +14614,8 @@ async function buildAheadNow(d) {
 function readyFor(file) {
   const e = file ? ready.get(file.name) : null;
   if (!e || !e.nodes) return null;
+  // Edits waiting in the store are the document now, not the file it was built from.
+  if (unsavedDocs.has(e.name)) { ready.delete(e.name); return null; }
   if (e.epoch !== readyEpoch || e.fileKey !== fileKeyOf(file)) {
     // Written since it was built (another PDF-Linker run, a save): what is
     // held is of the old file, so it goes and the window builds the new one.
@@ -15346,9 +17829,21 @@ window.__textReaderLoadLocal = async (file, handle, dir) => {
 };
 window.__textReaderRememberDir = (h) => rememberDir(h);
 // What a tab would lose if it went: the shell asks before closing one, and
-// moves one to a window of its own only with nothing unsaved. The flagged
-// values are not in it — they are kept in storage, whatever happens.
-window.__textReaderHasUnsaved = () => dirty || leaksDirty();
+// moves one to a window of its own only with nothing unsaved — a document
+// unsaved anywhere in the folder, a decision not yet written (a flag, a keep,
+// a LEAKS answer, a name said to be faked, a Master Keep removal). Removing
+// the shell's iframe fires no unload, so this is the only question it gets.
+window.__textReaderHasUnsaved = () => hasUnsaved();
+// The documents with unsaved edits, and where each is: on the reel, or in the store.
+window.__textReaderUnsaved = () => [
+  ...reel.filter((m) => m.dirty).map((m) => ({ name: m.name, where: "reel", conflict: !!m.conflict })),
+  ...[...unsavedDocs.values()].map((e) => ({ name: e.name, where: "store", conflict: !!e.conflict })),
+];
+// …and the folder replaces held for undo.
+window.__textReaderJournal = () => replaceJournal.map((r) => ({
+  id: r.id, q: r.q, withText: r.withText, state: r.state,
+  docs: r.docs.map((x) => ({ name: x.name, written: x.writtenText != null })),
+}));
 // …and what to open in that new window: the document on screen (which may be
 // one this reader opened itself, from Documents or its own picker), its file
 // and the case folder it came from.
@@ -15415,6 +17910,9 @@ window.__textReaderWarm = () => ({
   walk: { files: LK.leakFileOrder(leakRows(), leaks ? leaks.at : 0), window: leakFileWindow(), oneAtATime: oneDocAtATime() },
 });
 window.__textReaderMaster = (bytes, name) => readMasterBytes(new Uint8Array(bytes), name);
+// …and attached by its handle, as Load master workbook… attaches it (written in
+// place on a removal, read again where a run changed it).
+window.__textReaderAdoptMaster = (handle) => adoptMaster(handle);
 window.__textReaderMasterState = () => ({
   info: masterInfo, keeps: masterKeeps.map((k) => k.control + ":" + k.value),
   needs: !!masterNeeds, seen: [...keptSeen],
@@ -15452,5 +17950,6 @@ renderFlags();
 renderLeaksTab();
 updateLeaksButton();
 // The master workbook's standing keeps, in force before the first document is
-// read — the whole point of them is that nobody has to be asked again.
-restoreMaster();
+// read — the whole point of them is that nobody has to be asked again. Kept,
+// so a question put to the workbook early waits for it (masterSettled).
+masterRestoring = restoreMaster();

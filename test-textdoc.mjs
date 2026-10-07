@@ -20,8 +20,11 @@ import {
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
   textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
   marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
+  readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
+  pageListsAfter, fixedSumsFor, readerFileHasLines,
+  keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
 } from "./viewer/textdoc.js";
-import { parseKey, compileForward, compile, compileReals, buildMatcher } from "./viewer/pseudo-key.js";
+import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns } from "./viewer/pseudo-key.js";
 
 let fails = 0;
 function check(label, got, want) {
@@ -1055,6 +1058,277 @@ console.log("margin numbers the OCR missed");
   const tops = (...ns) => ns.map((t) => ({ header: "x", lines: Array.from({ length: t }, (_, k) => num(k + 1, "x")) }));
   check("…the highest that two pages reach: the OCR loses numbers at the foot, never adds them", [pleadingLast(tops(28, 27, 26)), pleadingLast(tops(28, 26, 28))], [27, 28]);
   check("…so one number misread high at the foot of one page is not it", pleadingLast([...tops(28, 28), { header: "x", lines: [...Array.from({ length: 27 }, (_, k) => num(k + 1, "x")), num(88, "x")] }]), 28);
+}
+
+// ---- a document of the folder off the screen: read, counted and saved as the screen would ----
+// The folder-wide Replace all and Save work on documents that are not on
+// screen. What they read of one must be what the screen would read of it: the
+// counts, the pages a save has to build, the spot keeps after its forward pass,
+// and the standing assertion.
+console.log("documents off the screen");
+{
+  const HEAD = ["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"];
+  const kx = parseKey([{ name: "Pseudonym Key", rows: [HEAD,
+    ["person", "Corwin Ashdale", "Tobias Wrenfield", "", "", "spreadsheet", 4],
+    ["person-token", "Ashdale", "Wrenfield", "", "", "spreadsheet", 4],
+    ["entity", "Pellmont Motors", "Quarrow Motors", "", "", "spreadsheet", 3],
+  ] }], "k");
+  const rev = compile(kx), reals = compileReals(kx), fwdx = compileForward(kx);
+  // readExport: the function the reader used to carry, word for word.
+  const oldRead = (text) => {
+    const parsed = parseExport(text);
+    const last = pleadingLast(parsed.pages);
+    let pages = 0, numbers = 0;
+    for (const p of parsed.pages) {
+      if (p.header == null) continue;
+      const r = restoreMarginNumbers(p.lines, { last });
+      if (!r) continue;
+      p.lines = r.lines; p.restored = r.added; pages++; numbers += r.added.length;
+    }
+    parsed.restored = { pages, numbers };
+    return parsed;
+  };
+  const numPage = (n, skip) => [`====== Page ${n} ======`, ...Array.from({ length: 28 }, (_, k) => (k + 1 === skip ? "" : String(k + 1).padStart(2) + "  line " + (k + 1)))];
+  const pleading = [...numPage(1, 5), ...numPage(2), ...numPage(3, 9), "====== Page 4 ======", "EXHIBIT A"].join("\n") + "\n";
+  check("readExport gives the lines and the numbers put back that the reader's own did", readExport(pleading), oldRead(pleading));
+  check("…numbers put back, and marked on the page", readExport(pleading).pages[0].restored, [5]);
+
+  // cloneDoc
+  const orig = readExport(pleading);
+  const copy = cloneDoc(orig);
+  copy.pages[0].lines[0] = "changed";
+  copy.pages[0].restored.push(99);
+  check("cloneDoc serializes the same", serializeExport(cloneDoc(orig)), serializeExport(orig));
+  check("…and is a copy: the original's lines and marks do not move with it", [orig.pages[0].lines[0], orig.pages[0].restored], [" 1  line 1", [5]]);
+
+  // shownPages: what Find and Replace read off a built page, from the text alone.
+  const text = [
+    "====== Page 1 ======",
+    " 1  Plaintiff Tobias Wrenfield bought a vehicle from Quarrow",
+    " 2  Motors on Page Street.",
+    " 3",
+    "====== Page 2 (printed p. 2) ======",
+    "Wrenfield asks for the vehicle back.",
+    "====== Authorities cited (public verification links) ======",
+    "Wrenfield v. Quarrow Motors (2001) 90 Cal.App.4th 12",
+  ].join("\n") + "\n";
+  const d = parseExport(text);
+  const real = shownPages(d, { rev, showFakes: false });
+  check("shownPages: the fakes shown as the real names, the margin numbers blanked to spaces",
+    real[0], "    Plaintiff Corwin Ashdale bought a vehicle from Pellmont\n    Motors on Page Street.\n  ");
+  check("…a page at a time, the trailer with its page and no header in any of them",
+    real[1], "Ashdale asks for the vehicle back.\n====== Authorities cited (public verification links) ======\nAshdale v. Pellmont Motors (2001) 90 Cal.App.4th 12");
+  check("…with Show fakes on, the file's own face", shownPages(d, { rev, showFakes: true })[0],
+    "    Plaintiff Tobias Wrenfield bought a vehicle from Quarrow\n    Motors on Page Street.\n  ");
+  check("…and a pseudonym wrapped over a numbered line is read piece by piece, the number between blanked", real[0].includes("Pellmont\n    Motors"), true);
+  const count = (pages, q) => pages.reduce((n, p) => { const rx = buildFindMatcher([q]); let k = 0; rx.lastIndex = 0; while (rx.exec(p)) k++; return n + k; }, 0);
+  check("a query of \"Page\" counts the text's own word, never the page headers", count(real, "Page"), 1);
+  check("…and a margin number is never a hit", count(real, "2"), 2);
+  check("…while a pseudonym's real name is, through the key", count(real, "Ashdale"), 3);
+  check("no key: the text as it is, numbers blanked", shownPages(parseExport("====== Page 1 ======\n 1  a b\n"), {})[0], "    a b");
+  // A margin number straight before a pseudonym is still a number (buildBody's
+  // U+0001 stand-in), and a line that opens with one is not.
+  check("…a number followed straight by a pseudonym is blanked", shownPages(parseExport("====== Page 1 ======\n 4  Tobias Wrenfield\n"), { rev })[0], "    Corwin Ashdale");
+
+  // splitFolderRows
+  const docA = { name: "A" }, docB = { name: "B" }, docC = { name: "C" }, comb = { name: "Combined Text.txt", combined: true };
+  const split = splitFolderRows([{ doc: comb, count: 6 }, { doc: docA, count: 2 }, { doc: docB, count: 1 }, { doc: docC, count: 3 }], (x) => x === docA || x === docB);
+  check("splitFolderRows: the documents on screen out, the combined file apart", [split.rest.map((r) => r.doc.name + " " + r.count), split.combined.map((r) => r.count)], [["C 3"], [6]]);
+  check("…and a combined file on screen is on screen", splitFolderRows([{ doc: comb, count: 6 }], (x) => x === comb), { rest: [], combined: [] });
+
+  // pageScan
+  const kj = parseKey([{ rows: [["Real Value", "Replacement"], ["Quillmark", "Mary Jones"], ["Jones", "Pat Doe"]] }], "k");
+  const oj = { rev: compile(kj), reals: compileReals(kj) };
+  const s1 = pageScan(" 1  Mary Jones signed.", oj);
+  check("pageScan: a real word inside a fake is no reason to build the page, and the fake is blanked", [s1.needs, s1.scan], [false, " 1  \u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000 signed."]);
+  check("…a real standing is", pageScan(" 1  Jones signed.", oj).needs, true);
+  check("…and one in a cited decision too: the save's own pass decides it", pageScan("See Jones v. Smith (2001) 90 Cal.App.4th 12.", oj).needs, true);
+  const s2 = pageScan("Pat signed; Jones left.", { ...oj, spots: [makeSpot(0, "Jones", 0)] });
+  check("…a spot keep is blanked, and is no reason either", [s2.needs, s2.scan], [false, "Pat signed; \u0000\u0000\u0000\u0000\u0000 left."]);
+  check("…but a spot running into a fake is", pageScan("Mary Jones left.", { ...oj, spots: [makeSpot(0, "Jones", 0)] }).needs, true);
+  check("…the keeps masked are no reason", pageScan("Jones left.", { ...oj, mask: (t) => t.replace(/Jones/g, "\u0000\u0000\u0000\u0000\u0000") }).needs, false);
+  check("…and a cited name is blanked in the scan", /Jones|Smith/.test(pageScan("Jones v. Smith (2001) 90 Cal.App.4th 12.", {}).scan), false);
+
+  // spotsAfterSwaps: the bug the folder save would hit in every such document.
+  const before = "Corwin Ashdale, then Corwin Ashdale; Corwin Ashdale kept.";
+  const held = [[37, 51]]; // the third
+  const places = [{ start: 0, end: 14, to: "Tobias Wrenfield" }, { start: 21, end: 35, to: "Tobias Wrenfield" }];
+  let after = "", at = 0;
+  for (const p of places) { after += before.slice(at, p.start) + p.to; at = p.end; }
+  after += before.slice(at);
+  check("spotsAfterSwaps: the third occurrence kept, the two before it faked → the first now, where it moved to",
+    spotsAfterSwaps(3, before, held, places, after), [makeSpot(3, "Corwin Ashdale", 0)]);
+  check("…and the kept place is still the value", after.slice(41, 55), "Corwin Ashdale");
+  check("…an occurrence kept before any swap keeps its ordinal",
+    spotsAfterSwaps(0, before, [[0, 14]], [{ start: 21, end: 35, to: "Tobias Wrenfield" }, { start: 37, end: 51, to: "Tobias Wrenfield" }],
+      "Corwin Ashdale, then Tobias Wrenfield; Tobias Wrenfield kept."), [makeSpot(0, "Corwin Ashdale", 0)]);
+  // …and what a save's forward pass gives, end to end: the spot still applies.
+  const runs = forwardRuns(fwdx, blankRanges(before, held));
+  const sw = []; let off = 0;
+  for (const r of runs) { const len = r.t === "swap" ? r.from.length : r.s.length; if (r.t === "swap") sw.push({ start: off, end: off + len, to: r.to }); off += len; }
+  let fw = "", k = 0;
+  for (const s of sw) { fw += before.slice(k, s.start) + s.to; k = s.end; }
+  fw += before.slice(k);
+  check("…through the key's own forward pass, the spot lands on the value it kept",
+    spotRanges(fw, spotsAfterSwaps(0, before, held, sw, fw)).map(([a, b]) => fw.slice(a, b)), ["Corwin Ashdale"]);
+
+  // pageListsAfter: syncNoOcr's five rules.
+  const e1 = { doc: "A.txt", pdf: "A.pdf", page: 1 };
+  const pg = (lines, header = "====== Page 1 ======") => ({ header, lines, review: null });
+  const none = { noOcr: [], ocrAgain: [], textFixed: [] };
+  check("pageListsAfter: a page reading [DID NOT OCR] is owed", pageListsAfter(none, [{ entry: e1, page: pg([DID_NOT_OCR]) }]).noOcr.length, 1);
+  check("…unless it is asked to be read again", pageListsAfter({ ...none, ocrAgain: [e1] }, [{ entry: e1, page: pg([DID_NOT_OCR]) }]).noOcr.length, 0);
+  check("…a header PDF-Linker wrote as DID NOT OCR takes it off",
+    pageListsAfter({ ...none, noOcr: [e1] }, [{ entry: e1, page: pg([DID_NOT_OCR], "====== Page 1 — DID NOT OCR ======") }]).noOcr.length, 0);
+  check("…a page no longer reading it comes off only with drop",
+    [pageListsAfter({ ...none, noOcr: [e1] }, [{ entry: e1, page: pg(["text"]) }]).noOcr.length, pageListsAfter({ ...none, noOcr: [e1] }, [{ entry: e1, page: pg(["text"]) }], { drop: true }).noOcr.length], [1, 0]);
+  check("…a request to read again is done once the page reads", pageListsAfter({ ...none, ocrAgain: [e1] }, [{ entry: e1, page: pg(["text"]) }]).ocrAgain.length, 0);
+  check("…and a page reading [DID NOT OCR] has no transcription", pageListsAfter({ ...none, textFixed: [{ ...e1, sum: "00000000" }] }, [{ entry: e1, page: pg([DID_NOT_OCR]) }]).textFixed.length, 0);
+  const same = { noOcr: [e1], ocrAgain: [], textFixed: [] };
+  check("…and the same lists where nothing moved", pageListsAfter(same, [{ entry: e1, page: pg([DID_NOT_OCR]) }]).noOcr === same.noOcr, true);
+
+  // fixedSumsFor
+  const tf = [{ ...e1, sum: "00000000" }];
+  check("fixedSumsFor: each transcribed page takes the sum of its text as written", fixedSumsFor(tf, [{ entry: e1, lines: ["a", "b"] }])[0].sum, pageTextSum(["a", "b"]));
+  check("…a page with no entry is passed over", fixedSumsFor(tf, [{ entry: { ...e1, page: 2 }, lines: ["a"] }]) === tf, true);
+
+  // readerFileHasLines: the last flag withdrawn
+  const empty = formatValuesFile([], [], [], [], [], []);
+  check("readerFileHasLines: the header alone has no lines", [readerFileHasLines(empty), readerFileHasLines(""), readerFileHasLines("﻿# just a note\n\n")], [false, false, false]);
+  check("…and a value is one", readerFileHasLines(formatValuesFile(["Rosa"], [], [], [], [], [])), true);
+  check("…and the header-only file parses to nothing", parseReaderFile(empty), { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
+
+  // realsLeftInExport: the standing assertion
+  const plain = "Tobias Wrenfield signed. See Ashdale v. Smith (2001) 90 Cal.App.4th 12.";
+  const heldText = blankRanges(plain, [[0, 16]]);
+  check("realsLeftInExport: a fake blanked gives nothing, a cited party nothing", realsLeftInExport(plain, heldText, { reals }), []);
+  const leak = "Corwin Ashdale signed.";
+  check("…a real standing gives that real", realsLeftInExport(leak, leak, { reals }).map((w) => w.real), ["Corwin Ashdale"]);
+  check("…and the case-wide keeps are masked", realsLeftInExport(leak, leak, { reals, mask: (t) => t.replace("Corwin Ashdale", "\u0000".repeat(14)) }), []);
+  check("…no key, no assertion", realsLeftInExport(leak, leak, {}), []);
+}
+
+// ── what PDF-Linker has spent ─────────────────────────────────────────────────
+//
+// PDF-Linker consumes New Real Values.txt: a keep line it applied goes onto the
+// master workbook's KEEP sheet and out of the file (the file is deleted once
+// nothing is left). The reader's list kept every keep of the case and wrote it
+// again on the next save, which put back on the master a row the operator had
+// emptied or deleted there. A keep the reader WROTE that the file no longer
+// carries is spent; one still in the file (held under PDF-Linker's "#" comment
+// when its master write failed, or waiting for the full re-run) is not.
+console.log("what PDF-Linker has spent");
+{
+  const kCor = { control: "no", value: "Corwin Ashdale" };
+  const kMar = { control: "never", value: "Marlow Tenbury" };
+  const wrote = formatValuesFile(["Quell Harbor"], [kCor, kMar], [], [], [], []);
+  check("keepLines: every keep line, its control lower case, its value folded to one line",
+    keepLines("# a note\nNO:  Corwin   Ashdale \nQuell Harbor\nnever: Marlow Tenbury\nno: corwin ashdale\n"),
+    [{ control: "no", value: "Corwin Ashdale" }, { control: "never", value: "Marlow Tenbury" }, { control: "no", value: "corwin ashdale" }]);
+  check("…a page line and a value are not keeps", keepLines("did not ocr: A.pdf | page 2\nRosa Delgado\nphrase: Cross River Bank\n"), []);
+  check("carriesKeep: with a control, that control only", [carriesKeep(wrote, "corwin ashdale", "no"), carriesKeep(wrote, "Corwin Ashdale", "never")], [true, false]);
+  check("…without one, either", [carriesKeep(wrote, "MARLOW TENBURY"), carriesKeep(wrote, "Quell Harbor"), carriesKeep(null, "x")], [true, false, false]);
+
+  // The file consumed whole: PDF-Linker deleted it.
+  const gone = spendLines({ keeps: [kCor, kMar], textFixed: [] }, wrote, null);
+  check("a keep written and gone from the folder (the file deleted) is spent", gone.spentKeeps.map((k) => k.value), ["Corwin Ashdale", "Marlow Tenbury"]);
+  check("…and off the list", gone.keeps, []);
+  check("…and off the record of what was written, the rest of it kept",
+    gone.saved.split("\n").filter((l) => l && !l.startsWith("#")), ["Quell Harbor"]);
+  check("…so the list without them is in step with what the file still holds",
+    formatValuesFile(["Quell Harbor"], gone.keeps, [], [], [], []), gone.saved);
+  check("…and a save with a new flag hands over the flag alone, never the keeps again",
+    parseReaderFile(formatValuesFile(["Quell Harbor", "Rosa Delgado"], gone.keeps, [], [], [], [])).keeps, []);
+
+  // The file rewritten by PDF-Linker without the keep lines.
+  const rewritten = "Quell Harbor\n";
+  check("a keep line taken out of a file that stays is spent the same way",
+    spendLines({ keeps: [kCor], textFixed: [] }, wrote, rewritten).spentKeeps.map((k) => k.value), ["Corwin Ashdale"]);
+
+  // The master write failed: the keep stays in the file under a "#" comment.
+  const held = "# 1 keep(s) applied, but not on the master KEEP sheet yet: this run could not write it (open in Excel? see pdf_linker.log). This file is their only record until a run records them there.\n\nno: Corwin Ashdale\n";
+  const still = spendLines({ keeps: [kCor], textFixed: [] }, wrote, held);
+  check("a keep still in the file under PDF-Linker's # comment is not spent", [still.spentKeeps, still.keeps], [[], [kCor]]);
+  check("…the same list back, untouched", still.keeps === spendLines({ keeps: still.keeps }, wrote, held).keeps, true);
+  check("…and still written", carriesKeep(still.saved, "Corwin Ashdale", "no"), true);
+  check("a keep line on the value with another control in the file is a keep still there",
+    spendLines({ keeps: [kCor], textFixed: [] }, wrote, "never: Corwin Ashdale\n").spentKeeps, []);
+
+  check("a keep never written is a decision not yet handed over: not spent, whatever the file says",
+    spendLines({ keeps: [kCor], textFixed: [] }, formatValuesFile(["Quell Harbor"], [], [], [], [], []), null).spentKeeps, []);
+  check("…nor one whose control changed since (never written as never)",
+    spendLines({ keeps: [{ control: "never", value: "Corwin Ashdale" }], textFixed: [] }, wrote, null).spentKeeps, []);
+  check("…and its old line, gone from the file, is off the record",
+    carriesKeep(spendLines({ keeps: [{ control: "never", value: "Corwin Ashdale" }], textFixed: [] }, wrote, null).saved, "Corwin Ashdale"), false);
+  check("a local keep is never written and never spent",
+    spendLines({ keeps: [{ control: "no", value: "Corwin Ashdale", state: "local" }], textFixed: [] }, wrote, null).spentKeeps, []);
+  check("the spelling and the spacing are folded",
+    spendLines({ keeps: [{ control: "no", value: "corwin  ASHDALE" }], textFixed: [] }, "no:   Corwin Ashdale\n", null).spentKeeps.length, 1);
+
+  // A transcribed page, spent by its page and sum (what adoption always did).
+  const page = { doc: "A Complaint.txt", pdf: "A Complaint.pdf", page: 2, sum: "0a1b2c3d" };
+  const fixedFile = formatValuesFile([], [], [], [], [], [page]);
+  check("a transcribed page written and gone is spent",
+    spendLines({ keeps: [], textFixed: [page] }, fixedFile, null).spentFixed.length, 1);
+  check("…one whose text changed since (another sum) is not",
+    spendLines({ keeps: [], textFixed: [{ ...page, sum: "ffffffff" }] }, fixedFile, null).spentFixed.length, 0);
+  check("…nor one the file still names",
+    spendLines({ keeps: [], textFixed: [page] }, fixedFile, fixedFile).spentFixed.length, 0);
+  check("…and its line goes off the record with it",
+    spendLines({ keeps: [], textFixed: [page] }, fixedFile, null).saved.split("\n").some((l) => /^text corrected:/.test(l)), false);
+  const none = { keeps: [kCor], textFixed: [page] };
+  const same = spendLines(none, wrote + "text corrected: A Complaint.pdf | page 2 | sum 0a1b2c3d\n", wrote + "text corrected: A Complaint.pdf | page 2 | sum 0a1b2c3d\n");
+  check("nothing spent: the same lists back", [same.keeps === none.keeps, same.textFixed === none.textFixed], [true, true]);
+  check("…and the record as it was", same.saved, wrote + "text corrected: A Complaint.pdf | page 2 | sum 0a1b2c3d\n");
+  check("the record keeps its header, its values and its page lines",
+    spendLines({ keeps: [] }, "# head\nQuell Harbor\ndid not ocr: A.pdf | page 3\nno: Corwin Ashdale\n", null).saved,
+    "# head\nQuell Harbor\ndid not ocr: A.pdf | page 3\n");
+
+  // A keep taken afresh is not the one written before.
+  check("forgetKeepLines: the keep lines on the value go, whatever their control",
+    forgetKeepLines("# h\nno: Corwin Ashdale\nnever: corwin ashdale\nQuell Harbor\nnever: Marlow Tenbury\n", ["CORWIN ASHDALE"]),
+    "# h\nQuell Harbor\nnever: Marlow Tenbury\n");
+  const fresh = forgetKeepLines(wrote, ["Corwin Ashdale"]);
+  check("…so the same keep taken again is owed, not spent",
+    spendLines({ keeps: [kCor], textFixed: [] }, fresh, null).spentKeeps, []);
+
+  // The line in the open folder's file that another session wrote: noted as
+  // handed over, so the list without it is owed to the file.
+  const elsewhere = formatValuesFile(["Quell Harbor"], [], [], [], [], []);
+  const noted = noteKeepLines(elsewhere, [{ control: "never", value: "Marlow Tenbury" }]);
+  check("noteKeepLines: a line the record does not carry is put in", carriesKeep(noted, "Marlow Tenbury", "never"), true);
+  check("…once", noteKeepLines(noted, [{ control: "never", value: "marlow tenbury" }]), noted);
+  check("…and a bad control or no value is not", noteKeepLines(elsewhere, [{ control: "maybe", value: "X" }, { control: "no", value: " " }]), elsewhere);
+  check("…so the list without it differs from what was written, which has lines: owed to the file",
+    [formatValuesFile(["Quell Harbor"], [], [], [], [], []) !== noted, readerFileHasLines(noted)], [true, true]);
+  check("a file of nothing but # lines is nothing PDF-Linker reads",
+    [readerFileHasLines(formatValuesFile([], [], [], [], [], [])), keepLines(formatValuesFile([], [], [], [], [], []))], [false, []]);
+
+  // The keeps WITHDRAWN (the reader's record, kept as keep lines) held to what
+  // the folder's file still carries: a line the file no longer has is nothing
+  // left to keep out of the list.
+  const record = "no: Corwin Ashdale\nnever: Marlow Tenbury\n";
+  check("keepLinesCarried: the record's lines the file still carries, same control and value",
+    keepLinesCarried(record, "# held\n\nNO:  corwin   ashdale\nQuell Harbor\n"), "no: Corwin Ashdale\n");
+  check("…a line on the value under another control is another keep: not the one withdrawn",
+    keepLinesCarried(record, "never: Corwin Ashdale\n"), "");
+  check("…no file (or nothing withdrawn) leaves nothing", [keepLinesCarried(record, null), keepLinesCarried("", wrote)], ["", ""]);
+  check("…and the record as it was where the file carries all of it",
+    keepLinesCarried(record, formatValuesFile([], [kCor, kMar], [], [], [], [])), record);
+
+  // The record of what was written, rebuilt from the folder's own file where it
+  // was written somewhere else (a copy of the case under the same name, a
+  // download): the list's text where the file reads the same, else the file's.
+  const list = formatValuesFile(["Quell Harbor"], [kCor], [], [], [], []);
+  check("writtenBaseline: no file, nothing written here", writtenBaseline(list, null), "");
+  check("…the file carrying the same lines (PDF-Linker's comments, another order, other spacing): the list's own text, in step",
+    writtenBaseline(list, "# 1 keep(s) applied, but not on the master KEEP sheet yet\n\nno:  corwin ashdale\nQUELL HARBOR\n"), list);
+  check("…the file lacking a line: the file's text, so the list reads as owed to it",
+    writtenBaseline(list, "Quell Harbor\n"), "Quell Harbor\n");
+  check("…and one carrying a line the list does not: the file's text too",
+    writtenBaseline(list, list + "never: Marlow Tenbury\n"), list + "never: Marlow Tenbury\n");
+  check("…the record then owes the list exactly what the folder lacks",
+    spendLines({ keeps: [kCor], textFixed: [] }, writtenBaseline(list, null), null).spentKeeps, []);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -20,7 +20,7 @@
     <button id="open-file" title="Open a text export (.txt or .txt.LEAK) from disk">📄 Open file</button>
     <button id="open-folder" title="Open a case folder: its pseudonym key and every export under Text Files">📁 Open case folder</button>
     <button id="edit-toggle" title="Allow editing — a document opens protected; turn this on to type in it (the real names still never reach the file)" aria-pressed="false" disabled>✎ Edit</button>
-    <button id="save" class="primary" title="Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S)" disabled>💾 Save</button>
+    <button id="save" class="primary" title="Write your edits back to the file — pseudonyms underneath; a real name you have not yet decided on is left as it stands, and the save warns you (Ctrl+S). With a case folder open, every document you have changed and every decision you have taken (flags, keeps, LEAKS answers, names to fake) in one save." disabled>💾 Save</button>
     <button id="print-btn" title="Print the pages as they are shown, always in their pseudonyms — the printout carries the fakes whichever way Show fakes sits, and the document is left as it was; choose “Save as PDF” in the print dialog to keep a copy (Ctrl+P)">🖨 Print</button>
     <button id="shot-btn" title="Screenshot the whole reader window as it stands — toolbar, panels, bars, the PDF pane and the pages — saved as a PNG, for looking at the design. The names are in their pseudonyms whichever way Show fakes sits: every real name the key binds is shown as its fake for the picture, then put back">📷 Screenshot</button>
     <span class="spacer"></span>
@@ -93,9 +93,10 @@
        Ctrl+F reads the pages that are IN THE DOM, which is this document and,
        with the folder read on, only the part of the reel that has not been
        shed. A case is forty documents; the folder is the thing being read.
-       Replace edits only the pages on screen (this document, and the ones the
-       folder has hung under it); a document in the folder is changed when it
-       is opened, never from here. -->
+       Replace works on the pages on screen; Replace all, with a case folder
+       open in full, replaces in every export of it — the documents off the
+       screen on pages built for them out of sight (#shadow-pages), each left
+       unsaved until Save writes them all. The bar itself writes no file. -->
   <div id="find-bar" class="revbar" hidden>
     <div class="lb-row">
       <span id="fb-type" class="lb-type find">find</span>
@@ -114,7 +115,8 @@
       <span class="lb-type find">replace</span>
       <input id="fb-with" type="text" spellcheck="false" autocomplete="off" placeholder="Replace with…" title="Enter replaces the hit in front and goes on to the next; Esc closes. Typed as it is to read: a real name typed here is marked as a pseudonym, and the file carries the fake, exactly as if it had been typed on the page. Left empty, a replace deletes.">
       <button id="fb-replace" class="primary" title="Replace the hit in front and go on to the next (Enter in the box). With nothing left here, the next document of the folder that has one is opened. Ctrl+Z undoes it.">Replace</button>
-      <button id="fb-replace-all" title="Replace every hit on the pages on screen: this document, and any the folder has hung under it (each is saved to its own file). The other documents in the folder are not touched. Match case decides whether “court” also replaces “Court”. Ctrl+Z undoes it at once.">Replace all</button>
+      <button id="fb-replace-all" title="Replace every hit in the case folder: the pages on screen and every other export that has one, each left unsaved until you save (Ctrl+S writes them all). A hit inside a longer name the key fakes as one is left as it stands. Combined Text.txt is left to PDF-Linker. Match case decides whether “court” also replaces “Court”. Ctrl+Z, or ↶ Undo replace in folder, puts it all back. Without a case folder open, the pages on screen only.">Replace all</button>
+      <button id="fb-undo-folder" class="secondary" hidden title="Put back the documents the last Replace all changed, wherever they are now — unsaved; Save writes them">↶ Undo replace in folder</button>
       <span id="fb-rnote" class="lb-where"></span>
     </div>
   </div>
@@ -285,6 +287,11 @@
       <div id="pages" hidden></div>
     </div>
     <div id="pdf-pane" aria-label="The PDF, side by side" hidden></div>
+    <!-- Pages of documents that are not on screen, built here out of sight so
+         the folder-wide Replace all and Save run the reader's own page code on
+         them. On the page (a body must be connected for the typed-name pass)
+         and outside #stage, where nothing that walks the pages meets them. -->
+    <div id="shadow-pages" hidden aria-hidden="true"></div>
 
     <aside id="side" aria-label="Panel">
       <div class="side-tabs">
@@ -327,6 +334,10 @@
         <div id="keeps-block" hidden>
           <p class="side-hint">Wrongly faked — kept as they really read. Un-marked here now; PDF-Linker restores them in the files on its next run.</p>
           <ul id="keeps-list"></ul>
+        </div>
+        <div id="settled-block" hidden>
+          <p class="side-hint">Said to <strong>fake it</strong> — Save writes each as its pseudonym wherever it stands in the clear, in every document of this case. × withdraws the decision; what a save has written stays written.</p>
+          <ul id="settled-list"></ul>
         </div>
         <div id="nocr-block" hidden>
           <p class="side-hint">Pages marked <strong>⊘ Did not OCR</strong>. Saved to <code>New Real Values.txt</code>; PDF-Linker marks each page in its PDF on its next run, never OCRs it again, and exports it as <code>[DID NOT OCR]</code>. Ctrl+Z on the page takes it back before a save.</p>

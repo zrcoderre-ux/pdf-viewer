@@ -525,6 +525,20 @@ body.side-hidden #side { display: none; }
    tooltip says what. */
 .side-body li .tag.alert { background: transparent; color: var(--note-strong); font-size: 12px; padding: 0 2px; }
 .side-body li.current .tag.alert { color: #ffd54f; }
+/* A document with unsaved edits — on the reel, or kept in the store until Save
+   writes it — amber, apart from a leak's red and from the ● of a document
+   built ahead, which means something else. One whose file was written after
+   its edits began, which Save will not write over, is the outline of it. The
+   tag is a label (a click on it opens the document, as the row does); a
+   document off the screen is dropped by the × after it (dropUnsaved), which
+   asks first. */
+.side-body li .tag.unsaved { background: #b26a00; }
+/* …the × beside it, not out at the row's end with the others. */
+.side-body li .x.drop-unsaved { margin-left: 0; padding: 0 2px; }
+.side-body li .tag.unsaved.conflict { background: transparent; border: 1px solid #e0a030; color: var(--note-strong); }
+.side-body li.current .tag.unsaved.conflict { color: #ffd54f; }
+/* Pages built off the screen (shadowPage): on the page, and never shown. */
+#shadow-pages { display: none !important; }
 
 /* A document built ahead of the review, waiting off the page. */
 #docs-list li.ready::after { content: "\25CF"; margin-left: auto; flex: none; font-size: 9px; color: #2e7d32; }

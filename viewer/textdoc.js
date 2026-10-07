@@ -25,9 +25,14 @@
 //       PDF-Linker for its next pass over the folder, and dropped again once a
 //       key comes back with them in it — that case's own key (keyAnswersFlags).
 //   isExportName / isKeyName   which files in a case folder are documents.
+//   readExport / shownPages / pageScan / spotsAfterSwaps / realsLeftInExport
+//       a document of the folder read, counted and saved WITHOUT being on
+//       screen, the way the screen would: what the folder-wide Replace all and
+//       Save rest on (pageListsAfter and fixedSumsFor keep the page lists
+//       right for what they write).
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
-import { caseShape, applyCase, translateRuns, findRealSpans } from "./pseudo-key.js";
+import { caseShape, applyCase, translateRuns, findReals, findRealSpans } from "./pseudo-key.js";
 
 // ---- the file as pages ---------------------------------------------------------
 
@@ -364,6 +369,209 @@ export function restoreMarginNumbers(lines, { last = 0 } = {}) {
     } else out.push(src[i]);
   }
   return { lines: out, added: added.sort((x, y) => x - y) };
+}
+
+/**
+ * The export as the reader opens it: its pages, with the margin numbers the
+ * OCR missed put back on every page that carries enough of its numbers to be
+ * pleading paper (restoreMarginNumbers, to the number the document's pages run
+ * to). Each page keeps the numbers put back on it (`restored`), which the
+ * margin marks, and the document how many there were, for the toast. The file
+ * is not touched: the pages are what the reader shows, lays beside the PDF and
+ * saves, so a save writes the numbers and closing without one loses nothing
+ * that the next open does not put back. Every document the reader works on is
+ * read through here — the one opened, the ones the reel hangs, and the ones a
+ * folder-wide Replace all or Save works on off the screen — so all of them
+ * read, and are written, alike.
+ */
+export function readExport(text) {
+  const parsed = parseExport(text);
+  const last = pleadingLast(parsed.pages);
+  let pages = 0, numbers = 0;
+  for (const p of parsed.pages) {
+    if (p.header == null) continue;
+    const r = restoreMarginNumbers(p.lines, { last });
+    if (!r) continue;
+    p.lines = r.lines;
+    p.restored = r.added;
+    pages++;
+    numbers += r.added.length;
+  }
+  parsed.restored = { pages, numbers };
+  return parsed;
+}
+
+/**
+ * A document as a copy of its own: its pages and their lines, the numbers put
+ * back on each, never shared with the original — so a document set aside with
+ * its edits (the reader's store of unsaved documents) is not changed by
+ * whatever is done to the one it was copied from, or the other way round.
+ */
+export function cloneDoc(doc) {
+  if (!doc) return doc;
+  return {
+    newline: doc.newline,
+    trailingNewline: doc.trailingNewline,
+    pages: (doc.pages || []).map((p) => ({ ...p, lines: (p.lines || []).slice(), restored: p.restored ? p.restored.slice() : p.restored })),
+  };
+}
+
+// ---- a page as the screen shows it -----------------------------------------------
+//
+// The reader builds a page (buildBody) from its disk text: the key's fakes laid
+// out as pseudonym spans showing the real name (or the fake, with Show fakes
+// on), a line's margin number in a gutter span of its own. Find and Replace
+// read the built page back with its gutters blanked (the reader's flatten), so
+// a phrase wrapped at the margin is one phrase and a margin number is never a
+// hit. The same reading, made from the text alone, is how a document that is
+// NOT on screen is counted: page by page, never across a page break, and never
+// the page headers or a combined file's banners, which are not in a page body.
+// It walks the runs exactly as buildBody lays them out — a margin number opens
+// a line only at its start, and a number followed straight by a pseudonym is
+// still one (the U+0001 stand-in for the span the next run supplies) — so the
+// count of a document off the screen is the count it would have on it.
+
+/** The page's runs as buildBody lays them out: { runs, gutters: [[start, end)], pns: [[start, end)] } in the disk text. */
+function laidOut(text, rev) {
+  const runs = rev ? translateRuns(rev, text) : [{ t: "text", s: text }];
+  const gutters = [], pns = [];
+  let at = 0, lineStart = true;
+  runs.forEach((r, ri) => {
+    if (r.t === "swap") {
+      if (r.from) pns.push([at, at + r.from.length]);
+      at += r.from.length;
+      lineStart = false;
+      return;
+    }
+    const pieces = r.s.split("\n");
+    pieces.forEach((piece, i) => {
+      if (i > 0) { at += 1; lineStart = true; }
+      if (!piece) return;
+      const last = i === pieces.length - 1 && ri + 1 < runs.length;
+      const g = lineStart ? gutterPrefix(last ? piece + "\u0001" : piece) : null;
+      if (g && g.gutter.length <= piece.length) gutters.push([at, at + g.gutter.length]);
+      at += piece.length;
+      lineStart = false;
+    });
+    lineStart = r.s.endsWith("\n") || (lineStart && r.s === "");
+  });
+  return { runs, gutters, pns };
+}
+
+/**
+ * Each page of `doc` as the screen shows it, as Find and Replace read it off the
+ * page: the fakes as the real names (`rev`, the key's fake → real side), or as
+ * they are with `showFakes`, and every margin number blanked to spaces. →
+ * [string per page].
+ */
+export function shownPages(doc, { rev = null, showFakes = false } = {}) {
+  return ((doc && doc.pages) || []).map((p) => {
+    const text = (p.lines || []).join("\n");
+    const { runs, gutters } = laidOut(text, rev);
+    let out = "";
+    for (const r of runs) out += r.t === "swap" ? (showFakes ? r.from : r.to) : r.s;
+    if (!gutters.length) return out;
+    // The gutters stand in the file's own text, and only text runs carry one,
+    // so their places in the shown text are the file's, moved by the swaps
+    // before them.
+    const moved = [];
+    let at = 0, shift = 0, g = 0;
+    for (const r of runs) {
+      const len = r.t === "swap" ? r.from.length : r.s.length;
+      if (r.t === "swap") shift += (showFakes ? r.from : r.to).length - len;
+      else while (g < gutters.length && gutters[g][0] < at + len) { moved.push([gutters[g][0] + shift, gutters[g][1] + shift]); g++; }
+      at += len;
+    }
+    return blankRanges(out, moved, " ");
+  });
+}
+
+/**
+ * The folder's find counts split three ways: the documents on screen are left
+ * out (their hits are counted on the page, and a row for them too counted them
+ * twice), the combined file is apart (it holds every export over again, and
+ * PDF-Linker writes it from them), and the rest. `onReel(doc)` says which are
+ * on screen. → { rest, combined }, each the rows as they came.
+ */
+export function splitFolderRows(rows, onReel) {
+  const rest = [], combined = [];
+  for (const r of rows || []) {
+    if (!r || !r.doc) continue;
+    if (onReel && onReel(r.doc)) continue;
+    (r.doc.combined ? combined : rest).push(r);
+  }
+  return { rest, combined };
+}
+
+/**
+ * A page of a document that is not on screen, as a save would read it, from
+ * its disk text alone: { needs, scan }.
+ *
+ * A save reads each page it writes as the page reads (the reader's
+ * serializeHeld and standingSpans): the run's fakes and the spot keeps
+ * blanked, the case-wide keeps masked, the names of cited decisions spared —
+ * and where a real the key binds stands there, the page goes through the
+ * reader's own save on a page built for it, which is what decides whether it
+ * is written as its fake. A page where none stands is written as it is, and
+ * building it would change nothing; `scan` is then what the standing assertion
+ * reads of it (the spots, the fakes and the cited names blanked to NULs).
+ * `needs` says the page must be built after all: any real standing in it,
+ * cited or not, and — as a safety valve — a spot keep the page would not lay
+ * out whole (one running into a fake, a margin number or another spot), since
+ * then the held place the page reads is not the place the text says.
+ * `spots` are this page's own spot keeps; `mask(flat, raw)` the case-wide keeps.
+ */
+export function pageScan(raw, { rev = null, reals = null, spots = null, mask = null } = {}) {
+  const text = String(raw == null ? "" : raw);
+  const { pns, gutters } = laidOut(text, rev);
+  const held = spotRanges(text, spots);
+  const overlaps = (a, b) => a[0] < b[1] && b[0] < a[1];
+  let needs = held.some((h, k) => pns.some((p) => overlaps(h, p)) || gutters.some((g) => overlaps(h, g)) || held.some((o, j) => j !== k && overlaps(h, o)));
+  const blank = held.concat(pns);
+  const flat = blank.length ? blankRanges(text, blank, " ") : text;
+  if (!needs && reals) needs = findRealSpans(reals, mask ? mask(flat, text) : flat, { layout: text }).length > 0;
+  return { needs, scan: blankRanges(text, blank.concat(citedNameSpans(flat))) };
+}
+
+/**
+ * The spot keeps of a page once a save's forward pass has rewritten it. A spot
+ * is its value and its ordinal among that value's occurrences in the page's
+ * disk text, and the pass writes the decided occurrences around it as their
+ * fakes: an occurrence before the kept one is no longer the value, so the
+ * ordinal counted before the pass points past the end after it, and the kept
+ * name would stand as a decided one. Each kept range (`held`, in `oldText`) is
+ * moved by the swaps before it (`places`: [{ start, end, to }] in `oldText`) and
+ * its ordinal counted again in `newText`. → [{ page, value, nth }].
+ */
+export function spotsAfterSwaps(page, oldText, held, places, newText) {
+  const swaps = (places || []).slice().sort((a, b) => a.start - b.start);
+  const out = [];
+  for (const [a, b] of held || []) {
+    const value = String(oldText).slice(a, b);
+    let shift = 0;
+    for (const s of swaps) {
+      if (s.end > a) break;
+      shift += String(s.to).length - (s.end - s.start);
+    }
+    const at = occurrencesOf(newText, value).findIndex(([s]) => s === a + shift);
+    out.push(makeSpot(page, value, at < 0 ? 0 : at));
+  }
+  return out;
+}
+
+/**
+ * The standing assertion over one export about to be written: the real values
+ * the key binds still standing in it. `plain` is the export as it will be
+ * written; `held` the same text with what may stand in it blanked (the spot
+ * keeps, the run's fakes, the cited names, the names nobody has decided on) —
+ * the two the same length. The case-wide keeps are masked (`mask(text,
+ * layout)`), and a name wrapped down a column is read off `plain`. A save
+ * writes nothing at all while any export it would write answers with one.
+ */
+export function realsLeftInExport(plain, held, { reals = null, mask = null } = {}) {
+  if (!reals) return [];
+  const masked = mask ? mask(held, plain) : held;
+  return findReals(reals, blankRanges(masked, citedNameSpans(held)), { layout: plain });
 }
 
 // ---- a page that did not OCR ----------------------------------------------------
@@ -1449,6 +1657,65 @@ export function headerSaysDidNotOcr(page) {
   return /\bDID NOT OCR\b/.test(String((page && (page.review || page.header)) || ""));
 }
 
+/**
+ * The page lists PDF-Linker is owed, as they follow the pages: `lists` is
+ * { noOcr, ocrAgain, textFixed }, `items` the pages read, each { entry, page }
+ * (the page's entry, { doc, pdf, page }, and the page itself, its header and
+ * lines). Read off the pages rather than kept beside them, so nothing can leave
+ * a list saying what the text does not:
+ *   - a page whose header PDF-Linker wrote as DID NOT OCR is the run's now,
+ *     and comes off the list of pages not to OCR;
+ *   - a page that reads [DID NOT OCR] under any other header is owed as not to
+ *     OCR — unless it has been asked to be read again;
+ *   - with `drop` (the page's text is the document's last word: an undo just
+ *     put it back, a save writes it), a page that no longer reads it comes off;
+ *   - a request to read a page again is done once the page reads as read
+ *     under a header that is not DID NOT OCR;
+ *   - a page that reads [DID NOT OCR] has no transcription to hand over.
+ * → { noOcr, ocrAgain, textFixed }, each the same list where nothing moved.
+ */
+export function pageListsAfter(lists, items, { drop = false } = {}) {
+  let list = (lists && lists.noOcr) || [], again = (lists && lists.ocrAgain) || [], fixed = (lists && lists.textFixed) || [];
+  for (const { entry, page: p } of items || []) {
+    if (!entry || !p) continue;
+    const marked = headerSaysDidNotOcr(p), reads = readsDidNotOcr(p.lines);
+    const asked = again.some((e) => sameNoOcr(e, entry));
+    if (marked) list = setNoOcr(list, entry, false);
+    else if (reads) { if (!asked) list = setNoOcr(list, entry, true); }
+    else if (drop) list = setNoOcr(list, entry, false);
+    if (asked && !marked && !reads) again = setOcrAgain(again, entry, false);
+    if (reads) fixed = setTextFixed(fixed, entry, false);
+  }
+  return { noOcr: list, ocrAgain: again, textFixed: fixed };
+}
+
+/**
+ * Each transcribed page's sum set to its text as it now stands — what a save
+ * just wrote: `items` are { entry, lines }. A page with no `text corrected`
+ * entry is passed over. → the list, the same one where no sum moved.
+ */
+export function fixedSumsFor(textFixed, items) {
+  let list = textFixed || [];
+  for (const { entry, lines } of items || []) {
+    if (entry && list.some((e) => sameNoOcr(e, entry))) list = setTextFixed(list, { ...entry, sum: pageTextSum(lines) }, true);
+  }
+  return list;
+}
+
+/**
+ * Whether a New Real Values.txt carries any line PDF-Linker reads: anything
+ * but blank lines and `#` comments. A file of the header alone is read as
+ * empty, which is how the last flag withdrawn reaches PDF-Linker — the file is
+ * written with nothing in it rather than left holding the flag.
+ */
+export function readerFileHasLines(text) {
+  for (const raw of String(text == null ? "" : text).split(/\r?\n/)) {
+    const line = raw.replace(/^﻿/, "").trim();
+    if (line && line[0] !== "#") return true;
+  }
+  return false;
+}
+
 /** The file's values to fake, in order (the keeps are parseReaderFile's). */
 export function parseValuesFile(text) {
   return parseReaderFile(text).values;
@@ -1499,6 +1766,170 @@ export function parseReaderFile(text) {
     if (p) phrases.push(v);
   }
   return { values, keeps, phrases, noOcr, ocrAgain, textFixed };
+}
+
+// ---- what PDF-Linker has spent ---------------------------------------------------
+//
+// PDF-Linker CONSUMES New Real Values.txt (_pn_consume_reader_file): a keep line
+// it applied goes onto the master workbook's KEEP sheet, under this folder's
+// Origin, and out of the file, which is deleted once nothing is left in it. The
+// reader's list went on holding every keep taken in the case, and wrote each of
+// them into the file again on the next save that found the list changed — so a
+// keep the operator had since emptied or deleted on the master came back on the
+// next run, and the operator removed the same values over and over.
+//
+// So the list is read against the file as it stands. An entry whose line the
+// reader WROTE (it is in `saved`, the text last written) and that the file no
+// longer carries has been SPENT: its decision lives on the master now, or was
+// taken off it there, and either way handing it over again is the bug. A line
+// still in the file is not spent, whatever the comment above it says —
+// PDF-Linker writes back a keep whose master row it could not write, and one
+// Apply Fixes holds for the full re-run, each under a "#" line saying why. The
+// text-corrected pages are spent the same way, by their page and sum. `saved`
+// must be what was written into THIS folder: the reader asks that of it first
+// (text-reader.js, writtenWhere), and rebuilds it from the folder's own file
+// where it was written anywhere else (writtenBaseline).
+
+/** Every keep line of a reader file, in order: [{ control, value }] (parseReaderFile reads a value's first line only). */
+export function keepLines(text) {
+  const out = [];
+  for (const raw of String(text == null ? "" : text).split(/\r?\n/)) {
+    const line = raw.replace(/^\ufeff/, "").trim();
+    if (!line || line[0] === "#") continue;
+    const m = line.match(KEEP_RE);
+    const v = m ? normalizeValue(m[2]) : "";
+    if (v) out.push({ control: m[1].toLowerCase(), value: v });
+  }
+  return out;
+}
+/**
+ * Whether the reader file `text` carries a keep line on `value` — one with
+ * `control` where it is given, else either. With a control it is the question
+ * "did the reader write THIS keep?" (asked of the text last written); without,
+ * "is a keep on the value still in the file?" (asked of the file).
+ */
+export function carriesKeep(text, value, control = "") {
+  const f = foldKey(value);
+  const c = String(control || "").toLowerCase();
+  return !!f && keepLines(text).some((k) => foldKey(k.value) === f && (!c || k.control === c));
+}
+/**
+ * The lists read against New Real Values.txt as it stands on disk.
+ *
+ *   lists   { keeps, textFixed }
+ *   saved   the file as the reader last wrote it (valuesSaved)
+ *   disk    the file now, or null where there is none — PDF-Linker deletes it
+ *           once it has spent every line (a file that cannot be read is no
+ *           answer at all: the caller does not ask)
+ *
+ * A keep is spent where the reader wrote it (`saved` carries its line, its own
+ * control) and the file carries no keep line on its value; a transcribed page
+ * where `saved` carries its line with the same sum and the file names the page
+ * no more. A local keep is never written, so it is never spent.
+ *
+ * → { keeps, textFixed, spentKeeps, spentFixed, saved }: each list less what
+ * was spent (the same array where nothing was), and `saved` less every keep and
+ * text-corrected line the file no longer carries — the reader's record of what
+ * it handed over brought into step with what the folder still holds, so an
+ * entry PDF-Linker has spent does not leave the list reading as unwritten.
+ */
+export function spendLines(lists, saved, disk) {
+  const keeps = (lists && lists.keeps) || [];
+  const textFixed = (lists && lists.textFixed) || [];
+  const now = disk == null ? "" : String(disk);
+  const was = saved == null ? "" : String(saved);
+  const onDisk = new Set(keepLines(now).map((k) => foldKey(k.value)));
+  const wrote = new Set(keepLines(was).map((k) => k.control + ":" + foldKey(k.value)));
+  const spentKeeps = keeps.filter((k) => k && k.state !== "local"
+    && wrote.has(k.control + ":" + foldKey(k.value)) && !onDisk.has(foldKey(k.value)));
+  const fixedWritten = parseReaderFile(was).textFixed;
+  const fixedOnDisk = parseReaderFile(now).textFixed;
+  const spentFixed = textFixed.filter((e) => fixedWritten.some((w) => sameNoOcr(w, e) && w.sum === e.sum)
+    && !fixedOnDisk.some((d) => sameNoOcr(d, e)));
+  const lines = was.split("\n").filter((raw) => {
+    const line = raw.replace(/^\ufeff/, "").trim();
+    if (!line || line[0] === "#") return true;
+    if (TEXTFIXED_LEAD_RE.test(line)) {
+      const n = line.match(TEXTFIXED_RE);
+      return !n || fixedOnDisk.some((d) => sameNoOcr(d, { doc: n[1], page: Number(n[2]) }));
+    }
+    const m = line.match(KEEP_RE);
+    return !m || onDisk.has(foldKey(m[2]));
+  });
+  return {
+    keeps: spentKeeps.length ? keeps.filter((k) => !spentKeeps.includes(k)) : keeps,
+    textFixed: spentFixed.length ? textFixed.filter((e) => !spentFixed.includes(e)) : textFixed,
+    spentKeeps,
+    spentFixed,
+    saved: lines.join("\n"),
+  };
+}
+/**
+ * `saved` without its keep lines on `values`. A keep taken AFRESH is not the one
+ * written before: the old line may be spent, and the new decision must not be
+ * taken for it and retired unsent.
+ */
+export function forgetKeepLines(saved, values) {
+  const want = new Set((values || []).map(foldKey).filter(Boolean));
+  const was = saved == null ? "" : String(saved);
+  if (!want.size) return was;
+  return was.split("\n").filter((raw) => {
+    const m = raw.replace(/^\ufeff/, "").trim().match(KEEP_RE);
+    return !m || !want.has(foldKey(m[2]));
+  }).join("\n");
+}
+/**
+ * `saved` with the keep `lines` ({ control, value }) put in where it does not
+ * carry them: lines the reader has found in the folder's file, written there by
+ * another session, and is about to take out of it. Recorded as handed over,
+ * the list without them reads as owed to the file (valuesDirty), and opening
+ * the folder does not read them back in as a keep (carriesKeep).
+ */
+export function noteKeepLines(saved, lines) {
+  let out = saved == null ? "" : String(saved);
+  for (const k of lines || []) {
+    const v = normalizeValue(k && k.value);
+    const c = String((k && k.control) || "").toLowerCase();
+    if (!v || !KEEP_CONTROLS.includes(c) || carriesKeep(out, v, c)) continue;
+    out += (out && !out.endsWith("\n") ? "\n" : "") + `${c}: ${v}\n`;
+  }
+  return out;
+}
+/**
+ * The keep lines of `record` that `text` still carries — the same control on
+ * the same value — as keep lines of their own ("" where `text` is null, a file
+ * that is not there). The record of the keeps WITHDRAWN is held to what the
+ * folder's file still says: a line the file no longer carries is nothing left
+ * to keep out of the list, and a line written there afterwards by another
+ * session is a keep to read in, not one withdrawn.
+ */
+export function keepLinesCarried(record, text) {
+  if (text == null) return "";
+  return noteKeepLines("", keepLines(record).filter((k) => carriesKeep(text, k.value, k.control)));
+}
+/** The lines of a reader file PDF-Linker reads, whitespace folded and lower case, sorted and once each. */
+function readerLines(text) {
+  const out = new Set();
+  for (const raw of String(text == null ? "" : text).split(/\r?\n/)) {
+    const line = foldKey(raw.replace(/^﻿/, ""));
+    if (line && line[0] !== "#") out.add(line);
+  }
+  return [...out].sort();
+}
+/**
+ * The record of what was written (valuesSaved), rebuilt from the folder's file
+ * as it stands (`disk`, null where there is none) where the record on hand was
+ * written somewhere else — another folder of the same name (a copy of the
+ * case, every case's Text Files), or no folder at all (the save picker, a
+ * download). The list's own text (`listText`, formatValuesFile's) where the
+ * file carries exactly the lines it would write, so a folder already in step
+ * reads in step; the file's text otherwise, so the list reads as owed to this
+ * folder wherever it differs; "" where the folder has no file.
+ */
+export function writtenBaseline(listText, disk) {
+  if (disk == null) return "";
+  const a = readerLines(listText), b = readerLines(disk);
+  return a.length === b.length && a.every((l, i) => l === b[i]) ? String(listText == null ? "" : listText) : String(disk);
 }
 
 /** Whether a flagged value is one to fake whole (`phrase:`). */

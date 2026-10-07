@@ -54,37 +54,59 @@ box itself is visually hidden and `:has(input:checked)` paints the pressed
 state. The key-offer bar now takes its own height through `--offer-h`, the way
 the LEAKS bar takes `--bar-h`, so neither covers the head of the rail.
 
-Find's bar has a second row, Replace (`#fb-replace-row`, Ctrl+H). It edits
-only the page bodies in the DOM; the folder is never written from the bar.
-`planReplace` maps a hit (`[start, end)` of `flatten(body, { blankGutters:
-true })`) onto one part per line, skipping the gutter spans, and returns null
-for a hit that covers only part of a `.pn` or `[data-here]` span, or some but
-not all pieces of a name wrapped across lines (`data-piece`). `applyReplace`
-deletes each part with a DOM Range, last line first, trims the head of a
-continuation line, empties the `.gs` of a numbered line it leaves blank, and
-puts the replacement in as a plain text node; `settleReplaced` then runs what
-typing runs (`normalizeLines`, `convertTypedReals`, `syncSpots`, `setDirty`).
-Replace all plans every hit before changing anything, snapshots every page it
-touches under one `batch` id (`snapshotPages`), so `stepHistory` undoes and
-redoes them as one step, and applies each page's plans last first so the
-earlier hits' nodes and offsets still hold. Match case (`#fb-case`, Alt+C)
-is `buildFindMatcher(values, { caseSensitive })`, which drops the `i` flag;
+Find's bar has a second row, Replace (`#fb-replace-row`, Ctrl+H). Replace
+works on the page bodies on screen. With a case folder open in full
+(`folderOpen()`), Replace all also replaces on shadow pages in every other
+export that has a hit, and leaves each document it changed unsaved in the
+store (`unsavedDocs`) until Save writes it. This reverses the earlier rule,
+"it edits only the page bodies in the DOM; the folder is never written from
+the bar", at the owner's direction. What still holds is that the bar writes
+no file: Save is the only thing that writes an export. The store, the shadow
+pages, the folder save and the undo journal are in `Design Notes/Unsaved
+documents and the folder save.md`. `planReplace` maps a hit (`[start, end)`
+of `flatten(body, { blankGutters: true })`) onto one part per line, skipping
+the gutter spans, and returns null for a hit that covers only part of a
+`.pn` or `[data-here]` span, or some but not all pieces of a name wrapped
+across lines (`data-piece`). `applyReplace` deletes each part with a DOM
+Range, last line first, trims the head of a continuation line, empties the
+`.gs` of a numbered line it leaves blank, and puts the replacement in as a
+plain text node; `settleBody` then runs what typing runs on the page
+(`normalizeLines`, `convertTypedReals` quiet, `dressColumns`), and on screen
+the bookkeeping follows: `syncSpots` whenever the page holds a `[data-here]`
+(a replace can add or take away an earlier occurrence and move a spot's
+ordinal), and `setDirty`. Replace all plans every hit before changing
+anything (`planHere`), snapshots every page it touches under one `batch` id
+(`snapshotPages`), so `stepHistory` undoes and redoes them as one step, and
+applies each page's plans last first (`applyHere`) so the earlier hits' nodes
+and offsets still hold. Match case (`#fb-case`, Alt+C) is
+`buildFindMatcher(values, { caseSensitive })`, which drops the `i` flag;
 `findMatcherFor` is the one place the page, the folder scan and Replace get
 their matcher, and the folder scan's `findScanFor` carries the flag so a
-toggle reads the folder again. Find looks for the query as typed in the
-text as the screen shows it, never for the key's other face of it: the page
-is read off the DOM, and the folder scan reads each other export through
-`findTextOf`, which gives the file as it is with Show fakes on and
-`PK.translate(rev, …)` of it (the run `buildBody` lays out) with it off. So
-a real name with Show fakes on is hit only where it stands unfaked, and a
+toggle reads the folder again. Find looks for the query as typed in the text
+as the screen shows it, never for the key's other face of it: the page is
+read off the DOM, and the folder scan reads each other export PAGE BY PAGE
+through `findPagesOf`, which is `TD.shownPages`: each page's lines as the
+file has them with Show fakes on, and translated through `rev` page by page
+(the run `buildBody` lays out) with it off, the margin numbers blanked. So a
+real name with Show fakes on is hit only where it stands unfaked, and a
 pseudonym with it off only where the key leaves it standing (an ambiguous
-fake). The translated texts are kept in `findShown` per file handle, by
-`fileKeyOf` stamp, and dropped when `rev` or `folderDocs` changes: a pass of
-the key costs about 200 ms a megabyte under a 3,000-name key, and the folder
-is asked again at each word typed. `findScanFor.fakes` carries the view, and
-a scan whose question went stale while it ran (`findScanStale`, the view or
-the key turned) starts again rather than keeping counts that would walk into
-documents with no hit on screen.
+fake). Counted per page, a page header, a DOCUMENT banner or a margin number
+is never a hit and a phrase is never counted across a page break, so the
+folder's count is what Replace all replaces plus what it leaves standing (the
+whole-file count used to differ on all three). Each document counts once:
+the reel's members on the page only (`TD.splitFolderRows(findRows, onReel)`;
+`findRest` used to drop only the open file, and counted a hung member twice),
+and `Combined Text.txt` apart (`findCombined`, "left to PDF-Linker"). A
+document with unsaved edits is read from the store (`readDoc`). The pages are
+kept in `findShown` per file handle, by stamp (`fileKeyOf`, or
+`unsaved:<seq>` for a stored document), and dropped when `rev`, `folderDocs`
+or Show fakes changes: a pass of the key costs about 200 ms a megabyte under
+a 3,000-name key, and the folder is asked again at each word typed.
+`findScanFor` carries the view and `unsavedSeq`, and a scan whose question
+went stale while it ran (`findScanStale`, the view or the key turned, the
+store changed) starts again rather than keeping counts that would walk into
+documents with no hit on screen; `findScanDone` names the question whose
+count `findRows` holds, which is what `awaitFolderScan` waits for.
 
 **A typed real name, and only a typed one** (`convertTypedReals`): the
 debounced converter marks a real name standing in a page's plain text as a
@@ -240,10 +262,178 @@ written only if every other keep is unchanged. The row and its history stay,
 because removing a row would shift every row below it and the ranges
 PDF-Linker hangs on the sheet. An empty Fix? is no decision, so PDF-Linker's
 next run no longer keeps the value either. A workbook opened as a copy (the
-file input, `masterInfo.loose`), a refused permission or a failed write leaves
-the value off for this session only, and the toast says so. The list is drawn
-again whenever a marks pass changes which kept values stand on the page
-(`keptSeen`); it used to wait for the next `renderFlags`.
+file input, `masterInfo.loose`) leaves the value off for this session only,
+and the toast says so. A refused permission or a failed write (Excel holding
+the file) is owed instead (`masterPending`): the status bar counts it, the
+closing prompt asks, and the next save writes it once the workbook's grant is
+in place (`Design Notes/Unsaved documents and the folder save.md`). The list
+is drawn again whenever a marks pass changes which kept values stand on the
+page (`keptSeen`); it used to wait for the next `renderFlags`.
+
+**…and off the reader's own keeps** (`keepsHeldFor`, `dropKeepsFor`,
+`keepsElsewhere`, `takeKeepLinesOut`, `heldNote`): PDF-Linker records every
+keep it is handed on the master, so a case's own keep of the value — in any
+case list the reader remembers, in the open folder's `New Real Values.txt`, or
+in another case folder's — put back the very row a removal took off, on that
+case's next run. Every entry point goes through `withdrawMaster`, which now
+also takes the value off every stored case list (`textReader.values.*`, by
+`storedValueKeys`; the list in hand with them where `flagsFor` is the open
+case's), recording each keep it takes as WITHDRAWN in its case (below); where
+the open folder's file still carries a keep line on it, records that line as
+handed over (`TD.noteKeepLines` into `valuesSaved`) and withdrawn: the list
+without it then differs from what was written, so the status bar counts `New
+Real Values.txt` to write, the closing tab asks, and Save writes the file
+without it — header only where nothing else is left — and opening the folder
+before then does not read it back in. OTHER case folders' files are looked
+for in every case the reader keeps a list for or wrote a keep line on the
+value for (its `valuesSaved` record): where the reader remembers the folder
+(`rememberDir`) and the browser's leave to write it already stands (asked,
+never prompted for: the removal has its own question to put), the file is read
+and the keep lines on the value are taken out at once, with the master (the
+folder's `valuesSaved` with them), since no Save in this folder can reach
+that one; where it does not — not remembered, no grant, or the folder gone
+from where it was remembered (`dirStands`: a "not found" from a folder that is
+gone says nothing of its file) — the record of what the reader wrote there is
+all there is, and the folder is NAMED, in the confirm and in red in the toast:
+"New Real Values.txt in Case Third still carries it, out of the reader's reach
+now: open Case Third here and Save before PDF-Linker runs there." Its keeps are
+recorded as withdrawn there, so that folder, opened later, does not read the
+line back, owes the file the change, and Save takes it out. The confirm names
+the case lists and the files ("It also comes off this reader's keeps for Case
+Harness, Case Other, and out of Case Harness's New Real Values.txt, which still
+carries it — Save writes that"; "…and out of New Real Values.txt in Case
+Other"); the toast after says what was done. A folder out of reach is counted
+as owed in that folder, when it is opened, not in this one's status bar: this
+Save cannot write it. Not touched: a LEAKS worksheet's own Fix? cell on the
+value, spot keeps (edits, never handed to PDF-Linker), and the lists of the
+reader under another origin (the extension's and the installed app's keep
+their own storage), whose next save there writes the keep again.
+`test-folder-save.mjs` cases 27, 28, 33 and 35.
+
+**A keep PDF-Linker has spent** (`TD.spendLines`, `spendFromDisk`,
+`keepsSpentNote`): PDF-Linker consumes `New Real Values.txt`
+(`_pn_consume_reader_file`): a keep line it applied goes onto the master's
+KEEP sheet, under this folder's Origin, and out of the file, which is deleted
+once nothing is left. The reader went on holding every keep taken in the case
+(`setKeep`, and a LEAKS `no`/`never` on a bound value mirrored into the list),
+counted a `never` and any keep on a faked value as owed for ever, and wrote
+the list again on every save that found it changed — so the next run recorded
+the keep again and re-created a master row the operator had emptied or deleted,
+and the operator removed the same values over and over. Now the list is read
+against the file as it stands, when the folder is opened (`adoptFolderNow`,
+which reads the file once) and before every write of it (`saveValuesFile`,
+after asking the folder's grant while the click is fresh). An entry is SPENT
+where the reader wrote its line (`valuesSaved` carries it — for a keep, the
+same control and value, `TD.carriesKeep`) and the file no longer carries a
+line for it (none on the value, any control; the file gone counts): it is
+retired from the case's list, the way a spent `text corrected:` line always
+was (that pruning is now the same function, and runs at a save as well). A
+line still in the file is not spent, whatever comment stands over it —
+PDF-Linker writes back, under a `#` line, a keep whose master row it could not
+write (#491) and one Apply Fixes holds for the full re-run — and is written
+again. A local keep is never written and never spent. The record of what was
+written is trimmed to the keep and page lines the file still carries
+(`spendLines`' `saved`), so a list PDF-Linker has spent does not read as owed:
+no false "to write" on opening the folder (and where only that record moved,
+the status bar is drawn again with it). Where the master workbook is
+attached by its handle and, read as it now stands (`masterSettled`: the
+startup reading, kept as `masterRestoring`, then `refreshMaster`, which hands a
+second asker the look in progress), does not keep a spent value — the row
+emptied or deleted by hand, or the run could not record it — the keep is
+retired all the same and said by name ("“Corwin Ashdale” is off this case's
+keeps: PDF-Linker has taken its line out of New Real Values.txt, and
+master_leaks.xlsx does not keep it — removed there, or never recorded. It is
+not sent again; keep it again if it should stand."): a toast when the folder is
+opened, in red in the save's own toast (`valuesSpentNote`), and the Flagged
+panel's own Save shows it too where nothing is left to write (never "Nothing
+flagged yet" over a list it has just been through; with nothing to say, it
+names the keeps PDF-Linker applied). A workbook REMEMBERED but not read — the
+browser wants its leave again (`masterNeeds`: a restarted browser takes the
+grant back unless "Allow on every visit" was chosen), or the file could not be
+read (`masterLost`, set by `masterUnread`) — is not taken for no workbook: the
+keeps are retired and named, saying the master could not be checked ("…and
+whether master_leaks.xlsx keeps it could not be checked — the browser wants its
+leave to read the workbook again (Allow, …). It is not sent again; if the
+Master Keep does not have it, keep it again here."). Holding the note until the
+renewal was the other way; a renewal that never comes would have said nothing.
+With no workbook attached (or one opened as a copy), a consumed line is spent
+with nothing to say. A save that finds everything it owed spent writes nothing
+(`saveValuesFile` answers "spent", and the save's toast says no "written
+too").
+
+**Only what was written HERE is spent here** (`rememberWritten`,
+`writtenRecord`, `writtenWhere`, `TD.writtenBaseline`). `valuesSaved` is kept
+by folder NAME, as every per-folder list is, and a name is not a folder: a copy
+of the case under the same name (a `copy_to` destination, an archive) shares
+it, and so does every case's `Text Files`. Read against the wrong folder, a
+keep line written into one read as spent in the other, and the keep was
+retired, silently where no master was attached, without ever reaching the
+folder PDF-Linker runs on. So every write into a folder records, beside the
+name, WHICH folder took it — its handle, after a write and after the no-write
+path that finds the folder already in step — kept in the `dirs` store under a
+key no folder can have (`"\u0000written:" + name`), which `rememberedDirs`
+passes over (it takes only directory handles) and `forgetDir` deletes with the
+folder. `spendFromDisk` asks it first: the same folder (`isSameEntry`) is
+spent as above; another folder is not spent at all — its own file becomes the
+record (`writtenBaseline`: the list's own text where the file carries exactly
+its lines, the file's text otherwise, "" with no file), so whatever the list
+holds that this folder's file lacks reads as owed and Save writes it there, and
+the record is this folder's from then on. No record at all (an older build's
+writes, no IndexedDB) is read by the name, as before. **A list saved through
+the picker or a download** — the Flagged panel's Save, the folder having
+refused the write — is no write into the folder, and is not marked written
+(`markValuesSaved`, which it used to be): the status bar goes on counting `New
+Real Values.txt` to write, the closing tab asks, the toast says a copy went
+outside the folder, and the record of what the folder was last given stays
+what it was — so what a run then spends of THAT is still spent, and a keep
+that never reached the folder is never taken for one the run took out (the
+first version marked the fallback written, and the next opening retired the
+keep, "PDF-Linker has taken its line out", without it ever having been
+handed over). The picker pointed at the folder's own `New Real Values.txt`
+(`writeText`'s `picked`, `isSameEntry` on the folder's file) is the folder
+write after all, and counts as one. `test-folder-save.mjs` cases 30 and 31.
+
+Two things keep the spent rule from eating a decision. **A keep taken
+afresh** — a new keep, or its control changed (`setKeep`, `moveLeakKeep`) —
+first lets go of the record of any keep line written for the value
+(`forgetWrittenKeep`, `TD.forgetKeepLines`), so a keep withdrawn and taken
+again after PDF-Linker spent its old line is handed over, not retired unsent.
+And **a keep withdrawn is not read back** (`noteWithdrawn`, `keepWithdrawn`,
+`trimWithdrawn`, `textReader.keepsWithdrawn.<name>`): opening a folder merges
+the keep lines of its file into the list (a line written in another session,
+the other reader's origin, or one another tab's list was stored over), but not
+one the operator WITHDREW — its ×, "It is a pseudonym after all", a LEAKS
+answer that is a keep no longer, Remove from Master Keep — which is recorded,
+at that moment, as a keep line in the case's record of withdrawals (a local
+keep, never written, is not). Such a line is the file's old copy of a decision
+withdrawn: it is noted as handed over (`valuesSaved`), so the list without it
+is owed out of the file, and the next save takes it out. A line leaves the
+record when the keep is taken again (`forgetWithdrawn`), and when the folder's
+file is seen without it — read at an opening or before a write, or written
+(`TD.keepLinesCarried`) — so a line written there afterwards by another
+session is read in again. The first version of this inferred a withdrawal from
+the list lacking a line `valuesSaved` carried, and that is also what a stale
+tab looks like: tab B, opened before tab A took a keep, stored its own list
+over A's at its next flag, and A's next opening took the file's line for a
+withdrawn one, did not read it back, and the save after wrote the file without
+it — a keep lost, silently, that the older merge had restored. **Another tab's
+withdrawal reaches this one at once** (`onWithdrawnElsewhere`, a `storage`
+listener on the open case's record): a keep it holds that another tab has just
+withdrawn — by its ×, or a Master Keep removal reaching every case's list —
+comes off its list there and then, so its next stored list does not put the
+keep back for the next save to hand over again. Only a withdrawal is followed:
+nothing is added to a tab's list from another's, and nothing is stored. Not
+covered: a flag withdrawn after it was written still comes back from the file
+at the next opening (its own path, `dropFlagsNowFaked`, takes off a flag the
+key now fakes); two tabs still write their lists over each other in every
+other respect, as every per-folder list does; the record of withdrawals is by
+folder NAME, so a same-named copy whose file was written without the line
+clears it for the other copy too, whose old line is then read back in (the
+cautious way); and a keep line in another folder's file that another origin
+wrote is read back there, and is reached by Remove from Master Keep only where
+this reader keeps a list for that folder. `test-textdoc.mjs`
+("what PDF-Linker has spent") and `test-folder-save.mjs` cases 25, 26, 29 and
+32, and 34 for the workbook remembered but not read.
 
 **The master workbook, attached once** (`adoptMaster`, `restoreMaster`,
 `offerMasterRenew`, `renewMaster`, `refreshMaster`): the workbook stands in one
@@ -480,7 +670,13 @@ page (`_TEXT_FIXED_MARK_KEY`), spends the line, and exports the page under a
 `TEXT CORRECTED` header (`headerSaysTextCorrected`). Adoption drops an entry
 whose line was WRITTEN (it is in `valuesSavedKey`'s text with the same sum)
 and is gone from the file on disk — spent by PDF-Linker — and takes in a
-line on disk the list does not name. A page that reads `[DID NOT OCR]` has
+line on disk the list does not name; since the spent keeps, the same pruning
+(`TD.spendLines`) also runs before every write of the file, and takes the
+spent line off the record of what was written (see "A keep PDF-Linker has
+spent", above) — and only where that record was written into this very folder
+("Only what was written HERE is spent here"): a page line written into a
+same-named copy, or saved by a download, is owed here, never spent. A page
+that reads `[DID NOT OCR]` has
 no transcription: the button is disabled there, `markDidNotOcr` withdraws an
 entry for the page it strips, and `syncNoOcr` drops one for a page that
 reads it. `#text-fixed-block` lists them.

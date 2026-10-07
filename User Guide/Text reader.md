@@ -361,8 +361,12 @@ app, which routes it to the reader tab.
   the pseudonym. By value and not by place, since a save fakes every
   occurrence of a name alike. The count says how many are settled and waiting
   on the save, the bar counts what has been answered here, and the settling
-  holds for the session — through keeps taken on other names — and is dropped
-  when another case's key is chosen or the folder is forgotten. Where there IS a worksheet the bar above
+  is remembered for the case, closing the tab included — through keeps taken
+  on other names. With a case folder open the save writes the pseudonym
+  wherever the name still stands in the folder, asking first before it
+  writes a document you have not opened. Choosing another case's key, or
+  forgetting the folder, puts the settling away until the folder is opened
+  again. Where there IS a worksheet the bar above
   the text is still the way through its rows; this steps what is standing in
   the text, which is not the same list (a worksheet is one row per value, and
   a value leaks wherever it leaks).
@@ -602,7 +606,10 @@ app, which routes it to the reader tab.
   nudge a character into it. **✎ Edit** lifts that for the document in front
   of you, **Ctrl+Z** and **Ctrl+Y** undo and redo through the reader's own
   history (the browser's cannot survive the pseudonym rewrites), and **Save**
-  (Ctrl+S) writes the text back to the same file. A
+  (Ctrl+S) writes the text back to the same file. With a case folder open,
+  moving to another document keeps your edits: the one you leave stays
+  unsaved, and the same Save writes it (see *Every document you change stays
+  unsaved*, below). A
   pseudonym span always writes its **fake**; a real name typed in is marked
   as its pseudonym as soon as the caret leaves it. **Only the name typed** —
   or pasted, or put in by Replace: typing on a page used to mark every real
@@ -619,6 +626,42 @@ app, which routes it to the reader tab.
   decided** is left exactly as it stands (see *A save before the review is
   over*, below); the save refuses outright rather than write one you **did**
   say to fake. Deleting a marked name deletes the fake.
+- **Every document you change stays unsaved until Save, and Save writes them
+  all.** With a case folder open, opening another document never asks you to
+  discard anything — from the Documents list, the find walk, Replace walking
+  on, the reel, a LEAKS row or the names walk. The document you leave keeps
+  its edits, unsaved: the Documents list tags it **unsaved** — a label: a
+  click on it opens the document, as a click on the row does, and the **×**
+  after it drops that document's edits, after asking (the file stays as it
+  is) — and opening it again, or the reel hanging it, brings them back. **Save** (Ctrl+S) writes every unsaved
+  document of the folder at once, each in place through its own file, after
+  reading every one for a real name it must not write — one failure writes
+  nothing. The status bar counts them (`● 3 documents unsaved — Save writes
+  them all`), its tooltip lists each one, and closing the tab asks first.
+  **Every decision is unsaved too, and the same Save writes it:** flags,
+  keeps and phrases (`New Real Values.txt`, including the last flag
+  withdrawn), the pages marked ⊘ Did not OCR, ↻ OCR This Page or ✎ Use my
+  text, LEAKS answers (`LEAKS.xlsx`), a Master Keep removal the workbook
+  would not take at the time, and a name you said to **fake** — remembered
+  for the case now, not just the session, and written as its pseudonym in
+  every document of the folder where it still stands (Save asks first before
+  writing a document you have not opened). The **Flagged** panel lists those
+  names, each with a **×** that withdraws the decision: no save writes it
+  from then on (what one has written stays written), and where it still
+  stands in the clear it is yours to decide again. **A file written since your edits
+  began is never written over.** If PDF-Linker or another window wrote it,
+  the save names it and keeps your version unsaved, and opening it says so
+  and offers **Take the disk's version** — there is deliberately no "write
+  over it", which could put back names PDF-Linker has faked since — and the
+  save the names walk and the LEAKS review make on the way out of a document
+  is written the same way (a document it cannot write holds the walk there,
+  and says why; it never goes to a Save picker or a download). Leaving the
+  case folder with documents unsaved asks first: **OK** saves them all and
+  goes on; **Cancel** saves nothing and asks next whether to leave without
+  saving — the edits are dropped, and a page on screen goes back to what its
+  file reads — or to stay. A file opened on its own, outside a case folder,
+  asks "Discard unsaved edits?" as it always did; once its folder is opened,
+  it is one of the folder's documents like the rest.
 - **The numbers are the paper.** On a numbered page the line numbers are
   fixed and the text moves between them. **Enter** sends the text after the
   caret down into the next numbered slot, and the slot below takes what was
@@ -734,6 +777,13 @@ app, which routes it to the reader tab.
   that has one** and stands on its first hit, round the folder from wherever
   it was started and back again. The bar says which hit of how many is in
   front, where it stands, and how many are in how many other documents.
+  The other documents are counted **page by page, as a page on screen
+  reads**: never a page header, a DOCUMENT banner or a margin number, and
+  never a phrase across a page break — so the count is what Replace all
+  replaces plus what it leaves standing. A document hung on the reel is
+  counted once, on the page. `Combined Text.txt` is counted apart (`·
+  Combined Text.txt: 6, left to PDF-Linker`): PDF-Linker writes it again from
+  the exports.
   **Find finds what the screen shows.** The query is looked for as typed:
   in this document as it reads, and in every other export as it would read
   if the walk opened it. With the real names on screen, the other exports
@@ -748,15 +798,36 @@ app, which routes it to the reader tab.
 - **Replace, under Find (Ctrl+H).** **Replace…** on the find bar, or
   **Ctrl+H**, opens a second row: what to put in place of the hit.
   **Replace** (or Enter in that box) replaces the hit in front and stands on
-  the next; **Replace all** replaces every hit on the pages on screen. A
-  replace is an edit like typing: one step of the undo history (**Replace all
-  is one Ctrl+Z**, however many pages it touched), the document marked unsaved
-  until it is saved, and a real name typed as the replacement marked as a
-  pseudonym, so the file carries the fake. It works on a protected document
-  and leaves it protected. It edits **only the pages on screen**: this
-  document, and whatever the folder has hung under it, each saved to its own
-  file. The other documents in the folder are counted from disk and never
-  written from the bar; › opens the next one and Replace goes on there. **A
+  the next, and › opens the next document with a hit and goes on there (the
+  one left keeps its edits). **Replace all, with a case folder open, replaces
+  every hit in the folder**: the pages on screen and every other export that
+  has one. It reads the folder for the question first, then prepares each
+  document off the screen in turn (the replace row says which, and **Esc**
+  or **Stop** ends it with nothing changed), and then asks once, naming the
+  documents on screen and off, what will be left standing, and the real names
+  the replacement carries. **Nothing is written by the bar**: every changed
+  document is unsaved until you save, and **Ctrl+S writes them all**. (It
+  used to replace on screen only and leave the rest of the folder alone, on
+  purpose; that was reversed at the owner's direction.) A replace is an edit
+  like typing: one step of the undo history — **Replace all is one Ctrl+Z**,
+  however many pages and documents it touched, and that step stays in the
+  history when you open another document — and a real name typed as the
+  replacement is marked as a pseudonym, so the file carries the fake. One
+  Ctrl+Z, or **↶ Undo replace in folder** in the replace row (the last three
+  replaces in the folder), puts every document back wherever it is by then:
+  one saved since becomes unsaved again with its old text, and a save writes
+  it only where the file still reads exactly what the reader wrote; one
+  changed since the replace — edited and saved on top of it, say — is left as
+  it is, and named. Where none of the replace's documents is on screen to be
+  seen coming back, or one of them has been saved since, Ctrl+Z (and Ctrl+Y)
+  asks first, as ↶ does, and the toast always says what was put back. In a
+  box of the find bar, Ctrl+Z is the box's own undo: it takes back the letter
+  typed there, not the replace. `Combined Text.txt`
+  is never replaced in — it is counted, and PDF-Linker writes it again from
+  the exports; with it open, Replace all stays in it. Without a case folder
+  open in full (a file on its own, or a folder attached for one file's key),
+  Replace all replaces on the pages on screen only, and says so. It works on
+  a protected document and leaves it protected. **A
   pseudonym is replaced whole or not at all.** Find "Helen Rasho" and the
   name is replaced; find "Rasho" inside a span that fakes "Helen Rasho" as one
   name and that hit is left standing, and the bar says so, because what would
@@ -822,8 +893,8 @@ app, which routes it to the reader tab.
   starts, belong to no folder until loaded or chosen like that: use **Load
   key…** with it (choosing the key already shown in the list does nothing; to
   go through the list, choose "(no key)" and back — never another key, which
-  would take off every flag it binds — though "(no key)" also forgets this
-  session's **fake it** answers in the names bar). Folders of one name share
+  would take off every flag it binds — though "(no key)" also puts the
+  case's **fake it** answers away until the folder is opened again). Folders of one name share
   one flag list, and so does every case's Text Files folder, and lone
   documents of one file name from different cases; a key chosen with one of
   them open answers them all. A flag kept for want of the case's key is only
@@ -879,9 +950,12 @@ app, which routes it to the reader tab.
   here is not handed over: PDF-Linker reads `New Real Values.txt` in the case
   folder and nothing else. While what is in the panel differs from what was
   last written, the panel says so and closing the tab asks first (the same
-  prompt an edited document, an unsaved LEAKS decision or a real name standing
-  in the clear raises; the browser's own dialog is all a page gets, and which
-  of the four it is, the panels and the status bar say).
+  prompt an unsaved document raises — the one on screen or any document of
+  the folder edited and left — and an unsaved LEAKS decision, a name you said
+  to fake that no save has written yet anywhere in the folder, a Master Keep
+  removal still owed, or a real name standing in the clear; the browser's own
+  dialog is all a page gets, and which it is, the panels and the status bar
+  say).
 - **A keep the case already carries out asks nothing of PDF-Linker.** A keep
   says *do not fake this value*, and what that costs depends on what the files
   already say. Where the run faked it, a file carries the pseudonym and only
@@ -894,6 +968,38 @@ app, which routes it to the reader tab.
   it raises no closing prompt, and the whole of its effect is the one that was
   wanted: the value stops being marked. The **Flagged** panel tags it *already
   so* rather than *this case*.
+- **A keep PDF-Linker has applied is not handed over again.** PDF-Linker reads
+  `New Real Values.txt`, puts each keep on the master workbook's KEEP sheet,
+  and takes the line out of the file (deleting the file once nothing is left).
+  The reader used to go on holding the keep and write it into the file again on
+  every save — so a keep you had since emptied or deleted on the master came
+  back on the next run, again and again. Now, when the folder is opened and
+  before the file is written, a keep whose line the reader wrote and the file
+  no longer carries is taken off the case's list. If the master workbook is
+  attached and does not keep it (you removed it there, or the run could not
+  record it), the reader says so by name — it is not sent again, and you can
+  keep it again if it should stand. If the workbook is remembered but the
+  browser wants your leave to read it again (or it could not be read), the
+  reader says the keep could not be checked against it: allow the workbook,
+  look for the value there, and keep it again if it is not. A line still in
+  the file is still owed: PDF-Linker leaves a keep there, under a `#` note,
+  when it could not write the master (Excel holding it) and when Apply Fixes
+  is waiting for the full re-run, and the reader writes it again with the
+  rest. Only the folder the line was written into counts: open a copy of the
+  case under the same name and nothing is taken as applied there — the folder
+  you open is owed whatever its own file lacks, and Save writes it there. A
+  list the Flagged panel saves through the save picker or a download, because
+  the folder refused it, is a copy outside the folder: the reader says so,
+  and goes on counting the folder's own file as still to write until it can
+  write it (or you point the picker at that very file). A keep you withdraw
+  (its ×, *It is a pseudonym after all*) after it was written is not read back
+  in from the file when the folder is next opened; your next Save takes it
+  out of the file. A keep you take again is a new decision and is handed
+  over. With the case open in two reader tabs, a
+  keep withdrawn in one comes off the other at once, and a keep taken in one is
+  read back in from the file even where the other tab, opened before it, has
+  since stored its own list — but a Save from that other tab still writes its
+  own list, so take a case's decisions in one tab.
 - **And it writes each document as it leaves it.** Deciding a document's names
   is a save's worth of work: the names settled are written as their
   pseudonyms, the keeps taken go into `New Real Values.txt`, a worksheet row
@@ -910,7 +1016,10 @@ app, which routes it to the reader tab.
   Fix? cell written.
   And **a save that does not happen holds the review**: the standing assertion
   refusing, or a file that would not be written, is exactly the moment not to
-  move on. The bar stays where it is and says why.
+  move on. The bar stays where it is and says why. In a case folder this save
+  is written as every save there is: in place, never over a file PDF-Linker
+  or another window has written since the edits began, and never to a Save
+  picker or Downloads.
 - **The walk does not stop at the end of a document.** The names standing in
   the clear are a folder's worth of work, and the bar over the text used to go
   down the moment the open document ran out of them — leaving the walk to be
@@ -1015,9 +1124,26 @@ app, which routes it to the reader tab.
   **Load master workbook…** or dropped on the window: that row's Fix? cell on
   the KEEP sheet is emptied (the row and its history stay, nothing else in the
   file is touched), so PDF-Linker's next run fakes it as well. A workbook
-  opened as a copy, or one Excel is holding open, is not changed, and the
-  reader says the value is off for this session only; it stays off when the
-  reader reads the workbook again.
+  opened as a copy is not changed, and the reader says the value is off for
+  this session only; it stays off when the reader reads the workbook again.
+  One Excel is holding open (or one the browser would not let the reader
+  write) is not changed yet: the removal is owed, the status bar counts it,
+  and the next Save writes it once the workbook can be written. **Your own
+  keeps of the value go with it**, from every entry point: PDF-Linker puts
+  every keep it is handed back on the Master Keep, so a case that still kept
+  the value — any case the reader remembers, the open folder's
+  `New Real Values.txt`, or another case folder's — would have put the row
+  straight back on its next run. The confirm names the cases and the files;
+  the value comes off those cases' keeps at once, and Save takes its line out
+  of the open folder's file (with nothing in it, where nothing else is left —
+  opening the folder again before you save does not read it back in).
+  Another case folder's file is
+  changed at once, with the master, where the reader still holds that folder
+  and the browser lets it write there. Where it cannot (a folder opened in an
+  earlier session, or moved since), the confirm and the toast name it:
+  **open that folder in the reader and Save before PDF-Linker runs there**,
+  or the run puts the value back on the Master Keep. Opened, its line is not
+  read back in, and Save takes it out.
 - **Or keep it at one place only.** Both of those keeps are decisions about a
   *value*, and neither fits the name on every document: the Clerk's own
   signature block. Fake the "David" of *David W. Slayton* and the pseudonym
@@ -1085,7 +1211,18 @@ app, which routes it to the reader tab.
   It now lights for any of them, the status bar names what is waiting
   (`● New Real Values.txt to write`), and such a save writes **only** those —
   the document's own bytes and timestamp are left alone, since its text never
-  changed.
+  changed. **With a case folder open, one Save writes all of it**: every
+  document you have changed (on screen, or edited and left), every document
+  where a name you said to fake still stands, the decision files, and a
+  Master Keep removal still owed — `● 3 documents unsaved · New Real
+  Values.txt and LEAKS.xlsx to write · 2 decided names to write as pseudonyms
+  (in 4 documents) — Save writes it all`, with each item on its own line in
+  the tooltip. Off-screen work shows its progress in the status bar (`Saving…
+  D Proof of Service (3 of 5) — Esc stops`; Esc stops it before anything is
+  written), and the toast says first any document that was not written
+  (changed on disk since, or refused by the file system — the others are
+  written), then the documents written, in the Documents list's order and six
+  at most by name ("…, and 34 more").
   **And a name you have said to fake is a save that would do something too.**
   A real value the run left unfaked and the walk settled with **fake it** is
   rewritten by the save on its own, and the file is written whether or not a

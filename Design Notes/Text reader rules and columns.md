@@ -75,7 +75,7 @@ spaces). `columnWidths` gives each cell its width from past the indent. All
 pure, tested in `test-textdoc.mjs`.
 
 `dressColumns(body)` runs in `dressBody` after `dressLines`, after a replace
-(`settleReplaced`, the next hit kept by text offset), and 400 ms after typing
+(`settleBody`, the next hit kept by text offset), and 400 ms after typing
 stops (`recolumnSoon`, the caret kept by text offset when anything moved). The
 grid's character is the reader font's average, measured on canvas
 (`charWidth` → `--col-n`, with the font's space as `--col-sp-n`, both in ems).

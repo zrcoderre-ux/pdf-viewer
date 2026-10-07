@@ -5,7 +5,16 @@ pages would be — that is the load-bearing choice. Everything that reads a page
 by its index (the PDF pane, the citations, the rules, the leak rows, the spot
 keeps) goes on working without knowing there is more than one file in it, and
 `reel` — `[{ name, handle, newline, trailingNewline, from, count, dirty,
-spots }]` — is the only thing that does.
+spots, d, base, editSeq, built, conflict }]` — is the only thing that does.
+A member's `d` is its entry in `folderDocs` (null for a file that is not one
+of the folder's; resolved as it is opened or hung, and, for a document opened
+on its own before its folder was, when the folder is adopted —
+`linkReelToFolder`, by the file itself), `base` the file it was read from (`{ text, stamp, opened
+}`, what Save checks the disk against), `editSeq` a count `reelMarkDirty`
+bumps on every edit (a save clears `dirty` only where it is unchanged, so
+typing during a save stays unsaved), `built` its pages' typing baselines
+where it came out of the store, and `conflict` its file written since its
+edits began.
 
 - **Appending never moves an index.** A member's pages are concatenated onto
   the end, so every index already handed out stays what it was. This is why
@@ -46,10 +55,46 @@ spots }]` — is the only thing that does.
   is filed against the page it was made in rather than the reading line. The
   standing "no real value may be written" assertion runs **per file, before any
   file is written**, so one member being clean can never let another out.
+- **Leaving the reel keeps its edits.** Opening another document used to ask
+  "Discard unsaved edits?" and drop every dirty member with a yes. With a case
+  folder open in full, `stashReel` puts each dirty member that is one of the
+  folder's documents into the store of unsaved documents first (its text as
+  Save would write it, its spot keeps, its pages' `__built` baselines), and a
+  document the reel hangs or opens from the store comes back dirty, with its
+  edits (`hungFromStore`). A document's unsaved text is on the reel or in the
+  store, never both. Save writes both. The store, and the folder-wide Replace
+  all that fills it, are in `Design Notes/Unsaved documents and the folder
+  save.md`. Nothing is hung while a save or a folder replace being prepared
+  holds the members still (`saving`, `folderPass`).
+- **A parse built ahead is used only where it is of the file as it now is.**
+  `reelExtend` and `reelPrepend` take a `ready` parse only where its `fileKey`
+  equals the file's stamp now (`readReelDoc`); a stale one, hung and saved,
+  would write the old text back over whatever wrote the file since. The copy
+  is cloned, and `buildAheadNow` keeps the text it was built from for `base`.
 - **Spot keeps are stored per document, rebased.** A spot names a page of its
-  own file, so `persistSpots` writes `page - member.from` and `spotsFrom` adds
-  it back as a member goes on the reel. Storing the reel's own numbering made
-  a document's keeps depend on where it happened to be hung.
+  own file, so `persistMemberSpots` writes `page - member.from` and
+  `spotsFrom` adds it back as a member goes on the reel. Storing the reel's
+  own numbering made a document's keeps depend on where it happened to be
+  hung. **Every path that touches a page's keeps files them under the member
+  that owns the page** (`spotsListOf(i)`, `setSpotsListOf(i, list)`,
+  `persistMemberSpots(m)`): `buildBody`, `syncSpots`, `restoreSnapshot`, the
+  ⊘ Did not OCR strips, Save's rebuild. They used to go into the open
+  document's list and its store, rebased by the open document's `from`, which
+  put a keep where there was none and lost the one there was.
+- **Shedding keeps the history.** A shed member's undo steps used to go (the
+  page had no body to put them back into), which made a Replace all across
+  several members, saved and read away from, come back only in part on
+  Ctrl+Z. Now a step for a shed page is put back into `doc.pages` and the
+  member's spots (`restoreSnapshot` with no body), marked dirty, and built
+  from there when the reading comes near it again; `reelShift` leaves a
+  folder replace's marker (no `page`) alone.
+- **Nothing is shed under a find.** The find bar counts the reel's documents
+  off their pages and leaves them out of the folder's rows (`onReel`, so no
+  document is counted twice); a member shed with the bar up was counted
+  nowhere — "none here · nowhere else in the folder", Replace all off.
+  `reelTrimNow` holds the reel while the find bar is open, as it does under
+  the LEAKS and names bars and the redaction tool, and opening the bar builds
+  every member back (`reelAllLive`).
 - **`REEL_MAX = 25`,** either end. A folder can hold three hundred exports;
   read end to end that is a tab that stops answering. The ceiling degrades
   into a message.

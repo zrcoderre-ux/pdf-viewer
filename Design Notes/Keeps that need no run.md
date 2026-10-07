@@ -45,3 +45,16 @@ needs the folder actually read and refuses a keep already written out.
 `fakeStandsInFile` asks the **key's own matcher**, not a plain search, so a
 pseudonym wrapped at the margin with a gutter number between its halves still
 counts as standing.
+
+**Owed is not for ever.** A keep owed (no state, or `pending`, and every
+`never`) is written into `New Real Values.txt` until PDF-Linker spends its
+line: the run records it on the master workbook's KEEP sheet and takes the line
+out of the file. From then on it is spent, and retired from the case's list
+when the folder is opened or the file next written (`TD.spendLines`; see "A
+keep PDF-Linker has spent" in `Design Notes/Text reader.md`) — a keep still
+owed after its line was spent was written again on every save, and put back on
+the master a row the operator had removed there. Spent only in the folder the
+line was written into: a same-named copy of the case, or a list saved by a
+download, spends nothing ("Only what was written HERE is spent here" in
+`Design Notes/Text reader.md`). A `local` keep is never written, so it is
+never spent: it stays as the note it always was.
