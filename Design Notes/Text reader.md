@@ -206,7 +206,9 @@ debounced converter marks a real name standing in a page's plain text as a
 pseudonym only where an edit wrote it. `buildBody` keeps the text the page
 was built from as `body.__built` (the round trip is exact, so it is also the
 page's disk text until something is typed), and a save sets it to what it
-wrote. `textdoc.typedReals` reads the page now with `serializeMapped` (the
+wrote once the file is written (a save refused on the way keeps the text from
+before it; see "The typing's marks, Esc and a refused save" below).
+`textdoc.typedReals` reads the page now with `serializeMapped` (the
 disk text, and each text node's offset in it) and keeps a hit only where
 `editedSpans(__built, now)` puts something of the edit in it (`spanEdited`:
 text put in that overlaps it, or text taken out of its middle) and it stands
@@ -223,7 +225,8 @@ as `pn`) for the marks an edit made that now stand in a cited name, and puts
 each back as the name typed (`dataset.real`), one undo step, with a toast. The
 same catches a short form the converter marked in a pause before "supra". A
 mark the page was built with is never one of them, so an undo that restores
-one leaves it.
+one leaves it — unless it carries `data-typed`, the typing's own mark, which
+counts whatever the page was built from (below).
 
 **A typed name never reaches the file, however quickly it is saved.** The
 converter was the only thing that turned a typed name into a pseudonym, and
@@ -257,11 +260,11 @@ each of these wrote the real name or the renamed cite. Now:
   into `left`: written as pseudonyms, not named as unreviewed. A typed name
   the key holds only an instruction for has no pseudonym to go as, so it is
   not left either: the last check refuses it, with `instructionNote`. Only
-  a member that is dirty is asked; the rest have nothing typed. Esc, the
-  caret and a line break are exceptions of the screen, not of the file: the
-  guide's "Esc leaves that one plain, and the save still writes its
-  pseudonym" is now true, and after the save the page shows the pseudonym
-  span the file carries.
+  a member that is dirty is asked; the rest have nothing typed. The caret
+  and a line break are exceptions of the screen, not of the file, and after
+  the save the page shows the pseudonym span the file carries. Esc was made
+  one too, the guide then promising "the save still writes its pseudonym";
+  that is reversed — Esc leaves the name in the file as well (below).
 - One timer per page body (`debounceEach`): typing on page 2 inside the wait
   no longer throws page 1's away, and an undo, a strip or a put-back cancels
   its own page's wait only.
@@ -302,13 +305,90 @@ export under a 62-name key, one page typed on, saved in the same time as
 before (6.9 s and 6.9 s from Ctrl+S to the write, the rest of the save being
 what it was).
 
-Not done: an undo or a key change rebuilds a page from its text
-(`restoreSnapshot`, `retranslate`), which resets `__built`, so a name typed
-and Esc'd before an undo is the page's own afterwards and the save leaves it,
-named, as unreviewed; carrying `__built` through an undo would also undo the
-rule above that a mark an undo restores is left alone. The Space prompt reads
-the line it is on, so a surname typed at the head of a line under a given
-name on the line before is offered, and marked, alone.
+**The typing's marks, Esc and a refused save.** A review of the change above
+found three ways it still let a typed name through, each checked in Chromium
+on that build:
+
+- *A save before the citation was finished made its mark permanent.* "See
+  Jones" saved with the caret still at its end (or after a pause, or inside
+  the wait) went to the file as "See Pratt", which is right — nobody can
+  tell yet that it opens a citation. But the save rebuilt the page from the
+  text it wrote and set `__built` to that text, and `typedPseudonymsCited`
+  told the typing's marks from the page's own by `__built` alone: the
+  " v. Smith (2019) 30 Cal.App.5th 1." typed after the save left "Pratt"
+  standing in it, and the next save wrote "See Pratt v. Smith" with a toast
+  that said only "Saved". The parent build had left "Jones" in the clear at
+  the first save, named in red, and its second save was right. A name marked
+  at the Space prompt or by the converter and then saved did the same before
+  either change; the save had become one more way to mark it. Now every mark
+  the typing makes carries `data-typed` (`acceptTyped`, `convertTypedReals`),
+  and `typedPseudonymsCited` counts a span carrying it as the edit's whatever
+  `built` says. The save's forward pass, rebuilding a page, finds the
+  flagged marks again in the rebuilt page — by where each fake begins in the
+  text written, carried over the names the pass writes (`placeAfterSwaps` of
+  its offset in `serializeMapped`'s `pn`) — and flags the marks it writes for
+  a TYPED name (`TD.typedSpans`) the same way; a mark it writes for a name the
+  run left and the review settled is not the typing's and is not flagged. An undo builds from
+  text and drops the flag, as an undo that restores a mark leaves it.
+- *Esc protected nothing in the file, and the prompt still said "Esc leaves
+  it".* Where it matters is a citation the reader does not read as one. A
+  short cite with no "supra" — "(Jones, 30 Cal.App.5th at p. 5.)" — is
+  protected by PDF-Linker (`_pn_short_cite_follows`: the name, a comma, then
+  the volume, reporter and "at" pin of the decision's own cite) and not by
+  `citedNameSpans`, which returns nothing for it. The operator presses Esc
+  because the name is a cited decision's, and the save wrote "(Pratt, 30
+  Cal.App.5th at p. 5.)", a renamed authority, under "1 real name written as
+  pseudonym"; the parent build left "Jones" and named it in red. The project
+  ranks a renamed authority above an ordinary, visible leak, so the save now
+  honours the Esc: the name ending where Esc was pressed (`typeDismissed`,
+  found as a DOM point with `pointAtOffset`, read into the disk text as one
+  of `serializeHeld`'s points, and carried over the names the pass writes) is
+  left out of the typed set. It waits like any name nobody has decided: it
+  stands in the file as typed, orange on the page, named in red by the save
+  as not yet reviewed, asked about at the tab's close, and the review's to
+  decide. The prompt says so ("Esc leaves it as typed, in the file too"). A
+  name the review has already settled is written as its pseudonym all the
+  same, as before either change: the answer covers every occurrence. The
+  converter skips the same place, so the screen and the file agree.
+- *A refused save's retry wrote what the first refused.* A typed name the key
+  holds only an instruction for is refused by the last check; beside it, a
+  typed name the pass wrote made the pass rebuild the page, and `buildBody`
+  set `__built` to the pass's text. The refusal left that standing, so the
+  next Ctrl+S found nothing typed on the page: the instruction's name fell
+  back to "not yet reviewed", was blanked out of the last check, and was
+  written in the clear ("Served on Quentin Vole and Ingrid Strangeways"). The
+  pass now puts `__built` back to the text from before the save right after
+  its rebuild; the write sets it to what it wrote, as it did, and a refused
+  save leaves the edits measured from where they began. The same reset is
+  what made a refused or cancelled save's marks the page's own.
+
+Checked in Chromium, each failing on the build before and passing after: a
+party saved with the caret at its end, the citation finished and saved (after
+a pause, and inside the wait); a Space-marked party carried over a save that
+rebuilt its page for a name typed on the next line, then cited; a party the
+converter marked when the focus left, saved, then cited; Esc on "(Jones", the
+short cite finished and saved (the file keeps "Jones", the toast names it in
+red, the page keeps it orange); Esc, a save mid-citation, the citation
+finished and saved; Esc on a name after a wrapped name the pass writes on the
+same line (its place moves); an instruction-only name refused, refused again,
+then deleted and the rest saved. `test-textdoc.mjs` pins `data-typed` in
+`typedPseudonymsCited`.
+
+Not done: `citedNameSpans` does not read the short cite with no "supra" that
+PDF-Linker protects, so such a name typed and NOT dismissed is still marked
+by the converter and written as its pseudonym, and one the run left in the
+clear there is orange and, once settled, written over; matching PDF-Linker
+needs its reporter list, a matcher change of its own to be measured under the
+hang rules. An undo or a key change rebuilds a page from its text
+(`restoreSnapshot`, `retranslate`), which resets `__built` and drops
+`data-typed`, so a name typed and Esc'd before an undo is the page's own
+afterwards and the save leaves it, named, as unreviewed, and a mark typed
+before an undo of later typing is the page's own; carrying either through an
+undo would also undo the rule above that a mark an undo restores is left
+alone. A member the reel sheds and builds again (`unshedMember`) loses its
+flags the same way. The Space prompt reads the line it is on, so a surname
+typed at the head of a line under a given name on the line before is
+offered, and marked, alone.
 
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each

@@ -371,6 +371,25 @@ console.log("what an edit wrote");
   check("a party marked while its citation was typed goes back; the page's own and a typed one outside a citation stay",
     [back.includes(early), back.includes(filed), back.includes(plain), back.length], [true, false, false, 1]);
   check("nothing typed, nothing goes back", typedPseudonymsCited(serializeMapped(cbody), serializeMapped(cbody).text), []);
+  // A SAVE BEFORE THE CITATION WAS FINISHED. "See Rasho" saved — the caret still
+  // at its end, or after a pause — went to the file as "See Strangeways", and
+  // the save took that text for the page's own: the citation typed after it
+  // left the mark standing in it, and the next save wrote the renamed
+  // authority. The typing's marks carry data-typed, and it counts whatever the
+  // page was built from.
+  const saved = pnOf("Strangeways", "Rasho"), savedTyped = E("SPAN", { "data-fake": "Strangeways", "data-real": "Rasho", "data-typed": "1" }, [T("Rasho")]);
+  const sbody = page([
+    [g("1   "), T("See "), saved, T(" v. Quillmark (2017) 13 Cal.App.5th 1152.")],
+    [g("2   "), T("See "), savedTyped, T(" v. Quillmark (2017) 13 Cal.App.5th 1152.")],
+  ]);
+  const ssaved = "1   See Strangeways\n2   See Strangeways";
+  const sback = typedPseudonymsCited(serializeMapped(sbody), ssaved);
+  check("a mark the typing made goes back after a save took it for the page's; one the page was saved with stays",
+    [sback.includes(savedTyped), sback.includes(saved), sback.length], [true, false, 1]);
+  check("…however the page reads against the text it was built from",
+    typedPseudonymsCited(serializeMapped(sbody), serializeMapped(sbody).text), [savedTyped]);
+  check("…and a typed mark outside a citation stays",
+    typedPseudonymsCited(serializeMapped(page([[g("1   "), E("SPAN", { "data-fake": "Strangeways", "data-real": "Rasho", "data-typed": "1" }, [T("Rasho")]), T(" agrees.")]])), "1   Strangeways agrees."), []);
 
   // THE SAVE'S QUESTION, of the names it reads standing in the page whole. A
   // name typed and saved inside the converter's wait — or with the caret still

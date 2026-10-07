@@ -4037,6 +4037,23 @@ pagesEl.addEventListener("paste", (e) => {
 // offered whole the moment it is finished (PK.swapsOnSpace). The debounced
 // converter below stays the net for everything the caret is not on — a
 // paste, a name typed and left — and skips the spot Escape dismissed.
+//
+// ESC LEAVES IT IN THE FILE TOO. Esc is the operator saying "that is not a
+// name to fake here", and the one place that is most often true is the one
+// the reader cannot see: the party of a cited decision in a form
+// citedNameSpans does not read — "(Jones, 30 Cal.App.5th at p. 5.)", the
+// short cite with no "supra", which PDF-Linker protects
+// (_pn_short_cite_follows) and the reader takes for this case's party. The
+// change that made a typed name saved at once go to the file as its
+// pseudonym took the dismissed one with it, and the export cited "(Pratt, 30
+// Cal.App.5th at p. 5.)" — a renamed authority, under a toast that said only
+// that a name had been written as its pseudonym. Left as typed, it is an
+// ordinary leak and a visible one: orange on the page, named in red by the
+// save as not yet reviewed, asked about at the tab's close, and the review's
+// to decide. The project ranks the renamed authority above that, so the save
+// honours the Esc (saveDocument) and the prompt says what Esc does to the
+// file. A name the review has settled is still written as its pseudonym:
+// that answer is about every place the name stands.
 const typeTip = $("type-tip");
 let typeHit = null;      // { body, node, offset, hit } while the prompt shows
 let typeDismissed = null; // { body, end, real } the user Escaped — `end` a text offset in the page, so it survives a rebuild
@@ -4066,7 +4083,7 @@ function offerAtCaret(body) {
   typeTip.append("Pseudonym: ", b);
   const k = document.createElement("span");
   k.className = "keys";
-  k.textContent = hit.partial ? " — → marks it; Space types on (it may open a longer name)" : " — Space or → marks it, Esc leaves it";
+  k.textContent = hit.partial ? " — → marks it; Space types on (it may open a longer name)" : " — Space or → marks it; Esc leaves it as typed, in the file too";
   typeTip.append(k);
   const rect = document.getSelection().getRangeAt(0).getBoundingClientRect();
   typeTip.hidden = false;
@@ -4086,6 +4103,7 @@ function acceptTyped(tail) {
   node.splitText(offset);
   const mid = node.splitText(start);
   const pn = makePn(PK.mirrorCase(hit.matched, hit.fake), hit.matched);
+  pn.dataset.typed = "1"; // a mark the typing made, to go back if a citation is typed round it — after a save too (typedPseudonymsCited)
   mid.replaceWith(pn);
   let after = pn.nextSibling;
   if (!after || after.nodeType !== 3) { after = document.createTextNode(""); pn.after(after); }
@@ -4420,8 +4438,9 @@ window.addEventListener("beforeunload", (e) => {
  * typed — "Helen" on its way to "Helen Rasho" — is not marked in pieces), and
  * so does the focus leaving the page, which moves no selection: a page that
  * has lost the focus has no caret in it, whatever the selection still says.
- * Esc at the prompt still leaves its name plain on the page; the save writes
- * its pseudonym (saveDocument, TD.typedSpans).
+ * Esc at the prompt leaves its name plain on the page, and the save leaves it
+ * plain in the file and names it (saveDocument; the prompt's own comment says
+ * why).
  */
 const convertTypedRealsSoon = debounceEach(convertTypedReals, 250);
 const caretHeld = new Set(); // page bodies with a typed name the converter passed over for the caret
@@ -4477,7 +4496,9 @@ function convertTypedReals(body, { quiet = false, tally = null } = {}) {
     if (typeHit && typeHit.node === node) hideTypeTip();
     node.splitText(h.end);
     const mid = node.splitText(h.start);
-    mid.replaceWith(makePn(h.fake, h.matched));
+    const mark = makePn(h.fake, h.matched);
+    mark.dataset.typed = "1"; // as acceptTyped's: the typing's mark, whatever a save does to __built
+    mid.replaceWith(mark);
     made++;
   }
   // A name marked while the citation it belongs to was still being typed — at
@@ -4596,10 +4617,10 @@ async function saveDocument() {
   // page's, since a name typed on page 1 and a word on page 2 are two waits —
   // and the converter is run now on every page of every edited document, which
   // puts back each mark that now stands in a cited decision's name and marks
-  // what it can. The names it passes over — the one the caret is still in, the
-  // one Esc dismissed, one typed across a line break, which it cannot read —
-  // the forward pass below writes as their pseudonyms all the same
-  // (TD.typedSpans): a name the operator typed never reaches the file.
+  // what it can. The names it passes over — the one the caret is still in, one
+  // typed across a line break, which it cannot read — the forward pass below
+  // writes as their pseudonyms all the same (TD.typedSpans): a name the
+  // operator typed reaches the file only where Esc said to leave it.
   convertTypedRealsSoon.cancel();
   hideTypeTip();
   const typing = { made: 0, back: 0 };
@@ -4626,13 +4647,23 @@ async function saveDocument() {
     // rebuilds is built afresh, and a name typed and saved at once is the
     // usual reason now, so the caret is put back where the typing left it.
     const caret = caretPoint(body);
-    let { text, held, pns, at } = TD.serializeHeld(body, { points: caret ? [caret] : null });
+    // …and the place Esc was pressed at the prompt, if it was on this page,
+    // read the same way: the name ending there is the operator's to leave
+    // (the prompt's comment says why), and it waits for the review like any
+    // name nobody has decided on. The converter asks the same of its hits
+    // (typeDismissed); this is that question in the disk text the save reads.
+    const esc = typeDismissed && typeDismissed.body === body ? pointAtOffset(body, typeDismissed.end) : null;
+    const points = [];
+    const caretK = caret ? points.push(caret) - 1 : -1;
+    const escK = esc ? points.push({ node: esc.node, offset: esc.offset, end: true }) - 1 : -1;
+    let { text, held, pns, at } = TD.serializeHeld(body, { points: points.length ? points : null });
+    let escAt = escK >= 0 ? at[escK] : -1;
     let standing = standingSpans(text, held, pns);
     // What the edits wrote is measured against the text the page had before
     // this save, which a rebuild below replaces. Only a document typed in has
     // anything typed: the rest are passed over without the asking.
     const base = body.__built;
-    const typedIn = (st, t) => new Set(edited(i) ? TD.typedSpans(st, t, base) : []);
+    const typedIn = (st, t) => new Set(edited(i) ? TD.typedSpans(st, t, base).filter((h) => escAt < 0 || h.end !== escAt) : []);
     let typed = typedIn(standing, text);
     // A name nobody has decided on waits for the review — unless it was TYPED,
     // which is the operator's own writing and goes to the file as its
@@ -4658,8 +4689,41 @@ async function saveDocument() {
       if (fw.swaps) {
         snapshot(body, true);
         forwarded += fw.swaps;
+        // THE TYPING'S MARKS STAY THE TYPING'S. A mark the typing made goes
+        // back to the name typed once a citation is typed round it
+        // (typedPseudonymsCited), and it was told from the page's own marks by
+        // __built alone — which the rebuild below, and the write after it,
+        // replace with the text written. So "See Jones" saved with the caret
+        // still at its end, or after a pause, went to the file as "See Pratt",
+        // and the rest of the citation typed after the save ("v. Smith (2019)
+        // 30 Cal.App.5th 1.") left the mark where it stood: the next save
+        // wrote "See Pratt v. Smith", with nothing said. The marks the typing
+        // made carry `data-typed`; the ones on this page, and the ones this
+        // pass writes for a TYPED name, are found again in the rebuilt page by
+        // where their fakes begin in the text written (placeAfterSwaps) and
+        // flagged again; a page the pass leaves alone keeps its nodes and its
+        // flags. An undo builds from text and drops the flag, as an undo that
+        // restores a mark leaves it.
+        const typedRanges = [...typed].flatMap((h) => h.ranges);
+        const flagAt = new Set();
+        if (body.querySelector(".pn[data-typed]")) {
+          for (const [el, o] of TD.serializeMapped(body).pn) if (el.dataset.typed) flagAt.add(placeAfterSwaps(o, fw.places));
+        }
+        if (typedRanges.length) {
+          for (const sw of fw.places) if (typedRanges.some(([a, b]) => sw.start < b && sw.end > a)) flagAt.add(placeAfterSwaps(sw.start, fw.places));
+        }
         buildBody(body, fw.text, i);
-        if (at && at[0] >= 0) placeCaretOnDisk(body, placeAfterSwaps(at[0], fw.places));
+        // …and the page is measured from the text it had before this save
+        // until the file is written (the write below sets __built to what it
+        // wrote). buildBody set it to the text the pass wrote, so a save
+        // refused by the last check — a typed name the key holds only an
+        // instruction for, beside one this pass wrote — left nothing typed on
+        // the page: the next Ctrl+S took the instruction's name for one the
+        // file had carried, "not yet reviewed", and wrote it in the clear.
+        if (base != null) body.__built = base;
+        if (flagAt.size) for (const [el, o] of TD.serializeMapped(body).pn) if (flagAt.has(o)) el.dataset.typed = "1";
+        if (caretK >= 0 && at[caretK] >= 0) placeCaretOnDisk(body, placeAfterSwaps(at[caretK], fw.places));
+        if (escAt >= 0) escAt = placeAfterSwaps(escAt, fw.places); // the name Esc left is spared, so it moves only with the names before it
         ({ text, held, pns } = TD.serializeHeld(body)); // the rebuilt page, its spots and fakes found again
         standing = standingSpans(text, held, pns); // …and the names left, where they now stand
         typed = typedIn(standing, text);

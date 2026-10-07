@@ -1134,15 +1134,22 @@ export function typedSpans(spans, text, built) {
  * before the rest of the citation was typed after it. [span element] — each
  * to go back to the name as typed, since a pseudonym there is a citation to a
  * case that does not exist. Spans the page was built with are not an edit's.
+ *
+ * …and a span carrying `data-typed` is one, whatever `built` says. The reader
+ * sets it on every mark the typing makes and carries it over a save's rebuild
+ * of the page, because a save takes the text it wrote for the page's own
+ * (`built`): told apart by the edit alone, "See Jones" saved before the
+ * citation was finished was "See Pratt" built, and the "v. Smith (2019) 30
+ * Cal.App.5th 1." typed after the save left the mark standing in it, to be
+ * written as a renamed authority by the next save.
  */
 export function typedPseudonymsCited(page, built) {
-  if (built == null || !page.pn || !page.pn.size) return [];
-  const spans = editedSpans(built, page.text);
-  if (!spans.length) return [];
+  if (!page.pn || !page.pn.size) return [];
+  const spans = built == null ? [] : editedSpans(built, page.text);
   const made = [];
   for (const [el, o] of page.pn) {
     const len = String(el.getAttribute("data-fake") || "").length;
-    if (spanEdited(spans, o, o + len)) made.push([el, o, o + len]);
+    if (el.getAttribute("data-typed") != null || spanEdited(spans, o, o + len)) made.push([el, o, o + len]);
   }
   if (!made.length) return [];
   const cited = citedNameSpans(page.text);
