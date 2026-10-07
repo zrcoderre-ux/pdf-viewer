@@ -291,12 +291,21 @@ check("unsaved decisions remembered with the cell they replace and the row they 
 {
   // The store is the browser's, not the case folder's: an answer says which
   // row it answers by a digest, and the value's text is nowhere in it.
-  check("the row is named by a digest, never by its value", [/rasho|old thing/i.test(JSON.stringify(packed)), /^[0-9a-f]{16}$/.test(packed[2].id)], [false, true]);
-  check("…of the folded Value and File cells: case and spacing aside, the same row",
-    [rowIdentity({ value: " helen  RASHO ", file: "rasho v quillmark - mtc.PDF" }) === rowIdentity(rows[0]),
-      rowIdentity({ value: "Helen Rasho", file: "Complaint.pdf" }) === rowIdentity(rows[0]),
-      rowIdentity({ value: "Helen Rashoe", file: rows[0].file }) === rowIdentity(rows[0])],
-    [true, false, false]);
+  check("the row is named by a digest, never by its value or its sentence", [/rasho|old thing|served/i.test(JSON.stringify(packed)), /^[0-9a-f]{16}$/.test(packed[2].id)], [false, true]);
+  const ctx = rows[0].context;
+  check("…of the folded Value, File and Context cells: case, spacing and line breaks aside, the same row",
+    [rowIdentity({ value: " helen  RASHO ", file: "rasho v quillmark - mtc.PDF", context: ctx.replace(/\n/g, "\r\n").toUpperCase() }) === rowIdentity(rows[0]),
+      rowIdentity({ value: "Helen Rasho", file: "Complaint.pdf", context: ctx }) === rowIdentity(rows[0]),
+      rowIdentity({ value: "Helen Rashoe", file: rows[0].file, context: ctx }) === rowIdentity(rows[0]),
+      rowIdentity({ value: "Helen Rasho", file: rows[0].file, context: "Helen Rasho signed the lease" }) === rowIdentity(rows[0])],
+    [true, false, false, false]);
+  // Worked out once a row: packDecisions runs on every decision over every
+  // answered row, and a Context is a sentence or two twice over. The memo is
+  // checked against the cells, so a row changed under it is hashed again.
+  const r = { value: "Helen Rasho", file: rows[0].file, context: ctx };
+  const first = rowIdentity(r);
+  r.context = "Helen Rasho signed the lease";
+  check("…remembered on the row, and worked out again when a cell under it changes", [first === rowIdentity(rows[0]), rowIdentity(r) === first, rowIdentity(r) === rowIdentity({ value: r.value, file: r.file, context: r.context })], [true, false, true]);
 }
 {
   // PDF-Linker rewrites the worksheet on every run and SORTS it as it writes
@@ -344,6 +353,41 @@ check("unsaved decisions remembered with the cell they replace and the row they 
   check("…and the other matter's rows take no answer from it, not even a value both sheets carry",
     [unpackDecisions(otherMatter, stored), otherMatter.map((r) => r.fix), undecidedCount(otherMatter)],
     [{ laid: 0, dropped: 2, legacy: 0 }, ["", "", ""], 3]);
+  // Not every worksheet is read under its case folder's id: one opened with
+  // no folder is stored under the lone document's file name (every case has a
+  // Complaint.txt), and a value found in more than three files is filed under
+  // "N files", which names no file at all. Value and File alone matched across
+  // cases: matter A's unsaved `no` on Jordan the country was laid on matter
+  // B's plaintiff Jordan, whom B's key binds, and became a keep on him. The
+  // Context sentence each was quoted from tells the two apart.
+  const answered = (file, fix) => {
+    const t = parseLeaks([{ name: "LEAKS", rows: [HEAD,
+      ["Riverside County", "", "filed in Riverside County", file, "REVIEW", "p.1:3", ""],
+      ["Jordan", "", "imports from the Kingdom of Jordan", file, "REVIEW", "p.1:2", ""]] }], "LEAKS.xlsx").rows;
+    t[1].fix = fix;
+    return JSON.parse(JSON.stringify(packDecisions(t)));
+  };
+  const plaintiff = (file) => parseLeaks([{ name: "LEAKS", rows: [HEAD,
+    ["Jordan", "", "Jordan testified that the car was red", file, "LEAK", "p.1:2", ""],
+    ["Lucerne Valley", "", "lives in Lucerne Valley", file, "REVIEW", "p.1:3", ""]] }], "LEAKS.xlsx").rows;
+  const inFile = plaintiff("Complaint.pdf");
+  const inFour = plaintiff("4 files");
+  check("another case's sheet flagging the same value in a file of the same name, or in \"N files\", takes no answer from it",
+    [unpackDecisions(inFile, answered("Complaint.pdf", "no")), unpackDecisions(inFour, answered("4 files", "never")),
+      inFile.map((r) => r.fix).concat(inFour.map((r) => r.fix)), fixEdits({ cols: parsed.cols, rows: inFile.concat(inFour) })],
+    [{ laid: 0, dropped: 1, legacy: 0 }, { laid: 0, dropped: 1, legacy: 0 }, ["", "", "", ""], []]);
+  // …and a re-run that quotes the value from another sentence (a file added
+  // ahead of it, the first occurrence moved) drops the answer to be given
+  // again: asked twice costs a click.
+  const requoted = parseLeaks([{ name: "LEAKS", rows: [HEAD,
+    ["Jordan", "", "shipped from Jordan in May", "Complaint.pdf", "REVIEW", "p.1:2", ""]] }], "LEAKS.xlsx").rows;
+  check("…nor does the same value quoted from another sentence since", [unpackDecisions(requoted, answered("Complaint.pdf", "no")), requoted[0].fix], [{ laid: 0, dropped: 1, legacy: 0 }, ""]);
+  // Its own sheet re-sorted, the sentence's line breaks and case aside, is
+  // still its own.
+  const own = parseLeaks([{ name: "LEAKS", rows: [HEAD,
+    ["JORDAN", "", "Imports  from the\nKingdom of JORDAN", "Complaint.pdf", "REVIEW", "p.1:2", ""],
+    ["Riverside County", "", "filed in Riverside County", "Complaint.pdf", "REVIEW", "p.1:3", ""]] }], "LEAKS.xlsx").rows;
+  check("…while its own sheet, re-sorted, takes it back", [unpackDecisions(own, answered("Complaint.pdf", "no")), own.map((r) => r.fix)], [{ laid: 1, dropped: 0, legacy: 0 }, ["no", ""]]);
   // Answers kept before rows had identities say nothing of which value they
   // answered, so none can be put back safely: all are discarded, and counted
   // for the toast that says so.

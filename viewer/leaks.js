@@ -688,42 +688,78 @@ export function decisionsKey(folder, name) {
 // same store key is shared by two matters whose folders have the same leaf
 // name, so one case's answers landed on the other's rows the same way.
 //
-// So an answer now carries WHICH ROW it answered — the row's value and the
-// File cell it was found in, which is how PDF-Linker itself tells one row
-// from another (one row per value, `grouped` by its lower-cased text) — and
-// is laid back only on a row that is that row, wherever the sort has put it.
-// Kept as a digest of the folded cells, never the cells: this storage is not
-// the case folder, and the value is the real text an export must not carry.
-// A digest that no longer matches anything — the value is gone, or found in
-// other files now, or a different case's sheet is under the same name — is an
-// answer that is thrown away and said so (text-reader.js attachLeaksNow), to
-// be given again: an answer asked twice costs a click, one laid on the wrong
-// name keeps it in the clear. An entry from before this rule, with no digest,
-// cannot be checked at all and is thrown away the same way. What the digest
-// cannot tell apart is two matters in same-named folders whose sheets both
-// flag one value in a file of the same name: that answer is the same answer
-// to the same question, and goes across; the store's own name (decisionsKey,
-// the folder's leaf name) is what would have to change to stop it — and has:
-// the reader keys it by the folder's own id now (text-reader.js dirIdFor).
+// So an answer now carries WHICH ROW it answered — the row's value, the File
+// cell it was found in and the Context sentence PDF-Linker quoted it from —
+// and is laid back only on a row that is that row, wherever the sort has put
+// it. Kept as a digest of the folded cells, never the cells: this storage is
+// not the case folder, and the value and its sentence are the real text an
+// export must not carry. A digest that no longer matches anything — the value
+// is gone, or found in other files now, or quoted from another sentence, or
+// another case's sheet is read under the same store — is an answer that is
+// thrown away and said so (text-reader.js attachLeaksNow), to be given again:
+// an answer asked twice costs a click, one laid on the wrong name keeps it in
+// the clear. An entry from before this rule, with no digest, cannot be checked
+// at all and is thrown away the same way.
+//
+// THE CONTEXT CELL IS IN IT because a value and a File cell do not tell one
+// CASE's row from another's, and the store is not always the case's own. In a
+// case folder it is named by the folder's id (decisionsKey; text-reader.js
+// dirIdFor), so two folders both called "Pleadings" read two stores. But a
+// worksheet picked or dropped with no folder open is stored under the lone
+// document's FILE name — every case has a Complaint.txt — or under nothing at
+// all with no document open; one picked by hand while a folder is open is
+// stored under that folder's; and without IndexedDB a folder is known only by
+// its name. Measured in Chromium with the value and File cell alone: matter
+// A's LEAKS.xlsx, opened loose, answered `no` on "Jordan" — the country,
+// "imports from the Kingdom of Jordan" — and was not saved; matter B's, opened
+// loose beside its own Complaint.txt, flags its plaintiff Jordan, whom its key
+// binds, in "Complaint.pdf" too. The `no` was laid on him, mirrored as a keep,
+// and the orange mark on the name in the clear went. Nor does a File cell
+// always name a file: for a value found in more than three PDF-Linker writes
+// "N files" (`_pn_write_leak_report`), so any two sheets flagging one word in
+// four files each matched. It is not the same answer to the same question: a
+// `no` is "leave it, in this case" (classifyFix), and a keep on Jordan the
+// country is not a keep on Jordan the plaintiff. The Context is the first
+// sentence PDF-Linker found the value in, its real half and its scrubbed one;
+// two matters practically never quote the same one, and a re-run that quotes
+// another drops the answer and says so — the safe way to be wrong. What can
+// still go across is one value in one File cell quoted from one sentence,
+// read under one store: a form's boilerplate printed alike in two cases.
 
 const FNV_BASIS = 2166136261;
 const FNV_PRIME = 16777619;
 /**
- * The row an answer belongs to, as a digest of its folded Value and File
- * cells: two FNV-1a passes of 32 bits (as pseudo-key.keySignature), the second
- * reading the text from its end, so two rows share one only by an accident of
- * one in 2^64. Synchronous, so the store can be written in the middle of a
- * decision.
+ * The row an answer belongs to, as a digest of its folded Value, File and
+ * Context cells: two FNV-1a passes of 32 bits (as pseudo-key.keySignature),
+ * the second reading the text from its end, so two rows share one only by an
+ * accident of one in 2^64. Folded as `fold` folds — case, and runs of white
+ * space, line breaks among them — so only a change of words moves it.
+ * Synchronous, so the store can be written in the middle of a decision.
+ *
+ * Worked out once a row and remembered on it (ROW_IDS): packDecisions runs
+ * on EVERY decision, over every row answered so far, and a Context cell is a
+ * sentence or two twice over. Measured in Node with Contexts of 566
+ * characters: a 300-row sheet answered row by row spent 1.7 s hashing in all,
+ * where it had spent 0.26 s on Value and File alone, and at 20,000 answered
+ * rows each click cost 0.4 s — the walk through a sheet squared. The memo is
+ * checked against the three cells it was worked from, so a row whose cells
+ * were ever changed is hashed again rather than answered from the old ones.
  */
+const ROW_IDS = new WeakMap(); // row -> { value, file, context, id }
 export function rowIdentity(row) {
-  const s = fold(row && row.value) + "|" + fold(row && row.file);
+  const r = row && typeof row === "object" ? row : null;
+  const memo = r ? ROW_IDS.get(r) : null;
+  if (memo && memo.value === r.value && memo.file === r.file && memo.context === r.context) return memo.id;
+  const s = fold(r && r.value) + "|" + fold(r && r.file) + "|" + fold(r && r.context);
   let a = FNV_BASIS;
   let b = FNV_BASIS;
   for (let i = 0, j = s.length - 1; i < s.length; i++, j--) {
     a = Math.imul(a ^ s.charCodeAt(i), FNV_PRIME);
     b = Math.imul(b ^ s.charCodeAt(j), FNV_PRIME);
   }
-  return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+  const id = (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+  if (r) ROW_IDS.set(r, { value: r.value, file: r.file, context: r.context, id });
+  return id;
 }
 /**
  * { rowNumber: { id, base, fix } } for the rows that moved, and

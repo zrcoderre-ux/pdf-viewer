@@ -9469,10 +9469,13 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" 
   if (!parsed.part) throw new Error(`${name}: the LEAKS sheet could not be placed in the workbook.`);
   // Unsaved decisions are never lost to a re-attach: they are remembered
   // per worksheet (folder and name) and laid back over the rows below —
-  // each on the row whose value and file it answered, wherever PDF-Linker's
-  // last run sorted that row to (LK.unpackDecisions). By row number alone a
-  // `no` meant for a county landed on the witness a re-run had put in its
-  // row, and became a keep on a name the key binds.
+  // each on the row whose value, file and quoted sentence it answered,
+  // wherever PDF-Linker's last run sorted that row to (LK.unpackDecisions).
+  // By row number alone a `no` meant for a county landed on the witness a
+  // re-run had put in its row, and became a keep on a name the key binds; by
+  // value and file alone, one case's `no` on Jordan the country landed on
+  // another's plaintiff Jordan, where the store was not the folder's own (a
+  // worksheet opened loose is kept under the lone document's file name).
   if (leaks) persistLeaks();
   leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", store: stateFolder(), at: -1, mirrored: new Set(), carried: 0, note: "" };
   const back = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));

@@ -825,41 +825,43 @@ among a folder's documents, and `pdfsync.combinedMembers` reads its
 `# Documents in this file:` list so picked PDFs are matched member by
 member, by name through the key or by order.
 
-An answer not yet saved is remembered in `localStorage`
-(`leaks.decisionsKey`: the folder's leaf name and the worksheet's) and laid
-back over the sheet at the next attach. It used to be remembered by SHEET ROW
-NUMBER alone (`{ row: { base, fix } }`) and laid back wherever that row's cell
-still read as `base` — which, for a row nobody had answered, is `""` on every
-row of every worksheet. PDF-Linker rewrites `LEAKS.xlsx` on every run and
-sorts it as it writes (`_pn_write_leak_report`: undecided rows first, decided
-ones sinking, a misspelling's family pulled together), so after a run a row
-number names another value. Measured in Chromium: a `no` left unsaved on row
-2, "Riverside County", came back on the witness the run sorted into row 2, a
-name the key binds. `mirrorLeakKeeps` made it one of the reader's keeps, so the
+An answer not yet saved is remembered in `localStorage` (`leaks.decisionsKey`:
+the case folder's id, and the worksheet's name) and laid back over the sheet
+at the next attach. It used to be remembered by SHEET ROW NUMBER alone
+(`{ row: { base, fix } }`) and laid back wherever that row's cell still read
+as `base` — which, for a row nobody had answered, is `""` on every row of
+every worksheet. PDF-Linker rewrites `LEAKS.xlsx` on every run and sorts it as
+it writes (`_pn_write_leak_report`: undecided rows first, decided ones
+sinking, a misspelling's family pulled together), so after a run a row number
+names another value. Measured in Chromium: a `no` left unsaved on row 2,
+"Riverside County", came back on the witness the run sorted into row 2, a name
+the key binds. `mirrorLeakKeeps` made it one of the reader's keeps, so the
 orange mark went; a one-space edit and Ctrl+S saved without a warning, wrote
-`no` for the witness into `LEAKS.xlsx` and `no: <the name>` into `New Real
-Values.txt`, and left the name in the export, where the next run would keep
-it. The folder toast read "every row answered" on the strength of answers
-given to other values. Two matters whose folders share a leaf name share one
-store entry, so the same happened across cases. (The store is named by the
-folder's own id now, not its leaf name — "Each folder is itself" in Design
-Notes/Text reader layout and navigation.md.)
+`no` for the witness into `LEAKS.xlsx` and `no: <the name>` into
+`New Real Values.txt`, and left the name in the export, where the next run
+would keep it. The folder toast read "every row answered" on the strength of
+answers given to other values. Two matters whose folders share a leaf name
+share one store entry, so the same happened across cases. (The store is named
+by the folder's own id now, not its leaf name — "Each folder is itself" in
+Design Notes/Text reader layout and navigation.md.)
 
 So `packDecisions` stores each answer with `id`, `leaks.rowIdentity` of its
 row: a digest (two FNV-1a passes, one from each end, 64 bits) of the folded
-Value and File cells, which is how PDF-Linker tells one row from another (one
-row per value). It is a digest so that the store gains no real text. The value
-is what an export must not carry, and this storage is the browser's, not the
-case folder's. `unpackDecisions` lays an answer only on the row with that
-identity, wherever it now stands, and only while its cell still reads `base`.
-Accepted suggestions (`{ id, base, ok: true }`) get the same check, so an
-acceptance of "Vazqez"'s pre-filled `~Vazquez` is not taken for a sibling
-spelling sorted into its row with the same cell. Two rows of one sheet can
-share an identity: PDF-Linker groups by lower case, the fold also collapses
-spaces. Those rows take answers by row number, and only while every answer
-stored under that identity still stands on one of them. It returns `{ laid,
-dropped, legacy }`. An answer that found no row of its own (the value gone,
-found in other files since, a different case's sheet under the same name) is
+Value, File and Context cells. Value is how PDF-Linker tells one row from
+another (one row per value); File and Context are what tell one CASE's row for
+a value from another's (below). It is a digest so that the store gains no real
+text. The value and its sentence are what an export must not carry, and this
+storage is the browser's, not the case folder's. `unpackDecisions` lays an
+answer only on the row with that identity, wherever it now stands, and only
+while its cell still reads `base`. Accepted suggestions
+(`{ id, base, ok: true }`) get the same check, so an acceptance of "Vazqez"'s
+pre-filled `~Vazquez` is not taken for a sibling spelling sorted into its row
+with the same cell. Two rows of one sheet can share an identity: PDF-Linker
+groups by lower case, the fold also collapses spaces. Those rows take answers
+by row number, and only while every answer stored under that identity still
+stands on one of them. It returns `{ laid, dropped, legacy }`. An answer that
+found no row of its own (the value gone, found in other files or quoted from
+another sentence since, a different case's sheet read under the same store) is
 `dropped`. One stored before identities existed, with no `id`, cannot be
 checked at all and is `legacy`, discarded unread. `attachLeaksNow` writes the
 store again at once with only what was laid back, so the leftovers are said
@@ -871,11 +873,49 @@ was written over by the folder's own toast a moment later. The folder toast
 also says how many answers are here and not yet saved (`leaks.carried`),
 "every row answered" included, since an answer only the browser holds is one
 the next run will not see. Losing an answer costs a click to give it again;
-laying one on the wrong value keeps a real name in the clear. What the digest
-cannot separate is two same-named folders whose sheets flag one value in a
-file of the same name. That answer goes across, as the same answer to the same
-question. Closing it would take a folder identity in the store's name, which
-is not changed here.
+laying one on the wrong value keeps a real name in the clear.
+
+The digest first held Value and File alone, on the ground that two matters
+whose stores coincide and whose sheets flag one value in a file of the same
+name are asking the same question. They are not: `no` is "leave it, in this
+case" (`classifyFix`), and a keep on Jordan the country in one matter is not a
+keep on Jordan the plaintiff in another. Nor does the File cell always name a
+file: for a value found in more than three, `_pn_write_leak_report` writes "N
+files", so any two sheets flagging one word in four files matched. The store
+is named by the case folder's id now ("Each folder is itself" in Design
+Notes/Text reader layout and navigation.md), which keeps two folders both
+called Pleadings apart, but not every worksheet is read under one: a sheet
+picked or dropped with no folder open is stored under the lone document's FILE
+name (`leaksStoreKey`: `stateFolder() || fileName`), or under nothing with no
+document open; one picked by hand while a folder is open, under that folder's
+id; and without IndexedDB a folder is known by its name. Measured in Chromium
+before this change, two matters each opening `Complaint.txt` and `LEAKS.xlsx`
+on their own: matter A answered `no` on "Jordan" ("imports from the Kingdom of
+Jordan") and did not save; matter B's sheet, through Open LEAKS…, flags its
+plaintiff Jordan, whom its key binds, in `Complaint.pdf`. The `no` was laid on
+him (the toast: "1 answered here and not yet saved"), `mirrorLeakKeeps` made
+it a keep, the orange mark went, and a one-space edit and Ctrl+S saved without
+a warning and wrote `Jordan = no` into B's `LEAKS.xlsx`. So the Context cell
+is in the digest: the first sentence PDF-Linker found the value in, real half
+and scrubbed half, which two matters practically never share. A re-run that
+quotes the value from another sentence drops the answer and says so, the safe
+direction. Same script after: B's row is undecided, no keep, the mark stands,
+the toast says "1 unsaved answer from an earlier session was discarded", the
+save warns "1 real name not yet reviewed was NOT faked — Jordan", and B's
+`LEAKS.xlsx` is untouched. What can still go across is one value in one File
+cell quoted from one sentence, read under one store: a form's boilerplate
+printed alike in two cases, read without a folder.
+
+The Context makes the digest dearer, and `packDecisions` runs on every
+decision over every answered row: measured in Node with Contexts of 566
+characters, a 300-row sheet answered row by row spent 1.7 s hashing (0.26 s
+with Value and File alone), and at 20,000 answered rows a click cost 0.4 s.
+`rowIdentity` remembers each row's digest on the row (a `WeakMap`, checked
+against the three cells it was worked from, so a row changed under it is
+hashed again): the same 300 decisions take 6 ms. `unpackDecisions` still
+hashes every row once per attach where anything is stored — 0.4 s for 20,000
+rows of such Contexts, about 10 ms for a sheet of 300 — and what it hashes is
+remembered for the decisions after.
 
 The bar's controls are one row at its TOP (`.lb-controls`: Fix? yes no never
 phrase accept, the answer, the typed cell, Apply, clear, then ‹ › Next
