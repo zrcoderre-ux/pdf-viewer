@@ -1452,6 +1452,34 @@ export function folderStateMoves(keys, from, to, { whole = [], perDoc = [] } = {
 }
 
 /**
+ * Whether an older build's state, kept under a folder's bare NAME, may be
+ * moved under the id of the folder of that name now being opened: "" where it
+ * may, else why it is held aside — "text" (a Text Files folder), "named" (more
+ * than one folder of the name known here), "unwritten" (that build never wrote
+ * the list to a folder) or "differs" (the folder's New Real Values.txt is not
+ * the text that build last wrote).
+ *
+ * The state was every same-named folder's at once, so whose it is can only be
+ * told from the one thing the folder itself carries: the file that build last
+ * wrote, still standing in THIS folder (`onDisk` equal to `saved`). How many
+ * folders of the name are remembered (`sameName`) is no evidence on its own:
+ * that build remembered folders by name too, one handle per name, so the
+ * first one opened after the upgrade always counts one — measured, a keep
+ * never written, made in client A's Opposition, moved into client B's because
+ * B was the one remembered, took the orange mark off B's plaintiff and was
+ * written into B's file as `no:`. It still holds a list aside where two are
+ * known. A Text Files folder's list is never moved: every case's Text Files
+ * folder shared the one name, and a list carried up from it is written into
+ * the case folder PDF-Linker reads.
+ */
+export function legacyStateHold({ textFiles = false, sameName = 0, saved = "", onDisk = null } = {}) {
+  if (textFiles) return "text";
+  if (sameName !== 1) return "named"; // counting this one: none known is no answer either
+  if (!saved) return "unwritten";
+  return onDisk === saved ? "" : "differs";
+}
+
+/**
  * Two stored lists ({ values, keeps, phrases, noOcr, ocrAgain, textFixed })
  * made one: everything in either, `mine` winning where both name a value or
  * a page — a keep's control, a phrase, a page asked to be read again rather

@@ -11,7 +11,7 @@ import {
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
-  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
+  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
@@ -605,6 +605,26 @@ console.log("a folder's state, by name and by id");
   check("no folder, or no move, moves nothing", [folderStateMoves(keys, "", ID, P), folderStateMoves(keys, ID, ID, P), folderStateMoves(keys, "Opposition", "", P)], [[], [], []]);
   check("a lone document's spots (no folder) are never a name's to take",
     folderStateMoves(["textReader.spots./Brief.txt"], "Brief.txt", ID, P), []);
+
+  // Whose an older build's list under the bare name is: told only by the file
+  // that build last wrote, still standing in this folder. The count of folders
+  // of the name is no evidence on its own — that build remembered one per
+  // name, so the first opened after the upgrade always counted one, and a
+  // keep never written, taken in client A's Opposition, moved into client B's
+  // and was written into B's file. A Text Files folder's list never moves:
+  // every case's had the one name.
+  const SAVED = "# New Real Values.txt\nno: Okafor\n";
+  check("moved only where the folder's file is what that build last wrote, and it is the one of the name",
+    legacyStateHold({ sameName: 1, saved: SAVED, onDisk: SAVED }), "");
+  check("…held where it was never written, whatever the count",
+    [legacyStateHold({ sameName: 1, saved: "", onDisk: null }), legacyStateHold({ sameName: 1 }), legacyStateHold({ sameName: 1, saved: "", onDisk: SAVED })],
+    ["unwritten", "unwritten", "unwritten"]);
+  check("…where the file is not what was written, or is gone (a run spends it)",
+    [legacyStateHold({ sameName: 1, saved: SAVED, onDisk: "no: Okafor\n" }), legacyStateHold({ sameName: 1, saved: SAVED, onDisk: null })], ["differs", "differs"]);
+  check("…where two of the name are known, or none is",
+    [legacyStateHold({ sameName: 2, saved: SAVED, onDisk: SAVED }), legacyStateHold({ saved: SAVED, onDisk: SAVED })], ["named", "named"]);
+  check("…and always for a Text Files folder, its file matching or not",
+    [legacyStateHold({ textFiles: true, sameName: 1, saved: SAVED, onDisk: SAVED }), legacyStateHold({ textFiles: true, sameName: 1 })], ["text", "text"]);
 
   // …and the list kept while the Text Files folder was open joins its case
   // folder's, nothing in either lost and the case folder's own winning.

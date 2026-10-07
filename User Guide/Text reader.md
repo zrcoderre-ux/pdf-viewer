@@ -338,7 +338,12 @@ app, which routes it to the reader tab.
   meanwhile is kept, and goes with you: open the case folder above and the
   list is that folder's, written by the next save. A `New Real Values.txt` or
   `LEAKS.xlsx` an earlier version left in Text Files is named in the bar, to
-  be moved up. A file from Text Files opened on its own attaches the case
+  be **deleted, not moved up**: that version wrote the list there out of one
+  list every case's Text Files folder shared, so it may name other cases'
+  values, and moved up it would write over the case folder's own. The reader
+  does not read it in; flag or keep again in the case folder what this case
+  needs, and give any answer in the stray worksheet again in the case
+  folder's own. A file from Text Files opened on its own attaches the case
   folder above it whenever the reader knows that folder. Every fake is shown
   as its real value in the case the fake was written in, **lightly
   highlighted**, and hovering shows the pseudonym underneath.
@@ -896,13 +901,18 @@ app, which routes it to the reader tab.
   itself, not by its name, so a keep taken in one is never read into the
   other, where it could leave that case's own party unmarked and hand its run
   a `no:` for the name. A list an earlier version kept under the bare name is
-  given to the folder when it can only be that folder's; otherwise it is held
-  aside and the reader says so once, with what it held, to be flagged or kept
-  again. Lone documents of one file name from different cases still share one
-  list; a key chosen with one of them open answers them all. A flag kept for
-  want of the case's key is only asked about again; a flag taken off wrongly
-  could let the name ship. The whole value has to be in the key: a key that
-  binds "David" has not
+  given to the folder only where that version last wrote it into this very
+  folder (its `New Real Values.txt` is still what was written) and no other
+  folder of the name is known here — never a list that was never written, and
+  never to a Text Files folder, whose one list every case shared; otherwise it
+  is held aside and the reader says so once, with what it held, to be flagged
+  or kept again. Opening another folder while one is still being read leaves
+  each folder's list its own: the folder you opened last is the one whose list
+  is in hand. Lone documents of one file name from different cases still share
+  one list; a key chosen with one of them open answers them all. A flag kept
+  for want of the case's key is only asked about again; a flag taken off
+  wrongly could let the name ship. The whole value has to be in the key: a key
+  that binds "David" has not
   pseudonymized a flagged "David W. Slayton",
   half of which would still be standing, and a value **kept** is not in the
   key's forward side at all — both stay flagged. **But a red mark never
