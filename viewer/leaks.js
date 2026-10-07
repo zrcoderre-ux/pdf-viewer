@@ -659,9 +659,14 @@ export function fixEdits(parsed) {
   return (parsed.rows || []).filter((r) => r.fix !== r.fix0).map((r) => ({ row: r.n, col, text: r.fix }));
 }
 
-/** Where unsaved decisions are remembered between reloads. */
+/**
+ * Where unsaved decisions are remembered between reloads. `folder` is the
+ * case folder's id (the reader's stateFolder), not its name: two matters
+ * whose folders share a name no longer share one store.
+ */
+export const DECISIONS_PREFIX = "textReader.leaks.";
 export function decisionsKey(folder, name) {
-  return "textReader.leaks." + (folder || "") + "/" + (name || "");
+  return DECISIONS_PREFIX + (folder || "") + "/" + (name || "");
 }
 
 // ---- unsaved answers, remembered by the row they answer ---------------------------
@@ -698,7 +703,8 @@ export function decisionsKey(folder, name) {
 // cannot tell apart is two matters in same-named folders whose sheets both
 // flag one value in a file of the same name: that answer is the same answer
 // to the same question, and goes across; the store's own name (decisionsKey,
-// the folder's leaf name) is what would have to change to stop it.
+// the folder's leaf name) is what would have to change to stop it — and has:
+// the reader keys it by the folder's own id now (text-reader.js dirIdFor).
 
 const FNV_BASIS = 2166136261;
 const FNV_PRIME = 16777619;

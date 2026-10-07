@@ -329,10 +329,14 @@ check("unsaved decisions remembered with the cell they replace and the row they 
   const elsewhere = parseLeaks([{ name: "LEAKS", rows: [HEAD,
     ["Riverside County", "", "", "Doc.pdf, Exhibit A.pdf", "REVIEW", "p.1:2", ""]] }], "LEAKS.xlsx").rows;
   check("…nor the same value found in other files since: a different row", [unpackDecisions(elsewhere, stored).laid, elsewhere[0].fix], [0, ""]);
-  // The store is named by the folder's leaf name (decisionsKey), so two matters
-  // whose folders are both "Pleadings" read one entry. The other matter's
-  // worksheet is a sheet of other rows, and takes nothing from it.
-  check("a same-named folder: both matters' answers are stored under one key", decisionsKey("Pleadings", "LEAKS.xlsx"), "textReader.leaks.Pleadings/LEAKS.xlsx");
+  // The store was named by the folder's leaf name (decisionsKey), so two
+  // matters whose folders are both "Pleadings" read one entry. The reader
+  // names it by the folder's own id now (text-reader.js dirIdFor), so they
+  // read two; and where an older entry under the name is read anyway, the
+  // other matter's worksheet is a sheet of other rows, and takes nothing.
+  check("a same-named folder under the name: both matters' answers were stored under one key", decisionsKey("Pleadings", "LEAKS.xlsx"), "textReader.leaks.Pleadings/LEAKS.xlsx");
+  check("…and under each folder's id, under two",
+    [decisionsKey("/folder/0b5e", "LEAKS.xlsx"), decisionsKey("/folder/77aa", "LEAKS.xlsx")], ["textReader.leaks./folder/0b5e/LEAKS.xlsx", "textReader.leaks./folder/77aa/LEAKS.xlsx"]);
   const otherMatter = parseLeaks([{ name: "LEAKS", rows: [HEAD,
     ["Peregrine Ashdown", "", "", "Quillmark Decl.pdf", "LEAK", "p.2:4", ""],
     ["Lucerne Valley", "", "", "Quillmark Decl.pdf", "REVIEW", "p.5:1", ""],

@@ -314,9 +314,21 @@ app, which routes it to the reader tab.
   Text Files folder by mistake is caught**: it is where the exports are, so it
   looks like the place, and everything that makes a case folder one — the key,
   the PDFs, the worksheet, the flagged list — is the level above. The reader
-  says so and opens the picker there again, with the folder above one click
-  away. Every fake is shown as its real value in the case the fake was written
-  in, **lightly highlighted**, and hovering shows the pseudonym underneath.
+  says so in the bar at the top, **and the bar stays up for as long as Text
+  Files is the folder open** (opening its documents no longer takes it down,
+  and a Text Files folder found for a file opened on its own puts it up too);
+  its button opens the picker inside Text Files, one level below the folder to
+  choose. **Nothing the case is owed is written into Text Files** — it is the
+  folder that is uploaded, and PDF-Linker never reads it there: Ctrl+S leaves
+  `New Real Values.txt` and `LEAKS.xlsx` unwritten and says so, and the
+  Flagged panel's Save does the same rather than open a picker. What you flag
+  meanwhile is kept, and goes with you: open the case folder above and the
+  list is that folder's, written by the next save. A `New Real Values.txt` or
+  `LEAKS.xlsx` an earlier version left in Text Files is named in the bar, to
+  be moved up. A file from Text Files opened on its own attaches the case
+  folder above it whenever the reader knows that folder. Every fake is shown
+  as its real value in the case the fake was written in, **lightly
+  highlighted**, and hovering shows the pseudonym underneath.
   The highlight's **colour and intensity** are yours to set (the swatch and
   slider beside "Mark pseudonyms", or under Options), and are remembered like
   the font — **written the moment you choose them.** Every reading setting is
@@ -849,12 +861,19 @@ app, which routes it to the reader tab.
   key…** with it (choosing the key already shown in the list does nothing; to
   go through the list, choose "(no key)" and back — never another key, which
   would take off every flag it binds — though "(no key)" also forgets this
-  session's **fake it** answers in the names bar). Folders of one name share
-  one flag list, and so does every case's Text Files folder, and lone
-  documents of one file name from different cases; a key chosen with one of
-  them open answers them all. A flag kept for want of the case's key is only
-  asked about again; a flag taken off wrongly could let the name ship. The
-  whole value has to be in the key: a key that binds "David" has not
+  session's **fake it** answers in the names bar). **Every case folder keeps
+  a list of its own, even where two folders share a name** (two clients'
+  "Opposition"; every case's "Text Files"): the reader knows each folder by
+  itself, not by its name, so a keep taken in one is never read into the
+  other, where it could leave that case's own party unmarked and hand its run
+  a `no:` for the name. A list an earlier version kept under the bare name is
+  given to the folder when it can only be that folder's; otherwise it is held
+  aside and the reader says so once, with what it held, to be flagged or kept
+  again. Lone documents of one file name from different cases still share one
+  list; a key chosen with one of them open answers them all. A flag kept for
+  want of the case's key is only asked about again; a flag taken off wrongly
+  could let the name ship. The whole value has to be in the key: a key that
+  binds "David" has not
   pseudonymized a flagged "David W. Slayton",
   half of which would still be standing, and a value **kept** is not in the
   key's forward side at all — both stay flagged. **But a red mark never
@@ -899,7 +918,8 @@ app, which routes it to the reader tab.
   standing — so a **Save** (or Ctrl+S) that finds the list changed since it
   was last written puts it into the case folder with the document and says so
   in the same line. Without a folder there is nowhere to put it, and the save
-  says that instead of opening a picker nobody asked for. **A list that has
+  says that instead of opening a picker nobody asked for — and so it does with
+  the Text Files folder open, which is not the case folder. **A list that has
   not been written is a closing prompt.** The flags and keeps are remembered
   here whatever happens, so closing the tab loses nothing — but remembered
   here is not handed over: PDF-Linker reads `New Real Values.txt` in the case

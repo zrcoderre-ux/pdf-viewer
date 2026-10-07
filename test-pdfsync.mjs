@@ -358,6 +358,10 @@ console.log("lines off the grid, and lines held on the paper");
 }
 
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");
+// …which the reader asks with the case folder's id, never its bare name: two
+// folders of one name keep two lists of swapped pages.
+check("swap store key by folder id", [swapStoreKey("/folder/0b5e", "Brief.txt"), swapStoreKey("/folder/77aa", "Brief.txt"), swapStoreKey("", "Brief.txt")],
+  ["textReader.swaps./folder/0b5e/Brief.txt", "textReader.swaps./folder/77aa/Brief.txt", "textReader.swaps./Brief.txt"]);
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

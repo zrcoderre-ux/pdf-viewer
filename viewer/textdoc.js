@@ -1417,6 +1417,60 @@ export function keyAnswersFlags(keyOwner, listId) {
   return !!keyOwner && keyOwner === listId;
 }
 
+/**
+ * The storage keys a folder's state is kept under for the folder `from`, each
+ * paired with its key for the folder `to`: [{ from, to }], out of `keys` (the
+ * store's keys as they stand). `whole` are the prefixes kept once per folder
+ * (prefix + folder: the flagged list, what was last written); `perDoc` those
+ * kept once per document in it (prefix + folder + "/" + file: spot keeps,
+ * swapped pages, unsaved LEAKS answers).
+ *
+ * A folder was once named by its bare name and is now named by an id that
+ * begins with "/", which no file or folder name can hold — so a name's
+ * prefix-and-slash never reaches into an id's keys, and the move from a name
+ * to an id (or from a Text Files folder's id to its case folder's) takes only
+ * that folder's own. An empty `from` is no folder, and moves nothing.
+ */
+export function folderStateMoves(keys, from, to, { whole = [], perDoc = [] } = {}) {
+  const out = [];
+  if (!from || !to || from === to) return out;
+  for (const k of keys || []) {
+    if (typeof k !== "string") continue;
+    const w = whole.find((p) => k === p + from);
+    if (w) { out.push({ from: k, to: w + to }); continue; }
+    const d = perDoc.find((p) => k.startsWith(p + from + "/"));
+    if (d) out.push({ from: k, to: d + to + k.slice((d + from).length) });
+  }
+  return out;
+}
+
+/**
+ * Two stored lists ({ values, keeps, phrases, noOcr, ocrAgain, textFixed })
+ * made one: everything in either, `mine` winning where both name a value or
+ * a page — a keep's control, a phrase, a page asked to be read again rather
+ * than left unread — as the folder's New Real Values.txt is merged into its
+ * list on adoption. Nothing in either is lost: a flag left on is only asked
+ * about again, and a flag dropped could let a name ship. Used where a list
+ * kept in the Text Files folder joins its case folder's.
+ */
+export function mergeStoredLists(mine, theirs) {
+  const a = mine || {}, b = theirs || {};
+  let values = (a.values || []).slice(), keeps = (a.keeps || []).slice(), phrases = (a.phrases || []).slice();
+  let noOcr = (a.noOcr || []).slice(), ocrAgain = (a.ocrAgain || []).slice(), textFixed = (a.textFixed || []).slice();
+  const hadValue = (v) => values.some((x) => foldKey(x) === foldKey(v));
+  for (const v of b.values || []) {
+    const fresh = !hadValue(v);
+    values = addValue(values, v);
+    if (fresh && isPhrase(b.phrases, v)) phrases = addValue(phrases, v);
+  }
+  for (const k of b.keeps || []) if (!keptControl(keeps, k.value)) keeps = addKeep(keeps, k.control, k.value, k.state);
+  const named = (e) => noOcr.some((x) => sameNoOcr(x, e)) || ocrAgain.some((x) => sameNoOcr(x, e));
+  for (const e of b.noOcr || []) if (!named(e)) noOcr = setNoOcr(noOcr, e, true);
+  for (const e of b.ocrAgain || []) if (!named(e)) ocrAgain = setOcrAgain(ocrAgain, e, true);
+  for (const e of b.textFixed || []) if (!named(e) && !textFixed.some((x) => sameNoOcr(x, e))) textFixed = setTextFixed(textFixed, e, true);
+  return { values, keeps, phrases, noOcr, ocrAgain, textFixed };
+}
+
 export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain, textFixed) {
   const body = (values || []).map(normalizeValue).filter(Boolean)
     .map((v) => (isPhrase(phrases, v) ? `phrase: ${v}` : v));

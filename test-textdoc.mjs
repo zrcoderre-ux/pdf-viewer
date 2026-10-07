@@ -11,7 +11,7 @@ import {
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
-  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
+  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
@@ -550,6 +550,61 @@ check("another folder's key does not",
 check("a key that is nobody's (dropped with a document, or offered at start) answers no list",
   [keyAnswersFlags(null, "textReader.values.Case B"), keyAnswersFlags("", "textReader.values.Case B"), keyAnswersFlags(undefined, "textReader.values.Case B")], [false, false, false]);
 check("…not even no list", [keyAnswersFlags(null, null), keyAnswersFlags("", "")], [false, false]);
+
+// A case folder's state is kept under its own id, not its bare name: two
+// folders called "Opposition" (two clients) shared one list, and one case's
+// `no` was read into the other's, where it took the orange mark off the
+// plaintiff and was written into its New Real Values.txt. The id begins with
+// "/", which no file or folder name holds, so moving a name's state to an id
+// takes that name's keys and nothing of an id's or of another name's.
+console.log("a folder's state, by name and by id");
+{
+  const P = { whole: ["textReader.values.", "textReader.valuesSaved."], perDoc: ["textReader.spots.", "textReader.swaps.", "textReader.leaks."] };
+  const ID = "/folder/0b5e", OTHER = "/folder/77aa";
+  const keys = [
+    "textReader.values.Opposition", "textReader.valuesSaved.Opposition",
+    "textReader.spots.Opposition/Brief.txt", "textReader.swaps.Opposition/Brief.txt", "textReader.leaks.Opposition/LEAKS.xlsx",
+    "textReader.values.Opposition Reply", "textReader.spots.Opposition Reply/Brief.txt",
+    "textReader.values.Brief.txt", "textReader.spots./Brief.txt",
+    "textReader.values." + OTHER, "textReader.spots." + OTHER + "/Brief.txt", "textReader.keys", "textReaderSettings",
+  ];
+  check("the name's own keys move to the id, each to its place",
+    folderStateMoves(keys, "Opposition", ID, P), [
+      { from: "textReader.values.Opposition", to: "textReader.values." + ID },
+      { from: "textReader.valuesSaved.Opposition", to: "textReader.valuesSaved." + ID },
+      { from: "textReader.spots.Opposition/Brief.txt", to: "textReader.spots." + ID + "/Brief.txt" },
+      { from: "textReader.swaps.Opposition/Brief.txt", to: "textReader.swaps." + ID + "/Brief.txt" },
+      { from: "textReader.leaks.Opposition/LEAKS.xlsx", to: "textReader.leaks." + ID + "/LEAKS.xlsx" },
+    ]);
+  check("…not a longer name that begins with it, a lone document's list, or another folder's id",
+    folderStateMoves(keys, "Opposition", ID, P).map((x) => x.from).filter((k) => !/\.Opposition(\/|$)/.test(k)), []);
+  check("an id's state moves whole to another id (a Text Files folder's to its case folder's)",
+    folderStateMoves(keys, OTHER, ID, P), [
+      { from: "textReader.values." + OTHER, to: "textReader.values." + ID },
+      { from: "textReader.spots." + OTHER + "/Brief.txt", to: "textReader.spots." + ID + "/Brief.txt" },
+    ]);
+  check("no folder, or no move, moves nothing", [folderStateMoves(keys, "", ID, P), folderStateMoves(keys, ID, ID, P), folderStateMoves(keys, "Opposition", "", P)], [[], [], []]);
+  check("a lone document's spots (no folder) are never a name's to take",
+    folderStateMoves(["textReader.spots./Brief.txt"], "Brief.txt", ID, P), []);
+
+  // …and the list kept while the Text Files folder was open joins its case
+  // folder's, nothing in either lost and the case folder's own winning.
+  const mine = { values: ["Zachary Coderre", "Helen Rasho"], keeps: [{ control: "no", value: "Riverside" }], phrases: ["Helen Rasho"],
+    noOcr: [{ doc: "Brief.txt", page: 2 }], ocrAgain: [], textFixed: [] };
+  const theirs = { values: ["helen rasho", "Okafor", "Cross River Bank"], keeps: [{ control: "never", value: "riverside" }, { control: "no", value: "Pemberly", state: "local" }],
+    phrases: ["Cross River Bank", "helen rasho"], noOcr: [], ocrAgain: [{ doc: "Brief.txt", page: 2 }, { doc: "Brief.txt", page: 5 }],
+    textFixed: [{ doc: "Brief.txt", page: 2, sum: "0a1b2c3d" }, { doc: "Reply.txt", page: 1, sum: "deadbeef" }] };
+  const m = mergeStoredLists(mine, theirs);
+  check("flags: both lists, one of each value, the case folder's spelling",
+    m.values, ["Zachary Coderre", "Helen Rasho", "Okafor", "Cross River Bank"]);
+  check("phrases: the case folder's, and theirs for a value only they flagged", m.phrases, ["Helen Rasho", "Cross River Bank"]);
+  check("keeps: a value both keep keeps the case folder's control; one only they kept comes with its state",
+    m.keeps, [{ control: "no", value: "Riverside" }, { control: "no", value: "Pemberly", state: "local" }]);
+  check("pages: one the case folder names is left to it; the rest come",
+    [m.noOcr, m.ocrAgain, m.textFixed], [[{ doc: "Brief.txt", page: 2 }], [{ doc: "Brief.txt", pdf: "", page: 5 }], [{ doc: "Reply.txt", pdf: "", page: 1, sum: "deadbeef" }]]);
+  check("an empty or missing list takes the other whole",
+    [mergeStoredLists(null, mine).values, mergeStoredLists(mine, {}).keeps], [mine.values, mine.keeps]);
+}
 
 // ---- folder listing ------------------------------------------------------------------
 console.log("folder");

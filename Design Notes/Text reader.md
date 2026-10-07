@@ -773,7 +773,9 @@ orange mark went; a one-space edit and Ctrl+S saved without a warning, wrote
 Values.txt`, and left the name in the export, where the next run would keep
 it. The folder toast read "every row answered" on the strength of answers
 given to other values. Two matters whose folders share a leaf name share one
-store entry, so the same happened across cases.
+store entry, so the same happened across cases. (The store is named by the
+folder's own id now, not its leaf name — "Each folder is itself" in Design
+Notes/Text reader layout and navigation.md.)
 
 So `packDecisions` stores each answer with `id`, `leaks.rowIdentity` of its
 row: a digest (two FNV-1a passes, one from each end, 64 bits) of the folded

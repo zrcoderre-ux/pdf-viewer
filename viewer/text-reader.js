@@ -108,6 +108,11 @@ const VALUES_PREFIX = "textReader.values.";
 // PDF-Linker has been handed what is in it.
 const VALUES_SAVED_PREFIX = "textReader.valuesSaved.";
 const SPOTS_PREFIX = "textReader.spots.";
+// Every key a folder's state is kept under, by the folder's id (stateFolder):
+// once per folder, or once per document in it — the spot keeps, the swapped
+// pages (pdfsync.js) and the unsaved LEAKS answers (leaks.js). The older
+// build's state is found by these, under the bare name (adoptLegacyState).
+const STATE_PREFIXES = { whole: [VALUES_PREFIX, VALUES_SAVED_PREFIX], perDoc: [SPOTS_PREFIX, PS.SWAPS_PREFIX, LK.DECISIONS_PREFIX] };
 
 let doc = null;              // TD.parseExport result
 let fileName = "";
@@ -115,6 +120,8 @@ let fileHandle = null;       // FileSystemFileHandle for in-place save
 let openedFile = null;       // the File the open document was read from (__textReaderSource)
 let dirHandle = null;        // the case folder, when one was opened
 let folderName = "";
+let folderId = "";           // …the id its state is kept under, found again by isSameEntry (dirIdFor)
+let folderIsText = false;    // …and whether it is the Text Files folder rather than a case folder (looksLikeTextFiles)
 let folderDocs = [];         // [{ name, handle, quarantined }]
 let folderLight = false;     // …attached for its key alone, the whole folder having taken the reader down last time
 // THE WHOLE FOLDER IS THE DEFAULT, UNTIL IT CRASHES. A file opened from a case
@@ -2004,42 +2011,133 @@ async function rememberedFile(name) {
     return out && out.kind === "file" ? out : null;
   } catch { return null; }
 }
+// EACH FOLDER IS ITSELF, NOT ITS NAME. The folders used to be remembered here
+// under their names, and everything the reader keeps for a case folder — the
+// flagged list, the keeps, the phrases, the page lists, what was last written,
+// the spot keeps, the swapped pages, the unsaved LEAKS answers — was kept in
+// localStorage under the name too. Two matters whose folders share a name
+// ("Opposition" under two clients; every case's "Text Files") shared one of
+// each: the folder remembered was whichever was opened last, and the list was
+// both of theirs. Measured in Chromium over two folders called Opposition: a
+// `no` on Okafor in one client's was read into the other's, where Okafor is
+// the plaintiff. The orange mark on the name standing in the clear went, the
+// save wrote the export with it unrefused, and that case's New Real Values.txt
+// was written `no: Okafor` — a keep on a real party word, which PDF-Linker's
+// next run obeys.
+//
+// So each folder gets an id of its own, kept here beside its handle, and is
+// found again by asking the remembered handles whether one of them IS the
+// folder (isSameEntry) — only those of the same name, the same entry having
+// the same name, so the cost is a call or two whatever the store holds. The
+// state is kept under the id (stateFolder). The id begins with "/", which no
+// file or folder name can hold, so it can never be read as a lone document's
+// list (kept under its file name) or as a name an older build kept one under.
+//
+// A record is { handle, role }:
+//   "case"       a case folder, offered to a file opened on its own (caseFolderFor);
+//   "text"       a Text Files folder, known for its id and NEVER remembered as a
+//                case folder: offered only where no case folder above it is;
+//   "forgotten"  a folder let go of (forgetFolder). Its id outlives the
+//                remembering, or the list kept under it would be lost to the
+//                next time it is opened, which the name never lost.
+// An older build's entry, a bare handle under the folder's name, is given an
+// id the first time the store is read (readDirRecords), as a case folder.
+const DIR_ID_PREFIX = "/folder/";
+function newDirId() {
+  const c = globalThis.crypto;
+  return DIR_ID_PREFIX + (c && c.randomUUID ? c.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
+}
+function isTextSub(name) { return String(name || "").toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase(); }
+/** Every remembered folder as [{ id, handle, role }]; throws without IndexedDB. */
+async function readDirRecords() {
+  const db = await openDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(DIRS_STORE, "readwrite");
+      const store = tx.objectStore(DIRS_STORE);
+      const keys = store.getAllKeys();
+      const vals = store.getAll();
+      const out = [];
+      vals.onsuccess = () => {
+        for (let i = 0; i < keys.result.length; i++) {
+          const k = keys.result[i], v = vals.result[i];
+          if (typeof k === "string" && k.startsWith(DIR_ID_PREFIX)) {
+            if (v && v.handle && v.handle.kind === "directory") out.push({ id: k, handle: v.handle, role: v.role || "case" });
+          } else if (v && v.kind === "directory") {
+            const id = newDirId();
+            store.put({ handle: v, role: "case" }, id);
+            store.delete(k);
+            out.push({ id, handle: v, role: "case" });
+          }
+        }
+      };
+      tx.oncomplete = () => resolve(out);
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally { db.close(); }
+}
+async function putDirRecord(id, handle, role) {
+  const db = await openDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(DIRS_STORE, "readwrite");
+      tx.objectStore(DIRS_STORE).put({ handle, role }, id);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally { db.close(); }
+}
+/**
+ * The id `h` is kept under: { id, role, sameName } — `sameName`, how many
+ * remembered folders bear its name (adoptLegacyState) — minted and stored the
+ * first time the folder is seen, unless `mint` is false. `roleOf(prev)` is the
+ * role to store, where the caller sets one; else a new folder takes "text" or
+ * "case" by its name and a known one keeps its own. Null without IndexedDB.
+ * One at a time: two adoptions of a folder never seen before would each mint
+ * it an id, and its state would be split between them.
+ */
+let dirIdQueue = Promise.resolve();
+function dirIdFor(h, roleOf = null, { mint = true } = {}) {
+  const run = dirIdQueue.then(() => dirIdForNow(h, roleOf, mint));
+  dirIdQueue = run.catch(() => null);
+  return run;
+}
+async function dirIdForNow(h, roleOf, mint) {
+  try {
+    const records = await readDirRecords();
+    const named = records.filter((r) => r.handle.name === h.name);
+    let hit = null;
+    for (const r of named) {
+      try { if (await r.handle.isSameEntry(h)) { hit = r; break; } } catch { /* a folder gone: not this one */ }
+    }
+    if (!hit && !mint) return null;
+    const prev = hit ? hit.role : "";
+    const role = roleOf ? roleOf(prev) : prev || (isTextSub(h.name) ? "text" : "case");
+    const id = hit ? hit.id : newDirId();
+    if (!hit || role !== prev) await putDirRecord(id, h, role);
+    return { id, role, sameName: named.length + (hit ? 0 : 1) };
+  } catch { return null; }
+}
+/** A folder shown to the reader, remembered as a case folder — never a Text Files folder. */
 async function rememberDir(handle) {
-  try {
-    const db = await openDb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(DIRS_STORE, "readwrite");
-      tx.objectStore(DIRS_STORE).put(handle, handle.name);
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
-  } catch { /* the folder simply is not remembered */ }
+  return dirIdFor(handle, (prev) => (prev === "text" || isTextSub(handle.name) ? "text" : "case"));
 }
-/** …and the opposite: a folder the reader is to stop remembering. */
-async function forgetDir(name) {
+/** …and the opposite: a folder the reader is to stop offering. Its id stays (see above). */
+async function forgetDir(id) {
+  if (!id) return;
   try {
     const db = await openDb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(DIRS_STORE, "readwrite");
-      tx.objectStore(DIRS_STORE).delete(name);
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(DIRS_STORE, "readwrite");
+        const store = tx.objectStore(DIRS_STORE);
+        const req = store.get(id);
+        req.onsuccess = () => { if (req.result && req.result.handle) store.put({ handle: req.result.handle, role: "forgotten" }, id); };
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    } finally { db.close(); }
   } catch { /* it was not remembered, which is where we wanted to get to */ }
-}
-async function rememberedDirs() {
-  try {
-    const db = await openDb();
-    const out = await new Promise((resolve, reject) => {
-      const req = db.transaction(DIRS_STORE, "readonly").objectStore(DIRS_STORE).getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
-    db.close();
-    return out.filter((h) => h && h.kind === "directory");
-  } catch { return []; }
 }
 async function permissionOf(handle, mode) {
   try { return handle.queryPermission ? await handle.queryPermission({ mode }) : "granted"; } catch { return "granted"; }
@@ -2047,26 +2145,47 @@ async function permissionOf(handle, mode) {
 
 /**
  * The case folder a file handle sits in, from the remembered folders:
- * { dir, needs } — `needs` true where the folder must be re-authorised on a
- * click before it can be read — or null where no remembered folder holds it.
+ * { dir, needs, textFiles } — `needs` true where the folder must be
+ * re-authorised on a click before it can be read — or null where no
+ * remembered folder holds it.
+ *
+ * A CASE FOLDER BEFORE A TEXT FILES FOLDER. Every case's Text Files folder
+ * was remembered under the one name, so the one remembered was the last
+ * case's to be picked by mistake, and a file of THAT case opened on its own
+ * adopted it as the case folder: the toast said only "Text Files · 1
+ * document, key attached", nothing warned, and the next Ctrl+S wrote New Real
+ * Values.txt into the folder that is uploaded. A Text Files folder is
+ * remembered as one now (rememberDir), and one remembered by an older build
+ * as a case folder is still known by its name: either is the answer only
+ * where no case folder holding the file is remembered, and comes back marked
+ * as what it is (`textFiles`), for adoption to say so.
  */
 async function caseFolderFor(fileHandle) {
   if (!fileHandle || typeof fileHandle.isSameEntry !== "function") return null;
-  for (const dir of await rememberedDirs()) {
+  let records;
+  try { records = await readDirRecords(); } catch { return null; }
+  let text = null, letGo = false;
+  for (const r of records) {
     let path = null;
-    try { path = await dir.resolve(fileHandle); } catch { path = null; }
+    try { path = await r.handle.resolve(fileHandle); } catch { path = null; }
     if (!path) continue;
+    // A folder let go of is not offered, nor is the Text Files folder inside
+    // it in its place: "Let go" means this file, on its own.
+    if (r.role === "forgotten") { letGo = true; continue; }
     // The file's own folder, or the folder above a "Text Files" it sits in.
     let up = path.length - 1;
-    if (up >= 1 && path[up - 1].toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) up -= 1;
-    let caseDir = dir;
+    if (up >= 1 && isTextSub(path[up - 1])) up -= 1;
+    let caseDir = r.handle;
     try {
       for (const seg of path.slice(0, up)) caseDir = await caseDir.getDirectoryHandle(seg);
     } catch { continue; }
+    if (r.role === "text" || isTextSub(caseDir.name)) { text = text || caseDir; continue; }
     const perm = await permissionOf(caseDir, "readwrite");
-    return { dir: caseDir, needs: perm !== "granted" };
+    return { dir: caseDir, needs: perm !== "granted", textFiles: false };
   }
-  return null;
+  if (!text || letGo) return null;
+  const perm = await permissionOf(text, "readwrite");
+  return { dir: text, needs: perm !== "granted", textFiles: true };
 }
 
 /** Read a case folder: its key, its exports and its flagged values. */
@@ -2074,7 +2193,9 @@ async function scanFolder(h, { light = false } = {}) {
   const found = { keyHandle: null, valuesHandle: null, leaksHandle: null, combined: null, textDir: null, docs: [], rootDocs: [], pdfs: [] };
   for await (const [name, entry] of h.entries()) {
     if (entry.kind === "file") {
-      if (/\.pdf$/i.test(name) && !/_temp\.pdf$/i.test(name)) { if (!light) found.pdfs.push({ name, handle: entry }); }
+      // A PDF is counted even where a light attach lists none: having PDFs is
+      // one of the things that makes a case folder one (looksLikeTextFiles).
+      if (/\.pdf$/i.test(name) && !/_temp\.pdf$/i.test(name)) { found.anyPdf = true; if (!light) found.pdfs.push({ name, handle: entry }); }
       else if (TD.isKeyName(name) && !found.keyHandle) found.keyHandle = entry;
       // The leak worksheet: the current name over the legacy one PDF-Linker still reads.
       else if (LK.isLeaksName(name) && (!found.leaksHandle || LK.leaksRank(name) < LK.leaksRank(found.leaksHandle.name))) found.leaksHandle = entry;
@@ -2125,25 +2246,41 @@ async function adoptFolder(h, { quiet = false, light = false } = {}) {
  * offer bar and the Documents tab then ask before reading the rest.
  */
 async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
+  // The folder's id first, before anything moves: it is what the folder's
+  // state is kept under (dirIdFor), and it is found by asking IndexedDB.
+  const rec = await dirIdFor(h);
   // Another matter: the PDFs go, and with them any redaction proposed over
   // them — boxes are a thing you are in the middle of, and this folder's
   // pages are not that folder's.
   if (dirHandle !== h) { forgetPdfs(); dropReady(); clearRedactions("the case folder changed"); }
   dirHandle = h;
   folderName = h.name;
-  // The name this folder's flags are kept under, taken now: the key file read
+  folderId = rec ? rec.id : "";
+  folderIsText = isTextSub(h.name); // …until the folder is read, below
+  // The list this folder's flags are kept under, taken now: the key file read
   // below is this folder's own even should another folder be opened meanwhile.
   const own = valuesStoreKey();
-  await rememberDir(h);
   const found = await scanFolder(h, { light });
+  // What the folder is, now that it has been read: a Text Files folder is
+  // never remembered as a case folder (rememberDir), and nothing that belongs
+  // to the case is written into it (textFolderOpen).
+  const text = looksLikeTextFiles(h, found);
+  if (dirHandle === h) folderIsText = text;
+  if (rec && rec.role !== (text ? "text" : "case")) await dirIdFor(h, () => (text ? "text" : "case"));
+  // An older build's state for this folder's NAME, moved under its id where
+  // it can only be this folder's; and the list kept while this case's Text
+  // Files folder was the one open, brought up into this one.
+  listNote = "";
+  if (rec) listNote = await adoptLegacyState(h, rec);
+  if (rec && found.textDir && !text) listNote += await carryUpTextFiles(found.textDir, own, h);
   // The combined file, when the folder has one, listed first: it is the one
   // file holding every export, and the one the drafting model was handed.
   folderDocs = light ? [] : (found.combined ? [found.combined].concat(found.docs) : found.docs);
   folderPdfs = light ? [] : found.pdfs;
   folderLight = light;
-  // Not in the Text Files folder: its remedy is the folder above (openFolder's
-  // offer bar), and every case's Text Files shares one flag list by name.
-  const ownNote = (remedy) => (looksLikeTextFiles(h, found) ? "" : notOwnKeyNote(remedy));
+  // Not in the Text Files folder: its remedy is the folder above (the offer
+  // bar, offerFolderAbove), and a key loaded into it is not the case's.
+  const ownNote = (remedy) => (text ? "" : notOwnKeyNote(remedy));
   if (found.keyHandle) {
     try {
       const f = await found.keyHandle.getFile();
@@ -2159,7 +2296,7 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
     const note = ownNote();
     toast("No pseudonym_key.xlsx in " + folderName + (note ? " — the documents read under the key in hand." + note : " — the documents will read in their fakes."), note ? { ms: 9000 } : undefined);
   }
-  const stored = readStoredValues(VALUES_PREFIX + folderName);
+  const stored = readStoredValues(own);
   flagged = stored.values;
   flagsFor = valuesStoreKey();
   keeps = stored.keeps;
@@ -2227,20 +2364,127 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
         // as finished on the strength of answers given to other values.
         const und = LK.undecidedCount(parsed.rows);
         const here = leaks && leaks.carried ? leaks.carried : 0;
-        const note = leaksNoteOnce();
+        const note = leaksNoteOnce() + listNoteOnce();
         toast(`${f.name}: ${parsed.rows.length} row${parsed.rows.length === 1 ? "" : "s"}`
           + (und ? `, ${und} to answer` + (here ? `, ${here} answered here and not yet saved` : "") + " — ⚠ Leaks to review them."
             : ", every row answered" + (here ? ` — ${here} of the answers here and not yet saved (Ctrl+Shift+S writes them).` : "."))
           + note, note || here ? { ms: 9000 } : undefined);
       }
     } catch (e) { toast("The folder's LEAKS.xlsx could not be read: " + (e.message || e), { error: true }); }
-  } else if (leaks && leaks.folder && leaks.folder !== folderName) {
+  } else if (leaks && leaks.store && leaks.store !== stateFolder()) {
     persistLeaks(); // remembered for the folder it belongs to
     dropLeaks();
   }
   if (folderDocs.length) { autoShowSidePanel(); showSideTab("tab-docs"); }
   if (doc) refreshPdf();
+  // Said here, whoever adopted it, and left standing while it is the folder
+  // open (offerFolderAbove); taken down when a case folder takes its place.
+  if (dirHandle === h) {
+    if (text) offerFolderAbove(h, found);
+    else if (keyOffer.dataset.textFiles) hideKeyOffer();
+  }
+  // What happened to the list, where nothing else this adoption says has
+  // said it; a quiet adoption leaves it to the toast its caller makes.
+  if (!quiet && listNote) toast(listNoteOnce().trim(), { ms: 12000 });
   return found;
+}
+
+// What an adoption has to say about the folder's list — an older build's
+// held aside, or the Text Files folder's brought up (adoptLegacyState,
+// carryUpTextFiles) — said once, by whichever toast comes next.
+let listNote = "";
+function listNoteOnce() {
+  if (!listNote) return "";
+  const s = " " + listNote.trim();
+  listNote = "";
+  return s;
+}
+
+/**
+ * AN OLDER BUILD'S STATE, kept under the folder's bare NAME, moved under its
+ * id — only where it can be nobody else's.
+ *
+ * That state was every same-named folder's at once, so a list under
+ * "Opposition" may be either client's. It moves to this folder when exactly
+ * one remembered folder bears the name (`sameName`, this one), and, where the
+ * reader kept what it last wrote, the New Real Values.txt in this folder is
+ * that text: the list was last written HERE. Anything else — two folders of
+ * the name known, a file that is not what was written, or none (a run spends
+ * the file, and which folder's run cannot be told) — and the state is HELD
+ * ASIDE, moved out of the name into `textReader.held.*` where nothing reads
+ * it, and said once, with what it held. A keep read into the wrong case
+ * takes the orange mark off a real name and hands its run a `no:` for it; a
+ * list held aside is only flagged again. A slot the id already fills is not
+ * written over: that value is held aside too.
+ *
+ * Returns what to say, or "".
+ */
+async function adoptLegacyState(h, rec) {
+  const name = h.name;
+  let keys = [];
+  try { for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i)); } catch { return ""; }
+  const moves = TD.folderStateMoves(keys, name, rec.id, STATE_PREFIXES);
+  if (!moves.length) return "";
+  const saved = lsGet(VALUES_SAVED_PREFIX + name, "");
+  let onDisk = null;
+  if (saved) {
+    try { onDisk = await (await (await h.getFileHandle(TD.VALUES_FILE)).getFile()).text(); } catch { onDisk = null; }
+  }
+  const ours = rec.sameName === 1 && (!saved || onDisk === saved);
+  let held = null, heldOther = 0;
+  for (const m of moves) {
+    try {
+      const raw = localStorage.getItem(m.from);
+      if (raw == null) continue;
+      if (ours && localStorage.getItem(m.to) == null) localStorage.setItem(m.to, raw);
+      else {
+        let at = "textReader.held." + m.from.slice("textReader.".length);
+        if (localStorage.getItem(at) != null) at += "#" + Date.now();
+        localStorage.setItem(at, raw);
+        if (m.from === VALUES_PREFIX + name) held = readStoredValues(at);
+        else if (m.from !== VALUES_SAVED_PREFIX + name) heldOther++;
+      }
+      localStorage.removeItem(m.from);
+    } catch { /* storage full: left where it was, and read by nothing */ }
+  }
+  const n = held ? held.values.length + held.keeps.length + held.noOcr.length + held.ocrAgain.length + held.textFixed.length : 0;
+  if (!n && !heldOther) return "";
+  const why = ours ? "this folder already keeps one of its own"
+    : rec.sameName > 1 ? `${rec.sameName} folders of that name are known here`
+      : `what it last wrote is not the ${TD.VALUES_FILE} in this one`;
+  const what = n
+    ? `${held.values.length} flag${held.values.length === 1 ? "" : "s"}, ${held.keeps.length} keep${held.keeps.length === 1 ? "" : "s"}`
+      + (held.noOcr.length + held.ocrAgain.length + held.textFixed.length ? ` and ${held.noOcr.length + held.ocrAgain.length + held.textFixed.length} page line${held.noOcr.length + held.ocrAgain.length + held.textFixed.length === 1 ? "" : "s"}` : "")
+      + (held.values.length || held.keeps.length ? ` (${held.values.concat(held.keeps.map((k) => k.value)).slice(0, 4).join(", ")}${held.values.length + held.keeps.length > 4 ? "…" : ""})` : "")
+    : "the spot keeps and page swaps kept for its documents";
+  return `An earlier version kept one list for every folder named “${name}”, and ${why}, so whose it is cannot be told: ${what} are held aside, not read into this folder. Flag or keep again here what this case still needs.`;
+}
+
+/**
+ * …and the Text Files folder's list brought up into its case folder's.
+ *
+ * Nothing the case is owed is written into the Text Files folder (it is
+ * uploaded, and PDF-Linker reads New Real Values.txt from the case folder and
+ * nowhere else), so a list made while it was the folder open stays in the
+ * browser, under that folder's own id, until its case folder is opened —
+ * which is what the save, and the offer bar, tell the operator to do. Then it
+ * is this folder's: the Text Files folder found (isSameEntry) is this
+ * folder's own, so its flags and keeps are this case's and nobody else's.
+ * Merged, not written over (TD.mergeStoredLists). The documents' spot keeps
+ * and swaps stay under the Text Files folder's id — a spot keep left behind is
+ * a real value marked again, never one let through.
+ */
+async function carryUpTextFiles(textDir, own, h) {
+  const rec = await dirIdFor(textDir, null, { mint: false });
+  if (!rec) return "";
+  const from = VALUES_PREFIX + rec.id;
+  if (lsGet(from, null) == null) return "";
+  const theirs = readStoredValues(from);
+  lsSet(own, TD.mergeStoredLists(readStoredValues(own), theirs));
+  try { localStorage.removeItem(from); localStorage.removeItem(VALUES_SAVED_PREFIX + rec.id); } catch { /* left: read by nothing but its own folder */ }
+  const lines = theirs.noOcr.length + theirs.ocrAgain.length + theirs.textFixed.length;
+  if (!theirs.values.length && !theirs.keeps.length && !lines) return "";
+  return ` The list kept while ${textDir.name} was the folder open — ${theirs.values.length} to fake, ${theirs.keeps.length} to keep${lines ? `, ${lines} page line${lines === 1 ? "" : "s"}` : ""} — is ${h.name}'s now, and the next save writes it into its ${TD.VALUES_FILE}.`;
 }
 
 // The offer bar: a lone file whose case folder is known but needs a click to
@@ -2257,10 +2501,11 @@ function showKeyOffer(text, action, onAct) {
   btn.textContent = action;
   btn.onclick = async () => { hideKeyOffer(); await onAct(); };
   delete keyOffer.dataset.master; // whose offer it is (offerMasterRenew marks its own)
+  delete keyOffer.dataset.textFiles; // …or offerFolderAbove its own
   keyOffer.hidden = false;
   syncOfferHeight();
 }
-function hideKeyOffer() { keyOffer.hidden = true; delete keyOffer.dataset.master; syncOfferHeight(); }
+function hideKeyOffer() { keyOffer.hidden = true; delete keyOffer.dataset.master; delete keyOffer.dataset.textFiles; syncOfferHeight(); }
 $("key-offer-close").addEventListener("click", hideKeyOffer);
 
 /**
@@ -2289,10 +2534,19 @@ async function attachKeyForFile(handle) {
     if (doc) retranslate();
     markDocList();
     // Left out of the Text Files folder, as adoption leaves it out (ownNote).
-    const note = looksLikeTextFiles(at.dir, found) ? "" : notOwnKeyNote();
+    const text = looksLikeTextFiles(at.dir, found);
+    const note = text ? "" : notOwnKeyNote();
     // …and what the worksheet's attach threw away of the answers remembered
-    // for it, said here because this toast would write over its own.
-    const gone = leaksNoteOnce();
+    // for it, and what became of the folder's list, said here because this
+    // toast would write over their own.
+    const gone = leaksNoteOnce() + listNoteOnce();
+    // The Text Files folder, found for want of a case folder above it: the
+    // offer bar adoption put up says what it is (offerFolderAbove), and is
+    // what the operator needs from the bar, before reading the rest of it.
+    if (text) {
+      toast(`${at.dir.name} is the folder the exports live in, not the case folder: nothing the case is owed is written into it — see the bar above.` + gone, { ms: 9000 });
+      return;
+    }
     if (!ask) {
       toast((key
         ? `${at.dir.name} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}, key attached${leaks ? " with its LEAKS worksheet" : ""}.` + note
@@ -2303,7 +2557,10 @@ async function attachKeyForFile(handle) {
     showKeyOffer(`Last time the reader went down with the whole of a case folder open, so this file came in on its own${key && !note ? `, with ${at.dir.name}'s key` : ""}.${note} Read the rest of the folder too?`,
       "Read the whole folder", readWholeFolder);
   };
-  if (at.needs) showKeyOffer("This file is in " + at.dir.name + ". Attach its pseudonym key?", "Attach key", attach);
+  // A Text Files folder that wants re-authorising has no key to attach: what
+  // there is to offer is the case folder above it, picked from inside it.
+  if (at.needs && at.textFiles) offerFolderAbove(at.dir, null, "This file is in " + at.dir.name + ", ");
+  else if (at.needs) showKeyOffer("This file is in " + at.dir.name + ". Attach its pseudonym key?", "Attach key", attach);
   else await attach();
 }
 
@@ -2315,7 +2572,10 @@ async function openFileNow(file, handle) {
   if (!file) return;
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
   openedFile = file;
-  hideKeyOffer();
+  // …but not the Text Files warning while that is still the folder open: the
+  // first document of the folder used to take it down the moment it opened,
+  // and the operator never saw it.
+  if (!(keyOffer.dataset.textFiles && textFolderOpen())) hideKeyOffer();
   // The case folder first, so the document renders under its own key — and so
   // a document built ahead of time is judged against the key it will open under.
   try { await attachKeyForFile(handle || null); } catch (e) { console.warn(e); }
@@ -2465,17 +2725,9 @@ async function openFolder(startIn) {
   }
   if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
   hideKeyOffer();
+  // A Text Files folder picked here is said so by the adoption itself
+  // (offerFolderAbove), whichever way it came to be the folder open.
   const found = await adoptFolder(h);
-  // THE TEXT FILES FOLDER IS NOT THE CASE FOLDER. It is the easy mistake —
-  // the documents are in it, so it looks like the place — and everything that
-  // makes a case folder a case folder is one level up: the key, the PDFs, the
-  // LEAKS worksheet, the flagged list. The reader cannot step up on its own
-  // (no handle leads to its parent), so it says so and opens the picker there
-  // again, where the folder above is one click away.
-  if (looksLikeTextFiles(h, found)) {
-    showKeyOffer(`${h.name} is the folder the exports live in, not the case folder: the key, the PDFs and the worksheet are the level above it.`,
-      "Choose the folder above…", () => openFolder(h));
-  }
   if (folderDocs.length) {
     // A file already open from this folder just takes the key; otherwise the
     // quarantined export, the one to read, else the first.
@@ -2516,7 +2768,10 @@ $("open-folder").addEventListener("click", () => openFolder());
 async function forgetFolder() {
   if (!dirHandle) return;
   const was = folderName;
-  await forgetDir(dirHandle.name);
+  // Forgotten by its id, which stays (dirIdFor): the list kept under it is
+  // there again when the folder is opened again, as it was under the name.
+  await forgetDir(folderId);
+  if (keyOffer.dataset.textFiles) hideKeyOffer();
   forgetPdfs();
   dropReady();
   dropSweep();
@@ -2528,6 +2783,8 @@ async function forgetFolder() {
   findShown = { rev: null, docs: null, texts: new Map() };
   dirHandle = null;
   folderName = "";
+  folderId = "";
+  folderIsText = false;
   folderDocs = [];
   folderPdfs = [];
   flagsFor = null;
@@ -2563,7 +2820,7 @@ async function readWholeFolder() {
   if (!dirHandle) return;
   setAskBeforeFolder(false);
   await adoptFolder(dirHandle, { quiet: true, light: false });
-  const gone = leaksNoteOnce();
+  const gone = leaksNoteOnce() + listNoteOnce();
   toast(`${folderName} · ${folderDocs.length} document${folderDocs.length === 1 ? "" : "s"}. The reader reads the rest of the folder from here.` + gone, { ms: gone ? 9000 : 6000 });
 }
 $("read-folder").addEventListener("click", readWholeFolder);
@@ -2575,7 +2832,52 @@ $("read-folder").addEventListener("click", readWholeFolder);
  */
 function looksLikeTextFiles(h, found) {
   if (h.name.toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) return true;
-  return !!found.rootDocs.length && !found.textDir && !found.keyHandle && !found.pdfs.length && !found.leaksHandle;
+  return !!found.rootDocs.length && !found.textDir && !found.keyHandle && !found.anyPdf && !found.leaksHandle;
+}
+/**
+ * Whether the folder open is the Text Files folder, into which NOTHING the
+ * case is owed is written: not New Real Values.txt, not LEAKS.xlsx.
+ *
+ * It is the folder uploaded to the drafting model, and PDF-Linker reads the
+ * reader's file from the case folder and nowhere else — a copy in Text Files
+ * it skips as a tool artifact, so it is neither applied nor ever removed.
+ * With Text Files picked, every Ctrl+S quietly wrote the flagged list there
+ * and marked it handed over: measured in Chromium, the witness flagged was in
+ * "Text Files/New Real Values.txt" after one save, and the case folder held
+ * nothing. A `phrase:` line or an owed `no:` over a pseudonym carries the real
+ * name the export has faked, so the file can hold real names the exports do
+ * not. Now the list stays in the browser, unwritten and said to be so, until
+ * the case folder is opened, and goes with it (carryUpTextFiles).
+ *
+ * Asked of the name as well as of what adoption read, so a save made while an
+ * adoption is still reading the folder is refused all the same.
+ */
+function textFolderOpen() {
+  return !!dirHandle && (folderIsText || isTextSub(dirHandle.name));
+}
+/**
+ * THE TEXT FILES FOLDER IS NOT THE CASE FOLDER. It is the easy mistake — the
+ * documents are in it, so it looks like the place — and everything that makes
+ * a case folder a case folder is one level up: the key, the PDFs, the LEAKS
+ * worksheet, the flagged list. The reader cannot step up on its own (no handle
+ * leads to its parent), so it says so and opens the picker there again, where
+ * the folder above is one click away.
+ *
+ * Said by the adoption, whichever way the folder came to be open (Open case
+ * folder, a file opened on its own from one remembered, the app's own pick),
+ * and LEFT STANDING while it is the folder open: the first document opened
+ * used to take it down at once, and a remembered one never put it up at all.
+ * A New Real Values.txt or LEAKS.xlsx an earlier version wrote into it is
+ * named: PDF-Linker never reads either there, and the upload carries them.
+ */
+function offerFolderAbove(h, found, lead = "") {
+  const stray = found ? [found.valuesHandle ? TD.VALUES_FILE : "", found.leaksHandle ? found.leaksHandle.name : ""].filter(Boolean) : [];
+  const it = stray.length === 1 ? "it" : "them";
+  showKeyOffer((lead ? lead + "the folder the exports live in" : `${h.name} is the folder the exports live in`)
+    + ", not the case folder: the key, the PDFs and the worksheet are the level above it, and the flagged list is written there and nowhere else — step up one level in the picker."
+    + (stray.length ? ` The ${stray.join(" and the ")} in it ${stray.length === 1 ? "was" : "were"} written by an earlier version: PDF-Linker never reads ${it} here and the upload carries ${it}, so move ${it} up into the case folder.` : ""),
+  "Choose the folder above…", () => openFolder(h));
+  keyOffer.dataset.textFiles = "1";
 }
 
 async function openFolderDoc(d) {
@@ -4351,7 +4653,12 @@ async function saveDocument() {
   if (valuesDirty()) {
     alsoList = await saveValuesFile({ quiet: true, folderOnly: true })
       ? ` · ${TD.VALUES_FILE} written too (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()})`
-      : " · the flagged list is still unwritten — no case folder is open, so save it from the Flagged panel";
+      // …and never into the Text Files folder, which is uploaded and which
+      // PDF-Linker never reads it from: said, and the way up offered again.
+      : textFolderOpen()
+        ? ` · the flagged list is still unwritten — ${folderName} is the folder the exports live in, not the case folder; choose the folder above it and the list goes with it`
+        : " · the flagged list is still unwritten — no case folder is open, so save it from the Flagged panel";
+    if (textFolderOpen() && keyOffer.hidden) offerFolderAbove(dirHandle, null);
   }
   // …and the worksheet, for the same reason: the rows answered while reading
   // this document are decisions about this document, and a decision left in
@@ -4362,7 +4669,9 @@ async function saveDocument() {
     const n = await saveLeaks({ quiet: true, folderOnly: true });
     alsoList += n
       ? ` · ${leaks.name} written too (${n} decision${n === 1 ? "" : "s"})`
-      : " · the LEAKS decisions are still unwritten — save them from the ⚠ Leaks bar";
+      : textFolderOpen()
+        ? ` · the LEAKS decisions are still unwritten — ${leaks.name} is not written into ${folderName}`
+        : " · the LEAKS decisions are still unwritten — save them from the ⚠ Leaks bar";
   }
   if (forwarded || typing.made || typing.back) afterTextChange();
   updateDirty();
@@ -4385,8 +4694,13 @@ async function saveDocument() {
       + ". Retype or keep " + (stuck.length === 1 ? "it" : "them") + " by hand." + instructionNote(stuckNames)
     : "";
   const wroteAs = forwarded + typing.made; // the names the save marked on its way in are written as pseudonyms too
+  // With no document written and the list or the worksheet left unwritten
+  // (no case folder, or the Text Files folder), nothing was saved, and the
+  // toast leads with that rather than "Saved the flagged list is still…".
   toast((!wrote.length
-    ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : "Nothing to save.")
+    ? (!alsoList ? "Nothing to save."
+      : / written too /.test(alsoList) ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ")
+        : "Nothing saved" + alsoList)
     : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + wrote.join(", ") +
       (wroteAs ? ` · ${wroteAs} real name${wroteAs === 1 ? "" : "s"} written as pseudonym${wroteAs === 1 ? "" : "s"}` : "")
       + (typing.back ? ` · ${typing.back} left as typed — ${typing.back === 1 ? "a party" : "parties"} to a cited decision, never a pseudonym` : "") + alsoList) + warn + stuckWarn,
@@ -7345,7 +7659,7 @@ async function sweepFolder() {
         // nothing in — a real name that is a word of some other name's fake
         // ("Jones" in "Mary Jones"), or a name kept just there.
         step("looking for the key's real values and the flagged ones", text.length);
-        const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + d.name, []));
+        const theirSpots = TD.normalizeSpots(lsGet(spotKeyFor(d.name), []));
         const { values, flags } = TD.clearReading(text, { rev, reals, flagRx, spots: theirSpots, mask: maskKept });
         if (values.length || flags) sweep.rows.push({ doc: d, values, flags });
         // …and, from the same reading, which PSEUDONYMS stand here. That is
@@ -8637,8 +8951,12 @@ function unmarkPhrase(v) {
   toast(`"${v}" is an ordinary flag again — PDF-Linker fakes it as a value, not as one phrase.`);
 }
 
-function valuesStoreKey() { return VALUES_PREFIX + (folderName || fileName || "loose"); }
-function valuesSavedKey() { return VALUES_SAVED_PREFIX + (folderName || fileName || "loose"); }
+// What a case folder's state is kept under: its id (dirIdFor), never its bare
+// name, which every same-named folder shares — or, where IndexedDB could give
+// it no id, the name, as an older build kept it. "" with no folder open.
+function stateFolder() { return folderName ? folderId || folderName : ""; }
+function valuesStoreKey() { return VALUES_PREFIX + (stateFolder() || fileName || "loose"); }
+function valuesSavedKey() { return VALUES_SAVED_PREFIX + (stateFolder() || fileName || "loose"); }
 /**
  * Whether the flagged values and the keeps have been written out since they
  * last moved. The list is remembered here whatever happens — closing the tab
@@ -8657,7 +8975,8 @@ function valuesDirty() {
 function markValuesSaved(text) { lsSet(valuesSavedKey(), text); renderFlags(); }
 // Spot keeps belong to ONE document, not to the case: they name a place in it.
 // Remembered per document, like its swapped pages.
-function spotStoreKey() { return SPOTS_PREFIX + (folderName || "") + "/" + (fileName || ""); }
+function spotStoreKey() { return spotKeyFor(fileName); }
+function spotKeyFor(name) { return SPOTS_PREFIX + stateFolder() + "/" + (name || ""); }
 // A spot names a page of its own DOCUMENT. The page numbers in hand are the
 // reel's — one list holding several files — so they are written back rebased
 // onto the member, which is what the file is opened with again whether it is
@@ -8832,9 +9151,11 @@ function renderFlags() {
     flagsList.appendChild(li);
   }
   const unsaved = valuesDirty();
-  flagsNote.textContent = (dirHandle
-    ? `Saves to ${folderName}/${TD.VALUES_FILE}.`
-    : "No case folder is open: the list is remembered here and can be saved anywhere or copied.")
+  flagsNote.textContent = (textFolderOpen()
+    ? `Not saved into ${folderName}: it is the folder the exports live in, and PDF-Linker reads the list from the case folder above it. Choose that folder and the list goes with it.`
+    : dirHandle
+      ? `Saves to ${folderName}/${TD.VALUES_FILE}.`
+      : "No case folder is open: the list is remembered here and can be saved anywhere or copied.")
     + (unsaved ? " Not written yet — PDF-Linker reads the file, not this list." : "");
 }
 
@@ -8975,6 +9296,17 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
     return false;
   }
   const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed);
+  // Never into the Text Files folder (textFolderOpen), and never handed over
+  // from it: nothing is written, nothing is marked saved, and no picker is put
+  // up — one opens where it was last, which is that folder. The list waits in
+  // the browser for the case folder, and goes with it when that is opened.
+  if (textFolderOpen()) {
+    if (!quiet) {
+      toast(`${TD.VALUES_FILE} was not written: ${folderName} is the folder the exports live in, not the case folder. Choose the folder above it (the bar at the top) — the list goes with it — and save again.`, { error: true, ms: 9000 });
+      offerFolderAbove(dirHandle, null);
+    }
+    return false;
+  }
   if (dirHandle) {
     try {
       if (dirHandle.requestPermission) {
@@ -9030,14 +9362,16 @@ $("flags-copy").addEventListener("click", async () => {
 // also flagged into New Real Values.txt, which would hand PDF-Linker the same
 // value twice under two different rules.
 const leaksBar = $("leaks-bar");
-let leaks = null;          // { parsed, bytes, name, handle, folder, at, mirrored: Set }
+let leaks = null;          // { parsed, bytes, name, handle, folder, store, at, mirrored: Set }
 let leakRowValue = "";     // the current row's value, marked wherever it stands
 let leakRowRanges = [];    // where it stands, from the last paint: [{ body, range }]
 let leakHere = null;       // the occurrence the bar scrolled to
 let leakHerePieces = null; // …and, where the names walk put it there, every piece of that name
 let rowHere = null;        // …the worksheet row's own, which the names walk does not move
 
-function leaksStoreKey() { return LK.decisionsKey(leaks.folder || folderName || fileName, leaks.name); }
+// Under the folder's id (stateFolder), not its name: `leaks.store`, taken when
+// it was attached, as `leaks.folder` is the name it is shown under.
+function leaksStoreKey() { return LK.decisionsKey(leaks.store || stateFolder() || fileName, leaks.name); }
 function persistLeaks() { if (leaks) lsSet(leaksStoreKey(), LK.packDecisions(leaks.parsed.rows)); }
 function leaksDirty() { return !!leaks && leaks.parsed.rows.some((r) => r.fix !== r.fix0); }
 function leakRows() { return leaks ? leaks.parsed.rows : []; }
@@ -9058,7 +9392,7 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "" 
   // `no` meant for a county landed on the witness a re-run had put in its
   // row, and became a keep on a name the key binds.
   if (leaks) persistLeaks();
-  leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", at: -1, mirrored: new Set(), carried: 0, note: "" };
+  leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", store: stateFolder(), at: -1, mirrored: new Set(), carried: 0, note: "" };
   const back = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));
   const remembered = back.laid;
   leaks.carried = back.laid;
@@ -9925,6 +10259,22 @@ async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
     return false;
   }
   let handle = leaks.handle;
+  // Not into the Text Files folder either (textFolderOpen): not by the folder
+  // open, and not by the worksheet's own handle where that is a copy an
+  // earlier version wrote there, which adoption attaches like any other. Its
+  // Context cells quote the real document, and PDF-Linker reads LEAKS.xlsx
+  // from the case folder alone.
+  if (textFolderOpen()) {
+    let inside = !handle;
+    if (handle) { try { inside = !!(await dirHandle.resolve(handle)); } catch { inside = false; } }
+    if (inside) {
+      if (!quiet) {
+        toast(`${leaks.name} was not written: ${folderName} is the folder the exports live in, not the case folder. Choose the folder above it (the bar at the top) and save the worksheet there.`, { error: true, ms: 9000 });
+        offerFolderAbove(dirHandle, null);
+      }
+      return false;
+    }
+  }
   if (!handle && dirHandle) {
     try { handle = await dirHandle.getFileHandle(leaks.name, { create: true }); } catch { handle = null; }
   }
@@ -10758,7 +11108,7 @@ async function reelExtend() {
     if (!parsed) parsed = readExport(await (await next.handle.getFile()).text());
     if (doc !== was) return false;
     const from = doc.pages.length;
-    const theirSpots = spotsFrom(TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + next.name, [])), from);
+    const theirSpots = spotsFrom(TD.normalizeSpots(lsGet(spotKeyFor(next.name), [])), from);
     const m = {
       name: next.name, handle: next.handle,
       newline: parsed.newline, trailingNewline: parsed.trailingNewline,
@@ -10908,7 +11258,7 @@ async function reelPrepend() {
     reelShift(n);
     doc.pages = parsed.pages.concat(doc.pages);
     // Its own spots are already the reel's numbering: it starts the reel.
-    const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + prev.name, []));
+    const theirSpots = TD.normalizeSpots(lsGet(spotKeyFor(prev.name), []));
     const m = {
       name: prev.name, handle: prev.handle,
       newline: parsed.newline, trailingNewline: parsed.trailingNewline,
@@ -11930,7 +12280,7 @@ function pdfTarget(i) {
 /** Everything the PDF side shows for the current document, from scratch. */
 function setupPdfForDoc() {
   pdfPicked = null;
-  swaps = new Set(lsGet(PS.swapStoreKey(folderName, fileName), []));
+  swaps = new Set(lsGet(PS.swapStoreKey(stateFolder(), fileName), []));
   refreshPdf();
 }
 /** Re-resolve the PDFs (the key or the folder changed) and redraw. */
@@ -12354,7 +12704,7 @@ async function buildAheadNow(d) {
   if (epoch !== readyEpoch || !readyWanted.includes(d.name)) return;
   const parsed = during("reading the next document ahead", () => readExport(text));
   if (parsed.pages.length > READY_MAX_PAGES) { ready.set(d.name, { name: d.name, skipped: `${parsed.pages.length} pages — too long to hold ready` }); return; }
-  const theirSpots = TD.normalizeSpots(lsGet(SPOTS_PREFIX + (folderName || "") + "/" + d.name, []));
+  const theirSpots = TD.normalizeSpots(lsGet(spotKeyFor(d.name), []));
   const nodes = document.createDocumentFragment();
   let clock = null;
   for (let at = 0; at < parsed.pages.length; at += READY_SLICE) {
@@ -14419,7 +14769,7 @@ function applySwapsNow() {
   shapePages();
   placeCitations();
 }
-function persistSwaps() { lsSet(PS.swapStoreKey(folderName, fileName), [...swaps]); }
+function persistSwaps() { lsSet(PS.swapStoreKey(stateFolder(), fileName), [...swaps]); }
 function setSwaps(indices, on) {
   for (const i of indices) { const t = pdfTarget(i); if (t) { if (on) swaps.add(t.key); else swaps.delete(t.key); } }
   persistSwaps();
