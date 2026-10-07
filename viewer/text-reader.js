@@ -1943,6 +1943,166 @@ function showKeyOffer(text, action, onAct) {
 function hideKeyOffer() { keyOffer.hidden = true; delete keyOffer.dataset.master; syncOfferHeight(); }
 $("key-offer-close").addEventListener("click", hideKeyOffer);
 
+// ── a PDF-Linker run going in the case folder ──────────────────────────────────
+//
+// A run rewrites the case folder as it goes: every export in Text Files, one
+// PDF after another, then the key and LEAKS.xlsx at its end. A document opened
+// meanwhile is the last run's text, or text this run is part-way through,
+// read under a key it is about to replace; and whatever is saved before it
+// finishes can be overwritten by it, or overwrite what it has just written.
+// The run says it is going the way it says so in Explorer: a zero-byte
+// `ETA <estimate>.txt` in the case folder, rewritten after each PDF and
+// replaced by `DONE <clock>.txt` on a clean finish (TD.runMarker). So every
+// export opened looks for one, and the bar says so while it stands.
+//
+// It is looked for again while the bar is up (RUN_RECHECK_MS, and on coming
+// back to the tab), so the bar says when the run has ended rather than going
+// on warning about one that is over, and offers the folder read again: what
+// is open is what stood before it did. A run that died part-way leaves its
+// marker behind until the next run clears it (a crashed --fix-leaks clears
+// its own), so the bar gives the marker's age — it is rewritten after every
+// PDF, and one untouched for a long while is that — and × puts it away until
+// the next document is opened.
+const runBar = $("run-bar");
+const RUN_RECHECK_MS = 30000;
+const RUN_STALE_MS = 30 * 60000; // untouched this long, the marker may be a dead run's
+let runShown = null;  // { dir, state: "running" | "ended" } while the bar is up
+let runTimer = 0;
+let runSeq = 0;       // the latest look wins: an older one answering late says nothing
+function syncRunHeight() {
+  document.documentElement.style.setProperty("--run-h", runBar.hidden ? "0px" : runBar.offsetHeight + "px");
+}
+function hideRunBar() {
+  runShown = null;
+  clearInterval(runTimer);
+  runTimer = 0;
+  runBar.hidden = true;
+  syncRunHeight();
+}
+$("run-bar-close").addEventListener("click", hideRunBar);
+
+/**
+ * The newest ETA and DONE markers in the case folder `dir`, each
+ * { label, at }, or null where the folder cannot be read now. Empty files
+ * only, as PDF-Linker scopes its own (`_marker_mtime`).
+ */
+async function runMarkersIn(dir) {
+  let eta = null, done = null;
+  try {
+    for await (const [name, entry] of dir.entries()) {
+      if (entry.kind !== "file") continue;
+      const m = TD.runMarker(name);
+      if (!m) continue;
+      let f;
+      try { f = await entry.getFile(); } catch { continue; }
+      if (f.size !== 0) continue;
+      const hit = { label: m.label, at: f.lastModified };
+      if (m.kind === "ETA") { if (!eta || hit.at > eta.at) eta = hit; }
+      else if (!done || hit.at > done.at) done = hit;
+    }
+  } catch { return null; }
+  return { eta, done };
+}
+
+function agoText(ms) {
+  const min = Math.floor(Math.max(0, ms) / 60000);
+  if (min < 1) return "less than a minute ago";
+  if (min < 90) return `${min} minute${min === 1 ? "" : "s"} ago`;
+  const h = Math.round(min / 60);
+  return `${h} hours ago`;
+}
+
+/**
+ * Whether PDF-Linker is running on the case folder, said in the bar.
+ * `opening`: an export has just been opened, so the bar comes up even where
+ * it was put away; otherwise (the recheck) only a bar already up is updated.
+ * An ETA marker newer than any DONE stamp is a run going — the test
+ * PDF-Linker itself makes of a copied folder (`_copy_is_ahead`).
+ */
+async function checkRun({ opening = false } = {}) {
+  const dir = dirHandle;
+  if (!dir) { runSeq++; hideRunBar(); return; }
+  // A recheck with no bar up asks nothing, and must not count as the latest
+  // look either: a focus landing while an opening's look is reading the
+  // folder would otherwise silence it.
+  if (!opening && !(runShown && runShown.dir === dir)) return;
+  const seq = ++runSeq;
+  if ((await permissionOf(dir, "read")) !== "granted") return;
+  const seen = await runMarkersIn(dir);
+  if (seq !== runSeq || dir !== dirHandle || !seen) return;
+  const { eta, done } = seen;
+  if (eta && (!done || eta.at > done.at)) { showRunning(dir, eta); return; }
+  // No run going. A bar that was warning about one says it has ended, and
+  // stays up until the folder is read again or it is put away: an export
+  // opened after the run is the new text, but the key in hand is still the
+  // one read before it. A bar about another folder has nothing to say here.
+  if (runShown && runShown.dir === dir) { if (runShown.state === "running") showRunEnded(dir, done); }
+  else if (runShown) hideRunBar();
+}
+
+function showRunBar(dir, state, text, action) {
+  runShown = { dir, state };
+  // Set only when it changes: the bar is an alert, and a recheck saying the
+  // same again is not news to a screen reader.
+  if ($("run-bar-text").textContent !== text) $("run-bar-text").textContent = text;
+  const btn = $("run-bar-btn");
+  btn.hidden = !action;
+  if (action) { btn.textContent = action.label; btn.onclick = action.run; }
+  runBar.classList.toggle("done", state !== "running");
+  runBar.hidden = false;
+  syncRunHeight();
+  clearInterval(runTimer);
+  runTimer = state === "running" ? setInterval(() => { checkRun(); }, RUN_RECHECK_MS) : 0;
+}
+
+function showRunning(dir, eta) {
+  const age = Date.now() - eta.at;
+  const stale = age > RUN_STALE_MS
+    ? ` Its ETA file was last updated ${agoText(age)}: a run that stopped part-way leaves it behind, and pdf_linker.log says whether one is still going.`
+    : "";
+  showRunBar(dir, "running",
+    `⚠ PDF-Linker is running on ${dir.name} — ETA ${eta.label}. It is rewriting the exports, and then the key and LEAKS.xlsx: what you open now may be replaced while you read it, and anything you save before it finishes can be overwritten.${stale}`);
+}
+
+function showRunEnded(dir, done) {
+  showRunBar(dir, "ended",
+    done
+      ? `PDF-Linker has finished on ${dir.name} — DONE ${done.label}. The key, the worksheet and the documents in hand were read while it was running.`
+      : `PDF-Linker's run on ${dir.name} has stopped without a DONE stamp — pdf_linker.log says why. The key, the worksheet and the documents in hand were read while it was running.`,
+    { label: "Read the folder again", run: readFolderAfterRun });
+}
+
+/**
+ * The case folder read again after a run, and the open document with it: the
+ * run wrote a new key, new exports and new PDFs, and the reader holds the old.
+ * An export the run renamed (quarantined to .txt.LEAK, or released from it)
+ * is found again by its name without the extension.
+ */
+async function readFolderAfterRun() {
+  const dir = dirHandle;
+  if (!dir) { hideRunBar(); return; }
+  if (dirty && !confirm("Discard unsaved edits to " + fileName + "?")) return;
+  dirty = false;
+  hideRunBar();
+  const name = fileName, was = fileHandle;
+  forgetPdfs();
+  dropReady();
+  await adoptFolder(dir, { quiet: true, light: folderLight });
+  if (!doc || !name) return;
+  let f = null, h = was;
+  try { f = h ? await h.getFile() : null; } catch { f = null; }
+  if (!f) {
+    const d = folderDocs.find((x) => TD.docLabel(x.name).toLowerCase() === TD.docLabel(name).toLowerCase());
+    h = d ? d.handle : null;
+    try { f = h ? await h.getFile() : null; } catch { f = null; }
+  }
+  if (f) { await openFile(f, h); return; }
+  retranslate();
+  toast(`${dir.name} is read again, but ${name} is not in it any more — open the document again from Documents.`, { ms: 7000 });
+}
+window.addEventListener("focus", () => { checkRun(); });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkRun(); });
+
 /**
  * A document opened on its own: attach the key of the case folder it sits
  * in, if the reader has been shown that folder; else say how to.
@@ -1966,6 +2126,7 @@ async function attachKeyForFile(handle) {
     }
     const ask = askBeforeFolder();
     const found = await adoptFolder(at.dir, { quiet: true, light: ask });
+    checkRun({ opening: true }).catch((e) => console.warn(e));
     if (doc) retranslate();
     markDocList();
     // Left out of the Text Files folder, as adoption leaves it out (ownNote).
@@ -1995,6 +2156,9 @@ async function openFileNow(file, handle) {
   // The case folder first, so the document renders under its own key — and so
   // a document built ahead of time is judged against the key it will open under.
   try { await attachKeyForFile(handle || null); } catch (e) { console.warn(e); }
+  // …and whether a PDF-Linker run is rewriting that folder now. Not waited
+  // for: the warning comes up beside the document, never in its way.
+  checkRun({ opening: true }).catch((e) => console.warn(e));
   const built = readyFor(file);
   if (built) {
     ready.delete(file.name); // the reader owns it from here: it is about to be edited
@@ -2207,6 +2371,7 @@ async function forgetFolder() {
   folderDocs = [];
   folderPdfs = [];
   flagsFor = null;
+  hideRunBar(); // the run is that folder's, and the reader no longer holds it
   // The reel is the folder read as one document: with no folder there is
   // nothing to read on to, so what is open becomes the whole of it. The pages
   // hanging off it belong to files this reader is no longer holding.
@@ -2768,7 +2933,7 @@ const placeCitationsSoon = debounce(() => placeCitations(), 450);
 // Whatever asks for the pages to be laid out again has the reading held
 // through it (holdReading): the page being read stays the page on the screen.
 function relayout() { holdReading(); relayoutSoon(); }
-const relayoutSoon = debounce(() => { reelAllLive(); syncOfferHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); autoRemeasure(); reelTrimSoon(); }, 150);
+const relayoutSoon = debounce(() => { reelAllLive(); syncOfferHeight(); syncRunHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); autoRemeasure(); reelTrimSoon(); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {

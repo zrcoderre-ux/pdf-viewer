@@ -104,6 +104,17 @@ body {
 }
 #key-offer button { background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 12px; }
 #key-offer #key-offer-close { background: transparent; color: #3e2723; border-color: transparent; font-size: 16px; margin-left: auto; }
+/* …and under it, the warning that PDF-Linker is running on the case folder
+   (runBar in text-reader.js). It too takes its own height (--run-h) above the
+   stage. Red-edged while the run is going; the accent once it has finished. */
+#run-bar {
+  position: fixed; top: calc(var(--toolbar-height) + var(--bar-h, 0px) + var(--offer-h, 0px)); left: 0; right: 0; z-index: 9;
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  background: #fdecea; color: #5f2120; border-bottom: 2px solid #c5221f; font-size: 13px;
+}
+#run-bar.done { background: #e8f0fe; color: #174ea6; border-bottom-color: var(--accent); }
+#run-bar #run-bar-btn { background: var(--accent); color: #fff; border: 1px solid var(--accent); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 12px; white-space: nowrap; }
+#run-bar #run-bar-close { background: transparent; color: inherit; border: 1px solid transparent; font-size: 16px; cursor: pointer; margin-left: auto; }
 
 /* The LEAKS review bar, under the toolbar and ABOVE the stage (it takes its
    own height, through --bar-h, rather than covering the first lines): the
@@ -253,7 +264,7 @@ body {
 
 /* ── layout ────────────────────────────────────────────────────────────────── */
 #main {
-  position: absolute; top: calc(var(--toolbar-height) + var(--bar-h, 0px) + var(--offer-h, 0px)); bottom: var(--status-height); left: 0; right: 0;
+  position: absolute; top: calc(var(--toolbar-height) + var(--bar-h, 0px) + var(--offer-h, 0px) + var(--run-h, 0px)); bottom: var(--status-height); left: 0; right: 0;
   display: flex;
 }
 /* The reel hangs the previous document ABOVE the reading and puts the scroll
@@ -1012,7 +1023,7 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
    left off. */
 @media print {
   html, body { height: auto; overflow: visible; background: #fff; }
-  #toolbar, .revbar, #key-offer, #tools-rail, #side, #statusbar, #toast, #pdf-pane, #flag-pop { display: none !important; }
+  #toolbar, .revbar, #key-offer, #run-bar, #tools-rail, #side, #statusbar, #toast, #pdf-pane, #flag-pop { display: none !important; }
   #main { position: static; display: block; }
   #stage { overflow: visible; position: static; }
   #pages { padding: 0; width: auto !important; min-width: 0 !important; }
