@@ -370,6 +370,32 @@ body.tools-collapsed #tools-rail .tool-btn { position: relative; }
 .textLayer { position: absolute; inset: 0; overflow: hidden; line-height: 1; user-select: text; color: transparent; caret-color: transparent; forced-color-adjust: none; }
 .textLayer span, .textLayer br { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; }
 .textLayer ::selection { background: rgba(26, 115, 232, 0.35); color: transparent; }
+/* A PAGE THAT CARRIES /Rotate. pdf.js lays its text layer out in the page's
+   own upright frame — the box is the UNROTATED page, and the spans are placed
+   in it — and only stamps the viewport's turn on it as data-main-rotation,
+   leaving the turning to the viewer's stylesheet. viewer.css had these three
+   rules from the start; this page loads only its own stylesheet and never had
+   them. So on a landscape exhibit, or a page somebody turned in Acrobat, the
+   layer stood upright over a bitmap drawn on its side — a 465 × 602 box of
+   words over a 602 × 465 picture — and everything that asks the browser where
+   the PDF's words are got the answer for the wrong page: the key sweep stored
+   its box on the transposed spot (the copy saved with the name readable beside
+   a black strip, and the check, which compares names and never places, said
+   every value was boxed); the screenshot painted its white fakes there and
+   left the name in the picture; a drag over the printed name boxed a span
+   somewhere else, labelled with the name. Rotating about the top-left and
+   translating back by the layer's own size lands it exactly on the bitmap, the
+   PDF viewer's own rule, and it is a transform, so the layer's own
+   offsetLeft/offsetTop stay in the page's frame for whatever reads those
+   (blankLineNumbers). The sweep's off-screen box is a text layer too and turns
+   the same way: keyBoxesForPage measures in the rotated viewport's frame,
+   which is the frame convertToPdfPoint reads. A page whose text runs sideways
+   ON SCREEN (portrait text on a /Rotate 90 page) is still read in the display
+   frame, its lines standing as columns, and is boxed only in part — the
+   check says so ("not found — review") rather than passing it. */
+.textLayer[data-main-rotation="90"] { transform-origin: 0 0; transform: rotate(90deg) translateY(-100%); }
+.textLayer[data-main-rotation="180"] { transform-origin: 0 0; transform: rotate(180deg) translate(-100%, -100%); }
+.textLayer[data-main-rotation="270"] { transform-origin: 0 0; transform: rotate(270deg) translateX(-100%); }
 /* A text page on its PDF page's grid (side by side): the PDF's width and
    height, each numbered line at its number's own height, the body at the
    PDF's text margin. */
@@ -417,6 +443,12 @@ body.tools-collapsed #tools-rail .tool-btn { position: relative; }
 .shot-covers { position: absolute; inset: 0; pointer-events: none; z-index: 5; overflow: hidden; }
 .shot-cover { position: absolute; background: #fff; color: #000; white-space: pre; overflow: hidden; }
 .shot-cover > span { display: inline-block; transform-origin: 0 50%; }
+/* …and a sheet whose words do not stand over its picture, so no cover could
+   be placed (pdfNamesOn): out of the picture whole, saying so. */
+.shot-cover.whole {
+  inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; white-space: normal;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #555;
+}
 body.redact-on .redactLayer .redact-rect { pointer-events: auto; }
 body.redact-on .redactLayer .redact-rect:hover { background: rgba(197, 34, 31, 0.5); }
 /* While the tool is on the drag belongs to it, in either mode, and the pointer
@@ -669,6 +701,12 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 /* A swapped page: the PDF page stands where its text was; the text is still
    in the DOM (and still saves) but is not shown. */
 .tpage.swapped .page-body, .tpage.swapped .link-layer { display: none; }
+/* …except while a print is being made (body.printing, from beforeprint): the
+   PDF page is the filing, never scrubbed, and the text is what prints — run
+   forward through the key with every other page. On screen behind the print
+   dialog as on the paper. */
+body.printing .tpage.swapped .page-body { display: block; }
+body.printing .tpage.swapped .pdf-inline { display: none; }
 /* A raw page the same way: the file's text stands where the page's was. One
    fixed-pitch column, wrapping off, exactly as a plain text editor opens it;
    a line longer than the sheet is scrolled to, not cut. */
@@ -1014,6 +1052,11 @@ body.marks-off [data-here]:hover { background: transparent; }
   .tpage { max-width: none; margin: 0 auto 18px; box-shadow: none; border-radius: 0; break-after: page; }
   .tpage:last-child { break-after: auto; }
   .page-label .swap-page, .page-label .raw-page, .page-label .nocr-page, .page-label .fix-page { display: none; }
+  /* A page swapped for its PDF page prints its text, and its PDF page — the
+     filing, which nothing scrubbed — never prints, whether or not the page
+     was told a print was coming (body.printing does the same on screen). */
+  .tpage.swapped .page-body { display: block; }
+  .pdf-inline { display: none !important; }
   .raw-sheet .raw-text { overflow: visible; white-space: pre-wrap; }
   .raw-sheet, .raw-sheet .raw-leak { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .link-layer { display: none; }

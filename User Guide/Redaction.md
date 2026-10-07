@@ -145,3 +145,17 @@ the pane. It skips the values the review has **kept**, which the reader knows
 about and the viewer does not. And where a `Combined Text.txt` puts several
 documents beside one export, the boxes are filed per PDF and the save writes a
 copy of each that carries any.
+
+**Turned pages are marked where they are drawn.** A landscape exhibit, or a
+page somebody turned in Acrobat (the file's own `/Rotate`), is swept, dragged
+over and screenshotted where its words are on the page you see — in the text
+reader this was not so until the reader's text layer was turned with the page,
+and a sweep stored its box on the wrong part of the page while the check said
+the name was covered. Two things are worth knowing. A page whose text runs
+**sideways** on screen (portrait text on a page turned a quarter) is read in
+columns rather than lines, so a name on it may be boxed only in part; the check
+reports it as not found, and an area drag over it is the answer. And should a
+page's text ever not stand over the page as it is drawn, the reader marks
+nothing there rather than mark the wrong place: the sweep's message names the
+page to be marked by hand, the check walks its values with that reason, a drag
+on it marks the area drawn, and a screenshot leaves that page out.

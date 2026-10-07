@@ -36,12 +36,41 @@ window's other text (everything outside `.page-body`, `.textLayer` and
 same-origin shell above it. The PDF pane shows the filing, which nothing
 scrubbed: `pdfNamesOn` reads each drawn sheet's pdf.js text layer the way
 `keyBoxesForPage` does, and `coverPdfNames` paints a white box over each name
-with its fake in the layer's type, under the redaction boxes. Put back: each
-node's own text, `afterTextChange()`, and the underlines at once. While
+with its fake in the layer's type, under the redaction boxes. A sheet whose
+layer does not stand over its bitmap (`layerOnSheet`: the same box, and the
+quarter turn pdf.js asked for, see Design Notes/Redaction.md) has names that
+cannot be placed, so it is covered whole (`whole`), saying why, and the toast
+counts it (`shotLeftOut`) rather than say only "in their pseudonyms". Put
+back: each node's own text, `afterTextChange()`, and the underlines at once. While
 `shotPut` is set, `beforeinput` on the pages is refused and the reel hangs
 nothing above. Hosted, the fakes go on only once the screen share is granted
 (`shareThisTab` answers the frame-taker), and a share that sends no frame is
 given up after five seconds, so the fakes never stay on.
+
+**🖨 Print and a page swapped for its PDF page.** `fakesForPrint` runs every
+page body forward and shows the pseudonyms, and the print is the display — in
+which a swapped page's body is hidden (`.tpage.swapped .page-body`) and its
+`.pdf-inline` sheet, the unscrubbed filing, is not. So a page shown through ⇄
+PDF printed "Helen Rasho … Quillmark Holdings" in a printout that had faked
+every other page; and the swaps are remembered per document
+(`PS.swapStoreKey`) and ⊘ Did not OCR swaps its page by itself, so this was
+any print of a document with a swap left on, not one click before Ctrl+P. Now
+`beforeprint` sets `body.printing` where any page is swapped, and the
+stylesheet shows the swapped bodies and hides their inline sheets for as long
+as it stands (on screen behind the dialog too); `shapePages` passes over a
+swapped page except under `body.printing`, so its text is fitted to the paper
+with the rest (a page that opened swapped was never fitted at all), and
+`afterprint` takes the class off. `holdReading()` goes first both ways, the
+swapped sheets changing height. The print stylesheet repeats the rule on its
+own — `.pdf-inline { display: none !important }` — so print media that no
+`beforeprint` announced still carries no PDF page (the body then prints as the
+screen shows it, like every other page in that case). Covering the inline
+sheet's names, as the screenshot does, was the alternative and the weak one
+here: a page is swapped because its OCR is mangled, which is the text layer
+least likely to give its names up to a cover. A swapped page fitted for a
+print keeps that fit, made at its own sheet's width; where the print faked
+anything, `pagesBackAfterPrint`'s `afterTextChange` moves `textEpoch`, so
+swapped back the page is fitted again to its real text (`shapeKey`).
 
 The tools live in a left-margin rail (`#tools-rail`), the PDF viewer's
 Acrobat-style panel carried over to this page: the top bar had grown to some

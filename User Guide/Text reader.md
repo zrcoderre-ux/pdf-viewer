@@ -217,7 +217,12 @@ app, which routes it to the reader tab.
   every page — the values kept for the case and the spot keeps left exactly as
   they read — and then the pseudonyms on show, whichever way *Show fakes*
   sits. Paper and PDF carry the scrubbed copy without anyone having to
-  remember. The document itself is not touched: the pages go back as they were
+  remember. **A page shown as its PDF page prints its text.** ⇄ PDF (and ⊘
+  Did not OCR, which turns the page to its PDF page) shows the filing, which
+  nothing scrubbed, so a print puts the page's own text back in its place —
+  run through the key like every other page, fitted to the paper — and the PDF
+  page never prints; the swap is still there when the dialog closes. The
+  document itself is not touched: the pages go back as they were
   when the dialog closes, nothing is written, and a real name standing unfaked
   is still standing and still orange, to be dealt with before a save.
 - **Screenshot the window, for the design.** **📷 Screenshot** saves the
@@ -232,7 +237,10 @@ app, which routes it to the reader tab.
   covered with its fake. The values kept for the case, the spot keeps and the
   parties of cited decisions read as they stand, as in the print. The screen
   goes back the moment the picture is taken; nothing is written. A PDF page
-  with no text (a scan) cannot be read for names and keeps them. In the
+  with no text (a scan) cannot be read for names and keeps them. A PDF page
+  whose text does not stand over the page as it is drawn — so that a cover
+  would land somewhere other than the name — is left out of the picture
+  whole, white with a line saying why, and the toast counts it. In the
   extension the tab is taken directly; in the hosted app the browser asks to
   share this tab, keeps one frame and stops, and the names change only once
   the share is allowed.

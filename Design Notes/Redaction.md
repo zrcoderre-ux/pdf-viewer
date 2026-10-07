@@ -101,6 +101,67 @@ spans crossed means no text there, which is the honest answer, and the drag
 falls back to marking the rectangle itself (`kind: "area"`) with a toast saying
 why. `markDraggedBox` is the one place that decides.
 
+## Turned pages: the text layer's frame (`text-reader.css`, `layerOnSheet`, `layerTurned`)
+
+pdf.js's `TextLayer` lays a page's words out in the page's own UNROTATED frame
+— `setLayerDimensions` sizes the box from `rawDims` and only stamps the
+viewport's turn on it as `data-main-rotation` — and leaves the turn to the
+viewer's stylesheet (Design Notes/Page rotation.md). `viewer.css` has carried
+the three `.textLayer[data-main-rotation]` rules from the start. The text
+reader loads only `text-reader.css`, which did not, so on every `/Rotate`
+90/180/270 page its layers stood upright over a bitmap drawn turned: on a
+quarter turn a 465 × 602 box of words over a 602 × 465 picture. Three things
+asked the browser where the PDF's words are and got the wrong page:
+
+- **The key sweep.** `keyBoxesForPage` measured the off-screen layer in the
+  unrotated frame and read the pixels through the ROTATED viewport's
+  `convertToPdfPoint`, so every box was stored transposed or mirrored;
+  `renderRedactedPageNow` painted it exactly where it was stored, and the copy
+  saved with the name readable beside a black strip. The check compares words
+  and labels, never places, so it passed.
+- **The screenshot.** `pdfNamesOn` measured the pane's layer the same way and
+  `coverPdfNames` painted the fakes where the layer was, with the name left in
+  the PNG under "the names in their pseudonyms".
+- **The hand.** `textRectsUnder` hit-tested the drag against the displaced
+  spans and stored a strip somewhere else, labelled with the name and carrying
+  its words, so the check counted it; `redactCurrentSelection` read a
+  selection's rectangles off the same layer.
+
+Measured with a red invented name on 0/90/180/270 fixtures: before, the copy
+kept 210–244 red pixels of it and the screenshot 121–271 on every turned page,
+with the check silent on all but one (where the sweep happened to break the
+name); with the rules copied into `text-reader.css`, 0 and 0 on every page
+whose text reads upright on screen, a hand drag over the name too. The rules turn the box with a
+transform, so `offsetLeft`/`offsetTop` inside it stay in the page's frame
+(`blankLineNumbers` reads those), and the sweep's off-screen box, a text layer
+too, turns with the rest — measured in the rotated viewport's frame, which is
+the one `convertToPdfPoint` reads.
+
+**The guards make the next frame bug loud.** Nothing compared a box with the
+page, which is why this was silent. `layerOnSheet(sheet, layer)` answers
+whether a sheet's layer stands over its bitmap: the same box to within
+`LAYER_SLACK_PX`, and turned as pdf.js asked (`layerTurned` reads the quarter
+turns of the computed transform against `data-main-rotation`), since a page
+turned half round has the bitmap's box exactly and only its words mirrored —
+a box test alone passed it. Where it says no: `keyBoxesForPage` boxes nothing
+on the page and answers `askew` (the same turn and the viewport's box), the
+sweep's toast names the page to be marked by hand, and `whyNotFound` gives the
+check's walk that reason (`sweptAskew`); `textRectsUnder` answers no words, so
+a text drag marks the area drawn and says why; `redactCurrentSelection` marks
+nothing and says why; `pdfNamesOn` leaves the sheet out of the screenshot
+whole. Taking the three rules back off in Chromium, every one of those fired on
+the 90, 180 and 270 fixtures and no real pixel reached the copy or the PNG. The
+check costs two rectangles and one computed style per page; it answers false
+for the frame between a pane resize and the layer laid again at the new width,
+which is true then too.
+
+**Residual: text that runs sideways ON SCREEN** — portrait text on a page
+turned a quarter, a margin note set vertically. `RD.pageTextFromSpans` joins
+spans by the display-frame geometry, which reads such lines as columns: a name
+can be run into the line beside it and boxed only in part (the fixture: 150 red
+pixels left in the copy, 98 in the screenshot). The check does report it ("1
+not found — review"); the screenshot has no check and does not.
+
 ## Checking a redaction against the export (`text-reader.js`)
 
 The sweep's blind spot is that it reads the PDF's text layer, which is not a

@@ -754,8 +754,31 @@ function printTitle() {
   const n = (m && m.name) || fileName || "document";
   return n.replace(/\.txt(\.LEAK)?$/i, "").trim() || "document";
 }
+// A PAGE SHOWN AS ITS PDF PAGE PRINTS ITS TEXT. ⇄ PDF puts the filing's own
+// page where the export's text was, and the filing is the one thing in the
+// reader nothing ever scrubbed. The print scrubbed every page body — the
+// swapped ones too, their text is in the DOM — and then printed the display,
+// in which a swapped page's body is hidden and its PDF page is not: the sheet
+// went to paper with "Helen Rasho … Quillmark Holdings" on it, under a print
+// that had faked every other page. And not only after a click a moment ago:
+// the swaps are remembered per document, and a page marked ⊘ Did not OCR is
+// turned to its PDF page the same way, so a page swapped last week printed
+// the filing today. So for the length of a print `body.printing` shows every
+// swapped page's text — run forward with the rest, its pseudonyms on show —
+// and hides its PDF page, on screen behind the dialog as on paper, and the
+// page is fitted to its paper with the others (shapePages passes over a
+// swapped page otherwise). The print stylesheet does the same on its own
+// (`.pdf-inline` never prints), so a print the page was never told of still
+// carries no PDF page. Covering the PDF page's names instead, as the
+// screenshot does, was the other way, and the weak one exactly here: a page
+// is swapped because its OCR is mangled, which is the page whose text layer
+// is least likely to give its names up to be covered.
 window.addEventListener("beforeprint", () => {
   fakesForPrint();
+  if (pagesEl.querySelector(".tpage.swapped")) {
+    holdReading(); // the swapped pages change height on screen too
+    document.body.classList.add("printing");
+  }
   shapePages({ all: true }); // every page, not only the ones the reading is at
 
   let w = 0;
@@ -774,6 +797,10 @@ window.addEventListener("beforeprint", () => {
 });
 window.addEventListener("afterprint", () => {
   document.documentElement.style.removeProperty("--print-zoom");
+  if (document.body.classList.contains("printing")) {
+    holdReading();
+    document.body.classList.remove("printing");
+  }
   pagesBackAfterPrint();
   if (titleBeforePrint) {
     document.title = titleBeforePrint.self;
@@ -866,6 +893,7 @@ async function shareThisTab() {
 }
 
 let shotPut = null; // while a screenshot is being taken: how the screen goes back
+let shotLeftOut = 0; // …and how many PDF pages it left out whole (pdfNamesOn), for the toast
 
 /** An element within `margin` screens of the window, above or below. */
 function nearWindow(rect, margin) {
@@ -965,6 +993,11 @@ function pdfNamesOn(sheet) {
   const { text, map } = RD.pageTextFromSpans(RD.measureSpans(layer));
   const swaps = forwardSwaps(text);
   if (!swaps.length) return null;
+  // Names that are there, and words that do not stand over the picture: a
+  // cover placed by the layer would go where the layer is, and the name would
+  // stay in the picture under a toast saying it was in its pseudonym. The
+  // sheet goes out of the picture whole instead (layerOnSheet).
+  if (!layerOnSheet(sheet, layer)) return { sheet, names: [], whole: true };
   const base = sheet.getBoundingClientRect();
   const out = [];
   for (const s of swaps) {
@@ -992,10 +1025,18 @@ function pdfNamesOn(sheet) {
  * fake in it in the text layer's own type, drawn narrower where it is longer
  * than the name, the way pdf.js fits its own text to the page. Under the
  * redaction's boxes, which stay to be seen. Answers the layer, to be taken off.
+ * A sheet whose names could not be placed (`whole`) is white from edge to
+ * edge, and says why, so the picture does not pass for a page with no names.
  */
-function coverPdfNames({ sheet, names }) {
+function coverPdfNames({ sheet, names, whole = false }) {
   const box = document.createElement("div");
   box.className = "shot-covers";
+  if (whole) {
+    const c = document.createElement("div");
+    c.className = "shot-cover whole";
+    c.textContent = "This PDF page is left out of the picture: its names could not be placed on it to be covered.";
+    box.appendChild(c);
+  }
   for (const n of names) {
     n.rects.forEach((m, k) => {
       const c = document.createElement("div");
@@ -1073,6 +1114,7 @@ function fakesForShot() {
     ? [...document.querySelectorAll(".pdf-sheet")].filter((s) => nearWindow(s.getBoundingClientRect(), 0)).map(pdfNamesOn).filter(Boolean)
     : [];
   const covers = plans.map(coverPdfNames);
+  shotLeftOut = plans.filter((p) => p.whole).length;
   // A fake longer than its box: read every one, then write.
   const fits = [];
   for (const c of covers) for (const t of c.querySelectorAll(".shot-cover > span")) fits.push([t, t.parentElement.clientWidth / (t.offsetWidth || 1)]);
@@ -1133,7 +1175,8 @@ $("shot-btn").addEventListener("click", async (e) => {
     }
     if (!blob) { toast("This browser cannot take a screenshot of the page.", { error: true }); return; }
     saveShot(blob);
-    toast(key ? "Screenshot saved to Downloads, the names in their pseudonyms." : "Screenshot saved to Downloads.");
+    toast(!key ? "Screenshot saved to Downloads."
+      : `Screenshot saved to Downloads, the names in their pseudonyms${shotLeftOut ? ` — and ${shotLeftOut} PDF page${shotLeftOut === 1 ? "" : "s"} left out of it, whose names could not be placed to be covered` : ""}.`);
   } catch (err) {
     if (err && err.name === "NotAllowedError") return; // the share was declined
     toast(`The screenshot failed: ${(err && err.message) || err}`, { error: true });
@@ -11401,6 +11444,52 @@ function infoFor(src) {
 }
 /** The box a slot renders its page into (under its label, where it has one). */
 function sheetOf(el) { return el.querySelector(".pdf-sheet") || el; }
+/**
+ * Whether a sheet's text layer stands where its bitmap is drawn: the same box,
+ * to within the pixel each of them rounds to.
+ *
+ * Everything that marks or covers a name on the PDF finds the name by asking
+ * the browser where the text layer's words are — the screenshot's covers, a
+ * drag in "words it covers", a selection — and none of it can see the bitmap.
+ * The day the layer stood somewhere else (a /Rotate page, before the
+ * stylesheet turned it: an upright box over a picture on its side) every one
+ * of them marked the wrong place and said it had done the job, and nothing
+ * looked. This is that look. It costs two rectangles, and it answers false
+ * for a moment of no consequence too — the pane resized, the bitmap already
+ * at the new width and its words not yet laid again — which is the same truth:
+ * the words are not over the picture.
+ *
+ * The box alone cannot see a page turned half round: upright or upside down,
+ * a /Rotate 180 layer has the bitmap's box exactly, and only its words are
+ * mirrored. So the layer's own turn is read too (layerTurned).
+ */
+const LAYER_SLACK_PX = 2;
+function layerOnSheet(sheet, layer) {
+  const canvas = sheet && sheet.querySelector("canvas");
+  if (!canvas || !layer || !layerTurned(layer)) return false;
+  const c = canvas.getBoundingClientRect(), l = layer.getBoundingClientRect();
+  return Math.abs(c.left - l.left) <= LAYER_SLACK_PX && Math.abs(c.top - l.top) <= LAYER_SLACK_PX
+    && Math.abs(c.width - l.width) <= LAYER_SLACK_PX && Math.abs(c.height - l.height) <= LAYER_SLACK_PX;
+}
+/**
+ * Whether a pdf.js text layer is turned the way pdf.js asked: the quarter
+ * turns of its transform, as the browser computed it, against its
+ * data-main-rotation. pdf.js lays the words out upright and leaves the turn
+ * to the stylesheet (text-reader.css), so a layer asking for 180 and turned
+ * 0 is a stylesheet that did not reach it.
+ */
+function layerTurned(layer) {
+  const want = (((Number(layer.getAttribute("data-main-rotation")) || 0) % 360) + 360) % 360;
+  const t = getComputedStyle(layer).transform;
+  let have = 0;
+  if (t && t !== "none") {
+    try {
+      const m = new DOMMatrixReadOnly(t);
+      have = ((Math.round(Math.atan2(m.b, m.a) * 180 / Math.PI) % 360) + 360) % 360;
+    } catch { return false; }
+  }
+  return have === want;
+}
 function pdfFirstLine(el) {
   const src = pdfSources[Number(el.dataset.index)];
   const page = Number(el.dataset.page);
@@ -13469,6 +13558,7 @@ function shapePages({ all = false } = {}) {
   // it is the last page with an appendix stapled under it — and is left to
   // flow rather than have the filing squeezed to make room for the links.
   const clipped = document.body.classList.contains("sbs");
+  const printing = document.body.classList.contains("printing");
   const shapes = [];
   const flowing = [];
   for (const sec of secs) {
@@ -13476,8 +13566,10 @@ function shapePages({ all = false } = {}) {
     // A swapped page's text is put away under its PDF page, not re-laid, so
     // it keeps the shape it had: swapped back, it comes up at the size it was
     // fitted to. Taking the fit off it drew it at the full reading size the
-    // moment it came back, and then the next pass shrank it again.
-    if (sec.classList.contains("swapped") || sec.classList.contains("raw")) continue;
+    // moment it came back, and then the next pass shrank it again. Except
+    // while a print is being made, when its text is the page that prints
+    // (body.printing, beforeprint) and is fitted to the paper like any other.
+    if ((sec.classList.contains("swapped") && !printing) || sec.classList.contains("raw")) continue;
     const loose = sec.classList.contains("matched")
       || (!clipped && sec.querySelector(".line.trailer"));
     if (loose) {
@@ -14247,6 +14339,11 @@ function storeBoxesFromClientRects(el, clientRects, meta) {
 function textRectsUnder(el, box) {
   const layer = sheetOf(el).querySelector(".textLayer");
   if (!layer) return { rects: [], text: "" };
+  // Words that do not stand over the picture are not under the drag, however
+  // their rectangles fall: a span boxed off a layer standing elsewhere is a
+  // strip of the page somewhere else, labelled with the name the hand meant
+  // (layerOnSheet). None is the honest answer, and the drag marks the area.
+  if (layer.firstChild && !layerOnSheet(sheetOf(el), layer)) return { rects: [], text: "", askew: true };
   const base = sheetOf(el).getBoundingClientRect();
   const x0 = base.left + box.left, y0 = base.top + box.top;
   const x1 = x0 + box.width, y1 = y0 + box.height;
@@ -14285,12 +14382,16 @@ function markDraggedBox(el, box) {
   let n = 0, fellBack = false;
   if (redactMark === "text") {
     if (under.rects.length) n = storeBoxesFromClientRects(el, under.rects, { kind: "text", label: under.text || "these words", words: under.text });
-    else { fellBack = true; n = storeBoxesFromClientRects(el, whole, { kind: "area", label: "this area — nothing under it is text" }); }
+    else { fellBack = true; n = storeBoxesFromClientRects(el, whole, { kind: "area", label: under.askew ? "this area" : "this area — nothing under it is text" }); }
   } else {
     n = storeBoxesFromClientRects(el, whole, { kind: "area", label: "this area", words: under.text });
   }
   if (!n) return;
-  if (fellBack) toast("Nothing under that drag is text, so the area itself is marked — which is what a signature or a stamp needs.", { ms: 5000 });
+  if (fellBack) {
+    toast(under.askew
+      ? "This page's text does not stand over the page as drawn, so the area itself is marked rather than the words the text puts somewhere else."
+      : "Nothing under that drag is text, so the area itself is marked — which is what a signature or a stamp needs.", { ms: 5000 });
+  }
   // …and where the export said something was missed on this very page, that
   // drag is the answer to it.
   const at = slotRedaction(el);
@@ -14310,6 +14411,12 @@ function redactCurrentSelection() {
   const host = node.nodeType === 1 ? node : node.parentElement;
   const el = host && host.closest ? host.closest(".pdf-slot") : null;
   if (!el || !pdfPane.contains(el)) return 0;
+  // A selection's rectangles are the layer's, and a layer standing off its
+  // picture would box somewhere else under the selected name (layerOnSheet).
+  if (!layerOnSheet(sheetOf(el), sheetOf(el).querySelector(".textLayer"))) {
+    toast("This page's text does not stand over the page as drawn, so a selection cannot mark it — switch to marking areas and drag over the words.", { error: true });
+    return 0;
+  }
   const label = sel.toString().replace(/\s+/g, " ").trim().slice(0, 120);
   const n = storeBoxesFromClientRects(el, [...range.getClientRects()], { kind: "text", label });
   if (n) sel.removeAllRanges();
@@ -14369,6 +14476,20 @@ async function keyBoxesForPage(page) {
   const chars = text.replace(/\s+/g, "").length;
   const pageBox = RD.pageBoxFromView(page.view);
   const base = box.getBoundingClientRect();
+  // THE BOX MEASURED IN MUST BE THE VIEWPORT convertToPdfPoint READS. pdf.js
+  // sizes the layer itself, in the page's UNROTATED frame, and the stylesheet
+  // turns it; without that turn a /Rotate page was measured upright and read
+  // through the rotated viewport, so every box was stored transposed or
+  // mirrored, painted exactly there, and the copy saved with the name readable
+  // — and the check, which compares names and never places, passed it. A page
+  // whose measured box is not the viewport's is boxed nothing and reported,
+  // the way a page too long to read is: its claims stay open for the check,
+  // and the toast names it to be marked by hand. The turn is read as well as
+  // the box, since a page turned half round has the viewport's box exactly.
+  if (!layerTurned(box) || Math.abs(base.width - vp.width) > LAYER_SLACK_PX || Math.abs(base.height - vp.height) > LAYER_SLACK_PX) {
+    box.innerHTML = "";
+    return { boxes: [], missed: 0, chars, truncated: tc.truncated, askew: true };
+  }
   const out = [];
   let missed = 0;
   for (const hit of PK.findRealSpans(reals, text)) {
@@ -14408,6 +14529,9 @@ async function keyBoxesForPage(page) {
 // walk that says "not found" thirty times over without saying that is thirty
 // mysteries. With it, it is one fact.
 let sweptText = new Map();
+// …and the pages whose text the sweep could not lay over the page
+// (keyBoxesForPage's `askew`): read, and boxed nothing, which is its own fact.
+let sweptAskew = new Set();
 
 async function scanForKeyValues() {
   if (!reals) { toast("No pseudonym key is loaded — load one in the tools rail.", { error: true }); return; }
@@ -14419,11 +14543,15 @@ async function scanForKeyValues() {
   redactScanning = true;
   updateRedactBar();
   sweptText = new Map();
+  sweptAskew = new Set();
   let found = 0, missed = 0, pagesRead = 0;
   // Pages whose text ran past what the sweep will lay out. Named in the toast:
   // a page the sweep did not read to the end is a page whose values it cannot
   // vouch for, and that is the operator's to know rather than ours to bury.
   const unchecked = [];
+  // …and pages whose text would not stand over the page (keyBoxesForPage):
+  // read to the end and boxed nothing, so named the same way.
+  const askew = [];
   try {
     for (const name of names) {
       const src = pdfSourceFor(name);
@@ -14443,6 +14571,7 @@ async function scanForKeyValues() {
         sweptText.set(name + "|" + pn, hits.chars);
         missed += hits.missed;
         if (hits.truncated) unchecked.push(`${name} p. ${pn}`);
+        if (hits.askew) { askew.push(`${name} p. ${pn}`); sweptAskew.add(name + "|" + pn); }
         for (const h of hits.boxes) {
           if (store.add(pn, h.rects, { kind: "key", label: h.label })) found++;
         }
@@ -14461,14 +14590,19 @@ async function scanForKeyValues() {
   toast((found
     ? `Marked ${found} value${found === 1 ? "" : "s"} the key binds, over ${pagesRead} page${pagesRead === 1 ? "" : "s"} of the PDF` +
       (missed ? `; ${missed} could not be placed on the page.` : ".")
-    : `The key binds nothing that stands in ${names.length === 1 ? "this PDF" : "these PDFs"} — ${pagesRead} page${pagesRead === 1 ? "" : "s"} read.`) +
+    : askew.length
+      ? `Nothing marked — ${pagesRead} page${pagesRead === 1 ? "" : "s"} read.`
+      : `The key binds nothing that stands in ${names.length === 1 ? "this PDF" : "these PDFs"} — ${pagesRead} page${pagesRead === 1 ? "" : "s"} read.`) +
     (missWalk.length
       ? ` The export places ${missOutstanding()} more that the sweep could not find — “Check against the export” walks ${missWalk.length === missOutstanding() ? "them" : `the ${missWalk.length} places they could be`}.`
       : "") +
     (unchecked.length
       ? ` ${unchecked.length} page${unchecked.length === 1 ? "" : "s"} carr${unchecked.length === 1 ? "ies" : "y"} more text than the sweep reads to the end (${unchecked.slice(0, 3).join(", ")}${unchecked.length > 3 ? ", and more" : ""}) — mark those by hand.`
+      : "") +
+    (askew.length
+      ? ` ${askew.length} page${askew.length === 1 ? "'s" : "s'"} text could not be laid over the page to find where the names stand, so nothing was marked there (${askew.slice(0, 3).join(", ")}${askew.length > 3 ? ", and more" : ""}) — mark those by hand.`
       : ""),
-    { ms: missWalk.length || unchecked.length ? 9000 : 5000 });
+    { ms: missWalk.length || unchecked.length || askew.length ? 9000 : 5000 });
 }
 
 /** The source behind a PDF name: the open document's, else one picked by hand, else the folder's. */
@@ -14817,6 +14951,9 @@ function whyNotFound(claim, labels) {
   // The page is a picture. Nothing on it can be found by any key, and every
   // value the export puts here will be reported: that is one fact, not many.
   if (chars === 0) return "that PDF page carries no text at all — a scan or an image, so the key cannot reach anything on it";
+  // The page's text was read but would not stand over the page, so the sweep
+  // marked nothing on it rather than mark the wrong place (keyBoxesForPage).
+  if (sweptAskew.has(claim.src.name + "|" + claim.page)) return "that PDF page's text could not be laid over the page to find where it stands, so the sweep marked nothing there — drag over it by hand";
   // It is boxed, but on another page: the export's page numbering and the
   // PDF's have come apart, which is worth knowing before marking anything.
   const need = RD.wordsOwed(claim.real, claim.fake);

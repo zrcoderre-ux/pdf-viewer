@@ -16,6 +16,7 @@
 // below pin that corner for each quarter turn, and pin what the rotate bar's
 // scope picker means.
 
+import { readFileSync } from "node:fs";
 import { normalizeAngle, pagesInScope, rotatedRunPlacement } from "./viewer/rotation.js";
 
 let fails = 0;
@@ -89,6 +90,28 @@ check("odd pages — the recto side of a duplex scan", pagesInScope("odd", 1, 6)
 check("even pages", pagesInScope("even", 1, 6), [2, 4, 6]);
 check("a page beyond the document rotates nothing", pagesInScope("page", 11, 10), []);
 check("an empty document", pagesInScope("all", 1, 0), []);
+
+console.log("\n--- every page that lays out a pdf.js text layer turns it ---");
+// pdf.js builds the text layer in the page's UNROTATED frame and only stamps
+// data-main-rotation on it; the turn is the stylesheet's. The text reader
+// loads its own stylesheet and not viewer.css, and for as long as it lacked
+// these rules every name its redaction sweep boxed, its screenshot covered or
+// a drag marked on a /Rotate page landed on the transposed spot — the copy
+// saved with the name readable and the check passing it. Each page's
+// stylesheets, as its HTML links them, must carry the same three turns.
+const turnsIn = (css) => {
+  const out = {};
+  for (const m of css.matchAll(/\.textLayer\[data-main-rotation="(\d+)"\]\s*\{([^}]*)\}/g)) {
+    out[m[1]] = m[2].split(";").map((d) => d.trim().replace(/\s+/g, " ")).filter(Boolean).sort();
+  }
+  return out;
+};
+const sheetsOf = (html) => [...readFileSync(new URL(`./viewer/${html}`, import.meta.url), "utf8")
+  .matchAll(/<link rel="stylesheet" href="([^"]+)"/g)].map((m) => m[1]);
+const turnsOf = (html) => Object.assign({}, ...sheetsOf(html).map((f) => turnsIn(readFileSync(new URL(`./viewer/${f}`, import.meta.url), "utf8"))));
+const viewerTurns = turnsOf("viewer.html");
+check("the PDF viewer turns the layer a quarter, a half and three quarters", Object.keys(viewerTurns).sort(), ["180", "270", "90"]);
+check("the text reader turns it the same three ways", turnsOf("text-reader.html"), viewerTurns);
 
 console.log("\n" + "=".repeat(60));
 console.log(`FAILURES: ${fails}`);
