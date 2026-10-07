@@ -1569,6 +1569,11 @@ document.addEventListener("cut", (e) => {
   if (shotPut) return;
   if (selectionCrossesGutter(body)) { toast(GUTTER_FIXED, { error: true }); return; }
   snapshot(body, true);
+  // …and the names Esc left noted for it, as beforeinput notes them for the
+  // browser's own edits: an Esc'd name the cut takes goes with it, settled by
+  // the input event the deletion fires (escapesIn, `after: "edit"`), and is
+  // not waiting for the next "Jones" typed anywhere on the page.
+  escNote(body);
   document.execCommand("delete");
 });
 // WHICH DRAG IS THE SELECTION'S. This listener first took a drag only where it
@@ -2896,18 +2901,31 @@ async function adoptLegacyState(h, rec, text) {
   const n = held ? held.values.length + held.keeps.length + lines : 0;
   // Flags read in where the rest was held: said, so the operator knows where
   // they came from (and they show in the Flagged panel, marked on the page).
-  const came = !ours && moved && moved.values.length
-    ? ` Its ${moved.values.length} flag${moved.values.length === 1 ? " is" : "s are"} read into this folder's list — a flag in the wrong case only fakes one more name.`
-    : "";
+  //
+  // THE NOTE NAMES ITS FOLDER, NEVER "THIS" ONE. It is queued and said by
+  // whichever toast comes next, and that may be another folder's: case A's
+  // adoption overtaken by case B's (A's key slow to read, B opened
+  // meanwhile) put A's note into B's "Key loaded: Lee Opposition" toast,
+  // saying A's flags were "read into this folder's list" and its keeps "not
+  // read into this folder" — B's, to anyone reading it, where the flags had
+  // gone into A's (measured on 6303b39). So every place the note speaks of
+  // the folder it moved says "the “Smith Opposition” folder you opened", true
+  // under any toast; where two folders share the name, the one opened is the
+  // one it means.
+  const opened = `the “${name}” folder you opened`;
+  const came = (into) => (!ours && moved && moved.values.length
+    ? ` Its ${moved.values.length} flag${moved.values.length === 1 ? " is" : "s are"} read into ${into} — a flag in the wrong case only fakes one more name.`
+    : "");
   if (!n && !heldOther) {
-    if (came) queueListNote(`An earlier version kept one list for every folder named “${name}”.` + came);
+    const c = came(`the list of ${opened}`);
+    if (c) queueListNote(`An earlier version kept one list for every folder named “${name}”.` + c);
     return;
   }
-  const why = ours ? "this folder already keeps one of its own"
-    : hold === "text" ? (isTextSub(name) ? "every case's exports are in a folder of that name" : "this one holds a case's exports, not the case")
+  const why = ours ? `${opened} already keeps one of its own`
+    : hold === "text" ? (isTextSub(name) ? "every case's exports are in a folder of that name" : `${opened} holds a case's exports, not the case`)
       : hold === "named" ? `${rec.sameName} folders of that name are known here`
         : hold === "unwritten" ? "it was never written into any of them"
-          : `what it last wrote is not the ${TD.VALUES_FILE} in this one`;
+          : `what it last wrote is not the ${TD.VALUES_FILE} in ${opened}`;
   // Every value named: nothing in the reader reads the held list.
   const named = n
     ? held.values.map((v) => `“${v}”`).concat(held.keeps.map((k) => `${k.control}: “${k.value}”`))
@@ -2918,7 +2936,7 @@ async function adoptLegacyState(h, rec, text) {
       held.keeps.length ? `${held.keeps.length} keep${held.keeps.length === 1 ? "" : "s"}` : "",
       lines ? `${lines} page line${lines === 1 ? "" : "s"}` : ""].filter(Boolean).join(", ") + ` (${named.join(", ")})`
     : "the spot keeps and page swaps kept for its documents";
-  queueListNote(`An earlier version kept one list for every folder named “${name}”, and ${why}, so whose it is cannot be told: ${what} ${n === 1 ? "is" : "are"} held aside, not read into this folder. Flag or keep again ${text ? "in the case folder above it" : `in “${name}”`} what that case still needs.` + came);
+  queueListNote(`An earlier version kept one list for every folder named “${name}”, and ${why}, so whose it is cannot be told: ${what} ${n === 1 ? "is" : "are"} held aside, not read into ${opened}. Flag or keep again ${text ? "in the case folder above it" : `in “${name}”`} what that case still needs.` + came("that folder's list"));
 }
 
 /**
@@ -3314,6 +3332,7 @@ function openText(text, name, handle, built) {
   dirty = false;
   editing = false;
   escaped = new WeakMap(); // the Esc'd names were the last document's
+  escSeen = new WeakMap();
   clearHistory();
   document.body.classList.remove("editing");
   $("edit-toggle").setAttribute("aria-pressed", "false");
@@ -4141,6 +4160,9 @@ pagesEl.addEventListener("input", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body) return;
   normalizeLines(body);
+  // The edit just made settles the names Esc left (noted at beforeinput, or
+  // by the cut or the paste): before anything asks for them below.
+  escapesIn(body, { after: "edit" });
   setDirty(true, pageIndexOf(body));
   refreshNocrButtons([pageIndexOf(body)]); // typed onto a [DID NOT OCR] page, or down to one
   offerAtCaret(body);
@@ -4389,12 +4411,18 @@ function normalizeLines(body) {
   if (moved && pt && pt.container.isConnected) placeCaret(pt.container, Math.min(pt.offset, pt.container.nodeType === 3 ? pt.container.data.length : pt.container.childNodes.length));
 }
 
-/** Enter: the text after the caret goes down a slot. */
+/**
+ * Enter: the text after the caret goes down a slot. The names Esc left as
+ * typed go with their nodes (escHold, escCutAt, escCarry): the text after the
+ * caret, an Esc'd short cite on the line among it, is taken as whole nodes.
+ */
 function enterAtCaret(body, { snap = true } = {}) {
   const cl = caretLine(body);
   if (!cl) return false;
-  const { line, pt: at } = cl;
+  const { line } = cl;
   if (snap) snapshot(body, true);
+  escHold(body);
+  const at = escCutAt(body, cl.pt);
   const lt = ltOf(line);
   const r = document.createRange();
   r.setStart(at.container, at.offset);
@@ -4426,6 +4454,7 @@ function enterAtCaret(body, { snap = true } = {}) {
   }
   dressBody(body);
   fixGutterSpacing(body);
+  escCarry(body);
   placeCaret(ltOf(target), 0);
   setDirty(true, pageIndexOf(body));
   afterTextChange();
@@ -4441,7 +4470,9 @@ function enterAtCaret(body, { snap = true } = {}) {
 function insertLinesAtCaret(body, pieces) {
   const cl = caretLine(body);
   if (!cl || !pieces.length) return false;
-  const { line, pt: at } = cl;
+  const { line } = cl;
+  escHold(body); // the names Esc left go down with their nodes (enterAtCaret)
+  const at = escCutAt(body, cl.pt);
   const lt = ltOf(line);
   const r = document.createRange();
   r.setStart(at.container, at.offset);
@@ -4492,6 +4523,7 @@ function insertLinesAtCaret(body, pieces) {
   const caretAt = caretNode && caretSlot ? offsetOfPoint(ltOf(caretSlot), caretNode, caretNode.data.length) : -1;
   dressBody(body);
   fixGutterSpacing(body);
+  escCarry(body);
   if (caretAt >= 0) { const pt = pointAtOffset(ltOf(caretSlot), caretAt); if (pt) placeCaret(pt.node, pt.offset); }
   else if (caretSlot) placeCaret(ltOf(caretSlot), 0);
   setDirty(true, pageIndexOf(body));
@@ -4504,6 +4536,7 @@ function joinLineUp(body, line) {
   const prev = line.previousElementSibling;
   if (!prev || !prev.classList.contains("line")) return false;
   snapshot(body, true);
+  escHold(body); // the names Esc left go up with their nodes (enterAtCaret)
   const plt = ltOf(prev);
   const joinAt = plt.textContent.length;
   plt.appendChild(extractAll(ltOf(line)));
@@ -4523,6 +4556,7 @@ function joinLineUp(body, line) {
   }
   dressBody(body);
   fixGutterSpacing(body);
+  escCarry(body);
   const at = pointAtOffset(plt, joinAt);
   placeCaret(at.node, at.offset);
   setDirty(true, pageIndexOf(body));
@@ -4561,9 +4595,10 @@ pagesEl.addEventListener("keydown", (e) => {
   if (!editing || e.ctrlKey || e.metaKey || e.altKey) return;
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body) return;
-  // A line pushed down, joined up or cut moves its text into other nodes, and
-  // a name Esc left as typed is found again by where it was (escapesIn).
-  if (e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") escNote(body);
+  // A line pushed down or joined up moves its text into other nodes, and the
+  // names Esc left as typed go with theirs (enterAtCaret, joinLineUp); a
+  // Backspace or Delete the browser makes is noted and settled as its edits
+  // are (beforeinput, input).
   if (e.key === "Enter") { e.preventDefault(); hideTypeTip(); enterAtCaret(body); }
   else if (e.key === "Backspace") { if (backspaceAtCaret(body)) e.preventDefault(); }
   else if (e.key === "Delete") { if (deleteAtCaret(body)) e.preventDefault(); }
@@ -4584,7 +4619,11 @@ pagesEl.addEventListener("keydown", (e) => {
 pagesEl.addEventListener("paste", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (!body || !editing) return;
-  escNote(body); // the lines below the caret move down into other nodes (insertLinesAtCaret)
+  // The first line goes in by execCommand, which asks no beforeinput: the
+  // names Esc left are noted for it here, and its input event settles them —
+  // one it typed over goes with its text. The lines after it carry theirs
+  // down by their nodes (insertLinesAtCaret).
+  escNote(body);
   // A passage this reader copied or cut comes back with its real names (ownCopy, under "copy, cut and drag").
   const text = ownCopy(e.clipboardData ? e.clipboardData.getData("text/plain") : "", "real");
   e.preventDefault();
@@ -4647,15 +4686,46 @@ pagesEl.addEventListener("paste", (e) => {
 // (`escaped`) as a live Range over the name as typed — the browser carries a
 // Range with its text when anything is typed before it, a mark is cut out of
 // the node beside it or the nodes are merged — and with its place in the
-// page's DISK text, noted before anything that takes the nodes away (a key
-// pressed that moves lines, a paste, a rebuild, a print, a screenshot), so it
-// is found again there, or nearest there, once they are gone (escapesIn). A
-// name is the Esc'd one only where it is that name exactly, at that place: a
-// longer name ending there ("Bob Jones" over an Esc'd "Jones") is not, and one
-// whose letters were typed over is no longer there to keep.
+// page's DISK text and the text it is a place in (`escSeen`), noted before
+// anything that takes the nodes away, so it is found again once they are
+// gone (escapesIn). A name is the Esc'd one only where it is that name
+// exactly, at that place: a longer name ending there ("Bob Jones" over an
+// Esc'd "Jones") is not, and one whose letters were typed over is no longer
+// there to keep.
+//
+// FOUND AGAIN BY WHAT MOVED IT, AND NOWHERE ELSE. A name whose nodes went was
+// looked for at the nearest occurrence of the name anywhere on the page, with
+// no limit, and a name the reader could not follow was taken for typed over.
+// Both were wrong, in opposite directions (measured on b6d82a6). Enter at the
+// head of the short cite's own line moved its text into a new node and left
+// the Range collapsed in the old one, read as typed over: the save wrote
+// "(Pratt, 30 Cal.App.5th at p. 5.)" under a plain "Saved" — and so did a
+// two-line paste there. And the line holding it deleted (Shift+Home,
+// Backspace, or Ctrl+X) left it waiting for any "Jones" at all: one typed on
+// line 1 as this case's party a minute later was taken for it, offered
+// nothing, and written into the file as itself. Now each way the nodes go is
+// followed by what did it:
+// - The reader's own line moves (enterAtCaret, insertLinesAtCaret,
+//   joinLineUp) hold each name's NODE (escHold), cut at the caret first so
+//   the text after it moves as whole nodes (escCutAt) — extractContents takes
+//   a node it holds whole along with it, but clones the one it starts
+//   inside — and find it again in that node wherever it went (escCarry).
+// - The browser's own edits — typing, a deletion, a cut, the first line of
+//   a paste — are noted just before (beforeinput, the cut and paste
+//   handlers) and settled just after (the input event): a name whose nodes
+//   the edit took is found where the text the edit left alone carries it
+//   (TD.escapedPlace), and one the edit reached was written over or taken
+//   out, and goes with its text.
+// - Anything else that moved it without a note (nothing known does) cannot
+//   say which occurrence it became: every occurrence of the name in the text
+//   written since the note is left as typed, `unsure`, and the save says so
+//   in red. A name left as typed is a leak the save names; a short cite's
+//   party written as its pseudonym is a renamed authority, which the project
+//   ranks above it.
 const typeTip = $("type-tip");
 let typeHit = null;      // { body, node, offset, hit } while the prompt shows
-let escaped = new WeakMap(); // page body → [{ range, a, b, text, real }]: the names Esc left as typed (escapesIn)
+let escaped = new WeakMap(); // page body → [{ range, a, b, text, real, unsure?, hold? }]: the names Esc left as typed (escapesIn)
+let escSeen = new WeakMap(); // page body → { text, noted }: the disk text the places (a, b) are in, and whether it was noted for the edit now made (escNote)
 function textBeforeCaret(pt) {
   if (pt.container.nodeType !== 3) return "";
   let t = pt.container.data.slice(0, pt.offset);
@@ -4735,9 +4805,26 @@ function escapeTyped(t) {
  * name was typed over in place (its letters edited, or deleted, in the node it
  * stood in) and is not there to keep; "lost" where the node it stood in has
  * gone, been moved or been written over by a rebuild — the name may well
- * stand elsewhere on the page, and is looked for by its place. A range grown
- * by typing against its edge ("See " before it, a "," after it) is cut back
- * to the name.
+ * stand elsewhere on the page, and is looked for by what moved it
+ * (escapesIn). A range grown by typing against its edge ("See " before it, a
+ * "," after it) is cut back to the name — and so is one grown by a letter
+ * glued to its front, which is not the name typed over: the names are read
+ * after EVERY keystroke now (the input event settles them), and "See " typed
+ * before an Esc'd "Jones" passes through "SJones", "SeJones" and "SeeJones"
+ * on its way to "See Jones" (measured: read there as typed over, the Esc was
+ * dropped at the "S" and the save wrote "See Pratt, 30 Cal.App.5th at p.
+ * 5."). The same letters in the same place are the name Esc was pressed on;
+ * a hit the converter or the save reads there is only ever the whole word.
+ *
+ * A collapsed range in its own node reads "gone", which is right only for an
+ * edit made IN that node: the browser deleting the name's letters. The
+ * reader's Enter and paste used to collapse it so too — extractContents
+ * clones the text node the caret is in and leaves the original the text
+ * before the caret, every live range past the caret clamped to its end — and
+ * an Esc'd short cite on the line was read as typed over and written as its
+ * pseudonym. Those moves now cut at the caret first and carry the name by its
+ * node (escCutAt, escHold, escCarry), so a range collapsed in place is the
+ * browser's deletion and nothing else.
  */
 function escState(d, body) {
   const r = d.range;
@@ -4745,21 +4832,35 @@ function escState(d, body) {
   if (n !== r.endContainer || n.nodeType !== 3 || !body.contains(n) || (n.parentElement && n.parentElement.closest(".pn, .gutter, [data-here]"))) return "lost";
   const s = n.data.slice(r.startOffset, r.endOffset);
   if (s === d.text) return "live";
-  const word = /[\p{L}\p{N}]/u;
-  if (s.length > d.text.length && s.endsWith(d.text) && !word.test(s[s.length - d.text.length - 1])) { r.setStart(n, r.endOffset - d.text.length); return "live"; }
-  if (s.length > d.text.length && s.startsWith(d.text) && !word.test(s[d.text.length])) { r.setEnd(n, r.startOffset + d.text.length); return "live"; }
+  if (s.length > d.text.length && s.endsWith(d.text)) { r.setStart(n, r.endOffset - d.text.length); return "live"; }
+  if (s.length > d.text.length && s.startsWith(d.text)) { r.setEnd(n, r.startOffset + d.text.length); return "live"; }
   return "gone";
 }
 /**
- * The Esc'd names standing on `body` now, each with a live range over it —
- * one whose nodes went found again by its place in the disk text (`exact`
- * there only: the place a rebuild carried it to; else the nearest occurrence,
- * TD.escapedPlaces) or, where the page no longer carries it, left to wait
- * there. A name typed over in place is dropped. While a print or a
- * screenshot has the pseudonyms on the page nothing is dropped or moved: the
- * names are back the moment it is over.
+ * The Esc'd names standing on `body` now, each with a live range over it. A
+ * name whose range the page took is looked for by its place in the disk text
+ * as last noted (`escSeen`):
+ * - `exact` (a rebuild that carried the places with its text, a print or a
+ *   screenshot put back, an undo) there and only there; where the page does
+ *   not carry it there it waits, its place kept;
+ * - otherwise by what was written since the note (TD.escapedPlace). Where
+ *   nothing written reached it, it is the same characters, at its place moved
+ *   by what was written before it. Where something did, it is the edit's to
+ *   say: `after: "edit"`, the browser's own edit noted just before it
+ *   (beforeinput, the cut, the paste's first line) and settled by the input
+ *   event, wrote over it or took it out, and it goes with its text; anything
+ *   else — `after: "move"`, a line move of the reader's whose node did not
+ *   carry the name, or a change nobody noted — cannot say which occurrence it
+ *   became, so EVERY occurrence of the name in the text written since is left
+ *   as typed, each its own entry marked `unsure`, which the save names in
+ *   red. Where the text written holds none, the name is gone.
+ * A name typed over in place is dropped. Each live name's place is noted
+ * afresh in the text as it stands, which is what the next one lost is looked
+ * for from. While a print or a screenshot has the pseudonyms on the page
+ * nothing is dropped, moved or noted: the names are found again exactly where
+ * they were the moment it is over (escFindAgain).
  */
-function escapesIn(body, { exact = false } = {}) {
+function escapesIn(body, { exact = false, after = null } = {}) {
   const list = escaped.get(body);
   if (!list || !list.length) return [];
   const frozen = !!(printPut || shotPut);
@@ -4770,25 +4871,48 @@ function escapesIn(body, { exact = false } = {}) {
     else if (st === "gone" && !frozen) continue;
     else { if (!frozen) d.range = null; keep.push(d); if (d.a >= 0 && !frozen) lost.push(d); }
   }
+  if (frozen) return live;
+  const seen = escSeen.get(body);
+  const mapped = TD.serializeMapped(body);
   if (lost.length) {
-    const mapped = TD.serializeMapped(body);
     const taken = new Set();
     for (const d of live) { const o = mapped.at.get(d.range.startContainer); if (o != null) taken.add(o + d.range.startOffset); }
+    const found = (d, at) => {
+      const r = escRangeAt(mapped, at, at + d.text.length);
+      if (!r) return false;
+      d.range = r;
+      d.a = at;
+      d.b = at + d.text.length;
+      taken.add(at);
+      live.push(d);
+      return true;
+    };
+    // The one edit since the note was the browser's: what it reached, it wrote over or took out.
+    const sure = after === "edit" && !!(seen && seen.noted);
     for (const d of lost) {
-      const places = exact ? (mapped.text.slice(d.a, d.b) === d.text ? [d.a] : []) : TD.escapedPlaces(mapped.text, d.text, d.a, taken);
-      for (const at of places) {
-        const r = escRangeAt(mapped, at, at + d.text.length);
-        if (!r) continue;
-        d.range = r;
-        d.a = at;
-        d.b = at + d.text.length;
-        taken.add(at);
-        live.push(d);
-        break;
+      if (exact) { if (mapped.text.slice(d.a, d.b) === d.text) found(d, d.a); continue; }
+      const r = TD.escapedPlace(seen ? seen.text : mapped.text, mapped.text, d.text, d.a, taken);
+      if (r.at >= 0) {
+        // Standing there but not in one plain text node (a spot keep taken over
+        // it): it waits there, its place carried.
+        if (!found(d, r.at)) { d.a = r.at; d.b = r.at + d.text.length; }
+        continue;
+      }
+      keep.splice(keep.indexOf(d), 1);
+      if (sure) continue;
+      for (const at of r.within) {
+        const u = { range: null, a: -1, b: -1, text: d.text, real: d.real, unsure: true };
+        if (found(u, at)) keep.push(u);
       }
     }
   }
-  if (!frozen) escaped.set(body, keep);
+  for (const d of keep) {
+    if (!d.range) continue;
+    const o = mapped.at.get(d.range.startContainer);
+    if (o != null) { d.a = o + d.range.startOffset; d.b = o + d.range.endOffset; }
+  }
+  escaped.set(body, keep);
+  escSeen.set(body, { text: mapped.text, noted: false });
   return live;
 }
 /** A Range over [start, end) of the page's disk text where one plain text node holds all of it, or null. */
@@ -4812,25 +4936,91 @@ function escFindAgain(body) {
   escapesIn(body, { exact: true });
 }
 /**
- * Each Esc'd name's place in the page's disk text noted, against the moment
- * its nodes go; `carry` (a rebuild that writes names before it) moves the
- * places with the text, and the ranges are given up, to be found again there.
+ * Each Esc'd name's place in the page's disk text noted, and the text with it,
+ * just before an edit or a move that may take its nodes (`noted`: the input
+ * event that follows settles that edit — escapesIn's `after: "edit"`);
+ * `carry` (a rebuild that writes names before it) moves the places with the
+ * text, to be found exactly there once it is built, and `release` gives the
+ * ranges up. Nothing is noted while a print or a screenshot has the fakes on
+ * the page: the places noted before it are where the names go back to.
  */
 function escNote(body, { carry = null, release = false } = {}) {
   const list = escaped.get(body);
-  if (!list || !list.length) return;
-  const live = escapesIn(body);
-  if (live.length) {
-    const { at } = TD.serializeMapped(body);
-    for (const d of live) {
-      const o = at.get(d.range.startContainer);
-      if (o != null) { d.a = o + d.range.startOffset; d.b = o + d.range.endOffset; }
+  if (!list || !list.length) return [];
+  let live = [];
+  if (!printPut && !shotPut) {
+    live = escapesIn(body);
+    const seen = escSeen.get(body);
+    if (seen) seen.noted = true;
+  }
+  if (carry || release) {
+    for (const d of escaped.get(body) || []) {
+      if (carry && d.a >= 0) { d.a = carry(d.a); d.b = d.a + d.text.length; }
+      if (release) d.range = null;
     }
+    if (carry) escSeen.delete(body); // the places are in the text the rebuild writes now
+    live = [];
   }
-  for (const d of escaped.get(body) || []) {
-    if (carry && d.a >= 0) { d.a = carry(d.a); d.b = d.a + d.text.length; }
-    if (release) d.range = null;
+  return live;
+}
+/**
+ * Before one of the reader's own line moves (enterAtCaret, insertLinesAtCaret,
+ * joinLineUp): each live Esc'd name's NODE held, with its offset in it. The
+ * move takes every node it moves whole — the same node, into the line it is
+ * put in — but a live Range on it collapses the moment the node leaves its
+ * parent, so the node is what carries the name (escCarry).
+ */
+function escHold(body) {
+  for (const d of escNote(body)) d.hold = { node: d.range.startContainer, offset: d.range.startOffset };
+}
+/**
+ * The caret's point as a boundary between nodes, where the page has Esc'd
+ * names: a text node the caret stands inside is split there first, and a
+ * name held in its second half is held in the new node. A Range starting
+ * INSIDE a text node does not move that node: extractContents clones it for
+ * the text after the caret and leaves the original the text before — the
+ * held node would stay behind, emptied of the name. Starting between nodes,
+ * every node after the caret moves whole, and the names in them with it.
+ * Elsewhere the point is left as it is: what it extracts reads the same.
+ */
+function escCutAt(body, pt) {
+  const list = escaped.get(body);
+  const n = pt.container;
+  if (!list || !list.length || n.nodeType !== 3 || !n.parentNode) return pt;
+  const parent = n.parentNode;
+  if (pt.offset > 0 && pt.offset < n.data.length) {
+    const tail = n.splitText(pt.offset);
+    for (const d of list) if (d.hold && d.hold.node === n && d.hold.offset >= pt.offset) d.hold = { node: tail, offset: d.hold.offset - pt.offset };
+    return { container: parent, offset: [...parent.childNodes].indexOf(tail) };
   }
+  const i = [...parent.childNodes].indexOf(n);
+  return { container: parent, offset: pt.offset === 0 ? i : i + 1 };
+}
+/**
+ * …and each held name found again in its node once the move and the dressing
+ * after it are done: where the node's text now begins in the page's disk text,
+ * plus the offset — which holds even where the dressing split the node into a
+ * column cell, since the halves stand together in the text. A name whose node
+ * went, or no longer holds it there (the caret was inside it), is looked for
+ * by what the move wrote (escapesIn, `after: "move"`), which never takes a
+ * move for a deletion.
+ */
+function escCarry(body) {
+  const list = escaped.get(body);
+  if (!list || !list.length) return;
+  const mapped = TD.serializeMapped(body);
+  for (const d of list) {
+    const h = d.hold;
+    if (!h) continue;
+    d.hold = null;
+    const o = h.node.isConnected && body.contains(h.node) ? mapped.at.get(h.node) : null;
+    if (o == null) continue;
+    const at = o + h.offset;
+    if (mapped.text.slice(at, at + d.text.length) !== d.text) continue;
+    const r = escRangeAt(mapped, at, at + d.text.length);
+    if (r) { d.range = r; d.a = at; d.b = at + d.text.length; }
+  }
+  escapesIn(body, { after: "move" });
 }
 document.addEventListener("selectionchange", () => {
   if (!typeHit) return;
@@ -5042,7 +5232,7 @@ function typingOf(body) {
   const list = escaped.get(body);
   if (list && list.length) {
     escNote(body); // each live one's place in the disk text, now
-    esc = (escaped.get(body) || []).filter((d) => d.a >= 0).map((d) => ({ a: d.a, b: d.b, text: d.text, real: d.real }));
+    esc = (escaped.get(body) || []).filter((d) => d.a >= 0).map((d) => ({ a: d.a, b: d.b, text: d.text, real: d.real, unsure: !!d.unsure }));
   }
   return { built: body.__built, typed, left, esc };
 }
@@ -5063,7 +5253,7 @@ function restoreTyping(body, snap) {
   if (Array.isArray(snap.esc)) {
     // Copies, each found again exactly where the snapshot noted it: the
     // snapshot is kept for a redo, and the live entries are changed in place.
-    escaped.set(body, snap.esc.map((d) => ({ range: null, a: d.a, b: d.b, text: d.text, real: d.real })));
+    escaped.set(body, snap.esc.map((d) => ({ range: null, a: d.a, b: d.b, text: d.text, real: d.real, unsure: !!d.unsure })));
     escapesIn(body, { exact: true });
   }
 }
@@ -5148,6 +5338,11 @@ pagesEl.addEventListener("beforeinput", (e) => {
   const kind = /delete/i.test(e.inputType) ? "del" : "ins";
   snapshot(body, kind !== snapshot.lastKind);
   snapshot.lastKind = kind;
+  // The names Esc left as typed, noted for the edit about to be made, which
+  // the input event settles (escapesIn, `after: "edit"`): one whose node it
+  // takes is found where the text it leaves alone carries it, and one it
+  // reaches — deleted with its line, typed over, cut — goes with its text.
+  escNote(body);
 });
 document.addEventListener("keydown", (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
@@ -5471,6 +5666,11 @@ async function saveDocument() {
   // reach used to stay orange, out of the walk, save after save, with nothing
   // said. Now it is named.
   const stuck = [];
+  // …and the names left as typed because an Esc on one of them could not be
+  // followed to a single place (escapesIn's `unsure`): each occurrence it may
+  // have become is left, and the save says why — not that it "stands in the
+  // file as it did", which a name the reader lost track of may not.
+  const unsure = [];
   for (const body of pageBodies()) {
     const i = pageIndexOf(body);
     // The caret, as a place in the text the page writes: a page the pass below
@@ -5483,6 +5683,7 @@ async function saveDocument() {
     // converter asks the same of its hits (escapesIn); this is that question
     // in the disk text the save reads — each name exactly where it stands.
     const esc = escapesIn(body);
+    for (const d of esc) if (d.unsure) unsure.push(d.text);
     const points = [];
     const caretK = caret ? points.push(caret) - 1 : -1;
     const escK = esc.map((d) => [points.push({ node: d.range.startContainer, offset: d.range.startOffset }) - 1, points.push({ node: d.range.endContainer, offset: d.range.endOffset, end: true }) - 1]);
@@ -5735,6 +5936,10 @@ async function saveDocument() {
       + stuckNames.slice(0, 4).join(", ") + (stuckNames.length > 4 ? "…" : "")
       + ". Retype or keep " + (stuck.length === 1 ? "it" : "them") + " by hand." + instructionNote(stuckNames)
     : "";
+  const unsureNames = [...new Set(unsure.map((v) => String(v).trim()))];
+  const unsureWarn = unsure.length
+    ? ` · ⚠ ${unsureNames.slice(0, 4).join(", ")}${unsureNames.length > 4 ? "…" : ""} left as typed in ${unsure.length} place${unsure.length === 1 ? "" : "s"}: you pressed Esc on ${unsureNames.length === 1 ? "it" : "them"}, and an edit moved the text in a way the reader could not follow, so it cannot tell ${unsure.length === 1 ? "whether this is the place" : "which of them is the one"} you meant. ${unsure.length === 1 ? "Check it; retype it if it is" : "Check each; retype one that is"} this case's own name and it is offered again.`
+    : "";
   const wroteAs = forwarded + typing.made; // the names the save marked on its way in are written as pseudonyms too
   // With no document written and the list or the worksheet left unwritten
   // (no case folder, or the Text Files folder), nothing was saved, and the
@@ -5745,8 +5950,8 @@ async function saveDocument() {
         : "Nothing saved" + alsoList)
     : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + wrote.join(", ") +
       (wroteAs ? ` · ${wroteAs} real name${wroteAs === 1 ? "" : "s"} written as pseudonym${wroteAs === 1 ? "" : "s"}` : "")
-      + (typing.back ? ` · ${typing.back} left as typed — ${typing.back === 1 ? "a party" : "parties"} to a cited decision, never a pseudonym` : "") + alsoList) + warn + stuckWarn,
-    { error: !!(warn || stuckWarn), ms: warn || stuckWarn ? 12000 : undefined });
+      + (typing.back ? ` · ${typing.back} left as typed — ${typing.back === 1 ? "a party" : "parties"} to a cited decision, never a pseudonym` : "") + alsoList) + warn + unsureWarn + stuckWarn,
+    { error: !!(warn || unsureWarn || stuckWarn), ms: warn || unsureWarn || stuckWarn ? 12000 : undefined });
   return true;
 }
 saveBtn.addEventListener("click", saveDocument);

@@ -1145,26 +1145,65 @@ export function withoutEscaped(spans, escaped) {
 }
 
 /**
- * Where an Esc'd name stands now, read off the page's disk text, for a name
- * whose nodes the page moved (a line cascade, a paste, a rebuild): the starts
- * of `name`'s occurrences there, whole words, nearest to `near` (where it was
- * last seen) first, leaving out the starts in `taken` (the places of the
- * page's other Esc'd names). Nearest, with no limit: an occurrence wrongly
- * taken for the Esc'd one is a name left as typed — orange, named in red by
- * the save — while the Esc'd one missed is written as its pseudonym, which in
- * a short cite is a renamed authority, the worse of the two.
+ * Where an Esc'd name stands now, for one whose nodes went from under its
+ * range: `was` is the page's disk text when its place was noted (`at`, the
+ * start of `name` there), `now` the page's disk text as it stands. The two
+ * are compared by the head and the tail they have in common, which is what an
+ * edit made in one place leaves alone, and the answer is one of two:
+ *
+ * - { at } — the name lay wholly in that head or tail, so nothing written
+ *   since the note reached it: its start now (moved by what the edit put in
+ *   or took out before it), where `now` holds it still, a whole word;
+ * - { at: -1, within } — the edit reached it (wrote over it, took it out,
+ *   moved the text it stood in, or glued a letter to it): `within` the
+ *   starts of the name's whole-word occurrences that the text the edit wrote
+ *   takes in (any of them between the shared head and tail; where the edit
+ *   only took text out, the ones it closed up across), leaving out `taken`
+ *   (the places of the page's other Esc'd names).
+ *
+ * BOUNDED, BY THE EDIT. This used to be the name's occurrences ANYWHERE on
+ * the page, nearest first, with no limit — on the reading that an occurrence
+ * wrongly taken for the Esc'd one is only a name left as typed. But a name
+ * whose line was deleted waited for the next occurrence however far off and
+ * however much later: "Jones was served." typed on line 1, after the short
+ * cite holding the Esc'd "Jones" had been cut from line 3, went into the file
+ * as itself, with no prompt and no mark, under a warning that it "stands in
+ * the file as it did" (measured on b6d82a6). An occurrence the edit did not
+ * write is one the operator never pressed Esc on, and it is not offered
+ * here. What the reader does with `within` — drop the name, where the one
+ * edit since the note was the browser's own and so took it out; leave each
+ * occurrence as typed and say so, where the text was moved by something it
+ * could not follow — is its own (escapesIn).
  */
-export function escapedPlaces(text, name, near, taken) {
-  const src = String(text == null ? "" : text);
-  if (!name) return [];
+export function escapedPlace(was, now, name, at, taken) {
+  const a0 = String(was == null ? "" : was), b0 = String(now == null ? "" : now);
+  if (!name || !(at >= 0)) return { at: -1, within: [] };
   const word = /[\p{L}\p{N}]/u;
-  const out = [];
-  for (let i = src.indexOf(name); i >= 0; i = src.indexOf(name, i + 1)) {
-    if ((i > 0 && word.test(src[i - 1])) || word.test(src[i + name.length] || "")) continue;
-    if (taken && taken.has(i)) continue;
-    out.push(i);
+  const whole = (i) => b0.startsWith(name, i) && !(i > 0 && word.test(b0[i - 1])) && !word.test(b0[i + name.length] || "");
+  const lim = Math.min(a0.length, b0.length);
+  let p = 0;
+  while (p < lim && a0.charCodeAt(p) === b0.charCodeAt(p)) p++;
+  let s = 0;
+  while (s < lim - p && a0.charCodeAt(a0.length - 1 - s) === b0.charCodeAt(b0.length - 1 - s)) s++;
+  const end = at + name.length;
+  // In the head the two share, or in the tail: the same characters, moved by
+  // the length the edit changed where it lay before it.
+  if (end <= p && whole(at)) return { at };
+  if (at >= a0.length - s && end <= a0.length) {
+    const there = at + (b0.length - a0.length);
+    if (whole(there)) return { at: there };
   }
-  return out.sort((x, y) => Math.abs(x - near) - Math.abs(y - near) || x - y);
+  // The edit reached it: what the edit wrote is [p, e) of `now`, or the
+  // point p where it only took text out.
+  const e = b0.length - s;
+  const within = [];
+  for (let i = b0.indexOf(name); i >= 0; i = b0.indexOf(name, i + 1)) {
+    const j = i + name.length;
+    if (!(e > p ? i < e && j > p : i < p && j > p)) continue;
+    if (!whole(i) || (taken && taken.has(i))) continue;
+    within.push(i);
+  }
+  return { at: -1, within };
 }
 
 /**

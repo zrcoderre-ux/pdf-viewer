@@ -821,16 +821,24 @@ app, which routes it to the reader tab.
   one included.) Every name you press Esc on is kept so, however many there
   are on the page — two short cites in a row, each Esc'd, both keep their
   names — and each goes with its text when you type or paste anywhere
-  earlier on the page, push lines down with Enter or join them with
-  Backspace, print or take a screenshot. Change the name itself (type over
-  its letters, or type a different name where it stood) and it is no longer
-  the one you pressed Esc on: it is offered again, and marked if you leave
-  it. Ctrl+Z and Ctrl+Y keep it so: an undo puts the names you pressed Esc on
-  back with the text they stand in, so a short cite deleted by mistake and
-  brought back with Ctrl+Z still keeps its name. A real
-  that opens a longer name in the key ("Helen" beside
-  "Helen Rasho"), or a kept one, is never space-marked: the space types on,
-  and the whole name is offered the moment it is finished. A name typed and
+  earlier on the page (on its own line ahead of it too, a paste of several
+  lines included), push lines down with Enter (at the head of its own line,
+  or between it and the words before it), join lines with Backspace or
+  Delete, print or take a screenshot. Change the name itself (type over its
+  letters, or type a different name where it stood) and it is no longer the
+  one you pressed Esc on: it is offered again, and marked if you leave it.
+  Delete it — its line, a selection or a Ctrl+X that takes it — and the Esc
+  goes with it: the same name typed afterwards, anywhere on the page, is a
+  name you typed, offered and marked like any other. Should an edit ever
+  move it in a way the reader cannot follow, the reader does not guess:
+  every place the name may now stand in the text that edit moved is left as
+  typed, and the save says so in red, naming it — check each, and retype
+  one that is this case's own to have it offered again. Ctrl+Z and Ctrl+Y
+  keep it so: an undo puts the names you pressed Esc on back with the text
+  they stand in, so a short cite deleted by mistake and brought back with
+  Ctrl+Z still keeps its name. A real that opens a longer name in the key
+  ("Helen" beside "Helen Rasho"), or a kept one, is never space-marked: the
+  space types on, and the whole name is offered the moment it is finished. A name typed and
   left is marked by the reader on its own once the caret has moved off it —
   clicked away, moved with the arrow keys, or the page left for the Find box
   or a button — whichever page it was typed on.
@@ -998,7 +1006,9 @@ app, which routes it to the reader tab.
   a Text Files folder's (whose one list every case shared), all of it is held
   aside. The reader says so once, naming every value it held, to be flagged or
   kept again — even when another folder is opened before it can, or the page
-  is reloaded: the notice waits for the next message. **Opening another
+  is reloaded: the notice waits for the next message, and names the folder
+  it means ("the “Smith Opposition” folder you opened"), whichever folder is
+  open when it shows. **Opening another
   folder while one is still being read** (a synced drive can take seconds)
   leaves each folder's list, key and
   documents its own: the folder you opened last is the one whose key and list

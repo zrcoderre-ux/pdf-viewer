@@ -848,6 +848,24 @@ only after the key and the worksheet are read) lost it the same way. Now
 only the toast that says them takes them off (`listNoteOnce`) — whichever
 folder's toast that is; each note names its folder.
 
+…and says nothing of "this" folder, since the toast that says it may be
+another's. The final review found `adoptLegacyState`'s note naming its folder
+only in its opening words, then calling it "this folder" twice: with A's
+adoption overtaken by B's (`u2-unsaid.mjs`: A's key slow to read, B opened
+meanwhile), B's "Key loaded: Lee Opposition" toast went on "…held aside, not
+read into this folder… Its 2 flags are read into this folder's list", where
+the flags had gone into "Smith Opposition"'s list and B held nothing of them —
+pointing the operator at the wrong case. Every place the note speaks of the
+folder it moved now says "the “Smith Opposition” folder you opened" (and "that
+folder's list" after it), which is true under any folder's toast; where two
+folders share the name, the one opened is the one it means. The reason clause
+does the same ("the “X” folder you opened already keeps one of its own", "…
+holds a case's exports, not the case", "…is not the New Real Values.txt in
+the “X” folder you opened"). `carryUpTextFiles` already named both folders.
+Measured in Chromium: the same steps now read "…held aside, not read into the
+“Smith Opposition” folder you opened… Its 2 flags are read into that folder's
+list" under B's toast.
+
 Left as they are: a lone document's list is still kept by its FILE name, so
 lone `Motion.txt`s of two cases share one (no case folder is open, so nothing
 is written for it without a picker). A Text Files folder's spot keeps and

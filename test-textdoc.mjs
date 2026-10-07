@@ -10,7 +10,7 @@ import {
   markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
-  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlaces, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
+  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
@@ -463,14 +463,52 @@ console.log("what an edit wrote");
   check("…nor is a name wrapped over a line, piece for piece",
     withoutEscaped([{ start: 4, end: 20, ranges: [[4, 9], [15, 20]] }], [[4, 9]]).length, 1);
   check("…and with nothing Esc'd, the typed set as it was", [withoutEscaped(twoTyped, []).length, withoutEscaped(twoTyped, null).length], [2, 2]);
-  // …and found again by its place where the page moved its nodes: the
-  // nearest occurrence, whole words, of the name to where it was last seen.
-  const moved = " 1  Inserted line.\n 2  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 3  Rasho agrees. Rashomon.";
-  check("escapedPlaces: nearest to where it was first, whole words only",
-    escapedPlaces(moved, "Rasho", 15, null), [moved.indexOf("Rasho"), moved.indexOf("Rasho agrees")]);
-  check("…leaving out a place another Esc'd name holds",
-    escapedPlaces(moved, "Rasho", 15, new Set([moved.indexOf("Rasho")])), [moved.indexOf("Rasho agrees")]);
-  check("…and none where the page no longer carries it", [escapedPlaces(moved, "Quillmark", 0, null), escapedPlaces(moved, "", 0, null)], [[], []]);
+  // …and found again, where the page moved its nodes, by WHAT MOVED IT and
+  // nowhere else (escapedPlace). The text an edit left alone — the head and
+  // the tail the page's text before and after share — carries the name to
+  // its place now; where the edit reached it, the answer is the occurrences
+  // in the text the edit wrote, never one anywhere else on the page. It was
+  // the nearest occurrence anywhere, with no limit, and a short cite's
+  // "Jones" deleted with its line waited for the "Jones" typed on line 1 a
+  // minute later as this case's party, which went into the file as itself.
+  const cite = " 1  Plaintiff filed.\n 2  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 3  The end.";
+  const at = cite.indexOf("Rasho");
+  const typedAbove = cite.replace("filed.", "filed. Also, ");
+  check("escapedPlace: text typed before it moves it by its length",
+    escapedPlace(cite, typedAbove, "Rasho", at, null), { at: typedAbove.indexOf("Rasho") });
+  const typedAfter = cite.replace("The end.", "The end. More.");
+  check("…text written after it leaves it where it was", escapedPlace(cite, typedAfter, "Rasho", at, null), { at });
+  check("…as does a page that has not changed (cells laid again: the nodes went, the text did not)", escapedPlace(cite, cite, "Rasho", at, null), { at });
+  const lineGone = cite.replace("Nothing. (Rasho, 30 Cal.App.5th at p. 5.)", "");
+  check("…deleted with its line: no place, and nothing written to take for it",
+    escapedPlace(cite, lineGone, "Rasho", at, null), { at: -1, within: [] });
+  // …which is why the reader asks it of each edit as it is made (the input
+  // event): measured across the deletion AND a "Rasho" typed on line 1 after
+  // it, the text written runs from the one to the other and takes it in.
+  const retypedFar = lineGone.replace("filed.", "filed. Rasho was served.");
+  check("…measured across two edits, the text written spans both (the reader settles each edit as it is made)",
+    escapedPlace(cite, retypedFar, "Rasho", at, null).within, [retypedFar.indexOf("Rasho")]);
+  const elsewhere = " 1  Rasho filed.\n 2  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 3  Rasho agrees.";
+  const elsewhereGone = elsewhere.replace("Nothing. (Rasho, 30 Cal.App.5th at p. 5.)", "Nothing.");
+  check("…never an occurrence the edit did not write, however near",
+    escapedPlace(elsewhere, elsewhereGone, "Rasho", elsewhere.indexOf("(Rasho") + 1, null), { at: -1, within: [] });
+  const glued = cite.replace("(Rasho", "(XRasho");
+  check("…a letter glued to it is the edit reaching it, and no whole word of it there",
+    escapedPlace(cite, glued, "Rasho", at, null), { at: -1, within: [] });
+  const typedOver = cite.replace("(Rasho", "(Vance");
+  check("…nor where its letters were typed over", escapedPlace(cite, typedOver, "Rasho", at, null), { at: -1, within: [] });
+  // A move the reader could not follow by its node: the occurrences in the
+  // text it moved, every one, the places of other Esc'd names left out.
+  const cascaded = " 1  Plaintiff filed.\n 2  \n 3  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 4  The end.";
+  check("…a line cascade: the occurrence in the text it moved",
+    escapedPlace(cite, cascaded, "Rasho", at, null), { at: -1, within: [cascaded.indexOf("Rasho")] });
+  const twoBefore = " 1  Plaintiff filed.\n 2  Nothing. (Rasho, 30 Cal.App.5th at p. 5.) Rasho agrees. Rashomon.\n 3  The end.";
+  const twoMoved = " 1  Plaintiff filed.\n 2  \n 3  Nothing. (Rasho, 30 Cal.App.5th at p. 5.) Rasho agrees. Rashomon.\n 4  The end.";
+  const tAt = twoBefore.indexOf("Rasho");
+  check("…whole words only, leaving out a place another Esc'd name holds",
+    [escapedPlace(twoBefore, twoMoved, "Rasho", tAt, null).within, escapedPlace(twoBefore, twoMoved, "Rasho", tAt, new Set([twoMoved.indexOf("Rasho")])).within],
+    [[twoMoved.indexOf("Rasho"), twoMoved.indexOf("Rasho agrees")], [twoMoved.indexOf("Rasho agrees")]]);
+  check("…and nothing for no name or no place", [escapedPlace(cite, cascaded, "", at, null), escapedPlace(cite, cascaded, "Rasho", -1, null)], [{ at: -1, within: [] }, { at: -1, within: [] }]);
 }
 
 // ---- the values file ---------------------------------------------------------------

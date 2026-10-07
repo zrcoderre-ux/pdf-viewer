@@ -531,7 +531,8 @@ and "Ctrl+Z puts the mark back" ("See Pratt v. Smith", an unrelated edit
 undone after it too). `test-textdoc.mjs` pins `data-left`.
 
 **Every Esc is kept, by place** (`escaped`, `escapeTyped`, `escapesIn`,
-`escNote`, `escFindAgain`, `TD.withoutEscaped`, `TD.escapedPlaces`). The
+`escNote`, `escFindAgain`, `TD.withoutEscaped`; `TD.escapedPlaces`, since
+replaced by `TD.escapedPlace`: "Found again by what moved it", below). The
 change above remembered ONE dismissal, `typeDismissed`, as an offset into the
 page's text, compared by its end alone. A review measured in Chromium what
 that let through: two short cites in a row, each Esc'd — "(Jones, 30
@@ -548,8 +549,9 @@ a live `Range` over the name as typed, with the name and its key value. The
 browser carries a Range with its text node — text typed earlier in the node,
 a mark cut out beside it, `normalize` merging nodes — so typing elsewhere moves
 nothing it does not move. Text typed against the name's front grows the Range
-over it ("See Jones"), and `escState` cuts it back where what was added ends at
-a word boundary; letters typed into the name, or deleted from it, leave no
+over it ("See Jones"), and `escState` cuts it back (where what was added ends
+at a word boundary, as first written; glued or not since "Found again by what
+moved it" below); letters typed into the name, or deleted from it, leave no
 Esc'd name there ("gone"), and the prompt offers it afresh. What takes the
 nodes away — Enter, Backspace and Delete moving lines (`enterAtCaret`,
 `backspaceAtCaret`), a paste laying lines (`insertLinesAtCaret`), a rebuild
@@ -558,13 +560,15 @@ notes each name's place in the page's DISK text (`escNote`); a rebuild that
 writes names before it carries the place with the text (the save's forward
 pass hands `buildBody` its `placeAfterSwaps`). A name whose nodes went is
 found again there: exactly, after a rebuild or a print or screenshot put back
-(`escFindAgain`), else at the nearest whole-word occurrence of the name
-(`TD.escapedPlaces`), passing over places another Esc'd name holds. Nearest,
-with no limit, because the two errors are not alike: an occurrence wrongly
-taken for the Esc'd one is a name left as typed — orange, named in red by the
-save — while the Esc'd one missed is written as its pseudonym, which in a short
-cite is a renamed authority. A name not found is kept, its place noted, in
-case the text comes back (an undo). The converter skips a hit whose node and offsets are an Esc'd
+(`escFindAgain`), else — as this paragraph was first written — at the nearest
+whole-word occurrence of the name anywhere on the page (`TD.escapedPlaces`),
+passing over places another Esc'd name holds, nearest with no limit, and a
+name not found was kept, its place noted, for any later occurrence. Both
+halves of that were wrong (Enter's collapsed Range read as typed over, and a
+deleted name taking the next one typed), and "Found again by what moved it",
+below, replaces them: the reader moves a name with its node, the browser's
+edits are settled one at a time, and a name is looked for only in the text
+the edit that took its node wrote. The converter skips a hit whose node and offsets are an Esc'd
 Range's exactly; the save reads every Esc'd name into the disk text as a pair
 of `serializeHeld` points and leaves out of `TD.typedSpans`' answer the typed
 spans that are EXACTLY one of them (`TD.withoutEscaped`) — a longer name ending
@@ -583,7 +587,129 @@ the same Jones moved by a cascade beside a Jones typed as this case's party
 over (offered again). Passing before and after: a print and a screenshot
 between the Esc and the save, and a save that rebuilt the line for a typed
 name before it, then a second save. `test-textdoc.mjs` pins `withoutEscaped`
-and `escapedPlaces`.
+and `escapedPlaces` (now `escapedPlace`, below).
+
+**Found again by what moved it, and nowhere else** (`escHold`, `escCutAt`,
+`escCarry`, `escSeen`, `escapesIn`'s `after`, `TD.escapedPlace`). The final
+review of the paragraph above measured two ways it still failed, in opposite
+directions, on b6d82a6 (and the first on c528313 and main too):
+
+- *Enter, or a two-line paste, at the head of the Esc'd short cite's own line
+  renamed it.* `enterAtCaret` and `insertLinesAtCaret` take the text after
+  the caret with `extractContents`, which CLONES the text node the caret
+  stands in for the text after it and leaves the original the text before:
+  the name's Range, in that original, was clamped to {0,0}, `escState` read
+  "" there as the name typed over ("gone"), and the entry was dropped. The
+  converter then marked "Jones" and the save wrote "(Pratt, 30 Cal.App.5th at
+  p. 5.)" under a plain "Saved Doc.txt" — at the head of the line, with the
+  caret between "Nothing else." and the cite, and with "Smith was served."
+  and a line break pasted there — while the User Guide said the name went
+  with its text through Enter.
+- *A deleted Esc'd name took the next one typed, anywhere.* Its line selected
+  (Shift+Home) and deleted with Backspace or Ctrl+X, the node went, the entry
+  read "lost", and `TD.escapedPlaces` took the nearest "Jones" on the page,
+  with no limit, whenever one appeared: "Jones was served." typed on line 1
+  as this case's party was offered nothing, the converter skipped it, and the
+  save wrote it into the file as itself, saying it "stands in the file as it
+  did". c528313 and main offered the prompt and wrote "Pratt was served."
+
+Now each way a name's nodes go is followed by what took them:
+
+- The reader's own line moves carry the name by its NODE. `extractContents`
+  moves a node it holds whole — the same node, into the line it is put in —
+  but a live Range on it collapses the moment the node leaves its parent. So
+  before the move `escHold` holds each live name's text node and its offset
+  in it, and where the page has Esc'd names `escCutAt` splits the caret's
+  text node at the caret first (a name held in its second half is held in
+  the new node) and starts the extraction between nodes, so everything after
+  the caret moves whole. After the move and the dressing (`dressBody`,
+  `fixGutterSpacing`) `escCarry` finds each name in its node: where the
+  node's text begins in the disk text (`serializeMapped`'s `at`) plus the
+  offset, which holds even where `dressColumns` split the node into a column
+  cell, since the halves stand together in the text. `enterAtCaret`,
+  `insertLinesAtCaret` and `joinLineUp` (Backspace at a line's start, Delete
+  at its end) all do this. A page with no Esc'd name is not cut: its moves
+  extract exactly as before.
+- The browser's own edits are settled ONE AT A TIME. `beforeinput` notes
+  every name's place and the page's disk text (`escNote`, `escSeen`, marked
+  `noted`), and so do the cut handler and the paste handler before their
+  `execCommand`, which asks no `beforeinput`; the `input` event that follows
+  settles them (`escapesIn(body, { after: "edit" })`) before anything else
+  reads the page. A name whose node the edit took is asked of
+  `TD.escapedPlace`, which compares the text before and after by the head and
+  tail they share: a name wholly in what the edit left alone is the same
+  characters, at its place moved by what was written before it; a name the
+  edit reached was written over or taken out — deleted with its line, cut,
+  typed over, a letter glued to it — and the entry goes with it. A cross-line
+  delete on a page with no numbers, where Chrome rebuilds the second line's
+  rest into the first, leaves the name in the shared tail, and it is carried.
+- Anything else that takes a node without a note (nothing known does; a
+  script moving one stands in for it) is asked the same question, but cannot
+  tell a move from a deletion: where the change reached the name, EVERY
+  whole-word occurrence of it in the text changed since the note is left as
+  typed, each its own entry marked `unsure` (so is a reader move whose node
+  did not carry the name), and the save adds to its red warning that the
+  name was left as typed in N places because an edit moved it where the
+  reader could not follow — check each, retype one that is this case's own
+  and it is offered again. Where the changed text holds none, the name is
+  gone. That is the direction the project ranks right: a name left as typed
+  is a leak the save names, the party of a short cite written as its
+  pseudonym a renamed authority.
+
+`TD.escapedPlace` is bounded by the edit: an occurrence the edit did not
+write is one the operator never pressed Esc on, however near, and it is never
+taken for the Esc'd one. That holds because the settling is per edit — two
+edits read as one (the deletion, then "Jones" typed on line 1) would span the
+text between them, which is why the `input` event settles each before the next
+can come. Each pass of `escapesIn` notes the live names' places afresh in the
+text as it stands, so a name whose cells were laid again (`recolumnSoon`: the
+nodes went, the text did not) is found at its place exactly, and a place
+whose name the converter marked beside it moves by the mark's length.
+
+Reading the names after every keystroke showed what reading them only when a
+pause or a save asked had hidden: "See " typed before an Esc'd "Jones" passes
+through "SJones", which `escState` read as the name typed over, and the save
+wrote "See Pratt, 30 Cal.App.5th at p. 5." (`escmore.mjs` of the earlier
+review). A Range grown by typing against its front is now cut back to the
+name whether or not what was added ends at a word boundary: the same letters
+at the same place are the name Esc was pressed on, and a hit the converter or
+the save reads there is only ever the whole word (typing glued to its end
+never grew the Range: the DOM moves a Range's end only past an insertion
+strictly inside it).
+
+Measured in Chromium. Failing on b6d82a6 and passing after: the review's
+three Enter and paste cases (`esc-enter2.mjs`, `esc-enter.mjs`,
+`esc-paste.mjs`) — the file keeps "(Jones, …)" and names it in red; the
+line selected and deleted or cut, then "Jones" typed on line 1
+(`esc-lost3.mjs` Backspace and Ctrl+X, `esc-lost.mjs` line-select-backspace
+and cut) — offered "Pratt" and written as it, under a plain "Saved"; Enter
+with the caret on the name's first letter; two Esc'd cites on one line with
+Enter between them, then at the head of the page ("(Corbin, 31 …)" before);
+Enter at the head of the cite's line on a page with no numbers, then a
+selection from line 1 into line 2 deleted (Chrome merges the lines); three
+lines pasted into the middle of the cite's line before it; Enter, Ctrl+Z,
+Ctrl+Y. A node moved by script with "Jones was served." typed on the last
+line keeps the cite's "Jones" and writes the party as "Pratt" both before
+and after, and now the toast says the Esc could not be followed (before, the
+nearest occurrence was taken, saying nothing). Passing before and after:
+Backspace and Delete joins of the cite's line (`esc-key.mjs`, `esc-del.mjs`),
+the other deletions of `esc-lost.mjs` and `esc-lost2.mjs`, Enter inside the
+name (the halves are no name; "Jones" typed after is offered), Ctrl+X of
+words before the name on its line, a deletion of its line undone, a cite
+on a line laid in columns with Enter above it, and, on a page with no
+numbers, a selection from line 1 into the cite's line deleted (the cite's
+line merged up, then "Jones" typed below written as "Pratt"). The earlier reviews' scripts
+(`escmore.mjs`, `escmore2.mjs`, `more.mjs`, `during.mjs`, and a37's
+`attack.mjs`, `attack2.mjs`, `checks.mjs`, `fakes.mjs`, `undo-more.mjs`,
+`x1b.mjs`, `x2.mjs`, `x2b.mjs`) give the same output as on b6d82a6, "See "
+typed before the name included once `escState` was changed as above.
+`test-textdoc.mjs` pins `escapedPlace`.
+
+Left as it is: an Esc'd name cut and pasted elsewhere is a deletion and then a
+name typed — the clipboard carries no Esc — so it is offered at the paste and
+marked by the converter, as on main. An `unsure` place is left as typed until
+it is retyped; Esc cannot be taken back at it, since the prompt does not show
+on an Esc'd place.
 
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each
