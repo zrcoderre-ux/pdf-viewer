@@ -40,7 +40,10 @@ with its fake in the layer's type, under the redaction boxes. A sheet whose
 layer does not stand over its bitmap (`layerOnSheet`: the same box, and the
 quarter turn pdf.js asked for, see Design Notes/Redaction.md) has names that
 cannot be placed, so it is covered whole (`whole`), saying why, and the toast
-counts it (`shotLeftOut`) rather than say only "in their pseudonyms". Put
+counts it (`shotLeftOut`) rather than say only "in their pseudonyms". A name
+the key holds only an instruction for is covered with `WITHHELD`, on the pages,
+in the chrome and over the PDF alike (`egressSwaps`, under **A control word in
+the key's Replacement cell** below), and the toast names it (`shotWithheld`). Put
 back: each node's own text, `afterTextChange()`, and the underlines at once. While
 `shotPut` is set, `beforeinput` on the pages is refused and the reel hangs
 nothing above. Hosted, the fakes go on only once the screen share is granted
@@ -48,7 +51,9 @@ nothing above. Hosted, the fakes go on only once the screen share is granted
 given up after five seconds, so the fakes never stay on.
 
 **🖨 Print and a page swapped for its PDF page.** `fakesForPrint` runs every
-page body forward and shows the pseudonyms, and the print is the display — in
+page body forward (`egressText`: a name the key holds only an instruction for
+printed as `WITHHELD`, and named in a toast once the dialog closes) and shows
+the pseudonyms, and the print is the display — in
 which a swapped page's body is hidden (`.tpage.swapped .page-body`) and its
 `.pdf-inline` sheet, the unscrubbed filing, is not. So a page shown through ⇄
 PDF printed "Helen Rasho … Quillmark Holdings" in a printout that had faked
@@ -106,8 +111,9 @@ selection's offsets in its `pre`, by `Range.toString()`, and goes whole if
 the sheet is a beat behind the text. Undecided names standing in the clear
 are faked (the screenshot's rule, not the save's, which leaves them for the
 walk): the clipboard leaves the room. A name the key holds only an
-instruction for (no fake) goes as it stands and the toast names it
-(`unfakedIn`, asked only when `keyHasInstructions`). A cut follows the
+instruction for (no fake) went as it stands, with a toast naming it after it
+had left; it is withheld now, as in the print and the screenshot
+(`egressSwaps`, and the toast names it from the swaps' `withheld`). A cut follows the
 browser's own: read-only, it does nothing at all (Chrome writes no clipboard
 there); in ✎ Edit the selection must begin in an editable page, the faked
 text goes on the clipboard and `execCommand("delete")` takes the selection
@@ -391,7 +397,8 @@ the case read as a party. Every cell is now read as PDF-Linker reads it back
 for the reader's own text (`_pn_key_reverse_pairs`, whose `control()` is the
 twin of `keyCellKind`) and applies it (`_pn_load_key`). A whole-value keep —
 "no"/"n"/"never", or a keep-spec whose kept parts are the whole value
-(`_pn_bracket_keep` → []) — is dropped as before. Any other instruction —
+(`_pn_bracket_keep` → []) — is dropped as before, except on an e-mail address
+or a website (below). Any other instruction —
 "yes"/"y", "phrase", a cell opening with ~ * = #, one wrapped whole in ( ),
 [ ] or { }, and any cell carrying a [kept] or {kept} part (a keep-spec of PART
 of the value, which PDF-Linker reads as keep-that, fake-the-rest; the old rule
@@ -464,6 +471,67 @@ standalone "n" turned into that row's real value, a "(n)" subdivision
 included, in the PDF's own text layer. The reader cannot mend that from its
 side; reading "n" as a pseudonym again would only put the same word on
 screen.
+
+Three gaps were left by that change, found by a review of it, and closed:
+
+- **What leaves the room withholds such a name** (`egressSwaps`,
+  `egressText`, `WITHHELD`). The print, the screenshot (its pages,
+  `swapChrome`, `pdfNamesOn`) and a copy off the pages run the forward matcher
+  to show every bound real as its fake, and `compileForward` maps an
+  instruction's real to nothing, so it went out exactly as it stood: a print
+  of "Dana Okafor" holding "phrase" put "Dana Okafor" on paper, where the build
+  before had printed "Phrase" — rubbish, but no name, as "Yes", "#Name?" and
+  "Alder {Law}" were. ("~Rasho" and "*Rasho" had printed a real spelling all
+  along.) Nor did those passes take the save's spare, so a name holding an
+  instruction wrapped down a caption's column, with its last word bound on its
+  own, printed half faked: "…and Jonathan" / "Avery Smith Cascadia, an", the
+  name half scrubbed that reads as finished. And a copy did the same under a
+  toast saying the name went "as it stands". These passes, and only these,
+  now spare every standing name with no fake (`standingSpans`, the column's
+  pieces with it) and lay `WITHHELD` — five full blocks — on its first piece
+  and nothing on the rest, as a fake that does not divide by words is dealt
+  out; the toast after a print, a screenshot or a copy names each with what
+  the key holds for it. The cover reads as no name, no key row reverses it,
+  and it opens with no control mark: "[name withheld]" was the first thought,
+  and pasted into a LEAKS answer or the key it is a keep-spec. It is the same
+  five blocks whatever it covers, where a run the length of the name would
+  give the length away. The SAVE never takes it — a file says what the case
+  says, and the save refuses such a name by name (`instructionNote`) — and
+  neither does the redacted copy's NAME, which never needed it:
+  `RD.scrubbedStem` checks the faked stem against `PK.boundRows`, instruction
+  rows included, and names a copy "document <hash> (redacted).pdf" wherever
+  one still stands. The cost is one `standingSpans` a page in those passes,
+  asked only where the key holds an instruction at all (`keyHasInstructions`):
+  Ctrl+A over 200 pleading pages (700 KB, three names on every line) copies in
+  131 ms under a key of pseudonyms only and 152 ms under one holding
+  instructions.
+  Checked in Chromium on the build before (the print, the column print, a
+  copy of each, and a screenshot's pages, Find box and PDF pane all carried
+  the names, the column half faked) and after (none did).
+- **A possessive holding an instruction binds the bare name** (`parseKey`'s
+  derived rows). "Rashoe's" over "~Rasho's" derived nothing, so "Rashoe"
+  standing alone was bound nowhere: not marked, not refused, not named as
+  unreviewed, and a save wrote it without a word — while a key kept in the
+  library from before still derived and marked it (`warnRows` re-reading the
+  derived "~Rasho" as an instruction), one workbook answering two ways. The
+  bare row is derived with no fake and the possessive's `control`, unless the
+  key binds the bare name itself; it owns no fake, so reversal is untouched.
+- **A keep on an e-mail address or a website is no keep** (`PK.contactValue`,
+  `_pn_contact_value`'s port). Every e-mail address and every website not
+  ending in .gov is faked at the owner's direction, and `_pn_load_key` asks
+  that of the real before reading a keep: "no", "n", "never" or a keep-spec
+  there is "not honoured", the row is dropped and the run fakes the value
+  afresh. Read here as a keep, the row was dropped and the address went
+  unmarked into a save — and "n", a pseudonym to the parse before the cells
+  were classified (and so a marked value), became a keep that unmarked it. A
+  keep on such a value is now an instruction: marked, refused, named in the
+  bar. The port carries PDF-Linker's lists (`_PN_PUBLIC_EMAILS`,
+  `_PN_URL_WHITELIST`, `_PN_PUBLIC_HOSTS`), the url detector's dotted branches,
+  the spellings with a dot missing (`_pn_url_dotless_parts`), an address's
+  host with its dot lost before "com", and `_pn_url_fragmentary`; run against
+  `_pn_contact_value` itself on 6,000 generated values and the test's own, it
+  answered alike on every one. It is asked only of a cell that is a keep, so
+  a key of thousands of pseudonyms never reaches it.
 
 **Taking a value off the Master Keep** (`withdrawMaster`): a value the master
 workbook (`Master Leaks.xlsx`, its KEEP sheet) keeps is left alone in every

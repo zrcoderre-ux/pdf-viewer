@@ -716,7 +716,11 @@ $("print-btn").addEventListener("click", () => window.print());
 const PRINT_WIDTH_PX = 700;
 let printPut = null; // while a print is being prepared: how the pages go back
 
-/** Every real name the key binds shown as its pseudonym, for the printout only. */
+/**
+ * Every real name the key binds shown as its pseudonym, for the printout only
+ * — and one the key holds only an instruction for WITHHELD (egressSwaps), its
+ * place covered, never printed as it stands.
+ */
 function fakesForPrint() {
   if (!doc || printPut) return; // a dialog over another: the first put-back stands
   const bodies = pageBodies();
@@ -724,17 +728,20 @@ function fakesForPrint() {
   // built from, which the rebuild below replaces: left at the faked text, every
   // name the print faked read as TYPED afterwards (the converter's measure,
   // and the save's), to be marked and written as its pseudonym unreviewed.
-  const was = { html: bodies.map((b) => b.innerHTML), built: bodies.map((b) => b.__built), fakes: document.body.classList.contains("show-fakes") };
+  const was = { html: bodies.map((b) => b.innerHTML), built: bodies.map((b) => b.__built), fakes: document.body.classList.contains("show-fakes"), withheld: [] };
   let moved = false;
   if (fwd && fwd.rx) {
     during("scrubbing the pages for print", () => {
+      const withheld = new Set();
       for (const body of bodies) {
         const { text, held, pns } = TD.serializeHeld(body);
-        const fw = forwardText(text, held, pns);
+        const fw = egressText(text, held, pns);
         if (!fw.swaps) continue;
+        for (const v of withheldIn(fw.places)) withheld.add(v);
         buildBody(body, fw.text, pageIndexOf(body));
         moved = true;
       }
+      was.withheld = [...withheld];
     });
   }
   if (!settings.showFakes) {
@@ -756,6 +763,12 @@ function pagesBackAfterPrint() {
   pageBodies().forEach((b, i) => { if (was.html[i] != null) { b.innerHTML = was.html[i]; b.__built = was.built[i]; } });
   document.body.classList.toggle("show-fakes", was.fakes);
   afterTextChange(); // the marks and the underlines are ranges into the old nodes
+  // A printout is not looked at in the dialog's small preview, and a name it
+  // left out is one the operator wanted faked: said once the dialog is gone.
+  if (was.withheld.length) {
+    const one = was.withheld.length === 1;
+    toast(`Printed in the pseudonyms — except ${withheldList(was.withheld)}, printed as ${WITHHELD}: the key holds an instruction for ${one ? "it" : "them"}, not a pseudonym, until PDF-Linker's next full run.`, { error: true });
+  }
 }
 
 // The sheets keep their screen width in print, so nothing re-wraps, and the
@@ -919,6 +932,7 @@ async function shareThisTab() {
 
 let shotPut = null; // while a screenshot is being taken: how the screen goes back
 let shotLeftOut = 0; // …and how many PDF pages it left out whole (pdfNamesOn), for the toast
+let shotWithheld = new Set(); // …and the names it covered with WITHHELD (egressSwaps), for the toast
 
 /** An element within `margin` screens of the window, above or below. */
 function nearWindow(rect, margin) {
@@ -991,13 +1005,16 @@ function swapChrome(root, edits, fields) {
   const nodes = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
   for (const n of nodes) {
-    const swaps = forwardSwaps(n.data);
-    if (swaps.length) swapInNodes([{ node: n, start: 0, end: n.data.length }], swaps, edits);
+    const swaps = egressSwaps(n.data);
+    if (!swaps.length) continue;
+    swapInNodes([{ node: n, start: 0, end: n.data.length }], swaps, edits);
+    for (const v of withheldIn(swaps)) shotWithheld.add(v);
   }
   for (const el of root.querySelectorAll("input, textarea")) {
     if (!(el.tagName === "TEXTAREA" || el.type === "text" || el.type === "search") || !el.value || el.closest("[hidden]")) continue;
-    const fw = forwardText(el.value);
+    const fw = egressText(el.value);
     if (!fw.swaps) continue;
+    for (const v of withheldIn(fw.places)) shotWithheld.add(v);
     fields.push([el, el.value, fw.text]);
     el.value = fw.text;
   }
@@ -1016,8 +1033,11 @@ function pdfNamesOn(sheet) {
   const spans = layer ? layer.querySelectorAll("span") : [];
   if (!spans.length) return null;
   const { text, map } = RD.pageTextFromSpans(RD.measureSpans(layer));
-  const swaps = forwardSwaps(text);
+  // A name the key holds only an instruction for is covered with WITHHELD
+  // (egressSwaps), as on the pages beside it.
+  const swaps = egressSwaps(text);
   if (!swaps.length) return null;
+  for (const v of withheldIn(swaps)) shotWithheld.add(v);
   // Names that are there, and words that do not stand over the picture: a
   // cover placed by the layer would go where the layer is, and the name would
   // stay in the picture under a toast saying it was in its pseudonym. The
@@ -1100,6 +1120,7 @@ function coverPdfNames({ sheet, names, whole = false }) {
 function fakesForShot() {
   hideTip();
   if (!key || shotPut) return () => {};
+  shotWithheld = new Set();
   // The Pages tab's pictures are pictures: no fake reaches into one, so they
   // are blurred for the shot.
   document.body.classList.add("shot-taking");
@@ -1121,9 +1142,12 @@ function fakesForShot() {
     }
     if (fwd && fwd.rx) {
       // The names the marks show, read as the save reads them: the disk text,
-      // its fakes and spot keeps blanked, put back through its text nodes.
+      // its fakes and spot keeps blanked, put back through its text nodes —
+      // and one the key holds only an instruction for covered (egressSwaps).
       const disk = TD.serializeHeld(body, { mapped: true });
-      swapInNodes(disk.segs, forwardSwaps(disk.text, disk.held, disk.pns), edits);
+      const swaps = egressSwaps(disk.text, disk.held, disk.pns);
+      swapInNodes(disk.segs, swaps, edits);
+      for (const v of withheldIn(swaps)) shotWithheld.add(v);
     }
   }
   document.body.classList.add("show-fakes");
@@ -1200,8 +1224,11 @@ $("shot-btn").addEventListener("click", async (e) => {
     }
     if (!blob) { toast("This browser cannot take a screenshot of the page.", { error: true }); return; }
     saveShot(blob);
+    const held = [...shotWithheld];
     toast(!key ? "Screenshot saved to Downloads."
-      : `Screenshot saved to Downloads, the names in their pseudonyms${shotLeftOut ? ` — and ${shotLeftOut} PDF page${shotLeftOut === 1 ? "" : "s"} left out of it, whose names could not be placed to be covered` : ""}.`);
+      : `Screenshot saved to Downloads, the names in their pseudonyms${shotLeftOut ? ` — and ${shotLeftOut} PDF page${shotLeftOut === 1 ? "" : "s"} left out of it, whose names could not be placed to be covered` : ""}`
+        + (held.length ? `${shotLeftOut ? ";" : " —"} ${withheldList(held)} covered with ${WITHHELD}: the key holds an instruction for ${held.length === 1 ? "it" : "them"}, not a pseudonym.` : "."),
+      held.length ? { error: true } : undefined);
   } catch (err) {
     if (err && err.name === "NotAllowedError") return; // the share was declined
     toast(`The screenshot failed: ${(err && err.message) || err}`, { error: true });
@@ -1245,8 +1272,13 @@ $("shot-btn").addEventListener("click", async (e) => {
 // it copies as it did: that is how a page is transcribed by hand.
 //
 // A name the key holds only an INSTRUCTION for ("~Rasho", PK.keyCellKind) has
-// no fake to write: it goes as it stands, as it stands in the file, and the
-// toast names it rather than let a passage faked all round it pass for done.
+// no fake to write. It went as it stood, with a toast naming it — the
+// clipboard's next stop being the drafting model, the toast came after the
+// name had already left — and, the save's spare not reaching this pass, a
+// name holding one wrapped down a caption's column went half faked ("Jonathan
+// / Avery Smith Cascadia") under a toast saying it went as it stood. It is
+// WITHHELD now, as in the print and the screenshot (egressSwaps): the place
+// covered, the name whole behind it, and the toast names it.
 //
 // What the reader itself puts on the clipboard it can take back. A cut and a
 // paste within the pages, or a name copied off a page into Find, are the
@@ -1263,15 +1295,10 @@ $("shot-btn").addEventListener("click", async (e) => {
 // worksheet as the value to fake a name WITH.
 let lastCopy = null; // { faked, real, shown, key }: what this reader last put on the clipboard, and from what
 let instrMemo = { reals: null, any: false };
-/** Whether the key holds any row with an instruction and no fake (the toast's question; asked once per key). */
+/** Whether the key holds any row with an instruction and no fake (egressSwaps' question; asked once per key). */
 function keyHasInstructions() {
   if (instrMemo.reals !== reals) instrMemo = { reals, any: !!reals && [...reals.map.values()].some((w) => !w.fake) };
   return instrMemo.any;
-}
-/** The names standing in the clear between `a` and `b` that the key holds no pseudonym for. */
-function unfakedIn(text, held, pns, a, b) {
-  if (!keyHasInstructions()) return [];
-  return standingSpans(text, held, pns).filter((h) => !h.fake && h.start < b && h.end > a).map((h) => h.real);
 }
 /**
  * A page body's part of a selection: { a, b } its stretch of the disk text,
@@ -1291,14 +1318,14 @@ function copyOfBody(body, range) {
   const skip = body.classList.contains("numbered")
     ? disk.segs.filter((g) => g.node.parentElement && g.node.parentElement.closest(".gutter")).map((g) => [g.start, g.end])
     : [];
-  const swaps = fwd && fwd.rx ? forwardSwaps(disk.text, disk.held, disk.pns) : [];
+  const swaps = fwd && fwd.rx ? egressSwaps(disk.text, disk.held, disk.pns) : [];
   const spans = (pick) => disk.pnNodes.map((el, k) => ({ start: disk.pns[k][0], end: disk.pns[k][1], to: pick(el) }));
   return {
     a, b,
     faked: TD.clipText(disk.text, swaps, a, b, skip),
     real: TD.clipText(disk.text, spans((el) => el.dataset.real), a, b, skip),
     shown: TD.clipText(disk.text, spans((el) => el.textContent), a, b, skip),
-    unfaked: unfakedIn(disk.text, disk.held, disk.pns, a, b),
+    withheld: withheldIn(swaps, a, b),
   };
 }
 /** …and a page shown ⇄ Raw, whose sheet is the file's text: the same, read off that text. */
@@ -1315,9 +1342,9 @@ function copyOfRaw(sec, pre, range) {
   };
   const a = same && pre.contains(range.startContainer) ? off(range.startContainer, range.startOffset) : 0;
   const b = same && pre.contains(range.endContainer) ? off(range.endContainer, range.endOffset) : raw.text.length;
-  const swaps = fwd && fwd.rx ? forwardSwaps(raw.text, raw.held, raw.pns) : [];
+  const swaps = fwd && fwd.rx ? egressSwaps(raw.text, raw.held, raw.pns) : [];
   const shown = TD.clipText(raw.text, [], a, b);
-  return { a, b, faked: TD.clipText(raw.text, swaps, a, b), real: shown, shown, unfaked: unfakedIn(raw.text, raw.held, raw.pns, a, b) };
+  return { a, b, faked: TD.clipText(raw.text, swaps, a, b), real: shown, shown, withheld: withheldIn(swaps, a, b) };
 }
 /** What a copy of the selection carries, where it reaches the pages; null where it does not. */
 function copyOfSelection() {
@@ -1336,14 +1363,13 @@ function copyOfSelection() {
   }
   if (!parts.length) return null;
   const join = (k) => parts.map((p) => p[k]).join("\n");
-  return { faked: join("faked"), real: join("real"), shown: join("shown"), unfaked: [...new Set(parts.flatMap((p) => p.unfaked))], key };
+  return { faked: join("faked"), real: join("real"), shown: join("shown"), withheld: [...new Set(parts.flatMap((p) => p.withheld))], key };
 }
 /** A copy's own toast: where the clipboard and the screen differ, it says which the clipboard has. */
 function copyToast(c, verb) {
-  if (c.unfaked.length) {
-    const one = c.unfaked.length === 1;
-    const names = c.unfaked.slice(0, 3).map((v) => { const i = keyInstruction(v); return i ? `${v} (“${i}”)` : v; }).join(", ") + (c.unfaked.length > 3 ? "…" : "");
-    toast(`${verb} in the pseudonyms — except ${names}, which went as ${one ? "it stands" : "they stand"}: the key has no pseudonym for ${one ? "it" : "them"} to write.`, { error: true });
+  if (c.withheld.length) {
+    const one = c.withheld.length === 1;
+    toast(`${verb} in the pseudonyms — except ${withheldList(c.withheld)}, which went as ${WITHHELD}: the key holds an instruction for ${one ? "it" : "them"}, not a pseudonym to write.`, { error: true });
   } else if (c.faked !== c.shown) toast(`${verb} in the pseudonyms, as the file has it.`);
 }
 /** Our copy for a copy or cut event in the pages, written to its clipboard; null where the browser's own stands. */
@@ -1702,7 +1728,10 @@ function diskReading(text, held, pns) {
  * how the page reads.
  */
 function forwardText(text, held, pns, spare) {
-  const swaps = forwardSwaps(text, held, pns, spare);
+  return writtenWith(text, forwardSwaps(text, held, pns, spare));
+}
+/** `text` with `swaps` (forwardSwaps' places) made: { text, swaps: names written, places }. */
+function writtenWith(text, swaps) {
   let out = "", at = 0;
   for (const s of swaps) { out += text.slice(at, s.start) + s.to; at = s.end; }
   // Names, not places: a name wrapped over lines is written a piece a line.
@@ -1750,6 +1779,59 @@ function standingSpans(text, held, pns) {
   if (!reals) return [];
   const { flat, cited } = diskReading(text, held, pns);
   return PK.findRealSpans(reals, maskKept(flat, text), { layout: text }).filter((h) => !TD.insideCited(cited, h));
+}
+
+// WHAT LEAVES THE ROOM WITHHOLDS A NAME IT HAS NO PSEUDONYM FOR. The print,
+// the screenshot and a copy off the pages run every page forward so that what
+// goes out carries no real name the key binds. A value the key holds only an
+// INSTRUCTION for ("~Rasho", "phrase", "yes", "#NAME?" typed over its stand-in,
+// PK.keyCellKind) has no fake to go as, and compileForward matches it and maps
+// it to nothing — so it went out exactly as it stands. Before the cells were
+// read as instructions those passes printed "Phrase" and "#Name?" in its place,
+// rubbish and no name; read as instructions, the print put "Dana Okafor" and
+// "Gregorio Sarvinyan" on paper, in a printout that said every name was in its
+// pseudonym. And the save's spare had not reached them: a name holding an
+// instruction wrapped down a caption's column ("…and Jonathan" / "Avery Smith
+// Walker, an"), with "Walker" bound on its own, has no column hit in the
+// forward matcher, so the print read it through "Walker" alone and printed
+// "Jonathan / Avery Smith Cascadia" — the name half scrubbed that reads as
+// finished, which saveDocument had just been made to refuse.
+//
+// So these passes, and only these, spare every standing name with no fake as
+// the save does (standingSpans, the column's pieces included) and lay a COVER
+// over it: WITHHELD on its first piece and nothing on the rest, as a fake that
+// does not divide by words is dealt out. The cover is no name and reads as
+// none, no key row reverses it and it opens with no control mark, so pasted
+// into the key or a LEAKS answer it is not read as an instruction either; and
+// it is the same five blocks whatever it covers, where a run as long as the
+// name would tell the name's length. The SAVE never takes it: a file must say
+// what the case says, and the save refuses such a name by name instead
+// (instructionNote). The cost is one standingSpans per page, asked only where
+// the key holds an instruction at all (keyHasInstructions).
+const WITHHELD = "█████";
+/**
+ * forwardSwaps for what leaves the room: the same places, plus a WITHHELD
+ * cover over each name standing with no fake (`withheld`: its real value, on
+ * every piece), the rest of the pass sparing those names whole.
+ */
+function egressSwaps(text, held, pns) {
+  const bare = keyHasInstructions() ? standingSpans(text, held, pns).filter((h) => !h.fake) : [];
+  if (!bare.length) return forwardSwaps(text, held, pns);
+  const out = forwardSwaps(text, held, pns, bare.flatMap((h) => h.ranges));
+  for (const h of bare) h.ranges.forEach(([a, b], k) => out.push({ start: a, end: b, to: k ? "" : WITHHELD, piece: k, withheld: h.real }));
+  return out.sort((x, y) => x.start - y.start);
+}
+/** …and as text, the way forwardText gives it. */
+function egressText(text, held, pns) {
+  return writtenWith(text, egressSwaps(text, held, pns));
+}
+/** The names `swaps` withheld (egressSwaps), once each, in order; `a`/`b` a stretch they must reach into. */
+function withheldIn(swaps, a = -Infinity, b = Infinity) {
+  return [...new Set(swaps.filter((s) => s.withheld && s.start < b && s.end > a).map((s) => s.withheld))];
+}
+/** "Dana Okafor (“phrase”), …" — withheld names for a toast, each with what the key holds for it. */
+function withheldList(names) {
+  return names.slice(0, 3).map((v) => { const i = keyInstruction(v); return i ? `${v} (“${i}”)` : v; }).join(", ") + (names.length > 3 ? "…" : "");
 }
 /**
  * The INSTRUCTION the key holds for a real value where a pseudonym would be —

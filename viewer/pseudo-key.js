@@ -13,7 +13,8 @@
 //   parseKey        key workbook rows → the map. Columns are found by HEADER
 //                   NAME, never position (the DeAnonymize.bas rule); an
 //                   operator keep in the Replacement cell ("no", "never",
-//                   a keep-spec of the whole value) is dropped, and every
+//                   a keep-spec of the whole value) is dropped — but not on
+//                   an e-mail address or a website (contactValue) — and every
 //                   other control word there ("~V", "*V", "phrase", "(x)",
 //                   "#NAME?"…) is an instruction, not a pseudonym: its real
 //                   is still marked, never written (keyCellKind); an "alt
@@ -141,6 +142,20 @@ export function appliedSheet(sheets) {
 // certainly did not mean one): the reader writes nothing for it, the cell
 // being a keep-spec typed wrong far more often than a stand-in — and the text
 // around a mistyped bracket is usually the real value copied in.
+//
+// A KEEP ON AN E-MAIL ADDRESS OR A WEBSITE IS NO KEEP. Every e-mail address
+// and every website not ending in .gov is faked, at the owner's direction, and
+// `_pn_load_key` asks `_pn_contact_value` of the row's real before it reads a
+// keep there: "no", "n", "never" or a keep-spec on such a value is "not
+// honoured", the row is dropped and the run fakes the value afresh. Read here
+// as a keep, the row was dropped and the address with it — a leaked
+// "hrasho@quillmark-law.com" with "n" typed over its stand-in stood in the
+// export unmarked, and a save wrote it without a word, a value the next run
+// fakes. So a keep on a contact value (`contactValue`, below) is an
+// instruction like any other: marked where it stands, refused by a save,
+// nothing written for it. "n" made this worse than it was, being read as a
+// keep since the cell was first classified; "no", "never" and a whole
+// keep-spec had the same gap before that.
 const KEY_KEEP_WORDS = new Set(["no", "n", "never"]);
 const KEY_CONTROL_WORDS = new Set(["yes", "y", "phrase"]);
 const KEY_CONTROL_LEADS = "~*=#";
@@ -178,6 +193,84 @@ function keepSpecRest(real, cell) {
   }
   return work.split("\u0000").map((f) => f.replace(KEY_FRAG_EDGE_RE, "")).filter((f) => /[A-Za-z0-9]/.test(f));
 }
+
+// `_pn_contact_value`'s lists and shapes, as PDF-Linker has them: the one
+// public address a court's own form prints (`_PN_PUBLIC_EMAILS`), the
+// citation hosts its old appendix wrote (`_PN_URL_WHITELIST`, exact), the
+// court's and its ADR program's sites with their subdomains
+// (`_PN_PUBLIC_HOSTS`), and the url detector's two dotted branches — led by a
+// scheme or "www.", or a bare domain on one of its TLDs — plus the spellings
+// with a dot missing ("www kaldorlaw com", `_PN_URL_DOTLESS`), read off the
+// parse PDF-Linker folds them with. A key cell is short and only a keep is
+// asked, so none of it is near a matcher.
+const CONTACT_PUBLIC_EMAILS = new Set(["adrcivil@lacourt.ca.gov"]);
+const CONTACT_URL_WHITELIST = new Set(["leginfo.legislature.ca.gov", "law.cornell.edu", "scholar.google.com", "google.com"]);
+const CONTACT_PUBLIC_HOSTS = ["lacourt.org", "resolvelawla.com"];
+const CONTACT_EMAIL_HOST_RE = /^[A-Za-z0-9.\-_]+\.[A-Za-z]{2,}$/;
+const CONTACT_EMAIL_COM_RE = /^([A-Za-z0-9][A-Za-z0-9-]*?),?(com|COM)$/;
+const CONTACT_URL_LED_RE = /^(?:https?:\/\/|www\.)[^\s<>()"'‘’“”]*[^\s<>()"'‘’“”.,;:!?]$/i;
+const CONTACT_URL_BARE_RE = /^[A-Za-z0-9][\w-]*(?:\.[\w-]+)*\.(?:com|net|org|law|gov|mil|edu|us|biz|info)\b(?:\/[^\s<>()"'‘’“”.,;:!?]*)?$/i;
+const CONTACT_URL_DOTLESS_RE = /^(https?:\/\/)?(?:(www)(\.|[ \t]|,[ \t]?|))?([A-Za-z0-9][A-Za-z0-9-]*?)(\.|[ \t]|,[ \t]?|)(com|net|org|law|edu|us|biz|info)(\/[^\s<>()"'‘’“”]*[^\s<>()"'‘’“”.,;:!?])?$/i;
+const CONTACT_SEP_RE = /^(?:[ \t]|,[ \t]?)$/;
+/** `_pn_url_dotless_parts`: { host, tld } of an address printed with a dot missing, or null (a fully dotted one included). */
+function dotlessUrl(v) {
+  const m = CONTACT_URL_DOTLESS_RE.exec(v);
+  if (!m) return null;
+  const [, , www, ws = "", host, ts = "", tld] = m;
+  if (www && ws === "." && ts === ".") return null;
+  const com = tld === "com" || tld === "COM"; // never "Com", a citation's abbreviation
+  const sepOrNone = ts === "" || CONTACT_SEP_RE.test(ts);
+  const shape = www
+    ? (ws === "." ? sepOrNone && com : ts === "." || (sepOrNone && com))
+    // No "www": a host with a letter in it, a separator, and "com" — a
+    // letterhead's line, which a key cell is the whole of.
+    : CONTACT_SEP_RE.test(ts) && com && host.length > 1 && /[A-Za-z]/.test(host) && /[A-Za-z0-9]$/.test(host) && host.toLowerCase() !== "dot";
+  return shape ? { host, tld } : null;
+}
+/**
+ * `_pn_contact_value`: "e-mail address" for an address (not the public one),
+ * "website" for a URL or bare domain whose host is not .gov or listed and that
+ * names a host at all (not `_pn_url_fragmentary`), else "".
+ */
+export function contactValue(value) {
+  const v = String(value == null ? "" : value).split(/\s+/).filter(Boolean).join(" ");
+  if (!v) return "";
+  const at = v.indexOf("@");
+  if (at !== -1 && at === v.lastIndexOf("@")) {
+    let h = v.slice(at + 1).replace(/\s+/g, "");
+    if (h.indexOf(".") === -1) { const m = CONTACT_EMAIL_COM_RE.exec(h); if (m) h = m[1] + "." + m[2]; }
+    if (v.slice(0, at).trim() && CONTACT_EMAIL_HOST_RE.test(h)) {
+      return CONTACT_PUBLIC_EMAILS.has(v.normalize("NFKC").replace(/\s+/g, "").toLowerCase()) ? "" : "e-mail address";
+    }
+  }
+  const dotless = dotlessUrl(v);
+  if (!dotless && !CONTACT_URL_LED_RE.test(v) && !CONTACT_URL_BARE_RE.test(v)) return "";
+  // `_pn_url_host`: the scheme, "www." and any path gone, and what the match
+  // carried after the host.
+  let host;
+  if (dotless) host = (dotless.host + "." + dotless.tld).toLowerCase();
+  else {
+    const m = /^(?:https?:\/\/)?(?:www\.)?([^/\s?#]+)/i.exec(v);
+    host = (m ? m[1] : v).toLowerCase().replace(/[^\w]+$/, "");
+  }
+  // `_pn_url_fragmentary`: a head naming no host ("http://www", a bare "www").
+  const dot = host.lastIndexOf(".");
+  const registrable = dot !== -1 && /[^.]/.test(host.slice(0, dot)) && /^[a-z]{2,}$/.test(host.slice(dot + 1));
+  if (!registrable) {
+    const lead = /^(https?:\/\/)?(www\.)?/i.exec(v);
+    const named = /^[^/\s?#]*/.exec(v.slice(lead[0].length))[0];
+    const anchored = !!(lead[1] || lead[2]) && /[A-Za-z0-9]/.test(named) && (!!lead[2] || !/^w{1,3}$/i.test(named));
+    if (!anchored) return "";
+  }
+  // `_pn_url_whitelisted`: .gov alone, the listed hosts exactly, the public
+  // form's sites with their subdomains.
+  if (host === "gov" || host.endsWith(".gov") || CONTACT_URL_WHITELIST.has(host)) return "";
+  if (CONTACT_PUBLIC_HOSTS.some((p) => host === p || host.endsWith("." + p))) return "";
+  return "website";
+}
+/** A keep, unless `real` is a value no keep is honoured on (contactValue): then an instruction. */
+const keepOn = (real) => (contactValue(real) ? "control" : "keep");
+
 /** What a Replacement cell is to the row whose Real Value is `real`: "keep", "control" or "fake" ("" for an empty cell). */
 export function keyCellKind(cell, real) {
   const t = trim(cell);
@@ -188,12 +281,12 @@ export function keyCellKind(cell, real) {
   // row of a key — asked first, so a key of thousands costs a test a row.
   if (t.length <= 6) {
     const f = t.toLowerCase();
-    if (KEY_KEEP_WORDS.has(f)) return "keep";
+    if (KEY_KEEP_WORDS.has(f)) return keepOn(real);
     if (KEY_CONTROL_WORDS.has(f)) return "control";
   }
   if (!KEY_BRACKET_RE.test(t)) return "fake";
   const rest = keepSpecRest(real, t);
-  if (rest) return rest.length ? "control" : "keep";
+  if (rest) return rest.length ? "control" : keepOn(real);
   if (t.length > 1 && KEY_WRAPS[t[0]] === t[t.length - 1]) return "control";
   return KEY_HAS_KEEP_PART_RE.test(t) ? "control" : "fake";
 }
@@ -261,15 +354,26 @@ export function parseKey(sheets, name) {
   // A row bound in the POSSESSIVE binds the bare name too: "Zachary's ->
   // John's" means Zachary IS John, so a derived base row is added unless the
   // key already carries one.
+  //
+  // …and so does one holding an INSTRUCTION ("Rashoe's" over "~Rasho's"): the
+  // bare name is the same value, with no fake either, and the row carries the
+  // instruction it came from. Skipped, as it was when the cells were first
+  // classified, "Rashoe" standing on its own was bound nowhere: not marked,
+  // not refused, not named as unreviewed, and a save wrote it without a word
+  // — while a key kept in the library from before (warnRows) still derived
+  // and marked it, one workbook answering two ways. It owns no fake (`byFake`
+  // passes over it), so nothing of reversal moves.
   const haveReal = new Set(entries.map((e) => fold(e.real)));
   const derived = [];
   for (const e of entries) {
-    if (e.control || !POSS_TAIL_RE.test(e.real)) continue;
+    if (!POSS_TAIL_RE.test(e.real)) continue;
     const baseReal = e.real.replace(POSS_TAIL_RE, "");
-    const baseFake = e.fake.replace(POSS_TAIL_RE, "");
-    if (!baseReal || !baseFake || haveReal.has(fold(baseReal))) continue;
+    const baseFake = e.control ? "" : e.fake.replace(POSS_TAIL_RE, "");
+    if (!baseReal || (!e.control && !baseFake) || haveReal.has(fold(baseReal))) continue;
     haveReal.add(fold(baseReal));
-    derived.push({ real: baseReal, fake: baseFake, alt: e.alt, occ: 0, pinned: e.pinned });
+    derived.push(e.control
+      ? { real: baseReal, fake: "", control: e.control, alt: e.alt, occ: 0, pinned: e.pinned }
+      : { real: baseReal, fake: baseFake, alt: e.alt, occ: 0, pinned: e.pinned });
   }
   for (const d of derived) entries.push(d);
 

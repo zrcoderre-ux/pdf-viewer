@@ -10,7 +10,7 @@ import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, compileFakes, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
-  wordFakesOf, keyCellKind, boundRows,
+  wordFakesOf, keyCellKind, contactValue, boundRows,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -622,8 +622,62 @@ console.log("control words in the Replacement cell");
       ["Cross River Bank Tower", "", "(Cross River Bank)"], ["Odile Varnum", "", "#NAME?"],
       ["Alder Law, P.C.", "", "Alder {Law}"], ["Dana Okafor", "", "phrase"], ["Rashoe's", "", "~Rasho's"]]);
   check("the kept value binds nothing", k.warn.some((w) => w.real === "Quillon"), false);
-  check("a possessive instruction derives no bare row of its own",
-    keyOf([["person", "Zachary's", "~Zackary's", "", "leaked", "", 1]]).warn.map((w) => w.real), ["Zachary's"]);
+  // A row bound in the possessive binds the bare name too, and one holding an
+  // instruction is no exception: skipped, "Rashoe" standing on its own beside
+  // "Rashoe's" was bound nowhere — not marked, not refused, written by a save
+  // without a word — while a key kept from before still marked it.
+  const poss = keyOf([["person", "Zachary's", "~Zackary's", "", "leaked", "", 1]]);
+  check("a possessive instruction binds the bare name too, with no fake and the same instruction",
+    poss.warn.map((w) => [w.real, w.fake, w.control]), [["Zachary's", "", "~Zackary's"], ["Zachary", "", "~Zackary's"]]);
+  check("…which is marked standing on its own, and owns nothing to reverse",
+    [findRealSpans(compileReals(poss), "Zachary filed; Zachary's brief follows.").map((h) => h.matched), poss.pairs.length],
+    [["Zachary", "Zachary's"], 0]);
+  check("…and nothing is written for either",
+    forwardRuns(compileForward(poss), "Zachary filed; Zachary's brief follows.").filter((r) => r.t === "swap").length, 0);
+  check("…nor derived where the key already binds the bare name",
+    keyOf([["person", "Zachary's", "~Zackary's", "", "leaked", "", 1], ["person-token", "Zachary", "Pellam", "", "replaced", "", 3]]).warn
+      .map((w) => [w.real, w.fake, w.control || ""]),
+    [["Zachary's", "", "~Zackary's"], ["Zachary", "Pellam", ""]]);
+
+  // A KEEP ON AN E-MAIL ADDRESS OR A WEBSITE IS NOT HONOURED. `_pn_load_key`
+  // asks `_pn_contact_value` of the real first: "no", "n", "never" or a
+  // keep-spec there drops the row and the run fakes the value afresh. Read as
+  // a keep, the reader dropped it too, and a leaked address stood unmarked and
+  // was saved without a word.
+  check("a keep on an e-mail address or a website other than .gov is an instruction",
+    [keyCellKind("n", "hrasho@quillmark-law.com"), keyCellKind("no", "www.quillmark-law.com"),
+      keyCellKind("never", "https://quillmark-law.com/team"), keyCellKind("[hrasho@quillmark-law.com]", "hrasho@quillmark-law.com"),
+      keyCellKind("no", "quillmark-law.com"), keyCellKind("no", "clerk@courts.ca.gov"), keyCellKind("No", "mail.google.com")],
+    ["control", "control", "control", "control", "control", "control", "control"]);
+  check("…a .gov site, a listed host and the court form's own address stay keeps",
+    [keyCellKind("no", "www.courts.ca.gov"), keyCellKind("n", "https://leginfo.legislature.ca.gov/faces"),
+      keyCellKind("never", "scholar.google.com"), keyCellKind("no", "www.lacourt.org"), keyCellKind("no", "my.lacourt.org"),
+      keyCellKind("no", "ADRCivil@LACourt.ca.gov")],
+    ["keep", "keep", "keep", "keep", "keep", "keep"]);
+  check("…as does a head naming no host, and every keep on anything else",
+    [keyCellKind("no", "http://www"), keyCellKind("no", "https://"), keyCellKind("n", "Rashoe"), keyCellKind("no", "Marcus"),
+      keyCellKind("[Alder Law, P.C.]", "Alder Law, P.C.")],
+    ["keep", "keep", "keep", "keep", "keep"]);
+  check("…the spellings with a dot missing are websites too, never a citation's \"Com.\"",
+    [contactValue("www kaldorlaw com"), contactValue("wwwkaldorlaw.com"), contactValue("www.kaldorlawcom"), contactValue("kaldorlaw com"),
+      contactValue("Cal. Coastal Com"), contactValue("dot com")],
+    ["website", "website", "website", "website", "", ""]);
+  // (Each answer here is `_pn_contact_value`'s own, run on the same values.)
+  check("…and an address's host with its dot lost before com is still an address; one with no handle is neither",
+    [contactValue("hrasho@quillmark-lawcom"), contactValue("h rasho@quillmark-law. com"), contactValue("@quillmark-law.com"), contactValue("firm.com]")],
+    ["e-mail address", "e-mail address", "", ""]);
+  const kc = keyOf([
+    ["email", "hrasho@quillmark-law.com", "n", "", "leaked", "detector", 1],
+    ["url", "www.quillmark-law.com", "no", "", "leaked", "detector", 1],
+    ["url", "www.courts.ca.gov", "no", "", "replaced", "detector", 1],
+  ]);
+  check("…so the row is kept, marked and refused, never written; the .gov keep is dropped",
+    [kc.dropped.keeps, kc.dropped.controls, kc.warn.map((w) => [w.real, w.fake, w.control])],
+    [1, 2, [["hrasho@quillmark-law.com", "", "n"], ["www.quillmark-law.com", "", "no"]]]);
+  const kcText = "Write to hrasho@quillmark-law.com or see www.quillmark-law.com and www.courts.ca.gov today.";
+  check("…where it stands in the clear",
+    [findRealSpans(compileReals(kc), kcText).map((h) => h.matched), forwardRuns(compileForward(kc), kcText).filter((r) => r.t === "swap").length],
+    [["hrasho@quillmark-law.com", "www.quillmark-law.com"], 0]);
 
   // The save: what the verifier's sentence wrote before was "~Rasho and
   // *Rasho met #Name? at (Cross River Bank)…". Now nothing is written for any

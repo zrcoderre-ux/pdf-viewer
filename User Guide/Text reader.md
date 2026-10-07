@@ -217,7 +217,10 @@ app, which routes it to the reader tab.
   every page — the values kept for the case and the spot keeps left exactly as
   they read — and then the pseudonyms on show, whichever way *Show fakes*
   sits. Paper and PDF carry the scrubbed copy without anyone having to
-  remember. **A page shown as its PDF page prints its text.** ⇄ PDF (and ⊘
+  remember. A name the key has no pseudonym for yet — an instruction such as
+  `~Rasho` or `phrase` typed over its stand-in in the key — is printed as
+  █████, the whole name behind it, and a message once the dialog closes names
+  it. **A page shown as its PDF page prints its text.** ⇄ PDF (and ⊘
   Did not OCR, which turns the page to its PDF page) shows the filing, which
   nothing scrubbed, so a print puts the page's own text back in its place —
   run through the key like every other page, fitted to the paper — and the PDF
@@ -234,7 +237,9 @@ app, which routes it to the reader tab.
   the capture every real name the key binds that is on screen is shown as
   its fake — on the pages (names the run missed included), in the bars and
   panels, in the Find box, and over the PDF in the pane, where each name is
-  covered with its fake. The values kept for the case, the spot keeps and the
+  covered with its fake. A name the key holds only an instruction for is
+  covered with █████ in all of those places, and the message after the
+  picture names it. The values kept for the case, the spot keeps and the
   parties of cited decisions read as they stand, as in the print. The screen
   goes back the moment the picture is taken; nothing is written. A PDF page
   with no text (a scan) cannot be read for names and keeps them. A PDF page
@@ -256,7 +261,7 @@ app, which routes it to the reader tab.
   selection across pages comes away with a line break between them, and
   without the margin numbers. A toast says the copy is in the pseudonyms,
   and names any name the key holds no pseudonym for yet (an instruction in
-  its Replacement cell), which goes as it stands. Inside the reader the copy
+  its Replacement cell), which goes as █████, as in the print. Inside the reader the copy
   comes back as you saw it: pasted into a page the real names return (and are
   marked as pseudonyms again), and pasted into Find it is what the screen
   showed. A cut works as the browser's own: in ✎ Edit it takes the selection
@@ -358,9 +363,14 @@ app, which routes it to the reader tab.
   stand-in, and until then you retype it, or keep that one where it stands
   (right-click it: **Keep just this one**). A longer name holding an
   instruction is left whole, never written as a stand-in for one of its words
-  with the rest in the clear, wrapped down a caption's column or not. (A `no`,
-  `n` or `never`, or a bracket around the whole value, is a keep, as
-  before.) **A pseudonym that is an
+  with the rest in the clear, wrapped down a caption's column or not. A print,
+  a screenshot or a copy shows such a name as █████ (see those, above). (A
+  `no`, `n` or `never`, or a bracket around the whole value, is a keep, as
+  before — except on an e-mail address or a website not ending in .gov, which
+  PDF-Linker fakes whatever is typed against it: there the keep is an
+  instruction like the rest, and the address stays marked until the run.) A
+  row bound in the possessive holding an instruction (`Rashoe's` over
+  `~Rasho's`) marks the bare name too. **A pseudonym that is an
   ordinary word is shown as written.** An older PDF-Linker could cut a
   surname's stand-in down to a word ("We"), and nothing in the text says which
   "we" the run wrote, so the reader used to paint the surname over every "we"
