@@ -166,7 +166,12 @@ original in Chrome's built-in viewer, skipping the linker. For a web PDF,
 
 Every document tool works on any PDF. For a file opened from disk the result is
 written back into it; for a web PDF the first save asks where to put the copy,
-and later saves go to that copy. Bates numbering, header / footer, watermark,
+and later saves go to that copy. A file opened from disk that changed on disk since
+it was opened — PDF-Linker replaces a PDF when it adds its text layer, links
+and bookmarks — is not written over unasked: Save offers **Reopen the new
+file** (your unsaved changes dropped), **Save as a copy…** (" (my changes).pdf";
+keep it outside the case folder, or PDF-Linker reads it as another document),
+**Overwrite it**, or Cancel. Bates numbering, header / footer, watermark,
 split, organize, insert and add-images are described under *PDF editor* above;
 a few details:
 

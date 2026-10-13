@@ -24,6 +24,7 @@ import {
   readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
+  valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans } from "./viewer/pseudo-key.js";
 
@@ -850,6 +851,11 @@ check("run markers", ["ETA ~6.04PM (6 of 13).txt", "ETA (estimating...).txt", "D
   [{ kind: "ETA", label: "~6:04 PM (6 of 13)" }, { kind: "ETA", label: "(estimating...)" }, { kind: "DONE", label: "12:45 AM" }, { kind: "ETA", label: "~11:05 PM (applying leak fixes)" }, null, null, null]);
 check("quarantine", isQuarantinedName("Brief.txt.LEAK"), true);
 check("key name", [isKeyName("pseudonym_key.xlsx"), isKeyName("pseudonym_key (1).xlsx"), isKeyName("Order 2024.xlsx")], [true, true, false]);
+// …never PDF-Linker's temporary copy, left beside the key by a save that crashed,
+// and the key itself before a copy of it a folder lists first.
+check("…not the temporary copy a save leaves", isKeyName("pseudonym_key.tmp.xlsx"), false);
+check("…the key itself first", [KEY_FILE, keyRank("pseudonym_key.xlsx"), keyRank("Pseudonym_Key.xlsx"), keyRank("pseudonym_key (1).xlsx"), keyRank("pseudonym_key - Copy.xlsx")],
+  ["pseudonym_key.xlsx", 0, 0, 1, 1]);
 
 // ---- settings ------------------------------------------------------------------------------
 console.log("settings");
@@ -1788,6 +1794,33 @@ console.log("a decision undone and made again");
     applyDecisionDelta(st({ rows: [["typed later", false], ["yes", false], ["no", true]] }), rows, true).rows,
     [["typed later", false], ["", false], ["no", false]]);
   check("rows of another sheet's length are not compared", decisionDelta(st({ rows: [["", false]] }), st({ rows: [["yes", false], ["", false]] })), null);
+}
+
+// ---- the lines of New Real Values.txt the reader did not write ----
+// The reader writes the file whole, from its lists: a page list PDF-Linker
+// reads and the lists cannot hold, and a line put in the file since the
+// folder was opened, are kept as they stand, after the reader's own.
+console.log("the lines of New Real Values.txt the reader did not write");
+{
+  check("a line's identity: value, phrase, keep, page lines, comments none",
+    ["Quell Harbor", "phrase: Cross River Bank", "never:  Corwin Ashdale", "did not ocr: Exhibit A.pdf | page 2", "# a comment", ""].map(valuesLineKey),
+    ["value:quell harbor", "phrase:cross river bank", "never:corwin ashdale", "noocr:exhibit a.pdf|2", "", ""]);
+  check("…a page list the reader cannot parse is kept raw", valuesLineKey("did not ocr: Exhibit A.pdf | pages 3-5, 9").startsWith("raw:"), true);
+  check("…folded alike however it is spelled", valuesLineKey("QUELL  harbor") === valuesLineKey("Quell Harbor"), true);
+  const mine = "# New Real Values\nMarlow Tenbury\nno: Cal\n";
+  const seen = valuesLineKeys("Quell Harbor\ndid not ocr: Exhibit A.pdf | pages 3-5, 9\n");
+  const disk = "Quell Harbor\ndid not ocr: Exhibit A.pdf | pages 3-5, 9\nHand Typed Value\nMarlow Tenbury\n";
+  check("kept: the page list and a line put in since the folder was opened; not the reader's own, nor one it read and has since let go",
+    linesNotOurs(disk, { mine, written: "", seen }), ["did not ocr: Exhibit A.pdf | pages 3-5, 9", "Hand Typed Value"]);
+  check("…a line this tab last wrote and has since let go is not kept", linesNotOurs("Old Value\n", { mine, written: "Old Value\n", seen: new Set() }), []);
+  check("…a keep the operator withdrew is not kept", linesNotOurs("no: Old Keep\n", { mine, seen: new Set(), withdrawn: (c, v) => c === "no" && v === "Old Keep" }), []);
+  check("…with the file never read (no seen), only the raw lines", linesNotOurs(disk, { mine, seen: null }), ["did not ocr: Exhibit A.pdf | pages 3-5, 9"]);
+  check("…once each", linesNotOurs("Hand Typed Value\nhand typed  value\n", { mine, seen: new Set() }), ["Hand Typed Value"]);
+  const both = withLinesNotOurs(mine, ["Hand Typed Value"]);
+  check("written after the reader's own lines, under a comment", both.split("\n").slice(-3), ["# Already in this file, not written by the text reader — kept as they stand:", "Hand Typed Value", ""]);
+  check("…which PDF-Linker reads as the reader's lines plus the kept one", parseReaderFile(both).values, ["Marlow Tenbury", "Hand Typed Value"]);
+  check("…and nothing kept, the reader's text as it was", withLinesNotOurs(mine, []), mine);
+  check("sameBytes", [sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 2])), sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 3])), sameBytes(null, new Uint8Array([]))], [true, false, false]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -1477,6 +1477,85 @@ the bar down with the folder it was about. Nothing is blocked: the bar warns
 and the operator decides. The marker names are a format read outside
 PDF-Linker, recorded in its CLAUDE.md beside the export headers and the key.
 
+**Files a run changed under the reader** (`folderKeyState`, `lookForChange`,
+`showFolderChanged`, `leaksOnDisk`, `TD.linesNotOurs`; `keyRead`,
+`leaksSeen`, `valuesSeen`, `valuesWrote`). The run bar above warns only while
+a run is going and only where an export is opened; a run that finished while
+no bar was up left the reader holding what it read before, and the next save
+wrote it back: the pre-run key's view of the text (a name the run had just
+faked written real again — the bug search's first finding, "theo brackwell"
+flagged, the run, then Ctrl+S), LEAKS.xlsx as it was attached (answers typed
+in Excel since undone, or a worksheet the run had removed put back, which
+reopened leak triage: `_pn_triage_pending`), and New Real Values.txt
+rewritten from the lists alone (a page list "pages 3-5, 9" the lists cannot
+hold, or a line typed into the file by hand, lost). Now nothing is written
+over a newer copy:
+
+- The KEY. `loadKeyFromBytes` notes the key read from a case folder
+  (`keyRead`: the folder's handle, the file's name and a signature of its
+  content — the reversal pairs, the instruction rows and the row count, not
+  the bytes, which openpyxl rewrites on every save). `folderKeyState` reads
+  the file's stamp, and its content only where the stamp moved: "same",
+  "moved" (it binds otherwise), "new" (a folder with no key in hand has one
+  now) or "unknown" (unreadable now: a run never deletes the key, so that is
+  no news). `saveNow` refuses on "moved" before it reads a page — saved under
+  the old key a name the new one binds would stay real, or be written as a
+  pseudonym no row of the new key turns back — and puts up the bar.
+- The LOOK. `checkRun`, with no bar up, now calls `lookForChange` (on the
+  focus coming back, on becoming visible and on opening an export): the key
+  as above and LEAKS.xlsx against the bytes held (`leaksOnDisk({ cheap })`, by
+  stamp, `leaksSeen`), read permission only, one look at a time. A change seen
+  while an ETA marker is newer than DONE is the run still going
+  (`showRunning`). Otherwise `showFolderChanged` puts up the ended bar with
+  what moved and **Read the folder again** (`readFolderAfterRun`, which now
+  keeps a folder document's edits in the store and asks only about the ones
+  with nowhere to be kept, and drops a worksheet the run removed). **×**
+  remembers the bar's text (`folderChangeHidden`), so the same news is not put
+  up again by the next look. No poll: PDF-Linker stamps DONE before it writes
+  the key and LEAKS.xlsx, so a look is a look, not a verdict.
+- LEAKS.xlsx. `saveLeaks` writes only over the bytes it read: changed on disk
+  or gone, nothing is written, the answers stay remembered (`persistLeaks`),
+  `leaksSaveNote` says why in the document save's toast, and the bar goes up.
+  Where the folder's own file will not take the write (Excel holding it), it
+  says so and writes nothing else (`writeBlob`'s `inPlaceOnly`): a copy picked
+  elsewhere is not the file PDF-Linker reads.
+- New Real Values.txt. The file is still written whole from the lists, the
+  reader's own lines first (PDF-Linker and `parseReaderFile` take a value's
+  first line), and then every other line of the file as it stands, verbatim,
+  under "# Already in this file, not written by the text reader — kept as they
+  stand:" (`TD.linesNotOurs`, `withLinesNotOurs`). A line PDF-Linker reads
+  that the reader cannot parse (`valuesLineKey`'s `raw:`) is always kept. Any
+  other line is kept only where this tab did not write it (`valuesWrote`, what
+  THIS tab last wrote: the record in localStorage is every tab's) and did not
+  see it as the folder was opened (`valuesSeen`, noted by `spendFromDisk` at
+  adoption: read into the lists then, gone from them since, it was
+  withdrawn), and it is not a keep the operator withdrew (`keepWithdrawn`).
+  What is recorded as written is the reader's own text alone.
+- The EXPORTS. A clean document whose file moved under it (an empty Ctrl+S
+  after a run rewrote it) is skipped and named (`staleClean`), not called a
+  conflict of edits; and a document with no entry in the folder — a light
+  attach, a lone file — gets the same content check before its handle is
+  written (`diskStill`), so a run's rewrite is not written over and a file
+  the run renamed to `.txt.LEAK` is not made again through the old handle.
+  Its conflict says to copy what is needed and open it again: there is no
+  disk's version to take for a document the folder's list does not hold.
+- The FILES PICKED. `TD.isKeyName` refuses PDF-Linker's `.tmp.xlsx`, left by
+  a save that crashed; `scanFolder` takes `pseudonym_key.xlsx` itself over a
+  copy the folder lists first (`TD.keyRank`); `leaksRank` orders LEAKS.xlsx,
+  its copies, the legacy name, its copies, as `_pn_existing_leak_xlsx` does.
+
+The PDF viewer's Save has the same rule (`viewer.js`: `pdfDisk`, `pdfOnDisk`,
+`askStaleWrite`, `pickedOverChanged`, `notePdfWritten`, `reopenFromDisk`):
+PDF-Linker REPLACES a case folder's PDF when it adds its text layer, links and
+bookmarks, or marks a page DID NOT OCR or TEXT CORRECTED, and the copy opened
+before, saved in place over it, wiped all that. The viewer notes the file it
+opened or last wrote (stamp, and a SHA-256 of the bytes, `documentKey`); a save
+in place over a file that moved asks: Cancel, Overwrite it, Save as a copy…
+(" (my changes).pdf", to be kept outside the case folder) or Reopen the new
+file (the unsaved changes dropped). The Save picker pointed at the document's
+own file asks the same. `test-stale-writes.mjs` (Chromium) pins each case;
+`test-textdoc.mjs` and `test-leaks.mjs` the line keys and the file ranks.
+
 **⇄ Raw** (`.raw-page`, on every page label, between `.swap-page` and
 `.nocr-page`; it replaced the toolbar's 📄 File as text panel) puts the page's
 own text in the page's place, the way ⇄ PDF puts its PDF page there.

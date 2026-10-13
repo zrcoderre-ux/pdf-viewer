@@ -28,7 +28,8 @@ import { buildEditedPdf, applyPagePlan, stampBates, stampHeaderFooter, stampWate
 import * as Annots from "./annotations.js";
 import { findTextBlocks, fontStyleFromName } from "./pdf-text-edit.js";
 import { hydrateIcons, setIcon, icon } from "./icons.js";
-import { toggleMenu, closeMenus, contextMenu, toast, dialogOpen, menuIsOpen, promptDialog } from "./ui.js";
+import { toggleMenu, closeMenus, contextMenu, toast, dialogOpen, menuIsOpen, promptDialog, openDialog } from "./ui.js";
+import { documentKey } from "./ocr-store.js";
 import { createFind } from "./find.js";
 import { printDocument } from "./print.js";
 import { createFeatures } from "./features.js";
@@ -1518,6 +1519,12 @@ if (ocrRunEl) {
 // original.
 let editingAllowed = false;
 let localFileHandle = null; // FileSystemFileHandle for in-place save, if provided
+// The file on disk as this viewer last read or wrote it: its stamp (size and
+// time, "" where unknown) and a hash of its bytes. A save in place is made only
+// over that file (pdfOnDisk): PDF-Linker REPLACES a PDF of the case folder when
+// it adds its text layer, links and bookmarks, or marks a page DID NOT OCR or
+// TEXT CORRECTED, and the copy opened before, written over it, wiped all that.
+let pdfDisk = null; // { key, sha: Promise<string> }
 
 function setEditingEnabled(on) {
   editingAllowed = on;
@@ -1546,39 +1553,72 @@ function annotationSaveData() {
 //   3. a normal blob download.
 // With `inPlace`, the picker is a Save As of THE document: the file it names
 // becomes the one this viewer saves to from then on.
-async function writeOutPdf(bytes, suggestedName, { inPlace = false } = {}) {
-  const name = /\.pdf$/i.test(suggestedName) ? suggestedName : `${suggestedName}.pdf`;
+async function writeOutPdf(bytes, suggestedName, { inPlace = false, decided = null } = {}) {
+  let name = /\.pdf$/i.test(suggestedName) ? suggestedName : `${suggestedName}.pdf`;
   // A document that arrived password-protected goes back out protected; the
   // viewer itself works on the opened (decrypted) bytes.
   if (inPlace) bytes = await Features.protectForSave(bytes);
   const blob = new Blob([bytes], { type: "application/pdf" });
 
   if (inPlace && localFileHandle && localFileHandle.createWritable) {
-    try {
-      if (localFileHandle.requestPermission) {
-        const perm = await localFileHandle.requestPermission({ mode: "readwrite" });
-        if (perm !== "granted") throw new Error("write permission denied");
+    // ONLY OVER THE FILE OPENED. Changed on disk since (a PDF-Linker run, most
+    // likely), the file is not written over unasked.
+    let choice = decided, disk = null;
+    if (!choice) {
+      disk = await pdfOnDisk();
+      choice = disk.same ? "overwrite" : await askStaleWrite(disk);
+    }
+    if (!choice) { statusEl.textContent = "Not saved."; toast("Not saved — the file on disk is left as it is.", { timeout: 6000 }); return false; }
+    if (choice === "reopen") { await reopenFromDisk(disk); return false; }
+    if (choice === "copy") name = copyName(name);
+    else {
+      try {
+        if (localFileHandle.requestPermission) {
+          const perm = await localFileHandle.requestPermission({ mode: "readwrite" });
+          if (perm !== "granted") throw new Error("write permission denied");
+        }
+        const writable = await localFileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        await notePdfWritten(localFileHandle, bytes);
+        return true;
+      } catch (e) {
+        if (e && e.name === "AbortError") return false;
+        // fall through to the picker / download
       }
-      const writable = await localFileHandle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      return true;
-    } catch (e) {
-      if (e && e.name === "AbortError") return false;
-      // fall through to the picker / download
     }
   }
 
   if (window.showSaveFilePicker) {
     try {
-      const handle = await window.showSaveFilePicker({
+      let handle = await window.showSaveFilePicker({
         suggestedName: name,
         types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }],
       });
+      // The picker pointed at the document's own file (the extension's first
+      // Save of a file:// document is one): over a file that changed since it
+      // was opened, the same question.
+      const over = await pickedOverChanged(handle);
+      if (over) {
+        const choice = await askStaleWrite(over, { picked: true });
+        if (!choice) { statusEl.textContent = "Not saved."; return false; }
+        if (choice === "reopen") { await reopenFromDisk(over); return false; }
+        if (choice === "copy") {
+          handle = await window.showSaveFilePicker({
+            suggestedName: copyName(name),
+            types: [{ description: "PDF", accept: { "application/pdf": [".pdf"] } }],
+          });
+          if (await pickedOverChanged(handle)) {
+            statusEl.textContent = "Not saved.";
+            toast("Not saved — that is the changed file again; choose another name.", { kind: "error", timeout: 6000 });
+            return false;
+          }
+        }
+      }
       const writable = await handle.createWritable();
       await writable.write(blob);
       await writable.close();
-      if (inPlace) adoptSavedFile(handle);
+      if (inPlace) { adoptSavedFile(handle); await notePdfWritten(handle, bytes); }
       return true;
     } catch (e) {
       if (e && e.name === "AbortError") return false; // user cancelled
@@ -1593,6 +1633,101 @@ async function writeOutPdf(bytes, suggestedName, { inPlace = false } = {}) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
   return true;
+}
+
+// The name of the document's own file: its handle's, else the file:// URL's.
+function openDocFileName() {
+  if (localFileHandle && localFileHandle.name) return localFileHandle.name;
+  if (/^file:/i.test(fileUrl || "")) {
+    try { return decodeURIComponent(new URL(fileUrl).pathname.split("/").pop() || ""); } catch { return ""; }
+  }
+  return "";
+}
+function copyName(name) { return name.replace(/(\.pdf)?$/i, "") + " (my changes).pdf"; }
+function fileStamp(f) { return f ? f.size + "|" + f.lastModified : ""; }
+/** What was just written through `handle` is the file this viewer holds from now on. */
+async function notePdfWritten(handle, bytes) {
+  let key = "";
+  try { const f = await handle.getFile(); if (f.size === bytes.byteLength) key = fileStamp(f); } catch { /* unknown: hashed at the next save */ }
+  pdfDisk = { key, sha: documentKey(bytes.slice(0)) };
+}
+/**
+ * The document's file against the one this viewer opened or last wrote →
+ * { same } | { gone } | { changed, file, bytes, key, sha }. By its stamp first;
+ * read and hashed only where that moved. A file that cannot be read now reads
+ * as the same: the save goes on as it always did.
+ */
+async function pdfOnDisk() {
+  const h = localFileHandle;
+  if (!h || !h.getFile || !pdfDisk) return { same: true };
+  let f;
+  try { f = await h.getFile(); } catch (e) { return e && e.name === "NotFoundError" ? { gone: true } : { same: true }; }
+  const key = fileStamp(f);
+  if (pdfDisk.key && key === pdfDisk.key) return { same: true };
+  let bytes;
+  try { bytes = new Uint8Array(await f.arrayBuffer()); } catch { return { same: true }; }
+  const sha = await documentKey(bytes);
+  if (sha === (await pdfDisk.sha)) { pdfDisk.key = key; return { same: true }; }
+  return { changed: true, file: f, bytes, key, sha };
+}
+/** A file the Save picker named that is the document's own and is not what was opened → as pdfOnDisk's `changed`; else null. */
+async function pickedOverChanged(handle) {
+  if (!handle || !pdfDisk || !handle.getFile) return null;
+  const own = openDocFileName();
+  if (!own || handle.name !== own) return null;
+  let f;
+  try { f = await handle.getFile(); } catch { return null; }
+  if (!f.size) return null; // a new file the picker has just made
+  const bytes = new Uint8Array(await f.arrayBuffer());
+  const sha = await documentKey(bytes);
+  if (sha === (await pdfDisk.sha)) return null;
+  return { changed: true, file: f, bytes, key: fileStamp(f), sha, handle };
+}
+/**
+ * Asked before the document's file, changed on disk, is written over →
+ * "reopen", "copy", "overwrite", or null (Cancel, Esc). For a file no longer
+ * there, a copy or nothing.
+ */
+function askStaleWrite(disk, { picked = false } = {}) {
+  const name = (disk && disk.file && disk.file.name) || openDocFileName() || "This PDF";
+  return new Promise((resolve) => {
+    if (disk && disk.gone) {
+      openDialog({
+        title: "This PDF is not where it was",
+        icon: "alert",
+        sub: `${name} is no longer where it was opened from.`,
+        actions: [
+          { label: "Cancel", value: null },
+          { label: "Save as a copy…", kind: "primary", value: "copy" },
+        ],
+        onClose: (v) => resolve(v || null),
+      });
+      return;
+    }
+    const at = disk && disk.file ? new Date(disk.file.lastModified).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+    openDialog({
+      title: "This PDF changed on disk",
+      icon: "alert",
+      sub: `${name} was changed on disk after you opened it${at ? ` (${at})` : ""}${picked ? ", or is another file of the same name" : ""} — PDF-Linker replaces a PDF when it adds its text layer, links and bookmarks, and marks pages DID NOT OCR or TEXT CORRECTED. Saving the copy you opened over it would wipe those.`,
+      body: "<p>Save as a copy: keep the copy outside the case folder, or PDF-Linker reads it as another document.</p>",
+      actions: [
+        { label: "Cancel", value: null, left: true },
+        { label: "Overwrite it", kind: "danger", value: "overwrite", id: "stale-overwrite" },
+        { label: "Save as a copy…", value: "copy", id: "stale-copy" },
+        { label: "Reopen the new file (drop my changes)", kind: "primary", value: "reopen", id: "stale-reopen" },
+      ],
+      onClose: (v) => resolve(v || null),
+    });
+  });
+}
+/** The document read again as it now stands on disk; what was unsaved is dropped. */
+async function reopenFromDisk(disk) {
+  const name = (disk && disk.file && disk.file.name) || openDocFileName() || "The PDF";
+  if (disk && disk.handle && disk.file) await loadLocalFile(disk.file, disk.handle);
+  else if (localFileHandle && disk && disk.file) await loadLocalFile(disk.file, localFileHandle);
+  else if (localFileHandle) await loadLocalFile(await localFileHandle.getFile(), localFileHandle);
+  else await loadAndRender();
+  toast(`Showing ${name} as it now stands on disk; your unsaved changes were dropped.`, { timeout: 7000 });
 }
 
 // After a Save As, the saved file is the document: later saves go to it.
@@ -1826,6 +1961,7 @@ function resetForNewDocument() {
   docAttachments = [];
   docSecurity = null;
   sourceBytes = null;
+  pdfDisk = null;
   if (Find) Find.reset();
   // …and with it every proposed redaction, and the span text they were found
   // in. A box belongs to the page it was drawn on, and this is another page.
@@ -2055,6 +2191,9 @@ async function loadAndRender() {
     }
 
     const buf = await resp.arrayBuffer();
+    // A file:// document: what Save's picker is checked against, should it be
+    // pointed at this same file (pickedOverChanged).
+    if (isLocalDocument) pdfDisk = { key: "", sha: documentKey(new Uint8Array(buf).slice(0)) };
     await renderBytes(buf);
   } catch (err) {
     if (!err.quiet) {
@@ -2091,6 +2230,7 @@ async function loadLocalFile(file, handle) {
     const ab = await file.arrayBuffer();
     const bytes = new Uint8Array(ab.byteLength);
     bytes.set(new Uint8Array(ab));
+    pdfDisk = { key: handle ? fileStamp(file) : "", sha: documentKey(bytes.slice(0)) };
     await renderBytes(bytes, { sourceName: file.name });
   } catch (err) {
     if (!err.quiet) {
