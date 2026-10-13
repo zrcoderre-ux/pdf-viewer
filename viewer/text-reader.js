@@ -156,6 +156,7 @@ let keeps = [];              // …and the keeps: values wrongly faked, left alo
 let noOcr = [];              // …and the pages marked ⊘ Did not OCR: [{ doc, pdf, page }] (syncNoOcr)
 let ocrAgain = [];           // …and the pages to read again, ↻ OCR This Page (ocrPageAgain)
 let textFixed = [];          // …and the pages transcribed by hand, ✎ Use my text: [{ doc, pdf, page, sum }] (useMyText)
+let fixDeclined = [];        // …and the pages taken back off it this session, which a save never hands over again by itself (autoUseMyText)
 let spots = [];              // spot keeps for the open document: [{ page, value, nth }]
 let masterKeeps = [];        // standing keeps from PDF-Linker's master workbook (its KEEP sheet)
 let masterInfo = null;       // { name, sheet, rows, partial } once it is attached
@@ -4082,6 +4083,7 @@ pagesEl.addEventListener("paste", (e) => {
   if (!text) return;
   if (selectionCrossesGutter(body)) { toast(GUTTER_FIXED, { error: true }); return; }
   const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  noteTyping(body);
   snapshot(body, true);
   batchEdit = true;
   try {
@@ -4339,6 +4341,20 @@ function pointAtOffset(body, target) {
   rec(body, true);
   return hit || { node: body, offset: body.childNodes.length };
 }
+// What the operator TYPED on a page is measured against the page as it read
+// just before the first keystroke on it (`typedFrom`, on the page object, kept
+// across saves, so two words corrected a save apart are two). Typing, a paste and
+// the edits a keystroke sets off (a typed real name marked) move it; a strip
+// to ⊘ Did not OCR, its put-back and the undo of either never do: those forget
+// what was typed (forgetTyping), so no page is handed over on their account.
+function noteTyping(body) {
+  const p = doc && doc.pages[pageIndexOf(body)];
+  if (p && p.typedFrom == null) p.typedFrom = TD.serializeNodes(body);
+}
+function forgetTyping(i) {
+  const p = doc && doc.pages[i];
+  if (p) p.typedFrom = null;
+}
 function snapshotOf(body) {
   // The page's spot keeps travel with its text: they are part of how the page
   // stands, and a redo that brought the text back without them would leave the
@@ -4406,6 +4422,7 @@ function restoreSnapshot(snap, { settle = true, lists = true } = {}) {
   setSpotsListOf(snap.page, spotsListOf(snap.page).filter((x) => x.page !== snap.page).concat(snap.spots || []));
   buildBody(body, snap.text, snap.page);
   doc.pages[snap.page].lines = snap.text.split("\n");
+  if (snap.nocr) forgetTyping(snap.page); // a strip undone or redone is no typing
   // …and what actually landed is what is remembered.
   syncSpots(body);
   if (lists) syncNoOcr([snap.page], { drop: true }); // an undone ⊘ Did not OCR comes off the list
@@ -4427,6 +4444,14 @@ function stepHistory(from, to) {
   if (refuseWhileBusy()) return;
   const top = from[from.length - 1];
   if (!top) return;
+  // A flag, a keep, a "fake it" or a LEAKS answer is a step of its own
+  // (asDecision): it moves its values back and touches no page.
+  if (top.decision) {
+    from.pop();
+    if (stepDecision(top.decision, from === undoStack)) to.push(top);
+    lastSnapPage = -1;
+    return;
+  }
   // A FOLDER REPLACE IS NOT TAKEN BACK BEHIND THE OPERATOR'S BACK. Its step
   // outlives the document it was made in, so a Ctrl+Z pressed in another
   // document — one the replace never touched, protected, with no steps of its
@@ -4500,6 +4525,96 @@ function stepHistory(from, to) {
   if (pages.length > 1 || (marker && pages.length !== 1)) afterTextChange();
   lastSnapPage = -1;
 }
+// ── …and the decisions, on the same history ───────────────────────────────────────
+//
+// Ctrl+Z walked past every decision: a flag, a phrase, a keep, a "fake it", a
+// LEAKS answer were taken back only by finding the value in a list. Each is now
+// a step on the undo history, in its place among the text edits, holding what
+// that one decision MOVED (TD.decisionDelta) and moving it back
+// (TD.applyDecisionDelta), so a value the folder's file brought in since stands.
+// The page lists (⊘ Did not OCR, ↻ OCR This Page, ✎ Use my text) are not in
+// it: a strip and its put-back are page steps of their own, as before.
+let deciding = 0;
+/** The decisions as they stand: what a step is measured between. */
+function decisionState() {
+  return { flagged, phrases, keeps, settled: [...settled], rows: leaks ? leakRows().map((r) => [r.fix, !!r.ok]) : null };
+}
+/** Run `fn`, a decision, as one undo step (nested decisions are the outer one's). What `fn` returns. */
+function asDecision(fn) {
+  if (deciding) return fn();
+  const store = flagsFor, sheet = leaks;
+  const before = decisionState();
+  let out;
+  deciding++;
+  try { out = fn(); } finally { deciding--; }
+  const delta = store === flagsFor && sheet === leaks ? TD.decisionDelta(before, decisionState()) : null;
+  if (delta) {
+    undoStack.push({ decision: { label: decisionLabel(delta), delta, store, sheet } });
+    trimHistory();
+    redoStack = [];
+    lastSnapPage = -1;
+  }
+  return out;
+}
+/** A step's name, for the toast that undoes or redoes it. */
+function decisionLabel(d) {
+  const q = (v) => `“${v}”`;
+  if (d.rows.length) {
+    const r = leaks && leakRows()[d.rows[0].i];
+    return d.rows.length > 1 ? `the answers on ${d.rows.length} LEAKS rows` : `the LEAKS answer on ${r ? q(r.value) : "a row"}`;
+  }
+  if (d.keeps.length) { const k = d.keeps[0]; return k.after ? `the keep on ${q(k.after.value)}` : `taking the keep off ${q(k.before.value)}`; }
+  if (d.phrases.add.length) return `the phrase ${q(d.phrases.add[0])}`;
+  if (d.flagged.add.length) return `the flag on ${q(d.flagged.add[0])}`;
+  if (d.flagged.drop.length) return `taking ${q(d.flagged.drop[0])} off the Flagged list`;
+  if (d.phrases.drop.length) return `${q(d.phrases.drop[0])} back to an ordinary flag`;
+  if (d.settled.add.length) return `“fake it” on ${q(d.settled.add[0])}`;
+  if (d.settled.drop.length) return `“fake it” taken back on ${q(d.settled.drop[0])}`;
+  return "a decision";
+}
+/**
+ * A decision step taken back (`undo`) or made again. False where it no longer
+ * applies — taken on another case's list, or on a worksheet no longer open —
+ * and the step is dropped.
+ */
+function stepDecision(d, undo) {
+  if (d.store !== flagsFor || (d.delta.rows.length && d.sheet !== leaks)) {
+    toast(`Nothing to ${undo ? "undo" : "redo"}: ${d.label} was taken on ${d.store !== flagsFor ? "another case's list" : "a LEAKS worksheet no longer open"}.`, { error: true });
+    return false;
+  }
+  const next = TD.applyDecisionDelta(decisionState(), d.delta, undo);
+  flagged = next.flagged;
+  phrases = next.phrases;
+  keeps = next.keeps;
+  settled = new Set(next.settled);
+  if (d.delta.rows.length) {
+    const rows = leakRows();
+    for (const { i } of d.delta.rows) {
+      const row = rows[i];
+      if (!row) continue;
+      [row.fix, row.ok] = next.rows[i];
+      moveLeakKeep(row); // …and the keep it mirrors, as the answer now reads
+    }
+    persistLeaks();
+    refreshSheetFakes();
+    for (const { i } of d.delta.rows) paintLeakRow(i);
+    renderLeaksBar();
+    renderLeaksTabState();
+    updateLeaksButton();
+    warmForLeaks();
+  }
+  persistValues();
+  compileKey();
+  remarkKept();
+  renderFlags();
+  paintHighlights();
+  if (doc) renderLeakStatus();
+  sweepFolder();
+  // An answer taken back is a question again: the review goes back to its row.
+  if (undo && d.delta.rows.length) goToLeak(d.delta.rows[0].i);
+  toast(`${undo ? "Undone" : "Redone"}: ${d.label}. ${undo ? "Ctrl+Y" : "Ctrl+Z"} ${undo ? "makes it again" : "takes it back"}.`);
+  return true;
+}
 function undo() { stepHistory(undoStack, redoStack); }
 function redo() { stepHistory(redoStack, undoStack); }
 /**
@@ -4535,6 +4650,7 @@ pagesEl.addEventListener("beforeinput", (e) => {
   if (shotPut) { e.preventDefault(); return; } // the screenshot's fakes are on the page, not in it
   if (e.inputType === "historyUndo" || e.inputType === "historyRedo") { e.preventDefault(); return; }
   if (selectionCrossesGutter(body)) { e.preventDefault(); toast(GUTTER_FIXED, { error: true }); return; }
+  noteTyping(body);
   // A deletion after typing, or typing after a deletion, is its own step.
   const kind = /delete/i.test(e.inputType) ? "del" : "ins";
   snapshot(body, kind !== snapshot.lastKind);
@@ -4880,11 +4996,15 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   // and a keep made at the third "Corwin Ashdale" moved to the first once the
   // edits went — so the next save kept the one said to be faked, and faked
   // the one kept.
+  // The pages typed on, as the typing left them (before the forward pass
+  // writes a settled name as its pseudonym, which is no typing).
+  const typedNow = new Map();
   if (doc) {
     for (const m of reel) if (journalled.has(m.name)) textBefore.set(m, TD.serializeExport(liveMemberDoc(m)));
     for (const body of pageBodies()) {
       const i = pageIndexOf(body);
       const m = reelMemberOf(i);
+      if (doc.pages[i] && doc.pages[i].typedFrom != null) typedNow.set(i, TD.serializeHeld(body).text);
       const r = savePage(body, i, (text, s) => {
         snapshot(body, true);
         setSpotsListOf(i, spotsListOf(i).filter((x) => x.page !== i).concat(s));
@@ -5141,6 +5261,10 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   }
   saveNote = "";
   dirty = reel.some((m) => m.dirty);
+  // A page typed over in several words is handed over as ✎ Use my text
+  // without the click (autoUseMyText), before the list is written below —
+  // the pages of the documents written, and no others.
+  const handed = autoUseMyText(typedNow, new Set(wroteMembers));
   // A transcribed page's line carries the page's text as it was just WRITTEN
   // (TD.pageTextSum), so PDF-Linker applies the text the operator saved and
   // nothing older or newer — the pages of the documents written, and no others.
@@ -5234,7 +5358,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   const said = (!wrote.length
     ? (alsoList ? "Saved" + alsoList.replace(/^ · /, " ").replace(/ written too /g, " ") : conflicts.length || failed.length ? "Nothing was written" : "Nothing to save.")
     : (wrote.length > 1 ? `Saved ${wrote.length} documents: ` : "Saved ") + shown +
-      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + alsoList)
+      (forwarded ? ` · ${forwarded} real name${forwarded === 1 ? "" : "s"} written as pseudonym${forwarded === 1 ? "" : "s"}` : "") + handedNote(handed) + alsoList)
     + combined;
   const reds = (conflictWarn + failWarn + unreadWarn + warn + stuckWarn + spentWarn).replace(/^ · /, "");
   toast(red ? reds + " — " + said : said, { error: !!red, ms: red ? 12000 : wrote.length > 1 ? 6000 : undefined });
@@ -7591,6 +7715,7 @@ function markDidNotOcr(i) {
   setSpotsListOf(i, spotsListOf(i).filter((x) => x.page !== i));
   buildBody(body, text, i);
   doc.pages[i].lines = lines;
+  forgetTyping(i); // the page's text is not worth keeping: nothing typed on it is to be handed over
   syncSpots(body);
   setDirty(true, i);
   // …and PDF-Linker is told, through New Real Values.txt, or its next full run
@@ -7715,6 +7840,7 @@ function putStrippedBack(i, sn) {
   setSpotsListOf(i, spotsListOf(i).filter((x) => x.page !== i).concat(sn.spots || []));
   buildBody(body, sn.text, i);
   doc.pages[i].lines = sn.text.split("\n");
+  forgetTyping(i); // the text put back is the page's, not typing
   syncSpots(body);
   setDirty(true, i);
   syncNoOcr([i], { drop: true }); // off the list of pages not to OCR
@@ -7746,6 +7872,7 @@ function useMyText(i) {
   const entry = pageEntryAt(i);
   if (entry && textFixed.some((e) => TD.sameNoOcr(e, entry))) {
     textFixed = TD.setTextFixed(textFixed, entry, false);
+    fixDeclined = TD.setNoOcr(fixDeclined, entry, true); // …and a save does not hand it over again by itself
     persistValues();
     renderFlags();
     toast(`${where}: no longer handed to PDF-Linker as text typed in by hand.`);
@@ -7767,6 +7894,7 @@ function useMyText(i) {
   const lines = body ? TD.serializeNodes(body).split("\n") : p.lines;
   noOcr = TD.setNoOcr(noOcr, entry, false);
   ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
+  fixDeclined = TD.setNoOcr(fixDeclined, entry, false);
   textFixed = TD.setTextFixed(textFixed, { ...entry, sum: TD.pageTextSum(lines) }, true);
   persistValues();
   renderFlags();
@@ -7789,6 +7917,46 @@ function refreshTextFixedSums(members = null) {
     textFixed = list;
     persistValues();
   }
+}
+/**
+ * ✎ Use my text without the click. A page the operator has TYPED over in
+ * TD.AUTO_TEXT_FIXED_WORDS words or more (`typedFrom` against the text the
+ * save just wrote) is a page being transcribed, and a full PDF-Linker run would
+ * put the OCR's reading back over every word of it: the save hands it over as
+ * the button does. Never a page that reads [DID NOT OCR], one on the ⊘ Did not
+ * OCR or ↻ OCR This Page lists (the operator's own word on the page stands),
+ * one already on the list, or one taken off it this session (fixDeclined).
+ * `typedNow`: the pages typed on, by index, as the typing left them; `written`:
+ * the members this save wrote. The pages handed over.
+ */
+function autoUseMyText(typedNow, written) {
+  if (!doc || !typedNow.size || flagsFor !== valuesStoreKey()) return [];
+  const sources = docPageSources();
+  const on = (list, e) => list.some((x) => TD.sameNoOcr(x, e));
+  let list = textFixed;
+  const out = [];
+  for (const [i, text] of typedNow) {
+    const p = doc.pages[i];
+    if (!p || p.header == null || p.typedFrom == null || !written.has(reelMemberOf(i))) continue;
+    if (pageReadsDidNotOcr(i)) continue;
+    const e = pageEntryAt(i, sources);
+    if (!e || on(list, e) || on(noOcr, e) || on(ocrAgain, e) || on(fixDeclined, e)) continue;
+    if (TD.wordsChanged(p.typedFrom, text) < TD.AUTO_TEXT_FIXED_WORDS) continue;
+    list = TD.setTextFixed(list, { ...e, sum: TD.pageTextSum(p.lines) }, true);
+    out.push(i);
+  }
+  if (!out.length) return out;
+  textFixed = list;
+  persistValues();
+  renderFlags();
+  refreshFixButtons(out);
+  return out;
+}
+/** What the save's message says of the pages autoUseMyText handed over. */
+function handedNote(handed) {
+  if (!handed || !handed.length) return "";
+  const labels = handed.slice(0, 4).map((i) => TD.pageLabel(doc.pages[i])).join(", ") + (handed.length > 4 ? "…" : "");
+  return ` · typed over, so handed to PDF-Linker as ✎ Use my text: ${labels} (click ✓ Use my text on a page to withdraw it)`;
 }
 function setFixButton(b, reads, asked, corrected) {
   b.classList.toggle("on", asked);
@@ -7924,6 +8092,7 @@ function markDidNotOcrPages(indices) {
   for (const t of todo) {
     buildBody(t.body, t.text, t.i);
     doc.pages[t.i].lines = t.lines;
+    forgetTyping(t.i);
     syncSpots(t.body);
     setDirty(true, t.i);
   }
@@ -9236,7 +9405,9 @@ function refreshSheetFakes() {
  * said, and counted. The right click is the way to it where the walk is not —
  * past it, closed, or stepping a worksheet that has a row for it.
  */
-function settleName(real, fake, then = "") {
+/** settleName, as one undo step (asDecision). */
+function settleName(real, fake, then = "") { return asDecision(() => settleNameNow(real, fake, then)); }
+function settleNameNow(real, fake, then = "") {
   settled.add(settledKey(real));
   settledShown.set(settledKey(real), String(real).trim());
   persistSettled(real);
@@ -10257,7 +10428,9 @@ function refreshKeepLocality() {
   renderFlags();
 }
 
-function setKeep(real, control, { leak = false } = {}) {
+/** setKeep, as one undo step (asDecision). */
+function setKeep(real, control, opts) { return asDecision(() => setKeepNow(real, control, opts)); }
+function setKeepNow(real, control, { leak = false } = {}) {
   // A keep on a value standing in the clear anywhere in the case, for this
   // case only, that PDF-Linker has not itself raised, is a decision the files
   // already carry out. Anything else is work the case folder has to be handed
@@ -10486,7 +10659,9 @@ function sameWords(a, b) {
 function wordsOf(x) {
   return (String(x).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []).join(" ");
 }
-function flagSelection() {
+/** flagSelection, as one undo step (asDecision). */
+function flagSelection() { return asDecision(() => flagSelectionNow()); }
+function flagSelectionNow() {
   const s = currentSelection();
   const problem = s ? TD.flagProblem(s.text, s.allFaked) : "Select the unfaked name first.";
   if (problem) { toast(problem, { error: true }); return; }
@@ -10589,7 +10764,9 @@ function phraseSelection() {
  * The phrase marked, from a selection or from a value already on the Flagged
  * list: flagged if it is not yet, and written as `phrase:` from now on.
  */
-function markPhrase(v, faked) {
+/** markPhrase, as one undo step (asDecision). */
+function markPhrase(v, faked) { return asDecision(() => markPhraseNow(v, faked)); }
+function markPhraseNow(v, faked) {
   const was = TD.isPhrase(flagged, v);
   flagged = TD.addValue(flagged, v);
   phrases = TD.addValue(phrases, v);
@@ -10604,7 +10781,9 @@ function markPhrase(v, faked) {
     + (alone.length ? ` ${alone.map((f) => `"${f}"`).join(", ")} ${alone.length === 1 ? "is" : "are"} still flagged on ${alone.length === 1 ? "its" : "their"} own — withdraw ${alone.length === 1 ? "it" : "them"} in the Flagged list if ${alone.length === 1 ? "it" : "they"} only ever stood here.` : ""));
 }
 /** …and back to an ordinary flag: the words still faked, each as the key has it. */
-function unmarkPhrase(v) {
+/** unmarkPhrase, as one undo step (asDecision). */
+function unmarkPhrase(v) { return asDecision(() => unmarkPhraseNow(v)); }
+function unmarkPhraseNow(v) {
   phrases = TD.removeValue(phrases, v);
   persistValues();
   renderFlags();
@@ -11016,7 +11195,7 @@ function renderFlags() {
     x.className = "x";
     x.textContent = "×";
     x.title = "Withdraw this value";
-    x.addEventListener("click", (e) => { e.stopPropagation(); flagged = TD.removeValue(flagged, v); phrases = TD.removeValue(phrases, v); persistValues(); renderFlags(); paintHighlights(); });
+    x.addEventListener("click", (e) => { e.stopPropagation(); asDecision(() => { flagged = TD.removeValue(flagged, v); phrases = TD.removeValue(phrases, v); }); persistValues(); renderFlags(); paintHighlights(); });
     li.appendChild(x);
     flagsList.appendChild(li);
   }
@@ -12161,7 +12340,9 @@ function stepRowInstance(dir) {
 }
 
 /** Write a decision into the current row's Fix? cell (remembered until saved). */
-function decideLeak(text, { advance = false } = {}) {
+/** decideLeak, as one undo step (asDecision). */
+function decideLeak(text, opts) { return asDecision(() => decideLeakNow(text, opts)); }
+function decideLeakNow(text, { advance = false } = {}) {
   if (!leaks || leaks.at < 0) return;
   const row = leakRows()[leaks.at];
   row.fix = String(text == null ? "" : text).trim();
@@ -12189,7 +12370,9 @@ function decideLeak(text, { advance = false } = {}) {
  * row stops coming back. Nothing is written to the workbook — the cell already
  * says this — so the acceptance is remembered here, with the decisions.
  */
-function acceptLeak() {
+/** acceptLeak, as one undo step (asDecision). */
+function acceptLeak() { return asDecision(() => acceptLeakNow()); }
+function acceptLeakNow() {
   if (!leaks || leaks.at < 0) return;
   const row = leakRows()[leaks.at];
   if (!LK.isSuggested(row)) return;
@@ -13332,7 +13515,7 @@ function reelShift(n) {
   const bump = (list) => { for (const x of list || []) if (!moved.has(x)) { moved.add(x); x.page += n; } };
   for (const m of reel) { m.from += n; bump(m.spots); }
   bump(spots);
-  // A folder replace's marker names no page (revertFolderReplace finds its documents by name).
+  // A folder replace's marker names no page (revertFolderReplace finds its documents by name), nor does a decision.
   for (const sn of undoStack) { if (sn.page != null) sn.page += n; bump(sn.spots); }
   for (const sn of redoStack) { if (sn.page != null) sn.page += n; bump(sn.spots); }
   if (lastSnapPage >= 0) lastSnapPage += n;
