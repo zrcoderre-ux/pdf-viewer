@@ -32,7 +32,11 @@ console.log("names");
 check("the worksheet by name, copies included, the legacy name too",
   ["LEAKS.xlsx", "leaks.xlsx", "LEAKS (1).xlsx", "LEAKS - Copy.xlsx", "pdf_linker_leaks.xlsx", "C:\\case\\LEAKS.xlsx", "LEAKS.txt", "pseudonym_key.xlsx", "MyLEAKS.xlsx"].map(isLeaksName),
   [true, true, true, true, true, true, false, false, false]);
-check("the current name ranks first", [leaksRank("LEAKS.xlsx"), leaksRank("pdf_linker_leaks.xlsx")], [0, 1]);
+check("the current name ranks first", [leaksRank("LEAKS.xlsx"), leaksRank("pdf_linker_leaks.xlsx")], [0, 2]);
+// …as PDF-Linker picks its worksheet: the file itself before a Windows copy of
+// it, and the legacy name's file before its copy — so a copy a folder lists
+// first is never taken over the file PDF-Linker reads and writes.
+check("a copy ranks after the file it copies", ["LEAKS.xlsx", "LEAKS (1).xlsx", "LEAKS - Copy.xlsx", "pdf_linker_leaks.xlsx", "pdf_linker_leaks (1).xlsx"].map(leaksRank), [0, 1, 1, 2, 3]);
 
 console.log("reading the sheet");
 const HEAD = ["Value", "Fix? (yes/no)", "Context", "File", "Type", "Where (page:line)", "Notes"];

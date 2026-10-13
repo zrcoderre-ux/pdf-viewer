@@ -24,6 +24,7 @@ import {
   readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
+  valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans } from "./viewer/pseudo-key.js";
 
@@ -309,6 +310,51 @@ console.log("cited case names");
     check("…and at the size a real declaration is, it is not seconds", ms(JURAT.repeat(1280)) < 3000, true);
     check("nothing in the jurat is taken for a case name", citedNameSpans(JURAT), []);
   }
+  // THE SHORT CITE WITH NO "supra", which PDF-Linker protects
+  // (_pn_short_cite_follows) and this did not read: the party's name, a comma,
+  // a volume and a REPORTER, then a pin or a page — or, behind "(", ";" or a
+  // signal, the bare pin "at p." of the Style Manual's short form. A name
+  // typed into one was marked as this case's party and written as its
+  // pseudonym: "(Pratt, 30 Cal.App.5th at p. 5.)", a renamed authority.
+  {
+    const SC = [
+      ["(Jones, 30 Cal.App.5th at p. 5.)", ["Jones"]],
+      ["(Jones, 30 Cal.App.5th at pp. 5-6)", ["Jones"]],
+      ["(Jones, at p. 5)", ["Jones"]],
+      ["(See Jones, 30 Cal.App.5th at p. 5.)", ["Jones"]],
+      ["x; Ruiz, at p. 9", ["Ruiz"]],
+      ["(O'Brien, 5 Cal.5th at 10)", ["O'Brien"]],
+      ["(Pérez, 30 Cal.App.5th at p. 5.)", ["Pérez"]],
+      ["(Acme Corp., 30 Cal.App.5th 1, 5)", ["Acme Corp."]],
+      ["(Jones, 30 Cal.App.5th, 5)", ["Jones"]],
+      ["(Department of Transportation, 30 Cal.App.5th at p. 7)", ["Department of Transportation"]],
+      ["Jones, 30 F. Supp. 2d 100", ["Jones"]],
+      [" 3  Nothing else. (Jones,\n 4  30 Cal.App.5th at p. 5.)", ["Jones"]],
+    ];
+    check("a short cite with no supra: the name alone, whatever the reporter, pin or signal",
+      SC.map(([t]) => spans(t)), SC.map(([, w]) => w));
+    // …and the name ONLY: a span reaching back into the sentence before the
+    // cite would spare a name of this case standing there, unmarked.
+    check("…cut after the sentence before it and after a signal",
+      [spans("Served on Helen Rasho. Jones, 30 Cal.App.5th at p. 5."), spans("Rasho. See Jones, at p. 5")], [["Jones"], ["Jones"]]);
+    const NOT = [
+      "Jones, 2019", "JOHN DOE, DOES 1 through 10", "Jones, 12 March 2020", "Jones, 30 Main Street",
+      "Jones, 25STCV12345", "(Jones, at 5)", "Mr. Jones, at p. 5 of his deposition", "(Jones Decl., at p. 3)",
+      "(Smith Depo., at p. 12)", "Rasho, 30 days later, wrote", "Jones, 30 Cal. App",
+    ];
+    check("…never a name before a bare number, a date, a docket or this case's own record",
+      NOT.map((t) => spans(t)), NOT.map(() => []));
+    // FOUND FROM THE TAIL: linear in the text, a jurat's capitals, a run of
+    // near-miss tails (", 30 days", "Jones, at times"), and a brief dense with
+    // short cites all read in step with their length.
+    const UNIT = "I JOHN ANDREW FORSYTHE DECLARE, 30 DAYS AS FOLLOWS. Jones, at times, said so. "
+      + "(Rasho, 30 Cal.App.5th at p. 5.) Quillmark, 12 March 2020, Vance, 31 Cal. App. 4th, 9; See Ruiz, at p. 4. ";
+    const ms = (t) => { const from = Date.now(); citedNameSpans(t); return Date.now() - from; };
+    const a = ms(UNIT.repeat(300)), b = ms(UNIT.repeat(1200));
+    check(`…and read in step with the text (${a} ms then ${b} ms for four times as much)`, b < Math.max(60, a * 12), true);
+    check("…a long export of them is not seconds", ms(UNIT.repeat(4800)) < 3000, true);
+    check("…and each short cite in it is found", citedNameSpans(UNIT.repeat(10)).length, 30);
+  }
   // The bound is a party's WORDS, and a long one still reads as it did: this
   // name always began at "Department", the pattern being unable to cross the
   // two small words of "of the State" whatever the count allows.
@@ -443,14 +489,15 @@ console.log("what an edit wrote");
   check("a citation typed whole keeps its parties, read whole as well",
     typedAt(" 1  Nothing.", " 1  Nothing. See Rasho v. Quillmark (2017) 13 Cal.App.5th 1152."), []);
 
-  // ESC IS KEPT FOR EVERY NAME IT WAS PRESSED ON. A short cite with no
-  // "supra" ("(Rasho, 30 Cal.App.5th at p. 5.)") is not read as one, so the
-  // save writes a name typed there unless Esc left it: one Esc used to be
+  // ESC IS KEPT FOR EVERY NAME IT WAS PRESSED ON. A citation the reader
+  // does not read as one — this was a short cite with no "supra" ("(Rasho,
+  // 30 Cal.App.5th at p. 5.)") until citedNameSpans read it, below — has the
+  // save write a name typed there unless Esc left it: one Esc used to be
   // remembered, the last, and the first of two such cites went to the file as
   // "(Strangeways, 30 …)", a renamed authority. Each Esc'd name is taken out
   // of the typed set where it stands exactly; a longer name ending at the same
   // place is not the Esc'd one.
-  const two = " 1  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 2  End. (Rasho, 31 Cal.App.5th at p. 9.)";
+  const two = " 1  Nothing. (Rasho, 30 slip op. 5.)\n 2  End. (Rasho, 31 slip op. 9.)";
   const twoBuilt = " 1  Nothing.\n 2  End.";
   const twoTyped = typedSpans(findRealSpans(sreals, two, { layout: two }), two, twoBuilt);
   const at1 = two.indexOf("Rasho"), at2 = two.lastIndexOf("Rasho");
@@ -513,6 +560,38 @@ console.log("what an edit wrote");
     [escapedPlace(twoBefore, twoMoved, "Rasho", tAt, null).within, escapedPlace(twoBefore, twoMoved, "Rasho", tAt, new Set([twoMoved.indexOf("Rasho")])).within],
     [[twoMoved.indexOf("Rasho"), twoMoved.indexOf("Rasho agrees")], [twoMoved.indexOf("Rasho agrees")]]);
   check("…and nothing for no name or no place", [escapedPlace(cite, cascaded, "", at, null), escapedPlace(cite, cascaded, "Rasho", -1, null)], [{ at: -1, within: [] }, { at: -1, within: [] }]);
+  // …and where the edit SLIDES — the text it took repeats what stands beside
+  // the name, so it could have been taken from either side of it — the two
+  // ways of telling it disagree about whether it reached the name. Told head
+  // first only, a deletion from "(Rasho, 30 …)" through to just before
+  // "(Rasho, 31 …)" reached the second, and the reader dropped its Esc: the
+  // save wrote "(Strangeways, 31 …)" under a plain "Saved". It is UNSURE now,
+  // left as typed and warned, never dropped.
+  const twoLines = "Plaintiff filed.\nNothing. (Rasho, 30 slip op. 5.)\nEnd. (Rasho, 31 slip op. 9.)\nSigned.";
+  const second = twoLines.lastIndexOf("Rasho");
+  const firstGone = twoLines.replace("(Rasho, 30 slip op. 5.)\nEnd. ", "");
+  check("escapedPlace: a deletion that slides over the name — unsure, at the place either telling puts it",
+    escapedPlace(twoLines, firstGone, "Rasho", second, null), { at: -1, within: [firstGone.indexOf("Rasho")], unsure: true });
+  const judge = "Plaintiff filed.\nNothing else (Judge so held).\nThe end. (Jones, slip op. 5.)\nSigned.";
+  const judgeGone = judge.replace("(Judge so held).\nThe end. ", "");
+  check("…a deletion whose text begins as the name's does", escapedPlace(judge, judgeGone, "Jones", judge.indexOf("Jones"), null),
+    { at: -1, within: [judgeGone.indexOf("Jones")], unsure: true });
+  const notSlid = judge.replace("so held).\nThe end. ", "");
+  check("…and one that does not slide is followed as before", escapedPlace(judge, notSlid, "Jones", judge.indexOf("Jones"), null), { at: notSlid.indexOf("Jones") });
+  // editedSpans, the measure of what was TYPED, slides a deletion's point to
+  // a place that splits no word: told head first, the point fell inside a
+  // name the file already carried, and the save took it for typed and wrote
+  // its pseudonym over it.
+  const base = "Plaintiff filed.\nThat was error (Judge Whitaker erred).\n(Jones agreed.)\nSigned.";
+  const baseNow = base.replace("(Judge Whitaker erred).\n", "");
+  const bj = baseNow.indexOf("Jones");
+  check("editedSpans: a deletion that slides is placed where it splits no word", spanEdited(editedSpans(base, baseNow), bj, bj + 5), false);
+  const inLine = " 1  Nothing.\n 2  That was error (Judge said) (Jones said).\n 3  x";
+  const inLineNow = inLine.replace("(Judge said) ", "");
+  const ij = inLineNow.indexOf("Jones");
+  check("…inside a changed line too", spanEdited(editedSpans(inLine, inLineNow), ij, ij + 5), false);
+  check("…and a deletion inside a name still reaches it",
+    spanEdited(editedSpans("Served on Jonnes here.", "Served on Jones here."), 10, 15), true);
 }
 
 // ---- the values file ---------------------------------------------------------------
@@ -772,6 +851,11 @@ check("run markers", ["ETA ~6.04PM (6 of 13).txt", "ETA (estimating...).txt", "D
   [{ kind: "ETA", label: "~6:04 PM (6 of 13)" }, { kind: "ETA", label: "(estimating...)" }, { kind: "DONE", label: "12:45 AM" }, { kind: "ETA", label: "~11:05 PM (applying leak fixes)" }, null, null, null]);
 check("quarantine", isQuarantinedName("Brief.txt.LEAK"), true);
 check("key name", [isKeyName("pseudonym_key.xlsx"), isKeyName("pseudonym_key (1).xlsx"), isKeyName("Order 2024.xlsx")], [true, true, false]);
+// …never PDF-Linker's temporary copy, left beside the key by a save that crashed,
+// and the key itself before a copy of it a folder lists first.
+check("…not the temporary copy a save leaves", isKeyName("pseudonym_key.tmp.xlsx"), false);
+check("…the key itself first", [KEY_FILE, keyRank("pseudonym_key.xlsx"), keyRank("Pseudonym_Key.xlsx"), keyRank("pseudonym_key (1).xlsx"), keyRank("pseudonym_key - Copy.xlsx")],
+  ["pseudonym_key.xlsx", 0, 0, 1, 1]);
 
 // ---- settings ------------------------------------------------------------------------------
 console.log("settings");
@@ -1710,6 +1794,33 @@ console.log("a decision undone and made again");
     applyDecisionDelta(st({ rows: [["typed later", false], ["yes", false], ["no", true]] }), rows, true).rows,
     [["typed later", false], ["", false], ["no", false]]);
   check("rows of another sheet's length are not compared", decisionDelta(st({ rows: [["", false]] }), st({ rows: [["yes", false], ["", false]] })), null);
+}
+
+// ---- the lines of New Real Values.txt the reader did not write ----
+// The reader writes the file whole, from its lists: a page list PDF-Linker
+// reads and the lists cannot hold, and a line put in the file since the
+// folder was opened, are kept as they stand, after the reader's own.
+console.log("the lines of New Real Values.txt the reader did not write");
+{
+  check("a line's identity: value, phrase, keep, page lines, comments none",
+    ["Quell Harbor", "phrase: Cross River Bank", "never:  Corwin Ashdale", "did not ocr: Exhibit A.pdf | page 2", "# a comment", ""].map(valuesLineKey),
+    ["value:quell harbor", "phrase:cross river bank", "never:corwin ashdale", "noocr:exhibit a.pdf|2", "", ""]);
+  check("…a page list the reader cannot parse is kept raw", valuesLineKey("did not ocr: Exhibit A.pdf | pages 3-5, 9").startsWith("raw:"), true);
+  check("…folded alike however it is spelled", valuesLineKey("QUELL  harbor") === valuesLineKey("Quell Harbor"), true);
+  const mine = "# New Real Values\nMarlow Tenbury\nno: Cal\n";
+  const seen = valuesLineKeys("Quell Harbor\ndid not ocr: Exhibit A.pdf | pages 3-5, 9\n");
+  const disk = "Quell Harbor\ndid not ocr: Exhibit A.pdf | pages 3-5, 9\nHand Typed Value\nMarlow Tenbury\n";
+  check("kept: the page list and a line put in since the folder was opened; not the reader's own, nor one it read and has since let go",
+    linesNotOurs(disk, { mine, written: "", seen }), ["did not ocr: Exhibit A.pdf | pages 3-5, 9", "Hand Typed Value"]);
+  check("…a line this tab last wrote and has since let go is not kept", linesNotOurs("Old Value\n", { mine, written: "Old Value\n", seen: new Set() }), []);
+  check("…a keep the operator withdrew is not kept", linesNotOurs("no: Old Keep\n", { mine, seen: new Set(), withdrawn: (c, v) => c === "no" && v === "Old Keep" }), []);
+  check("…with the file never read (no seen), only the raw lines", linesNotOurs(disk, { mine, seen: null }), ["did not ocr: Exhibit A.pdf | pages 3-5, 9"]);
+  check("…once each", linesNotOurs("Hand Typed Value\nhand typed  value\n", { mine, seen: new Set() }), ["Hand Typed Value"]);
+  const both = withLinesNotOurs(mine, ["Hand Typed Value"]);
+  check("written after the reader's own lines, under a comment", both.split("\n").slice(-3), ["# Already in this file, not written by the text reader — kept as they stand:", "Hand Typed Value", ""]);
+  check("…which PDF-Linker reads as the reader's lines plus the kept one", parseReaderFile(both).values, ["Marlow Tenbury", "Hand Typed Value"]);
+  check("…and nothing kept, the reader's text as it was", withLinesNotOurs(mine, []), mine);
+  check("sameBytes", [sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 2])), sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 3])), sameBytes(null, new Uint8Array([]))], [true, false, false]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
