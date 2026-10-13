@@ -20,6 +20,11 @@ about keeping them straight:
   the top-left and translate back). That is deliberate and useful — the
   line-number detection and the selectable-text region keep reading
   `offsetLeft` / `offsetTop` in the page's upright frame, unchanged by rotation.
+  The text reader's PDF pane, swapped-in pages and redaction sweep build the
+  same layers and load only `text-reader.css`, which carries the same three
+  rules; it lacked them once, and every name it marked or covered on a
+  `/Rotate` page landed in the wrong place (Design Notes/Redaction.md, "Turned
+  pages").
 
 Anything that crosses between the frames goes through the cached viewport
 rather than through `currentScale`: `collectHighlightPdfRects`

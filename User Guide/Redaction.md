@@ -42,11 +42,48 @@ images become a new document that has never held anything else:
 - **no metadata** — no `/Info` dictionary and no XMP packet, so nothing in the
   file carries the author, the software, the times, or the original filename.
 
-The copy is named for the document it came from, run forward through the key
-where one is loaded and marked redacted either way:
-`Rasho v Quillmark - MTC.pdf` is saved as
-`Strangeways v Melbury - MTC (redacted).pdf`. Re-redacting a redacted copy
-marks it once, not twice.
+The copy is named for the document it came from, the way PDF-Linker names
+its text export: underscores and hyphens become spaces, the name is run
+forward through the key where one is loaded, and it is marked redacted either
+way. `Rasho v Quillmark - MTC.pdf` is saved as
+`Strangeways v Melbury MTC (redacted).pdf`, and `Helen_Rasho_Decl.pdf` as
+`Ingrid Strangeways Decl (redacted).pdf`. Names run together are read too:
+`HelenRasho Decl.pdf` becomes `IngridStrangeways Decl (redacted).pdf`. A value
+the key spells with a hyphen or an underscore is found however the name
+separates its words, and faked whole: `Mary Kate_Olsen Decl.pdf`, where the
+key binds `Mary-Kate Olsen`, is saved as `Ruth-Ann Pell Decl (redacted).pdf`,
+and `23_cv_01234 Order.pdf` as `23-cv-05678 Order (redacted).pdf`.
+Re-redacting a redacted copy marks it once, not twice.
+
+**The name hides what the pages hide.** After faking, the name is checked for
+anything the key binds, and where a real value would still stand in it — a
+name welded to another word (`RashoDecl.pdf`, `RASHODECL.pdf`,
+`Rashodecl.pdf`, `Rasho2023.pdf`), a possessive written without its
+apostrophe (`RASHOS OPP.pdf`), a long name or a case number inside a word or
+spaced out (`25STCV59720Complaint.pdf`, `25 STCV 59720 Complaint.pdf`), a name
+typed without its accents or its apostrophe (`Jose Garcia`, `OBRIEN`,
+`ObrienDecl`), a long surname run into a word (`KowalczykDecl.pdf`), a
+name's words in another order or around an initial, where a word of it would
+stand beside a pseudonym or the whole name would stand (`Rasho_Helen_Decl.pdf`,
+`Helen M. Rasho Decl.pdf`, `Vrba, Tomas Decl.pdf`), an e-mail address spelled
+otherwise than the key spells it, a value the key holds an instruction for
+rather than a pseudonym — the copy is saved under a neutral name instead,
+such as `document 3fa9c1 (redacted).pdf`. The same document always gets the
+same neutral name. An e-mail address in the name is
+faked whole, underscores and all: `Letter to helen_rasho@rashofamilylaw.com.pdf`
+is saved as `Letter to quenby3@postbox9.org (redacted).pdf`.
+
+The check errs toward the neutral name. With no dictionary to consult, a
+capitalised word with a party's short name inside it is read as the name:
+`Marketing Plan.pdf` in a matter with a party named Mark is saved as
+`document … (redacted).pdf`; rename the copy yourself if you need a better one.
+Three shapes are not caught: a short name run into another word with no
+capital in the name itself (`rashodecl.pdf`, `Declrasho.pdf`, an e-mail
+address typed without its `@`); a name of three letters or fewer run into
+another word with no change of case to part it (`LEEDECL.pdf`, `Leedecl.pdf`
+— `LeeDecl.pdf` is caught); and one word of a longer name standing alone
+where the key binds only the whole name (`Vrba Decl.pdf` for `Tomas Vrba`) —
+look at the name the Save dialog offers before you share the copy.
 
 Pages render at **200 dpi** by default; 150 makes a smaller file and 300 a
 sharper one. Because the result is images, it is larger than the original and
@@ -134,3 +171,22 @@ the pane. It skips the values the review has **kept**, which the reader knows
 about and the viewer does not. And where a `Combined Text.txt` puts several
 documents beside one export, the boxes are filed per PDF and the save writes a
 copy of each that carries any.
+
+**Turned pages are marked where they are drawn.** A landscape exhibit, or a
+page somebody turned in Acrobat (the file's own `/Rotate`), is swept, dragged
+over and screenshotted where its words are on the page you see — in the text
+reader this was not so until the reader's text layer was turned with the page,
+and a sweep stored its box on the wrong part of the page while the check said
+the name was covered. Two things are worth knowing. A page whose text runs
+**sideways** on screen (portrait text on a page turned a quarter) is read in
+columns rather than lines, so a name on it may be boxed only in part; the check
+reports it as not found, and an area drag over it is the answer. The same goes
+for a page set at a slant, even of under a degree, where a name stands in a
+short run of its own at the far end of a line (a service list's right-hand
+column): the sweep may box its first name alone, and the check reports the
+rest. A screenshot
+of the PDF pane leaves such a page out whole when a name is on it. And should a
+page's text ever not stand over the page as it is drawn, the reader marks
+nothing there rather than mark the wrong place: the sweep's message names the
+page to be marked by hand, the check walks its values with that reason, a drag
+on it marks the area drawn, and a screenshot leaves that page out.

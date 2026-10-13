@@ -649,6 +649,21 @@ function walk(node, emit, opts) {
   // pseudonym span's own text is never one of the text nodes.
   const onText = opts && opts.text;
   const onFake = opts && opts.fake;
+  // `child` is told of each place BETWEEN an element's children as the walk
+  // reaches it — (element, i) before its i-th child, and (element, count)
+  // after the last — which is how a DOM boundary point that sits on an
+  // element rather than in a text node (a selection's end, see serializeHeld)
+  // finds where it stands in what is emitted. A pseudonym span's inside is
+  // not walked, so it is never told of one.
+  const onChild = opts && opts.child;
+  const kids = (n, atStart) => {
+    const list = n.childNodes || [];
+    for (let i = 0; i < list.length; i++) {
+      if (onChild) onChild(n, i);
+      rec(list[i], i === 0 && atStart);
+    }
+    if (onChild) onChild(n, list.length);
+  };
   const rec = (n, atStart) => {
     if (n.nodeType === TEXT_NODE) {
       if (onText) onText(n);
@@ -658,12 +673,13 @@ function walk(node, emit, opts) {
     if (n.nodeType !== ELEMENT_NODE) return;
     const name = String(n.nodeName || "").toUpperCase();
     if (name === "BR") {
+      if (onChild) onChild(n, 0);
       if (n.nextSibling) emit("\n");
       return;
     }
     if (mark && n.getAttribute && n.getAttribute(HERE_ATTR) != null) {
       mark("in");
-      for (const c of n.childNodes || []) rec(c, false);
+      kids(n, false);
       mark("out");
       return;
     }
@@ -681,11 +697,7 @@ function walk(node, emit, opts) {
       return;
     }
     if (BLOCKS.has(name) && !atStart) emit("\n");
-    let first = true;
-    for (const c of n.childNodes || []) {
-      rec(c, first && atStart);
-      first = false;
-    }
+    kids(n, atStart);
   };
   rec(node, true);
 }
@@ -730,12 +742,49 @@ const HERE_ATTR = "data-here";
  * pseudonyms, `pns` the fakes the run wrote. With `mapped`, `segs` as well:
  * each text node and where its text stands in `text` ([{ node, start, end }],
  * in order; a pseudonym span's own text is not one), which is what a reading
- * of the disk text needs to put its marks back on the page.
+ * of the disk text needs to put its marks back on the page, and `pnNodes`,
+ * the pseudonym spans themselves in the order of `pns`.
+ *
+ * With `points` ([{ node, offset, end }], DOM boundary points: a text node and
+ * an offset into it, or an element and a child index), `at` as well: where
+ * each stands in `text`, or -1 for one that is not inside `root`. A point
+ * INSIDE a pseudonym span takes the span whole — the span's start for a
+ * start point, its end for one marked `end` — since the file carries the
+ * fake and a piece of the real name lines up with no piece of it; a point at
+ * the span's very start or end is that place either way. This is how a
+ * selection on the page is cut out of the text the file carries (the reader's
+ * copy, cut and drag).
  */
-export function serializeHeld(root, { mapped = false } = {}) {
+export function serializeHeld(root, { mapped = false, points = null } = {}) {
   let out = "";
   const held = [];
   const segs = mapped ? [] : null;
+  const pnNodes = mapped ? [] : null;
+  const pts = points || [];
+  const at = pts.map(() => -1);
+  const place = (k, pos) => { if (at[k] < 0) at[k] = pos; };
+  const len = (n) => (n.data != null ? n.data : n.nodeValue || "").length;
+  // Where a point stands in a pseudonym span's own text: "start", "end", "mid",
+  // or null where it is not in the span at all.
+  const inSpan = (span, p) => {
+    let before = 0, hit = -1;
+    const visit = (n) => {
+      if (n.nodeType === TEXT_NODE) {
+        if (n === p.node) hit = before + Math.min(Math.max(0, p.offset), len(n));
+        before += len(n);
+        return;
+      }
+      const list = n.childNodes || [];
+      for (let i = 0; i < list.length; i++) {
+        if (n === p.node && p.offset === i) hit = before;
+        visit(list[i]);
+      }
+      if (n === p.node && p.offset >= list.length) hit = before;
+    };
+    visit(span);
+    if (hit < 0) return null;
+    return before > 0 && hit === 0 ? "start" : before > 0 && hit === before ? "end" : "mid";
+  };
   // …and where each PSEUDONYM's fake stands in it. The marks read the page with
   // these blanked (the reader's flatten, clearReading): a fake is what the run
   // wrote, and a word of it that happens to be a real the key binds is not a
@@ -746,20 +795,76 @@ export function serializeHeld(root, { mapped = false } = {}) {
   let open = -1;
   walk(root, (s) => { out += s; }, {
     fakes: true,
-    text: mapped ? (n) => {
+    text: mapped || pts.length ? (n) => {
       const d = n.data != null ? n.data : n.nodeValue || "";
-      segs.push({ node: n, start: out.length, end: out.length + d.length });
+      if (mapped) segs.push({ node: n, start: out.length, end: out.length + d.length });
+      pts.forEach((p, k) => { if (p.node === n) place(k, out.length + Math.min(Math.max(0, p.offset), d.length)); });
     } : null,
+    child: pts.length ? (n, i) => { pts.forEach((p, k) => { if (p.node === n && p.offset === i) place(k, out.length); }); } : null,
     mark: (phase) => {
       if (phase === "in") open = out.length;
       else if (open >= 0) { if (out.length > open) held.push([open, out.length]); open = -1; }
     },
     fake: (n) => {
       const f = n.getAttribute("data-fake") || "";
-      if (f) pns.push([out.length, out.length + f.length]);
+      if (f) {
+        pns.push([out.length, out.length + f.length]);
+        if (mapped) pnNodes.push(n);
+      }
+      pts.forEach((p, k) => {
+        if (at[k] >= 0) return;
+        const where = inSpan(n, p);
+        if (where) place(k, where === "start" || (where === "mid" && !p.end) ? out.length : out.length + f.length);
+      });
     },
   });
-  return mapped ? { text: out, held, pns, segs } : { text: out, held, pns };
+  const res = mapped ? { text: out, held, pns, segs, pnNodes } : { text: out, held, pns };
+  if (points) res.at = at;
+  return res;
+}
+
+/**
+ * `text` from `a` to `b` as a copy of it carries it: each of `swaps` ({ start,
+ * end, to }, places in `text`) that the stretch reaches written WHOLE as its
+ * `to`, and the `skip` ranges ([start, end)) left out.
+ *
+ * Whole, because a selection that ends half way through a name is still a
+ * selection of the name: "Helen Ra" is two thirds of a real name, and there is
+ * no two thirds of its pseudonym that says less. A swap the stretch only
+ * touches at an end (one ending where it begins) is not reached. The skipped
+ * ranges are what the page shows but a selection never takes — the pleading
+ * margin's numbers — and they are cut from the text around the swaps, never
+ * out of a `to`.
+ */
+export function clipText(text, swaps, a, b, skip) {
+  const src = String(text == null ? "" : text);
+  const lo = Math.max(0, Math.min(src.length, a | 0)), hi = Math.max(0, Math.min(src.length, b | 0));
+  if (hi <= lo) return "";
+  const gaps = (skip || []).filter((r) => r && r[1] > r[0]).sort((x, y) => x[0] - y[0]);
+  // Asked with `from` only ever moving on, so the ranges already passed are
+  // passed for good: one walk over them for the whole stretch, not one per
+  // swap (a Word export is one page, its every name a swap).
+  let gi = 0;
+  const plain = (from, to) => {
+    while (gi < gaps.length && gaps[gi][1] <= from) gi++;
+    let out = "", at = from;
+    for (let j = gi; j < gaps.length && gaps[j][0] < to; j++) {
+      const [x, y] = gaps[j];
+      if (y <= at) continue;
+      if (x > at) out += src.slice(at, x);
+      at = Math.max(at, y);
+    }
+    return at < to ? out + src.slice(at, to) : out;
+  };
+  const ws = (swaps || []).filter((w) => w && w.end > w.start).sort((x, y) => x.start - y.start);
+  let out = "", at = lo;
+  for (const w of ws) {
+    if (w.end <= lo || w.end <= at) continue;
+    if (w.start >= hi) break;
+    out += plain(at, Math.max(at, w.start)) + String(w.to == null ? "" : w.to);
+    at = w.end;
+  }
+  return out + plain(at, Math.max(at, hi));
 }
 
 /**
@@ -1225,20 +1330,141 @@ export function typedReals(hits, page, built) {
 }
 
 /**
+ * The same question asked by the SAVE, of the names standing in the page's
+ * disk reading (the reader's standingSpans: findRealSpans hits, a name wrapped
+ * over a line break or down a column one hit with a range per piece): the ones
+ * an edit wrote, none in a cited decision's name. `text` is the page as it is
+ * about to be written, `built` what it was built from or last saved as; with
+ * none, nothing counts as typed.
+ *
+ * The converter answers it for the screen and passes over the name the caret
+ * is still in and the one Esc dismissed at the prompt; it reads a text node at
+ * a time, so a name typed across a line break is not one it can see at all;
+ * and it waits a quarter of a second after the typing. A save inside any of
+ * those wrote the real name into the export and then counted it as a name the
+ * file had carried, "not yet reviewed", from then on. The save asks here
+ * instead, of every name it reads, and writes each one this returns as its
+ * pseudonym. A piece the edit wrote makes the name typed: "Rasho" typed under
+ * a "Helen" the page had is "Helen Rasho" typed, and is faked whole.
+ */
+export function typedSpans(spans, text, built) {
+  if (!spans || !spans.length || built == null) return [];
+  const edits = editedSpans(built, text);
+  if (!edits.length) return [];
+  const mine = spans.filter((h) => (h.ranges && h.ranges.length ? h.ranges : [[h.start, h.end]]).some(([a, b]) => spanEdited(edits, a, b)));
+  if (!mine.length) return [];
+  const cited = citedNameSpans(text);
+  return mine.filter((h) => !insideCited(cited, h));
+}
+
+/**
+ * The typed names Esc left AS TYPED taken out of `spans` (typedSpans' answer):
+ * `escaped` is [[start, end], …], each the place of one Esc'd name in the same
+ * disk text. A name is the Esc'd one only where it stands EXACTLY there — a
+ * longer name ending at the same place ("Bob Jones" typed over an Esc'd
+ * "Jones"), or one of several pieces wrapped over lines, is not: it is a name
+ * the operator never dismissed, and goes as typed names go.
+ */
+export function withoutEscaped(spans, escaped) {
+  if (!spans || !spans.length || !escaped || !escaped.length) return spans || [];
+  return spans.filter((h) => {
+    if (h.ranges && h.ranges.length > 1) return true;
+    return !escaped.some(([a, b]) => h.start === a && h.end === b);
+  });
+}
+
+/**
+ * Where an Esc'd name stands now, for one whose nodes went from under its
+ * range: `was` is the page's disk text when its place was noted (`at`, the
+ * start of `name` there), `now` the page's disk text as it stands. The two
+ * are compared by the head and the tail they have in common, which is what an
+ * edit made in one place leaves alone, and the answer is one of two:
+ *
+ * - { at } — the name lay wholly in that head or tail, so nothing written
+ *   since the note reached it: its start now (moved by what the edit put in
+ *   or took out before it), where `now` holds it still, a whole word;
+ * - { at: -1, within } — the edit reached it (wrote over it, took it out,
+ *   moved the text it stood in, or glued a letter to it): `within` the
+ *   starts of the name's whole-word occurrences that the text the edit wrote
+ *   takes in (any of them between the shared head and tail; where the edit
+ *   only took text out, the ones it closed up across), leaving out `taken`
+ *   (the places of the page's other Esc'd names).
+ *
+ * BOUNDED, BY THE EDIT. This used to be the name's occurrences ANYWHERE on
+ * the page, nearest first, with no limit — on the reading that an occurrence
+ * wrongly taken for the Esc'd one is only a name left as typed. But a name
+ * whose line was deleted waited for the next occurrence however far off and
+ * however much later: "Jones was served." typed on line 1, after the short
+ * cite holding the Esc'd "Jones" had been cut from line 3, went into the file
+ * as itself, with no prompt and no mark, under a warning that it "stands in
+ * the file as it did" (measured on b6d82a6). An occurrence the edit did not
+ * write is one the operator never pressed Esc on, and it is not offered
+ * here. What the reader does with `within` — drop the name, where the one
+ * edit since the note was the browser's own and so took it out; leave each
+ * occurrence as typed and say so, where the text was moved by something it
+ * could not follow — is its own (escapesIn).
+ */
+export function escapedPlace(was, now, name, at, taken) {
+  const a0 = String(was == null ? "" : was), b0 = String(now == null ? "" : now);
+  if (!name || !(at >= 0)) return { at: -1, within: [] };
+  const word = /[\p{L}\p{N}]/u;
+  const whole = (i) => b0.startsWith(name, i) && !(i > 0 && word.test(b0[i - 1])) && !word.test(b0[i + name.length] || "");
+  const lim = Math.min(a0.length, b0.length);
+  let p = 0;
+  while (p < lim && a0.charCodeAt(p) === b0.charCodeAt(p)) p++;
+  let s = 0;
+  while (s < lim - p && a0.charCodeAt(a0.length - 1 - s) === b0.charCodeAt(b0.length - 1 - s)) s++;
+  const end = at + name.length;
+  // In the head the two share, or in the tail: the same characters, moved by
+  // the length the edit changed where it lay before it.
+  if (end <= p && whole(at)) return { at };
+  if (at >= a0.length - s && end <= a0.length) {
+    const there = at + (b0.length - a0.length);
+    if (whole(there)) return { at: there };
+  }
+  // The edit reached it: what the edit wrote is [p, e) of `now`, or the
+  // point p where it only took text out.
+  const e = b0.length - s;
+  const within = [];
+  for (let i = b0.indexOf(name); i >= 0; i = b0.indexOf(name, i + 1)) {
+    const j = i + name.length;
+    if (!(e > p ? i < e && j > p : i < p && j > p)) continue;
+    if (!whole(i) || (taken && taken.has(i))) continue;
+    within.push(i);
+  }
+  return { at: -1, within };
+}
+
+/**
  * The pseudonym spans an edit made that now stand in a cited decision's name:
  * a party marked at the as-you-type prompt, or by the converter in a pause,
  * before the rest of the citation was typed after it. [span element] — each
  * to go back to the name as typed, since a pseudonym there is a citation to a
  * case that does not exist. Spans the page was built with are not an edit's.
+ *
+ * …and a span carrying `data-typed` is one, whatever `built` says. The reader
+ * sets it on every mark the typing makes and carries it over a save's rebuild
+ * of the page, because a save takes the text it wrote for the page's own
+ * (`built`): told apart by the edit alone, "See Jones" saved before the
+ * citation was finished was "See Pratt" built, and the "v. Smith (2019) 30
+ * Cal.App.5th 1." typed after the save left the mark standing in it, to be
+ * written as a renamed authority by the next save.
+ *
+ * …and never a span carrying `data-left`: a mark this put back that the
+ * operator took back with Ctrl+Z. The undo puts back the text the page was
+ * measured against (`built`) and the typing's flags with the mark (the
+ * reader's restoreTyping), which would have it put back again at the next
+ * pause; the guide's "Ctrl+Z puts the mark back" is the operator saying the
+ * citation is one whose parties the file holds as pseudonyms.
  */
 export function typedPseudonymsCited(page, built) {
-  if (built == null || !page.pn || !page.pn.size) return [];
-  const spans = editedSpans(built, page.text);
-  if (!spans.length) return [];
+  if (!page.pn || !page.pn.size) return [];
+  const spans = built == null ? [] : editedSpans(built, page.text);
   const made = [];
   for (const [el, o] of page.pn) {
+    if (el.getAttribute("data-left") != null) continue; // the operator's: Ctrl+Z took it back from a put-back
     const len = String(el.getAttribute("data-fake") || "").length;
-    if (spanEdited(spans, o, o + len)) made.push([el, o, o + len]);
+    if (el.getAttribute("data-typed") != null || spanEdited(spans, o, o + len)) made.push([el, o, o + len]);
   }
   if (!made.length) return [];
   const cited = citedNameSpans(page.text);
@@ -1591,6 +1817,121 @@ export function dropFlagsInKey(list, compiledForward) {
  */
 export function keyAnswersFlags(keyOwner, listId) {
   return !!keyOwner && keyOwner === listId;
+}
+
+/**
+ * The storage keys a folder's state is kept under for the folder `from`, each
+ * paired with its key for the folder `to`: [{ from, to }], out of `keys` (the
+ * store's keys as they stand). `whole` are the prefixes kept once per folder
+ * (prefix + folder: the flagged list, what was last written); `perDoc` those
+ * kept once per document in it (prefix + folder + "/" + file: spot keeps,
+ * swapped pages, unsaved LEAKS answers).
+ *
+ * A folder was once named by its bare name and is now named by an id that
+ * begins with "/", which no file or folder name can hold — so a name's
+ * prefix-and-slash never reaches into an id's keys, and the move from a name
+ * to an id (or from a Text Files folder's id to its case folder's) takes only
+ * that folder's own. An empty `from` is no folder, and moves nothing.
+ */
+export function folderStateMoves(keys, from, to, { whole = [], perDoc = [] } = {}) {
+  const out = [];
+  if (!from || !to || from === to) return out;
+  for (const k of keys || []) {
+    if (typeof k !== "string") continue;
+    const w = whole.find((p) => k === p + from);
+    if (w) { out.push({ from: k, to: w + to }); continue; }
+    const d = perDoc.find((p) => k.startsWith(p + from + "/"));
+    if (d) out.push({ from: k, to: d + to + k.slice((d + from).length) });
+  }
+  return out;
+}
+
+/**
+ * Whether an older build's state, kept under a folder's bare NAME, may be
+ * moved under the id of the folder of that name now being opened: "" where it
+ * may, else why it is held aside — "text" (a Text Files folder), "named" (more
+ * than one folder of the name known here), "unwritten" (that build never wrote
+ * the list to a folder) or "differs" (the folder's New Real Values.txt is not
+ * the text that build last wrote).
+ *
+ * The state was every same-named folder's at once, so whose it is can only be
+ * told from the one thing the folder itself carries: the file that build last
+ * wrote, still standing in THIS folder (`onDisk` equal to `saved`). How many
+ * folders of the name are remembered (`sameName`) is no evidence on its own:
+ * that build remembered folders by name too, one handle per name, so the
+ * first one opened after the upgrade always counts one — measured, a keep
+ * never written, made in client A's Opposition, moved into client B's because
+ * B was the one remembered, took the orange mark off B's plaintiff and was
+ * written into B's file as `no:`. It still holds a list aside where two are
+ * known. A Text Files folder's list is never moved: every case's Text Files
+ * folder shared the one name, and a list carried up from it is written into
+ * the case folder PDF-Linker reads.
+ */
+export function legacyStateHold({ textFiles = false, sameName = 0, saved = "", onDisk = null } = {}) {
+  if (textFiles) return "text";
+  if (sameName !== 1) return "named"; // counting this one: none known is no answer either
+  if (!saved) return "unwritten";
+  return onDisk === saved ? "" : "differs";
+}
+
+/**
+ * An older build's stored list (as readStoredValues gives it) split by what
+ * legacyStateHold answered for it: `{ move, held }`, the part read into the
+ * folder being opened and the part held aside, either null where empty.
+ *
+ * NOT THE FLAGS. The whole list was held aside wherever the folder could not
+ * show it was last written there — and the ordinary state after a run is just
+ * that, since a run spends New Real Values.txt once it has applied it. So for
+ * an operator who had flagged, saved and run PDF-Linker, the first open after
+ * the upgrade held every flag aside with the keeps, though only one folder of
+ * the name had ever been known: the names flagged as standing in the clear
+ * lost their red mark, nothing handed them to PDF-Linker again, and the save
+ * wrote no file. The two halves of the list fail in opposite directions. A
+ * keep or a page line read into the wrong case takes the mark off a real name
+ * and hands its run a `no:` for it; a flag read into the wrong case only fakes
+ * one more name there (and a phrase only joins a flag's words). So where one
+ * folder of the name is known ("unwritten", "differs") the flags and their
+ * phrases move and only the keeps and page lines are held; where the list was
+ * last written here ("") all of it moves; where two folders of the name are
+ * known ("named"), or it is a Text Files folder's ("text" — every case's had
+ * the one name), all of it is held, as no one folder can be told from another.
+ */
+export function legacyListSplit(list, hold) {
+  const l = list || {};
+  const any = (x) => Object.values(x).some((v) => Array.isArray(v) && v.length);
+  const whole = { values: l.values || [], keeps: l.keeps || [], phrases: l.phrases || [], noOcr: l.noOcr || [], ocrAgain: l.ocrAgain || [], textFixed: l.textFixed || [] };
+  if (!hold) return { move: any(whole) ? whole : null, held: null };
+  if (hold === "text" || hold === "named") return { move: null, held: any(whole) ? whole : null };
+  const move = { values: whole.values, keeps: [], phrases: whole.phrases.filter((p) => isPhrase(whole.values, p)), noOcr: [], ocrAgain: [], textFixed: [] };
+  const held = { values: [], keeps: whole.keeps, phrases: [], noOcr: whole.noOcr, ocrAgain: whole.ocrAgain, textFixed: whole.textFixed };
+  return { move: any(move) ? move : null, held: any(held) ? held : null };
+}
+
+/**
+ * Two stored lists ({ values, keeps, phrases, noOcr, ocrAgain, textFixed })
+ * made one: everything in either, `mine` winning where both name a value or
+ * a page — a keep's control, a phrase, a page asked to be read again rather
+ * than left unread — as the folder's New Real Values.txt is merged into its
+ * list on adoption. Nothing in either is lost: a flag left on is only asked
+ * about again, and a flag dropped could let a name ship. Used where a list
+ * kept in the Text Files folder joins its case folder's.
+ */
+export function mergeStoredLists(mine, theirs) {
+  const a = mine || {}, b = theirs || {};
+  let values = (a.values || []).slice(), keeps = (a.keeps || []).slice(), phrases = (a.phrases || []).slice();
+  let noOcr = (a.noOcr || []).slice(), ocrAgain = (a.ocrAgain || []).slice(), textFixed = (a.textFixed || []).slice();
+  const hadValue = (v) => values.some((x) => foldKey(x) === foldKey(v));
+  for (const v of b.values || []) {
+    const fresh = !hadValue(v);
+    values = addValue(values, v);
+    if (fresh && isPhrase(b.phrases, v)) phrases = addValue(phrases, v);
+  }
+  for (const k of b.keeps || []) if (!keptControl(keeps, k.value)) keeps = addKeep(keeps, k.control, k.value, k.state);
+  const named = (e) => noOcr.some((x) => sameNoOcr(x, e)) || ocrAgain.some((x) => sameNoOcr(x, e));
+  for (const e of b.noOcr || []) if (!named(e)) noOcr = setNoOcr(noOcr, e, true);
+  for (const e of b.ocrAgain || []) if (!named(e)) ocrAgain = setOcrAgain(ocrAgain, e, true);
+  for (const e of b.textFixed || []) if (!named(e) && !textFixed.some((x) => sameNoOcr(x, e))) textFixed = setTextFixed(textFixed, e, true);
+  return { values, keeps, phrases, noOcr, ocrAgain, textFixed };
 }
 
 export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain, textFixed) {
