@@ -9,7 +9,7 @@
 import {
   isLeaksName, leaksRank, headerIndex, sheetsLookLikeLeaks, leaksSheet, parseLeaks, classifyFix, isKeepKind,
   parseWhere, parseFiles, splitContext, matchExport, undecidedCount, nextUndecided, fixEdits,
-  packDecisions, unpackDecisions, decisionsKey, rowIdentity, leakPages, CONTEXT_RULE, isSuggested, isPending,
+  packDecisions, unpackDecisions, decisionsKey, rowIdentity, wholeContextIdentity, leakPages, CONTEXT_RULE, isSuggested, isPending,
   rowFile, reviewOrder, walkOrder, stepFrom, rowPlace, leakFileOrder, fileDone, exportMatcher,
   isMasterName, masterKeepSheet, sheetsLookLikeMaster, parseMasterKeeps, masterWithdrawEdits,
   walkStops, walkStep, WALK_BOUNCE_LIMIT, sweepSpan, isFakeKind, fakeDecisions,
@@ -329,16 +329,34 @@ check("a file is not done while a suggestion stands in it", fileDone(rows, "Rash
   const kept = packDecisions(took);
   check("…and is remembered beside the decisions, with the row it was given to", kept, { 3: { id: rowIdentity(took[1]), base: "~Vazquez", ok: true } });
   const fresh = parseLeaks(SHEETS, "LEAKS.xlsx").rows;
-  check("…laid back over the sheet", [unpackDecisions(fresh, kept), fresh.map((r) => !!r.ok), undecidedCount(fresh)], [{ laid: 1, dropped: 0, legacy: 0 }, [false, true, false], 1]);
+  // …counted as ACCEPTED, never as laid: "answered here and not yet saved" is
+  // what the worksheet is owed, and an acceptance is owed nothing (the toast
+  // read "1 to answer, 1 answered here and not yet saved" for it, of a sheet
+  // with nothing to save).
+  check("…laid back over the sheet, as an acceptance", [unpackDecisions(fresh, kept), fresh.map((r) => !!r.ok), undecidedCount(fresh)], [{ laid: 0, accepted: 1, dropped: 0, legacy: 0 }, [false, true, false], 1]);
+  // …and one whose row has changed or gone is retired WITHOUT A WORD: nothing
+  // anybody gave is lost with it, so "answer it again" would be false (the
+  // toast said "1 unsaved answer from an earlier session was discarded" when a
+  // run had applied the very suggestion accepted and the row went).
   const moved = parseLeaks(SHEETS, "LEAKS.xlsx").rows;
   moved[1].fix0 = moved[1].fix = "~Vazqueth"; // PDF-Linker read it again, differently
-  check("…but never over a suggestion that has changed since", [unpackDecisions(moved, kept), !!moved[1].ok], [{ laid: 0, dropped: 1, legacy: 0 }, false]);
+  check("…but never over a suggestion that has changed since — retired, not dropped", [unpackDecisions(moved, kept), !!moved[1].ok], [{ laid: 0, accepted: 0, dropped: 0, legacy: 0 }, false]);
+  const gone = parseLeaks([{ name: "LEAKS", rows: [HEAD, ROWS[1]] }], "LEAKS.xlsx").rows;
+  check("…nor anywhere once its row has gone — retired, not dropped", [unpackDecisions(gone, kept), gone.map((r) => [r.fix, !!r.ok])], [{ laid: 0, accepted: 0, dropped: 0, legacy: 0 }, [["", false]]]);
   // A misspelling's family arrives pre-filled alike and sorted together: the
   // acceptance is of THIS spelling, and the sibling a re-run sorted into its
   // row carries the very same cell.
   const sibling = parseLeaks([{ name: "LEAKS", rows: [HEAD, ROWS[1], ["Wazquez", "~Vazquez", "Wazquez signed", "Guaranty.pdf, Complaint.pdf", "misspelled name?", "p.44:2", ""]] }], "LEAKS.xlsx").rows;
   check("…nor over a sibling spelling now in its row, pre-filled the same",
-    [unpackDecisions(sibling, kept), sibling.map((r) => !!r.ok), undecidedCount(sibling)], [{ laid: 0, dropped: 1, legacy: 0 }, [false, false], 2]);
+    [unpackDecisions(sibling, kept), sibling.map((r) => !!r.ok), undecidedCount(sibling)], [{ laid: 0, accepted: 0, dropped: 0, legacy: 0 }, [false, false], 2]);
+  // …and an answer and an acceptance stored together are told apart.
+  const both = rows.map((r) => Object.assign({}, r));
+  both[1].ok = true;
+  both[0].fix = "never";
+  const back = parseLeaks(SHEETS, "LEAKS.xlsx").rows;
+  check("an answer and an acceptance laid back together: one laid, one accepted",
+    [unpackDecisions(back, JSON.parse(JSON.stringify(packDecisions(both)))), back.map((r) => [r.fix, !!r.ok])],
+    [{ laid: 1, accepted: 1, dropped: 0, legacy: 0 }, [["never", false], ["~Vazquez", true], ["yes", false]]]);
 }
 rows[0].fix = "no";
 rows[2].fix = "";
@@ -348,10 +366,10 @@ check("unsaved decisions remembered with the cell they replace and the row they 
   { 2: { id: rowIdentity(rows[0]), base: "", fix: "no" }, 5: { id: rowIdentity(rows[2]), base: "yes", fix: "" } });
 {
   const fresh = parseLeaks(SHEETS, "LEAKS.xlsx").rows;
-  check("laid back over a sheet that has not moved", [unpackDecisions(fresh, packed), fresh.map((r) => r.fix)], [{ laid: 2, dropped: 0, legacy: 0 }, ["no", "~Vazquez", ""]]);
+  check("laid back over a sheet that has not moved", [unpackDecisions(fresh, packed), fresh.map((r) => r.fix)], [{ laid: 2, accepted: 0, dropped: 0, legacy: 0 }, ["no", "~Vazquez", ""]]);
   const changed = parseLeaks(SHEETS, "LEAKS.xlsx").rows;
   changed[0].fix0 = changed[0].fix = "never"; // Excel decided it since
-  check("…but never over a cell somebody typed since", [unpackDecisions(changed, packed), changed[0].fix], [{ laid: 1, dropped: 1, legacy: 0 }, "never"]);
+  check("…but never over a cell somebody typed since", [unpackDecisions(changed, packed), changed[0].fix], [{ laid: 1, accepted: 0, dropped: 1, legacy: 0 }, "never"]);
 }
 {
   // The store is the browser's, not the case folder's: an answer says which
@@ -364,6 +382,40 @@ check("unsaved decisions remembered with the cell they replace and the row they 
       rowIdentity({ value: "Helen Rashoe", file: rows[0].file, context: ctx }) === rowIdentity(rows[0]),
       rowIdentity({ value: "Helen Rasho", file: rows[0].file, context: "Helen Rasho signed the lease" }) === rowIdentity(rows[0])],
     [true, false, false, false]);
+  // …of the ORIGINAL half of the Context cell only: the sentence above
+  // CONTEXT_RULE, the cached unscrubbed one, which no decision moves. The half
+  // below it is the export's sentence, which moves whenever something else in
+  // it is decided: measured on PDF-Linker's own worksheets (a full run, a `yes`
+  // saved on "54", Apply Fixes, a full run), two rows quoting one sentence came
+  // back with ", 49," for ", 54," below the rule and nothing else changed, and
+  // two of the three unsaved answers on the sheet were thrown away.
+  const stacked = (orig, exp) => orig + "\n" + CONTEXT_RULE + "\n" + exp;
+  const brook = (exp) => ({ value: "Halden Brookmere", file: "Brookmere Decl.pdf", context: stacked("Halden Brookmere, 71, and Wexford Applewhite, 54, signed.", exp) });
+  check("…the original half: the export half moving moves nothing, the original half moving does",
+    [rowIdentity(brook("Teague Morrow, 71, and Wexford Applewhite, 54, signed.")) === rowIdentity(brook("Teague Morrow, 71, and Wexford Applewhite, 49, signed.")),
+      rowIdentity(brook("x")) === rowIdentity({ ...brook("x"), context: stacked("Halden Brookmere, 71, signed alone.", "x") }),
+      // A cell with no rule (the two quotes were the same) is its own original half.
+      rowIdentity({ value: "Halden Brookmere", file: "Brookmere Decl.pdf", context: "Halden Brookmere, 71, and Wexford Applewhite, 54, signed." }) === rowIdentity(brook("anything"))],
+    [true, false, true]);
+  // …and an answer given before the export half moved comes back.
+  const v1 = [brook("Teague Morrow, 71, and Wexford Applewhite, 54, signed."), { value: "Wexford Applewhite", file: "Brookmere Decl.pdf", context: stacked("Halden Brookmere, 71, and Wexford Applewhite, 54, signed.", "Teague Morrow, 71, and Wexford Applewhite, 54, signed.") }]
+    .map((r, i) => ({ ...r, n: i + 2, fix: i ? "no" : "yes", fix0: "", ok: false }));
+  const v3 = [brook("Teague Morrow, 71, and Wexford Applewhite, 49, signed."), { value: "Wexford Applewhite", file: "Brookmere Decl.pdf", context: stacked("Halden Brookmere, 71, and Wexford Applewhite, 54, signed.", "Teague Morrow, 71, and Wexford Applewhite, 49, signed.") }]
+    .map((r, i) => ({ ...r, n: i + 3, fix: "", fix0: "", ok: false }));
+  check("answers to two rows of one sentence survive a decision that moved the sentence's export half",
+    [unpackDecisions(v3, JSON.parse(JSON.stringify(packDecisions(v1)))), v3.map((r) => r.fix)], [{ laid: 2, accepted: 0, dropped: 0, legacy: 0 }, ["yes", "no"]]);
+  // FOR ONE RELEASE, an answer stored by the build before — its row named by
+  // the whole cell, both halves — is laid back too, rather than thrown away
+  // once by the change; and stored again, it is under the row's own identity.
+  const was = { value: "Helen Rasho", file: rows[0].file, context: ctx, n: 2, fix: "", fix0: "", ok: false };
+  const before = { 2: { id: wholeContextIdentity(was), base: "", fix: "no" } };
+  // 3155cb140655299e is rowIdentity of this row as e8df959 worked it out.
+  check("the whole-cell identity is the one the build before worked out", [wholeContextIdentity(was), wholeContextIdentity(was) !== rowIdentity(was)], ["3155cb140655299e", true]);
+  const now = [{ ...was }];
+  check("…an answer stored under it is laid back", [unpackDecisions(now, before), now[0].fix], [{ laid: 1, accepted: 0, dropped: 0, legacy: 0 }, "no"]);
+  check("…and stored again under the row's own", packDecisions(now), { 2: { id: rowIdentity(was), base: "", fix: "no" } });
+  const elsewhere = [{ ...was, context: stacked("Helen Rasho was served elsewhere", "served elsewhere") }];
+  check("…but not on a row whose cells are another's", [unpackDecisions(elsewhere, before), elsewhere[0].fix], [{ laid: 0, accepted: 0, dropped: 1, legacy: 0 }, ""]);
   // Worked out once a row: packDecisions runs on every decision over every
   // answered row, and a Context is a sentence or two twice over. The memo is
   // checked against the cells, so a row changed under it is hashed again.
@@ -392,14 +444,14 @@ check("unsaved decisions remembered with the cell they replace and the row they 
     ["Riverside County", "", "", "Doc.pdf", "REVIEW", "p.1:2", ""]] }], "LEAKS.xlsx").rows;
   check("a re-sorted sheet: each answer goes back on its own value, wherever it now stands",
     [unpackDecisions(resorted, stored), resorted.map((r) => [r.n, r.value, r.fix])],
-    [{ laid: 1, dropped: 1, legacy: 0 }, [[2, "Ondine Vasquez-Hart", ""], [3, "Mojave Sands LLC", ""], [4, "Riverside County", "no"]]]);
+    [{ laid: 1, accepted: 0, dropped: 1, legacy: 0 }, [[2, "Ondine Vasquez-Hart", ""], [3, "Mojave Sands LLC", ""], [4, "Riverside County", "no"]]]);
   check("…and the sheet is not read as finished on answers given to other values",
     [undecidedCount(resorted), fixEdits({ cols: parsed.cols, rows: resorted })], [2, [{ row: 4, col: 1, text: "no" }]]);
   const swapped = parseLeaks([{ name: "LEAKS", rows: [HEAD,
     ["Ondine Vasquez-Hart", "", "", "Doc.pdf", "LEAK", "p.1:1", ""],
     ["Thaddeus Brimble", "", "", "Doc.pdf", "LEAK", "p.3:9", ""]] }], "LEAKS.xlsx").rows;
   check("a different value in the same row takes no answer", [unpackDecisions(swapped, stored), swapped.map((r) => r.fix), fixEdits({ cols: parsed.cols, rows: swapped })],
-    [{ laid: 0, dropped: 2, legacy: 0 }, ["", ""], []]);
+    [{ laid: 0, accepted: 0, dropped: 2, legacy: 0 }, ["", ""], []]);
   const elsewhere = parseLeaks([{ name: "LEAKS", rows: [HEAD,
     ["Riverside County", "", "", "Doc.pdf, Exhibit A.pdf", "REVIEW", "p.1:2", ""]] }], "LEAKS.xlsx").rows;
   check("…nor the same value found in other files since: a different row", [unpackDecisions(elsewhere, stored).laid, elsewhere[0].fix], [0, ""]);
@@ -417,7 +469,7 @@ check("unsaved decisions remembered with the cell they replace and the row they 
     ["Fenwick Ridge", "", "", "Quillmark Decl.pdf", "REVIEW", "p.6:1", ""]] }], "LEAKS.xlsx").rows;
   check("…and the other matter's rows take no answer from it, not even a value both sheets carry",
     [unpackDecisions(otherMatter, stored), otherMatter.map((r) => r.fix), undecidedCount(otherMatter)],
-    [{ laid: 0, dropped: 2, legacy: 0 }, ["", "", ""], 3]);
+    [{ laid: 0, accepted: 0, dropped: 2, legacy: 0 }, ["", "", ""], 3]);
   // Not every worksheet is read under its case folder's id: one opened with
   // no folder is stored under the lone document's file name (every case has a
   // Complaint.txt), and a value found in more than three files is filed under
@@ -440,31 +492,32 @@ check("unsaved decisions remembered with the cell they replace and the row they 
   check("another case's sheet flagging the same value in a file of the same name, or in \"N files\", takes no answer from it",
     [unpackDecisions(inFile, answered("Complaint.pdf", "no")), unpackDecisions(inFour, answered("4 files", "never")),
       inFile.map((r) => r.fix).concat(inFour.map((r) => r.fix)), fixEdits({ cols: parsed.cols, rows: inFile.concat(inFour) })],
-    [{ laid: 0, dropped: 1, legacy: 0 }, { laid: 0, dropped: 1, legacy: 0 }, ["", "", "", ""], []]);
+    [{ laid: 0, accepted: 0, dropped: 1, legacy: 0 }, { laid: 0, accepted: 0, dropped: 1, legacy: 0 }, ["", "", "", ""], []]);
   // …and a re-run that quotes the value from another sentence (a file added
   // ahead of it, the first occurrence moved) drops the answer to be given
   // again: asked twice costs a click.
   const requoted = parseLeaks([{ name: "LEAKS", rows: [HEAD,
     ["Jordan", "", "shipped from Jordan in May", "Complaint.pdf", "REVIEW", "p.1:2", ""]] }], "LEAKS.xlsx").rows;
-  check("…nor does the same value quoted from another sentence since", [unpackDecisions(requoted, answered("Complaint.pdf", "no")), requoted[0].fix], [{ laid: 0, dropped: 1, legacy: 0 }, ""]);
+  check("…nor does the same value quoted from another sentence since", [unpackDecisions(requoted, answered("Complaint.pdf", "no")), requoted[0].fix], [{ laid: 0, accepted: 0, dropped: 1, legacy: 0 }, ""]);
   // Its own sheet re-sorted, the sentence's line breaks and case aside, is
   // still its own.
   const own = parseLeaks([{ name: "LEAKS", rows: [HEAD,
     ["JORDAN", "", "Imports  from the\nKingdom of JORDAN", "Complaint.pdf", "REVIEW", "p.1:2", ""],
     ["Riverside County", "", "filed in Riverside County", "Complaint.pdf", "REVIEW", "p.1:3", ""]] }], "LEAKS.xlsx").rows;
-  check("…while its own sheet, re-sorted, takes it back", [unpackDecisions(own, answered("Complaint.pdf", "no")), own.map((r) => r.fix)], [{ laid: 1, dropped: 0, legacy: 0 }, ["no", ""]]);
+  check("…while its own sheet, re-sorted, takes it back", [unpackDecisions(own, answered("Complaint.pdf", "no")), own.map((r) => r.fix)], [{ laid: 1, accepted: 0, dropped: 0, legacy: 0 }, ["no", ""]]);
   // Answers kept before rows had identities say nothing of which value they
-  // answered, so none can be put back safely: all are discarded, and counted
-  // for the toast that says so.
+  // answered, so none can be put back safely: all are discarded, and the
+  // answers among them counted for the toast that says so — an acceptance
+  // among them is retired without a word, as one whose row has gone.
   const old = { 2: { base: "", fix: "no" }, 3: { base: "", fix: "never" }, 4: { base: "~Vazquez", ok: true } };
   const again = parseLeaks([{ name: "LEAKS", rows: [HEAD,
     ["Riverside County", "", "", "Doc.pdf", "REVIEW", "p.1:2", ""],
     ["Lucerne Valley", "", "", "Doc.pdf", "REVIEW", "p.1:3", ""],
     ["Vazqez", "~Vazquez", "", "Doc.pdf", "misspelled name?", "p.4:1", ""]] }], "LEAKS.xlsx").rows;
   check("row-number-only answers from before are discarded, even where the sheet has not moved",
-    [unpackDecisions(again, old), again.map((r) => [r.fix, !!r.ok])], [{ laid: 0, dropped: 0, legacy: 3 }, [["", false], ["", false], ["~Vazquez", false]]]);
+    [unpackDecisions(again, old), again.map((r) => [r.fix, !!r.ok])], [{ laid: 0, accepted: 0, dropped: 0, legacy: 2 }, [["", false], ["", false], ["~Vazquez", false]]]);
   check("nothing stored, nothing laid", [unpackDecisions(again, null), unpackDecisions(again, {}), unpackDecisions(again, "junk")],
-    [{ laid: 0, dropped: 0, legacy: 0 }, { laid: 0, dropped: 0, legacy: 0 }, { laid: 0, dropped: 0, legacy: 0 }]);
+    [{ laid: 0, accepted: 0, dropped: 0, legacy: 0 }, { laid: 0, accepted: 0, dropped: 0, legacy: 0 }, { laid: 0, accepted: 0, dropped: 0, legacy: 0 }]);
 }
 {
   // Two rows one identity: PDF-Linker groups by lower case, the reader folds
@@ -478,7 +531,7 @@ check("unsaved decisions remembered with the cell they replace and the row they 
   const same = parseLeaks([{ name: "LEAKS", rows: twins }], "LEAKS.xlsx").rows;
   check("twin rows each take back their own answer", [unpackDecisions(same, kept).laid, same.map((r) => r.fix)], [2, ["yes", "no"]]);
   const shifted = parseLeaks([{ name: "LEAKS", rows: [HEAD, ["Other", "", "", "Doc.pdf", "LEAK", "", ""]].concat(twins.slice(1)) }], "LEAKS.xlsx").rows;
-  check("…and moved, neither is guessed at", [unpackDecisions(shifted, kept), shifted.map((r) => r.fix)], [{ laid: 0, dropped: 2, legacy: 0 }, ["", "", ""]]);
+  check("…and moved, neither is guessed at", [unpackDecisions(shifted, kept), shifted.map((r) => r.fix)], [{ laid: 0, accepted: 0, dropped: 2, legacy: 0 }, ["", "", ""]]);
 }
 check("the store key names folder and file", decisionsKey("Rasho v Quillmark", "LEAKS.xlsx"), "textReader.leaks.Rasho v Quillmark/LEAKS.xlsx");
 {

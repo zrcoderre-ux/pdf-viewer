@@ -1518,7 +1518,26 @@ over a newer copy:
   `leaksSaveNote` says why in the document save's toast, and the bar goes up.
   Where the folder's own file will not take the write (Excel holding it), it
   says so and writes nothing else (`writeBlob`'s `inPlaceOnly`): a copy picked
-  elsewhere is not the file PDF-Linker reads.
+  elsewhere is not the file PDF-Linker reads. And only into the file it was
+  read from: a worksheet loaded by hand with no handle while a case folder is
+  open (dropped from a mail, read through the file input) is "foreign"
+  (`leaksOnDisk`). The first version compared it with the folder's own file
+  by name and called another matter's sheet "changed on disk", and before
+  that the save made a handle for it (`getFileHandle(leaks.name, { create:
+  true })`) and wrote it over the case's own: the re-check's repro 8 left
+  `Odile Varnecke="no"`, another matter's row, where the case's rows had
+  been, a `no` PDF-Linker would read as this case's keep. Now its save says
+  it is not this case folder's worksheet, keeps its answers and puts up no
+  bar. The case folder's OWN worksheet (`leaksOwn`: a file of the folder
+  itself by `dirHandle.resolve`, asked when it was attached, and the folder
+  still open) is written in place or not at all — never by the Save picker,
+  whatever its state; a sheet picked by hand from elsewhere, changed or gone,
+  is said as such ("load it again", "no longer where it was loaded from") and
+  puts up no bar about the folder. The Text Files guard is asked before the
+  disk, being the reason to give there. After a save the sheet's rows are
+  stored again (`persistLeaks`) rather than removed: what is left to remember
+  is its acceptances, which no save writes ("Acceptances are not answers",
+  below). `test-stale-writes.mjs` case 7 pins the hand-loaded sheet.
 - New Real Values.txt. The file is still written whole from the lists, the
   reader's own lines first (PDF-Linker and `parseReaderFile` take a value's
   first line), and then every other line of the file as it stands, verbatim,
@@ -1849,7 +1868,9 @@ Design Notes/Text reader layout and navigation.md.)
 
 So `packDecisions` stores each answer with `id`, `leaks.rowIdentity` of its
 row: a digest (two FNV-1a passes, one from each end, 64 bits) of the folded
-Value, File and Context cells. Value is how PDF-Linker tells one row from
+Value, File and Context cells (the Context's original half only, since
+2026-10-13: "Acceptances are not answers, and the export half is not the
+row", below). Value is how PDF-Linker tells one row from
 another (one row per value); File and Context are what tell one CASE's row for
 a value from another's (below). It is a digest so that the store gains no real
 text. The value and its sentence are what an export must not carry, and this
@@ -1861,7 +1882,8 @@ pre-filled `~Vazquez` is not taken for a sibling spelling sorted into its row
 with the same cell. Two rows of one sheet can share an identity: PDF-Linker
 groups by lower case, the fold also collapses spaces. Those rows take answers
 by row number, and only while every answer stored under that identity still
-stands on one of them. It returns `{ laid, dropped, legacy }`. An answer that
+stands on one of them. It returns `{ laid, dropped, legacy }` (and an
+`accepted` count since, below). An answer that
 found no row of its own (the value gone, found in other files or quoted from
 another sentence since, a different case's sheet read under the same store) is
 `dropped`. One stored before identities existed, with no `id`, cannot be
@@ -1918,6 +1940,58 @@ hashed again): the same 300 decisions take 6 ms. `unpackDecisions` still
 hashes every row once per attach where anything is stored — 0.4 s for 20,000
 rows of such Contexts, about 10 ms for a sheet of 300 — and what it hashes is
 remembered for the decisions after.
+
+**Acceptances are not answers, and the export half is not the row**
+(`unpackDecisions`' `accepted`; `rowIdentity` over `splitContext`'s
+`original`; `wholeContextIdentity`; `saveLeaks`' `persistLeaks`). The
+2026-10-13 re-check of the rules above found two ways an answer was lost, or
+miscounted, and both are closed:
+
+- An ACCEPTED suggestion writes nothing to the workbook (the cell already
+  says it) and so is remembered in the store or nowhere, yet Save LEAKS.xlsx
+  removed the store with the answers it wrote (`localStorage.removeItem`), and
+  after a reload or a folder read the suggestion was asked again. It was also
+  counted as an answer: in `laid` ("1 to answer, 1 answered here and not yet
+  saved" of a sheet with nothing to save), and once its row had gone — most
+  often because a run applied the very suggestion — in `dropped` ("1 unsaved
+  answer from an earlier session was discarded … Answer it again"). Now
+  `unpackDecisions` returns `{ laid, accepted, dropped, legacy }`: a laid-back
+  acceptance counts in `accepted`, never `laid`; one that finds no row of its
+  own is retired without a word, never `dropped` (nothing anybody gave is
+  lost with it), and so is one among the legacy entries; the attach's toast
+  and the folder's count `laid` alone as "not yet saved"; `attachLeaksNow`
+  stores the sheet again whenever anything was stored, so what found no row
+  is gone from the store; and `saveLeaks` stores the rows again once it has
+  written them (`persistLeaks`), which leaves the acceptances.
+- The Context cell stacks two quotes, the document's sentence above
+  `CONTEXT_RULE` (from the cached unscrubbed text) and the export's below it,
+  and the export's moves whenever something ELSE in the sentence is decided.
+  Measured on PDF-Linker's own worksheets (a full run, a `yes` saved on "54",
+  Apply Fixes, a full run): the rows "Halden Brookmere, 71," and "Odile
+  Varnecke, 45," quoting one sentence came back with ", 49," below the rule
+  and nothing else changed, and laid back, two of the three unsaved answers
+  were thrown away as "changed or gone since". The digest now takes the
+  ORIGINAL half only (`splitContext`, line breaks read as "\n" first; the whole
+  cell where there is no rule, the two quotes being the same): the document's
+  sentence, which no decision moves and which still tells two matters' rows
+  apart as the whole cell did. For one release `unpackDecisions` also knows
+  an answer by the identity the build before gave its row
+  (`wholeContextIdentity`, the whole cell; worked out only where a stored
+  answer matches no row's own), so the answers that build stored are laid
+  back rather than thrown away once by the change, and the attach stores them
+  again under the row's own identity. **Take `wholeContextIdentity` out in the
+  release after this one.** PDF-Linker's half of the same finding — its File
+  cell and Context sample taken in the order the files were met, which the
+  full run and Apply Fixes walk differently — is its #516
+  (`_pn_write_leak_report`, `_pn_natural_key`: one order whatever the run
+  met), whose CLAUDE.md format line names the File and Context columns and the
+  Context's original half as what names a row across runs.
+
+`test-leaks.mjs` pins both (`3155cb140655299e` is e8df959's identity of its
+fixture row, which `wholeContextIdentity` must reproduce);
+`test-folder-save.mjs` case 36 pins the acceptance's toasts, the save, the
+reload and the row gone quietly, and case 37 the answers kept through a
+moved export half and one stored under the old whole-cell identity.
 
 **The rows still to answer are marked before the walk reaches them**
 (`sheetMatcher`, `pendingSheetRanges`, `::highlight(leakrows)`). Only the row
