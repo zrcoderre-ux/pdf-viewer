@@ -217,7 +217,15 @@ app, which routes it to the reader tab.
   every page — the values kept for the case and the spot keeps left exactly as
   they read — and then the pseudonyms on show, whichever way *Show fakes*
   sits. Paper and PDF carry the scrubbed copy without anyone having to
-  remember. The document itself is not touched: the pages go back as they were
+  remember. A name the key has no pseudonym for yet — an instruction such as
+  `~Rasho` or `phrase` typed over its stand-in in the key — is printed as
+  █████, the whole name behind it, and a message once the dialog closes names
+  it. **A page shown as its PDF page prints its text.** ⇄ PDF (and ⊘
+  Did not OCR, which turns the page to its PDF page) shows the filing, which
+  nothing scrubbed, so a print puts the page's own text back in its place —
+  run through the key like every other page, fitted to the paper — and the PDF
+  page never prints; the swap is still there when the dialog closes. The
+  document itself is not touched: the pages go back as they were
   when the dialog closes, nothing is written, and a real name standing unfaked
   is still standing and still orange, to be dealt with before a save.
 - **Screenshot the window, for the design.** **📷 Screenshot** saves the
@@ -230,13 +238,59 @@ app, which routes it to the reader tab.
   its fake — on the pages (names the run missed included), in the bars and
   panels, in the Find box, and over the PDF in the pane, where each name is
   covered with its fake (a name wrapped inside a caption's column there is
-  covered half on each line). The values kept for the case, the spot keeps and the
-  parties of cited decisions read as they stand, as in the print. The screen
+  covered half on each line). A name the key holds only an instruction for is
+  covered with █████ in all of those places, and the message after the
+  picture names it. A page shown ⇄ Raw is read whole, like the page itself, so
+  a name wrapped down a caption's column is faked or covered as one name. The
+  flag pop-up and the keep menu are taken off the screen for the picture and
+  come back after it; the bar warning that PDF-Linker is running keeps its
+  faked text until the picture is taken, a message that comes up meanwhile is
+  in the pseudonyms, and a save or a flag is refused until the screen is back.
+  The values kept for the case, the spot keeps and the parties of cited
+  decisions read as they stand, as in the print. The screen
   goes back the moment the picture is taken; nothing is written. A PDF page
-  with no text (a scan) cannot be read for names and keeps them. In the
+  with no text (a scan) cannot be read for names and keeps them. A PDF page
+  whose text does not stand over the page as it is drawn — so that a cover
+  would land somewhere other than the name — is left out of the picture
+  whole, white with a line saying why, and the toast counts it. So is a PDF
+  page with a name on it whose text runs sideways, upside down or at a slant
+  of more than a degree on screen — a portrait page turned in Acrobat, a stamp
+  up the margin — since the names in such text cannot all be found: it is left
+  out rather than shown with one half covered. Take that page from the export
+  beside it. (A scan's slight lean, under a degree, is read along its lines and
+  covered name by name.) A name that stands only in a PDF annotation — a
+  typed-on note, a filled-in form field — is drawn on the page but is not in
+  its text, and is **not** covered: check such a page, or take it from the
+  export. In the
   extension the tab is taken directly; in the hosted app the browser asks to
   share this tab, keeps one frame and stops, and the names change only once
   the share is allowed.
+- **Copy what the file says — in its pseudonyms.** **Ctrl+C**, the right-click
+  Copy, **Ctrl+X** in ✎ Edit and a drag of the selected text all carry the
+  passage as the *file* has it, whichever way *Show fakes* sits: every name as
+  its pseudonym, a name the run missed included, and plain text only (the
+  page's formatting stays behind with the names it used to hide). The values
+  kept for the case, the spot keeps and the parties of cited decisions go as
+  they stand, as a save leaves them — and a cited decision stays cited even
+  where your selection stops before its year and reporter, since each page is
+  read whole first. Half a name selected goes as its whole pseudonym; a
+  selection across pages comes away with a line break between them, and
+  without the margin numbers. A toast says the copy is in the pseudonyms,
+  and names any name the key holds no pseudonym for yet (an instruction in
+  its Replacement cell), which goes as █████, as in the print. Inside the reader the copy
+  comes back as you saw it: pasted into a page the real names return (and are
+  marked as pseudonyms again), and pasted into Find it is what the screen
+  showed. A cut works as the browser's own: in ✎ Edit it takes the selection
+  away (one undo step; only the first page's part of a selection that runs
+  onto the next), and read-only it does nothing. A drag carries the
+  pseudonyms wherever you press inside the selection — on a word, past the
+  end of a line, in the space under the text, on a citation link or a picture
+  the selection takes in; a link or picture outside the selection drags as
+  itself — except a citation link built from real names the file holds as
+  pseudonyms (*Citations linked*, below), which does not drag at all. The PDF —
+  in the pane and on
+  a page swapped for its PDF page — is the filing itself and still copies as
+  it reads.
 - **Citations linked.** The same detector the PDF viewer runs underlines every
   case, statute, rule, regulation and CACI instruction and links it to Lexis+
   or Westlaw (the provider setting is shared), with the **§ Authorities**
@@ -249,7 +303,16 @@ app, which routes it to the reader tab.
   fills as always and a cite opened from the panel opens the same page; the
   status bar says the links are off, and they come back the moment the grid
   does. Side by side without the grid leaves every line where it flows, so
-  there the links are drawn and are right.
+  there the links are drawn and are right. **A citation whose parties the
+  file holds as pseudonyms** — this case's own prior appeal, say, which
+  PDF-Linker fakes like the caption — is linked as the screen reads it: with
+  *Show fakes* off its address and its panel entry carry the real names, so a
+  click looks up the real decision. That address stays on this machine: the
+  link does not drag, its right-click menu (with *Copy link address*) does
+  not open, and a copy or drag of its entry in **§ Authorities** puts nothing
+  on the clipboard; a toast says why each time. Turn *Show fakes* on to take
+  it as the file has it. A published decision's link, whose names the file
+  carries too, drags and copies as before.
 - **A name wrapped across lines is one name.** A pseudonym or a real value
   whose halves sit on two numbered lines — the line break, the next line's
   gutter number and any blank line between — is matched as one: the reader
@@ -287,9 +350,26 @@ app, which routes it to the reader tab.
   Text Files folder by mistake is caught**: it is where the exports are, so it
   looks like the place, and everything that makes a case folder one — the key,
   the PDFs, the worksheet, the flagged list — is the level above. The reader
-  says so and opens the picker there again, with the folder above one click
-  away. Every fake is shown as its real value in the case the fake was written
-  in, **lightly highlighted**, and hovering shows the pseudonym underneath.
+  says so in the bar at the top, **and the bar stays up for as long as Text
+  Files is the folder open** (opening its documents no longer takes it down,
+  and a Text Files folder found for a file opened on its own puts it up too);
+  its button opens the picker inside Text Files, one level below the folder to
+  choose. **Nothing the case is owed is written into Text Files** — it is the
+  folder that is uploaded, and PDF-Linker never reads it there: Ctrl+S leaves
+  `New Real Values.txt` and `LEAKS.xlsx` unwritten and says so, and the
+  Flagged panel's Save does the same rather than open a picker. What you flag
+  meanwhile is kept, and goes with you: open the case folder above and the
+  list is that folder's, written by the next save. A `New Real Values.txt` or
+  `LEAKS.xlsx` an earlier version left in Text Files is named in the bar, to
+  be **deleted, not moved up**: that version wrote the list there out of one
+  list every case's Text Files folder shared, so it may name other cases'
+  values, and moved up it would write over the case folder's own. The reader
+  does not read it in; flag or keep again in the case folder what this case
+  needs, and give any answer in the stray worksheet again in the case
+  folder's own. A file from Text Files opened on its own attaches the case
+  folder above it whenever the reader knows that folder. Every fake is shown
+  as its real value in the case the fake was written in, **lightly
+  highlighted**, and hovering shows the pseudonym underneath.
   The highlight's **colour and intensity** are yours to set (the swatch and
   slider beside "Mark pseudonyms", or under Options), and are remembered like
   the font — **written the moment you choose them.** Every reading setting is
@@ -306,7 +386,27 @@ app, which routes it to the reader tab.
   **Show fakes** shows the document as it is on disk. The key is read the way
   `DeAnonymize.bas` and the Claude extension read it: columns by header name,
   operator keeps skipped, alt spellings forward-only, an ambiguous fake
-  retired, the pinned tab out of the reversal. **A pseudonym that is an
+  retired, the pinned tab out of the reversal. **A control word typed over a
+  pseudonym in the key is not a pseudonym.** `~Rasho`, `*Rasho`, `phrase`,
+  `(Cross River Bank)`, `[Law]` or Excel's `#NAME?` in a Replacement cell is
+  an instruction for PDF-Linker's next full run, and the reader reads it as
+  PDF-Linker does: it is never shown in place of a name or written into a
+  file, and the real value it stands against is still marked orange where it
+  stands in the clear. The names bar and the right-click menu say what the key
+  holds for it instead of offering **Fake it**. A save that would write it —
+  you answered it `yes` on the LEAKS worksheet, say — is refused with a
+  message saying why: only a full PDF-Linker run (not Apply Fixes) gives it a
+  stand-in, and until then you retype it, or keep that one where it stands
+  (right-click it: **Keep just this one**). A longer name holding an
+  instruction is left whole, never written as a stand-in for one of its words
+  with the rest in the clear, wrapped down a caption's column or not. A print,
+  a screenshot or a copy shows such a name as █████ (see those, above). (A
+  `no`, `n` or `never`, or a bracket around the whole value, is a keep, as
+  before — except on an e-mail address or a website not ending in .gov, which
+  PDF-Linker fakes whatever is typed against it: there the keep is an
+  instruction like the rest, and the address stays marked until the run.) A
+  row bound in the possessive holding an instruction (`Rashoe's` over
+  `~Rasho's`) marks the bare name too. **A pseudonym that is an
   ordinary word is shown as written.** An older PDF-Linker could cut a
   surname's stand-in down to a word ("We"), and nothing in the text says which
   "we" the run wrote, so the reader used to paint the surname over every "we"
@@ -457,8 +557,20 @@ app, which routes it to the reader tab.
   place** — only the Fix? cells change; every other part of the file, the
   Context quotes, the column widths and the dropdown come back byte for byte,
   and the file is read back before it is written — after which Apply Fixes (or
-  a re-run) applies them to the files. A `yes` here is never also flagged
-  into `New Real Values.txt`.
+  a re-run) applies them to the files. **An unsaved answer is remembered with
+  the row it answers**, its value, its file and the Context sentence it was
+  quoted from, and goes back on that value wherever a run of PDF-Linker has
+  since sorted it, never on whatever now stands in its old row — nor on
+  another case's row for the same word: a `no` on Jordan the country in one
+  case is not a `no` on Jordan the plaintiff in another, even where both
+  worksheets were opened on their own beside a `Complaint.txt`, or file the
+  word under "4 files". An answer whose value has gone, or is now found in
+  other files or quoted from another sentence, is discarded, and the toast on
+  opening the folder or the worksheet says how many were, so you can answer
+  them again. Answers an older reader remembered by row number only are
+  discarded the same way, and said once. The folder's toast also says how
+  many answers are only in the reader and not yet saved, "every row answered"
+  included. A `yes` here is never also flagged into `New Real Values.txt`.
 - **Every row still to answer is orange before the review reaches it.** Only
   the row in front used to be marked, so a name the worksheet was already
   asking about stood unmarked until the review got there, and flagging it on
@@ -634,7 +746,13 @@ app, which routes it to the reader tab.
   A document opens **protected**: reading, selecting and flagging can never
   nudge a character into it. **✎ Edit** lifts that for the document in front
   of you, **Ctrl+Z** and **Ctrl+Y** undo and redo through the reader's own
-  history (the browser's cannot survive the pseudonym rewrites), and **Save**
+  history (the browser's cannot survive the pseudonym rewrites) — the
+  decisions too, in their place among the edits: a flag, a phrase, a value
+  taken off the Flagged list, a keep, a "fake it" and a LEAKS answer (the
+  review goes back to that row) are each one step, and the toast names what
+  was undone. An undo moves back only what that decision moved, so a value
+  the case folder's list brought in since stands. ⊘ Did not OCR and ↻ OCR
+  This Page are undone as page edits, as before — and **Save**
   (Ctrl+S) writes the text back to the same file. With a case folder open,
   moving to another document keeps your edits: the one you leave stays
   unsaved, and the same Save writes it (see *Every document you change stays
@@ -777,11 +895,58 @@ app, which routes it to the reader tab.
   as-you-type correction, for the page. **Space** marks it as an autocorrect
   (the real name stays on screen, the fake goes underneath and into the
   file, and the space lands after it); **→** marks it without the space;
-  **Esc** leaves that one plain, and the save still writes its pseudonym. A
-  real that opens a longer name in the key ("Helen" beside "Helen Rasho"),
-  or a kept one, is never space-marked: the space types on, and the whole
-  name is offered the moment it is finished. A name typed and left is
-  marked by the reader on its own once the caret has moved off it.
+  **Esc** leaves it as typed — on the page and in the file. Press it for a
+  name that belongs to a cited decision in a form the reader does not
+  recognise as a citation, such as a short cite with no *supra*, "(Jones, 30
+  Cal.App.5th at p. 5.)": the save leaves that name where it stands, keeps it
+  orange and names it in red as not yet reviewed, for you to decide. (A name
+  you have already said to fake is written as its pseudonym everywhere, this
+  one included.) Every name you press Esc on is kept so, however many there
+  are on the page — two short cites in a row, each Esc'd, both keep their
+  names — and each goes with its text when you type or paste anywhere
+  earlier on the page (on its own line ahead of it too, a paste of several
+  lines included), push lines down with Enter (at the head of its own line,
+  or between it and the words before it), join lines with Backspace or
+  Delete, print or take a screenshot. Change the name itself (type over its
+  letters, or type a different name where it stood) and it is no longer the
+  one you pressed Esc on: it is offered again, and marked if you leave it.
+  Delete it — its line, a selection or a Ctrl+X that takes it — and the Esc
+  goes with it: the same name typed afterwards, anywhere on the page, is a
+  name you typed, offered and marked like any other. Should an edit ever
+  move it in a way the reader cannot follow, the reader does not guess:
+  every place the name may now stand in the text that edit moved is left as
+  typed, and the save says so in red, naming it — check each, and retype
+  one that is this case's own to have it offered again. Ctrl+Z and Ctrl+Y
+  keep it so: an undo puts the names you pressed Esc on back with the text
+  they stand in, so a short cite deleted by mistake and brought back with
+  Ctrl+Z still keeps its name. A real that opens a longer name in the key
+  ("Helen" beside "Helen Rasho"), or a kept one, is never space-marked: the
+  space types on, and the whole name is offered the moment it is finished. A name typed and
+  left is marked by the reader on its own once the caret has moved off it —
+  clicked away, moved with the arrow keys, or the page left for the Find box
+  or a button — whichever page it was typed on.
+- **A name you type never goes into the file as itself, however quickly you
+  save.** Ctrl+S the instant a name is typed — the caret still at its end, a
+  moment before the reader would have marked it, or the name broken over two
+  lines — and the save writes its pseudonym all the same, and the caret stays
+  where you were typing (unless you pressed Esc on it: see above). It used to
+  write the real name and call it "not yet reviewed". A name pasted across a
+  line break stays orange until the save writes it whole, rather than having
+  its surname marked on its own. A party you typed and then typed on into a
+  citation ("See Jones v. Smith (2019) 30 Cal.App.5th 1.") goes back to the
+  name: before anything is written when the citation is finished before you
+  save, and on the next save when you saved halfway ("See Jones", Ctrl+S,
+  then the rest of the citation). A name the key holds only an instruction
+  for (no pseudonym yet) is not written at all: the save stops and names it,
+  every time you save, until you retype it or keep it. **Undo and redo keep
+  all of this.** Ctrl+Z after a save that marked the names you typed takes
+  that marking off — they show as typed again — and the next save writes them
+  as pseudonyms again; a refused save undone refuses again; a party saved
+  before its citation was finished still goes back to the name once the
+  citation is, whatever was undone in between; and a name typed before the key
+  was loaded is written as its pseudonym once it is. The names the run left
+  in the clear are still yours to decide — the save leaves those where they
+  stand and says so.
 - **A row that cannot be located says so, once, and keeps saying it.** A LEAKS
   row names the **PDF** the value was found in; the review has to open that
   PDF's **text export**, and the two names do not always agree. A stem ending
@@ -884,7 +1049,15 @@ app, which routes it to the reader tab.
   between. The selection shows red while it is on. A selection with a
   question to it (a passage, a pseudonym, the orange name alone, a value kept
   where it stands or by the Master Keep) is not flagged; it stays selected
-  with the pop-up asking. Click the button again to turn it off; it is never
+  with the pop-up asking. **Nor is a party of a cited decision** — "Kremerman"
+  in "Kremerman v. Ford Motor Co. (2019) 30 Cal.App.5th 1": a flag hands
+  PDF-Linker the name as one of this case's own parties, and where the
+  decision's other side is this case's party already (Ford, in a case against
+  Ford), or both sides are flagged, its next run takes the citation for this
+  case's own caption and renames the published decision. The pop-up says so,
+  and its own 🚩 Flag flags the name only if you press it, for a name that
+  really is this case's own; Ctrl+Shift+F refuses it outright and says why.
+  Click the button again to turn it off; it is never
   on when a reader opens. The
   **Flagged** panel collects them and **Save list to case folder** writes `New
   Real Values.txt` beside the key, which PDF-Linker reads on its next run —
@@ -928,12 +1101,46 @@ app, which routes it to the reader tab.
   key…** with it (choosing the key already shown in the list does nothing; to
   go through the list, choose "(no key)" and back — never another key, which
   would take off every flag it binds — though "(no key)" also puts the
-  case's **fake it** answers away until the folder is opened again). Folders of one name share
-  one flag list, and so does every case's Text Files folder, and lone
-  documents of one file name from different cases; a key chosen with one of
-  them open answers them all. A flag kept for want of the case's key is only
-  asked about again; a flag taken off wrongly could let the name ship. The
-  whole value has to be in the key: a key that binds "David" has not
+  case's **fake it** answers away until the folder is opened again). **Every case folder keeps
+  a list of its own, even where two folders share a name** (two clients'
+  "Opposition"; every case's "Text Files"): the reader knows each folder by
+  itself, not by its name, so a keep taken in one is never read into the
+  other, where it could leave that case's own party unmarked and hand its run
+  a `no:` for the name. A list an earlier version kept under the bare name is
+  given to the folder whole only where that version last wrote it into this
+  very folder (its `New Real Values.txt` is still what was written) and no
+  other folder of the name is known here. Where no other folder of the name is
+  known but that cannot be shown — a list never written, or its file spent by
+  a PDF-Linker run — its flags (and their phrases) are read into the folder,
+  since a flag in the wrong case only fakes one more name, and its keeps and
+  page lines are held aside. Where two folders of the name are known, or it is
+  a Text Files folder's (whose one list every case shared), all of it is held
+  aside. The reader says so once, naming every value it held, to be flagged or
+  kept again — even when another folder is opened before it can, or the page
+  is reloaded: the notice waits for the next message, and names the folder
+  it means ("the “Smith Opposition” folder you opened"), whichever folder is
+  open when it shows. **Opening another
+  folder while one is still being read** (a synced drive can take seconds)
+  leaves each folder's list, key and
+  documents its own: the folder you opened last is the one whose key and list
+  are in hand, and a file you opened on its own is not opened after all if
+  another folder was opened while its case folder was being read (open it
+  again). Until the new folder's own document is up, the
+  one on screen is still the last folder's: a keep or flag taken in it goes
+  into its own folder's list, or, once the new folder's list is in hand, is
+  refused and said; Ctrl+S is refused while the folder is being read ("save
+  again in a moment"); and nothing typed into it is marked with the new
+  folder's key. Answer Cancel to the "Discard unsaved edits?" the new
+  folder's document asks as it opens, and the last folder's document stays on
+  screen that way — not saved, marked or decided in under the other case's
+  key — until you open it again from its own case folder (where a name typed
+  in the meantime is left as it stands and named in red by the save, not
+  written as its pseudonym).
+  Lone documents of one file name from different cases still share
+  one list; a key chosen with one of them open answers them all. A flag kept
+  for want of the case's key is only asked about again; a flag taken off
+  wrongly could let the name ship. The whole value has to be in the key: a key
+  that binds "David" has not
   pseudonymized a flagged "David W. Slayton",
   half of which would still be standing, and a value **kept** is not in the
   key's forward side at all — both stay flagged. **But a red mark never
@@ -978,7 +1185,8 @@ app, which routes it to the reader tab.
   standing — so a **Save** (or Ctrl+S) that finds the list changed since it
   was last written puts it into the case folder with the document and says so
   in the same line. Without a folder there is nowhere to put it, and the save
-  says that instead of opening a picker nobody asked for. **A list that has
+  says that instead of opening a picker nobody asked for — and so it does with
+  the Text Files folder open, which is not the case folder. **A list that has
   not been written is a closing prompt.** The flags and keeps are remembered
   here whatever happens, so closing the tab loses nothing — but remembered
   here is not handed over: PDF-Linker reads `New Real Values.txt` in the case
@@ -1019,9 +1227,10 @@ app, which routes it to the reader tab.
   the file is still owed: PDF-Linker leaves a keep there, under a `#` note,
   when it could not write the master (Excel holding it) and when Apply Fixes
   is waiting for the full re-run, and the reader writes it again with the
-  rest. Only the folder the line was written into counts: open a copy of the
-  case under the same name and nothing is taken as applied there — the folder
-  you open is owed whatever its own file lacks, and Save writes it there. A
+  rest. Only the folder the line was written into counts: a copy of the case
+  under the same name keeps a list of its own, so a keep taken in one is never
+  read into the other, nothing is taken as applied there, and a run on the
+  copy spends its line in the copy alone. A
   list the Flagged panel saves through the save picker or a download, because
   the folder refused it, is a copy outside the folder: the reader says so,
   and goes on counting the folder's own file as still to write until it can
@@ -1746,6 +1955,17 @@ app, which routes it to the reader tab.
   second click withdraws it, ⊘ Did not OCR on the page withdraws it too, and
   it is off on a page that reads `[DID NOT OCR]`. ⊘ Did not OCR stays for the
   page you cannot read, or that is not worth the typing.
+  **A page you type over is handed over by itself.** Where you have typed over
+  two words or more on a page (corrected, put in or taken out, counted against
+  the page as it read before your first keystroke on it), 💾 Save puts it on
+  the list as the button would, and the save's message names the page. One
+  word is not enough: a single correction is what a flag or a `*` fix is for.
+  ⊘ Did not OCR is never swept in: a page that reads `[DID NOT OCR]`, a page
+  on the Did not OCR or OCR This Page list, and a page you strip, put back or
+  take a strip back on (Ctrl+Z) are never handed over on that account, and
+  typing done before the strip does not count. Click **✓ Use my text** on a
+  page to take it back off the list; for the rest of the session the save
+  will not hand that page over again by itself (the button still does).
 
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and

@@ -6,9 +6,9 @@ pure, Node-tested modules — `textdoc.js` (the export as pages by its
 `====== Page N ======` headers, byte-exact round trip; the DOM walk that
 serializes a pseudonym span as its FAKE; the `New Real Values.txt` list),
 `pseudo-key.js` (a port of the Claude extension's `src/pseudo.js`: parseKey
-by header name, keeps dropped, pinned tab out of the reversal, ambiguous fake
-retired, a fake that is an ordinary word retired, case-mirrored swaps in both
-directions) and `xlsx-read.js` (a port
+by header name, keeps dropped, control words held as instructions, pinned tab
+out of the reversal, ambiguous fake retired, a fake that is an ordinary word
+retired, case-mirrored swaps in both directions) and `xlsx-read.js` (a port
 of its `src/xlsxread.js`). It reuses `citation-linker.js` and `toa.js`
 directly; citation underlines are painted as thin overlay strips from DOM
 Ranges so the text stays editable, and the pleading gutter numbers are
@@ -36,12 +36,204 @@ window's other text (everything outside `.page-body`, `.textLayer` and
 same-origin shell above it. The PDF pane shows the filing, which nothing
 scrubbed: `pdfNamesOn` reads each drawn sheet's pdf.js text layer the way
 `keyBoxesForPage` does, and `coverPdfNames` paints a white box over each name
-with its fake in the layer's type, under the redaction boxes. Put back: each
-node's own text, `afterTextChange()`, and the underlines at once. While
+with its fake in the layer's type, under the redaction boxes. A sheet whose
+layer does not stand over its bitmap (`layerOnSheet`: the same box, and the
+quarter turn pdf.js asked for, see Design Notes/Redaction.md) has names that
+cannot be placed, so it is covered whole (`whole`) before anything is read off
+it, since words read off a layer standing elsewhere cannot vouch that it has
+none, saying why, and the toast counts it (`shotLeftOut`) rather than say only
+"in their pseudonyms". So is a sheet with words that do not run left to right
+on screen (`sidewaysOn`: portrait text on a page turned a quarter, a stamp up
+the margin, a slant past a degree) and a name in either of its readings — the
+join welds such lines, so a name there is found in part or not at all (Design
+Notes/Redaction.md, "Text that runs sideways ON SCREEN"). Under a degree the
+join reads each span along its own line (`RD.spanFrame`, with the turns
+`sidewaysOn` reads, which it now reads first): read by its box on screen, a
+name alone in a short span at a line's far end ran into the next line's first
+word from 0.85°, and its surname went into the PNG beside an "Odile" cover
+(Design Notes/Redaction.md, "A slant under the slack"). A name only in an
+annotation's appearance (a FreeText note, a filled form field) is drawn on the
+page but is in no text layer, and is not covered (same file, the residual
+after it). Only a sheet that is
+covered name by name adds its `WITHHELD` names to the toast. A name
+the key holds only an instruction for is covered with `WITHHELD`, on the pages,
+in the chrome and over the PDF alike (`egressSwaps`, under **A control word in
+the key's Replacement cell** below), and the toast names it (`shotWithheld`). Put
+back: each node's own text, `afterTextChange()`, and the underlines at once. While
 `shotPut` is set, `beforeinput` on the pages is refused and the reel hangs
 nothing above. Hosted, the fakes go on only once the screen share is granted
 (`shareThisTab` answers the frame-taker), and a share that sends no frame is
 given up after five seconds, so the fakes never stay on.
+
+**A page shown ⇄ Raw is a page, not chrome (`shotRaw`).** It was left to
+`swapChrome`, which runs `egressSwaps` one text node at a time, and the raw
+sheet's orange marks split a name into a node a piece: a name wrapped down a
+caption's column ("…and Jonathan" / "Avery Smith Walker, an") was read as
+"Jonathan", matching nothing, and "Avery Smith Walker", matching the bare
+"Walker" row, so the PNG carried "Jonathan" / "Avery Smith Cascadia" — under
+a toast saying the name was covered with `WITHHELD`, the cover having been
+laid on the hidden `.page-body`. The same for a name with a pseudonym, under
+"the names in their pseudonyms"; on main and before this branch too. Now each
+near raw sheet is read whole before its page's body is touched
+(`rawPageText`, its fakes and spot keeps in their places, after `fillRaw`
+brings it up to date) and its swaps are made in its own text nodes by
+`swapInNodes`, the marks and a selection in it standing; `swapChrome` skips
+`.raw-sheet`. The print of a raw page already read it whole (`refreshRawPages`
+rebuilds it from the covered body), and so did a copy (`copyOfRaw`).
+
+**The window is live while the picture is taken (`shotHeldBack`).** The fakes
+are up from `fakesForShot` until `back()`, the frame drawn 300 ms and two
+frames after the share dialog closes, and anything that wrote into the window
+meanwhile wrote past them. The flag pop-up: the fakes' own edits move the
+selection and fire `selectionchange`, `showFlagPop` rewrote `#flag-pop-note`
+from `leakIn(…).real`, and the PNG said "“Dana Okafor” is in the key and
+stands unfaked here…" — or "“Gregorio Sarvinyan”…" for a name the toast said
+was covered; with 🚩 on, a drag over an orange name leaves exactly that state
+by design. The run bar: `checkRun`, on the focus coming back as the share
+dialog closes or on its 30-second tick, found the bar's text (faked in place)
+not what it would say and wrote the real one back — "PDF-Linker is running on
+Rasho v Quillmark", a case folder being named for its parties. Both on main at
+b0a2d0c too. Now the pop-up and the keep menu are hidden for the picture and
+put back after it; `showFlagPop`, `showRunBar` and the typed-name converter
+(`convertTypedReals`, whose `normalize()` would also take out the empty text
+nodes a wrapped name leaves for the picture, which the put-back then cannot
+find) hold what they would write while `shotPut` is set and write it in
+`back()` (`flagPopHeld`, `runBarHeld`, `caretHeld`); a toast raised meanwhile
+goes up through `egressText`; `saveDocument` and `flagSelection` refuse, the
+page holding the picture's words; the hover tip shows nothing. Residual: a
+writer into the window that is none of these and lands inside the capture
+window writes past the fakes all the same; these are the ones found.
+
+**🖨 Print and a page swapped for its PDF page.** `fakesForPrint` runs every
+page body forward (`egressText`: a name the key holds only an instruction for
+printed as `WITHHELD`, and named in a toast once the dialog closes) and shows
+the pseudonyms, and the print is the display — in
+which a swapped page's body is hidden (`.tpage.swapped .page-body`) and its
+`.pdf-inline` sheet, the unscrubbed filing, is not. So a page shown through ⇄
+PDF printed "Helen Rasho … Quillmark Holdings" in a printout that had faked
+every other page; and the swaps are remembered per document
+(`PS.swapStoreKey`) and ⊘ Did not OCR swaps its page by itself, so this was
+any print of a document with a swap left on, not one click before Ctrl+P. Now
+`beforeprint` sets `body.printing` where any page is swapped, and the
+stylesheet shows the swapped bodies and hides their inline sheets for as long
+as it stands (on screen behind the dialog too); `shapePages` passes over a
+swapped page except under `body.printing`, so its text is fitted to the paper
+with the rest (a page that opened swapped was never fitted at all), and
+`afterprint` takes the class off. `holdReading()` goes first both ways, the
+swapped sheets changing height. The print stylesheet repeats the rule on its
+own — `.pdf-inline { display: none !important }` — so print media that no
+`beforeprint` announced still carries no PDF page (the body then prints as the
+screen shows it, like every other page in that case). Covering the inline
+sheet's names, as the screenshot does, was the alternative and the weak one
+here: a page is swapped because its OCR is mangled, which is the text layer
+least likely to give its names up to a cover. A swapped page fitted for a
+print keeps that fit, made at its own sheet's width; where the print faked
+anything, `pagesBackAfterPrint`'s `afterTextChange` moves `textEpoch`, so
+swapped back the page is fitted again to its real text (`shapeKey`).
+
+**Copy, cut and drag carry the pseudonyms.** Nothing listened for them, so the
+browser copied what the screen showed: with Show fakes off (the default) the
+real names, as plain text, from an export whose file carries the fakes — a
+passage copied off the reader and pasted into the drafting model took "Helen
+Rasho … Quillmark Holdings" out with it. With Show fakes on the plain text
+was clean and the HTML flavour was not: Chrome serializes each `.pn` with its
+attributes, so every `data-real` rode along unseen. Now `copy`, `cut` and
+`dragstart` on the document call `copyOfSelection`, which takes over wherever
+the selection reaches a page (a box's own text, the PDF pane and a page
+swapped for its PDF page copy as the browser copies them — the filing,
+which is how a page is transcribed by hand), and the clipboard gets
+`text/plain` alone: what the file says, run forward as the print and the
+screenshot run it, whichever way the toggle sits. It is never the
+selection's text run forward on its own: `citedNameSpans` spares a cited
+decision's party only where the citation after the name is in the text it
+reads, so "As this Court held in Varnell v. Ostrow Freight" — a selection
+that stops before "(2019) 31 Cal.App.5th 200" — read alone fakes both
+parties, a decision that does not exist pasted into the draft. Each page the
+selection touches is read whole instead (`copyOfBody`):
+`TD.serializeHeld(body, { mapped: true, points })` gives the disk text, its
+spot keeps and fakes, and where the selection's two ends stand in it (`at`:
+a text node's offset, an element boundary found by the walk's `child` hook,
+and a point inside a `.pn` taking the span whole, its start for a start point
+and its end for an end one); `forwardSwaps` fakes the page as the save reads
+it (keeps masked, spot keeps and fakes blanked, cited parties spared) and
+`TD.clipText` cuts the stretch out, a swap the stretch reaches written whole
+(half of "Helen Rasho" goes as all of its fake) and the gutter's text left out
+on a numbered page, where the stylesheet keeps it out of the selection.
+Pages are joined with a line break. A page shown ⇄ Raw is cut out of
+`rawPageText` (which now gives the fakes' places, `pns`, too) at the
+selection's offsets in its `pre`, by `Range.toString()`, and goes whole if
+the sheet is a beat behind the text. Undecided names standing in the clear
+are faked (the screenshot's rule, not the save's, which leaves them for the
+walk): the clipboard leaves the room. A name the key holds only an
+instruction for (no fake) went as it stands, with a toast naming it after it
+had left; it is withheld now, as in the print and the screenshot
+(`egressSwaps`, and the toast names it from the swaps' `withheld`). A cut follows the
+browser's own: read-only, it does nothing at all (Chrome writes no clipboard
+there); in ✎ Edit the selection must begin in an editable page, the faked
+text goes on the clipboard and `execCommand("delete")` takes the selection
+away — which, like Chrome's `deleteByCut`, takes only the first page's part
+of a selection running on into the next. That deletion fires `input` but not
+`beforeinput`, so the cut asks the beforeinput handler's questions itself:
+the gutter guard, `shotPut`, and `snapshot(body, true)` for one undo step. A
+drag is the selection's where it starts on a Text node or on an element the
+selection holds any of (`sel.containsNode(target, true)`). It first took only
+a Text node, on the reading that a drag of the selection starts on its
+words; but Chrome drags the selection wherever the press lands inside it,
+and the drag's target is whatever the press hit — the `.line` past a line's
+last word, the `.page-body` under the text, a line's `.lt` margin, a
+citation link of the link layer under a Ctrl+A. Pressed and dragged at a
+grid of points over a selected page, 2,027 of 2,087 drags started on such an
+element and went out as Chrome's own, the real names in text/plain and every
+`data-real` in text/html; every one of those elements is one the selection
+holds. A link the selection does not reach drags as the link — unless its
+address carries a real name the file holds as a pseudonym (`veiledUrls`, below).
+A picture the
+selection holds is no exception: pressed on an `<img>` in a selected line,
+held 0 to 400 ms before the pointer moved, Chrome dragged the selection
+from it every time (target the `<img>`, the real names in the text), so
+sparing pictures, as the review proposed, would have kept the leak; one
+outside the selection drags as itself. The cost is one forward pass per page
+the selection touches — the save's own pass, named `copying the selection in its
+pseudonyms` for the hold report; Ctrl+A over 200 pleading pages (810 KB, a
+name and a cite on every line) copies in about 125 ms. What the reader puts out it can take back
+(`lastCopy`, `ownCopy`): a paste in a page whose `text/plain` is exactly the
+last text this reader wrote (newlines folded, under the same case's key —
+`PK.sameCaseKey`) gets the real names back, which `convertTypedRealsSoon`
+marks as pseudonyms as it marks any typed real, so a cut and paste writes
+the bytes it wrote before; plain fakes pasted into a page would show the fake
+where the name was, and a word of one the key binds would be faked inside
+it by the next save. Find gets what the screen showed (`shown`), since Find
+finds what the screen shows. No other box does: a real name pasted into a
+LEAKS answer would be a real value written into the worksheet as a
+replacement.
+
+**A citation link built from names the file does not carry** (`veiledUrls`,
+`veiledLinkAt`, `selectionHoldsVeiled`, `veiledLinkNote`). The citations are
+found in the pages' SHOWN text (`flatten`), so with Show fakes off a citation
+whose parties the export holds as pseudonyms — this case's own prior appeal,
+which PDF-Linker fakes as the caption (`_side_is_trusted`) — gets an `href` and
+a `title` built from the real names
+(`…pdsearchterms=Rasho%20v.%20Quillmark%20Holdings…`). The click is the
+operator's own lookup, in the operator's browser, and opens that. But the
+drag handler let a link the selection does not reach go as itself, and it went
+with that address in text/uri-list and text/plain and the title in its
+text/html; the browser's "Copy link address" put the address on the clipboard;
+and the § Authorities panel, filled from the same reading, carried the same
+address and the names as its entry's text to a drag or a copy of the panel
+(measured on 6303b39, and so on main, which had no drag handler at all). Now
+`placeCitationsNow` notes where a pseudonym span shows a name other than its
+fake (a binary search over those places per citation) and lists the address of
+every citation that reaches one. A drag of such a link (an underline or a panel
+entry) is refused, so is the browser's context menu on it (the keep menu, whose
+listener runs first, still answers where it does), and a copy or drag of a
+selection off the pages that takes in such an entry puts nothing on the
+clipboard; each says why in a toast. A published decision's parties (the same
+in the file), a spot keep, and every link with Show fakes on (built from the
+fakes) go as before. Measured in Chromium: the prior appeal's underline drag
+refused with Show fakes off and dragged as its pseudonyms with it on, its
+context menu refused, a published decision beside it dragged and offered as
+before, the panel's text copied to an empty clipboard and its entry's drag
+refused.
 
 The tools live in a left-margin rail (`#tools-rail`), the PDF viewer's
 Acrobat-style panel carried over to this page: the top bar had grown to some
@@ -108,12 +300,40 @@ store changed) starts again rather than keeping counts that would walk into
 documents with no hit on screen; `findScanDone` names the question whose
 count `findRows` holds, which is what `awaitFolderScan` waits for.
 
+**Ctrl+Z on a decision** (`asDecision`, `decisionState`, `stepDecision`,
+`decisionLabel`, `textdoc.decisionDelta`, `textdoc.applyDecisionDelta`), at
+the owner's direction. The undo history held page snapshots only, so a flag,
+a phrase, a keep, a "fake it" and a LEAKS answer were taken back only by
+finding the value in a list. Each decision function is now its own name over
+a `…Now` body run inside `asDecision` (`flagSelection`, `markPhrase`,
+`unmarkPhrase`, `setKeep`, `settleName`, `decideLeak`, `acceptLeak`, and the
+Flagged list's ×), which reads the decision state before and after —
+`flagged`, `phrases`, `keeps`, `settled` and the worksheet rows' `[fix, ok]`
+— and pushes `{ decision: { label, delta, store, sheet } }` onto `undoStack`
+where anything moved; a decision inside another is the outer one's
+(`deciding`). The delta holds only what moved, by value (by row for the
+worksheet), and an undo moves those back over the state as it NOW stands, so
+a value adoption merged in from the file since, or a keep the folder's
+reading settled, is not undone with it. `stepHistory` pops a decision step
+before any page logic; `stepDecision` refuses one taken on another case's
+list (`store`, `flagsFor`) or a worksheet no longer attached (`sheet`) and
+drops it, sets each row's `fix`/`ok` back and lets `moveLeakKeep` put its
+mirrored keep and `leaks.mirrored` right, settles once (persist, compile,
+re-mark, repaint), sends the review back to an answered row it took back
+(`goToLeak`), and says what it did. `reelShift` and a member's shed pass over
+decision steps, which name no page. The page lists (⊘ Did not OCR, ↻ OCR This
+Page, ✎ Use my text) are not decisions here: a strip and its put-back stay page
+steps as before. Checked in Chromium (Playwright, not committed): a flag and a
+LEAKS answer undone and redone, the review back on the row.
+
 **A typed real name, and only a typed one** (`convertTypedReals`): the
 debounced converter marks a real name standing in a page's plain text as a
 pseudonym only where an edit wrote it. `buildBody` keeps the text the page
 was built from as `body.__built` (the round trip is exact, so it is also the
 page's disk text until something is typed), and a save sets it to what it
-wrote. `textdoc.typedReals` reads the page now with `serializeMapped` (the
+wrote once the file is written (a save refused on the way keeps the text from
+before it; see "The typing's marks, Esc and a refused save" below).
+`textdoc.typedReals` reads the page now with `serializeMapped` (the
 disk text, and each text node's offset in it) and keeps a hit only where
 `editedSpans(__built, now)` puts something of the edit in it (`spanEdited`:
 text put in that overlaps it, or text taken out of its middle) and it stands
@@ -130,7 +350,414 @@ as `pn`) for the marks an edit made that now stand in a cited name, and puts
 each back as the name typed (`dataset.real`), one undo step, with a toast. The
 same catches a short form the converter marked in a pause before "supra". A
 mark the page was built with is never one of them, so an undo that restores
-one leaves it.
+one leaves it — unless it carries `data-typed`, the typing's own mark, which
+counts whatever the page was built from (below).
+
+**A typed name never reaches the file, however quickly it is saved.** The
+converter was the only thing that turned a typed name into a pseudonym, and
+it could be outrun or passed by. It waits 250 ms after the last key, and it
+was one timer for the reader holding only the page it was last asked about;
+it passes over the name the caret is still in and the one Esc dismissed at
+the prompt; it reads a text node at a time, so a name typed or pasted across
+a line break is not one it can see. `saveDocument` serialized the page as the
+typing had left it, wrote such a name in the clear as "not yet reviewed",
+and then set `__built` to the text it wrote, so the name was the file's own
+from then on and never typed again. Two worse cases came out of the same
+gap. A party marked at the Space prompt and typed on into a whole citation
+("See Jones" — Space — "v. Smith (2019) 30 Cal.App.5th 1.", Ctrl+S inside the
+wait) was written as "See Pratt v. Smith", a renamed authority, and the
+`__built` reset made the mark permanent. And a converter run overdue by the
+time the save had read every page landed inside `await writeText` (a
+permission asked, a picker, a slow synced folder): the page showed a
+pseudonym where the file had the name, nothing was dirty, nothing was orange
+and the tab closed without asking. Checked in Chromium on the old build:
+each of these wrote the real name or the renamed cite. Now:
+
+- The save cancels every page's wait and runs the converter (`quiet`, its
+  `tally` counting what it did) on every page of every edited member before
+  it reads a page, so a mark now standing in a cited name goes back first
+  (`typedPseudonymsCited`). Then, of the names its own reading finds standing
+  (`standingSpans`, a name wrapped over a line or down a column one hit),
+  `TD.typedSpans` gives those an edit wrote — something of the edit in a piece
+  of it, measured against `__built` as it stood before this save (a rebuild
+  replaces it), outside every `citedNameSpans` read with the fakes standing,
+  as `typedReals` reads it — and they go into the forward pass rather than
+  into `left`: written as pseudonyms, not named as unreviewed. A typed name
+  the key holds only an instruction for has no pseudonym to go as, so it is
+  not left either: the last check refuses it, with `instructionNote`. Only
+  a member that is dirty is asked; the rest have nothing typed. The caret
+  and a line break are exceptions of the screen, not of the file, and after
+  the save the page shows the pseudonym span the file carries. Esc was made
+  one too, the guide then promising "the save still writes its pseudonym";
+  that is reversed — Esc leaves the name in the file as well (below).
+- One timer per page body (`debounceEach`): typing on page 2 inside the wait
+  no longer throws page 1's away, and an undo, a strip or a put-back cancels
+  its own page's wait only.
+- A page whose name the converter passed over for the caret is remembered
+  (`caretHeld`); `selectionchange` and `focusout` ask again a beat later, and
+  a page that has lost the focus has no caret in it whatever the selection
+  says (`body.contains(document.activeElement)`), so "a name typed and left
+  is marked once the caret has moved off it" holds before any save — a click
+  away, the arrow keys, the Find box. The same wait means "Helen" on its way
+  to "Helen Rasho" is not marked in pieces.
+- A converter hit that is a piece of a name wrapped over a line break
+  (`standingSpans`, read once the first hit is about to be marked) is left
+  for the save. Pasted out of the filing as "Served on Helen" / "Rasho by
+  mail." under a key binding "Helen Rasho" and the surname token, the
+  converter marked "Rasho" alone and the file read "Helen / Strangeways", a
+  name half faked with "Helen" bound nowhere to mark it — a quarter second
+  after the paste on the old build, and at once had the save's own converter
+  run done it. Now it stands orange and the save writes "Ingrid /
+  Strangeways", one name dealt over its pieces.
+- The page the save rebuilds keeps its caret (`caretPoint`,
+  `placeAfterSwaps`, `placeCaretOnDisk`), read as a place in the DISK text
+  since a name and its pseudonym differ in length with Show fakes on. It used
+  to go to the head of the page, where the next key landed; a save after a
+  decided name did that before, a save while typing a name does it now.
+- After the writes, a written page whose text is no longer what was written
+  stays dirty, so a key typed during the write is not taken for saved.
+- `fakesForPrint` keeps each page's `__built` and `pagesBackAfterPrint` puts
+  it back with the nodes. It was left at the faked text, and every name the
+  print had faked then read as typed: the converter marked the run's
+  undecided leftovers on the next keystroke on that page, and the save would
+  have written them.
+
+The cost is the converter's pass on the pages that were typed on (a page
+whose text is still `__built` returns before reading anything) and one
+`editedSpans` per page of an edited member with a name standing on it, which
+returns at once where the page is as it was built. A 200-page pleading
+export under a 62-name key, one page typed on, saved in the same time as
+before (6.9 s and 6.9 s from Ctrl+S to the write, the rest of the save being
+what it was).
+
+**The typing's marks, Esc and a refused save.** A review of the change above
+found three ways it still let a typed name through, each checked in Chromium
+on that build:
+
+- *A save before the citation was finished made its mark permanent.* "See
+  Jones" saved with the caret still at its end (or after a pause, or inside
+  the wait) went to the file as "See Pratt", which is right — nobody can
+  tell yet that it opens a citation. But the save rebuilt the page from the
+  text it wrote and set `__built` to that text, and `typedPseudonymsCited`
+  told the typing's marks from the page's own by `__built` alone: the
+  " v. Smith (2019) 30 Cal.App.5th 1." typed after the save left "Pratt"
+  standing in it, and the next save wrote "See Pratt v. Smith" with a toast
+  that said only "Saved". The parent build had left "Jones" in the clear at
+  the first save, named in red, and its second save was right. A name marked
+  at the Space prompt or by the converter and then saved did the same before
+  either change; the save had become one more way to mark it. Now every mark
+  the typing makes carries `data-typed` (`acceptTyped`, `convertTypedReals`),
+  and `typedPseudonymsCited` counts a span carrying it as the edit's whatever
+  `built` says. The save's forward pass, rebuilding a page, finds the
+  flagged marks again in the rebuilt page — by where each fake begins in the
+  text written, carried over the names the pass writes (`placeAfterSwaps` of
+  its offset in `serializeMapped`'s `pn`) — and flags the marks it writes for
+  a TYPED name (`TD.typedSpans`) the same way; a mark it writes for a name the
+  run left and the review settled is not the typing's and is not flagged. An undo builds from
+  text and dropped the flag, as an undo that restores a mark leaves it — which
+  is how one Ctrl+Z after a save, or of an unrelated typo, let the renamed
+  authority through after all; it now carries the flag (and `__built`, and the
+  Esc'd names) with its snapshot ("What was typed survives an undo", below).
+- *Esc protected nothing in the file, and the prompt still said "Esc leaves
+  it".* Where it matters is a citation the reader does not read as one. A
+  short cite with no "supra" — "(Jones, 30 Cal.App.5th at p. 5.)" — is
+  protected by PDF-Linker (`_pn_short_cite_follows`: the name, a comma, then
+  the volume, reporter and "at" pin of the decision's own cite) and not by
+  `citedNameSpans`, which returns nothing for it. The operator presses Esc
+  because the name is a cited decision's, and the save wrote "(Pratt, 30
+  Cal.App.5th at p. 5.)", a renamed authority, under "1 real name written as
+  pseudonym"; the parent build left "Jones" and named it in red. The project
+  ranks a renamed authority above an ordinary, visible leak, so the save now
+  honours the Esc: the name ending where Esc was pressed (`typeDismissed`,
+  found as a DOM point with `pointAtOffset`, read into the disk text as one
+  of `serializeHeld`'s points, and carried over the names the pass writes) is
+  left out of the typed set — one place, which "Every Esc is kept, by place"
+  below replaced with every Esc'd name. It waits like any name nobody has
+  decided: it stands in the file as typed, orange on the page, named in red
+  by the save as not yet reviewed, asked about at the tab's close, and the
+  review's to decide. The prompt says so ("Esc leaves it as typed, in the
+  file too"). A name the review has already settled is written as its
+  pseudonym all the same, as before either change: the answer covers every
+  occurrence. The converter skips the same place, so the screen and the
+  file agree.
+- *A refused save's retry wrote what the first refused.* A typed name the key
+  holds only an instruction for is refused by the last check; beside it, a
+  typed name the pass wrote made the pass rebuild the page, and `buildBody`
+  set `__built` to the pass's text. The refusal left that standing, so the
+  next Ctrl+S found nothing typed on the page: the instruction's name fell
+  back to "not yet reviewed", was blanked out of the last check, and was
+  written in the clear ("Served on Quentin Vole and Ingrid Strangeways"). The
+  pass now puts `__built` back to the text from before the save right after
+  its rebuild; the write sets it to what it wrote, as it did, and a refused
+  save leaves the edits measured from where they began. The same reset is
+  what made a refused or cancelled save's marks the page's own.
+
+Checked in Chromium, each failing on the build before and passing after: a
+party saved with the caret at its end, the citation finished and saved (after
+a pause, and inside the wait); a Space-marked party carried over a save that
+rebuilt its page for a name typed on the next line, then cited; a party the
+converter marked when the focus left, saved, then cited; Esc on "(Jones", the
+short cite finished and saved (the file keeps "Jones", the toast names it in
+red, the page keeps it orange); Esc, a save mid-citation, the citation
+finished and saved; Esc on a name after a wrapped name the pass writes on the
+same line (its place moves); an instruction-only name refused, refused again,
+then deleted and the rest saved. `test-textdoc.mjs` pins `data-typed` in
+`typedPseudonymsCited`.
+
+Not done: `citedNameSpans` does not read the short cite with no "supra" that
+PDF-Linker protects, so such a name typed and NOT dismissed is still marked
+by the converter and written as its pseudonym, and one the run left in the
+clear there is orange and, once settled, written over; matching PDF-Linker
+needs its reporter list, a matcher change of its own to be measured under the
+hang rules. An undo or a key change rebuilt a page from its text
+(`restoreSnapshot`, `retranslate`), resetting `__built` and dropping
+`data-typed`; both now carry what was typed ("What was typed survives an
+undo", below). A member the reel sheds and builds again (`unshedMember`)
+still loses its flags: it is shed only once saved, and its pages are built
+from the file's text, so a mark typed and saved before its citation was
+finished is the page's own when the member comes back, and a citation typed
+round it then is written with the pseudonym in it. The Space prompt reads the
+line it is on, so a surname typed at the head of a line under a given name on
+the line before is offered, and marked, alone.
+
+**What was typed survives an undo** (`typingOf`, `restoreTyping`, the
+snapshot's `built`, `typed`, `left` and `esc`; `retranslate`; `data-left` in
+`TD.typedPseudonymsCited`). Three things say which of a page's names the
+operator wrote, and none is in its text: `__built` (what `TD.typedSpans` and
+`TD.typedReals` measure an edit against), `data-typed` on the typing's marks,
+and the Esc'd names. `restoreSnapshot` built the page from the snapshot's text
+alone, which made `__built` that text and dropped the rest; the save's forward
+pass is an undo step (`snapshot(body, true)` before its rebuild), so one Ctrl+Z
+after a save broke three guarantees the User Guide gives. Measured in Chromium
+on 6303b39 (`attack.mjs`, `attack2.mjs` of the final review): a name typed and
+saved at once was written as its pseudonym, Ctrl+Z took the save's marking
+off, and Ctrl+S wrote "Served on Helen Rasho" over the pseudonym already in the
+file, saying in red that it "stands in the file as it did"; a save refused for
+a typed name the key holds only an instruction for, Ctrl+Z, Ctrl+S wrote it and
+the other typed name in the clear; "See Jones" Space-marked and saved, " x"
+typed on another line and undone, then "v. Smith (2019) 30 Cal.App.5th 1."
+typed and saved wrote "See Pratt v. Smith (2019) 30 Cal.App.5th 1." under a
+plain "Saved", a renamed authority. And a name typed before the key was loaded
+(`retranslate`) was written in the clear as "not yet reviewed".
+
+Each snapshot (`snapshotOf`, so `snapshot`, `snapshotPages` and the other
+stack's step in `stepHistory` alike) now carries the page's `__built`, the
+places in its own text of its `data-typed` marks, and its Esc'd names (their
+places noted by `escNote` first), and `restoreTyping` puts all three back once
+`buildBody` has built the page from the same text: `__built` as it stood, the
+flags on the marks at those places, the Esc'd names found again exactly there.
+`putStrippedBack` (↻ OCR This Page from a strip of the reader's own) does the
+same with the strip's step, and `retranslate` with the page as it stood, since
+the file's text and what was typed into it are the same under any key. So the
+page after an undo is measured, marked and Esc'd as it was when the step was
+taken, and a redo brings back what the undo left. Putting `__built` back would,
+alone, have turned an Esc'd short cite's party deleted and put back by Ctrl+Z
+into a typed name, written as its pseudonym — "(Pratt, 30 Cal.App.5th at p.
+5.)", where the old undo left it as the page's own; the Esc'd names coming back
+with the step is what keeps it as typed (measured: Esc'd, the cite deleted,
+Ctrl+Z, Ctrl+S writes "(Jones, …)" and names it in red; with the Esc'd names
+left off the step, "(Pratt, 30 Cal.App.5th at p. 5.)" under "1 real name
+written as pseudonym").
+
+The one rule an undo kept by dropping the flags was the guide's "Ctrl+Z puts
+the mark back": a party marked at the Space prompt and put back as the name
+once its citation was typed (`typedPseudonymsCited`) came back as a mark, and
+an undo that restores a mark leaves it. With the flag and `__built` restored,
+that mark is the typing's and stands in an edited place, and the next pause or
+save put it back again (measured: "See Pratt v. Smith" on the baseline, "See
+Jones v. Smith" with the flags alone carried). So the put-back's own step
+records which marks it took out (`left`), and `restoreTyping` gives each of
+them `data-left`, the operator's: `TD.typedPseudonymsCited` passes over it
+however the page reads, `typingOf` carries it, and the save's forward pass
+flags it again after a rebuild as it does `data-typed`. Checked in Chromium,
+each failing on 6303b39 and passing after: the three of the review, the key
+loaded after the typing, and undo, redo and undo of a save. Each as on
+6303b39: an Esc'd cite deleted and undone, and one with an unrelated edit
+undone (both keep "(Jones, …)" and name it in red); the page's own undecided
+name deleted, saved and undone (back in the clear, named in red, not faked);
+and "Ctrl+Z puts the mark back" ("See Pratt v. Smith", an unrelated edit
+undone after it too). `test-textdoc.mjs` pins `data-left`.
+
+**Every Esc is kept, by place** (`escaped`, `escapeTyped`, `escapesIn`,
+`escNote`, `escFindAgain`, `TD.withoutEscaped`; `TD.escapedPlaces`, since
+replaced by `TD.escapedPlace`: "Found again by what moved it", below). The
+change above remembered ONE dismissal, `typeDismissed`, as an offset into the
+page's text, compared by its end alone. A review measured in Chromium what
+that let through: two short cites in a row, each Esc'd — "(Jones, 30
+Cal.App.5th at p. 5.)" and "(Vance, 31 …)" — and the second Esc replaced the
+first, so the converter's next pause marked Jones and the save wrote "(Pratt,
+30 Cal.App.5th at p. 5.)", the renamed authority the Esc was for, naming only
+Vance in red; one Esc'd and "Also, " typed at the head of the page, and the
+offset no longer reached the name: the same "(Pratt, …)" under a plain
+"Saved". A different name retyped to end at the dismissed place (Jones
+deleted, Vance typed) was taken for the Esc'd one and written as itself.
+
+Now each Esc is kept, per page body (a WeakMap, reset as a document opens), as
+a live `Range` over the name as typed, with the name and its key value. The
+browser carries a Range with its text node — text typed earlier in the node,
+a mark cut out beside it, `normalize` merging nodes — so typing elsewhere moves
+nothing it does not move. Text typed against the name's front grows the Range
+over it ("See Jones"), and `escState` cuts it back (where what was added ends
+at a word boundary, as first written; glued or not since "Found again by what
+moved it" below); letters typed into the name, or deleted from it, leave no
+Esc'd name there ("gone"), and the prompt offers it afresh. What takes the
+nodes away — Enter, Backspace and Delete moving lines (`enterAtCaret`,
+`backspaceAtCaret`), a paste laying lines (`insertLinesAtCaret`), a rebuild
+(`buildBody`), a print or a screenshot writing fakes into the nodes — first
+notes each name's place in the page's DISK text (`escNote`); a rebuild that
+writes names before it carries the place with the text (the save's forward
+pass hands `buildBody` its `placeAfterSwaps`). A name whose nodes went is
+found again there: exactly, after a rebuild or a print or screenshot put back
+(`escFindAgain`), else — as this paragraph was first written — at the nearest
+whole-word occurrence of the name anywhere on the page (`TD.escapedPlaces`),
+passing over places another Esc'd name holds, nearest with no limit, and a
+name not found was kept, its place noted, for any later occurrence. Both
+halves of that were wrong (Enter's collapsed Range read as typed over, and a
+deleted name taking the next one typed), and "Found again by what moved it",
+below, replaces them: the reader moves a name with its node, the browser's
+edits are settled one at a time, and a name is looked for only in the text
+the edit that took its node wrote. The converter skips a hit whose node and offsets are an Esc'd
+Range's exactly; the save reads every Esc'd name into the disk text as a pair
+of `serializeHeld` points and leaves out of `TD.typedSpans`' answer the typed
+spans that are EXACTLY one of them (`TD.withoutEscaped`) — a longer name ending
+at the same place ("Bob Jones" over an Esc'd "Jones") or one wrapped over lines
+is not the name dismissed. While a print or a screenshot has the fakes on the
+page, nothing is dropped or moved: the names are put back the moment it ends.
+
+Measured in Chromium. Failing on the build before and passing after: the two
+short cites, each Esc'd (both keep their names, the toast names both);
+"Also, " typed at the head of the page after an Esc; Jones Esc'd, deleted and
+Vance typed in its place (Vance marked and written as Corbin); an Enter above
+the Esc'd name, two lines pasted above it, "See " typed against its front, the
+line it is on joined to the one above with Backspace; two Esc'd short cites to
+the same Jones moved by a cascade beside a Jones typed as this case's party
+(the cites keep Jones, the party goes as Pratt); and the name's letters typed
+over (offered again). Passing before and after: a print and a screenshot
+between the Esc and the save, and a save that rebuilt the line for a typed
+name before it, then a second save. `test-textdoc.mjs` pins `withoutEscaped`
+and `escapedPlaces` (now `escapedPlace`, below).
+
+**Found again by what moved it, and nowhere else** (`escHold`, `escCutAt`,
+`escCarry`, `escSeen`, `escapesIn`'s `after`, `TD.escapedPlace`). The final
+review of the paragraph above measured two ways it still failed, in opposite
+directions, on b6d82a6 (and the first on c528313 and main too):
+
+- *Enter, or a two-line paste, at the head of the Esc'd short cite's own line
+  renamed it.* `enterAtCaret` and `insertLinesAtCaret` take the text after
+  the caret with `extractContents`, which CLONES the text node the caret
+  stands in for the text after it and leaves the original the text before:
+  the name's Range, in that original, was clamped to {0,0}, `escState` read
+  "" there as the name typed over ("gone"), and the entry was dropped. The
+  converter then marked "Jones" and the save wrote "(Pratt, 30 Cal.App.5th at
+  p. 5.)" under a plain "Saved Doc.txt" — at the head of the line, with the
+  caret between "Nothing else." and the cite, and with "Smith was served."
+  and a line break pasted there — while the User Guide said the name went
+  with its text through Enter.
+- *A deleted Esc'd name took the next one typed, anywhere.* Its line selected
+  (Shift+Home) and deleted with Backspace or Ctrl+X, the node went, the entry
+  read "lost", and `TD.escapedPlaces` took the nearest "Jones" on the page,
+  with no limit, whenever one appeared: "Jones was served." typed on line 1
+  as this case's party was offered nothing, the converter skipped it, and the
+  save wrote it into the file as itself, saying it "stands in the file as it
+  did". c528313 and main offered the prompt and wrote "Pratt was served."
+
+Now each way a name's nodes go is followed by what took them:
+
+- The reader's own line moves carry the name by its NODE. `extractContents`
+  moves a node it holds whole — the same node, into the line it is put in —
+  but a live Range on it collapses the moment the node leaves its parent. So
+  before the move `escHold` holds each live name's text node and its offset
+  in it, and where the page has Esc'd names `escCutAt` splits the caret's
+  text node at the caret first (a name held in its second half is held in
+  the new node) and starts the extraction between nodes, so everything after
+  the caret moves whole. After the move and the dressing (`dressBody`,
+  `fixGutterSpacing`) `escCarry` finds each name in its node: where the
+  node's text begins in the disk text (`serializeMapped`'s `at`) plus the
+  offset, which holds even where `dressColumns` split the node into a column
+  cell, since the halves stand together in the text. `enterAtCaret`,
+  `insertLinesAtCaret` and `joinLineUp` (Backspace at a line's start, Delete
+  at its end) all do this. A page with no Esc'd name is not cut: its moves
+  extract exactly as before.
+- The browser's own edits are settled ONE AT A TIME. `beforeinput` notes
+  every name's place and the page's disk text (`escNote`, `escSeen`, marked
+  `noted`), and so do the cut handler and the paste handler before their
+  `execCommand`, which asks no `beforeinput`; the `input` event that follows
+  settles them (`escapesIn(body, { after: "edit" })`) before anything else
+  reads the page. A name whose node the edit took is asked of
+  `TD.escapedPlace`, which compares the text before and after by the head and
+  tail they share: a name wholly in what the edit left alone is the same
+  characters, at its place moved by what was written before it; a name the
+  edit reached was written over or taken out — deleted with its line, cut,
+  typed over, a letter glued to it — and the entry goes with it. A cross-line
+  delete on a page with no numbers, where Chrome rebuilds the second line's
+  rest into the first, leaves the name in the shared tail, and it is carried.
+- Anything else that takes a node without a note (nothing known does; a
+  script moving one stands in for it) is asked the same question, but cannot
+  tell a move from a deletion: where the change reached the name, EVERY
+  whole-word occurrence of it in the text changed since the note is left as
+  typed, each its own entry marked `unsure` (so is a reader move whose node
+  did not carry the name), and the save adds to its red warning that the
+  name was left as typed in N places because an edit moved it where the
+  reader could not follow — check each, retype one that is this case's own
+  and it is offered again. Where the changed text holds none, the name is
+  gone. That is the direction the project ranks right: a name left as typed
+  is a leak the save names, the party of a short cite written as its
+  pseudonym a renamed authority.
+
+`TD.escapedPlace` is bounded by the edit: an occurrence the edit did not
+write is one the operator never pressed Esc on, however near, and it is never
+taken for the Esc'd one. That holds because the settling is per edit — two
+edits read as one (the deletion, then "Jones" typed on line 1) would span the
+text between them, which is why the `input` event settles each before the next
+can come. Each pass of `escapesIn` notes the live names' places afresh in the
+text as it stands, so a name whose cells were laid again (`recolumnSoon`: the
+nodes went, the text did not) is found at its place exactly, and a place
+whose name the converter marked beside it moves by the mark's length.
+
+Reading the names after every keystroke showed what reading them only when a
+pause or a save asked had hidden: "See " typed before an Esc'd "Jones" passes
+through "SJones", which `escState` read as the name typed over, and the save
+wrote "See Pratt, 30 Cal.App.5th at p. 5." (`escmore.mjs` of the earlier
+review). A Range grown by typing against its front is now cut back to the
+name whether or not what was added ends at a word boundary: the same letters
+at the same place are the name Esc was pressed on, and a hit the converter or
+the save reads there is only ever the whole word (typing glued to its end
+never grew the Range: the DOM moves a Range's end only past an insertion
+strictly inside it).
+
+Measured in Chromium. Failing on b6d82a6 and passing after: the review's
+three Enter and paste cases (`esc-enter2.mjs`, `esc-enter.mjs`,
+`esc-paste.mjs`) — the file keeps "(Jones, …)" and names it in red; the
+line selected and deleted or cut, then "Jones" typed on line 1
+(`esc-lost3.mjs` Backspace and Ctrl+X, `esc-lost.mjs` line-select-backspace
+and cut) — offered "Pratt" and written as it, under a plain "Saved"; Enter
+with the caret on the name's first letter; two Esc'd cites on one line with
+Enter between them, then at the head of the page ("(Corbin, 31 …)" before);
+Enter at the head of the cite's line on a page with no numbers, then a
+selection from line 1 into line 2 deleted (Chrome merges the lines); three
+lines pasted into the middle of the cite's line before it; Enter, Ctrl+Z,
+Ctrl+Y. A node moved by script with "Jones was served." typed on the last
+line keeps the cite's "Jones" and writes the party as "Pratt" both before
+and after, and now the toast says the Esc could not be followed (before, the
+nearest occurrence was taken, saying nothing). Passing before and after:
+Backspace and Delete joins of the cite's line (`esc-key.mjs`, `esc-del.mjs`),
+the other deletions of `esc-lost.mjs` and `esc-lost2.mjs`, Enter inside the
+name (the halves are no name; "Jones" typed after is offered), Ctrl+X of
+words before the name on its line, a deletion of its line undone, a cite
+on a line laid in columns with Enter above it, and, on a page with no
+numbers, a selection from line 1 into the cite's line deleted (the cite's
+line merged up, then "Jones" typed below written as "Pratt"). The earlier reviews' scripts
+(`escmore.mjs`, `escmore2.mjs`, `more.mjs`, `during.mjs`, and a37's
+`attack.mjs`, `attack2.mjs`, `checks.mjs`, `fakes.mjs`, `undo-more.mjs`,
+`x1b.mjs`, `x2.mjs`, `x2b.mjs`) give the same output as on b6d82a6, "See "
+typed before the name included once `escState` was changed as above.
+`test-textdoc.mjs` pins `escapedPlace`.
+
+Left as it is: an Esc'd name cut and pasted elsewhere is a deletion and then a
+name typed — the clipboard carries no Esc — so it is offered at the paste and
+marked by the converter, as on main. An `unsure` place is left as typed until
+it is retyped; Esc cannot be taken back at it, since the prompt does not show
+on an Esc'd place.
 
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each
@@ -242,6 +869,33 @@ with a selection already made flags it as the click always did. The mode is
 per tab and never stored, and `body.flag-mode` paints the page's
 `::selection` in the flag's red. Ctrl+Shift+F is still `flagSelection` alone.
 
+**A cited decision's party is asked about, never flagged on a release**
+(`citedIn`, `CITED_FLAG`, `flagSelection({ asked })`). A flag is a line of
+`New Real Values.txt`, which PDF-Linker reads as an authoritative `--term`: a
+party of THIS case, whose words count toward `_trusted_party_tokens`. Where a
+cited decision's other side is already this case's party — "Kremerman v. Ford
+Motor Co. (2019) 30 Cal.App.5th 1" in a case against Ford, the key binding
+"Ford Motor Company" — a flagged "Kremerman" makes `_side_is_trusted` clear
+both sides, the cite is taken for this case's own caption, and the next run
+writes "Sterling v. Crestline Emberly Co. (2019) …": a renamed authority,
+measured against `pdf_linker.py`'s `_pn_build_terms`. Flagging both sides of
+any cite ("Jones" and "Smith") does the same. The marks, the save, a copy and
+a print all leave a cited name alone (`TD.citedNameSpans`); the flag paths
+did not ask, and with 🚩 on a double-click flagged one with no question at
+all. `citedIn` reads the selection into the page's disk text
+(`serializeHeld` with its two ends as points) and asks whether it overlaps a
+cited decision's name there, in the text as it stands and as the marks read
+it (`diskReading`, fakes and spot keeps blanked). `flagTakes` refuses such a
+selection, so the switch's release leaves it selected with the pop-up up;
+`showFlagPop` puts the reason above its buttons; Ctrl+Shift+F refuses it and
+says why; and only the pop-up's own 🚩 Flag (`asked`) flags it, for a name the
+operator knows is this case's own. Checked in Chromium: a double-click on
+"Kremerman" with 🚩 on (the pop-up asks, nothing flagged, the saved `New Real
+Values.txt` holds no "Kremerman"); a drag over "Smith" and over "Jones" inside
+"Jones v. Smith (2019) 30 Cal.App.5th 1" (neither flagged); Ctrl+Shift+F on
+"Jones" there (refused); the pop-up's Flag on it (flagged); "Riverside County"
+outside any cite (flagged on release, as before).
+
 **A fake that is an ordinary word** (`parseKey`'s `wordFakes`,
 `PK.wordFakesOf`, `PK.compile`): an older PDF-Linker's nickname rule cut a
 surname's stand-in to "We" (the front of a longer name's fake, six letters
@@ -259,6 +913,158 @@ longest first. `setKey` says so in the status bar and a toast naming the
 pairs, pointing at a full PDF-Linker run, which drops such rows on load
 (PDF-Linker's `_pn_key_word_stand_ins`) and no longer draws them
 (`_nick_front`, `fold_onto`).
+
+**A control word in the key's Replacement cell** (`PK.keyCellKind`,
+`parseKey`'s `control` and `dropped.controls`): the key's Replacement column
+takes the LEAKS Fix? column's control words, and PDF-Linker's own notes tell
+the operator to answer a leak there — "~" and the canonical spelling typed
+over a misspelling's stand-in. `--fix-leaks` refuses a control typed in the
+key, so the cell stands until a full run. `isKeepCell` knew "no", "never" and
+a cell wholly bracketed or braced; every other control was read as the row's
+PSEUDONYM. A save then wrote "~Rasho" for the real "Rashoe" — the canonical
+real name, in the export, inside a `.pn` span that the marks and the save's
+last check blank — and counted it "written as pseudonym"; "*Rasho" over a scan
+error wrote the corrected real spelling, "(Cross River Bank)" the phrase, and
+"n", "phrase" and "#NAME?" wrote rubbish, while on screen every "phrase" in
+the case read as a party. Every cell is now read as PDF-Linker reads it back
+for the reader's own text (`_pn_key_reverse_pairs`, whose `control()` is the
+twin of `keyCellKind`) and applies it (`_pn_load_key`). A whole-value keep —
+"no"/"n"/"never", or a keep-spec whose kept parts are the whole value
+(`_pn_bracket_keep` → []) — is dropped as before, except on an e-mail address
+or a website (below). Any other instruction —
+"yes"/"y", "phrase", a cell opening with ~ * = #, one wrapped whole in ( ),
+[ ] or { }, and any cell carrying a [kept] or {kept} part (a keep-spec of PART
+of the value, which PDF-Linker reads as keep-that, fake-the-rest; the old rule
+dropped "[Law]" on "Alder Law, P.C." whole) — keeps its row in `warn` with
+`fake: ""` and the cell as `control`: marked where it stands, refused by a
+save that would write it, and out of the pairs, `compileFakes`, the forward
+map and the typeahead. The kept parts are cut out of the value [bracketed]
+first and {braced} after, as `_pn_keep_spec_parts` hands them over, so a
+value holding one part's text twice ("{Law} [Law Firm]" on "Law Firm Law")
+is a keep of the whole here as it is there. Never "~V forwarded to V's fake":
+PDF-Linker gives a misspelling a SLIP of the canonical's fake, and two Real
+Values on one Replacement cannot be reversed; the reader has no slip to give,
+so the value waits for the run. A keep-spec naming text the value does not
+hold is a literal replacement to `_pn_load_key` (with a warning that it was
+surely not meant); the reader writes nothing for it, the text around a
+mistyped bracket being usually the real value copied in. One sheet holding
+both an instruction and a fake for one value: the instruction stands (applied
+still beats pinned). Three things follow:
+
+- Nothing writes the instruction's real through its own shorter words.
+  `compileForward` MATCHES it and maps it to nothing: left out, "Helen" bound
+  to "Ingrid" and "~Helen Rasho" over "Helen Rashoe" made the save (and the
+  typed converter, `findRealsInPlain`) write "Ingrid Rashoe", a half-scrubbed
+  name with nothing left to mark it. Matched longest first, the name is
+  skipped whole, the same protection a keep has from `maskKept`;
+  `compileTypeahead` counts it as a longer value too, so the space bar does
+  not swap "Helen" on the way to typing it. That does not reach a name
+  wrapped down a caption's COLUMN, for which no column hit is made with no
+  fake to make it with, so `saveDocument` spares every standing name with no
+  fake, settled or not: a LEAKS `yes` on "Jonathan Avery Smith Walker",
+  wrapped "…and Jonathan" / "Avery Smith Walker, an" and holding an
+  instruction, with "Walker" bound on its own, was saved as "Jonathan / Avery
+  Smith Cascadia" and called done, the full name being gone from the text
+  that the last check reads. Spared, it stands whole and the save refuses it
+  (checked in Chromium, both ways).
+- A key kept in the library from before is read the same way (`pairRows`,
+  `warnRows`, and `wordFakesOf`, which had listed "n" and "yes" as fakes that
+  are ordinary words): its instructions sit in its pairs and warning rows as
+  fakes, and the compilers classify each row again. A key this parseKey made
+  carries `dropped.controls` and is taken as it stands, so the compiles cost
+  what they did (4,000 rows, every compiler ten times, three runs each:
+  780–870 ms before, 760–860 ms after; an older key classified again on
+  every compile, 810–950 ms), and `keyCellKind` answers a cell with no
+  leading mark and no bracket of any kind with one test.
+- The operator is told. A settled value with no fake is refused by the save's
+  last check (`saveDocument`), and the refusal — and the `stuck` warning, should
+  that ever be reached — adds `instructionNote`: the key holds no pseudonym for
+  it, only "~Rasho", an instruction to PDF-Linker that only a full run (not
+  Apply Fixes) carries out; until then retype it, or keep it where it stands
+  (right-click: Keep just this one). The spot keep is named because it is the
+  narrowest way through: the first draft said "keep it", which reads as "Keep
+  in this case", and that keep stops the marks and the refusal for the value
+  in every export of the folder, for a value the operator had said to fake.
+  The names bar (whose **Fake it** was already disabled for a hit with no
+  fake) and the right-click menu say what the key holds (`keyInstruction`)
+  instead of "fake it writes its pseudonym".
+
+Measured: a sentence carrying one value of each kind was saved as "~Rasho
+and *Rasho met #Name? at (Cross River Bank); N and Phrase of Alder {Law}
+agreed." and the save's last check found nothing in it; now nothing is
+written for any of them and each but the `n` keep is marked
+(test-pseudo-key.mjs, "control words in the Replacement cell"). Where the two
+still differ it is PDF-Linker's to close. `_pn_key_reverse_pairs` does not
+read "n" or "y" as a control (`_pn_load_key` reads "n" as `no`, and has no
+branch for "y" or "yes"), nor a cell carrying a keep-spec beside other text
+("Alder {Law}"). The second is harmless — such a cell stands in no text the
+reader writes. The first is not: with "n" typed over a row's stand-in, the
+transcription a ✎ Use my text line hands it is read back with every
+standalone "n" turned into that row's real value, a "(n)" subdivision
+included, in the PDF's own text layer. The reader cannot mend that from its
+side; reading "n" as a pseudonym again would only put the same word on
+screen.
+
+Three gaps were left by that change, found by a review of it, and closed:
+
+- **What leaves the room withholds such a name** (`egressSwaps`,
+  `egressText`, `WITHHELD`). The print, the screenshot (its pages,
+  `swapChrome`, `pdfNamesOn`) and a copy off the pages run the forward matcher
+  to show every bound real as its fake, and `compileForward` maps an
+  instruction's real to nothing, so it went out exactly as it stood: a print
+  of "Dana Okafor" holding "phrase" put "Dana Okafor" on paper, where the build
+  before had printed "Phrase" — rubbish, but no name, as "Yes", "#Name?" and
+  "Alder {Law}" were. ("~Rasho" and "*Rasho" had printed a real spelling all
+  along.) Nor did those passes take the save's spare, so a name holding an
+  instruction wrapped down a caption's column, with its last word bound on its
+  own, printed half faked: "…and Jonathan" / "Avery Smith Cascadia, an", the
+  name half scrubbed that reads as finished. And a copy did the same under a
+  toast saying the name went "as it stands". These passes, and only these,
+  now spare every standing name with no fake (`standingSpans`, the column's
+  pieces with it) and lay `WITHHELD` — five full blocks — on its first piece
+  and nothing on the rest, as a fake that does not divide by words is dealt
+  out; the toast after a print, a screenshot or a copy names each with what
+  the key holds for it. The cover reads as no name, no key row reverses it,
+  and it opens with no control mark: "[name withheld]" was the first thought,
+  and pasted into a LEAKS answer or the key it is a keep-spec. It is the same
+  five blocks whatever it covers, where a run the length of the name would
+  give the length away. The SAVE never takes it — a file says what the case
+  says, and the save refuses such a name by name (`instructionNote`) — and
+  neither does the redacted copy's NAME, which never needed it:
+  `RD.scrubbedStem` checks the faked stem against `PK.boundRows`, instruction
+  rows included, and names a copy "document <hash> (redacted).pdf" wherever
+  one still stands. The cost is one `standingSpans` a page in those passes,
+  asked only where the key holds an instruction at all (`keyHasInstructions`):
+  Ctrl+A over 200 pleading pages (700 KB, three names on every line) copies in
+  131 ms under a key of pseudonyms only and 152 ms under one holding
+  instructions.
+  Checked in Chromium on the build before (the print, the column print, a
+  copy of each, and a screenshot's pages, Find box and PDF pane all carried
+  the names, the column half faked) and after (none did).
+- **A possessive holding an instruction binds the bare name** (`parseKey`'s
+  derived rows). "Rashoe's" over "~Rasho's" derived nothing, so "Rashoe"
+  standing alone was bound nowhere: not marked, not refused, not named as
+  unreviewed, and a save wrote it without a word — while a key kept in the
+  library from before still derived and marked it (`warnRows` re-reading the
+  derived "~Rasho" as an instruction), one workbook answering two ways. The
+  bare row is derived with no fake and the possessive's `control`, unless the
+  key binds the bare name itself; it owns no fake, so reversal is untouched.
+- **A keep on an e-mail address or a website is no keep** (`PK.contactValue`,
+  `_pn_contact_value`'s port). Every e-mail address and every website not
+  ending in .gov is faked at the owner's direction, and `_pn_load_key` asks
+  that of the real before reading a keep: "no", "n", "never" or a keep-spec
+  there is "not honoured", the row is dropped and the run fakes the value
+  afresh. Read here as a keep, the row was dropped and the address went
+  unmarked into a save — and "n", a pseudonym to the parse before the cells
+  were classified (and so a marked value), became a keep that unmarked it. A
+  keep on such a value is now an instruction: marked, refused, named in the
+  bar. The port carries PDF-Linker's lists (`_PN_PUBLIC_EMAILS`,
+  `_PN_URL_WHITELIST`, `_PN_PUBLIC_HOSTS`), the url detector's dotted branches,
+  the spellings with a dot missing (`_pn_url_dotless_parts`), an address's
+  host with its dot lost before "com", and `_pn_url_fragmentary`; run against
+  `_pn_contact_value` itself on 6,000 generated values and the test's own, it
+  answered alike on every one. It is asked only of a cell that is a keep, so
+  a key of thousands of pseudonyms never reaches it.
 
 **Taking a value off the Master Keep** (`withdrawMaster`): a value the master
 workbook (`Master Leaks.xlsx`, its KEEP sheet) keeps is left alone in every
@@ -380,18 +1186,24 @@ with nothing to say. A save that finds everything it owed spent writes nothing
 too").
 
 **Only what was written HERE is spent here** (`rememberWritten`,
-`writtenRecord`, `writtenWhere`, `TD.writtenBaseline`). `valuesSaved` is kept
-by folder NAME, as every per-folder list is, and a name is not a folder: a copy
-of the case under the same name (a `copy_to` destination, an archive) shares
-it, and so does every case's `Text Files`. Read against the wrong folder, a
-keep line written into one read as spent in the other, and the keep was
+`writtenRecord`, `writtenWhere`, `TD.writtenBaseline`). `valuesSaved` was kept
+by folder NAME, as every per-folder list was, and a name is not a folder: a
+copy of the case under the same name (a `copy_to` destination, an archive)
+shared it, and so did every case's `Text Files`. Read against the wrong folder,
+a keep line written into one read as spent in the other, and the keep was
 retired, silently where no master was attached, without ever reaching the
-folder PDF-Linker runs on. So every write into a folder records, beside the
-name, WHICH folder took it — its handle, after a write and after the no-write
-path that finds the folder already in step — kept in the `dirs` store under a
-key no folder can have (`"\u0000written:" + name`), which `rememberedDirs`
-passes over (it takes only directory handles) and `forgetDir` deletes with the
-folder. `spendFromDisk` asks it first: the same folder (`isSameEntry`) is
+folder PDF-Linker runs on. Every per-folder record is now kept under the
+folder's id (`stateFolder`, `dirIdFor`; see "Each folder is itself" in
+`Design Notes/Text reader layout and navigation.md`), so a same-named
+copy has a list and a record of its own; the name is the key only where
+IndexedDB gave the folder no id. Beside that, every write into a folder
+records WHICH folder took it — its handle, after a write and after the
+no-write path that finds the folder already in step — kept in the `dirs`
+store under a key no folder can have (`"\u0000written:" + stateFolder()`),
+which `readDirRecords` passes over (it takes only ids and directory handles)
+and which outlives a folder let go of, as its id does. `spendFromDisk` asks it
+first (and stops there, spending nothing, where an adoption it runs in was
+overtaken while it asked: `still`): the same folder (`isSameEntry`) is
 spent as above; another folder is not spent at all — its own file becomes the
 record (`writtenBaseline`: the list's own text where the file carries exactly
 its lines, the file's text otherwise, "" with no file), so whatever the list
@@ -444,12 +1256,18 @@ nothing is added to a tab's list from another's, and nothing is stored. Not
 covered: a flag withdrawn after it was written still comes back from the file
 at the next opening (its own path, `dropFlagsNowFaked`, takes off a flag the
 key now fakes); two tabs still write their lists over each other in every
-other respect, as every per-folder list does; the record of withdrawals is by
-folder NAME, so a same-named copy whose file was written without the line
-clears it for the other copy too, whose old line is then read back in (the
-cautious way); and a keep line in another folder's file that another origin
+other respect, as every per-folder list does; and a keep line in another folder's file that another origin
 wrote is read back there, and is reached by Remove from Master Keep only where
-this reader keeps a list for that folder. `test-textdoc.mjs`
+this reader keeps a list for that folder. The record of withdrawals, and the
+names said to be faked, are kept under the folder's id like the list, and
+beside the list IN HAND (`listStateKey`, from `flagsFor`; `withdrawnKey`,
+`settledStoreKey`): while an adoption has named its folder and not yet read
+that folder's list, a decision taken in the last folder's document is that
+case's, not the new one's. An older build's, kept under the bare
+name, moves with the list (`STATE_PREFIXES`, `adoptLegacyState`). Remove from
+Master Keep finds the other cases' folders by those ids among the remembered
+folders (`keepsElsewhere`, `dirRecordsById`) and names each by its folder's
+name (`caseLabel`), in the order of the names. `test-textdoc.mjs`
 ("what PDF-Linker has spent") and `test-folder-save.mjs` cases 25, 26, 29 and
 32, and 34 for the workbook remembered but not read.
 
@@ -698,6 +1516,28 @@ that reads `[DID NOT OCR]` has
 no transcription: the button is disabled there, `markDidNotOcr` withdraws an
 entry for the page it strips, and `syncNoOcr` drops one for a page that
 reads it. `#text-fixed-block` lists them.
+**…and without the click** (`autoUseMyText`, `noteTyping`, `forgetTyping`,
+`fixDeclined`, `textdoc.wordsChanged`, `TD.AUTO_TEXT_FIXED_WORDS`), at the
+owner's direction. A page's text just before the first keystroke on it is kept
+on the page object as `typedFrom` (the `beforeinput` handler, after its own
+refusals, and the paste handler), across saves, so two words corrected a save
+apart count as two.
+`saveDocument` takes each typed page's text as the typing left it (before the
+forward pass writes a settled name as its pseudonym), and once the files are
+written hands over every page of a written member whose words differ from
+`typedFrom` in two or more (`wordsChanged`: the larger of the words taken out
+and put in over a longest-common-run alignment, the common head and tail set
+aside, so a line re-broken is no change), before `refreshTextFixedSums` and
+the values file. Never a page that reads `[DID NOT OCR]`, one on `noOcr` or
+`ocrAgain` (the operator's own word on the page stands), one already on the
+list, or one in `fixDeclined` — the pages a click on ✓ Use my text took off
+this session; the button itself asks again and clears that. ⊘ Did not OCR is
+not swept in, at the owner's word: `markDidNotOcr`, `markDidNotOcrPages`,
+`putStrippedBack` and `restoreSnapshot` of a step tagged `nocr` (the strip
+undone or redone) each `forgetTyping`, so neither the strip nor the typing
+before it hands a page over. Checked in Chromium (Playwright, not committed):
+one word typed is not handed over, two are; a page typed on and stripped is
+not; withdrawn, a page is not handed over again; a strip undone is no typing.
 
 **Margin numbers the OCR missed** are put back as the export is read:
 `readExport` (every parse site: `openText`, the reel's `reelExtend` and
@@ -766,6 +1606,98 @@ result back before it is written. A `Combined Text.txt` is listed first
 among a folder's documents, and `pdfsync.combinedMembers` reads its
 `# Documents in this file:` list so picked PDFs are matched member by
 member, by name through the key or by order.
+
+An answer not yet saved is remembered in `localStorage` (`leaks.decisionsKey`:
+the case folder's id, and the worksheet's name) and laid back over the sheet
+at the next attach. It used to be remembered by SHEET ROW NUMBER alone
+(`{ row: { base, fix } }`) and laid back wherever that row's cell still read
+as `base` — which, for a row nobody had answered, is `""` on every row of
+every worksheet. PDF-Linker rewrites `LEAKS.xlsx` on every run and sorts it as
+it writes (`_pn_write_leak_report`: undecided rows first, decided ones
+sinking, a misspelling's family pulled together), so after a run a row number
+names another value. Measured in Chromium: a `no` left unsaved on row 2,
+"Riverside County", came back on the witness the run sorted into row 2, a name
+the key binds. `mirrorLeakKeeps` made it one of the reader's keeps, so the
+orange mark went; a one-space edit and Ctrl+S saved without a warning, wrote
+`no` for the witness into `LEAKS.xlsx` and `no: <the name>` into
+`New Real Values.txt`, and left the name in the export, where the next run
+would keep it. The folder toast read "every row answered" on the strength of
+answers given to other values. Two matters whose folders share a leaf name
+share one store entry, so the same happened across cases. (The store is named
+by the folder's own id now, not its leaf name — "Each folder is itself" in
+Design Notes/Text reader layout and navigation.md.)
+
+So `packDecisions` stores each answer with `id`, `leaks.rowIdentity` of its
+row: a digest (two FNV-1a passes, one from each end, 64 bits) of the folded
+Value, File and Context cells. Value is how PDF-Linker tells one row from
+another (one row per value); File and Context are what tell one CASE's row for
+a value from another's (below). It is a digest so that the store gains no real
+text. The value and its sentence are what an export must not carry, and this
+storage is the browser's, not the case folder's. `unpackDecisions` lays an
+answer only on the row with that identity, wherever it now stands, and only
+while its cell still reads `base`. Accepted suggestions
+(`{ id, base, ok: true }`) get the same check, so an acceptance of "Vazqez"'s
+pre-filled `~Vazquez` is not taken for a sibling spelling sorted into its row
+with the same cell. Two rows of one sheet can share an identity: PDF-Linker
+groups by lower case, the fold also collapses spaces. Those rows take answers
+by row number, and only while every answer stored under that identity still
+stands on one of them. It returns `{ laid, dropped, legacy }`. An answer that
+found no row of its own (the value gone, found in other files or quoted from
+another sentence since, a different case's sheet read under the same store) is
+`dropped`. One stored before identities existed, with no `id`, cannot be
+checked at all and is `legacy`, discarded unread. `attachLeaksNow` writes the
+store again at once with only what was laid back, so the leftovers are said
+once and then gone, and leaves the sentence on `leaks.note`. `leaksNoteOnce`
+hands it to whichever toast follows the attach: the attach's own, the folder's
+(`adoptFolderNow`), the lone file's (`attachKeyForFile`) or Read the whole
+folder's. A toast is a single element, and a notice made inside a quiet attach
+was written over by the folder's own toast a moment later. The folder toast
+also says how many answers are here and not yet saved (`leaks.carried`),
+"every row answered" included, since an answer only the browser holds is one
+the next run will not see. Losing an answer costs a click to give it again;
+laying one on the wrong value keeps a real name in the clear.
+
+The digest first held Value and File alone, on the ground that two matters
+whose stores coincide and whose sheets flag one value in a file of the same
+name are asking the same question. They are not: `no` is "leave it, in this
+case" (`classifyFix`), and a keep on Jordan the country in one matter is not a
+keep on Jordan the plaintiff in another. Nor does the File cell always name a
+file: for a value found in more than three, `_pn_write_leak_report` writes "N
+files", so any two sheets flagging one word in four files matched. The store
+is named by the case folder's id now ("Each folder is itself" in Design
+Notes/Text reader layout and navigation.md), which keeps two folders both
+called Pleadings apart, but not every worksheet is read under one: a sheet
+picked or dropped with no folder open is stored under the lone document's FILE
+name (`leaksStoreKey`: `stateFolder() || fileName`), or under nothing with no
+document open; one picked by hand while a folder is open, under that folder's
+id; and without IndexedDB a folder is known by its name. Measured in Chromium
+before this change, two matters each opening `Complaint.txt` and `LEAKS.xlsx`
+on their own: matter A answered `no` on "Jordan" ("imports from the Kingdom of
+Jordan") and did not save; matter B's sheet, through Open LEAKS…, flags its
+plaintiff Jordan, whom its key binds, in `Complaint.pdf`. The `no` was laid on
+him (the toast: "1 answered here and not yet saved"), `mirrorLeakKeeps` made
+it a keep, the orange mark went, and a one-space edit and Ctrl+S saved without
+a warning and wrote `Jordan = no` into B's `LEAKS.xlsx`. So the Context cell
+is in the digest: the first sentence PDF-Linker found the value in, real half
+and scrubbed half, which two matters practically never share. A re-run that
+quotes the value from another sentence drops the answer and says so, the safe
+direction. Same script after: B's row is undecided, no keep, the mark stands,
+the toast says "1 unsaved answer from an earlier session was discarded", the
+save warns "1 real name not yet reviewed was NOT faked — Jordan", and B's
+`LEAKS.xlsx` is untouched. What can still go across is one value in one File
+cell quoted from one sentence, read under one store: a form's boilerplate
+printed alike in two cases, read without a folder.
+
+The Context makes the digest dearer, and `packDecisions` runs on every
+decision over every answered row: measured in Node with Contexts of 566
+characters, a 300-row sheet answered row by row spent 1.7 s hashing (0.26 s
+with Value and File alone), and at 20,000 answered rows a click cost 0.4 s.
+`rowIdentity` remembers each row's digest on the row (a `WeakMap`, checked
+against the three cells it was worked from, so a row changed under it is
+hashed again): the same 300 decisions take 6 ms. `unpackDecisions` still
+hashes every row once per attach where anything is stored — 0.4 s for 20,000
+rows of such Contexts, about 10 ms for a sheet of 300 — and what it hashes is
+remembered for the decisions after.
 
 **The rows still to answer are marked before the walk reaches them**
 (`sheetMatcher`, `pendingSheetRanges`, `::highlight(leakrows)`). Only the row

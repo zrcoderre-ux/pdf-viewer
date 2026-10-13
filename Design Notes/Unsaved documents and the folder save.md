@@ -224,6 +224,22 @@ the replace to be prepared (Esc stops it)." / "Wait for the save to finish.").
    (a reload, leaving without saving), a keep made at the third "Corwin
    Ashdale" moved to the first, and the next save kept the one said to be
    faked and faked the one kept (`test-folder-save.mjs` case 16).
+   Before that pass the typing is finished: every page's converter wait is
+   cancelled and `convertTypedReals` run on each page of an edited member
+   (`typing` counts what it marked and put back). `savePage` carries the
+   rest of what a save of the page owes the typing (see "A typed name never
+   reaches the file" and "The typing's marks, Esc and a refused save" in
+   `Design Notes/Text reader.md`): a name the edits wrote
+   (`TD.typedSpans`, `typedIn` — the pages on screen of an edited member) is
+   written as its pseudonym, not left as "not yet reviewed"; a name Esc left
+   (`escapesIn`, `TD.withoutEscaped`) waits; a name the key holds only an
+   instruction for is spared whole and refused by the assertion; the
+   typing's marks keep `data-typed` / `data-left` through the rebuild,
+   `__built` stays the text from before the save until the write, and the
+   caret and the Esc'd names follow the rebuild (`carry`, placeAfterSwaps).
+   Off screen `typedIn` is false: a document set aside in the store had its
+   typing marked as it was set aside (stashReel), and its Esc'd names are
+   not kept with it, so a name standing there waits for the review.
 2. Off screen: every store entry not on the reel, and every document where
    a name said to be faked still stands (`settledElsewhere({ fresh: true })`
    after `sweepNow()`, which waits for a sweep running and skips the quiet

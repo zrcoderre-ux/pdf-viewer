@@ -10,8 +10,8 @@ import {
   markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
-  serializeHeld, serializeMapped, editedSpans, spanEdited, typedReals, typedPseudonymsCited, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
-  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
+  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
+  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
@@ -19,12 +19,13 @@ import {
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
   textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
+  wordsChanged, AUTO_TEXT_FIXED_WORDS, decisionDelta, applyDecisionDelta,
   marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
   readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
 } from "./viewer/textdoc.js";
-import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns } from "./viewer/pseudo-key.js";
+import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans } from "./viewer/pseudo-key.js";
 
 let fails = 0;
 function check(label, got, want) {
@@ -274,6 +275,20 @@ console.log("cited case names");
     [spans("The declaration of Helen Rasho, served on Vazqez."), citedNameSpans(""), citedNameSpans(null)], [[], [], []]);
   check("a value that STRADDLES a case name's edge is not inside it",
     at("...said Rasho v. Quillmark (1977) 70 Cal.App.3d 216", "said Rasho"), false);
+  // WHAT A FLAG ASKS FIRST (citedIn in the reader). A flag is an authoritative
+  // --term to PDF-Linker, a party of THIS case; a cited decision's party
+  // handed over so, where the other side is this case's party already ("Ford
+  // Motor Company" in a lemon-law case), makes the run take the cite for the
+  // case's own caption and rename the published decision. The reader asks
+  // before flagging a selection inside one, and reads it from these spans.
+  {
+    const P = "  1  Plaintiff Ingrid Strangeways bought a Crestline truck.\n"
+      + "  2  Plaintiff relies on Kremerman v. Ford Motor Co. (2019) 30 Cal.App.5th 1, 5.\n";
+    check("a flag's question: either side of a cited decision is inside its name",
+      [at(P, "Kremerman"), at(P, "Ford"), at(P, "Motor Co.")], [true, true, true]);
+    check("…and the case's own party on the line above is not",
+      [at(P, "Strangeways"), at(P, "Crestline")], [false, false]);
+  }
   // A DECLARATION'S CAPITALS, which is what a party's words being unbounded
   // cost. A run of capitalised words that is not a case name — the jurat, a
   // caption block, a signature block, a list of exhibits — made the scanner
@@ -374,6 +389,130 @@ console.log("what an edit wrote");
   check("a party marked while its citation was typed goes back; the page's own and a typed one outside a citation stay",
     [back.includes(early), back.includes(filed), back.includes(plain), back.length], [true, false, false, 1]);
   check("nothing typed, nothing goes back", typedPseudonymsCited(serializeMapped(cbody), serializeMapped(cbody).text), []);
+  // A SAVE BEFORE THE CITATION WAS FINISHED. "See Rasho" saved — the caret still
+  // at its end, or after a pause — went to the file as "See Strangeways", and
+  // the save took that text for the page's own: the citation typed after it
+  // left the mark standing in it, and the next save wrote the renamed
+  // authority. The typing's marks carry data-typed, and it counts whatever the
+  // page was built from.
+  const saved = pnOf("Strangeways", "Rasho"), savedTyped = E("SPAN", { "data-fake": "Strangeways", "data-real": "Rasho", "data-typed": "1" }, [T("Rasho")]);
+  const sbody = page([
+    [g("1   "), T("See "), saved, T(" v. Quillmark (2017) 13 Cal.App.5th 1152.")],
+    [g("2   "), T("See "), savedTyped, T(" v. Quillmark (2017) 13 Cal.App.5th 1152.")],
+  ]);
+  const ssaved = "1   See Strangeways\n2   See Strangeways";
+  const sback = typedPseudonymsCited(serializeMapped(sbody), ssaved);
+  check("a mark the typing made goes back after a save took it for the page's; one the page was saved with stays",
+    [sback.includes(savedTyped), sback.includes(saved), sback.length], [true, false, 1]);
+  check("…however the page reads against the text it was built from",
+    typedPseudonymsCited(serializeMapped(sbody), serializeMapped(sbody).text), [savedTyped]);
+  check("…and a typed mark outside a citation stays",
+    typedPseudonymsCited(serializeMapped(page([[g("1   "), E("SPAN", { "data-fake": "Strangeways", "data-real": "Rasho", "data-typed": "1" }, [T("Rasho")]), T(" agrees.")]])), "1   Strangeways agrees."), []);
+  // CTRL+Z PUTS THE MARK BACK. An undo now restores the text a page is
+  // measured against and the typing's flags with its text (the reader's
+  // restoreTyping), so a mark the put-back took out, brought back by Ctrl+Z on
+  // that step, would be typed and in an edited place — and put back again at
+  // the next pause. The put-back's own step marks what it took out
+  // `data-left`, the operator's, and it is passed over however it reads.
+  const leftMark = E("SPAN", { "data-fake": "Strangeways", "data-real": "Rasho", "data-left": "1" }, [T("Rasho")]);
+  const lbody = page([[g("1   "), T("See "), leftMark, T(" v. Quillmark (2017) 13 Cal.App.5th 1152.")]]);
+  check("a mark Ctrl+Z took back from a put-back stays, though its place was typed",
+    typedPseudonymsCited(serializeMapped(lbody), "1   See"), []);
+
+  // THE SAVE'S QUESTION, of the names it reads standing in the page whole. A
+  // name typed and saved inside the converter's wait — or with the caret still
+  // at its end, or dismissed with Esc, or typed across a line break, which the
+  // converter cannot read — went into the export in the clear and was "not
+  // yet reviewed" from then on. The save writes each name this answers as its
+  // pseudonym.
+  const sreals = compileReals(key);
+  const typedAt = (built, now) => typedSpans(findRealSpans(sreals, now, { layout: now }), now, built).map((h) => now.slice(h.start, h.end));
+  const leftover = " 1  Counsel for Helen Rasho appeared.\n 2  Nothing else.";
+  check("a name typed is the save's to write; the run's leftover beside it is the review's",
+    typedAt(leftover, leftover.replace("else.", "else. Served on Helen Rasho.")), ["Helen Rasho"]);
+  check("…and on a page nobody typed on, nothing", typedAt(leftover, leftover), []);
+  check("…nor where the page has no text it was built from", typedSpans(findRealSpans(sreals, leftover), leftover, null), []);
+  check("a name typed across a line break is one name, typed",
+    typedAt(" 1  Served on\n 2  by mail.", " 1  Served on Helen\n 2  Rasho, by mail."), ["Helen\n 2  Rasho"]);
+  check("the surname typed under a given name the page had makes the whole name typed",
+    typedAt(" 1  Served on Helen\n 2  by mail.", " 1  Served on Helen\n 2  Rasho by mail."), ["Helen\n 2  Rasho"]);
+  // An Enter inside a name the run left writes the break and the number
+  // between its pieces, and nothing of the name: it is still the review's.
+  check("an Enter inside a leftover does not make it typed",
+    typedAt(" 1  Counsel for Helen Rasho appeared.\n 2", " 1  Counsel for Helen\n 2  Rasho appeared."), []);
+  check("a citation typed whole keeps its parties, read whole as well",
+    typedAt(" 1  Nothing.", " 1  Nothing. See Rasho v. Quillmark (2017) 13 Cal.App.5th 1152."), []);
+
+  // ESC IS KEPT FOR EVERY NAME IT WAS PRESSED ON. A short cite with no
+  // "supra" ("(Rasho, 30 Cal.App.5th at p. 5.)") is not read as one, so the
+  // save writes a name typed there unless Esc left it: one Esc used to be
+  // remembered, the last, and the first of two such cites went to the file as
+  // "(Strangeways, 30 …)", a renamed authority. Each Esc'd name is taken out
+  // of the typed set where it stands exactly; a longer name ending at the same
+  // place is not the Esc'd one.
+  const two = " 1  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 2  End. (Rasho, 31 Cal.App.5th at p. 9.)";
+  const twoBuilt = " 1  Nothing.\n 2  End.";
+  const twoTyped = typedSpans(findRealSpans(sreals, two, { layout: two }), two, twoBuilt);
+  const at1 = two.indexOf("Rasho"), at2 = two.lastIndexOf("Rasho");
+  check("both short cites' names are typed", twoTyped.map((h) => two.slice(h.start, h.end)), ["Rasho", "Rasho"]);
+  check("withoutEscaped: each Esc'd name is left out where it stands — both of two",
+    withoutEscaped(twoTyped, [[at1, at1 + 5], [at2, at2 + 5]]), []);
+  check("…and only that one where one was Esc'd",
+    withoutEscaped(twoTyped, [[at2, at2 + 5]]).map((h) => h.start), [at1]);
+  const longer = " 1  Served on Helen Rasho.";
+  const longerTyped = typedSpans(findRealSpans(sreals, longer, { layout: longer }), longer, " 1  Served on.");
+  const rs = longer.indexOf("Rasho");
+  check("…a longer name ending where an Esc'd one ended is not the Esc'd one",
+    withoutEscaped(longerTyped, [[rs, rs + 5]]).map((h) => longer.slice(h.start, h.end)), ["Helen Rasho"]);
+  check("…nor is a name wrapped over a line, piece for piece",
+    withoutEscaped([{ start: 4, end: 20, ranges: [[4, 9], [15, 20]] }], [[4, 9]]).length, 1);
+  check("…and with nothing Esc'd, the typed set as it was", [withoutEscaped(twoTyped, []).length, withoutEscaped(twoTyped, null).length], [2, 2]);
+  // …and found again, where the page moved its nodes, by WHAT MOVED IT and
+  // nowhere else (escapedPlace). The text an edit left alone — the head and
+  // the tail the page's text before and after share — carries the name to
+  // its place now; where the edit reached it, the answer is the occurrences
+  // in the text the edit wrote, never one anywhere else on the page. It was
+  // the nearest occurrence anywhere, with no limit, and a short cite's
+  // "Jones" deleted with its line waited for the "Jones" typed on line 1 a
+  // minute later as this case's party, which went into the file as itself.
+  const cite = " 1  Plaintiff filed.\n 2  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 3  The end.";
+  const at = cite.indexOf("Rasho");
+  const typedAbove = cite.replace("filed.", "filed. Also, ");
+  check("escapedPlace: text typed before it moves it by its length",
+    escapedPlace(cite, typedAbove, "Rasho", at, null), { at: typedAbove.indexOf("Rasho") });
+  const typedAfter = cite.replace("The end.", "The end. More.");
+  check("…text written after it leaves it where it was", escapedPlace(cite, typedAfter, "Rasho", at, null), { at });
+  check("…as does a page that has not changed (cells laid again: the nodes went, the text did not)", escapedPlace(cite, cite, "Rasho", at, null), { at });
+  const lineGone = cite.replace("Nothing. (Rasho, 30 Cal.App.5th at p. 5.)", "");
+  check("…deleted with its line: no place, and nothing written to take for it",
+    escapedPlace(cite, lineGone, "Rasho", at, null), { at: -1, within: [] });
+  // …which is why the reader asks it of each edit as it is made (the input
+  // event): measured across the deletion AND a "Rasho" typed on line 1 after
+  // it, the text written runs from the one to the other and takes it in.
+  const retypedFar = lineGone.replace("filed.", "filed. Rasho was served.");
+  check("…measured across two edits, the text written spans both (the reader settles each edit as it is made)",
+    escapedPlace(cite, retypedFar, "Rasho", at, null).within, [retypedFar.indexOf("Rasho")]);
+  const elsewhere = " 1  Rasho filed.\n 2  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 3  Rasho agrees.";
+  const elsewhereGone = elsewhere.replace("Nothing. (Rasho, 30 Cal.App.5th at p. 5.)", "Nothing.");
+  check("…never an occurrence the edit did not write, however near",
+    escapedPlace(elsewhere, elsewhereGone, "Rasho", elsewhere.indexOf("(Rasho") + 1, null), { at: -1, within: [] });
+  const glued = cite.replace("(Rasho", "(XRasho");
+  check("…a letter glued to it is the edit reaching it, and no whole word of it there",
+    escapedPlace(cite, glued, "Rasho", at, null), { at: -1, within: [] });
+  const typedOver = cite.replace("(Rasho", "(Vance");
+  check("…nor where its letters were typed over", escapedPlace(cite, typedOver, "Rasho", at, null), { at: -1, within: [] });
+  // A move the reader could not follow by its node: the occurrences in the
+  // text it moved, every one, the places of other Esc'd names left out.
+  const cascaded = " 1  Plaintiff filed.\n 2  \n 3  Nothing. (Rasho, 30 Cal.App.5th at p. 5.)\n 4  The end.";
+  check("…a line cascade: the occurrence in the text it moved",
+    escapedPlace(cite, cascaded, "Rasho", at, null), { at: -1, within: [cascaded.indexOf("Rasho")] });
+  const twoBefore = " 1  Plaintiff filed.\n 2  Nothing. (Rasho, 30 Cal.App.5th at p. 5.) Rasho agrees. Rashomon.\n 3  The end.";
+  const twoMoved = " 1  Plaintiff filed.\n 2  \n 3  Nothing. (Rasho, 30 Cal.App.5th at p. 5.) Rasho agrees. Rashomon.\n 4  The end.";
+  const tAt = twoBefore.indexOf("Rasho");
+  check("…whole words only, leaving out a place another Esc'd name holds",
+    [escapedPlace(twoBefore, twoMoved, "Rasho", tAt, null).within, escapedPlace(twoBefore, twoMoved, "Rasho", tAt, new Set([twoMoved.indexOf("Rasho")])).within],
+    [[twoMoved.indexOf("Rasho"), twoMoved.indexOf("Rasho agrees")], [twoMoved.indexOf("Rasho agrees")]]);
+  check("…and nothing for no name or no place", [escapedPlace(cite, cascaded, "", at, null), escapedPlace(cite, cascaded, "Rasho", -1, null)], [{ at: -1, within: [] }, { at: -1, within: [] }]);
 }
 
 // ---- the values file ---------------------------------------------------------------
@@ -500,6 +639,23 @@ check("nothing in the key, nothing dropped \u2014 and the list stands as it is",
   dropFlagsInKey(STANDS, RUN), { kept: STANDS, dropped: [] });
 check("no key, nothing dropped", dropFlagsInKey(["Rosa Delgado"], null), { kept: ["Rosa Delgado"], dropped: [] });
 check("no list, nothing to drop", dropFlagsInKey(null, RUN), { kept: [], dropped: [] });
+{
+  // A key row whose Replacement is an INSTRUCTION ("~Rosa Delgado" typed over
+  // a misspelling's stand-in) binds no fake (pseudo-key keyCellKind): the run
+  // has not answered that flag, the reader has nothing to write for it, and a
+  // name typed out is not marked through its shorter words either.
+  const CTL = compileForward(parseKey([{ name: "Pseudonym Key", rows: [HEADERS,
+    ["person", "Rosa Delgado", "Wilma Trent", "", "", "spreadsheet", 4],
+    ["person-token", "Rosa", "Wilma", "", "", "spreadsheet", 6],
+    ["person", "Rosa Delgadoe", "~Rosa Delgado", "", "leaked", "document", 1],
+    ["person", "Marisol Ybarra", "phrase", "", "", "", 1],
+  ] }], "pseudonym_key.xlsx"));
+  check("a flag the key holds only an instruction for stays on the list",
+    dropFlagsInKey(["Rosa Delgadoe", "Marisol Ybarra", "Rosa Delgado"], CTL), { kept: ["Rosa Delgadoe", "Marisol Ybarra"], dropped: ["Rosa Delgado"] });
+  check("…it has no fake", [fakeFor(CTL, "Rosa Delgadoe"), fakeFor(CTL, "Marisol Ybarra")], [null, null]);
+  check("…and typed out, neither it nor the shorter name inside it is marked",
+    findRealsInPlain(CTL, [{ node: "n1", text: "Rosa Delgadoe signed; Rosa wrote" }]).map((h) => [h.matched, h.fake]), [["Rosa", "Wilma"]]);
+}
 
 // …and only the folder's OWN key answers them: the key in hand outlives the
 // folder it was read from, and another case's key binds that case's names.
@@ -512,6 +668,100 @@ check("another folder's key does not",
 check("a key that is nobody's (dropped with a document, or offered at start) answers no list",
   [keyAnswersFlags(null, "textReader.values.Case B"), keyAnswersFlags("", "textReader.values.Case B"), keyAnswersFlags(undefined, "textReader.values.Case B")], [false, false, false]);
 check("…not even no list", [keyAnswersFlags(null, null), keyAnswersFlags("", "")], [false, false]);
+
+// A case folder's state is kept under its own id, not its bare name: two
+// folders called "Opposition" (two clients) shared one list, and one case's
+// `no` was read into the other's, where it took the orange mark off the
+// plaintiff and was written into its New Real Values.txt. The id begins with
+// "/", which no file or folder name holds, so moving a name's state to an id
+// takes that name's keys and nothing of an id's or of another name's.
+console.log("a folder's state, by name and by id");
+{
+  const P = { whole: ["textReader.values.", "textReader.valuesSaved."], perDoc: ["textReader.spots.", "textReader.swaps.", "textReader.leaks."] };
+  const ID = "/folder/0b5e", OTHER = "/folder/77aa";
+  const keys = [
+    "textReader.values.Opposition", "textReader.valuesSaved.Opposition",
+    "textReader.spots.Opposition/Brief.txt", "textReader.swaps.Opposition/Brief.txt", "textReader.leaks.Opposition/LEAKS.xlsx",
+    "textReader.values.Opposition Reply", "textReader.spots.Opposition Reply/Brief.txt",
+    "textReader.values.Brief.txt", "textReader.spots./Brief.txt",
+    "textReader.values." + OTHER, "textReader.spots." + OTHER + "/Brief.txt", "textReader.keys", "textReaderSettings",
+  ];
+  check("the name's own keys move to the id, each to its place",
+    folderStateMoves(keys, "Opposition", ID, P), [
+      { from: "textReader.values.Opposition", to: "textReader.values." + ID },
+      { from: "textReader.valuesSaved.Opposition", to: "textReader.valuesSaved." + ID },
+      { from: "textReader.spots.Opposition/Brief.txt", to: "textReader.spots." + ID + "/Brief.txt" },
+      { from: "textReader.swaps.Opposition/Brief.txt", to: "textReader.swaps." + ID + "/Brief.txt" },
+      { from: "textReader.leaks.Opposition/LEAKS.xlsx", to: "textReader.leaks." + ID + "/LEAKS.xlsx" },
+    ]);
+  check("…not a longer name that begins with it, a lone document's list, or another folder's id",
+    folderStateMoves(keys, "Opposition", ID, P).map((x) => x.from).filter((k) => !/\.Opposition(\/|$)/.test(k)), []);
+  check("an id's state moves whole to another id (a Text Files folder's to its case folder's)",
+    folderStateMoves(keys, OTHER, ID, P), [
+      { from: "textReader.values." + OTHER, to: "textReader.values." + ID },
+      { from: "textReader.spots." + OTHER + "/Brief.txt", to: "textReader.spots." + ID + "/Brief.txt" },
+    ]);
+  check("no folder, or no move, moves nothing", [folderStateMoves(keys, "", ID, P), folderStateMoves(keys, ID, ID, P), folderStateMoves(keys, "Opposition", "", P)], [[], [], []]);
+  check("a lone document's spots (no folder) are never a name's to take",
+    folderStateMoves(["textReader.spots./Brief.txt"], "Brief.txt", ID, P), []);
+
+  // Whose an older build's list under the bare name is: told only by the file
+  // that build last wrote, still standing in this folder. The count of folders
+  // of the name is no evidence on its own — that build remembered one per
+  // name, so the first opened after the upgrade always counted one, and a
+  // keep never written, taken in client A's Opposition, moved into client B's
+  // and was written into B's file. A Text Files folder's list never moves:
+  // every case's had the one name.
+  const SAVED = "# New Real Values.txt\nno: Okafor\n";
+  check("moved only where the folder's file is what that build last wrote, and it is the one of the name",
+    legacyStateHold({ sameName: 1, saved: SAVED, onDisk: SAVED }), "");
+  check("…held where it was never written, whatever the count",
+    [legacyStateHold({ sameName: 1, saved: "", onDisk: null }), legacyStateHold({ sameName: 1 }), legacyStateHold({ sameName: 1, saved: "", onDisk: SAVED })],
+    ["unwritten", "unwritten", "unwritten"]);
+  check("…where the file is not what was written, or is gone (a run spends it)",
+    [legacyStateHold({ sameName: 1, saved: SAVED, onDisk: "no: Okafor\n" }), legacyStateHold({ sameName: 1, saved: SAVED, onDisk: null })], ["differs", "differs"]);
+  check("…where two of the name are known, or none is",
+    [legacyStateHold({ sameName: 2, saved: SAVED, onDisk: SAVED }), legacyStateHold({ saved: SAVED, onDisk: SAVED })], ["named", "named"]);
+  check("…and always for a Text Files folder, its file matching or not",
+    [legacyStateHold({ textFiles: true, sameName: 1, saved: SAVED, onDisk: SAVED }), legacyStateHold({ textFiles: true, sameName: 1 })], ["text", "text"]);
+
+  // …and what is held is the half that fails the dangerous way. A run spends
+  // New Real Values.txt, so after a run every list was "differs" and its
+  // flags were held with its keeps: names flagged as standing in the clear
+  // lost their red mark and were handed to no run again. A flag read into the
+  // wrong case only fakes one more name; a keep takes the mark off one.
+  const OLD = { values: ["Ada Pemberton", "Bram Ellery"], keeps: [{ control: "no", value: "Riverside" }], phrases: ["Bram Ellery", "Cora Whitlow"],
+    noOcr: [{ doc: "Brief.txt", page: 2 }], ocrAgain: [], textFixed: [] };
+  const E = { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] };
+  check("one folder of the name known, the file not what was written: the flags and their phrases move, the keeps and page lines are held",
+    ["differs", "unwritten"].map((h) => legacyListSplit(OLD, h)),
+    [0, 1].map(() => ({ move: { ...E, values: ["Ada Pemberton", "Bram Ellery"], phrases: ["Bram Ellery"] },
+      held: { ...E, keeps: [{ control: "no", value: "Riverside" }], noOcr: [{ doc: "Brief.txt", page: 2 }] } })));
+  check("…last written here, all of it moves; two of the name, or a Text Files folder's, all of it is held",
+    [legacyListSplit(OLD, ""), legacyListSplit(OLD, "named"), legacyListSplit(OLD, "text")],
+    [{ move: OLD, held: null }, { move: null, held: OLD }, { move: null, held: OLD }]);
+  check("…and a half with nothing in it is none",
+    [legacyListSplit({ values: ["Ada Pemberton"] }, "differs").held, legacyListSplit({ keeps: [{ control: "no", value: "X" }] }, "differs").move, legacyListSplit(null, "")],
+    [null, null, { move: null, held: null }]);
+
+  // …and the list kept while the Text Files folder was open joins its case
+  // folder's, nothing in either lost and the case folder's own winning.
+  const mine = { values: ["Zachary Coderre", "Helen Rasho"], keeps: [{ control: "no", value: "Riverside" }], phrases: ["Helen Rasho"],
+    noOcr: [{ doc: "Brief.txt", page: 2 }], ocrAgain: [], textFixed: [] };
+  const theirs = { values: ["helen rasho", "Okafor", "Cross River Bank"], keeps: [{ control: "never", value: "riverside" }, { control: "no", value: "Pemberly", state: "local" }],
+    phrases: ["Cross River Bank", "helen rasho"], noOcr: [], ocrAgain: [{ doc: "Brief.txt", page: 2 }, { doc: "Brief.txt", page: 5 }],
+    textFixed: [{ doc: "Brief.txt", page: 2, sum: "0a1b2c3d" }, { doc: "Reply.txt", page: 1, sum: "deadbeef" }] };
+  const m = mergeStoredLists(mine, theirs);
+  check("flags: both lists, one of each value, the case folder's spelling",
+    m.values, ["Zachary Coderre", "Helen Rasho", "Okafor", "Cross River Bank"]);
+  check("phrases: the case folder's, and theirs for a value only they flagged", m.phrases, ["Helen Rasho", "Cross River Bank"]);
+  check("keeps: a value both keep keeps the case folder's control; one only they kept comes with its state",
+    m.keeps, [{ control: "no", value: "Riverside" }, { control: "no", value: "Pemberly", state: "local" }]);
+  check("pages: one the case folder names is left to it; the rest come",
+    [m.noOcr, m.ocrAgain, m.textFixed], [[{ doc: "Brief.txt", page: 2 }], [{ doc: "Brief.txt", pdf: "", page: 5 }], [{ doc: "Reply.txt", pdf: "", page: 1, sum: "deadbeef" }]]);
+  check("an empty or missing list takes the other whole",
+    [mergeStoredLists(null, mine).values, mergeStoredLists(mine, {}).keeps], [mine.values, mine.keeps]);
+}
 
 // ---- folder listing ------------------------------------------------------------------
 console.log("folder");
@@ -852,6 +1102,71 @@ console.log("clear reading (the folder's ⚠ and the page agree)");
     [got.text, got.pns, got.held, got.segs.map((g) => [g.node.data, g.start, g.end])],
     ["Helen Pat Doe met \nQuillmarkRasho", [[6, 13]], [[19, 28]], [["Helen ", 0, 6], [" met ", 13, 18], ["Quillmark", 19, 28], ["Rasho", 28, 33]]]);
   check("…and without it, what it always gave", Object.keys(serializeHeld(body)), ["text", "held", "pns"]);
+}
+
+// ---- a selection, cut out of the text the file carries ------------------------
+// The reader's copy, cut and drag put the PSEUDONYMS on the clipboard: the
+// page is read whole as the save reads it, and the selection's two ends are
+// found in that text (serializeHeld's `points`) and cut out of it (clipText).
+console.log("copying a selection");
+{
+  const T = (s) => ({ nodeType: 3, data: s });
+  const E = (name, kids, attrs) => ({ nodeType: 1, nodeName: name, childNodes: kids, getAttribute: (k) => (attrs && k in attrs ? attrs[k] : null) });
+  const g = T(" 2  "), a = T("Plaintiff "), real = T("Helen Rasho"), b = T(" moves."), c = T("Second line");
+  const pn = E("SPAN", [real], { "data-fake": "Ingrid Strangeways", "data-real": "Helen Rasho" });
+  const gutter = E("SPAN", [g], { class: "gutter" });
+  const line1 = E("DIV", [gutter, a, pn, b]), line2 = E("DIV", [c]);
+  const body = E("DIV", [line1, line2]);
+  const at = (...pts) => serializeHeld(body, { points: pts }).at;
+  const disk = serializeHeld(body, { mapped: true });
+  check("the disk text the points are found in", disk.text, " 2  Plaintiff Ingrid Strangeways moves.\nSecond line");
+  check("…its pseudonym spans in the order of their places", [disk.pnNodes.length, disk.pnNodes[0] === pn], [1, true]);
+  check("a point in a text node is its offset in the disk text", at({ node: a, offset: 4 }, { node: b, offset: 6 }, { node: c, offset: 6 }), [8, 38, 46]);
+  check("a point between children stands where the walk is there: before a line's newline, or after it inside the line",
+    at({ node: body, offset: 1 }, { node: line2, offset: 0 }, { node: body, offset: 2 }), [39, 40, 51]);
+  check("a point inside a pseudonym takes it whole: a start point its start, an end point its end",
+    at({ node: real, offset: 4 }, { node: real, offset: 4, end: true }), [14, 32]);
+  check("…and one at its very start or end is that place either way",
+    at({ node: real, offset: 0, end: true }, { node: real, offset: 11 }, { node: pn, offset: 0 }, { node: pn, offset: 1, end: true }), [14, 32, 14, 32]);
+  check("a point not on the page is -1", at({ node: T("elsewhere"), offset: 2 }), [-1]);
+  check("…and without points there is no `at`", "at" in serializeHeld(body), false);
+
+  const sw = [{ start: 14, end: 32, to: "Helen Rasho" }];
+  check("clipText: the stretch, a swap it reaches written whole", clipText(disk.text, sw, 4, 20), "Plaintiff Helen Rasho");
+  check("…a swap only touched at the stretch's end is not reached", [clipText(disk.text, sw, 4, 14), clipText(disk.text, sw, 32, 39)], ["Plaintiff ", " moves."]);
+  check("…a stretch inside a swap is the swap", clipText(disk.text, sw, 20, 21), "Helen Rasho");
+  check("…the skipped margin number is left out, the newline kept", clipText(disk.text, [], 0, 51, [[0, 4]]), "Plaintiff Ingrid Strangeways moves.\nSecond line");
+  check("…an empty stretch is nothing", clipText(disk.text, sw, 20, 20), "");
+  // A name wrapped over two numbered lines: a swap per piece, the margin between them.
+  const wrapped = " 1  Helen\n 2  Rasho signed";
+  const pieces = [{ start: 4, end: 9, to: "Ingrid" }, { start: 14, end: 19, to: "Strangeways" }];
+  check("…a wrapped name's pieces with the margin numbers out from between them",
+    clipText(wrapped, pieces, 0, wrapped.length, [[0, 4], [10, 14]]), "Ingrid\nStrangeways signed");
+  check("…and a stretch that begins in the margin is the line's text", clipText(wrapped, pieces, 11, wrapped.length, [[0, 4], [10, 14]]), "Strangeways signed");
+
+  // THE CITATION NEEDS THE PAGE. A cited decision's party is the decision's,
+  // and the forward pass spares it only where the reporter after it is in the
+  // text it reads: a selection that stops at the case name, read on its own,
+  // would fake the decision's party — a citation to a case that does not exist
+  // pasted straight into the drafting model.
+  const key = parseKey([{ rows: [["Real Value", "Replacement"], ["Varnell", "Pembrook"], ["Ostrow Freight", "Halden Cartage"]] }], "k");
+  const fwd = compileForward(key);
+  const swaps = (text) => {
+    const out = [];
+    let off = 0;
+    for (const r of forwardRuns(fwd, blankRanges(text, citedNameSpans(text)))) {
+      const n = r.t === "swap" ? r.from.length : r.s.length;
+      if (r.t === "swap") out.push({ start: off, end: off + n, to: r.to });
+      off += n;
+    }
+    return out;
+  };
+  const page = "Varnell signed it. As this Court held in Varnell v. Ostrow Freight (2019) 31 Cal.App.5th 200, the clause binds.";
+  const from = page.indexOf("As this"), to = page.indexOf(" (2019)");
+  const frag = page.slice(from, to);
+  check("read on its own, the fragment fakes the decision's parties", clipText(frag, swaps(frag), 0, frag.length), "As this Court held in Pembrook v. Halden Cartage");
+  check("cut out of the page read whole, it carries them as cited", clipText(page, swaps(page), from, to), "As this Court held in Varnell v. Ostrow Freight");
+  check("…while this case's own Varnell on the same page is faked", clipText(page, swaps(page), 0, 18), "Pembrook signed it.");
 }
 
 // ---- a page that did not OCR ------------------------------------------------
@@ -1346,6 +1661,55 @@ console.log("what PDF-Linker has spent");
     writtenBaseline(list, list + "never: Marlow Tenbury\n"), list + "never: Marlow Tenbury\n");
   check("…the record then owes the list exactly what the folder lacks",
     spendLines({ keeps: [kCor], textFixed: [] }, writtenBaseline(list, null), null).spentKeeps, []);
+}
+
+// ✎ Use my text is asked without the click where a page was TYPED over in
+// several words by the time a save writes it.
+console.log("a page typed over is handed over by itself");
+{
+  check("several words, not one", AUTO_TEXT_FIXED_WORDS, 2);
+  check("nothing typed", wordsChanged("The lease was signed.", "The lease was signed."), 0);
+  check("a word corrected in place counts once", wordsChanged("The lease was slgned.", "The lease was signed."), 1);
+  check("two words corrected", wordsChanged("Tbe lease was slgned.", "The lease was signed."), 2);
+  check("a word taken out and one put right", wordsChanged("The the lease was slgned.", "The lease was signed."), 2);
+  check("a word put in", wordsChanged("The lease signed.", "The lease was signed."), 1);
+  check("a line moved or re-broken is no change", wordsChanged("The lease\nwas signed.", "The lease was\n  signed."), 0);
+  check("two corrections far apart on a page count as two",
+    wordsChanged(["Tbe lease", ...Array(50).fill("was signed in full"), "on Monday"].join("\n"),
+      ["The lease", ...Array(50).fill("was signed in full"), "on Mnday"].join("\n")), 2);
+  check("a whole line typed in", wordsChanged("", "Rent is due on the first."), 6);
+}
+
+// Ctrl+Z on a decision: a step holds what the decision moved and moves only
+// that back, so what came in since stands.
+console.log("a decision undone and made again");
+{
+  const st = (o) => ({ flagged: [], phrases: [], keeps: [], settled: [], rows: null, ...o });
+  check("nothing moved, no step", decisionDelta(st({ flagged: ["Rosa Delgado"] }), st({ flagged: ["Rosa Delgado"] })), null);
+  const flag = decisionDelta(st({ flagged: ["Rosa Delgado"] }), st({ flagged: ["Rosa Delgado", "Tamsin Kettleby"] }));
+  check("a flag moves one value", [flag.flagged.add, flag.flagged.drop], [["Tamsin Kettleby"], []]);
+  // A value the folder's file brought in after the flag stands through its undo.
+  const later = st({ flagged: ["Rosa Delgado", "Tamsin Kettleby", "Oswin Halvorsen"] });
+  const back = applyDecisionDelta(later, flag, true);
+  check("undone, the flag alone comes off", back.flagged, ["Rosa Delgado", "Oswin Halvorsen"]);
+  check("…and redone, it goes back on", applyDecisionDelta(back, flag, false).flagged, ["Rosa Delgado", "Oswin Halvorsen", "Tamsin Kettleby"]);
+  check("the state handed in is not touched", later.flagged.length, 3);
+  const off = decisionDelta(st({ flagged: ["Rosa Delgado"], phrases: ["Rosa Delgado"] }), st());
+  const on = applyDecisionDelta(st(), off, true);
+  check("a value taken off the Flagged list, phrase and all, comes back", [on.flagged, on.phrases], [["Rosa Delgado"], ["Rosa Delgado"]]);
+  const keep = decisionDelta(st({ keeps: [{ control: "no", value: "Cal" }] }),
+    st({ keeps: [{ control: "never", value: "Cal" }, { control: "no", value: "Dealer", state: "local" }] }));
+  check("keeps by value, before and after", keep.keeps.length, 2);
+  check("undone, each keep reads as it did", applyDecisionDelta(st({ keeps: [{ control: "never", value: "Cal" }, { control: "no", value: "Dealer", state: "local" }] }), keep, true).keeps,
+    [{ control: "no", value: "Cal" }]);
+  const fake = decisionDelta(st({ settled: ["a"] }), st({ settled: ["a", "rosa delgado"] }));
+  check("a fake-it undone", applyDecisionDelta(st({ settled: ["a", "rosa delgado"] }), fake, true).settled, ["a"]);
+  const rows = decisionDelta(st({ rows: [["", false], ["", false], ["no", false]] }), st({ rows: [["", false], ["yes", false], ["no", true]] }));
+  check("a LEAKS answer by row", rows.rows, [{ i: 1, before: ["", false], after: ["yes", false] }, { i: 2, before: ["no", false], after: ["no", true] }]);
+  check("undone, the rows read as before and no other moves",
+    applyDecisionDelta(st({ rows: [["typed later", false], ["yes", false], ["no", true]] }), rows, true).rows,
+    [["typed later", false], ["", false], ["no", false]]);
+  check("rows of another sheet's length are not compared", decisionDelta(st({ rows: [["", false]] }), st({ rows: [["yes", false], ["", false]] })), null);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

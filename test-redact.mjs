@@ -11,13 +11,15 @@
 
 import zlib from "node:zlib";
 import {
-  spanGap, pageTextFromSpans, spanRangeFor,
+  spanGap, pageTextFromSpans, spanRangeFor, offUpright, sidewaysSpans, UPRIGHT_SLACK_DEG,
+  spanFrame, SPAN_FRAME_MAX_DEG,
   mergeRects, padRect, clampRect, redactedName, countLabel,
   addRedaction, removeRedaction, redactionsFor, redactionPages,
   redactionCount, clearRedactions, createRedactionStore, pageBoxFromView,
   valueWords, wordsOwed, coveredClaims, pageLayoutFromSpans, spanPiecesFor, charKeys, columnNamesOver,
+  scrubbedStem, unweldNames, nameWordFakes, partWelds, boundValueStands,
 } from "./viewer/redact.js";
-import { parseKey, compileReals, findRealSpans, findColumnSpans } from "./viewer/pseudo-key.js";
+import { parseKey, compileReals, findRealSpans, findColumnSpans, compileForward, forwardRuns, translate, boundRows } from "./viewer/pseudo-key.js";
 import { buildRedactedPdf } from "./viewer/pdf-edit.js";
 
 let fails = 0;
@@ -75,6 +77,117 @@ console.log("the page as one string, and the way back");
     { startSpan: 2, startOffset: 0, endSpan: 2, endOffset: 5 });
 }
 
+console.log("text that does not run across the screen");
+{
+  // The pane's spans on a portrait page turned a quarter (/Rotate 90), as the
+  // reader measured them in Chromium: each line a tall strip, the lines side
+  // by side at one top. The join reads screen geometry for upright text, so
+  // it welds each line's end to the next one's start — the surname with it.
+  // This is why the screenshot leaves such a sheet out (sidewaysSpans): the
+  // reading here cannot say where a name is, or that there is none.
+  const side = [
+    S("NOTICE OF ERRATA", 540, 46, 9, 89),
+    S("Counsel for Ms. Quillfeather", 512, 46, 9, 113),
+    S("Dated this day in the county.", 502, 46, 9, 115),
+  ];
+  const welded = pageTextFromSpans(side).text;
+  ok("a sideways page's lines weld, the surname into the next line", welded.includes("QuillfeatherDated"));
+  ok("…so the surname is no word there", !/\bQuillfeather\b/.test(welded));
+  ok("each span on a line of its own keeps it a word",
+    /\bQuillfeather\b/.test(side.map((s) => s.text).join("\n")));
+
+  check("upright is no turn", offUpright(0), 0);
+  check("a layer turned a quarter with its words turned back reads upright", offUpright(90, 270), 0);
+  check("…and with its words left portrait, a quarter off", offUpright(90, 0), 90);
+  check("a quarter the other way is as far off", offUpright(270), 90);
+  check("upside down is as far off as it goes", offUpright(180), 180);
+  check("a turn past a full one is taken back", offUpright(450), 90);
+  check("a slant either way is its size", [offUpright(359.5), offUpright(0.5)], [0.5, 0.5]);
+  check("a turn that could not be read is no evidence of upright", offUpright(90, NaN), 180);
+  check("…nor is one never given", offUpright(undefined), 180);
+
+  const sp = (text, turn) => ({ text, turn });
+  check("a span a quarter off is sideways", sidewaysSpans([sp("Counsel for Ms. Quillfeather", 90)]).length, 1);
+  check("an upright one is not", sidewaysSpans([sp("Counsel for Ms. Quillfeather", 0)]).length, 0);
+  check("a scan's lean under the slack is upright", sidewaysSpans([sp("Quillfeather", 0.6), sp("Dated", 359.4)]).length, 0);
+  ok("the slack is a degree or so: a lean of 2° already ran a line into the next", UPRIGHT_SLACK_DEG >= 0.5 && UPRIGHT_SLACK_DEG < 2);
+  check("a slant past it is sideways", sidewaysSpans([sp("Quillfeather", 3)]).length, 1);
+  check("one letter can be a name set a letter to a span", sidewaysSpans([sp("Q", 90)]).length, 1);
+  check("a sideways page number or Bates stamp cannot", sidewaysSpans([sp("000123", 90), sp("12.", 270)]).length, 0);
+  check("a span whose turn was not read counts as sideways", sidewaysSpans([sp("Quillfeather", NaN)]).length, 1);
+  check("the slack is the caller's to set", sidewaysSpans([sp("Quillfeather", 3)], 5).length, 0);
+  check("no spans, none sideways", sidewaysSpans(null), []);
+}
+
+console.log("a span at a slant, read along its own line");
+{
+  // A span as Chromium measures it on screen: the upright box round the box
+  // pdf.js turned through `deg` (clockwise, y down) about its top-left corner
+  // (ox, oy), w by h — with the turn the screenshot reads (sidewaysOn).
+  const T = (text, ox, oy, w, h, deg) => {
+    const t = (deg * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
+    const xs = [0, w * c, -h * s, w * c - h * s].map((v) => ox + v);
+    const ys = [0, w * s, h * c, w * s + h * c].map((v) => oy + v);
+    return { text, left: Math.min(...xs), top: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys), turn: deg };
+  };
+  // …and a point (x, y) of the page as laid out upright, turned the same way about the origin.
+  const at = (x, y, deg) => { const t = (deg * Math.PI) / 180; return [x * Math.cos(t) - y * Math.sin(t), x * Math.sin(t) + y * Math.cos(t)]; };
+  const near = (x, y) => Math.abs(x - y) < 1e-6;
+  for (const deg of [0, 0.9, -0.9, 12]) {
+    const f = spanFrame(T("Quillfeather", 560, 40, 90, 11, deg));
+    ok(`the box turned ${deg}° is worked back out of the box round it`,
+      f && near(f.x, 560) && near(f.y, 40) && near(f.w, 90) && near(f.h, 11));
+  }
+  check("no turn given, no frame: the screen reading stands", spanFrame(S("Quillfeather", 560, 40, 90, 11)), null);
+  check("…nor past the turn a box can be worked back from", spanFrame(T("Quillfeather", 560, 40, 90, 11, SPAN_FRAME_MAX_DEG + 1)), null);
+  check("…a quarter off included", spanFrame(T("Quillfeather", 560, 40, 90, 11, 90)), null);
+
+  // The landscape service list of the review (11 pt on 14): the served
+  // party's name alone in the right-hand column at x = 560, the next row at
+  // the left margin. Read by the boxes on screen, a lean of under a degree
+  // welded the surname into the next row; read along the line it does not.
+  const row = (deg) => {
+    const [ax, ay] = at(560, 0, deg), [bx, by] = at(0, 14, deg), [cx, cy] = at(300, 0, deg), [dx, dy] = at(0, 0, deg);
+    return [
+      T("Respondent (by counsel of record)", dx, dy, 190, 11, deg),
+      T("First-class mail, postage prepaid", cx, cy, 180, 11, deg),
+      T("Nadia Quillfeather", ax, ay, 98, 11, deg),
+      T("Dated this day in the county of Los Angeles, California.", bx, by, 300, 11, deg),
+    ];
+  };
+  for (const deg of [0.85, 0.9, 0.99, -0.99]) {
+    const spans = row(deg);
+    const screen = pageTextFromSpans(spans.map(({ turn, ...s }) => s)).text;
+    const along = pageTextFromSpans(spans).text;
+    if (deg > 0) ok(`${deg}°: read by the boxes on screen, the surname runs into the next row`, screen.includes("QuillfeatherDated"));
+    check(`${deg}°: read along the line, each row is a line and the name a name`, along,
+      "Respondent (by counsel of record) First-class mail, postage prepaid Nadia Quillfeather\nDated this day in the county of Los Angeles, California.");
+  }
+  check("…and at no turn the two readings are one",
+    pageTextFromSpans(row(0)).text, pageTextFromSpans(row(0).map(({ turn, ...s }) => s)).text);
+  // A line's far end sinks by its width's worth of the slant: at a degree,
+  // 560 pt out is nearly ten points down — the screen reading broke the line
+  // there; along it, the words are one line with a space.
+  {
+    const [ax, ay] = at(0, 0, 1), [bx, by] = at(560, 0, 1);
+    check("a degree's slant: the far word of the same line is the same line",
+      spanGap(T("Served on", ax, ay, 50, 11, 1), T("Quillfeather", bx, by, 60, 11, 1)), " ");
+    check("…where the boxes on screen broke the line there",
+      spanGap({ ...T("Served on", ax, ay, 50, 11, 1), turn: undefined }, { ...T("Quillfeather", bx, by, 60, 11, 1), turn: undefined }), "\n");
+  }
+  // An OCR layer leans each line its own way: the drop is measured from the
+  // first span's line, wherever the next one's starts.
+  {
+    const [ax, ay] = at(560, 0, 0.9), [bx, by] = at(0, 14, 0.4);
+    check("lines leaning a little differently are still two lines",
+      spanGap(T("Quillfeather", ax, ay, 60, 11, 0.9), T("Dated", bx, by, 40, 11, 0.4)), "\n");
+  }
+  check("a word cut in two at a slant is still one word",
+    spanGap(T("Quill", ...at(560, 0, 0.9), 30, 11, 0.9), T("feather", ...at(590, 0, 0.9), 40, 11, 0.9)), "");
+  check("one span with no turn: both read on screen, as before",
+    spanGap(T("Helen", 100, 100, 40, 10, 0.9), S("Rasho", 150, 100, 40)), spanGap(S("Helen", 100, 100, 40), S("Rasho", 150, 100, 40)));
+}
+
 console.log("one line of text, one box");
 {
   // A name split across two spans reports two rectangles with a hairline
@@ -126,11 +239,14 @@ console.log("a box grown, and held on its page");
 
 console.log("the name the copy is saved under");
 {
+  // The copy is named as PDF-Linker names the export (_pn_scrubbed_stem): its
+  // separators spaced, then faked — so "Rasho v Quillmark - MTC" is named as
+  // its export is, "Strangeways v Melbury MTC".
   const fake = (t) => t.replace(/Rasho/g, "Strangeways").replace(/Quillmark/g, "Melbury");
   check("no key, and the copy is still marked",
-    redactedName("Rasho v Quillmark - MTC.pdf", null), "Rasho v Quillmark - MTC (redacted).pdf");
+    redactedName("Rasho v Quillmark - MTC.pdf", null), "Rasho v Quillmark MTC (redacted).pdf");
   check("with a key the copy carries the pseudonymized name",
-    redactedName("Rasho v Quillmark - MTC.pdf", fake), "Strangeways v Melbury - MTC (redacted).pdf");
+    redactedName("Rasho v Quillmark - MTC.pdf", fake), "Strangeways v Melbury MTC (redacted).pdf");
   check("a copy of a copy is marked once",
     redactedName("Strangeways v Melbury (redacted).pdf", null), "Strangeways v Melbury (redacted).pdf");
   check("a path is not part of the name",
@@ -138,6 +254,237 @@ console.log("the name the copy is saved under");
   check("a key that throws leaves the name it had",
     redactedName("MTC.pdf", () => { throw new Error("no"); }), "MTC (redacted).pdf");
   check("a nameless file is still a file", redactedName("", null), "document (redacted).pdf");
+  check("with no key at all, a document's name is written with spaces, never underscores",
+    redactedName("Motion_to_Compel__Further.pdf", null), "Motion to Compel Further (redacted).pdf");
+}
+
+// THE NAME GOES WHERE THE COPY GOES. The stem used to be run forward as it
+// stood, and the key finds a name only standing as a word: an underscore is a
+// letter to its matcher and a weld has no boundary, so "Helen_Rasho_Decl",
+// "RashoDecl" and "25STCV59720_Complaint" were the names of copies whose pages
+// were black over every one of those values. Both of the readers' forwards are
+// run here — the text reader's (forwardRuns) and the viewer's (translate) —
+// over the key the review found it with.
+console.log("the copy's name hides what its pages hide");
+{
+  const key = parseKey([{ name: "Pseudonym Key", rows: [
+    ["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"],
+    ["person", "Helen Rasho", "Ingrid Strangeways", "", "", "spreadsheet", 12],
+    ["person-token", "Rasho", "Strangeways", "", "", "spreadsheet", 30],
+    ["entity", "Quillmark Holdings", "Melbury Partners", "", "", "spreadsheet", 4],
+    ["entity-token", "Quillmark", "Melbury", "", "", "spreadsheet", 4],
+    ["docket", "25STCV59720", "25STZV11111", "", "", "spreadsheet", 4],
+    ["docket", "23-cv-01234", "23-cv-05678", "", "", "spreadsheet", 2],
+    ["person-token", "Lee", "Hartwell", "", "", "spreadsheet", 4],
+    ["person-token", "Ann", "Corvina", "", "", "spreadsheet", 4],
+    ["person-token", "Bill", "Tamsin", "", "", "spreadsheet", 3],
+    ["person-token", "Rashoe", "~Rasho", "", "leaked", "document", 1],
+    ["email", "helen_rasho@rashofamilylaw.com", "quenby3@postbox9.org", "", "", "", 2],
+    ["person", "José García", "Tomás Velarde", "", "", "", 2],
+    ["person-token", "García", "Velarde", "", "", "", 2],
+    ["person-token", "O'Brien", "Fairweather", "", "", "", 2],
+  ] }], "pseudonym_key.xlsx");
+  const f = compileForward(key);
+  const rows = boundRows(key);
+  const readers = {
+    reader: { forward: (t) => forwardRuns(f, t).map((r) => (r.t === "swap" ? r.to : r.s)).join(""), rows },
+    viewer: { forward: (t) => translate(f, t).text, rows },
+  };
+  const both = (name) => {
+    const a = redactedName(name, readers.reader);
+    const b = redactedName(name, readers.viewer);
+    return a === b ? a : `reader ${a} / viewer ${b}`;
+  };
+  const NEUTRAL = /^document [0-9a-f]{6} \(redacted\)\.pdf$/;
+
+  check("underscores are spaces, and the names between them are faked",
+    both("Rasho_v_Quillmark_MTC.pdf"), "Strangeways v Melbury MTC (redacted).pdf");
+  check("a full name joined by underscores is faked whole",
+    both("Helen_Rasho_Decl.pdf"), "Ingrid Strangeways Decl (redacted).pdf");
+  check("a docket before an underscore is faked",
+    both("25STCV59720_Complaint.pdf"), "25STZV11111 Complaint (redacted).pdf");
+  check("a hyphen is a space too, as PDF-Linker spaces it",
+    both("Rasho-Decl.pdf"), "Strangeways Decl (redacted).pdf");
+  check("…save inside a value spelled with one: the docket keeps its hyphens and is faked whole",
+    both("23-cv-01234_Order.pdf"), "23-cv-05678 Order (redacted).pdf");
+  // …and found with any run of separators where the key has one, written back
+  // as the key spells it: a docket typed with underscores is the docket.
+  check("…a docket typed with underscores for its hyphens is the docket the key binds, faked whole",
+    both("23_cv_01234 Order.pdf"), "23-cv-05678 Order (redacted).pdf");
+  // …and an underscore the same: an address whose handle carries one, spaced
+  // out, was no address the key binds, and its handle two words it does — the
+  // forward faked the person and left the firm's domain, the surname in it:
+  // "Letter to ingrid strangeways@rashofamilylaw.com (redacted).pdf".
+  check("…an e-mail address whose handle has an underscore keeps it, and is faked whole",
+    both("Letter to helen_rasho@rashofamilylaw.com.pdf"), "Letter to quenby3@postbox9.org (redacted).pdf");
+  check("…wherever it stands in the name",
+    both("RE_helen_rasho@rashofamilylaw.com_thread.pdf"), "RE quenby3@postbox9.org thread (redacted).pdf");
+
+  // Two or three bound name words run together, and nothing else, are their
+  // fakes run together the same way, each in its own case.
+  check("a welded full name is its fakes welded",
+    both("HelenRasho Decl.pdf"), "IngridStrangeways Decl (redacted).pdf");
+  check("…in capitals", both("HELENRASHO_DECL.pdf"), "INGRIDSTRANGEWAYS DECL (redacted).pdf");
+  check("…in lower case", both("helenrasho.pdf"), "ingridstrangeways (redacted).pdf");
+  check("…two parties' words alike", both("QuillmarkRasho Opp.pdf"), "MelburyStrangeways Opp (redacted).pdf");
+
+  // A value the key cannot fake where it stands takes the copy to a neutral
+  // name: a name welded to a word no key binds, at a seam where the case or
+  // the digits turn; a long value inside a word; a docket that lost its
+  // hyphens; a value whose row holds an instruction rather than a fake.
+  for (const n of ["RashoDecl.pdf", "MSJRasho.pdf", "Rasho2023.pdf", "HELENRASHODECL.pdf",
+    "25STCV59720Complaint.pdf", "Rashoe_Decl.pdf",
+    // An address spelled otherwise than the key spells it: its handle faked
+    // word by word, its host would stand.
+    "helen.rasho@rashofamilylaw.com thread.pdf",
+    // A value spaced out, its accents dropped, its apostrophe dropped; a weld
+    // the forward parts at an accent and half fakes ("JoséVelarde").
+    "25_STCV_59720 Complaint.pdf", "Jose_Garcia_Decl.pdf", "OBRIEN_DECL.pdf", "JoséGarcía Decl.pdf"]) {
+    const got = both(n);
+    ok(`${n} takes a neutral name (${got})`, NEUTRAL.test(got));
+  }
+  const n1 = redactedName("RashoDecl.pdf", readers.reader);
+  check("the same document always takes the same neutral name", redactedName("RashoDecl.pdf", readers.reader), n1);
+  ok("…and another document another", redactedName("RashoReply.pdf", readers.reader) !== n1);
+  check("re-redacting a neutral copy keeps its name, marked once", redactedName(n1, readers.reader), n1);
+  // The hash carries the key: a guess at the original name cannot be tested
+  // against the copy by anyone who does not hold the key.
+  ok("…and the hash is not the stem's alone", redactedName("RashoDecl.pdf", { forward: readers.reader.forward, rows: rows.slice(1) }) !== n1);
+
+  // A SHORT NAME RUN INTO OTHER LETTERS, its own letters carrying a capital,
+  // is the name: PDF-Linker's short weld tier. The commit before pinned
+  // "RASHODECL (redacted).pdf" here as the expected name, on the reasoning
+  // that such a test would call "Release" a leak for a party named Lee; it
+  // would not, "release" having no "lee" in it.
+  for (const n of ["RASHODECL.pdf", "Rashodecl.pdf", "RASHOS OPP.pdf", "Rashos_Opp.pdf", "DECLRASHO.pdf"]) {
+    const got = both(n);
+    ok(`${n} takes a neutral name (${got})`, NEUTRAL.test(got));
+  }
+  // Under four letters a name is too short to tell from a word's letters.
+  check("a name under four letters inside a word is no name: Lee in Leeward, Ann in Annual",
+    both("Leeward_Annual_Report.pdf"), "Leeward Annual Report (redacted).pdf");
+  // The cost: with no dictionary, a capitalised word with a party's short name
+  // in it is the name — a useful name lost, not a party's name kept.
+  ok("a capitalised word with a short name in it takes a neutral name: Bill in Billing",
+    NEUTRAL.test(both("Billing Statement.pdf")));
+  check("…never a lower-case one, as PDF-Linker reads it (_pn_span_is_cased)",
+    both("billing statement.pdf"), "billing statement (redacted).pdf");
+  check("a possessive is faked as before", both("Quillmark's MSJ.pdf"), "Melbury's MSJ (redacted).pdf");
+  check("a date's hyphens are spaces, as in the export's own name",
+    both("2023-01-05 RASHO DECL.pdf"), "2023 01 05 STRANGEWAYS DECL (redacted).pdf");
+
+  // A bare forward (no rows) still checks with its own reading of the name.
+  ok("a bare forward still sends a seam weld to a neutral name",
+    NEUTRAL.test(redactedName("RashoDecl.pdf", readers.reader.forward)));
+}
+
+// A NAME SPELLED OTHERWISE THAN THE KEY SPELLS IT. The forward fakes what the
+// key binds where it stands, and the check found a value only where its words
+// stood in the key's order: "Rasho_Helen_Decl" came out "Strangeways Helen
+// Decl" (the surname faked by its own row, the given name left beside it),
+// "Mary-Kate_Olsen_Decl" "Mary Kate Pell Decl", and with no shorter row
+// bound "Vrba, Tomas Decl" went out whole — a half-scrubbed name that reads
+// as finished, in the one file made to be handed on. A long name word welded
+// ("KowalczykDecl") fell between the short tier and the long one, and a
+// value whose apostrophe was dropped was found only as a whole word.
+console.log("a name spelled otherwise than the key spells it");
+{
+  const key = parseKey([{ name: "Pseudonym Key", rows: [
+    ["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"],
+    ["person", "Helen Rasho", "Ingrid Strangeways", "", "", "spreadsheet", 12],
+    ["person-token", "Rasho", "Strangeways", "", "", "spreadsheet", 30],
+    ["person", "Mary-Kate Olsen", "Ruth-Ann Pell", "", "", "spreadsheet", 3],
+    ["person-token", "Olsen", "Pell", "", "", "spreadsheet", 3],
+    ["person", "Helena Kowalczyk", "Agatha Brandvold", "", "", "spreadsheet", 3],
+    ["person", "Tomas Vrba", "Elias Quint", "", "", "spreadsheet", 3],
+    ["person", "Mark Ellis", "Peter Hale", "", "", "spreadsheet", 3],
+    ["person-token", "O'Brien", "Fairweather", "", "", "", 2],
+    ["person-token", "D'Souza", "Pemberton", "", "", "", 2],
+    ["docket", "25STCV59720", "25STZV11111", "", "", "spreadsheet", 4],
+  ] }], "pseudonym_key.xlsx");
+  const f = compileForward(key);
+  const rows = boundRows(key);
+  const readers = {
+    reader: { forward: (t) => forwardRuns(f, t).map((r) => (r.t === "swap" ? r.to : r.s)).join(""), rows },
+    viewer: { forward: (t) => translate(f, t).text, rows },
+  };
+  const both = (name) => {
+    const a = redactedName(name, readers.reader);
+    const b = redactedName(name, readers.viewer);
+    return a === b ? a : `reader ${a} / viewer ${b}`;
+  };
+  const NEUTRAL = /^document [0-9a-f]{6} \(redacted\)\.pdf$/;
+  for (const n of [
+    // A name's words in another order, around an initial, run together, or
+    // with only the surname bound on its own.
+    "Rasho_Helen_Decl.pdf", "Helen M. Rasho Decl.pdf", "Vrba, Tomas Decl.pdf", "Tomas_J_Vrba.pdf",
+    "MaryKate Olsen Decl.pdf",
+    // A name word of eight letters or more, welded.
+    "KowalczykDecl.pdf", "KOWALCZYKDECL.pdf",
+    // A value that runs together once its apostrophe is dropped, welded.
+    "OBRIENDECL.pdf", "ObrienDecl.pdf", "DSOUZADECL.pdf",
+    // A long value spaced out once a weld is parted ("Case25" is "Case 25").
+    "Case25_STCV_59720.pdf"]) {
+    const got = both(n);
+    ok(`${n} takes a neutral name (${got})`, NEUTRAL.test(got));
+  }
+  check("a hyphenated given name with an underscore where the key has a space is faked whole",
+    both("Mary-Kate_Olsen_Decl.pdf"), "Ruth-Ann Pell Decl (redacted).pdf");
+  check("…and with a space where the key has its hyphen",
+    both("Mary Kate Olsen Decl.pdf"), "Ruth-Ann Pell Decl (redacted).pdf");
+  check("a name in the key's own order is faked as before",
+    both("Helen_Rasho_Decl.pdf"), "Ingrid Strangeways Decl (redacted).pdf");
+  check("a pseudonym is no real name", both("Ingrid Strangeways Decl.pdf"), "Ingrid Strangeways Decl (redacted).pdf");
+  // The words read in any order need corroboration: two of one name's own
+  // words, or one beside its own fake's. A given name that is a word, alone,
+  // is neither.
+  check("a given name that is a word, alone, is no bound value", both("Mark Up Draft.pdf"), "Mark Up Draft (redacted).pdf");
+  check("a word a fake carries, or a particle pair, corroborates nothing",
+    [boundValueStands("Declaracion de la Parte", [{ real: "Maria de la Cruz", fake: "Elena de la Vega" }]),
+      boundValueStands("Holdings Report Melbury", [{ real: "Quillmark Holdings", fake: "Melbury Holdings" }]),
+      boundValueStands("Declaracion de la Parte", [{ real: "Maria de la Cruz", fake: "Elena Ortiz Vega" }])],
+    [false, false, false]);
+  check("…where two own words, or one and its fake's, stand in any order",
+    [boundValueStands("Cruz Maria", [{ real: "Maria de la Cruz", fake: "Elena de la Vega" }]),
+      boundValueStands("Vega Maria", [{ real: "Maria de la Cruz", fake: "Elena de la Vega" }])],
+    [true, true]);
+}
+
+console.log("the pieces of the name's scrub");
+{
+  const words = nameWordFakes([
+    { real: "Helen Rasho", fake: "Ingrid Strangeways" },
+    { real: "Quillmark Holdings", fake: "Melbury Holdings" },
+    { real: "Rashoe", fake: "", control: "~Rasho" },
+    { real: "J. Doe", fake: "K. Wilde" },
+  ]);
+  check("a word the fake carries over is no name; an instruction is no fake; a word under three letters is none",
+    [...words.entries()], [["helen", "Ingrid"], ["rasho", "Strangeways"], ["quillmark", "Melbury"], ["doe", "Wilde"]]);
+  check("a run that is one bound word is the forward's business", unweldNames("Rasho Quillmark", words), "Rasho Quillmark");
+  check("a run with a letter no bound word accounts for is left whole", unweldNames("RashoDecl HelenRashoX", words), "RashoDecl HelenRashoX");
+  check("three words run together, and no more", unweldNames("HelenRashoQuillmark DoeHelenRashoQuillmark", words),
+    "IngridStrangewaysMelbury DoeHelenRashoQuillmark");
+  check("welds part where the case and the digits turn", partWelds("RashoDecl MSJRasho Rasho2023 25STCV59720"),
+    "Rasho Decl MSJ Rasho Rasho 2023 25 STCV 59720");
+  const rows = [{ real: "Helen Rasho" }, { real: "Rasho" }, { real: "25STCV59720" }, { real: "Lee" }];
+  check("a value is found whatever stands between its words",
+    ["Helen-Rasho", "helen.rasho", "Rasho's", "HelenRasho"].map((s) => boundValueStands(s, rows)), [true, true, true, true]);
+  check("a short name inside a word, where its letters carry a capital and it is four letters or more",
+    ["RASHODECL", "Rashomon", "DeclRASHO", "rashomon", "Leeward", "Strangeways"].map((s) => boundValueStands(s, rows)),
+    [true, true, true, false, false, false]);
+  check("a long value inside a word is found", boundValueStands("Complaint25STCV59720", rows), true);
+  check("…and spaced out across whole words, edge to edge, but not from the middle of one",
+    ["25 STCV 59720 Complaint", "x25 STCV 597201"].map((s) => boundValueStands(s, rows)), [true, false]);
+  check("a value is read with its accents off",
+    ["Jose Garcia", "GARCIA DECL"].map((s) => boundValueStands(s, [{ real: "José García" }, { real: "García" }])), [true, true]);
+  check("…and with the apostrophe a file name drops", boundValueStands("OBRIEN DECL", [{ real: "O'Brien" }]), true);
+  check("an e-mail address's host is a value of its own",
+    boundValueStands("ingrid strangeways@rashofamilylaw.com", [{ real: "helen_rasho@rashofamilylaw.com" }]), true);
+  // The forward reads a word as ASCII letters and parts "JoséGarcía" at the
+  // accent: the surname faked, the given name welded to its pseudonym.
+  check("a name word of a longer value welded to anything is found",
+    boundValueStands("JoséVelarde Decl", [{ real: "José García", fake: "Tomás Velarde" }]), true);
+  check("scrubbedStem with nothing to scrub is the stem spaced", scrubbedStem("A_B-C", null), "A B C");
 }
 
 console.log("what the bar says");

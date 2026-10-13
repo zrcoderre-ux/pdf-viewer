@@ -613,7 +613,9 @@ list is stored under (`valuesStoreKey()`, the flag store's own identity):
 
 - adoption reading the folder's key file sets it to that folder (`own`, taken
   as adoption names the folder, so an adoption overtaken by another still
-  files its key as its own folder's and not the later one's);
+  files its key as its own folder's and not the later one's — and, since
+  "An adoption overtaken by another" below, puts neither that key nor its
+  list in hand, and files the key under its own folder's name);
 - a key loaded by hand (Load key…, a key dropped ON ITS OWN or with a PDF or
   a workbook) or chosen in the Key list sets it to the list open at that
   moment (`handOwner`): the case folder's, or with no folder open the lone
@@ -652,8 +654,11 @@ one lacks. Adoption, and the lone-file attach after it (on the `found` that
 adoption returns), leave it out where the folder picked looks like the Text
 Files subfolder (`looksLikeTextFiles`): there the remedy is the folder above,
 which `openFolder`'s offer bar already says, and a key loaded into it would own
-the one list every case's Text Files folder shares. Without the note each of
-these toasts and the offer line is main's word for word.
+the one list every case's Text Files folder shares. (Since "Each folder is
+itself" below, each Text Files folder has a list of its own, and the offer bar
+is put up by adoption, `offerFolderAbove`, whichever way the folder came.)
+Without the note each of these toasts and the offer line is main's word for
+word.
 
 Left as they are, on purpose (each keeps a flag main would have dropped,
 never the other way):
@@ -674,15 +679,17 @@ never the other way):
 - After "Let go of the folder" the key keeps its owner, the folder: the lone
   document's own list is not answered until a key is chosen with it open.
 - The identity is the folder's NAME, as the flag store's is: two case folders
-  of one name share one list and one owner, exactly as they share the list.
-  So does every case's Text Files folder (`textReader.values.Text Files`).
-  A lone document's list is stored by its FILE name, so lone documents of one
-  name from different cases (`Motion.txt`, `Complaint.txt`) share one list,
-  and a key chosen while one was open answers the others too — as on main,
-  which shares the list the same way. A key loaded with no folder open could
-  have belonged to none; `handOwner` gives it the lone document's list
-  instead, so that a lone document's flags can still come off under its
-  case's key.
+  of one name share one list and one owner, exactly as they share the list. So
+  does every case's Text Files folder (`textReader.values.Text Files`). (No
+  longer: the store and the owner are the folder's own id now, and a KEEP
+  shared this way was found to let a name ship — see "Each folder is itself"
+  below.) A lone document's list is stored by its FILE name, so lone documents
+  of one name from different cases (`Motion.txt`, `Complaint.txt`) share one
+  list, and a key chosen while one was open answers the others too — as on
+  main, which shares the list the same way. A key loaded with no folder open
+  could have belonged to none; `handOwner` gives it the lone document's list
+  instead, so that a lone document's flags can still come off under its case's
+  key.
 
 Measured in Chromium on PWA builds of main and of this change. A probe for
 this design (19 scenarios: key-less B after A by Open case folder, through its
@@ -718,3 +725,347 @@ picked in a new PWA tab; the "could not be read" line of a key that is not a
 zip reads with its full stop. Key, Key list, library and document text match
 main throughout; the status line of the overlapping adoptions above, and the
 note's longer toast, are the only other differences.
+
+### Each folder is itself: its state is kept by its id (`dirIdFor`)
+
+Everything the reader keeps for a case folder — the flagged list, the keeps,
+the phrases, the page lists, what was last written (`valuesSavedKey`), the
+spot keeps, the swapped pages, the unsaved LEAKS answers — was kept in
+`localStorage` under the folder's bare NAME, and the remembered folders in
+IndexedDB were put under the name too. The paragraph above left that as it
+was on purpose, on the ground that a flag shared by two same-named folders
+only asks again. A KEEP does the opposite. Measured in Chromium over two
+folders called Opposition under two clients: a `no` on Okafor in the first
+was read into the second, where Okafor is the plaintiff. `keyLessKeeps` took
+him out of the forward side, so the orange mark on the name standing in the
+clear went; Ctrl+S wrote the export with it unrefused; and the second case's
+`New Real Values.txt` was written `no: Okafor`, which its next run obeys —
+the real name stays in its exports from then on. The store put by name had
+its own half of it: the folder remembered was whichever of the two was opened
+last, and a file from the other, opened on its own, found no case folder.
+
+So each folder gets an id, kept beside its handle in the `dirs` store, and is
+found again by asking the stored handles whether one IS the folder
+(`isSameEntry`) — only those of its name, the same entry having the same name,
+so it costs a read or two of IndexedDB and a call or two per adoption.
+`stateFolder()` is the id while a folder is open, and every key above is built
+on it (`valuesStoreKey`, `valuesSavedKey`, `spotKeyFor`, `PS.swapStoreKey`,
+`leaksStoreKey` through `leaks.store`); `keyFolder` and `flagsFor`, which hold
+`valuesStoreKey()`, follow with it, so only a key read from or chosen in THIS
+folder answers its flags. The id begins with `/folder/`: no file or folder
+name holds a "/", so it can never be read as a lone document's list (kept by
+its file name, as before) nor as a name an older build used, and a name's keys
+and an id's can be told apart by prefix (`TD.folderStateMoves`).
+
+A record is `{ handle, role }`. `"case"` is offered to a file opened on its
+own (`caseFolderFor`). `"text"` is a Text Files folder, kept for its id and
+never remembered as a case folder (below). `"forgotten"` is a folder let go of
+(`forgetFolder`, `forgetDir`): before, forgetting deleted the entry and the
+list survived under the name; deleting an id would lose the list the next time
+the folder is opened, so the record stays and is only not offered — nor is a
+Text Files folder inside it, in its place: let go means the file on its own.
+An older build's entry, a bare handle under the name, is given an id the first
+time the store is read (`readDirRecords`), as a case folder. `dirIdFor` runs
+one call at a time, or two adoptions of a folder never seen would each mint it
+an id and split its state. Without IndexedDB there is no id, and the name is
+the key, as it was.
+
+**Moving an older build's state (`adoptLegacyState`, `TD.legacyStateHold`).**
+A list under "Opposition" was every Opposition's, so it cannot simply be given
+to the first one opened. It moves to the id only where the reader kept the
+text it last wrote AND the folder's `New Real Values.txt` is that text — the
+list was last written into this very folder — and no other folder of the name
+is known here (`sameName`, counting this one). Anything else — a list never
+written, two of the name known, the file different, or no file (a run spends
+it, and whose run cannot be told) — and the state is HELD ASIDE: moved to
+`textReader.held.*`, read by nothing, and said once in the adoption's toast
+with what it held, so the operator flags or keeps again what the case still
+needs. A held keep costs a right-click; a keep read into the wrong case let a
+name ship. The documents' spot keeps, swaps and LEAKS answers move or are held
+with the list.
+
+The first version of this moved a list never written on the count alone
+(`sameName === 1` and no saved text). The count is no evidence for that
+build's state: it remembered folders by name, one handle per name, so the
+first folder of a name opened after the upgrade always counts one, whichever
+client's it is. Measured in Chromium: an older build's `Opposition` list
+holding `no: Okafor`, never written, with that build remembering client B's
+Opposition, moved into B's on the first open; B's plaintiff lost his orange
+mark, and Ctrl+S wrote `no: Okafor` into B's `New Real Values.txt` and the
+export with the name standing. Now the list is held aside and the toast names
+Okafor. Where its file is still what was written, the list was last written
+into this folder, and that file is merged into its list on adoption anyway;
+what the list gained after that write, in whichever folder of the name was
+open, still comes with it — the residual of a rule that can only read the
+file.
+
+A Text Files folder's list is NEVER moved, written or not: every case's Text
+Files folder had the one name, so `textReader.values.Text Files` was every
+case's flags and keeps, and that build's store could hold only one Text Files
+handle, so `sameName` was one by construction. Moved under one Text Files
+folder's id, it was carried up into that case folder's list
+(`carryUpTextFiles`) and written by the next save where PDF-Linker reads it —
+measured, another case's `no: Okafor` took the mark off this case's plaintiff
+and reached its file. It is held aside, and the toast says to flag or keep
+again in the case folder above.
+
+**…but not the flags, where one folder of the name is known
+(`TD.legacyListSplit`).** Holding the whole list held its flags with its keeps,
+and the ordinary state after a run is a list that "differs": a run spends
+`New Real Values.txt` once it has applied it. So for an operator who had
+flagged, saved and run PDF-Linker, the first open after the upgrade gave
+"differs" even where only one folder of the name had ever existed, and every
+flag went to `textReader.held.*` with the keeps. Measured in Chromium, an
+older build's list of six flags, its file spent: none of the six names was
+marked, and Ctrl+S wrote no `New Real Values.txt`, where main kept all six
+marked and wrote them on the next save. The two halves of a list fail in
+opposite directions: a keep or a page line read into the wrong case takes the
+orange mark off a real name and hands its run a `no:`; a flag read into the
+wrong case only fakes one more name there (a phrase only joins a flag's
+words). So where `sameName` is one ("unwritten", "differs") the flags and
+their phrases are merged into the folder's list (`TD.mergeStoredLists`, so a
+list the id already keeps loses nothing) and only the keeps and page lines
+are held; the record of what that build last wrote is held with them, so the
+next save writes the file. Where the file matches, all of it moves, merged the
+same way. Where two folders of the name are known, or it is a Text Files
+folder's, all of it is still held: no one folder can be told from another, and
+copying the flags into each folder of the name as it opens was judged more
+machinery than it is worth — the residual is flags to give again by hand.
+
+**What was held is said, every value of it, and said whatever happens before
+the toast.** The note named four values, and nothing in the reader reads the
+held list, so the rest were lost to the operator; it names them all now
+(flags, `no:`/`never:` keeps, and page lines by document and page). And it
+was one variable, `listNote`, which the next adoption set to its own note: an
+adoption overtaken by another (A opened, its key slow, B opened meanwhile)
+returned before its toast, B's adoption cleared the note, and the next time A
+opened there was nothing left to move — measured, only the two "Key loaded…"
+toasts, the list under `textReader.held.values.Smith Opposition`, and A
+reopened said nothing. A reload between the move and the toast (which comes
+only after the key and the worksheet are read) lost it the same way. Now
+`adoptLegacyState` and `carryUpTextFiles` queue their notes in storage
+(`queueListNote`, `textReader.listNotes`) in the same step as the move, and
+only the toast that says them takes them off (`listNoteOnce`) — whichever
+folder's toast that is; each note names its folder.
+
+…and says nothing of "this" folder, since the toast that says it may be
+another's. The final review found `adoptLegacyState`'s note naming its folder
+only in its opening words, then calling it "this folder" twice: with A's
+adoption overtaken by B's (`u2-unsaid.mjs`: A's key slow to read, B opened
+meanwhile), B's "Key loaded: Lee Opposition" toast went on "…held aside, not
+read into this folder… Its 2 flags are read into this folder's list", where
+the flags had gone into "Smith Opposition"'s list and B held nothing of them —
+pointing the operator at the wrong case. Every place the note speaks of the
+folder it moved now says "the “Smith Opposition” folder you opened" (and "that
+folder's list" after it), which is true under any folder's toast; where two
+folders share the name, the one opened is the one it means. The reason clause
+does the same ("the “X” folder you opened already keeps one of its own", "…
+holds a case's exports, not the case", "…is not the New Real Values.txt in
+the “X” folder you opened"). `carryUpTextFiles` already named both folders.
+Measured in Chromium: the same steps now read "…held aside, not read into the
+“Smith Opposition” folder you opened… Its 2 flags are read into that folder's
+list" under B's toast.
+
+Left as they are: a lone document's list is still kept by its FILE name, so
+lone `Motion.txt`s of two cases share one (no case folder is open, so nothing
+is written for it without a picker). A Text Files folder's spot keeps and
+swaps stay under its own id when its case folder takes its list up: a spot
+keep left behind is a real value marked again, never one let through.
+
+Measured in Chromium (Playwright, OPFS folders): two remembered folders called
+Opposition each adopted from its own file opened alone; a keep in one leaves
+Okafor marked in the other, its save warns and writes no `New Real Values.txt`;
+forgotten and opened again, the folder's keep is there under the same id; an
+older build's list moves where its folder is the one of the name and its file
+matches, and is held aside, and said once, where two are known or the file
+differs (and, since the paragraph above, where it was never written, and for
+a Text Files folder always).
+
+**An adoption overtaken by another (`adoptFolderNow`).** Adoption takes the
+folder's list name (`own`) as it names the folder, and reads its key, its
+`New Real Values.txt` and its worksheet with awaits between. When another
+folder is opened meanwhile — a file of case A opened on its own, A's key slow
+to read on a synced drive, and Open case folder used on case B — the folder
+open, `valuesStoreKey()` and `persistValues()` are B's by the time A's
+adoption reaches its list. The id change read the list from `own` but still
+put it in hand and wrote it back under the folder open: A's `no: Okafor` was
+installed as B's list and saved under B's id. B opened again on its own showed
+its plaintiff unmarked, and Ctrl+S wrote `no: Okafor` into B's
+`New Real Values.txt`. Main read the list by the open folder's NAME, so
+between folders of two names it never crossed; with ids it crossed between any
+two. The same happened, on main too, when the takeover came while A's own
+`New Real Values.txt` was being read: the merge ran on the list then in hand,
+which was B's.
+
+Now the folder's file is read first, and only then, with nothing more to wait
+on, is the adoption asked whether its folder is still the one open
+(`dirHandle === h` and `valuesStoreKey() === own`). If not, it puts nothing in
+hand and writes nothing: the adoption that took over installs its own list,
+and A's list stays where it is stored, its file merged the next time A is
+opened. Nor does an adoption overtaken while its worksheet is read attach it:
+attached then it would be kept under the folder open (`leaks.store`). Measured
+in Chromium: two adoptions started together with A's key read slowed, the lone
+file of A with Open case folder on B, and the takeover landing during A's file
+read — each time B's stored list holds nothing of A's, B's Okafor is marked,
+and B's later save writes no keep for him; A's worksheet, read slowly, is not
+attached while B is open.
+
+**…and what that left open (a review of it).** The paragraph above claimed an
+overtaken adoption "puts nothing in hand and writes nothing". It asked only
+before the list, and the list was not the only thing that crossed. Each of
+these was reproduced in Chromium on that build and on main alike:
+
+- *The key.* `loadKeyFromBytes` ran after the key file's read with nothing
+  asked: A's key, read slowly while Open case folder was used on B, was put
+  in hand over B's and filed in the Key list under `folderName`, by then B's.
+  B's Brief read its pseudonyms as plain text, the status bar said "Key: Lee
+  Opposition" over A's bindings, and " Okafor testified." typed into B's
+  Brief was saved as "Pemberly testified." — A's pseudonym, which no row of
+  B's key reverses. Now `gone()` (`dirHandle !== h` or `valuesStoreKey() !==
+  own`) is asked after EVERY wait in `adoptFolderNow` — the folder listed,
+  the older build's state moved, the key file read, and again once the key is
+  parsed (`loadKeyFromBytes`'s `still`) — and an overtaken adoption returns
+  `found.overtaken` with nothing more put in hand. The key is filed under the
+  adopting folder's own name (`h.name`).
+- *The callers.* `attachKeyForFile` returns false for an overtaken adoption,
+  and `openFileNow` then opens a file of the overtaken folder only where the
+  folder open holds it: a lone file of A whose folder B overtook used to open
+  anyway, under B's key. `openFolderNow`, `readWholeFolder` and
+  `readFolderAfterRun` stop where it is overtaken; the adoption that took over
+  opens its own document.
+- *The list in hand, written under the new folder's id.* Adoption names its
+  folder first and puts that folder's list in hand only once it has been
+  read, so in between `valuesStoreKey()` is the new folder's while the list in
+  hand is still the last one's, and `persistValues()` wrote it there whoever
+  called it: a keep taken in A's Brief still on screen; A's folder sweep
+  ending while B was still listed (`refreshKeepLocality` settling a pending
+  keep); A's worksheet parse finishing after B was opened (`attachLeaksNow`
+  laying answers back and mirroring keeps). Each time B's stored list became
+  A's — B's plaintiff unmarked, `no: Okafor` and A's flags written into B's
+  `New Real Values.txt` by B's next save. Now `persistValues` writes the list
+  where it was READ from (`flagsFor`); `listAway()` (a list in hand that is
+  not the folder open's) keeps `refreshKeepLocality` from reading it against
+  the folder open and `saveValuesFile` from writing it into that folder;
+  `attachLeaks` takes the adoption's `still` and lays nothing back once its
+  parse ends in another folder.
+- *The document on screen.* Until the new folder's own document is up, the
+  one on screen is the last folder's, and four things took it for the
+  new folder's. A keep or flag taken in it once the new folder's list was in
+  hand — B's worksheet being read, on a synced drive for seconds — went into
+  B's list (`no: Okafor` again, by "Keep in this case" on the Okafor standing
+  in A's Brief): `docListAway()` (the list in hand is not the one the
+  document's folder keeps) now refuses `setKeep`, `flagSelection` and
+  `phraseSelection`, and says so. A save of it wrote a name typed into it as
+  B's pseudonym ("Thackeray testified." in A's file): the save refuses while
+  any folder is being read (`adopting`, held by `adoptFolder`, `openFolder`
+  and `openFile` until the new document is up) and wherever the document on
+  screen was opened in another case folder than the one open (`spotsFolder`
+  against `stateFolder()`) — which is also the state the second "Discard
+  unsaved edits?" of an opening leaves when it is declined. And the
+  converter and the Space prompt marked a typed name with the key in hand;
+  marked so, it was B's pseudonym in A's text, and when A's document was next
+  read under A's key it stood there as plain text and went to the file with
+  nothing said. They wait now while `keyAway()` (either of the save's two
+  conditions). A spot keep is the document's own and is kept under the folder
+  the document was opened in (`spotsFolder`, set by `openText`, by
+  `openFolderNow` and the bar's Attach key as they take the document into the
+  folder, and by `forgetFolder`), not the folder open: "Keep just this one"
+  on Okafor in A's Brief while B was read landed on B's Brief.txt, and B's
+  plaintiff was unmarked and left in the clear by every save.
+
+Measured in Chromium, each failing on the build before and passing after: A's
+key slowed with Open case folder on B (B's export carries only B's
+pseudonyms); a lone file of A with B opened meanwhile (not opened; B's Brief
+up); a keep in A's Brief while B's key is read (A's list holds it, B's
+nothing); A's sweep ending while B is listed slowly, and A's worksheet parsed
+after B opened (B's stored list stays B's own, with its own flag); a spot keep
+in A's Brief while B is read; a save of A's Brief while B's worksheet is read
+(refused); a keep and a flag on A's Brief while B's worksheet is read
+(refused, B's list empty, B's Okafor orange); A's edited Brief kept over B's
+opening by Cancel (the save refused, A's file untouched).
+
+Left as it is: a document kept on screen that way and then opened again from
+its own folder is rebuilt under its key (`retranslate`), which takes the page
+as it stands for its own text (`__built`), so a name typed into it meanwhile
+is not written as its pseudonym but left and named in red, as after any key
+change. A lone document — opened with no folder — kept on screen that way
+over a folder opened meanwhile still reads, marks and saves under the key in
+hand, as a lone document always has (a key chosen with one open answers it);
+a keep or flag taken in it is refused, since the list in hand is the
+folder's.
+
+### Nothing the case is owed is written into Text Files (`textFolderOpen`)
+
+The Text Files folder is the one uploaded to the drafting model, and
+PDF-Linker reads `New Real Values.txt` from the case folder and nowhere else
+(`_pn_reader_file_text`); a copy in Text Files it skips as a tool artifact, so
+it is neither applied nor ever removed. With Text Files picked as the folder,
+`saveValuesFile` wrote the list into it on every Ctrl+S and `markValuesSaved`
+recorded it as handed over. Measured: the witness flagged was in `Text
+Files/New Real Values.txt` after one save, and the case folder held nothing.
+The file can hold real names the exports do not: a `phrase:` line over a
+pseudonym writes the faked word's real name, an owed `no:` its real value.
+The warning that should have stopped it was taken down by the first document
+the folder opened (`openFileNow`'s `hideKeyOffer`), and a Text Files folder
+remembered by name — every case's under the one name — was re-adopted for a
+file opened on its own with only "Text Files · 1 document, key attached."
+
+Now, while `textFolderOpen()` (the folder adoption read as Text Files, by
+`looksLikeTextFiles`, or merely named so):
+
+- `saveValuesFile` writes nothing, marks nothing saved and puts up no picker
+  (one opens where it was last, which is that folder); the Ctrl+S toast says
+  the list is still unwritten and why, the way the no-folder save does, and
+  the Flagged panel says where it goes. A save that wrote nothing at all now
+  leads with "Nothing saved" (it read "Saved the flagged list is still
+  unwritten", in the no-folder save too). `saveLeaks` writes neither through
+  the folder nor through a worksheet handle inside it — an earlier version's
+  copy, which adoption attaches like any other.
+- The offer bar (`offerFolderAbove`) is put up by adoption itself, whichever
+  way the folder came — Open case folder, a remembered one for a lone file,
+  the app's own pick — and stays while it is the folder open; a case folder
+  adopted takes it down. It names a `New Real Values.txt` or `LEAKS.xlsx` an
+  earlier version left there. Its button opens the picker INSIDE the folder (a
+  child handle cannot open its parent), so it says to step up one level.
+- A `New Real Values.txt` found in a Text Files folder is not read into its
+  list (this build writes none there, so it is an earlier version's, written
+  from the one list every Text Files folder shared), and the bar says to
+  DELETE it and flag or keep again in the case folder what the case needs.
+  The first version merged it into the folder's list, as adoption does with
+  a case folder's file, and told the operator to move it up. Measured: a
+  stray file holding `no: Okafor` went up with the list into the case folder
+  (`carryUpTextFiles`), took the orange mark off that case's plaintiff, and
+  was written into its `New Real Values.txt` by the next Ctrl+S; moved up by
+  hand, it would have written over the case's own file with other cases'
+  values. A stray `LEAKS.xlsx` is to be deleted too, its answers given again
+  in the case folder's own worksheet: moved up, it would write over the one
+  PDF-Linker last wrote there.
+- The list made meanwhile is kept under the Text Files folder's own id, and
+  when its case folder is adopted, the Text Files folder found in it
+  (`isSameEntry`) gives its list up into the case's (`carryUpTextFiles`,
+  `TD.mergeStoredLists`, nothing lost, the case's own winning), said in the
+  toast; the next save writes it where PDF-Linker reads it. That list holds
+  only what was flagged or kept while this build had that folder open: an
+  earlier version's shared list and stray file are never read into it (the
+  bullet above, and "Moving an older build's state").
+- A Text Files folder is remembered as `"text"`, never as a case folder
+  (`rememberDir`, and adoption once it has read the folder), and
+  `caseFolderFor` takes a case folder holding the file before any Text Files
+  folder — an older build's, remembered as a case folder by its name, too. A
+  Text Files folder is the answer only where no case folder above it is
+  known, and adoption then says what it is; one that wants re-authorising
+  offers the folder above rather than "its key".
+
+`scanFolder` counts a PDF even on a light attach (`anyPdf`), since having PDFs
+is one of the things that make a case folder one: a key-less older-layout
+folder read light no longer reads as Text Files and has its saves refused.
+
+Measured in Chromium: a remembered Text Files folder, a file opened alone,
+one flag, Ctrl+S — the bar up and still up after a second document, nothing
+written into Text Files or the case folder, the Flagged panel's Save refused
+without a picker; the bar's button, the case folder picked, the flag there,
+and Ctrl+S writing it into the case folder's `New Real Values.txt`. Open case
+folder on Text Files: the bar survives the first document and names the stray
+file; a handle-less LEAKS attach and a stray `LEAKS.xlsx` are never written
+there. With the case folder and its Text Files both remembered by an older
+build, a file opened alone adopts the case folder.

@@ -267,9 +267,13 @@ export function formatPageRanges(pages) {
   return out.join(", ");
 }
 
-/** The localStorage key remembering which pages of a document are swapped. */
-export function swapStoreKey(folderName, fileName) {
-  return "textReader.swaps." + (folderName || "") + "/" + (fileName || "");
+/**
+ * The localStorage key remembering which pages of a document are swapped.
+ * `folder` is the case folder's id (the reader's stateFolder), "" with none.
+ */
+export const SWAPS_PREFIX = "textReader.swaps.";
+export function swapStoreKey(folder, fileName) {
+  return SWAPS_PREFIX + (folder || "") + "/" + (fileName || "");
 }
 
 /**

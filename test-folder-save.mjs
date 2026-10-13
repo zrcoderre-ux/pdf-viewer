@@ -121,6 +121,9 @@ const KEY_BYTES = buildKeyXlsx(KEY);
 
 // ── the fixture: an invented case ──────────────────────────────────────────
 const CASE = "Case Harness";
+// Where a preset's key names the case folder's own state: replaced with the
+// folder's id once the reader has one for it (newReader, writeFolder).
+const CASE_ID = "\u0000case-id\u0000";
 const A = "====== Page 1 ======\nPlaintiff Tobias Wrenfield bought a vehicle from Quarrow Motors.\nThe vehicle failed within a month.\n====== Page 2 ======\nWrenfield asks for restitution.\n";
 // …with a real name the run left in the clear, for the decisions.
 const A_LEAK = "====== Page 1 ======\nPlaintiff Tobias Wrenfield bought a vehicle from Quarrow Motors.\nThe vehicle failed within a month.\n====== Page 2 ======\nWrenfield asks for restitution. Corwin Ashdale signed it.\n";
@@ -171,7 +174,13 @@ async function newReader({ presets = {} } = {}) {
   });
   await page.goto(srv.base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
-  if (Object.keys(presets).length) await page.evaluate((p) => { for (const [k, v] of Object.entries(p)) localStorage.setItem(k, JSON.stringify(v)); }, presets);
+  // A preset keyed by CASE_ID is the case folder's own state, kept under its
+  // id: written once the folder is in OPFS and the reader has given it one
+  // (writeFolder). The rest are written now.
+  const now = {}, later = {};
+  for (const [k, v] of Object.entries(presets)) (k.includes(CASE_ID) ? later : now)[k] = v;
+  if (Object.keys(now).length) await page.evaluate((p) => { for (const [k, v] of Object.entries(p)) localStorage.setItem(k, JSON.stringify(v)); }, now);
+  if (Object.keys(later).length) await page.evaluate((p) => { window.__casePresets = p; }, later);
   await page.exposeFunction("__testToast", (t) => log.toasts.push(t));
   await page.evaluate(() => {
     const el = document.getElementById("toast");
@@ -181,7 +190,7 @@ async function newReader({ presets = {} } = {}) {
 }
 /** The case folder into OPFS: the key and the root files in it, the exports in Text Files. */
 async function writeFolder(page, { docs = BASE, root = ROOT, key = true } = {}) {
-  await page.evaluate(async ({ CASE, docs, root, keyBytes }) => {
+  await page.evaluate(async ({ CASE, CASE_ID, docs, root, keyBytes }) => {
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry(CASE, { recursive: true }); } catch { /* none yet */ }
     const dir = await top.getDirectoryHandle(CASE, { create: true });
@@ -191,7 +200,48 @@ async function writeFolder(page, { docs = BASE, root = ROOT, key = true } = {}) 
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     for (const [name, body] of Object.entries(docs)) await put(text, name, body);
     window.__case = dir;
-  }, { CASE, docs, root, keyBytes: key ? Array.from(KEY_BYTES) : null });
+    // The case's own presets, under the id the reader knows the folder by.
+    if (window.__casePresets) {
+      const rec = await window.__textReaderRememberDir(dir);
+      for (const [k, v] of Object.entries(window.__casePresets)) localStorage.setItem(k.split(CASE_ID).join(rec.id), JSON.stringify(v));
+      window.__casePresets = null;
+    }
+  }, { CASE, CASE_ID, docs, root, keyBytes: key ? Array.from(KEY_BYTES) : null });
+}
+/**
+ * The key a case folder's state is stored under: its id — the reader knows
+ * each folder by itself, not by its name (dirIdFor) — found in the reader's
+ * IndexedDB by asking each remembered folder of the name whether it IS the
+ * folder `name` (under `parent`) in OPFS; the name itself where the reader
+ * has not met the folder (a list an earlier version kept under the bare name).
+ */
+async function stateKeyOf(page, name = CASE, { parent = "" } = {}) {
+  return page.evaluate(async ({ name, parent }) => {
+    let dir = null;
+    try {
+      let top = await navigator.storage.getDirectory();
+      if (parent) top = await top.getDirectoryHandle(parent);
+      dir = await top.getDirectoryHandle(name);
+    } catch { dir = null; }
+    const recs = await new Promise((resolve) => {
+      const req = indexedDB.open("textReader");
+      req.onerror = () => resolve([]);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains("dirs")) { db.close(); resolve([]); return; }
+        const tx = db.transaction("dirs", "readonly");
+        const keys = tx.objectStore("dirs").getAllKeys(), vals = tx.objectStore("dirs").getAll();
+        tx.oncomplete = () => { db.close(); resolve(keys.result.map((k, i) => [k, vals.result[i]])); };
+        tx.onerror = () => { db.close(); resolve([]); };
+      };
+    });
+    for (const [k, v] of recs) {
+      if (typeof k !== "string" || !k.startsWith("/folder/") || !v || !v.handle || v.handle.name !== name) continue;
+      if (!dir) return k;
+      try { if (await v.handle.isSameEntry(dir)) return k; } catch { /* a folder gone */ }
+    }
+    return name;
+  }, { name, parent });
 }
 async function adopt(page) {
   return page.evaluate(async (CASE) => {
@@ -364,7 +414,7 @@ async function hang(page, n) {
   }
   return page.evaluate(() => window.__textReaderReel().members.length);
 }
-const spotsOf = (page, name) => page.evaluate((k) => localStorage.getItem(k), `textReader.spots.${CASE}/${name}`);
+const spotsOf = async (page, name) => page.evaluate((k) => localStorage.getItem(k), `textReader.spots.${await stateKeyOf(page)}/${name}`);
 const NRV = (files) => (files["New Real Values.txt"] || {}).text || null;
 
 // ── the master workbook, as a real .xlsx ───────────────────────────────────
@@ -413,10 +463,10 @@ async function masterOnDisk(page) {
 }
 const masterState = (page) => page.evaluate(() => window.__textReaderMasterState());
 /** A case's keeps as the reader stores them, "control: value". */
-const storedKeeps = (page, name = CASE) => page.evaluate((k) => {
+const storedKeeps = async (page, name = CASE, opts = {}) => page.evaluate((k) => {
   const v = JSON.parse(localStorage.getItem(k) || "null");
   return ((v && v.keeps) || []).map((x) => x.control + ": " + x.value);
-}, `textReader.values.${name}`);
+}, `textReader.values.${await stateKeyOf(page, name, opts)}`);
 /** New Real Values.txt's lines PDF-Linker reads, or null with no file. */
 const nrvLines = (files) => { const t = NRV(files); return t == null ? null : t.split("\n").filter((l) => l.trim() && !l.trim().startsWith("#")); };
 async function writeNrv(page, text) {
@@ -654,7 +704,7 @@ test(3, "a document replaced off the screen reads byte for byte as one opened, r
   // ordinal counted again after the pass (it used to point past the end, and
   // the save refused).
   console.log("  — a name said to be faked, with a spot keep after it");
-  const presets = { [`textReader.spots.${CASE}/E Exhibit.txt`]: [{ page: 0, value: "Corwin Ashdale", nth: 2 }] };
+  const presets = { [`textReader.spots.${CASE_ID}/E Exhibit.txt`]: [{ page: 0, value: "Corwin Ashdale", nth: 2 }] };
   const docs = { ...PARITY_DOCS, "A Complaint.txt": A_LEAK };
   const subject = await parityRun({ open: "A Complaint.txt", settle: "Corwin Ashdale", presets, docsOverride: docs });
   const unseen = subject.dialogs.filter((d) => /^Save also writes/.test(d.message));
@@ -1316,7 +1366,7 @@ test(15, "the walks' save never writes over a changed file, and never downloads"
 
 // ── 16. spot keeps moved by a save are stored once it writes ────────────────
 test(16, "a save that writes nothing leaves the stored spot keeps as the file counts them", async () => {
-  const presets = { [`textReader.spots.${CASE}/E Exhibit.txt`]: [{ page: 0, value: "Corwin Ashdale", nth: 2 }] };
+  const presets = { [`textReader.spots.${CASE_ID}/E Exhibit.txt`]: [{ page: 0, value: "Corwin Ashdale", nth: 2 }] };
   // Refused, then saved again where it stands: the pages the refused save
   // changed are unsaved, and the save that writes them stores the keeps.
   {
@@ -1532,7 +1582,7 @@ test(22, "a “fake it” kept for the case can be withdrawn", async () => {
     await r.page.evaluate(() => document.querySelector("#settled-list li .x").click());
     await r.page.waitForTimeout(400);
     check("× withdraws it: off the list", await listed(), []);
-    check("…out of the case's store", await r.page.evaluate((k) => localStorage.getItem(k), `textReader.settled.${CASE}`), "[]");
+    check("…out of the case's store", await r.page.evaluate((k) => localStorage.getItem(k), `textReader.settled.${await stateKeyOf(r.page)}`), "[]");
     check("…and nothing is owed for it", await hasUnsaved(r.page), false);
     check("no page errors", r.log.errors, []);
   } finally { await r.close(); }
@@ -1781,7 +1831,7 @@ test(27, "Remove from Master Keep takes the value off every case's keeps and out
       truthy("…saying the case lists and the file go too", /It also comes off this reader's keeps for Case Harness, Case Other, and out of Case Harness's New Real Values\.txt, which still carries it — Save writes that\. Left there, PDF-Linker's next run would put it back on the Master Keep\./.test(conf[0] || ""));
       check("the master's row is emptied", await masterOnDisk(r.page), ["never:Clerk"]);
       check("…the case's list lets it go", await storedKeeps(r.page), []);
-      check("…and every other case's, the rest of it kept", [await storedKeeps(r.page, OTHER), await r.page.evaluate((k) => JSON.parse(localStorage.getItem(k)).values, `textReader.values.${OTHER}`)], [["no: Marlow Tenbury"], ["Quell Harbor"]]);
+      check("…and every other case's, the rest of it kept", [await storedKeeps(r.page, OTHER), await r.page.evaluate((k) => JSON.parse(localStorage.getItem(k)).values, `textReader.values.${await stateKeyOf(r.page, OTHER)}`)], [["no: Marlow Tenbury"], ["Quell Harbor"]]);
       truthy("…and the toast says so", r.log.toasts.some((t) => /off the Master Keep/.test(t) && /It is off this reader's keeps for Case Harness, Case Other too, and Save takes it out of Case Harness's New Real Values\.txt\./.test(t)));
       check("the folder's file is owed the change", [await hasUnsaved(r.page), /New Real Values\.txt to write/.test(await stDirty(r.page))], [true, true]);
       // Opened again before the save: the line in the file is not read back.
@@ -1934,7 +1984,11 @@ test(29, "two reader tabs on one folder: a stale tab's list never loses a keep, 
 });
 
 // ── 30. a copy of the case under the same name ──────────────────────────────
-test(30, "a keep written into a same-named copy of the case folder is not spent in the original", async () => {
+// Each folder is known by itself, not its name (dirIdFor): a copy of the case
+// under the same name — a copy_to destination, an archive — keeps a list of
+// its own, so a keep taken in the copy is neither read into the original nor
+// spent there, and a run on the copy spends it in the copy alone.
+test(30, "a keep taken in a same-named copy of the case folder stays the copy's, and is not spent in the original", async () => {
   const r = await newReader();
   try {
     await writeFolderAs(r.page, CASE, { parent: "Copies" });
@@ -1948,18 +2002,16 @@ test(30, "a keep written into a same-named copy of the case folder is not spent 
     r.log.toasts.length = 0;
     await adoptNamed(r.page, CASE, { parent: "Originals" });
     await openDoc(r.page, "A Complaint.txt");
-    check("the original opened: its file never had the line, so the keep is not spent there", await storedKeeps(r.page), ["never: Corwin Ashdale"]);
-    check("…it is owed to this folder", [await hasUnsaved(r.page), /New Real Values\.txt to write/.test(await stDirty(r.page))], [true, true]);
+    check("the original opened: the copy's keep is not on its list", await storedKeeps(r.page, CASE, { parent: "Originals" }), []);
+    check("…nothing is owed to it", [await hasUnsaved(r.page), /New Real Values\.txt to write/.test(await stDirty(r.page))], [false, false]);
     check("…and nothing is said of PDF-Linker taking it", r.log.toasts.some((t) => /off this case's keeps/.test(t)), false);
-    await save(r.page);
-    check("Save hands it to the folder PDF-Linker runs on", linesOf(await nrvOf(r.page, CASE, { parent: "Originals" })), ["never: Corwin Ashdale"]);
-    // PDF-Linker runs on the original and spends the line: spent there now.
-    await r.page.evaluate(async (CASE) => { const d = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Originals")).getDirectoryHandle(CASE); await d.removeEntry("New Real Values.txt"); }, CASE);
-    await adoptNamed(r.page, CASE, { parent: "Originals" });
-    check("…where the run then spends it, it is spent", [await storedKeeps(r.page), await hasUnsaved(r.page)], [[], false]);
     // Back in the copy, whose file still carries the line it was given.
     await adoptNamed(r.page, CASE, { parent: "Copies" });
-    check("…and the copy, whose file still carries the line, owes nothing and spends nothing", [await storedKeeps(r.page), await hasUnsaved(r.page)], [["never: Corwin Ashdale"], false]);
+    check("…and the copy, whose file still carries the line, keeps it, owes nothing and spends nothing", [await storedKeeps(r.page, CASE, { parent: "Copies" }), await hasUnsaved(r.page)], [["never: Corwin Ashdale"], false]);
+    // PDF-Linker runs on the copy and spends the line: spent there.
+    await r.page.evaluate(async (CASE) => { const d = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Copies")).getDirectoryHandle(CASE); await d.removeEntry("New Real Values.txt"); }, CASE);
+    await adoptNamed(r.page, CASE, { parent: "Copies" });
+    check("…where a run on the copy spends it, it is spent there", [await storedKeeps(r.page, CASE, { parent: "Copies" }), await hasUnsaved(r.page)], [[], false]);
     check("no page errors", r.log.errors, []);
   } finally { await r.close(); }
 });
@@ -2147,11 +2199,15 @@ test(33, "Remove from Master Keep takes the line out of another folder's file it
     truthy("…and names Case Third's, out of reach, for the operator to save", /New Real Values\.txt in Case Third still carries it, out of the reader's reach now: open Case Third here and Save before PDF-Linker runs there\. Left there, PDF-Linker's next run would put it back on the Master Keep\./.test(conf));
     check("the master's row is emptied", await masterOnDisk(r.page), ["never:Clerk"]);
     check("Case Other's file no longer hands it to PDF-Linker", linesOf(await nrvOf(r.page, OTHER)), []);
-    check("…its list and the record of what was written there let it go", [await storedKeeps(r.page, OTHER), await r.page.evaluate((k) => /Corwin Ashdale/.test(JSON.parse(localStorage.getItem(k) || '""')), `textReader.valuesSaved.${OTHER}`)], [[], false]);
+    check("…its list and the record of what was written there let it go", [await storedKeeps(r.page, OTHER), await r.page.evaluate((k) => /Corwin Ashdale/.test(JSON.parse(localStorage.getItem(k) || '""')), `textReader.valuesSaved.${await stateKeyOf(r.page, OTHER)}`)], [[], false]);
     truthy("the toast says what was done, and warns of Case Third, in red", r.log.toasts.some((t) => /It is out of New Real Values\.txt in Case Other\. ⚠ New Real Values\.txt in Case Third still carries it: open Case Third here and Save before PDF-Linker runs there, or the run puts it back on the Master Keep\./.test(t)));
     // Case Third opened later, its file still carrying the line.
     await writeFolderAs(r.page, THIRD, { nrv: "# New Real Values\nnever: Corwin Ashdale\n" });
     await adoptNamed(r.page, THIRD);
+    // …and a document of it, as Open case folder opens one: the document on
+    // screen is not Case Harness's any more, which a save refuses to write
+    // under Case Third's key.
+    await openDoc(r.page, "A Complaint.txt");
     check("Case Third opened: the line in its file is not read back", await storedKeeps(r.page, THIRD), []);
     check("…the file is owed the change", [await hasUnsaved(r.page), /New Real Values\.txt to write/.test(await stDirty(r.page))], [true, true]);
     await save(r.page);
