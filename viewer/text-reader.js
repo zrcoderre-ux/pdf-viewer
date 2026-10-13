@@ -2819,12 +2819,13 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // and its file on disk to be merged the next time the folder is opened.
   // Nothing else of it is attached either — its worksheet is this folder's.
   if (gone()) return overtaken();
-  // The names said to be faked in this case, kept for it — read after the key,
-  // whose arrival from another case would otherwise clear them (setKey).
-  loadSettled();
   const stored = readStoredValues(own);
   flagged = stored.values;
   flagsFor = own;
+  // The names said to be faked in this case, kept for it beside its list —
+  // read after the key, whose arrival from another case would otherwise clear
+  // them (setKey).
+  loadSettled();
   keeps = stored.keeps;
   phrases = stored.phrases;
   noOcr = stored.noOcr;
@@ -11285,9 +11286,9 @@ function isSettled(v) { return settled.has(settledKey(v)) || sheetFakes.has(LK.f
 // pseudonym in every document of the folder where it stands. So the decisions
 // are listed in the Flagged panel, each with a × that withdraws it (what a
 // save has already written stays written; the name is the review's again).
-// Kept under the folder's id (stateFolder), as the flags, the spot keeps and
-// the LEAKS answers are.
-function settledStoreKey() { return SETTLED_PREFIX + (stateFolder() || fileName || "loose"); }
+// Kept under the folder's id, beside the list in hand (listStateKey), as the
+// flags, the spot keeps and the LEAKS answers are.
+function settledStoreKey() { return SETTLED_PREFIX + listStateKey(); }
 // The decisions as they were spelled when taken, for the panel (the set holds
 // them folded); an older build stored them folded, and they show so.
 let settledShown = new Map();
@@ -12850,6 +12851,17 @@ function unmarkPhraseNow(v) {
 // it no id, the name, as an older build kept it. "" with no folder open.
 function stateFolder() { return folderName ? folderId || folderName : ""; }
 function valuesStoreKey() { return VALUES_PREFIX + (stateFolder() || fileName || "loose"); }
+/**
+ * The key of the case whose list is IN HAND (`flagsFor`), which the records
+ * that go with the list are kept under — the names said to be faked and the
+ * keeps withdrawn — else the folder open's. While an adoption has named its
+ * folder and not yet read that folder's list, the list in hand is still the
+ * folder before's, and a decision taken then is that case's: kept under the
+ * folder open, it was read into the new case as its own.
+ */
+function listStateKey() {
+  return flagsFor && flagsFor.startsWith(VALUES_PREFIX) ? flagsFor.slice(VALUES_PREFIX.length) : stateFolder() || fileName || "loose";
+}
 function valuesSavedKey() { return VALUES_SAVED_PREFIX + (stateFolder() || fileName || "loose"); }
 /**
  * THE KEEPS WITHDRAWN, case by case (`textReader.keepsWithdrawn.<name>`): the
@@ -12866,7 +12878,7 @@ function valuesSavedKey() { return VALUES_SAVED_PREFIX + (stateFolder() || fileN
  * (forgetWithdrawn), and when the folder's file is seen, read or written,
  * without it (trimWithdrawn). Kept as keep lines (TD.noteKeepLines).
  */
-function withdrawnKey(name = stateFolder() || fileName || "loose") { return WITHDRAWN_PREFIX + name; }
+function withdrawnKey(name = listStateKey()) { return WITHDRAWN_PREFIX + name; }
 function setWithdrawn(k, text) {
   if (String(text || "").trim()) { lsSet(k, text); return; }
   try { localStorage.removeItem(k); } catch { /* no storage: nothing was kept */ }
@@ -12878,7 +12890,7 @@ function setWithdrawn(k, text) {
  * records nothing, which nothing would ever read or trim.
  */
 function noteWithdrawn(lines, name) {
-  const n = name != null ? name : stateFolder();
+  const n = name != null ? name : listStateKey();
   if (!n || n === "loose" || TD.isExportName(n)) return;
   const k = withdrawnKey(n);
   const was = lsGet(k, "");

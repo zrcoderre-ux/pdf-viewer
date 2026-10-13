@@ -1259,8 +1259,11 @@ key now fakes); two tabs still write their lists over each other in every
 other respect, as every per-folder list does; and a keep line in another folder's file that another origin
 wrote is read back there, and is reached by Remove from Master Keep only where
 this reader keeps a list for that folder. The record of withdrawals, and the
-names said to be faked, are kept under the folder's id like the list
-(`withdrawnKey`, `settledStoreKey`), and an older build's, kept under the bare
+names said to be faked, are kept under the folder's id like the list, and
+beside the list IN HAND (`listStateKey`, from `flagsFor`; `withdrawnKey`,
+`settledStoreKey`): while an adoption has named its folder and not yet read
+that folder's list, a decision taken in the last folder's document is that
+case's, not the new one's. An older build's, kept under the bare
 name, moves with the list (`STATE_PREFIXES`, `adoptLegacyState`). Remove from
 Master Keep finds the other cases' folders by those ids among the remembered
 folders (`keepsElsewhere`, `dirRecordsById`) and names each by its folder's
