@@ -845,6 +845,26 @@ answered while the text stands on a name; ‹ goes to that row. The trail is one
 per worksheet (every attach makes a new `leaks`), its entries being row
 indices.
 
+**Instance ‹ › steps the value in front through where it stands**
+(`stepRowInstance`, `stepNameInstance`; Alt+, and Alt+.). Row ‹ › and the
+names bar's Name ‹ › go from one value to the next, so the other places ONE
+value stood — what a decision about it is a decision about — could only be
+scrolled to by eye. In the LEAKS bar the instances are `leakRowRanges` (the
+row's mark, every place it stands on the pages on screen) put in reading
+order by `compareBoundaryPoints` (a value wrapped down a column is found
+after the page's plain hits); stepping moves `rowHere`, `leakHere` and the
+strong mark and leaves `leaks.at` and the trail alone, and `rowInstanceAt`
+finds the one standing by where its range starts, since the ranges are made
+again at every paint (`rowInst`, its number, where its page was rebuilt).
+`renderRowInstance` writes `#lb-inst` after every paint. A page sweep in
+progress ends, as ‹ ends it. In the names bar the instances are the stops of
+`liveLeaks()` with the same `settledKey`; `stepNameInstance` sets `leakStep`
+one short and calls `stepLeak`, so the walk stands where it lands (Name ›
+goes on from there) and never leaves the document. The keys go to whichever
+walk put the mark where it is: the names bar's when `leakHere` is not
+`rowHere`. Each label and its arrows are one `.lb-pair`, so a narrow window
+wraps them whole.
+
 The pages those rows name are drawn BEFORE the review reaches them.
 `leaks.leakPages` lists every page a row names in that walk order, held to
 the documents the window allows, and `text-reader.js` keeps a

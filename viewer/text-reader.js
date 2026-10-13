@@ -5727,6 +5727,7 @@ function paintRowMarksNow() {
   CSS.highlights.set("leakrow", highlightOf(leakRowRanges.flatMap((x) => x.pieces || [x.range])));
   CSS.highlights.set("leakrows", highlightOf(pendingSheetRanges()));
   markLeakHere();
+  renderRowInstance(); // …and which of them the bar stands on, read off the ranges just made
 }
 /** One reading of the whole document; false where it gave up part-way. */
 async function scanPass() {
@@ -8974,6 +8975,10 @@ function renderNamesBar() {
   $("nb-answer").title = $("nb-answer").textContent; // it takes the room there is, and a long one is cut short
   $("nb-fake").disabled = !h.fake;
   $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2 && !restOfFolder().length;
+  const same = sameNameStops(hits, i);
+  const k = same.indexOf(i);
+  $("nb-inst").textContent = same.length > 1 ? `· instance ${k + 1} of ${same.length}` : "· its only instance here";
+  $("nb-inst-prev").disabled = $("nb-inst-next").disabled = same.length < 2;
   $("nb-rest").textContent = folderRest();
   if (pageSweep && pageSweep.seq === docSeq) {
     // Finishing the page: what is left on it, and what comes after.
@@ -9000,6 +9005,7 @@ function renderWaiting(on = "folder") {
     ? "This document is being read for names standing in the clear"
     : "The rest of the folder is being read for names standing in the clear";
   $("nb-where").textContent = here ? "\u2026" : sweep.running ? `${sweep.at} of ${folderDocs.length}\u2026` : "\u2026";
+  $("nb-inst").textContent = "";
   $("nb-rest").textContent = "";
   $("nb-prev").disabled = $("nb-next").disabled = true;
 }
@@ -9013,6 +9019,7 @@ function renderOnward(rest) {
   $("nb-value").textContent = TD.docLabel(next.doc.name);
   $("nb-value").title = `${next.count} name${next.count === 1 ? "" : "s"} standing in the clear in ${next.doc.name}`;
   $("nb-where").textContent = `${next.count} standing in the clear`;
+  $("nb-inst").textContent = "";
   $("nb-rest").textContent = rest.length > 1
     ? `· ${n} in ${rest.length} documents of ${folderName || "the folder"}`
     : "";
@@ -9066,6 +9073,50 @@ function decideName(what) {
 }
 $("nb-prev").addEventListener("click", () => stepLeak(-1));
 $("nb-next").addEventListener("click", () => stepLeak(1));
+// INSTANCE BY INSTANCE. Name ‹ › walks every name standing in the clear in the
+// order they stand, so the places ONE name stands were the stops that happened
+// to be that name, with the others between. Three of the four decisions are
+// about the name wherever it stands (only "keep just this one" is about the
+// place), so Instance ‹ › (Alt+, and Alt+.) steps the name in front through
+// its own places, round at either end, on the pages on screen. The walk
+// stands where it lands: Name › goes on from there.
+/** The indices in `hits` of the stops that are the same name as stop `i`, in order. */
+function sameNameStops(hits, i) {
+  const v = settledKey(hits[i] && hits[i].real);
+  const out = [];
+  for (let j = 0; j < hits.length; j++) if (settledKey(hits[j].real) === v) out.push(j);
+  return out;
+}
+function stepNameInstance(dir) {
+  const hits = liveLeaks();
+  if (!hits.length || onward || namesBar.hidden) return;
+  const i = Math.min(Math.max(leakStep, 0), hits.length - 1);
+  const same = sameNameStops(hits, i);
+  const n = same.length;
+  if (n < 2) return;
+  // stepLeak stands on leakStep + dir, inside the document's hits: never off
+  // its end, so never into the next document.
+  leakStep = same[(((same.indexOf(i) + dir) % n) + n) % n] - dir;
+  stepLeak(dir);
+}
+$("nb-inst-prev").addEventListener("click", () => stepNameInstance(-1));
+$("nb-inst-next").addEventListener("click", () => stepNameInstance(1));
+// Alt+, and Alt+. (the ‹ and › keys) step the value in front through its
+// instances, in whichever bar put the mark where it is: the worksheet row's
+// (leakHere is rowHere) or the names walk's. By the key's place on the
+// keyboard (`code`): on a Mac, Option+, types "≤".
+document.addEventListener("keydown", (e) => {
+  if (!e.altKey || e.ctrlKey || e.metaKey || (e.code !== "Comma" && e.code !== "Period")) return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA")) return; // a field being typed in
+  const rowsOn = !!leaks && !leaksBar.hidden;
+  const namesOn = !namesBar.hidden && !onward;
+  if (!rowsOn && !namesOn) return;
+  e.preventDefault();
+  const dir = e.code === "Period" ? 1 : -1;
+  if (namesOn && (!rowsOn || (leakHere && leakHere !== rowHere))) stepNameInstance(dir);
+  else stepRowInstance(dir);
+});
 $("nb-find").addEventListener("click", () => { const h = liveLeaks()[Math.max(0, leakStep)]; if (h) scrollRangeTo(h.range); });
 // Closing the bar puts the names walk away, a page being finished with it: the
 // LEAKS review goes on to its next row, and stops on no more names until the
@@ -11271,6 +11322,7 @@ let leakRowRanges = [];    // where it stands, from the last paint: [{ body, ran
 let leakHere = null;       // the occurrence the bar scrolled to
 let leakHerePieces = null; // …and, where the names walk put it there, every piece of that name
 let rowHere = null;        // …the worksheet row's own, which the names walk does not move
+let rowInst = -1;          // …and which of the value's instances that is, should its page be rebuilt under it
 
 function leaksStoreKey() { return LK.decisionsKey(leaks.folder || folderName || fileName, leaks.name); }
 function persistLeaks() { if (leaks) lsSet(leaksStoreKey(), LK.packDecisions(leaks.parsed.rows)); }
@@ -11563,6 +11615,7 @@ function renderLeaksBar() {
   $("lb-save").textContent = n ? `💾 Save LEAKS.xlsx (${n})` : "💾 Save LEAKS.xlsx";
   $("lb-prev").disabled = $("lb-next").disabled = rows.length < 2;
   $("lb-next-open").disabled = !und;
+  renderRowInstance();
 }
 
 // The Leaks tab's list is BUILT ONCE per worksheet and written on after that.
@@ -11650,6 +11703,7 @@ async function goToLeak(i, { locate = true, trail = true } = {}) {
   leakRowValue = row.value;
   leakHere = null;
   rowHere = null;
+  rowInst = -1;
   leaks.problem = ""; // a new row is a new question; locateLeak answers it
   showLeaksBar(true);
   renderLeaksBar();
@@ -11823,7 +11877,9 @@ async function locateLeak(row) {
   }
   leakHere = rowHere = best.range;
   leakHerePieces = best.pieces || null;
+  rowInst = rowInstanceAt(rowInstances());
   markLeakHere();
+  renderRowInstance();
   const sec = best.body.closest(".tpage");
   scrollRangeTo(best.range);
   if (bestScore < 2 && wheres.length) toast(`Found "${row.value}" on ${TD.pageLabel(doc.pages[Number(sec.dataset.index)]) || "the page"}, not at ${row.where}.`);
@@ -12037,6 +12093,71 @@ function markLeakHere() {
   const all = leakHerePieces && leakHerePieces[0] === leakHere ? leakHerePieces : [leakHere];
   if (leakHere && leakHere.startContainer.isConnected) CSS.highlights.set("leakrow-here", highlightOf(all));
   else CSS.highlights.delete("leakrow-here");
+}
+
+// ── the row's value, instance by instance ────────────────────────────────────
+//
+// A row is one VALUE, and a value stands wherever it stands: the row's mark is
+// on every one of them, and the bar went to the one its Where cell names. The
+// arrows went from row to row, so the other places the value stood, which are
+// what a decision about it is a decision about, could only be scrolled to by
+// eye. Instance ‹ › (Alt+, and Alt+.) steps the row in front through them in
+// the order they stand, round at either end, moving the strong mark with it;
+// the row, and the trail ‹ › keep, stay as they are. What is stepped is what
+// is marked: the pages on screen, this document and, with the folder read on,
+// what hangs under it.
+/** The row's value where it stands on these pages, in reading order: [{ body, range, pieces }]. */
+function rowInstances() {
+  // In page order already, but a value wrapped down a column is found after
+  // the page's plain hits (leakMatches), so the page is put in order too.
+  const list = leakRowRanges.filter((x) => x.range.startContainer.isConnected);
+  try { list.sort((a, b) => a.range.compareBoundaryPoints(Range.START_TO_START, b.range)); } catch { /* a page rebuilt between */ }
+  return list;
+}
+/**
+ * Which of `list` the row stands on: rowHere's own place (the ranges are made
+ * again at every paint, so by where it starts, not by identity), or — its page
+ * rebuilt under it — the same instance by number. -1 where it stands on none.
+ */
+function rowInstanceAt(list) {
+  if (rowHere && rowHere.startContainer.isConnected) {
+    for (let i = 0; i < list.length; i++) {
+      try { if (list[i].range.compareBoundaryPoints(Range.START_TO_START, rowHere) === 0) return i; } catch { /* rebuilt */ }
+    }
+  }
+  return rowInst >= 0 && rowInst < list.length ? rowInst : -1;
+}
+/** The bar's word on it: which instance of how many, and where that one stands. */
+function renderRowInstance() {
+  if (!leaks || leaksBar.hidden || leaks.at < 0) return;
+  const list = rowInstances();
+  const n = list.length, i = rowInstanceAt(list);
+  $("lb-inst").textContent = !n ? ""
+    : i >= 0 ? `· instance ${i + 1} of ${n} · ${whereInText(list[i].range)}`
+    : `· ${n} instance${n === 1 ? "" : "s"}`;
+  $("lb-inst-prev").disabled = $("lb-inst-next").disabled = !n || (n === 1 && i === 0);
+}
+/** The row's value where it next stands (dir 1) or stood before (dir -1), round at either end. */
+function stepRowInstance(dir) {
+  if (!leaks || leaks.at < 0 || leaksBar.hidden) return;
+  const list = rowInstances();
+  const n = list.length;
+  if (!n) {
+    toast(leaks.problem || `\u201c${leakRowValue}\u201d is not on these pages.`, { error: true });
+    return;
+  }
+  // Finishing the page's names, the text has gone off the row; going back to
+  // its value is leaving them, as ‹ is (leakBack).
+  if (pageSweep) { pageSweep = null; renderNamesBar(); }
+  const at = rowInstanceAt(list);
+  rowInst = at < 0 ? (dir < 0 ? n - 1 : 0) : (((at + dir) % n) + n) % n;
+  const h = list[rowInst];
+  leakHere = rowHere = h.range;
+  leakHerePieces = h.pieces || null;
+  markLeakHere();
+  renderRowInstance();
+  scrollRangeTo(h.range);
+  warmForLeaks();
 }
 
 /** Write a decision into the current row's Fix? cell (remembered until saved). */
@@ -12340,6 +12461,8 @@ function leakForward() {
 }
 $("lb-prev").addEventListener("click", leakBack);
 $("lb-next").addEventListener("click", leakForward);
+$("lb-inst-prev").addEventListener("click", () => stepRowInstance(-1));
+$("lb-inst-next").addEventListener("click", () => stepRowInstance(1));
 $("lb-next-open").addEventListener("click", () => { const n = LK.nextUndecided(leakRows(), leaks.at); if (n >= 0) goToLeak(n); });
 $("lb-accept").addEventListener("click", acceptLeak);
 $("lb-find").addEventListener("click", () => { if (leaks && leaks.at >= 0) locateLeak(leakRows()[leaks.at]); });

@@ -47,7 +47,9 @@
        somewhere else each time the walk moved on. The row's text is under
        them now at whatever length it runs to; the answer has a slot of one
        width (the whole of it on hover), accept keeps its place when it is not
-       offered, and the save button is as wide as its count makes it. -->
+       offered, and the save button is as wide as its count makes it.
+       Two pairs of arrows: Row steps from one value to the next, Instance
+       steps the value in front through the places it stands. -->
   <div id="leaks-bar" class="revbar" hidden>
     <div class="lb-row lb-controls">
       <span class="tb-label">Fix?</span>
@@ -60,9 +62,13 @@
       <input id="lb-typed" type="text" spellcheck="false" placeholder="or type: the replacement · ~CORRECT SPELLING (this is a misspelling of it) · *CORRECT TEXT (a scan error; ** in every folder) · [part to keep]" title="Anything else PDF-Linker's Fix? cell accepts. Enter applies it and moves on.">
       <button id="lb-apply" title="Write the typed text into the Fix? cell">Apply</button>
       <button id="lb-clear" class="secondary" title="Clear the cell — decide later">clear</button>
+      <span class="lb-pair"><span class="tb-label">Row</span>
       <button id="lb-prev" title="Back to the row you were on before — after a decision, the row you just answered (Alt+↑). With nothing to go back to, the row before this one in the document">‹</button>
-      <button id="lb-next" title="Forward again to where ‹ went back from; otherwise the next row down the document — the review walks the document, not the worksheet's own order (Alt+↓)">›</button>
+      <button id="lb-next" title="Forward again to where ‹ went back from; otherwise the next row down the document — the review walks the document, not the worksheet's own order (Alt+↓)">›</button></span>
       <button id="lb-next-open" title="The next row still to answer: nothing typed in its Fix? cell, or PDF-Linker's own ~suggestion sitting there unaccepted">Next unanswered</button>
+      <span class="lb-pair"><span class="tb-label">Instance</span>
+      <button id="lb-inst-prev" title="This row's value where it stands before this, round to the last after the first — the same row, the same decision (Alt+,)">‹</button>
+      <button id="lb-inst-next" title="This row's value where it next stands, round to the first after the last — the same row, the same decision (Alt+.)">›</button></span>
       <button id="lb-find" title="Find this value in the text again">Find in text</button>
       <button id="lb-save" class="primary" title="Write the decisions into LEAKS.xlsx in the case folder (Ctrl+Shift+S). Then double-click Apply Fixes.bat, or re-run PDF-Linker, to apply them to the files.">💾 Save LEAKS.xlsx</button>
       <button id="lb-open" title="Load another LEAKS.xlsx">📂</button>
@@ -73,6 +79,7 @@
       <span id="lb-type" class="lb-type"></span>
       <b id="lb-value" class="lb-value" title="The flagged value"></b>
       <span id="lb-where" class="lb-where"></span>
+      <span id="lb-inst" class="lb-where" title="Which of the places this row's value stands on the pages on screen the text is at, and where that is"></span>
       <span id="lb-problem" class="lb-problem"></span>
     </div>
     <div class="lb-row lb-context-row">
@@ -88,7 +95,9 @@
        from one name to the next: the answer in words takes the room left
        between the decisions and the arrows, cut short (the whole of it on
        hover), and between documents the decisions are put out of sight
-       without giving up their places, so › is where it was. -->
+       without giving up their places, so › is where it was. Name ‹ › walks
+       every name standing in the clear in turn; Instance ‹ › only the name in
+       front, through the places it stands. -->
   <!-- Find, across every document of the case folder. The browser's own
        Ctrl+F reads the pages that are IN THE DOM, which is this document and,
        with the folder read on, only the part of the reel that has not been
@@ -152,8 +161,12 @@
       <button id="nb-fake" class="primary nb-decide" title="Say that this one is to be faked: the next save writes the pseudonym (it fakes nothing you have not decided), and the walk stops offering it so you need not come back to it">fake it</button>
       <button id="nb-skip" class="secondary nb-decide" title="Go on without deciding — a save leaves this one in the file as it stands, and warns that it did">leave it for now</button>
       <span id="nb-answer" class="lb-answer nb-decide"></span>
-      <button id="nb-prev" title="The one before it, up the document (Shift+Alt+L)">‹</button>
-      <button id="nb-next" title="The next one, down the document (Alt+L)">›</button>
+      <span class="lb-pair"><span class="tb-label">Name</span>
+      <button id="nb-prev" title="The one before it, up the document, whichever name it is (Shift+Alt+L)">‹</button>
+      <button id="nb-next" title="The next one, down the document, whichever name it is (Alt+L)">›</button></span>
+      <span class="lb-pair nb-decide"><span class="tb-label">Instance</span>
+      <button id="nb-inst-prev" title="This name where it stands in the clear before this, round to the last after the first (Alt+,)">‹</button>
+      <button id="nb-inst-next" title="This name where it next stands in the clear, round to the first after the last (Alt+.)">›</button></span>
       <button id="nb-find" class="nb-decide" title="Scroll back to it">Find in text</button>
       <button id="nb-close" title="Hide the bar — the names stay marked, and the count in the status bar brings it back">×</button>
     </div>
@@ -162,6 +175,7 @@
       <span id="nb-type" class="lb-type leak">unfaked</span>
       <b id="nb-value" class="lb-value" title="A real name from the key, standing in the clear"></b>
       <span id="nb-where" class="lb-where"></span>
+      <span id="nb-inst" class="lb-where" title="Which of the places this name stands in the clear on the pages on screen the walk is at"></span>
       <span id="nb-rest" class="lb-where"></span>
     </div>
   </div>

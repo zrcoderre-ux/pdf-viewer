@@ -496,6 +496,20 @@ app, which routes it to the reader tab.
   to retrace (the worksheet just opened, or you have gone all the way back)
   they step along the document as before. While the names bar is finishing a
   page, ‹ takes you back to the row just answered.
+- **Instance ‹ › goes through every place the value stands.** **Row ‹ ›**
+  moves from one row's value to the next; **Instance ‹ ›** (**Alt+,** and
+  **Alt+.**, the keys with ‹ and › on them) stays on the row and takes the
+  text to the next or the previous place its value stands, round at either
+  end, the strong mark moving with it. The bar says which instance of how
+  many and the page and line it is at. A decision made there is the row's,
+  whichever instance you are looking at. The names bar has the same pair:
+  **Name ‹ ›** walks every name the key binds standing in the clear, whichever
+  name it is; **Instance ‹ ›** walks only the name in front, through its own
+  places in the clear, so you can see each one before **keep in this case**,
+  **never fake it anywhere** or **fake it** answers all of them at once. Both
+  step the pages on screen: this document, and with the folder read on, what
+  hangs under it. With both bars up, the keys step whichever walk put the
+  mark where it is.
 - **A review goes through the folder one document at a time.** A row stands
   in a document — its File cell — and the rows are worked **document by
   document**: every row standing in the document in front is reached before
@@ -640,7 +654,12 @@ app, which routes it to the reader tab.
   real name the key binds that is standing in the clear and **not yet
   decided** is left exactly as it stands (see *A save before the review is
   over*, below); the save refuses outright rather than write one you **did**
-  say to fake. Deleting a marked name deletes the fake.
+  say to fake. Deleting a marked name deletes the fake. That check reads the
+  **pages** of the file, not PDF-Linker's page headers: a page you transcribed
+  comes back from a run under a header ending "this page's text layer is the
+  operator's transcription", and with a key that binds "Operator" every save
+  of that document used to be refused over a word that no page shows, Find
+  cannot find and nobody can retype.
 - **Every document you change stays unsaved until Save, and Save writes them
   all.** With a case folder open, opening another document never asks you to
   discard anything — from the Documents list, the find walk, Replace walking
