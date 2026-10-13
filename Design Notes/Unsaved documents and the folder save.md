@@ -243,7 +243,14 @@ the replace to be prepared (Esc stops it)." / "Wait for the save to finish.").
 4. The key moved meanwhile: nothing written.
 5. The standing assertion over every document about to be written, on
    screen and off (`TD.realsLeftInExport(plain, held, { reals, mask:
-   maskKept })`). One failure writes nothing.
+   maskKept })`). One failure writes nothing. It reads the PAGES: the page
+   headers and a combined file's banners are blanked first (`headLineRanges`,
+   NUL so no name is read across a page break). Those lines are PDF-Linker's,
+   copied through byte for byte; no page shows them, and the marks, Find and
+   the forward pass never read them. Read with the rest, the header PDF-Linker
+   writes over a page transcribed by hand ("…this page's text layer is the
+   operator's transcription") refused every save of its document under a key
+   binding "Operator", naming a value no reader could find to retype.
 6. `await grant`; refused, nothing written.
 7. In folder mode, for each document: the disk read again through its
    handle and compared with `base.text` (`diskStill`); a mismatch is a

@@ -157,6 +157,10 @@ body {
 #key-bar .lb-count { min-width: 9ch; }
 .revbar .lb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .revbar .lb-row .spacer { flex: 1; min-width: 8px; }
+/* A pair of arrows and the label saying what they step (Row, Name, Instance):
+   one piece, so a row too narrow for the bar wraps it whole rather than
+   leaving the label at the end of one line and its arrows on the next. */
+.revbar .lb-pair { display: inline-flex; align-items: center; gap: 8px; flex: none; }
 .revbar button {
   background: var(--btn); color: var(--text); border: 1px solid var(--btn-border);
   padding: 3px 9px; border-radius: 4px; cursor: pointer; font-size: 12px; line-height: 1.2; flex: none;

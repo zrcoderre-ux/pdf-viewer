@@ -1206,6 +1206,23 @@ console.log("documents off the screen");
   check("…a real standing gives that real", realsLeftInExport(leak, leak, { reals }).map((w) => w.real), ["Corwin Ashdale"]);
   check("…and the case-wide keeps are masked", realsLeftInExport(leak, leak, { reals, mask: (t) => t.replace("Corwin Ashdale", "\u0000".repeat(14)) }), []);
   check("…no key, no assertion", realsLeftInExport(leak, leak, {}), []);
+  // The page headers and banners are PDF-Linker's, copied through: a NOTE
+  // saying "the operator's transcription" is no "Operator" standing in a page.
+  {
+    const opKey = { pairs: [{ real: "Operator", fake: "Ventor" }], warn: [{ real: "Operator", fake: "Ventor" }] };
+    const op = compileReals(opKey);
+    const noted = "====== Page 1 ======\nThe request.\n====== Page 2 — NOTE: TEXT CORRECTED by hand in the text reader; this page's text layer is the operator's transcription ======\nExhibit A.\n";
+    check("realsLeftInExport: a page header's NOTE is not read", realsLeftInExport(noted, noted, { reals: op }), []);
+    const crlf = noted.replace(/\n/g, "\r\n");
+    check("…nor under CRLF", realsLeftInExport(crlf, crlf, { reals: op }), []);
+    const banner = "#### DOCUMENT 1 OF 2 IN THIS COMBINED FILE: Operator Report.txt ####\nThe request.\n";
+    check("…nor a combined file's banner", realsLeftInExport(banner, banner, { reals: op }), []);
+    const inPage = noted.replace("Exhibit A.", "The Operator signed.");
+    check("…but the same name in the page's text still is", realsLeftInExport(inPage, inPage, { reals: op }).map((w) => w.real), ["Operator"]);
+    const two = compileReals({ pairs: [{ real: "Night Operator", fake: "Day Ventor" }], warn: [{ real: "Night Operator", fake: "Day Ventor" }] });
+    const across = "====== Page 1 ======\nSigned by the Night\n====== Page 2 ======\nOperator and others.\n";
+    check("…and a name is not read across the header between two pages", realsLeftInExport(across, across, { reals: two }), []);
+  }
 }
 
 // ── what PDF-Linker has spent ─────────────────────────────────────────────────

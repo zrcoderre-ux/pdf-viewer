@@ -567,11 +567,32 @@ export function spotsAfterSwaps(page, oldText, held, places, newText) {
  * the two the same length. The case-wide keeps are masked (`mask(text,
  * layout)`), and a name wrapped down a column is read off `plain`. A save
  * writes nothing at all while any export it would write answers with one.
+ *
+ * THE PAGES, NOT THE HEADERS. A page header and a combined file's banner are
+ * PDF-Linker's lines, copied through byte for byte (serializeExport): no page
+ * shows them, the marks and Find never read them, the save never fakes in
+ * them and nobody can retype them. The assertion read them all the same, so a
+ * page transcribed by hand, whose header PDF-Linker writes as "…this page's
+ * text layer is the operator's transcription", refused every save of its
+ * document under a key that binds "Operator" — naming a value that stood
+ * nowhere a reader could find it. They are blanked with NUL, which is no gap,
+ * so a name is not read across a page break either.
  */
 export function realsLeftInExport(plain, held, { reals = null, mask = null } = {}) {
   if (!reals) return [];
   const masked = mask ? mask(held, plain) : held;
-  return findReals(reals, blankRanges(masked, citedNameSpans(held)), { layout: plain });
+  return findReals(reals, blankRanges(masked, citedNameSpans(held).concat(headLineRanges(held))), { layout: plain });
+}
+/** Where an export's page headers and banners stand: [[start, end), …], each line without its break. */
+function headLineRanges(text) {
+  const out = [];
+  let at = 0;
+  for (const line of String(text == null ? "" : text).split("\n")) {
+    const bare = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (PAGE_HEADER_RE.test(bare) || DOC_BANNER_RE.test(bare)) out.push([at, at + bare.length]);
+    at += line.length + 1;
+  }
+  return out;
 }
 
 // ---- a page that did not OCR ----------------------------------------------------
