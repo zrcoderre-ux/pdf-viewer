@@ -509,7 +509,7 @@ PDF-Linker protects, so such a name typed and NOT dismissed is still marked
 by the converter and written as its pseudonym, and one the run left in the
 clear there is orange and, once settled, written over; matching PDF-Linker
 needs its reporter list, a matcher change of its own to be measured under the
-hang rules. An undo or a key change rebuilt a page from its text
+hang rules. (Since done: "The short cite with no supra is read", below.) An undo or a key change rebuilt a page from its text
 (`restoreSnapshot`, `retranslate`), resetting `__built` and dropping
 `data-typed`; both now carry what was typed ("What was typed survives an
 undo", below). A member the reel sheds and builds again (`unshedMember`)
@@ -691,6 +691,9 @@ Now each way a name's nodes go is followed by what took them:
   typed over, a letter glued to it — and the entry goes with it. A cross-line
   delete on a page with no numbers, where Chrome rebuilds the second line's
   rest into the first, leaves the name in the shared tail, and it is carried.
+  (Not where the deleted text repeats what stands beside the name: there the
+  shared head ran into the name and the entry was dropped — "An edit that
+  slides is unsure", below.)
 - Anything else that takes a node without a note (nothing known does; a
   script moving one stands in for it) is asked the same question, but cannot
   tell a move from a deletion: where the change reached the name, EVERY
@@ -755,9 +758,147 @@ typed before the name included once `escState` was changed as above.
 
 Left as it is: an Esc'd name cut and pasted elsewhere is a deletion and then a
 name typed — the clipboard carries no Esc — so it is offered at the paste and
-marked by the converter, as on main. An `unsure` place is left as typed until
+marked by the converter, as on main. (Since changed for the reader's own
+copy: "…and carried through the reader's own cut and paste", below.) An `unsure` place is left as typed until
 it is retyped; Esc cannot be taken back at it, since the prompt does not show
 on an Esc'd place.
+
+**The short cite with no supra is read** (`TD.citedNameSpans`,
+`shortCiteNames`, `SHORT_TAIL_RE`, `SHORT_NAME_RE`). The last review of the
+Esc tracking (0b35064) found three high-severity ways an Esc'd short cite
+still went into the file as "(Pratt, 30 Cal.App.5th at p. 5.)" under a plain
+"Saved", and one — a cite the FILE already carried — that predated the Esc
+work altogether. Every one was a short cite with no "supra", and every one
+needed the reader to follow an Esc, or to measure what was typed, through an
+edit it could not measure exactly. The root of it is that the reader did not
+know the cite was a cite. PDF-Linker does (`_pn_short_cite_follows`,
+`_PN_SHORT_CITE_TAIL`: the name, a comma, a volume, a reporter, an "at" pin),
+so the reader now reads it too, and the party is spared wherever it stands
+and however it got there — typed with or without Esc, pasted, carried over a
+line Chrome merged, or carried by the file — with no Esc to follow at all.
+
+What is read, after the name and ", ":
+- a VOLUME and a REPORTER from `reporters.js` (the citation linker's list,
+  ported from PDF-Linker's `REPORTERS_RAW`), then a pin ("at p. 5", "at pp.
+  5-6", "at 5") or a page ("30 Cal.App.5th 1", "30 Cal.App.5th, 5"). The
+  reporter is what makes it a citation: "Jones, 2019", "DOES 1", a docket, a
+  date ("12 March 2020") or a street ("30 Main Street") is not one;
+- or the bare pin "(Jones, at p. 5)", the Style Manual's short form. This one
+  is WIDER than PDF-Linker, whose pin needs the reporter before it: a name the
+  run left there is its review's, as before, and the reader spares one typed
+  there because faking it renames the authority, which the project ranks above
+  a visible leak. With no reporter to say "citation" it is read only behind
+  "(", ";" or a signal, only with "p." or "pp.", and never after a record word
+  ("Jones Decl., at p. 3", "Smith Depo., at p. 12" — this case's own papers).
+
+The span is the name alone, cut as PDF-Linker's `_pn_cite_run_start` cuts a
+run read from the left: after the last citation signal ("See Jones" is
+"Jones") and after the last full stop closing an ordinary word ("…served on
+Helen Rasho. Jones, 30 …" is "Jones"; "Acme Corp." keeps its "Corp."). A span
+too wide would spare a name of THIS case standing before the cite, unmarked
+and unwarned. Residual, stated: a capitalised word opening the name run that
+is neither a signal nor after a full stop ("Plaintiff Jones, 30 Cal.App.5th
+at p. 5") is spanned with it — harmless unless the key binds that word too.
+
+Under the hang rules ("Text reader hangs and freezes.md") it is FOUND FROM
+THE TAIL: a global scan for ", <volume> <reporter>" or ", at p." — the
+reporter alternation tried only where ", <digits> " has been read — and from
+each tail the name is read backwards over a fixed window (160 characters)
+with counted words, so the work is a constant per tail and the whole is
+linear. Measured (`test-textdoc.mjs`): a text mixing a jurat's capitals,
+near-miss tails (", 30 DAYS", "Jones, at times", "Quillmark, 12 March 2020")
+and short cites reads 300 repeats in 7 ms and 1,200 in 26 ms; the jurat test
+and `test-long-export-scan.mjs` are unchanged. `test-textdoc.mjs` pins the
+shapes, positive and negative.
+
+With it, the review's repros hold — the two-cite deletion across a line, the
+cut and paste of an Esc'd cite, and a deletion beside a cite the file already
+carried — and `test-typed-cites.mjs` (Chromium) pins them: a short cite typed
+at once, after a pause (the converter's mark put back), and as the bare pin,
+kept as typed; a name typed in prose, before "30 days" or in "(… Decl., at p.
+3)" still faked. Each of those holds because the cite is read; the changes
+below hold the same edits for an Esc'd name in a form the reader still does
+not read as a citation, and that test runs them with a ", slip op." tail.
+
+**An edit that slides is unsure, never a drop** (`TD.escapedPlace`'s
+`unsure`; `escapesIn`). `escapedPlace` told an edit by the head and tail the
+text before and after share, taking the HEAD first. A deletion of text that
+repeats what stands beside the Esc'd name — "(Jones, 30 …)\nNothing else. "
+deleted from before "(Jones, 31 …)", or "(Judge Whitaker so held).\nThe end. "
+from before "(Jones, …" — reads the same whichever side of the repeat it was
+taken from, and head first the shared head ran on into the name: "the edit
+reached it", and since the edit was the browser's own (`sure`) the entry was
+dropped and the converter marked the name. `escapedPlace` now tells the edit
+both ways, head first and tail first; where the two disagree about whether it
+reached the name, the name is UNSURE: every place either telling puts it, and
+every whole-word occurrence in the widest region the edit could have written,
+comes back with `unsure: true`, and `escapesIn` leaves each as typed, marked
+`unsure`, which the save names in red ("left as typed in N places … cannot
+tell which"), whatever `sure` says. An edit that does not slide is told as
+before, exactly. `test-typed-cites.mjs` case 3, with a tail the reader does
+NOT read as a citation (", slip op. 5.)"): the two-cite deletion across the
+line keeps the second name with the red warning; the deletion that does not
+slide keeps it with no such warning; and with the Esc'd name's line deleted,
+a name typed later is offered and written as its pseudonym. `test-textdoc.mjs`
+pins the two slides and the one that does not.
+
+**…and carried through the reader's own cut and paste** (`lastCopy`'s
+`esc`, `copyOfBody`, `isOwnCopy`, `escPasted`, `insertLinesAtCaret`'s `laid`).
+A cut took the Esc with the name (by design: a deletion), and the paste of the
+reader's own copy put "Jones" back as new text — the converter marked it and
+the save wrote "(Pratt, …)"; a copy pasted as a second cite the same. The
+reader knows the paste is exactly its own copy (`ownCopy`), so the copy now
+notes where in its `real` text each live Esc'd name it takes stands (read into
+the disk text with the selection's ends, then measured as the length of what
+the copy takes before it), and a paste of that copy Esc's each one again
+where it lands: in the first line at the selection's start plus its column,
+in a later line at the node `insertLinesAtCaret` laid it in. Where the name
+is not there exactly, each whole-word occurrence in that line is left as
+typed, `unsure`. Text pasted from anywhere else is new text, offered and
+marked as before. `test-typed-cites.mjs` case 4, with the ", slip op." tail:
+the parenthetical cut and pasted on a plain page, and the line's text cut
+with Shift+Home and pasted on another line of a numbered page, keep "(Ashdale,
+…)"; a foreign paste of the name is still written as its pseudonym. The cut's
+toast still says "Cut in the pseudonyms": the
+clipboard carries the pseudonym for an Esc'd name, as for any real name,
+since what leaves the reader is faked; only the reader's own paste takes it
+back.
+
+**Ctrl+Backspace and Ctrl+Delete keep the numbers** (`caretDeletesGutter`).
+The keydown guard stands aside for Ctrl, and the `beforeinput` guard asked
+only of a selection that is not collapsed, so Ctrl+Backspace at the head of a
+numbered line's text deleted the word across the line break and the line's
+number with it: " 2  Nothing else.(Jones, …)" and line 3's number gone (on
+b6d82a6 and 0b35064). Chrome hands that deletion no target ranges
+(`getTargetRanges()` is empty for `deleteWordBackward` there, measured), so the
+caret is asked: a word or line deletion backward from offset 0 of a numbered
+line's text, or forward from its end, is refused with the "line numbers are
+fixed" toast. Mid-line the word goes as before. `test-typed-cites.mjs` case
+5: Ctrl+Backspace at the head of line 3 and Ctrl+Delete at the end of line 2
+are refused and said, Ctrl+Backspace mid-line deletes, and the file keeps
+every number.
+
+**What was typed is told the same way** (`TD.editedSpans`, `slidPoint`). The
+save's measure of what was typed had the same head-first bias: a slide
+deletion's point fell inside a name the FILE already carried, "took text out
+of its middle", and the save wrote its pseudonym over a name nobody typed —
+a short cite PDF-Linker shipped with its real name, under a plain "Saved"
+(on b6d82a6 and 0b35064 alike). The cite is spared now
+whatever `editedSpans` says, and for any other name a deletion's point is slid,
+within the places that tell the same story (left while the character before
+equals the last one taken, right while the first taken equals the one after),
+to the first that splits no word of what is left; where every place splits
+one, it stays where it was found. That is done for the trimmed edit and for
+each pure deletion inside a changed line (`editHunks` places those
+arbitrarily too). `test-typed-cites.mjs` case 2: "(Ashford so held).\n"
+deleted from before a file's own "(Ashdale, slip op. 5.)" leaves "Ashdale",
+named in red as not yet reviewed, and before "(Ashdale, 30 Cal.App.5th at p.
+5.)" leaves the cite as it was; both wrote the pseudonym before.
+`test-textdoc.mjs` pins it. Residual, stated: text PUT IN that repeats what
+stands beside it ("(Jones agreed.) " pasted right before "(Jones agreed.)")
+cannot say which copy is new, and is measured where it was found, head first:
+one copy counts as typed and is written as its pseudonym, the other is left
+and named in red; the reader's own paste of an Esc'd copy is Esc'd as above.
 
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each
