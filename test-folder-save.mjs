@@ -118,6 +118,19 @@ wb.save(sys.argv[1])
   return fs.readFileSync(out);
 }
 const KEY_BYTES = buildKeyXlsx(KEY);
+/** LEAKS.xlsx as PDF-Linker lays it out: its header, then `rows` of [Value, Fix?, Context, File, Type, Where, Notes]. */
+function buildLeaksXlsx(rows) {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "folder-save-")), "LEAKS.xlsx");
+  const py = `
+import json, sys, openpyxl
+wb = openpyxl.Workbook(); ws = wb.active; ws.title = "LEAKS"
+ws.append(["Value", "Fix? (yes/no)", "Context", "File", "Type", "Where (page:line)", "Notes"])
+for r in json.loads(sys.argv[2]): ws.append(r)
+wb.save(sys.argv[1])
+`;
+  execFileSync("python3", ["-I", "-c", py, out, JSON.stringify(rows)]);
+  return fs.readFileSync(out);
+}
 
 // ── the fixture: an invented case ──────────────────────────────────────────
 const CASE = "Case Harness";
@@ -2298,6 +2311,142 @@ test(35, "Remove from Master Keep names a remembered folder that is no longer wh
     truthy("the confirm names it as out of reach", /New Real Values\.txt in Case Moved still carries it, out of the reader's reach now: open Case Moved here and Save before PDF-Linker runs there\./.test(conf));
     check("…and its list lets the value go", await storedKeeps(r.page, GONE), []);
     check("no page errors", r.log.errors.filter((e) => !/NotFoundError|could not be found/i.test(e)), []);
+  } finally { await r.close(); }
+});
+
+// ── 36. an accepted suggestion is no unsaved answer ────────────────────────
+// A pre-filled `~` accepted as it stands writes nothing to the workbook (the
+// cell already says it), so it is remembered in the reader alone: Save
+// LEAKS.xlsx used to take it out of the store with the answers it wrote, and
+// after a reload the suggestion was asked again; the toasts counted it as
+// "answered here and not yet saved", and once a run had applied it and its row
+// had gone, as "an unsaved answer … discarded … Answer it again".
+test(36, "an accepted ~ suggestion survives Save LEAKS.xlsx and a reload, is no unsaved answer, and goes quietly with its row", async () => {
+  const r = await newReader();
+  try {
+    const DOC = "====== Page 1 ======\nPlaintiff Tobias Wrenfield bought a vehicle in Lucerne Valley from Quarrow Motors.\n====== Page 2 ======\nWrenfield asks for restitution. Corwn Ashdale paid.\n";
+    const CORWN = ["Corwn Ashdale", "~Corwin Ashdale", "Corwn Ashdale paid.", "A Complaint.pdf", "possible person name", "p.2:1", "pre-filled: reads as a misspelling of 'Corwin Ashdale' — leave it to accept"];
+    const LUCERNE = ["Lucerne Valley", "", "bought a vehicle in Lucerne Valley from Quarrow Motors.", "A Complaint.pdf", "unscrubbed name?", "p.1:1", ""];
+    // The folder found again by name, as after a reload.
+    const putLeaks = (bytes) => r.page.evaluate(async ({ b, CASE }) => {
+      if (!window.__case) window.__case = await (await navigator.storage.getDirectory()).getDirectoryHandle(CASE);
+      const w = await (await window.__case.getFileHandle("LEAKS.xlsx", { create: true })).createWritable(); await w.write(new Uint8Array(b)); await w.close();
+    }, { b: Array.from(bytes), CASE });
+    await writeFolder(r.page, { docs: { "A Complaint.txt": DOC }, root: {} });
+    await putLeaks(buildLeaksXlsx([CORWN, LUCERNE]));
+    await adopt(r.page);
+    await openDoc(r.page, "A Complaint.txt", { settle: 1000 });
+    const rowOf = (v) => r.page.evaluate((v) => window.__textReaderLeaks().rows.findIndex((x) => x.value === v), v);
+    await r.page.evaluate((i) => window.__textReaderGoToLeak(i), await rowOf("Corwn Ashdale"));
+    await r.page.waitForTimeout(400);
+    await r.page.evaluate(() => document.getElementById("lb-accept").click());
+    await r.page.waitForTimeout(400);
+    const storeKey = LK.decisionsKey(await stateKeyOf(r.page), "LEAKS.xlsx");
+    const stored = () => r.page.evaluate((k) => JSON.parse(localStorage.getItem(k) || "null"), storeKey);
+    check("the acceptance is remembered, as an acceptance", Object.values((await stored()) || {}).map((e) => [e.base, !!e.ok]), [["~Corwin Ashdale", true]]);
+    const attachToast = async () => {
+      r.log.toasts.length = 0;
+      await r.page.evaluate(async (CASE) => {
+        if (!window.__case) window.__case = await (await navigator.storage.getDirectory()).getDirectoryHandle(CASE);
+        await window.__textReaderAdoptFolder(window.__case, { quiet: false });
+      }, CASE);
+      await r.page.waitForTimeout(600);
+      return r.log.toasts.filter((t) => /^LEAKS\.xlsx: /.test(t)).pop() || "";
+    };
+    // The folder read again with nothing changed: one row to answer, and
+    // nothing "not yet saved" — the acceptance is owed to nobody.
+    check("read again unchanged: the acceptance is not counted as an answer not yet saved", await attachToast(), "LEAKS.xlsx: 2 rows, 1 to answer — ⚠ Leaks to review them.");
+    // …while an answer given here is.
+    await r.page.evaluate((i) => window.__textReaderGoToLeak(i), await rowOf("Lucerne Valley"));
+    await r.page.waitForTimeout(400);
+    await r.page.evaluate(() => window.__textReaderDecide("no"));
+    await r.page.waitForTimeout(300);
+    check("…an answer given here still is", await attachToast(), "LEAKS.xlsx: 2 rows, every row answered — 1 of the answers here and not yet saved (Ctrl+Shift+S writes them).");
+    // Save LEAKS.xlsx, then reload the tab: the acceptance is still remembered.
+    await r.page.evaluate(() => document.getElementById("lb-save").click());
+    await r.page.waitForTimeout(1500);
+    truthy("Save LEAKS.xlsx wrote the answer", r.log.toasts.some((t) => /^Saved LEAKS\.xlsx — 1 decision written\./.test(t)));
+    check("…and the store still holds the acceptance, and only it", Object.values((await stored()) || {}).map((e) => [e.base, !!e.ok, typeof e.fix]), [["~Corwin Ashdale", true, "undefined"]]);
+    await reload(r);
+    check("reloaded: every row answered, the suggestion not asked again", await attachToast(), "LEAKS.xlsx: 2 rows, every row answered.");
+    // A run applies the suggestion: its row goes. Nothing anybody gave is lost
+    // with it, and nothing is said to be.
+    await putLeaks(buildLeaksXlsx([["Lucerne Valley", "no", LUCERNE[2], "A Complaint.pdf", "unscrubbed name?", "p.1:1", ""], ["Marcus Delacroy", "", "Marcus Delacroy saw it.", "A Complaint.pdf", "possible person name", "p.1:1", ""]]));
+    const after = await attachToast();
+    check("its row gone after a run: no answer said to be discarded", [after, /discarded/.test(after)], ["LEAKS.xlsx: 2 rows, 1 to answer — ⚠ Leaks to review them.", false]);
+    check("…and the acceptance retired from the store", (await stored()) || {}, {});
+    // …and so with nothing saved at all: the suggestion accepted, nothing owed,
+    // and a run applies it.
+    await putLeaks(buildLeaksXlsx([CORWN, LUCERNE]));
+    await attachToast();
+    await r.page.evaluate((i) => window.__textReaderGoToLeak(i), await rowOf("Corwn Ashdale"));
+    await r.page.waitForTimeout(400);
+    await r.page.evaluate(() => document.getElementById("lb-accept").click());
+    await r.page.waitForTimeout(400);
+    await putLeaks(buildLeaksXlsx([["Lucerne Valley", "no", LUCERNE[2], "A Complaint.pdf", "unscrubbed name?", "p.1:1", ""], ["Marcus Delacroy", "", "Marcus Delacroy saw it.", "A Complaint.pdf", "possible person name", "p.1:1", ""]]));
+    const quiet = await attachToast();
+    check("an acceptance alone, its row gone after a run: nothing said to be discarded", [quiet, /discarded/.test(quiet)], ["LEAKS.xlsx: 2 rows, 1 to answer — ⚠ Leaks to review them.", false]);
+    check("no page errors", r.log.errors, []);
+  } finally { await r.close(); }
+});
+
+// ── 37. a row is named by the document's sentence, not the export's ────────
+// The Context cell stacks the sentence as the document had it over the
+// sentence as the export carries it (CONTEXT_RULE), and the export's moves
+// whenever something else in it is decided: a `yes` on "54" saved and applied
+// turned "…, 54, …" below the rule into "…, 49, …", and the unsaved answers to
+// the other rows of that sentence were thrown away ("Answer them again"). And
+// for one release, an answer the build before stored — its row named by the
+// whole cell — still comes back.
+test(37, "unsaved answers survive a run that moved only their sentence's export half; one stored under the old whole-cell identity comes back once", async () => {
+  const r = await newReader();
+  try {
+    const SENT = "Halden Brookmere and Wexford Applewhite, 54, signed the lease.";
+    const ctx = (age) => SENT + "\n" + LK.CONTEXT_RULE + "\nTeague Morrow and Wexford Applewhite, " + age + ", signed the lease.";
+    const sheet = (age) => buildLeaksXlsx([
+      ["Halden Brookmere", "", ctx(age), "A Complaint.pdf", "possible person name", "p.1:1", ""],
+      ["Wexford Applewhite", "", ctx(age), "A Complaint.pdf", "possible person name", "p.1:1", ""],
+    ]);
+    const putLeaks = (bytes) => r.page.evaluate(async ({ b, CASE }) => {
+      if (!window.__case) window.__case = await (await navigator.storage.getDirectory()).getDirectoryHandle(CASE);
+      const w = await (await window.__case.getFileHandle("LEAKS.xlsx", { create: true })).createWritable(); await w.write(new Uint8Array(b)); await w.close();
+    }, { b: Array.from(bytes), CASE });
+    const attachToast = async () => {
+      r.log.toasts.length = 0;
+      await r.page.evaluate(async (CASE) => {
+        if (!window.__case) window.__case = await (await navigator.storage.getDirectory()).getDirectoryHandle(CASE);
+        await window.__textReaderAdoptFolder(window.__case, { quiet: false });
+      }, CASE);
+      await r.page.waitForTimeout(600);
+      return r.log.toasts.filter((t) => /^LEAKS\.xlsx: /.test(t)).pop() || "";
+    };
+    const answers = () => r.page.evaluate(() => window.__textReaderLeaks().rows.map((x) => [x.value, x.fix]));
+    await writeFolder(r.page, { docs: { "A Complaint.txt": A }, root: {} });
+    await putLeaks(sheet("54"));
+    await adopt(r.page);
+    await openDoc(r.page, "A Complaint.txt", { settle: 1000 });
+    for (const [i, fix] of [[0, "yes"], [1, "no"]]) {
+      await r.page.evaluate((i) => window.__textReaderGoToLeak(i), i);
+      await r.page.waitForTimeout(400);
+      await r.page.evaluate((f) => window.__textReaderDecide(f), fix);
+      await r.page.waitForTimeout(300);
+    }
+    // The run: the sentence's export half moved (another value in it decided), nothing else.
+    await putLeaks(sheet("49"));
+    const toastNow = await attachToast();
+    check("the export half moved: both answers back on their rows", await answers(), [["Halden Brookmere", "yes"], ["Wexford Applewhite", "no"]]);
+    check("…counted as not yet saved, none discarded", [toastNow, /discarded/.test(toastNow)], ["LEAKS.xlsx: 2 rows, every row answered — 2 of the answers here and not yet saved (Ctrl+Shift+S writes them).", false]);
+    // The build before named the row by the whole cell, both halves: an answer
+    // it stored is laid back once, and stored again under the row's own name.
+    const storeKey = LK.decisionsKey(await stateKeyOf(r.page), "LEAKS.xlsx");
+    const old = LK.wholeContextIdentity({ value: "Wexford Applewhite", file: "A Complaint.pdf", context: ctx("49") });
+    await r.page.evaluate(({ k, v }) => localStorage.setItem(k, JSON.stringify(v)), { k: storeKey, v: { 3: { id: old, base: "", fix: "never" } } });
+    await reload(r);
+    const toastOld = await attachToast();
+    check("an answer stored under the old whole-cell identity is laid back", [await answers(), toastOld], [[["Halden Brookmere", ""], ["Wexford Applewhite", "never"]], "LEAKS.xlsx: 2 rows, 1 to answer, 1 answered here and not yet saved — ⚠ Leaks to review them."]);
+    const now = await r.page.evaluate((k) => JSON.parse(localStorage.getItem(k) || "null"), storeKey);
+    check("…and stored again under the row's own identity", Object.values(now || {}).map((e) => [e.id === old, e.fix]), [[false, "never"]]);
+    check("no page errors", r.log.errors, []);
   } finally { await r.close(); }
 });
 

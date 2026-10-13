@@ -783,21 +783,47 @@ export function decisionsKey(folder, name) {
 // four files each matched. It is not the same answer to the same question: a
 // `no` is "leave it, in this case" (classifyFix), and a keep on Jordan the
 // country is not a keep on Jordan the plaintiff. The Context is the first
-// sentence PDF-Linker found the value in, its real half and its scrubbed one;
-// two matters practically never quote the same one, and a re-run that quotes
-// another drops the answer and says so — the safe way to be wrong. What can
-// still go across is one value in one File cell quoted from one sentence,
-// read under one store: a form's boilerplate printed alike in two cases.
+// sentence PDF-Linker found the value in; two matters practically never quote
+// the same one, and a re-run that quotes another drops the answer and says so
+// — the safe way to be wrong. What can still go across is one value in one
+// File cell quoted from one sentence, read under one store: a form's
+// boilerplate printed alike in two cases.
+//
+// …ITS ORIGINAL HALF ONLY. The cell stacks two quotes (CONTEXT_RULE between
+// them): the sentence as the document had it, from the cached unscrubbed text,
+// and the sentence as the export now carries it. The second moves whenever
+// anything ELSE in the sentence is decided: measured on PDF-Linker's own
+// worksheets (a full run, a `yes` saved on "54", Apply Fixes, a full run), the
+// rows "Halden Brookmere, 71," and "Odile Varnecke, 45," quoting that sentence
+// came back with "…, 49, …" in their export half and nothing else changed, and
+// two of the three unsaved answers on the sheet were thrown away as "changed
+// or gone since". The original half is the document's own sentence, which no
+// decision moves, and it still tells two cases' rows apart as the whole cell
+// did (Jordan the country and Jordan the plaintiff are quoted from two real
+// sentences). A cell with no rule — the two quotes the same — is its own
+// original half.
 
 const FNV_BASIS = 2166136261;
 const FNV_PRIME = 16777619;
+/** Two FNV-1a passes of 32 bits over `s`, the second from its end, as 16 hex digits. */
+function digest(s) {
+  let a = FNV_BASIS;
+  let b = FNV_BASIS;
+  for (let i = 0, j = s.length - 1; i < s.length; i++, j--) {
+    a = Math.imul(a ^ s.charCodeAt(i), FNV_PRIME);
+    b = Math.imul(b ^ s.charCodeAt(j), FNV_PRIME);
+  }
+  return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+}
 /**
- * The row an answer belongs to, as a digest of its folded Value, File and
- * Context cells: two FNV-1a passes of 32 bits (as pseudo-key.keySignature),
- * the second reading the text from its end, so two rows share one only by an
- * accident of one in 2^64. Folded as `fold` folds — case, and runs of white
- * space, line breaks among them — so only a change of words moves it.
- * Synchronous, so the store can be written in the middle of a decision.
+ * The row an answer belongs to, as a digest of its folded Value and File cells
+ * and the ORIGINAL half of its Context cell (splitContext: the text above
+ * CONTEXT_RULE, the whole cell where it has none): two FNV-1a passes of 32 bits
+ * (as pseudo-key.keySignature), the second reading the text from its end, so
+ * two rows share one only by an accident of one in 2^64. Folded as `fold`
+ * folds — case, and runs of white space, line breaks among them — so only a
+ * change of words moves it. Synchronous, so the store can be written in the
+ * middle of a decision.
  *
  * Worked out once a row and remembered on it (ROW_IDS): packDecisions runs
  * on EVERY decision, over every row answered so far, and a Context cell is a
@@ -813,23 +839,32 @@ export function rowIdentity(row) {
   const r = row && typeof row === "object" ? row : null;
   const memo = r ? ROW_IDS.get(r) : null;
   if (memo && memo.value === r.value && memo.file === r.file && memo.context === r.context) return memo.id;
-  const s = fold(r && r.value) + "|" + fold(r && r.file) + "|" + fold(r && r.context);
-  let a = FNV_BASIS;
-  let b = FNV_BASIS;
-  for (let i = 0, j = s.length - 1; i < s.length; i++, j--) {
-    a = Math.imul(a ^ s.charCodeAt(i), FNV_PRIME);
-    b = Math.imul(b ^ s.charCodeAt(j), FNV_PRIME);
-  }
-  const id = (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+  // Line breaks as "\n" before the cut, as the fold reads any of them alike.
+  const context = String(r && r.context != null ? r.context : "").replace(/\r\n?/g, "\n");
+  const id = digest(fold(r && r.value) + "|" + fold(r && r.file) + "|" + fold(splitContext(context).original));
   if (r) ROW_IDS.set(r, { value: r.value, file: r.file, context: r.context, id });
   return id;
+}
+/**
+ * The identity the build before this one gave a row: its WHOLE Context cell,
+ * both halves, in the digest. Read by unpackDecisions FOR ONE RELEASE, so the
+ * answers that build stored are laid back once more (and stored again under
+ * the row's own identity) rather than thrown away by the change; to be taken
+ * out in the release after. Not remembered on the row: it is asked once per
+ * attach, and only where a stored answer matches no row's own identity.
+ */
+export function wholeContextIdentity(row) {
+  const r = row && typeof row === "object" ? row : null;
+  return digest(fold(r && r.value) + "|" + fold(r && r.file) + "|" + fold(r && r.context));
 }
 /**
  * { rowNumber: { id, base, fix } } for the rows that moved, and
  * { id, base, ok: true } for a suggestion accepted as it stands — `id` the
  * row's identity (rowIdentity), `base` the sheet's own cell then. An accepted
  * suggestion writes nothing to the workbook (the cell already carries it) and
- * so is remembered HERE or nowhere; a save does not clear it.
+ * so is remembered HERE or nowhere; a save does not clear it (text-reader.js
+ * saveLeaks stores the sheet's rows again once it has written them, and only
+ * the acceptances are left to store).
  */
 export function packDecisions(rows) {
   const out = {};
@@ -842,10 +877,19 @@ export function packDecisions(rows) {
 /**
  * Remembered decisions laid back over the rows: each on the row with ITS
  * identity, wherever that row now stands, and only where the sheet's cell is
- * still what it was. Returns { laid, dropped, legacy }: the answers put back,
- * the ones that found no row of their own (gone, changed, or answered in the
- * sheet since), and the ones from before rows had identities, discarded
- * unread.
+ * still what it was. Returns { laid, accepted, dropped, legacy }: the answers
+ * put back (`laid`: what the worksheet is owed), the acceptances put back
+ * (`accepted`: a pre-filled suggestion taken as it stands, which the worksheet
+ * already says and a save never writes — so never counted as an answer "not
+ * yet saved"), the answers that found no row of their own (gone, changed, or
+ * answered in the sheet since), and the answers from before rows had
+ * identities, discarded unread. An acceptance that finds no row of its own is
+ * retired without a word, never `dropped`: the row it accepted has gone —
+ * usually because a run applied the suggestion — or now asks something else,
+ * and either way nothing anybody gave is lost with it, so "answer it again"
+ * would be false. For one release an answer is also known by the identity the
+ * build before gave its row (wholeContextIdentity), where it matches no row's
+ * own.
  *
  * Two rows of one sheet can share an identity — PDF-Linker groups by the
  * value's lower case, the reader folds runs of spaces too, so "Helen  Rasho"
@@ -856,39 +900,47 @@ export function packDecisions(rows) {
  * moved. Moved, they are dropped like any answer that lost its row.
  */
 export function unpackDecisions(rows, stored) {
-  const got = { laid: 0, dropped: 0, legacy: 0 };
-  const byId = new Map(); // identity -> [{ n, s }] as stored
+  const got = { laid: 0, accepted: 0, dropped: 0, legacy: 0 };
+  const isAnswer = (s) => typeof s.fix === "string";
+  const byId = new Map(); // identity -> [{ n, s, used }] as stored
   for (const [k, s] of Object.entries(stored && typeof stored === "object" ? stored : {})) {
     if (!s || typeof s !== "object") continue;
-    if (typeof s.id !== "string" || !s.id) { got.legacy++; continue; }
-    const e = { n: Number(k), s };
+    if (typeof s.id !== "string" || !s.id) { if (isAnswer(s)) got.legacy++; continue; }
+    const e = { n: Number(k), s, used: false };
     const list = byId.get(s.id);
     if (list) list.push(e); else byId.set(s.id, [e]);
   }
   if (!byId.size) return got;
   const all = rows || [];
+  const index = (list) => {
+    const at = new Map(); // identity -> the sheet row numbers carrying it now
+    for (let i = 0; i < all.length; i++) {
+      const here = at.get(list[i]);
+      if (here) here.add(all[i].n); else at.set(list[i], new Set([all[i].n]));
+    }
+    return at;
+  };
   const ids = all.map(rowIdentity);
-  const at = new Map(); // identity -> the sheet row numbers carrying it now
+  const at = index(ids);
+  // The build before's identities, worked out only where a stored answer is
+  // not under any row's own.
+  let olds = null, atOld = null;
+  if ([...byId.keys()].some((id) => !at.has(id))) { olds = all.map(wholeContextIdentity); atOld = index(olds); }
   for (let i = 0; i < all.length; i++) {
-    const here = at.get(ids[i]);
-    if (here) here.add(all[i].n); else at.set(ids[i], new Set([all[i].n]));
-  }
-  for (let i = 0; i < all.length; i++) {
-    const list = byId.get(ids[i]);
+    let list = byId.get(ids[i]), here = at.get(ids[i]);
+    if (!list && olds) { list = byId.get(olds[i]); here = atOld.get(olds[i]); }
     if (!list) continue;
     const r = all[i];
-    const here = at.get(ids[i]);
     let e = null;
     if (here.size === 1 && list.length === 1) e = list[0]; // the one row it can be, wherever it stands
     else if (list.every((x) => here.has(x.n))) e = list.find((x) => x.n === r.n) || null;
-    if (!e || e.s.base !== r.fix0) continue;
-    if (typeof e.s.fix === "string" && e.s.fix !== r.fix0) r.fix = e.s.fix;
-    else if (e.s.ok) r.ok = true;
+    if (!e || e.used || e.s.base !== r.fix0) continue;
+    if (isAnswer(e.s) && e.s.fix !== r.fix0) { r.fix = e.s.fix; got.laid++; }
+    else if (e.s.ok) { r.ok = true; got.accepted++; }
     else continue;
-    got.laid++;
+    e.used = true;
   }
-  for (const list of byId.values()) got.dropped += list.length;
-  got.dropped -= got.laid;
+  for (const list of byId.values()) for (const e of list) if (!e.used && isAnswer(e.s)) got.dropped++;
   return got;
 }
 

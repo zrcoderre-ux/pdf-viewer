@@ -508,7 +508,11 @@ app, which routes it to the reader tab.
   removed is not put back — your answers stay remembered in the meantime. An
   export the run rewrote is not written over by a save with nothing in it,
   and a file opened on its own that changed, or was renamed `.txt.LEAK`, is
-  not written back through its old name. **New Real Values.txt** keeps the
+  not written back through its old name. A LEAKS.xlsx you dropped or loaded
+  by hand while a case folder is open is never saved into the case folder,
+  whatever its name: the save says it is not this case folder's worksheet
+  and keeps your answers (load the file itself with 📂 to save into it).
+  **New Real Values.txt** keeps the
   lines already in it that the reader did not write — a page list such as
   `did not ocr: Exhibit A.pdf | pages 3-5, 9`, or a line you typed into the
   file by hand — after the reader's own, under a comment that says so.
@@ -556,7 +560,9 @@ app, which routes it to the reader tab.
   **accept** (**Alt+A**) takes it as it stands and the row stops coming back;
   typing anything else overwrites it. An acceptance writes nothing to the
   workbook — the cell already says it — so it is remembered in the reader,
-  beside the unsaved decisions, and a save does not clear it. A decision moves
+  beside the unsaved decisions, and a save does not clear it; nor is it ever
+  counted among the answers "not yet saved", and once a run has applied it
+  and its row has gone, it is let go without a word. A decision moves
   you to the next row still to answer; the **Leaks** tab lists every row with
   its state and jumps to any of them. A `no` or `never` on a value the key
   binds is mirrored as one of the reader's keeps, so the orange mark goes and
@@ -585,7 +591,9 @@ app, which routes it to the reader tab.
   another case's row for the same word: a `no` on Jordan the country in one
   case is not a `no` on Jordan the plaintiff in another, even where both
   worksheets were opened on their own beside a `Complaint.txt`, or file the
-  word under "4 files". An answer whose value has gone, or is now found in
+  word under "4 files". The sentence is the one the document had, so an
+  answer given elsewhere in it since (which changes the export's version of
+  the sentence) does not lose yours. An answer whose value has gone, or is now found in
   other files or quoted from another sentence, is discarded, and the toast on
   opening the folder or the worksheet says how many were, so you can answer
   them again. Answers an older reader remembered by row number only are

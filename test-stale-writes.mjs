@@ -5,8 +5,8 @@
 // a run, is not saved over or put back; New Real Values.txt keeps the lines the
 // reader did not write; an export a run rewrote is not written over by an
 // empty save; a lone file changed or renamed on disk is not written through
-// its old handle; and the PDF viewer asks before saving over a PDF that
-// changed on disk.
+// its old handle; the PDF viewer asks before saving over a PDF that changed on
+// disk; and a worksheet loaded by hand is never written into the case folder.
 //
 // Run: node test-stale-writes.mjs   (from the repo root)
 //
@@ -228,6 +228,12 @@ async function typeOnPage(page, text) {
   await page.waitForTimeout(500);
 }
 const runBar = (page) => page.evaluate(() => (document.getElementById("run-bar").hidden ? "" : document.getElementById("run-bar-text").textContent));
+/** The window's focus coming back, and the look it makes given time. */
+async function look(page, ms = 1500) {
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForTimeout(ms);
+}
+const toasted = (log, re) => log.toasts.some((t) => re.test(t));
 
 async function run() {
   srv = await startServer();
@@ -399,6 +405,39 @@ async function run() {
       await p.evaluate(() => document.getElementById("stale-overwrite").click());
       await p.waitForTimeout(1500);
       check("Overwrite it: written over", (await pdfText()).includes("Second run"), false);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+
+    // ── 7. a worksheet loaded by hand ─────────────────────────────────────
+    // Dropped from a mail or read through the file input, it has no handle.
+    // Its save once went into the case folder under its own name (a handle
+    // made for it, `create: true`) and took the place of the case's own
+    // worksheet: another matter's `no`, which PDF-Linker would read as this
+    // case's keep (the re-check's repro 8). Then it was refused as "changed
+    // on disk", compared with a file it was never read from.
+    console.log("7. a worksheet loaded by hand is never written into the case folder, nor called changed on disk");
+    {
+      const r = await newReader();
+      const p = r.page;
+      const other = buildXlsx("LEAKS.xlsx", "LEAKS", LEAKS_HEAD, [["Odile Varnecke", "", "Odile Varnecke moved.", "Other Motion.pdf", "possible person name", "p.1:1", ""]]);
+      await p.evaluate((b) => window.__textReaderAttachLeaks(b, "LEAKS.xlsx"), Array.from(other));
+      await p.waitForTimeout(600);
+      await p.evaluate(() => window.__textReaderGoToLeak(0));
+      await p.waitForTimeout(400);
+      await p.evaluate(() => window.__textReaderDecide("no"));
+      await p.waitForTimeout(300);
+      await p.evaluate(() => document.getElementById("lb-save").click());
+      await p.waitForTimeout(1200);
+      check("Save LEAKS.xlsx: the case folder's own worksheet left as it was", await readBytes(p, "LEAKS.xlsx"), Array.from(LEAKS_BYTES));
+      truthy("…said as not this case folder's worksheet, not as changed on disk", toasted(r.log, /^LEAKS\.xlsx was not saved: it is not this case folder's worksheet/) && !toasted(r.log, /changed on disk/));
+      check("…its answer kept here", await p.evaluate(() => window.__textReaderLeaks().dirty), true);
+      await look(p);
+      check("…and a look takes nothing of it for the folder's: no bar", await runBar(p), "");
+      await typeOnPage(p, " Mine.");
+      await save(p);
+      truthy("the document save carrying it along: the document written, the worksheet not, said", /Saved A Complaint/.test(lastSave(r.log)) && /not this case folder's worksheet/.test(lastSave(r.log)) && (await readFile(p, "Text Files/A Complaint.txt")).includes("Mine."));
+      check("…the case folder's own worksheet still as it was", await readBytes(p, "LEAKS.xlsx"), Array.from(LEAKS_BYTES));
       check("no page errors", r.log.errors, []);
       await r.close();
     }
