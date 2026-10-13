@@ -2669,6 +2669,34 @@ export function writtenBaseline(listText, disk) {
   const a = readerLines(listText), b = readerLines(disk);
   return a.length === b.length && a.every((l, i) => l === b[i]) ? String(listText == null ? "" : listText) : String(disk);
 }
+/**
+ * The record of what was written (`saved`) with every line of the folder's
+ * file (`disk`) that the list (`listText`, formatValuesFile's) carries and the
+ * record does not: the lines the folder's opening read INTO the list — written
+ * by another browser, another session or by hand. They stand in the file all
+ * the same, so a list that lets one go owes the file its removal (valuesDirty):
+ * unrecorded, the value withdrawn read as "nothing to write", stayed in the
+ * file, and PDF-Linker went on applying it. And a keep or a transcribed page
+ * PDF-Linker then takes out reads as spent (spendLines), not owed again. A line
+ * the reader cannot read into a list (`raw:`) is never recorded. Where the
+ * record then carries exactly the list's lines, the list's own text, so a
+ * folder in step with its file reads in step.
+ */
+export function noteLinesRead(saved, disk, listText) {
+  const was = saved == null ? "" : String(saved);
+  if (disk == null) return was;
+  const list = lineKeys(listText), have = lineKeys(was);
+  let out = was;
+  for (const raw of String(disk).split(/\r?\n/)) {
+    const k = valuesLineKey(raw);
+    if (!k || k.startsWith("raw:") || !list.has(k) || have.has(k)) continue;
+    have.add(k);
+    out += (out && !out.endsWith("\n") ? "\n" : "") + raw.replace(/^﻿/, "").trim() + "\n";
+  }
+  if (out === was) return was;
+  const a = readerLines(listText), b = readerLines(out);
+  return a.length === b.length && a.every((l, i) => l === b[i]) ? String(listText == null ? "" : listText) : out;
+}
 
 /** Whether a flagged value is one to fake whole (`phrase:`). */
 export function isPhrase(phrases, value) {

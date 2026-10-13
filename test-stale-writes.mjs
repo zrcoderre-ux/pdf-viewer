@@ -322,6 +322,33 @@ async function run() {
       check("no page errors", r.log.errors, []);
       await r.close();
     }
+    {
+      // A value this browser never wrote — read in from the file as the folder
+      // was opened — withdrawn and nothing else changed: the file still owes
+      // its removal, or PDF-Linker goes on applying a flag nobody wants.
+      const r = await newReader();
+      const p = r.page;
+      check("opened: the file's value is in the list", await p.evaluate(() => [...document.querySelectorAll("#flags-list li")].some((li) => /Quell Harbor/.test(li.textContent))), true);
+      await p.evaluate(() => [...document.querySelectorAll("#flags-list li")].find((li) => /Quell Harbor/.test(li.textContent)).querySelector(".x").click());
+      await p.waitForTimeout(300);
+      truthy("withdrawn alone: the list reads as owed to the file", await p.evaluate(() => window.__textReaderHasUnsaved()));
+      await save(p);
+      const nrv = await readFile(p, "New Real Values.txt");
+      const lines = (nrv || "").split("\n").filter((l) => l.trim() && !l.startsWith("#"));
+      check("…and the save takes it out of the file, the page list kept", lines, ["did not ocr: Exhibit A.pdf | pages 3-5, 9"]);
+      check("…nothing owed after", await p.evaluate(() => window.__textReaderHasUnsaved()), false);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+    {
+      // …and a folder whose file holds only what the list now does owes it
+      // nothing: the lines read in are the file's own.
+      const r = await newReader();
+      const p = r.page;
+      check("another browser's file read in: nothing owed", await p.evaluate(() => window.__textReaderHasUnsaved()), false);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
 
     // ── 4. an export a run rewrote ────────────────────────────────────────
     console.log("4. an empty save does not write over an export a run rewrote");

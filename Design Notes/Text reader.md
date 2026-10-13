@@ -1531,6 +1531,17 @@ over a newer copy:
   adoption: read into the lists then, gone from them since, it was
   withdrawn), and it is not a keep the operator withdrew (`keepWithdrawn`).
   What is recorded as written is the reader's own text alone.
+  A line the opening READ INTO the lists from the file (written by another
+  browser, another session or by hand) is recorded as in the file
+  (`TD.noteLinesRead`, after `spendFromDisk`, which reads the record as this
+  tab left it). Unrecorded, withdrawing such a value left the list equal to the
+  record: `valuesDirty` said nothing was owed, no save wrote the file, and
+  PDF-Linker went on applying the flag. Recorded, the list without it reads as
+  owed and the save takes it out (`valuesSeen` drops it from the lines kept);
+  a folder whose file holds just what the list does reads in step on opening
+  instead of owing a rewrite; and a keep or transcribed page so read that
+  PDF-Linker later takes out reads as spent rather than owed again.
+  `test-stale-writes.mjs` case 3 pins both.
 - The EXPORTS. A clean document whose file moved under it (an empty Ctrl+S
   after a run rewrote it) is skipped and named (`staleClean`), not called a
   conflict of edits; and a document with no entry in the folder — a light

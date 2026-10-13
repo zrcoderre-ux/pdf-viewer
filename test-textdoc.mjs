@@ -24,7 +24,7 @@ import {
   readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
-  valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank,
+  valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans } from "./viewer/pseudo-key.js";
 
@@ -1821,6 +1821,22 @@ console.log("the lines of New Real Values.txt the reader did not write");
   check("…which PDF-Linker reads as the reader's lines plus the kept one", parseReaderFile(both).values, ["Marlow Tenbury", "Hand Typed Value"]);
   check("…and nothing kept, the reader's text as it was", withLinesNotOurs(mine, []), mine);
   check("sameBytes", [sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 2])), sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 3])), sameBytes(null, new Uint8Array([]))], [true, false, false]);
+
+  // What the folder's opening read INTO the list from the file is recorded as
+  // in the file, so letting it go owes the file its removal.
+  const kCor = { control: "no", value: "Corwin Ashdale", state: "" };
+  const fixed = { doc: "Exhibit A.pdf", pdf: "", page: 2, sum: "ed8d6603" };
+  const listNow = formatValuesFile(["Quell Harbor"], [kCor], [], [], [], [fixed]);
+  const fileNow = "Quell Harbor\nno: Corwin Ashdale\ntext corrected: Exhibit A.pdf | page 2 | sum ed8d6603\ndid not ocr: Exhibit A.pdf | pages 3-5, 9\n";
+  check("noteLinesRead: the file holding just what the list does — the list's own text, in step",
+    noteLinesRead("", fileNow, listNow), listNow);
+  const partial = noteLinesRead("Old Value\n", "Quell Harbor\nHand Typed Value\n", listNow);
+  check("…else the record and the lines the list took from the file, nothing it did not take",
+    partial, "Old Value\nQuell Harbor\n");
+  check("…a page list the reader cannot read is never recorded", noteLinesRead("", "did not ocr: Exhibit A.pdf | pages 3-5, 9\n", listNow), "");
+  check("…no file, the record as it was", noteLinesRead("Old Value\n", null, listNow), "Old Value\n");
+  check("…a transcribed page read in and since taken out by PDF-Linker reads as spent",
+    spendLines({ keeps: [], textFixed: [fixed] }, noteLinesRead("", fileNow, listNow), "Quell Harbor\n").spentFixed, [fixed]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

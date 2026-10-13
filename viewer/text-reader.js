@@ -2983,6 +2983,12 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
     spentKeeps = await spendFromDisk(diskValues, { settle: false, still: () => !gone() });
     if (gone()) return overtaken();
     trimWithdrawn(diskValues); // a withdrawn line the file no longer carries is nothing left to keep out
+    // …and what the list now carries because the file does is recorded as in
+    // the file — AFTER the spending, which reads the record as this tab left
+    // it: a value read in and withdrawn is then owed out of the file.
+    const was = lsGet(valuesSavedKey(), "");
+    const now = TD.noteLinesRead(was, diskValues, TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed));
+    if (now !== was) lsSet(valuesSavedKey(), now);
   }
   persistValues();
   if (doc) syncNoOcr(doc.pages.map((_, i) => i)); // the open document says what it carries

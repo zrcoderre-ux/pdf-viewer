@@ -206,7 +206,7 @@ test-pdf-text-edit.mjs               Node-runnable Edit text: content parsing, l
 test-review-instances.mjs            Browser test (Playwright, Chromium, an OPFS case folder): Instance ‹ › in the LEAKS bar and the names bar, and Alt+, / Alt+.; skips without them
 test-folder-save.mjs                 Browser test (Playwright, Chromium, an OPFS case folder): the folder-wide Replace all and the one Save, keeps PDF-Linker has spent, Remove from Master Keep, two reader tabs on one folder; skips without them
 test-typed-cites.mjs                 Browser test (Playwright, Chromium, an OPFS case folder): a short cite's party kept however typed, Esc'd names through a sliding edit and the reader's own cut and paste, a file's own name not taken for typed, Ctrl+Backspace and the line numbers; skips without them
-test-stale-writes.mjs                Browser test (Playwright, Chromium, an OPFS case folder): nothing written over what a run changed — the key, LEAKS.xlsx, New Real Values.txt's other lines, exports, a lone file, and the PDF viewer's Save; skips without them
+test-stale-writes.mjs                Browser test (Playwright, Chromium, an OPFS case folder): nothing written over what a run changed — the key, LEAKS.xlsx, New Real Values.txt's other lines and a value read from it and withdrawn, exports, a lone file, and the PDF viewer's Save; skips without them
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
 viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)
