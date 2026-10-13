@@ -384,6 +384,40 @@ async function run() {
       await r.close();
     }
 
+    // ── 7. ✎ Use my text after a run rewrote the page ──────────────────────
+    console.log("7. a save stamps a transcribed page's sum only where it wrote the page over the text the line was made on");
+    {
+      const r = await newReader();
+      const p = r.page;
+      const fixedLine = async () => ((await readFile(p, "New Real Values.txt")) || "").split("\n").find((l) => /^text corrected:/.test(l)) || "";
+      await typeOnPage(p, " The lease was signed.");
+      await p.evaluate(() => document.querySelector('.tpage[data-index="0"] > .page-label .fix-page').click());
+      await p.waitForTimeout(300);
+      await save(p);
+      const made = await fixedLine();
+      truthy("✎ pressed and saved: the line carries the sum of the page as written", /^text corrected: A Complaint\.txt \| page 1 \| sum [0-9a-f]{8}$/.test(made));
+      // A run could not apply it (the PDF locked) and wrote the export again
+      // from the OCR; the folder is read again.
+      await writeFile(p, "Text Files/A Complaint.txt", A_RUN);
+      await p.evaluate(async () => { await window.__textReaderAdoptFolder(window.__case); await window.__textReaderOpenDoc("A Complaint.txt"); });
+      await p.waitForTimeout(1200);
+      await save(p);
+      check("an empty save after: the line keeps its sum", await fixedLine(), made);
+      await typeOnPage(p, " Tne Iease.");
+      await save(p);
+      truthy("…typed over the run's text and saved: written", ((await readFile(p, "Text Files/A Complaint.txt")) || "").includes("Tne Iease."));
+      check("…and the line still keeps its sum: the run's reading is not the operator's transcription", await fixedLine(), made);
+      await p.evaluate(() => document.querySelector('.tpage[data-index="0"] > .page-label .fix-page').click()); // withdraw
+      await p.waitForTimeout(200);
+      await p.evaluate(() => document.querySelector('.tpage[data-index="0"] > .page-label .fix-page').click()); // and ask again
+      await p.waitForTimeout(200);
+      await save(p);
+      const again = await fixedLine();
+      truthy("✎ pressed again: the page as it now stands", again !== made && /\| sum [0-9a-f]{8}$/.test(again));
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+
     // ── 6. the PDF viewer ─────────────────────────────────────────────────
     console.log("6. the PDF viewer asks before saving over a PDF that changed on disk");
     {

@@ -35,3 +35,19 @@ export const REPORTERS_RAW = [
 export const REPORTERS_SORTED = [...REPORTERS_RAW].sort(
   (a, b) => b.length - a.length
 );
+
+// …and the reporters PDF-Linker's list carries that the linker above does not
+// read (compact Style Manual forms, bankruptcy and federal-claims reporters,
+// Massachusetts): what a citation's SHAPE is read by (textdoc.citedNameSpans),
+// so the reader spares every name PDF-Linker's guard does. Kept out of the
+// linker's list, which builds a link from the reporter it reads.
+export const REPORTERS_MORE = [
+  "C5th", "C4th", "C3d", "C2d", "CA5th", "CA4th", "CA3d", "CA2d", "CR3d", "CR2d", "CR",
+  "U. S.", "B.R.", "B. R.", "Fed. Cl.", "Fed.Cl.", "Vet. App.", "Vet.App.", "T.C.",
+  "Fed. Appx.", "Fed. Appx", "Fed.Appx.",
+  "Mass. App. Ct.", "Mass.App.Ct.", "Mass. App. Div.", "Mass.App.Div.",
+  "Mass. L. Rptr.", "Mass.L.Rptr.", "Mass.",
+];
+export const REPORTERS_ALL_SORTED = [...REPORTERS_RAW, ...REPORTERS_MORE].sort(
+  (a, b) => b.length - a.length
+);

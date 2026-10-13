@@ -433,7 +433,16 @@ app, which routes it to the reader tab.
   p. 5)" where it stands as a citation (after "(", ";" or a signal such as
   *See*). Only the name is spared, never the words of the sentence before it;
   a name before a bare number ("Jones, 2019", "DOES 1", a docket, a date) is
-  not, nor one citing this case's own record ("(Jones Decl., at p. 3)"). It is not marked, and **the save writes no pseudonym over it**, which
+  not, nor one citing this case's own record ("(Jones Decl., at p. 3)"). So
+  is a matter named with no *v.* — "In re Marriage of Hartwell (2008) …",
+  "Estate of Bowles …", "Conservatorship of …" — a writ's real party in
+  interest in its parentheses ("Rasho v. Superior Court (Quillmark) (2019)
+  …"), a federal or spaced reporter ("500 F. Supp. 2d 100 (N.D. Cal. 2007)",
+  "30 Cal. App. 5th 1"), a name wrapped onto the next line, and a name that
+  closes a page whose year opens the next. Not this case's **own caption**
+  recited with a year ("In this action, Wrenfield v. Quarrow Motors (2025)"):
+  where both sides are the parties the key was built from, it is no decision,
+  as PDF-Linker reads it, and its names are marked and faked. It is not marked, and **the save writes no pseudonym over it**, which
   is what would have put out a citation to a case that does not exist. That
   was the classic **keep**, made automatic. The citation is the whole test: a
   caption has no reporter, so "Rasho v. Quillmark, Defendant" at the head of a
@@ -1395,7 +1404,11 @@ app, which routes it to the reader tab.
   says so rather than going on without its keeps. The extension's reader and
   the installed app are set up separately.
 - **Taking a value off the Master Keep.** A master keep that is wrong for this
-  case stops the value being faked. Click the **×** beside it in that list,
+  case stops the value being faked. A keep you made in this case that
+  PDF-Linker has since applied and put on the Master Keep is listed and
+  marked here too, though the key no longer names it, so it can always be
+  taken back; and the **×** on a keep of this case that the attached
+  workbook also holds asks to take it off the Master Keep as well. Click the **×** beside it in that list,
   select it in the text and press **Remove from Master Keep**, or right-click
   it and choose **Remove from the Master Keep**. After you confirm, the reader
   stops keeping it at once: where it stands unfaked it is marked orange, ready
@@ -1985,7 +1998,16 @@ app, which routes it to the reader tab.
   the export's page still reads that way, so a line that outlived its text
   (the page typed over and not saved, or the export rewritten since) never
   writes the wrong text into the PDF — it stays in the file, and the page is
-  saved and marked again. A transcription a run could not apply is kept in
+  saved and marked again. A save moves that sum only where it wrote the page
+  over the text the line was made on, or where you pressed ✎ since: after a
+  run that could not apply the line rewrote the export from the OCR, saving
+  the document (even with nothing typed on that page) no longer hands the
+  OCR's reading over as yours — put your text back on the page and press ✎
+  again. A line on the page shaped like PDF-Linker's own page heading
+  ("====== Page 3 ======", pasted back with a page) stops the hand-over until
+  you take it out; a ruled line of your own ("= = = = =") is part of the
+  page. Not offered on Combined Text.txt: hand the page over from its own
+  export. A transcription a run could not apply is kept in
   `Edited Pages Not Applied.txt` in the case folder before that run rewrites
   its export. The button reads **✓ Use my text** while the request stands, a
   second click withdraws it, ⊘ Did not OCR on the page withdraws it too, and

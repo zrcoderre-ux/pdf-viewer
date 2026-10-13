@@ -820,6 +820,69 @@ kept as typed; a name typed in prose, before "30 days" or in "(… Decl., at p.
 below hold the same edits for an Esc'd name in a form the reader still does
 not read as a citation, and that test runs them with a ", slip op." tail.
 
+**The rest of what PDF-Linker keeps is read** (`TD.citedNameSpans`:
+`NONV_RE`, `CITE_AFTER_RE`, `STRUNG_RE`, `nameRunStart`, `sideIsOwn`). The
+bug search of Oct 7 measured the reader's spans against `pdf_linker.py`
+sample by sample, and the harness was run again here: each name made a term
+of the case on its own, PDF-Linker's output asked whether the name stood
+verbatim, the reader's spans asked whether it was spared. Twenty-two of 47
+disagreed. Where PDF-Linker kept a name the reader did not spare, the reader
+marked a decided case's party and wrote its pseudonym at the save, renaming
+a published authority. Where the reader spared a name PDF-Linker fakes, it
+left this case's party unmarked and saved a typed one real. Now read:
+- A matter with no " v. ", behind PDF-Linker's leads (its parser's
+  `_NONV_PREFIX` and the shape guard's "In re" / "In the Matter of"): "In re
+  Marriage of Hartwell (2008) …", "Estate of Bowles …", "Conservatorship
+  of", "Guardianship of", "Adoption of". "Matter of" and "Ex parte" alone
+  are left out, as PDF-Linker leaves them out (an owner decision there).
+- A writ's real party in interest, "Rasho v. Superior Court (Quillmark)
+  (2019) …": the parentheses are part of the name, and the year after them
+  is the citation.
+- The reporter read from PDF-Linker's whole list (`REPORTERS_ALL_SORTED`,
+  the linker's list plus the compact, bankruptcy, federal-claims and
+  Massachusetts forms the linker does not link), with its spaces flexed as
+  `_flex_ws_reporter` flexes them: "30 Cal. App. 5th 1", "500 F. Supp. 2d
+  100", "123 S. Ct. 456" were no reporter to the old shape, which read one
+  capitalised word before the page. The year read as `_PN_CITE_YEAR` reads
+  it too, the court before it: "(9th Cir. 2009)", "(N.D. Cal. 2007)".
+- A name wrapped across a line, its gutter number between ("Rasho v.\n12
+  Quillmark (2019) …"), and a cite whose name closes a page and whose year
+  opens the next: every per-page reading is handed the next page's opening
+  lines (`next`, `pageAfterHead`/`nextHeadOf` in the reader, the page loop's
+  next page in `clearReading` and the off-screen save), joined behind a page
+  header as the export prints one, with the next page's furniture stepped
+  over before the year as `_PN_CITE_PAGE_FURNITURE` steps over it. Never
+  across into another document of a reel.
+- A STRUNG cite with no tail in reach ("…358, 373-374; Krongos v. Pacific
+  Gas & Electric Co." closing a page), behind the string-cite seam as
+  `_PN_STRING_CITE_SEAM_RE` reads it, its runs held to one line.
+- The name cut as `nameRunStart` cuts it, for the full name, the strung
+  one and the supra as for the short cite: after the last signal and the last
+  full stop closing an ordinary word. "…served on Helen Rasho. See Jones v.
+  Smith (2019) …" spanned from "Helen", sparing this case's party.
+- This case's OWN CAPTION recited with a year, "In this action, Wrenfield v.
+  Quarrow Motors, Inc. (2025)", is not a decision: both sides mostly words of
+  the parties the key was built from (`sideIsOwn`, PDF-Linker's
+  `_side_is_trusted` over `_trusted_party_tokens`: key rows whose Source is
+  "spreadsheet" or "--term" and whose Category is a person or entity, alt
+  spellings left out; `parseKey`'s `own`, set on each key compile through
+  `setOwnPartyWords`). One side alone the case's is still a decision.
+
+Three disagreements are left, each PDF-Linker's and named to its session
+rather than copied: "Helen Rasho. Jones v. Smith (2019) …" with no signal
+keeps "Helen Rasho" there (its stop rule asks whether "Rasho" is a word of
+the language, the reader's whether it has a lower-case letter); in "In this
+action, Wrenfield v. Quarrow (2025)" its defendant's half reads the lead
+"In this action" into the plaintiff's side, finds it not mostly trusted and
+keeps "Quarrow"; and a bare supra ("Gelman, supra, 30 Cal.App.5th at p. 5")
+whose full cite is not in the same export has a term of the case faked in
+it, where the reader spares it — a supra is always an authority, and the
+reader does not rename one. `test-textdoc.mjs` pins every shape, the cut,
+the page break and the caption, and a jurat-and-leads text read in step
+with its length; `test-typed-cites.mjs` case 6 (Chromium) types each into a
+document and saves: the cited party as typed, the case's own caption as its
+pseudonyms, a name closing a page whose year is on the next as typed.
+
 **An edit that slides is unsure, never a drop** (`TD.escapedPlace`'s
 `unsure`; `escapesIn`). `escapedPlace` told an edit by the head and tail the
 text before and after share, taking the HEAD first. A deletion of text that
@@ -1326,6 +1389,35 @@ with nothing to say. A save that finds everything it owed spent writes nothing
 (`saveValuesFile` answers "spent", and the save's toast says no "written
 too").
 
+**A spent keep stays the reader's to take back** (`noteKeepsSpent`,
+`keepsSpentHere`, `keepWorks`; the record under `SPENT_KEEPS_PREFIX` +
+the case's state key, one of `STATE_PREFIXES.whole`). PDF-Linker retires the
+key row a LOCAL keep corrects once it has applied it, so from that run on
+the key binds the value no more — and the reader showed and offered only the
+master keeps the key binds (`keyBinds`, the noise filter that keeps another
+matter's settled keeps from underlining this case). The keep the case had
+made was then unmarked, missing from the Master Keep panel, and out of the
+selection's and the right-click's Remove from Master Keep: once spent, it
+could be withdrawn only in Excel (the bug search's G1, and G5, Remove from
+Master Keep with no mark to start from). Every keep `spendFromDisk` finds
+spent is recorded for the case; `keepWorks` (the key binds it, or the case
+spent it) replaces `keyBinds` in the kept marks, the mask, `masterMatcher` and
+`masterHeldIn`, and the Master Keep panel lists the case's spent keeps
+wherever they stand. A keep spent before this record existed is out of it,
+as before.
+**…and a case keep the master holds too** (G2): PDF-Linker spent its line
+and put it on the KEEP sheet, and the folder has not been read since to say
+so. The ×, or "It is a pseudonym after all", took it off the case's list
+alone, and the master went on keeping it, in this case too, run after run.
+`setKeepNow` now asks `withdrawMaster` as well wherever the attached master
+holds the value (which says what it does, and asks first).
+`test-folder-save.mjs` test 36 (Chromium) pins both; its negative control on
+the code before shows neither the panel's line nor the selection's button,
+and leaves the master's row standing after the ×. G3, G4, G6 and G7 are
+PDF-Linker's (its session's keep-withdrawal work): a keep it records onto
+another case's row, or holds, is carried back in New Real Values.txt under a
+`#` comment, which the reader reads past.
+
 **Only what was written HERE is spent here** (`rememberWritten`,
 `writtenRecord`, `writtenWhere`, `TD.writtenBaseline`). `valuesSaved` was kept
 by folder NAME, as every per-folder list was, and a name is not a folder: a
@@ -1725,13 +1817,38 @@ page header; `useMyText`, `setFixButton`, `refreshFixButtons`, called from
 by `formatValuesFile` as `text corrected: FILE | page N | sum XXXXXXXX`
 (`textdoc.textFixedLine`) and read back by `parseReaderFile` into
 `textFixed`, never into `values`. The sum is `textdoc.pageTextSum` — FNV-1a
-over the UTF-8 bytes of the page's lines up to the first rule line, trailing
-blanks and the blank lines at the ends dropped — which PDF-Linker's
-`_pn_page_text_sum` computes identically; both sides pin the same values.
-`useMyText` takes the sum of the page as it reads at the click, and
-`saveDocument` refreshes every entry's sum off the lines it just wrote
-(`refreshTextFixedSums`) before the values file is written, so the line
-names the text on disk. PDF-Linker applies a line only where the export's
+over the UTF-8 bytes of the page's lines up to the authorities trailer
+(`TRAILER_RE`), trailing blanks and the blank lines at the ends dropped —
+which PDF-Linker's `_pn_page_text_sum` computes identically; both sides pin
+the same values. (It cut at any rule line, "=… x …=", until the bug search
+of Oct 7: a ruled line the operator typed, "= = = = =" or "== Exhibit A ==",
+ended the page's text, and PDF-Linker's cut, the same rule, drew only the
+text above it into the PDF and marked the page TEXT CORRECTED. Only the
+trailer ends a page now, on both sides, pinned to the vectors 9b3e2d29 and
+42fcfd5c beside 46d66a09, 811c9dc5 and a1d0b975.) A page carrying a line
+shaped like PDF-Linker's own furniture — six "=" each side of a label, a
+page header or a held page's heading pasted back with its text
+(`TD.pageFurnitureLine`, PDF-Linker's `_pn_page_furniture_line`) — is not
+handed over: `useMyText` says which line to take out, and `autoUseMyText`
+passes it by, since PDF-Linker would refuse it. Never on Combined Text.txt
+(`isCombinedHead`, the owner's decision of Oct 13): PDF-Linker reads the page
+out of the document's own export, which a save there does not write.
+`useMyText` takes the sum of the page as it reads at the click and notes the
+page as pressed (`fixPressed`); the save then stamps each transcribed page of
+a member it wrote with the text it wrote (`refreshTextFixedSums`, and the
+same in the off-screen save, over `TD.fixedSumsFor`) — but ONLY where it
+wrote the page (its sum moved from the file the write replaced, `m.base` /
+`r.base` before the write) and the line was true of that file, or ✎ was
+pressed there since the last save. It used to stamp every transcribed page
+of every member written, and the bug search measured what that cost: a run
+that could not apply the line (the PDF locked) rewrote the export from the
+OCR, and the next save of that document — an empty Ctrl+S, an edit on
+another page — stamped the OCR's reading as the operator's transcription,
+which the next run burned into the PDF, marked TEXT CORRECTED, and spent the
+line. The line now keeps its sum, PDF-Linker refuses it and says so, and ✎
+pressed again hands over the page as it then reads. `test-stale-writes.mjs`
+case 7 (Chromium) pins it; its negative control on the old code stamps the
+run's text at the empty save. PDF-Linker applies a line only where the export's
 page still sums to it, writes the page into the PDF's text layer, marks the
 page (`_TEXT_FIXED_MARK_KEY`), spends the line, and exports the page under a
 `TEXT CORRECTED` header (`headerSaysTextCorrected`). Adoption drops an entry

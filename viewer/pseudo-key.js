@@ -310,6 +310,10 @@ const POSS_MATCH_RE = /['’][sS]$/;
  *           the cell's text as `control`.
  *   dropped — { keeps, controls, ambiguous, words, pinned }: what was set aside.
  */
+// The key rows naming the case's own parties (parseKey's `own`): PDF-Linker's
+// trusted sources and categories (`_trusted_party_tokens`).
+const OWN_SOURCES = new Set(["spreadsheet", "--term"]);
+const OWN_CATEGORIES = new Set(["person", "entity", "person-token", "entity-token"]);
 export function parseKey(sheets, name) {
   const entries = [];
   let keeps = 0;
@@ -325,6 +329,8 @@ export function parseKey(sheets, name) {
     const fakeCol = heads.indexOf("replacement");
     const statusCol = heads.indexOf("status");
     const occCol = heads.indexOf("occurrences");
+    const catCol = heads.indexOf("category");
+    const srcCol = heads.indexOf("source");
     for (let i = hi + 1; i < rows.length; i++) {
       const row = rows[i] || [];
       const real = trim(row[realCol]);
@@ -347,6 +353,7 @@ export function parseKey(sheets, name) {
         alt: statusCol !== -1 && fold(row[statusCol]) === ALT_STATUS,
         occ: isFinite(occ) && occ > 0 ? occ : 0,
         pinned,
+        own: catCol !== -1 && srcCol !== -1 && OWN_SOURCES.has(fold(row[srcCol])) && OWN_CATEGORIES.has(fold(row[catCol])),
       });
     }
   }
@@ -459,6 +466,12 @@ export function parseKey(sheets, name) {
     name: name || "",
     sheet: (applied && trim(applied.name)) || "",
     rows: entries.length,
+    // The case's OWN parties: what the key was built from, the E-Court
+    // template ("spreadsheet") and `--term` (New Real Values.txt's lines
+    // among them) — PDF-Linker's `_trusted_party_tokens`, which decides when
+    // a "X v. Y" recited with a year is this case's caption and not a
+    // decision (textdoc.citedNameSpans). An alt spelling is a derived one.
+    own: entries.filter((e) => e.own && !e.alt).map((e) => e.real),
     pairs,
     warn,
     hint,

@@ -122,12 +122,16 @@ const WITHDRAWN_PREFIX = "textReader.keepsWithdrawn.";
 // …and the names said to be faked and not yet written (settledStoreKey).
 const SETTLED_PREFIX = "textReader.settled.";
 const SPOTS_PREFIX = "textReader.spots.";
+// …and the keeps of this case PDF-Linker has SPENT — applied, put on the
+// master workbook's KEEP sheet and taken out of New Real Values.txt
+// (spentKeepsKey): the master keeps that are this case's own decision.
+const SPENT_KEEPS_PREFIX = "textReader.keepsSpent.";
 // Every key a folder's state is kept under, by the folder's id (stateFolder):
 // once per folder — the list, what was last written, the keeps withdrawn and
 // the names said to be faked — or once per document in it — the spot keeps,
 // the swapped pages (pdfsync.js) and the unsaved LEAKS answers (leaks.js). The
 // older build's state is found by these, under the bare name (adoptLegacyState).
-const STATE_PREFIXES = { whole: [VALUES_PREFIX, VALUES_SAVED_PREFIX, WITHDRAWN_PREFIX, SETTLED_PREFIX], perDoc: [SPOTS_PREFIX, PS.SWAPS_PREFIX, LK.DECISIONS_PREFIX] };
+const STATE_PREFIXES = { whole: [VALUES_PREFIX, VALUES_SAVED_PREFIX, WITHDRAWN_PREFIX, SETTLED_PREFIX, SPENT_KEEPS_PREFIX], perDoc: [SPOTS_PREFIX, PS.SWAPS_PREFIX, LK.DECISIONS_PREFIX] };
 
 let doc = null;              // TD.parseExport result
 let fileName = "";
@@ -791,7 +795,7 @@ function fakesForPrint() {
       const withheld = new Set();
       for (const body of bodies) {
         const { text, held, pns } = TD.serializeHeld(body);
-        const fw = egressText(text, held, pns);
+        const fw = egressText(text, held, pns, nextHeadOf(body));
         if (!fw.swaps) continue;
         for (const v of withheldIn(fw.places)) withheld.add(v);
         buildBody(body, fw.text, pageIndexOf(body));
@@ -1251,7 +1255,8 @@ function shotRaw(sec, edits) {
   // The sheet is the page's text by construction (fillRaw); one that is not
   // cannot have the page's places laid on it, and is read on its own words.
   const own = segs.map((g) => g.node.data).join("");
-  const swaps = own === text ? egressSwaps(text, held, pns) : egressSwaps(own);
+  const next = pageAfterHead(Number(sec.dataset.index));
+  const swaps = own === text ? egressSwaps(text, held, pns, next) : egressSwaps(own, null, null, next);
   swapInNodes(segs, swaps, edits);
   for (const v of withheldIn(swaps)) shotWithheld.add(v);
 }
@@ -1319,7 +1324,7 @@ function fakesForShot() {
       // its fakes and spot keeps blanked, put back through its text nodes —
       // and one the key holds only an instruction for covered (egressSwaps).
       const disk = TD.serializeHeld(body, { mapped: true });
-      const swaps = egressSwaps(disk.text, disk.held, disk.pns);
+      const swaps = egressSwaps(disk.text, disk.held, disk.pns, nextHeadOf(body));
       swapInNodes(disk.segs, swaps, edits);
       for (const v of withheldIn(swaps)) shotWithheld.add(v);
     }
@@ -1521,7 +1526,7 @@ function copyOfBody(body, range) {
   const skip = body.classList.contains("numbered")
     ? disk.segs.filter((g) => g.node.parentElement && g.node.parentElement.closest(".gutter")).map((g) => [g.start, g.end])
     : [];
-  const swaps = fwd && fwd.rx ? egressSwaps(disk.text, disk.held, disk.pns) : [];
+  const swaps = fwd && fwd.rx ? egressSwaps(disk.text, disk.held, disk.pns, nextHeadOf(body)) : [];
   const spans = (pick) => disk.pnNodes.map((el, k) => ({ start: disk.pns[k][0], end: disk.pns[k][1], to: pick(el) }));
   const realSpans = spans((el) => el.dataset.real);
   const real = TD.clipText(disk.text, realSpans, a, b, skip);
@@ -1556,7 +1561,7 @@ function copyOfRaw(sec, pre, range) {
   };
   const a = same && pre.contains(range.startContainer) ? off(range.startContainer, range.startOffset) : 0;
   const b = same && pre.contains(range.endContainer) ? off(range.endContainer, range.endOffset) : raw.text.length;
-  const swaps = fwd && fwd.rx ? egressSwaps(raw.text, raw.held, raw.pns) : [];
+  const swaps = fwd && fwd.rx ? egressSwaps(raw.text, raw.held, raw.pns, pageAfterHead(Number(sec.dataset.index))) : [];
   const shown = TD.clipText(raw.text, [], a, b);
   return { a, b, faked: TD.clipText(raw.text, swaps, a, b), real: shown, shown, withheld: withheldIn(swaps, a, b), esc: [] };
 }
@@ -1915,9 +1920,9 @@ function keyLessKeeps(k) {
 function keptMatcher() {
   const held = heldPhrases();
   if (!held.length) return keptMarkMatcher();
-  if (maskMemo.keeps !== keeps || maskMemo.master !== masterKeeps || maskMemo.key !== key || maskMemo.phrases !== phrases || maskMemo.flagged !== flagged) {
-    const mine = allKeeps().filter((k) => keyBinds(k.value)).map((k) => k.value);
-    maskMemo = { keeps, master: masterKeeps, key, phrases, flagged, values: mine.concat(held), rx: PK.buildMatcher(mine.concat(held)) };
+  if (maskMemo.keeps !== keeps || maskMemo.master !== masterKeeps || maskMemo.key !== key || maskMemo.phrases !== phrases || maskMemo.flagged !== flagged || maskMemo.spent !== spentSeq + keepsSpentHere().size) {
+    const mine = allKeeps().filter((k) => keepWorks(k.value)).map((k) => k.value);
+    maskMemo = { keeps, master: masterKeeps, key, phrases, flagged, spent: spentSeq + keepsSpentHere().size, values: mine.concat(held), rx: PK.buildMatcher(mine.concat(held)) };
   }
   return maskMemo.rx;
 }
@@ -1928,7 +1933,7 @@ function keptMatcher() {
 // the way a keep is — not faked by the save, not counted as a leak, not
 // refused by the save's last check — and wears the red mark of any flag, until
 // the key comes back with the whole phrase in it (dropFlagsNowFaked).
-let maskMemo = { keeps: null, master: null, key: null, phrases: null, flagged: null, values: null, rx: null };
+let maskMemo = { keeps: null, master: null, key: null, phrases: null, flagged: null, spent: -1, values: null, rx: null };
 function heldPhrases() {
   if (!phrases.length || !key) return [];
   return phrases.filter((v) => TD.isPhrase(flagged, v) && keyBinds(v) && !TD.fakeFor(fwd, v));
@@ -1959,17 +1964,46 @@ function keyBinds(value) {
   }
   return keyBindsMemo.seen.get(v);
 }
+// …and the master keeps that are THIS CASE'S own: the keeps its list handed
+// to PDF-Linker and saw spent (noteKeepsSpent). PDF-Linker retires the key
+// row a local keep corrects once it has applied it, so from that run on the
+// key binds the value no more — and a master keep the key does not bind was
+// left unmarked, unlisted in the Master Keep panel, out of the selection's
+// "Remove from Master Keep": the keep this case made was out of reach of the
+// reader for good, and a withdrawal of it could only be made in Excel.
+function spentKeepsKey(name = listStateKey()) { return SPENT_KEEPS_PREFIX + name; }
+let spentSeq = 0;
+let spentMemo = { k: null, set: new Set() };
+function keepsSpentHere() {
+  const k = spentKeepsKey();
+  if (spentMemo.k !== k) spentMemo = { k, set: new Set((lsGet(k, []) || []).map((v) => LK.fold(v))) };
+  return spentMemo.set;
+}
+function noteKeepsSpent(values) {
+  const k = spentKeepsKey();
+  const was = lsGet(k, []) || [];
+  const have = new Set(was.map((v) => LK.fold(v)));
+  const add = values.filter((v) => v && !have.has(LK.fold(v)));
+  if (!add.length) return;
+  lsSet(k, was.concat(add));
+  spentMemo = { k: null, set: new Set() };
+  spentSeq++;
+}
+/** Whether a keep does work here: the key binds it, or it is a keep of this case's own PDF-Linker has spent onto the master. */
+function keepWorks(value) {
+  return keyBinds(value) || keepsSpentHere().has(LK.fold(value));
+}
 // The keeps that DO WORK: the ones the key binds. A keep is worth seeing —
 // and worth blanking the text for — because it says "this name was left alone
 // on purpose", which only means something where the name would otherwise have
 // been faked or flagged. Marking the rest would underline half the page to no
 // purpose, and masking the rest is work done to prevent something that was
 // never going to happen.
-let keptMarkMemo = { keeps: null, master: null, key: null, values: null, rx: null };
+let keptMarkMemo = { keeps: null, master: null, key: null, spent: -1, values: null, rx: null };
 function keptMarkMatcher() {
-  if (keptMarkMemo.keeps !== keeps || keptMarkMemo.master !== masterKeeps || keptMarkMemo.key !== key) {
-    const mine = allKeeps().filter((k) => keyBinds(k.value)).map((k) => k.value);
-    keptMarkMemo = { keeps, master: masterKeeps, key, values: mine, rx: mine.length ? PK.buildMatcher(mine) : null };
+  if (keptMarkMemo.keeps !== keeps || keptMarkMemo.master !== masterKeeps || keptMarkMemo.key !== key || keptMarkMemo.spent !== spentSeq + keepsSpentHere().size) {
+    const mine = allKeeps().filter((k) => keepWorks(k.value)).map((k) => k.value);
+    keptMarkMemo = { keeps, master: masterKeeps, key, spent: spentSeq + keepsSpentHere().size, values: mine, rx: mine.length ? PK.buildMatcher(mine) : null };
   }
   return keptMarkMemo.rx;
 }
@@ -2024,10 +2058,25 @@ function keptCompiled() {
  * save spares: a name the page marked and the walk had settled was left
  * standing, save after save, with nothing said.
  */
-function diskReading(text, held, pns) {
+function diskReading(text, held, pns, next = "") {
   const blank = (held || []).concat(pns || []);
   const flat = blank.length ? TD.blankRanges(text, blank, " ") : text;
-  return { flat, blank, cited: TD.citedNameSpans(flat) };
+  return { flat, blank, cited: TD.citedNameSpans(flat, { next }) };
+}
+/**
+ * The opening of the page after page `i`, where a cite whose name closes page
+ * `i` has its year (TD.citedNameSpans' `next`): "" after the last page, and
+ * where the next page is another document's (a reel's next member).
+ */
+function pageAfterHead(i) {
+  if (!doc || !(i >= 0) || i + 1 >= doc.pages.length) return "";
+  if (reel.length && reelMemberOf(i) !== reelMemberOf(i + 1)) return "";
+  return doc.pages[i + 1].lines.slice(0, 12).join("\n");
+}
+/** …of the page `el` stands in. */
+function nextHeadOf(el) {
+  const sec = el && el.closest ? el.closest(".tpage") : null;
+  return sec ? pageAfterHead(Number(sec.dataset.index)) : "";
 }
 /**
  * real → fake over `text`, kept occurrences left exactly as they stand: the
@@ -2037,8 +2086,8 @@ function diskReading(text, held, pns) {
  * to leave as they stand (the save's undecided names), which are not part of
  * how the page reads.
  */
-function forwardText(text, held, pns, spare) {
-  return writtenWith(text, forwardSwaps(text, held, pns, spare));
+function forwardText(text, held, pns, spare, next = "") {
+  return writtenWith(text, forwardSwaps(text, held, pns, spare, { next }));
 }
 /** `text` with `swaps` (forwardSwaps' places) made: { text, swaps: names written, places }. */
 function writtenWith(text, swaps) {
@@ -2063,7 +2112,7 @@ function forwardSwaps(text, held, pns, spare, opts) {
   // that does not exist (textdoc.citedNameSpans). Which names those are is
   // read off the page as its marks read it (diskReading), and the blanks are
   // NULs here, so no match runs across a fake or a spot keep.
-  const { flat, blank, cited } = diskReading(text, held, pns);
+  const { flat, blank, cited } = diskReading(text, held, pns, (opts && opts.next) || "");
   const spared = blank.concat(cited, spare || []);
   const out = [];
   let off = 0;
@@ -2091,9 +2140,9 @@ function forwardSwaps(text, held, pns, spare, opts) {
  * citation the walk had not reached yet included. The ones not settled with
  * "fake it" are what it leaves exactly as they stand, and says so.
  */
-function standingSpans(text, held, pns) {
+function standingSpans(text, held, pns, next = "") {
   if (!reals) return [];
-  const { flat, cited } = diskReading(text, held, pns);
+  const { flat, cited } = diskReading(text, held, pns, next);
   return PK.findRealSpans(reals, maskKept(flat, text), { layout: text }).filter((h) => !TD.insideCited(cited, h));
 }
 
@@ -2130,16 +2179,16 @@ const WITHHELD = "█████";
  * cover over each name standing with no fake (`withheld`: its real value, on
  * every piece), the rest of the pass sparing those names whole.
  */
-function egressSwaps(text, held, pns) {
-  const bare = keyHasInstructions() ? standingSpans(text, held, pns).filter((h) => !h.fake) : [];
-  if (!bare.length) return forwardSwaps(text, held, pns);
-  const out = forwardSwaps(text, held, pns, bare.flatMap((h) => h.ranges));
+function egressSwaps(text, held, pns, next = "") {
+  const bare = keyHasInstructions() ? standingSpans(text, held, pns, next).filter((h) => !h.fake) : [];
+  if (!bare.length) return forwardSwaps(text, held, pns, null, { next });
+  const out = forwardSwaps(text, held, pns, bare.flatMap((h) => h.ranges), { next });
   for (const h of bare) h.ranges.forEach(([a, b], k) => out.push({ start: a, end: b, to: k ? "" : WITHHELD, piece: k, withheld: h.real }));
   return out.sort((x, y) => x.start - y.start);
 }
 /** …and as text, the way forwardText gives it. */
-function egressText(text, held, pns) {
-  return writtenWith(text, egressSwaps(text, held, pns));
+function egressText(text, held, pns, next = "") {
+  return writtenWith(text, egressSwaps(text, held, pns, next));
 }
 /** The names `swaps` withheld (egressSwaps), once each, in order; `a`/`b` a stretch they must reach into. */
 function withheldIn(swaps, a = -Infinity, b = Infinity) {
@@ -2237,6 +2286,9 @@ function dropFlagsNowFaked() {
 }
 function compileKeyNow() {
   const k = keyLessKeeps(key);
+  // The case's own parties, whose caption recited with a year is no cited
+  // decision (TD.citedNameSpans).
+  TD.setOwnPartyWords(key ? TD.ownPartyWordsOf(key.own) : null);
   rev = key ? PK.compile(key) : null;
   fwd = k ? PK.compileForward(k) : null;
   reals = k ? PK.compileReals(k) : null;
@@ -6601,6 +6653,7 @@ function convertTypedReals(body, { quiet = false, tally = null, caret = true } =
   // long way. A save asks this of every page of an edited document.
   const page = TD.serializeMapped(body);
   if (body.__built == null || page.text === body.__built) return 0;
+  page.next = nextHeadOf(body); // a cite closing the page has its year on the next (TD.citedNameSpans)
   const sel = document.getSelection();
   const focused = caret && body.contains(document.activeElement);
   const caretNode = focused && sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
@@ -6632,7 +6685,7 @@ function convertTypedReals(body, { quiet = false, tally = null, caret = true } =
     if (esc.some((d) => d.range.startContainer === h.node && d.range.startOffset === h.start && d.range.endOffset === h.end)) continue;
     if (!pieces) {
       const d = TD.serializeHeld(body);
-      pieces = standingSpans(d.text, d.held, d.pns).filter((s) => s.ranges.length > 1).flatMap((s) => s.ranges);
+      pieces = standingSpans(d.text, d.held, d.pns, nextHeadOf(body)).filter((s) => s.ranges.length > 1).flatMap((s) => s.ranges);
     }
     const o = page.at.get(h.node);
     if (o != null && pieces.some(([a, b]) => o + h.start < b && o + h.end > a)) continue;
@@ -6655,6 +6708,7 @@ function convertTypedReals(body, { quiet = false, tally = null, caret = true } =
   let back = 0;
   if (body.querySelector(".pn")) {
     const mapped = TD.serializeMapped(body);
+    mapped.next = page.next;
     let step = null;
     for (const el of TD.typedPseudonymsCited(mapped, body.__built)) {
       if (!el.isConnected) continue;
@@ -6869,7 +6923,11 @@ async function saveDocument({ offscreen = true } = {}) {
  * not reach, the text the standing assertion reads, and the page's spots after
  * the pass (null where it made no swap).
  */
-function savePage(body, i, rebuild, { typedIn = false, unsure = null } = {}) {
+function savePage(body, i, rebuild, { typedIn = false, unsure = null, next = null } = {}) {
+  // The opening of the page after, where a cite closing this page has its
+  // year (TD.citedNameSpans): read off the open document for a page on
+  // screen, handed in for one built off it.
+  const nx = next != null ? next : nextHeadOf(body);
   // The caret, as a place in the text the page writes: a page the pass below
   // rebuilds is built afresh, and a name typed and saved at once is the
   // usual reason now, so the caret is put back where the typing left it.
@@ -6890,12 +6948,12 @@ function savePage(body, i, rebuild, { typedIn = false, unsure = null } = {}) {
   const escK = esc.map((d) => [points.push({ node: d.range.startContainer, offset: d.range.startOffset }) - 1, points.push({ node: d.range.endContainer, offset: d.range.endOffset, end: true }) - 1]);
   let { text, held, pns, at } = TD.serializeHeld(body, { points: points.length ? points : null });
   let escAt = escK.map(([s, e]) => [at[s], at[e]]).filter(([s, e]) => s >= 0 && e > s);
-  let standing = standingSpans(text, held, pns);
+  let standing = standingSpans(text, held, pns, nx);
   // What the edits wrote is measured against the text the page had before
   // this save, which a rebuild below replaces. Only a document typed in has
   // anything typed: the rest are passed over without the asking.
   const base = body.__built;
-  const typedOf = (st, t) => new Set(typedIn ? TD.withoutEscaped(TD.typedSpans(st, t, base), escAt) : []);
+  const typedOf = (st, t) => new Set(typedIn ? TD.withoutEscaped(TD.typedSpans(st, t, base, { next: nx }), escAt) : []);
   let typed = typedOf(standing, text);
   // A name nobody has decided on waits for the review — unless it was TYPED,
   // which is the operator's own writing and goes to the file as its
@@ -6918,7 +6976,7 @@ function savePage(body, i, rebuild, { typedIn = false, unsure = null } = {}) {
     // it stands whole, the stuck list holds it, and the last check below
     // refuses it and says why (instructionNote).
     const spare = standing.filter((h) => !h.fake || waits(h));
-    const fw = forwardText(text, held, pns, spare.flatMap((h) => h.ranges));
+    const fw = forwardText(text, held, pns, spare.flatMap((h) => h.ranges), nx);
     if (fw.swaps) {
       swaps = fw.swaps;
       pageSpots = TD.spotsAfterSwaps(i, text, held, fw.places, fw.text);
@@ -6970,7 +7028,7 @@ function savePage(body, i, rebuild, { typedIn = false, unsure = null } = {}) {
       if (caretK >= 0 && at[caretK] >= 0) placeCaretOnDisk(body, carry(at[caretK]));
       escAt = escAt.map(([s, e]) => { const a = carry(s); return [a, a + (e - s)]; }); // the names Esc left are spared, so each moves only with the names before it
       ({ text, held, pns } = TD.serializeHeld(body)); // the rebuilt page, its spots and fakes found again
-      standing = standingSpans(text, held, pns); // …and the names left, where they now stand
+      standing = standingSpans(text, held, pns, nx); // …and the names left, where they now stand
       typed = typedOf(standing, text);
       left = standing.filter(waits);
     }
@@ -6980,7 +7038,7 @@ function savePage(body, i, rebuild, { typedIn = false, unsure = null } = {}) {
   // it leaves a kept one: the assertion reads past them too — and past the
   // run's fakes and the cited decisions' names, read as the page reads them,
   // which are what the forward pass left alone.
-  const scan = TD.blankRanges(text, held.concat(pns, diskReading(text, held, pns).cited, left.flatMap((h) => h.ranges)));
+  const scan = TD.blankRanges(text, held.concat(pns, diskReading(text, held, pns, nx).cited, left.flatMap((h) => h.ranges)));
   return { text, swaps, left, stuck, scan, pageSpots };
 }
 
@@ -7015,14 +7073,15 @@ async function prepareOffscreenSave(t, pass) {
   for (let i = 0; i < parsed.pages.length; i++) {
     if (pass.stop) return null;
     const raw = parsed.pages[i].lines.join("\n");
-    const ps = TD.pageScan(raw, { rev, reals, spots: TD.spotsOnPage(docSpots, i), mask: maskKept });
+    const next = parsed.pages[i + 1] ? parsed.pages[i + 1].lines.slice(0, 12).join("\n") : "";
+    const ps = TD.pageScan(raw, { rev, reals, spots: TD.spotsOnPage(docSpots, i), mask: maskKept, next });
     // A page an edit changed goes through the page too, whatever the scan says.
     const edited = !!entry && built[i] != null && built[i] !== raw;
     if (!ps.needs && !edited) { scan.push(ps.scan); continue; }
     batchEdit = true;
     try {
       const body = shadowPage(parsed.pages, i, docSpots, built[i]);
-      const r = savePage(body, i, (text, s, carry) => buildBody(body, text, i, s, carry));
+      const r = savePage(body, i, (text, s, carry) => buildBody(body, text, i, s, carry), { next });
       swaps += r.swaps;
       if (r.pageSpots) docSpots = docSpots.filter((x) => x.page !== i).concat(r.pageSpots);
       parsed.pages[i].lines = r.text.split("\n");
@@ -7302,6 +7361,8 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
       } else { x.writtenText = null; x.writtenSpots = null; x.savedOther = true; }
     }
   };
+  // The text each member's write replaced, for the transcribed pages' sums.
+  const replacedText = new Map();
   for (const m of write) {
     const text = TD.serializeExport(memberDoc(m));
     saveNote = `Saving… ${TD.docLabel(m.name)}`;
@@ -7344,6 +7405,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
     // Its spot keeps as the file now counts them, stored now that it does.
     if (m.spotsUnstored) { persistMemberSpots(m); m.spotsUnstored = false; }
     saveTouched.wrote.add(m);
+    replacedText.set(m, m.base && typeof m.base.text === "string" ? m.base.text : null);
     m.base = { text, stamp: null, opened: text };
     m.built = null;
     wrote.push(m.name);
@@ -7393,13 +7455,16 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
     if (flagsFor === valuesStoreKey()) {
       const pdf = pdfForName(r.d.name) || "";
       const items = [], sums = [];
-      for (const p of r.parsed.pages) {
+      const old = r.base && typeof r.base.text === "string" ? readExport(r.base.text).pages : null;
+      r.parsed.pages.forEach((p, k) => {
         const page = PS.pdfPageOf(p);
-        if (p.header == null || !page) continue;
+        if (p.header == null || !page) return;
         const entry = { doc: r.d.name, pdf, page };
         items.push({ entry, page: p });
-        sums.push({ entry, lines: p.lines });
-      }
+        const key = fixPressedKey(entry);
+        sums.push({ entry, lines: p.lines, before: old && old[k] ? old[k].lines : null, pressed: fixPressed.has(key) });
+        fixPressed.delete(key);
+      });
       const next = TD.pageListsAfter({ noOcr, ocrAgain, textFixed }, items, { drop: true });
       const fixed = TD.fixedSumsFor(next.textFixed, sums);
       if (next.noOcr !== noOcr || next.ocrAgain !== ocrAgain || fixed !== textFixed) {
@@ -7433,7 +7498,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   // A transcribed page's line carries the page's text as it was just WRITTEN
   // (TD.pageTextSum), so PDF-Linker applies the text the operator saved and
   // nothing older or newer — the pages of the documents written, and no others.
-  if (wroteMembers.length) refreshTextFixedSums(wroteMembers);
+  if (wroteMembers.length) refreshTextFixedSums(wroteMembers, replacedText);
   // Written off the screen: what the folder was read for is to be read again.
   if (wroteOff) {
     dropSweep();
@@ -8173,7 +8238,7 @@ async function scanPassNow(pass) {
     const pageDisk = () => {
       if (!diskMemo) {
         const d = TD.serializeHeld(body, { mapped: true });
-        const { flat: dflat, cited } = diskReading(d.text, d.held, d.pns);
+        const { flat: dflat, cited } = diskReading(d.text, d.held, d.pns, nextHeadOf(body));
         diskMemo = { text: d.text, segs: d.segs, flat: dflat, cited };
       }
       return diskMemo;
@@ -10094,10 +10159,22 @@ function putStrippedBack(i, sn) {
 // sum is the page's text as last saved (refreshTextFixedSums); PDF-Linker
 // applies the line only where the export still reads that way. A second click
 // withdraws the request. ⊘ Did not OCR stays for the page not worth the typing.
+// The transcribed pages ✎ was pressed on since their document was last saved
+// (fixPressedKey): the next save stamps each with the text it writes, whatever
+// the file it replaces read (TD.fixedSumsFor).
+const fixPressed = new Set();
+function fixPressedKey(e) { return e ? String(e.doc).replace(/\s+/g, " ").trim().toLowerCase() + "|" + e.page : ""; }
 function useMyText(i) {
   if (!doc) return;
   const p = doc.pages[i];
   if (!p || p.header == null) return;
+  // Never on Combined Text.txt (the owner's decision): PDF-Linker reads the
+  // page out of the document's own export, which a save here does not write,
+  // and writes Combined Text.txt again from the exports.
+  if (isCombinedHead()) {
+    toast(`${TD.pageLabel(p)}: ✎ Use my text is not offered on Combined Text.txt — open the document's own export, type the page there, and hand it over from there.`, { error: true });
+    return;
+  }
   const m = reel.length > 1 ? reelMemberOf(i) : null;
   const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
   const entry = pageEntryAt(i);
@@ -10123,6 +10200,15 @@ function useMyText(i) {
   }
   const body = bodyForPage(i);
   const lines = body ? TD.serializeNodes(body).split("\n") : p.lines;
+  // A line shaped like PDF-Linker's own furniture (a page header, a held
+  // page's heading pasted back with its text) is refused by PDF-Linker, not
+  // cut at: the page is not handed over until it is taken out.
+  const furniture = TD.pageFurnitureLine(lines);
+  if (furniture) {
+    toast(`${where} carries the line “${furniture}”, which is shaped like PDF-Linker's own page heading — it would refuse the page. Take that line out, then press ✎ Use my text again.`, { error: true, ms: 9000 });
+    return;
+  }
+  fixPressed.add(fixPressedKey(entry));
   noOcr = TD.setNoOcr(noOcr, entry, false);
   ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
   fixDeclined = TD.setNoOcr(fixDeclined, entry, false);
@@ -10131,17 +10217,32 @@ function useMyText(i) {
   renderFlags();
   toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run writes the text into the PDF and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
 }
-/** Each transcribed page of the open document takes the sum of its text as it now stands — what a save just wrote. */
-function refreshTextFixedSums(members = null) {
+/**
+ * Each transcribed page of the documents a save just wrote (`members`) takes
+ * the sum of its text as written — where the save wrote the page and the line
+ * was true of the file it replaced (`replaced`: each member's text before the
+ * write), or ✎ was pressed on it since (TD.fixedSumsFor). A page of a document
+ * the save could not write keeps the sum of what its file still says.
+ */
+function refreshTextFixedSums(members, replaced) {
   if (!doc || !textFixed.length || flagsFor !== valuesStoreKey()) return;
-  // `members`: the documents a save just wrote — a page of one it could not
-  // write keeps the sum of what its file still says.
   const sources = docPageSources();
   const items = [];
+  const beforeOf = new Map();
   doc.pages.forEach((p, i) => {
-    if (members && !members.includes(reelMemberOf(i))) return;
+    const m = reelMemberOf(i);
+    if (!members.includes(m)) return;
     const entry = pageEntryAt(i, sources);
-    if (entry) items.push({ entry, lines: p.lines });
+    if (!entry) return;
+    if (!beforeOf.has(m)) {
+      const t = replaced && replaced.get(m);
+      beforeOf.set(m, typeof t === "string" ? readExport(t).pages : null);
+    }
+    const old = beforeOf.get(m);
+    const k = i - (m ? m.from : 0);
+    const key = fixPressedKey(entry);
+    items.push({ entry, lines: p.lines, before: old && old[k] ? old[k].lines : null, pressed: fixPressed.has(key) });
+    fixPressed.delete(key);
   });
   const list = TD.fixedSumsFor(textFixed, items);
   if (list !== textFixed) {
@@ -10161,7 +10262,7 @@ function refreshTextFixedSums(members = null) {
  * the members this save wrote. The pages handed over.
  */
 function autoUseMyText(typedNow, written) {
-  if (!doc || !typedNow.size || flagsFor !== valuesStoreKey()) return [];
+  if (!doc || !typedNow.size || flagsFor !== valuesStoreKey() || isCombinedHead()) return [];
   const sources = docPageSources();
   const on = (list, e) => list.some((x) => TD.sameNoOcr(x, e));
   let list = textFixed;
@@ -10173,6 +10274,7 @@ function autoUseMyText(typedNow, written) {
     const e = pageEntryAt(i, sources);
     if (!e || on(list, e) || on(noOcr, e) || on(ocrAgain, e) || on(fixDeclined, e)) continue;
     if (TD.wordsChanged(p.typedFrom, text) < TD.AUTO_TEXT_FIXED_WORDS) continue;
+    if (TD.pageFurnitureLine(p.lines)) continue; // PDF-Linker would refuse it (useMyText says why)
     list = TD.setTextFixed(list, { ...e, sum: TD.pageTextSum(p.lines) }, true);
     out.push(i);
   }
@@ -11829,8 +11931,9 @@ function citedIn(s) {
   try { d = TD.serializeHeld(s.body, { points: pts }); } catch { return false; }
   const [a, b] = d.at;
   if (a < 0 || b < 0 || b <= a) return false;
+  const next = nextHeadOf(s.body);
   for (const reading of [d.text, diskReading(d.text, d.held, d.pns).flat]) {
-    for (const [x, y] of TD.citedNameSpans(reading)) {
+    for (const [x, y] of TD.citedNameSpans(reading, { next })) {
       if (x >= b) break;
       if (y > a) return true;
     }
@@ -12454,11 +12557,11 @@ async function writeMasterWithdrawn(values) {
   }
 }
 /** The Master Keep's values the key binds, matched: what a selection may be standing in. */
-let masterRxMemo = { master: null, key: null, rx: null };
+let masterRxMemo = { master: null, key: null, spent: -1, rx: null };
 function masterMatcher() {
-  if (masterRxMemo.master !== masterKeeps || masterRxMemo.key !== key) {
-    const mine = masterKeeps.filter((k) => keyBinds(k.value)).map((k) => k.value);
-    masterRxMemo = { master: masterKeeps, key, rx: mine.length ? PK.buildMatcher(mine) : null };
+  if (masterRxMemo.master !== masterKeeps || masterRxMemo.key !== key || masterRxMemo.spent !== spentSeq + keepsSpentHere().size) {
+    const mine = masterKeeps.filter((k) => keepWorks(k.value)).map((k) => k.value);
+    masterRxMemo = { master: masterKeeps, key, spent: spentSeq + keepsSpentHere().size, rx: mine.length ? PK.buildMatcher(mine) : null };
   }
   return masterRxMemo.rx;
 }
@@ -12473,7 +12576,7 @@ function masterHeldIn(s) {
   const out = [];
   const add = (v) => {
     const k = masterKeeps.find((x) => LK.fold(x.value) === LK.fold(v));
-    if (k && keyBinds(k.value) && !out.includes(k.value)) out.push(k.value);
+    if (k && keepWorks(k.value) && !out.includes(k.value)) out.push(k.value);
   };
   if (s.pn && keptBy(pnReal(s.pn)) === "master") add(pnReal(s.pn));
   const rx = masterMatcher();
@@ -12762,6 +12865,12 @@ function setKeepNow(real, control, { leak = false } = {}) {
   paintHighlights();
   noteInFlagged();
   sweepFolder(); // a pending keep is waiting on this
+  // A CASE KEEP THE MASTER HOLDS TOO — PDF-Linker spent its line and put it on
+  // the KEEP sheet, and the folder has not been read since to say so: taken
+  // off the case's list only, the master went on keeping it, in this case
+  // too, run after run. The Master Keep is asked as well (withdrawMaster says
+  // what it does and asks first).
+  if (!control && masterInfo && TD.keptControl(masterKeeps, real)) setTimeout(() => withdrawMaster([real]), 0);
   toast(!control ? `"${real}" is a pseudonym again`
     : state === "local" ? `"${real}" left as it stands — nothing in ${dirHandle ? folderName : "this document"} fakes it, so there is nothing to hand over and nothing to re-run. It is simply no longer marked.`
     : state === "pending" ? `"${real}" left as it stands. Reading the rest of ${folderName} to see whether anything there fakes it — until that is known it stays on the list for PDF-Linker.`
@@ -13318,6 +13427,7 @@ async function spendFromDisk(disk, { settle = true, still = null } = {}) {
   keeps = s.keeps;
   textFixed = s.textFixed;
   persistValues();
+  if (s.spentKeeps.length) noteKeepsSpent(s.spentKeeps.map((k) => k.value));
   if (settle) {
     // A keep retired that the master workbook does not hold is no longer a keep
     // at all: the key, and the marks it lays, read it again.
@@ -13642,7 +13752,10 @@ function renderMaster() {
   // faked. The rest of the workbook — the settled decisions of every other
   // matter — does no work here and is not a list worth reading: it is a
   // number, and the button to load another.
-  const here = masterKeeps.filter((k) => keptSeen.has(TD.foldValue(k.value)));
+  // …and this case's own keeps PDF-Linker has spent onto it, wherever they
+  // stand, so a keep the case made can always be taken back from here.
+  const spent = keepsSpentHere();
+  const here = masterKeeps.filter((k) => keptSeen.has(TD.foldValue(k.value)) || spent.has(LK.fold(k.value)));
   hint.textContent = (here.length
     ? `${here.length} value${here.length === 1 ? "" : "s"} held against the key here, by ${masterInfo.name}:`
     : `${masterInfo.name} holds nothing the key would fake in this document.`)
@@ -20859,7 +20972,7 @@ function fillRaw(sec) {
   // The marks are the page's own leak marks (scanPassNow): every real name the
   // key binds, past the values kept for the case, the spot keeps and the
   // parties of cited decisions.
-  const cited = TD.citedNameSpans(text);
+  const cited = TD.citedNameSpans(text, { next: pageAfterHead(Number(sec.dataset.index)) });
   // A name wrapped down a column is marked piece by piece: the other column's
   // words between them are not part of it.
   const leaks = reals
