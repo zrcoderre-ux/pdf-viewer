@@ -483,6 +483,74 @@ console.log("\n--- links an overlay knows about but hasn't drawn ---");
     api.urlsOf(api.linksInSelection(selectionOverBothLines(page))).length, 3);
 }
 
+console.log("\n--- cases ahead of the rest ---");
+// The worker opens the tabs left to right in the order it is handed them, so a
+// selection over cases and code sections together lists the cases first: like
+// with like, cases on the left. Each run keeps its reading order.
+const kindStrip = (href, kind, r) =>
+  makeEl("a", { className: "citation-link", attrs: { href, "data-kind": kind }, rects: [r] });
+const sweepAll = (article) => ({
+  isCollapsed: false, rangeCount: 1,
+  getRangeAt: () => ({ commonAncestorContainer: article, getClientRects: () => [rect(0, 95, 300, 90)] }),
+});
+{
+  // A paragraph read top to bottom: a code section, a case, a page's own link,
+  // a supra, a rule, a short form. Supra and short form are cases.
+  const plain = link("https://plain.test/", [rect(10, 130, 100, 20)]);
+  const article = makeEl("article", { children: [plain] });
+  const overlay = makeEl("div", { children: [
+    kindStrip("https://wl.test/civ-3287", "statute", rect(10, 100, 100, 20)),
+    kindStrip("https://wl.test/smith", "case", rect(150, 100, 100, 20)),
+    kindStrip("https://wl.test/jones", "supra", rect(150, 130, 100, 20)),
+    kindStrip("https://wl.test/crc-3.1350", "rule", rect(10, 160, 100, 20)),
+    kindStrip("https://wl.test/doe", "shortform", rect(150, 160, 100, 20)),
+  ] });
+  const page = { html: makeEl("html", { children: [makeEl("body", { children: [article, overlay] })] }), article };
+  const selection = sweepAll(article);
+  const { api, sent } = load(page, { selection });
+  api.setPointer(null, null);
+  const want = [
+    "https://wl.test/smith", "https://wl.test/jones", "https://wl.test/doe",
+    "https://wl.test/civ-3287", "https://plain.test/", "https://wl.test/crc-3.1350",
+  ];
+  check("the cases first, then the rest, each in reading order", api.collectUrls(), want);
+  api.onKeyDown(keyEvent());
+  check("...and that is the order the worker is handed them", sent[0].urls, want);
+}
+{
+  // The page links the case before our underline does: one tab, with the cases.
+  const article = makeEl("article", { children: [link("https://wl.test/smith#p5", [rect(10, 100, 100, 20)])] });
+  const overlay = makeEl("div", { children: [
+    kindStrip("https://wl.test/civ", "statute", rect(150, 100, 100, 20)),
+    kindStrip("https://wl.test/smith", "case", rect(10, 130, 100, 20)),
+  ] });
+  const page = { html: makeEl("html", { children: [makeEl("body", { children: [article, overlay] })] }), article };
+  const selection = sweepAll(article);
+  const { api } = load(page, { selection });
+  api.setPointer(null, null);
+  check("a case the page also links opens once, among the cases",
+    api.collectUrls(), ["https://wl.test/smith", "https://wl.test/civ"]);
+}
+{
+  // Links a source reports but hasn't drawn sort by the kind it reports.
+  const page = makePage();
+  const selection = {
+    isCollapsed: false, rangeCount: 1,
+    getRangeAt: () => ({
+      commonAncestorContainer: page.article,
+      getClientRects: () => [rect(10, 100, 300, 20), rect(10, 130, 200, 20), rect(0, 700, 400, 2000)],
+    }),
+  };
+  const source = () => [
+    { url: "https://offscreen.test/code", rects: [rect(10, 800, 120, 20)], kind: "statute" },
+    { url: "https://offscreen.test/case", rects: [rect(10, 900, 120, 20)], kind: "case" },
+  ];
+  const { api } = load(page, { selection, sources: [source] });
+  check("an undrawn case joins the cases", api.urlsOf(api.linksInSelection(selection)), [
+    "https://offscreen.test/case",
+    "https://a.test/", "https://b.test/", "https://cite.test/1", "https://offscreen.test/code",
+  ]);
+}
 console.log("\n--- Shift+Space ---");
 {
   const page = makePage();
@@ -914,6 +982,26 @@ function runBackground() {
   return { ctx, created, grouped, groupUpdates };
 }
 
+{
+  // The text reader's underlines, statute before case on the line.
+  const strip = (href, kind, left) => makeEl("a", {
+    className: "cite-link kind-" + kind,
+    attrs: { href, "data-kind": kind, "data-text-height": "20" },
+    rects: [rect(left, 114, 100, 6)],
+  });
+  const body = makeEl("div", { className: "page-body", contentEditable: true });
+  const layer = makeEl("div", { className: "link-layer", children: [
+    strip("https://cite.test/code", "statute", 10),
+    strip("https://cite.test/case", "supra", 150),
+  ] });
+  const page = { html: makeEl("html", { children: [makeEl("body", { children: [body, layer] })] }), body };
+  const selection = readerSelection(page, [rect(0, 100, 300, 20)]);
+  const { api } = load(page, { selection });
+  api.setPointer(null, null);
+  check("the text reader's cases come first too",
+    api.collectUrls(), ["https://cite.test/case", "https://cite.test/code"]);
+}
+
 console.log("\n--- the tabs the worker opens ---");
 {
   const { ctx, created } = runBackground();
@@ -1099,6 +1187,10 @@ console.log("\n--- wiring ---");
     read("viewer/text-reader.html").includes('<script src="shift-space-open.js">'), true);
   check("...and its underlines carry the height of their line",
     /\.dataset\.textHeight\s*=/.test(read("viewer/text-reader.js")), true);
+  check("...and their kind, so a selection opens its cases first",
+    /\.dataset\.kind\s*=/.test(read("viewer/text-reader.js")), true);
+  check("the website overlay's undrawn links report their kind",
+    /out\.push\(\{[^}]*\bkind: c\.kind/.test(read("content/claude-citations.js")), true);
 }
 {
   const optionsHtml = read("options.html");

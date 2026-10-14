@@ -7,11 +7,13 @@ scroll wheel. **Shift + Space** does the same thing from the keyboard:
   page you're reading, right after the current tab (and in the same tab group,
   if there is one). Focus never leaves what you were doing.
 - **Select text first** and Shift + Space opens *every* link the selection
-  covers, in reading order — sweep a paragraph of citations and pull all of
-  them at once, into a **tab group** of their own named `Links` rather than
-  strung along the tab strip. A selection is one act, so all of them means all
-  of them: the ceiling is 120, high enough to be a guard against a runaway
-  selection rather than a budget. A brief note says how many opened.
+  covers — sweep a paragraph of citations and pull all of them at once, into a
+  **tab group** of their own named `Links` rather than strung along the tab
+  strip. The **cases come first**, on the left, and the code sections, rules
+  and other links follow on the right, each run in reading order; a supra or
+  short-form reference counts as its case. A selection is one act, so all of
+  them means all of them: the ceiling is 120, high enough to be a guard against
+  a runaway selection rather than a budget. A brief note says how many opened.
 - If the mouse is resting on a link *outside* the selection, that link wins —
   the pointer is what a middle click would have acted on.
 
