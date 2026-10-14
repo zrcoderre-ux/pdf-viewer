@@ -160,6 +160,7 @@ let folderPdfs = [];         // [{ name, handle }] — the case folder's PDFs
 let key = null;              // parsed key (PK.parseKey)
 let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
 let fakesRx = null;          // …and one over the key's FAKES: which pseudonyms stand
+let pinnedFakes = null;      // …and the stand-ins only its pinned sheet holds (PK.compilePinnedFakes)
 let settings = loadSettings();
 let flagged = [];            // New Real Values list: names to fake next run
 let pageSweep = null;        // the page a LEAKS review is finishing before it leaves (see advanceLeak)
@@ -2297,6 +2298,7 @@ function compileKeyNow() {
   // faked that very value somewhere, and a matcher the keep had emptied could
   // only ever answer no.
   fakesRx = key ? PK.compileFakes(key) : null;
+  pinnedFakes = key ? PK.compilePinnedFakes(key) : null;
   // A kept value is never offered, and a real that opens one stays partial.
   ahead = k ? PK.compileTypeahead(k, allKeeps().map((x) => x.value)) : null;
   warmMatchers();
@@ -7363,6 +7365,8 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   };
   // The text each member's write replaced, for the transcribed pages' sums.
   const replacedText = new Map();
+  // …and every text written, for the stand-ins in it Word's macro cannot turn back (pinnedNote).
+  const writtenTexts = [];
   for (const m of write) {
     const text = TD.serializeExport(memberDoc(m));
     saveNote = `Saving… ${TD.docLabel(m.name)}`;
@@ -7405,6 +7409,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
     // Its spot keeps as the file now counts them, stored now that it does.
     if (m.spotsUnstored) { persistMemberSpots(m); m.spotsUnstored = false; }
     saveTouched.wrote.add(m);
+    writtenTexts.push(text);
     replacedText.set(m, m.base && typeof m.base.text === "string" ? m.base.text : null);
     m.base = { text, stamp: null, opened: text };
     m.built = null;
@@ -7443,6 +7448,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
     }
     const w = await writeInPlace(r.d.handle, r.text);
     if (!w.ok) { failed.push({ name: r.d.name, why: w.why }); continue; }
+    writtenTexts.push(r.text);
     wrote.push(r.d.name);
     wroteOff++;
     const e = unsavedDocs.get(r.d.name);
@@ -7600,7 +7606,8 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
     + (unreadable.length ? ` · ⚠ ${nameList(unreadable.map((n) => TD.docLabel(n)))} could not be read, so ${unreadable.length === 1 ? "it was" : "they were"} not written.` : "");
   const combined = wrote.length && folderDocs.some((d) => d.combined) ? ` · ${TD.COMBINED_FILE} is behind the exports until PDF-Linker's next run (or Apply Fixes).` : "";
   const unreadWarn = elsewhereUnread ? ` · ⚠ ${folderName} could not be read through for the names you said to fake, so none was written off the screen — save again.` : "";
-  const red = warn || unsureWarn || stuckWarn || conflictWarn || failWarn || unreadWarn || spentWarn || (leaksDirty() && leaksSaveNote);
+  const pinnedWarn = pinnedNote(writtenTexts);
+  const red = warn || unsureWarn || stuckWarn || conflictWarn || failWarn || unreadWarn || spentWarn || pinnedWarn || (leaksDirty() && leaksSaveNote);
   // Named in the folder's order, six at most: a save of forty documents is not
   // a toast of forty names. And what went wrong first, where it is read — a
   // warning after a long list of names was a warning nobody saw.
@@ -7619,9 +7626,40 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
       + (typing.back ? ` · ${typing.back} left as typed — ${typing.back === 1 ? "a party" : "parties"} to a cited decision, never a pseudonym` : "")
       + handedNote(handed) + alsoList)
     + combined;
-  const reds = (conflictWarn + failWarn + unreadWarn + warn + unsureWarn + stuckWarn + spentWarn).replace(/^ · /, "");
+  const reds = (conflictWarn + failWarn + unreadWarn + warn + unsureWarn + stuckWarn + spentWarn + pinnedWarn).replace(/^ · /, "");
   toast(red ? reds + " — " + said : said, { error: !!red, ms: red ? 12000 : wrote.length > 1 ? 6000 : undefined });
   return !conflicts.length && !failed.length && !unreadable.length && filesOk;
+}
+/**
+ * What the save says of a stand-in it left in a file that only the key's
+ * PINNED sheet holds (PK.compilePinnedFakes): a real name typed and written
+ * as its pseudonym, where the run that wrote the key found the name in no
+ * export and put its row on "Pinned (never in text)". DeAnonymize.bas reads
+ * the Pseudonym Key sheet alone, so a draft made from the export keeps the
+ * stand-in where the name should come back — the one failure the project
+ * ranks above every visible leak, and the save said nothing of it.
+ * PDF-Linker's next run finds the export carrying it and moves the row onto
+ * the reversal sheet; until then the export is not to go out. "" where none.
+ */
+function pinnedNote(texts) {
+  if (!pinnedFakes || !pinnedFakes.rx || !texts || !texts.length) return "";
+  const found = new Map();
+  for (const t of texts) {
+    const rx = pinnedFakes.rx;
+    rx.lastIndex = 0;
+    let m;
+    while ((m = rx.exec(t))) {
+      if (!m[0]) { rx.lastIndex++; continue; }
+      const k = PK.fold(m[0]);
+      if (!found.has(k) && pinnedFakes.map.has(k)) found.set(k, { fake: m[0], real: pinnedFakes.map.get(k) });
+    }
+  }
+  if (!found.size) return "";
+  const list = [...found.values()];
+  const one = list.length === 1;
+  return ` · ⚠ ${list.slice(0, 4).map((x) => `“${x.fake}” (for ${x.real})`).join(", ")}${list.length > 4 ? "…" : ""}: ${one ? "a stand-in" : "stand-ins"} only the key's pinned sheet holds. ` +
+    `Word's DeAnonymize macro reads the Pseudonym Key sheet alone, so a draft made from this export keeps ${one ? "it" : "them"} where the real name should come back — ` +
+    `run PDF-Linker (it moves ${one ? "the row" : "the rows"} onto the Pseudonym Key sheet) before the export goes out.`;
 }
 saveBtn.addEventListener("click", () => saveDocument());
 document.addEventListener("keydown", (e) => {

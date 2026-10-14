@@ -332,7 +332,11 @@ app, which routes it to the reader tab.
   right-click offers **Fake it**, the names bar's answer: every occurrence of
   the name is written as its pseudonym on the next save. It reaches a name
   the walk has gone past, or one it does not stop on because the LEAKS
-  worksheet has a row for it.
+  worksheet has a row for it. A name the key binds only on its **Pinned
+  (never in text)** sheet (a party no export named when the key was
+  written) is written as that sheet's pseudonym too, and the save says so in
+  red: Word's DeAnonymize macro reads the Pseudonym Key sheet alone, so run
+  PDF-Linker — it moves the row there — before that export goes out.
 - **Real names from the key.** **Open case folder** picks the matter's folder
   and takes only `pseudonym_key.xlsx` and the exports out of it (a
   `*.txt.LEAK` quarantined by PDF-Linker's leak gate is listed too, marked,

@@ -77,22 +77,32 @@ async function startServer() {
 // ── the key, as a real .xlsx ────────────────────────────────────────────────
 // On disk the exports carry the FAKES; the key turns them back on screen.
 // "Ashdale" is bound on its own, so a name typed as "Ashdale" is offered.
-function buildKey(rows) {
+function buildKey(rows, pinned = []) {
   const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "typed-cites-")), "pseudonym_key.xlsx");
   const py = `
 import json, sys, openpyxl
 wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Pseudonym Key"
-ws.append(["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"])
+head = ["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"]
+ws.append(head)
 for r in json.loads(sys.argv[2]): ws.append(r)
+pinned = json.loads(sys.argv[3])
+if pinned:
+    p = wb.create_sheet("Pinned (never in text)")
+    p.append(head)
+    for r in pinned: p.append(r)
 wb.save(sys.argv[1])
 `;
-  execFileSync("python3", ["-I", "-c", py, out, JSON.stringify(rows)]);
+  execFileSync("python3", ["-I", "-c", py, out, JSON.stringify(rows), JSON.stringify(pinned)]);
   return fs.readFileSync(out);
 }
 const KEY_BYTES = buildKey([
   ["person", "Corwin Ashdale", "Tobias Wrenfield", "", "", "spreadsheet", 4],
   ["person-token", "Ashdale", "Wrenfield", "", "", "spreadsheet", 4],
   ["entity", "Quarrow Motors", "Brindle Works", "", "", "spreadsheet", 2],
+], [
+  // A binding no export carried when the run wrote the key: on the pinned
+  // sheet, which Word's macro does not read.
+  ["person", "Odile Varnum", "Marlow Kestrel", "", "", "spreadsheet", 0],
 ]);
 
 // ── the case ────────────────────────────────────────────────────────────────
@@ -542,6 +552,29 @@ async function run() {
       const c = await fileText(p, "C Brief.txt");
       truthy("a name closing the page, its year on the next: as typed", c.includes("As held in Gelman v. Ashdale\n"));
       truthy("…and one in prose above it: its pseudonym", c.includes("The rule is settled. Wrenfield agreed."));
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+
+    // ── 7. a stand-in only the pinned sheet holds ──────────────────────────
+    console.log("7. a name written as a stand-in only the key's pinned sheet holds is named by the save");
+    {
+      const r = await newReader();
+      const p = r.page;
+      await caretAt(p, 0, 0);
+      await type(p, " Odile Varnum agreed.");
+      await p.waitForTimeout(900);
+      await save(p);
+      const a = await fileText(p, "A Complaint.txt");
+      truthy("written as its stand-in", a.includes("Plaintiff filed the complaint. Marlow Kestrel agreed."));
+      truthy("…and the save says Word's macro will not turn it back until PDF-Linker runs",
+        r.log.toasts.some((t) => /“Marlow Kestrel” \(for Odile Varnum\): a stand-in only the key's pinned sheet holds/.test(t) && /run PDF-Linker/.test(t)));
+      r.log.toasts.length = 0;
+      await caretAt(p, 0, 1);
+      await type(p, " Ashdale agreed.");
+      await p.waitForTimeout(900);
+      await save(p);
+      truthy("…a stand-in the Pseudonym Key sheet holds is not named", !r.log.toasts.some((t) => /pinned sheet holds/.test(t) && /Wrenfield/.test(t)));
       check("no page errors", r.log.errors, []);
       await r.close();
     }

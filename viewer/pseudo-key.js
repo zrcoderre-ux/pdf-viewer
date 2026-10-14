@@ -354,6 +354,8 @@ export function parseKey(sheets, name) {
         occ: isFinite(occ) && occ > 0 ? occ : 0,
         pinned,
         own: catCol !== -1 && srcCol !== -1 && OWN_SOURCES.has(fold(row[srcCol])) && OWN_CATEGORIES.has(fold(row[catCol])),
+        // An OCR fix: its Replacement is the text's own correct reading, not a stand-in.
+        ocr: (catCol !== -1 && fold(row[catCol]) === "ocr-fix") || (srcCol !== -1 && fold(row[srcCol]) === "ocr-fix"),
       });
     }
   }
@@ -379,8 +381,8 @@ export function parseKey(sheets, name) {
     if (!baseReal || (!e.control && !baseFake) || haveReal.has(fold(baseReal))) continue;
     haveReal.add(fold(baseReal));
     derived.push(e.control
-      ? { real: baseReal, fake: "", control: e.control, alt: e.alt, occ: 0, pinned: e.pinned }
-      : { real: baseReal, fake: baseFake, alt: e.alt, occ: 0, pinned: e.pinned });
+      ? { real: baseReal, fake: "", control: e.control, alt: e.alt, occ: 0, pinned: e.pinned, ocr: e.ocr }
+      : { real: baseReal, fake: baseFake, alt: e.alt, occ: 0, pinned: e.pinned, ocr: e.ocr });
   }
   for (const d of derived) entries.push(d);
 
@@ -438,7 +440,7 @@ export function parseKey(sheets, name) {
   const seenReal = new Map();
   const rowOf = (e) => (e.control
     ? { real: e.real, fake: "", pinned: !!e.pinned, control: e.control }
-    : { real: e.real, fake: e.fake, pinned: !!e.pinned });
+    : { real: e.real, fake: e.fake, pinned: !!e.pinned, ocr: !!e.ocr });
   for (const e of entries) {
     const k = fold(e.real);
     const at = seenReal.get(k);
@@ -921,6 +923,27 @@ export function compileForward(key) {
   for (const w of warn) if (w.fake && !map.has(fold(w.real))) map.set(fold(w.real), w.fake);
   const rx = buildMatcher(warn.map((w) => w.real));
   return { rx, map };
+}
+
+/**
+ * The stand-ins only the key's PINNED sheet holds ("Pinned (never in text)":
+ * bindings no export carried when the run wrote the key), which DeAnonymize.bas
+ * does not read: a draft carrying one keeps the stand-in where the real name
+ * should come back. The forward side writes them all the same — a real name
+ * typed is never written as itself — and PDF-Linker's next run, finding an
+ * export that carries one, moves its row onto the reversal sheet; until then
+ * the export is not to go out, and the save says so (text-reader's
+ * pinnedNote). An OCR fix's row is left out (its Replacement is the text's
+ * own correct reading), and so is a stand-in the applied sheet also reverses.
+ * → { rx, map: fold(fake) → real }, or null where there is none.
+ */
+export function compilePinnedFakes(key) {
+  const live = new Set(pairRows(key).map((p) => fold(p.fake)));
+  const rows = warnRows(key).filter((w) => w.pinned && w.fake && !w.control && !w.ocr && !isCommonReal(w.fake) && !live.has(fold(w.fake)));
+  if (!rows.length) return null;
+  const map = new Map();
+  for (const w of rows) if (!map.has(fold(w.fake))) map.set(fold(w.fake), w.real);
+  return { rx: buildMatcher(rows.map((w) => w.fake)), map };
 }
 
 /**

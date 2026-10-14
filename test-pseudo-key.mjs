@@ -10,7 +10,7 @@ import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, compileFakes, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
-  wordFakesOf, keyCellKind, contactValue, boundRows,
+  wordFakesOf, keyCellKind, contactValue, boundRows, compilePinnedFakes,
 } from "./viewer/pseudo-key.js";
 
 let fails = 0;
@@ -60,6 +60,21 @@ const pinned = parseKey([
 ]);
 check("pinned rows reverse nothing", pinned.pairs, [{ fake: "Ingrid Strangeways", real: "Helen Rasho" }]);
 check("pinned rows still forward-map, and the applied fake wins", pinned.warn.map((w) => w.real + ">" + w.fake), ["Helen Rasho>Ingrid Strangeways", "John Doe>Yorke Deverell"]);
+// The stand-ins Word's macro cannot turn back: the pinned sheet's, less an
+// OCR fix's (its Replacement is the text's own reading) and one the applied
+// sheet reverses too.
+{
+  const pk = parseKey([
+    sheet("Pseudonym Key", [["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 3]]),
+    sheet("Pinned (never in text)", [["person", "John Doe", "Yorke Deverell", "", "", "", 0], ["ocr-fix", "Rasbo", "Rasho", "", "", "ocr-fix", 0], ["person", "Helen R.", "Ingrid Strangeways", "", "", "", 0]]),
+  ]);
+  const pf = compilePinnedFakes(pk);
+  check("compilePinnedFakes: the pinned stand-in, not an OCR fix's reading nor one the applied sheet reverses",
+    [...pf.map.entries()], [["yorke deverell", "John Doe"]]);
+  pf.rx.lastIndex = 0;
+  check("…matched where it stands", pf.rx.test("Signed by Yorke Deverell today."), true);
+  check("…and none without a pinned sheet", compilePinnedFakes(keyOf([["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 3]])), null);
+}
 
 const poss = keyOf([["person", "Zachary's", "John's", "", "", "", 1]]);
 check("a possessive row derives its bare form", poss.pairs.map((p) => p.fake + ">" + p.real).sort(), ["John's>Zachary's", "John>Zachary"]);

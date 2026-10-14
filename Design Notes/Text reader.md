@@ -21,6 +21,25 @@ the `chrome.*` shim that used to sit at the top of `viewer.js`, moved out so
 both pages import it first. The PWA shell (`pwa/app-web.js`) routes a `.txt`
 to a reader iframe and feeds it through `__textReaderLoadLocal`.
 
+**A stand-in only the pinned sheet holds is named at the save**
+(`PK.compilePinnedFakes`, `pinnedFakes`, `pinnedNote`). PDF-Linker puts a
+binding no export carries on "Pinned (never in text)", which DeAnonymize.bas
+does not read. The forward side writes a real name typed as its pseudonym
+whichever sheet binds it (the applied sheet's fake where both do), so a
+party named in no export yet, typed into one, went to the file as a stand-in
+Word's macro could not turn back, and nothing said so: the failure the
+project ranks above every visible leak, silent until a run. PDF-Linker's next
+run finds an export carrying a pinned stand-in and moves its row onto the
+Pseudonym Key sheet (its session's work on the bug search's fix 6), so the
+reader keeps writing it and the save names it in red, from the texts it
+wrote, until then: "run PDF-Linker … before the export goes out". Asked of
+the texts written, not of the swaps, so a name the typing converter marked or
+a paste carried is named too; an OCR fix's row (its Replacement the text's
+own correct reading) and a stand-in the applied sheet also reverses are not.
+`test-typed-cites.mjs` case 7 pins it; on the code before it the save said
+nothing. The `# stand-in:` declaration line once planned for New Real
+Values.txt (P3(a)) is not built: PDF-Linker reads the exports themselves.
+
 **📷 Screenshot** leaves the room like a print, so it is taken in the
 pseudonyms whichever way Show fakes sits (`fakesForShot`, which answers the
 function that puts the screen back). On the pages within a screen of the
