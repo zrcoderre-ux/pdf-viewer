@@ -1,0 +1,326 @@
+// Browser test: a form page beside its PDF looks like the PDF, and the line
+// numbering is what it was (viewer/text-reader.js, applyMatchedLayout and
+// placePages; columns.js, placeLine and dressCheckboxes; pdfsync.lineItems and
+// pdfFace; rules.js on the grid).
+//
+// The owner's direction: the reader is what must LOOK like the PDF, however
+// the export lays its lines out — and line numbering stays paramount. So, side
+// by side, a form page's pieces each stand where the PDF prints them, at their
+// own size and in the PDF's face, and every export line is still ONE line, in
+// its order, on its own row (a piece moves across, never up or down); a
+// pleading page's numbered lines stand exactly where their numbers put them.
+//
+// Run: node test-form-look.mjs   (from the repo root)
+//      node test-form-look.mjs --pleading-tops   prints the pleading page's
+//      numbered lines' tops as JSON and nothing else, to hold this checkout's
+//      against another's (they must be the same to the pixel).
+//
+// Needs Playwright (/opt/node-tools), Chromium (/opt/pw-browsers/chromium) and a
+// free port in 8130-8199 for python3's http.server; exits 0 with SKIP where any
+// is missing. The case folder is an OPFS directory, as in test-folder-save.mjs;
+// both PDFs are made in the page with pdf-lib's standard fonts. Every name and
+// number in them is invented.
+
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import net from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO = path.dirname(fileURLToPath(import.meta.url));
+const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
+const CHROME = "/opt/pw-browsers/chromium";
+const TOPS_ONLY = process.argv.includes("--pleading-tops");
+
+function skip(why) { console.log(`SKIP: ${why}`); process.exit(0); }
+if (!fs.existsSync(PW)) skip("Playwright is not installed at " + PW);
+if (!fs.existsSync(CHROME)) skip("Chromium is not installed at " + CHROME);
+const { chromium } = await import(PW);
+
+let fails = 0;
+function check(label, ok, note = "") {
+  if (!ok) fails++;
+  if (TOPS_ONLY) return;
+  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}`);
+  if (!ok && note) console.log(`        ${note}`);
+}
+
+function portFree(port) {
+  return new Promise((resolve) => {
+    const s = net.createServer();
+    s.once("error", () => resolve(false));
+    s.once("listening", () => s.close(() => resolve(true)));
+    s.listen(port, "127.0.0.1");
+  });
+}
+async function waitPort(port, ms = 8000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    const ok = await new Promise((resolve) => {
+      const c = net.connect(port, "127.0.0.1", () => { c.end(); resolve(true); });
+      c.on("error", () => resolve(false));
+    });
+    if (ok) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error("http.server did not come up on " + port);
+}
+let port = 0;
+for (let p = 8130; p <= 8199; p++) if (await portFree(p)) { port = p; break; }
+if (!port) skip("no free port in 8130-8199");
+const server = spawn("python3", ["-m", "http.server", String(port), "--bind", "127.0.0.1"], { cwd: REPO, stdio: "ignore" });
+await waitPort(port);
+const BASE = `http://127.0.0.1:${port}`;
+
+// ── the form ────────────────────────────────────────────────────────────────
+// A Judicial Council-style form page: rows of pieces, each { t, x, y (its
+// baseline, from the top), size, font: R(egular) B(old) I(talic), box (a
+// checkbox drawn before its label), join (the export joins it to the piece
+// before with ONE space, as an export of today does where the form prints the
+// two apart) }. A piece with no x follows the one before it a space on, in the
+// PDF as in the export. Each entry is one export line — the footnote and the
+// label printed beside it on its baseline are one, as are the footnote's next
+// line and the party boxes two points lower.
+const FORM = [
+  [{ t: "SAMPLE-100", x: 520, y: 48, size: 10, font: "B" }],
+  [{ t: "REQUEST FOR SAMPLE ORDER", x: 230, y: 80, font: "B" }],
+  [{ t: "1.", x: 36, y: 110 }, { t: "TO THE CLERK: Please", x: 50.5, y: 110 }, { t: "dismiss", y: 110, font: "B", join: true }, { t: "this action as follows:", y: 110, join: true }],
+  [{ t: "a.", x: 50.7, y: 124 }, { t: "(1)", x: 65.3, y: 124 }, { box: true, x: 88.4, y: 124 }, { t: "With prejudice", x: 107.9, y: 124 },
+    { t: "(2)", x: 181.9, y: 124 }, { box: true, x: 205.4, y: 124 }, { t: "Without prejudice", x: 224.5, y: 124 }],
+  [{ t: "(3)", x: 65.4, y: 138 }, { box: true, x: 88.6, y: 138 }, { t: "Cross-complaint filed", x: 107.8, y: 138 }, { t: "on", y: 138, join: true },
+    { t: "(date):", y: 138, font: "I", join: true }, { t: "by", x: 314.6, y: 138 }, { t: "(name):", y: 138, font: "I", join: true }],
+  [{ t: "* If the request is for some parties only, of some causes only,", x: 36, y: 170, size: 7 },
+    { t: "Attorney or party without attorney for", x: 353.6, y: 170, join: true }],
+  [{ t: "or of some cross-complaints only, so state the parties,", x: 36, y: 178.4, size: 7 }, { box: true, x: 358, y: 180.9 },
+    { t: "Plaintiff/Petitioner", x: 377, y: 180.9 }, { box: true, x: 464.6, y: 180.9, join: true }, { t: "Defendant/Respondent", x: 483.6, y: 180.9 }],
+  [{ t: "Date:", x: 36, y: 220 }, { t: "Clerk, by", x: 300, y: 220 }],
+];
+const U = 4.2, X0 = 36; // the export's character on the page, and its left
+/** An export line as PDF-Linker lays one out: each piece at its column, a space at least from the last. */
+function exportLine(pieces) {
+  let s = "";
+  for (const p of pieces) {
+    const t = p.box ? "[   ]" : p.t;
+    if (p.join || p.x == null) { s += " " + t; continue; }
+    let col = Math.round((p.x - X0) / U);
+    if (s.length && col <= s.length) col = s.length + 1;
+    s = s.padEnd(col) + t;
+  }
+  return s;
+}
+const FORM_LINES = ["[fillable form SAMPLE-100: 5 checkbox(es), 0 checked]", ...FORM.map(exportLine)];
+const FORM_TEXT = "====== Page 1 ======\n" + FORM_LINES.join("\n") + "\n";
+
+// ── the pleading ────────────────────────────────────────────────────────────
+// Twenty-eight numbers down the margin, a pitch of 24 points, the body at 72,
+// in Times; a checkbox on one numbered line.
+const PLEAD_BODY = {
+  1: "Marigold Teasdale-Vane (SBN 000000)", 2: "TEASDALE-VANE LAW", 3: "100 Example Way", 4: "Sampletown, CA 90000",
+  8: "SUPERIOR COURT OF THE STATE OF CALIFORNIA", 9: "FOR THE COUNTY OF SAMPLE",
+  12: "QUILLON BRAKESMAN, an individual,", 13: "Plaintiff,", 14: "v.", 15: "ORVELLE HOLDINGS, INC.,",
+  16: "Defendant.", 19: "[ X ] Plaintiff demands a jury trial.", 21: "Plaintiff alleges as follows:",
+  22: "1. Plaintiff is an individual residing in the County of Sample.", 23: "2. Defendant is a corporation doing business there.",
+};
+const PLEAD_LINES = [];
+for (let n = 1; n <= 28; n++) PLEAD_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + PLEAD_BODY[n] : ""));
+const PLEAD_TEXT = "====== Page 1 ======\n" + PLEAD_LINES.join("\n") + "\n";
+
+let browser = null;
+try {
+  browser = await chromium.launch({ executablePath: CHROME });
+  const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("dialog", (d) => d.accept().catch(() => {}));
+  await page.goto(BASE + "/viewer/text-reader.html");
+  await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc && !!window.__textReaderPickPdfs);
+
+  // The PDFs, made in the page, and the folder: both PDFs, both exports.
+  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, FORM_TEXT, PLEAD_TEXT }) => {
+    const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+    const form = await PDFDocument.create();
+    const fp = form.addPage([612, 792]);
+    const fonts = { R: await form.embedFont(StandardFonts.Helvetica), B: await form.embedFont(StandardFonts.HelveticaBold), I: await form.embedFont(StandardFonts.HelveticaOblique) };
+    const placed = []; // [line, piece, x, size, font] of each piece that prints text
+    FORM.forEach((pieces, k) => {
+      let end = null;
+      for (const p of pieces) {
+        const size = p.size || 9;
+        const font = fonts[p.font || "R"];
+        if (p.box) { fp.drawRectangle({ x: p.x, y: 792 - p.y - 1, width: 9, height: 9, borderWidth: 0.5 }); continue; }
+        const x = p.x != null ? p.x : end + fonts.R.widthOfTextAtSize(" ", size);
+        fp.drawText(p.t, { x, y: 792 - p.y, size, font });
+        end = x + font.widthOfTextAtSize(p.t, size);
+        placed.push({ line: k + 1, t: p.t, x, size, font: p.font || "R" });
+      }
+    });
+    const plead = await PDFDocument.create();
+    const pp = plead.addPage([612, 792]);
+    const times = await plead.embedFont(StandardFonts.TimesRoman);
+    for (let n = 1; n <= 28; n++) {
+      const y = 792 - (100 + (n - 1) * 24);
+      const num = String(n);
+      pp.drawText(num, { x: 46 - times.widthOfTextAtSize(num, 12), y, size: 12, font: times });
+      const body = PLEAD_BODY[n];
+      if (!body) continue;
+      // A checkbox is drawn, not printed: its export mark has no text on the PDF.
+      if (body.startsWith("[ X ] ")) { pp.drawRectangle({ x: 72, y: y - 1, width: 10, height: 10, borderWidth: 0.5 }); pp.drawText(body.slice(6), { x: 88, y, size: 12, font: times }); }
+      else pp.drawText(body, { x: 72, y, size: 12, font: times });
+    }
+    const formBytes = await form.save(), pleadBytes = await plead.save();
+    const top = await navigator.storage.getDirectory();
+    try { await top.removeEntry("Case Form Look", { recursive: true }); } catch { /* none yet */ }
+    const dir = await top.getDirectoryHandle("Case Form Look", { create: true });
+    const put = async (d, name, data) => { const w = await (await d.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); };
+    await put(dir, "Sample Form.pdf", formBytes);
+    await put(dir, "Sample Pleading.pdf", pleadBytes);
+    const text = await dir.getDirectoryHandle("Text Files", { create: true });
+    await put(text, "Sample Form.txt", FORM_TEXT);
+    await put(text, "Sample Pleading.txt", PLEAD_TEXT);
+    await window.__textReaderAdoptFolder(dir);
+    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes };
+    return { placed };
+  }, { FORM, PLEAD_BODY, FORM_TEXT, PLEAD_TEXT });
+
+  /** Open an export beside its PDF and wait for its page to be laid on the grid. */
+  async function openBeside(exportName, pdfName) {
+    await page.evaluate((n) => window.__textReaderOpenDoc(n), exportName);
+    await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
+    await page.evaluate(async (pdfName) => {
+      const f = new File([window.__formLookPdfs[pdfName]], pdfName, { type: "application/pdf" });
+      await window.__textReaderPickPdfs([f]);
+    }, pdfName);
+    const sbs = await page.$("#sbs-toggle");
+    if (!(await sbs.evaluate((b) => document.body.classList.contains("sbs") || b.classList.contains("on") || b.getAttribute("aria-pressed") === "true"))) await sbs.click();
+    await page.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 });
+    await page.waitForTimeout(1500);
+  }
+  /** The page laid out, as the screen has it: each line's box, rows, top and text. */
+  const readPage = () => page.evaluate(async () => {
+    const TD = await import("/viewer/textdoc.js");
+    const sec = document.querySelector("#pages .tpage");
+    const body = sec.querySelector(".page-body");
+    const b = body.getBoundingClientRect();
+    const lines = [...body.querySelectorAll(":scope > .line")].map((l) => {
+      const lt = l.querySelector(":scope > .lt");
+      const r = l.getBoundingClientRect();
+      // Where each piece of the line stands on its baseline: a probe of no size
+      // set at the head of each cell and of the line, read and taken out again.
+      const bases = [];
+      for (const host of [lt, ...lt.querySelectorAll(":scope > .cc")]) {
+        const probe = document.createElement("span");
+        probe.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+        host.insertBefore(probe, host === lt ? null : host.firstChild);
+        bases.push(probe.getBoundingClientRect().top - b.top);
+        probe.remove();
+      }
+      return {
+        text: l.textContent, top: parseFloat(l.style.top), boxTop: r.top - b.top, boxBottom: r.bottom - b.top, lh: parseFloat(l.style.lineHeight),
+        bases, num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null,
+        face: lt.style.fontFamily, cells: lt.querySelectorAll(".cc").length, placed: lt.querySelectorAll(".cc[style*='min-width']").length,
+      };
+    });
+    return { lines, width: sec.getBoundingClientRect().width, file: TD.serializeNodes(body), boxes: [...body.querySelectorAll(".cb")].map((c) => c.textContent) };
+  });
+
+  // ── a form page beside its PDF ──────────────────────────────────────────────
+  if (!TOPS_ONLY) console.log("a form page beside its PDF");
+  if (!TOPS_ONLY) {
+    await openBeside("Sample Form.txt", "Sample Form.pdf");
+    const laid = await readPage();
+    const scale = laid.width / 612;
+    check("the page reads back as the file: every line, in its order", laid.file === FORM_LINES.join("\n"), JSON.stringify(laid.file).slice(0, 200));
+    const texted = laid.lines.filter((l) => l.text.trim() && !Number.isNaN(l.top));
+    check("…and stands down the page in that order", texted.every((l, k) => k === 0 || l.top >= texted[k - 1].top), texted.map((l) => l.top.toFixed(1)).join(" "));
+    const strays = texted.filter((l) => !(l.boxBottom - l.boxTop <= l.lh + 1 && l.bases.every((y) => Math.abs(y - l.bases[0]) <= 0.5) && l.bases[0] > l.boxTop && l.bases[0] <= l.boxBottom));
+    check("each line stands on ONE row: its box one line high, every piece of it on the line's own baseline", strays.length === 0,
+      strays.map((l) => `${l.text.trim().slice(0, 30)} box ${l.boxTop.toFixed(1)}–${l.boxBottom.toFixed(1)} lh ${l.lh} baselines ${l.bases.map((v) => v.toFixed(1)).join(",")}`).join(" | "));
+    check("…the 9-point label on the 7-point footnote's line on that line's baseline, not raised to the row it was printed on",
+      (() => { const l = laid.lines.find((x) => x.text.includes("Attorney or party")); return !!l && l.bases.length === 2 && Math.abs(l.bases[0] - l.bases[1]) <= 0.5; })());
+    check("every checkbox is one piece, drawn whole", laid.boxes.length === 5 && laid.boxes.every((t) => t === "[   ]"), JSON.stringify(laid.boxes));
+    // Where the pieces stand, and in what face and size.
+    const where = await page.evaluate(({ wanted }) => {
+      const body = document.querySelector("#pages .tpage .page-body");
+      const left = body.getBoundingClientRect().left;
+      return wanted.map(({ line, t }) => {
+        const lt = body.querySelectorAll(":scope > .line")[line].querySelector(".lt");
+        const walk = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+          const i = n.data.indexOf(t);
+          if (i < 0) continue;
+          const r = document.createRange();
+          r.setStart(n, i);
+          r.setEnd(n, i + 1);
+          const cs = getComputedStyle(n.parentElement);
+          return { t, x: r.getBoundingClientRect().left - left, size: parseFloat(cs.fontSize), weight: cs.fontWeight, style: cs.fontStyle, family: cs.fontFamily };
+        }
+        return { t, missing: true };
+      });
+    }, { wanted: made.placed.map((p) => ({ line: p.line, t: p.t })) });
+    const off = where.map((w, k) => ({ w, p: made.placed[k] })).filter(({ w, p }) => w.missing || Math.abs(w.x - p.x * scale) > 1.5);
+    check("every piece stands where the PDF prints it — a label the export joins with one space too", off.length === 0,
+      off.map(({ w, p }) => `${p.t}: ${w.missing ? "missing" : w.x.toFixed(1)} vs ${(p.x * scale).toFixed(1)}`).join(" | "));
+    const sized = where.map((w, k) => ({ w, p: made.placed[k] })).filter(({ w, p }) => !w.missing && Math.abs(w.size - p.size * scale) > 0.05);
+    check("…at its own size: the 9-point label on the 7-point footnote's line is 9-point", sized.length === 0,
+      sized.map(({ w, p }) => `${p.t}: ${w.size.toFixed(2)} vs ${(p.size * scale).toFixed(2)}`).join(" | "));
+    const faced = where.map((w, k) => ({ w, p: made.placed[k] })).filter(({ w, p }) => !w.missing
+      && ((w.weight === "700") !== (p.font === "B") || (w.style === "italic") !== (p.font === "I") || !/Arial|Helvetica|Liberation Sans/.test(w.family)));
+    check("…in the PDF's face: Helvetica as Arial, its bold bold, its oblique italic", faced.length === 0,
+      faced.map(({ w, p }) => `${p.t}: ${w.weight} ${w.style} ${w.family.slice(0, 30)} vs ${p.font}`).join(" | "));
+    const note = laid.lines.find((l) => l.text.startsWith("[fillable form"));
+    check("a line the PDF does not print (PDF-Linker's note) keeps the reader's own face", !!note && !note.face, note ? note.face : "no note line");
+    const look = await page.evaluate(() => window.__textReaderFormLook());
+    if (!TOPS_ONLY) console.log(`        (planned ${look.planned} page(s) in ${look.plan.toFixed(1)} ms; placing passes took ${look.place.toFixed(1)} ms; fonts asked for ${look.fonts.pages} time(s), ${look.fonts.ms.toFixed(1)} ms)`);
+    // Side by side shut: nothing it did is left on the page.
+    await page.click("#sbs-toggle");
+    await page.waitForTimeout(800);
+    const flow = await readPage();
+    check("side by side shut, the page is the reader's own again, the file unchanged",
+      flow.file === FORM_LINES.join("\n") && flow.lines.every((l) => !l.face && !l.placed) && flow.boxes.length === 5,
+      JSON.stringify(flow.lines.filter((l) => l.face || l.placed).map((l) => l.text.slice(0, 20))));
+  }
+
+  // ── a pleading page beside its PDF ─────────────────────────────────────────
+  if (!TOPS_ONLY) console.log("a pleading page beside its PDF");
+  {
+    await openBeside("Sample Pleading.txt", "Sample Pleading.pdf");
+    const laid = await readPage();
+    // Where its numbers put the numbered lines: the PDF's own geometry, read as
+    // the reader reads it (pdfsync.pleadingGeometry over pdf.js's items).
+    const geom = await page.evaluate(async () => {
+      const pdfjs = await import("/pdfjs/build/pdf.mjs");
+      pdfjs.GlobalWorkerOptions.workerSrc = "/pdfjs/build/pdf.worker.mjs";
+      const PS = await import("/viewer/pdfsync.js");
+      const pdf = await pdfjs.getDocument({ data: window.__formLookPdfs["Sample Pleading.pdf"].slice() }).promise;
+      const pg = await pdf.getPage(1);
+      const v = pg.getViewport({ scale: 1 });
+      const tc = await pg.getTextContent();
+      const items = tc.items.filter((it) => it.str && it.transform).map((it) => ({ str: it.str, x: it.transform[4], top: v.height - (it.transform[5] + (it.height || 0)), w: it.width || 0, h: it.height || 0 }));
+      return PS.pleadingGeometry(items, { w: v.width, h: v.height });
+    });
+    const scale = laid.width / 612;
+    const numbered = laid.lines.filter((l) => l.num);
+    if (TOPS_ONLY) {
+      console.log(JSON.stringify(numbered.map((l) => [l.num, l.top])));
+    } else {
+      const offTop = numbered.filter((l) => Math.abs(l.top - (geom.y1 + (l.num - 1) * geom.pitch) * scale) > 0.01);
+      check("every numbered line stands exactly at its number on the PDF", numbered.length === 28 && offTop.length === 0,
+        offTop.map((l) => `${l.num}: ${l.top} vs ${((geom.y1 + (l.num - 1) * geom.pitch) * scale).toFixed(3)}`).join(" | "));
+      check("…the pleading's lines are left as they were: no PDF face, no piece placed", laid.lines.every((l) => !l.face && !l.placed),
+        JSON.stringify(laid.lines.filter((l) => l.face || l.placed).map((l) => l.text.slice(0, 20))));
+      check("…its checkbox drawn whole on its numbered line", laid.boxes.length === 1 && laid.boxes[0] === "[ X ]", JSON.stringify(laid.boxes));
+      check("…and the page reads back as the file", laid.file === PLEAD_LINES.join("\n"), JSON.stringify(laid.file).slice(0, 160));
+    }
+  }
+
+  if (!TOPS_ONLY) check("no error on the page", errors.length === 0, errors.join(" | "));
+} catch (e) {
+  fails++;
+  console.log(`  FAIL  the test itself threw: ${e && e.stack ? e.stack.split("\n").slice(0, 3).join(" | ") : e}`);
+} finally {
+  if (browser) await browser.close().catch(() => {});
+  server.kill("SIGTERM");
+}
+if (!TOPS_ONLY) console.log(fails ? `\n${fails} FAILED` : "\nall passed");
+process.exit(fails && !TOPS_ONLY ? 1 : 0);

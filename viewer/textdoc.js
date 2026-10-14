@@ -3300,6 +3300,31 @@ export const COLUMN_REACH = 3;
 export const COLUMN_TIGHT = 4;
 const GAP_RUN_RE = / +(?=\S)/g;
 
+// A form's CHECKBOX as PDF-Linker writes it: "[   ]" empty, "[ X ]" ticked,
+// "[ ? ]" where the ink could not be read — and, in exports written before
+// those, "[ ]", "[X]" and "[?]". The empty one holds three spaces, which is a
+// gap between columns (COLUMN_GAP): cut there, the box came out as a "[" at
+// the end of one cell and a "]" at the head of the next. A box is one thing
+// on the page, so it is one thing here — never cut (columnCuts), and drawn as
+// a box (columns.js, dressCheckboxes).
+const CHECKBOX_RE = /\[(?: {3}| X | \? |X|\?| )\]/g;
+/** What a mark says: "" an empty box, "x" a ticked one, "?" one the run could not read. */
+const CHECKBOX_STATE = { "[   ]": "", "[ ]": "", "[ X ]": "x", "[X]": "x", "[ ? ]": "?", "[?]": "?" };
+/** A checkbox mark's state, or null where `s` is not one whole mark. */
+export function checkboxState(s) {
+  return Object.prototype.hasOwnProperty.call(CHECKBOX_STATE, s) ? CHECKBOX_STATE[s] : null;
+}
+/** Every checkbox mark in a text, in order: [from, to, state] each. */
+export function checkboxRanges(text) {
+  const s = String(text == null ? "" : text);
+  const out = [];
+  if (!s.includes("[")) return out;
+  CHECKBOX_RE.lastIndex = 0;
+  let m;
+  while ((m = CHECKBOX_RE.exec(s))) out.push([m.index, m.index + m[0].length, CHECKBOX_STATE[m[0]]]);
+  return out;
+}
+
 /**
  * Where a line's spaces cut it between columns: the offsets at which a column
  * begins after a gap. A gap of COLUMN_GAP spaces always cuts; a narrower one
@@ -3314,7 +3339,9 @@ const GAP_RUN_RE = / +(?=\S)/g;
  * `atoms` are [from, to) stretches of the line that are one thing on screen
  * and are never cut: a pseudonym, a spot keep. A column does not begin in the
  * middle of a name, and a word of one that happens to stand on the page's
- * second column is still a word of the name.
+ * second column is still a word of the name. A checkbox mark is one of them
+ * always (checkboxRanges), whoever asks: the three spaces inside "[   ]" are
+ * no gap between columns.
  */
 export function columnCuts(text, { stops = null, second = null, start = 0, atoms = null } = {}) {
   const s = String(text == null ? "" : text);
@@ -3322,7 +3349,9 @@ export function columnCuts(text, { stops = null, second = null, start = 0, atoms
   const first = s.search(/\S/);
   if (first < 0) return cuts;
   const begun = (col) => (!stops ? 0 : stops instanceof Map ? stops.get(col) || 0 : stops.has(col) ? 2 : 0);
-  const within = (i) => !!atoms && atoms.some(([a, b]) => i > a && i < b);
+  const boxes = checkboxRanges(s);
+  const whole = boxes.length ? (atoms || []).concat(boxes) : atoms;
+  const within = (i) => !!whole && whole.some(([a, b]) => i > a && i < b);
   GAP_RUN_RE.lastIndex = first;
   let m;
   while ((m = GAP_RUN_RE.exec(s))) {

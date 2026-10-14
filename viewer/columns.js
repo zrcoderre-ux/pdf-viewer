@@ -40,22 +40,127 @@
 //           (alignColumns): off the PDF's grid the column stands at one place
 //           down every line beside it, a gutter clear of the widest text to
 //           its left, however far past the grid that text runs.
+//   .cb     a form's checkbox mark, one piece, drawn as a box over its own
+//           characters (dressCheckboxes).
 //
 // The cells are wrappers and nothing else: the text, the pseudonym spans and
 // the rule spans are inside them as they were, so serializeNodes, a copy and
 // every offset into the page read exactly what they did. On the PDF's grid
 // (side by side) pleading paper keeps its columns, measured in the PDF's own
 // body type at the grid's scale, since every line there starts at the body
-// margin; a page with no numbers places each line at its PDF row's own left,
-// and the cells are inert on it.
+// margin; a page with no numbers is cut wherever one of its PDF's items begins
+// as well, and each piece set where the PDF prints it, at its size and in its
+// face (placeLine; text-reader.js, placePages).
 // Like the rule spans they are re-derived on every pass — but a line already
 // dressed as its text says is left exactly as it is, so the editor's caret
 // text node on any other line is never replaced.
 
-import { columnBands, columnCuts, columnWidths, lineIndent, placeColumns, serializeNodes, COLUMN_GUTTER } from "./textdoc.js";
+import { checkboxRanges, checkboxState, columnBands, columnCuts, columnWidths, lineIndent, placeColumns, serializeNodes, COLUMN_GUTTER } from "./textdoc.js";
 
 /** A node's length in the file: a pseudonym span counts its fake, as the cuts were made on. */
 const fileLength = (n) => (n.nodeType === 3 ? n.data.length : n.nodeType === 1 ? serializeNodes(n).length : 0);
+
+// ---- a form's checkboxes, drawn ----------------------------------------------
+//
+// PDF-Linker writes a form's checkbox as "[   ]", "[ X ]" or "[ ? ]" ("[ ]",
+// "[X]", "[?]" in older exports; textdoc.checkboxRanges). In the reader's font
+// that was two brackets with a gap between them — and the empty one's three
+// spaces were a gap between columns, so the page's columns cut it in half: a
+// "[" closing one cell and a "]" opening the next. Each mark is wrapped in a
+// span (.cb, its state in data-cb: "x" ticked, "?" unread, none empty) that
+// the stylesheet draws as a small square at the line's own type size, a mark
+// in it for X and for ?, over the mark's own text, which stays underneath
+// unseen — so the box takes exactly the room its text does, and every width
+// worked out from the text (the cells, placeColumns, a prefix side by side)
+// is the box's. Like the rule spans it carries no data-fake and no
+// contenteditable: serializeNodes, a copy, Find, the LEAKS walk and every
+// offset read the mark's characters as they always did, and in the editor the
+// mark is drawn as the text it is, to be typed into. Re-derived on every pass:
+// a span whose text an edit has made something else is text again.
+const BOX_INSIDE = ".cb, .pn, [data-here], .rb, .rh";
+/** Text nodes of a line a mark may be wrapped in: not a mark already, a pseudonym, a spot keep or a rule glyph. */
+function boxableTexts(lt) {
+  const out = [];
+  const visit = (parent) => {
+    for (const n of parent.childNodes) {
+      if (n.nodeType === 3) { if (n.data.includes("[")) out.push(n); continue; }
+      if (n.nodeType === 1 && !n.matches(BOX_INSIDE)) visit(n);
+    }
+  };
+  visit(lt);
+  return out;
+}
+/** A line's checkbox marks wrapped as boxes (.cb). Returns whether it changed anything. */
+export function dressCheckboxes(lt) {
+  const had = lt.querySelectorAll(".cb");
+  if (!had.length && !lt.textContent.includes("[")) return false;
+  let changed = false;
+  for (const c of had) {
+    const state = checkboxState(c.textContent);
+    if (state == null || (c.parentElement && c.parentElement.closest(".pn, [data-here]"))) { c.replaceWith(...c.childNodes); changed = true; continue; }
+    if ((c.getAttribute("data-cb") || "") !== state) {
+      if (state) c.setAttribute("data-cb", state); else c.removeAttribute("data-cb");
+      changed = true;
+    }
+  }
+  for (const n of boxableTexts(lt)) {
+    const marks = checkboxRanges(n.data);
+    // From the right, so the offsets of the marks before each one hold.
+    for (let r = marks.length - 1; r >= 0; r--) {
+      const [a, b, state] = marks[r];
+      if (b < n.data.length) n.splitText(b);
+      const mark = a > 0 ? n.splitText(a) : n;
+      const box = document.createElement("span");
+      box.className = "cb";
+      if (state) box.setAttribute("data-cb", state);
+      mark.replaceWith(box);
+      box.appendChild(mark);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
+ * A line as it reads on screen against the file it writes: `fileAt(d)`, the
+ * offset in the file of place d in what it shows (-1 inside a pseudonym or a
+ * spot keep, whose real name has no place in its fake), and those stretches
+ * (`atoms`, [from, to) in what it shows). The PDF prints what the page shows;
+ * the cells are cut in the file.
+ */
+export function lineMap(lt) {
+  const atoms = [];
+  const fakes = []; // [shown from, file from] of each stretch whose file text is not what it shows
+  let d = 0, f = 0;
+  const visit = (parent) => {
+    for (const n of parent.childNodes) {
+      if (n.nodeType === 3) { d += n.data.length; f += n.data.length; continue; }
+      if (n.nodeType !== 1 || n.nodeName === "BR") continue;
+      const fake = n.getAttribute("data-fake");
+      if (fake != null || n.hasAttribute("data-here")) {
+        const shown = n.textContent.length;
+        atoms.push([d, d + shown]);
+        fakes.push([d, f, d + shown, f + (fake != null ? fake.length : serializeNodes(n).length)]);
+        d += shown;
+        f = fakes[fakes.length - 1][3];
+        continue;
+      }
+      visit(n);
+    }
+  };
+  visit(lt);
+  const fileAt = (at) => {
+    let dd = 0, ff = 0; // the last stretch's end, shown and in the file
+    for (const [ds, fs, de, fe] of fakes) {
+      if (at < ds) break;
+      if (at === ds) return fs;
+      if (at < de) return -1;
+      dd = de; ff = fe;
+    }
+    return at <= d ? ff + (at - dd) : -1;
+  };
+  return { fileAt, atoms };
+}
 
 /**
  * Where a line's spans stand in the file, [from, to) each: a pseudonym, a
@@ -164,6 +269,7 @@ export function dressLineColumns(lt, shape) {
     const cell = document.createElement("span");
     cell.className = "cc";
     cell.style.setProperty("--cols", String(widths[i]));
+    cell.__at = i ? cuts[i - 1] : lead; // where its piece begins in the file (text-reader.js, placeCells)
     cell.append(...parts[p++]);
     const gap = document.createElement("span");
     gap.className = "cg";
@@ -196,6 +302,9 @@ export function dressColumns(body) {
     const at = count++;
     const lt = line.querySelector(":scope > .lt");
     if (!lt) continue;
+    // A checkbox is one thing: wrapped before anything is cut, so no cut can
+    // fall inside it (spanRanges reads it as one).
+    if (dressCheckboxes(lt)) changed = true;
     const g = numbered && line.classList.contains("num") ? line.querySelector(":scope > .gutter") : null;
     const start = g ? g.textContent.length : 0;
     const shown = lt.textContent;
@@ -235,28 +344,53 @@ export function dressColumns(body) {
   // …and a plain line is read after all where it stands beside a second
   // column, which its left-hand half can run right up to with a single space
   // between. Only there: a form's column down its caption says nothing about
-  // the prose under it.
+  // the prose under it. And where the PDF's grid cuts it (gridCuts, below).
   for (const l of plain) {
-    if (bands[l.at].second.size) { l.text = serializeNodes(l.lt); lines.push(l); }
+    if (bands[l.at].second.size || l.lt.__grid) { l.text = serializeNodes(l.lt); lines.push(l); }
     else { l.line.classList.remove("cols"); l.lt.__colPlan = null; }
   }
   for (const l of lines) {
     const { ind, lead } = lineIndent(l.text, { start: l.start, origin });
     const { stops, second } = bands[l.at];
-    const cuts = columnCuts(l.text, { stops, second, start: l.start, atoms: spanRanges(l.lt) });
+    const atoms = spanRanges(l.lt);
+    const own = columnCuts(l.text, { stops, second, start: l.start, atoms });
+    const cuts = gridCuts(l.lt, l.text, own, atoms, lead);
     const gaps = cuts.map((c) => l.text.slice(0, c).replace(/ +$/, "").length);
     if (dressLineColumns(l.lt, { ind, lead, cuts, widths: columnWidths(cuts, lead), gaps })) changed = true;
     // What alignColumns needs to place the line's second columns, in the
     // page's own columns: where its text begins and each piece after a gap.
-    l.lt.__colPlan = second.size ? { from: l.start + lead, cuts: cuts.map((c) => l.start + c), second, origin } : null;
+    // Not for a line the PDF's grid has cut as well: that is a page laid on
+    // its PDF, where alignColumns has nothing to place.
+    l.lt.__colPlan = second.size && cuts === own ? { from: l.start + lead, cuts: cuts.map((c) => l.start + c), second, origin } : null;
     // A line with a gap between columns, not just an indent: what the page's
     // type has to be small enough to hold on one line (text-reader.js,
     // shapePages), since a column that wraps comes back at the left margin.
-    l.line.classList.toggle("cols", cuts.length > 0);
+    l.line.classList.toggle("cols", own.length > 0);
   }
   // …and each second column placed for the font the page is read in.
   alignColumns([body]);
   return changed;
+}
+
+/**
+ * A line's cuts with the PDF's own added: beside its PDF page a line is cut
+ * wherever one of the PDF's items begins (text-reader.js, applyMatchedLayout,
+ * which writes them on the line as `__grid`, { text, cuts }), so that each
+ * piece can stand where the PDF prints it — a piece the export joins to the
+ * one before with a single space as well as one three spaces off. Only while
+ * the line is the text they were worked out for, never inside a pseudonym, a
+ * spot keep or a checkbox, and never before the line's own text or at its
+ * end. Returns `own` itself where nothing is added.
+ */
+function gridCuts(lt, text, own, atoms, lead) {
+  const g = lt.__grid;
+  if (!g || g.text !== text || !g.cuts.length) return own;
+  const whole = atoms.concat(checkboxRanges(text));
+  const all = new Set(own);
+  for (const c of g.cuts) {
+    if (c > lead && c < text.length && text[c] !== " " && !whole.some(([a, b]) => c > a && c < b)) all.add(c);
+  }
+  return all.size === own.length ? own : [...all].sort((a, b) => a - b);
 }
 
 /**
@@ -296,23 +430,38 @@ function put(el, name, value) {
 
 // A piece's width in ems of its font, read off the font's own metrics on a
 // canvas: the same widths the page draws it at, and no layout asked for.
-// Kept per font; a page's pieces are mostly the same lines over and over.
-let sizer = null, sizerFont = "", sized = new Map();
-function textEm(text, font) {
-  if (font !== sizerFont) {
-    sizer = sizer || document.createElement("canvas").getContext("2d");
-    sizer.font = "100px " + font;
-    sizerFont = font;
+// Kept per FONT — the face, and its weight and slant in front of it ("italic
+// 700 " + the family list) — since a page beside its PDF is drawn in the PDF's
+// faces as well as the reader's own (pdfsync.pdfFace), and a width kept for
+// one face and read back for another is a column in the wrong place. A
+// page's pieces are mostly the same lines over and over.
+let sizer = null, sizerFont = null;
+const sizedBy = new Map(); // font → Map(text → width in em)
+let sizedCount = 0;
+function textEm(text, font, style = "") {
+  const key = style + font;
+  let sized = sizedBy.get(key);
+  if (!sized) {
+    if (sizedCount >= 50000) { sizedBy.clear(); sizedCount = 0; }
     sized = new Map();
+    sizedBy.set(key, sized);
   }
   let w = sized.get(text);
   if (w == null) {
+    sizer = sizer || document.createElement("canvas").getContext("2d");
+    if (sizerFont !== key) { sizer.font = style + "100px " + font; sizerFont = key; }
     w = sizer.measureText(text).width / 100;
-    if (sized.size >= 50000) sized.clear();
     sized.set(text, w);
+    sizedCount++;
   }
   return w;
 }
+/** A face's CSS weight and slant as the canvas font shorthand puts them in front of the size. */
+const faceStyle = (face) => (face ? (face.italic ? "italic " : "") + (face.bold ? "700 " : "") : "");
+/** `text`'s width in ems of `face` (pdfsync.pdfFace: { family, bold, italic }). */
+export function faceEm(text, face) { return textEm(text, face.family, faceStyle(face)); }
+/** …and the face's own space, in ems: what a line's opening spaces are drawn at in it. */
+export function faceSpace(face) { return textEm("          ", face.family, faceStyle(face)) / 10; }
 /** A cell's text as the page shows it: a pseudonym as it reads, the gap's spaces left out. */
 function pieceText(cell) {
   let s = "";
@@ -376,6 +525,105 @@ export function alignColumns(bodies) {
     }
     for (const el of placed) if (!keep.has(el)) unplace(el);
   }
+}
+
+/** A face (pdfsync.pdfFace) written on an element, or taken off it: its family, weight and slant, and its space for the cells' sums. */
+function putFace(el, face) {
+  const key = face ? faceStyle(face) + face.family : "";
+  if ((el.__face || "") === key) return;
+  el.__face = key;
+  const s = el.style;
+  if (!face) { for (const p of ["font-family", "font-weight", "font-style", "--col-sp-n"]) s.removeProperty(p); return; }
+  s.fontFamily = face.family;
+  s.fontWeight = face.bold ? "700" : "400";
+  s.fontStyle = face.italic ? "italic" : "normal";
+  s.setProperty("--col-sp-n", faceSpace(face).toFixed(4));
+}
+const sameFace = (a, b) => (a ? faceStyle(a) + a.family : "") === (b ? faceStyle(b) + b.family : "");
+
+/**
+ * Side by side, a line's pieces each where its PDF prints them, at the size
+ * and in the face the PDF prints them in (text-reader.js, applyMatchedLayout,
+ * which finds them: pdfsync.lineItems). `spec`:
+ *
+ *   places   Map(file offset → { x, size, face }): the pieces the PDF placed,
+ *            by where each begins in the file — x in px across the page, the
+ *            line's own coordinates; size in px, null for the line's own; face
+ *            null for the line's own.
+ *   start    where the line's text begins, in px (its first piece's place).
+ *   at       (offset, x, from) → where a piece the PDF did not place begins:
+ *            the grid's place (x and from are where the piece before it
+ *            begins, for a grid that runs on from there).
+ *   face     the face of the row the line was matched to.
+ *   size     the line's type in px.
+ *   lead     where the line's text begins in the file (its one piece, where
+ *            it has no cells).
+ *   cellFaces  a box row's: each of its cells' faces (rules.js, .rc), null
+ *            for the row's own.
+ *
+ * Each cell (.cc) is given the width that puts the piece after it at its
+ * place (min-width, so fitCells still squeezes a piece too wide for it), and
+ * its own size and face where they are not the line's. The piece after the
+ * last cut is no cell: its size and face are the LINE's — so the line takes
+ * them (on its .lt; its box, which the leading is worked out from, stays the
+ * row's), and a cell that differs says so. Written only where it changes.
+ */
+export function placeLine(lt, spec) {
+  lt.__placed = true;
+  const cells = [];
+  for (const c of lt.children) if (c.classList.contains("cc")) cells.push(c);
+  const last = cells[cells.length - 1];
+  const lead = cells.length ? cells[0].__at : null;
+  const tailAt = last ? last.__at + fileLength(last) : null;
+  const tail = (cells.length ? spec.places.get(tailAt) : spec.places.get(spec.lead)) || null;
+  const face = tail && tail.face ? tail.face : spec.face;
+  const size = tail && tail.size ? tail.size : spec.size;
+  putFace(lt, face);
+  const sz = size !== spec.size ? size.toFixed(2) + "px" : "";
+  if (lt.style.fontSize !== sz) lt.style.fontSize = sz;
+  // A box row's cells between its bars, each in its own face where it is not
+  // the row's.
+  if (spec.cellFaces) {
+    let i = 0;
+    for (const c of lt.children) {
+      if (!c.classList.contains("rc")) continue;
+      const f = spec.cellFaces[i++];
+      putFace(c, f && !sameFace(f, face) ? f : null);
+    }
+  }
+  let x = spec.start, from = lead;
+  cells.forEach((c, i) => {
+    const own = spec.places.get(c.__at) || null;
+    const nextAt = i + 1 < cells.length ? cells[i + 1].__at : tailAt;
+    const placed = spec.places.get(nextAt);
+    const next = placed ? placed.x : spec.at(nextAt, x, from);
+    const want = next - x > 0.5 ? (next - x).toFixed(2) + "px" : "";
+    if (c.style.minWidth !== want) c.style.minWidth = want;
+    const cs = own && own.size && Math.abs(own.size - size) > 0.01 ? own.size.toFixed(2) + "px" : "";
+    if (c.style.fontSize !== cs) c.style.fontSize = cs;
+    putFace(c, own && own.face && !sameFace(own.face, face) ? own.face : null);
+    x = next;
+    from = nextAt;
+  });
+}
+/**
+ * A line put back as the grid left it: the PDF's cuts off it (`__grid`) and
+ * whatever placeLine wrote taken back. Returns whether it carried the PDF's
+ * cuts, so its cells are to be cut again without them (dressColumns).
+ */
+export function unplaceLine(lt) {
+  const cut = !!lt.__grid;
+  lt.__grid = null;
+  lt.__placed = false;
+  putFace(lt, null);
+  if (lt.style.fontSize && !(lt.parentElement && lt.parentElement.classList.contains("rl"))) lt.style.fontSize = "";
+  for (const c of lt.querySelectorAll(".cc")) {
+    if (c.style.minWidth) c.style.minWidth = "";
+    if (c.style.fontSize) c.style.fontSize = "";
+    putFace(c, null);
+  }
+  for (const c of lt.querySelectorAll(".rc")) putFace(c, null);
+  return cut;
 }
 
 /** The narrowest a piece before a column is drawn to hold its column (fitCells): three quarters of its width still reads. */

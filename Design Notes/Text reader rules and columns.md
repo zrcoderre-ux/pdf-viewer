@@ -185,13 +185,14 @@ line of capitals beside it, the page set smaller, and a line put back.
 
 Side by side, a page whose every line has both halves begins no line anywhere
 but the margin, so `pdfsync.charGrid` had no two lines four columns apart to
-fit and the page fell back to `.rowleft`, ragged as above. `pdfRows` now keeps,
-on a row whose halves share a baseline, where each half after the first
-begins (`breaks`: an item a gutter of 1.5 × the type clear of everything
-before it, and its first word), and the grid's pairs take a two-column line's
-right-hand half too: the break whose word the half begins with, or the row
-itself where the line was matched to its right-hand half. That page gets a
-grid, and its right-hand column stands where the PDF prints it.
+fit and the page fell back to `.rowleft`, ragged as above. `pdfRows` kept, on
+a row whose halves share a baseline, where each half after the first begins
+(`breaks`), and the grid's pairs took a two-column line's right-hand half
+too. Both are gone since the form look (below, "A form beside its PDF looks
+like the PDF"): the grid's pairs are every piece of type a line carries
+(`pdfsync.lineItems`), the right-hand half among them, and `pdfRows` keeps
+each row's items in place of its breaks. That page gets a grid, and its
+right-hand column stands where the PDF prints it.
 
 The grid unit is `--col-u`: in the flowing view and on pleading paper,
 `--col-n` × `--body-em`; side by side `--body-em` is the PDF's body type at the
@@ -199,12 +200,16 @@ grid's scale (`--grid-em`, written with the grid). Pleading paper keeps all of
 it there: every line starts at the body margin.
 
 A page with NO numbers side by side is set on the export's own grid read back
-off the PDF (`pdfsync.charGrid`): for each line whose matched row (`rowLayout`
-now returns `rowOf`) begins with the line's first word, a pair (the column its
-text begins at, the row's left), fitted Theil–Sen (median slope over pairs
-4+ columns apart, then median intercept) to { x0, unit } in PDF units; no
-grid with fewer than two lines 4+ columns in, a slope outside 1.5–15 pt, or
-under 60% of the pairs within 1.5 units. With one (`.cgrid`, `--grid-col` =
+off the PDF (`pdfsync.charGrid`): for each piece of type a matched line
+carries (`rowLayout` returns `rowOf`; `matchItems` finds the items of the
+line's row and of the rows beside it in the line, `pdfsync.lineItems`), a pair
+(the column the piece begins at, the item's x) — a box row's pieces too, not
+one a checkbox leads or one glued to the text before it — fitted Theil–Sen
+(median slope over pairs 4+ columns apart, then median intercept) to { x0,
+unit } in PDF units; no grid with fewer than two pairs 4+ columns in, a slope
+outside 1.5–15 pt, or under 60% of the pairs within 1.5 units. Until the form
+look the pairs were each line's first word against its row's left, and a page
+of boxes (CM-010's first, SUM-100) had too few of them for a grid. With one (`.cgrid`, `--grid-col` =
 unit × scale): every line's left is x0, its indent and cells are in the
 grid's unit, so a right-hand column stands where the PDF prints it on every
 line; a box row (`.rl`, not cut into columns) is set in by what its leading
@@ -251,3 +256,232 @@ numbers down the side were out of step with the PDF's and two stood crowded
 together where the push ran out. `holdWithin` takes the same room, or it
 pulled the caption back up past its numbers from the foot. Tested in
 `test-pdfsync.mjs`.
+
+### A form beside its PDF looks like the PDF (`placePages`, `columns.placeLine`, `pdfsync.lineItems`, `pdfFace`)
+
+The owner, in chat: "I want to use PDF viewer to compensate. Even if the
+underlying text file has a wider row, I want PDF viewer to show me something
+that looks as much like the pdf as possible. The underlying text file can
+deviate as needed, so long as it is not misleading or confusing to the claude
+model reading it." And, of everything here: "Line numbering is still
+paramount in the text file and in the viewer." So the export stays laid out
+for a model to read, and the reader, side by side, is what looks like the
+form — without ever moving a line. Every export line is still one line, in
+its order, on its own row: a piece of it moves ACROSS and takes its own size,
+never up or down, and a smaller piece sits on the line's baseline, not on the
+baseline of the row the PDF printed it on. Pleading paper is untouched.
+
+**A checkbox is one piece, in both views** (`textdoc.checkboxRanges`,
+`checkboxState`; `columns.dressCheckboxes`). PDF-Linker writes a box as
+`[   ]`, `[ X ]` or `[ ? ]` (`[ ]`, `[X]`, `[?]` in older exports). The empty
+one's three spaces are `COLUMN_GAP`, so the columns cut inside it — on CIV-110
+"(TYPE OR PRINT NAME OF [   ] ATTORNEY" drew as "[" … "]ATTORNEY", and
+"[   ] Plaintiff/Petitioner [   ] Defendant/Respondent" put a "[" at the end of
+one cell and "] Plaintiff/Petitioner [" in the next. A mark is an atom of
+`columnCuts` now, whoever asks (`columnBands`, the char grid's pairs, the
+cells), so no cut and no column begins inside one. `dressColumns` wraps each
+mark, on every line, a box row's too, in a `.cb` span (its state in
+`data-cb`: `x`, `?`, none for empty) before anything is cut, and the
+stylesheet draws it as a square 0.74 em on a side at the line's own type size,
+from the baseline to about a capital's height, an X or a ? in it. The mark's
+characters stay underneath, transparent: the box takes exactly the room its
+text does, so every width worked out from the text (the cells' grid,
+`placeColumns`, a prefix side by side) is the box's, and the span carries no
+`data-fake`, so a save, a copy, Find and the LEAKS walk read the mark as they
+always did. It is an inline-block, so no line wraps through it, and NOT
+`contenteditable=false` like the rule spans: in the editor (`body.editing`)
+the mark is drawn as the text it is, to be typed into — an X typed into a box
+makes it a ticked box on the next pass, and a mark typed into something else
+is text again (re-derived on every pass, like the rule spans). Tested in
+`test-textdoc.mjs` and `test-columns.html`, in both views.
+
+**Each piece where the PDF prints it, at its own size** (`pdfsync.rowItemsNear`,
+`lineItems`; `text-reader.js`, `planCells`, `placePages`; `columns.placeLine`,
+`lineMap`). pdf.js hands a page's text over as ITEMS, a run of type each — a
+new one wherever the form leaves a gap or changes face — and a line's text
+carries them in order. `pdfRows` keeps each row's items (with the item's font
+id); a matched line's candidates are its row's and those of every row whose
+span down the page overlaps it that no other line was matched to, less any
+standing over one of its own across the page (a line above or below) — the
+export writes CIV-110's "causes of … [   ] Plaintiff/Petitioner" as one line,
+and the PDF prints the labels two points lower, a row of their own.
+`lineItems` finds each item in what the line SHOWS (the real names, as the
+PDF prints them; `lineMap` carries a place on screen to its place in the file,
+under the fakes) by its first words, up to three, in order after the last one
+found, so two items that open alike are told apart; where its text begins (its
+"(" of "(date):" where the line has it too) and at what x; and where its piece
+begins — the same place, or a checkbox a space before it, since the PDF draws
+the box and its item is the label. A piece begins only after a space and never
+inside a pseudonym or a spot keep: an item glued to the text before it (a
+superscript, a link inside its parentheses) is marked `glued`, counts for the
+line's face and begins nothing; an item of a row beside the line has to be
+found by four letters or more. On CIV-110's first page it finds 133 pieces on
+63 rows, every one where it belongs. The page's char grid is fitted from the
+same pieces (above), so a page of boxes whose every line begins at the margin
+— CM-010's first page, SUM-100 — has a grid now, and its boxes stand on it.
+
+The line is cut wherever a piece begins (`planCells` writes the cuts on the
+line as `__grid`, { text, cuts }; `dressColumns` adds them to the column cuts
+while the line is the text they were planned for, `gridCuts`) — so a label the
+export joins to the text before it with ONE space is a cell of its own (CIV-110
+line 46: the 7-point footnote and, after a single space, the 9-point "Attorney
+or party without attorney for" printed at 353.6). `placeLine` gives each cell
+the min-width that puts the piece after it at its place (so `fitCells` still
+squeezes a piece too wide for its room, unchanged), its own size and its own
+face where they are not the line's; the piece after the last cut is no cell,
+so the line takes ITS size and face on its `.lt` (the `.line`'s box, which the
+spacing down the page is worked out from, stays the row's — `spreadTops` and
+`holdWithin` get the same sizes as before), and the first piece is placed by
+the line's own left. A piece no item claims (PDF-Linker's notes, a word the
+run changed) keeps the grid's place: on the export's grid read off the PDF
+(`.cgrid`) its column there, on a page without one the reader's grid on from
+the piece before. Sizes: a piece's item's own, the line's within a fifth of
+it — and the line's here is its ROW's own height, not the page's body that
+`typeSizes` takes a row within a fifth of to be. A piece standing at the PDF's
+x and drawn at a size not the PDF's is a width not the PDF's: SUM-100's body
+is about 7.5 points, its 9-point "(For proof of service of this summons, use
+Proof of Service of Summons (form POS-010).)" was drawn at 7.5 and came out
+with gaps between its pieces.
+
+A page laid on pleading numbers is not cut, faced or placed (`planCells` runs
+only off the numbers), and nothing here touches `tops`. Checked in
+`test-form-look.mjs` (the real reader, both PDFs made in the page): a form
+page's lines read back in their order, stand down the page in it, and each is
+one line high with every piece on its baseline; a pleading page's numbered
+lines stand exactly at `pleadingGeometry`'s line tops. Against origin/main the
+pleading's 28 numbered tops are the same to the last digit, and on seven forms
+brought to the reading a page at a time — CIV-110 (115 lines), POS-010 (119),
+CM-010 (214), SUM-100 (86), MC-011 (247, its numbered fourth page among them),
+PLD-050 (69) and LASC CIV 109 (330) — every line's top, line height and order
+is the same.
+
+**The PDF's own face** (`pdfsync.pdfFace`, `faceKey`; `text-reader.js`,
+`noteFaces`, `mostFace`, `boxCellFaces`). pdf.js's text content says only which
+of three families a font falls in (`styles[fontName].fontFamily`: serif,
+sans-serif, monospace); its NAME ("QZRSCC+Arial-BoldMT") is on the font object
+pdf.js loads to draw the page, in `page.commonObjs`, and the weight and slant
+are read off that name — pdf.js's own `bold`/`italic` are set only on a font it
+put a system face in for. The page in the pane is normally drawn before its
+grid is read, which loads its fonts; where it has not been, the page's
+operator list is asked for once (`getOperatorList`, 4–76 ms of worker time a
+page measured cold on six Judicial Council forms, the first page of a
+document dearest; it was never needed opening those six), and each font id is
+asked about once, kept on the PDF's reading (`info.faces`, since a PDF told to
+put down what it holds lets its fonts go). The name maps to faces the machine
+may have: Arial, Helvetica, Liberation Sans (cut to Arial's widths), Arimo,
+then sans-serif; Times New Roman, Times, Liberation Serif, Tinos, serif;
+Courier New, Courier, Liberation Mono, Cousine, monospace; a face a filing is
+commonly set in (Calibri, Cambria, Garamond, Century Schoolbook, Book Antiqua…)
+first where the machine may have it. A line takes the face most of what it
+carries is set in (not its matched row's alone: CIV-110's caption line is three
+of the PDF's rows, and was matched to "FOR COURT USE ONLY", in bold italics);
+a cell or a box row's cell (`.rc`) takes its own where it differs. No face for
+a symbol font (Wingdings' "o" is a box), an OCR layer's GlyphLessFont or a
+Type 3 font: the type is in the scan, and a line carrying no face is not cut
+or placed either — an OCR's words, and the reader's own face, as before. A line
+the PDF does not print keeps the reader's face, as the flowing view does.
+Widths are kept per FONT (`textEm` keyed by weight, slant and family) and a
+faced line or cell carries its face's own space as `--col-sp-n`, which its
+indent and `fitCells` read.
+
+**A box's bars on the PDF's grid** (`rules.ruleGrid`'s `place`, `planStack`,
+`needOnGrid`, `.gridfit`). On a page laid on the export's grid read off the PDF
+(`.cgrid`, `body.__charGrid` in px) a bar the file sets at column c is the
+PDF's rule at x0 + c × unit, to within half a character, so each column of
+bars is set there at the least: the box is the PDF's box, however little of it
+its text fills. Measured there, a cell needs its TEXT and a space, not the
+spaces it ends with: in the PDF's own face at 9-point bold those ran wider than
+the grid's characters and pushed CIV-110's notice past the PDF's rule. And a
+`white-space: pre` table cell is never narrower than its text and those spaces,
+whatever width it is given, so such a row is a fixed table (`.gridfit`) at the
+width its cells and bars add up to, the spaces running on unseen.
+
+There each row's first bar stands at its OWN column (`ruleGrid`'s `heads`): a
+stack of rule rows is often two boxes, one under the other's side —
+SUM-100's notice under the court's box, the case number's box under that —
+and the one lead every row shares in the flowing sheet stood the notice's
+left side under the court box's, 259 px in, and its right side off the
+sheet, once SUM-100 had a grid. (The flowing sheet still shares one lead: it
+is not laid on the PDF, and was left as it was.) No column is placed more than a character
+(`slack`, the grid's unit) past the furthest right the PDF prints type on the
+page (`reach`, `__charGrid.right`: a form's number and its page count end at
+the right margin, where its boxes do): the grid is a fit and runs a little
+wide at the far side of the page (PLD-050's right side stood 8 px past the
+PDF's rule), and PDF-Linker widens a box to hold a notice in small type, so
+the bar its text pushes out stands far past the PDF's rule on the grid
+(SUM-100's, 37 px, off the sheet). A form whose type stops a little short of
+its box's side keeps the grid's place (LASC CIV 109's table, 5 points). And a
+stack whose every row the layout slid back into its indent before its box
+was fitted (its `─` runs, at their glyphs' own width, ran past the sheet)
+has no record of where its rows were laid; on the grid it now stands at the
+left they were slid to and is squared up there (MC-011's TOTAL boxes, whose
+sides missed their own top and foot by 47 px, on origin/main as well). A
+slid row's top is still the one the layout wrote, so it is made as tall as
+the gap to the next row like any other, and the box's sides meet.
+
+Measured against the PDF's rules (read off its operator list for the
+measuring, at 0.9837 px a point), left to right, px: CIV-110's caption 35,
+389, 567 against 35.4, 389.5, 566.6 (it was ~461 px wide against the PDF's
+~532, its inner column ~355 px in against ~389); SUM-100's notice 32, 565
+against 35.6, 566.6, its court box 430, 565 against 424.5, 566.6, its case
+number's 358, 565 against 357, 566.6; MC-011's SHORT TITLE box 35, 391, 567
+against 35, 390, 567 (origin/main 36, 266, 403), its TOTAL boxes 483, 566
+against 483, 567 (origin/main: their sides 436 to 501 and 483 to 549, no box
+square); CM-010's 32, 216, 386, 567 against 35, 221, 390, 567; LASC CIV 109's
+second page 32, 94, 197, 499, 565 against 35, 97, 195, 496, 567 (origin/main:
+no grid, bars ragged to the sheet's edge); PLD-050's 33, 391, 566 against 35,
+390, 567. Off the grid, and on pleading paper, a box is its cells' own as
+before. Tested in `test-rules.mjs` and `test-rules.html`.
+
+Refused: reading the rules off the operator list (`constructPath` and
+rectangle ops) to set the bars exactly. It costs the page's operator list
+(4–76 ms of worker time a page, on top of the draw's own) and a walk of the
+transforms to bring each path to the page, and the grid, held to the page's
+type, already lands within 5 px of the PDF's rules on these forms, most of
+them within 2 — and a form's drawn rectangles are not always the boxes the
+export drew (a widget's own frame, a shaded band).
+Also refused: moving a piece up or down to the row the PDF printed it on (the
+line rule), and a face on pleading paper (laid on its numbers; Times beside
+Georgia would read closer, but nothing about the numbered margin is to move).
+Not done yet: the text inside a drawn box's cells is not cut into pieces — a
+box row is a table, and its cells take the PDF's faces but keep the export's
+spaces — so CM-010's case-type list, inside its box, stands narrower than the
+PDF's three columns, and SUM-100's "SUMMONS", in the first cell of a row of
+the court's box, is set small and to the left of where the PDF centres it.
+Cutting a cell would go through `fitRuleRows`' measuring as well as
+`placeLine`.
+
+Costs, measured in Chromium on CIV-110, POS-010, SUM-100, MC-011, CM-010,
+LASC CIV 109 and PLD-050, every page brought to the reading in turn: finding
+the pieces, fitting the grid on them and planning them (`matchItems`,
+`charGrid`, `planCells`) 3.5–10 ms a page, the first page of a session (the
+code and the faces new) counted in, 2–4 ms on a warm page — on top of the
+page's existing `rowLayout`, 20–40 ms on these dense forms; the placing pass
+(`placePages`) 1.5–6.5 ms a page a pass, the most the first time a page is
+cut by its PDF's items (`dressColumns` again). The fonts' operator list was
+asked for no time on any of them. `window.__textReaderFormLook()` reports
+these. Fitting a laid page's boxes (`fitRuleRows`) is 1–37 ms a page, almost
+all of it the browser laying the page's tables out again once their widths
+are written — measuring every cell's text on the grid (`needOnGrid`) is
+0.6 ms for CIV-110's 103 cells, 1.3 ms for LASC CIV 109's 251 — and stays
+within 9 ms of origin/main's on the same page either way (CIV-110's
+first 9.4 against 3.8, CM-010's 22.5 against 15.8, LASC CIV 109's second
+36.6 against 27.7; MC-011's third 9.2 against 19.4, SUM-100 10.8 against
+11.8): a page laid on the grid now has boxes to fit where origin/main left
+it ragged.
+
+What the export could do better, for the reader and for the model: two pieces
+the form prints apart written three spaces apart or more (today a few are
+joined by one — the reader cuts them where the PDF's items begin, but the
+model reads them as one phrase); a label not written on the line of a
+footnote set two points higher in a smaller size (CIV-110 line 46 — the line
+rule keeps it on that line, at its own size); a box drawn at the PDF's width,
+its small type wrapped to fit it, rather than the box widened for its text
+(SUM-100's notice: its closing bar, and the court box's above it, at a column
+the grid puts 37 px past the PDF's rule — the reader holds it to the page's
+type). And what the reader cannot recover from the PDF's text: an AcroForm
+field's value — a filled field is a widget annotation, not text content.
+`page.getAnnotations()` gives each widget's `fieldValue` (or a checkbox's
+`exportValue` and on/off state) and its `rect`, so a value could be placed
+where the form prints it; the export carries PDF-Linker's reading of the same
+field, and the reader shows the export.

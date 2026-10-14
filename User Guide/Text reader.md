@@ -206,6 +206,21 @@ app, which routes it to the reader tab.
   the LEAKS walk read exactly what the file says. In the editor the gaps' own
   spaces are drawn, so what is typed into one is seen, and a line is laid out
   again once the typing stops.
+- **A form looks like its PDF.** A checkbox PDF-Linker writes as `[   ]`,
+  `[ X ]` or `[ ? ]` is drawn as a box at its line's type size — ticked with an
+  X, or a ? where the run could not tell — and is never cut in half by the
+  columns, in the reading view and side by side; in the editor it is the
+  text it is, to type an X into. Side by side, each piece of a form's line
+  stands where the PDF prints it, at its own size and in the PDF's face (a
+  form set in Arial reads as Arial, its headings bold, "(date):" in italics),
+  even where the export joins two pieces with a single space; a box's sides
+  stand on the PDF's rules to within a character, and two boxes, one under
+  the other's side, each where the PDF draws it. Every line of the file is
+  still one line, in its order, on its own row — a piece moves across, never
+  up or down — and pleading paper is laid on its numbers as before. A line
+  the PDF does not print (PDF-Linker's own notes) keeps the reader's font.
+  Display only: a save, a copy, Find and the LEAKS walk read exactly what the
+  file says.
 - **Print what you see — in its pseudonyms.** **🖨 Print** (Ctrl+P) sends the
   pages as they are shown to the browser's print dialog, where "Save as PDF"
   keeps a copy: the font and leading in force, the drawn boxes, the pseudonym

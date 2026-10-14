@@ -16,6 +16,7 @@ import {
   isExportName, isKeyName, isQuarantinedName, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
   columnCuts, columnBands, columnWidths, lineIndent, placeColumns, COLUMN_GAP, COLUMN_REACH, COLUMN_SNAP, COLUMN_GUTTER, COLUMN_STRETCH,
+  checkboxRanges, checkboxState,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
   textFixedLine, setTextFixed, pageTextSum, pageFurnitureLine, headerSaysTextCorrected, TEXTFIXED_RE,
@@ -1176,6 +1177,49 @@ console.log("indents on the grid");
     T("\u201cDefendants\u201d)."),
   ])]);
   check("a line cut into column cells serializes as the file's text", serializeNodes(line), "Barbara Wren,     \u201cDefendants\u201d).");
+}
+
+// ---- a form's checkboxes are one piece ----------------------------------------
+// PDF-Linker writes a checkbox as "[   ]", "[ X ]" or "[ ? ]" ("[ ]", "[X]",
+// "[?]" before those). The empty one's three spaces are COLUMN_GAP, so the
+// columns cut inside it: a "[" at the end of one cell, "] Plaintiff" at the
+// head of the next. A mark is one thing, never cut, and wherever the columns
+// are worked out from (columnBands reads the same cuts) it begins nothing.
+console.log("checkboxes are one piece");
+{
+  check("the six spellings, each with its state",
+    checkboxRanges("a [   ] b [ X ] c [ ? ] d [ ] e [X] f [?]"),
+    [[2, 7, ""], [10, 15, "x"], [18, 23, "?"], [26, 29, ""], [32, 35, "x"], [38, 41, "?"]]);
+  check("\u2026and nothing else in brackets", checkboxRanges("[  ] [x] [XX] [ X] [Exhibit A] [sic]"), []);
+  check("a mark's state, or null for what is not one whole mark",
+    ["[   ]", "[ X ]", "[ ? ]", "[ ]", "[X]", "[?]", "[  ]", "[ X ] "].map(checkboxState), ["", "x", "?", "", "x", "?", null, null]);
+  // A signature block's line, with the space PDF-Linker leaves inside a box.
+  const sig = "(TYPE OR PRINT NAME OF  [   ] ATTORNEY    [   ] PARTY WITHOUT ATTORNEY)" + " ".repeat(36) + "(SIGNATURE)";
+  const cuts = columnCuts(sig);
+  check("no cut falls inside an empty box", cuts.every((c) => !checkboxRanges(sig).some(([a, b]) => c > a && c < b)), true);
+  check("\u2026the line is cut before each box and its label, and at the signature",
+    cuts.map((c) => sig.slice(c, c + 14)), ["[   ] PARTY WI", "(SIGNATURE)"]);
+  const party = "or of specified cross-complaints only, so state and identify the parties, causes of    [   ] Plaintiff/Petitioner [   ] Defendant/Respondent";
+  check("a box after a single space is no cut, and the box before it is not broken either",
+    columnCuts(party).map((c) => party.slice(c, c + 8)), ["[   ] Pl"]);
+  check("the older spellings hold no gap, and an atom given beside them still counts (the gap after a box is a gap)",
+    [columnCuts("a. [ ]    Complaint   [X]  Petition"), columnCuts("Plaintiff Pat    Doe     [ ]   x", { atoms: [[10, 20]] })], [[10, 22], [25, 31]]);
+  // Eight lines of checkbox items, the boxes in one column: an empty box's
+  // spaces end at its "]", and counted as a gap every "]" began a column of
+  // its own \u2014 a second column the lines around it were then cut at.
+  const items = ["a.", "b.", "c.", "d.", "e.", "f.", "g.", "h."].map((l, i) => ({ text: `    ${l}   [   ] item number ${i + 1} of the list` }));
+  const bands = columnBands(items);
+  check("a column of boxes: no column begins at their closing brackets",
+    bands.every((b) => ![...b.stops.keys()].includes(14)), true);
+  check("\u2026and the box column itself is where the lines begin after the item letter", [...bands[3].stops.keys()].includes(9), true);
+}
+// The box is a span with no data-fake, like the rule spans: it serializes as
+// its characters.
+{
+  const T = (s) => ({ nodeType: 3, data: s });
+  const E = (name, kids, attrs) => ({ nodeType: 1, nodeName: name, childNodes: kids, getAttribute: (k) => (attrs && k in attrs ? attrs[k] : null) });
+  const line = E("DIV", [E("SPAN", [E("SPAN", [T("[ X ]")], { "data-cb": "x" }), T(" Plaintiff/Petitioner  "), E("SPAN", [T("[   ]")]), T(" Defendant")])]);
+  check("a line with its boxes drawn serializes as the file's text", serializeNodes(line), "[ X ] Plaintiff/Petitioner  [   ] Defendant");
 }
 
 // ---- what a file carries in the clear, read as the page reads it ------------

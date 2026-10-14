@@ -26,7 +26,8 @@
 <div id="report">running…</div>
 <div id="stage"><div id="pages"></div></div>
 <script type="module">
-import { dressColumns, alignColumns, fitCells, charWidth, CELL_SQUEEZE_MIN } from "./viewer/columns.js";
+import { dressColumns, alignColumns, fitCells, charWidth, placeLine, unplaceLine, lineMap, CELL_SQUEEZE_MIN } from "./viewer/columns.js";
+import { serializeNodes } from "./viewer/textdoc.js";
 
 const stage = document.getElementById("stage");
 const pages = document.getElementById("pages");
@@ -107,6 +108,7 @@ const check = (label, ok, note = "") => {
   out.push(`<span class="${ok ? "pass" : "fail"}">  ${ok ? "PASS" : "FAIL"}  ${label}${note && !ok ? "\n        " + note : ""}</span>`);
 };
 const near = (a, b, tol = 1) => Math.abs(a - b) <= tol;
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const r1 = (x) => Math.round(x * 10) / 10;
 
 // A two-column line: its left-hand piece, three spaces, the next column. The
@@ -273,6 +275,135 @@ out.push("off the PDF's grid, a second column at one place down a justified page
   alignColumns([body]);
   const left = body.querySelectorAll(".cx").length;
   check("a line no longer beside a second column is back on the plain grid", left === 0, `${left} still placed`);
+}
+
+/** A flowing page (the reading view, off the PDF's grid), its lines given as strings. */
+function flowPage(rows) {
+  const sec = document.createElement("section");
+  sec.className = "tpage";
+  sec.style.setProperty("--reader-size-eff", SIZE + "px");
+  sec.style.width = "1300px";
+  sec.innerHTML = '<div class="page-inner" style="height:auto"><div class="page-body"></div></div>';
+  const body = sec.querySelector(".page-body");
+  for (const text of rows) {
+    const line = document.createElement("div");
+    line.className = "line";
+    const lt = document.createElement("span");
+    lt.className = "lt";
+    lt.textContent = text;
+    line.append(lt);
+    body.append(line);
+  }
+  pages.append(sec);
+  dressColumns(body);
+  return body;
+}
+/** Where a node's text sits on its baseline: a probe of no size set in it, read and taken out again. */
+function baselineOf(parent, before = null) {
+  const probe = document.createElement("span");
+  probe.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline";
+  parent.insertBefore(probe, before);
+  const y = probe.getBoundingClientRect().top;
+  probe.remove();
+  return y;
+}
+
+// A form's checkboxes: "[   ]" holds three spaces, a gap between columns, and
+// the columns cut it in half — a "[" ending one cell, "] Plaintiff" opening the
+// next. Each spelling is one piece, drawn as a box, its characters underneath.
+const MARKS = ["(TYPE OR PRINT NAME OF  [   ] ATTORNEY    [   ] PARTY WITHOUT ATTORNEY)" + " ".repeat(30) + "(SIGNATURE)",
+  "causes of action    [ X ] Plaintiff/Petitioner [ ? ] Defendant/Respondent",
+  "a.   [ ]  Complaint      [X]  Petition      [?]  Other (specify):"];
+for (const view of ["flowing", "beside the PDF"]) {
+  out.push(`a form's checkboxes, ${view}:`);
+  const body = view === "flowing" ? flowPage(MARKS) : page(MARKS.map((t) => [t]), cw.char * SIZE);
+  const boxes = [...body.querySelectorAll(".cb")];
+  check("every mark is one box, its state on it", same(boxes.map((b) => [b.textContent, b.getAttribute("data-cb")]),
+    [["[   ]", null], ["[   ]", null], ["[ X ]", "x"], ["[ ? ]", "?"], ["[ ]", null], ["[X]", "x"], ["[?]", "?"]]), JSON.stringify(boxes.map((b) => b.textContent)));
+  const cells = [...body.querySelectorAll(".cc")].map((c) => [...c.childNodes].filter((n) => !(n.nodeType === 1 && n.classList.contains("cg"))).map((n) => n.textContent).join(""));
+  check("no cell ends on a \"[\" or opens on a \"]\" — no cut falls inside a box", cells.length > 0 && cells.every((t) => !/\[\s*$/.test(t) && !/^\s*\]/.test(t)), JSON.stringify(cells));
+  check("the page reads back as the file", serializeNodes(body) === MARKS.join("\n"), JSON.stringify(serializeNodes(body)));
+  const b = boxes[2], cs = getComputedStyle(b), fs = parseFloat(cs.fontSize);
+  const sq = getComputedStyle(b, "::before");
+  check("a box is drawn as a square at its line's type size", near(parseFloat(sq.width), 0.74 * fs, 0.6) && near(parseFloat(sq.height), 0.74 * fs, 0.6) && parseFloat(sq.borderTopWidth) >= 1,
+    `${sq.width} × ${sq.height}, border ${sq.borderTopWidth}, type ${fs}px`);
+  check("…its characters underneath, unseen", cs.webkitTextFillColor === "rgba(0, 0, 0, 0)" || cs.webkitTextFillColor === "transparent", cs.webkitTextFillColor);
+  check("…an X in a ticked one, a ? in one the run could not read, nothing in an empty one",
+    same([2, 3, 0].map((i) => getComputedStyle(boxes[i], "::after").content), ['"X"', '"?"', "none"]), [2, 3, 0].map((i) => getComputedStyle(boxes[i], "::after").content).join(" "));
+  const sizer = document.createElement("canvas").getContext("2d");
+  sizer.font = `${cs.fontSize} ${cs.fontFamily}`;
+  check("…taking exactly the room its characters do", near(b.getBoundingClientRect().width, sizer.measureText(b.textContent).width, 1), `${r1(b.getBoundingClientRect().width)} vs ${r1(sizer.measureText(b.textContent).width)}`);
+  const r = b.getBoundingClientRect(), s = b.closest(".line").getBoundingClientRect();
+  check("…on its line", r.top >= s.top - 1 && r.bottom <= s.bottom + 1, `${r1(r.top)}–${r1(r.bottom)} in ${r1(s.top)}–${r1(s.bottom)}`);
+  document.body.classList.add("editing");
+  const ed = getComputedStyle(b).display, edFill = getComputedStyle(b).webkitTextFillColor, edBox = getComputedStyle(b, "::before").content;
+  document.body.classList.remove("editing");
+  check("in the editor the mark is the text it is, to be typed into", ed === "inline" && edFill !== "rgba(0, 0, 0, 0)" && edBox === "none" && !b.hasAttribute("contenteditable"), `${ed} ${edFill} ${edBox}`);
+  // An edit that makes a mark something else makes it text again; one that
+  // makes it a mark again makes it a box.
+  b.firstChild.data = "[ Y ]";
+  dressColumns(body);
+  check("a mark typed into something else is text again", !b.isConnected && body.querySelectorAll(".cb").length === 6 && serializeNodes(body).includes("[ Y ] Plaintiff"), String(body.querySelectorAll(".cb").length));
+  const lt = body.querySelectorAll(".lt")[1];
+  const walk = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+  for (let t = walk.nextNode(); t; t = walk.nextNode()) if (t.data.includes("[ Y ]")) t.data = t.data.replace("[ Y ]", "[ X ]");
+  dressColumns(body);
+  check("…and typed back, a box again", body.querySelectorAll(".cb").length === 7 && serializeNodes(body) === MARKS.join("\n"), String(body.querySelectorAll(".cb").length));
+}
+
+// Beside its PDF a line is cut wherever one of the PDF's items begins (the
+// line's `__grid`), and each piece is set at its item's x, at its item's size,
+// in its item's face (columns.placeLine) — on its own line, on that line's
+// baseline: the line numbers are the reader's grid down the page, and nothing
+// here moves a line or a piece of one up or down.
+out.push("side by side, each piece where the PDF prints it:");
+{
+  const FOOT = "* If dismissal requested is of specified parties only,";
+  const text = FOOT + " Attorney or party without attorney for";
+  const body = page([[text], ["the line under it"]], cw.char * SIZE);
+  const [line, under] = body.querySelectorAll(".line");
+  const lt = line.querySelector(".lt");
+  const at = text.indexOf("Attorney");
+  lt.__grid = { text, cuts: [at] };
+  dressColumns(body);
+  const cell = lt.querySelector(".cc");
+  check("the PDF's cut is made where the export has only a space", !!cell && cell.__at === 0 && lt.lastChild.textContent === "Attorney or party without attorney for", lt.innerHTML.slice(0, 160));
+  const sans = { family: 'Arial, "Liberation Sans", sans-serif', bold: false, italic: false };
+  const bold = Object.assign({}, sans, { bold: true });
+  const small = 12, big = 16; // the footnote and the label, px
+  placeLine(lt, { places: new Map([[0, { x: 0, size: small, face: sans }], [at, { x: 700, size: big, face: bold }]]), start: 0, at: (a) => a * 8, face: sans, size: small, lead: 0 });
+  const tail = document.createRange();
+  tail.setStart(lt.lastChild, 0);
+  tail.setEnd(lt.lastChild, 1);
+  const left = body.getBoundingClientRect().left;
+  check("the label stands at its item's x", near(tail.getBoundingClientRect().left - left, 700, 0.6), r1(tail.getBoundingClientRect().left - left));
+  check("…at its own size, in its own face; the footnote at its own",
+    getComputedStyle(lt).fontSize === big + "px" && getComputedStyle(lt).fontWeight === "700" && getComputedStyle(cell).fontSize === small + "px" && getComputedStyle(cell).fontWeight === "400",
+    `${getComputedStyle(lt).fontSize} ${getComputedStyle(lt).fontWeight} / ${getComputedStyle(cell).fontSize} ${getComputedStyle(cell).fontWeight}`);
+  const lb = line.getBoundingClientRect(), ub = under.getBoundingClientRect();
+  const rects = [...(() => { const r = document.createRange(); r.selectNodeContents(lt); return r.getClientRects(); })()].filter((q) => q.width > 0);
+  check("the line stands on its one row: every piece of it within its box, the line under it where it was",
+    rects.every((q) => q.top >= lb.top - 1 && q.bottom <= lb.bottom + 1) && near(ub.top - body.getBoundingClientRect().top, 24, 0.5), `${rects.map((q) => r1(q.top) + "–" + r1(q.bottom)).join(" ")} in ${r1(lb.top)}–${r1(lb.bottom)}`);
+  const base = baselineOf(lt), cellBase = baselineOf(cell, cell.querySelector(".cg"));
+  check("…the smaller piece on the line's baseline, not raised or lowered to its own row's", near(base, cellBase, 0.5), `${r1(base)} vs ${r1(cellBase)}`);
+  check("the page reads back as the file, cut and set or not", serializeNodes(body) === text + "\nthe line under it");
+  check("placed again, nothing is written", (() => { const was = lt.outerHTML; placeLine(lt, { places: new Map([[0, { x: 0, size: small, face: sans }], [at, { x: 700, size: big, face: bold }]]), start: 0, at: (a) => a * 8, face: sans, size: small, lead: 0 }); return lt.outerHTML === was; })());
+  check("taken off the grid, the PDF's cut and every place go with it", unplaceLine(lt) && (dressColumns(body), !lt.querySelector(".cc")) && !lt.style.fontFamily && !lt.style.fontSize, lt.outerHTML.slice(0, 160));
+  // The PDF prints what the page SHOWS — the real names — and the cells are
+  // cut in the FILE, under the fakes: a place on screen read as its place in
+  // the file, none inside a name.
+  const b3 = page([["Served on ", { fake: "Pat Doe", real: "Rosamund Delacroix-Vane", shown: "real" }, "    Case No. 1"]], 8);
+  const map = lineMap(b3.querySelector(".lt"));
+  check("a place on screen is its place in the file, a name's real length and all",
+    same([map.fileAt(0), map.fileAt(10), map.fileAt(15), map.fileAt(33), map.fileAt(37), map.fileAt(47), map.atoms], [0, 10, -1, 17, 21, 31, [[10, 33]]]),
+    JSON.stringify([map.fileAt(0), map.fileAt(10), map.fileAt(15), map.fileAt(33), map.fileAt(37), map.fileAt(47), map.atoms]));
+  // A piece the PDF did not place keeps the grid's place.
+  const t2 = "Date:" + " ".repeat(20) + "Clerk, by" + " ".repeat(20) + ", Deputy";
+  const b2 = page([[t2]], 8);
+  const lt2 = b2.querySelector(".lt");
+  placeLine(lt2, { places: new Map([[0, { x: 0, size: SIZE, face: sans }], [25, { x: 300, size: SIZE, face: sans }]]), start: 0, at: (a) => a * 8, face: sans, size: SIZE, lead: 0 });
+  const c2 = lt2.querySelectorAll(".cc");
+  check("a piece no item placed keeps the grid's place", near(parseFloat(c2[1].style.minWidth), 54 * 8 - 300, 0.01), c2[1].style.minWidth);
 }
 
 out.push("", `${"=".repeat(52)}`, `FAILURES: ${fails}`);
