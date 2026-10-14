@@ -33,7 +33,7 @@
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
 import { caseShape, applyCase, translateRuns, findReals, findRealSpans } from "./pseudo-key.js";
-import { REPORTERS_SORTED } from "./reporters.js";
+import { REPORTERS_SORTED, REPORTERS_ALL_SORTED } from "./reporters.js";
 
 // ---- the file as pages ---------------------------------------------------------
 
@@ -522,7 +522,7 @@ export function splitFolderRows(rows, onReel) {
  * then the held place the page reads is not the place the text says.
  * `spots` are this page's own spot keeps; `mask(flat, raw)` the case-wide keeps.
  */
-export function pageScan(raw, { rev = null, reals = null, spots = null, mask = null } = {}) {
+export function pageScan(raw, { rev = null, reals = null, spots = null, mask = null, next = "" } = {}) {
   const text = String(raw == null ? "" : raw);
   const { pns, gutters } = laidOut(text, rev);
   const held = spotRanges(text, spots);
@@ -531,7 +531,7 @@ export function pageScan(raw, { rev = null, reals = null, spots = null, mask = n
   const blank = held.concat(pns);
   const flat = blank.length ? blankRanges(text, blank, " ") : text;
   if (!needs && reals) needs = findRealSpans(reals, mask ? mask(flat, text) : flat, { layout: text }).length > 0;
-  return { needs, scan: blankRanges(text, blank.concat(citedNameSpans(flat))) };
+  return { needs, scan: blankRanges(text, blank.concat(citedNameSpans(flat, { next }))) };
 }
 
 /**
@@ -920,14 +920,60 @@ export function serializeMapped(root) {
 // so the words are COUNTED here, and the work from each place is a fixed
 // handful rather than the rest of the paragraph.
 const PARTY_WORDS = 8;
-const PARTY = "[A-Z][\\w.'\u2019-]*(?:(?:\\s+(?:of|the|and|&|de|la|le|van|von|del|da|dos|ex|rel\\.)\\s+|\\s+)[A-Z\\d][\\w.'\u2019-]*|,\\s+(?:Inc|LLC|L\\.L\\.C|Corp|Co|Ltd|N\\.A|LP|L\\.P)\\.?){0," + PARTY_WORDS + "}";
-const CASE_NAME_RE = new RegExp(PARTY + "\\s+v(?:s?\\.|s\\b|\\.|\\b)\\s+" + PARTY, "g");
+// The whitespace INSIDE a cite as the export prints it (PDF-Linker's
+// `_PN_CITE_WS`): a space, or a line break — blank lines, a page's
+// "====== Page N ======" header — and the gutter number the next line opens
+// on. A cite on pleading paper wraps wherever the margin falls, and a name
+// read on spaces alone lost the half past the wrap: "Rasho v.\n12  Quillmark
+// (2019) …" was no cite at all, and both parties were marked as this case's.
+const CITE_GAP = "(?:[ \\t]+|[ \\t]*\\n\\s*(?:={6}[ \\t]+Page[^\\n]*\\n\\s*)?(?:\\d{1,3}[ \\t]+)?)";
+// …and before the TAIL alone, the next page's furniture too — a letterhead, an
+// e-filing stamp, printed as short unnumbered lines after the page header
+// (`_PN_CITE_PAGE_FURNITURE`): a case name does not resume after a page's
+// letterhead, but its year does.
+const CITE_TAIL_GAP = "(?:[ \\t]+|[ \\t]*\\n\\s*(?:={6}[ \\t]+Page[^\\n]*\\n\\s*(?:(?![ \\t]*(?:\\d{1,3}[ \\t]{2,}|={6}))[^\\n]{1,90}\\n\\s*){0,4})?(?:\\d{1,3}[ \\t]+)?)";
+const PARTY = "[A-Z][\\w.'\u2019-]*(?:(?:" + CITE_GAP + "(?:of|the|and|&|de|la|le|van|von|del|da|dos|ex|rel\\.)" + CITE_GAP + "|" + CITE_GAP + ")[A-Z\\d][\\w.'\u2019-]*|,\\s+(?:Inc|LLC|L\\.L\\.C|Corp|Co|Ltd|N\\.A|LP|L\\.P)\\.?){0," + PARTY_WORDS + "}";
+const CASE_NAME_RE = new RegExp(PARTY + CITE_GAP + "v(?:s?\\.|s\\b|\\.|\\b)" + CITE_GAP + PARTY, "g");
+// A matter named WITHOUT a " v. " — "In re Marriage of Hartwell", "Estate of
+// Bowles", "In the Matter of the Estate of Bowen", "Conservatorship of
+// Wendland" — read with the same citation after it. These are PDF-Linker's
+// leads: the parser's `_NONV_PREFIX` and the shape guard's "In re" / "In the
+// Matter of" (`_PN_CITE_SHAPE_RE`'s `inre`). Read on " v. " alone, every one
+// was a name the key bound standing in the clear: marked, and written as its
+// pseudonym at the save — a published authority renamed. "Matter of" and
+// "Ex parte" alone are left out, as PDF-Linker leaves them out.
+const NONV_LEAD = "(?:In" + CITE_GAP + "(?:re|Re|RE)|IN" + CITE_GAP + "RE|In" + CITE_GAP + "the" + CITE_GAP + "Matter" + CITE_GAP + "of|(?:Estate|Guardianship|Conservatorship|Adoption|Marriage)" + CITE_GAP + "of)";
+const NONV_RE = new RegExp("(?<![\\w'\u2019])" + NONV_LEAD + CITE_GAP + PARTY, "g");
 // What must follow the name for it to be a citation and not a caption: a year
-// in parentheses, a volume and reporter, or supra. A page or pin may come
-// first ("at p. 220"), and a comma or an opening bracket may sit between.
-const CITE_AFTER_RE = /^[\s,;]*(?:\((?:[^)]{0,40}\b\d{4})\)|\d{1,4}\s+[A-Z][\w.]*\s*\d|supra\b|\[\d)/i;
+// in parentheses — the court before it where a federal or out-of-state cite
+// puts one, "(9th Cir. 2009)" (`_PN_CITE_YEAR`) — a volume and reporter, or
+// supra. A page or pin may come first ("at p. 220"), and a comma or an opening
+// bracket may sit between. The reporter is read from PDF-Linker's list with
+// its spaces flexed (`_flex_ws_reporter`): "30 Cal. App. 5th 1", "500 F. Supp.
+// 2d 100" and "123 S. Ct. 456" were no reporter to the old shape, which read
+// one capitalised word before the page.
+const CITE_REPORTER = REPORTERS_ALL_SORTED.map((r) => r.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ +/g, "\\s+")).join("|");
+const CITE_YEAR = "\\((?:(?:\\d{1,2}(?:st|nd|rd|th)|[A-Z][\\w.]*)[ \\t]+){0,4}(?:1[7-9]|20)\\d\\d\\)";
+// A WRIT names its real party in interest in parentheses between the case
+// name and the year: "Rasho v. Superior Court (Quillmark) (2019) 30 Cal.App.5th
+// 1". The parenthesis is part of the name, and the year after it the citation.
+const CITE_RPI = "[ \\t]*\\([A-Z][\\w.'\u2019&-]*(?:(?:,?[ \\t]+|[ \\t]+(?:of|the|and|&)[ \\t]+)[A-Z\\d][\\w.'\u2019&-]*){0,7}\\)";
+const CITE_AFTER_RE = new RegExp("^(" + CITE_RPI + ")?(?:,?" + CITE_TAIL_GAP + "|,?[ \\t]*|[\\s,;]*)(?:" + CITE_YEAR + "|\\((?:[^)]{0,40}\\b\\d{4})\\)|\\d{1,4}" + CITE_GAP + "(?:" + CITE_REPORTER + ")|\\d{1,4}\\s+[A-Z][\\w.]*\\s*\\d|[Ss]upra\\b|\\[\\d)");
+// How far past a name its citation may start: the real party, a page break
+// and the next page's furniture.
+const CITE_AFTER_REACH = 480;
 // A short form: the party alone, with supra after it.
 const SUPRA_RE = new RegExp("[A-Z][\\w.'\u2019-]*(?:\\s+[A-Z][\\w.'\u2019-]*){0," + PARTY_WORDS + "}(?=,?\\s+supra\\b)", "g");
+// What stands before a STRUNG cite with no tail in reach — "…71 Cal.App.5th
+// 358, 373-374; Krongos v. Pacific Gas & Electric Co." closing a page whose
+// next page carries its year: the cite before it, a pin, then ";"
+// (`_PN_STRING_CITE_SEAM_RE`). The name runs and the " v. " are held to the
+// line they stand on, since nothing but the word count says where they end.
+const STRUNG_SEAM_RE = new RegExp("(?:" + CITE_YEAR + "|(?<!\\w)\\d{1,4}\\s+(?:" + CITE_REPORTER + ")|(?<![A-Za-z])supra\\b)(?:[^;\\n]|\\n[ \\t]*(?:\\d{1,3}[ \\t]+)?){0,40};[ \\t]*\\n?[ \\t]*(?:\\d{1,3}[ \\t]+)?[ \\t]*$");
+const STRUNG_PARTY = "[A-Z][\\w.'\u2019-]*(?:(?:[ \\t]+(?:of|the|and|&|de|la|le|van|von|del|da|dos|ex|rel\\.)[ \\t]+|[ \\t]+)[A-Z\\d][\\w.'\u2019-]*|,[ \\t]+(?:Inc|LLC|L\\.L\\.C|Corp|Co|Ltd|N\\.A|LP|L\\.P)\\.?){0," + PARTY_WORDS + "}";
+const STRUNG_RE = new RegExp("(?<![\\w'\u2019])" + STRUNG_PARTY + "[ \\t]+vs?\\.?[ \\t]+" + STRUNG_PARTY, "g");
+// The " v. " inside a matched name, where the plaintiff's half ends.
+const NAME_V_RE = new RegExp(CITE_GAP + "v(?:s?\\.|s\\b|\\.|\\b)" + CITE_GAP);
 
 // …and the SHORT CITE WITH NO "supra", which PDF-Linker protects and this did
 // not read: "(Jones, 30 Cal.App.5th at p. 5.)" — the party's name, a comma,
@@ -1031,29 +1077,117 @@ function shortCiteNames(src, out) {
   }
 }
 
+// THIS CASE'S OWN CAPTION, recited with a year — "this action, Wrenfield v.
+// Quarrow Motors (2025)" — is no authority, and PDF-Linker fakes it: a "X v. Y"
+// whose two sides are each MOSTLY words of the parties the case's own key
+// was built from (the E-Court template, `--term`: `_side_is_trusted` over
+// `_trusted_party_tokens`) is the document's caption, not a decision. The
+// reader spared it as a cited decision, so the caption's names stood unmarked
+// and a typed one was saved real. The words come from the key
+// (setOwnPartyWords, pseudo-key's ownPartyWords); with none, nothing is
+// exempted.
+let OWN_PARTY_WORDS = null;
+/** The words of this case's own parties (a Set of word bases, wordBase's), or null: citedNameSpans' caption exemption. */
+export function setOwnPartyWords(words) { OWN_PARTY_WORDS = words && words.size ? words : null; }
+// The words that identify nobody: a firm's furniture, the small words, a role.
+const CAPTION_FILLER = new Set(["inc", "llc", "llp", "lp", "corp", "corporation", "co", "company", "ltd", "na", "pc", "plc", "the", "and", "of", "for",
+  "plaintiff", "plaintiffs", "defendant", "defendants", "petitioner", "petitioners", "respondent", "respondents", "appellant", "appellants",
+  "appellee", "appellees", "cross-complainant", "cross-defendant", "real", "party", "interest"]);
+/** The word bases setOwnPartyWords takes, from the case's own parties' values (pseudo-key's parseKey `own`). */
+export function ownPartyWordsOf(values) {
+  const out = new Set();
+  for (const v of values || []) for (const w of String(v).split(/\s+/)) { const b = wordBase(w); if (b.length >= 3 && !CAPTION_FILLER.has(b)) out.add(b); }
+  return out;
+}
+/** A word's base, as PDF-Linker's `_pn_word_base` reads it: no edge punctuation, no possessive, lower case. */
+export function wordBase(w) {
+  return String(w == null ? "" : w).replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "").replace(/['’]s$/i, "").toLowerCase();
+}
+/** Whether a side of a "X v. Y" is MOSTLY words of this case's own parties (`own`). */
+function sideIsOwn(side, own) {
+  const words = String(side).split(/[\s,]+/).map(wordBase).filter((b) => b.length >= 3 && !CAPTION_FILLER.has(b) && !/^\d+$/.test(b));
+  const hits = words.filter((b) => own.has(b)).length;
+  return hits > 0 && hits * 2 >= words.length;
+}
+/**
+ * Where its name really begins inside a run read from the left (PDF-Linker's
+ * `_pn_cite_run_start`): after the last citation signal ("See", "Cf.") and the
+ * last full stop that closes an ordinary word — "…served on Helen Rasho. See
+ * Jones v. Smith (2019) …" names "Jones v. Smith", and a span from "Helen"
+ * spared this case's own party, unmarked and unwarned. A gutter number the
+ * run read across a line break is no word either. → an offset into `run`, or
+ * -1 where nothing is left.
+ */
+function nameRunStart(run) {
+  const words = [];
+  for (const w of run.matchAll(/\S+/g)) words.push([w[0], w.index]);
+  let cut = 0;
+  for (let i = 0; i < words.length - 1; i++) {
+    const w = words[i][0];
+    const base = w.replace(/[.,]+$/, "").toLowerCase();
+    if (SHORT_SIGNALS.has(base)) cut = i + 1;
+    else if (w.endsWith(".") && base.length > 1 && !SHORT_ABBREVS.has(base) && /\p{Ll}/u.test(base)) cut = i + 1;
+  }
+  while (cut < words.length && /^\d+$/.test(words[cut][0])) cut++;
+  return cut < words.length ? words[cut][1] : -1;
+}
+
 /**
  * Where `text` names a decided case: `[start, end]` per span, in order. A span
  * covers the case NAME alone — the citation after it is what proves the name
- * is one, and is not part of what the name protects.
+ * is one, and is not part of what the name protects (a writ's real party in
+ * interest, in its parentheses, is part of the name).
+ *
+ * `next`: the opening of the page after, where `text` is one page — a cite
+ * whose name closes this page has its year at the head of the next
+ * (PDF-Linker reads 240 characters across the seam, `_PAGE_CTX`). `own`: the
+ * words of this case's own parties (setOwnPartyWords by default), whose
+ * caption recited with a year is no decision.
  */
-export function citedNameSpans(text) {
-  const src = String(text == null ? "" : text);
+export function citedNameSpans(text, { next = "", own = OWN_PARTY_WORDS } = {}) {
+  const page = String(text == null ? "" : text);
+  const src = next ? page + "\n====== Page ======\n" + String(next).slice(0, 240) : page;
   const out = [];
-  for (const re of [CASE_NAME_RE, SUPRA_RE]) {
+  for (const re of [CASE_NAME_RE, NONV_RE, SUPRA_RE, STRUNG_RE]) {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(src))) {
       if (!m[0]) { re.lastIndex++; continue; }
-      const end = m.index + m[0].length;
-      if (re === CASE_NAME_RE && !CITE_AFTER_RE.test(src.slice(end, end + 60))) continue;
-      out.push([m.index, end]);
+      if (m.index >= page.length) break;
+      let start = m.index, end = m.index + m[0].length;
+      if (re === SUPRA_RE) {
+        const at = nameRunStart(m[0]);
+        if (at < 0) continue;
+        out.push([start + at, end]);
+        continue;
+      }
+      if (re === STRUNG_RE) {
+        // No tail in reach: only behind the cite it is strung after.
+        if (!STRUNG_SEAM_RE.test(src.slice(Math.max(0, start - 160), start))) continue;
+      } else {
+        const t = CITE_AFTER_RE.exec(src.slice(end, end + CITE_AFTER_REACH));
+        if (!t) continue;
+        if (t[1]) end += t[1].length; // a writ's real party in interest
+      }
+      if (re !== NONV_RE) {
+        // The plaintiff's own words: not the sentence or the signal before it…
+        const v = NAME_V_RE.exec(m[0]);
+        const at = nameRunStart(v ? m[0].slice(0, v.index) : m[0]);
+        if (at < 0) continue;
+        // …and not this case's own caption recited with a year.
+        if (own && v && sideIsOwn(m[0].slice(at, v.index), own) && sideIsOwn(m[0].slice(v.index + v[0].length), own)) continue;
+        start += at;
+      }
+      out.push([start, end]);
     }
   }
   shortCiteNames(src, out);
-  out.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  const mine = [];
+  for (const [a, b] of out) if (a < page.length) mine.push([a, Math.min(b, page.length)]);
+  mine.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
   // The overlapping ones merged, so a caller has one span to test against.
   const merged = [];
-  for (const [a, b] of out) {
+  for (const [a, b] of mine) {
     const last = merged[merged.length - 1];
     if (last && a <= last[1]) last[1] = Math.max(last[1], b);
     else merged.push([a, b]);
@@ -1166,7 +1300,7 @@ export function clearReading(text, { rev = null, reals = null, flagRx = null, sp
     if (reals) {
       // A name wrapped down a column is read too, its cells off the page as
       // it stands (`layout`), not off the reading with its fakes blanked out.
-      const cited = citedNameSpans(flat);
+      const cited = citedNameSpans(flat, { next: pages[i + 1] ? pages[i + 1].lines.slice(0, 12).join("\n") : "" });
       for (const h of findRealSpans(reals, mask ? mask(flat, raw) : flat, { layout: raw })) {
         if (!insideCited(cited, h)) values.push(h.real);
       }
@@ -1473,7 +1607,7 @@ export function typedReals(hits, page, built) {
     if (o != null && spanEdited(spans, o + h.start, o + h.end)) where.push([h, o + h.start, o + h.end]);
   }
   if (!where.length) return [];
-  const cited = citedNameSpans(page.text);
+  const cited = citedNameSpans(page.text, { next: page.next || "" });
   return where.filter(([, s, e]) => !insideSpans(cited, s, e)).map(([h]) => h);
 }
 
@@ -1495,13 +1629,13 @@ export function typedReals(hits, page, built) {
  * pseudonym. A piece the edit wrote makes the name typed: "Rasho" typed under
  * a "Helen" the page had is "Helen Rasho" typed, and is faked whole.
  */
-export function typedSpans(spans, text, built) {
+export function typedSpans(spans, text, built, { next = "" } = {}) {
   if (!spans || !spans.length || built == null) return [];
   const edits = editedSpans(built, text);
   if (!edits.length) return [];
   const mine = spans.filter((h) => (h.ranges && h.ranges.length ? h.ranges : [[h.start, h.end]]).some(([a, b]) => spanEdited(edits, a, b)));
   if (!mine.length) return [];
-  const cited = citedNameSpans(text);
+  const cited = citedNameSpans(text, { next });
   return mine.filter((h) => !insideCited(cited, h));
 }
 
@@ -1644,7 +1778,7 @@ export function typedPseudonymsCited(page, built) {
     if (el.getAttribute("data-typed") != null || spanEdited(spans, o, o + len)) made.push([el, o, o + len]);
   }
   if (!made.length) return [];
-  const cited = citedNameSpans(page.text);
+  const cited = citedNameSpans(page.text, { next: page.next || "" });
   return made.filter(([, s, e]) => insideSpans(cited, s, e)).map(([el]) => el);
 }
 
@@ -2212,9 +2346,30 @@ export const setOcrAgain = setNoOcr;
 // PDF; it is left in the file, and the page is saved and marked again.
 export const TEXTFIXED_RE = /^text[\s-]*corrected\s*:\s*(.+?)\s*\|\s*(?:pages?|pp?\.?)?\s*(\d+)\s*(?:\|\s*sum\s*([0-9a-f]{8})\s*)?$/i;
 const TEXTFIXED_LEAD_RE = /^text[\s-]*corrected\s*:/i;
-// A rule line ends a page's text, for the sum, as it does in PDF-Linker's own
-// cut (the authorities trailer an older build wrote rides on the last page).
-const PAGE_RULE_RE = /^=+ .* =+$/;
+// The authorities trailer an older build wrote rides on the last page of an
+// export, and ends that page's text — for the sum, here and in PDF-Linker's
+// page cut alike (`_PN_EXPORT_TRAILER_RE`, the same pattern as TRAILER_RE).
+// It is the ONLY line that ends a page short of the next page header: the
+// broad rule this replaced (any "=… x …=" line) also ended a page at a line
+// the operator typed — "= = = = =", "== Exhibit A ==" — so PDF-Linker drew
+// the text above it as the page's whole layer, marked the page TEXT
+// CORRECTED, and the rest was never read again.
+//
+// …and a line shaped like PDF-Linker's own furniture — six "=" each side of
+// a label: a page header, a held page's heading in Edited Pages Not
+// Applied.txt pasted back with its page — is not cut at either: the page is
+// not handed over (pageFurnitureLine; PDF-Linker's `_pn_page_furniture_line`
+// refuses it the same way, pinned to the same vectors).
+const FURNITURE_RE = /^={6} \S(?:.*\S)? ={6}$/;
+/** The first line of a page, above its authorities trailer if it has one, shaped like PDF-Linker's own furniture; null where none is. */
+export function pageFurnitureLine(lines) {
+  for (const raw of lines || []) {
+    const line = String(raw == null ? "" : raw);
+    if (TRAILER_RE.test(line)) return null;
+    if (FURNITURE_RE.test(line)) return line;
+  }
+  return null;
+}
 
 /** A page transcribed by hand: { doc, pdf, page, sum }, or null without a doc and a page. */
 export function makeTextFixedEntry(e) {
@@ -2241,14 +2396,14 @@ export function setTextFixed(list, entry, on) {
 }
 /**
  * The page's text as a checksum: FNV-1a, 32 bits, over the UTF-8 bytes of its
- * lines up to the first rule line, joined by newlines — each line's trailing
+ * lines up to the authorities trailer (TRAILER_RE), joined by newlines — each line's trailing
  * spaces, tabs and carriage returns dropped, and the blank lines at either end.
  * PDF-Linker's _pn_page_text_sum is the same function; the two are pinned to
  * the same values on both sides.
  */
 export function pageTextSum(lines) {
   const src = (lines || []).map((l) => String(l == null ? "" : l));
-  const r = src.findIndex((l) => PAGE_RULE_RE.test(l));
+  const r = src.findIndex((l) => TRAILER_RE.test(l));
   const body = (r < 0 ? src : src.slice(0, r)).map((l) => l.replace(/[ \t\r]+$/, ""));
   while (body.length && !body[0]) body.shift();
   while (body.length && !body[body.length - 1]) body.pop();
@@ -2303,6 +2458,20 @@ export function wordsChanged(before, after) {
   return Math.max(n - same, m - same);
 }
 
+// A page line PDF-Linker SET ASIDE: `# <the line>`, under a `# not applied: …`
+// note — refused because its PDF's page count no longer matches its export.
+const SET_ASIDE_RE = /^#\s*((?:did[\s-]*not[\s-]*ocr|ocr[\s-]*again|text[\s-]*corrected)\s*:.*)$/i;
+/** The page lines PDF-Linker set aside in `disk` (`# <the line>`), as parseReaderFile reads them: { noOcr, ocrAgain, textFixed }. */
+export function setAsideLines(disk) {
+  const lines = [];
+  for (const raw of String(disk == null ? "" : disk).split(/\r?\n/)) {
+    const m = raw.replace(/^\ufeff/, "").trim().match(SET_ASIDE_RE);
+    if (m) lines.push(m[1]);
+  }
+  const p = parseReaderFile(lines.join("\n"));
+  return { noOcr: p.noOcr, ocrAgain: p.ocrAgain, textFixed: p.textFixed };
+}
+
 /** Whether a page's lines read DID_NOT_OCR and nothing else (the trailer aside). */
 export function readsDidNotOcr(lines) {
   const src = (lines || []).map((l) => String(l == null ? "" : l));
@@ -2332,14 +2501,17 @@ export function headerSaysDidNotOcr(page) {
  *   - a page that reads [DID NOT OCR] has no transcription to hand over.
  * → { noOcr, ocrAgain, textFixed }, each the same list where nothing moved.
  */
-export function pageListsAfter(lists, items, { drop = false } = {}) {
+export function pageListsAfter(lists, items, { drop = false, held = null } = {}) {
   let list = (lists && lists.noOcr) || [], again = (lists && lists.ocrAgain) || [], fixed = (lists && lists.textFixed) || [];
   for (const { entry, page: p } of items || []) {
     if (!entry || !p) continue;
     const marked = headerSaysDidNotOcr(p), reads = readsDidNotOcr(p.lines);
     const asked = again.some((e) => sameNoOcr(e, entry));
+    // …never one PDF-Linker set aside (`held`): its page is not the one the
+    // line named any more, until the page is marked again by hand.
+    const aside = !!held && held.some((e) => sameNoOcr(e, entry));
     if (marked) list = setNoOcr(list, entry, false);
-    else if (reads) { if (!asked) list = setNoOcr(list, entry, true); }
+    else if (reads) { if (!asked && !aside) list = setNoOcr(list, entry, true); }
     else if (drop) list = setNoOcr(list, entry, false);
     if (asked && !marked && !reads) again = setOcrAgain(again, entry, false);
     if (reads) fixed = setTextFixed(fixed, entry, false);
@@ -2348,14 +2520,40 @@ export function pageListsAfter(lists, items, { drop = false } = {}) {
 }
 
 /**
- * Each transcribed page's sum set to its text as it now stands — what a save
- * just wrote: `items` are { entry, lines }. A page with no `text corrected`
- * entry is passed over. → the list, the same one where no sum moved.
+ * Each transcribed page's sum set to its text as a save just wrote it —
+ * `items` are { entry, lines, before, pressed }: the page as written, the
+ * page as the file it replaced read (null where that is not known), and
+ * whether ✎ Use my text was pressed on it since the last save. A SAVE MOVES A
+ * SUM ONLY WHERE IT WROTE THE PAGE AND THE LINE WAS TRUE OF THE FILE IT
+ * REPLACED, or where ✎ was pressed: it used to stamp every transcribed page
+ * of every document it wrote, so an empty Ctrl+S on an export a run had
+ * rewritten from the bad OCR made that OCR the operator's transcription, and
+ * the next run burned it into the PDF and spent the line. A page with no
+ * `text corrected` entry is passed over. → the list, the same one where no
+ * sum moved.
  */
 export function fixedSumsFor(textFixed, items) {
   let list = textFixed || [];
-  for (const { entry, lines } of items || []) {
-    if (entry && list.some((e) => sameNoOcr(e, entry))) list = setTextFixed(list, { ...entry, sum: pageTextSum(lines) }, true);
+  for (const { entry, lines, before = null, pressed = false } of items || []) {
+    const had = entry && list.find((e) => sameNoOcr(e, entry));
+    if (!had) continue;
+    const sum = pageTextSum(lines);
+    if (sum === had.sum) continue;
+    if (!pressed) {
+      // Nothing known of the page the write replaced: the line stands.
+      if (before == null) continue;
+      const was = pageTextSum(before);
+      // The save did not write this page — an empty Ctrl+S, an edit on
+      // another page, a margin number put back somewhere else.
+      if (was === sum) continue;
+      // The line was not true of the page the write replaced: a run rewrote
+      // the export since (from the OCR the operator was replacing, its PDF
+      // locked), and stamping the page's text now handed that reading to the
+      // next run as the operator's transcription. The line keeps its sum;
+      // PDF-Linker refuses it and says so, and ✎ asks again.
+      if (had.sum && was !== had.sum) continue;
+    }
+    list = setTextFixed(list, { ...entry, sum }, true);
   }
   return list;
 }
@@ -2494,6 +2692,8 @@ export function carriesKeep(text, value, control = "") {
 export function spendLines(lists, saved, disk) {
   const keeps = (lists && lists.keeps) || [];
   const textFixed = (lists && lists.textFixed) || [];
+  const noOcr = (lists && lists.noOcr) || [];
+  const ocrAgain = (lists && lists.ocrAgain) || [];
   const now = disk == null ? "" : String(disk);
   const was = saved == null ? "" : String(saved);
   const onDisk = new Set(keepLines(now).map((k) => foldKey(k.value)));
@@ -2504,6 +2704,20 @@ export function spendLines(lists, saved, disk) {
   const fixedOnDisk = parseReaderFile(now).textFixed;
   const spentFixed = textFixed.filter((e) => fixedWritten.some((w) => sameNoOcr(w, e) && w.sum === e.sum)
     && !fixedOnDisk.some((d) => sameNoOcr(d, e)));
+  // …and a page not to OCR, or to OCR again, written here and no longer in the
+  // file as a line PDF-Linker reads: applied (the page marked, the line spent),
+  // or SET ASIDE — refused because its PDF's page count no longer matches its
+  // export, and written back as `# <the line>` (setAsideLines) so no run
+  // applies it to a renumbered page. Kept, the reader's next write put the
+  // line back as one to apply, and the run after it marked the wrong page.
+  const wroteP = parseReaderFile(was), diskP = parseReaderFile(now);
+  const gonePage = (written, onDisk) => (e) => written.some((w) => sameNoOcr(w, e)) && !onDisk.some((d) => sameNoOcr(d, e));
+  const spentNoOcr = noOcr.filter(gonePage(wroteP.noOcr, diskP.noOcr));
+  const spentAgain = ocrAgain.filter(gonePage(wroteP.ocrAgain, diskP.ocrAgain));
+  const aside = setAsideLines(now);
+  const setAside = spentNoOcr.filter((e) => aside.noOcr.some((d) => sameNoOcr(d, e)))
+    .concat(spentAgain.filter((e) => aside.ocrAgain.some((d) => sameNoOcr(d, e))))
+    .concat(textFixed.filter((e) => aside.textFixed.some((d) => sameNoOcr(d, e))));
   const lines = was.split("\n").filter((raw) => {
     const line = raw.replace(/^\ufeff/, "").trim();
     if (!line || line[0] === "#") return true;
@@ -2511,14 +2725,20 @@ export function spendLines(lists, saved, disk) {
       const n = line.match(TEXTFIXED_RE);
       return !n || fixedOnDisk.some((d) => sameNoOcr(d, { doc: n[1], page: Number(n[2]) }));
     }
+    const pl = parseReaderFile(line);
+    if (pl.noOcr.length) return diskP.noOcr.some((d) => sameNoOcr(d, pl.noOcr[0]));
+    if (pl.ocrAgain.length) return diskP.ocrAgain.some((d) => sameNoOcr(d, pl.ocrAgain[0]));
     const m = line.match(KEEP_RE);
     return !m || onDisk.has(foldKey(m[2]));
   });
   return {
     keeps: spentKeeps.length ? keeps.filter((k) => !spentKeeps.includes(k)) : keeps,
     textFixed: spentFixed.length ? textFixed.filter((e) => !spentFixed.includes(e)) : textFixed,
+    noOcr: spentNoOcr.length ? noOcr.filter((e) => !spentNoOcr.includes(e)) : noOcr,
+    ocrAgain: spentAgain.length ? ocrAgain.filter((e) => !spentAgain.includes(e)) : ocrAgain,
     spentKeeps,
     spentFixed,
+    setAside,
     saved: lines.join("\n"),
   };
 }
@@ -2620,11 +2840,61 @@ export function linesNotOurs(disk, { mine = "", written = "", seen = null, withd
   }
   return out;
 }
-/** The file to write: the reader's own text, then the lines kept (linesNotOurs) under their comment. */
-export function withLinesNotOurs(mine, kept) {
-  const text = String(mine == null ? "" : mine);
+/**
+ * The file to write: the reader's own text, then PDF-Linker's notes with the
+ * lines under them (`noted`, notedBlocks'), then the lines kept (linesNotOurs)
+ * under their comment.
+ */
+export function withLinesNotOurs(mine, kept, noted = []) {
+  let text = String(mine == null ? "" : mine);
+  for (const b of noted || []) text += (text && !text.endsWith("\n") ? "\n" : "") + "\n" + b.note.concat([""], b.lines).join("\n") + "\n";
   if (!kept || !kept.length) return text;
   return text + (text && !text.endsWith("\n") ? "\n" : "") + "\n" + KEPT_LINES_HEAD + "\n" + kept.join("\n") + "\n";
+}
+// PDF-LINKER'S NOTES stay over their lines. A run writes lines back into the
+// file under a `#` note saying what they are — a keep it could not record on
+// the master, one waiting for a full re-run, a line saved after it read the
+// file, and (keep withdrawals, G3) a keep line carried back for this case
+// whose master row is another case's, which the note tells the next run to
+// apply as this case's keep without recording it again. The reader read those
+// lines into its lists and wrote them back among its own, the note dropped:
+// a carried keep line then read as a fresh instruction, recorded once more as
+// the newest, and could put this case's `no` back over the other case's row.
+// The reader's own header (its first line has never changed) and the page
+// lines PDF-Linker set aside (`# <the line>`) are not notes.
+const READER_HEAD_FIRST = VALUES_HEAD[0];
+/**
+ * PDF-Linker's notes in `disk` (the file as it stands) over lines the reader's
+ * own text (`mine`) still carries: { blocks: [{ note, lines }], mine } — each
+ * note's comment lines and the lines under it that `mine` carries (verbatim,
+ * as the file has them), and `mine` without those lines, which go under their
+ * note instead (withLinesNotOurs). A line the reader no longer carries is not
+ * kept under its note; a note with none left goes.
+ */
+export function notedBlocks(disk, mine) {
+  const text = String(mine == null ? "" : mine);
+  const ours = new Set();
+  for (const raw of text.split(/\r?\n/)) { const k = valuesLineKey(raw); if (k && !k.startsWith("raw:")) ours.add(k); }
+  const blocks = [], moved = new Set();
+  let cur = null, header = false;
+  for (const raw of String(disk == null ? "" : disk).split(/\r?\n/)) {
+    const line = raw.replace(/^\ufeff/, "").trim();
+    if (!line) continue;
+    if (line[0] === "#") {
+      if (line === READER_HEAD_FIRST) { header = true; cur = null; continue; }
+      if (header || line === KEPT_LINES_HEAD || SET_ASIDE_RE.test(line)) { cur = null; continue; }
+      if (cur && !cur.lines.length) cur.note.push(line);
+      else { cur = { note: [line], lines: [] }; blocks.push(cur); }
+      continue;
+    }
+    header = false;
+    if (!cur) continue;
+    const k = valuesLineKey(line);
+    if (k && ours.has(k) && !moved.has(k)) { cur.lines.push(line); moved.add(k); }
+  }
+  const out = blocks.filter((b) => b.lines.length);
+  if (!out.length) return { blocks: [], mine: text };
+  return { blocks: out, mine: text.split("\n").filter((raw) => !moved.has(valuesLineKey(raw))).join("\n") };
 }
 /** Whether two byte arrays hold the same bytes. */
 export function sameBytes(a, b) {
@@ -2668,6 +2938,34 @@ export function writtenBaseline(listText, disk) {
   if (disk == null) return "";
   const a = readerLines(listText), b = readerLines(disk);
   return a.length === b.length && a.every((l, i) => l === b[i]) ? String(listText == null ? "" : listText) : String(disk);
+}
+/**
+ * The record of what was written (`saved`) with every line of the folder's
+ * file (`disk`) that the list (`listText`, formatValuesFile's) carries and the
+ * record does not: the lines the folder's opening read INTO the list — written
+ * by another browser, another session or by hand. They stand in the file all
+ * the same, so a list that lets one go owes the file its removal (valuesDirty):
+ * unrecorded, the value withdrawn read as "nothing to write", stayed in the
+ * file, and PDF-Linker went on applying it. And a keep or a transcribed page
+ * PDF-Linker then takes out reads as spent (spendLines), not owed again. A line
+ * the reader cannot read into a list (`raw:`) is never recorded. Where the
+ * record then carries exactly the list's lines, the list's own text, so a
+ * folder in step with its file reads in step.
+ */
+export function noteLinesRead(saved, disk, listText) {
+  const was = saved == null ? "" : String(saved);
+  if (disk == null) return was;
+  const list = lineKeys(listText), have = lineKeys(was);
+  let out = was;
+  for (const raw of String(disk).split(/\r?\n/)) {
+    const k = valuesLineKey(raw);
+    if (!k || k.startsWith("raw:") || !list.has(k) || have.has(k)) continue;
+    have.add(k);
+    out += (out && !out.endsWith("\n") ? "\n" : "") + raw.replace(/^﻿/, "").trim() + "\n";
+  }
+  if (out === was) return was;
+  const a = readerLines(listText), b = readerLines(out);
+  return a.length === b.length && a.every((l, i) => l === b[i]) ? String(listText == null ? "" : listText) : out;
 }
 
 /** Whether a flagged value is one to fake whole (`phrase:`). */

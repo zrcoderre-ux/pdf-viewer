@@ -205,7 +205,8 @@ function keepSpecRest(real, cell) {
 // asked, so none of it is near a matcher.
 const CONTACT_PUBLIC_EMAILS = new Set(["adrcivil@lacourt.ca.gov"]);
 const CONTACT_URL_WHITELIST = new Set(["leginfo.legislature.ca.gov", "law.cornell.edu", "scholar.google.com", "google.com"]);
-const CONTACT_PUBLIC_HOSTS = ["lacourt.org", "resolvelawla.com"];
+// …and the federal SCRA site and LawHelpCA, which a form prints (PDF-Linker #510).
+const CONTACT_PUBLIC_HOSTS = ["lacourt.org", "resolvelawla.com", "scra.dmdc.osd.mil", "lawhelpcalifornia.org"];
 const CONTACT_EMAIL_HOST_RE = /^[A-Za-z0-9.\-_]+\.[A-Za-z]{2,}$/;
 const CONTACT_EMAIL_COM_RE = /^([A-Za-z0-9][A-Za-z0-9-]*?),?(com|COM)$/;
 const CONTACT_URL_LED_RE = /^(?:https?:\/\/|www\.)[^\s<>()"'‘’“”]*[^\s<>()"'‘’“”.,;:!?]$/i;
@@ -310,6 +311,10 @@ const POSS_MATCH_RE = /['’][sS]$/;
  *           the cell's text as `control`.
  *   dropped — { keeps, controls, ambiguous, words, pinned }: what was set aside.
  */
+// The key rows naming the case's own parties (parseKey's `own`): PDF-Linker's
+// trusted sources and categories (`_trusted_party_tokens`).
+const OWN_SOURCES = new Set(["spreadsheet", "--term"]);
+const OWN_CATEGORIES = new Set(["person", "entity", "person-token", "entity-token"]);
 export function parseKey(sheets, name) {
   const entries = [];
   let keeps = 0;
@@ -325,6 +330,8 @@ export function parseKey(sheets, name) {
     const fakeCol = heads.indexOf("replacement");
     const statusCol = heads.indexOf("status");
     const occCol = heads.indexOf("occurrences");
+    const catCol = heads.indexOf("category");
+    const srcCol = heads.indexOf("source");
     for (let i = hi + 1; i < rows.length; i++) {
       const row = rows[i] || [];
       const real = trim(row[realCol]);
@@ -347,6 +354,9 @@ export function parseKey(sheets, name) {
         alt: statusCol !== -1 && fold(row[statusCol]) === ALT_STATUS,
         occ: isFinite(occ) && occ > 0 ? occ : 0,
         pinned,
+        own: catCol !== -1 && srcCol !== -1 && OWN_SOURCES.has(fold(row[srcCol])) && OWN_CATEGORIES.has(fold(row[catCol])),
+        // An OCR fix: its Replacement is the text's own correct reading, not a stand-in.
+        ocr: (catCol !== -1 && fold(row[catCol]) === "ocr-fix") || (srcCol !== -1 && fold(row[srcCol]) === "ocr-fix"),
       });
     }
   }
@@ -372,8 +382,8 @@ export function parseKey(sheets, name) {
     if (!baseReal || (!e.control && !baseFake) || haveReal.has(fold(baseReal))) continue;
     haveReal.add(fold(baseReal));
     derived.push(e.control
-      ? { real: baseReal, fake: "", control: e.control, alt: e.alt, occ: 0, pinned: e.pinned }
-      : { real: baseReal, fake: baseFake, alt: e.alt, occ: 0, pinned: e.pinned });
+      ? { real: baseReal, fake: "", control: e.control, alt: e.alt, occ: 0, pinned: e.pinned, ocr: e.ocr }
+      : { real: baseReal, fake: baseFake, alt: e.alt, occ: 0, pinned: e.pinned, ocr: e.ocr });
   }
   for (const d of derived) entries.push(d);
 
@@ -431,7 +441,7 @@ export function parseKey(sheets, name) {
   const seenReal = new Map();
   const rowOf = (e) => (e.control
     ? { real: e.real, fake: "", pinned: !!e.pinned, control: e.control }
-    : { real: e.real, fake: e.fake, pinned: !!e.pinned });
+    : { real: e.real, fake: e.fake, pinned: !!e.pinned, ocr: !!e.ocr });
   for (const e of entries) {
     const k = fold(e.real);
     const at = seenReal.get(k);
@@ -459,6 +469,12 @@ export function parseKey(sheets, name) {
     name: name || "",
     sheet: (applied && trim(applied.name)) || "",
     rows: entries.length,
+    // The case's OWN parties: what the key was built from, the E-Court
+    // template ("spreadsheet") and `--term` (New Real Values.txt's lines
+    // among them) — PDF-Linker's `_trusted_party_tokens`, which decides when
+    // a "X v. Y" recited with a year is this case's caption and not a
+    // decision (textdoc.citedNameSpans). An alt spelling is a derived one.
+    own: entries.filter((e) => e.own && !e.alt).map((e) => e.real),
     pairs,
     warn,
     hint,
@@ -908,6 +924,27 @@ export function compileForward(key) {
   for (const w of warn) if (w.fake && !map.has(fold(w.real))) map.set(fold(w.real), w.fake);
   const rx = buildMatcher(warn.map((w) => w.real));
   return { rx, map };
+}
+
+/**
+ * The stand-ins only the key's PINNED sheet holds ("Pinned (never in text)":
+ * bindings no export carried when the run wrote the key), which DeAnonymize.bas
+ * does not read: a draft carrying one keeps the stand-in where the real name
+ * should come back. The forward side writes them all the same — a real name
+ * typed is never written as itself — and PDF-Linker's next run, finding an
+ * export that carries one, moves its row onto the reversal sheet; until then
+ * the export is not to go out, and the save says so (text-reader's
+ * pinnedNote). An OCR fix's row is left out (its Replacement is the text's
+ * own correct reading), and so is a stand-in the applied sheet also reverses.
+ * → { rx, map: fold(fake) → real }, or null where there is none.
+ */
+export function compilePinnedFakes(key) {
+  const live = new Set(pairRows(key).map((p) => fold(p.fake)));
+  const rows = warnRows(key).filter((w) => w.pinned && w.fake && !w.control && !w.ocr && !isCommonReal(w.fake) && !live.has(fold(w.fake)));
+  if (!rows.length) return null;
+  const map = new Map();
+  for (const w of rows) if (!map.has(fold(w.fake))) map.set(fold(w.fake), w.real);
+  return { rx: buildMatcher(rows.map((w) => w.fake)), map };
 }
 
 /**

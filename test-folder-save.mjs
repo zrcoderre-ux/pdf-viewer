@@ -1710,6 +1710,7 @@ test(25, "a keep PDF-Linker has spent is not handed over again, whatever the mas
       // under a comment saying why. It is not spent.
       await keptAndSpent(r, null, { spend: (page) => writeNrv(page, HELD_NRV) });
       check("the master write failed, the line held under its comment: still handed over", nrvLines(await readFolder(r.page)), ["restitution", "no: Corwin Ashdale"]);
+      truthy("…under PDF-Linker's note still", /# 1 keep\(s\) applied, but not on the master KEEP sheet yet[^\n]*\n\nno: Corwin Ashdale\n/.test(NRV(await readFolder(r.page)) || ""));
       check("…and still on the case's list", await storedKeeps(r.page), ["no: Corwin Ashdale"]);
       check("…with nothing said", r.log.toasts.some((t) => /off this case's keeps/.test(t)), false);
       check("no page errors", r.log.errors, []);
@@ -2448,6 +2449,94 @@ test(37, "unsaved answers survive a run that moved only their sentence's export 
     check("…and stored again under the row's own identity", Object.values(now || {}).map((e) => [e.id === old, e.fix]), [[false, "never"]]);
     check("no page errors", r.log.errors, []);
   } finally { await r.close(); }
+});
+
+// ── 38. a keep PDF-Linker spent onto the master stays the reader's to take back ──
+// PDF-Linker applies a case's keep, puts it on the master's KEEP sheet, takes
+// its line out of New Real Values.txt — and retires the key row it corrected,
+// so the key binds the value no more. The reader showed and offered only the
+// master keeps the key binds: the keep the case made was unmarked, unlisted
+// and out of the selection's Remove from Master Keep for good.
+const KEY_NO_PELLMONT = buildKeyXlsx(KEY.filter((r) => r[1] !== "Pellmont Motors"));
+const MASTER_KEEPS_PELLMONT = buildMasterXlsx([ELSEWHERE, keepRow("Pellmont Motors", "no")]);
+// The export as the run wrote it with the keep applied: the name in the clear.
+const A_KEPT = A.split("Quarrow Motors").join("Pellmont Motors");
+test(38, "a keep PDF-Linker spent onto the master is marked, listed and can be taken off it; × on a case keep the master holds takes it off the master too", async () => {
+  const putKey = (page, bytes) => page.evaluate(async (b) => { const w = await (await window.__case.getFileHandle("pseudonym_key.xlsx", { create: true })).createWritable(); await w.write(new Uint8Array(b)); await w.close(); }, Array.from(bytes));
+  const putDoc = (page, name, text) => page.evaluate(async ({ name, text }) => { const t = await window.__case.getDirectoryHandle("Text Files"); const w = await (await t.getFileHandle(name, { create: true })).createWritable(); await w.write(text); await w.close(); }, { name, text });
+  const masterListed = (page) => page.evaluate(() => [...document.querySelectorAll("#master-list li")].map((li) => li.firstChild.textContent));
+  {
+    const r = await newReader();
+    try {
+      await writeFolder(r.page);
+      await writeMaster(r.page, MASTER_PLAIN);
+      await setReel(r.page, false);
+      await adopt(r.page);
+      await attachMaster(r.page);
+      await openDoc(r.page, "A Complaint.txt");
+      await keepPn(r.page, "Pellmont Motors", "no");
+      await save(r.page);
+      check("the keep is handed to PDF-Linker", nrvLines(await readFolder(r.page)), ["no: Pellmont Motors"]);
+      // The run: the keep applied and recorded, its line spent, its key row retired.
+      await writeMaster(r.page, MASTER_KEEPS_PELLMONT);
+      await consume(r.page);
+      await putKey(r.page, KEY_NO_PELLMONT);
+      await putDoc(r.page, "A Complaint.txt", A_KEPT);
+      await adopt(r.page);
+      await attachMaster(r.page);
+      await openDoc(r.page, "A Complaint.txt", { settle: 1200 });
+      check("read again: off the case's keeps, spent", await storedKeeps(r.page), []);
+      check("…and listed in the Master Keep panel, though the key binds it no more", (await masterListed(r.page)).includes("Pellmont Motors"), true);
+      // Selected where it stands, in the clear: the pop-up offers Remove from Master Keep.
+      await r.page.evaluate(() => {
+        for (const body of document.querySelectorAll("#pages .tpage .page-body")) {
+          const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+          let n;
+          while ((n = w.nextNode())) {
+            const i = n.data.indexOf("Pellmont Motors");
+            if (i < 0) continue;
+            n.parentElement.scrollIntoView({ block: "center" });
+            const rg = document.createRange(); rg.setStart(n, i); rg.setEnd(n, i + 15);
+            const sel = document.getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+            return;
+          }
+        }
+      });
+      const offered = await r.page.waitForFunction(() => !document.getElementById("flag-pop").hidden && !document.getElementById("flag-pop-master").hidden, null, { timeout: 4000 }).then(() => true, () => false);
+      check("…and selected, Remove from Master Keep is offered", offered, true);
+      if (offered) {
+        await r.page.evaluate(() => document.getElementById("flag-pop-master").click());
+        await r.page.waitForTimeout(1200);
+        check("…and takes it off the master", await masterOnDisk(r.page), ["never:Clerk"]);
+      }
+      check("no page errors", r.log.errors, []);
+    } finally { await r.close(); }
+  }
+  {
+    // Spent onto the master, the folder not read since: the case's list still
+    // holds the keep, and its × took it off the list alone — the master went
+    // on keeping it.
+    const r = await newReader();
+    try {
+      await writeFolder(r.page);
+      await writeMaster(r.page, MASTER_PLAIN);
+      await setReel(r.page, false);
+      await adopt(r.page);
+      await attachMaster(r.page);
+      await openDoc(r.page, "A Complaint.txt");
+      await keepPn(r.page, "Pellmont Motors", "no");
+      await save(r.page);
+      await writeMaster(r.page, MASTER_KEEPS_PELLMONT);
+      await attachMaster(r.page);
+      check("the case keeps it, and the master too", [(await keepsShown(r.page)).includes("Pellmont Motors"), (await masterState(r.page)).keeps.includes("no:Pellmont Motors")], [true, true]);
+      r.log.dialogs.length = 0;
+      await unkeep(r.page, "Pellmont Motors");
+      await r.page.waitForTimeout(1500);
+      truthy("× asks to take it off the Master Keep as well", r.log.dialogs.some((d) => d.type === "confirm" && /Remove “Pellmont Motors” from the Master Keep/.test(d.message)));
+      check("…and the master no longer keeps it", await masterOnDisk(r.page), ["never:Clerk"]);
+      check("no page errors", r.log.errors, []);
+    } finally { await r.close(); }
+  }
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

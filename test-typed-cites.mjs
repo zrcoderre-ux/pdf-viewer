@@ -77,21 +77,32 @@ async function startServer() {
 // ── the key, as a real .xlsx ────────────────────────────────────────────────
 // On disk the exports carry the FAKES; the key turns them back on screen.
 // "Ashdale" is bound on its own, so a name typed as "Ashdale" is offered.
-function buildKey(rows) {
+function buildKey(rows, pinned = []) {
   const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "typed-cites-")), "pseudonym_key.xlsx");
   const py = `
 import json, sys, openpyxl
 wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Pseudonym Key"
-ws.append(["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"])
+head = ["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"]
+ws.append(head)
 for r in json.loads(sys.argv[2]): ws.append(r)
+pinned = json.loads(sys.argv[3])
+if pinned:
+    p = wb.create_sheet("Pinned (never in text)")
+    p.append(head)
+    for r in pinned: p.append(r)
 wb.save(sys.argv[1])
 `;
-  execFileSync("python3", ["-I", "-c", py, out, JSON.stringify(rows)]);
+  execFileSync("python3", ["-I", "-c", py, out, JSON.stringify(rows), JSON.stringify(pinned)]);
   return fs.readFileSync(out);
 }
 const KEY_BYTES = buildKey([
   ["person", "Corwin Ashdale", "Tobias Wrenfield", "", "", "spreadsheet", 4],
   ["person-token", "Ashdale", "Wrenfield", "", "", "spreadsheet", 4],
+  ["entity", "Quarrow Motors", "Brindle Works", "", "", "spreadsheet", 2],
+], [
+  // A binding no export carried when the run wrote the key: on the pinned
+  // sheet, which Word's macro does not read.
+  ["person", "Odile Varnum", "Marlow Kestrel", "", "", "spreadsheet", 0],
 ]);
 
 // ── the case ────────────────────────────────────────────────────────────────
@@ -122,6 +133,17 @@ const N = [
   " 4  End.",
 ].join("\n") + "\n";
 
+// A brief whose first page closes on a case name and whose second opens on
+// its year.
+const C = [
+  "====== Page 1 ======",
+  "The rule is settled.",
+  "As held in",
+  "====== Page 2 ======",
+  "(2019) 30 Cal.App.5th 1, the rule stands.",
+  "Signed.",
+].join("\n") + "\n";
+
 // ── the browser ─────────────────────────────────────────────────────────────
 let srv = null, browser = null;
 async function newReader(docName = "A Complaint.txt") {
@@ -138,7 +160,7 @@ async function newReader(docName = "A Complaint.txt") {
     const el = document.getElementById("toast");
     new MutationObserver(() => { const t = el.textContent.trim(); if (t) window.__testToast(t); }).observe(el, { childList: true, characterData: true, subtree: true });
   });
-  await page.evaluate(async ({ CASE, A, N, keyBytes }) => {
+  await page.evaluate(async ({ CASE, A, N, C, keyBytes }) => {
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry(CASE, { recursive: true }); } catch { /* none yet */ }
     const dir = await top.getDirectoryHandle(CASE, { create: true });
@@ -147,9 +169,10 @@ async function newReader(docName = "A Complaint.txt") {
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "A Complaint.txt", A);
     await put(text, "N Declaration.txt", N);
+    await put(text, "C Brief.txt", C);
     window.__case = dir;
     await window.__textReaderAdoptFolder(dir);
-  }, { CASE, A, N, keyBytes: Array.from(KEY_BYTES) });
+  }, { CASE, A, N, C, keyBytes: Array.from(KEY_BYTES) });
   await page.evaluate(() => { const t = document.getElementById("reel-toggle"); if (t && t.checked) { t.checked = false; t.dispatchEvent(new Event("change")); } });
   await page.evaluate((n) => window.__textReaderOpenDoc(n), docName);
   await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
@@ -494,6 +517,64 @@ async function run() {
       await save(p);
       const n = await fileText(p, "N Declaration.txt");
       check("the file keeps every number", n.split("\n").slice(1, 5).map((l) => l.slice(0, 2)), [" 1", " 2", " 3", " 4"]);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+
+    // ── 6. the cites PDF-Linker keeps that the reader did not read ────────
+    console.log("6. a matter named without a v., a writ, a federal reporter and a cite across a page keep their party; the case's own caption does not");
+    {
+      const r = await newReader();
+      const p = r.page;
+      await caretAt(p, 0, 0);
+      await type(p, " See In re Marriage of Ashdale (2008) 167 Cal.App.4th 562.");
+      await caretAt(p, 0, 1);
+      await type(p, " Ashdale v. Superior Court (Gelman) (2019) 30 Cal.App.5th 1. Gelman v. Ashdale, 500 F. Supp. 2d 100 (N.D. Cal. 2007).");
+      await caretAt(p, 0, 2);
+      await type(p, " In this action, Ashdale v. Quarrow Motors (2025), the plaintiff sued.");
+      await save(p);
+      const a = await fileText(p, "A Complaint.txt");
+      truthy("In re Marriage of: as typed", a.includes("Plaintiff filed the complaint. See In re Marriage of Ashdale (2008) 167 Cal.App.4th 562."));
+      truthy("a writ's real party and a federal reporter: as typed", a.includes("The court so held. Ashdale v. Superior Court (Gelman) (2019) 30 Cal.App.5th 1. Gelman v. Ashdale, 500 F. Supp. 2d 100 (N.D. Cal. 2007)."));
+      truthy("the case's own caption recited with a year: its pseudonyms", a.includes("Nothing else. In this action, Wrenfield v. Brindle Works (2025), the plaintiff sued."));
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+    {
+      const r = await newReader("C Brief.txt");
+      const p = r.page;
+      await caretAt(p, 0, 1);
+      await type(p, " Gelman v. Ashdale");
+      await caretAt(p, 0, 0);
+      await type(p, " Ashdale agreed.");
+      await p.waitForTimeout(900);
+      await save(p);
+      const c = await fileText(p, "C Brief.txt");
+      truthy("a name closing the page, its year on the next: as typed", c.includes("As held in Gelman v. Ashdale\n"));
+      truthy("…and one in prose above it: its pseudonym", c.includes("The rule is settled. Wrenfield agreed."));
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+
+    // ── 7. a stand-in only the pinned sheet holds ──────────────────────────
+    console.log("7. a name written as a stand-in only the key's pinned sheet holds is named by the save");
+    {
+      const r = await newReader();
+      const p = r.page;
+      await caretAt(p, 0, 0);
+      await type(p, " Odile Varnum agreed.");
+      await p.waitForTimeout(900);
+      await save(p);
+      const a = await fileText(p, "A Complaint.txt");
+      truthy("written as its stand-in", a.includes("Plaintiff filed the complaint. Marlow Kestrel agreed."));
+      truthy("…and the save says Word's macro will not turn it back until PDF-Linker runs",
+        r.log.toasts.some((t) => /“Marlow Kestrel” \(for Odile Varnum\): a stand-in only the key's pinned sheet holds/.test(t) && /run PDF-Linker/.test(t)));
+      r.log.toasts.length = 0;
+      await caretAt(p, 0, 1);
+      await type(p, " Ashdale agreed.");
+      await p.waitForTimeout(900);
+      await save(p);
+      truthy("…a stand-in the Pseudonym Key sheet holds is not named", !r.log.toasts.some((t) => /pinned sheet holds/.test(t) && /Wrenfield/.test(t)));
       check("no page errors", r.log.errors, []);
       await r.close();
     }

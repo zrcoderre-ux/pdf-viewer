@@ -10,7 +10,7 @@ import {
   markCss,
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
   serializeNodes, textOf, findRealsInPlain,
-  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
+  serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, setOwnPartyWords, ownPartyWordsOf, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
@@ -18,13 +18,13 @@ import {
   columnCuts, columnBands, columnWidths, lineIndent, placeColumns, COLUMN_GAP, COLUMN_REACH, COLUMN_SNAP, COLUMN_GUTTER, COLUMN_STRETCH,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
-  textFixedLine, setTextFixed, pageTextSum, headerSaysTextCorrected, TEXTFIXED_RE,
+  textFixedLine, setTextFixed, pageTextSum, pageFurnitureLine, headerSaysTextCorrected, TEXTFIXED_RE,
   wordsChanged, AUTO_TEXT_FIXED_WORDS, decisionDelta, applyDecisionDelta,
   marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
   readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
-  valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank,
+  valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead, setAsideLines, notedBlocks,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans } from "./viewer/pseudo-key.js";
 
@@ -258,7 +258,7 @@ console.log("cited case names");
     + "and Semole v. Sansoucie, supra, 28 Cal.App.3d 714. Rasho, supra, at p. 220. "
     + "The Rasho declaration says otherwise.";
   check("a case name with its citation, a short form, and a party with supra",
-    spans(T), ["See Rasho v. Quillmark", "Semole v. Sansoucie", "Rasho"]);
+    spans(T), ["Rasho v. Quillmark", "Semole v. Sansoucie", "Rasho"]);
   const at = (t, w) => { const i = t.indexOf(w); return insideSpans(citedNameSpans(t), i, i + w.length); };
   check("a party of a cited decision is inside one", at(T, "Rasho v. Quillmark"), true);
   check("…and the same name in the matter's own text is not",
@@ -354,6 +354,61 @@ console.log("cited case names");
     check(`…and read in step with the text (${a} ms then ${b} ms for four times as much)`, b < Math.max(60, a * 12), true);
     check("…a long export of them is not seconds", ms(UNIT.repeat(4800)) < 3000, true);
     check("…and each short cite in it is found", citedNameSpans(UNIT.repeat(10)).length, 30);
+  }
+  // WHAT PDF-LINKER KEEPS, read the way it reads it (`_PN_CITE_SHAPE_RE`, its
+  // parser's one-party leads, `_flex_ws_reporter`), measured sample by sample
+  // against pdf_linker.py: every name below it leaves verbatim, and a name the
+  // reader did not spare was marked and saved as its pseudonym.
+  {
+    const KEPT = [
+      ["As held in In re Marriage of Hartwell (2008) 167 Cal.App.4th 562, the court may.", "Hartwell"],
+      ["See Estate of Bowles (2008) 169 Cal.App.4th 684, 690.", "Bowles"],
+      ["In Conservatorship of Wendland (2001) 26 Cal.4th 519, the court held.", "Wendland"],
+      ["In the Matter of the Estate of Bowen (1990) 1 Cal.App.4th 1 controls.", "Bowen"],
+      ["Adoption of Kelsey S. (1992) 1 Cal.4th 816.", "Kelsey"],
+      ["In re Ferrand, 9 Cal. 4th 1 (1994).", "Ferrand"],
+      ["Rasho v. Superior Court (Quillmark) (2019) 30 Cal.App.5th 1 is on point.", "Rasho"],
+      ["Rasho v. Superior Court (Quillmark) (2019) 30 Cal.App.5th 1 is on point.", "Quillmark"],
+      ["Rasho v. Quillmark, 30 Cal. App. 5th 1 (2019), is on point.", "Rasho"],
+      ["Rasho v. Quillmark, 500 F. Supp. 2d 100 (N.D. Cal. 2007), is on point.", "Rasho"],
+      ["Rasho v. Quillmark, 123 S. Ct. 456 (2003), is on point.", "Rasho"],
+      ["Rasho v. Quillmark, 36 Mass. App. Ct. 162 (1994).", "Rasho"],
+      ["As held in Rasho v.\n12  Quillmark (2019) 30 Cal.App.5th 1, the rule.", "Quillmark"],
+      ["Cf. Rasho v. Quillmark (2019) 30 Cal.App.5th 1.", "Rasho"],
+      ["…71 Cal.App.5th 358, 373-374; Krongos v. Pacific Gas & Electric Co.", "Krongos"],
+    ];
+    check("a matter named without a v., a writ's real party, a spaced or federal reporter, a wrapped or strung cite: spared",
+      KEPT.map(([t, w]) => at(t, w)), KEPT.map(() => true));
+    // …and the name ONLY: what closes the sentence before it is this case's.
+    check("a party closing the sentence before the cite is no part of it, with a signal or without",
+      [at("The motion was served on Helen Rasho. See Jones v. Smith (2019) 30 Cal.App.5th 1.", "Helen Rasho"),
+        at("The motion was served on Helen Rasho. Jones v. Smith (2019) 30 Cal.App.5th 1.", "Helen Rasho"),
+        at("The motion was served on Helen Rasho. See Jones v. Smith (2019) 30 Cal.App.5th 1.", "Jones")], [false, false, true]);
+    check("a lead with no citation after it is no cite",
+      [spans("In re Marriage of Wrenfield, Los Angeles Superior Court Case No. BD123456, was filed."), spans("in re-filing the motion"), spans("The Estate of Bowles holds the house.")], [[], [], []]);
+    // A CITE ACROSS A PAGE BREAK: the name closes one page, its year opens the
+    // next (PDF-Linker reads 240 characters past the seam).
+    const P1 = "  27  As held in Rasho v. Quillmark", P2 = "  1  (2019) 30 Cal.App.5th 1, the rule stands.";
+    check("a cite whose year is on the next page: spared with the next page's head, not without it",
+      [insideSpans(citedNameSpans(P1, { next: P2 }), P1.indexOf("Rasho"), P1.indexOf("Rasho") + 5), insideSpans(citedNameSpans(P1), P1.indexOf("Rasho"), P1.indexOf("Rasho") + 5)], [true, false]);
+    check("…and nothing of the next page comes back as a span", citedNameSpans("Plain words.", { next: "Rasho v. Quillmark (2019) 30 Cal.App.5th 1" }), []);
+    // THIS CASE'S OWN CAPTION recited with a year is no decision: both sides
+    // mostly the case's own party words (the key's template and --term rows).
+    const own = ownPartyWordsOf(["Tobias Wrenfield", "Quarrow Motors, Inc."]);
+    const CAP = "In this action, Wrenfield v. Quarrow Motors, Inc. (2025), the plaintiff sued.";
+    check("the case's own caption with a year: not spared; one side alone the case's: spared",
+      [insideSpans(citedNameSpans(CAP, { own }), CAP.indexOf("Wrenfield"), CAP.indexOf("Wrenfield") + 9),
+        insideSpans(citedNameSpans("Wrenfield v. Gelman (2019) 30 Cal.App.5th 1.", { own }), 0, 9),
+        insideSpans(citedNameSpans(CAP), CAP.indexOf("Wrenfield"), CAP.indexOf("Wrenfield") + 9)], [false, true, true]);
+    setOwnPartyWords(own);
+    check("…the words set for the case are the default", insideSpans(citedNameSpans(CAP), CAP.indexOf("Wrenfield"), CAP.indexOf("Wrenfield") + 9), false);
+    setOwnPartyWords(null);
+    // Still linear on a jurat's capitals and a brief dense with leads.
+    const UNIT = "I JOHN ANDREW FORSYTHE DECLARE IN RE THE ESTATE OF THE MATTER OF ADOPTION OF ALL "
+      + "In re Marriage of Hartwell (2008) 167 Cal.App.4th 562; Estate of Bowles, the Estate of Bowles, In the Matter of Doe. ";
+    const ms = (t) => { const from = Date.now(); citedNameSpans(t); return Date.now() - from; };
+    const a = ms(UNIT.repeat(300)), b = ms(UNIT.repeat(1200));
+    check(`…and the leads read in step with the text (${a} ms then ${b} ms for four times as much)`, b < Math.max(80, a * 12), true);
   }
   // The bound is a party's WORDS, and a long one still reads as it did: this
   // name always began at "Department", the pattern being unable to cross the
@@ -1360,6 +1415,15 @@ console.log("a page transcribed by hand");
     pageTextSum(["  The lease was signed.", "Rent: $900 — paid"]));
   check("a rule line ends the page", pageTextSum(["The lease was signed.", "", "====== Authorities cited (public verification links) ======", "Smith v. Jones"]), "46d66a09");
   check("…and any change to the text moves it", pageTextSum(["The lease was signed!"]) === "46d66a09", false);
+  // Only the authorities trailer ends a page short of the next header: a
+  // ruled line the operator typed is the page's own (the shared vectors,
+  // pinned in PDF-Linker's tests to the same sums).
+  check("a ruled line the page carries is part of its text, as in PDF-Linker",
+    [pageTextSum(["The lease was signed.", "== Exhibit A ==", "Rent: $900 — paid"]), pageTextSum(["The lease was signed.", "= = = = =", "Rent: $900 — paid"])], ["9b3e2d29", "42fcfd5c"]);
+  check("pageFurnitureLine: a line shaped like PDF-Linker's own heading, above the trailer",
+    [pageFurnitureLine(["Text.", "====== Page 3 ======", "More."]), pageFurnitureLine(["Text.", "== Exhibit A ==", "= = = = ="]),
+      pageFurnitureLine(["Text.", "====== Authorities cited (public verification links) ======", "====== Page 3 ======"]), pageFurnitureLine([])],
+    ["====== Page 3 ======", null, null, null]);
   const e = { doc: "Kingscote Decl..txt", pdf: "Feit Decl.pdf", page: 4, sum: "0A1B2C3D" };
   check("the line names the PDF and carries the sum", textFixedLine(e), "text corrected: Feit Decl.pdf | page 4 | sum 0a1b2c3d");
   check("…and is written without one where there is none", textFixedLine({ doc: "X.txt", page: 2 }), "text corrected: X.txt | page 2");
@@ -1587,9 +1651,21 @@ console.log("documents off the screen");
   check("…and the same lists where nothing moved", pageListsAfter(same, [{ entry: e1, page: pg([DID_NOT_OCR]) }]).noOcr === same.noOcr, true);
 
   // fixedSumsFor
-  const tf = [{ ...e1, sum: "00000000" }];
-  check("fixedSumsFor: each transcribed page takes the sum of its text as written", fixedSumsFor(tf, [{ entry: e1, lines: ["a", "b"] }])[0].sum, pageTextSum(["a", "b"]));
-  check("…a page with no entry is passed over", fixedSumsFor(tf, [{ entry: { ...e1, page: 2 }, lines: ["a"] }]) === tf, true);
+  // A save moves a sum only where it wrote the page and the line was true of
+  // the file it replaced, or ✎ was pressed there.
+  const tf = [{ ...e1, sum: pageTextSum(["a"]) }];
+  check("fixedSumsFor: a page the save wrote, its line true of the file replaced: the text as written",
+    fixedSumsFor(tf, [{ entry: e1, lines: ["a", "b"], before: ["a"] }])[0].sum, pageTextSum(["a", "b"]));
+  check("…a page the save did not write (an empty Ctrl+S): the line stands",
+    fixedSumsFor(tf, [{ entry: e1, lines: ["Tne Iease"], before: ["Tne Iease"] }]) === tf, true);
+  check("…a line a run outdated (the file replaced read otherwise): it stands, whatever is written",
+    fixedSumsFor(tf, [{ entry: e1, lines: ["Tne Iease betvveen"], before: ["Tne Iease"] }]) === tf, true);
+  check("…nothing known of the file replaced: it stands", fixedSumsFor(tf, [{ entry: e1, lines: ["a", "b"] }]) === tf, true);
+  check("…✎ pressed since the last save: the text as written, whatever the file read",
+    fixedSumsFor(tf, [{ entry: e1, lines: ["The lease"], before: ["Tne Iease"], pressed: true }])[0].sum, pageTextSum(["The lease"]));
+  check("…a line with no sum takes the page the save wrote",
+    fixedSumsFor([{ ...e1, sum: "" }], [{ entry: e1, lines: ["a", "b"], before: ["a"] }])[0].sum, pageTextSum(["a", "b"]));
+  check("…a page with no entry is passed over", fixedSumsFor(tf, [{ entry: { ...e1, page: 2 }, lines: ["a"], before: [] }]) === tf, true);
 
   // readerFileHasLines: the last flag withdrawn
   const empty = formatValuesFile([], [], [], [], [], []);
@@ -1696,9 +1772,28 @@ console.log("what PDF-Linker has spent");
   const same = spendLines(none, wrote + "text corrected: A Complaint.pdf | page 2 | sum 0a1b2c3d\n", wrote + "text corrected: A Complaint.pdf | page 2 | sum 0a1b2c3d\n");
   check("nothing spent: the same lists back", [same.keeps === none.keeps, same.textFixed === none.textFixed], [true, true]);
   check("…and the record as it was", same.saved, wrote + "text corrected: A Complaint.pdf | page 2 | sum 0a1b2c3d\n");
-  check("the record keeps its header, its values and its page lines",
+  check("the record keeps its header and its values; a page line the file no longer carries goes, as a keep's does",
     spendLines({ keeps: [] }, "# head\nQuell Harbor\ndid not ocr: A.pdf | page 3\nno: Corwin Ashdale\n", null).saved,
-    "# head\nQuell Harbor\ndid not ocr: A.pdf | page 3\n");
+    "# head\nQuell Harbor\n");
+  // A page line written here and gone from the file — applied, or SET ASIDE by
+  // PDF-Linker as "# <the line>" because the PDF's pages no longer match its
+  // export — comes off the list, or the next write puts it back to apply.
+  {
+    const n3 = { doc: "A.pdf", pdf: "", page: 3 }, n4 = { doc: "A.pdf", pdf: "", page: 4 };
+    const wroteN = "did not ocr: A.pdf | page 3\nocr again: A.pdf | page 4\n";
+    const asideFile = "# not applied: A.pdf now has 12 pages and its export 11 — mark the page again on the export the next full run writes\n# did not ocr: A.pdf | page 3\nocr again: A.pdf | page 4\n";
+    const sp = spendLines({ keeps: [], textFixed: [], noOcr: [n3], ocrAgain: [n4] }, wroteN, asideFile);
+    check("a ⊘ line set aside: off the list, and named as set aside; an OCR-again line the file still carries stays",
+      [sp.noOcr, sp.ocrAgain.length, sp.setAside], [[], 1, [n3]]);
+    check("…and off the record", sp.saved.split("\n").filter(Boolean), ["ocr again: A.pdf | page 4"]);
+    const applied = spendLines({ keeps: [], textFixed: [], noOcr: [n3], ocrAgain: [] }, wroteN, null);
+    check("…one applied (the file gone): off the list, set aside nothing", [applied.noOcr, applied.setAside], [[], []]);
+    check("…one never written here stays", spendLines({ keeps: [], textFixed: [], noOcr: [n3], ocrAgain: [] }, "", null).noOcr, [n3]);
+    check("setAsideLines: the page lines PDF-Linker wrote back under #", setAsideLines(asideFile), { noOcr: [n3], ocrAgain: [], textFixed: [] });
+    // …and the ⊘ list does not take the page back by itself while it is held.
+    const held = pageListsAfter({ noOcr: [], ocrAgain: [], textFixed: [] }, [{ entry: n3, page: { header: "====== Page 3 ======", lines: [DID_NOT_OCR] } }], { held: [n3] });
+    check("pageListsAfter: a page held as set aside is not put back on the list", held.noOcr, []);
+  }
 
   // A keep taken afresh is not the one written before.
   check("forgetKeepLines: the keep lines on the value go, whatever their control",
@@ -1820,7 +1915,36 @@ console.log("the lines of New Real Values.txt the reader did not write");
   check("written after the reader's own lines, under a comment", both.split("\n").slice(-3), ["# Already in this file, not written by the text reader — kept as they stand:", "Hand Typed Value", ""]);
   check("…which PDF-Linker reads as the reader's lines plus the kept one", parseReaderFile(both).values, ["Marlow Tenbury", "Hand Typed Value"]);
   check("…and nothing kept, the reader's text as it was", withLinesNotOurs(mine, []), mine);
+  // PDF-Linker's notes stay over the lines it wrote under them.
+  const ourKeep = formatValuesFile(["restitution"], [{ control: "no", value: "Corwin Ashdale", state: "" }], [], [], [], []);
+  const carried = "# 1 keep(s) kept here by this line: the master KEEP sheet's row for each is another case's.\n\nno: Corwin Ashdale\n";
+  const nb = notedBlocks(carried, ourKeep);
+  check("notedBlocks: a note and the line under it the reader still carries",
+    nb.blocks, [{ note: ["# 1 keep(s) kept here by this line: the master KEEP sheet's row for each is another case's."], lines: ["no: Corwin Ashdale"] }]);
+  check("…the line written under the note, not among the reader's own",
+    withLinesNotOurs(nb.mine, [], nb.blocks).split("\n").filter((l) => l && !l.startsWith("# ") || /kept here/.test(l)),
+    ["restitution", "# 1 keep(s) kept here by this line: the master KEEP sheet's row for each is another case's.", "no: Corwin Ashdale"]);
+  check("…a line the reader withdrew goes, and its note with it",
+    notedBlocks(carried, formatValuesFile(["restitution"], [], [], [], [], [])).blocks, []);
+  check("…the reader's own header, its kept-lines head and a set-aside page line are no notes",
+    notedBlocks(ourKeep + "\n" + "# Already in this file, not written by the text reader — kept as they stand:\nno: Corwin Ashdale\n# did not ocr: A.pdf | page 3\n", ourKeep).blocks, []);
   check("sameBytes", [sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 2])), sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 3])), sameBytes(null, new Uint8Array([]))], [true, false, false]);
+
+  // What the folder's opening read INTO the list from the file is recorded as
+  // in the file, so letting it go owes the file its removal.
+  const kCor = { control: "no", value: "Corwin Ashdale", state: "" };
+  const fixed = { doc: "Exhibit A.pdf", pdf: "", page: 2, sum: "ed8d6603" };
+  const listNow = formatValuesFile(["Quell Harbor"], [kCor], [], [], [], [fixed]);
+  const fileNow = "Quell Harbor\nno: Corwin Ashdale\ntext corrected: Exhibit A.pdf | page 2 | sum ed8d6603\ndid not ocr: Exhibit A.pdf | pages 3-5, 9\n";
+  check("noteLinesRead: the file holding just what the list does — the list's own text, in step",
+    noteLinesRead("", fileNow, listNow), listNow);
+  const partial = noteLinesRead("Old Value\n", "Quell Harbor\nHand Typed Value\n", listNow);
+  check("…else the record and the lines the list took from the file, nothing it did not take",
+    partial, "Old Value\nQuell Harbor\n");
+  check("…a page list the reader cannot read is never recorded", noteLinesRead("", "did not ocr: Exhibit A.pdf | pages 3-5, 9\n", listNow), "");
+  check("…no file, the record as it was", noteLinesRead("Old Value\n", null, listNow), "Old Value\n");
+  check("…a transcribed page read in and since taken out by PDF-Linker reads as spent",
+    spendLines({ keeps: [], textFixed: [fixed] }, noteLinesRead("", fileNow, listNow), "Quell Harbor\n").spentFixed, [fixed]);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
