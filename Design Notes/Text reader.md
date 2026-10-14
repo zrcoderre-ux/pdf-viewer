@@ -1076,7 +1076,10 @@ marked nor counted, as before. The folder sweep (`clearReading`) counts flags
 the same way, off the text with each fake translated to its real name and
 spot keeps mapped into it. `flagSelection` tells the operator such a flag
 takes a full re-run (`s.touches` or `phraseFakedInFile`), as `markPhrase`
-does.
+does — and since PDF-Linker's one launcher (2026-10-14) its click finds the
+same flag itself (`_rerun_half_faked_values`, reading the exports through the
+key as this reader does) and does that full run, so the message says Re-run
+PDF-Linker does one for it, never "not Apply Fixes".
 
 **Flagging by selecting** (`setFlagMode`, `flagTakes`, `flagWhereReleased`):
 🚩 in the tools rail is a switch (`aria-pressed`, `body.flag-mode`), not a
@@ -1207,7 +1210,9 @@ still beats pinned). Three things follow:
   last check (`saveDocument`), and the refusal — and the `stuck` warning, should
   that ever be reached — adds `instructionNote`: the key holds no pseudonym for
   it, only "~Rasho", an instruction to PDF-Linker that only a full run (not
-  Apply Fixes) carries out; until then retype it, or keep it where it stands
+  Apply Fixes) carries out — since PDF-Linker's one launcher (2026-10-14),
+  "the next click of Re-run PDF-Linker carries it out", which decides on that
+  full run itself; until then retype it, or keep it where it stands
   (right-click: Keep just this one). The spot keep is named because it is the
   narrowest way through: the first draft said "keep it", which reads as "Keep
   in this case", and that keep stops the marks and the refusal for the value
@@ -1381,7 +1386,8 @@ retired from the case's list, the way a spent `text corrected:` line always
 was (that pruning is now the same function, and runs at a save as well). A
 line still in the file is not spent, whatever comment stands over it —
 PDF-Linker writes back, under a `#` line, a keep whose master row it could not
-write (#491) and one Apply Fixes holds for the full re-run — and is written
+write (#491) and one a typed `--fix-leaks` holds for the full run (the
+launcher's click does that full run instead, since 2026-10-14) — and is written
 again. A local keep is never written and never spent. The record of what was
 written is trimmed to the keep and page lines the file still carries
 (`spendLines`' `saved`), so a list PDF-Linker has spent does not read as owed:
@@ -2500,3 +2506,20 @@ wrong guess are restood on it once, as that first PDF lands — never again,
 because a slot the reader has scrolled past is holding the column up under
 them. On a combined file of forty documents that is every slot at the real
 page shape with four PDFs open, where it used to take forty.
+
+**PDF-Linker has one launcher, and the reader names only it** (2026-10-14).
+PDF-Linker retired its `Apply Fixes` launcher: `Re-run PDF-Linker` now passes
+`--auto` and decides for itself whether a click needs the full run (a new or
+changed document, an updated PDF-Linker or setting, a keep on a name the
+exports carry faked, an instruction typed into the key, a flag on a name half
+faked) or only the text-only pass that `Apply Fixes` ran (PDF-Linker's notes,
+*Launchers, deferral and copying*, "One button"). So every message that told
+the operator which of the two to double-click — the LEAKS save's hint and
+toasts, the Flagged panel's hint, the flag and phrase toasts, the combined
+file's status note, `instructionNote`, the ordinary-word pseudonym toast —
+names `Re-run PDF-Linker` alone, and where a full run is what it will take,
+says so as what the click will do rather than as a choice. The header the
+reader writes into `New Real Values.txt` (`VALUES_HEAD`) says the same; it is a
+comment PDF-Linker skips, so no format moved. The ordinary-word toast names the
+one way to force a full run where nothing else asks for one: deleting
+`PDF-Linker Run Record.json` from the folder.
