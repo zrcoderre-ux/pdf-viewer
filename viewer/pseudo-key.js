@@ -205,7 +205,8 @@ function keepSpecRest(real, cell) {
 // asked, so none of it is near a matcher.
 const CONTACT_PUBLIC_EMAILS = new Set(["adrcivil@lacourt.ca.gov"]);
 const CONTACT_URL_WHITELIST = new Set(["leginfo.legislature.ca.gov", "law.cornell.edu", "scholar.google.com", "google.com"]);
-const CONTACT_PUBLIC_HOSTS = ["lacourt.org", "resolvelawla.com"];
+// …and the federal SCRA site and LawHelpCA, which a form prints (PDF-Linker #510).
+const CONTACT_PUBLIC_HOSTS = ["lacourt.org", "resolvelawla.com", "scra.dmdc.osd.mil", "lawhelpcalifornia.org"];
 const CONTACT_EMAIL_HOST_RE = /^[A-Za-z0-9.\-_]+\.[A-Za-z]{2,}$/;
 const CONTACT_EMAIL_COM_RE = /^([A-Za-z0-9][A-Za-z0-9-]*?),?(com|COM)$/;
 const CONTACT_URL_LED_RE = /^(?:https?:\/\/|www\.)[^\s<>()"'‘’“”]*[^\s<>()"'‘’“”.,;:!?]$/i;

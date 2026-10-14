@@ -896,7 +896,11 @@ action, Wrenfield v. Quarrow (2025)" its defendant's half reads the lead
 keeps "Quarrow"; and a bare supra ("Gelman, supra, 30 Cal.App.5th at p. 5")
 whose full cite is not in the same export has a term of the case faked in
 it, where the reader spares it — a supra is always an authority, and the
-reader does not rename one. `test-textdoc.mjs` pins every shape, the cut,
+reader does not rename one. PDF-Linker's session took the first two as its
+leaks to fix (the run cut where it cannot rename an authority; the lead cut
+at its last signal, stop or comma, G5j) and keeps the third, a recorded
+difference: keeping the name there is in its "fakes less" group, which waits
+on the owner's direction. `test-textdoc.mjs` pins every shape, the cut,
 the page break and the caption, and a jurat-and-leads text read in step
 with its length; `test-typed-cites.mjs` case 6 (Chromium) types each into a
 document and saves: the cited party as typed, the case's own caption as its
@@ -1622,8 +1626,14 @@ over a newer copy:
   keeps a folder document's edits in the store and asks only about the ones
   with nowhere to be kept, and drops a worksheet the run removed). **×**
   remembers the bar's text (`folderChangeHidden`), so the same news is not put
-  up again by the next look. No poll: PDF-Linker stamps DONE before it writes
-  the key and LEAKS.xlsx, so a look is a look, not a verdict.
+  up again by the next look. No poll. Since PDF-Linker #517 it stamps DONE
+  after its last writes (the worksheet, the key, the reader's file, the
+  quarantine), so a change seen with DONE newer than every ETA is a finished
+  run's; with nothing unsaved and nothing being opened or saved, the look
+  reads the folder again itself (`readFolderAfterRun`) rather than putting up
+  the bar — the owner's decision of Oct 13, "the reader re-reads changed
+  files on focus, document open and save, with no 5-second poll". With
+  something unsaved the bar asks, as before.
 - LEAKS.xlsx. `saveLeaks` writes only over the bytes it read: changed on disk
   or gone, nothing is written, the answers stay remembered (`persistLeaks`),
   `leaksSaveNote` says why in the document save's toast, and the bar goes up.
@@ -1672,6 +1682,36 @@ over a newer copy:
   instead of owing a rewrite; and a keep or transcribed page so read that
   PDF-Linker later takes out reads as spent rather than owed again.
   `test-stale-writes.mjs` case 3 pins both.
+  PDF-LINKER'S NOTES stay over their lines (`TD.notedBlocks`, written by
+  `withLinesNotOurs` between the reader's own lines and the kept ones). A run
+  writes lines back under a `#` note saying what they are — keeps it could
+  not record on the master, keeps waiting for a full re-run, lines saved
+  after it read the file, values it could not register, and (keep
+  withdrawals, G3) a keep line carried back for this case whose master row
+  is another case's, which the note tells the next run to apply without
+  recording it again. The reader read those lines into its lists and wrote
+  them among its own, the note dropped, so a carried keep line read as a
+  fresh instruction and could put this case's `no` back over the other
+  case's row. Now each note is written with the lines under it the reader
+  still carries (a line withdrawn goes, and a note with none left goes with
+  it); the reader's own header (whose first line has never changed), its
+  kept-lines head and the set-aside page lines are not notes.
+  `test-folder-save.mjs` test 25 pins the held keep's note.
+  PAGE LINES PDF-LINKER SET ASIDE (`TD.spendLines`' `setAside`,
+  `TD.setAsideLines`, `pagesSetAside`/`holdSetAside`/`releaseSetAside`, the
+  `held` of `TD.pageListsAfter`). A `did not ocr:`, `ocr again:` or `text
+  corrected:` line PDF-Linker refuses because the PDF's page count no longer
+  matches its export (pages moved in the viewer) is written back as `#
+  <the line>` under a `# not applied:` note, so no run applies it to a
+  renumbered page. The reader kept the entry, and its page still reading
+  [DID NOT OCR] put it back on the ⊘ list, so its next write handed the line
+  over again and the run after it marked the wrong page. Now a page line
+  written here and gone from the file as a line PDF-Linker reads (applied or
+  set aside) comes off the lists and the record, as a spent keep and a spent
+  transcription do; one set aside is held for the case (and said so), so
+  neither the ⊘ list nor the automatic Use my text hands its page over
+  again until the page is marked by hand — after the next full run has
+  written the export again. `test-stale-writes.mjs` case 9 pins it.
 - The EXPORTS. A clean document whose file moved under it (an empty Ctrl+S
   after a run rewrote it) is skipped and named (`staleClean`), not called a
   conflict of edits; and a document with no entry in the folder — a light

@@ -24,7 +24,7 @@ import {
   readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
-  valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead,
+  valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead, setAsideLines, notedBlocks,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans } from "./viewer/pseudo-key.js";
 
@@ -1772,9 +1772,28 @@ console.log("what PDF-Linker has spent");
   const same = spendLines(none, wrote + "text corrected: A Complaint.pdf | page 2 | sum 0a1b2c3d\n", wrote + "text corrected: A Complaint.pdf | page 2 | sum 0a1b2c3d\n");
   check("nothing spent: the same lists back", [same.keeps === none.keeps, same.textFixed === none.textFixed], [true, true]);
   check("…and the record as it was", same.saved, wrote + "text corrected: A Complaint.pdf | page 2 | sum 0a1b2c3d\n");
-  check("the record keeps its header, its values and its page lines",
+  check("the record keeps its header and its values; a page line the file no longer carries goes, as a keep's does",
     spendLines({ keeps: [] }, "# head\nQuell Harbor\ndid not ocr: A.pdf | page 3\nno: Corwin Ashdale\n", null).saved,
-    "# head\nQuell Harbor\ndid not ocr: A.pdf | page 3\n");
+    "# head\nQuell Harbor\n");
+  // A page line written here and gone from the file — applied, or SET ASIDE by
+  // PDF-Linker as "# <the line>" because the PDF's pages no longer match its
+  // export — comes off the list, or the next write puts it back to apply.
+  {
+    const n3 = { doc: "A.pdf", pdf: "", page: 3 }, n4 = { doc: "A.pdf", pdf: "", page: 4 };
+    const wroteN = "did not ocr: A.pdf | page 3\nocr again: A.pdf | page 4\n";
+    const asideFile = "# not applied: A.pdf now has 12 pages and its export 11 — mark the page again on the export the next full run writes\n# did not ocr: A.pdf | page 3\nocr again: A.pdf | page 4\n";
+    const sp = spendLines({ keeps: [], textFixed: [], noOcr: [n3], ocrAgain: [n4] }, wroteN, asideFile);
+    check("a ⊘ line set aside: off the list, and named as set aside; an OCR-again line the file still carries stays",
+      [sp.noOcr, sp.ocrAgain.length, sp.setAside], [[], 1, [n3]]);
+    check("…and off the record", sp.saved.split("\n").filter(Boolean), ["ocr again: A.pdf | page 4"]);
+    const applied = spendLines({ keeps: [], textFixed: [], noOcr: [n3], ocrAgain: [] }, wroteN, null);
+    check("…one applied (the file gone): off the list, set aside nothing", [applied.noOcr, applied.setAside], [[], []]);
+    check("…one never written here stays", spendLines({ keeps: [], textFixed: [], noOcr: [n3], ocrAgain: [] }, "", null).noOcr, [n3]);
+    check("setAsideLines: the page lines PDF-Linker wrote back under #", setAsideLines(asideFile), { noOcr: [n3], ocrAgain: [], textFixed: [] });
+    // …and the ⊘ list does not take the page back by itself while it is held.
+    const held = pageListsAfter({ noOcr: [], ocrAgain: [], textFixed: [] }, [{ entry: n3, page: { header: "====== Page 3 ======", lines: [DID_NOT_OCR] } }], { held: [n3] });
+    check("pageListsAfter: a page held as set aside is not put back on the list", held.noOcr, []);
+  }
 
   // A keep taken afresh is not the one written before.
   check("forgetKeepLines: the keep lines on the value go, whatever their control",
@@ -1896,6 +1915,19 @@ console.log("the lines of New Real Values.txt the reader did not write");
   check("written after the reader's own lines, under a comment", both.split("\n").slice(-3), ["# Already in this file, not written by the text reader — kept as they stand:", "Hand Typed Value", ""]);
   check("…which PDF-Linker reads as the reader's lines plus the kept one", parseReaderFile(both).values, ["Marlow Tenbury", "Hand Typed Value"]);
   check("…and nothing kept, the reader's text as it was", withLinesNotOurs(mine, []), mine);
+  // PDF-Linker's notes stay over the lines it wrote under them.
+  const ourKeep = formatValuesFile(["restitution"], [{ control: "no", value: "Corwin Ashdale", state: "" }], [], [], [], []);
+  const carried = "# 1 keep(s) kept here by this line: the master KEEP sheet's row for each is another case's.\n\nno: Corwin Ashdale\n";
+  const nb = notedBlocks(carried, ourKeep);
+  check("notedBlocks: a note and the line under it the reader still carries",
+    nb.blocks, [{ note: ["# 1 keep(s) kept here by this line: the master KEEP sheet's row for each is another case's."], lines: ["no: Corwin Ashdale"] }]);
+  check("…the line written under the note, not among the reader's own",
+    withLinesNotOurs(nb.mine, [], nb.blocks).split("\n").filter((l) => l && !l.startsWith("# ") || /kept here/.test(l)),
+    ["restitution", "# 1 keep(s) kept here by this line: the master KEEP sheet's row for each is another case's.", "no: Corwin Ashdale"]);
+  check("…a line the reader withdrew goes, and its note with it",
+    notedBlocks(carried, formatValuesFile(["restitution"], [], [], [], [], [])).blocks, []);
+  check("…the reader's own header, its kept-lines head and a set-aside page line are no notes",
+    notedBlocks(ourKeep + "\n" + "# Already in this file, not written by the text reader — kept as they stand:\nno: Corwin Ashdale\n# did not ocr: A.pdf | page 3\n", ourKeep).blocks, []);
   check("sameBytes", [sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 2])), sameBytes(new Uint8Array([1, 2]), new Uint8Array([1, 3])), sameBytes(null, new Uint8Array([]))], [true, false, false]);
 
   // What the folder's opening read INTO the list from the file is recorded as

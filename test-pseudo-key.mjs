@@ -681,8 +681,8 @@ console.log("control words in the Replacement cell");
   check("…a .gov site, a listed host and the court form's own address stay keeps",
     [keyCellKind("no", "www.courts.ca.gov"), keyCellKind("n", "https://leginfo.legislature.ca.gov/faces"),
       keyCellKind("never", "scholar.google.com"), keyCellKind("no", "www.lacourt.org"), keyCellKind("no", "my.lacourt.org"),
-      keyCellKind("no", "ADRCivil@LACourt.ca.gov")],
-    ["keep", "keep", "keep", "keep", "keep", "keep"]);
+      keyCellKind("no", "ADRCivil@LACourt.ca.gov"), keyCellKind("no", "https://scra.dmdc.osd.mil/scra/"), keyCellKind("no", "www.lawhelpcalifornia.org")],
+    ["keep", "keep", "keep", "keep", "keep", "keep", "keep", "keep"]);
   check("…as does a head naming no host, and every keep on anything else",
     [keyCellKind("no", "http://www"), keyCellKind("no", "https://"), keyCellKind("n", "Rashoe"), keyCellKind("no", "Marcus"),
       keyCellKind("[Alder Law, P.C.]", "Alder Law, P.C.")],

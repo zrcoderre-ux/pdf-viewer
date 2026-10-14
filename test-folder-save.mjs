@@ -1710,6 +1710,7 @@ test(25, "a keep PDF-Linker has spent is not handed over again, whatever the mas
       // under a comment saying why. It is not spent.
       await keptAndSpent(r, null, { spend: (page) => writeNrv(page, HELD_NRV) });
       check("the master write failed, the line held under its comment: still handed over", nrvLines(await readFolder(r.page)), ["restitution", "no: Corwin Ashdale"]);
+      truthy("…under PDF-Linker's note still", /# 1 keep\(s\) applied, but not on the master KEEP sheet yet[^\n]*\n\nno: Corwin Ashdale\n/.test(NRV(await readFolder(r.page)) || ""));
       check("…and still on the case's list", await storedKeeps(r.page), ["no: Corwin Ashdale"]);
       check("…with nothing said", r.log.toasts.some((t) => /off this case's keeps/.test(t)), false);
       check("no page errors", r.log.errors, []);

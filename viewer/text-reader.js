@@ -126,12 +126,15 @@ const SPOTS_PREFIX = "textReader.spots.";
 // master workbook's KEEP sheet and taken out of New Real Values.txt
 // (spentKeepsKey): the master keeps that are this case's own decision.
 const SPENT_KEEPS_PREFIX = "textReader.keepsSpent.";
+// …and the page lines PDF-Linker SET ASIDE (pagesSetAside): not handed over
+// again by the ⊘ list on its own.
+const SET_ASIDE_PREFIX = "textReader.pagesSetAside.";
 // Every key a folder's state is kept under, by the folder's id (stateFolder):
 // once per folder — the list, what was last written, the keeps withdrawn and
 // the names said to be faked — or once per document in it — the spot keeps,
 // the swapped pages (pdfsync.js) and the unsaved LEAKS answers (leaks.js). The
 // older build's state is found by these, under the bare name (adoptLegacyState).
-const STATE_PREFIXES = { whole: [VALUES_PREFIX, VALUES_SAVED_PREFIX, WITHDRAWN_PREFIX, SETTLED_PREFIX, SPENT_KEEPS_PREFIX], perDoc: [SPOTS_PREFIX, PS.SWAPS_PREFIX, LK.DECISIONS_PREFIX] };
+const STATE_PREFIXES = { whole: [VALUES_PREFIX, VALUES_SAVED_PREFIX, WITHDRAWN_PREFIX, SETTLED_PREFIX, SPENT_KEEPS_PREFIX, SET_ASIDE_PREFIX], perDoc: [SPOTS_PREFIX, PS.SWAPS_PREFIX, LK.DECISIONS_PREFIX] };
 
 let doc = null;              // TD.parseExport result
 let fileName = "";
@@ -3506,8 +3509,13 @@ function showFolderChanged(dir, { key: k = "", leaks: lk = "", docs = false } = 
  * Read permission only, never a prompt; one look at a time; nothing where a
  * bar about the folder is up already. A change seen while an ETA marker is
  * newer than DONE is the run still going (showRunning, whose recheck then
- * ends in showRunEnded) — and DONE is not taken as settled either way:
- * PDF-Linker stamps it before it writes the key and LEAKS.xlsx.
+ * ends in showRunEnded). Otherwise the run is over — PDF-Linker stamps DONE
+ * after its last writes, the worksheet, the key, the reader's file and the
+ * quarantine (PDF-Linker #517) — and with nothing unsaved and nothing being
+ * opened or saved, the folder is READ AGAIN at once (the owner's decision of
+ * Oct 13: the reader re-reads changed files on focus, document open and save,
+ * with no poll); with something unsaved the bar asks, since reading the folder
+ * again means deciding what becomes of it.
  */
 let lookingForChange = false;
 async function lookForChange(dir) {
@@ -3524,6 +3532,7 @@ async function lookForChange(dir) {
     const seen = await runMarkersIn(dir);
     if (dir !== dirHandle || (runShown && runShown.dir === dir)) return;
     if (seen && seen.eta && (!seen.done || seen.eta.at > seen.done.at)) { showRunning(dir, seen.eta); return; }
+    if (!hasUnsaved() && !saving && !opening && !adopting) { await readFolderAfterRun(); return; }
     showFolderChanged(dir, { key: keyNews ? k : "", leaks: leaksNews ? lk : "" }, { look: true });
   } catch (e) { console.warn(e); }
   finally { lookingForChange = false; }
@@ -7471,7 +7480,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
         sums.push({ entry, lines: p.lines, before: old && old[k] ? old[k].lines : null, pressed: fixPressed.has(key) });
         fixPressed.delete(key);
       });
-      const next = TD.pageListsAfter({ noOcr, ocrAgain, textFixed }, items, { drop: true });
+      const next = TD.pageListsAfter({ noOcr, ocrAgain, textFixed }, items, { drop: true, held: pagesSetAside() });
       const fixed = TD.fixedSumsFor(next.textFixed, sums);
       if (next.noOcr !== noOcr || next.ocrAgain !== ocrAgain || fixed !== textFixed) {
         noOcr = next.noOcr; ocrAgain = next.ocrAgain; textFixed = fixed;
@@ -7627,7 +7636,8 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
       + handedNote(handed) + alsoList)
     + combined;
   const reds = (conflictWarn + failWarn + unreadWarn + warn + unsureWarn + stuckWarn + spentWarn + pinnedWarn).replace(/^ · /, "");
-  toast(red ? reds + " — " + said : said, { error: !!red, ms: red ? 12000 : wrote.length > 1 ? 6000 : undefined });
+  // …the LEAKS note alone (red, but not among `reds`: it rides in `said`) opens on no " — ".
+  toast(reds ? reds + " — " + said : said, { error: !!red, ms: red ? 12000 : wrote.length > 1 ? 6000 : undefined });
   return !conflicts.length && !failed.length && !unreadable.length && filesOk;
 }
 /**
@@ -10027,7 +10037,18 @@ function markDidNotOcr(i) {
   const text = lines.join("\n");
   const m = reel.length > 1 ? reelMemberOf(i) : null;
   const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
-  if (text === was) { toast(`${where} already reads ${TD.DID_NOT_OCR}.`); return; }
+  // Marked by hand: a page PDF-Linker set aside is the operator's to hand over
+  // again (pagesSetAside), here as it now stands.
+  const held = releaseSetAside(pageEntryAt(i));
+  if (text === was) {
+    if (held) {
+      syncNoOcr([i]);
+      toast(`${where}: handed to PDF-Linker again as not to OCR, as it now stands (Save writes it).`);
+      return;
+    }
+    toast(`${where} already reads ${TD.DID_NOT_OCR}.`);
+    return;
+  }
   snapshot(body, true);
   // The step remembers that it is a strip: its snapshot is the page's text as
   // it read BEFORE, which ↻ OCR This Page puts back (strippedTextOf).
@@ -10247,6 +10268,7 @@ function useMyText(i) {
     return;
   }
   fixPressed.add(fixPressedKey(entry));
+  releaseSetAside(entry); // pressed by hand: a page PDF-Linker set aside is the operator's to hand over again
   noOcr = TD.setNoOcr(noOcr, entry, false);
   ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
   fixDeclined = TD.setNoOcr(fixDeclined, entry, false);
@@ -10310,7 +10332,7 @@ function autoUseMyText(typedNow, written) {
     if (!p || p.header == null || p.typedFrom == null || !written.has(reelMemberOf(i))) continue;
     if (pageReadsDidNotOcr(i)) continue;
     const e = pageEntryAt(i, sources);
-    if (!e || on(list, e) || on(noOcr, e) || on(ocrAgain, e) || on(fixDeclined, e)) continue;
+    if (!e || on(list, e) || on(noOcr, e) || on(ocrAgain, e) || on(fixDeclined, e) || on(pagesSetAside(), e)) continue;
     if (TD.wordsChanged(p.typedFrom, text) < TD.AUTO_TEXT_FIXED_WORDS) continue;
     if (TD.pageFurnitureLine(p.lines)) continue; // PDF-Linker would refuse it (useMyText says why)
     list = TD.setTextFixed(list, { ...e, sum: TD.pageTextSum(p.lines) }, true);
@@ -10448,7 +10470,7 @@ function markDidNotOcrPages(indices) {
   let again = ocrAgain, fixed = textFixed;
   for (const t of todo) {
     const e = pageEntryAt(t.i, sources);
-    if (e) { again = TD.setOcrAgain(again, e, false); fixed = TD.setTextFixed(fixed, e, false); }
+    if (e) { releaseSetAside(e); again = TD.setOcrAgain(again, e, false); fixed = TD.setTextFixed(fixed, e, false); }
   }
   if (again !== ocrAgain || fixed !== textFixed) {
     ocrAgain = again;
@@ -13418,6 +13440,34 @@ async function writtenWhere() {
   catch { return "elsewhere"; }
 }
 /**
+ * The page lines PDF-Linker SET ASIDE in this case's file — a `did not ocr:`,
+ * `ocr again:` or `text corrected:` line it refused because the PDF's page
+ * count no longer matches its export (pages moved in the viewer since the
+ * export was written), written back as `# <the line>` so no run applies it to
+ * a renumbered page. TD.spendLines takes the entry off the list; held here,
+ * the ⊘ list does not put a page reading [DID NOT OCR] back on by itself
+ * (TD.pageListsAfter's `held`), or the next write handed the line over again
+ * and the run after it marked the wrong page. Marking the page by hand
+ * releases it (markDidNotOcr).
+ */
+function setAsideKey(name = listStateKey()) { return SET_ASIDE_PREFIX + name; }
+function pagesSetAside() { return lsGet(setAsideKey(), []) || []; }
+function holdSetAside(entries) {
+  const was = pagesSetAside();
+  const add = entries.filter((e) => !was.some((x) => TD.sameNoOcr(x, e)));
+  if (!add.length) return;
+  lsSet(setAsideKey(), was.concat(add.map((e) => ({ doc: e.doc, pdf: e.pdf || "", page: e.page }))));
+  const pages = add.map((e) => `${TD.docLabel(e.pdf || e.doc)} page ${e.page}`);
+  toast(`PDF-Linker set aside ${pages.slice(0, 4).join(", ")}${pages.length > 4 ? "…" : ""} in ${TD.VALUES_FILE}: the PDF's pages no longer match its export, so the line named a page that may not be that one any more. ${add.length === 1 ? "It is" : "They are"} off the lists and not handed over again; once the next full run has written the export again, mark the page again where it now stands.`, { error: true, ms: 14000 });
+}
+function releaseSetAside(entry) {
+  const was = pagesSetAside();
+  if (!entry || !was.some((x) => TD.sameNoOcr(x, entry))) return false;
+  const now = was.filter((x) => !TD.sameNoOcr(x, entry));
+  if (now.length) lsSet(setAsideKey(), now); else { try { localStorage.removeItem(setAsideKey()); } catch { /* no storage */ } }
+  return true;
+}
+/**
  * The case's lists read against the folder's file as it stands (`disk`: its
  * text, or null where there is none): what PDF-Linker has spent comes off them
  * (TD.spendLines), and the record of what was written keeps only what the file
@@ -13454,9 +13504,10 @@ async function spendFromDisk(disk, { settle = true, still = null } = {}) {
     if (settle && base !== was) renderFlags();
     return [];
   }
-  const s = TD.spendLines({ keeps, textFixed }, was, disk);
+  const s = TD.spendLines({ keeps, textFixed, noOcr, ocrAgain }, was, disk);
   if (s.saved !== was) lsSet(valuesSavedKey(), s.saved);
-  if (s.keeps === keeps && s.textFixed === textFixed) {
+  if (s.setAside.length) holdSetAside(s.setAside);
+  if (s.keeps === keeps && s.textFixed === textFixed && s.noOcr === noOcr && s.ocrAgain === ocrAgain) {
     // Only the record moved (a keep withdrawn whose line the run took out
     // anyway): the status bar reads it again all the same.
     if (settle && s.saved !== was) renderFlags();
@@ -13464,6 +13515,8 @@ async function spendFromDisk(disk, { settle = true, still = null } = {}) {
   }
   keeps = s.keeps;
   textFixed = s.textFixed;
+  noOcr = s.noOcr;
+  ocrAgain = s.ocrAgain;
   persistValues();
   if (s.spentKeeps.length) noteKeepsSpent(s.spentKeeps.map((k) => k.value));
   if (settle) {
@@ -13641,7 +13694,7 @@ function syncNoOcr(indices, { drop = false } = {}) {
       const entry = pageEntryAt(i, sources);
       if (entry) items.push({ entry, page: doc.pages[i] });
     }
-    const next = TD.pageListsAfter({ noOcr, ocrAgain, textFixed }, items, { drop });
+    const next = TD.pageListsAfter({ noOcr, ocrAgain, textFixed }, items, { drop, held: pagesSetAside() });
     if (next.noOcr !== noOcr || next.ocrAgain !== ocrAgain || next.textFixed !== textFixed) {
       noOcr = next.noOcr;
       ocrAgain = next.ocrAgain;
@@ -13988,7 +14041,9 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
       withdrawn: keepWithdrawn,
     })
     : [];
-  const out = TD.withLinesNotOurs(text, kept);
+  // …and PDF-Linker's notes stay over the lines it wrote under them (TD.notedBlocks).
+  const noted = typeof diskNow === "string" ? TD.notedBlocks(diskNow, text) : { blocks: [], mine: text };
+  const out = TD.withLinesNotOurs(noted.mine, kept, noted.blocks);
   const keptNote = kept.length
     ? ` · ${kept.length} line${kept.length === 1 ? "" : "s"} already in the file that the reader did not write (typed by hand, or saved by another copy of the reader) kept as ${kept.length === 1 ? "it stands" : "they stand"}`
     : "";

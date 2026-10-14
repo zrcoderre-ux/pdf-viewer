@@ -248,11 +248,12 @@ async function run() {
       await typeOnPage(p, " It broke.");
       await save(p);
       truthy("the key written again with nothing changed in it: saved as ever", /^Saved A Complaint/.test(lastSave(r.log)) && (await readFile(p, "Text Files/A Complaint.txt")).includes("It broke."));
+      // Something unsaved: the bar asks before the folder is read again.
+      await typeOnPage(p, " Again.");
       await writeFile(p, "pseudonym_key.xlsx", Array.from(KEY_MOVED));
       await p.evaluate(() => window.dispatchEvent(new Event("focus")));
       await p.waitForTimeout(1200);
-      truthy("the window focused: the bar says the key changed on disk", /pseudonym_key\.xlsx in Case Stale has changed on disk/.test(await runBar(p)));
-      await typeOnPage(p, " Again.");
+      truthy("the window focused, an edit unsaved: the bar says the key changed on disk", /pseudonym_key\.xlsx in Case Stale has changed on disk/.test(await runBar(p)));
       await save(p);
       truthy("…and a save is refused, said so", /^Not saved: pseudonym_key\.xlsx in Case Stale has changed on disk/.test(lastSave(r.log)));
       check("…nothing written", (await readFile(p, "Text Files/A Complaint.txt")).includes("Again."), false);
@@ -263,6 +264,14 @@ async function run() {
       await typeOnPage(p, " Third.");
       await save(p);
       truthy("…and the next save writes, under the new key", /^Saved A Complaint/.test(lastSave(r.log)) && (await readFile(p, "Text Files/A Complaint.txt")).includes("Third."));
+      // Nothing unsaved, the run finished: the folder is read again by itself.
+      await writeFile(p, "pseudonym_key.xlsx", Array.from(KEY_SAME));
+      await p.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await p.waitForTimeout(2500);
+      check("nothing unsaved: the folder read again by itself, no bar", await runBar(p), "");
+      await typeOnPage(p, " Fourth.");
+      await save(p);
+      truthy("…and a save writes under the key now on disk", /^Saved A Complaint/.test(lastSave(r.log)) && (await readFile(p, "Text Files/A Complaint.txt")).includes("Fourth."));
       check("no page errors", r.log.errors, []);
       await r.close();
     }
@@ -498,6 +507,43 @@ async function run() {
       await save(p);
       const again = await fixedLine();
       truthy("✎ pressed again: the page as it now stands", again !== made && /\| sum [0-9a-f]{8}$/.test(again));
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+
+    // ── 9. a page line PDF-Linker set aside ──────────────────────────────────
+    console.log("9. a ⊘ line PDF-Linker set aside is not written back to apply, until the page is marked again by hand");
+    {
+      const r = await newReader();
+      const p = r.page;
+      const active = async () => ((await readFile(p, "New Real Values.txt")) || "").split("\n").filter((l) => /^did not ocr:/i.test(l.trim()));
+      const nocr = () => p.evaluate(() => document.querySelector('.tpage[data-index="0"] > .page-label .nocr-page').click());
+      await nocr();
+      await p.waitForTimeout(400);
+      await save(p);
+      const line = (await active())[0] || "";
+      truthy("⊘ and saved: the line handed over", /^did not ocr: .+ \| page 1$/.test(line));
+      // The run refused it — the PDF's pages no longer match the export — and
+      // wrote it back commented out, under its note.
+      await writeFile(p, "New Real Values.txt", "# not applied: the PDF's page count no longer matches its export\n# " + line + "\n");
+      await p.evaluate(async () => { await window.__textReaderAdoptFolder(window.__case); await window.__textReaderOpenDoc("A Complaint.txt"); });
+      await p.waitForTimeout(1500);
+      truthy("read again: the reader says it was set aside", r.log.toasts.some((t) => /PDF-Linker set aside .+ page 1/.test(t)));
+      // A flag withdrawn, so the save writes the file.
+      await p.evaluate(() => [...document.querySelectorAll("#flags-list li")].find((li) => /Quell Harbor/.test(li.textContent)).querySelector(".x").click());
+      await p.waitForTimeout(300);
+      await save(p);
+      truthy("…the save writes the file", /New Real Values\.txt/.test(lastSave(r.log)));
+      check("…and does not hand the set-aside line over again", await active(), []);
+      // The next full run writes the export again from the PDF; the page reads
+      // its OCR once more, and is marked again by hand where it now stands.
+      await writeFile(p, "Text Files/A Complaint.txt", A);
+      await p.evaluate(async () => { await window.__textReaderAdoptFolder(window.__case); await window.__textReaderOpenDoc("A Complaint.txt"); });
+      await p.waitForTimeout(1500);
+      await nocr();
+      await p.waitForTimeout(400);
+      await save(p);
+      check("marked again by hand: handed over again", await active(), [line]);
       check("no page errors", r.log.errors, []);
       await r.close();
     }

@@ -514,8 +514,10 @@ app, which routes it to the reader tab.
 - **Nothing is saved over what a run changed.** When you come back to the
   window, or open an export, the reader looks at the case folder's key and
   LEAKS.xlsx; where a PDF-Linker run (or Excel) has changed them since the
-  reader read them, the same bar says what changed and offers **Read the
-  folder again**. Until you do, Save writes nothing under the old key (a name
+  reader read them and the run has finished, the reader reads the folder
+  again by itself where you have nothing unsaved; with something unsaved,
+  the same bar says what changed and offers **Read the folder again**. Until
+  you do, Save writes nothing under the old key (a name
   the run has since faked would go back into the file real), LEAKS.xlsx is
   not saved over answers typed in Excel since, and a worksheet the run
   removed is not put back — your answers stay remembered in the meantime. An
@@ -528,7 +530,13 @@ app, which routes it to the reader tab.
   **New Real Values.txt** keeps the
   lines already in it that the reader did not write — a page list such as
   `did not ocr: Exhibit A.pdf | pages 3-5, 9`, or a line you typed into the
-  file by hand — after the reader's own, under a comment that says so.
+  file by hand — after the reader's own, under a comment that says so; a
+  note PDF-Linker wrote over lines it put back (a keep it could not record,
+  one carried for this case) stays over them; a value you withdraw leaves
+  the file at the next save even where another browser put it there; and a
+  page line PDF-Linker set aside (`# did not ocr: …`, the PDF's pages no
+  longer matching its export) is not written back to apply — mark the page
+  again once the next full run has written the export again.
 - **The key, term by term.** **🗝 Key terms** in the tools panel (or a click
   on the pseudonym count in the status bar) puts a bar over the text that
   walks the pseudonym key as it stands on the page. A **term** is one row of

@@ -2458,6 +2458,20 @@ export function wordsChanged(before, after) {
   return Math.max(n - same, m - same);
 }
 
+// A page line PDF-Linker SET ASIDE: `# <the line>`, under a `# not applied: …`
+// note — refused because its PDF's page count no longer matches its export.
+const SET_ASIDE_RE = /^#\s*((?:did[\s-]*not[\s-]*ocr|ocr[\s-]*again|text[\s-]*corrected)\s*:.*)$/i;
+/** The page lines PDF-Linker set aside in `disk` (`# <the line>`), as parseReaderFile reads them: { noOcr, ocrAgain, textFixed }. */
+export function setAsideLines(disk) {
+  const lines = [];
+  for (const raw of String(disk == null ? "" : disk).split(/\r?\n/)) {
+    const m = raw.replace(/^\ufeff/, "").trim().match(SET_ASIDE_RE);
+    if (m) lines.push(m[1]);
+  }
+  const p = parseReaderFile(lines.join("\n"));
+  return { noOcr: p.noOcr, ocrAgain: p.ocrAgain, textFixed: p.textFixed };
+}
+
 /** Whether a page's lines read DID_NOT_OCR and nothing else (the trailer aside). */
 export function readsDidNotOcr(lines) {
   const src = (lines || []).map((l) => String(l == null ? "" : l));
@@ -2487,14 +2501,17 @@ export function headerSaysDidNotOcr(page) {
  *   - a page that reads [DID NOT OCR] has no transcription to hand over.
  * → { noOcr, ocrAgain, textFixed }, each the same list where nothing moved.
  */
-export function pageListsAfter(lists, items, { drop = false } = {}) {
+export function pageListsAfter(lists, items, { drop = false, held = null } = {}) {
   let list = (lists && lists.noOcr) || [], again = (lists && lists.ocrAgain) || [], fixed = (lists && lists.textFixed) || [];
   for (const { entry, page: p } of items || []) {
     if (!entry || !p) continue;
     const marked = headerSaysDidNotOcr(p), reads = readsDidNotOcr(p.lines);
     const asked = again.some((e) => sameNoOcr(e, entry));
+    // …never one PDF-Linker set aside (`held`): its page is not the one the
+    // line named any more, until the page is marked again by hand.
+    const aside = !!held && held.some((e) => sameNoOcr(e, entry));
     if (marked) list = setNoOcr(list, entry, false);
-    else if (reads) { if (!asked) list = setNoOcr(list, entry, true); }
+    else if (reads) { if (!asked && !aside) list = setNoOcr(list, entry, true); }
     else if (drop) list = setNoOcr(list, entry, false);
     if (asked && !marked && !reads) again = setOcrAgain(again, entry, false);
     if (reads) fixed = setTextFixed(fixed, entry, false);
@@ -2675,6 +2692,8 @@ export function carriesKeep(text, value, control = "") {
 export function spendLines(lists, saved, disk) {
   const keeps = (lists && lists.keeps) || [];
   const textFixed = (lists && lists.textFixed) || [];
+  const noOcr = (lists && lists.noOcr) || [];
+  const ocrAgain = (lists && lists.ocrAgain) || [];
   const now = disk == null ? "" : String(disk);
   const was = saved == null ? "" : String(saved);
   const onDisk = new Set(keepLines(now).map((k) => foldKey(k.value)));
@@ -2685,6 +2704,20 @@ export function spendLines(lists, saved, disk) {
   const fixedOnDisk = parseReaderFile(now).textFixed;
   const spentFixed = textFixed.filter((e) => fixedWritten.some((w) => sameNoOcr(w, e) && w.sum === e.sum)
     && !fixedOnDisk.some((d) => sameNoOcr(d, e)));
+  // …and a page not to OCR, or to OCR again, written here and no longer in the
+  // file as a line PDF-Linker reads: applied (the page marked, the line spent),
+  // or SET ASIDE — refused because its PDF's page count no longer matches its
+  // export, and written back as `# <the line>` (setAsideLines) so no run
+  // applies it to a renumbered page. Kept, the reader's next write put the
+  // line back as one to apply, and the run after it marked the wrong page.
+  const wroteP = parseReaderFile(was), diskP = parseReaderFile(now);
+  const gonePage = (written, onDisk) => (e) => written.some((w) => sameNoOcr(w, e)) && !onDisk.some((d) => sameNoOcr(d, e));
+  const spentNoOcr = noOcr.filter(gonePage(wroteP.noOcr, diskP.noOcr));
+  const spentAgain = ocrAgain.filter(gonePage(wroteP.ocrAgain, diskP.ocrAgain));
+  const aside = setAsideLines(now);
+  const setAside = spentNoOcr.filter((e) => aside.noOcr.some((d) => sameNoOcr(d, e)))
+    .concat(spentAgain.filter((e) => aside.ocrAgain.some((d) => sameNoOcr(d, e))))
+    .concat(textFixed.filter((e) => aside.textFixed.some((d) => sameNoOcr(d, e))));
   const lines = was.split("\n").filter((raw) => {
     const line = raw.replace(/^\ufeff/, "").trim();
     if (!line || line[0] === "#") return true;
@@ -2692,14 +2725,20 @@ export function spendLines(lists, saved, disk) {
       const n = line.match(TEXTFIXED_RE);
       return !n || fixedOnDisk.some((d) => sameNoOcr(d, { doc: n[1], page: Number(n[2]) }));
     }
+    const pl = parseReaderFile(line);
+    if (pl.noOcr.length) return diskP.noOcr.some((d) => sameNoOcr(d, pl.noOcr[0]));
+    if (pl.ocrAgain.length) return diskP.ocrAgain.some((d) => sameNoOcr(d, pl.ocrAgain[0]));
     const m = line.match(KEEP_RE);
     return !m || onDisk.has(foldKey(m[2]));
   });
   return {
     keeps: spentKeeps.length ? keeps.filter((k) => !spentKeeps.includes(k)) : keeps,
     textFixed: spentFixed.length ? textFixed.filter((e) => !spentFixed.includes(e)) : textFixed,
+    noOcr: spentNoOcr.length ? noOcr.filter((e) => !spentNoOcr.includes(e)) : noOcr,
+    ocrAgain: spentAgain.length ? ocrAgain.filter((e) => !spentAgain.includes(e)) : ocrAgain,
     spentKeeps,
     spentFixed,
+    setAside,
     saved: lines.join("\n"),
   };
 }
@@ -2801,11 +2840,61 @@ export function linesNotOurs(disk, { mine = "", written = "", seen = null, withd
   }
   return out;
 }
-/** The file to write: the reader's own text, then the lines kept (linesNotOurs) under their comment. */
-export function withLinesNotOurs(mine, kept) {
-  const text = String(mine == null ? "" : mine);
+/**
+ * The file to write: the reader's own text, then PDF-Linker's notes with the
+ * lines under them (`noted`, notedBlocks'), then the lines kept (linesNotOurs)
+ * under their comment.
+ */
+export function withLinesNotOurs(mine, kept, noted = []) {
+  let text = String(mine == null ? "" : mine);
+  for (const b of noted || []) text += (text && !text.endsWith("\n") ? "\n" : "") + "\n" + b.note.concat([""], b.lines).join("\n") + "\n";
   if (!kept || !kept.length) return text;
   return text + (text && !text.endsWith("\n") ? "\n" : "") + "\n" + KEPT_LINES_HEAD + "\n" + kept.join("\n") + "\n";
+}
+// PDF-LINKER'S NOTES stay over their lines. A run writes lines back into the
+// file under a `#` note saying what they are — a keep it could not record on
+// the master, one waiting for a full re-run, a line saved after it read the
+// file, and (keep withdrawals, G3) a keep line carried back for this case
+// whose master row is another case's, which the note tells the next run to
+// apply as this case's keep without recording it again. The reader read those
+// lines into its lists and wrote them back among its own, the note dropped:
+// a carried keep line then read as a fresh instruction, recorded once more as
+// the newest, and could put this case's `no` back over the other case's row.
+// The reader's own header (its first line has never changed) and the page
+// lines PDF-Linker set aside (`# <the line>`) are not notes.
+const READER_HEAD_FIRST = VALUES_HEAD[0];
+/**
+ * PDF-Linker's notes in `disk` (the file as it stands) over lines the reader's
+ * own text (`mine`) still carries: { blocks: [{ note, lines }], mine } — each
+ * note's comment lines and the lines under it that `mine` carries (verbatim,
+ * as the file has them), and `mine` without those lines, which go under their
+ * note instead (withLinesNotOurs). A line the reader no longer carries is not
+ * kept under its note; a note with none left goes.
+ */
+export function notedBlocks(disk, mine) {
+  const text = String(mine == null ? "" : mine);
+  const ours = new Set();
+  for (const raw of text.split(/\r?\n/)) { const k = valuesLineKey(raw); if (k && !k.startsWith("raw:")) ours.add(k); }
+  const blocks = [], moved = new Set();
+  let cur = null, header = false;
+  for (const raw of String(disk == null ? "" : disk).split(/\r?\n/)) {
+    const line = raw.replace(/^\ufeff/, "").trim();
+    if (!line) continue;
+    if (line[0] === "#") {
+      if (line === READER_HEAD_FIRST) { header = true; cur = null; continue; }
+      if (header || line === KEPT_LINES_HEAD || SET_ASIDE_RE.test(line)) { cur = null; continue; }
+      if (cur && !cur.lines.length) cur.note.push(line);
+      else { cur = { note: [line], lines: [] }; blocks.push(cur); }
+      continue;
+    }
+    header = false;
+    if (!cur) continue;
+    const k = valuesLineKey(line);
+    if (k && ours.has(k) && !moved.has(k)) { cur.lines.push(line); moved.add(k); }
+  }
+  const out = blocks.filter((b) => b.lines.length);
+  if (!out.length) return { blocks: [], mine: text };
+  return { blocks: out, mine: text.split("\n").filter((raw) => !moved.has(valuesLineKey(raw))).join("\n") };
 }
 /** Whether two byte arrays hold the same bytes. */
 export function sameBytes(a, b) {
