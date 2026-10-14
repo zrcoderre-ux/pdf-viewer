@@ -14102,7 +14102,7 @@ $("flags-copy").addEventListener("click", async () => {
 // also flagged into New Real Values.txt, which would hand PDF-Linker the same
 // value twice under two different rules.
 const leaksBar = $("leaks-bar");
-let leaks = null;          // { parsed, bytes, name, handle, folder, store, at, trail, mirrored: Set }
+let leaks = null;          // { parsed, bytes, name, handle, own, folder, store, at, trail, mirrored: Set } — `own`: read from the case folder itself (leaksOwn)
 let leakRowValue = "";     // the current row's value, marked wherever it stands
 let leakRowRanges = [];    // where it stands, from the last paint: [{ body, range, pieces }] — `pieces` where it is wrapped down a column
 let leakHere = null;       // the occurrence the bar scrolled to
@@ -14114,6 +14114,24 @@ let rowInst = -1;          // …and which of the value's instances that is, sho
 // it was attached, as `leaks.folder` is the name it is shown under.
 function leaksStoreKey() { return LK.decisionsKey(leaks.store || stateFolder() || fileName, leaks.name); }
 function persistLeaks() { if (leaks) lsSet(leaksStoreKey(), LK.packDecisions(leaks.parsed.rows)); }
+/**
+ * Whether `handle` is a file of the open case folder itself (not of its Text
+ * Files folder, nor of a folder under it): what PDF-Linker reads LEAKS.xlsx
+ * from. False for no handle.
+ */
+async function inCaseFolderRoot(handle) {
+  if (!handle || !dirHandle || !dirHandle.resolve || textFolderOpen()) return false;
+  try { const at = await dirHandle.resolve(handle); return !!at && at.length === 1; } catch { return false; }
+}
+/**
+ * Whether the worksheet in hand is the open case folder's OWN: a file of the
+ * folder itself, read from it by the adoption or picked there (`leaks.own`,
+ * asked when it was attached), and the folder still the one open. That one is
+ * written in place or not at all, never by the Save picker (saveLeaks). One
+ * loaded by hand is not the folder's: with no handle it is never written into
+ * the folder at all (leaksOnDisk's "foreign").
+ */
+function leaksOwn() { return !!leaks && !!leaks.own && leaks.store === stateFolder(); }
 function leaksDirty() { return !!leaks && leaks.parsed.rows.some((r) => r.fix !== r.fix0); }
 function leakRows() { return leaks ? leaks.parsed.rows : []; }
 /** The worksheet as parsed, or null: its identity is what the marks were read against. */
@@ -14198,6 +14216,10 @@ async function attachLeaks(bytes, name, handle, { quiet = false, folder = "", st
   return duringAsync("reading LEAKS.xlsx", () => attachLeaksNow(bytes, name, handle, { quiet, folder, still }));
 }
 async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "", still = null } = {}) {
+  // Whether it is the case folder's own worksheet (leaksOwn), asked while the
+  // file is there to be asked about: a run that removes it later leaves it the
+  // folder's worksheet, gone — not a stranger's.
+  const own = await inCaseFolderRoot(handle);
   const wb = await parseXlsx(bytes);
   if (still && !still()) return null;
   if (!LK.sheetsLookLikeLeaks(wb.sheets)) throw new Error(`${name} has no "Value" / "Fix?" header — not a LEAKS worksheet.`);
@@ -14213,18 +14235,25 @@ async function attachLeaksNow(bytes, name, handle, { quiet = false, folder = "",
   // another's plaintiff Jordan, where the store was not the folder's own (a
   // worksheet opened loose is kept under the lone document's file name).
   if (leaks) persistLeaks();
-  leaks = { parsed, bytes, name, handle: handle || null, folder: folder || folderName || "", store: stateFolder(), at: -1, trail: LK.newTrail(), mirrored: new Set(), carried: 0, note: "" };
-  const back = LK.unpackDecisions(parsed.rows, lsGet(leaksStoreKey(), null));
+  leaks = { parsed, bytes, name, handle: handle || null, own, folder: folder || folderName || "", store: stateFolder(), at: -1, trail: LK.newTrail(), mirrored: new Set(), carried: 0, note: "" };
+  const stored = lsGet(leaksStoreKey(), null);
+  const back = LK.unpackDecisions(parsed.rows, stored);
+  // "Answered here and not yet saved" is what the worksheet is owed: the
+  // answers laid back (`laid`), never an accepted suggestion (`accepted`),
+  // which the cell already says and no save writes.
   const remembered = back.laid;
   leaks.carried = back.laid;
-  // What could not be put back is thrown away now, and said once: the store
-  // is written again with only what was laid back, so the next attach does
-  // not find the same leftovers and say it again. The toast that follows
-  // this attach says it (leaksNoteOnce) — the one here when it is not quiet,
-  // else the folder's own: a toast here would only be written over by it.
+  // What could not be put back is thrown away now, and an answer among it is
+  // said once: the store is written again with only what was laid back, so
+  // the next attach does not find the same leftovers and say it again — an
+  // acceptance whose row has gone is retired so too, without a word, and an
+  // answer known by the identity an older build gave its row is stored under
+  // the row's own from here. The toast that follows this attach says it
+  // (leaksNoteOnce) — the one here when it is not quiet, else the folder's
+  // own: a toast here would only be written over by it.
+  if (stored && typeof stored === "object" && Object.keys(stored).length) persistLeaks();
   const lost = back.dropped + back.legacy;
   if (lost) {
-    persistLeaks();
     leaks.note = `${lost} unsaved answer${lost === 1 ? "" : "s"} from an earlier session ${lost === 1 ? "was" : "were"} discarded — `
       + (back.legacy ? "kept by row number, which a run of PDF-Linker re-sorts, so " + (lost === 1 ? "it" : "they") + " could not be matched to " + (lost === 1 ? "its value" : "their values") : (lost === 1 ? "the row it answered has" : "the rows they answered have") + " changed or gone since")
       + ". Answer " + (lost === 1 ? "it" : "them") + " again.";
@@ -15163,25 +15192,29 @@ function finishPageSweep() {
 }
 
 /**
- * LEAKS.xlsx as it stands against the bytes the reader holds (leaks.bytes) →
- * { state, handle }: "same" — the file still is those bytes; "changed" —
- * answered in Excel, or rewritten by a PDF-Linker run, since it was read;
- * "gone" — no longer there (PDF-Linker removes it once no row needs a look);
- * "unread" — a worksheet loaded by hand with no handle, or a file that cannot
- * be read now, which the save goes on to write as it always did. `cheap`: a
- * file whose stamp is the one last found to hold those bytes is taken as them
- * unread (the look on focus, lookForChange). The handle is the worksheet's
- * own, else the folder's file by its name — never created here.
+ * The worksheet's file as it stands against the bytes the reader holds
+ * (leaks.bytes) → { state, handle }: "same" — the file still is those bytes;
+ * "changed" — answered in Excel, or rewritten by a PDF-Linker run, since it
+ * was read; "gone" — no longer there (PDF-Linker removes it once no row needs
+ * a look); "foreign" — a worksheet loaded by hand with no handle while a
+ * folder is open: not this case folder's, whatever its name, and never
+ * written into it; "unread" — no handle and no folder (a loose worksheet, the
+ * Save picker's), or a file that cannot be read now, which the save goes on
+ * to write as it always did. `cheap`: a file whose stamp is the one last
+ * found to hold those bytes is taken as them unread (the look on focus,
+ * lookForChange). Only the worksheet's own handle is read — never the
+ * folder's file by the worksheet's name, which is not the file it was read
+ * from: compared with it, another matter's sheet loaded by hand was "changed
+ * on disk", and written by name (`create: true`, once) it took the place of
+ * the case's own, its `no` on another matter's name read by PDF-Linker as
+ * this case's keep.
  */
 async function leaksOnDisk({ cheap = false } = {}) {
   const lk = leaks;
   if (!lk) return { state: "unread", handle: null };
-  let handle = lk.handle;
-  if (!handle && dirHandle && lk.store === stateFolder()) {
-    try { handle = await dirHandle.getFileHandle(lk.name); }
-    catch (e) { return { state: e && e.name === "NotFoundError" ? "gone" : "unread", handle: null }; }
-  }
-  if (!handle || !handle.getFile) return { state: "unread", handle: null };
+  const handle = lk.handle;
+  if (!handle) return { state: dirHandle ? "foreign" : "unread", handle: null };
+  if (!handle.getFile) return { state: "unread", handle: null };
   let f;
   try { f = await handle.getFile(); }
   catch (e) { return { state: e && e.name === "NotFoundError" ? "gone" : "unread", handle }; }
@@ -15205,6 +15238,26 @@ async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
   if (!leaks) { if (!quiet) toast("No LEAKS.xlsx is loaded.", { error: true }); return false; }
   const edits = LK.fixEdits(leaks.parsed);
   if (!edits.length) { if (!quiet) toast("Nothing to save — no decision has changed."); return false; }
+  leaksSaveNote = "";
+  const n = edits.length, one = n === 1;
+  const kept = `Your ${n} answer${one ? " is" : "s are"} kept here`;
+  const handle = leaks.handle;
+  // Not into the Text Files folder either (textFolderOpen): not by the folder
+  // open, and not by the worksheet's own handle where that is a copy an
+  // earlier version wrote there, which adoption attaches like any other. Its
+  // Context cells quote the real document, and PDF-Linker reads LEAKS.xlsx
+  // from the case folder alone. Asked first: it is the reason to give.
+  if (textFolderOpen()) {
+    let inside = !handle;
+    if (handle) { try { inside = !!(await dirHandle.resolve(handle)); } catch { inside = false; } }
+    if (inside) {
+      if (!quiet) {
+        toast(`${leaks.name} was not written: ${folderName} is the folder the exports live in, not the case folder. Choose the folder above it (the bar at the top) and save the worksheet there.`, { error: true, ms: 9000 });
+        offerFolderAbove(dirHandle, null);
+      }
+      return false;
+    }
+  }
   // ONLY OVER THE BYTES IT WAS READ AS. The decisions are laid into the
   // worksheet the reader read (leaks.bytes) and the whole file is written: over
   // a worksheet answered in Excel since, or rewritten by a run, that undid
@@ -15212,16 +15265,34 @@ async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
   // reopened leak triage for PDF-Linker (`_pn_triage_pending`). Neither is
   // written: the answers stay remembered here, and the folder read again shows
   // the worksheet as it now stands.
-  leaksSaveNote = "";
+  //
+  // …AND ONLY INTO THE FILE IT WAS READ FROM. A worksheet loaded by hand with
+  // no handle while a case folder is open (dropped from a mail, read through
+  // the file input) was written into the folder under its own name, through a
+  // handle made for the purpose: another matter's sheet took the place of
+  // this case's, and PDF-Linker would read its `no` on another matter's name
+  // as this case's keep. It is not written there at all now ("foreign").
+  const own = leaksOwn();
   const disk = await leaksOnDisk();
+  if (disk.state === "foreign") {
+    persistLeaks();
+    leaksSaveNote = `${leaks.name} was not saved: it is not this case folder's worksheet — it was loaded by hand, not read from ${folderName}, and written there it would take the place of the one PDF-Linker wrote for the case. ${kept}: to save it, load the file itself (📂 on the ⚠ Leaks bar) and save again; to answer the case's own worksheet, Read the folder again.`;
+    if (!quiet) toast(leaksSaveNote, { error: true, ms: 12000 });
+    return false;
+  }
   if (disk.state === "changed" || disk.state === "gone") {
     persistLeaks();
-    const n = edits.length, one = n === 1;
     leaksSaveNote = disk.state === "changed"
-      ? `${leaks.name} was not saved: it changed on disk since the reader read it — answered in Excel, or rewritten by a PDF-Linker run — and writing the copy read before would undo that. Your ${n} answer${one ? " is" : "s are"} kept here: Read the folder again (the bar at the top), check ${one ? "it" : "them"} on the worksheet as it now stands, and save again.`
-      : `${leaks.name} was not saved: it is no longer in ${leaks.folder || folderName} — PDF-Linker removes it once no row needs a look, and the reader does not put it back. Your ${n} answer${one ? " is" : "s are"} kept here.`;
+      ? own
+        ? `${leaks.name} was not saved: it changed on disk since the reader read it — answered in Excel, or rewritten by a PDF-Linker run — and writing the copy read before would undo that. ${kept}: Read the folder again (the bar at the top), check ${one ? "it" : "them"} on the worksheet as it now stands, and save again.`
+        // …a worksheet loaded by hand from elsewhere: nothing of the case
+        // folder moved, so there is no folder to read again — the file is.
+        : `${leaks.name} was not saved: it changed on disk since the reader read it (answered in Excel, most likely), and writing the copy read before would undo that. ${kept}: load it again (📂 on the ⚠ Leaks bar), check ${one ? "it" : "them"} on the worksheet as it now stands, and save again.`
+      : own
+        ? `${leaks.name} was not saved: it is no longer in ${leaks.folder || folderName} — PDF-Linker removes it once no row needs a look, and the reader does not put it back. ${kept}.`
+        : `${leaks.name} was not saved: it is no longer where it was loaded from, and the reader does not put it back. ${kept}.`;
     if (!quiet) toast(leaksSaveNote, { error: true, ms: 12000 });
-    if (dirHandle) showFolderChanged(dirHandle, { leaks: disk.state });
+    if (own && dirHandle) showFolderChanged(dirHandle, { leaks: disk.state });
     return false;
   }
   let out;
@@ -15240,34 +15311,21 @@ async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
     toast("The worksheet was not saved: " + (e.message || e), { error: true });
     return false;
   }
-  let handle = leaks.handle;
-  // Not into the Text Files folder either (textFolderOpen): not by the folder
-  // open, and not by the worksheet's own handle where that is a copy an
-  // earlier version wrote there, which adoption attaches like any other. Its
-  // Context cells quote the real document, and PDF-Linker reads LEAKS.xlsx
-  // from the case folder alone.
-  if (textFolderOpen()) {
-    let inside = !handle;
-    if (handle) { try { inside = !!(await dirHandle.resolve(handle)); } catch { inside = false; } }
-    if (inside) {
-      if (!quiet) {
-        toast(`${leaks.name} was not written: ${folderName} is the folder the exports live in, not the case folder. Choose the folder above it (the bar at the top) and save the worksheet there.`, { error: true, ms: 9000 });
-        offerFolderAbove(dirHandle, null);
-      }
-      return false;
-    }
-  }
-  if (!handle && dirHandle) {
-    try { handle = await dirHandle.getFileHandle(leaks.name, { create: true }); } catch { handle = null; }
-  }
   if (!handle && folderOnly) return false; // nowhere to put it without asking
+  // In place, and never by the Save picker for the case folder's own
+  // worksheet, whatever its state, nor for any file just read as it stands: a
+  // write the file refuses (Excel holding it) says so and writes nothing
+  // else, since a copy picked elsewhere is not the file PDF-Linker reads.
   const ok = await writeBlob(new Blob([out], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), leaks.name, handle,
-    { description: "LEAKS worksheet", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }, { inPlaceOnly: disk.state === "same" });
+    { description: "LEAKS worksheet", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }, { inPlaceOnly: own || disk.state === "same" });
   if (!ok) return false;
   leaks.bytes = out;
-  if (handle) leaks.handle = handle;
   for (const r of leaks.parsed.rows) r.fix0 = r.fix;
-  try { localStorage.removeItem(leaksStoreKey()); } catch { /* fine */ }
+  // Stored again, not forgotten: what is left of the sheet to remember now is
+  // its acceptances (packDecisions), which no save writes since the cell
+  // already says them. The whole entry was removed here, and an accepted
+  // `~` suggestion was asked again after the next reload or folder read.
+  persistLeaks();
   renderLeaksBar();
   for (let i = 0; i < leakLis.length; i++) paintLeakRow(i);
   renderLeaksTabState();
