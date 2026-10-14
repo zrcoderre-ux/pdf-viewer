@@ -8075,6 +8075,9 @@ function placeCitationsNow() {
       for (const r of p.strips) {
         const a = document.createElement("a");
         a.className = "cite-link kind-" + p.kind;
+        // Shift+Space reads the kind here, to open a selection's cases ahead
+        // of its other links.
+        a.dataset.kind = p.kind;
         a.href = p.url;
         a.target = "_blank";
         a.rel = "noopener";

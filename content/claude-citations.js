@@ -665,7 +665,7 @@
     for (const c of citations) {
       let rects;
       try { rects = c.range.getClientRects(); } catch (e) { continue; }
-      if (rects.length) out.push({ url: c.url, rects: [...rects] });
+      if (rects.length) out.push({ url: c.url, rects: [...rects], kind: c.kind });
     }
     return out;
   });

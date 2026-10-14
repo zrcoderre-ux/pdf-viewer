@@ -88,6 +88,15 @@
   // PWA's own copy can't reach it, reads it too.
   const UNDERLINES = "a[data-text-height]";
 
+  // The citation kinds that stand for a case: a full cite, and a supra or
+  // short-form reference back to one (the PDF viewer marks those two apart;
+  // the text reader draws both as "supra"). Every overlay that draws citation
+  // links puts the kind on the strip as data-kind, and a link source reports
+  // it as `kind`. A page's own links carry none and count as the rest.
+  const CASE_KINDS = ["case", "supra", "shortform"];
+
+  function isCaseKind(kind) { return CASE_KINDS.indexOf(kind) !== -1; }
+
   // Protocols worth a new tab. A middle click on mailto:/tel:/javascript:
   // doesn't open a background tab either.
   const OPENABLE_SCHEMES = ["http:", "https:", "file:", "chrome-extension:"];
@@ -97,7 +106,7 @@
   let mouseY = null;
 
   // Overlay owners that draw fewer links than they know about register here:
-  //   window.__shiftSpaceLinkSources.push(() => [{ url, rects }, …])
+  //   window.__shiftSpaceLinkSources.push(() => [{ url, rects, kind }, …])
   // The array is shared (an extension gets one isolated world per frame) and
   // created by whichever file loads first, so registration order doesn't
   // matter. Selection only — an undrawn link can't be under the pointer.
@@ -226,9 +235,9 @@
     return null;
   }
 
-  // Every link the selection paints over, in reading order. `ownOnly` leaves
-  // out the page's ordinary links and counts only our own overlays (see
-  // collectUrls for when).
+  // Every link the selection paints over: the cases, then the rest, each in
+  // reading order. `ownOnly` leaves out the page's ordinary links and counts
+  // only our own overlays (see collectUrls for when).
   function linksInSelection(sel, ownOnly) {
     if (!sel || sel.isCollapsed || !sel.rangeCount) return [];
 
@@ -264,7 +273,7 @@
     for (const a of candidates) {
       if (!isOpenableLink(a)) continue;
       if (coverage(a, selRects) < MIN_COVERAGE) continue;
-      hits.push({ url: a.href, rect: firstRect(a) });
+      hits.push({ url: a.href, rect: firstRect(a), isCase: isCaseKind(a.getAttribute("data-kind")) });
     }
     // Links their owner knows about but hasn't drawn. The website overlay only
     // paints citations currently scrolled into view, so a selection running off
@@ -277,7 +286,7 @@
       for (const entry of entries || []) {
         if (!entry || !entry.url || !entry.rects || !entry.rects.length) continue;
         if (coverageOfRects(entry.rects, selRects) < MIN_COVERAGE) continue;
-        hits.push({ url: entry.url, rect: entry.rects[0] });
+        hits.push({ url: entry.url, rect: entry.rects[0], isCase: isCaseKind(entry.kind) });
       }
     }
     // Open them the way they read: top to bottom, then left to right. Links on
@@ -287,7 +296,14 @@
       const dt = p.rect.top - q.rect.top;
       return Math.abs(dt) > 4 ? dt : p.rect.left - q.rect.left;
     });
-    return hits;
+    // Then like with like: the cases ahead of everything else. The tabs land
+    // left to right in the order they are listed (the worker puts each one
+    // after the last), so a paragraph that cites cases and code sections
+    // together opens its cases as one run on the left and the code sections
+    // and other links after them, rather than interleaved as the text had them.
+    // A destination named both ways (a page's own link to a case we also
+    // underline) is opened once, from the case run: urlsOf keeps the first.
+    return hits.filter((h) => h.isCase).concat(hits.filter((h) => !h.isCase));
   }
 
   // One tab per destination, counted the way the worker counts it (see
