@@ -399,8 +399,9 @@ app, which routes it to the reader tab.
   stands in the clear. The names bar and the right-click menu say what the key
   holds for it instead of offering **Fake it**. A save that would write it —
   you answered it `yes` on the LEAKS worksheet, say — is refused with a
-  message saying why: only a full PDF-Linker run (not Apply Fixes) gives it a
-  stand-in, and until then you retype it, or keep that one where it stands
+  message saying why: the next click of **Re-run PDF-Linker** gives it a
+  stand-in (with a full run, where that is what it takes), and until then
+  you retype it, or keep that one where it stands
   (right-click it: **Keep just this one**). A longer name holding an
   instruction is left whole, never written as a stand-in for one of its words
   with the rest in the clear, wrapped down a caption's column or not. A print,
@@ -416,8 +417,10 @@ app, which routes it to the reader tab.
   "we" the run wrote, so the reader used to paint the surname over every "we"
   in the case. It now leaves those words as they are, says so in the status
   bar and in a message naming the pair, and keeps writing the name as the key
-  says when you type it. A full **Re-run PDF-Linker** gives the name a
-  stand-in of its own (current PDF-Linker repairs such a key as it reads it).
+  says when you type it. A full PDF-Linker run gives the name a stand-in of
+  its own (current PDF-Linker repairs such a key as it reads it): **Re-run
+  PDF-Linker** does one on its first click after PDF-Linker is updated, or
+  once `PDF-Linker Run Record.json` is deleted from the folder.
   The last few keys are
   remembered, so a lone `.txt` can be read under a key already loaded. A real
   name from the key standing **unfaked** in an export is counted in the status
@@ -555,7 +558,7 @@ app, which routes it to the reader tab.
   clear are the names walk's (Alt+L).
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
-  **Fix?** cell to answer, and Apply Fixes reads the cells back. The
+  **Fix?** cell to answer, and PDF-Linker reads the cells back. The
   reader attaches the folder's worksheet when the folder is opened (or **⚠
   Leaks** loads one; a dropped `LEAKS.xlsx` attaches too) and works it **one
   row at a time**: the current row stands in a bar above the text — value,
@@ -604,8 +607,8 @@ app, which routes it to the reader tab.
   **Save LEAKS.xlsx** (Ctrl+Shift+S) writes them **into the same workbook in
   place** — only the Fix? cells change; every other part of the file, the
   Context quotes, the column widths and the dropdown come back byte for byte,
-  and the file is read back before it is written — after which Apply Fixes (or
-  a re-run) applies them to the files. **An unsaved answer is remembered with
+  and the file is read back before it is written — after which a click of
+  **Re-run PDF-Linker** applies them to the files. **An unsaved answer is remembered with
   the row it answers**, its value, its file and the Context sentence it was
   quoted from, and goes back on that value wherever a run of PDF-Linker has
   since sorted it, never on whatever now stands in its old row — nor on
@@ -1125,13 +1128,17 @@ app, which routes it to the reader tab.
   Click the button again to turn it off; it is never
   on when a reader opens. The
   **Flagged** panel collects them and **Save list to case folder** writes `New
-  Real Values.txt` beside the key, which PDF-Linker reads on its next run —
-  and on Apply Fixes — as if each line had been given with `--term`. **A flag
-  needs no full re-run.** The value is the operator's own instruction, so
-  nothing has to re-read the PDFs to find it: double-clicking `Apply Fixes` in
-  the case folder scrubs it straight into the `.txt` exports and writes its
-  row into the key. That launcher sits beside `pseudonym_key.xlsx` whether or
-  not the folder still has a `LEAKS.xlsx` to triage. **A name the run half
+  Real Values.txt` beside the key, which PDF-Linker reads on its next run
+  as if each line had been given with `--term`. **A flag needs no full
+  re-run.** The value is the operator's own instruction, so nothing has to
+  re-read the PDFs to find it: double-clicking **Re-run PDF-Linker** in the
+  case folder scrubs it straight into the `.txt` exports and writes its row
+  into the key, reopening no PDF where nothing else in the folder needs the
+  full run (a new or changed document, an updated PDF-Linker: the launcher
+  decides, and `pdf_linker.log` says which it did). That launcher sits beside
+  `pseudonym_key.xlsx` whether or not the folder still has a `LEAKS.xlsx` to
+  triage; the older **Apply Fixes** launcher is retired, and PDF-Linker
+  removes it from a folder it runs on. **A name the run half
   faked is flagged whole.** Where the run faked one word of a name and missed
   the rest — "Rosa" in the clear beside "Delgado" faked, or beside "Delgado"
   standing orange — select the whole name and flag it: the selection is
@@ -1141,8 +1148,8 @@ app, which routes it to the reader tab.
   mistake. Only a selection that is nothing but a pseudonym, or nothing but
   the orange name, is refused: the first is faked already, and the second is
   the names bar's question (fake it, or keep it). A word of the name already
-  faked means the export carries its fake, so that flag takes **Re-run
-  PDF-Linker** rather than Apply Fixes, and the reader says so. **A flag the
+  faked means the export carries its fake, so that flag takes a full run —
+  **Re-run PDF-Linker** does one for it — and the reader says so. **A flag the
   run has answered comes off the list.** The flag is a job: this name
   is in the clear, fake it. When the key comes back with the name in it — the
   folder opened after a run, a key chosen by hand — the job is done, and the
@@ -1230,12 +1237,12 @@ app, which routes it to the reader tab.
   joins the **Flagged** panel tagged *phrase*, and is written into `New Real
   Values.txt` as `phrase: Cross River Bank`. Where the phrase stands in the
   clear, a save **holds it whole** — it does not fake the one word the key
-  knows, which would leave "Cross Zed Bank" and nothing for Apply Fixes to
-  find — and the orange mark on the word inside gives way to the phrase's
-  red one. Where a word of it is already faked in the file — anywhere in the
-  document, not only where it was selected — the export carries that fake,
-  so it takes **Re-run PDF-Linker** rather than Apply Fixes, and the reader
-  says so. The opposite mistake, a value
+  knows, which would leave "Cross Zed Bank" and nothing for the text-only
+  pass to find — and the orange mark on the word inside gives way to the
+  phrase's red one. Where a word of it is already faked in the file —
+  anywhere in the document, not only where it was selected — the export
+  carries that fake, so it takes a full run — **Re-run PDF-Linker** does one
+  for it — and the reader says so. The opposite mistake, a value
   that should never have been faked (a word of a cited decision's name,
   usually), is **right-clicked**: "Keep in this case" is PDF-Linker's `no`,
   "Never fake it anywhere" its `never`. The keep takes effect in the reader
@@ -1290,8 +1297,9 @@ app, which routes it to the reader tab.
   reader says the keep could not be checked against it: allow the workbook,
   look for the value there, and keep it again if it is not. A line still in
   the file is still owed: PDF-Linker leaves a keep there, under a `#` note,
-  when it could not write the master (Excel holding it) and when Apply Fixes
-  is waiting for the full re-run, and the reader writes it again with the
+  when it could not write the master (Excel holding it) and when a typed
+  `--fix-leaks` left it waiting for the full run (a click of Re-run
+  PDF-Linker does that run for it instead), and the reader writes it again with the
   rest. Only the folder the line was written into counts: a copy of the case
   under the same name keeps a list of its own, so a keep taken in one is never
   read into the other, nothing is taken as applied there, and a run on the
@@ -1922,8 +1930,8 @@ app, which routes it to the reader tab.
   now also goes on `New Real Values.txt`, as a line `did not ocr: FILE | page
   N` — FILE is the PDF's name where the reader knows it (the side-by-side
   pane's own match) and the export's otherwise, N the PDF page — and 💾 Save
-  writes it with the document. PDF-Linker's next run (or **Apply Fixes**)
-  marks the page in the PDF itself, never OCRs it again, and exports it as
+  writes it with the document. PDF-Linker's next run (a click of **Re-run
+  PDF-Linker**) marks the page in the PDF itself, never OCRs it again, and exports it as
   `[DID NOT OCR]` under a header saying so; the line is spent from the file
   as the mark lands. The Flagged panel lists the pages waiting to be handed
   over, and a page comes off that list when Ctrl+Z puts its text back or

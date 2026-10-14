@@ -2246,7 +2246,7 @@ function instructionNote(realValues) {
   const it = one ? "it" : "them";
   return ` The key holds no pseudonym for ${told.slice(0, 3).join(", ")}${told.length > 3 ? "…" : ""}: ${one ? "its Replacement cell holds an instruction" : "their Replacement cells hold instructions"} to PDF-Linker`
     + (excel ? " (one reading #… is Excel's error text, which PDF-Linker ignores: type that cell again in the key)" : "")
-    + `, and only a full run (not Apply Fixes) gives ${it} a stand-in. Until then retype ${it}, or keep ${it} where ${one ? "it stands" : "they stand"} (right-click: Keep just this one).`;
+    + `, and the next click of Re-run PDF-Linker gives ${it} a stand-in (with a full run, where that is what it takes). Until then retype ${it}, or keep ${it} where ${one ? "it stands" : "they stand"} (right-click: Keep just this one).`;
 }
 function compileKey() {
   const out = during("compiling the key", () => compileKeyNow());
@@ -2348,7 +2348,7 @@ function setKey(parsed) {
   if (wordy.length) {
     const which = wordy.slice(0, 3).map((w) => `\u201c${w.fake}\u201d for \u201c${w.real}\u201d`).join(", ") + (wordy.length > 3 ? ` and ${wordy.length - 3} more` : "");
     $("st-key").textContent += ` (${wordy.length} pseudonym${wordy.length === 1 ? " is an ordinary word" : "s are ordinary words"}: shown as written)`;
-    toast(`The key fakes ${which} — ${wordy.length === 1 ? "a pseudonym that is" : "pseudonyms that are"} an ordinary word, so nothing tells the run's from the word itself. The reader shows ${wordy.length === 1 ? "it" : "them"} as written rather than turning every one into the name. Re-run PDF-Linker (a full run, not Apply Fixes) to give ${wordy.length === 1 ? "that name a stand-in" : "those names stand-ins"} of ${wordy.length === 1 ? "its" : "their"} own.`, { ms: 12000 });
+    toast(`The key fakes ${which} — ${wordy.length === 1 ? "a pseudonym that is" : "pseudonyms that are"} an ordinary word, so nothing tells the run's from the word itself. The reader shows ${wordy.length === 1 ? "it" : "them"} as written rather than turning every one into the name. A full PDF-Linker run gives ${wordy.length === 1 ? "that name a stand-in" : "those names stand-ins"} of ${wordy.length === 1 ? "its" : "their"} own: Re-run PDF-Linker does one on the first click after PDF-Linker is updated, or once PDF-Linker Run Record.json is deleted from the folder.`, { ms: 12000 });
   }
   // Another key binds other values: what the last one proposed over a PDF is
   // its reading, not this one's, and goes. Boxes drawn by hand stay — they
@@ -3025,7 +3025,8 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // a keep on the master workbook's KEEP sheet and takes its line out, and
   // spends a page's line the moment the text is in the PDF; it carries back a
   // line it could not apply — a keep whose master row it could not write, one
-  // Apply Fixes holds for the full re-run — and such a line is not spent. (A
+  // a typed --fix-leaks holds for the full run (a click of Re-run PDF-Linker
+  // does the full run for it instead) — and such a line is not spent. (A
   // transcribed page's header says TEXT CORRECTED from that run on, but a page
   // already corrected can be typed over and marked again, so the header alone
   // cannot say the request is done.) A spent keep is retired from the case's
@@ -7613,7 +7614,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   if (staleClean.length && dirHandle) showFolderChanged(dirHandle, { docs: true });
   const failWarn = failed.map((f) => ` · ⚠ ${TD.docLabel(f.name)} could not be written (${f.why}) — still unsaved.`).join("")
     + (unreadable.length ? ` · ⚠ ${nameList(unreadable.map((n) => TD.docLabel(n)))} could not be read, so ${unreadable.length === 1 ? "it was" : "they were"} not written.` : "");
-  const combined = wrote.length && folderDocs.some((d) => d.combined) ? ` · ${TD.COMBINED_FILE} is behind the exports until PDF-Linker's next run (or Apply Fixes).` : "";
+  const combined = wrote.length && folderDocs.some((d) => d.combined) ? ` · ${TD.COMBINED_FILE} is behind the exports until PDF-Linker's next run (Re-run PDF-Linker).` : "";
   const unreadWarn = elsewhereUnread ? ` · ⚠ ${folderName} could not be read through for the names you said to fake, so none was written off the screen — save again.` : "";
   const pinnedWarn = pinnedNote(writtenTexts);
   const red = warn || unsureWarn || stuckWarn || conflictWarn || failWarn || unreadWarn || spentWarn || pinnedWarn || (leaksDirty() && leaksSaveNote);
@@ -13186,10 +13187,11 @@ function flagSelectionNow({ asked = false } = {}) {
   flagPop.hidden = true;
   noteInFlagged();
   // A word of it already faked: the export carries that word's fake, so the
-  // name is not there for Apply Fixes to find (as with a phrase, markPhrase).
+  // name is not there for the text-only pass to find (as with a phrase,
+  // markPhrase), and the click of Re-run PDF-Linker does the full run for it.
   const faked = flagged.length > before && (!!s.touches || phraseFakedInFile(v));
   toast((flagged.length > before ? `Flagged "${v}" — ${flagged.length} value${flagged.length === 1 ? "" : "s"} to hand to PDF-Linker` : `"${v}" is already flagged`)
-    + (faked ? ". A word of it is already faked in the file, so it takes Re-run PDF-Linker; Apply Fixes cannot find the name in the export." : ""), { ms: faked ? 7000 : 3200 });
+    + (faked ? ". A word of it is already faked in the file, so Re-run PDF-Linker does a full run for it: the export holds no such name for the quick pass to find." : ""), { ms: faked ? 7000 : 3200 });
 }
 
 /**
@@ -13231,7 +13233,7 @@ function phraseIn(s, leak) {
 /**
  * Whether the open document carries the phrase with a word of it already
  * faked — "Cross Zed Bank" where the key fakes "River" — which only a full
- * re-run puts back together: Apply Fixes reads the export, and the export
+ * run puts back together: the text-only pass reads the export, and the export
  * holds no phrase there to find.
  */
 function phraseFakedInFile(v) {
@@ -13280,7 +13282,7 @@ function markPhraseNow(v, faked) {
   sweepFolder(); // a phrase held whole changes what the rest of the folder is carrying
   const alone = flagged.filter((f) => holdsWords(v, f));
   toast((was ? `"${v}" is flagged as one phrase now` : `Flagged "${v}" as one phrase`) + " — PDF-Linker fakes the words whole, together."
-    + (faked ? " A word of it is already faked in the file, so it takes Re-run PDF-Linker; Apply Fixes cannot find the phrase in the export."
+    + (faked ? " A word of it is already faked in the file, so Re-run PDF-Linker does a full run for it: the export holds no such phrase for the quick pass to find."
       : heldPhrases().includes(v) ? " Until then a save leaves it standing whole." : "")
     + (alone.length ? ` ${alone.map((f) => `"${f}"`).join(", ")} ${alone.length === 1 ? "is" : "are"} still flagged on ${alone.length === 1 ? "its" : "their"} own — withdraw ${alone.length === 1 ? "it" : "them"} in the Flagged list if ${alone.length === 1 ? "it" : "they"} only ever stood here.` : ""));
 }
@@ -14087,7 +14089,7 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
       if (!quiet) {
         toast((emptied
           ? `Wrote ${TD.VALUES_FILE} with nothing in it — the flags and keeps withdrawn are no longer handed to PDF-Linker.`
-          : `Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()}) into ${folderName} — re-run PDF-Linker to apply them to the files.`)
+          : `Wrote ${TD.VALUES_FILE} (${flagged.length} to fake, ${keeps.length} to keep${pageListsNote()}) into ${folderName} — double-click Re-run PDF-Linker there to apply them to the files.`)
           + keptNote + (valuesSpentNote ? " " + valuesSpentNote : ""), valuesSpentNote ? { error: true, ms: 12000 } : undefined);
       }
       return true;
@@ -14139,7 +14141,7 @@ $("flags-copy").addEventListener("click", async () => {
 // PDF-Linker's leak triage is a worksheet, LEAKS.xlsx in the case folder: one
 // row per flagged value with a Fix? cell the operator answers (yes / no /
 // never / phrase, ~CORRECT SPELLING, *CORRECT TEXT, a [kept part], or the
-// exact replacement), and Apply Fixes reads the cells back. Answering
+// exact replacement), and PDF-Linker reads the cells back. Answering
 // it in Excel means reading a sentence in a cell and guessing at the page.
 // Here the worksheet is attached — from the case folder on open, or loaded
 // by hand — and worked ROW BY ROW: the current row stands in a bar above the
@@ -14150,7 +14152,8 @@ $("flags-copy").addEventListener("click", async () => {
 // is the exact text PDF-Linker will read, written into that row's Fix? cell
 // and nowhere else (xlsx-write.js copies every other part of the workbook
 // through byte for byte); it is remembered here until saved, and Save
-// writes LEAKS.xlsx back in place. Then Apply Fixes does the rest.
+// writes LEAKS.xlsx back in place. Then a click of Re-run PDF-Linker does the
+// rest.
 // A `no` or `never` on a value the key binds is mirrored as one of the
 // reader's own keeps, so the orange mark goes and a save of the document
 // leaves the value as it stands — the two channels agreeing on the one
@@ -14573,7 +14576,7 @@ function renderLeaksTabState() {
   $("leaks-save").disabled = !n;
   $("leaks-note").textContent = !leaks ? "" : n
     ? `${n} decision${n === 1 ? "" : "s"} not yet saved (remembered here until then).`
-    : leaks.handle || dirHandle ? `Saves into ${leaks.folder || folderName || "the folder"}/${leaks.name}. After saving, double-click Apply Fixes.bat, or re-run PDF-Linker.` : "No folder is open: a save asks where to write the worksheet.";
+    : leaks.handle || dirHandle ? `Saves into ${leaks.folder || folderName || "the folder"}/${leaks.name}. After saving, double-click Re-run PDF-Linker in that folder.` : "No folder is open: a save asks where to write the worksheet.";
 }
 /** The whole list, from scratch: a worksheet attached, or dropped. */
 function renderLeaksTab() {
@@ -15222,7 +15225,7 @@ function advanceLeak(n) {
     return;
   }
   if (n >= 0) goToLeak(n);
-  else toast("Every row is answered — save the worksheet, then Apply Fixes.");
+  else toast("Every row is answered — save the worksheet, then double-click Re-run PDF-Linker.");
 }
 function goSweepStop(h) {
   const hits = liveLeaks();
@@ -15246,7 +15249,7 @@ function finishPageSweep() {
   renderNamesBar();
   const n = LK.nextUndecided(leakRows(), sw.from);
   if (n >= 0) goToLeak(n);
-  else toast("Every row is answered — save the worksheet, then Apply Fixes.");
+  else toast("Every row is answered — save the worksheet, then double-click Re-run PDF-Linker.");
 }
 
 /**
@@ -15388,7 +15391,7 @@ async function saveLeaks({ quiet = false, folderOnly = false } = {}) {
   for (let i = 0; i < leakLis.length; i++) paintLeakRow(i);
   renderLeaksTabState();
   const und = LK.undecidedCount(leaks.parsed.rows);
-  if (!quiet) toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still to answer` : "") + ". Double-click Apply Fixes.bat (or re-run PDF-Linker) to apply them to the files.", { ms: 6000 });
+  if (!quiet) toast(`Saved ${leaks.name} — ${edits.length} decision${edits.length === 1 ? "" : "s"} written` + (und ? `, ${und} row${und === 1 ? "" : "s"} still to answer` : "") + ". Double-click Re-run PDF-Linker to apply them to the files.", { ms: 6000 });
   return edits.length;
 }
 

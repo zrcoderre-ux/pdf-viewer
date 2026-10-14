@@ -38,7 +38,7 @@
 
   <!-- The LEAKS review bar: the worksheet's current row above the text, the
        text opened at the row's page and line. The decision goes into the
-       row's Fix? cell exactly as PDF-Linker's Apply Fixes reads it.
+       row's Fix? cell exactly as PDF-Linker reads it.
        Its controls are ONE ROW AT THE TOP, and nothing in that row changes
        size from one worksheet row to the next. They used to come after the
        row's own text (its value and where it stands above them, its Context
@@ -70,7 +70,7 @@
       <button id="lb-inst-prev" title="This row's value where it stands before this, round to the last after the first — the same row, the same decision (Alt+,)">‹</button>
       <button id="lb-inst-next" title="This row's value where it next stands, round to the first after the last — the same row, the same decision (Alt+.)">›</button></span>
       <button id="lb-find" title="Find this value in the text again">Find in text</button>
-      <button id="lb-save" class="primary" title="Write the decisions into LEAKS.xlsx in the case folder (Ctrl+Shift+S). Then double-click Apply Fixes.bat, or re-run PDF-Linker, to apply them to the files.">💾 Save LEAKS.xlsx</button>
+      <button id="lb-save" class="primary" title="Write the decisions into LEAKS.xlsx in the case folder (Ctrl+Shift+S). Then double-click Re-run PDF-Linker to apply them to the files.">💾 Save LEAKS.xlsx</button>
       <button id="lb-open" title="Load another LEAKS.xlsx">📂</button>
       <button id="lb-close" title="Hide the bar (the worksheet stays loaded; ⚠ Leaks brings it back)">×</button>
     </div>
@@ -343,7 +343,7 @@
         <p class="side-note" id="leaks-note"></p>
       </div>
       <div id="side-flags" class="side-body" hidden>
-        <p class="side-hint">Names you spotted unfaked — to be pseudonymized. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it on its next run — or, without reopening a single PDF, when you double-click <code>Apply Fixes</code> in that folder.</p>
+        <p class="side-hint">Names you spotted unfaked — to be pseudonymized. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it the next time you double-click <code>Re-run PDF-Linker</code> in that folder — without reopening a single PDF where nothing else needs it.</p>
         <ul id="flags-list"></ul>
         <div id="keeps-block" hidden>
           <p class="side-hint">Wrongly faked — kept as they really read. Un-marked here now; PDF-Linker restores them in the files on its next run.</p>

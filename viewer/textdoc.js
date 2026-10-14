@@ -1850,8 +1850,8 @@ export const VALUES_FILE = "New Real Values.txt";
 const VALUES_HEAD = [
   "# New Real Values — written by the text reader for PDF-Linker.",
   "# One real value per line: names spotted unfaked in the scrubbed exports.",
-  "# PDF-Linker reads this file from the case folder on its next run (and on",
-  "# Apply Fixes) and pseudonymizes each value as if it had been given",
+  "# PDF-Linker reads this file from the case folder on its next run (a",
+  "# click of Re-run PDF-Linker), pseudonymizing each value as if it were given",
   "# with --term. A line 'no: VALUE' is the opposite — a value the run faked",
   "# that should be left as it is in this case (a cited decision's name); a",
   "# line 'never: VALUE' keeps it in every case. A line 'phrase: VALUE' is a",
@@ -2640,7 +2640,7 @@ export function parseReaderFile(text) {
 // taken off it there, and either way handing it over again is the bug. A line
 // still in the file is not spent, whatever the comment above it says —
 // PDF-Linker writes back a keep whose master row it could not write, and one
-// Apply Fixes holds for the full re-run, each under a "#" line saying why. The
+// a typed --fix-leaks holds for the full run, each under a "#" line saying why. The
 // text-corrected pages are spent the same way, by their page and sum. `saved`
 // must be what was written into THIS folder: the reader asks that of it first
 // (text-reader.js, writtenWhere), and rebuilds it from the folder's own file
