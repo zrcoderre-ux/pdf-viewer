@@ -863,6 +863,27 @@ body.gutter-off .page-body.numbered .gutter { font-size: var(--body-em); }
    span of no size would still stand on, and drop the line's text below its
    number by half of it. */
 body:not(.editing) .page-body .cg { font-size: 0; line-height: 0; }
+/* A form's checkbox, drawn (columns.js, dressCheckboxes): a square at the
+   line's own type size, an X in it where PDF-Linker read the box ticked and a
+   ? where it could not tell. The mark's own characters are underneath, unseen
+   but there — the box takes the room they do, a copy, a save and Find read
+   them — and it is one piece (inline-block): no line wraps through it. The
+   square stands from the baseline to about the height of a capital, as the
+   box does beside its label on the form. In the editor the mark is drawn as
+   the text it is, to be typed into. */
+body:not(.editing) .page-body .cb {
+  display: inline-block; position: relative; text-indent: 0; -webkit-text-fill-color: transparent;
+}
+body:not(.editing) .page-body .cb::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 0.74em; height: 0.74em; transform: translate(-50%, -50%);
+  box-sizing: border-box; border: max(1px, 0.07em) solid currentColor;
+}
+body:not(.editing) .page-body .cb[data-cb]::after {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  font: 700 0.6em/1 Arial, "Liberation Sans", sans-serif; -webkit-text-fill-color: currentColor;
+}
+body:not(.editing) .page-body .cb[data-cb="x"]::after { content: "X"; }
+body:not(.editing) .page-body .cb[data-cb="?"]::after { content: "?"; }
 /* …read unwrapped for a moment, for how wide its widest column line is
    (shapePages: a page in columns is set no larger than that fits). */
 .page-body.cols-measure .line.cols > .lt { white-space: pre; }
@@ -921,6 +942,11 @@ body:not(.editing) .page-body .cg { font-size: 0; line-height: 0; }
    whole of it — and a rule row keeps the slot the PDF gave it. */
 .page-body.fixed .line.rl { display: table; }
 .page-body.fixed .rc { vertical-align: top; }
+/* …and a box whose bars stand on the export's grid read off the PDF (.cgrid;
+   rules.js, applyStack) is that wide and no wider: each row a fixed table at
+   the width its cells add up to, the spaces a cell ends with running on
+   unseen instead of pushing its bar past the PDF's rule. */
+.page-body.fixed.cgrid .line.rl.gridfit { table-layout: fixed; }
 /* …and it begins where the page's text begins. A box row is a table and not
    the numbered grid, so the cell standing in for the gutter is sized here —
    and it was sized to the READER's gutter, which on the PDF's grid is not

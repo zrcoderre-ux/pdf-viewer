@@ -12,6 +12,8 @@
 // scrubbing, by the bare stem too. A Combined Text.txt names each member in
 // its banner, so its pages are matched document by document.
 
+import { checkboxRanges } from "./textdoc.js";
+
 /** A file name's stem, extensions off (.pdf, .txt, .txt.LEAK), separators spaced, case folded. */
 export function normalizeStem(name) {
   let s = String(name == null ? "" : name).split(/[\\/]/).pop();
@@ -560,18 +562,21 @@ function overlaps(a, b) {
  * row of its own.
  *
  * …and where the halves DO share a baseline, as a justified page set in two
- * columns has them, the row says where each half after the first begins:
- * `breaks`, [{ x, word }] — an item standing a column's gutter clear of the
- * one before it, and the first word it prints (lower case, letters and
- * digits). The grid a two-column line is laid on is read off them
- * (text-reader.js, charGrid's pairs) where no line of the page begins
- * anywhere but the margin. Only on a row that has one.
+ * columns has them, the row is both halves — and says where each begins by
+ * its ITEMS, which it keeps, in x order: { str, x, w, h, base, font }, `font`
+ * the item's pdf.js font id where it had one. A line laid on the row finds
+ * them in its text (lineItems): the export's character grid is read off where
+ * they begin (text-reader.js, charGrid's pairs), and each piece of the line is
+ * put where the PDF prints it, at its own size and in its own face (pdfFace).
+ * (A row used to keep only `breaks`, the items a column's gutter clear of the
+ * one before, for the grid of a page whose every line has both halves; every
+ * item is a pair now, and those are among them.)
  */
 export function pdfRows(items, size) {
   const rows = [];
   const sorted = (items || []).filter((it) => it.str && it.str.trim()).map((it) => {
     const h = it.h > 0 ? it.h : 10;
-    return { str: it.str, x: it.x, w: it.w > 0 ? it.w : 0, h, base: it.top + h };
+    return { str: it.str, x: it.x, w: it.w > 0 ? it.w : 0, h, base: it.top + h, font: it.font || null };
   }).sort((a, b) => a.base - b.base || a.x - b.x);
   const apart = (row, it) => {
     const h = Math.min(it.h, row.tall);
@@ -599,20 +604,7 @@ export function pdfRows(items, size) {
     // with it.
     const body = its.filter((i) => Math.abs(i.h - height) <= height * 0.2);
     const base = Math.min(...(body.length ? body : its).map((i) => i.base));
-    const row = { top: base - height, left: its[0].x, height, text: its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim() };
-    // Clear of everything before it, not only of the item before it: a long
-    // item can start first and end last. An item of no width says nothing.
-    const breaks = [];
-    let right = its[0].x + its[0].w, known = its[0].w > 0;
-    for (let k = 1; k < its.length; k++) {
-      const it = its[k];
-      const word = (String(it.str).toLowerCase().match(/[a-z0-9]+/) || [""])[0];
-      if (known && word && it.x - right > Math.min(it.h, height) * 1.5) breaks.push({ x: it.x, word });
-      right = Math.max(right, it.x + it.w);
-      known = known && it.w > 0;
-    }
-    if (breaks.length) row.breaks = breaks;
-    return row;
+    return { top: base - height, left: its[0].x, height, text: its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim(), items: its };
   });
 }
 
@@ -754,13 +746,14 @@ export function rowLayout(lineTexts, rows, { bodyLeft = null } = {}) {
  * An export lays a page out in characters: its indents, its centred headings
  * and a two-column page's second column are runs of spaces, each standing
  * for the width of a character on the PDF. `pairs` are [{ col, x }]: where a
- * line's text begins in the export, and where the PDF row it was matched to
- * begins on the page. Those lie on one straight line, and the line is
- * fitted robustly (Theil–Sen: the median slope between every two lines that
- * begin columns apart), since a line matched to the wrong row — a two-column
- * line to its right-hand half — is a point far off it. Too few lines that
- * begin anywhere but the margin, a slope no font has, or a fit most lines
- * miss by more than a character and a half, and there is no grid.
+ * piece of type begins in the export, and where the PDF prints it — every
+ * piece each line carries (text-reader.js, matchItems; lineItems below), a
+ * box's labels and a second column's among them. Those lie on one straight
+ * line, and the line is fitted robustly (Theil–Sen: the median slope between
+ * every two pieces that begin columns apart), since a piece found at the
+ * wrong item is a point far off it. Too few pieces that begin anywhere but
+ * the margin, a slope no font has, or a fit most pieces miss by more than a
+ * character and a half, and there is no grid.
  */
 export function charGrid(pairs) {
   const pts = (pairs || []).filter((p) => p && p.col >= 0 && Number.isFinite(p.x));
@@ -779,6 +772,188 @@ export function charGrid(pairs) {
   const near = pts.filter((p) => Math.abs(p.x - (x0 + unit * p.col)) <= Math.max(1.5 * unit, 3)).length;
   if (near < Math.max(3, pts.length * 0.6)) return null;
   return { x0, unit };
+}
+
+// ---- each piece of a line where the PDF prints it ------------------------------
+//
+// The grid above puts a line's columns where the export's spaces say, and the
+// export is laid out for a model to read, not to look like the page: it may run
+// wider than the paper, join two pieces the form prints apart with one space,
+// or carry on one line pieces the form prints in two sizes (CIV-110's 7-point
+// footnote and the 9-point "Attorney or party without attorney for" beside it).
+// The PDF knows where each piece is: pdf.js hands its text over as ITEMS, a run
+// of type each — a new one wherever the form leaves a gap or changes face — and
+// a line's text carries them in order. So beside the PDF a line is cut wherever
+// one of its items begins (text-reader.js, applyMatchedLayout), and each piece
+// stands at its item's x, at its item's size, in its item's face.
+
+/**
+ * The PDF items a line matched to row `j` may carry: the row's own, and those
+ * of each row beside it — its span down the page overlapping row j's — that no
+ * other line was matched to (`taken`, a Set of row indexes). A form prints a
+ * label a point or two off the line it stands on (the export writes "causes of
+ * … [   ] Plaintiff/Petitioner" as one line; the PDF's rows are two), and an
+ * item of a row beside it that stands OVER one of row j's own across the page
+ * is a line above or below, not a piece of this one. [{ it, own }] in x order,
+ * `own` true for row j's.
+ */
+export function rowItemsNear(rows, j, taken = null) {
+  const row = rows && rows[j];
+  if (!row) return [];
+  const own = row.items || [];
+  const out = own.map((it) => ({ it, own: true }));
+  const top = row.top, bottom = row.top + row.height;
+  rows.forEach((o, r) => {
+    if (r === j || (taken && taken.has(r)) || !(o.top < bottom && o.top + o.height > top)) return;
+    for (const it of o.items || []) {
+      if (own.some((m) => it.x < m.x + m.w && m.x < it.x + it.w)) continue;
+      out.push({ it, own: false });
+    }
+  });
+  return out.sort((a, b) => a.it.x - b.it.x);
+}
+
+const WORD_RE = /[\p{L}\p{N}]+/gu;
+const wordsOf = (s) => [...String(s).matchAll(WORD_RE)].map((m) => ({ w: m[0].toLowerCase(), i: m.index }));
+
+/**
+ * Where each PDF item a line carries begins in its text, and so where the line
+ * is cut beside its PDF page: [{ at, start, x, item }] in order. `text` is the
+ * line as it reads (real names, as the PDF prints them), `cands` its items
+ * (rowItemsNear). An item is found by its first words — up to three, in order,
+ * after the last item found, so two items that open alike are told apart by
+ * where they stand. `start` is where the item's own text begins (its "(" of
+ * "(date):" where the line has it too), `x` where that character stands on the
+ * page in PDF units, and `at` where its PIECE begins: the same place, or a
+ * checkbox mark standing a space before it (the PDF draws the box; its item is
+ * the label beside it, and the box goes with the label).
+ *
+ * A piece begins only after a space, or at the line's first character: an item
+ * glued to the text before it (a superscript, a word the PDF split in two, a
+ * link inside its parentheses) runs on in the piece before, and a place inside
+ * one of `atoms` ([from, to) in the text: a pseudonym, a spot keep) is no place
+ * to cut at all. Such an item is still in the list, `glued` true — its face is
+ * still the face of the text it prints — and begins no piece. An item of a row
+ * beside this one (`own` false) has to be found by four letters or more: a
+ * word as short as "by" is in too many lines to say this is the one it belongs
+ * to.
+ */
+export function lineItems(text, cands, { atoms = null } = {}) {
+  const s = String(text == null ? "" : text);
+  const words = wordsOf(s);
+  const boxes = checkboxRanges(s);
+  const first = s.search(/\S/);
+  const inside = (i) => !!atoms && atoms.some(([a, b]) => i > a && i < b);
+  const out = [];
+  let cursor = 0;
+  for (const c of cands || []) {
+    const it = c && c.it ? c.it : c;
+    const str = String((it && it.str) || "");
+    const lead = str.replace(/^\s+/, "");
+    const iw = wordsOf(lead);
+    if (!iw.length) continue;
+    const need = Math.min(3, iw.length);
+    if (c && c.own === false && iw.slice(0, need).reduce((n, w) => n + w.w.length, 0) < 4) continue;
+    let p = -1;
+    for (let q = cursor; q + need <= words.length && p < 0; q++) {
+      let ok = true;
+      for (let m = 0; m < need && ok; m++) ok = words[q + m].w === iw[m].w;
+      if (ok) p = q;
+    }
+    if (p < 0) continue;
+    cursor = p + need;
+    // Where the item's text begins in the line, and where that is on the page:
+    // its first word, or what it prints before that word where the line has
+    // the same characters there; else the word's own place, read off the item's
+    // width in proportion.
+    const j = words[p].i;
+    const pre = lead.slice(0, iw[0].i);
+    const skipped = str.length - lead.length;
+    const w = it.w > 0 ? it.w : 0;
+    let start = j, x = it.x + (str.length ? (w * (skipped + iw[0].i)) / str.length : 0);
+    if (pre && j >= pre.length && s.slice(j - pre.length, j).toLowerCase() === pre.toLowerCase()) {
+      start = j - pre.length;
+      x = it.x + (str.length ? (w * skipped) / str.length : 0);
+    }
+    let at = start;
+    const before = s.slice(0, start).replace(/ +$/, "");
+    const box = before.length < start ? boxes.find((b) => b[1] === before.length) : null;
+    if (box) at = box[0];
+    const glued = inside(at) || (at > first && s[at - 1] !== " ");
+    out.push(glued ? { at: start, start, x, item: it, glued } : { at, start, x, item: it });
+  }
+  return out;
+}
+
+// ---- the PDF's own typeface ---------------------------------------------------
+//
+// Beside its PDF page a line is drawn in the PDF's face, not the reader's: a
+// form set in Arial reads as Arial, its headings bold where the PDF's are, its
+// "(date):" in italics. pdf.js says only which of three families a font falls
+// in (its text content's style: serif, sans-serif or monospace); its NAME —
+// "QZRSCC+Arial-BoldMT" — is on the font object once pdf.js has loaded it, and
+// the weight and slant are read off that. The face is drawn in what this
+// machine has: Arial on Windows, Liberation Sans (cut to Arial's widths) on
+// Linux, and the family's generic behind them.
+
+const FACE_STACKS = {
+  "sans-serif": 'Arial, Helvetica, "Liberation Sans", Arimo, "Nimbus Sans", sans-serif',
+  serif: '"Times New Roman", Times, "Liberation Serif", Tinos, "Nimbus Roman", serif',
+  monospace: '"Courier New", Courier, "Liberation Mono", Cousine, "Nimbus Mono PS", monospace',
+};
+// Faces a filing is commonly set in, by the start of the name the PDF gives
+// them (letters only, lower case): the face itself first where the machine has
+// it, then one cut to its widths, then its family. Arial, Times and Courier
+// are the stacks themselves.
+const NAMED_FACES = [
+  [/^arialnarrow/, '"Arial Narrow", "Liberation Sans Narrow"', "sans-serif"],
+  [/^(?:arial|helvetica|arimo|liberationsans|nimbussans)/, "", "sans-serif"],
+  [/^(?:calibri|carlito)/, "Calibri, Carlito", "sans-serif"],
+  [/^verdana/, 'Verdana, "DejaVu Sans"', "sans-serif"],
+  [/^tahoma/, "Tahoma", "sans-serif"],
+  [/^segoeui/, '"Segoe UI"', "sans-serif"],
+  [/^centurygothic/, '"Century Gothic"', "sans-serif"],
+  [/^franklingothic/, '"Franklin Gothic Book"', "sans-serif"],
+  [/^(?:timesnewroman|times|tinos|liberationserif|nimbusrom)/, "", "serif"],
+  [/^georgia/, "Georgia", "serif"],
+  [/^(?:cambria|caladea)/, "Cambria, Caladea", "serif"],
+  [/^(?:garamond|ebgaramond)/, 'Garamond, "EB Garamond"', "serif"],
+  [/^(?:bookantiqua|palatino)/, '"Book Antiqua", "Palatino Linotype", Palatino, "TeX Gyre Pagella"', "serif"],
+  [/^(?:centuryschoolbook|newcenturyschlbk)/, '"Century Schoolbook", "TeX Gyre Schola"', "serif"],
+  [/^bookman/, '"Bookman Old Style", "TeX Gyre Bonum"', "serif"],
+  [/^(?:couriernew|courier|cousine|liberationmono|nimbusmono)/, "", "monospace"],
+  [/^consolas/, "Consolas", "monospace"],
+  [/^lucidaconsole/, '"Lucida Console"', "monospace"],
+];
+// A symbol font draws pictures, not letters: Wingdings' "o" is a box. A piece
+// set in one keeps the face of the line around it. And a font that says
+// nothing of the type on the page is no face at all: an OCR's text layer is
+// set in Tesseract's GlyphLessFont (or another invisible one) over the scan,
+// and a Type 3 font is pictures of glyphs a scanner or an OCR drew — the type
+// is in the image, and the reader's own face reads a scan as well as a guess.
+const SYMBOL_FACE_RE = /symbol|dingbat|wingding|webding|marlett|zapf|glyphless|^t3font|^type3/i;
+
+/**
+ * The face to draw a PDF font's text in: { family, a CSS font-family list;
+ * bold; italic } — from the font's `name` as pdf.js loaded it (its subset tag
+ * "ABCDEF+" off; empty while it has not loaded) and `generic`, the family
+ * pdf.js reads off the font ("serif", "sans-serif", "monospace"). `hints` are
+ * what pdf.js itself set ({ bold, italic }, on a font it put a system face in
+ * for; isType3Font). Null for a symbol font, an OCR layer's, a Type 3 font.
+ */
+export function pdfFace(name, generic, hints = null) {
+  const raw = String(name || "").replace(/^[A-Z]{6}\+/, "");
+  if (SYMBOL_FACE_RE.test(raw) || (hints && hints.isType3Font)) return null;
+  const key = raw.toLowerCase().replace(/[^a-z]/g, "");
+  let kind = FACE_STACKS[generic] ? generic : "sans-serif", first = "";
+  for (const [re, faces, g] of NAMED_FACES) if (re.test(key)) { first = faces; kind = g; break; }
+  const bold = /bold|black|heavy|demi/i.test(raw) || !!(hints && hints.bold);
+  const italic = /italic|oblique/i.test(raw) || /[-,_][A-Za-z]*It(?:MT|PS)?$/.test(raw) || !!(hints && hints.italic);
+  return { family: (first ? first + ", " : "") + FACE_STACKS[kind], bold, italic };
+}
+/** A face as one string: the same face, the same key. */
+export function faceKey(face) {
+  return face ? `${face.italic ? "italic " : ""}${face.bold ? "700 " : ""}${face.family}` : "";
 }
 
 // ---- the type a text page is set in beside its PDF page ----------------------

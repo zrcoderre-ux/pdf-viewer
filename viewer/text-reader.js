@@ -44,7 +44,7 @@ import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
 import { dressLines, fitRuleRows, placeholderIn } from "./rules.js";
-import { dressColumns, alignColumns, charWidth, fitCells } from "./columns.js";
+import { dressColumns, alignColumns, charWidth, fitCells, lineMap, faceEm, faceSpace, placeLine, unplaceLine } from "./columns.js";
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
@@ -17228,6 +17228,47 @@ async function textItemsOf(page, cap = PAGE_ITEMS_MAX) {
   }
   return out;
 }
+/**
+ * The faces a PDF page's type is set in, kept on the PDF's reading by font id
+ * (`info.faces`: id → { face }) for the grid to draw its lines in
+ * (applyMatchedLayout, pdfsync.pdfFace). pdf.js's text content says only the
+ * family a font falls in; its NAME, which says Arial and bold, is on the font
+ * object pdf.js loads to draw the page, and a page read before it is drawn has
+ * not loaded it yet — so the page's operator list is asked for once, which
+ * loads it (the fonts are the document's, so after its first page this is
+ * rarely needed again). Kept here and not read back off pdf.js later: a PDF
+ * told to put down what it holds (trimPdfs, pdf.cleanup) lets its fonts go.
+ * A font is asked for once: one pdf.js could not load keeps its family alone
+ * rather than have every page after it parsed again for it. `info.faceEpoch`
+ * counts the changes, so a page's placement is worked out again when a face
+ * it was laid out in becomes known.
+ */
+async function noteFaces(info, page, styles) {
+  if (!info.faces) info.faces = new Map();
+  const ids = Object.keys(styles || {}).filter((id) => !info.faces.has(id));
+  if (!ids.length) return;
+  const objs = page.commonObjs;
+  const fontOf = (id) => { try { return objs && objs.has(id) ? objs.get(id) : null; } catch { return null; } };
+  if (ids.some((id) => !fontOf(id))) {
+    const from = performance.now();
+    try { await page.getOperatorList(); } catch { /* the families alone, then */ }
+    facesCost.ms += performance.now() - from;
+    facesCost.pages++;
+  }
+  for (const id of ids) {
+    const font = fontOf(id);
+    const generic = styles[id] && styles[id].fontFamily;
+    info.faces.set(id, { face: PS.pdfFace(font && font.name, generic, font) });
+  }
+  info.faceEpoch = (info.faceEpoch || 0) + 1;
+}
+// What making a page look like its PDF costs, for the console
+// (window.__textReaderFormLook): asking pdf.js for the fonts, planning the
+// pieces (planCells) and placing them (placePages), in ms.
+const facesCost = { ms: 0, pages: 0 };
+const formLook = { plan: 0, planned: 0, place: 0, placed: 0 };
+window.__textReaderFormLook = () => ({ fonts: Object.assign({}, facesCost), plan: formLook.plan, planned: formLook.planned, place: formLook.place, placed: formLook.placed });
+
 /** Said once per page: a page whose text the reader would not read to the end. */
 function sayHugePage(name, pageNo) {
   const k = name + "|" + pageNo;
@@ -17320,6 +17361,8 @@ async function readPdfGridNow(info, pass) {
       noteDoing(pass, `reading the PDF's line grid (page ${i} of ${info.count}, ${info.name})`);
       const page = await pdf.getPage(i);
       const tc = await textItemsOf(page);
+      // The faces its type is set in, beside it (pdfsync.pdfFace).
+      if (!tc.truncated) await noteFaces(info, page, tc.styles);
       // Read and handed straight back: reading a page leaves the worker
       // holding what it parsed to answer, and the reading moving on reads
       // the next ones. A page being DRAWN is left alone: it is holding a
@@ -17341,7 +17384,7 @@ async function readPdfGridNow(info, pass) {
         if (!it.str || !it.transform) continue;
         const t = sz.h - (it.transform[5] + (it.height || 0));
         if (it.str.trim() && t >= 0 && t < top) top = t;
-        items.push({ str: it.str, x: it.transform[4], top: t, w: it.width || 0, h: it.height || 0 });
+        items.push({ str: it.str, x: it.transform[4], top: t, w: it.width || 0, h: it.height || 0, font: it.fontName || null });
       }
       info.lines[i - 1] = isFinite(top) ? top : null;
       info.geoms[i - 1] = PS.pleadingGeometry(items, sz);
@@ -18929,7 +18972,7 @@ function applyMatchedLayoutNow() {
       matchedSlots.add(slot);
       const had = sec.__plan;
       if (had && sz && sec.__planLite === lite) {
-        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, firstY: had.firstY, scale: 1 });
+        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, cells: had.cells, firstY: had.firstY, scale: 1 });
         continue;
       }
       plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
@@ -18938,7 +18981,7 @@ function applyMatchedLayoutNow() {
     const geom = info.geoms[t.page - 1];
     const rows = info.rows[t.page - 1];
     const numbered = !!geom && body.classList.contains("numbered");
-    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null;
+    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null, cells = null;
     // The body type: the DOCUMENT's, so every page of one filing is drawn at
     // one scale and a title page is not sized as though its heading were
     // body text; the page's own where the document has nothing read yet, and
@@ -18964,11 +19007,11 @@ function applyMatchedLayoutNow() {
     // width, its text, its type or its grid does, so a page whose answer is in
     // hand is not worked out again.
     const planKey = [textEpoch, w0, info.name, t.page, base, bodyX, geom ? 1 : 0, rows ? rows.length : -1,
-      settings.lineHeight, settings.font, settings.customFont].join("|");
+      settings.lineHeight, settings.font, settings.customFont, info.faceEpoch || 0].join("|");
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, firstY: info.lines[t.page - 1], scale: 1 });
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, cells: had.cells, firstY: info.lines[t.page - 1], scale: 1 });
       continue;
     }
     if (numbered) {
@@ -19003,52 +19046,66 @@ function applyMatchedLayoutNow() {
       if (lay) {
         tops = lay.positions.map((p) => (p ? p.top : null));
         lefts = lay.positions.map((p) => (p ? p.left : null));
-        // THE EXPORT'S CHARACTER GRID, read back off the PDF (pdfsync.charGrid):
-        // where each line's text begins in characters, against where its row
-        // begins on the page, for the lines whose row begins with the same
-        // word. A page with one — any page whose lines begin anywhere but the
-        // margin — has every line set on it from the grid's own left edge:
-        // its indent, a centred heading, a second column all stand where the
-        // PDF prints them, and a two-column line's right-hand half (whose own
-        // place no row says) on the same column as the lines that are nothing
-        // else. A page without one keeps each line at its row's own left.
-        const firstWord = (t) => (String(t).toLowerCase().match(/[a-z0-9]+/) || [""])[0];
+        // THE EXPORT'S CHARACTER GRID, read back off the PDF (pdfsync.charGrid),
+        // from the pieces of type each line carries (pdfsync.lineItems, by
+        // matchItems): where each begins in the export's characters, against
+        // where it stands on the page. A page with one — any page whose pieces
+        // stand anywhere but the margin — has every line set on it from the
+        // grid's own left edge: its indent, a centred heading, a second column
+        // all stand where the PDF prints them. A page without one keeps each
+        // line at its row's own left. Not a piece a checkbox leads (the export
+        // pads a box's label a character or two off the box) nor one glued to
+        // the text before it: those stand where the export could put them,
+        // not where the PDF does. A box row's text counts, though the export
+        // pads it a character off its bar too: it is most of a form's caption,
+        // and leaving it out left a page of boxes with no grid at all.
+        const cellsFrom = performance.now(); // what finding the pieces, fitting the grid on them and planning them costs
+        const matched = matchItems(lines, texts, lay.rowOf, rows);
         const pairs = [];
-        lay.rowOf.forEach((j, k) => {
-          if (j == null) return;
-          const w = firstWord(texts[k]), rw = firstWord(rows[j].text);
-          if (w && rw === w) pairs.push({ col: texts[k].search(/\S/), x: rows[j].left });
-          // …and where a two-column line's right-hand half begins: a page
-          // whose every line has both halves begins none of them anywhere but
-          // the margin, and gave no grid — its right-hand column drawn wherever
-          // the left-hand text ended. The PDF says where the half begins: the
-          // row's break that prints its first word, or the row itself where
-          // the line was matched to its right-hand half.
-          for (const c of TD.columnCuts(texts[k])) {
-            const cw = firstWord(texts[k].slice(c));
-            if (!cw) continue;
-            if (cw === rw && w !== rw) { pairs.push({ col: c, x: rows[j].left }); continue; }
-            const b = (rows[j].breaks || []).find((x) => x.word === cw);
-            if (b) pairs.push({ col: c, x: b.x });
+        for (const m of matched) {
+          if (!m) continue;
+          for (const g of m.found) {
+            if (g.glued || g.at !== g.start) continue;
+            const col = m.map.fileAt(g.start);
+            if (col >= 0) pairs.push({ col, x: g.x });
           }
-        });
+        }
         charGridFit = PS.charGrid(pairs);
         if (charGridFit) lefts = lefts.map((l) => (l == null ? null : charGridFit.x0));
+        // …and the furthest right the page prints type (its form number, its
+        // page count end at the right margin, where its boxes do): no box's
+        // bar stands more than a character past it (rules.js, ruleGrid's
+        // `reach`) — the fit runs wide at the far side of the page, and a bar
+        // the export's own text pushed out runs further.
+        if (charGridFit) charGridFit.right = Math.max(...rows.flatMap((r) => r.items.map((it) => it.x + it.w)));
         pitch = lay.pitch;
         if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
         sizes = PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base);
-        // A row of a drawn box (rules.js) is a table, not cut into columns,
-        // and draws the spaces it opens with in its first cell at their own
-        // width: it stands that much further in, by what they fall short of
-        // the grid — the bar under a docket number where the PDF draws it.
-        if (charGridFit) {
-          const sp = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--col-sp-n")) || 0.25;
-          lines.forEach((l, k) => {
-            if (lefts[k] == null || !l.classList.contains("rl")) return;
-            const lead = Math.max(0, texts[k].search(/\S/));
-            lefts[k] = charGridFit.x0 + lead * Math.max(0, charGridFit.unit - sp * sizes[k]);
-          });
-        }
+        // EACH PIECE WHERE THE PDF PRINTS IT, in the PDF's own face and size
+        // (planCells): a line is cut wherever one of its row's items begins,
+        // and its first piece is set at its item's own x — the left the line
+        // is drawn from is put where that makes its text begin.
+        cells = planCells(lines, texts, matched, rows, info, sizes);
+        formLook.plan += performance.now() - cellsFrom;
+        formLook.planned++;
+        const sp = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--col-sp-n")) || 0.25;
+        lines.forEach((l, k) => {
+          const c = cells[k];
+          if (lefts[k] == null) return;
+          const lead = Math.max(0, texts[k].search(/\S/));
+          // A row of a drawn box (rules.js) is a table, not cut into columns,
+          // and draws the spaces it opens with in its first cell at their own
+          // width — in its own face: it stands that much further in, by what
+          // they fall short of the grid — the bar under a docket number where
+          // the PDF draws it.
+          if (l.classList.contains("rl")) {
+            const space = c && c.face ? faceSpace(c.face) : sp;
+            if (charGridFit) lefts[k] = charGridFit.x0 + lead * Math.max(0, charGridFit.unit - space * sizes[k]);
+            return;
+          }
+          const first = c && c.places.find(([at]) => at === lead);
+          if (first) lefts[k] = charGridFit ? first[1].x - lead * charGridFit.unit : first[1].x;
+        });
       }
     }
     // Never on top of each other: a row the PDF (a scan's text layer, most
@@ -19087,8 +19144,8 @@ function applyMatchedLayoutNow() {
     matchedSlots.add(slot);
     sec.__planFor = planKey;
     sec.__planLite = lite;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, firstY: info.lines[t.page - 1] };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, firstY: info.lines[t.page - 1], scale: 1 });
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, cells, firstY: info.lines[t.page - 1] };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, cells, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // A page the reel has SHED has no lines to lay and stands at the height it
   // was pinned at (shedMember). Its slot used to fall to the pane's width —
@@ -19174,6 +19231,8 @@ function applyMatchedLayoutNow() {
     const onGrid = !!(p.tops && !p.geom && p.grid);
     const gridCol = onGrid ? (p.grid.unit * p.scale) + "px" : "";
     p.body.classList.toggle("cgrid", onGrid);
+    // …and where that grid stands, for a box's bars to stand on it (rules.js, planStack).
+    p.body.__charGrid = onGrid ? { x0: p.grid.x0 * p.scale, unit: p.grid.unit * p.scale, right: p.grid.right * p.scale } : null;
     p.body.classList.toggle("rowleft", !!(p.tops && !p.geom && !p.grid));
     if (p.body.style.getPropertyValue("--grid-col") !== gridCol) {
       if (gridCol) p.body.style.setProperty("--grid-col", gridCol); else p.body.style.removeProperty("--grid-col");
@@ -19264,6 +19323,10 @@ function applyMatchedLayoutNow() {
   // column's text, the way an over-long line is below and the way pdf.js fits
   // its own text to the page — and only so far (columns.js, fitCells). The
   // reading page and its neighbours only.
+  // …and before that, each piece where its PDF prints it (placePages).
+  const placeFrom = performance.now();
+  placePages(plans, near);
+  formLook.place += performance.now() - placeFrom;
   const cells = [];
   for (const p of plans) {
     if (!p.tops || !near.has(Number(p.sec.dataset.index))) continue;
@@ -19674,6 +19737,186 @@ function columnCaps(bodies) {
   return caps;
 }
 
+// ── each piece of a line where its PDF prints it ──
+//
+// The export is laid out for a model to read; beside its PDF a page is laid
+// out to look like it. Each matched line is cut wherever one of its PDF row's
+// ITEMS begins — a run of type pdf.js reads as one, a new one wherever the form
+// leaves a gap or changes face — and each piece is drawn at its item's own x,
+// at its item's own size and in its item's face: a label the export joins to
+// the text before it with one space stands where the form prints it, the
+// 9-point label the export writes on the line of a 7-point footnote is 9-point,
+// "(date):" is in italics and "REQUEST FOR DISMISSAL" bold. A piece no item
+// claims (PDF-Linker's own notes, a word the run changed) keeps the grid's
+// place. pdfsync.lineItems finds the items, planCells plans the pieces and
+// columns.placeLine sets them; the cells are the column cells (columns.js),
+// wrappers with no data-fake, so nothing a save, a copy, Find or the LEAKS walk
+// reads moves. Pleading paper is laid on its numbers and is left as it was.
+
+/**
+ * The PDF's items each line carries: per line, null for a line no row
+ * claims, else { row, its matched row; map, lineMap's reading of it; found,
+ * pdfsync.lineItems }. Each item of the line's row, and of the rows beside it
+ * no other line was matched to (pdfsync.rowItemsNear), is looked for in what
+ * the line SHOWS (the real names, as the PDF prints them; lineMap carries a
+ * place in it to the file). The char grid is fitted from these and the pieces
+ * are planned from them (planCells).
+ */
+function matchItems(lines, texts, rowOf, rows) {
+  const taken = new Set(rowOf.filter((j) => j != null));
+  return lines.map((l, k) => {
+    const j = rowOf[k];
+    const row = j == null ? null : rows[j];
+    const lt = row ? l.querySelector(":scope > .lt") : null;
+    if (!lt) return null;
+    const map = lineMap(lt);
+    return { row, map, found: PS.lineItems(texts[k], PS.rowItemsNear(rows, j, taken), { atoms: map.atoms }) };
+  });
+}
+/**
+ * The plan: per line, null for a line no row claims, else { text, the line as
+ * the file writes it, which `cuts` are good for; cuts, the file offsets the
+ * PDF's items begin at; places, [[file offset, { x, size, face }]], x and size
+ * in PDF units; face, the face most of its row is set in }. Each item found in
+ * the line (matchItems) gives the piece it begins its x — less the width of a
+ * checkbox the text sets before it, since the PDF draws the box and its item
+ * is the label — its size (the line's own within a fifth of it, typeSizes'
+ * tolerance) and its face. A row of a drawn box is a table and is not cut: it
+ * takes its faces only.
+ */
+function planCells(lines, texts, matched, rows, info, sizes) {
+  const faces = info.faces || new Map();
+  const faceOf = (id) => { const f = id ? faces.get(id) : null; return f ? f.face : null; };
+  return lines.map((l, k) => {
+    const m = matched[k];
+    if (!m) return null;
+    const { row, map, found } = m;
+    const lt = l.querySelector(":scope > .lt");
+    // The line's own face: the one most of what it carries is set in. Not its
+    // row's alone — a box row the export writes as one line can be three of
+    // the PDF's rows, and matched to the one in bold italics.
+    const face = mostFace(found.map((g) => g.item), faceOf) || mostFace(row.items, faceOf);
+    if (l.classList.contains("rl")) return { text: null, cuts: [], places: [], face, cellFaces: boxCellFaces(lt, found, faceOf) };
+    // Only a line the PDF sets in a face of its own (not an OCR layer's over a
+    // scan, pdfsync.pdfFace) is cut into its pieces: an OCR's words stand where
+    // the scan has them, and the scan's type is not a face the reader has.
+    if (!face) return { text: null, cuts: [], places: [], face };
+    const first = texts[k].search(/\S/);
+    // Each piece at its own size — its item's, the line's within a fifth of
+    // it — and the line's here is its ROW's own, not the page's body that
+    // typeSizes takes a row within a fifth of to be (the line's box and the
+    // spacing down the page still are): a piece stands at the PDF's x, and
+    // drawn at a size not the PDF's it is a width not the PDF's either — the
+    // 9-point line of a form whose body is 7.5 came out with gaps between its
+    // pieces.
+    const own = row.height > 0 ? row.height : sizes[k];
+    const cuts = [], places = [];
+    for (const g of found) {
+      const at = g.glued ? -1 : map.fileAt(g.at);
+      if (!(at >= 0)) continue;
+      const f = faceOf(g.item.font);
+      const h = g.item.h > 0 ? g.item.h : own;
+      const size = own > 0 && Math.abs(h - own) <= own * 0.2 ? own : h;
+      const pre = texts[k].slice(g.at, g.start);
+      places.push([at, { x: g.x - (pre ? faceEm(pre, f || face) * size : 0), size, face: f }]);
+      if (g.at > first) cuts.push(at);
+    }
+    return { text: TD.serializeNodes(lt), cuts, places, face };
+  });
+}
+/**
+ * A box row's cells (rules.js, .rc between its bars) each in the face most of
+ * what was found in it is set in — "FOR COURT USE ONLY" in its bold italics
+ * beside a cell of plain labels — by the cell's place among the row's cells;
+ * null for a cell nothing was found in.
+ */
+function boxCellFaces(lt, found, faceOf) {
+  const out = [];
+  let at = 0;
+  for (const c of lt.children) {
+    const len = c.textContent.length;
+    if (c.classList.contains("rc")) out.push(mostFace(found.filter((g) => g.start >= at && g.start < at + len).map((g) => g.item), faceOf));
+    at += len;
+  }
+  return out;
+}
+/** The face most of a row's characters are set in (null where none is known). */
+function mostFace(items, faceOf) {
+  const counts = new Map();
+  let best = null, most = 0;
+  for (const it of items || []) {
+    const f = faceOf(it.font);
+    if (!f) continue;
+    const key = PS.faceKey(f);
+    const n = (counts.get(key) || 0) + String(it.str).trim().length;
+    counts.set(key, n);
+    if (n > most) { most = n; best = f; }
+  }
+  return best;
+}
+const sameCuts = (a, b) => a.length === b.length && a.every((c, i) => c === b[i]);
+/** A page's columns cut again, the caret kept at its place in the text (the cells are wrappers). */
+function recutKeepingCaret(body) {
+  const at = caretOffsetIn(body);
+  if (dressColumns(body) && at >= 0) { const pt = pointAtOffset(body, at); if (pt) placeCaret(pt.node, pt.offset); }
+}
+/**
+ * …and written, on the pages near the reading (fitCells' pages, which it
+ * runs before): each line cut where the plan says (`__grid`, which
+ * dressColumns honours while the line is the text it was planned for) and its
+ * pieces set (columns.placeLine). A piece the PDF did not place stands where
+ * the grid put it: on the export's own grid read off the PDF (.cgrid), at its
+ * column; on a page without one, the reader's grid on from the piece before.
+ * A page that has left the grid has all of it taken back (unplacePage).
+ */
+function placePages(plans, near) {
+  const colN = parseFloat(document.documentElement.style.getPropertyValue("--col-n")) || 0.5;
+  for (const p of plans) {
+    if (!p.tops || !p.cells || !p.lefts) { if (p.body.__placed) unplacePage(p.body); continue; }
+    if (!near.has(Number(p.sec.dataset.index))) continue;
+    let recut = false;
+    // A page an input method is composing on keeps its cuts until it is done:
+    // cutting it again would take the text node being composed out from under
+    // it (recolumnSoon waits the same way). The pass after picks it up.
+    if (p.body !== composingIn) p.lines.forEach((l, k) => {
+      const lt = l.querySelector(":scope > .lt");
+      const c = p.cells[k];
+      const want = c && c.text != null && c.cuts.length ? c : null;
+      const had = lt && lt.__grid;
+      if (!lt || (want ? had && had.text === want.text && sameCuts(had.cuts, want.cuts) : !had)) return;
+      lt.__grid = want ? { text: want.text, cuts: want.cuts } : null;
+      recut = true;
+    });
+    if (recut) recutKeepingCaret(p.body);
+    const s = p.scale, grid = p.grid;
+    const at = grid ? (a) => (grid.x0 + a * grid.unit) * s : (a, x, from) => x + (a - from) * colN * p.base * s;
+    p.lines.forEach((l, k) => {
+      const lt = l.querySelector(":scope > .lt");
+      const c = p.cells[k];
+      if (!lt) return;
+      if (!c || p.lefts[k] == null) { if (lt.__placed) unplaceLine(lt); return; }
+      const lead = Math.max(0, l.textContent.search(/\S/));
+      const places = new Map(c.places.map(([a, v]) => [a, { x: v.x * s, size: v.size * s, face: v.face }]));
+      const start = (grid ? p.lefts[k] + lead * grid.unit : p.lefts[k]) * s;
+      placeLine(lt, { places, start, at, face: c.face, size: p.sizes[k] * s, lead, cellFaces: c.cellFaces || null });
+    });
+    p.body.__placed = true;
+    formLook.placed++;
+  }
+}
+// The page an input method is composing on, while it is (placePages).
+let composingIn = null;
+pagesEl.addEventListener("compositionstart", (e) => { composingIn = e.target && e.target.closest ? e.target.closest(".page-body") : null; });
+pagesEl.addEventListener("compositionend", () => { composingIn = null; });
+/** Everything placePages wrote, taken back off a page: its lines cut as the export alone cuts them. */
+function unplacePage(body) {
+  let recut = false;
+  for (const lt of body.querySelectorAll(":scope > .line > .lt")) if (unplaceLine(lt)) recut = true;
+  // (Mid-composition the page is cut again when the typing settles: recolumnSoon.)
+  if (recut && body !== composingIn) recutKeepingCaret(body);
+  body.__placed = false;
+}
+
 /** A slot back as the pane built it: the levelling and the held-open box go. */
 function unlevelSlot(el) {
   const lab = el.querySelector(".page-label");
@@ -19694,7 +19937,9 @@ function clearMatched(sec) {
   if (inner) inner.style.height = "";
   const body = sec.querySelector(".page-body");
   if (!body) return; // shed: there are no lines left to un-lay
+  if (body.__placed) unplacePage(body); // the PDF's own cuts, places and faces (placePages)
   body.classList.remove("fixed", "cgrid", "rowleft");
+  body.__charGrid = null;
   body.style.paddingTop = "";
   body.style.removeProperty("--grid-em");
   body.style.removeProperty("--grid-col");

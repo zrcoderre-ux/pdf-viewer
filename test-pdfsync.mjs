@@ -6,7 +6,7 @@ import {
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft,
   matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
-  offGridTops, holdWithin,
+  offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -216,7 +216,10 @@ console.log("a row's own type: one tall glyph does not set the line's size or pl
   check("a line set wholly in a display size keeps it, the margin's number beside it and all",
     pdfRows([{ str: "ORDER", x: 200, top: 60, w: 90, h: 24 }, { str: "1", x: 40, top: 72, w: 4, h: 12 }], null).map((r) => [r.text, r.top, r.height]),
     [["1 ORDER", 60, 24]]);
-  check("a row of one item is that item's, whatever size it is", pdfRows([{ str: "x", x: 10, top: 20, w: 4, h: 30 }], null), [{ top: 20, left: 10, height: 30, text: "x" }]);
+  // …and carries the item itself, for a line laid on it to set each of its
+  // pieces where the PDF prints it (lineItems).
+  check("a row of one item is that item's, whatever size it is", pdfRows([{ str: "x", x: 10, top: 20, w: 4, h: 30 }], null),
+    [{ top: 20, left: 10, height: 30, text: "x", items: [{ str: "x", x: 10, w: 4, h: 30, base: 50, font: null }] }]);
   check("no items, no rows", [pdfRows([], null), pdfRows(null, null)], [[], []]);
   // A two-column page: the left-hand column's line and the right-hand one's
   // beside it, three points apart and a gutter away — two rows, as the export
@@ -233,15 +236,88 @@ console.log("a row's own type: one tall glyph does not set the line's size or pl
     pdfRows([{ str: "Id.", x: 54, top: 100, w: 12, h: 9.5 }, { str: "1", x: 66.5, top: 100.5, w: 3, h: 6 }], null).map((r) => r.text), ["Id. 1"]);
   check("a second column on the same baseline stays in the row",
     pdfRows([{ str: "JANE DOE,", x: 90, top: 300, w: 60, h: 12 }, { str: "Case No.: 25STCV12345", x: 330, top: 300, w: 120, h: 12 }], null).map((r) => r.text), ["JANE DOE, Case No.: 25STCV12345"]);
-  // …and the row says where it begins: a page whose every line has both
-  // halves has its grid read off them (text-reader.js, charGrid's pairs).
-  check("…and the row says where that column begins, and the word it begins with",
-    pdfRows([{ str: "JANE DOE,", x: 90, top: 300, w: 60, h: 12 }, { str: "Case No.: 25STCV12345", x: 330, top: 300, w: 120, h: 12 }], null)[0].breaks,
-    [{ x: 330, word: "case" }]);
-  check("words a space apart are no column",
-    pdfRows([{ str: "JANE", x: 90, top: 300, w: 30, h: 12 }, { str: "DOE,", x: 123, top: 300, w: 30, h: 12 }], null)[0].breaks, undefined);
-  check("…nor an item clear of the one before it but not of a longer one that began first",
-    pdfRows([{ str: "A line that runs on", x: 90, top: 300, w: 300, h: 12 }, { str: "x", x: 100, top: 300, w: 5, h: 12 }, { str: "Next", x: 400, top: 300, w: 30, h: 12 }], null)[0].breaks, undefined);
+  // …and the row keeps its items, so a line laid on it finds where that
+  // column begins — the item that prints it — and a page whose every line has
+  // both halves has its grid read off them (text-reader.js, charGrid's pairs).
+  const halves = pdfRows([{ str: "JANE DOE,", x: 90, top: 300, w: 60, h: 12 }, { str: "Case No.: 25STCV12345", x: 330, top: 300, w: 120, h: 12 }], null)[0];
+  const line = "JANE DOE," + " ".repeat(48) + "Case No.: 25STCV12345";
+  check("…and keeps its items, so a line laid on it finds where that column begins",
+    lineItems(line, halves.items).map((g) => [g.at, g.x]), [[0, 90], [57, 330]]);
+}
+
+console.log("each piece of a line where the PDF prints it");
+{
+  // A form's signature block, as a Judicial Council form prints it: the
+  // footnote in 7-point and, on its baseline, the 9-point label of the party
+  // boxes; then the footnote's next line, and the boxes' labels a row of their
+  // own two points lower. The export writes each footnote line with what
+  // stands beside it, joined by a space or a few.
+  const items = [
+    { str: "* If dismissal requested is of specified parties only,", x: 36, top: 482, w: 170, h: 7, font: "f1" },
+    { str: "Attorney or party without attorney for", x: 353.6, top: 480, w: 145.6, h: 9, font: "f1" },
+    { str: "or of specified cross-complaints only,", x: 36, top: 490.7, w: 120, h: 7, font: "f1" },
+    { str: "Plaintiff/Petitioner", x: 377, top: 491.2, w: 70, h: 9, font: "f1" },
+    { str: "Defendant/Respondent", x: 483.6, top: 491.2, w: 92.6, h: 9, font: "f2" },
+  ];
+  const rows = pdfRows(items, { w: 612, h: 792 });
+  check("the label on the footnote's baseline is in its row; the boxes' labels are a row of their own",
+    rows.map((r) => r.items.map((i) => i.str.slice(0, 9))), [["* If dism", "Attorney "], ["or of spe"], ["Plaintiff", "Defendant"]]);
+  const near = (j, taken) => rowItemsNear(rows, j, new Set(taken)).map((c) => [c.it.str.slice(0, 9), c.own]);
+  check("a line takes its row's items and those of a row beside it no line has",
+    near(1, [0, 1]), [["or of spe", true], ["Plaintiff", false], ["Defendant", false]]);
+  check("…but not a row another line was matched to", near(1, [0, 1, 2]), [["or of spe", true]]);
+  check("…nor an item standing over one of its own across the page (a line above or below)",
+    rowItemsNear([{ top: 0, height: 9, items: [{ str: "a", x: 10, w: 100, h: 9 }] }, { top: 4, height: 9, items: [{ str: "b", x: 50, w: 20, h: 9 }, { str: "c", x: 200, w: 20, h: 9 }] }], 0).map((c) => c.it.str), ["a", "c"]);
+  const L0 = "* If dismissal requested is of specified parties only, Attorney or party without attorney for";
+  const got0 = lineItems(L0, rowItemsNear(rows, 0, new Set([0, 1])));
+  check("each item is found where it begins in the line, at its own x — the label after ONE space a piece of its own",
+    got0.map((g) => [g.at, g.x, g.item.h]), [[0, 36, 7], [L0.indexOf("Attorney"), 353.6, 9]]);
+  const L1 = "or of specified cross-complaints only,    [   ] Plaintiff/Petitioner [   ] Defendant/Respondent";
+  const got1 = lineItems(L1, rowItemsNear(rows, 1, new Set([0, 1])));
+  check("a box before a label goes with it: its piece begins at the box, its item at the word",
+    got1.map((g) => [L1.slice(g.at, g.at + 5), L1.slice(g.start, g.start + 5), g.x]), [["or of", "or of", 36], ["[   ]", "Plain", 377], ["[   ]", "Defen", 483.6]]);
+  // Items that open alike are told apart by order; an item's own "(" is where
+  // it begins; a superscript glued to its word begins no piece.
+  const form = [
+    { str: "Cross-complaint filed", x: 108, w: 84, h: 9 }, { str: "on", x: 194, w: 10, h: 9 }, { str: "(date):", x: 206.6, w: 26, h: 9 },
+    { str: "Cross-complaint filed", x: 300, w: 84, h: 9 }, { str: "by", x: 386, w: 9.5, h: 9 }, { str: "(name):", x: 398, w: 31, h: 9 },
+  ];
+  const line = "Cross-complaint filed on (date):   Cross-complaint filed by (name):";
+  check("two items opening alike are found in order, each by its first words",
+    lineItems(line, form).map((g) => [g.at, g.x]), [[0, 108], [22, 194], [25, 206.6], [35, 300], [57, 386], [60, 398]]);
+  check("a superscript glued to its word is found but begins no piece",
+    lineItems("Consent is hereby given.1", [{ str: "Consent is hereby given.", x: 50, w: 100, h: 9 }, { str: "1", x: 150, w: 3, h: 6 }]).map((g) => [g.at, !!g.glued]),
+    [[0, false], [24, true]]);
+  check("…and nothing begins inside a pseudonym",
+    lineItems("Served on Pat Doe Smith today", [{ str: "Served on Pat", x: 10, w: 60, h: 9 }, { str: "Doe Smith today", x: 75, w: 60, h: 9 }], { atoms: [[10, 23]] }).map((g) => !!g.glued),
+    [false, true]);
+  check("an item of a row beside the line is taken only on four letters or more",
+    lineItems("signed by me", [{ it: { str: "signed", x: 10, w: 30, h: 9 }, own: true }, { it: { str: "by", x: 60, w: 9, h: 9 }, own: false }]).length, 1);
+  check("an item whose words the line does not carry is not found", lineItems("Plaintiff's motion", [{ str: "Exhibit A", x: 10, w: 40, h: 9 }]), []);
+  check("an item read in proportion where what it prints before its word is not in the line",
+    lineItems("dismissal", [{ str: "* dismissal", x: 100, w: 44, h: 9 }]).map((g) => g.x), [108]);
+}
+
+console.log("the PDF's own typeface");
+{
+  const SANS = 'Arial, Helvetica, "Liberation Sans", Arimo, "Nimbus Sans", sans-serif';
+  const SERIF = '"Times New Roman", Times, "Liberation Serif", Tinos, "Nimbus Roman", serif';
+  check("a subset Arial, bold", pdfFace("QZRSCC+Arial-BoldMT", "sans-serif"), { family: SANS, bold: true, italic: false });
+  check("…italic", pdfFace("JRFCIQ+Arial-ItalicMT", "sans-serif"), { family: SANS, bold: false, italic: true });
+  check("Times, bold italic", pdfFace("TimesNewRomanPS-BoldItalicMT", "serif"), { family: SERIF, bold: true, italic: true });
+  check("Helvetica's oblique is its italic", pdfFace("Helvetica-Oblique", "sans-serif").italic, true);
+  check("an Adobe face's short italic, and a family the stacks do not name, in pdf.js's family",
+    pdfFace("ABCDEF+MyriadPro-BoldIt", "sans-serif"), { family: SANS, bold: true, italic: true });
+  check("a face the machine may have goes first, its family behind it",
+    [pdfFace("CenturySchoolbook", "sans-serif").family, pdfFace("Calibri,Bold", "sans-serif").family],
+    ['"Century Schoolbook", "TeX Gyre Schola", ' + SERIF, "Calibri, Carlito, " + SANS]);
+  check("a font not loaded yet: its family alone", pdfFace("", "monospace"),
+    { family: '"Courier New", Courier, "Liberation Mono", Cousine, "Nimbus Mono PS", monospace', bold: false, italic: false });
+  check("what pdf.js read of a system font counts", pdfFace("F1", "serif", { bold: true }).bold, true);
+  check("no face for a symbol font, an OCR layer's or a Type 3 font",
+    [pdfFace("ZapfDingbats", "serif"), pdfFace("GlyphLessFont", "sans-serif"), pdfFace("T3Font_0", "sans-serif"), pdfFace("F7", "sans-serif", { isType3Font: true })],
+    [null, null, null, null]);
+  check("one face, one key", [faceKey(pdfFace("Arial-BoldMT", "sans-serif")) === faceKey(pdfFace("XYZABC+Arial,Bold", "serif")), faceKey(null)], [true, ""]);
 }
 
 console.log("the type a page is set in: the PDF's own sizes at the reading size");

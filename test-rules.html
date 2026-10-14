@@ -30,6 +30,10 @@
     <div class="page-body" id="flow"></div></div></section>
   <section class="tpage" data-index="2" style="--reader-size-eff:16px"><div class="page-inner" style="height:auto">
     <div class="page-body numbered" id="caption"></div></div></section>
+  <section class="tpage matched" data-index="3"><div class="page-inner" style="height:200px">
+    <div class="page-body fixed cgrid" id="grid"></div></div></section>
+  <section class="tpage matched" data-index="4"><div class="page-inner" style="height:200px">
+    <div class="page-body fixed cgrid" id="grid2" style="width:600px"></div></div></section>
 </div></div>
 <script type="module">
 import { dressLines, fitRuleRows } from "./viewer/rules.js";
@@ -215,6 +219,126 @@ const textX = (el) => {
   check("a rule the export indents starts that far in", rule.classList.contains("hf") && Math.abs(pad - 16 * unit) <= 1, `${rule.className} ${r1(pad)} vs ${r1(16 * unit)}`);
   const under = lines.slice(12, 14).map((l) => Math.round(l.querySelector(".rb").getBoundingClientRect().left));
   check("…and the bar of the row under it, its own table, stands under the rule's", same(under), under.join(" "));
+}
+// Side by side on the export's own grid read back off the PDF (.cgrid; the
+// reader writes it on the body as __charGrid), a box is the PDF's box: each
+// bar where the grid puts the column the export sets it at, x0 + column ×
+// unit, however little of the box its text fills. And a row set larger, in
+// bold (CIV-110's notice under its caption), whose text fits the grid but
+// whose closing spaces at that size do not, keeps its bar on the PDF's rule —
+// the spaces run on unseen (a fixed table, .gridfit).
+{
+  out.push("on the export's grid read off the PDF:");
+  const body = document.getElementById("grid");
+  const rows = [
+    "     ┌" + "─".repeat(20) + "┬" + "─".repeat(20) + "┐",
+    "     │ NAME:" + " ".repeat(14) + "│ CASE NUMBER:" + " ".repeat(7) + "│",
+    "     │ A conformed copy will not be returned   │",
+    "     └" + "─".repeat(41) + "┘",
+  ];
+  const size = [11, 11, 14, 11];
+  const ctx = document.createElement("canvas").getContext("2d");
+  const font = getComputedStyle(body).fontFamily;
+  ctx.font = `700 14px ${font}`;
+  const text = ctx.measureText(" A conformed copy will not be returned").width, spaces = ctx.measureText("   ").width;
+  const x0 = 30, unit = (text + 0.7 * spaces) / 42;
+  body.__charGrid = { x0, unit };
+  rows.forEach((t, k) => {
+    const line = document.createElement("div");
+    line.className = "line";
+    const lt = document.createElement("span");
+    lt.className = "lt";
+    lt.textContent = t;
+    if (k === 2) lt.style.fontWeight = "700";
+    line.appendChild(lt);
+    body.appendChild(line);
+    ctx.font = `${size[k]}px ${font}`;
+    // Laid as applyMatchedLayout lays a box row on the grid: its five
+    // opening spaces, drawn at their own width, end where the grid's five do.
+    const left = x0 + 5 * unit - ctx.measureText("     ").width;
+    const top = 10 + k * 20;
+    line.style.cssText = `top:${top}px;left:${left}px;font-size:${size[k]}px;line-height:${size[k] + 4}px`;
+    line.__laid = `${top}|${left}|${size[k]}|${size[k] + 4}`;
+  });
+  dressLines(body);
+  dressColumns(body);
+  fitRuleRows(body);
+  const at = (o) => body.getBoundingClientRect().left + x0 + o * unit;
+  const bars = rowsOf("grid").map((r) => r.bars);
+  check("every row's first bar stands at its column's place on the grid", bars.every((b) => Math.abs(b[0] - at(5)) <= 1.5), bars.map((b) => b[0]).join(" ") + " vs " + r1(at(5)));
+  check("…the caption's inner bar at its", bars.slice(0, 2).every((b) => Math.abs(b[1] - at(26)) <= 2), bars.slice(0, 2).map((b) => b[1]).join(" ") + " vs " + r1(at(26)));
+  check("…and every row's last bar at the box's right edge, the larger bold row too", bars.every((b) => Math.abs(b[b.length - 1] - at(47)) <= 3), bars.map((b) => b[b.length - 1]).join(" ") + " vs " + r1(at(47)));
+  const notice = body.querySelectorAll(".line")[2];
+  check("…its closing spaces running on unseen, the row a fixed table the width of its cells", notice.classList.contains("gridfit") && !!notice.style.width, notice.className + " " + notice.style.width);
+  // Off that grid the box is the cells' own again, as it was.
+  body.classList.remove("cgrid");
+  fitRuleRows(body);
+  const off = rowsOf("grid").map((r) => r.bars);
+  check("off the PDF's grid, the box is its cells' own again (the bold row's spaces push its bar)", off[2][1] > bars[2][1] + 1.5 && !notice.classList.contains("gridfit") && !notice.style.width, `${off[2][1]} vs ${bars[2][1]} ${notice.className}`);
+}
+// SUM-100's top: a box at the right margin (the court's, bars at 30 and 47)
+// beside the caption's labels, and a notice under it the width of the page (5
+// and 47, its top rule meeting the court box's foot at 30). Each row's first
+// bar stands at ITS column, not at one lead every row shares — which stood
+// the notice's left side under the court box's. The page's type (its form
+// number, its page count) ends two characters short of where the grid puts
+// column 47 — as SUM-100's does, its export having widened the box for the
+// notice's small type — and the box ends where the type does. Then the same
+// rows with no record of where they were laid — every one slid back into its
+// indent before its box was fitted, as the layout does a box at the right
+// margin it finds running past the sheet (MC-011's TOTAL boxes) — squared up
+// on the grid all the same.
+{
+  out.push("two boxes in one stack, on the grid:");
+  const body = document.getElementById("grid2");
+  const rows = [
+    "LABEL:" + " ".repeat(24) + "┌" + "─".repeat(16) + "┐",
+    "MORE:" + " ".repeat(25) + "│" + cell(" FOR COURT USE", 16) + "│",
+    "     ┌" + "─".repeat(24) + "┴" + "─".repeat(16) + "┤",
+    "     │" + cell(" You have been sued. Read the notice.", 41) + "│",
+    "     └" + "─".repeat(41) + "┘",
+  ];
+  const ctx = document.createElement("canvas").getContext("2d");
+  const font = getComputedStyle(body).fontFamily;
+  ctx.font = `11px ${font}`;
+  const x0 = 30, unit = 7, right = x0 + 45 * unit;
+  body.__charGrid = { x0, unit, right };
+  const laidAt = [];
+  rows.forEach((t, k) => {
+    const line = document.createElement("div");
+    line.className = "line";
+    const lt = document.createElement("span");
+    lt.className = "lt";
+    lt.textContent = t;
+    line.appendChild(lt);
+    body.appendChild(line);
+    const lead = t.search(/\S/);
+    const left = x0 + lead * unit - ctx.measureText(" ".repeat(lead)).width;
+    const top = 10 + k * 15;
+    laidAt.push(left);
+    line.style.cssText = `top:${top}px;left:${left}px;font-size:11px;line-height:15px`;
+    line.__laid = `${top}|${left}|11|15`;
+  });
+  dressLines(body);
+  dressColumns(body);
+  fitRuleRows(body);
+  const b0 = body.getBoundingClientRect().left;
+  const at = (o) => b0 + x0 + o * unit;
+  const bars = rowsOf("grid2").map((r) => r.bars);
+  check("the court box's rows stand their first bar at its column, 30", bars.slice(0, 2).every((b) => Math.abs(b[0] - at(30)) <= 1.5), bars.slice(0, 2).map((b) => b[0]).join(" ") + " vs " + r1(at(30)));
+  check("…the notice's rows theirs at 5, not under the court box's", bars.slice(2).every((b) => Math.abs(b[0] - at(5)) <= 1.5), bars.slice(2).map((b) => b[0]).join(" ") + " vs " + r1(at(5)));
+  check("…the notice's top rule meeting the court box's foot at 30", Math.abs(bars[2][1] - at(30)) <= 2, bars[2][1] + " vs " + r1(at(30)));
+  check("every row's last bar ends where the page's type does, not two characters on where the grid runs", bars.every((b) => Math.abs(b[b.length - 1] - (b0 + right)) <= 3), bars.map((b) => b[b.length - 1]).join(" ") + " vs " + r1(b0 + right));
+  // …and with no record of where any row was laid, each slid back from it.
+  const lines = [...body.querySelectorAll(".line")];
+  lines.forEach((line, k) => { line.__laid = null; line.style.left = Math.max(0, laidAt[k] - 12 - 3 * k) + "px"; line.style.width = ""; });
+  fitRuleRows(body);
+  const slid = rowsOf("grid2").map((r) => r.bars);
+  check("rows that all gave up their record still make one box on the grid: one left for every row",
+    same(lines.map((l) => parseFloat(l.style.left))), lines.map((l) => l.style.left).join(" "));
+  check("…and every bar where it stood when the rows were laid", slid.every((b, k) => b.length === bars[k].length && b.every((x, i) => Math.abs(x - bars[k][i]) <= 1.5)), JSON.stringify(slid) + " vs " + JSON.stringify(bars));
+  check("…each row as tall as the gap to the next, its top the one it was laid at, so the box's sides meet",
+    lines.slice(0, -1).every((l) => l.style.height === "15px"), lines.map((l) => l.style.height || "-").join(" "));
 }
 out.push("", `${"=".repeat(52)}`, `FAILURES: ${fails}`);
 document.getElementById("report").innerHTML = out.join("\n");
