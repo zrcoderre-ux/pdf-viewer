@@ -18975,7 +18975,7 @@ function applyMatchedLayoutNow() {
       matchedSlots.add(slot);
       const had = sec.__plan;
       if (had && sz && sec.__planLite === lite) {
-        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, cells: had.cells, firstY: had.firstY, scale: 1 });
+        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, type: had.type, cells: had.cells, firstY: had.firstY, scale: 1 });
         continue;
       }
       plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
@@ -18984,7 +18984,7 @@ function applyMatchedLayoutNow() {
     const geom = info.geoms[t.page - 1];
     const rows = info.rows[t.page - 1];
     const numbered = !!geom && body.classList.contains("numbered");
-    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null, cells = null;
+    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null, cells = null, typeBox = null;
     // The body type: the DOCUMENT's, so every page of one filing is drawn at
     // one scale and a title page is not sized as though its heading were
     // body text; the page's own where the document has nothing read yet, and
@@ -19014,7 +19014,7 @@ function applyMatchedLayoutNow() {
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, cells: had.cells, firstY: info.lines[t.page - 1], scale: 1 });
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, type: had.type, cells: had.cells, firstY: info.lines[t.page - 1], scale: 1 });
       continue;
     }
     if (numbered) {
@@ -19077,10 +19077,14 @@ function applyMatchedLayoutNow() {
         if (charGridFit) lefts = lefts.map((l) => (l == null ? null : charGridFit.x0));
         // …and the furthest right the page prints type (its form number, its
         // page count end at the right margin, where its boxes do): no box's
-        // bar stands more than a character past it (rules.js, ruleGrid's
+        // bar stands more than a character past it (rules.js, pageGrid's
         // `reach`) — the fit runs wide at the far side of the page, and a bar
         // the export's own text pushed out runs further.
         if (charGridFit) charGridFit.right = Math.max(...rows.flatMap((r) => r.items.map((it) => it.x + it.w)));
+        // …and on a page the grid could not be read off, where its type runs
+        // from and to: a box's rules are set across that (rules.js), as the
+        // export set them across the page it was read from.
+        else typeBox = { left: Math.min(...rows.map((r) => r.left)), right: Math.max(...rows.flatMap((r) => r.items.map((it) => it.x + it.w))) };
         pitch = lay.pitch;
         if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
         sizes = PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base);
@@ -19147,8 +19151,8 @@ function applyMatchedLayoutNow() {
     matchedSlots.add(slot);
     sec.__planFor = planKey;
     sec.__planLite = lite;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, cells, firstY: info.lines[t.page - 1] };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, cells, firstY: info.lines[t.page - 1], scale: 1 });
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, type: typeBox, cells, firstY: info.lines[t.page - 1] };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, type: typeBox, cells, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // A page the reel has SHED has no lines to lay and stands at the height it
   // was pinned at (shedMember). Its slot used to fall to the pane's width —
@@ -19234,8 +19238,10 @@ function applyMatchedLayoutNow() {
     const onGrid = !!(p.tops && !p.geom && p.grid);
     const gridCol = onGrid ? (p.grid.unit * p.scale) + "px" : "";
     p.body.classList.toggle("cgrid", onGrid);
-    // …and where that grid stands, for a box's bars to stand on it (rules.js, planStack).
+    // …and where that grid stands, for a page's rules to stand on it (rules.js, readPage).
     p.body.__charGrid = onGrid ? { x0: p.grid.x0 * p.scale, unit: p.grid.unit * p.scale, right: p.grid.right * p.scale } : null;
+    // …or, on a page with no such grid, where its type stands across the sheet.
+    p.body.__typeBox = p.tops && !p.geom && !p.grid && p.type && p.type.right > p.type.left ? { left: p.type.left * p.scale, right: p.type.right * p.scale } : null;
     p.body.classList.toggle("rowleft", !!(p.tops && !p.geom && !p.grid));
     if (p.body.style.getPropertyValue("--grid-col") !== gridCol) {
       if (gridCol) p.body.style.setProperty("--grid-col", gridCol); else p.body.style.removeProperty("--grid-col");
@@ -19359,7 +19365,9 @@ function applyMatchedLayoutNow() {
       const floor = p.bodyX > 0 ? p.bodyX * p.scale : 0;
       if (left - floor < 1) return; // already at the margin: nothing to give
       const lt = l.querySelector(":scope > .lt");
-      if (lt) spill.push({ l, lt, left, floor });
+      // A rule is set on its page's grid (rules.js), not slid: it has no
+      // indent to give, and its runs are drawn where the grid puts them.
+      if (lt && !l.classList.contains("rl") && !l.classList.contains("rr") && !lt.classList.contains("rg")) spill.push({ l, lt, left, floor });
     });
   }
   if (spill.length) {
@@ -19389,7 +19397,7 @@ function applyMatchedLayoutNow() {
     for (const l of p.lines) {
       if (l.classList.contains("rl")) continue; // a ruled box is squared up by fitRuleRows
       const lt = l.querySelector(":scope > .lt");
-      if (lt) squeeze.push({ lt });
+      if (lt && !l.classList.contains("rr") && !lt.classList.contains("rg")) squeeze.push({ lt }); // …and a line of rules alone is set on its grid
     }
   }
   for (const x of squeeze) x.fit = x.lt.clientWidth > 0 && x.lt.scrollWidth > x.lt.clientWidth + 0.5 ? x.lt.clientWidth / x.lt.scrollWidth : 1;
@@ -19716,8 +19724,10 @@ function shapePages({ all = false } = {}) {
   });
   // A box too wide for its paper is drawn to fit it (rules.js), and it was
   // fitted at the type its page had before this: fitted again at the type the
-  // page has now, so it still ends at the margin.
-  const boxed = measure.filter((s) => s.sec.querySelector(".line.rl")).map((s) => s.sec);
+  // page has now, so it still ends at the margin. A page's rules are set on
+  // its grid, which is its type's: a page with a line of rules alone and no
+  // box is set again too.
+  const boxed = measure.filter((s) => s.sec.querySelector(".line.rl, .line.rr, .line > .lt.rg")).map((s) => s.sec);
   if (boxed.length) fitRuleRows(boxed);
 }
 
@@ -19943,6 +19953,7 @@ function clearMatched(sec) {
   if (body.__placed) unplacePage(body); // the PDF's own cuts, places and faces (placePages)
   body.classList.remove("fixed", "cgrid", "rowleft");
   body.__charGrid = null;
+  body.__typeBox = null;
   body.style.paddingTop = "";
   body.style.removeProperty("--grid-em");
   body.style.removeProperty("--grid-col");

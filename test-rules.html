@@ -177,13 +177,17 @@ for (const [id, name] of [["laid", "side by side, on the PDF's grid"], ["flow", 
     check("the sheet keeps the paper's width", Math.abs(sec.getBoundingClientRect().width - 816) <= 1 && !sec.style.width, `${sec.getBoundingClientRect().width} "${sec.style.width}"`);
     check("the box is drawn smaller than the reading size", parseFloat(body.querySelector(".line.rl > .lt").style.fontSize) < 100, body.querySelector(".line.rl > .lt").style.fontSize);
     check("…and ends at the page's right margin", right <= margin + 1 && right >= margin - 4, `${right} vs ${margin}`);
-    // Its rows open with five spaces, which the grid sets in five of its
-    // characters (indentBoxRow) — and drawn smaller, by as much less.
+    // Its rows open with five spaces, so its left side stands five of the
+    // page's grid characters in from the margin — the grid tightened first,
+    // as far as it gives, and drawn smaller with the type past that.
     const lt = body.querySelector(".line.rl > .lt");
     const f = parseFloat(lt.style.fontSize) / 100;
-    const pad = parseFloat(getComputedStyle(lt.firstElementChild).paddingLeft);
     const unit = cw.char * parseFloat(getComputedStyle(body).fontSize);
-    check("…its indent drawn smaller with it", Math.abs(pad - 5 * unit * f) <= 0.5, `${r1(pad)} vs ${r1(5 * unit * f)} (×${f})`);
+    const set = body.__rules || {};
+    const from = body.getBoundingClientRect().left + parseFloat(getComputedStyle(body).paddingLeft);
+    const in5 = rows[0].bars[0] - from;
+    check("…its grid tightened before its type was drawn smaller, and near as far as it gives", set.g >= 0.5 && set.g < 0.6 && f < 1 && Math.abs(set.unit - unit * f * set.g) <= 0.01, JSON.stringify(set) + ` vs ${r1(unit)} ×${f}`);
+    check("…its indent with them", Math.abs(in5 - 5 * set.unit) <= 1, `${r1(in5)} vs ${r1(5 * set.unit)}`);
   }
 }
 
@@ -215,8 +219,8 @@ const textX = (el) => {
   const bars = lines.slice(0, 9).map((l) => Math.round(l.querySelector(".rb").getBoundingClientRect().left));
   check("the caption's bar stands in one column down every row, the unnumbered one too", same(bars), bars.join(" "));
   const rule = firstCell(12);
-  const pad = parseFloat(getComputedStyle(rule).paddingLeft);
-  check("a rule the export indents starts that far in", rule.classList.contains("hf") && Math.abs(pad - 16 * unit) <= 1, `${rule.className} ${r1(pad)} vs ${r1(16 * unit)}`);
+  const ruleFrom = parseFloat(rule.style.backgroundPosition) || 0; // the run's own start in its cell (rules.js, drawRuns)
+  check("a rule the export indents starts that far in", rule.classList.contains("rg") && Math.abs(ruleFrom - 16 * unit) <= 1, `${rule.className} ${r1(ruleFrom)} vs ${r1(16 * unit)}`);
   const under = lines.slice(12, 14).map((l) => Math.round(l.querySelector(".rb").getBoundingClientRect().left));
   check("…and the bar of the row under it, its own table, stands under the rule's", same(under), under.join(" "));
 }
@@ -226,7 +230,7 @@ const textX = (el) => {
 // unit, however little of the box its text fills. And a row set larger, in
 // bold (CIV-110's notice under its caption), whose text fits the grid but
 // whose closing spaces at that size do not, keeps its bar on the PDF's rule —
-// the spaces run on unseen (a fixed table, .gridfit).
+// the spaces run on unseen (a fixed table, .fit).
 {
   out.push("on the export's grid read off the PDF:");
   const body = document.getElementById("grid");
@@ -240,8 +244,11 @@ const textX = (el) => {
   const ctx = document.createElement("canvas").getContext("2d");
   const font = getComputedStyle(body).fontFamily;
   ctx.font = `700 14px ${font}`;
-  const text = ctx.measureText(" A conformed copy will not be returned").width, spaces = ctx.measureText("   ").width;
-  const x0 = 30, unit = (text + 0.7 * spaces) / 42;
+  // The grid fits the notice's text where the file sets it (its "A" two
+  // characters past its bar) and a space more, with half a pixel to spare —
+  // but not the three spaces the file ends it with as well.
+  const text = ctx.measureText("A conformed copy will not be returned").width;
+  const x0 = 30, unit = (text + 0.28 * 14 + 0.5) / 40;
   body.__charGrid = { x0, unit };
   rows.forEach((t, k) => {
     const line = document.createElement("div");
@@ -269,12 +276,16 @@ const textX = (el) => {
   check("…the caption's inner bar at its", bars.slice(0, 2).every((b) => Math.abs(b[1] - at(26)) <= 2), bars.slice(0, 2).map((b) => b[1]).join(" ") + " vs " + r1(at(26)));
   check("…and every row's last bar at the box's right edge, the larger bold row too", bars.every((b) => Math.abs(b[b.length - 1] - at(47)) <= 3), bars.map((b) => b[b.length - 1]).join(" ") + " vs " + r1(at(47)));
   const notice = body.querySelectorAll(".line")[2];
-  check("…its closing spaces running on unseen, the row a fixed table the width of its cells", notice.classList.contains("gridfit") && !!notice.style.width, notice.className + " " + notice.style.width);
-  // Off that grid the box is the cells' own again, as it was.
+  check("…its closing spaces running on unseen, the row a fixed table the width of its cells", notice.classList.contains("fit") && getComputedStyle(notice).tableLayout === "fixed" && !!notice.style.width, notice.className + " " + notice.style.width);
+  // Off that grid (a page whose PDF gave none) the box is still one box on
+  // one grid: its sides and its inner bar straight down every row.
   body.classList.remove("cgrid");
   fitRuleRows(body);
   const off = rowsOf("grid").map((r) => r.bars);
-  check("off the PDF's grid, the box is its cells' own again (the bold row's spaces push its bar)", off[2][1] > bars[2][1] + 1.5 && !notice.classList.contains("gridfit") && !notice.style.width, `${off[2][1]} vs ${bars[2][1]} ${notice.className}`);
+  check("off the PDF's grid, every row's first bar in one column and its last in one", same(off.map((b) => b[0])) && same(off.map((b) => b[b.length - 1])), JSON.stringify(off));
+  check("…the inner bar too, in the rows it crosses", Math.abs(off[0][1] - off[1][1]) <= 1, JSON.stringify(off.slice(0, 2)));
+  body.classList.add("cgrid");
+  fitRuleRows(body);
 }
 // SUM-100's top: a box at the right margin (the court's, bars at 30 and 47)
 // beside the caption's labels, and a notice under it the width of the page (5

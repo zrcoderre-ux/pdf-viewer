@@ -229,7 +229,7 @@ viewer/viewer.html                   PDF viewer shell
 viewer/text-reader.html / .js / .css Text reader for PDF-Linker's exports (pages, cites, key)
 viewer/textdoc.js                    Text reader's document model (pure; test-textdoc.mjs)
 viewer/pdfsync.js                    Text reader's PDF pane decisions: matching, ranges, scroll sync (pure; test-pdfsync.mjs)
-viewer/rules.js                      Text reader's box-drawing glyphs drawn as boxes (column grid pure; test-rules.mjs)
+viewer/rules.js                      Text reader's box-drawing glyphs drawn as boxes, every rule of a page on one column grid (grid pure; test-rules.mjs, test-straight-rules.mjs)
 viewer/columns.js                    Text reader's space-aligned columns laid out on the font's own grid (cuts pure in textdoc.js; test-textdoc.mjs)
 viewer/pseudo-key.js                 pseudonym_key.xlsx reader + fake↔real swaps (pure; test-pseudo-key.mjs)
 viewer/xlsx-read.js                  Minimal .xlsx reader (pure; test-xlsx-read.mjs)

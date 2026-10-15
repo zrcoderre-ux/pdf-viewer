@@ -14,7 +14,10 @@ agree) share one anonymous table, and a line whose offsets differ from the
 row above is `.rt` (`display: table`, its own columns) so two stacked boxes
 never share columns. A line of nothing but rules is `.rr`, half a line tall;
 a `─` run is `.rh`, a line at its own width, or `.rc.hf` when it is a whole
-cell, a line across the cell. Every span carries the glyph as its text and no
+cell, a line across the cell — until its page is set on its column grid, when
+a fitted row is a table of its own (`.fit`) and a run is drawn where the grid
+puts its ends (`.rg`; "A straight rule in the file is straight on the page",
+below). Every span carries the glyph as its text and no
 `data-fake`, so `serializeNodes` and the clipboard are unchanged (pinned in
 `test-textdoc.mjs`); `ruleParts` / `ruleShape` in `textdoc.js` are the pure
 half. `undress` runs first on each pass and touches only lines that carry a
@@ -22,7 +25,11 @@ rule span, so the editor's caret text node on any other line is never
 replaced.
 
 What the table layout cannot do is done by `fitRuleRows` at the end of each
-layout pass: a box's rows are squared up as a STACK — every consecutive rule
+layout pass. (Since the owner asked for every straight rule to be straight in
+both views, the grid is the PAGE's, not a stack's, and `ruleGrid` is gone:
+`pageGrid`, "A straight rule in the file is straight on the page", below. What
+follows is the stack it replaced, for the wobble it was built for.) A box's
+rows were squared up as a STACK — every consecutive rule
 row, not only the run whose bars fall at the same offsets — against one
 column grid (`ruleGrid`, pure, `test-rules.mjs`). Bar offsets within three
 characters of each other are one column, never two of one row's own, and
@@ -35,7 +42,8 @@ edge there and each row the height of the gap to the row below, so its bars
 meet the next row's. `test-rules.html` reads the geometry back out of a page
 in both views.
 
-A box never widens its sheet. It used to (the line-lock rule, applied to
+A box never widens its sheet (still so; the page grid tightens its columns
+before it draws a page's rules smaller, below). It used to (the line-lock rule, applied to
 boxes), and since `#pages` is `width: max-content` with every sheet centred
 in it, one wide table in an exhibit set put every other page of the document
 off centre in a column thousands of pixels wide. `fitWide` draws a box wider
@@ -51,8 +59,8 @@ measured before any is written (`planStack` / `applyStack`), so a pass costs
 a handful of layouts rather than one per box. The fit is redone when the
 paper's width changes (`applyPageWidthNow`, which runs after the layout pass
 on a zoom or resize) and for the pages `shapePages` has just fitted, whose
-type may have given. `fitRuleRows` takes the column, a page, or a list of
-pages.
+type may have given. `fitRuleRows` takes the column, a page, a page's body,
+or a list of them.
 
 ### Columns laid out with spaces (`viewer/columns.js`)
 
@@ -106,7 +114,12 @@ an indented `.hf` draws its line over its content box only, and `needOf`
 (`fitStacks`) counts its padding, since a cell is never narrower than that and
 a row that is its own table (`.rt`) would push its bar out past the stack's.
 Off the grid and on numbered pages beside the PDF; an unnumbered page beside
-the PDF places a box row by its own left instead (below). Checked in
+the PDF places a box row by its own left instead (below). Once its page is set
+on its column grid, every text cell of a box row is set in this way, written
+by `fitRuleRows` in px (`padsOf`: as far past the bar before it as the file
+has it, the first cell from the margin), which overrides `.ci` until the
+row's cells are made again — "A straight rule in the file is straight on the
+page", below. Checked in
 `test-rules.html` ("a caption on numbered paper"). A line with a column gap is `.line.cols`:
 `shapePages` reads those unwrapped (`.cols-measure`, every page at once in
 `columnCaps`) and starts the page's fit no larger than its widest column line
@@ -385,7 +398,9 @@ faced line or cell carries its face's own space as `--col-sp-n`, which its
 indent and `fitCells` read.
 
 **A box's bars on the PDF's grid** (`rules.ruleGrid`'s `place`, `planStack`,
-`needOnGrid`, `.gridfit`). On a page laid on the export's grid read off the PDF
+`needOnGrid`, `.gridfit`; since the page grid, `pageGrid`'s `place`,
+`solvePage`, `needOnGrid` and `.fit`, the same rules for every row of the
+page). On a page laid on the export's grid read off the PDF
 (`.cgrid`, `body.__charGrid` in px) a bar the file sets at column c is the
 PDF's rule at x0 + c × unit, to within half a character, so each column of
 bars is set there at the least: the box is the PDF's box, however little of it
@@ -401,8 +416,9 @@ stack of rule rows is often two boxes, one under the other's side —
 SUM-100's notice under the court's box, the case number's box under that —
 and the one lead every row shares in the flowing sheet stood the notice's
 left side under the court box's, 259 px in, and its right side off the
-sheet, once SUM-100 had a grid. (The flowing sheet still shares one lead: it
-is not laid on the PDF, and was left as it was.) No column is placed more than a character
+sheet, once SUM-100 had a grid. (The flowing sheet shared one lead until the
+page grid: there it drew SUM-100's notice 88 px in, under the court box, and
+now each row's first bar stands at its own column in both views.) No column is placed more than a character
 (`slack`, the grid's unit) past the furthest right the PDF prints type on the
 page (`reach`, `__charGrid.right`: a form's number and its page count end at
 the right margin, where its boxes do): the grid is a fit and runs a little
@@ -447,9 +463,10 @@ Not done yet: the text inside a drawn box's cells is not cut into pieces — a
 box row is a table, and its cells take the PDF's faces but keep the export's
 spaces — so CM-010's case-type list, inside its box, stands narrower than the
 PDF's three columns, and SUM-100's "SUMMONS", in the first cell of a row of
-the court's box, is set small and to the left of where the PDF centres it.
-Cutting a cell would go through `fitRuleRows`' measuring as well as
-`placeLine`.
+the court's box, is set small. (Where a cell's text BEGINS is the grid's
+since the page grid — as far past its bar as the file sets it — so "SUMMONS"
+now stands over its column rather than at the cell's left.) Cutting a cell
+would go through `fitRuleRows`' measuring as well as `placeLine`.
 
 Costs, measured in Chromium on CIV-110, POS-010, SUM-100, MC-011, CM-010,
 LASC CIV 109 and PLD-050, every page brought to the reading in turn: finding
@@ -485,3 +502,110 @@ field's value — a filled field is a widget annotation, not text content.
 `exportValue` and on/off state) and its `rect`, so a value could be placed
 where the form prints it; the export carries PDF-Linker's reading of the same
 field, and the reader shows the export.
+
+### A straight rule in the file is straight on the page (`rules.pageGrid`, `fitRuleRows`)
+
+The owner, in chat: "Where the raw text has straight lines, those lines
+should still be straight in the viewer. Like a form box, or a separate
+statement. Parallel and perpendicular lines should still be parallel and
+perpendicular. Also, this should remain true even when using side by side
+view."
+
+In the file a rule is straight because every glyph of it stands at one
+character column. Eight Judicial Council forms (CIV-110, SUM-100, MC-011,
+CM-010, PLD-050, LASC CIV 109, POS-010, MC-350EX) and a separate statement
+on pleading paper, made into exports by PDF-Linker and read back out of the
+reader in both views (52 pages), showed where they were not:
+
+- the separate statement drew each rule between two facts in two halves at
+  different heights — the half before the divider an inline run on the
+  text's middle, the half after a whole cell's line on the row's — and side
+  by side its divider jumped 23 px at every rule row (the rule row's first
+  cell was measured with its `─` glyphs at their own width);
+- a box's side stepped a pixel wherever a row with more bars met one with
+  fewer (CIV-110 under its caption, PLD-050, MC-350EX): each bar is a cell a
+  pixel wide, and every cell after one was as wide as its columns, so each
+  bar before a column pushed it a pixel;
+- a divider or signature line drew at its glyphs' width — 226 px past
+  CIV-110's box flowing, wrapping onto a second line of its own; 32 px past
+  it side by side;
+- separate boxes down one column of the file stood wherever their own rows
+  put them (MC-011's amounts, from 480 to 690 px);
+- flowing, a stack of two boxes, one under the other's side, shared one lead
+  (SUM-100's notice drawn 88 px in, under the court box);
+- beside a PDF whose grid could not be read (`.rowleft`, LASC CIV 109's first
+  and fourth pages), the rows were ragged and ran off the sheet.
+
+Every rule glyph of a page — its boxes' rows, and its lines of nothing but
+`─` runs (after the margin number, a numbered one too) — is now set on ONE
+column grid (`pageGrid`, pure, `test-rules.mjs`): a column of the file is one
+x on the page, whichever row, box or rule line a glyph of it stands in. The
+columns are the bars' offsets and the runs' free ends (a run opening just
+past a bar is drawn from it, one ending at a bar to it); offsets within
+`RULE_COL_SLOP` (3) of the FIRST of a column are that column (counted from
+the first, so a run of near offsets does not chain into one), never two of
+one row's own. Each column stands at its place on the page's character grid
+— `(offset − origin) × unit`, the unit the reader's average character in the
+page's body type (`--col-n` × `--body-em`) and `origin` the margin number's
+characters on pleading paper; side by side on a `.cgrid` page the export's
+grid read off the PDF; on a `.rowleft` page the export's columns spread
+across where the PDF's type stands, its first character where the type
+begins and its last where it ends (`typeGrid`, from the `__typeBox`
+applyMatchedLayout writes off the PDF's rows) — and further right only where
+a cell's text needs it, and then that column's whole way down the page. A
+cell needs its room PAST the bar before it, so a bar stands at its column
+whatever number of bars come before it in its row. Each column moves on to
+the screen's next whole pixel (`snap`, from where the page stands on the
+screen and `devicePixelRatio`): fractional widths drew one row's bar two
+device pixels wide and its neighbours' one.
+
+Each row is a table of its own then (`.fit`, `table-layout: fixed`, where the
+flowing sheet's rows shared anonymous tables) at exactly the widths the grid
+gives; the cell after the last bar takes whatever the table has over, since a
+table fixed at a width its columns miss by a sixty-fourth of a pixel shares
+the difference out among them, the bars too. Each text cell is set where the
+file sets it — as far past the bar before it as the file has it, its own
+opening spaces taken back off (`padsOf`: a `padding-left` and a negative
+`text-indent`; the first cell from the margin, as `indentBoxRow` sets it
+before a fit) — so a centred label is centred, and its need is its text from
+there, up to its last character and a space (`needOnGrid`). Every `─` run in
+a cell of runs and spaces, and in a line of nothing but runs, is drawn where
+the grid puts its ends (`.rg`: background layers, a hairline each at the
+middle of the row, the glyphs at no size): from the bar it opens on, to the
+bar it ends at, and a free end at its column — over a bar's own pixel where a
+bar of another row stands in that column, so a divider under a box ends
+where the box does. A rule line's glyphs take no room and no height (a glyph
+of no size still stood a line's leading about the baseline, and the line grew
+by half of one), so it never wraps; the layout's spill and squeeze
+(text-reader.js) pass over such lines.
+
+Side by side on a page with no numbers every rule line is given the page's
+one left (the grid's), and each row of a box is as tall as the gap to the
+row below it, as before. A flowing sheet whose rules run wider than its paper
+tightens its grid first, down to `GRID_MIN` (0.5) of the page's — the columns
+closer, the type the page's own, the boxes nearer their text, as the stacks
+drew them — and only past that draws the rules' type smaller (`fitWide`, as
+before); the grid on a page laid on its PDF is the PDF's and does not give,
+so there a box whose text would push it off the sheet has the text in its
+cells set smaller, no smaller than `BOX_TYPE_MIN` (0.6) (LASC CIV 109's table,
+set in the reader's font, ran a column past its sheet). `body.__rules` says
+what grid a page was set on.
+
+Read back the same way, every bar down its column, every row's runs against
+one another and their corners, every run against the bar beside it and every
+column across the page agree on all 52 pages in both views, the bars to a
+twentieth of a pixel and each on a whole pixel of the screen.
+`test-straight-rules.mjs` (the real reader, both PDFs made in the page) holds
+a form page and a separate statement on pleading paper to the same, and
+passes at a device pixel ratio of 2 as well. Against origin/main no line of
+the 52 pages moved up or down side by side. Flowing, a page's type is sized
+now without rule glyphs drawn at their own width — a divider wrapping onto a
+line of its own held a form's type down — so most form pages are set a
+little larger, and a box row is one height whatever it carries.
+
+Not changed: side by side, a rule line the PDF prints no text on is laid by
+the line spacing from the line above it (`pdfsync.rowLayout`), so where the
+PDF sets the next row closer than that the rule is drawn over that row's text
+(MC-011, the underline under item 11b across 11c). Straight, and in its
+order in the file, but on the wrong side of the text; laying it between its
+neighbours instead would move the lines under it on every such page.
