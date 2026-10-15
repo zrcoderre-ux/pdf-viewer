@@ -1069,6 +1069,64 @@ export function countLabel(boxes, pages) {
   return `${boxes} box${boxes === 1 ? "" : "es"} on ${pages} page${pages === 1 ? "" : "s"}.`;
 }
 
+// ── one mark, every place ────────────────────────────────────────────────────
+//
+// Words marked by hand in one place are words that have to go everywhere they
+// stand: a name blacked out on page 3 and left readable on page 9 is not
+// redacted. So a text mark is spread — over the whole document in the viewer,
+// over every PDF of the case folder in the text reader — and these decide
+// what is spread and where it stands.
+
+/**
+ * The phrase a hand mark spreads, or null where it should not spread: the
+ * marked words with their blanks folded, held to what could be a value. Under
+ * three letters or digits it is no name (an "a", a "§", a lone initial), and
+ * spread it would black out half the document.
+ */
+export function spreadPhrase(label) {
+  const s = String(label == null ? "" : label).replace(/\s+/g, " ").trim();
+  if (!s || s.length > 120) return null;
+  if ((s.match(/[\p{L}\p{N}]/gu) || []).length < 3) return null;
+  return s;
+}
+
+/**
+ * Every place `phrase` stands in a page's text (pageTextFromSpans' string), as
+ * [{ start, end }]: any case, any run of blank (a line break included) where
+ * the phrase has a space, and whole words — "Lee" is not marked inside
+ * "Leeward". Typographic quotes and dashes read as the plain ones, so
+ * "O'Brien" marked finds "O’Brien".
+ */
+export function phraseHits(text, phrase) {
+  const p = spreadPhrase(phrase);
+  const t = String(text == null ? "" : text);
+  if (!p || !t) return [];
+  const fold = (c) => (/['‘’‚‛′]/.test(c) ? "['‘’‚‛′]" : /[“”„″"]/.test(c) ? "[\"“”„″]" : /[-‐‑‒–—−]/.test(c) ? "[-‐‑‒–—−]" : c.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&"));
+  const body = p.split(" ").map((w) => [...w].map(fold).join("")).join("\\s+");
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_])${body}(?![\\p{L}\\p{N}_])`, "giu");
+  const out = [];
+  for (const m of t.matchAll(re)) out.push({ start: m.index, end: m.index + m[0].length });
+  return out;
+}
+
+/**
+ * Whether boxes already on a page cover `rects` (PDF points): the middle of
+ * every rectangle inside a rectangle of some box. A place already marked —
+ * the one the hand just marked, a value the key proposed — is not marked
+ * twice, so a spread's count is the places it added.
+ */
+export function coveredBy(boxes, rects) {
+  const list = (rects || []).filter((r) => r && r.w > 0 && r.h > 0);
+  if (!list.length) return false;
+  const all = [];
+  for (const b of boxes || []) for (const r of (b && b.rects) || []) all.push(r);
+  const E = 0.5;
+  return list.every((r) => {
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    return all.some((o) => cx >= o.x - E && cx <= o.x + o.w + E && cy >= o.y - E && cy <= o.y + o.h + E);
+  });
+}
+
 // ── the store ────────────────────────────────────────────────────────────────
 //
 // pageNumber → [{ id, rects: [{x,y,w,h}] in PDF points, kind, label }]

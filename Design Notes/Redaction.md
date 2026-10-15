@@ -64,6 +64,38 @@ PDF pane (`pdfNamesOn`) reads the same transcript the forward way
 laid out by pdf.js: the caption drawn a line at a time, a column at a time, and
 with only the ")" beside the first half.
 
+**One mark, every place** (`redact.spreadPhrase`, `phraseHits`, `coveredBy`;
+`spreadTextMark` in both readers). A hand text mark is spread: the viewer runs
+`sweepPages` (the key sweep's page walk, the emptied spans put back for the
+measurement, now shared with `scanForKeyValues`) with `phraseHits` in place of
+the key; the text reader runs `keyBoxesForPage(page, phrase)` over every PDF
+`redactFolderNames` lists — the documents beside the export, then the folder's
+and any picked by hand. The phrase is the characters under the drag
+(`charsUnder`, each character's middle inside the drag), not the crossed
+spans' whole text, which is the line. Any case, a blank run where the phrase
+has a space, whole words at both ends, curly and straight quotes and dashes
+alike; under three letters or digits nothing spreads (an initial or "a" would
+black out half the document). `coveredBy` skips a place whose every rectangle
+has its middle under an existing box, so the hand's own place and the key's
+proposals are not doubled. Area drags do not spread.
+
+The text reader's two page walks lay pages out in the one off-screen
+`sweepContainer`, so the key sweep and a spread run under `withSweepLock`, one
+at a time. Clear bumps `redactGen` and a spread under way stops adding. A PDF
+carrying boxes is held open by `pdfsInUse` only when it is beside the export,
+or while a sweep or the save is reading it (`redactBusyPdf`); held whenever it
+carried boxes, a spread over a folder of forty PDFs would keep forty open. The
+save opens a closed one again through `pdfSourceFor`.
+
+**Find beside the Redact bar** (`find.placeFindBar`). The viewer's Find stands
+top right and the tool bars top centre; the Redact bar is wide enough to reach
+under it. `placeFindBar` moves Find below any open float bar it would meet,
+rerun by a `ResizeObserver` on every float bar (a bar shown, hidden or wrapped
+changes its size) and on resize; `reveal` scrolls a match below the lowest bar.
+`#find-redact` (Redact all) shows only in Redact mode and marks `Find.findAll`
+with Find's own options. `test-redact-spread.mjs` checks both readers in
+Chromium.
+
 `redact.js` is the store and the painting; its decisions (span joining, char
 range to span range, line merging, padding, clamping, the copy's name, the
 page as it is laid out) are pure and covered by `test-redact.mjs`.

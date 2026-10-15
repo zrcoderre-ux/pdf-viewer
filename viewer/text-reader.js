@@ -16915,7 +16915,14 @@ function pdfsInUse() {
   for (const i of pdfInView) { const s = pdfSources[i]; if (s) must.add(s.name); }
   const nameOf = (k) => k.slice(0, k.lastIndexOf("|"));
   for (const k of swaps) must.add(nameOf(k));
-  for (const [name, store] of redactStores) if (store.count().boxes) must.add(name);
+  // A PDF beside the export that carries boxes is held; one elsewhere in the
+  // folder (a hand mark spread there) is held only while a sweep or the save
+  // is reading it — its boxes are in its store, not in the open document, and
+  // the save opens it again. Held all at once, a mark spread over a folder of
+  // forty PDFs would keep forty open.
+  const beside = new Set(pdfSourceNames());
+  for (const [name, store] of redactStores) if (beside.has(name) && store.count().boxes) must.add(name);
+  if (redactBusyPdf) must.add(redactBusyPdf);
   // …and the one the Pages tab is drawing a picture from, for as long as it is.
   if (pagesThumbBusy) must.add(pagesThumbBusy);
   // Then, in this order and while the budget lasts: the worksheet's next
@@ -20420,7 +20427,20 @@ let redactOn = false;
 let redactMark = "text";     // what a drag marks: "text" | "area"
 let redactSaving = false;
 let redactScanning = false;
+let redactSpreading = 0;     // hand marks still being spread over the folder
+let redactGen = 0;           // bumped by Clear: a spread under way stops adding
+let redactBusyPdf = null;    // the PDF a sweep or a save is reading right now
 const redactStores = new Map(); // PDF name → its own store of boxes
+
+// One sweep over the PDFs at a time — the key's and a hand mark's spread lay
+// pages out in the same off-screen box (sweepContainer), and two at once
+// would measure each other's words.
+let sweepLock = Promise.resolve();
+function withSweepLock(fn) {
+  const run = sweepLock.then(fn, fn);
+  sweepLock = run.catch(() => {});
+  return run;
+}
 
 function redactStoreFor(name) {
   if (!redactStores.has(name)) redactStores.set(name, RD.createRedactionStore());
@@ -20444,6 +20464,7 @@ function redactTotals() {
 /** Every box taken back off, and the pane redrawn without them. */
 function clearRedactions(why) {
   const had = redactTotals().boxes;
+  redactGen++;
   redactStores.clear();
   missWalk = []; missShort = new Map(); missAt = -1;
   if (typeof showMissRow === "function") showMissRow(false);
@@ -20547,6 +20568,7 @@ function textRectsUnder(el, box) {
   const x1 = x0 + box.width, y1 = y0 + box.height;
   const rects = [];
   const words = [];
+  let phrase = "", prev = null;
   for (const span of layer.querySelectorAll("span")) {
     const r = span.getBoundingClientRect();
     if (!r.width || !r.height) continue;
@@ -20557,8 +20579,33 @@ function textRectsUnder(el, box) {
     rects.push({ left, top: r.top, width: right - left, height: r.height });
     const t = (span.textContent || "").trim();
     if (t) words.push(t);
+    // …and the characters themselves the drag covers, for the mark to be
+    // spread by: the span's whole text is the line, not the name.
+    const piece = charsUnder(span, x0, x1);
+    if (piece) {
+      const sameLine = prev && Math.min(prev.bottom, r.bottom) - Math.max(prev.top, r.top) > Math.min(prev.height, r.height) / 2;
+      phrase += !prev ? "" : sameLine && r.left - prev.right < r.height * 0.15 ? "" : " ";
+      phrase += piece;
+      prev = r;
+    }
   }
-  return { rects, text: words.join(" ").replace(/\s+/g, " ").slice(0, 120) };
+  return { rects, text: words.join(" ").replace(/\s+/g, " ").slice(0, 120), phrase: phrase.replace(/\s+/g, " ").trim() };
+}
+/** The run of a span's characters whose middles stand between x0 and x1 (client px). */
+function charsUnder(span, x0, x1) {
+  const node = span.firstChild;
+  if (!node || node.nodeType !== 3 || !node.data) return "";
+  const range = document.createRange();
+  let first = -1, last = -1;
+  for (let i = 0; i < node.data.length; i++) {
+    range.setStart(node, i);
+    range.setEnd(node, i + 1);
+    const c = range.getBoundingClientRect();
+    if (!c.width) continue;
+    const mid = c.left + c.width / 2;
+    if (mid >= x0 && mid <= x1) { if (first < 0) first = i; last = i; }
+  }
+  return first < 0 ? "" : node.data.slice(first, last + 1);
 }
 
 /**
@@ -20578,8 +20625,12 @@ function markDraggedBox(el, box) {
   // operator has plainly just blacked out.
   const under = textRectsUnder(el, box);
   let n = 0, fellBack = false;
+  let spread = "";
   if (redactMark === "text") {
-    if (under.rects.length) n = storeBoxesFromClientRects(el, under.rects, { kind: "text", label: under.text || "these words", words: under.text });
+    if (under.rects.length) {
+      n = storeBoxesFromClientRects(el, under.rects, { kind: "text", label: under.phrase || under.text || "these words", words: under.text });
+      spread = under.phrase;
+    }
     else { fellBack = true; n = storeBoxesFromClientRects(el, whole, { kind: "area", label: under.askew ? "this area" : "this area — nothing under it is text" }); }
   } else {
     n = storeBoxesFromClientRects(el, whole, { kind: "area", label: "this area", words: under.text });
@@ -20594,6 +20645,7 @@ function markDraggedBox(el, box) {
   // drag is the answer to it.
   const at = slotRedaction(el);
   if (at) missAnsweredByBox(at.src.name, at.page);
+  if (spread) spreadTextMark(spread);
 }
 
 /**
@@ -20617,7 +20669,7 @@ function redactCurrentSelection() {
   }
   const label = sel.toString().replace(/\s+/g, " ").trim().slice(0, 120);
   const n = storeBoxesFromClientRects(el, [...range.getClientRects()], { kind: "text", label });
-  if (n) sel.removeAllRanges();
+  if (n) { sel.removeAllRanges(); spreadTextMark(label); }
   return n;
 }
 
@@ -20649,8 +20701,12 @@ function sweepContainer() {
   return sweepBox;
 }
 
-/** Every place the key's real values stand on a page: [{ rects (in points), label }]. */
-async function keyBoxesForPage(page) {
+/**
+ * Every place the key's real values stand on a page: [{ rects (in points), label }].
+ * Given a `phrase`, every place THAT stands instead (redact.phraseHits) — a
+ * hand mark being spread over the folder.
+ */
+async function keyBoxesForPage(page, phrase = null) {
   const vp = page.getViewport({ scale: 1 });
   const box = sweepContainer();
   box.innerHTML = "";
@@ -20722,9 +20778,11 @@ async function keyBoxesForPage(page) {
     }
     return rects;
   };
-  const names = RD.columnNamesOver(
-    PK.findRealSpans(reals, text).map((hit) => ({ label: hit.real, parts: [RD.spanRangeFor(map, hit.start, hit.end)], keys: RD.charKeys(map, hit.start, hit.end) })),
-    measured, (lay) => PK.findColumnSpans(reals, lay.text, lay.text));
+  const names = phrase
+    ? RD.phraseHits(text, phrase).map((h) => ({ label: phrase, parts: [RD.spanRangeFor(map, h.start, h.end)] }))
+    : RD.columnNamesOver(
+      PK.findRealSpans(reals, text).map((hit) => ({ label: hit.real, parts: [RD.spanRangeFor(map, hit.start, hit.end)], keys: RD.charKeys(map, hit.start, hit.end) })),
+      measured, (lay) => PK.findColumnSpans(reals, lay.text, lay.text));
   for (const n of names) {
     const rects = boxesOf(n.parts);
     if (rects && rects.length) out.push({ rects, label: n.label });
@@ -20763,33 +20821,36 @@ async function scanForKeyValues() {
   // read to the end and boxed nothing, so named the same way.
   const askew = [];
   try {
-    for (const name of names) {
-      const src = pdfSourceFor(name);
-      if (!src) continue;
-      const store = redactStoreFor(name);
-      store.clear("key"); // a re-sweep replaces the run's own, never the hand's
-      let info;
-      try { info = await loadPdf(src, { now: true }); }
-      catch (e) { toast(`Could not open ${name}: ${e.message || e}`, { error: true }); continue; }
-      for (let pn = 1; pn <= info.count; pn++) {
-        rbState.textContent = `Reading ${name}, page ${pn} of ${info.count}…`;
-        let page;
-        try { page = await info.pdf.getPage(pn); } catch { continue; }
-        pagesRead++;
-        let hits;
-        try { hits = await keyBoxesForPage(page); } catch { continue; }
-        sweptText.set(name + "|" + pn, hits.chars);
-        missed += hits.missed;
-        if (hits.truncated) unchecked.push(`${name} p. ${pn}`);
-        if (hits.askew) { askew.push(`${name} p. ${pn}`); sweptAskew.add(name + "|" + pn); }
-        for (const h of hits.boxes) {
-          if (store.add(pn, h.rects, { kind: "key", label: h.label })) found++;
+    await withSweepLock(async () => {
+      for (const name of names) {
+        const src = pdfSourceFor(name);
+        if (!src) continue;
+        redactBusyPdf = name;
+        const store = redactStoreFor(name);
+        store.clear("key"); // a re-sweep replaces the run's own, never the hand's
+        let info;
+        try { info = await loadPdf(src, { now: true }); }
+        catch (e) { toast(`Could not open ${name}: ${e.message || e}`, { error: true }); continue; }
+        for (let pn = 1; pn <= info.count; pn++) {
+          rbState.textContent = `Reading ${name}, page ${pn} of ${info.count}…`;
+          let page;
+          try { page = await info.pdf.getPage(pn); } catch { continue; }
+          pagesRead++;
+          let hits;
+          try { hits = await keyBoxesForPage(page); } catch { continue; }
+          sweptText.set(name + "|" + pn, hits.chars);
+          missed += hits.missed;
+          if (hits.truncated) unchecked.push(`${name} p. ${pn}`);
+          if (hits.askew) { askew.push(`${name} p. ${pn}`); sweptAskew.add(name + "|" + pn); }
+          for (const h of hits.boxes) {
+            if (store.add(pn, h.rects, { kind: "key", label: h.label })) found++;
+          }
+          // A long document is a long loop: the tab breathes between pages.
+          await new Promise((r) => setTimeout(r, 0));
         }
-        // A long document is a long loop: the tab breathes between pages.
-        await new Promise((r) => setTimeout(r, 0));
       }
-    }
-  } finally { redactScanning = false; }
+    });
+  } finally { redactScanning = false; redactBusyPdf = null; }
   repaintAllRedactions();
   // A sweep is only half the answer: the export is the other half, and a value
   // the PDF's text would not give up is exactly the thing nobody would notice.
@@ -20813,6 +20874,77 @@ async function scanForKeyValues() {
       ? ` ${askew.length} page${askew.length === 1 ? "'s" : "s'"} text could not be laid over the page to find where the names stand, so nothing was marked there (${askew.slice(0, 3).join(", ")}${askew.length > 3 ? ", and more" : ""}) — mark those by hand.`
       : ""),
     { ms: missWalk.length || unchecked.length || askew.length ? 9000 : 5000 });
+}
+
+// ── a hand mark, over the whole folder ──
+//
+// Words marked by hand in one place have to go everywhere they stand: a name
+// blacked out in the motion and readable in the reply is not redacted. So a
+// text mark (a drag over words, a selection) is spread over every PDF of the
+// case folder — the documents beside the export first, then the rest of the
+// folder's and any picked by hand — page by page off screen, the same way the
+// key's sweep reads them (keyBoxesForPage with the phrase). Any case, whole
+// words (redact.phraseHits); a place already under a box is not marked twice.
+// An area drag is not spread: what it covers is a picture, not words.
+function redactFolderNames() {
+  const out = [...pdfSourceNames()];
+  const add = (n) => { if (n && !out.includes(n)) out.push(n); };
+  for (const p of folderPdfs) add(p.name);
+  for (const n of pickedPdfs.keys()) add(n);
+  return out;
+}
+function spreadTextMark(label) {
+  const phrase = RD.spreadPhrase(label);
+  if (!phrase) return;
+  redactSpreading++;
+  updateRedactBar();
+  withSweepLock(() => spreadTextMarkNow(phrase))
+    .catch((e) => console.warn("[text-reader] spreading a redaction failed:", e))
+    .finally(() => { redactSpreading--; updateRedactBar(); });
+}
+async function spreadTextMarkNow(phrase) {
+  const gen = redactGen;
+  const names = redactFolderNames();
+  let found = 0;
+  const docs = new Set(), unread = [];
+  try {
+    for (const name of names) {
+      const src = pdfSourceFor(name);
+      if (!src) continue;
+      let info;
+      try { info = await loadPdf(src, { now: true }); }
+      catch { unread.push(name); continue; }
+      redactBusyPdf = name;
+      for (let pn = 1; pn <= info.count; pn++) {
+        if (gen !== redactGen || !redactOn) return;
+        rbState.textContent = `Marking “${phrase}” everywhere — ${name}, page ${pn} of ${info.count}…`;
+        let page, hits;
+        try { page = await info.pdf.getPage(pn); hits = await keyBoxesForPage(page, phrase); }
+        catch { continue; }
+        if (gen !== redactGen) return;
+        const store = redactStoreFor(name);
+        for (const h of hits.boxes) {
+          if (RD.coveredBy(store.for(pn), h.rects)) continue;
+          if (store.add(pn, h.rects, { kind: "text", label: phrase, words: phrase })) { found++; docs.add(name); }
+        }
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    }
+  } finally {
+    redactBusyPdf = null;
+    repaintAllRedactions();
+  }
+  // The words spread may be what the check was still asking for. Counted
+  // again, unless a walk is under way (counting again would restart it).
+  if (found && missWalk.length && missAt < 0 && doc && reals) missWalk = redactionShortfall();
+  const others = [...docs].filter((n) => n !== names[0]).length;
+  toast((found
+    ? `“${phrase}” also marked in ${found} other place${found === 1 ? "" : "s"}` +
+      (names.length > 1 ? ` across ${docs.size} of the folder's ${names.length} PDFs` : "") + "." +
+      (others ? " Save writes a redacted copy of each PDF that carries boxes." : "")
+    : `“${phrase}” stands nowhere else in ${names.length === 1 ? "this PDF" : `the folder's ${names.length} PDFs`}.`) +
+    (unread.length ? ` Could not open ${unread.slice(0, 3).join(", ")}${unread.length > 3 ? ", and more" : ""} — check those by hand.` : ""),
+    { ms: found || unread.length ? 7000 : 4000 });
 }
 
 /** The source behind a PDF name: the open document's, else one picked by hand, else the folder's. */
@@ -20839,7 +20971,7 @@ function updateRedactBar() {
   rbKey.textContent = key
     ? `Key: ${PK.keyTitle(key)}${allKeeps().length ? ` — a sweep skips the ${allKeeps().length} value${allKeeps().length === 1 ? "" : "s"} you have kept` : ""}`
     : "No key loaded — the key is the baseline; load one under Pseudonyms.";
-  const busy = redactSaving || redactScanning;
+  const busy = redactSaving || redactScanning || redactSpreading > 0;
   const miss = missOutstanding();
   rbCheck.disabled = !reals || !names.length || busy;
   rbCheck.textContent = miss ? `${miss} not found — review` : "Check against the export";
@@ -20943,6 +21075,7 @@ async function saveRedactedCopiesNow() {
       const src = pdfSourceFor(m.name);
       if (!src) { toast(`${m.name} is no longer open — its boxes are still marked.`, { error: true }); continue; }
       const store = redactStoreFor(m.name);
+      redactBusyPdf = m.name;
       const info = await loadPdf(src, { now: true });
       const pages = [];
       // EVERY page, not only the marked ones. A copy that kept its unmarked
@@ -20972,6 +21105,7 @@ async function saveRedactedCopiesNow() {
     toast("Redaction failed: " + (e && e.message ? e.message : e), { error: true });
   } finally {
     redactSaving = false;
+    redactBusyPdf = null;
     updateRedactBar();
   }
 }

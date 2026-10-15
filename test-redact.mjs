@@ -18,6 +18,7 @@ import {
   redactionCount, clearRedactions, createRedactionStore, pageBoxFromView,
   valueWords, wordsOwed, coveredClaims, pageLayoutFromSpans, spanPiecesFor, charKeys, columnNamesOver,
   scrubbedStem, unweldNames, nameWordFakes, partWelds, boundValueStands,
+  spreadPhrase, phraseHits, coveredBy,
 } from "./viewer/redact.js";
 import { parseKey, compileReals, findRealSpans, findColumnSpans, compileForward, forwardRuns, translate, boundRows } from "./viewer/pseudo-key.js";
 import { buildRedactedPdf } from "./viewer/pdf-edit.js";
@@ -809,6 +810,27 @@ console.log("\nthe page as it is laid out");
   check("a page with nothing down a column is the drawing order's names, untouched",
     columnNamesOver(plainOf([L("Helen Rasho signed.", 100)]), [L("Helen Rasho signed.", 100)], find).map((n) => n.label), ["Helen Rasho"]);
   check("a piece across a blank is two pieces", spanPiecesFor([{ span: 0, off: 3 }, null, { span: 0, off: 5 }], 0, 3).length, 2);
+}
+
+console.log("\none mark, every place");
+{
+  check("a phrase is the marked words, blanks folded", spreadPhrase("  Helen\n Rasho "), "Helen Rasho");
+  check("under three letters or digits nothing is spread", [spreadPhrase("a"), spreadPhrase("J."), spreadPhrase("§ 12")], [null, null, null]);
+  check("three is enough", spreadPhrase("Lee"), "Lee");
+  const at = (t, p) => phraseHits(t, p).map((h) => t.slice(h.start, h.end));
+  check("any case, every place", at("Helen Rasho signed. HELEN RASHO, Plaintiff. rasho", "Helen Rasho"), ["Helen Rasho", "HELEN RASHO"]);
+  check("whole words: Lee is not in Leeward or Lees", at("Lee sailed leeward; Lees; (Lee)", "Lee"), ["Lee", "Lee"]);
+  check("a line break where the phrase has a space", at("served on Helen\nRasho at", "Helen Rasho"), ["Helen\nRasho"]);
+  check("curly and straight apostrophes are one", at("Mr. O’Brien and O'Brien", "O'Brien"), ["O’Brien", "O'Brien"]);
+  check("dashes are one", at("Case 23–cv–01234 and 23-cv-01234", "23-cv-01234"), ["23–cv–01234", "23-cv-01234"]);
+  check("regex characters are only characters", at("Acct (No. 4411) and Acct No. 4411", "(No. 4411)"), ["(No. 4411)"]);
+  check("a phrase too short to spread finds nothing", phraseHits("a a a", "a"), []);
+  const box = (x, y, w, h) => ({ rects: [{ x, y, w, h }] });
+  ok("a place under a box is covered", coveredBy([box(100, 100, 60, 12)], [{ x: 101, y: 101, w: 50, h: 10 }]));
+  ok("a place beside it is not", !coveredBy([box(100, 100, 60, 12)], [{ x: 200, y: 101, w: 50, h: 10 }]));
+  ok("a name wrapped over two lines is covered only when both lines are",
+    !coveredBy([box(100, 100, 60, 12)], [{ x: 101, y: 101, w: 50, h: 10 }, { x: 72, y: 86, w: 40, h: 10 }]));
+  ok("nothing on the page covers nothing", !coveredBy([], [{ x: 1, y: 1, w: 5, h: 5 }]));
 }
 
 console.log(`\n${"=".repeat(60)}\nFAILURES: ${fails}`);

@@ -15,6 +15,22 @@ marks text** a drag over the page proposes the words it covers, and with **Drag
 marks an area** it proposes the box itself — a signature, a photograph, an
 exhibit stamp, a scanned page whose text layer knows nothing.
 
+**A mark reaches every place its words stand.** Words you mark by hand —
+a drag or a selection over text, or Box select's *Mark for redaction* — are
+marked wherever else they stand: in the viewer, on every page of the document;
+in the text reader, in every PDF of the case folder, not only the one beside
+the export. A name blacked out on page 3 and left readable on page 9 is not
+redacted. The match is any case and whole words (`Lee` is not marked inside
+`Leeward`), and a name broken over two lines is found. A place already boxed
+is not boxed twice, and a toast says how many more places were marked. Marks
+of under three letters or digits, and area drags, stay where they are drawn.
+Each spread box can still be clicked off on its own. In the text reader the
+save then writes a redacted copy of each PDF that carries boxes.
+
+**Find works beside it.** Ctrl+F with the Redact tool on opens Find below the
+Redact bar rather than over it, and Find carries a **Redact all** button that
+marks every match it has found, with its own Match case and Whole word.
+
 **Nothing is hidden until you save.** A proposal is a translucent red box with
 the words still legible underneath, so you can read what is about to go and
 take any box back off with a click. Boxes the key proposed are outlined in

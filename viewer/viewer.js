@@ -116,6 +116,7 @@ const pageInputEl      = document.getElementById("page-input");
 const pageTotalEl      = document.getElementById("page-total");
 const redactToggleEl  = document.getElementById("redact-toggle");
 const redactBarEl     = document.getElementById("redact-bar");
+const findRedactEl    = document.getElementById("find-redact");
 const redactMarkEl    = document.getElementById("redact-mark");
 const redactKeyEl     = document.getElementById("redact-key");
 const redactLoadKeyEl = document.getElementById("redact-load-key");
@@ -3153,7 +3154,7 @@ function attachPageTools(refs) {
   attachHighlightHandlers(
     refs.pageNumber, refs.pageWrapper, refs.textLayerDiv,
     () => Annots.markupKind(), () => rectSelectMode,
-    (text, rects) => redactMode ? [{ label: "Mark for redaction", icon: "redact", action: () => redactClientRects(refs.pageNumber, rects) }] : [],
+    (text, rects) => redactMode ? [{ label: "Mark for redaction", icon: "redact", action: () => redactClientRects(refs.pageNumber, rects, text) }] : [],
   );
   Annots.attachPage(refs.pageNumber, refs.pageWrapper, refs.annotLayerDiv);
   // Redactions are stored in PDF points, so a zoom (which rebuilds every
@@ -4012,10 +4013,13 @@ function markupSelectionThen(kind) {
   return made;
 }
 
-// Box select's "Mark for redaction": the marquee's glyph rects become boxes.
-function redactClientRects(pageNumber, rects) {
-  if (storeBoxesFromClientRects(pageNumber, rects, { kind: "text", label: "boxed text" })) {
+// Box select's "Mark for redaction": the marquee's glyph rects become boxes,
+// and the words under them are marked wherever else they stand.
+function redactClientRects(pageNumber, rects, text) {
+  const label = String(text || "").replace(/\s+/g, " ").trim().slice(0, 120);
+  if (storeBoxesFromClientRects(pageNumber, rects, { kind: "text", label: label || "boxed text" })) {
     repaintRedactionsOnPage(pageNumber);
+    toastSpread(label, spreadTextMark(label));
     updateRedactState();
   }
 }
@@ -4707,7 +4711,10 @@ function repaintAllRedactions() {
 // Screen rectangles (client space) → the boxes that get stored, in PDF points.
 // Merged into lines first, padded by a point so a glyph's descender or its
 // antialiased edge doesn't survive along the border, then held inside the page.
-function storeBoxesFromClientRects(pageNumber, clientRects, meta) {
+//
+// `unlessCovered`: boxes already on the page cover these, so nothing is added
+// and the answer is false (not null, which is "could not be placed").
+function storeBoxesFromClientRects(pageNumber, clientRects, meta, { unlessCovered = false } = {}) {
   const wrapper = pageWrapperFor(pageNumber);
   const vp = pageViewportByNum.get(pageNumber);
   if (!wrapper || !vp) return null;
@@ -4729,7 +4736,9 @@ function storeBoxesFromClientRects(pageNumber, clientRects, meta) {
     }, 1), userBox);
     if (box) out.push(box);
   }
-  return out.length ? RD.addRedaction(pageNumber, out, meta) : null;
+  if (!out.length) return null;
+  if (unlessCovered && RD.coveredBy(RD.redactionsFor(pageNumber), out)) return false;
+  return RD.addRedaction(pageNumber, out, meta);
 }
 
 // An area drag: the box itself, whatever is under it. This is the tool for a
@@ -4781,7 +4790,10 @@ function redactCurrentSelection() {
       added++;
     }
   }
-  if (added) sel.removeAllRanges();
+  if (added) {
+    sel.removeAllRanges();
+    toastSpread(label, spreadTextMark(label));
+  }
   // Text turned across the page (a watermark, a stamp) has a box that size
   // too, and is left unmarked: said, so it is not taken for marked. The
   // selection goes too, as after a mark: its turned text is not tinted
@@ -4819,6 +4831,51 @@ function turnedTextIn(range) {
 function scanForKeyValues() {
   if (!redactReals) { statusEl.textContent = "Choose a pseudonym key first."; return; }
   RD.clearRedactions("key");
+  const { found, missed } = sweepPages((text, map, measured) =>
+    // …a name wrapped down a column included, read off the page as it is
+    // LAID OUT (redact.columnNamesOver): a caption drawn a line at a time
+    // across its columns has the other column between its halves in the
+    // order the page was drawn in.
+    RD.columnNamesOver(
+      PK.findRealSpans(redactReals, text).map((hit) => ({ label: hit.real, parts: [RD.spanRangeFor(map, hit.start, hit.end)], keys: RD.charKeys(map, hit.start, hit.end) })),
+      measured, (lay) => PK.findColumnSpans(redactReals, lay.text, lay.text)),
+  { kind: "key" });
+  updateRedactState();
+  statusEl.textContent = found
+    ? `Marked ${found} value${found === 1 ? "" : "s"} the key binds` +
+      (missed ? `; ${missed} could not be placed on the page.` : ".")
+    : "The key binds nothing that stands in this document.";
+}
+
+function toastSpread(label, n) {
+  if (!n) return;
+  toast(`“${label}” also marked in ${n} other place${n === 1 ? "" : "s"} in this document. Click a box to take it back off.`, { kind: "success", timeout: 5000 });
+}
+
+// Words marked by hand in one place are marked everywhere they stand in the
+// document (redact.phraseHits: any case, whole words, a line break where the
+// phrase has a space). A name blacked out on page 3 and readable on page 9 is
+// not redacted. Places already under a box are not marked twice, so the count
+// is the places this added.
+function spreadTextMark(label) {
+  const phrase = RD.spreadPhrase(label);
+  if (!phrase) return 0;
+  const { found } = sweepPages((text, map) =>
+    RD.phraseHits(text, phrase).map((h) => ({ label: phrase, parts: [RD.spanRangeFor(map, h.start, h.end)] })),
+  { kind: "text", unlessCovered: true });
+  return found;
+}
+
+// Every page's text, read as the sweep reads it, and each place `namesOn`
+// finds there ([{ label, parts }]) marked as `kind`.
+//
+// The page's own spans are read back in first. applySelectableArea may have
+// emptied some of them (the pleading gutter, anything outside a crop region) and
+// a range over an empty span has no rectangle — so the text is restored, the
+// geometry taken, and the page put back exactly as it was. A name is no less
+// printed for being unselectable, and a redaction that skipped it would be a
+// name left standing in a copy made to hide it.
+function sweepPages(namesOn, { kind, unlessCovered = false }) {
   let found = 0, missed = 0;
   for (const wrapper of pagesEl.querySelectorAll(".page-wrapper")) {
     const pageNumber = Number(wrapper.dataset.pageNumber);
@@ -4832,6 +4889,7 @@ function scanForKeyValues() {
       const el = spans[i];
       if (el && el.textContent !== t) { emptied.push(i); el.textContent = t; }
     });
+    let added = 0;
     try {
       const measured = pageSpanBoxes(textLayerDiv, texts);
       const { text, map } = RD.pageTextFromSpans(measured);
@@ -4853,30 +4911,19 @@ function scanForKeyValues() {
         }
         return rects;
       };
-      const mark = (parts, label) => {
-        const rects = rectsOf(parts);
-        if (!rects || !rects.length) { missed++; return; }
-        if (storeBoxesFromClientRects(pageNumber, rects, { kind: "key", label })) found++;
-        else missed++;
-      };
-      // …a name wrapped down a column included, read off the page as it is
-      // LAID OUT (redact.columnNamesOver): a caption drawn a line at a time
-      // across its columns has the other column between its halves in the
-      // order the page was drawn in.
-      const names = RD.columnNamesOver(
-        PK.findRealSpans(redactReals, text).map((hit) => ({ label: hit.real, parts: [RD.spanRangeFor(map, hit.start, hit.end)], keys: RD.charKeys(map, hit.start, hit.end) })),
-        measured, (lay) => PK.findColumnSpans(redactReals, lay.text, lay.text));
-      for (const n of names) mark(n.parts, n.label);
+      for (const n of namesOn(text, map, measured)) {
+        const rects = rectsOf(n.parts);
+        if (!rects || !rects.length) { missed++; continue; }
+        const r = storeBoxesFromClientRects(pageNumber, rects, { kind, label: n.label }, { unlessCovered });
+        if (r) { found++; added++; }
+        else if (r === null) missed++;
+      }
     } finally {
       for (const i of emptied) if (spans[i]) spans[i].textContent = "";
     }
-    repaintRedactionsOnPage(pageNumber);
+    if (added || kind === "key") repaintRedactionsOnPage(pageNumber);
   }
-  updateRedactState();
-  statusEl.textContent = found
-    ? `Marked ${found} value${found === 1 ? "" : "s"} the key binds` +
-      (missed ? `; ${missed} could not be placed on the page.` : ".")
-    : "The key binds nothing that stands in this document.";
+  return { found, missed };
 }
 
 function updateRedactState() {
@@ -4941,6 +4988,7 @@ function setRedactMode(on) {
   }
   if (redactToggleEl) redactToggleEl.setAttribute("aria-pressed", String(on));
   if (redactBarEl) redactBarEl.hidden = !on;
+  if (findRedactEl) findRedactEl.hidden = !on;
   document.body.classList.toggle("redact-mode", on);
   document.body.classList.toggle("redact-area-mode", on && redactMark === "area");
   updateRedactState();
@@ -6782,10 +6830,8 @@ redoBtnEl?.addEventListener("click", doRedo);
 syncUndoButtons();
 
 // ── Redact: mark every place a phrase appears ────────────────────────────────
-document.getElementById("redact-search")?.addEventListener("click", async () => {
-  const q = await promptDialog({ title: "Mark text for redaction", message: "Every place this word or phrase appears in the document is marked. Check the marks before saving the redacted copy.", placeholder: "e.g. a name, an account number", confirm: "Mark all", icon: "redact" });
-  if (!q || !q.trim()) return;
-  const matches = Find.findAll(q.trim(), { caseSensitive: false });
+// Each match a box; a place already under one is not marked twice.
+function markMatchesForRedaction(matches, label) {
   const byPage = new Map();
   for (const m of matches) {
     const rects = [...m.range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5);
@@ -6794,11 +6840,25 @@ document.getElementById("redact-search")?.addEventListener("click", async () => 
   }
   let n = 0;
   for (const [pn, groups] of byPage) {
-    for (const rects of groups) if (storeBoxesFromClientRects(pn, rects, { kind: "text", label: q.trim() })) n++;
+    for (const rects of groups) if (storeBoxesFromClientRects(pn, rects, { kind: "text", label }, { unlessCovered: true })) n++;
     repaintRedactionsOnPage(pn);
   }
   updateRedactState();
-  toast(n ? `Marked ${n} place${n === 1 ? "" : "s"} for redaction` : `“${q.trim()}” does not appear in the document's text.`, { kind: n ? "success" : "info", timeout: 5000 });
+  return n;
+}
+document.getElementById("redact-search")?.addEventListener("click", async () => {
+  const q = await promptDialog({ title: "Mark text for redaction", message: "Every place this word or phrase appears in the document is marked. Check the marks before saving the redacted copy.", placeholder: "e.g. a name, an account number", confirm: "Mark all", icon: "redact" });
+  if (!q || !q.trim()) return;
+  const n = markMatchesForRedaction(Find.findAll(q.trim(), { caseSensitive: false }), q.trim());
+  toast(n ? `Marked ${n} place${n === 1 ? "" : "s"} for redaction` : `“${q.trim()}” does not appear in the document's text, or is already marked.`, { kind: n ? "success" : "info", timeout: 5000 });
+});
+// …and from the Find bar, while the Redact tool is on: what Find has found,
+// with Find's own Match case and Whole word, is what is marked.
+findRedactEl?.addEventListener("click", () => {
+  const q = Find.current();
+  if (!q) { Find.open(); return; }
+  const n = markMatchesForRedaction(Find.findAll(q.query, q), q.query);
+  toast(n ? `Marked ${n} match${n === 1 ? "" : "es"} of “${q.query}” for redaction` : `Nothing more to mark: every match of “${q.query}” is already marked, or there is none.`, { kind: n ? "success" : "info", timeout: 5000 });
 });
 
 // ── The tools panel: search and collapsible groups ───────────────────────────
