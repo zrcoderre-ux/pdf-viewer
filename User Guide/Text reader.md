@@ -142,34 +142,41 @@ app, which routes it to the reader tab.
   single spacing: any other font puts one column's bars at different places on
   different lines, and any leading cuts a vertical rule into a stack of short
   strokes. The reader draws the box instead. A line carrying bars is laid out
-  as a row of cells split at its bars, consecutive lines whose bars stand at
-  the same character positions share one table, so a bar column is one
-  unbroken line down the page in Georgia at any leading exactly as in
-  Consolas; a line that is nothing but rules (a box's top, a divider) is a
-  hairline at half a line's height, and an underline inside a row is a line
-  under its own width. The glyphs stay underneath — a save and a copy read
-  exactly what the file says, and the bars are located in the file's own
-  text, so a row whose real name is longer than its fake is still a row of
-  the same box. A box never wraps — a wrapped cell is a box with a hole in it
-  — and it **never widens its sheet** either: a box wider than its paper is
-  **drawn smaller** until it ends at the page's right margin, its columns
-  squared up again at that size and the numbered margin beside it left at its
-  own. (A sheet widened for one wide table put every other page in the
-  document off centre, in a column as wide as that table, with the stage
-  scrolled sideways into grey.) Two boxes stacked with
-  different widths keep their own columns; the one row between them that
-  belongs to neither is drawn on its own and sized to the box under it. A
-  page laid on its PDF's grid (side by side) positions every line on its own,
-  so there each box's rows are measured together after every layout pass —
-  every column set to its widest cell, the rows given one left edge, and each
-  row made as tall as the gap to the next so the bars meet — the box is a box
-  there too. **Text inside a box keeps the export's indent**: on pleading
+  as a row of cells split at its bars, so a bar column is one unbroken line
+  down the page in Georgia at any leading exactly as in Consolas; a line that
+  is nothing but rules (a box's top, a divider) is a hairline at half a line's
+  height. **A line straight in the file is straight on the page, in both
+  views**: every rule a page draws — its boxes, its dividers, its signature
+  lines, a separate statement's grid — is set on one grid of the file's
+  character columns, so a column of the file is one place across the page.
+  A box's sides run straight down however many inner bars its rows carry, the
+  two halves of a separate statement's row rule meet at its divider on one
+  line, a divider under a box spans the box rather than running off the page
+  (or wrapping onto a line of its own), boxes down a form's right margin
+  stand one over another, and a box under another's side keeps its own left
+  edge. The glyphs stay underneath — a save and a copy read exactly what the
+  file says, and the bars are located in the file's own text, so a row whose
+  real name is longer than its fake is still a row of the same box. A box
+  never wraps — a wrapped cell is a box with a hole in it — and it **never
+  widens its sheet** either: where a page's rules are wider than its paper
+  their columns are first drawn closer together, and only past that are they
+  **drawn smaller** until they end at the page's right margin, the numbered
+  margin beside them left at its own size. (A sheet widened for one wide
+  table put every other page in the document off centre, in a column as wide
+  as that table, with the stage scrolled sideways into grey.) Side by side
+  the grid is the PDF's own, every line is positioned on its own, and after
+  every layout pass each box's rows are given one left edge and made as tall
+  as the gap to the next row so the bars meet — the box is a box there too,
+  standing on the PDF's rules; a box whose text in the reader's font would
+  push it off the sheet has that text set a little smaller instead.
+  **Text inside a box keeps the export's indent**: on pleading
   paper "Plaintiff," under the party's name, "vs." and "Defendants." used to
   stand flush against the side of the caption box; they now stand as far in
   as the export sets them, on the same grid as the page's other indented
-  lines, in the reading view and side by side. A box or a rule the export
-  draws in from the margin is drawn that far in too, and a box drawn smaller
-  to fit its paper takes its indents down with its type.
+  lines, in the reading view and side by side, and a label the export centres
+  in its cell is centred in it. A box or a rule the export draws in from the
+  margin is drawn that far in too, and a box drawn smaller to fit its paper
+  takes its indents down with it.
 - **Columns stand where the export put them, whatever the font.** A
   two-column page — a Westlaw printout, a caption with the case number beside
   the parties, the clerk's filing stamp beside the attorney block — reaches the
