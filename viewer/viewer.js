@@ -67,6 +67,7 @@ import { autoScroll } from "./autoscroll.js";
 import { pageRotation } from "./rotation.js";
 import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRatio } from "./pdf-fonts.js";
 import { repairTextLayer } from "./text-layer.js";
+import { fetchPdf } from "./web-pdf.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
   "pdfjs/build/pdf.worker.mjs"
@@ -2178,9 +2179,12 @@ async function loadAndRender() {
     // e-court systems — serve PDFs from URLs that don't contain the real
     // filename and only expose it via this header. Using `credentials:
     // include` ensures session cookies are sent, matching what the user's
-    // browser would do for the original link.
-    const resp = await fetch(fileUrl, { credentials: "include" });
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    // browser would do for the original link. A link that answers with a web
+    // page (SharePoint's viewer, a sign-in page) is not handed to pdf.js,
+    // which would only say "Invalid PDF structure" (web-pdf.js).
+    const got = await fetchPdf(fileUrl, fetch);
+    if (got.notPdf) { openAsTheSiteServesIt(got.resp); return; }
+    const resp = got.resp;
 
     const cd = resp.headers.get("Content-Disposition");
     const fromHeader = filenameFromContentDisposition(cd);
@@ -2190,7 +2194,7 @@ async function loadAndRender() {
       setDisplayName(fromHeader);
     }
 
-    const buf = await resp.arrayBuffer();
+    const buf = got.buf;
     // A file:// document: what Save's picker is checked against, should it be
     // pointed at this same file (pickedOverChanged).
     if (isLocalDocument) pdfDisk = { key: "", sha: documentKey(new Uint8Array(buf).slice(0)) };
@@ -2202,6 +2206,24 @@ async function loadAndRender() {
       toast(`Could not open the PDF: ${err.message}`, { kind: "error", timeout: 8000 });
     }
   }
+}
+
+// The link answered with a web page rather than a PDF, even after asking
+// SharePoint for the file itself. In the extension the tab goes on to the link
+// with the bypass token, so the site shows it the way it does without the
+// viewer (its own viewer, or its sign-in page) instead of an error; the hosted
+// app cannot go around itself, so it says what came back.
+function openAsTheSiteServesIt(resp) {
+  const type = ((resp && resp.headers.get("Content-Type")) || "").split(";")[0].trim();
+  const what = type ? `a ${type} page` : "something other than a PDF";
+  if (location.protocol === "chrome-extension:" && /^https?:/i.test(fileUrl)) {
+    statusEl.textContent = `This link served ${what}, not the PDF file. Opening it the way the site shows it…`;
+    const sep = fileUrl.includes("?") ? "&" : "?";
+    location.replace(fileUrl + sep + "citationlinker=skip");
+    return;
+  }
+  statusEl.textContent = `Error: this link served ${what}, not a PDF file.`;
+  toast(`Could not open the PDF: the link served ${what}, not a PDF file.`, { kind: "error", timeout: 8000 });
 }
 
 // Render a local File object directly (no network). Used by the PWA shell when
@@ -5221,8 +5243,9 @@ downloadEl.addEventListener("click", async () => {
     // initial fetch), fall back to a fresh fetch. This is the rare path.
     if (!pdfBytes) {
       statusEl.textContent = "Preparing download…";
-      const resp = await fetch(fileUrl, { credentials: "include" });
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const got = await fetchPdf(fileUrl, fetch);
+      if (got.notPdf) throw new Error("the link did not serve a PDF file");
+      const resp = got.resp;
       // If we still don't have a server-derived name, take this fetch's
       // Content-Disposition before we discard the response.
       if (!serverFilename) {
@@ -5231,7 +5254,7 @@ downloadEl.addEventListener("click", async () => {
         );
         if (headerName) setDisplayName(headerName);
       }
-      pdfBytes = await resp.arrayBuffer();
+      pdfBytes = got.buf;
     }
 
     // Wait briefly for the footer-title pass to complete if it hasn't yet.

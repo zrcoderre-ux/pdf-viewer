@@ -57,3 +57,19 @@ site — read the comments there for the why, not just the what.
    nested scroll context the toolbar couldn't see. Moved scroll to
    `<body>` (`overflow-y: auto`), removed it from the container. Sticky
    behavior now works as originally intended.
+
+6. **web-pdf.js** — SharePoint and OneDrive links ending in `.pdf` (a "Copy
+   link" address `…/:b:/r/sites/…/File.pdf?csf=1&web=1&e=…`, or a path with
+   `?web=1`) are caught by the `.pdf` redirect rule, but a fetch of them
+   answers with SharePoint's own viewer page, which pdf.js reported as
+   "Invalid PDF structure"; the browser's own view worked because it
+   navigates rather than fetches. `loadAndRender` now reads the link through
+   `fetchPdf`: the bytes must carry a `%PDF-` header in their first 1024
+   bytes (what pdf.js accepts), a SharePoint answer (by host, or by its
+   `MicrosoftSharePointTeamServices`/`SPRequestGuid` header for an
+   on-premises farm) is retried at the site's
+   `_layouts/15/download.aspx?SourceUrl=<path>` and then as the link with
+   `download=1`, and a link that still serves a page sends the tab on to it
+   with the bypass token (`openAsTheSiteServesIt`), so the site shows it as it
+   would without the extension (its viewer, or its sign-in page). Tests in
+   `test-web-pdf.mjs`.
