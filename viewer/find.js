@@ -81,6 +81,41 @@ export function findIn(norm, query, { caseSensitive = false, wholeWord = false }
   return out;
 }
 
+/** The lowest edge of the floating bars on screen, in client pixels (0 for none). */
+function barsBottom() {
+  let b = 0;
+  for (const el of document.querySelectorAll(".float-bar")) {
+    if (el.hidden || !el.getClientRects().length) continue;
+    b = Math.max(b, el.getBoundingClientRect().bottom);
+  }
+  return b;
+}
+
+/**
+ * Find stands at the top right, where the other tools' bars stand at the top
+ * centre; a wide one (Redact's) reaches under it. Find is used WITH those
+ * tools — find a name, then mark it — so it is not drawn over them or under
+ * them: where an open bar would meet it, it stands below that bar.
+ */
+export function placeFindBar(bar) {
+  if (!bar) return;
+  bar.style.top = "";
+  if (bar.hidden) return;
+  const me = bar.getBoundingClientRect();
+  let top = me.top;
+  for (let moved = true, n = 0; moved && n < 8; n++) {
+    moved = false;
+    for (const el of document.querySelectorAll(".float-bar")) {
+      if (el === bar || el.hidden || !el.getClientRects().length) continue;
+      const r = el.getBoundingClientRect();
+      const across = r.left < me.right && r.right > me.left;
+      const down = r.top < top + me.height && r.bottom > top;
+      if (across && down) { top = r.bottom + 8; moved = true; }
+    }
+  }
+  if (top !== me.top) bar.style.top = `${Math.round(top)}px`;
+}
+
 function rawToPoint(nodes, off) {
   // Binary search for the node holding raw offset `off`.
   let lo = 0, hi = nodes.length - 1;
@@ -163,7 +198,9 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {} }) {
     const place = () => {
       const r = m.range.getBoundingClientRect();
       if (!r.width && !r.height) return false;
-      const topBar = 52 + 60;
+      // Under the toolbar and whatever bars stand open below it (Find stacks
+      // under the Redact bar), not behind them.
+      const topBar = Math.max(52 + 60, barsBottom() + 24);
       if (r.top < topBar || r.bottom > window.innerHeight - 40) {
         window.scrollBy({ top: r.top - window.innerHeight / 3, behavior: "auto" });
       }
@@ -197,8 +234,17 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {} }) {
     if (!keepPlace && matches.length) go(1);
   }
 
+  const place = () => placeFindBar(bar);
+  if (typeof ResizeObserver !== "undefined") {
+    // A bar opened, closed, or wrapped to a second row: each changes its size.
+    const sizes = new ResizeObserver(place);
+    for (const el of document.querySelectorAll(".float-bar")) sizes.observe(el);
+  }
+  window.addEventListener("resize", place);
+
   function open(text = "") {
     bar.hidden = false;
+    place();
     toggleBtn?.setAttribute("aria-pressed", "true");
     if (text) input.value = text;
     input.focus();
@@ -241,6 +287,13 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {} }) {
     reset() { index = new Map(); matches = []; current = -1; paint(); if (!bar.hidden) showCount(); },
     /** The pages were rebuilt (zoom, rotation): read them again and keep the place. */
     pagesRebuilt() { index = new Map(); if (!bar.hidden && input.value.trim()) run({ keepPlace: true }); },
+    /** What the bar is searching for, with its options, or null when empty. */
+    current() {
+      const q = input.value.trim();
+      return q ? { query: q, caseSensitive: caseEl.checked, wholeWord: wordEl.checked } : null;
+    },
+    /** Stand clear of the other bars again (one opened or closed). */
+    place,
     /** Every match as { pn, range }, for tools that act on them (redact by search). */
     findAll(query, opts = {}) { return search(query, opts); },
   };
