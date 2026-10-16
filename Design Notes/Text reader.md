@@ -1981,7 +1981,8 @@ reading size), and by `applyMatchedLayoutNow`, which treats it as a ⇄ Raw page
 (`clearMatched`, its slot held to the page's height in `rawSlots`). The margin
 numbers stay: `buildBody` still makes the gutters and `.numbered`, so the
 numbered-page editing (fixed slots, `GUTTER_FIXED`) is unchanged, at the
-owner's word. `test-free-page.mjs` (Chromium) pins it; the grid path beside a
+owner's word. `useMyText` turns ✎ Edit on (`setEditing(true)`) when it
+puts a page on the list; withdrawing leaves it. `test-free-page.mjs` (Chromium) pins it; the grid path beside a
 PDF included.
 **…and without the click** (`autoUseMyText`, `noteTyping`, `forgetTyping`,
 `fixDeclined`, `textdoc.wordsChanged`, `TD.AUTO_TEXT_FIXED_WORDS`), at the

@@ -10293,6 +10293,8 @@ function useMyText(i) {
   textFixed = TD.setTextFixed(textFixed, { ...entry, sum: TD.pageTextSum(lines) }, true);
   persistValues();
   renderFlags();
+  // The page is the operator's to type now: ✎ Edit comes on with it.
+  if (!editing) setEditing(true);
   toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run writes the text into the PDF and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
 }
 /**

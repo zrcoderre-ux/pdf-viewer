@@ -2079,6 +2079,8 @@ app, which routes it to the reader tab.
   whatever you type. The margin numbers of a numbered page stay fixed in their
   gutter, as on every numbered page. Withdraw the request and the page is laid
   out against the PDF again; the text is the same either way.
+  Clicking ✎ Use my text also turns ✎ Edit on, so you can type straight
+  away; withdrawing the request leaves ✎ Edit as it is.
   **A page you type over is handed over by itself.** Where you have typed over
   two words or more on a page (corrected, put in or taken out, counted against
   the page as it read before your first keystroke on it), 💾 Save puts it on
