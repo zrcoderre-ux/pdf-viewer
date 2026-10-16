@@ -4,7 +4,8 @@
 // margin numbers stay fixed in their gutter, the text is unchanged, and
 // withdrawing the request lays it out as before; beside its PDF it comes off
 // the grid with its PDF page held level. The page is built free again
-// on reopening the document, and the click turns ✎ Edit on.
+// on reopening the document, the click turns ✎ Edit on, and the Flagged
+// panel's list goes to each page on it.
 //
 // Run: node test-free-page.mjs   (from the repo root)
 //
@@ -109,6 +110,9 @@ const A = [
   " 2  Other                   $5               June 1",
 ].join("\n") + "\n";
 
+// A second document, long enough that its last page is well off the screen.
+const B = Array.from({ length: 6 }, (_, k) => `====== Page ${k + 1} ======\n` + Array.from({ length: 40 }, (_, j) => `Brief page ${k + 1}, line ${j + 1}.`).join("\n")).join("\n") + "\n";
+
 let srv = null, browser = null;
 async function openReader(page) {
   await page.evaluate((n) => window.__textReaderOpenDoc(n), "A Decl.txt");
@@ -124,7 +128,7 @@ async function newReader() {
   page.on("dialog", (d) => d.accept().catch(() => {}));
   await page.goto(srv.base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
-  await page.evaluate(async ({ CASE, A, keyBytes }) => {
+  await page.evaluate(async ({ CASE, A, B, keyBytes }) => {
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry(CASE, { recursive: true }); } catch { /* none yet */ }
     const dir = await top.getDirectoryHandle(CASE, { create: true });
@@ -132,9 +136,10 @@ async function newReader() {
     await put(dir, "pseudonym_key.xlsx", new Uint8Array(keyBytes));
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "A Decl.txt", A);
+    await put(text, "B Brief.txt", B);
     window.__case = dir;
     await window.__textReaderAdoptFolder(dir);
-  }, { CASE, A, keyBytes: Array.from(KEY_BYTES) });
+  }, { CASE, A, B, keyBytes: Array.from(KEY_BYTES) });
   await page.evaluate(() => { const t = document.getElementById("reel-toggle"); if (t && t.checked) { t.checked = false; t.dispatchEvent(new Event("change")); } });
   await openReader(page);
   await page.evaluate(() => document.getElementById("edit-toggle").click());
@@ -262,6 +267,34 @@ async function run() {
       });
       truthy(`its PDF page held to its height (off by ${level.toFixed ? level.toFixed(1) : level}px)`, level >= 0 && level <= 2);
       check("the margin numbers kept", (await state(p, 0)).gutters, 4);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+    console.log("4. the Flagged panel's list goes to each ✓ Use my text page, in whichever document it is");
+    {
+      const r = await newReader();
+      const p = r.page;
+      await p.evaluate((n) => window.__textReaderOpenDoc(n), "B Brief.txt");
+      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length === 6);
+      await p.waitForTimeout(600);
+      await fixClick(p, 4);
+      await p.waitForTimeout(300);
+      await p.evaluate((n) => window.__textReaderOpenDoc(n), "A Decl.txt");
+      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length === 2);
+      await p.waitForTimeout(600);
+      check("the list names the page", await p.evaluate(() => [...document.querySelectorAll("#text-fixed-list li")].map((li) => li.textContent)), ["B Brief — page 5"]);
+      await p.evaluate(() => document.querySelector("#text-fixed-list li").click());
+      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length === 6, null, { timeout: 8000 });
+      await p.waitForTimeout(1200);
+      const at = await p.evaluate(() => {
+        const stage = document.getElementById("pages").closest("#stage") || document.scrollingElement;
+        const box = stage.getBoundingClientRect();
+        const sec = document.querySelectorAll("#pages .tpage")[4];
+        const r = sec.getBoundingClientRect();
+        return { top: Math.round(r.top - box.top), h: Math.round(box.height), free: sec.querySelector(".page-body").classList.contains("free") };
+      });
+      truthy(`the document opened at page 5, its head in view (top ${at.top} of ${at.h})`, at.top >= -2 && at.top < at.h / 2);
+      check("…a page free of the PDF", at.free, true);
       check("no page errors", r.log.errors, []);
       await r.close();
     }

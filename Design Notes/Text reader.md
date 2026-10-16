@@ -1972,6 +1972,9 @@ reads it. `#text-fixed-block` lists them.
 `setFree(sec, asked)` per page; a change rebuilds the body from its own text
 the way an undo does (`snapshotOf`, `buildBody`, `restoreTyping`, the caret
 put back), then lays the pages out again and `afterTextChangeSoon`.
+Each entry of `#text-fixed-list` goes to its page (`goToFixedPage`: found by
+`pageEntryAt` on screen, or its document opened from `folderDocs` first, then
+`goToPageFromList`); the Pages tab already tags such a page "Use my text".
 `buildPages` adds the class before the first `buildBody` of a page on the
 list. A free body is passed over by the rule rows and the columns
 (`dressLines`/`dressColumns` are local guards over `rules.js`'s and

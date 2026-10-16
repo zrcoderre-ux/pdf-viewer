@@ -819,6 +819,19 @@ body.gutter-off .page-body.numbered .gutter { font-size: var(--body-em); }
    column instead and is CUT at the edge of the paper (.page-inner clips) —
    one long line does not take the whole page's type down with it. */
 .page-body.numbered .line.num > .lt { white-space: pre; }
+/* One pitch down the margin (slotLines): a number's slot is its line and the
+   unnumbered lines under it, and every slot is padded to the fullest one's rows
+   (--slot-rows, on #pages). Off the grid only: there the PDF places them. */
+.tpage:not(.matched) .page-body.numbered:not(.fixed) .line[data-slot] > .lt { white-space: pre; }
+.tpage:not(.matched) .page-body.numbered:not(.fixed) .line[data-slot="end"] {
+  margin-bottom: calc(max(0, var(--slot-rows, 1) - var(--slot-used, 1)) * var(--reader-lh) * 1em);
+}
+/* …a row of a ruled box is made taller instead: a gap under it would break the
+   box's bars, and the bars stretch to the row's height. */
+.tpage:not(.matched) .page-body.numbered:not(.fixed) .line.rl[data-slot="end"] {
+  margin-bottom: 0;
+  height: calc((1 + max(0, var(--slot-rows, 1) - var(--slot-used, 1))) * var(--reader-lh) * 1em);
+}
 /* The columns an export lays out with spaces, laid out (columns.js), on a
    grid whose character is the reader font's average one (--col-n, in ems;
    --col-sp-n is its space). An indented line keeps its spaces and is
