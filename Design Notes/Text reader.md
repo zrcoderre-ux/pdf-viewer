@@ -1967,6 +1967,22 @@ that reads `[DID NOT OCR]` has
 no transcription: the button is disabled there, `markDidNotOcr` withdraws an
 entry for the page it strips, and `syncNoOcr` drops one for a page that
 reads it. `#text-fixed-block` lists them.
+**…and a page on the list is free of the PDF** (`setFree`, `isFreePage`, a
+`.page-body.free`). `refreshFixButtons` (every `renderFlags`) calls
+`setFree(sec, asked)` per page; a change rebuilds the body from its own text
+the way an undo does (`snapshotOf`, `buildBody`, `restoreTyping`, the caret
+put back), then lays the pages out again and `afterTextChangeSoon`.
+`buildPages` adds the class before the first `buildBody` of a page on the
+list. A free body is passed over by the rule rows and the columns
+(`dressLines`/`dressColumns` are local guards over `rules.js`'s and
+`columns.js`'s, so every caller, the typing's `recolumnSoon` included, skips
+it), by `shapePages` (its `--fit` and `minHeight` taken off: it flows at the
+reading size), and by `applyMatchedLayoutNow`, which treats it as a ⇄ Raw page
+(`clearMatched`, its slot held to the page's height in `rawSlots`). The margin
+numbers stay: `buildBody` still makes the gutters and `.numbered`, so the
+numbered-page editing (fixed slots, `GUTTER_FIXED`) is unchanged, at the
+owner's word. `test-free-page.mjs` (Chromium) pins it; the grid path beside a
+PDF included.
 **…and without the click** (`autoUseMyText`, `noteTyping`, `forgetTyping`,
 `fixDeclined`, `textdoc.wordsChanged`, `TD.AUTO_TEXT_FIXED_WORDS`), at the
 owner's direction. A page's text just before the first keystroke on it is kept
