@@ -366,6 +366,26 @@ The same page lays out line for line beside its PDF. The numbers themselves are
 put back as the export is read (`readExport`, Text reader.md), so this matters
 where too few were read to put any back.
 
+### One pitch down the margin off the grid (`slotLines`, `slotRows`)
+
+Off the grid (no PDF beside the page, or a ✓ Use my text page) a numbered
+page's lines flow, and an unnumbered line between two numbers took a row of
+its own, so that pair of numbers stood twice as far apart as the rest. The
+owner: a line between the numbers is fine, but the spacing should be
+consistent throughout. `slotLines(body)` (from `dressBody`, and over every
+page in `afterTextChange`) marks each numbered line and the unnumbered lines
+under it, up to the next number, as one slot (`data-slot`, "end" on its last
+line, `--slot-used` its rows); the lines after the last number (a footer) and
+the trailer are in none. `slotRows()` puts the rows of the fullest slot of any
+numbered page on screen on `#pages` as `--slot-rows`, and the CSS pads each
+slot's last line to it (`margin-bottom`, in `--reader-lh` rows), so every
+number of the document stands the same distance from the next: one row, or
+two once any number has a line under it. Lines in a slot do not wrap, as a
+numbered line does not. None of it applies on the grid (`.tpage.matched`,
+`.page-body.fixed`), where the PDF places the numbers. A page fitted to the
+paper (`shapePages`) is fitted with the padding, so a page whose pitch doubled
+is set smaller. `test-margin-pitch.mjs` (Chromium) pins it.
+
 ### The hold: a key value carrying a run of blank
 
 This is the one that took the tab down. The breadcrumb finally named it:

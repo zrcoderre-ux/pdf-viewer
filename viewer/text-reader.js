@@ -4815,7 +4815,48 @@ function dressBody(body) {
   dressLines(body);
   dressColumns(body);
   markTrailer(body);
+  slotLines(body);
+  slotRowsSoon();
 }
+// ONE PITCH DOWN THE MARGIN. Off the grid a numbered page's lines flow, and a
+// line between two numbers (a caption's second line, a line the OCR read
+// between them) took a row of its own: the numbers either side of it stood
+// twice as far apart as every other pair, and the margin no longer read as
+// pleading paper. A line between the numbers is fine; the spacing is not. So
+// each number's slot is its line and the unnumbered lines under it, and every
+// slot in the document is padded to the rows of the fullest one
+// (`--slot-rows` on #pages, slotRows): one number with a line under it, and
+// every number down every numbered page stands two rows from the next. The
+// lines in a slot are not wrapped (a wrapped one would make its slot taller
+// than the rest), as a numbered line is not. The lines after the last number
+// (a footer) are not in a slot. On the grid (`.fixed`) the PDF places the
+// numbers, and none of this applies.
+function slotLines(body) {
+  for (const l of body.querySelectorAll(":scope > .line[data-slot]")) { delete l.dataset.slot; l.style.removeProperty("--slot-used"); }
+  body.__slotRows = 1;
+  if (!body.classList.contains("numbered")) return;
+  const lines = [...body.querySelectorAll(":scope > .line")];
+  let at = -1;
+  const close = (end) => {
+    const used = end - at;
+    for (let k = at; k < end; k++) lines[k].dataset.slot = k === end - 1 ? "end" : "in";
+    lines[end - 1].style.setProperty("--slot-used", String(used));
+    if (used > body.__slotRows) body.__slotRows = used;
+  };
+  lines.forEach((l, k) => {
+    if (!l.classList.contains("num") || l.classList.contains("trailer")) return;
+    if (at >= 0) close(k);
+    at = k;
+  });
+  if (at >= 0) close(at + 1);
+}
+/** The rows of the fullest slot of every numbered page on screen: every slot is padded to it. */
+function slotRows() {
+  let rows = 1;
+  for (const body of pagesEl.querySelectorAll(".page-body.numbered")) rows = Math.max(rows, body.__slotRows || 1);
+  if (pagesEl.style.getPropertyValue("--slot-rows") !== String(rows)) pagesEl.style.setProperty("--slot-rows", String(rows));
+}
+const slotRowsSoon = debounce(slotRows, 0);
 
 /** The gutter span: the number (shown in the margin) and the spacing after it (kept, not shown). The numbers are fixed: the span takes no edit. */
 function makeGutter(prefix) {
@@ -4915,6 +4956,8 @@ function showFakes(on) {
 // flagged and leaked highlights. Cheap enough to run on every settled edit.
 function afterTextChange() {
   updateCounts();
+  for (const body of pageBodies()) slotLines(body); // a line typed or taken out between two numbers
+  slotRows();
   textAnchors = null; textLineTops = null;
   applyMatchedLayout();
   applyPageWidth();

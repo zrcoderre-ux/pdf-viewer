@@ -1648,6 +1648,12 @@ app, which routes it to the reader tab.
   document over again, and is a reel already), and it stops after 25 documents
   in all, either end — a page of a long export is not free, and a folder can
   hold three hundred — saying so, with the next one a click away in the list.
+  **The margin numbers are evenly spaced.** Where the PDF is not beside the
+  page (or the page is on ✓ Use my text), a line between two numbers is kept,
+  but it no longer pushes those two numbers apart: every number in the
+  document is given the same room, enough for the fullest one. With no line
+  between any two numbers, that is one row; once any number has a line under
+  it, every number is two rows from the next.
   The **numbered margin is the boundary**: nothing the grid does puts a line
   left of it. A PDF carries margin furniture the export has not — the firm
   printed down the side, a seal, a stamp — and the body's margin is the one
