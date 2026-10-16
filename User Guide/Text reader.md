@@ -2082,13 +2082,16 @@ app, which routes it to the reader tab.
   space, and no wrapping, so a column you line up on the page is lined up in
   the file. A real name is drawn across exactly the room its pseudonym takes
   in the file (squeezed or stretched a little), so the columns after it are
-  where the file has them. The page keeps the paper's length beside the
-  others, its type set smaller if needed so its longest line is seen to its
-  end. Nothing lines its text up with the PDF's: beside the PDF the page sits
-  level with its PDF page, its spaces are not cut into columns, and its ruled
-  lines are not drawn as table rows. The margin numbers stay fixed in their
-  gutter. Withdraw the request and the page is laid out against the PDF
-  again; the text is the same either way.
+  where the file has them. Down the page nothing changes: beside the PDF the
+  page keeps its PDF page's size and each line stays level with its row on
+  the PDF, in the same type size as before; off the PDF it keeps the paper's
+  shape like every other page. Across the page it is yours: every line starts
+  from one left edge and your spaces place the text; it is not cut into
+  columns, its ruled lines are not drawn as table rows, and no line is moved
+  or narrowed on its own. A line too long for the page scrolls sideways
+  rather than being shrunk. The margin numbers stay fixed. Withdraw the
+  request and the page is laid out against the PDF again; the text is the
+  same either way.
   Clicking ✎ Use my text also turns ✎ Edit on, so you can type straight
   away; withdrawing the request leaves ✎ Edit as it is.
   **To find them:** the Flagged panel lists every page on ✓ Use my text in

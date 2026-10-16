@@ -10481,18 +10481,21 @@ function refreshFixButtons(indices) {
 /**
  * USE MY TEXT IS THE OPERATOR'S PAGE. While a page is asked for as ✓ Use my
  * text, its text is to be the page's own — PDF-Linker writes it into the PDF,
- * not the other way about — so nothing places its text where the PDF has
- * it: it comes off the grid beside the PDF (its slot held level, as a raw
- * page's is), and its spaces are not cut into columns or its rules into rows.
- * It is set as a plain text file is, fixed-pitch and unwrapped, so that the
- * page is typed to look like its PDF the way the FILE will: a space is one
+ * not the other way about — so nothing places its text ACROSS the page where
+ * the PDF has it: its spaces are not cut into columns or its rules into rows,
+ * and beside its PDF its lines are not cut at the PDF's items, set each at its
+ * own left, or slid and narrowed one at a time (applyMatchedLayoutNow). It is
+ * set as a plain text file is, fixed-pitch and unwrapped, so that the page is
+ * typed to look like its PDF the way the FILE will: a space is one
  * character's width, and a column typed straight is straight in the file.
- * It is still a page: shaped to the paper as any page off the grid is
- * (shapePages), its type taken down until its widest line fits across
- * (freeCap), so it is as long as the others — the owner: "Keep the page
- * constraint, just don't mess with my ability to adjust the placement of text
- * horizontally." The spacing and the placement are whatever is typed — between
- * the margin numbers, which stay fixed in their gutter as on any numbered page.
+ * DOWN the page it is a page like the others: beside its PDF it takes the PDF
+ * page's size and its lines the PDF's places down it, in the document's body
+ * type; off the grid it is shaped to the paper as the others are. Its type is
+ * never made smaller than theirs for it: a line too long for the sheet is
+ * scrolled to (text-reader.css). The owner: "retain the page size and the
+ * line spacing with pdf and text file", and "don't mess with my ability to
+ * adjust the placement of text horizontally". The margin numbers stay fixed
+ * in their gutter as on any numbered page.
  * The page
  * is built again from its own text when it goes either way (the text, its
  * keeps and what was typed on it are carried as an undo carries them), so it
@@ -19128,7 +19131,7 @@ function applyMatchedLayoutNow() {
   const rawSlots = [];
   for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
     const i = Number(sec.dataset.index);
-    if (sec.classList.contains("raw") || isFreePage(sec)) {
+    if (sec.classList.contains("raw")) {
       clearMatched(sec);
       const el = on ? slots.get(i) : null;
       if (el) { matchedSlots.add(el); fitSlot(el, w0); rawSlots.push([el, sec]); }
@@ -19183,7 +19186,7 @@ function applyMatchedLayoutNow() {
     // width, its text, its type or its grid does, so a page whose answer is in
     // hand is not worked out again.
     const planKey = [textEpoch, w0, info.name, t.page, base, bodyX, geom ? 1 : 0, rows ? rows.length : -1,
-      settings.lineHeight, settings.font, settings.customFont, info.faceEpoch || 0].join("|");
+      settings.lineHeight, settings.font, settings.customFont, info.faceEpoch || 0, isFreePage(sec) ? "free" : ""].join("|");
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       matchedSlots.add(slot);
@@ -19287,6 +19290,23 @@ function applyMatchedLayoutNow() {
           if (first) lefts[k] = charGridFit ? first[1].x - lead * charGridFit.unit : first[1].x;
         });
       }
+    }
+    // A ✓ USE MY TEXT PAGE KEEPS THE PDF'S PAGE AND ITS LINES' PLACES DOWN IT,
+    // and nothing across. The operator is typing the page to look like its
+    // PDF the way the file will (setFree), a character a place: every line in
+    // one size (the document's body type), from one left edge (the page's own
+    // text margin), never cut into pieces at the PDF's items nor slid or
+    // squeezed a line at a time below — so what the typed spaces put where is
+    // what stands there. The owner: "retain the page size and the line
+    // spacing with pdf and text file".
+    if (isFreePage(sec)) {
+      if (sizes && base > 0) sizes = sizes.map(() => base);
+      if (lefts) {
+        const at = lefts.filter((l) => l != null);
+        const edge = at.length ? Math.min(...at) : null;
+        lefts = lefts.map((l) => (l == null ? null : edge));
+      }
+      charGridFit = null; cells = null; typeBox = null;
     }
     // Never on top of each other: a row the PDF (a scan's text layer, most
     // often) prints closer under the one above than that line's box is tall
@@ -19529,7 +19549,7 @@ function applyMatchedLayoutNow() {
   // numbers in front of them, has nothing to give and is left alone).
   const spill = [];
   for (const p of plans) {
-    if (!p.tops || !p.lefts) continue;
+    if (!p.tops || !p.lefts || isFreePage(p.sec)) continue; // a free page's lines keep one edge
     p.lines.forEach((l, k) => {
       const left = p.lefts[k] == null ? 0 : p.lefts[k] * p.scale;
       // What it may give back is the indent IN FRONT of it — the blank
@@ -19567,6 +19587,12 @@ function applyMatchedLayoutNow() {
   const squeeze = [];
   for (const p of plans) {
     if (!near.has(Number(p.sec.dataset.index))) continue;
+    // Not a ✓ Use my text page: its type is never made smaller, and a line
+    // too long for the sheet is scrolled to (text-reader.css), not narrowed.
+    if (isFreePage(p.sec)) {
+      for (const lt of p.body.querySelectorAll(":scope > .line > .lt")) if (lt.style.transform) { lt.style.transform = ""; lt.style.transformOrigin = ""; }
+      continue;
+    }
     for (const l of p.lines) {
       if (l.classList.contains("rl")) continue; // a ruled box is squared up by fitRuleRows
       const lt = l.querySelector(":scope > .lt");
@@ -19858,11 +19884,7 @@ function shapePages({ all = false } = {}) {
     // so the fit found below takes them with it.
     alignColumns(live.map((s) => s.body).filter((b) => !b.classList.contains("free")));
     const caps = columnCaps(live.map((s) => s.body));
-    // A ✓ Use my text page is being typed to look like its PDF, a character a
-    // place (fixed-pitch, unwrapped): every line has to be seen to its end, so
-    // its widest line is a ceiling as a column line is.
-    const freeCaps = live.map((s) => freeCap(s.body));
-    live.forEach((s, k) => { const c = Math.min(caps[k], freeCaps[k]); if (c < 1) put(s, c); });
+    live.forEach((s, k) => { if (caps[k] < 1) put(s, caps[k]); });
     for (let pass = 0; pass < FIT_PASSES && live.length; pass++) {
       // Too tall for the paper: the type gives. Too WIDE is not the type's
       // fault and is not paid for by the whole page — one runaway line
@@ -19913,13 +19935,6 @@ function shapePages({ all = false } = {}) {
  * one line (1 where every one fits, or there are none). The lines are read
  * unwrapped, every page at once, so the pass lays the document out once.
  */
-/** The size a ✓ Use my text page's widest line fits across the paper at (1 where it fits already). */
-function freeCap(body) {
-  if (!body.classList.contains("free")) return 1;
-  let need = 0, room = 0;
-  for (const lt of body.querySelectorAll(":scope > .line > .lt")) { need = Math.max(need, lt.scrollWidth); room = room || lt.clientWidth; }
-  return room > 0 && need > room + 0.5 ? Math.max(MIN_FIT, Math.floor((room / need) * 1000) / 1000) : 1;
-}
 function columnCaps(bodies) {
   const rows = bodies.map((b) => [...b.querySelectorAll(":scope > .line.cols > .lt")]);
   const on = bodies.filter((b, k) => rows[k].length);

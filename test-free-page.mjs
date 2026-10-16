@@ -3,8 +3,8 @@
 // the paper's shape, is set fixed-pitch and unwrapped as the file is, and
 // its spaces are no longer cut into columns, its
 // margin numbers stay fixed in their gutter, the text is unchanged, and
-// withdrawing the request lays it out as before; beside its PDF it comes off
-// the grid with its PDF page held level. The page is built free again
+// withdrawing the request lays it out as before; beside its PDF it keeps the
+// PDF page's size and its lines' places down it, unshrunk, from one left edge. The page is built free again
 // on reopening the document, the click turns ✎ Edit on, and the Flagged
 // panel's list goes to each page on it.
 //
@@ -255,7 +255,7 @@ async function run() {
       check("no page errors", r.log.errors, []);
       await r.close();
     }
-    console.log("3. beside its PDF, the page comes off the grid and its PDF page stays level");
+    console.log("3. beside its PDF, the page keeps its PDF page's size and its lines' places down it");
     {
       const r = await newReader();
       const p = r.page;
@@ -284,15 +284,29 @@ async function run() {
       await p.waitForTimeout(1200);
       const matched = () => p.evaluate(() => [...document.querySelectorAll("#pages .tpage")].map((s) => s.classList.contains("matched")));
       check("both pages on the grid before", await matched(), [true, true]);
-      await fixClick(p, 0);
-      await p.waitForTimeout(1200);
-      check("the freed page is off the grid, the other on it", await matched(), [false, true]);
-      const level = await p.evaluate(() => {
+      const laid = () => p.evaluate(() => {
         const sec = document.querySelector("#pages .tpage");
         const slot = document.querySelector('.pdf-slot[data-index="0"]');
-        return slot ? Math.abs(slot.getBoundingClientRect().height - sec.getBoundingClientRect().height) : -1;
+        const lines = [...sec.querySelectorAll(".page-body > .line")];
+        return {
+          h: Math.round(sec.getBoundingClientRect().height),
+          slotH: slot ? Math.round(slot.getBoundingClientRect().height) : -1,
+          tops: lines.map((l) => Math.round(parseFloat(l.style.top) * 10) / 10),
+          sizes: lines.map((l) => Math.round(parseFloat(getComputedStyle(l).fontSize) * 10) / 10),
+          squeezed: lines.some((l) => { const lt = l.querySelector(".lt"); return !!(lt && lt.style.transform); }),
+          lefts: [...new Set(lines.map((l) => l.style.left))],
+        };
       });
-      truthy(`its PDF page held to its height (off by ${level.toFixed ? level.toFixed(1) : level}px)`, level >= 0 && level <= 2);
+      const before = await laid();
+      await fixClick(p, 0);
+      await p.waitForTimeout(1200);
+      const after = await laid();
+      check("the freed page stays on the PDF's page beside it", await matched(), [true, true]);
+      check("…the PDF page's size", [after.h, after.slotH], [before.h, before.slotH]);
+      check("…each line where the PDF has it down the page", after.tops, before.tops);
+      truthy(`…in one size, no smaller than before (${before.sizes.join(",")} → ${after.sizes.join(",")})`, new Set(after.sizes).size === 1 && after.sizes[0] >= Math.min(...before.sizes) - 0.1);
+      check("…never narrowed", after.squeezed, false);
+      check("…every line from one left edge", after.lefts.length, 1);
       check("the margin numbers kept", (await state(p, 0)).gutters, 4);
       check("no page errors", r.log.errors, []);
       await r.close();

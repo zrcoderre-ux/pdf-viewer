@@ -1979,18 +1979,26 @@ Each entry of `#text-fixed-list` goes to its page (`goToFixedPage`: found by
 list. A free body is passed over by the rule rows and the columns
 (`dressLines`/`dressColumns` are local guards over `rules.js`'s and
 `columns.js`'s, so every caller, the typing's `recolumnSoon` included, skips
-it), and by `applyMatchedLayoutNow`, which treats it as a ⇄ Raw page
-(`clearMatched`, its slot held to the page's height in `rawSlots`). The
-owner's aim: "to easily manually type the text file to look like the PDF". So
-a free page is set as the file is (text-reader.css `.page-body.free`:
-fixed-pitch, `.lt` `white-space: pre`), and `fitFreeNames` (from `dressBody`
-and `afterTextChange`) draws each pseudonym span across its FAKE's width
+it). Beside its PDF it stays on the grid DOWN the page and is left alone
+ACROSS it: `applyMatchedLayoutNow` plans it as any page (the PDF page's size,
+`slotTops`/`rowLayout` tops, `spreadTops`, `holdWithin`), then gives every
+line the document's body type (`base`), one left (the least of the row
+lefts, where the page is unnumbered), and no `cells`, `charGridFit` or
+`typeBox`; the spill pass passes it by and so does the squeeze, which takes
+any `scaleX` off it. Off the grid `shapePages` shapes it as any page. Its
+type is never taken down for it: a line too long for the sheet scrolls
+(`.page-inner:has(> .page-body.free)`, `overflow-x: auto`). The owner's aim:
+"to easily manually type the text file to look like the PDF". So a free page
+is set as the file is (text-reader.css `.page-body.free`: fixed-pitch, `.lt`
+`white-space: pre`), and `fitFreeNames` (from `dressBody` and
+`afterTextChange`) draws each pseudonym span across its FAKE's width
 (`scaleX(fake/shown)` and a `margin-right` of the difference in `ch`), so a
-column straight in the file is straight on the page. It was first left
-unshaped as well; "Now the use my text pages are way too long. Keep the page
-constraint", so `shapePages` shapes it like any page off the grid, and
-`freeCap` caps its `--fit` at the size its widest line fits across, as
-`columnCaps` does for column lines. The margin
+column straight in the file is straight on the page. How it got here, in the
+owner's words: taken off the grid and left to flow, the page was "way too
+long"; shaped to the paper with its type capped to its widest line, it
+"shrunk the text size too"; "I want to retain the page size and the line
+spacing with pdf and text file". The PDF's page and rows down it, and
+nothing across. The margin
 numbers stay: `buildBody` still makes the gutters and `.numbered`, so the
 numbered-page editing (fixed slots, `GUTTER_FIXED`) is unchanged, at the
 owner's word. `useMyText` turns ✎ Edit on (`setEditing(true)`) when it
