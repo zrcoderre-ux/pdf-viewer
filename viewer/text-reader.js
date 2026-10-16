@@ -4815,6 +4815,7 @@ function dressBody(body) {
   dressLines(body);
   dressColumns(body);
   markTrailer(body);
+  fitFreeNames(body);
   slotLines(body);
   slotRowsSoon();
 }
@@ -4849,6 +4850,30 @@ function slotLines(body) {
     at = k;
   });
   if (at >= 0) close(at + 1);
+}
+/**
+ * ON A ✓ USE MY TEXT PAGE A NAME TAKES ITS PSEUDONYM'S ROOM. The page is typed
+ * to look like its PDF the way the file will, a character a place — and the
+ * file carries the pseudonym, the page the real name, and the two are seldom
+ * one length: "Corwin Ashdale" shown for "Tobias Wrenfield" stood two places
+ * short, and every column typed after it on that line was two places off what
+ * the file says. So the name is drawn squeezed or stretched across exactly the
+ * places its pseudonym takes in the file (a scale on the span, and a margin
+ * making up the difference in its box); its letters stay its own.
+ */
+function fitFreeNames(body) {
+  const free = body.classList.contains("free");
+  for (const span of body.querySelectorAll(".pn")) {
+    const f = span.dataset.fake.length, r = span.textContent.length;
+    if (!free || f === r || !r) {
+      if (span.style.transform) { span.style.display = ""; span.style.transform = ""; span.style.transformOrigin = ""; span.style.marginRight = ""; }
+      continue;
+    }
+    span.style.display = "inline-block";
+    span.style.transformOrigin = "0 50%";
+    span.style.transform = `scaleX(${(f / r).toFixed(4)})`;
+    span.style.marginRight = `${f - r}ch`;
+  }
 }
 /** The rows of the fullest slot of every numbered page on screen: every slot is padded to it. */
 function slotRows() {
@@ -4956,7 +4981,10 @@ function showFakes(on) {
 // flagged and leaked highlights. Cheap enough to run on every settled edit.
 function afterTextChange() {
   updateCounts();
-  for (const body of pageBodies()) slotLines(body); // a line typed or taken out between two numbers
+  for (const body of pageBodies()) {
+    slotLines(body); // a line typed or taken out between two numbers
+    fitFreeNames(body); // …and a name typed, or the fakes shown
+  }
   slotRows();
   textAnchors = null; textLineTops = null;
   applyMatchedLayout();
@@ -10453,10 +10481,17 @@ function refreshFixButtons(indices) {
 /**
  * USE MY TEXT IS THE OPERATOR'S PAGE. While a page is asked for as ✓ Use my
  * text, its text is to be the page's own — PDF-Linker writes it into the PDF,
- * not the other way about — so nothing holds it to the PDF any more: it comes
- * off the grid beside the PDF (its slot held level, as a raw page's is), is
- * not shaped to the paper, its spaces are not cut into columns or its rules
- * into rows. The spacing and the placement are whatever is typed — between
+ * not the other way about — so nothing places its text where the PDF has
+ * it: it comes off the grid beside the PDF (its slot held level, as a raw
+ * page's is), and its spaces are not cut into columns or its rules into rows.
+ * It is set as a plain text file is, fixed-pitch and unwrapped, so that the
+ * page is typed to look like its PDF the way the FILE will: a space is one
+ * character's width, and a column typed straight is straight in the file.
+ * It is still a page: shaped to the paper as any page off the grid is
+ * (shapePages), its type taken down until its widest line fits across
+ * (freeCap), so it is as long as the others — the owner: "Keep the page
+ * constraint, just don't mess with my ability to adjust the placement of text
+ * horizontally." The spacing and the placement are whatever is typed — between
  * the margin numbers, which stay fixed in their gutter as on any numbered page.
  * The page
  * is built again from its own text when it goes either way (the text, its
@@ -19721,14 +19756,6 @@ function shapePages({ all = false } = {}) {
     // while a print is being made, when its text is the page that prints
     // (body.printing, beforeprint) and is fitted to the paper like any other.
     if ((sec.classList.contains("swapped") && !printing) || sec.classList.contains("raw")) continue;
-    // A page of the operator's own text (✓ Use my text) is not the PDF's
-    // paper: it flows at the reading size, as long as its text makes it.
-    if (isFreePage(sec)) {
-      if (body.style.minHeight) body.style.minHeight = "";
-      if (sec.style.getPropertyValue("--fit")) sec.style.removeProperty("--fit");
-      sec.__shapedFor = null;
-      continue;
-    }
     const loose = sec.classList.contains("matched")
       || (!clipped && sec.querySelector(".line.trailer"));
     if (loose) {
@@ -19829,9 +19856,13 @@ function shapePages({ all = false } = {}) {
     // alignColumns): a second column one place down the lines beside it, a
     // gutter clear of the widest text to its left. Written in the body's type,
     // so the fit found below takes them with it.
-    alignColumns(live.map((s) => s.body));
+    alignColumns(live.map((s) => s.body).filter((b) => !b.classList.contains("free")));
     const caps = columnCaps(live.map((s) => s.body));
-    live.forEach((s, k) => { if (caps[k] < 1) put(s, caps[k]); });
+    // A ✓ Use my text page is being typed to look like its PDF, a character a
+    // place (fixed-pitch, unwrapped): every line has to be seen to its end, so
+    // its widest line is a ceiling as a column line is.
+    const freeCaps = live.map((s) => freeCap(s.body));
+    live.forEach((s, k) => { const c = Math.min(caps[k], freeCaps[k]); if (c < 1) put(s, c); });
     for (let pass = 0; pass < FIT_PASSES && live.length; pass++) {
       // Too tall for the paper: the type gives. Too WIDE is not the type's
       // fault and is not paid for by the whole page — one runaway line
@@ -19882,6 +19913,13 @@ function shapePages({ all = false } = {}) {
  * one line (1 where every one fits, or there are none). The lines are read
  * unwrapped, every page at once, so the pass lays the document out once.
  */
+/** The size a ✓ Use my text page's widest line fits across the paper at (1 where it fits already). */
+function freeCap(body) {
+  if (!body.classList.contains("free")) return 1;
+  let need = 0, room = 0;
+  for (const lt of body.querySelectorAll(":scope > .line > .lt")) { need = Math.max(need, lt.scrollWidth); room = room || lt.clientWidth; }
+  return room > 0 && need > room + 0.5 ? Math.max(MIN_FIT, Math.floor((room / need) * 1000) / 1000) : 1;
+}
 function columnCaps(bodies) {
   const rows = bodies.map((b) => [...b.querySelectorAll(":scope > .line.cols > .lt")]);
   const on = bodies.filter((b, k) => rows[k].length);

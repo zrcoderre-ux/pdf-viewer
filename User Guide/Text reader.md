@@ -2077,14 +2077,18 @@ app, which routes it to the reader tab.
   second click withdraws it, ⊘ Did not OCR on the page withdraws it too, and
   it is off on a page that reads `[DID NOT OCR]`. ⊘ Did not OCR stays for the
   page you cannot read, or that is not worth the typing.
-  **While a page reads ✓ Use my text, it no longer follows the PDF.** Its
-  text is to be the page's own, so the reader stops laying it out against the
-  PDF: beside the PDF it comes off the PDF's grid (its PDF page held level
-  beside it), it is not shaped to the PDF's paper, and its spaces are not cut
-  into columns or its ruled lines into rows. The spacing and placement are
-  whatever you type. The margin numbers of a numbered page stay fixed in their
-  gutter, as on every numbered page. Withdraw the request and the page is laid
-  out against the PDF again; the text is the same either way.
+  **While a page reads ✓ Use my text, you type it to look like the PDF.** The
+  page is set the way the text file is: a fixed-width font, one character per
+  space, and no wrapping, so a column you line up on the page is lined up in
+  the file. A real name is drawn across exactly the room its pseudonym takes
+  in the file (squeezed or stretched a little), so the columns after it are
+  where the file has them. The page keeps the paper's length beside the
+  others, its type set smaller if needed so its longest line is seen to its
+  end. Nothing lines its text up with the PDF's: beside the PDF the page sits
+  level with its PDF page, its spaces are not cut into columns, and its ruled
+  lines are not drawn as table rows. The margin numbers stay fixed in their
+  gutter. Withdraw the request and the page is laid out against the PDF
+  again; the text is the same either way.
   Clicking ✎ Use my text also turns ✎ Edit on, so you can type straight
   away; withdrawing the request leaves ✎ Edit as it is.
   **To find them:** the Flagged panel lists every page on ✓ Use my text in

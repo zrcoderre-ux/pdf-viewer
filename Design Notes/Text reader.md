@@ -1979,9 +1979,18 @@ Each entry of `#text-fixed-list` goes to its page (`goToFixedPage`: found by
 list. A free body is passed over by the rule rows and the columns
 (`dressLines`/`dressColumns` are local guards over `rules.js`'s and
 `columns.js`'s, so every caller, the typing's `recolumnSoon` included, skips
-it), by `shapePages` (its `--fit` and `minHeight` taken off: it flows at the
-reading size), and by `applyMatchedLayoutNow`, which treats it as a ⇄ Raw page
-(`clearMatched`, its slot held to the page's height in `rawSlots`). The margin
+it), and by `applyMatchedLayoutNow`, which treats it as a ⇄ Raw page
+(`clearMatched`, its slot held to the page's height in `rawSlots`). The
+owner's aim: "to easily manually type the text file to look like the PDF". So
+a free page is set as the file is (text-reader.css `.page-body.free`:
+fixed-pitch, `.lt` `white-space: pre`), and `fitFreeNames` (from `dressBody`
+and `afterTextChange`) draws each pseudonym span across its FAKE's width
+(`scaleX(fake/shown)` and a `margin-right` of the difference in `ch`), so a
+column straight in the file is straight on the page. It was first left
+unshaped as well; "Now the use my text pages are way too long. Keep the page
+constraint", so `shapePages` shapes it like any page off the grid, and
+`freeCap` caps its `--fit` at the size its widest line fits across, as
+`columnCaps` does for column lines. The margin
 numbers stay: `buildBody` still makes the gutters and `.numbered`, so the
 numbered-page editing (fixed slots, `GUTTER_FIXED`) is unchanged, at the
 owner's word. `useMyText` turns ✎ Edit on (`setEditing(true)`) when it
