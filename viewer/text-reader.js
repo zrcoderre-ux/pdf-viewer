@@ -11124,6 +11124,31 @@ function clearPagesPicked() {
   pagesAnchor = null;
 }
 
+/**
+ * Go to a page on the ✓ Use my text list (the Flagged panel's
+ * #text-fixed-list), wherever in the folder it is: on screen, or in a
+ * document of the folder opened for it.
+ */
+async function goToFixedPage(e) {
+  const find = () => {
+    if (!doc) return -1;
+    const sources = docPageSources();
+    for (let i = 0; i < doc.pages.length; i++) {
+      const x = pageEntryAt(i, sources);
+      if (x && TD.sameNoOcr(x, e)) return i;
+    }
+    return -1;
+  };
+  let i = find();
+  if (i < 0) {
+    const d = folderDocs.find((x) => x.name === e.doc);
+    if (!d) { toast(`${e.doc} is not among the case folder's documents, so its page ${e.page} cannot be shown.`, { error: true }); return; }
+    if (!(await openFolderDoc(d))) return;
+    i = find();
+  }
+  if (i < 0) { toast(`${TD.docLabel(e.pdf || e.doc)} has no page ${e.page} any more.`, { error: true }); return; }
+  goToPageFromList(doc.pages[i]);
+}
 /** Go to a page from its row: its head at the top of the stage. */
 function goToPageFromList(p) {
   const i = doc ? doc.pages.indexOf(p) : -1;
@@ -13859,7 +13884,11 @@ function renderFlags() {
   for (const e of textFixed) {
     const li = document.createElement("li");
     li.textContent = `${TD.docLabel(e.pdf || e.doc)} — page ${e.page}`;
-    li.title = TD.textFixedLine(e);
+    li.title = `Go to this page — ${TD.textFixedLine(e)}`;
+    li.tabIndex = 0;
+    li.setAttribute("role", "button");
+    li.addEventListener("click", () => goToFixedPage(e));
+    li.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); goToFixedPage(e); } });
     fixedList.appendChild(li);
   }
   refreshNocrButtons();

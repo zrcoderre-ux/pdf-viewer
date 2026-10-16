@@ -381,10 +381,12 @@ numbered page on screen on `#pages` as `--slot-rows`, and the CSS pads each
 slot's last line to it (`margin-bottom`, in `--reader-lh` rows), so every
 number of the document stands the same distance from the next: one row, or
 two once any number has a line under it. Lines in a slot do not wrap, as a
-numbered line does not. None of it applies on the grid (`.tpage.matched`,
+numbered line does not. A row of a ruled box (`.line.rl`, a table row) is
+made taller instead of given a margin, so its bars stretch and the box stays
+closed (`test-straight-rules.mjs` caught the gap). None of it applies on the grid (`.tpage.matched`,
 `.page-body.fixed`), where the PDF places the numbers. A page fitted to the
 paper (`shapePages`) is fitted with the padding, so a page whose pitch doubled
-is set smaller. `test-margin-pitch.mjs` (Chromium) pins it.
+is set smaller. `test-margin-pitch.mjs` (Chromium) pins it, a box down numbered lines included.
 
 ### The hold: a key value carrying a run of blank
 

@@ -102,6 +102,8 @@ for (let n = 1; n <= 10; n++) { L.push(String(n).padStart(2) + (P1[n] ? "  " + P
 L.push("Footer text after the numbers");
 L.push("====== Page 2 ======");
 for (let n = 1; n <= 6; n++) L.push(String(n).padStart(2) + (n === 2 ? "  Plain." : ""));
+// …and a box drawn down numbered lines: its bars must still meet.
+L.push("====== Page 3 ======", " 1  Box:", " 2  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2510", " 3  \u2502 Fact \u2502 Okay \u2502", " 4  \u2502 Two  \u2502 Yes  \u2502", " 5  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2518", " 6  After.");
 const A = L.join("\n") + "\n";
 
 let srv = null, browser = null;
@@ -174,6 +176,17 @@ async function run() {
       const one = even(g);
       truthy(`every gap the same (${JSON.stringify(g)})`, typeof one === "number");
       truthy(`…two rows apart (row ${row}, gap ${one})`, typeof one === "number" && Math.abs(one - 2 * row) <= 2);
+      const bars = await p.evaluate(() => {
+        const sec = document.querySelectorAll("#pages .tpage")[2];
+        const rows = [...sec.querySelectorAll(".page-body > .line.rl")];
+        const out = [];
+        for (let k = 1; k < rows.length; k++) {
+          const a = rows[k - 1].getBoundingClientRect(), b = rows[k].getBoundingClientRect();
+          out.push(Math.round(b.top - a.bottom));
+        }
+        return { n: rows.length, gaps: out };
+      });
+      check("the box is drawn, its rows touching (no gap for its bars to break at)", bars, { n: 4, gaps: [0, 0, 0] });
       truthy("the line between the numbers is kept", (await p.evaluate(() => document.querySelector("#pages .page-body").textContent)).includes("its second line, between the numbers"));
       console.log("2. …and as a ✓ Use my text page");
       await fixClick(p, 0);

@@ -2087,6 +2087,10 @@ app, which routes it to the reader tab.
   out against the PDF again; the text is the same either way.
   Clicking ✎ Use my text also turns ✎ Edit on, so you can type straight
   away; withdrawing the request leaves ✎ Edit as it is.
+  **To find them:** the Flagged panel lists every page on ✓ Use my text in
+  the case; click one to go to it (its document is opened first where it is
+  not the one on screen). In the Pages tab, such a page is tagged *Use my
+  text*.
   **A page you type over is handed over by itself.** Where you have typed over
   two words or more on a page (corrected, put in or taken out, counted against
   the page as it read before your first keystroke on it), 💾 Save puts it on
