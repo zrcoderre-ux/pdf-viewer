@@ -4,7 +4,7 @@
 // margin numbers stay fixed in their gutter, the text is unchanged, and
 // withdrawing the request lays it out as before; beside its PDF it comes off
 // the grid with its PDF page held level. The page is built free again
-// on reopening the document.
+// on reopening the document, and the click turns ✎ Edit on.
 //
 // Run: node test-free-page.mjs   (from the repo root)
 //
@@ -212,6 +212,14 @@ async function run() {
       await openReader(p);
       const s = await state(p, 0);
       check("free on reopening", [s.free, s.cells, s.gutters], [true, 0, 4]);
+      // Opened protected: ✓ Use my text on another page turns ✎ Edit on.
+      truthy("reopened protected", await p.evaluate(() => !document.body.classList.contains("editing")));
+      await fixClick(p, 1);
+      await p.waitForTimeout(300);
+      truthy("✎ Use my text turns ✎ Edit on", await p.evaluate(() => document.body.classList.contains("editing") && document.querySelectorAll("#pages .page-body")[1].isContentEditable));
+      await fixClick(p, 1);
+      await p.waitForTimeout(300);
+      truthy("…and withdrawing it leaves ✎ Edit on", await p.evaluate(() => document.body.classList.contains("editing")));
       check("no page errors", r.log.errors, []);
       await r.close();
     }
