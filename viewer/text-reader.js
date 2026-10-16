@@ -43,8 +43,13 @@ import { createToaPanel } from "./toa.js";
 import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
-import { dressLines, fitRuleRows, placeholderIn } from "./rules.js";
-import { dressColumns, alignColumns, charWidth, fitCells, lineMap, faceEm, faceSpace, placeLine, unplaceLine } from "./columns.js";
+import { dressLines as dressRuleLines, fitRuleRows, placeholderIn } from "./rules.js";
+import { dressColumns as dressColumnsOf, alignColumns, charWidth, fitCells, lineMap, faceEm, faceSpace, placeLine, unplaceLine } from "./columns.js";
+// A page whose text is the operator's own (✓ Use my text, a `.free` body) is
+// not laid out against the PDF: no rule rows, no columns. Every caller goes
+// through these two.
+function dressLines(body) { if (!body.classList.contains("free")) dressRuleLines(body); }
+function dressColumns(body) { return body.classList.contains("free") ? false : dressColumnsOf(body); }
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
@@ -4574,6 +4579,7 @@ document.addEventListener("drop", (e) => {
  * going unresponsive; `theirSpots` are that document's own spot keeps.
  */
 function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpots = null, editable = false } = {}) {
+  const fixedSrc = into === pagesEl && doc && textFixed.length ? docPageSources() : null;
   for (let i = from; i < to; i++) {
     const p = pages[i];
     const sec = document.createElement("section");
@@ -4643,6 +4649,11 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
     // The margin numbers put back on this page (readExport), marked as the
     // body is built — and built again, since the body element stays.
     body.__restored = p.restored ? new Set(p.restored) : null;
+    // A page asked for as ✓ Use my text is built free of the PDF (setFree).
+    if (fixedSrc && pages[i] === doc.pages[i]) {
+      const e = pageEntryAt(i, fixedSrc);
+      if (e && textFixed.some((x) => TD.sameNoOcr(x, e))) body.classList.add("free");
+    }
     buildBody(body, p.lines.join("\n"), i, theirSpots);
     const layer = document.createElement("div");
     layer.className = "link-layer";
@@ -10378,13 +10389,56 @@ function refreshFixButtons(indices) {
     : [...pagesEl.querySelectorAll(".tpage > .page-label .fix-page")];
   if (!buttons.length) return;
   const sources = textFixed.length ? docPageSources() : null;
+  let freed = false;
   for (const b of buttons) {
     const i = Number(b.closest(".tpage").dataset.index);
     const p = doc.pages[i];
     if (!p) continue;
     const e = sources ? pageEntryAt(i, sources) : null;
-    setFixButton(b, pageReadsDidNotOcr(i), !!e && textFixed.some((x) => TD.sameNoOcr(x, e)), TD.headerSaysTextCorrected(p));
+    const asked = !!e && textFixed.some((x) => TD.sameNoOcr(x, e));
+    setFixButton(b, pageReadsDidNotOcr(i), asked, TD.headerSaysTextCorrected(p));
+    if (setFree(b.closest(".tpage"), asked)) freed = true;
   }
+  if (freed) {
+    textAnchors = null; textLineTops = null;
+    if (gridOn()) applyMatchedLayout(); else shapePages();
+    afterTextChangeSoon(); // the rebuilt lines are new nodes: the marks and underlines are found again
+  }
+}
+/**
+ * USE MY TEXT IS THE OPERATOR'S PAGE. While a page is asked for as ✓ Use my
+ * text, its text is to be the page's own — PDF-Linker writes it into the PDF,
+ * not the other way about — so nothing holds it to the PDF any more: it comes
+ * off the grid beside the PDF (its slot held level, as a raw page's is), is
+ * not shaped to the paper, its spaces are not cut into columns or its rules
+ * into rows. The spacing and the placement are whatever is typed — between
+ * the margin numbers, which stay fixed in their gutter as on any numbered page.
+ * The page
+ * is built again from its own text when it goes either way (the text, its
+ * keeps and what was typed on it are carried as an undo carries them), so it
+ * saves exactly as before.
+ */
+function isFreePage(sec) {
+  const body = sec && sec.querySelector(".page-body");
+  return !!body && body.classList.contains("free");
+}
+/** Make page `sec` free of the PDF, or hold it to it again. Whether it changed. */
+function setFree(sec, on) {
+  const body = sec && sec.querySelector(".page-body");
+  if (!body || body.classList.contains("free") === on) return false;
+  const i = Number(sec.dataset.index);
+  const snap = snapshotOf(body);
+  const focused = body.contains(document.activeElement);
+  convertTypedRealsSoon.cancel(body);
+  body.classList.toggle("free", on);
+  buildBody(body, snap.text, i);
+  restoreTyping(body, snap);
+  if (focused && snap.caret >= 0) {
+    const at = pointAtOffset(body, snap.caret);
+    if (at) placeCaret(at.node, at.offset);
+  }
+  convertTypedRealsSoon(body);
+  return true;
 }
 
 /** The label's button: ⊘ Did not OCR on a page of text, ↻ OCR This Page on one that reads DID_NOT_OCR. */
@@ -18965,7 +19019,7 @@ function applyMatchedLayoutNow() {
   const rawSlots = [];
   for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
     const i = Number(sec.dataset.index);
-    if (sec.classList.contains("raw")) {
+    if (sec.classList.contains("raw") || isFreePage(sec)) {
       clearMatched(sec);
       const el = on ? slots.get(i) : null;
       if (el) { matchedSlots.add(el); fitSlot(el, w0); rawSlots.push([el, sec]); }
@@ -19593,6 +19647,14 @@ function shapePages({ all = false } = {}) {
     // while a print is being made, when its text is the page that prints
     // (body.printing, beforeprint) and is fitted to the paper like any other.
     if ((sec.classList.contains("swapped") && !printing) || sec.classList.contains("raw")) continue;
+    // A page of the operator's own text (✓ Use my text) is not the PDF's
+    // paper: it flows at the reading size, as long as its text makes it.
+    if (isFreePage(sec)) {
+      if (body.style.minHeight) body.style.minHeight = "";
+      if (sec.style.getPropertyValue("--fit")) sec.style.removeProperty("--fit");
+      sec.__shapedFor = null;
+      continue;
+    }
     const loose = sec.classList.contains("matched")
       || (!clipped && sec.querySelector(".line.trailer"));
     if (loose) {

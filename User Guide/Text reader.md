@@ -2071,6 +2071,14 @@ app, which routes it to the reader tab.
   second click withdraws it, ⊘ Did not OCR on the page withdraws it too, and
   it is off on a page that reads `[DID NOT OCR]`. ⊘ Did not OCR stays for the
   page you cannot read, or that is not worth the typing.
+  **While a page reads ✓ Use my text, it no longer follows the PDF.** Its
+  text is to be the page's own, so the reader stops laying it out against the
+  PDF: beside the PDF it comes off the PDF's grid (its PDF page held level
+  beside it), it is not shaped to the PDF's paper, and its spaces are not cut
+  into columns or its ruled lines into rows. The spacing and placement are
+  whatever you type. The margin numbers of a numbered page stay fixed in their
+  gutter, as on every numbered page. Withdraw the request and the page is laid
+  out against the PDF again; the text is the same either way.
   **A page you type over is handed over by itself.** Where you have typed over
   two words or more on a page (corrected, put in or taken out, counted against
   the page as it read before your first keystroke on it), 💾 Save puts it on
