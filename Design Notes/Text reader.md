@@ -1766,6 +1766,25 @@ a raw page as it does a swapped one, and `applyMatchedLayoutNow` takes it off
 the grid (`clearMatched`) and holds its slot to the page's height with the
 shed slots (`rawSlots`), so the two columns stay level. Not persisted.
 
+**Typing into ⇄ Raw.** Under ✎ Edit the `pre.raw-text` is
+`contenteditable="plaintext-only"` (set in `setRaw` and by `setEditing`); the
+head (banner, header line) is a `span.raw-head` with `contenteditable=false`,
+and `rawPageText` returns its length as `lead`. `commitRaw(sec)` reads the
+sheet less its head (`rawSheetBody`), and where it differs from
+`TD.serializeNodes(body)` takes an undo snapshot, `buildBody`s the page from
+it, sets `doc.pages[i].lines`, `syncSpots`, `setDirty`, then
+`convertTypedRealsSoon` and `afterTextChangeSoon`. It keeps the body's
+`__built`, so a real name typed in the sheet is measured as typed and written
+as its pseudonym. It runs 400 ms after the last input (`commitRawSoon`), on
+focusout, in `setRaw(sec, false)`, at the top of `saveDocument` and before
+`setEditing(false)` (`commitRawPages`). `fillRaw` leaves the sheet alone while
+it has the focus (the corner tag still updates), so the caret survives the
+commit; the focusout handler refills it. The pages' own `input`/`beforeinput`
+handlers look for `.page-body` and pass the sheet by, and the global Ctrl+Z
+handler leaves a contenteditable outside `.page-body` to the browser, so
+Ctrl+Z in the sheet is the browser's per-keystroke undo. `test-raw-edit.mjs`
+(Chromium) pins it.
+
 **⊘ Did not OCR** (`.nocr-page` on every label with a page header, beside
 the ⇄ PDF swap) replaces the page's lines with `textdoc.didNotOcrLines`:
 `[DID NOT OCR]` alone, except that PDF-Linker's "Authorities cited" trailer

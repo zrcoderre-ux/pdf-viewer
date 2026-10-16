@@ -753,6 +753,9 @@ body.printing .tpage.swapped .pdf-inline { display: none; }
   margin: 0; overflow-x: auto; white-space: pre; tab-size: 8; user-select: text;
   font: calc(var(--reader-size-eff) * 0.84)/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
+/* Under ✎ Edit the file's text takes typing; its header is PDF-Linker's and does not. */
+.raw-sheet .raw-text[contenteditable="plaintext-only"] { outline: none; caret-color: #111; }
+.raw-sheet .raw-head { color: #666; }
 /* A real name from the key standing in the file: the page's own leak mark. */
 .raw-sheet .raw-leak { background-color: var(--leak-bg); text-decoration: underline double #e65100; }
 .pdf-inline { position: relative; min-height: 120px; background: #fff; }
