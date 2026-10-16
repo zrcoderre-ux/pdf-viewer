@@ -1,6 +1,7 @@
 // Browser test for a page asked for as ✓ Use my text (viewer/text-reader.js:
-// setFree, isFreePage, the guarded dressColumns/dressLines): the page comes
-// off the PDF's paper and its spaces are no longer cut into columns, its
+// setFree, isFreePage, the guarded dressColumns/dressLines): the page keeps
+// the paper's shape, is set fixed-pitch and unwrapped as the file is, and
+// its spaces are no longer cut into columns, its
 // margin numbers stay fixed in their gutter, the text is unchanged, and
 // withdrawing the request lays it out as before; beside its PDF it comes off
 // the grid with its PDF page held level. The page is built free again
@@ -156,6 +157,7 @@ const state = (page, i) => page.evaluate((i) => {
     cells: body.querySelectorAll(".cc").length,
     fit: sec.style.getPropertyValue("--fit"),
     minH: body.style.minHeight,
+    h: Math.round(sec.getBoundingClientRect().height),
   };
 }, i);
 const pageText = (page, i) => page.evaluate((i) => [...document.querySelectorAll("#pages .tpage")[i].querySelectorAll(".page-body .line")]
@@ -179,8 +181,33 @@ async function run() {
       const after = await state(p, 0);
       check("free", after.free, true);
       check("no column cells", after.cells, 0);
-      check("…not shaped to the paper", [after.fit, after.minH], ["", ""]);
+      const other = await state(p, 1);
+      truthy(`…still shaped to the paper: as tall as the page beside it (${after.h} and ${other.h})`, after.minH !== "" && Math.abs(after.h - other.h) <= 2);
       check("the margin numbers stay in their gutter", [after.numbered, after.gutters], [true, 4]);
+      const look = await p.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        const lines = [...body.querySelectorAll(":scope > .line > .lt")];
+        // The x of the character at one column on two lines ("Amount" and "$1,200" both start at column 24 of their text).
+        const xAt = (lt, col) => {
+          const w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+          let n, at = 0;
+          while ((n = w.nextNode())) {
+            if (col < at + n.data.length) { const r = document.createRange(); r.setStart(n, col - at); r.setEnd(n, col - at + 1); return r.getBoundingClientRect().left; }
+            at += n.data.length;
+          }
+          return NaN;
+        };
+        const a = lines[1], b = lines[2];
+        return {
+          mono: /mono/i.test(getComputedStyle(body).fontFamily),
+          wrap: getComputedStyle(lines[1]).whiteSpace,
+          fits: lines.every((lt) => lt.scrollWidth <= lt.clientWidth + 1),
+          dx: Math.abs(xAt(a, a.textContent.indexOf("Amount")) - xAt(b, b.textContent.indexOf("$1,200"))),
+        };
+      });
+      check("set fixed-pitch and unwrapped, as the file is", [look.mono, look.wrap], [true, "pre"]);
+      truthy("every line seen to its end", look.fits);
+      truthy(`a column typed straight in the file is straight on the page (${look.dx.toFixed(2)}px)`, look.dx < 0.5);
       check("the text unchanged", await pageText(p, 0), text0);
       check("the other page is held to the PDF as before", (await state(p, 1)).free, false);
       truthy("…its columns kept", (await state(p, 1)).cells > 0);
@@ -295,6 +322,8 @@ async function run() {
       });
       truthy(`the document opened at page 5, its head in view (top ${at.top} of ${at.h})`, at.top >= -2 && at.top < at.h / 2);
       check("…a page free of the PDF", at.free, true);
+      const hs = await p.evaluate(() => [...document.querySelectorAll("#pages .tpage")].slice(3, 6).map((sec) => Math.round(sec.getBoundingClientRect().height)));
+      truthy(`a long free page is no longer than the pages either side (${hs.join(", ")})`, Math.abs(hs[1] - hs[0]) <= 2 && Math.abs(hs[1] - hs[2]) <= 2);
       check("no page errors", r.log.errors, []);
       await r.close();
     }
