@@ -5179,10 +5179,12 @@ function updateDirty() {
 // the file. Edits already made stay (and stay saveable) when protection is
 // put back.
 function setEditing(on) {
+  if (!on) commitRawPages(); // typed into a raw sheet before protection goes back on
   editing = !!on && !!doc;
   document.body.classList.toggle("editing", editing);
   $("edit-toggle").setAttribute("aria-pressed", String(editing));
   for (const body of pageBodies()) body.contentEditable = editing ? "plaintext-only" : "false";
+  for (const pre of pagesEl.querySelectorAll(".raw-sheet .raw-text")) pre.contentEditable = editing ? "plaintext-only" : "false";
   updateDirty();
 }
 $("edit-toggle").addEventListener("click", () => setEditing(!editing));
@@ -6853,6 +6855,7 @@ function placeCaretOnDisk(body, pos) {
  * or a download), since what it writes is one of the folder's documents.
  */
 async function saveDocument({ offscreen = true } = {}) {
+  commitRawPages(); // typing in a raw sheet not yet on its page
   const inFolder = folderOpen();
   if (!doc && !(inFolder && offscreen && unsavedDocs.size)) return false;
   if (refuseWhileBusy()) return false;
@@ -21483,6 +21486,18 @@ $("rb-miss-close").addEventListener("click", () => showMissRow(false));
 // disk still holds the version before them, and the corner says which this is.
 // A real value the key binds standing in the text — a name the run missed — is
 // marked as it is on the page, because it is what the file carries now.
+//
+// UNDER ✎ EDIT THE FILE'S TEXT TAKES TYPING. What is typed there is the file:
+// a pseudonym typed is a pseudonym (read back under the key as the page
+// shows it), and a real name typed is a name typed, written as its pseudonym
+// as it would be on the page (the page keeps the text it was built from,
+// `__built`, so convertTypedReals measures the edit against that). The page
+// header and the banner are PDF-Linker's and take no edit (`.raw-head`). The
+// page is built again from the sheet's text a beat after the typing stops
+// (commitRaw), and at once when the sheet loses the focus, the page goes back
+// to ⇄ Text, or a save starts — one undo step per burst of typing, as on the
+// page. While the sheet has the focus it is not written over (fillRaw), so
+// the caret stays where it is; the marks catch up when it leaves.
 
 /** A page's text exactly as a save would write it — banner or header line, then its lines — and its spot keeps' and the run's fakes' places in it. */
 function rawPageText(sec) {
@@ -21494,7 +21509,7 @@ function rawPageText(sec) {
   const parts = own.text === "" && !(p.lines || []).length ? head : head.concat(own.text);
   const lead = head.length && parts.length > head.length ? head.join("\n").length + 1 : 0;
   const past = ([a, b]) => [a + lead, b + lead];
-  return { text: parts.join("\n"), held: own.held.map(past), pns: own.pns.map(past) };
+  return { text: parts.join("\n"), held: own.held.map(past), pns: own.pns.map(past), lead: head.length ? Math.min(head.join("\n").length + 1, parts.join("\n").length) : 0 };
 }
 
 /** The ⇄ Raw button, as the page stands. */
@@ -21511,11 +21526,16 @@ function setRawButton(b, on) {
 function fillRaw(sec) {
   const view = sec.querySelector(".page-inner > .raw-sheet");
   if (!view) return;
-  const { text, held } = rawPageText(sec);
+  const pre = view.querySelector(".raw-text");
   const m = reelMemberOf(Number(sec.dataset.index));
   const tag = m && m.dirty
     ? "The file with your unsaved edits — the disk still has the version before them"
     : "The file as it is on disk";
+  const tagEl = view.querySelector(".raw-tag");
+  if (tagEl.textContent !== tag) tagEl.textContent = tag;
+  // Being typed in: the caret stays where it is (commitRaw writes the page).
+  if (document.activeElement === pre) return;
+  const { text, held, lead } = rawPageText(sec);
   // The marks are the page's own leak marks (scanPassNow): every real name the
   // key binds, past the values kept for the case, the spot keeps and the
   // parties of cited decisions.
@@ -21525,15 +21545,22 @@ function fillRaw(sec) {
   const leaks = reals
     ? PK.findRealSpans(reals, TD.blankRanges(maskKept(text, text), held), { layout: text }).filter((h) => !TD.insideCited(cited, h))
     : [];
-  const marks = leaks.flatMap((h) => h.ranges).sort((a, b) => a[0] - b[0]);
+  // The head is PDF-Linker's and takes no edit: no mark is cut into it.
+  const marks = leaks.flatMap((h) => h.ranges).filter(([, b]) => b > lead).map(([a, b]) => [Math.max(a, lead), b]).sort((a, b) => a[0] - b[0]);
   // Nothing moved, nothing written: a selection being made in it to copy survives.
   const sig = [tag, text, marks.map(([a, b]) => a + "-" + b).join(",")].join("\u0000");
   if (view.__sig === sig) return;
   view.__sig = sig;
-  view.querySelector(".raw-tag").textContent = tag;
-  const pre = view.querySelector(".raw-text");
   pre.textContent = "";
   let at = 0;
+  if (lead) {
+    const head = document.createElement("span");
+    head.className = "raw-head";
+    head.contentEditable = "false";
+    head.textContent = text.slice(0, lead);
+    pre.append(head);
+    at = lead;
+  }
   for (const [a, b] of marks) {
     if (a > at) pre.append(text.slice(at, a));
     const mark = document.createElement("span");
@@ -21545,6 +21572,57 @@ function fillRaw(sec) {
   }
   pre.append(text.slice(at));
 }
+/** The body text a raw sheet now holds: everything but its head, as typed. */
+function rawSheetBody(pre) {
+  const head = pre.querySelector(":scope > .raw-head");
+  let out = "";
+  for (const n of pre.childNodes) if (n !== head) out += n.textContent;
+  // A page that was its header alone: the line break typed after it is the
+  // break the file puts between the header and the first line.
+  if (head && !head.textContent.endsWith("\n") && out.startsWith("\n")) out = out.slice(1);
+  return out;
+}
+/** The page built again from what was typed into its raw sheet. */
+function commitRaw(sec) {
+  commitRawSoon.cancel(sec);
+  const pre = sec.isConnected && sec.classList.contains("raw") ? sec.querySelector(".page-inner > .raw-sheet .raw-text") : null;
+  const body = sec.querySelector(".page-body");
+  if (!pre || !body || !doc || !editing) return;
+  const i = Number(sec.dataset.index);
+  const text = rawSheetBody(pre).replace(/\r\n?/g, "\n");
+  if (text === TD.serializeNodes(body)) return;
+  snapshot(body);
+  convertTypedRealsSoon.cancel(body);
+  hideTypeTip();
+  // The text the page was built from stays what an edit is measured against:
+  // a real name typed into the sheet is a name typed (convertTypedReals).
+  const built = body.__built;
+  buildBody(body, text, i);
+  body.__built = built;
+  doc.pages[i].lines = text.split("\n");
+  syncSpots(body);
+  setDirty(true, i);
+  refreshNocrButtons([i]);
+  convertTypedRealsSoon(body);
+  afterTextChangeSoon();
+}
+const commitRawSoon = debounceEach(commitRaw, 400);
+/** Every raw sheet's typing into its page, now: before a save, or anything else that reads the pages. */
+function commitRawPages() {
+  for (const sec of rawPages) commitRaw(sec);
+}
+pagesEl.addEventListener("input", (e) => {
+  const pre = e.target && e.target.closest && e.target.closest(".raw-sheet .raw-text");
+  if (pre) commitRawSoon(pre.closest(".tpage"));
+});
+pagesEl.addEventListener("focusout", (e) => {
+  const pre = e.target && e.target.closest && e.target.closest(".raw-sheet .raw-text");
+  if (!pre) return;
+  const sec = pre.closest(".tpage");
+  commitRaw(sec);
+  // …and the marks and the corner catch up with what was typed.
+  setTimeout(() => { if (sec.isConnected && sec.classList.contains("raw")) fillRaw(sec); }, 0);
+});
 function refreshRawPages() {
   for (const sec of rawPages) {
     if (!sec.isConnected) rawPages.delete(sec); // a document closed, or built again
@@ -21567,6 +21645,8 @@ function setRaw(sec, on) {
       tag.className = "raw-tag";
       const pre = document.createElement("pre");
       pre.className = "raw-text";
+      pre.contentEditable = editing ? "plaintext-only" : "false";
+      pre.spellcheck = false;
       view.append(tag, pre);
       inner.appendChild(view);
     }
@@ -21575,6 +21655,7 @@ function setRaw(sec, on) {
     rawPages.add(sec);
     fillRaw(sec);
   } else {
+    commitRaw(sec); // what was typed into the sheet is the page's now
     if (view) view.remove();
     sec.classList.remove("raw");
     rawPages.delete(sec);

@@ -1535,6 +1535,14 @@ app, which routes it to the reader tab.
   every other. It is not remembered: reopening the document shows its text. A
   document with no page headers (a Word export) has no page label and so no
   ⇄ Raw.
+  **With ✎ Edit on, the raw text takes typing**, and what you type is the
+  file: a pseudonym typed reads as its real name once you are back on the
+  page, and a real name the key binds is written as its pseudonym, as it is
+  when typed on the page. The page header (and a combined file's banner) is
+  PDF-Linker's and takes no edit. The page catches up a moment after you stop
+  typing, and at once when you click away, press ⇄ Text or save; Ctrl+Z inside
+  the sheet takes back a keystroke, and Ctrl+Z on the page takes back the
+  whole burst of typing.
 - **A flag does not rearrange the page.** Flagging a value, or keeping a
   wrongly faked one, used to open the Documents / Flagged panel to show the
   list growing. Flagging is done *while reading*, often several in a row, and
