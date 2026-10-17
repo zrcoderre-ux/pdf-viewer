@@ -1172,7 +1172,8 @@ test(13, "textdoc.shownPages reads every fixture page as the page body does", as
           const TD = await import("/viewer/textdoc.js");
           const PK = await import("/viewer/pseudo-key.js");
           const key = PK.parseKey([{ name: "Pseudonym Key", rows: [["Category", "Real Value", "Replacement", "Context", "Status", "Source", "Occurrences"], ...keyRows] }], "k");
-          const shown = TD.shownPages(TD.readExport(text), { rev: PK.compile(key), showFakes: document.body.classList.contains("show-fakes") });
+          // The reader's own matcher: a cited decision's name spared (TD.compileDisplay).
+          const shown = TD.shownPages(TD.readExport(text), { rev: TD.compileDisplay(key), showFakes: document.body.classList.contains("show-fakes") });
           // The reader's flatten({ blankGutters: true }), as Find reads a page.
           const flatten = (body) => {
             let t = "";

@@ -2638,3 +2638,24 @@ reader writes into `New Real Values.txt` (`VALUES_HEAD`) says the same; it is a
 comment PDF-Linker skips, so no format moved. The ordinary-word toast names the
 one way to force a full run where nothing else asks for one: deleting
 `PDF-Linker Run Record.json` from the folder.
+
+**The way back spares what the way out spared** (`TD.compileDisplay`,
+`PK.compile(key, { spare })`, `PK.ownFakesOf`). The reverse matcher reversed
+every fake, including one standing inside a cited decision's name that
+PDF-Linker had spared: "Smith v. Jones (2010) 50 Cal.4th 100" in a case where
+"Smith" is also the plaintiff's fake read "Coderre v. Jones" on the page, and a
+copy carried the wrong citation in the real names, which no check for a fake
+left in the text can find. `compileDisplay` gives the reader's `rev` a `spare`
+that runs `citedNameSpans` over the page (with `next`, for a year on the
+following page), and `runsWith` drops every hit touching one of its spans, so
+the fake stays as text rather than becoming a pseudonym run. Every reverse
+path goes through `rev` (buildBody, `laidOut` for Find and `pageScan`,
+`clearReading`, `pageLinesShown`), so the page, Find, the folder's ⚠ and the
+save read a cited name the same way. The caption exemption is asked of the
+FAKES (`ownFakesOf`: the fakes the key's `own` rows went out under), since the
+page holds those: PDF-Linker faked this case's own caption cited with a year,
+and it reads back. The spare is computed only where a page has a fake to
+swap. A matcher compiled without `spare` (`PK.compile(key)`) still reverses
+everything, which is what the folder-save parity test used until it was
+pointed at `compileDisplay`. Tests in `test-textdoc.mjs` ("cited names on the
+way back"). The Claude extension does the same on claude.ai.
