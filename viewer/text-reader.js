@@ -5393,6 +5393,22 @@ $("edit-toggle").addEventListener("click", () => setEditing(!editing));
 // into is written " 7  typed text", never " 7typed text".
 // A page with no numbered margin edits as plain lines: Enter makes a new
 // line block, Backspace at a line's start removes one.
+//
+// EVERY NUMBER HAS A HALF LINE UNDER IT. Pleading paper is double-spaced, and
+// the filing's text often stands between two numbers — a caption's second
+// line, a single-spaced quotation — so the slots are not the numbers alone:
+// under each numbered line there is a half line (1.5 under 1) before the next
+// number. It is there whether or not anything is in it: an empty half line is
+// not in the file and takes no room on the page (`halfAfter`), and it is made
+// a line of its own only when text goes into it, and taken out again when the
+// text leaves it (pullUp). So Enter on line 1 sends the text to 1.5 and a
+// second Enter to 2; Backspace at the head of line 2 sends it back to 1.5 and
+// a second Backspace joins it to 1; Delete at the end of line 1 is that first
+// Backspace from the other side. It used to step by half lines only where a
+// line already stood between the two numbers; elsewhere Enter went straight
+// to the next number. The owner: "consistently treat it like there is a line
+// between every numbered line … This will allow me to better approximate the
+// actual text position."
 function lineOfNode(body, n) {
   const el = n && (n.nodeType === 1 ? n : n.parentElement);
   const line = el && el.closest && el.closest(".line");
@@ -5501,6 +5517,54 @@ function normalizeLines(body) {
   if (moved && pt && pt.container.isConnected) placeCaret(pt.container, Math.min(pt.offset, pt.container.nodeType === 3 ? pt.container.data.length : pt.container.childNodes.length));
 }
 
+/** Whether the slot under `line` is an EMPTY half line not yet in the file: a numbered line with a number (or nothing) straight after it. */
+function halfAfter(line) {
+  if (!line.classList.contains("num")) return false;
+  const next = line.nextElementSibling;
+  return !next || (next.classList.contains("line") && next.classList.contains("num"));
+}
+/**
+ * The run of slots below `cur` pulled up one, into `cur`, as far as the first
+ * empty slot (an empty half line under a number is one: halfAfter). A half
+ * line the pull leaves empty is taken out — it was never more than a place
+ * for text to stand.
+ */
+function pullUp(cur) {
+  for (;;) {
+    if (halfAfter(cur)) break;
+    const next = cur.nextElementSibling;
+    const nlt = next && next.classList.contains("line") ? ltOf(next) : null;
+    if (!nlt || !nlt.textContent.length) break;
+    ltOf(cur).appendChild(extractAll(nlt));
+    cur = next;
+  }
+  if (!cur.classList.contains("num") && !ltOf(cur).textContent.length) {
+    const prev = cur.previousElementSibling, next = cur.nextElementSibling;
+    if (!next || (prev && prev.classList.contains("num"))) cur.remove();
+  }
+}
+/**
+ * A numbered line's text moved up into the empty half line above it (Backspace
+ * at its head, or Delete at the end of the line above): the half line is made
+ * for it, and the run below comes up a slot behind it.
+ */
+function moveIntoHalfAbove(body, line, { caret = "half" } = {}) {
+  const prev = line.previousElementSibling;
+  snapshot(body, true);
+  escHold(body); // the names Esc left go up with their nodes (enterAtCaret)
+  const above = ltOf(prev), at = above.textContent.length;
+  const half = newLineAfter(prev);
+  ltOf(half).appendChild(extractAll(ltOf(line)));
+  pullUp(line);
+  dressBody(body);
+  fixGutterSpacing(body);
+  escCarry(body);
+  if (caret === "half") placeCaret(ltOf(half), 0);
+  else { const pt = pointAtOffset(above, at); placeCaret(pt.node, pt.offset); }
+  setDirty(true, pageIndexOf(body));
+  afterTextChange();
+  return true;
+}
 /**
  * Enter: the text after the caret goes down a slot. The names Esc left as
  * typed go with their nodes (escHold, escCutAt, escCarry): the text after the
@@ -5524,8 +5588,18 @@ function enterAtCaret(body, { snap = true } = {}) {
     target = newLineAfter(line);
     ltOf(target).appendChild(carry);
   } else {
-    let cur = line.nextElementSibling, placed = false;
-    while (cur) {
+    let prev = line, cur = line.nextElementSibling, placed = false;
+    for (;;) {
+      // The half line under a number, empty and not yet in the file, takes
+      // what comes down to it: made a line of its own now (halfAfter).
+      if (halfAfter(prev)) {
+        const half = newLineAfter(prev);
+        ltOf(half).appendChild(carry);
+        if (!target) target = half;
+        placed = true;
+        break;
+      }
+      if (!cur) break;
       const clt = cur.classList.contains("line") ? ltOf(cur) : null;
       if (clt) {
         if (!target) target = cur;
@@ -5533,6 +5607,7 @@ function enterAtCaret(body, { snap = true } = {}) {
         const displaced = extractAll(clt);
         clt.appendChild(carry);
         carry = displaced;
+        prev = cur;
       }
       cur = cur.nextElementSibling;
     }
@@ -5541,6 +5616,10 @@ function enterAtCaret(body, { snap = true } = {}) {
       ltOf(foot).appendChild(carry);
       if (!target) target = foot;
     }
+    // A half line whose whole text went down is empty again: not a line of
+    // the file, and no room on the page (halfAfter).
+    const before = line.previousElementSibling;
+    if (!line.classList.contains("num") && !lt.textContent.length && before && before.classList.contains("num")) line.remove();
   }
   dressBody(body);
   fixGutterSpacing(body);
@@ -5632,20 +5711,11 @@ function joinLineUp(body, line) {
   const plt = ltOf(prev);
   const joinAt = plt.textContent.length;
   plt.appendChild(extractAll(ltOf(line)));
-  if (!body.classList.contains("numbered")) line.remove();
-  else {
-    let cur = line;
-    for (;;) {
-      const next = cur.nextElementSibling;
-      const nlt = next && next.classList.contains("line") ? ltOf(next) : null;
-      if (!nlt || !nlt.textContent.length) {
-        if (!next && !cur.classList.contains("num")) cur.remove();
-        break;
-      }
-      ltOf(cur).appendChild(extractAll(nlt));
-      cur = next;
-    }
-  }
+  // A line with no number of its own (a half line) joined away is gone, as on
+  // a page with no numbers: the number below it is not pulled up into its
+  // place. A numbered line keeps its number, and the slots below come up.
+  if (!body.classList.contains("numbered") || !line.classList.contains("num")) line.remove();
+  else pullUp(line);
   dressBody(body);
   fixGutterSpacing(body);
   escCarry(body);
@@ -5661,6 +5731,10 @@ function backspaceAtCaret(body) {
   const { line, pt: at } = cl;
   const lt = ltOf(line);
   if (offsetOfPoint(lt, at.container, at.offset) !== 0) return false;
+  // A numbered line's text with an empty half line above it goes up into that
+  // half line first (halfAfter); a second Backspace joins it to the number above.
+  const prev = line.previousElementSibling;
+  if (body.classList.contains("numbered") && prev && halfAfter(prev) && lt.textContent.length) return moveIntoHalfAbove(body, line);
   return joinLineUp(body, line) || true; // at the first line there is nothing to join: the number stays
 }
 function deleteAtCaret(body) {
@@ -5671,6 +5745,12 @@ function deleteAtCaret(body) {
   if (offsetOfPoint(lt, at.container, at.offset) !== lt.textContent.length) return false;
   const next = line.nextElementSibling;
   if (!next || !next.classList.contains("line")) return true; // the last line: nothing after it to join
+  // The half line under a number is the slot after it: the next number's text
+  // comes up into it (Backspace at that number's head, from the other side).
+  if (body.classList.contains("numbered") && halfAfter(line)) {
+    if (!ltOf(next).textContent.length) return true;
+    return moveIntoHalfAbove(body, next, { caret: "here" });
+  }
   return joinLineUp(body, next);
 }
 const GUTTER_FIXED = "The line numbers are fixed: edit within a line, or join lines with Backspace at a line's start.";

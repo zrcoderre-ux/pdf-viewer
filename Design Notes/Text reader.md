@@ -2001,6 +2001,22 @@ list; withdrawing leaves it. `test-free-page.mjs` (Chromium) pins it, with a
 control: on an ordinary form page beside its PDF the same spaces typed leave
 the piece where the PDF prints it.
 
+**A half line under every margin number** (`halfAfter`, `pullUp`,
+`moveIntoHalfAbove`, in `enterAtCaret`, `joinLineUp`, `backspaceAtCaret`,
+`deleteAtCaret`). The numbered page's slots were its lines, so Enter stepped by
+half a line only where an unnumbered line already stood between two numbers.
+Now every numbered line has a half line under it: `halfAfter(line)` is true
+for a numbered line followed by another (or by nothing), and that empty slot
+is made a line (`newLineAfter`) only when text goes into it. Enter's cascade
+stops there; Backspace at the head of a numbered line with an empty half line
+above moves its text up into it (`moveIntoHalfAbove`), a second joins it to the
+number; Delete at the end of a number is the first Backspace from the other
+side. A half line emptied by any of them is taken out (`pullUp`, and Enter
+and the join), so an empty half line is never a line of the file. Off the
+grid a half line is a row, and the margin pitch (slotLines) spaces every
+number for it; beside the PDF it stands between its numbers (`slotTops`,
+`spreadTops`), which do not move. `test-half-lines.mjs` (Chromium) pins it.
+
 **Tab indents** (`TAB_STOP`, `tabHost`, `gutterIndent`, `outdentGutter`). Tab
 on an editable page or raw sheet puts in spaces to the next stop of four
 (counted from the start of the line's text, after a margin number), and
