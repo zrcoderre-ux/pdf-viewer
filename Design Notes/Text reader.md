@@ -2015,7 +2015,18 @@ side. A half line emptied by any of them is taken out (`pullUp`, and Enter
 and the join), so an empty half line is never a line of the file. Off the
 grid a half line is a row, and the margin pitch (slotLines) spaces every
 number for it; beside the PDF it stands between its numbers (`slotTops`,
-`spreadTops`), which do not move. `test-half-lines.mjs` (Chromium) pins it.
+`spreadTops`), which do not move. And beside the PDF a numbered page's lines
+take their indents from the PDF BY SLOT (`pdfIndents`, `.line.pind`,
+`--pdf-ind`): a numbered line's slot is its number's row, an unnumbered line
+alone between 5 and 6 is 5.5 (two are 5⅓ and 5⅔), and the PDF row printed at
+that height (within 0.3 of a pitch) gives the indent, its first piece right
+of the margin less the margin (`bodyX`); CSS sets the line's text there and
+takes the file's own indent back out (`--lead`). The owner, of the layout the
+reader copies from the PDF: "it should do that when the indented line is
+actually on 5.5". Display only: the file keeps its line numbers and its
+spaces ("It is important that the text file has the correct line numbers").
+A slot with no PDF row keeps the file's spacing, and so does a line set by
+hand on a ✓ Use my text page. `test-half-lines.mjs` (Chromium) pins both.
 
 **Tab indents** (`TAB_STOP`, `tabHost`, `gutterIndent`, `outdentGutter`). Tab
 on an editable page or raw sheet puts in spaces to the next stop of four

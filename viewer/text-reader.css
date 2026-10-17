@@ -861,6 +861,10 @@ body.gutter-off .page-body.numbered .gutter { font-size: var(--body-em); }
   text-indent: calc(var(--ind) * var(--col-u) - var(--lead) * var(--col-sp-n, 0.25) * 1em);
 }
 .page-body.fixed.rowleft .lt.ci { text-indent: calc(-1 * var(--lead) * var(--col-sp-n, 0.25) * 1em); }
+/* A numbered line beside its PDF whose slot (its number, or the half line
+   between two) the PDF prints a row at: its text starts where that row's does
+   (text-reader.js, pdfIndents), the file's own indent taken back out. */
+.page-body.numbered.fixed .line.pind > .lt { text-indent: calc(var(--pdf-ind) - var(--lead, 0) * var(--col-sp-n, 0.25) * 1em); }
 .page-body .cc {
   display: inline-block; white-space: pre; box-sizing: border-box; text-indent: 0;
   min-width: calc(var(--cols) * var(--col-u)); padding-right: calc(2 * var(--col-u));

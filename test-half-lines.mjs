@@ -254,12 +254,14 @@ async function run() {
         const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
         const pdf = await PDFDocument.create();
         const font = await pdf.embedFont(StandardFonts.TimesRoman);
-        for (const body of [{ 1: "Alpha", 2: "Beta", 4: "Delta" }, { 1: "x" }]) {
+        // Line 4 indented half an inch, and a row between 1 and 2 (1.5) an inch in.
+        for (const [body, half] of [[{ 1: "Alpha", 2: "Beta", 4: "Delta" }, { 1: "Alpha" }], [{ 1: "x" }, {}]]) {
           const pg = pdf.addPage([612, 792]);
           for (let n = 1; n <= 28; n++) {
             const y = 792 - (100 + (n - 1) * 24);
             pg.drawText(String(n), { x: 46 - font.widthOfTextAtSize(String(n), 12), y, size: 12, font });
-            if (body[n]) pg.drawText(body[n], { x: 72, y, size: 12, font });
+            if (body[n] && !(n === 1 && half[1])) pg.drawText(body[n], { x: n === 4 ? 108 : 72, y, size: 12, font });
+            if (half[n]) pg.drawText(half[n], { x: 144, y: y - 12, size: 12, font });
           }
         }
         const f = new File([await pdf.save()], "A Decl.pdf", { type: "application/pdf" });
@@ -270,6 +272,16 @@ async function run() {
       await p.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 });
       await p.waitForTimeout(1500);
       const tops = () => p.evaluate(() => [...document.querySelector("#pages .tpage .page-body").querySelectorAll(":scope > .line")].map((l) => [l.classList.contains("num") ? l.querySelector(".gn").textContent.trim() : "·", Math.round(l.getBoundingClientRect().top * 10) / 10]));
+      const xAt = (k) => p.evaluate((k) => {
+        const lt = document.querySelectorAll("#pages .tpage .page-body > .line")[k].querySelector(".lt");
+        const w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+        let n; while ((n = w.nextNode())) { const at = n.data.search(/\S/); if (at >= 0) { const r = document.createRange(); r.setStart(n, at); r.setEnd(n, at + 1); return r.getBoundingClientRect().left; } }
+        return NaN;
+      }, k);
+      const scale = await p.evaluate(() => document.querySelector("#pages .tpage").getBoundingClientRect().width / 612);
+      const flush = await xAt(1); // Beta, on line 2, where the PDF prints it at the margin
+      truthy(`line 4 starts where the PDF's line 4 does, half an inch in (${((await xAt(3)) - flush).toFixed(1)}px, want ${(36 * scale).toFixed(1)})`, Math.abs((await xAt(3)) - flush - 36 * scale) < 2);
+      truthy("…though the file gives it no indent", (await slots(p))[3][1] === "Delta");
       const before = await tops();
       await caretIn(p, 0);
       await p.keyboard.press("Enter");
@@ -279,6 +291,9 @@ async function run() {
       const half = after.find(([n]) => n === "·");
       const t1 = after.find(([n]) => n === "1")[1], t2 = after.find(([n]) => n === "2")[1];
       truthy(`the half line between 1 and 2 (${t1}, ${half && half[1]}, ${t2})`, !!half && half[1] > t1 && half[1] < t2);
+      const halfX = await xAt(1) - flush;
+      truthy(`…and starts where the PDF's row at 1.5 does, an inch in (${halfX.toFixed(1)}px, want ${(72 * scale).toFixed(1)})`, Math.abs(halfX - 72 * scale) < 2);
+      check("the file is unchanged by it: the half line's text as typed", (await slots(p))[1], ["·", "Alpha"]);
       check("no page errors", r.log.errors, []);
       await r.close();
     }
