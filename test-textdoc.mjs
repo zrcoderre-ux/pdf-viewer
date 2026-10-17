@@ -22,12 +22,12 @@ import {
   textFixedLine, setTextFixed, pageTextSum, pageFurnitureLine, headerSaysTextCorrected, TEXTFIXED_RE,
   wordsChanged, AUTO_TEXT_FIXED_WORDS, decisionDelta, applyDecisionDelta,
   marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
-  readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
+  readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport, compileDisplay,
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
   valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead, setAsideLines, notedBlocks,
 } from "./viewer/textdoc.js";
-import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans } from "./viewer/pseudo-key.js";
+import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans, translate, translateRuns } from "./viewer/pseudo-key.js";
 
 let fails = 0;
 function check(label, got, want) {
@@ -1989,6 +1989,45 @@ console.log("the lines of New Real Values.txt the reader did not write");
   check("…no file, the record as it was", noteLinesRead("Old Value\n", null, listNow), "Old Value\n");
   check("…a transcribed page read in and since taken out by PDF-Linker reads as spent",
     spendLines({ keeps: [], textFixed: [fixed] }, noteLinesRead("", fileNow, listNow), "Quell Harbor\n").spentFixed, [fixed]);
+}
+
+// ---- the way back spares what the way out spared ----------------------------
+// A fake inside a cited decision's name is that decision's party, not this
+// case's: the run spared the name, and a published party can share a word with
+// a fake. The page shows it as the export has it.
+console.log("cited names on the way back");
+{
+  const key = parseKey([{ name: "Pseudonym Key", rows: [HEADERS,
+    ["person", "Helen Rasho", "Ingrid Smith", "", "", "spreadsheet", 4],
+    ["person", "Rasho", "Smith", "", "", "spreadsheet", 3],
+    ["entity", "Quillmark, Inc.", "Jones Holdings, Inc.", "", "", "spreadsheet", 2],
+    ["person", "Gregory Walton", "Ford", "", "", "harvested", 1],
+  ] }], "k");
+  const rev = compileDisplay(key);
+  check("a cited decision's party who shares a word with a fake keeps its name; the sentence around it reads back",
+    translate(rev, "Smith relies on Smith v. Ford Motor Co. (2010) 50 Cal.4th 100, 105.").text,
+    "Rasho relies on Smith v. Ford Motor Co. (2010) 50 Cal.4th 100, 105.");
+  check("…a writ's real party in interest with it",
+    translate(rev, "See Ford v. Superior Court (Smith) (2019) 7 Cal.5th 1.").text,
+    "See Ford v. Superior Court (Smith) (2019) 7 Cal.5th 1.");
+  check("…and a short cite",
+    translate(rev, "(Smith, supra, 50 Cal.4th at p. 105.)").text, "(Smith, supra, 50 Cal.4th at p. 105.)");
+  check("this case's own caption, cited, was faked and reads back",
+    translate(rev, "In Smith v. Jones Holdings, Inc. (2023) 90 Cal.App.5th 100, the court remanded.").text,
+    "In Rasho v. Quillmark, Inc. (2023) 90 Cal.App.5th 100, the court remanded.");
+  check("a caption with no cite after it is this case and reads back",
+    translate(rev, "SMITH v. JONES HOLDINGS, INC.").text, "RASHO v. QUILLMARK, INC.");
+  const p1 = "Plaintiff relies on Smith v. Ford Motor Co.";
+  check("a cite whose year opens the next page is spared there too",
+    [translate(rev, p1, { next: " 1  (2010) 50 Cal.4th 100." }).text, translate(rev, p1).text],
+    [p1, "Plaintiff relies on Rasho v. Gregory Walton Motor Co."]);
+  const doc = readExport("====== Page 1 ======\n 1  " + p1 + "\n====== Page 2 ======\n 1  (2010) 50 Cal.4th 100.\n");
+  check("…and the page as Find reads it agrees",
+    shownPages(doc, { rev })[0].includes("Smith v. Ford Motor Co."), true);
+  check("a matcher compiled without the reader's spare reverses everything, as before",
+    translate(compile(key), "Smith v. Ford Motor Co. (2010) 50 Cal.4th 100").text, "Rasho v. Gregory Walton Motor Co. (2010) 50 Cal.4th 100");
+  check("the runs carry the spared fake as text, never as a pseudonym",
+    translateRuns(rev, "Smith v. Ford (2010) 50 Cal.4th 1").filter((r) => r.t === "swap").length, 0);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

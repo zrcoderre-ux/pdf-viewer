@@ -29,7 +29,11 @@
 //                   fake first, whole words only, case-insensitive, and the
 //                   real is written in the case the fake was written in. A
 //                   name wrapped down a column (a caption's, with the other
-//                   column between its halves) is one name (columnHits).
+//                   column between its halves) is one name (columnHits). A
+//                   matcher compiled with `spare` leaves a fake inside the
+//                   ranges it names exactly as it stands — the reader's
+//                   cited decisions (textdoc.citedNameSpans), whose names
+//                   the run never faked.
 //   compileForward / forwardRuns   real → fake, the direction a SAVE needs:
 //                   a real name typed into the reader is written to disk as
 //                   its pseudonym, never as itself.
@@ -896,11 +900,26 @@ function warnRows(key) {
 }
 
 /** Reversal matcher: fake → real. A fake that is an ordinary word is never reversed (wordFakesOf). */
-export function compile(key) {
+export function compile(key, opts) {
   const pairs = pairRows(key).filter((p) => !isCommonReal(p.fake));
   const map = new Map(pairs.map((p) => [fold(p.fake), p.real]));
   const rx = buildMatcher(pairs.map((p) => p.fake));
-  return { rx, map };
+  // `spare(text, next)` → [[start, end]]: ranges where a fake is no fake. The
+  // run spares a cited decision's name, so a published party that shares a
+  // word with a fake ("Smith v. Jones (2010) 50 Cal.4th 100", Smith a fake
+  // here) is that case's party, and reversing it writes a wrong citation in
+  // the real names. Kept off this module (textdoc imports it).
+  return { rx, map, spare: (opts && opts.spare) || null };
+}
+
+/**
+ * The fakes this case's own parties went out under (`own`, parseKey's): what
+ * a cited caption of THIS case reads in, which the run did fake, since
+ * citedNameSpans exempts the case's own caption from what it spares.
+ */
+export function ownFakesOf(key) {
+  const own = new Set(((key && key.own) || []).map(fold));
+  return pairRows(key).filter((p) => p.fake && own.has(fold(p.real))).map((p) => p.fake);
 }
 
 /**
@@ -1362,7 +1381,13 @@ function runsWith(compiled, text, opts) {
   if (!text) return out;
   if (!compiled || !compiled.rx) return [{ t: "text", s: text }];
   const places = [];
-  for (const h of hitsFrom(compiled, text, 0, Infinity, opts).hits) {
+  let hits = hitsFrom(compiled, text, 0, Infinity, opts).hits;
+  if (compiled.spare && hits.length) {
+    // Read only where there is a fake to spare: most of a page has none.
+    const spans = compiled.spare(text, (opts && opts.next) || "") || [];
+    if (spans.length) hits = hits.filter((h) => !h.ranges.some(([a, b]) => spans.some(([x, y]) => a < y && x < b)));
+  }
+  for (const h of hits) {
     const swaps = h.ranges.map(([a, b]) => ({ t: "swap", from: text.slice(a, b) }));
     dealOut(swaps, swapTo(h.hit, h.whole), h.whole);
     swaps.forEach((r, k) => places.push({ at: h.ranges[k], run: r }));
@@ -1378,9 +1403,13 @@ function runsWith(compiled, text, opts) {
   return out;
 }
 
-/** fake → real, as runs. The reader's display: a name wrapped down a column included. */
-export function translateRuns(compiled, text) {
-  return runsWith(compiled, text, { columns: true });
+/**
+ * fake → real, as runs. The reader's display: a name wrapped down a column
+ * included. `opts.next`: the opening of the page after, for a cite whose year
+ * is there (the matcher's `spare`).
+ */
+export function translateRuns(compiled, text, opts) {
+  return runsWith(compiled, text, { columns: true, next: (opts && opts.next) || "" });
 }
 
 /**
@@ -1392,9 +1421,9 @@ export function forwardRuns(compiledForward, text, opts) {
   return runsWith(compiledForward, text, opts);
 }
 
-/** Display translation as one string. Returns { text, count }. */
-export function translate(compiled, text) {
-  const runs = runsWith(compiled, text, { columns: true });
+/** Display translation as one string, `opts` as translateRuns takes them. Returns { text, count }. */
+export function translate(compiled, text, opts) {
+  const runs = runsWith(compiled, text, { columns: true, next: (opts && opts.next) || "" });
   let count = 0;
   let out = "";
   for (const r of runs) {

@@ -395,7 +395,15 @@ app, which routes it to the reader tab.
   folder's own. A file from Text Files opened on its own attaches the case
   folder above it whenever the reader knows that folder. Every fake is shown
   as its real value in the case the fake was written in, **lightly
-  highlighted**, and hovering shows the pseudonym underneath.
+  highlighted**, and hovering shows the pseudonym underneath. **A fake inside
+  a cited decision's name is shown as the export has it.** PDF-Linker spared
+  that name, so a word in it that matches one of this case's fakes is the
+  published party's own — `Smith v. Jones (2010) 50 Cal.4th 100` where
+  `Smith` is also your plaintiff's fake — and the real name over it would be
+  a wrong citation, copied out of the reader in the real names. It stays
+  unmarked, and Find, the folder's ⚠ and a save read it the same way. This
+  case's own caption cited with a year is the exception PDF-Linker makes too:
+  it was faked, and it reads back.
   The highlight's **colour and intensity** are yours to set (the swatch and
   slider beside "Mark pseudonyms", or under Options), and are remembered like
   the font — **written the moment you choose them.** Every reading setting is

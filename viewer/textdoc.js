@@ -32,7 +32,7 @@
 //       right for what they write).
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
-import { caseShape, applyCase, translateRuns, findReals, findRealSpans } from "./pseudo-key.js";
+import { caseShape, applyCase, translateRuns, findReals, findRealSpans, compile, ownFakesOf } from "./pseudo-key.js";
 import { REPORTERS_SORTED, REPORTERS_ALL_SORTED } from "./reporters.js";
 
 // ---- the file as pages ---------------------------------------------------------
@@ -432,9 +432,9 @@ export function cloneDoc(doc) {
 // still one (the U+0001 stand-in for the span the next run supplies) — so the
 // count of a document off the screen is the count it would have on it.
 
-/** The page's runs as buildBody lays them out: { runs, gutters: [[start, end)], pns: [[start, end)] } in the disk text. */
-function laidOut(text, rev) {
-  const runs = rev ? translateRuns(rev, text) : [{ t: "text", s: text }];
+/** The page's runs as buildBody lays them out: { runs, gutters: [[start, end)], pns: [[start, end)] } in the disk text. `next`: the page after's opening. */
+function laidOut(text, rev, next = "") {
+  const runs = rev ? translateRuns(rev, text, { next }) : [{ t: "text", s: text }];
   const gutters = [], pns = [];
   let at = 0, lineStart = true;
   runs.forEach((r, ri) => {
@@ -466,9 +466,10 @@ function laidOut(text, rev) {
  * [string per page].
  */
 export function shownPages(doc, { rev = null, showFakes = false } = {}) {
-  return ((doc && doc.pages) || []).map((p) => {
+  const pages = (doc && doc.pages) || [];
+  return pages.map((p, i) => {
     const text = (p.lines || []).join("\n");
-    const { runs, gutters } = laidOut(text, rev);
+    const { runs, gutters } = laidOut(text, rev, pages[i + 1] ? (pages[i + 1].lines || []).slice(0, 12).join("\n") : "");
     let out = "";
     for (const r of runs) out += r.t === "swap" ? (showFakes ? r.from : r.to) : r.s;
     if (!gutters.length) return out;
@@ -524,7 +525,7 @@ export function splitFolderRows(rows, onReel) {
  */
 export function pageScan(raw, { rev = null, reals = null, spots = null, mask = null, next = "" } = {}) {
   const text = String(raw == null ? "" : raw);
-  const { pns, gutters } = laidOut(text, rev);
+  const { pns, gutters } = laidOut(text, rev, next);
   const held = spotRanges(text, spots);
   const overlaps = (a, b) => a[0] < b[1] && b[0] < a[1];
   let needs = held.some((h, k) => pns.some((p) => overlaps(h, p)) || gutters.some((g) => overlaps(h, g)) || held.some((o, j) => j !== k && overlaps(h, o)));
@@ -1194,6 +1195,21 @@ export function citedNameSpans(text, { next = "", own = OWN_PARTY_WORDS } = {}) 
   }
   return merged;
 }
+/**
+ * The key's fake → real matcher as the reader shows a page with it: every
+ * fake reversed except one standing in a cited decision's name. The run
+ * spared those names (citedNameSpans), so a fake there is a published party
+ * that shares a word with one of this case's fakes — "Smith v. Jones (2010)
+ * 50 Cal.4th 100", Smith a fake here — and the real name over it is a wrong
+ * citation, copied out in the real names where no check for a fake left in
+ * the text can find it. This case's own caption, cited, is the exception the
+ * run makes too: it was faked, and it reads back. `own` is asked of the FAKES
+ * the case's parties went out under, since that is what the page holds.
+ */
+export function compileDisplay(key) {
+  const own = ownPartyWordsOf(ownFakesOf(key));
+  return compile(key, { spare: (t, next) => citedNameSpans(t, { next, own }) });
+}
 /** Whether [start, end) falls inside one of `spans`. */
 export function insideSpans(spans, start, end) {
   for (const [a, b] of spans || []) {
@@ -1287,10 +1303,11 @@ export function clearReading(text, { rev = null, reals = null, flagRx = null, sp
   const pages = parseExport(text).pages;
   for (let i = 0; i < pages.length; i++) {
     const raw = pages[i].lines.join("\n");
+    const next = pages[i + 1] ? pages[i + 1].lines.slice(0, 12).join("\n") : "";
     const blank = spotRanges(raw, spotsOnPage(spots, i));
     if (rev) {
       let at = 0;
-      for (const r of translateRuns(rev, raw)) {
+      for (const r of translateRuns(rev, raw, { next })) {
         const len = r.t === "swap" ? r.from.length : r.s.length;
         if (r.t === "swap") blank.push([at, at + len]);
         at += len;
@@ -1300,7 +1317,7 @@ export function clearReading(text, { rev = null, reals = null, flagRx = null, sp
     if (reals) {
       // A name wrapped down a column is read too, its cells off the page as
       // it stands (`layout`), not off the reading with its fakes blanked out.
-      const cited = citedNameSpans(flat, { next: pages[i + 1] ? pages[i + 1].lines.slice(0, 12).join("\n") : "" });
+      const cited = citedNameSpans(flat, { next });
       for (const h of findRealSpans(reals, mask ? mask(flat, raw) : flat, { layout: raw })) {
         if (!insideCited(cited, h)) values.push(h.real);
       }
@@ -1313,7 +1330,7 @@ export function clearReading(text, { rev = null, reals = null, flagRx = null, sp
       // run has faked already, and a spot keep stands on purpose.
       let shown = "", rawAt = 0;
       const held = [], plain = []; // plain: [raw start, shown start, length] per run of the file's own text
-      for (const r of rev ? translateRuns(rev, raw) : [{ t: "text", s: raw }]) {
+      for (const r of rev ? translateRuns(rev, raw, { next }) : [{ t: "text", s: raw }]) {
         if (r.t === "swap") {
           held.push([shown.length, shown.length + r.to.length]);
           shown += r.to;

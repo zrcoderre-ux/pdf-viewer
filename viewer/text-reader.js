@@ -2298,7 +2298,8 @@ function compileKeyNow() {
   // The case's own parties, whose caption recited with a year is no cited
   // decision (TD.citedNameSpans).
   TD.setOwnPartyWords(key ? TD.ownPartyWordsOf(key.own) : null);
-  rev = key ? PK.compile(key) : null;
+  // A cited decision's name is shown as the export has it (TD.compileDisplay).
+  rev = key ? TD.compileDisplay(key) : null;
   fwd = k ? PK.compileForward(k) : null;
   reals = k ? PK.compileReals(k) : null;
   // Over the WHOLE key, keeps and all. Taking a value out of the forward side
@@ -4739,7 +4740,7 @@ function buildBody(body, text, page, theirSpots, carry = null) {
   // page writes to disk until something is typed — the round trip is exact.
   body.__built = text;
   body.classList.toggle("numbered", TD.pageIsNumbered(text.split("\n")));
-  const runs = rev ? PK.translateRuns(rev, text) : [{ t: "text", s: text }];
+  const runs = rev ? PK.translateRuns(rev, text, { next: Number.isInteger(page) ? pageAfterHead(page) : "" }) : [{ t: "text", s: text }];
   // The spots of the member the page belongs to — on a reel, not always the
   // open document's — unless the caller hands a document's own.
   const pageSpots = theirSpots || spotsListOf(page);
@@ -11453,7 +11454,7 @@ function pageLinesShown(i, max) {
       out.push(tidy(g ? g.rest : l));
       if (out.length >= max) break;
     }
-    if (rev && !settings.showFakes && out.length) out.splice(0, out.length, ...PK.translate(rev, out.join("\n")).text.split("\n"));
+    if (rev && !settings.showFakes && out.length) out.splice(0, out.length, ...PK.translate(rev, out.join("\n"), { next: pageAfterHead(i) }).text.split("\n"));
   }
   while (out.length && !out[out.length - 1]) out.pop();
   return out;
