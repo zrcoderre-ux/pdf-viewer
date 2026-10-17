@@ -361,7 +361,10 @@ export function dressColumns(body) {
     // page's own columns: where its text begins and each piece after a gap.
     // Not for a line the PDF's grid has cut as well: that is a page laid on
     // its PDF, where alignColumns has nothing to place.
-    l.lt.__colPlan = second.size && cuts === own ? { from: l.start + lead, cuts: cuts.map((c) => l.start + c), second, origin } : null;
+    // …nor for a line the operator has set by hand on a ✓ Use my text page
+    // (text-reader.js, markOwnLines: `.own`): its spaces say where its columns
+    // stand, and nothing moves them for the font.
+    l.lt.__colPlan = second.size && cuts === own && !l.line.classList.contains("own") ? { from: l.start + lead, cuts: cuts.map((c) => l.start + c), second, origin } : null;
     // A line with a gap between columns, not just an indent: what the page's
     // type has to be small enough to hold on one line (text-reader.js,
     // shapePages), since a column that wraps comes back at the left margin.

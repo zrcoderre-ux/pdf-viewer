@@ -45,11 +45,11 @@ import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
 import { dressLines as dressRuleLines, fitRuleRows, placeholderIn } from "./rules.js";
 import { dressColumns as dressColumnsOf, alignColumns, charWidth, fitCells, lineMap, faceEm, faceSpace, placeLine, unplaceLine } from "./columns.js";
-// A page whose text is the operator's own (✓ Use my text, a `.free` body) is
-// not laid out against the PDF: no rule rows, no columns. Every caller goes
-// through these two.
-function dressLines(body) { if (!body.classList.contains("free")) dressRuleLines(body); }
-function dressColumns(body) { return body.classList.contains("free") ? false : dressColumnsOf(body); }
+// Every caller goes through these two, so the lines the operator has set by
+// hand on a ✓ Use my text page are marked first (markOwnLines): columns.js
+// and rules.js leave those lines where their spaces put them.
+function dressLines(body) { markOwnLines(body); dressRuleLines(body); }
+function dressColumns(body) { markOwnLines(body); return dressColumnsOf(body); }
 import * as PS from "./pdfsync.js";
 import * as LK from "./leaks.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
@@ -4652,7 +4652,11 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
     // A page asked for as ✓ Use my text is built free of the PDF (setFree).
     if (fixedSrc && pages[i] === doc.pages[i]) {
       const e = pageEntryAt(i, fixedSrc);
-      if (e && textFixed.some((x) => TD.sameNoOcr(x, e))) body.classList.add("free");
+      if (e && textFixed.some((x) => TD.sameNoOcr(x, e))) {
+        body.classList.add("free");
+        const kept = readFreeFrom()[`${valuesStoreKey()}|${e.doc}|${e.page}`];
+        body.__freeFrom = Array.isArray(kept) ? kept : p.lines.slice();
+      }
     }
     buildBody(body, p.lines.join("\n"), i, theirSpots);
     const layer = document.createElement("div");
@@ -4815,7 +4819,6 @@ function dressBody(body) {
   dressLines(body);
   dressColumns(body);
   markTrailer(body);
-  fitFreeNames(body);
   slotLines(body);
   slotRowsSoon();
 }
@@ -4850,30 +4853,6 @@ function slotLines(body) {
     at = k;
   });
   if (at >= 0) close(at + 1);
-}
-/**
- * ON A ✓ USE MY TEXT PAGE A NAME TAKES ITS PSEUDONYM'S ROOM. The page is typed
- * to look like its PDF the way the file will, a character a place — and the
- * file carries the pseudonym, the page the real name, and the two are seldom
- * one length: "Corwin Ashdale" shown for "Tobias Wrenfield" stood two places
- * short, and every column typed after it on that line was two places off what
- * the file says. So the name is drawn squeezed or stretched across exactly the
- * places its pseudonym takes in the file (a scale on the span, and a margin
- * making up the difference in its box); its letters stay its own.
- */
-function fitFreeNames(body) {
-  const free = body.classList.contains("free");
-  for (const span of body.querySelectorAll(".pn")) {
-    const f = span.dataset.fake.length, r = span.textContent.length;
-    if (!free || f === r || !r) {
-      if (span.style.transform) { span.style.display = ""; span.style.transform = ""; span.style.transformOrigin = ""; span.style.marginRight = ""; }
-      continue;
-    }
-    span.style.display = "inline-block";
-    span.style.transformOrigin = "0 50%";
-    span.style.transform = `scaleX(${(f / r).toFixed(4)})`;
-    span.style.marginRight = `${f - r}ch`;
-  }
 }
 /** The rows of the fullest slot of every numbered page on screen: every slot is padded to it. */
 function slotRows() {
@@ -4983,7 +4962,7 @@ function afterTextChange() {
   updateCounts();
   for (const body of pageBodies()) {
     slotLines(body); // a line typed or taken out between two numbers
-    fitFreeNames(body); // …and a name typed, or the fakes shown
+    markOwnLines(body); // …and a line set by hand on a ✓ Use my text page
   }
   slotRows();
   textAnchors = null; textLineTops = null;
@@ -5253,6 +5232,130 @@ function updateDirty() {
   for (const n of o.conflicts) tip.push(`${TD.docLabel(n)} changed on disk after your edits — open it to see your version, or take the disk's`);
   st.title = tip.length ? tip.join("\n") + "\nSave (Ctrl+S) writes all of it." : "";
 }
+
+// ── Tab indents ────────────────────────────────────────────────────────────────
+//
+// The file is plain text, and its indents and columns are spaces: Tab puts in
+// spaces to the next stop of TAB_STOP characters (counted from the start of
+// the line's text, after any margin number), and Shift+Tab takes back up to
+// that many spaces before the caret. With a selection over several lines,
+// each line is indented (or outdented) at its start by one stop. The spaces go
+// in as typing does (insertText), so the page's own input handling — an undo
+// step, the columns cut again, a ✓ Use my text line left where its spaces put
+// it (markOwnLines) — takes them like any other keystroke. It used to move the
+// focus off the page. In a raw sheet (⇄ Raw) the same, over the file's text.
+const TAB_STOP = 4;
+/** The editable text a node is in: a page's line text, or a raw sheet. */
+function tabHost(n) {
+  const el = n && (n.nodeType === 1 ? n : n.parentElement);
+  return el ? el.closest(".page-body .line > .lt, .raw-sheet .raw-text") : null;
+}
+/** The text from the start of the caret's line to the caret. */
+function lineBeforeCaret(range) {
+  const host = tabHost(range.startContainer);
+  if (!host) return null;
+  const r = document.createRange();
+  r.selectNodeContents(host);
+  r.setEnd(range.startContainer, range.startOffset);
+  const t = r.toString();
+  return host.classList.contains("raw-text") ? t.slice(t.lastIndexOf("\n") + 1) : t;
+}
+/** Place the caret at `offset` characters into `host`'s text. */
+function caretInto(host, offset) {
+  const w = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  let n, at = 0;
+  while ((n = w.nextNode())) {
+    if (offset <= at + n.data.length) { placeCaret(n, offset - at); return true; }
+    at += n.data.length;
+  }
+  return false;
+}
+/**
+ * The spaces a numbered line's indent keeps in its gutter: past the two the
+ * export writes after every number, an indent written in the file stands
+ * there (TD.gutterPrefix takes every space before the text), out of reach of
+ * the caret. Shift+Tab takes them back from there.
+ */
+function gutterIndent(lt) {
+  const gs = lt.parentElement && lt.parentElement.querySelector(":scope > .gutter > .gs");
+  return gs ? { gs, n: Math.max(0, gs.textContent.length - 2) } : { gs: null, n: 0 };
+}
+/** Up to `n` of a numbered line's gutter indent taken back; how many. */
+function outdentGutter(lt, n) {
+  const { gs, n: has } = gutterIndent(lt);
+  const k = Math.min(n, has);
+  if (k > 0) gs.textContent = gs.textContent.slice(k);
+  return k;
+}
+pagesEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey || !editing) return;
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const host = tabHost(range.startContainer);
+  if (!host || !host.isContentEditable) return;
+  e.preventDefault();
+  // On a page, one undo step for the whole of it, as a paste is: execCommand
+  // asks no beforeinput, where a keystroke's step is taken.
+  const body = host.closest(".page-body");
+  if (body) {
+    escNote(body);
+    noteTyping(body);
+    snapshot(body, true);
+  }
+  let gutterMoved = false;
+  batchEdit = true;
+  try {
+    if (!range.collapsed) {
+      // Every line the selection touches, at its start; last first, so the
+      // places of the ones above hold.
+      const lines = [];
+      if (host.classList.contains("raw-text")) {
+        const r = document.createRange();
+        r.selectNodeContents(host); r.setEnd(range.startContainer, range.startOffset);
+        const text = host.textContent;
+        const from = r.toString().lastIndexOf("\n") + 1;
+        const upto = r.toString().length + range.toString().length;
+        for (let at = from; at <= upto && at <= text.length;) {
+          lines.push({ h: host, at });
+          const nl = text.indexOf("\n", at);
+          if (nl < 0) break;
+          at = nl + 1;
+        }
+      } else {
+        for (const lt of body.querySelectorAll(":scope > .line > .lt")) if (range.intersectsNode(lt)) lines.push({ h: lt, at: 0 });
+      }
+      for (const { h, at } of lines.reverse()) {
+        const text = h.classList.contains("raw-text") ? h.textContent.slice(at) : h.textContent;
+        const lead = text.match(/^ */)[0].length;
+        if (e.shiftKey) {
+          if (lead === 0) { if (!h.classList.contains("raw-text") && outdentGutter(h, TAB_STOP)) gutterMoved = true; continue; }
+          if (!caretInto(h, at)) continue;
+          for (let k = 0; k < Math.min(TAB_STOP, lead); k++) document.execCommand("forwardDelete");
+        } else {
+          if (!caretInto(h, at)) placeCaret(h, 0);
+          document.execCommand("insertText", false, " ".repeat(TAB_STOP));
+        }
+      }
+      return;
+    }
+    const before = lineBeforeCaret(range) || "";
+    if (e.shiftKey) {
+      const spaces = before.match(/ *$/)[0].length;
+      const n = Math.min(spaces, ((before.length - 1) % TAB_STOP) + 1);
+      for (let k = 0; k < n; k++) document.execCommand("delete");
+      // At the start of a numbered line's text, the indent is in its gutter.
+      if (!before.length && host.classList.contains("lt") && outdentGutter(host, TAB_STOP)) gutterMoved = true;
+      return;
+    }
+    document.execCommand("insertText", false, " ".repeat(TAB_STOP - (before.length % TAB_STOP)));
+  } finally {
+    batchEdit = false;
+    // A gutter's spaces are no text node the browser edited: the page is told
+    // as an edit would tell it.
+    if (gutterMoved) body.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+});
 
 // ── edit protection ────────────────────────────────────────────────────────────────
 //
@@ -10472,56 +10575,90 @@ function refreshFixButtons(indices) {
     setFixButton(b, pageReadsDidNotOcr(i), asked, TD.headerSaysTextCorrected(p));
     if (setFree(b.closest(".tpage"), asked)) freed = true;
   }
-  if (freed) {
-    textAnchors = null; textLineTops = null;
-    if (gridOn()) applyMatchedLayout(); else shapePages();
-    afterTextChangeSoon(); // the rebuilt lines are new nodes: the marks and underlines are found again
-  }
+  if (freed) afterTextChangeSoon(); // a withdrawn page's own lines laid out again
 }
 /**
- * USE MY TEXT IS THE OPERATOR'S PAGE. While a page is asked for as ✓ Use my
- * text, its text is to be the page's own — PDF-Linker writes it into the PDF,
- * not the other way about — so nothing places its text ACROSS the page where
- * the PDF has it: its spaces are not cut into columns or its rules into rows,
- * and beside its PDF its lines are not cut at the PDF's items, set each at its
- * own left, or slid and narrowed one at a time (applyMatchedLayoutNow). It is
- * set as a plain text file is, fixed-pitch and unwrapped, so that the page is
- * typed to look like its PDF the way the FILE will: a space is one
- * character's width, and a column typed straight is straight in the file.
- * DOWN the page it is a page like the others: beside its PDF it takes the PDF
- * page's size and its lines the PDF's places down it, in the document's body
- * type; off the grid it is shaped to the paper as the others are. Its type is
- * never made smaller than theirs for it: a line too long for the sheet is
- * scrolled to (text-reader.css). The owner: "retain the page size and the
- * line spacing with pdf and text file", and "don't mess with my ability to
- * adjust the placement of text horizontally". The margin numbers stay fixed
- * in their gutter as on any numbered page.
- * The page
- * is built again from its own text when it goes either way (the text, its
- * keeps and what was typed on it are carried as an undo carries them), so it
- * saves exactly as before.
+ * USE MY TEXT LEAVES THE OPERATOR'S SPACING ALONE — AND NOTHING ELSE CHANGES.
+ * A page on the list is one the operator is typing into shape by hand, and
+ * what they need from the reader there is that a line they line up or indent
+ * with spaces STAYS where the spaces put it: not moved to suit the font, not
+ * cut at the PDF's items and each piece set where the PDF prints it, not slid
+ * to its row's indent. The owner, after a version that changed the whole page
+ * (a fixed-pitch font, its own size, off the PDF's grid): "I don't want use
+ * my text to change anything other than the spacial correction when I try to
+ * line text up or indent it. Clicking the use my text button alone should
+ * create no visible difference."
+ *
+ * So pressing it changes nothing on screen. It notes the page's lines as they
+ * stand (`__freeFrom`, kept per page in localStorage so a reopened document
+ * still knows them; for a page handed over by the save after typing, the text
+ * before the typing, `typedFrom`), and from then on a line whose text is not
+ * one of those (markOwnLines: an edited or typed line, matched by its text
+ * so lines moving up or down do not count) is the operator's own, `.own`:
+ * columns.js does not move its second column for the font (no `__colPlan`),
+ * and beside the PDF it is not cut at the PDF's items, and stands at the
+ * page's text edge rather than its row's (applyMatchedLayoutNow) — its own
+ * spaces, drawn a character's width each as everywhere, place its text. Its
+ * size, its place down the page and every other line are as they were.
  */
 function isFreePage(sec) {
   const body = sec && sec.querySelector(".page-body");
   return !!body && body.classList.contains("free");
 }
-/** Make page `sec` free of the PDF, or hold it to it again. Whether it changed. */
+const FREE_FROM_KEY = "textReader.freeFrom";
+function freeFromKey(i) {
+  const e = doc ? pageEntryAt(i) : null;
+  return e ? `${valuesStoreKey()}|${e.doc}|${e.page}` : null;
+}
+function readFreeFrom() {
+  try { return JSON.parse(localStorage.getItem(FREE_FROM_KEY) || "{}") || {}; } catch { return {}; }
+}
+function writeFreeFrom(k, lines) {
+  if (!k) return;
+  const all = readFreeFrom();
+  if (lines) all[k] = lines; else delete all[k];
+  try { localStorage.setItem(FREE_FROM_KEY, JSON.stringify(all)); } catch { /* kept for the session only */ }
+}
+/** Make page `sec` a ✓ Use my text page, or an ordinary one again. Whether it changed. */
 function setFree(sec, on) {
   const body = sec && sec.querySelector(".page-body");
   if (!body || body.classList.contains("free") === on) return false;
   const i = Number(sec.dataset.index);
-  const snap = snapshotOf(body);
-  const focused = body.contains(document.activeElement);
-  convertTypedRealsSoon.cancel(body);
+  const k = freeFromKey(i);
   body.classList.toggle("free", on);
-  buildBody(body, snap.text, i);
-  restoreTyping(body, snap);
-  if (focused && snap.caret >= 0) {
-    const at = pointAtOffset(body, snap.caret);
-    if (at) placeCaret(at.node, at.offset);
+  if (on) {
+    const kept = k ? readFreeFrom()[k] : null;
+    const p = doc && doc.pages[i];
+    body.__freeFrom = Array.isArray(kept) ? kept
+      : p && p.typedFrom != null ? String(p.typedFrom).split("\n")
+      : TD.serializeNodes(body).split("\n");
+    if (!kept) writeFreeFrom(k, body.__freeFrom);
+  } else {
+    body.__freeFrom = null;
+    writeFreeFrom(k, null);
   }
-  convertTypedRealsSoon(body);
+  // Nothing moves where nothing is the operator's yet; a withdrawn page's own
+  // lines are laid out as the reader lays out any line again.
+  const had = !!body.querySelector(":scope > .line.own");
+  markOwnLines(body);
+  if (had || body.querySelector(":scope > .line.own")) dressBody(body);
   return true;
+}
+/** Mark the lines of a ✓ Use my text page that are not as the page stood when it was pressed: the operator's own. */
+function markOwnLines(body) {
+  const lines = body.querySelectorAll(":scope > .line");
+  if (!body.classList.contains("free") || !Array.isArray(body.__freeFrom)) {
+    for (const l of lines) if (l.classList.contains("own")) l.classList.remove("own");
+    return;
+  }
+  const left = new Map();
+  for (const t of body.__freeFrom) left.set(t, (left.get(t) || 0) + 1);
+  for (const l of lines) {
+    const t = TD.serializeNodes(l);
+    const n = left.get(t) || 0;
+    if (n > 0) left.set(t, n - 1);
+    l.classList.toggle("own", n === 0);
+  }
 }
 
 /** The label's button: ⊘ Did not OCR on a page of text, ↻ OCR This Page on one that reads DID_NOT_OCR. */
@@ -19186,7 +19323,8 @@ function applyMatchedLayoutNow() {
     // width, its text, its type or its grid does, so a page whose answer is in
     // hand is not worked out again.
     const planKey = [textEpoch, w0, info.name, t.page, base, bodyX, geom ? 1 : 0, rows ? rows.length : -1,
-      settings.lineHeight, settings.font, settings.customFont, info.faceEpoch || 0, isFreePage(sec) ? "free" : ""].join("|");
+      settings.lineHeight, settings.font, settings.customFont, info.faceEpoch || 0,
+      lines.map((l) => (l.classList.contains("own") ? 1 : 0)).join("")].join("|");
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       matchedSlots.add(slot);
@@ -19241,8 +19379,10 @@ function applyMatchedLayoutNow() {
         const cellsFrom = performance.now(); // what finding the pieces, fitting the grid on them and planning them costs
         const matched = matchItems(lines, texts, lay.rowOf, rows);
         const pairs = [];
-        for (const m of matched) {
-          if (!m) continue;
+        for (const [k, m] of matched.entries()) {
+          // A line set by hand on a ✓ Use my text page says where the operator
+          // put its words, not where the PDF prints them: no evidence for the grid.
+          if (!m || lines[k].classList.contains("own")) continue;
           for (const g of m.found) {
             if (g.glued || g.at !== g.start) continue;
             const col = m.map.fileAt(g.start);
@@ -19291,22 +19431,19 @@ function applyMatchedLayoutNow() {
         });
       }
     }
-    // A ✓ USE MY TEXT PAGE KEEPS THE PDF'S PAGE AND ITS LINES' PLACES DOWN IT,
-    // and nothing across. The operator is typing the page to look like its
-    // PDF the way the file will (setFree), a character a place: every line in
-    // one size (the document's body type), from one left edge (the page's own
-    // text margin), never cut into pieces at the PDF's items nor slid or
-    // squeezed a line at a time below — so what the typed spaces put where is
-    // what stands there. The owner: "retain the page size and the line
-    // spacing with pdf and text file".
-    if (isFreePage(sec)) {
-      if (sizes && base > 0) sizes = sizes.map(() => base);
-      if (lefts) {
-        const at = lefts.filter((l) => l != null);
-        const edge = at.length ? Math.min(...at) : null;
-        lefts = lefts.map((l) => (l == null ? null : edge));
-      }
-      charGridFit = null; cells = null; typeBox = null;
+    // A line set by hand on a ✓ Use my text page (markOwnLines) is not cut
+    // at the PDF's items nor set at its row's own left: it stands at the
+    // page's text edge, and its own spaces place its text, a character of
+    // the page's grid each (placeLine with no places of the PDF's). Its face
+    // and size stay the ones its row gave it (setFree).
+    if (lefts && lines.some((l) => l.classList.contains("own"))) {
+      const at = lefts.filter((l) => l != null);
+      const edge = charGridFit ? charGridFit.x0 : at.length ? Math.min(...at) : null;
+      lines.forEach((l, k) => {
+        if (!l.classList.contains("own")) return;
+        if (cells && cells[k]) cells[k] = { text: null, cuts: [], places: [], face: cells[k].face, cellFaces: cells[k].cellFaces || null };
+        if (lefts[k] != null) lefts[k] = edge;
+      });
     }
     // Never on top of each other: a row the PDF (a scan's text layer, most
     // often) prints closer under the one above than that line's box is tall
@@ -19549,8 +19686,9 @@ function applyMatchedLayoutNow() {
   // numbers in front of them, has nothing to give and is left alone).
   const spill = [];
   for (const p of plans) {
-    if (!p.tops || !p.lefts || isFreePage(p.sec)) continue; // a free page's lines keep one edge
+    if (!p.tops || !p.lefts) continue;
     p.lines.forEach((l, k) => {
+      if (l.classList.contains("own")) return; // set by hand: it stays where its spaces put it
       const left = p.lefts[k] == null ? 0 : p.lefts[k] * p.scale;
       // What it may give back is the indent IN FRONT of it — the blank
       // between the numbered margin and where this row starts — and not a
@@ -19587,12 +19725,6 @@ function applyMatchedLayoutNow() {
   const squeeze = [];
   for (const p of plans) {
     if (!near.has(Number(p.sec.dataset.index))) continue;
-    // Not a ✓ Use my text page: its type is never made smaller, and a line
-    // too long for the sheet is scrolled to (text-reader.css), not narrowed.
-    if (isFreePage(p.sec)) {
-      for (const lt of p.body.querySelectorAll(":scope > .line > .lt")) if (lt.style.transform) { lt.style.transform = ""; lt.style.transformOrigin = ""; }
-      continue;
-    }
     for (const l of p.lines) {
       if (l.classList.contains("rl")) continue; // a ruled box is squared up by fitRuleRows
       const lt = l.querySelector(":scope > .lt");
@@ -19882,7 +20014,7 @@ function shapePages({ all = false } = {}) {
     // alignColumns): a second column one place down the lines beside it, a
     // gutter clear of the widest text to its left. Written in the body's type,
     // so the fit found below takes them with it.
-    alignColumns(live.map((s) => s.body).filter((b) => !b.classList.contains("free")));
+    alignColumns(live.map((s) => s.body));
     const caps = columnCaps(live.map((s) => s.body));
     live.forEach((s, k) => { if (caps[k] < 1) put(s, caps[k]); });
     for (let pass = 0; pass < FIT_PASSES && live.length; pass++) {

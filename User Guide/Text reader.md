@@ -2077,23 +2077,20 @@ app, which routes it to the reader tab.
   second click withdraws it, ⊘ Did not OCR on the page withdraws it too, and
   it is off on a page that reads `[DID NOT OCR]`. ⊘ Did not OCR stays for the
   page you cannot read, or that is not worth the typing.
-  **While a page reads ✓ Use my text, you type it to look like the PDF.** The
-  page is set the way the text file is: a fixed-width font, one character per
-  space, and no wrapping, so a column you line up on the page is lined up in
-  the file. A real name is drawn across exactly the room its pseudonym takes
-  in the file (squeezed or stretched a little), so the columns after it are
-  where the file has them. Down the page nothing changes: beside the PDF the
-  page keeps its PDF page's size and each line stays level with its row on
-  the PDF, in the same type size as before; off the PDF it keeps the paper's
-  shape like every other page. Across the page it is yours: every line starts
-  from one left edge and your spaces place the text; it is not cut into
-  columns, its ruled lines are not drawn as table rows, and no line is moved
-  or narrowed on its own. A line too long for the page scrolls sideways
-  rather than being shrunk. The margin numbers stay fixed. Withdraw the
-  request and the page is laid out against the PDF again; the text is the
-  same either way.
+  **While a page reads ✓ Use my text, your spacing stands.** Pressing the
+  button changes nothing on screen. From then on, a line you edit on that
+  page is placed only by its own spaces: the reader stops moving its columns
+  to suit the font, and beside the PDF it stops setting the line's pieces
+  where the PDF prints them, so a line you line up or indent with spaces stays
+  where you put it. Its size, its place down the page, and every line you have
+  not touched look as they did. The page remembers which lines are yours when
+  the document is opened again; withdraw the request and they are laid out as
+  any line is.
   Clicking ✎ Use my text also turns ✎ Edit on, so you can type straight
   away; withdrawing the request leaves ✎ Edit as it is.
+  **Tab indents.** On an editable page (and in ⇄ Raw), Tab puts in spaces to
+  the next stop of four and Shift+Tab takes them back; with several lines
+  selected, each is indented or outdented by one stop. Ctrl+Z takes it back.
   **To find them:** the Flagged panel lists every page on ✓ Use my text in
   the case; click one to go to it (its document is opened first where it is
   not the one on screen). In the Pages tab, such a page is tagged *Use my

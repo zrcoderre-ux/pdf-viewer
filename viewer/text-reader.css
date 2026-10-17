@@ -819,13 +819,6 @@ body.gutter-off .page-body.numbered .gutter { font-size: var(--body-em); }
    column instead and is CUT at the edge of the paper (.page-inner clips) —
    one long line does not take the whole page's type down with it. */
 .page-body.numbered .line.num > .lt { white-space: pre; }
-/* A ✓ Use my text page (setFree) is set as the text file is: fixed-pitch and
-   unwrapped, so it is typed to look like its PDF the way the file will. */
-.page-body.free { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-.page-body.free .line > .lt { white-space: pre; overflow-wrap: normal; }
-/* …its type never made smaller to fit: a line too long for the sheet is
-   scrolled to, as on a raw page, not narrowed or cut. */
-.page-inner:has(> .page-body.free) { overflow-x: auto; overflow-y: hidden; }
 /* One pitch down the margin (slotLines): a number's slot is its line and the
    unnumbered lines under it, and every slot is padded to the fullest one's rows
    (--slot-rows, on #pages). Off the grid only: there the PDF places them. */
