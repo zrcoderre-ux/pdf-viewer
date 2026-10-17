@@ -20453,6 +20453,18 @@ function pageGeometry(box, sel) {
   return { tops: els.map((e) => e.offsetTop), heights: els.map((e) => e.offsetHeight) };
 }
 function firstLineOffset(sec) {
+  // A page shown ⇄ Raw has its lines put away under the file's text, and no
+  // line of it is the PDF's: it stands level with its PDF page (rawSlots) and
+  // takes that page's own anchor, so the pair scrolls as one, page beside
+  // page, as it does with the page shown as text. Measured off its hidden
+  // lines it read as nothing, and every page after it drifted off its PDF
+  // page — two hundred pixels by the next.
+  if (sec.classList.contains("raw")) {
+    const slot = !pdfPane.hidden && pdfPane.querySelector(`.pdf-slot[data-index="${sec.dataset.index}"]`);
+    if (slot && !slot.classList.contains("blank")) return pdfFirstLine(slot);
+    const pre = sec.querySelector(".raw-sheet .raw-text");
+    if (pre) return pre.getBoundingClientRect().top - sec.getBoundingClientRect().top;
+  }
   const top = sec.getBoundingClientRect().top;
   for (const l of sec.querySelectorAll(".line")) {
     if (l.textContent.trim()) return l.getBoundingClientRect().top - top;
