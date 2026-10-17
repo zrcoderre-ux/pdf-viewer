@@ -1764,7 +1764,11 @@ page's height at the click, so nothing below moves. One view at a time:
 `applySwapsNow` turns raw off on a page it swaps in. `shapePages` passes over
 a raw page as it does a swapped one, and `applyMatchedLayoutNow` takes it off
 the grid (`clearMatched`) and holds its slot to the page's height with the
-shed slots (`rawSlots`), so the two columns stay level. Not persisted.
+shed slots (`rawSlots`), so the two columns stay level. Not persisted. Side by side, a raw page's scroll anchor is its PDF page's
+(`firstLineOffset`: `pdfFirstLine` of its slot), so the pair scrolls as one,
+page beside page; it was measured off the page's hidden lines, read as
+nothing, and every page after it drifted off its PDF page (250 px by the next
+page). `test-raw-sync.mjs` (Chromium) pins it, both columns leading.
 
 **Typing into ⇄ Raw.** Under ✎ Edit the `pre.raw-text` is
 `contenteditable="plaintext-only"` (set in `setRaw` and by `setEditing`); the
