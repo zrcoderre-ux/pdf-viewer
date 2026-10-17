@@ -1967,43 +1967,54 @@ that reads `[DID NOT OCR]` has
 no transcription: the button is disabled there, `markDidNotOcr` withdraws an
 entry for the page it strips, and `syncNoOcr` drops one for a page that
 reads it. `#text-fixed-block` lists them.
-**…and a page on the list is free of the PDF** (`setFree`, `isFreePage`, a
-`.page-body.free`). `refreshFixButtons` (every `renderFlags`) calls
-`setFree(sec, asked)` per page; a change rebuilds the body from its own text
-the way an undo does (`snapshotOf`, `buildBody`, `restoreTyping`, the caret
-put back), then lays the pages out again and `afterTextChangeSoon`.
+**…and a page on the list leaves the operator's spacing alone** (`setFree`,
+`markOwnLines`, `isFreePage`, `.page-body.free`, `.line.own`). The owner:
+"I don't want use my text to change anything other than the spacial
+correction when I try to line text up or indent it. Clicking the use my text
+button alone should create no visible difference." (Three versions before
+this one changed the page itself — off the PDF's grid, a fixed-pitch font,
+its own type size — and each was turned down.) So pressing it changes nothing
+on screen: `refreshFixButtons` (every `renderFlags`) calls `setFree(sec,
+asked)`, which marks the body `.free` and notes its lines as they stand
+(`__freeFrom`; for a page the save handed over after typing, its `typedFrom`),
+kept per page in localStorage (`textReader.freeFrom`, keyed by the values
+store, the document and its PDF page) so a reopened document still has them;
+`buildPages` reads them back. `markOwnLines` (from the `dressLines` and
+`dressColumns` wrappers, so every dressing pass, and from `afterTextChange`)
+marks `.own` each line whose text is not one of those (matched as a multiset,
+so a line moving up or down is not an edit). An own line is placed only by
+its own spaces, a grid character each, as every line's spaces are: columns.js
+gives it no `__colPlan` (alignColumns does not move its second column for the
+font), and beside the PDF `applyMatchedLayoutNow` gives it no PDF places (its
+cell spec keeps the row's face and size, `places: []`, so `placeLine` sets its
+pieces on the page's character grid, `at(a)`), puts it at the page's text edge
+(`charGridFit.x0`, else the least row left) rather than its row's, leaves it
+out of the pairs `charGrid` is read from (it is evidence of where the operator
+put words, not the PDF), and the spill pass passes it by. Its place down the
+page, its size, its face, and every other line are as they were. Withdrawn,
+the stored lines go and the page is dressed again as any page.
 Each entry of `#text-fixed-list` goes to its page (`goToFixedPage`: found by
 `pageEntryAt` on screen, or its document opened from `folderDocs` first, then
 `goToPageFromList`); the Pages tab already tags such a page "Use my text".
-`buildPages` adds the class before the first `buildBody` of a page on the
-list. A free body is passed over by the rule rows and the columns
-(`dressLines`/`dressColumns` are local guards over `rules.js`'s and
-`columns.js`'s, so every caller, the typing's `recolumnSoon` included, skips
-it). Beside its PDF it stays on the grid DOWN the page and is left alone
-ACROSS it: `applyMatchedLayoutNow` plans it as any page (the PDF page's size,
-`slotTops`/`rowLayout` tops, `spreadTops`, `holdWithin`), then gives every
-line the document's body type (`base`), one left (the least of the row
-lefts, where the page is unnumbered), and no `cells`, `charGridFit` or
-`typeBox`; the spill pass passes it by and so does the squeeze, which takes
-any `scaleX` off it. Off the grid `shapePages` shapes it as any page. Its
-type is never taken down for it: a line too long for the sheet scrolls
-(`.page-inner:has(> .page-body.free)`, `overflow-x: auto`). The owner's aim:
-"to easily manually type the text file to look like the PDF". So a free page
-is set as the file is (text-reader.css `.page-body.free`: fixed-pitch, `.lt`
-`white-space: pre`), and `fitFreeNames` (from `dressBody` and
-`afterTextChange`) draws each pseudonym span across its FAKE's width
-(`scaleX(fake/shown)` and a `margin-right` of the difference in `ch`), so a
-column straight in the file is straight on the page. How it got here, in the
-owner's words: taken off the grid and left to flow, the page was "way too
-long"; shaped to the paper with its type capped to its widest line, it
-"shrunk the text size too"; "I want to retain the page size and the line
-spacing with pdf and text file". The PDF's page and rows down it, and
-nothing across. The margin
-numbers stay: `buildBody` still makes the gutters and `.numbered`, so the
-numbered-page editing (fixed slots, `GUTTER_FIXED`) is unchanged, at the
-owner's word. `useMyText` turns ✎ Edit on (`setEditing(true)`) when it
-puts a page on the list; withdrawing leaves it. `test-free-page.mjs` (Chromium) pins it; the grid path beside a
-PDF included.
+`useMyText` turns ✎ Edit on (`setEditing(true)`) when it puts a page on the
+list; withdrawing leaves it. `test-free-page.mjs` (Chromium) pins it, with a
+control: on an ordinary form page beside its PDF the same spaces typed leave
+the piece where the PDF prints it.
+
+**Tab indents** (`TAB_STOP`, `tabHost`, `gutterIndent`, `outdentGutter`). Tab
+on an editable page or raw sheet puts in spaces to the next stop of four
+(counted from the start of the line's text, after a margin number), and
+Shift+Tab takes back up to that many before the caret; with a selection over
+several lines each is indented or outdented at its start. The spaces go in by
+`execCommand("insertText")`, which asks no `beforeinput`, so the handler takes
+the undo step itself (`escNote`, `noteTyping`, `snapshot(body, true)`, under
+`batchEdit`), as the paste does. A numbered line's indent, once the page is
+built from the file, stands in its gutter (`TD.gutterPrefix` takes every
+space before the text, `.gs`), out of the caret's reach: Shift+Tab at the
+start of such a line's text takes it back from there, keeping the two spaces
+the export writes after every number, and tells the page with an `input`
+event. It used to move the focus off the page. `test-tab-indent.mjs`
+(Chromium) pins it.
 **…and without the click** (`autoUseMyText`, `noteTyping`, `forgetTyping`,
 `fixDeclined`, `textdoc.wordsChanged`, `TD.AUTO_TEXT_FIXED_WORDS`), at the
 owner's direction. A page's text just before the first keystroke on it is kept
