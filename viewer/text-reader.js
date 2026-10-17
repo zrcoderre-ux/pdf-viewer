@@ -4637,6 +4637,16 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         f.addEventListener("click", (e) => { e.preventDefault(); useMyText(Number(sec.dataset.index)); });
         lab.appendChild(f);
         setFixButton(f, TD.readsDidNotOcr(p.lines), false, TD.headerSaysTextCorrected(p));
+        // # Number lines: pleading paper's margin numbers, where the export
+        // has none (numberPage). Only on a page without them.
+        const nb = document.createElement("button");
+        nb.className = "num-page";
+        nb.type = "button";
+        nb.textContent = "# Number lines";
+        nb.title = "This page has no margin line numbers: give it pleading paper's 1–28 — each line on the number the PDF prints it at where the PDF is open beside it, else in order";
+        nb.hidden = TD.pageIsNumbered(p.lines) || TD.readsDidNotOcr(p.lines);
+        nb.addEventListener("click", (e) => { e.preventDefault(); numberPage(Number(sec.dataset.index)); });
+        lab.appendChild(nb);
       }
       sec.appendChild(lab);
     }
@@ -10294,6 +10304,116 @@ $("fb-with").addEventListener("keydown", (e) => {
 // document dirty, a save writes it — and it is made the way an undo puts a
 // page back: the body built again from its new text, the page's spot keeps
 // with it.
+/**
+ * # NUMBER LINES: PLEADING PAPER'S MARGIN, WHERE THE EXPORT HAS NONE. A scan
+ * whose OCR read none of its gutter, or a page PDF-Linker did not take for
+ * pleading paper, comes out as plain lines; the page is numbered paper all
+ * the same, and its line numbers are what a pinpoint cites. The button writes
+ * them in, as PDF-Linker writes them (" 7  text", a bare " 7" for a number
+ * with no line, an unnumbered line behind four spaces between two numbers).
+ *
+ * WHERE THE PDF IS OPEN BESIDE IT and its own printed numbers are read
+ * (`geom`), each line goes on the number nearest where the PDF prints it
+ * (PS.rowLayout matches lines to rows by their words), the rule the owner
+ * chose for PDF-Linker's export: a number claims the line nearest it (a tie to
+ * the upper), and any other line between two numbers is a half line. Lines
+ * keep their order whatever the matching says: a line is never put above the
+ * one before it. Above line 1 or below the last number a line is the page's
+ * own furniture, unnumbered. ELSEWHERE the lines are numbered in order, one
+ * each, to 28, and the toast says so. Either way the page's common left
+ * margin is taken off (the numbers stand there now), the blank lines above
+ * the text go, the Authorities cited trailer stays after it, and the whole
+ * of it is one undo step.
+ */
+function numberPage(i) {
+  if (!doc) return;
+  const p = doc.pages[i];
+  if (!p || p.header == null) return;
+  ensurePageLive(i);
+  const body = bodyForPage(i);
+  if (!body) return;
+  const m = reel.length > 1 ? reelMemberOf(i) : null;
+  const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
+  if (body.classList.contains("numbered")) { toast(`${where} already has its margin numbers.`); return; }
+  const all = TD.serializeNodes(body).split("\n");
+  let end = all.findIndex((l) => TD.TRAILER_RE.test(l));
+  if (end < 0) end = all.length;
+  while (end > 0 && !all[end - 1].trim()) end--;
+  let first = 0;
+  while (first < end && !all[first].trim()) first++;
+  if (first >= end) { toast(`${where} has no text to number.`, { error: true }); return; }
+  const content = all.slice(first, end), tail = all.slice(end);
+  const margin = Math.min(...content.filter((l) => l.trim()).map((l) => l.search(/\S/)));
+  const texts = content.map((l) => (l.trim() ? l.slice(margin).replace(/\s+$/, "") : ""));
+  const num = (n) => String(n).padStart(2);
+  const half = (t) => "    " + t;
+  let out = null, how = "";
+  // From the PDF: its printed numbers and the rows it prints the lines on.
+  const t = pdfTarget(i);
+  const info = t ? infoFor(t.src) : null;
+  const geom = info && info.geoms ? info.geoms[t.page - 1] : null;
+  const rows = info && info.rows ? info.rows[t.page - 1] : null;
+  const lay = geom && rows && rows.length ? PS.rowLayout(texts, rows) : null;
+  if (lay) {
+    const last = Math.max(1, Math.min(geom.last || 28, 40));
+    const at = (n) => PS.lineTop(geom, n);
+    // Each text line's slot: a number, or before line 1 / after the last.
+    let floor = 0;
+    const slot = texts.map((txt, k) => {
+      const pos = lay.positions[k];
+      if (!txt || !pos) return null;
+      // The nearest number, a tie (within a twentieth of a line either side
+      // of halfway, PDF-Linker's _GUTTER_TIE_SHARE) to the upper one.
+      const f = (pos.top - geom.y1) / geom.pitch;
+      let s = Math.floor(f) + (f - Math.floor(f) > 0.525 ? 1 : 0) + 1;
+      if (pos.top < at(1) - geom.pitch / 2) s = 0;            // above line 1
+      else if (pos.top > at(last) + geom.pitch / 2) s = last + 1; // below the last
+      else s = Math.max(1, Math.min(last, s));
+      s = Math.max(s, floor); // never above the line before it
+      floor = s;
+      return { s, y: pos.top };
+    });
+    // A number claims the line nearest it; a tie goes to the upper.
+    const claim = new Map();
+    slot.forEach((x, k) => {
+      if (!x || x.s < 1 || x.s > last) return;
+      const d = Math.abs(x.y - at(x.s)), had = claim.get(x.s);
+      if (had == null || d < Math.abs(slot[had].y - at(x.s)) - 1e-6) claim.set(x.s, k);
+    });
+    out = [];
+    let cur = 0;
+    const upTo = (n) => { while (cur < n) { cur++; out.push(num(cur)); } };
+    texts.forEach((txt, k) => {
+      const x = slot[k];
+      if (!x) return; // a blank line: the numbers make the spacing now
+      if (x.s === 0 && cur === 0) { out.push(half(txt)); return; }
+      if (x.s > last) { upTo(last); out.push(half(txt)); return; }
+      if (claim.get(x.s) === k) { upTo(x.s - 1); out.push(num(x.s) + "  " + txt); cur = x.s; return; }
+      // A half line: between the number before it and its own, or after its own.
+      if (x.s > cur && x.y < at(x.s)) upTo(x.s - 1); else upTo(Math.min(x.s, last));
+      out.push(half(txt));
+    });
+    upTo(last);
+    how = "on the numbers the PDF prints them at";
+  } else {
+    out = [];
+    texts.forEach((txt, k) => { out.push(k < 28 ? num(k + 1) + (txt ? "  " + txt : "") : half(txt)); });
+    for (let n = texts.length + 1; n <= 28; n++) out.push(num(n));
+    how = "in order (open the PDF beside it to have them placed where it prints them)";
+  }
+  const lines = out.concat(tail);
+  const text = lines.join("\n");
+  snapshot(body, true);
+  convertTypedRealsSoon.cancel(body);
+  hideTypeTip();
+  buildBody(body, text, i);
+  doc.pages[i].lines = lines;
+  syncSpots(body);
+  setDirty(true, i);
+  refreshNocrButtons([i]);
+  afterTextChange();
+  toast(`${where}: margin numbers put in, ${how}. Ctrl+Z takes them out; Save writes them.`, { ms: 7000 });
+}
 function markDidNotOcr(i) {
   if (!doc) return;
   const p = doc.pages[i];
@@ -10794,6 +10914,11 @@ function refreshNocrButtons(indices) {
     if (!p) continue;
     const e = sources ? pageEntryAt(i, sources) : null;
     setNocrButton(b, pageReadsDidNotOcr(i), !!e && ocrAgain.some((x) => TD.sameNoOcr(x, e)), TD.headerSaysDidNotOcr(p));
+    const nb = b.parentElement && b.parentElement.querySelector(".num-page");
+    if (nb) {
+      const body = b.closest(".tpage").querySelector(".page-body");
+      nb.hidden = body ? body.classList.contains("numbered") || pageReadsDidNotOcr(i) : TD.pageIsNumbered(p.lines);
+    }
   }
   refreshFixButtons(indices);
 }

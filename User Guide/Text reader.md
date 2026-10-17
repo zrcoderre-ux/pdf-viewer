@@ -2097,6 +2097,11 @@ app, which routes it to the reader tab.
   slot: line 5 where the PDF's line 5 does, a half line where the PDF's row
   between 5 and 6 does. That is display only; the file keeps its line numbers
   and spacing.
+  **# Number lines** puts pleading paper's margin numbers (1–28) on a page
+  whose export has none (a scan whose OCR missed the margin). With the PDF
+  open beside it, each line goes on the number the PDF prints it at, and a
+  line between two numbers becomes a half line; otherwise the lines are
+  numbered in order. Ctrl+Z takes them out; Save writes them.
   **Tab indents.** On an editable page (and in ⇄ Raw), Tab puts in spaces to
   the next stop of four and Shift+Tab takes them back; with several lines
   selected, each is indented or outdented by one stop. Ctrl+Z takes it back.

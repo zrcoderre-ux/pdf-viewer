@@ -723,6 +723,13 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 .page-label .nocr-page.stripped:hover { background: #a61d1d; border-color: #a61d1d; }
 /* ↻ OCR This Page, asked: the request is on the list for PDF-Linker. */
 .page-label .nocr-page.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* # Number lines: pleading paper's margin numbers, on a page that has none. */
+.page-label .num-page {
+  float: right; margin-right: 6px; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.page-label .num-page:hover { background: #e3e5e8; }
+.page-label .num-page[hidden] { display: none; }
 /* ✎ Use my text, beside it: the page's typed-in text is to be the PDF's own. */
 .page-label .fix-page {
   float: right; margin-right: 6px; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
@@ -1148,7 +1155,7 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
   #pages { zoom: var(--print-zoom, 1); }
   .tpage { max-width: none; margin: 0 auto 18px; box-shadow: none; border-radius: 0; break-after: page; }
   .tpage:last-child { break-after: auto; }
-  .page-label .swap-page, .page-label .raw-page, .page-label .nocr-page, .page-label .fix-page { display: none; }
+  .page-label .swap-page, .page-label .raw-page, .page-label .nocr-page, .page-label .fix-page, .page-label .num-page { display: none; }
   /* A page swapped for its PDF page prints its text, and its PDF page — the
      filing, which nothing scrubbed — never prints, whether or not the page
      was told a print was coming (body.printing does the same on screen). */
