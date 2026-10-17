@@ -2088,6 +2088,11 @@ app, which routes it to the reader tab.
   any line is.
   Clicking ✎ Use my text also turns ✎ Edit on, so you can type straight
   away; withdrawing the request leaves ✎ Edit as it is.
+  **Half lines between margin numbers.** On a numbered page every number has
+  a half line under it. Enter on line 1 moves the text after the cursor to
+  1.5 (between 1 and 2), and a second Enter to line 2; Backspace at the start
+  of line 2 moves it back to 1.5, and a second Backspace joins it to line 1.
+  An empty half line is not in the file and takes no room.
   **Tab indents.** On an editable page (and in ⇄ Raw), Tab puts in spaces to
   the next stop of four and Shift+Tab takes them back; with several lines
   selected, each is indented or outdented by one stop. Ctrl+Z takes it back.
