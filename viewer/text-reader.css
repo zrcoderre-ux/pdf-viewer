@@ -808,11 +808,12 @@ body.sbs .line.trailer { display: none; }
    beside the PDF the PDF's body type at the grid's scale (--body-em). Never
    in a line's own type: a margin two and a half ems of each line's type put
    a line set larger or smaller than the body out of line with the rest. The
-   numbers are set in the page's body type, eight tenths of it, so a page
-   fitted smaller is not held open by them. */
+   numbers are set in the page's body type at its full size and in the text's
+   colour, as pleading paper prints them: they were eight tenths of it and
+   grey, smaller than the PDF's and hard to see. */
 .page-body.numbered { --gutter-em: var(--reader-size-eff, 1em); --gutter-w: calc(2.6 * var(--gutter-em)); }
 .page-body.numbered.fixed { --gutter-em: var(--body-em); }
-.page-body.numbered .gutter { font-size: calc(0.8 * var(--body-em)); padding-right: calc(0.4 * var(--gutter-em)); margin-right: calc(0.88 * var(--gutter-em)); }
+.page-body.numbered .gutter { font-size: var(--body-em); color: inherit; padding-right: calc(0.4 * var(--gutter-em)); margin-right: calc(0.88 * var(--gutter-em)); }
 body.gutter-off .page-body.numbered .gutter { font-size: var(--body-em); }
 /* A numbered line is never wrapped: its tail would fall on a screen line with
    no number, which read across to the PDF is one line off. It runs past the

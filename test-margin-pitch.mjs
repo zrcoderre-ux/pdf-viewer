@@ -2,7 +2,8 @@
 // slotLines, slotRows; text-reader.css `[data-slot]`): a line between two
 // margin numbers is kept, and every number of every numbered page stands the
 // same distance from the next, as a normal page and as a ✓ Use my text page;
-// taking the in-between line out brings every gap back to one row.
+// taking the in-between line out brings every gap back to one row; the
+// numbers are in the text's own size and colour.
 //
 // Run: node test-margin-pitch.mjs   (from the repo root)
 //
@@ -187,6 +188,11 @@ async function run() {
         return { n: rows.length, gaps: out };
       });
       check("the box is drawn, its rows touching (no gap for its bars to break at)", bars, { n: 4, gaps: [0, 0, 0] });
+      check("the margin numbers in the text's own size and colour", await p.evaluate(() => {
+        const l = document.querySelector("#pages .page-body > .line.num");
+        const g = getComputedStyle(l.querySelector(".gutter")), t = getComputedStyle(l.querySelector(".lt"));
+        return [g.fontSize === t.fontSize, g.color === t.color];
+      }), [true, true]);
       truthy("the line between the numbers is kept", (await p.evaluate(() => document.querySelector("#pages .page-body").textContent)).includes("its second line, between the numbers"));
       console.log("2. …and as a ✓ Use my text page");
       await fixClick(p, 0);
