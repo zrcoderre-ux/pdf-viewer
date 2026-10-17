@@ -2032,6 +2032,23 @@ spaces ("It is important that the text file has the correct line numbers").
 A slot with no PDF row keeps the file's spacing, and so does a line set by
 hand on a ✓ Use my text page. `test-half-lines.mjs` (Chromium) pins both.
 
+**# Number lines** (`numberPage`, `.num-page` on every label with a page
+header, shown only while the page is not `.numbered` and does not read
+`[DID NOT OCR]`; `refreshNocrButtons` keeps it so). Writes pleading paper's
+margin into a page whose export has none, as PDF-Linker writes it: " 7  text",
+a bare " 7", an unnumbered half line behind four spaces. With the PDF open and
+its printed numbers read (`geom`, its `rows`), each line is matched to its
+PDF row (`PS.rowLayout`) and put on the nearest number, a tie within a
+twentieth of a line of halfway to the upper (PDF-Linker's `_GUTTER_TIE_SHARE`);
+a number claims the line nearest it and any other line between two numbers is
+a half line (the rule the owner chose for PDF-Linker's export, #541); a line is
+never put above the one before it; above line 1 or below the last number a
+line is unnumbered furniture; the numbers run to `geom.last`. Without it, the
+lines are numbered in order to 28 and the toast says so. The page's common left
+margin and the blank lines above its text go, the Authorities cited trailer
+stays after it, and it is one undo step (`snapshot`, `buildBody`, as
+`markDidNotOcr`). `test-number-lines.mjs` (Chromium) pins both ways.
+
 **Tab indents** (`TAB_STOP`, `tabHost`, `gutterIndent`, `outdentGutter`). Tab
 on an editable page or raw sheet puts in spaces to the next stop of four
 (counted from the start of the line's text, after a margin number), and
