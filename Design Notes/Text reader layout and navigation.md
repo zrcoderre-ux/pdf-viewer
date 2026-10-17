@@ -344,10 +344,12 @@ padding of its own. And the margin is measured in a unit of its own,
 paper changes, so the rule and the numbers' right edge stand at one place on
 every page of the document (a page fitted to 0.525 had its numbers 9 px left
 of the next page's and its text 18 px); the PDF's body type at the grid's
-scale beside it. The numbers are set in the page's body type (`0.8 *
---body-em`), never a line's own, so a line set larger or smaller keeps its
-number in line, and a fitted page is not held open by its numbers' line
-boxes.
+scale beside it. The numbers are set in the page's body type
+(`--body-em`), never a line's own, so a line set larger or smaller keeps its
+number in line. They were eight tenths of it and grey (`#9aa0a6`); the owner
+found them smaller than the PDF's and hard to see, so they are the body
+type's full size in the text's colour, as pleading paper prints them; the
+rule beside them stays grey.
 
 **…and only the numbers in their order are the grid.** A numbered line is
 `fixed` at its number's height (`slotTops`, `spreadTops`), so the number has to
