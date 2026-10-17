@@ -19368,7 +19368,7 @@ function applyMatchedLayoutNow() {
       matchedSlots.add(slot);
       const had = sec.__plan;
       if (had && sz && sec.__planLite === lite) {
-        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, type: had.type, cells: had.cells, firstY: had.firstY, scale: 1 });
+        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: had.firstY, scale: 1 });
         continue;
       }
       plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
@@ -19377,7 +19377,7 @@ function applyMatchedLayoutNow() {
     const geom = info.geoms[t.page - 1];
     const rows = info.rows[t.page - 1];
     const numbered = !!geom && body.classList.contains("numbered");
-    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null, cells = null, typeBox = null;
+    let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null, cells = null, typeBox = null, inds = null;
     // The body type: the DOCUMENT's, so every page of one filing is drawn at
     // one scale and a title page is not sized as though its heading were
     // body text; the page's own where the document has nothing read yet, and
@@ -19408,7 +19408,7 @@ function applyMatchedLayoutNow() {
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, type: had.type, cells: had.cells, firstY: info.lines[t.page - 1], scale: 1 });
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: info.lines[t.page - 1], scale: 1 });
       continue;
     }
     if (numbered) {
@@ -19432,6 +19432,7 @@ function applyMatchedLayoutNow() {
       pitch = geom.pitch;
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
       sizes = PS.typeSizes(off.sizes, base);
+      inds = pdfIndents(lines, nums, geom, rows, bodyX);
     } else {
       const texts = lines.map((l) => l.textContent);
       // Where across the page each line stands, in the export's characters:
@@ -19561,8 +19562,8 @@ function applyMatchedLayoutNow() {
     matchedSlots.add(slot);
     sec.__planFor = planKey;
     sec.__planLite = lite;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, type: typeBox, cells, firstY: info.lines[t.page - 1] };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, type: typeBox, cells, firstY: info.lines[t.page - 1], scale: 1 });
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1] };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // A page the reel has SHED has no lines to lay and stands at the height it
   // was pinned at (shedMember). Its slot used to fall to the pane's width —
@@ -19664,11 +19665,15 @@ function applyMatchedLayoutNow() {
     // already there is left alone.
     p.lines.forEach((l, k) => {
       const top = p.tops ? p.tops[k] : null;
+      const ind = top != null && p.inds && p.inds[k] != null ? p.inds[k] * p.scale : null;
       const want = top == null ? "" :
         (top * p.scale) + "|" + (p.lefts && p.lefts[k] != null ? p.lefts[k] * p.scale : "") + "|" +
-        (p.sizes[k] * p.scale) + "|" + (p.boxes[k] * p.scale);
+        (p.sizes[k] * p.scale) + "|" + (p.boxes[k] * p.scale) + "|" + (ind == null ? "" : ind);
       if (l.__laid === want) return;
       l.__laid = want;
+      // Where the PDF's row at this line's slot starts its text (pdfIndents).
+      l.classList.toggle("pind", ind != null);
+      if (ind != null) l.style.setProperty("--pdf-ind", ind.toFixed(2) + "px"); else l.style.removeProperty("--pdf-ind");
       if (top == null) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; return; }
       l.style.top = (top * p.scale) + "px";
       l.style.left = p.lefts && p.lefts[k] != null ? (p.lefts[k] * p.scale) + "px" : "";
@@ -20349,6 +20354,49 @@ function unlevelSlot(el) {
   if (sheet && sheet.style.minHeight) sheet.style.minHeight = "";
   if (el.style.height) el.style.height = ""; // …and a shed page's height
 }
+/**
+ * WHERE THE PDF STARTS EACH LINE'S TEXT, on a numbered page beside it, read by
+ * the line's SLOT: a numbered line's is its number's row, and an unnumbered
+ * line between two numbers is a half line (halfAfter) — one alone between 5
+ * and 6 is 5.5, two are 5⅓ and 5⅔. The PDF's row printed at that height, if
+ * there is one, gives the indent: its first piece of type right of the
+ * margin, less the margin. The export carries its indents as spaces, and
+ * PDF-Linker puts a line the PDF prints at 5.5 on 5 or 6 as often as not, so
+ * a line moved to its half line (Enter) stood where the export's spaces put
+ * it rather than where the PDF does; the owner, of the layout the reader
+ * copies from the PDF: "it should do that when the indented line is actually
+ * on 5.5". A slot the PDF prints nothing at keeps the file's own spacing
+ * (null), and so does a line set by hand on a ✓ Use my text page (`.own`).
+ * In the PDF's points; null where none applies.
+ */
+function pdfIndents(lines, nums, geom, rows, bodyX) {
+  const out = lines.map(() => null);
+  if (!geom || !rows || !rows.length || !(bodyX > 0)) return out;
+  const pitch = geom.pitch;
+  const numAt = [];
+  nums.forEach((n, k) => { if (n != null) numAt.push(k); });
+  const slotY = (k) => {
+    if (nums[k] != null) return PS.lineTop(geom, nums[k]);
+    let a = -1, b = -1;
+    for (const i of numAt) { if (i < k) a = i; else { b = i; break; } }
+    if (a < 0 || b < 0 || nums[b] !== nums[a] + 1) return null;
+    return PS.lineTop(geom, nums[a]) + (pitch * (k - a)) / (b - a);
+  };
+  lines.forEach((l, k) => {
+    if (l.classList.contains("own") || !l.textContent.replace(/^\s*\d{0,2}/, "").trim()) return;
+    const y = slotY(k);
+    if (y == null) return;
+    let best = null, gap = pitch * 0.3;
+    for (const r of rows) {
+      const d = Math.abs(r.top - y);
+      if (d <= gap && r.items.some((it) => it.x >= bodyX - 1.5 && String(it.str).trim())) { best = r; gap = d; }
+    }
+    if (!best) return;
+    const x = Math.min(...best.items.filter((it) => it.x >= bodyX - 1.5 && String(it.str).trim()).map((it) => it.x));
+    out[k] = Math.max(0, x - bodyX);
+  });
+  return out;
+}
 function clearMatched(sec) {
   if (!sec.classList.contains("matched")) return;
   sec.classList.remove("matched");
@@ -20371,7 +20419,7 @@ function clearMatched(sec) {
   for (const c of body.querySelectorAll(".cc")) if (c.style.width || c.style.transform) { c.style.width = ""; c.style.transform = ""; c.style.transformOrigin = ""; }
   for (const l of body.querySelectorAll(":scope > .line.lead")) l.classList.remove("lead");
   sec.__lead = 0;
-  for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; }
+  for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; l.classList.remove("pind"); l.style.removeProperty("--pdf-ind"); }
   for (const lt of body.querySelectorAll(":scope > .line > .lt")) if (lt.style.transform) { lt.style.transform = ""; lt.style.transformOrigin = ""; }
 }
 function setSideBySide(on, { remember = true } = {}) {

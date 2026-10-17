@@ -2093,6 +2093,10 @@ app, which routes it to the reader tab.
   1.5 (between 1 and 2), and a second Enter to line 2; Backspace at the start
   of line 2 moves it back to 1.5, and a second Backspace joins it to line 1.
   An empty half line is not in the file and takes no room.
+  Beside the PDF, each line starts where the PDF starts the text at its own
+  slot: line 5 where the PDF's line 5 does, a half line where the PDF's row
+  between 5 and 6 does. That is display only; the file keeps its line numbers
+  and spacing.
   **Tab indents.** On an editable page (and in ⇄ Raw), Tab puts in spaces to
   the next stop of four and Shift+Tab takes them back; with several lines
   selected, each is indented or outdented by one stop. Ctrl+Z takes it back.
