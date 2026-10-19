@@ -2005,6 +2005,63 @@ list; withdrawing leaves it. `test-free-page.mjs` (Chromium) pins it, with a
 control: on an ordinary form page beside its PDF the same spaces typed leave
 the piece where the PDF prints it.
 
+**💬 Comments** (`commentSelection`, `openCommentPop`, `saveComment`,
+`deleteComment`, `paintComments`, `docComments`, `commentSpan`; textdoc.js
+`COMMENTS_HEAD`, `COMMENTS_RE`, `parseComments`, `commentLine`,
+`commentsBlock`, `findPassage`). The owner asked for comments on the text
+"like commenting on the pdf", preserved through successive runs, with any
+real values in them faked. ✎ Use my text was the owner's first idea for
+keeping them (the page's text, comment included, burned into the PDF's
+layer); the owner chose instead to keep them as PDF comments. A full run
+rebuilds every export from its PDF, so the PDF is the one place a comment
+lasts: PDF-Linker writes each comment the reader made into the PDF as an
+annotation, and every run writes the PDF's comments back into the export it
+rebuilds (PDF-Linker's `_pn_sync_export_comments`, `_pn_comments_block`; its
+notes, "Text reader comments"). The export carries them as a block after the
+document's last page, `====== Comments (not part of the document) ======`
+and one line a comment, `[c1] Page 3, on "passage": text [id rdc-…]`. That is
+the My-Macros Markdown export's form for a Word document's comments, a
+`[cN]` with the passage quoted (its `AddCommentEntry`): the quote is what
+lets a reader, or a model reading the export, find the passage. The id is
+the annotation's `/NM` (the viewer writes `pdfv-…`, the reader `rdc-` and ten
+letters), which is how a run tells which PDF comment an edit is to.
+**The block is the document's, not its last page's.** `parseExport` takes it
+off the page's lines into `page.comments` (its raw lines, head first, up to
+the next header or banner, so a Combined Text.txt member's block ends at the
+next member), and `serializeExport` writes it back after them, byte for byte.
+So the page's sum, Find, Replace all, the margin-number restore, the marks
+and every other pass over `p.lines` never see it, and every save path, on
+screen or off it, carries it, because each one writes
+`serializeExport(memberDoc(m))` or a `cloneDoc` of it (`cloneDoc` copies the
+array). `pageTextSum` and `pageFurnitureLine` cut at `COMMENTS_RE` as at the
+trailer all the same (`pageCut`), for lines read some other way, since
+PDF-Linker's `_pn_page_text_sum` and `_pn_page_furniture_line` do and the two
+are pinned to each other under node. A comment changes the member's last
+page of its span (`commentSpan`: its reel member, and within it a Combined
+member) and marks that member dirty; the save's standing assertion reads the
+whole member text, block included, so a bound real name left in the clear in
+a comment stops the save as one on a page does.
+**Disk text, shown through the key.** A comment's text and passage are stored
+as the block writes them: what was typed is put through `forwardText` (each
+bound real name as its pseudonym, kept values and cited decisions' names
+spared, as the save's pass spares them) and folded onto one line
+(`commentDisk`); it is shown through `translateRuns` as Show fakes says
+(`commentShown`). The passage is the selection's disk text, margin numbers
+dropped, folded (`passageOf`; first `COMMENT_ON_MAX`, 300, characters at a
+word). On screen it is found again in the page's disk text by `findPassage`
+(margin numbers skipped, whitespace one space, a wrap at the margin read
+through), painted as the `comment` highlight a text node at a time with the
+gutters left out (`diskRanges`), and a click on it opens the box
+(`commentAtPoint`). Not on Combined Text.txt (`commentRefusal`), whose
+comments are shown read-only, nor on a page with no PDF-Linker header. The
+state is `var`, not `let`: `render` and `afterTextChange` reach it while the
+module may still be loading. `test-comments.mjs` (Chromium) pins it: made,
+marked across a margin number, saved with its real name as the fake,
+reopened, read, changed and deleted from its passage; a block PDF-Linker
+wrote shown and written back byte for byte by a save of other edits; refused
+on Combined Text.txt. `test-textdoc.mjs` pins the block's parse, write and
+`findPassage`.
+
 **A half line under every margin number** (`halfAfter`, `pullUp`,
 `moveIntoHalfAbove`, in `enterAtCaret`, `joinLineUp`, `backspaceAtCaret`,
 `deleteAtCaret`). The numbered page's slots were its lines, so Enter stepped by

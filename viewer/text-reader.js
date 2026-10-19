@@ -1863,7 +1863,7 @@ $("side-collapse").addEventListener("click", () => showSidePanel(false, { rememb
   btn.hidden = !canOpen;
   btn.addEventListener("click", () => { try { chrome.runtime.openOptionsPage(); } catch { /* not an extension page */ } });
 }
-const SIDE_TABS = [["tab-docs", "side-docs"], ["tab-pages", "side-pages"], ["tab-flags", "side-flags"], ["tab-leaks", "side-leaks"]];
+const SIDE_TABS = [["tab-docs", "side-docs"], ["tab-pages", "side-pages"], ["tab-flags", "side-flags"], ["tab-leaks", "side-leaks"], ["tab-comments", "side-comments"]];
 function showSideTab(tab) {
   for (const [t, b] of SIDE_TABS) {
     const on = t === tab;
@@ -4679,6 +4679,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
 }
 
 function render() {
+  hideCommentPop();
   pagesEl.innerHTML = "";
   emptyEl.hidden = true;
   pagesEl.hidden = false;
@@ -4708,6 +4709,7 @@ function showPages(nodes, built) {
       if (marks) markKept(s);
     }
   }
+  hideCommentPop();
   pagesEl.innerHTML = "";
   emptyEl.hidden = true;
   pagesEl.hidden = false;
@@ -4998,6 +5000,7 @@ function afterTextChange() {
   refindSoon(); // …and the find's own ranges, which the rebuilt pages have dropped
   rekeySoon(); // …and the key walk's, for the same reason
   pagesTabSoon(); // …and the Pages tab's rows: a page stripped, typed into, or hung on the reel
+  paintCommentsSoon(); // …and the passages commented on, whose ranges a rebuilt page has dropped
   // The pages are where they are now: auto-scroll takes its pace from them
   // again rather than from the layout it started under.
   autoRemeasure();
@@ -13581,6 +13584,353 @@ $("flag-pop-row").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("mousedown", (e) => e.preventDefault());
 $("flag-pop-phrase").addEventListener("click", phraseSelection);
 flagPopBtn.addEventListener("click", () => flagSelection({ asked: true }));
+
+// ── comments on the document ────────────────────────────────────────────────────
+//
+// A comment is made as it is on the PDF: select a passage, 💬 Comment, type.
+// It is kept in the document's comments block (TD.commentsBlock, after its last
+// page) as disk text — a real name the key binds written as its pseudonym, as
+// typing on the page is (forwardText) — and shown through the key. A save
+// writes the block with the document, and the save's last check reads it with
+// the rest of the file, so a bound name left in the clear in a comment stops
+// the save as one on a page does. PDF-Linker's next run puts each comment into
+// the PDF as a comment on its passage (or changes or deletes the one there, by
+// its id), and every run after writes the PDF's comments back into the export
+// it rebuilds from the PDF — those made in the PDF viewer as well. So a comment
+// outlives the run that would otherwise have written over it.
+//
+// Combined Text.txt is PDF-Linker's to write again from the exports: its
+// members' comments are shown, and made on the members' own exports.
+// `var`, not `let`: a document put up while the module is still being read
+// (render, afterTextChange) reaches these before this line has run.
+var COMMENT_ON_MAX = 300; // a passage longer than this is quoted by its opening
+var commentPop = $("comment-pop");
+var commentInput = $("comment-pop-input");
+var commentAt = null;    // the comment the box is open on: docComments' shape
+var commentMarks = [];   // [{ ranges, ref }]: each passage marked, and its comment
+var commentOpened = 0;   // when the box last opened: the scroll that took the page to it does not close it
+var commentPaintTimer = 0;
+
+/** The pages of the document page `i` belongs to, { from, to }: its reel member, and within it a Combined Text.txt member. Its comments block is on `to`. */
+function commentSpan(i) {
+  const m = reelMemberOf(i);
+  let from = m ? m.from : 0, to = m ? m.from + m.count - 1 : doc.pages.length - 1;
+  for (let k = i; k > from; k--) if (doc.pages[k].banner != null) { from = k; break; }
+  for (let k = i + 1; k <= to; k++) if (doc.pages[k].banner != null) { to = k - 1; break; }
+  return { from, to };
+}
+/**
+ * The comments on the document on screen, in order: [{ span, k, c, page }] —
+ * `k` the comment's place in its block's list (TD.parseComments), `page` the
+ * index of the page it is on, -1 where its document has no page of that number.
+ */
+function docComments() {
+  const out = [];
+  if (!doc) return out;
+  for (let i = 0; i < doc.pages.length;) {
+    const span = commentSpan(i);
+    i = span.to + 1;
+    if (!doc.pages[span.to].comments) continue;
+    TD.parseComments(doc.pages[span.to].comments).forEach((c, k) => {
+      if (c.raw != null) return;
+      let page = -1;
+      for (let j = span.from; j <= span.to; j++) if (doc.pages[j].number === c.page) { page = j; break; }
+      out.push({ span, k, c, page });
+    });
+  }
+  return out;
+}
+/** A comment's disk text as the page would show it: through the key, real names or fakes as Show fakes says. */
+function commentShown(disk) {
+  if (!disk || !rev) return disk || "";
+  return PK.translateRuns(rev, disk).map((r) => (r.t === "swap" ? (settings.showFakes ? r.from : r.to) : r.s)).join("");
+}
+/** …and what was typed as the block writes it: one line, each real name the key binds as its pseudonym. */
+function commentDisk(shown) {
+  const t = TD.commentFlat(shown);
+  return fwd && t ? forwardText(t, [], [], null).text : t;
+}
+function newCommentId() {
+  const a = new Uint8Array(10);
+  crypto.getRandomValues(a);
+  return "rdc-" + [...a].map((x) => String.fromCharCode(97 + (x % 26))).join("");
+}
+/** Why page `i` takes no comment from here, or "". */
+function commentRefusal(i) {
+  const p = doc && doc.pages[i];
+  if (!p) return "Open a document first.";
+  if (isCombinedHead()) return `No comments on ${TD.COMBINED_FILE}: PDF-Linker writes it again from the documents' own exports, and a comment made here would not reach the PDF. Comment on the document's own export.`;
+  if (p.number == null) return "This page has no PDF-Linker page header, so there is no PDF page for the comment to go on.";
+  return "";
+}
+/** The selection's passage as the block quotes it: its disk text, without the margin numbers, on one line. */
+function passageOf(s) {
+  const pts = [{ node: s.range.startContainer, offset: s.range.startOffset }, { node: s.range.endContainer, offset: s.range.endOffset, end: true }];
+  let d;
+  try { d = TD.serializeHeld(s.body, { points: pts }); } catch { return ""; }
+  const [a, b] = d.at;
+  if (a < 0 || b <= a) return "";
+  const atLineStart = a === 0 || d.text[a - 1] === "\n";
+  const lines = d.text.slice(a, b).split("\n").map((l, k) => {
+    const g = k || atLineStart ? TD.gutterPrefix(l) : null;
+    return g ? g.rest : l;
+  });
+  let on = TD.commentFlat(lines.join(" "));
+  if (on.length > COMMENT_ON_MAX) on = on.slice(0, COMMENT_ON_MAX).replace(/\s+\S*$/, "");
+  return on;
+}
+/**
+ * A page's disk text [a, b) as ranges on the page (`d`: serializeHeld's mapped
+ * reading of it), a piece a text node or pseudonym — the margin numbers left
+ * out, as a selection leaves them — in order; [] where the page does not hold it.
+ */
+function diskRanges(d, a, b) {
+  const out = [];
+  const pieces = d.segs.map((g) => ({ start: g.start, end: g.end, node: g.node }))
+    .concat(d.pns.map(([s, e], k) => ({ start: s, end: e, el: d.pnNodes[k] })))
+    .filter((x) => x.end > a && x.start < b)
+    .sort((x, y) => x.start - y.start);
+  for (const x of pieces) {
+    const r = document.createRange();
+    if (x.el) r.selectNode(x.el);
+    else {
+      if (x.node.parentElement && x.node.parentElement.closest(".gutter")) continue;
+      const lo = Math.max(a, x.start) - x.start, hi = Math.min(b, x.end) - x.start;
+      if (!/\S/.test(x.node.data.slice(lo, hi))) continue;
+      r.setStart(x.node, lo);
+      r.setEnd(x.node, hi);
+    }
+    out.push(r);
+  }
+  return out;
+}
+
+/** Comment on the passage selected: the box opens to type it in. */
+function commentSelection() {
+  if (shotPut) return; // the page holds the picture's words (fakesForShot)
+  const s = currentSelection();
+  if (!s) { toast("Select the passage to comment on first, then press 💬 Comment (or C)."); return; }
+  const i = pageIndexOf(s.body);
+  const why = commentRefusal(i);
+  if (why) { toast(why, { error: true, ms: 8000 }); return; }
+  const on = passageOf(s);
+  if (!on) { toast("Select some of the page's text to comment on.", { error: true }); return; }
+  flagPop.hidden = true;
+  openCommentPop({ span: commentSpan(i), k: -1, c: { page: doc.pages[i].number, on, text: "", id: newCommentId() }, page: i }, s.range, { edit: true });
+}
+
+function openCommentPop(ref, range, { edit = false } = {}) {
+  commentAt = ref;
+  commentOpened = performance.now();
+  const p = ref.page >= 0 ? doc.pages[ref.page] : null;
+  $("comment-pop-where").textContent = `💬 Page ${ref.c.page}` + (p && p.printed ? ` (printed p. ${p.printed})` : "");
+  const on = commentShown(ref.c.on);
+  $("comment-pop-on").textContent = on ? `on “${on.length > 140 ? on.slice(0, 140) + "…" : on}”` : "on the page";
+  $("comment-pop-text").textContent = commentShown(ref.c.text);
+  const ro = isCombinedHead();
+  $("comment-pop-note").textContent = ro ? `Shown from ${TD.COMBINED_FILE}; change it on the document's own export.`
+    : ref.page < 0 ? `Its document has no page ${ref.c.page} on screen.` : "";
+  setCommentEditing(edit && !ro);
+  commentPop.hidden = false;
+  const rects = range ? range.getClientRects() : [];
+  const r = rects.length ? rects[rects.length - 1] : null;
+  const w = commentPop.offsetWidth, h = commentPop.offsetHeight;
+  const left = r ? r.left : (window.innerWidth - w) / 2;
+  let top = r ? r.bottom + 6 : toolbar.offsetHeight + 40;
+  if (top + h > window.innerHeight - 8 && r) top = Math.max(toolbar.offsetHeight + 4, r.top - h - 6);
+  commentPop.style.left = Math.max(4, Math.min(window.innerWidth - w - 4, left)) + "px";
+  commentPop.style.top = Math.max(toolbar.offsetHeight + 4, Math.min(window.innerHeight - h - 4, top)) + "px";
+  if (!commentInput.hidden) commentInput.focus();
+}
+function setCommentEditing(on) {
+  const ro = isCombinedHead();
+  const isNew = !!commentAt && commentAt.k < 0;
+  $("comment-pop-text").hidden = on;
+  commentInput.hidden = !on;
+  $("comment-pop-save").hidden = !on;
+  $("comment-pop-edit").hidden = on || ro;
+  $("comment-pop-delete").hidden = isNew || ro;
+  $("comment-pop-close").textContent = on ? "Cancel" : "Close";
+  if (on) {
+    commentInput.value = commentAt ? commentShown(commentAt.c.text) : "";
+    commentInput.focus();
+  }
+}
+function hideCommentPop() {
+  if (commentPop) commentPop.hidden = true;
+  commentAt = null;
+}
+/** The block of `span` written from `list` (parseComments' shape): the document unsaved, the marks and the list redrawn. */
+function setComments(span, list) {
+  const holder = doc.pages[span.to];
+  holder.comments = TD.commentsBlock(list, holder.lines) || undefined;
+  setDirty(true, span.to);
+  updateDirty();
+  paintComments();
+}
+/** The comment's place in its block's list as the block reads now: by its id, else where it was. */
+function commentIndex(list, ref) {
+  if (ref.c.id) { const k = list.findIndex((x) => x.id === ref.c.id); if (k >= 0) return k; }
+  return ref.k < list.length ? ref.k : -1;
+}
+function saveComment() {
+  const ref = commentAt;
+  if (!ref || !doc) return;
+  if (refuseWhileBusy()) return;
+  const typed = commentInput.value;
+  if (!TD.commentFlat(typed)) { toast("Type the comment first — or Cancel.", { error: true }); return; }
+  const list = TD.parseComments(doc.pages[ref.span.to].comments);
+  if (ref.k >= 0 && TD.commentFlat(typed) === TD.commentFlat(commentShown(ref.c.text))) { setCommentEditing(false); return; }
+  const c = { ...ref.c, text: commentDisk(typed) };
+  if (ref.k < 0) {
+    // In page order: after the last comment on this page or one before it.
+    let at = 0;
+    list.forEach((x, k) => { if (x.raw == null && x.page <= c.page) at = k + 1; });
+    list.splice(at, 0, c);
+  } else {
+    const k = commentIndex(list, ref);
+    if (k < 0) { toast("That comment is no longer in the document.", { error: true }); hideCommentPop(); return; }
+    list[k] = c;
+  }
+  hideCommentPop();
+  setComments(ref.span, list);
+  toast(`Comment ${ref.k < 0 ? "added" : "changed"} on page ${c.page} — 💾 Save writes it into the document, and PDF-Linker's next run puts it in the PDF.`);
+}
+function deleteComment() {
+  const ref = commentAt;
+  if (!ref || !doc || ref.k < 0) return;
+  if (refuseWhileBusy()) return;
+  const list = TD.parseComments(doc.pages[ref.span.to].comments);
+  const k = commentIndex(list, ref);
+  hideCommentPop();
+  if (k < 0) return;
+  list.splice(k, 1);
+  setComments(ref.span, list);
+  toast(`Comment deleted from page ${ref.c.page} — 💾 Save writes the document without it, and PDF-Linker's next run takes it off the PDF.`);
+}
+
+/** The passages commented on, marked; the count on each page's label and in the tab; the tab's list. */
+function paintComments() {
+  commentMarks = [];
+  const all = docComments();
+  const perPage = new Map();
+  const read = new Map(); // a page's disk text, read once
+  for (const ref of all) {
+    if (ref.page < 0) continue;
+    if (!perPage.has(ref.page)) perPage.set(ref.page, []);
+    perPage.get(ref.page).push(ref);
+    if (!ref.c.on) continue;
+    const body = bodyForPage(ref.page);
+    if (!body || !body.isConnected) continue;
+    if (!read.has(body)) read.set(body, TD.serializeHeld(body, { mapped: true }));
+    const d = read.get(body);
+    const hit = TD.findPassage(d.text, ref.c.on);
+    const ranges = hit ? diskRanges(d, hit[0], hit[1]) : [];
+    if (ranges.length) commentMarks.push({ ranges, ref });
+  }
+  if ("highlights" in CSS && typeof Highlight !== "undefined") CSS.highlights.set("comment", highlightOf(commentMarks.flatMap((x) => x.ranges)));
+  for (const sec of pagesEl.querySelectorAll(".tpage")) {
+    const lab = sec.querySelector(":scope > .page-label");
+    if (!lab) continue;
+    const refs = perPage.get(Number(sec.dataset.index));
+    let b = lab.querySelector(":scope > .cmt-page");
+    if (!refs) { if (b) b.remove(); continue; }
+    if (!b) {
+      b = document.createElement("button");
+      b.type = "button";
+      b.className = "cmt-page";
+      // Read off the section at the click, as the label's other buttons are.
+      b.addEventListener("click", (e) => { e.preventDefault(); openPageComment(Number(sec.dataset.index)); });
+      lab.appendChild(b);
+    }
+    b.textContent = `💬 ${refs.length}`;
+    b.title = refs.length === 1 ? "A comment on this page — click to read it" : `${refs.length} comments on this page — click for the first; the Comments tab lists them`;
+  }
+  renderCommentsList(all);
+}
+function paintCommentsSoon() {
+  clearTimeout(commentPaintTimer);
+  commentPaintTimer = setTimeout(paintComments, 200);
+}
+function renderCommentsList(all) {
+  $("comments-count").textContent = String(all.length);
+  const ul = $("comments-list");
+  ul.textContent = "";
+  for (const ref of all) {
+    const li = document.createElement("li");
+    const tag = document.createElement("span");
+    tag.className = "tag keep";
+    tag.textContent = `p. ${ref.c.page}`;
+    const lv = document.createElement("span");
+    lv.className = "lv cmt-lv";
+    lv.textContent = commentShown(ref.c.text);
+    const on = commentShown(ref.c.on);
+    li.title = (on ? `On “${on}”: ` : "On the page: ") + commentShown(ref.c.text);
+    li.append(tag, lv);
+    li.addEventListener("click", () => goToComment(ref));
+    ul.appendChild(li);
+  }
+}
+function sameComment(a, b) { return a.span.to === b.span.to && a.k === b.k; }
+/** To a comment: its passage scrolled into sight and its box open. */
+function goToComment(ref) {
+  if (ref.page < 0) { openCommentPop(ref, null); return; }
+  ensurePageLive(ref.page);
+  paintComments();
+  const m = commentMarks.find((x) => sameComment(x.ref, ref));
+  if (m) {
+    scrollRangeTo(m.ranges[0], { margin: 80 });
+    requestAnimationFrame(() => openCommentPop(m.ref, m.ranges[m.ranges.length - 1]));
+  } else {
+    goToPageFromList(doc.pages[ref.page]);
+    requestAnimationFrame(() => openCommentPop(ref, null));
+  }
+}
+/** The first comment on page `i`, from the count on its label. */
+function openPageComment(i) {
+  const ref = docComments().find((x) => x.page === i);
+  if (!ref) return;
+  const m = commentMarks.find((x) => sameComment(x.ref, ref));
+  openCommentPop(ref, m ? m.ranges[m.ranges.length - 1] : null);
+}
+/** The comment whose passage is under a point, or null. */
+function commentAtPoint(x, y) {
+  for (const m of commentMarks) {
+    for (const range of m.ranges) for (const r of range.getClientRects()) if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return { ref: m.ref, range };
+  }
+  return null;
+}
+pagesEl.addEventListener("click", (e) => {
+  if (e.button !== 0 || !commentMarks.length || e.target.closest(".page-label, a, button")) return;
+  const sel = document.getSelection();
+  if (sel && !sel.isCollapsed) return; // a drag that ended here selects; it does not open
+  const m = commentAtPoint(e.clientX, e.clientY);
+  if (m) openCommentPop(m.ref, m.range);
+});
+$("comment-btn").addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
+$("comment-btn").addEventListener("click", commentSelection);
+$("flag-pop-comment").addEventListener("mousedown", (e) => e.preventDefault());
+$("flag-pop-comment").addEventListener("click", commentSelection);
+$("comment-pop-save").addEventListener("click", saveComment);
+$("comment-pop-edit").addEventListener("click", () => setCommentEditing(true));
+$("comment-pop-delete").addEventListener("click", deleteComment);
+$("comment-pop-close").addEventListener("click", () => {
+  if (!commentInput.hidden && commentAt && commentAt.k >= 0) setCommentEditing(false);
+  else hideCommentPop();
+});
+commentInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveComment(); }
+  else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideCommentPop(); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !commentPop.hidden) { hideCommentPop(); return; }
+  const t = e.target;
+  if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+  if (t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))) return;
+  if ((e.key === "c" || e.key === "C") && currentSelection()) { e.preventDefault(); commentSelection(); }
+});
+// A box left open over a page that has scrolled away reads as the wrong page's.
+stageEl.addEventListener("scroll", () => { if (!commentPop.hidden && commentInput.hidden && performance.now() - commentOpened > 800) hideCommentPop(); }, { passive: true });
 
 // ── flagging by selecting ───────────────────────────────────────────────────────
 //

@@ -277,6 +277,7 @@
 
         <div class="tools-group-label">Review</div>
         <button id="find-btn" class="tool-btn" title="Find (Ctrl+F) — in this document and on through every export in the case folder. It finds what the screen shows: this document as it reads, and every other export as it would read when opened — through the key, so a real name is found in a document whose file carries its pseudonym. With Show fakes on, a real name is found only where it stands unfaked; with it off, a pseudonym only where the key leaves it standing. Enter goes to the next, and on into the next document when this one runs out. Ctrl+H opens it with Replace."><span class="ti">🔍</span><span class="tl">Find</span></button>
+        <button id="comment-btn" class="tool-btn" title="Comment on the passage selected (C), as you would comment on the PDF: the comment is saved with the document, PDF-Linker's next run puts it in the PDF as a comment on that passage, and every run after writes it back into the export. A real name in it is written as its pseudonym. Click a passage that carries one (shaded yellow) to read, change or delete it; the Comments tab lists them."><span class="ti">💬</span><span class="tl">Comment</span></button>
         <button id="flag-btn" class="tool-btn" aria-pressed="false" title="Turn flagging on: every name you then select on the page with the mouse is flagged as you let go — added to New Real Values.txt so PDF-Linker pseudonymizes it on its next pass. Click again to turn it off. Ctrl+Shift+F flags the one selection. Right-click a pseudonym to keep a wrongly faked one instead."><span class="ti">🚩</span><span class="tl">Flag real value</span></button>
         <button id="leaks-btn" class="tool-btn" title="Review PDF-Linker's LEAKS.xlsx row by row: each row shown above the text, the text opened at its page and line, the decision written into the worksheet's Fix? cell. The case folder's own worksheet is attached when the folder is opened; click to open it, or to load one."><span class="ti">⚠</span><span class="tl">Leaks</span><span id="leaks-count" class="badge" hidden>0</span></button>
         <button id="autoscroll" class="tool-btn" title="Auto-scroll while reading (A) — [ slower, ] faster, Space pauses. The pace is set in pages per minute: each page takes the same time to cross the screen, whatever its height. A scroll of your own suspends it and it picks up again a second later; remembered between documents." aria-pressed="false"><span class="ti">↓</span><span class="tl">Auto-scroll</span></button>
@@ -313,6 +314,7 @@
         <button id="tab-pages" class="side-tab" aria-pressed="false" title="Every page of the document on screen, pictured: click one to go to it, drag over several to mark them ⊘ Did not OCR at once">Pages</button>
         <button id="tab-flags" class="side-tab" aria-pressed="false">Flagged <span id="flag-count" class="badge">0</span></button>
         <button id="tab-leaks" class="side-tab" aria-pressed="false">Leaks <span id="leaks-tab-count" class="badge">0</span></button>
+        <button id="tab-comments" class="side-tab" aria-pressed="false" title="Every comment on the document on screen"><span class="tab-long">Comments</span><span class="tab-short">💬</span> <span id="comments-count" class="badge">0</span></button>
         <button id="side-collapse" class="side-tab collapse" title="Collapse the panel (▤ Panel in the toolbar brings it back)">»</button>
       </div>
       <div id="side-docs" class="side-body">
@@ -341,6 +343,10 @@
           <button id="leaks-load" title="Load another LEAKS.xlsx">Load…</button>
         </div>
         <p class="side-note" id="leaks-note"></p>
+      </div>
+      <div id="side-comments" class="side-body" hidden>
+        <p class="side-hint" id="comments-hint">Select a passage and press 💬 Comment (or C) to comment on it, as on the PDF. Saved with the document; PDF-Linker's next run puts each comment in the PDF, and every run after writes it back into the export, its real names in their pseudonyms. Click one to go to it.</p>
+        <ul id="comments-list"></ul>
       </div>
       <div id="side-flags" class="side-body" hidden>
         <p class="side-hint">Names you spotted unfaked — to be pseudonymized. Saved to <code>New Real Values.txt</code> in the case folder; PDF-Linker reads it the next time you double-click <code>Re-run PDF-Linker</code> in that folder — without reopening a single PDF where nothing else needs it.</p>
@@ -412,7 +418,7 @@
     <span id="st-dirty"></span>
   </div>
 
-  <div id="flag-pop" hidden><button id="flag-pop-btn">🚩 Flag as real value</button><span id="flag-pop-note"></span><button id="flag-pop-keep" class="secondary" hidden>Keep…</button><button id="flag-pop-master" class="secondary" hidden>Remove from Master Keep</button><button id="flag-pop-row" class="secondary" hidden>Answer its row…</button><button id="flag-pop-phrase" class="secondary" hidden>Phrase</button></div>
+  <div id="flag-pop" hidden><button id="flag-pop-btn">🚩 Flag as real value</button><span id="flag-pop-note"></span><button id="flag-pop-keep" class="secondary" hidden>Keep…</button><button id="flag-pop-master" class="secondary" hidden>Remove from Master Keep</button><button id="flag-pop-row" class="secondary" hidden>Answer its row…</button><button id="flag-pop-phrase" class="secondary" hidden>Phrase</button><button id="flag-pop-comment" class="secondary" title="Comment on this passage, as a comment on the PDF: saved with the document, kept in its PDF by PDF-Linker's next run, and written back into the export on every run after (C)">💬 Comment</button></div>
   <div id="keep-menu" hidden>
     <div class="km-head"><span id="keep-menu-lead">Wrongly faked?</span> <b id="keep-menu-value"></b><br><span class="km-sub" id="keep-menu-sub">The file carries <b id="keep-menu-fake"></b> until PDF-Linker re-runs.</span></div>
     <button id="keep-menu-fake-it" hidden>Fake it</button>
@@ -422,6 +428,18 @@
     <button id="keep-menu-undo">It is a pseudonym after all</button>
     <button id="keep-menu-unmaster" hidden>Remove from the Master Keep (every case)</button>
     <button id="keep-menu-cancel" class="secondary">Cancel</button>
+  </div>
+  <div id="comment-pop" hidden role="dialog" aria-label="Comment">
+    <div class="cp-head"><b id="comment-pop-where"></b> <span id="comment-pop-on" class="cp-on"></span></div>
+    <div id="comment-pop-text" class="cp-text"></div>
+    <textarea id="comment-pop-input" rows="4" spellcheck="true" placeholder="Your comment… (Ctrl+Enter saves, Esc cancels)"></textarea>
+    <p id="comment-pop-note" class="cp-note"></p>
+    <div class="cp-actions">
+      <button id="comment-pop-save" class="primary" title="Keep the comment (Ctrl+Enter) — 💾 Save writes it into the document">Save comment</button>
+      <button id="comment-pop-edit" title="Change what the comment says">Edit</button>
+      <button id="comment-pop-delete" class="danger" title="Delete the comment — 💾 Save writes the document without it, and PDF-Linker's next run takes it off the PDF">Delete</button>
+      <button id="comment-pop-close" class="secondary" title="Close (Esc)">Close</button>
+    </div>
   </div>
   <div id="swap-pop" hidden>
     <div class="sp-head" id="swap-pop-head"></div>

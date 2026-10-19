@@ -70,7 +70,11 @@ export function parseExport(text) {
 
   const pages = [];
   let page = null;
+  // Once a page's comments block has begun, every line up to the next header
+  // or banner is the block's (see "comments on the document", below).
+  let block = null;
   const open = (banner, header) => {
+    block = null;
     page = { banner: banner || null, header: header || null, number: null, printed: null, review: null, lines: [] };
     if (header) {
       const m = header.match(PAGE_HEADER_RE);
@@ -93,7 +97,8 @@ export function parseExport(text) {
       continue;
     }
     if (!page) open(null, null);
-    page.lines.push(line);
+    if (!block && COMMENTS_RE.test(line)) block = page.comments = [];
+    (block || page.lines).push(line);
   }
   if (!pages.length) open(null, null);
   return { newline, trailingNewline, pages };
@@ -107,6 +112,7 @@ export function serializeExport(doc) {
     if (p.banner != null) out.push(p.banner);
     if (p.header != null) out.push(p.header);
     for (const l of p.lines || []) out.push(l);
+    for (const l of p.comments || []) out.push(l);
   }
   return out.join(nl) + (doc.trailingNewline ? nl : "");
 }
@@ -151,6 +157,108 @@ export function gutterPrefix(line) {
 // "====== Authorities cited (public verification links) ======" rule and a
 // line per authority under it, riding on the last page's lines.
 export const TRAILER_RE = /^\s*=+\s*Authorities cited\b.*?=+\s*$/i;
+
+// ---- comments on the document ---------------------------------------------------
+//
+// A comment made on an export is kept as a comment on its PDF: PDF-Linker writes
+// it into the PDF as an annotation (a highlight over the passage, with the
+// comment's text), and every run writes the PDF's comments back into the export
+// it rebuilds, so a comment outlives the run the way the PDF's own words do. In
+// the export they are a block after the document's last page, under a head of
+// their own, one line a comment, as the My-Macros Markdown export writes Word's:
+//
+//   ====== Comments (not part of the document) ======
+//   [c1] Page 3, on "the passage commented on": what the comment says [id rdc-qkzmwtra]
+//
+// numbered in order, each with the PDF page it is on, the passage it marks (a
+// `"` or `\` in it written `\"`, `\\`) and its id, which is how a run tells which
+// PDF comment an edit in the reader is to. The block is the document's, not its
+// last page's: parseExport keeps it off the page's lines (`page.comments`, the
+// raw lines from the head on), so the page's text, its sum, Find and every pass
+// over the pages never see it, and serializeExport writes it back where it was.
+// Its text is disk text like the page's: a real name in a comment is written
+// as its pseudonym, and the reader shows it through the key.
+export const COMMENTS_HEAD = "====== Comments (not part of the document) ======";
+export const COMMENTS_RE = /^\s*={6} Comments \(not part of the document\) ={6}\s*$/;
+const COMMENT_LINE_RE = /^\[c(\d+)\] Page (\d+)(?:, on "((?:[^"\\]|\\.)*)")?: (.*?)(?: \[id ([A-Za-z0-9._-]{1,80})\])?$/;
+
+/** A passage or a comment as one line of the block: its whitespace folded. */
+export function commentFlat(s) {
+  return String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The comments a block carries (its raw lines, head first): [{ page, on, text,
+ * id }] in order, `on` "" for a comment on no passage and `id` null where the
+ * line has none. A line that does not read as a comment (a blank, a line typed
+ * into the block by hand) is kept as `{ raw }`, so a block written again keeps it.
+ */
+export function parseComments(lines) {
+  const out = [];
+  for (const l of lines || []) {
+    const s = String(l == null ? "" : l);
+    if (COMMENTS_RE.test(s)) continue;
+    const m = s.match(COMMENT_LINE_RE);
+    if (!m) { if (s.trim()) out.push({ raw: s }); continue; }
+    out.push({ page: parseInt(m[2], 10), on: (m[3] || "").replace(/\\(.)/g, "$1"), text: m[4], id: m[5] || null });
+  }
+  return out;
+}
+
+/** One comment as its line of the block, numbered `n`. */
+export function commentLine(c, n) {
+  const on = commentFlat(c.on);
+  return `[c${n}] Page ${c.page}` + (on ? `, on "${on.replace(/[\\"]/g, "\\$&")}"` : "") + `: ${commentFlat(c.text)}` + (c.id ? ` [id ${c.id}]` : "");
+}
+
+/**
+ * The block for `comments` (parseComments' shape), head first and numbered in
+ * order, or null for none. `lines` are the page lines it follows: a page whose
+ * last line has text gets a blank line before the head, as PDF-Linker writes
+ * the block (a page's text, a blank line, the block).
+ */
+export function commentsBlock(comments, lines) {
+  const list = (comments || []).filter((c) => c && (c.raw != null || c.page));
+  if (!list.length) return null;
+  const last = lines && lines.length ? String(lines[lines.length - 1]) : "";
+  const out = last.trim() ? ["", COMMENTS_HEAD] : [COMMENTS_HEAD];
+  let n = 0;
+  for (const c of list) out.push(c.raw != null ? c.raw : commentLine(c, ++n));
+  return out;
+}
+
+/**
+ * Where `on` (a comment's passage, as the block carries it) stands in a page's
+ * disk text: [start, end) or null. Read as a passage is selected — the margin
+ * numbers left out and every run of whitespace, a line break included, one
+ * space — so a passage that wraps at the margin is still found. The first
+ * place it reads as written, else the first ignoring case.
+ */
+export function findPassage(text, on) {
+  const want = commentFlat(on);
+  if (!want) return null;
+  const src = String(text == null ? "" : text);
+  let flat = "";
+  const at = [];
+  let space = false;
+  let lineStart = 0;
+  for (const line of src.split("\n")) {
+    const g = gutterPrefix(line);
+    for (let k = g ? g.gutter.length : 0; k < line.length; k++) {
+      const ch = line[k];
+      if (/\s/.test(ch)) { space = flat.length > 0; continue; }
+      if (space) { flat += " "; at.push(lineStart + k); space = false; }
+      flat += ch;
+      at.push(lineStart + k);
+    }
+    space = flat.length > 0;
+    lineStart += line.length + 1;
+  }
+  let i = flat.indexOf(want);
+  if (i < 0) i = flat.toLowerCase().indexOf(want.toLowerCase());
+  if (i < 0) return null;
+  return [at[i], at[i + want.length - 1] + 1];
+}
 
 // ---- margin numbers the OCR missed ----------------------------------------------
 //
@@ -413,7 +521,7 @@ export function cloneDoc(doc) {
   return {
     newline: doc.newline,
     trailingNewline: doc.trailingNewline,
-    pages: (doc.pages || []).map((p) => ({ ...p, lines: (p.lines || []).slice(), restored: p.restored ? p.restored.slice() : p.restored })),
+    pages: (doc.pages || []).map((p) => ({ ...p, lines: (p.lines || []).slice(), restored: p.restored ? p.restored.slice() : p.restored, comments: p.comments ? p.comments.slice() : p.comments })),
   };
 }
 
@@ -2378,11 +2486,15 @@ const TEXTFIXED_LEAD_RE = /^text[\s-]*corrected\s*:/i;
 // not handed over (pageFurnitureLine; PDF-Linker's `_pn_page_furniture_line`
 // refuses it the same way, pinned to the same vectors).
 const FURNITURE_RE = /^={6} \S(?:.*\S)? ={6}$/;
+// …and the head of the comments block ends a page's text as the trailer does
+// (COMMENTS_RE; PDF-Linker's `_pn_page_cut`). The reader keeps the block off
+// the page's lines (parseExport), so here it is for lines read some other way.
+const pageCut = (l) => TRAILER_RE.test(l) || COMMENTS_RE.test(l);
 /** The first line of a page, above its authorities trailer if it has one, shaped like PDF-Linker's own furniture; null where none is. */
 export function pageFurnitureLine(lines) {
   for (const raw of lines || []) {
     const line = String(raw == null ? "" : raw);
-    if (TRAILER_RE.test(line)) return null;
+    if (pageCut(line)) return null;
     if (FURNITURE_RE.test(line)) return line;
   }
   return null;
@@ -2413,14 +2525,14 @@ export function setTextFixed(list, entry, on) {
 }
 /**
  * The page's text as a checksum: FNV-1a, 32 bits, over the UTF-8 bytes of its
- * lines up to the authorities trailer (TRAILER_RE), joined by newlines — each line's trailing
+ * lines up to the authorities trailer or the comments block (pageCut), joined by newlines — each line's trailing
  * spaces, tabs and carriage returns dropped, and the blank lines at either end.
  * PDF-Linker's _pn_page_text_sum is the same function; the two are pinned to
  * the same values on both sides.
  */
 export function pageTextSum(lines) {
   const src = (lines || []).map((l) => String(l == null ? "" : l));
-  const r = src.findIndex((l) => TRAILER_RE.test(l));
+  const r = src.findIndex(pageCut);
   const body = (r < 0 ? src : src.slice(0, r)).map((l) => l.replace(/[ \t\r]+$/, ""));
   while (body.length && !body[0]) body.shift();
   while (body.length && !body[body.length - 1]) body.pop();

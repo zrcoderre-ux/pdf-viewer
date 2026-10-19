@@ -738,6 +738,12 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 .page-label .fix-page:hover:not(:disabled) { background: #e3e5e8; }
 .page-label .fix-page:disabled { opacity: 0.45; cursor: default; }
 .page-label .fix-page.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* 💬 n: the comments on this page; a click opens the first. */
+.page-label .cmt-page {
+  float: right; margin-right: 6px; background: #fff3cd; border: 1px solid #ffc107; color: #5d4500; border-radius: 3px; padding: 0 6px; cursor: pointer;
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.page-label .cmt-page:hover { background: #ffe8a1; }
 /* A swapped page: the PDF page stands where its text was; the text is still
    in the DOM (and still saves) but is not shown. */
 .tpage.swapped .page-body, .tpage.swapped .link-layer { display: none; }
@@ -1050,6 +1056,9 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
 /* A value KEPT, standing in the clear on purpose: the same dotted mark a kept
    pseudonym carries, so a decision does not read as an oversight. */
 ::highlight(kept) { background-color: rgba(120, 144, 156, 0.16); text-decoration: underline dotted #78909c; }
+/* A passage commented on, as a highlight carrying a comment is in the PDF
+   viewer: click it to read the comment. */
+::highlight(comment) { background-color: rgba(255, 193, 7, 0.38); }
 
 /* Citation underlines: thin strips at the foot of each line fragment, so the
    text stays editable and selectable above them. Colours match the viewer. */
@@ -1081,6 +1090,26 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
 #keep-menu button:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
 #keep-menu button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
 #flag-pop-note { color: var(--text-muted); min-width: 12em; }
+/* The comment box: what a comment says, or the box to type it in. */
+#comment-pop {
+  position: fixed; z-index: 36; display: flex; flex-direction: column; gap: 6px; width: 340px; max-width: calc(100vw - 8px);
+  background: var(--chrome); border: 1px solid var(--btn-border); border-left: 4px solid #ffc107; border-radius: 6px; padding: 10px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-size: 12px;
+}
+#comment-pop[hidden] { display: none; }
+#comment-pop .cp-head { line-height: 1.4; word-break: break-word; }
+#comment-pop .cp-on { color: var(--text-muted); }
+#comment-pop .cp-text { font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto; }
+#comment-pop textarea { font: inherit; font-size: 13px; line-height: 1.4; resize: vertical; min-height: 64px; background: var(--btn); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 6px; }
+#comment-pop textarea[hidden], #comment-pop .cp-text[hidden], #comment-pop button[hidden] { display: none; }
+#comment-pop .cp-note { margin: 0; color: var(--text-muted); }
+#comment-pop .cp-note:empty { display: none; }
+#comment-pop .cp-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+#comment-pop button { background: var(--btn); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 12px; }
+#comment-pop button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+#comment-pop button.danger { color: #e53935; font-weight: 600; }
+#comment-pop button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
+#side-comments .cmt-lv { white-space: normal; }
 #swap-pop {
   position: fixed; z-index: 35; display: flex; flex-direction: column; gap: 6px; width: 340px;
   background: var(--chrome); border: 1px solid var(--btn-border); border-radius: 6px; padding: 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-size: 12px;
@@ -1146,7 +1175,7 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
    left off. */
 @media print {
   html, body { height: auto; overflow: visible; background: #fff; }
-  #toolbar, .revbar, #key-offer, #run-bar, #tools-rail, #side, #statusbar, #toast, #pdf-pane, #flag-pop { display: none !important; }
+  #toolbar, .revbar, #key-offer, #run-bar, #tools-rail, #side, #statusbar, #toast, #pdf-pane, #flag-pop, #comment-pop { display: none !important; }
   #main { position: static; display: block; }
   #stage { overflow: visible; position: static; }
   #pages { padding: 0; width: auto !important; min-width: 0 !important; }
@@ -1155,7 +1184,7 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
   #pages { zoom: var(--print-zoom, 1); }
   .tpage { max-width: none; margin: 0 auto 18px; box-shadow: none; border-radius: 0; break-after: page; }
   .tpage:last-child { break-after: auto; }
-  .page-label .swap-page, .page-label .raw-page, .page-label .nocr-page, .page-label .fix-page, .page-label .num-page { display: none; }
+  .page-label .swap-page, .page-label .raw-page, .page-label .nocr-page, .page-label .fix-page, .page-label .num-page, .page-label .cmt-page { display: none; }
   /* A page swapped for its PDF page prints its text, and its PDF page — the
      filing, which nothing scrubbed — never prints, whether or not the page
      was told a print was coming (body.printing does the same on screen). */

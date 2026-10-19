@@ -26,6 +26,7 @@ import {
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
   valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead, setAsideLines, notedBlocks,
+  COMMENTS_HEAD, parseComments, commentLine, commentsBlock, findPassage,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans, translate, translateRuns } from "./viewer/pseudo-key.js";
 
@@ -2028,6 +2029,42 @@ console.log("cited names on the way back");
     translate(compile(key), "Smith v. Ford Motor Co. (2010) 50 Cal.4th 100").text, "Rasho v. Gregory Walton Motor Co. (2010) 50 Cal.4th 100");
   check("the runs carry the spared fake as text, never as a pseudonym",
     translateRuns(rev, "Smith v. Ford (2010) 50 Cal.4th 1").filter((r) => r.t === "swap").length, 0);
+}
+
+console.log("\ncomments on the document (the block after the last page)");
+{
+  const text = "====== Page 1 ======\n 1  Plaintiff Rasho filed.\n 2  The court denied it.\n\n" + COMMENTS_HEAD +
+    "\n[c1] Page 1, on \"Rasho filed\": Check the \"date\" here [id rdc-abc]\n[c2] Page 1: A note on the page\n";
+  const d = parseExport(text);
+  check("the block is off the page's lines", d.pages[0].lines, [" 1  Plaintiff Rasho filed.", " 2  The court denied it.", ""]);
+  check("…kept as the page's comments, head first", d.pages[0].comments.length, 3);
+  check("…and written back byte for byte", serializeExport(d), text);
+  check("the page's sum does not see it", pageTextSum(d.pages[0].lines), pageTextSum([" 1  Plaintiff Rasho filed.", " 2  The court denied it."]));
+  const cs = parseComments(d.pages[0].comments);
+  check("each line read as a comment", cs, [
+    { page: 1, on: "Rasho filed", text: "Check the \"date\" here", id: "rdc-abc" },
+    { page: 1, on: "", text: "A note on the page", id: null },
+  ]);
+  check("a quote in the passage is escaped",
+    commentLine({ page: 4, on: 'the "Agreement"  of\nsale', text: "  why?\n ", id: "x1" }, 3),
+    '[c3] Page 4, on "the \\"Agreement\\" of sale": why? [id x1]');
+  check("…and read back", parseComments([commentLine({ page: 4, on: 'a "b" \\c', text: "t", id: "x1" }, 1)])[0].on, 'a "b" \\c');
+  check("a block after a page of text opens with a blank line", commentsBlock([{ page: 1, on: "", text: "x", id: null }], [" 1  text"]),
+    ["", COMMENTS_HEAD, "[c1] Page 1: x"]);
+  check("…after a blank one, with none", commentsBlock([{ page: 2, on: "", text: "x", id: null }], ["text", ""]), [COMMENTS_HEAD, "[c1] Page 2: x"]);
+  check("no comments, no block", commentsBlock([], ["text"]), null);
+  check("a line typed into the block by hand is kept", commentsBlock(parseComments([COMMENTS_HEAD, "my own note", "[c9] Page 1: y"]), [""]),
+    [COMMENTS_HEAD, "my own note", "[c1] Page 1: y"]);
+  const added = parseExport(serializeExport({ newline: "\n", trailingNewline: true, pages: [{ header: "====== Page 1 ======", lines: ["text"], comments: commentsBlock([{ page: 1, on: "", text: "x" }], ["text"]) }] }));
+  check("a block first written settles: its blank line is the page's", [added.pages[0].lines, added.pages[0].comments], [["text", ""], [COMMENTS_HEAD, "[c1] Page 1: x"]]);
+  check("a Combined Text.txt member's block ends at the next banner",
+    parseExport("#### DOCUMENT 1 OF 2 IN THIS COMBINED FILE: A.txt ####\n====== Page 1 ======\na\n\n" + COMMENTS_HEAD + "\n[c1] Page 1: x\n\n#### DOCUMENT 2 OF 2 IN THIS COMBINED FILE: B.txt ####\n====== Page 1 ======\nb\n").pages.map((p) => [p.lines, p.comments || null]),
+    [[[], null], [["a", ""], [COMMENTS_HEAD, "[c1] Page 1: x", ""]], [[], null], [["b"], null]]);
+  const page = " 1  The parties met in\n 2  Los Angeles on Friday.";
+  check("a passage wrapped at the margin is found across the numbers", (([a, b]) => page.slice(a, b))(findPassage(page, "met in Los Angeles")), "met in\n 2  Los Angeles");
+  check("…ignoring case where it must", (([a, b]) => page.slice(a, b))(findPassage(page, "los angeles")), "Los Angeles");
+  check("…and not found, null", findPassage(page, "San Diego"), null);
+  check("cloneDoc copies the block", (() => { const c = cloneDoc(d); c.pages[0].comments.push("x"); return d.pages[0].comments.length; })(), 3);
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

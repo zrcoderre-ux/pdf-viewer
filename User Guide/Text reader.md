@@ -2129,6 +2129,35 @@ app, which routes it to the reader tab.
   page to take it back off the list; for the rest of the session the save
   will not hand that page over again by itself (the button still does).
 
+- **Comment on the text as you would on the PDF.** Select a passage and press
+  **💬 Comment** (in the box beside the selection, in the Tools panel, or
+  **C**), type the comment, and **Save comment** (Ctrl+Enter). The passage is
+  shaded yellow, the page's label counts its comments (**💬 1**), and the
+  **Comments** tab lists every comment in the document; click a shaded
+  passage, the count or a row of the list to read the comment, **Edit** it or
+  **Delete** it. Comments need no ✎ Edit: they are not the document's text.
+  **💾 Save** writes them into the export, after its last page, under
+  `====== Comments (not part of the document) ======`, one line a comment:
+  `[c1] Page 3, on "the passage": what it says [id rdc-…]` (the same shape
+  the My-Macros Markdown export gives a Word document's comments), so a model
+  reading the export sees each comment beside the passage it is about. **A
+  real name in a comment is written as its pseudonym**, as one typed on the
+  page is, and shown as the real name here; a name the key binds that cannot
+  be written as one stops the save the same way.
+  **A comment outlives the next run.** A full PDF-Linker run rebuilds every
+  export from its PDF, so the comment is kept where the run reads: in the
+  PDF. Its next run (or the text-only pass) puts each new comment on the PDF
+  as a comment on that passage, a highlight carrying the comment's text with
+  the real names in it (the PDF is never pseudonymized), or a note at the top
+  of the page where the passage cannot be matched on the PDF page; a comment
+  you changed is changed there, and one you deleted is taken off. Every run
+  after writes the PDF's comments back into the export, so the comment stays
+  in the text file run after run. Comments made on the PDF in the PDF viewer
+  come into the export the same way, and a comment made here can be read,
+  changed or deleted in the PDF viewer. Not on `Combined Text.txt`, which
+  PDF-Linker writes again from the exports: there its documents' comments
+  are shown, and made on each document's own export.
+
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and
   saves a flattened copy with what has to go blacked out. It is the same
