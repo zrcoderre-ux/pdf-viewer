@@ -40,6 +40,17 @@ app, which routes it to the reader tab.
   belong to the window: the citation provider, **§ Authorities** and the
   theme. **Tools** at the head of the rail collapses it to an icon
   strip and back, and that choice is remembered.
+- **Rename a document from its name in the top bar**, as in the PDF viewer:
+  click the name, type, and press Enter (Esc leaves it). Here the file itself
+  is renamed in the case folder, and its PDF with it, so the two still pair
+  and PDF-Linker's next run writes the export under the new name instead of a
+  second one beside it. The export takes the name in its pseudonyms (a real
+  name typed is written as its fake, as PDF-Linker names an export); the PDF
+  takes it in the real names, as PDF-Linker leaves PDFs. A rename is refused,
+  with the reason, while the document has unsaved edits, while PDF-Linker is
+  running, while pages of it are marked for the next run (⊘ Did not OCR,
+  ↻ OCR This Page, ✎ Use my text) or LEAKS.xlsx has rows on it, where the
+  name is taken, and for `Combined Text.txt` or a quarantined `.txt.LEAK`.
 - **Pages, in your font.** Each `====== Page N ======` block is laid out as a
   sheet, with the printed page number and any REVIEW clause on its label. A
   page numbered down its margin — pleading paper — is laid out as one: the

@@ -202,6 +202,7 @@ test-redact.mjs                      Node-runnable redaction tests: span mapping
 test-resize-pages.mjs                Node-runnable Resize pages: the fit, text read back by pdf.js, comments, links and bookmarks moved
 test-resize-viewer.mjs               Browser test (Playwright, Chromium): the Resize pages dialog's count and the file saved in place; skips without them
 test-pdf-tab.mjs                     Browser test (Playwright, Chromium, an OPFS case folder): ↗ Open PDF in new tab, as a browser tab and as the app shell's tab, at the page being read; skips without them
+test-rename-doc.mjs                  Browser test (Playwright, Chromium, an OPFS case folder): renaming a document from the top bar, the export in its pseudonyms and its PDF with it; skips without them
 test-comments.mjs                    Browser test (Playwright, Chromium, an OPFS case folder): 💬 comments made, marked, saved faked, reopened, changed and deleted; PDF-Linker's block byte for byte; none on Combined Text.txt; skips without them
 test-redact-spread.mjs               Browser test (Chromium): a hand redaction mark spread over the document and the case folder, and Find standing clear of the Redact bar
 test-pdf-columns.html                Browser test: a name wrapped down a caption's column on PDF pages laid out by pdf.js (open over http)

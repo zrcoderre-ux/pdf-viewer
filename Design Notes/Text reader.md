@@ -1847,6 +1847,30 @@ the page reads as read under a header that is not DID NOT OCR (PDF-Linker's
 full run has taken the mark off). `markDidNotOcr` withdraws a request for the
 page it strips. `#ocr-again-block` lists them.
 
+**Renaming a document** (`#doc-title`, `startRename`, `renameDoc`). The top
+bar shows the open document's name (`paintDocTitle`, from `renderReelState`)
+and a click makes it a field, as the PDF viewer's `startRename` does. The
+viewer only changes the name shown and offered on a download; here the file
+is renamed on disk, and its PDF with it (`pdfForName`), since the pair is
+found by name and PDF-Linker writes each export under its PDF's name run
+through the key. The export's stem is `RD.scrubbedStem` of the name typed
+(refused where it falls back to `document <digest>`, a real value still
+standing); the PDF's is that stem turned back through `rev`, or the
+export's own stem where the real form would not pair (`PS.pdfMatcher` is
+asked before anything moves). `renameEntry` uses `move()` and falls back to
+copy-and-remove, through a passing name for a change of case only, since on
+a case-blind disk the copy would land on its own source. The export goes
+first; if the PDF then fails, the export is moved back. The spot keeps and
+page swaps kept under the export's name and the redaction boxes kept under
+the PDF's move with them, and the folder is read again as after a run
+(`adoptFolder`, then `openFolderDoc`, back at the page being read).
+`renameBlocked` refuses while anything names the document by the old name
+and is not the reader's to rewrite: unsaved edits, a run going
+(`runMarkersIn`), entries on `noOcr` / `ocrAgain` / `textFixed`, LEAKS rows.
+`renameFixed` covers what can never be renamed here (Combined Text.txt, a
+`.txt.LEAK`, a document outside an open case folder). Tests in
+`test-rename-doc.mjs`.
+
 **The panels' rail** (`#side-rail`) replaced the tab strip across the head
 of `#side`, which had grown to five tabs and a chevron and cut their names
 short. As in the PDF viewer, a button per panel stands down the right edge
