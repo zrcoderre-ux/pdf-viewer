@@ -27,7 +27,7 @@ import { openDialog, confirmDialog, toast, formatBytes, esc } from "./ui.js";
 import { icon, hydrateIcons } from "./icons.js";
 import { fontDocument, fontCanvas } from "./pdf-fonts.js";
 import {
-  applyPagePlan, insertBlankPages, cropPages, stampHeaderFooter, setMetadata,
+  applyPagePlan, insertBlankPages, cropPages, resizePages, pageBoxes, resizePlan, stampHeaderFooter, setMetadata,
   sanitizePdf, flattenPdf, readAttachment,
 } from "./pdf-edit.js";
 import { decryptPdf, encryptPdf, detectEncryption, fileKey, describePermissions, permissionBits, PasswordError } from "./pdf-crypt.js";
@@ -525,6 +525,90 @@ export function createFeatures(ctx) {
             for (const k of ["top", "bottom", "left", "right"]) m[k] = Math.max(0, parseFloat($(`.m-${k}`).value) || 0) * 72;
             if (!m.top && !m.bottom && !m.left && !m.right) { toast("Enter a margin to trim."); return false; }
             await applyEdit("Cropping", (baked) => cropPages({ srcBytes: baked, margins: m, pages: new Set(pages) }), { success: `Cropped ${pages.length} page${pages.length === 1 ? "" : "s"}` });
+            return true;
+          },
+        },
+      ],
+    });
+  }
+
+  // ── Resize pages ───────────────────────────────────────────────────────────
+  // Pages over a paper size scaled onto it, centred, the text still text
+  // (pdf-edit.js resizePages): what an e-filing portal asks of a drawing or a
+  // poster-sized exhibit ("exceeds the maximum size of 18 inches X 18 inches").
+  const PAPER = [
+    ["letter", "Letter (8.5 × 11 in)", 8.5, 11],
+    ["legal", "Legal (8.5 × 14 in)", 8.5, 14],
+    ["tabloid", "Tabloid (11 × 17 in)", 11, 17],
+    ["a4", "A4 (210 × 297 mm)", 210 / 25.4, 297 / 25.4],
+    ["custom", "Custom…", null, null],
+  ];
+  async function resizeDialog() {
+    if (!ctx.getBytes() || !guard("modify")) return;
+    const n = ctx.numPages(), cur = ctx.currentPage();
+    let boxes = null;
+    try { boxes = await pageBoxes(ctx.getBytes().slice(0)); } catch { boxes = null; }
+    const inch = (pt) => (Math.round((pt / 72) * 100) / 100).toString();
+    const shown = (b) => (b.rotate % 180 ? [b.height, b.width] : [b.width, b.height]);
+    const body = document.createElement("div");
+    body.innerHTML = `
+      <p class="modal-sub" style="margin-top:0">Scales pages that are too big onto the paper size below, centred, as printing with “Fit to page” does — but the text stays text, searchable and selectable, and comments, links and bookmarks move with their pages. Nothing is cut off.</p>
+      <label class="modal-row">Paper size
+        <select class="paper">${PAPER.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("")}</select>
+      </label>
+      <div class="hf-grid custom-row" style="grid-template-columns:auto 1fr auto 1fr" hidden>
+        <span class="hf-lbl">Width</span><input type="number" class="c-w" value="8.5" min="1" step="0.25">
+        <span class="hf-lbl">Height</span><input type="number" class="c-h" value="11" min="1" step="0.25">
+      </div>
+      <label class="modal-check"><input type="checkbox" class="only" checked> Only pages larger than this size (the rest stay exactly as they are)</label>
+      <label class="modal-row">Apply to
+        <select class="scope"><option value="all">All pages</option><option value="current">Page ${cur}</option><option value="range">Pages…</option></select>
+      </label>
+      <label class="modal-row range-row" hidden>Pages <input type="text" class="ranges" placeholder="1-3, 5"></label>
+      <p class="modal-preview resize-preview"></p>`;
+    const $ = (s) => body.querySelector(s);
+    const size = () => {
+      const p = PAPER.find((x) => x[0] === $(".paper").value);
+      const w = p[2] != null ? p[2] : parseFloat($(".c-w").value), h = p[3] != null ? p[3] : parseFloat($(".c-h").value);
+      return w > 0 && h > 0 ? { w: w * 72, h: h * 72 } : null;
+    };
+    const pagesChosen = () => $(".scope").value === "all" ? Array.from({ length: n }, (_, i) => i + 1) : $(".scope").value === "range" ? parsePageList($(".ranges").value, n) : [cur];
+    // The pages a resize would change, read off their own sizes as the tool will read them.
+    const toResize = () => {
+      const sz = size();
+      if (!sz || !boxes) return null;
+      const only = $(".only").checked;
+      return pagesChosen().filter((pn) => boxes[pn - 1] && resizePlan({ x: 0, y: 0, ...boxes[pn - 1] }, sz.w, sz.h, { onlyLarger: only }));
+    };
+    const preview = () => {
+      $(".custom-row").hidden = $(".paper").value !== "custom";
+      $(".range-row").hidden = $(".scope").value !== "range";
+      const list = toResize();
+      const el = $(".resize-preview");
+      if (!list) { el.textContent = boxes ? "Enter the paper's width and height in inches." : ""; return; }
+      if (!list.length) { el.textContent = $(".only").checked ? "Every page chosen already fits this size: nothing to resize." : "Nothing to resize."; return; }
+      const big = list.map((pn) => [pn, shown(boxes[pn - 1])]).sort((a, b) => b[1][0] * b[1][1] - a[1][0] * a[1][1])[0];
+      el.textContent = `${list.length} of ${pagesChosen().length} page${pagesChosen().length === 1 ? "" : "s"} will be resized` +
+        ` (${list.length === 1 ? "page" : "pages"} ${list.slice(0, 8).join(", ")}${list.length > 8 ? "…" : ""}; the largest, page ${big[0]}, is ${inch(big[1][0])} × ${inch(big[1][1])} in).`;
+    };
+    for (const s of [".paper", ".c-w", ".c-h", ".only", ".scope", ".ranges"]) { $(s).addEventListener("input", preview); $(s).addEventListener("change", preview); }
+    preview();
+    openDialog({
+      title: "Resize pages", icon: "fit-page", body, width: "wide",
+      actions: [
+        { label: "Cancel" },
+        {
+          label: "Resize & save", kind: "primary",
+          onClick: async () => {
+            const sz = size();
+            if (!sz) { toast("Enter the paper's width and height in inches."); return false; }
+            const pages = pagesChosen();
+            if (!pages.length) { toast("Choose the pages to resize."); return false; }
+            const list = toResize();
+            if (list && !list.length) { toast("Nothing to resize: every page chosen already fits."); return false; }
+            const report = {};
+            await applyEdit("Resizing", (baked) => resizePages({ srcBytes: baked, width: sz.w, height: sz.h, pages: new Set(pages), onlyLarger: $(".only").checked, report }),
+              { success: list ? `Resized ${list.length} page${list.length === 1 ? "" : "s"}` : "Resized" });
             return true;
           },
         },
@@ -1190,7 +1274,7 @@ export function createFeatures(ctx) {
 
   return {
     askPassword, showLocked, openEncrypted, protectForSave, openableBytes, allowed, guard,
-    askInsertPosition, protect, unprotect, insertBlank, extractPages, cropDialog, pageNumbers,
+    askInsertPosition, protect, unprotect, insertBlank, extractPages, cropDialog, resizeDialog, pageNumbers,
     sanitize, flatten, exportWord, exportText, exportImages, compress, compare,
     showProperties, saveAttachment, showShortcuts, toggleReadAloud,
     togglePresentation: () => (presenting ? stopPresenting() : startPresenting()),

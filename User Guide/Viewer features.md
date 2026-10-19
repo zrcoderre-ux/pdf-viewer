@@ -179,6 +179,16 @@ a few details:
   placement is exact on standard pages and rotation-aware.
 - **Header / footer** — six slots (header/footer × left/center/right); `{n}` is
   the page number and `{N}` the total (e.g. `Page {n} of {N}`).
+- **Resize pages…** (beside Crop pages) — for a page too big to file
+  ("exceeds the maximum size of 18 inches X 18 inches"): pages larger than a
+  paper size (Letter, Legal, Tabloid, A4 or one you type) are scaled onto it,
+  centred, turned landscape where the page is wider than tall, as printing
+  with "Fit to page" does. Unlike printing, the text stays text, searchable
+  and selectable, and comments, links and bookmarks move with their pages;
+  nothing is cut off. The dialog says how many pages it will change and the
+  size of the largest. With **Only pages larger than this size** ticked (the
+  default) the rest are left exactly as they are; untick it to fit every page
+  chosen to the paper, small ones scaled up. Saves as the other tools do.
 - **Split** — every N pages, one page per file, or ranges like `1-3, 4-8, 9-`.
   Parts save into a folder you pick (or as downloads), and each part keeps the
   comments on its pages.

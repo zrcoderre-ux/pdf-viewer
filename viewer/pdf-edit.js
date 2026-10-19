@@ -507,6 +507,186 @@ export async function cropPages({ srcBytes, margins, pages = null, boxes = null 
   return doc.save();
 }
 
+// ── Resize pages ─────────────────────────────────────────────────────────────
+//
+// A filing portal refuses a page over its size ("exceeds the maximum size of
+// 18 inches X 18 inches on page number 1"). Cropping cuts the page down;
+// resizing SCALES it: the page becomes the paper size asked for and what it
+// shows is scaled to fit inside it, centred, as a printer's "fit to page"
+// does — but in the file, so the text stays text (searchable, selectable)
+// rather than a picture of it. One affine map moves everything that stands on
+// the page: the content (one scale and one shift wrapped round its streams),
+// every annotation's coordinates (its Rect, quads, vertices, ink, lines) and
+// every bookmark or link destination that points at a place on the page.
+
+/** The part of a page that shows: its crop box, inside its media box. */
+function visibleBox(page) {
+  const m = page.getMediaBox(), c = page.getCropBox();
+  const x0 = Math.max(m.x, c.x), y0 = Math.max(m.y, c.y);
+  const x1 = Math.min(m.x + m.width, c.x + c.width), y1 = Math.min(m.y + m.height, c.y + c.height);
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } : { x: m.x, y: m.y, width: m.width, height: m.height };
+}
+
+/**
+ * How a page of `box` (points, the page's own unrotated space) goes onto
+ * paper of `width` × `height`: { s, tx, ty, w, h } — a point (x, y) of the
+ * page lands at (s·x + tx, s·y + ty) on a new page of w × h — or null where
+ * nothing is to be done. The paper is turned to the page's own way (a page
+ * wider than it is tall gets it landscape), so a turned page is fitted, not
+ * shrunk to a sliver. `onlyLarger`: a page that already fits is left alone,
+ * and one that does not is only ever made smaller.
+ */
+export function resizePlan(box, width, height, { onlyLarger = true } = {}) {
+  if (!box || !(box.width > 0) || !(box.height > 0) || !(width > 0) || !(height > 0)) return null;
+  const wide = box.width > box.height;
+  const w = wide ? Math.max(width, height) : Math.min(width, height);
+  const h = wide ? Math.min(width, height) : Math.max(width, height);
+  const fits = box.width <= w + 0.5 && box.height <= h + 0.5;
+  if (onlyLarger && fits) return null;
+  const s = Math.min(w / box.width, h / box.height);
+  if (!onlyLarger && Math.abs(s - 1) < 1e-3 && Math.abs(box.width - w) < 0.5 && Math.abs(box.height - h) < 0.5 && !box.x && !box.y) return null;
+  const tx = (w - s * box.width) / 2 - s * box.x;
+  const ty = (h - s * box.height) / 2 - s * box.y;
+  return { s, tx, ty, w, h };
+}
+
+/** Each page's visible size in points, in its own space, and its turn, as the dialog counts them: [{ width, height, rotate }]. */
+export async function pageBoxes(bytes) {
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+  return doc.getPages().map((p) => { const b = visibleBox(p); return { width: b.width, height: b.height, rotate: norm360(p.getRotation().angle) }; });
+}
+
+/**
+ * Pages over `width` × `height` points (or all of `pages`, with `onlyLarger`
+ * off) scaled onto paper of that size. `report.resized` is given the 1-based
+ * numbers of the pages it changed.
+ */
+export async function resizePages({ srcBytes, width = 612, height = 792, pages = null, onlyLarger = true, report = null }) {
+  const doc = await PDFDocument.load(srcBytes);
+  const ctx = doc.context;
+  const moved = new Map(); // a page's ref → its plan, for the destinations
+  const done = [];
+  const num = (v) => (v instanceof PDFNumber ? v.asNumber() : null);
+  // An array of x, y pairs, mapped where it is: Rect, QuadPoints, Vertices, L, CL, an ink path.
+  const mapPairs = (arr, p) => {
+    if (!(arr instanceof PDFArray)) return;
+    for (let k = 0; k + 1 < arr.size(); k += 2) {
+      const x = num(arr.get(k)), y = num(arr.get(k + 1));
+      if (x == null || y == null) continue;
+      arr.set(k, PDFNumber.of(p.s * x + p.tx));
+      arr.set(k + 1, PDFNumber.of(p.s * y + p.ty));
+    }
+  };
+  doc.getPages().forEach((page, i) => {
+    if (pages && !pages.has(i + 1)) return;
+    const p = resizePlan(visibleBox(page), width, height, { onlyLarger });
+    if (!p) return;
+    // Two wraps, the scale outside the shift: s · (x + tx/s) = s·x + tx.
+    page.translateContent(p.tx / p.s, p.ty / p.s);
+    page.scaleContent(p.s, p.s);
+    page.setMediaBox(0, 0, p.w, p.h);
+    page.setCropBox(0, 0, p.w, p.h);
+    for (const k of ["TrimBox", "BleedBox", "ArtBox"]) page.node.delete(PDFName.of(k));
+    const annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray);
+    if (annots) {
+      for (let k = 0; k < annots.size(); k++) {
+        const a = annots.lookup(k);
+        if (!(a instanceof PDFDict)) continue;
+        for (const key of ["Rect", "QuadPoints", "Vertices", "L", "CL"]) mapPairs(a.lookup(PDFName.of(key)), p);
+        const ink = a.lookup(PDFName.of("InkList"));
+        if (ink instanceof PDFArray) for (let j = 0; j < ink.size(); j++) mapPairs(ink.lookup(j), p);
+        // RD is a set of margins inside the Rect: scaled, not moved.
+        const rd = a.lookup(PDFName.of("RD"));
+        if (rd instanceof PDFArray) for (let j = 0; j < rd.size(); j++) { const v = num(rd.get(j)); if (v != null) rd.set(j, PDFNumber.of(v * p.s)); }
+      }
+    }
+    moved.set(page.ref.toString(), p);
+    done.push(i + 1);
+  });
+  if (moved.size) moveDestinations(doc, moved);
+  if (report) report.resized = done;
+  if (!done.length) return null;
+  return doc.save();
+}
+
+/**
+ * Every destination that names a place on a resized page, moved with it:
+ * bookmarks, link annotations, GoTo actions, and the catalog's named
+ * destinations (its /Dests dictionary and /Names /Dests tree). A destination
+ * is [page /XYZ left top zoom], [page /FitH top], [page /FitV left],
+ * [page /FitR left bottom right top] and the /FitB… forms; a null coordinate
+ * means "keep the current one" and stays null.
+ */
+function moveDestinations(doc, moved) {
+  const seen = new Set();
+  const look = (v) => (v instanceof PDFRef ? doc.context.lookup(v) : v);
+  const fixArray = (arr) => {
+    if (!(arr instanceof PDFArray) || seen.has(arr) || arr.size() < 2) return;
+    seen.add(arr);
+    const target = arr.get(0);
+    const p = target instanceof PDFRef ? moved.get(target.toString()) : null;
+    if (!p) return;
+    const kind = arr.get(1) instanceof PDFName ? arr.get(1).asString().replace(/^\//, "") : "";
+    const at = (k, axis) => {
+      const v = arr.get(k);
+      if (v instanceof PDFNumber) arr.set(k, PDFNumber.of(p.s * v.asNumber() + (axis === "x" ? p.tx : p.ty)));
+    };
+    if (kind === "XYZ") { at(2, "x"); at(3, "y"); }
+    else if (kind === "FitH" || kind === "FitBH") at(2, "y");
+    else if (kind === "FitV" || kind === "FitBV") at(2, "x");
+    else if (kind === "FitR") { at(2, "x"); at(3, "y"); at(4, "x"); at(5, "y"); }
+  };
+  // A destination as an array, or a dictionary carrying it under /D.
+  const fixDest = (d) => {
+    d = look(d);
+    if (d instanceof PDFDict) d = look(d.get(PDFName.of("D")));
+    fixArray(d);
+  };
+  const fixHolder = (dict) => {
+    if (!(dict instanceof PDFDict)) return;
+    fixDest(dict.get(PDFName.of("Dest")));
+    const act = look(dict.get(PDFName.of("A")));
+    if (act instanceof PDFDict) fixDest(act.get(PDFName.of("D")));
+  };
+  // Link annotations and their actions, on every page.
+  for (const page of doc.getPages()) {
+    const annots = page.node.lookupMaybe(PDFName.of("Annots"), PDFArray);
+    if (annots) for (let k = 0; k < annots.size(); k++) fixHolder(annots.lookup(k));
+  }
+  const cat = doc.catalog;
+  // Bookmarks, walked by their siblings and children (a visited set guards a cycle).
+  const walked = new Set();
+  const walk = (ref) => {
+    for (let n = ref; n && !walked.has(String(n));) {
+      walked.add(String(n));
+      const item = look(n);
+      if (!(item instanceof PDFDict)) break;
+      fixHolder(item);
+      const first = item.get(PDFName.of("First"));
+      if (first) walk(first);
+      n = item.get(PDFName.of("Next"));
+    }
+  };
+  const outlines = look(cat.get(PDFName.of("Outlines")));
+  if (outlines instanceof PDFDict && outlines.get(PDFName.of("First"))) walk(outlines.get(PDFName.of("First")));
+  // Named destinations: the old /Dests dictionary, and the /Names tree.
+  const dests = look(cat.get(PDFName.of("Dests")));
+  if (dests instanceof PDFDict) for (const [, v] of dests.entries()) fixDest(v);
+  const names = look(cat.get(PDFName.of("Names")));
+  const tree = names instanceof PDFDict ? look(names.get(PDFName.of("Dests"))) : null;
+  const nodes = new Set();
+  const walkTree = (node) => {
+    node = look(node);
+    if (!(node instanceof PDFDict) || nodes.has(node)) return;
+    nodes.add(node);
+    const list = look(node.get(PDFName.of("Names")));
+    if (list instanceof PDFArray) for (let k = 1; k < list.size(); k += 2) fixDest(list.get(k));
+    const kids = look(node.get(PDFName.of("Kids")));
+    if (kids instanceof PDFArray) for (let k = 0; k < kids.size(); k++) walkTree(kids.get(k));
+  };
+  walkTree(tree);
+}
+
 // ── Flatten, sanitize ────────────────────────────────────────────────────────
 
 // Make comments, drawings, stamps, signatures (and, with `forms`, form

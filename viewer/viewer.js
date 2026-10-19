@@ -6755,6 +6755,7 @@ const TOOL_ACTIONS = {
   "insert-blank-btn": () => Features.insertBlank(),
   "extract-btn": () => Features.extractPages(),
   "crop-pages-btn": () => Features.cropDialog(),
+  "resize-pages-btn": () => Features.resizeDialog(),
   "protect-btn": () => Features.protect(),
   "unprotect-btn": () => Features.unprotect(),
   "sanitize-btn": () => Features.sanitize(),

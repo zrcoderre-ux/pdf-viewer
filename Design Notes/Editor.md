@@ -204,6 +204,26 @@ must not draw the annotations the model owns, or they would show twice:
 pages render with `AnnotationMode.ENABLE_STORAGE` and every owned id is set
 `{ noView: true, noPrint: true }` in `pdfDoc.annotationStorage`.
 
+**Resize pages** (`resizeDialog`; `pdf-edit.js` `resizePages`, `resizePlan`,
+`pageBoxes`, `moveDestinations`). Asked for after an e-filing portal refused
+a page "exceeds the maximum size of 18 inches X 18 inches". It scales, never
+crops: a page whose visible box (crop box inside media box) is over the
+paper is put on paper of that size, the paper turned to the page's own way
+in its unrotated space (so a /Rotate 90 page keeps its turn), scaled by the
+smaller ratio and centred. One affine map, x' = s·x + tx, moves everything
+on the page. The content gets it as two pdf-lib wraps (`translateContent`
+by tx/s inside `scaleContent` by s), so the text is still text. Every
+annotation's Rect, QuadPoints, Vertices, L, CL and InkList get it too
+(pdf-lib's own `scaleAnnotations` scales and cannot move), with RD scaled
+only. So do the destinations that name a place on a resized page: link
+annotations, GoTo actions, bookmarks, the catalog's /Dests and its
+/Names /Dests tree, by their /XYZ, /FitH, /FitV, /FitR and /FitB… forms.
+Trim, bleed and art boxes are dropped. A page that already fits is not
+touched (`onlyLarger`), and nothing to do returns null, which `applyEdit`
+reads as no edit. `test-resize-pages.mjs` (node, pdf.js reading the text
+back where it now stands) and `test-resize-viewer.mjs` (Chromium: the
+dialog's count, the file saved in place) pin it.
+
 **Every document tool starts from `bakeCurrentEdits()`** — the document's
 bytes with the current comments written in — so a tool never loses unsaved
 comments. The tools in `viewer/features.js` go through its `applyEdit`: bake,
