@@ -24,6 +24,9 @@
     <button id="print-btn" title="Print the pages as they are shown, always in their pseudonyms — the printout carries the fakes whichever way Show fakes sits, and the document is left as it was; choose “Save as PDF” in the print dialog to keep a copy (Ctrl+P)">🖨 Print</button>
     <button id="shot-btn" title="Screenshot the whole reader window as it stands — toolbar, panels, bars, the PDF pane and the pages — saved as a PNG, for looking at the design. The names are in their pseudonyms whichever way Show fakes sits: every real name the key binds is shown as its fake for the picture, then put back">📷 Screenshot</button>
     <span class="spacer"></span>
+    <!-- The document's name, as in the PDF viewer: click it to rename. -->
+    <span id="doc-title" role="button" tabindex="0" hidden></span>
+    <span class="spacer"></span>
 
     <label class="tb-label" for="provider">Cites on</label>
     <select id="provider" title="Which service citation links open on">

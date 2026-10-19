@@ -3643,6 +3643,206 @@ async function readFolderAfterRun() {
 window.addEventListener("focus", () => { checkRun(); });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkRun(); });
 
+// ── the document's name in the top bar, and renaming it ───────────────────────
+//
+// As in the PDF viewer, the name in the top bar is clicked to rename. There it
+// changes only the name shown and offered on a download; here a document is
+// its file, so the file is renamed on disk — and its PDF with it, for the pair
+// is found by name (pdfForName) and PDF-Linker writes each export under its
+// PDF's name run through the key. A rename that broke the pair would leave the
+// export without its PDF and have the next run write a second export beside it.
+//
+// The export takes the name typed run through the key and checked as a
+// redacted copy's is (redact.scrubbedStem), so a real name typed is written
+// as its pseudonym; the PDF takes the same name with the pseudonyms turned
+// back into the real names, as PDF-Linker leaves PDFs — or the export's own
+// stem where that would not pair them again.
+//
+// Refused while anything names the document by its old name and is not ours to
+// rewrite: unsaved edits, a PDF-Linker run going, pages owed to the next run
+// (⊘ Did not OCR, ↻ OCR This Page, ✎ Use my text), rows of LEAKS.xlsx.
+const docTitleEl = $("doc-title");
+/** Why the document on screen cannot be renamed at all, or "". */
+function renameFixed(m) {
+  if (!m) return "no document open";
+  if (TD.isCombinedName(m.name)) return "Combined Text.txt is PDF-Linker's own file, written again by every run, and is not renamed";
+  if (TD.isQuarantinedName(m.name)) return "quarantined by PDF-Linker's leak gate — rename it once a run has released it";
+  if (!folderOpen() || !m.d || !folderDocs.includes(m.d)) return "open its case folder to rename it — its PDF is renamed with it";
+  return "";
+}
+function paintDocTitle() {
+  if (docTitleEl.dataset.editing === "1") return;
+  const m = reelCurrent();
+  docTitleEl.hidden = !m;
+  if (!m) return;
+  docTitleEl.textContent = TD.docLabel(m.name);
+  const why = renameFixed(m);
+  docTitleEl.classList.toggle("fixed", !!why);
+  docTitleEl.title = m.name + " — " + (why ? "not renamed here: " + why : "click to rename it, and its PDF with it");
+}
+/** Why the document cannot be renamed right now, or "". */
+async function renameBlocked(m) {
+  const fixed = renameFixed(m);
+  if (fixed) return fixed;
+  if (saving || folderPass) return "a save or a folder-wide replace is running";
+  const o = owedNow();
+  if (dirty || o.docs.length || o.loose) return "save your edits first — they are kept under the name it has now";
+  const seen = await runMarkersIn(dirHandle);
+  if (seen && seen.eta && (!seen.done || seen.eta.at > seen.done.at)) return "PDF-Linker is running on the folder; rename it once the run is done";
+  const pdf = pdfForName(m.name);
+  const names = (e) => e && (e.doc === m.name || (pdf && e.pdf === pdf));
+  if ([...noOcr, ...ocrAgain, ...textFixed].some(names)) return "pages of it are marked for PDF-Linker's next run (⊘ Did not OCR, ↻ OCR This Page or ✎ Use my text), which names it by its file; rename it after that run";
+  if (leakRows().some((r) => LK.parseFiles(r.file).some((f) => exportForName(f) === m.name))) return "LEAKS.xlsx has rows on it, naming it by its file; rename it once they are answered and the run has taken them";
+  return "";
+}
+async function startRename() {
+  if (docTitleEl.dataset.editing === "1" || docTitleEl.hidden) return;
+  const m = reelCurrent();
+  const why = await renameBlocked(m);
+  if (why) { toast(`${m ? m.name : "The document"} is not renamed: ${why}.`, { ms: 7000 }); return; }
+  docTitleEl.dataset.editing = "1";
+  const current = TD.docLabel(m.name);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.id = "doc-title-input";
+  input.value = current;
+  input.spellcheck = false;
+  input.autocomplete = "off";
+  input.title = "Enter renames the document and its PDF; Esc leaves it as it is";
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    input.replaceWith(docTitleEl);
+    delete docTitleEl.dataset.editing;
+    paintDocTitle();
+    const typed = input.value;
+    if (save && typed.trim() && typed.trim() !== current) renameDoc(m, typed).catch((e) => toast("Not renamed: " + (e.message || e), { error: true }));
+  };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation(); // the reader's own keys (C, A, Space…) are not for the field
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", () => finish(true));
+  docTitleEl.replaceWith(input);
+  input.focus();
+  input.select();
+}
+docTitleEl.addEventListener("click", () => { startRename(); });
+docTitleEl.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === "F2") { e.preventDefault(); startRename(); } });
+
+/** The folder `handle` sits in under the case folder, or null. */
+async function parentDirOf(handle) {
+  const path = await dirHandle.resolve(handle);
+  if (!path) return null;
+  let dir = dirHandle;
+  for (const part of path.slice(0, -1)) dir = await dir.getDirectoryHandle(part);
+  return dir;
+}
+async function entryExists(dir, name) {
+  try { await dir.getFileHandle(name); return true; } catch { return false; }
+}
+/**
+ * `handle` renamed to `to` in `dir`, and the handle under its new name. By
+ * move() where the browser has it, else copied and the old removed — through
+ * a passing name where only the case changes, since on a disk that ignores
+ * case the copy would be written over the file it is copied from.
+ */
+async function renameEntry(dir, handle, to) {
+  if (typeof handle.move === "function") {
+    try { await handle.move(to); return await dir.getFileHandle(to); } catch (e) {
+      if (!e || (e.name !== "NotSupportedError" && e.name !== "TypeError" && e.name !== "NotAllowedError")) throw e;
+    }
+  }
+  if (to.toLowerCase() === handle.name.toLowerCase()) {
+    const via = await renameEntry(dir, handle, to + ".renaming");
+    return renameEntry(dir, via, to);
+  }
+  const f = await handle.getFile();
+  const nh = await dir.getFileHandle(to, { create: true });
+  const w = await nh.createWritable();
+  await w.write(f);
+  await w.close();
+  await dir.removeEntry(handle.name);
+  return nh;
+}
+function moveStored(from, to) {
+  try {
+    const v = localStorage.getItem(from);
+    if (v == null) return;
+    localStorage.setItem(to, v);
+    localStorage.removeItem(from);
+  } catch { /* no storage: nothing was kept under it */ }
+}
+async function renameDoc(m, typed) {
+  const why = await renameBlocked(m);
+  if (why) { toast(`${m.name} is not renamed: ${why}.`, { ms: 7000 }); return; }
+  const stem = String(typed).replace(/[\r\n\t]+/g, " ").replace(/\.(txt(\.leak)?|pdf)$/i, "")
+    .replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
+  if (!stem) return;
+  const forward = fwdName();
+  const scrub = { forward, rows: key ? PK.boundRows(key) : [] };
+  const fake = RD.scrubbedStem(stem, scrub);
+  if (!fake || (/^document [0-9a-f]+$/i.test(fake) && !/^document [0-9a-f]+$/i.test(stem))) {
+    toast(`Not renamed: “${stem}” would still carry a real name the key binds once its pseudonyms were put in. Type it in its pseudonyms.`, { error: true, ms: 8000 });
+    return;
+  }
+  const oldName = m.name, newName = fake + ".txt";
+  const oldPdf = pdfForName(oldName);
+  let newPdf = null;
+  if (oldPdf) {
+    const real = rev ? PK.translate(rev, fake).text.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() : fake;
+    const pairs = (pdf) => PS.pdfMatcher([pdf], forward)(newName) === pdf;
+    newPdf = real && pairs(real + ".pdf") ? real + ".pdf" : fake + ".pdf";
+    if (!pairs(newPdf)) { toast(`Not renamed: ${newPdf} would not be found again as ${newName}'s PDF.`, { error: true }); return; }
+  }
+  if (newName === oldName && (!oldPdf || newPdf === oldPdf)) return;
+  if ((await permissionOf(dirHandle, "readwrite")) !== "granted") {
+    try { if ((await dirHandle.requestPermission({ mode: "readwrite" })) !== "granted") throw new Error("leave to write to " + dirHandle.name + " was not given"); } catch (e) { toast("Not renamed: " + (e.message || e), { error: true }); return; }
+  }
+  const d = m.d;
+  const txtDir = await parentDirOf(d.handle);
+  const pdfEntry = oldPdf ? folderPdfs.find((p) => p.name === oldPdf) : null;
+  const pdfDir = pdfEntry ? await parentDirOf(pdfEntry.handle) : null;
+  if (!txtDir || (oldPdf && !pdfDir)) { toast(`Not renamed: ${oldName} is not where the folder was read from — read the folder again.`, { error: true }); return; }
+  const taken = (newName.toLowerCase() !== oldName.toLowerCase() && await entryExists(txtDir, newName)) ? newName
+    : (newPdf && newPdf.toLowerCase() !== oldPdf.toLowerCase() && await entryExists(pdfDir, newPdf)) ? newPdf : "";
+  if (taken) { toast(`Not renamed: there is already a ${taken} in the folder.`, { error: true }); return; }
+
+  // Where the reading is, to be put back once the document is read again.
+  const at = Math.max(0, readingPage() - (m.from || 0));
+  let txtHandle = d.handle;
+  if (newName !== oldName) txtHandle = await renameEntry(txtDir, d.handle, newName);
+  if (newPdf && newPdf !== oldPdf) {
+    try { await renameEntry(pdfDir, pdfEntry.handle, newPdf); } catch (e) {
+      // The pair stays a pair: the export goes back to the name it had.
+      if (newName !== oldName) { try { await renameEntry(txtDir, txtHandle, oldName); } catch { /* said below */ } }
+      throw new Error(`${oldPdf} could not be renamed (${e.message || e}), so ${oldName} keeps its name`);
+    }
+  }
+  // What the reader keeps under the document's name goes with it.
+  const folder = stateFolder();
+  moveStored(spotKeyFor(oldName), spotKeyFor(newName));
+  moveStored(PS.swapStoreKey(folder, oldName), PS.swapStoreKey(folder, newName));
+  if (newPdf && redactStores.has(oldPdf)) { redactStores.set(newPdf, redactStores.get(oldPdf)); redactStores.delete(oldPdf); }
+  for (const set of [seenDocs, confirmedDocs]) if (set.delete(oldName)) set.add(newName);
+
+  // The folder read again, as after a run, and the document opened under its new name.
+  forgetPdfs();
+  dropReady();
+  const found = await adoptFolder(dirHandle, { quiet: true, light: folderLight });
+  if (!found || found.overtaken) return;
+  const nd = folderDocs.find((x) => x.name === newName);
+  if (nd && await openFolderDoc(nd)) {
+    const cur = reelCurrent();
+    const p = doc && doc.pages[(cur ? cur.from : 0) + at];
+    if (p && at) goToPageFromList(p);
+  }
+  toast(`Renamed to ${newName}` + (newPdf && newPdf !== oldPdf ? `, and its PDF to ${newPdf}` : "") +
+    (fake !== stem ? " — the name in its pseudonyms, as PDF-Linker names an export" : "") + ".", { ms: 7000 });
+}
+
 /**
  * A document opened on its own: attach the key of the case folder it sits
  * in, if the reader has been shown that folder; else say how to. Returns
@@ -17439,6 +17639,7 @@ function reelSyncCurrent() {
 /** What the status bar says about a reel: which document, and how much of the folder is on. */
 function renderReelState() {
   const m = reelCurrent();
+  paintDocTitle();
   if (!m) { $("st-file").textContent = "No document"; return; }
   const pages = m.count;
   $("st-file").textContent = m.name + (TD.isQuarantinedName(m.name) ? " (quarantined by PDF-Linker's leak gate)" : "") +

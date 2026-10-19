@@ -92,6 +92,16 @@ body {
   border-radius: 4px; padding: 3px 6px; font-size: 13px; max-width: 220px;
 }
 .tb-label { color: var(--text-muted); font-size: 12px; }
+/* The document's name, centred in the bar; a click makes it a field to rename. */
+#doc-title {
+  flex: 0 1 auto; min-width: 60px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis;
+  font-size: 13px; font-weight: 600; color: var(--text); padding: 4px 8px; border-radius: 4px; cursor: text;
+}
+#doc-title:hover, #doc-title:focus-visible { background: var(--btn-hover); outline: none; }
+#doc-title.fixed { cursor: default; }
+#doc-title.fixed:hover { background: none; }
+#doc-title-input { width: min(40vw, 520px); font-weight: 600; }
+#toolbar #doc-title-input { max-width: none; }
 .tb-value { min-width: 2ch; text-align: center; }
 
 /* The offer bar under the toolbar: attach the key of the folder a lone file
