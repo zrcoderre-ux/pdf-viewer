@@ -12,6 +12,25 @@
  * Items carry { str, transform:[a,b,c,d,e,f], width, height, hasEOL }; the
  * text is read in the page's own upright frame (e, f in points from the
  * bottom-left). Returns [{ y, x, size, text, right }].
+ *
+ * A scan's OCR layer does not always set a line's words on one baseline: a
+ * word or two can be recognized a few points above the rest of its line,
+ * high enough to clear the tolerance a line allows and stand as a "line" of
+ * its own between two real ones — the sentence read with a hole in it and
+ * its missing words a line further down. Such a band is told by two things
+ * together: the lines on either side of it are no farther apart than the
+ * page's ordinary line pitch (a real line between them would make that gap
+ * two pitches), and its words fall where one of those lines has room for
+ * them (no word of that line under or over them). Each of its words goes
+ * into the line it fits, the nearer where both have room; a word that fits
+ * neither stays where it is. A single-spaced quotation inside double-spaced
+ * text has lines at half the pitch too, but each runs under the line above
+ * it, so none of it moves.
+ *
+ * The same OCR layer can carry letters nothing on the page prints — a speck
+ * or the margin's rule read as "bb" or "www" — on a band of their own
+ * between two lines, left of where the body begins. Those are dropped
+ * (foldStrayBands).
  */
 export function linesFromItems(items) {
   const runs = [];
@@ -22,22 +41,99 @@ export function linesFromItems(items) {
     if (!it.str.trim()) continue;
     runs.push({ x: e, y: f, size, text: it.str, width: it.width || it.str.length * size * 0.5 });
   }
-  runs.sort((p, q) => (Math.abs(p.y - q.y) > Math.min(p.size, q.size) * 0.4 ? q.y - p.y : p.x - q.x));
-  const lines = [];
+  // Down the page by baseline, a run joining the line above it where the two
+  // stand within the tolerance; across each line by x once it is whole.
+  runs.sort((p, q) => q.y - p.y || p.x - q.x);
+  let bands = [];
   for (const r of runs) {
-    const cur = lines[lines.length - 1];
+    const cur = bands[bands.length - 1];
     if (cur && Math.abs(cur.y - r.y) <= Math.min(cur.size, r.size) * 0.4) {
-      const gap = r.x - cur.right;
-      const sep = gap > r.size * 0.18 && !/\s$/.test(cur.text) && !/^\s/.test(r.text) ? (gap > r.size * 2.5 ? "\t" : " ") : "";
-      cur.text += sep + r.text;
-      cur.right = Math.max(cur.right, r.x + r.width);
+      cur.runs.push(r);
       cur.size = Math.max(cur.size, r.size);
-    } else {
-      lines.push({ y: r.y, x: r.x, size: r.size, text: r.text, right: r.x + r.width });
-    }
+    } else bands.push({ y: r.y, size: r.size, runs: [r] });
   }
-  for (const l of lines) l.text = l.text.replace(/[  ]+/g, " ").trim();
+  bands = foldStrayBands(bands);
+  const lines = [];
+  for (const band of bands) {
+    const rs = band.runs.slice().sort((p, q) => p.x - q.x);
+    let text = "", right = -Infinity;
+    for (const r of rs) {
+      if (text) {
+        const gap = r.x - right;
+        text += gap > r.size * 0.18 && !/\s$/.test(text) && !/^\s/.test(r.text) ? (gap > r.size * 2.5 ? "\t" : " ") : "";
+      }
+      text += r.text;
+      right = Math.max(right, r.x + r.width);
+    }
+    lines.push({ y: band.y, x: rs[0].x, size: band.size, text: text.replace(/[  ]+/g, " ").trim(), right });
+  }
   return lines.filter((l) => l.text);
+}
+
+/** Whether a run stands over or under any run of a band (sharing more than a sliver of x). */
+function overlapsBand(r, band) {
+  for (const o of band.runs) {
+    const shared = Math.min(r.x + r.width, o.x + o.width) - Math.max(r.x, o.x);
+    if (shared > Math.min(2, 0.5 * Math.min(r.width, o.width))) return true;
+  }
+  return false;
+}
+
+/**
+ * The words OCR set off their line's baseline, put back on it (linesFromItems).
+ * `bands` run down the page, each { y, size, runs }; returns them with the
+ * stray bands' words moved into the lines they belong to and any band left
+ * empty gone.
+ */
+function foldStrayBands(bands) {
+  if (bands.length < 2) return bands;
+  // OCR's reading of a speck or the margin's rule: a band of nothing but a
+  // few letters of no word ("bb", "www", "bh DN"), wholly left of where the
+  // body's lines begin. Nothing printed is there; the band is dropped, not
+  // put at the head of a real line. It goes before the pitch is read, since
+  // a row of it halfway between two lines would halve that too.
+  const starts = [];
+  for (const b of bands) {
+    const xs = b.runs.filter((r) => /\p{L}{4}/u.test(r.text)).map((r) => r.x);
+    if (xs.length) starts.push(Math.min(...xs));
+  }
+  starts.sort((a, b) => a - b);
+  const bodyLeft = starts.length ? starts[starts.length >> 1] : -Infinity;
+  const junk = (r, size) => r.x + r.width < bodyLeft - size * 0.25 && /^[\p{L} ]+$/u.test(r.text.trim())
+    && r.text.trim().split(/\s+/).every((w) => w.length <= 3);
+  bands = bands.filter((b) => !b.runs.every((r) => junk(r, b.size)));
+  if (bands.length < 2) return bands;
+  // The pitch from the gaps a line's own type could sit in: a stray band
+  // makes two gaps under a type size, and enough of them would halve it.
+  const gaps = [];
+  for (let i = 1; i < bands.length; i++) {
+    const g = bands[i - 1].y - bands[i].y;
+    if (g > Math.min(bands[i - 1].size, bands[i].size) * 0.9) gaps.push(g);
+  }
+  const sorted = gaps.sort((a, b) => a - b);
+  const pitch = sorted[sorted.length >> 1];
+  if (!(pitch > 0)) return bands;
+  for (let i = 0; i < bands.length; i++) {
+    const band = bands[i];
+    let a = i - 1;
+    while (a >= 0 && !bands[a].runs.length) a--; // a band emptied by this pass is no line
+    const above = bands[a], below = bands[i + 1];
+    // A band between two lines a pitch apart, or at the page's top or foot
+    // well within a pitch of the one line it has.
+    let stray;
+    if (above && below) stray = above.y - below.y <= pitch * 1.3;
+    else stray = (above || below) && Math.abs((above || below).y - band.y) <= pitch * 0.6;
+    if (!stray) continue;
+    const keep = [];
+    for (const r of band.runs) {
+      const into = [above, below].filter((n) => n && !overlapsBand(r, n))
+        .sort((p, q) => Math.abs(p.y - r.y) - Math.abs(q.y - r.y))[0];
+      if (into) into.runs.push(r);
+      else keep.push(r);
+    }
+    band.runs = keep;
+  }
+  return bands.filter((b) => b.runs.length);
 }
 
 /**

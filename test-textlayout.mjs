@@ -64,6 +64,76 @@ console.log("reading a page");
   check("blank items are skipped", linesFromItems([item("   ", 72, 700), item("x", 72, 680)]).map((l) => l.text), ["x"]);
 }
 
+console.log("\nwords a scan's OCR set above their line");
+{
+  // Double-spaced pleading lines 24 points apart; OCR read a few words of a
+  // line 9 points high, between it and the line above.
+  const lines = linesFromItems([
+    item("The motion was filed on time and the", 72, 700, 12, 240),
+    item("opposition", 72, 676, 12, 66),
+    item("was served", 142, 685, 12, 64),
+    item("by mail on the same day as the", 210, 676, 12, 200),
+    item("hearing was set for the next month.", 72, 652, 12, 230),
+  ]).map((l) => l.text);
+  check("a word raised mid-line goes back into its line", lines, [
+    "The motion was filed on time and the",
+    "opposition was served by mail on the same day as the",
+    "hearing was set for the next month.",
+  ]);
+  const end = linesFromItems([
+    item("Plaintiff filed the complaint", 72, 700, 12, 180),
+    item("in May.", 256, 707, 12, 44),
+    item("Defendant answered in June of that year.", 72, 676, 12, 260),
+  ]).map((l) => l.text);
+  check("a raised word at a line's end joins the line it ends, not the one under it", end, [
+    "Plaintiff filed the complaint in May.",
+    "Defendant answered in June of that year.",
+  ]);
+  const quote = linesFromItems([
+    item("The court held as follows:", 72, 700, 12, 170),
+    item("A single-spaced quotation runs", 108, 686, 12, 200),
+    item("on for two lines of its own.", 108, 674, 12, 190),
+    item("And the brief goes on below it.", 72, 650, 12, 200),
+    item("Double-spaced again after that.", 72, 626, 12, 200),
+    item("And again on the line after.", 72, 602, 12, 200),
+  ]).map((l) => l.text);
+  check("a single-spaced quotation inside double-spaced text keeps its lines", quote, [
+    "The court held as follows:",
+    "A single-spaced quotation runs",
+    "on for two lines of its own.",
+    "And the brief goes on below it.",
+    "Double-spaced again after that.",
+    "And again on the line after.",
+  ]);
+}
+
+console.log("\nletters OCR read in the margin");
+{
+  const lines = linesFromItems([
+    item("1", 40, 700, 12, 6),
+    item("The motion was filed on time and the", 72, 700, 12, 240),
+    item("bb", 48, 688, 12, 12),
+    item("2", 40, 676, 12, 6),
+    item("opposition was served by mail that day.", 72, 676, 12, 250),
+    item("bh DN", 42, 664, 12, 24),
+    item("3", 40, 652, 12, 6),
+    item("The hearing was set for the next month.", 72, 652, 12, 250),
+  ]).map((l) => l.text);
+  check("a few letters of no word between two lines, left of the body, are dropped", lines, [
+    "1 The motion was filed on time and the",
+    "2 opposition was served by mail that day.",
+    "3 The hearing was set for the next month.",
+  ]);
+  const real = linesFromItems([
+    item("The motion was filed on time and the", 72, 700, 12, 240),
+    item("Re:", 30, 676, 12, 18),
+    item("opposition was served by mail that day.", 72, 652, 12, 250),
+  ]).map((l) => l.text);
+  check("a short word on a line of its own is kept", real, [
+    "The motion was filed on time and the", "Re:", "opposition was served by mail that day.",
+  ]);
+}
+
 console.log("\nplain text and Word");
 {
   const pages = [
