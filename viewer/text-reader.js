@@ -82,7 +82,6 @@ const providerEl = $("provider");
 const docsList = $("docs-list");
 const docsHint = $("docs-hint");
 const flagsList = $("flags-list");
-const flagCount = $("flag-count");
 const flagsNote = $("flags-note");
 const flagPop = $("flag-pop");
 const flagPopBtn = $("flag-pop-btn");
@@ -1806,14 +1805,15 @@ $("toa-toggle").addEventListener("click", () => {
   chrome.storage.sync.set({ toaEnabledText: toaOn });
   if (toaOn) renderToa();
 });
-// The side panel collapses to nothing — a chevron on the panel, the toolbar
-// button, or Esc-free: the choice is remembered, and until one is made the
-// panel stays closed and opens itself the first time it has something to
-// show (a folder's documents, a flag).
+// The side panel opens and closes from the rail down the right edge, as the
+// PDF viewer's thumbnails, bookmarks and comments do: a button opens its panel,
+// the lit one (or the panel's ×) closes it. The choice is remembered, and until
+// one is made the panel stays closed and opens itself the first time it has
+// something to show (a folder's documents, a flag).
 let sideChoice = lsGet("textReader.side", null); // true/false once chosen, else null
 function showSidePanel(on, { remember = false } = {}) {
   document.body.classList.toggle("side-hidden", !on);
-  $("panel-toggle").setAttribute("aria-pressed", String(!!on));
+  pressSideRail();
   if (remember) { sideChoice = !!on; lsSet("textReader.side", sideChoice); }
   if (on && pagesStale) renderPagesTab();
   relayout();
@@ -1834,7 +1834,6 @@ function autoShowSidePanel() { if (sideChoice !== false) showSidePanel(true); }
 function noteInFlagged() {
   if (!document.body.classList.contains("side-hidden")) showSideTab("tab-flags");
 }
-$("panel-toggle").addEventListener("click", () => showSidePanel(document.body.classList.contains("side-hidden"), { remember: true }));
 $("side-collapse").addEventListener("click", () => showSidePanel(false, { remember: true }));
 
 // The tools rail down the left margin — the PDF viewer's, with the reading,
@@ -1863,17 +1862,38 @@ $("side-collapse").addEventListener("click", () => showSidePanel(false, { rememb
   btn.hidden = !canOpen;
   btn.addEventListener("click", () => { try { chrome.runtime.openOptionsPage(); } catch { /* not an extension page */ } });
 }
-const SIDE_TABS = [["tab-docs", "side-docs"], ["tab-pages", "side-pages"], ["tab-flags", "side-flags"], ["tab-leaks", "side-leaks"], ["tab-comments", "side-comments"]];
-function showSideTab(tab) {
-  for (const [t, b] of SIDE_TABS) {
-    const on = t === tab;
-    $(t).classList.toggle("active", on);
-    $(t).setAttribute("aria-pressed", String(on));
-    $(b).hidden = !on;
-  }
-  if (tab === "tab-pages") renderPagesTab(); // drawn only while it is in sight (pagesTabSoon)
+// The rail's buttons, each naming the panel it shows (data-side). Which one is
+// up is remembered with the panel's open or closed.
+const SIDE_TABS = [...document.querySelectorAll("#side-rail .rail-btn")];
+let sideTab = SIDE_TABS.some((b) => b.id === lsGet("textReader.sideTab", "")) ? lsGet("textReader.sideTab", "") : "tab-docs";
+function pressSideRail() {
+  const open = !document.body.classList.contains("side-hidden");
+  for (const b of SIDE_TABS) b.setAttribute("aria-pressed", String(open && b.id === sideTab));
 }
-for (const [tab] of SIDE_TABS) $(tab).addEventListener("click", () => showSideTab(tab));
+function showSideTab(tab, { draw = true } = {}) {
+  sideTab = tab;
+  for (const b of SIDE_TABS) {
+    const on = b.id === tab;
+    $(b.dataset.side).hidden = !on;
+    if (on) $("side-title").textContent = b.dataset.title;
+  }
+  pressSideRail();
+  if (draw && tab === "tab-pages") renderPagesTab(); // drawn only while it is in sight (pagesTabSoon)
+}
+for (const b of SIDE_TABS) {
+  b.addEventListener("click", () => {
+    if (!document.body.classList.contains("side-hidden") && sideTab === b.id) { showSidePanel(false, { remember: true }); return; }
+    showSideTab(b.id);
+    lsSet("textReader.sideTab", b.id);
+    showSidePanel(true, { remember: true });
+  });
+}
+showSideTab(sideTab, { draw: false }); // the Pages tab is drawn when the panel opens (showSidePanel)
+// A count on a rail button shows only when there is something to count.
+function setRailCount(id, n) {
+  $(id).textContent = String(n);
+  $(id).hidden = !n;
+}
 
 // ── the key library ────────────────────────────────────────────────────────────
 // The keys themselves live in key-library.js: one library in storage, shared
@@ -13853,7 +13873,7 @@ function paintCommentsSoon() {
   commentPaintTimer = setTimeout(paintComments, 200);
 }
 function renderCommentsList(all) {
-  $("comments-count").textContent = String(all.length);
+  setRailCount("comments-count", all.length);
   const ul = $("comments-list");
   ul.textContent = "";
   for (const ref of all) {
@@ -14590,7 +14610,7 @@ function renderFlags() {
   updateDirty(); // a flag, a keep or one of them written is a save's business
   pagesTabSoon(); // …and the Pages tab's tags read the page lists
   flagsList.innerHTML = "";
-  flagCount.textContent = String(flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length + textFixed.length + settled.size);
+  setRailCount("flag-count", flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length + textFixed.length + settled.size);
   const nocrList = $("nocr-list");
   nocrList.innerHTML = "";
   $("nocr-block").hidden = !noOcr.length;
@@ -15232,7 +15252,7 @@ function updateLeaksButton() {
   badge.textContent = String(LK.undecidedCount(rows));
   badge.title = leaks ? `${LK.undecidedCount(rows)} of ${rows.length} rows still to answer` : "";
   $("leaks-btn").setAttribute("aria-pressed", String(!leaksBar.hidden));
-  $("leaks-tab-count").textContent = String(rows.length);
+  setRailCount("leaks-tab-count", rows.length);
 }
 
 /** Whether the key binds this value (so an unfaked occurrence is an orange leak). */

@@ -1847,6 +1847,20 @@ the page reads as read under a header that is not DID NOT OCR (PDF-Linker's
 full run has taken the mark off). `markDidNotOcr` withdraws a request for the
 page it strips. `#ocr-again-block` lists them.
 
+**The panels' rail** (`#side-rail`) replaced the tab strip across the head
+of `#side`, which had grown to five tabs and a chevron and cut their names
+short. As in the PDF viewer, a button per panel stands down the right edge
+whether or not the panel is open: a click opens its panel (`showSideTab`,
+then `showSidePanel(true)`), a click on the lit one or the head's **×**
+closes it. The buttons keep the old tabs' ids (`tab-docs` … `tab-comments`)
+and the counts theirs (`flag-count`, `leaks-tab-count`, `comments-count`),
+set by `setRailCount`, which hides a count of nothing. `pressSideRail` lights
+the button of the panel showing, and none while it is closed. The panel last
+shown is kept in `textReader.sideTab`; at start-up `showSideTab` is called
+with `draw: false`, since the Pages tab's state is declared further down and
+`showSidePanel` draws it when the panel opens. The toolbar's ▤ Panel button
+went with the strip: the rail does its job.
+
 **The Pages tab** (`#side-pages`, `renderPagesTab`) lists every page of
 `doc.pages` the way the PDF viewer's Pages panel lists a PDF's: a row per page
 with a header or with text before the first one, each a picture of the page

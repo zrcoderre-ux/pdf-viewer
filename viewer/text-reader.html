@@ -31,7 +31,6 @@
       <option value="westlaw">Westlaw</option>
     </select>
     <button id="toa-toggle" title="Table of Authorities panel" aria-pressed="false">§ Authorities</button>
-    <button id="panel-toggle" title="Documents and flagged values" aria-pressed="true">▤ Panel</button>
     <button id="defaults-btn" title="Reading defaults (font, size, leading, width) in the extension's Options page" hidden>⚙ Defaults</button>
     <button id="theme-toggle" title="Light / dark">☀</button>
   </div>
@@ -310,13 +309,9 @@
     <div id="shadow-pages" hidden aria-hidden="true"></div>
 
     <aside id="side" aria-label="Panel">
-      <div class="side-tabs">
-        <button id="tab-docs" class="side-tab active" aria-pressed="true"><span class="tab-long">Documents</span><span class="tab-short">Docs</span></button>
-        <button id="tab-pages" class="side-tab" aria-pressed="false" title="Every page of the document on screen, pictured: click one to go to it, drag over several to mark them ⊘ Did not OCR at once">Pages</button>
-        <button id="tab-flags" class="side-tab" aria-pressed="false">Flagged <span id="flag-count" class="badge">0</span></button>
-        <button id="tab-leaks" class="side-tab" aria-pressed="false">Leaks <span id="leaks-tab-count" class="badge">0</span></button>
-        <button id="tab-comments" class="side-tab" aria-pressed="false" title="Every comment on the document on screen"><span class="tab-long">Comments</span><span class="tab-short">💬</span> <span id="comments-count" class="badge">0</span></button>
-        <button id="side-collapse" class="side-tab collapse" title="Collapse the panel (▤ Panel in the toolbar brings it back)">»</button>
+      <div class="side-head">
+        <span id="side-title">Documents</span>
+        <button id="side-collapse" title="Close the panel (its button on the rail at the right brings it back)" aria-label="Close the panel">×</button>
       </div>
       <div id="side-docs" class="side-body">
         <p class="side-hint" id="docs-hint">Open a case folder to list its exports here.</p>
@@ -391,6 +386,16 @@
         <p class="side-note" id="flags-note"></p>
       </div>
     </aside>
+    <!-- The panels' rail down the right edge, as in the PDF viewer: one button
+         per panel. A button opens its panel beside the rail, the lit one
+         closes it again. -->
+    <nav id="side-rail" aria-label="Panels">
+      <button id="tab-docs" class="rail-btn" data-side="side-docs" data-title="Documents" title="Documents — the case folder's exports" aria-label="Documents" aria-pressed="false">🗂</button>
+      <button id="tab-pages" class="rail-btn" data-side="side-pages" data-title="Pages" title="Pages — every page of the document on screen, pictured: click one to go to it, drag over several to mark them ⊘ Did not OCR at once" aria-label="Pages" aria-pressed="false">📄</button>
+      <button id="tab-flags" class="rail-btn" data-side="side-flags" data-title="Flagged" title="Flagged — values flagged, kept and decided, for New Real Values.txt" aria-label="Flagged" aria-pressed="false">🚩<span id="flag-count" class="rail-badge" hidden>0</span></button>
+      <button id="tab-leaks" class="rail-btn" data-side="side-leaks" data-title="Leaks" title="Leaks — the LEAKS.xlsx worksheet's rows" aria-label="Leaks" aria-pressed="false">⚠<span id="leaks-tab-count" class="rail-badge" hidden>0</span></button>
+      <button id="tab-comments" class="rail-btn" data-side="side-comments" data-title="Comments" title="Comments — every comment on the document on screen" aria-label="Comments" aria-pressed="false">💬<span id="comments-count" class="rail-badge" hidden>0</span></button>
+    </nav>
   </div>
 
   <!-- The auto-scroll pill: the pace, where the reading is. It floats over the

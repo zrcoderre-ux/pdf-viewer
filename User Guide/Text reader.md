@@ -37,8 +37,8 @@ app, which routes it to the reader tab.
   *Review* (flag a real value, the LEAKS worksheet, auto-scroll) and *PDF*
   (side by side, PDF pages). The top bar keeps only the document's own
   actions — open a file or a case folder, Edit, Save — and the settings that
-  belong to the window: the citation provider, **§ Authorities**, **▤ Panel**
-  and the theme. **Tools** at the head of the rail collapses it to an icon
+  belong to the window: the citation provider, **§ Authorities** and the
+  theme. **Tools** at the head of the rail collapses it to an icon
   strip and back, and that choice is remembered.
 - **Pages, in your font.** Each `====== Page N ======` block is laid out as a
   sheet, with the printed page number and any REVIEW clause on its label. A
@@ -1740,9 +1740,12 @@ app, which routes it to the reader tab.
 - **The rest of the reading tools from the PDF viewer.** **Shift + Space**
   opens the citation under the pointer, or every citation in the selection, in
   background tabs, as on a PDF; the theme toggle and the Authorities panel are
-  the viewer's own. The Documents / Pages / Flagged panel collapses on its **»**
-  chevron (or **▤ Panel**), stays closed until it has something to show, and
-  remembers your choice.
+  the viewer's own. The side panels open from a rail of icons down
+  the right edge, as a PDF's page thumbnails, bookmarks and comments do:
+  🗂 Documents, 📄 Pages, 🚩 Flagged, ⚠ Leaks and 💬 Comments, each with its
+  count. A button opens its panel beside the rail and the lit one (or the
+  panel's **×**) closes it. The panel stays closed until it has something to
+  show, and remembers whether it was open and which one.
 - **The PDF it came from, beside the text or swapped into it.** PDF-Linker
   leaves the PDF in the case folder under its real name and names the export
   for the same stem scrubbed, so the reader finds the pair by running each
