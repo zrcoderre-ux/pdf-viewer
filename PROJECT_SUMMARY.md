@@ -199,6 +199,7 @@ test-sentence-openers.mjs            Node-runnable sentence-opening words (Discu
 test-rules.mjs                       Node-runnable page rule grid tests: one column per column of the file, bars whatever their row's count, runs to their bars and dividers to the box's side
 test-straight-rules.mjs              Browser test (Playwright, Chromium, an OPFS case folder): a form page and a separate statement on pleading paper, every straight rule straight, level, meeting and aligned, flowing and side by side; skips without them
 test-redact.mjs                      Node-runnable redaction tests: span mapping, sideways spans, box merging, a store per document, and the saved copy read back for text and metadata
+test-pdf-tab.mjs                     Browser test (Playwright, Chromium, an OPFS case folder): ↗ Open PDF in new tab, as a browser tab and as the app shell's tab, at the page being read; skips without them
 test-comments.mjs                    Browser test (Playwright, Chromium, an OPFS case folder): 💬 comments made, marked, saved faked, reopened, changed and deleted; PDF-Linker's block byte for byte; none on Combined Text.txt; skips without them
 test-redact-spread.mjs               Browser test (Chromium): a hand redaction mark spread over the document and the case folder, and Find standing clear of the Redact bar
 test-pdf-columns.html                Browser test: a name wrapped down a caption's column on PDF pages laid out by pdf.js (open over http)

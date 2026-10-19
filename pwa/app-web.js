@@ -388,6 +388,12 @@ function openLocalFile(file, handle) {
 }
 // The viewer's Ctrl+O and the Home page's button come here.
 window.__appOpenFile = () => pickFiles();
+// …and the text reader's ↗ Open PDF in new tab: the export's PDF, in a viewer
+// tab of its own beside the reader's, at the page being read.
+window.__appOpenPdf = (file, handle, page) => {
+  if (!file) return;
+  newTab({ initialLabel: file.name, file, handle: handle || null, page: page || 0 });
+};
 
 // ---- Open affordances ------------------------------------------------------
 

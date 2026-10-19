@@ -2158,6 +2158,17 @@ app, which routes it to the reader tab.
   PDF-Linker writes again from the exports: there its documents' comments
   are shown, and made on each document's own export.
 
+- **Open the PDF in a tab of its own.** **↗ Open PDF in new tab** (the PDF
+  group of the Tools panel) opens the PDF of the page you are reading in the
+  PDF viewer, alone, without its text export, at that page: the filing
+  itself, to read, comment on, mark up or save as the viewer does. It saves to
+  the case folder's own PDF (and warns first if PDF-Linker has replaced the
+  file since it was opened). In the app the PDF opens as a tab beside the
+  reader's; in Chrome, as a browser tab of its own. The button is lit once a
+  PDF is matched to the export: the case folder's own, or one picked under
+  ⇄ PDF pages…. On a page with no PDF (a cover, a document of a reel with
+  none), it opens the first PDF the export has, at its first page.
+
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and
   saves a flattened copy with what has to go blacked out. It is the same

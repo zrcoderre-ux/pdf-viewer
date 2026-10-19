@@ -2005,6 +2005,26 @@ list; withdrawing leaves it. `test-free-page.mjs` (Chromium) pins it, with a
 control: on an ordinary form page beside its PDF the same spaces typed leave
 the piece where the PDF prints it.
 
+**↗ Open PDF in new tab** (`openPdfInTab`, `#pdf-tab-btn`, lit in
+`refreshPdf` once `pdfSources` holds a PDF; app-web.js `__appOpenPdf`). The
+owner asked, with a case folder open, for the corresponding PDF in a new tab,
+"the pdf only, not the associated text file". The PDF is the reading page's
+`pdfSources` entry (else the first one the export has, at page 1), and its
+page is `PS.pdfPageOf`. Inside the app's shell the reader is an iframe tab, so
+the shell opens it (`window.top.__appOpenPdf(file, handle, page)`: `newTab`,
+the way a PDF opened from disk is). In the extension the reader is a browser
+tab of its own: `window.open` on viewer.html, then the file is handed to the
+new window's `__pdfViewerLoadLocal(file, handle)` once it has one (polled, as
+the shell's `feedWhenReady` polls) and `__pdfViewerGoToPage`. The page is the
+extension's, so its window is this one's to reach. The tab is opened BEFORE
+the file is read: a browser lets a page open one only while the click is
+fresh, and `getFile` is an await. The handle goes with the file, so the
+viewer saves in place to the folder's PDF, behind its own check that the file
+was not replaced since (`askStaleWrite`). `test-pdf-tab.mjs`
+(Chromium) pins both paths: a browser tab on viewer.html at the page being
+read with the folder's handle, and, on the site `pwa/build-site.sh` builds, a
+viewer tab of the shell's and no browser tab; off for an export with no PDF.
+
 **💬 Comments** (`commentSelection`, `openCommentPop`, `saveComment`,
 `deleteComment`, `paintComments`, `docComments`, `commentSpan`; textdoc.js
 `COMMENTS_HEAD`, `COMMENTS_RE`, `parseComments`, `commentLine`,

@@ -17688,6 +17688,7 @@ function reelAllLiveNow() {
 // PDF rendered whole is gigabytes of bitmap.
 const pdfPane = $("pdf-pane");
 const sbsBtn = $("sbs-toggle");
+const pdfTabBtn = $("pdf-tab-btn");
 const swapBtn = $("swap-btn");
 const swapPop = $("swap-pop");
 const PDF_MARGIN = 800; // px beyond the viewport a page is kept rendered
@@ -18407,6 +18408,7 @@ function refreshPdf() {
   const any = pdfSources.some(Boolean);
   sbsBtn.disabled = !doc;
   swapBtn.disabled = !doc;
+  pdfTabBtn.disabled = !doc || !any;
   // Nothing to redact without a PDF matched to the export.
   redactBtn.disabled = !doc || !any;
   if (redactBtn.disabled && redactOn) setRedactMode(false);
@@ -21317,6 +21319,56 @@ async function pickPdf() {
   $("pdf-input").click();
 }
 $("pdf-pick").addEventListener("click", pickPdf);
+
+// ── the PDF in a tab of its own ─────────────────────────────────────────────────
+//
+// ↗ Open PDF in new tab: the PDF of the page being read, in the PDF viewer and
+// nothing else, at that page — the filing itself, where it is commented on,
+// marked up and saved as the viewer does (in place, through the folder's own
+// handle, with its check that PDF-Linker has not replaced the file since).
+// In the app the reader is a tab of the shell's, and the shell opens it beside
+// this one (`__appOpenPdf`, app-web.js). In the extension the reader is a
+// browser tab of its own, and a new one is opened on viewer.html and handed the
+// file the way the shell hands one to its tabs (`__pdfViewerLoadLocal`): the
+// page is the extension's, so its window is this one's to reach.
+async function openPdfInTab() {
+  if (!doc) return;
+  const i = readingPage();
+  // The page being read, else the first page with a PDF (a cover sheet,
+  // a banner, a page of a member with none).
+  let at = pdfSources[i] ? i : pdfSources.findIndex(Boolean);
+  if (at < 0) { toast("No PDF is matched to this export — pick one under ⇄ PDF pages… → Pick PDFs….", { error: true }); return; }
+  const src = pdfSources[at];
+  const page = (at === i && PS.pdfPageOf(doc.pages[at])) || 1;
+  const handle = src.handle || null;
+  let shell = null;
+  try { if (window.top !== window && typeof window.top.__appOpenPdf === "function") shell = window.top; } catch { /* another origin above */ }
+  // The tab is opened before the file is read: a browser lets a page open one
+  // only while the click that asked for it is fresh.
+  const w = shell ? null : window.open(new URL("viewer.html", location.href).href, "_blank");
+  if (!shell && !w) { toast("The browser blocked the new tab — allow pop-ups for the reader and press ↗ again.", { error: true }); return; }
+  let file;
+  try { file = src.file || (src.handle && (await src.handle.getFile())); } catch (e) { file = null; }
+  if (!file) {
+    if (w) w.close();
+    toast(`Could not read ${src.name} — is it still in the case folder?`, { error: true });
+    return;
+  }
+  if (shell) { shell.__appOpenPdf(file, handle, page); return; }
+  const t0 = Date.now();
+  const feed = () => {
+    let load = null;
+    try { load = w.__pdfViewerLoadLocal; } catch { /* not loaded yet */ }
+    if (typeof load === "function") {
+      Promise.resolve(load(file, handle)).then(() => { if (page > 1) { try { w.__pdfViewerGoToPage(page); } catch { /* closed */ } } });
+      return;
+    }
+    if (w.closed || Date.now() - t0 > 20000) return;
+    setTimeout(feed, 50);
+  };
+  feed();
+}
+pdfTabBtn.addEventListener("click", openPdfInTab);
 $("pdf-input").addEventListener("change", async () => {
   const fs = [...$("pdf-input").files];
   $("pdf-input").value = "";
