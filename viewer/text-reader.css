@@ -12,6 +12,7 @@
   --side-width: 300px;
   --tools-rail-width: 200px;         /* expanded */
   --tools-rail-collapsed: 46px;      /* icon-only */
+  --side-rail-width: 44px;          /* the panels' rail, right */
   --chrome: #323639;
   --chrome-2: #2a2d30;
   --canvas: #525659;
@@ -523,16 +524,40 @@ body.side-hidden #side { display: none; }
   width: var(--side-width); flex: none; background: var(--chrome-2); border-left: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden;
 }
-.side-tabs { display: flex; border-bottom: 1px solid var(--border); }
-.side-tab {
-  flex: 1; background: transparent; color: var(--text-muted); border: none; padding: 8px; cursor: pointer; font-size: 13px;
-  border-bottom: 2px solid transparent;
+/* The open panel's name and its ×, where the tabs used to crowd. */
+.side-head {
+  flex: none; display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--border);
 }
-.side-tab.active { color: var(--text); border-bottom-color: var(--accent); }
-.side-tab .tab-short { display: none; }
-/* Four tabs and the chevron in the panel's width: each as wide as its name,
-   on one line, and cut short rather than wrapped where the panel is narrow. */
-.side-tabs .side-tab:not(.collapse) { flex: 1 1 auto; min-width: 0; padding: 8px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#side-title { font-weight: 600; font-size: 13px; }
+#side-collapse {
+  background: transparent; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 18px; line-height: 1; width: 28px; height: 28px; border-radius: 4px;
+}
+#side-collapse:hover { background: var(--btn-hover); color: var(--text); }
+
+/* ── the panels' rail (right edge) ─────────────────────────────────────────
+   The PDF viewer's: an icon per panel, always there, and the panel opens
+   beside it. The lit button is the panel showing. */
+#side-rail {
+  width: var(--side-rail-width); flex: none;
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 8px;
+  background: var(--chrome); border-left: 1px solid var(--border);
+}
+.rail-btn {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border: none; border-radius: 6px;
+  background: transparent; color: var(--text); font-size: 16px; line-height: 1; cursor: pointer;
+}
+.rail-btn:hover { background: var(--btn-hover); }
+.rail-btn[aria-pressed="true"] { background: var(--accent); }
+.rail-badge {
+  position: absolute; top: 0; right: -2px; min-width: 15px; height: 15px; padding: 0 4px;
+  border-radius: 8px; background: var(--accent); color: #fff; border: 1px solid var(--chrome);
+  font-size: 9.5px; font-weight: 700; line-height: 13px; text-align: center; font-family: inherit;
+}
+.rail-btn[aria-pressed="true"] .rail-badge { background: #fff; color: var(--accent); }
+.rail-badge[hidden] { display: none; }
 .side-body { flex: 1; overflow-y: auto; padding: 10px; }
 .side-hint, .side-note { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; line-height: 1.4; }
 .side-body ul { list-style: none; margin: 0; padding: 0; }
@@ -579,7 +604,6 @@ body.side-hidden #side { display: none; }
 /* A document built ahead of the review, waiting off the page. */
 #docs-list li.ready::after { content: "\25CF"; margin-left: auto; flex: none; font-size: 9px; color: #2e7d32; }
 #docs-list li.ready.current::after { color: #fff; }
-.side-tab.collapse { flex: none; width: 34px; font-size: 16px; }
 .side-body li .x {
   margin-left: auto; flex: none; background: transparent; border: none; color: inherit; cursor: pointer; font-size: 14px; padding: 0 4px;
 }
@@ -1159,11 +1183,6 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
 
 @media (max-width: 900px) {
   :root { --side-width: 240px; --tools-rail-width: 168px; }
-  /* The four tabs in the narrower panel: Documents goes by its short name. */
-  .side-tab .tab-long { display: none; }
-  .side-tab .tab-short { display: inline; }
-  .side-tabs .side-tab:not(.collapse) { padding: 8px 2px; font-size: 12px; }
-  .side-tab.collapse { width: 26px; }
 }
 
 /* ── print ───────────────────────────────────────────────────────────────────
@@ -1175,7 +1194,7 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
    left off. */
 @media print {
   html, body { height: auto; overflow: visible; background: #fff; }
-  #toolbar, .revbar, #key-offer, #run-bar, #tools-rail, #side, #statusbar, #toast, #pdf-pane, #flag-pop, #comment-pop { display: none !important; }
+  #toolbar, .revbar, #key-offer, #run-bar, #tools-rail, #side, #side-rail, #statusbar, #toast, #pdf-pane, #flag-pop, #comment-pop { display: none !important; }
   #main { position: static; display: block; }
   #stage { overflow: visible; position: static; }
   #pages { padding: 0; width: auto !important; min-width: 0 !important; }
