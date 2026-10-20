@@ -6098,10 +6098,126 @@ pagesEl.addEventListener("keydown", (e) => {
   // names Esc left as typed go with theirs (enterAtCaret, joinLineUp); a
   // Backspace or Delete the browser makes is noted and settled as its edits
   // are (beforeinput, input).
+  // In a column box on a ✓ Use my text page, a line break and a join stay in
+  // the column (boxKey).
+  if ((e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") && boxKey(body, e.key)) { e.preventDefault(); return; }
   if (e.key === "Enter") { e.preventDefault(); hideTypeTip(); enterAtCaret(body); }
   else if (e.key === "Backspace") { if (backspaceAtCaret(body)) e.preventDefault(); }
   else if (e.key === "Delete") { if (deleteAtCaret(body)) e.preventDefault(); }
 });
+
+// ── column boxes on a ✓ Use my text page (TD.makeColumnBox, reflowBox) ────────
+//
+// The owner, in chat: "Add the ability for me to insert column boxes when using
+// use my text. That way I can insulate the formatting changes for the causes of
+// action from the parties on a cover page." ⊞ Column box makes the lines
+// selected a two-column box, its divider at the column the selection starts
+// at, written in box-drawing rules as PDF-Linker writes a form's; typing in a
+// cell sets the row back on the box's rules, the words that outgrow the cell
+// wrapped onto the next row of the same column (reflowBox); Enter breaks the
+// cell onto a row of its own in that column, Backspace at a cell's head joins
+// it to the cell above, and Delete at a row's end does nothing — the box is
+// never joined across. The page is rebuilt from its text each time, as a raw
+// edit is, the caret put back in the file's text (placeCaretOnDisk).
+
+/** A point in a page, as an offset in the text it writes to disk (the fakes counted, not the real names): -1 inside a pseudonym. */
+function diskOffsetOfPoint(body, node, off) {
+  if (node.nodeType !== 3) {
+    const kids = node.childNodes;
+    if (kids[off] && kids[off].nodeType === 3) { node = kids[off]; off = 0; }
+    else if (off > 0 && kids[off - 1] && kids[off - 1].nodeType === 3) { node = kids[off - 1]; off = node.data.length; }
+    else return -1;
+  }
+  for (const [n, o] of TD.serializeMapped(body).at) if (n === node) return o + off;
+  return -1;
+}
+/** An offset in a page's text as { line, col }. */
+function lineColOf(text, pos) {
+  const before = text.slice(0, pos);
+  const nl = before.lastIndexOf("\n");
+  return { line: before.split("\n").length - 1, col: pos - (nl + 1) };
+}
+/** The page built again from `lines`, the caret put at { line, col } in them. */
+function rebuildFromLines(body, lines, caret) {
+  const i = pageIndexOf(body);
+  const built = body.__built;
+  buildBody(body, lines.join("\n"), i);
+  body.__built = built;
+  doc.pages[i].lines = lines;
+  syncSpots(body);
+  markOwnLines(body);
+  if (caret) placeCaretOnDisk(body, lines.slice(0, caret.line).reduce((a, l) => a + l.length + 1, 0) + caret.col);
+  setDirty(true, i);
+  afterTextChangeSoon();
+  applyMatchedLayoutSoon();
+}
+/** The caret's place in a page's text, as { text, lines, line, col }, or null. */
+function caretInText(body) {
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  if (!body.contains(r.startContainer)) return null;
+  const pos = diskOffsetOfPoint(body, r.startContainer, r.startOffset);
+  if (pos < 0) return null;
+  const text = TD.serializeNodes(body);
+  return { text, lines: text.split("\n"), ...lineColOf(text, pos), collapsed: r.collapsed };
+}
+function boxKey(body, key) {
+  if (!body.classList.contains("free")) return false;
+  const at = caretInText(body);
+  if (!at || !at.collapsed || !TD.isBoxRow(at.lines[at.line])) return false;
+  const numbered = body.classList.contains("numbered");
+  if (key === "Delete") {
+    // At the row's end (past its last rule) there is nothing of the box's to take.
+    const bars = TD.boxBars(at.lines[at.line]);
+    return at.col > bars[bars.length - 1] || at.col === at.lines[at.line].length;
+  }
+  const res = key === "Enter"
+    ? TD.reflowBox(at.lines, at.line, { line: at.line, col: at.col }, { numbered, breakAt: true })
+    : TD.boxBackspace(at.lines, at.line, at.col, { numbered });
+  if (!res) return false;
+  snapshot(body, true);
+  rebuildFromLines(body, res.lines, res.caret);
+  return true;
+}
+// Typing in a box row: the row set back on its rules once the keystroke lands.
+let boxTyped = null;
+const boxReflowSoon = debounce(() => {
+  const body = boxTyped;
+  boxTyped = null;
+  if (!body || !body.isConnected || body === composingIn || !editing) return;
+  const at = caretInText(body);
+  if (!at || !TD.isBoxRow(at.lines[at.line])) return;
+  const res = TD.reflowBox(at.lines, at.line, { line: at.line, col: at.col }, { numbered: body.classList.contains("numbered") });
+  if (!res || res.lines.join("\n") === at.text) return;
+  rebuildFromLines(body, res.lines, res.caret || { line: at.line, col: at.col });
+}, 120);
+pagesEl.addEventListener("input", (e) => {
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  if (body && body.classList.contains("free")) { boxTyped = body; boxReflowSoon(); }
+});
+function makeColumnBoxAtSelection() {
+  const sel = document.getSelection();
+  const r = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+  const el = r && (r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement);
+  const body = el && el.closest(".page-body");
+  if (!body) { toast("Select the lines the box is to cover (or put the caret on one) on a ✓ Use my text page, where the divider is to go, then press ⊞ Column box.", { error: true }); return; }
+  if (!body.classList.contains("free")) { toast("Column boxes are for ✓ Use my text pages — the page whose text is handed to PDF-Linker as typed. Press ✓ Use my text on this page first.", { error: true }); return; }
+  if (!editing) setEditing(true);
+  const a = diskOffsetOfPoint(body, r.startContainer, r.startOffset);
+  const b = r.collapsed ? a : diskOffsetOfPoint(body, r.endContainer, r.endOffset);
+  if (a < 0) { toast("Put the caret in the text, not on a name, where the divider is to go.", { error: true }); return; }
+  const text = TD.serializeNodes(body);
+  const s0 = lineColOf(text, a), s1 = lineColOf(text, b < 0 ? a : b);
+  const lines = text.split("\n");
+  if (lines.slice(s0.line, s1.line + 1).some((l) => /[│─┌└├┐┘┤]/.test(l))) { toast("Those lines are in a box already.", { error: true }); return; }
+  snapshot(body, true);
+  const made = TD.makeColumnBox(lines, s0.line, s1.line, s0.col, { numbered: body.classList.contains("numbered") });
+  rebuildFromLines(body, made.lines, { line: made.first, col: made.lines[made.first].indexOf("│") + 2 });
+  toast("A column box: type in either column and the other never moves — the words that outgrow a column wrap onto its next row. Ctrl+Z takes the box off.", { ms: 7000 });
+}
+$("colbox-btn").addEventListener("mousedown", (e) => e.preventDefault()); // the selection stays where it is
+$("colbox-btn").addEventListener("click", makeColumnBoxAtSelection);
 // A paste goes in as ONE edit, its first piece typed where the caret stands
 // (so it replaces a selection, and the line numbers keep their guard) and the
 // rest laid into the slots below in a single pass.
@@ -20800,6 +20916,8 @@ function autoLayPage(i) {
   const data = mine.map((l, j) => {
     let auto = true;
     if (rec) { const n = laid.get(now[j]) || 0; if (n > 0) laid.set(now[j], n - 1); else auto = false; }
+    // A column box's lines are the operator's layout (makeColumnBox): left as they stand.
+    if (/[│─┌┐└┘├┤┬┴┼]/.test(now[j])) auto = false;
     const L = tidy[j];
     const g = numbered ? TD.gutterPrefix(L) : null;
     let num = g ? parseInt(g.gutter, 10) : null;

@@ -8,7 +8,7 @@
 
 import {
   markCss,
-  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters,
+  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, setOwnPartyWords, ownPartyWordsOf, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
@@ -2080,6 +2080,28 @@ console.log("margin numbers set back in their column (tidyGutters)");
   check("a number put back where the line already carries it with one space: read as that number, not put in front of it",
     (restoreMarginNumbers(Array.from({ length: 10 }, (_, k) => (k === 5 ? "6 text six" : String(k + 1).padStart(2) + "  line " + (k + 1)))) || { lines: null }).lines,
     Array.from({ length: 10 }, (_, k) => String(k + 1).padStart(2) + "  " + (k === 5 ? "text six" : "line " + (k + 1))));
+}
+
+console.log("column boxes (makeColumnBox, reflowBox, boxBackspace)");
+{
+  const L = [" 7  QUILLON BRAKESMAN,           COMPLAINT FOR:", " 8  Plaintiff,                    1. Breach of contract", " 9  v.                            2. Fraud", "10", "11  Next."];
+  const m = makeColumnBox(L, 0, 2, 34, { numbered: true });
+  check("a box of the lines: rules over and under as half lines, each line on its number", m.lines, [
+    "    ┌────────────────────────────────┬───────────────────────┐",
+    " 7  │ QUILLON BRAKESMAN,             │ COMPLAINT FOR:        │",
+    " 8  │ Plaintiff,                     │ 1. Breach of contract │",
+    " 9  │ v.                             │ 2. Fraud              │",
+    "    └────────────────────────────────┴───────────────────────┘", "10", "11  Next."]);
+  const typed = m.lines.slice();
+  typed[2] = typed[2].replace("1. Breach of contract", "1. Breach of written contract and of the covenant");
+  const r = reflowBox(typed, 2, { line: 2, col: typed[2].indexOf("covenant") + 3 }, { numbered: true });
+  check("typed past a cell's width: wrapped down the column, the box grown over the empty line 10, 2. Fraud whole", r.lines.slice(1, 6).map((l) => [l.slice(0, 4), l.split("│")[2].trim()]),
+    [[" 7  ", "COMPLAINT FOR:"], [" 8  ", "1. Breach of written"], [" 9  ", "contract and of the"], ["10  ", "covenant"], ["    ", "2. Fraud"]]);
+  check("…the caret in the word it was in", r.lines[r.caret.line].slice(r.caret.col - 3, r.caret.col + 5), "covenant");
+  const e = reflowBox(m.lines, 2, { line: 2, col: m.lines[2].indexOf("of contract") + 3 }, { numbered: true, breakAt: true });
+  const b = boxBackspace(e.lines, e.caret.line, e.caret.col, { numbered: true });
+  check("Enter in a cell and Backspace back: the box as it was (grown over line 10)", b.lines.slice(0, 4).concat(b.lines.slice(5)), m.lines.slice(0, 4).concat(b.lines.slice(5)));
+  check("Backspace at the head of the first row's cell: nothing joined across the rule", boxBackspace(m.lines, 1, m.lines[1].indexOf("COMPLAINT"), { numbered: true }).lines, m.lines);
 }
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

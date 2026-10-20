@@ -2131,6 +2131,14 @@ app, which routes it to the reader tab.
   so a page that matches its PDF looks the same when you press the button.
   Only the start of a line (its indent) and a column the PDF sets well apart
   are moved; the spaces between words are left as you have them.
+  **⊞ Column box** (in the tools rail) keeps two columns apart on a ✓ Use my
+  text page — a cover page's parties beside its causes of action. Select the
+  lines, starting where the divider is to go, and press it: the lines become a
+  box drawn in rules, each keeping its number. Type in either column and the
+  other never moves: words that outgrow a column wrap onto its next row (the
+  box grows at its foot), Enter starts a new row in that column alone, and
+  Backspace at the start of a cell joins it to the cell above. ⇄ Raw shows the
+  box as PDF-Linker writes a form's, and Ctrl+Z takes it off.
   **Backspace at the start of an indented line takes the indent off first**
   and leaves the line on its number; a second Backspace moves it up to the
   half line above, as before. Ctrl+Z steps back through both.

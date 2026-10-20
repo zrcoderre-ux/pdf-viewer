@@ -153,6 +153,20 @@ const D_LAID = [
   "10        5. Plaintiff then asked for the reason", "11  in writing.", "12        6. Defendant did not answer.", "13",
 ];
 
+// A complaint's cover page: the parties down the left, the causes of action
+// down the right, set apart by spaces.
+const E = [
+  "====== Page 1 ======",
+  " 1  QUILLON BRAKESMAN, an individual,        COMPLAINT FOR:",
+  " 2  Plaintiff,                                1. Breach of contract",
+  " 3       v.                                   2. Fraud",
+  " 4  ORVELLE HOLDINGS, INC.,",
+  " 5  Defendant.",
+  " 6",
+  " 7",
+  " 8  Plaintiff alleges:",
+].join("\n") + "\n";
+
 // A second document, long enough that its last page is well off the screen.
 const B = Array.from({ length: 6 }, (_, k) => `====== Page ${k + 1} ======\n` + Array.from({ length: 40 }, (_, j) => `Brief page ${k + 1}, line ${j + 1}.`).join("\n")).join("\n") + "\n";
 
@@ -171,7 +185,7 @@ async function newReader() {
   page.on("dialog", (d) => d.accept().catch(() => {}));
   await page.goto(srv.base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
-  await page.evaluate(async ({ CASE, A, B, C, D, keyBytes }) => {
+  await page.evaluate(async ({ CASE, A, B, C, D, E, keyBytes }) => {
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry(CASE, { recursive: true }); } catch { /* none yet */ }
     const dir = await top.getDirectoryHandle(CASE, { create: true });
@@ -182,9 +196,10 @@ async function newReader() {
     await put(text, "B Brief.txt", B);
     await put(text, "C Form.txt", C);
     await put(text, "D Plead.txt", D);
+    await put(text, "E Cover.txt", E);
     window.__case = dir;
     await window.__textReaderAdoptFolder(dir);
-  }, { CASE, A, B, C, D, keyBytes: Array.from(KEY_BYTES) });
+  }, { CASE, A, B, C, D, E, keyBytes: Array.from(KEY_BYTES) });
   await page.evaluate(() => { const t = document.getElementById("reel-toggle"); if (t && t.checked) { t.checked = false; t.dispatchEvent(new Event("change")); } });
   await openReader(page);
   await page.evaluate(() => document.getElementById("edit-toggle").click());
@@ -491,6 +506,92 @@ async function run() {
       const want = D_LAID.slice();
       want[3] = " 4  2. Defendant is a corporation doing";
       check(`${side}: an indent taken out by hand stays out, the rest still laid out`, placed && await raw(), want);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+    console.log("10. a column box on a ✓ Use my text cover page: the causes of action typed in without moving the parties");
+    {
+      const r = await newReader();
+      const p = r.page;
+      await p.evaluate((n) => window.__textReaderOpenDoc(n), "E Cover.txt");
+      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length === 1 && document.querySelector("#pages .page-body").textContent.includes("COMPLAINT"));
+      await p.waitForTimeout(600);
+      await fixClick(p, 0);
+      await p.waitForTimeout(600);
+      const raw = async () => {
+        await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+        await p.waitForTimeout(250);
+        const lines = await p.evaluate(() => document.querySelector("#pages .tpage .raw-sheet .raw-text").textContent.split("\n").slice(1));
+        await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+        await p.waitForTimeout(400);
+        return lines;
+      };
+      // Lines 1 to 5 selected, from where COMPLAINT FOR begins.
+      const selected = await p.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        const ls = body.querySelectorAll(":scope > .line");
+        const find = (lt, what) => { const w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { const k = n.data.indexOf(what); if (k >= 0) return [n, k]; } return null; };
+        const a = find(ls[0].querySelector(".lt"), "COMPLAINT"), b = find(ls[4].querySelector(".lt"), "Defendant.");
+        if (!a || !b) return false;
+        const rg = document.createRange(); rg.setStart(a[0], a[1]); rg.setEnd(b[0], b[1] + 10);
+        body.focus(); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); return true;
+      });
+      truthy("lines 1 to 5 selected", selected);
+      await p.click("#colbox-btn");
+      await p.waitForTimeout(600);
+      const boxed = await raw();
+      check("the lines made a box: a rule over and under, the parties in the left column, the causes of action in the right", boxed.slice(0, 7).map((l) => { const k = l.search(/[│┌└]/); return l.slice(0, k) + l.slice(k).replace(/ +│/g, " │").replace(/│ +/g, "│ ").replace(/─+/g, "─"); }), [
+        "┌─┬─┐",
+        " 1  │ QUILLON BRAKESMAN, an individual, │ COMPLAINT FOR: │",
+        " 2  │ Plaintiff, │ 1. Breach of contract │",
+        " 3  │ v. │ 2. Fraud │",
+        " 4  │ ORVELLE HOLDINGS, INC., │ │",
+        " 5  │ Defendant. │ │",
+        "└─┴─┘",
+      ].map((l) => (l.startsWith("┌") || l.startsWith("└") ? "    " + l : l)));
+      const ruled = await p.evaluate(() => document.querySelectorAll("#pages .tpage .page-body > .line.rl").length);
+      truthy(`…drawn as a ruled box (${ruled} rows)`, ruled >= 5);
+      // Typed at the end of "1. Breach of contract": the words that outgrow
+      // the column wrap onto its next rows; 2. Fraud moves down whole; the
+      // left column does not move.
+      await p.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) { const k = n.data.indexOf("of contract"); if (k >= 0) { const rg = document.createRange(); rg.setStart(n, k + 11); rg.collapse(true); body.focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(rg); return; } }
+      });
+      await p.keyboard.type(" and of the covenant of good faith", { delay: 15 });
+      await p.waitForTimeout(800);
+      const typed = await raw();
+      const right = (l) => { const b = [...l].map((c, k) => (c === "│" ? k : -1)).filter((k) => k >= 0); return b.length >= 3 ? l.slice(b[1] + 1, b[2]).trim() : null; };
+      const left = (l) => { const b = [...l].map((c, k) => (c === "│" ? k : -1)).filter((k) => k >= 0); return b.length >= 3 ? l.slice(b[0] + 1, b[1]).trim() : null; };
+      const rows = typed.filter((l) => l.split("│").length >= 4);
+      check("typed in the right column: its text wraps down the column, 2. Fraud whole on a row of its own", rows.map(right).filter(Boolean).join(" | "),
+        "COMPLAINT FOR: | 1. Breach of contract | and of the covenant | of good faith | 2. Fraud");
+      check("…the left column as it was", rows.map(left).filter(Boolean), ["QUILLON BRAKESMAN, an individual,", "Plaintiff,", "v.", "ORVELLE HOLDINGS, INC.,", "Defendant."]);
+      check("…every rule straight: each row's │ where the box's top rule puts its joints", [...new Set(typed.filter((l) => /[│┌└]/.test(l)).map((l) => [...l].map((c, k) => ("│┌┐┬└┘┴".includes(c) ? k : -1)).filter((k) => k >= 0).join(",")))].length, 1);
+      check("…and line 8 still line 8", typed.find((l) => l.includes("Plaintiff alleges")).slice(0, 4), " 8  ");
+      // Enter at the head of 2. Fraud: a row of its own, a blank row above it,
+      // in that column only; Backspace there joins it back.
+      await p.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) { const k = n.data.indexOf("2. Fraud"); if (k >= 0) { const rg = document.createRange(); rg.setStart(n, k); rg.collapse(true); body.focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(rg); return; } }
+      });
+      await p.keyboard.press("Enter");
+      await p.waitForTimeout(500);
+      const entered = (await raw()).filter((l) => l.split("│").length >= 4);
+      check("Enter in a cell: the column alone moves down a row", [entered.map(right).join(" | "), entered.map(left).filter(Boolean).length],
+        ["COMPLAINT FOR: | 1. Breach of contract | and of the covenant | of good faith |  | 2. Fraud", 5]);
+      await p.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) { const k = n.data.indexOf("2. Fraud"); if (k >= 0) { const rg = document.createRange(); rg.setStart(n, k); rg.collapse(true); body.focus(); const s = getSelection(); s.removeAllRanges(); s.addRange(rg); return; } }
+      });
+      await p.keyboard.press("Backspace");
+      await p.waitForTimeout(500);
+      const back = (await raw()).filter((l) => l.split("│").length >= 4);
+      check("Backspace at the head of a cell: joined to the cell above in its column, never across the box", back.map(right).join(" | "),
+        "COMPLAINT FOR: | 1. Breach of contract | and of the covenant | of good faith | 2. Fraud | ");
       check("no page errors", r.log.errors, []);
       await r.close();
     }

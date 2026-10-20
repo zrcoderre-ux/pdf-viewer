@@ -3743,3 +3743,245 @@ export function placeColumns(lines, { unit = 8, gutter = COLUMN_GUTTER * unit, p
   }
   return list.map((l, i) => (mine[i].length ? { ind: xOf(i, l.from), ends: lay(i, null).ends } : null));
 }
+
+// ---- column boxes on a ✓ Use my text page -------------------------------------
+//
+// The owner, in chat: "Add the ability for me to insert column boxes when using
+// use my text. That way I can insulate the formatting changes for the causes of
+// action from the parties on a cover page." A box is written as PDF-Linker
+// writes a form's (box-drawing rules: ┌─┬─┐ over, │ between, └─┴─┘ under), so
+// ⇄ Raw and the model reading the file see the column, and the reader draws it
+// ruled (rules.js). Typing in one column never moves another: a cell's text
+// that outgrows its width wraps, word by word, onto the next row of the same
+// column (a row is added at the box's foot where there is none).
+
+const BOX_JOINTS = "┌┬┐├┼┤└┴┘│";
+/** Where a line's box rules stand: the offsets of its │ and joints, or [] for none. */
+export function boxBars(line) {
+  const out = [];
+  const s = String(line || "");
+  for (let i = 0; i < s.length; i++) if (BOX_JOINTS.includes(s[i])) out.push(i);
+  return out;
+}
+/** Whether a line is a row of a box's text: two │ or more, nothing ruled across. */
+export function isBoxRow(line) {
+  const s = String(line || "");
+  return (s.match(/│/g) || []).length >= 2 && !/[─┌┐└┘├┤┬┴┼]/.test(s);
+}
+/** Whether a line is a box's rule: ─ and its joints, nothing else but spaces and a margin number. */
+export function isBoxRule(line) {
+  const s = String(line || "").replace(/^( ?\d{1,2})?\s*/, "");
+  return /^[─┌┐└┘├┤┬┴┼│]+$/.test(s.trimEnd()) && s.includes("─");
+}
+/** The box line `i` stands in: { from, to } (its rule lines too), or null. */
+export function boxAround(lines, i) {
+  const inBox = (k) => k >= 0 && k < lines.length && (isBoxRow(lines[k]) || isBoxRule(lines[k]));
+  if (!isBoxRow(lines[i])) return null;
+  let from = i, to = i;
+  while (inBox(from - 1)) from--;
+  while (inBox(to + 1)) to++;
+  return { from, to };
+}
+
+/**
+ * Make lines `from`…`to` a two-column box, the divider at `col` (an offset in
+ * the line, a margin number and its spaces counted): each line's text left of
+ * it (moved back to the start of a word it would cut) the left cell, the rest
+ * the right; a rule over and under. On a numbered page (`numbered`) each line
+ * keeps its number, and the rules are lines between numbers, written with four
+ * spaces where a number stands (as PDF-Linker writes a half line). Returns the
+ * page's new lines and `{ first, last }`, the box's rows among them.
+ */
+export function makeColumnBox(lines, from, to, col, { numbered = false } = {}) {
+  const rows = [];
+  for (let k = from; k <= to; k++) {
+    const s = String(lines[k] || "");
+    const g = numbered ? gutterPrefix(s) : null;
+    const lead = g ? String(parseInt(g.gutter, 10)).padStart(2) + "  " : numbered ? "    " : "";
+    const body = g ? s.slice(g.gutter.length) : numbered ? s.replace(/^ {0,4}/, "") : s;
+    const shift = g ? g.gutter.length : numbered ? s.length - body.length : 0;
+    let cut = Math.max(0, col - shift);
+    while (cut > 0 && cut < body.length && /\S/.test(body[cut - 1]) && /\S/.test(body[cut])) cut--;
+    rows.push({ lead, left: body.slice(0, cut).trim(), right: body.slice(cut).trim() });
+  }
+  const wl = Math.max(Math.max(0, col - 4), ...rows.map((r) => r.left.length)) + 2;
+  const wr = Math.max(12, ...rows.map((r) => r.right.length)) + 2;
+  const pad = numbered ? "    " : "";
+  const out = lines.slice(0, from);
+  out.push(pad + "┌" + "─".repeat(wl) + "┬" + "─".repeat(wr) + "┐");
+  const first = out.length;
+  for (const r of rows) out.push(r.lead + "│" + (" " + r.left).padEnd(wl) + "│" + (" " + r.right).padEnd(wr) + "│");
+  const last = out.length - 1;
+  out.push(pad + "└" + "─".repeat(wl) + "┴" + "─".repeat(wr) + "┘");
+  return { lines: out.concat(lines.slice(to + 1)), first, last };
+}
+
+/**
+ * A box row typed in, set back on its box's rules: every cell its text at the
+ * box's widths, and a cell's text that runs past its width wrapped, word by
+ * word, onto the next row of the same column. Where that row carries on the
+ * text (it opens in lower case) the words go in front of it and it wraps in
+ * turn; else (an item of its own — "2. Fraud") the column's rows from there
+ * move down one, as far as its first empty row (a row added at the box's foot
+ * where there is none — four spaces where a number stands, on a numbered
+ * page). Nothing in any other column moves. `caret` is { line, col } in the
+ * row typed in (null for none). With `breakAt` (Enter in a cell) the cell is
+ * broken at the caret, what follows it a line of its own in the column below.
+ * Returns { lines, caret } or null where the row is not one the box's rules
+ * can be read for.
+ */
+export function reflowBox(lines, i, caret = null, { numbered = false, breakAt = false } = {}) {
+  const box = boxAround(lines, i);
+  if (!box) return null;
+  // The box's columns: off a rule (its joints), else another row of it.
+  const own = boxBars(lines[i]);
+  let rule = null;
+  for (let k = box.from; k <= box.to && !rule; k++) if (k !== i && isBoxRule(lines[k]) && boxBars(lines[k]).length === own.length) rule = boxBars(lines[k]);
+  for (let k = box.from; k <= box.to && !rule; k++) if (k !== i && isBoxRow(lines[k]) && boxBars(lines[k]).length === own.length) rule = boxBars(lines[k]);
+  if (!rule) return null;
+  const n = own.length - 1; // cells a row
+  const width = (j) => rule[j + 1] - rule[j] - 1;
+  const room = (j) => Math.max(1, width(j) - 2);
+  const out = lines.slice();
+  // The box's rows, top to bottom, and each one's cells' text.
+  const rows = [];
+  for (let k = box.from; k <= box.to; k++) if (isBoxRow(out[k]) && boxBars(out[k]).length === own.length) rows.push(k);
+  const text = new Map(rows.map((k) => {
+    const b = boxBars(out[k]);
+    return [k, b.slice(0, -1).map((x, j) => out[k].slice(x + 1, b[j + 1]).trim())];
+  }));
+  const touched = new Set([i]);
+  // The caret: which cell, and how far into its text.
+  let at = null;
+  if (caret && caret.line === i) {
+    for (let j = 0; j < n; j++) {
+      if (caret.col > own[j] && caret.col <= own[j + 1]) {
+        const cell = lines[i].slice(own[j] + 1, own[j + 1]);
+        const lead = cell.length - cell.replace(/^ +/, "").length;
+        at = { row: i, j, off: Math.max(0, Math.min(text.get(i)[j].length, caret.col - own[j] - 1 - lead)) };
+      }
+    }
+  }
+  const addRow = () => {
+    const last = rows[rows.length - 1];
+    // On pleading paper the box grows over the empty numbered line under its
+    // foot rule, where there is one, rather than a line between two numbers.
+    const foot = last + 1;
+    if (numbered && foot < out.length && isBoxRule(out[foot]) && foot + 1 < out.length) {
+      const g = gutterPrefix(out[foot + 1]);
+      if (g && !g.rest.trim()) {
+        const row = String(parseInt(g.gutter, 10)).padStart(2) + "  ";
+        const made = row.padEnd(rule[0]).slice(0, rule[0]) + "│" + Array.from({ length: n }, (_, j) => " ".repeat(width(j))).join("│") + "│";
+        out[foot + 1] = out[foot];
+        out[foot] = made;
+        rows.push(foot);
+        text.set(foot, Array.from({ length: n }, () => ""));
+        return foot;
+      }
+    }
+    const lead = numbered ? "    " : " ".repeat(rule[0]);
+    out.splice(last + 1, 0, lead + "│" + Array.from({ length: n }, (_, j) => " ".repeat(width(j))).join("│") + "│");
+    // Rows below it in the box move down a line with it.
+    for (let r = 0; r < rows.length; r++) if (rows[r] > last) rows[r]++;
+    const moved = new Map();
+    for (const [k, v] of text) moved.set(k > last ? k + 1 : k, v);
+    text.clear();
+    for (const [k, v] of moved) text.set(k, v);
+    rows.push(last + 1);
+    text.set(last + 1, Array.from({ length: n }, () => ""));
+    if (at && at.row > last) at.row++;
+    return last + 1;
+  };
+  if (breakAt && !at) return null;
+  for (let j = 0; j < n; j++) {
+    let r = rows.indexOf(i);
+    let force = breakAt && at.j === j;
+    for (;;) {
+      const k = rows[r];
+      const t = text.get(k)[j];
+      if (!force && t.length <= room(j)) break;
+      let cut = force ? at.off : t.lastIndexOf(" ", room(j));
+      if (!force && cut <= 0) cut = room(j);
+      const keep = t.slice(0, cut).trimEnd(), carry = t.slice(cut).trim();
+      text.get(k)[j] = keep;
+      touched.add(k);
+      if (at && at.row === k && at.j === j && (force || at.off > keep.length)) at = { row: null, j, off: force ? 0 : Math.max(0, at.off - (t.length - carry.length)) };
+      if (r + 1 >= rows.length) addRow();
+      const next = rows[r + 1];
+      const nt = text.get(next)[j];
+      const broke = force;
+      force = false;
+      if (!broke && nt && /^[a-z]/.test(nt)) text.get(next)[j] = carry + " " + nt;
+      else if (!nt) text.get(next)[j] = carry;
+      else {
+        // An item of its own: the column moves down a row to make room.
+        let m = r + 1;
+        while (m < rows.length && text.get(rows[m])[j]) m++;
+        if (m >= rows.length) { addRow(); m = rows.length - 1; }
+        for (let q = m; q > r + 1; q--) { text.get(rows[q])[j] = text.get(rows[q - 1])[j]; touched.add(rows[q]); }
+        text.get(next)[j] = carry;
+      }
+      touched.add(next);
+      if (at && at.row === null) at.row = next;
+      r++;
+    }
+  }
+  for (const k of touched) {
+    const b = boxBars(out[k]);
+    const lead = out[k].slice(0, b[0]);
+    const head = lead.length === rule[0] ? lead : lead.slice(0, rule[0]).padEnd(rule[0]);
+    out[k] = head + text.get(k).map((t, j) => "│" + (" " + t).padEnd(width(j))).join("") + "│" + out[k].slice(b[b.length - 1] + 1);
+  }
+  return { lines: out, caret: at && at.row != null ? { line: at.row, col: rule[at.j] + 2 + at.off } : null };
+}
+
+/**
+ * Backspace at the head of a box cell's text: the cell's text joined to the
+ * end of the same column's text on the row above (wrapped on from there as
+ * typing would be), never to the line above across the box — and nothing at
+ * all on the box's first row. A row left empty in every cell that is no line
+ * of the paper (an unnumbered row) goes. `col` is the caret's column in row
+ * `i`. Returns { lines, caret } or null where this is no head of a box cell.
+ */
+export function boxBackspace(lines, i, col, { numbered = false } = {}) {
+  const box = boxAround(lines, i);
+  if (!box) return null;
+  const own = boxBars(lines[i]);
+  let j = -1, lead = 0;
+  for (let q = 0; q < own.length - 1; q++) {
+    const cell = lines[i].slice(own[q] + 1, own[q + 1]);
+    lead = cell.length - cell.replace(/^ +/, "").length;
+    if (col > own[q] && col <= own[q + 1]) { j = q; if (col - own[q] - 1 > lead) return null; break; }
+  }
+  if (j < 0) return null;
+  let p = i - 1;
+  while (p >= box.from && !isBoxRow(lines[p])) p--;
+  if (p < box.from) return { lines: lines.slice(), caret: { line: i, col } }; // the first row: nothing above to join to
+  const out = lines.slice();
+  const pb = boxBars(out[p]), ib = boxBars(out[i]);
+  const above = out[p].slice(pb[j] + 1, pb[j + 1]).trim();
+  const mine = out[i].slice(ib[j] + 1, ib[j + 1]).trim();
+  const joined = above && mine ? above + " " + mine : above + mine;
+  const put = (s, bars, t) => s.slice(0, bars[j] + 1) + (" " + t).padEnd(bars[j + 1] - bars[j] - 1) + s.slice(bars[j + 1]);
+  out[p] = put(out[p], pb, joined);
+  // The column's rows below come up one, as far as its first empty row — as
+  // Enter sent them down.
+  const rows = [];
+  for (let k = i; k <= box.to; k++) if (isBoxRow(out[k]) && boxBars(out[k]).length === ib.length) rows.push(k);
+  const cell = (k) => { const b = boxBars(out[k]); return out[k].slice(b[j] + 1, b[j + 1]).trim(); };
+  for (let q = 0; q < rows.length; q++) {
+    const next = q + 1 < rows.length ? cell(rows[q + 1]) : "";
+    out[rows[q]] = put(out[rows[q]], boxBars(out[rows[q]]), next);
+    if (!next) break;
+  }
+  const caretCol = pb[j] + 2 + above.length + (above && mine ? 1 : 0);
+  // A row of nothing that is no numbered line of the paper goes.
+  const empty = ib.slice(0, -1).every((b, q) => !out[i].slice(b + 1, ib[q + 1]).trim());
+  if (empty && !(numbered && gutterPrefix(out[i]))) out.splice(i, 1);
+  // The joined text set back on the box's widths, wrapping on down the column.
+  const temp = out[p];
+  out[p] = out[p].slice(0, pb[j] + 1) + (" " + joined) + out[p].slice(pb[j + 1]);
+  const res = reflowBox(out, p, { line: p, col: caretCol }, { numbered });
+  if (!res) { out[p] = temp; return { lines: out, caret: { line: p, col: caretCol } }; }
+  return { lines: res.lines, caret: res.caret || { line: p, col: caretCol } };
+}

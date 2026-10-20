@@ -2109,6 +2109,33 @@ the line already carries it with one space (`restoreMarginNumbers`,
 missing indent set, a one-space number, and an indent taken out by hand in
 ⇄ Raw staying out).
 
+**Column boxes on a ✓ Use my text page** (`#colbox-btn`,
+`makeColumnBoxAtSelection`, `boxKey`, `boxReflowSoon`; `TD.makeColumnBox`,
+`TD.reflowBox`, `TD.boxBackspace`, `TD.isBoxRow`, `TD.boxAround`). The owner:
+"Add the ability for me to insert column boxes when using use my text. That
+way I can insulate the formatting changes for the causes of action from the
+parties on a cover page" — written in box-drawing rules (as PDF-Linker writes
+a form's), made from a selection with a button, a column's overflow wrapped
+within it. ⊞ Column box makes the selected lines a two-column box, its divider
+at the selection's start column (moved back to the start of a word it would
+cut): each line keeps its number and its text split there into a left and a
+right cell, a rule over and under as half lines (four spaces where a number
+stands). Typing in a box row (`input`, 120 ms) sets the row back on the box's
+rules (`reflowBox`: the top rule's joints, else another row's bars): a cell
+whose text outgrows its width wraps word by word onto the column's next row —
+in front of that row's text where it carries on in lower case, else the
+column's rows move down one as far as its first empty row — and the box grows
+at its foot, over the empty numbered line under its rule where there is one.
+No other column moves. Enter in a cell breaks it onto a row of its own in that
+column (`breakAt`), Backspace at a cell's head joins it to the cell above and
+brings the column's rows below back up (`boxBackspace`; nothing on the first
+row), and Delete at a row's end does nothing: the box is never joined across.
+Each is a rebuild of the page from its text (`rebuildFromLines`), the caret
+put back by its place in the file's text (`diskOffsetOfPoint`,
+`placeCaretOnDisk`). The ✓ Use my text layout (`autoLayPage`) leaves box
+lines as they stand. Tested in `test-textdoc.mjs` and `test-free-page.mjs`
+(section 10, a cover page's parties and causes of action).
+
 Each entry of `#text-fixed-list` goes to its page (`goToFixedPage`: found by
 `pageEntryAt` on screen, or its document opened from `folderDocs` first, then
 `goToPageFromList`); the Pages tab already tags such a page "Use my text".
