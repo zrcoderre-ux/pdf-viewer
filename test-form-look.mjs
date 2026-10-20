@@ -523,8 +523,19 @@ try {
     // The pleading's own page (the reader may hold the document before it too).
     const SEC = `[...document.querySelectorAll("#pages .tpage")].find((s) => s.textContent.includes("TEASDALE-VANE LAW"))`;
     const sec = (js) => page.evaluate(new Function(`const sec = ${SEC}; ${js}`));
+    // ONE TEXT, TWO VIEWS: typed on the page (Text view), it is in the raw sheet.
+    const onPage = await sec(`
+      const lt = [...sec.querySelectorAll(".page-body > .line > .lt")].find((x) => x.textContent === "Sampletown, CA 90000");
+      if (!lt) return false;
+      lt.closest(".page-body").focus();
+      const n = lt.lastChild; const r = document.createRange(); r.setStart(n, n.data.length); r.collapse(true);
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); return true;`);
+    if (onPage) await page.keyboard.type(" USA", { delay: 10 });
+    await page.waitForTimeout(600);
     await sec(`sec.querySelector(".page-label .raw-page").click();`);
     await page.waitForTimeout(300);
+    const rawHas = await sec(`return sec.querySelector(".raw-sheet .raw-text").textContent.split("\\n");`);
+    check("typed in Text view, the edit is in ⇄ Raw: one text, two views", onPage && rawHas.includes(" 4  Sampletown, CA 90000 USA"), JSON.stringify(rawHas.slice(4, 6)));
     const typed = await sec(`
       const pre = sec.querySelector(".raw-sheet .raw-text");
       if (!pre || !pre.isContentEditable) return false;
@@ -558,6 +569,16 @@ try {
     await page.waitForTimeout(300);
     const raw3 = await sec(`return sec.querySelector(".raw-sheet .raw-text").textContent.split("\\n")[3];`);
     check("…and ⇄ Raw shows it set back in its column", raw3 === " 3  100 Example Way", JSON.stringify(raw3));
+    // …and a save writes exactly what ⇄ Raw shows: the file on disk is the sheet.
+    const sheet = await sec(`return sec.querySelector(".raw-sheet .raw-text").textContent;`);
+    await page.keyboard.press("Control+s");
+    await page.waitForTimeout(1500);
+    const disk = await page.evaluate(async () => {
+      const top = await navigator.storage.getDirectory();
+      const dir = await (await top.getDirectoryHandle("Case Form Look")).getDirectoryHandle("Text Files");
+      return (await (await dir.getFileHandle("Sample Pleading.txt")).getFile()).text();
+    });
+    check("…and a save writes exactly what ⇄ Raw shows", disk.replace(/\n$/, "") === sheet, JSON.stringify({ disk: disk.slice(0, 120), sheet: sheet.slice(0, 120) }));
     await sec(`sec.querySelector(".page-label .raw-page").click();`);
     await page.waitForTimeout(300);
     if (!editOn) await page.evaluate(() => document.getElementById("edit-toggle").click());
