@@ -311,6 +311,34 @@ export function numberChain(nums) {
   return out;
 }
 
+/**
+ * A numbered page's margin numbers set back in their column, as the export
+ * writes them: the number right-aligned in two characters and two spaces
+ * after it (GUTTER_RE). A line typed into the ⇄ Raw sheet as "9 37. The
+ * defendant…" — one space after its margin number — reads as an unnumbered
+ * line with a 9 at its head, and the page drawn from it crowds it in under the
+ * line above. The owner, in chat: "Margin lines only go up to 28". So only a
+ * number from 1 to `last` with ONE space after it, and only where it takes its
+ * place in the numbers climbing down the page (numberChain), is taken for the
+ * margin's; a line whose text opens with a paragraph number ("37. …") is the
+ * text's. Returns the lines, changed only where a number was set back.
+ */
+export const MARGIN_LAST = 28;
+const ONE_SPACE_GUTTER_RE = /^( ?)(\d{1,2}) (?=\S)/;
+export function tidyGutters(lines, { last = MARGIN_LAST } = {}) {
+  const src = (lines || []).map((l) => String(l == null ? "" : l));
+  const loose = src.map((l) => {
+    if (gutterPrefix(l)) return null;
+    const m = l.match(ONE_SPACE_GUTTER_RE);
+    const n = m ? parseInt(m[2], 10) : NaN;
+    return n >= 1 && n <= last ? { n, rest: l.slice(m[0].length) } : null;
+  });
+  if (!loose.some(Boolean)) return src;
+  const nums = src.map((l, k) => (loose[k] ? loose[k].n : marginNumber(l)));
+  const chain = numberChain(nums);
+  return src.map((l, k) => (loose[k] && chain[k] ? String(loose[k].n).padStart(2) + "  " + loose[k].rest : l));
+}
+
 // What OCR reads a margin digit as, most often: a 1 as l, I or |, a 0 as O,
 // a 5 as S, a 2 as Z, an 8 as B, a 6 as b or G, a 9 as g or q.
 const OCR_DIGITS = { l: "1", I: "1", "|": "1", "!": "1", o: "0", O: "0", s: "5", S: "5", z: "2", Z: "2", B: "8", b: "6", G: "6", g: "9", q: "9" };

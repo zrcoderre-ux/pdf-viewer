@@ -1562,7 +1562,14 @@ app, which routes it to the reader tab.
   **With ✎ Edit on, the raw text takes typing**, and what you type is the
   file: a pseudonym typed reads as its real name once you are back on the
   page, and a real name the key binds is written as its pseudonym, as it is
-  when typed on the page. The page header (and a combined file's banner) is
+  when typed on the page. On pleading paper a **margin number typed with
+  one space after it** ("9 37. Oakenshaw…") is set back in its column
+  (" 9  37. Oakenshaw…"), as the export writes it, so the page still reads it
+  as line 9 — only a number from 1 to 28 that takes its place in the numbers
+  climbing down the page, never a paragraph number in the text. The raw text
+  shows it set back once the caret leaves it, and opening ⇄ Raw on a page
+  whose file already has such a line, then going back to ⇄ Text, sets it back
+  too (an edit to save). The page header (and a combined file's banner) is
   PDF-Linker's and takes no edit. The page catches up a moment after you stop
   typing, and at once when you click away, press ⇄ Text or save; Ctrl+Z inside
   the sheet takes back a keystroke, and Ctrl+Z on the page takes back the

@@ -1779,7 +1779,17 @@ sheet less its head (`rawSheetBody`), and where it differs from
 it, sets `doc.pages[i].lines`, `syncSpots`, `setDirty`, then
 `convertTypedRealsSoon` and `afterTextChangeSoon`. It keeps the body's
 `__built`, so a real name typed in the sheet is measured as typed and written
-as its pseudonym. It runs 400 ms after the last input (`commitRawSoon`), on
+as its pseudonym. On a numbered page (`TD.pageIsNumbered`) the sheet's lines
+go through `TD.tidyGutters` first: a margin number from 1 to `MARGIN_LAST`
+(28) with ONE space after it, where it takes its place in the numbers
+climbing down the page (`numberChain`), is set back to the export's
+two-character number and two spaces (`GUTTER_RE` wants two or more), so the
+line is the margin's again rather than an unnumbered line opening "9 37."
+crowded in under the line above. The owner: "Raw and text view should be
+connected such that an edit in one effects both" and "Margin lines only go up
+to 28". A page whose file already carries such a line is set back the first
+time ⇄ Raw is left under ✎ Edit, since the tidied text then differs from the
+page. It runs 400 ms after the last input (`commitRawSoon`), on
 focusout, in `setRaw(sec, false)`, at the top of `saveDocument` and before
 `setEditing(false)` (`commitRawPages`). `fillRaw` leaves the sheet alone while
 it has the focus (the corner tag still updates), so the caret survives the

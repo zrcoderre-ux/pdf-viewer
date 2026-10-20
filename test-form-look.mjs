@@ -140,6 +140,13 @@ const PLEAD_WANT = [
   { line: 7, t: "SUPERIOR", bold: true }, { line: 11, t: "QUILLON", bold: true }, { line: 11, t: "individual," },
   { line: 21, t: "individual", italic: true }, { line: 21, t: "residing" }, { line: 0, t: "Marigold" },
 ];
+// Lines the PDF sets in pieces cut mid-word, as some filings' makers do; the
+// export has the words whole (the pieces join to the line's text exactly).
+const SPLIT_AT = {
+  21: ["Plain", "tiff all", "eges as fol", "lows:"],
+  23: ["2. Def", "endant is a corpo", "ration doing bus", "iness there."],
+};
+for (const [n, parts] of Object.entries(SPLIT_AT)) if (parts.join("") !== PLEAD_BODY[n]) throw new Error(`SPLIT_AT ${n} is not its line`);
 const PLEAD_LINES = [];
 for (let n = 1; n <= 28; n++) PLEAD_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + PLEAD_BODY[n] : ""));
 const PLEAD_TEXT = "====== Page 1 ======\n" + PLEAD_LINES.join("\n") + "\n";
@@ -156,7 +163,7 @@ try {
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc && !!window.__textReaderPickPdfs);
 
   // The PDFs, made in the page, and the folder: both PDFs, both exports.
-  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT }) => {
+  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, SPLIT_AT }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const form = await PDFDocument.create();
     const fp = form.addPage([612, 792]);
@@ -174,6 +181,10 @@ try {
         placed.push({ line: k + 1, t: p.t, x, size, font: p.font || "R" });
       }
     });
+    // The pleading twice: with its numbers in the text layer, and without (a
+    // filing whose margin numbers are drawn, not set as text) — the export
+    // numbers its lines either way.
+    const pleading = async (numbers) => {
     const plead = await PDFDocument.create();
     const pp = plead.addPage([612, 792]);
     const tf = { R: await plead.embedFont(StandardFonts.TimesRoman), B: await plead.embedFont(StandardFonts.TimesRomanBold), I: await plead.embedFont(StandardFonts.TimesRomanItalic) };
@@ -181,29 +192,36 @@ try {
     for (let n = 1; n <= 28; n++) {
       const y = 792 - (100 + (n - 1) * 24);
       const num = String(n);
-      pp.drawText(num, { x: 46 - times.widthOfTextAtSize(num, 12), y, size: 12, font: times });
+      if (numbers) pp.drawText(num, { x: 46 - times.widthOfTextAtSize(num, 12), y, size: 12, font: times });
       const body = PLEAD_BODY[n];
       if (!body) continue;
       // A checkbox is drawn, not printed: its export mark has no text on the PDF.
       if (body.startsWith("[ X ] ")) { pp.drawRectangle({ x: 72, y: y - 1, width: 10, height: 10, borderWidth: 0.5 }); pp.drawText(body.slice(6), { x: 88, y, size: 12, font: times }); continue; }
-      // A line set in several faces is several pieces, each hard against the last.
+      // A line set in several faces is several pieces, each hard against the
+      // last; and a PDF that sets its words in pieces cut wherever its maker
+      // split the run (kerning, a tracked span) — each piece a text item of
+      // its own, the words whole in the export.
       let x = 72;
-      for (const [t, f] of PLEAD_FACES[n] || [[body, "R"]]) { pp.drawText(t, { x, y, size: 12, font: tf[f] }); x += tf[f].widthOfTextAtSize(t, 12); }
+      for (const [t, f] of PLEAD_FACES[n] || (SPLIT_AT[n] ? SPLIT_AT[n].map((t) => [t, "R"]) : [[body, "R"]])) { pp.drawText(t, { x, y, size: 12, font: tf[f] }); x += tf[f].widthOfTextAtSize(t, 12); }
     }
-    const formBytes = await form.save(), pleadBytes = await plead.save();
+    return plead.save();
+    };
+    const formBytes = await form.save(), pleadBytes = await pleading(true), unreadBytes = await pleading(false);
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry("Case Form Look", { recursive: true }); } catch { /* none yet */ }
     const dir = await top.getDirectoryHandle("Case Form Look", { create: true });
     const put = async (d, name, data) => { const w = await (await d.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); };
     await put(dir, "Sample Form.pdf", formBytes);
     await put(dir, "Sample Pleading.pdf", pleadBytes);
+    await put(dir, "Sample Unread Pleading.pdf", unreadBytes);
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "Sample Form.txt", FORM_TEXT);
     await put(text, "Sample Pleading.txt", PLEAD_TEXT);
+    await put(text, "Sample Unread Pleading.txt", PLEAD_TEXT);
     await window.__textReaderAdoptFolder(dir);
-    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes };
+    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes };
     return { placed };
-  }, { FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT });
+  }, { FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, SPLIT_AT });
 
   /** Open an export beside its PDF and wait for its page to be laid on the grid. */
   async function openBeside(exportName, pdfName) {
@@ -218,6 +236,42 @@ try {
     await page.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 });
     await page.waitForTimeout(1500);
   }
+  /**
+   * Every word on the page drawn with a gap between two of its letters: the
+   * grid moves pieces of a line, and must never open one up inside a word.
+   * A gap is the next letter starting more than a fifth of the type past where
+   * the one before it ends, as the screen draws them (transforms and all).
+   */
+  const letterGaps = () => page.evaluate(() => {
+    const out = [];
+    const body = document.querySelector("#pages .tpage .page-body.fixed");
+    if (!body) return ["no page on the grid"];
+    for (const lt of body.querySelectorAll(":scope > .line > .lt")) {
+      const chars = [];
+      const walk = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const el = n.parentElement;
+        if (el.closest(".gn, .gutter, .cb")) continue; // a margin number, a drawn checkbox
+        const size = parseFloat(getComputedStyle(el).fontSize) || 12;
+        for (let i = 0; i < n.data.length; i++) {
+          const r = document.createRange();
+          r.setStart(n, i); r.setEnd(n, i + 1);
+          const b = r.getBoundingClientRect();
+          chars.push({ ch: n.data[i], l: b.left, r: b.right, top: b.top, size });
+        }
+      }
+      for (let i = 1; i < chars.length; i++) {
+        const a = chars[i - 1], c = chars[i];
+        if (!/[\p{L}\p{N}]/u.test(a.ch) || !/[\p{L}\p{N}]/u.test(c.ch)) continue;
+        const gap = c.l - a.r;
+        if (gap > 0.2 * c.size || Math.abs(c.top - a.top) > c.size) {
+          const word = chars.slice(Math.max(0, i - 6), i + 6).map((x) => x.ch).join("");
+          out.push(`"${word.trim()}" ${a.ch}|${c.ch} gap ${gap.toFixed(1)}px at ${c.size.toFixed(1)}px`);
+        }
+      }
+    }
+    return out;
+  });
   /** The page laid out, as the screen has it: each line's box, rows, top and text. */
   const readPage = () => page.evaluate(async () => {
     const TD = await import("/viewer/textdoc.js");
@@ -293,6 +347,8 @@ try {
       faced.map(({ w, p }) => `${p.t}: ${w.weight} ${w.style} ${w.family.slice(0, 30)} vs ${p.font}`).join(" | "));
     const note = laid.lines.find((l) => l.text.startsWith("[fillable form"));
     check("a line the PDF does not print (PDF-Linker's note) keeps the reader's own face", !!note && !note.face, note ? note.face : "no note line");
+    const formGaps = await letterGaps();
+    check("no word on the form page drawn with a gap between its letters", formGaps.length === 0, formGaps.slice(0, 6).join(" | "));
     const look = await page.evaluate(() => window.__textReaderFormLook());
     if (!TOPS_ONLY) console.log(`        (planned ${look.planned} page(s) in ${look.plan.toFixed(1)} ms; placing passes took ${look.place.toFixed(1)} ms; fonts asked for ${look.fonts.pages} time(s), ${look.fonts.ms.toFixed(1)} ms)`);
     // Side by side shut: the page keeps the look, and the face, it had beside
@@ -378,6 +434,8 @@ try {
         JSON.stringify(styled));
       check("…its checkbox drawn whole on its numbered line", laid.boxes.length === 1 && laid.boxes[0] === "[ X ]", JSON.stringify(laid.boxes));
       check("…and the page reads back as the file", laid.file === PLEAD_LINES.join("\n"), JSON.stringify(laid.file).slice(0, 160));
+      const pleadGaps = await letterGaps();
+      check("…and no word on it drawn with a gap between its letters", pleadGaps.length === 0, pleadGaps.slice(0, 6).join(" | "));
       // The right margin is the PDF's: every line's text box ends where the PDF's body does, not at the paper's edge.
       const ends = await page.evaluate(() => {
         const body = document.querySelector("#pages .tpage .page-body.fixed");
@@ -400,6 +458,90 @@ try {
           && shut.lines.every((l) => !l.face && !l.placed),
         sayOff(offWant(kept)) || JSON.stringify(shut.lines.filter((l) => l.face || l.placed).map((l) => l.text.slice(0, 20))));
     }
+  }
+
+  // ── a numbered export beside a PDF whose numbers are not text ─────────────
+  // Laid by its words rather than its numbers, its lines cut into the PDF's
+  // pieces — and those pieces found in the line's text, not in the gutter
+  // number in front of it: found there, every cut stood the gutter's width
+  // early, in the middle of a word ("Mari|gold", "Pla|intiff").
+  if (!TOPS_ONLY) {
+    console.log("a numbered export beside a PDF whose numbers are not text");
+    await openBeside("Sample Unread Pleading.txt", "Sample Unread Pleading.pdf");
+    const laid = await readPage();
+    const gaps = await letterGaps();
+    check("no word drawn with a gap between its letters — the lines the PDF splits mid-word too", gaps.length === 0, gaps.slice(0, 6).join(" | "));
+    const cutIn = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body > .line > .lt > .cc")]
+      .filter((c) => /[\p{L}\p{N}]$/u.test(c.textContent) && c.nextSibling && /^[\p{L}\p{N}]/u.test(c.nextSibling.textContent || ""))
+      .map((c) => c.textContent + "|" + c.nextSibling.textContent.slice(0, 8)));
+    check("…no line cut inside a word", cutIn.length === 0, cutIn.slice(0, 6).join(" ; "));
+    // Laid by its words, each line at its PDF row's left — where the row's TEXT
+    // begins, so the margin number hangs in the margin to the left of it, not
+    // in the body with the text a margin further in.
+    const xs = await page.evaluate(() => {
+      const body = document.querySelector("#pages .tpage .page-body.fixed");
+      const L = body.getBoundingClientRect().left, W = body.getBoundingClientRect().width;
+      return { W, lines: [...body.querySelectorAll(":scope > .line.num")].filter((l) => l.querySelector(".lt").textContent.trim() && !l.querySelector(".cb")) // a checkbox stands where the PDF draws its box, before the text
+        .map((l) => ({ n: l.querySelector(".gn").textContent.trim(), gn: l.querySelector(".gn").getBoundingClientRect().right - L, text: (() => { const lt = l.querySelector(".lt"), w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT); for (let t = w.nextNode(); t; t = w.nextNode()) { const k = t.data.search(/\S/); if (k >= 0) { const r = document.createRange(); r.setStart(t, k); r.setEnd(t, k + 1); return r.getBoundingClientRect().left - L; } } return NaN; })() })) };
+    });
+    const at = 72 * (xs.W / 612);
+    const offText = xs.lines.filter((l) => Math.abs(l.text - at) > 1.5 || !(l.gn < at));
+    check("…each numbered line's text where the PDF prints it, its number in the margin before it",
+      xs.lines.length > 5 && offText.length === 0, offText.slice(0, 4).map((l) => `${l.n}: number ends ${l.gn.toFixed(1)}, text at ${l.text.toFixed(1)} vs ${at.toFixed(1)}`).join(" | "));
+    check("…and the page reads back as the file", laid.file === PLEAD_LINES.join("\n"), JSON.stringify(laid.file).slice(0, 160));
+  }
+
+  // ── typing into a page shown ⇄ Raw, on a page laid on its PDF ──────────
+  // Side by side on and off: switched back to text, the page is what was typed.
+  if (!TOPS_ONLY) for (const beside of [false]) {
+    console.log(`typing ⇄ Raw on a page laid on its PDF, side by side ${beside ? "on" : "off"}`);
+    await openBeside("Sample Pleading.txt", "Sample Pleading.pdf");
+    if (!beside) { await page.click("#sbs-toggle"); await page.waitForTimeout(600); }
+    const editOn = await page.evaluate(() => document.body.classList.contains("editing"));
+    if (!editOn) { await page.evaluate(() => document.getElementById("edit-toggle").click()); await page.waitForTimeout(200); }
+    // The pleading's own page (the reader may hold the document before it too).
+    const SEC = `[...document.querySelectorAll("#pages .tpage")].find((s) => s.textContent.includes("TEASDALE-VANE LAW"))`;
+    const sec = (js) => page.evaluate(new Function(`const sec = ${SEC}; ${js}`));
+    await sec(`sec.querySelector(".page-label .raw-page").click();`);
+    await page.waitForTimeout(300);
+    const typed = await sec(`
+      const pre = sec.querySelector(".raw-sheet .raw-text");
+      if (!pre || !pre.isContentEditable) return false;
+      pre.focus();
+      const w = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        const k = n.data.indexOf("TEASDALE-VANE LAW");
+        if (k >= 0) { const r = document.createRange(); r.setStart(n, k + "TEASDALE-VANE LAW".length); r.collapse(true); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); return true; }
+      }
+      return false;`);
+    if (typed) await page.keyboard.type(" LLP", { delay: 10 });
+    // …and one of the two spaces after line 3's margin number taken out: the
+    // number is still the margin's, set back in its column.
+    const squeezed = await sec(`
+      const pre = sec.querySelector(".raw-sheet .raw-text");
+      const w = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+      for (let n = w.nextNode(); n; n = w.nextNode()) {
+        const k = n.data.indexOf(" 3  100 Example Way");
+        if (k >= 0) { const r = document.createRange(); r.setStart(n, k + 3); r.collapse(true); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); return true; }
+      }
+      return false;`);
+    if (squeezed) await page.keyboard.press("Delete");
+    await page.waitForTimeout(100);
+    await sec(`sec.querySelector(".page-label .raw-page").click();`);
+    await page.waitForTimeout(800);
+    const line2 = await sec(`const l = sec.querySelectorAll(".page-body > .line")[1]; return l ? (l.querySelector(".lt") || l).textContent : null;`);
+    check("switched back to text, the page is what was typed into the raw sheet", typed && line2 === "TEASDALE-VANE LAW LLP", JSON.stringify({ typed, line2 }));
+    const line3 = await sec(`const l = sec.querySelectorAll(".page-body > .line")[2]; return l ? { num: l.classList.contains("num"), gn: (l.querySelector(".gn") || {}).textContent, text: (l.querySelector(".lt") || l).textContent } : null;`);
+    check("…a margin number typed with one space after it is still the margin's, its line numbered", squeezed && line3 && line3.num && line3.gn === " 3" && line3.text === "100 Example Way", JSON.stringify({ squeezed, line3 }));
+    await sec(`sec.querySelector(".page-label .raw-page").click();`);
+    await page.waitForTimeout(300);
+    const raw3 = await sec(`return sec.querySelector(".raw-sheet .raw-text").textContent.split("\\n")[3];`);
+    check("…and ⇄ Raw shows it set back in its column", raw3 === " 3  100 Example Way", JSON.stringify(raw3));
+    await sec(`sec.querySelector(".page-label .raw-page").click();`);
+    await page.waitForTimeout(300);
+    if (!editOn) await page.evaluate(() => document.getElementById("edit-toggle").click());
+    if (!beside) await page.click("#sbs-toggle");
+    await page.waitForTimeout(300);
   }
 
   if (!TOPS_ONLY) check("no error on the page", errors.length === 0, errors.join(" | "));

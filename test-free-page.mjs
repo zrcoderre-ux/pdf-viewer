@@ -338,6 +338,55 @@ async function run() {
       check("no page errors", r.log.errors, []);
       await r.close();
     }
+    console.log("8. typed into ⇄ Raw on a ✓ Use my text page laid on its PDF, side by side off: the page is the typing back as text");
+    for (const beside of [false, true]) {
+      const r = await newReader();
+      const p = r.page;
+      await p.evaluate(async () => {
+        const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+        const pdf = await PDFDocument.create();
+        const font = await pdf.embedFont(StandardFonts.TimesRoman);
+        for (const lines of [["DECLARATION OF TOBIAS WRENFIELD", "Name                    Amount           Date", "Tobias Wrenfield        $1,200           May 4", "End."], ["Name                    Amount           Date", "Other                   $5               June 1"]]) {
+          const pg = pdf.addPage([612, 792]);
+          lines.forEach((t, k) => { const y = 792 - (100 + k * 24); pg.drawText(String(k + 1), { x: 40, y, size: 12, font }); pg.drawText(t, { x: 72, y, size: 12, font }); });
+        }
+        await window.__textReaderPickPdfs([new File([await pdf.save()], "A Decl.pdf", { type: "application/pdf" })]);
+      });
+      const sbs = await p.$("#sbs-toggle");
+      const on = await sbs.evaluate((b) => b.getAttribute("aria-pressed") === "true");
+      if (on !== beside) await sbs.click();
+      await p.waitForTimeout(3000);
+      console.log("DBG", await p.evaluate(() => [document.body.className, document.querySelectorAll("#pages .tpage").length, document.querySelectorAll("#pages .tpage.matched").length, JSON.stringify(window.__textReaderPdfQueue ? window.__textReaderPdfQueue() : null)]));
+      await p.waitForFunction(() => !!document.querySelector("#pages .tpage.matched"), null, { timeout: 15000 });
+      await p.waitForTimeout(1200);
+      await fixClick(p, 0);
+      await p.waitForTimeout(900);
+      await p.evaluate(() => document.querySelectorAll("#pages .tpage")[0].querySelector(".page-label .raw-page").click());
+      await p.waitForTimeout(300);
+      const placed = await p.evaluate(() => {
+        const pre = document.querySelectorAll("#pages .tpage")[0].querySelector(".raw-sheet .raw-text");
+        if (!pre || !pre.isContentEditable) return false;
+        pre.focus();
+        const w = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) {
+          const k = n.data.indexOf("End.");
+          if (k >= 0) { const rg = document.createRange(); rg.setStart(n, k + 4); rg.collapse(true); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); return true; }
+        }
+        return false;
+      });
+      truthy(`side by side ${beside ? "on" : "off"}: caret placed in the raw sheet`, placed);
+      await p.keyboard.type(" Signed.", { delay: 10 });
+      await p.waitForTimeout(100);
+      await p.evaluate(() => document.querySelectorAll("#pages .tpage")[0].querySelector(".page-label .raw-page").click());
+      await p.waitForTimeout(1000);
+      const text = await p.evaluate(() => [...document.querySelectorAll("#pages .tpage")[0].querySelectorAll(".page-body > .line")].map((l) => (l.querySelector(".lt") || l).textContent).join("\n"));
+      truthy(`side by side ${beside ? "on" : "off"}: back as text, the page is what was typed (${JSON.stringify(text.split("\n").pop())})`, /End\. Signed\.$/.test(text));
+      await p.evaluate(() => document.querySelectorAll("#pages .tpage")[0].querySelector(".page-label .raw-page").click());
+      await p.waitForTimeout(300);
+      truthy(`side by side ${beside ? "on" : "off"}: …and ⇄ Raw again shows it`, await p.evaluate(() => /End\. Signed\./.test(document.querySelectorAll("#pages .tpage")[0].querySelector(".raw-sheet .raw-text").textContent)));
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
     console.log("7. the Flagged panel's list goes to each ✓ Use my text page, in whichever document it is");
     {
       const r = await newReader();

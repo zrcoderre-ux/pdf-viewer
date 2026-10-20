@@ -18639,6 +18639,10 @@ function refreshPdf() {
   updatePdfStatus();
   pageThumbsMoved(); // the Pages tab pictures each page from its PDF, where it now has one
   if (!any && !doc) hideSwapPop();
+  // With the pane shut no slot asks for the PDF, so the grid is asked for here
+  // (gridOn): the pages laid on the PDFs just matched, or let go of the ones
+  // that are not theirs any more.
+  if (doc && pdfPane.hidden) applyMatchedLayoutSoon();
 }
 function updatePdfStatus() {
   const names = pdfSourceNames();
@@ -20246,7 +20250,8 @@ function applyMatchedLayoutNow() {
         lines.forEach((l, k) => {
           const c = cells[k];
           if (lefts[k] == null) return;
-          const lead = Math.max(0, texts[k].search(/\S/));
+          const lt = l.querySelector(":scope > .lt");
+          const lead = Math.max(0, (lt ? lt.textContent : texts[k]).search(/\S/)); // the text's own, as the places are (matchItems)
           // A row of a drawn box (rules.js) is a table, not cut into columns,
           // and draws the spaces it opens with in its first cell at their own
           // width — in its own face: it stands that much further in, by what
@@ -20429,11 +20434,19 @@ function applyMatchedLayoutNow() {
     // settled edit — almost always to put every line back where it already
     // stands. What it would write is remembered on the line, and a line
     // already there is left alone.
+    // THE MARGIN NUMBERS HANG IN THE MARGIN. A numbered line is a grid of two
+    // tracks, the gutter's (--body-x, the PDF's body margin) and the text's, so
+    // its text starts --body-x in from the line's own left. A line laid at its
+    // PDF row's left (a page whose PDF's numbers could not be read, laid by its
+    // words) is placed at where the row's TEXT begins: the line itself stands
+    // the gutter's width to the left of that, or the text is set a whole margin
+    // in from where the PDF prints it, the number in the body beside it.
+    p.gut = p.lefts && !p.geom && p.bodyX > 0 && p.body.classList.contains("numbered") ? p.bodyX * p.scale : 0;
     p.lines.forEach((l, k) => {
       const top = p.tops ? p.tops[k] : null;
       const ind = top != null && p.inds && p.inds[k] != null ? p.inds[k] * p.scale : null;
       const want = top == null ? "" :
-        (top * p.scale) + "|" + (p.lefts && p.lefts[k] != null ? p.lefts[k] * p.scale : "") + "|" +
+        (top * p.scale) + "|" + (p.lefts && p.lefts[k] != null ? p.lefts[k] * p.scale - p.gut : "") + "|" +
         (p.sizes[k] * p.scale) + "|" + (p.boxes[k] * p.scale) + "|" + (ind == null ? "" : ind);
       if (l.__laid === want) return;
       l.__laid = want;
@@ -20442,7 +20455,7 @@ function applyMatchedLayoutNow() {
       if (ind != null) l.style.setProperty("--pdf-ind", ind.toFixed(2) + "px"); else l.style.removeProperty("--pdf-ind");
       if (top == null) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; return; }
       l.style.top = (top * p.scale) + "px";
-      l.style.left = p.lefts && p.lefts[k] != null ? (p.lefts[k] * p.scale) + "px" : "";
+      l.style.left = p.lefts && p.lefts[k] != null ? (p.lefts[k] * p.scale - p.gut) + "px" : "";
       l.style.fontSize = (p.sizes[k] * p.scale) + "px";
       l.style.lineHeight = (p.boxes[k] * p.scale) + "px";
     });
@@ -20540,11 +20553,11 @@ function applyMatchedLayoutNow() {
     if (!p.tops || !p.lefts) continue;
     p.lines.forEach((l, k) => {
       if (l.classList.contains("own")) return; // set by hand: it stays where its spaces put it
-      const left = p.lefts[k] == null ? 0 : p.lefts[k] * p.scale;
+      const left = p.lefts[k] == null ? 0 : p.lefts[k] * p.scale - (p.gut || 0);
       // What it may give back is the indent IN FRONT of it — the blank
       // between the numbered margin and where this row starts — and not a
       // pixel more: the margin is the boundary, here as everywhere.
-      const floor = p.bodyX > 0 ? p.bodyX * p.scale : 0;
+      const floor = p.bodyX > 0 ? p.bodyX * p.scale - (p.gut || 0) : 0;
       if (left - floor < 1) return; // already at the margin: nothing to give
       const lt = l.querySelector(":scope > .lt");
       // A rule is set on its page's grid (rules.js), not slid: it has no
@@ -20970,9 +20983,15 @@ function matchItems(lines, texts, rowOf, rows, { skip = null } = {}) {
     const lt = row ? ltOf(l) : null;
     if (!lt) return null;
     const map = lineMap(lt);
+    // Found in the line's TEXT (.lt), the text its cuts are made in: a line the
+    // file numbers carries its gutter number in front of it ("  1  …"), and
+    // finding the pieces in that put every cut the gutter's width early — in
+    // the middle of a word, on a numbered page whose PDF's numbers could not
+    // be read (it takes this path rather than its numbers').
+    const shown = lt.textContent;
     let cands = PS.rowItemsNear(rows, j, taken);
     if (skip) cands = cands.filter((c) => !skip(c.it));
-    return { row, map, found: PS.lineItems(texts[k], cands, { atoms: map.atoms }) };
+    return { row, map, shown, found: PS.lineItems(shown, cands, { atoms: map.atoms }) };
   });
 }
 /**
@@ -20997,7 +21016,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
   return lines.map((l, k) => {
     const m = matched[k];
     if (!m) return null;
-    const { row, map, found } = m;
+    const { row, map, found, shown } = m;
     const lt = l.querySelector(":scope > .lt");
     // The line's own face: the one most of what it carries is set in. Not its
     // row's alone — a box row the export writes as one line can be three of
@@ -21008,9 +21027,9 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     // scan, pdfsync.pdfFace) is cut into its pieces: an OCR's words stand where
     // the scan has them, and the scan's type is not a face the reader has.
     if (!face) return { text: null, cuts: [], places: [], face };
-    const runs = PS.faceRuns(texts[k], found, { fileAt: map.fileAt, atoms: map.atoms, faceOf });
+    const runs = PS.faceRuns(shown, found, { fileAt: map.fileAt, atoms: map.atoms, faceOf });
     if (!place) return { text: null, cuts: [], places: [], face, runs };
-    const first = texts[k].search(/\S/);
+    const first = shown.search(/\S/);
     // Each piece at its own size — its item's, the line's within a fifth of
     // it — and the line's here is its ROW's own, not the page's body that
     // typeSizes takes a row within a fifth of to be (the line's box and the
@@ -21026,7 +21045,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
       const f = faceOf(g.item.font);
       const h = g.item.h > 0 ? g.item.h : own;
       const size = own > 0 && Math.abs(h - own) <= own * 0.2 ? own : h;
-      const pre = texts[k].slice(g.at, g.start);
+      const pre = shown.slice(g.at, g.start);
       places.push([at, { x: g.x - (pre ? faceEm(pre, f || face) * size : 0), size, face: f }]);
       if (g.at > first) cuts.push(at);
     }
@@ -21121,7 +21140,7 @@ function placePages(plans, near) {
         if (placeLine(lt, { places: null, start: null, at: null, face: c.face, size, lead: 0, cellFaces: c.cellFaces || null, runs })) moved = true;
         return;
       }
-      const lead = Math.max(0, l.textContent.search(/\S/));
+      const lead = Math.max(0, lt.textContent.search(/\S/)); // the text's own, not its gutter number's (matchItems)
       const places = new Map(c.places.map(([a, v]) => [a, { x: v.x * s, size: v.size * s, face: v.face }]));
       const start = (grid ? p.lefts[k] + lead * grid.unit : p.lefts[k]) * s;
       if (placeLine(lt, { places, start, at, face: c.face, size, lead, cellFaces: c.cellFaces || null, runs })) moved = true;
@@ -22894,7 +22913,14 @@ function commitRaw(sec) {
   const body = sec.querySelector(".page-body");
   if (!pre || !body || !doc || !editing) return;
   const i = Number(sec.dataset.index);
-  const text = rawSheetBody(pre).replace(/\r\n?/g, "\n");
+  let text = rawSheetBody(pre).replace(/\r\n?/g, "\n");
+  // On pleading paper a margin number typed with one space after it is set
+  // back in its column (TD.tidyGutters): the raw sheet and the page are one
+  // text, and a number the page cannot read as the margin's would draw its
+  // line crowded in under the one above. The sheet shows it once the typing
+  // leaves it (fillRaw, on focusout).
+  const lines = text.split("\n");
+  if (TD.pageIsNumbered(lines)) text = TD.tidyGutters(lines).join("\n");
   if (text === TD.serializeNodes(body)) return;
   snapshot(body);
   convertTypedRealsSoon.cancel(body);

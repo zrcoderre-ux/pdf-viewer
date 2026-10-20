@@ -549,6 +549,34 @@ first 9.4 against 3.8, CM-010's 22.5 against 15.8, LASC CIV 109's second
 11.8): a page laid on the grid now has boxes to fit where origin/main left
 it ragged.
 
+**A piece is found in the text it is cut in** (`matchItems`, `planCells`).
+The owner, in chat: "The grid layout should never cause extra space between
+letters in a single word." A line the file numbers carries its gutter number
+in front of its text (`.gutter`, then `.lt`), and the pieces were found in the
+whole line's `textContent` — gutter and all — while the cuts and places are
+offsets into `.lt` (`lineMap`). On a numbered page that is laid by its
+numbers this never mattered (placePages leaves it alone), but a numbered
+export beside a PDF whose margin numbers are not text (drawn, or a layer
+without them) is laid by its words like a form, and every cut stood the
+gutter's width early: "Mari|gold", "Pla|intiff", "Sep|tem|ber", each piece
+placed and sized on its own, with a gap where the PDF's next piece began.
+`matchItems` now reads `.lt`'s text (`shown`), and `planCells` and the line's
+lead (in the plan and in `placePages`) read the same. `test-form-look.mjs`
+holds a pleading whose PDF has no numbers in its text and splits two lines'
+words into pieces: no gap between a word's letters, no cell ending inside a
+word.
+
+**The margin numbers hang in the margin on a page laid by its words.** A
+numbered line is two grid tracks, the gutter's (`--body-x`, the PDF's body
+margin) and the text's. On a page whose PDF's numbers could not be read, each
+line is laid at its PDF row's left, which is where the row's TEXT begins, so
+the gutter track was drawn from there: the number in the body and the text a
+whole margin (57 px at a 480 px page) further in. The write pass now stands
+such a line the gutter's width to the left of its row (`p.gut`, and the
+spill pass's left and floor with it), so its text starts where the PDF prints
+it. `test-form-look.mjs` checks it on the pleading whose PDF has no numbers
+in its text.
+
 What the export could do better, for the reader and for the model: two pieces
 the form prints apart written three spaces apart or more (today a few are
 joined by one — the reader cuts them where the PDF's items begin, but the

@@ -8,7 +8,7 @@
 
 import {
   markCss,
-  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp,
+  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, setOwnPartyWords, ownPartyWordsOf, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
@@ -2067,5 +2067,16 @@ console.log("\ncomments on the document (the block after the last page)");
   check("cloneDoc copies the block", (() => { const c = cloneDoc(d); c.pages[0].comments.push("x"); return d.pages[0].comments.length; })(), 3);
 }
 
+
+console.log("margin numbers set back in their column (tidyGutters)");
+{
+  check("one space after a margin number: set back to two, the number in two characters",
+    tidyGutters([" 8  make.", "9 37. Oakenshaw then told", "10  application.", "18 40. Told", "19 that she had", "20  Born."]),
+    [" 8  make.", " 9  37. Oakenshaw then told", "10  application.", "18  40. Told", "19  that she had", "20  Born."]);
+  check("a paragraph number in the text is the text's, not the margin's", tidyGutters([" 8  make.", "37. Oakenshaw", " 9  next"]), [" 8  make.", "37. Oakenshaw", " 9  next"]);
+  check("margin numbers only go up to 28", tidyGutters(["27  a", "28  b", "29 c"]), ["27  a", "28  b", "29 c"]);
+  check("a number out of order down the page is the text's", tidyGutters(["25  a", "26", "5 days later"]), ["25  a", "26", "5 days later"]);
+  check("nothing to set back, the lines as they were", tidyGutters([" 1  a", " 2", " 3  c"]), [" 1  a", " 2", " 3  c"]);
+}
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);
