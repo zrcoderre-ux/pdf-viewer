@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, fileLayout,
   matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
@@ -492,6 +492,33 @@ console.log("the right margin");
   check("no rows, no margin", [bodyRightOf([]), bodyRightOf(null)], [null, null]);
   check("the document's margin is the median of its pages'", docBodyRight([[row([72, 468])], [row([72, 470])], [row([72, 200])], null]), 540);
   check("…and none with nothing read", docBodyRight([null, []]), null);
+}
+
+console.log("a ✓ Use my text page's file laid out as its PDF (fileLayout, slotFit)");
+{
+  const slot = (t) => (t - 100) / 24 + 1;
+  const ln = (num, indent, body, top, pieces, auto = true) => ({ num, indent, body, auto, top, pieces });
+  check("each line on the number its row stands at, its indent where the PDF sets it, the empty half line dropped",
+    fileLayout([
+      ln(1, 0, "Caption", 100, [{ at: 0, x: 72 }]),
+      ln(2, 0, "1. Indented", 124, [{ at: 0, x: 108 }]),
+      ln(4, 0, "drifted down a number", 148, [{ at: 0, x: 72 }]),
+      ln(null, 0, "", null, []),
+      ln(5, 0, "Name   Amount", 172, [{ at: 0, x: 72 }, { at: 7, x: 72 + 20 * 6 }]),
+    ], { slot, last: 28, x0: 72, unit: 6 }).slice(),
+    [" 1  Caption", " 2        1. Indented", " 3  drifted down a number", " 4  Name                Amount", " 5"]);
+  const typed = fileLayout([ln(1, 0, "a", 100, [{ at: 0, x: 72 }]), ln(3, 3, "typed by hand", 900, [], false)], { slot, last: 28, x0: 72, unit: 6 });
+  check("a line typed by hand stays as typed, on its own number, and is named as typed", [typed.slice(), typed.typed], [[" 1  a", " 2", " 3     typed by hand"], [2]]);
+  check("a line its row would put above the line before it takes the next number free",
+    fileLayout([ln(1, 0, "one", 124, [{ at: 0, x: 72 }]), ln(2, 0, "two", 100, [{ at: 0, x: 72 }])], { slot, last: 28, x0: 72, unit: 6 }).slice(), [" 1", " 2  one", " 3  two"]);
+  check("a column the file has in one place near the PDF's keeps it; one it has in two takes the PDF's",
+    fileLayout([ln(null, 0, "Name    Amount", 0, [{ at: 0, x: 72 }, { at: 8, x: 72 + 9 * 6 }]), ln(null, 0, "Other   Due", 0, [{ at: 0, x: 72 }, { at: 8, x: 72 + 9 * 6 }]),
+      ln(null, 0, "A   B", 0, [{ at: 0, x: 72 }, { at: 4, x: 72 + 30 * 6 }]), ln(null, 0, "Long name   C", 0, [{ at: 0, x: 72 }, { at: 12, x: 72 + 30 * 6 }])], { x0: 72, unit: 6 }).slice(),
+    ["Name    Amount", "Other   Due", "A                             B", "Long name                     C"]);
+  check("prose keeps its one space where the PDF sets two words closer than a column", fileLayout([ln(null, 0, "On or about", 0, [{ at: 0, x: 72 }, { at: 3, x: 72 + 5 * 6 }])], { x0: 72, unit: 6 }).slice(), ["On or about"]);
+  check("the paper's numbers read off the rows the file's numbers were matched to, a stray one moving nothing",
+    slotFit([{ n: 1, top: 100 }, { n: 2, top: 124 }, { n: 3, top: 148 }, { n: 4, top: 172 }, { n: 9, top: 196 }]), { y1: 100, pitch: 24 });
+  check("…and none from fewer than three", slotFit([{ n: 1, top: 100 }, { n: 2, top: 124 }]), null);
 }
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");
 // …which the reader asks with the case folder's id, never its bare name: two

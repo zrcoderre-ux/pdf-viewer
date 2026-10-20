@@ -2045,6 +2045,43 @@ out of the pairs `charGrid` is read from (it is evidence of where the operator
 put words, not the PDF), and the spill pass passes it by. Its place down the
 page, its size, its face, and every other line are as they were. Withdrawn,
 the stored lines go and the page is dressed again as any page.
+**…and its FILE laid out as its PDF lays it out** (`autoLayPage`,
+`pdfsync.fileLayout`, `pdfsync.slotFit`; `textReader.autoLaid`). The owner,
+later: "Let's have raw automatically update to match the layout, but my
+manual editing should overwrite that", for the margin numbers, the indents,
+each line's place on the numbers and the spacing within a line, on ✓ Use my
+text pages only, as the page is laid out; and "I should also be able to
+manually override any given indentation applied based on the match". This
+supersedes "no visible difference" where the file was out of step with its
+PDF: a line already where the PDF has it is left as it is, so a page whose
+file matches its PDF still looks the same when pressed. After every layout
+pass on the grid (`autoLaySoon`, debounced), under ✎ Edit, for each near page
+that is `.free`, `.matched` and `.fixed`, not raw, swapped or shed, not
+focused or composing and carrying no spot keep: the lines up to the trailer
+are read (their one-space margin numbers set back first, `tidyGutters`),
+matched to the PDF's rows by their words (`alignLines`), and each line's
+pieces found (`lineItems`, past a number the line's text carried itself).
+`fileLayout` writes them back: each piece at its column (`x0`, `unit`: the
+character grid read off the page's pieces, `charGrid`, and kept with the
+record so a page laid again never moves; with no grid to read, indents and
+spacing are left alone), a column the file already has in one place within
+two characters of the PDF's kept, a gap closer than `COLUMN_GAP` one space;
+on a numbered page each line on the number its row stands at (the PDF's own
+numbers, else `slotFit` over the rows the file's numbered lines matched),
+never above a line before it, an empty half line dropped, the numbers written
+to the page's last. The page is rebuilt like a raw edit (snapshot, so Ctrl+Z
+puts it back; `buildBody`, `setDirty`), at most three times in five seconds.
+A line the operator types after that (on the page or in ⇄ Raw) is not one of
+the lines the record holds (matched as a multiset, by the file's text), so
+`fileLayout` writes it back exactly as it stands and leaves it out of the
+next record: laid out once, then the operator's. Lines Ctrl+Z puts back are
+the operator's in the same way. A line's number put back on opening where
+the line already carries it with one space (`restoreMarginNumbers`,
+`numberedAs`) is read as that number. Tested in `test-pdfsync.mjs` and
+`test-free-page.mjs` (section 9: drifted lines put back on their numbers, a
+missing indent set, a one-space number, and an indent taken out by hand in
+⇄ Raw staying out).
+
 Each entry of `#text-fixed-list` goes to its page (`goToFixedPage`: found by
 `pageEntryAt` on screen, or its document opened from `folderDocs` first, then
 `goToPageFromList`); the Pages tab already tags such a page "Use my text".

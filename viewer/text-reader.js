@@ -20648,6 +20648,154 @@ function applyMatchedLayoutNow() {
   if (grid) gridNear();
   // The slots have just taken their widths: the pane keeps its own middle.
   if (on) holdSideways(pdfPane);
+  // A ✓ Use my text page's file laid out as its PDF now lays it out.
+  if (grid) autoLaySoon();
+}
+
+// ── a ✓ Use my text page's FILE laid out as its PDF lays it out ─────────────────
+//
+// The owner, in chat: "Let's have raw automatically update to match the layout,
+// but my manual editing should overwrite that." A ✓ Use my text page's file is
+// what PDF-Linker writes into the PDF, so on those pages (and only those) the
+// file itself is rewritten from the PDF the page is laid on: every margin
+// number in its column, each line on the number its PDF row stands at, its
+// indent and the gaps within it from where the PDF sets its pieces
+// (pdfsync.fileLayout). It is an edit like any other — unsaved until a save,
+// Ctrl+Z puts the page back — made as the page is laid out, while ✎ Edit is on
+// and the page is not being typed on.
+//
+// WHAT THE OPERATOR TYPES STANDS. The lines the layout last wrote are kept per
+// page (AUTO_LAID_KEY, by the page's ✓ Use my text key); a line that is not
+// one of them is the operator's — typed, pasted, or put back with Ctrl+Z —
+// and is written back exactly as it stands, on its own number. So a line is
+// laid out once, and from the moment it is touched by hand it is left alone.
+// The character grid the layout writes on (the PDF's x of the margin's column
+// and a character's width) is kept with them, so laying a page out again never
+// moves what it laid out before.
+const AUTO_LAID_KEY = "textReader.autoLaid";
+function readAutoLaid() {
+  try { return JSON.parse(localStorage.getItem(AUTO_LAID_KEY) || "{}") || {}; } catch { return {}; }
+}
+function writeAutoLaid(k, rec) {
+  if (!k) return;
+  const all = readAutoLaid();
+  if (rec) all[k] = rec; else delete all[k];
+  try { localStorage.setItem(AUTO_LAID_KEY, JSON.stringify(all)); } catch { /* kept for the session only */ }
+}
+const autoLaidSaid = new Set();
+const autoLaySoon = debounce(() => { if (doc) during("laying a ✓ Use my text page's file out as its PDF", autoLayPages); }, 300);
+function autoLayPages() {
+  if (!editing || !gridOn()) return;
+  for (const i of nearPages()) autoLayPage(i);
+}
+/** Lay page `i`'s file out as its PDF does, where it is a ✓ Use my text page on the grid. Whether it changed. */
+function autoLayPage(i) {
+  const sec = pagesEl.querySelector(`.tpage[data-index="${i}"]`);
+  if (!sec || !sec.classList.contains("matched") || sec.classList.contains("raw") || sec.classList.contains("swapped") || sec.classList.contains("shed")) return false;
+  const body = sec.querySelector(".page-body");
+  if (!body || !body.classList.contains("free") || !body.classList.contains("fixed")) return false;
+  // Not under the operator's caret, nor mid-composition: the page is rebuilt.
+  if (body === composingIn || document.activeElement === body || body.contains(document.activeElement)) return false;
+  // A spot keep is a place in the text: moving the text under it moves what it names.
+  if (body.querySelector("[data-here]")) return false;
+  const t = pdfTarget(i);
+  const info = t && infoFor(t.src);
+  const rows = info && info.rows[t.page - 1];
+  if (!rows || !rows.length) return false;
+  const k = freeFromKey(i);
+  if (!k) return false;
+  const rec = readAutoLaid()[k] || null;
+  const els = [...body.querySelectorAll(":scope > .line")];
+  // PDF-Linker's trailer rides on the last page and is no part of the PDF's.
+  const tailAt = els.findIndex((l) => l.classList.contains("trailer"));
+  const mine = tailAt < 0 ? els : els.slice(0, tailAt);
+  const tail = (tailAt < 0 ? [] : els.slice(tailAt)).map((l) => TD.serializeNodes(l));
+  const now = mine.map((l) => TD.serializeNodes(l));
+  // A margin number written with one space after it is the margin's (tidyGutters).
+  const tidy = body.classList.contains("numbered") ? TD.tidyGutters(now) : now;
+  const laid = new Map();
+  if (rec && Array.isArray(rec.lines)) for (const s of rec.lines) laid.set(s, (laid.get(s) || 0) + 1);
+  const shown = mine.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; });
+  const map = PS.alignLines(shown, rows.map((r) => r.text));
+  const numbered = body.classList.contains("numbered");
+  const geom = info.geoms[t.page - 1] || null;
+  const last = Math.max(TD.MARGIN_LAST, geom && geom.last > 0 ? geom.last : 0);
+  const data = mine.map((l, j) => {
+    let auto = true;
+    if (rec) { const n = laid.get(now[j]) || 0; if (n > 0) laid.set(now[j], n - 1); else auto = false; }
+    const L = tidy[j];
+    const g = numbered ? TD.gutterPrefix(L) : null;
+    let num = g ? parseInt(g.gutter, 10) : null;
+    if (!(num >= 1 && num <= last)) num = null;
+    const spaces = g ? g.gutter.replace(/^ ?\d{1,2}/, "").length : 0;
+    const rest = num != null ? L.slice(g.gutter.length) : L.replace(/^ +/, "");
+    const indent = num != null ? Math.max(0, spaces - 2) : L.length - L.replace(/^ +/, "").length;
+    const row = map[j] != null ? rows[map[j]] : null;
+    const pieces = [];
+    const lt = ltOf(l);
+    if (row && lt && auto) {
+      const m = lineMap(lt);
+      const own = TD.serializeNodes(lt);
+      const lead = Math.max(0, own.search(/\S/));
+      // Where the body starts in the line's text: past a margin number the
+      // line's text carried itself, where tidyGutters took it for the margin's.
+      const from = own.length - rest.length;
+      if (from >= lead && own.endsWith(rest)) {
+        for (const f of PS.lineItems(shown[j], row.items, { atoms: m.atoms })) {
+          if (f.glued) continue;
+          const a = m.fileAt(f.at);
+          if (a >= from) pieces.push({ at: a - from, x: f.x });
+        }
+      }
+    }
+    return { num: num != null ? num : null, indent, body: num != null ? rest : rest, auto, top: row ? row.top : null, pieces };
+  });
+  // The character grid: kept from the first time, else read off the page's
+  // pieces against where the file has them, else the margin and half the type.
+  let grid = rec && rec.unit > 0 ? { x0: rec.x0, unit: rec.unit } : null;
+  if (!grid) grid = PS.charGrid(data.flatMap((d) => d.pieces.map((p) => ({ col: d.indent + p.at, x: p.x }))));
+  // No grid to read (the file's columns do not follow the PDF's at any one
+  // character width): its indents and spacing cannot be worked out in the
+  // file's characters, and are left as they are; the numbers still are.
+  if (!grid) for (const d of data) d.pieces = [];
+  // Where each row stands on the paper's numbers: the PDF's own, or read off
+  // the rows the file's numbered lines were matched to.
+  let slot = null;
+  if (numbered) {
+    const fit = geom ? { y1: PS.lineTop(geom, 1), pitch: geom.pitch } : PS.slotFit(data.filter((d) => d.num != null && d.top != null).map((d) => ({ n: d.num, top: d.top })));
+    if (fit) slot = (top) => (top - fit.y1) / fit.pitch + 1;
+  }
+  if (numbered && !slot) return false; // nowhere to put the lines: the page stays as it stands
+  const out = PS.fileLayout(data, { slot, last, x0: grid ? grid.x0 : 0, unit: grid ? grid.unit : 1, gap: TD.COLUMN_GAP });
+  const typed = new Set(out.typed);
+  const record = { lines: out.filter((_, j) => !typed.has(j)), x0: grid ? grid.x0 : null, unit: grid ? grid.unit : null };
+  if (out.join("\n") === now.join("\n")) {
+    if (!rec) writeAutoLaid(k, record);
+    return false;
+  }
+  // A page laid out again and again with nothing typed between is a layout
+  // that does not settle: it is stopped rather than left to rewrite the page.
+  const tries = (sec.__autoTries || 0) + 1;
+  if (tries > 3) return false;
+  sec.__autoTries = tries;
+  setTimeout(() => { sec.__autoTries = 0; }, 5000);
+  const lines = out.concat(tail);
+  snapshot(body, true);
+  const built = body.__built;
+  buildBody(body, lines.join("\n"), i);
+  body.__built = built;
+  doc.pages[i].lines = lines;
+  syncSpots(body);
+  markOwnLines(body);
+  setDirty(true, i);
+  writeAutoLaid(k, record);
+  afterTextChangeSoon();
+  applyMatchedLayoutSoon();
+  if (!autoLaidSaid.has(k)) {
+    autoLaidSaid.add(k);
+    toast(`${TD.pageLabel(doc.pages[i])}: its text laid out as its PDF — the margin numbers, each line on its number, its indents and spacing. A line you type stays as you type it. Ctrl+Z puts the page back.`, { ms: 8000 });
+  }
+  return true;
 }
 // ── the sheet as a page ──────────────────────────────────────────────────────
 //

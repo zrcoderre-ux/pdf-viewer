@@ -2077,6 +2077,9 @@ console.log("margin numbers set back in their column (tidyGutters)");
   check("margin numbers only go up to 28", tidyGutters(["27  a", "28  b", "29 c"]), ["27  a", "28  b", "29 c"]);
   check("a number out of order down the page is the text's", tidyGutters(["25  a", "26", "5 days later"]), ["25  a", "26", "5 days later"]);
   check("nothing to set back, the lines as they were", tidyGutters([" 1  a", " 2", " 3  c"]), [" 1  a", " 2", " 3  c"]);
+  check("a number put back where the line already carries it with one space: read as that number, not put in front of it",
+    (restoreMarginNumbers(Array.from({ length: 10 }, (_, k) => (k === 5 ? "6 text six" : String(k + 1).padStart(2) + "  line " + (k + 1)))) || { lines: null }).lines,
+    Array.from({ length: 10 }, (_, k) => String(k + 1).padStart(2) + "  " + (k === 5 ? "text six" : "line " + (k + 1))));
 }
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

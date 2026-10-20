@@ -1232,3 +1232,166 @@ export function spreadTops(tops, box, fixed = null, spans = null) {
   }
   return out;
 }
+
+// ---- a ✓ Use my text page's file laid out as its PDF lays it out -----------------
+//
+// The owner, in chat: "Let's have raw automatically update to match the layout,
+// but my manual editing should overwrite that" — the margin numbers, the indents,
+// each line's place on the numbers and the gaps within a line, on the pages
+// handed to PDF-Linker as typed text, whose file is what it writes into the PDF.
+// The reader works the layout out (text-reader.js, autoLayFreePage); these are
+// the parts of it that need no page.
+
+/**
+ * Where a numbered page's lines are on its PDF, from the numbers the FILE gives
+ * the lines its words were matched to: `pairs` [{ n, top }] (a margin number,
+ * and the top in PDF units of the row that line was matched to). Theil–Sen, as
+ * charGrid is, so a few lines on the wrong number move nothing: { y1, pitch },
+ * line n's top being y1 + (n - 1) × pitch; null with fewer than three pairs, a
+ * pitch no pleading has, or a fit most pairs miss by more than a third of it.
+ */
+export function slotFit(pairs) {
+  const pts = (pairs || []).filter((p) => p && p.n > 0 && Number.isFinite(p.top));
+  if (pts.length < 3) return null;
+  const slopes = [];
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) {
+    const dn = pts[j].n - pts[i].n;
+    if (dn) slopes.push((pts[j].top - pts[i].top) / dn);
+  }
+  if (!slopes.length) return null;
+  const pitch = median(slopes);
+  if (!(pitch >= 6 && pitch <= 60)) return null;
+  const y1 = median(pts.map((p) => p.top - (p.n - 1) * pitch));
+  const near = pts.filter((p) => Math.abs(p.top - (y1 + (p.n - 1) * pitch)) <= pitch / 3).length;
+  if (near < Math.max(3, pts.length * 0.6)) return null;
+  return { y1, pitch };
+}
+
+/**
+ * A page's file lines laid out as its PDF lays them out.
+ *
+ * `lines`, in the file's order: { num, the margin number it carries (null for
+ * none); indent, the spaces its text is set in by past the margin (past the
+ * gutter's number and two spaces, on a numbered line); body, its text from its
+ * first character on; auto, false for a line the operator has typed since the
+ * layout last wrote it — written back exactly as it stands, on its own number;
+ * top, the PDF row its words were matched to (PDF units), or null; pieces,
+ * [{ at, x }]: where each PDF item that begins a piece of it begins in `body`
+ * and where on the page that item stands }.
+ *
+ * Options: `slot(top)`, the line a row's top stands at (1 for the first,
+ * fractions between) — null on a page with no numbers, whose lines keep their
+ * order and places; `last`, the paper's last number (28); `x0` and `unit`, the
+ * PDF's x of the margin's column and the width of a character of the file in
+ * PDF units; `gap`, the fewest spaces that are a column (COLUMN_GAP); `slack`,
+ * how many characters a column may stand from the PDF's and keep its place (a
+ * proportional face's type is no whole number of the file's characters, and a
+ * file already laid out as its PDF is left as it is). A column is every piece
+ * the PDF sets at one column, down the page: where the file has all of them at
+ * one column within `slack` of the PDF's, they keep it; else every one of them
+ * takes the PDF's, so the file's column is one column again.
+ *
+ * A line's text: its first piece at its column; each piece after it the
+ * spaces its column asks for where those are a column's (`gap` or more), else
+ * the one space of prose — or, where the file had a column there and the PDF
+ * puts the pieces closer, still a column's `gap`. On a numbered page each line
+ * is put on the number its row stands at (a row between two numbers, a line of
+ * its own under the first), never above a line before it in the file: where
+ * its row would put it there, it takes the next number free. An empty
+ * unnumbered line the layout owns is dropped, every number down to the
+ * page's last (the highest the file numbers or a line is put on, no further
+ * than `last`) is written, and its line is written " 7" where it carries
+ * nothing.
+ *
+ * Returns the lines, with `.typed`: the indexes among them of the lines
+ * written from one the operator typed (`auto` false), which the layout is not
+ * to take for its own next time.
+ */
+export function fileLayout(lines, { slot = null, last = 28, x0 = 0, unit = 6, gap = 3, slack = 2 } = {}) {
+  // Where the PDF puts a piece, as a column past the margin — and each such
+  // column the file already has in one place near enough, kept where it is.
+  const want = (p) => Math.max(0, Math.round((p.x - x0) / unit));
+  const has = new Map(); // the PDF's column → the columns the file has its pieces at
+  for (const l of lines) {
+    if (!l.auto) continue;
+    for (const p of l.pieces || []) {
+      if (!p || !Number.isFinite(p.x)) continue;
+      const w = want(p);
+      if (!has.has(w)) has.set(w, new Set());
+      has.get(w).add(Math.max(0, l.indent || 0) + p.at);
+    }
+  }
+  const keep = new Map();
+  for (const [w, cols] of has) {
+    if (cols.size !== 1) continue;
+    const c = [...cols][0];
+    if (Math.abs(c - w) <= slack) keep.set(w, c);
+  }
+  const text = (l) => {
+    const body = String(l.body || "");
+    const indent = Math.max(0, l.indent || 0);
+    const ps = l.auto ? (l.pieces || []).filter((p) => p && p.at >= 0 && p.at < body.length && Number.isFinite(p.x)).sort((a, b) => a.at - b.at) : [];
+    if (!ps.length) return " ".repeat(indent) + body;
+    const colOf = (p) => (keep.has(want(p)) ? keep.get(want(p)) : want(p));
+    const cuts = ps.map((p) => p.at);
+    let out = ps[0].at === 0 ? " ".repeat(colOf(ps[0])) : " ".repeat(indent) + body.slice(0, ps[0].at).replace(/ +$/, "");
+    ps.forEach((p, i) => {
+      const seg = body.slice(p.at, i + 1 < ps.length ? cuts[i + 1] : body.length);
+      if (i > 0 || ps[0].at !== 0) {
+        const had = (body.slice(0, p.at).match(/ +$/) || [""])[0].length;
+        if (i > 0 || out.length) {
+          const want = colOf(p) - out.length;
+          out += " ".repeat(want >= gap ? want : had >= gap ? gap : 1);
+        }
+      }
+      out += i + 1 < ps.length ? seg.replace(/ +$/, "") : seg;
+    });
+    return out;
+  };
+  const pad = (n) => String(n).padStart(2);
+  if (!slot) {
+    const out = lines.map((l) => ((l.num != null ? pad(l.num) + "  " : "") + text(l)).replace(/ +$/, ""));
+    out.typed = lines.map((l, k) => (l.auto ? -1 : k)).filter((k) => k >= 0);
+    return out;
+  }
+  const at = new Map(); // number → line
+  const halves = new Map(); // number → the lines under it (0: above the first)
+  let cur = 0;
+  const half = (k) => { const n = Math.min(cur, last); if (!halves.has(n)) halves.set(n, []); halves.get(n).push(k); };
+  lines.forEach((l, k) => {
+    const blank = !String(l.body || "").trim();
+    if (blank && l.auto) return; // every number is written below; an empty half line is no line
+    let want = null;
+    if (l.auto && l.top != null) {
+      const s = slot(l.top);
+      const r = Math.round(s);
+      if (Math.abs(s - r) <= 0.3 && r >= 1 && r <= last) want = r;
+      else if (s > 1) want = Math.floor(s) + 0.5;
+    }
+    if (want == null) want = l.num != null ? l.num : cur + 0.5;
+    if (Number.isInteger(want)) {
+      if (want <= cur || at.has(want)) want = cur + 1 <= last ? cur + 1 : null;
+      if (want == null) { half(k); return; }
+      at.set(want, k);
+      cur = want;
+      return;
+    }
+    if (Math.floor(want) > cur && Math.floor(want) <= last) cur = Math.floor(want);
+    half(k);
+  });
+  const out = [];
+  out.typed = [];
+  const mark = (k) => { if (!lines[k].auto) out.typed.push(out.length - 1); };
+  const put = (n) => { for (const k of halves.get(n) || []) { out.push(text(lines[k]).replace(/ +$/, "")); mark(k); } };
+  put(0);
+  let upto = 0;
+  for (const l of lines) if (l.num > upto) upto = l.num;
+  for (const n of at.keys()) if (n > upto) upto = n;
+  for (const n of halves.keys()) if (n > upto) upto = n;
+  for (let n = 1; n <= Math.min(upto, last); n++) {
+    if (at.has(n)) { out.push((pad(n) + "  " + text(lines[at.get(n)])).replace(/\s+$/, "")); mark(at.get(n)); }
+    else out.push(pad(n));
+    put(n);
+  }
+  return out;
+}

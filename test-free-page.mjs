@@ -118,6 +118,41 @@ const C = [
   "Other                   $5               June 1",
 ].join("\n") + "\n";
 
+// A pleading page whose PDF indents its paragraphs and carries no margin
+// numbers in its text, and an export of it typed by hand and laid out badly:
+// line 2's indent missing, line 6's number one space off its text and its
+// indent missing, lines 10 to 12 a number too low (D_ROWS is what the PDF
+// prints on each line, and where).
+const D_ROWS = [
+  ["COMPLAINT FOR DAMAGES", 72], ["1. Plaintiff is an individual residing in", 108], ["the County of Sample.", 72],
+  ["2. Defendant is a corporation doing", 108], ["business in the County of Sample.", 72], ["3. Plaintiff applied for an apartment", 108],
+  ["with Defendant in the spring.", 72], ["4. Defendant refused the application", 108], ["without giving a reason.", 72],
+  ["5. Plaintiff then asked for the reason", 108], ["in writing.", 72], ["6. Defendant did not answer.", 108],
+];
+const D = [
+  "====== Page 1 ======",
+  " 1  COMPLAINT FOR DAMAGES",
+  " 2  1. Plaintiff is an individual residing in",
+  " 3  the County of Sample.",
+  " 4        2. Defendant is a corporation doing",
+  " 5  business in the County of Sample.",
+  "6 3. Plaintiff applied for an apartment",
+  " 7  with Defendant in the spring.",
+  " 8        4. Defendant refused the application",
+  " 9  without giving a reason.",
+  "10",
+  "11        5. Plaintiff then asked for the reason",
+  "12  in writing.",
+  "13        6. Defendant did not answer.",
+].join("\n") + "\n";
+// …and what it is to be once laid out as its PDF.
+const D_LAID = [
+  " 1  COMPLAINT FOR DAMAGES", " 2        1. Plaintiff is an individual residing in", " 3  the County of Sample.",
+  " 4        2. Defendant is a corporation doing", " 5  business in the County of Sample.", " 6        3. Plaintiff applied for an apartment",
+  " 7  with Defendant in the spring.", " 8        4. Defendant refused the application", " 9  without giving a reason.",
+  "10        5. Plaintiff then asked for the reason", "11  in writing.", "12        6. Defendant did not answer.", "13",
+];
+
 // A second document, long enough that its last page is well off the screen.
 const B = Array.from({ length: 6 }, (_, k) => `====== Page ${k + 1} ======\n` + Array.from({ length: 40 }, (_, j) => `Brief page ${k + 1}, line ${j + 1}.`).join("\n")).join("\n") + "\n";
 
@@ -136,7 +171,7 @@ async function newReader() {
   page.on("dialog", (d) => d.accept().catch(() => {}));
   await page.goto(srv.base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
-  await page.evaluate(async ({ CASE, A, B, C, keyBytes }) => {
+  await page.evaluate(async ({ CASE, A, B, C, D, keyBytes }) => {
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry(CASE, { recursive: true }); } catch { /* none yet */ }
     const dir = await top.getDirectoryHandle(CASE, { create: true });
@@ -146,9 +181,10 @@ async function newReader() {
     await put(text, "A Decl.txt", A);
     await put(text, "B Brief.txt", B);
     await put(text, "C Form.txt", C);
+    await put(text, "D Plead.txt", D);
     window.__case = dir;
     await window.__textReaderAdoptFolder(dir);
-  }, { CASE, A, B, C, keyBytes: Array.from(KEY_BYTES) });
+  }, { CASE, A, B, C, D, keyBytes: Array.from(KEY_BYTES) });
   await page.evaluate(() => { const t = document.getElementById("reel-toggle"); if (t && t.checked) { t.checked = false; t.dispatchEvent(new Event("change")); } });
   await openReader(page);
   await page.evaluate(() => document.getElementById("edit-toggle").click());
@@ -321,7 +357,20 @@ async function run() {
         const before = await look(p, 0);
         await fixClick(p, 0);
         await p.waitForTimeout(1500);
-        check("✓ Use my text: the form looks exactly as it did", await look(p, 0), before);
+        // The file is laid out as the PDF lays the form out (autoLayPage): the
+        // pieces stand where they stood, and the file's columns are one column
+        // each down the page, where the PDF's are.
+        const after = await look(p, 0);
+        check("✓ Use my text: every piece stands where it stood, at its size, in its face",
+          { h: after.h, lines: after.lines.map((l) => l.slice(1)) }, { h: before.h, lines: before.lines.map((l) => l.slice(1)) });
+        // (Read as the file has it — ⇄ Raw, the pseudonyms as written — not as shown.)
+        await p.evaluate(() => document.querySelectorAll("#pages .tpage")[0].querySelector(".page-label .raw-page").click());
+        await p.waitForTimeout(300);
+        const disk = await p.evaluate(() => document.querySelectorAll("#pages .tpage")[0].querySelector(".raw-sheet .raw-text").textContent.split("\n").slice(1));
+        await p.evaluate(() => document.querySelectorAll("#pages .tpage")[0].querySelector(".page-label .raw-page").click());
+        await p.waitForTimeout(1200);
+        const colsOf = (re) => [...new Set(disk.map((t) => t.search(re)).filter((c) => c > 0))];
+        check("…and the file's second column is one column down the page", colsOf(/(?<=\s{3})\S/).length, 1);
       }
       const face = () => p.evaluate(() => { const lt = document.querySelectorAll("#pages .page-body > .line")[1].querySelector(".lt"); const cs = getComputedStyle(lt); return [cs.fontFamily, cs.fontSize]; });
       const faceWas = await face();
@@ -355,8 +404,6 @@ async function run() {
       const sbs = await p.$("#sbs-toggle");
       const on = await sbs.evaluate((b) => b.getAttribute("aria-pressed") === "true");
       if (on !== beside) await sbs.click();
-      await p.waitForTimeout(3000);
-      console.log("DBG", await p.evaluate(() => [document.body.className, document.querySelectorAll("#pages .tpage").length, document.querySelectorAll("#pages .tpage.matched").length, JSON.stringify(window.__textReaderPdfQueue ? window.__textReaderPdfQueue() : null)]));
       await p.waitForFunction(() => !!document.querySelector("#pages .tpage.matched"), null, { timeout: 15000 });
       await p.waitForTimeout(1200);
       await fixClick(p, 0);
@@ -384,6 +431,66 @@ async function run() {
       await p.evaluate(() => document.querySelectorAll("#pages .tpage")[0].querySelector(".page-label .raw-page").click());
       await p.waitForTimeout(300);
       truthy(`side by side ${beside ? "on" : "off"}: …and ⇄ Raw again shows it`, await p.evaluate(() => /End\. Signed\./.test(document.querySelectorAll("#pages .tpage")[0].querySelector(".raw-sheet .raw-text").textContent)));
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+    console.log("9. a ✓ Use my text pleading laid on its PDF: its file laid out as the PDF lays it out, and a line typed by hand stays as typed");
+    for (const beside of [false, true]) {
+      const r = await newReader();
+      const p = r.page;
+      await p.evaluate((n) => window.__textReaderOpenDoc(n), "D Plead.txt");
+      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length === 1 && document.querySelector("#pages .page-body").textContent.includes("COMPLAINT"));
+      await p.waitForTimeout(600);
+      await p.evaluate(async (rows) => {
+        const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+        const pdf = await PDFDocument.create();
+        const font = await pdf.embedFont(StandardFonts.TimesRoman);
+        const pg = pdf.addPage([612, 792]);
+        rows.forEach(([t, x], k) => pg.drawText(t, { x, y: 792 - (100 + k * 24), size: 12, font }));
+        await window.__textReaderPickPdfs([new File([await pdf.save()], "D Plead.pdf", { type: "application/pdf" })]);
+      }, D_ROWS);
+      const sbs = await p.$("#sbs-toggle");
+      if ((await sbs.evaluate((b) => b.getAttribute("aria-pressed") === "true")) !== beside) await sbs.click();
+      await p.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 });
+      await p.waitForTimeout(1200);
+      const raw = async () => {
+        await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+        await p.waitForTimeout(300);
+        const lines = await p.evaluate(() => document.querySelector("#pages .tpage .raw-sheet .raw-text").textContent.split("\n").slice(1));
+        await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+        await p.waitForTimeout(1500);
+        return lines;
+      };
+      const side = `side by side ${beside ? "on" : "off"}`;
+      // (Opened, its one-space margin number is read as the margin's, as the
+      // numbers OCR missed are put back: restoreMarginNumbers.)
+      const typedIn = D.split("\n").slice(1, -1);
+      typedIn[5] = " 6  3. Plaintiff applied for an apartment";
+      check(`${side}: before ✓ Use my text the file is as typed, its one-space number read as line 6`, await raw(), typedIn);
+      await fixClick(p, 0);
+      await p.waitForTimeout(2000);
+      check(`${side}: pressed, the file is laid out as its PDF — numbers, each line on its number, indents`, await raw(), D_LAID);
+      truthy(`${side}: …as an edit to save`, await p.evaluate(() => /unsaved|Save/.test(document.getElementById("st-dirty").textContent)));
+      // A line's indent taken out by hand, in ⇄ Raw: it stays out.
+      await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+      await p.waitForTimeout(300);
+      const placed = await p.evaluate(() => {
+        const pre = document.querySelector("#pages .tpage .raw-sheet .raw-text");
+        pre.focus();
+        const w = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) {
+          const k = n.data.indexOf(" 4        2. Defendant");
+          if (k >= 0) { const rg = document.createRange(); rg.setStart(n, k + 4); rg.setEnd(n, k + 10); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); return true; }
+        }
+        return false;
+      });
+      if (placed) await p.keyboard.press("Delete");
+      await p.waitForTimeout(100);
+      await p.evaluate(() => document.querySelector("#pages .tpage .page-label .raw-page").click());
+      await p.waitForTimeout(2000);
+      const want = D_LAID.slice();
+      want[3] = " 4  2. Defendant is a corporation doing";
+      check(`${side}: an indent taken out by hand stays out, the rest still laid out`, placed && await raw(), want);
       check("no page errors", r.log.errors, []);
       await r.close();
     }

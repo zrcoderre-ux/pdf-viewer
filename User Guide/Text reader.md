@@ -2118,6 +2118,17 @@ app, which routes it to the reader tab.
   second click withdraws it, ⊘ Did not OCR on the page withdraws it too, and
   it is off on a page that reads `[DID NOT OCR]`. ⊘ Did not OCR stays for the
   page you cannot read, or that is not worth the typing.
+  **Beside its PDF, a ✓ Use my text page's file is laid out as the PDF lays
+  it out.** The file is what PDF-Linker writes into the PDF, so on those pages
+  the reader rewrites it to match: every margin number in its column, each
+  line on the number the PDF prints it beside, its indent where the PDF sets
+  it, and the gap before a column where the PDF puts it (prose keeps its one
+  space). It happens as the page is laid out, under ✎ Edit, as an edit to
+  save — ⇄ Raw shows it, and Ctrl+Z puts the page back. **Your own edits
+  win:** a line you change after that, on the page or in ⇄ Raw — an indent
+  taken out, a line moved — is kept exactly as you typed it, and the layout
+  never touches it again. A line already where the PDF has it is left alone,
+  so a page that matches its PDF looks the same when you press the button.
   **While a page reads ✓ Use my text, your spacing stands.** Pressing the
   button changes nothing on screen. From then on, a line you edit on that
   page is placed only by its own spaces: the reader stops moving its columns

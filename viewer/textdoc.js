@@ -365,6 +365,10 @@ function numberedAs(line, n) {
   if (g) return g[2] ? num + g[2] + line.slice(g[0].length) : num;
   const mis = misreadNumber(line);
   if (mis && mis.n === n) return mis.rest ? num + (mis.spacing || "  ") + mis.rest : num;
+  // The number itself, written with one space after it (tidyGutters): it is
+  // this one, not text the number goes in front of.
+  const one = line.match(ONE_SPACE_GUTTER_RE);
+  if (one && parseInt(one[2], 10) === n) return num + "  " + line.slice(one[0].length);
   if (!line.trim()) return num;
   // An unnumbered line stands four places in, where the number and its two
   // spaces would be: those four are the number's now.
