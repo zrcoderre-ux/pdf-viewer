@@ -8,7 +8,9 @@
 // by side, a form page's pieces each stand where the PDF prints them, at their
 // own size and in the PDF's face, and every export line is still ONE line, in
 // its order, on its own row (a piece moves across, never up or down); a
-// pleading page's numbered lines stand exactly where their numbers put them.
+// pleading page's numbered lines stand exactly where their numbers put them,
+// in the reader's own type — bold where the PDF's is bold and italic where it
+// is italic, run by run, as a form's are.
 //
 // Run: node test-form-look.mjs   (from the repo root)
 //      node test-form-look.mjs --pleading-tops   prints the pleading page's
@@ -77,8 +79,10 @@ const BASE = `http://127.0.0.1:${port}`;
 // baseline, from the top), size, font: R(egular) B(old) I(talic), box (a
 // checkbox drawn before its label), join (the export joins it to the piece
 // before with ONE space, as an export of today does where the form prints the
-// two apart) }. A piece with no x follows the one before it a space on, in the
-// PDF as in the export. Each entry is one export line — the footnote and the
+// two apart), glue (the PDF prints it hard against the piece before, no space
+// between — a face changing in the middle of a word — and the export writes
+// the two as one word) }. A piece with no x follows the one before it a space
+// on, in the PDF as in the export. Each entry is one export line — the footnote and the
 // label printed beside it on its baseline are one, as are the footnote's next
 // line and the party boxes two points lower.
 const FORM = [
@@ -93,7 +97,7 @@ const FORM = [
     { t: "Attorney or party without attorney for", x: 353.6, y: 170, join: true }],
   [{ t: "or of some cross-complaints only, so state the parties,", x: 36, y: 178.4, size: 7 }, { box: true, x: 358, y: 180.9 },
     { t: "Plaintiff/Petitioner", x: 377, y: 180.9 }, { box: true, x: 464.6, y: 180.9, join: true }, { t: "Defendant/Respondent", x: 483.6, y: 180.9 }],
-  [{ t: "Date:", x: 36, y: 220 }, { t: "Clerk, by", x: 300, y: 220 }],
+  [{ t: "Date:", x: 36, y: 220 }, { t: "Clerk", x: 300, y: 220, font: "I" }, { t: ", by", y: 220, glue: true }],
 ];
 const U = 4.2, X0 = 36; // the export's character on the page, and its left
 /** An export line as PDF-Linker lays one out: each piece at its column, a space at least from the last. */
@@ -101,6 +105,7 @@ function exportLine(pieces) {
   let s = "";
   for (const p of pieces) {
     const t = p.box ? "[   ]" : p.t;
+    if (p.glue) { s += t; continue; }
     if (p.join || p.x == null) { s += " " + t; continue; }
     let col = Math.round((p.x - X0) / U);
     if (s.length && col <= s.length) col = s.length + 1;
@@ -121,6 +126,20 @@ const PLEAD_BODY = {
   16: "Defendant.", 19: "[ X ] Plaintiff demands a jury trial.", 21: "Plaintiff alleges as follows:",
   22: "1. Plaintiff is an individual residing in the County of Sample.", 23: "2. Defendant is a corporation doing business there.",
 };
+// …and the faces some of its lines are set in: the court's heading in bold,
+// the plaintiff's name in bold with the rest of its line regular, one word of
+// the body in italics. Everything else is Times.
+const PLEAD_FACES = {
+  8: [["SUPERIOR COURT OF THE STATE OF CALIFORNIA", "B"]],
+  12: [["QUILLON BRAKESMAN,", "B"], [" an individual,", "R"]],
+  22: [["1. Plaintiff is an ", "R"], ["individual", "I"], [" residing in the County of Sample.", "R"]],
+};
+// What the reader is to draw them in, by the line (its index among the page's
+// lines) and a word on it.
+const PLEAD_WANT = [
+  { line: 7, t: "SUPERIOR", bold: true }, { line: 11, t: "QUILLON", bold: true }, { line: 11, t: "individual," },
+  { line: 21, t: "individual", italic: true }, { line: 21, t: "residing" }, { line: 0, t: "Marigold" },
+];
 const PLEAD_LINES = [];
 for (let n = 1; n <= 28; n++) PLEAD_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + PLEAD_BODY[n] : ""));
 const PLEAD_TEXT = "====== Page 1 ======\n" + PLEAD_LINES.join("\n") + "\n";
@@ -137,7 +156,7 @@ try {
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc && !!window.__textReaderPickPdfs);
 
   // The PDFs, made in the page, and the folder: both PDFs, both exports.
-  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, FORM_TEXT, PLEAD_TEXT }) => {
+  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const form = await PDFDocument.create();
     const fp = form.addPage([612, 792]);
@@ -149,7 +168,7 @@ try {
         const size = p.size || 9;
         const font = fonts[p.font || "R"];
         if (p.box) { fp.drawRectangle({ x: p.x, y: 792 - p.y - 1, width: 9, height: 9, borderWidth: 0.5 }); continue; }
-        const x = p.x != null ? p.x : end + fonts.R.widthOfTextAtSize(" ", size);
+        const x = p.x != null ? p.x : end + (p.glue ? 0 : fonts.R.widthOfTextAtSize(" ", size));
         fp.drawText(p.t, { x, y: 792 - p.y, size, font });
         end = x + font.widthOfTextAtSize(p.t, size);
         placed.push({ line: k + 1, t: p.t, x, size, font: p.font || "R" });
@@ -157,7 +176,8 @@ try {
     });
     const plead = await PDFDocument.create();
     const pp = plead.addPage([612, 792]);
-    const times = await plead.embedFont(StandardFonts.TimesRoman);
+    const tf = { R: await plead.embedFont(StandardFonts.TimesRoman), B: await plead.embedFont(StandardFonts.TimesRomanBold), I: await plead.embedFont(StandardFonts.TimesRomanItalic) };
+    const times = tf.R;
     for (let n = 1; n <= 28; n++) {
       const y = 792 - (100 + (n - 1) * 24);
       const num = String(n);
@@ -165,8 +185,10 @@ try {
       const body = PLEAD_BODY[n];
       if (!body) continue;
       // A checkbox is drawn, not printed: its export mark has no text on the PDF.
-      if (body.startsWith("[ X ] ")) { pp.drawRectangle({ x: 72, y: y - 1, width: 10, height: 10, borderWidth: 0.5 }); pp.drawText(body.slice(6), { x: 88, y, size: 12, font: times }); }
-      else pp.drawText(body, { x: 72, y, size: 12, font: times });
+      if (body.startsWith("[ X ] ")) { pp.drawRectangle({ x: 72, y: y - 1, width: 10, height: 10, borderWidth: 0.5 }); pp.drawText(body.slice(6), { x: 88, y, size: 12, font: times }); continue; }
+      // A line set in several faces is several pieces, each hard against the last.
+      let x = 72;
+      for (const [t, f] of PLEAD_FACES[n] || [[body, "R"]]) { pp.drawText(t, { x, y, size: 12, font: tf[f] }); x += tf[f].widthOfTextAtSize(t, 12); }
     }
     const formBytes = await form.save(), pleadBytes = await plead.save();
     const top = await navigator.storage.getDirectory();
@@ -181,7 +203,7 @@ try {
     await window.__textReaderAdoptFolder(dir);
     window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes };
     return { placed };
-  }, { FORM, PLEAD_BODY, FORM_TEXT, PLEAD_TEXT });
+  }, { FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT });
 
   /** Open an export beside its PDF and wait for its page to be laid on the grid. */
   async function openBeside(exportName, pdfName) {
@@ -219,6 +241,7 @@ try {
         text: l.textContent, top: parseFloat(l.style.top), boxTop: r.top - b.top, boxBottom: r.bottom - b.top, lh: parseFloat(l.style.lineHeight),
         bases, num: l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null,
         face: lt.style.fontFamily, cells: lt.querySelectorAll(".cc").length, placed: lt.querySelectorAll(".cc[style*='min-width']").length,
+        faced: lt.querySelectorAll(".fc").length, weight: lt.style.fontWeight || "",
       };
     });
     return { lines, width: sec.getBoundingClientRect().width, file: TD.serializeNodes(body), boxes: [...body.querySelectorAll(".cb")].map((c) => c.textContent) };
@@ -279,9 +302,9 @@ try {
     const shut = await readPage();
     const grow = shut.width / laid.width;
     const moved = shut.lines.filter((l, k) => { const b = laid.lines[k];
-      return !b || l.text !== b.text || l.face !== b.face || l.placed !== b.placed || Number.isNaN(l.top) !== Number.isNaN(b.top)
+      return !b || l.text !== b.text || l.face !== b.face || l.placed !== b.placed || l.faced !== b.faced || l.weight !== b.weight || Number.isNaN(l.top) !== Number.isNaN(b.top)
         || (!Number.isNaN(l.top) && Math.abs(l.top - b.top * grow) > 1); });
-    check("side by side shut, the page keeps the side-by-side look — every piece's face, place and row — the file unchanged",
+    check("side by side shut, the page keeps the side-by-side look — every piece's face, every run's, its place and row — the file unchanged",
       shut.file === FORM_LINES.join("\n") && shut.lines.some((l) => l.face) && moved.length === 0 && shut.boxes.length === 5,
       JSON.stringify(moved.slice(0, 4).map((l) => [l.text.trim().slice(0, 20), l.face.slice(0, 10), l.placed, l.top])));
     // …and a document opened with side by side already off is laid on its PDF too.
@@ -329,8 +352,30 @@ try {
       const offTop = numbered.filter((l) => Math.abs(l.top - (geom.y1 + (l.num - 1) * geom.pitch) * scale) > 0.01);
       check("every numbered line stands exactly at its number on the PDF", numbered.length === 28 && offTop.length === 0,
         offTop.map((l) => `${l.num}: ${l.top} vs ${((geom.y1 + (l.num - 1) * geom.pitch) * scale).toFixed(3)}`).join(" | "));
-      check("…the pleading's lines are left as they were: no PDF face, no piece placed", laid.lines.every((l) => !l.face && !l.placed),
+      check("…the pleading's lines are left where they were: in the reader's own family, no piece placed", laid.lines.every((l) => !l.face && !l.placed),
         JSON.stringify(laid.lines.filter((l) => l.face || l.placed).map((l) => l.text.slice(0, 20))));
+      // …and in the PDF's weight and slant, run by run: each wanted word's
+      // text node, and the style it is drawn in.
+      const readFaces = () => page.evaluate(({ wanted }) => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        return wanted.map(({ line, t }) => {
+          const lt = body.querySelectorAll(":scope > .line")[line].querySelector(".lt");
+          const walk = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+          for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            if (n.data.indexOf(t) < 0) continue;
+            const cs = getComputedStyle(n.parentElement);
+            return { t, weight: cs.fontWeight, style: cs.fontStyle, wrapped: n.parentElement.classList.contains("fc") };
+          }
+          return { t, missing: true };
+        });
+      }, { wanted: PLEAD_WANT });
+      const offWant = (got) => got.filter((w, i) => w.missing || (w.weight === "700") !== !!PLEAD_WANT[i].bold || (w.style === "italic") !== !!PLEAD_WANT[i].italic);
+      const sayOff = (off) => off.map((w) => `${w.t}: ${w.missing ? "missing" : w.weight + " " + w.style}`).join(" | ");
+      const styled = await readFaces();
+      check("…and in the PDF's weight and slant, run by run: the heading bold, the plaintiff's name bold and the rest of its line not, one word of the body in italics",
+        offWant(styled).length === 0, sayOff(offWant(styled)));
+      check("…a run inside a line in a wrapper of its own, the line's own face on the line", styled.some((w) => w.wrapped) && laid.lines.filter((l) => l.faced).length >= 2,
+        JSON.stringify(styled));
       check("…its checkbox drawn whole on its numbered line", laid.boxes.length === 1 && laid.boxes[0] === "[ X ]", JSON.stringify(laid.boxes));
       check("…and the page reads back as the file", laid.file === PLEAD_LINES.join("\n"), JSON.stringify(laid.file).slice(0, 160));
       // The right margin is the PDF's: every line's text box ends where the PDF's body does, not at the paper's edge.
@@ -343,6 +388,17 @@ try {
       check("…and its lines end at the PDF's right margin, not the paper's edge",
         geom.right > 400 && geom.right < 600 && !!ends.margin && ends.boxes.length > 0 && past.length === 0 && ends.boxes.some((r) => Math.abs(r - geom.right * scale) <= 1),
         `margin ${ends.margin}, PDF right ${(geom.right * scale).toFixed(1)}, ends ${[...new Set(ends.boxes.map((r) => r.toFixed(1)))].join(",")}`);
+      // Side by side shut, the pleading keeps the look it had beside the PDF
+      // (as the form does, above): its runs in the PDF's weight and slant, on
+      // their numbers, the file unchanged.
+      await page.click("#sbs-toggle");
+      await page.waitForTimeout(800);
+      const shut = await readPage();
+      const kept = await readFaces();
+      check("…side by side shut, the pleading keeps its runs' weight and slant, the file unchanged",
+        shut.file === PLEAD_LINES.join("\n") && offWant(kept).length === 0 && shut.lines.filter((l) => l.faced).length === laid.lines.filter((l) => l.faced).length
+          && shut.lines.every((l) => !l.face && !l.placed),
+        sayOff(offWant(kept)) || JSON.stringify(shut.lines.filter((l) => l.face || l.placed).map((l) => l.text.slice(0, 20))));
     }
   }
 

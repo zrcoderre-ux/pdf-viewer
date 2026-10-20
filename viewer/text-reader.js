@@ -20164,6 +20164,25 @@ function applyMatchedLayoutNow() {
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
       sizes = PS.typeSizes(off.sizes, base);
       inds = pdfIndents(lines, nums, geom, rows, bodyX);
+      // …AND THE PDF'S WEIGHT AND SLANT, RUN BY RUN (planCells with `place`
+      // false; columns.faceLine). Pleading paper is laid on its numbers and
+      // nothing on it moves — no piece is cut or set at the PDF's x, and the
+      // reader's own family and the row's size stay — but its type is bold
+      // where the PDF's is bold and italic where it is italic, as a form's
+      // is: the row at each line's number or half line, or the one its words
+      // matched (pdfsync.numberedRowOf), its pieces found in the line
+      // (matchItems), each piece's face read off its font. The margin's own
+      // numbers are no pieces of the line: a "12" in the body would be found
+      // for one, and the line's real pieces, looked for past it, never found.
+      if (rows && rows.length) {
+        const left = bodyX > 0 ? bodyX - 1.5 : geom.numberRight + 1;
+        const rowOf = PS.numberedRowOf(nums, geom, rows, off.rowOf, left).map((j, k) => (lines[k].classList.contains("own") ? null : j));
+        const bodies = lines.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; });
+        const cellsFrom = performance.now();
+        cells = planCells(lines, bodies, matchItems(lines, bodies, rowOf, rows, { skip: (it) => it.x < left }), rows, info, sizes, { place: false });
+        formLook.plan += performance.now() - cellsFrom;
+        formLook.planned++;
+      }
     } else {
       const texts = lines.map((l) => l.textContent);
       // Where across the page each line stands, in the export's characters:
@@ -20927,7 +20946,11 @@ function columnCaps(bodies) {
 // place. pdfsync.lineItems finds the items, planCells plans the pieces and
 // columns.placeLine sets them; the cells are the column cells (columns.js),
 // wrappers with no data-fake, so nothing a save, a copy, Find or the LEAKS walk
-// reads moves. Pleading paper is laid on its numbers and is left as it was.
+// reads moves. Pleading paper is laid on its numbers and nothing on it is cut
+// or moved — and its lines take the PDF's weight and slant all the same, run
+// by run (planCells with `place` false; pdfsync.faceRuns, columns.faceLine),
+// as every matched line does: a run's face is a wrapper inside whatever holds
+// it, never a cell, so it asks nothing of the columns.
 
 /**
  * The PDF's items each line carries: per line, null for a line no row
@@ -20936,33 +20959,41 @@ function columnCaps(bodies) {
  * no other line was matched to (pdfsync.rowItemsNear), is looked for in what
  * the line SHOWS (the real names, as the PDF prints them; lineMap carries a
  * place in it to the file). The char grid is fitted from these and the pieces
- * are planned from them (planCells).
+ * are planned from them (planCells). `skip` leaves out items that are no piece
+ * of any line (a numbered page's margin numbers).
  */
-function matchItems(lines, texts, rowOf, rows) {
+function matchItems(lines, texts, rowOf, rows, { skip = null } = {}) {
   const taken = new Set(rowOf.filter((j) => j != null));
   return lines.map((l, k) => {
     const j = rowOf[k];
     const row = j == null ? null : rows[j];
-    const lt = row ? l.querySelector(":scope > .lt") : null;
+    const lt = row ? ltOf(l) : null;
     if (!lt) return null;
     const map = lineMap(lt);
-    return { row, map, found: PS.lineItems(texts[k], PS.rowItemsNear(rows, j, taken), { atoms: map.atoms }) };
+    let cands = PS.rowItemsNear(rows, j, taken);
+    if (skip) cands = cands.filter((c) => !skip(c.it));
+    return { row, map, found: PS.lineItems(texts[k], cands, { atoms: map.atoms }) };
   });
 }
 /**
  * The plan: per line, null for a line no row claims, else { text, the line as
  * the file writes it, which `cuts` are good for; cuts, the file offsets the
  * PDF's items begin at; places, [[file offset, { x, size, face }]], x and size
- * in PDF units; face, the face most of its row is set in }. Each item found in
- * the line (matchItems) gives the piece it begins its x — less the width of a
- * checkbox the text sets before it, since the PDF draws the box and its item
- * is the label — its size (the line's own within a fifth of it, typeSizes'
- * tolerance) and its face. A row of a drawn box is a table and is not cut: it
- * takes its faces only.
+ * in PDF units; face, the face most of its row is set in; runs, the runs of
+ * the line set in faces of their own (pdfsync.faceRuns, for columns.faceLine)
+ * }. Each item found in the line (matchItems) gives the piece it begins its x
+ * — less the width of a checkbox the text sets before it, since the PDF draws
+ * the box and its item is the label — and its size (the line's own within a
+ * fifth of it, typeSizes' tolerance); every item found, a glued one too, gives
+ * its run its face. A row of a drawn box is a table and is not cut: it takes
+ * its faces only. With `place` false (a numbered page) nothing is cut or
+ * placed and the faces carry no family — the line keeps the reader's own type
+ * and the row's size, and takes the PDF's weight and slant alone.
  */
-function planCells(lines, texts, matched, rows, info, sizes) {
+function planCells(lines, texts, matched, rows, info, sizes, { place = true } = {}) {
   const faces = info.faces || new Map();
-  const faceOf = (id) => { const f = id ? faces.get(id) : null; return f ? f.face : null; };
+  const known = (id) => { const f = id ? faces.get(id) : null; return f ? f.face : null; };
+  const faceOf = place ? known : (id) => { const f = known(id); return f ? { family: "", bold: f.bold, italic: f.italic } : null; };
   return lines.map((l, k) => {
     const m = matched[k];
     if (!m) return null;
@@ -20977,6 +21008,8 @@ function planCells(lines, texts, matched, rows, info, sizes) {
     // scan, pdfsync.pdfFace) is cut into its pieces: an OCR's words stand where
     // the scan has them, and the scan's type is not a face the reader has.
     if (!face) return { text: null, cuts: [], places: [], face };
+    const runs = PS.faceRuns(texts[k], found, { fileAt: map.fileAt, atoms: map.atoms, faceOf });
+    if (!place) return { text: null, cuts: [], places: [], face, runs };
     const first = texts[k].search(/\S/);
     // Each piece at its own size — its item's, the line's within a fifth of
     // it — and the line's here is its ROW's own, not the page's body that
@@ -20997,7 +21030,7 @@ function planCells(lines, texts, matched, rows, info, sizes) {
       places.push([at, { x: g.x - (pre ? faceEm(pre, f || face) * size : 0), size, face: f }]);
       if (g.at > first) cuts.push(at);
     }
-    return { text: TD.serializeNodes(lt), cuts, places, face };
+    return { text: TD.serializeNodes(lt), cuts, places, face, runs };
   });
 }
 /**
@@ -21043,12 +21076,14 @@ function recutKeepingCaret(body) {
  * pieces set (columns.placeLine). A piece the PDF did not place stands where
  * the grid put it: on the export's own grid read off the PDF (.cgrid), at its
  * column; on a page without one, the reader's grid on from the piece before.
- * A page that has left the grid has all of it taken back (unplacePage).
+ * A numbered page (no lefts) has nothing placed: its lines take their faces,
+ * run by run, and nothing else. A page that has left the grid has all of it
+ * taken back (unplacePage).
  */
 function placePages(plans, near) {
   const colN = parseFloat(document.documentElement.style.getPropertyValue("--col-n")) || 0.5;
   for (const p of plans) {
-    if (!p.tops || !p.cells || !p.lefts) { if (p.body.__placed) unplacePage(p.body); continue; }
+    if (!p.tops || !p.cells) { if (p.body.__placed) unplacePage(p.body); continue; }
     if (!near.has(Number(p.sec.dataset.index))) continue;
     let recut = false;
     // A page an input method is composing on keeps its cuts until it is done:
@@ -21066,16 +21101,32 @@ function placePages(plans, near) {
     if (recut) recutKeepingCaret(p.body);
     const s = p.scale, grid = p.grid;
     const at = grid ? (a) => (grid.x0 + a * grid.unit) * s : (a, x, from) => x + (a - from) * colN * p.base * s;
+    // Facing a run moves its text nodes into a wrapper (columns.faceLine), and
+    // a caret in one of them is put back by its offset, as recutKeepingCaret
+    // puts it back after a cut. Not while an input method is composing on the
+    // page: its runs wait for the pass after, as its cuts do.
+    const composing = p.body === composingIn;
+    const caret = composing ? -1 : caretOffsetIn(p.body);
+    let moved = false;
     p.lines.forEach((l, k) => {
-      const lt = l.querySelector(":scope > .lt");
+      const lt = ltOf(l);
       const c = p.cells[k];
       if (!lt) return;
-      if (!c || p.lefts[k] == null) { if (lt.__placed) unplaceLine(lt); return; }
+      if (!c || (p.lefts && p.lefts[k] == null)) { if (lt.__placed && unplaceLine(lt).faced) moved = true; return; }
+      const runs = composing ? null : c.runs || [];
+      const size = p.sizes[k] * s;
+      // A numbered page (no lefts): the PDF's weight and slant, run by run,
+      // and nothing placed (planCells with `place` false).
+      if (!p.lefts) {
+        if (placeLine(lt, { places: null, start: null, at: null, face: c.face, size, lead: 0, cellFaces: c.cellFaces || null, runs })) moved = true;
+        return;
+      }
       const lead = Math.max(0, l.textContent.search(/\S/));
       const places = new Map(c.places.map(([a, v]) => [a, { x: v.x * s, size: v.size * s, face: v.face }]));
       const start = (grid ? p.lefts[k] + lead * grid.unit : p.lefts[k]) * s;
-      placeLine(lt, { places, start, at, face: c.face, size: p.sizes[k] * s, lead, cellFaces: c.cellFaces || null });
+      if (placeLine(lt, { places, start, at, face: c.face, size, lead, cellFaces: c.cellFaces || null, runs })) moved = true;
     });
+    if (moved && caret >= 0) { const pt = pointAtOffset(p.body, caret); if (pt) placeCaret(pt.node, pt.offset); }
     p.body.__placed = true;
     formLook.placed++;
   }
@@ -21084,12 +21135,20 @@ function placePages(plans, near) {
 let composingIn = null;
 pagesEl.addEventListener("compositionstart", (e) => { composingIn = e.target && e.target.closest ? e.target.closest(".page-body") : null; });
 pagesEl.addEventListener("compositionend", () => { composingIn = null; });
-/** Everything placePages wrote, taken back off a page: its lines cut as the export alone cuts them. */
+/** Everything placePages wrote, taken back off a page: its lines cut as the export alone cuts them, in the reader's face throughout. */
 function unplacePage(body) {
-  let recut = false;
-  for (const lt of body.querySelectorAll(":scope > .line > .lt")) if (unplaceLine(lt)) recut = true;
+  const composing = body === composingIn;
+  const caret = composing ? -1 : caretOffsetIn(body);
+  let recut = false, moved = false;
+  for (const lt of body.querySelectorAll(":scope > .line > .lt")) {
+    const took = unplaceLine(lt);
+    if (took.cut) recut = true;
+    if (took.faced) moved = true;
+  }
   // (Mid-composition the page is cut again when the typing settles: recolumnSoon.)
-  if (recut && body !== composingIn) recutKeepingCaret(body);
+  if (recut && !composing && dressColumns(body)) moved = true;
+  // A run's wrapper coming off moves its text nodes, as a recut does: the caret goes back by its offset.
+  if (moved && caret >= 0) { const pt = pointAtOffset(body, caret); if (pt) placeCaret(pt.node, pt.offset); }
   body.__placed = false;
 }
 
@@ -21119,27 +21178,14 @@ function unlevelSlot(el) {
 function pdfIndents(lines, nums, geom, rows, bodyX) {
   const out = lines.map(() => null);
   if (!geom || !rows || !rows.length || !(bodyX > 0)) return out;
-  const pitch = geom.pitch;
-  const numAt = [];
-  nums.forEach((n, k) => { if (n != null) numAt.push(k); });
-  const slotY = (k) => {
-    if (nums[k] != null) return PS.lineTop(geom, nums[k]);
-    let a = -1, b = -1;
-    for (const i of numAt) { if (i < k) a = i; else { b = i; break; } }
-    if (a < 0 || b < 0 || nums[b] !== nums[a] + 1) return null;
-    return PS.lineTop(geom, nums[a]) + (pitch * (k - a)) / (b - a);
-  };
+  // The row at each line's slot (pdfsync.numberedRowOf, by the slot alone: the
+  // indent is the slot's, not a row the line's words were matched to).
+  const rowOf = PS.numberedRowOf(nums, geom, rows, null, bodyX - 1.5);
   lines.forEach((l, k) => {
     if (l.classList.contains("own") || !l.textContent.replace(/^\s*\d{0,2}/, "").trim()) return;
-    const y = slotY(k);
-    if (y == null) return;
-    let best = null, gap = pitch * 0.3;
-    for (const r of rows) {
-      const d = Math.abs(r.top - y);
-      if (d <= gap && r.items.some((it) => it.x >= bodyX - 1.5 && String(it.str).trim())) { best = r; gap = d; }
-    }
-    if (!best) return;
-    const x = Math.min(...best.items.filter((it) => it.x >= bodyX - 1.5 && String(it.str).trim()).map((it) => it.x));
+    const j = rowOf[k];
+    if (j == null) return;
+    const x = Math.min(...rows[j].items.filter((it) => it.x >= bodyX - 1.5 && String(it.str).trim()).map((it) => it.x));
     out[k] = Math.max(0, x - bodyX);
   });
   return out;

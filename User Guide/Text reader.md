@@ -235,8 +235,13 @@ app, which routes it to the reader tab.
   stand on the PDF's rules to within a character, and two boxes, one under
   the other's side, each where the PDF draws it. Every line of the file is
   still one line, in its order, on its own row — a piece moves across, never
-  up or down — and pleading paper is laid on its numbers as before. A line
-  the PDF does not print (PDF-Linker's own notes) keeps the reader's font.
+  up or down — and pleading paper is laid on its numbers as before. On every
+  page beside its PDF, pleading paper included, each run of the text is bold
+  where the PDF's is bold and italic where it is italic, a face that changes
+  in the middle of a word too (a case name in italics and its "'s"); pleading
+  paper keeps the reader's own type and takes the weight and slant alone, so
+  nothing on it moves. A line the PDF does not print (PDF-Linker's own notes)
+  keeps the reader's font, and a scan's OCR layer has no face to take.
   Display only: a save, a copy, Find and the LEAKS walk read exactly what the
   file says.
 - **Print what you see — in its pseudonyms.** **🖨 Print** (Ctrl+P) sends the
