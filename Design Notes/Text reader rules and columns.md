@@ -623,7 +623,10 @@ is the attorney block's, flush at the margin. None takes an indent off the
 PDF's rows: the stamp is printed over the same heights, and the row nearest a
 number was as often its as the line's (`pdfIndents` read "TEASDALE-VANE LAW"
 off the stamp's row, 270 px in). A lone clerk's name ("Edgecombe W. Slayton,")
-says nothing of the stamp and is set at the margin. `test-form-look.mjs`
+is the stamp's too where it stands over the stamp's line of the clerk's
+office ("Executive Officer/Clerk of Court"), as a stamp sets it: a person's
+name alone (`PERSON_RE`), with nothing an attorney's line carries (`SBN`, an
+email, a phone, a firm's LLP — `ATTORNEY_RE`). `test-form-look.mjs`
 prints a stamp on the sample pleading, its second line at line 2's very
 height with the firm's name under it. And `docBodyLeft` counts a PDF's rows
 read as well as its numbers in what it keeps its answer by: a poor scan's

@@ -1465,5 +1465,24 @@ export function captionAlign(texts, { first = true, gap = 3 } = {}) {
     else if (STAMP_RE.test(t)) out[k] = "right";
     else out[k] = "left";
   }
+  // THE CLERK'S NAME: a line of nothing but a person's name ("Edgecombe W.
+  // Slayton,"), standing over the stamp's line of the clerk's office, is the stamp's — the
+  // owner, "Fix the clerk name issue". An attorney's name carries its State Bar
+  // number, or stands among the firm's lines, not the stamp's.
+  const isStamp = (k) => out[k] === "right" || out[k] === "split";
+  const near = (k, d) => { for (let q = k + d; q >= 0 && q < end; q += d) if (String(texts[q] || "").trim()) return q; return -1; };
+  for (let k = 0; k < end; k++) {
+    if (out[k] !== "left" || !PERSON_RE.test(String(texts[k]).trim()) || ATTORNEY_RE.test(texts[k])) continue;
+    // …above the line naming the office it signs for, as a stamp sets it
+    // ("Edgecombe W. Slayton," over "Executive Officer/Clerk of Court,").
+    const down = near(k, 1);
+    if (down >= 0 && isStamp(down) && CLERK_OFFICE_RE.test(texts[down])) out[k] = "right";
+  }
   return out;
 }
+// A person's name alone on a line: two to four capitalised words (an initial
+// among them), a trailing comma; and what an attorney's lines carry that a
+// clerk's never does.
+const PERSON_RE = /^[A-Z][a-z'’-]+(?:\s+(?:[A-Z]\.|[A-Z][a-z'’-]+)){1,3},?$/;
+const CLERK_OFFICE_RE = /Executive\s+Officer|Clerk\s+of\s+(the\s+)?Court|Court\s+Executive/i;
+const ATTORNEY_RE = /\bSBN\b|Bar\s+No|@|\(\d{3}\)|\bEsq\b|\b(LLP|LLC|APC|P\.C\.|LAW)\b/i;

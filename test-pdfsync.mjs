@@ -538,6 +538,10 @@ console.log("a pleading's caption (captionAlign)");
   check("the stamp at the right, the attorney block at the margin, a line of both split; nothing past the court's title",
     captionAlign(cap), ["right", "split", "right", "left", "split", "right", "left", null, null, null]);
   check("…and nothing on a page that is not a document's first", captionAlign(cap, { first: false }).every((x) => x === null), true);
+  check("the clerk's name alone against the stamp's lines is the stamp's; an attorney's among the firm's is not",
+    captionAlign(["Electronically FILED by", "Superior Court of California,", "Edgecombe W. Slayton,", "Executive Officer/Clerk of Court,",
+      "Hillingdon A. Marchmont", "VANTAGE LLP", "SUPERIOR COURT OF THE STATE OF CALIFORNIA"]),
+    ["right", "right", "right", "right", "left", "left", null]);
   check("…nor on a page with no court's title", captionAlign(["Telephone: (723) 258-6342"]), [null]);
 }
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");
