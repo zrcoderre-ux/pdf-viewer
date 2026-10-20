@@ -20434,19 +20434,29 @@ function applyMatchedLayoutNow() {
     // settled edit — almost always to put every line back where it already
     // stands. What it would write is remembered on the line, and a line
     // already there is left alone.
-    // THE MARGIN NUMBERS HANG IN THE MARGIN. A numbered line is a grid of two
-    // tracks, the gutter's (--body-x, the PDF's body margin) and the text's, so
-    // its text starts --body-x in from the line's own left. A line laid at its
-    // PDF row's left (a page whose PDF's numbers could not be read, laid by its
-    // words) is placed at where the row's TEXT begins: the line itself stands
-    // the gutter's width to the left of that, or the text is set a whole margin
-    // in from where the PDF prints it, the number in the body beside it.
+    // THE MARGIN NUMBERS STAND IN ONE COLUMN, IN THE MARGIN. A numbered line is
+    // a grid of two tracks, the gutter's (--body-x, the PDF's body margin) and
+    // the text's. A line laid by its words (a page whose PDF's numbers could
+    // not be read) has its PDF row's left, where the row's TEXT begins: drawn
+    // from there, the number sat in the body with the text a margin further in,
+    // and moving the whole line instead took the number with every indented
+    // paragraph. On a page with the export's grid read off the PDF (.cgrid)
+    // every line has the grid's one left, and its indent is the file's own
+    // spaces on that grid: the line stands the gutter's width to the left of
+    // it (`gut`). On a page laid row by row (.rowleft) the line stays at the
+    // page's left, its number in the margin's one column, and only its text
+    // is set in, by the row's indent past the margin (.pind, --pdf-ind, as a
+    // numbered page's own indents are; `rowInd`).
     p.gut = p.lefts && !p.geom && p.bodyX > 0 && p.body.classList.contains("numbered") ? p.bodyX * p.scale : 0;
+    const rowInd = !!(p.gut && !p.grid);
     p.lines.forEach((l, k) => {
       const top = p.tops ? p.tops[k] : null;
-      const ind = top != null && p.inds && p.inds[k] != null ? p.inds[k] * p.scale : null;
+      const ind = top == null ? null
+        : rowInd ? (p.lefts[k] != null ? Math.max(0, p.lefts[k] * p.scale - p.gut) : null)
+        : p.inds && p.inds[k] != null ? p.inds[k] * p.scale : null;
+      const lineLeft = p.lefts && p.lefts[k] != null && !rowInd ? Math.max(0, p.lefts[k] * p.scale - p.gut) : null;
       const want = top == null ? "" :
-        (top * p.scale) + "|" + (p.lefts && p.lefts[k] != null ? p.lefts[k] * p.scale - p.gut : "") + "|" +
+        (top * p.scale) + "|" + (lineLeft == null ? "" : lineLeft) + "|" +
         (p.sizes[k] * p.scale) + "|" + (p.boxes[k] * p.scale) + "|" + (ind == null ? "" : ind);
       if (l.__laid === want) return;
       l.__laid = want;
@@ -20455,7 +20465,7 @@ function applyMatchedLayoutNow() {
       if (ind != null) l.style.setProperty("--pdf-ind", ind.toFixed(2) + "px"); else l.style.removeProperty("--pdf-ind");
       if (top == null) { l.style.top = ""; l.style.left = ""; l.style.lineHeight = ""; l.style.fontSize = ""; return; }
       l.style.top = (top * p.scale) + "px";
-      l.style.left = p.lefts && p.lefts[k] != null ? (p.lefts[k] * p.scale - p.gut) + "px" : "";
+      l.style.left = lineLeft == null ? "" : lineLeft + "px";
       l.style.fontSize = (p.sizes[k] * p.scale) + "px";
       l.style.lineHeight = (p.boxes[k] * p.scale) + "px";
     });
@@ -20550,14 +20560,16 @@ function applyMatchedLayoutNow() {
   // numbers in front of them, has nothing to give and is left alone).
   const spill = [];
   for (const p of plans) {
-    if (!p.tops || !p.lefts) continue;
+    // (A numbered page laid by its words keeps its lines at the margin and
+    // indents their text, p.gut: the squeeze below brings one back inside.)
+    if (!p.tops || !p.lefts || p.gut) continue;
     p.lines.forEach((l, k) => {
       if (l.classList.contains("own")) return; // set by hand: it stays where its spaces put it
-      const left = p.lefts[k] == null ? 0 : p.lefts[k] * p.scale - (p.gut || 0);
+      const left = p.lefts[k] == null ? 0 : p.lefts[k] * p.scale;
       // What it may give back is the indent IN FRONT of it — the blank
       // between the numbered margin and where this row starts — and not a
       // pixel more: the margin is the boundary, here as everywhere.
-      const floor = p.bodyX > 0 ? p.bodyX * p.scale - (p.gut || 0) : 0;
+      const floor = p.bodyX > 0 ? p.bodyX * p.scale : 0;
       if (left - floor < 1) return; // already at the margin: nothing to give
       const lt = l.querySelector(":scope > .lt");
       // A rule is set on its page's grid (rules.js), not slid: it has no

@@ -147,9 +147,16 @@ const SPLIT_AT = {
   23: ["2. Def", "endant is a corpo", "ration doing bus", "iness there."],
 };
 for (const [n, parts] of Object.entries(SPLIT_AT)) if (parts.join("") !== PLEAD_BODY[n]) throw new Error(`SPLIT_AT ${n} is not its line`);
+const INDENTED = 21;
 const PLEAD_LINES = [];
-for (let n = 1; n <= 28; n++) PLEAD_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + PLEAD_BODY[n] : ""));
+// (An indented paragraph is written indented: its spaces after the gutter's two.)
+for (let n = 1; n <= 28; n++) PLEAD_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + (n === INDENTED ? "       " : "") + PLEAD_BODY[n] : ""));
 const PLEAD_TEXT = "====== Page 1 ======\n" + PLEAD_LINES.join("\n") + "\n";
+// …and the export of a PDF it does not line up with by its spaces (the
+// paragraph's indent is the PDF's alone): laid row by row.
+const PLEAD_ROW_LINES = [];
+for (let n = 1; n <= 28; n++) PLEAD_ROW_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + PLEAD_BODY[n] : ""));
+const PLEAD_ROW_TEXT = "====== Page 1 ======\n" + PLEAD_ROW_LINES.join("\n") + "\n";
 
 let browser = null;
 try {
@@ -163,7 +170,7 @@ try {
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc && !!window.__textReaderPickPdfs);
 
   // The PDFs, made in the page, and the folder: both PDFs, both exports.
-  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, SPLIT_AT }) => {
+  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const form = await PDFDocument.create();
     const fp = form.addPage([612, 792]);
@@ -184,7 +191,10 @@ try {
     // The pleading twice: with its numbers in the text layer, and without (a
     // filing whose margin numbers are drawn, not set as text) — the export
     // numbers its lines either way.
-    const pleading = async (numbers) => {
+    // `plain`: every line one piece in one face (no character grid to read
+    // off it, so the page is laid row by row) and the paragraph indented on
+    // the PDF alone.
+    const pleading = async (numbers, plain = false) => {
     const plead = await PDFDocument.create();
     const pp = plead.addPage([612, 792]);
     const tf = { R: await plead.embedFont(StandardFonts.TimesRoman), B: await plead.embedFont(StandardFonts.TimesRomanBold), I: await plead.embedFont(StandardFonts.TimesRomanItalic) };
@@ -201,12 +211,14 @@ try {
       // last; and a PDF that sets its words in pieces cut wherever its maker
       // split the run (kerning, a tracked span) — each piece a text item of
       // its own, the words whole in the export.
-      let x = 72;
-      for (const [t, f] of PLEAD_FACES[n] || (SPLIT_AT[n] ? SPLIT_AT[n].map((t) => [t, "R"]) : [[body, "R"]])) { pp.drawText(t, { x, y, size: 12, font: tf[f] }); x += tf[f].widthOfTextAtSize(t, 12); }
+      // (Line 21 an indented paragraph on the PDF without its numbers: the text
+      // is set in, the margin number stays in its column.)
+      let x = !numbers && n === INDENTED ? 108 : 72;
+      for (const [t, f] of plain ? [[body, "R"]] : PLEAD_FACES[n] || (SPLIT_AT[n] ? SPLIT_AT[n].map((t) => [t, "R"]) : [[body, "R"]])) { pp.drawText(t, { x, y, size: 12, font: tf[f] }); x += tf[f].widthOfTextAtSize(t, 12); }
     }
     return plead.save();
     };
-    const formBytes = await form.save(), pleadBytes = await pleading(true), unreadBytes = await pleading(false);
+    const formBytes = await form.save(), pleadBytes = await pleading(true), unreadBytes = await pleading(false), rowBytes = await pleading(false, true);
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry("Case Form Look", { recursive: true }); } catch { /* none yet */ }
     const dir = await top.getDirectoryHandle("Case Form Look", { create: true });
@@ -214,14 +226,16 @@ try {
     await put(dir, "Sample Form.pdf", formBytes);
     await put(dir, "Sample Pleading.pdf", pleadBytes);
     await put(dir, "Sample Unread Pleading.pdf", unreadBytes);
+    await put(dir, "Sample Row Pleading.pdf", rowBytes);
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "Sample Form.txt", FORM_TEXT);
     await put(text, "Sample Pleading.txt", PLEAD_TEXT);
     await put(text, "Sample Unread Pleading.txt", PLEAD_TEXT);
+    await put(text, "Sample Row Pleading.txt", PLEAD_ROW_TEXT);
     await window.__textReaderAdoptFolder(dir);
-    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes };
+    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes, "Sample Row Pleading.pdf": rowBytes };
     return { placed };
-  }, { FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, SPLIT_AT });
+  }, { FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED });
 
   /** Open an export beside its PDF and wait for its page to be laid on the grid. */
   async function openBeside(exportName, pdfName) {
@@ -465,9 +479,10 @@ try {
   // pieces — and those pieces found in the line's text, not in the gutter
   // number in front of it: found there, every cut stood the gutter's width
   // early, in the middle of a word ("Mari|gold", "Pla|intiff").
-  if (!TOPS_ONLY) {
-    console.log("a numbered export beside a PDF whose numbers are not text");
-    await openBeside("Sample Unread Pleading.txt", "Sample Unread Pleading.pdf");
+  if (!TOPS_ONLY) for (const [name, lines, laidAs] of [["Sample Unread Pleading", PLEAD_LINES, "cgrid"], ["Sample Row Pleading", PLEAD_ROW_LINES, "rowleft"]]) {
+    console.log(`a numbered export beside a PDF whose numbers are not text (${laidAs})`);
+    await openBeside(name + ".txt", name + ".pdf");
+    check(`…laid ${laidAs === "cgrid" ? "on the export's grid read off the PDF" : "row by row"}`, await page.evaluate((c) => !!document.querySelector("#pages .tpage .page-body.fixed." + c), laidAs));
     const laid = await readPage();
     const gaps = await letterGaps();
     check("no word drawn with a gap between its letters — the lines the PDF splits mid-word too", gaps.length === 0, gaps.slice(0, 6).join(" | "));
@@ -484,11 +499,17 @@ try {
       return { W, lines: [...body.querySelectorAll(":scope > .line.num")].filter((l) => l.querySelector(".lt").textContent.trim() && !l.querySelector(".cb")) // a checkbox stands where the PDF draws its box, before the text
         .map((l) => ({ n: l.querySelector(".gn").textContent.trim(), gn: l.querySelector(".gn").getBoundingClientRect().right - L, text: (() => { const lt = l.querySelector(".lt"), w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT); for (let t = w.nextNode(); t; t = w.nextNode()) { const k = t.data.search(/\S/); if (k >= 0) { const r = document.createRange(); r.setStart(t, k); r.setEnd(t, k + 1); return r.getBoundingClientRect().left - L; } } return NaN; })() })) };
     });
-    const at = 72 * (xs.W / 612);
-    const offText = xs.lines.filter((l) => Math.abs(l.text - at) > 1.5 || !(l.gn < at));
-    check("…each numbered line's text where the PDF prints it, its number in the margin before it",
-      xs.lines.length > 5 && offText.length === 0, offText.slice(0, 4).map((l) => `${l.n}: number ends ${l.gn.toFixed(1)}, text at ${l.text.toFixed(1)} vs ${at.toFixed(1)}`).join(" | "));
-    check("…and the page reads back as the file", laid.file === PLEAD_LINES.join("\n"), JSON.stringify(laid.file).slice(0, 160));
+    // The indented paragraph's text is set in by its spaces on the export's
+    // grid (or its row's indent, on a page laid row by row): well past the
+    // margin, a few points either side of where the PDF sets it.
+    const atOf = (n) => (Number(n) === INDENTED ? 108 : 72) * (xs.W / 612);
+    const offText = xs.lines.filter((l) => Math.abs(l.text - atOf(l.n)) > (Number(l.n) === INDENTED ? 6 : 1.5) || !(l.gn < atOf(l.n)));
+    check("…each numbered line's text where the PDF prints it — an indented paragraph's set in — its number in the margin before it",
+      xs.lines.length > 5 && xs.lines.some((l) => Number(l.n) === INDENTED) && offText.length === 0,
+      offText.slice(0, 4).map((l) => `${l.n}: number ends ${l.gn.toFixed(1)}, text at ${l.text.toFixed(1)} vs ${atOf(l.n).toFixed(1)}`).join(" | "));
+    const cols = [...new Set(xs.lines.map((l) => l.gn.toFixed(1)))];
+    check("…and every margin number in one column, the indented paragraph's too", cols.length === 1, cols.join(", "));
+    check("…and the page reads back as the file", laid.file === lines.join("\n"), JSON.stringify(laid.file).slice(0, 160));
   }
 
   // ── typing into a page shown ⇄ Raw, on a page laid on its PDF ──────────

@@ -571,11 +571,20 @@ numbered line is two grid tracks, the gutter's (`--body-x`, the PDF's body
 margin) and the text's. On a page whose PDF's numbers could not be read, each
 line is laid at its PDF row's left, which is where the row's TEXT begins, so
 the gutter track was drawn from there: the number in the body and the text a
-whole margin (57 px at a 480 px page) further in. The write pass now stands
-such a line the gutter's width to the left of its row (`p.gut`, and the
-spill pass's left and floor with it), so its text starts where the PDF prints
-it. `test-form-look.mjs` checks it on the pleading whose PDF has no numbers
-in its text.
+whole margin (57 px at a 480 px page) further in. Standing every line the
+gutter's width to the left of its row fixed that and broke the margin on a
+page laid row by row (`.rowleft`), where each line has its own row's left:
+an indented paragraph took its number in with it, so the numbers jumped
+right line by line. Now (`p.gut`, `rowInd` in the write pass): on a `.cgrid`
+page every line has the grid's one left, its indent being the file's spaces
+on the grid, and the line stands the gutter's width left of it; on a
+`.rowleft` page the line stays at the page's left, its number in the
+margin's one column, and its text is set in by the row's indent past the
+margin through `.pind` / `--pdf-ind`, as a pleading's own indents are. The
+spill pass passes such pages by (the squeeze brings an overrunning line
+back). `test-form-look.mjs` checks both on pleadings whose PDFs have no
+numbers in their text: the text where the PDF prints it, an indented
+paragraph set in, every number in one column.
 
 What the export could do better, for the reader and for the model: two pieces
 the form prints apart written three spaces apart or more (today a few are
