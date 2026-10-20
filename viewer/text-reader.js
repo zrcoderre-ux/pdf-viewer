@@ -11163,7 +11163,7 @@ function useMyText(i) {
   renderFlags();
   // The page is the operator's to type now: ✎ Edit comes on with it.
   if (!editing) setEditing(true);
-  toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run writes the text into the PDF and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
+  toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run keeps the text and writes this page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
 }
 /**
  * Each transcribed page of the documents a save just wrote (`members`) takes
@@ -11245,11 +11245,11 @@ function setFixButton(b, reads, asked, corrected) {
   b.disabled = reads && !asked;
   b.textContent = asked ? "✓ Use my text" : "✎ Use my text";
   b.title = asked
-    ? `Asked: PDF-Linker's next run writes this page's text, as you saved it, into the PDF as the page's own and never OCRs the page again. ${TD.VALUES_FILE} carries the request once it is written — Save writes it. Click to withdraw.`
+    ? `Asked: PDF-Linker's next run keeps this page's text, as you saved it, and writes the page's export from it on every run — into the PDF too, where the page is a scan — and never OCRs the page again. ${TD.VALUES_FILE} carries the request once it is written — Save writes it. Click to withdraw.`
     : reads
       ? `The page reads ${TD.DID_NOT_OCR}: there is no text to hand over. Type the page's text in first.`
       : (corrected ? "PDF-Linker already uses your transcription for this page. Typed over it again? " : "The OCR was bad and you have typed this page's text in by hand? ")
-        + `Hand it to PDF-Linker: Save puts the page on ${TD.VALUES_FILE}, and its next run writes the text into the PDF as the page's own and never OCRs the page again.`;
+        + `Hand it to PDF-Linker: Save puts the page on ${TD.VALUES_FILE}, and its next run keeps the text and writes the page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again.`;
 }
 /** Set each page label's ✎ button from its page (`indices`, or every page on screen). */
 function refreshFixButtons(indices) {

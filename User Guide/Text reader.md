@@ -2095,10 +2095,19 @@ app, which routes it to the reader tab.
   💾 Save writes it with the document. PDF-Linker's next run (or **Apply
   Fixes**) reads the page out of the export you saved, puts the real names
   back where the export carries their pseudonyms (through the folder's own
-  key), and writes the text into the PDF as the page's text layer, word by
-  word where the old layer put its words; it marks the page so no OCR pass
-  reads over it again, spends the line, and from then on exports the page
-  off that layer under a header saying TEXT CORRECTED. The **sum** is the
+  key), and KEEPS that text, in `Edited Pages.json` in the folder's
+  do-not-share subfolder. From then on every run writes the page's export
+  from your text under a header saying TEXT CORRECTED, faked with that run's
+  names, so a name you flag later is faked there too; and no OCR pass reads
+  the page again. Where the page is a scan it also writes the text into the
+  PDF as the page's text layer, word by word where the old layer put its
+  words; a page of printed type, or a PDF open in another program, keeps
+  what the PDF has, and your text still stands for the page in the export.
+  ↻ OCR This Page or ⊘ Did not OCR on the page drops the kept text, and
+  pressing ✎ again after a new edit replaces it. If the PDF is replaced, or
+  pages are added or taken out, the kept text is not used on the page that
+  now stands there: the run says so, and puts the text in `Edited Pages Not
+  Applied.txt` for you to put back. The **sum** is the
   page's text as you last saved it: PDF-Linker applies the line only where
   the export's page still reads that way, so a line that outlived its text
   (the page typed over and not saved, or the export rewritten since) never

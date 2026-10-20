@@ -1994,7 +1994,11 @@ took six seconds; batched, under one.
 
 **✎ Use my text** (`.fix-page`, beside `.nocr-page` on every label with a
 page header; `useMyText`, `setFixButton`, `refreshFixButtons`, called from
-`refreshNocrButtons`) hands a page TRANSCRIBED by hand to PDF-Linker:
+`refreshNocrButtons`) hands a page TRANSCRIBED by hand to PDF-Linker (which,
+since Oct 20 at the owner's direction, KEEPS the page's text and writes its
+export from it on every run, the PDF written too only where the page is a
+scan: PDF-Linker's `Design Notes/Reader flags file.md`, "…and ✎ Use my text
+is an instruction that lasts"; only the button's wording moved here):
 `textFixed` (beside `noOcr` and `ocrAgain`, persisted with them) is written
 by `formatValuesFile` as `text corrected: FILE | page N | sum XXXXXXXX`
 (`textdoc.textFixedLine`) and read back by `parseReaderFile` into
