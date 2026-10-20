@@ -621,7 +621,11 @@ between its two, with no line pulled onto the scan's rows (`offGridTops`
 passed by), every line in the document's type, no face, and no indent but the
 file's own spaces (`pdfIndents` passed by). `test-form-look.mjs` puts three
 lines of each such test PDF a few points off the pitch and checks every
-number a pitch below the last.
+number a pitch below the last. The grid is kept on the paper (`PAPER_MARGIN`,
+an inch): line 1 between half an inch and two inches down, and the pitch no
+more than leaves the last line's foot an inch above the page's — the owner,
+"The pleading goes too far down, it also needs an inch of margin at the
+bottom" — checked in the same test.
 
 **A numbered page whose PDF's numbers are no text is a poor scan, set in the
 document's type** (`poorScan`, in the plan's rows path). The owner: "when I

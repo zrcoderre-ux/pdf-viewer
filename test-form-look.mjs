@@ -523,6 +523,15 @@ try {
     // (Each page the reader holds on its own: the document before may be held above it.)
     const pagesTops = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body.fixed")].map((b) => [...b.querySelectorAll(":scope > .line.num")].map((l) => [parseInt(l.querySelector(".gn").textContent, 10), parseFloat(l.style.top)])));
     const steps = pagesTops.flatMap((numTops) => numTops.slice(1).map(([n, t], k) => (t - numTops[k][1]) / (n - numTops[k][0])));
+    // …and the last line's foot an inch above the page's, at the least.
+    const foot = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage")].map((sec) => {
+      const b = sec.querySelector(".page-body.fixed"), inner = sec.querySelector(".page-inner");
+      const n28 = b && [...b.querySelectorAll(":scope > .line.num")].find((l) => l.querySelector(".gn").textContent.trim() === "28");
+      if (!n28) return null;
+      const r = n28.getBoundingClientRect(), box = inner.getBoundingClientRect();
+      return { gap: box.bottom - r.bottom, inch: 72 * box.width / 612 };
+    }).filter(Boolean));
+    check("…the last line an inch above the foot of the page, at the least", foot.length > 0 && foot.every((f) => f.gap >= f.inch - 1), JSON.stringify(foot));
     check("…every number a pitch below the last, all one pitch", pagesTops.length > 0 && pagesTops.every((t) => t.length === 28) && Math.max(...steps) - Math.min(...steps) < 0.05, steps.map((x) => x.toFixed(2)).join(" ").slice(0, 200));
     const laid = await readPage();
     const gaps = await letterGaps(true);

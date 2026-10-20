@@ -21697,8 +21697,10 @@ function pdfIndents(lines, nums, geom, rows, bodyX) {
  * as pdfsync.pleadingGeometry gives for one that does. Line 1's top and the
  * pitch are fitted (pdfsync.slotFit) to the rows the page's numbered lines'
  * words were matched to (pdfsync.rowLayout), else pleading paper's own: line 1
- * an inch down, 28 lines to an inch from the foot.
+ * an inch down, 28 lines to an inch from the foot — and never closer than an
+ * inch to the foot either way.
  */
+const PAPER_MARGIN = 72; // an inch, in PDF points: pleading paper's margin over line 1 and under the last
 function scanGeom(lines, rows, sz, bodyX) {
   const lay = PS.rowLayout(lines.map((l) => l.textContent), rows, { bodyLeft: bodyX });
   const pairs = [];
@@ -21709,9 +21711,15 @@ function scanGeom(lines, rows, sz, bodyX) {
   });
   const fit = PS.slotFit(pairs);
   const x = bodyX > 0 ? bodyX : 72;
+  // …AND KEPT ON THE PAPER: the owner, "The pleading goes too far down, it also
+  // needs an inch of margin at the bottom". Line 1 between half an inch and two
+  // inches down, and the pitch no more than puts the foot of the last line an
+  // inch above the page's foot (PAPER_MARGIN), whatever the scan's rows say.
+  const y1 = fit ? Math.max(PAPER_MARGIN / 2, Math.min(PAPER_MARGIN * 2, fit.y1)) : PAPER_MARGIN;
+  const room = (sz.h - PAPER_MARGIN - y1) / TD.MARGIN_LAST;
   return {
-    y1: fit ? fit.y1 : 72,
-    pitch: fit ? fit.pitch : (sz.h - 144) / TD.MARGIN_LAST,
+    y1,
+    pitch: fit ? Math.min(fit.pitch, room) : room,
     first: 1, last: TD.MARGIN_LAST, bodyX: x, numberRight: x - 12, scan: true,
   };
 }
