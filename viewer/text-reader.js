@@ -20380,9 +20380,9 @@ function applyMatchedLayoutNow() {
       plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
       continue;
     }
-    const geom = info.geoms[t.page - 1];
+    let geom = info.geoms[t.page - 1];
     const rows = info.rows[t.page - 1];
-    const numbered = !!geom && body.classList.contains("numbered");
+    let numbered = !!geom && body.classList.contains("numbered");
     let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null, cells = null, typeBox = null, inds = null;
     // The body type: the DOCUMENT's, so every page of one filing is drawn at
     // one scale and a title page is not sized as though its heading were
@@ -20401,6 +20401,18 @@ function applyMatchedLayoutNow() {
     // is the thing the eye notices first.
     if (!margins.has(info)) margins.set(info, docBodyLeft(info));
     const bodyX = margins.get(info);
+    // PLEADING PAPER THE PDF'S NUMBERS DID NOT COME THROUGH ON (a poor scan,
+    // numbered by # Number lines or by hand) is laid on the paper's numbers
+    // all the same: the owner, "The added numbers from number lines are not
+    // uniformly spaced with the half spaces baked in". Its grid (scanGeom) is
+    // read off the rows its numbered lines' words were matched to, else the
+    // paper's own, and the page is laid as a numbered one: every number a
+    // pitch below the last, a half line halfway between two, in the
+    // document's type and the file's own indents (`geom.scan`).
+    if (!geom && body.classList.contains("numbered") && rows && rows.length) {
+      geom = scanGeom(lines, rows, sz || { w: 612, h: 792 }, bodyX);
+      numbered = true;
+    }
     // WHERE THIS PAGE'S LINES GO, worked out once and kept on the page. The
     // pass is asked for again every time a batch of the PDF's sizes lands and
     // every time more of its grid does — twenty times over on a long exhibit
@@ -20433,12 +20445,14 @@ function applyMatchedLayoutNow() {
       fixed = nums.map((n) => n != null);
       tops = PS.slotTops(nums.map((num) => ({ num })), geom);
       // The lines off the grid — a footer, a stamp — on the rows that print them.
-      const off = PS.offGridTops(lines.map((l) => l.textContent), nums, tops, rows, geom.pitch);
+      // (Not on a poor scan's page: its half lines go halfway between their
+      // numbers, every line in the document's type, indented by its spaces.)
+      const off = geom.scan ? { tops, sizes: lines.map(() => null), rowOf: lines.map(() => null) } : PS.offGridTops(lines.map((l) => l.textContent), nums, tops, rows, geom.pitch);
       tops = off.tops;
       pitch = geom.pitch;
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
-      sizes = PS.typeSizes(off.sizes, base);
-      inds = pdfIndents(lines, nums, geom, rows, bodyX);
+      sizes = geom.scan ? lines.map(() => base) : PS.typeSizes(off.sizes, base);
+      inds = geom.scan ? lines.map(() => null) : pdfIndents(lines, nums, geom, rows, bodyX);
       // …AND THE PDF'S WEIGHT AND SLANT, RUN BY RUN (planCells with `place`
       // false; columns.faceLine). Pleading paper is laid on its numbers and
       // nothing on it moves — no piece is cut or set at the PDF's x, and the
@@ -20449,7 +20463,8 @@ function applyMatchedLayoutNow() {
       // (matchItems), each piece's face read off its font. The margin's own
       // numbers are no pieces of the line: a "12" in the body would be found
       // for one, and the line's real pieces, looked for past it, never found.
-      if (rows && rows.length) {
+      if (geom.scan) cells = lines.map(() => null);
+      else if (rows && rows.length) {
         const left = bodyX > 0 ? bodyX - 1.5 : geom.numberRight + 1;
         const rowOf = PS.numberedRowOf(nums, geom, rows, off.rowOf, left).map((j, k) => (lines[k].classList.contains("own") ? null : j));
         const bodies = lines.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; });
@@ -21675,6 +21690,30 @@ function pdfIndents(lines, nums, geom, rows, bodyX) {
     out[k] = Math.max(0, x - bodyX);
   });
   return out;
+}
+/**
+ * The paper's line grid for a numbered page whose PDF carries no numbers in
+ * its text (a poor scan): { y1, pitch, first, last, bodyX, numberRight, scan }
+ * as pdfsync.pleadingGeometry gives for one that does. Line 1's top and the
+ * pitch are fitted (pdfsync.slotFit) to the rows the page's numbered lines'
+ * words were matched to (pdfsync.rowLayout), else pleading paper's own: line 1
+ * an inch down, 28 lines to an inch from the foot.
+ */
+function scanGeom(lines, rows, sz, bodyX) {
+  const lay = PS.rowLayout(lines.map((l) => l.textContent), rows, { bodyLeft: bodyX });
+  const pairs = [];
+  if (lay) lines.forEach((l, k) => {
+    if (!l.classList.contains("num") || lay.rowOf[k] == null) return;
+    const n = parseInt(l.querySelector(".gn").textContent, 10);
+    if (n >= 1 && n <= TD.MARGIN_LAST) pairs.push({ n, top: rows[lay.rowOf[k]].top });
+  });
+  const fit = PS.slotFit(pairs);
+  const x = bodyX > 0 ? bodyX : 72;
+  return {
+    y1: fit ? fit.y1 : 72,
+    pitch: fit ? fit.pitch : (sz.h - 144) / TD.MARGIN_LAST,
+    first: 1, last: TD.MARGIN_LAST, bodyX: x, numberRight: x - 12, scan: true,
+  };
 }
 function clearMatched(sec) {
   if (!sec.classList.contains("matched")) return;

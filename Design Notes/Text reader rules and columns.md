@@ -608,6 +608,21 @@ word, or the line it is shares no word with its row and is matched to none
 a justified line (word spaces of 0.8 type heights) and checks no two words a
 space apart in the file are drawn more than a wide space apart.
 
+**…and laid on the paper's numbers** (`scanGeom`, `geom.scan`). The owner,
+next: "The added numbers from number lines are not uniformly spaced with the
+half spaces baked in." Laid by its words, each line stood on whatever row of
+the scan its words matched, so the numbers ran unevenly and a half line stood
+wherever the OCR had put it. Such a page now takes the numbered path with a
+grid of its own: `scanGeom` fits line 1's top and the pitch (`slotFit`) to the
+rows the page's numbered lines' words matched (`rowLayout`), else pleading
+paper's own (line 1 an inch down, 28 lines to an inch from the foot); every
+number then stands a pitch below the last (`slotTops`), a half line halfway
+between its two, with no line pulled onto the scan's rows (`offGridTops`
+passed by), every line in the document's type, no face, and no indent but the
+file's own spaces (`pdfIndents` passed by). `test-form-look.mjs` puts three
+lines of each such test PDF a few points off the pitch and checks every
+number a pitch below the last.
+
 **A numbered page whose PDF's numbers are no text is a poor scan, set in the
 document's type** (`poorScan`, in the plan's rows path). The owner: "when I
 use the add number margins button, it should apply the same font used

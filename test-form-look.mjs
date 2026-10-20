@@ -208,7 +208,9 @@ try {
     const tf = { R: await plead.embedFont(StandardFonts.TimesRoman), B: await plead.embedFont(StandardFonts.TimesRomanBold), I: await plead.embedFont(StandardFonts.TimesRomanItalic) };
     const times = tf.R;
     for (let n = 1; n <= 28; n++) {
-      const y = 792 - (100 + (n - 1) * 24);
+      // (A scan's lines are not on its paper's pitch: on the PDFs without
+      // numbers, three lines a few points off their places.)
+      const y = 792 - (100 + (n - 1) * 24) - (numbers ? 0 : ({ 3: 5, 9: -4, 14: 6 }[n] || 0));
       const num = String(n);
       if (numbers) pp.drawText(num, { x: 46 - times.widthOfTextAtSize(num, 12), y, size: 12, font: times });
       const body = plain ? PLEAD_PLAIN[n] : PLEAD_BODY[n];
@@ -509,10 +511,19 @@ try {
   // pieces — and those pieces found in the line's text, not in the gutter
   // number in front of it: found there, every cut stood the gutter's width
   // early, in the middle of a word ("Mari|gold", "Pla|intiff").
-  if (!TOPS_ONLY) for (const [name, lines, laidAs] of [["Sample Unread Pleading", PLEAD_LINES, "cgrid"], ["Sample Row Pleading", PLEAD_ROW_LINES, "rowleft"]]) {
-    console.log(`a numbered export beside a PDF whose numbers are not text (${laidAs})`);
+  // A poor scan, numbered in the file (# Number lines, or by hand): laid as
+  // pleading paper — every number a pitch below the last, a half line halfway
+  // between two — in the document's type, each line's text at the margin plus
+  // the file's own indent (the owner: "The added numbers from number lines are
+  // not uniformly spaced with the half spaces baked in").
+  if (!TOPS_ONLY) for (const [name, lines, indented] of [["Sample Unread Pleading", PLEAD_LINES, true], ["Sample Row Pleading", PLEAD_ROW_LINES, false]]) {
+    console.log(`a numbered export beside a PDF whose numbers are not text (${name})`);
     await openBeside(name + ".txt", name + ".pdf");
-    check(`…laid ${laidAs === "cgrid" ? "on the export's grid read off the PDF" : "row by row"}`, await page.evaluate((c) => !!document.querySelector("#pages .tpage .page-body.fixed." + c), laidAs));
+    check("…laid as pleading paper, on the paper's numbers", await page.evaluate(() => !!document.querySelector("#pages .tpage .page-body.fixed") && !document.querySelector("#pages .tpage .page-body.cgrid, #pages .tpage .page-body.rowleft")));
+    // (Each page the reader holds on its own: the document before may be held above it.)
+    const pagesTops = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body.fixed")].map((b) => [...b.querySelectorAll(":scope > .line.num")].map((l) => [parseInt(l.querySelector(".gn").textContent, 10), parseFloat(l.style.top)])));
+    const steps = pagesTops.flatMap((numTops) => numTops.slice(1).map(([n, t], k) => (t - numTops[k][1]) / (n - numTops[k][0])));
+    check("…every number a pitch below the last, all one pitch", pagesTops.length > 0 && pagesTops.every((t) => t.length === 28) && Math.max(...steps) - Math.min(...steps) < 0.05, steps.map((x) => x.toFixed(2)).join(" ").slice(0, 200));
     const laid = await readPage();
     const gaps = await letterGaps(true);
     check("no word drawn with a gap between its letters, nor between two words the file sets a space apart — the lines the PDF splits mid-word or sets in pieces too", gaps.length === 0, gaps.slice(0, 6).join(" | "));
@@ -536,14 +547,13 @@ try {
       return { W, lines: [...body.querySelectorAll(":scope > .line.num")].filter((l) => l.querySelector(".lt").textContent.trim() && !l.querySelector(".cb")) // a checkbox stands where the PDF draws its box, before the text
         .map((l) => ({ n: l.querySelector(".gn").textContent.trim(), gn: l.querySelector(".gn").getBoundingClientRect().right - L, text: (() => { const lt = l.querySelector(".lt"), w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT); for (let t = w.nextNode(); t; t = w.nextNode()) { const k = t.data.search(/\S/); if (k >= 0) { const r = document.createRange(); r.setStart(t, k); r.setEnd(t, k + 1); return r.getBoundingClientRect().left - L; } } return NaN; })() })) };
     });
-    // The indented paragraph's text is set in by its spaces on the export's
-    // grid (or its row's indent, on a page laid row by row): well past the
-    // margin, a few points either side of where the PDF sets it.
-    const atOf = (n) => (Number(n) === INDENTED ? 108 : 72) * (xs.W / 612);
-    const offText = xs.lines.filter((l) => Math.abs(l.text - atOf(l.n)) > (Number(l.n) === INDENTED ? 6 : 1.5) || !(l.gn < atOf(l.n)));
-    check("…each numbered line's text where the PDF prints it — an indented paragraph's set in — its number in the margin before it",
+    // Each line's text at the margin, or set in by the file's own spaces —
+    // never by where the scan's OCR read it.
+    const margin = 72 * (xs.W / 612);
+    const offText = xs.lines.filter((l) => (Number(l.n) === INDENTED && indented ? !(l.text > margin + 10) : Math.abs(l.text - margin) > 1.5) || !(l.gn < margin));
+    check(`…each numbered line's text at the margin, ${indented ? "the paragraph the file indents set in by its spaces" : "the paragraph the scan indents and the file does not, flush"}, its number in the margin before it`,
       xs.lines.length > 5 && xs.lines.some((l) => Number(l.n) === INDENTED) && offText.length === 0,
-      offText.slice(0, 4).map((l) => `${l.n}: number ends ${l.gn.toFixed(1)}, text at ${l.text.toFixed(1)} vs ${atOf(l.n).toFixed(1)}`).join(" | "));
+      offText.slice(0, 4).map((l) => `${l.n}: number ends ${l.gn.toFixed(1)}, text at ${l.text.toFixed(1)} vs ${margin.toFixed(1)}`).join(" | "));
     const cols = [...new Set(xs.lines.map((l) => l.gn.toFixed(1)))];
     check("…and every margin number in one column, the indented paragraph's too", cols.length === 1, cols.join(", "));
     check("…and the page reads back as the file", laid.file === lines.join("\n"), JSON.stringify(laid.file).slice(0, 160));
