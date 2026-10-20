@@ -586,6 +586,28 @@ back). `test-form-look.mjs` checks both on pleadings whose PDFs have no
 numbers in their text: the text where the PDF prints it, an indented
 paragraph set in, every number in one column.
 
+**Only a piece the PDF sets apart is put where the PDF puts it**
+(`pdfsync.standApart`, `APART_EM`). The owner, in chat: "It shouldn't
+exaggerate spaces between words. Indentation should be reserved for the
+beginning of a sentence. Currently it is causing visual gaps between words
+that don't appear in the pdfs." A PDF sets a line of prose in several items
+wherever its face changes, a kerning run breaks or a justified line's words
+are spread; each was a piece set at its item's x, so wherever the reader's
+font ran a hair narrower than the PDF's, a gap opened between two words, and
+the file layout (`autoLayPage`) wrote those gaps as spaces. Now a found item
+starts a piece only where the PDF leaves a gap of at least one type height
+(a column's) after the item before it: `planCells` places only those (the
+line's first piece always), the rest following the word before them a space
+on; `autoLayPage` writes only those, so a line's spaces between words are the
+file's own; and the character grid (`charGrid`'s pairs) is read only off
+those, a justified line's spread words being no evidence of where the file's
+characters fall. And `pdfRows` joins two items that touch on the page, in one
+size, without a space in the row's text: a word set as "Plain" "tiff" is one
+word, or the line it is shares no word with its row and is matched to none
+(a superscript against its word keeps its space). `test-form-look.mjs` holds
+a justified line (word spaces of 0.8 type heights) and checks no two words a
+space apart in the file are drawn more than a wide space apart.
+
 What the export could do better, for the reader and for the model: two pieces
 the form prints apart written three spaces apart or more (today a few are
 joined by one — the reader cuts them where the PDF's items begin, but the

@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, fileLayout,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, fileLayout, standApart,
   matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
@@ -519,6 +519,15 @@ console.log("a ✓ Use my text page's file laid out as its PDF (fileLayout, slot
   check("the paper's numbers read off the rows the file's numbers were matched to, a stray one moving nothing",
     slotFit([{ n: 1, top: 100 }, { n: 2, top: 124 }, { n: 3, top: 148 }, { n: 4, top: 172 }, { n: 9, top: 196 }]), { y1: 100, pitch: 24 });
   check("…and none from fewer than three", slotFit([{ n: 1, top: 100 }, { n: 2, top: 124 }]), null);
+}
+
+console.log("pieces the PDF sets apart, and words it sets in pieces (standApart, pdfRows)");
+{
+  const g = (x, w, h = 12) => ({ item: { x, w, h } });
+  check("a justified line's words follow one another; a label a column off stands apart",
+    standApart([g(72, 40), g(72 + 40 + 9, 50), g(72 + 99 + 8, 30), g(400, 40)]), [true, false, false, true]);
+  check("a word a PDF sets in two items is one word in its row's text",
+    pdfRows([{ str: "Plain", x: 72, top: 100, w: 25, h: 12 }, { str: "tiff alleges", x: 97, top: 100, w: 60, h: 12 }], { w: 612, h: 792 }).map((r) => r.text), ["Plaintiff alleges"]);
 }
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");
 // …which the reader asks with the case folder's id, never its bare name: two

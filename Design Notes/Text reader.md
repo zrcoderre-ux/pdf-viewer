@@ -1770,6 +1770,20 @@ page beside page; it was measured off the page's hidden lines, read as
 nothing, and every page after it drifted off its PDF page (250 px by the next
 page). `test-raw-sync.mjs` (Chromium) pins it, both columns leading.
 
+**Backspace takes an indent off before it moves a line**
+(`unindentAtCaret`, from `backspaceAtCaret`). The owner: "if I have something
+indented on line [9] that should not be, backspace just pushes it up to 8.5
+between 8 and 9. It should first go to non-indented, but still at 9. From
+there, a second backspace would move it up to 8.5 … that way I can fix indent
+mistakes, and correct line placement." At the head of a numbered line's text
+whose gutter carries more than its two spaces (`.gs`, the indent, which takes
+no typing), or after the opening spaces of an unnumbered line's text, one
+Backspace sets the gutter's spaces to two and deletes the opening spaces, one
+undo step, the caret at the text's head; the next Backspace does what it did
+(into the half line above, then a join). On a ✓ Use my text page the line is
+then the operator's (`markOwnLines`, `autoLayPage`), so the layout leaves it
+unindented. `test-half-lines.mjs` section 2b.
+
 **Typing into ⇄ Raw.** Under ✎ Edit the `pre.raw-text` is
 `contenteditable="plaintext-only"` (set in `setRaw` and by `setEditing`); the
 head (banner, header line) is a `span.raw-head` with `contenteditable=false`,

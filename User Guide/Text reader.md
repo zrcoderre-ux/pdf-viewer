@@ -2129,6 +2129,11 @@ app, which routes it to the reader tab.
   taken out, a line moved — is kept exactly as you typed it, and the layout
   never touches it again. A line already where the PDF has it is left alone,
   so a page that matches its PDF looks the same when you press the button.
+  Only the start of a line (its indent) and a column the PDF sets well apart
+  are moved; the spaces between words are left as you have them.
+  **Backspace at the start of an indented line takes the indent off first**
+  and leaves the line on its number; a second Backspace moves it up to the
+  half line above, as before. Ctrl+Z steps back through both.
   **While a page reads ✓ Use my text, your spacing stands.** Pressing the
   button changes nothing on screen. From then on, a line you edit on that
   page is placed only by its own spaces: the reader stops moving its columns

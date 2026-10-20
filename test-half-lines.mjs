@@ -103,7 +103,7 @@ const A = [
   " 1  Alpha",
   " 2  Beta",
   " 3",
-  " 4  Delta",
+  " 4        Delta",
   " 5",
   " 6",
   "====== Page 2 ======",
@@ -242,7 +242,22 @@ async function run() {
       check("Enter mid-line on 4: the rest to 4.5", (await slots(p)).slice(3, 6), [["4", "De"], ["·", "lta"], ["5", ""]]);
       await p.keyboard.press("Control+s");
       await p.waitForTimeout(1500);
-      truthy("the half line is a line of the file between 4 and 5", (await file(p)).includes(" 4  De\nlta\n 5\n"));
+      truthy("the half line is a line of the file between 4 and 5", (await file(p)).includes(" 4        De\nlta\n 5\n"));
+      console.log("2b. Backspace at the head of an indented line: the indent goes first, the line stays on its number; a second Backspace moves it up a half line");
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(200);
+      const four = () => p.evaluate(() => { const l = document.querySelectorAll("#pages .tpage .page-body > .line")[3]; return [l.querySelector(".gn").textContent.trim(), l.querySelector(".gs").textContent.length, l.querySelector(".lt").textContent]; });
+      check("line 4 indented, as the file has it", await four(), ["4", 8, "Delta"]);
+      await caretIn(p, 3);
+      await p.keyboard.press("Backspace");
+      check("Backspace: the indent off, still on 4", await four(), ["4", 2, "Delta"]);
+      check("…and nothing moved", await slots(p), START);
+      await p.keyboard.press("Backspace");
+      check("…again: up to 3.5", (await slots(p)).slice(2, 5), [["3", ""], ["·", "Delta"], ["4", ""]]);
+      await p.keyboard.press("Control+z");
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(200);
+      check("Ctrl+Z twice: indented on 4 again", await four(), ["4", 8, "Delta"]);
       check("no page errors", r.log.errors, []);
       await r.close();
     }

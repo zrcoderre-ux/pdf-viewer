@@ -5958,12 +5958,49 @@ function joinLineUp(body, line) {
   afterTextChange();
   return true;
 }
+/**
+ * Backspace at the head of an INDENTED line's text takes the indent off and
+ * leaves the line where it is: the owner, in chat, "if I have something
+ * indented on line [9] that should not be, backspace just pushes it up to 8.5
+ * between 8 and 9. It should first go to non-indented, but still at 9. From
+ * there, a second backspace would move it up to 8.5" — "that way I can fix
+ * indent mistakes, and correct line placement". A numbered line's indent is
+ * the spaces after its number's two (the gutter's .gs, which takes no typing);
+ * an unnumbered line's is the spaces its text opens with, the caret after them.
+ * Whether it did.
+ */
+function unindentAtCaret(body, line, lt, off) {
+  const gs = line.classList.contains("num") ? line.querySelector(":scope > .gutter > .gs") : null;
+  const lead = (lt.textContent.match(/^ +/) || [""])[0].length;
+  const inGutter = !!gs && gs.textContent.length > 2 && off === 0;
+  const inText = lead > 0 && off === lead;
+  if (!inGutter && !inText) return false;
+  snapshot(body, true);
+  if (inGutter) gs.textContent = "  ";
+  if (inText || (inGutter && lead)) {
+    const r = document.createRange();
+    const from = pointAtOffset(lt, 0), to = pointAtOffset(lt, lead);
+    r.setStart(from.node, from.offset);
+    r.setEnd(to.node, to.offset);
+    r.deleteContents();
+  }
+  dressBody(body);
+  fixGutterSpacing(body);
+  const pt = pointAtOffset(lt, 0);
+  placeCaret(pt.node, pt.offset);
+  setDirty(true, pageIndexOf(body));
+  afterTextChange();
+  return true;
+}
 function backspaceAtCaret(body) {
   const cl = caretLine(body);
   if (!cl) return false;
   const { line, pt: at } = cl;
   const lt = ltOf(line);
-  if (offsetOfPoint(lt, at.container, at.offset) !== 0) return false;
+  const off = offsetOfPoint(lt, at.container, at.offset);
+  // An indented line's text: the indent goes first, the line stays on its number.
+  if (unindentAtCaret(body, line, lt, off)) return true;
+  if (off !== 0) return false;
   // A numbered line's text with an empty half line above it goes up into that
   // half line first (halfAfter); a second Backspace joins it to the number above.
   const prev = line.previousElementSibling;
@@ -20218,8 +20255,12 @@ function applyMatchedLayoutNow() {
           // A line set by hand on a ✓ Use my text page says where the operator
           // put its words, not where the PDF prints them: no evidence for the grid.
           if (!m || lines[k].classList.contains("own")) continue;
-          for (const g of m.found) {
-            if (g.glued || g.at !== g.start) continue;
+          // …and only the pieces the PDF sets apart (pdfsync.standApart): a
+          // justified line's words stand wherever its spacing stretched them,
+          // no evidence of where the file's characters fall.
+          const apart = PS.standApart(m.found);
+          for (const [gi, g] of m.found.entries()) {
+            if (g.glued || g.at !== g.start || !apart[gi]) continue;
             const col = m.map.fileAt(g.start);
             if (col >= 0) pairs.push({ col, x: g.x });
           }
@@ -20741,11 +20782,15 @@ function autoLayPage(i) {
       // line's text carried itself, where tidyGutters took it for the margin's.
       const from = own.length - rest.length;
       if (from >= lead && own.endsWith(rest)) {
-        for (const f of PS.lineItems(shown[j], row.items, { atoms: m.atoms })) {
-          if (f.glued) continue;
+        // The line's start, and the pieces the PDF sets apart (a column): no
+        // other, so the spaces between words are the file's own.
+        const found = PS.lineItems(shown[j], row.items, { atoms: m.atoms });
+        const apart = PS.standApart(found);
+        found.forEach((f, fi) => {
+          if (f.glued || !apart[fi]) return;
           const a = m.fileAt(f.at);
           if (a >= from) pieces.push({ at: a - from, x: f.x });
-        }
+        });
       }
     }
     return { num: num != null ? num : null, indent, body: num != null ? rest : rest, auto, top: row ? row.top : null, pieces };
@@ -21199,16 +21244,22 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     // pieces.
     const own = row.height > 0 ? row.height : sizes[k];
     const cuts = [], places = [];
-    for (const g of found) {
+    // Only a piece the PDF sets APART from the text before it is put where the
+    // PDF prints it (pdfsync.standApart): one that follows the word before it
+    // follows it here too, a space on, or the reader's font, a hair narrower
+    // or wider than the PDF's, opens a gap between two words or crowds them.
+    const apart = PS.standApart(found);
+    found.forEach((g, gi) => {
       const at = g.glued ? -1 : map.fileAt(g.at);
-      if (!(at >= 0)) continue;
+      if (!(at >= 0)) return;
+      if (g.at > first && !apart[gi]) return;
       const f = faceOf(g.item.font);
       const h = g.item.h > 0 ? g.item.h : own;
       const size = own > 0 && Math.abs(h - own) <= own * 0.2 ? own : h;
       const pre = shown.slice(g.at, g.start);
       places.push([at, { x: g.x - (pre ? faceEm(pre, f || face) * size : 0), size, face: f }]);
       if (g.at > first) cuts.push(at);
-    }
+    });
     return { text: TD.serializeNodes(lt), cuts, places, face, runs };
   });
 }

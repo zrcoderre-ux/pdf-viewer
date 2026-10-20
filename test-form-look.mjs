@@ -148,14 +148,21 @@ const SPLIT_AT = {
 };
 for (const [n, parts] of Object.entries(SPLIT_AT)) if (parts.join("") !== PLEAD_BODY[n]) throw new Error(`SPLIT_AT ${n} is not its line`);
 const INDENTED = 21;
+// A caption's second column, on the PDFs without numbers: each line's two
+// pieces set apart (x 72 and 350), the file's at one column — the evidence the
+// export's character grid is read off.
+const CAPTION = { 13: ["Plaintiff,", "Case No. 12345"], 16: ["Defendant.", "Dept. 5"] };
+const PLEAD_PLAIN = { ...PLEAD_BODY }; // (the row-by-row pleading's: no second column)
+for (const [n, [a, b]] of Object.entries(CAPTION)) PLEAD_BODY[n] = a.padEnd(40) + b;
+const JUSTIFIED = 15;
 const PLEAD_LINES = [];
 // (An indented paragraph is written indented: its spaces after the gutter's two.)
-for (let n = 1; n <= 28; n++) PLEAD_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + (n === INDENTED ? "       " : "") + PLEAD_BODY[n] : ""));
+for (let n = 1; n <= 28; n++) PLEAD_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + (n === INDENTED ? "     " : "") + PLEAD_BODY[n] : ""));
 const PLEAD_TEXT = "====== Page 1 ======\n" + PLEAD_LINES.join("\n") + "\n";
 // …and the export of a PDF it does not line up with by its spaces (the
 // paragraph's indent is the PDF's alone): laid row by row.
 const PLEAD_ROW_LINES = [];
-for (let n = 1; n <= 28; n++) PLEAD_ROW_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + PLEAD_BODY[n] : ""));
+for (let n = 1; n <= 28; n++) PLEAD_ROW_LINES.push(String(n).padStart(2) + (PLEAD_PLAIN[n] ? "  " + PLEAD_PLAIN[n] : ""));
 const PLEAD_ROW_TEXT = "====== Page 1 ======\n" + PLEAD_ROW_LINES.join("\n") + "\n";
 
 let browser = null;
@@ -170,14 +177,14 @@ try {
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc && !!window.__textReaderPickPdfs);
 
   // The PDFs, made in the page, and the folder: both PDFs, both exports.
-  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED }) => {
+  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const form = await PDFDocument.create();
     const fp = form.addPage([612, 792]);
     const fonts = { R: await form.embedFont(StandardFonts.Helvetica), B: await form.embedFont(StandardFonts.HelveticaBold), I: await form.embedFont(StandardFonts.HelveticaOblique) };
     const placed = []; // [line, piece, x, size, font] of each piece that prints text
     FORM.forEach((pieces, k) => {
-      let end = null;
+      let end = null, prevEnd = null;
       for (const p of pieces) {
         const size = p.size || 9;
         const font = fonts[p.font || "R"];
@@ -185,7 +192,8 @@ try {
         const x = p.x != null ? p.x : end + (p.glue ? 0 : fonts.R.widthOfTextAtSize(" ", size));
         fp.drawText(p.t, { x, y: 792 - p.y, size, font });
         end = x + font.widthOfTextAtSize(p.t, size);
-        placed.push({ line: k + 1, t: p.t, x, size, font: p.font || "R" });
+        placed.push({ line: k + 1, t: p.t, x, size, font: p.font || "R", apart: prevEnd == null || x - prevEnd >= size });
+        prevEnd = end;
       }
     });
     // The pleading twice: with its numbers in the text layer, and without (a
@@ -203,7 +211,7 @@ try {
       const y = 792 - (100 + (n - 1) * 24);
       const num = String(n);
       if (numbers) pp.drawText(num, { x: 46 - times.widthOfTextAtSize(num, 12), y, size: 12, font: times });
-      const body = PLEAD_BODY[n];
+      const body = plain ? PLEAD_PLAIN[n] : PLEAD_BODY[n];
       if (!body) continue;
       // A checkbox is drawn, not printed: its export mark has no text on the PDF.
       if (body.startsWith("[ X ] ")) { pp.drawRectangle({ x: 72, y: y - 1, width: 10, height: 10, borderWidth: 0.5 }); pp.drawText(body.slice(6), { x: 88, y, size: 12, font: times }); continue; }
@@ -214,6 +222,16 @@ try {
       // (Line 21 an indented paragraph on the PDF without its numbers: the text
       // is set in, the margin number stays in its column.)
       let x = !numbers && n === INDENTED ? 108 : 72;
+      // (On the PDFs without numbers, line 15 set as a justified line is: each
+      // word an item of its own, the word spaces wide, under a column's gap.)
+      if (!numbers && !plain && CAPTION[n]) {
+        CAPTION[n].forEach((t, j) => pp.drawText(t, { x: j ? 350 : 72, y, size: 12, font: tf.R }));
+        continue;
+      }
+      if (!numbers && !plain && n === JUSTIFIED) {
+        for (const w of body.split(" ")) { pp.drawText(w, { x, y, size: 12, font: tf.R }); x += tf.R.widthOfTextAtSize(w, 12) + 0.8 * 12; }
+        continue;
+      }
       for (const [t, f] of plain ? [[body, "R"]] : PLEAD_FACES[n] || (SPLIT_AT[n] ? SPLIT_AT[n].map((t) => [t, "R"]) : [[body, "R"]])) { pp.drawText(t, { x, y, size: 12, font: tf[f] }); x += tf[f].widthOfTextAtSize(t, 12); }
     }
     return plead.save();
@@ -235,7 +253,7 @@ try {
     await window.__textReaderAdoptFolder(dir);
     window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes, "Sample Row Pleading.pdf": rowBytes };
     return { placed };
-  }, { FORM, PLEAD_BODY, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED });
+  }, { FORM, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION });
 
   /** Open an export beside its PDF and wait for its page to be laid on the grid. */
   async function openBeside(exportName, pdfName) {
@@ -256,7 +274,7 @@ try {
    * A gap is the next letter starting more than a fifth of the type past where
    * the one before it ends, as the screen draws them (transforms and all).
    */
-  const letterGaps = () => page.evaluate(() => {
+  const letterGaps = (words = false) => page.evaluate((words) => {
     const out = [];
     const body = document.querySelector("#pages .tpage .page-body.fixed");
     if (!body) return ["no page on the grid"];
@@ -274,6 +292,15 @@ try {
           chars.push({ ch: n.data[i], l: b.left, r: b.right, top: b.top, size });
         }
       }
+      // …and two words one space apart in the file drawn further apart than a
+      // wide space: a gap the PDF does not have.
+      for (let i = 2; words && i < chars.length; i++) {
+        const a = chars[i - 2], sp = chars[i - 1], c = chars[i];
+        if (sp.ch !== " " || !/[\p{L}\p{N},.;:)]/u.test(a.ch) || !/[\p{L}\p{N}(]/u.test(c.ch) || (chars[i - 3] && chars[i - 3].ch === " ") || (chars[i + 1] && chars[i + 1].ch === " ")) continue;
+        if (Math.abs(c.top - a.top) > c.size) continue;
+        const gap = c.l - a.r;
+        if (gap > 0.6 * c.size) out.push(`words "${chars.slice(Math.max(0, i - 8), i + 8).map((x) => x.ch).join("").trim()}" gap ${gap.toFixed(1)}px at ${c.size.toFixed(1)}px`);
+      }
       for (let i = 1; i < chars.length; i++) {
         const a = chars[i - 1], c = chars[i];
         if (!/[\p{L}\p{N}]/u.test(a.ch) || !/[\p{L}\p{N}]/u.test(c.ch)) continue;
@@ -285,7 +312,7 @@ try {
       }
     }
     return out;
-  });
+  }, words);
   /** The page laid out, as the screen has it: each line's box, rows, top and text. */
   const readPage = () => page.evaluate(async () => {
     const TD = await import("/viewer/textdoc.js");
@@ -349,8 +376,11 @@ try {
         return { t, missing: true };
       });
     }, { wanted: made.placed.map((p) => ({ line: p.line, t: p.t })) });
-    const off = where.map((w, k) => ({ w, p: made.placed[k] })).filter(({ w, p }) => w.missing || Math.abs(w.x - p.x * scale) > 1.5);
-    check("every piece stands where the PDF prints it — a label the export joins with one space too", off.length === 0,
+    // A piece the PDF sets APART (a column's gap before it) stands where the PDF
+    // prints it; one set hard after the word before follows that word, a space
+    // on, rather than open a gap between two words (pdfsync.standApart).
+    const off = where.map((w, k) => ({ w, p: made.placed[k] })).filter(({ w, p }) => p.apart && (w.missing || Math.abs(w.x - p.x * scale) > 1.5));
+    check("every piece the PDF sets apart stands where the PDF prints it — a label the export joins with one space too", off.length === 0,
       off.map(({ w, p }) => `${p.t}: ${w.missing ? "missing" : w.x.toFixed(1)} vs ${(p.x * scale).toFixed(1)}`).join(" | "));
     const sized = where.map((w, k) => ({ w, p: made.placed[k] })).filter(({ w, p }) => !w.missing && Math.abs(w.size - p.size * scale) > 0.05);
     check("…at its own size: the 9-point label on the 7-point footnote's line is 9-point", sized.length === 0,
@@ -448,8 +478,8 @@ try {
         JSON.stringify(styled));
       check("…its checkbox drawn whole on its numbered line", laid.boxes.length === 1 && laid.boxes[0] === "[ X ]", JSON.stringify(laid.boxes));
       check("…and the page reads back as the file", laid.file === PLEAD_LINES.join("\n"), JSON.stringify(laid.file).slice(0, 160));
-      const pleadGaps = await letterGaps();
-      check("…and no word on it drawn with a gap between its letters", pleadGaps.length === 0, pleadGaps.slice(0, 6).join(" | "));
+      const pleadGaps = await letterGaps(true);
+      check("…and no word on it drawn with a gap between its letters, or between two of its words", pleadGaps.length === 0, pleadGaps.slice(0, 6).join(" | "));
       // The right margin is the PDF's: every line's text box ends where the PDF's body does, not at the paper's edge.
       const ends = await page.evaluate(() => {
         const body = document.querySelector("#pages .tpage .page-body.fixed");
@@ -484,8 +514,8 @@ try {
     await openBeside(name + ".txt", name + ".pdf");
     check(`…laid ${laidAs === "cgrid" ? "on the export's grid read off the PDF" : "row by row"}`, await page.evaluate((c) => !!document.querySelector("#pages .tpage .page-body.fixed." + c), laidAs));
     const laid = await readPage();
-    const gaps = await letterGaps();
-    check("no word drawn with a gap between its letters — the lines the PDF splits mid-word too", gaps.length === 0, gaps.slice(0, 6).join(" | "));
+    const gaps = await letterGaps(true);
+    check("no word drawn with a gap between its letters, nor between two words the file sets a space apart — the lines the PDF splits mid-word or sets in pieces too", gaps.length === 0, gaps.slice(0, 6).join(" | "));
     const cutIn = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body > .line > .lt > .cc")]
       .filter((c) => /[\p{L}\p{N}]$/u.test(c.textContent) && c.nextSibling && /^[\p{L}\p{N}]/u.test(c.nextSibling.textContent || ""))
       .map((c) => c.textContent + "|" + c.nextSibling.textContent.slice(0, 8)));

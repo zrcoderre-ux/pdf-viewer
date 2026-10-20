@@ -648,7 +648,18 @@ export function pdfRows(items, size) {
     // with it.
     const body = its.filter((i) => Math.abs(i.h - height) <= height * 0.2);
     const base = Math.min(...(body.length ? body : its).map((i) => i.base));
-    return { top: base - height, left: its[0].x, height, text: its.map((i) => i.str).join(" ").replace(/\s+/g, " ").trim(), items: its };
+    // The row's words as it prints them: two items that touch on the page are
+    // one run of type, joined as it is — a word a PDF sets in two items ("Plain"
+    // "tiff") is one word, or the row shares no word with the line it is, and
+    // the line is matched to no row at all.
+    let text = "";
+    its.forEach((it, k) => {
+      const prev = its[k - 1];
+      // (…in one size: a superscript set against its word is a note's number.)
+      const touch = prev && prev.w > 0 && it.x - (prev.x + prev.w) < 0.15 * Math.min(it.h, prev.h) && Math.abs(it.h - prev.h) <= 0.2 * Math.max(it.h, prev.h);
+      text += (k === 0 || touch ? "" : " ") + it.str;
+    });
+    return { top: base - height, left: its[0].x, height, text: text.replace(/\s+/g, " ").trim(), items: its };
   });
 }
 
@@ -946,6 +957,29 @@ export function lineItems(text, cands, { atoms = null } = {}) {
     out.push(glued ? { at: start, start, x, item: it, glued } : { at, start, x, item: it });
   }
   return out;
+}
+
+/**
+ * Which of a line's found items (lineItems' answer, in order) STAND APART from
+ * the one before them on the PDF: a gap there of `em` × the type's height or
+ * more, a column's, where a word space is a fraction of one. Per item, true
+ * for the first. The owner, in chat: "It shouldn't exaggerate spaces between
+ * words. Indentation should be reserved for the beginning of a sentence." A
+ * line of prose that a PDF sets in several items (a face changing, a kerning
+ * run, a justified line's words) is one run of text whose words follow one
+ * another; only a piece the PDF sets apart is a piece to put where the PDF
+ * puts it — on the page, and in the file's spaces.
+ */
+export const APART_EM = 1;
+export function standApart(found, { em = APART_EM } = {}) {
+  return (found || []).map((g, i) => {
+    if (i === 0) return true;
+    const a = found[i - 1].item, b = g.item;
+    if (!a || !b) return true;
+    const end = a.x + (a.w > 0 ? a.w : 0);
+    const h = Math.max(b.h > 0 ? b.h : 0, a.h > 0 ? a.h : 0) || 10;
+    return b.x - end >= em * h;
+  });
 }
 
 // ---- the PDF's own typeface ---------------------------------------------------
