@@ -20383,6 +20383,8 @@ function applyMatchedLayoutNow() {
       // leading, are never read as one line on top of another.
       spans = texts.map((t) => { const a = t.search(/\S/); return a < 0 ? null : [a, t.trimEnd().length]; });
       const lay = rows && rows.length ? PS.rowLayout(texts, rows, { bodyLeft: bodyX }) : null;
+      // (Numbered in the file, but not by numbers the PDF's text carries.)
+      const numberedFile = body.classList.contains("numbered");
       if (lay) {
         tops = lay.positions.map((p) => (p ? p.top : null));
         lefts = lay.positions.map((p) => (p ? p.left : null));
@@ -20430,12 +20432,22 @@ function applyMatchedLayoutNow() {
         else typeBox = { left: Math.min(...rows.map((r) => r.left)), right: Math.max(...rows.flatMap((r) => r.items.map((it) => it.x + it.w))) };
         pitch = lay.pitch;
         if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
-        sizes = PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base);
+        // A PAGE OF PLEADING PAPER WHOSE PDF'S NUMBERS COULD NOT BE READ is a
+        // poor scan: the owner, in chat, "when I use the add number margins
+        // button, it should apply the same font used elsewhere in that
+        // document, rather than attempt to base it on the pdf. The fact that
+        // the numbers didn't come through indicates that page was not a good
+        // scan." Its lines keep their places on the paper (the rows its words
+        // were matched to), but every one is set in the document's body type
+        // and the reader's face: no size, weight, slant or piece taken off an
+        // OCR's reading of the scan, whose sizes come out a line at a time.
+        const poorScan = numberedFile;
+        sizes = poorScan ? lines.map(() => base) : PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base);
         // EACH PIECE WHERE THE PDF PRINTS IT, in the PDF's own face and size
         // (planCells): a line is cut wherever one of its row's items begins,
         // and its first piece is set at its item's own x — the left the line
         // is drawn from is put where that makes its text begin.
-        cells = planCells(lines, texts, matched, rows, info, sizes);
+        cells = poorScan ? lines.map(() => null) : planCells(lines, texts, matched, rows, info, sizes);
         formLook.plan += performance.now() - cellsFrom;
         formLook.planned++;
         const sp = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--col-sp-n")) || 0.25;

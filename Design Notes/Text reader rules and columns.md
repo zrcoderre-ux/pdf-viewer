@@ -608,6 +608,19 @@ word, or the line it is shares no word with its row and is matched to none
 a justified line (word spaces of 0.8 type heights) and checks no two words a
 space apart in the file are drawn more than a wide space apart.
 
+**A numbered page whose PDF's numbers are no text is a poor scan, set in the
+document's type** (`poorScan`, in the plan's rows path). The owner: "when I
+use the add number margins button, it should apply the same font used
+elsewhere in that document, rather than attempt to base it on the pdf. The
+fact that the numbers didn't come through indicates that page was not a good
+scan." Such a page (numbered in the file, by # Number lines or by hand, and
+no `geom` read off its PDF) is laid by its words as before — each line on the
+row it matched, its indent where that row starts — but every line takes the
+document's body type (`base`) and no cells: no size, weight, slant or piece
+from the OCR's reading of the scan, whose sizes come out a line at a time.
+`test-form-look.mjs` checks every line of such a page in one size and the
+reader's own face.
+
 What the export could do better, for the reader and for the model: two pieces
 the form prints apart written three spaces apart or more (today a few are
 joined by one — the reader cuts them where the PDF's items begin, but the

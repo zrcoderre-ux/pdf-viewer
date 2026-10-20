@@ -520,6 +520,13 @@ try {
       .filter((c) => /[\p{L}\p{N}]$/u.test(c.textContent) && c.nextSibling && /^[\p{L}\p{N}]/u.test(c.nextSibling.textContent || ""))
       .map((c) => c.textContent + "|" + c.nextSibling.textContent.slice(0, 8)));
     check("…no line cut inside a word", cutIn.length === 0, cutIn.slice(0, 6).join(" ; "));
+    // A numbered page whose PDF's numbers are no text is a poor scan: every line
+    // in the document's body type and the reader's own face, none of the scan's.
+    const type = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body.fixed > .line")]
+      .filter((l) => l.querySelector(".lt").textContent.trim())
+      .map((l) => { const lt = l.querySelector(".lt"); return [getComputedStyle(lt).fontSize, lt.style.fontFamily || "", lt.querySelectorAll("[style*='font']").length]; }));
+    check("…every line in one size, the document's, in the reader's own face — none of the scan's",
+      new Set(type.map((t) => t[0])).size === 1 && type.every((t) => !t[1] && !t[2]), JSON.stringify([...new Set(type.map((t) => t.join(" ")))]).slice(0, 300));
     // Laid by its words, each line at its PDF row's left — where the row's TEXT
     // begins, so the margin number hangs in the margin to the left of it, not
     // in the body with the text a margin further in.
