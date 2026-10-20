@@ -282,7 +282,9 @@ for a model to read, and the reader, side by side, is what looks like the
 form — without ever moving a line. Every export line is still one line, in
 its order, on its own row: a piece of it moves ACROSS and takes its own size,
 never up or down, and a smaller piece sits on the line's baseline, not on the
-baseline of the row the PDF printed it on. Pleading paper is untouched.
+baseline of the row the PDF printed it on. Pleading paper is neither cut nor
+placed: its lines stand on their numbers in the reader's own type, and take
+the PDF's weight and slant alone, run by run (below).
 
 **A checkbox is one piece, in both views** (`textdoc.checkboxRanges`,
 `checkboxState`; `columns.dressCheckboxes`). PDF-Linker writes a box as
@@ -388,7 +390,8 @@ commonly set in (Calibri, Cambria, Garamond, Century Schoolbook, Book Antiqua…
 first where the machine may have it. A line takes the face most of what it
 carries is set in (not its matched row's alone: CIV-110's caption line is three
 of the PDF's rows, and was matched to "FOR COURT USE ONLY", in bold italics);
-a cell or a box row's cell (`.rc`) takes its own where it differs. No face for
+a box row's cell (`.rc`) takes its own where it differs, and every other run
+of the line set otherwise takes its own in a wrapper (below). No face for
 a symbol font (Wingdings' "o" is a box), an OCR layer's GlyphLessFont or a
 Type 3 font: the type is in the scan, and a line carrying no face is not cut
 or placed either — an OCR's words, and the reader's own face, as before. A line
@@ -396,6 +399,65 @@ the PDF does not print keeps the reader's face, as the flowing view does.
 Widths are kept per FONT (`textEm` keyed by weight, slant and family) and a
 faced line or cell carries its face's own space as `--col-sp-n`, which its
 indent and `fitCells` read.
+
+**Bold and italic, run by run** (`pdfsync.faceRuns`, `columns.faceLine`,
+`.fc`; `pdfsync.numberedRowOf`, `planCells` with `place` false). The owner,
+in chat, asked for per-run faces on every matched page, pleading paper
+included, having weighed a Markdown export against it and kept the exports
+plain text: PDF-Linker's scrub, the key's round trip and leak scans, and this
+reader's character grid all read plain lines, and the PDF beside the export
+already carries the faces. Until then a face was a CELL's: a form line was
+cut at each PDF item and each cell took its item's face, so a face that
+changes in the middle of a word (a name in italics and its "'s", a footnote's
+number) was lost in the piece before it, and a pleading line, never cut at
+the PDF's items, had no face at all. Now the faces are the RUNS'. `faceRuns`
+turns the items `lineItems` finds in a line, glued or not, into runs in file
+offsets: each from its item's text to the next found item's, or to the end of
+its own text where the next is more than two characters further on (an item
+the line does not carry between them) or there is none, that end moved to the
+nearer edge of a word it would fall inside, since pdf.js's spacing and the
+export's differ by a character here and there and a face that stops a letter
+short of a word's end reads worse than one that runs a letter long; a run
+never begins or ends inside a pseudonym or a spot keep (one beginning inside
+begins after it, which keeps the face before it), and one whose face is not
+known is left out. `faceLine` wraps each run set otherwise than its line in a
+`.fc` span carrying that face, INSIDE whatever holds the run (a cell, a
+cell's gap): the wrapper holds text, pseudonym spans, spot keeps and checkbox
+marks and never a cell, so the columns' arithmetic — the cells' widths side
+by side — never sees it, and a line carrying a rule glyph keeps the line's
+face throughout, since `dressRules` reads its glyphs off top-level text
+nodes. The wrappers carry no `data-fake` and are re-derived on every pass
+like the cells (`lt.__faced` keys the text and the runs, so a line faced as
+its runs say is left exactly as it is); `undressColumns` strips them before
+a line is cut again, `spanRanges` reads through them, `unplaceLine` takes
+them off, and since facing moves text nodes `placePages` and `unplacePage`
+put the caret back by its offset, as a recut does, and never while an input
+method is composing. A box row's cells still carry their faces themselves:
+`rules.js` makes the cells afresh on every pass. On a numbered page the row
+for each line is its number's row, the row its words were matched to
+(`offGridTops`, which now says which row), or the row at its half line
+(`numberedRowOf`, which `pdfIndents` reads too), the margin's own numbers
+left out of the pieces (`matchItems`' `skip`: a "12" in the body would be
+found for one, and the line's real pieces, looked for past it, never found);
+`planCells` with `place` false cuts and places nothing, and its faces carry
+no family, which `putFace` reads as the weight and slant alone, a regular one
+written explicitly so a regular run inside a bold line reads regular. So a
+pleading's lines stand on their numbers in the reader's own type and at their
+row's size, bold where the PDF is bold and italic where it is italic, and
+`placePages` no longer gates on a page having lefts. The PDF's family is NOT
+applied on pleading paper: the owner asked for bold and italics, and a
+family change would move a caption's space-laid columns. Measured on the two
+test pages: the form's pieces where they were to the pixel, the pleading's
+28 tops unchanged, both pages planned in a few milliseconds. Residuals: an OCR
+layer's type has no face (GlyphLessFont), so a scan takes none; an item
+`lineItems` does not find (its first words not in the line) leaves its text
+in the face of the run before it. Tested in `test-pdfsync.mjs` (`faceRuns`,
+`numberedRowOf`, `offGridTops`' rows), `test-columns.html` (a run's wrapper
+inside a cell; a numbered line's faces alone, nothing placed) and
+`test-form-look.mjs` (the form's "Clerk" in italics with its glued ", by"
+regular; the pleading's heading and party in bold and one word of its body
+in italics, nothing moved, and the runs kept with the pane shut, since a
+matched page keeps its side-by-side look there).
 
 **A box's bars on the PDF's grid** (`rules.ruleGrid`'s `place`, `planStack`,
 `needOnGrid`, `.gridfit`; since the page grid, `pageGrid`'s `place`,

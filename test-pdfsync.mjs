@@ -6,7 +6,7 @@ import {
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight,
   matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
-  offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey,
+  offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
 
@@ -320,6 +320,57 @@ console.log("the PDF's own typeface");
   check("one face, one key", [faceKey(pdfFace("Arial-BoldMT", "sans-serif")) === faceKey(pdfFace("XYZABC+Arial,Bold", "serif")), faceKey(null)], [true, ""]);
 }
 
+console.log("the PDF's row for each line of a numbered page");
+{
+  // Four rows: line 1 with its body, a bare "2", a caption line on the half
+  // line between 2 and 3, and line 3 with its body.
+  const geom = { y1: 100, pitch: 24, first: 1, last: 28, bodyX: 72, numberRight: 46 };
+  const rows = [
+    { top: 100, height: 12, text: "1 Body one", items: [{ str: "1", x: 40 }, { str: "Body one", x: 72 }] },
+    { top: 124, height: 12, text: "2", items: [{ str: "2", x: 40 }] },
+    { top: 136, height: 12, text: "Caption line", items: [{ str: "Caption line", x: 72 }] },
+    { top: 148, height: 12, text: "3 Body three", items: [{ str: "3", x: 40 }, { str: "Body three", x: 72 }] },
+  ];
+  check("a numbered line's row is the one at its number; a bare number is no row; a half line's is the row printed there",
+    numberedRowOf([1, 2, null, 3], geom, rows, null, 70.5), [0, null, 2, 3]);
+  check("a row the line's words were matched to wins", numberedRowOf([1, 2, null, 3], geom, rows, [null, null, 3, null], 70.5), [0, null, 3, 3]);
+  check("no half line between numbers that are not consecutive", numberedRowOf([1, null, 5], geom, rows, null, 70.5), [0, null, null]);
+  check("no geometry or no rows, nothing", [numberedRowOf([1], null, rows), numberedRowOf([1], geom, [])], [[null], [null]]);
+}
+
+console.log("the runs of a line in the PDF's faces");
+{
+  const R = { family: "", bold: false, italic: false }, I = { family: "", bold: false, italic: true }, B = { family: "", bold: true, italic: false };
+  const faceOf = (f) => (f === "R" ? R : f === "I" ? I : f === "B" ? B : null);
+  const item = (start, str, font) => ({ start, item: { str, font } });
+  const text = "1. Plaintiff is an individual residing in the County of Sample.";
+  check("each item's run, from its text to the next item's",
+    faceRuns(text, [item(0, "1. Plaintiff is an", "R"), item(19, "individual", "I"), item(30, "residing in the County of Sample.", "R")], { faceOf }),
+    [{ from: 0, to: 19, face: R }, { from: 19, to: 30, face: I }, { from: 30, to: text.length, face: R }]);
+  check("an item the line does not carry between two found: the run before it ends where its own text does",
+    faceRuns(text, [item(0, "1. Plaintiff is an", "R"), item(30, "residing in the County of Sample.", "R")], { faceOf }),
+    [{ from: 0, to: 18, face: R }, { from: 30, to: text.length, face: R }]);
+  check("a face that changes in the middle of a word", faceRuns("Smith's motion", [item(0, "Smith", "I"), item(5, "'s motion", "R")], { faceOf }),
+    [{ from: 0, to: 5, face: I }, { from: 5, to: 14, face: R }]);
+  check("touching runs in one face are one", faceRuns("REQUEST FOR DISMISSAL", [item(0, "REQUEST", "B"), item(8, "FOR DISMISSAL", "B")], { faceOf }),
+    [{ from: 0, to: 21, face: B }]);
+  check("a face not known is left out", faceRuns("Hello world", [item(0, "Hello", "?"), item(6, "world", "B")], { faceOf }), [{ from: 6, to: 11, face: B }]);
+  check("the last run ends where its text does, moved to the nearer edge of a word it would end inside",
+    [faceRuns("SUPERIOR COURT OF CALIFORNIA, COUNTY OF SAMPLE", [item(0, "SUPERIOR COURT OF CALIFORNI", "B")], { faceOf })[0].to,
+      faceRuns("SUPERIOR COURT OF CALIFORNIA, COUNTY OF SAMPLE", [item(0, "SUPERIOR COURT OF CA", "B")], { faceOf })[0].to],
+    [28, 18]);
+  check("a next item within two characters takes the run up to itself", faceRuns("Hello, World", [item(0, "Hello", "B"), item(7, "World", "R")], { faceOf }),
+    [{ from: 0, to: 7, face: B }, { from: 7, to: 12, face: R }]);
+  // A pseudonym is one piece: a run beginning inside it begins after it, and
+  // the offsets are the file's (the fake's length, not the real name's).
+  const line = "Served on Pat Doe today";
+  const fileAt = (i) => (i <= 10 ? i : i >= 17 ? i + 12 : -1); // "Pat Doe" shown; "Strangeways Melbury" in the file
+  check("a run beginning inside a pseudonym begins after it, and the one before runs over it, in the file's offsets",
+    faceRuns(line, [item(0, "Served on Pat", "R"), item(14, "Doe", "B")], { faceOf, atoms: [[10, 17]], fileAt }), [{ from: 0, to: 29, face: R }]);
+  check("…and a run ending inside one ends after it", faceRuns(line, [item(0, "Served on Pa", "B")], { faceOf, atoms: [[10, 17]], fileAt }), [{ from: 0, to: 29, face: B }]);
+  check("nothing found, no runs", [faceRuns(line, [], { faceOf }), faceRuns("", [item(0, "x", "B")], { faceOf })], [[], []]);
+}
+
 console.log("the type a page is set in: the PDF's own sizes at the reading size");
 {
   const rows = [{ top: 60, height: 12, text: "1" }, { top: 60, height: 12, text: "IN THE SUPERIOR COURT" }, { top: 84, height: 12, text: "2" }, { top: 84, height: 12.4, text: "FOR THE COUNTY" }, { top: 700, height: 8, text: "footnote" }];
@@ -418,6 +469,7 @@ console.log("lines off the grid, and lines held on the paper");
   check("the footer's title goes to its row", got.tops[6], 757);
   check("…at its own type size", got.sizes[6], 9);
   check("a page number with no word in it is matched by its characters", [got.tops[4], got.sizes[4]], [742, 10]);
+  check("…and each matched line says which row it was matched to", got.rowOf, [null, null, null, null, 2, null, 3, null]);
   check("the numbered lines are left on the grid", got.tops.slice(0, 2), [696, 720]);
   check("a blank between two placed lines goes between them", got.tops[5], 749.5);
   check("a blank after the last placed row stacks off that row", got.tops[7], 781);

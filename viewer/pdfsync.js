@@ -424,13 +424,14 @@ export function slotTops(lines, geom) {
  * `texts` and `nums` are per line (nums null off the grid), `tops` from
  * slotTops, `rows` from pdfRows, `pitch` the grid's. A match is taken only where it falls
  * between the numbered lines either side of it, so a footer is never pulled
- * up among the body. Returns { tops, sizes } — sizes the matched row's own
- * type height, null elsewhere.
+ * up among the body. Returns { tops, sizes, rowOf } — sizes the matched row's
+ * own type height and rowOf its index in `rows`, null elsewhere.
  */
 export function offGridTops(texts, nums, tops, rows, pitch = 0) {
   const out = (tops || []).slice();
   const sizes = out.map(() => null);
-  if (!rows || !rows.length || !texts || !texts.length) return { tops: out, sizes };
+  const rowOf = out.map(() => null);
+  if (!rows || !rows.length || !texts || !texts.length) return { tops: out, sizes, rowOf };
   const n = out.length;
   const inWindow = (k, top) => {
     let above = null, below = null;
@@ -439,7 +440,7 @@ export function offGridTops(texts, nums, tops, rows, pitch = 0) {
     return (above == null || top > above) && (below == null || top < below);
   };
   const used = new Set();
-  const take = (k, j) => { out[k] = rows[j].top; sizes[k] = rows[j].height; used.add(j); };
+  const take = (k, j) => { out[k] = rows[j].top; sizes[k] = rows[j].height; rowOf[k] = j; used.add(j); };
   const map = alignLines(texts.map((t, k) => (nums[k] ? "" : t)), rows.map((r) => r.text));
   map.forEach((j, k) => { if (j != null && !nums[k] && inWindow(k, rows[j].top)) take(k, j); });
   // A line with no word in it to match by — the page number, "- 3 -" — is
@@ -470,7 +471,50 @@ export function offGridTops(texts, nums, tops, rows, pitch = 0) {
   if (prev >= 0 && matched(prev) && pitch > 0) {
     for (let i = prev + 1; i < n; i++) if (out[i] != null) out[i] = out[prev] + (i - prev) * pitch;
   }
-  return { tops: out, sizes };
+  return { tops: out, sizes, rowOf };
+}
+
+/**
+ * THE PDF'S ROW FOR EACH LINE OF A NUMBERED PAGE, as its index in `rows`, or
+ * null: a numbered line's is the row printed at its number (lineTop, within
+ * three tenths of the pitch); an unnumbered line's is the row offGridTops
+ * matched it to by its words (`matched`, its rowOf), else the row at its half
+ * line between the numbers either side — one alone between 5 and 6 is 5.5,
+ * two are 5⅓ and 5⅔; none where the numbers either side are not consecutive.
+ * Only a row carrying type at or right of `left` counts (the body margin, a
+ * point or so in: a row that is the bare margin number is no row for a
+ * line). What a line's indent is read off (text-reader.js, pdfIndents) and
+ * what its faces are (planCells).
+ */
+export function numberedRowOf(nums, geom, rows, matched = null, left = 0) {
+  const n = (nums || []).length;
+  const out = new Array(n).fill(null);
+  if (!geom || !rows || !rows.length) return out;
+  const pitch = geom.pitch;
+  const inBody = (it) => it.x >= left && String(it.str).trim();
+  const nearest = (y) => {
+    let best = null, gap = pitch * 0.3;
+    rows.forEach((r, j) => {
+      const d = Math.abs(r.top - y);
+      if (d <= gap && (r.items || []).some(inBody)) { best = j; gap = d; }
+    });
+    return best;
+  };
+  const numAt = [];
+  nums.forEach((v, k) => { if (v != null) numAt.push(k); });
+  const slotY = (k) => {
+    if (nums[k] != null) return lineTop(geom, nums[k]);
+    let a = -1, b = -1;
+    for (const i of numAt) { if (i < k) a = i; else { b = i; break; } }
+    if (a < 0 || b < 0 || nums[b] !== nums[a] + 1) return null;
+    return lineTop(geom, nums[a]) + (pitch * (k - a)) / (b - a);
+  };
+  for (let k = 0; k < n; k++) {
+    if (matched && matched[k] != null) { out[k] = matched[k]; continue; }
+    const y = slotY(k);
+    if (y != null) out[k] = nearest(y);
+  }
+  return out;
 }
 
 /**
@@ -972,7 +1016,71 @@ export function pdfFace(name, generic, hints = null) {
 }
 /** A face as one string: the same face, the same key. */
 export function faceKey(face) {
-  return face ? `${face.italic ? "italic " : ""}${face.bold ? "700 " : ""}${face.family}` : "";
+  return face ? `${face.italic ? "italic " : ""}${face.bold ? "700 " : ""}${face.family || ""}` : "";
+}
+
+// ---- the faces a line's runs are set in -----------------------------------------
+//
+// A line is seldom one face: a caption in bold, a case name in italics in the
+// body, a footnote's number set small — and pdf.js's text items break where the
+// face changes, so the items lineItems finds in a line say where each face
+// begins. faceRuns turns them into the runs the reader draws (columns.faceLine)
+// on every page beside its PDF: a form's pieces, a pleading's lines, an
+// exhibit's prose alike.
+
+const WORD_CHAR_RE = /[\p{L}\p{N}]/u;
+/**
+ * The runs of a line set in faces of their own: [{ from, to, face }] in FILE
+ * offsets (the text the cells are cut in, a pseudonym counted as its fake),
+ * ascending, none overlapping, none beginning or ending inside a pseudonym or
+ * a spot keep. `text` is the line as it shows; `found` is lineItems' answer
+ * for it, glued pieces included (a face changes in the middle of a word as
+ * often as at a space — "*Smith*'s", a footnote's number); `faceOf` gives a
+ * font id's face, null for one not known; `fileAt` and `atoms` are the line's
+ * map (columns.lineMap). A run begins where its item's text begins — moved to
+ * the end of a pseudonym where it begins inside one, which then keeps the
+ * face before it — and ends where the next found item's begins. Where that is
+ * further on than the item's own text reaches by more than two characters (an
+ * item between the two that the line does not carry, or text the PDF does not
+ * print), or there is no next item, the run ends where the item's text does,
+ * moved to the nearer edge of a word it would end inside: pdf.js's spacing
+ * and the export's differ by a character here and there, and a face that
+ * stops a letter short of a word's end reads worse than one that runs a
+ * letter long. Runs that touch in one face are one; a run whose face is not
+ * known is left out, so the line's own face stands there.
+ */
+export function faceRuns(text, found, { fileAt = null, atoms = [], faceOf = () => null } = {}) {
+  const s = String(text == null ? "" : text);
+  const n = s.length;
+  const atomAt = (i) => (atoms || []).find(([a, b]) => i > a && i < b) || null;
+  const offAtom = (i) => { const a = atomAt(i); return a ? a[1] : i; };
+  const isWord = (i) => i >= 0 && i < n && WORD_CHAR_RE.test(s[i]);
+  const wordEdge = (i) => {
+    if (!(isWord(i - 1) && isWord(i))) return i;
+    let a = i, b = i;
+    while (isWord(a - 1)) a--;
+    while (isWord(b)) b++;
+    return i - a < b - i ? a : b;
+  };
+  const toFile = (i) => (fileAt ? fileAt(i) : i);
+  const items = (found || [])
+    .filter((g) => g && g.start >= 0 && g.start < n)
+    .map((g) => ({ start: g.start, face: faceOf(g.item && g.item.font), reach: String((g.item && g.item.str) || "").trim().length }))
+    .sort((a, b) => a.start - b.start);
+  const runs = [];
+  items.forEach((it, i) => {
+    const from = offAtom(it.start);
+    const next = i + 1 < items.length ? offAtom(items[i + 1].start) : n;
+    const own = offAtom(wordEdge(Math.min(n, it.start + it.reach)));
+    const to = Math.min(next, i + 1 < items.length && own >= next - 2 ? next : own);
+    if (!it.face || !(to > from)) return;
+    const a = toFile(from), b = toFile(to);
+    if (a < 0 || !(b > a)) return;
+    const last = runs[runs.length - 1];
+    if (last && last.to === a && faceKey(last.face) === faceKey(it.face)) { last.to = b; return; }
+    runs.push({ from: a, to: b, face: it.face });
+  });
+  return runs;
 }
 
 // ---- the type a text page is set in beside its PDF page ----------------------

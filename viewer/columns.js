@@ -42,6 +42,9 @@
 //           its left, however far past the grid that text runs.
 //   .cb     a form's checkbox mark, one piece, drawn as a box over its own
 //           characters (dressCheckboxes).
+//   .fc     a run of a line beside its PDF set in a face of the PDF's that is
+//           not the line's — bold, italic, on a form a piece's own family —
+//           inside whatever holds the run (faceLine; pdfsync.faceRuns).
 //
 // The cells are wrappers and nothing else: the text, the pseudonym spans and
 // the rule spans are inside them as they were, so serializeNodes, a copy and
@@ -50,7 +53,8 @@
 // body type at the grid's scale, since every line there starts at the body
 // margin; a page with no numbers is cut wherever one of its PDF's items begins
 // as well, and each piece set where the PDF prints it, at its size and in its
-// face (placeLine; text-reader.js, placePages).
+// face (placeLine; text-reader.js, placePages). Every matched page, numbered
+// or not, draws each run of its text in the PDF's weight and slant (faceLine).
 // Like the rule spans they are re-derived on every pass — but a line already
 // dressed as its text says is left exactly as it is, so the editor's caret
 // text node on any other line is never replaced.
@@ -166,14 +170,14 @@ export function lineMap(lt) {
  * Where a line's spans stand in the file, [from, to) each: a pseudonym, a
  * spot keep. A line is split between columns only in its text nodes
  * (splitAt), so these are the stretches no cut may fall inside. A line dressed
- * already is read through its cells.
+ * already is read through its cells, and a faced one through its runs' wrappers.
  */
 function spanRanges(lt) {
   const out = [];
   let off = 0;
   const visit = (parent) => {
     for (const n of parent.childNodes) {
-      if (n.nodeType === 1 && (n.classList.contains("cc") || n.classList.contains("cg"))) { visit(n); continue; }
+      if (n.nodeType === 1 && (n.classList.contains("cc") || n.classList.contains("cg") || n.classList.contains("fc"))) { visit(n); continue; }
       const len = fileLength(n);
       if (n.nodeType === 1 && len) out.push([off, off + len]);
       off += len;
@@ -183,8 +187,9 @@ function spanRanges(lt) {
   return out;
 }
 
-/** The cells and the indent taken back off a line. */
+/** The cells and the indent taken back off a line — and its runs' face wrappers, since a line is cut in its top-level text nodes (splitAt); placeLine puts the faces back after. */
 export function undressColumns(lt) {
+  unfaceLine(lt);
   for (const c of [...lt.querySelectorAll(".cc, .cg")]) c.replaceWith(...c.childNodes);
   if (lt.classList.contains("ci")) { lt.classList.remove("ci"); lt.style.removeProperty("--lead"); lt.style.removeProperty("--ind"); }
   unplace(lt);
@@ -530,19 +535,30 @@ export function alignColumns(bodies) {
   }
 }
 
-/** A face (pdfsync.pdfFace) written on an element, or taken off it: its family, weight and slant, and its space for the cells' sums. */
+/**
+ * A face (pdfsync.pdfFace) written on an element, or taken off it: its family,
+ * weight and slant, and its space for the cells' sums. A face with no family
+ * (a numbered page's: the PDF's weight and slant in the reader's own type,
+ * planCells) sets the weight and slant alone — a regular one explicitly, so a
+ * regular run inside a bold line reads regular.
+ */
 function putFace(el, face) {
-  const key = face ? faceStyle(face) + face.family : "";
+  const key = face ? "f:" + faceStyle(face) + (face.family || "") : "";
   if ((el.__face || "") === key) return;
   el.__face = key;
   const s = el.style;
   if (!face) { for (const p of ["font-family", "font-weight", "font-style", "--col-sp-n"]) s.removeProperty(p); return; }
-  s.fontFamily = face.family;
+  if (face.family) {
+    s.fontFamily = face.family;
+    s.setProperty("--col-sp-n", faceSpace(face).toFixed(4));
+  } else {
+    s.removeProperty("font-family");
+    s.removeProperty("--col-sp-n");
+  }
   s.fontWeight = face.bold ? "700" : "400";
   s.fontStyle = face.italic ? "italic" : "normal";
-  s.setProperty("--col-sp-n", faceSpace(face).toFixed(4));
 }
-const sameFace = (a, b) => (a ? faceStyle(a) + a.family : "") === (b ? faceStyle(b) + b.family : "");
+const sameFace = (a, b) => (a ? faceStyle(a) + (a.family || "") : "") === (b ? faceStyle(b) + (b.family || "") : "");
 
 /**
  * Side by side, a line's pieces each where its PDF prints them, at the size
@@ -557,7 +573,15 @@ const sameFace = (a, b) => (a ? faceStyle(a) + a.family : "") === (b ? faceStyle
  *   at       (offset, x, from) → where a piece the PDF did not place begins:
  *            the grid's place (x and from are where the piece before it
  *            begins, for a grid that runs on from there).
- *   face     the face of the row the line was matched to.
+ *   face     the face of the row the line was matched to (planCells: the one
+ *            most of the line is set in; on a numbered page one with no
+ *            family, the reader's own type keeping its weight and slant).
+ *   runs     the runs of the line set in faces of their own (pdfsync.faceRuns,
+ *            file offsets), drawn by faceLine; null to leave the line's
+ *            wrappers as they are (an input method is composing on the page).
+ *
+ * With no `start` (a numbered page) nothing is placed: the cells keep the
+ * grid's own widths, and the line takes its face and its runs alone.
  *   size     the line's type in px.
  *   lead     where the line's text begins in the file (its one piece, where
  *            it has no cells).
@@ -566,10 +590,16 @@ const sameFace = (a, b) => (a ? faceStyle(a) + a.family : "") === (b ? faceStyle
  *
  * Each cell (.cc) is given the width that puts the piece after it at its
  * place (min-width, so fitCells still squeezes a piece too wide for it), and
- * its own size and face where they are not the line's. The piece after the
- * last cut is no cell: its size and face are the LINE's — so the line takes
- * them (on its .lt; its box, which the leading is worked out from, stays the
- * row's), and a cell that differs says so. Written only where it changes.
+ * its own size where it is not the line's. The piece after the last cut is
+ * no cell: its size is the LINE's — so the line takes it (on its .lt; its
+ * box, which the leading is worked out from, stays the row's), and a cell
+ * that differs says so. The faces are the runs' (faceLine), the line's own on
+ * its .lt and each run set otherwise in a wrapper of its own — a cell, which
+ * is cut only where the export has a space, could not carry a face that
+ * changes mid-word, and a numbered line, which is never cut at the PDF's
+ * items, could carry none. Written only where it changes. Returns whether
+ * facing the runs moved any text node (the caller puts the caret back by its
+ * offset).
  */
 export function placeLine(lt, spec) {
   lt.__placed = true;
@@ -578,14 +608,16 @@ export function placeLine(lt, spec) {
   const last = cells[cells.length - 1];
   const lead = cells.length ? cells[0].__at : null;
   const tailAt = last ? last.__at + fileLength(last) : null;
-  const tail = (cells.length ? spec.places.get(tailAt) : spec.places.get(spec.lead)) || null;
-  const face = tail && tail.face ? tail.face : spec.face;
+  const places = spec.places || new Map();
+  const tail = (cells.length ? places.get(tailAt) : places.get(spec.lead)) || null;
+  const face = spec.face || null;
   const size = tail && tail.size ? tail.size : spec.size;
   putFace(lt, face);
   const sz = size !== spec.size ? size.toFixed(2) + "px" : "";
   if (lt.style.fontSize !== sz) lt.style.fontSize = sz;
   // A box row's cells between its bars, each in its own face where it is not
-  // the row's.
+  // the row's (rules.js makes the cells afresh on every pass, so a run's
+  // wrapper inside one would not last; the cell carries the face).
   if (spec.cellFaces) {
     let i = 0;
     for (const c of lt.children) {
@@ -594,25 +626,37 @@ export function placeLine(lt, spec) {
       putFace(c, f && !sameFace(f, face) ? f : null);
     }
   }
-  let x = spec.start, from = lead;
-  cells.forEach((c, i) => {
-    const own = spec.places.get(c.__at) || null;
-    const nextAt = i + 1 < cells.length ? cells[i + 1].__at : tailAt;
-    const placed = spec.places.get(nextAt);
-    const next = placed ? placed.x : spec.at(nextAt, x, from);
-    const want = next - x > 0.5 ? (next - x).toFixed(2) + "px" : "";
-    if (c.style.minWidth !== want) c.style.minWidth = want;
-    const cs = own && own.size && Math.abs(own.size - size) > 0.01 ? own.size.toFixed(2) + "px" : "";
-    if (c.style.fontSize !== cs) c.style.fontSize = cs;
-    putFace(c, own && own.face && !sameFace(own.face, face) ? own.face : null);
-    x = next;
-    from = nextAt;
-  });
+  if (spec.start != null) {
+    let x = spec.start, from = lead;
+    cells.forEach((c, i) => {
+      const own = places.get(c.__at) || null;
+      const nextAt = i + 1 < cells.length ? cells[i + 1].__at : tailAt;
+      const placed = places.get(nextAt);
+      const next = placed ? placed.x : spec.at(nextAt, x, from);
+      const want = next - x > 0.5 ? (next - x).toFixed(2) + "px" : "";
+      if (c.style.minWidth !== want) c.style.minWidth = want;
+      const cs = own && own.size && Math.abs(own.size - size) > 0.01 ? own.size.toFixed(2) + "px" : "";
+      if (c.style.fontSize !== cs) c.style.fontSize = cs;
+      x = next;
+      from = nextAt;
+    });
+  } else {
+    // Nothing placed: the cells are the export's own columns, on the grid's widths.
+    for (const c of cells) {
+      if (c.style.minWidth) c.style.minWidth = "";
+      if (c.style.fontSize) c.style.fontSize = "";
+    }
+  }
+  for (const c of cells) putFace(c, null); // the runs carry the faces
+  if (spec.runs === null) return false;
+  return faceLine(lt, spec.runs || [], face);
 }
 /**
- * A line put back as the grid left it: the PDF's cuts off it (`__grid`) and
- * whatever placeLine wrote taken back. Returns whether it carried the PDF's
- * cuts, so its cells are to be cut again without them (dressColumns).
+ * A line put back as the grid left it: the PDF's cuts off it (`__grid`), its
+ * runs' face wrappers off it, and whatever placeLine wrote taken back.
+ * Returns { cut, whether it carried the PDF's cuts, so its cells are to be
+ * cut again without them (dressColumns); faced, whether taking the wrappers
+ * off moved a text node (the caller puts the caret back by its offset) }.
  */
 export function unplaceLine(lt) {
   const cut = !!lt.__grid;
@@ -626,7 +670,93 @@ export function unplaceLine(lt) {
     putFace(c, null);
   }
   for (const c of lt.querySelectorAll(".rc")) putFace(c, null);
-  return cut;
+  return { cut, faced: unfaceLine(lt) };
+}
+
+// ---- a line's runs in the PDF's faces ----------------------------------------
+//
+// Beside its PDF a line's text is drawn in the faces the PDF sets it in, run by
+// run (pdfsync.faceRuns): each run not in the line's own face is wrapped in a
+// span (.fc) carrying that face — bold, italic, and on a form the piece's own
+// family and nothing else. The wrapper stands INSIDE whatever holds the run (a
+// cell, a cell's gap, the line) and holds only text, pseudonym spans, spot
+// keeps and checkbox marks, never a cell: the columns' arithmetic, which is
+// the cells' widths side by side, never sees it, a face that changes in the
+// middle of a word (a name in italics and its "'s") is drawn where it changes,
+// and a numbered page, whose lines are never cut at the PDF's items, takes its
+// faces all the same with nothing moved. Like the cells it carries no data-fake
+// and is re-derived on every pass: serializeNodes, a copy, Find, the LEAKS walk
+// and every offset into the page read what they always did, and a line already
+// faced as its text and runs say is left exactly as it is.
+
+/** Taken whole: wrapped, never split, never entered. */
+const FACE_LEAF = "[data-fake], [data-here], .cb, .rb, .rh";
+/**
+ * `lt`'s runs (pdfsync.faceRuns, file offsets) each wrapped in its face where
+ * it differs from `face`, the line's own; the wrappers from before taken off
+ * first. A line carrying a rule glyph (rules.js) keeps the line's face
+ * throughout: dressRules reads a line's glyphs off its top-level text nodes.
+ * Returns whether any text node moved.
+ */
+export function faceLine(lt, runs, face) {
+  const want = (runs || []).filter((r) => r && r.face && r.to > r.from && !sameFace(r.face, face));
+  if (want.length && lt.querySelector(".rb, .rh")) want.length = 0;
+  const key = want.length ? serializeNodes(lt) + "\n" + want.map((r) => r.from + "-" + r.to + ":" + faceStyle(r.face) + (r.face.family || "")).join(",") : "";
+  if ((lt.__faced || "") === key) return false;
+  let changed = unfaceLine(lt);
+  lt.__faced = key;
+  if (!want.length) return changed;
+  const state = { off: 0, k: 0, span: null, run: null };
+  const runAt = () => { while (state.k < want.length && want[state.k].to <= state.off) state.k++; return state.k < want.length ? want[state.k] : null; };
+  const wrap = (node, run) => {
+    // Nodes of one run that follow one another under one parent share a wrapper.
+    if (state.span && state.run === run && node.previousSibling === state.span) { state.span.appendChild(node); return; }
+    const span = document.createElement("span");
+    span.className = "fc";
+    putFace(span, run.face);
+    node.before(span);
+    span.appendChild(node);
+    state.span = span;
+    state.run = run;
+    changed = true;
+  };
+  const visit = (parent) => {
+    for (let node of [...parent.childNodes]) {
+      if (node.nodeType === 3) {
+        for (;;) {
+          const len = node.data.length;
+          const r = len ? runAt() : null;
+          if (!r || r.from >= state.off + len) { state.off += len; break; }
+          if (r.from > state.off) { const tail = node.splitText(r.from - state.off); state.off = r.from; node = tail; continue; }
+          if (r.to < state.off + len) { const tail = node.splitText(r.to - state.off); wrap(node, r); state.off = r.to; node = tail; continue; }
+          wrap(node, r);
+          state.off += len;
+          break;
+        }
+        continue;
+      }
+      if (node.nodeType !== 1) continue;
+      const len = fileLength(node);
+      if (node.nodeName === "BR" || node.matches(FACE_LEAF)) {
+        const r = runAt();
+        if (r && node.nodeName !== "BR" && r.from <= state.off && r.to >= state.off + len) wrap(node, r);
+        state.off += len;
+        continue;
+      }
+      state.span = null; // a wrapper's nodes are siblings: none continues into a child
+      visit(node);
+      state.span = null;
+    }
+  };
+  visit(lt);
+  return changed;
+}
+/** The runs' face wrappers taken off a line. Returns whether there were any. */
+export function unfaceLine(lt) {
+  const had = lt.querySelectorAll(".fc");
+  for (const c of had) c.replaceWith(...c.childNodes);
+  lt.__faced = null;
+  return had.length > 0;
 }
 
 /** The narrowest a piece before a column is drawn to hold its column (fitCells): three quarters of its width still reads. */

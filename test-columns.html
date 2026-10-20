@@ -352,10 +352,11 @@ for (const view of ["flowing", "beside the PDF"]) {
 }
 
 // Beside its PDF a line is cut wherever one of the PDF's items begins (the
-// line's `__grid`), and each piece is set at its item's x, at its item's size,
-// in its item's face (columns.placeLine) — on its own line, on that line's
-// baseline: the line numbers are the reader's grid down the page, and nothing
-// here moves a line or a piece of one up or down.
+// line's `__grid`), and each piece is set at its item's x, at its item's size
+// (columns.placeLine), and each run of it in its item's face (columns.faceLine,
+// a wrapper inside the cell) — on its own line, on that line's baseline: the
+// line numbers are the reader's grid down the page, and nothing here moves a
+// line or a piece of one up or down.
 out.push("side by side, each piece where the PDF prints it:");
 {
   const FOOT = "* If dismissal requested is of specified parties only,";
@@ -371,15 +372,18 @@ out.push("side by side, each piece where the PDF prints it:");
   const sans = { family: 'Arial, "Liberation Sans", sans-serif', bold: false, italic: false };
   const bold = Object.assign({}, sans, { bold: true });
   const small = 12, big = 16; // the footnote and the label, px
-  placeLine(lt, { places: new Map([[0, { x: 0, size: small, face: sans }], [at, { x: 700, size: big, face: bold }]]), start: 0, at: (a) => a * 8, face: sans, size: small, lead: 0 });
+  const runs = [{ from: at, to: text.length, face: bold }];
+  placeLine(lt, { places: new Map([[0, { x: 0, size: small, face: sans }], [at, { x: 700, size: big, face: bold }]]), start: 0, at: (a) => a * 8, face: sans, size: small, lead: 0, runs });
   const tail = document.createRange();
   tail.setStart(lt.lastChild, 0);
   tail.setEnd(lt.lastChild, 1);
   const left = body.getBoundingClientRect().left;
   check("the label stands at its item's x", near(tail.getBoundingClientRect().left - left, 700, 0.6), r1(tail.getBoundingClientRect().left - left));
-  check("…at its own size, in its own face; the footnote at its own",
-    getComputedStyle(lt).fontSize === big + "px" && getComputedStyle(lt).fontWeight === "700" && getComputedStyle(cell).fontSize === small + "px" && getComputedStyle(cell).fontWeight === "400",
-    `${getComputedStyle(lt).fontSize} ${getComputedStyle(lt).fontWeight} / ${getComputedStyle(cell).fontSize} ${getComputedStyle(cell).fontWeight}`);
+  const label = lt.lastChild;
+  check("…at its own size, and its run in its own face (a wrapper, not the cell); the footnote at its own size and in the line's face",
+    getComputedStyle(lt).fontSize === big + "px" && label.classList.contains("fc") && getComputedStyle(label).fontWeight === "700" && getComputedStyle(lt).fontWeight === "400"
+      && getComputedStyle(cell).fontSize === small + "px" && getComputedStyle(cell).fontWeight === "400" && !cell.style.fontWeight,
+    `${getComputedStyle(lt).fontSize} ${getComputedStyle(lt).fontWeight} ${label.className} ${getComputedStyle(label).fontWeight} / ${getComputedStyle(cell).fontSize} ${getComputedStyle(cell).fontWeight}`);
   const lb = line.getBoundingClientRect(), ub = under.getBoundingClientRect();
   const rects = [...(() => { const r = document.createRange(); r.selectNodeContents(lt); return r.getClientRects(); })()].filter((q) => q.width > 0);
   check("the line stands on its one row: every piece of it within its box, the line under it where it was",
@@ -387,8 +391,25 @@ out.push("side by side, each piece where the PDF prints it:");
   const base = baselineOf(lt), cellBase = baselineOf(cell, cell.querySelector(".cg"));
   check("…the smaller piece on the line's baseline, not raised or lowered to its own row's", near(base, cellBase, 0.5), `${r1(base)} vs ${r1(cellBase)}`);
   check("the page reads back as the file, cut and set or not", serializeNodes(body) === text + "\nthe line under it");
-  check("placed again, nothing is written", (() => { const was = lt.outerHTML; placeLine(lt, { places: new Map([[0, { x: 0, size: small, face: sans }], [at, { x: 700, size: big, face: bold }]]), start: 0, at: (a) => a * 8, face: sans, size: small, lead: 0 }); return lt.outerHTML === was; })());
-  check("taken off the grid, the PDF's cut and every place go with it", unplaceLine(lt) && (dressColumns(body), !lt.querySelector(".cc")) && !lt.style.fontFamily && !lt.style.fontSize, lt.outerHTML.slice(0, 160));
+  check("placed again, nothing is written", (() => { const was = lt.outerHTML; placeLine(lt, { places: new Map([[0, { x: 0, size: small, face: sans }], [at, { x: 700, size: big, face: bold }]]), start: 0, at: (a) => a * 8, face: sans, size: small, lead: 0, runs }); return lt.outerHTML === was; })());
+  check("taken off the grid, the PDF's cut, every place and every run's face go with it",
+    (() => { const took = unplaceLine(lt); return took.cut && took.faced; })() && (dressColumns(body), !lt.querySelector(".cc") && !lt.querySelector(".fc")) && !lt.style.fontFamily && !lt.style.fontSize && !lt.style.fontWeight,
+    lt.outerHTML.slice(0, 160));
+  // A numbered page's line: nothing placed, the export's own columns on the
+  // grid's widths, and the PDF's weight and slant run by run in the reader's
+  // own type — a face with no family.
+  const t3 = "QUILLON BRAKESMAN, an individual," + " ".repeat(12) + ") Case No. 1";
+  const b3x = page([[t3]], 8);
+  const lt3 = b3x.querySelector(".lt");
+  const plain = { family: "", bold: false, italic: false }, heavy = { family: "", bold: true, italic: false };
+  const moved = placeLine(lt3, { places: null, start: null, at: null, face: plain, size: SIZE, lead: 0, runs: [{ from: 0, to: 18, face: heavy }] });
+  const c3 = lt3.querySelector(".cc"), f3 = lt3.querySelector(".fc");
+  check("faces alone: the name's run in bold inside the cell, the rest of the line regular, no family and no width written",
+    moved && !!c3 && !!f3 && c3.contains(f3) && f3.textContent === "QUILLON BRAKESMAN," && getComputedStyle(f3).fontWeight === "700" && getComputedStyle(lt3).fontWeight === "400"
+      && !lt3.style.fontFamily && !c3.style.minWidth && serializeNodes(b3x) === t3,
+    lt3.outerHTML.slice(0, 200));
+  check("…faced again as before, nothing is written", !placeLine(lt3, { places: null, start: null, at: null, face: plain, size: SIZE, lead: 0, runs: [{ from: 0, to: 18, face: heavy }] }));
+  check("…and taken off, the line is the reader's own again", unplaceLine(lt3).faced && !lt3.querySelector(".fc") && !lt3.style.fontWeight && serializeNodes(b3x) === t3, lt3.outerHTML.slice(0, 160));
   // The PDF prints what the page SHOWS — the real names — and the cells are
   // cut in the FILE, under the fakes: a place on screen read as its place in
   // the file, none inside a name.
