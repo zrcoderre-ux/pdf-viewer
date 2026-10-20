@@ -1785,13 +1785,20 @@ app, which routes it to the reader tab.
   is one control now: a pane whose pages do not line up with the pages beside
   them is half of what the second column is for, and reaching for another
   switch to get the other half was a step between the reader and the thing they
-  opened the pane to do. Closing the pane puts every page back the moment it is
-  switched — its own font, size, width and leading, every line where it flows.
+  opened the pane to do. **Closing the pane keeps the look.** A page with a PDF
+  matched to it stays laid on that PDF page's geometry, in the PDF's own faces
+  and sizes, with the pane shut: Side by side adds the second column and
+  nothing else. An export with no PDF matched flows in the reader's own font,
+  as it always did. **The right margin is the PDF's**: a line on the grid ends
+  where the PDF's type does (the document's furthest-right type, or the page's
+  where it prints further, and never a margin wider than the left one), and a
+  line that runs longer in the reader's font is squeezed inside it rather than
+  out to the paper's edge.
   One thing the grid costs, and it is worth knowing: the **citation underlines
-  are off while the pane is open**, being strips measured off lines the grid
-  has moved. The **§ Authorities** panel still lists every authority in the
-  document and its links still open, and the status bar says so; the underlines
-  come back the moment the pane closes. What follows describes the grid.
+  are off on a document laid on its PDF**, being strips measured off lines the
+  grid has moved — now with the pane shut as well as open. The **§ Authorities**
+  panel still lists every authority in the document and its links still open,
+  and the status bar says so. What follows describes the grid.
   **The sheet is never wider than the page you are set to.** The scale comes
   from the type — the PDF's body drawn at the reading size — and on a filing
   set in large type, or at a large reading size, that asked for a sheet half

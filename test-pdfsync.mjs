@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight,
   matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey,
 } from "./viewer/pdfsync.js";
@@ -433,6 +433,14 @@ console.log("lines off the grid, and lines held on the paper");
   check("a line with no place passes through", holdWithin([null, 95], [14, 14], 100), [null, 86]);
 }
 
+console.log("the right margin");
+{
+  const row = (...its) => ({ items: its.map(([x, w]) => ({ x, w })) });
+  check("a page's type ends at its furthest-right row, every piece of it counted", bodyRightOf([row([72, 300]), row([72, 200], [400, 140]), row([90, 100])]), 540);
+  check("no rows, no margin", [bodyRightOf([]), bodyRightOf(null)], [null, null]);
+  check("the document's margin is the median of its pages'", docBodyRight([[row([72, 468])], [row([72, 470])], [row([72, 200])], null]), 540);
+  check("…and none with nothing read", docBodyRight([null, []]), null);
+}
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");
 // …which the reader asks with the case folder's id, never its bare name: two
 // folders of one name keep two lists of swapped pages.

@@ -438,6 +438,9 @@ body.tools-collapsed #tools-rail .tool-btn { position: relative; }
 .page-body.fixed .line > .lt { white-space: pre; }
 .page-body.fixed { padding: 0; position: relative; }
 .page-body.fixed .line { position: absolute; left: 0; right: 0; min-height: 0; }
+/* …ending at the PDF's own right margin (--body-r, applyMatchedLayout), not the
+   paper's edge. A ruled box is set on its page's grid (rules.js) and keeps it. */
+.page-body.fixed .line:not(.rl):not(.rr) { right: var(--body-r, 0px); }
 .page-body.fixed .line > .lt { min-height: 0; }
 /* The gutter's own right margin lies inside its track, so the track is the
    PDF's body margin exactly and the text starts where the PDF's does. */
@@ -815,9 +818,10 @@ body.printing .tpage.swapped .pdf-inline { display: none; }
 /* PDF-Linker's own trailer at the foot of an export — the "Authorities cited"
    rule and its verification links. Part of the file, no part of the filed
    document, and the PDF beside it has no such page: clipped while the pane is
-   open so the last sheet keeps the shape the rest of them hold. Hidden, never
+   open so the last sheet keeps the shape the rest of them hold — and on a page
+   laid on its PDF with the pane shut, which keeps that shape too. Hidden, never
    removed — the DOM still carries it and a save still writes it. */
-body.sbs .line.trailer { display: none; }
+body.sbs .line.trailer, .tpage.matched .line.trailer { display: none; }
 /* The blank lines PDF-Linker writes for a page's top margin, on a page beside
    its PDF that has no grid to lay them on: the sheet's own top stands in for
    them (applyMatchedLayout). Hidden, never removed, like the trailer. */

@@ -706,6 +706,25 @@ export function docBodyLeft(geoms, rowsByPage) {
   for (const rows of rowsByPage || []) { const l = bodyLeftOf(rows); if (l != null) ls.push(l); }
   return ls.length ? median(ls) : null;
 }
+/**
+ * Where a page's text ENDS across the page, in PDF units from its left edge:
+ * the furthest right any of its rows prints type, or null with no rows. The
+ * owner, in chat: "Pdf viewer removes any margin on the right side of the text
+ * file. It shouldn't. it should have the same margin as the pdf." The reader
+ * holds a line on the grid inside the larger of this and the document's own
+ * (docBodyRight), so no line is held short of type its PDF page prints.
+ */
+export function bodyRightOf(rows) {
+  let right = 0;
+  for (const r of rows || []) for (const it of (r && r.items) || []) right = Math.max(right, it.x + (it.w || 0));
+  return right > 0 ? right : null;
+}
+/** …and across the pages read so far, so every page of a document ends at one margin. */
+export function docBodyRight(rowsByPage) {
+  const rs = [];
+  for (const rows of rowsByPage || []) { const r = bodyRightOf(rows); if (r != null) rs.push(r); }
+  return rs.length ? median(rs) : null;
+}
 export function rowLayout(lineTexts, rows, { bodyLeft = null } = {}) {
   const map = alignLines(lineTexts, rows.map((r) => r.text));
   const matched = map.map((j, i) => (j == null ? null : i)).filter((i) => i != null);

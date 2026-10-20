@@ -270,6 +270,45 @@ new headless mode (`channel: "chromium"`) with `--force-device-scale-factor` and
 a `--window-size`, and a one-pixel checkerboard canvas shows whole-pixel
 placement the way a 125% Windows screen does.
 
+### The grid is the page's, not the pane's (`gridOn`, `docBodyRight`)
+
+The owner, in chat: "The text file should keep the side by side look, even
+when side by side is off", "I like the side by side font better", and "Pdf
+viewer removes any margin on the right side of the text file. It shouldn't.
+it should have the same margin as the pdf."
+
+**With the pane shut.** `gridOn()` was `sbsOn && !pdfPane.hidden`; it is now
+true for any document with a PDF matched (or with the pane open, as before).
+`applyMatchedLayoutNow` keeps `on` (the pane is up: slots to fit, labels to
+level, blank and shed slots to hold) apart from `grid` (pages to lay): with
+the pane shut a page's plan carries no slot, and every slot write is behind
+`p.slot`. A swapped page (its PDF page shown in its place) is never laid.
+`gridNear` and `readPdfGrid` ask for the grid on `gridOn()` rather than the
+pane, so a document opened with Side by side off opens its PDF and reads its
+grid near the reading as the pane would; `openPdfAhead` runs either way. With
+no slots, the measured sizes landing (`sizeSlotsFor`) re-lay only where a
+matched page was laid at another shape than the one measured
+(`sec.__laidRatio`). The Authorities trailer is hidden on a matched page
+(`.tpage.matched .line.trailer`), as it is beside the pane. Cost: the
+citation underlines are off wherever the grid is (placeCitations), now with
+the pane shut too; an export with no PDF matched keeps them and flows as
+before. `test-form-look.mjs` checks the pane shut keeps every piece's face,
+place and row (scaled to the wider page), and a document opened with the pane
+already shut is laid on its PDF.
+
+**The right margin.** A line on the grid was `right: 0` — out to the paper's
+edge, so a line that ran long in the reader's font filled the margin before
+it was squeezed. Each plan now carries `bodyR`, where the page's lines end:
+the largest of the document's margin (`pdfsync.docBodyRight`, the median of
+each read page's furthest-right type, `bodyRightOf`), this page's own furthest
+right (a form number out at the edge is never squeezed short of where its PDF
+prints it), and the page width less the left margin (a caption or signature
+page of short lines ends its type well inside the margin). The write pass
+sets `--body-r` on the body (`clearMatched` takes it off), and
+`.page-body.fixed .line:not(.rl):not(.rr)` ends there; the squeeze below then
+fits an overrunning line inside it. Ruled boxes keep the page's rule grid.
+Tested in `test-pdfsync.mjs` and `test-form-look.mjs`.
+
 ### The numbered margin is the boundary
 
 A pleading's PDF carries furniture its export does not: the firm's name

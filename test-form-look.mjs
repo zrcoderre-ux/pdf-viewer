@@ -272,13 +272,32 @@ try {
     check("a line the PDF does not print (PDF-Linker's note) keeps the reader's own face", !!note && !note.face, note ? note.face : "no note line");
     const look = await page.evaluate(() => window.__textReaderFormLook());
     if (!TOPS_ONLY) console.log(`        (planned ${look.planned} page(s) in ${look.plan.toFixed(1)} ms; placing passes took ${look.place.toFixed(1)} ms; fonts asked for ${look.fonts.pages} time(s), ${look.fonts.ms.toFixed(1)} ms)`);
-    // Side by side shut: nothing it did is left on the page.
+    // Side by side shut: the page keeps the look, and the face, it had beside
+    // the PDF — at the wider page the shut pane leaves, so each top is scaled.
     await page.click("#sbs-toggle");
     await page.waitForTimeout(800);
-    const flow = await readPage();
-    check("side by side shut, the page is the reader's own again, the file unchanged",
-      flow.file === FORM_LINES.join("\n") && flow.lines.every((l) => !l.face && !l.placed) && flow.boxes.length === 5,
-      JSON.stringify(flow.lines.filter((l) => l.face || l.placed).map((l) => l.text.slice(0, 20))));
+    const shut = await readPage();
+    const grow = shut.width / laid.width;
+    const moved = shut.lines.filter((l, k) => { const b = laid.lines[k];
+      return !b || l.text !== b.text || l.face !== b.face || l.placed !== b.placed || Number.isNaN(l.top) !== Number.isNaN(b.top)
+        || (!Number.isNaN(l.top) && Math.abs(l.top - b.top * grow) > 1); });
+    check("side by side shut, the page keeps the side-by-side look — every piece's face, place and row — the file unchanged",
+      shut.file === FORM_LINES.join("\n") && shut.lines.some((l) => l.face) && moved.length === 0 && shut.boxes.length === 5,
+      JSON.stringify(moved.slice(0, 4).map((l) => [l.text.trim().slice(0, 20), l.face.slice(0, 10), l.placed, l.top])));
+    // …and a document opened with side by side already off is laid on its PDF too.
+    await page.evaluate((n) => window.__textReaderOpenDoc(n), "Sample Form.txt");
+    await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
+    await page.evaluate(async () => {
+      const f = new File([window.__formLookPdfs["Sample Form.pdf"]], "Sample Form.pdf", { type: "application/pdf" });
+      await window.__textReaderPickPdfs([f]);
+    });
+    const opened = await page.waitForFunction(() => !document.body.classList.contains("sbs") && !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 }).then(() => true, () => false);
+    await page.waitForTimeout(800);
+    const fresh = opened ? await readPage() : null;
+    check("opened with side by side off, the page is laid on its PDF in the PDF's faces",
+      !!fresh && fresh.lines.some((l) => l.face) && fresh.boxes.length === 5, fresh ? "" : "never laid on the grid");
+    await page.click("#sbs-toggle"); // …and back on for the next document
+    await page.waitForTimeout(400);
   }
 
   // ── a pleading page beside its PDF ─────────────────────────────────────────
@@ -297,7 +316,10 @@ try {
       const v = pg.getViewport({ scale: 1 });
       const tc = await pg.getTextContent();
       const items = tc.items.filter((it) => it.str && it.transform).map((it) => ({ str: it.str, x: it.transform[4], top: v.height - (it.transform[5] + (it.height || 0)), w: it.width || 0, h: it.height || 0 }));
-      return PS.pleadingGeometry(items, { w: v.width, h: v.height });
+      const size = { w: v.width, h: v.height };
+      const g = PS.pleadingGeometry(items, size);
+      // The reader's right margin: the type's furthest right, held no wider than the left margin.
+      return { ...g, right: Math.max(PS.docBodyRight([PS.pdfRows(items, size)]) || 0, size.w - g.bodyX) };
     });
     const scale = laid.width / 612;
     const numbered = laid.lines.filter((l) => l.num);
@@ -311,6 +333,16 @@ try {
         JSON.stringify(laid.lines.filter((l) => l.face || l.placed).map((l) => l.text.slice(0, 20))));
       check("…its checkbox drawn whole on its numbered line", laid.boxes.length === 1 && laid.boxes[0] === "[ X ]", JSON.stringify(laid.boxes));
       check("…and the page reads back as the file", laid.file === PLEAD_LINES.join("\n"), JSON.stringify(laid.file).slice(0, 160));
+      // The right margin is the PDF's: every line's text box ends where the PDF's body does, not at the paper's edge.
+      const ends = await page.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body.fixed");
+        const left = body.getBoundingClientRect().left;
+        return { margin: body.style.getPropertyValue("--body-r"), boxes: [...body.querySelectorAll(":scope > .line:not(.rl):not(.rr) > .lt")].map((lt) => lt.getBoundingClientRect().right - left) };
+      });
+      const past = ends.boxes.filter((r) => r > geom.right * scale + 1);
+      check("…and its lines end at the PDF's right margin, not the paper's edge",
+        geom.right > 400 && geom.right < 600 && !!ends.margin && ends.boxes.length > 0 && past.length === 0 && ends.boxes.some((r) => Math.abs(r - geom.right * scale) <= 1),
+        `margin ${ends.margin}, PDF right ${(geom.right * scale).toFixed(1)}, ends ${[...new Set(ends.boxes.map((r) => r.toFixed(1)))].join(",")}`);
     }
   }
 

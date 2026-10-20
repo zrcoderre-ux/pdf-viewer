@@ -4257,12 +4257,11 @@ async function leaveFolderAsk() {
  * starting pdf.js's worker and parsing the document all came after that
  * second, one after the other. Asked for first, the worker starts and the
  * file is read on threads of their own while the pages are built, and the
- * PDF is open, or nearly, by the time the pane asks for it. Only side by side
- * (the pane is what wants it), and only the PDF the export's own name
+ * PDF is open, or nearly, by the time the pane or the grid asks for it (the
+ * grid lays the pages with the pane shut too: gridOn), and only the PDF the export's own name
  * matches: a combined file's members are not known until it is parsed.
  */
 function openPdfAhead(name) {
-  if (!sbsOn) return;
   sharedPdfWorker();
   const hit = pdfForName(name);
   const src = hit ? folderPdfs.find((p) => p.name === hit) : null;
@@ -18445,7 +18444,7 @@ async function readPdfGridNow(info, pass) {
     if (performance.now() - since > GRID_SLICE) {
       // The pages read so far are laid on their grid now rather than when
       // the rest are. It is debounced, so asking often costs one pass.
-      if (sbsOn && !pdfPane.hidden) applyMatchedLayoutSoon();
+      if (gridOn()) applyMatchedLayoutSoon();
       await idleClock();
       since = performance.now();
     }
@@ -18486,7 +18485,7 @@ async function readPdfGridNow(info, pass) {
     } catch { info.lines[i - 1] = null; }
   }
   notePass("reading the PDF's line grid", gridFrom);
-  if (sbsOn && !pdfPane.hidden) applyMatchedLayoutSoon();
+  if (gridOn()) applyMatchedLayoutSoon();
 }
 const PDF_LINE_DEFAULT = 72 / 792; // an inch down a letter page, until the PDF says
 /** A slot's first printed line, in px from the slot's top, from the PDF loaded so far. */
@@ -19685,6 +19684,16 @@ function docBodyLeft(info) {
   }
   return info.__margin;
 }
+function docBodyRight(info) {
+  if (!info || !info.rows) return null;
+  let filled = 0;
+  for (const r of info.rows) if (r) filled++;
+  if (info.__rightAt !== filled) {
+    info.__rightAt = filled;
+    info.__right = PS.docBodyRight(info.rows);
+  }
+  return info.__right;
+}
 function docTypeSize(info) {
   if (!info || !info.rows) return null;
   let filled = 0;
@@ -19758,6 +19767,17 @@ function sizeSlotsFor(name) {
     const src = pdfSources[Number(el.dataset.index)];
     if (!src || src.name !== name) continue;
     sizeFromKnown(el, src, Number(el.dataset.page), parseFloat(el.style.width) || paneWidth());
+  }
+  // With the pane shut there are no slots to move, and the pages on the grid
+  // (gridOn) stand at the paper they were guessed at: a page laid at another
+  // shape than the one just measured for it is laid again.
+  if (!slotMoved && pdfPane.hidden && gridOn()) {
+    const sizes = pdfSizes.get(name);
+    for (const sec of pagesEl.querySelectorAll(".tpage.matched")) {
+      const t = pdfTarget(Number(sec.dataset.index));
+      const sz = t && t.src.name === name ? sizes[t.page - 1] : null;
+      if (sz && sec.__laidRatio && Math.abs(sz.h / sz.w - sec.__laidRatio) > 1e-4) { slotMoved = true; break; }
+    }
   }
   if (slotMoved) applyMatchedLayoutSoon();
 }
@@ -20009,7 +20029,17 @@ function applyMatchedLayoutSoon() {
 // column is that line 7 stands beside line 7, and reaching for a second switch
 // to get it was a step between the reader and the thing they opened the pane
 // to do. One control, one result.
-function gridOn() { return sbsOn && !pdfPane.hidden; }
+//
+// …AND THE PAGES KEEP IT WITH THE PANE SHUT. The owner, in chat: "The text
+// file should keep the side by side look, even when side by side is off" —
+// and of the type: "I like the side by side font better." So the grid is no
+// longer the pane's: a page with a PDF matched to it is laid on that page's
+// geometry, in its faces and sizes, whether or not the PDF is beside it.
+// Side by side adds the second column and nothing else; the toggle no longer
+// re-sets the text under the reader. An export with no PDF matched has no
+// grid to be laid on, and with the pane shut flows as it always did (and keeps
+// its citation underlines, which the grid turns off: placeCitations).
+function gridOn() { return !!doc && (!pdfPane.hidden || pdfSources.some(Boolean)); }
 function applyMatchedLayout() {
   return during("lining the text up with the PDF", () => applyMatchedLayoutNow());
 }
@@ -20053,9 +20083,11 @@ function applyMatchedLayoutNow() {
       if (el) { matchedSlots.add(el); fitSlot(el, w0); rawSlots.push([el, sec]); }
       continue;
     }
-    const slot = grid ? slots.get(i) || null : null;
-    const t = slot && pdfTarget(i);
-    if (!slot || !t) { clearMatched(sec); continue; }
+    // A swapped page IS its PDF page (applySwaps): its text is put away, not laid.
+    if (sec.classList.contains("swapped")) { clearMatched(sec); continue; }
+    const slot = on ? slots.get(i) || null : null;
+    const t = grid && (slot || !on) ? pdfTarget(i) : null;
+    if (!t) { clearMatched(sec); continue; }
     const info = infoFor(t.src);
     // The page's size from the PDF, open or not: the sizes are kept after a
     // PDF is closed (pdfSizes), and the folder's paper stands in before then.
@@ -20064,10 +20096,10 @@ function applyMatchedLayoutNow() {
     const body = sec.querySelector(".page-body");
     const lines = [...body.querySelectorAll(":scope > .line")];
     if (!near.has(i) || !info || !sz) {
-      matchedSlots.add(slot);
+      if (slot) matchedSlots.add(slot);
       const had = sec.__plan;
       if (had && sz && sec.__planLite === lite) {
-        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: had.firstY, scale: 1 });
+        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: had.firstY, scale: 1 });
         continue;
       }
       plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
@@ -20106,8 +20138,8 @@ function applyMatchedLayoutNow() {
       lines.map((l) => (l.classList.contains("own") ? 1 : 0)).join("")].join("|");
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
-      matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: info.lines[t.page - 1], scale: 1 });
+      if (slot) matchedSlots.add(slot);
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: info.lines[t.page - 1], scale: 1 });
       continue;
     }
     if (numbered) {
@@ -20258,11 +20290,17 @@ function applyMatchedLayoutNow() {
     // The scale is the sheet's, and the sheet is the paper: the write pass
     // below sets it from the page's own width (and the magnification with it),
     // so the grid is drawn at whatever size the paper is being read at.
-    matchedSlots.add(slot);
+    if (slot) matchedSlots.add(slot);
     sec.__planFor = planKey;
     sec.__planLite = lite;
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1] };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1], scale: 1 });
+    // THE RIGHT MARGIN: where the document's pages end their type, or this
+    // page's where it prints further (a form number out at the edge), and
+    // never a margin wider than the left one — a page of short lines (a
+    // caption, a signature block) ends its type well short of the margin.
+    const leftAt = bodyX > 0 ? bodyX : rows && rows.length ? PS.bodyLeftOf(rows) : null;
+    const bodyR = Math.max(docBodyRight(info) || 0, (rows && PS.bodyRightOf(rows)) || 0, leftAt > 0 ? sz.w - leftAt : 0) || null;
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1] };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // A page the reel has SHED has no lines to lay and stands at the height it
   // was pinned at (shedMember). Its slot used to fall to the pane's width —
@@ -20298,8 +20336,10 @@ function applyMatchedLayoutNow() {
     const w = pageW;
     p.scale = w / p.sz.w; // the sheet leads; the grid follows it
     p.w = w;
-    fitSlot(p.slot, w);
-    if (p.slot.style.height) p.slot.style.height = ""; // held to a shed page's height, and the page is back
+    if (p.slot) {
+      fitSlot(p.slot, w);
+      if (p.slot.style.height) p.slot.style.height = "";
+    } // held to a shed page's height, and the page is back
     p.sec.classList.add("matched");
     p.sec.style.width = w + "px";
     // The page's height from the SAME arithmetic the bitmap is drawn by
@@ -20308,6 +20348,7 @@ function applyMatchedLayoutNow() {
     // pixel a page is a centimetre by the fortieth — one column sliding under
     // the other with nothing visibly wrong on either.
     const pageH = Math.round((w * p.sz.h) / p.sz.w);
+    p.sec.__laidRatio = p.sz.h / p.sz.w; // what sizeSlotsFor compares a page's measured size to, with the pane shut
     // …or more, only where the page's lines cannot all fit on it (holdWithin,
     // above, brings back everything that can). The slot grows with it
     // (below), so the two boxes stay the same box.
@@ -20333,6 +20374,13 @@ function applyMatchedLayoutNow() {
     if (p.body.style.paddingTop !== padTop) p.body.style.paddingTop = padTop;
     if (p.bodyX > 0) p.sec.style.setProperty("--body-x", (p.bodyX * p.scale) + "px");
     else p.sec.style.removeProperty("--body-x");
+    // …and the PDF's right margin (pdfsync.bodyRightOf): a line on the grid
+    // ends where the PDF's text does, not at the paper's edge, and one that
+    // runs longer is squeezed back inside it (below) as it was at the edge.
+    const bodyR = p.tops && p.bodyR > 0 && p.bodyR < p.sz.w ? ((p.sz.w - p.bodyR) * p.scale).toFixed(2) + "px" : "";
+    if (p.body.style.getPropertyValue("--body-r") !== bodyR) {
+      if (bodyR) p.body.style.setProperty("--body-r", bodyR); else p.body.style.removeProperty("--body-r");
+    }
     // The page's body type, which the grid's columns are measured in
     // (columns.js): each line is set in its own row's size, and a column
     // has to stand at one place down the page whatever size that is.
@@ -20406,8 +20454,8 @@ function applyMatchedLayoutNow() {
     const pairs = plans.map((p) => ({
       p,
       lt: p.sec.querySelector(".page-label"),
-      ls: p.slot.querySelector(".page-label"),
-      sheet: p.slot.querySelector(".pdf-sheet"),
+      ls: p.slot ? p.slot.querySelector(".page-label") : null,
+      sheet: p.slot ? p.slot.querySelector(".pdf-sheet") : null,
     }));
     for (const x of pairs) {
       if (x.lt && x.lt.style.height) x.lt.style.height = "";
@@ -20553,7 +20601,7 @@ function applyMatchedLayoutNow() {
   fitRuleRows(pagesEl);
   textAnchors = null; textLineTops = null;
   // …and the grid asked for wherever the reading has come to without one.
-  if (on) gridNear();
+  if (grid) gridNear();
   // The slots have just taken their widths: the pane keeps its own middle.
   if (on) holdSideways(pdfPane);
 }
@@ -21115,6 +21163,7 @@ function clearMatched(sec) {
   body.style.paddingTop = "";
   body.style.removeProperty("--grid-em");
   body.style.removeProperty("--grid-col");
+  body.style.removeProperty("--body-r");
   for (const c of body.querySelectorAll(".cc")) if (c.style.width || c.style.transform) { c.style.width = ""; c.style.transform = ""; c.style.transformOrigin = ""; }
   for (const l of body.querySelectorAll(":scope > .line.lead")) l.classList.remove("lead");
   sec.__lead = 0;
@@ -21306,7 +21355,7 @@ function refitPdf() {
   // The pane's widths belong to the matched layout: beside a text page a
   // slot is drawn at the PDF page's own scale, and only a slot the layout
   // does not claim falls back to the pane's width.
-  if (!pdfPane.hidden) applyMatchedLayout();
+  if (gridOn()) applyMatchedLayout();
   for (const el of pagesEl.querySelectorAll(".pdf-inline")) {
     const sec = el.closest(".tpage");
     if (el.dataset.rendered) renderInto(el, pdfSources[Number(sec.dataset.index)], Number(el.dataset.page), inlineWidth(sec));
