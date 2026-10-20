@@ -1783,6 +1783,19 @@ undo step, the caret at the text's head; the next Backspace does what it did
 (into the half line above, then a join). On a ✓ Use my text page the line is
 then the operator's (`markOwnLines`, `autoLayPage`), so the layout leaves it
 unindented. `test-half-lines.mjs` section 2b.
+The indent the operator sees beside the PDF is often not the file's at all:
+on a numbered page `pdfIndents` sets a line's text where the PDF's row at its
+number starts (`.pind`, `--pdf-ind`), and on a page laid row by row the row's
+left does (`rowInd`). The owner: "The backspace on a wrongly indented line is
+still bringing it up to the previous half line." So the same Backspace takes
+that indent off too: the line goes on the page's list of lines that take no
+indent from the PDF (`noIndentOf`, `setNoIndent`; by the line's text as the
+file writes it, indent taken off, `noIndentKey`; kept in localStorage,
+`textReader.noIndent`, by the page's PDF page; carried by the undo history in
+`snapshotOf` / `restoreSnapshot`), which `pdfIndents` and `rowInd` pass by and
+the plan's key counts (`__noIndentSig`). `test-half-lines.mjs` section 3: a
+line the PDF indents, one Backspace to the margin on its own number, a second
+up to the half line, Ctrl+Z indented again.
 
 **Typing into ⇄ Raw.** Under ✎ Edit the `pre.raw-text` is
 `contenteditable="plaintext-only"` (set in `setRaw` and by `setEditing`); the

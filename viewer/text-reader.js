@@ -5974,8 +5974,13 @@ function unindentAtCaret(body, line, lt, off) {
   const lead = (lt.textContent.match(/^ +/) || [""])[0].length;
   const inGutter = !!gs && gs.textContent.length > 2 && off === 0;
   const inText = lead > 0 && off === lead;
-  if (!inGutter && !inText) return false;
+  // …or the indent is the PDF's, not the file's: beside its PDF a numbered
+  // line's text starts where the PDF's row at its number does (pdfIndents,
+  // .pind), whatever the file says — and that is the indent the operator sees.
+  const fromPdf = off === (inText ? lead : 0) && line.classList.contains("pind") && parseFloat(line.style.getPropertyValue("--pdf-ind")) > 0.5;
+  if (!inGutter && !inText && !fromPdf) return false;
   snapshot(body, true);
+  if (fromPdf) setNoIndent(body, [...noIndentOf(body), noIndentKey(line)]);
   if (inGutter) gs.textContent = "  ";
   if (inText || (inGutter && lead)) {
     const r = document.createRange();
@@ -5988,9 +5993,38 @@ function unindentAtCaret(body, line, lt, off) {
   fixGutterSpacing(body);
   const pt = pointAtOffset(lt, 0);
   placeCaret(pt.node, pt.offset);
-  setDirty(true, pageIndexOf(body));
+  if (inGutter || inText) setDirty(true, pageIndexOf(body));
   afterTextChange();
+  if (fromPdf) applyMatchedLayoutSoon();
   return true;
+}
+/**
+ * The lines of a page that take NO indent from the PDF (unindentAtCaret): by
+ * their text as the file writes it, indent taken off (so taking the file's
+ * indent off as well finds it), kept per page in localStorage
+ * (`textReader.noIndent`, by the page's PDF page, as ✓ Use my text's lines
+ * are) and carried by the undo history (snapshotOf, restoreSnapshot).
+ */
+const NO_INDENT_KEY = "textReader.noIndent";
+const noIndentKey = (line) => TD.serializeNodes(line).replace(/^( ?\d{1,2}) +/, "$1  ").replace(/^ +/, "");
+function noIndentOf(body) {
+  if (!body.__noIndent) {
+    let kept = [];
+    try { const k = freeFromKey(pageIndexOf(body)); const all = JSON.parse(localStorage.getItem(NO_INDENT_KEY) || "{}") || {}; if (k && Array.isArray(all[k])) kept = all[k]; } catch { /* none kept */ }
+    body.__noIndent = new Set(kept);
+  }
+  return body.__noIndent;
+}
+function setNoIndent(body, list) {
+  body.__noIndent = new Set(list);
+  body.__noIndentSig = (body.__noIndentSig || 0) + 1;
+  try {
+    const k = freeFromKey(pageIndexOf(body));
+    if (!k) return;
+    const all = JSON.parse(localStorage.getItem(NO_INDENT_KEY) || "{}") || {};
+    if (body.__noIndent.size) all[k] = [...body.__noIndent]; else delete all[k];
+    localStorage.setItem(NO_INDENT_KEY, JSON.stringify(all));
+  } catch { /* kept for the session only */ }
 }
 function backspaceAtCaret(body) {
   const cl = caretLine(body);
@@ -6728,7 +6762,7 @@ function snapshotOf(body) {
   // value in the clear with nothing saying so — which the next save would write
   // back to its pseudonym.
   const page = pageIndexOf(body);
-  return { page, text: TD.serializeNodes(body), caret: caretOffsetIn(body), spots: spotsFromBody(body, page), ...typingOf(body) };
+  return { page, text: TD.serializeNodes(body), caret: caretOffsetIn(body), spots: spotsFromBody(body, page), noIndent: [...noIndentOf(body)], ...typingOf(body) };
 }
 // WHAT WAS TYPED TRAVELS WITH THE TEXT TOO. Three things on a page say which
 // of its names the operator wrote, and none of them is in its text: the text
@@ -6850,6 +6884,7 @@ function restoreSnapshot(snap, { settle = true, lists = true } = {}) {
   // member the page belongs to, which is not the open document's on a reel.
   setSpotsListOf(snap.page, spotsListOf(snap.page).filter((x) => x.page !== snap.page).concat(snap.spots || []));
   buildBody(body, snap.text, snap.page);
+  if (snap.noIndent) setNoIndent(body, snap.noIndent); // …and the lines that take no indent from the PDF
   restoreTyping(body, snap); // …measured, marked and Esc'd as it was then (typingOf)
   doc.pages[snap.page].lines = snap.text.split("\n");
   if (snap.nocr) forgetTyping(snap.page); // a strip undone or redone is no typing
@@ -20176,7 +20211,7 @@ function applyMatchedLayoutNow() {
     // hand is not worked out again.
     const planKey = [textEpoch, w0, info.name, t.page, base, bodyX, geom ? 1 : 0, rows ? rows.length : -1,
       settings.lineHeight, settings.font, settings.customFont, info.faceEpoch || 0,
-      lines.map((l) => (l.classList.contains("own") ? 1 : 0)).join("")].join("|");
+      lines.map((l) => (l.classList.contains("own") ? 1 : 0)).join(""), body.__noIndentSig || 0].join("|");
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       if (slot) matchedSlots.add(slot);
@@ -20490,10 +20525,11 @@ function applyMatchedLayoutNow() {
     // numbered page's own indents are; `rowInd`).
     p.gut = p.lefts && !p.geom && p.bodyX > 0 && p.body.classList.contains("numbered") ? p.bodyX * p.scale : 0;
     const rowInd = !!(p.gut && !p.grid);
+    const none = rowInd ? noIndentOf(p.body) : null;
     p.lines.forEach((l, k) => {
       const top = p.tops ? p.tops[k] : null;
       const ind = top == null ? null
-        : rowInd ? (p.lefts[k] != null ? Math.max(0, p.lefts[k] * p.scale - p.gut) : null)
+        : rowInd ? (p.lefts[k] != null ? (none.size && none.has(noIndentKey(l)) ? 0 : Math.max(0, p.lefts[k] * p.scale - p.gut)) : null)
         : p.inds && p.inds[k] != null ? p.inds[k] * p.scale : null;
       const lineLeft = p.lefts && p.lefts[k] != null && !rowInd ? Math.max(0, p.lefts[k] * p.scale - p.gut) : null;
       const want = top == null ? "" :
@@ -21411,8 +21447,10 @@ function pdfIndents(lines, nums, geom, rows, bodyX) {
   // The row at each line's slot (pdfsync.numberedRowOf, by the slot alone: the
   // indent is the slot's, not a row the line's words were matched to).
   const rowOf = PS.numberedRowOf(nums, geom, rows, null, bodyX - 1.5);
+  const none = lines.length ? noIndentOf(lines[0].parentElement) : new Set();
   lines.forEach((l, k) => {
     if (l.classList.contains("own") || !l.textContent.replace(/^\s*\d{0,2}/, "").trim()) return;
+    if (none.size && none.has(noIndentKey(l))) return; // taken off by hand (unindentAtCaret)
     const j = rowOf[k];
     if (j == null) return;
     const x = Math.min(...rows[j].items.filter((it) => it.x >= bodyX - 1.5 && String(it.str).trim()).map((it) => it.x));

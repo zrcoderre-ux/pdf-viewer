@@ -297,6 +297,22 @@ async function run() {
       const flush = await xAt(1); // Beta, on line 2, where the PDF prints it at the margin
       truthy(`line 4 starts where the PDF's line 4 does, half an inch in (${((await xAt(3)) - flush).toFixed(1)}px, want ${(36 * scale).toFixed(1)})`, Math.abs((await xAt(3)) - flush - 36 * scale) < 2);
       truthy("…though the file gives it no indent", (await slots(p))[3][1] === "Delta");
+      // Backspace at its head: the indent the reader shows goes — the PDF's as
+      // well as the file's — and the line stays on 4; Ctrl+Z puts it back.
+      const tops0 = await tops();
+      await caretIn(p, 3);
+      await p.keyboard.press("Backspace");
+      await p.waitForTimeout(1200);
+      truthy(`Backspace at the head of the indented line 4: it starts at the margin (${((await xAt(3)) - flush).toFixed(1)}px)`, Math.abs((await xAt(3)) - flush) < 2);
+      check("…still on 4, nothing moved down the page", await tops(), tops0);
+      await p.keyboard.press("Backspace");
+      await p.waitForTimeout(800);
+      check("a second Backspace: up to 3.5", (await slots(p)).slice(2, 5), [["3", ""], ["·", "Delta"], ["4", ""]]);
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(600);
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(1200);
+      truthy(`Ctrl+Z: indented again (${((await xAt(3)) - flush).toFixed(1)}px)`, Math.abs((await xAt(3)) - flush - 36 * scale) < 2);
       const before = await tops();
       await caretIn(p, 0);
       await p.keyboard.press("Enter");
