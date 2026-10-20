@@ -2137,8 +2137,10 @@ app, which routes it to the reader tab.
   box drawn in rules, each keeping its number. Type in either column and the
   other never moves: words that outgrow a column wrap onto its next row (the
   box grows at its foot), Enter starts a new row in that column alone, and
-  Backspace at the start of a cell joins it to the cell above. ⇄ Raw shows the
-  box as PDF-Linker writes a form's, and Ctrl+Z takes it off.
+  Backspace at the start of a cell joins it to the cell above. **Drag the
+  divider, or the box's right edge, to size the columns** (the pointer turns
+  to ⟷ over a rule): the text that no longer fits wraps down its column. ⇄ Raw
+  shows the box as PDF-Linker writes a form's, and Ctrl+Z takes it off.
   **Backspace at the start of an indented line takes the indent off first**
   and leaves the line on its number; a second Backspace moves it up to the
   half line above, as before. Ctrl+Z steps back through both.

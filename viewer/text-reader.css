@@ -1230,3 +1230,9 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
   .rb, .rc.hf, .rh, .rg, .pn, .held, .page-body.numbered .gutter, .page-label { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 @page { margin: 12mm; }
+
+/* A column box on a ✓ Use my text page: its divider and right edge are
+   dragged to size its columns (text-reader.js, boxDrag), a guide showing
+   where the rule will stand. */
+body.editing .page-body.free .line.rl .rb { cursor: col-resize; }
+.box-guide { width: 0; border-left: 2px dashed var(--accent, #1a73e8); z-index: 50; pointer-events: none; }

@@ -2109,6 +2109,19 @@ the line already carries it with one space (`restoreMarginNumbers`,
 missing indent set, a one-space number, and an indent taken out by hand in
 ⇄ Raw staying out).
 
+**# Number lines on a poor scan** (`numberPage`, `TD.pageNumbersComplete`).
+The owner: "I have a page where Number Lines is not available" and "number
+lines should always create the lines in a single straight margin". The
+button is offered until a page's numbers run complete (`pageNumbersComplete`:
+the numbers climbing down it at least 80% of 1 to its highest, and on 60% of
+its lines of text) — not only on a page with none, since an OCR that caught
+three numbers made `pageIsNumbered` true and hid it. Pressed on a page with
+some numbers, they come off and it is numbered from 1. Every line's text is
+written flush after its number: the spaces a poor scan's OCR put in front of
+a line are no indent of the filing's. And on a numbered page laid on the
+export's grid read off the PDF, every line (one no row was matched to too)
+has the grid's one left, so the numbers stand in one column.
+
 **Column boxes on a ✓ Use my text page** (`#colbox-btn`,
 `makeColumnBoxAtSelection`, `boxKey`, `boxReflowSoon`; `TD.makeColumnBox`,
 `TD.reflowBox`, `TD.boxBackspace`, `TD.isBoxRow`, `TD.boxAround`). The owner:
@@ -2133,7 +2146,19 @@ row), and Delete at a row's end does nothing: the box is never joined across.
 Each is a rebuild of the page from its text (`rebuildFromLines`), the caret
 put back by its place in the file's text (`diskOffsetOfPoint`,
 `placeCaretOnDisk`). The ✓ Use my text layout (`autoLayPage`) leaves box
-lines as they stand. Tested in `test-textdoc.mjs` and `test-free-page.mjs`
+lines as they stand. A box is drawn across the page's text (`across`, its
+widest line past the margin number), so the right column is never only as
+wide as what it holds; and its columns are sized by DRAGGING a divider or the
+right edge (`boxDrag`, `TD.resizeBox`): the owner, "it created one tiny box
+and one large box, but they are not adjustable". A rule is a pixel wide, so a
+press within `BOX_GRAB` (6) px of one grabs it (`boxBarAt`, the cursor a
+col-resize there); a dashed guide follows the pointer in whole characters
+(read off the row: its outer rules and the file's columns between them), and
+on letting go every rule of the box moves to the new column, every row is
+set on it, and a cell's text that no longer fits wraps down its column (one
+undo step). A column is never drawn narrower than `TD.BOX_MIN`; the left edge
+does not move. Widening a column does not pull wrapped text back up: the file
+does not say which rows were one item. Tested in `test-textdoc.mjs` and `test-free-page.mjs`
 (section 10, a cover page's parties and causes of action).
 
 Each entry of `#text-fixed-list` goes to its page (`goToFixedPage`: found by

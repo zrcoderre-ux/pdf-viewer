@@ -8,7 +8,7 @@
 
 import {
   markCss,
-  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace,
+  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace, resizeBox, pageNumbersComplete,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, setOwnPartyWords, ownPartyWordsOf, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
@@ -2102,6 +2102,20 @@ console.log("column boxes (makeColumnBox, reflowBox, boxBackspace)");
   const b = boxBackspace(e.lines, e.caret.line, e.caret.col, { numbered: true });
   check("Enter in a cell and Backspace back: the box as it was (grown over line 10)", b.lines.slice(0, 4).concat(b.lines.slice(5)), m.lines.slice(0, 4).concat(b.lines.slice(5)));
   check("Backspace at the head of the first row's cell: nothing joined across the rule", boxBackspace(m.lines, 1, m.lines[1].indexOf("COMPLAINT"), { numbered: true }).lines, m.lines);
+  const wide = makeColumnBox(L, 0, 2, 34, { numbered: true, across: 70 });
+  check("drawn across the page's text: the right column to the widest line", wide.lines[0].length, 4 + 70);
+  const narrower = resizeBox(wide.lines, 1, 1, 24, { numbered: true });
+  check("the divider moved left: every rule at the new column, the left column's text wrapped down it, the right untouched",
+    [narrower.filter((l) => /[┌│└]/.test(l)).every((l) => l[24] === "┬" || l[24] === "│" || l[24] === "┴"), narrower.slice(1, 4).map((l) => l.split("│")[1].trim()), narrower.slice(1, 4).map((l) => l.split("│")[2].trim())],
+    [true, ["QUILLON", "BRAKESMAN,", "Plaintiff,"], ["COMPLAINT FOR:", "1. Breach of contract", "2. Fraud"]]);
+  check("the right edge drawn in: the box narrower", resizeBox(wide.lines, 1, 2, 60, { numbered: true })[0].length, 61);
+  check("…a divider not past its neighbour", resizeBox(wide.lines, 1, 1, 2, { numbered: true })[0].indexOf("┬"), 4 + 1 + 6);
+}
+console.log("margin numbers that run complete (pageNumbersComplete)");
+{
+  check("pleading paper 1 to 28: complete", pageNumbersComplete(Array.from({ length: 28 }, (_, k) => String(k + 1).padStart(2) + "  x")), true);
+  check("three numbers an OCR caught on a page of eight lines: not", pageNumbersComplete([" 1  a", " 2  b", " 3  c", "d", "e", "f", "g", "h"]), false);
+  check("no numbers: not", pageNumbersComplete(["a", "b"]), false);
 }
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

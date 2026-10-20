@@ -592,6 +592,32 @@ async function run() {
       const back = (await raw()).filter((l) => l.split("│").length >= 4);
       check("Backspace at the head of a cell: joined to the cell above in its column, never across the box", back.map(right).join(" | "),
         "COMPLAINT FOR: | 1. Breach of contract | and of the covenant | of good faith | 2. Fraud | ");
+      // The divider dragged five characters left: every rule of the box moves
+      // with it, straight down the box, and the left column's text that no
+      // longer fits wraps down its column.
+      const joints = (ls) => ls.filter((l) => /^ *┌/.test(l)).map((l) => [...l].map((c, k) => ("┌┬┐".includes(c) ? k : -1)).filter((k) => k >= 0))[0];
+      const before = await raw();
+      const was = joints(before);
+      const grab = await p.evaluate(() => {
+        const row = [...document.querySelectorAll("#pages .tpage .page-body > .line.rl")].find((l) => l.textContent.includes("Plaintiff,"));
+        const bars = row.querySelectorAll(".rb");
+        const a = bars[1].getBoundingClientRect(), z = bars[bars.length - 1].getBoundingClientRect(), o = bars[0].getBoundingClientRect();
+        return { x: a.left + a.width / 2 + 3, y: a.top + a.height / 2, unit: (z.left - o.left) }; // a few pixels off the hairline, as a hand lands
+      });
+      const unit = grab.unit / (was[2] - was[0]);
+      await p.mouse.move(grab.x, grab.y);
+      await p.mouse.down();
+      await p.mouse.move(grab.x - 2.5 * unit, grab.y, { steps: 3 });
+      await p.mouse.move(grab.x - 5 * unit, grab.y, { steps: 3 });
+      await p.mouse.up();
+      await p.waitForTimeout(600);
+      const after = await raw();
+      check("the divider dragged five characters left: the box's rule moved five columns", joints(after), [was[0], was[1] - 5, was[2]]);
+      check("…every row's rules straight under it", [...new Set(after.filter((l) => /[│┌└]/.test(l)).map((l) => [...l].map((c, k) => ("│┌┐┬└┘┴".includes(c) ? k : -1)).filter((k) => k >= 0).join(",")))].length, 1);
+      check("…the left column's text all there, wrapped where it no longer fits", after.filter((l) => l.split("│").length >= 4).map(left).filter(Boolean).join(" "), "QUILLON BRAKESMAN, an individual, Plaintiff, v. ORVELLE HOLDINGS, INC., Defendant.");
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(400);
+      check("…and Ctrl+Z puts the divider back", joints(await raw()), was);
       check("no page errors", r.log.errors, []);
       await r.close();
     }

@@ -146,6 +146,26 @@ export function pageIsNumbered(lines) {
   return numbered >= 3 || (numbered >= 1 && numbered * 2 >= filled);
 }
 
+/**
+ * Whether a page's margin numbers RUN COMPLETE: numbered (pageIsNumbered),
+ * and the numbers climbing down it (numberChain) at least `share` of the
+ * numbers from 1 to its highest. A page an OCR caught a few numbers of is
+ * numbered by pageIsNumbered's count and still lacks most of them: # Number
+ * lines is offered there (the owner: "I have a page where Number Lines is not
+ * available").
+ */
+export function pageNumbersComplete(lines, { share = 0.8 } = {}) {
+  if (!pageIsNumbered(lines)) return false;
+  const nums = (lines || []).map((l) => { const g = gutterPrefix(l); const n = g ? parseInt(g.gutter, 10) : NaN; return n > 0 ? n : null; });
+  const chain = numberChain(nums);
+  let count = 0, top = 0;
+  nums.forEach((n, k) => { if (chain[k]) { count++; top = Math.max(top, n); } });
+  // …and most of its lines of text on a number (a line between two numbers,
+  // or past the last, is the paper's too, but not most of them).
+  const filled = (lines || []).filter((l, k) => String(l).trim() && !(nums[k] != null && !gutterPrefix(l).rest.trim())).length;
+  return count >= Math.max(3, share * top) && count >= 0.6 * filled;
+}
+
 /** The gutter number a line opens with: { gutter, rest } or null. */
 export function gutterPrefix(line) {
   const m = String(line == null ? "" : line).match(GUTTER_RE);
@@ -3789,10 +3809,11 @@ export function boxAround(lines, i) {
  * it (moved back to the start of a word it would cut) the left cell, the rest
  * the right; a rule over and under. On a numbered page (`numbered`) each line
  * keeps its number, and the rules are lines between numbers, written with four
- * spaces where a number stands (as PDF-Linker writes a half line). Returns the
- * page's new lines and `{ first, last }`, the box's rows among them.
+ * spaces where a number stands (as PDF-Linker writes a half line). `across`,
+ * the page's widest line past its margin number: the box is drawn that wide.
+ * Returns the page's new lines and `{ first, last }`, the box's rows among them.
  */
-export function makeColumnBox(lines, from, to, col, { numbered = false } = {}) {
+export function makeColumnBox(lines, from, to, col, { numbered = false, across = 0 } = {}) {
   const rows = [];
   for (let k = from; k <= to; k++) {
     const s = String(lines[k] || "");
@@ -3805,7 +3826,9 @@ export function makeColumnBox(lines, from, to, col, { numbered = false } = {}) {
     rows.push({ lead, left: body.slice(0, cut).trim(), right: body.slice(cut).trim() });
   }
   const wl = Math.max(Math.max(0, col - 4), ...rows.map((r) => r.left.length)) + 2;
-  const wr = Math.max(12, ...rows.map((r) => r.right.length)) + 2;
+  // The box across the page's text (`across`, its widest line past the margin
+  // number), so the right column is not drawn only as wide as what it holds.
+  const wr = Math.max(12 + 2, ...rows.map((r) => r.right.length + 2), across - wl - 3);
   const pad = numbered ? "    " : "";
   const out = lines.slice(0, from);
   out.push(pad + "┌" + "─".repeat(wl) + "┬" + "─".repeat(wr) + "┐");
@@ -3984,4 +4007,53 @@ export function boxBackspace(lines, i, col, { numbered = false } = {}) {
   const res = reflowBox(out, p, { line: p, col: caretCol }, { numbered });
   if (!res) { out[p] = temp; return { lines: out, caret: { line: p, col: caretCol } }; }
   return { lines: res.lines, caret: res.caret || { line: p, col: caretCol } };
+}
+
+/**
+ * A column box's rule `j` (0 the left edge, 1 the first divider, …, the last
+ * the right edge) moved to column `col` of the line: a divider moves between
+ * its two columns, the right edge widens or narrows the last. Every rule line
+ * of the box is drawn again at the new places and every row set on them, a
+ * cell's text that no longer fits wrapped onto its column's next rows
+ * (reflowBox). The owner, in chat: the columns "are not adjustable". `i` is
+ * any row of the box. Returns the page's lines, or null where the box's rules
+ * cannot be read or `j` is its left edge.
+ */
+export const BOX_MIN = 6; // the narrowest a column is drawn, its two spaces of margin counted
+export function resizeBox(lines, i, j, col, { numbered = false } = {}) {
+  const box = boxAround(lines, i);
+  if (!box || j < 1) return null;
+  let rule = null;
+  for (let k = box.from; k <= box.to && !rule; k++) if (isBoxRule(lines[k])) rule = boxBars(lines[k]);
+  if (!rule || j >= rule.length) return null;
+  const lo = rule[j - 1] + BOX_MIN + 1;
+  const hi = j + 1 < rule.length ? rule[j + 1] - BOX_MIN - 1 : Infinity;
+  const at = Math.max(lo, Math.min(hi, Math.round(col)));
+  if (at === rule[j]) return lines.slice();
+  const bars = rule.slice();
+  bars[j] = at;
+  const n = bars.length - 1;
+  const width = (q) => bars[q + 1] - bars[q] - 1;
+  let out = lines.slice();
+  for (let k = box.from; k <= box.to; k++) {
+    const s = out[k];
+    const b = boxBars(s);
+    if (b.length !== bars.length) continue;
+    const head = s.slice(0, b[0]);
+    if (isBoxRule(s)) {
+      out[k] = head + bars.slice(0, -1).map((x, q) => s[b[q]] + "─".repeat(width(q))).join("") + s[b[n]];
+    } else if (isBoxRow(s)) {
+      const cells = b.slice(0, -1).map((x, q) => s.slice(x + 1, b[q + 1]).trim());
+      out[k] = head + cells.map((t, q) => "│" + (" " + t).padEnd(width(q))).join("") + "│";
+    }
+  }
+  // Each row whose text the new widths no longer hold, wrapped down its column.
+  for (let k = box.from; k < out.length; k++) {
+    const around = boxAround(out, k);
+    if (!around && !isBoxRule(out[k])) { if (k > box.from) break; continue; }
+    if (!isBoxRow(out[k])) continue;
+    const res = reflowBox(out, k, null, { numbered });
+    if (res) out = res.lines;
+  }
+  return out;
 }

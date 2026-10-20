@@ -4864,7 +4864,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         nb.type = "button";
         nb.textContent = "# Number lines";
         nb.title = "This page has no margin line numbers: give it pleading paper's 1–28 — each line on the number the PDF prints it at where the PDF is open beside it, else in order";
-        nb.hidden = TD.pageIsNumbered(p.lines) || TD.readsDidNotOcr(p.lines);
+        nb.hidden = TD.pageNumbersComplete(p.lines) || TD.readsDidNotOcr(p.lines);
         nb.addEventListener("click", (e) => { e.preventDefault(); numberPage(Number(sec.dataset.index)); });
         lab.appendChild(nb);
       }
@@ -6212,10 +6212,87 @@ function makeColumnBoxAtSelection() {
   const lines = text.split("\n");
   if (lines.slice(s0.line, s1.line + 1).some((l) => /[│─┌└├┐┘┤]/.test(l))) { toast("Those lines are in a box already.", { error: true }); return; }
   snapshot(body, true);
-  const made = TD.makeColumnBox(lines, s0.line, s1.line, s0.col, { numbered: body.classList.contains("numbered") });
+  // The box across the page's text: its widest line, past a margin number.
+  const across = Math.max(0, ...lines.map((l) => { const g = TD.gutterPrefix(l); return (g ? l.slice(g.gutter.length) : l).trimEnd().length; }));
+  const made = TD.makeColumnBox(lines, s0.line, s1.line, s0.col, { numbered: body.classList.contains("numbered"), across });
   rebuildFromLines(body, made.lines, { line: made.first, col: made.lines[made.first].indexOf("│") + 2 });
-  toast("A column box: type in either column and the other never moves — the words that outgrow a column wrap onto its next row. Ctrl+Z takes the box off.", { ms: 7000 });
+  toast("A column box: type in either column and the other never moves — the words that outgrow a column wrap onto its next row. Drag the divider or the right edge to size the columns. Ctrl+Z takes the box off.", { ms: 8000 });
 }
+// A box's divider or right edge DRAGGED to where it is to stand (TD.resizeBox):
+// the owner, "it created one tiny box and one large box, but they are not
+// adjustable". A press on a rule of a box row, on a ✓ Use my text page under
+// ✎ Edit, shows a guide down the box that follows the pointer; letting go
+// moves the rule by the characters the guide moved, every row of the box set
+// on the new widths (one undo step). A character is read off the row pressed
+// (its two outer rules, and the columns between them in the file).
+let boxDrag = null;
+// A rule is drawn a pixel wide: it is grabbed anywhere within BOX_GRAB px of it.
+const BOX_GRAB = 6;
+/** The rule of a box row on a ✓ Use my text page under the pointer, near enough to grab: its .rb, or null. */
+function boxBarAt(e) {
+  if (!editing) return null;
+  const line = e.target && e.target.closest && e.target.closest(".page-body.free > .line.rl");
+  if (!line) return null;
+  let best = null, gap = BOX_GRAB;
+  for (const b of line.querySelectorAll(".rb")) {
+    const r = b.getBoundingClientRect();
+    const d = Math.abs(e.clientX - (r.left + r.width / 2));
+    if (d <= gap) { gap = d; best = b; }
+  }
+  return best;
+}
+pagesEl.addEventListener("pointermove", (e) => {
+  if (boxDrag) return;
+  const line = e.target && e.target.closest && e.target.closest(".page-body.free > .line.rl");
+  if (!line) return;
+  const want = boxBarAt(e) && [...line.querySelectorAll(".rb")].indexOf(boxBarAt(e)) > 0 ? "col-resize" : "";
+  if (line.style.cursor !== want) line.style.cursor = want;
+});
+pagesEl.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || !editing) return;
+  const bar = boxBarAt(e);
+  const line = bar && bar.closest(".line");
+  const body = line && line.closest(".page-body");
+  if (!body || !body.classList.contains("free")) return;
+  const lines = [...body.querySelectorAll(":scope > .line")];
+  const i = lines.indexOf(line);
+  const text = TD.serializeNodes(body).split("\n");
+  if (i < 0 || !TD.isBoxRow(text[i])) return;
+  const bars = [...line.querySelectorAll(".rb")];
+  const j = bars.indexOf(bar);
+  const cols = TD.boxBars(text[i]);
+  if (j < 1 || cols.length !== bars.length) return; // the left edge stays where the box stands
+  const x0 = bars[0].getBoundingClientRect().left, x1 = bars[bars.length - 1].getBoundingClientRect().left;
+  const unit = (x1 - x0) / (cols[cols.length - 1] - cols[0]);
+  if (!(unit > 0)) return;
+  e.preventDefault();
+  const box = TD.boxAround(text, i);
+  const top = lines[box.from].getBoundingClientRect().top, foot = lines[box.to].getBoundingClientRect().bottom;
+  const guide = document.createElement("div");
+  guide.className = "box-guide";
+  Object.assign(guide.style, { position: "fixed", top: top + "px", height: Math.max(8, foot - top) + "px", left: bar.getBoundingClientRect().left + "px" });
+  document.body.appendChild(guide);
+  boxDrag = { body, i, j, col: cols[j], unit, startX: e.clientX, barX: bar.getBoundingClientRect().left, guide };
+  try { bar.setPointerCapture(e.pointerId); } catch { /* the window's moves will do */ }
+});
+window.addEventListener("pointermove", (e) => {
+  if (!boxDrag) return;
+  const steps = Math.round((e.clientX - boxDrag.startX) / boxDrag.unit);
+  boxDrag.guide.style.left = (boxDrag.barX + steps * boxDrag.unit) + "px";
+});
+window.addEventListener("pointerup", (e) => {
+  if (!boxDrag) return;
+  const d = boxDrag;
+  boxDrag = null;
+  d.guide.remove();
+  const steps = Math.round((e.clientX - d.startX) / d.unit);
+  if (!steps || !d.body.isConnected) return;
+  const lines = TD.serializeNodes(d.body).split("\n");
+  const out = TD.resizeBox(lines, d.i, d.j, d.col + steps, { numbered: d.body.classList.contains("numbered") });
+  if (!out || out.join("\n") === lines.join("\n")) return;
+  snapshot(d.body, true);
+  rebuildFromLines(d.body, out, null);
+});
 $("colbox-btn").addEventListener("mousedown", (e) => e.preventDefault()); // the selection stays where it is
 $("colbox-btn").addEventListener("click", makeColumnBoxAtSelection);
 // A paste goes in as ONE edit, its first piece typed where the caret stands
@@ -10745,8 +10822,11 @@ function numberPage(i) {
   if (!body) return;
   const m = reel.length > 1 ? reelMemberOf(i) : null;
   const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
-  if (body.classList.contains("numbered")) { toast(`${where} already has its margin numbers.`); return; }
-  const all = TD.serializeNodes(body).split("\n");
+  const was = TD.serializeNodes(body).split("\n");
+  if (TD.pageNumbersComplete(was)) { toast(`${where} already has its margin numbers.`); return; }
+  // A page with SOME numbers (an OCR caught a few): they come off, and the
+  // page is numbered from 1 as one that had none.
+  const all = was.map((l) => { const g = TD.gutterPrefix(l); return g ? g.rest : l; });
   let end = all.findIndex((l) => TD.TRAILER_RE.test(l));
   if (end < 0) end = all.length;
   while (end > 0 && !all[end - 1].trim()) end--;
@@ -10754,8 +10834,11 @@ function numberPage(i) {
   while (first < end && !all[first].trim()) first++;
   if (first >= end) { toast(`${where} has no text to number.`, { error: true }); return; }
   const content = all.slice(first, end), tail = all.slice(end);
-  const margin = Math.min(...content.filter((l) => l.trim()).map((l) => l.search(/\S/)));
-  const texts = content.map((l) => (l.trim() ? l.slice(margin).replace(/\s+$/, "") : ""));
+  // Every line's text flush at the one margin after its number: the owner,
+  // "number lines should always create the lines in a single straight
+  // margin" — the spaces a poor scan's OCR put in front of a line are no
+  // indent of the filing's, and an indent the page does have is typed back.
+  const texts = content.map((l) => l.trim());
   const num = (n) => String(n).padStart(2);
   const half = (t) => "    " + t;
   let out = null, how = "";
@@ -11328,7 +11411,7 @@ function refreshNocrButtons(indices) {
     const nb = b.parentElement && b.parentElement.querySelector(".num-page");
     if (nb) {
       const body = b.closest(".tpage").querySelector(".page-body");
-      nb.hidden = body ? body.classList.contains("numbered") || pageReadsDidNotOcr(i) : TD.pageIsNumbered(p.lines);
+      nb.hidden = body ? TD.pageNumbersComplete(TD.serializeNodes(body).split("\n")) || pageReadsDidNotOcr(i) : TD.pageNumbersComplete(p.lines);
     }
   }
   refreshFixButtons(indices);
@@ -20659,7 +20742,12 @@ function applyMatchedLayoutNow() {
       const ind = top == null ? null
         : rowInd ? (p.lefts[k] != null ? (none.size && none.has(noIndentKey(l)) ? 0 : Math.max(0, p.lefts[k] * p.scale - p.gut)) : null)
         : p.inds && p.inds[k] != null ? p.inds[k] * p.scale : null;
-      const lineLeft = p.lefts && p.lefts[k] != null && !rowInd ? Math.max(0, p.lefts[k] * p.scale - p.gut) : null;
+      // (On a numbered page on the export's grid every line has the grid's one
+      // left — a line no row was matched to too — so its number stands in the
+      // margin's one column with the rest.)
+      const lineLeft = rowInd ? null
+        : p.gut && p.grid ? Math.max(0, p.grid.x0 * p.scale - p.gut)
+        : p.lefts && p.lefts[k] != null ? Math.max(0, p.lefts[k] * p.scale - p.gut) : null;
       const want = top == null ? "" :
         (top * p.scale) + "|" + (lineLeft == null ? "" : lineLeft) + "|" +
         (p.sizes[k] * p.scale) + "|" + (p.boxes[k] * p.scale) + "|" + (ind == null ? "" : ind);

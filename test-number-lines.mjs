@@ -107,6 +107,17 @@ const A = [
   " 1  Already numbered",
   " 2  on pleading paper",
   " 3  as exported",
+  // A poor scan: the OCR caught three of its numbers, and put its lines in at
+  // whatever indent it read them at.
+  "====== Page 3 ======",
+  " 1  One",
+  " 2  Two",
+  " 3  Three",
+  "     Four",
+  "  Five",
+  "        Six",
+  "Seven",
+  "   Eight",
 ].join("\n") + "\n";
 
 // A form page with no margin numbers: beside its PDF each piece of a line is
@@ -205,6 +216,13 @@ async function run() {
       const p = r.page;
       check("offered on the page with no numbers", await shown(p, 0), true);
       check("…not on the page that has them", await shown(p, 1), false);
+      check("…and on a page an OCR caught only a few numbers of", await shown(p, 2), true);
+      await press(p, 2);
+      await p.waitForTimeout(400);
+      check("that page numbered from 1, its few numbers taken off and put back, every line flush at one margin", await lines(p, 2),
+        [" 1  One", " 2  Two", " 3  Three", " 4  Four", " 5  Five", " 6  Six", " 7  Seven", " 8  Eight"].concat(bare(9, 28)));
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(300);
       await press(p, 0);
       await p.waitForTimeout(400);
       check("numbered in order, the margin taken off, bare numbers to 28", await lines(p, 0),
