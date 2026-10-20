@@ -608,6 +608,27 @@ word, or the line it is shares no word with its row and is matched to none
 a justified line (word spaces of 0.8 type heights) and checks no two words a
 space apart in the file are drawn more than a wide space apart.
 
+**A pleading's caption: the attorney block at the margin, the clerk's stamp
+at the right** (`pdfsync.captionAlign`, `.cap-r`, `.cap-split`). The owner:
+"The law firm name, attorneys, emails, address, phone numbers are always left
+aligned. But frequently PDF viewer is mistakenly heavily indenting them.
+Likewise, the stamp in the top right is always right aligned." On a numbered
+page that is its PDF's first, the lines above the court's title are read by
+their words: one carrying a filing stamp's (Electronically FILED, Superior
+Court of California, Clerk of Court, Deputy, By, a date and time …) is the
+stamp's and stands against the right margin; one whose last column (after
+`COLUMN_GAP` spaces) is the stamp's carries both, the attorney's words at the
+margin and the stamp's at the right (a flex row, `space-between`); every other
+is the attorney block's, flush at the margin. None takes an indent off the
+PDF's rows: the stamp is printed over the same heights, and the row nearest a
+number was as often its as the line's (`pdfIndents` read "TEASDALE-VANE LAW"
+off the stamp's row, 270 px in). A lone clerk's name ("Edgecombe W. Slayton,")
+says nothing of the stamp and is set at the margin. `test-form-look.mjs`
+prints a stamp on the sample pleading, its second line at line 2's very
+height with the firm's name under it. And `docBodyLeft` counts a PDF's rows
+read as well as its numbers in what it keeps its answer by: a poor scan's
+margin, read before any row had arrived, was kept as none for good.
+
 **…and laid on the paper's numbers** (`scanGeom`, `geom.scan`). The owner,
 next: "The added numbers from number lines are not uniformly spaced with the
 half spaces baked in." Laid by its words, each line stood on whatever row of

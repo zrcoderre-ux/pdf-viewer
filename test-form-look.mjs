@@ -148,6 +148,13 @@ const SPLIT_AT = {
 };
 for (const [n, parts] of Object.entries(SPLIT_AT)) if (parts.join("") !== PLEAD_BODY[n]) throw new Error(`SPLIT_AT ${n} is not its line`);
 const INDENTED = 21;
+// The clerk's filing stamp over the attorney block, at the right: its first
+// words written onto line 1 a column after the attorney's name (as PDF-Linker
+// writes them), and on the PDF with numbers its second printed at line 2's
+// very height, with the firm's name a few points under it — the row an indent
+// would be read off.
+const STAMP = { 1: "Electronically FILED by", 2: "Superior Court of California," };
+PLEAD_BODY[1] = PLEAD_BODY[1] + " ".repeat(12) + STAMP[1];
 // A caption's second column, on the PDFs without numbers: each line's two
 // pieces set apart (x 72 and 350), the file's at one column — the evidence the
 // export's character grid is read off.
@@ -177,7 +184,7 @@ try {
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc && !!window.__textReaderPickPdfs);
 
   // The PDFs, made in the page, and the folder: both PDFs, both exports.
-  const made = await page.evaluate(async ({ FORM, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION }) => {
+  const made = await page.evaluate(async ({ FORM, STAMP, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const form = await PDFDocument.create();
     const fp = form.addPage([612, 792]);
@@ -224,6 +231,16 @@ try {
       // (Line 21 an indented paragraph on the PDF without its numbers: the text
       // is set in, the margin number stays in its column.)
       let x = !numbers && n === INDENTED ? 108 : 72;
+      if (numbers && n === 1) {
+        pp.drawText(body.slice(0, body.indexOf(STAMP[1])).trimEnd(), { x, y, size: 12, font: tf.R });
+        pp.drawText(STAMP[1], { x: 430, y, size: 9, font: tf.R });
+        continue;
+      }
+      if (numbers && n === 2) {
+        pp.drawText(STAMP[2], { x: 430, y, size: 9, font: tf.R });
+        pp.drawText(body, { x, y: y - 7, size: 12, font: tf.R });
+        continue;
+      }
       // (On the PDFs without numbers, line 15 set as a justified line is: each
       // word an item of its own, the word spaces wide, under a column's gap.)
       if (!numbers && !plain && CAPTION[n]) {
@@ -255,7 +272,7 @@ try {
     await window.__textReaderAdoptFolder(dir);
     window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes, "Sample Row Pleading.pdf": rowBytes };
     return { placed };
-  }, { FORM, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION });
+  }, { FORM, STAMP, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION });
 
   /** Open an export beside its PDF and wait for its page to be laid on the grid. */
   async function openBeside(exportName, pdfName) {
@@ -480,6 +497,22 @@ try {
         JSON.stringify(styled));
       check("…its checkbox drawn whole on its numbered line", laid.boxes.length === 1 && laid.boxes[0] === "[ X ]", JSON.stringify(laid.boxes));
       check("…and the page reads back as the file", laid.file === PLEAD_LINES.join("\n"), JSON.stringify(laid.file).slice(0, 160));
+      // The caption: the attorney block at the margin, the clerk's stamp at the right.
+      const cap = await page.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body.fixed");
+        const L = body.getBoundingClientRect().left, R = body.getBoundingClientRect().right;
+        const right = parseFloat(body.style.getPropertyValue("--body-r")) || 0;
+        const at = (k, what) => {
+          const lt = body.querySelectorAll(":scope > .line")[k].querySelector(".lt");
+          const w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+          for (let n = w.nextNode(); n; n = w.nextNode()) { const i = n.data.indexOf(what); if (i >= 0) { const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + what.length); const b = r.getBoundingClientRect(); return { l: b.left - L, r: b.right - L }; } }
+          return null;
+        };
+        return { firm1: at(0, "Marigold"), stamp: at(0, "Electronically FILED by"), firm2: at(1, "TEASDALE"), edge: R - L - right };
+      });
+      check("…the caption's attorney block at the margin, line 2 too though the PDF's row at its height is the stamp's",
+        !!cap.firm1 && !!cap.firm2 && Math.abs(cap.firm1.l - 72 * scale) < 1.5 && Math.abs(cap.firm2.l - 72 * scale) < 1.5, JSON.stringify(cap));
+      check("…and the clerk's stamp on line 1 against the right margin", !!cap.stamp && Math.abs(cap.stamp.r - cap.edge) < 3, JSON.stringify(cap));
       const pleadGaps = await letterGaps(true);
       check("…and no word on it drawn with a gap between its letters, or between two of its words", pleadGaps.length === 0, pleadGaps.slice(0, 6).join(" | "));
       // The right margin is the PDF's: every line's text box ends where the PDF's body does, not at the paper's edge.

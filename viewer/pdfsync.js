@@ -1429,3 +1429,41 @@ export function fileLayout(lines, { slot = null, last = 28, x0 = 0, unit = 6, ga
   }
   return out;
 }
+
+// ---- a pleading's caption: the attorney block left, the clerk's stamp right ----
+//
+// The owner, in chat: "The law firm name, attorneys, emails, address, phone
+// numbers are always left aligned. But frequently PDF viewer is mistakenly
+// heavily indenting them. Likewise, the stamp in the top right is always right
+// aligned." Above the court's title on a pleading's first page, a line's
+// indent read off the PDF is as often the clerk's stamp's (printed over the
+// same height, at the right) as its own; and PDF-Linker writes the stamp's
+// words onto the attorney block's lines, a column's spaces after them.
+
+const COURT_TITLE_RE = /\b(SUPERIOR COURT OF THE STATE|COURT OF APPEAL|UNITED STATES (DISTRICT|BANKRUPTCY) COURT|SUPREME COURT OF|DISTRICT COURT FOR|IN THE .{0,40}COURT)\b/i;
+const STAMP_RE = /(Electronically\s+(FILED|RECEIVED)|\bE-?FILED\b|ENDORSED|CONFORMED\s+COPY|ORIGINAL\s+FILED|Superior\s+Court\s+of\s+California|^\s*County\s+of\s+[A-Z]|Executive\s+Officer|Clerk\s+of\s+(the\s+)?Court|Deputy(\s+Clerk)?\b|^\s*By[\s:]|\b\d{1,2}\/\d{1,2}\/\d{2,4}\s+(at\s+)?\d{1,2}:\d{2}(\s*[AP]\.?M\.?)?|Envelope\s*(ID|No)|Transaction\s+ID|^\s*FILED\b)/i;
+/**
+ * How each line of a pleading's caption is aligned: per line, "left" (the
+ * attorney block: flush at the margin), "right" (the clerk's stamp, against
+ * the right margin), "split" (an attorney line carrying the stamp's words a
+ * column after it: the one at the margin, the other at the right), or null
+ * (the line is no part of the caption, or the page is not a document's first:
+ * `first` false). `texts` are the lines' text, a margin number not in them.
+ * The caption runs from the top to the court's title, which is not in it.
+ */
+export function captionAlign(texts, { first = true, gap = 3 } = {}) {
+  const out = (texts || []).map(() => null);
+  if (!first) return out;
+  const end = texts.findIndex((t) => COURT_TITLE_RE.test(t || ""));
+  if (end < 0) return out;
+  const sep = new RegExp(` {${gap},}`);
+  for (let k = 0; k < end; k++) {
+    const t = String(texts[k] || "").trim();
+    if (!t) continue;
+    const parts = t.split(sep);
+    if (parts.length >= 2 && STAMP_RE.test(parts[parts.length - 1]) && !STAMP_RE.test(parts[0])) out[k] = "split";
+    else if (STAMP_RE.test(t)) out[k] = "right";
+    else out[k] = "left";
+  }
+  return out;
+}

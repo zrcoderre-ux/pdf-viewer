@@ -19951,8 +19951,13 @@ function slotShell(cls, tag, { label = false } = {}) {
  */
 function docBodyLeft(info) {
   if (!info || !info.geoms) return null;
+  // Kept until more of the PDF is read: its numbers' margins, or — on a PDF
+  // that carries none (a poor scan) — its rows, which are read after the open:
+  // counting the numbers alone kept the margin a scan had before any row was
+  // read (none) for good, and drew its numbered pages at the default margin.
   let filled = 0;
   for (const g of info.geoms) if (g) filled++;
+  if (info.rows) for (const r of info.rows) if (r) filled += 1000;
   if (info.__marginAt !== filled) {
     info.__marginAt = filled;
     info.__margin = PS.docBodyLeft(info.geoms, info.rows);
@@ -20752,9 +20757,21 @@ function applyMatchedLayoutNow() {
     p.gut = p.lefts && !p.geom && p.bodyX > 0 && p.body.classList.contains("numbered") ? p.bodyX * p.scale : 0;
     const rowInd = !!(p.gut && !p.grid);
     const none = rowInd ? noIndentOf(p.body) : null;
+    // A pleading's caption on its first page (pdfsync.captionAlign): the
+    // attorney block flush at the margin, whatever indent the PDF's rows give
+    // it (the clerk's stamp, printed over the same heights, is as often the
+    // row read), and the stamp against the right margin.
+    const pageNo = PS.pdfPageOf(doc.pages[Number(p.sec.dataset.index)]);
+    const align = p.tops && p.body.classList.contains("numbered") && pageNo === 1
+      ? PS.captionAlign(p.lines.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; }), { gap: TD.COLUMN_GAP })
+      : null;
     p.lines.forEach((l, k) => {
       const top = p.tops ? p.tops[k] : null;
+      const al = align && top != null ? align[k] : null;
+      l.classList.toggle("cap-r", al === "right");
+      l.classList.toggle("cap-split", al === "split");
       const ind = top == null ? null
+        : al ? 0
         : rowInd ? (p.lefts[k] != null ? (none.size && none.has(noIndentKey(l)) ? 0 : Math.max(0, p.lefts[k] * p.scale - p.gut)) : null)
         : p.inds && p.inds[k] != null ? p.inds[k] * p.scale : null;
       // (On a numbered page on the export's grid every line has the grid's one

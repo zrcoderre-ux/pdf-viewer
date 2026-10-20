@@ -1236,3 +1236,9 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
    where the rule will stand. */
 body.editing .page-body.free .line.rl .rb { cursor: col-resize; }
 .box-guide { width: 0; border-left: 2px dashed var(--accent, #1a73e8); z-index: 50; pointer-events: none; }
+
+/* A pleading caption's clerk's stamp, against the right margin (text-reader.js,
+   pdfsync.captionAlign); a line carrying the attorney block's words and the
+   stamp's, the one at the margin and the other at the right. */
+.page-body.fixed .line.cap-r > .lt { text-align: right; }
+.page-body.fixed .line.cap-split > .lt { display: flex; justify-content: space-between; }

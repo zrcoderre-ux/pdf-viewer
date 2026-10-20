@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, fileLayout, standApart,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, fileLayout, standApart, captionAlign,
   matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
@@ -528,6 +528,17 @@ console.log("pieces the PDF sets apart, and words it sets in pieces (standApart,
     standApart([g(72, 40), g(72 + 40 + 9, 50), g(72 + 99 + 8, 30), g(400, 40)]), [true, false, false, true]);
   check("a word a PDF sets in two items is one word in its row's text",
     pdfRows([{ str: "Plain", x: 72, top: 100, w: 25, h: 12 }, { str: "tiff alleges", x: 97, top: 100, w: 60, h: 12 }], { w: 612, h: 792 }).map((r) => r.text), ["Plaintiff alleges"]);
+}
+
+console.log("a pleading's caption (captionAlign)");
+{
+  const cap = ["Electronically FILED by", "HOLLOWMERE GOLDCREST LEDGEWOOD &        County of Los Angeles", "10/12/2026 11:02 PM", "VANTAGE LLP",
+    "Cotterill S. Strangeways (SBN 428397)       Executive Officer/Clerk of Court,", "By A. Selwyn, Deputy Clerk", "Telephone: (723) 258-6342", "",
+    "SUPERIOR COURT OF THE STATE OF CALIFORNIA", "Plaintiff,"];
+  check("the stamp at the right, the attorney block at the margin, a line of both split; nothing past the court's title",
+    captionAlign(cap), ["right", "split", "right", "left", "split", "right", "left", null, null, null]);
+  check("…and nothing on a page that is not a document's first", captionAlign(cap, { first: false }).every((x) => x === null), true);
+  check("…nor on a page with no court's title", captionAlign(["Telephone: (723) 258-6342"]), [null]);
 }
 check("swap store key", swapStoreKey("Rasho v Quillmark", "Brief.txt"), "textReader.swaps.Rasho v Quillmark/Brief.txt");
 // …which the reader asks with the case folder's id, never its bare name: two
