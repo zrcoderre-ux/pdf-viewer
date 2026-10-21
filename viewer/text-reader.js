@@ -20431,7 +20431,13 @@ function applyMatchedLayoutNow() {
     // paper's own, and the page is laid as a numbered one: every number a
     // pitch below the last, a half line halfway between two, in the
     // document's type and the file's own indents (`geom.scan`).
-    if (!geom && body.classList.contains("numbered") && rows && rows.length) {
+    // …BUT ONLY WHERE THE NUMBERS RUN AS A MARGIN DOES (marginRuns). Three
+    // lines opening with a number make a page `numbered`, and an exhibit's
+    // invoice has them: a "1" and an "8" of its quantities, a "25" of its days.
+    // Laid as pleading paper, its "1" stood at line 1 an inch down the page and
+    // the forty lines the file has above it were crowded over the page's top.
+    // The owner: "some of the text is being pushed up off the page".
+    if (!geom && body.classList.contains("numbered") && rows && rows.length && marginRuns(lines)) {
       geom = scanGeom(lines, rows, sz || { w: 612, h: 792 }, bodyX);
       numbered = true;
     }
@@ -21767,6 +21773,23 @@ function pdfIndents(lines, nums, geom, rows, bodyX) {
  * inch to the foot either way.
  */
 const PAPER_MARGIN = 72; // an inch, in PDF points: pleading paper's margin over line 1 and under the last
+/**
+ * Whether a page's margin numbers run as pleading paper's do: at least
+ * MARGIN_RUN_MIN of them climbing down the page (TD.numberChain), and those at
+ * least half of the numbers from 1 to the highest of them. A page # Number
+ * lines numbered, or one an OCR caught most of the margin of, does; a few
+ * figures that happen to open lines of an exhibit (an invoice's "25", "1",
+ * "8", "3") do not.
+ */
+const MARGIN_RUN_MIN = 5;
+function marginRuns(lines) {
+  const nums = lines.map((l) => (l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null))
+    .map((n) => (n > 0 && n <= TD.MARGIN_LAST ? n : null));
+  const chain = TD.numberChain(nums);
+  let count = 0, top = 0;
+  nums.forEach((n, k) => { if (chain[k]) { count++; top = Math.max(top, n); } });
+  return count >= MARGIN_RUN_MIN && count >= top / 2;
+}
 function scanGeom(lines, rows, sz, bodyX) {
   const lay = PS.rowLayout(lines.map((l) => l.textContent), rows, { bodyLeft: bodyX });
   const pairs = [];
