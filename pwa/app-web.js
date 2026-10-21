@@ -22,7 +22,8 @@ const VIEWER_SRC = "viewer/viewer.html";
 // A PDF-Linker text export opens in the text reader instead: the same tab
 // strip, a different page in the iframe.
 const READER_SRC = "viewer/text-reader.html";
-const isTextFile = (f) => /\.(txt|leak)$/i.test(f.name) || f.type === "text/plain";
+// …and so does My-Macros' Markdown export of a Word draft, in its pseudonyms.
+const isTextFile = (f) => /\.(txt|leak|md|markdown)$/i.test(f.name) || f.type === "text/plain" || f.type === "text/markdown";
 const isPdfFile = (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name);
 let tabs = [];
 let activeId = null;
@@ -404,6 +405,7 @@ async function pickFiles() {
         types: [
           { description: "PDF document", accept: { "application/pdf": [".pdf"] } },
           { description: "Text export", accept: { "text/plain": [".txt", ".LEAK"] } },
+          { description: "Markdown", accept: { "text/markdown": [".md", ".markdown"] } },
         ],
         multiple: true,
       });

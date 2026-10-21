@@ -14,10 +14,10 @@
 
 import { checkboxRanges } from "./textdoc.js";
 
-/** A file name's stem, extensions off (.pdf, .txt, .txt.LEAK), separators spaced, case folded. */
+/** A file name's stem, extensions off (.pdf, .txt, .txt.LEAK, .md), separators spaced, case folded. */
 export function normalizeStem(name) {
   let s = String(name == null ? "" : name).split(/[\\/]/).pop();
-  s = s.replace(/\.txt\.leak$/i, "").replace(/\.(txt|pdf|docx?)$/i, "");
+  s = s.replace(/\.txt\.leak$/i, "").replace(/\.(txt|pdf|docx?|md|markdown)$/i, "");
   return spaceStem(s).toLowerCase();
 }
 /** PDF-Linker's own normalisation of a stem before it is scrubbed (_pn_scrubbed_stem). */

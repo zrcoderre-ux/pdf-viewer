@@ -863,7 +863,7 @@ let titleBeforePrint = null;
 function printTitle() {
   const m = typeof reelCurrent === "function" ? reelCurrent() : null;
   const n = (m && m.name) || fileName || "document";
-  return n.replace(/\.txt(\.LEAK)?$/i, "").trim() || "document";
+  return TD.docLabel(n).trim() || "document";
 }
 // A PAGE SHOWN AS ITS PDF PAGE PRINTS ITS TEXT. ⇄ PDF puts the filing's own
 // page where the export's text was, and the filing is the one thing in the
@@ -3672,6 +3672,7 @@ function renameFixed(m) {
   if (!m) return "no document open";
   if (TD.isCombinedName(m.name)) return "Combined Text.txt is PDF-Linker's own file, written again by every run, and is not renamed";
   if (TD.isQuarantinedName(m.name)) return "quarantined by PDF-Linker's leak gate — rename it once a run has released it";
+  if (TD.isMarkdownName(m.name)) return "a Markdown export is not one of the case folder's documents — rename it where it is saved";
   if (!folderOpen() || !m.d || !folderDocs.includes(m.d)) return "open its case folder to rename it — its PDF is renamed with it";
   return "";
 }
@@ -4358,7 +4359,7 @@ function openText(text, name, handle, built, { stash = null, d = null, base = nu
 async function pickFile() {
   if (window.showOpenFilePicker) {
     try {
-      const [h] = await window.showOpenFilePicker({ types: [{ description: "Text export", accept: { "text/plain": [".txt", ".LEAK"] } }] });
+      const [h] = await window.showOpenFilePicker({ types: [{ description: "Text export or Markdown", accept: { "text/plain": [".txt", ".LEAK"], "text/markdown": [".md", ".markdown"] } }] });
       await openFile(await h.getFile(), h);
       return;
     } catch (e) {
@@ -4768,7 +4769,7 @@ document.addEventListener("drop", (e) => {
   // document may bring its own case folder in, and the key is loaded first,
   // while the folder open is still the last one. On its own it is a key loaded
   // by hand, the open folder's.
-  const isDoc = (f) => /\.(txt|leak)$/i.test(f.name) || f.type === "text/plain";
+  const isDoc = (f) => /\.(txt|leak)$/i.test(f.name) || TD.isMarkdownName(f.name) || f.type === "text/plain";
   const owner = files.some(isDoc) ? null : handOwner();
   (async () => {
     for (const f of files) {
@@ -8498,7 +8499,9 @@ async function writeText(text, name, handle, { adopt = false, picked = null } = 
   }
   if (window.showSaveFilePicker) {
     try {
-      const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: "Text", accept: { "text/plain": [".txt"] } }] });
+      // A Markdown export is saved as one, not offered a .txt.
+      const type = TD.isMarkdownName(name) ? { description: "Markdown", accept: { "text/markdown": [".md", ".markdown"] } } : { description: "Text", accept: { "text/plain": [".txt"] } };
+      const h = await window.showSaveFilePicker({ suggestedName: name, types: [type] });
       const w = await h.createWritable();
       await w.write(blob);
       await w.close();
@@ -17568,7 +17571,7 @@ function reelDivider(m, { back = false } = {}) {
   el.dataset.name = m.name;
   const label = document.createElement("span");
   label.className = "rd-name";
-  label.textContent = m.name.replace(/\.txt(\.LEAK)?$/i, "");
+  label.textContent = TD.docLabel(m.name);
   const note = document.createElement("span");
   note.className = "rd-note";
   note.textContent = TD.isQuarantinedName(m.name) ? "quarantined by the leak gate"

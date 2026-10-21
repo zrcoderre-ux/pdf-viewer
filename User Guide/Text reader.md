@@ -30,6 +30,14 @@ app, which routes it to the reader tab.
   own "open with" — `.pdf`, `.txt` and a quarantined `.txt.LEAK` alike. A
   folder picked with no exports in it offers the file picker rather than
   leaving a dead end.
+- **My-Macros' Markdown export opens the same way.** The re-anonymized `.md`
+  My-Macros writes from a Word draft is in its pseudonyms, like an export, so
+  the reader opens it as it opens a `.txt` — from the picker, a drop, or the
+  app's "open with" — and puts the real values from the key over the
+  pseudonyms on screen. The Markdown marks (`#`, `**`, `-`) show as written.
+  Save writes it back to the same `.md`, in its pseudonyms. It is a file on
+  its own, not one of the case folder's documents, so it is not listed in
+  Documents and is renamed where it is saved, not from the top bar.
 - **The tools stand down the left margin.** The reading, pseudonym, review and
   PDF tools are in a **Tools** panel on the left — the same rail the PDF viewer
   carries — in labelled groups: *Reading* (font, size, leading, width, line

@@ -21,6 +21,20 @@ the `chrome.*` shim that used to sit at the top of `viewer.js`, moved out so
 both pages import it first. The PWA shell (`pwa/app-web.js`) routes a `.txt`
 to a reader iframe and feeds it through `__textReaderLoadLocal`.
 
+**My-Macros' Markdown export opens as a lone file** (`TD.isMarkdownName`).
+The re-anonymized `.md` My-Macros writes from a Word draft carries the
+pseudonyms, as an export does, so it takes the `.txt` path unchanged: the
+pickers, the drop, the file input, the PWA's `isTextFile` and its
+`file_handlers` all accept `.md`/`.markdown`, and `parseExport` reads it as
+it reads a headerless Word export, one page, round-tripped byte for byte. The
+Markdown is shown as written (`#`, `**`, list markers), not rendered: the page
+is the file's text, and a save writes that text back. It is never a document
+of the case folder — `isExportName` does not take it, so a folder listing, the
+reel and PDF-Linker's run do not see it — and `renameFixed` refuses it for
+that reason. `TD.docLabel` (the bar, the print title, the reel divider) and
+`PS.normalizeStem` drop `.md` with the other extensions, and the Save picker
+offers a `.md` as Markdown. `test-markdown.mjs` covers it.
+
 **A stand-in only the pinned sheet holds is named at the save**
 (`PK.compilePinnedFakes`, `pinnedFakes`, `pinnedNote`). PDF-Linker puts a
 binding no export carries on "Pinned (never in text)", which DeAnonymize.bas
