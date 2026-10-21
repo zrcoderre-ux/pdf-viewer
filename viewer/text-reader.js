@@ -21914,6 +21914,65 @@ function syncScroll(from, force) {
   // margins are not the PDF's, so one box's run is not the other's. Each
   // scrolls sideways on its own.
 }
+// THE WHEEL MOVES BOTH COLUMNS IN ONE FRAME. The owner, in chat: "Scrolling
+// down is not scrolling both down at the same time." Left to the browser, a
+// wheel scrolls the column under the mouse on the compositor's own thread, at
+// once, and the other column follows only when the scroll event reaches this
+// page's thread — a frame later at best, and as long as whatever else the page
+// is doing at worst (a page being laid on its grid, a PDF page drawn, the reel
+// hanging the next document: 50-70 ms holds on a small folder, longer on a
+// scan). So side by side, a vertical wheel over either column is taken here,
+// and both columns are moved from the same frame: the one under the mouse
+// eased toward where the wheel has sent it, the other synced to it before the
+// frame is drawn. Sideways wheels, Ctrl+wheel (the zoom) and a wheel over a
+// box that scrolls on its own inside the column are the browser's as before;
+// the keys, the scroll bars and auto-scroll still go by the scroll event.
+const WHEEL_EASE = 0.3;  // of what is left to go, each frame
+const WHEEL_SNAP = 40;   // px: a step this small (a trackpad's) is taken whole
+let wheelBox = null, wheelPos = 0, wheelGoal = 0, wheelAt = 0, wheelRaf = 0;
+const reducedMotion = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+/** A box between the wheel's target and the column that can scroll that way itself. */
+function scrollsOwnWay(target, box, dy) {
+  for (let el = target instanceof Element ? target : null; el && el !== box; el = el.parentElement) {
+    if (el.scrollHeight <= el.clientHeight + 1) continue;
+    const oy = getComputedStyle(el).overflowY;
+    if (oy !== "auto" && oy !== "scroll") continue;
+    if (dy > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0) return true;
+  }
+  return false;
+}
+function onSyncWheel(e) {
+  if (!sbsOn || pdfPane.hidden || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (!e.deltaY || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+  const box = e.currentTarget;
+  const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * box.clientHeight : e.deltaY;
+  if (scrollsOwnWay(e.target, box, dy)) return;
+  e.preventDefault();
+  if (wheelBox !== box) { wheelBox = box; wheelPos = wheelAt = wheelGoal = box.scrollTop; }
+  wheelGoal = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, wheelGoal + dy));
+  if (!wheelRaf) wheelRaf = requestAnimationFrame(wheelStep);
+}
+function wheelStep() {
+  wheelRaf = 0;
+  const box = wheelBox;
+  if (!box || !sbsOn || pdfPane.hidden) { wheelBox = null; return; }
+  // Something else moved the column since the last frame (the reel putting the
+  // scroll back after hanging a document above, a re-layout held in place):
+  // the wheel's place and its goal move with it.
+  const moved = box.scrollTop - wheelAt;
+  if (Math.abs(moved) > 1) { wheelPos += moved; wheelGoal += moved; }
+  wheelGoal = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, wheelGoal));
+  const left = wheelGoal - wheelPos;
+  wheelPos = Math.abs(left) <= WHEEL_SNAP || (reducedMotion && reducedMotion.matches) ? wheelGoal : wheelPos + left * WHEEL_EASE;
+  if (Math.abs(wheelGoal - wheelPos) < 0.5) wheelPos = wheelGoal;
+  box.scrollTop = wheelPos;
+  wheelAt = box.scrollTop;
+  syncScroll(box === stageEl ? "text" : "pdf", true);
+  if (wheelPos !== wheelGoal) wheelRaf = requestAnimationFrame(wheelStep);
+  else wheelBox = null;
+}
+stageEl.addEventListener("wheel", onSyncWheel, { passive: false });
+pdfPane.addEventListener("wheel", onSyncWheel, { passive: false });
 stageEl.addEventListener("scroll", () => { notePlaceSoon(); noteSideways(stageEl); syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); fitNearSoon(); gridNearSoon(); }, { passive: true });
 // Coalesced: a scroll fires continuously, and a pass over the members that
 // builds pages back is not something to do sixty times a second.
