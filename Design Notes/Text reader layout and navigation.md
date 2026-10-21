@@ -270,6 +270,31 @@ new headless mode (`channel: "chromium"`) with `--force-device-scale-factor` and
 a `--window-size`, and a one-pixel checkerboard canvas shows whole-pixel
 placement the way a 125% Windows screen does.
 
+### Side by side across the reel's seams (`matchReelGaps`)
+
+The owner, in chat: "Side by side is not keeping the height of the text and
+pdf the same", "some of the text is being pushed up off the page", and "They
+are not lining up at the top as they should."
+
+With ↕ Read folder on, the divider hung between two documents (`reelDivider`)
+stood in the text column alone. Every page under it stood about 50 px lower
+than its PDF page. `syncScroll` holds the two columns level at each page's first
+line and moves them in proportion between first lines, so the pair was level
+only with a first line at the top of the screen: anywhere else near a seam the
+text stood up to a divider's height above its PDF page, and at the foot of the
+folder the pane ran out of room first and the last pages stayed out of step for
+good. With Read folder off there is no divider, which is why only some files
+showed it.
+
+`applyMatchedLayoutNow` now ends with `matchReelGaps`: the first slot of each
+document takes, as its top margin, the gap the text column has above that
+document's first page (divider and its margins together), measured each pass,
+so a divider that wraps in a narrow window is matched too. A slot's top margin
+collapses with the bottom margin of the slot above, so the margin given is the
+gap. `test-reel-sync.mjs` scrolls a three-document reel down and back up at two
+widths and finds no page more than a pixel off its PDF page (before: 50 px off
+at every seam, and at the foot of the folder).
+
 ### The grid is the page's, not the pane's (`gridOn`, `docBodyRight`)
 
 The owner, in chat: "The text file should keep the side by side look, even

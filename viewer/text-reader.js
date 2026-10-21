@@ -20985,6 +20985,7 @@ function applyMatchedLayoutNow() {
   // The boxes the export draws: their columns and sheets, measured now that
   // every line stands where this pass put it (rules.js).
   fitRuleRows(pagesEl);
+  if (on) matchReelGaps();
   textAnchors = null; textLineTops = null;
   // …and the grid asked for wherever the reading has come to without one.
   if (grid) gridNear();
@@ -20992,6 +20993,37 @@ function applyMatchedLayoutNow() {
   if (on) holdSideways(pdfPane);
   // A ✓ Use my text page's file laid out as its PDF now lays it out.
   if (grid) autoLaySoon();
+}
+
+// THE REEL'S DIVIDERS HAVE THEIR GAP IN THE PANE TOO. The owner, in chat: "They
+// are not lining up at the top as they should." A divider hung between two
+// documents (reelDivider) stands in the text column alone: every page under it
+// stood its height lower than its PDF page, and the scroll sync, which holds
+// the two columns level at each page's first line and moves them in proportion
+// between, slid them apart across every seam (50px a divider) and left them
+// apart at the foot of the folder, where the pane ran out of room first. The
+// first slot of each document is given the text's own gap above it instead, so
+// the two columns are the same lengths down to the last page.
+function matchReelGaps() {
+  const top = pagesEl.getBoundingClientRect().top + (parseFloat(getComputedStyle(pagesEl).paddingTop) || 0);
+  const want = new Map(); // slot → the gap above it, where a divider stands over its page
+  for (const d of pagesEl.querySelectorAll(":scope > .reel-divider")) {
+    const sec = d.nextElementSibling;
+    if (!sec || !sec.classList.contains("tpage")) continue;
+    const el = pdfPane.querySelector(`.pdf-slot[data-index="${sec.dataset.index}"]`);
+    if (!el) continue;
+    let prev = d.previousElementSibling;
+    while (prev && !prev.classList.contains("tpage")) prev = prev.previousElementSibling;
+    // A slot's top margin collapses with the bottom margin of the slot above
+    // it, and against the pane's padding stands on its own: either way the
+    // gap above it is the margin it is given.
+    const gap = sec.getBoundingClientRect().top - (prev ? prev.getBoundingClientRect().bottom : top);
+    want.set(el, Math.round(gap * 100) / 100 + "px");
+  }
+  for (const el of pdfPane.querySelectorAll(".pdf-slot")) {
+    const m = want.get(el) || "";
+    if (el.style.marginTop !== m) el.style.marginTop = m;
+  }
 }
 
 // ── a ✓ Use my text page's FILE laid out as its PDF lays it out ─────────────────
