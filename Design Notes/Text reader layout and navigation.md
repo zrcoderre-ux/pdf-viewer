@@ -295,6 +295,35 @@ gap. `test-reel-sync.mjs` scrolls a three-document reel down and back up at two
 widths and finds no page more than a pixel off its PDF page (before: 50 px off
 at every seam, and at the foot of the folder).
 
+### The wheel moves both columns in one frame (`onSyncWheel`, `wheelStep`)
+
+The owner, in chat: "There is a significant delay for scroll syncing.
+Scrolling down is not scrolling both down at the same time."
+
+Left to the browser, a wheel scrolls the column under the mouse on the
+compositor's thread, at once; the other column follows only when the scroll
+event reaches the page's thread, a frame later at best and as long as whatever
+else is running at worst (laying a page on its grid, drawing a PDF page, the
+reel hanging a document: 50-70 ms holds on a three-document test folder, longer
+on scans). Side by side, a vertical wheel over either column is now taken
+(`preventDefault`) and both are moved from one `requestAnimationFrame`: the
+column under the mouse eased toward the wheel's goal (`WHEEL_EASE` of what is
+left each frame; a step of `WHEEL_SNAP` px or less, a trackpad's, taken whole,
+as is every step under prefers-reduced-motion), the other synced to it by
+`syncScroll(…, true)` before the frame is drawn. A move made by someone else
+between frames (the reel putting the scroll back after hanging a document
+above) carries the wheel's place and goal with it. Left to the browser:
+sideways and Shift wheels, Ctrl/⌘+wheel (the zoom), a wheel over a box that
+scrolls on its own inside the column (`scrollsOwnWay`), and everything with
+side by side off. Keys, scroll bars and auto-scroll still go by the scroll
+event.
+
+Headless Chromium scrolls on the main thread, so it never shows the old lag;
+`test-reel-sync.mjs` checks that the wheel is taken side by side and not
+otherwise, that every page stays level while the wheel turns over either
+column, that Ctrl+wheel still zooms, and that wheeling up from the last
+document still hangs the earlier ones above.
+
 ### The grid is the page's, not the pane's (`gridOn`, `docBodyRight`)
 
 The owner, in chat: "The text file should keep the side by side look, even

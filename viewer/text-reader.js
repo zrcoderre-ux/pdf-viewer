@@ -20431,7 +20431,13 @@ function applyMatchedLayoutNow() {
     // paper's own, and the page is laid as a numbered one: every number a
     // pitch below the last, a half line halfway between two, in the
     // document's type and the file's own indents (`geom.scan`).
-    if (!geom && body.classList.contains("numbered") && rows && rows.length) {
+    // …BUT ONLY WHERE THE NUMBERS RUN AS A MARGIN DOES (marginRuns). Three
+    // lines opening with a number make a page `numbered`, and an exhibit's
+    // invoice has them: a "1" and an "8" of its quantities, a "25" of its days.
+    // Laid as pleading paper, its "1" stood at line 1 an inch down the page and
+    // the forty lines the file has above it were crowded over the page's top.
+    // The owner: "some of the text is being pushed up off the page".
+    if (!geom && body.classList.contains("numbered") && rows && rows.length && marginRuns(lines)) {
       geom = scanGeom(lines, rows, sz || { w: 612, h: 792 }, bodyX);
       numbered = true;
     }
@@ -21767,6 +21773,23 @@ function pdfIndents(lines, nums, geom, rows, bodyX) {
  * inch to the foot either way.
  */
 const PAPER_MARGIN = 72; // an inch, in PDF points: pleading paper's margin over line 1 and under the last
+/**
+ * Whether a page's margin numbers run as pleading paper's do: at least
+ * MARGIN_RUN_MIN of them climbing down the page (TD.numberChain), and those at
+ * least half of the numbers from 1 to the highest of them. A page # Number
+ * lines numbered, or one an OCR caught most of the margin of, does; a few
+ * figures that happen to open lines of an exhibit (an invoice's "25", "1",
+ * "8", "3") do not.
+ */
+const MARGIN_RUN_MIN = 5;
+function marginRuns(lines) {
+  const nums = lines.map((l) => (l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null))
+    .map((n) => (n > 0 && n <= TD.MARGIN_LAST ? n : null));
+  const chain = TD.numberChain(nums);
+  let count = 0, top = 0;
+  nums.forEach((n, k) => { if (chain[k]) { count++; top = Math.max(top, n); } });
+  return count >= MARGIN_RUN_MIN && count >= top / 2;
+}
 function scanGeom(lines, rows, sz, bodyX) {
   const lay = PS.rowLayout(lines.map((l) => l.textContent), rows, { bodyLeft: bodyX });
   const pairs = [];
@@ -21914,6 +21937,65 @@ function syncScroll(from, force) {
   // margins are not the PDF's, so one box's run is not the other's. Each
   // scrolls sideways on its own.
 }
+// THE WHEEL MOVES BOTH COLUMNS IN ONE FRAME. The owner, in chat: "Scrolling
+// down is not scrolling both down at the same time." Left to the browser, a
+// wheel scrolls the column under the mouse on the compositor's own thread, at
+// once, and the other column follows only when the scroll event reaches this
+// page's thread — a frame later at best, and as long as whatever else the page
+// is doing at worst (a page being laid on its grid, a PDF page drawn, the reel
+// hanging the next document: 50-70 ms holds on a small folder, longer on a
+// scan). So side by side, a vertical wheel over either column is taken here,
+// and both columns are moved from the same frame: the one under the mouse
+// eased toward where the wheel has sent it, the other synced to it before the
+// frame is drawn. Sideways wheels, Ctrl+wheel (the zoom) and a wheel over a
+// box that scrolls on its own inside the column are the browser's as before;
+// the keys, the scroll bars and auto-scroll still go by the scroll event.
+const WHEEL_EASE = 0.3;  // of what is left to go, each frame
+const WHEEL_SNAP = 40;   // px: a step this small (a trackpad's) is taken whole
+let wheelBox = null, wheelPos = 0, wheelGoal = 0, wheelAt = 0, wheelRaf = 0;
+const reducedMotion = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+/** A box between the wheel's target and the column that can scroll that way itself. */
+function scrollsOwnWay(target, box, dy) {
+  for (let el = target instanceof Element ? target : null; el && el !== box; el = el.parentElement) {
+    if (el.scrollHeight <= el.clientHeight + 1) continue;
+    const oy = getComputedStyle(el).overflowY;
+    if (oy !== "auto" && oy !== "scroll") continue;
+    if (dy > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0) return true;
+  }
+  return false;
+}
+function onSyncWheel(e) {
+  if (!sbsOn || pdfPane.hidden || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (!e.deltaY || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+  const box = e.currentTarget;
+  const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * box.clientHeight : e.deltaY;
+  if (scrollsOwnWay(e.target, box, dy)) return;
+  e.preventDefault();
+  if (wheelBox !== box) { wheelBox = box; wheelPos = wheelAt = wheelGoal = box.scrollTop; }
+  wheelGoal = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, wheelGoal + dy));
+  if (!wheelRaf) wheelRaf = requestAnimationFrame(wheelStep);
+}
+function wheelStep() {
+  wheelRaf = 0;
+  const box = wheelBox;
+  if (!box || !sbsOn || pdfPane.hidden) { wheelBox = null; return; }
+  // Something else moved the column since the last frame (the reel putting the
+  // scroll back after hanging a document above, a re-layout held in place):
+  // the wheel's place and its goal move with it.
+  const moved = box.scrollTop - wheelAt;
+  if (Math.abs(moved) > 1) { wheelPos += moved; wheelGoal += moved; }
+  wheelGoal = Math.max(0, Math.min(box.scrollHeight - box.clientHeight, wheelGoal));
+  const left = wheelGoal - wheelPos;
+  wheelPos = Math.abs(left) <= WHEEL_SNAP || (reducedMotion && reducedMotion.matches) ? wheelGoal : wheelPos + left * WHEEL_EASE;
+  if (Math.abs(wheelGoal - wheelPos) < 0.5) wheelPos = wheelGoal;
+  box.scrollTop = wheelPos;
+  wheelAt = box.scrollTop;
+  syncScroll(box === stageEl ? "text" : "pdf", true);
+  if (wheelPos !== wheelGoal) wheelRaf = requestAnimationFrame(wheelStep);
+  else wheelBox = null;
+}
+stageEl.addEventListener("wheel", onSyncWheel, { passive: false });
+pdfPane.addEventListener("wheel", onSyncWheel, { passive: false });
 stageEl.addEventListener("scroll", () => { notePlaceSoon(); noteSideways(stageEl); syncScroll("text"); reelMaybeExtend(); reelScrolled(); reelSyncCurrent(); reelTrimSoon(); pdfTrimSoon(); fitNearSoon(); gridNearSoon(); }, { passive: true });
 // Coalesced: a scroll fires continuously, and a pass over the members that
 // builds pages back is not something to do sixty times a second.

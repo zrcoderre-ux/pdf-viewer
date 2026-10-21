@@ -651,6 +651,19 @@ more than leaves the last line's foot an inch above the page's — the owner,
 "The pleading goes too far down, it also needs an inch of margin at the
 bottom" — checked in the same test.
 
+**…but only where the numbers run as a margin does** (`marginRuns`). The
+owner, of an exhibit's invoice: "some of the text is being pushed up off the
+page", "it seems to just be this page". Three lines opening with a number make
+a page `numbered` (`pageIsNumbered`), and the invoice had them: a "25" of its
+days, a "1" and an "8" and a "3" of its quantities. With no margin numbers in
+its PDF it took the path above, its "1" stood at line 1 an inch down, and the
+forty lines the file has before it were crowded over the page's top. The path
+is now taken only where at least `MARGIN_RUN_MIN` (5) numbers climb down the
+page (`numberChain`) and they are at least half of the numbers from 1 to the
+highest; any other numbered page is laid by its words as before.
+`test-stray-numbers.mjs` lays such an invoice beside its PDF and checks every
+line stands on the page, in order (before: the first 22 lines over the top).
+
 **A numbered page whose PDF's numbers are no text is a poor scan, set in the
 document's type** (`poorScan`, in the plan's rows path). The owner: "when I
 use the add number margins button, it should apply the same font used

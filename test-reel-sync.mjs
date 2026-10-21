@@ -195,6 +195,45 @@ async function run() {
     await p.waitForTimeout(1500);
     check("a narrow window, back up the folder", await sweep(-400, 30), []);
     check("…and down again", await sweep(400, 30), []);
+    // The wheel is taken side by side and both columns moved from one frame:
+    // over the PDF pane as well, the text keeping level with it.
+    await p.setViewportSize({ width: 1400, height: 900 });
+    await p.waitForTimeout(1000);
+    const paneBox = await p.evaluate(() => { const r = document.getElementById("pdf-pane").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+    const before = await p.evaluate(() => document.getElementById("pdf-pane").scrollTop);
+    const bad = [];
+    for (let k = 0; k < 12; k++) {
+      await p.mouse.move(paneBox.x, paneBox.y);
+      await p.mouse.wheel(0, -300);
+      await p.waitForTimeout(350);
+      for (const b of await offLevel()) bad.push(b);
+    }
+    check("a wheel over the PDF pane: every page level as it moves", bad.slice(0, 4), []);
+    check("…the pane moved by it", await p.evaluate((b) => document.getElementById("pdf-pane").scrollTop < b - 1000, before), true);
+    const taken = () => p.evaluate(() => {
+      const e = new WheelEvent("wheel", { deltaY: 100, bubbles: true, cancelable: true });
+      document.querySelector("#pages .tpage .page-body").dispatchEvent(e);
+      return [e.defaultPrevented];
+    });
+    check("side by side, the wheel is the reader's to move both columns with", (await taken())[0], true);
+    const fsBefore = await p.evaluate(() => document.querySelector("#pages .tpage").getBoundingClientRect().width);
+    await p.mouse.move(300, 500);
+    await p.keyboard.down("Control");
+    await p.mouse.wheel(0, -120);
+    await p.keyboard.up("Control");
+    await p.waitForTimeout(800);
+    check("…Ctrl+wheel is still the zoom", await p.evaluate((w) => document.querySelector("#pages .tpage").getBoundingClientRect().width > w + 1, fsBefore), true);
+    // Up from the last document: the reel hangs the ones before it above.
+    await p.evaluate((n) => window.__textReaderOpenDoc(n), "C Form.txt");
+    await p.waitForTimeout(2500);
+    check("C opened on its own first", await p.evaluate(() => window.__textReaderReel().members.map((m) => m.name)), ["C Form.txt"]);
+    const upBad = await sweep(-300, 30);
+    check("up from the last document, every page level with its PDF page", upBad, []);
+    check("…the reel hanging the documents before it above", await p.evaluate(() => window.__textReaderReel().members.map((m) => m.name)), ["A Decl.txt", "B Brief.txt", "C Form.txt"]);
+    const sbsBtn = await p.$("#sbs-toggle");
+    await sbsBtn.click();
+    await p.waitForTimeout(800);
+    check("side by side off, the wheel is the browser's", (await taken())[0], false);
     check("no page errors", errors, []);
     await context.close();
   } finally {
