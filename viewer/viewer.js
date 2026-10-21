@@ -2287,6 +2287,16 @@ window.__pdfViewerReflow = () => { if (pdfDoc) renderAllPages(); };
 window.__pdfViewerSource = () => ({ handle: localFileHandle, page: pdfDoc ? visiblePageNumber() : 0 });
 window.__pdfViewerGoToPage = (pn) => goToPage(pn);
 
+// The text reader's PDF mode (text-reader.js, "PDF mode") drives the viewer
+// it embeds through these: how many pages there are and whether each page's
+// text is in yet (a find waits on it), Find opened on a match of a given page,
+// and auto-scroll carried from the end of one PDF into the next.
+window.__pdfViewerPageCount = () => (pdfDoc ? pdfDoc.numPages : 0);
+window.__pdfViewerVisiblePage = () => (pdfDoc ? visiblePageNumber() : 0);
+window.__pdfViewerFind = (q, opts, dir, pn) => (Find ? Find.openAt(q, opts, dir, pn) : 0);
+window.__pdfViewerFindQuery = () => (Find && Find.isOpen() ? Find.current() : null);
+window.__pdfViewerAutoScroll = { on: () => autoScroll.isEnabled(), resume: () => autoScroll.resume(), pause: () => autoScroll.pause() };
+
 // Test hook: build the citation for the current selection (used by e2e checks).
 window.__pdfViewerBuildCitation = () => buildCitationReference();
 
@@ -6725,7 +6735,14 @@ Features = createFeatures({
   setLayout: (l) => setPageLayout(l),
 });
 
-Find = createFind({ pagesEl, scrollToPage });
+// In the text reader's PDF mode the reader sets window.__pdfFolderFind on this
+// frame, and a find that runs out here goes on into the case folder's next PDF.
+Find = createFind({
+  pagesEl,
+  scrollToPage,
+  onEdge: (dir, q) => (typeof window.__pdfFolderFind === "function" ? !!window.__pdfFolderFind(dir, q) : false),
+  edgeOn: () => typeof window.__pdfFolderFind === "function",
+});
 
 // ── Security: which tools show ───────────────────────────────────────────────
 function syncSecurityTools() {

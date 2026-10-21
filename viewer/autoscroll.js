@@ -286,6 +286,8 @@ function finish() {
   stopTicking();
   updateUi();
   onStatus("Auto-scroll reached the end");
+  // The text reader's PDF mode listens for this to go on into the next PDF.
+  window.dispatchEvent(new CustomEvent("autoscroll-end"));
 }
 
 // ── Mode / play / speed ─────────────────────────────────────────────────────
@@ -526,4 +528,28 @@ export const autoScroll = {
   },
 
   isEnabled() { return enabled; },
+
+  // Stop where it is, still armed (Space picks it up): the text reader's PDF
+  // mode putting this viewer out of sight.
+  pause() {
+    if (!enabled || paused) return;
+    paused = true;
+    stopTicking();
+    if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = 0; }
+    updateUi();
+  },
+
+  // Start (or pick back up) from where the page stands — the text reader's
+  // PDF mode, having carried a running auto-scroll into the next PDF.
+  resume() {
+    if (!enabled) { setEnabled(true); return; }
+    paused = false;
+    suspended = false;
+    curPxPerSec = 0;
+    refreshMetrics();
+    pos = scroller().scrollTop;
+    lastWritten = null;
+    if (!held) ensureTicking();
+    updateUi();
+  },
 };

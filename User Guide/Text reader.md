@@ -2237,6 +2237,29 @@ app, which routes it to the reader tab.
   ⇄ PDF pages…. On a page with no PDF (a cover, a document of a reel with
   none), it opens the first PDF the export has, at its first page.
 
+- **PDF mode: the case folder's PDFs with every PDF tool.** **📑 PDF mode**
+  in the top bar puts the PDF viewer in the text's place, in the same tab, on
+  the PDF of the page you are reading and at that page — comments and markup,
+  Fill & Sign, edit text, organize pages, redact, OCR, Save, every tool the
+  viewer has. Press it again (it reads **📝 Text mode** while PDF mode is on),
+  or **Ctrl+Shift+M**, and the text comes back at the page the PDF was on,
+  opening that PDF's export if it is another document. While it is on:
+  - **Switch PDFs** with **‹ ›** or the list in the top bar (**Alt+PageUp** /
+    **Alt+PageDown**). Each PDF opened stays open, at its page and zoom and
+    with any unsaved changes, until the case folder changes; Save writes the
+    folder's own file in place.
+  - **Continuous scroll.** Keep scrolling past the last page and the next PDF
+    comes up at its first page; scroll back up past the first page and the one
+    before comes up at its last. Auto-scroll that reaches the end of one PDF
+    carries on at the top of the next.
+  - **Search the folder.** The viewer's Find (**Ctrl+F**) reads every PDF of
+    the folder: past the last match in this PDF, **›** (or Enter) opens the
+    next PDF that has one and stands on it, and **‹** goes back the same way.
+    The top bar counts the matches through the folder ("“lien”: 14 in 5 PDFs
+    of 12"). A scanned page is searched by the words the viewer recognized
+    the last time it was opened. A search open in the reader's own Find is
+    carried in.
+
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and
   saves a flattened copy with what has to go blacked out. It is the same

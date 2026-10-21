@@ -59,6 +59,8 @@ import * as XW from "./xlsx-write.js";
 import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
 import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRatio } from "./pdf-fonts.js";
 import { repairTextLayer } from "./text-layer.js";
+import { normalize as findNormalize, findIn as findInText } from "./find.js";
+import { documentKey as ocrDocKey, loadPage as ocrLoadPage, MAX_KEEP_DAYS as OCR_KEEP_MAX } from "./ocr-store.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdfjs/build/pdf.worker.mjs");
 
@@ -164,6 +166,7 @@ function setAskBeforeFolder(on) {
   try { if (on) localStorage.setItem(ASK_FOLDER_KEY, "1"); else localStorage.removeItem(ASK_FOLDER_KEY); } catch { /* no storage: the default stands */ }
 }
 let folderPdfs = [];         // [{ name, handle }] — the case folder's PDFs
+let pdfModeOn = false;       // PDF mode: the folder's PDFs in the PDF viewer, in the text's place ("PDF mode")
 let key = null;              // parsed key (PK.parseKey)
 let rev = null, fwd = null, reals = null, ahead = null; // compiled matchers
 let fakesRx = null;          // …and one over the key's FAKES: which pseudonyms stand
@@ -7356,7 +7359,7 @@ document.addEventListener("keydown", (e) => {
 // The browser's own dialog is all a page gets; which of the four it is, the
 // panels and the status bar say.
 window.addEventListener("beforeunload", (e) => {
-  if (!hasUnsaved() && !standingInTheClear()) return;
+  if (!hasUnsaved() && !standingInTheClear() && !pdfModeUnsaved().length) return;
   e.preventDefault();
   e.returnValue = "";
 });
@@ -16994,7 +16997,7 @@ function autoTarget() {
 }
 
 // ── the engine ──
-function autoRunning() { return autoOn && !!doc && !autoPaused && !autoSuspended; }
+function autoRunning() { return autoOn && !!doc && !pdfModeOn && !autoPaused && !autoSuspended; }
 
 function autoStart() {
   if (autoMax() <= 4) return; // a short document: armed, and nothing to do
@@ -18900,6 +18903,7 @@ function refreshPdf() {
   sbsBtn.disabled = !doc;
   swapBtn.disabled = !doc;
   pdfTabBtn.disabled = !doc || !any;
+  syncPdfModeBtn();
   // Nothing to redact without a PDF matched to the export.
   redactBtn.disabled = !doc || !any;
   if (redactBtn.disabled && redactOn) setRedactMode(false);
@@ -22235,6 +22239,462 @@ async function openPdfInTab() {
   feed();
 }
 pdfTabBtn.addEventListener("click", openPdfInTab);
+// ── PDF mode: the case folder's PDFs in the PDF viewer ──────────────────────
+//
+// 📑 PDF mode puts the PDF viewer — every one of its tools — in the text's
+// place, in this tab, on the PDF of the page being read and at that page; the
+// same button brings the text back at the page the PDF was on. ↗ Open PDF in
+// new tab opens one filing on its own; this is the folder's PDFs read the way
+// the folder's exports are, one after another:
+//
+//   • ‹ › and the list in the toolbar step between them (Alt+PageUp/PageDown);
+//   • scrolling on past the last page goes on into the next PDF, and back up
+//     past the first into the one before, as the reel does for the text;
+//     auto-scroll reaching the end of one carries on at the top of the next;
+//   • the viewer's Find (Ctrl+F) reads the whole folder: past this PDF's last
+//     match › opens the next PDF with one, standing on it, and the toolbar
+//     counts the matches through the folder.
+//
+// A FRAME PER PDF. Each PDF opened is a viewer of its own (viewer.html in an
+// iframe, handed the file through its folder handle as the app's shell hands
+// one to a tab, __pdfViewerLoadLocal), kept when another is shown or the text
+// comes back: its page, its zoom and any unsaved comment or edit are where
+// they were left, and Save writes the file in place as the viewer always
+// does. PM_FRAMES_MAX of them at most; the one shown longest ago with nothing
+// unsaved is closed to make room.
+//
+// The folder find reads each PDF's text with pdf.js on this side (and the
+// viewer's saved OCR for a scanned page), once per file as it stands, so it
+// knows which PDF to open next without opening each one in a viewer first.
+const pdfModeBtn = $("pdf-mode-btn");
+const pmStage = $("pdf-mode");
+const pmControls = $("pm-controls");
+const pmPick = $("pm-pick");
+const pmPrevBtn = $("pm-prev");
+const pmNextBtn = $("pm-next");
+const pmWhereEl = $("pm-where");
+const pmFindEl = $("pm-find");
+const pmEdgeEl = $("pm-edge");
+const PM_FRAMES_MAX = 8;
+const PM_OVERSCROLL = 450;   // px of wheel past the end that turns to the next PDF
+let pmList = [];             // the folder's PDFs: [{ name, handle?, file? }]
+let pmListOf = null;         // …and what it was built from (folderPdfs, or the matched sources)
+let pmAt = -1;               // the one shown
+let pmUse = 0;
+const pmFrames = new Map();  // name → { frame, ready, stamp, used }
+const pmText = new Map();    // name → { stamp, pages: [norm text] } for the folder find
+let pmFindSeq = 0;
+let pmSumSeq = 0;
+let pmSumTimer = 0;
+let pmBusy = false;          // a PDF being brought up: the edge waits for it
+let pmEdge = { dir: 0, px: 0, t: 0 };
+let pmQuietUntil = 0;        // the wheel is spent, not obeyed, until then (Date.now)
+
+/** The PDFs PDF mode steps through: the case folder's, else those matched to the document. */
+function pdfModeList() {
+  if (folderPdfs.length) return folderPdfs;
+  const out = [];
+  const seen = new Set();
+  for (const src of [...pdfSources, pdfPicked, ...pickedPdfs.values()]) {
+    if (src && !seen.has(src.name)) { seen.add(src.name); out.push(src); }
+  }
+  return out;
+}
+function syncPdfModeBtn() {
+  // By id: refreshPdf can ask before this part of the file has run.
+  const btn = document.getElementById("pdf-mode-btn");
+  if (btn) btn.disabled = !pdfModeOn && !pdfModeList().length;
+}
+/** The PDFs open in PDF mode with changes not saved yet, by name. */
+function pdfModeUnsaved() {
+  const out = [];
+  for (const [name, f] of pmFrames) {
+    try { if (f.frame.contentWindow.__pdfViewerHasUnsaved && f.frame.contentWindow.__pdfViewerHasUnsaved()) out.push(name); } catch { /* gone */ }
+  }
+  return out;
+}
+function pmWin(name = pmList[pmAt] && pmList[pmAt].name) {
+  const f = name && pmFrames.get(name);
+  try { return f ? f.frame.contentWindow : null; } catch { return null; }
+}
+function pmDropFrame(name) {
+  const f = pmFrames.get(name);
+  if (!f) return;
+  try { f.frame.contentWindow.__pdfViewerUnregister && f.frame.contentWindow.__pdfViewerUnregister(); } catch { /* gone */ }
+  f.frame.remove();
+  pmFrames.delete(name);
+}
+/** A new list of PDFs (another folder): the frames of the old one go, unless that would lose an edit. */
+function pmTakeList() {
+  const list = pdfModeList();
+  if (list === pmListOf && pmList.length) return true;
+  const same = list.length === pmList.length && list.every((p, i) => p.name === pmList[i].name);
+  if (!same) {
+    const unsaved = pdfModeUnsaved();
+    if (unsaved.length && !confirm(`${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes in PDF mode from the last folder. Discard them?`)) return false;
+    for (const name of [...pmFrames.keys()]) pmDropFrame(name);
+    pmText.clear();
+  }
+  pmList = list.slice();
+  pmListOf = list;
+  pmPick.innerHTML = "";
+  pmList.forEach((p, i) => {
+    const o = document.createElement("option");
+    o.value = String(i);
+    o.textContent = pmLabel(p.name);
+    pmPick.appendChild(o);
+  });
+  return true;
+}
+function pmSyncBar() {
+  pmPick.value = String(pmAt);
+  pmPrevBtn.disabled = pmAt <= 0;
+  pmNextBtn.disabled = pmAt >= pmList.length - 1;
+  pmWhereEl.textContent = pmList.length ? `${pmAt + 1} of ${pmList.length}` : "";
+}
+
+const pmLabel = (name) => String(name).replace(/\.pdf$/i, "");
+const pmSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** A viewer frame for one PDF, loading it. */
+function pmMakeFrame(src) {
+  const frame = document.createElement("iframe");
+  frame.title = src.name;
+  frame.src = new URL("viewer.html", location.href).href;
+  pmStage.appendChild(frame);
+  const f = { frame, stamp: "", used: 0, ready: null };
+  f.ready = (async () => {
+    await new Promise((res) => frame.addEventListener("load", res, { once: true }));
+    const w = frame.contentWindow;
+    for (let t = 0; typeof w.__pdfViewerLoadLocal !== "function"; t++) {
+      if (t > 400) throw new Error("the viewer did not start");
+      await pmSleep(50);
+    }
+    const file = src.file || (src.handle && (await src.handle.getFile()));
+    if (!file) throw new Error(`could not read ${src.name}`);
+    f.stamp = `${file.size}:${file.lastModified}`;
+    pmWire(w);
+    await w.__pdfViewerLoadLocal(file, src.handle || null);
+  })();
+  f.ready.catch((e) => {
+    if (pmFrames.get(src.name) === f) pmDropFrame(src.name);
+    toast(`Could not open ${src.name} in PDF mode: ${e.message || e}`, { error: true, ms: 6000 });
+  });
+  pmFrames.set(src.name, f);
+  // Room for it: the one shown longest ago that holds nothing unsaved.
+  if (pmFrames.size > PM_FRAMES_MAX) {
+    const unsaved = new Set(pdfModeUnsaved());
+    const old = [...pmFrames.entries()].filter(([n, g]) => g !== f && !unsaved.has(n)).sort((a, b) => a[1].used - b[1].used)[0];
+    if (old) pmDropFrame(old[0]);
+  }
+  return f;
+}
+
+/**
+ * Show the folder's PDF `idx`: at `page`, at its foot (`end`), or where it was
+ * left. `auto` carries a running auto-scroll into it.
+ */
+async function pmShow(idx, { page = 0, end = false, auto = false } = {}) {
+  if (idx < 0 || idx >= pmList.length) return false;
+  const src = pmList[idx];
+  pmAt = idx;
+  pmSyncBar();
+  pmEdgeHint(0);
+  let f = pmFrames.get(src.name);
+  if (!f) f = pmMakeFrame(src);
+  f.used = ++pmUse;
+  for (const g of pmFrames.values()) {
+    if (g === f || g.frame.hidden) continue;
+    // Where it was left, put back when it is shown again: a frame out of sight
+    // can come back scrolled to its top.
+    try { const se = g.frame.contentDocument.scrollingElement; g.scroll = { top: se.scrollTop, left: se.scrollLeft }; } catch { g.scroll = null; }
+    g.frame.hidden = true;
+    // Out of sight is not being read: its auto-scroll stops where it is.
+    try { g.frame.contentWindow.__pdfViewerAutoScroll.pause(); } catch { /* not loaded yet */ }
+  }
+  f.frame.hidden = false;
+  pmBusy = true;
+  try {
+    await f.ready;
+  } catch { return false; } finally { pmBusy = false; }
+  if (pmList[pmAt] !== src || !pdfModeOn) return false;
+  const w = f.frame.contentWindow;
+  try {
+    if (end) {
+      const n = w.__pdfViewerPageCount();
+      if (n) w.__pdfViewerGoToPage(n);
+      const s = w.document.scrollingElement || w.document.documentElement;
+      s.scrollTop = s.scrollHeight;
+    } else if (page) w.__pdfViewerGoToPage(page);
+    else if (f.scroll) { const se = w.document.scrollingElement; se.scrollTop = f.scroll.top; se.scrollLeft = f.scroll.left; }
+    f.scroll = null;
+    if (auto) w.__pdfViewerAutoScroll.resume();
+  } catch { /* the viewer went away */ }
+  try { f.frame.focus(); w.focus(); } catch { /* ok */ }
+  return true;
+}
+
+/** Hooks into a viewer frame: the folder find, scrolling on past either end, auto-scroll, keys. */
+function pmWire(w) {
+  w.__pdfFolderFind = (dir, q) => { pmFolderFind(dir, q); return true; };
+  w.addEventListener("wheel", (e) => {
+    // The wheel that carried the reading into this PDF is still turning:
+    // spent here rather than scrolling straight back out of where it landed.
+    if (Date.now() < pmQuietUntil && !e.ctrlKey) { e.preventDefault(); return; }
+    if (e.ctrlKey || !pdfModeOn || pmBusy) return;
+    const s = w.document.scrollingElement || w.document.documentElement;
+    const max = s.scrollHeight - w.innerHeight;
+    if (e.deltaY > 0 && s.scrollTop >= max - 2) pmOverscroll(1, e.deltaY);
+    else if (e.deltaY < 0 && s.scrollTop <= 1) pmOverscroll(-1, -e.deltaY);
+    else pmOverscroll(0, 0);
+  }, { passive: false });
+  w.addEventListener("autoscroll-end", () => {
+    if (pdfModeOn && pmWin() === w && pmAt < pmList.length - 1) pmShow(pmAt + 1, { page: 1, auto: true });
+  });
+  w.addEventListener("keydown", (e) => { if (pmKey(e)) { e.preventDefault(); e.stopPropagation(); } }, true);
+  // What the viewer's Find is looking for, counted through the folder.
+  const input = w.document.getElementById("find-input");
+  if (input) {
+    const recount = () => { clearTimeout(pmSumTimer); pmSumTimer = setTimeout(() => pmFindSummary(), 400); };
+    input.addEventListener("input", recount);
+    for (const id of ["find-case", "find-word"]) { const el = w.document.getElementById(id); if (el) el.addEventListener("change", recount); }
+    const close = w.document.getElementById("find-close");
+    if (close) close.addEventListener("click", recount);
+  }
+}
+
+/** Wheel past either end: once enough has been spent, the next PDF (or the one before). */
+function pmOverscroll(dir, px) {
+  const now = performance.now();
+  if (!dir || dir !== pmEdge.dir || now - pmEdge.t > 700) pmEdge = { dir, px: 0, t: now };
+  if (!dir) { pmEdgeHint(0); return; }
+  const to = pmAt + dir;
+  if (to < 0 || to >= pmList.length) return;
+  pmEdge.px += Math.min(px, 200);
+  pmEdge.t = now;
+  if (pmEdge.px < PM_OVERSCROLL) { pmEdgeHint(dir, pmList[to].name); return; }
+  pmEdge = { dir: 0, px: 0, t: 0 };
+  pmQuietUntil = Date.now() + 600;
+  pmShow(to, dir > 0 ? { page: 1 } : { end: true }).then(() => { pmQuietUntil = Date.now() + 400; });
+}
+let pmEdgeTimer = 0;
+function pmEdgeHint(dir, name = "") {
+  clearTimeout(pmEdgeTimer);
+  if (!dir) { pmEdgeEl.hidden = true; return; }
+  pmEdgeEl.textContent = `${dir > 0 ? "↓" : "↑"} Keep scrolling for ${pmLabel(name)}`;
+  pmEdgeEl.className = "pm-edge " + (dir > 0 ? "down" : "up");
+  pmEdgeEl.hidden = false;
+  pmEdgeTimer = setTimeout(() => { pmEdgeEl.hidden = true; }, 900);
+}
+
+/** PDF mode's own keys, wherever focus is: Ctrl+Shift+M back to the text, Alt+PageUp/PageDown between PDFs. */
+function pmKey(e) {
+  if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "M" || e.key === "m")) { togglePdfMode(); return true; }
+  if (!pdfModeOn) return false;
+  if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "PageDown" || e.key === "PageUp")) {
+    pmShow(pmAt + (e.key === "PageDown" ? 1 : -1), e.key === "PageDown" ? { page: 1 } : {});
+    return true;
+  }
+  return false;
+}
+
+// ── the folder find ──
+/** A PDF's text, page by page, folded as the viewer's Find folds it. */
+async function pmPdfText(src) {
+  const file = src.file || (await src.handle.getFile());
+  const stamp = `${file.size}:${file.lastModified}`;
+  const held = pmText.get(src.name);
+  if (held && held.stamp === stamp) return held.pages;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let docKey = null;
+  const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0), worker: sharedPdfWorker(), ownerDocument: fontDocument() }).promise;
+  const pages = [];
+  try {
+    for (let pn = 1; pn <= pdf.numPages; pn++) {
+      const tc = await (await pdf.getPage(pn)).getTextContent();
+      let text = tc.items.map((it) => (it.str || "") + (it.hasEOL ? "\n" : "")).join("");
+      // A scan: the words the viewer recognized when it was last opened, if it kept them.
+      if (!text.trim()) {
+        if (docKey == null) docKey = await ocrDocKey(bytes).catch(() => "");
+        const words = docKey ? await ocrLoadPage(docKey, pn, OCR_KEEP_MAX) : null;
+        if (words) text = words.map((wd) => wd.text + (wd.eol ? "\n" : " ")).join("");
+      }
+      pages.push(findNormalize(text).norm);
+    }
+  } finally { try { pdf.destroy(); } catch { /* ok */ } }
+  pmText.set(src.name, { stamp, pages });
+  return pages;
+}
+/** Per page of a PDF, how many matches it holds ([] where it cannot be read). */
+async function pmHits(src, q) {
+  try {
+    const pages = await pmPdfText(src);
+    return pages.map((norm) => findInText(norm, q.query, q).length);
+  } catch { return []; }
+}
+/** Wait until the viewer has a page's text (Find reads the text layer). */
+async function pmTextReady(w, pn) {
+  for (let t = 0; t < 160; t++) {
+    try {
+      const layer = w.document.querySelector(`.page-wrapper[data-page-number="${pn}"] .textLayer`);
+      if (layer && layer.childNodes.length) return;
+    } catch { return; }
+    await pmSleep(50);
+  }
+}
+/**
+ * The viewer's Find ran off the end of this PDF going `dir`: on through the
+ * folder to the next PDF with a match, opened at it — round to this one
+ * again, its first (or last), when no other PDF has one.
+ */
+async function pmFolderFind(dir, q) {
+  if (!q || !pmList.length) return;
+  const seq = ++pmFindSeq;
+  const n = pmList.length;
+  for (let k = 1; k <= n; k++) {
+    const idx = (((pmAt + dir * k) % n) + n) % n;
+    pmFindEl.textContent = `Looking for “${q.query}” in ${pmLabel(pmList[idx].name)}…`;
+    const counts = await pmHits(pmList[idx], q);
+    if (seq !== pmFindSeq || !pdfModeOn) return;
+    const pages = counts.map((c, i) => (c ? i + 1 : 0)).filter(Boolean);
+    if (!pages.length) continue;
+    const pn = dir > 0 ? pages[0] : pages[pages.length - 1];
+    if (!(await pmShow(idx, { page: pn }))) return;
+    const w = pmWin();
+    await pmTextReady(w, pn);
+    if (seq !== pmFindSeq || !pdfModeOn) return;
+    try { w.__pdfViewerFind(q.query, q, dir, pn); } catch { /* the viewer went away */ }
+    pmFindSummary(q);
+    return;
+  }
+  pmFindEl.textContent = `“${q.query}” is in none of the folder's PDFs`;
+}
+/** The toolbar's count of what Find is looking for, through every PDF of the folder. */
+async function pmFindSummary(q) {
+  if (!q) { try { q = pmWin().__pdfViewerFindQuery(); } catch { q = null; } }
+  const seq = ++pmSumSeq;
+  if (!q || !pdfModeOn) { pmFindEl.textContent = ""; return; }
+  let total = 0, docs = 0, read = 0;
+  for (const src of pmList) {
+    const counts = await pmHits(src, q);
+    if (seq !== pmSumSeq || !pdfModeOn) return;
+    const c = counts.reduce((a, b) => a + b, 0);
+    total += c;
+    if (c) docs++;
+    read++;
+    pmFindEl.textContent = `“${q.query}”: ${total} in ${docs} PDF${docs === 1 ? "" : "s"}` + (read < pmList.length ? ` (reading ${read} of ${pmList.length}…)` : ` of ${pmList.length}`);
+  }
+}
+
+// ── in and out ──
+async function enterPdfMode() {
+  if (!pmTakeList()) return;
+  if (!pmList.length) { toast("No PDF to show — open a case folder with its PDFs, or pick one under ⇄ PDF pages….", { error: true }); return; }
+  // The PDF of the page being read, at that page; else the one shown last.
+  let idx = pmAt >= 0 && pmAt < pmList.length ? pmAt : 0;
+  let page = 0;
+  if (doc) {
+    const i = readingPage();
+    const at = pdfSources[i] ? i : pdfSources.findIndex(Boolean);
+    const src = at >= 0 ? pdfSources[at] : null;
+    const k = src ? pmList.findIndex((p) => p.name === src.name) : -1;
+    if (k >= 0) { idx = k; page = (at === i && PS.pdfPageOf(doc.pages[at])) || 1; }
+  }
+  // What the reader's Find was looking for goes on being looked for.
+  const q = !findBar.hidden && $("fb-input").value.trim() ? { query: $("fb-input").value.trim(), caseSensitive: $("fb-case").checked, wholeWord: false } : null;
+  pdfModeOn = true;
+  autoStop();
+  document.body.classList.add("pdf-mode");
+  pmStage.hidden = false;
+  pmControls.hidden = false;
+  pdfModeBtn.setAttribute("aria-pressed", "true");
+  pdfModeBtn.textContent = "📝 Text mode";
+  pdfModeBtn.title = "Back to the text, at the page the PDF is on (Ctrl+Shift+M). The PDFs stay open here, with any unsaved changes, until the folder changes";
+  if (!(await pmShow(idx, { page }))) return;
+  if (q && pdfModeOn) {
+    const w = pmWin();
+    await pmTextReady(w, page || 1);
+    try { w.__pdfViewerFind(q.query, q, 1, page || 1); } catch { /* ok */ }
+    pmFindSummary(q);
+  }
+}
+async function exitPdfMode() {
+  const src = pmList[pmAt];
+  let page = 0;
+  try { page = pmWin().__pdfViewerVisiblePage() || 0; } catch { /* ok */ }
+  pdfModeOn = false;
+  pmFindSeq++;
+  pmSumSeq++;
+  document.body.classList.remove("pdf-mode");
+  pmStage.hidden = true;
+  pmControls.hidden = true;
+  pmEdgeHint(0);
+  pdfModeBtn.setAttribute("aria-pressed", "false");
+  pdfModeBtn.textContent = "📑 PDF mode";
+  pdfModeBtn.title = pdfModeTitle;
+  // The theme may have been switched in the viewer: the reader follows it.
+  try { const t = localStorage.getItem("pdfViewerTheme") === "light" ? "light" : "dark"; if (t !== currentTheme) { currentTheme = t; applyTheme(t); } } catch { /* ok */ }
+  // A PDF saved in PDF mode is not the one the pane read: read again.
+  let changed = false;
+  for (const [name, f] of pmFrames) {
+    const p = pmList.find((x) => x.name === name);
+    if (!p || !p.handle) continue;
+    try {
+      const file = await p.handle.getFile();
+      const stamp = `${file.size}:${file.lastModified}`;
+      if (f.stamp && stamp !== f.stamp) {
+        f.stamp = stamp;
+        const held = pdfCache.get(name);
+        pdfCache.delete(name);
+        pdfSizes.delete(name);
+        if (held) held.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }, () => {});
+        changed = true;
+      }
+    } catch { /* gone from the folder */ }
+  }
+  if (changed && doc) refreshPdf();
+  const unsaved = pdfModeUnsaved();
+  if (unsaved.length) toast(`${unsaved.map(pmLabel).join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes — kept in PDF mode until you save ${unsaved.length === 1 ? "it" : "them"} there.`, { ms: 6000 });
+  if (src) await pmBackToText(src.name, page);
+  if (autoOn) autoStart();
+}
+/** The text at the page of PDF `name` the viewer was on: in the document on screen, else its own export opened. */
+async function pmBackToText(name, page) {
+  const find = () => {
+    if (!doc) return -1;
+    let best = -1, bestN = 0, first = -1;
+    for (let i = 0; i < doc.pages.length; i++) {
+      if (!pdfSources[i] || pdfSources[i].name !== name) continue;
+      if (first < 0) first = i;
+      const n = PS.pdfPageOf(doc.pages[i]);
+      if (n && n <= (page || 1) && n >= bestN) { best = i; bestN = n; }
+    }
+    return best >= 0 ? best : first;
+  };
+  let i = find();
+  if (i < 0 && dirHandle) {
+    const d = folderDocs.find((x) => !x.combined && pdfForName(x.name) === name);
+    if (d && (await openFolderDoc(d))) { resolvePdfSources(); i = find(); }
+  }
+  if (i >= 0 && doc) goToPageFromList(doc.pages[i]);
+}
+function togglePdfMode() {
+  if (pdfModeOn) exitPdfMode(); else if (!pdfModeBtn.disabled) enterPdfMode();
+}
+const pdfModeTitle = pdfModeBtn.title;
+pdfModeBtn.addEventListener("click", togglePdfMode);
+pmPrevBtn.addEventListener("click", () => pmShow(pmAt - 1));
+pmNextBtn.addEventListener("click", () => pmShow(pmAt + 1));
+pmPick.addEventListener("change", () => pmShow(Number(pmPick.value)));
+// The reader's own keys stand down in PDF mode: they work on the text, which
+// is not on the screen. Focus is given back to the viewer instead.
+window.addEventListener("keydown", (e) => {
+  if (pmKey(e)) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+  if (!pdfModeOn) return;
+  if (e.target && e.target.closest && e.target.closest("#pm-controls, #pdf-mode-btn") && !e.ctrlKey && !e.metaKey && !e.altKey) return;
+  e.stopImmediatePropagation();
+  if (e.ctrlKey || e.metaKey) e.preventDefault();
+  try { const w = pmWin(); if (w) w.focus(); } catch { /* ok */ }
+}, true);
 $("pdf-input").addEventListener("change", async () => {
   const fs = [...$("pdf-input").files];
   $("pdf-input").value = "";
