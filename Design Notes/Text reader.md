@@ -35,6 +35,16 @@ that reason. `TD.docLabel` (the bar, the print title, the reel divider) and
 `PS.normalizeStem` drop `.md` with the other extensions, and the Save picker
 offers a `.md` as Markdown. `test-markdown.mjs` covers it.
 
+**A keep in a Markdown export is carried out by its save** (`clearKeptIn`).
+In a PDF-Linker export a value kept where the run faked it stays faked on
+disk until the next run un-fakes it through `New Real Values.txt`. Nothing
+will ever rewrite a `.md`, so a save of one being edited (Edit on, or dirty)
+first takes each `.pn.kept` span off the page and leaves its `data-real` as
+plain text, one undo step a page, and adds the member to `touched` so it is
+written. The forward pass and the last check already read past a kept value
+in the clear (`maskKept`), so the save neither re-fakes it nor refuses it,
+and the file opened again shows it as kept text. A `.txt` is untouched by this.
+
 **A stand-in only the pinned sheet holds is named at the save**
 (`PK.compilePinnedFakes`, `pinnedFakes`, `pinnedNote`). PDF-Linker puts a
 binding no export carries on "Pinned (never in text)", which DeAnonymize.bas

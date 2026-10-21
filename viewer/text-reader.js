@@ -7885,6 +7885,25 @@ async function prepareOffscreenSave(t, pass) {
   return { d, entry, seq: entry ? entry.seq : null, parsed, base, spots: docSpots, scan, swaps, waiting, stuck, before, text: TD.serializeExport(parsed) };
 }
 
+// A KEEP IN A MARKDOWN EXPORT IS CARRIED OUT BY ITS SAVE. In a PDF-Linker
+// export a value kept where the run faked it stays faked on disk until the
+// next run un-fakes it (New Real Values.txt). My-Macros' Markdown export has
+// no run to wait for: nothing will ever rewrite it. So a save of one being
+// edited writes each kept pseudonym as the real value it shows — the span
+// taken off the page and its value left as plain text, which the save's
+// forward pass and its last check already read past (maskKept), and which
+// reads as kept when the file is opened again. One undo step for the page.
+/** Whether `body` had kept pseudonyms turned into their values, for member `m`'s save. */
+function clearKeptIn(body, m) {
+  const name = m ? m.name : fileName;
+  if (!TD.isMarkdownName(name) || !(editing || (m ? m.dirty : dirty))) return false;
+  const kept = [...body.querySelectorAll(".pn.kept")];
+  if (!kept.length) return false;
+  snapshot(body, true);
+  for (const span of kept) span.replaceWith(document.createTextNode(span.dataset.real));
+  return true;
+}
+
 /** Write text into a file of the folder, in place: no picker and no download, whatever goes wrong. → { ok, why } */
 async function writeInPlace(handle, text) {
   let w = null;
@@ -7983,6 +8002,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
       const i = pageIndexOf(body);
       const m = reelMemberOf(i);
       if (doc.pages[i] && doc.pages[i].typedFrom != null) typedNow.set(i, TD.serializeHeld(body).text);
+      if (clearKeptIn(body, m)) touched.add(m);
       const r = savePage(body, i, (text, s, carry) => {
         snapshot(body, true);
         setSpotsListOf(i, spotsListOf(i).filter((x) => x.page !== i).concat(s));
