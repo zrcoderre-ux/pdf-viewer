@@ -148,6 +148,9 @@ async function run() {
     await page.evaluate(() => window.__textReaderOpenDoc("A Decl.txt"));
     await page.waitForFunction(() => !document.getElementById("pdf-mode-btn").disabled, null, { timeout: 20000 });
 
+    // PDF mode reads on from one PDF into the next only while the folder is read on.
+    const setReel = (on) => page.evaluate((v) => { const t = document.getElementById("reel-toggle"); if (t.checked !== v) { t.checked = v; t.dispatchEvent(new Event("change")); } }, on);
+    await setReel(true);
     console.log("1. PDF mode opens the PDF being read, at its page, in the viewer");
     await page.evaluate(() => { const s = document.querySelectorAll("#pages .tpage")[1]; document.getElementById("stage").scrollTop = s.offsetTop - 20; });
     await page.waitForTimeout(300);
@@ -211,7 +214,34 @@ async function run() {
     await fa.waitForFunction(() => /1 of 1/.test(document.getElementById("find-count").textContent), null, { timeout: 10000 });
     check("past the last match here, › goes round to the next PDF that has one", await fa.evaluate(() => window.__pdfViewerSource().page), 1);
 
-    console.log("6. the same button brings the text back, at the PDF's page");
+    console.log("6. with ↕ Read folder on off, each PDF ends where it ends");
+    await setReel(false);
+    await fa.evaluate(() => window.__pdfViewerGoToPage(1));
+    await fa.fill("#find-input", "zephyrine");
+    await fa.press("#find-input", "Enter");
+    await page.waitForTimeout(1500);
+    check("Find stays in this PDF", (await shownFrame(page)).name, "A Decl.pdf");
+    check("…and says it has nothing here", await fa.evaluate(() => document.getElementById("find-count").textContent), "No results");
+    await page.waitForFunction(() => /this PDF only/.test(document.getElementById("pm-find").textContent), null, { timeout: 10000 });
+    truthy("…and the toolbar says the search is this PDF only", true);
+    await fa.fill("#find-input", "quillfeather");
+    await fa.press("#find-input", "Enter");
+    await fa.waitForFunction(() => /1 of 1/.test(document.getElementById("find-count").textContent), null, { timeout: 10000 });
+    await fa.press("#find-input", "Enter");
+    await page.waitForTimeout(1500);
+    check("past its last match Find goes round this PDF, not on", (await shownFrame(page)).name, "A Decl.pdf");
+    await fa.evaluate(() => { const s = document.scrollingElement; s.scrollTop = s.scrollHeight; });
+    await page.waitForTimeout(300);
+    await page.mouse.move(700, 500);
+    for (let k = 0; k < 10; k++) { await page.mouse.wheel(0, 120); await page.waitForTimeout(40); }
+    await page.waitForTimeout(800);
+    check("scrolling past the last page stays in it", (await shownFrame(page)).name, "A Decl.pdf");
+    await fa.evaluate(() => window.dispatchEvent(new CustomEvent("autoscroll-end")));
+    await page.waitForTimeout(800);
+    check("…and so does auto-scroll reaching it", (await shownFrame(page)).name, "A Decl.pdf");
+    await fa.press("#find-input", "Escape");
+
+    console.log("7. the same button brings the text back, at the PDF's page");
     await page.click("#pm-next");
     fb = await waitShown(page, "B Letter.pdf", 2);
     await fb.evaluate(() => window.__pdfViewerGoToPage(2));
@@ -220,7 +250,7 @@ async function run() {
     await page.waitForFunction(() => document.getElementById("st-file").textContent.startsWith("B Letter.txt"), null, { timeout: 20000 });
     await page.waitForTimeout(800);
     check("out of PDF mode", await page.evaluate(() => document.body.classList.contains("pdf-mode") || !document.getElementById("pdf-mode").hidden), false);
-    check("…in the export of the PDF that was shown, at its page", await page.evaluate(() => { const st = document.getElementById("stage"); const line = st.scrollTop + st.clientHeight * 0.35; let at = 0; for (const s of document.querySelectorAll("#pages .tpage")) { if (s.offsetTop > line) break; at = Number(s.dataset.index); } return at; }), 1);
+    check("…in the export of the PDF that was shown, at its page", await page.evaluate(() => { const st = document.getElementById("stage"); const line = st.scrollTop + st.clientHeight * 0.35; let at = null; for (const s of document.querySelectorAll("#pages .tpage")) { if (s.offsetTop > line) break; at = s; } return at ? /Page 2 of the letter/.test(at.textContent) : false; }), true);
     await page.click("#pdf-mode-btn");
     fb = await waitShown(page, "B Letter.pdf", 2);
     check("and in again, the frames still open", await page.evaluate(() => document.querySelectorAll("#pdf-mode iframe").length), 2);
@@ -230,7 +260,32 @@ async function run() {
     check("no page errors", errors, []);
     await context.close();
 
-    console.log("7. in the app: PDF mode in the reader's own tab");
+    console.log("8. the reader's own Find, with ↕ Read folder on off: this document only");
+    const reader2 = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    const rp = await reader2.newPage();
+    const rpErrors = [];
+    rp.on("pageerror", (e) => rpErrors.push(e.message));
+    rp.on("dialog", (d) => d.accept().catch(() => {}));
+    await rp.goto(srv.base + "/viewer/text-reader.html");
+    await rp.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
+    await makeCase(rp);
+    await rp.evaluate(() => window.__textReaderOpenDoc("A Decl.txt"));
+    await rp.waitForFunction(() => document.getElementById("st-file").textContent.startsWith("A Decl.txt"), null, { timeout: 20000 });
+    await rp.waitForTimeout(800);
+    await rp.keyboard.press("Control+f");
+    await rp.fill("#fb-input", "of the letter");
+    await rp.waitForTimeout(1500);
+    check("off: the bar says this document only", await rp.evaluate(() => document.getElementById("fb-rest").textContent), "· this document only (↕ Read folder on is off; Replace all still reaches the folder)");
+    await rp.press("#fb-input", "Enter");
+    await rp.waitForTimeout(1500);
+    check("…and Enter does not open the other document", await rp.evaluate(() => document.getElementById("st-file").textContent.startsWith("A Decl.txt")), true);
+    await rp.evaluate(() => { const t = document.getElementById("reel-toggle"); t.checked = true; t.dispatchEvent(new Event("change")); });
+    await rp.waitForFunction(() => /in 1 other document/.test(document.getElementById("fb-rest").textContent), null, { timeout: 10000 });
+    truthy("on: the rest of the folder is counted again", true);
+    check("no page errors in the reader", rpErrors, []);
+    await reader2.close();
+
+    console.log("9. in the app: PDF mode in the reader's own tab");
     const out = fs.mkdtempSync(path.join(os.tmpdir(), "pdf-mode-site-"));
     execFileSync("bash", [path.join(REPO, "pwa", "build-site.sh"), out], { stdio: "ignore" });
     site = await startServer(out);

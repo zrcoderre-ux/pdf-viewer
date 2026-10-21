@@ -61,6 +61,20 @@ bytes' SHA-256), so a scan is found once the viewer has recognized it.
 counts the matches through the folder for the top bar whenever the viewer's
 find input changes.
 
+## Only while the folder is read on
+
+Going on from one PDF into the next, by wheel, by auto-scroll or by Find,
+happens only while ↕ Read folder on (`settings.reel`) is on (`pmFolderOn`).
+The frame's `__pdfFolderFindOn` hook gives the viewer's `edgeOn` that
+answer, so with the setting off the viewer's Find goes round its own matches
+as it does outside PDF mode. The reader's own Find follows the same setting
+(`findFolderWide`): off, `scanFindFolder` does not read the folder as you
+type, `findRest` and `findCombined` are empty, so Enter and › stay in the
+document, and the bar says "this document only". Replace all is not a search
+and keeps its reach: `replaceAllEverywhere` asks `findRest({ all: true })`,
+and `awaitFolderScan` reads the folder for it with `scanFindFolder({ all:
+true })`. Turning the toggle restarts an open find.
+
 ## Back to the text
 
 `exitPdfMode` reads the shown frame's page and calls `pmBackToText`. That
