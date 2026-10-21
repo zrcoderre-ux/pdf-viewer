@@ -2,7 +2,8 @@
 // isMarkdownName): a .md in its pseudonyms opens like a lone .txt — the real
 // values from the key on screen, the name without its extension in the bar —
 // and a save writes it back in its pseudonyms under its own name, an edit
-// with it. In the app (the site pwa/build-site.sh
+// with it — except a value kept, which the save of a .md being edited writes
+// as itself (clearKeptIn): no PDF-Linker run will ever un-fake it. In the app (the site pwa/build-site.sh
 // assembles) a .md picked opens in the reader's tab.
 //
 // Run: node test-markdown.mjs   (from the repo root)
@@ -95,8 +96,10 @@ wb.save(sys.argv[1])
 const KEY_BYTES = buildKey([
   ["person", "Corwin Ashdale", "Tobias Wrenfield", "", "", "spreadsheet", 4],
   ["person", "Ashdale", "Wrenfield", "", "", "spreadsheet", 2],
+  ["person", "Careau", "Halvorsen", "", "", "spreadsheet", 1],
 ]);
-const MD = "# Tentative Ruling\n\n**Plaintiff Tobias Wrenfield** moves to compel.\n\n- Wrenfield's first request\n";
+// "Careau" is a street, faked by mistake: the keep is what the save carries out.
+const MD = "# Tentative Ruling\n\n**Plaintiff Tobias Wrenfield** moves to compel.\n\nThe store on Halvorsen Street.\n\n- Wrenfield's first request\n";
 
 /** The .md in the origin's private file system, opened in the reader in `w` as a lone file. */
 async function openMd(w) {
@@ -148,10 +151,41 @@ async function run() {
     const saved = await onDisk(page);
     check("the edit saved, the pseudonyms kept, byte for byte", saved, MD.replace(/\n$/, " Granted.\n"));
     truthy("no real name reaches the file", !/Ashdale/.test(saved));
+
+    console.log("3. a keep: Edit and Save write the kept value as itself");
+    const ok = await page.evaluate(() => {
+      const pn = [...document.querySelectorAll("#pages .tpage .page-body .pn")].find((el) => el.dataset.real === "Careau");
+      if (!pn) return false;
+      const r = pn.getBoundingClientRect();
+      pn.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 2, clientY: r.top + r.height / 2 }));
+      return true;
+    });
+    truthy("the faked street is a pseudonym on the page", ok);
+    await page.waitForFunction(() => !document.getElementById("keep-menu").hidden, null, { timeout: 4000 });
+    await page.evaluate(() => document.getElementById("keep-menu-no").click());
+    await page.waitForTimeout(500);
+    truthy("…kept, and marked so", await page.evaluate(() => !!document.querySelector('#pages .pn.kept[data-real="Careau"]')));
+    check("the file still carries its fake until the save", (await onDisk(page)).includes("Halvorsen Street"), true);
+    truthy("Edit is on", await page.evaluate(() => document.getElementById("edit-toggle").getAttribute("aria-pressed") === "true"));
+    await page.keyboard.press("Control+s");
+    await page.waitForTimeout(1500);
+    const kept = await onDisk(page);
+    check("the kept value is written as itself, the rest as it was", kept, MD.replace("Halvorsen Street", "Careau Street").replace(/\n$/, " Granted.\n"));
+    truthy("…the real name still in its pseudonym", kept.includes("Tobias Wrenfield") && !/Ashdale/.test(kept));
+    truthy("…and the page shows it, no pseudonym under it", await page.evaluate(() => document.querySelector("#pages .tpage .page-body").innerText.includes("Careau Street") && !document.querySelector('#pages .pn[data-real="Careau"]')));
+
+    console.log("4. opened again: the kept value reads in the clear");
+    await page.evaluate(async () => {
+      const h = await (await navigator.storage.getDirectory()).getFileHandle("Draft Order.md");
+      await window.__textReaderLoadLocal(await h.getFile(), h);
+    });
+    await page.waitForTimeout(1000);
+    truthy("Careau Street, with no pseudonym", await page.evaluate(() => document.querySelector("#pages .tpage .page-body").innerText.includes("Careau Street") && !document.querySelector('#pages .pn[data-real="Careau"]')));
+    truthy("Corwin Ashdale still put back over its pseudonym", (await bodyText(page)).includes("Corwin Ashdale"));
     check("no page errors", errors, []);
     await context.close();
 
-    console.log("3. in the app: a .md picked opens in the reader's tab");
+    console.log("5. in the app: a .md picked opens in the reader's tab");
     const out = fs.mkdtempSync(path.join(os.tmpdir(), "md-site-"));
     execFileSync("bash", [path.join(REPO, "pwa", "build-site.sh"), out], { stdio: "ignore" });
     site = await startServer(out);

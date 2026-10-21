@@ -35,7 +35,11 @@ app, which routes it to the reader tab.
   the reader opens it as it opens a `.txt` — from the picker, a drop, or the
   app's "open with" — and puts the real values from the key over the
   pseudonyms on screen. The Markdown marks (`#`, `**`, `-`) show as written.
-  Save writes it back to the same `.md`, in its pseudonyms. It is a file on
+  Save writes it back to the same `.md`, in its pseudonyms — except the
+  values you have **kept**: with **✎ Edit** on, Save writes each kept value
+  as itself in place of the pseudonym the run wrongly put there, so the fix
+  is in the file, not only on screen (no PDF-Linker run will rewrite a `.md`
+  to do it later). It is a file on
   its own, not one of the case folder's documents, so it is not listed in
   Documents and is renamed where it is saved, not from the top bar.
 - **The tools stand down the left margin.** The reading, pseudonym, review and
