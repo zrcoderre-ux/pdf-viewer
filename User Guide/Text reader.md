@@ -1652,7 +1652,10 @@ app, which routes it to the reader tab.
   the **next export in the Documents list** is read and hung underneath it,
   with a divider naming it and an **Open on its own** button, and so on down
   the folder. Nothing is combined on disk and nothing is written that you did
-  not edit.
+  not edit. **Turned off, a search ends where the document does too:** Find
+  counts and steps through this document only (Replace all still replaces
+  through the whole folder, as before, and says so); turned back on, Find
+  reads the rest of the folder again.
   **It reads both ways.** The export you open is rarely the first paper in the
   case, so coming back up to the head of the reel hangs the export **before**
   it above, and so on back up the folder. Reading back is asked for rather than
@@ -2259,6 +2262,11 @@ app, which routes it to the reader tab.
     of 12"). A scanned page is searched by the words the viewer recognized
     the last time it was opened. A search open in the reader's own Find is
     carried in.
+  - **Both follow ↕ Read folder on** (the PDF group of the Tools panel).
+    Turned off, each PDF ends where it ends: scrolling and auto-scroll stop at
+    its last page, and Find searches this PDF only, going round it rather
+    than on. The reader's own Find does the same with it off: this document
+    only.
 
 - **Redact the PDF from beside the export.** With the pane open, **▬ Redact
   PDF** (the PDF group of the Tools panel) marks the case folder's own PDF and

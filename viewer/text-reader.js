@@ -756,7 +756,9 @@ reelToggle.addEventListener("change", () => {
   settings.reel = reelToggle.checked;
   saveSettings();
   if (settings.reel) { reelDone = false; reelDoneUp = false; reelMaybeExtend(); }
-  else toast("The reel is off — this document ends where it ends, at both ends. What is already hanging off it stays until the next one is opened.");
+  else toast("The reel is off — this document ends where it ends, at both ends, and Find searches this document only. What is already hanging off it stays until the next one is opened.");
+  // Find reads the folder only while it is read on.
+  if (!findBar.hidden && findQuery) restartFind();
 });
 // ── print ────────────────────────────────────────────────────────────────────
 // The pages as they are shown, to paper or to a PDF — the browser's own
@@ -4018,6 +4020,13 @@ function refuseWhileBusy() {
 }
 /** Whether a case folder is open in full: listed, read, and the reel's to hang. A light attach is not. */
 function folderOpen() { return !!dirHandle && !folderLight && folderDocs.length > 0; }
+/**
+ * Whether Find steps and counts through the whole case folder: only while it
+ * is read on (↕ Read folder on, settings.reel). Off, a document ends where it
+ * ends, and so does a search — here and in PDF mode. Replace all is not a
+ * search and keeps its reach (it reads the folder itself: findRest's `all`).
+ */
+function findFolderWide() { return folderOpen() && settings.reel !== false; }
 /** Whether the document at the head of the reel is Combined Text.txt. */
 function isCombinedHead() {
   const h = reel[0];
@@ -9543,7 +9552,8 @@ function findScanStale() {
 }
 let findScanWaiters = []; // what is waiting on the folder's count being in (awaitFolderScan)
 let findScanDone = null;  // the question whose count `findRows` holds: a reading that broke off holds none
-async function scanFindFolder() {
+async function scanFindFolder({ all = false } = {}) {
+  if (!all && !findFolderWide()) return;
   if (!dirHandle || !findQuery || findScanning || !findScanStale()) return;
   findScanning = true;
   // Counts made under another key or the other face of the names are no
@@ -9578,7 +9588,7 @@ async function scanFindFolder() {
   // The question moved while this one was being read (a word typed, Match
   // case ticked, Show fakes turned): the new one could not start while this
   // held the folder, so it starts now.
-  if (findScanFor !== mine || findScanStale()) { scanFindFolder(); return; }
+  if (findScanFor !== mine || findScanStale()) { scanFindFolder({ all }); return; }
   findRows = rows;
   findScanDone = mine;
   renderFindBar();
@@ -9606,7 +9616,7 @@ async function awaitFolderScan(pass, moved = null) {
       // Stale, or read under this question and broken off before its count
       // was in: read again from the start.
       if (fresh) { if (++broke > 3) return false; findScanFor = null; }
-      scanFindFolder();
+      scanFindFolder({ all: true });
     }
     await new Promise((res) => {
       findScanWaiters.push(res);
@@ -9622,11 +9632,13 @@ async function awaitFolderScan(pass, moved = null) {
  * a walk past the last hit on screen would open one already hung), and the
  * combined file is apart (findCombined).
  */
-function findRest() {
+function findRest({ all = false } = {}) {
+  if (!all && !findFolderWide()) return [];
   return roundFromHere(TD.splitFolderRows(findRows, onReel).rest);
 }
 /** The combined file's count, when it has hits and is not the document on screen. */
-function findCombined() {
+function findCombined({ all = false } = {}) {
+  if (!all && !findFolderWide()) return 0;
   return TD.splitFolderRows(findRows, onReel).combined.reduce((t, r) => t + r.count, 0);
 }
 /** The bar: which hit of how many, where it stands, and what the folder holds. */
@@ -9648,7 +9660,8 @@ function renderFindBar() {
   $("fb-rest").textContent = !findQuery ? ""
     : findScanning ? `· reading ${folderName || "the folder"}…`
     : others.length ? `· ${rest} in ${others.length} other document${others.length === 1 ? "" : "s"}${n ? "" : ` — › opens ${TD.docLabel(others[0].doc.name)}`}` + combNote
-    : dirHandle ? "· nowhere else in the folder" + combNote : "";
+    : findFolderWide() ? "· nowhere else in the folder" + combNote
+    : folderOpen() ? "· this document only (↕ Read folder on is off; Replace all still reaches the folder)" : "";
   $("fb-prev").disabled = $("fb-next").disabled = !findQuery || (n < 2 && !others.length);
   $("fb-replace").disabled = !doc || !findQuery || (!n && !others.length);
   // Replace all: hits here, or — with the case folder open in full — hits in
@@ -9694,7 +9707,7 @@ function stepFind(dir = 1) {
   if (!n) {
     if (others.length) { jumpToFind(dir < 0 ? others[others.length - 1] : others[0]); return; }
     if (findScanning) { findJump = true; toast(`Reading ${folderName || "the folder"} for “${findQuery}”…`); return; }
-    toast(dirHandle ? `“${findQuery}” is nowhere in ${folderName || "the folder"}.` : `“${findQuery}” is not in this document.`);
+    toast(findFolderWide() ? `“${findQuery}” is nowhere in ${folderName || "the folder"}.` : `“${findQuery}” is not in this document.`);
     return;
   }
   const next = findStep + dir;
@@ -10487,8 +10500,8 @@ async function replaceAllEverywhere() {
       if (moved() || findScanStale()) { halt(CHANGED_UNDER); return; }
       if (!inHand) { halt(`${folderName} could not be read for “${q}” — nothing was changed.`); return; }
     }
-    const targets = findRest().map((r) => r.doc).sort((a, b) => folderDocs.indexOf(a) - folderDocs.indexOf(b));
-    const comb = findCombined();
+    const targets = findRest({ all: true }).map((r) => r.doc).sort((a, b) => folderDocs.indexOf(a) - folderDocs.indexOf(b));
+    const comb = findCombined({ all: true });
     const combNote = comb ? ` Not touched: ${TD.COMBINED_FILE} (${comb}) — PDF-Linker writes it again from the exports.` : "";
     if (!targets.length) {
       // Nothing off the screen: the replace there always was, and no confirm.
@@ -22290,6 +22303,8 @@ let pmBusy = false;          // a PDF being brought up: the edge waits for it
 let pmEdge = { dir: 0, px: 0, t: 0 };
 let pmQuietUntil = 0;        // the wheel is spent, not obeyed, until then (Date.now)
 
+/** Whether PDF mode reads on from one PDF into the next (scrolling, auto-scroll, Find): the reader's ↕ Read folder on. */
+function pmFolderOn() { return settings.reel !== false; }
 /** The PDFs PDF mode steps through: the case folder's, else those matched to the document. */
 function pdfModeList() {
   if (folderPdfs.length) return folderPdfs;
@@ -22436,11 +22451,14 @@ async function pmShow(idx, { page = 0, end = false, auto = false } = {}) {
 /** Hooks into a viewer frame: the folder find, scrolling on past either end, auto-scroll, keys. */
 function pmWire(w) {
   w.__pdfFolderFind = (dir, q) => { pmFolderFind(dir, q); return true; };
+  // …and only while the folder is read on (↕ Read folder on): off, each PDF
+  // ends where it ends, for scrolling and for Find.
+  w.__pdfFolderFindOn = pmFolderOn;
   w.addEventListener("wheel", (e) => {
     // The wheel that carried the reading into this PDF is still turning:
     // spent here rather than scrolling straight back out of where it landed.
     if (Date.now() < pmQuietUntil && !e.ctrlKey) { e.preventDefault(); return; }
-    if (e.ctrlKey || !pdfModeOn || pmBusy) return;
+    if (e.ctrlKey || !pdfModeOn || pmBusy || !pmFolderOn()) return;
     const s = w.document.scrollingElement || w.document.documentElement;
     const max = s.scrollHeight - w.innerHeight;
     if (e.deltaY > 0 && s.scrollTop >= max - 2) pmOverscroll(1, e.deltaY);
@@ -22448,7 +22466,7 @@ function pmWire(w) {
     else pmOverscroll(0, 0);
   }, { passive: false });
   w.addEventListener("autoscroll-end", () => {
-    if (pdfModeOn && pmWin() === w && pmAt < pmList.length - 1) pmShow(pmAt + 1, { page: 1, auto: true });
+    if (pdfModeOn && pmFolderOn() && pmWin() === w && pmAt < pmList.length - 1) pmShow(pmAt + 1, { page: 1, auto: true });
   });
   w.addEventListener("keydown", (e) => { if (pmKey(e)) { e.preventDefault(); e.stopPropagation(); } }, true);
   // What the viewer's Find is looking for, counted through the folder.
@@ -22573,6 +22591,7 @@ async function pmFindSummary(q) {
   if (!q) { try { q = pmWin().__pdfViewerFindQuery(); } catch { q = null; } }
   const seq = ++pmSumSeq;
   if (!q || !pdfModeOn) { pmFindEl.textContent = ""; return; }
+  if (!pmFolderOn()) { pmFindEl.textContent = `“${q.query}”: this PDF only (↕ Read folder on is off)`; return; }
   let total = 0, docs = 0, read = 0;
   for (const src of pmList) {
     const counts = await pmHits(src, q);

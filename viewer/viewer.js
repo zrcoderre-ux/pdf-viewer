@@ -6741,7 +6741,7 @@ Find = createFind({
   pagesEl,
   scrollToPage,
   onEdge: (dir, q) => (typeof window.__pdfFolderFind === "function" ? !!window.__pdfFolderFind(dir, q) : false),
-  edgeOn: () => typeof window.__pdfFolderFind === "function",
+  edgeOn: () => typeof window.__pdfFolderFind === "function" && (typeof window.__pdfFolderFindOn !== "function" || window.__pdfFolderFindOn()),
 });
 
 // ── Security: which tools show ───────────────────────────────────────────────
