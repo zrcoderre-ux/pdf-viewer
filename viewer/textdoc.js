@@ -3209,6 +3209,18 @@ export function isExportName(name) {
   return true;
 }
 
+/**
+ * A Markdown document by name: what My-Macros' Markdown export writes from a
+ * Word draft, in its pseudonyms (the re-anonymized copy). It is read as a lone
+ * file, the way a headerless Word export is — one page, the real values put
+ * back on screen through the key — and saved in its pseudonyms under its own
+ * name. Never one of a case folder's documents: PDF-Linker neither writes nor
+ * reads it, so isExportName does not take it.
+ */
+export function isMarkdownName(name) {
+  return /\.(md|markdown)$/i.test(String(name == null ? "" : name).trim());
+}
+
 export function isQuarantinedName(name) {
   return /\.txt\.leak$/i.test(String(name == null ? "" : name));
 }
@@ -3233,7 +3245,7 @@ export function runMarker(name) {
 /** The pseudonym key by name — the macro's pattern plus Windows' copies. */
 /** A document's name as a reader says it: without the export's extension. */
 export function docLabel(name) {
-  return String(name == null ? "" : name).replace(/\.txt(\.LEAK)?$/i, "");
+  return String(name == null ? "" : name).replace(/\.(txt(\.LEAK)?|md|markdown)$/i, "");
 }
 
 export function isKeyName(name) {

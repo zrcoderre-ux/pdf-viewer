@@ -13,7 +13,7 @@ import {
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, setOwnPartyWords, ownPartyWordsOf, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
-  isExportName, isKeyName, isQuarantinedName, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
+  isExportName, isKeyName, isQuarantinedName, isMarkdownName, docLabel, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
   columnCuts, columnBands, columnWidths, lineIndent, placeColumns, COLUMN_GAP, COLUMN_REACH, COLUMN_SNAP, COLUMN_GUTTER, COLUMN_STRETCH,
   checkboxRanges, checkboxState,
@@ -907,6 +907,16 @@ check("tool artifacts are not documents", ["LEAKS.txt", "Combined Text.txt", "Au
 check("run markers", ["ETA ~6.04PM (6 of 13).txt", "ETA (estimating...).txt", "DONE 12.45AM.txt", "eta ~11.05pm (applying leak fixes).TXT", "Brief.txt", "ETA.txt", "ETA notes.docx"].map(runMarker),
   [{ kind: "ETA", label: "~6:04 PM (6 of 13)" }, { kind: "ETA", label: "(estimating...)" }, { kind: "DONE", label: "12:45 AM" }, { kind: "ETA", label: "~11:05 PM (applying leak fixes)" }, null, null, null]);
 check("quarantine", isQuarantinedName("Brief.txt.LEAK"), true);
+// My-Macros' Markdown export: opened as a lone file, never a document of the folder.
+check("markdown by name", ["Draft Order.md", "Draft.MARKDOWN", "Brief.txt", "notes.md.txt"].map(isMarkdownName), [true, true, false, false]);
+check("…not an export", isExportName("Draft Order.md"), false);
+check("…its label without the extension", ["Draft Order.md", "Draft.markdown", "Brief.txt.LEAK", "Reply.txt"].map(docLabel), ["Draft Order", "Draft", "Brief", "Reply"]);
+{
+  const md = "# TENTATIVE RULING\r\n\r\n**Plaintiff Quill Rasho** moves to compel.\r\n\r\n- item one\r\n1. item two\r\n";
+  const p = parseExport(md);
+  check("…read as one page with no header", [p.pages.length, p.pages[0].header, p.pages[0].lines[0]], [1, null, "# TENTATIVE RULING"]);
+  check("…and written back byte for byte", serializeExport(p), md);
+}
 check("key name", [isKeyName("pseudonym_key.xlsx"), isKeyName("pseudonym_key (1).xlsx"), isKeyName("Order 2024.xlsx")], [true, true, false]);
 // …never PDF-Linker's temporary copy, left beside the key by a save that crashed,
 // and the key itself before a copy of it a folder lists first.

@@ -97,7 +97,8 @@ Actions**.
 
 ## Text exports
 
-A `.txt` opened in the app — from the picker, a drop, or the OS file handler —
+A `.txt` (or My-Macros' Markdown export, a `.md`) opened in the app — from the
+picker, a drop, or the OS file handler —
 opens in the **text reader** (`viewer/text-reader.html`) in its own tab rather
 than the PDF viewer: PDF-Linker's scrubbed exports laid out as pages in your
 font, citations linked, the real names put back on screen from the case's

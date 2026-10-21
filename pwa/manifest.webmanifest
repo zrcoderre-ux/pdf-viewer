@@ -59,6 +59,10 @@
         "text/plain": [
           ".txt",
           ".LEAK"
+        ],
+        "text/markdown": [
+          ".md",
+          ".markdown"
         ]
       },
       "icons": [
