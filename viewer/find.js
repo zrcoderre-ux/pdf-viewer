@@ -133,7 +133,12 @@ function rawToPoint(nodes, off) {
   return last ? { node: last.node, offset: last.node.data.length } : null;
 }
 
-export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {} }) {
+// `onEdge(dir, query)` is asked when a step would run off either end of this
+// document's matches (or there are none here): the text reader's PDF mode
+// answers it by going on into the next PDF of the case folder that has one,
+// and returns true when it has taken the step. `edgeOn()` says whether there
+// is anywhere to go, so ‹ › stay lit with a single match, or none, here.
+export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {}, onEdge = null, edgeOn = () => false }) {
   const bar = document.getElementById("find-bar");
   const input = document.getElementById("find-input");
   const countEl = document.getElementById("find-count");
@@ -190,7 +195,7 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {} }) {
     const q = input.value.trim();
     countEl.classList.toggle("none", !!q && !matches.length);
     countEl.textContent = !q ? " " : matches.length ? `${current + 1} of ${matches.length}` : "No results";
-    prevBtn.disabled = nextBtn.disabled = matches.length < 2 && !(matches.length === 1 && current < 0);
+    prevBtn.disabled = nextBtn.disabled = !(q && edgeOn()) && matches.length < 2 && !(matches.length === 1 && current < 0);
   }
   function reveal(i) {
     const m = matches[i];
@@ -210,7 +215,7 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {} }) {
     if (!place()) { scrollToPage(m.pn, { smooth: false }); requestAnimationFrame(place); }
   }
   function go(dir) {
-    if (!matches.length) return;
+    if (!matches.length) { if (onEdge && edgeOn() && input.value.trim()) onEdge(dir, query()); return; }
     if (current < 0) {
       // Start from what is on screen (below the toolbar), not the top of the
       // document.
@@ -218,10 +223,18 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {} }) {
       current = matches.findIndex((m) => m.range.getBoundingClientRect().top >= top);
       if (current < 0) current = 0;
       if (dir < 0) current = (current - 1 + matches.length) % matches.length;
-    } else current = (current + dir + matches.length) % matches.length;
+    } else {
+      const next = current + dir;
+      if ((next < 0 || next >= matches.length) && onEdge && edgeOn() && onEdge(dir, query())) return;
+      current = (next + matches.length) % matches.length;
+    }
     paint();
     showCount();
     reveal(current);
+  }
+  function query() {
+    const q = input.value.trim();
+    return q ? { query: q, caseSensitive: caseEl.checked, wholeWord: wordEl.checked } : null;
   }
   function run({ keepPlace = false } = {}) {
     const q = input.value;
@@ -263,7 +276,16 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {} }) {
 
   input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => run(), 160); });
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); clearTimeout(timer); if (!matches.length || input.dataset.q !== input.value) { input.dataset.q = input.value; run(); } else go(e.shiftKey ? -1 : 1); }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      clearTimeout(timer);
+      if (!matches.length || input.dataset.q !== input.value) {
+        input.dataset.q = input.value;
+        run();
+        // Nothing in this document: on to the next one that has it.
+        if (!matches.length) go(e.shiftKey ? -1 : 1);
+      } else go(e.shiftKey ? -1 : 1);
+    }
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
   });
   prevBtn.addEventListener("click", () => go(-1));
@@ -288,9 +310,28 @@ export function createFind({ pagesEl, scrollToPage, onOpenChange = () => {} }) {
     /** The pages were rebuilt (zoom, rotation): read them again and keep the place. */
     pagesRebuilt() { index = new Map(); if (!bar.hidden && input.value.trim()) run({ keepPlace: true }); },
     /** What the bar is searching for, with its options, or null when empty. */
-    current() {
-      const q = input.value.trim();
-      return q ? { query: q, caseSensitive: caseEl.checked, wholeWord: wordEl.checked } : null;
+    current: query,
+    /**
+     * Open on `query` and stand on a match of page `pn` — its first going
+     * forward (`dir` 1), its last going back — else the first or last of the
+     * document. What the PDF mode calls on arriving in the next PDF.
+     */
+    openAt(q, { caseSensitive = false, wholeWord = false } = {}, dir = 1, pn = 0) {
+      bar.hidden = false;
+      place();
+      toggleBtn?.setAttribute("aria-pressed", "true");
+      input.value = q;
+      input.dataset.q = q;
+      caseEl.checked = !!caseSensitive;
+      wordEl.checked = !!wholeWord;
+      onOpenChange(true);
+      matches = q.trim() ? search(q, { caseSensitive, wholeWord }) : [];
+      const onPage = matches.map((m, i) => (m.pn === pn ? i : -1)).filter((i) => i >= 0);
+      current = !matches.length ? -1 : onPage.length ? (dir < 0 ? onPage[onPage.length - 1] : onPage[0]) : dir < 0 ? matches.length - 1 : 0;
+      paint();
+      showCount();
+      if (current >= 0) reveal(current); else if (pn) scrollToPage(pn, { smooth: false });
+      return matches.length;
     },
     /** Stand clear of the other bars again (one opened or closed). */
     place,

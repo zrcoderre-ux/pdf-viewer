@@ -1242,3 +1242,29 @@ body.editing .page-body.free .line.rl .rb { cursor: col-resize; }
    stamp's, the one at the margin and the other at the right. */
 .page-body.fixed .line.cap-r > .lt { text-align: right; }
 .page-body.fixed .line.cap-split > .lt { display: flex; justify-content: space-between; }
+
+/* ── PDF mode (text-reader.js, "PDF mode") ──
+   The case folder's PDFs in the PDF viewer, a frame per PDF, filling the
+   window under the toolbar; the toolbar keeps only the toggle and the
+   switcher, since everything else on it works on the text. */
+#pdf-mode {
+  position: fixed; top: var(--toolbar-height); left: 0; right: 0; bottom: 0; z-index: 45;
+  background: var(--canvas);
+}
+#pdf-mode iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+/* Hidden, not taken out of the layout: a frame put out of display comes back
+   with its scroll and its overlays measured at no size. */
+#pdf-mode iframe[hidden] { display: block; visibility: hidden; pointer-events: none; }
+body.pdf-mode #toolbar > :not(#pdf-mode-btn):not(#pm-controls):not(.spacer) { display: none; }
+body.pdf-mode #statusbar { display: none; }
+.pm-controls { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.pm-controls[hidden] { display: none; }
+#pm-pick { max-width: 42vw; }
+.pm-where { font-size: 12px; opacity: 0.8; white-space: nowrap; }
+.pm-edge {
+  position: absolute; left: 50%; transform: translateX(-50%); z-index: 2;
+  padding: 6px 14px; border-radius: 16px; font-size: 12px; pointer-events: none;
+  background: var(--accent, #1a73e8); color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
+.pm-edge.down { bottom: 18px; }
+.pm-edge.up { top: 64px; }
