@@ -7,7 +7,9 @@ and markup, signatures, form filling, text edits, page organizing,
 redaction, password protection, Bates numbering, compression, comparison
 and export to Word. The Chrome extension opens PDFs from the web in the
 viewer; the web app (`pwa/`) opens files from disk in tabs, in as many
-windows as you like, and saves back to the same file.
+windows as you like, and saves back to the same file. **PDF+** (`desktop/`)
+is the same app installed as a Windows program, with no network; see
+[desktop/README.md](desktop/README.md).
 
 Nothing is written into a PDF until you save, and citation links are never
 written into it — they are overlays, drawn fresh each time.
@@ -267,6 +269,7 @@ viewer/statute-codes.js              Code patterns (port of STATUTE_CODES)
 viewer/federal-codes.js              C.F.R. / U.S.C. / named federal codes
 viewer/code-tables.js                WL / Lexis search prefix tables
 fetch-pdfjs.sh                       One-time PDF.js download
+desktop/                             PDF+, the desktop app (Electron; see desktop/README.md)
 User Guide/                          One page per feature, linked from this README
 Design Notes/                        How the code works and why, one file per area (see PROJECT_SUMMARY.md)
 ```
