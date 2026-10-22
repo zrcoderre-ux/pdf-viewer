@@ -651,6 +651,24 @@ more than leaves the last line's foot an inch above the page's — the owner,
 "The pleading goes too far down, it also needs an inch of margin at the
 bottom" — checked in the same test.
 
+**…and run down the length of it** (`SCAN_FIT_MIN`, and `rows` read but
+empty). The owner: "The number lines should place the numbers through the
+length of the text page, with margins at the top and bottom. I just had one
+where the 1-28 only went halfway down the page, despite the page matching the
+pdf size." A single-spaced filing numbered by # Number lines has a number on
+every row of the scan, so `slotFit` read single spacing off those rows and the
+28 numbers stopped halfway down the sheet. A fit whose pitch is under
+`SCAN_FIT_MIN` (95%) of the paper's own (line 1 to an inch above the foot, in
+28 lines) is now dropped for the paper's grid, so the numbers run from the top
+margin to the bottom one. The same holds for a scan with no text layer at all,
+which was laid flowing at the reader's leading and also stopped part of the
+way down: it now takes the paper's grid too, its body at the paper's inch
+(`geom.bodyX`) because no margin can be read from it. `test-form-look.mjs` lays
+both (a scan's rows 12 points apart, and a PDF with no text) and checks line 1
+within two inches of the top and line 28 within an inch and two lines of the
+foot (before the fix: 286 px short on the single-spaced scan). That file's
+poor-scan checks now read only the open document's page out of the reel.
+
 **…but only where the numbers run as a margin does** (`marginRuns`). The
 owner, of an exhibit's invoice: "some of the text is being pushed up off the
 page", "it seems to just be this page". Three lines opening with a number make

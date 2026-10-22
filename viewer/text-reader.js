@@ -20445,7 +20445,7 @@ function applyMatchedLayoutNow() {
     // point or two with the measurement, and a column of numbers that wanders
     // is the thing the eye notices first.
     if (!margins.has(info)) margins.set(info, docBodyLeft(info));
-    const bodyX = margins.get(info);
+    let bodyX = margins.get(info);
     // PLEADING PAPER THE PDF'S NUMBERS DID NOT COME THROUGH ON (a poor scan,
     // numbered by # Number lines or by hand) is laid on the paper's numbers
     // all the same: the owner, "The added numbers from number lines are not
@@ -20460,9 +20460,14 @@ function applyMatchedLayoutNow() {
     // Laid as pleading paper, its "1" stood at line 1 an inch down the page and
     // the forty lines the file has above it were crowded over the page's top.
     // The owner: "some of the text is being pushed up off the page".
-    if (!geom && body.classList.contains("numbered") && rows && rows.length && marginRuns(lines)) {
+    // …AND A SCAN WITH NO TEXT AT ALL (no OCR read it: `rows` read, and empty)
+    // on the paper's own grid too, rather than its numbers flowing at the
+    // reader's leading part of the way down the sheet.
+    if (!geom && body.classList.contains("numbered") && rows && marginRuns(lines)) {
       geom = scanGeom(lines, rows, sz || { w: 612, h: 792 }, bodyX);
       numbered = true;
+      // (A scan with no text has no margin of its own read: the paper's inch.)
+      if (!(bodyX > 0)) bodyX = geom.bodyX;
     }
     // WHERE THIS PAGE'S LINES GO, worked out once and kept on the page. The
     // pass is asked for again every time a batch of the PDF's sizes lands and
@@ -21821,20 +21826,34 @@ function scanGeom(lines, rows, sz, bodyX) {
     const n = parseInt(l.querySelector(".gn").textContent, 10);
     if (n >= 1 && n <= TD.MARGIN_LAST) pairs.push({ n, top: rows[lay.rowOf[k]].top });
   });
-  const fit = PS.slotFit(pairs);
+  let fit = PS.slotFit(pairs);
   const x = bodyX > 0 ? bodyX : 72;
   // …AND KEPT ON THE PAPER: the owner, "The pleading goes too far down, it also
   // needs an inch of margin at the bottom". Line 1 between half an inch and two
   // inches down, and the pitch no more than puts the foot of the last line an
   // inch above the page's foot (PAPER_MARGIN), whatever the scan's rows say.
-  const y1 = fit ? Math.max(PAPER_MARGIN / 2, Math.min(PAPER_MARGIN * 2, fit.y1)) : PAPER_MARGIN;
-  const room = (sz.h - PAPER_MARGIN - y1) / TD.MARGIN_LAST;
+  const headAt = (y) => Math.max(PAPER_MARGIN / 2, Math.min(PAPER_MARGIN * 2, y));
+  const roomFrom = (y) => (sz.h - PAPER_MARGIN - y) / TD.MARGIN_LAST;
+  // …AND RUN DOWN THE LENGTH OF IT: the owner, "The number lines should place
+  // the numbers through the length of the text page, with margins at the top
+  // and bottom. I just had one where the 1-28 only went halfway down the
+  // page". A single-spaced filing numbered by # Number lines has a number on
+  // every row of the scan, and a fit to those rows is a pitch of single
+  // spacing: 28 lines of it stop halfway down the paper. A fit that falls
+  // short of the paper's own pitch is not the paper's grid; the paper's is.
+  if (fit && fit.pitch < SCAN_FIT_MIN * roomFrom(headAt(fit.y1))) fit = null;
+  const y1 = fit ? headAt(fit.y1) : PAPER_MARGIN;
+  const room = roomFrom(y1);
   return {
     y1,
     pitch: fit ? Math.min(fit.pitch, room) : room,
     first: 1, last: TD.MARGIN_LAST, bodyX: x, numberRight: x - 12, scan: true,
   };
 }
+// The least of the paper's own pitch a scan's fitted pitch may be and still be
+// taken (scanGeom): 28 lines of it stop no more than a line and a half short of
+// the margin at the foot.
+const SCAN_FIT_MIN = 0.95;
 function clearMatched(sec) {
   if (!sec.classList.contains("matched")) return;
   sec.classList.remove("matched");
