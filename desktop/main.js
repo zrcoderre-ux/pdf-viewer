@@ -1,0 +1,451 @@
+// PDF+ — the desktop app's main process.
+//
+// PDF+ is the PWA's tabbed shell (pwa/index.html + app-web.js) and the
+// canonical viewer (viewer/, pdfjs/) running in Electron instead of in Chrome
+// from GitHub Pages: the same files, copied into app/ by assemble.mjs, served
+// from inside the app and never fetched. What this file adds is what Chrome
+// and the hosting gave the PWA, and the lockdown that is the point of having
+// a desktop app at all:
+//
+//   - The pages are served from the app itself under pdfplus://app/, a
+//     standard, secure scheme (storage, workers, fetch and the File System
+//     Access API all need one), with a Content-Security-Policy, and with
+//     shim.js injected first into every page (see shim.js).
+//   - NO NETWORK. Every request that is not to pdfplus://app/ (or a data: or
+//     blob: URL the page made itself) is cancelled. Links leave the app for
+//     the default browser, never load in it: Westlaw and Lexis+ straight away
+//     (citation links, Shift+Space), anything else after asking.
+//   - The pages get no Node: sandboxed, context-isolated, and the only bridge
+//     (preload.js) can read and write just the files Windows handed the app
+//     (Open with, a double-click once PDF+ is the default) — never a path the
+//     page names on its own. Files opened through the app's own pickers are
+//     Chromium's File System Access handles, as in the PWA, with the
+//     permission prompts answered yes.
+//   - One instance: a file opened while PDF+ is running goes to the window
+//     last used, as a new tab.
+
+"use strict";
+
+const { app, BrowserWindow, Menu, dialog, ipcMain, protocol, session, shell } = require("electron");
+const fs = require("node:fs");
+const fsp = require("node:fs/promises");
+const path = require("node:path");
+const crypto = require("node:crypto");
+
+const SCHEME = "pdfplus";
+const HOST = "app";
+const ORIGIN = `${SCHEME}://${HOST}`;
+const APP_DIR = path.join(__dirname, "app"); // assembled by assemble.mjs
+const SHIM_PATH = "/__pdfplus/shim.js";
+const ICON = path.join(__dirname, "build", "icon.png");
+const APP_NAME = "PDF+";
+
+// What Windows may hand the app: the PWA's file handlers, as in
+// pwa/manifest.webmanifest.
+const OPENABLE = /\.(pdf|txt|leak|md|markdown)$/i;
+
+// Links that open in the browser without asking: the citation links' own
+// targets (viewer/code-tables.js). Any other link is shown first.
+const TRUSTED_LINK_HOSTS = [/(^|\.)westlaw\.com$/i, /(^|\.)lexis\.com$/i, /(^|\.)lexisnexis\.com$/i];
+// PDF-Linker's own link (the text reader's Re-run PDF-Linker button,
+// textdoc.rerunUrl), handed to the program Windows has registered for it.
+// It carries a folder token and a nonce, and PDF-Linker runs only on the
+// request file the reader writes beside it, so it goes without asking.
+const APP_SCHEMES = ["pdf-linker:"];
+
+// Content-Security-Policy for every page: scripts only from the app (plus
+// WebAssembly, for OCR), nothing fetched from anywhere else. The network is
+// shut in onBeforeRequest as well; this is what stops a script that got into
+// a page from running at all.
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval' blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data: blob:",
+  "connect-src 'self' data: blob:",
+  "media-src 'self' data: blob:",
+  "worker-src 'self' blob:",
+  "frame-src 'self' blob:",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'none'",
+].join("; ");
+
+const MIME = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json",
+  ".webmanifest": "application/manifest+json",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".wasm": "application/wasm",
+  ".bcmap": "application/octet-stream",
+  ".pfb": "application/octet-stream",
+  ".ttf": "font/ttf",
+  ".otf": "font/otf",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8",
+  ".pdf": "application/pdf",
+};
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: SCHEME,
+  privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true, codeCache: true },
+}]);
+
+// A profile of its own, for tests (test-desktop.mjs): the single-instance
+// lock, storage and the opened-files list all live in it.
+if (process.env.PDFPLUS_USER_DATA) app.setPath("userData", process.env.PDFPLUS_USER_DATA);
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  start();
+}
+
+// ---- Files Windows handed over ---------------------------------------------
+//
+// The bridge reads and writes only these. A path is granted when it arrives
+// on the command line (the first launch, or a second one forwarded by the
+// single-instance lock), and the grant is kept, so a file in the Recent list
+// opens again after a restart. The newest GRANT_LIMIT are kept.
+
+const GRANT_LIMIT = 500;
+let grantsFile = "";
+let grants = []; // newest first, as given (a path's case kept for display)
+
+const pathKey = (p) => {
+  const r = path.resolve(p);
+  return process.platform === "win32" ? r.toLowerCase() : r;
+};
+
+function loadGrants() {
+  grantsFile = path.join(app.getPath("userData"), "opened-files.json");
+  try {
+    const list = JSON.parse(fs.readFileSync(grantsFile, "utf8"));
+    if (Array.isArray(list)) grants = list.filter((p) => typeof p === "string");
+  } catch { grants = []; }
+}
+
+function grant(p) {
+  const k = pathKey(p);
+  grants = [path.resolve(p), ...grants.filter((g) => pathKey(g) !== k)].slice(0, GRANT_LIMIT);
+  try { fs.writeFileSync(grantsFile, JSON.stringify(grants, null, 1)); } catch { /* kept for this run */ }
+}
+
+function isGranted(p) {
+  if (typeof p !== "string" || !p || !path.isAbsolute(p)) return false;
+  const k = pathKey(p);
+  return grants.some((g) => pathKey(g) === k);
+}
+
+/** The openable files on a command line: what Windows passes for "Open with"
+ *  and a double-click. Chromium's own switches and anything that is not an
+ *  existing file are not. */
+function filesFromArgv(argv, cwd) {
+  const args = argv.slice(process.defaultApp ? 2 : 1);
+  const out = [];
+  for (const a of args) {
+    if (!a || a.startsWith("--") || !OPENABLE.test(a)) continue;
+    const p = path.resolve(cwd || process.cwd(), a);
+    try { if (fs.statSync(p).isFile()) out.push(p); } catch { /* not there */ }
+  }
+  return out;
+}
+
+// Files waiting for a window whose page has said it is ready for them.
+const pending = [];
+const readyContents = new Set();
+let lastWindow = null;
+
+function deliverFiles(paths) {
+  if (!paths.length) return;
+  for (const p of paths) grant(p);
+  const files = paths.map((p) => ({ path: p, name: path.basename(p) }));
+  const win = (lastWindow && !lastWindow.isDestroyed() && lastWindow) || BrowserWindow.getAllWindows()[0];
+  if (win && readyContents.has(win.webContents.id)) {
+    win.webContents.send("pdfplus:open-files", files);
+  } else {
+    pending.push(...files);
+  }
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
+}
+
+// ---- Serving the app --------------------------------------------------------
+
+function notFound() {
+  return new Response("Not found", { status: 404, headers: { "content-type": "text/plain" } });
+}
+
+async function serve(request) {
+  const url = new URL(request.url);
+  if (url.host !== HOST) return notFound();
+  let rel;
+  try { rel = decodeURIComponent(url.pathname); } catch { return notFound(); }
+  if (rel === "/") rel = "/index.html";
+  const file = rel === SHIM_PATH
+    ? path.join(__dirname, "shim.js")
+    : path.normalize(path.join(APP_DIR, rel));
+  if (rel !== SHIM_PATH && !file.startsWith(APP_DIR + path.sep)) return notFound();
+  let body;
+  try { body = await fsp.readFile(file); } catch { return notFound(); }
+  const ext = path.extname(file).toLowerCase();
+  const headers = {
+    "content-type": MIME[ext] || "application/octet-stream",
+    "content-security-policy": CSP,
+    "x-content-type-options": "nosniff",
+    "cache-control": "no-cache",
+  };
+  if (ext === ".html") {
+    // shim.js goes in ahead of every script on the page.
+    const html = body.toString("utf8").replace(/<head(\s[^>]*)?>/i, (m) => `${m}\n<script src="${SHIM_PATH}"></script>`);
+    return new Response(html, { headers });
+  }
+  return new Response(body, { headers });
+}
+
+// ---- Links ------------------------------------------------------------------
+
+function isAppUrl(u) {
+  return typeof u === "string" && u.startsWith(ORIGIN + "/");
+}
+
+/** A link the page wants opened: in the default browser, if it is a web or
+ *  mail link at all, and after asking unless it goes to Westlaw or Lexis+;
+ *  a pdf-linker: link to PDF-Linker. */
+async function openExternal(raw, win) {
+  let u;
+  try { u = new URL(String(raw)); } catch { return false; }
+  if (!["https:", "http:", "mailto:", ...APP_SCHEMES].includes(u.protocol)) return false;
+  const trusted = APP_SCHEMES.includes(u.protocol)
+    || (u.protocol === "https:" && TRUSTED_LINK_HOSTS.some((re) => re.test(u.hostname)));
+  if (!trusted) {
+    const opts = {
+      type: "question",
+      buttons: ["Open in browser", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      title: APP_NAME,
+      message: "Open this link in your web browser?",
+      detail: u.href.length > 400 ? u.href.slice(0, 400) + "…" : u.href,
+    };
+    const parent = win && !win.isDestroyed() ? win : null;
+    const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
+    if (response !== 0) return false;
+  }
+  await shell.openExternal(u.href);
+  return true;
+}
+
+// ---- Windows ----------------------------------------------------------------
+
+function webPreferences() {
+  return {
+    preload: path.join(__dirname, "preload.js"),
+    contextIsolation: true,
+    sandbox: true,
+    nodeIntegration: false,
+    nodeIntegrationInSubFrames: false,
+    nodeIntegrationInWorker: false,
+    webSecurity: true,
+    allowRunningInsecureContent: false,
+    webviewTag: false,
+    navigateOnDragDrop: false,
+    safeDialogs: true,
+    spellcheck: true,
+  };
+}
+
+function windowOptions(extra = {}) {
+  return {
+    width: 1280,
+    height: 860,
+    minWidth: 480,
+    minHeight: 360,
+    title: APP_NAME,
+    backgroundColor: "#16181c",
+    autoHideMenuBar: true,
+    icon: process.platform === "win32" ? undefined : ICON, // Windows takes the .exe's own
+    ...extra,
+    webPreferences: webPreferences(),
+  };
+}
+
+function trackWindow(win) {
+  win.on("focus", () => { lastWindow = win; });
+  win.on("closed", () => { if (lastWindow === win) lastWindow = null; });
+  // The window wears the document's name, as the PWA's does; Home is PDF+.
+  win.on("page-title-updated", (e, title) => {
+    e.preventDefault();
+    const t = String(title || "").trim();
+    win.setTitle(!t || t === "PDF Viewer" || t === APP_NAME ? APP_NAME : `${t} — ${APP_NAME}`);
+  });
+}
+
+function createWindow() {
+  const win = new BrowserWindow(windowOptions());
+  trackWindow(win);
+  lastWindow = win;
+  win.loadURL(`${ORIGIN}/index.html`);
+  return win;
+}
+
+// Every page in every window, including the tabs' iframes and windows the
+// app opens itself (New window, a tab pulled out of the strip).
+function guardContents(contents) {
+  const id = contents.id;
+  contents.on("destroyed", () => readyContents.delete(id));
+
+  contents.setWindowOpenHandler(({ url }) => {
+    // Another window of the app: allowed, as a window like the first, with
+    // its opener kept (the tab handoff talks to it by postMessage).
+    if (isAppUrl(url) || url.startsWith(`blob:${ORIGIN}/`)) {
+      return { action: "allow", overrideBrowserWindowOptions: windowOptions() };
+    }
+    openExternal(url, BrowserWindow.fromWebContents(contents)).catch(() => {});
+    return { action: "deny" };
+  });
+  contents.on("did-create-window", (win) => trackWindow(win));
+
+  // No page ever leaves the app: a link followed in place goes to the browser.
+  const stay = (e, url) => {
+    url = String(url || "");
+    if (isAppUrl(url) || url.startsWith("about:") || url.startsWith("blob:") || url.startsWith("data:")) return;
+    e.preventDefault();
+    openExternal(url, BrowserWindow.fromWebContents(contents)).catch(() => {});
+  };
+  contents.on("will-navigate", (e) => stay(e, e.url));
+  contents.on("will-frame-navigate", (e) => { if (!e.isMainFrame) stay(e, e.url); });
+  contents.on("will-redirect", (e) => stay(e, e.url));
+  contents.on("will-attach-webview", (e) => e.preventDefault());
+
+  // Chromium shows no dialog for beforeunload in Electron: the close is just
+  // refused. Ask, as Chrome does for the PWA when a tab has unsaved changes.
+  contents.on("will-prevent-unload", (e) => {
+    const win = BrowserWindow.fromWebContents(contents);
+    const choice = dialog.showMessageBoxSync(win, {
+      type: "warning",
+      buttons: ["Close without saving", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      title: APP_NAME,
+      message: "Some documents in this window have changes that are not saved.",
+      detail: "Close the window anyway? The changes will be lost.",
+    });
+    if (choice === 0) e.preventDefault();
+  });
+
+  // Developer tools (F12), for finding out what went wrong. There is no menu.
+  contents.on("before-input-event", (e, input) => {
+    if (input.type === "keyDown" && input.key === "F12") {
+      contents.toggleDevTools();
+      e.preventDefault();
+    }
+  });
+}
+
+// ---- The bridge (preload.js) ------------------------------------------------
+
+function fromApp(event) {
+  const url = event.senderFrame && event.senderFrame.url;
+  return isAppUrl(url);
+}
+
+function registerIpc() {
+  ipcMain.handle("pdfplus:read", async (event, p) => {
+    if (!fromApp(event) || !isGranted(p)) throw new Error("PDF+ has not been given that file.");
+    const [bytes, st] = await Promise.all([fsp.readFile(p), fsp.stat(p)]);
+    return { bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength), lastModified: st.mtimeMs, size: st.size };
+  });
+
+  // Written beside the file and moved over it, so a save that fails part way
+  // leaves the file as it was (Chrome's File System Access writes the same
+  // way, through a .crswap file).
+  ipcMain.handle("pdfplus:write", async (event, p, bytes) => {
+    if (!fromApp(event) || !isGranted(p)) throw new Error("PDF+ has not been given that file.");
+    if (!(bytes instanceof Uint8Array)) throw new TypeError("bytes must be a Uint8Array");
+    const tmp = path.join(path.dirname(p), `.${path.basename(p)}.${crypto.randomBytes(4).toString("hex")}.pdfplus-tmp`);
+    try {
+      await fsp.writeFile(tmp, bytes);
+      await fsp.rename(tmp, p);
+    } catch (e) {
+      await fsp.rm(tmp, { force: true }).catch(() => {});
+      throw e;
+    }
+    const st = await fsp.stat(p);
+    return { lastModified: st.mtimeMs, size: st.size };
+  });
+
+  ipcMain.handle("pdfplus:open-external", (event, url) => {
+    if (!fromApp(event)) return false;
+    return openExternal(url, BrowserWindow.fromWebContents(event.sender));
+  });
+
+  // A window's shell is ready for files: hand it any that came before it was.
+  ipcMain.on("pdfplus:open-files-ready", (event) => {
+    if (!fromApp(event) || event.senderFrame !== event.sender.mainFrame) return;
+    readyContents.add(event.sender.id);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (pending.length && (!lastWindow || lastWindow === win || lastWindow.isDestroyed())) {
+      event.sender.send("pdfplus:open-files", pending.splice(0));
+    }
+  });
+}
+
+// ---- Start ------------------------------------------------------------------
+
+function lockDownSession(ses) {
+  // No network: the app's own files, and URLs the page made from its own data.
+  ses.webRequest.onBeforeRequest((details, cb) => {
+    const u = details.url;
+    const ok = isAppUrl(u) || u.startsWith("data:") || u.startsWith("blob:") || u.startsWith("devtools:");
+    cb({ cancel: !ok });
+  });
+  // Files: yes, as the PWA's user always answers (open, save, a case folder).
+  // Clipboard: copying, and the viewer's own paste. Nothing else is asked for.
+  const allowed = new Set(["fileSystem", "clipboard-sanitized-write", "clipboard-read", "fullscreen"]);
+  ses.setPermissionCheckHandler((_wc, permission, origin) => allowed.has(permission) && isAppUrl(String(origin || "").replace(/\/?$/, "/")));
+  ses.setPermissionRequestHandler((wc, permission, cb, details) => {
+    const from = (details && details.requestingUrl) || (wc && wc.getURL()) || "";
+    cb(allowed.has(permission) && isAppUrl(from));
+  });
+}
+
+function start() {
+  if (process.platform === "win32") app.setAppUserModelId("com.zrcoderre.pdfplus");
+  Menu.setApplicationMenu(null);
+
+  app.on("second-instance", (_e, argv, cwd) => {
+    const files = filesFromArgv(argv, cwd);
+    if (files.length) deliverFiles(files);
+    else {
+      const win = (lastWindow && !lastWindow.isDestroyed() && lastWindow) || BrowserWindow.getAllWindows()[0];
+      if (win) { if (win.isMinimized()) win.restore(); win.focus(); } else createWindow();
+    }
+  });
+
+  app.on("web-contents-created", (_e, contents) => guardContents(contents));
+  app.on("window-all-closed", () => app.quit());
+
+  app.whenReady().then(() => {
+    loadGrants();
+    lockDownSession(session.defaultSession);
+    protocol.handle(SCHEME, serve);
+    registerIpc();
+    const first = filesFromArgv(process.argv, process.cwd());
+    for (const p of first) grant(p);
+    pending.push(...first.map((p) => ({ path: p, name: path.basename(p) })));
+    createWindow();
+  });
+}

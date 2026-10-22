@@ -86,6 +86,7 @@ The detail behind each area is in `Design Notes/`, one file per area, moved word
 - **[Unsaved documents and the folder save (`text-reader.js`)](Design%20Notes/Unsaved%20documents%20and%20the%20folder%20save.md)** — With a case folder open, Replace all reaches every export (shadow pages built by the reader's own code in `#shadow-pages`) and leaves each changed document unsaved in the store (`unsavedDocs`); moving between documents never drops an edit; one Save writes every unsaved document and every decision (flags, keeps, LEAKS answers, names to fake, a Master Keep removal), in place, after the standing assertion (over the pages, not PDF-Linker's headers) and a content check (no "write over it"). Covers per-page folder counting (`TD.shownPages`), prepare/confirm/commit, the undo journal and marker, and the experiments; it reverses "the folder is never written from the bar" at the owner's direction.
 - **[The reader's auto-scroll (`text-reader.js`, "auto-scroll while reading")](Design%20Notes/Reader%20auto-scroll.md)** — The text reader's auto-scroll: a pace in pages per minute, turned into pixels by each `.tpage`'s measured height; a per-screen speed ceiling; manual scrolling that suspends rather than stops (caught via `autoWritten`; `autoBusy()` holds it); sub-pixel motion snapped to the device grid. `autoRemeasure()` must run when pages move or a document opens.
 - **[Keeps that ask nothing of PDF-Linker (`textdoc.keepNeedsRun`)](Design%20Notes/Keeps%20that%20need%20no%20run.md)** — When a keep needs a PDF-Linker run (`textdoc.keepNeedsRun`): a keep on a value already standing in the clear is `local` and is not written to `New Real Values.txt`. Covers the `local` and `pending` states, the folder-wide `caseFakes` index built by `sweepFolder`, and the rule that a keep is settled local only after every export is read.
+- **[PDF+, the desktop app (`desktop/`)](Design%20Notes/Desktop%20app.md)** — The PWA's shell and the viewer in Electron, with no shared file changed: served from `pdfplus://app/` with a CSP and `shim.js` put first in every page, no network (`lockDownSession`), links to the browser (Westlaw and Lexis at once, others after asking), and files Windows hands over as `PathFileHandle`s fed through the shim's own `launchQueue`, given their methods back after IndexedDB or `postMessage` (`revive`). Read and written only where the main process was given the path (`isGranted`).
 
 ## Things to know before changing code
 
@@ -263,6 +264,8 @@ viewer/reporters.js                  REPORTERS_RAW port
 viewer/statute-codes.js              STATUTE_CODES port
 viewer/federal-codes.js              C.F.R. / U.S.C. / named federal codes, rev. ruls.
 viewer/code-tables.js                WL / Lexis URL builders
+desktop/                             PDF+, the desktop app (Electron): main.js, preload.js, shim.js, assemble.mjs (see desktop/README.md)
+test-desktop.mjs                     Electron test (Playwright): PDF+ opening, saving, Recent, a second launch, the bridge, no network, links, a moved tab, OCR under the CSP; skips without them
 pdfjs/build/pdf.mjs                  PDF.js main module (downloaded)
 pdfjs/build/pdf.worker.mjs           PDF.js worker (downloaded)
 Design Notes/                        How the code works and why, one file per area (linked above)
