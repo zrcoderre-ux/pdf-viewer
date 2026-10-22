@@ -2191,8 +2191,13 @@ app, which routes it to the reader tab.
   **# Number lines** puts pleading paper's margin numbers (1–28) on a page
   whose export has none (a scan whose OCR missed the margin). With the PDF
   open beside it, each line goes on the number the PDF prints it at, and a
-  line between two numbers becomes a half line; otherwise the lines are
-  numbered in order. Ctrl+Z takes them out; Save writes them.
+  line between two numbers becomes a half line — on a scan whose PDF prints
+  no numbers as text, on pleading paper's own lines (line 1 about an inch
+  down, 24 points a line, line 28 at least half an inch above the foot)
+  fitted to where the scan prints its text, so the text stays where it is;
+  otherwise the lines are numbered in order. Either way the numbers run 1 to
+  28. **✕ Remove numbers** on such a page takes them out again. Ctrl+Z takes
+  either back; Save writes them.
   **Tab indents.** On an editable page (and in ⇄ Raw), Tab puts in spaces to
   the next stop of four and Shift+Tab takes them back; with several lines
   selected, each is indented or outdented by one stop. Ctrl+Z takes it back.
