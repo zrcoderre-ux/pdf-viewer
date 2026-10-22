@@ -388,38 +388,53 @@ export function pleadingGeometry(items, size) {
 /**
  * Pleading paper's line grid for a page whose PDF prints no numbers as text
  * (a poor scan): { y1, pitch, first, last, scan } as pleadingGeometry gives,
- * from the page's `rows` (pdfRows) and `size`. Line 1 about an inch down
- * (PAPER_TOP), 24 points a line (PAPER_PITCH, double spacing of 12-point
- * type) or the double spacing the rows themselves keep, and line 28's slot
- * ending no closer than PAPER_FOOT to the foot of the page. Line 1's top is
- * moved by up to half a line so the rows stand on the lines (and, between
- * two, on the half line), lines before half lines: numbered on this grid
+ * from the page's `rows` (pdfRows) and `size`. The scan's own lines, read off
+ * the rows its text stands on: the pitch (20 to 30 points) and line 1's top
+ * that put the most rows on a line or, between two, a half line — lines
+ * before half lines, so a double-spaced page takes lines. A scanned page is
+ * often its paper a little enlarged or shrunk: assumed at 24 points, a scan's
+ * line 28 stood between the paper's 26 and 27 (the owner: "the line spacing
+ * is still coming up a bit short"). Read off the scan, the grid is the scan's:
+ * only line 28's own top is kept SCAN_FOOT above the page's foot. With too few
+ * rows to say (fewer than SCAN_ROWS_MIN, or fewer than ten lines' height from
+ * the first to the last), pleading paper's own: line 1 about an inch down
+ * (PAPER_TOP), 24 points a line (PAPER_PITCH), line 28's slot ending at least
+ * half an inch above the foot (PAPER_FOOT). Numbered on this grid
  * (text-reader.js, numberPage) and laid on it, a scan's text stays where it
- * is printed. With no rows, the paper's own.
+ * is printed.
  */
-export const PAPER_TOP = 72, PAPER_PITCH = 24, PAPER_FOOT = 36;
+export const PAPER_TOP = 72, PAPER_PITCH = 24, PAPER_FOOT = 36, SCAN_FOOT = 12, SCAN_ROWS_MIN = 6;
 export function paperGrid(rows, size, { last = 28 } = {}) {
   const h = (size && size.h) || 792;
   const tops = (rows || []).filter((r) => r && String(r.text || "").trim() && !/^\s*\d{1,2}\s*$/.test(r.text)).map((r) => r.top).sort((a, b) => a - b);
-  const steps = [];
-  for (let i = 1; i < tops.length; i++) { const d = tops[i] - tops[i - 1]; if (d >= 20 && d <= 28) steps.push(d); }
-  const room = (y) => (h - PAPER_FOOT - y) / last;
-  let pitch = Math.min(steps.length >= 3 ? median(steps) : PAPER_PITCH, room(PAPER_TOP));
-  const half = pitch / 2;
-  const cost = (y) => {
+  // How far rows stand off a grid, as a share of its pitch summed over them
+  // (a share, so a finer grid does not fit stray rows better for being fine).
+  const cost = (y, pitch) => {
     let c = 0;
     for (const t of tops) {
       if (t < y - pitch || t > y + last * pitch) continue;
-      const f = (t - y) / pitch, full = Math.abs(f - Math.round(f)) * pitch;
-      const mid = Math.abs(f - 0.5 - Math.round(f - 0.5)) * pitch;
-      c += Math.min(full, mid + pitch / 8, pitch / 4);
+      const f = (t - y) / pitch, full = Math.abs(f - Math.round(f));
+      const mid = Math.abs(f - 0.5 - Math.round(f - 0.5));
+      c += Math.min(full, mid + 1 / 8, 1 / 4);
     }
     return c;
   };
-  // From an inch down outward, so a page with nothing to say keeps the inch.
-  let y1 = PAPER_TOP, best = cost(PAPER_TOP);
-  for (let d = 0.5; d <= half; d += 0.5) for (const y of [PAPER_TOP + d, PAPER_TOP - d]) { const c = cost(y); if (c < best - 1e-6) { best = c; y1 = y; } }
-  pitch = Math.min(pitch, room(y1));
+  // Line 1's top for a pitch: from an inch down outward, by half points, so
+  // a page with nothing to say keeps the inch.
+  const phase = (pitch) => {
+    let y1 = PAPER_TOP, best = cost(PAPER_TOP, pitch);
+    for (let d = 0.5; d <= pitch / 2; d += 0.5) for (const y of [PAPER_TOP + d, PAPER_TOP - d]) { const c = cost(y, pitch); if (c < best - 1e-6) { best = c; y1 = y; } }
+    return { y1, best };
+  };
+  const enough = tops.length >= SCAN_ROWS_MIN && tops[tops.length - 1] - tops[0] >= 10 * PAPER_PITCH;
+  let pitch = PAPER_PITCH, { y1, best } = phase(PAPER_PITCH);
+  if (!enough) return { y1, pitch: Math.min(pitch, (h - PAPER_FOOT - y1) / last), first: 1, last, scan: true };
+  // The pitch by tenths of a point, 24 kept on a tie.
+  for (let p = 20; p <= 30.001; p += 0.1) {
+    const q = Math.round(p * 10) / 10, at = phase(q);
+    if (at.best < best - 1e-6) { best = at.best; pitch = q; y1 = at.y1; }
+  }
+  pitch = Math.min(pitch, (h - SCAN_FOOT - y1) / (last - 1));
   return { y1, pitch, first: 1, last, scan: true };
 }
 
@@ -565,25 +580,43 @@ export function numberedRowOf(nums, geom, rows, matched = null, left = 0) {
  * page — `tops` is handed back as it was: the words come first. `spans`, as
  * spreadTops takes them: a line is held above only the lines it stands over.
  */
-export function holdWithin(tops, room, height, spans = null) {
+export function holdWithin(tops, room, height, spans = null, fixed = null) {
   if (!tops || !(height > 0)) return tops;
   const out = tops.slice();
   const roomOf = (i) => (room && room[i] > 0 ? room[i] : 0);
+  // A `fixed` line (a pleading page's numbered line) is never moved: a line
+  // under line 28 brought up off the foot took 28, 27 and the numbers above
+  // up with it, the margin's spacing squeezed at the bottom of the page (the
+  // owner: "The space betwene the numbers is not consistent. It needs to be").
+  const isFixed = (i) => !!(fixed && fixed[i]);
   if (!spans) {
     let limit = height;
     for (let i = out.length - 1; i >= 0; i--) {
       const t = out[i];
       if (t == null) continue;
       const r = roomOf(i);
-      out[i] = Math.min(t, limit - r);
+      if (!isFixed(i)) out[i] = Math.min(t, limit - r);
       if (r > 0) limit = out[i];
     }
   } else {
     for (let i = out.length - 1; i >= 0; i--) {
-      if (out[i] == null) continue;
+      if (out[i] == null || isFixed(i)) continue;
       let limit = height;
       for (let k = i + 1; k < out.length; k++) if (out[k] != null && roomOf(k) > 0 && overlaps(spans[i], spans[k])) limit = Math.min(limit, out[k]);
       out[i] = Math.min(out[i], limit - roomOf(i));
+    }
+  }
+  // …and a run of lines between two fixed ones (or under the last) that would
+  // be brought up over the fixed line above it stays where it was: the page
+  // grows for it, as for any line that cannot fit.
+  if (fixed) {
+    let floor = -Infinity, start = 0, over = false;
+    for (let i = 0; i <= out.length; i++) {
+      if (i < out.length && !isFixed(i)) { if (out[i] != null && out[i] < floor - 1e-6) over = true; continue; }
+      if (over) for (let k = start; k < i; k++) out[k] = tops[k];
+      if (i < out.length && tops[i] != null) floor = tops[i] + roomOf(i);
+      start = i + 1;
+      over = false;
     }
   }
   return out.some((t) => t != null && t < 0) ? tops : out;

@@ -530,6 +530,15 @@ console.log("a ✓ Use my text page's file laid out as its PDF (fileLayout, slot
   check("…a single-spaced scan's rows on its lines and half lines", (89 - g2.y1) % 12, 0);
   const g3 = paperGrid(rowsAt([100, 124, 148]), { w: 612, h: 640 });
   check("…and on a short page, line 28 kept half an inch above the foot", g3.y1 + 28 * g3.pitch <= 640 - 36 + 1e-9, true);
+  const g4 = paperGrid(rowsAt(Array.from({ length: 22 }, (_, k) => 72 + 25.4 * k + ((k % 3) - 1) * 1.5)), { w: 612, h: 792 });
+  check("…a scan of its paper enlarged: its own 25.4 points a line, not 24", [g4.y1, g4.pitch], [72, 25.4]);
+  const g5 = paperGrid(rowsAt(Array.from({ length: 22 }, (_, k) => 66 + 22.8 * k)), { w: 612, h: 792 });
+  check("…and one shrunk: 22.8", [g5.y1, g5.pitch], [66, 22.8]);
+  // A line under the last number brought up off the foot moves no number.
+  check("holdWithin: a footer under line 28 held on the page moves no fixed line",
+    holdWithin([700, 724, 748, 772, 796], [12, 12, 12, 12, 12], 792, null, [true, true, true, false, false]), [700, 724, 748, 768, 780]);
+  check("…and where it cannot fit under the fixed line above, stays where it was (the page grows)",
+    holdWithin([700, 724, 748, 772, 796, 820], [12, 12, 12, 12, 12, 12], 770, null, [true, true, true, false, false, false]), [700, 724, 748, 772, 796, 820]);
 }
 
 console.log("pieces the PDF sets apart, and words it sets in pieces (standApart, pdfRows)");

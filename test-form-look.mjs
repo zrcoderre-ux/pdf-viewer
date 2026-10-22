@@ -162,6 +162,7 @@ const CAPTION = { 13: ["Plaintiff,", "Case No. 12345"], 16: ["Defendant.", "Dept
 const PLEAD_PLAIN = { ...PLEAD_BODY }; // (the row-by-row pleading's: no second column)
 for (const [n, [a, b]] of Object.entries(CAPTION)) PLEAD_BODY[n] = a.padEnd(40) + b;
 const JUSTIFIED = 15;
+const FOOTER = ["COMPLAINT FOR DAMAGES", "Case No. 12345", "- 1 -"];
 const PLEAD_LINES = [];
 // (An indented paragraph is written indented: its spaces after the gutter's two.)
 for (let n = 1; n <= 28; n++) PLEAD_LINES.push(String(n).padStart(2) + (PLEAD_BODY[n] ? "  " + (n === INDENTED ? "     " : "") + PLEAD_BODY[n] : ""));
@@ -184,7 +185,7 @@ try {
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc && !!window.__textReaderPickPdfs);
 
   // The PDFs, made in the page, and the folder: both PDFs, both exports.
-  const made = await page.evaluate(async ({ FORM, STAMP, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION }) => {
+  const made = await page.evaluate(async ({ FOOTER, FORM, STAMP, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const form = await PDFDocument.create();
     const fp = form.addPage([612, 792]);
@@ -212,7 +213,7 @@ try {
     // `pitch`: the scan's rows that far apart (a single-spaced filing numbered
     // by # Number lines, a number on every row); `image`: no text at all (a
     // scan no OCR has read), only the paper's rule down the margin.
-    const pleading = async (numbers, plain = false, { pitch = 24, image = false } = {}) => {
+    const pleading = async (numbers, plain = false, { pitch = 24, top = 100, image = false, footer = null } = {}) => {
     const plead = await PDFDocument.create();
     const pp = plead.addPage([612, 792]);
     if (image) { pp.drawLine({ start: { x: 60, y: 0 }, end: { x: 60, y: 792 }, thickness: 1 }); return plead.save(); }
@@ -221,7 +222,7 @@ try {
     for (let n = 1; n <= 28; n++) {
       // (A scan's lines are not on its paper's pitch: on the PDFs without
       // numbers, three lines a few points off their places.)
-      const y = 792 - (100 + (n - 1) * pitch) - (numbers || pitch !== 24 ? 0 : ({ 3: 5, 9: -4, 14: 6 }[n] || 0));
+      const y = 792 - (top + (n - 1) * pitch) - (numbers || pitch !== 24 ? 0 : ({ 3: 5, 9: -4, 14: 6 }[n] || 0));
       const num = String(n);
       if (numbers) pp.drawText(num, { x: 46 - times.widthOfTextAtSize(num, 12), y, size: 12, font: times });
       const body = plain ? PLEAD_PLAIN[n] : PLEAD_BODY[n];
@@ -257,6 +258,8 @@ try {
       }
       for (const [t, f] of plain ? [[body, "R"]] : PLEAD_FACES[n] || (SPLIT_AT[n] ? SPLIT_AT[n].map((t) => [t, "R"]) : [[body, "R"]])) { pp.drawText(t, { x, y, size: 12, font: tf[f] }); x += tf[f].widthOfTextAtSize(t, 12); }
     }
+    // A footer under the last line: the title and the page number, small.
+    if (footer) footer.forEach((t, k) => pp.drawText(t, { x: 230, y: 792 - (770 + 9 * k), size: 8, font: times }));
     return plead.save();
     };
     const formBytes = await form.save(), pleadBytes = await pleading(true), unreadBytes = await pleading(false), rowBytes = await pleading(false, true);
@@ -272,7 +275,11 @@ try {
     await put(dir, "Sample Tight Pleading.pdf", tightBytes);
     await put(dir, "Sample Image Pleading.pdf", imageBytes);
     // …and each poor scan's export without its numbers, beside the same PDF.
-    for (const [n, b] of [["Unread", unreadBytes], ["Row", rowBytes], ["Tight", tightBytes]]) await put(dir, `Sample ${n} Bare.pdf`, b);
+    // (A scan of its paper a little enlarged — 25.4 points a line, line 28 near
+    // the foot — with a footer of three small lines under it.)
+    const bigBytes = await pleading(false, true, { pitch: 25.4, top: 66, footer: FOOTER });
+    window.__formLookPdfs = { "Sample Big Bare.pdf": bigBytes };
+    for (const [n, b] of [["Unread", unreadBytes], ["Row", rowBytes], ["Tight", tightBytes], ["Big", bigBytes]]) await put(dir, `Sample ${n} Bare.pdf`, b);
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "Sample Form.txt", FORM_TEXT);
     await put(text, "Sample Pleading.txt", PLEAD_TEXT);
@@ -284,6 +291,7 @@ try {
     await put(text, "Sample Unread Bare.txt", bare(PLEAD_TEXT));
     await put(text, "Sample Row Bare.txt", bare(PLEAD_ROW_TEXT));
     await put(text, "Sample Tight Bare.txt", bare(PLEAD_ROW_TEXT));
+    await put(text, "Sample Big Bare.txt", bare(PLEAD_ROW_TEXT).replace(/\n$/, "") + "\n" + FOOTER.map((t) => " ".repeat(40) + t).join("\n") + "\n");
     // …and a numbered export whose words the scan's text does not carry at all
     // (no line of it matched to a row), with a half line under every other
     // number: more lines than the paper holds at the reader's leading.
@@ -292,9 +300,9 @@ try {
     await put(text, "Sample Stranger Pleading.txt", "====== Page 1 ======\n" + stranger.join("\n") + "\n");
     await put(dir, "Sample Stranger Pleading.pdf", rowBytes);
     await window.__textReaderAdoptFolder(dir);
-    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes, "Sample Row Pleading.pdf": rowBytes, "Sample Tight Pleading.pdf": tightBytes, "Sample Image Pleading.pdf": imageBytes, "Sample Unread Bare.pdf": unreadBytes, "Sample Row Bare.pdf": rowBytes, "Sample Tight Bare.pdf": tightBytes, "Sample Stranger Pleading.pdf": rowBytes };
+    window.__formLookPdfs = { ...window.__formLookPdfs, "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes, "Sample Row Pleading.pdf": rowBytes, "Sample Tight Pleading.pdf": tightBytes, "Sample Image Pleading.pdf": imageBytes, "Sample Unread Bare.pdf": unreadBytes, "Sample Row Bare.pdf": rowBytes, "Sample Tight Bare.pdf": tightBytes, "Sample Stranger Pleading.pdf": rowBytes };
     return { placed };
-  }, { FORM, STAMP, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION });
+  }, { FOOTER, FORM, STAMP, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION });
 
   /** Open an export beside its PDF and wait for its page to be laid on the grid. */
   async function openBeside(exportName, pdfName) {
@@ -595,7 +603,7 @@ try {
     }).filter(Boolean);
   }`;
   /** The page's margin numbers as the screen has them, and what they must be. */
-  const checkNumbers = async (onOwn) => {
+  const checkNumbers = async (onOwn, { scanPaper = false } = {}) => {
     const m = await onOwn(`{
       const sec = secs[0], b = sec.querySelector(".page-body"), box = sec.querySelector(".page-inner").getBoundingClientRect();
       const ns = [...b.querySelectorAll(":scope > .line.num")];
@@ -607,7 +615,10 @@ try {
     check("…the numbers 1 to 28, every one shown on the page and a pitch below the last, all one pitch",
       ns.map((x) => x.n).join() === Array.from({ length: 28 }, (_, k) => k + 1).join() && ns.every((x) => x.shown) && Math.max(...steps) - Math.min(...steps) < 0.05,
       `${ns.map((x) => x.n).join(",")} | ${steps.map((x) => x.toFixed(2)).join(" ").slice(0, 160)}`);
-    check("…down the length of the page: line 1 within two inches of the top, line 28 between half an inch and an inch above the foot",
+    // (A scan's own paper runs where it runs: only kept on the page.)
+    if (scanPaper) check("…down the length of the page: line 1 within two inches of the top, line 28 on the page, within an inch of the foot",
+      ns.length === 28 && ns[0].head <= 2 * m.inch + 1 && ns[27].gap >= 0 && ns[27].gap <= m.inch + 1, JSON.stringify({ head: ns[0] && ns[0].head, foot: ns[27] && ns[27].gap, inch: m.inch }));
+    else check("…down the length of the page: line 1 within two inches of the top, line 28 between half an inch and an inch above the foot",
       ns.length === 28 && ns[0].head <= 2 * m.inch + 1 && ns[27].gap >= m.inch / 2 - 1 && ns[27].gap <= m.inch + 1, JSON.stringify({ head: ns[0] && ns[0].head, foot: ns[27] && ns[27].gap, inch: m.inch }));
     check("…and every number in one column", new Set(ns.map((x) => x.right.toFixed(1))).size === 1);
     return m;
@@ -638,7 +649,7 @@ try {
   // ("using backspace to try to move a line up a level ... instead it bring
   // other lines down"); and ✕ Remove numbers takes them out again.
   const editingOn = async (on) => { if ((await page.evaluate(() => document.body.classList.contains("editing"))) !== on) { await page.evaluate(() => document.getElementById("edit-toggle").click()); await page.waitForTimeout(200); } };
-  if (!TOPS_ONLY) for (const bare of ["Sample Unread Bare", "Sample Row Bare", "Sample Tight Bare"]) {
+  if (!TOPS_ONLY) for (const bare of ["Sample Unread Bare", "Sample Row Bare", "Sample Tight Bare", "Sample Big Bare"]) {
     console.log(`# Number lines on a poor scan beside its PDF (${bare})`);
     await openBeside(bare + ".txt", bare + ".pdf");
     const onOwn = await ownOf(bare);
@@ -646,7 +657,7 @@ try {
     const offered = await onOwn(`const b = secs[0].querySelector(".page-label .num-page"); if (!b || b.hidden) return false; b.click(); return true;`);
     check("# Number lines offered on the page", offered);
     await page.waitForTimeout(1500);
-    const m = await checkNumbers(onOwn);
+    const m = await checkNumbers(onOwn, { scanPaper: bare.includes("Big") });
     const pitch = m.nums.length > 1 ? m.nums[1].top - m.nums[0].top : 0;
     const after = await onOwn(TEXT_AT);
     // Where the PDF prints each line: the baseline of the item its words open with.
@@ -669,7 +680,14 @@ try {
     const moved = after.map((a, k) => {
       const it = printed.reduce((best, x) => (common(a.text, x.str) > (best ? common(a.text, best.str) : 7) ? x : best), null);
       return { a, b: before[k], it, k };
-    }).filter(({ a, b, it }) => !b || a.text !== b.text || Math.abs(a.left - b.left) > 2 || (it && Math.abs(a.base - it.base * a.w / 612) > pitch / 4 + 1.5));
+    // (A footer's small print, set in the document's type, stands as far apart
+    // as that type needs, from the row the PDF prints its first line on.)
+    }).filter(({ a, b, it }) => !b || a.text !== b.text || Math.abs(a.left - b.left) > 2 || (it && !FOOTER.slice(1).some((f) => a.text.startsWith(f.slice(0, 8))) && Math.abs(a.base - it.base * a.w / 612) > pitch / 4 + 1.5));
+    if (bare.includes("Big")) {
+      const foot = after.filter((a) => FOOTER.some((f) => a.text.startsWith(f.slice(0, 5))));
+      const last = await onOwn(`const ns = [...secs[0].querySelectorAll(".page-body > .line.num")]; const b = secs[0].querySelector(".page-body").getBoundingClientRect(); return { top: ns[27].getBoundingClientRect().top - b.top, h: b.height };`);
+      check("…the footer under line 28, in order, on the page", foot.length === 3 && foot.every((f, k) => f.mid > last.top && f.base < last.h && (!k || f.mid > foot[k - 1].mid)), JSON.stringify({ foot, last }));
+    }
     check("…every line's text where the scan prints it (within a quarter line), as it stood without the numbers",
       pitch > 0 && after.length === before.length && moved.length === 0,
       moved.slice(0, 4).map(({ a, b, it, k }) => `${k}: ${JSON.stringify(b)} → ${JSON.stringify(a)} printed at ${it ? (it.base * a.w / 612).toFixed(1) : "?"}`).join(" | "));

@@ -711,6 +711,28 @@ line 28 between half an inch and an inch above the foot, ✕ Remove numbers
 giving the lines back, and Backspace moving a line up half a line and none
 down; `test-pdfsync.mjs` pins `paperGrid`.
 
+**…at the scan's own line spacing, the numbers never squeezed**
+(`paperGrid`'s pitch search, `SCAN_FOOT`, `holdWithin`'s `fixed`). The owner:
+"the line spacing is still coming up a bit short", and "The space betwene the
+numbers is not consistent. It needs to be". A scanned page is its paper a
+little enlarged or shrunk, so 24 points a line put the scan's line 28 well
+before the paper's; and a page with lines under 28 (a footer) stacked them a
+pitch apart past the foot, where `holdWithin` brought them back up and took 28,
+27 and the numbers above up with them. `paperGrid` now reads the pitch off the
+rows (20 to 30 points by tenths, each scored by the share of a line its rows
+stand off a line or half line, so a finer grid gains nothing by being fine; 24
+on a tie, and 24 with the half inch under 28 where fewer than `SCAN_ROWS_MIN`
+rows over ten lines' height say otherwise), and a grid read off the scan is
+kept only so line 28's top stands `SCAN_FOOT` above the foot. `holdWithin`
+takes the page's `fixed` lines and never moves one; a run it would bring up
+over the fixed line above it is left where it was. And on a scan the lines
+above line 1 and under the last number go on the rows that print them
+(`offGridTops`, as on any numbered page; the half lines between numbers still
+go halfway), set in where those rows are. `test-form-look.mjs` adds a scan at
+25.4 points a line with a three-line footer under 28; `test-pdfsync.mjs` pins
+the pitch read off an enlarged and a shrunk scan and `holdWithin` with fixed
+lines.
+
 **…but only where the numbers run as a margin does** (`marginRuns`). The
 owner, of an exhibit's invoice: "some of the text is being pushed up off the
 page", "it seems to just be this page". Three lines opening with a number make
