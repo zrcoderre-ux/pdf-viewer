@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, fileLayout, standApart, captionAlign,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
   matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
@@ -519,6 +519,17 @@ console.log("a ✓ Use my text page's file laid out as its PDF (fileLayout, slot
   check("the paper's numbers read off the rows the file's numbers were matched to, a stray one moving nothing",
     slotFit([{ n: 1, top: 100 }, { n: 2, top: 124 }, { n: 3, top: 148 }, { n: 4, top: 172 }, { n: 9, top: 196 }]), { y1: 100, pitch: 24 });
   check("…and none from fewer than three", slotFit([{ n: 1, top: 100 }, { n: 2, top: 124 }]), null);
+  // A scan whose PDF prints no numbers (paperGrid): pleading paper's own lines,
+  // fitted to its rows, line 28's slot ending at least half an inch up.
+  const rowsAt = (tops) => tops.map((top) => ({ text: "words", top }));
+  const g0 = paperGrid([], { w: 612, h: 792 });
+  check("paperGrid: with no rows, line 1 an inch down, 24 points a line", [g0.y1, g0.pitch, g0.last], [72, 24, 28]);
+  const g1 = paperGrid(rowsAt(Array.from({ length: 20 }, (_, k) => 88 + 24 * k)), { w: 612, h: 792 });
+  check("…its lines moved onto a double-spaced scan's rows", [g1.y1, g1.pitch], [64, 24]);
+  const g2 = paperGrid(rowsAt(Array.from({ length: 40 }, (_, k) => 89 + 12 * k)), { w: 612, h: 792 });
+  check("…a single-spaced scan's rows on its lines and half lines", (89 - g2.y1) % 12, 0);
+  const g3 = paperGrid(rowsAt([100, 124, 148]), { w: 612, h: 640 });
+  check("…and on a short page, line 28 kept half an inch above the foot", g3.y1 + 28 * g3.pitch <= 640 - 36 + 1e-9, true);
 }
 
 console.log("pieces the PDF sets apart, and words it sets in pieces (standApart, pdfRows)");

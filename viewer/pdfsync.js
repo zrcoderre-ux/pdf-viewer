@@ -385,6 +385,44 @@ export function pleadingGeometry(items, size) {
   return { y1, pitch, first, last, bodyX, numberRight };
 }
 
+/**
+ * Pleading paper's line grid for a page whose PDF prints no numbers as text
+ * (a poor scan): { y1, pitch, first, last, scan } as pleadingGeometry gives,
+ * from the page's `rows` (pdfRows) and `size`. Line 1 about an inch down
+ * (PAPER_TOP), 24 points a line (PAPER_PITCH, double spacing of 12-point
+ * type) or the double spacing the rows themselves keep, and line 28's slot
+ * ending no closer than PAPER_FOOT to the foot of the page. Line 1's top is
+ * moved by up to half a line so the rows stand on the lines (and, between
+ * two, on the half line), lines before half lines: numbered on this grid
+ * (text-reader.js, numberPage) and laid on it, a scan's text stays where it
+ * is printed. With no rows, the paper's own.
+ */
+export const PAPER_TOP = 72, PAPER_PITCH = 24, PAPER_FOOT = 36;
+export function paperGrid(rows, size, { last = 28 } = {}) {
+  const h = (size && size.h) || 792;
+  const tops = (rows || []).filter((r) => r && String(r.text || "").trim() && !/^\s*\d{1,2}\s*$/.test(r.text)).map((r) => r.top).sort((a, b) => a - b);
+  const steps = [];
+  for (let i = 1; i < tops.length; i++) { const d = tops[i] - tops[i - 1]; if (d >= 20 && d <= 28) steps.push(d); }
+  const room = (y) => (h - PAPER_FOOT - y) / last;
+  let pitch = Math.min(steps.length >= 3 ? median(steps) : PAPER_PITCH, room(PAPER_TOP));
+  const half = pitch / 2;
+  const cost = (y) => {
+    let c = 0;
+    for (const t of tops) {
+      if (t < y - pitch || t > y + last * pitch) continue;
+      const f = (t - y) / pitch, full = Math.abs(f - Math.round(f)) * pitch;
+      const mid = Math.abs(f - 0.5 - Math.round(f - 0.5)) * pitch;
+      c += Math.min(full, mid + pitch / 8, pitch / 4);
+    }
+    return c;
+  };
+  // From an inch down outward, so a page with nothing to say keeps the inch.
+  let y1 = PAPER_TOP, best = cost(PAPER_TOP);
+  for (let d = 0.5; d <= half; d += 0.5) for (const y of [PAPER_TOP + d, PAPER_TOP - d]) { const c = cost(y); if (c < best - 1e-6) { best = c; y1 = y; } }
+  pitch = Math.min(pitch, room(y1));
+  return { y1, pitch, first: 1, last, scan: true };
+}
+
 /** The top of line `n` on the grid. */
 export function lineTop(geom, n) {
   return geom.y1 + (n - 1) * geom.pitch;

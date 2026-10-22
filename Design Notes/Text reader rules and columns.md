@@ -668,28 +668,48 @@ both (a scan's rows 12 points apart, and a PDF with no text) and checks line 1
 within two inches of the top and line 28 within an inch and two lines of the
 foot (before the fix: 286 px short on the single-spaced scan). That file's
 poor-scan checks now read only the open document's page out of the reel.
+(Both are superseded by the grid two paragraphs down: `SCAN_FIT_MIN` and the
+inch under line 28 are gone, the paper's own grid is `paperGrid`, and the
+margin at the foot is at least half an inch.)
 
-**…drawn apart from the lines, which stay where their words put them**
-(`marginNums`, `p.margin`, `.own-margin`). The owner, next: "Generally, when
-there are no numbers, the text is placed at the correct spot. Adding the
-numbers shouldnt move the text. It should only add the number margins." Laid
-on the numbers, a poor scan's lines moved off the rows the PDF prints them on.
-A poor scan with a text layer is now laid by its words exactly as the same page
-without numbers is (`rowLayout`, the same tops and lefts; only the type is the
-document's, as above), and `scanGeom`'s grid is no longer the lines' but the
-margin's: `marginNums` draws 1 to 28 at one pitch in a `.margin-nums` column in
-`.page-inner`, outside the page body (never selected, copied, saved or
-edited), right-aligned where a numbered line's gutter puts its number, with the
-paper's rule beside them. Each line keeps its own number in the DOM, since the
-file writes it, and its gutter track, so the text does not move; `.own-margin`
-only hides it. A line that is only its number takes no room (`room`), as a
-blank line takes none on the page without numbers, or the single-spaced lines
-under it were pushed down. A scan with no text at all has no rows to lay a line
-on and is still laid on the paper's numbers (`geom.scan`). `test-form-look.mjs`
-opens each poor scan's export without numbers beside the same PDF, then with
-them, and checks every line's first character at the same place to 1.5 px, the
-lines' own numbers hidden, and the drawn column 1 to 28 at one pitch down the
-page between its margins.
+**…numbered where the scan prints each line, and laid on those numbers**
+(`pdfsync.paperGrid`, `numberPage`, `scanGeom`). The owner, in turn: "Adding
+the numbers shouldnt move the text. It should only add the number margins";
+then, of the numbers drawn apart from the lines (a column of their own, the
+lines laid by their words), "It also doesn't work using backspace to try to
+move a line up a level, instead it bring other lines down"; "the number
+spacing leave too much space at the bottom of the page"; and of a caption page
+whose numbers stopped at 23 (its lines matched to none of the scan's rows, it
+flowed at the reader's leading in a sheet the PDF page's size, cut off at the
+foot). The cause of all four was that # Number lines numbered a scan's lines
+in order, with no regard to where they are printed, so laying them on the
+numbers moved the text. Now, with the PDF beside the page, `numberPage` numbers
+a scan whose PDF prints no numbers as text on `paperGrid`: line 1 about an
+inch down (`PAPER_TOP`), 24 points a line (`PAPER_PITCH`, or the double
+spacing the rows keep), line 1's top moved by up to half a line so the rows
+stand on lines (and between two, on half lines, at a small cost so a
+double-spaced page takes lines), and line 28's slot ending at least half an
+inch (`PAPER_FOOT`) above the foot. Each line takes the number within a third
+of a line of where it is printed, else it is a half line (a single-spaced
+scan's every other line; claimed by the nearest number whatever its distance,
+it was drawn a row up). The layout lays such a page on the same grid
+(`scanGeom` takes `paperGrid`, or a file's own numbering where its line 1 is
+another row of the paper's pitch), as any numbered page: every line on its
+number or halfway between, each set in where its PDF row is (`pdfIndents`;
+under `SCAN_INDENT_MIN`, six points, is a scan's skew and flush), all of 1 to
+28 on the page whatever matched, and Backspace moves a line up half a line
+with the run below up behind it. The drawn column (`marginNums`,
+`.own-margin`) is gone. **✕ Remove numbers** (`unnumberPage`, `.unnum-page`,
+offered on a numbered page whose PDF prints no numbers as text,
+`pdfPrintsNumbers`) takes them out as one undo step: each line's text kept
+with any indent past the number's two spaces, a half line's four spaces off,
+the bare numbers at the foot gone. `test-form-look.mjs` presses # Number lines
+on three scans' exports without numbers (double-spaced, double-spaced with
+three rows off the pitch, single-spaced) and checks every line within a
+quarter line of the baseline its PDF prints it on, 1 to 28 at one pitch with
+line 28 between half an inch and an inch above the foot, ✕ Remove numbers
+giving the lines back, and Backspace moving a line up half a line and none
+down; `test-pdfsync.mjs` pins `paperGrid`.
 
 **…but only where the numbers run as a margin does** (`marginRuns`). The
 owner, of an exhibit's invoice: "some of the text is being pushed up off the

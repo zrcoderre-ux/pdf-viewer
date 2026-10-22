@@ -562,14 +562,12 @@ try {
   }
 
   // ── a numbered export beside a PDF whose numbers are not text ─────────────
-  // A poor scan, numbered in the file (# Number lines, or by hand). Its lines
-  // stand where they stand WITHOUT the numbers — on the rows the PDF prints
-  // their words on — and the numbers are drawn down the paper's margin apart
-  // from them: 1 to 28 at one pitch, from the margin at the top to the one at
-  // the foot (the owner: "Adding the numbers shouldnt move the text. It should
-  // only add the number margins"; "The added numbers from number lines are not
-  // uniformly spaced"; "the 1-28 only went halfway down the page"). Each is
-  // laid against the same PDF's export without numbers, line by line.
+  // A poor scan, numbered in the file (# Number lines, or by hand): laid on
+  // pleading paper's numbers, 1 to 28 at one pitch down the length of the page,
+  // line 28 ending between half an inch and an inch above its foot (the owner:
+  // "The added numbers from number lines are not uniformly spaced", "the 1-28
+  // only went halfway down the page", "the number spacing leave too much space
+  // at the bottom of the page"), every line in the document's type.
   // (Only the open document's pages are read: the reel holds the documents
   // either side of it too, a pleading whose PDF's numbers are text among them.)
   const ownOf = async (name) => {
@@ -590,57 +588,132 @@ try {
         if (k < 0) continue;
         const r = document.createRange(); r.setStart(t, k); r.setEnd(t, k + 1);
         const q = r.getBoundingClientRect();
-        return { text: lt.textContent.trim().slice(0, 24), mid: (q.top + q.bottom) / 2 - b.top, left: q.left - b.left };
+        const size = parseFloat(getComputedStyle(t.parentElement).fontSize) || 12;
+        return { text: lt.textContent.trim().slice(0, 24), mid: (q.top + q.bottom) / 2 - b.top, base: q.bottom - 0.216 * size - b.top, left: q.left - b.left, w: b.width };
       }
       return null;
-    });
+    }).filter(Boolean);
   }`;
-  if (!TOPS_ONLY) for (const [name, lines] of [["Sample Unread Pleading", PLEAD_LINES], ["Sample Row Pleading", PLEAD_ROW_LINES], ["Sample Tight Pleading", PLEAD_ROW_LINES]]) {
-    console.log(`a numbered export beside a PDF whose numbers are not text (${name})`);
-    const bare = name.replace("Pleading", "Bare");
-    await openBeside(bare + ".txt", bare + ".pdf");
-    const before = await (await ownOf(bare))(TEXT_AT);
-    await openBeside(name + ".txt", name + ".pdf");
-    const onOwn = await ownOf(name);
-    check("…laid by its words, as the page without numbers is, its numbers drawn down the margin apart from its lines",
-      await onOwn(`return secs.length > 0 && secs.every((s) => s.querySelector(".page-body.fixed.own-margin") && s.querySelector(".page-inner > .margin-nums"));`));
-    const after = await onOwn(TEXT_AT);
-    const moved = after.map((a, k) => ({ a, b: before[k], k })).filter(({ a, b }) => !!a !== !!b || (a && (a.text !== b.text || Math.abs(a.mid - b.mid) > 1.5 || Math.abs(a.left - b.left) > 1.5)));
-    check("…every line's text exactly where it stands without the numbers: adding them moves nothing",
-      after.length === before.length && after.filter(Boolean).length > 10 && moved.length === 0,
-      moved.slice(0, 4).map(({ a, b, k }) => `${k}: ${JSON.stringify(b)} → ${JSON.stringify(a)}`).join(" | "));
-    const hidden = await onOwn(`return [...secs[0].querySelectorAll(".page-body > .line.num > .gutter")].every((g) => getComputedStyle(g).visibility === "hidden");`);
-    check("…the lines' own numbers out of sight (kept: the file writes them)", hidden);
-    // The margin: 1 to 28 at one pitch, in one column, down the length of the
-    // page between its margins.
-    const nums = await onOwn(`{
-      const inner = secs[0].querySelector(".page-inner"), box = inner.getBoundingClientRect();
-      const spans = [...inner.querySelectorAll(":scope > .margin-nums > span")].map((s) => { const r = s.getBoundingClientRect(); return { n: s.textContent, top: r.top - box.top, bottom: box.bottom - r.bottom, right: r.right - box.left, h: r.height }; });
-      return { spans, inch: 72 * box.width / 612, selectable: getComputedStyle(inner.querySelector(".margin-nums")).userSelect };
+  /** The page's margin numbers as the screen has them, and what they must be. */
+  const checkNumbers = async (onOwn) => {
+    const m = await onOwn(`{
+      const sec = secs[0], b = sec.querySelector(".page-body"), box = sec.querySelector(".page-inner").getBoundingClientRect();
+      const ns = [...b.querySelectorAll(":scope > .line.num")];
+      return { fixed: b.classList.contains("fixed") && b.classList.contains("numbered"), inch: 72 * box.width / 612,
+        nums: ns.map((l) => { const g = l.querySelector(".gn").getBoundingClientRect(), r = l.getBoundingClientRect(); return { n: l.querySelector(".gn").textContent.trim(), top: parseFloat(l.style.top), head: r.top - box.top, gap: box.bottom - r.bottom, right: g.right - box.left, shown: g.height > 0 && g.top >= box.top - 0.5 && g.bottom <= box.bottom + 0.5 }; }) };
     }`);
-    const sp = nums.spans, steps = sp.slice(1).map((x, k) => x.top - sp[k].top);
-    check("…the numbers 1 to 28, every one a pitch below the last, all one pitch",
-      sp.map((x) => x.n).join() === Array.from({ length: 28 }, (_, k) => k + 1).join() && Math.max(...steps) - Math.min(...steps) < 0.05, steps.map((x) => x.toFixed(2)).join(" ").slice(0, 200));
-    check("…down the length of the page: 1 within two inches of the top, 28 at least an inch above the foot and within an inch and two lines of it",
-      sp.length === 28 && sp[0].top <= 2 * nums.inch + 1 && sp[27].bottom >= nums.inch - 1 && sp[27].bottom <= nums.inch + 2 * sp[27].h + 1, JSON.stringify({ head: sp[0] && sp[0].top, foot: sp[27] && sp[27].bottom, inch: nums.inch }));
-    check("…in one column, left of the text, and never selected", new Set(sp.map((x) => x.right.toFixed(1))).size === 1 && sp[0].right < Math.min(...after.filter(Boolean).map((a) => a.left)) && nums.selectable === "none");
-    const gaps = await letterGaps(true);
-    check("no word drawn with a gap between its letters, nor between two words the file sets a space apart", gaps.length === 0, gaps.slice(0, 6).join(" | "));
-    // A numbered page whose PDF's numbers are no text is a poor scan: every line
-    // in the document's body type and the reader's own face, none of the scan's.
-    const type = await onOwn(`return secs.flatMap((s) => [...s.querySelectorAll(".page-body.fixed > .line")])
+    const ns = m.nums, steps = ns.slice(1).map((x, k) => x.top - ns[k].top);
+    check("…laid on the paper's numbers", m.fixed);
+    check("…the numbers 1 to 28, every one shown on the page and a pitch below the last, all one pitch",
+      ns.map((x) => x.n).join() === Array.from({ length: 28 }, (_, k) => k + 1).join() && ns.every((x) => x.shown) && Math.max(...steps) - Math.min(...steps) < 0.05,
+      `${ns.map((x) => x.n).join(",")} | ${steps.map((x) => x.toFixed(2)).join(" ").slice(0, 160)}`);
+    check("…down the length of the page: line 1 within two inches of the top, line 28 between half an inch and an inch above the foot",
+      ns.length === 28 && ns[0].head <= 2 * m.inch + 1 && ns[27].gap >= m.inch / 2 - 1 && ns[27].gap <= m.inch + 1, JSON.stringify({ head: ns[0] && ns[0].head, foot: ns[27] && ns[27].gap, inch: m.inch }));
+    check("…and every number in one column", new Set(ns.map((x) => x.right.toFixed(1))).size === 1);
+    return m;
+  };
+  const oneType = async (onOwn) => {
+    const type = await onOwn(`return [...secs[0].querySelectorAll(".page-body.fixed > .line")]
       .filter((l) => l.querySelector(".lt").textContent.trim())
       .map((l) => { const lt = l.querySelector(".lt"); return [getComputedStyle(lt).fontSize, lt.style.fontFamily || "", lt.querySelectorAll("[style*='font']").length]; });`);
     check("…every line in one size, the document's, in the reader's own face — none of the scan's",
-      new Set(type.map((t) => t[0])).size === 1 && type.every((t) => !t[1] && !t[2]), JSON.stringify([...new Set(type.map((t) => t.join(" ")))]).slice(0, 300));
-    const file = await onOwn(`return import("/viewer/textdoc.js").then((TD) => TD.serializeNodes(secs[0].querySelector(".page-body")));`);
-    check("…and the page reads back as the file, its numbers in it", file === lines.join("\n"), JSON.stringify(file).slice(0, 160));
+      type.length > 5 && new Set(type.map((t) => t[0])).size === 1 && type.every((t) => !t[1] && !t[2]), JSON.stringify([...new Set(type.map((t) => t.join(" ")))]).slice(0, 300));
+  };
+  const fileOf = (onOwn) => onOwn(`return import("/viewer/textdoc.js").then((TD) => TD.serializeNodes(secs[0].querySelector(".page-body")));`);
+  // Numbered elsewhere (its line 1 the PDF's first row): laid on those numbers.
+  if (!TOPS_ONLY) for (const [name, lines] of [["Sample Unread Pleading", PLEAD_LINES], ["Sample Row Pleading", PLEAD_ROW_LINES]]) {
+    console.log(`a numbered export beside a PDF whose numbers are not text (${name})`);
+    await openBeside(name + ".txt", name + ".pdf");
+    const onOwn = await ownOf(name);
+    await checkNumbers(onOwn);
+    await oneType(onOwn);
+    const gaps = await letterGaps(true);
+    check("no word drawn with a gap between its letters, nor between two words the file sets a space apart", gaps.length === 0, gaps.slice(0, 6).join(" | "));
+    check("…and the page reads back as the file", (await fileOf(onOwn)) === lines.join("\n"));
+  }
+  // # Number lines on a poor scan beside its PDF: each line on the number
+  // nearest where the scan prints it, so the text stays where it stood (the
+  // owner: "Adding the numbers shouldnt move the text"); Backspace at a line's
+  // head moves it up half a line and the run below up behind it, never down
+  // ("using backspace to try to move a line up a level ... instead it bring
+  // other lines down"); and ✕ Remove numbers takes them out again.
+  const editingOn = async (on) => { if ((await page.evaluate(() => document.body.classList.contains("editing"))) !== on) { await page.evaluate(() => document.getElementById("edit-toggle").click()); await page.waitForTimeout(200); } };
+  if (!TOPS_ONLY) for (const bare of ["Sample Unread Bare", "Sample Row Bare", "Sample Tight Bare"]) {
+    console.log(`# Number lines on a poor scan beside its PDF (${bare})`);
+    await openBeside(bare + ".txt", bare + ".pdf");
+    const onOwn = await ownOf(bare);
+    const before = await onOwn(TEXT_AT);
+    const offered = await onOwn(`const b = secs[0].querySelector(".page-label .num-page"); if (!b || b.hidden) return false; b.click(); return true;`);
+    check("# Number lines offered on the page", offered);
+    await page.waitForTimeout(1500);
+    const m = await checkNumbers(onOwn);
+    const pitch = m.nums.length > 1 ? m.nums[1].top - m.nums[0].top : 0;
+    const after = await onOwn(TEXT_AT);
+    // Where the PDF prints each line: the baseline of the item its words open with.
+    const printed = await page.evaluate(async (pdfName) => {
+      const pdfjs = await import("/pdfjs/build/pdf.mjs");
+      pdfjs.GlobalWorkerOptions.workerSrc = "/pdfjs/build/pdf.worker.mjs";
+      const pdf = await pdfjs.getDocument({ data: window.__formLookPdfs[pdfName].slice() }).promise;
+      const pg = await pdf.getPage(1), v = pg.getViewport({ scale: 1 });
+      // (A row's items joined in order: a line set in pieces is one row.)
+      const rows = new Map();
+      for (const it of (await pg.getTextContent()).items) {
+        if (!it.str || !it.str.trim()) continue;
+        const base = Math.round((v.height - it.transform[5]) * 2) / 2;
+        if (!rows.has(base)) rows.set(base, []);
+        rows.get(base).push(it);
+      }
+      return [...rows].map(([base, its]) => ({ base, str: its.sort((a, b) => a.transform[4] - b.transform[4]).map((it) => it.str).join("").trim() }));
+    }, bare + ".pdf");
+    const common = (a, b) => { let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++; return i; };
+    const moved = after.map((a, k) => {
+      const it = printed.reduce((best, x) => (common(a.text, x.str) > (best ? common(a.text, best.str) : 7) ? x : best), null);
+      return { a, b: before[k], it, k };
+    }).filter(({ a, b, it }) => !b || a.text !== b.text || Math.abs(a.left - b.left) > 2 || (it && Math.abs(a.base - it.base * a.w / 612) > pitch / 4 + 1.5));
+    check("…every line's text where the scan prints it (within a quarter line), as it stood without the numbers",
+      pitch > 0 && after.length === before.length && moved.length === 0,
+      moved.slice(0, 4).map(({ a, b, it, k }) => `${k}: ${JSON.stringify(b)} → ${JSON.stringify(a)} printed at ${it ? (it.base * a.w / 612).toFixed(1) : "?"}`).join(" | "));
+    await oneType(onOwn);
+    check("…✕ Remove numbers offered, # Number lines not", await onOwn(`const l = secs[0].querySelector(".page-label"); return !l.querySelector(".unnum-page").hidden && l.querySelector(".num-page").hidden;`));
+    // ✕ Remove numbers: the numbers out, every line's text kept.
+    await onOwn(`secs[0].querySelector(".page-label .unnum-page").click(); return 1;`);
+    await page.waitForTimeout(800);
+    const plain = await onOwn(`return { numbered: secs[0].querySelector(".page-body").classList.contains("numbered"), lines: [...secs[0].querySelectorAll(".page-body > .line")].filter((l) => !l.querySelector(".cb")).map((l) => l.textContent.trim().slice(0, 24)).filter(Boolean) };`);
+    check("✕ Remove numbers takes them out, every line's text kept", !plain.numbered && plain.lines.join("|") === before.map((b) => b.text).join("|"),
+      JSON.stringify({ numbered: plain.numbered, got: plain.lines.slice(0, 3), want: before.slice(0, 3).map((b) => b.text) }));
+    check("…and # Number lines offered again", await onOwn(`const l = secs[0].querySelector(".page-label"); return l.querySelector(".unnum-page").hidden && !l.querySelector(".num-page").hidden;`));
+    await onOwn(`secs[0].querySelector(".page-label .num-page").click(); return 1;`);
+    await page.waitForTimeout(1500);
+    // Backspace at the head of a numbered line under another: up half a line.
+    await editingOn(true);
+    const at = await onOwn(`{
+      const ls = [...secs[0].querySelectorAll(".page-body > .line")];
+      const k = ls.findIndex((l, i) => i > 0 && l.classList.contains("num") && ls[i - 1].classList.contains("num") && l.querySelector(".lt").textContent.trim() && ls[i - 1].querySelector(".lt").textContent.trim() && !l.querySelector(".cb") && !l.classList.contains("pind"));
+      if (k < 0) return null;
+      const lt = ls[k].querySelector(".lt"); lt.closest(".page-body").focus();
+      const r = document.createRange(); r.setStart(lt.firstChild || lt, 0); r.collapse(true); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      return lt.textContent.trim().slice(0, 24);
+    }`);
+    const was = await onOwn(TEXT_AT);
+    if (at) await page.keyboard.press("Backspace");
+    await page.waitForTimeout(1200);
+    const now = await onOwn(TEXT_AT);
+    const w = was.find((x) => x.text === at), n = now.find((x) => x.text === at);
+    const down = now.filter((x) => { const b = was.find((y) => y.text === x.text); return b && x.mid > b.mid + 1; });
+    // (A single-spaced page has no numbered line straight under another.)
+    if (at || !bare.includes("Tight")) {
+      check(`Backspace at the head of a numbered line ("${at}") moves it up half a line`, !!(w && n) && Math.abs((w.mid - n.mid) - pitch / 2) <= 1.5, JSON.stringify({ was: w, now: n, pitch }));
+      check("…and no line moves down", down.length === 0, JSON.stringify(down.slice(0, 3)));
+    }
+    await page.keyboard.press("Control+z");
+    await page.waitForTimeout(300);
+    await editingOn(false);
   }
   // A poor scan whose text no line of the export matches has no row to put a
-  // line on either: on the paper's numbers, every one of 1 to 28 on the page.
-  // (Flowing at the reader's leading inside a sheet the PDF page's size, the
-  // numbers past 23 or so were cut off at its foot: the owner, "I had one only
-  // generate 1-23".)
+  // line on: on the paper's numbers, every one of 1 to 28 on the page. (Flowing
+  // at the reader's leading inside a sheet the PDF page's size, the numbers past
+  // 23 or so were cut off at its foot: the owner, "I had one only generate
+  // 1-23", on a caption page.)
   if (!TOPS_ONLY) {
     const name = "Sample Stranger Pleading";
     console.log(`a numbered export none of whose lines the scan's text carries (${name})`);
@@ -653,14 +726,7 @@ try {
     const onOwn = await ownOf(name);
     await page.waitForFunction(new Function(`return [...document.querySelectorAll("#pages .tpage.matched")].some((s) => s.querySelector(".page-label") && window.__textReaderReel().members.some((m) => m.name === ${JSON.stringify(name + ".txt")} && +s.dataset.index === m.from));`), null, { timeout: 15000 });
     await page.waitForTimeout(1500);
-    const seen = await onOwn(`{
-      const sec = secs[0], box = sec.querySelector(".page-inner").getBoundingClientRect();
-      const drawn = [...sec.querySelectorAll(".page-inner > .margin-nums > span")];
-      const gns = drawn.length ? drawn : [...sec.querySelectorAll(".page-body > .line.num .gn")].filter((g) => getComputedStyle(g.parentElement).visibility !== "hidden");
-      return gns.map((g) => { const r = g.getBoundingClientRect(); return { n: g.textContent.trim(), in: r.height > 0 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5, top: Math.round(r.top - box.top), h: Math.round(box.height) }; });
-    }`);
-    check("…every number 1 to 28 shown on the page, none cut off at its foot",
-      seen.length === 28 && seen.every((x, k) => x.in && x.n === String(k + 1)), JSON.stringify(seen.filter((x) => !x.in).slice(0, 4)) + " of " + seen.length);
+    await checkNumbers(onOwn);
   }
   // A scan with no text at all has no row to put a line on: laid on the paper's
   // numbers, 1 to 28 at one pitch down the length of the page.
@@ -668,18 +734,7 @@ try {
     const name = "Sample Image Pleading";
     console.log(`a numbered export beside a PDF with no text (${name})`);
     await openBeside(name + ".txt", name + ".pdf");
-    const onOwn = await ownOf(name);
-    check("…laid as pleading paper, on the paper's numbers", await onOwn(`return secs.length > 0 && secs.every((s) => s.querySelector(".page-body.numbered.fixed") && !s.querySelector(".margin-nums"));`));
-    const numTops = (await onOwn(`return [...secs[0].querySelectorAll(".page-body > .line.num")].map((l) => parseFloat(l.style.top));`));
-    const steps = numTops.slice(1).map((t, k) => t - numTops[k]);
-    check("…every number a pitch below the last, all one pitch", numTops.length === 28 && Math.max(...steps) - Math.min(...steps) < 0.05, steps.map((x) => x.toFixed(2)).join(" ").slice(0, 200));
-    const foot = await onOwn(`{
-      const sec = secs[0], b = sec.querySelector(".page-body"), box = sec.querySelector(".page-inner").getBoundingClientRect();
-      const ns = [...b.querySelectorAll(":scope > .line.num")], r1 = ns[0].getBoundingClientRect(), r28 = ns[27].getBoundingClientRect();
-      return { head: r1.top - box.top, gap: box.bottom - r28.bottom, inch: 72 * box.width / 612, line: r28.height };
-    }`);
-    check("…down the length of the page: line 1 within two inches of the top, line 28 at least an inch above the foot and within an inch and two lines of it",
-      foot.head <= 2 * foot.inch + 1 && foot.gap >= foot.inch - 1 && foot.gap <= foot.inch + 2 * foot.line + 1, JSON.stringify(foot));
+    await checkNumbers(await ownOf(name));
   }
 
   // ── typing into a page shown ⇄ Raw, on a page laid on its PDF ──────────

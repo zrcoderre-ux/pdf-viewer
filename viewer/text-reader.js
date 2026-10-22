@@ -4880,6 +4880,17 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         nb.hidden = TD.pageNumbersComplete(p.lines) || TD.readsDidNotOcr(p.lines);
         nb.addEventListener("click", (e) => { e.preventDefault(); numberPage(Number(sec.dataset.index)); });
         lab.appendChild(nb);
+        // ✕ Remove numbers: the margin numbers taken out again (unnumberPage),
+        // on a numbered page whose PDF prints none as text — the page
+        // # Number lines numbered, or one numbered by hand.
+        const ub = document.createElement("button");
+        ub.className = "unnum-page";
+        ub.type = "button";
+        ub.textContent = "✕ Remove numbers";
+        ub.title = "Take this page's margin line numbers out again (Ctrl+Z puts them back)";
+        ub.hidden = !TD.pageIsNumbered(p.lines) || TD.readsDidNotOcr(p.lines);
+        ub.addEventListener("click", (e) => { e.preventDefault(); unnumberPage(Number(sec.dataset.index)); });
+        lab.appendChild(ub);
       }
       sec.appendChild(lab);
     }
@@ -10898,8 +10909,15 @@ function numberPage(i) {
   // From the PDF: its printed numbers and the rows it prints the lines on.
   const t = pdfTarget(i);
   const info = t ? infoFor(t.src) : null;
-  const geom = info && info.geoms ? info.geoms[t.page - 1] : null;
   const rows = info && info.rows ? info.rows[t.page - 1] : null;
+  // …or, on a scan whose PDF prints no numbers as text, on pleading paper's
+  // own lines fitted to the rows it prints (pdfsync.paperGrid), the grid the
+  // page is then laid on (scanGeom): each line on the number nearest where it
+  // is printed, so numbering it moves no text (the owner: "Adding the numbers
+  // shouldnt move the text"). Numbered in order, a scan's text was laid on
+  // the numbers wherever that put it.
+  const read = info && info.geoms ? info.geoms[t.page - 1] : null;
+  const geom = read || (info && rows && rows.length ? PS.paperGrid(rows, info.sizes[t.page - 1]) : null);
   const lay = geom && rows && rows.length ? PS.rowLayout(texts, rows) : null;
   if (lay) {
     const last = paperLast(geom, info.sizes[t.page - 1]);
@@ -10920,10 +10938,14 @@ function numberPage(i) {
       floor = s;
       return { s, y: pos.top };
     });
-    // A number claims the line nearest it; a tie goes to the upper.
+    // A number claims the line nearest it; a tie goes to the upper. Not a line
+    // printed half a line off it: that is the half line between two numbers,
+    // and claimed it was drawn on the number, a row from where it is printed
+    // (a single-spaced scan's every other line).
     const claim = new Map();
     slot.forEach((x, k) => {
       if (!x || x.s < 1 || x.s > last) return;
+      if (Math.abs(x.y - at(x.s)) > geom.pitch / 3) return;
       const d = Math.abs(x.y - at(x.s)), had = claim.get(x.s);
       if (had == null || d < Math.abs(slot[had].y - at(x.s)) - 1e-6) claim.set(x.s, k);
     });
@@ -10941,7 +10963,7 @@ function numberPage(i) {
       out.push(half(txt));
     });
     upTo(last);
-    how = "on the numbers the PDF prints them at";
+    how = read ? "on the numbers the PDF prints them at" : "on pleading paper's lines, where the scan prints them";
   } else {
     out = [];
     texts.forEach((txt, k) => { out.push(k < 28 ? num(k + 1) + (txt ? "  " + txt : "") : half(txt)); });
@@ -10960,6 +10982,52 @@ function numberPage(i) {
   refreshNocrButtons([i]);
   afterTextChange();
   toast(`${where}: margin numbers put in, ${how}. Ctrl+Z takes them out; Save writes them.`, { ms: 7000 });
+}
+/** Whether the PDF page behind page `i` prints its margin numbers as text (its own pleading paper, not one # Number lines gave it). */
+function pdfPrintsNumbers(i) {
+  const t = pdfTarget(i);
+  const info = t ? infoFor(t.src) : null;
+  return !!(info && info.geoms && info.geoms[t.page - 1]);
+}
+/**
+ * ✕ Remove numbers: the page's margin numbers taken out, as one undo step —
+ * the owner, of # Number lines: "when i use it, there should be a button to
+ * remove the numbers". Each line keeps its text and any indent past the
+ * number's two spaces; a half line its text, the four spaces that set it
+ * under the numbered text taken off; a bare number becomes a blank line, and
+ * the bare numbers at the foot go.
+ */
+function unnumberPage(i) {
+  if (!doc) return;
+  const p = doc.pages[i];
+  if (!p || p.header == null) return;
+  ensurePageLive(i);
+  const body = bodyForPage(i);
+  if (!body) return;
+  const m = reel.length > 1 ? reelMemberOf(i) : null;
+  const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
+  const was = TD.serializeNodes(body).split("\n");
+  if (!TD.pageIsNumbered(was)) { toast(`${where} has no margin numbers.`); return; }
+  let end = was.findIndex((l) => TD.TRAILER_RE.test(l));
+  if (end < 0) end = was.length;
+  const out = was.slice(0, end).map((l) => {
+    const g = TD.gutterPrefix(l);
+    if (!g) return l.replace(/^ {4}/, "");
+    const spaces = g.gutter.replace(/^ ?\d{1,2}/, "").length;
+    return g.rest ? " ".repeat(Math.max(0, spaces - 2)) + g.rest : "";
+  });
+  while (out.length && !out[out.length - 1].trim()) out.pop();
+  const lines = out.concat(was.slice(end));
+  snapshot(body, true);
+  convertTypedRealsSoon.cancel(body);
+  hideTypeTip();
+  buildBody(body, lines.join("\n"), i);
+  doc.pages[i].lines = lines;
+  syncSpots(body);
+  setDirty(true, i);
+  refreshNocrButtons([i]);
+  afterTextChange();
+  toast(`${where}: margin numbers taken out. Ctrl+Z puts them back; Save writes it.`, { ms: 7000 });
 }
 function markDidNotOcr(i) {
   if (!doc) return;
@@ -11462,9 +11530,13 @@ function refreshNocrButtons(indices) {
     const e = sources ? pageEntryAt(i, sources) : null;
     setNocrButton(b, pageReadsDidNotOcr(i), !!e && ocrAgain.some((x) => TD.sameNoOcr(x, e)), TD.headerSaysDidNotOcr(p));
     const nb = b.parentElement && b.parentElement.querySelector(".num-page");
-    if (nb) {
+    const ub = b.parentElement && b.parentElement.querySelector(".unnum-page");
+    if (nb || ub) {
       const body = b.closest(".tpage").querySelector(".page-body");
-      nb.hidden = body ? TD.pageNumbersComplete(TD.serializeNodes(body).split("\n")) || pageReadsDidNotOcr(i) : TD.pageNumbersComplete(p.lines);
+      const now = body ? TD.serializeNodes(body).split("\n") : p.lines;
+      const stripped = pageReadsDidNotOcr(i);
+      if (nb) nb.hidden = TD.pageNumbersComplete(now) || stripped;
+      if (ub) ub.hidden = !TD.pageIsNumbered(now) || stripped || pdfPrintsNumbers(i);
     }
   }
   refreshFixButtons(indices);
@@ -18809,6 +18881,8 @@ async function readPdfGridNow(info, pass) {
     } catch { info.lines[i - 1] = null; }
   }
   notePass("reading the PDF's line grid", gridFrom);
+  // ✕ Remove numbers stands down where the PDF prints its own numbers.
+  for (const ub of pagesEl.querySelectorAll(".tpage > .page-label .unnum-page:not([hidden])")) if (pdfPrintsNumbers(Number(ub.closest(".tpage").dataset.index))) ub.hidden = true;
   if (gridOn()) applyMatchedLayoutSoon();
 }
 const PDF_LINE_DEFAULT = 72 / 792; // an inch down a letter page, until the PDF says
@@ -20433,7 +20507,7 @@ function applyMatchedLayoutNow() {
       if (slot) matchedSlots.add(slot);
       const had = sec.__plan;
       if (had && sz && sec.__planLite === lite) {
-        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, margin: had.margin, firstY: had.firstY, scale: 1 });
+        plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: had.firstY, scale: 1 });
         continue;
       }
       plans.push({ sec, slot, sz: sz || { w: 612, h: 612 * pageRatioGuess }, body, lines, geom: null, tops: null, lefts: null, sizes: null, boxes: null, room: null, pitch: 0, bodyX: 0, firstY: info ? info.lines[t.page - 1] : null, scale: 1 });
@@ -20442,7 +20516,6 @@ function applyMatchedLayoutNow() {
     let geom = info.geoms[t.page - 1];
     const rows = info.rows[t.page - 1];
     let numbered = !!geom && body.classList.contains("numbered");
-    let margin = null; // a poor scan's numbers, drawn down the paper apart from its lines (marginNums)
     let tops = null, lefts = null, sizes = null, pitch = 0, fixed = null, charGridFit = null, spans = null, cells = null, typeBox = null, inds = null;
     // The body type: the DOCUMENT's, so every page of one filing is drawn at
     // one scale and a title page is not sized as though its heading were
@@ -20462,26 +20535,20 @@ function applyMatchedLayoutNow() {
     if (!margins.has(info)) margins.set(info, docBodyLeft(info));
     let bodyX = margins.get(info);
     // PLEADING PAPER THE PDF'S NUMBERS DID NOT COME THROUGH ON (a poor scan,
-    // numbered by # Number lines or by hand): its lines stay where its words
-    // put them, exactly as on the page without numbers, and the numbers are
-    // drawn down the paper's margin apart from them (marginNums). The owner:
-    // "Generally, when there are no numbers, the text is placed at the correct
-    // spot. Adding the numbers shouldnt move the text. It should only add the
-    // number margins." Laid on the numbers instead (every line a pitch below
-    // the last), the page's text moved off the rows the PDF prints it on.
-    // The margin's grid (scanGeom) is read off the rows its numbered lines'
-    // words were matched to where they run as pleading paper's do, else the
-    // paper's own, and runs from the margin at the top to the one at the foot
-    // ("the numbers through the length of the text page, with margins at the
-    // top and bottom") — 1 to 28 at one pitch, in one column, in the
-    // document's type (the owner, earlier: "The added numbers from number
-    // lines are not uniformly spaced with the half spaces baked in").
-    // A scan with no row to put a line on — no text at all, its text not read
-    // yet, or none of the page's lines found in it — is laid on the paper's
-    // numbers: flowing at the reader's leading in a sheet the PDF page's size,
-    // a caption page's lines ran past its foot and every number after 23 was
-    // cut off there (the owner: "I had one only generate 1-23", "I had it on
-    // the caption page").
+    // numbered by # Number lines or by hand) is laid on the paper's numbers:
+    // every number a pitch below the last, a half line halfway between two,
+    // 1 to 28 down the length of the page (the owner: "The added numbers from
+    // number lines are not uniformly spaced", "the numbers through the length
+    // of the text page, with margins at the top and bottom"). Its grid
+    // (scanGeom) is the one # Number lines numbered it on (pdfsync.paperGrid,
+    // fitted to the scan's rows), so a line stands where the scan prints it —
+    // "Adding the numbers shouldnt move the text" — and Backspace at a line's
+    // head moves it up half a line, as on any pleading page. Laid by its words
+    // with the numbers drawn apart instead, nothing a number did could be seen,
+    // and a page none of whose lines were found in the scan's text flowed at
+    // the reader's leading in a sheet the PDF page's size: a caption page's
+    // numbers past 23 were cut off at its foot ("I had one only generate
+    // 1-23", "I had it on the caption page").
     // …BUT ONLY WHERE THE NUMBERS RUN AS A MARGIN DOES (marginRuns). Three
     // lines opening with a number make a page `numbered`, and an exhibit's
     // invoice has them: a "1" and an "8" of its quantities, a "25" of its days.
@@ -20489,11 +20556,10 @@ function applyMatchedLayoutNow() {
     // the forty lines the file has above it were crowded over the page's top.
     // The owner: "some of the text is being pushed up off the page".
     if (!geom && body.classList.contains("numbered") && marginRuns(lines)) {
-      const g = scanGeom(lines, rows || [], sz || { w: 612, h: 792 }, bodyX);
-      if (g.matched) margin = g;
-      else { geom = g; numbered = true; }
+      geom = scanGeom(lines, rows || [], sz || { w: 612, h: 792 }, bodyX);
+      numbered = true;
       // (A scan with no text has no margin of its own read: the paper's inch.)
-      if (!(bodyX > 0)) bodyX = g.bodyX;
+      if (!(bodyX > 0)) bodyX = geom.bodyX;
     }
     // WHERE THIS PAGE'S LINES GO, worked out once and kept on the page. The
     // pass is asked for again every time a batch of the PDF's sizes lands and
@@ -20502,13 +20568,13 @@ function applyMatchedLayoutNow() {
     // bulk of what it costs. Nothing about a page's answer changes unless its
     // width, its text, its type or its grid does, so a page whose answer is in
     // hand is not worked out again.
-    const planKey = [textEpoch, w0, info.name, t.page, base, bodyX, geom ? 1 : 0, margin ? 1 : 0, rows ? rows.length : -1,
+    const planKey = [textEpoch, w0, info.name, t.page, base, bodyX, geom ? 1 : 0, rows ? rows.length : -1,
       settings.lineHeight, settings.font, settings.customFont, info.faceEpoch || 0,
       lines.map((l) => (l.classList.contains("own") ? 1 : 0)).join(""), body.__noIndentSig || 0].join("|");
     if (sec.__planFor === planKey && sec.__plan) {
       const had = sec.__plan;
       if (slot) matchedSlots.add(slot);
-      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, margin: had.margin, firstY: info.lines[t.page - 1], scale: 1 });
+      plans.push({ sec, slot, sz, body, lines, geom: had.geom, tops: had.tops, lefts: had.lefts, sizes: had.sizes, boxes: had.boxes, room: had.room, pitch: had.pitch, bodyX: had.bodyX, bodyR: had.bodyR, base: had.base, grid: had.grid, type: had.type, cells: had.cells, inds: had.inds, firstY: info.lines[t.page - 1], scale: 1 });
       continue;
     }
     if (numbered) {
@@ -20528,13 +20594,20 @@ function applyMatchedLayoutNow() {
       tops = PS.slotTops(nums.map((num) => ({ num })), geom);
       // The lines off the grid — a footer, a stamp — on the rows that print them.
       // (Not on a poor scan's page: its half lines go halfway between their
-      // numbers, every line in the document's type, indented by its spaces.)
+      // numbers, every line in the document's type.)
       const off = geom.scan ? { tops, sizes: lines.map(() => null), rowOf: lines.map(() => null) } : PS.offGridTops(lines.map((l) => l.textContent), nums, tops, rows, geom.pitch);
       tops = off.tops;
       pitch = geom.pitch;
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
       sizes = geom.scan ? lines.map(() => base) : PS.typeSizes(off.sizes, base);
-      inds = geom.scan ? lines.map(() => null) : pdfIndents(lines, nums, geom, rows, bodyX);
+      // A poor scan's line set in where the scan prints it set in, as any
+      // pleading page's is: # Number lines writes its text flush after the
+      // number, and where the PDF indents it is where it stood before the
+      // numbers ("Adding the numbers shouldnt move the text"). Less than half
+      // a character in is a scan's skew, not an indent: flush, so the lines
+      // stand at one margin.
+      inds = pdfIndents(lines, nums, geom, rows, bodyX);
+      if (geom.scan) inds = inds.map((v) => (v != null && v < SCAN_INDENT_MIN ? null : v));
       // …AND THE PDF'S WEIGHT AND SLANT, RUN BY RUN (planCells with `place`
       // false; columns.faceLine). Pleading paper is laid on its numbers and
       // nothing on it moves — no piece is cut or set at the PDF's x, and the
@@ -20679,10 +20752,7 @@ function applyMatchedLayoutNow() {
     // have. The blank lines under the last one did the same at the foot,
     // growing the sheet past its PDF page. A line with nothing on it — no
     // words and no margin number — is a gap, and a gap pushes nothing.
-    // (On a poor scan whose numbers are drawn apart from its lines, a line
-    // that is only its number is as empty: nothing of it is drawn there.)
-    const blank = margin ? (l) => isEmptyLine(l) || !(ltOf(l) || l).textContent.trim() : isEmptyLine;
-    const room = boxes ? boxes.map((b, k) => (blank(lines[k]) ? 0 : b)) : null;
+    const room = boxes ? boxes.map((b, k) => (isEmptyLine(lines[k]) ? 0 : b)) : null;
     // ON PLEADING PAPER THE NUMBERS ARE THE GRID, and a numbered line stays on
     // its number whatever stands between it and the one above (fixed). A
     // caption's single-spaced lines between two numbers are set a type size
@@ -20710,9 +20780,8 @@ function applyMatchedLayoutNow() {
     // caption, a signature block) ends its type well short of the margin.
     const leftAt = bodyX > 0 ? bodyX : rows && rows.length ? PS.bodyLeftOf(rows) : null;
     const bodyR = Math.max(docBodyRight(info) || 0, (rows && PS.bodyRightOf(rows)) || 0, leftAt > 0 ? sz.w - leftAt : 0) || null;
-    if (!tops) margin = null; // (nothing matched: the page flows, its numbers with its lines)
-    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, margin, firstY: info.lines[t.page - 1] };
-    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, margin, firstY: info.lines[t.page - 1], scale: 1 });
+    sec.__plan = { geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1] };
+    plans.push({ sec, slot, sz, body, lines, geom: numbered ? geom : null, tops, lefts, sizes, boxes, room, pitch, bodyX, bodyR, base, grid: charGridFit, type: typeBox, cells, inds, firstY: info.lines[t.page - 1], scale: 1 });
   }
   // A page the reel has SHED has no lines to lay and stands at the height it
   // was pinned at (shedMember). Its slot used to fall to the pane's width —
@@ -20786,7 +20855,6 @@ function applyMatchedLayoutNow() {
     if (p.body.style.paddingTop !== padTop) p.body.style.paddingTop = padTop;
     if (p.bodyX > 0) p.sec.style.setProperty("--body-x", (p.bodyX * p.scale) + "px");
     else p.sec.style.removeProperty("--body-x");
-    marginNums(p);
     // …and the PDF's right margin (pdfsync.bodyRightOf): a line on the grid
     // ends where the PDF's text does, not at the paper's edge, and one that
     // runs longer is squeezed back inside it (below) as it was at the edge.
@@ -21823,16 +21891,6 @@ function pdfIndents(lines, nums, geom, rows, bodyX) {
   return out;
 }
 /**
- * The paper's line grid for a numbered page whose PDF carries no numbers in
- * its text (a poor scan): { y1, pitch, first, last, bodyX, numberRight, scan }
- * as pdfsync.pleadingGeometry gives for one that does. Line 1's top and the
- * pitch are fitted (pdfsync.slotFit) to the rows the page's numbered lines'
- * words were matched to (pdfsync.rowLayout), else pleading paper's own: line 1
- * an inch down, 28 lines to an inch from the foot — and never closer than an
- * inch to the foot either way.
- */
-const PAPER_MARGIN = 72; // an inch, in PDF points: pleading paper's margin over line 1 and under the last
-/**
  * Whether a page's margin numbers run as pleading paper's do: at least
  * MARGIN_RUN_MIN of them climbing down the page (TD.numberChain), and those at
  * least half of the numbers from 1 to the highest of them. A page # Number
@@ -21849,86 +21907,40 @@ function marginRuns(lines) {
   nums.forEach((n, k) => { if (chain[k]) { count++; top = Math.max(top, n); } });
   return count >= MARGIN_RUN_MIN && count >= top / 2;
 }
+/**
+ * The paper's line grid for a numbered page whose PDF carries no numbers in
+ * its text (a poor scan): { y1, pitch, first, last, bodyX, numberRight, scan }
+ * as pdfsync.pleadingGeometry gives for one that does — pdfsync.paperGrid,
+ * the grid # Number lines numbers such a page on (line 1 about an inch down,
+ * 24 points a line, fitted to the scan's rows, line 28 ending at least half an
+ * inch above the foot: the owner, "the number spacing leave too much space at
+ * the bottom of the page", of the grid that kept an inch under line 28).
+ */
+const SCAN_INDENT_MIN = 6; // PDF points: less in than this on a scan is no indent (scanGeom's pages)
 function scanGeom(lines, rows, sz, bodyX) {
-  const lay = PS.rowLayout(lines.map((l) => l.textContent), rows, { bodyLeft: bodyX });
+  const x = bodyX > 0 ? bodyX : 72;
+  const paper = PS.paperGrid(rows, sz);
+  // The numbers the file gives the lines its words were matched to, where
+  // they stand on the paper's pitch (a file numbered elsewhere than by
+  // # Number lines: its line 1 may be the paper's second row): their line 1,
+  // kept on the paper. Otherwise — a page numbered in order, a single-spaced
+  // one with a number on every row — the paper's grid.
+  const lay = rows.length ? PS.rowLayout(lines.map((l) => l.textContent), rows, { bodyLeft: bodyX }) : null;
   const pairs = [];
   if (lay) lines.forEach((l, k) => {
     if (!l.classList.contains("num") || lay.rowOf[k] == null) return;
     const n = parseInt(l.querySelector(".gn").textContent, 10);
     if (n >= 1 && n <= TD.MARGIN_LAST) pairs.push({ n, top: rows[lay.rowOf[k]].top });
   });
-  let fit = PS.slotFit(pairs);
-  const x = bodyX > 0 ? bodyX : 72;
-  // …AND KEPT ON THE PAPER: the owner, "The pleading goes too far down, it also
-  // needs an inch of margin at the bottom". Line 1 between half an inch and two
-  // inches down, and the pitch no more than puts the foot of the last line an
-  // inch above the page's foot (PAPER_MARGIN), whatever the scan's rows say.
-  const headAt = (y) => Math.max(PAPER_MARGIN / 2, Math.min(PAPER_MARGIN * 2, y));
-  const roomFrom = (y) => (sz.h - PAPER_MARGIN - y) / TD.MARGIN_LAST;
-  // …AND RUN DOWN THE LENGTH OF IT: the owner, "The number lines should place
-  // the numbers through the length of the text page, with margins at the top
-  // and bottom. I just had one where the 1-28 only went halfway down the
-  // page". A single-spaced filing numbered by # Number lines has a number on
-  // every row of the scan, and a fit to those rows is a pitch of single
-  // spacing: 28 lines of it stop halfway down the paper. A fit that falls
-  // short of the paper's own pitch is not the paper's grid; the paper's is.
-  if (fit && fit.pitch < SCAN_FIT_MIN * roomFrom(headAt(fit.y1))) fit = null;
-  const y1 = fit ? headAt(fit.y1) : PAPER_MARGIN;
-  const room = roomFrom(y1);
-  return {
-    y1,
-    pitch: fit ? Math.min(fit.pitch, room) : room,
-    first: 1, last: TD.MARGIN_LAST, bodyX: x, numberRight: x - 12, scan: true,
-    matched: !!lay, // whether any line's words were found on the scan's rows
-  };
-}
-// The least of the paper's own pitch a scan's fitted pitch may be and still be
-// taken (scanGeom): 28 lines of it stop no more than a line and a half short of
-// the margin at the foot.
-const SCAN_FIT_MIN = 0.95;
-/**
- * A poor scan's margin numbers (`p.margin`, scanGeom's grid), drawn down the
- * paper apart from its lines: 1 to 28 at one pitch, right-aligned in one
- * column before the body margin with the paper's rule beside them, where a
- * numbered line's own gutter would put them. The lines keep the places their
- * words gave them, and their own numbers are put out of sight (.own-margin)
- * but kept — the file writes them, and they keep the gutter's width, so the
- * text stands where it stood without numbers. The column is the paper's, not
- * the filing's: outside the page body, never selected, copied or saved.
- */
-function marginNums(p) {
-  const inner = p.sec.querySelector(".page-inner");
-  let el = inner ? inner.querySelector(":scope > .margin-nums") : null;
-  const body = p.body || p.sec.querySelector(".page-body");
-  if (body) body.classList.toggle("own-margin", !!p.margin);
-  if (!p.margin || !inner) { if (el) el.remove(); return; }
-  const g = p.margin, k = p.scale;
-  const size = (p.base > 0 ? p.base : g.pitch / 1.5) * k;
-  const lh = size * LINE_BOX;
-  const want = [g.y1, g.pitch, g.last, p.bodyX > 0 ? p.bodyX : g.bodyX, size, k].map((v) => v.toFixed(3)).join("|");
-  if (el && el.__for === want) return;
-  if (!el) {
-    el = document.createElement("div");
-    el.className = "margin-nums";
-    el.setAttribute("aria-hidden", "true");
-    inner.appendChild(el);
+  const fit = PS.slotFit(pairs);
+  let y1 = paper.y1, pitch = paper.pitch;
+  // (A fit within a quarter line of the paper's is the paper's: the grid the
+  // page was numbered on, to the point.)
+  if (fit && Math.abs(fit.pitch - paper.pitch) <= paper.pitch * 0.08 && Math.abs(fit.y1 - paper.y1) > paper.pitch / 4) {
+    y1 = Math.max(PS.PAPER_TOP / 2, Math.min(PS.PAPER_TOP * 2, fit.y1));
+    pitch = Math.min(fit.pitch, (sz.h - PS.PAPER_FOOT - y1) / TD.MARGIN_LAST);
   }
-  el.__for = want;
-  el.style.width = ((p.bodyX > 0 ? p.bodyX : g.bodyX) * k) + "px";
-  el.style.fontSize = size + "px";
-  el.replaceChildren();
-  const rule = document.createElement("div");
-  rule.className = "mn-rule";
-  rule.style.top = (g.y1 * k) + "px";
-  rule.style.height = ((g.last - 1) * g.pitch * k + lh) + "px";
-  el.appendChild(rule);
-  for (let n = 1; n <= g.last; n++) {
-    const s = document.createElement("span");
-    s.textContent = String(n);
-    s.style.top = (PS.lineTop(g, n) * k) + "px";
-    s.style.lineHeight = lh + "px";
-    el.appendChild(s);
-  }
+  return { y1, pitch, first: 1, last: TD.MARGIN_LAST, bodyX: x, numberRight: x - 12, scan: true };
 }
 function clearMatched(sec) {
   if (!sec.classList.contains("matched")) return;
@@ -21940,7 +21952,6 @@ function clearMatched(sec) {
   sec.style.removeProperty("--body-x");
   const inner = sec.querySelector(".page-inner");
   if (inner) inner.style.height = "";
-  marginNums({ sec, margin: null });
   const body = sec.querySelector(".page-body");
   if (!body) return; // shed: there are no lines left to un-lay
   if (body.__placed) unplacePage(body); // the PDF's own cuts, places and faces (placePages)
