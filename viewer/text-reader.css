@@ -852,6 +852,14 @@ body.sbs .line.trailer, .tpage.matched .line.trailer { display: none; }
   border-right: 1px solid #c4c7cb; white-space: pre; user-select: none; align-self: stretch; cursor: default;
 }
 .page-body.numbered .gutter .gs { display: none; }
+/* A poor scan's margin (text-reader.js, marginNums): the numbers drawn down the
+   paper at one pitch, apart from the lines, which stand where their words put
+   them. Each line's own number is kept (the file writes it) and keeps its
+   track, so the text does not move; it is only out of sight. */
+.page-body.own-margin .line > .gutter { visibility: hidden; }
+.margin-nums { position: absolute; left: 0; top: 0; bottom: 0; pointer-events: none; user-select: none; font-family: var(--reader-font); color: inherit; }
+.margin-nums > span { position: absolute; right: 1.28em; white-space: pre; }
+.margin-nums > .mn-rule { position: absolute; right: 0.88em; width: 0; border-right: 1px solid #c4c7cb; }
 /* THE NUMBERS STAND ONE ON TOP OF THE OTHER, down the page and from one page
    to the next. The margin is measured in a unit of its own, --gutter-em: off
    the PDF's grid the reading size, which no page's fit to its paper changes,
@@ -1227,7 +1235,7 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
   .raw-sheet, .raw-sheet .raw-leak { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .link-layer { display: none; }
   .page-body:focus { box-shadow: none; }
-  .rb, .rc.hf, .rh, .rg, .pn, .held, .page-body.numbered .gutter, .page-label { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .rb, .rc.hf, .rh, .rg, .pn, .held, .page-body.numbered .gutter, .margin-nums, .page-label { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 @page { margin: 12mm; }
 
