@@ -851,7 +851,7 @@ export function docBodyRight(rowsByPage) {
   for (const rows of rowsByPage || []) { const r = bodyRightOf(rows); if (r != null) rs.push(r); }
   return rs.length ? median(rs) : null;
 }
-export function rowLayout(lineTexts, rows, { bodyLeft = null } = {}) {
+export function rowLayout(lineTexts, rows, { bodyLeft = null, height = 0, lineBox = 1.2 } = {}) {
   const map = alignLines(lineTexts, rows.map((r) => r.text));
   const matched = map.map((j, i) => (j == null ? null : i)).filter((i) => i != null);
   if (!matched.length) return null;
@@ -877,8 +877,36 @@ export function rowLayout(lineTexts, rows, { bodyLeft = null } = {}) {
     if (map[i] != null) { last = rows[map[i]].top; k = 0; out[i] = { top: last, left: held(rows[map[i]].left), size: rows[map[i]].height }; }
     else if (last != null) { k++; out[i] = { top: last + k * pitch, left: left0, size: null }; }
   });
-  const first = matched[0];
+  // LINES THE PDF'S TEXT DOES NOT CARRY between two it does — a picture's
+  // words, which the export has from its OCR and the PDF only as an image —
+  // are spread between those two where a pitch apiece would run them past the
+  // one below: stacked a pitch apart, fourteen lines of a pasted email pushed
+  // every line under the picture down the page, off the foot of it, and out
+  // of line with the PDF beside it (the owner: "PDFs will have pictures in
+  // them, this throws off the spacing, sometimes to the point of dragging text
+  // off screen"). They begin under the line above's box (its type, `lineBox`
+  // of it, as the reader clears it), and `spread` is the room each is given,
+  // which the reader sets its type to fit (text-reader.js, applyMatchedLayout).
+  // Above the first line matched they are spread from the top of the page,
+  // and under the last, where the page's `height` is given, down to its foot
+  // (the page's top margin up from the bottom, an inch at most).
+  const spreadRun = (from, to, start, end) => {
+    const n = to - from;
+    if (n < 1 || !(end > start) || start + n * pitch <= end + 0.5) return;
+    const share = (end - start) / n;
+    for (let i = from; i < to; i++) out[i] = { top: start + (i - from) * share, left: left0, size: null, spread: share };
+  };
+  const below = (i) => rows[map[i]].top + rows[map[i]].height * lineBox;
+  for (let m = 1; m < matched.length; m++) {
+    const a = matched[m - 1], b = matched[m];
+    if (b - a >= 2 && rows[map[b]].top > rows[map[a]].top) spreadRun(a + 1, b, below(a), rows[map[b]].top);
+  }
+  const first = matched[0], lastM = matched[matched.length - 1];
   for (let i = 0; i < first; i++) out[i] = { top: Math.max(0, rows[map[first]].top - (first - i) * pitch), left: left0, size: null };
+  spreadRun(0, first, 0, rows[map[first]].top);
+  let end = lineTexts.length; // (the blank lines closing the page are no lines to make room for)
+  while (end > lastM + 1 && !String(lineTexts[end - 1] || "").trim()) end--;
+  if (height > 0) spreadRun(lastM + 1, end, below(lastM), height - Math.min(72, Math.max(0, rows[map[first]].top)));
   return { positions: out, pitch, rowOf: map };
 }
 
@@ -1256,34 +1284,70 @@ export function typeSizes(sizes, base, tolerance = 0.2) {
  * and a filer who crams a sentence in between two numbers often prints it
  * smaller: drawn so, one line in a paragraph came out half the size of the
  * lines around it. The owner: "it should not [shrink some lines]. It should
- * shrink things uniformly, if needed." So every line between the first and
- * last numbered line is at least the body size `base`, and where a gap
- * between two numbered lines (`fixed`, at `tops`) cannot then hold the lines
- * in it, each a type size under the one above it (spreadTops), the page's
- * type is taken down by ONE factor, every line alike, as far as the
- * tightest gap needs and no further than `min`. `empty`, per line, is a line
- * with nothing on it (it holds no room). Lines above the first number or under
- * the last (a stamp, a footer) keep their own size, and only the factor.
+ * shrink things uniformly, if needed."
+ *
+ * The lines between the first and last numbered line (`fixed`, at `tops`)
+ * that the PDF prints under the body size `base` are read in RUNS, a run
+ * being consecutive such lines (`empty`, per line, a line with nothing on it,
+ * ends one, as does a line at the body size or over it):
+ *
+ * - A run that carries a numbered line is type the PDF sets small down the
+ *   page (a footnote, a block quote, a paragraph squeezed onto the page): it
+ *   keeps the PDF's size, ONE size for the run, its median, numbered lines
+ *   and the lines between them alike.
+ * - A run wholly between two CONSECUTIVE numbers (a gap of no more than a
+ *   pitch and a half, the pitch the page's usual gap between numbered lines)
+ *   is a line or two crammed into a half line: it takes the body size, or as
+ *   near it as its gap holds beside the lines already in it (the sum of their
+ *   type sizes, the numbered line above included, as spreadTops clears them),
+ *   and never less than its own. In a wider gap (a picture standing over
+ *   eight lines' numbers, its small print between them) it is type the PDF
+ *   sets small, kept as above.
+ *
+ * A line no PDF row was found for (`unread`) between two lines of a run is
+ * of the run. Nothing is ever taken under the PDF's own size. (Taking the WHOLE page down
+ * by the factor its tightest gap needed, as this did first, set every line of
+ * a page with a single-spaced footnote smaller than its PDF: "displaying the
+ * text file font smaller than the pdf size".) A heading set larger, and a
+ * stamp above line 1 or a footer under the last number, keep their own size.
  */
-export function evenHalfLines(sizes, tops, fixed, base, empty = null, { min = 0.5 } = {}) {
+export function evenHalfLines(sizes, tops, fixed, base, empty = null, { unread = null } = {}) {
   if (!sizes || !tops || !fixed || !(base > 0)) return sizes;
   const at = [];
   fixed.forEach((f, k) => { if (f && tops[k] != null) at.push(k); });
   if (at.length < 2) return sizes;
-  const out = sizes.map((h, k) => (h != null && k > at[0] && k < at[at.length - 1] && !fixed[k] && h < base ? base : h));
+  const lo = at[0], hi = at[at.length - 1];
+  const pitch = median(at.slice(1).map((k, g) => tops[k] - tops[at[g]]));
+  const out = sizes.slice();
+  const placed = (k) => k >= lo && k <= hi && tops[k] != null && !(empty && empty[k]) && out[k] != null;
+  const small = (k) => placed(k) && !(unread && unread[k]) && out[k] < base;
+  // `unread`, per line, a line no PDF row was found for (its size is the
+  // body's for want of one): one standing between two lines of a run is of
+  // the run — a footnote line whose row the text layer ran into the next.
+  const joins = (k) => placed(k) && unread && unread[k];
   // A line with no place (spreadTops passes it over) holds no room either.
   const room = (k) => (tops[k] == null || (empty && empty[k]) ? 0 : out[k] || 0);
-  let f = 1;
-  for (let g = 1; g < at.length; g++) {
-    const a = at[g - 1], b = at[g];
-    if (b - a < 2) continue;
-    let need = 0, any = false;
-    for (let i = a; i < b; i++) { need += room(i); if (i > a && room(i)) any = true; }
-    const avail = tops[b] - tops[a];
-    if (any && need > 0 && avail > 0 && avail < need) f = Math.min(f, avail / need);
+  for (let k = lo; k <= hi; k++) {
+    if (!small(k)) continue;
+    const run = [];
+    while (k <= hi && (small(k) || joins(k))) run.push(k++);
+    while (!small(run[run.length - 1])) { run.pop(); k--; }
+    const own = run.filter(small).map((i) => out[i]);
+    // Between the numbered lines either side of it (lo is one, and a run
+    // carrying none has both within lo..hi).
+    let a = run[0] - 1; while (a > lo && !(fixed[a] && tops[a] != null)) a--;
+    let b = run[run.length - 1] + 1; while (b < hi && !(fixed[b] && tops[b] != null)) b++;
+    if (run.some((i) => fixed[i]) || !(tops[b] - tops[a] <= pitch * 1.5)) {
+      const s = median(own);
+      for (const i of run) out[i] = s;
+      continue;
+    }
+    let other = 0;
+    for (let i = a; i < b; i++) if (!run.includes(i)) other += room(i);
+    const s = Math.min(base, (tops[b] - tops[a] - other) / run.length);
+    if (s > Math.max(...own)) for (const i of run) out[i] = s;
   }
-  f = Math.max(min, f);
-  return f < 1 ? out.map((h) => (h == null ? h : h * f)) : out;
+  return out;
 }
 
 /**

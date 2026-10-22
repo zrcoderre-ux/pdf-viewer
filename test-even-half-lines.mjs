@@ -1,8 +1,8 @@
 // Browser test for one type size between a pleading's numbers
 // (pdfsync.evenHalfLines, from text-reader.js's matched layout): a half line
-// the PDF prints in smaller type is drawn in the page's size, and where a gap
-// cannot hold its lines the whole page's type is taken down alike, never one
-// line on its own.
+// the PDF prints in smaller type is drawn in the page's size, a run of small
+// type down the numbers (a footnote) in one size, its PDF's, and nothing on
+// the page ever taken under the PDF's own size.
 //
 // Run: node test-even-half-lines.mjs   (from the repo root)
 //
@@ -59,8 +59,8 @@ async function startServer() {
 
 const BODY = { 1: "Plaintiff Ashby states as follows.", 2: "The parties are named below.", 5: "Parties: Plaintiff Ashby is a creditor of the Estate.", 6: "Angeles Superior Court sits here.", 8: "The Debt: provided to the decedent over many months.", 9: "Bookkeeper wages were promised." };
 
-/** A pleading page and its export: `halves`, per number, the half lines under it as [text, PDF type size, spacing]. */
-async function open(browser, base, halves) {
+/** A pleading page and its export: `halves`, per number, the half lines under it as [text, PDF type size, spacing]; `small`, per number, the numbered line's own size where not 12. */
+async function open(browser, base, halves, small = {}) {
   const lines = ["====== Page 1 ======"];
   for (let n = 1; n <= 12; n++) { lines.push(`${String(n).padStart(2)}  ${BODY[n] || ""}`.trimEnd()); for (const [t] of halves[n] || []) lines.push("    " + t); }
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
@@ -78,7 +78,7 @@ async function open(browser, base, halves) {
     await window.__textReaderOpenDoc("A Decl.txt");
   }, lines.join("\n") + "\n");
   await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
-  await page.evaluate(async ({ BODY, halves }) => {
+  await page.evaluate(async ({ BODY, halves, small }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const pdf = await PDFDocument.create();
     const font = await pdf.embedFont(StandardFonts.TimesRoman);
@@ -86,15 +86,16 @@ async function open(browser, base, halves) {
     for (let n = 1; n <= 28; n++) {
       const y = 792 - (100 + (n - 1) * 24);
       pg.drawText(String(n), { x: 46 - font.widthOfTextAtSize(String(n), 12), y, size: 12, font });
-      if (BODY[n]) pg.drawText(BODY[n], { x: 72, y, size: 12, font });
+      if (BODY[n]) pg.drawText(BODY[n], { x: 72, y, size: small[n] || 12, font });
       (halves[n] || []).forEach(([t, size, gap], k) => pg.drawText(t, { x: 72, y: y - (k + 1) * gap, size, font }));
     }
     await window.__textReaderPickPdfs([new File([await pdf.save()], "A Decl.pdf", { type: "application/pdf" })]);
-  }, { BODY, halves });
+  }, { BODY, halves, small });
   await page.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 });
   await page.waitForTimeout(1500);
   const sizes = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body > .line")].map((l) => parseFloat(getComputedStyle(l).fontSize)));
-  return { sizes, errors, close: () => page.context().close() };
+  const texts = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body > .line")].map((l) => l.textContent));
+  return { sizes, texts, errors, close: () => page.context().close() };
 }
 
 const srv = await startServer();
@@ -108,11 +109,21 @@ try {
     check("no page errors", r.errors, []);
     await r.close();
   }
-  console.log("2. two half lines crammed into one gap");
+  console.log("2. two half lines crammed into one gap: nothing on the page taken down");
   {
     const r = await open(browser, srv.base, { 5: [["duly appointed Personal Representative of the Estate in the Los", 7, 12]], 8: [["check for tax check for the year this check was returned", 12, 8], ["the bank letter indicating the check was returned for funds", 12, 8]] });
     check("every line in one size", new Set(r.sizes.map((s) => Math.round(s * 100))).size, 1);
-    check("…taken down alike, to two thirds", Math.round(r.sizes[0] * 3 / 2), 16);
+    check("…the PDF's 12 point (16px at this width), not two thirds of it", r.sizes.map((s) => Math.round(s)), r.sizes.map(() => 16));
+    check("no page errors", r.errors, []);
+    await r.close();
+  }
+  console.log("3. a footnote in 8 point down lines 8-9, a half line between them");
+  {
+    const r = await open(browser, srv.base, { 8: [["footnote text continued on the half line below it", 8, 12]] }, { 8: 8, 9: 8 });
+    const at = (n) => r.sizes[r.texts.findIndex((t) => t.startsWith(String(n).padStart(2) + " "))];
+    const half = r.sizes[r.texts.findIndex((t) => t.includes("footnote text continued"))];
+    check("the footnote's numbered lines and its half line in one size, the PDF's 8 point", [at(8), half, at(9)].map((s) => Math.round(s * 3 / 4)), [8, 8, 8]);
+    check("…the body beside it at the PDF's 12 point", [at(1), at(5), at(6)].map((s) => Math.round(s * 3 / 4)), [12, 12, 12]);
     check("no page errors", r.errors, []);
     await r.close();
   }

@@ -161,6 +161,23 @@ console.log("a page with no numbers: rows matched by their words");
   check("a blank line takes the slot under its predecessor", lay.positions[1].top, 60 + lay.pitch);
   check("the pitch is the median row spacing", lay.pitch, 14);
   check("nothing matched, nothing laid out", rowLayout(["zzz"], rows), null);
+  {
+    // A PICTURE'S WORDS: lines the export has and the PDF's text does not,
+    // between rows 24 apart with a picture's 96 points between two of them.
+    const R = (top, text) => ({ top, left: 72, height: 12, text, items: [] });
+    const pr = [R(100, "alpha bravo charlie"), R(124, "delta echo foxtrot"), R(244, "golf hotel india"), R(268, "juliet kilo lima")];
+    const pic = ["picture one words", "picture two words", "picture three words", "picture four words", "picture five words", "picture six words"];
+    const lay = rowLayout(["alpha bravo charlie", "delta echo foxtrot", ...pic, "golf hotel india", "juliet kilo lima"], pr);
+    const tops = lay.positions.map((p) => Math.round(p.top * 10) / 10);
+    check("a picture's lines are spread between the rows either side, under the box of the one above", tops, [100, 124, 138.4, 156, 173.6, 191.2, 208.8, 226.4, 244, 268]);
+    check("…each given its room", Math.round(lay.positions[2].spread * 10) / 10, 17.6);
+    check("…and where a pitch apiece fits, stacked a pitch apart as before", rowLayout(["alpha bravo charlie", "delta echo foxtrot", "picture one words", "golf hotel india"], pr).positions.map((p) => p.top), [100, 124, 148, 244]);
+    const top = rowLayout([...pic, "golf hotel india", "juliet kilo lima"], [R(80, "golf hotel india"), R(104, "juliet kilo lima")]);
+    check("above the first row, spread from the top of the page", top.positions.map((p) => Math.round(p.top * 10) / 10), [0, 13.3, 26.7, 40, 53.3, 66.7, 80, 104]);
+    const foot = rowLayout(["alpha bravo charlie", ...pic, ...pic.map((t) => t + " again"), "", ""], [R(600, "alpha bravo charlie")], { height: 792 });
+    check("under the last, down to the foot of the page (its top margin up from the bottom)", Math.round(foot.positions[12].top * 10) / 10 < 792 - 72, true);
+    check("…the closing blank lines no lines to make room for", Math.round(foot.positions[1].spread * 10) / 10, Math.round(((792 - 72 - 614.4) / 12) * 10) / 10);
+  }
   // THE FIRM NAME DOWN THE MARGIN. A pleading's PDF carries furniture the
   // export does not: the firm printed sideways in the left margin, a seal, a
   // stamp. Each is a row, and each starts further left than the body does.
@@ -404,9 +421,14 @@ console.log("the type a page is set in: the PDF's own sizes at the reading size"
   const F = [true, false, true, false, false, true];
   check("a half line the PDF prints small is the body size", evenHalfLines([12, 7, 12, null, null, 12], [0, 12, 24, null, null, 48], F, 12), [12, 12, 12, null, null, 12]);
   check("…a heading kept larger is kept", evenHalfLines([12, 14, 12], [0, 10, 40], [true, false, true], 12), [12, 14, 12]);
-  check("two half lines in one gap: the whole page taken down alike", evenHalfLines([12, 7, 7, 12, 12], [0, 8, 16, 24, 48], [true, false, false, true, true], 12).map((h) => Math.round(h * 100) / 100), [8, 8, 8, 8, 8]);
-  check("…an empty line holds no room", evenHalfLines([12, 7, 12], [0, 12, 24], [true, false, true], 12, [false, true, false]), [12, 12, 12]);
-  check("…no further than the floor", evenHalfLines([12, 7, 7, 7, 7, 12], [0, 1, 2, 3, 4, 10], [true, false, false, false, false, true], 12, null, { min: 0.5 }), [6, 6, 6, 6, 6, 6]);
+  check("two half lines in one gap: as near the body as the gap holds, never under their own", evenHalfLines([12, 7, 7, 12, 12], [0, 8, 16, 24, 48], [true, false, false, true, true], 12), [12, 7, 7, 12, 12]);
+  check("…and raised where it holds them, both alike", evenHalfLines([12, 5, 4, 12, 12], [0, 8, 16, 24, 48], [true, false, false, true, true], 12), [12, 6, 6, 12, 12]);
+  check("…nothing else on the page taken down", evenHalfLines([12, 7, 7, 7, 7, 12, 12], [0, 1, 2, 3, 4, 10, 34], [true, false, false, false, false, true, true], 12), [12, 7, 7, 7, 7, 12, 12]);
+  check("…an empty line holds no room", evenHalfLines([12, 0, 7, 12], [0, 6, 12, 24], [true, false, false, true], 12, [false, true, false, false]), [12, 0, 12, 12]);
+  check("a footnote down the numbers: one size, the PDF's", evenHalfLines([12, 8, 8, 8.5, 8, 8, 12], [0, 24, 33, 48, 57, 72, 96], [true, true, false, true, false, true, true], 12), [12, 8, 8, 8, 8, 8, 12]);
+  check("…a line no row was read for between two of its lines is of it", evenHalfLines([12, 8, 8, 12, 8, 12], [0, 24, 33, 42, 48, 72], [true, true, false, false, true, true], 12, null, { unread: [false, false, false, true, false, false] }), [12, 8, 8, 8, 8, 12]);
+  check("…but not one at its edge", evenHalfLines([12, 12, 8, 8, 12], [0, 12, 24, 33, 48], [true, false, true, false, true], 12, null, { unread: [false, true, false, false, false] }), [12, 12, 8, 8, 12]);
+  check("small print between numbers far apart (a picture's) keeps its own size", evenHalfLines([12, 12, 7, 7, 7, 12, 12], [0, 24, 40, 52, 64, 120, 144], [true, true, false, false, false, true, true], 12), [12, 12, 7, 7, 7, 12, 12]);
   check("…a stamp above line 1 keeps its own size", evenHalfLines([7, 12, 12], [0, 20, 44], [false, true, true], 12), [7, 12, 12]);
   check("each line's own box: a heading's tall box pushes, a footnote's small one does not", spreadTops([0, 10, 30, 36], [22, 14, 14, 9]), [0, 22, 36, 50]);
   check("no box, nothing moves", spreadTops([0, 5], 0), [0, 5]);

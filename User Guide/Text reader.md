@@ -2216,10 +2216,13 @@ app, which routes it to the reader tab.
   Beside the PDF, each line starts where the PDF starts the text at its own
   slot: line 5 where the PDF's line 5 does, a half line where the PDF's row
   between 5 and 6 does. That is display only; the file keeps its line numbers
-  and spacing. **Every line between the numbers is set in the page's one
-  size**, even where the PDF prints a crammed half line in smaller type;
-  where a gap between two numbers cannot hold its lines at that size, the
-  whole page's type is made smaller, every line alike, never one line alone.
+  and spacing. **A half line the PDF crams in smaller type is set in the
+  page's size** (or as near it as its gap holds), and type the PDF sets small
+  down the page, a footnote, is set in one size, the PDF's, its numbered
+  lines and the lines between them alike. Nothing is drawn smaller than the
+  PDF prints it. A picture's words, which the export has and the PDF's text
+  does not, are fitted into the picture's room, so they move no other line
+  and the page stays the size of its PDF page.
   **# Number lines** puts pleading paper's margin numbers (1–28) on a page
   whose export has none (a scan whose OCR missed the margin). With the PDF
   open beside it, each line goes on the number the PDF prints it at, and a

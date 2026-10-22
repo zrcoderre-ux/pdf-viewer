@@ -277,15 +277,79 @@ crams a sentence into a half line often prints it smaller, so one line of a
 paragraph came out half the size of the lines around it, beside the PDF and
 on the grid with the pane shut. The owner: "When sentences are tightly packed,
 it is choosing to shrink some of the lines, it should not. It should shrink
-things uniformly, if needed." Every line between the first and last numbered
-line is now at least the body size; where a gap between two numbered lines
-cannot then hold its lines (the sum of their type sizes, the numbered line
-above included, as `spreadTops` clears them), the page's type is taken down by
-one factor, every line alike, to what the tightest gap needs and no lower than
-`MIN_FIT`. A heading set larger keeps its size, and a stamp above line 1 or a
-footer under the last number keeps its own size and takes only the factor.
-Tests: `test-pdfsync.mjs` ("a half line the PDF prints small…"),
-`test-even-half-lines.mjs`.
+things uniformly, if needed."
+
+The first answer raised every line between the first and last number to the
+body size and, where a gap could not then hold its lines, took the WHOLE
+page's type down by the factor the tightest gap needed. A page with a
+single-spaced footnote in 8 point (three lines to a gap, raised to 12) was
+drawn at two thirds of its PDF's size, every line of it; and a numbered line
+kept the body size whatever its row printed, so a footnote's numbered lines
+stood half again the size of the lines between them. The owner: "PDF+ is now
+displaying the text file font smaller than the pdf size, and the inconsistent
+sizing of the text per line remains, although unlike before it seems to be
+happening on the numbered lines, rather than between them."
+
+Now (same day): a numbered line takes its own row's size as a half line does
+(`numberedRowOf`, read before the sizes are, within `typeSizes`' fifth of the
+body still the body). The lines between the first and last number that the
+PDF prints under the body size are read in RUNS of consecutive such lines (an
+empty line, or one at the body size or over, ends a run; a line no PDF row
+was found for, `unread`, standing between two of a run's lines is of it):
+
+- A run that carries a numbered line, or stands in a gap wider than a pitch
+  and a half (a picture over several numbers, its small print between them),
+  is type the PDF sets small: ONE size for the run, its median, numbered
+  lines and half lines alike.
+- A run wholly between two consecutive numbers is a line or two crammed into
+  a half line: it takes the body size, or as near it as its gap holds beside
+  the lines already in it (the sum of their type sizes, as `spreadTops`
+  clears them), and never less than its own.
+
+Nothing is ever taken under the PDF's own size, and nothing outside a run
+changes: a heading set larger, a stamp above line 1, a footer under the last
+number keep their own size. Tests: `test-pdfsync.mjs` ("a half line the PDF
+prints small…", "a footnote down the numbers…"), `test-even-half-lines.mjs`
+(the body at the PDF's 12 point beside a crammed gap; a footnote's numbered
+lines and half line in one size, its PDF's 8 point).
+
+### A picture's words: lines the PDF's text does not carry (`rowLayout`'s `spread`)
+
+The owner: "rarely, PDFs will have pictures in them, this throws off the
+spacing, sometimes to the point of dragging text off screen", and "in side by
+side it is adding a large amount of white at the end of the PDF, making the
+PDF appear longer than the text document. When in PDF mode, this extra white
+disappears." A picture's words are in the export (PDF-Linker's OCR of it) and
+not in the PDF's text layer, which has only the image. Such a line matches no
+row, and `rowLayout` stacked it a pitch under the line before: fourteen lines
+of a pasted email pushed every line under the picture down the page and out
+of line with the PDF, and enough of them ran past the foot, where the page
+grew to hold them (`p.h`) and the PDF's sheet was held open to the same
+height (`minHeight`, so the two columns stay one box): 700 to 950 pixels of
+white under a 491-pixel PDF page. On pleading paper the same came of lines
+under line 28 (offGridTops stacks them off the last number).
+
+Now a run of unmatched lines that a pitch apiece would run past the next
+matched line is spread between the two, from under the line above's box (its
+type × `lineBox`); one above the first matched line from the top of the page;
+one under the last, where `height` is passed, down to the foot (the page's
+top margin up from the bottom, an inch at most; the blank lines closing the
+page are not counted). Each carries `spread`, its room, and the reader sets
+its type to fit it (`spread / LINE_BOX`, no smaller than `MIN_FIT` of its
+size) and its box to no more than it. On pleading paper the lines under the
+last number the PDF does not print are set smaller alike to fit between it
+and the foot, a footer the PDF prints keeping its row (`applyMatchedLayout`,
+the numbered branch).
+
+At the floor these lines stand closer than their type rather than move a
+line the PDF prints or grow the page: they are the picture's words, and the
+picture is on the PDF beside them. This departs from `MIN_FIT`'s rule that a
+page past the floor grows, for these lines only; holding them to their type
+instead made `holdWithin` pull the PDF's own lines up the page to make room.
+Tests: `test-pdfsync.mjs` ("a picture's lines are spread…"),
+`test-picture-lines.mjs` (inside, above and below a picture, sixty lines at
+the foot, and pleading paper: every printed line on its row, the page the
+paper's height, no white under the PDF page side by side).
 
 ### A form beside its PDF looks like the PDF (`placePages`, `columns.placeLine`, `pdfsync.lineItems`, `pdfFace`)
 
