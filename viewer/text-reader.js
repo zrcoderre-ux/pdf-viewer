@@ -20593,9 +20593,16 @@ function applyMatchedLayoutNow() {
       fixed = nums.map((n) => n != null);
       tops = PS.slotTops(nums.map((num) => ({ num })), geom);
       // The lines off the grid — a footer, a stamp — on the rows that print them.
-      // (Not on a poor scan's page: its half lines go halfway between their
-      // numbers, every line in the document's type.)
-      const off = geom.scan ? { tops, sizes: lines.map(() => null), rowOf: lines.map(() => null) } : PS.offGridTops(lines.map((l) => l.textContent), nums, tops, rows, geom.pitch);
+      // (On a poor scan's page only those above line 1 and under the last
+      // number: its half lines go halfway between their numbers, every line in
+      // the document's type. Stacked a pitch apart under 28, a footer ran past
+      // the foot of the page and was brought back up over it.)
+      let off = PS.offGridTops(lines.map((l) => l.textContent), nums, tops, rows, geom.pitch);
+      if (geom.scan) {
+        const first = nums.findIndex((n) => n != null), end = nums.length - 1 - nums.slice().reverse().findIndex((n) => n != null);
+        const outside = (k) => first >= 0 && (k < first || k > end);
+        off = { tops: tops.map((t, k) => (outside(k) ? off.tops[k] : t)), sizes: lines.map(() => null), rowOf: lines.map(() => null), outRow: off.rowOf.map((j, k) => (outside(k) ? j : null)) };
+      }
       tops = off.tops;
       pitch = geom.pitch;
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
@@ -20608,6 +20615,13 @@ function applyMatchedLayoutNow() {
       // stand at one margin.
       inds = pdfIndents(lines, nums, geom, rows, bodyX);
       if (geom.scan) inds = inds.map((v) => (v != null && v < SCAN_INDENT_MIN ? null : v));
+      // …and a scan's footer or stamp, on the row that prints it, set in where
+      // that row is: centred, or at the right, as the scan prints it.
+      if (geom.scan && off.outRow && bodyX > 0) off.outRow.forEach((j, k) => {
+        if (j == null) return;
+        const xs = rows[j].items.filter((it) => it.x >= bodyX - 1.5 && String(it.str).trim()).map((it) => it.x);
+        if (xs.length && Math.min(...xs) - bodyX >= SCAN_INDENT_MIN) inds[k] = Math.min(...xs) - bodyX;
+      });
       // …AND THE PDF'S WEIGHT AND SLANT, RUN BY RUN (planCells with `place`
       // false; columns.faceLine). Pleading paper is laid on its numbers and
       // nothing on it moves — no piece is cut or set at the PDF's x, and the
@@ -20765,7 +20779,7 @@ function applyMatchedLayoutNow() {
     // page's height, the same as the sheet beside it, and a line that would
     // run past it is brought back up (pdfsync.holdWithin). The page grows
     // only where its lines cannot all fit on it at all.
-    if (tops) tops = PS.holdWithin(tops, clear, sz.h, spans);
+    if (tops) tops = PS.holdWithin(tops, clear, sz.h, spans, fixed);
     // No grid to draw to (a scan with no text layer): the page keeps its
     // flowing layout at the pane's own scale.
     // The scale is the sheet's, and the sheet is the paper: the write pass
@@ -21912,9 +21926,11 @@ function marginRuns(lines) {
  * its text (a poor scan): { y1, pitch, first, last, bodyX, numberRight, scan }
  * as pdfsync.pleadingGeometry gives for one that does — pdfsync.paperGrid,
  * the grid # Number lines numbers such a page on (line 1 about an inch down,
- * 24 points a line, fitted to the scan's rows, line 28 ending at least half an
- * inch above the foot: the owner, "the number spacing leave too much space at
- * the bottom of the page", of the grid that kept an inch under line 28).
+ * the scan's own line spacing read off its rows, else 24 points a line with
+ * line 28 ending at least half an inch above the foot: the owner, "the number
+ * spacing leave too much space at the bottom of the page", of the grid that
+ * kept an inch under line 28, and "the line spacing is still coming up a bit
+ * short", of 24 points on a scan whose paper ran wider).
  */
 const SCAN_INDENT_MIN = 6; // PDF points: less in than this on a scan is no indent (scanGeom's pages)
 function scanGeom(lines, rows, sz, bodyX) {
@@ -21938,7 +21954,7 @@ function scanGeom(lines, rows, sz, bodyX) {
   // page was numbered on, to the point.)
   if (fit && Math.abs(fit.pitch - paper.pitch) <= paper.pitch * 0.08 && Math.abs(fit.y1 - paper.y1) > paper.pitch / 4) {
     y1 = Math.max(PS.PAPER_TOP / 2, Math.min(PS.PAPER_TOP * 2, fit.y1));
-    pitch = Math.min(fit.pitch, (sz.h - PS.PAPER_FOOT - y1) / TD.MARGIN_LAST);
+    pitch = Math.min(fit.pitch, (sz.h - PS.SCAN_FOOT - y1) / (TD.MARGIN_LAST - 1));
   }
   return { y1, pitch, first: 1, last: TD.MARGIN_LAST, bodyX: x, numberRight: x - 12, scan: true };
 }
