@@ -270,6 +270,23 @@ together where the push ran out. `holdWithin` takes the same room, or it
 pulled the caption back up past its numbers from the foot. Tested in
 `test-pdfsync.mjs`.
 
+**…and the lines between them take ONE size** (`pdfsync.evenHalfLines`,
+called in `applyMatchedLayout` before the boxes are taken; 2026-10-22). A line
+between two numbers used to take its PDF row's own height, and a filer who
+crams a sentence into a half line often prints it smaller, so one line of a
+paragraph came out half the size of the lines around it, beside the PDF and
+on the grid with the pane shut. The owner: "When sentences are tightly packed,
+it is choosing to shrink some of the lines, it should not. It should shrink
+things uniformly, if needed." Every line between the first and last numbered
+line is now at least the body size; where a gap between two numbered lines
+cannot then hold its lines (the sum of their type sizes, the numbered line
+above included, as `spreadTops` clears them), the page's type is taken down by
+one factor, every line alike, to what the tightest gap needs and no lower than
+`MIN_FIT`. A heading set larger keeps its size, and a stamp above line 1 or a
+footer under the last number keeps its own size and takes only the factor.
+Tests: `test-pdfsync.mjs` ("a half line the PDF prints small…"),
+`test-even-half-lines.mjs`.
+
 ### A form beside its PDF looks like the PDF (`placePages`, `columns.placeLine`, `pdfsync.lineItems`, `pdfFace`)
 
 The owner, in chat: "I want to use PDF viewer to compensate. Even if the
@@ -881,3 +898,26 @@ PDF sets the next row closer than that the rule is drawn over that row's text
 (MC-011, the underline under item 11b across 11c). Straight, and in its
 order in the file, but on the wrong side of the text; laying it between its
 neighbours instead would move the lines under it on every such page.
+
+**A caption's `)` side is a bar** (`textdoc.captionParens`, `rules.js`
+`dressLines` and `markParen`; owner's request, 2026-10-22). Pleading paper
+boxes the parties with a column of `)`s and an underscore line under them,
+the case number and title beyond. In the reader's font that column followed
+each line's left-hand words, and the closing `___)` row put its `)` wherever
+its underscores ended. `captionParens` reads the page's lines as the file
+writes them (one pass in `dressLines`, which now serializes every line before
+dressing any: the side is a column of the page, not of a line). A side `)`
+follows a space or an underscore and is followed by a space or the line's end,
+and stands within 2 characters of one column on 3+ consecutive lines. Every
+row of the side takes the first row's column as its `rk`, so a `)` a run's
+text pushed a character over is still a row of the same table and not `.rt`.
+`markParen` wraps that `)` (the `k`th of the line, counted off its text
+nodes, since the file's offsets are the fakes' and the screen holds real
+names) as a `.rb.paren` bar, and on the foot row the underscores before it
+as an `.rh` run (a `.hf` cell) with the bar `data-v="up"`. From there it is
+a box row like any `│` row: `.rl`, columns.js leaves it alone, fitRuleRows
+sets it on the grid. A line carrying box glyphs keeps its glyphs' reading and
+is never read for a `)` side. Tests: `test-textdoc.mjs` ("caption parens"),
+`test-caption-parens.mjs` (numbered and plain: one column, the foot, the file
+read back unchanged).
+

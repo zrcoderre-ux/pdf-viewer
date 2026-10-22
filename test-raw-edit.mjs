@@ -233,6 +233,31 @@ async function run() {
       check("no page errors", r.log.errors, []);
       await r.close();
     }
+    console.log("4. a narrow page: ⇄ Text stays in front, whatever wraps");
+    {
+      // The label's buttons wrap on a narrow page; the row that wrapped used
+      // to hang under the label, covered by the sheet's "The file with your
+      // unsaved edits" line (.page-label is a flow-root now).
+      const r = await newReader();
+      const p = r.page;
+      await p.evaluate(() => document.documentElement.style.setProperty("--reader-width-eff", "260px"));
+      await p.waitForTimeout(200);
+      await toggleRaw(p, 0);
+      await p.waitForTimeout(300);
+      const seen = await p.evaluate(() => {
+        const sec = document.querySelectorAll("#pages .tpage")[0];
+        const lab = sec.querySelector(".page-label").getBoundingClientRect();
+        return [...sec.querySelectorAll(".page-label button")].filter((b) => b.offsetParent).map((b) => {
+          const r = b.getBoundingClientRect();
+          const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return { b: b.className, front: at === b || b.contains(at), inLabel: r.bottom <= lab.bottom + 0.5 };
+        });
+      });
+      truthy("the buttons wrapped", seen.length > 2);
+      check("every button in the label and in front", seen.filter((x) => !x.front || !x.inLabel), []);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
   } finally {
     await browser.close();
     srv.stop();

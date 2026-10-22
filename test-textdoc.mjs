@@ -28,6 +28,7 @@ import {
   valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead, setAsideLines, notedBlocks,
   COMMENTS_HEAD, parseComments, commentLine, commentsBlock, findPassage,
   launcherFolderToken, rerunUrl, runRequestText, RUN_REQUEST_FILE, LAUNCHER_STEMS,
+  captionParens,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans, translate, translateRuns } from "./viewer/pseudo-key.js";
 
@@ -908,6 +909,27 @@ check("tool artifacts are not documents", ["LEAKS.txt", "Combined Text.txt", "Au
 check("run markers", ["ETA ~6.04PM (6 of 13).txt", "ETA (estimating...).txt", "DONE 12.45AM.txt", "eta ~11.05pm (applying leak fixes).TXT", "Brief.txt", "ETA.txt", "ETA notes.docx"].map(runMarker),
   [{ kind: "ETA", label: "~6:04 PM (6 of 13)" }, { kind: "ETA", label: "(estimating...)" }, { kind: "DONE", label: "12:45 AM" }, { kind: "ETA", label: "~11:05 PM (applying leak fixes)" }, null, null, null]);
 check("quarantine", isQuarantinedName("Brief.txt.LEAK"), true);
+// A caption's `)` side: a column of `)`s down three lines or more, drawn as the box's side.
+{
+  const cap = [
+    " 9",
+    "10  TOBIAS WRENFIELD, an individual,  )  Case No. 23STCV01234",
+    "11                                    )",
+    "12            Plaintiff,              )  NOTICE OF MOTION (Hon. Dana Whitaker)",
+    "13       vs.                           )",
+    "14  QUARROW MOTORS, INC.,             )  Dept.: 15",
+    "15  __________________________________)",
+    "16  DANA WHITAKER (SBN 123456)",
+  ];
+  const got = captionParens(cap);
+  check("caption parens: one side down the caption, the slipped row on it", got.map((x) => x && x.at),
+    [null, 38, 38, 38, 39, 38, 38, null]);
+  check("…every row on the first's column", [...new Set(got.filter(Boolean).map((x) => x.col))], [38]);
+  check("…the underscore row is the foot", got.map((x) => !!(x && x.under)), [false, false, false, false, false, false, true, false]);
+  check("…a parenthetical is not a side", captionParens(["(SBN 1)", "Dept. 15 (Hon. X)", "x (y) z"]), [null, null, null]);
+  check("…two lines are not a caption", captionParens(["a   )  b", "c   )  d", "e"]), [null, null, null]);
+  check("…a line without one ends the side", captionParens(["a   )", "b   )", "c", "d   )", "e   )", "f   )"]).map((x) => x && x.at), [null, null, null, 4, 4, 4]);
+}
 // The Re-run button: the folder token PDF-Linker's launcher records
 // (`_launcher_folder_line`), the link it answers, and the request file.
 {

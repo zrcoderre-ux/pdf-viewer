@@ -6173,18 +6173,27 @@ function unindentAtCaret(body, line, lt, off) {
   const fromPdf = off === (inText ? lead : 0) && line.classList.contains("pind") && parseFloat(line.style.getPropertyValue("--pdf-ind")) > 0.5;
   if (!inGutter && !inText && !fromPdf) return false;
   snapshot(body, true);
-  if (fromPdf) setNoIndent(body, [...noIndentOf(body), noIndentKey(line)]);
-  if (inGutter) gs.textContent = "  ";
-  if (inText || (inGutter && lead)) {
+  // ONE SPACE A PRESS, as any editor takes a space back (the owner: "a single
+  // backspace removes them all. It makes it very difficult to properly
+  // position things"). The line still never moves while it has an indent left.
+  // An indent the PDF gives (fromPdf) is no spaces of the file's, so it comes
+  // off whole, and with it the file's own spaces, which the PDF's indent hides.
+  let caret = 0;
+  if (fromPdf) {
+    setNoIndent(body, [...noIndentOf(body), noIndentKey(line)]);
+    if (inGutter) gs.textContent = "  ";
+  } else if (inGutter) gs.textContent = gs.textContent.slice(1);
+  if (fromPdf ? lead > 0 : inText) {
     const r = document.createRange();
-    const from = pointAtOffset(lt, 0), to = pointAtOffset(lt, lead);
+    const from = pointAtOffset(lt, fromPdf ? 0 : lead - 1), to = pointAtOffset(lt, lead);
     r.setStart(from.node, from.offset);
     r.setEnd(to.node, to.offset);
     r.deleteContents();
+    if (!fromPdf) caret = lead - 1;
   }
   dressBody(body);
   fixGutterSpacing(body);
-  const pt = pointAtOffset(lt, 0);
+  const pt = pointAtOffset(lt, caret);
   placeCaret(pt.node, pt.offset);
   if (inGutter || inText) setDirty(true, pageIndexOf(body));
   afterTextChange();
@@ -20926,6 +20935,9 @@ function applyMatchedLayoutNow() {
     // often) prints closer under the one above than that line's box is tall
     // is pushed down to clear it, and out of register with the PDF by that
     // much — reading the text beats lining it up (pdfsync.spreadTops).
+    // Every line between the numbers in one size, the page's type taken down
+    // alike where a gap cannot hold its lines (pdfsync.evenHalfLines).
+    if (fixed && sizes && tops) sizes = PS.evenHalfLines(sizes, tops, fixed, base, lines.map(isEmptyLine), { min: MIN_FIT });
     const boxes = sizes ? sizes.map((h) => h * LINE_BOX) : null;
     // …but an EMPTY line holds no room. PDF-Linker writes the page's top
     // margin as blank lines above line 1 — six, ten, more — and stacked up

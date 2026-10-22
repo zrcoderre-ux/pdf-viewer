@@ -5,7 +5,7 @@ import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
   pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
-  matchedScale, spreadTops, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
+  matchedScale, spreadTops, evenHalfLines, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
 import { parseExport } from "./viewer/textdoc.js";
@@ -400,6 +400,14 @@ console.log("the type a page is set in: the PDF's own sizes at the reading size"
   check("the push carries until a gap absorbs it", spreadTops([0, 5, 10, 60], 14), [0, 14, 28, 60]);
   check("two lines on one row never share it", spreadTops([100, 100], 24), [100, 124]);
   check("a line with no place is passed over, not pushed", spreadTops([0, null, 3], 14), [0, null, 14]);
+  // One size between the numbers (evenHalfLines): lines 1-3 numbered 24 apart, type 12.
+  const F = [true, false, true, false, false, true];
+  check("a half line the PDF prints small is the body size", evenHalfLines([12, 7, 12, null, null, 12], [0, 12, 24, null, null, 48], F, 12), [12, 12, 12, null, null, 12]);
+  check("…a heading kept larger is kept", evenHalfLines([12, 14, 12], [0, 10, 40], [true, false, true], 12), [12, 14, 12]);
+  check("two half lines in one gap: the whole page taken down alike", evenHalfLines([12, 7, 7, 12, 12], [0, 8, 16, 24, 48], [true, false, false, true, true], 12).map((h) => Math.round(h * 100) / 100), [8, 8, 8, 8, 8]);
+  check("…an empty line holds no room", evenHalfLines([12, 7, 12], [0, 12, 24], [true, false, true], 12, [false, true, false]), [12, 12, 12]);
+  check("…no further than the floor", evenHalfLines([12, 7, 7, 7, 7, 12], [0, 1, 2, 3, 4, 10], [true, false, false, false, false, true], 12, null, { min: 0.5 }), [6, 6, 6, 6, 6, 6]);
+  check("…a stamp above line 1 keeps its own size", evenHalfLines([7, 12, 12], [0, 20, 44], [false, true, true], 12), [7, 12, 12]);
   check("each line's own box: a heading's tall box pushes, a footnote's small one does not", spreadTops([0, 10, 30, 36], [22, 14, 14, 9]), [0, 22, 36, 50]);
   check("no box, nothing moves", spreadTops([0, 5], 0), [0, 5]);
   // Pleading paper: numbered at 0, 24, 48, 72, the caption's single-spaced

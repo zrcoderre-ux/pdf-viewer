@@ -200,6 +200,15 @@ app, which routes it to the reader tab.
   in its cell is centred in it. A box or a rule the export draws in from the
   margin is drawn that far in too, and a box drawn smaller to fit its paper
   takes its indents down with it.
+- **A caption boxed with `)`s is a box too.** A pleading's cover page often
+  closes the parties' side of its caption with a `)` on every line and an
+  underscore line under the parties. Where three or more lines in a row carry
+  a `)` at the same column, the reader draws that column as the box's right
+  side, straight down every row whatever the names' widths, and the
+  underscore line as its foot. The file is unchanged: the `)`s and
+  underscores are still there underneath (⇄ Raw shows them), and a save
+  writes them as they were. A `)` closing a parenthetical, such as
+  "(SBN 123456)", is never read as a side.
 - **Columns stand where the export put them, whatever the font.** A
   two-column page — a Westlaw printout, a caption with the case number beside
   the parties, the clerk's filing stamp beside the attorney block — reaches the
@@ -2181,9 +2190,13 @@ app, which routes it to the reader tab.
   divider, or the box's right edge, to size the columns** (the pointer turns
   to ⟷ over a rule): the text that no longer fits wraps down its column. ⇄ Raw
   shows the box as PDF-Linker writes a form's, and Ctrl+Z takes it off.
-  **Backspace at the start of an indented line takes the indent off first**
-  and leaves the line on its number; a second Backspace moves it up to the
-  half line above, as before. Ctrl+Z steps back through both.
+  **Backspace at the start of an indented line takes the indent off first,
+  one space a press,** and leaves the line on its number until the indent is
+  gone; the Backspace after that moves it up to the half line above, as
+  before. (Shift+Tab takes the indent back to the stop before it, four spaces
+  at a time.) An indent beside the PDF that comes from the PDF rather than
+  from spaces in the file comes off in one press. Ctrl+Z steps back through
+  each.
   **While a page reads ✓ Use my text, your spacing stands.** Pressing the
   button changes nothing on screen. From then on, a line you edit on that
   page is placed only by its own spaces: the reader stops moving its columns
@@ -2203,7 +2216,10 @@ app, which routes it to the reader tab.
   Beside the PDF, each line starts where the PDF starts the text at its own
   slot: line 5 where the PDF's line 5 does, a half line where the PDF's row
   between 5 and 6 does. That is display only; the file keeps its line numbers
-  and spacing.
+  and spacing. **Every line between the numbers is set in the page's one
+  size**, even where the PDF prints a crammed half line in smaller type;
+  where a gap between two numbers cannot hold its lines at that size, the
+  whole page's type is made smaller, every line alike, never one line alone.
   **# Number lines** puts pleading paper's margin numbers (1–28) on a page
   whose export has none (a scan whose OCR missed the margin). With the PDF
   open beside it, each line goes on the number the PDF prints it at, and a
