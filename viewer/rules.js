@@ -30,7 +30,7 @@
 // copy read exactly what the file says. The spans are re-derived on every
 // pass (undressed first), because an edit can split or join a cell.
 
-import { ruleParts, ruleShape, serializeNodes } from "./textdoc.js";
+import { ruleParts, ruleShape, captionParens, serializeNodes } from "./textdoc.js";
 import { undressColumns } from "./columns.js";
 
 /** An empty slot carries a <br> so the caret can stand in it; one with text does not need it. */
@@ -65,6 +65,48 @@ function closeCell(cell) {
   return cell;
 }
 
+/**
+ * The `)` a caption's side is drawn with (textdoc.captionParens), made a bar
+ * where it stands among the line's own text: the `k`th `)` of the line, read
+ * off its text nodes, since the file's offsets are the fakes' and the screen
+ * holds the real names. Its text stays `)`, so the file is unchanged. `under`:
+ * the underscore run before it is the box's foot, drawn as a rule across its
+ * cell, and the side stops there. False where the line's text does not hold
+ * that `)` (an edit moved it, or it is inside a name).
+ */
+function markParen(lt, k, under) {
+  let seen = 0;
+  for (const n of [...lt.childNodes]) {
+    if (n.nodeType !== 3) { seen += (n.textContent.match(/\)/g) || []).length; if (seen > k) return false; continue; }
+    for (let i = n.data.indexOf(")"); i >= 0; i = n.data.indexOf(")", i + 1)) {
+      if (seen++ !== k) continue;
+      const bar = document.createElement("span");
+      bar.className = "rb paren";
+      bar.contentEditable = "false";
+      bar.textContent = ")";
+      if (under) bar.dataset.v = "up";
+      const rest = n.splitText(i);
+      rest.data = rest.data.slice(1);
+      n.after(bar);
+      if (under) {
+        const m = /^(\s*)(_+)(\s*)$/.exec(n.data);
+        if (m) {
+          const run = document.createElement("span");
+          run.className = "rh";
+          run.contentEditable = "false";
+          run.textContent = m[2];
+          n.data = m[1];
+          n.after(run);
+          if (m[3]) run.after(document.createTextNode(m[3]));
+          if (!n.data) n.remove();
+        }
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
 /** A line's text with its rule glyphs wrapped; cells where it carries bars. Returns whether it carried any. */
 export function dressRules(lt) {
   const parts = [];
@@ -97,24 +139,31 @@ export function dressRules(lt) {
  */
 export function dressLines(body) {
   let prevKey = null;
-  for (const line of body.querySelectorAll(".line")) {
+  const lines = [...body.querySelectorAll(".line")];
+  // The bars are located in the line as the FILE writes it — the fakes
+  // underneath, not the real names on screen: the file's columns are the
+  // ones PDF-Linker aligned, and a row whose real name is three letters
+  // longer than its fake is still a row of the same box. Read once, for the
+  // caption's `)` side too, which is a column of the page, not of a line.
+  const texts = lines.map((line) => { const lt = line.querySelector(":scope > .lt"); if (lt) undress(lt); return serializeNodes(line); });
+  const parens = captionParens(texts);
+  for (const [li, line] of lines.entries()) {
     const lt = line.querySelector(":scope > .lt");
     if (!lt) continue;
-    undress(lt);
     // Its cells are made afresh, with no widths: a table fixed at the width
     // the last fit gave it would share that out among them until the next.
     if (line.classList.contains("fit")) { line.classList.remove("fit"); line.style.width = ""; }
     line.classList.remove("rl", "rt", "rr");
     placeholderIn(lt);
-    // The bars are located in the line as the FILE writes it — the fakes
-    // underneath, not the real names on screen: the file's columns are the
-    // ones PDF-Linker aligned, and a row whose real name is three letters
-    // longer than its fake is still a row of the same box.
-    const shape = ruleShape(serializeNodes(line));
+    const text = texts[li];
+    let shape = ruleShape(text);
+    const paren = shape ? null : parens[li];
+    if (paren) shape = { bars: [paren.col], rule: false };
     if (!shape) { prevKey = null; continue; }
     // The glyphs are wrapped where they stand among the line's own nodes, so
     // the column cells (columns.js) come off first and go back on after.
     undressColumns(lt);
+    if (paren && !markParen(lt, (text.slice(0, paren.at).match(/\)/g) || []).length, paren.under)) { prevKey = null; continue; }
     const cells = dressRules(lt);
     if (shape.rule) line.classList.add("rr");
     if (!cells) { prevKey = null; continue; }

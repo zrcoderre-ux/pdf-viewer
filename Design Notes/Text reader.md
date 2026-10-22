@@ -1807,6 +1807,16 @@ undo step, the caret at the text's head; the next Backspace does what it did
 (into the half line above, then a join). On a ✓ Use my text page the line is
 then the operator's (`markOwnLines`, `autoLayPage`), so the layout leaves it
 unindented. `test-half-lines.mjs` section 2b.
+**…one space a press** (2026-10-22, this narrows the paragraph above). The
+owner: "if I make a series of spaces or indents, a single backspace removes
+them all. It makes it very difficult to properly position things." Each
+Backspace now takes ONE space: from the text's opening spaces where the caret
+stands after them (the caret stays after what is left), else from the
+gutter's (`.gs`, down to its two). The line still does not move until the
+indent is gone. The PDF's indent beside the PDF (`fromPdf`, below) is no
+spaces of the file's and still comes off whole, with the file's own opening
+spaces, which it hides. `test-half-lines.mjs` section 2b (seven presses, seven
+undo steps).
 The indent the operator sees beside the PDF is often not the file's at all:
 on a numbered page `pdfIndents` sets a line's text where the PDF's row at its
 number starts (`.pind`, `--pdf-ind`), and on a page laid row by row the row's

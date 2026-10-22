@@ -3493,6 +3493,63 @@ export function ruleShape(line) {
   return { bars, rule: RULE_ONLY_RE.test(line) };
 }
 
+/**
+ * THE `)` SIDE OF A CAPTION. A pleading's cover page boxes its parties with a
+ * column of `)`s down their right, one on every line of the caption, and the
+ * case number and title stand beyond it:
+ *
+ *     TOBIAS WRENFIELD,             )  Case No. 23STCV01234
+ *               Plaintiff,          )
+ *     ______________________________)
+ *
+ * In the reader's font that column wanders as its left half's words do, so
+ * it is drawn as the box's side (rules.js, dressLines), as a `│` is. `lines`
+ * are a page's lines as the file writes them (gutter included); per line the
+ * result is null, or { at, col, under }: the offset of its side `)`, the
+ * offset the whole side stands at (its first line's, so every row of it is
+ * one table and one column), and whether only an underscore run stands before
+ * it (the box's foot). A side `)` follows a space or an underscore and is
+ * followed by a space or the line's end, so "(SBN 123456)" and "(Hon. Dana
+ * Whitaker)" are not one; and it stands within PAREN_SLOP of the side's
+ * column on CAPTION_PAREN_MIN lines running, with no line between them
+ * lacking one.
+ */
+export const CAPTION_PAREN_MIN = 3;
+const PAREN_SLOP = 2;
+export function captionParens(lines) {
+  const cands = lines.map((s) => {
+    s = String(s == null ? "" : s);
+    const out = [];
+    for (let i = s.indexOf(")"); i >= 0; i = s.indexOf(")", i + 1)) {
+      if (i > 0 && (s[i - 1] === " " || s[i - 1] === "_") && (i + 1 === s.length || s[i + 1] === " ")) out.push(i);
+    }
+    return out;
+  });
+  const res = lines.map(() => null);
+  for (let i = 0; i < lines.length;) {
+    if (!cands[i].length) { i++; continue; }
+    // The longest run from here, for each side this line could be.
+    let best = null;
+    for (const col of cands[i]) {
+      const picks = [];
+      for (let j = i; j < lines.length; j++) {
+        const near = cands[j].filter((c) => Math.abs(c - col) <= PAREN_SLOP).sort((a, b) => Math.abs(a - col) - Math.abs(b - col))[0];
+        if (near == null) break;
+        picks.push(near);
+      }
+      if (!best || picks.length > best.picks.length) best = { col, picks };
+    }
+    if (best.picks.length < CAPTION_PAREN_MIN) { i++; continue; }
+    best.picks.forEach((at, k) => {
+      const s = String(lines[i + k]);
+      const before = s.slice(0, at).replace(/^\s*\d*\s*/, "");
+      res[i + k] = { at, col: best.col, under: /^_+\s*$/.test(before) };
+    });
+    i += best.picks.length;
+  }
+  return res;
+}
+
 // ---- columns laid out with spaces ----------------------------------------------------
 //
 // The same character grid lays a page's COLUMNS out with spaces: a second

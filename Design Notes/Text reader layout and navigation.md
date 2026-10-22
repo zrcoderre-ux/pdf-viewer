@@ -218,6 +218,15 @@ clears what it set, reads both labels at their own heights with
 `getBoundingClientRect` (a pixel rounded away per page drifts the columns), and
 levels from there.
 
+**A label holds its buttons** (`.page-label { display: flow-root }`, 2026-10-22).
+The page's buttons (⇄ PDF, ⇄ Raw, ⊘ Did not OCR, ✎ Use my text, # Number
+lines…) float right, and on a narrow sheet (side by side, a small window) they
+wrap. The label did not contain its floats, so the wrapped row hung below it,
+under the page: on a page shown ⇄ Raw the sheet's "The file with your unsaved
+edits" line covered ⇄ Text, the button that turns Raw off. Now the label grows
+to hold them, and the levelling above keeps its PDF page's label level with it.
+Test: `test-raw-edit.mjs` case 4.
+
 **A shed page was pinned at the wrong height, beside a slot of the wrong
 width.** `shedMember` took the page off the grid (`clearMatched`) and THEN read
 the height to pin, which was whatever its text came to flowing off the grid; and

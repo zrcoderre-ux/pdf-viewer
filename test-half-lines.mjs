@@ -243,21 +243,22 @@ async function run() {
       await p.keyboard.press("Control+s");
       await p.waitForTimeout(1500);
       truthy("the half line is a line of the file between 4 and 5", (await file(p)).includes(" 4        De\nlta\n 5\n"));
-      console.log("2b. Backspace at the head of an indented line: the indent goes first, the line stays on its number; a second Backspace moves it up a half line");
+      console.log("2b. Backspace at the head of an indented line: the indent goes first, a space a press, the line staying on its number; once it is gone, Backspace moves it up a half line");
       await p.keyboard.press("Control+z");
       await p.waitForTimeout(200);
       const four = () => p.evaluate(() => { const l = document.querySelectorAll("#pages .tpage .page-body > .line")[3]; return [l.querySelector(".gn").textContent.trim(), l.querySelector(".gs").textContent.length, l.querySelector(".lt").textContent]; });
       check("line 4 indented, as the file has it", await four(), ["4", 8, "Delta"]);
       await caretIn(p, 3);
       await p.keyboard.press("Backspace");
-      check("Backspace: the indent off, still on 4", await four(), ["4", 2, "Delta"]);
+      check("Backspace: one space of the indent off, still on 4", await four(), ["4", 7, "Delta"]);
+      for (let k = 0; k < 5; k++) await p.keyboard.press("Backspace");
+      check("five more: the indent off, still on 4", await four(), ["4", 2, "Delta"]);
       check("…and nothing moved", await slots(p), START);
       await p.keyboard.press("Backspace");
       check("…again: up to 3.5", (await slots(p)).slice(2, 5), [["3", ""], ["·", "Delta"], ["4", ""]]);
-      await p.keyboard.press("Control+z");
-      await p.keyboard.press("Control+z");
+      for (let k = 0; k < 7; k++) await p.keyboard.press("Control+z");
       await p.waitForTimeout(200);
-      check("Ctrl+Z twice: indented on 4 again", await four(), ["4", 8, "Delta"]);
+      check("Ctrl+Z seven times: indented on 4 again", await four(), ["4", 8, "Delta"]);
       check("no page errors", r.log.errors, []);
       await r.close();
     }

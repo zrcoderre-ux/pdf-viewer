@@ -1251,6 +1251,42 @@ export function typeSizes(sizes, base, tolerance = 0.2) {
 }
 
 /**
+ * ONE TYPE SIZE BETWEEN THE NUMBERS. On pleading paper a line between two
+ * numbered ones (a single-spaced half line) took its PDF row's own height,
+ * and a filer who crams a sentence in between two numbers often prints it
+ * smaller: drawn so, one line in a paragraph came out half the size of the
+ * lines around it. The owner: "it should not [shrink some lines]. It should
+ * shrink things uniformly, if needed." So every line between the first and
+ * last numbered line is at least the body size `base`, and where a gap
+ * between two numbered lines (`fixed`, at `tops`) cannot then hold the lines
+ * in it, each a type size under the one above it (spreadTops), the page's
+ * type is taken down by ONE factor, every line alike, as far as the
+ * tightest gap needs and no further than `min`. `empty`, per line, is a line
+ * with nothing on it (it holds no room). Lines above the first number or under
+ * the last (a stamp, a footer) keep their own size, and only the factor.
+ */
+export function evenHalfLines(sizes, tops, fixed, base, empty = null, { min = 0.5 } = {}) {
+  if (!sizes || !tops || !fixed || !(base > 0)) return sizes;
+  const at = [];
+  fixed.forEach((f, k) => { if (f && tops[k] != null) at.push(k); });
+  if (at.length < 2) return sizes;
+  const out = sizes.map((h, k) => (h != null && k > at[0] && k < at[at.length - 1] && !fixed[k] && h < base ? base : h));
+  // A line with no place (spreadTops passes it over) holds no room either.
+  const room = (k) => (tops[k] == null || (empty && empty[k]) ? 0 : out[k] || 0);
+  let f = 1;
+  for (let g = 1; g < at.length; g++) {
+    const a = at[g - 1], b = at[g];
+    if (b - a < 2) continue;
+    let need = 0, any = false;
+    for (let i = a; i < b; i++) { need += room(i); if (i > a && room(i)) any = true; }
+    const avail = tops[b] - tops[a];
+    if (any && need > 0 && avail > 0 && avail < need) f = Math.min(f, avail / need);
+  }
+  f = Math.max(min, f);
+  return f < 1 ? out.map((h) => (h == null ? h : h * f)) : out;
+}
+
+/**
  * The scale that draws `unit` PDF units as `px` pixels: the PDF's body
  * type at the reading size. Bounded, so a misread size cannot blow the
  * sheet up or crush it. Null where there is nothing to scale to.
