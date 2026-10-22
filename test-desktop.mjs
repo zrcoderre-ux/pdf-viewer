@@ -6,8 +6,8 @@
 // (a stored PathFileHandle given its methods back); a second launch hands its
 // file to the running window and exits; a text export opens in the text
 // reader; the bridge reads and writes no file it was not given; nothing is
-// fetched from the network; Westlaw links go to the browser at once and
-// other links only after asking; a tab moved to a new window takes its file
+// fetched from the network; Westlaw links go to the browser at once, other
+// links only after asking, and PDF-Linker's pdf-linker: link to PDF-Linker; a tab moved to a new window takes its file
 // along and saves there; OCR runs under the Content-Security-Policy; closing
 // a window with unsaved changes asks; and no page logs an error or a CSP
 // refusal.
@@ -307,6 +307,22 @@ try {
     const after = await app.evaluate(() => ({ opened: globalThis.__opened.slice(), asked: globalThis.__asked.slice() }));
     check("a link followed in place: asked, then opened in the browser", after, { opened: ["https://example.org/followed"], asked: ["https://example.org/followed"] });
     truthy("…and the viewer stayed where it was", /\/viewer\/viewer\.html$/.test(viewer.url()));
+    // The text reader's Re-run PDF-Linker opens PDF-Linker's own link as a
+    // clicked <a rel="noopener"> (text-reader.js openLink).
+    await app.evaluate(() => { globalThis.__answer = 1; globalThis.__opened.length = 0; globalThis.__asked.length = 0; });
+    await viewer.evaluate(() => {
+      const a = document.createElement("a");
+      a.href = "pdf-linker://run?f=QzpcQ2FzZQ&d=Case&n=1234";
+      a.rel = "noopener";
+      a.hidden = true;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+    await sleep(800);
+    check("PDF-Linker's pdf-linker: link goes to PDF-Linker without a question",
+      await app.evaluate(() => ({ opened: globalThis.__opened.slice(), asked: globalThis.__asked.slice() })),
+      { opened: ["pdf-linker://run?f=QzpcQ2FzZQ&d=Case&n=1234"], asked: [] });
     check("still one window", await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   }
 

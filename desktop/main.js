@@ -47,6 +47,11 @@ const OPENABLE = /\.(pdf|txt|leak|md|markdown)$/i;
 // Links that open in the browser without asking: the citation links' own
 // targets (viewer/code-tables.js). Any other link is shown first.
 const TRUSTED_LINK_HOSTS = [/(^|\.)westlaw\.com$/i, /(^|\.)lexis\.com$/i, /(^|\.)lexisnexis\.com$/i];
+// PDF-Linker's own link (the text reader's Re-run PDF-Linker button,
+// textdoc.rerunUrl), handed to the program Windows has registered for it.
+// It carries a folder token and a nonce, and PDF-Linker runs only on the
+// request file the reader writes beside it, so it goes without asking.
+const APP_SCHEMES = ["pdf-linker:"];
 
 // Content-Security-Policy for every page: scripts only from the app (plus
 // WebAssembly, for OCR), nothing fetched from anywhere else. The network is
@@ -215,12 +220,14 @@ function isAppUrl(u) {
 }
 
 /** A link the page wants opened: in the default browser, if it is a web or
- *  mail link at all, and after asking unless it goes to Westlaw or Lexis+. */
+ *  mail link at all, and after asking unless it goes to Westlaw or Lexis+;
+ *  a pdf-linker: link to PDF-Linker. */
 async function openExternal(raw, win) {
   let u;
   try { u = new URL(String(raw)); } catch { return false; }
-  if (!["https:", "http:", "mailto:"].includes(u.protocol)) return false;
-  const trusted = u.protocol === "https:" && TRUSTED_LINK_HOSTS.some((re) => re.test(u.hostname));
+  if (!["https:", "http:", "mailto:", ...APP_SCHEMES].includes(u.protocol)) return false;
+  const trusted = APP_SCHEMES.includes(u.protocol)
+    || (u.protocol === "https:" && TRUSTED_LINK_HOSTS.some((re) => re.test(u.hostname)));
   if (!trusted) {
     const opts = {
       type: "question",

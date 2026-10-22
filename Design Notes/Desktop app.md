@@ -37,7 +37,10 @@ nothing else is.
 
 A link never loads inside the app. Three paths lead to `openExternal`, which
 opens `http`, `https` and `mailto` links in the default browser, at once for
-`TRUSTED_LINK_HOSTS` (Westlaw, Lexis) and after a question for anything else:
+`TRUSTED_LINK_HOSTS` (Westlaw, Lexis) and after a question for anything else,
+and hands PDF-Linker's `pdf-linker:` link (the text reader's Re-run
+PDF-Linker, `textdoc.rerunUrl`) to the program Windows registered for it, at
+once (`APP_SCHEMES`). Any other scheme is refused:
 
 - `window.open` is wrapped in every frame by `shim.js`. It answers as a
   browser does: a stand-in window object, or `null` for `noopener`. Without

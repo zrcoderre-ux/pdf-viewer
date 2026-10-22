@@ -197,7 +197,8 @@
     if (!u || u.origin === location.origin || u.protocol === "blob:" || u.protocol === "about:") {
       return nativeOpen.apply(window, arguments);
     }
-    if (!/^(https?|mailto):$/.test(u.protocol)) return null;
+    // The web, mail, and PDF-Linker's own pdf-linker: link (main.js APP_SCHEMES).
+    if (!/^(https?|mailto|pdf-linker):$/.test(u.protocol)) return null;
     native().openExternal(u.href).catch(() => {});
     if (/(^|,)\s*(noopener|noreferrer)\s*(=\s*(yes|1|true))?\s*(,|$)/i.test(String(features || ""))) return null;
     // What a browser hands back for a tab that opened elsewhere.
