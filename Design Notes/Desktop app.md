@@ -30,8 +30,22 @@ CSP refusal in the console, so a feature that needs more shows up there.
 `lockDownSession` cancels every request that is not to `pdfplus://app/`,
 `data:`, `blob:` or `devtools:` (`onBeforeRequest`), below the CSP, so a
 window loaded some other way is refused too. Permissions: `fileSystem`,
-the clipboard and fullscreen are granted, from the app's origin only;
-nothing else is.
+the clipboard and fullscreen are granted, from the app's origin only, and
+the screen share below; nothing else is. The update check (below) is the
+one request PDF+ makes, from the main process in a session of its own.
+
+## The reader's screenshot, and downloads
+
+Hosted, the text reader's 📷 Screenshot asks for a screen share of its own
+tab (`getDisplayMedia` on the shell's window, `shareThisTab`). Electron
+refuses that unless it is answered: `setDisplayMediaRequestHandler` gives
+the request its own window's top frame (`{ video: frame.top }`) and nothing
+else, with no picker. Before that, Chromium asks the `media` permission:
+**a screen share arrives as `media` with an empty `mediaTypes`**, a camera
+or microphone with `video` or `audio` in it, so only the empty kind is
+granted. The PNG it saves is a download; `will-download` puts every
+download into Downloads under a free name (`freeName`: "name (1).png"),
+with no dialog, as Chrome does.
 
 ## Links
 
@@ -102,6 +116,35 @@ first. Electron shows no dialog for `beforeunload`: the close is simply
 refused. `will-prevent-unload` asks instead ("Close without saving" /
 "Cancel"). There is no menu; F12 opens the developer tools.
 
+## Updates
+
+Home's version and **Check for updates** are drawn by the shim
+(`updatesOnHome`); the checking is electron-updater's in `main.js`
+("Updates"), asked through the bridge and never on its own. It reads
+`latest.yml` from the URL in `package.json`'s `build.publish` (written into
+the app's `app-update.yml`): the generic provider on
+`…/releases/latest/download`, GitHub's link to the newest release's files,
+so no API and no tag parsing; the catch is that every release in the
+repository is taken for a PDF+ release. `latest.yml` names the installer
+and its SHA-512, which electron-updater checks after the download; the
+installer is not signed (`publisherName` unset), so no signature check is
+made. `release-desktop.yml` publishes the release from a `pdfplus-v<version>`
+tag through `build-desktop.yml` (`release: true`), whose release notes
+(`build/release-notes.md`, the commit subjects since the last tag) are what
+the button shows.
+
+The installer's file name has no spaces or `+`
+(`PDFPlus-Setup-<version>.exe`): GitHub renames such release assets, and
+`latest.yml` would then name a file the release does not have.
+
+`autoInstallOnAppQuit` stays on: a downloaded update that was not installed
+at once (Cancel on the unsaved-changes question) installs when PDF+ next
+closes. `PDFPLUS_UPDATE_CONFIG` points the updater at another
+`app-update.yml` (tests; the unpackaged app has none and says so). The
+Linux updater wants an AppImage, so the test hands it a stand-in path in
+`APPIMAGE`; Windows CI runs the real Windows updater against the test's
+local server.
+
 ## Packaging
 
 `package.json` pins Electron and electron-builder. The installer is NSIS,
@@ -120,6 +163,9 @@ the command line opened and saved in place with a sticky note; Recent; a
 second launch handing its files over; a text export in the reader; the
 bridge refusing a file it was not given; no network; links; a handle sent by
 `postMessage`; a tab moved to a new window and saved there; OCR under the
-CSP; and the unsaved-changes question on close. CI
+CSP; the reader's screenshot in Downloads (and a camera still refused); the
+update button against a local stand-in for the releases (up to date, then a
+newer release shown with its notes and downloaded, never installed); and
+the unsaved-changes question on close. CI
 (`.github/workflows/build-desktop.yml`) runs it on Linux and Windows before
 building the installer.

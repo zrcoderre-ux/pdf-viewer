@@ -254,8 +254,10 @@
     });
   }
 
-  // Home says PDF+ (the window's title is set by main.js).
+  // Home says PDF+ (the window's title is set by main.js), and has its
+  // version and the update button.
   document.addEventListener("DOMContentLoaded", () => {
+    try { updatesOnHome(); } catch (e) { console.error(e); }
     const h1 = document.querySelector(".home-hero h1");
     if (h1 && h1.textContent.trim() === "PDF Viewer") h1.textContent = "PDF+";
     const drop = document.querySelector(".home-drop");
@@ -267,4 +269,113 @@
       }
     }
   });
+
+  // ---- updates, on Home -----------------------------------------------------
+  //
+  // The version, and Check for updates: nothing is asked of GitHub until it
+  // is clicked (main.js, "Updates"). A newer release shows its version and
+  // what changed, and is downloaded and installed only on a second click;
+  // PDF+ then closes (asking first about unsaved documents), installs it and
+  // opens again.
+  function updatesOnHome() {
+    const home = document.querySelector("#dropzone .home-inner");
+    const n = native();
+    if (!home || !n.checkForUpdate) return;
+    const style = document.createElement("style");
+    style.textContent = `
+      .pdfplus-about { margin-top: 26px; font-size: 12.5px; color: var(--c-text-3); }
+      .pdfplus-about .pa-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+      .pdfplus-about .link-btn { padding: 0; font-size: 12.5px; color: var(--c-accent); }
+      .pdfplus-about .link-btn:disabled { color: var(--c-text-3); cursor: default; }
+      .pdfplus-about .pa-status { color: var(--c-text-2); }
+      .pdfplus-about .pa-update { margin-top: 12px; padding: 14px 16px; border: 1px solid var(--c-border); border-radius: 12px; background: var(--c-card); color: var(--c-text); }
+      .pdfplus-about .pa-head { font-weight: 650; font-size: 13.5px; }
+      .pdfplus-about .pa-notes { margin: 10px 0 12px; max-height: 240px; overflow: auto; white-space: pre-wrap; font: inherit; line-height: 1.55; color: var(--c-text-2); }
+      .pdfplus-about .pa-get { border: 1px solid var(--c-accent-strong); background: var(--c-accent-strong); color: #fff; border-radius: 8px; padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+      .pdfplus-about .pa-get:disabled { opacity: 0.6; cursor: default; }
+      .pdfplus-about .pa-hint { margin-top: 8px; color: var(--c-text-3); }
+    `;
+    document.head.appendChild(style);
+
+    const box = document.createElement("section");
+    box.className = "pdfplus-about";
+    box.innerHTML = `
+      <div class="pa-row">
+        <span class="pa-version">PDF+</span>
+        <button type="button" class="link-btn pa-check" title="Asks GitHub for the newest PDF+ release. Nothing else is sent, and nothing is asked until you click.">Check for updates</button>
+        <span class="pa-status" role="status" aria-live="polite"></span>
+      </div>
+      <div class="pa-update" hidden>
+        <div class="pa-head"></div>
+        <pre class="pa-notes"></pre>
+        <button type="button" class="pa-get">Download and install</button>
+        <div class="pa-hint" hidden></div>
+      </div>`;
+    const more = home.querySelector(".home-more");
+    if (more) home.insertBefore(box, more); else home.appendChild(box);
+
+    const $ = (sel) => box.querySelector(sel);
+    const status = (t) => { $(".pa-status").textContent = t; };
+    n.version().then((v) => { if (v) $(".pa-version").textContent = `PDF+ ${v}`; }).catch(() => {});
+
+    let stage = "idle"; // idle → checking → available → downloading → ready
+    $(".pa-check").addEventListener("click", async () => {
+      if (stage === "checking" || stage === "downloading") return;
+      stage = "checking";
+      $(".pa-check").disabled = true;
+      status("Checking…");
+      let r;
+      try { r = await n.checkForUpdate(); } catch (e) { r = { status: "error", message: String((e && e.message) || e) }; }
+      $(".pa-check").disabled = false;
+      if (r.status === "available") {
+        stage = "available";
+        status("");
+        $(".pa-head").textContent = `PDF+ ${r.version} is available. You have ${r.current}.`;
+        $(".pa-notes").textContent = r.notes || "No notes came with this release.";
+        $(".pa-get").textContent = "Download and install";
+        $(".pa-get").disabled = false;
+        $(".pa-hint").hidden = true;
+        $(".pa-update").hidden = false;
+        return;
+      }
+      stage = "idle";
+      $(".pa-update").hidden = true;
+      status(r.status === "none" ? `PDF+ is up to date.`
+        : r.status === "unavailable" ? r.message
+          : `Could not check for updates: ${r.message}`);
+    });
+
+    n.onUpdateProgress((pct) => {
+      if (stage === "downloading") $(".pa-get").textContent = `Downloading… ${pct}%`;
+    });
+    $(".pa-get").addEventListener("click", async () => {
+      if (stage === "ready") {
+        $(".pa-get").disabled = true;
+        $(".pa-get").textContent = "Installing…";
+        await n.installUpdate();
+        return;
+      }
+      if (stage !== "available") return;
+      stage = "downloading";
+      $(".pa-get").disabled = true;
+      $(".pa-check").disabled = true;
+      $(".pa-get").textContent = "Downloading…";
+      let r;
+      try { r = await n.downloadUpdate(); } catch (e) { r = { status: "error", message: String((e && e.message) || e) }; }
+      $(".pa-check").disabled = false;
+      if (r.status !== "downloaded") {
+        stage = "available";
+        $(".pa-get").disabled = false;
+        $(".pa-get").textContent = "Download and install";
+        $(".pa-hint").hidden = false;
+        $(".pa-hint").textContent = `The download failed: ${r.message}`;
+        return;
+      }
+      stage = "ready";
+      $(".pa-get").disabled = false;
+      $(".pa-get").textContent = "Restart and install";
+      $(".pa-hint").hidden = false;
+      $(".pa-hint").textContent = "PDF+ closes, installs the update and opens again. A document with unsaved changes is asked about first; if you keep PDF+ open, the update installs the next time it closes.";
+    });
+  }
 })();
