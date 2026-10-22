@@ -271,6 +271,8 @@ try {
     await put(dir, "Sample Row Pleading.pdf", rowBytes);
     await put(dir, "Sample Tight Pleading.pdf", tightBytes);
     await put(dir, "Sample Image Pleading.pdf", imageBytes);
+    // …and each poor scan's export without its numbers, beside the same PDF.
+    for (const [n, b] of [["Unread", unreadBytes], ["Row", rowBytes], ["Tight", tightBytes]]) await put(dir, `Sample ${n} Bare.pdf`, b);
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "Sample Form.txt", FORM_TEXT);
     await put(text, "Sample Pleading.txt", PLEAD_TEXT);
@@ -278,8 +280,12 @@ try {
     await put(text, "Sample Row Pleading.txt", PLEAD_ROW_TEXT);
     await put(text, "Sample Tight Pleading.txt", PLEAD_ROW_TEXT);
     await put(text, "Sample Image Pleading.txt", PLEAD_ROW_TEXT);
+    const bare = (t) => t.split("\n").map((l) => (/^[ \d]\d/.test(l) ? l.slice(2).replace(/^  /, "") : l)).join("\n");
+    await put(text, "Sample Unread Bare.txt", bare(PLEAD_TEXT));
+    await put(text, "Sample Row Bare.txt", bare(PLEAD_ROW_TEXT));
+    await put(text, "Sample Tight Bare.txt", bare(PLEAD_ROW_TEXT));
     await window.__textReaderAdoptFolder(dir);
-    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes, "Sample Row Pleading.pdf": rowBytes, "Sample Tight Pleading.pdf": tightBytes, "Sample Image Pleading.pdf": imageBytes };
+    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes, "Sample Row Pleading.pdf": rowBytes, "Sample Tight Pleading.pdf": tightBytes, "Sample Image Pleading.pdf": imageBytes, "Sample Unread Bare.pdf": unreadBytes, "Sample Row Bare.pdf": rowBytes, "Sample Tight Bare.pdf": tightBytes };
     return { placed };
   }, { FORM, STAMP, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION });
 
@@ -549,49 +555,70 @@ try {
   }
 
   // ── a numbered export beside a PDF whose numbers are not text ─────────────
-  // Laid by its words rather than its numbers, its lines cut into the PDF's
-  // pieces — and those pieces found in the line's text, not in the gutter
-  // number in front of it: found there, every cut stood the gutter's width
-  // early, in the middle of a word ("Mari|gold", "Pla|intiff").
-  // A poor scan, numbered in the file (# Number lines, or by hand): laid as
-  // pleading paper — every number a pitch below the last, a half line halfway
-  // between two — in the document's type, each line's text at the margin plus
-  // the file's own indent (the owner: "The added numbers from number lines are
-  // not uniformly spaced with the half spaces baked in").
-  if (!TOPS_ONLY) for (const [name, lines, indented] of [["Sample Unread Pleading", PLEAD_LINES, true], ["Sample Row Pleading", PLEAD_ROW_LINES, false], ["Sample Tight Pleading", PLEAD_ROW_LINES, false], ["Sample Image Pleading", PLEAD_ROW_LINES, false]]) {
-    console.log(`a numbered export beside a PDF whose numbers are not text (${name})`);
-    await openBeside(name + ".txt", name + ".pdf");
-    // (Only this document's pages: the reel holds the documents either side of
-    // it too, a pleading whose PDF's numbers are text among them.)
+  // A poor scan, numbered in the file (# Number lines, or by hand). Its lines
+  // stand where they stand WITHOUT the numbers — on the rows the PDF prints
+  // their words on — and the numbers are drawn down the paper's margin apart
+  // from them: 1 to 28 at one pitch, from the margin at the top to the one at
+  // the foot (the owner: "Adding the numbers shouldnt move the text. It should
+  // only add the number margins"; "The added numbers from number lines are not
+  // uniformly spaced"; "the 1-28 only went halfway down the page"). Each is
+  // laid against the same PDF's export without numbers, line by line.
+  // (Only the open document's pages are read: the reel holds the documents
+  // either side of it too, a pleading whose PDF's numbers are text among them.)
+  const ownOf = async (name) => {
     const own = await page.evaluate((n) => { const m = window.__textReaderReel().members.find((x) => x.name === n); return m ? [m.from, m.from + m.count] : [0, 1e9]; }, name + ".txt");
     const ownSecs = `[...document.querySelectorAll("#pages .tpage")].filter((s) => +s.dataset.index >= ${own[0]} && +s.dataset.index < ${own[1]})`;
-    const onOwn = (js) => page.evaluate(new Function(`const secs = ${ownSecs}; ${js}`));
-    check("…laid as pleading paper, on the paper's numbers", await onOwn(`return secs.length > 0 && secs.every((s) => s.querySelector(".page-body.fixed") && !s.querySelector(".page-body.cgrid, .page-body.rowleft"));`));
-    const pagesTops = await onOwn(`return secs.map((s) => s.querySelector(".page-body.fixed")).filter(Boolean).map((b) => [...b.querySelectorAll(":scope > .line.num")].map((l) => [parseInt(l.querySelector(".gn").textContent, 10), parseFloat(l.style.top)]));`);
-    const steps = pagesTops.flatMap((numTops) => numTops.slice(1).map(([n, t], k) => (t - numTops[k][1]) / (n - numTops[k][0])));
-    // …and the last line's foot an inch above the page's, at the least.
-    const foot = await onOwn(`return secs.map((sec) => {
-      const b = sec.querySelector(".page-body.fixed"), inner = sec.querySelector(".page-inner");
-      const n28 = b && [...b.querySelectorAll(":scope > .line.num")].find((l) => l.querySelector(".gn").textContent.trim() === "28");
-      if (!n28) return null;
-      const r = n28.getBoundingClientRect(), box = inner.getBoundingClientRect();
-      const n1 = [...b.querySelectorAll(":scope > .line.num")].find((l) => l.querySelector(".gn").textContent.trim() === "1");
-      return { gap: box.bottom - r.bottom, head: n1.getBoundingClientRect().top - box.top, inch: 72 * box.width / 612, line: r.height };
-    }).filter(Boolean);`);
-    check("…the last line an inch above the foot of the page, at the least", foot.length > 0 && foot.every((f) => f.gap >= f.inch - 1), JSON.stringify(foot));
-    // …and the numbers run the length of the page between its margins, never
-    // stopping halfway down it (the owner: "the 1-28 only went halfway down the
-    // page"), whatever the spacing of the scan's own rows.
-    check("…the numbers down the length of the page: line 1 within two inches of its top, line 28 within an inch and two lines of its foot",
-      foot.length > 0 && foot.every((f) => f.head <= 2 * f.inch + 1 && f.gap <= f.inch + 2 * f.line + 1), JSON.stringify(foot));
-    check("…every number a pitch below the last, all one pitch", pagesTops.length > 0 && pagesTops.every((t) => t.length === 28) && Math.max(...steps) - Math.min(...steps) < 0.05, steps.map((x) => x.toFixed(2)).join(" ").slice(0, 200));
-    const laid = await readPage();
+    return (js) => page.evaluate(new Function(`const secs = ${ownSecs}; ${js}`));
+  };
+  // Where each line's text stands on the page: its first character's middle
+  // and left, from the page's top left. (Not a line a drawn checkbox opens:
+  // where its box goes is the checkbox's own question, not the numbers'.)
+  const TEXT_AT = `{
+    const body = secs[0].querySelector(".page-body"), b = body.getBoundingClientRect();
+    return [...body.querySelectorAll(":scope > .line")].map((l) => {
+      if (l.querySelector(".cb")) return null;
+      const lt = l.querySelector(".lt"), w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+      for (let t = w.nextNode(); t; t = w.nextNode()) {
+        const k = t.data.search(/\\S/);
+        if (k < 0) continue;
+        const r = document.createRange(); r.setStart(t, k); r.setEnd(t, k + 1);
+        const q = r.getBoundingClientRect();
+        return { text: lt.textContent.trim().slice(0, 24), mid: (q.top + q.bottom) / 2 - b.top, left: q.left - b.left };
+      }
+      return null;
+    });
+  }`;
+  if (!TOPS_ONLY) for (const [name, lines] of [["Sample Unread Pleading", PLEAD_LINES], ["Sample Row Pleading", PLEAD_ROW_LINES], ["Sample Tight Pleading", PLEAD_ROW_LINES]]) {
+    console.log(`a numbered export beside a PDF whose numbers are not text (${name})`);
+    const bare = name.replace("Pleading", "Bare");
+    await openBeside(bare + ".txt", bare + ".pdf");
+    const before = await (await ownOf(bare))(TEXT_AT);
+    await openBeside(name + ".txt", name + ".pdf");
+    const onOwn = await ownOf(name);
+    check("…laid by its words, as the page without numbers is, its numbers drawn down the margin apart from its lines",
+      await onOwn(`return secs.length > 0 && secs.every((s) => s.querySelector(".page-body.fixed.own-margin") && s.querySelector(".page-inner > .margin-nums"));`));
+    const after = await onOwn(TEXT_AT);
+    const moved = after.map((a, k) => ({ a, b: before[k], k })).filter(({ a, b }) => !!a !== !!b || (a && (a.text !== b.text || Math.abs(a.mid - b.mid) > 1.5 || Math.abs(a.left - b.left) > 1.5)));
+    check("…every line's text exactly where it stands without the numbers: adding them moves nothing",
+      after.length === before.length && after.filter(Boolean).length > 10 && moved.length === 0,
+      moved.slice(0, 4).map(({ a, b, k }) => `${k}: ${JSON.stringify(b)} → ${JSON.stringify(a)}`).join(" | "));
+    const hidden = await onOwn(`return [...secs[0].querySelectorAll(".page-body > .line.num > .gutter")].every((g) => getComputedStyle(g).visibility === "hidden");`);
+    check("…the lines' own numbers out of sight (kept: the file writes them)", hidden);
+    // The margin: 1 to 28 at one pitch, in one column, down the length of the
+    // page between its margins.
+    const nums = await onOwn(`{
+      const inner = secs[0].querySelector(".page-inner"), box = inner.getBoundingClientRect();
+      const spans = [...inner.querySelectorAll(":scope > .margin-nums > span")].map((s) => { const r = s.getBoundingClientRect(); return { n: s.textContent, top: r.top - box.top, bottom: box.bottom - r.bottom, right: r.right - box.left, h: r.height }; });
+      return { spans, inch: 72 * box.width / 612, selectable: getComputedStyle(inner.querySelector(".margin-nums")).userSelect };
+    }`);
+    const sp = nums.spans, steps = sp.slice(1).map((x, k) => x.top - sp[k].top);
+    check("…the numbers 1 to 28, every one a pitch below the last, all one pitch",
+      sp.map((x) => x.n).join() === Array.from({ length: 28 }, (_, k) => k + 1).join() && Math.max(...steps) - Math.min(...steps) < 0.05, steps.map((x) => x.toFixed(2)).join(" ").slice(0, 200));
+    check("…down the length of the page: 1 within two inches of the top, 28 at least an inch above the foot and within an inch and two lines of it",
+      sp.length === 28 && sp[0].top <= 2 * nums.inch + 1 && sp[27].bottom >= nums.inch - 1 && sp[27].bottom <= nums.inch + 2 * sp[27].h + 1, JSON.stringify({ head: sp[0] && sp[0].top, foot: sp[27] && sp[27].bottom, inch: nums.inch }));
+    check("…in one column, left of the text, and never selected", new Set(sp.map((x) => x.right.toFixed(1))).size === 1 && sp[0].right < Math.min(...after.filter(Boolean).map((a) => a.left)) && nums.selectable === "none");
     const gaps = await letterGaps(true);
-    check("no word drawn with a gap between its letters, nor between two words the file sets a space apart — the lines the PDF splits mid-word or sets in pieces too", gaps.length === 0, gaps.slice(0, 6).join(" | "));
-    const cutIn = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body > .line > .lt > .cc")]
-      .filter((c) => /[\p{L}\p{N}]$/u.test(c.textContent) && c.nextSibling && /^[\p{L}\p{N}]/u.test(c.nextSibling.textContent || ""))
-      .map((c) => c.textContent + "|" + c.nextSibling.textContent.slice(0, 8)));
-    check("…no line cut inside a word", cutIn.length === 0, cutIn.slice(0, 6).join(" ; "));
+    check("no word drawn with a gap between its letters, nor between two words the file sets a space apart", gaps.length === 0, gaps.slice(0, 6).join(" | "));
     // A numbered page whose PDF's numbers are no text is a poor scan: every line
     // in the document's body type and the reader's own face, none of the scan's.
     const type = await onOwn(`return secs.flatMap((s) => [...s.querySelectorAll(".page-body.fixed > .line")])
@@ -599,25 +626,27 @@ try {
       .map((l) => { const lt = l.querySelector(".lt"); return [getComputedStyle(lt).fontSize, lt.style.fontFamily || "", lt.querySelectorAll("[style*='font']").length]; });`);
     check("…every line in one size, the document's, in the reader's own face — none of the scan's",
       new Set(type.map((t) => t[0])).size === 1 && type.every((t) => !t[1] && !t[2]), JSON.stringify([...new Set(type.map((t) => t.join(" ")))]).slice(0, 300));
-    // Laid by its words, each line at its PDF row's left — where the row's TEXT
-    // begins, so the margin number hangs in the margin to the left of it, not
-    // in the body with the text a margin further in.
-    const xs = await onOwn(`{
-      const body = secs[0].querySelector(".page-body.fixed");
-      const L = body.getBoundingClientRect().left, W = body.getBoundingClientRect().width;
-      return { W, lines: [...body.querySelectorAll(":scope > .line.num")].filter((l) => l.querySelector(".lt").textContent.trim() && !l.querySelector(".cb")) // a checkbox stands where the PDF draws its box, before the text
-        .map((l) => ({ n: l.querySelector(".gn").textContent.trim(), gn: l.querySelector(".gn").getBoundingClientRect().right - L, text: (() => { const lt = l.querySelector(".lt"), w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT); for (let t = w.nextNode(); t; t = w.nextNode()) { const k = t.data.search(/\\S/); if (k >= 0) { const r = document.createRange(); r.setStart(t, k); r.setEnd(t, k + 1); return r.getBoundingClientRect().left - L; } } return NaN; })() })) };
+    const file = await onOwn(`return import("/viewer/textdoc.js").then((TD) => TD.serializeNodes(secs[0].querySelector(".page-body")));`);
+    check("…and the page reads back as the file, its numbers in it", file === lines.join("\n"), JSON.stringify(file).slice(0, 160));
+  }
+  // A scan with no text at all has no row to put a line on: laid on the paper's
+  // numbers, 1 to 28 at one pitch down the length of the page.
+  if (!TOPS_ONLY) {
+    const name = "Sample Image Pleading";
+    console.log(`a numbered export beside a PDF with no text (${name})`);
+    await openBeside(name + ".txt", name + ".pdf");
+    const onOwn = await ownOf(name);
+    check("…laid as pleading paper, on the paper's numbers", await onOwn(`return secs.length > 0 && secs.every((s) => s.querySelector(".page-body.numbered.fixed") && !s.querySelector(".margin-nums"));`));
+    const numTops = (await onOwn(`return [...secs[0].querySelectorAll(".page-body > .line.num")].map((l) => parseFloat(l.style.top));`));
+    const steps = numTops.slice(1).map((t, k) => t - numTops[k]);
+    check("…every number a pitch below the last, all one pitch", numTops.length === 28 && Math.max(...steps) - Math.min(...steps) < 0.05, steps.map((x) => x.toFixed(2)).join(" ").slice(0, 200));
+    const foot = await onOwn(`{
+      const sec = secs[0], b = sec.querySelector(".page-body"), box = sec.querySelector(".page-inner").getBoundingClientRect();
+      const ns = [...b.querySelectorAll(":scope > .line.num")], r1 = ns[0].getBoundingClientRect(), r28 = ns[27].getBoundingClientRect();
+      return { head: r1.top - box.top, gap: box.bottom - r28.bottom, inch: 72 * box.width / 612, line: r28.height };
     }`);
-    // Each line's text at the margin, or set in by the file's own spaces —
-    // never by where the scan's OCR read it.
-    const margin = 72 * (xs.W / 612);
-    const offText = xs.lines.filter((l) => (Number(l.n) === INDENTED && indented ? !(l.text > margin + 10) : Math.abs(l.text - margin) > 1.5) || !(l.gn < margin));
-    check(`…each numbered line's text at the margin, ${indented ? "the paragraph the file indents set in by its spaces" : "the paragraph the scan indents and the file does not, flush"}, its number in the margin before it`,
-      xs.lines.length > 5 && xs.lines.some((l) => Number(l.n) === INDENTED) && offText.length === 0,
-      offText.slice(0, 4).map((l) => `${l.n}: number ends ${l.gn.toFixed(1)}, text at ${l.text.toFixed(1)} vs ${margin.toFixed(1)}`).join(" | "));
-    const cols = [...new Set(xs.lines.map((l) => l.gn.toFixed(1)))];
-    check("…and every margin number in one column, the indented paragraph's too", cols.length === 1, cols.join(", "));
-    check("…and the page reads back as the file", laid.file === lines.join("\n"), JSON.stringify(laid.file).slice(0, 160));
+    check("…down the length of the page: line 1 within two inches of the top, line 28 at least an inch above the foot and within an inch and two lines of it",
+      foot.head <= 2 * foot.inch + 1 && foot.gap >= foot.inch - 1 && foot.gap <= foot.inch + 2 * foot.line + 1, JSON.stringify(foot));
   }
 
   // ── typing into a page shown ⇄ Raw, on a page laid on its PDF ──────────

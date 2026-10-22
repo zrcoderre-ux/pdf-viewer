@@ -669,6 +669,28 @@ within two inches of the top and line 28 within an inch and two lines of the
 foot (before the fix: 286 px short on the single-spaced scan). That file's
 poor-scan checks now read only the open document's page out of the reel.
 
+**…drawn apart from the lines, which stay where their words put them**
+(`marginNums`, `p.margin`, `.own-margin`). The owner, next: "Generally, when
+there are no numbers, the text is placed at the correct spot. Adding the
+numbers shouldnt move the text. It should only add the number margins." Laid
+on the numbers, a poor scan's lines moved off the rows the PDF prints them on.
+A poor scan with a text layer is now laid by its words exactly as the same page
+without numbers is (`rowLayout`, the same tops and lefts; only the type is the
+document's, as above), and `scanGeom`'s grid is no longer the lines' but the
+margin's: `marginNums` draws 1 to 28 at one pitch in a `.margin-nums` column in
+`.page-inner`, outside the page body (never selected, copied, saved or
+edited), right-aligned where a numbered line's gutter puts its number, with the
+paper's rule beside them. Each line keeps its own number in the DOM, since the
+file writes it, and its gutter track, so the text does not move; `.own-margin`
+only hides it. A line that is only its number takes no room (`room`), as a
+blank line takes none on the page without numbers, or the single-spaced lines
+under it were pushed down. A scan with no text at all has no rows to lay a line
+on and is still laid on the paper's numbers (`geom.scan`). `test-form-look.mjs`
+opens each poor scan's export without numbers beside the same PDF, then with
+them, and checks every line's first character at the same place to 1.5 px, the
+lines' own numbers hidden, and the drawn column 1 to 28 at one pitch down the
+page between its margins.
+
 **…but only where the numbers run as a margin does** (`marginRuns`). The
 owner, of an exhibit's invoice: "some of the text is being pushed up off the
 page", "it seems to just be this page". Three lines opening with a number make
