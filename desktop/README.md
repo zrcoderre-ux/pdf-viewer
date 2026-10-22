@@ -13,6 +13,8 @@ reach:
   normal browser: Westlaw and Lexis+ straight away, any other link only
   after PDF+ asks. The one thing PDF+ itself fetches is a newer release,
   and only when you click **Check for updates**.
+- **File dialogs start where you left off.** Open, Save As and Open a case
+  folder start in the folder the last dialog finished in, across restarts.
 - **No browser extensions.** Nothing installed in Chrome can see the
   documents open in PDF+.
 - **No permission prompts.** Files and folders you open can be saved without

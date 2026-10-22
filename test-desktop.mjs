@@ -12,7 +12,8 @@
 // a window with unsaved changes asks; the text reader's screenshot lands in
 // Downloads; Home's update button reports up to date, then shows a newer
 // release with its notes and downloads it (from a stand-in for GitHub's
-// releases, never installed); the app's files can come from a checkout
+// releases, never installed); file dialogs start where the last one finished,
+// across restarts; the app's files can come from a checkout
 // chosen on Home (a wrong folder refused, Restart held over unsaved work,
 // the folder's files run from the next start, a pull taken up at the start
 // after, a broken folder falling back to PDF+'s own); and no page logs an
@@ -615,6 +616,41 @@ try {
     check("…and nothing restarted", await app.evaluate(() => globalThis.__restarted), 0);
   }
 
+  // ── 14b. file dialogs start where the last one finished ───────────────────
+  console.log("14b. File dialogs start where the last one finished, in every tab");
+  {
+    // The dialog itself is Windows'; it is stood in for by one that records
+    // where it was told to start and hands back a file from the browser's
+    // own private storage (a real file handle).
+    const stand = (frame) => frame.evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle("Picked Case", { create: true });
+      const file = await dir.getFileHandle("Motion.pdf", { create: true });
+      window.__asked = [];
+      window.__pdfplusPickers.open = async (opts) => { window.__asked.push(opts.startIn ? `${opts.startIn.kind} ${opts.startIn.name}` : "documents"); return [file]; };
+      window.__pdfplusPickers.directory = async (opts) => {
+        window.__asked.push(opts.startIn ? `${opts.startIn.kind} ${opts.startIn.name}` : "documents");
+        if (window.__failStart && opts.startIn) { window.__failStart = false; throw new DOMException("gone", "NotFoundError"); }
+        return dir;
+      };
+    });
+    await stand(win);
+    await win.evaluate(async () => { await window.showOpenFilePicker({ types: [] }); await window.showOpenFilePicker({ types: [] }); });
+    check("the second Open starts where the first finished", await win.evaluate(() => window.__asked), ["documents", "file Motion.pdf"]);
+    const viewerTab = win.frames().find((f) => /\/viewer\/viewer\.html$/.test(f.url()));
+    await stand(viewerTab);
+    await viewerTab.evaluate(async () => { await window.showOpenFilePicker({}); });
+    check("…and so does one in a tab", await viewerTab.evaluate(() => window.__asked), ["file Motion.pdf"]);
+    await viewerTab.evaluate(async () => {
+      await window.showOpenFilePicker({ startIn: { kind: "file", name: "Exhibit B.pdf", __pdfplusPath: "C:\\Case\\Exhibit B.pdf" } });
+    });
+    check("a file Windows opened as the start: the last folder instead", (await viewerTab.evaluate(() => window.__asked)).slice(-1), ["file Motion.pdf"]);
+    await win.evaluate(async () => { window.__failStart = true; await window.showDirectoryPicker(); });
+    check("a start that is gone: asked again without it", (await win.evaluate(() => window.__asked)).slice(-2), ["file Motion.pdf", "documents"]);
+    await win.evaluate(async () => { await window.showOpenFilePicker({}); });
+    check("a folder picked: the next dialog starts in it", (await win.evaluate(() => window.__asked)).slice(-1), ["directory Picked Case"]);
+  }
+
   check("no page errors", log.errors, []);
   check("no Content-Security-Policy refusals", log.csp, []);
 
@@ -664,6 +700,12 @@ try {
     await app.close();
     w = await start();
     check("after a pull and a restart: the pulled files", await marker(w), "folder-2");
+    check("…and the file dialog still starts where the last one finished", await w.evaluate(async () => {
+      let started = "";
+      window.__pdfplusPickers.open = async (opts) => { started = opts.startIn ? `${opts.startIn.kind} ${opts.startIn.name}` : "documents"; return []; };
+      await window.showOpenFilePicker({});
+      return started;
+    }), "file Motion.pdf");
     check("…and the new commit shown", (await note(w)).where, `${checkout} (main @ 1234567)`);
 
     // The folder broken (a file the app needs gone): PDF+ runs its own.

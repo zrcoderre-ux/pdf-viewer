@@ -130,6 +130,21 @@ Files opened through the app's own pickers, Save As and case folders are
 Chromium's real File System Access handles, as in the PWA, and need none of
 this; the `fileSystem` permission handler answers their prompts yes.
 
+## File dialogs start where the last one finished
+
+Chrome opens a site's file dialogs where its last one finished; Electron
+does not remember (every dialog started in Documents, which OneDrive often
+holds). The shim wraps `showOpenFilePicker`, `showSaveFilePicker` and
+`showDirectoryPicker` in every frame: unless the page gave its own
+`startIn`, the dialog gets the handle the last dialog returned, kept in the
+`pdfplus-pickers` IndexedDB store (shared by the shell and every tab, kept
+across restarts, one per dialog `id`). A `PathFileHandle` given as
+`startIn` is dropped for the last handle (Chromium refuses a handle it did
+not make), and a start that fails (the folder gone) is asked again without
+it. The real pickers sit in `window.__pdfplusPickers`, where the test puts a
+stand-in dialog; that the real Windows dialog honours `startIn` is
+Chromium's, and is not tested here.
+
 ## Windows and closing
 
 New window and a tab pulled out of the strip use `window.open` with the
@@ -196,7 +211,8 @@ bridge refusing a file it was not given; no network; links; a handle sent by
 CSP; the reader's screenshot in Downloads (and a camera still refused); the
 update button against a local stand-in for the releases (up to date, then a
 newer release shown with its notes and downloaded, never installed); the
-unsaved-changes question on close; and app files from a copy of the
+unsaved-changes question on close; file dialogs starting where the last one
+finished, in every tab and after a restart; and app files from a copy of the
 repository (a wrong folder refused, Restart held over unsaved work, the
 folder's files run from the next start, nothing outside its app folders
 served, a pull taken up at the start after, a broken folder falling back). CI
