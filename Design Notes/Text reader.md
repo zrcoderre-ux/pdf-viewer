@@ -2939,3 +2939,35 @@ swap. A matcher compiled without `spare` (`PK.compile(key)`) still reverses
 everything, which is what the folder-save parity test used until it was
 pointed at `compileDisplay`. Tests in `test-textdoc.mjs` ("cited names on the
 way back"). The Claude extension does the same on claude.ai.
+
+**▶ Re-run PDF-Linker** (`rerunLinker`, `folderLauncher`, `openLink`,
+`saveAllForRun`, `closeForRun`, `letGoOfFolder`; `textdoc.launcherFolderToken`,
+`rerunUrl`, `runRequestText`, `RUN_REQUEST_FILE`; owner's request, 2026-10-22).
+A page can neither start a program nor learn the path of the folder it was
+handed, so PDF-Linker does both halves: each launcher it writes records its
+folder on a comment line (`Folder, for the text reader's Re-run button:
+<base64url path>`, `_launcher_folder_line`), and `Register Reader Button.bat`
+(PDF-Linker's `--register-reader-button`, a one-time setup at the owner's
+direction: no run writes the registry) registers the `pdf-linker:` link for
+the Windows user. The click opens `pdf-linker://run?f=<token>&d=<folder
+name>&n=<nonce>` FIRST, because Chrome starts an outside program only on a
+click and the save can outlast the click's activation by minutes; the link is
+an anchor clicked with the beforeunload guard held off (`openingLink`), since
+an unsaved document would otherwise put "Leave site?" in front of it. A
+folder permission prompt answered at the click spends the activation, so the
+button then asks to be pressed again (`navigator.userActivation`). PDF-Linker
+(`_serve_reader_request`) waits up to 15 minutes for `PDF-Linker Run
+Request.json` in the folder with the same nonce: "go" once `saveAllForRun`
+has written everything (`saveDocument`, then `__pdfViewerSave` in each PDF
+mode frame with unsaved changes, then `hasUnsaved()` must be false), "cancel"
+otherwise, so a run never starts on a folder half saved. The nonce is also
+the authority: any page can open the link, only one holding the folder can
+answer it. PDF-Linker deletes the file as it starts the launcher, which is
+the reader's sign the run began; only then is the folder closed: the app's
+tab by a `textreader:close` message to the shell (which toasts what is
+running), the extension's tab by `chrome.tabs.remove`, else the folder let
+go of without being forgotten. Not taken within `RERUN_PICKUP_MS` (90 s), the
+reader takes the file back and leaves the folder open. A launcher from an
+older PDF-Linker records no folder, and the button says to double-click it
+once. Tests: `test-textdoc.mjs` ("launcher folder token", "rerun link"), and
+PDF-Linker's `tests/test_reader_rerun_button.py`.

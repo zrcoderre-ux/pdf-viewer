@@ -695,6 +695,17 @@ window.addEventListener("message", async (e) => {
   }
 });
 
+// A text reader whose Re-run PDF-Linker has started the run closes its tab:
+// the run rewrites the folder's files under it (text-reader.js, rerunLinker).
+// Everything was saved first, so closeTab asks nothing.
+window.addEventListener("message", (e) => {
+  if (e.origin !== location.origin || !e.data || e.data.type !== "textreader:close") return;
+  const tab = tabs.find((t) => t.text && t.iframe.contentWindow === e.source);
+  if (!tab) return;
+  closeTab(tab.id);
+  if (typeof e.data.text === "string") shellToast(e.data.text, 10000);
+});
+
 // This window was opened to take documents from another one.
 const arrival = new URLSearchParams(location.search).get(WINDOW_PARAM);
 if (arrival) {
