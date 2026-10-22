@@ -909,6 +909,7 @@ body.thumbs-open #thumb-resize { display: block; }
 .fb-sep { width: 1px; height: 20px; background: var(--c-border-strong); }
 .fb-field { display: inline-flex; align-items: center; gap: 7px; color: var(--c-text-2); font-size: 12px; white-space: nowrap; }
 .fb-field input[type="range"] { width: 86px; }
+.fb-field output { min-width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
 .fb-group { display: inline-flex; align-items: center; gap: 4px; }
 .fb-group b, .fb-group em { font-size: 14px; line-height: 1; }
 .fb-group em { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-weight: 600; }

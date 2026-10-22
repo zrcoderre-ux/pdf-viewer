@@ -63,7 +63,7 @@ const TYPE_PROPS = {
   textedit: ["style", "color", "fontSize", "font"],
 };
 const DEFAULTS = {
-  highlight: { color: "#ffd400", opacity: 1 },
+  highlight: { color: "#ffd400", opacity: 0.2 },
   underline: { color: "#2563eb" },
   strikeout: { color: "#e11d48" },
   note: { color: "#ffd400" },
@@ -1688,7 +1688,7 @@ function barEls() {
   bar = {
     root: $("annot-bar"), label: $("annot-bar-label"), colors: $("annot-colors"),
     width: $("annot-width"), widthWrap: $("annot-width-wrap"),
-    opacity: $("annot-opacity"), opacityWrap: $("annot-opacity-wrap"),
+    opacity: $("annot-opacity"), opacityWrap: $("annot-opacity-wrap"), opacityVal: $("annot-opacity-val"),
     size: $("annot-fontsize"), sizeWrap: $("annot-size-wrap"),
     font: $("annot-font"), fontWrap: $("annot-font-wrap"),
     fill: $("annot-fill"), fillWrap: $("annot-fill-wrap"),
@@ -1718,7 +1718,7 @@ function barEls() {
   custom.appendChild(ci);
   bar.colors.appendChild(custom);
   bar.width.addEventListener("input", () => applyProp("width", bar.width.value));
-  bar.opacity.addEventListener("input", () => applyProp("opacity", bar.opacity.value));
+  bar.opacity.addEventListener("input", () => { applyProp("opacity", bar.opacity.value); showOpacity(); });
   bar.size.addEventListener("change", () => applyProp("fontSize", bar.size.value));
   bar.font.addEventListener("change", () => applyProp("font", bar.font.value));
   bar.fill.addEventListener("change", () => applyProp("fill", bar.fill.checked));
@@ -1739,6 +1739,12 @@ function barEls() {
   bar.done.addEventListener("click", () => { finishEditing(); setTool(null); select(null); });
   bar.root.addEventListener("pointerdown", (e) => e.stopPropagation());
   return bar;
+}
+
+// The slider's value as a percent beside it, so a drag shows where it is.
+function showOpacity() {
+  const b = barEls();
+  if (b.opacityVal) b.opacityVal.textContent = `${b.opacity.value}%`;
 }
 
 function syncBar() {
@@ -1796,6 +1802,7 @@ function syncBar() {
   for (const sw of b.colors.querySelectorAll(".swatch[data-color]")) sw.setAttribute("aria-checked", String(sw.dataset.color.toLowerCase() === String(color).toLowerCase()));
   b.width.value = String(width);
   b.opacity.value = String(opacity);
+  showOpacity();
   if (![...b.size.options].some((o) => o.value === String(size))) {
     const o = document.createElement("option"); o.textContent = String(size); b.size.appendChild(o);
   }
