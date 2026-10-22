@@ -268,6 +268,42 @@ async function run() {
       check("no page errors", r.log.errors, []);
       await r.close();
     }
+    // The PDF's text carries only some of its margin: an OCR that read 1 to 23
+    // and lost the rest at the foot. The paper still runs to 28 (the owner: "I
+    // had one only generate 1-23").
+    console.log("3. with a PDF whose text carries only 1-23 of its margin: still 1-28");
+    {
+      const r = await newReader();
+      const p = r.page;
+      await p.evaluate(async () => {
+        const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+        const pdf = await PDFDocument.create();
+        const font = await pdf.embedFont(StandardFonts.TimesRoman);
+        const at = (n) => 792 - (100 + (n - 1) * 24);
+        for (const page of [[["Alpha", 1], ["Beta", 3], ["Gamma", 3.5], ["Delta", 6]], [["Already numbered", 1], ["on pleading paper", 2], ["as exported", 3]]]) {
+          const pg = pdf.addPage([612, 792]);
+          for (let n = 1; n <= 23; n++) pg.drawText(String(n), { x: 46 - font.widthOfTextAtSize(String(n), 12), y: at(n), size: 12, font });
+          for (const [t, n] of page) pg.drawText(t, { x: 72, y: at(n), size: 12, font });
+        }
+        const f = new File([await pdf.save()], "A Decl.pdf", { type: "application/pdf" });
+        await window.__textReaderPickPdfs([f]);
+      });
+      const sbs = await p.$("#sbs-toggle");
+      if (!(await sbs.evaluate((b) => document.body.classList.contains("sbs") || b.getAttribute("aria-pressed") === "true"))) await sbs.click();
+      await p.waitForFunction(() => !!document.querySelector("#pages .tpage.matched"), null, { timeout: 15000 });
+      await p.waitForTimeout(1500);
+      await press(p, 0);
+      await p.waitForTimeout(800);
+      check("each line on its number, and the numbers on to 28", await lines(p, 0),
+        [" 1  Alpha", " 2", " 3  Beta", "    Gamma", " 4", " 5", " 6  Delta"].concat(bare(7, 28)));
+      // …and laid on the paper's grid all the way down: 24 to 28 a pitch apart
+      // under 23, as the PDF's own numbers are above it.
+      const tops = await p.evaluate(() => [...document.querySelector("#pages .tpage .page-body").querySelectorAll(":scope > .line.num")].map((l) => parseFloat(l.style.top)));
+      const steps = tops.slice(1).map((t, k) => t - tops[k]);
+      truthy(`…every number laid a pitch below the last, 24 to 28 too (${steps.map((x) => x.toFixed(1)).join(" ")})`, tops.length === 28 && Math.max(...steps) - Math.min(...steps) < 0.05);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
   } finally {
     await browser.close();
     srv.stop();

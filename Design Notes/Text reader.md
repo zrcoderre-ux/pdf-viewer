@@ -2137,6 +2137,17 @@ the line already carries it with one space (`restoreMarginNumbers`,
 missing indent set, a one-space number, and an indent taken out by hand in
 ⇄ Raw staying out).
 
+**# Number lines to 28 whatever the PDF's text carries** (`paperLast`). The
+owner: "I had one only generate 1-23". With the PDF beside the page,
+`numberPage` numbered to the last number the PDF's text layer carries
+(`geom.last`), and an OCR that read the margin down to 23 and lost the rest at
+the foot gave 23 lines; the layout then dropped any number past it. Both now
+take `paperLast`: the highest number the PDF carries, and never fewer than 28
+(`TD.MARGIN_LAST`) where line 28 still stands on the page at the PDF's own
+pitch, as the ✓ Use my text layout (`autoLayPage`) already did.
+`test-number-lines.mjs` section 3 numbers a page beside a PDF whose text has
+only 1 to 23 and checks 1 to 28, each a pitch below the last.
+
 **# Number lines on a poor scan** (`numberPage`, `TD.pageNumbersComplete`).
 The owner: "I have a page where Number Lines is not available" and "number
 lines should always create the lines in a single straight margin". The

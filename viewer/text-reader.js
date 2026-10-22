@@ -10852,6 +10852,20 @@ $("fb-with").addEventListener("keydown", (e) => {
  * the text go, the Authorities cited trailer stays after it, and the whole
  * of it is one undo step.
  */
+/**
+ * The last number a page of pleading paper runs to: the highest its PDF's
+ * margin carries, and never fewer than the paper's 28 (TD.MARGIN_LAST). An
+ * OCR that read the margin down to 23 and lost the rest at the foot of the
+ * scan is not paper of 23 lines — the owner: "I had one only generate 1-23".
+ * A number the PDF does not carry is laid only where it still stands on the
+ * page at the PDF's own pitch.
+ */
+function paperLast(geom, sz) {
+  const read = Math.max(1, Math.min(geom.last || TD.MARGIN_LAST, 40));
+  if (read >= TD.MARGIN_LAST || geom.scan) return read;
+  const fits = sz && sz.h > 0 && geom.pitch > 0 ? Math.floor((sz.h - geom.y1) / geom.pitch) : TD.MARGIN_LAST;
+  return Math.max(read, Math.min(TD.MARGIN_LAST, fits));
+}
 function numberPage(i) {
   if (!doc) return;
   const p = doc.pages[i];
@@ -10888,7 +10902,7 @@ function numberPage(i) {
   const rows = info && info.rows ? info.rows[t.page - 1] : null;
   const lay = geom && rows && rows.length ? PS.rowLayout(texts, rows) : null;
   if (lay) {
-    const last = Math.max(1, Math.min(geom.last || 28, 40));
+    const last = paperLast(geom, info.sizes[t.page - 1]);
     const at = (n) => PS.lineTop(geom, n);
     // Each text line's slot: a number, or before line 1 / after the last.
     let floor = 0;
@@ -20503,7 +20517,7 @@ function applyMatchedLayoutNow() {
       // …and none past the last number the PDF's own margin carries: an 88
       // where 28 was printed is a line the grid would put off the paper.
       let nums = lines.map((l) => (l.classList.contains("num") ? parseInt(l.querySelector(".gn").textContent, 10) : null))
-        .map((n) => (n > 0 && n <= geom.last ? n : null));
+        .map((n) => (n > 0 && n <= paperLast(geom, sz) ? n : null));
       const inOrder = TD.numberChain(nums);
       nums = nums.map((n, k) => (inOrder[k] && n > 0 ? n : null));
       fixed = nums.map((n) => n != null);
