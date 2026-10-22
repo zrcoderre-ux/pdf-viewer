@@ -164,7 +164,18 @@ try {
   let viewer = await activeFrame(win);
   truthy("…in the viewer", /\/viewer\/viewer\.html$/.test(viewer.url()));
   truthy("…served from inside the app", viewer.url().startsWith("pdfplus://app/"));
-  truthy("…and drawn", await until(() => viewer.evaluate(() => window.__pdfViewerPageCount?.() === 1 && !!document.querySelector(".page-wrapper canvas") && document.querySelector(".page-wrapper canvas").width > 0)));
+  const drawn = await until(() => viewer.evaluate(() => window.__pdfViewerPageCount?.() === 1 && [...document.querySelectorAll("#pages canvas")].some((c) => c.width > 0)), 30000);
+  truthy("…and drawn", drawn);
+  if (!drawn) {
+    // What the viewer saw, for a failure on a CI runner that does not happen here.
+    console.log("        state: " + JSON.stringify(await viewer.evaluate(() => ({
+      pages: window.__pdfViewerPageCount?.(), canvases: [...document.querySelectorAll("#pages canvas")].map((c) => c.width),
+      visibility: document.visibilityState, focus: document.hasFocus(), inner: [innerWidth, innerHeight], scrollY,
+    }))) + " window: " + JSON.stringify(await app.evaluate(({ BrowserWindow }) => {
+      const w = BrowserWindow.getAllWindows()[0];
+      return { visible: w.isVisible(), focused: w.isFocused(), minimized: w.isMinimized(), bounds: w.getBounds() };
+    })));
+  }
   truthy("the window wears the document's name", await until(async () => /— PDF\+$/.test(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getTitle()))));
 
   // ── 2. edit and save in place ─────────────────────────────────────────────
