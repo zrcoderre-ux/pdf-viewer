@@ -128,10 +128,18 @@ so no API and no tag parsing; the catch is that every release in the
 repository is taken for a PDF+ release. `latest.yml` names the installer
 and its SHA-512, which electron-updater checks after the download; the
 installer is not signed (`publisherName` unset), so no signature check is
-made. `release-desktop.yml` publishes the release from a `pdfplus-v<version>`
-tag through `build-desktop.yml` (`release: true`), whose release notes
-(`build/release-notes.md`, the commit subjects since the last tag) are what
-the button shows.
+made.
+
+Releases are automatic: `release-desktop.yml` runs on every push to `main`
+that touches the app. Its `version` job takes `desktop/package.json`'s
+version where that is newer than the last `pdfplus-v*` tag, else the last
+tag's with the patch one up; `build-desktop.yml`, called with that
+`version`, stamps it on the build (`npm version`, not committed) and writes
+the release notes (`build/release-notes.md`, the commit subjects since the
+last tag), which are what the button shows; `publish` creates the tag on the
+merged commit with the release. One run at a time (`concurrency`), so two
+merges never compute the same version. `build-desktop.yml` no longer runs
+by itself on `main`, which would build the same commit twice.
 
 The installer's file name has no spaces or `+`
 (`PDFPlus-Setup-<version>.exe`): GitHub renames such release assets, and

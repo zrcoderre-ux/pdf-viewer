@@ -1,29 +1,79 @@
 name: Release PDF+
 
-# Publishes a PDF+ release when a tag pdfplus-v<version> is pushed (the
-# version in desktop/package.json): build-desktop.yml tests and builds it,
-# with release notes from the commits since the last release, and this job
-# puts the installer, its blockmap and latest.yml on a GitHub release of that
-# tag, marked latest. PDF+'s Check for updates reads latest.yml through
-# GitHub's releases/latest link, so the newest release here is the update
-# every installed PDF+ is offered. Nothing else in this repository should be
-# published as a release.
+# Every change merged into main that touches the app (desktop/, the PWA's
+# shell, the viewer, PDF.js) is released as a new PDF+ version, by itself:
+#
+#   version   the next version: desktop/package.json's when that is newer
+#             than the last release (raise it there for a new minor or major
+#             version), else the last release's with the patch number one up
+#   build     build-desktop.yml, called with that version: the tests on Linux
+#             and Windows, then the installer, stamped with the version, with
+#             release notes from the commits since the last release
+#   publish   a GitHub release tagged pdfplus-v<version> on the merged commit,
+#             marked latest, with the installer, its blockmap and latest.yml
+#
+# PDF+'s Check for updates reads latest.yml through GitHub's releases/latest
+# link, so the newest release here is the update every installed PDF+ is
+# offered; nothing installs until someone clicks it. Nothing else in this
+# repository should be published as a release. Runs are one at a time: a
+# merge that lands while one is building waits, and of several waiting only
+# the newest runs (its notes cover the others' commits).
 
 on:
   push:
-    tags: ["pdfplus-v*"]
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "pwa/**"
+      - "viewer/**"
+      - "pdfjs/**"
+      - "citation-site-rules.js"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
 jobs:
+  version:
+    # Releases come from main only, whatever branch a manual run is started on.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The next version
+        id: next
+        run: |
+          version="$(node -e '
+            const base = require("./desktop/package.json").version;
+            const tags = require("child_process").execSync("git tag --list \"pdfplus-v*\"").toString().split("\n").filter(Boolean);
+            const parse = (v) => v.split(".").map(Number);
+            const cmp = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i]; return 0; };
+            const ok = (v) => /^\d+\.\d+\.\d+$/.test(v);
+            const last = tags.map((t) => t.slice("pdfplus-v".length)).filter(ok).map(parse).sort(cmp).pop();
+            const b = parse(base);
+            if (!last || cmp(b, last) > 0) console.log(base);
+            else console.log([last[0], last[1], last[2] + 1].join("."));
+          ')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "PDF+ $version"
+
   build:
+    needs: version
     uses: ./.github/workflows/build-desktop.yml
     with:
-      release: true
+      version: ${{ needs.version.outputs.version }}
 
   publish:
-    needs: build
+    needs: [version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -36,16 +86,15 @@ jobs:
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          version="${TAG#pdfplus-v}"
           {
-            echo "Download **PDFPlus-Setup-${version}.exe** below and run it, or click **Check for updates** on PDF+'s Home page."
+            echo "Download **PDFPlus-Setup-${VERSION}.exe** below and run it, or click **Check for updates** on PDF+'s Home page."
             echo
             echo "## What changed"
             echo
             cat out/release-notes.md
           } > notes.md
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
-            --title "PDF+ ${version}" --notes-file notes.md \
+          gh release create "pdfplus-v${VERSION}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest \
+            --title "PDF+ ${VERSION}" --notes-file notes.md \
             out/*.exe out/*.blockmap out/latest.yml
