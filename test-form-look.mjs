@@ -284,8 +284,15 @@ try {
     await put(text, "Sample Unread Bare.txt", bare(PLEAD_TEXT));
     await put(text, "Sample Row Bare.txt", bare(PLEAD_ROW_TEXT));
     await put(text, "Sample Tight Bare.txt", bare(PLEAD_ROW_TEXT));
+    // …and a numbered export whose words the scan's text does not carry at all
+    // (no line of it matched to a row), with a half line under every other
+    // number: more lines than the paper holds at the reader's leading.
+    const stranger = [];
+    for (let n = 1; n <= 28; n++) { stranger.push(String(n).padStart(2) + "  Quorvant zephyl item " + n); if (n % 2) stranger.push("    continued quibbet " + n); }
+    await put(text, "Sample Stranger Pleading.txt", "====== Page 1 ======\n" + stranger.join("\n") + "\n");
+    await put(dir, "Sample Stranger Pleading.pdf", rowBytes);
     await window.__textReaderAdoptFolder(dir);
-    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes, "Sample Row Pleading.pdf": rowBytes, "Sample Tight Pleading.pdf": tightBytes, "Sample Image Pleading.pdf": imageBytes, "Sample Unread Bare.pdf": unreadBytes, "Sample Row Bare.pdf": rowBytes, "Sample Tight Bare.pdf": tightBytes };
+    window.__formLookPdfs = { "Sample Form.pdf": formBytes, "Sample Pleading.pdf": pleadBytes, "Sample Unread Pleading.pdf": unreadBytes, "Sample Row Pleading.pdf": rowBytes, "Sample Tight Pleading.pdf": tightBytes, "Sample Image Pleading.pdf": imageBytes, "Sample Unread Bare.pdf": unreadBytes, "Sample Row Bare.pdf": rowBytes, "Sample Tight Bare.pdf": tightBytes, "Sample Stranger Pleading.pdf": rowBytes };
     return { placed };
   }, { FORM, STAMP, PLEAD_BODY, PLEAD_PLAIN, PLEAD_FACES, FORM_TEXT, PLEAD_TEXT, PLEAD_ROW_TEXT, SPLIT_AT, INDENTED, JUSTIFIED, CAPTION });
 
@@ -628,6 +635,32 @@ try {
       new Set(type.map((t) => t[0])).size === 1 && type.every((t) => !t[1] && !t[2]), JSON.stringify([...new Set(type.map((t) => t.join(" ")))]).slice(0, 300));
     const file = await onOwn(`return import("/viewer/textdoc.js").then((TD) => TD.serializeNodes(secs[0].querySelector(".page-body")));`);
     check("…and the page reads back as the file, its numbers in it", file === lines.join("\n"), JSON.stringify(file).slice(0, 160));
+  }
+  // A poor scan whose text no line of the export matches has no row to put a
+  // line on either: on the paper's numbers, every one of 1 to 28 on the page.
+  // (Flowing at the reader's leading inside a sheet the PDF page's size, the
+  // numbers past 23 or so were cut off at its foot: the owner, "I had one only
+  // generate 1-23".)
+  if (!TOPS_ONLY) {
+    const name = "Sample Stranger Pleading";
+    console.log(`a numbered export none of whose lines the scan's text carries (${name})`);
+    await page.evaluate((n) => window.__textReaderOpenDoc(n), name + ".txt");
+    await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
+    await page.evaluate(async (pdfName) => {
+      const f = new File([window.__formLookPdfs[pdfName]], pdfName, { type: "application/pdf" });
+      await window.__textReaderPickPdfs([f]);
+    }, name + ".pdf");
+    const onOwn = await ownOf(name);
+    await page.waitForFunction(new Function(`return [...document.querySelectorAll("#pages .tpage.matched")].some((s) => s.querySelector(".page-label") && window.__textReaderReel().members.some((m) => m.name === ${JSON.stringify(name + ".txt")} && +s.dataset.index === m.from));`), null, { timeout: 15000 });
+    await page.waitForTimeout(1500);
+    const seen = await onOwn(`{
+      const sec = secs[0], box = sec.querySelector(".page-inner").getBoundingClientRect();
+      const drawn = [...sec.querySelectorAll(".page-inner > .margin-nums > span")];
+      const gns = drawn.length ? drawn : [...sec.querySelectorAll(".page-body > .line.num .gn")].filter((g) => getComputedStyle(g.parentElement).visibility !== "hidden");
+      return gns.map((g) => { const r = g.getBoundingClientRect(); return { n: g.textContent.trim(), in: r.height > 0 && r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5, top: Math.round(r.top - box.top), h: Math.round(box.height) }; });
+    }`);
+    check("…every number 1 to 28 shown on the page, none cut off at its foot",
+      seen.length === 28 && seen.every((x, k) => x.in && x.n === String(k + 1)), JSON.stringify(seen.filter((x) => !x.in).slice(0, 4)) + " of " + seen.length);
   }
   // A scan with no text at all has no row to put a line on: laid on the paper's
   // numbers, 1 to 28 at one pitch down the length of the page.

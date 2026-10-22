@@ -20476,17 +20476,21 @@ function applyMatchedLayoutNow() {
     // top and bottom") — 1 to 28 at one pitch, in one column, in the
     // document's type (the owner, earlier: "The added numbers from number
     // lines are not uniformly spaced with the half spaces baked in").
-    // A scan with no text at all (`rows` read, and empty) has no row to put a
-    // line on, and is laid on the paper's numbers.
+    // A scan with no row to put a line on — no text at all, its text not read
+    // yet, or none of the page's lines found in it — is laid on the paper's
+    // numbers: flowing at the reader's leading in a sheet the PDF page's size,
+    // a caption page's lines ran past its foot and every number after 23 was
+    // cut off there (the owner: "I had one only generate 1-23", "I had it on
+    // the caption page").
     // …BUT ONLY WHERE THE NUMBERS RUN AS A MARGIN DOES (marginRuns). Three
     // lines opening with a number make a page `numbered`, and an exhibit's
     // invoice has them: a "1" and an "8" of its quantities, a "25" of its days.
     // Laid as pleading paper, its "1" stood at line 1 an inch down the page and
     // the forty lines the file has above it were crowded over the page's top.
     // The owner: "some of the text is being pushed up off the page".
-    if (!geom && body.classList.contains("numbered") && rows && marginRuns(lines)) {
-      const g = scanGeom(lines, rows, sz || { w: 612, h: 792 }, bodyX);
-      if (rows.length) margin = g;
+    if (!geom && body.classList.contains("numbered") && marginRuns(lines)) {
+      const g = scanGeom(lines, rows || [], sz || { w: 612, h: 792 }, bodyX);
+      if (g.matched) margin = g;
       else { geom = g; numbered = true; }
       // (A scan with no text has no margin of its own read: the paper's inch.)
       if (!(bodyX > 0)) bodyX = g.bodyX;
@@ -21875,6 +21879,7 @@ function scanGeom(lines, rows, sz, bodyX) {
     y1,
     pitch: fit ? Math.min(fit.pitch, room) : room,
     first: 1, last: TD.MARGIN_LAST, bodyX: x, numberRight: x - 12, scan: true,
+    matched: !!lay, // whether any line's words were found on the scan's rows
   };
 }
 // The least of the paper's own pitch a scan's fitted pitch may be and still be
