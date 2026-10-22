@@ -294,6 +294,10 @@
       .pdfplus-about .pa-get { border: 1px solid var(--c-accent-strong); background: var(--c-accent-strong); color: #fff; border-radius: 8px; padding: 7px 14px; font: inherit; font-weight: 600; cursor: pointer; }
       .pdfplus-about .pa-get:disabled { opacity: 0.6; cursor: default; }
       .pdfplus-about .pa-hint { margin-top: 8px; color: var(--c-text-3); }
+      .pdfplus-about .pa-source { margin-top: 10px; }
+      .pdfplus-about .pa-src-where { color: var(--c-text-2); overflow-wrap: anywhere; }
+      .pdfplus-about .pa-src-note { margin-top: 6px; color: var(--c-text-2); }
+      .pdfplus-about .pa-src-note.warn { color: #e5484d; }
     `;
     document.head.appendChild(style);
 
@@ -310,6 +314,16 @@
         <pre class="pa-notes"></pre>
         <button type="button" class="pa-get">Download and install</button>
         <div class="pa-hint" hidden></div>
+      </div>
+      <div class="pa-source">
+        <div class="pa-row">
+          <span>App files:</span>
+          <span class="pa-src-where">…</span>
+          <button type="button" class="link-btn pa-src-choose" title="Run the tools and the reader from your own copy of the pdf-viewer repository: after a git pull, Restart PDF+ and it runs what you pulled. Nothing is downloaded.">Use a folder…</button>
+          <button type="button" class="link-btn pa-src-builtin" hidden>Use PDF+'s own</button>
+          <button type="button" class="link-btn pa-src-restart" hidden title="Close PDF+ and open it again, with the app files as set here (a git pull included)">Restart PDF+</button>
+        </div>
+        <div class="pa-src-note" hidden></div>
       </div>`;
     const more = home.querySelector(".home-more");
     if (more) home.insertBefore(box, more); else home.appendChild(box);
@@ -317,6 +331,7 @@
     const $ = (sel) => box.querySelector(sel);
     const status = (t) => { $(".pa-status").textContent = t; };
     n.version().then((v) => { if (v) $(".pa-version").textContent = `PDF+ ${v}`; }).catch(() => {});
+    if (n.source) appFilesOnHome($);
 
     let stage = "idle"; // idle → checking → available → downloading → ready
     $(".pa-check").addEventListener("click", async () => {
@@ -376,6 +391,61 @@
       $(".pa-get").textContent = "Restart and install";
       $(".pa-hint").hidden = false;
       $(".pa-hint").textContent = "PDF+ closes, installs the update and opens again. A document with unsaved changes is asked about first; if you keep PDF+ open, the update installs the next time it closes.";
+    });
+  }
+
+  // ---- app files, on Home -----------------------------------------------------
+  //
+  // Where the tools and the reader come from: PDF+'s own copy, or a folder
+  // holding the user's checkout of the repository (main.js, "Where the app's
+  // files come from"), chosen through a folder dialog in the main process.
+  // The choice takes effect on Restart PDF+, which is also how a git pull is
+  // taken up; Restart refuses while a document has unsaved changes.
+  function appFilesOnHome($) {
+    const n = native();
+    const newer = (a, b) => {
+      const pa = String(a).split(".").map(Number), pb = String(b).split(".").map(Number);
+      for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0);
+      return false;
+    };
+    const note = (text, warn) => {
+      const el = $(".pa-src-note");
+      el.hidden = !text;
+      el.textContent = text || "";
+      el.classList.toggle("warn", !!warn);
+    };
+    const show = (info, said) => {
+      if (!info) return;
+      const folder = info.chosen || "";
+      const head = info.git && info.git.commit ? ` (${info.git.branch ? info.git.branch + " @ " : ""}${info.git.commit})` : "";
+      $(".pa-src-where").textContent = folder ? folder + head : "built into PDF+";
+      $(".pa-src-choose").textContent = folder ? "Change folder…" : "Use a folder…";
+      $(".pa-src-builtin").hidden = !folder;
+      $(".pa-src-restart").hidden = !(folder || info.restartNeeded);
+      if (said) { note(said.text, said.warn); return; }
+      if (info.problem) { note(`${folder} cannot be used: ${info.problem}. PDF+ is running its own files.`, true); return; }
+      if (info.restartNeeded) { note("Restart PDF+ to start using " + (folder ? "this folder." : "its own files."), false); return; }
+      if (info.folder && info.folderVersion && newer(info.folderVersion, info.appVersion)) {
+        note(`This folder has PDF+ ${info.folderVersion}, newer than the ${info.appVersion} installed: its window, file access or engine changed, and that part comes only from an update (Check for updates).`, false);
+        return;
+      }
+      note(info.folder ? "After a git pull, Restart PDF+ to run what you pulled." : "", false);
+    };
+    const refresh = (said) => n.source().then((info) => show(info, said)).catch(() => {});
+    refresh();
+    // Back to Home after a pull: the commit shown is read afresh.
+    document.getElementById("home-tab")?.addEventListener("click", () => refresh());
+
+    $(".pa-src-choose").addEventListener("click", async () => {
+      const info = await n.chooseSourceFolder();
+      if (!info) return;
+      show(info, info.refused ? { text: info.refused, warn: true } : null);
+    });
+    $(".pa-src-builtin").addEventListener("click", async () => show(await n.useBuiltInSource()));
+    $(".pa-src-restart").addEventListener("click", async () => {
+      const r = await n.restart();
+      if (r && r.ok) return;
+      if (r && r.why === "unsaved") refresh({ text: "A document has unsaved changes: save it (or close it) first, then Restart PDF+.", warn: true });
     });
   }
 })();
