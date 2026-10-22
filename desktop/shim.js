@@ -226,6 +226,66 @@
     window.open(u.href, "_blank", "noopener");
   });
 
+  // ---- file dialogs: start where the last one finished ----------------------
+  //
+  // Chrome opens a site's file dialogs where its last one finished; Electron
+  // does not remember, so every Open and Save started in Documents. So each
+  // dialog here is given `startIn` (the handle the last dialog returned, kept
+  // in IndexedDB across restarts, one per dialog `id`), unless the page gave
+  // its own. A PathFileHandle as `startIn` (a file Windows opened) is not a
+  // handle Chromium knows and would be refused, so the last one stands in.
+  // A folder since moved or deleted: the dialog is asked again without it.
+  // The pickers are called through window.__pdfplusPickers so a test can
+  // stand in for the dialog itself.
+  const PICK_DB = "pdfplus-pickers";
+  const pickDb = () => new Promise((resolve, reject) => {
+    const req = indexedDB.open(PICK_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("last");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  async function lastPicked(id) {
+    try {
+      const db = await pickDb();
+      return await new Promise((resolve) => {
+        const r = db.transaction("last").objectStore("last").get(id || "");
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => resolve(null);
+      });
+    } catch { return null; }
+  }
+  async function rememberPicked(id, handle) {
+    try {
+      const db = await pickDb();
+      db.transaction("last", "readwrite").objectStore("last").put(handle, id || "");
+    } catch { /* not remembered: the next dialog starts in Documents */ }
+  }
+  const pickers = { open: window.showOpenFilePicker, save: window.showSaveFilePicker, directory: window.showDirectoryPicker };
+  Object.defineProperty(window, "__pdfplusPickers", { value: pickers });
+  for (const [kind, name] of [["open", "showOpenFilePicker"], ["save", "showSaveFilePicker"], ["directory", "showDirectoryPicker"]]) {
+    if (typeof pickers[kind] !== "function") continue;
+    window[name] = async function (options) {
+      const opts = { ...(options || {}) };
+      if (opts.startIn && typeof opts.startIn === "object" && typeof opts.startIn[MARK] === "string") delete opts.startIn;
+      const given = !!opts.startIn;
+      if (!given) {
+        const last = await lastPicked(opts.id);
+        if (last) opts.startIn = last;
+      }
+      let result;
+      try {
+        result = await pickers[kind].call(window, opts);
+      } catch (e) {
+        if ((e && e.name === "AbortError") || given || !opts.startIn) throw e;
+        delete opts.startIn;
+        result = await pickers[kind].call(window, opts);
+      }
+      const first = Array.isArray(result) ? result[0] : result;
+      if (first && typeof first === "object" && first.kind) rememberPicked(opts.id, first);
+      return result;
+    };
+  }
+
   // ---- the shell: files from Windows, and its name ---------------------------
 
   const isShell = window.top === window && /^\/(index\.html)?$/.test(location.pathname);
