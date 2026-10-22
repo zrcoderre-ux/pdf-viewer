@@ -4,7 +4,8 @@
 // the page (shim.js, really) exactly this much and nothing else: read and
 // write a file Windows handed the app, open a link in the browser, the path
 // of a File the user picked (to tell whether two handles are one file), the
-// files Windows hands over while the app runs, and Home's update button. main.js checks every
+// files Windows hands over while the app runs, and Home's update button and
+// app-files setting. main.js checks every
 // path against the files it was given; a page cannot name one of its own.
 
 "use strict";
@@ -24,6 +25,10 @@ contextBridge.exposeInMainWorld("pdfplusNative", {
   downloadUpdate: () => ipcRenderer.invoke("pdfplus:update-download"),
   installUpdate: () => ipcRenderer.invoke("pdfplus:update-install"),
   onUpdateProgress: (cb) => { ipcRenderer.on("pdfplus:update-progress", (_e, pct) => cb(pct)); },
+  source: () => ipcRenderer.invoke("pdfplus:source"),
+  chooseSourceFolder: () => ipcRenderer.invoke("pdfplus:source-choose"),
+  useBuiltInSource: () => ipcRenderer.invoke("pdfplus:source-builtin"),
+  restart: () => ipcRenderer.invoke("pdfplus:restart"),
   onOpenFiles: (cb) => {
     ipcRenderer.on("pdfplus:open-files", (_e, files) => cb(files));
     ipcRenderer.send("pdfplus:open-files-ready");

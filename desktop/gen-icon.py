@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Draw PDF+'s icon: the PDF Viewer page with a red plus above its band.
+"""Draw PDF+'s icon: the PDF Viewer's page, without its red band, with a red
+plus in the middle.
 
-The page is pwa/icons/icon-512.png as it stands, so the two apps read as one
-family, and the plus is what tells them apart in the taskbar and in "Open
-with" while both are installed. Writes build/icon.png (512 px), which
-electron-builder turns into the Windows .ico and which the window uses on
-Linux.
+The page and its outline are pwa/icons/icon-512.png as it stands, so the two
+apps read as one family; the plus in place of the band is what tells them
+apart in the taskbar and in "Open with" while both are installed. Writes
+build/icon.png (512 px), which electron-builder turns into the Windows .ico
+and which the window uses on Linux.
 
   python3 desktop/gen-icon.py        (needs Pillow)
 """
@@ -18,18 +19,21 @@ SRC = HERE.parent / "pwa" / "icons" / "icon-512.png"
 OUT = HERE / "build" / "icon.png"
 
 SCALE = 4  # drawn at 4x and reduced, for smooth edges
-RED = (220, 38, 38, 255)  # the band's red (pwa/gen-icons.py BAND)
+RED = (220, 38, 38, 255)     # the band's red (pwa/gen-icons.py BAND)
+SHEET = (248, 250, 252, 255)  # the page's white (pwa/gen-icons.py SHEET)
 
 
 def main():
     page = Image.open(SRC).convert("RGBA")
     if page.size != (512, 512):
         raise SystemExit(f"{SRC} is {page.size}, expected 512x512")
-    # The white of the page above the red band (which starts at y 295), left
-    # of centre where the cut corner takes nothing; big enough to read at 16 px.
-    cx, cy = 246, 160
-    arm = 92   # half the plus's span
-    bar = 30   # half the stroke's width
+    # The band (x 96-415, y 295-393 as pwa/gen-icons.py draws it) painted
+    # over in the page's white, a pixel wider all round for its soft edge.
+    ImageDraw.Draw(page).rectangle([94, 293, 417, 395], fill=SHEET)
+    # The page's middle: its outline runs x 66-445, y 11-500.
+    cx, cy = 256, 256
+    arm = 112  # half the plus's span
+    bar = 36   # half the stroke's width
 
     layer = Image.new("RGBA", (512 * SCALE, 512 * SCALE), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)

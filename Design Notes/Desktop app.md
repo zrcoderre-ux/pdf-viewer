@@ -25,6 +25,28 @@ Tesseract, and no `'unsafe-eval'`: pdf.js and Tesseract's worker test for
 `new Function` and fall back. `test-desktop.mjs` runs OCR and fails on any
 CSP refusal in the console, so a feature that needs more shows up there.
 
+## App files from a checkout
+
+`settings.json`'s `appFolder` (set on Home's App files row through a folder
+dialog in the main process, never a path from a page) makes `fileFor` serve
+the user's checkout in place of `app/`: `/index.html` and the other
+`SHELL_FILES` and `/icons/` from `pwa/`, `/viewer/` and `/pdfjs/` from their
+folders, and `citation-site-rules.js`, the files `assemble.mjs` copies. Each
+prefix is confined to its own folder (`under`), so nothing else in the
+checkout is served (`desktop/`, `.git`, `pwa/sw.js`). `shim.js` is always
+the installed one.
+
+The source is decided once, at start (`decideSource`), so every window runs
+the same files; a change takes effect on Restart PDF+ (`pdfplus:restart`:
+`app.relaunch` and `app.exit`). A relaunch cannot be called off once
+scheduled, so the restart first asks every window's shell whether any tab
+has unsaved changes (`anythingUnsaved`, through `executeJavaScript`) and
+does nothing if one has. A chosen folder that fails `folderProblem` at
+start is not used: PDF+ runs `app/` and Home shows the reason. Home also
+shows the checkout's branch and commit, read from `.git` without git
+(`gitHead`), and warns when the checkout's `desktop/package.json` is newer
+than the installed version: a pull never replaces PDF+'s own program.
+
 ## No network
 
 `lockDownSession` cancels every request that is not to `pdfplus://app/`,
@@ -173,7 +195,10 @@ bridge refusing a file it was not given; no network; links; a handle sent by
 `postMessage`; a tab moved to a new window and saved there; OCR under the
 CSP; the reader's screenshot in Downloads (and a camera still refused); the
 update button against a local stand-in for the releases (up to date, then a
-newer release shown with its notes and downloaded, never installed); and
-the unsaved-changes question on close. CI
+newer release shown with its notes and downloaded, never installed); the
+unsaved-changes question on close; and app files from a copy of the
+repository (a wrong folder refused, Restart held over unsaved work, the
+folder's files run from the next start, nothing outside its app folders
+served, a pull taken up at the start after, a broken folder falling back). CI
 (`.github/workflows/build-desktop.yml`) runs it on Linux and Windows before
 building the installer.

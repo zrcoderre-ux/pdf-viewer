@@ -12,7 +12,11 @@
 // a window with unsaved changes asks; the text reader's screenshot lands in
 // Downloads; Home's update button reports up to date, then shows a newer
 // release with its notes and downloads it (from a stand-in for GitHub's
-// releases, never installed); and no page logs an error or a CSP refusal.
+// releases, never installed); the app's files can come from a checkout
+// chosen on Home (a wrong folder refused, Restart held over unsaved work,
+// the folder's files run from the next start, a pull taken up at the start
+// after, a broken folder falling back to PDF+'s own); and no page logs an
+// error or a CSP refusal.
 //
 // Run: node test-desktop.mjs   (from the repo root; on Linux with no display
 //                               it runs itself again under xvfb-run)
@@ -552,8 +556,129 @@ try {
     check("…and Cancel kept the window open", await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   }
 
+  // ── 14. app files from a folder ───────────────────────────────────────────
+  console.log("14. App files: a folder chosen on Home, a wrong one refused, Restart held over unsaved work");
+  const checkout = path.join(tmp, "pdf-viewer");
+  {
+    // A copy of the repository as a checkout would hold it, with a marker in
+    // its shell page to tell its files from PDF+'s own.
+    fs.mkdirSync(path.join(checkout, "pwa"), { recursive: true });
+    for (const f of ["index.html", "manifest.webmanifest", "app-web.js", "app-web.css"]) fs.copyFileSync(path.join(REPO, "pwa", f), path.join(checkout, "pwa", f));
+    fs.cpSync(path.join(REPO, "pwa", "icons"), path.join(checkout, "pwa", "icons"), { recursive: true });
+    fs.cpSync(path.join(REPO, "viewer"), path.join(checkout, "viewer"), { recursive: true });
+    fs.cpSync(path.join(REPO, "pdfjs"), path.join(checkout, "pdfjs"), { recursive: true });
+    fs.copyFileSync(path.join(REPO, "citation-site-rules.js"), path.join(checkout, "citation-site-rules.js"));
+    fs.mkdirSync(path.join(checkout, "desktop"));
+    fs.writeFileSync(path.join(checkout, "desktop", "package.json"), JSON.stringify({ version: CURRENT }));
+    fs.mkdirSync(path.join(checkout, ".git", "refs", "heads"), { recursive: true });
+    fs.writeFileSync(path.join(checkout, ".git", "HEAD"), "ref: refs/heads/main\n");
+    fs.writeFileSync(path.join(checkout, ".git", "refs", "heads", "main"), "abcdef1234567890abcdef1234567890abcdef12\n");
+    const marked = (tag) => {
+      const p = path.join(checkout, "pwa", "index.html");
+      const html = fs.readFileSync(path.join(REPO, "pwa", "index.html"), "utf8");
+      fs.writeFileSync(p, html.replace("<head>", `<head>\n  <meta name="pdfplus-test" content="${tag}">`));
+    };
+    marked("folder-1");
+    const wrong = path.join(tmp, "Not The Repo");
+    fs.mkdirSync(wrong);
+
+    await win.evaluate(() => document.getElementById("home-tab").click());
+    await until(() => win.evaluate(() => !document.getElementById("dropzone").hidden));
+    const row = () => win.evaluate(() => ({
+      where: document.querySelector(".pdfplus-about .pa-src-where").textContent,
+      note: document.querySelector(".pdfplus-about .pa-src-note").hidden ? "" : document.querySelector(".pdfplus-about .pa-src-note").textContent,
+    }));
+    check("at first: built in", (await until(async () => { const r = await row(); return r.where !== "…" && r; })).where, "built into PDF+");
+
+    await app.evaluate(({ dialog }, dir) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] }); }, wrong);
+    await win.evaluate(() => document.querySelector(".pdfplus-about .pa-src-choose").click());
+    const refused = await until(async () => { const r = await row(); return /cannot be used/.test(r.note) && r; });
+    truthy("a folder that is not the repository is refused, and says why", refused && /viewer.html|index.html/.test(refused.note));
+    check("…and nothing is set", fs.existsSync(path.join(profile, "settings.json")) ? JSON.parse(fs.readFileSync(path.join(profile, "settings.json"), "utf8")).appFolder : undefined, undefined);
+
+    await app.evaluate(({ dialog }, dir) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] }); }, checkout);
+    await win.evaluate(() => document.querySelector(".pdfplus-about .pa-src-choose").click());
+    const chosen = await until(async () => { const r = await row(); return r.where.startsWith(checkout) && r; });
+    check("the checkout is chosen, with its branch and commit", chosen && chosen.where, `${checkout} (main @ abcdef1)`);
+    check("…from the next start", chosen && chosen.note, "Restart PDF+ to start using this folder.");
+    check("…kept in settings.json", JSON.parse(fs.readFileSync(path.join(profile, "settings.json"), "utf8")).appFolder, checkout);
+
+    // Exhibit B still has the unsaved note from 13.
+    await app.evaluate(({ app }) => {
+      globalThis.__restarted = 0;
+      app.relaunch = () => { globalThis.__restarted++; };
+      app.exit = () => { globalThis.__restarted++; };
+    });
+    await win.evaluate(() => document.querySelector(".pdfplus-about .pa-src-restart").click());
+    const held = await until(async () => { const r = await row(); return /unsaved/.test(r.note) && r.note; });
+    truthy("Restart refused while a document has unsaved changes", held);
+    check("…and nothing restarted", await app.evaluate(() => globalThis.__restarted), 0);
+  }
+
   check("no page errors", log.errors, []);
   check("no Content-Security-Policy refusals", log.csp, []);
+
+  // ── 15. the next start runs the folder's files ───────────────────────────
+  console.log("15. The next start runs the folder's files; a pull is taken up at the start after; a broken folder falls back");
+  {
+    await app.evaluate(({ dialog }) => { dialog.showMessageBoxSync = () => 0; }); // close without saving
+    await app.close();
+    const start = async () => {
+      app = await electron.launch({ executablePath: ELECTRON, args: [DESKTOP, ...SWITCHES], cwd: DESKTOP, env: ENV });
+      const w = await app.firstWindow();
+      watch(w);
+      await w.waitForLoadState("load");
+      return w;
+    };
+    const marker = (w) => w.evaluate(() => document.querySelector('meta[name="pdfplus-test"]')?.content || "none");
+    const note = (w) => until(() => w.evaluate(() => {
+      const where = document.querySelector(".pdfplus-about .pa-src-where").textContent;
+      const n = document.querySelector(".pdfplus-about .pa-src-note");
+      return where !== "…" && { where, note: n.hidden ? "" : n.textContent };
+    }));
+
+    log.errors.length = 0; // the first app's teardown (closed over an unsaved note) is not this start's
+    let w = await start();
+    check("the shell came from the folder", await marker(w), "folder-1");
+    check("…and Home says so", await note(w), { where: `${checkout} (main @ abcdef1)`, note: "After a git pull, Restart PDF+ to run what you pulled." });
+    const viewerFrame = await w.evaluate(async () => {
+      const own = (await fetch("viewer/viewer.html")).ok;
+      const out = (await fetch("viewer/..%2F..%2Fdesktop%2Fpackage.json")).status;
+      const pwaOnly = (await fetch("README.md")).status;
+      return { own, out, pwaOnly };
+    });
+    check("the viewer from it, and nothing outside its app folders", viewerFrame, { own: true, out: 404, pwaOnly: 404 });
+    log.errors.length = 0; // those two 404s were the point
+    await app.evaluate(({ app }) => {
+      globalThis.__restarted = [];
+      app.relaunch = () => { globalThis.__restarted.push("relaunch"); };
+      app.exit = () => { globalThis.__restarted.push("exit"); };
+    });
+    await w.evaluate(() => document.querySelector(".pdfplus-about .pa-src-restart").click());
+    check("Restart PDF+ with nothing unsaved: relaunched", await until(() => app.evaluate(() => globalThis.__restarted.length === 2 && globalThis.__restarted)), ["relaunch", "exit"]);
+
+    // A pull: the folder's files change; the next start runs them.
+    fs.writeFileSync(path.join(checkout, ".git", "refs", "heads", "main"), "1234567aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n");
+    const html = fs.readFileSync(path.join(checkout, "pwa", "index.html"), "utf8");
+    fs.writeFileSync(path.join(checkout, "pwa", "index.html"), html.replace("folder-1", "folder-2"));
+    await app.close();
+    w = await start();
+    check("after a pull and a restart: the pulled files", await marker(w), "folder-2");
+    check("…and the new commit shown", (await note(w)).where, `${checkout} (main @ 1234567)`);
+
+    // The folder broken (a file the app needs gone): PDF+ runs its own.
+    fs.renameSync(path.join(checkout, "viewer", "viewer.html"), path.join(checkout, "viewer", "viewer.html.gone"));
+    await app.close();
+    w = await start();
+    check("a broken folder: PDF+'s own files", await marker(w), "none");
+    truthy("…and Home says why", /cannot be used: .*viewer\.html.*PDF\+ is running its own files/.test((await note(w)).note));
+    await w.evaluate(() => document.querySelector(".pdfplus-about .pa-src-builtin").click());
+    check("Use PDF+'s own: the folder forgotten", await until(async () => {
+      const r = await note(w);
+      return r.where === "built into PDF+" && JSON.parse(fs.readFileSync(path.join(profile, "settings.json"), "utf8")).appFolder === undefined;
+    }), true);
+    check("no page errors after restarts", log.errors, []);
+  }
 } catch (e) {
   fails++;
   console.log("  FAIL  " + (e && e.stack || e));

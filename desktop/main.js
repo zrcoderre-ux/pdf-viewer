@@ -27,6 +27,10 @@
 //     newest GitHub release (release-desktop.yml) and installs it on a click.
 //     It is the one thing that goes on the network, from this process, never
 //     from a page.
+//   - Or the app's files from a folder: a checkout of this repository the
+//     user picks on Home ("App files"), served in place of the built-in
+//     copy, so a git pull and a restart bring PDF+ up to date with no
+//     download and no GitHub release (see "Where the app's files come from").
 
 "use strict";
 
@@ -184,6 +188,111 @@ function deliverFiles(paths) {
   }
 }
 
+// ---- Where the app's files come from ----------------------------------------
+//
+// Built in: app/, which assemble.mjs filled from the repository when the
+// installer was made. Or a folder: the user's own checkout of this repository
+// (settings.json's appFolder, chosen on Home through a folder dialog in this
+// process, never a path a page names), read in place: pwa/'s shell files and
+// icons, viewer/, pdfjs/ and citation-site-rules.js, the same files
+// assemble.mjs copies, so a git pull is picked up at the next start.
+// PDF+'s own program (this file, preload.js, shim.js, Electron) is always the
+// installed one.
+//
+// Which it is is decided once, at start, so every window runs the same files;
+// a change on Home takes effect on Restart. A folder that has gone, or lacks
+// the app's files, is not used: PDF+ runs its own files and Home says why.
+
+let settings = {};
+const settingsFile = () => path.join(app.getPath("userData"), "settings.json");
+
+function loadSettings() {
+  try { settings = JSON.parse(fs.readFileSync(settingsFile(), "utf8")) || {}; } catch { settings = {}; }
+}
+
+function saveSettings() {
+  fs.writeFileSync(settingsFile(), JSON.stringify(settings, null, 1));
+}
+
+// What a checkout must hold to be served (assemble.mjs copies the same).
+const FOLDER_NEEDS = ["pwa/index.html", "pwa/app-web.js", "pwa/app-web.css", "viewer/viewer.html", "viewer/text-reader.html", "pdfjs/build/pdf.mjs", "citation-site-rules.js"];
+const SHELL_FILES = new Set(["/index.html", "/manifest.webmanifest", "/app-web.js", "/app-web.css"]);
+
+function folderProblem(dir) {
+  if (!dir || !path.isAbsolute(dir)) return "it is not a folder";
+  try { if (!fs.statSync(dir).isDirectory()) return "it is not a folder"; } catch { return "it is not there"; }
+  for (const f of FOLDER_NEEDS) {
+    if (!fs.existsSync(path.join(dir, f))) return `${f.split("/").join(path.sep)} is not in it (is it a copy of the pdf-viewer repository?)`;
+  }
+  return "";
+}
+
+// { folder } when the folder is in use; { wanted, problem } when it was set
+// and could not be used.
+let source = { folder: "" };
+
+function decideSource() {
+  const wanted = typeof settings.appFolder === "string" ? settings.appFolder : "";
+  if (!wanted) return { folder: "" };
+  const problem = folderProblem(wanted);
+  return problem ? { folder: "", wanted, problem } : { folder: wanted };
+}
+
+/** `rel` under `base`, or null where it would leave it. */
+function under(base, rel) {
+  const f = path.normalize(path.join(base, rel));
+  return f.startsWith(base + path.sep) ? f : null;
+}
+
+/** The file on disk for a path under pdfplus://app/, or null. */
+function fileFor(rel) {
+  if (rel === SHIM_PATH) return path.join(__dirname, "shim.js");
+  const root = source.folder;
+  if (!root) return under(APP_DIR, rel);
+  if (SHELL_FILES.has(rel)) return path.join(root, "pwa", rel.slice(1));
+  if (rel.startsWith("/icons/")) return under(path.join(root, "pwa", "icons"), rel.slice("/icons".length));
+  if (rel.startsWith("/viewer/")) return under(path.join(root, "viewer"), rel.slice("/viewer".length));
+  if (rel.startsWith("/pdfjs/")) return under(path.join(root, "pdfjs"), rel.slice("/pdfjs".length));
+  if (rel === "/citation-site-rules.js") return path.join(root, "citation-site-rules.js");
+  return null;
+}
+
+/** The checkout's branch and commit, read from .git (no git needed). */
+function gitHead(dir) {
+  try {
+    const head = fs.readFileSync(path.join(dir, ".git", "HEAD"), "utf8").trim();
+    const m = /^ref: refs\/heads\/(.+)$/.exec(head);
+    if (!m) return { branch: "", commit: head.slice(0, 7) };
+    let sha = "";
+    try { sha = fs.readFileSync(path.join(dir, ".git", "refs", "heads", ...m[1].split("/")), "utf8").trim(); } catch {
+      try {
+        const packed = fs.readFileSync(path.join(dir, ".git", "packed-refs"), "utf8");
+        const line = packed.split("\n").find((l) => l.endsWith(" refs/heads/" + m[1]));
+        sha = line ? line.split(" ")[0] : "";
+      } catch { sha = ""; }
+    }
+    return { branch: m[1], commit: sha.slice(0, 7) };
+  } catch { return null; }
+}
+
+function folderVersion(dir) {
+  try { return JSON.parse(fs.readFileSync(path.join(dir, "desktop", "package.json"), "utf8")).version || ""; } catch { return ""; }
+}
+
+function sourceInfo() {
+  const chosen = typeof settings.appFolder === "string" ? settings.appFolder : "";
+  const shown = source.folder || chosen;
+  return {
+    appVersion: app.getVersion(),
+    folder: source.folder,                                  // in use now
+    chosen,                                                 // what settings say (from the next start)
+    restartNeeded: chosen !== source.folder && !(source.problem && chosen === source.wanted),
+    problem: source.problem && chosen === source.wanted ? source.problem : "",
+    git: shown ? gitHead(shown) : null,
+    folderVersion: shown ? folderVersion(shown) : "",
+  };
+}
+
 // ---- Serving the app --------------------------------------------------------
 
 function notFound() {
@@ -196,10 +305,8 @@ async function serve(request) {
   let rel;
   try { rel = decodeURIComponent(url.pathname); } catch { return notFound(); }
   if (rel === "/") rel = "/index.html";
-  const file = rel === SHIM_PATH
-    ? path.join(__dirname, "shim.js")
-    : path.normalize(path.join(APP_DIR, rel));
-  if (rel !== SHIM_PATH && !file.startsWith(APP_DIR + path.sep)) return notFound();
+  const file = fileFor(rel);
+  if (!file) return notFound();
   let body;
   try { body = await fsp.readFile(file); } catch { return notFound(); }
   const ext = path.extname(file).toLowerCase();
@@ -497,6 +604,61 @@ function registerUpdateIpc() {
   });
 }
 
+// ---- App files and restarting (Home) ----------------------------------------
+
+/** Whether any window has a document with unsaved changes. */
+async function anythingUnsaved() {
+  const probe = `[...document.querySelectorAll("#tab-views iframe")].some((f) => {
+    try {
+      const w = f.contentWindow;
+      return !!((w.__pdfViewerHasUnsaved && w.__pdfViewerHasUnsaved()) || (w.__textReaderHasUnsaved && w.__textReaderHasUnsaved()));
+    } catch { return false; }
+  })`;
+  for (const win of BrowserWindow.getAllWindows()) {
+    try { if (await win.webContents.executeJavaScript(probe)) return true; } catch { /* not a shell */ }
+  }
+  return false;
+}
+
+function registerSourceIpc() {
+  ipcMain.handle("pdfplus:source", (event) => (fromApp(event) ? sourceInfo() : null));
+
+  ipcMain.handle("pdfplus:source-choose", async (event) => {
+    if (!fromApp(event)) return null;
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const r = await dialog.showOpenDialog(win, {
+      title: "Choose your copy of the pdf-viewer repository",
+      buttonLabel: "Use this folder",
+      properties: ["openDirectory"],
+    });
+    if (r.canceled || !r.filePaths || !r.filePaths[0]) return { ...sourceInfo(), canceled: true };
+    const dir = r.filePaths[0];
+    const problem = folderProblem(dir);
+    if (problem) return { ...sourceInfo(), refused: `${dir} cannot be used: ${problem}.` };
+    settings.appFolder = dir;
+    saveSettings();
+    return sourceInfo();
+  });
+
+  ipcMain.handle("pdfplus:source-builtin", (event) => {
+    if (!fromApp(event)) return null;
+    delete settings.appFolder;
+    saveSettings();
+    return sourceInfo();
+  });
+
+  // Restart, to take the new setting or a git pull. Not over unsaved work:
+  // a relaunch cannot be called off once asked for, so the windows are asked
+  // first and nothing happens while a document has changes.
+  ipcMain.handle("pdfplus:restart", async (event) => {
+    if (!fromApp(event)) return { ok: false };
+    if (await anythingUnsaved()) return { ok: false, why: "unsaved" };
+    app.relaunch();
+    app.exit(0);
+    return { ok: true };
+  });
+}
+
 // ---- Start ------------------------------------------------------------------
 
 function lockDownSession(ses) {
@@ -565,10 +727,13 @@ function start() {
 
   app.whenReady().then(() => {
     loadGrants();
+    loadSettings();
+    source = decideSource();
     lockDownSession(session.defaultSession);
     protocol.handle(SCHEME, serve);
     registerIpc();
     registerUpdateIpc();
+    registerSourceIpc();
     const first = filesFromArgv(process.argv, process.cwd());
     for (const p of first) grant(p);
     pending.push(...first.map((p) => ({ path: p, name: path.basename(p) })));
