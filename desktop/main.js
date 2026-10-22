@@ -23,6 +23,10 @@
 //     permission prompts answered yes.
 //   - One instance: a file opened while PDF+ is running goes to the window
 //     last used, as a new tab.
+//   - Updates only when asked: Home's Check for updates button reads the
+//     newest GitHub release (release-desktop.yml) and installs it on a click.
+//     It is the one thing that goes on the network, from this process, never
+//     from a page.
 
 "use strict";
 
@@ -403,6 +407,96 @@ function registerIpc() {
   });
 }
 
+// ---- Updates ----------------------------------------------------------------
+//
+// Asked for on Home (shim.js), never on its own. electron-updater reads
+// latest.yml from where app-update.yml points (package.json build.publish:
+// the newest GitHub release, by GitHub's own "latest" link), and checks the
+// installer it downloads against the SHA-512 in it before running it. It
+// runs in a session of its own, so the pages' network block does not apply
+// to it and it does not apply to the pages.
+//
+// PDFPLUS_UPDATE_CONFIG points it at another app-update.yml, for tests
+// (test-desktop.mjs) and for the unpackaged app, which has none.
+
+let updater = null;
+
+function getUpdater() {
+  if (updater) return updater;
+  const { autoUpdater } = require("electron-updater");
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true; // downloaded and not yet installed: installed when PDF+ closes
+  autoUpdater.allowDowngrade = false;
+  autoUpdater.logger = null;
+  autoUpdater.on("error", () => {}); // reported through the call that failed
+  if (process.env.PDFPLUS_UPDATE_CONFIG) {
+    autoUpdater.forceDevUpdateConfig = true;
+    autoUpdater.updateConfigPath = process.env.PDFPLUS_UPDATE_CONFIG;
+  }
+  updater = autoUpdater;
+  return updater;
+}
+
+/** Release notes as plain text: latest.yml may hold a string or, across
+ *  several versions, a list of them. */
+function notesText(notes) {
+  if (!notes) return "";
+  if (Array.isArray(notes)) return notes.map((n) => (n && n.note) || "").filter(Boolean).join("\n\n");
+  return String(notes);
+}
+
+function updateError(e) {
+  const msg = String((e && e.message) || e || "").split("\n")[0];
+  if (/\b404\b|Cannot find latest/i.test(msg)) return "no PDF+ release has been published yet.";
+  if (/ENOTFOUND|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ECONNREFUSED|ETIMEDOUT/i.test(msg)) return "GitHub could not be reached. Is this computer online?";
+  return msg || "unknown error";
+}
+
+function registerUpdateIpc() {
+  ipcMain.handle("pdfplus:version", (event) => (fromApp(event) ? app.getVersion() : ""));
+
+  ipcMain.handle("pdfplus:update-check", async (event) => {
+    if (!fromApp(event)) return { status: "error", message: "not allowed" };
+    if (!app.isPackaged && !process.env.PDFPLUS_UPDATE_CONFIG) {
+      return { status: "unavailable", message: "Updates work in the installed PDF+, not in one run from its source." };
+    }
+    try {
+      const r = await getUpdater().checkForUpdates();
+      const info = r && r.updateInfo;
+      if (!r || !r.isUpdateAvailable || !info) return { status: "none", version: app.getVersion() };
+      return { status: "available", version: info.version, current: app.getVersion(), notes: notesText(info.releaseNotes), date: info.releaseDate || "" };
+    } catch (e) {
+      return { status: "error", message: updateError(e) };
+    }
+  });
+
+  ipcMain.handle("pdfplus:update-download", async (event) => {
+    if (!fromApp(event)) return { status: "error", message: "not allowed" };
+    const u = getUpdater();
+    const progress = (p) => {
+      if (!event.sender.isDestroyed()) event.sender.send("pdfplus:update-progress", Math.floor((p && p.percent) || 0));
+    };
+    u.on("download-progress", progress);
+    try {
+      await u.downloadUpdate();
+      return { status: "downloaded" };
+    } catch (e) {
+      return { status: "error", message: updateError(e) };
+    } finally {
+      u.removeListener("download-progress", progress);
+    }
+  });
+
+  // Closes every window (a window with unsaved changes asks first, and
+  // Cancel keeps PDF+ open: the update then installs when it next closes),
+  // installs without the installer's own window, and opens PDF+ again.
+  ipcMain.handle("pdfplus:update-install", (event) => {
+    if (!fromApp(event) || !updater) return false;
+    setImmediate(() => updater.quitAndInstall(true, true));
+    return true;
+  });
+}
+
 // ---- Start ------------------------------------------------------------------
 
 function lockDownSession(ses) {
@@ -413,13 +507,44 @@ function lockDownSession(ses) {
     cb({ cancel: !ok });
   });
   // Files: yes, as the PWA's user always answers (open, save, a case folder).
-  // Clipboard: copying, and the viewer's own paste. Nothing else is asked for.
+  // Clipboard: copying, and the viewer's own paste. Nothing else is asked
+  // for, but for the reader's screenshot (below).
   const allowed = new Set(["fileSystem", "clipboard-sanitized-write", "clipboard-read", "fullscreen"]);
   ses.setPermissionCheckHandler((_wc, permission, origin) => allowed.has(permission) && isAppUrl(String(origin || "").replace(/\/?$/, "/")));
   ses.setPermissionRequestHandler((wc, permission, cb, details) => {
     const from = (details && details.requestingUrl) || (wc && wc.getURL()) || "";
-    cb(allowed.has(permission) && isAppUrl(from));
+    // A screen share (getDisplayMedia) asks for "media" with no camera or
+    // microphone in it; setDisplayMediaRequestHandler then gives it the
+    // app's own window and nothing else. A camera or a microphone is refused.
+    const share = permission === "media" && details && Array.isArray(details.mediaTypes) && details.mediaTypes.length === 0;
+    cb((allowed.has(permission) || share) && isAppUrl(from));
   });
+
+  // The text reader's 📷 Screenshot asks for a screen share of its own tab
+  // (getDisplayMedia, text-reader.js shareThisTab), which is how a hosted
+  // page gets a picture of itself. Here it gets its own window, without the
+  // share picker, and nothing else: no other window, no screen, no sound.
+  ses.setDisplayMediaRequestHandler((request, callback) => {
+    const frame = request.frame;
+    if (!frame || !isAppUrl(frame.url) || !request.videoRequested) return callback(null);
+    callback({ video: frame.top || frame });
+  });
+
+  // A download (the screenshot's PNG; a file saved where there is no save
+  // picker) goes into Downloads with no question, as Chrome's do, under a
+  // name of its own: "name (1).png" beside a "name.png" already there.
+  ses.on("will-download", (_e, item) => {
+    item.setSavePath(freeName(app.getPath("downloads"), item.getFilename() || "download"));
+  });
+}
+
+function freeName(dir, name) {
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  for (let i = 0; ; i++) {
+    const p = path.join(dir, i ? `${stem} (${i})${ext}` : name);
+    if (!fs.existsSync(p)) return p;
+  }
 }
 
 function start() {
@@ -443,6 +568,7 @@ function start() {
     lockDownSession(session.defaultSession);
     protocol.handle(SCHEME, serve);
     registerIpc();
+    registerUpdateIpc();
     const first = filesFromArgv(process.argv, process.cwd());
     for (const p of first) grant(p);
     pending.push(...first.map((p) => ({ path: p, name: path.basename(p) })));

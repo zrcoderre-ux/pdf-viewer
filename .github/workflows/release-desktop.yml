@@ -1,0 +1,51 @@
+name: Release PDF+
+
+# Publishes a PDF+ release when a tag pdfplus-v<version> is pushed (the
+# version in desktop/package.json): build-desktop.yml tests and builds it,
+# with release notes from the commits since the last release, and this job
+# puts the installer, its blockmap and latest.yml on a GitHub release of that
+# tag, marked latest. PDF+'s Check for updates reads latest.yml through
+# GitHub's releases/latest link, so the newest release here is the update
+# every installed PDF+ is offered. Nothing else in this repository should be
+# published as a release.
+
+on:
+  push:
+    tags: ["pdfplus-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      release: true
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PDF+ for Windows
+          path: out
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#pdfplus-v}"
+          {
+            echo "Download **PDFPlus-Setup-${version}.exe** below and run it, or click **Check for updates** on PDF+'s Home page."
+            echo
+            echo "## What changed"
+            echo
+            cat out/release-notes.md
+          } > notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --latest \
+            --title "PDF+ ${version}" --notes-file notes.md \
+            out/*.exe out/*.blockmap out/latest.yml

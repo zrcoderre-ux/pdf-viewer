@@ -2,9 +2,11 @@ name: Build PDF+ (desktop)
 
 # Tests PDF+ (desktop/) on Linux and Windows, then builds its Windows
 # installer and keeps it as this run's artifact ("PDF+ for Windows" on the
-# run's page), to download and install by hand. Nothing is published: no
-# release, no update anyone receives. The PWA's deploy is a separate workflow
-# and is not touched by this one.
+# run's page), to download and install by hand. Nothing is published from
+# here: release-desktop.yml calls this workflow with `release: true` (which
+# adds release notes and checks the version against the tag) and publishes
+# what it built. The PWA's deploy is a separate workflow and is not touched
+# by this one.
 
 on:
   push:
@@ -18,6 +20,12 @@ on:
       - "test-desktop.mjs"
       - ".github/workflows/build-desktop.yml"
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      release:
+        description: "Building a release: notes from the commits since the last one, and the version checked against the tag"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -70,10 +78,33 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A release's notes are the commits since the last release's tag.
+          fetch-depth: ${{ inputs.release && '0' || '1' }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - name: Release notes, and the version against the tag
+        if: ${{ inputs.release }}
+        shell: bash
+        run: |
+          version="$(node -p "require('./desktop/package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "pdfplus-v${version}" ]; then
+            echo "::error::The tag ${GITHUB_REF_NAME} does not match desktop/package.json's version ${version} (expected pdfplus-v${version})."
+            exit 1
+          fi
+          prev="$(git describe --tags --abbrev=0 --match 'pdfplus-v*' HEAD^ 2>/dev/null || true)"
+          # electron-builder puts build/release-notes.md into latest.yml, which
+          # is what the update button shows.
+          if [ -z "$prev" ]; then
+            echo "The first release of PDF+." > desktop/build/release-notes.md
+          else
+            git log --no-merges --format='- %s' "${prev}..HEAD" -- desktop pwa viewer pdfjs citation-site-rules.js | head -n 60 > desktop/build/release-notes.md
+            [ -s desktop/build/release-notes.md ] || echo "No changes to the app since ${prev#pdfplus-v}." > desktop/build/release-notes.md
+          fi
+          cat desktop/build/release-notes.md
 
       - name: Install Electron and the packager
         working-directory: desktop
@@ -83,10 +114,18 @@ jobs:
         working-directory: desktop
         run: npm run dist
 
+      - name: Gather what a release needs
+        shell: bash
+        run: |
+          mkdir -p out
+          cp desktop/dist/*.exe desktop/dist/*.exe.blockmap desktop/dist/latest.yml out/
+          if [ -f desktop/build/release-notes.md ]; then cp desktop/build/release-notes.md out/; fi
+          ls -l out
+
       - name: Keep the installer
         uses: actions/upload-artifact@v4
         with:
           name: PDF+ for Windows
-          path: desktop/dist/*.exe
+          path: out/*
           if-no-files-found: error
           retention-days: 30

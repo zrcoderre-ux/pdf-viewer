@@ -9,8 +9,10 @@
 // fetched from the network; Westlaw links go to the browser at once, other
 // links only after asking, and PDF-Linker's pdf-linker: link to PDF-Linker; a tab moved to a new window takes its file
 // along and saves there; OCR runs under the Content-Security-Policy; closing
-// a window with unsaved changes asks; and no page logs an error or a CSP
-// refusal.
+// a window with unsaved changes asks; the text reader's screenshot lands in
+// Downloads; Home's update button reports up to date, then shows a newer
+// release with its notes and downloads it (from a stand-in for GitHub's
+// releases, never installed); and no page logs an error or a CSP refusal.
 //
 // Run: node test-desktop.mjs   (from the repo root; on Linux with no display
 //                               it runs itself again under xvfb-run)
@@ -20,7 +22,9 @@
 // either is missing (1 where PDFPLUS_REQUIRE_TEST is set, as in CI).
 
 import { spawn, spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -114,7 +118,59 @@ fs.writeFileSync(exhibit, pdfWith("Exhibit B"));
 fs.writeFileSync(notes, "Page 1\n\nThe hearing is set for the morning.\n");
 fs.writeFileSync(secret, pdfWith("Never handed to the app"));
 
-const ENV = { ...process.env, PDFPLUS_USER_DATA: profile };
+const downloads = path.join(tmp, "Downloads");
+fs.mkdirSync(downloads);
+
+// A stand-in for the GitHub releases the update button reads: latest.yml
+// (latest-linux.yml for the Linux build of the updater) naming an installer
+// and its SHA-512, and the installer, here a few bytes that are never run.
+const CURRENT = JSON.parse(fs.readFileSync(path.join(DESKTOP, "package.json"), "utf8")).version;
+const release = { version: CURRENT, notes: "" };
+const payload = Buffer.from("not really an installer\n".repeat(4000));
+const served = [];
+function latestYml() {
+  const file = process.platform === "win32" ? `PDFPlus-Setup-${release.version}.exe` : `PDFPlus-${release.version}.AppImage`;
+  const sha512 = crypto.createHash("sha512").update(payload).digest("base64");
+  return [
+    `version: ${release.version}`,
+    "files:",
+    `  - url: ${file}`,
+    `    sha512: ${sha512}`,
+    `    size: ${payload.length}`,
+    `path: ${file}`,
+    `sha512: ${sha512}`,
+    "releaseDate: '2026-10-22T12:00:00.000Z'",
+    "releaseNotes: |-",
+    ...release.notes.split("\n").map((l) => "  " + l),
+    "",
+  ].join("\n");
+}
+const releases = http.createServer((req, res) => {
+  const name = decodeURIComponent(new URL(req.url, "http://x").pathname.slice(1));
+  served.push(name);
+  if (/^latest(-linux)?\.yml$/.test(name)) { res.writeHead(200, { "content-type": "text/yaml" }); res.end(latestYml()); return; }
+  if (/^PDFPlus-.*\.(exe|AppImage)$/.test(name) && name.includes(release.version)) {
+    res.writeHead(200, { "content-type": "application/octet-stream", "content-length": payload.length });
+    res.end(payload);
+    return;
+  }
+  res.writeHead(404); res.end();
+});
+await new Promise((r) => releases.listen(0, "127.0.0.1", r));
+const updateConfig = path.join(tmp, "app-update.yml");
+fs.writeFileSync(updateConfig, `provider: generic\nurl: http://127.0.0.1:${releases.address().port}\nupdaterCacheDirName: pdfplus-updater-test\n`);
+const fakeAppImage = path.join(tmp, "PDF+.AppImage"); // the Linux updater wants the running AppImage
+fs.writeFileSync(fakeAppImage, "");
+
+const ENV = {
+  ...process.env,
+  PDFPLUS_USER_DATA: profile,
+  PDFPLUS_UPDATE_CONFIG: updateConfig,
+  // Where the updater keeps a download, out of the real profile's way.
+  LOCALAPPDATA: path.join(tmp, "cache"),
+  XDG_CACHE_HOME: path.join(tmp, "cache"),
+  ...(process.platform === "linux" ? { APPIMAGE: fakeAppImage } : {}),
+};
 const SWITCHES = process.platform === "linux" ? ["--no-sandbox"] : [];
 
 let app = null;
@@ -408,8 +464,70 @@ try {
     truthy("recognized: " + JSON.stringify(text.trim()), /Desktop\s+reading/i.test(text));
   }
 
-  // ── 11. closing with unsaved changes ──────────────────────────────────────
-  console.log("11. closing a window with unsaved changes asks first");
+  // ── 11. the text reader's screenshot ──────────────────────────────────────
+  console.log("11. the text reader's 📷 Screenshot: the window, saved to Downloads with no question");
+  {
+    await app.evaluate(({ app }, dir) => app.setPath("downloads", dir), downloads);
+    await win.evaluate(() => [...document.querySelectorAll("#tabs .tab")].find((t) => /Hearing Notes/.test(t.textContent)).click());
+    const reader = await activeFrame(win);
+    truthy("the reader is the tab showing", /\/viewer\/text-reader\.html$/.test(reader.url()));
+    await reader.evaluate(() => document.getElementById("shot-btn").click());
+    const png = await until(() => {
+      const f = fs.readdirSync(downloads).find((n) => /screenshot.*\.png$/i.test(n));
+      if (!f) return null;
+      const b = fs.readFileSync(path.join(downloads, f));
+      return b.length > 24 && b.subarray(1, 4).toString("latin1") === "PNG" ? { name: f, b } : null;
+    }, 20000);
+    truthy("a PNG in Downloads", png);
+    if (png) {
+      const w = png.b.readUInt32BE(16), h = png.b.readUInt32BE(20);
+      truthy(`…the size of the window's page (${w} × ${h})`, w >= 800 && h >= 500);
+      truthy("…named for the document", /^Hearing Notes.* - screenshot /.test(png.name));
+    }
+    check("a camera or microphone is still refused", await reader.evaluate(async () => {
+      try { (await navigator.mediaDevices.getUserMedia({ video: true })).getTracks().forEach((t) => t.stop()); return "granted"; }
+      catch (e) { return "refused"; }
+    }), "refused");
+  }
+
+  // ── 12. updates ───────────────────────────────────────────────────────────
+  console.log("12. Home's Check for updates: up to date, then a newer release shown, downloaded and ready to install");
+  {
+    await win.evaluate(() => document.getElementById("home-tab").click());
+    await until(() => win.evaluate(() => !document.getElementById("dropzone").hidden));
+    check("Home shows the version", await win.evaluate(() => document.querySelector(".pdfplus-about .pa-version").textContent), `PDF+ ${CURRENT}`);
+    check("nothing asked of the releases before the button", served, []);
+    await win.evaluate(() => document.querySelector(".pdfplus-about .pa-check").click());
+    check("the same version: up to date", await until(() => win.evaluate(() => {
+      const t = document.querySelector(".pdfplus-about .pa-status").textContent;
+      return /up to date|Could not/.test(t) && t;
+    })), "PDF+ is up to date.");
+
+    release.version = "9.9.9";
+    release.notes = "- Screenshot in the text reader\n- A second change";
+    await win.evaluate(() => document.querySelector(".pdfplus-about .pa-check").click());
+    const shown = await until(() => win.evaluate(() => {
+      const u = document.querySelector(".pdfplus-about .pa-update");
+      return u && !u.hidden && { head: u.querySelector(".pa-head").textContent, notes: u.querySelector(".pa-notes").textContent };
+    }));
+    check("a newer release: its version and what changed", shown, {
+      head: `PDF+ 9.9.9 is available. You have ${CURRENT}.`,
+      notes: "- Screenshot in the text reader\n- A second change",
+    });
+    check("…and nothing downloaded yet", served.filter((n) => !/\.yml$/.test(n)), []);
+    await win.evaluate(() => document.querySelector(".pdfplus-about .pa-get").click());
+    const ready = await until(() => win.evaluate(() => {
+      const b = document.querySelector(".pdfplus-about .pa-get");
+      return /Restart and install|failed/.test(b.textContent + document.querySelector(".pdfplus-about .pa-hint").textContent)
+        && (b.textContent === "Restart and install" ? b.textContent : document.querySelector(".pdfplus-about .pa-hint").textContent);
+    }), 30000);
+    check("downloaded, checked and ready to install", ready, "Restart and install");
+    truthy("…the installer was fetched", served.some((n) => /^PDFPlus-.*9\.9\.9/.test(n)));
+    await win.evaluate(() => document.getElementById("home-tab").click()); // back to the documents
+  }
+
+  // ── 13. closing with unsaved changes ──────────────────────────────────────
+  console.log("13. closing a window with unsaved changes asks first");
   {
     // The PDF tab: one more note, not saved.
     await win.evaluate(() => {
@@ -446,6 +564,7 @@ try {
       await app.close();
     } catch { /* gone */ }
   }
+  releases.close();
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
