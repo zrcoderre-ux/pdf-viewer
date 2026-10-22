@@ -2,15 +2,16 @@ name: Build PDF+ (desktop)
 
 # Tests PDF+ (desktop/) on Linux and Windows, then builds its Windows
 # installer and keeps it as this run's artifact ("PDF+ for Windows" on the
-# run's page), to download and install by hand. Nothing is published from
-# here: release-desktop.yml calls this workflow with `release: true` (which
-# adds release notes and checks the version against the tag) and publishes
+# run's page). Nothing is published from here. On a working branch it runs
+# by itself; on main, release-desktop.yml calls it with `version` (which
+# stamps that version on the build and adds release notes) and publishes
 # what it built. The PWA's deploy is a separate workflow and is not touched
 # by this one.
 
 on:
   push:
-    branches: [main, "claude/**"]
+    # Not main: there release-desktop.yml runs this, and releases the result.
+    branches: ["claude/**"]
     paths:
       - "desktop/**"
       - "pwa/**"
@@ -22,17 +23,19 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
-      release:
-        description: "Building a release: notes from the commits since the last one, and the version checked against the tag"
-        type: boolean
-        default: false
+      version:
+        description: "Building a release of this version: stamped on the app, with notes from the commits since the last release"
+        type: string
+        default: ""
 
 permissions:
   contents: read
 
 concurrency:
-  group: build-desktop-${{ github.ref }}
-  cancel-in-progress: true
+  # In a call this is the caller's name, so a release never cancels, or is
+  # cancelled by, a branch build.
+  group: ${{ github.workflow }}-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
@@ -80,22 +83,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # A release's notes are the commits since the last release's tag.
-          fetch-depth: ${{ inputs.release && '0' || '1' }}
+          fetch-depth: ${{ inputs.version && '0' || '1' }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: Release notes, and the version against the tag
-        if: ${{ inputs.release }}
+      - name: Release notes
+        if: ${{ inputs.version }}
         shell: bash
         run: |
-          version="$(node -p "require('./desktop/package.json').version")"
-          if [ "${GITHUB_REF_NAME}" != "pdfplus-v${version}" ]; then
-            echo "::error::The tag ${GITHUB_REF_NAME} does not match desktop/package.json's version ${version} (expected pdfplus-v${version})."
-            exit 1
-          fi
-          prev="$(git describe --tags --abbrev=0 --match 'pdfplus-v*' HEAD^ 2>/dev/null || true)"
+          prev="$(git describe --tags --abbrev=0 --match 'pdfplus-v*' HEAD 2>/dev/null || true)"
           # electron-builder puts build/release-notes.md into latest.yml, which
           # is what the update button shows.
           if [ -z "$prev" ]; then
@@ -109,6 +107,11 @@ jobs:
       - name: Install Electron and the packager
         working-directory: desktop
         run: npm ci
+
+      - name: Stamp the release's version
+        if: ${{ inputs.version }}
+        working-directory: desktop
+        run: npm version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
 
       - name: Build the installer
         working-directory: desktop

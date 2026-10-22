@@ -10,6 +10,10 @@
   requests, wait until all of them are resolved before merging — don't merge
   between follow-ups. If work finishes and the user has not messaged, go ahead
   and merge.
+- Merging into `main` also releases PDF+, the desktop app, when the change
+  touches `desktop/`, `pwa/`, `viewer/` or `pdfjs/`
+  (`.github/workflows/release-desktop.yml`, which picks the version). Do not
+  push `pdfplus-v*` tags by hand; see `desktop/README.md`, "Releases".
 
 ## Project notes
 

@@ -68,21 +68,23 @@ Your settings stay in `AppData\Roaming\PDF+` unless you delete that folder.
   files).
 - Code signing.
 
-## Cutting a release
+## Releases
 
-1. Set the new version in `desktop/package.json` (in `desktop/`:
-   `npm version 0.3.0 --no-git-tag-version`, which updates the lockfile
-   too), and merge it into `main`.
-2. Tag that commit `pdfplus-v<version>` and push the tag:
-   `git tag pdfplus-v0.3.0 && git push origin pdfplus-v0.3.0`.
+Releases are automatic. Every change merged into `main` that touches the app
+(`desktop/`, `pwa/`, `viewer/`, `pdfjs/`) becomes a new PDF+ release
+(`.github/workflows/release-desktop.yml`): the tests run on Linux and
+Windows, the installer is built, and a GitHub release tagged
+`pdfplus-v<version>` is published with the installer, its blockmap and
+`latest.yml`. Its notes are the commit subjects since the last release that
+touched the app. Installed copies are offered it the next time someone
+clicks **Check for updates**; nothing installs without that click.
 
-`.github/workflows/release-desktop.yml` then runs the tests, builds the
-installer (refusing a tag that does not match the version), and publishes a
-GitHub release with the installer, its blockmap and `latest.yml`. The notes
-are the commit subjects since the last release that touched the app. Every
-installed PDF+ is offered it the next time someone clicks Check for updates.
-Every build that is not a release is still kept as its Actions run's
-artifact, **PDF+ for Windows**, for 30 days.
+The version goes up by one patch number each release (0.2.0, 0.2.1, …). For
+a new minor or major version, set it in `desktop/package.json` (in
+`desktop/`: `npm version 0.3.0 --no-git-tag-version`, which updates the
+lockfile too); the next release takes it. Do not push `pdfplus-v*` tags by
+hand. Builds on working branches are kept as their Actions run's artifact,
+**PDF+ for Windows**, for 30 days, and are never released.
 
 ## How it is built
 
@@ -96,9 +98,9 @@ artifact, **PDF+ for Windows**, for 30 days.
 | `gen-icon.py`, `build/icon.png` | The icon: the web app's page with a red plus. |
 
 `.github/workflows/build-desktop.yml` runs `test-desktop.mjs` on Linux and
-Windows, then builds the installer, on every push that touches `desktop/`,
-`pwa/`, `viewer/` or `pdfjs/`; `release-desktop.yml` publishes a release
-from a tag (above). How the pieces work and why is in
+Windows, then builds the installer, on every push to a working branch that
+touches `desktop/`, `pwa/`, `viewer/` or `pdfjs/`; on `main`,
+`release-desktop.yml` runs it and publishes the release (above). How the pieces work and why is in
 `Design Notes/Desktop app.md`.
 
 To run it from a checkout (Node 22):
