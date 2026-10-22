@@ -1747,8 +1747,8 @@ function adoptSavedFile(handle) {
 
 // Save: the annotation set (and any rotation on screen) into the file.
 async function saveEditedPdf() {
-  if (!saveEditsEl) return;
-  if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return; }
+  if (!saveEditsEl) return false;
+  if (!pdfBytes) { statusEl.textContent = "PDF not loaded yet."; return false; }
   saveEditsEl.disabled = true;
   try {
     statusEl.textContent = "Saving…";
@@ -1774,10 +1774,12 @@ async function saveEditedPdf() {
       toast("Saved", { kind: "success" });
     }
     statusEl.textContent = "";
+    return ok;
   } catch (e) {
     console.error("[pdf-viewer] save failed:", e);
     statusEl.textContent = "Save failed.";
     toast(`Save failed: ${e.message || e}`, { kind: "error", timeout: 6000 });
+    return false;
   } finally {
     saveEditsEl.disabled = false;
     syncUndoButtons();
@@ -2268,6 +2270,9 @@ window.__pdfViewerLoadLocal = loadLocalFile;
 // Whether this tab holds changes that are not in the file yet — the PWA shell
 // asks before closing a tab, and a reload or a closed window is warned below.
 window.__pdfViewerHasUnsaved = () => Annots.hasUnsaved();
+// …and Save, as the button does, true where it was written: the text reader's
+// Re-run PDF-Linker saves every PDF open in its PDF mode before the run.
+window.__pdfViewerSave = () => saveEditedPdf();
 window.addEventListener("beforeunload", (e) => {
   if (Annots.hasUnsaved()) { e.preventDefault(); e.returnValue = ""; }
 });

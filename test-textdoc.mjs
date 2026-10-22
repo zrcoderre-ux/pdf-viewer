@@ -27,6 +27,7 @@ import {
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
   valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead, setAsideLines, notedBlocks,
   COMMENTS_HEAD, parseComments, commentLine, commentsBlock, findPassage,
+  launcherFolderToken, rerunUrl, runRequestText, RUN_REQUEST_FILE, LAUNCHER_STEMS,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans, translate, translateRuns } from "./viewer/pseudo-key.js";
 
@@ -907,6 +908,21 @@ check("tool artifacts are not documents", ["LEAKS.txt", "Combined Text.txt", "Au
 check("run markers", ["ETA ~6.04PM (6 of 13).txt", "ETA (estimating...).txt", "DONE 12.45AM.txt", "eta ~11.05pm (applying leak fixes).TXT", "Brief.txt", "ETA.txt", "ETA notes.docx"].map(runMarker),
   [{ kind: "ETA", label: "~6:04 PM (6 of 13)" }, { kind: "ETA", label: "(estimating...)" }, { kind: "DONE", label: "12:45 AM" }, { kind: "ETA", label: "~11:05 PM (applying leak fixes)" }, null, null, null]);
 check("quarantine", isQuarantinedName("Brief.txt.LEAK"), true);
+// The Re-run button: the folder token PDF-Linker's launcher records
+// (`_launcher_folder_line`), the link it answers, and the request file.
+{
+  const tok = "QzpcQ2FzZXNcT2thZm9yIHYuIFBlbWJlcmx5";
+  const bat = "@echo off\r\nREM PDF-Linker re-run - double-click\r\nREM Folder, for the text reader's Re-run button: " + tok + "\r\nset \"PDFLINKER_PY=x\"\r\n";
+  check("launcher folder token (.bat)", launcherFolderToken(bat), tok);
+  check("…(.command)", launcherFolderToken("#!/bin/sh\n# Folder, for the text reader's Re-run button: " + tok + "\nnohup x &\n"), tok);
+  check("…an older launcher records none", launcherFolderToken("@echo off\r\nREM PDF-Linker re-run\r\n"), "");
+  check("…a command line is not the tag", launcherFolderToken("echo Folder, for the text reader's Re-run button: " + tok), "");
+  check("…it decodes to the path", Buffer.from(tok, "base64url").toString("utf8"), "C:\\Cases\\Okafor v. Pemberly");
+  check("rerun link", rerunUrl(tok, "Okafor v. Pemberly", "0f8a2c4e-1b3d-4a5f-9e7c-6d2b8a1c3e5f"),
+    "pdf-linker://run?f=" + tok + "&d=Okafor%20v.%20Pemberly&n=0f8a2c4e-1b3d-4a5f-9e7c-6d2b8a1c3e5f");
+  check("run request", JSON.parse(runRequestText("abc", "go")), { nonce: "abc", state: "go" });
+  check("its names", [RUN_REQUEST_FILE, LAUNCHER_STEMS], ["PDF-Linker Run Request.json", ["Re-run PDF-Linker", "Run PDF-Linker"]]);
+}
 // My-Macros' Markdown export: opened as a lone file, never a document of the folder.
 check("markdown by name", ["Draft Order.md", "Draft.MARKDOWN", "Brief.txt", "notes.md.txt"].map(isMarkdownName), [true, true, false, false]);
 check("…not an export", isExportName("Draft Order.md"), false);

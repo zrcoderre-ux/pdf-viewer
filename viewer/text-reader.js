@@ -4463,9 +4463,19 @@ async function forgetFolder() {
   // Its unsaved documents are saved first, or dropped — or the folder stays.
   if (!(await leaveFolderAsk())) return;
   const was = folderName;
+  await letGoOfFolder({ forget: true });
+  toast(`${was} is let go. The reader reads what you open, on its own — the key stays attached. “Open case folder” brings it back.`, { ms: 7000 });
+}
+/**
+ * The folder dropped, and everything read from it or through it; the document
+ * on screen stays on its own, under the key. `forget`: not remembered either
+ * (Forget this folder). Re-run PDF-Linker lets go without forgetting where it
+ * cannot close the tab, since the folder is the one to open again after the run.
+ */
+async function letGoOfFolder({ forget = true } = {}) {
   // Forgotten by its id, which stays (dirIdFor): the list kept under it is
   // there again when the folder is opened again, as it was under the name.
-  await forgetDir(folderId);
+  if (forget) await forgetDir(folderId);
   if (keyOffer.dataset.textFiles) hideKeyOffer();
   forgetPdfs();
   dropReady();
@@ -4515,7 +4525,6 @@ async function forgetFolder() {
   refreshPdf();
   renderNamesBar();
   renderLeakStatus();
-  toast(`${was} is let go. The reader reads what you open, on its own — the key stays attached. “Open case folder” brings it back.`, { ms: 7000 });
 }
 /** The one member of a reel, opened on its own: what is left when the folder goes. */
 async function openFolderDocLike(m) {
@@ -4526,6 +4535,164 @@ async function openFolderDocLike(m) {
   } catch { reelDone = true; reelDoneUp = true; }
 }
 $("forget-folder").addEventListener("click", () => { forgetFolder(); });
+
+/**
+ * ▶ RE-RUN PDF-LINKER: everything saved, the folder's own launcher started,
+ * and the folder closed — the double-click in the folder, from here.
+ *
+ * A page cannot start a program, so PDF-Linker does it: a `pdf-linker:` link
+ * (registered once per computer by PDF-Linker's `Register Reader Button.bat`)
+ * starts it, and it waits in the folder for this page's word. The link goes
+ * FIRST, while the click still counts as one — Chrome opens an outside
+ * program only from a click, and a save can outlast that by far — carrying the
+ * folder's path as the launcher records it (TD.launcherFolderToken: the page
+ * cannot learn a path) and a nonce. Then everything is saved: the documents
+ * and decisions (saveDocument, the folder's one save) and every PDF with
+ * unsaved changes in PDF mode. Then the word: TD.RUN_REQUEST_FILE with the
+ * nonce, "go" where all of it was written and "cancel" where not, so a run
+ * never starts on a folder half saved. PDF-Linker takes the file away as it
+ * starts the launcher, which is how this page knows it did; only then is the
+ * folder closed. A run that never comes (the link not set up on this
+ * computer, Chrome's question declined) leaves the folder open, the file
+ * taken back, and says so: nothing is lost, and the launcher in the folder
+ * still works.
+ */
+const RERUN_PICKUP_MS = 90000;
+let openingLink = false; // the beforeunload guard stands aside for the link
+let rerunning = false;
+/** The folder's launcher and the folder token it records: { name, token }, or null where it has none. */
+async function folderLauncher(dir) {
+  for (const stem of TD.LAUNCHER_STEMS) {
+    for (const ext of [".bat", ".command"]) {
+      let fh;
+      try { fh = await dir.getFileHandle(stem + ext); } catch { continue; }
+      try { return { name: stem + ext, token: TD.launcherFolderToken(await (await fh.getFile()).text()) }; }
+      catch { return { name: stem + ext, token: "" }; }
+    }
+  }
+  return null;
+}
+/** Open `url` without leaving the page: an outside program's link (the reader's own guard against leaving is held off for it). */
+function openLink(url) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.rel = "noopener";
+  a.hidden = true;
+  document.body.appendChild(a);
+  openingLink = true;
+  try { a.click(); } finally {
+    a.remove();
+    setTimeout(() => { openingLink = false; }, 1000);
+  }
+}
+async function writeRunRequest(dir, nonce, state) {
+  const fh = await dir.getFileHandle(TD.RUN_REQUEST_FILE, { create: true });
+  const w = await fh.createWritable();
+  await w.write(TD.runRequestText(nonce, state));
+  await w.close();
+}
+/** Whether the request file is gone: PDF-Linker took it, and started the run. */
+async function runRequestTaken(dir) {
+  try { await dir.getFileHandle(TD.RUN_REQUEST_FILE); return false; }
+  catch (e) { return !!(e && e.name === "NotFoundError"); }
+}
+/** Everything this reader holds of the folder, written: true where nothing is left owed. */
+async function saveAllForRun() {
+  if (hasUnsaved()) {
+    if (doc || unsavedDocs.size) { if (!(await saveDocument())) return false; }
+    else {
+      if (valuesDirty()) await saveValuesFile({ quiet: true });
+      if (leaksDirty()) await saveLeaks({ quiet: true });
+    }
+  }
+  for (const name of pdfModeUnsaved()) {
+    const w = pmWin(name);
+    let ok = false;
+    try { ok = !!(w && w.__pdfViewerSave && (await w.__pdfViewerSave())); } catch { ok = false; }
+    if (!ok) { toast(`${pmLabel(name)} was not saved in PDF mode, so PDF-Linker was not run.`, { error: true, ms: 8000 }); return false; }
+  }
+  if (!hasUnsaved()) return true;
+  const owed = unsavedNames().map((n) => TD.docLabel(n)).concat(pendingWrites());
+  toast(`Not run: ${owed.length ? nameList(owed) + " " + (owed.length === 1 ? "is" : "are") : "something is"} still unsaved, and PDF-Linker would run without ${owed.length === 1 ? "it" : "them"}. Save, then press Re-run PDF-Linker again.`, { error: true, ms: 9000 });
+  return false;
+}
+/**
+ * The folder closed once its run has started: the app's tab with it (the
+ * shell closes it and says why), the extension's tab, else — a page that
+ * cannot close itself — the folder let go of, here.
+ */
+async function closeForRun(dir, launcher) {
+  const said = `PDF-Linker is running on ${dir.name} (${launcher}). Open the folder again when its DONE file appears; pdf_linker.log says how it is going.`;
+  if (window.parent !== window) {
+    try { window.parent.postMessage({ type: "textreader:close", text: said }, location.origin); } catch { /* not the app's shell */ }
+    // Closed, this page is gone; still here, the frame is not the app's tab.
+    await new Promise((r) => setTimeout(r, 1500));
+    if (dir !== dirHandle) return;
+  }
+  if (location.protocol === "chrome-extension:" && window.chrome && chrome.tabs && chrome.tabs.getCurrent) {
+    try {
+      const tab = await new Promise((res) => chrome.tabs.getCurrent(res));
+      if (tab && tab.id != null) { chrome.tabs.remove(tab.id); return; }
+    } catch { /* stays open */ }
+  }
+  await letGoOfFolder({ forget: false });
+  toast(said, { ms: 10000 });
+}
+async function rerunLinker() {
+  const dir = dirHandle;
+  if (!dir || rerunning) return;
+  if (refuseWhileBusy()) return;
+  if (opening || adopting) { toast("Wait for the folder to finish opening."); return; }
+  if ((await permissionOf(dir, "readwrite")) !== "granted") {
+    let p = "denied";
+    try { p = await dir.requestPermission({ mode: "readwrite" }); } catch { p = "denied"; }
+    if (p !== "granted") { toast(`Not run: the reader may not write into ${dir.name}, so it cannot save it first.`, { error: true, ms: 7000 }); return; }
+    // The question took the click: Chrome opens an outside program only on one.
+    if (navigator.userActivation && !navigator.userActivation.isActive) { toast("Allowed. Press Re-run PDF-Linker again to save and run."); return; }
+  }
+  const seen = await runMarkersIn(dir);
+  if (seen && seen.eta && (!seen.done || seen.eta.at > seen.done.at)) {
+    toast(`PDF-Linker is already running on ${dir.name} (ETA ${seen.eta.label}).`, { error: true, ms: 6000 });
+    return;
+  }
+  const launcher = await folderLauncher(dir);
+  if (!launcher) { toast(`${dir.name} has no Re-run PDF-Linker launcher: PDF-Linker writes one when it runs on the folder.`, { error: true, ms: 7000 }); return; }
+  if (!launcher.token) {
+    toast(`${launcher.name} in ${dir.name} was written by a PDF-Linker from before this button, so it does not say where the folder is. Double-click it in the folder this once; the run writes it afresh, and the button works from then on.`, { error: true, ms: 12000 });
+    return;
+  }
+  const nonce = crypto.randomUUID();
+  rerunning = true;
+  try {
+    openLink(TD.rerunUrl(launcher.token, dir.name, nonce));
+    toast("Saving everything before PDF-Linker runs…", { ms: 60000 });
+    let saved = false;
+    try { saved = await saveAllForRun(); } catch (e) { console.warn(e); saved = false; }
+    try { await writeRunRequest(dir, nonce, saved ? "go" : "cancel"); }
+    catch (e) {
+      toast(`Not run: the reader could not write ${TD.RUN_REQUEST_FILE} into ${dir.name} (${e.message || e}). Double-click ${launcher.name} in the folder.`, { error: true, ms: 9000 });
+      return;
+    }
+    if (!saved) return; // saveAllForRun, or the save itself, has said why
+    toast(`Saved. Waiting for PDF-Linker to start on ${dir.name} — if Chrome asks whether to open PDF-Linker, say Open.`, { ms: RERUN_PICKUP_MS });
+    const until = Date.now() + RERUN_PICKUP_MS;
+    let taken = false;
+    while (!(taken = await runRequestTaken(dir)) && Date.now() < until) await new Promise((r) => setTimeout(r, 500));
+    if (!taken) {
+      try { await dir.removeEntry(TD.RUN_REQUEST_FILE); }
+      catch (e) { taken = !!(e && e.name === "NotFoundError"); } // taken at the last moment
+    }
+    if (!taken) {
+      toast(`PDF-Linker did not start. Everything is saved and ${dir.name} stays open. If this computer has not been set up for the button, double-click Register Reader Button.bat in the PDF-Linker folder once; until then, double-click ${launcher.name} in the case folder.`, { error: true, ms: 15000 });
+      return;
+    }
+    if (dir !== dirHandle) return; // another folder was opened meanwhile: that one stays
+    await closeForRun(dir, launcher.name.replace(/\.(bat|command)$/i, ""));
+  } finally {
+    rerunning = false;
+  }
+}
+$("rerun-btn").addEventListener("click", () => { rerunLinker(); });
 /** …and the other way: bring the rest of the folder in after all — the default again from here. */
 async function readWholeFolder() {
   if (!dirHandle) return;
@@ -4640,6 +4807,8 @@ function renderDocListNow() {
   markDocAlerts();
   const acts = $("docs-actions");
   if (acts) acts.hidden = !dirHandle;
+  const rerun = $("rerun-btn");
+  if (rerun) rerun.hidden = !dirHandle;
   const read = $("read-folder");
   if (read) read.hidden = !dirHandle || !folderLight;
 }
@@ -7380,6 +7549,7 @@ document.addEventListener("keydown", (e) => {
 // The browser's own dialog is all a page gets; which of the four it is, the
 // panels and the status bar say.
 window.addEventListener("beforeunload", (e) => {
+  if (openingLink) return; // a pdf-linker: link, which leaves the page where it is (rerunLinker)
   if (!hasUnsaved() && !standingInTheClear() && !pdfModeUnsaved().length) return;
   e.preventDefault();
   e.returnValue = "";

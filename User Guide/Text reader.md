@@ -572,6 +572,22 @@ app, which routes it to the reader tab.
   says whether anything is still going. The reader can only look while it
   holds the case folder, so a file opened on its own, with no folder known,
   gets no warning.
+- **▶ Re-run PDF-Linker, from the reader.** With a case folder open, the
+  toolbar's **▶ Re-run PDF-Linker** saves everything first (every document
+  you changed, the flags, keeps and LEAKS answers, and any PDF changed in PDF
+  mode), then starts the folder's own `Re-run PDF-Linker` launcher, exactly
+  as a double-click in the folder does, and closes the folder (in the app,
+  its tab). **Set it up once per computer:** double-click
+  `Register Reader Button.bat` in the PDF-Linker folder (no administrator
+  rights; run it again if Python or PDF-Linker moves). The first time you
+  press the button, Chrome asks whether to open PDF-Linker: say **Open**, and
+  tick "Always allow" to stop it asking. If a save does not go through,
+  nothing runs and the folder stays open. If PDF-Linker does not start within
+  a minute and a half (the computer is not set up, or Chrome's question was
+  declined), the reader says so and the folder stays open, everything saved:
+  double-click `Re-run PDF-Linker` in the folder instead. A launcher written
+  by a PDF-Linker from before the button does not say where its folder is, so
+  the first time, double-click it yourself; the run writes it afresh.
 - **Nothing is saved over what a run changed.** When you come back to the
   window, or open an export, the reader looks at the case folder's key and
   LEAKS.xlsx; where a PDF-Linker run (or Excel) has changed them since the

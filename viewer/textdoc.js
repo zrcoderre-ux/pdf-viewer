@@ -3242,6 +3242,37 @@ export function runMarker(name) {
   return { kind: m[1].toUpperCase(), label };
 }
 
+/**
+ * THE RE-RUN BUTTON (text-reader.js, `rerunLinker`). A page cannot start a
+ * program, and it cannot learn where on disk the case folder it was handed
+ * sits. PDF-Linker writes the folder's path into each launcher it leaves, on a
+ * comment line of its own (`_launcher_folder_line`), as unpadded base64url of
+ * its UTF-8; the reader copies that token into a `pdf-linker:` link, which
+ * Windows hands to PDF-Linker (`--reader-request`, registered once per
+ * computer by its `Register Reader Button.bat`). The link carries a nonce, and
+ * PDF-Linker starts the launcher only once the reader has written the same
+ * nonce into `RUN_REQUEST_FILE` in that folder: the save's "go", and the proof
+ * that the page asking holds the folder. The tag, the token's alphabet, the
+ * link and the file's fields change only in step with PDF-Linker.
+ */
+export const RUN_REQUEST_FILE = "PDF-Linker Run Request.json";
+export const LAUNCHER_STEMS = ["Re-run PDF-Linker", "Run PDF-Linker"];
+const LAUNCHER_FOLDER_TAG = "Folder, for the text reader's Re-run button:";
+/** The folder token a launcher's text records, or "" (an older PDF-Linker's launcher records none). */
+export function launcherFolderToken(text) {
+  const tag = LAUNCHER_FOLDER_TAG.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(`^(?:REM|#)[ \\t]+${tag}[ \\t]+([A-Za-z0-9_-]+)[ \\t]*\\r?$`, "m").exec(String(text == null ? "" : text));
+  return m ? m[1] : "";
+}
+/** The `pdf-linker:` link that asks PDF-Linker to run the folder its launcher's token names. */
+export function rerunUrl(token, folderName, nonce) {
+  return `pdf-linker://run?f=${token}&d=${encodeURIComponent(folderName || "")}&n=${nonce}`;
+}
+/** The request file's text: `go` once everything is saved, `cancel` where a save did not finish. */
+export function runRequestText(nonce, state) {
+  return JSON.stringify({ nonce, state }) + "\n";
+}
+
 /** The pseudonym key by name — the macro's pattern plus Windows' copies. */
 /** A document's name as a reader says it: without the export's extension. */
 export function docLabel(name) {

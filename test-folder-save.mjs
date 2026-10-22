@@ -2540,6 +2540,104 @@ test(38, "a keep PDF-Linker spent onto the master is marked, listed and can be t
   }
 });
 
+// ── 39. ▶ Re-run PDF-Linker ─────────────────────────────────────────────────
+// The test plays PDF-Linker's part (`_serve_reader_request`): the link the
+// click opened is caught, the request file read, and taken away.
+test(39, "▶ Re-run PDF-Linker: the link at the click, everything saved before the word, the folder closed once PDF-Linker takes it", async () => {
+  const TOKEN = "QzpcQ2FzZXNcQ2FzZSBIYXJuZXNz"; // C:\Cases\Case Harness
+  const bat = (line) => "@echo off\r\nREM PDF-Linker re-run - double-click\r\n"
+    + (line ? "REM Folder, for the text reader's Re-run button: " + TOKEN + "\r\n" : "") + 'start "x" /min x\r\nexit /b\r\n';
+  const putRoot = (page, name, text) => page.evaluate(async ({ name, text }) => {
+    const w = await (await window.__case.getFileHandle(name, { create: true })).createWritable(); await w.write(text); await w.close();
+  }, { name, text });
+  const watchLinks = (page) => page.evaluate(() => {
+    window.__links = [];
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () { if (/^pdf-linker:/.test(this.href)) { window.__links.push(this.href); return; } return click.call(this); };
+  });
+  const links = (page) => page.evaluate(() => window.__links.slice());
+  const request = (page) => page.evaluate(async () => {
+    try { return JSON.parse(await (await (await window.__case.getFileHandle("PDF-Linker Run Request.json")).getFile()).text()); } catch { return null; }
+  });
+  const awaitRequest = async (page, ms = 15000) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) { const q = await request(page); if (q) return q; await page.waitForTimeout(150); }
+    return null;
+  };
+  const buttonUp = (page) => page.evaluate(() => !document.getElementById("rerun-btn").hidden);
+  {
+    const r = await newReader();
+    try {
+      await writeFolder(r.page);
+      await putRoot(r.page, "Re-run PDF-Linker.bat", bat(true));
+      await setReel(r.page, false);
+      await adopt(r.page);
+      await openDoc(r.page, "A Complaint.txt");
+      check("the button is up with the folder", await buttonUp(r.page), true);
+      truthy("A edited", await typeOver(r.page, "restitution", "rescission"));
+      await watchLinks(r.page);
+      r.log.dialogs.length = 0;
+      await r.page.click("#rerun-btn");
+      const q = await awaitRequest(r.page);
+      const [link] = await links(r.page);
+      const m = /^pdf-linker:\/\/run\?f=([A-Za-z0-9_-]+)&d=Case%20Harness&n=([0-9a-f-]{36})$/.exec(link || "");
+      check("the link carries the launcher's folder token and a nonce", m ? m[1] : link, TOKEN);
+      check("the word: go, under the link's nonce", q, { nonce: m ? m[2] : "?", state: "go" });
+      check("…written after A was", /rescission/.test(T(await readFolder(r.page), "A Complaint.txt")), true);
+      check("nothing left unsaved", await hasUnsaved(r.page), false);
+      check("the folder stays open until PDF-Linker takes the word", await buttonUp(r.page), true);
+      await r.page.evaluate(async () => { await window.__case.removeEntry("PDF-Linker Run Request.json"); });
+      await r.page.waitForFunction(() => document.getElementById("rerun-btn").hidden, null, { timeout: 5000 }).catch(() => {});
+      check("taken: the folder is closed", await buttonUp(r.page), false);
+      truthy("…and the reader says what is running", r.log.toasts.some((t) => /PDF-Linker is running on Case Harness \(Re-run PDF-Linker\)/.test(t)));
+      check("no Leave site? in front of the link", r.log.dialogs.filter((d) => d.type === "beforeunload"), []);
+      check("no page errors", r.log.errors, []);
+    } finally { await r.close(); }
+  }
+  {
+    // A save that does not go through: the word is "cancel", the folder stays.
+    const r = await newReader();
+    try {
+      await writeFolder(r.page);
+      await putRoot(r.page, "Re-run PDF-Linker.bat", bat(true));
+      await setReel(r.page, false);
+      await adopt(r.page);
+      await openDoc(r.page, "A Complaint.txt");
+      truthy("A edited", await typeOver(r.page, "restitution", "rescission"));
+      await writeDisk(r.page, "A Complaint.txt", A.replace("a month", "a week"));
+      await watchLinks(r.page);
+      r.log.answer = () => false;
+      await r.page.click("#rerun-btn");
+      const q = await awaitRequest(r.page);
+      check("the word: cancel", q && q.state, "cancel");
+      check("…the file on disk not written over", T(await readFolder(r.page), "A Complaint.txt"), A.replace("a month", "a week"));
+      check("the folder stays open", await buttonUp(r.page), true);
+      check("no page errors", r.log.errors, []);
+    } finally { await r.close(); }
+  }
+  {
+    // A launcher from before the button, and none at all: nothing opened, nothing written.
+    const r = await newReader();
+    try {
+      await writeFolder(r.page);
+      await putRoot(r.page, "Re-run PDF-Linker.bat", bat(false));
+      await adopt(r.page);
+      await openDoc(r.page, "A Complaint.txt");
+      await watchLinks(r.page);
+      await r.page.click("#rerun-btn");
+      await r.page.waitForTimeout(800);
+      truthy("an older launcher: double-click it this once", r.log.toasts.some((t) => /from before this button/.test(t)));
+      await r.page.evaluate(async () => { await window.__case.removeEntry("Re-run PDF-Linker.bat"); });
+      await r.page.click("#rerun-btn");
+      await r.page.waitForTimeout(800);
+      truthy("no launcher: said so", r.log.toasts.some((t) => /has no Re-run PDF-Linker launcher/.test(t)));
+      check("no link opened, no word written", [await links(r.page), await request(r.page)], [[], null]);
+      check("the folder stays open", await buttonUp(r.page), true);
+      check("no page errors", r.log.errors, []);
+    } finally { await r.close(); }
+  }
+});
+
 // ── run ─────────────────────────────────────────────────────────────────────
 srv = await startServer();
 try {
