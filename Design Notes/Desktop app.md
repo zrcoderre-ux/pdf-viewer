@@ -85,6 +85,19 @@ once (`APP_SCHEMES`). Any other scheme is refused:
 - A clicked `<a href>` to another origin is caught by the shim's `click`
   listener on `window`, after the page's own handlers (one that opens the
   link itself prevents the default, and the shim leaves it alone).
+- **PDF-Linker not set up on the computer** (owner: "When I use the Re-run
+  PDF-linker button I get a pop up saying I dont have an app to run it").
+  `pdf-linker:` is registered per Windows user by PDF-Linker's
+  `Register Reader Button.bat`; with none, Windows answered the link with
+  its own "You'll need a new app" pop-up. `openExternal` now asks
+  `app.getApplicationNameForProtocol` first and, where nothing is
+  registered, puts up PDF+'s own message naming the .bat (OK, or Try anyway
+  for a registration Windows can name no program for). Declined, it returns
+  false, and the shim's `window.open` dispatches `pdfplus:link-refused` with
+  the URL on the page's window, so the text reader's `rerunLinker` stops
+  waiting for a run that will not come and says the same (no request file
+  is left in the folder). Tests: `test-desktop.mjs` case 7,
+  `test-folder-save.mjs` case 39.
 - `setWindowOpenHandler`, `will-navigate` and `will-frame-navigate` in
   `guardContents` are the backstop. **`will-frame-navigate` was not emitted
   for a link clicked in a tab's iframe** in Electron 44 (the navigation went

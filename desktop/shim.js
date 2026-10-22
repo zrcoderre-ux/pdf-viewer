@@ -199,7 +199,13 @@
     }
     // The web, mail, and PDF-Linker's own pdf-linker: link (main.js APP_SCHEMES).
     if (!/^(https?|mailto|pdf-linker):$/.test(u.protocol)) return null;
-    native().openExternal(u.href).catch(() => {});
+    // A pdf-linker: link main.js did not hand over (PDF-Linker not set up on
+    // this computer, and the person said OK to being told so) is said to the
+    // page, so the text reader's Re-run PDF-Linker stops waiting for a run
+    // that will not start (text-reader.js, rerunLinker).
+    native().openExternal(u.href).then((opened) => {
+      if (opened === false && u.protocol === "pdf-linker:") window.dispatchEvent(new CustomEvent("pdfplus:link-refused", { detail: { url: u.href } }));
+    }, () => {});
     if (/(^|,)\s*(noopener|noreferrer)\s*(=\s*(yes|1|true))?\s*(,|$)/i.test(String(features || ""))) return null;
     // What a browser hands back for a tab that opened elsewhere.
     return {

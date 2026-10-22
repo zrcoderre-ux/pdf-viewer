@@ -2616,6 +2616,41 @@ test(39, "▶ Re-run PDF-Linker: the link at the click, everything saved before 
     } finally { await r.close(); }
   }
   {
+    // In PDF+ on a computer PDF-Linker is not set up on: PDF+ does not hand
+    // the link over and says so to the page (desktop/shim.js). Everything is
+    // saved, no word is written for a run that will not come, the reader
+    // says what to do at once (not after its minute and a half), and the
+    // folder stays open.
+    const r = await newReader();
+    try {
+      await writeFolder(r.page);
+      await putRoot(r.page, "Re-run PDF-Linker.bat", bat(true));
+      await setReel(r.page, false);
+      await adopt(r.page);
+      await openDoc(r.page, "A Complaint.txt");
+      truthy("A edited", await typeOver(r.page, "restitution", "rescission"));
+      await r.page.evaluate(() => {
+        window.__links = [];
+        const click = HTMLAnchorElement.prototype.click;
+        HTMLAnchorElement.prototype.click = function () {
+          if (!/^pdf-linker:/.test(this.href)) return click.call(this);
+          window.__links.push(this.href);
+          const url = this.href;
+          setTimeout(() => window.dispatchEvent(new CustomEvent("pdfplus:link-refused", { detail: { url } })), 50);
+        };
+      });
+      const t0 = Date.now();
+      await r.page.click("#rerun-btn");
+      const said = () => r.log.toasts.some((t) => /not set up for the button.*Register Reader Button\.bat/.test(t));
+      while (!said() && Date.now() - t0 < 10000) await r.page.waitForTimeout(150);
+      truthy("said at once: this computer is not set up, run Register Reader Button.bat", said());
+      check("…A saved all the same", /rescission/.test(T(await readFolder(r.page), "A Complaint.txt")), true);
+      check("…no word written", await request(r.page), null);
+      check("…the folder stays open", await buttonUp(r.page), true);
+      check("no page errors", r.log.errors, []);
+    } finally { await r.close(); }
+  }
+  {
     // A launcher from before the button, and none at all: nothing opened, nothing written.
     const r = await newReader();
     try {

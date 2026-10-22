@@ -206,11 +206,15 @@ try {
   app = await electron.launch({ executablePath: ELECTRON, args: [DESKTOP, ...SWITCHES, brief], cwd: DESKTOP, env: ENV });
   // Links the page opens, and the questions main.js asks, are recorded here
   // instead of reaching the desktop.
-  await app.evaluate(({ shell, dialog }) => {
+  await app.evaluate(({ app: electronApp, shell, dialog }) => {
     globalThis.__opened = [];
     globalThis.__asked = [];
     globalThis.__answer = 1; // Cancel
     shell.openExternal = async (u) => { globalThis.__opened.push(u); };
+    // The program Windows registered for a scheme (PDF-Linker's Register
+    // Reader Button.bat registers pdf-linker:): set, unless a test says not.
+    globalThis.__protocolApp = "PDF-Linker";
+    electronApp.getApplicationNameForProtocol = () => globalThis.__protocolApp;
     dialog.showMessageBox = async (...a) => {
       const o = a.find((x) => x && typeof x === "object" && "buttons" in x);
       globalThis.__asked.push(o ? o.detail || o.message : "");
@@ -395,6 +399,33 @@ try {
     check("PDF-Linker's pdf-linker: link goes to PDF-Linker without a question",
       await app.evaluate(() => ({ opened: globalThis.__opened.slice(), asked: globalThis.__asked.slice() })),
       { opened: ["pdf-linker://run?f=QzpcQ2FzZQ&d=Case&n=1234"], asked: [] });
+    // …and on a computer PDF-Linker has not been set up on, PDF+ says what to
+    // do instead of Windows' "You'll need a new app", and tells the page.
+    const clickRerun = (n) => viewer.evaluate((n) => {
+      window.__refused = window.__refused || [];
+      if (!window.__refusedOn) { window.__refusedOn = true; window.addEventListener("pdfplus:link-refused", (e) => window.__refused.push(e.detail.url)); }
+      const a = document.createElement("a");
+      a.href = `pdf-linker://run?f=QzpcQ2FzZQ&d=Case&n=${n}`;
+      a.rel = "noopener";
+      a.hidden = true;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }, n);
+    await app.evaluate(() => { globalThis.__protocolApp = ""; globalThis.__answer = 0; globalThis.__opened.length = 0; globalThis.__asked.length = 0; }); // OK
+    await clickRerun(5678);
+    await sleep(800);
+    const unset = await app.evaluate(() => ({ opened: globalThis.__opened.slice(), asked: globalThis.__asked.slice() }));
+    check("PDF-Linker not set up: not opened", unset.opened, []);
+    truthy("…and PDF+ says to run Register Reader Button.bat", unset.asked.length === 1 && /Register Reader Button\.bat/.test(unset.asked[0]));
+    check("…and tells the page, so the reader stops waiting", await viewer.evaluate(() => window.__refused), ["pdf-linker://run?f=QzpcQ2FzZQ&d=Case&n=5678"]);
+    await app.evaluate(() => { globalThis.__answer = 1; globalThis.__opened.length = 0; globalThis.__asked.length = 0; }); // Try anyway
+    await clickRerun(9012);
+    await sleep(800);
+    check("…Try anyway hands it over all the same",
+      await app.evaluate(() => globalThis.__opened.slice()), ["pdf-linker://run?f=QzpcQ2FzZQ&d=Case&n=9012"]);
+    check("…and the page is told nothing", await viewer.evaluate(() => window.__refused), ["pdf-linker://run?f=QzpcQ2FzZQ&d=Case&n=5678"]);
+    await app.evaluate(() => { globalThis.__protocolApp = "PDF-Linker"; });
     check("still one window", await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   }
 

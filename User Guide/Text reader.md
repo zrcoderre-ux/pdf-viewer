@@ -594,7 +594,9 @@ app, which routes it to the reader tab.
   nothing runs and the folder stays open. If PDF-Linker does not start within
   a minute and a half (the computer is not set up, or Chrome's question was
   declined), the reader says so and the folder stays open, everything saved:
-  double-click `Re-run PDF-Linker` in the folder instead. A launcher written
+  double-click `Re-run PDF-Linker` in the folder instead. In PDF+, on a
+  computer not set up yet, PDF+ says so at once and names the .bat, instead
+  of Windows' "You'll need a new app" pop-up. A launcher written
   by a PDF-Linker from before the button does not say where its folder is, so
   the first time, double-click it yourself; the run writes it afresh.
 - **Nothing is saved over what a run changed.** When you come back to the

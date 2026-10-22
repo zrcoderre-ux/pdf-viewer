@@ -337,6 +337,29 @@ async function openExternal(raw, win) {
   let u;
   try { u = new URL(String(raw)); } catch { return false; }
   if (!["https:", "http:", "mailto:", ...APP_SCHEMES].includes(u.protocol)) return false;
+  const parent = win && !win.isDestroyed() ? win : null;
+  const ask = (opts) => (parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts));
+  // PDF-LINKER NOT SET UP ON THIS COMPUTER. Its link is handed to the program
+  // Windows registered for it, which PDF-Linker's Register Reader Button.bat
+  // does once per computer; with none, Windows put up its own "You'll need a
+  // new app to open this pdf-linker link", which says nothing of what to do
+  // (the owner: "I get a pop up saying I dont have an app to run it"). So the
+  // registration is asked about first, and PDF+ says what to do. "Try anyway"
+  // is there in case the question answers wrong (a registration Windows can
+  // name no program for): it does what the button did before.
+  if (APP_SCHEMES.includes(u.protocol) && !app.getApplicationNameForProtocol(u.href)) {
+    const { response } = await ask({
+      type: "warning",
+      buttons: ["OK", "Try anyway"],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      title: APP_NAME,
+      message: "PDF-Linker is not set up on this computer for the Re-run PDF-Linker button.",
+      detail: "Double-click Register Reader Button.bat in the PDF-Linker folder once (it needs no administrator rights), then press Re-run PDF-Linker again. Until then, double-click the Re-run PDF-Linker launcher in the case folder.\n\nThe reader saves your changes either way, and the folder stays open.",
+    });
+    if (response !== 1) return false;
+  }
   const trusted = APP_SCHEMES.includes(u.protocol)
     || (u.protocol === "https:" && TRUSTED_LINK_HOSTS.some((re) => re.test(u.hostname)));
   if (!trusted) {
@@ -350,8 +373,7 @@ async function openExternal(raw, win) {
       message: "Open this link in your web browser?",
       detail: u.href.length > 400 ? u.href.slice(0, 400) + "…" : u.href,
     };
-    const parent = win && !win.isDestroyed() ? win : null;
-    const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
+    const { response } = await ask(opts);
     if (response !== 0) return false;
   }
   await shell.openExternal(u.href);

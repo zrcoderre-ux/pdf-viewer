@@ -4663,11 +4663,23 @@ async function rerunLinker() {
   }
   const nonce = crypto.randomUUID();
   rerunning = true;
+  // PDF+ (desktop/shim.js) says when it did not hand the link over, because
+  // PDF-Linker is not set up on this computer and it told the person so: no
+  // run will come for the request, so none is waited for.
+  const url = TD.rerunUrl(launcher.token, dir.name, nonce);
+  let refused = false;
+  const onRefused = (e) => { if (e.detail && e.detail.url === url) refused = true; };
+  window.addEventListener("pdfplus:link-refused", onRefused);
   try {
-    openLink(TD.rerunUrl(launcher.token, dir.name, nonce));
+    openLink(url);
     toast("Saving everything before PDF-Linker runs…", { ms: 60000 });
     let saved = false;
     try { saved = await saveAllForRun(); } catch (e) { console.warn(e); saved = false; }
+    const notSetUp = () => toast(`Saved. PDF-Linker was not run: this computer is not set up for the button (double-click Register Reader Button.bat in the PDF-Linker folder once). Until then, double-click ${launcher.name} in ${dir.name}.`, { error: true, ms: 15000 });
+    if (refused) {
+      if (saved) notSetUp();
+      return;
+    }
     try { await writeRunRequest(dir, nonce, saved ? "go" : "cancel"); }
     catch (e) {
       toast(`Not run: the reader could not write ${TD.RUN_REQUEST_FILE} into ${dir.name} (${e.message || e}). Double-click ${launcher.name} in the folder.`, { error: true, ms: 9000 });
@@ -4677,11 +4689,12 @@ async function rerunLinker() {
     toast(`Saved. Waiting for PDF-Linker to start on ${dir.name} — if Chrome asks whether to open PDF-Linker, say Open.`, { ms: RERUN_PICKUP_MS });
     const until = Date.now() + RERUN_PICKUP_MS;
     let taken = false;
-    while (!(taken = await runRequestTaken(dir)) && Date.now() < until) await new Promise((r) => setTimeout(r, 500));
+    while (!(taken = await runRequestTaken(dir)) && !refused && Date.now() < until) await new Promise((r) => setTimeout(r, 500));
     if (!taken) {
       try { await dir.removeEntry(TD.RUN_REQUEST_FILE); }
       catch (e) { taken = !!(e && e.name === "NotFoundError"); } // taken at the last moment
     }
+    if (!taken && refused) { notSetUp(); return; }
     if (!taken) {
       toast(`PDF-Linker did not start. Everything is saved and ${dir.name} stays open. If this computer has not been set up for the button, double-click Register Reader Button.bat in the PDF-Linker folder once; until then, double-click ${launcher.name} in the case folder.`, { error: true, ms: 15000 });
       return;
@@ -4689,6 +4702,7 @@ async function rerunLinker() {
     if (dir !== dirHandle) return; // another folder was opened meanwhile: that one stays
     await closeForRun(dir, launcher.name.replace(/\.(bat|command)$/i, ""));
   } finally {
+    window.removeEventListener("pdfplus:link-refused", onRefused);
     rerunning = false;
   }
 }
