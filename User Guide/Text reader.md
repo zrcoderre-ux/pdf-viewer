@@ -2238,9 +2238,22 @@ app, which routes it to the reader tab.
   page's size** (or as near it as its gap holds), and type the PDF sets small
   down the page, a footnote, is set in one size, the PDF's, its numbered
   lines and the lines between them alike. Nothing is drawn smaller than the
-  PDF prints it. A picture's words, which the export has and the PDF's text
-  does not, are fitted into the picture's room, so they move no other line
-  and the page stays the size of its PDF page.
+  PDF prints it — except that **no line is ever drawn on top of another**:
+  where the lines the export puts between two numbers cannot all stand there
+  at their size (a caption's party block a line deeper than the PDF prints
+  it), those lines are set smaller, alike, until they fit. A picture's words,
+  which the export has and the PDF's text does not, are fitted into the
+  picture's room, so they move no other line and the page stays the size of
+  its PDF page; where even very small type will not fit them, the lines
+  around them give way rather than have them drawn through each other.
+  **A scanned page is set in one size.** Where the PDF's text is an OCR
+  layer over a scan (or the page header's REVIEW note says the run corrected
+  the page's OCR layer), the OCR's line-by-line sizes and positions are not
+  trusted: every line is set in one size, the size the page's lines fit
+  across the PDF's text in, and the lines are spaced evenly down the page,
+  held where the PDF prints them only at the lines whose match agrees with
+  the rest. A scanned court form PDF-Linker has the blank of is still drawn
+  in the blank's type.
   **# Number lines** puts pleading paper's margin numbers (1–28) on a page
   whose export has none (a scan whose OCR missed the margin). With the PDF
   open beside it, each line goes on the number the PDF prints it at, and a

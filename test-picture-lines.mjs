@@ -4,7 +4,11 @@
 // and every line the PDF does carry stays on its row — under the picture,
 // above it and beside a picture at the foot of the page — and on the page,
 // which keeps the paper's height, so side by side its PDF page's sheet has no
-// white held open under it (plain paper and pleading paper).
+// white held open under it (plain paper and pleading paper). And no line ever
+// stands on another (the owner: "It should never make lines overlap like
+// this"): sixty of a picture's lines in the inch under the last line the PDF
+// prints cannot be set legibly there, and the lines above give way, a little
+// out of register, rather than have them drawn through each other.
 //
 // Run: node test-picture-lines.mjs   (from the repo root)
 //
@@ -81,6 +85,16 @@ async function open(browser, base, { exp, pdf }) {
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  // A folder handle is never put in IndexedDB here: the Chromium this runs on
+  // in some containers goes down reading an origin-private folder's handle
+  // back out of it, and the folder is only remembered, not needed, for this.
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (v, k) {
+      if (v && typeof FileSystemHandle === "function" && v.handle instanceof FileSystemHandle) throw new DOMException("not kept in this test", "DataCloneError");
+      return put.call(this, v, k);
+    };
+  });
   await page.goto(base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder);
   await page.evaluate(async (text) => {
@@ -117,7 +131,7 @@ async function open(browser, base, { exp, pdf }) {
     const body = document.querySelector("#pages .tpage .page-body");
     const br = body.getBoundingClientRect();
     const scale = br.width / 612;
-    return { height: br.height / scale, at: [...body.querySelectorAll(":scope > .line")].map((l) => { const r = l.getBoundingClientRect(); return [l.textContent.trim(), (r.top - br.top) / scale, (r.bottom - br.top) / scale]; }) };
+    return { height: br.height / scale, at: [...body.querySelectorAll(":scope > .line")].map((l) => { const r = l.getBoundingClientRect(); return [l.textContent.trim(), (r.top - br.top) / scale, (r.bottom - br.top) / scale, parseFloat(getComputedStyle(l).fontSize) / scale]; }) };
   });
   return { lines, sheet, errors, close: () => page.context().close() };
 }
@@ -135,14 +149,16 @@ try {
     ["2. thirty of them, more than a pitch apiece holds", { inside: 30 }],
     ["3. a picture at the head of the page", { before: 20, y: 292 }],
     ["4. a picture at the foot of the page", { after: 24 }],
-    ["5. sixty of them at the foot, more than the page holds at a pitch apiece", { after: 60 }],
+    ["5. sixty of them at the foot, more than the page holds at a pitch apiece", { after: 60, crowded: true }],
     ["6. pleading paper: a picture's words under line 28", { pleading: true, after: 12 }],
     ["7. pleading paper: a picture over eight lines' numbers", { pleading: true, inside: 14 }],
   ]) {
     console.log(label);
     const b = build(spec);
     const r = await open(browser, srv.base, b);
-    check("every line the PDF carries on its row", offRow(r, b.pdf).every((d) => d <= 1), true);
+    if (!spec.crowded) check("every line the PDF carries on its row", offRow(r, b.pdf).every((d) => d <= 1), true);
+    const worded = r.lines.at.filter(([t]) => t);
+    check("no line on top of another: each its type or more under the one above", worded.every(([, top], k) => k === 0 || top >= worded[k - 1][1] + worded[k - 1][3] - 0.5), true);
     check("…and every line on the page", r.lines.at.every(([, top, bottom]) => top >= -1 && bottom <= r.lines.height + 1) && Math.round(r.lines.height) === 792, true);
     check("…and side by side no white held open under its PDF page", Math.abs(r.sheet) <= 2, true);
     check("no page errors", r.errors, []);

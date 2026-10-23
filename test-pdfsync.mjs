@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, scanLayout, fitRuns, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
   matchedScale, spreadTops, evenHalfLines, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
@@ -177,6 +177,52 @@ console.log("a page with no numbers: rows matched by their words");
     const foot = rowLayout(["alpha bravo charlie", ...pic, ...pic.map((t) => t + " again"), "", ""], [R(600, "alpha bravo charlie")], { height: 792 });
     check("under the last, down to the foot of the page (its top margin up from the bottom)", Math.round(foot.positions[12].top * 10) / 10 < 792 - 72, true);
     check("…the closing blank lines no lines to make room for", Math.round(foot.positions[1].spread * 10) / 10, Math.round(((792 - 72 - 614.4) / 12) * 10) / 10);
+  }
+  {
+    // A SCAN (scanLayout): thirty lines 12 points apart from 100, the OCR's
+    // rows each a line in a size of its own; lines 10-19 the run read again,
+    // sharing no word with their rows, and line 12's words on row 19 (a
+    // fragment of a leaning line). rowLayout took that match as it came:
+    // a gap of eight rows under line 11, and lines 13-19 stacked over lines
+    // 20 on, to be pushed down past them and off the foot of the page.
+    const words = (k) => `alpha${k} bravo${k} charlie${k} delta${k} echo${k} foxtrot${k}`;
+    const texts = Array.from({ length: 30 }, (_, k) => words(k));
+    const heights = [9, 14, 10, 13, 8, 12, 11, 14, 9, 13];
+    const rows = texts.map((t, k) => ({ top: 100 + k * 12, left: 72, height: heights[k % 10], text: k >= 10 && k < 20 ? "xq zz yy ww" + k : t, items: [] }));
+    rows[19].text = words(12);
+    const old = rowLayout(texts, rows, { height: 792 });
+    check("(before: rowLayout set lines 13-19 over lines 20 on)", [old.positions[12].top, old.positions[13].top === old.positions[20].top], [328, true]);
+    const lay = scanLayout(texts, rows, { size: 10, height: 792 });
+    const tops = lay.positions.map((p) => Math.round(p.top * 10) / 10);
+    check("a scan's lines stand a line apart down the page, the PDF's first and last rows where it prints them", tops, texts.map((_, k) => 100 + k * 12));
+    check("…every line in one size", [...new Set(lay.positions.map((p) => p.size))], [10]);
+    check("…the match out of its place no anchor", [lay.rowOf[12], lay.rowOf[5], lay.anchors], [null, 5, 20]);
+    check("…nothing set closer than its box", lay.positions.every((p) => !p.spread), true);
+    // The size the leading holds: 12 points a line holds 12 / (1.2 × 0.9).
+    check("a size larger than the page's leading holds is taken down to it, alike", Math.round(scanLayout(texts, rows, { size: 14 }).size * 100) / 100, 11.11);
+    // Nothing matched at all: evenly from the first printed row to the last,
+    // the export's blank line half a line.
+    const none = scanLayout(["one two", "", "three four", "five six"], [{ top: 100, left: 72, height: 10, text: "x" }, { top: 160, left: 72, height: 10, text: "y" }], { size: 10 });
+    check("nothing matched: the page's lines evenly down the PDF's text, a blank line half a line", none.positions.map((p) => p.top), [100, 124, 136, 160]);
+    check("…in one size", none.positions.map((p) => p.size), [10, 10, 10, 10]);
+    check("no rows, no layout", scanLayout(texts, [], { size: 10 }), null);
+  }
+  {
+    // NO LINE OVER ANOTHER ON PLEADING PAPER (fitRuns): lines 14 and 15 24
+    // points apart in 12-point type, and two lines the export puts between
+    // them — a caption's party block a line deeper than the PDF prints it.
+    // spreadTops shared the 12 points left at 6 apiece, each line half under
+    // the one above; their type is taken down alike to what the space holds.
+    const tops = [300, 312, 324, 336], fixed = [true, false, false, true], clear = [12, 12, 12, 12];
+    check("(before: spreadTops shared the space out at half a line each)", spreadTops([300, 312, 324, 324], clear, fixed), [300, 312, 318, 324]);
+    const f = fitRuns([300, 312, 324, 324], clear, fixed);
+    check("the run between two numbers taken down alike to what the space holds", f, [1, 0.5, 0.5, 1]);
+    const sized = clear.map((h, k) => h * f[k]);
+    const laid = spreadTops([300, 312, 324, 324], sized, fixed);
+    check("…and laid there, each its type below the one above, none over another", laid.every((t, k) => k === 0 || t >= laid[k - 1] + sized[k - 1] - 1e-9), true);
+    check("a run that fits is left as it is", fitRuns(tops, clear, fixed), [1, 1, 1, 1]);
+    check("…and above the first number, down from the top of the page", fitRuns([0, 6, 12], [12, 12, 12], [false, false, true]), [0.5, 0.5, 1]);
+    check("…no further than the floor", fitRuns([300, 305, 310], [12, 12, 12], [true, false, true], { floor: 0.4 }), [1, 0.4, 1]);
   }
   // THE FIRM NAME DOWN THE MARGIN. A pleading's PDF carries furniture the
   // export does not: the firm printed sideways in the left margin, a seal, a

@@ -335,21 +335,117 @@ type × `lineBox`); one above the first matched line from the top of the page;
 one under the last, where `height` is passed, down to the foot (the page's
 top margin up from the bottom, an inch at most; the blank lines closing the
 page are not counted). Each carries `spread`, its room, and the reader sets
-its type to fit it (`spread / LINE_BOX`, no smaller than `MIN_FIT` of its
-size) and its box to no more than it. On pleading paper the lines under the
+its type to fit it (`spread / LINE_BOX`, no smaller than `SPREAD_FLOOR`, 0.3,
+of its size) and its box to no more than it, and no less than its type. On pleading paper the lines under the
 last number the PDF does not print are set smaller alike to fit between it
 and the foot, a footer the PDF prints keeping its row (`applyMatchedLayout`,
 the numbered branch).
 
-At the floor these lines stand closer than their type rather than move a
-line the PDF prints or grow the page: they are the picture's words, and the
-picture is on the PDF beside them. This departs from `MIN_FIT`'s rule that a
-page past the floor grows, for these lines only; holding them to their type
-instead made `holdWithin` pull the PDF's own lines up the page to make room.
-Tests: `test-pdfsync.mjs` ("a picture's lines are spread…"),
-`test-picture-lines.mjs` (inside, above and below a picture, sixty lines at
-the foot, and pleading paper: every printed line on its row, the page the
-paper's height, no white under the PDF page side by side).
+At the floor these lines used to stand closer than their type (their box held
+to `spread`) rather than move a line the PDF prints or grow the page. Since
+2026-10-23 they never do: the owner, of lines drawn through each other on a
+caption page, "It should never make lines overlap like this. the PDF never
+actually looks like that." Their floor is lower than the page's fit
+(`SPREAD_FLOOR`, 0.3 against `MIN_FIT`'s 0.5), so a picture's words fit their
+room in all but the extreme case, and past it a line's box is never less than
+its type: it pushes the lines under it down, and `holdWithin` brings the
+page's lines up to make room, a little out of register — sixty lines in the
+inch under the PDF's last line is the test of it. Tests: `test-pdfsync.mjs`
+("a picture's lines are spread…"), `test-picture-lines.mjs` (inside, above
+and below a picture, sixty lines at the foot, and pleading paper: every
+printed line on its row but in the sixty-line case, no line on top of
+another, the page the paper's height, no white under the PDF page side by
+side).
+
+### No line on top of another on pleading paper (`pdfsync.fitRuns`)
+
+The owner, of a caption page beside its PDF, the party block's four lines
+drawn over each other between lines 14 and 17 and the causes of action beside
+them printed through each other: "It should never make lines overlap like
+this. the PDF never actually looks like that." The export puts more lines
+between two numbers than the PDF does there (a caption's column wrapped a line
+deeper, a half line on the wrong number), and `spreadTops`, holding the
+numbers fixed, shared the space between them evenly at less than each line's
+room: lines a few points apart in 12-point type. `evenHalfLines` stops short
+of that (a crammed line is raised to the body size only as far as its gap
+holds, and never taken under its own size), so it could not prevent it.
+
+Now `fitRuns(tops, clear, fixed)`, called in `applyMatchedLayout` after
+`evenHalfLines` and before `spreadTops`, finds each run of lines between two
+numbered lines (and above the first, from the top of the page) whose type
+sizes add up to more than the space under the numbered line above leaves, and
+takes that run's type down alike, by the factor that fits it, no further than
+`FIT_FLOOR` (0.4). Only that run changes: the numbers do not move, and no
+other line on the page is taken down. On a numbered page a line's `clear` is
+now its type whatever its `spread`, so the lines under line 28 the PDF does
+not print are pushed down rather than overlapped. This overrides "nothing is
+ever taken under the PDF's own size" (above) for the lines that cannot stand
+clear of each other at it. Tests: `test-pdfsync.mjs` ("no line over another
+on pleading paper"), `test-even-half-lines.mjs` case 2 (two half lines
+crammed into one gap: those two in one smaller size, every other line at the
+PDF's 12 point, none on top of another).
+
+### A scan in one size (`pdfsync.scanLayout`, `scanPage`, `scanTypeSize`)
+
+The owner, of a scanned AIR lease page beside its PDF (its header: "REVIEW:
+201 word(s) of this page's OCR layer were CORRECTED to this run's own
+reading"): lines a third of a page apart, runs of others crushed to a few
+pixels between them, every line in a size of its own and run off the right
+edge — "When it creates this level of spacing issues, and font size problems,
+it ceases to be useful."
+
+A scan's text is an OCR layer: its words are sized by each line's box,
+ascenders to descenders (well over the type the scan prints), a line at a
+time, and a leaning page's rows come apart and run together. Where the export
+is the run's own reading of the page, half its lines share too few words with
+any row to be matched, or are matched a few rows off. `rowLayout` took every
+match as it came, and the lines between two matches too close together were
+spread into what room was left (the picture's-words rule above) at a fraction
+of their size.
+
+A page is a SCAN (`scanPage`) where most of its PDF's characters are set in a
+font that names no face (`ocrLayerPage`, the test `formTypeOver` already made,
+kept per page in `info.scans` as the grid is read), or where its export
+header's REVIEW clause names its "OCR layer" — the one way to know a scan
+whose OCR layer is set in a face of its own (Acrobat's invisible text). Not a
+scanned court form read in its blank's type: its rows are the blank's.
+
+Such a page (not numbered) is laid out by `scanLayout` instead of
+`rowLayout`:
+
+- ONE SIZE for every line: `scanTypeSize`, the size the page's longer lines
+  (the 85th percentile of those of 24 characters or more, measured in the
+  reader's face) fit across the PDF's text in, no more than a tenth over the
+  document's body size; and `scanLayout` takes it down further, alike, where
+  the page's leading cannot hold it (its box at 0.9 of the leading).
+- The page's LEADING is read off the whole page: the PDF's printed block, its
+  first row to its last, over the export's lines (a blank line half a line),
+  so a few matches in the wrong place cannot set it.
+- ANCHORS: the longest chain of matches (a dynamic programme over them) each
+  within a sixth of the block (or four lines) of where the even leading puts
+  it, each pair leaving the lines between them at least 0.9 of their box and
+  no more than half again the leading (plus half a line). The PDF's first and
+  last printed rows anchor the page's first and last lines where they agree
+  with the chain, so a page with no anchor worth the name is set evenly from
+  the PDF's first printed line to its last.
+- Between two anchors the lines are spaced evenly, a blank line half a line
+  (none where that would leave the text lines less than their room). Above
+  the first and under the last, at the leading, closer where it would run off
+  the paper. An anchor stands at its row's left, the rest at the margin, as
+  in `rowLayout`; only anchors' rows are handed on (`rowOf`), so the page's
+  character grid is read off lines that are where they are said to be.
+- No pieces cut or placed, no faces (an OCR layer has none): the page is set
+  as a poor scan is.
+
+A numbered scan keeps its numbers' grid and takes the one size alone
+(`scanTypeSize`, unless the numbers are the paper's own, `geom.scan`, which
+keeps the document's body type as before); the flowing view
+(`applyPdfTypeSizes`) gives a scan's lines no sizes of their own either.
+Tests: `test-pdfsync.mjs` ("a scan's lines stand a line apart…": a match
+eight rows off is no anchor, one size, the size the leading holds, nothing
+matched set evenly), `test-scan-layout.mjs` (the reader: one size, no line
+crushed and no gap of several, first and last on their rows, nothing past
+the PDF's right margin, the paper's height; a born-digital page unchanged).
 
 ### A form beside its PDF looks like the PDF (`placePages`, `columns.placeLine`, `pdfsync.lineItems`, `pdfFace`)
 

@@ -2,7 +2,10 @@
 // (pdfsync.evenHalfLines, from text-reader.js's matched layout): a half line
 // the PDF prints in smaller type is drawn in the page's size, a run of small
 // type down the numbers (a footnote) in one size, its PDF's, and nothing on
-// the page ever taken under the PDF's own size.
+// the page ever taken under the PDF's own size — but for lines the space
+// between two numbers cannot hold at their size, which are taken down alike
+// to what it holds rather than drawn over each other (pdfsync.fitRuns; the
+// owner: "It should never make lines overlap like this").
 //
 // Run: node test-even-half-lines.mjs   (from the repo root)
 //
@@ -66,6 +69,16 @@ async function open(browser, base, halves, small = {}) {
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  // A folder handle is never put in IndexedDB here: the Chromium this runs on
+  // in some containers goes down reading an origin-private folder's handle
+  // back out of it, and the folder is only remembered, not needed, for this.
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (v, k) {
+      if (v && typeof FileSystemHandle === "function" && v.handle instanceof FileSystemHandle) throw new DOMException("not kept in this test", "DataCloneError");
+      return put.call(this, v, k);
+    };
+  });
   await page.goto(base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder);
   await page.evaluate(async (text) => {
@@ -95,7 +108,8 @@ async function open(browser, base, halves, small = {}) {
   await page.waitForTimeout(1500);
   const sizes = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body > .line")].map((l) => parseFloat(getComputedStyle(l).fontSize)));
   const texts = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body > .line")].map((l) => l.textContent));
-  return { sizes, texts, errors, close: () => page.context().close() };
+  const tops = await page.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body > .line")].map((l) => l.getBoundingClientRect().top));
+  return { sizes, texts, tops, errors, close: () => page.context().close() };
 }
 
 const srv = await startServer();
@@ -109,11 +123,14 @@ try {
     check("no page errors", r.errors, []);
     await r.close();
   }
-  console.log("2. two half lines crammed into one gap: nothing on the page taken down");
+  console.log("2. two half lines crammed into one gap: those two taken down to what it holds, nothing else");
   {
     const r = await open(browser, srv.base, { 5: [["duly appointed Personal Representative of the Estate in the Los", 7, 12]], 8: [["check for tax check for the year this check was returned", 12, 8], ["the bank letter indicating the check was returned for funds", 12, 8]] });
-    check("every line in one size", new Set(r.sizes.map((s) => Math.round(s * 100))).size, 1);
-    check("…the PDF's 12 point (16px at this width), not two thirds of it", r.sizes.map((s) => Math.round(s)), r.sizes.map(() => 16));
+    const crammed = r.texts.map((t, k) => (/check for tax|bank letter/.test(t) ? k : -1)).filter((k) => k >= 0);
+    check("every other line at the PDF's 12 point (16px at this width), not two thirds of it", r.sizes.filter((_, k) => !crammed.includes(k)).every((s) => Math.round(s) === 16), true);
+    check("…the two crammed lines in one size, under it", [r.sizes[crammed[0]] === r.sizes[crammed[1]], r.sizes[crammed[0]] < 16], [true, true]);
+    const worded = r.tops.map((t, k) => [t, r.sizes[k], r.texts[k].trim()]).filter(([, , t]) => t);
+    check("…and no line on top of another: each its type or more under the one above", worded.every(([t], k) => k === 0 || t >= worded[k - 1][0] + worded[k - 1][1] - 0.5), true);
     check("no page errors", r.errors, []);
     await r.close();
   }

@@ -911,6 +911,149 @@ export function rowLayout(lineTexts, rows, { bodyLeft = null, height = 0, lineBo
 }
 
 /**
+ * Where each line of a SCANNED page goes: rowLayout for a page whose text is
+ * an OCR layer over a picture, where the rows are not to be trusted the way a
+ * born-digital page's are. The owner, of a scanned lease beside its PDF: lines
+ * a third of a page apart, others crushed to a few pixels between them, and
+ * every line in its own size — "When it creates this level of spacing issues,
+ * and font size problems, it ceases to be useful."
+ *
+ * An OCR layer sizes its words a line at a time, from each line's box, and a
+ * scan's lines lean, so its rows come apart and run into each other; and where
+ * the export is a run's own reading of the page (a REVIEW clause: "201 words of
+ * this page's OCR layer were CORRECTED"), half its lines share too few words
+ * with any row to be matched, or are matched to the wrong one. rowLayout took
+ * each match as gospel: a line matched three rows down left a gap, and the
+ * lines between two matches too close together were set small enough to fit.
+ *
+ * So here every line is set in ONE size, `size` (the caller's: what the page's
+ * lines fit across the paper in), or less where the page's own leading cannot
+ * hold that size; a match holds a line where the PDF prints it only where it
+ * agrees with the rest — the ANCHORS, the longest run of matches each of which
+ * stands about where the page's even leading puts it and leaves the lines
+ * between it and the next their room (no less than `squeeze` of a line's box)
+ * and no more than half again the page's leading; and the lines between two
+ * anchors are spaced evenly between them, the blank lines of the export at
+ * half a line. The page's first and last printed rows bound it the same way,
+ * so a page with no anchor worth the name is set evenly from the PDF's first
+ * printed line to its last. Lines above the first anchor or under the last are
+ * set at the page's leading, closer (to `squeeze`) where that would run them
+ * off the paper.
+ *
+ * Returns { positions, pitch, rowOf, size, anchors } — positions as
+ * rowLayout's ({ top, left, size, spread }, `spread` the room a line set
+ * closer than its box is given), rowOf the row of each anchor only (the lines
+ * whose pieces the page's character grid may be read off), `size` the one
+ * type size — or null where the page has no rows or no text.
+ */
+export function scanLayout(lineTexts, rows, { size = 0, lineBox = 1.2, height = 0, bodyLeft = null, squeeze = 0.9, minFit = 0.5 } = {}) {
+  const n = (lineTexts || []).length;
+  if (!n || !rows || !rows.length || !(size > 0)) return null;
+  const empty = lineTexts.map((t) => !String(t || "").trim());
+  const firstText = empty.indexOf(false);
+  if (firstText < 0) return null;
+  const lastText = n - 1 - empty.slice().reverse().indexOf(false);
+  const map = alignLines(lineTexts, rows.map((r) => r.text));
+  // Each line's place in the run of the page's text, in lines: a blank line
+  // inside it half a line, the blank lines before and after it none.
+  const BLANK = 0.5;
+  const cum = new Array(n + 1).fill(0);
+  for (let i = 0; i < n; i++) cum[i + 1] = cum[i] + (i < firstText || i > lastText ? 0 : empty[i] ? BLANK : 1);
+  const textBetween = (a, b) => { let c = 0; for (let i = a; i < b; i++) if (!empty[i]) c++; return c; };
+  // The PDF's printed block, and the page's leading: its text spread evenly
+  // down it. Read off the whole page, so a few matches in the wrong place
+  // cannot set it.
+  const tops = rows.map((r) => r.top);
+  const blockTop = Math.min(...tops), blockLast = Math.max(...tops);
+  const units = cum[lastText] - cum[firstText];
+  const rowPitch = median(rows.map((r) => r.height)) * lineBox;
+  const pitch = units > 0 && blockLast > blockTop ? (blockLast - blockTop) / units : rowPitch;
+  // One size, no larger than the leading holds.
+  const s = Math.max(size * minFit, Math.min(size, pitch / (lineBox * squeeze)));
+  const box = s * lineBox, minStep = box * squeeze;
+  // The anchors: matches that stand about where the even leading puts them
+  // (within a sixth of the block, or four lines), in order down the page, each
+  // pair leaving the lines between them their room and no gap they lack.
+  const reach = Math.max(4 * pitch, (blockLast - blockTop) / 6);
+  const cand = [];
+  for (let i = firstText; i <= lastText; i++) {
+    if (map[i] == null || empty[i]) continue;
+    const top = rows[map[i]].top;
+    if (Math.abs(top - (blockTop + (cum[i] - cum[firstText]) * pitch)) <= reach) cand.push({ i, top, left: rows[map[i]].left, row: map[i] });
+  }
+  const fits = (a, b) => {
+    const gap = b.top - a.top;
+    return gap >= textBetween(a.i, b.i) * minStep - 0.01 && gap <= (cum[b.i] - cum[a.i]) * pitch * 1.5 + pitch * 0.5;
+  };
+  const best = cand.map(() => 1), prev = cand.map(() => -1);
+  for (let b = 0; b < cand.length; b++) {
+    for (let a = 0; a < b; a++) if (best[a] + 1 > best[b] && fits(cand[a], cand[b])) { best[b] = best[a] + 1; prev[b] = a; }
+  }
+  let end = -1;
+  best.forEach((v, k) => { if (end < 0 || v > best[end]) end = k; });
+  const chain = [];
+  for (let k = end; k >= 0; k = prev[k]) chain.unshift(cand[k]);
+  // The printed block's ends hold the page's first and last lines where they
+  // agree with the anchors (or there are none).
+  const ends = chain.slice();
+  const head = { i: firstText, top: blockTop, edge: true }, foot = { i: lastText, top: blockLast, edge: true };
+  if (!ends.length) {
+    ends.push(head);
+    if (lastText > firstText) ends.push(foot);
+    // (Under the size floor its lines may not fit the block: they run past it.)
+    const wt = textBetween(firstText, lastText);
+    if (wt > 0 && (foot.top - head.top) / wt < minStep) foot.top = head.top + wt * minStep;
+  }
+  else {
+    if (ends[0].i > firstText && fits(head, ends[0])) ends.unshift(head);
+    if (ends[ends.length - 1].i < lastText && fits(ends[ends.length - 1], foot)) ends.push(foot);
+  }
+  const floorAt = bodyLeft != null ? bodyLeft : bodyLeftOf(rows);
+  const left0 = floorAt == null ? Math.min(...rows.map((r) => r.left)) : floorAt;
+  const out = new Array(n).fill(null);
+  const put = (i, top, step) => { out[i] = { top, left: left0, size: s, spread: step < box - 0.01 ? Math.max(0, step) : 0 }; };
+  // Between two ends, evenly; a blank line at half a line, or none where the
+  // text lines would have less than their room.
+  for (let k = 1; k < ends.length; k++) {
+    const a = ends[k - 1], b = ends[k], gap = b.top - a.top;
+    let blank = BLANK, w = cum[b.i] - cum[a.i];
+    if (w > 0 && gap / w < minStep) { blank = 0; w = textBetween(a.i, b.i); }
+    const step = w > 0 ? Math.max(0, gap / w) : 0;
+    let y = a.top;
+    for (let i = a.i; i < b.i; i++) {
+      const u = i < firstText || i > lastText ? 0 : empty[i] ? blank : 1;
+      put(i, y, u ? step : box);
+      y += u * step;
+    }
+  }
+  const lastEnd = ends[ends.length - 1];
+  put(lastEnd.i, lastEnd.top, box);
+  // Above the first end: up from it at the page's leading, closer where that
+  // would run them over the top of the paper.
+  const top0 = ends[0];
+  if (top0.i > 0) {
+    const w = cum[top0.i] - cum[0];
+    const step = w > 0 ? Math.max(minStep, Math.min(pitch, top0.top / w)) : pitch;
+    for (let i = 0; i < top0.i; i++) put(i, Math.max(0, top0.top - (cum[top0.i] - cum[i]) * step), step);
+  }
+  // Under the last: down from it, closer where they would run past the foot
+  // (the page's top margin up from the bottom, an inch at most).
+  if (lastEnd.i < n - 1) {
+    const w = cum[n] - cum[lastEnd.i];
+    const room = height > 0 ? height - Math.min(72, Math.max(0, blockTop)) - lastEnd.top : Infinity;
+    const step = w > 0 ? Math.max(minStep, Math.min(pitch, room / w)) : pitch;
+    for (let i = lastEnd.i + 1; i < n; i++) put(i, lastEnd.top + (cum[i] - cum[lastEnd.i]) * step, step);
+    out[lastEnd.i].spread = step < box - 0.01 ? step : 0;
+  }
+  // An anchor stands at its row's left, as rowLayout's matches do.
+  const held = (x) => (floorAt == null ? x : Math.max(x, floorAt));
+  for (const c of chain) out[c.i].left = held(c.left);
+  const rowOf = new Array(n).fill(null);
+  for (const c of chain) rowOf[c.i] = c.row;
+  return { positions: out, pitch, rowOf, size: s, anchors: chain.length };
+}
+
+/**
  * The character grid PDF-Linker set a page's text on, read back off the PDF:
  * { x0, unit } in PDF units, so that a line whose text begins at column c of
  * the export stands at x0 + c × unit on the page — or null where the page
@@ -1454,6 +1597,46 @@ export function spreadTops(tops, box, fixed = null, spans = null) {
     }
     i = a; // the run is placed; carry on above it
     next = null;
+  }
+  return out;
+}
+
+/**
+ * NO LINE ON TOP OF ANOTHER, on pleading paper. spreadTops shares the space
+ * between two numbered lines evenly where the lines between them cannot all
+ * have their room there, and shared at less than their room they were drawn
+ * over each other: a caption's party block four lines deep in the space of
+ * three, a column of causes of action beside it printed through each other.
+ * The owner: "It should never make lines overlap like this. the PDF never
+ * actually looks like that." So such a run's type is taken down, alike, to
+ * what the space holds (no further than `floor` of it), before spreadTops
+ * places it — "It should shrink things uniformly, if needed."
+ *
+ * `tops`, `clear` (the room each line takes, 0 for an empty one) and `fixed`
+ * as spreadTops takes them. A run is the lines between two fixed lines, or
+ * above the first (down from the top of the page); the lines under the last
+ * are pushed down, and need nothing here. Returns a factor per line, 1 for
+ * every line not taken down.
+ */
+export function fitRuns(tops, clear, fixed, { floor = 0.4 } = {}) {
+  const n = (tops || []).length;
+  const out = new Array(n).fill(1);
+  if (!fixed) return out;
+  const placed = (k) => tops[k] != null && Number.isFinite(tops[k]);
+  const roomOf = (k) => (clear && clear[k] > 0 ? clear[k] : 0);
+  let prev = -1; // the fixed line above the run, or -1 for the top of the page
+  for (let k = 0; k < n; k++) {
+    if (!(fixed[k] && placed(k))) continue;
+    const run = [];
+    for (let i = prev + 1; i < k; i++) if (placed(i) && !fixed[i] && roomOf(i) > 0) run.push(i);
+    const start = prev >= 0 ? tops[prev] + roomOf(prev) : 0;
+    const need = run.reduce((s, i) => s + roomOf(i), 0);
+    const room = tops[k] - start;
+    if (run.length && need > room + 0.01) {
+      const f = Math.max(floor, Math.max(0, room) / need);
+      for (const i of run) out[i] = f;
+    }
+    prev = k;
   }
   return out;
 }

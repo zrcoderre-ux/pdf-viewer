@@ -1,0 +1,183 @@
+// Browser test for a SCANNED page beside its PDF (pdfsync.scanLayout,
+// text-reader.js scanPage and scanTypeSize): a dense lease page whose PDF text
+// is an OCR layer, sized line by line, and whose export is the run's own
+// reading of it (its header's REVIEW clause says the OCR layer was CORRECTED),
+// so that a run of its lines shares too few words with any row to be matched
+// and one line's words stand on a row three lines down. The owner, of such a
+// page: lines a third of a page apart, others crushed to a few pixels, each
+// line in its own size and run off the right edge — "When it creates this
+// level of spacing issues, and font size problems, it ceases to be useful."
+//
+// Checked: every line in one size; the lines down the page about a line
+// apart, none crushed and no gap of several; every line on the paper and
+// across it inside the PDF's text; the page the paper's height. And a page
+// the export does not mark (a born-digital PDF) is laid out as before.
+//
+// Run: node test-scan-layout.mjs   (from the repo root)
+//
+// Needs Playwright (/opt/node-tools), Chromium (/opt/pw-browsers/chromium)
+// and a free port in 8130-8199 for python3's http.server; exits 0 with SKIP
+// where any is missing. Every name in it is invented.
+
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import net from "node:net";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO = path.dirname(fileURLToPath(import.meta.url));
+const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
+const CHROME = "/opt/pw-browsers/chromium";
+
+function skip(why) { console.log(`SKIP: ${why}`); process.exit(0); }
+if (!fs.existsSync(PW)) skip("Playwright is not installed at " + PW);
+if (!fs.existsSync(CHROME)) skip("Chromium is not installed at " + CHROME);
+const { chromium } = await import(PW);
+
+let fails = 0, passes = 0;
+function check(label, ok, note = "") {
+  if (ok) passes++; else fails++;
+  console.log(`  ${ok ? "PASS" : "FAIL"}  ${label}`);
+  if (!ok && note) console.log(`        ${note}`);
+}
+
+function portFree(port) {
+  return new Promise((resolve) => {
+    const s = net.createServer();
+    s.once("error", () => resolve(false));
+    s.once("listening", () => s.close(() => resolve(true)));
+    s.listen(port, "127.0.0.1");
+  });
+}
+async function startServer() {
+  let port = 0;
+  for (let p = 8130; p <= 8199; p++) if (await portFree(p)) { port = p; break; }
+  if (!port) skip("no free port in 8130-8199");
+  const proc = spawn("python3", ["-m", "http.server", String(port), "--bind", "127.0.0.1"], { cwd: REPO, stdio: "ignore" });
+  for (let t = 0; t < 80; t++) {
+    const up = await new Promise((resolve) => { const c = net.connect(port, "127.0.0.1", () => { c.end(); resolve(true); }); c.on("error", () => resolve(false)); });
+    if (up) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return { base: `http://127.0.0.1:${port}`, stop: () => { try { proc.kill("SIGTERM"); } catch { /* gone */ } } };
+}
+
+// Fifty lines of a lease, 12 points apart from 90, each about as wide as the
+// PDF's text; the OCR's rows each in a size of its own, 9 to 13 points.
+const W = ["lessee", "lessor", "premises", "sublease", "assignment", "consent", "covenant", "condition", "obligation", "performed",
+  "provisions", "default", "notice", "paragraph", "option", "writing", "transfer", "assignee", "sublessee", "rent"];
+const line = (i) => {
+  let s = `${i}.`;
+  for (let k = 0; s.length < 92; k++) s += ` ${W[(i * 7 + k * 3) % 20]}`;
+  return s;
+};
+const garble = (t) => t.split(" ").map((w, k) => (k % 4 === 3 ? w : w.replace(/[aeiou]/g, "x") + "q")).join(" ");
+const N = 50, TOP = 90, PITCH = 12;
+const SIZES = [9, 13, 10, 12, 9.5, 13, 11, 12.5, 9, 13];
+
+function build({ review }) {
+  const exp = [], pdf = [];
+  for (let i = 0; i < N; i++) {
+    exp.push(line(i));
+    // Lines 20-33 the run read again: the PDF's OCR shares a word in four.
+    const t = i >= 20 && i < 34 ? garble(line(i)) : line(i);
+    pdf.push([t, TOP + i * PITCH, SIZES[i % 10]]);
+  }
+  // …and line 22's words on line 25's row, a fragment of a leaning line.
+  pdf[25][0] = line(22);
+  const header = review ? "====== Page 1 — REVIEW: 160 word(s) of this page's OCR layer were CORRECTED to this run's own reading ======" : "====== Page 1 ======";
+  return { text: [header, ...exp].join("\n") + "\n", pdf };
+}
+
+async function open(browser, base, { text, pdf }) {
+  const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  // A folder handle is never put in IndexedDB here: the Chromium this runs on
+  // in some containers goes down reading an origin-private folder's handle
+  // back out of it, and the folder is only remembered, not needed, for this.
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (v, k) {
+      if (v && typeof FileSystemHandle === "function" && v.handle instanceof FileSystemHandle) throw new DOMException("not kept in this test", "DataCloneError");
+      return put.call(this, v, k);
+    };
+  });
+  await page.goto(base + "/viewer/text-reader.html");
+  await page.waitForFunction(() => !!window.__textReaderAdoptFolder);
+  await page.evaluate(async (text) => {
+    const top = await navigator.storage.getDirectory();
+    try { await top.removeEntry("Case Scan Layout", { recursive: true }); } catch { /* none yet */ }
+    const dir = await top.getDirectoryHandle("Case Scan Layout", { create: true });
+    const t = await dir.getDirectoryHandle("Text Files", { create: true });
+    const w = await (await t.getFileHandle("Lease.txt", { create: true })).createWritable(); await w.write(text); await w.close();
+    await window.__textReaderAdoptFolder(dir);
+    await window.__textReaderOpenDoc("Lease.txt");
+  }, text);
+  await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
+  await page.evaluate(async (rows) => {
+    const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.TimesRoman);
+    const pg = doc.addPage([612, 792]);
+    // Each row squeezed to the width the scan prints it at, as an OCR layer's
+    // words are stretched to their boxes: its size is the OCR's, its width the page's.
+    for (const [t, y, size] of rows) {
+      const fit = Math.min(size, size * 468 / font.widthOfTextAtSize(t, size));
+      pg.drawText(t, { x: 72, y: 792 - y, size: fit, font });
+    }
+    await window.__textReaderPickPdfs([new File([await doc.save()], "Lease.pdf", { type: "application/pdf" })]);
+  }, pdf);
+  await page.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 });
+  await page.waitForTimeout(1000);
+  const sbs = await page.$("#sbs-toggle");
+  if (!(await sbs.evaluate((b) => b.getAttribute("aria-pressed") === "true"))) await sbs.click();
+  await page.waitForTimeout(2000);
+  const got = await page.evaluate(() => {
+    const body = document.querySelector("#pages .tpage .page-body");
+    const br = body.getBoundingClientRect();
+    const scale = br.width / 612;
+    const lines = [...body.querySelectorAll(":scope > .line")].filter((l) => l.textContent.trim()).map((l) => {
+      const lt = l.querySelector(":scope > .lt") || l;
+      const r = document.createRange();
+      r.selectNodeContents(lt);
+      const tr = r.getBoundingClientRect();
+      return { top: (l.getBoundingClientRect().top - br.top) / scale, size: parseFloat(getComputedStyle(lt).fontSize) / scale, right: (tr.right - br.left) / scale };
+    });
+    return { height: br.height / scale, lines };
+  });
+  return { ...got, errors, close: () => page.context().close() };
+}
+
+const srv = await startServer();
+const browser = await chromium.launch({ executablePath: CHROME });
+try {
+  console.log("a scanned page the run read again (its REVIEW clause)");
+  const r = await open(browser, srv.base, build({ review: true }));
+  const sizes = r.lines.map((l) => Math.round(l.size * 100) / 100);
+  check("every line in one size", new Set(sizes).size === 1, JSON.stringify([...new Set(sizes)]));
+  const steps = r.lines.slice(1).map((l, k) => l.top - r.lines[k].top);
+  const size = sizes[0];
+  check("the lines down the page in order, none crushed onto the one above", steps.every((s) => s >= size * 1.2 * 0.85), JSON.stringify(steps.map((s) => Math.round(s * 10) / 10)));
+  check("…and no gap of several lines between two", steps.every((s) => s <= PITCH * 2), JSON.stringify(steps.map((s) => Math.round(s * 10) / 10)));
+  // (A row's top is its baseline less its type; a line's box a little over its type.)
+  const rowTop = (i) => TOP + i * PITCH - SIZES[i % 10];
+  check("…the first and last where the PDF prints them", Math.abs(r.lines[0].top - rowTop(0)) <= 6 && Math.abs(r.lines[N - 1].top - rowTop(N - 1)) <= 6,
+    `${Math.round(r.lines[0].top)}, ${Math.round(r.lines[N - 1].top)}`);
+  check("every line across the page inside the PDF's text, none cut off at the edge", r.lines.every((l) => l.right <= 540 + 6), JSON.stringify(r.lines.map((l) => Math.round(l.right)).filter((x) => x > 546)));
+  check("the page the paper's height", Math.round(r.height) === 792, String(r.height));
+  check("no page errors", r.errors.length === 0, r.errors.join(" | "));
+  await r.close();
+
+  console.log("the same page, a born-digital PDF (no REVIEW clause): laid out as before, by its rows");
+  const b = await open(browser, srv.base, build({ review: false }));
+  const bs = new Set(b.lines.map((l) => Math.round(l.size * 100) / 100));
+  check("its rows' own sizes, as before", bs.size > 1, JSON.stringify([...bs]));
+  check("no page errors", b.errors.length === 0, b.errors.join(" | "));
+  await b.close();
+} finally {
+  await browser.close();
+  srv.stop();
+}
+console.log(fails ? `\n${fails} FAILED, ${passes} passed` : `\nall ${passes} passed`);
+process.exit(fails ? 1 : 0);
