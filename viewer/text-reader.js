@@ -51,6 +51,7 @@ import { dressColumns as dressColumnsOf, alignColumns, charWidth, fitCells, line
 function dressLines(body) { markOwnLines(body); dressRuleLines(body); }
 function dressColumns(body) { markOwnLines(body); return dressColumnsOf(body); }
 import * as PS from "./pdfsync.js";
+import * as FT from "./form-templates.js";
 import * as LK from "./leaks.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
 import * as RD from "./redact.js";
@@ -18932,10 +18933,77 @@ async function noteFaces(info, page, styles) {
 }
 // What making a page look like its PDF costs, for the console
 // (window.__textReaderFormLook): asking pdf.js for the fonts, planning the
-// pieces (planCells) and placing them (placePages), in ms.
+// pieces (planCells) and placing them (placePages), in ms; and how many
+// scanned form pages were read in their blank's type (formTypeOver).
 const facesCost = { ms: 0, pages: 0 };
-const formLook = { plan: 0, planned: 0, place: 0, placed: 0 };
-window.__textReaderFormLook = () => ({ fonts: Object.assign({}, facesCost), plan: formLook.plan, planned: formLook.planned, place: formLook.place, placed: formLook.placed });
+const formLook = { plan: 0, planned: 0, place: 0, placed: 0, forms: 0 };
+window.__textReaderFormLook = () => ({ fonts: Object.assign({}, facesCost), plan: formLook.plan, planned: formLook.planned, place: formLook.place, placed: formLook.placed, forms: formLook.forms });
+
+/**
+ * A scanned court form's text in its BLANK's type (form-templates.js): null,
+ * or the page's items with the blank's own items, carried onto the scan by the
+ * fit, standing in for the OCR's words that read them, each at the size and in
+ * the face the form prints it — so its lines are cut, placed and sized as a
+ * born-digital form's are (planCells), its rows the form's rows. The owner:
+ * "Use the forms in pdf-linker form templates in PDF+ such that it knows the
+ * correct font size and spacing for those forms."
+ *
+ * Asked only of a page whose text is an OCR layer over a scan — most of it in
+ * a font that names no face (pdfsync.pdfFace; FORM_OCR_SHARE) — since a
+ * born-digital page's type is its own already; text set over the scan in a
+ * face of its own (an e-filing stamp) passes through as it is. The
+ * recognition is kept per page (`info.tplPages`), and a page after a
+ * recognised one is tried as that form's next page. The blank's
+ * fonts are faces of their own on the PDF's reading (`tpl:<file>#<n>`), added
+ * to `info.faces` as the page is, which moves `faceEpoch` so the page is laid
+ * out again in them. The library is fetched once, a blank the first time a page
+ * names its form; with no library (a build without viewer/form-templates) every
+ * page is read as before.
+ */
+let formLibraryOnce = null;
+function formLibrary() {
+  if (!formLibraryOnce) {
+    const base = new URL("./form-templates/", import.meta.url);
+    formLibraryOnce = FT.templateLibrary((name) => fetch(new URL(encodeURIComponent(name), base)).then((r) => {
+      if (!r.ok) throw new Error(`${name}: ${r.status}`);
+      return r.json();
+    }));
+  }
+  return formLibraryOnce;
+}
+// A scan: this many words at least, and this share of the page's characters
+// in a font that names no face — a court's e-filing stamp is set over a scan
+// in a face of its own, and must not keep the page from its blank; a
+// born-digital form with a picture OCR'd on it is the PDF's own type, and must
+// not have the blank's laid over it.
+const FORM_MIN_ITEMS = 20, FORM_OCR_SHARE = 0.8;
+async function formTypeOver(info, pageNo, items, sz) {
+  if (!info.tplPages) info.tplPages = new Map();
+  const faces = info.faces || new Map();
+  const isOcr = (it) => { const f = faces.get(it.font); return !!f && !f.face; };
+  const worded = items.filter((it) => it.str && it.str.trim());
+  const chars = (its) => its.reduce((n, it) => n + it.str.trim().length, 0);
+  const ocr = worded.filter(isOcr);
+  if (ocr.length < FORM_MIN_ITEMS || chars(ocr) < FORM_OCR_SHARE * chars(worded)) {
+    info.tplPages.delete(pageNo);
+    return null;
+  }
+  const seq = info.tplPages.get(pageNo - 1) || null;
+  const got = await FT.recognise(formLibrary(), items, sz, { seq });
+  if (!got) { info.tplPages.delete(pageNo); return null; }
+  info.tplPages.set(pageNo, got);
+  const idOf = (k) => `tpl:${got.tpl.file}#${k}`;
+  let added = false;
+  got.tpl.faces.forEach(([name, generic], k) => {
+    if (faces.has(idOf(k))) return;
+    faces.set(idOf(k), { face: PS.pdfFace(name, generic) });
+    added = true;
+  });
+  info.faces = faces;
+  if (added) info.faceEpoch = (info.faceEpoch || 0) + 1;
+  formLook.forms++;
+  return FT.formItems(got.tpl, got.fit, items, idOf, { isOcr });
+}
 
 /** Said once per page: a page whose text the reader would not read to the end. */
 function sayHugePage(name, pageNo) {
@@ -19055,8 +19123,11 @@ async function readPdfGridNow(info, pass) {
         items.push({ str: it.str, x: it.transform[4], top: t, w: it.width || 0, h: it.height || 0, font: it.fontName || null });
       }
       info.lines[i - 1] = isFinite(top) ? top : null;
-      info.geoms[i - 1] = PS.pleadingGeometry(items, sz);
-      info.rows[i - 1] = PS.pdfRows(items, sz);
+      // A SCAN of a court form PDF-Linker holds the blank of: the blank's own
+      // type in place of the OCR's (formTypeOver).
+      const typed = await formTypeOver(info, i, items, sz).catch(() => null);
+      info.geoms[i - 1] = PS.pleadingGeometry(typed || items, sz);
+      info.rows[i - 1] = PS.pdfRows(typed || items, sz);
     } catch { info.lines[i - 1] = null; }
   }
   notePass("reading the PDF's line grid", gridFrom);
@@ -21966,11 +22037,13 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     // PDF prints it (pdfsync.standApart): one that follows the word before it
     // follows it here too, a space on, or the reader's font, a hair narrower
     // or wider than the PDF's, opens a gap between two words or crowds them.
-    const apart = PS.standApart(found);
+    // …or one set in another size than the text before it (pdfsync.sizeSteps):
+    // a form's typed value after its label, at the size its field sets it in.
+    const apart = PS.standApart(found), steps = PS.sizeSteps(found);
     found.forEach((g, gi) => {
       const at = g.glued ? -1 : map.fileAt(g.at);
       if (!(at >= 0)) return;
-      if (g.at > first && !apart[gi]) return;
+      if (g.at > first && !apart[gi] && !steps[gi]) return;
       const f = faceOf(g.item.font);
       const h = g.item.h > 0 ? g.item.h : own;
       const size = own > 0 && Math.abs(h - own) <= own * 0.2 ? own : h;

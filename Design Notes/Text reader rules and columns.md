@@ -475,7 +475,9 @@ a box row's cell (`.rc`) takes its own where it differs, and every other run
 of the line set otherwise takes its own in a wrapper (below). No face for
 a symbol font (Wingdings' "o" is a box), an OCR layer's GlyphLessFont or a
 Type 3 font: the type is in the scan, and a line carrying no face is not cut
-or placed either — an OCR's words, and the reader's own face, as before. A line
+or placed either — an OCR's words, and the reader's own face, as before.
+(Since "A scanned form in its blank's type", below, a scan of a court form
+PDF-Linker holds the blank of takes the blank's type instead.) A line
 the PDF does not print keeps the reader's face, as the flowing view does.
 Widths are kept per FONT (`textEm` keyed by weight, slant and family) and a
 faced line or cell carries its face's own space as `--col-sp-n`, which its
@@ -687,7 +689,10 @@ size, without a space in the row's text: a word set as "Plain" "tiff" is one
 word, or the line it is shares no word with its row and is matched to none
 (a superscript against its word keeps its space). `test-form-look.mjs` holds
 a justified line (word spaces of 0.8 type heights) and checks no two words a
-space apart in the file are drawn more than a wide space apart.
+space apart in the file are drawn more than a wide space apart. (Since "A
+scanned form in its blank's type", below, `planCells` also places an item set
+in another size than the one before it, `sizeSteps`; the file's spaces and the
+character grid still go by `standApart` alone.)
 
 **A pleading's caption: the attorney block at the margin, the clerk's stamp
 at the right** (`pdfsync.captionAlign`, `.cap-r`, `.cap-split`). The owner:
@@ -855,6 +860,104 @@ field's value — a filled field is a widget annotation, not text content.
 `exportValue` and on/off state) and its `rect`, so a value could be placed
 where the form prints it; the export carries PDF-Linker's reading of the same
 field, and the reader shows the export.
+
+### A scanned form in its blank's type (`form-templates.js`, `formTypeOver`, `build-form-templates.mjs`)
+
+The owner, in chat: "Use the forms in pdf-linker form templates in PDF+ such
+that it knows the correct font size and spacing for those forms." Everything
+above makes a form page look like its PDF from what the PDF says of its
+type, and a scan says nothing: its text is an OCR layer over a picture, in
+Tesseract's GlyphLessFont, which `pdfFace` reads as no face, so its lines
+were neither cut nor placed nor faced; and its sizes are the recogniser's,
+whole points set line by line (on a Tesseract scan of a filled CIV-110, the
+6-point "NAME:" read 8, sized with the 9-point name typed after it).
+
+A Judicial Council form is the same labels at the same places in the same
+type on every copy, and PDF-Linker keeps the blanks (`Form Templates/`) and
+reads a scan against them (`_template_recognise`). `form-templates.js` is that
+recognition, ported, asked of the page the reader lays out: the page states
+the form's id (the footer read bottom up, else the header's right half;
+`formKey` folds a scan's slips, `keyNear` takes one letter of the prefix
+misread), a revision the footer prints is within two edits of the blank's,
+the blank's label words FIT the scan's (`fitWords`: a scale and an offset per
+axis, least squares over words reading exactly alike and unique on both
+sides, at least four, the scale within 0.85–1.15, an anchor past 6 points
+dropped once), and under that fit 60% of the blank's label words, eight at
+least, have a scan word standing on them reading the same within the slip
+rule (`matchShare`, `wordSlip`). A page with no id it can read, after a
+recognised page of the same PDF, is tried as that form's next page at 40%,
+seeded with the page before's fit. The constants are PDF-Linker's.
+
+What the recognition hands the reader is the blank's TYPE (`formItems`): the
+blank's own text items — read by the pdf.js this repo pins, so they are the
+items a born-digital copy of the form gives `lineItems` — carried onto the
+scan by the fit, each with its size and with its font as a face of its own
+on the PDF's reading (`tpl:<file>#<n>` in `info.faces`); the OCR's words that
+stand on one of the blank's printed runs (overlapping half the narrower,
+centred within its height) give way to it, unless they stand in a text field
+and do not read as the run's words (a value typed over a word a field
+prints); words in a checkbox's widget are the box or its mark and go (the
+export carries the state); every other word — a typed value, a stamp, a note
+— is kept as read, in runs of the item it came from, and a run standing in a
+text field whose /DA names a size takes that size and face on its own
+baseline. Asked by `readPdfGridNow` (`formTypeOver`), before `pdfRows`, of a
+page that is an OCR layer: twenty words at least, and 80% of its characters
+in a font with no face (`FORM_OCR_SHARE`) — a court's e-filing stamp is set
+over a scan in a face of its own and must not keep the page from its blank,
+and passes through `formItems` untouched (`isOcr`), never resized to a field
+it stands in; a born-digital form with a picture OCR'd on it is the PDF's own
+type and must not have the blank's laid over it. So the rows are the form's
+rows and every pass downstream (planCells, faceRuns, the char grid,
+spreadTops) reads a recognised scan as it reads a born-digital form. The PDF
+pane's own text layer is pdf.js's and is untouched. Measured on the Tesseract
+scan of CIV-110 (shrunk 3% and moved 12 and 18 points): recognised at a share
+of 0.94 in 16 ms, the fit 0.967 / 0.969 against 0.97, 776 OCR words down to
+155 items, the stray readings left a ">", a "+" and the footer's link (which
+the blank prints in a button's appearance, not its text).
+
+A value typed a few points after its label is under a type height after it,
+so not apart (`standApart`), and was drawn as part of the label's piece at
+the label's 6 points; the field prints it at 9. A change of SIZE is not a
+word space, so `planCells` now also places an item set in a size a fifth or
+more off the one before it (`pdfsync.sizeSteps`, typeSizes' tolerance) — on a
+born-digital form too, where a flattened value beside its label is the same
+case. The file's spaces (`autoLayPage`) and the character grid still go by
+`standApart` alone.
+
+The data is `viewer/form-templates/`: one JSON per blank (its faces, and per
+page that names its form: the form, every key it states, its revision, its
+items `[str, x, top, w, h, face, inField]`, its text fields with their /DA
+size and face, its checkboxes) and `index.json` (form key → files, and each
+blank's checksum), 700 KB for PDF-Linker's 51 blanks, 106 template pages —
+the same pages, ids, keys and revisions PDF-Linker's `_template_library`
+indexes, checked page by page when this was built. `build-form-templates.mjs`
+makes it from `../PDF-Linker/Form Templates` (or a folder named); the reader
+fetches `index.json` once and a blank the first time a page names its form,
+and a build without the folder reads every page as before. A blank added to
+or revised in PDF-Linker's folder reaches PDF+ only when the script is run
+again and its output committed: `test-form-templates.mjs` fails, naming the
+blank, while the folder beside the checkout holds one the data does not (by
+checksum), and skips that check where there is no PDF-Linker checkout beside
+it. A form PDF-Linker's `form_templates` setting points at outside its
+committed folder is not seen.
+
+Residuals, stated: a value typed in a field whose /DA says size 0 (auto) keeps
+the OCR's size; an OCR word garbled past the slip rule on a label outside the
+fields gives way to the blank all the same (it is the label's ink), and one
+inside a field is kept beside the blank's word; a stamp or note standing on a
+label's ink outside every field gives way too. Tests: `test-form-templates.mjs`
+(form keys and footers; every blank recognised as itself at the identity fit
+and as no other page; a synthetic scan — moved, shrunk, sizes rounded, label
+words misread, values typed — in the blank's sizes and faces, its rows the
+blank's height; a page that only names a form, a form footed with another's
+id, and an older revision refused; POS-040's page 2 with its id lost,
+recognised after page 1 and not alone; a stamp in its own face over the
+scan passed through; the data against PDF-Linker's folder)
+and `test-form-scan.mjs` (a real Tesseract scan of a filled CIV-110 in the
+reader, with the library and with it blocked: without, no line in the form's
+face; with, the lines in Arial, placed, the heading bold at 1.5 times the
+6-point label, the typed case number and the name after its label at their
+fields' 9 points).
 
 ### A straight rule in the file is straight on the page (`rules.pageGrid`, `fitRuleRows`)
 

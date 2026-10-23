@@ -1081,6 +1081,26 @@ export function standApart(found, { em = APART_EM } = {}) {
   });
 }
 
+/**
+ * Which of a line's found items (lineItems' answer, in order) change SIZE from
+ * the one before by a fifth or more (typeSizes' tolerance): per item, false for
+ * the first. A form's typed value runs on a few points after its 6-point label
+ * in the 9 points its field sets it in — under a type height after it, so not
+ * apart (standApart), and drawn as part of the label's piece it took the
+ * label's size. A change of type is not a word space; beside its PDF such an
+ * item is a piece of its own, at its own size, where the PDF prints it
+ * (text-reader.js, planCells). Asked of placement only: the file's spaces and
+ * the character grid still go by standApart.
+ */
+export function sizeSteps(found, tolerance = 0.2) {
+  return (found || []).map((g, i) => {
+    if (i === 0) return false;
+    const a = found[i - 1].item, b = g.item;
+    const ha = a && a.h > 0 ? a.h : 0, hb = b && b.h > 0 ? b.h : 0;
+    return ha > 0 && hb > 0 && Math.abs(ha - hb) > tolerance * Math.max(ha, hb);
+  });
+}
+
 // ---- the PDF's own typeface ---------------------------------------------------
 //
 // Beside its PDF page a line is drawn in the PDF's face, not the reader's: a

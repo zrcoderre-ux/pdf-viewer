@@ -262,7 +262,13 @@ app, which routes it to the reader tab.
   in the middle of a word too (a case name in italics and its "'s"); pleading
   paper keeps the reader's own type and takes the weight and slant alone, so
   nothing on it moves. A line the PDF does not print (PDF-Linker's own notes)
-  keeps the reader's font, and a scan's OCR layer has no face to take.
+  keeps the reader's font, and a scan's OCR layer has no face to take —
+  except a scan of a court form PDF-Linker keeps the blank of (its `Form
+  Templates` folder: the Judicial Council and Los Angeles forms there). Such a
+  page is recognised against its blank, as PDF-Linker recognises it, and drawn
+  in the form's own type: each label at the size and in the face the form
+  prints it, its rows the form's rows, and a value typed in one of the form's
+  fields at the size that field sets it in, even a few points after its label.
   Display only: a save, a copy, Find and the LEAKS walk read exactly what the
   file says.
 - **Print what you see — in its pseudonyms.** **🖨 Print** (Ctrl+P) sends the
