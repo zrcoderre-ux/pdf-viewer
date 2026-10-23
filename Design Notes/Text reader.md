@@ -1010,6 +1010,25 @@ cannot say which copy is new, and is measured where it was found, head first:
 one copy counts as typed and is written as its pseudonym, the other is left
 and named in red; the reader's own paste of an Esc'd copy is Esc'd as above.
 
+**A real name is written in the fake's case, never the key's caps**
+(`pseudo-key.caseShape` / `applyCase` / `mirrorCase`, the extension's
+`src/pseudo.js` #331–#334). The key stores a caption's spelling
+("ZACHARY CODERRE", "CHRISTOPHER McALLISTER", "JOHN SMITH, Jr."), and the shape
+read off the fake standing in the text decides how it reads. There is no
+`mixed` shape any more: a fake with capitals of its own ("McAllister",
+"Zenith Holdings, LLC", "Bank of Calderon") is prose, and the real is titled,
+where `mixed` used to fall back on the key and put the caps into a sentence.
+Titling keeps small words small ("Bank of America"), abbreviations, initials
+and Roman numerals in capitals, and gets Mc, O' and accented names right. A
+real value in both cases is left as written unless most of its capitalised
+words are shouted (`mostlyShouted`): then the shouted words are titled and the
+rest kept ("John Smith, Jr."), so "IBM Credit Corp" stays as it is. A
+possessive row ("ZACHARY CODERRE's" → "John Doe's") is split the way a bare
+name plus 's is (`lookup`, and `textdoc.lookupForward` for the typed span),
+and a word the replacement shares with the fake takes the fake's spelling
+("SILVERGATE., Inc." → "U.S.A., Inc."). `test-pseudo-key.mjs`, "case: the
+fake's case, never the key's caps".
+
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each
 line whole — "…; and QUARRY", the blank, ")  Case No.: 25STCV59720" — with

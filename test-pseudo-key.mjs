@@ -8,7 +8,7 @@
 
 import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
-  compileReals, compileFakes, findReals, mirrorCase, caseShape, isKeyFileName, keySignature, sameCaseKey,
+  compileReals, compileFakes, findReals, mirrorCase, caseShape, applyCase, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
   wordFakesOf, keyCellKind, contactValue, boundRows, compilePinnedFakes,
 } from "./viewer/pseudo-key.js";
@@ -89,8 +89,58 @@ check("a name wrapped over a gutter line still matches", translate(c, "Ingrid\n 
 check("a space run matches too", translate(c, "Ingrid   Strangeways").text, "Helen Rasho");
 check("runs", translateRuns(c, "Dear Strangeways, hi"), [{ t: "text", s: "Dear " }, { t: "swap", from: "Strangeways", to: "Rasho" }, { t: "text", s: ", hi" }]);
 check("no key: one text run", translateRuns(compile(null), "abc"), [{ t: "text", s: "abc" }]);
-check("mixed case left as stored", mirrorCase("McDonald", "Cross River Bank, LLC"), "Cross River Bank, LLC");
-check("caseShape", ["ABC", "abc", "Abc Def", "McD"].map(caseShape), ["upper", "lower", "title", "mixed"]);
+check("a value in both cases is left as stored", mirrorCase("McDonald", "Cross River Bank, LLC"), "Cross River Bank, LLC");
+check("caseShape", ["ABC", "abc", "Abc Def", "McD"].map(caseShape), ["upper", "lower", "title", "title"]);
+
+// The casing rules of the extension's src/pseudo.js (#331–#334): the key's
+// caption spelling of a real value never lands in a sentence in capitals.
+console.log("case: the fake's case, never the key's caps");
+check("text with capitals of its own is ordinary text",
+  ["McDonald", "Cross River Bank, LLC", "Bank of Zenith", "McALLISTER", "JOHN MacDONALD", "JOHN DOE's", "ÉMILE", "Émile"].map(caseShape),
+  ["title", "title", "title", "upper", "upper", "upper", "upper", "title"]);
+check("titling keeps small words small and leaves a value in both cases alone",
+  ["BANK OF AMERICA", "THE BANK OF NEW YORK", "smith and jones", "MCCARTHY", "MACK", "Bank of America", "Ludwig van Beethoven"].map((v) => applyCase("title", v)),
+  ["Bank of America", "The Bank of New York", "Smith and Jones", "McCarthy", "Mack", "Bank of America", "Ludwig van Beethoven"]);
+check("a caption's spelling with a small letter in it is still a shout",
+  ["CHRISTOPHER McALLISTER", "JOHN MacDONALD", "JANE DeMARCO", "JOHN SMITH, Jr.", "JOHN SMITH, an individual", "ACME HOLDINGS OF CALIFORNIA, Inc.", "IBM Credit Corp", "NASA Ames"].map((v) => applyCase("title", v)),
+  ["Christopher McAllister", "John MacDonald", "Jane DeMarco", "John Smith, Jr.", "John Smith, an individual", "Acme Holdings of California, Inc.", "IBM Credit Corp", "NASA Ames"]);
+check("suffixes, O' names and accented letters",
+  ["JOHN SMITH III", "HENRY FORD VIII", "MARY O'BRIEN", "MARY O’BRIEN", "D'ANGELO SMITH'S", "JOSÉ GARCÍA", "ÉMILE ZOLA", "ZACHARY CODERRE's"].map((v) => applyCase("title", v)),
+  ["John Smith III", "Henry Ford VIII", "Mary O'Brien", "Mary O’Brien", "D'Angelo Smith's", "José García", "Émile Zola", "Zachary Coderre's"]);
+{
+  const cc = compile({ pairs: [
+    { real: "ZACHARY CODERRE", fake: "Quenby McAllister" },
+    { real: "CROSS RIVER BANK, LLC", fake: "Zenith Holdings, LLC" },
+    { real: "BANK OF AMERICA", fake: "Bank of Calderon" },
+    { real: "MCDONALD", fake: "DeVane" },
+    { real: "CHRISTOPHER McALLISTER", fake: "Cardington Claverhouse" },
+    { real: "JANE DeMARCO, an individual", fake: "Brimley Claverhouse" },
+  ] });
+  check("a fake with capitals of its own still reads as prose",
+    ["Quenby McAllister moved.", "Zenith Holdings, LLC answered.", "Bank of Calderon paid.", "DeVane's motion"].map((t) => translate(cc, t).text),
+    ["Zachary Coderre moved.", "Cross River Bank, LLC answered.", "Bank of America paid.", "McDonald's motion"]);
+  check("…while the fake's shout and its quiet carry across",
+    ["QUENBY McALLISTER, Plaintiff,", "bank of calderon"].map((t) => translate(cc, t).text),
+    ["ZACHARY CODERRE, Plaintiff,", "bank of america"]);
+  check("a shouted real with a small letter, in a sentence",
+    translate(cc, "Plaintiffs Cardington Claverhouse and Brimley Claverhouse (Plaintiffs) filed this action.").text,
+    "Plaintiffs Christopher McAllister and Jane DeMarco, an individual (Plaintiffs) filed this action.");
+  check("…and in a caption", translate(cc, "CARDINGTON CLAVERHOUSE, Plaintiff").text, "CHRISTOPHER MCALLISTER, Plaintiff");
+  check("…and wrapped down a column over a gutter number", translate(cc, "Cardington\n 3  Claverhouse").text, "Christopher\n 3  McAllister");
+}
+{
+  const cp = compile({ pairs: [{ real: "ZACHARY CODERRE's", fake: "John Doe's" }, { real: "ZACHARY CODERRE", fake: "John Doe" }] });
+  check("a possessive row is cased from the fake, its 's the text's own",
+    ["John Doe's motion", "John Doe’s motion", "JOHN DOE'S MOTION", "JOHN DOE's motion", "john doe's"].map((t) => translate(cp, t).text),
+    ["Zachary Coderre's motion", "Zachary Coderre’s motion", "ZACHARY CODERRE'S MOTION", "ZACHARY CODERRE'S motion", "zachary coderre's"]);
+}
+{
+  const cs = compile({ pairs: [{ real: "U.S.A., INC.", fake: "SILVERGATE., INC." }, { real: "CROSS RIVER BANK, LLC", fake: "Zenith Bank, Llc" }] });
+  check("a word the fake shares with the real is spelled the way the fake spells it",
+    ["SILVERGATE., Inc. moved.", "Silvergate., Inc.'s motion", "SILVERGATE., INC.", "silvergate., inc.", "Zenith Bank, Llc"].map((t) => translate(cs, t).text),
+    ["U.S.A., Inc. moved.", "U.S.A., Inc.'s motion", "U.S.A., INC.", "u.s.a., inc.", "Cross River Bank, Llc"]);
+  check("…and the typed-name prompt reads it the other way", mirrorCase("U.S.A., Inc.", "SILVERGATE., INC."), "Silvergate., Inc.");
+}
 
 console.log("forward");
 const f = compileForward(key);

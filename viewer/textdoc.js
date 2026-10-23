@@ -32,7 +32,7 @@
 //       right for what they write).
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
-import { caseShape, applyCase, translateRuns, findReals, findRealSpans, compile, ownFakesOf } from "./pseudo-key.js";
+import { caseShape, mirrorCase, translateRuns, findReals, findRealSpans, compile, ownFakesOf } from "./pseudo-key.js";
 import { REPORTERS_SORTED, REPORTERS_ALL_SORTED } from "./reporters.js";
 
 // ---- the file as pages ---------------------------------------------------------
@@ -1985,6 +1985,7 @@ export function findRealsInPlain(compiledForward, segments) {
 }
 
 const POSS_MATCH_RE = /['’][sS]$/;
+const POSS_TAIL_RE = /['’]s$/i;
 /** A value folded for comparison: trimmed, one space between words, lower case. */
 export function foldValue(s) { return foldKey(s); }
 function foldKey(s) {
@@ -2001,15 +2002,20 @@ export function fakeFor(compiledForward, value) {
 function lookupForward(compiled, m) {
   let fake = compiled.map.get(foldKey(m));
   let suffix = "";
+  const mp = m.match(POSS_MATCH_RE);
   if (fake == null) {
-    const mp = m.match(POSS_MATCH_RE);
     if (!mp) return null;
     fake = compiled.map.get(foldKey(m.slice(0, -mp[0].length)));
     if (fake == null) return null;
     suffix = mp[0];
+  } else if (mp && POSS_TAIL_RE.test(fake)) {
+    // A possessive row: the 's is the text's own, as pseudo-key's lookup has it.
+    fake = fake.replace(POSS_TAIL_RE, "");
+    suffix = mp[0];
   }
-  const shape = caseShape(suffix ? m.slice(0, -suffix.length) : m);
-  const cased = applyCase(shape, fake);
+  const core = suffix ? m.slice(0, -suffix.length) : m;
+  const shape = caseShape(core);
+  const cased = mirrorCase(core, fake);
   if (!suffix) return cased;
   return cased + (shape === "upper" ? suffix.toUpperCase() : shape === "lower" ? suffix.toLowerCase() : suffix);
 }

@@ -768,17 +768,29 @@ export function buildMatcher(values) {
 }
 
 /**
- * The shape a name is written in: upper / lower / title / mixed / none.
- * `mixed` — deliberate case inside it ("McDonald", "LLC") — is a shape no
- * transform can be derived from, so text of that shape is left as written.
+ * The shape a name is written in, read off the text that stands there:
+ *   upper  SHOUTED, the whole thing        (a caption, a heading)
+ *   lower  quiet, the whole thing          (a slug, a lowercased list)
+ *   title  ordinary text — anything else   (prose: "John Doe", but also
+ *          "McDonald", "Zenith Holdings, LLC", "Bank of Zenith")
+ * `none` is a value with no letters at all (a case number, a phone number).
+ *
+ * There is no shape that means "keep the replacement as the key stores it":
+ * text with capitals of its own inside it is still ordinary text, and the
+ * name that replaces it reads as ordinary text too. That was once a fourth
+ * shape, `mixed`, and every fake with an internal capital, an "LLC" or an
+ * "of" in it put the key's shouted caption spelling into the middle of a
+ * sentence. (The extension's src/pseudo.js, #331.)
  */
 export function caseShape(s) {
-  const t = String(s == null ? "" : s);
-  if (!/[A-Za-z]/.test(t)) return "none";
-  if (t === t.toUpperCase()) return "upper";
+  // A trailing 's is read past: "JOHN DOE's" is still a shout.
+  const t = String(s == null ? "" : s).replace(POSS_TAIL_RE, "");
+  if (!/\p{L}/u.test(t)) return "none";
+  // A caption shouts "McALLISTER" with the c of its Mc/Mac still small; the
+  // capitals after it are what say the name is shouted.
+  if (t.replace(/\bMa?c(?=[A-Z]{2})/g, (p) => p.toUpperCase()) === t.toUpperCase()) return "upper";
   if (t === t.toLowerCase()) return "lower";
-  const words = t.match(/[A-Za-z]+/g) || [];
-  return words.every((w) => /^[A-Z][a-z]*$/.test(w)) ? "title" : "mixed";
+  return "title";
 }
 
 const KEEP_UPPER = new Set(
@@ -788,39 +800,117 @@ const KEEP_UPPER = new Set(
   ).split(" ")
 );
 
+// A generational suffix — "JOHN SMITH III" is John Smith III, not Iii.
+const ROMAN_RE = /^X{0,3}(?:IX|IV|V?I{0,3})$/;
+
 function looksAbbrev(word) {
-  const letters = word.replace(/[^A-Za-z]/g, "");
+  const letters = word.replace(/[^\p{L}]/gu, "");
   if (!letters) return false;
   if (letters.length <= 2) return true;
   if (KEEP_UPPER.has(letters.toLowerCase())) return true;
-  return letters.length <= 4 && !/[AEIOUY]/i.test(letters);
+  if (ROMAN_RE.test(letters.toUpperCase())) return true;
+  // Accents off for the vowel test: "MÉN" is a word, not an abbreviation.
+  const bare = letters.normalize("NFD").replace(/\p{M}/gu, "");
+  return letters.length <= 4 && !/[AEIOUY]/i.test(bare);
 }
 
-const WORD_RE = /[A-Za-z]+(?:['’][A-Za-z]+)*/g;
+// Letters of any script, with an apostrophe INSIDE the word: "O'Brien" and
+// "Coderre's" are one word each, and "JOSÉ" is not split at the É.
+const WORD_RE = /\p{L}+(?:['‘’]\p{L}+)*/gu;
 
-function titleWord(w, deliberate) {
-  const up = w === w.toUpperCase();
-  const low = w === w.toLowerCase();
-  if (!up && !low) return w;
-  if (up && (deliberate || looksAbbrev(w))) return w;
-  return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+// A shouted word that keeps a small letter in its prefix, the way a caption
+// writes "McALLISTER", "MacDONALD" or "DeMARCO".
+const PREFIX_SHOUT_RE = /^(\p{Lu}\p{Ll}{1,2})(\p{Lu}{2,})$/u;
+
+// Shouted: all capitals ("SMITH"), or capitals after a cased prefix
+// ("McALLISTER"). "McDonald", "OneWest" and "Jr" are not.
+function isShoutedWord(w) {
+  if (w === w.toUpperCase()) return w !== w.toLowerCase();
+  return PREFIX_SHOUT_RE.test(w);
 }
 
-/** Write `value` in `shape`. */
+// The small words a title pass leaves small after the first word: "BANK OF
+// AMERICA" reads "Bank of America", not "Bank OF America".
+const SMALL_WORDS = new Set("of and the for in on at to by or".split(" "));
+
+function titleWord(w, first) {
+  if (!first && SMALL_WORDS.has(w.toLowerCase())) return w.toLowerCase();
+  // In an all-caps word there is nothing to read, so the guess is made: an
+  // abbreviation keeps its capitals and everything else is titled.
+  if (w === w.toUpperCase() && looksAbbrev(w)) return w;
+  // "MCDONALD" is McDonald. (Not Mac, which is as often Mack, Macy or Machado.)
+  if (/^mc[a-z]{2}/i.test(w)) return "Mc" + w.charAt(2).toUpperCase() + w.slice(3).toLowerCase();
+  const p = w.match(PREFIX_SHOUT_RE);
+  if (p) return p[1] + p[2].charAt(0) + p[2].slice(1).toLowerCase();
+  const out = w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+  // "O'BRIEN" is O'Brien: one letter and an apostrophe is a prefix. (A
+  // possessive's 's is one letter AFTER the mark, so "SMITH'S" is untouched.)
+  return out.replace(/^(\p{L}['‘’])(\p{L})(?=\p{L})/u, (m, a, b) => a + b.toUpperCase());
+}
+
+// A value in both cases that is nonetheless a caption's spelling: most of its
+// capitalised words are shouted — "JOHN SMITH, Jr.", "CHRISTOPHER McALLISTER",
+// "JOHN SMITH, an individual". An abbreviation is no evidence either way
+// (prose writes "IBM" too), and neither is a lowercase word.
+function mostlyShouted(core) {
+  let shouted = 0;
+  let prose = 0;
+  for (const w of core.match(WORD_RE) || []) {
+    if (w === w.toLowerCase()) continue;
+    if (!isShoutedWord(w)) prose++;
+    else if (!(w === w.toUpperCase() && looksAbbrev(w))) shouted++;
+  }
+  return shouted > prose;
+}
+
+/**
+ * Write `value` in `shape`. Titling puts a name into ordinary prose and
+ * genuinely re-cases: the key's "ZACHARY CODERRE" reads "Zachary Coderre".
+ * A value with both cases in it ("McDonald", "Cross River Bank, LLC") is
+ * already written the way prose writes it and is left as it is — unless most
+ * of its capitalised words are shouted (mostlyShouted), and then the shouted
+ * words are titled and the rest left as written.
+ */
 export function applyCase(shape, value) {
   const v = String(value == null ? "" : value);
   if (shape === "upper") return v.toUpperCase();
   if (shape === "lower") return v.toLowerCase();
   if (shape === "title") {
-    const deliberate = v !== v.toUpperCase();
-    return v.replace(WORD_RE, (w) => titleWord(w, deliberate));
+    // A possessive row's "CODERRE's" is not a value in both cases.
+    const core = v.replace(POSS_TAIL_RE, "");
+    const both = core !== core.toUpperCase() && core !== core.toLowerCase();
+    if (both && !mostlyShouted(core)) return v;
+    let first = true;
+    return v.replace(WORD_RE, (w) => {
+      const out = !both || isShoutedWord(w) ? titleWord(w, first) : w;
+      first = false;
+      return out;
+    });
   }
   return v;
 }
 
-/** The replacement in the matched text's own voice. */
+/**
+ * The replacement in the matched text's own voice: the shape is read off the
+ * text and written onto the replacement, every time. And a word the
+ * replacement SHARES with the text is spelled as the text spells it —
+ * "SILVERGATE., Inc." for "U.S.A., INC." reads "U.S.A., Inc."
+ */
 export function mirrorCase(sample, value) {
-  return applyCase(caseShape(sample), value);
+  return sharedWords(sample, applyCase(caseShape(sample), value));
+}
+
+// Every word of `out` that also stands in `sample` (case-blind) takes the
+// sample's spelling of it. A trailing 's on the sample is not part of its
+// last word.
+function sharedWords(sample, out) {
+  const spelled = new Map();
+  for (const w of String(sample == null ? "" : sample).replace(POSS_TAIL_RE, "").match(WORD_RE) || []) {
+    const k = fold(w);
+    if (!spelled.has(k)) spelled.set(k, w);
+  }
+  if (!spelled.size) return out;
+  return out.replace(WORD_RE, (w) => (spelled.has(fold(w)) ? spelled.get(fold(w)) : w));
 }
 
 function casedSuffix(shape, suffix) {
@@ -1013,12 +1103,18 @@ function lookup(compiled, m) {
   const g = foldGaps(m);
   let mapped = compiled.map.get(fold(g));
   let suffix = "";
+  const mp = g.match(POSS_MATCH_RE);
   if (mapped == null) {
-    const mp = g.match(POSS_MATCH_RE);
     if (mp) {
       mapped = compiled.map.get(fold(g.slice(0, -mp[0].length)));
       if (mapped != null) suffix = mp[0];
     }
+  } else if (mp && POSS_TAIL_RE.test(mapped)) {
+    // A possessive ROW ("INGRID's" -> "ZACHARY CODERRE's") goes the way a bare
+    // name with an 's does: the name is cased from the text, the 's is the
+    // text's own and not the key's.
+    mapped = mapped.replace(POSS_TAIL_RE, "");
+    suffix = mp[0];
   }
   return mapped == null ? null : { mapped, suffix };
 }
@@ -1042,8 +1138,8 @@ function lineRanges(start, matched) {
 /** The replacement for a match, in the case the match was written in. */
 function swapTo(hit, matched) {
   const core = hit.suffix ? matched.slice(0, -hit.suffix.length) : matched;
-  const shape = caseShape(foldGaps(core));
-  return applyCase(shape, hit.mapped) + casedSuffix(shape, hit.suffix);
+  const sample = foldGaps(core);
+  return mirrorCase(sample, hit.mapped) + casedSuffix(caseShape(sample), hit.suffix);
 }
 
 /**
