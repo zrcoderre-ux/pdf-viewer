@@ -675,10 +675,11 @@ function lockDownSession(ses) {
   ses.setPermissionCheckHandler((_wc, permission, origin) => allowed.has(permission) && isAppUrl(String(origin || "").replace(/\/?$/, "/")));
   ses.setPermissionRequestHandler((wc, permission, cb, details) => {
     const from = (details && details.requestingUrl) || (wc && wc.getURL()) || "";
-    // A screen share (getDisplayMedia) asks for "media" with no camera or
-    // microphone in it; setDisplayMediaRequestHandler then gives it the
-    // app's own window and nothing else. A camera or a microphone is refused.
-    const share = permission === "media" && details && Array.isArray(details.mediaTypes) && details.mediaTypes.length === 0;
+    // A screen share (getDisplayMedia) asks for "display-capture" (Electron
+    // 45 on; "media" before it); setDisplayMediaRequestHandler then gives it
+    // the app's own window, with no sound, and nothing else. A camera or a
+    // microphone ("media") is refused.
+    const share = permission === "display-capture";
     cb((allowed.has(permission) || share) && isAppUrl(from));
   });
 
