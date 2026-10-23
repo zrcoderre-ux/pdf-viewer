@@ -372,6 +372,36 @@ sets `--body-r` on the body (`clearMatched` takes it off), and
 fits an overrunning line inside it. Ruled boxes keep the page's rule grid.
 Tested in `test-pdfsync.mjs` and `test-form-look.mjs`.
 
+**An overrunning line gives back its indent before it is squeezed**
+(`giveOf`, `giveBack`, `ungive`, `charRect`). The owner: "The grid side by
+side placement matching should never force text off the page, if it does,
+reduce the indentation until no text is off the page." The slide-back (the
+spill pass) moves a line's LEFT, and only on a page laid row by row: on the
+export's grid (`.cgrid`) every line has the grid's one left, and its indent is
+the `.lt`'s `text-indent` (the file's spaces on the grid, its first piece's
+place), as it is on a numbered page (`.pind`, the PDF row's indent). So an
+indented line whose export carries more than its PDF prints (a real name for
+a fake, words the run added) was squeezed across from where it stood, indent
+and all — a form's indented line drawn at 0.72 of its width. Now, after the
+spill pass and before the squeeze, every line on the near pages that runs past
+`--body-r` (`scrollWidth` over `clientWidth`, which no transform changes) is
+measured: its indent (its first non-space character past the `.lt`'s content
+box, the squeeze from the pass before divided back out) gives first, down to
+the line's left; then the blank each cell is held open by in front of a piece
+placed further right (`placeLine`'s `min-width`, past its text and a space),
+the last cell first. They are written as an inline `text-indent` on the `.lt`
+and a negative `margin-right` on the cell (`__gave` marks the line), so
+neither `placeLine`'s widths nor `fitCells`' are touched; the squeeze then
+takes only what is still over. Every pass takes them off first (`ungive`, for
+every line of a near page, before `fitCells` measures), and `clearMatched`
+does too. Box rows, rule lines, a caption's stamp line and a line set by hand
+are passed by, as the spill pass passes them. Only the overrunning lines are
+measured past their widths, so a page that fits costs nothing more.
+`test-indent-give.mjs`: a line a little too long ends at the margin with its
+indent given back and no squeeze; one far too long gives all its indent before
+it is squeezed; a line that fits keeps every piece at its PDF place; the file
+reads back unchanged.
+
 ### The numbered margin is the boundary
 
 A pleading's PDF carries furniture its export does not: the firm's name

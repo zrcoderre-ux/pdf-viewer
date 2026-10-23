@@ -1877,7 +1877,10 @@ app, which routes it to the reader tab.
   space **in front of** the text — the indent the PDF put it at — the line
   slides back into it, by what it overruns or by what the indent has to give,
   whichever is less. Its top never moves, so it still stands beside its own
-  row; the indent is what gives. **Whatever is still past the edge after that
+  row; the indent is what gives. The same goes for a line set on the PDF's
+  grid, where the indent is the blank before its first word (and the blank
+  before a piece placed out to the right): the indent shrinks, down to the
+  margin, until the line ends on the page. **Whatever is still past the edge after that
   is narrowed, never cut**: the line is drawn squeezed across by what it
   overruns, in its own type and at its own height, the way pdf.js fits its
   text layer to the page — so pleading paper, whose lines all start at the

@@ -21265,6 +21265,21 @@ function applyMatchedLayoutNow() {
   const placeFrom = performance.now();
   placePages(plans, near);
   formLook.place += performance.now() - placeFrom;
+  // (What the last pass gave back of an indent is put back before anything is
+  // measured: giveBack, below, works it out afresh.)
+  const givers = [];
+  for (const p of plans) {
+    if (!p.tops || !near.has(Number(p.sec.dataset.index))) continue;
+    for (const l of p.lines) {
+      const lt = l.querySelector(":scope > .lt");
+      if (!lt) continue;
+      ungive(lt);
+      // (A box row, a rule line and a line set by hand keep their own places; a
+      // caption's stamp line stands against the right margin.)
+      if (l.classList.contains("rl") || l.classList.contains("rr") || l.classList.contains("own") || l.classList.contains("cap-r") || l.classList.contains("cap-split") || lt.classList.contains("rg")) continue;
+      givers.push(lt);
+    }
+  }
   const cells = [];
   for (const p of plans) {
     if (!p.tops || !near.has(Number(p.sec.dataset.index))) continue;
@@ -21314,6 +21329,26 @@ function applyMatchedLayoutNow() {
       x.l.__laid = null;
     }
   }
+  // …AND A LINE PLACED PAST THE MARGIN GIVES BACK ITS INDENT. The owner: "The
+  // grid side by side placement matching should never force text off the
+  // page, if it does, reduce the indentation until no text is off the page."
+  // On the export's grid (.cgrid) and on a numbered page an indent is not the
+  // line's left, which the slide above moves, but the blank the line opens
+  // with (text-indent: the file's spaces on the grid, the PDF row's indent,
+  // the first piece's place) and the blank a piece placed further right is
+  // set out to. Where the text runs past the PDF's right margin, that blank
+  // gives way: the line's own indent first, down to the margin, then the gap
+  // in front of each piece placed out to the right, the last first, down to a
+  // space. Only what is still over after that is squeezed (below). Read for
+  // every line, then written, then the squeeze reads once more: the lines
+  // that overrun are the only ones measured past their width.
+  const over = [];
+  for (const lt of givers) {
+    const by = lt.scrollWidth - lt.clientWidth;
+    if (by > 0.5) over.push({ lt, by });
+  }
+  for (const x of over) x.give = giveOf(x.lt, x.by);
+  for (const x of over) if (x.give) giveBack(x.lt, x.give);
   // A LINE STILL TOO LONG IS NARROWED, NEVER CUT. What overran the sheet after
   // giving back its indent used to be cut off at the edge, and the words at
   // the end of a line are words like any other. The line is drawn narrower
@@ -22100,6 +22135,71 @@ function unplacePage(body) {
   body.__placed = false;
 }
 
+/**
+ * What of a line's blank gives way so that it ends `by` px sooner
+ * (applyMatchedLayout, before the squeeze): its own indent first — where its
+ * first character stands past its box's left, never further back than that —
+ * then the blank each piece before a placed one is held open by, from the
+ * right, each down to a space. { ti, indent, cells: [[cell, px]] }, in the
+ * line's own px (a squeeze from the pass before divided back out); null where
+ * nothing gives.
+ */
+function giveOf(lt, by) {
+  const first = charRect(lt, false);
+  if (!first) return null;
+  const box = lt.getBoundingClientRect();
+  const m = /scaleX\(([\d.]+)\)/.exec(lt.style.transform || "");
+  const f = (m && parseFloat(m[1])) || 1;
+  const cs = getComputedStyle(lt);
+  const at = (x) => (x - box.left) / f - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.borderLeftWidth) || 0);
+  let need = by;
+  const indent = Math.min(need, Math.max(0, at(first.left)));
+  need -= indent;
+  const cells = [];
+  const cc = [...lt.children].filter((c) => c.classList.contains("cc"));
+  for (let i = cc.length - 1; i >= 0 && need > 0.5; i--) {
+    const c = cc[i];
+    const ccs = getComputedStyle(c);
+    const space = (parseFloat(ccs.getPropertyValue("--col-sp-n")) || 0.25) * (parseFloat(ccs.fontSize) || 0);
+    const left = at(c.getBoundingClientRect().left);
+    const end = charRect(c, true);
+    const spare = left + c.offsetWidth - (end ? at(end.right) : left) - space;
+    if (spare <= 0.5) continue;
+    const px = Math.min(need, spare);
+    cells.push([c, px]);
+    need -= px;
+  }
+  if (indent <= 0.25 && !cells.length) return null;
+  return { ti: parseFloat(cs.textIndent) || 0, indent, cells };
+}
+/** The first (or the last) character of `el` that is not a space, as the screen draws it; null where there is none. */
+function charRect(el, last) {
+  const nodes = [];
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) if (/\S/.test(n.data) && !(n.parentElement && n.parentElement.closest(".gutter"))) nodes.push(n);
+  const n = last ? nodes[nodes.length - 1] : nodes[0];
+  if (!n) return null;
+  const i = last ? n.data.length - 1 - n.data.split("").reverse().findIndex((ch) => /\S/.test(ch)) : n.data.search(/\S/);
+  const r = document.createRange();
+  r.setStart(n, i);
+  r.setEnd(n, i + 1);
+  const rects = r.getClientRects();
+  return rects.length ? rects[0] : r.getBoundingClientRect();
+}
+/** …written: the indent less what it gives (an inline text-indent over the stylesheet's), each cell's blank by a negative margin. */
+function giveBack(lt, g) {
+  if (g.indent > 0.25) lt.style.textIndent = (g.ti - g.indent).toFixed(2) + "px";
+  for (const [c, px] of g.cells) c.style.marginRight = (-px).toFixed(2) + "px";
+  lt.__gave = true;
+}
+/** …and taken back off, the line's indent and its cells' blanks the stylesheet's and placeLine's again. */
+function ungive(lt) {
+  if (!lt.__gave) return;
+  lt.__gave = false;
+  if (lt.style.textIndent) lt.style.textIndent = "";
+  for (const c of lt.children) if (c.style.marginRight) c.style.marginRight = "";
+}
+
 /** A slot back as the pane built it: the levelling and the held-open box go. */
 function unlevelSlot(el) {
   const lab = el.querySelector(".page-label");
@@ -22218,7 +22318,7 @@ function clearMatched(sec) {
   for (const l of body.querySelectorAll(":scope > .line.lead")) l.classList.remove("lead");
   sec.__lead = 0;
   for (const l of body.querySelectorAll(":scope > .line")) { l.__laid = null; l.style.top = ""; l.style.left = ""; l.style.height = ""; l.style.lineHeight = ""; l.style.fontSize = ""; l.classList.remove("pind"); l.style.removeProperty("--pdf-ind"); }
-  for (const lt of body.querySelectorAll(":scope > .line > .lt")) if (lt.style.transform) { lt.style.transform = ""; lt.style.transformOrigin = ""; }
+  for (const lt of body.querySelectorAll(":scope > .line > .lt")) { if (lt.style.transform) { lt.style.transform = ""; lt.style.transformOrigin = ""; } ungive(lt); }
 }
 function setSideBySide(on, { remember = true } = {}) {
   sbsOn = !!on;
