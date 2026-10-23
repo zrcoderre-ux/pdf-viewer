@@ -1,0 +1,214 @@
+{
+ "version": 1,
+ "blanks": {
+  "APP-003 Appellant's Notice Designating Record on Appeal (Unlimited Civil Case).pdf": "189e9621603f73a8",
+  "APP-005 Abandonment of Appeal (Unlimited Civil Case).pdf": "f0c745b5f75a41cb",
+  "APP-013 Memorandum of Costs on Appeal.pdf": "56f9137f5f0ae055",
+  "CIV-050 Statement of Damages (Personal Injury or Wrongful Death).pdf": "9533e3e0e185e73c",
+  "CIV-090 Offer to Compromise and Acceptance Under Code of Civil Procedure Section 998.pdf": "9b0bd54d2c3cbe3b",
+  "CIV-100 Request for Entry of Default (Application to Enter Default).pdf": "9bd74f5b9d67ef00",
+  "CIV-105 Request for Entry of Default (Fair Debt Buying Practices Act).pdf": "8ad5d8605fdc1d7f",
+  "CIV-110 Request for Dismissal.pdf": "95f8d4a98e5bf4d5",
+  "CIV-120 Notice of Entry of Dismissal and Proof of Service.pdf": "ae1f7a49b7b445f6",
+  "CIV-130 Notice of Entry of Judgment or Order.pdf": "e3ed9b66c47ce49b",
+  "CIV-140 Declaration of Demurring or Moving Party Regarding Meet and Confer.pdf": "95d527153c0c1669",
+  "CIV-141 Declaration of Demurring or Moving Party in Support of Automatic Extension.pdf": "5659c87ef6302208",
+  "CM-010 Civil Case Cover Sheet.pdf": "2e97e4010e077b4d",
+  "EJ-130 Writ of Execution.pdf": "c90f4938097db8f5",
+  "JUD-100 Judgment.pdf": "5561524d6bda15b3",
+  "LASC CIV 109 Civil Case Cover Sheet Addendum and Statement of Location.pdf": "c91fae74f57a9017",
+  "LASC CIV 237 Order Appointing Court Approved Reporter as Official Reporter Pro Tempore.pdf": "bf899286df99bd53",
+  "LASC CIV 271 Alternative Dispute Resolution Information Package.pdf": "e29eee127cf2c194",
+  "MC-010 Memorandum of Costs (Summary).pdf": "c3036ad5bbf217de",
+  "MC-011 Memorandum of Costs (Worksheet).pdf": "2539a38609f7791c",
+  "MC-012 Memorandum of Costs After Judgment, Acknowledgment of Credit, and Declaration of Accrued Interest.pdf": "6533b2d4e86783ac",
+  "MC-050 Substitution of Attorney - Civil (Without Court Order).pdf": "0015b72acbd9910a",
+  "MC-350 Petition for Approval of Compromise of Claim or Action (Minor or Person With a Disability).pdf": "7d63e23cd6c1423b",
+  "MC-350EX Petition for Expedited Approval of Compromise of Claim (Minor or Person With a Disability).pdf": "b6a5a4c252e7b723",
+  "PLD-050 General Denial.pdf": "3a40b9fe2f22b238",
+  "PLD-C-001 Complaint - Contract.pdf": "47ead65f61e88193",
+  "PLD-C-001(1) Cause of Action - Breach of Contract.pdf": "9aaaf8ed1637dbf2",
+  "PLD-C-001(2) Cause of Action - Common Counts.pdf": "99951c1c56921ef7",
+  "PLD-C-001(3) Cause of Action - Fraud.pdf": "dd00d7a4067d0d24",
+  "PLD-C-010 Answer - Contract.pdf": "33c2cf372ba41d82",
+  "PLD-PI-001 Complaint - Personal Injury, Property Damage, Wrongful Death.pdf": "6af3e8aa7afbc8d0",
+  "PLD-PI-001(1) Cause of Action - Motor Vehicle.pdf": "d812cfa4c17e1011",
+  "PLD-PI-001(2) Cause of Action - General Negligence.pdf": "89a539d1dac090b1",
+  "PLD-PI-001(3) Cause of Action - Intentional Tort.pdf": "6df7948ec6bc87d0",
+  "PLD-PI-001(4) Cause of Action - Premises Liability.pdf": "efa2b05aa53cb08f",
+  "PLD-PI-001(5) Cause of Action - Products Liability.pdf": "802262e0814b0bec",
+  "PLD-PI-001(6) Exemplary Damages Attachment.pdf": "4818725b269b8f8d",
+  "PLD-PI-002 Cross-Complaint - Personal Injury, Property Damage, Wrongful Death.pdf": "04b0e467274bab71",
+  "POS-010 Proof of Service of Summons.pdf": "09b82292b517ea81",
+  "POS-015 Notice and Acknowledgment of Receipt - Civil.pdf": "65971fbb0aeb6faf",
+  "POS-020 Proof of Personal Service - Civil.pdf": "4ccafb2dbda29431",
+  "POS-020(D) Attachment to Proof of Personal Service - Civil (Documents Served).pdf": "f4ec6b63c39ad17c",
+  "POS-020(P) Attachment to Proof of Personal Service - Civil (Persons Served).pdf": "6eab0287abe0590c",
+  "POS-030 Proof of Service by First-Class Mail - Civil.pdf": "0e3d9fe1f0a38847",
+  "POS-030(D) Attachment to Proof of Service by First-Class Mail - Civil (Documents Served).pdf": "7c9ded9b15260fdb",
+  "POS-030(P) Attachment to Proof of Service by First-Class Mail - Civil (Persons Served).pdf": "7701cb35b539edba",
+  "POS-040 Proof of Service - Civil.pdf": "38faaa07d954d159",
+  "POS-040(D) Attachment to Proof of Service - Civil (Documents Served).pdf": "0d72391056e78bd5",
+  "POS-040(P) Attachment to Proof of Service - Civil (Persons Served).pdf": "0a087d753f7e584b",
+  "SUM-100 Summons.pdf": "aa5b1a4933e81c40",
+  "SUM-110 Summons (Cross-Complaint).pdf": "d7d2f4740a4911d9"
+ },
+ "keys": {
+  "app003": [
+   "APP-003 Appellant's Notice Designating Record on Appeal (Unlimited Civil Case).json"
+  ],
+  "app005": [
+   "APP-005 Abandonment of Appeal (Unlimited Civil Case).json"
+  ],
+  "app013": [
+   "APP-013 Memorandum of Costs on Appeal.json"
+  ],
+  "civ050": [
+   "CIV-050 Statement of Damages (Personal Injury or Wrongful Death).json"
+  ],
+  "civ090": [
+   "CIV-090 Offer to Compromise and Acceptance Under Code of Civil Procedure Section 998.json"
+  ],
+  "civ100": [
+   "CIV-100 Request for Entry of Default (Application to Enter Default).json"
+  ],
+  "civ105": [
+   "CIV-105 Request for Entry of Default (Fair Debt Buying Practices Act).json"
+  ],
+  "civ110": [
+   "CIV-110 Request for Dismissal.json"
+  ],
+  "civ120": [
+   "CIV-120 Notice of Entry of Dismissal and Proof of Service.json"
+  ],
+  "civ130": [
+   "CIV-130 Notice of Entry of Judgment or Order.json"
+  ],
+  "civ140": [
+   "CIV-140 Declaration of Demurring or Moving Party Regarding Meet and Confer.json"
+  ],
+  "civ141": [
+   "CIV-141 Declaration of Demurring or Moving Party in Support of Automatic Extension.json"
+  ],
+  "cm010": [
+   "CM-010 Civil Case Cover Sheet.json"
+  ],
+  "ej130": [
+   "EJ-130 Writ of Execution.json"
+  ],
+  "iascciv109": [
+   "LASC CIV 109 Civil Case Cover Sheet Addendum and Statement of Location.json"
+  ],
+  "iascciv237": [
+   "LASC CIV 237 Order Appointing Court Approved Reporter as Official Reporter Pro Tempore.json"
+  ],
+  "iascciv271": [
+   "LASC CIV 271 Alternative Dispute Resolution Information Package.json"
+  ],
+  "jud100": [
+   "JUD-100 Judgment.json"
+  ],
+  "mc010": [
+   "MC-010 Memorandum of Costs (Summary).json"
+  ],
+  "mc011": [
+   "MC-011 Memorandum of Costs (Worksheet).json"
+  ],
+  "mc012": [
+   "MC-012 Memorandum of Costs After Judgment, Acknowledgment of Credit, and Declaration of Accrued Interest.json"
+  ],
+  "mc050": [
+   "MC-050 Substitution of Attorney - Civil (Without Court Order).json"
+  ],
+  "mc350": [
+   "MC-350 Petition for Approval of Compromise of Claim or Action (Minor or Person With a Disability).json"
+  ],
+  "mc350ex": [
+   "MC-350EX Petition for Expedited Approval of Compromise of Claim (Minor or Person With a Disability).json"
+  ],
+  "pi0014": [
+   "PLD-PI-001(4) Cause of Action - Premises Liability.json"
+  ],
+  "pid050": [
+   "PLD-050 General Denial.json"
+  ],
+  "pidc001": [
+   "PLD-C-001 Complaint - Contract.json"
+  ],
+  "pidc0011": [
+   "PLD-C-001(1) Cause of Action - Breach of Contract.json"
+  ],
+  "pidc0012": [
+   "PLD-C-001(2) Cause of Action - Common Counts.json"
+  ],
+  "pidc0013": [
+   "PLD-C-001(3) Cause of Action - Fraud.json"
+  ],
+  "pidc010": [
+   "PLD-C-010 Answer - Contract.json"
+  ],
+  "pidpi001": [
+   "PLD-PI-001 Complaint - Personal Injury, Property Damage, Wrongful Death.json"
+  ],
+  "pidpi0011": [
+   "PLD-PI-001(1) Cause of Action - Motor Vehicle.json"
+  ],
+  "pidpi0012": [
+   "PLD-PI-001(2) Cause of Action - General Negligence.json"
+  ],
+  "pidpi0013": [
+   "PLD-PI-001(3) Cause of Action - Intentional Tort.json"
+  ],
+  "pidpi0014": [
+   "PLD-PI-001(4) Cause of Action - Premises Liability.json"
+  ],
+  "pidpi0015": [
+   "PLD-PI-001(5) Cause of Action - Products Liability.json"
+  ],
+  "pidpi0016": [
+   "PLD-PI-001(6) Exemplary Damages Attachment.json"
+  ],
+  "pidpi002": [
+   "PLD-PI-002 Cross-Complaint - Personal Injury, Property Damage, Wrongful Death.json"
+  ],
+  "pos010": [
+   "POS-010 Proof of Service of Summons.json"
+  ],
+  "pos015": [
+   "POS-015 Notice and Acknowledgment of Receipt - Civil.json"
+  ],
+  "pos020": [
+   "POS-020 Proof of Personal Service - Civil.json"
+  ],
+  "pos020d": [
+   "POS-020(D) Attachment to Proof of Personal Service - Civil (Documents Served).json"
+  ],
+  "pos020p": [
+   "POS-020(P) Attachment to Proof of Personal Service - Civil (Persons Served).json"
+  ],
+  "pos030": [
+   "POS-030 Proof of Service by First-Class Mail - Civil.json"
+  ],
+  "pos030d": [
+   "POS-030(D) Attachment to Proof of Service by First-Class Mail - Civil (Documents Served).json"
+  ],
+  "pos030p": [
+   "POS-030(P) Attachment to Proof of Service by First-Class Mail - Civil (Persons Served).json"
+  ],
+  "pos040": [
+   "POS-040 Proof of Service - Civil.json"
+  ],
+  "pos040d": [
+   "POS-040(D) Attachment to Proof of Service - Civil (Documents Served).json"
+  ],
+  "pos040p": [
+   "POS-040(P) Attachment to Proof of Service - Civil (Persons Served).json"
+  ],
+  "sum100": [
+   "SUM-100 Summons.json"
+  ],
+  "sum110": [
+   "SUM-110 Summons (Cross-Complaint).json"
+  ]
+ }
+}

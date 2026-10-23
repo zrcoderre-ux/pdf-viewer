@@ -85,6 +85,8 @@
         "viewer/rules.js",
         "viewer/columns.js",
         "viewer/pdfsync.js",
+        "viewer/form-templates.js",
+        "viewer/form-templates/*.json",
         "viewer/pseudo-key.js",
         "viewer/key-library.js",
         "viewer/redact.js",

@@ -231,6 +231,8 @@ viewer/viewer.html                   PDF viewer shell
 viewer/text-reader.html / .js / .css Text reader for PDF-Linker's exports (pages, cites, key)
 viewer/textdoc.js                    Text reader's document model (pure; test-textdoc.mjs)
 viewer/pdfsync.js                    Text reader's PDF pane decisions: matching, ranges, scroll sync (pure; test-pdfsync.mjs)
+viewer/form-templates.js             Text reader: a scanned court form recognised against PDF-Linker's blank and drawn in its type (pure; test-form-templates.mjs)
+viewer/form-templates/               The blanks' text, sizes, faces and fields (made by build-form-templates.mjs from PDF-Linker's Form Templates)
 viewer/rules.js                      Text reader's box-drawing glyphs drawn as boxes, every rule of a page on one column grid (grid pure; test-rules.mjs, test-straight-rules.mjs)
 viewer/columns.js                    Text reader's space-aligned columns laid out on the font's own grid (cuts pure in textdoc.js; test-textdoc.mjs)
 viewer/pseudo-key.js                 pseudonym_key.xlsx reader + fake↔real swaps (pure; test-pseudo-key.mjs)
