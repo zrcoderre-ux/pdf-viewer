@@ -140,7 +140,10 @@ holds). The shim wraps `showOpenFilePicker`, `showSaveFilePicker` and
 `showDirectoryPicker` in every frame: unless the page gave its own
 `startIn`, the dialog gets the handle the last dialog returned, kept in the
 `pdfplus-pickers` IndexedDB store (shared by the shell and every tab, kept
-across restarts, one per dialog `id`). A `PathFileHandle` given as
+across restarts, one per dialog `id`). The wrapper returns only once that
+write has committed (`rememberPicked`): a write left pending was lost when
+PDF+ quit right after, and the next start opened where the dialog before
+had finished (a Windows CI run caught it). A `PathFileHandle` given as
 `startIn` is dropped for the last handle (Chromium refuses a handle it did
 not make), and a start that fails (the folder gone) is asked again without
 it. The real pickers sit in `window.__pdfplusPickers`, where the test puts a
