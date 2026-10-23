@@ -52,8 +52,11 @@ export function isKeyFileName(name) {
   return KEY_FILE_RE.test(base.trim());
 }
 
+// Quote-blind as well as case- and space-blind, the way the extension's fold
+// is: a key written with "O'Dell" binds the "O’Dell" a Word draft types.
 export function fold(s) {
-  return String(s == null ? "" : s).trim().replace(/\s+/g, " ").toLowerCase();
+  return String(s == null ? "" : s).trim().replace(/\s+/g, " ").toLowerCase()
+    .replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
 }
 
 function trim(s) {
@@ -557,9 +560,36 @@ const GAP = "(?:[ \\t]|\\r?\\n" + GUTTER_TOKEN + ")+";
 // A gap that crosses at least one line, for cutting a match into its lines.
 const LINE_GAP_RE = new RegExp("[ \\t]*(?:\\r?\\n" + GUTTER_TOKEN + "[ \\t]*)+", "g");
 const GAP_RE = new RegExp(GAP, "g");
-/** The text with every gap read as one space — what a wrapped match looks up as. */
+
+// MARKDOWN'S OWN MARKS. My-Macros' Markdown export (and any Markdown) writes
+// a name among marks claude.ai renders away and the reader shows as written:
+// emphasis that starts or stops inside it ("*Ingrid* Strangeways", a caption's
+// "**QUARRY FINCH**, an individual"), a tracked change ("Ingrid{++ ++}Strangeways",
+// a deleted "{--Smith--}" between its words), and the escape before a
+// character Markdown would read as markup ("ingrid\_s@mail.org"). A value
+// matches through them: MARK may stand wherever a word of the value meets a
+// blank or a mark of punctuation, and a mark of punctuation may carry its
+// escape. Every MARK alternative is a fixed opening ({, +, *, _), so the run
+// reads in one pass.
+const MARK = "(?:[*_]|\\{\\+\\+|\\+\\+\\}|\\{--[^}\\n]{0,200}?--\\})*";
+// The same marks in a MATCHED text, to be taken out of it: an escape first
+// (its character stays — an escaped "*" is an asterisk), then a tracked
+// change, emphasis, and an underscore standing at a word's edge ("ingrid_s"
+// keeps its own).
+const MARK_STRIP_RE = /\\([!-\/:-@[-`{-~])|\{--[^}\n]{0,200}?--\}|\{\+\+|\+\+\}|\*+|(?<![A-Za-z0-9\\])_+|_+(?![A-Za-z0-9])/g;
+// …and where a matched name is cut for them, so the marks stay in the text
+// between its pieces the way a line break and its gutter number do.
+const MARK_CUT_RE = /[ \t]*(?:(?<!\\)\*|(?<![A-Za-z0-9\\])_|(?<!\\)_(?![A-Za-z0-9])|\{\+\+|\+\+\}|\{--[^}\n]{0,200}?--\})+[ \t]*/g;
+/** A matched text without Markdown's marks in it: escapes read, emphasis and tracked changes gone. */
+export function foldMarks(s) {
+  return String(s == null ? "" : s).replace(MARK_STRIP_RE, (m, esc) => (esc != null ? esc : ""));
+}
+/**
+ * The text with every gap read as one space — what a wrapped match looks up
+ * as — and Markdown's marks out of it (foldMarks).
+ */
 export function foldGaps(s) {
-  return String(s == null ? "" : s).replace(GAP_RE, " ");
+  return foldMarks(s).replace(GAP_RE, " ");
 }
 
 // A matcher over the key's values. Boundaries are alphanumeric lookarounds
@@ -617,9 +647,40 @@ export function foldGaps(s) {
  * the value only ever matched text broken in the very same place.
  */
 function altFor(v) {
-  return escapeRe(String(v).trim()).replace(/\s+/g, GAP) + (POSS_TAIL_RE.test(v) ? "" : "(?:['’][sS])?");
+  const t = String(v).trim();
+  let out = "";
+  let prev = ""; // what came last: "w" a word, "p" a mark of punctuation, "s" a blank
+  for (const run of t.match(VALUE_RUN_RE) || []) {
+    if (/^\s/.test(run)) {
+      out += MARK + GAP + MARK;
+      prev = "s";
+      continue;
+    }
+    const word = VALUE_WORD_RE.test(run);
+    // Where a word meets punctuation, emphasis may open or close.
+    if (prev && prev !== "s" && (prev === "w") !== word) out += MARK;
+    out += word ? escapeRe(run) : charPattern(run);
+    prev = word ? "w" : "p";
+  }
+  return out + (POSS_TAIL_RE.test(t) ? "" : "(?:['‘’][sS])?");
 }
-const WORD_CLASS = "[A-Za-z0-9_]";
+// A value read as words, blanks and single marks of punctuation.
+const VALUE_RUN_RE = /\s+|[\p{L}\p{N}]+|[^\s\p{L}\p{N}]/gu;
+const VALUE_WORD_RE = /^[\p{L}\p{N}]/u;
+// One mark of punctuation in a value: either quote, straight or curly, and
+// Markdown's escape before it allowed.
+function charPattern(c) {
+  if (/['‘’]/.test(c)) return "\\\\?['‘’]";
+  if (/["“”]/.test(c)) return '\\\\?["“”]';
+  if (/[!-\/:-@[-`{-~]/.test(c)) return "\\\\?" + escapeRe(c);
+  return escapeRe(c);
+}
+// A value's edges. A word character on the other side makes it part of a
+// longer word, and so does an underscore joining one ("Rasho_Helen_Decl"),
+// but an underscore on its own is Markdown's emphasis ("_Ingrid_").
+const WORD_CLASS = "[A-Za-z0-9]";
+const BEFORE = "(?<![A-Za-z0-9]|[A-Za-z0-9]\\\\?_)";
+const AFTER = "(?![A-Za-z0-9]|\\\\?_[A-Za-z0-9])";
 const LEAD_WORD_RE = new RegExp("^" + WORD_CLASS + "+");
 /**
  * A matcher, standing in for a global RegExp over exactly what the readers of
@@ -733,10 +794,10 @@ class Matcher {
 }
 /** One value, matched only where it is tried: sticky, at a place chosen already. */
 function stickyOf(alts) {
-  return new RegExp("(?<!" + WORD_CLASS + ")(?:" + alts.join("|") + ")(?!" + WORD_CLASS + ")", "iy");
+  return new RegExp(BEFORE + "(?:" + alts.join("|") + ")" + AFTER, "iy");
 }
 function oneMatcher(alts) {
-  return new RegExp("(?<!" + WORD_CLASS + ")(?:" + alts.join("|") + ")(?!" + WORD_CLASS + ")", "gi");
+  return new RegExp(BEFORE + "(?:" + alts.join("|") + ")" + AFTER, "gi");
 }
 /**
  * A matcher for FINDING, which is not the same question as matching a name.
@@ -897,7 +958,27 @@ export function applyCase(shape, value) {
  * "SILVERGATE., Inc." for "U.S.A., INC." reads "U.S.A., Inc."
  */
 export function mirrorCase(sample, value) {
-  return sharedWords(sample, applyCase(caseShape(sample), value));
+  return mirrorQuotes(sample, sharedWords(sample, applyCase(caseShape(sample), value)));
+}
+
+// Quote marks follow the text the way case does (the extension's
+// mirrorQuotes): the key's "O'Neil" for a draft's "O’Dell" reads "O’Neil",
+// and a curly key value standing for straight text reads straight.
+function mirrorQuotes(sample, value) {
+  const v = String(value == null ? "" : value);
+  if (!/['"‘’“”]/.test(v)) return v;
+  const m = String(sample == null ? "" : sample).match(/['"‘’“”]/);
+  if (!m) return v;
+  if (m[0] === "'" || m[0] === '"') return v.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
+  let out = "";
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    const opens = i === 0 || /[\s(\[{‘“]/.test(out[i - 1]);
+    if (c === "'") out += opens ? "‘" : "’";
+    else if (c === '"') out += opens ? "“" : "”";
+    else out += c;
+  }
+  return out;
 }
 
 // Every word of `out` that also stands in `sample` (case-blind) takes the
@@ -1121,15 +1202,21 @@ function lookup(compiled, m) {
 
 /**
  * The places a match covers, a piece per line: the matched text cut at its
- * line gaps, which stay in the text between (the gutter numbers with them).
+ * line gaps, which stay in the text between (the gutter numbers with them),
+ * and at Markdown's marks, which stay there too — "*Ingrid* Strangeways"
+ * reads "*Helen* Rasho", its asterisks where they stood.
  * → [[start, end), …] into the text the match was made in.
  */
 function lineRanges(start, matched) {
+  const cuts = [];
+  for (const g of matched.matchAll(LINE_GAP_RE)) cuts.push([g.index, g.index + g[0].length]);
+  if (/[*_{+]/.test(matched)) for (const g of matched.matchAll(MARK_CUT_RE)) cuts.push([g.index, g.index + g[0].length]);
+  cuts.sort((a, b) => a[0] - b[0]);
   const out = [];
   let at = 0;
-  for (const g of matched.matchAll(LINE_GAP_RE)) {
-    if (g.index > at) out.push([start + at, start + g.index]);
-    at = g.index + g[0].length;
+  for (const [a, b] of cuts) {
+    if (a > at) out.push([start + at, start + a]);
+    at = Math.max(at, b);
   }
   if (at < matched.length) out.push([start + at, start + matched.length]);
   return out;
