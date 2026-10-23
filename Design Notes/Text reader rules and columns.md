@@ -380,7 +380,57 @@ other line on the page is taken down. On a numbered page a line's `clear` is
 now its type whatever its `spread`, so the lines under line 28 the PDF does
 not print are pushed down rather than overlapped. This overrides "nothing is
 ever taken under the PDF's own size" (above) for the lines that cannot stand
-clear of each other at it. Tests: `test-pdfsync.mjs` ("no line over another
+clear of each other at it.
+
+**…counting only the lines that stand over each other** (`spans` on a
+numbered page too; `fitRuns`, `spreadTops`' runs, `stackRun`, `runFits`).
+The first `fitRuns` stacked every line of a run one under another, and a
+caption's two columns are lines side by side: the party block's half lines
+and the causes of action the export writes between them ("2. QUANTUM MERUIT;
+AND", "3. FORECLOSURE OF") are four lines in one gap but two deep, and were
+taken down to half their size, and "ROCKHAVEN ENTERPRISES, INC." with them
+(the owner: "The caption involves all the same size text, yet is being
+shrunk"). Now a numbered page's lines carry their `spans` (where the line's
+text stands across the export's characters, its gutter number aside), and a
+line clears only the lines it stands over: in the run, the numbered line
+above it (a line beside it starts level with it, as the second column does),
+and the numbered line below (a line beside it may stand level with it).
+`spreadTops` holds and stacks a run the same way, and `fitRuns` finds the
+largest factor the run fits at by search (to the thousandth, never more than
+fits). A numbered line with nothing after its number holds no room
+(`bare`): its number is in the margin.
+
+### A pleading line's size is its first piece's, its face only where the face covers it (`pdfsync.firstPieceSize`, `faceCovers`)
+
+The owner, of the same caption page: "I am still getting incorrect sizing
+variation (as well as misjudge bolding", and "the bold is being mistakenly
+applied accros the entire line. Only the name of the Firm is bold up toop,
+not edgcombe w. slyaton. nothing in the party cpation box is bold in the pdf".
+
+A pleading line took its ROW's size (`numberedRowOf`: the row at its number,
+or the one its words matched), and a caption line carries two of the PDF's
+rows: the attorney block and the court's e-filing stamp beside it, a party
+and a cause of action. Where the stamp's row stood nearer the number's height,
+the line took the stamp's 9 point and "S. SAUNDERSON EDGERTON" was drawn
+smaller than the name under it. Now the line's pieces are found first
+(`matchItems`, the margin's numbers left out, the same pieces `planCells`
+reads the faces off) and its size is its FIRST piece's (`firstPieceSize`, the
+first not glued to the text before it); the row's height only where no piece
+was found.
+
+And a line took the face most of its FOUND pieces were set in, for the whole
+line, so what no piece was found for took it too: the firm's name in bold
+and the clerk's name beside it (a pseudonym in the export, the real name in
+the PDF, so never found) bold with it. Now a line is drawn in a bold or
+italic face only where the pieces in that face cover 80% of its characters
+(`faceCovers`); otherwise the line is upright and regular and each run in
+bold or italics carries its own (`faceRuns`, unchanged). A box row's cells
+keep their own faces as before. Tests: `test-caption-faces.mjs` (the attorney
+block beside a stamp, line 1's stamp nearer the number than the block; the
+party block beside the causes of action, single-spaced between the numbers:
+all of it at the PDF's 12 point, the firm bold and the clerk's name not, the
+stamp's italic line italic and the e-mail beside it not, nothing in the
+caption box bold, no line on top of another), `test-pdfsync.mjs`. Tests: `test-pdfsync.mjs` ("no line over another
 on pleading paper"), `test-even-half-lines.mjs` case 2 (two half lines
 crammed into one gap: those two in one smaller size, every other line at the
 PDF's 12 point, none on top of another).

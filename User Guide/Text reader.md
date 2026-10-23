@@ -2241,7 +2241,12 @@ app, which routes it to the reader tab.
   PDF prints it — except that **no line is ever drawn on top of another**:
   where the lines the export puts between two numbers cannot all stand there
   at their size (a caption's party block a line deeper than the PDF prints
-  it), those lines are set smaller, alike, until they fit. A picture's words,
+  it), those lines are set smaller, alike, until they fit. Lines side by side
+  (the party block and the causes of action beside it) do not count against
+  each other. A line beside the clerk's stamp takes the size of its own text,
+  not the stamp's, and a line is bold or italic only where the PDF sets
+  nearly all of it so: the firm's name in bold leaves the stamp beside it
+  plain. A picture's words,
   which the export has and the PDF's text does not, are fitted into the
   picture's room, so they move no other line and the page stays the size of
   its PDF page; where even very small type will not fit them, the lines

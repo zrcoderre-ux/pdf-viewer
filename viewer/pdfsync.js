@@ -1326,6 +1326,34 @@ export function faceKey(face) {
 
 const WORD_CHAR_RE = /[\p{L}\p{N}]/u;
 /**
+ * The size of a line's FIRST piece of the PDF's type (lineItems' `found`, the
+ * first not glued to the text before it), or null with none: a pleading
+ * line's size, where the row the line was put on may be another column's — a
+ * clerk's stamp beside the attorney block, a cause of action beside a party.
+ */
+export function firstPieceSize(found) {
+  let best = null;
+  for (const g of found || []) if (!g.glued && g.item && g.item.h > 0 && (!best || g.at < best.at)) best = g;
+  return best ? best.item.h : null;
+}
+/**
+ * Whether nearly all of a line (`shown`, `share` of its characters) is set in
+ * `face` by the pieces found in it (lineItems' `found`, each piece's face
+ * read by `faceOf`): only such a line is drawn in a bold or italic face, what
+ * no piece was found for with it. Otherwise each run carries its own.
+ */
+export function faceCovers(shown, found, face, faceOf, share = 0.8) {
+  const chars = String(shown || "").replace(/\s+/g, "").length;
+  if (!chars || !face) return false;
+  const key = faceKey(face);
+  let n = 0;
+  for (const g of found || []) {
+    const f = g && g.item ? faceOf(g.item.font) : null;
+    if (f && faceKey(f) === key) n += String(g.item.str).replace(/\s+/g, "").length;
+  }
+  return n >= chars * share;
+}
+/**
  * The runs of a line set in faces of their own: [{ from, to, face }] in FILE
  * offsets (the text the cells are cut in, a pseudonym counted as its fake),
  * ascending, none overlapping, none beginning or ending inside a pseudonym or
@@ -1585,15 +1613,38 @@ export function spreadTops(tops, box, fixed = null, spans = null) {
     const prev = a - 1 >= 0 ? a - 1 : null;
     const start = prev != null ? out[prev] + boxOf(prev) : -Infinity;
     const end = out[next];
-    let limit = end;
+    // Each held under the next fixed line and above the lines below it in the
+    // run that it stands over (`spans`: a caption's two columns are lines side
+    // by side, not one on another).
+    const over = (a, b) => !spans || overlaps(spans[a], spans[b]);
     const held = run.map(() => 0);
-    for (let r = run.length - 1; r >= 0; r--) { held[r] = Math.min(out[run[r]], limit - boxOf(run[r])); if (boxOf(run[r]) > 0) limit = held[r]; }
-    if (!run.length || held[0] >= start || !Number.isFinite(start)) run.forEach((k, r) => { out[k] = held[r]; });
+    for (let r = run.length - 1; r >= 0; r--) {
+      // (Beside the fixed line below, a line may stand level with it.)
+      let limit = over(next, run[r]) ? end : end + boxOf(run[r]);
+      for (let q = r + 1; q < run.length; q++) if (boxOf(run[q]) > 0 && over(run[r], run[q])) limit = Math.min(limit, held[q]);
+      held[r] = Math.min(out[run[r]], limit - boxOf(run[r]));
+    }
+    const floorOf = (k) => (prev == null ? -Infinity : over(prev, k) ? start : out[prev]);
+    if (!run.length || run.every((k, r) => held[r] >= floorOf(k) - 1e-9) || !Number.isFinite(start)) run.forEach((k, r) => { out[k] = held[r]; });
     else {
-      const total = run.reduce((sum, k) => sum + boxOf(k), 0);
-      const share = total > 0 ? Math.max(0, end - start) / total : 0;
-      let y = start;
-      for (const k of run) { out[k] = y; y += boxOf(k) * share; }
+      // Stacked down from the line above, each under the lines it stands
+      // under, and the whole drawn in to the space there is.
+      const gap = { prev, next, tops: out, boxOf, spans, start };
+      if (!spans) {
+        // (One line under another: the space shared out exactly.)
+        const total = run.reduce((sum, k) => sum + boxOf(k), 0);
+        const share = total > 0 ? Math.max(0, end - start) / total : 0;
+        let y = start;
+        for (const k of run) { out[k] = y; y += boxOf(k) * share; }
+        i = a;
+        next = null;
+        continue;
+      }
+      let lo = 0, hi = 1;
+      if (runFits(run, gap, 1)) lo = 1;
+      else for (let step = 0; step < 20; step++) { const mid = (lo + hi) / 2; if (runFits(run, gap, mid)) lo = mid; else hi = mid; }
+      const ys = stackRun(run, gap, lo < 1 ? thousandth(run, gap, lo) : 1);
+      run.forEach((k, r) => { out[k] = ys[r]; });
     }
     i = a; // the run is placed; carry on above it
     next = null;
@@ -1618,7 +1669,7 @@ export function spreadTops(tops, box, fixed = null, spans = null) {
  * are pushed down, and need nothing here. Returns a factor per line, 1 for
  * every line not taken down.
  */
-export function fitRuns(tops, clear, fixed, { floor = 0.4 } = {}) {
+export function fitRuns(tops, clear, fixed, { floor = 0.4, spans = null } = {}) {
   const n = (tops || []).length;
   const out = new Array(n).fill(1);
   if (!fixed) return out;
@@ -1629,16 +1680,50 @@ export function fitRuns(tops, clear, fixed, { floor = 0.4 } = {}) {
     if (!(fixed[k] && placed(k))) continue;
     const run = [];
     for (let i = prev + 1; i < k; i++) if (placed(i) && !fixed[i] && roomOf(i) > 0) run.push(i);
-    const start = prev >= 0 ? tops[prev] + roomOf(prev) : 0;
-    const need = run.reduce((s, i) => s + roomOf(i), 0);
-    const room = tops[k] - start;
-    if (run.length && need > room + 0.01) {
-      const f = Math.max(floor, Math.max(0, room) / need);
-      for (const i of run) out[i] = f;
+    const gap = { prev: prev >= 0 ? prev : null, next: k, tops, boxOf: roomOf, spans, start: 0 };
+    if (run.length && !runFits(run, gap, 1)) {
+      // The largest factor the run fits at, to a thousandth, and no less than the floor.
+      let lo = floor, hi = 1;
+      for (let step = 0; step < 20; step++) { const mid = (lo + hi) / 2; if (runFits(run, gap, mid)) lo = mid; else hi = mid; }
+      for (const i of run) out[i] = Math.max(floor, thousandth(run, gap, lo));
     }
     prev = k;
   }
   return out;
+}
+
+/**
+ * A run of lines (`run`, their indexes, all between the same two fixed lines)
+ * stacked down the page, each `boxOf` its own, times `scale`, below the lines
+ * before it in the run that it stands over across the page (`spans`, as
+ * spreadTops takes them; every line over every other without them). `gap`:
+ * { prev, the fixed line above (null for none); next, the fixed line below;
+ * tops; boxOf; spans; start, where a run with no line above it starts }. A
+ * line under the fixed line above starts its box below it, one beside it at
+ * its top: a caption's causes of action stand level with the party beside
+ * them, not under it. Returns the tops, per line of the run.
+ */
+function stackRun(run, gap, scale = 1) {
+  const { prev, tops, boxOf, spans } = gap;
+  const over = (a, b) => !spans || overlaps(spans[a], spans[b]);
+  const out = [];
+  run.forEach((k, r) => {
+    let y = prev == null ? gap.start : over(prev, k) ? tops[prev] + boxOf(prev) : tops[prev];
+    for (let q = 0; q < r; q++) if (boxOf(run[q]) > 0 && over(run[q], k)) y = Math.max(y, out[q] + boxOf(run[q]) * scale);
+    out.push(y);
+  });
+  return out;
+}
+/** The factor `f` a search came to, to the thousandth, and still one the run fits at. */
+function thousandth(run, gap, f) {
+  const r = Math.round(f * 1000) / 1000;
+  return runFits(run, gap, r) ? r : Math.max(0, r - 0.001);
+}
+/** …and whether, so stacked, it stands clear of the fixed line below: over it by its box, beside it by its top. */
+function runFits(run, gap, scale = 1) {
+  const { next, tops, boxOf, spans } = gap;
+  const ys = stackRun(run, gap, scale);
+  return run.every((k, r) => ys[r] + (!spans || overlaps(spans[next], spans[k]) ? boxOf(k) * scale : 0) <= tops[next] + 1e-6);
 }
 
 // ---- a ✓ Use my text page's file laid out as its PDF lays it out -----------------

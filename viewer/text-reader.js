@@ -21019,6 +21019,10 @@ function applyMatchedLayoutNow() {
       }
       tops = off.tops;
       pitch = geom.pitch;
+      // Where across the page each line stands, as on a page with no numbers:
+      // a caption's two columns are lines side by side, and the lines between
+      // two numbers clear only the lines they stand under (spreadTops, fitRuns).
+      spans = lines.map((l) => { const lt = ltOf(l); const t = lt ? lt.textContent : ""; const a = t.search(/\S/); return a < 0 ? null : [a, t.trimEnd().length]; });
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
       // Each line's PDF row (pdfsync.numberedRowOf): the one at its number or
       // half line, or the one its words matched. A NUMBERED line's size is
@@ -21029,7 +21033,23 @@ function applyMatchedLayoutNow() {
       const left = bodyX > 0 ? bodyX - 1.5 : geom.numberRight + 1;
       const rowOf = geom.scan || !rows || !rows.length ? null
         : PS.numberedRowOf(nums, geom, rows, off.rowOf, left).map((j, k) => (lines[k].classList.contains("own") ? null : j));
-      const read = off.sizes.map((h, k) => (h == null && nums[k] != null && rowOf && rowOf[k] != null ? rows[rowOf[k]].height : h));
+      // Each line's pieces of the PDF's type (matchItems), the margin's own
+      // numbers left out: what its faces are read off (planCells, below), and
+      // its size. A LINE'S SIZE IS ITS FIRST PIECE'S, not its row's: a caption
+      // line carries the attorney block and the clerk's stamp beside it, or a
+      // party and a cause of action, each its own row of the PDF, and the row
+      // the line was put on was as often the stamp's 10 point as the block's 12
+      // — "S. SAUNDERSON EDGERTON" drawn smaller than the name under it, a
+      // party's second line smaller than its first. The owner: "I am still
+      // getting incorrect sizing variation… The caption involves all the same
+      // size text, yet is being shrunk."
+      const bodies = lines.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; });
+      const pieces = rowOf ? matchItems(lines, bodies, rowOf, rows, { skip: (it) => it.x < left }) : null;
+      const read = off.sizes.map((h, k) => {
+        const own = pieces ? PS.firstPieceSize(pieces[k] && pieces[k].found) : null;
+        if (own > 0) return own;
+        return h == null && nums[k] != null && rowOf && rowOf[k] != null ? rows[rowOf[k]].height : h;
+      });
       // (A scan's pleading paper whose numbers came through: one size, the
       // one its lines fit across the paper in, not the OCR's line by line.)
       if (scan && !geom.scan) base = scanTypeSize(lines.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; }), base, rows, bodyX);
@@ -21094,10 +21114,9 @@ function applyMatchedLayoutNow() {
       // numbers are no pieces of the line: a "12" in the body would be found
       // for one, and the line's real pieces, looked for past it, never found.
       if (geom.scan) cells = lines.map(() => null);
-      else if (rows && rows.length) {
-        const bodies = lines.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; });
+      else if (pieces) {
         const cellsFrom = performance.now();
-        cells = planCells(lines, bodies, matchItems(lines, bodies, rowOf, rows, { skip: (it) => it.x < left }), rows, info, sizes, { place: false });
+        cells = planCells(lines, bodies, pieces, rows, info, sizes, { place: false });
         formLook.plan += performance.now() - cellsFrom;
         formLook.planned++;
       }
@@ -21239,8 +21258,12 @@ function applyMatchedLayoutNow() {
     // it. The owner: "It should never make lines overlap like this. the PDF
     // never actually looks like that." Their type is taken down alike instead,
     // to what the space holds.
+    // (A numbered line with nothing after its number holds no room: its
+    // number is in the margin, and the half line under it stands where the
+    // PDF's caption, single-spaced, has its next line.)
+    const bare = (k) => isEmptyLine(lines[k]) || (fixed && fixed[k] && !(ltOf(lines[k]) || lines[k]).textContent.trim());
     if (fixed && sizes && tops) {
-      const f = PS.fitRuns(tops, sizes.map((h, k) => (isEmptyLine(lines[k]) ? 0 : h)), fixed, { floor: FIT_FLOOR });
+      const f = PS.fitRuns(tops, sizes.map((h, k) => (bare(k) ? 0 : h)), fixed, { floor: FIT_FLOOR, spans });
       sizes = sizes.map((h, k) => h * f[k]);
     }
     // (A line given its room (`spread`: a picture's words, set to fit beside
@@ -21264,7 +21287,7 @@ function applyMatchedLayoutNow() {
     // apart, and they clear each other by that — their TYPE, as the PDF sets
     // it — not by a whole line's box apiece, which pushed each one down a few
     // points into the next, and the numbers down the side with them.
-    const clear = fixed ? sizes.map((h, k) => (isEmptyLine(lines[k]) ? 0 : h)) : room;
+    const clear = fixed ? sizes.map((h, k) => (bare(k) ? 0 : h)) : room;
     if (tops) tops = PS.spreadTops(tops, clear, fixed, spans);
     // …and nothing pushed past the foot of the paper: the page is the PDF
     // page's height, the same as the sheet beside it, and a line that would
@@ -22209,8 +22232,16 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     // The line's own face: the one most of what it carries is set in. Not its
     // row's alone — a box row the export writes as one line can be three of
     // the PDF's rows, and matched to the one in bold italics.
-    const face = mostFace(found.map((g) => g.item), faceOf) || mostFace(row.items, faceOf);
+    let face = mostFace(found.map((g) => g.item), faceOf) || mostFace(row.items, faceOf);
     if (l.classList.contains("rl")) return { text: null, cuts: [], places: [], face, cellFaces: boxCellFaces(lt, found, faceOf) };
+    // …in bold or italics only where nearly all of it is: what no piece was
+    // found for takes the line's face, and a line half the firm's name in bold
+    // and half the clerk's stamp beside it drew the stamp bold too (the owner:
+    // "Only the name of the Firm is bold up top, not edgcombe w. slyaton.
+    // nothing in the party caption box is bold in the pdf"). Otherwise the
+    // line is upright and regular, and each run in bold or italics carries its
+    // own (faceRuns).
+    if (face && (face.bold || face.italic) && !PS.faceCovers(shown, found, face, faceOf)) face = { ...face, bold: false, italic: false };
     // Only a line the PDF sets in a face of its own (not an OCR layer's over a
     // scan, pdfsync.pdfFace) is cut into its pieces: an OCR's words stand where
     // the scan has them, and the scan's type is not a face the reader has.

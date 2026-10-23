@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, scanLayout, fitRuns, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, scanLayout, fitRuns, firstPieceSize, faceCovers, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
   matchedScale, spreadTops, evenHalfLines, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
@@ -223,6 +223,29 @@ console.log("a page with no numbers: rows matched by their words");
     check("a run that fits is left as it is", fitRuns(tops, clear, fixed), [1, 1, 1, 1]);
     check("…and above the first number, down from the top of the page", fitRuns([0, 6, 12], [12, 12, 12], [false, false, true]), [0.5, 0.5, 1]);
     check("…no further than the floor", fitRuns([300, 305, 310], [12, 12, 12], [true, false, true], { floor: 0.4 }), [1, 0.4, 1]);
+  }
+  {
+    // …COUNTING ONLY THE LINES THAT STAND OVER EACH OTHER: lines 14 and 15
+    // 24 points apart, line 14 the party block's first line, and between
+    // them a cause of action beside it, the block's second line, and the next
+    // cause of action — four lines in the gap but two deep, as the PDF
+    // prints them. Stacked one under another they were taken down by half.
+    const tops = [300, 306, 312, 318, 324], fixed = [true, false, false, false, true], clear = [12, 12, 12, 12, 12];
+    const spans = [[0, 40], [44, 66], [0, 40], [44, 62], [0, 40]];
+    check("a caption's two columns side by side: nothing taken down", fitRuns(tops, clear, fixed, { spans }), [1, 1, 1, 1, 1]);
+    const laid = spreadTops(tops, clear, fixed, spans);
+    check("…and laid where they stand, nothing pushed", laid, tops);
+    check("…without the columns, every line stacked, taken down", fitRuns(tops, clear, fixed)[1] < 1, true);
+    // A numbered line's size is its first piece's, not its row's.
+    check("a line's size is its first piece's", firstPieceSize([{ at: 40, glued: false, item: { h: 9 } }, { at: 0, glued: false, item: { h: 12 } }, { at: 0, glued: true, item: { h: 7 } }]), 12);
+    check("…none found, none", firstPieceSize([]), null);
+    // A line in bold only where the bold covers it.
+    const faceOf = (id) => ({ b: { family: "", bold: true, italic: false }, r: { family: "", bold: false, italic: false } })[id];
+    const bold = faceOf("b");
+    const firm = { item: { str: "ROSEMONT & EDGERTON LLP", font: "b" } };
+    check("a line half the firm's name in bold and half a name no piece was found for: not a bold line",
+      faceCovers("ROSEMONT & EDGERTON LLP              Edgecombe W. Slayton,", [firm], bold, faceOf), false);
+    check("…a line all of it bold: a bold line", faceCovers("ROSEMONT & EDGERTON LLP", [firm], bold, faceOf), true);
   }
   // THE FIRM NAME DOWN THE MARGIN. A pleading's PDF carries furniture the
   // export does not: the firm printed sideways in the left margin, a seal, a
