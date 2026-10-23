@@ -62,10 +62,12 @@ Hosted, the text reader's 📷 Screenshot asks for a screen share of its own
 tab (`getDisplayMedia` on the shell's window, `shareThisTab`). Electron
 refuses that unless it is answered: `setDisplayMediaRequestHandler` gives
 the request its own window's top frame (`{ video: frame.top }`) and nothing
-else, with no picker. Before that, Chromium asks the `media` permission:
-**a screen share arrives as `media` with an empty `mediaTypes`**, a camera
-or microphone with `video` or `audio` in it, so only the empty kind is
-granted. The PNG it saves is a download; `will-download` puts every
+else, with no picker. Before that, Chromium asks a permission: **from
+Electron 45 a screen share arrives as `display-capture`**, which is granted,
+and a camera or microphone as `media`, which is refused. (Up to Electron 44
+a screen share was `media` with an empty `mediaTypes`; the 45 upgrade broke
+the screenshot until the handler learned the new name, and
+`test-desktop.mjs` is what caught it.) The PNG it saves is a download; `will-download` puts every
 download into Downloads under a free name (`freeName`: "name (1).png"),
 with no dialog, as Chrome does.
 
