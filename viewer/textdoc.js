@@ -3550,6 +3550,225 @@ export function captionParens(lines) {
   return res;
 }
 
+/**
+ * A CAPTION'S TWO COLUMNS, EDITED APART. The owner, in chat: "When it
+ * recognizes a caption box, it should treat that like a column, and prevent
+ * moving of the case no or causes of action from moving the party captions
+ * and visa vera". A caption row is one line of the file, so an Enter in the
+ * parties pushed the case number and the causes of action down with them, and
+ * a party name typed longer pushed the `)` side out of its column. Here the
+ * rows of a caption (`sides`, captionParens' reading of the page, the `)` of
+ * each row where it now stands) are two columns of slots, as a column box's
+ * are (reflowBox): the left one the parties, the foot's underscores no slot of
+ * it; the right one the case number and title, down to the foot. An edit in
+ * one column moves the text of that column only:
+ *
+ *   "type"       the row set back with its `)` on the side's column; a cell's
+ *                text that outgrows its width (the side; the page's widest
+ *                line outside the caption, for the right) wrapped word by word
+ *                onto the column's next slot — in front of its text where that
+ *                carries on in lower case, else the column moving down a slot
+ *                as far as its first empty one.
+ *   "enter"      the cell broken at the caret, what follows it a slot of its
+ *                own below, the column moving down to make room.
+ *   "backspace"  at the head of a cell's text: one space of its indent off
+ *                (a left cell's past its margin, a right cell's past the two
+ *                after the side), else the cell joined to the column's slot
+ *                above, the column below coming up a slot. Nothing on the
+ *                column's first slot.
+ *   "delete"     at the end of a cell's text: the column's next slot joined
+ *                to it, the column below coming up.
+ *
+ * A column that needs a slot more than the caption has gets a row above the
+ * foot — on pleading paper, the empty numbered line under the caption where
+ * there is one (the foot moves down onto it), else a line between numbers.
+ * Rows whose two cells did not change are left exactly as the file has them.
+ * `caret` is { line, col } in `lines`; `typedEmpty`, with "type", that the
+ * left cell typed into held nothing before (on pleading paper its spaces are
+ * the margin's, so what was typed opens the cell). Returns { lines, caret:
+ * { line, col, cell } } (cell 0 the parties, 1 the right), the lines unchanged
+ * where the key has nothing to do in the caption (it is still the caption's),
+ * or null where the caret is no caption cell's, or a Backspace or Delete is
+ * not at a cell's head or end (the browser's own, then).
+ */
+export const CAPTION_RIGHT_LEAD = 2; // ")  Case No.": the spaces PDF-Linker writes after the side
+const CAPTION_RIGHT_MIN = 30; // the right column is never drawn narrower than this
+export function captionEdit(lines, sides, i, caret, { op = "type", numbered = false, typedEmpty = false } = {}) {
+  const side = sides && sides[i];
+  if (!side || !caret) return null;
+  const col = side.col;
+  let from = i, to = i;
+  while (from > 0 && sides[from - 1] && sides[from - 1].col === col) from--;
+  while (to + 1 < lines.length && sides[to + 1] && sides[to + 1].col === col) to++;
+  const cell = (s) => { const t = s.trim(); return { lead: t ? s.length - s.trimStart().length : 0, t }; };
+  const startOf = (s, at) => {
+    if (!numbered) return 0;
+    const m = /^( ?\d{1,2})(?= |$)/.exec(s);
+    return Math.min(m ? m[1].length + 2 : Math.min(4, s.length - s.trimStart().length), at);
+  };
+  const pos = [];
+  for (let k = from; k <= to; k++) {
+    const s = String(lines[k]), at = sides[k].at, start = startOf(s, at);
+    pos.push({ k, orig: s, at, start, head: s.slice(0, start), left: cell(s.slice(start, at)), right: cell(s.slice(at + 1)), under: !!sides[k].under });
+  }
+  const feet = pos.filter((p) => p.under);
+  if (feet.length > 1 || (feet.length && !pos[pos.length - 1].under)) return null; // no shape this knows
+  const foot = feet[0] || null;
+  const footLeft = foot ? foot.orig.slice(foot.start, foot.at) : "";
+  const leftPos = () => (foot ? pos.slice(0, -1) : pos);
+  const cols = [leftPos().map((p) => ({ ...p.left })), pos.map((p) => ({ ...p.right }))];
+  // Where the caret is: which column, which slot, how far into its text.
+  const here = pos.find((p) => p.k === caret.line);
+  if (!here) return null;
+  let cur = null;
+  if (caret.col <= here.at) {
+    if (here === foot) return op === "type" ? null : { lines: lines.slice(), caret: { ...caret, cell: 0 } };
+    cur = { j: 0, s: leftPos().indexOf(here), base: here.start, c: here.left };
+  } else cur = { j: 1, s: pos.indexOf(here), base: here.at + 1, c: here.right };
+  const headAt = cur.base + cur.c.lead;
+  // On the right, the spaces before the text are its head too: a Backspace the
+  // browser took there would delete the side's `)` before them.
+  const atHead = !cur.c.t || caret.col === headAt || (cur.j === 1 && caret.col < headAt);
+  const atEnd = !cur.c.t || caret.col >= headAt + cur.c.t.length;
+  cur = { j: cur.j, s: cur.s, off: Math.max(0, Math.min(cur.c.t.length, caret.col - headAt)) };
+  // Each column's room: the left one up to a space before the side; the right
+  // one to the page's widest line outside the caption.
+  let widest = 0;
+  lines.forEach((l, k) => { if (k < from || k > to) widest = Math.max(widest, String(l).trimEnd().length); });
+  const newStart = numbered ? 4 : 0;
+  const room = (j, s) => (j === 0 ? col - (leftPos()[s] ? leftPos()[s].start : newStart) - 1 : Math.max(widest, col + 1 + CAPTION_RIGHT_MIN) - col - 1);
+  const empty = () => ({ lead: 0, t: "" });
+  // `item` in at slot s, the column below moving down as far as its first empty slot.
+  const insertAt = (arr, s, item) => {
+    let m = s;
+    while (m < arr.length && arr[m].t) m++;
+    if (m < arr.length) arr.splice(m, 1);
+    arr.splice(s, 0, item);
+  };
+  // Slot s out, the column below coming up as far as its first empty slot.
+  const removeAt = (arr, s) => {
+    let m = s + 1;
+    while (m < arr.length && arr[m].t) m++;
+    arr.splice(s, 1);
+    arr.splice(m - 1, 0, empty());
+  };
+  const wrap = (j, s) => {
+    const arr = cols[j];
+    for (; s < arr.length; s++) {
+      const c = arr[s], fit = Math.max(1, room(j, s));
+      if (c.lead + c.t.length <= fit) break;
+      if (c.lead >= fit) c.lead = 0;
+      if (c.lead + c.t.length <= fit) break;
+      const w = fit - c.lead;
+      let cut = c.t.lastIndexOf(" ", w);
+      if (cut <= 0) cut = w;
+      const keep = c.t.slice(0, cut).trimEnd(), carry = c.t.slice(cut).trim();
+      if (cur.j === j && cur.s === s && cur.off > keep.length) cur = { j, s: s + 1, off: Math.max(0, cur.off - (c.t.length - carry.length)) };
+      c.t = keep;
+      if (s + 1 >= arr.length) arr.push(empty());
+      const nx = arr[s + 1];
+      if (nx.t && /^[a-z]/.test(nx.t)) nx.t = carry + " " + nx.t;
+      else if (!nx.t) { nx.lead = c.lead; nx.t = carry; }
+      else insertAt(arr, s + 1, { lead: c.lead, t: carry });
+    }
+  };
+  const arr = cols[cur.j], c = arr[cur.s];
+  const force = new Set(); // positions written whatever their cells say
+  if (op === "type") {
+    if (cur.j === 0) {
+      if (typedEmpty && c.lead + c.t.length > room(0, cur.s)) c.lead = 0;
+      force.add(here);
+    }
+    wrap(cur.j, cur.s);
+  } else if (op === "enter") {
+    const keep = c.t.slice(0, cur.off).trimEnd(), carry = c.t.slice(cur.off).trim();
+    const lead = c.lead;
+    c.t = keep;
+    if (!keep) c.lead = 0;
+    if (cur.s + 1 >= arr.length) arr.push(empty());
+    insertAt(arr, cur.s + 1, { lead: carry ? lead : 0, t: carry });
+    cur = { j: cur.j, s: cur.s + 1, off: 0 };
+    wrap(cur.j, cur.s);
+  } else if (op === "backspace") {
+    if (!atHead) return null;
+    if (c.t && c.lead > (cur.j === 0 ? 0 : CAPTION_RIGHT_LEAD)) { c.lead--; cur.off = 0; }
+    else if (cur.s === 0) return { lines: lines.slice(), caret: { ...caret, cell: cur.j } };
+    else {
+      const up = arr[cur.s - 1];
+      const at = up.t.length + (up.t && c.t ? 1 : 0);
+      if (!up.t) up.lead = c.lead;
+      up.t = up.t && c.t ? up.t + " " + c.t : up.t + c.t;
+      removeAt(arr, cur.s);
+      cur = { j: cur.j, s: cur.s - 1, off: at };
+      wrap(cur.j, cur.s);
+    }
+  } else if (op === "delete") {
+    if (!atEnd) return null;
+    if (cur.s + 1 >= arr.length) return { lines: lines.slice(), caret: { ...caret, cell: cur.j } };
+    const nx = arr[cur.s + 1];
+    const at = c.t.length;
+    if (!c.t) c.lead = nx.lead;
+    c.t = c.t && nx.t ? c.t + " " + nx.t : c.t + nx.t;
+    removeAt(arr, cur.s + 1);
+    cur = { j: cur.j, s: cur.s, off: at };
+    wrap(cur.j, cur.s);
+  } else return null;
+  // Slots past the caption's rows that hold nothing are no rows.
+  const slotsOf = (j) => (j === 0 ? leftPos().length : pos.length);
+  for (const j of [0, 1]) {
+    const hold = cur.j === j ? cur.s + 1 : 0; // the caret's slot stays, empty or not
+    while (cols[j].length > Math.max(slotsOf(j), hold) && !cols[j][cols[j].length - 1].t) cols[j].pop();
+  }
+  const out = lines.slice();
+  while (cols[0].length > slotsOf(0) || cols[1].length > slotsOf(1)) {
+    const last = pos[pos.length - 1];
+    const below = last.k + 1;
+    const g = numbered && below < out.length ? gutterPrefix(out[below]) : null;
+    if (g && !g.rest.trim()) {
+      // The empty numbered line under the caption is taken into it: the foot
+      // (where there is one) moves down onto it, its place a row.
+      const num = g.gutter.match(/^ ?\d{1,2}/)[0];
+      pos.push({ k: below, orig: null, at: -1, start: num.length + 2, head: num + "  ", left: empty(), right: empty(), under: false });
+    } else {
+      // …else a line between: above the foot, or under the caption's last row.
+      const at = foot ? pos[pos.length - 1].k : below;
+      out.splice(at, 0, "");
+      for (const p of pos) if (p.k >= at) p.k++;
+      const row = { k: at, orig: null, at: -1, start: newStart, head: " ".repeat(newStart), left: empty(), right: empty(), under: false };
+      if (foot) pos.splice(pos.length - 1, 0, row); else pos.push(row);
+    }
+  }
+  const footAt = foot ? pos.length - 1 : -1;
+  const lefts = pos.filter((p, q) => q !== footAt);
+  for (const j of [0, 1]) while (cols[j].length < slotsOf(j)) cols[j].push(empty());
+  // The caret's slot is written even empty, so it has spaces to stand in.
+  const caretPos = cur.j === 0 ? lefts[cur.s] : pos[cur.s];
+  let caretOut = null;
+  pos.forEach((p, q) => {
+    const isFoot = q === footAt;
+    const L = isFoot ? null : cols[0][lefts.indexOf(p)];
+    const R = cols[1][q];
+    const same = (a, b) => a.lead === b.lead && a.t === b.t;
+    const keep = p.orig != null && !force.has(p) && p.under === isFoot && (isFoot ? p.orig.slice(p.start, p.at) === footLeft : same(L, p.left)) && same(R, p.right)
+      && !(p === caretPos && cur.j === 1 && !R.t && !p.right.lead);
+    let at, rlead;
+    if (keep) { at = p.at; rlead = p.right.lead; }
+    else {
+      const area = col - p.start;
+      const leftStr = isFoot ? footLeft : (" ".repeat(L.lead) + L.t).slice(0, Math.max(0, area - 1)).padEnd(area);
+      at = p.start + leftStr.length;
+      rlead = R.t ? (R.lead >= 1 ? R.lead : CAPTION_RIGHT_LEAD) : (p === caretPos && cur.j === 1 ? CAPTION_RIGHT_LEAD : 0);
+      out[p.k] = p.head + leftStr + ")" + " ".repeat(rlead) + R.t;
+    }
+    if (p === caretPos) {
+      caretOut = cur.j === 0
+        ? { line: p.k, col: p.start + (keep ? p.left.lead : L.lead) + cur.off, cell: 0 }
+        : { line: p.k, col: at + 1 + rlead + cur.off, cell: 1 };
+    }
+  });
+  return { lines: out, caret: caretOut };
+}
+
 // ---- columns laid out with spaces ----------------------------------------------------
 //
 // The same character grid lays a page's COLUMNS out with spaces: a second

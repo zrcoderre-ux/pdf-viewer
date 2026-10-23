@@ -209,6 +209,18 @@ app, which routes it to the reader tab.
   underscores are still there underneath (⇄ Raw shows them), and a save
   writes them as they were. A `)` closing a parenthetical, such as
   "(SBN 123456)", is never read as a side.
+- **Under ✎ Edit, the two sides of such a caption are columns.** Editing the
+  parties never moves the case number or the causes of action, and editing
+  those never moves the parties. Enter starts a new row in that column alone
+  (its rows below move down into the column's first empty row, and the box
+  grows a row above its underscore line when there is none — on pleading paper
+  the empty numbered line under the caption is taken for it). Backspace at the
+  start of a cell takes one space of its indent off first, then joins it to
+  the row above in the same column; Delete at the end of a cell brings the
+  column's next row up. A party's name typed past the `)` wraps its last word
+  onto the next row of the parties' side, and the `)` stays in its column. This
+  works on every page, not only ✓ Use my text pages, and Ctrl+Z takes each
+  edit back.
 - **Columns stand where the export put them, whatever the font.** A
   two-column page — a Westlaw printout, a caption with the case number beside
   the parties, the clerk's filing stamp beside the attorney block — reaches the

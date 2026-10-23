@@ -6304,9 +6304,124 @@ pagesEl.addEventListener("keydown", (e) => {
   // In a column box on a ✓ Use my text page, a line break and a join stay in
   // the column (boxKey).
   if ((e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") && boxKey(body, e.key)) { e.preventDefault(); return; }
+  // In a caption's cell, on any page, a line break and a join stay in its column (captionKey).
+  if ((e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") && captionKey(body, e.key)) { e.preventDefault(); hideTypeTip(); return; }
   if (e.key === "Enter") { e.preventDefault(); hideTypeTip(); enterAtCaret(body); }
   else if (e.key === "Backspace") { if (backspaceAtCaret(body)) e.preventDefault(); }
   else if (e.key === "Delete") { if (deleteAtCaret(body)) e.preventDefault(); }
+});
+
+// ── a caption's two columns (TD.captionEdit) ──────────────────────────────────
+//
+// The owner, in chat: "When it recognizes a caption box, it should treat that
+// like a column, and prevent moving of the case no or causes of action from
+// moving the party captions and visa vera". A caption the reader draws boxed
+// (its `)` side a bar: rules.js, markParen) is two columns of slots, as a
+// column box is: Enter in a cell breaks it onto the next slot of its column,
+// Backspace at a cell's head takes an indent space off or joins it to the
+// slot above, Delete at its end brings the next slot up, and typing that
+// outgrows the parties' width wraps down their column. The other column never
+// moves. On any page under ✎ Edit, not only ✓ Use my text: the caption is
+// recognised on every page. The page is rebuilt from its text, as a box edit
+// is (rebuildFromLines).
+
+/** Where a caption row's `)` stands on the page now, per line: { at, col, under } as captionParens says, read off the drawn bars. */
+function captionSides(body) {
+  const m = TD.serializeMapped(body);
+  const starts = [];
+  let o = 0;
+  for (const l of m.text.split("\n")) { starts.push(o); o += l.length + 1; }
+  return [...body.querySelectorAll(":scope > .line")].map((line, k) => {
+    const bar = line.querySelector(".rb.paren");
+    const col = Number(line.dataset.rk);
+    if (!bar || !bar.firstChild || !m.at.has(bar.firstChild) || !Number.isFinite(col)) return null;
+    return { at: m.at.get(bar.firstChild) - starts[k], col, under: bar.dataset.v === "up" };
+  });
+}
+/** The caret's caption row: { line, bar, left } (left: on the parties' side of the `)`), or null. */
+function captionCaretRow(body) {
+  const sel = document.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  const el = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+  const line = el && el.closest(".line");
+  const bar = line && body.contains(line) && line.querySelector(".rb.paren");
+  if (!bar) return null;
+  let left = false;
+  try { left = r.comparePoint(bar, 0) >= 0; } catch { return null; }
+  return { line, bar, left, collapsed: r.collapsed };
+}
+/**
+ * The caret in a page's text (caretInText), or — where it stands in a caption
+ * cell holding no text node, as a party's empty cell on pleading paper does
+ * (its spaces are the margin's) — at the side's `)`, before it or past it.
+ */
+function captionCaretIn(body) {
+  const row = captionCaretRow(body);
+  if (!row || !row.collapsed) return null;
+  const at = caretInText(body);
+  if (at) return at;
+  const m = TD.serializeMapped(body);
+  const o = m.at.get(row.bar.firstChild);
+  if (o == null) return null;
+  return { text: m.text, lines: m.text.split("\n"), ...lineColOf(m.text, row.left ? o : o + 1), collapsed: true };
+}
+/** The caret put back where TD.captionEdit says, in the cell itself where it holds no text to stand in. */
+function placeCaptionCaret(body, caret) {
+  if (!caret) return;
+  const text = TD.serializeNodes(body).split("\n");
+  placeCaretOnDisk(body, text.slice(0, caret.line).reduce((a, l) => a + l.length + 1, 0) + caret.col);
+  const line = body.querySelectorAll(":scope > .line")[caret.line];
+  const bar = line && line.querySelector(".rb.paren");
+  const cell = bar && (caret.cell === 0 ? bar.previousElementSibling : bar.nextElementSibling);
+  if (cell && cell.classList.contains("rc") && !cell.firstChild) placeCaret(cell, 0);
+}
+function captionKey(body, key) {
+  if (!captionCaretRow(body)) return false;
+  const at = captionCaretIn(body);
+  if (!at) return false;
+  const sides = captionSides(body);
+  if (!sides[at.line]) return false;
+  const op = key === "Enter" ? "enter" : key === "Backspace" ? "backspace" : "delete";
+  const res = TD.captionEdit(at.lines, sides, at.line, { line: at.line, col: at.col }, { op, numbered: body.classList.contains("numbered") });
+  if (!res) return false;
+  if (res.lines.join("\n") !== at.text) {
+    snapshot(body, true);
+    rebuildFromLines(body, res.lines, null);
+  }
+  placeCaptionCaret(body, res.caret);
+  return true;
+}
+// Typing in a caption's cell: the row set back with its `)` on the side once
+// the keystroke lands, and what outgrows the parties' width wrapped down their
+// column. A party's empty cell typed into is noted first: on pleading paper
+// its spaces are the margin's, so what is typed there opens the cell.
+let captionTyped = null, captionEmpty = null;
+pagesEl.addEventListener("beforeinput", (e) => {
+  if (!editing || !/^insert/.test(e.inputType || "")) return;
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  const row = body && captionCaretRow(body);
+  if (row && row.left && row.bar.previousElementSibling && !row.bar.previousElementSibling.textContent.trim()) captionEmpty = row.line;
+});
+const captionReflowSoon = debounce(() => {
+  const body = captionTyped;
+  const empty = captionEmpty;
+  captionTyped = null;
+  captionEmpty = null;
+  if (!body || !body.isConnected || body === composingIn || !editing) return;
+  const row = captionCaretRow(body);
+  const at = row && captionCaretIn(body);
+  if (!at) return;
+  const sides = captionSides(body);
+  if (!sides[at.line]) return;
+  const res = TD.captionEdit(at.lines, sides, at.line, { line: at.line, col: at.col }, { numbered: body.classList.contains("numbered"), typedEmpty: empty === row.line });
+  if (!res || res.lines.join("\n") === at.text) return;
+  rebuildFromLines(body, res.lines, null);
+  placeCaptionCaret(body, res.caret);
+}, 120);
+pagesEl.addEventListener("input", (e) => {
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  if (body && editing && captionCaretRow(body)) { captionTyped = body; captionReflowSoon(); }
 });
 
 // ── column boxes on a ✓ Use my text page (TD.makeColumnBox, reflowBox) ────────
