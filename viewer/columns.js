@@ -543,10 +543,14 @@ export function alignColumns(bodies) {
  * regular run inside a bold line reads regular.
  */
 function putFace(el, face) {
-  const key = face ? "f:" + faceStyle(face) + (face.family || "") : "";
+  const key = face ? "f:" + faceStyle(face) + (face.em ? face.em + "em" : "") + (face.family || "") : "";
   if ((el.__face || "") === key) return;
   el.__face = key;
   const s = el.style;
+  // (A run's own size, in its line's: pdfsync.faceRuns' `em`. Taken off only
+  // where it was put on, since a placed cell sets its size itself.)
+  if (face && face.em) { s.fontSize = face.em + "em"; el.__em = true; }
+  else if (el.__em) { s.removeProperty("font-size"); el.__em = false; }
   if (!face) { for (const p of ["font-family", "font-weight", "font-style", "--col-sp-n"]) s.removeProperty(p); return; }
   if (face.family) {
     s.fontFamily = face.family;
@@ -558,7 +562,7 @@ function putFace(el, face) {
   s.fontWeight = face.bold ? "700" : "400";
   s.fontStyle = face.italic ? "italic" : "normal";
 }
-const sameFace = (a, b) => (a ? faceStyle(a) + (a.family || "") : "") === (b ? faceStyle(b) + (b.family || "") : "");
+const sameFace = (a, b) => (a ? faceStyle(a) + (a.em || "") + (a.family || "") : "") === (b ? faceStyle(b) + (b.em || "") + (b.family || "") : "");
 
 /**
  * Side by side, a line's pieces each where its PDF prints them, at the size
@@ -701,7 +705,7 @@ const FACE_LEAF = "[data-fake], [data-here], .cb, .rb, .rh";
 export function faceLine(lt, runs, face) {
   const want = (runs || []).filter((r) => r && r.face && r.to > r.from && !sameFace(r.face, face));
   if (want.length && lt.querySelector(".rb, .rh")) want.length = 0;
-  const key = want.length ? serializeNodes(lt) + "\n" + want.map((r) => r.from + "-" + r.to + ":" + faceStyle(r.face) + (r.face.family || "")).join(",") : "";
+  const key = want.length ? serializeNodes(lt) + "\n" + want.map((r) => r.from + "-" + r.to + ":" + faceStyle(r.face) + (r.face.em || "") + (r.face.family || "")).join(",") : "";
   if ((lt.__faced || "") === key) return false;
   let changed = unfaceLine(lt);
   lt.__faced = key;

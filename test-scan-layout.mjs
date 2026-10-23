@@ -89,7 +89,7 @@ function build({ review }) {
   return { text: [header, ...exp].join("\n") + "\n", pdf };
 }
 
-async function open(browser, base, { text, pdf }) {
+async function open(browser, base, { text, pdf }, { turned = false } = {}) {
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -115,19 +115,24 @@ async function open(browser, base, { text, pdf }) {
     await window.__textReaderOpenDoc("Lease.txt");
   }, text);
   await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
-  await page.evaluate(async (rows) => {
-    const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+  await page.evaluate(async ({ rows, turned }) => {
+    const { PDFDocument, StandardFonts, degrees } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.TimesRoman);
     const pg = doc.addPage([612, 792]);
+    // (`turned`: the page stored upside down and shown upright by /Rotate 180,
+    // as a scanner leaves a sheet fed the wrong way up — each line drawn
+    // turned half round, from the far corner.)
+    if (turned) pg.setRotation(degrees(180));
     // Each row squeezed to the width the scan prints it at, as an OCR layer's
     // words are stretched to their boxes: its size is the OCR's, its width the page's.
     for (const [t, y, size] of rows) {
       const fit = Math.min(size, size * 468 / font.widthOfTextAtSize(t, size));
-      pg.drawText(t, { x: 72, y: 792 - y, size: fit, font });
+      if (turned) pg.drawText(t, { x: 612 - 72, y, size: fit, font, rotate: degrees(180) });
+      else pg.drawText(t, { x: 72, y: 792 - y, size: fit, font });
     }
     await window.__textReaderPickPdfs([new File([await doc.save()], "Lease.pdf", { type: "application/pdf" })]);
-  }, pdf);
+  }, { rows: pdf, turned });
   await page.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 });
   await page.waitForTimeout(1000);
   const sbs = await page.$("#sbs-toggle");
@@ -168,6 +173,17 @@ try {
   check("the page the paper's height", Math.round(r.height) === 792, String(r.height));
   check("no page errors", r.errors.length === 0, r.errors.join(" | "));
   await r.close();
+
+  console.log("the same scan stored upside down, shown upright by /Rotate 180");
+  {
+    const t = await open(browser, srv.base, build({ review: true }), { turned: true });
+    check("its first line at the head of the page and its last at the foot, as shown",
+      Math.abs(t.lines[0].top - rowTop(0)) <= 6 && Math.abs(t.lines[N - 1].top - rowTop(N - 1)) <= 6, `${Math.round(t.lines[0].top)}, ${Math.round(t.lines[N - 1].top)}`);
+    const ts = t.lines.slice(1).map((l, k) => l.top - t.lines[k].top);
+    check("…the lines down the page in order", ts.every((s) => s > 0), JSON.stringify(ts.map((s) => Math.round(s))));
+    check("…and the page the paper's height", Math.round(t.height) === 792, String(t.height));
+    await t.close();
+  }
 
   console.log("the same page, a born-digital PDF (no REVIEW clause): laid out as before, by its rows");
   const b = await open(browser, srv.base, build({ review: false }));

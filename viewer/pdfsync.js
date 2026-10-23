@@ -571,6 +571,35 @@ export function numberedRowOf(nums, geom, rows, matched = null, left = 0) {
 }
 
 /**
+ * Each line of a numbered page matched to the PDF row that prints its WORDS
+ * (alignLines, in order), where that row stands near the line's place on the
+ * grid: within half a pitch above the numbered line before it (or its own
+ * number) and half a pitch below the numbered line after it. Null where no
+ * row shares its words there. `texts` per line (its text after the margin
+ * number), `nums` per line (its number or null), `rows` from pdfRows. A
+ * single-spaced block between two numbers is printed on rows of its own
+ * leading, and the row at a half line's slot is as often the next line's.
+ */
+export function nearRows(texts, nums, geom, rows) {
+  const n = (texts || []).length;
+  const out = new Array(n).fill(null);
+  if (!geom || !rows || !rows.length) return out;
+  const map = alignLines(texts, rows.map((r) => r.text));
+  const at = [];
+  nums.forEach((v, k) => { if (v != null) at.push(k); });
+  for (let k = 0; k < n; k++) {
+    const j = map[k];
+    if (j == null) continue;
+    let a = null, b = null;
+    for (const i of at) { if (i <= k) a = i; if (i >= k) { b = i; break; } }
+    const lo = a != null ? lineTop(geom, nums[a]) - geom.pitch / 2 : -Infinity;
+    const hi = b != null ? lineTop(geom, nums[b]) + geom.pitch / 2 : Infinity;
+    if (rows[j].top >= lo && rows[j].top <= hi) out[k] = j;
+  }
+  return out;
+}
+
+/**
  * Lines held ON THE PAPER: worked up from the foot, each line's top is held
  * at least its own box above the line below it and the lowest one its box
  * above `height` — so a line spreadTops pushed, or a pitch-stacked one the
@@ -827,7 +856,16 @@ export function bodyLeftOf(rows) {
 export function docBodyLeft(geoms, rowsByPage) {
   const xs = [];
   for (const g of geoms || []) if (g && g.bodyX > 0) xs.push(g.bodyX);
-  if (xs.length) return median(xs);
+  // The margin MOST pages begin at (to the nearest two points, the lesser on
+  // a tie), not their median: two pages read, a caption page at 104 and a
+  // page of argument at 140, gave a margin of 122 that neither has.
+  if (xs.length) {
+    const counts = new Map();
+    for (const x of xs) { const k = Math.round(x / 2); const c = counts.get(k) || { n: 0, xs: [] }; c.n++; c.xs.push(x); counts.set(k, c); }
+    let best = null;
+    for (const [k, c] of counts) if (!best || c.n > best.c.n || (c.n === best.c.n && k < best.k)) best = { k, c };
+    return median(best.c.xs);
+  }
   const ls = [];
   for (const rows of rowsByPage || []) { const l = bodyLeftOf(rows); if (l != null) ls.push(l); }
   return ls.length ? median(ls) : null;
@@ -1290,7 +1328,8 @@ const NAMED_FACES = [
 // set in Tesseract's GlyphLessFont (or another invisible one) over the scan,
 // and a Type 3 font is pictures of glyphs a scanner or an OCR drew — the type
 // is in the image, and the reader's own face reads a scan as well as a guess.
-const SYMBOL_FACE_RE = /symbol|dingbat|wingding|webding|marlett|zapf|glyphless|^t3font|^type3/i;
+// (GdPicture's OCR writes its layer in "GdPictureOCRFont": an OCR's too.)
+const SYMBOL_FACE_RE = /symbol|dingbat|wingding|webding|marlett|zapf|glyphless|ocrfont|gdpicture|^t3font|^type3/i;
 
 /**
  * The face to draw a PDF font's text in: { family, a CSS font-family list;
@@ -1306,13 +1345,89 @@ export function pdfFace(name, generic, hints = null) {
   const key = raw.toLowerCase().replace(/[^a-z]/g, "");
   let kind = FACE_STACKS[generic] ? generic : "sans-serif", first = "";
   for (const [re, faces, g] of NAMED_FACES) if (re.test(key)) { first = faces; kind = g; break; }
-  const bold = /bold|black|heavy|demi/i.test(raw) || !!(hints && hints.bold);
-  const italic = /italic|oblique/i.test(raw) || /[-,_][A-Za-z]*It(?:MT|PS)?$/.test(raw) || !!(hints && hints.italic);
+  // (…and Monotype's short forms: "TimesNewRomanBdMS", "TimesNewRomanItMS",
+  // "TimesNewRomanBdItMS".)
+  const bold = /bold|black|heavy|demi/i.test(raw) || /[a-z]Bd(?:It)?(?:MS|MT|PS)?$/.test(raw) || !!(hints && hints.bold);
+  const italic = /italic|oblique/i.test(raw) || /[-,_][A-Za-z]*It(?:MT|PS)?$/.test(raw) || /(?:[a-z]|Bd)It(?:MS|MT|PS)?$/.test(raw) || !!(hints && hints.italic);
   return { family: (first ? first + ", " : "") + FACE_STACKS[kind], bold, italic };
 }
+/**
+ * Whether a font PROGRAM is bold or italic, read off its own tables: `bytes`
+ * an sfnt (TrueType or OpenType, as pdf.js hands a loaded font over: its
+ * `data`). The OS/2 table's weight and selection bits, the head table's
+ * macStyle, and the name table's subfamily; null where it says nothing or is
+ * no sfnt. A PDF made by some printers names every font "F1", "F2"…
+ * ("CIDFont+F3") and leaves its descriptor's flags at nothing, and the font
+ * inside it is "Times New Roman Bold Italic" all the same.
+ */
+export function fontProgramFace(bytes) {
+  try {
+    const b = bytes instanceof Uint8Array ? bytes : bytes ? new Uint8Array(bytes) : null;
+    if (!b || b.length < 12) return null;
+    const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
+    const tag0 = dv.getUint32(0);
+    if (tag0 !== 0x00010000 && tag0 !== 0x4f54544f && tag0 !== 0x74727565) return null; // 1.0, 'OTTO', 'true'
+    const n = dv.getUint16(4);
+    const tables = {};
+    for (let i = 0; i < n; i++) {
+      const at = 12 + i * 16;
+      if (at + 16 > b.length) break;
+      const tag = String.fromCharCode(b[at], b[at + 1], b[at + 2], b[at + 3]);
+      tables[tag] = { off: dv.getUint32(at + 8), len: dv.getUint32(at + 12) };
+    }
+    let bold = false, italic = false, said = false;
+    const os2 = tables["OS/2"];
+    if (os2 && os2.off + 64 <= b.length) {
+      const weight = dv.getUint16(os2.off + 4), sel = dv.getUint16(os2.off + 62);
+      // (pdf.js writes an OS/2 of its own where the font's will not do: weight
+      // 500, and the italic bit from the descriptor's angle. That weight says nothing.)
+      if (weight >= 600 && weight !== 500) { bold = true; said = true; }
+      if (sel & 0x20) { bold = true; said = true; }
+      if (sel & 0x01) { italic = true; said = true; }
+    }
+    const head = tables.head;
+    if (head && head.off + 46 <= b.length) {
+      const mac = dv.getUint16(head.off + 44);
+      if (mac & 1) { bold = true; said = true; }
+      if (mac & 2) { italic = true; said = true; }
+    }
+    const name = tables.name;
+    if (name && name.off + 6 <= b.length) {
+      const count = dv.getUint16(name.off + 2), store = name.off + dv.getUint16(name.off + 4);
+      for (let i = 0; i < count; i++) {
+        const r = name.off + 6 + i * 12;
+        if (r + 12 > b.length) break;
+        const platform = dv.getUint16(r), id = dv.getUint16(r + 6), len = dv.getUint16(r + 8), off = store + dv.getUint16(r + 10);
+        if (id !== 2 && id !== 4) continue;
+        if (off + len > b.length) continue;
+        let s = "";
+        if (platform === 3 || platform === 0) for (let k = 0; k + 1 < len; k += 2) s += String.fromCharCode(dv.getUint16(off + k));
+        else for (let k = 0; k < len; k++) s += String.fromCharCode(b[off + k]);
+        if (/bold|black|heavy|demi|semibold/i.test(s)) { bold = true; said = true; }
+        if (/italic|oblique/i.test(s)) { italic = true; said = true; }
+      }
+    }
+    return said ? { bold, italic } : null;
+  } catch { return null; }
+}
+
 /** A face as one string: the same face, the same key. */
 export function faceKey(face) {
-  return face ? `${face.italic ? "italic " : ""}${face.bold ? "700 " : ""}${face.family || ""}` : "";
+  return face ? `${face.italic ? "italic " : ""}${face.bold ? "700 " : ""}${face.em ? face.em + "em " : ""}${face.family || ""}` : "";
+}
+/**
+ * A run's face with its SIZE, where its piece is set in another size than its
+ * line (`size`, the line's; `h`, the piece's): `em`, the piece's size in the
+ * line's, so a pleading line carrying the attorney's 12-point name, the 9-point
+ * "State Bar #" after it and the clerk's 7-point stamp beside them draws each
+ * at its own (columns.putFace). Within RUN_SIZE_SLACK of the line's it is the
+ * line's. `size` 0 (a form's line, whose pieces are placed at their own sizes
+ * already) asks nothing.
+ */
+const RUN_SIZE_SLACK = 0.06;
+function sizedFace(face, h, size) {
+  if (!face || !(size > 0) || !(h > 0) || Math.abs(h / size - 1) <= RUN_SIZE_SLACK) return face;
+  return { ...face, em: Math.round((h / size) * 1000) / 1000 };
 }
 
 // ---- the faces a line's runs are set in -----------------------------------------
@@ -1373,7 +1488,7 @@ export function faceCovers(shown, found, face, faceOf, share = 0.8) {
  * letter long. Runs that touch in one face are one; a run whose face is not
  * known is left out, so the line's own face stands there.
  */
-export function faceRuns(text, found, { fileAt = null, atoms = [], faceOf = () => null } = {}) {
+export function faceRuns(text, found, { fileAt = null, atoms = [], faceOf = () => null, size = 0 } = {}) {
   const s = String(text == null ? "" : text);
   const n = s.length;
   const atomAt = (i) => (atoms || []).find(([a, b]) => i > a && i < b) || null;
@@ -1389,7 +1504,7 @@ export function faceRuns(text, found, { fileAt = null, atoms = [], faceOf = () =
   const toFile = (i) => (fileAt ? fileAt(i) : i);
   const items = (found || [])
     .filter((g) => g && g.start >= 0 && g.start < n)
-    .map((g) => ({ start: g.start, face: faceOf(g.item && g.item.font), reach: String((g.item && g.item.str) || "").trim().length }))
+    .map((g) => ({ start: g.start, face: sizedFace(faceOf(g.item && g.item.font), g.item && g.item.h, size), reach: String((g.item && g.item.str) || "").trim().length }))
     .sort((a, b) => a.start - b.start);
   const runs = [];
   items.forEach((it, i) => {

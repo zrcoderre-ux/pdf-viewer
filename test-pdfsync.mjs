@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, scanLayout, fitRuns, firstPieceSize, faceCovers, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
+  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, scanLayout, fitRuns, firstPieceSize, faceCovers, nearRows, fontProgramFace, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
   matchedScale, spreadTops, evenHalfLines, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
@@ -225,6 +225,29 @@ console.log("a page with no numbers: rows matched by their words");
     check("…no further than the floor", fitRuns([300, 305, 310], [12, 12, 12], [true, false, true], { floor: 0.4 }), [1, 0.4, 1]);
   }
   {
+    // A LINE'S ROW BY ITS WORDS on pleading paper (nearRows): a single-spaced
+    // block between lines 7 and 8 is printed on rows of its own leading, and
+    // the row at a half line's slot is the next line's.
+    const geom = { y1: 100, pitch: 24 };
+    const rows = [{ top: 244, text: "7", left: 80 }, { top: 256, text: "Attorneys for Defendants and Respondents", left: 104 },
+      { top: 268, text: "8 California, acting by and through", left: 80 }, { top: 280, text: "Department of Justice", left: 104 }];
+    const texts = ["", "Attorneys for Defendants and Respondents", "California, acting by and through", "Department of Justice"];
+    check("each line on the row that prints its words, near its place", nearRows(texts, [7, null, 8, null], geom, rows), [null, 1, 2, 3]);
+    check("…and none a page away", nearRows(["Department of Justice"], [20], geom, rows), [null]);
+  }
+  // THE DOCUMENT'S MARGIN, the one most pages begin at: a caption page at 104
+  // and a page of argument at 140 are not a margin of 122.
+  check("the body margin most pages share, the lesser on a tie", [docBodyLeft([{ bodyX: 104.4 }, { bodyX: 140.4 }]), docBodyLeft([{ bodyX: 140.4 }, { bodyX: 104.4 }, { bodyX: 140.6 }])], [104.4, 140.5]);
+  // A pleading line's runs at their own SIZES (faceRuns' `em`): the name at
+  // the line's 12 point, the 9-point "State Bar #" after it at 0.75 of it.
+  {
+    const f = { family: "", bold: false, italic: false };
+    const found = [{ start: 0, at: 0, item: { str: "DENNIS J. HERRERA,", font: "a", h: 12 } }, { start: 19, at: 19, item: { str: "State Bar # 139669", font: "a", h: 9 } }];
+    const runs = faceRuns("DENNIS J. HERRERA, State Bar # 139669", found, { faceOf: () => f, size: 12 });
+    check("a run in another size than its line carries it, in the line's", runs.map((r) => r.face.em || 1), [1, 0.75]);
+    check("…and none asked for, none given", faceRuns("DENNIS J. HERRERA, State Bar # 139669", found, { faceOf: () => f }).every((r) => !r.face.em), true);
+  }
+  {
     // …COUNTING ONLY THE LINES THAT STAND OVER EACH OTHER: lines 14 and 15
     // 24 points apart, line 14 the party block's first line, and between
     // them a cause of action beside it, the block's second line, and the next
@@ -391,6 +414,38 @@ console.log("the PDF's own typeface");
   check("a subset Arial, bold", pdfFace("QZRSCC+Arial-BoldMT", "sans-serif"), { family: SANS, bold: true, italic: false });
   check("…italic", pdfFace("JRFCIQ+Arial-ItalicMT", "sans-serif"), { family: SANS, bold: false, italic: true });
   check("Times, bold italic", pdfFace("TimesNewRomanPS-BoldItalicMT", "serif"), { family: SERIF, bold: true, italic: true });
+  // Monotype's short forms, as a 2002 filing names its fonts.
+  check("Monotype's short forms: Bd bold, It italic, BdIt both",
+    ["TimesNewRomanBdMS", "TimesNewRomanItMS", "TimesNewRomanBdItMS", "TimesNewRomanMS"].map((n) => { const f = pdfFace(n, "serif"); return [f.bold, f.italic]; }),
+    [[true, false], [false, true], [true, true], [false, false]]);
+  {
+    // A FONT PROGRAM's own weight and slant (fontProgramFace): a printer's PDF
+    // names its fonts "CIDFont+F2" and its descriptor says nothing, and the
+    // font inside is Times New Roman Bold.
+    const sfnt = ({ weight = 400, sel = 0, mac = 0, sub = "" } = {}) => {
+      const tables = [];
+      const os2 = new Uint8Array(78); const dv = new DataView(os2.buffer); dv.setUint16(4, weight); dv.setUint16(62, sel); tables.push(["OS/2", os2]);
+      const head = new Uint8Array(54); new DataView(head.buffer).setUint16(44, mac); tables.push(["head", head]);
+      if (sub) {
+        const str = new Uint8Array(sub.length * 2); const sv = new DataView(str.buffer); [...sub].forEach((c, k) => sv.setUint16(k * 2, c.charCodeAt(0)));
+        const name = new Uint8Array(6 + 12 + str.length); const nv = new DataView(name.buffer);
+        nv.setUint16(2, 1); nv.setUint16(4, 18); nv.setUint16(6, 3); nv.setUint16(8, 1); nv.setUint16(12, 2); nv.setUint16(14, str.length); nv.setUint16(16, 0);
+        name.set(str, 18); tables.push(["name", name]);
+      }
+      let off = 12 + tables.length * 16;
+      const total = off + tables.reduce((n, [, b]) => n + b.length, 0);
+      const out = new Uint8Array(total); const ov = new DataView(out.buffer);
+      ov.setUint32(0, 0x00010000); ov.setUint16(4, tables.length);
+      tables.forEach(([tag, b], k) => { const at = 12 + k * 16; [...tag].forEach((c, i) => { out[at + i] = c.charCodeAt(0); }); ov.setUint32(at + 8, off); ov.setUint32(at + 12, b.length); out.set(b, off); off += b.length; });
+      return out;
+    };
+    check("a font program's OS/2 weight says bold", fontProgramFace(sfnt({ weight: 700 })), { bold: true, italic: false });
+    check("…its selection bits italic", fontProgramFace(sfnt({ sel: 1 })), { bold: false, italic: true });
+    check("…its head table's macStyle", fontProgramFace(sfnt({ mac: 3 })), { bold: true, italic: true });
+    check("…its name table's subfamily", fontProgramFace(sfnt({ sub: "Bold Italic" })), { bold: true, italic: true });
+    check("…a regular program says nothing", fontProgramFace(sfnt({})), null);
+    check("…and no sfnt, nothing", fontProgramFace(new Uint8Array([1, 2, 3])), null);
+  }
   check("Helvetica's oblique is its italic", pdfFace("Helvetica-Oblique", "sans-serif").italic, true);
   check("an Adobe face's short italic, and a family the stacks do not name, in pdf.js's family",
     pdfFace("ABCDEF+MyriadPro-BoldIt", "sans-serif"), { family: SANS, bold: true, italic: true });

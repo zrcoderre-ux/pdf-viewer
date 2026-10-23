@@ -435,6 +435,87 @@ on pleading paper"), `test-even-half-lines.mjs` case 2 (two half lines
 crammed into one gap: those two in one smaller size, every other line at the
 PDF's 12 point, none on top of another).
 
+### Measured against thirty public filings (`audit/layout-audit.mjs`, 2026-10-23)
+
+The owner, of the layout so far: "Pull all of these pdfs and use them to perform
+tests to improve the results. Run pdf-linker on them to get the text files and
+then try to match the formatting." Thirty public California filings (born-digital
+pleadings in Times, Century Schoolbook, Georgia and Calibri; GdPicture and
+Tesseract OCR'd scans; scans stored upside down; tables of authorities) were run
+through PDF-Linker, and each export opened beside its PDF in the reader by
+`audit/layout-audit.mjs`, which grades what the reader DRAWS against what the
+PDF PRINTS word by word, read by PyMuPDF (`audit/layout-truth.py`, a reading
+that shares nothing with the reader's pdf.js): lines drawn over each other,
+words off the PDF's size by more than 15%, bold or italics the PDF does not set
+(or misses), lines more than 6 points off their row, text past the PDF's
+right margin, pages taller than their paper. Over the first twelve pages of each
+(about 91,000 words), the first full pass (after the size changes below were
+already in) counted 49 overlaps, 153 words off size, 17 / 229 bold drawn / missed,
+3 / 554 italics drawn / missed, 957 lines off their rows, 275 past the margin and
+2 pages grown, with 79,000 words found where the PDF prints them; the second, 39,
+148, 8 / 44, 3 / 71, 693, 48 and 0, with 84,400 found. The changes:
+
+- **A page's items where the page SHOWS them** (`readPdfGridNow`, the viewport's
+  transform). A scan stored upside down and shown upright by /Rotate 180 had its
+  items read in the page's own frame: its last line read as its first, its lines
+  laid from the foot of the sheet up and past it. A whole Proposition 65
+  complaint of such pages: 156 lines off their rows, 98 past the margin; now 16
+  and 14. (`test-scan-layout.mjs`, the upside-down case.)
+- **A scan is known by its invisible text too** (`hiddenTextShare`, render mode 3
+  or 7 in the page's operator list; `SYMBOL_FACE_RE` takes GdPicture's
+  "GdPictureOCRFont"): an OCR layer in a font that calls itself a face was laid
+  out by its OCR's 21-point line heights, every line 360 points too wide.
+- **A scan's one size fits its longest line that is no runaway** (`scanTypeSize`:
+  within an eighth of the 85th percentile's, a fiftieth to spare): sized to the
+  85th percentile, the longest sixth of a justified page's lines ran a
+  twentieth past the margin.
+- **Bold and italic read off the font PROGRAM** (`pdfsync.fontProgramFace`: OS/2
+  weight and selection, head macStyle, the name table's subfamily), where pdf.js
+  keeps it: the reader's PDFs open with `fontExtraProperties`, and `noteFaces`
+  reads each font once and lets go of its program. A printer's PDF names its
+  fonts "CIDFont+F1"…"F4" with descriptor flags of nothing, and they are Times
+  New Roman, Bold, Italic: 140 words missed bold and 168 italic on one brief, now
+  7 and 2. And Monotype's short names ("TimesNewRomanBdMS", "…ItMS",
+  "…BdItMS") are read as bold and italic (`pdfFace`).
+- **A pleading line's row by its WORDS** (`pdfsync.nearRows`, before
+  `numberedRowOf`'s slot): in a single-spaced block the row at a half line's
+  slot is as often the next line's, and none of the line's pieces were found in
+  it.
+- **The margin numbers told by the page's own number column** (`left`,
+  `geom.numberRight`), and the document's body margin the one MOST pages begin
+  at (`pdfsync.docBodyLeft`, to two points, the lesser on a tie) rather than a
+  median: two pages read, one beginning at 104 and one at 140, made a margin of
+  122, and every piece of the first page's text at 104 was taken for a margin
+  number — its italics, bold and size lost with it. Twenty-three italic misses on
+  one demurrer's caption, now none.
+- **Each run on a pleading line at its own size** (`pdfsync.faceRuns`' `em`,
+  `columns.putFace`): the attorney's 12-point name, the 9-point "State Bar #"
+  after it and the clerk's 7-point stamp beside them, each in its own; only on
+  pleading paper (a form's pieces are placed at their sizes already).
+- **Five per cent, not twenty, is "the body size" on a born-digital page**
+  (`TYPE_SLACK`): its sizes are its fonts', not an OCR's, and a proof of service
+  in 10 point under a 12-point body was drawn at 12. A scan is set in one size
+  anyway.
+- **A line of rule glyphs holds no room** (`RULE_ONLY_RE`, `bare`): a signature
+  line is a stroke, and counted as a line of type it took the name under it to
+  half its size.
+- **Spans in the FILE's columns on pleading paper**: a numbered line's text
+  stands after its number and the spaces the file writes after it (`.gutter`),
+  a half line's after its own spaces. Counted from the text alone, the two
+  were two grids, "City Attorney" (a half line at column 49) and "WAYNE K.
+  SNODGRASS" (line 20, at 0 of its own) stood side by side, and neither moved
+  off the other.
+
+The audit itself: `node audit/layout-audit.mjs CASE_FOLDER [--pages 1-12]
+[--doc TEXT] [--out FILE.json] [--lines]` over a folder PDF-Linker has run on
+(its `pdf_linker.log` names each PDF's export); each export is read in an
+origin-private folder of its own with its PDF and the key, side by side. The
+report names real text and stays on the machine. Residuals: lines on pleading
+paper stand on their numbers where the PDF sets a single-spaced block at its
+own leading, a few points off (by design: the numbers come first); a page whose
+export PDF-Linker scrambled (a four-column service list on a leaning scan)
+cannot be drawn better than its export.
+
 ### A scan in one size (`pdfsync.scanLayout`, `scanPage`, `scanTypeSize`)
 
 The owner, of a scanned AIR lease page beside its PDF (its header: "REVIEW:

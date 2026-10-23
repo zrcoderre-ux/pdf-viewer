@@ -18899,7 +18899,9 @@ async function openPdfNow(src) {
   // The fonts go into a document of their own (pdf-fonts.js): loaded into this
   // one, every font a PDF brought in or took away laid the whole text column
   // out again — 620 ms → 60 ms a jump across a combined file of forty.
-  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer(), worker: sharedPdfWorker(), ownerDocument: fontDocument() }).promise;
+  // (`fontExtraProperties` keeps each font's program on its object, which
+  // noteFaces reads the weight and slant off and then lets go of.)
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer(), worker: sharedPdfWorker(), ownerDocument: fontDocument(), fontExtraProperties: true }).promise;
   const n = pdf.numPages;
   const hole = () => new Array(n).fill(null);
   const info = { pdf, count: n, sizes: hole(), name: src.name, lines: hole(), geoms: hole(), rows: hole(), gridRead: new Set(), gridQueued: true };
@@ -19042,7 +19044,15 @@ async function noteFaces(info, page, styles) {
   for (const id of ids) {
     const font = fontOf(id);
     const generic = styles[id] && styles[id].fontFamily;
-    info.faces.set(id, { face: PS.pdfFace(font && font.name, generic, font) });
+    // The weight and slant the font's own program says (pdfsync.fontProgramFace)
+    // as well as its name: a printer's PDF names its fonts "F1"… and sets the
+    // descriptor's flags to nothing, and the font in it is Times New Roman Bold.
+    // Read once, then the program let go of: pdf.js keeps it only because the
+    // document is opened with `fontExtraProperties` for this.
+    const prog = font && font.data ? PS.fontProgramFace(font.data) : null;
+    if (font && font.data) { try { font.data = null; } catch { /* read-only: it stays */ } }
+    const hints = prog ? { ...(font || {}), bold: !!(font && font.bold) || prog.bold, italic: !!(font && font.italic) || prog.italic } : font;
+    info.faces.set(id, { face: PS.pdfFace(font && font.name, generic, hints) });
   }
   info.faceEpoch = (info.faceEpoch || 0) + 1;
 }
@@ -19092,6 +19102,29 @@ function formLibrary() {
 // born-digital form with a picture OCR'd on it is the PDF's own type, and must
 // not have the blank's laid over it.
 const FORM_MIN_ITEMS = 20, FORM_OCR_SHARE = 0.8;
+/**
+ * The share of a page's text-showing operations drawn INVISIBLY (render mode
+ * 3 or 7: an OCR layer over its picture), from its operator list — the one
+ * pdf.js builds to draw the page, so asked again it is in hand. 0 where it
+ * cannot be read.
+ */
+async function hiddenTextShare(page) {
+  try {
+    const ops = await page.getOperatorList();
+    const O = pdfjsLib.OPS;
+    const show = new Set([O.showText, O.showSpacedText, O.nextLineShowText, O.nextLineSetSpacingShowText]);
+    let mode = 0, hidden = 0, all = 0;
+    const stack = [];
+    for (let k = 0; k < ops.fnArray.length; k++) {
+      const fn = ops.fnArray[k];
+      if (fn === O.save) stack.push(mode);
+      else if (fn === O.restore) mode = stack.length ? stack.pop() : 0;
+      else if (fn === O.setTextRenderingMode) mode = ops.argsArray[k][0];
+      else if (show.has(fn)) { all++; if (mode === 3 || mode === 7) hidden++; }
+    }
+    return all ? hidden / all : 0;
+  } catch { return 0; }
+}
 /** Whether a page's text is an OCR layer over a scan, by the test above. */
 function ocrLayerPage(info, items) {
   const faces = info.faces || new Map();
@@ -19237,18 +19270,29 @@ async function readPdfGridNow(info, pass) {
       if (tc.truncated) { info.lines[i - 1] = null; sayHugePage(info.name, i); continue; }
       const items = [];
       let top = Infinity;
+      // Each item where it stands on the page AS SHOWN (the viewport's
+      // transform: its /Rotate and its media box's origin), the frame the
+      // page's size is in. Read in the page's own frame, a scan stored upside
+      // down and shown upright by /Rotate 180 — a whole complaint of them —
+      // had its last line read as its first, and its lines laid from the foot
+      // of the sheet up and past it.
+      const vt = page.getViewport({ scale: 1 }).transform;
       for (const it of tc.items) {
         if (!it.str || !it.transform) continue;
-        const t = sz.h - (it.transform[5] + (it.height || 0));
+        const m = pdfjsLib.Util.transform(vt, it.transform);
+        const t = m[5] - (it.height || 0);
         if (it.str.trim() && t >= 0 && t < top) top = t;
-        items.push({ str: it.str, x: it.transform[4], top: t, w: it.width || 0, h: it.height || 0, font: it.fontName || null });
+        items.push({ str: it.str, x: m[4], top: t, w: it.width || 0, h: it.height || 0, font: it.fontName || null });
       }
       info.lines[i - 1] = isFinite(top) ? top : null;
       // A SCAN of a court form PDF-Linker holds the blank of: the blank's own
       // type in place of the OCR's (formTypeOver).
       const typed = await formTypeOver(info, i, items, sz).catch(() => null);
-      // …and any other scan's rows are an OCR's, laid out as such (scanPage).
-      (info.scans || (info.scans = []))[i - 1] = !typed && ocrLayerPage(info, items);
+      // …and any other scan's rows are an OCR's, laid out as such (scanPage):
+      // its type in a font that names no face, or drawn invisibly over the
+      // picture (text render mode 3), as every OCR layer is, whatever the font
+      // it is set in calls itself.
+      (info.scans || (info.scans = []))[i - 1] = !typed && (ocrLayerPage(info, items) || (items.length >= FORM_MIN_ITEMS && await hiddenTextShare(page) >= FORM_OCR_SHARE));
       info.geoms[i - 1] = PS.pleadingGeometry(typed || items, sz);
       info.rows[i - 1] = PS.pdfRows(typed || items, sz);
     } catch { info.lines[i - 1] = null; }
@@ -20503,8 +20547,8 @@ function scanPage(i, info, pageNo) {
   return !!(pg && /\bOCR layer\b/i.test(pg.review || ""));
 }
 /**
- * A scanned page's one type size: the size its longer lines (the 85th
- * percentile of those of 24 characters or more) fit across the PDF's text in,
+ * A scanned page's one type size: the size its longest lines (those of 24
+ * characters or more, a runaway aside) fit across the PDF's text in,
  * in the reader's face, and never more than a tenth over `base`. An OCR layer
  * sizes its words by each line's box, ascenders to descenders, which runs well
  * over the type the scan prints: drawn at it, every line of a dense scan ran
@@ -20519,7 +20563,12 @@ function scanTypeSize(texts, base, rows, bodyX) {
   for (const t of texts) { const s = String(t || "").trim(); if (s.length >= 24) ws.push(faceEm(s, face)); }
   if (ws.length < 3 || !(room > 0)) return base;
   ws.sort((a, b) => a - b);
-  const w = ws[Math.min(ws.length - 1, Math.floor(ws.length * 0.85))];
+  // The longest line that is no runaway (within an eighth of the 85th
+  // percentile's), and a fiftieth to spare: on a justified page most lines run
+  // the full width, and sized to the 85th percentile the longest sixth of them
+  // ran a twentieth past the margin.
+  const p85 = ws[Math.min(ws.length - 1, Math.floor(ws.length * 0.85))];
+  const w = Math.max(...ws.filter((x) => x <= p85 * 1.12)) / 0.98;
   return w > 0 ? Math.max(base * MIN_FIT, Math.min(base * 1.1, room / w)) : base;
 }
 
@@ -21022,7 +21071,18 @@ function applyMatchedLayoutNow() {
       // Where across the page each line stands, as on a page with no numbers:
       // a caption's two columns are lines side by side, and the lines between
       // two numbers clear only the lines they stand under (spreadTops, fitRuns).
-      spans = lines.map((l) => { const lt = ltOf(l); const t = lt ? lt.textContent : ""; const a = t.search(/\S/); return a < 0 ? null : [a, t.trimEnd().length]; });
+      // In the FILE's columns: a numbered line's text stands after its number
+      // and the spaces the file writes after it (.gutter), a half line's
+      // after its own spaces, and the two are one grid only counted so.
+      spans = lines.map((l) => {
+        const lt = ltOf(l);
+        const t = lt ? lt.textContent : "";
+        const a = t.search(/\S/);
+        if (a < 0) return null;
+        const g = l.querySelector(".gutter");
+        const gut = g && !(lt && lt.contains(g)) ? g.textContent.length : 0;
+        return [gut + a, gut + t.trimEnd().length];
+      });
       if (!base) base = pitch / (Number(settings.lineHeight) || 1.5);
       // Each line's PDF row (pdfsync.numberedRowOf): the one at its number or
       // half line, or the one its words matched. A NUMBERED line's size is
@@ -21030,9 +21090,22 @@ function applyMatchedLayoutNow() {
       // the PDF printed it at, a footnote's numbered lines stood half again
       // the size of the lines between them (evenHalfLines, below, sets a run
       // of small type in one size).
-      const left = bodyX > 0 ? bodyX - 1.5 : geom.numberRight + 1;
+      // What is the margin's (its numbers) and what the body's: anything right
+      // of the numbers' own column. Not the document's body margin less a
+      // point and a half: read off the pages so far, it is not this page's —
+      // a page whose body begins at 104 beside one at 140 put it at 122, and
+      // every piece of this page's text at 104 was left out as a number.
+      const left = geom.numberRight > 0 ? geom.numberRight + 1 : bodyX > 0 ? bodyX - 1.5 : 0;
+      const bodies = lines.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; });
+      // EACH LINE'S ROW BY ITS WORDS, where that row stands near its slot
+      // (pdfsync.nearRows), before the row at its number or half line: in a
+      // single-spaced block (an attorney's address, a caption's party, a
+      // signature) the row at a half line's slot is as often the next line's,
+      // and none of the line's pieces were found in it — the line lost its
+      // italics, its bold and its size.
+      const byWords = geom.scan || !rows || !rows.length ? null : PS.nearRows(bodies, nums, geom, rows);
       const rowOf = geom.scan || !rows || !rows.length ? null
-        : PS.numberedRowOf(nums, geom, rows, off.rowOf, left).map((j, k) => (lines[k].classList.contains("own") ? null : j));
+        : PS.numberedRowOf(nums, geom, rows, off.rowOf.map((j, k) => (j != null ? j : byWords[k])), left).map((j, k) => (lines[k].classList.contains("own") ? null : j));
       // Each line's pieces of the PDF's type (matchItems), the margin's own
       // numbers left out: what its faces are read off (planCells, below), and
       // its size. A LINE'S SIZE IS ITS FIRST PIECE'S, not its row's: a caption
@@ -21043,7 +21116,6 @@ function applyMatchedLayoutNow() {
       // party's second line smaller than its first. The owner: "I am still
       // getting incorrect sizing variation… The caption involves all the same
       // size text, yet is being shrunk."
-      const bodies = lines.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; });
       const pieces = rowOf ? matchItems(lines, bodies, rowOf, rows, { skip: (it) => it.x < left }) : null;
       const read = off.sizes.map((h, k) => {
         const own = pieces ? PS.firstPieceSize(pieces[k] && pieces[k].found) : null;
@@ -21053,7 +21125,7 @@ function applyMatchedLayoutNow() {
       // (A scan's pleading paper whose numbers came through: one size, the
       // one its lines fit across the paper in, not the OCR's line by line.)
       if (scan && !geom.scan) base = scanTypeSize(lines.map((l) => { const lt = ltOf(l); return lt ? lt.textContent : ""; }), base, rows, bodyX);
-      sizes = geom.scan || scan ? lines.map(() => base) : PS.typeSizes(read, base);
+      sizes = geom.scan || scan ? lines.map(() => base) : PS.typeSizes(read, base, TYPE_SLACK);
       if (!geom.scan && !scan) unread = read.map((h) => !(h > 0));
       // LINES UNDER THE LAST NUMBER THAT THE PDF'S TEXT DOES NOT CARRY (a
       // picture at the foot of the page, its words the export's OCR of it)
@@ -21192,7 +21264,7 @@ function applyMatchedLayoutNow() {
         // OCR's reading of the scan, whose sizes come out a line at a time.
         // …and a scan is set the same way (scanLayout): every line in its one size.
         const poorScan = numberedFile || scan;
-        sizes = poorScan ? lines.map(() => base) : PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base);
+        sizes = poorScan ? lines.map(() => base) : PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base, TYPE_SLACK);
         // …and a line the PDF's text does not carry (a picture's words),
         // spread between the lines either side of it (rowLayout), in type
         // that fits the room it was given, so it pushes nothing under it.
@@ -21261,7 +21333,13 @@ function applyMatchedLayoutNow() {
     // (A numbered line with nothing after its number holds no room: its
     // number is in the margin, and the half line under it stands where the
     // PDF's caption, single-spaced, has its next line.)
-    const bare = (k) => isEmptyLine(lines[k]) || (fixed && fixed[k] && !(ltOf(lines[k]) || lines[k]).textContent.trim());
+    // …nor a line that is only a drawn rule (a signature line, a box's top:
+    // rules.js draws it as a stroke, not as a line of type).
+    const bare = (k) => {
+      if (isEmptyLine(lines[k])) return true;
+      const t = (ltOf(lines[k]) || lines[k]).textContent;
+      return (fixed && fixed[k] && !t.trim()) || RULE_ONLY_RE.test(t);
+    };
     if (fixed && sizes && tops) {
       const f = PS.fitRuns(tops, sizes.map((h, k) => (bare(k) ? 0 : h)), fixed, { floor: FIT_FLOOR, spans });
       sizes = sizes.map((h, k) => h * f[k]);
@@ -21895,7 +21973,7 @@ function applyPdfTypeSizes(sec, body) {
   const lay = base && !body.classList.contains("numbered") && !scanPage(Number(sec.dataset.index), info, t.page)
     ? PS.rowLayout(lines.map((l) => l.textContent), rows)
     : null;
-  const sizes = lay ? PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base) : null;
+  const sizes = lay ? PS.typeSizes(lay.positions.map((p) => (p ? p.size : null)), base, TYPE_SLACK) : null;
   lines.forEach((l, k) => {
     const h = sizes ? sizes[k] : null;
     // Within a fiftieth of the body IS the body: a text layer's heights wobble.
@@ -21911,6 +21989,13 @@ const MIN_FIT = 0.5;
 // taken down to stand clear of each other (pdfsync.fitRuns): further than the
 // page's fit, since the alternative is lines drawn through each other.
 const FIT_FLOOR = 0.4;
+// How near the body size a born-digital row's size must be to be drawn at the
+// body size: its sizes are the font's, not an OCR's reading of a scan (which
+// wobbles, and is set in one size anyway: scanPage). Twenty per cent made a
+// proof of service set in 10 point, under a 12-point body, 12.
+const TYPE_SLACK = 0.05;
+// A line of box-drawing glyphs and nothing else: a rule, not type.
+const RULE_ONLY_RE = /^[\s\u2500-\u257F]*[\u2500-\u257F][\s\u2500-\u257F]*$/;
 // …and a picture's words (rowLayout's `spread`, and the lines under the last
 // number the PDF does not print), set to fit the room the picture leaves:
 // smaller than the page's fit allows, since past it they would either stand
@@ -22246,7 +22331,9 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     // scan, pdfsync.pdfFace) is cut into its pieces: an OCR's words stand where
     // the scan has them, and the scan's type is not a face the reader has.
     if (!face) return { text: null, cuts: [], places: [], face };
-    const runs = PS.faceRuns(shown, found, { fileAt: map.fileAt, atoms: map.atoms, faceOf });
+    // (On pleading paper each run at its own size too, where it is not its
+    // line's: a form's pieces are placed at theirs already.)
+    const runs = PS.faceRuns(shown, found, { fileAt: map.fileAt, atoms: map.atoms, faceOf, size: place ? 0 : sizes[k] });
     if (!place) return { text: null, cuts: [], places: [], face, runs };
     const first = shown.search(/\S/);
     // Each piece at its own size — its item's, the line's within a fifth of
