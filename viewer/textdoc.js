@@ -32,7 +32,7 @@
 //       right for what they write).
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
-import { caseShape, mirrorCase, translateRuns, findReals, findRealSpans, compile, ownFakesOf } from "./pseudo-key.js";
+import { caseShape, mirrorCase, fold as pkFold, translateRuns, findReals, findRealSpans, compile, ownFakesOf } from "./pseudo-key.js";
 import { REPORTERS_SORTED, REPORTERS_ALL_SORTED } from "./reporters.js";
 
 // ---- the file as pages ---------------------------------------------------------
@@ -1986,10 +1986,10 @@ export function findRealsInPlain(compiledForward, segments) {
 
 const POSS_MATCH_RE = /['’][sS]$/;
 const POSS_TAIL_RE = /['’]s$/i;
-/** A value folded for comparison: trimmed, one space between words, lower case. */
+/** A value folded for comparison: trimmed, one space between words, lower case, quote-blind (pseudo-key's fold). */
 export function foldValue(s) { return foldKey(s); }
 function foldKey(s) {
-  return String(s == null ? "" : s).trim().replace(/\s+/g, " ").toLowerCase();
+  return pkFold(s);
 }
 // The fake in the matched text's own case, possessive carried — exactly what
 // pseudo-key's forwardRuns writes, so the span made while typing and the

@@ -35,6 +35,27 @@ that reason. `TD.docLabel` (the bar, the print title, the reel divider) and
 `PS.normalizeStem` drop `.md` with the other extensions, and the Save picker
 offers a `.md` as Markdown. `test-markdown.mjs` covers it.
 
+**A name is matched through Markdown's marks** (`pseudo-key.altFor`, `MARK`,
+`foldMarks`). Shown as written, the Markdown puts marks inside names that
+claude.ai renders away, so the extension swapped names the reader missed:
+emphasis opening or closing inside one ("*Ingrid* Strangeways", a caption's
+"**QUARRY FINCH**, an individual"), a tracked change ("Ingrid{++ ++}Strangeways",
+a "{--Smith--}" between its words), and the escape My-Macros writes before
+`*`, `_`, `\` and a backtick ("ingrid\_s@mail.org"). A value's pattern lets
+`MARK` stand wherever one of its words meets a blank or punctuation, and lets
+each mark of punctuation carry an escape; `foldGaps` takes the marks out of a
+match before it is looked up (an escape keeps its character), and `lineRanges`
+cuts a match at them as at a line break, so they stay in the text between the
+pieces and "*Ingrid* Strangeways" reads "*Helen* Rasho". An underscore at a
+word's edge is emphasis ("_Ingrid_"); one joining two words still makes one
+word ("Rasho_Helen_Decl"), so the boundaries are `BEFORE`/`AFTER` rather than
+a word class with `_` in it. Quote marks are matched and folded either way
+(`fold`, `charPattern`), since a Word draft types "O’Dell" where the key has
+"O'Dell", and `mirrorCase` writes the replacement in the text's own quotes
+(the extension's `mirrorQuotes`). The same reading serves the save (a real
+name among the marks is faked) and the leak check. `test-pseudo-key.mjs`,
+"markdown: a name among Markdown's marks".
+
 **A keep in a Markdown export is carried out by its save** (`clearKeptIn`).
 In a PDF-Linker export a value kept where the run faked it stays faked on
 disk until the next run un-fakes it through `New Real Values.txt`. Nothing

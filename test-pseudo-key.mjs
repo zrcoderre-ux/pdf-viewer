@@ -142,6 +142,38 @@ check("suffixes, O' names and accented letters",
   check("…and the typed-name prompt reads it the other way", mirrorCase("U.S.A., Inc.", "SILVERGATE., INC."), "Silvergate., Inc.");
 }
 
+// A Markdown file — My-Macros' export of a Word draft — writes a name among
+// marks claude.ai renders away and the reader shows as written.
+console.log("markdown: a name among Markdown's marks");
+{
+  const cm = compile({ pairs: [
+    { real: "Helen Rasho", fake: "Ingrid Strangeways" },
+    { real: "Rasho", fake: "Strangeways" },
+    { real: "Pat O'Neil", fake: "Quinn O'Dell" },
+    { real: "helen@x.com", fake: "ingrid_s@mail.org" },
+    { real: "OPAL DOVE, an individual", fake: "QUARRY FINCH, an individual" },
+  ] });
+  const tr = (t) => translate(cm, t).text;
+  check("emphasis opening or closing inside a name, its marks where they stood",
+    ["*Ingrid* Strangeways moved.", "**Ingrid Strangeways** moved.", "_Ingrid Strangeways_ moved.", "*Strangeways*'s brief"].map(tr),
+    ["*Helen* Rasho moved.", "**Helen Rasho** moved.", "_Helen Rasho_ moved.", "*Rasho*'s brief"]);
+  check("a caption's bold name with the rest of its row outside the bold", tr("**QUARRY FINCH**, an individual"), "**Opal Dove, an individual**");
+  check("a tracked change inside a name", ["Ingrid{++ ++}Strangeways", "Ingrid {--Smith--}Strangeways"].map(tr),
+    ["Helen{++ ++}Rasho", "Helen {--Smith--}Rasho"]);
+  check("an escaped character in a value", tr("write ingrid\\_s@mail.org"), "write helen@x.com");
+  check("either quote mark, written the way the text writes it", ["Quinn O’Dell said", "Quinn O'Dell said"].map(tr), ["Pat O’Neil said", "Pat O'Neil said"]);
+  check("an underscore joining words still makes one word; an escaped asterisk is an asterisk",
+    ["Strangeways_Decl.pdf", "x_Strangeways", "\\*Strangeways\\* stays"].map(tr), ["Strangeways_Decl.pdf", "x_Strangeways", "\\*Rasho\\* stays"]);
+  const src = "The *Ingrid* Strangeways motion; **QUARRY FINCH**, an individual; Quinn O’Dell{++ ++}said.";
+  check("the runs give the file back byte for byte",
+    translateRuns(cm, src).map((r) => (r.t === "text" ? r.s : r.from)).join(""), src);
+  const fw = compileForward({ warn: [{ real: "Helen Rasho", fake: "Ingrid Strangeways" }, { real: "Pat O'Neil", fake: "Quinn O'Dell" }] });
+  check("a save fakes a real name standing among the marks",
+    forwardRuns(fw, "*Helen* Rasho and Pat O’Neil").filter((r) => r.t === "swap").map((r) => r.from + ">" + r.to),
+    ["Helen>Ingrid", "Rasho>Strangeways", "Pat O’Neil>Quinn O’Dell"]);
+  check("…and the leak reading sees it", findReals(compileReals({ warn: [{ real: "Helen Rasho", fake: "Ingrid Strangeways" }] }), "**Helen** Rasho").map((w) => w.real), ["Helen Rasho"]);
+}
+
 console.log("forward");
 const f = compileForward(key);
 check("real → fake for a save", forwardRuns(f, "Plaintiff HELEN RASHO and Rasho's counsel"),
