@@ -1088,3 +1088,44 @@ is never read for a `)` side. Tests: `test-textdoc.mjs` ("caption parens"),
 `test-caption-parens.mjs` (numbered and plain: one column, the foot, the file
 read back unchanged).
 
+**A caption's two sides are columns under ✎ Edit** (`textdoc.captionEdit`;
+text-reader.js `captionKey`, `captionReflowSoon`, `captionSides`,
+`captionCaretIn`, `placeCaptionCaret`; owner's request, 2026-10-23: "When it
+recognizes a caption box, it should treat that like a column, and prevent
+moving of the case no or causes of action from moving the party captions and
+visa vera"). A caption row is one line of the file, so Enter among the parties
+(`enterAtCaret`) carried the case number down with them, and a party typed
+longer pushed its `)` off the side's column (three characters and
+`captionParens` no longer read the row as the side's). Now the caption's rows
+are two columns of slots, as a column box's are (`reflowBox`, which this
+mirrors): the parties' (every row but the foot) and the right side's (every
+row, the foot's included). Enter breaks a cell into the next slot of its
+column, which moves down as far as its first empty slot; Backspace at a
+cell's head takes one indent space off (past the margin on the left, past
+`CAPTION_RIGHT_LEAD`'s two on the right, as `unindentAtCaret` does), else
+joins the cell to the slot above and brings the column below up as far as its
+first empty slot, and does nothing on the column's first slot; Delete at a
+cell's end brings the next slot up; typing sets the row's `)` back on the
+side's column (120 ms after the keystroke) and wraps what outgrows the cell
+word by word down the column — in front of the next slot's text where that
+opens in lower case, else the column moving down. The right side's width is
+the page's widest line outside the caption, never under `CAPTION_RIGHT_MIN`
+(30). A column needing a slot more gets a row above the foot: on pleading paper
+the empty numbered line under the caption, the foot moved down onto it, else
+a line between numbers (four spaces where a number stands). Rows whose cells
+did not change are left as the file has them, so a slipped `)` elsewhere in
+the caption stays where it was. On any page, not only ✓ Use my text: the side
+is read off the drawn bars (`captionSides`: each `.rb.paren`'s offset in the
+page's file text, the side's column from the row's `data-rk`), so typing
+that has already moved a `)` is still read against the column it belongs in.
+A party's empty cell on pleading paper has no text node (its spaces are the
+gutter's), so the caret is put in the `.rc` itself (`placeCaptionCaret`) and
+read back at the `)` (`captionCaretIn`); what is typed there opens the cell
+(`typedEmpty`, noted at `beforeinput`), not the far end of the spaces. Each
+key edit is one undo step (`snapshot`), typing is undone with its keystrokes,
+and every edit is a rebuild of the page from its text (`rebuildFromLines`).
+Not covered: a paste of several lines into a caption cell still goes down the
+page as lines (`insertLinesAtCaret`). Tests: `test-textdoc.mjs` ("caption
+edit"), `test-caption-parens.mjs` (Enter, Backspace and typing in each
+column, numbered and plain).
+

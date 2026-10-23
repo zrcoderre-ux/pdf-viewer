@@ -29,6 +29,7 @@ import {
   COMMENTS_HEAD, parseComments, commentLine, commentsBlock, findPassage,
   launcherFolderToken, rerunUrl, runRequestText, RUN_REQUEST_FILE, LAUNCHER_STEMS,
   captionParens,
+  captionEdit,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans, translate, translateRuns } from "./viewer/pseudo-key.js";
 
@@ -929,6 +930,61 @@ check("quarantine", isQuarantinedName("Brief.txt.LEAK"), true);
   check("…a parenthetical is not a side", captionParens(["(SBN 1)", "Dept. 15 (Hon. X)", "x (y) z"]), [null, null, null]);
   check("…two lines are not a caption", captionParens(["a   )  b", "c   )  d", "e"]), [null, null, null]);
   check("…a line without one ends the side", captionParens(["a   )", "b   )", "c", "d   )", "e   )", "f   )"]).map((x) => x && x.at), [null, null, null, 4, 4, 4]);
+}
+// A caption's two columns edited apart (captionEdit): an edit in one never moves the other.
+{
+  const cap = [
+    "PARTY ONE, an individual,     )  Case No. 1",
+    "          Plaintiff,          )  COMPLAINT FOR:",
+    "     vs.                      )  1. Fraud",
+    "PARTY TWO,                    )",
+    "          Defendant.          )",
+    "______________________________)",
+    "The body of the complaint runs this wide across the page, and further.",
+  ];
+  const sides = captionParens(cap);
+  const left = (r) => r.lines.slice(0, -1).filter((l) => l.includes(")") && !/^_+\)/.test(l)).map((l) => l.slice(0, l.lastIndexOf(")")).trim());
+  const right = (r) => r.lines.slice(0, -1).filter((l) => l.includes(")")).map((l) => l.slice(l.lastIndexOf(")") + 1).trim());
+  const at = (r) => [...new Set(r.lines.filter((l) => / \)|_\)/.test(l)).map((l) => l.lastIndexOf(")")))];
+  const same = { lines: cap };
+  let r = captionEdit(cap, sides, 2, { line: 2, col: cap[2].indexOf("1.") }, { op: "enter" });
+  check("caption edit: Enter in the title moves that column alone down, into its first empty row", [right(r), left(r), at(r)],
+    [["Case No. 1", "COMPLAINT FOR:", "", "1. Fraud", "", ""], left(same), [30]]);
+  check("…the caret at the head of what went down", r.caret, { line: 3, col: 33, cell: 1 });
+  r = captionEdit(cap, sides, 0, { line: 0, col: cap[0].indexOf("an ind") }, { op: "enter" });
+  check("…Enter among the parties: the parties' column moves down as far as its first empty row", [left(r), right(r)],
+    [["PARTY ONE,", "an individual,", "Plaintiff,", "vs.", "PARTY TWO,", "Defendant."], right(same).concat("")]);
+  check("…a row added above the foot when the column has none empty", r.lines.length, cap.length + 1);
+  r = captionEdit(cap, sides, 1, { line: 1, col: cap[1].indexOf("Plaintiff") }, { op: "backspace" });
+  check("…Backspace at an indented party: one space of the indent off, the row where it was", r.lines[1], "         Plaintiff,           )  COMPLAINT FOR:");
+  r = captionEdit(cap, sides, 3, { line: 3, col: 0 }, { op: "backspace" });
+  check("…at an unindented party's head: joined to the row above in its column, the column below up a row", [left(r), right(r)],
+    [["PARTY ONE, an individual,", "Plaintiff,", "vs. PARTY TWO,", "Defendant.", ""], right(same)]);
+  r = captionEdit(cap, sides, 1, { line: 1, col: 31 }, { op: "backspace" });
+  check("…Backspace just past the side, before a title's spaces: the title joined up, the `)` kept", [right(r), r.lines[1]],
+    [["Case No. 1 COMPLAINT FOR:", "1. Fraud", "", "", "", ""], "          Plaintiff,          )  1. Fraud"]);
+  check("…in the middle of a cell: the browser's own", captionEdit(cap, sides, 0, { line: 0, col: 3 }, { op: "backspace" }), null);
+  check("…at the head of the column's first row: nothing", captionEdit(cap, sides, 0, { line: 0, col: cap[0].indexOf("Case") }, { op: "backspace" }).lines, cap);
+  r = captionEdit(cap, sides, 1, { line: 1, col: cap[1].length }, { op: "delete" });
+  check("…Delete at a title's end: the column's next row joined up", right(r), ["Case No. 1", "COMPLAINT FOR: 1. Fraud", "", "", "", ""]);
+  check("…Enter on the foot's underscores: nothing", captionEdit(cap, sides, 5, { line: 5, col: 4 }, { op: "enter" }).lines, cap);
+  const typed = cap.slice();
+  typed[3] = "PARTY TWO, a California corporation    )";
+  const s2 = sides.slice();
+  s2[3] = { ...s2[3], at: typed[3].indexOf(")") };
+  r = captionEdit(typed, s2, 3, { line: 3, col: 35 }, {});
+  check("…typed past the side: the last word wraps down the parties, the side back on its column", [left(r), at(r), right(r)],
+    [["PARTY ONE, an individual,", "Plaintiff,", "vs.", "PARTY TWO, a California", "corporation", "Defendant."], [30], right(same).concat("")]);
+  check("…the caret after what was typed, on the row it went to", r.caret, { line: 4, col: 11, cell: 0 });
+  const num = [" 4  A,         )  Case No. 1", " 5             )", " 6  B,         )  Title", " 7  ___________)", " 8", " 9  Body text."];
+  r = captionEdit(num, captionParens(num), 2, { line: 2, col: 4 }, { op: "enter", numbered: true });
+  check("…on pleading paper a row needed is the empty numbered line under the caption, the foot moved down onto it",
+    r.lines, [" 4  A,         )  Case No. 1", " 5             )", " 6             )  Title", " 7  B,         )", " 8  ___________)", " 9  Body text."]);
+  const nt = num.slice();
+  nt[1] = " 5             X)";
+  const s3 = captionParens(num);
+  s3[1] = { ...s3[1], at: 16 };
+  check("…typed into a party row that held nothing: what is typed opens the cell", captionEdit(nt, s3, 1, { line: 1, col: 16 }, { numbered: true, typedEmpty: true }).lines[1], " 5  X          )");
 }
 // The Re-run button: the folder token PDF-Linker's launcher records
 // (`_launcher_folder_line`), the link it answers, and the request file.
