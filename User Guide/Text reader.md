@@ -2317,6 +2317,28 @@ app, which routes it to the reader tab.
   PDF-Linker writes again from the exports: there its documents' comments
   are shown, and made on each document's own export.
 
+- **Mark words the PDF strikes through.** A strike drawn through printed
+  words is lost when a page is read as text, an OCR's reading above all, and
+  the words then read as if they still counted. Select the struck words and
+  press **S̶ Strike** (in the Tools panel or the box beside the selection),
+  **Ctrl+Shift+X**, or **K** while the document is protected. The words show
+  struck through here, and **💾 Save** writes them into the text file as
+  `~~like this~~`, Markdown's strikethrough, which any reader of the file,
+  Claude included, takes as struck. Press it again on struck words to take
+  the strike off; Ctrl+Z takes back either. A selection over two lines strikes
+  each line's words, and one across a caption's two columns strikes each
+  column's. A selection that reaches into a name takes the whole name.
+  **A strike outlives the next run.** PDF-Linker's next run puts a strikeout
+  on those words in the PDF (as it keeps your comments there), and every run
+  after writes them back as struck. It does the same, on its own, for words
+  the PDF already strikes through: a strikeout made in the PDF viewer (K), or
+  a line drawn through printed type in a PDF made from Word or a web page. It
+  marks a drawn line only when it is sure: never on a scanned page (strike
+  those here), and never an underline, a table's border or a rule that runs
+  past the words. A strike you take off here comes off the PDF, and one the
+  PDF draws is no longer written struck. Not on `Combined Text.txt`, which
+  PDF-Linker writes again from the exports.
+
 - **Open the PDF in a tab of its own.** **↗ Open PDF in new tab** (the PDF
   group of the Tools panel) opens the PDF of the page you are reading in the
   PDF viewer, alone, without its text export, at that page: the filing

@@ -2335,6 +2335,71 @@ wrote shown and written back byte for byte by a save of other edits; refused
 on Combined Text.txt. `test-textdoc.mjs` pins the block's parse, write and
 `findPassage`.
 
+**S̶ Strike: words struck through** (`strikeSelection`, `applyStrikeOp`,
+`dressStrikes`, `hideStrikeMark`, `atomStretches`; textdoc.js `STRIKE_MARK`,
+`strikeRuns`, `strikeEdit`, `unstruck`). The owner asked for a way to mark
+lines the PDF strikes through, since a strike "doesn't tend to OCR": in the
+reader by hand ("where I highlight the text and press a button indicating where
+the strike through was"), and from PDF-Linker only where it is very sure. The
+owner chose the form, Markdown's `~~struck~~`, over a bracketed note, and the
+PDF as the place it is kept, as a StrikeOut annotation, over a hidden
+annotation or the text file alone (2026-10-23). Select the words and press
+**S̶ Strike** (the Tools panel or the box beside a selection), Ctrl+Shift+X, or
+K while the document is protected; pressed on words struck already, it takes
+the strike off them.
+**The file's form.** A run is on one line and never crosses a gap (two spaces
+or more, a tab, a box-drawing rule); a `~~` opens a run where a character other
+than a space or a `~` follows it and closes it where one precedes it; one that
+pairs with nothing on its line is text (`strikeRuns`). PDF-Linker reads and
+writes the same rule (`_strike_runs`, pinned to this one under node in its
+`test_struck_text.py`). `strikeEdit` is the whole decision, in the page's text
+as `flatten` reads it (the margin numbers blanked): each character of each line
+the selection reaches is struck or not, the selection's are set (all struck
+already, it takes them off; else it strikes them all), and the marks are
+written again round each run of struck words, a run carried over one space and
+stopped by anything else, so a strike beside a run joins it and one taken off
+its middle leaves a run either side. A selection reaching into a name or a
+spot keep takes it whole (`atomStretches`): a mark inside a name would part it
+from its fake. It returns the marks to put in and take out, last first.
+**The page's form.** The marks go in and out of the page's own text nodes,
+where `strikeEdit` puts them (`applyStrikeOp`: an opening mark in the text
+before the run's first character, a closing one after its last, beside a name
+rather than in it), as a replace does: the names on the page, its spot keeps,
+what was typed on it and its Esc'd names stand as they were, and the step is
+one `snapshot`, one Ctrl+Z. Nothing reads the marks differently from any
+other text, so the save is the file byte for byte. `dressStrikes` shows them:
+each mark in a hidden span (`.sk`, `display: none`) and the run, marks and
+all, in a wrapper drawing the line (`.st`, `line-through`), one wrapper a
+stretch of the run's sibling nodes, so a run a face's wrapper parts still
+reads struck. A wrapper and not a CSS highlight: the side-by-side layout wraps
+and unwraps a line's text nodes for its faces and cells, which a live range
+over them does not survive. columns.js reads a wrapper as one piece, and never
+needs to cut inside one, since a run never crosses a gap. It runs in
+`dressBody` and again after typing (`recolumnLater`), so a mark typed by hand,
+or a partner typed away, is dressed or let go of once the typing stops.
+**What a strike is not.** It is no word typed: the save hands a page over as ✎
+Use my text only where its WORDS changed (`autoUseMyText` compares the two
+texts through `TD.unstruck`), and PDF-Linker takes the marks out of a
+transcription before it draws it into the PDF. It is made with the document
+protected, as a comment is, being a command and never a stray keystroke. Not
+on `Combined Text.txt`, which PDF-Linker writes again from the exports. A name
+a struck passage wraps reads as the real name: PDF-Linker strikes a line at a
+time, so the fake stands as "Ingrid~~" at one line's end and "~~Strangeways"
+at the next line's head, and `~~` is one of pseudo-key.js's Markdown marks
+(`MARK`, `MARK_STRIP_RE`, `MARK_CUT_RE`), which a name matches through and is
+cut at, the marks staying in the text between its pieces. Its
+residual: the four hidden characters stand in a struck line's text as the
+side-by-side layout measures it, which shifts nothing measured on the
+caption fixture (`test-caption-faces.mjs` with three runs struck: the sizes,
+the faces and the spacing as they were). `test-strike.mjs` (Chromium) pins
+it: struck on a line, into a name (the name whole, the file its fake), over
+two lines and across two columns, saved; a name a struck passage wraps shown
+real and struck; taken off a word in a run's middle
+and put back by Ctrl+Z; refused on spaces; a run PDF-Linker wrote shown
+struck, its marks hidden, and written back byte for byte by a save of other
+typing; K taking a strike off; none on Combined Text.txt. `test-textdoc.mjs`
+pins `strikeRuns`, `strikeEdit` and `unstruck`.
+
 **A half line under every margin number** (`halfAfter`, `pullUp`,
 `moveIntoHalfAbove`, in `enterAtCaret`, `joinLineUp`, `backspaceAtCaret`,
 `deleteAtCaret`). The numbered page's slots were its lines, so Enter stepped by

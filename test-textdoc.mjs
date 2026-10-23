@@ -30,6 +30,7 @@ import {
   launcherFolderToken, rerunUrl, runRequestText, RUN_REQUEST_FILE, LAUNCHER_STEMS,
   captionParens,
   captionEdit,
+  STRIKE_MARK, strikeRuns, strikeEdit, unstruck,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans, translate, translateRuns } from "./viewer/pseudo-key.js";
 
@@ -2214,6 +2215,27 @@ console.log("column boxes (makeColumnBox, reflowBox, boxBackspace)");
     [true, ["QUILLON", "BRAKESMAN,", "Plaintiff,"], ["COMPLAINT FOR:", "1. Breach of contract", "2. Fraud"]]);
   check("the right edge drawn in: the box narrower", resizeBox(wide.lines, 1, 2, 60, { numbered: true })[0].length, 61);
   check("…a divider not past its neighbour", resizeBox(wide.lines, 1, 1, 2, { numbered: true })[0].indexOf("┬"), 4 + 1 + 6);
+}
+console.log("words struck through (strikeRuns, strikeEdit, unstruck)");
+{
+  check("a run read off its line", strikeRuns("pay ~~the sum~~ of $500"), [{ open: 4, close: 13 }]);
+  check("a ~~ that pairs with nothing, or opens on a space, is text", strikeRuns("a ~~ b ~~c and ~~d"), []);
+  check("a pair across a column gap is text: no run crosses one", strikeRuns("~~LEFT      RIGHT~~"), []);
+  check("…nor across a box's rule", strikeRuns("~~a │ b~~"), []);
+  check("the words as printed", unstruck("x ~~a b~~ y\n~~c~~ d ~~ e"), "x a b y\nc d ~~ e");
+  check("the mark", STRIKE_MARK, "~~");
+  const ed = (t, a, b, o) => { const r = strikeEdit(t, a, b, o); return r && [r.text, r.strike]; };
+  check("words struck", ed("pay the sum of $500", 4, 11), ["pay ~~the sum~~ of $500", true]);
+  check("pressed on struck words: the strike off", ed("pay ~~the sum~~ of $500", 6, 13), ["pay the sum of $500", false]);
+  check("off a word in the middle: the run either side stays", ed("pay ~~the sum of~~ $500", 10, 13), ["pay ~~the~~ sum ~~of~~ $500", false]);
+  check("struck beside a run: the two join", ed("~~abc~~ def", 8, 11), ["~~abc def~~", true]);
+  check("part struck, part not: all of it struck, one run", ed("a ~~b~~ c", 0, 9), ["~~a b c~~", true]);
+  check("across a column gap: a run each side", ed("left col      right col", 0, 23), ["~~left col~~      ~~right col~~", true]);
+  check("over two lines: each line's piece", ed("line one\nline two", 5, 13), ["line ~~one~~\n~~line~~ two", true]);
+  check("a stretch reaching into a name takes it whole", ed("Jane Doe paid", 2, 4, { atoms: [[0, 8]] }), ["~~Jane Doe~~ paid", true]);
+  check("spaces alone: nothing to strike", strikeEdit("a    b", 2, 4), null);
+  const r = strikeEdit("pay ~~the sum~~ of $500 now", 16, 27);
+  check("the ops last first, each a mark in or out", r.ops.map((o) => [o.at, o.del ? "del" : o.open ? "open" : "close"]), [[27, "close"], [13, "del"]]);
 }
 console.log("margin numbers that run complete (pageNumbersComplete)");
 {

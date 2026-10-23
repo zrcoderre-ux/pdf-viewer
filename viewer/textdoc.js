@@ -280,6 +280,148 @@ export function findPassage(text, on) {
   return [at[i], at[i + want.length - 1] + 1];
 }
 
+// ---- words struck through ---------------------------------------------------------
+//
+// A passage the PDF shows STRUCK THROUGH is written ~~like this~~ in the export,
+// Markdown's strikethrough (owner, 2026-10-23): a strike drawn through printed
+// words is lost to every reading of the page, an OCR's above all, and the words
+// then read as live text. The reader marks it by hand (select, S̶ Strike or K)
+// and shows it struck with the tildes hidden; PDF-Linker's next run puts a
+// StrikeOut annotation on the passage in the PDF, so it outlives the run that
+// rebuilds the export, and every run writes the text under one back as struck.
+//
+// A run is on ONE line and never crosses a column gap (two spaces or more, a
+// tab) or a box-drawing rule, so a selection across a caption's two columns
+// strikes each column's piece, and no cell the columns are cut into
+// (columns.js) holds half a pair. A ~~ opens a run where a character other than
+// a space or a ~ follows it, and closes it where one precedes it; a ~~ that
+// pairs with nothing on its line is text.
+export const STRIKE_MARK = "~~";
+const STRIKE_GAP_RE = /[\t─-╿]/;
+
+/** The struck runs of one line, in order: [{ open, close }], where its opening ~~ and its closing ~~ stand (each two characters). */
+export function strikeRuns(line) {
+  const s = String(line == null ? "" : line);
+  const out = [];
+  let open = -1;
+  for (let i = s.indexOf(STRIKE_MARK); i >= 0; i = s.indexOf(STRIKE_MARK, i)) {
+    if (open < 0) {
+      const next = s[i + 2];
+      if (next != null && next !== " " && next !== "~" && !STRIKE_GAP_RE.test(next)) { open = i; i += 2; continue; }
+      i += 1;
+      continue;
+    }
+    const prev = s[i - 1];
+    if (i > open + 2 && prev !== " " && prev !== "~" && !STRIKE_GAP_RE.test(prev)) { out.push({ open, close: i }); open = -1; i += 2; continue; }
+    // A gap inside a run that has not closed: no run crosses one.
+    i += 1;
+  }
+  // …and a run is cut where a gap stands inside it: such a pair is text.
+  return out.filter((r) => { const inner = s.slice(r.open + 2, r.close); return !inner.includes("  ") && !STRIKE_GAP_RE.test(inner); });
+}
+
+/** `text` with every struck run's ~~ marks taken out: the words as the page prints them. */
+export function unstruck(text) {
+  return String(text == null ? "" : text).split("\n").map((line) => {
+    let out = "", at = 0;
+    for (const r of strikeRuns(line)) { out += line.slice(at, r.open) + line.slice(r.open + 2, r.close); at = r.close + 2; }
+    return out + line.slice(at);
+  }).join("\n");
+}
+
+/**
+ * The edit that strikes through the stretch [a, b) of `text` — a page's text,
+ * its lines split on "\n" — or takes the strike off it where every word of it
+ * is struck already: { strike, ops, text } — `strike` which of the two, `ops`
+ * the ~~ marks to put in ({ at, ins, open }: `open` a mark before the first
+ * character of its run, else one after the last) and take out ({ at, del }),
+ * offsets in `text`, LAST FIRST (an insertion and a deletion at one place, the
+ * deletion first) so each holds while those after it are made, and `text` the
+ * result.
+ * Null where the stretch holds nothing to strike: spaces, a rule, a gap.
+ *
+ * Per line, each character is struck or not; the stretch's are set, and the
+ * marks are written again round each run of struck characters, a run carried
+ * over one space between two struck words and stopped by anything else — so
+ * a run struck beside another joins it, and one taken off in its middle
+ * leaves two. `atoms` ([start, end) stretches of `text`: a pseudonym, a spot
+ * keep) are taken whole where the stretch reaches into one, as a selection
+ * does: a mark inside a name would part it from its fake.
+ */
+export function strikeEdit(text, a, b, { atoms = [] } = {}) {
+  const src = String(text == null ? "" : text);
+  let lo = Math.max(0, Math.min(a, b)), hi = Math.min(src.length, Math.max(a, b));
+  for (const [s, e] of atoms) {
+    if (lo > s && lo < e) lo = s;
+    if (hi > s && hi < e) hi = e;
+  }
+  if (hi <= lo) return null;
+  const lines = [];
+  for (let at = 0; at <= src.length;) {
+    const nl = src.indexOf("\n", at);
+    const end = nl < 0 ? src.length : nl;
+    if (end > lo && at < hi) lines.push({ at, s: src.slice(at, end) });
+    if (nl < 0 || at >= hi) break;
+    at = nl + 1;
+  }
+  // Every line the stretch reaches, read into its characters.
+  const read = lines.map(({ at, s }) => {
+    const runs = strikeRuns(s);
+    const marks = new Set();
+    for (const r of runs) for (const p of [r.open, r.open + 1, r.close, r.close + 1]) marks.add(p);
+    const chars = []; // { p (offset in the line), c, struck }
+    let k = 0;
+    for (let p = 0; p < s.length; p++) {
+      if (marks.has(p)) continue;
+      while (k < runs.length && runs[k].close + 2 <= p) k++;
+      const struck = k < runs.length && p >= runs[k].open + 2 && p < runs[k].close;
+      chars.push({ p, c: s[p], struck });
+    }
+    return { at, s, runs, chars };
+  });
+  const word = (c) => c !== " " && !STRIKE_GAP_RE.test(c);
+  const chosen = [];
+  for (const l of read) for (const ch of l.chars) if (word(ch.c) && l.at + ch.p >= lo && l.at + ch.p < hi) chosen.push(ch);
+  if (!chosen.length) return null;
+  const strike = !chosen.every((ch) => ch.struck);
+  for (const ch of chosen) ch.struck = strike;
+  const ops = [];
+  for (const l of read) {
+    // The marks as they stand: an open before its run's first character, a
+    // close after its last — named by the character they stand beside.
+    const before = new Map(), after = new Map(); // character index → line offset of the mark
+    for (const r of l.runs) {
+      const first = l.chars.findIndex((ch) => ch.p === r.open + 2);
+      const last = l.chars.findIndex((ch) => ch.p === r.close - 1);
+      if (first >= 0) before.set(first, r.open);
+      if (last >= 0) after.set(last, r.close);
+    }
+    // …and as they should: round each run of struck words, over single spaces.
+    const want = [];
+    for (let i = 0; i < l.chars.length;) {
+      if (!l.chars[i].struck || !word(l.chars[i].c)) { i++; continue; }
+      let j = i;
+      for (;;) {
+        if (j + 1 < l.chars.length && l.chars[j + 1].struck && word(l.chars[j + 1].c)) { j++; continue; }
+        if (j + 2 < l.chars.length && l.chars[j + 1].c === " " && l.chars[j + 2].struck && word(l.chars[j + 2].c)) { j += 2; continue; }
+        break;
+      }
+      want.push([i, j]);
+      i = j + 1;
+    }
+    const wantBefore = new Set(want.map((w) => w[0])), wantAfter = new Set(want.map((w) => w[1]));
+    for (const [i, off] of before) if (!wantBefore.has(i)) ops.push({ at: l.at + off, del: 2 });
+    for (const [i, off] of after) if (!wantAfter.has(i)) ops.push({ at: l.at + off, del: 2 });
+    for (const i of wantBefore) if (!before.has(i)) ops.push({ at: l.at + l.chars[i].p, ins: STRIKE_MARK, open: true });
+    for (const i of wantAfter) if (!after.has(i)) ops.push({ at: l.at + l.chars[i].p + 1, ins: STRIKE_MARK, open: false });
+  }
+  if (!ops.length) return null;
+  ops.sort((x, y) => y.at - x.at || (x.del ? -1 : 1) - (y.del ? -1 : 1));
+  let out = src;
+  for (const op of ops) out = op.del ? out.slice(0, op.at) + out.slice(op.at + op.del) : out.slice(0, op.at) + op.ins + out.slice(op.at);
+  return { strike, ops, text: out };
+}
+
 // ---- margin numbers the OCR missed ----------------------------------------------
 //
 // A scanned pleading reaches its export through OCR, and the OCR misses some

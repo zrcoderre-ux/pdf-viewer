@@ -161,10 +161,13 @@ console.log("markdown: a name among Markdown's marks");
   check("a tracked change inside a name", ["Ingrid{++ ++}Strangeways", "Ingrid {--Smith--}Strangeways"].map(tr),
     ["Helen{++ ++}Rasho", "Helen {--Smith--}Rasho"]);
   check("an escaped character in a value", tr("write ingrid\\_s@mail.org"), "write helen@x.com");
+  check("a name a struck line wraps, its strike marks where they stood (textdoc.js strikeRuns)",
+    tr("~~paid by Ingrid~~\n~~Strangeways on Friday~~"), "~~paid by Helen~~\n~~Rasho on Friday~~");
+  check("…and inside one line's strike", tr("~~Ingrid Strangeways paid~~"), "~~Helen Rasho paid~~");
   check("either quote mark, written the way the text writes it", ["Quinn O’Dell said", "Quinn O'Dell said"].map(tr), ["Pat O’Neil said", "Pat O'Neil said"]);
   check("an underscore joining words still makes one word; an escaped asterisk is an asterisk",
     ["Strangeways_Decl.pdf", "x_Strangeways", "\\*Strangeways\\* stays"].map(tr), ["Strangeways_Decl.pdf", "x_Strangeways", "\\*Rasho\\* stays"]);
-  const src = "The *Ingrid* Strangeways motion; **QUARRY FINCH**, an individual; Quinn O’Dell{++ ++}said.";
+  const src = "The *Ingrid* Strangeways motion; **QUARRY FINCH**, an individual; Quinn O’Dell{++ ++}said; ~~Ingrid~~\n~~Strangeways~~ paid.";
   check("the runs give the file back byte for byte",
     translateRuns(cm, src).map((r) => (r.t === "text" ? r.s : r.from)).join(""), src);
   const fw = compileForward({ warn: [{ real: "Helen Rasho", fake: "Ingrid Strangeways" }, { real: "Pat O'Neil", fake: "Quinn O'Dell" }] });

@@ -565,21 +565,23 @@ const GAP_RE = new RegExp(GAP, "g");
 // a name among marks claude.ai renders away and the reader shows as written:
 // emphasis that starts or stops inside it ("*Ingrid* Strangeways", a caption's
 // "**QUARRY FINCH**, an individual"), a tracked change ("Ingrid{++ ++}Strangeways",
-// a deleted "{--Smith--}" between its words), and the escape before a
-// character Markdown would read as markup ("ingrid\_s@mail.org"). A value
-// matches through them: MARK may stand wherever a word of the value meets a
-// blank or a mark of punctuation, and a mark of punctuation may carry its
-// escape. Every MARK alternative is a fixed opening ({, +, *, _), so the run
-// reads in one pass.
-const MARK = "(?:[*_]|\\{\\+\\+|\\+\\+\\}|\\{--[^}\\n]{0,200}?--\\})*";
+// a deleted "{--Smith--}" between its words), a strike (textdoc.js
+// strikeRuns: PDF-Linker strikes a line at a time, so a name a struck line
+// wraps is "Ingrid~~" at the end of one line and "~~Strangeways" at the head
+// of the next), and the escape before a character Markdown would read as
+// markup ("ingrid\_s@mail.org"). A value matches through them: MARK may
+// stand wherever a word of the value meets a blank or a mark of punctuation,
+// and a mark of punctuation may carry its escape. Every MARK alternative is a
+// fixed opening ({, +, *, _, ~), so the run reads in one pass.
+const MARK = "(?:[*_]|~~|\\{\\+\\+|\\+\\+\\}|\\{--[^}\\n]{0,200}?--\\})*";
 // The same marks in a MATCHED text, to be taken out of it: an escape first
 // (its character stays — an escaped "*" is an asterisk), then a tracked
-// change, emphasis, and an underscore standing at a word's edge ("ingrid_s"
-// keeps its own).
-const MARK_STRIP_RE = /\\([!-\/:-@[-`{-~])|\{--[^}\n]{0,200}?--\}|\{\+\+|\+\+\}|\*+|(?<![A-Za-z0-9\\])_+|_+(?![A-Za-z0-9])/g;
+// change, a strike, emphasis, and an underscore standing at a word's edge
+// ("ingrid_s" keeps its own).
+const MARK_STRIP_RE = /\\([!-\/:-@[-`{-~])|\{--[^}\n]{0,200}?--\}|\{\+\+|\+\+\}|~~|\*+|(?<![A-Za-z0-9\\])_+|_+(?![A-Za-z0-9])/g;
 // …and where a matched name is cut for them, so the marks stay in the text
 // between its pieces the way a line break and its gutter number do.
-const MARK_CUT_RE = /[ \t]*(?:(?<!\\)\*|(?<![A-Za-z0-9\\])_|(?<!\\)_(?![A-Za-z0-9])|\{\+\+|\+\+\}|\{--[^}\n]{0,200}?--\})+[ \t]*/g;
+const MARK_CUT_RE = /[ \t]*(?:(?<!\\)\*|(?<!\\)~~|(?<![A-Za-z0-9\\])_|(?<!\\)_(?![A-Za-z0-9])|\{\+\+|\+\+\}|\{--[^}\n]{0,200}?--\})+[ \t]*/g;
 /** A matched text without Markdown's marks in it: escapes read, emphasis and tracked changes gone. */
 export function foldMarks(s) {
   return String(s == null ? "" : s).replace(MARK_STRIP_RE, (m, esc) => (esc != null ? esc : ""));
@@ -1210,7 +1212,7 @@ function lookup(compiled, m) {
 function lineRanges(start, matched) {
   const cuts = [];
   for (const g of matched.matchAll(LINE_GAP_RE)) cuts.push([g.index, g.index + g[0].length]);
-  if (/[*_{+]/.test(matched)) for (const g of matched.matchAll(MARK_CUT_RE)) cuts.push([g.index, g.index + g[0].length]);
+  if (/[*_{+~]/.test(matched)) for (const g of matched.matchAll(MARK_CUT_RE)) cuts.push([g.index, g.index + g[0].length]);
   cuts.sort((a, b) => a[0] - b[0]);
   const out = [];
   let at = 0;

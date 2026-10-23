@@ -5244,6 +5244,7 @@ function markTrailer(body) {
 function dressBody(body) {
   dressLines(body);
   dressColumns(body);
+  dressStrikes(body); // …and each run struck through, which no column's cut parts
   markTrailer(body);
   slotLines(body);
   slotRowsSoon();
@@ -5477,7 +5478,9 @@ const recolumnLater = debounce(() => {
   for (const body of recolumnPending) {
     if (!body.isConnected) continue;
     const at = caretOffsetIn(body);
-    if (dressColumns(body) && at >= 0) { const pt = pointAtOffset(body, at); if (pt) placeCaret(pt.node, pt.offset); }
+    const moved = dressColumns(body);
+    // …and a run struck through dressed again: a mark typed, or its partner typed away.
+    if ((dressStrikes(body) || moved) && at >= 0) { const pt = pointAtOffset(body, at); if (pt) placeCaret(pt.node, pt.offset); }
   }
   recolumnPending.clear();
 }, 400);
@@ -11637,7 +11640,9 @@ function autoUseMyText(typedNow, written) {
     if (pageReadsDidNotOcr(i)) continue;
     const e = pageEntryAt(i, sources);
     if (!e || on(list, e) || on(noOcr, e) || on(ocrAgain, e) || on(fixDeclined, e) || on(pagesSetAside(), e)) continue;
-    if (TD.wordsChanged(p.typedFrom, text) < TD.AUTO_TEXT_FIXED_WORDS) continue;
+    // A strike marked (~~, strikeSelection) is no word typed: the page still
+    // reads as the PDF prints it, and a strike is the PDF's to keep.
+    if (TD.wordsChanged(TD.unstruck(p.typedFrom), TD.unstruck(text)) < TD.AUTO_TEXT_FIXED_WORDS) continue;
     if (TD.pageFurnitureLine(p.lines)) continue; // PDF-Linker would refuse it (useMyText says why)
     list = TD.setTextFixed(list, { ...e, sum: TD.pageTextSum(p.lines) }, true);
     out.push(i);
@@ -14838,9 +14843,220 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
   if (t && (t.isContentEditable || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName))) return;
   if ((e.key === "c" || e.key === "C") && currentSelection()) { e.preventDefault(); commentSelection(); }
+  if ((e.key === "k" || e.key === "K") && currentSelection()) { e.preventDefault(); strikeSelection(); }
 });
 // A box left open over a page that has scrolled away reads as the wrong page's.
 stageEl.addEventListener("scroll", () => { if (!commentPop.hidden && commentInput.hidden && performance.now() - commentOpened > 800) hideCommentPop(); }, { passive: true });
+
+// ── words struck through ────────────────────────────────────────────────────────
+//
+// A strike the PDF draws through printed words is lost to the export — to an
+// OCR's reading above all — and the words then read as live text. Select them
+// and press S̶ Strike (Ctrl+Shift+X): the file writes them ~~like this~~
+// (TD.strikeEdit), and the page shows them struck (dressStrikes): each run in
+// a wrapper of its own (.st) that draws the line, its marks inside it hidden
+// (.sk). A wrapper and not a highlight, since the side-by-side layout wraps
+// and unwraps a line's text nodes (its faces, its cells) and a range over them
+// does not survive that; the wrapper is one piece to columns.js, which never
+// cuts inside a run since a run never crosses a gap, and a face's wrapper
+// goes inside it. Pressed on words struck already, it takes the strike off.
+// The marks go in and out where the page's own text nodes are, as a replace
+// does, so the names on the page, its spot keeps and what was typed on it
+// stand as they were, and one Ctrl+Z takes the strike back. PDF-Linker's next run puts a
+// StrikeOut annotation on the words in the PDF, so the strike outlives the
+// run that rebuilds the export, and every run writes the words under one
+// back as struck — those struck in the PDF viewer (K) as well.
+
+/** Where place `off` in `root`'s text stands: the text node that place begins (or, `end`, ends) a character of, and the offset in it; null past the text. */
+function textPointIn(root, off, end) {
+  let at = 0, last = null;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    const len = n.data.length;
+    if (end ? off > at && off <= at + len : off >= at && off < at + len) return { node: n, offset: off - at };
+    at += len;
+    last = n;
+  }
+  return last && off === at ? { node: last, offset: last.data.length } : null;
+}
+
+/** The text node standing at place `p` of `root`'s text, parted there so a node begins at it; null inside a name or past the text. */
+function partAt(root, p) {
+  const at = textPointIn(root, p, false);
+  if (!at) return null;
+  if (at.node.parentElement && at.node.parentElement.closest(".pn, [data-here]")) return null;
+  return at.offset ? at.node.splitText(at.offset) : at.node;
+}
+
+/** Where the strike is drawn on a line now: the places of its hidden marks and of the text its wrappers hold, as two lists. */
+function strikeDressing(lt) {
+  const sk = [], st = [];
+  let at = 0;
+  const w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    const inSk = !!n.parentElement.closest(".sk"), inSt = !!n.parentElement.closest(".st");
+    for (let k = 0; k < n.data.length; k++) {
+      if (inSk) sk.push(at + k);
+      if (inSt) st.push(at + k);
+    }
+    at += n.data.length;
+  }
+  return { sk: sk.join(","), st: st.join(",") };
+}
+
+/**
+ * Each struck run on the page's lines dressed: its ~~ marks in hidden spans
+ * (.sk), and the run, marks and all, in wrappers that draw the line through it
+ * (.st) — one wrapper a stretch of the run whose nodes stand side by side, so a
+ * run whose nodes a face's wrapper parts still reads struck. A mark that no
+ * longer pairs (its partner typed away) is let go of and reads as the text it
+ * now is. A line dressed as its text says is left as it is. Returns whether
+ * anything moved, which a caret is put back after.
+ */
+function dressStrikes(body) {
+  let changed = false;
+  for (const lt of body.querySelectorAll(":scope > .line > .lt")) {
+    const had = lt.querySelectorAll(".sk, .st");
+    const shown = lt.textContent;
+    if (!had.length && !shown.includes(TD.STRIKE_MARK)) continue;
+    const runs = TD.strikeRuns(shown);
+    const want = { sk: [], st: [] };
+    for (const r of runs) {
+      want.sk.push(r.open, r.open + 1, r.close, r.close + 1);
+      for (let p = r.open; p < r.close + 2; p++) want.st.push(p);
+    }
+    const now = strikeDressing(lt);
+    if (now.sk === want.sk.join(",") && now.st === want.st.join(",")) continue;
+    changed = true;
+    for (const s of lt.querySelectorAll(".st, .sk")) s.replaceWith(...s.childNodes);
+    for (let i = runs.length - 1; i >= 0; i--) {
+      // The closing mark first, so the opening one's place still stands.
+      const close = hideStrikeMark(lt, runs[i].close), open = hideStrikeMark(lt, runs[i].open);
+      if (!open.length || !close.length) continue;
+      // The run's nodes, from its opening mark to its closing one, wrapped a
+      // stretch of siblings at a time.
+      const range = document.createRange();
+      range.setStartBefore(open[0]);
+      range.setEndAfter(close[close.length - 1]);
+      const units = [];
+      const walker = document.createTreeWalker(range.commonAncestorContainer, NodeFilter.SHOW_ALL);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (!range.intersectsNode(n)) continue;
+        if (n.nodeType === 1 && n.matches(".sk, .pn, [data-here], .cb")) units.push(n);
+        else if (n.nodeType === 3 && n.data.length && !n.parentElement.closest(".sk, .pn, [data-here], .cb")) units.push(n);
+      }
+      let group = null;
+      for (const n of units) {
+        if (group && group.nextSibling === n) { group.appendChild(n); continue; }
+        group = document.createElement("span");
+        group.className = "st";
+        n.before(group);
+        group.appendChild(n);
+      }
+    }
+  }
+  return changed;
+}
+/** The ~~ at place `p` of `lt`'s text put in a hidden span (.sk) — two, one a character, where the line's text nodes part it — the spans returned; none inside a name. */
+function hideStrikeMark(lt, p) {
+  partAt(lt, p + 2);
+  const nodes = [];
+  for (let k = 0; k < 2;) {
+    const n = partAt(lt, p + k);
+    if (!n || !n.data.length) return [];
+    if (n.data.length > 2 - k) n.splitText(2 - k);
+    nodes.push(n);
+    k += n.data.length;
+  }
+  return nodes.map((n) => {
+    const sk = document.createElement("span");
+    sk.className = "sk";
+    n.before(sk);
+    sk.appendChild(n);
+    return sk;
+  });
+}
+
+/** The stretches of a page's text (flatten's) no mark may fall inside: each pseudonym and spot keep, whole. */
+function atomStretches(segs) {
+  const out = new Map();
+  for (const g of segs) {
+    const atom = atomOf(g.node);
+    if (!atom) continue;
+    const r = out.get(atom);
+    if (r) { r[0] = Math.min(r[0], g.start); r[1] = Math.max(r[1], g.end); }
+    else out.set(atom, [g.start, g.end]);
+  }
+  return [...out.values()];
+}
+
+/** One mark of TD.strikeEdit's put in or taken out at its place in the page's text (flatten's), in the text node standing there — never inside a name. */
+function applyStrikeOp(body, op) {
+  const { segs } = flatten(body, { blankGutters: true });
+  if (op.del) {
+    for (const g of segs) {
+      if (g.end <= op.at || g.start >= op.at + op.del) continue;
+      const lo = Math.max(op.at, g.start) - g.start, hi = Math.min(op.at + op.del, g.end) - g.start;
+      g.node.deleteData(lo, hi - lo);
+      // The mark's own span, empty now, goes with it.
+      const sk = g.node.parentElement && g.node.parentElement.closest(".sk");
+      if (sk && !sk.textContent) sk.remove();
+    }
+    return;
+  }
+  // An insertion goes into the text beside the character its run begins or
+  // ends on: an opening mark before the first, a closing one after the last
+  // (TD.strikeEdit's `open`), so it is in that character's cell and face.
+  const g = op.open
+    ? segs.find((x) => x.start <= op.at && op.at < x.end)
+    : segs.find((x) => x.start < op.at && op.at <= x.end);
+  if (!g) return;
+  const t = document.createTextNode(op.ins);
+  const atom = atomOf(g.node);
+  if (atom) {
+    if (op.open) atom.before(t); else atom.after(t);
+    return;
+  }
+  const at = op.at - g.start;
+  if (at <= 0) g.node.before(t);
+  else if (at >= g.node.data.length) g.node.after(t);
+  else g.node.splitText(at).before(t);
+}
+
+/** S̶ Strike: the words selected struck through, or the strike taken off them where every one is struck already. */
+function strikeSelection() {
+  if (shotPut) return; // the page holds the picture's words (fakesForShot)
+  const s = currentSelection();
+  if (!s) { toast("Select the words the PDF strikes through, then press S̶ Strike (Ctrl+Shift+X)."); return; }
+  if (refuseWhileBusy()) return;
+  if (isCombinedHead()) { toast(`No strikes in ${TD.COMBINED_FILE}: PDF-Linker writes it again from the documents' own exports. Strike the words in the document's own export.`, { error: true, ms: 8000 }); return; }
+  const body = s.body;
+  const { text, segs } = flatten(body, { blankGutters: true });
+  const a = offsetOfPoint(body, s.range.startContainer, s.range.startOffset);
+  const b = offsetOfPoint(body, s.range.endContainer, s.range.endOffset);
+  const edit = a >= 0 && b >= 0 ? TD.strikeEdit(text, a, b, { atoms: atomStretches(segs) }) : null;
+  if (!edit) { toast("Nothing there to strike through: select the words themselves.", { error: true }); return; }
+  flagPop.hidden = true;
+  snapshot(body, true);
+  for (const op of edit.ops) applyStrikeOp(body, op);
+  dressColumns(body);
+  dressStrikes(body);
+  if (body.querySelector("[data-here]")) syncSpots(body);
+  setDirty(true, pageIndexOf(body));
+  lastSnapPage = -1; // what is typed next is its own step
+  document.getSelection().removeAllRanges(); // …and the line through the words is seen, not the selection over it
+  afterTextChange();
+  toast(edit.strike
+    ? "Struck through — 💾 Save writes it into the file as ~~…~~, and PDF-Linker's next run puts a strikeout on those words in the PDF. Ctrl+Z takes it back."
+    : "Strike taken off — 💾 Save writes the words without it, and PDF-Linker's next run takes the strikeout it put there off the PDF.");
+}
+$("strike-btn").addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
+$("strike-btn").addEventListener("click", strikeSelection);
+$("flag-pop-strike").addEventListener("mousedown", (e) => e.preventDefault());
+$("flag-pop-strike").addEventListener("click", strikeSelection);
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === "x" && currentSelection()) { e.preventDefault(); strikeSelection(); }
+});
 
 // ── flagging by selecting ───────────────────────────────────────────────────────
 //
