@@ -254,10 +254,16 @@
       });
     } catch { return null; }
   }
+  // Waited for: a write still pending when PDF+ quits is lost, and the next
+  // start's dialog opened where the one before the last had finished.
   async function rememberPicked(id, handle) {
     try {
       const db = await pickDb();
-      db.transaction("last", "readwrite").objectStore("last").put(handle, id || "");
+      await new Promise((resolve) => {
+        const tx = db.transaction("last", "readwrite");
+        tx.objectStore("last").put(handle, id || "");
+        tx.oncomplete = tx.onerror = tx.onabort = () => resolve();
+      });
     } catch { /* not remembered: the next dialog starts in Documents */ }
   }
   const pickers = { open: window.showOpenFilePicker, save: window.showSaveFilePicker, directory: window.showDirectoryPicker };
@@ -281,7 +287,7 @@
         result = await pickers[kind].call(window, opts);
       }
       const first = Array.isArray(result) ? result[0] : result;
-      if (first && typeof first === "object" && first.kind) rememberPicked(opts.id, first);
+      if (first && typeof first === "object" && first.kind) await rememberPicked(opts.id, first);
       return result;
     };
   }
