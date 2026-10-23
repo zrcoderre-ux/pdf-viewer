@@ -1900,6 +1900,20 @@ handler leaves a contenteditable outside `.page-body` to the browser, so
 Ctrl+Z in the sheet is the browser's per-keystroke undo. `test-raw-edit.mjs`
 (Chromium) pins it.
 
+**…and a line break typed into the sheet is a "\n" in it (`unbreakRaw`, in
+the sheet's `input` handler, before `commitRawSoon`).** Chromium (153,
+measured; a `<div>` with `pre-wrap` still takes a "\n") types Enter into a
+plaintext-only `<pre>` as a `<br>`, and `execCommand("insertText", "\n")`
+does the same, so a keydown handler would not help; any `<br>` is taken. A
+`<br>` is no character of `textContent`, which `rawSheetBody`, the Tab
+handling (`lineBeforeCaret`) and the copy all read: a line typed under
+another was saved run onto it ("answered.Tobias Wrenfield agreed."), and the
+page built from the sheet lost the break the same way. Each `<br>` is made the
+"\n" it stands for as it is typed, the caret put back at its place in the text
+(each `<br>` before it counted as one character). One ending the sheet is left:
+it is what shows an empty last line, which a "\n" there does not, and it is
+no text either way. `test-raw-edit.mjs` case 5.
+
 **⊘ Did not OCR** (`.nocr-page` on every label with a page header, beside
 the ⇄ PDF swap) replaces the page's lines with `textdoc.didNotOcrLines`:
 `[DID NOT OCR]` alone, except that PDF-Linker's "Authorities cited" trailer

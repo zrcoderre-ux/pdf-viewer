@@ -16,6 +16,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -181,7 +182,7 @@ const fixClick = (page, i) => page.evaluate((i) => document.querySelectorAll("#p
 
 async function run() {
   srv = await startServer();
-  browser = await chromium.launch({ executablePath: CHROME });
+  browser = await launchBrowser(chromium, CHROME);
   try {
     const r = await newReader();
     const p = r.page;

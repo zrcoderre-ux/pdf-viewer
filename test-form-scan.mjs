@@ -24,6 +24,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 import * as pdfjs from "./pdfjs/build/pdf.mjs";
 import { pdfRows } from "./viewer/pdfsync.js";
 
@@ -186,7 +187,7 @@ async function laidOut(browser, { library }) {
 
 let browser = null;
 try {
-  browser = await chromium.launch({ executablePath: CHROME });
+  browser = await launchBrowser(chromium, CHROME);
   const before = await laidOut(browser, { library: false });
   const after = await laidOut(browser, { library: true });
   const texted = (r) => r.lines.filter((l) => l.text.trim());

@@ -25,6 +25,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -126,7 +127,7 @@ const EXPORT = [
 ].join("\n") + "\n";
 
 const srv = await startServer();
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await launchBrowser(chromium, CHROME);
 try {
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
   const errors = [];

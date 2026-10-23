@@ -21,6 +21,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -139,16 +140,6 @@ async function newReader({ doc = "A Decl.txt" } = {}) {
   page.on("pageerror", (e) => log.errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) log.errors.push("console: " + m.text()); });
   page.on("dialog", (d) => d.accept().catch(() => {}));
-  // A folder handle is never put in IndexedDB here: the Chromium this runs on
-  // in some containers goes down reading an origin-private folder's handle
-  // back out of it, and the folder is only remembered, not needed, for this.
-  await page.addInitScript(() => {
-    const put = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function (v, k) {
-      if (v && typeof FileSystemHandle === "function" && v.handle instanceof FileSystemHandle) throw new DOMException("not kept in this test", "DataCloneError");
-      return put.call(this, v, k);
-    };
-  });
   await page.goto(srv.base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
   await page.evaluate(async ({ CASE, A, B, W, COMBINED, keyBytes }) => {
@@ -211,7 +202,7 @@ const toastText = (page) => page.evaluate(() => document.getElementById("toast")
 
 async function run() {
   srv = await startServer();
-  browser = await chromium.launch({ executablePath: CHROME });
+  browser = await launchBrowser(chromium, CHROME);
   try {
     console.log("1. words struck through, on a line, across a name, over two lines and two columns; saved");
     {

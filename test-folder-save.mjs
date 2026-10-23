@@ -40,6 +40,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const { parseXlsx } = await import("./viewer/xlsx-read.js");
@@ -2641,7 +2642,7 @@ test(39, "▶ Re-run PDF-Linker: the link at the click, everything saved before 
 // ── run ─────────────────────────────────────────────────────────────────────
 srv = await startServer();
 try {
-  browser = await chromium.launch({ executablePath: CHROME });
+  browser = await launchBrowser(chromium, CHROME);
   for (const c of cases) {
     if (ONLY && c.n !== ONLY) continue;
     console.log(`${c.n}. ${c.title}`);

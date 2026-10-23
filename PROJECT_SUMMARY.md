@@ -225,6 +225,7 @@ test-typed-cites.mjs                 Browser test (Playwright, Chromium, an OPFS
 test-form-templates.mjs              Node-runnable form ids, the fit, every blank recognised as itself, a synthetic scan in its blank's type, the data against PDF-Linker's folder
 test-form-scan.mjs                   Browser test (Playwright, Chromium, PyMuPDF, Tesseract): a Tesseract scan of a filled CIV-110 drawn in the form's sizes and faces beside it; skips without them
 test-stale-writes.mjs                Browser test (Playwright, Chromium, an OPFS case folder): nothing written over what a run changed — the key, LEAKS.xlsx, New Real Values.txt's other lines and a value read from it and withdrawn, a transcribed page's sum after a run rewrote it, a page line set aside, the folder read again by itself, exports, a lone file, and the PDF viewer's Save — and a worksheet loaded by hand never written into the case folder; skips without them
+browser-for-tests.mjs                What the OPFS browser tests launch Chromium through: each context a fresh on-disk profile, since an off-the-record one crashes reading a folder handle back from IndexedDB
 viewer/viewer.html                   Viewer shell (toolbar has naming-mode dropdown)
 viewer/text-reader.html / .js / .css   Text reader for PDF-Linker's exports
 viewer/textdoc.js                        Its document model (pure; test-textdoc.mjs)

@@ -21,6 +21,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -285,7 +286,7 @@ async function clip(page, kind) {
 
 async function run() {
   srv = await startServer();
-  browser = await chromium.launch({ executablePath: CHROME });
+  browser = await launchBrowser(chromium, CHROME);
   try {
     // ── 1. a short cite typed ─────────────────────────────────────────────
     console.log("1. a short cite with no supra keeps its party, however it is typed");

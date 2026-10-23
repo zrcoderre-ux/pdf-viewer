@@ -36,6 +36,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -151,7 +152,7 @@ const SS_TEXT = "====== Page 1 ======\n" + SS_LINES.join("\n") + "\n";
 
 let browser = null;
 try {
-  browser = await chromium.launch({ executablePath: CHROME });
+  browser = await launchBrowser(chromium, CHROME);
   const context = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
   const page = await context.newPage();
   const errors = [];

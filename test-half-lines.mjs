@@ -19,6 +19,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -207,7 +208,7 @@ const START = [["1", "Alpha"], ["2", "Beta"], ["3", ""], ["4", "Delta"], ["5", "
 
 async function run() {
   srv = await startServer();
-  browser = await chromium.launch({ executablePath: CHROME });
+  browser = await launchBrowser(chromium, CHROME);
   try {
     console.log("1. Enter and Backspace step by half lines");
     {

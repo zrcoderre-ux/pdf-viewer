@@ -18,6 +18,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -113,7 +114,7 @@ async function open(browser, base, halves, small = {}) {
 }
 
 const srv = await startServer();
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await launchBrowser(chromium, CHROME);
 try {
   console.log("1. a half line the PDF prints in 7 point, under 12-point body type");
   {

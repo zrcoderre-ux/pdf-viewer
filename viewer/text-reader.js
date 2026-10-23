@@ -25049,9 +25049,41 @@ const commitRawSoon = debounceEach(commitRaw, 400);
 function commitRawPages() {
   for (const sec of rawPages) commitRaw(sec);
 }
+// ENTER IN A RAW SHEET IS A "\n". Chromium (153, measured) types a line break
+// into a plaintext-only <pre> as a <br> (Enter, and execCommand's "\n" too),
+// and a <br> is no character of the sheet's text (textContent, which every
+// reader of the sheet takes): a line typed under another was saved run onto
+// it, "answered.Tobias Wrenfield agreed.". So each <br> is made the "\n" it
+// stands for as it is typed, the caret kept at its place in the text. One
+// ending the sheet stays: it is what shows the empty last line a "\n" there
+// does not, and it is no text either way.
+function unbreakRaw(pre) {
+  const brs = [...pre.querySelectorAll("br")];
+  if (!brs.length) return;
+  const tail = document.createRange();
+  tail.setStartAfter(brs[brs.length - 1]);
+  tail.setEnd(pre, pre.childNodes.length);
+  if (tail.toString() === "") brs.pop();
+  if (!brs.length) return;
+  // The caret as a place in the text, each <br> before it counted as its "\n".
+  const sel = getSelection();
+  let caret = -1;
+  if (sel.rangeCount && sel.isCollapsed && pre.contains(sel.anchorNode)) {
+    const r = document.createRange();
+    r.selectNodeContents(pre);
+    r.setEnd(sel.anchorNode, sel.anchorOffset);
+    caret = r.toString().length + r.cloneContents().querySelectorAll("br").length;
+  }
+  for (const br of brs) br.replaceWith("\n");
+  pre.normalize();
+  // (Past the end only behind the closing <br>: the caret goes back there.)
+  if (caret >= 0 && !caretInto(pre, caret)) placeCaret(pre, pre.childNodes.length);
+}
 pagesEl.addEventListener("input", (e) => {
   const pre = e.target && e.target.closest && e.target.closest(".raw-sheet .raw-text");
-  if (pre) commitRawSoon(pre.closest(".tpage"));
+  if (!pre) return;
+  unbreakRaw(pre);
+  commitRawSoon(pre.closest(".tpage"));
 });
 pagesEl.addEventListener("focusout", (e) => {
   const pre = e.target && e.target.closest && e.target.closest(".raw-sheet .raw-text");

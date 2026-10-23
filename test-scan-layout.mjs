@@ -24,6 +24,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -155,7 +156,7 @@ async function open(browser, base, { text, pdf }, { turned = false } = {}) {
 }
 
 const srv = await startServer();
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await launchBrowser(chromium, CHROME);
 try {
   console.log("a scanned page the run read again (its REVIEW clause)");
   const r = await open(browser, srv.base, build({ review: true }));

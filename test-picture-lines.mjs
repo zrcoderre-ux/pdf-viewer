@@ -21,6 +21,7 @@ import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -142,7 +143,7 @@ function offRow(r, pdf) {
 }
 
 const srv = await startServer();
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await launchBrowser(chromium, CHROME);
 try {
   for (const [label, spec] of [
     ["1. fourteen of a picture's lines among the body's", { inside: 14 }],

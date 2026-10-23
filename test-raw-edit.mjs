@@ -2,7 +2,7 @@
 // commitRaw, fillRaw's `.raw-head`): under ✎ Edit the file's text takes
 // typing, the page is built again from it, a pseudonym typed reads as its
 // real name on the page, a real name typed is written as its pseudonym, the
-// page header takes no edit, Ctrl+Z on the pages takes the typing back, a save writes what was typed, and with ✎ Edit
+// page header takes no edit, Ctrl+Z on the pages takes the typing back, a save writes what was typed, a line break typed is one in the file, and with ✎ Edit
 // off the sheet takes nothing.
 //
 // Run: node test-raw-edit.mjs   (from the repo root)
@@ -18,6 +18,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "./browser-for-tests.mjs";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -163,7 +164,7 @@ async function save(page) {
 
 async function run() {
   srv = await startServer();
-  browser = await chromium.launch({ executablePath: CHROME });
+  browser = await launchBrowser(chromium, CHROME);
   try {
     console.log("1. typing into a raw page under ✎ Edit");
     {
@@ -255,6 +256,28 @@ async function run() {
       });
       truthy("the buttons wrapped", seen.length > 2);
       check("every button in the label and in front", seen.filter((x) => !x.front || !x.inLabel), []);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+    console.log("5. a line break typed into the sheet is a line break in the file");
+    {
+      // Chromium types Enter into the sheet (a plaintext-only <pre>) as a
+      // <br>, which is no character of its text: the line typed after it ran
+      // onto the line above (unbreakRaw).
+      const r = await newReader();
+      const p = r.page;
+      await toggleRaw(p, 0);
+      await p.waitForTimeout(200);
+      await caretAfter(p, 0, "complaint.");
+      await p.keyboard.press("Enter");
+      await p.keyboard.press("Enter");
+      await p.keyboard.type("Then a reply.", { delay: 10 });
+      check("no <br> stands in the sheet", await p.evaluate(() => document.querySelectorAll(".raw-sheet .raw-text br").length), 0);
+      check("the caret stays where the typing goes", await rawText(p, 0),
+        "====== Page 1 ======\nPlaintiff filed the complaint.\n\nThen a reply.\nTobias Wrenfield answered.");
+      await save(p);
+      check("the save writes the blank line and the line typed", await fileText(p),
+        "====== Page 1 ======\nPlaintiff filed the complaint.\n\nThen a reply.\nTobias Wrenfield answered.\n====== Page 2 ======\nNothing else.\n");
       check("no page errors", r.log.errors, []);
       await r.close();
     }
