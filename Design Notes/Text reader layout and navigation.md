@@ -453,6 +453,22 @@ found them smaller than the PDF's and hard to see, so they are the body
 type's full size in the text's colour, as pleading paper prints them; the
 rule beside them stays grey.
 
+**…and a line between two numbers that nothing placed stands on the half
+line** (`pdfsync.betweenTops`, after `offGridTops` in `applyMatchedLayoutNow`;
+2026-10-24). `slotTops` stacks an unnumbered line a pitch under the number
+above it, which is the next number's own slot, and a line with words is then
+moved to the PDF row that prints them. A table's RULE has no words: on a
+compendium's ruled exhibit list every rule was drawn through the row under it,
+half a line low, and read as a strike through "A", "Complaint filed by…" and
+the rest (the owner: "the new strike capability is misplacing boxes" — the
+file carried no `~~` at all, and the reader before the strike work drew it the
+same way). A run of unnumbered lines between two numbered ones, none of it
+matched to a row, that would reach the next number's slot is spread evenly in
+the gap between the two; one alone lands on the half line, where the PDF draws
+the rule. A line whose words matched a row keeps that row, and a run that fits
+a pitch apart above the next number (numbers missing between) is left. Tests:
+`test-pdfsync.mjs` ("a rule between two numbers stands on the half line").
+
 **…and only the numbers in their order are the grid.** A numbered line is
 `fixed` at its number's height (`slotTops`, `spreadTops`), so the number has to
 be right. On an OCR'd pleading it is not always: line 17 read as 11 pinned its

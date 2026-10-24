@@ -270,6 +270,28 @@ together where the push ran out. `holdWithin` takes the same room, or it
 pulled the caption back up past its numbers from the foot. Tested in
 `test-pdfsync.mjs`.
 
+**…and so does a born-digital page off pleading paper** (`applyMatchedLayout`,
+the `clear` it hands `spreadTops` and `holdWithin`; 2026-10-24, the public
+contracts batch). Its rows are where the PDF sets its type, and its lines
+cleared a `LINE_BOX` apiece all the same: an AIR commercial lease sets its
+10-point type 11.5 points apart, 1.15 of it, and each line was pushed half a
+point below the one above it, until the foot of the page stood 25 points out
+of register with the PDF beside it. The layout audit counted 509 lines out of
+register in that lease's first twelve pages, and 466 in a residential lease
+set the same way. A line now clears its type size, so a line the PDF prints
+closer under the one above than its type is still pushed clear, and a line
+the PDF spaces at its type or more stands on its row. A SCAN's lines still
+clear their box: its rows are an OCR layer's, sized a line at a time
+(`scanLayout`). The line's own box (`boxes`, its CSS line height) and the
+sheet's foot (`room`) are unchanged. Measured on the batch's audit (43
+documents, twelve pages each at most): lines out of register 509 to 0 on the
+AIR lease, 466 to 103 on the residential one, 4,279 to 2,233 over the batch,
+most of the rest on scans; words found within 40 points of their PDF word
+93.4% to 96.5%. Lines
+whose type boxes cross went 51 to 48: eight pairs no longer do, and five now
+do where the PDF stacks them closer than a type size of the line above (a
+logo's words read by OCR, a form's label under its value).
+
 **…and the lines between them take ONE size** (`pdfsync.evenHalfLines`,
 called in `applyMatchedLayout` before the boxes are taken; 2026-10-22). A line
 between two numbers used to take its PDF row's own height, and a filer who

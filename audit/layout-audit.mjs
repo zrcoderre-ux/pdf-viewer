@@ -5,7 +5,7 @@
 // the PDF prints, word by word, as PyMuPDF reads it (audit/layout-truth.py:
 // a reading that shares nothing with the reader's own, pdf.js).
 //
-//   node audit/layout-audit.mjs CASE_FOLDER [--pages 1-12] [--doc TEXT] [--out FILE.json] [--lines]
+//   node audit/layout-audit.mjs CASE_FOLDER [--pages 1-12] [--doc TEXT] [--out FILE.json] [--lines] [--shots DIR]
 //
 // CASE_FOLDER is a folder PDF-Linker has run on: its PDFs, `Text Files/`, its
 // `pseudonym_key.xlsx` and `pdf_linker.log` (which names each PDF's export).
@@ -36,6 +36,7 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { launchBrowser } from "../browser-for-tests.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -50,6 +51,7 @@ const ONLY = opt("--doc");
 const OUT = opt("--out");
 const SETTLE = Number(opt("--settle", "700"));
 const LINES = args.includes("--lines"); // each page's lines as drawn (text, top, bottom, size), in the report
+const SHOTS = opt("--shots"); // a folder: each graded page as the reader draws it, and its PDF beside it, as PNGs
 
 // ── the folder: each PDF and its export, from the run's own log ───────────────
 function pairs(folder) {
@@ -137,6 +139,24 @@ async function readerPages(page) {
   }, { P0, P1, SETTLE, LINES });
 }
 
+/** Each graded page as the reader draws it, and the PDF page the reader shows
+ * beside it: "<export> p<N> reader.png" and "<export> p<N> pdf.png" in --shots.
+ * Real text: keep the folder off anything shared, as the report. */
+async function shoot(page, p, rp) {
+  fs.mkdirSync(SHOTS, { recursive: true });
+  const stem = p.txt.replace(/\.txt$/i, "");
+  for (const r of rp) {
+    const sel = `#pages .tpage[data-index="${r.index}"]`;
+    const el = await page.$(sel);
+    if (!el) continue;
+    await el.scrollIntoViewIfNeeded().catch(() => {});
+    await page.waitForTimeout(SETTLE);
+    await el.screenshot({ path: path.join(SHOTS, `${stem} p${r.n} reader.png`) }).catch(() => {});
+    const slot = await page.$(`#pdf-pane .pdf-slot[data-index="${r.index}"]`);
+    if (slot) await slot.screenshot({ path: path.join(SHOTS, `${stem} p${r.n} pdf.png`) }).catch(() => {});
+  }
+}
+
 // ── the comparison ───────────────────────────────────────────────────────────
 const norm = (t) => String(t).toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
 function grade(rp, tp) {
@@ -209,7 +229,7 @@ function grade(rp, tp) {
 const { chromium } = await import(PW);
 const srv = await serve();
 const BASE = `http://127.0.0.1:${srv.address().port}`;
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await launchBrowser(chromium, CHROME);
 const report = [];
 const list = pairs(CASE).filter((p) => !ONLY || p.pdf.toLowerCase().includes(ONLY.toLowerCase()) || p.txt.toLowerCase().includes(ONLY.toLowerCase()));
 if (!list.length) console.error("No PDF and export pairs in the folder's pdf_linker.log.");
@@ -225,15 +245,6 @@ try {
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("dialog", (d) => d.accept().catch(() => {}));
     if (process.env.AUDIT_CONSOLE) page.on("console", (m) => { if (process.env.AUDIT_CONSOLE === "*" || m.text().startsWith(process.env.AUDIT_CONSOLE)) console.log("  [page]", m.text().slice(0, 600)); });
-    // (Some Chromium builds go down reading an origin-private folder's handle
-    // back out of IndexedDB; the folder need not be remembered for this.)
-    await page.addInitScript(() => {
-      const put = IDBObjectStore.prototype.put;
-      IDBObjectStore.prototype.put = function (v, key) {
-        if (v && typeof FileSystemHandle === "function" && v.handle instanceof FileSystemHandle) throw new DOMException("not kept in the audit", "DataCloneError");
-        return put.call(this, v, key);
-      };
-    });
     await page.goto(BASE + "/viewer/text-reader.html");
     await page.waitForFunction(() => !!window.__textReaderAdoptFolder);
     let rp = [];
@@ -256,6 +267,7 @@ try {
       if (sbs && !(await sbs.evaluate((b) => b.getAttribute("aria-pressed") === "true"))) await sbs.click();
       await page.waitForFunction(() => !!document.querySelector("#pages .tpage.matched"), null, { timeout: 30000 }).catch(() => {});
       rp = await readerPages(page);
+      if (SHOTS) await shoot(page, p, rp);
     } catch (e) { errors.push("audit: " + String(e.message || e).split("\n")[0]); }
     await ctx.close();
     const doc = { ...p, pages: [], total: {}, errors, scans: 0, ms: 0 };

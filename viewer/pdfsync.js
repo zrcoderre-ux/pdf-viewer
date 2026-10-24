@@ -466,6 +466,40 @@ export function slotTops(lines, geom) {
 }
 
 /**
+ * The lines BETWEEN two numbers that nothing placed: on a numbered page,
+ * each run of unnumbered lines standing between two numbered ones, none of
+ * whose words matched a PDF row (`matched[k]` false), spread evenly in the gap
+ * between those two numbers — one alone on the half line between them. slotTops
+ * stacks an unnumbered line a pitch under the number above it, which is the
+ * NEXT number's slot, and a line with words is then moved to the row that
+ * prints them (offGridTops); a table's rule has no words to move it by, and
+ * every rule of a ruled exhibit list was drawn through the row under it, half
+ * a line low, reading as a strike through the text (the owner: "misplacing
+ * boxes"). A run that fits a pitch apart above the next number (numbers
+ * missing between) is left as slotTops stacked it. `nums` are per line (null
+ * off the grid), `tops` the tops so far; returns new tops.
+ */
+export function betweenTops(nums, tops, matched) {
+  const out = (tops || []).slice();
+  const n = out.length;
+  let a = -1;
+  for (let b = 0; b < n; b++) {
+    if (!(nums[b] > 0) || out[b] == null) continue;
+    if (a >= 0 && b - a > 1 && out[a] != null && out[b] > out[a]) {
+      const run = [];
+      for (let k = a + 1; k < b; k++) run.push(k);
+      const free = run.filter((k) => !(matched && matched[k]) && out[k] != null);
+      if (free.length && free.some((k) => out[k] >= out[b] - 0.5)) {
+        const step = (out[b] - out[a]) / (run.length + 1);
+        free.forEach((k) => { out[k] = out[a] + step * (k - a); });
+      }
+    }
+    a = b;
+  }
+  return out;
+}
+
+/**
  * The lines OFF the grid on a numbered page — a footer under line 28 (the
  * page number, the document's title), a stamp or a caption above line 1 —
  * put on the PDF's row that prints their words. slotTops can only stack them

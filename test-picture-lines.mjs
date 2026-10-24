@@ -9,6 +9,9 @@
 // this"): sixty of a picture's lines in the inch under the last line the PDF
 // prints cannot be set legibly there, and the lines above give way, a little
 // out of register, rather than have them drawn through each other.
+// And a page the PDF sets closer than a line's box (12-point type 13.8 points
+// apart, 1.15 of it, as an AIR lease is set) keeps every line on its row: a
+// line clears its type, not its box, or each was pushed below the last.
 //
 // Run: node test-picture-lines.mjs   (from the repo root)
 //
@@ -68,14 +71,14 @@ const W = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hot
 const para = (i) => `The witness ${W[i % 20]} testified regarding the ${W[(i * 7) % 20]} contract on ${W[(i * 3) % 20]} terms ${i}`;
 const picLine = (k) => `          Email from ${W[k % 20]} sent ${W[(k + 5) % 20]} subject ${W[(k + 9) % 20]} re payment ${k}`;
 
-/** One page: `before` picture lines, `body` lines 24 points apart from y (PDF, top down), `inside` after body line 7, `after` at the end; `pleading`, numbered 1-28 down the margin. */
-function build({ before = 0, inside = 0, after = 0, y = 100, pleading = false }) {
+/** One page: `before` picture lines, `body` lines `pitch` (24) points apart from y (PDF, top down), `inside` after body line 7, `after` at the end; `pleading`, numbered 1-28 down the margin. */
+function build({ before = 0, inside = 0, after = 0, y = 100, pleading = false, pitch = 24 }) {
   const exp = [], pdf = [];
   for (let k = 0; k < before; k++) exp.push(picLine(k));
   for (let i = 0, n = 1; i < 28; i++, n++) {
     if (i === 7 && inside) { for (let k = 0; k < inside; k++) exp.push(picLine(100 + k)); y += 8 * 24; n += 8; }
     if (n > 28 || y > 750) break;
-    exp.push(pleading ? `${String(n).padStart(2)}  ${para(i)}` : para(i)); pdf.push([para(i), y, pleading ? n : 0]); y += 24;
+    exp.push(pleading ? `${String(n).padStart(2)}  ${para(i)}` : para(i)); pdf.push([para(i), y, pleading ? n : 0]); y += pitch;
     if (!pleading && y > 700) break;
   }
   for (let k = 0; k < after; k++) exp.push(picLine(200 + k));
@@ -153,6 +156,7 @@ try {
     ["5. sixty of them at the foot, more than the page holds at a pitch apiece", { after: 60, crowded: true }],
     ["6. pleading paper: a picture's words under line 28", { pleading: true, after: 12 }],
     ["7. pleading paper: a picture over eight lines' numbers", { pleading: true, inside: 14 }],
+    ["8. no picture, the lines set at 1.15 of their type", { pitch: 13.8 }],
   ]) {
     console.log(label);
     const b = build(spec);

@@ -21282,7 +21282,9 @@ function applyMatchedLayoutNow() {
         const outside = (k) => first >= 0 && (k < first || k > end);
         off = { tops: tops.map((t, k) => (outside(k) ? off.tops[k] : t)), sizes: lines.map(() => null), rowOf: lines.map(() => null), outRow: off.rowOf.map((j, k) => (outside(k) ? j : null)) };
       }
-      tops = off.tops;
+      // …and a line between two numbers that nothing placed (a table's rule)
+      // on the half line, not the next number's slot (pdfsync.betweenTops).
+      tops = PS.betweenTops(nums, off.tops, off.rowOf.map((j) => j != null));
       pitch = geom.pitch;
       // Where across the page each line stands, as on a page with no numbers:
       // a caption's two columns are lines side by side, and the lines between
@@ -21581,7 +21583,14 @@ function applyMatchedLayoutNow() {
     // apart, and they clear each other by that — their TYPE, as the PDF sets
     // it — not by a whole line's box apiece, which pushed each one down a few
     // points into the next, and the numbers down the side with them.
-    const clear = fixed ? sizes.map((h, k) => (bare(k) ? 0 : h)) : room;
+    // …and so do a born-digital page's lines off pleading paper: its rows are
+    // where the PDF sets its type, and a lease set at 1.15 of its 10 points was
+    // pushed half a point a line by a box apiece (1.2), twenty-five points out
+    // of register at the foot of the page. A line the PDF prints closer under
+    // the one above than its type is still pushed to clear it. A scan's rows
+    // are an OCR layer's, sized a line at a time: its lines clear their box.
+    const clear = fixed ? sizes.map((h, k) => (bare(k) ? 0 : h))
+      : room && !scan ? room.map((b, k) => (b > 0 ? sizes[k] : 0)) : room;
     if (tops) tops = PS.spreadTops(tops, clear, fixed, spans);
     // …and nothing pushed past the foot of the paper: the page is the PDF
     // page's height, the same as the sheet beside it, and a line that would

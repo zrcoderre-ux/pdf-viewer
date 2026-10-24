@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, pdfRows, lineSimilarity, alignLines, rowLayout, scanLayout, fitRuns, firstPieceSize, faceCovers, nearRows, fontProgramFace, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
+  pleadingGeometry, lineTop, slotTops, betweenTops, pdfRows, lineSimilarity, alignLines, rowLayout, scanLayout, fitRuns, firstPieceSize, faceCovers, nearRows, fontProgramFace, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
   matchedScale, spreadTops, evenHalfLines, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
@@ -136,6 +136,17 @@ console.log("the PDF page's line grid");
   check("two stamp lines above line 1 stack upward, never above the page", slotTops(L(null, null, 1), { y1: 30, pitch: 24 }), [0, 6, 30]);
   check("no numbered line, nothing to hang on", slotTops(L(null, null), g), [null, null]);
   check("no grid, nothing", slotTops(L(1, 2), null), [null, null]);
+  // A line between two numbers that no row placed (a table's rule) goes on
+  // the half line, not onto the next number's slot; one whose words matched
+  // a row keeps it, and a run that fits a pitch apart (numbers missing) stays.
+  {
+    const nums = [1, null, 2, null, null, 3, 5, null, null, 8];
+    const tops = [36, 60, 60, 84, 108, 84, 132, 156, 180, 204];
+    check("a rule between two numbers stands on the half line", betweenTops(nums, tops, nums.map(() => false)).slice(0, 3), [36, 48, 60]);
+    check("two between two numbers share the gap", betweenTops(nums, tops, nums.map(() => false)).slice(2, 6), [60, 68, 76, 84]);
+    check("a run that fits above the next number is left", betweenTops(nums, tops, nums.map(() => false)).slice(6), [132, 156, 180, 204]);
+    check("a line its words placed keeps its row", betweenTops(nums, [36, 41, 60], [false, true, false]), [36, 41, 60]);
+  }
 }
 
 console.log("a page with no numbers: rows matched by their words");
