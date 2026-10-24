@@ -538,8 +538,18 @@ async function run() {
         body.focus(); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rg); return true;
       });
       truthy("lines 1 to 5 selected", selected);
+      // Where each margin number stands on the page: a box's rules are drawn on
+      // the seams between rows, and no number moves for them (slotLines, "A
+      // rule is no row").
+      const numberTops = () => p.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        const top = body.getBoundingClientRect().top;
+        return [...body.querySelectorAll(":scope > .line > .gutter .gn")].map((g) => g.textContent.trim() + "@" + Math.round(g.getBoundingClientRect().top - top));
+      });
+      const unboxed = await numberTops();
       await p.click("#colbox-btn");
       await p.waitForTimeout(600);
+      check("…and making the box moves no margin number", await numberTops(), unboxed);
       const boxed = await raw();
       check("the lines made a box: a rule over and under, the parties in the left column, the causes of action in the right", boxed.slice(0, 7).map((l) => { const k = l.search(/[│┌└]/); return l.slice(0, k) + l.slice(k).replace(/ +│/g, " │").replace(/│ +/g, "│ ").replace(/─+/g, "─"); }), [
         "┌─┬─┐",
@@ -562,6 +572,7 @@ async function run() {
       });
       await p.keyboard.type(" and of the covenant of good faith", { delay: 15 });
       await p.waitForTimeout(800);
+      check("…typing that wraps down a column moves no margin number either", await numberTops(), unboxed);
       const typed = await raw();
       const right = (l) => { const b = [...l].map((c, k) => (c === "│" ? k : -1)).filter((k) => k >= 0); return b.length >= 3 ? l.slice(b[1] + 1, b[2]).trim() : null; };
       const left = (l) => { const b = [...l].map((c, k) => (c === "│" ? k : -1)).filter((k) => k >= 0); return b.length >= 3 ? l.slice(b[0] + 1, b[1]).trim() : null; };
