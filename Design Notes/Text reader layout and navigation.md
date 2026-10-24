@@ -508,6 +508,31 @@ closed (`test-straight-rules.mjs` caught the gap). None of it applies on the gri
 paper (`shapePages`) is fitted with the padding, so a page whose pitch doubled
 is set smaller. `test-margin-pitch.mjs` (Chromium) pins it, a box down numbered lines included.
 
+**A rule is no row** (`isSeam` in `slotLines`; the stylesheet's
+`.line.rr:not(.num)` on a numbered page off the grid; 2026-10-24). The owner:
+"Adding columns can mess with the number margins, protect the numbers from
+that … Not just adding, but also adjusting within them." ⊞ Column box writes
+its rules over and under the box as lines of their own, and the one under it
+stands between two numbers: counted as a line of its slot, a box over lines 1
+to 5 made `--slot-rows` 2, and every number on every numbered page of the
+document stood two rows from the next (22 px to 45 px apart, measured); the top
+rule, before line 1, pushed that page's numbers half a line below every other
+page's; and a box grown by a row between two numbers, its foot rule under it,
+took the document to three rows. An unnumbered line of nothing but rules is
+now no row of its slot: `slotLines` leaves it out of `--slot-used` and pads the
+slot under its last ROW instead (a rule after it stands on the seam below the
+padding, a box's last row stretched down to it), and the stylesheet takes its
+half line back with a negative `margin-bottom` (a box's rule is a table, which
+no `height` makes shorter than its content), its cells set at the top so the
+row is exactly that half line (on their baselines, a cell of no size beside one
+of the text's size made it 16 px rather than 11), and `translateY` a quarter
+line up draws its hairline on the seam. Beside the PDF and on the grid the PDF
+places the numbers, as before. A box that needs a row where no empty numbered
+line is left still takes a half line (`reflowBox`'s `addRow`), as any line
+typed between two numbers does, and the pitch is two rows from then on.
+`test-free-page.mjs` (section 10) checks that making the box and typing that
+wraps down its column move no margin number.
+
 ### The hold: a key value carrying a run of blank
 
 This is the one that took the tab down. The breadcrumb finally named it:

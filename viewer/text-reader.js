@@ -5262,6 +5262,17 @@ function dressBody(body) {
 // than the rest), as a numbered line is not. The lines after the last number
 // (a footer) are not in a slot. On the grid (`.fixed`) the PDF places the
 // numbers, and none of this applies.
+//
+// A RULE IS NO ROW. A box's rule over or under it (⊞ Column box writes them as
+// lines of their own between two numbers, as PDF-Linker writes a form's) is
+// drawn on the seam between two rows and takes none of the slot's (the
+// stylesheet, `.line.rr:not(.num)`). Counted as a line, a box over lines 1 to
+// 5 put its foot rule in line 5's slot and every number on every numbered page
+// stood two rows from the next; a box grown by a row between two numbers, its
+// foot rule under that, three. The owner: "Adding columns can mess with the
+// number margins, protect the numbers from that … Not just adding, but also
+// adjusting within them".
+const isSeam = (l) => l.classList.contains("rr") && !l.classList.contains("num");
 function slotLines(body) {
   for (const l of body.querySelectorAll(":scope > .line[data-slot]")) { delete l.dataset.slot; l.style.removeProperty("--slot-used"); }
   body.__slotRows = 1;
@@ -5269,9 +5280,12 @@ function slotLines(body) {
   const lines = [...body.querySelectorAll(":scope > .line")];
   let at = -1;
   const close = (end) => {
-    const used = end - at;
-    for (let k = at; k < end; k++) lines[k].dataset.slot = k === end - 1 ? "end" : "in";
-    lines[end - 1].style.setProperty("--slot-used", String(used));
+    // The slot's room is padded under its last ROW, a rule after it standing
+    // on the seam below the padding (a box's last row is stretched down to it).
+    let used = 0, last = at;
+    for (let k = at; k < end; k++) if (!isSeam(lines[k])) { used++; last = k; }
+    for (let k = at; k < end; k++) lines[k].dataset.slot = k === last ? "end" : "in";
+    lines[last].style.setProperty("--slot-used", String(used));
     if (used > body.__slotRows) body.__slotRows = used;
   };
   lines.forEach((l, k) => {

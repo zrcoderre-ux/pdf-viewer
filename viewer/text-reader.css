@@ -1066,6 +1066,19 @@ body:not(.editing) .page-body .cb[data-cb="?"]::after { content: "?"; }
 .line.rl.fit .rc.hf { font-size: 0; }
 /* A line that is nothing but rules is a hairline on the page: half a line tall. */
 .line.rr, .line.rr > .lt { min-height: 0; line-height: calc(var(--reader-lh) * 0.5em); }
+/* …and on numbered paper off the grid, no height at all: a box's rule over or
+   under it stands between two numbers, and a half line there put the numbers
+   below it out of step with every other page's (slotLines, "A rule is no
+   row"). Its half line is taken back by its margin (a box's rule is a table,
+   which no `height` makes shorter than its content) and drawn on the seam
+   between the rows above and below it. */
+.tpage:not(.matched) .page-body.numbered:not(.fixed) .line.rr:not(.num) {
+  margin-bottom: calc(var(--reader-lh) * -0.5em);
+  transform: translateY(calc(var(--reader-lh) * -0.25em));
+}
+/* (Its cells set on their baselines, one of no size beside one of the text's,
+   made the row taller than the half line the margin takes back.) */
+.tpage:not(.matched) .page-body.numbered:not(.fixed) .line.rr:not(.num) > .lt > * { vertical-align: top; }
 .page-body:focus { box-shadow: inset 0 0 0 2px rgba(26, 115, 232, 0.25); }
 body:not(.editing) .page-body { caret-color: transparent; }
 body.editing .tpage { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 0 0 2px rgba(26, 115, 232, 0.35); }
