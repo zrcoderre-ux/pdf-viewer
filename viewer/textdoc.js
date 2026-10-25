@@ -553,7 +553,7 @@ const RESTORE_BARE = 4;     // …and at most this many put back as bare lines w
 export function pleadingLast(pages) {
   const tops = [];
   for (const p of pages || []) {
-    if (!p || p.header == null) continue;
+    if (!p || p.header == null || headerSaysCondensed(p)) continue;
     const nums = (p.lines || []).map(marginNumber);
     const chain = numberChain(nums);
     let count = 0, top = 0;
@@ -692,7 +692,7 @@ export function readExport(text) {
   const last = pleadingLast(parsed.pages);
   let pages = 0, numbers = 0;
   for (const p of parsed.pages) {
-    if (p.header == null) continue;
+    if (p.header == null || headerSaysCondensed(p)) continue;
     const r = restoreMarginNumbers(p.lines, { last });
     if (!r) continue;
     p.lines = r.lines;
@@ -2743,6 +2743,21 @@ export function pageTextSum(lines) {
   }
   return h.toString(16).padStart(8, "0");
 }
+/**
+ * Whether PDF-Linker wrote the page as a CONDENSED transcript (its header
+ * says so): a court reporter's sheet of four deposition pages, each in its
+ * own box with its own line numbers 1-25, which PDF-Linker writes one after
+ * another, each under its "Page N" heading. The page's margin numbers start
+ * again at 1 for every one of them, so it is no pleading page: nothing is put
+ * back in its margin (restoreMarginNumbers), it says nothing about the
+ * number the document's pleading pages run to (pleadingLast), and it is not
+ * laid on its PDF page's grid, where four columns of numbers stand side by
+ * side (text-reader.js, applyMatchedLayoutNow).
+ */
+export function headerSaysCondensed(page) {
+  return /\bCONDENSED TRANSCRIPT\b/.test(String((page && (page.review || page.header)) || ""));
+}
+
 /** Whether PDF-Linker wrote the page off the operator's transcription (its header says so). */
 export function headerSaysTextCorrected(page) {
   return /\bTEXT CORRECTED\b/.test(String((page && (page.review || page.header)) || ""));

@@ -533,6 +533,44 @@ typed between two numbers does, and the pitch is two rows from then on.
 `test-free-page.mjs` (section 10) checks that making the box and typing that
 wraps down its column move no margin number.
 
+### A condensed transcript's sheet reads as the file has it (`headerSaysCondensed`)
+
+The owner, of an exhibit packet holding a deposition printed four pages to the
+sheet: "It mistakenly applies the 1-28 line number, the raw becomes extremely
+wide, and the text view in the pdf reader shows basically a single blurry
+line." PDF-Linker now writes such a sheet as its four pages one after another,
+each under its "Page N" heading with its own line numbers 1-25, and says so in
+the page's header ("— NOTE: CONDENSED TRANSCRIPT: 4 pages printed on this
+one …"; PDF-Linker's *Condensed transcripts*). The page still opens with
+margin numbers, so the reader took it for pleading paper three ways:
+
+- On the grid (`applyMatchedLayoutNow`) the PDF page's geometry is its left
+  column's numbers, and `numberChain` kept one run of 1-25 of the four: those
+  lines were pinned to the left column's rows and the other seventy-five laid
+  "by their words" between them, crammed and drawn over each other (measured:
+  lines standing 70 px ABOVE the line before them).
+- Off it, the heading between line 25 of one page and line 1 of the next was a
+  line in line 25's slot (`slotLines`), the slot two rows, and `slotRows` pads
+  every slot of every numbered page on screen to the fullest one: the whole
+  document went double spaced.
+- `readExport` counted the sheet's 25s in `pleadingLast`, so a document whose
+  only other numbered page was a pleading page ran "to 25", and numbers past
+  25 on it read as misreadings.
+
+`TD.headerSaysCondensed(page)` reads the header, and the sheet is read a line a
+row, as the file has it: `buildPages` marks its section and body `condensed`;
+`applyMatchedLayoutNow` takes it off the grid (`clearMatched`, as a swapped page
+is), so it flows beside its PDF page and away from it; `slotLines` slots none
+of it; `readExport` puts nothing back in its margin and `pleadingLast` leaves
+it out; and # Number lines and ✕ Remove numbers are not offered on it (its
+numbers are its four pages' own). A pleading page beside it is laid as before.
+PDF-Linker locates a line of the sheet on its deposition page ("p.78 (printed
+p.31):22"), and every line number stands four times on the sheet, so the
+LEAKS walk (`locateLeak`) also weighs the "Page N" heading over a hit
+(`condensedPageOf`) against the Where cell's printed page: without it a row
+on page 32's line 5 was marked on page 30's. `test-condensed-page.mjs`
+(Chromium) and `test-textdoc.mjs` pin it.
+
 ### The hold: a key value carrying a run of blank
 
 This is the one that took the tab down. The breadcrumb finally named it:
