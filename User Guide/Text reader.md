@@ -2208,6 +2208,9 @@ app, which routes it to the reader tab.
   divider, or the box's right edge, to size the columns** (the pointer turns
   to ⟷ over a rule): the text that no longer fits wraps down its column. ⇄ Raw
   shows the box as PDF-Linker writes a form's, and Ctrl+Z takes it off.
+  **The same keys work in any table on any page**, a table ruled only between
+  its columns included: Enter and Backspace move only the text of the column
+  the caret is in, and the column lines never break.
   **Backspace at the start of an indented line takes the indent off first,
   one space a press,** and leaves the line on its number until the indent is
   gone; the Backspace after that moves it up to the half line above, as

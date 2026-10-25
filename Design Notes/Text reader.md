@@ -2264,6 +2264,38 @@ does not move. Widening a column does not pull wrapped text back up: the file
 does not say which rows were one item. Tested in `test-textdoc.mjs` and `test-free-page.mjs`
 (section 10, a cover page's parties and causes of action).
 
+**A box's keys on every page, and a table ruled only between its columns**
+(`boxKey`, `boxReflowSoon`; `TD.boxEdit`, `TD.openBoxAround`). The owner, of a
+table of objections (Objection and Material │ Grounds Asserted │ Plaintiffs'
+Response): "When editing in Text view, the column lines should not be broken
+by backspace, and backspace should move only the text in that column up a
+line. Likewise, enter should only move text in that column down." Two things
+had kept the column-box keys off it. They answered only on a ✓ Use my text
+page (`.free`), and only a box ruled on every side: PDF-Linker writes a table
+the page rules only BETWEEN its columns (its rules starting and ending in a
+`─`, each row a `│` between columns and none at either end), so a row read
+as a box row but the caret in its first column stood left of every bar,
+`boxBackspace` answered null and the browser joined the row onto the line
+above across the table (the owner's screenshot: Backspace at "Exhibits"
+broke every bar of the row). Now the keys answer on any page, and
+`openBoxAround` finds such a table's open sides: the contiguous rows of the
+same bars and the rule lines among them, the rule's first and last glyphs a
+`─`, its joints the rows' bars. `boxEdit` makes the edit on the box CLOSED (a
+`│` at the left where the rule starts, at the right past the longest row's
+text, so no column is wrapped for the sentinel, the rules run on to it in
+`─`) and takes the sides back off after, every rule put back as it stood
+(found by its closed text, so a foot rule a grown box moved down comes back
+too). Enter breaks the cell and sends the rest of that column down
+(`reflowBox`, `breakAt`), Backspace at a cell's head joins it to the column's
+row above (`boxBackspace`), Delete never takes a bar nor reaches past the
+row's last cell, and a row typed in (`input`, 120 ms, any page) is set back
+on its rules. Backspace or Delete inside a cell's text is the browser's, the
+row then set back by the typing path. `boxBackspace` read the joined row back
+off the line its own `put` had widened, so a join longer than the cell above
+spliced a bar's worth of the old text into the next row ("depositionde" /
+"position"); it reads off the row as it stood. Tested in `test-textdoc.mjs`
+and `test-table-keys.mjs` (an ordinary page and a ✓ Use my text page).
+
 Each entry of `#text-fixed-list` goes to its page (`goToFixedPage`: found by
 `pageEntryAt` on screen, or its document opened from `folderDocs` first, then
 `goToPageFromList`); the Pages tab already tags such a page "Use my text".

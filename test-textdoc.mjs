@@ -8,7 +8,7 @@
 
 import {
   markCss,
-  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace, resizeBox, pageNumbersComplete,
+  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace, boxEdit, openBoxAround, resizeBox, pageNumbersComplete,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, setOwnPartyWords, ownPartyWordsOf, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
@@ -2215,6 +2215,49 @@ console.log("column boxes (makeColumnBox, reflowBox, boxBackspace)");
     [true, ["QUILLON", "BRAKESMAN,", "Plaintiff,"], ["COMPLAINT FOR:", "1. Breach of contract", "2. Fraud"]]);
   check("the right edge drawn in: the box narrower", resizeBox(wide.lines, 1, 2, 60, { numbered: true })[0].length, 61);
   check("…a divider not past its neighbour", resizeBox(wide.lines, 1, 1, 2, { numbered: true })[0].indexOf("┬"), 4 + 1 + 6);
+}
+console.log("a table ruled only between its columns: keys kept in the column (openBoxAround, boxEdit)");
+{
+  // As PDF-Linker writes a table with no rule down its outer sides: the rules
+  // start and end in a ─, each row a │ between its columns and none at its ends.
+  const R = "    ───────────────────────────┼──────────────────────┼─────────────────────────";
+  const row = (lead, a, b, c) => (lead + " " + a).padEnd(31) + "│ " + b.padEnd(21) + "│ " + c;
+  const L = [R,
+    row(" 8  ", "1. Paragraph 4;", "Hearsay; the", "Overrule. Authentication."),
+    row(" 9  ", "Exhibit 18", "deposition", "Paragraph 4 authenticates"),
+    row("    ", "Attached to the", "excerpts are", "the transcript excerpts, a line longer than its rule."),
+    row("10  ", "Compendium of", "offered for the", "Deposition evidence."),
+    row("    ", "", "truth of the", ""),
+    row("11  ", "Exhibits.", "", ""),
+    R.replace(/┼/g, "┴"), "12"].map((l) => l.trimEnd());
+  const col = (lines, j) => lines.filter((l) => l.includes("│") && !l.includes("─")).map((l) => (j ? l.split("│")[j] : l.split("│")[0].slice(4)).trim());
+  check("its open sides found: the box's lines, a │ to go at each end", openBoxAround(L, 2), { from: 0, to: 7, left: 4, right: 80 });
+  check("a table ruled on every side has none open", openBoxAround(["┌──┬──┐", "│ a│ b│", "└──┴──┘"], 1), null);
+  check("…nor does a line of two bars with no rule by it", openBoxAround(["a │ b │ c"], 0), null);
+  const bs = boxEdit(L, 6, L[6].indexOf("Exhibits"), "Backspace", { numbered: true });
+  check("Backspace at the head of the first column's text: joined to the column's row above, no bar moved", [col(bs.lines, 0), bs.lines.filter((l) => l.includes("│")).every((l) => l[31] === "│" || l[31] === "┼" || l[31] === "┴")],
+    [["1. Paragraph 4;", "Exhibit 18", "Attached to the", "Compendium of", "Exhibits.", ""], true]);
+  check("…the other columns as they were, the long line not wrapped", [col(bs.lines, 1), col(bs.lines, 2)], [col(L, 1), col(L, 2)]);
+  check("…the rules as they stood, numbers kept", [bs.lines[0], bs.lines[bs.lines.length - 2], bs.lines.map((l) => l.slice(0, 4)).join("|")], [L[0], L[L.length - 2], L.map((l) => l.slice(0, 4)).join("|")]);
+  check("…the caret at its head, a line up", [bs.caret.line, bs.lines[bs.caret.line].slice(bs.caret.col, bs.caret.col + 8)], [5, "Exhibits"]);
+  const bj = boxEdit(bs.lines, 5, bs.caret.col, "Backspace", { numbered: true });
+  check("Backspace again: joined to the end of the column's text above, the caret after it", [col(bj.lines, 0).slice(3, 5), bj.lines[bj.caret.line].slice(bj.caret.col - 3, bj.caret.col)], [["Compendium of Exhibits.", ""], "of "]);
+  const en = boxEdit(L, 2, L[2].indexOf("Exhibit 18"), "Enter", { numbered: true });
+  check("Enter: that column's text from the caret down a row, the others not moved", [col(en.lines, 0), col(en.lines, 1), col(en.lines, 2)],
+    [["1. Paragraph 4;", "", "Exhibit 18", "Attached to the", "Compendium of", "Exhibits."], col(L, 1), col(L, 2)]);
+  check("…the caret at the head of the text it sent down", en.lines[en.caret.line].slice(en.caret.col, en.caret.col + 7), "Exhibit");
+  check("Backspace inside a cell's text: the page's own", boxEdit(L, 2, L[2].indexOf("hibit"), "Backspace", { numbered: true }), null);
+  check("Delete at a cell's end: nothing taken (no bar, no row joined)", boxEdit(L, 2, L[2].indexOf("Exhibit 18") + 10, "Delete", { numbered: true }).lines, L);
+  check("Delete inside a cell's text: the page's own", boxEdit(L, 2, L[2].indexOf("hibit"), "Delete", { numbered: true }), null);
+  const typed = L.slice();
+  typed[1] = typed[1].replace("Hearsay; the", "Hearsay; the deposition is");
+  const ty = boxEdit(typed, 1, typed[1].indexOf(" is") + 3, "typed", { numbered: true });
+  check("typed past a cell's width: the row set back on its rules, the word wrapped down its column", [ty.lines[1].indexOf("│"), col(ty.lines, 1).slice(0, 3)], [31, ["Hearsay; the", "deposition is", "deposition excerpts"]]);
+}
+{
+  const B = ["┌──────────────┬──────────┐", "│ Hearsay; the │ x        │", "│ deposition   │ y        │", "│ excerpts are │          │", "└──────────────┴──────────┘"];
+  check("Backspace joining a cell's text longer than the cell above: wrapped back down its column, no bar moved (once read off the row the join had widened)",
+    boxBackspace(B, 2, 2, {}).lines, B);
 }
 console.log("words struck through (strikeRuns, strikeEdit, unstruck)");
 {

@@ -6327,8 +6327,8 @@ pagesEl.addEventListener("keydown", (e) => {
   // names Esc left as typed go with theirs (enterAtCaret, joinLineUp); a
   // Backspace or Delete the browser makes is noted and settled as its edits
   // are (beforeinput, input).
-  // In a column box on a ✓ Use my text page, a line break and a join stay in
-  // the column (boxKey).
+  // In a box's row, on any page and in a table ruled only between its columns
+  // too, a line break and a join stay in the column (boxKey).
   if ((e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") && boxKey(body, e.key)) { e.preventDefault(); return; }
   // In a caption's cell, on any page, a line break and a join stay in its column (captionKey).
   if ((e.key === "Enter" || e.key === "Backspace" || e.key === "Delete") && captionKey(body, e.key)) { e.preventDefault(); hideTypeTip(); return; }
@@ -6507,21 +6507,14 @@ function caretInText(body) {
   return { text, lines: text.split("\n"), ...lineColOf(text, pos), collapsed: r.collapsed };
 }
 function boxKey(body, key) {
-  if (!body.classList.contains("free")) return false;
   const at = caretInText(body);
-  if (!at || !at.collapsed || !TD.isBoxRow(at.lines[at.line])) return false;
-  const numbered = body.classList.contains("numbered");
-  if (key === "Delete") {
-    // At the row's end (past its last rule) there is nothing of the box's to take.
-    const bars = TD.boxBars(at.lines[at.line]);
-    return at.col > bars[bars.length - 1] || at.col === at.lines[at.line].length;
-  }
-  const res = key === "Enter"
-    ? TD.reflowBox(at.lines, at.line, { line: at.line, col: at.col }, { numbered, breakAt: true })
-    : TD.boxBackspace(at.lines, at.line, at.col, { numbered });
+  if (!at || !at.collapsed || !String(at.lines[at.line]).includes("│")) return false;
+  const res = TD.boxEdit(at.lines, at.line, at.col, key, { numbered: body.classList.contains("numbered") });
   if (!res) return false;
-  snapshot(body, true);
-  rebuildFromLines(body, res.lines, res.caret);
+  if (res.lines.join("\n") !== at.text) {
+    snapshot(body, true);
+    rebuildFromLines(body, res.lines, res.caret);
+  } else if (res.caret) placeCaretOnDisk(body, res.lines.slice(0, res.caret.line).reduce((a, l) => a + l.length + 1, 0) + res.caret.col);
   return true;
 }
 // Typing in a box row: the row set back on its rules once the keystroke lands.
@@ -6531,14 +6524,14 @@ const boxReflowSoon = debounce(() => {
   boxTyped = null;
   if (!body || !body.isConnected || body === composingIn || !editing) return;
   const at = caretInText(body);
-  if (!at || !TD.isBoxRow(at.lines[at.line])) return;
-  const res = TD.reflowBox(at.lines, at.line, { line: at.line, col: at.col }, { numbered: body.classList.contains("numbered") });
+  if (!at || !String(at.lines[at.line]).includes("│")) return;
+  const res = TD.boxEdit(at.lines, at.line, at.col, "typed", { numbered: body.classList.contains("numbered") });
   if (!res || res.lines.join("\n") === at.text) return;
   rebuildFromLines(body, res.lines, res.caret || { line: at.line, col: at.col });
 }, 120);
 pagesEl.addEventListener("input", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
-  if (body && body.classList.contains("free")) { boxTyped = body; boxReflowSoon(); }
+  if (body) { boxTyped = body; boxReflowSoon(); }
 });
 function makeColumnBoxAtSelection() {
   const sel = document.getSelection();

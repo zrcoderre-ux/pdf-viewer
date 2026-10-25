@@ -4521,11 +4521,123 @@ export function boxBackspace(lines, i, col, { numbered = false } = {}) {
   const empty = ib.slice(0, -1).every((b, q) => !out[i].slice(b + 1, ib[q + 1]).trim());
   if (empty && !(numbered && gutterPrefix(out[i]))) out.splice(i, 1);
   // The joined text set back on the box's widths, wrapping on down the column.
+  // (Off the row as it stood: a join longer than the cell has moved the
+  // bars of the one `put` wrote.)
   const temp = out[p];
-  out[p] = out[p].slice(0, pb[j] + 1) + (" " + joined) + out[p].slice(pb[j + 1]);
+  out[p] = lines[p].slice(0, pb[j] + 1) + (" " + joined) + lines[p].slice(pb[j + 1]);
   const res = reflowBox(out, p, { line: p, col: caretCol }, { numbered });
   if (!res) { out[p] = temp; return { lines: out, caret: { line: p, col: caretCol } }; }
   return { lines: res.lines, caret: res.caret || { line: p, col: caretCol } };
+}
+
+// ---- a box with no rule down its outer sides --------------------------------
+//
+// PDF-Linker writes a table the page rules only BETWEEN its columns (the
+// commonest table a filing prints: its rules across, and between its columns,
+// nothing down its outer edges) as rule lines that start and end in a `─`, and
+// rows with a `│` between each two columns and none at either end. Its first
+// column is the text before the first `│`, its last the text after the last.
+// The owner, of such a table: "the column lines should not be broken by
+// backspace, and backspace should move only the text in that column up a
+// line. Likewise, enter should only move text in that column down." So the
+// box's edits are made on it CLOSED — a `│` put at each open side, where its
+// rules end — and the sides taken back off after (boxEdit).
+
+/** The open sides of the box line `i` stands in: { from, to, left, right } (`left`/`right` the columns a closing `│` goes at, null where that side is ruled), or null. */
+export function openBoxAround(lines, i) {
+  const s = String(lines[i] || "");
+  if (!s.includes("│") || /[─┌┐└┘├┤┬┴┼]/.test(s)) return null;
+  const bars = boxBars(s);
+  const sameBars = (k) => { const b = boxBars(lines[k]); return b.length === bars.length && b.every((x, q) => x === bars[q]); };
+  const part = (k) => k >= 0 && k < lines.length && (isBoxRule(lines[k]) || (!/[─┌┐└┘├┤┬┴┼]/.test(lines[k]) && sameBars(k)));
+  let from = i, to = i;
+  while (part(from - 1)) from--;
+  while (part(to + 1)) to++;
+  let rule = null;
+  for (let k = from; k <= to && !rule; k++) if (isBoxRule(lines[k])) rule = String(lines[k]);
+  if (!rule) return null;
+  const a = rule.search(/[─┌┐└┘├┤┬┴┼│]/), z = rule.trimEnd().length - 1;
+  const left = rule[a] === "─" ? a : null, right = rule[z] === "─" ? z + 1 : null;
+  if (left == null && right == null) return null;
+  // Every joint of the rule a bar of the rows, as rows of one box have.
+  const joints = boxBars(rule).filter((x) => x > a && x < z);
+  if (joints.length !== bars.length || !joints.every((x, q) => x === bars[q])) return null;
+  return { from, to, left, right };
+}
+/**
+ * The box's lines with its open sides closed: a `│` at each (openBoxAround),
+ * the right one past the longest row's text, so no column's text is wrapped
+ * for it, and a rule run on to it in `─`. `rules` gets each closed rule line
+ * and the line it was, so openBox can put it back as it stood.
+ */
+function closeBox(lines, box, rules) {
+  const out = lines.slice();
+  let end = box.right;
+  if (end != null) for (let k = box.from; k <= box.to; k++) if (!isBoxRule(lines[k])) end = Math.max(end, String(lines[k]).trimEnd().length + 1);
+  const at = end != null ? end + (box.left != null ? 1 : 0) : null;
+  for (let k = box.from; k <= box.to; k++) {
+    const was = String(out[k]), rule = isBoxRule(was);
+    let s = was;
+    if (box.left != null) s = s.padEnd(box.left).slice(0, box.left) + "│" + s.slice(box.left);
+    if (at != null) { const t = s.trimEnd(); s = t.padEnd(at, rule ? "─" : " ") + "│"; }
+    if (rule) rules.set(s, was);
+    out[k] = s;
+  }
+  return out;
+}
+/**
+ * …and taken back off: the box's lines as they now run, from its first line
+ * on (a row Enter added, a foot rule moved under it), its rules as they stood
+ * and its rows without their closing `│`s.
+ */
+function openBox(lines, box, rules, bars) {
+  const out = lines.slice();
+  for (let k = box.from; k < out.length; k++) {
+    const s = String(out[k]);
+    if (rules.has(s)) { out[k] = rules.get(s); continue; }
+    if (!isBoxRow(s) || boxBars(s).length !== bars) break;
+    let t = s;
+    if (box.right != null) { t = t.trimEnd(); if (t.endsWith("│")) t = t.slice(0, -1); }
+    if (box.left != null && t[box.left] === "│") t = t.slice(0, box.left) + t.slice(box.left + 1);
+    out[k] = t.trimEnd();
+  }
+  return out;
+}
+
+/**
+ * A key in a box's row, kept in its column: Enter breaks the cell at the
+ * caret and sends the rest of that column down a row (reflowBox, `breakAt`),
+ * Backspace at a cell's head joins it to the same column's row above and
+ * brings the rest of the column up (boxBackspace), and Delete never takes a
+ * `│`, nor reaches past the row's last cell. A box ruled on every side or
+ * only between its columns alike (openBoxAround). `typed`: a row just typed
+ * in, set back on the box's rules (reflowBox). `col` is the caret's column in
+ * row `i`. Returns { lines, caret } — the page's lines and the caret's
+ * { line, col } in them (lines unchanged where the key does nothing there) —
+ * or null where line `i` is no box row, or the key is the page's own (a
+ * Backspace inside a cell's text).
+ */
+export function boxEdit(lines, i, col, key, { numbered = false } = {}) {
+  const open = openBoxAround(lines, i);
+  const rules = new Map();
+  const work = open ? closeBox(lines, open, rules) : lines;
+  const shift = open && open.left != null && col >= open.left ? 1 : 0;
+  const c = col + shift;
+  if (!isBoxRow(work[i])) return null;
+  let res;
+  if (key === "Delete") {
+    const s = work[i], bars = boxBars(s);
+    // Never a rule, nor past the last cell's text into the row under it.
+    if (BOX_JOINTS.includes(s[c] || "") || c >= bars[bars.length - 1] || !s.slice(c, bars.find((b) => b >= c)).trim()) res = { lines: work.slice(), caret: { line: i, col: c } };
+    else return null;
+  } else if (key === "Enter") res = reflowBox(work, i, { line: i, col: c }, { numbered, breakAt: true });
+  else if (key === "Backspace") res = boxBackspace(work, i, c, { numbered });
+  else if (key === "typed") res = reflowBox(work, i, { line: i, col: c }, { numbered });
+  if (!res) return null;
+  if (!open) return res;
+  const back = openBox(res.lines, open, rules, boxBars(work[i]).length);
+  const caret = res.caret ? { line: res.caret.line, col: Math.max(0, res.caret.col - (open.left != null && res.caret.col > open.left ? 1 : 0)) } : null;
+  return { lines: back, caret };
 }
 
 /**
