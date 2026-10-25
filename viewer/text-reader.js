@@ -4988,6 +4988,9 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
     const sec = document.createElement("section");
     sec.className = "tpage";
     sec.dataset.index = String(i);
+    // A condensed transcript's sheet (TD.headerSaysCondensed): its four pages'
+    // own margin numbers, one run of 1 to 25 after another.
+    if (TD.headerSaysCondensed(p)) sec.classList.add("condensed");
     if (p.banner != null || p.header != null) {
       const lab = document.createElement("div");
       lab.className = "page-label" + (p.banner != null ? " doc" : "");
@@ -5047,7 +5050,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         nb.type = "button";
         nb.textContent = "# Number lines";
         nb.title = "This page has no margin line numbers: give it pleading paper's 1–28 — each line on the number the PDF prints it at where the PDF is open beside it, else in order";
-        nb.hidden = TD.pageNumbersComplete(p.lines) || TD.readsDidNotOcr(p.lines);
+        nb.hidden = TD.pageNumbersComplete(p.lines) || TD.readsDidNotOcr(p.lines) || TD.headerSaysCondensed(p);
         nb.addEventListener("click", (e) => { e.preventDefault(); numberPage(Number(sec.dataset.index)); });
         lab.appendChild(nb);
         // ✕ Remove numbers: the margin numbers taken out again (unnumberPage),
@@ -5058,7 +5061,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         ub.type = "button";
         ub.textContent = "✕ Remove numbers";
         ub.title = "Take this page's margin line numbers out again (Ctrl+Z puts them back)";
-        ub.hidden = !TD.pageIsNumbered(p.lines) || TD.readsDidNotOcr(p.lines);
+        ub.hidden = !TD.pageIsNumbered(p.lines) || TD.readsDidNotOcr(p.lines) || TD.headerSaysCondensed(p);
         ub.addEventListener("click", (e) => { e.preventDefault(); unnumberPage(Number(sec.dataset.index)); });
         lab.appendChild(ub);
       }
@@ -5073,6 +5076,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
     // The margin numbers put back on this page (readExport), marked as the
     // body is built — and built again, since the body element stays.
     body.__restored = p.restored ? new Set(p.restored) : null;
+    if (sec.classList.contains("condensed")) body.classList.add("condensed");
     // A page asked for as ✓ Use my text is built free of the PDF (setFree).
     if (fixedSrc && pages[i] === doc.pages[i]) {
       const e = pageEntryAt(i, fixedSrc);
@@ -5277,6 +5281,11 @@ function slotLines(body) {
   for (const l of body.querySelectorAll(":scope > .line[data-slot]")) { delete l.dataset.slot; l.style.removeProperty("--slot-used"); }
   body.__slotRows = 1;
   if (!body.classList.contains("numbered")) return;
+  // A condensed transcript's sheet reads as the file has it, a line a row:
+  // a "Page 31" heading between line 25 of one page and line 1 of the next
+  // made a slot of two rows, and every slot of every numbered page on screen
+  // is padded to the fullest one, so the whole document went double spaced.
+  if (body.classList.contains("condensed")) return;
   const lines = [...body.querySelectorAll(":scope > .line")];
   let at = -1;
   const close = (end) => {
@@ -11848,7 +11857,9 @@ function refreshNocrButtons(indices) {
     if (nb || ub) {
       const body = b.closest(".tpage").querySelector(".page-body");
       const now = body ? TD.serializeNodes(body).split("\n") : p.lines;
-      const stripped = pageReadsDidNotOcr(i);
+      // (A condensed transcript's numbers are its four pages' own, whole:
+      // nothing to number, and nothing # Number lines put there to take out.)
+      const stripped = pageReadsDidNotOcr(i) || TD.headerSaysCondensed(p);
       if (nb) nb.hidden = TD.pageNumbersComplete(now) || stripped;
       if (ub) ub.hidden = !TD.pageIsNumbered(now) || stripped || pdfPrintsNumbers(i);
     }
@@ -16709,6 +16720,22 @@ function gutterOf(range) {
   const n = gn ? parseInt(gn.textContent, 10) : NaN;
   return isFinite(n) ? n : null;
 }
+// On a condensed transcript's sheet (TD.headerSaysCondensed), the deposition
+// page a hit stands in: the "Page N" heading PDF-Linker writes over each of
+// the sheet's pages, which a Where cell names as the printed page ("p.78
+// (printed p.31):22") — every line number stands four times on the sheet, so
+// the line alone does not say which. Null anywhere else.
+const CONDENSED_HEAD_RE = /^\s+Page\s+(\d{1,5})\s*$/;
+function condensedPageOf(range) {
+  const el = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  const line = el && el.closest && el.closest(".line");
+  if (!line || !line.closest(".tpage.condensed")) return null;
+  for (let l = line; l; l = l.previousElementSibling) {
+    const m = l.classList.contains("line") && l.textContent.match(CONDENSED_HEAD_RE);
+    if (m) return m[1];
+  }
+  return null;
+}
 
 /**
  * Open the row's document (the first of its files that has an export in
@@ -16773,6 +16800,7 @@ async function locateLeak(row) {
       if (w.page != null && page === w.page && memberOk(i)) s = 2;
       else if (w.page == null && page == null) s = 1;
       if (s && w.line != null && g != null && g >= w.line && g <= (w.lineEnd != null && w.lineEnd >= w.line ? w.lineEnd : w.line)) s += 3;
+      if (s >= 2 && w.printed != null && sec.classList.contains("condensed") && condensedPageOf(hit.range) === w.printed) s += 1;
       score = Math.max(score, s);
     }
     if (score > bestScore) { bestScore = score; best = hit; }
@@ -21182,6 +21210,12 @@ function applyMatchedLayoutNow() {
     }
     // A swapped page IS its PDF page (applySwaps): its text is put away, not laid.
     if (sec.classList.contains("swapped")) { clearMatched(sec); continue; }
+    // …and a CONDENSED transcript's page flows: its four deposition pages are
+    // one after another in the file and side by side on the sheet, so no line
+    // of it has a row of the PDF to stand on, and laid on the grid every
+    // number from 1 to 25 four times over was pinned to the left column's
+    // rows (TD.headerSaysCondensed).
+    if (sec.classList.contains("condensed")) { clearMatched(sec); continue; }
     const slot = on ? slots.get(i) || null : null;
     const t = grid && (slot || !on) ? pdfTarget(i) : null;
     if (!t) { clearMatched(sec); continue; }

@@ -19,7 +19,7 @@ import {
   checkboxRanges, checkboxState,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
-  textFixedLine, setTextFixed, pageTextSum, pageFurnitureLine, headerSaysTextCorrected, TEXTFIXED_RE,
+  textFixedLine, setTextFixed, pageTextSum, pageFurnitureLine, headerSaysTextCorrected, headerSaysCondensed, TEXTFIXED_RE,
   wordsChanged, AUTO_TEXT_FIXED_WORDS, decisionDelta, applyDecisionDelta,
   marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
   readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport, compileDisplay,
@@ -2236,6 +2236,32 @@ console.log("words struck through (strikeRuns, strikeEdit, unstruck)");
   check("spaces alone: nothing to strike", strikeEdit("a    b", 2, 4), null);
   const r = strikeEdit("pay ~~the sum~~ of $500 now", 16, 27);
   check("the ops last first, each a mark in or out", r.ops.map((o) => [o.at, o.del ? "del" : o.open ? "open" : "close"]), [[27, "close"], [13, "del"]]);
+}
+console.log("a condensed transcript's sheet: four pages' own numbers, nothing put back (headerSaysCondensed)");
+{
+  const head = (n, pages) => `====== Page ${n} (printed p. ${pages[0]}-${pages[pages.length - 1]}) — NOTE: CONDENSED TRANSCRIPT: ${pages.length} pages printed on this one (pages ${pages.join(", ")}), each written in turn with its own line numbers ======`;
+  const sheet = (n, pages) => {
+    const out = [head(n, pages), "         Corla Ventimiglia v. Ashgrove Freight Lines"];
+    for (const p of pages) {
+      out.push(`                        Page ${p}`);
+      // Line 24 left empty, line 25 read by nothing: a pleading page's
+      // numbers would be put back over both.
+      for (let k = 1; k <= 23; k++) out.push(String(k).padStart(2) + `  Q Line ${k} of page ${p}.`);
+    }
+    out.push("    9 (Pages 30 - 33)    Halvorsen Reporting");
+    return out;
+  };
+  const pleading = (n) => [`====== Page ${n} ======`, ...Array.from({ length: 26 }, (_, k) => String(k + 1).padStart(2) + `  Pleading line ${k + 1}.`)];
+  const text = [...pleading(1), ...sheet(2, [30, 31, 32, 33]), ...sheet(3, [34, 35, 36, 37])].join("\n") + "\n";
+  const doc = readExport(text);
+  check("its header says so", doc.pages.map(headerSaysCondensed), [false, true, true]);
+  check("an ordinary header does not", headerSaysCondensed(parseExport("====== Page 2 (printed p. 9) — REVIEW: recognised at only 150 dpi, text is LOW CONFIDENCE ======\n").pages[0]), false);
+  check("nothing put back on the sheets", [doc.pages[1].restored || null, doc.pages[2].restored || null], [null, null]);
+  check("…which read as the file has them", serializeExport({ ...doc, pages: doc.pages.slice(1) }), [...sheet(2, [30, 31, 32, 33]), ...sheet(3, [34, 35, 36, 37])].join("\n") + "\n");
+  // Their boxes run to 23 on every sheet: counted, the one pleading page's 24
+  // to 26 would have read as numbers misread past the paper's last.
+  check("the sheets say nothing of where the pleading pages run to", pleadingLast(doc.pages), null);
+  check("…as a document of sheets alone says nothing", pleadingLast(readExport([...sheet(1, [30, 31, 32, 33]), ...sheet(2, [34, 35, 36, 37])].join("\n")).pages), null);
 }
 console.log("margin numbers that run complete (pageNumbersComplete)");
 {
