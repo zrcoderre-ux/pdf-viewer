@@ -2296,6 +2296,18 @@ spliced a bar's worth of the old text into the next row ("depositionde" /
 "position"); it reads off the row as it stood. Tested in `test-textdoc.mjs`
 and `test-table-keys.mjs` (an ordinary page and a ✓ Use my text page).
 
+The same table beside its PDF drew some of its lines between two numbers
+smaller than the rest (the owner: "The pdf text is also all uniform in
+size"). Measured on a table of the same shape: the export's rows, a row for
+every column's own baseline (PDF-Linker's `_column_rows` note), put up to
+three half lines between two numbers where the PDF prints one, and
+`pdfsync.fitRuns` took those down to what the space holds (4.0 px beside
+6.8 px). With the table written a column at a time no more half lines stand
+between two numbers than the PDF prints there, and every row of it is drawn
+at the PDF's own 11 pt against its 12 pt body (6.8 px), so nothing in the
+reader changed for it: an export written before needs PDF-Linker run again.
+`test-table-keys.mjs` section 3 pins it.
+
 Each entry of `#text-fixed-list` goes to its page (`goToFixedPage`: found by
 `pageEntryAt` on screen, or its document opened from `folderDocs` first, then
 `goToPageFromList`); the Pages tab already tags such a page "Use my text".

@@ -202,6 +202,50 @@ async function run() {
       check("no page errors", r.log.errors, []);
       await r.close();
     }
+    console.log("3. beside its PDF: the table's lines between the numbers drawn at the size of those on them");
+    {
+      // The PDF the export was read from: a 12 pt body and an 11 pt table on
+      // 13 pt leading, its rows on the numbers and half a lead under them —
+      // one printed line of each column a row, as PDF-Linker writes it
+      // (`_column_rows`). An export of the rows interleaved, a row for every
+      // column's own baseline, held more half lines than the space between
+      // two numbers, and those alone were drawn smaller.
+      const r = await newReader("A Objections.txt");
+      const p = r.page;
+      await p.evaluate(async ({ TABLE }) => {
+        const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+        const pdf = await PDFDocument.create();
+        const font = await pdf.embedFont(StandardFonts.TimesRoman);
+        const pg = pdf.addPage([612, 792]);
+        const Y = (n) => 792 - (100 + (n - 1) * 24);
+        const cols = [72, 232, 372];
+        let num = 0, ruleAt = null;
+        for (const l of TABLE.slice(1)) {
+          const g = /^ ?(\d{1,2})  /.exec(l);
+          if (g) num = +g[1];
+          const half = !g && !l.includes("─");
+          const y = Y(num) - (half ? 13 : 0);
+          if (g) pg.drawText(String(num), { x: 46 - font.widthOfTextAtSize(String(num), 12), y, size: 12, font });
+          if (l.includes("─")) { ruleAt = Y(num) - 18; pg.drawLine({ start: { x: 66, y: ruleAt }, end: { x: 560, y: ruleAt }, thickness: 0.6 }); continue; }
+          const cells = l.slice(4).split("│");
+          if (cells.length < 2) { if (cells[0].trim()) pg.drawText(cells[0].trim(), { x: 72, y, size: 12, font }); continue; }
+          cells.forEach((t, k) => { if (t.trim()) pg.drawText(t.trim(), { x: cols[k] + 4, y, size: 11, font }); });
+        }
+        for (const x of [226, 366]) pg.drawLine({ start: { x, y: Y(2) - 18 }, end: { x, y: Y(6) - 18 }, thickness: 0.6 });
+        const f = new File([await pdf.save()], "A Objections.pdf", { type: "application/pdf" });
+        await window.__textReaderPickPdfs([f]);
+      }, { TABLE });
+      const sbs = await p.$("#sbs-toggle");
+      if (!(await sbs.evaluate((b) => document.body.classList.contains("sbs") || b.getAttribute("aria-pressed") === "true"))) await sbs.click();
+      await p.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body"), null, { timeout: 15000 });
+      await p.waitForTimeout(2000);
+      const sizes = await p.evaluate(() => [...document.querySelectorAll("#pages .tpage .page-body > .line")]
+        .filter((l) => /│/.test(l.textContent) && !/─/.test(l.textContent))
+        .map((l) => getComputedStyle(l.querySelector(".lt") || l).fontSize));
+      check("every row of the table, on a number or between two, at one size", [sizes.length, [...new Set(sizes)].length], [6, 1]);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
   } finally {
     await browser.close();
     srv.stop();
