@@ -12,7 +12,7 @@
 // scrubbing, by the bare stem too. A Combined Text.txt names each member in
 // its banner, so its pages are matched document by document.
 
-import { checkboxRanges } from "./textdoc.js";
+import { checkboxRanges, strikeLayout } from "./textdoc.js";
 
 /** A file name's stem, extensions off (.pdf, .txt, .txt.LEAK, .md), separators spaced, case folded. */
 export function normalizeStem(name) {
@@ -1953,6 +1953,10 @@ export function fileLayout(lines, { slot = null, last = 28, x0 = 0, unit = 6, ga
   // Where the PDF puts a piece, as a column past the margin — and each such
   // column the file already has in one place near enough, kept where it is.
   const want = (p) => Math.max(0, Math.round((p.x - x0) / unit));
+  // Columns are counted as the line is laid out (textdoc.strikeLayout): a
+  // strike's hidden ~~ marks take no room on the page, so none of the grid's.
+  const lays = new Map();
+  const layOf = (l) => { if (!lays.has(l)) lays.set(l, strikeLayout(String(l.body || ""))); return lays.get(l); };
   const has = new Map(); // the PDF's column → the columns the file has its pieces at
   for (const l of lines) {
     if (!l.auto) continue;
@@ -1960,7 +1964,7 @@ export function fileLayout(lines, { slot = null, last = 28, x0 = 0, unit = 6, ga
       if (!p || !Number.isFinite(p.x)) continue;
       const w = want(p);
       if (!has.has(w)) has.set(w, new Set());
-      has.get(w).add(Math.max(0, l.indent || 0) + p.at);
+      has.get(w).add(Math.max(0, l.indent || 0) + layOf(l).toVis(p.at));
     }
   }
   const keep = new Map();
@@ -1976,13 +1980,16 @@ export function fileLayout(lines, { slot = null, last = 28, x0 = 0, unit = 6, ga
     if (!ps.length) return " ".repeat(indent) + body;
     const colOf = (p) => (keep.has(want(p)) ? keep.get(want(p)) : want(p));
     const cuts = ps.map((p) => p.at);
+    // …the marks the body holds before a piece, which `out` carries too.
+    const lay = layOf(l);
+    const marks = (p) => p.at - lay.toVis(p.at);
     let out = ps[0].at === 0 ? " ".repeat(colOf(ps[0])) : " ".repeat(indent) + body.slice(0, ps[0].at).replace(/ +$/, "");
     ps.forEach((p, i) => {
       const seg = body.slice(p.at, i + 1 < ps.length ? cuts[i + 1] : body.length);
       if (i > 0 || ps[0].at !== 0) {
         const had = (body.slice(0, p.at).match(/ +$/) || [""])[0].length;
         if (i > 0 || out.length) {
-          const want = colOf(p) - out.length;
+          const want = colOf(p) - (out.length - marks(p));
           out += " ".repeat(want >= gap ? want : had >= gap ? gap : 1);
         }
       }

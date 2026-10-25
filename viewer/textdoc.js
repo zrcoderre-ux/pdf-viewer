@@ -320,6 +320,43 @@ export function strikeRuns(line) {
   return out.filter((r) => { const inner = s.slice(r.open + 2, r.close); return !inner.includes("  ") && !STRIKE_GAP_RE.test(inner); });
 }
 
+/**
+ * A line as the page LAYS IT OUT: a strike's ~~ marks are hidden on the page
+ * and take no room there, so every column, indent and bar of the line is
+ * counted in its text with the marks taken out — counted with them, a column
+ * the line sets after a struck word stood four places further on, and moved
+ * when the words were struck (the owner: "Strike through should not change
+ * the spacing"). { text, toFile(v, opening), toVis(f) }: `text` the line
+ * unstruck; toFile carries a place in `text` back to the line — the place of
+ * the character standing there, or, with `opening`, of the marks standing
+ * just before it, so a column that opens with a struck word begins at its
+ * opening mark — and toVis a place in the line to `text`. The file keeps its
+ * marks; only the layout reads past them.
+ */
+export function strikeLayout(line) {
+  const s = String(line == null ? "" : line);
+  const runs = s.includes(STRIKE_MARK) ? strikeRuns(s) : [];
+  if (!runs.length) return { text: s, toFile: (v) => v, toVis: (f) => f };
+  const marks = []; // where each mark begins in the line, in order
+  for (const r of runs) marks.push(r.open, r.close);
+  const opens = new Set(runs.map((r) => r.open));
+  let text = "", at = 0;
+  for (const m of marks) { text += s.slice(at, m); at = m + 2; }
+  text += s.slice(at);
+  const toFile = (v, opening = false) => {
+    let f = v;
+    for (const m of marks) { if (m <= f) f += 2; else break; }
+    if (opening && opens.has(f - 2)) f -= 2;
+    return f;
+  };
+  const toVis = (f) => {
+    let v = f;
+    for (const m of marks) { if (m >= f) break; v -= Math.min(2, f - m); }
+    return v;
+  };
+  return { text, toFile, toVis };
+}
+
 /** `text` with every struck run's ~~ marks taken out: the words as the page prints them. */
 export function unstruck(text) {
   return String(text == null ? "" : text).split("\n").map((line) => {

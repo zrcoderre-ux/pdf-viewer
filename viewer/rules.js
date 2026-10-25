@@ -29,8 +29,13 @@
 // The glyphs stay in the DOM as the spans' own text, so serializeNodes and a
 // copy read exactly what the file says. The spans are re-derived on every
 // pass (undressed first), because an edit can split or join a cell.
+//
+// Every bar, run and cell is counted in a line as it is LAID OUT (laidText):
+// a strike's ~~ marks are hidden on the page and take no room there, and
+// counted, a struck word in a box's cell moved that row's bars four places on,
+// off the box's columns (textdoc.strikeLayout).
 
-import { ruleParts, ruleShape, captionParens, serializeNodes } from "./textdoc.js";
+import { ruleParts, ruleShape, captionParens, serializeNodes, unstruck } from "./textdoc.js";
 import { undressColumns } from "./columns.js";
 
 /** An empty slot carries a <br> so the caret can stand in it; one with text does not need it. */
@@ -145,7 +150,7 @@ export function dressLines(body) {
   // ones PDF-Linker aligned, and a row whose real name is three letters
   // longer than its fake is still a row of the same box. Read once, for the
   // caption's `)` side too, which is a column of the page, not of a line.
-  const texts = lines.map((line) => { const lt = line.querySelector(":scope > .lt"); if (lt) undress(lt); return serializeNodes(line); });
+  const texts = lines.map((line) => { const lt = line.querySelector(":scope > .lt"); if (lt) undress(lt); return laidText(line); });
   const parens = captionParens(texts);
   for (const [li, line] of lines.entries()) {
     const lt = line.querySelector(":scope > .lt");
@@ -176,6 +181,8 @@ export function dressLines(body) {
 }
 
 const cellsOf = (line) => [...line.querySelectorAll(":scope > .lt > .rc")];
+/** A line's text as the page lays it out: the file's, a strike's hidden marks taken out. */
+const laidText = (line) => unstruck(serializeNodes(line));
 /** A laid line's record: "top|left|size|box" (text-reader.js, applyMatchedLayout). */
 const laidOf = (line) => String(line.__laid || "").split("|").map(parseFloat);
 /** A row's bar offsets as dressLines recorded them. */
@@ -443,7 +450,7 @@ function readPage(body) {
 function typeGrid(body, box, guess) {
   let lo = Infinity, hi = -Infinity;
   for (const line of body.querySelectorAll(":scope > .line")) {
-    const t = serializeNodes(line);
+    const t = laidText(line);
     const a = t.search(/\S/);
     if (a < 0) continue;
     lo = Math.min(lo, a);
@@ -466,7 +473,7 @@ function readRow(line, lt, glen) {
     // own: a row where they disagree is left to the table layout rather than
     // set on a grid its cells do not answer to.
     if (!bars.length || cells.length !== bars.length + 1) return null;
-    const text = serializeNodes(line);
+    const text = laidText(line);
     const segs = cells.map((c, i) => {
       const from = i ? bars[i - 1] + 1 : glen;
       return ruleCell(text.slice(from, i < bars.length ? bars[i] : text.length), from);
@@ -474,7 +481,7 @@ function readRow(line, lt, glen) {
     return { line, lt, bars, cells, segs };
   }
   if (!lt.querySelector(".rh")) return null;
-  const text = serializeNodes(line).slice(glen);
+  const text = laidText(line).slice(glen);
   if (!/^[ \u2500]*\u2500[ \u2500]*$/.test(text)) return null;
   return { line, lt, bars: [], cells: [lt], segs: [ruleCell(text, glen)], free: true };
 }
