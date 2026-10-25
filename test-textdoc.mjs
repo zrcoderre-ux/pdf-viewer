@@ -30,7 +30,7 @@ import {
   launcherFolderToken, rerunUrl, runRequestText, RUN_REQUEST_FILE, LAUNCHER_STEMS,
   captionParens,
   captionEdit,
-  STRIKE_MARK, strikeRuns, strikeEdit, unstruck,
+  STRIKE_MARK, strikeRuns, strikeEdit, unstruck, strikeLayout,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans, translate, translateRuns } from "./viewer/pseudo-key.js";
 
@@ -2262,6 +2262,18 @@ console.log("a condensed transcript's sheet: four pages' own numbers, nothing pu
   // to 26 would have read as numbers misread past the paper's last.
   check("the sheets say nothing of where the pleading pages run to", pleadingLast(doc.pages), null);
   check("…as a document of sheets alone says nothing", pleadingLast(readExport([...sheet(1, [30, 31, 32, 33]), ...sheet(2, [34, 35, 36, 37])].join("\n")).pages), null);
+}
+console.log("a line as the page lays it out: a strike's hidden marks take no room (strikeLayout)");
+{
+  const L = strikeLayout(" 3  ~~LESSOR SIGNS HERE~~        LESSEE SIGNS HERE");
+  check("the marks out", L.text, " 3  LESSOR SIGNS HERE        LESSEE SIGNS HERE");
+  check("…so the second column stands where it stood unstruck", L.text.indexOf("LESSEE"), " 3  LESSOR SIGNS HERE        LESSEE SIGNS HERE".indexOf("LESSEE"));
+  check("a place carried back to the line: the character's, or the opening mark before it", [L.toFile(4), L.toFile(4, true), L.toFile(21), L.toFile(29)], [6, 4, 25, 33]);
+  check("…and a place in the line to the layout's", [L.toVis(4), L.toVis(6), L.toVis(23), L.toVis(25), L.toVis(33)], [4, 4, 21, 21, 29]);
+  const M = strikeLayout("~~a~~ b   ~~c d~~  e");
+  check("two runs", [M.text, M.toFile(M.text.indexOf("e")), M.toFile(M.text.indexOf("c"), true)], ["a b   c d  e", 19, 10]);
+  const plain = strikeLayout("no ~~ marks paired here ~~ ");
+  check("marks that pair with nothing are text, and take their room", [plain.text, plain.toFile(5), plain.toVis(5)], ["no ~~ marks paired here ~~ ", 5, 5]);
 }
 console.log("margin numbers that run complete (pageNumbersComplete)");
 {

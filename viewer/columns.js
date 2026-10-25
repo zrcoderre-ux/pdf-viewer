@@ -59,7 +59,7 @@
 // dressed as its text says is left exactly as it is, so the editor's caret
 // text node on any other line is never replaced.
 
-import { checkboxRanges, checkboxState, columnBands, columnCuts, columnWidths, lineIndent, placeColumns, serializeNodes, COLUMN_GUTTER } from "./textdoc.js";
+import { checkboxRanges, checkboxState, columnBands, columnCuts, columnWidths, lineIndent, placeColumns, serializeNodes, strikeLayout, COLUMN_GUTTER } from "./textdoc.js";
 
 /** A node's length in the file: a pseudonym span counts its fake, as the cuts were made on. */
 const fileLength = (n) => (n.nodeType === 3 ? n.data.length : n.nodeType === 1 ? serializeNodes(n).length : 0);
@@ -258,7 +258,14 @@ function splitAt(lt, marks) {
  * changed anything.
  */
 export function dressLineColumns(lt, shape) {
-  if (dressedAs(lt, shape)) return false;
+  if (dressedAs(lt, shape)) {
+    // The cells stand as they should, but where each begins in the file can
+    // have moved under them: a strike's marks go into the cells' own text
+    // (text-reader.js, applyStrikeOp), the cells laid out as they were.
+    let k = 0;
+    for (const c of lt.children) if (c.classList.contains("cc")) { c.__at = k ? shape.cuts[k - 1] : shape.lead; k++; }
+    return false;
+  }
   undressColumns(lt);
   const { ind, lead, cuts, widths, gaps } = shape;
   if (ind || lead) { lt.classList.add("ci"); lt.style.setProperty("--ind", String(ind)); lt.style.setProperty("--lead", String(lead)); }
@@ -338,30 +345,42 @@ export function dressColumns(body) {
       continue;
     }
     l.text = serializeNodes(l.lt);
+    l.lay = strikeLayout(l.text);
     lines.push(l);
   }
+  // Every column, indent and width is counted in the line as it is LAID OUT
+  // (textdoc.strikeLayout): a strike's hidden ~~ marks take no room on the
+  // page, and counted, they moved every column after a struck word on by four
+  // places. The cells are still cut in the file's own text, at the places the
+  // layout's carry back to.
   // The columns each line stands in: where the lines around it begin, for as
   // far down the page as they run (textdoc.columnBands). A plain line begins
   // none, but still stands between the lines that do.
   const page = Array.from({ length: count }, () => ({ text: "" }));
-  for (const l of lines) page[l.at] = { text: l.text, start: l.start };
+  for (const l of lines) page[l.at] = { text: l.lay.text, start: l.start };
   const bands = columnBands(page);
   // …and a plain line is read after all where it stands beside a second
   // column, which its left-hand half can run right up to with a single space
   // between. Only there: a form's column down its caption says nothing about
   // the prose under it. And where the PDF's grid cuts it (gridCuts, below).
   for (const l of plain) {
-    if (bands[l.at].second.size || l.lt.__grid) { l.text = serializeNodes(l.lt); lines.push(l); }
+    if (bands[l.at].second.size || l.lt.__grid) { l.text = serializeNodes(l.lt); l.lay = strikeLayout(l.text); lines.push(l); }
     else { l.line.classList.remove("cols"); l.lt.__colPlan = null; }
   }
   for (const l of lines) {
-    const { ind, lead } = lineIndent(l.text, { start: l.start, origin });
+    const lay = l.lay;
+    const { ind, lead } = lineIndent(lay.text, { start: l.start, origin });
     const { stops, second } = bands[l.at];
     const atoms = spanRanges(l.lt);
-    const own = columnCuts(l.text, { stops, second, start: l.start, atoms });
-    const cuts = gridCuts(l.lt, l.text, own, atoms, lead);
-    const gaps = cuts.map((c) => l.text.slice(0, c).replace(/ +$/, "").length);
-    if (dressLineColumns(l.lt, { ind, lead, cuts, widths: columnWidths(cuts, lead), gaps })) changed = true;
+    const own = columnCuts(lay.text, { stops, second, start: l.start, atoms: atoms.map(([a, b]) => [lay.toVis(a), lay.toVis(b)]) });
+    // In the file: where each cell begins (at a struck word's opening mark),
+    // and where its gap's spaces begin (past a closing one).
+    const leadAt = lay.toFile(lead, true);
+    const ownAt = own.map((c) => lay.toFile(c, true));
+    const cutsAt = gridCuts(l.lt, l.text, ownAt, atoms, leadAt);
+    const cuts = cutsAt === ownAt ? own : cutsAt.map((c) => lay.toVis(c));
+    const gaps = cuts.map((c, k) => Math.min(cutsAt[k], lay.toFile(lay.text.slice(0, c).replace(/ +$/, "").length)));
+    if (dressLineColumns(l.lt, { ind, lead: leadAt, cuts: cutsAt, widths: columnWidths(cuts, lead), gaps })) changed = true;
     // What alignColumns needs to place the line's second columns, in the
     // page's own columns: where its text begins and each piece after a gap.
     // Not for a line the PDF's grid has cut as well: that is a page laid on
@@ -369,7 +388,7 @@ export function dressColumns(body) {
     // …nor for a line the operator has set by hand on a ✓ Use my text page
     // (text-reader.js, markOwnLines: `.own`): its spaces say where its columns
     // stand, and nothing moves them for the font.
-    l.lt.__colPlan = second.size && cuts === own && !l.line.classList.contains("own") ? { from: l.start + lead, cuts: cuts.map((c) => l.start + c), second, origin } : null;
+    l.lt.__colPlan = second.size && cutsAt === ownAt && !l.line.classList.contains("own") ? { from: l.start + lead, cuts: cuts.map((c) => l.start + c), second, origin } : null;
     // A line with a gap between columns, not just an indent: what the page's
     // type has to be small enough to hold on one line (text-reader.js,
     // shapePages), since a column that wraps comes back at the left margin.
@@ -470,10 +489,11 @@ const faceStyle = (face) => (face ? (face.italic ? "italic " : "") + (face.bold 
 export function faceEm(text, face) { return textEm(text, face.family, faceStyle(face)); }
 /** …and the face's own space, in ems: what a line's opening spaces are drawn at in it. */
 export function faceSpace(face) { return textEm("          ", face.family, faceStyle(face)) / 10; }
-/** A cell's text as the page shows it: a pseudonym as it reads, the gap's spaces left out. */
+/** A cell's text as the page shows it: a pseudonym as it reads, the gap's spaces left out, and a strike's hidden ~~ marks (.sk), which take no room on the page. */
 function pieceText(cell) {
   let s = "";
-  for (const n of cell.childNodes) if (!(n.nodeType === 1 && n.classList.contains("cg"))) s += n.textContent;
+  const w = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) if (!n.parentElement.closest(".cg, .sk")) s += n.data;
   return s;
 }
 

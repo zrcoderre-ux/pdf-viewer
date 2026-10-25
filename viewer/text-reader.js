@@ -11573,39 +11573,43 @@ function useMyText(i) {
     toast(`${where}: no longer handed to PDF-Linker as text typed in by hand.`);
     return;
   }
-  if (pageReadsDidNotOcr(i)) {
-    toast(`${where} reads ${TD.DID_NOT_OCR} — type its text in first (or ↻ OCR This Page to have it read again).`, { error: true });
-    return;
-  }
-  if (!entry) {
-    toast(`${where} carries no PDF page number, so PDF-Linker cannot be told which page the text is for.`, { error: true });
-    return;
-  }
-  if (flagsFor !== valuesStoreKey()) {
-    toast("The case folder's list is still being read — try again in a moment.", { error: true });
-    return;
-  }
+  const why = askUseMyText(i, where);
+  if (why) { toast(why, { error: true, ms: 9000 }); return; }
+  // The page is the operator's to type now: ✎ Edit comes on with it.
+  if (!editing) setEditing(true);
+  toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run keeps the text and writes this page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
+}
+/**
+ * ✎ Use my text's "on" (useMyText, and every strike: strikeSelection): page
+ * `i` put on the list, with the sum of its text as it stands. Null where it
+ * was put on, or was on already; else why not, as a sentence naming the page
+ * (`where`) — it reads DID NOT OCR, it carries no PDF page number, the case
+ * folder's list is not read yet, or it carries a line shaped like
+ * PDF-Linker's own page heading, which PDF-Linker would refuse.
+ */
+function askUseMyText(i, where = TD.pageLabel(doc.pages[i])) {
+  const p = doc.pages[i];
+  const entry = pageEntryAt(i);
+  if (entry && textFixed.some((e) => TD.sameNoOcr(e, entry))) return null;
+  if (pageReadsDidNotOcr(i)) return `${where} reads ${TD.DID_NOT_OCR} — type its text in first (or ↻ OCR This Page to have it read again).`;
+  if (!entry) return `${where} carries no PDF page number, so PDF-Linker cannot be told which page the text is for.`;
+  if (flagsFor !== valuesStoreKey()) return "The case folder's list is still being read — try again in a moment.";
   const body = bodyForPage(i);
   const lines = body ? TD.serializeNodes(body).split("\n") : p.lines;
   // A line shaped like PDF-Linker's own furniture (a page header, a held
   // page's heading pasted back with its text) is refused by PDF-Linker, not
   // cut at: the page is not handed over until it is taken out.
   const furniture = TD.pageFurnitureLine(lines);
-  if (furniture) {
-    toast(`${where} carries the line “${furniture}”, which is shaped like PDF-Linker's own page heading — it would refuse the page. Take that line out, then press ✎ Use my text again.`, { error: true, ms: 9000 });
-    return;
-  }
+  if (furniture) return `${where} carries the line “${furniture}”, which is shaped like PDF-Linker's own page heading — it would refuse the page. Take that line out, then press ✎ Use my text again.`;
   fixPressed.add(fixPressedKey(entry));
-  releaseSetAside(entry); // pressed by hand: a page PDF-Linker set aside is the operator's to hand over again
+  releaseSetAside(entry); // asked for: a page PDF-Linker set aside is the operator's to hand over again
   noOcr = TD.setNoOcr(noOcr, entry, false);
   ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
   fixDeclined = TD.setNoOcr(fixDeclined, entry, false);
   textFixed = TD.setTextFixed(textFixed, { ...entry, sum: TD.pageTextSum(lines) }, true);
   persistValues();
   renderFlags();
-  // The page is the operator's to type now: ✎ Edit comes on with it.
-  if (!editing) setEditing(true);
-  toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run keeps the text and writes this page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
+  return null;
 }
 /**
  * Each transcribed page of the documents a save just wrote (`members`) takes
@@ -11789,10 +11793,13 @@ function markOwnLines(body) {
     for (const l of lines) if (l.classList.contains("own")) l.classList.remove("own");
     return;
   }
+  // A line read without its strike marks: striking words moves nothing of a
+  // line's own (a strike turns ✓ Use my text on, and a line struck after was
+  // taken for the operator's own and set apart from its PDF's pieces).
   const left = new Map();
-  for (const t of body.__freeFrom) left.set(t, (left.get(t) || 0) + 1);
+  for (const t of body.__freeFrom) { const u = TD.unstruck(t); left.set(u, (left.get(u) || 0) + 1); }
   for (const l of lines) {
-    const t = TD.serializeNodes(l);
+    const t = TD.unstruck(TD.serializeNodes(l));
     const n = left.get(t) || 0;
     if (n > 0) left.set(t, n - 1);
     l.classList.toggle("own", n === 0);
@@ -15067,13 +15074,25 @@ function strikeSelection() {
   dressColumns(body);
   dressStrikes(body);
   if (body.querySelector("[data-here]")) syncSpots(body);
-  setDirty(true, pageIndexOf(body));
+  const i = pageIndexOf(body);
+  setDirty(true, i);
+  // …and the page is handed over as ✓ Use my text with it (the owner): the
+  // page as struck is the operator's, and PDF-Linker's next run keeps it so.
+  const p = doc.pages[i];
+  const was = !!p && !!pageEntryAt(i) && textFixed.some((e) => TD.sameNoOcr(e, pageEntryAt(i)));
+  const why = p && p.header != null ? askUseMyText(i) : null;
   lastSnapPage = -1; // what is typed next is its own step
   document.getSelection().removeAllRanges(); // …and the line through the words is seen, not the selection over it
+  // The page is planned on its PDF again NOW, as the line now reads: the
+  // plan kept from before the strike was cut for the line without its marks,
+  // so it did not hold, and the line stood on the export's grid beside pieces
+  // set where the PDF prints them until the next pass (a scroll) planned it.
+  textEpoch++;
   afterTextChange();
-  toast(edit.strike
+  const fixed = why ? ` ✓ Use my text could not be turned on: ${why}` : was ? "" : " ✓ Use my text is on for the page: PDF-Linker's next run keeps it as you have it (click it to withdraw).";
+  toast((edit.strike
     ? "Struck through — 💾 Save writes it into the file as ~~…~~, and PDF-Linker's next run puts a strikeout on those words in the PDF. Ctrl+Z takes it back."
-    : "Strike taken off — 💾 Save writes the words without it, and PDF-Linker's next run takes the strikeout it put there off the PDF.");
+    : "Strike taken off — 💾 Save writes the words without it, and PDF-Linker's next run takes the strikeout it put there off the PDF.") + fixed, { ms: fixed ? 9000 : undefined });
 }
 $("strike-btn").addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
 $("strike-btn").addEventListener("click", strikeSelection);
@@ -21497,10 +21516,14 @@ function applyMatchedLayoutNow() {
           // justified line's words stand wherever its spacing stretched them,
           // no evidence of where the file's characters fall.
           const apart = PS.standApart(m.found);
+          // (Counted as the line is laid out: a strike's hidden marks take no
+          // room, and counted, they set a struck line's pieces four places
+          // off the rest and the page's grid off with them.)
+          const lay = m.map && lines[k].querySelector(":scope > .lt .sk") ? TD.strikeLayout(TD.serializeNodes(ltOf(lines[k]))) : null;
           for (const [gi, g] of m.found.entries()) {
             if (g.glued || g.at !== g.start || !apart[gi]) continue;
             const col = m.map.fileAt(g.start);
-            if (col >= 0) pairs.push({ col, x: g.x });
+            if (col >= 0) pairs.push({ col: lay ? lay.toVis(col) : col, x: g.x });
           }
         }
         charGridFit = PS.charGrid(pairs);
@@ -22145,7 +22168,7 @@ function autoLayPage(i) {
   // The character grid: kept from the first time, else read off the page's
   // pieces against where the file has them, else the margin and half the type.
   let grid = rec && rec.unit > 0 ? { x0: rec.x0, unit: rec.unit } : null;
-  if (!grid) grid = PS.charGrid(data.flatMap((d) => d.pieces.map((p) => ({ col: d.indent + p.at, x: p.x }))));
+  if (!grid) grid = PS.charGrid(data.flatMap((d) => { const lay = TD.strikeLayout(d.body); return d.pieces.map((p) => ({ col: d.indent + lay.toVis(p.at), x: p.x })); }));
   // No grid to read (the file's columns do not follow the PDF's at any one
   // character width): its indents and spacing cannot be worked out in the
   // file's characters, and are left as they are; the numbers still are.
@@ -22535,6 +22558,22 @@ function columnCaps(bodies) {
 // it, never a cell, so it asks nothing of the columns.
 
 /**
+ * A line's text as it reads, with a strike's hidden ~~ marks (.sk) read as
+ * spaces, place for place: the marks take no room on the page and the PDF
+ * prints none, so an item the line strikes through is found where its own
+ * words begin, after a space as the PDF sets it, and set at the PDF's x —
+ * read as text, the mark glued the item to what stood before it, and a
+ * struck "$500" at the head of its column ran on in the piece before it, two
+ * tildes' width short of where the PDF prints it.
+ */
+function shownBlankingMarks(lt) {
+  if (!lt.querySelector(".sk")) return lt.textContent;
+  let s = "";
+  const w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) s += n.parentElement.closest(".sk") ? " ".repeat(n.data.length) : n.data;
+  return s;
+}
+/**
  * The PDF's items each line carries: per line, null for a line no row
  * claims, else { row, its matched row; map, lineMap's reading of it; found,
  * pdfsync.lineItems }. Each item of the line's row, and of the rows beside it
@@ -22557,7 +22596,7 @@ function matchItems(lines, texts, rowOf, rows, { skip = null } = {}) {
     // finding the pieces in that put every cut the gutter's width early — in
     // the middle of a word, on a numbered page whose PDF's numbers could not
     // be read (it takes this path rather than its numbers').
-    const shown = lt.textContent;
+    const shown = shownBlankingMarks(lt);
     let cands = PS.rowItemsNear(rows, j, taken);
     if (skip) cands = cands.filter((c) => !skip(c.it));
     return { row, map, shown, found: PS.lineItems(shown, cands, { atoms: map.atoms }) };
@@ -22625,8 +22664,13 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     // …or one set in another size than the text before it (pdfsync.sizeSteps):
     // a form's typed value after its label, at the size its field sets it in.
     const apart = PS.standApart(found), steps = PS.sizeSteps(found);
+    // A piece the line strikes through begins at its hidden opening mark
+    // (shownBlankingMarks read the marks as spaces to find it): the mark goes
+    // with its piece, and the line's first piece is still its first.
+    const real = lt.textContent;
+    const markStart = (d) => { while (d > 0 && real[d - 1] === "~" && shown[d - 1] === " ") d--; return d; };
     found.forEach((g, gi) => {
-      const at = g.glued ? -1 : map.fileAt(g.at);
+      const at = g.glued ? -1 : map.fileAt(markStart(g.at));
       if (!(at >= 0)) return;
       if (g.at > first && !apart[gi] && !steps[gi]) return;
       const f = faceOf(g.item.font);
@@ -22634,7 +22678,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
       const size = own > 0 && Math.abs(h - own) <= own * 0.2 ? own : h;
       const pre = shown.slice(g.at, g.start);
       places.push([at, { x: g.x - (pre ? faceEm(pre, f || face) * size : 0), size, face: f }]);
-      if (g.at > first) cuts.push(at);
+      if (markStart(g.at) > markStart(first)) cuts.push(at);
     });
     return { text: TD.serializeNodes(lt), cuts, places, face, runs };
   });
@@ -22730,7 +22774,11 @@ function placePages(plans, near) {
       const lead = Math.max(0, lt.textContent.search(/\S/)); // the text's own, not its gutter number's (matchItems)
       const places = new Map(c.places.map(([a, v]) => [a, { x: v.x * s, size: v.size * s, face: v.face }]));
       const start = (grid ? p.lefts[k] + lead * grid.unit : p.lefts[k]) * s;
-      if (placeLine(lt, { places, start, at, face: c.face, size, lead, cellFaces: c.cellFaces || null, runs })) moved = true;
+      // A struck line's places on the grid counted as it is laid out: its
+      // hidden marks take no room (textdoc.strikeLayout).
+      const lay = lt.querySelector(".sk") ? TD.strikeLayout(TD.serializeNodes(lt)) : null;
+      const lineAt = lay ? (a, x, from) => at(lay.toVis(a), x, from == null ? from : lay.toVis(from)) : at;
+      if (placeLine(lt, { places, start, at: lineAt, face: c.face, size, lead, cellFaces: c.cellFaces || null, runs })) moved = true;
     });
     if (moved && caret >= 0) { const pt = pointAtOffset(p.body, caret); if (pt) placeCaret(pt.node, pt.offset); }
     p.body.__placed = true;

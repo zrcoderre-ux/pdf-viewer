@@ -2412,7 +2412,58 @@ real and struck; taken off a word in a run's middle
 and put back by Ctrl+Z; refused on spaces; a run PDF-Linker wrote shown
 struck, its marks hidden, and written back byte for byte by a save of other
 typing; K taking a strike off; none on Combined Text.txt. `test-textdoc.mjs`
-pins `strikeRuns`, `strikeEdit` and `unstruck`.
+pins `strikeRuns`, `strikeEdit` and `unstruck`. (Since, 2026-10-25, the residual
+above was measured wrong for every layout but the caption fixture's, and is
+closed, and a strike turns ✓ Use my text on: the two paragraphs below.)
+
+**A strike moves nothing** (`TD.strikeLayout`; columns.js `dressColumns`,
+`pieceText`, `dressLineColumns`; rules.js `laidText`; `shownBlankingMarks`,
+`planCells`, `placePages`, `autoLayPage`; pdfsync.js `fileLayout`). The owner:
+"Strike through should not change the spacing in pdf viewer." The marks are
+hidden and take no room, but every layout that places a line's pieces counted
+them as characters. Measured on invented pages, struck words moved what stood
+after them on their line: away from the PDF, a second column 25.6 px on and a
+caption's ")" side 2.7 px; a ruled box's row its bar 5.3 px (the row then
+read as a box of its own); beside the PDF, a struck item at the head of its
+column (a "$500") 7 px short of the PDF's x, since the mark glued it to the
+text before it. Now every one of them counts a line as it is laid out, its
+struck runs' marks taken out (`strikeLayout`: the text, and its places carried back to the
+file's, an opening mark going with the column it opens): the column cuts,
+widths and bands (the cells are still cut in the file's own text), a box's
+bars and a caption's side (`laidText`), the width a second column is placed
+past (`pieceText` reads no `.sk`), the PDF's items found where a struck word
+begins (`shownBlankingMarks` reads the marks as spaces, `planCells` starts the
+piece at its mark), the grid fitted and each struck line set on it, and a
+✓ Use my text page laid out as its PDF (`fileLayout`). Counted so, a strike
+can leave a line's cells as they stand, and the place each begins in the
+file is then set afresh on them (`dressLineColumns`): left as it was, the
+PDF's x was looked up at the place before the marks, and two struck rows of
+a schedule stood 15 px short (measured while this was made). The page is
+also planned on its PDF again at once (`textEpoch`), not at the next scroll. The file is unchanged: the
+marks stay where `strikeEdit` puts them, and the ⇄ Raw sheet, which shows
+them, shows the line four characters longer. `test-strike-spacing.mjs`
+(Chromium) pins it, read and edited, beside the PDF and away from it;
+`test-textdoc.mjs` pins `strikeLayout`. (Taking the room out of the gap after
+the struck words in the file instead was tried: it held the reading view and
+the grid, but in the editor, where a gap's spaces are drawn, the next column
+moved left by them.)
+
+**…and a strike turns ✓ Use my text on** (`askUseMyText`, `strikeSelection`;
+the owner, 2026-10-25: "Using the strike feature on a page should
+automatically check Use my text"). This REVERSES "What a strike is not" above
+for the strike itself: striking words, or taking a strike off, puts the page on
+the list as the button does (`askUseMyText`, the button's "on" half, shared
+with `useMyText`), and the toast says so, or why it could not (the page reads
+DID NOT OCR, carries no PDF page number, or a line PDF-Linker would refuse).
+✎ Edit is not turned on with it, a strike being made with the document
+protected too, and a page withdrawn by its button comes on again with the
+next strike. A save after typing still asks `autoUseMyText` by the words
+alone. On a ✓ Use my text page a line struck after the button was pressed was
+taken for a line the operator set by hand (`.own`) and lost its PDF's
+placement; `markOwnLines` now reads each line without its marks. PDF-Linker
+counts such a page as the operator's though its words are its layer's own
+(`_pn_text_fixed_strikes_moved`: its struck words are not those its last
+export struck), where before it refused it as nothing typed.
 
 **A half line under every margin number** (`halfAfter`, `pullUp`,
 `moveIntoHalfAbove`, in `enterAtCaret`, `joinLineUp`, `backspaceAtCaret`,
