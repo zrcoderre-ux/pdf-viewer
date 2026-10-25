@@ -2414,7 +2414,7 @@ struck, its marks hidden, and written back byte for byte by a save of other
 typing; K taking a strike off; none on Combined Text.txt. `test-textdoc.mjs`
 pins `strikeRuns`, `strikeEdit` and `unstruck`. (Since, 2026-10-25, the residual
 above was measured wrong for every layout but the caption fixture's, and is
-closed, and a strike turns ✓ Use my text on: the two paragraphs below.)
+closed: the paragraph below.)
 
 **A strike moves nothing** (`TD.strikeLayout`; columns.js `dressColumns`,
 `pieceText`, `dressLineColumns`; rules.js `laidText`; `shownBlankingMarks`,
@@ -2448,22 +2448,19 @@ the struck words in the file instead was tried: it held the reading view and
 the grid, but in the editor, where a gap's spaces are drawn, the next column
 moved left by them.)
 
-**…and a strike turns ✓ Use my text on** (`askUseMyText`, `strikeSelection`;
-the owner, 2026-10-25: "Using the strike feature on a page should
-automatically check Use my text"). This REVERSES "What a strike is not" above
-for the strike itself: striking words, or taking a strike off, puts the page on
-the list as the button does (`askUseMyText`, the button's "on" half, shared
-with `useMyText`), and the toast says so, or why it could not (the page reads
-DID NOT OCR, carries no PDF page number, or a line PDF-Linker would refuse).
-✎ Edit is not turned on with it, a strike being made with the document
-protected too, and a page withdrawn by its button comes on again with the
-next strike. A save after typing still asks `autoUseMyText` by the words
-alone. On a ✓ Use my text page a line struck after the button was pressed was
-taken for a line the operator set by hand (`.own`) and lost its PDF's
-placement; `markOwnLines` now reads each line without its marks. PDF-Linker
-counts such a page as the operator's though its words are its layer's own
-(`_pn_text_fixed_strikes_moved`: its struck words are not those its last
-export struck), where before it refused it as nothing typed.
+**A strike does not turn ✓ Use my text on** (tried and taken back, 2026-10-25).
+At the owner's word ("Using the strike feature on a page should automatically
+check Use my text") every strike put its page on the list for a while, and
+PDF-Linker's nothing-typed refusal was narrowed to take such a page. Taken
+back at the owner's direction the same day, once the scheme was set out: a
+strike already outlives every run that rebuilds the export (PDF-Linker puts a
+StrikeOut annotation on the words, and writes them back struck from it), and
+✓ Use my text makes the operator's text the page's for good — kept, written
+into a scan's layer, never OCR'd again — which a page only struck through
+does not need. What stays: on a ✓ Use my text page a line struck after the
+button was pressed is not taken for a line the operator set by hand
+(`markOwnLines` reads each line without its marks; before, it lost its PDF's
+placement). `test-strike-spacing.mjs` pins both.
 
 **A half line under every margin number** (`halfAfter`, `pullUp`,
 `moveIntoHalfAbove`, in `enterAtCaret`, `joinLineUp`, `backspaceAtCaret`,
