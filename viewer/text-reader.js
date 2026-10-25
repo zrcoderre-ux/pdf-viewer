@@ -11794,8 +11794,8 @@ function markOwnLines(body) {
     return;
   }
   // A line read without its strike marks: striking words moves nothing of a
-  // line's own (a strike turns ✓ Use my text on, and a line struck after was
-  // taken for the operator's own and set apart from its PDF's pieces).
+  // line's own (a line struck after the button was pressed was taken for the
+  // operator's own and set apart from its PDF's pieces).
   const left = new Map();
   for (const t of body.__freeFrom) { const u = TD.unstruck(t); left.set(u, (left.get(u) || 0) + 1); }
   for (const l of lines) {

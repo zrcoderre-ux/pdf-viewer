@@ -1,14 +1,14 @@
 // Browser test for a strike that moves nothing (textdoc.js strikeLayout;
 // columns.js dressColumns, pieceText, dressLineColumns; rules.js laidText;
 // text-reader.js shownBlankingMarks, planCells, placePages, autoLayPage;
-// pdfsync.js fileLayout) and turns ✓ Use my text on (strikeSelection,
-// askUseMyText, markOwnLines). A strike's ~~ marks are hidden on the page and
+// pdfsync.js fileLayout; markOwnLines). A strike's ~~ marks are hidden on the page and
 // take no room there; counted as characters, every column after a struck
 // word moved four places on — a second column, a caption's ")" side, a ruled
 // box's bar — and beside the PDF a struck piece at a column's head was set
 // two tildes short of the PDF's x. The owner: "Strike through should not
-// change the spacing in pdf viewer", and "Using the strike feature on a page
-// should automatically check Use my text."
+// change the spacing in pdf viewer". A strike leaves ✓ Use my text as it
+// was, and on a ✓ Use my text page a struck line is not taken for one the
+// operator set by hand.
 //
 // Run: node test-strike-spacing.mjs   (from the repo root)
 //
@@ -227,7 +227,7 @@ async function run() {
       check("in the editor nothing moved", moved(editing, await placesOf(p, words)), []);
       await editToggle(p);
       check("…nor read", moved(reading, await placesOf(p, words)), []);
-      check("✓ Use my text came on with the first strike, and no line of it is set apart as typed", await fixState(p), { button: "✓ Use my text", own: 0 });
+      check("✓ Use my text left as it was", (await fixState(p)).button, "✎ Use my text");
       check("no page errors", r.log.errors, []);
       await r.close();
     }
@@ -263,22 +263,22 @@ async function run() {
       const before = await placesOf(p, words);
       await strike(p, [["Rent", "charged"], ["Deposit", "held"], ["$500", "$500"], ["LESSOR", "HERE"]]);
       check("every piece where it stood", moved(before, await placesOf(p, words)), []);
-      check("✓ Use my text on, and no line set apart as typed", await fixState(p), { button: "✓ Use my text", own: 0 });
       check("no page errors", r.log.errors, []);
       await r.close();
     }
-    console.log("5. ✓ Use my text withdrawn, then a strike: on again");
+    console.log("5. on a ✓ Use my text page beside its PDF: a struck line is not set apart as typed, and nothing moves");
     {
-      const r = await newReader("A Decl.txt");
+      const r = await newReader("B Exhibit.txt");
       const p = r.page;
-      await strike(p, [["letter", "May 4"]]);
-      check("on with the strike", (await fixState(p)).button, "✓ Use my text");
+      await besidePdf(p, SCHEDULE, false);
       await p.evaluate(() => document.querySelector("#pages .tpage .page-label .fix-page").click());
-      await p.waitForTimeout(400);
-      check("withdrawn by its button", (await fixState(p)).button, "✎ Use my text");
-      await strike(p, [["LESSOR", "HERE"]]);
-      check("…and on again with the next strike", (await fixState(p)).button, "✓ Use my text");
-      check("the toast says so", /Use my text is on for the page/.test(await p.evaluate(() => document.getElementById("toast").textContent)), true);
+      await p.waitForTimeout(1200);
+      check("✓ Use my text pressed", (await fixState(p)).button, "✓ Use my text");
+      const words = ["Rent", "$1,200", "May 4", "Deposit", "$500", "May 5"];
+      const before = await placesOf(p, words);
+      await strike(p, [["Rent", "charged"], ["$500", "$500"]]);
+      check("no line set apart as typed", (await fixState(p)).own, 0);
+      check("every piece where it stood", moved(before, await placesOf(p, words)), []);
       check("no page errors", r.log.errors, []);
       await r.close();
     }
