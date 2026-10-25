@@ -11573,39 +11573,43 @@ function useMyText(i) {
     toast(`${where}: no longer handed to PDF-Linker as text typed in by hand.`);
     return;
   }
-  if (pageReadsDidNotOcr(i)) {
-    toast(`${where} reads ${TD.DID_NOT_OCR} — type its text in first (or ↻ OCR This Page to have it read again).`, { error: true });
-    return;
-  }
-  if (!entry) {
-    toast(`${where} carries no PDF page number, so PDF-Linker cannot be told which page the text is for.`, { error: true });
-    return;
-  }
-  if (flagsFor !== valuesStoreKey()) {
-    toast("The case folder's list is still being read — try again in a moment.", { error: true });
-    return;
-  }
+  const why = askUseMyText(i, where);
+  if (why) { toast(why, { error: true, ms: 9000 }); return; }
+  // The page is the operator's to type now: ✎ Edit comes on with it.
+  if (!editing) setEditing(true);
+  toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run keeps the text and writes this page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
+}
+/**
+ * ✎ Use my text's "on" (useMyText, and every strike: strikeSelection): page
+ * `i` put on the list, with the sum of its text as it stands. Null where it
+ * was put on, or was on already; else why not, as a sentence naming the page
+ * (`where`) — it reads DID NOT OCR, it carries no PDF page number, the case
+ * folder's list is not read yet, or it carries a line shaped like
+ * PDF-Linker's own page heading, which PDF-Linker would refuse.
+ */
+function askUseMyText(i, where = TD.pageLabel(doc.pages[i])) {
+  const p = doc.pages[i];
+  const entry = pageEntryAt(i);
+  if (entry && textFixed.some((e) => TD.sameNoOcr(e, entry))) return null;
+  if (pageReadsDidNotOcr(i)) return `${where} reads ${TD.DID_NOT_OCR} — type its text in first (or ↻ OCR This Page to have it read again).`;
+  if (!entry) return `${where} carries no PDF page number, so PDF-Linker cannot be told which page the text is for.`;
+  if (flagsFor !== valuesStoreKey()) return "The case folder's list is still being read — try again in a moment.";
   const body = bodyForPage(i);
   const lines = body ? TD.serializeNodes(body).split("\n") : p.lines;
   // A line shaped like PDF-Linker's own furniture (a page header, a held
   // page's heading pasted back with its text) is refused by PDF-Linker, not
   // cut at: the page is not handed over until it is taken out.
   const furniture = TD.pageFurnitureLine(lines);
-  if (furniture) {
-    toast(`${where} carries the line “${furniture}”, which is shaped like PDF-Linker's own page heading — it would refuse the page. Take that line out, then press ✎ Use my text again.`, { error: true, ms: 9000 });
-    return;
-  }
+  if (furniture) return `${where} carries the line “${furniture}”, which is shaped like PDF-Linker's own page heading — it would refuse the page. Take that line out, then press ✎ Use my text again.`;
   fixPressed.add(fixPressedKey(entry));
-  releaseSetAside(entry); // pressed by hand: a page PDF-Linker set aside is the operator's to hand over again
+  releaseSetAside(entry); // asked for: a page PDF-Linker set aside is the operator's to hand over again
   noOcr = TD.setNoOcr(noOcr, entry, false);
   ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
   fixDeclined = TD.setNoOcr(fixDeclined, entry, false);
   textFixed = TD.setTextFixed(textFixed, { ...entry, sum: TD.pageTextSum(lines) }, true);
   persistValues();
   renderFlags();
-  // The page is the operator's to type now: ✎ Edit comes on with it.
-  if (!editing) setEditing(true);
-  toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run keeps the text and writes this page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
+  return null;
 }
 /**
  * Each transcribed page of the documents a save just wrote (`members`) takes
@@ -15070,7 +15074,13 @@ function strikeSelection() {
   dressColumns(body);
   dressStrikes(body);
   if (body.querySelector("[data-here]")) syncSpots(body);
-  setDirty(true, pageIndexOf(body));
+  const i = pageIndexOf(body);
+  setDirty(true, i);
+  // …and the page is handed over as ✓ Use my text with it (the owner): the
+  // page as struck is the operator's, and PDF-Linker's next run keeps it so.
+  const p = doc.pages[i];
+  const was = !!p && !!pageEntryAt(i) && textFixed.some((e) => TD.sameNoOcr(e, pageEntryAt(i)));
+  const why = p && p.header != null ? askUseMyText(i) : null;
   lastSnapPage = -1; // what is typed next is its own step
   document.getSelection().removeAllRanges(); // …and the line through the words is seen, not the selection over it
   // The page is planned on its PDF again NOW, as the line now reads: the
@@ -15079,9 +15089,10 @@ function strikeSelection() {
   // set where the PDF prints them until the next pass (a scroll) planned it.
   textEpoch++;
   afterTextChange();
-  toast(edit.strike
+  const fixed = why ? ` ✓ Use my text could not be turned on: ${why}` : was ? "" : " ✓ Use my text is on for the page: PDF-Linker's next run keeps it as you have it (click it to withdraw).";
+  toast((edit.strike
     ? "Struck through — 💾 Save writes it into the file as ~~…~~, and PDF-Linker's next run puts a strikeout on those words in the PDF. Ctrl+Z takes it back."
-    : "Strike taken off — 💾 Save writes the words without it, and PDF-Linker's next run takes the strikeout it put there off the PDF.");
+    : "Strike taken off — 💾 Save writes the words without it, and PDF-Linker's next run takes the strikeout it put there off the PDF.") + fixed, { ms: fixed ? 9000 : undefined });
 }
 $("strike-btn").addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
 $("strike-btn").addEventListener("click", strikeSelection);
