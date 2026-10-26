@@ -2225,8 +2225,10 @@ const VALUES_HEAD = [
   "# its next full run reads the page again. A line 'text corrected: FILE |",
   "# page N | sum …' is a page whose text was typed in by hand: PDF-Linker",
   "# writes that text into the PDF as the page's text layer and never OCRs the",
-  "# page again. Lines beginning with # are ignored. Delete a line to withdraw",
-  "# it.",
+  "# page again. A line 'fix: VALUE | ANSWER' is an answer given in the walk",
+  "# through the key, read as that value's Fix? cell in LEAKS.xlsx: a typed",
+  "# replacement (a new pseudonym for it), ~CORRECT, *CORRECT or a [kept part].",
+  "# Lines beginning with # are ignored. Delete a line to withdraw it.",
 ];
 
 // A keep line: `no: VALUE` (this case) or `never: VALUE` (every case).
@@ -2235,6 +2237,35 @@ export const KEEP_RE = /^(no|never)\s*:\s*(.+?)\s*$/i;
 // several words faked whole. It is a value to fake like any other line, so it
 // is on the flagged list; the prefix is what says the words go together.
 export const PHRASE_RE = /^phrase\s*:\s*(.+?)\s*$/i;
+// An answer given in the walk through the key: `fix: VALUE | ANSWER`, the
+// value's whole Fix? cell (PDF-Linker's _READER_FIX_RE). Its no, never and
+// phrase go as the lines above; this carries the rest — a typed replacement
+// above all, a new pseudonym for a name the key fakes already.
+export const FIX_RE = /^fix\s*:\s*(.+?)\s*\|\s*(.+?)\s*$/i;
+/** An answer: { value, answer }, both trimmed, or null without both. */
+export function makeAnswer(value, answer) {
+  const v = normalizeValue(value), a = String(answer == null ? "" : answer).replace(/\s+/g, " ").trim();
+  return v && a ? { value: v, answer: a } : null;
+}
+/** The answer the list holds for `value`, or "". */
+export function answerFor(list, value) {
+  const f = foldKey(normalizeValue(value));
+  const a = (list || []).find((x) => foldKey(x.value) === f);
+  return a ? a.answer : "";
+}
+/** The list with `value` answered `answer` (in place of any answer it had), or with its answer taken off where `answer` is empty; the same list when nothing moves. */
+export function setAnswer(list, value, answer) {
+  const have = list || [];
+  const f = foldKey(normalizeValue(value));
+  const now = makeAnswer(value, answer);
+  const at = have.findIndex((x) => foldKey(x.value) === f);
+  if (!now) return at < 0 ? have : have.filter((_, k) => k !== at);
+  if (at >= 0 && have[at].answer === now.answer) return have;
+  // Answered again: the value as it was first written, the answer the new one.
+  return at < 0 ? have.concat([now]) : have.map((x, k) => (k === at ? { value: x.value, answer: now.answer } : x));
+}
+/** Its line in New Real Values.txt. */
+export function answerLine(a) { return `fix: ${a.value} | ${a.answer}`; }
 export const KEEP_CONTROLS = ["no", "never"];
 
 /**
@@ -2420,6 +2451,14 @@ export function decisionDelta(a, b) {
     const before = ka.get(key) || null, after = kb.get(key) || null;
     if (!sameKeep(before, after)) keeps.push({ before, after });
   }
+  // …and the answers given in the walk through the key, by value.
+  const aa = new Map((a.answers || []).map((x) => [foldKey(x.value), x]));
+  const ab = new Map((b.answers || []).map((x) => [foldKey(x.value), x]));
+  const answers = [];
+  for (const key of new Set([...aa.keys(), ...ab.keys()])) {
+    const before = aa.get(key) || null, after = ab.get(key) || null;
+    if ((before && before.answer) !== (after && after.answer)) answers.push({ before, after });
+  }
   const rows = [];
   if (a.rows && b.rows && a.rows.length === b.rows.length) {
     a.rows.forEach((r, i) => {
@@ -2428,8 +2467,8 @@ export function decisionDelta(a, b) {
     });
   }
   const moved = flagged.add.length || flagged.drop.length || phrases.add.length || phrases.drop.length
-    || settled.add.length || settled.drop.length || keeps.length || rows.length;
-  return moved ? { flagged, phrases, settled, keeps, rows } : null;
+    || settled.add.length || settled.drop.length || keeps.length || rows.length || answers.length;
+  return moved ? { flagged, phrases, settled, keeps, rows, answers } : null;
 }
 /** State `state` with `delta` taken back (`undo`) or made again; a new state, `state` untouched. */
 export function applyDecisionDelta(state, delta, undo) {
@@ -2450,10 +2489,15 @@ export function applyDecisionDelta(state, delta, undo) {
   }
   const rows = state.rows ? state.rows.map((r) => r.slice()) : null;
   if (rows) for (const { i, before, after } of delta.rows) if (i < rows.length) rows[i] = (undo ? before : after).slice();
+  let answers = (state.answers || []).slice();
+  for (const { before, after } of delta.answers || []) {
+    const want = undo ? before : after;
+    answers = setAnswer(answers, (before || after).value, want ? want.answer : "");
+  }
   return {
     flagged: list(state.flagged, delta.flagged),
     phrases: list(state.phrases, delta.phrases),
-    keeps, settled: [...settled], rows,
+    keeps, settled: [...settled], rows, answers,
   };
 }
 
@@ -2572,16 +2616,17 @@ export function legacyStateHold({ textFiles = false, sameName = 0, saved = "", o
 export function legacyListSplit(list, hold) {
   const l = list || {};
   const any = (x) => Object.values(x).some((v) => Array.isArray(v) && v.length);
-  const whole = { values: l.values || [], keeps: l.keeps || [], phrases: l.phrases || [], noOcr: l.noOcr || [], ocrAgain: l.ocrAgain || [], textFixed: l.textFixed || [] };
+  const whole = { values: l.values || [], keeps: l.keeps || [], phrases: l.phrases || [], noOcr: l.noOcr || [], ocrAgain: l.ocrAgain || [], textFixed: l.textFixed || [], answers: l.answers || [] };
   if (!hold) return { move: any(whole) ? whole : null, held: null };
   if (hold === "text" || hold === "named") return { move: null, held: any(whole) ? whole : null };
-  const move = { values: whole.values, keeps: [], phrases: whole.phrases.filter((p) => isPhrase(whole.values, p)), noOcr: [], ocrAgain: [], textFixed: [] };
-  const held = { values: [], keeps: whole.keeps, phrases: [], noOcr: whole.noOcr, ocrAgain: whole.ocrAgain, textFixed: whole.textFixed };
+  const move = { values: whole.values, keeps: [], phrases: whole.phrases.filter((p) => isPhrase(whole.values, p)), noOcr: [], ocrAgain: [], textFixed: [], answers: [] };
+  const held = { values: [], keeps: whole.keeps, phrases: [], noOcr: whole.noOcr, ocrAgain: whole.ocrAgain, textFixed: whole.textFixed, answers: whole.answers };
   return { move: any(move) ? move : null, held: any(held) ? held : null };
 }
 
 /**
- * Two stored lists ({ values, keeps, phrases, noOcr, ocrAgain, textFixed })
+ * Two stored lists ({ values, keeps, phrases, noOcr, ocrAgain, textFixed,
+ * answers })
  * made one: everything in either, `mine` winning where both name a value or
  * a page — a keep's control, a phrase, a page asked to be read again rather
  * than left unread — as the folder's New Real Values.txt is merged into its
@@ -2604,10 +2649,12 @@ export function mergeStoredLists(mine, theirs) {
   for (const e of b.noOcr || []) if (!named(e)) noOcr = setNoOcr(noOcr, e, true);
   for (const e of b.ocrAgain || []) if (!named(e)) ocrAgain = setOcrAgain(ocrAgain, e, true);
   for (const e of b.textFixed || []) if (!named(e) && !textFixed.some((x) => sameNoOcr(x, e))) textFixed = setTextFixed(textFixed, e, true);
-  return { values, keeps, phrases, noOcr, ocrAgain, textFixed };
+  let answers = (a.answers || []).slice();
+  for (const x of b.answers || []) if (!answerFor(answers, x.value)) answers = setAnswer(answers, x.value, x.answer);
+  return { values, keeps, phrases, noOcr, ocrAgain, textFixed, answers };
 }
 
-export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain, textFixed) {
+export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain, textFixed, answers) {
   const body = (values || []).map(normalizeValue).filter(Boolean)
     .map((v) => (isPhrase(phrases, v) ? `phrase: ${v}` : v));
   // A local keep is left out on purpose: the file it would go into is a list of
@@ -2618,7 +2665,8 @@ export function formatValuesFile(values, keeps, phrases, noOcr, ocrAgain, textFi
   const pages = (noOcr || []).map(makeNoOcrEntry).filter(Boolean).map(noOcrLine);
   const again = (ocrAgain || []).map(makeNoOcrEntry).filter(Boolean).map(ocrAgainLine);
   const fixed = (textFixed || []).map(makeTextFixedEntry).filter(Boolean).map(textFixedLine);
-  return VALUES_HEAD.concat(body, kept, pages, again, fixed).join("\n") + "\n";
+  const told = (answers || []).map((a) => makeAnswer(a && a.value, a && a.answer)).filter(Boolean).map(answerLine);
+  return VALUES_HEAD.concat(body, kept, told, pages, again, fixed).join("\n") + "\n";
 }
 
 // ---- a page PDF-Linker is to leave unread -------------------------------------
@@ -2959,12 +3007,14 @@ export function parseValuesFile(text) {
 }
 
 /**
- * The file's lines: { values, keeps, phrases, noOcr, ocrAgain, textFixed }. A
+ * The file's lines: { values, keeps, phrases, noOcr, ocrAgain, textFixed,
+ * answers }. A
  * phrase line is a value to fake, so it is in `values` too; `phrases` says
  * which of them go whole; `noOcr` is the pages marked Did not OCR, `ocrAgain`
  * the pages to read again and `textFixed` the pages transcribed by hand
  * ({ doc, pdf: "", page }, `doc` being whatever file the line names, and a
- * transcribed page's `sum`).
+ * transcribed page's `sum`); `answers` the walk through the key's answers,
+ * { value, answer }.
  */
 export function parseReaderFile(text) {
   const values = [];
@@ -2973,6 +3023,7 @@ export function parseReaderFile(text) {
   let noOcr = [];
   let ocrAgain = [];
   let textFixed = [];
+  const answers = [];
   const seen = new Set();
   for (const raw of String(text == null ? "" : text).split(/\r?\n/)) {
     const line = raw.replace(/^\ufeff/, "").trim();
@@ -2993,6 +3044,14 @@ export function parseReaderFile(text) {
       if (n) textFixed = setTextFixed(textFixed, { doc: n[1], page: Number(n[2]), sum: n[3] }, true);
       continue;
     }
+    // An answer from the walk through the key. A `fix:` line with nothing
+    // after its pipe is no answer, and no value either.
+    if (/^fix\s*:/i.test(line)) {
+      const f = line.match(FIX_RE);
+      const a = f && makeAnswer(f[1], f[2]);
+      if (a && !seen.has(foldKey(a.value))) { seen.add(foldKey(a.value)); answers.push(a); }
+      continue;
+    }
     const m = line.match(KEEP_RE);
     const p = m ? null : line.match(PHRASE_RE);
     const v = normalizeValue(m ? m[2] : p ? p[1] : line);
@@ -3002,7 +3061,7 @@ export function parseReaderFile(text) {
     else values.push(v);
     if (p) phrases.push(v);
   }
-  return { values, keeps, phrases, noOcr, ocrAgain, textFixed };
+  return { values, keeps, phrases, noOcr, ocrAgain, textFixed, answers };
 }
 
 // ---- what PDF-Linker has spent ---------------------------------------------------
@@ -3075,6 +3134,7 @@ export function spendLines(lists, saved, disk) {
   const textFixed = (lists && lists.textFixed) || [];
   const noOcr = (lists && lists.noOcr) || [];
   const ocrAgain = (lists && lists.ocrAgain) || [];
+  const answers = (lists && lists.answers) || [];
   const now = disk == null ? "" : String(disk);
   const was = saved == null ? "" : String(saved);
   const onDisk = new Set(keepLines(now).map((k) => foldKey(k.value)));
@@ -3095,6 +3155,11 @@ export function spendLines(lists, saved, disk) {
   const gonePage = (written, onDisk) => (e) => written.some((w) => sameNoOcr(w, e)) && !onDisk.some((d) => sameNoOcr(d, e));
   const spentNoOcr = noOcr.filter(gonePage(wroteP.noOcr, diskP.noOcr));
   const spentAgain = ocrAgain.filter(gonePage(wroteP.ocrAgain, diskP.ocrAgain));
+  // …and an answer from the walk through the key, written here and no longer
+  // in the file: the full run carried it out and spent its line (one it
+  // could not yet carry out — a plain --fix-leaks — it leaves in the file).
+  const sameAnswer = (x, y) => foldKey(x.value) === foldKey(y.value) && x.answer === y.answer;
+  const spentAnswers = answers.filter((a) => wroteP.answers.some((w) => sameAnswer(w, a)) && !diskP.answers.some((d) => sameAnswer(d, a)));
   const aside = setAsideLines(now);
   const setAside = spentNoOcr.filter((e) => aside.noOcr.some((d) => sameNoOcr(d, e)))
     .concat(spentAgain.filter((e) => aside.ocrAgain.some((d) => sameNoOcr(d, e))))
@@ -3109,6 +3174,7 @@ export function spendLines(lists, saved, disk) {
     const pl = parseReaderFile(line);
     if (pl.noOcr.length) return diskP.noOcr.some((d) => sameNoOcr(d, pl.noOcr[0]));
     if (pl.ocrAgain.length) return diskP.ocrAgain.some((d) => sameNoOcr(d, pl.ocrAgain[0]));
+    if (pl.answers.length) return diskP.answers.some((d) => foldKey(d.value) === foldKey(pl.answers[0].value));
     const m = line.match(KEEP_RE);
     return !m || onDisk.has(foldKey(m[2]));
   });
@@ -3117,7 +3183,9 @@ export function spendLines(lists, saved, disk) {
     textFixed: spentFixed.length ? textFixed.filter((e) => !spentFixed.includes(e)) : textFixed,
     noOcr: spentNoOcr.length ? noOcr.filter((e) => !spentNoOcr.includes(e)) : noOcr,
     ocrAgain: spentAgain.length ? ocrAgain.filter((e) => !spentAgain.includes(e)) : ocrAgain,
+    answers: spentAnswers.length ? answers.filter((a) => !spentAnswers.includes(a)) : answers,
     spentKeeps,
+    spentAnswers,
     spentFixed,
     setAside,
     saved: lines.join("\n"),
@@ -3183,6 +3251,7 @@ export function valuesLineKey(raw) {
   if (p.ocrAgain.length) return "again:" + page(p.ocrAgain[0]);
   if (p.textFixed.length) return "fixed:" + page(p.textFixed[0]) + "|" + foldKey(p.textFixed[0].sum || "");
   if (p.keeps.length) return p.keeps[0].control + ":" + foldKey(p.keeps[0].value);
+  if (p.answers.length) return "fix:" + foldKey(p.answers[0].value) + "|" + foldKey(p.answers[0].answer);
   if (p.values.length) return (p.phrases.length ? "phrase:" : "value:") + foldKey(p.values[0]);
   return "raw:" + foldKey(line);
 }

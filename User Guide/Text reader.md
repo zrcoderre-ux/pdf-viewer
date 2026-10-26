@@ -657,6 +657,15 @@ app, which routes it to the reader tab.
   walks the pages on screen — this document, and with the folder read on, what
   hangs under it — and only the pseudonyms: the names the run left in the
   clear are the names walk's (Alt+L).
+  **The bar answers each term as the Leaks bar answers a row:** **yes**
+  (leave it a pseudonym), **no** (keep the name as it stands in this case),
+  **never** (in every case), **phrase** (fake it whole), or type an answer
+  (a new pseudonym for it, ~CORRECT SPELLING, *CORRECT TEXT or [part to
+  keep]) and press Enter. Each answer moves on to the next term. No and never
+  take effect on screen at once. Phrase and a typed answer go to PDF-Linker
+  in New Real Values.txt, are listed in the Flagged panel (× withdraws one),
+  and are put in by the next Re-run PDF-Linker, which does a full run where
+  a new pseudonym has to replace one the files already carry.
 - **The LEAKS worksheet, row by row, in the text.** PDF-Linker's leak triage
   is `LEAKS.xlsx` in the case folder: one row per flagged value with a
   **Fix?** cell to answer, and PDF-Linker reads the cells back. The

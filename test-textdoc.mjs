@@ -11,7 +11,7 @@ import {
   parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace, boxEdit, openBoxAround, resizeBox, pageNumbersComplete,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, setOwnPartyWords, ownPartyWordsOf, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
-  addValue, removeValue, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
+  addValue, removeValue, setAnswer, answerFor, answerLine, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, isMarkdownName, docLabel, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
@@ -674,7 +674,7 @@ check("keptControl", [keptControl(keeps, "PALERMO"), keptControl(keeps, "x")], [
 check("removeKeep", removeKeep(keeps, "palermo"), [{ control: "never", value: "Stockton Theatres" }]);
 const both = formatValuesFile(list, keeps);
 check("keeps written as control lines", both.endsWith("\nno: Palermo\nnever: Stockton Theatres\n"), true);
-check("both halves read back", parseReaderFile(both), { values: list, keeps, phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
+check("both halves read back", parseReaderFile(both), { values: list, keeps, phrases: [], noOcr: [], ocrAgain: [], textFixed: [], answers: [] });
 check("parseValuesFile ignores the keeps", parseValuesFile(both), list);
 // ── a keep that asks nothing of PDF-Linker ─────────────────────────────────
 //
@@ -747,7 +747,7 @@ check("a phrase is written with its control word, a plain flag bare",
   ["phrase: Cross River Bank", "Rosa Delgado", "no: Semole"]);
 check("…and read back as a value to fake that goes whole",
   parseReaderFile("# c\nphrase:  Cross River Bank \nRosa Delgado\nno: Semole\n"),
-  { values: ["Cross River Bank", "Rosa Delgado"], keeps: [{ control: "no", value: "Semole" }], phrases: ["Cross River Bank"], noOcr: [], ocrAgain: [], textFixed: [] });
+  { values: ["Cross River Bank", "Rosa Delgado"], keeps: [{ control: "no", value: "Semole" }], phrases: ["Cross River Bank"], noOcr: [], ocrAgain: [], textFixed: [], answers: [] });
 check("the round trip holds", (() => {
   const t = formatValuesFile(["Bank of America", "Helen Rasho"], [], ["Bank of America"]);
   const r = parseReaderFile(t);
@@ -871,8 +871,8 @@ console.log("a folder's state, by name and by id");
   // lost their red mark and were handed to no run again. A flag read into the
   // wrong case only fakes one more name; a keep takes the mark off one.
   const OLD = { values: ["Ada Pemberton", "Bram Ellery"], keeps: [{ control: "no", value: "Riverside" }], phrases: ["Bram Ellery", "Cora Whitlow"],
-    noOcr: [{ doc: "Brief.txt", page: 2 }], ocrAgain: [], textFixed: [] };
-  const E = { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] };
+    noOcr: [{ doc: "Brief.txt", page: 2 }], ocrAgain: [], textFixed: [], answers: [] };
+  const E = { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [], answers: [] };
   check("one folder of the name known, the file not what was written: the flags and their phrases move, the keeps and page lines are held",
     ["differs", "unwritten"].map((h) => legacyListSplit(OLD, h)),
     [0, 1].map(() => ({ move: { ...E, values: ["Ada Pemberton", "Bram Ellery"], phrases: ["Bram Ellery"] },
@@ -887,7 +887,7 @@ console.log("a folder's state, by name and by id");
   // …and the list kept while the Text Files folder was open joins its case
   // folder's, nothing in either lost and the case folder's own winning.
   const mine = { values: ["Zachary Coderre", "Helen Rasho"], keeps: [{ control: "no", value: "Riverside" }], phrases: ["Helen Rasho"],
-    noOcr: [{ doc: "Brief.txt", page: 2 }], ocrAgain: [], textFixed: [] };
+    noOcr: [{ doc: "Brief.txt", page: 2 }], ocrAgain: [], textFixed: [], answers: [] };
   const theirs = { values: ["helen rasho", "Okafor", "Cross River Bank"], keeps: [{ control: "never", value: "riverside" }, { control: "no", value: "Pemberly", state: "local" }],
     phrases: ["Cross River Bank", "helen rasho"], noOcr: [], ocrAgain: [{ doc: "Brief.txt", page: 2 }, { doc: "Brief.txt", page: 5 }],
     textFixed: [{ doc: "Brief.txt", page: 2, sum: "0a1b2c3d" }, { doc: "Reply.txt", page: 1, sum: "deadbeef" }] };
@@ -1506,7 +1506,7 @@ console.log("did not OCR, handed to PDF-Linker");
   check("…and written again the same", formatValuesFile(back.values, back.keeps, back.phrases, back.noOcr), file);
   check("a line PDF-Linker would write back reads too",
     parseReaderFile("DID NOT OCR:  Exhibits.pdf  |  p. 9\n").noOcr, [{ doc: "Exhibits.pdf", pdf: "", page: 9 }]);
-  check("an unreadable one is still no value", parseReaderFile("did not ocr: Exhibits page nine\n"), { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
+  check("an unreadable one is still no value", parseReaderFile("did not ocr: Exhibits page nine\n"), { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [], answers: [] });
   check("NOOCR_RE takes the pipe form", NOOCR_RE.test("did not ocr: A.pdf | page 2"), true);
   check("a stripped page reads Did not OCR", readsDidNotOcr(didNotOcrLines([" 1  soup"])), true);
   check("…the trailer aside", readsDidNotOcr(["[DID NOT OCR]", "", "====== Authorities cited (public verification links) ======", "x"]), true);
@@ -1542,7 +1542,7 @@ console.log("OCR this page again");
     parseReaderFile("OCR this page again: Exhibits.pdf | p. 9\nocr-again:  B.pdf  |  page 3\n").ocrAgain,
     [{ doc: "Exhibits.pdf", pdf: "", page: 9 }, { doc: "B.pdf", pdf: "", page: 3 }]);
   check("an unreadable one is still no value", parseReaderFile("ocr again: Exhibits page nine\n"),
-    { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
+    { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [], answers: [] });
   check("OCRAGAIN_RE takes the pipe form", OCRAGAIN_RE.test("ocr again: A.pdf | page 2"), true);
   check("…and is not a did-not-ocr line", NOOCR_RE.test("ocr again: A.pdf | page 2"), false);
   check("a file with neither list writes neither", formatValuesFile(["X Y"], [], [], [], []).includes("ocr again: "), false);
@@ -1596,7 +1596,7 @@ console.log("a page transcribed by hand");
   check("a line typed by hand, without a sum, reads too",
     parseReaderFile("Text-Corrected:  Exhibits.pdf  |  p. 9\n").textFixed, [{ doc: "Exhibits.pdf", pdf: "", page: 9, sum: "" }]);
   check("an unreadable one is still no value", parseReaderFile("text corrected: Exhibits page nine\n"),
-    { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
+    { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [], answers: [] });
   check("TEXTFIXED_RE is not a did-not-ocr line", NOOCR_RE.test("text corrected: A.pdf | page 2"), false);
   check("…and takes the sum", TEXTFIXED_RE.exec("text corrected: A.pdf | page 2 | sum 0a1b2c3d")[3], "0a1b2c3d");
   const ran = parseExport("====== Page 4 — NOTE: TEXT CORRECTED by hand in the text reader; this page's text layer is the operator's transcription ======\nThe lease.\n");
@@ -1821,7 +1821,7 @@ console.log("documents off the screen");
   const empty = formatValuesFile([], [], [], [], [], []);
   check("readerFileHasLines: the header alone has no lines", [readerFileHasLines(empty), readerFileHasLines(""), readerFileHasLines("﻿# just a note\n\n")], [false, false, false]);
   check("…and a value is one", readerFileHasLines(formatValuesFile(["Rosa"], [], [], [], [], [])), true);
-  check("…and the header-only file parses to nothing", parseReaderFile(empty), { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] });
+  check("…and the header-only file parses to nothing", parseReaderFile(empty), { values: [], keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [], answers: [] });
 
   // realsLeftInExport: the standing assertion
   const plain = "Tobias Wrenfield signed. See Ashdale v. Smith (2001) 90 Cal.App.4th 12.";
@@ -2215,6 +2215,29 @@ console.log("column boxes (makeColumnBox, reflowBox, boxBackspace)");
     [true, ["QUILLON", "BRAKESMAN,", "Plaintiff,"], ["COMPLAINT FOR:", "1. Breach of contract", "2. Fraud"]]);
   check("the right edge drawn in: the box narrower", resizeBox(wide.lines, 1, 2, 60, { numbered: true })[0].length, 61);
   check("…a divider not past its neighbour", resizeBox(wide.lines, 1, 1, 2, { numbered: true })[0].indexOf("┬"), 4 + 1 + 6);
+}
+console.log("answers from the walk through the key (fix: VALUE | ANSWER)");
+{
+  const file = formatValuesFile(["Rosa Delgado"], [{ control: "no", value: "Semole" }], [], [], [], [], [{ value: "Orla Vantreese", answer: "Bertram Ollivant" }, { value: "Pelham Grantwick", answer: "phrase" }]);
+  check("written as fix lines after the keeps", file.split("\n").filter((l) => l && l[0] !== "#"), ["Rosa Delgado", "no: Semole", "fix: Orla Vantreese | Bertram Ollivant", "fix: Pelham Grantwick | phrase"]);
+  const back = parseReaderFile(file);
+  check("…read back as answers, not values", [back.values, back.answers], [["Rosa Delgado"], [{ value: "Orla Vantreese", answer: "Bertram Ollivant" }, { value: "Pelham Grantwick", answer: "phrase" }]]);
+  check("a fix line with nothing after its pipe is nothing at all", [parseReaderFile("fix: Orla Vantreese |\nfix: Orla\n").values, parseReaderFile("fix: Orla Vantreese |\n").answers], [[], []]);
+  let list = setAnswer([], "Orla  Vantreese", " ~Orla  Vantrees ");
+  check("set: the value and answer trimmed", list, [{ value: "Orla Vantreese", answer: "~Orla Vantrees" }]);
+  list = setAnswer(list, "orla vantreese", "Bertram Ollivant");
+  check("…answered again: one answer for the value, the new one", [list.length, answerFor(list, "ORLA VANTREESE")], [1, "Bertram Ollivant"]);
+  check("…taken off with an empty answer", setAnswer(list, "Orla Vantreese", ""), []);
+  check("the line", answerLine(list[0]), "fix: Orla Vantreese | Bertram Ollivant");
+  const wrote = formatValuesFile([], [], [], [], [], [], list);
+  check("spent once written and no longer in the file", spendLines({ keeps: [], textFixed: [], answers: list }, wrote, "# empty\n").answers, []);
+  check("…not while the file still carries it (a plain --fix-leaks leaves it waiting)", spendLines({ keeps: [], textFixed: [], answers: list }, wrote, wrote).answers, list);
+  check("…nor one never written", spendLines({ keeps: [], textFixed: [], answers: list }, "", "").answers, list);
+  const st = (o) => ({ flagged: [], phrases: [], keeps: [], settled: [], rows: null, answers: [], ...o });
+  const d = decisionDelta(st({}), st({ answers: list }));
+  check("an answer is a decision step, undone and made again", [applyDecisionDelta(st({ answers: list }), d, true).answers, applyDecisionDelta(st({}), d, false).answers], [[], list]);
+  check("merged: the list's own answer wins, the other's joins", mergeStoredLists({ answers: list }, { answers: [{ value: "Orla Vantreese", answer: "x" }, { value: "Pelham Grantwick", answer: "phrase" }] }).answers,
+    list.concat([{ value: "Pelham Grantwick", answer: "phrase" }]));
 }
 console.log("a table ruled only between its columns: keys kept in the column (openBoxAround, boxEdit)");
 {

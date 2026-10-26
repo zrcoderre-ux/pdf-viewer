@@ -178,6 +178,7 @@ let pageSweep = null;        // the page a LEAKS review is finishing before it l
 let flagsFor = null;         // …the storage key that list was read from, and is written back to (persistValues; listAway, docListAway)
 let keyFolder = null;        // …the storage key of the list the key in hand was read from or chosen for; null, none (TD.keyAnswersFlags)
 let phrases = [];            // …which of them are PHRASES: several words faked whole (`phrase:`)
+let answers = [];            // the answers given in the walk through the key: { value, answer } (`fix: VALUE | ANSWER`)
 let keeps = [];              // …and the keeps: values wrongly faked, left alone next run
 let noOcr = [];              // …and the pages marked ⊘ Did not OCR: [{ doc, pdf, page }] (syncNoOcr)
 let ocrAgain = [];           // …and the pages to read again, ↻ OCR This Page (ocrPageAgain)
@@ -3008,6 +3009,7 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   noOcr = stored.noOcr;
   ocrAgain = stored.ocrAgain;
   textFixed = stored.textFixed;
+  answers = stored.answers;
   if (onDisk) {
     try {
       // A value the key already fakes is not brought back in: the file on disk
@@ -3050,6 +3052,8 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
       // …and a transcribed page the file names that the list does not is one
       // written in another session, owed until PDF-Linker spends it.
       for (const e of onDisk.textFixed) if (!named(e) && !textFixed.some((x) => TD.sameNoOcr(x, e))) textFixed = TD.setTextFixed(textFixed, e, true);
+      // …and an answer from the walk through the key the list has none for.
+      for (const a of onDisk.answers) if (!TD.answerFor(answers, a.value)) answers = TD.setAnswer(answers, a.value, a.answer);
     } catch { /* what the file held that could not be taken: the list in hand stands */ }
   }
   // WHAT PDF-LINKER HAS SPENT. A keep or a transcribed page is DONE once its
@@ -3077,7 +3081,7 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
     // the file — AFTER the spending, which reads the record as this tab left
     // it: a value read in and withdrawn is then owed out of the file.
     const was = lsGet(valuesSavedKey(), "");
-    const now = TD.noteLinesRead(was, diskValues, TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed));
+    const now = TD.noteLinesRead(was, diskValues, TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed, answers));
     if (now !== was) lsSet(valuesSavedKey(), now);
   }
   persistValues();
@@ -6532,6 +6536,8 @@ const boxReflowSoon = debounce(() => {
 pagesEl.addEventListener("input", (e) => {
   const body = e.target && e.target.closest && e.target.closest(".page-body");
   if (body) { boxTyped = body; boxReflowSoon(); }
+  // A word typed out of a ✓ Use my text page: a LEAKS row on it may be moot now (answerGoneRows).
+  if (body && leaks && body.classList.contains("free")) goneRowsSoon("it was deleted from a ✓ Use my text page");
 });
 function makeColumnBoxAtSelection() {
   const sel = document.getSelection();
@@ -7532,7 +7538,7 @@ function stepHistory(from, to) {
 let deciding = 0;
 /** The decisions as they stand: what a step is measured between. */
 function decisionState() {
-  return { flagged, phrases, keeps, settled: [...settled], rows: leaks ? leakRows().map((r) => [r.fix, !!r.ok]) : null };
+  return { flagged, phrases, keeps, answers, settled: [...settled], rows: leaks ? leakRows().map((r) => [r.fix, !!r.ok]) : null };
 }
 /** Run `fn`, a decision, as one undo step (nested decisions are the outer one's). What `fn` returns. */
 function asDecision(fn) {
@@ -7559,6 +7565,7 @@ function decisionLabel(d) {
     return d.rows.length > 1 ? `the answers on ${d.rows.length} LEAKS rows` : `the LEAKS answer on ${r ? q(r.value) : "a row"}`;
   }
   if (d.keeps.length) { const k = d.keeps[0]; return k.after ? `the keep on ${q(k.after.value)}` : `taking the keep off ${q(k.before.value)}`; }
+  if (d.answers && d.answers.length) { const a = d.answers[0]; return a.after ? `the answer ${q(a.after.answer)} on ${q(a.after.value)}` : `the answer taken off ${q(a.before.value)}`; }
   if (d.phrases.add.length) return `the phrase ${q(d.phrases.add[0])}`;
   if (d.flagged.add.length) return `the flag on ${q(d.flagged.add[0])}`;
   if (d.flagged.drop.length) return `taking ${q(d.flagged.drop[0])} off the Flagged list`;
@@ -7581,6 +7588,7 @@ function stepDecision(d, undo) {
   flagged = next.flagged;
   phrases = next.phrases;
   keeps = next.keeps;
+  answers = next.answers;
   settled = new Set(next.settled);
   if (d.delta.rows.length) {
     const rows = leakRows();
@@ -10304,7 +10312,103 @@ function renderKeyBar(terms) {
   $("kb-term-prev").disabled = $("kb-term-next").disabled = terms.length < 2;
   $("kb-prev").disabled = $("kb-next").disabled = !t || t.at.length < 2;
   $("kb-find").disabled = !t;
+  // The term's Fix? answer, as the Leaks bar shows a row's.
+  const cell = t ? keyAnswerCell(t.real) : "";
+  const c = LK.classifyFix(cell, t ? t.real : "");
+  const ans = $("kb-answer");
+  ans.textContent = !t ? "" : cell ? c.label + (keptBy(t.real) === "master" ? " (the master workbook)" : "") : "not answered — faked as the key has it";
+  ans.title = ans.textContent;
+  ans.className = "lb-answer" + (cell ? "" : " undecided");
+  for (const b of keyBar.querySelectorAll("button[data-kfix]")) { b.classList.toggle("on", !!cell && c.kind === b.dataset.kfix); b.disabled = !t; }
+  const typed = $("kb-typed");
+  typed.disabled = $("kb-apply").disabled = !t;
+  $("kb-clear").disabled = !t || !cell || keptBy(t.real) === "master";
+  if (document.activeElement !== typed) typed.value = cell && !LK.CONTROLS.includes(c.kind) ? cell : "";
 }
+/**
+ * The Fix? answer a term stands under, as a LEAKS cell would read: its keep
+ * (`no`, `never`), else the answer given it in the walk (`phrase`, a typed
+ * replacement…), else "" — faked as the key has it.
+ */
+function keyAnswerCell(real) {
+  const by = keptBy(real);
+  if (by === "case") return TD.keptControl(keeps, real);
+  if (by === "master") return TD.keptControl(masterKeeps, real) || "never";
+  return TD.answerFor(answers, real);
+}
+/** The answer `answer` given `value` in the walk ("" takes it off), as one undo step. */
+function setKeyAnswer(value, answer) {
+  asDecision(() => { answers = TD.setAnswer(answers, value, answer); });
+  persistValues();
+  renderFlags();
+  if (!keyBar.hidden) renderKeyBar(keyTerms());
+}
+/**
+ * A Fix? answer for the term the walk stands on, as the Leaks bar gives a
+ * row's: `yes` leaves it a pseudonym (a keep or answer on it taken back),
+ * `no`/`never` keep it as the right-click does (setKeep: un-marked here at
+ * once, handed to PDF-Linker as its line), and `phrase` or anything typed
+ * goes to PDF-Linker as `fix: VALUE | ANSWER`, read there as the value's
+ * Fix? cell. Then on to the next term.
+ */
+function decideKey(answer) {
+  const terms = keyTerms();
+  const loc = keyLocate(terms);
+  if (!loc) return;
+  const t = terms[loc.ti];
+  const real = t.real;
+  let a = String(answer == null ? "" : answer).replace(/\s+/g, " ").trim();
+  const word = a.toLowerCase();
+  if (["yes", "no", "never", "phrase"].includes(word)) a = word;
+  // Typed as it already stands: no answer at all.
+  else if (a && PK.fold(a) === PK.fold(t.fake)) a = "yes";
+  if (a && a !== "yes" && PK.fold(a) === PK.fold(real)) { toast(`A pseudonym the same as "${real}" fakes nothing — type a different one, or answer no to leave it as it stands.`, { error: true }); return; }
+  if (a.startsWith("#")) { toast(`"${a}" is Excel's error text, not an answer PDF-Linker reads — type it again.`, { error: true }); return; }
+  if (keptBy(real) === "master" && a !== "never") { toast(`"${real}" is kept by the master workbook in every case — take it off the Master Keep (right-click it) to answer it here.`, { error: true }); return; }
+  if (refusedListAway("answered")) return;
+  asDecision(() => {
+    const kept = TD.keptControl(keeps, real);
+    if (a === "no" || a === "never") {
+      answers = TD.setAnswer(answers, real, "");
+      if (kept !== a) setKeepNow(real, a);
+      return;
+    }
+    if (kept) setKeepNow(real, "");
+    answers = TD.setAnswer(answers, real, a === "yes" ? "" : a);
+  });
+  persistValues();
+  renderFlags();
+  if (a !== "yes" && a !== "no" && a !== "never") {
+    toast(a === "phrase"
+      ? `"${real}" is to be faked whole, as one name — saved to ${TD.VALUES_FILE} for PDF-Linker's next run.`
+      : `"${real}" answered “${a}” — saved to ${TD.VALUES_FILE}, read by PDF-Linker as its Fix? cell.`
+        + (LK.classifyFix(a, real).kind === "replacement" ? " A new pseudonym for a name the files carry is put in by its next full run: a click of Re-run PDF-Linker does it." : ""));
+  }
+  const after = keyTerms();
+  if (after.length > 1) stepKeyTerm(1);
+  else renderKeyBar(after);
+}
+for (const b of keyBar.querySelectorAll("button[data-kfix]")) b.addEventListener("click", () => decideKey(b.dataset.kfix));
+$("kb-apply").addEventListener("click", () => {
+  const t = $("kb-typed").value.trim();
+  if (t) decideKey(t);
+  else toast("Type the new pseudonym, ~CORRECT SPELLING, *CORRECT TEXT or [part to keep] first.", { error: true });
+});
+$("kb-clear").addEventListener("click", () => {
+  const terms = keyTerms();
+  const loc = keyLocate(terms);
+  if (!loc) return;
+  $("kb-typed").value = "";
+  const real = terms[loc.ti].real;
+  asDecision(() => { if (TD.keptControl(keeps, real)) setKeepNow(real, ""); answers = TD.setAnswer(answers, real, ""); });
+  persistValues();
+  renderFlags();
+  renderKeyBar(keyTerms());
+});
+$("kb-typed").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("kb-apply").click(); }
+  if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); $("kb-typed").blur(); }
+});
 /** The next term (dir 1) or the one before (dir -1), at its first appearance. */
 function stepKeyTerm(dir) {
   if (keyBar.hidden) { showKeyBar(true); return; }
@@ -11411,6 +11515,8 @@ function markDidNotOcr(i) {
     setPageSwap(t.key, true);
   }
   toast(`${where}: text stripped, ${TD.DID_NOT_OCR} in its place${swapped ? ", and its PDF page shown" : ""} — Save writes it, and puts the page on ${TD.VALUES_FILE} so PDF-Linker never OCRs it again. Ctrl+Z puts it back.`);
+  // …and a LEAKS row whose value stood only there is answered no (answerGoneRows).
+  if (leaks) setTimeout(() => answerGoneRows(`only the page marked ${TD.DID_NOT_OCR} carried it`), 0);
 }
 /** A page's ⇄ PDF swap turned on or off by `key`, remembered and shown (or held for when side by side closes). */
 function setPageSwap(key, on) { setPageSwaps([key], on); }
@@ -15415,7 +15521,7 @@ window.addEventListener("storage", onWithdrawnElsewhere);
  * file's own text is the signature; nothing else can be out of step with it.
  */
 function valuesDirty() {
-  const now = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed);
+  const now = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed, answers);
   const saved = lsGet(valuesSavedKey(), "");
   if (now === saved) return false;
   // A local keep is not in the file and never will be, so a list that holds
@@ -15426,7 +15532,7 @@ function valuesDirty() {
 }
 /** Whether the list holds anything New Real Values.txt carries. */
 function valuesOwed() {
-  return !!(flagged.length || TD.owedKeeps(keeps).length || noOcr.length || ocrAgain.length || textFixed.length);
+  return !!(flagged.length || TD.owedKeeps(keeps).length || answers.length || noOcr.length || ocrAgain.length || textFixed.length);
 }
 /** …and the same list, as it stands, marked as written. */
 function markValuesSaved(text) { lsSet(valuesSavedKey(), text); renderFlags(); }
@@ -15512,17 +15618,17 @@ async function spendFromDisk(disk, { settle = true, still = null } = {}) {
   if (!settle) valuesSeen = { list: valuesStoreKey(), keys: TD.valuesLineKeys(typeof disk === "string" ? disk : "") };
   const was = lsGet(valuesSavedKey(), "");
   if (where === "elsewhere") {
-    const base = TD.writtenBaseline(TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed), disk);
+    const base = TD.writtenBaseline(TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed, answers), disk);
     if (base !== was) lsSet(valuesSavedKey(), base);
     // …and from now on the record is this folder's.
     await rememberWritten(stateFolder(), dirHandle);
     if (settle && base !== was) renderFlags();
     return [];
   }
-  const s = TD.spendLines({ keeps, textFixed, noOcr, ocrAgain }, was, disk);
+  const s = TD.spendLines({ keeps, textFixed, noOcr, ocrAgain, answers }, was, disk);
   if (s.saved !== was) lsSet(valuesSavedKey(), s.saved);
   if (s.setAside.length) holdSetAside(s.setAside);
-  if (s.keeps === keeps && s.textFixed === textFixed && s.noOcr === noOcr && s.ocrAgain === ocrAgain) {
+  if (s.keeps === keeps && s.textFixed === textFixed && s.noOcr === noOcr && s.ocrAgain === ocrAgain && s.answers === answers) {
     // Only the record moved (a keep withdrawn whose line the run took out
     // anyway): the status bar reads it again all the same.
     if (settle && s.saved !== was) renderFlags();
@@ -15532,6 +15638,7 @@ async function spendFromDisk(disk, { settle = true, still = null } = {}) {
   textFixed = s.textFixed;
   noOcr = s.noOcr;
   ocrAgain = s.ocrAgain;
+  answers = s.answers;
   persistValues();
   if (s.spentKeeps.length) noteKeepsSpent(s.spentKeeps.map((k) => k.value));
   if (settle) {
@@ -15631,10 +15738,10 @@ function spotsFrom(list, from) { return from ? list.map((x) => ({ ...x, page: x.
 // bare, and one before phrases stored no `phrases`.
 function readStoredValues(k) {
   const v = lsGet(k, null);
-  if (Array.isArray(v)) return { values: v, keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [] };
-  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [], phrases: (v && v.phrases) || [], noOcr: (v && v.noOcr) || [], ocrAgain: (v && v.ocrAgain) || [], textFixed: (v && v.textFixed) || [] };
+  if (Array.isArray(v)) return { values: v, keeps: [], phrases: [], noOcr: [], ocrAgain: [], textFixed: [], answers: [] };
+  return { values: (v && v.values) || [], keeps: (v && v.keeps) || [], phrases: (v && v.phrases) || [], noOcr: (v && v.noOcr) || [], ocrAgain: (v && v.ocrAgain) || [], textFixed: (v && v.textFixed) || [], answers: (v && v.answers) || [] };
 }
-function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; phrases = st.phrases; noOcr = st.noOcr; ocrAgain = st.ocrAgain; textFixed = st.textFixed; compileKey(); renderFlags(); }
+function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagged = st.values; flagsFor = valuesStoreKey(); keeps = st.keeps; phrases = st.phrases; noOcr = st.noOcr; ocrAgain = st.ocrAgain; textFixed = st.textFixed; answers = st.answers; compileKey(); renderFlags(); }
 /**
  * The list in hand written back WHERE IT WAS READ FROM (`flagsFor`), not
  * simply under the folder open. Adoption names its folder first and puts that
@@ -15651,7 +15758,7 @@ function loadValuesFor() { const st = readStoredValues(valuesStoreKey()); flagge
  * keep taken in A's document is A's. With no list read yet (null: nothing
  * opened, or a folder just let go) it is the store of what is open, as before.
  */
-function persistValues() { lsSet(flagsFor || valuesStoreKey(), { values: flagged, keeps, phrases, noOcr, ocrAgain, textFixed }); }
+function persistValues() { lsSet(flagsFor || valuesStoreKey(), { values: flagged, keeps, phrases, noOcr, ocrAgain, textFixed, answers }); }
 /**
  * Whether the list in hand is ANOTHER folder's than the one open: an adoption
  * between naming its folder and putting that folder's list in hand (or one
@@ -15735,6 +15842,7 @@ function pageListsNote() {
   if (noOcr.length) parts.push(`${noOcr.length} page${noOcr.length === 1 ? "" : "s"} not to OCR`);
   if (ocrAgain.length) parts.push(`${ocrAgain.length} to OCR again`);
   if (textFixed.length) parts.push(`${textFixed.length} transcribed by hand`);
+  if (answers.length) parts.push(`${answers.length} answer${answers.length === 1 ? "" : "s"} from the walk through the key`);
   return parts.length ? ", " + parts.join(", ") : "";
 }
 
@@ -15742,7 +15850,7 @@ function renderFlags() {
   updateDirty(); // a flag, a keep or one of them written is a save's business
   pagesTabSoon(); // …and the Pages tab's tags read the page lists
   flagsList.innerHTML = "";
-  setRailCount("flag-count", flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length + textFixed.length + settled.size);
+  setRailCount("flag-count", flagged.length + keeps.length + spots.length + noOcr.length + ocrAgain.length + textFixed.length + answers.length + settled.size);
   const nocrList = $("nocr-list");
   nocrList.innerHTML = "";
   $("nocr-block").hidden = !noOcr.length;
@@ -15773,6 +15881,21 @@ function renderFlags() {
     li.addEventListener("click", () => goToFixedPage(e));
     li.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); goToFixedPage(e); } });
     fixedList.appendChild(li);
+  }
+  const answersList = $("answers-list");
+  answersList.innerHTML = "";
+  $("answers-block").hidden = !answers.length;
+  for (const a of answers) {
+    const li = document.createElement("li");
+    li.textContent = `${a.value} → ${a.answer}`;
+    li.title = TD.answerLine(a);
+    const x = document.createElement("button");
+    x.className = "x";
+    x.textContent = "×";
+    x.title = "Withdraw this answer";
+    x.addEventListener("click", (e) => { e.stopPropagation(); setKeyAnswer(a.value, ""); });
+    li.appendChild(x);
+    answersList.appendChild(li);
   }
   refreshNocrButtons();
   renderSpots();
@@ -16031,7 +16154,7 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
     if (!quiet) toast(`${TD.VALUES_FILE} was not written: ${folderName}'s own list is still being read — try again in a moment.`, { error: true });
     return false;
   }
-  const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed);
+  const text = TD.formatValuesFile(flagged, keeps, phrases, noOcr, ocrAgain, textFixed, answers);
   // Never into the Text Files folder (textFolderOpen), and never handed over
   // from it: nothing is written, nothing is marked saved, and no picker is put
   // up — one opens where it was last, which is that folder. The list waits in
@@ -16145,8 +16268,8 @@ async function saveValuesFile({ quiet = false, folderOnly = false } = {}) {
 }
 $("flags-save").addEventListener("click", () => saveValuesFile());
 $("flags-copy").addEventListener("click", async () => {
-  const n = flagged.length + keeps.length + noOcr.length + ocrAgain.length + textFixed.length;
-  try { await navigator.clipboard.writeText(flagged.map((v) => (TD.isPhrase(phrases, v) ? "phrase: " + v : v)).concat(keeps.map((k) => k.control + ": " + k.value), noOcr.map(TD.noOcrLine), ocrAgain.map(TD.ocrAgainLine), textFixed.map(TD.textFixedLine)).join("\n") + "\n"); toast("Copied " + n + " line" + (n === 1 ? "" : "s")); }
+  const n = flagged.length + keeps.length + answers.length + noOcr.length + ocrAgain.length + textFixed.length;
+  try { await navigator.clipboard.writeText(flagged.map((v) => (TD.isPhrase(phrases, v) ? "phrase: " + v : v)).concat(keeps.map((k) => k.control + ": " + k.value), answers.map(TD.answerLine), noOcr.map(TD.noOcrLine), ocrAgain.map(TD.ocrAgainLine), textFixed.map(TD.textFixedLine)).join("\n") + "\n"); toast("Copied " + n + " line" + (n === 1 ? "" : "s")); }
   catch { toast("Copy failed", { error: true }); }
 });
 
@@ -17160,6 +17283,105 @@ function acceptLeakNow() {
   const n = LK.nextUndecided(leakRows(), leaks.at);
   if (n < 0 || n !== leaks.at) advanceLeak(n);
 }
+
+// ── a LEAKS row whose value the pages no longer carry ─────────────────────────
+//
+// The owner: "Clicking did not OCR should automatically mark no all flagged
+// words that appear only on did not OCR pages, same for when a use my text
+// page has deleted that word." A LEAKS row asks about a value standing in the
+// clear in an export. Once the page carrying it is stripped to DID NOT OCR, or
+// the operator has typed it out of a ✓ Use my text page, the export no longer
+// carries it — PDF-Linker never reads a DID NOT OCR page again, and writes a
+// transcribed page from the operator's text — and the question is moot. Each
+// such row still unanswered is answered `no` (answerGoneRows), as one undo
+// step, where the value stands nowhere else: not on another page of this
+// document, nor in any other document the row names (every document of the
+// folder, where it names none).
+//
+// …EXCEPT A NAME THE KEY FAKES ELSEWHERE IN THE CASE. A `no` is a keep: on a
+// value the key binds it retires the key's row, and PDF-Linker's next run
+// would un-fake the name wherever its pseudonym stands. Such a row is left as
+// it is and said, since the value being gone is its whole answer anyway: the
+// next run, finding it nowhere, does not ask again.
+/** The open document's text as Save would write it, its DID NOT OCR pages left out. */
+function liveTextOfDoc() {
+  if (!doc) return "";
+  return doc.pages.map((p, i) => {
+    if (pageReadsDidNotOcr(i)) return "";
+    const body = bodyForPage(i);
+    return body ? TD.serializeNodes(body) : (p.lines || []).join("\n");
+  }).join("\n");
+}
+/** A file's text, its DID NOT OCR pages left out. */
+function liveTextOfFile(text) {
+  return TD.parseExport(text).pages.filter((p) => !TD.readsDidNotOcr(p.lines)).map((p) => p.lines.join("\n")).join("\n");
+}
+/** Whether `value` stands in `text`, as a whole word. */
+function valueStandsIn(value, text) {
+  const rx = PK.buildMatcher([value]);
+  if (!rx) return true; // nothing to read it with: say it stands, and answer nothing
+  rx.lastIndex = 0;
+  return rx.test(text);
+}
+let goneRunning = false;
+async function answerGoneRows(why) {
+  if (!leaks || !doc || goneRunning) return;
+  const sheet = leaks;
+  const rows = leakRows();
+  // The documents on screen, by their file names.
+  const here = new Set((reel.length > 1 ? reel.map((m) => m.name) : [fileName]).filter(Boolean).map((n) => LK.fold(n)));
+  const live = liveTextOfDoc();
+  const cand = [];
+  rows.forEach((r, i) => {
+    if (String(r.fix || "").trim() || r.ok) return; // answered, or PDF-Linker's own reading accepted
+    const files = LK.parseFiles(r.file).map((f) => exportForName(f) || f);
+    if (files.length && !files.some((f) => here.has(LK.fold(f)))) return; // a row of other documents only
+    if (!valueStandsIn(r.value, live)) cand.push({ i, files });
+  });
+  if (!cand.length) return;
+  goneRunning = true;
+  try {
+    // …and nowhere else in the folder it was found.
+    const texts = new Map();
+    const textOf = async (d) => {
+      if (!texts.has(d.name)) { try { texts.set(d.name, liveTextOfFile((await readDoc(d)).text)); } catch { texts.set(d.name, null); } }
+      return texts.get(d.name);
+    };
+    const gone = [], held = [];
+    for (const c of cand) {
+      const others = dirHandle ? folderDocs.filter((d) => !here.has(LK.fold(d.name)) && (!c.files.length || c.files.some((f) => LK.fold(f) === LK.fold(d.name)))) : [];
+      let elsewhere = false;
+      for (const d of others) {
+        const t = await textOf(d);
+        if (t == null || valueStandsIn(rows[c.i].value, t)) { elsewhere = true; break; }
+      }
+      if (leaks !== sheet) return;
+      if (elsewhere) continue;
+      const v = rows[c.i].value;
+      if (boundByKey(v) && (!caseIsRead() || fakeStandsInCase(v))) held.push(v);
+      else gone.push(c.i);
+    }
+    if (leaks !== sheet || (!gone.length && !held.length)) return;
+    if (gone.length) {
+      asDecision(() => {
+        for (const i of gone) { rows[i].fix = "no"; decidedHere++; }
+        persistLeaks();
+        refreshSheetFakes();
+        mirrorLeakKeeps(gone.map((i) => rows[i]));
+      });
+      for (const i of gone) paintLeakRow(i);
+      renderLeaksBar();
+      renderLeaksTabState();
+      updateLeaksButton();
+      paintHighlights();
+      warmForLeaks();
+    }
+    const names = (list) => list.slice(0, 3).map((v) => `“${v}”`).join(", ") + (list.length > 3 ? "…" : "");
+    toast((gone.length ? `LEAKS: ${names(gone.map((i) => rows[i].value))} answered no — ${why}, and ${gone.length === 1 ? "it stands" : "they stand"} nowhere else. Ctrl+Z takes ${gone.length === 1 ? "it" : "them"} back.` : "")
+      + (held.length ? `${gone.length ? " " : "LEAKS: "}${names(held)} left unanswered: the key fakes ${held.length === 1 ? "it" : "them"} elsewhere in the case, and a no would un-fake ${held.length === 1 ? "it" : "them"} there. Gone from the text, ${held.length === 1 ? "it is" : "they are"} not asked about again after PDF-Linker's next run.` : ""), { ms: 9000 });
+  } finally { goneRunning = false; }
+}
+const goneRowsSoon = debounce((why) => { answerGoneRows(why); }, 1500);
 
 // ── finishing the page before the review leaves it ──────────────────────────
 //

@@ -2225,6 +2225,67 @@ a line are no indent of the filing's. And on a numbered page laid on the
 export's grid read off the PDF, every line (one no row was matched to too)
 has the grid's one left, so the numbers stand in one column.
 
+**The walk through the key answers as the Leaks bar does** (`decideKey`,
+`keyAnswerCell`, `setKeyAnswer`, `#answers-block`; `TD.setAnswer`,
+`TD.answerFor`, `TD.answerLine`, `TD.FIX_RE`). The owner: "when I step
+through the pseudonym key I should get the same yes no never, phrase and type
+replacement options that I get for leaks." The bar was a reading only, its
+keep and flag choices on each name's right-click. It now carries the Leaks
+bar's Fix? row, one row at the top that never moves: yes, no, never, phrase,
+the term's answer in words (`LK.classifyFix`, as a row's), a field for
+anything else a Fix? cell takes, Apply and clear. An answer moves the walk on
+to the next term, as Apply moves the review on.
+- **no** and **never** are the right-click's keeps (`setKeepNow`): the mark
+  goes here at once and the keep reaches PDF-Linker as its line.
+- **yes** says the name is a pseudonym. Any case keep or answer on it is
+  taken back, and nothing is written for it.
+- **phrase** and a **typed answer** go as a new line of New Real Values.txt,
+  `fix: VALUE | ANSWER`, kept in a list of their own (`answers`: stored with
+  the flags, merged from the folder's file on adoption, spent once a run
+  takes the line out, `TD.spendLines`, and one undo step each,
+  `TD.decisionDelta`). PDF-Linker reads the line as the value's Fix? cell
+  (its `_READER_FIX_RE`), so a new pseudonym, `~`, `*`, `**` and a kept part
+  mean there what they mean in LEAKS.xlsx.
+
+Phrase goes as an answer, not as the `phrase:` flag the selection pop-up
+writes: a flag on a value the key already fakes whole comes off the list the
+next time the key is compiled (`dropFlagsNowFaked`), and the answer must
+stand until PDF-Linker spends it. A typed answer the same as the term's
+pseudonym is a `yes`. One the same as the name itself is refused (a self-map
+fakes nothing), and so is Excel's error text. A name the master workbook
+keeps is answered only by taking it off the Master Keep. The name stays
+marked as the key has it until PDF-Linker's run: a new pseudonym for a name
+the exports carry moves a binding, which only its full run makes, and a
+click of Re-run PDF-Linker does that run for it. The Flagged panel lists the
+answers, each with a × to withdraw it. `test-key-answers.mjs`, and
+`test-textdoc.mjs` for the line.
+
+**A LEAKS row whose value the pages no longer carry is answered no**
+(`answerGoneRows`, `liveTextOfDoc`, `liveTextOfFile`, `goneRowsSoon`). The
+owner: "Clicking did not OCR should automatically mark no all flagged words
+that appear only on did not OCR pages, same for when a use my text page has
+deleted that word." The "flagged words" are the worksheet's rows (one row
+per flagged value). Once the page carrying a value is stripped to DID NOT OCR
+(`markDidNotOcr`), or the operator has typed it out of a ✓ Use my text page
+(the `input` on a `.free` body, 1.5 s quiet), the export no longer carries
+it: PDF-Linker never reads a DID NOT OCR page again, and writes a transcribed
+page from the operator's text. Each row is checked if it is unanswered (no
+cell typed, no pre-filled reading accepted) and names this document, or no
+document at all. It is answered `no`, as one undo step, where its value
+(whole words, `PK.buildMatcher`) stands nowhere else: on no other page of
+the document as Save would write it, its DID NOT OCR pages left out, nor in
+any other document the row names (every document of the folder where it
+names none), read as Save would write them.
+
+The exception is a name the key binds whose pseudonym stands elsewhere in
+the case (`boundByKey`, `fakeStandsInCase`; or the folder not yet read for
+pseudonyms, `caseIsRead`). A `no` is a keep: it retires the key's row, and
+PDF-Linker's next run would un-fake the name wherever its pseudonym stands,
+the failure that outranks a leak. Such a row is left unanswered and the
+toast names it. Gone from the text, it is not asked about again after the
+next run, which carries no decision for a value it finds nowhere.
+`test-gone-rows.mjs`.
+
 **Column boxes on a ✓ Use my text page** (`#colbox-btn`,
 `makeColumnBoxAtSelection`, `boxKey`, `boxReflowSoon`; `TD.makeColumnBox`,
 `TD.reflowBox`, `TD.boxBackspace`, `TD.isBoxRow`, `TD.boxAround`). The owner:
