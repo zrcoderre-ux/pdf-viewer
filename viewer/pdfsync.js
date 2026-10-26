@@ -1021,11 +1021,20 @@ export function rowLayout(lineTexts, rows, { bodyLeft = null, height = 0, lineBo
 export function scanLayout(lineTexts, rows, { size = 0, lineBox = 1.2, height = 0, bodyLeft = null, squeeze = 0.9, minFit = 0.5 } = {}) {
   const n = (lineTexts || []).length;
   if (!n || !rows || !rows.length || !(size > 0)) return null;
-  const empty = lineTexts.map((t) => !String(t || "").trim());
+  // A line of nothing but a box's rules and bars (a table's rule, or a row of
+  // empty cells) is no line of the scan's text: the reader draws a rule as a
+  // hairline, and the scan prints it in the gap between two rows. Counted a
+  // line of text each, a ruled table's rules ran it down the page past the
+  // PDF's own, a line for every rule.
+  const empty = lineTexts.map((t) => !String(t || "").replace(/[│─┌┐└┘├┤┬┴┼]/g, "").trim());
   const firstText = empty.indexOf(false);
   if (firstText < 0) return null;
   const lastText = n - 1 - empty.slice().reverse().indexOf(false);
-  const map = alignLines(lineTexts, rows.map((r) => r.text));
+  // …and matched to the scan's rows by its words alone, the bars between its
+  // cells left out: they are no words of the row, and with them a table's
+  // lines matched no row, so nothing held the table where the scan prints
+  // it and its lines were spaced evenly down to the page's footer.
+  const map = alignLines(lineTexts.map((t) => String(t || "").replace(/[│─┌┐└┘├┤┬┴┼]/g, " ")), rows.map((r) => r.text));
   // Each line's place in the run of the page's text, in lines: a blank line
   // inside it half a line, the blank lines before and after it none.
   const BLANK = 0.5;
@@ -1039,7 +1048,17 @@ export function scanLayout(lineTexts, rows, { size = 0, lineBox = 1.2, height = 
   const blockTop = Math.min(...tops), blockLast = Math.max(...tops);
   const units = cum[lastText] - cum[firstText];
   const rowPitch = median(rows.map((r) => r.height)) * lineBox;
-  const pitch = units > 0 && blockLast > blockTop ? (blockLast - blockTop) / units : rowPitch;
+  const spanPitch = units > 0 && blockLast > blockTop ? (blockLast - blockTop) / units : rowPitch;
+  // …or, where the page's white is most of its block (a table half a page
+  // long, its page number at the foot), the scan's own leading: the usual
+  // step from one printed row to the next. Spread over the white, the
+  // leading put every line of the table far from its row, no match stood
+  // near enough to hold one, and the table was spaced evenly down to the
+  // foot of the page.
+  const sorted = tops.slice().sort((a, b) => a - b);
+  const steps = sorted.slice(1).map((t, k) => t - sorted[k]).filter((d) => d > 0.5);
+  const rowStep = steps.length >= 3 ? median(steps) : 0;
+  const pitch = rowStep > 0 && spanPitch > rowStep * 1.5 ? rowStep : spanPitch;
   // One size, no larger than the leading holds.
   const s = Math.max(size * minFit, Math.min(size, pitch / (lineBox * squeeze)));
   const box = s * lineBox, minStep = box * squeeze;
@@ -1094,7 +1113,7 @@ export function scanLayout(lineTexts, rows, { size = 0, lineBox = 1.2, height = 
     let y = a.top;
     for (let i = a.i; i < b.i; i++) {
       const u = i < firstText || i > lastText ? 0 : empty[i] ? blank : 1;
-      put(i, y, u ? step : box);
+      put(i, y, u ? u * step : box);
       y += u * step;
     }
   }
@@ -1116,6 +1135,17 @@ export function scanLayout(lineTexts, rows, { size = 0, lineBox = 1.2, height = 
     const step = w > 0 ? Math.max(minStep, Math.min(pitch, room / w)) : pitch;
     for (let i = lastEnd.i + 1; i < n; i++) put(i, lastEnd.top + (cum[i] - cum[lastEnd.i]) * step, step);
     out[lastEnd.i].spread = step < box - 0.01 ? step : 0;
+    // …but the page's last line, where it is the scan's last printed row (a
+    // page number, a footer), stands where the scan prints it, at the foot.
+    // Its gap from the text above is the page's white, which no line of the
+    // export spans, so no anchor reaches it: on a scanned exhibit whose table
+    // ends half way down, its "25 of 28" was set under the table.
+    const fr = map[lastText];
+    if (lastText > lastEnd.i && fr != null && Math.abs(rows[fr].top - blockLast) < 1 && rows[fr].top > out[lastText].top) {
+      const d = rows[fr].top - out[lastText].top;
+      for (let i = lastText; i < n; i++) out[i].top += d;
+      chain.push({ i: lastText, top: rows[fr].top, left: rows[fr].left, row: fr });
+    }
   }
   // An anchor stands at its row's left, as rowLayout's matches do.
   const held = (x) => (floorAt == null ? x : Math.max(x, floorAt));

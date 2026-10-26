@@ -600,6 +600,44 @@ matched set evenly), `test-scan-layout.mjs` (the reader: one size, no line
 crushed and no gap of several, first and last on their rows, nothing past
 the PDF's right margin, the paper's height; a born-digital page unchanged).
 
+**A scanned page of a ruled TABLE** (`scanTypeSize`, `scanLayout`, the
+`room` of a rule line). The owner, of a scanned exhibit's four-column table
+of violations beside its PDF: "The text words are much smaller than the
+pdf." Measured on a table of that shape (8-point cells on a 9-point
+leading, ruled all round, its page number at the foot): set at 2.46 px where
+the born-digital copy of the same page is set at 4.97, half the PDF's type.
+Four things set it apart from a page of prose:
+- **Its rows are no evidence of the type's size.** `scanTypeSize` fitted
+  the page's longer lines across the PDF's text, and a table's rows are its
+  longest lines: a hundred and fifty characters of cells padded to their
+  bars, where the reader lays a box on the page's character grid, its bars
+  at the PDF's rules (rules.js), whatever its type. A line carrying a box
+  glyph is left out of the measure. The type is the page's body size, as a
+  page with fewer than three lines to measure is.
+- **A rule takes no line.** `scanLayout` counted each rule (and a row of
+  empty cells) a line of text, a table ran a line taller for each, and its
+  lines were matched to the scan's rows with their bars, which no row
+  carries. A line of nothing but box glyphs is now a blank line (half a
+  line), and lines are matched by their words alone, so each row of the
+  table anchors where the scan prints it. The room a blank line is handed is
+  what it takes (`u * step`, half a step), and the reader's `room` for a
+  scan's rule-only line is that room, not a box at its type: given a box, a
+  table's rules pushed every row under them down a line.
+- **The page's white is no leading.** The leading was the printed block's
+  height over the export's lines, and a table half a page long with its
+  page number at the foot gave a leading of 32 points: no line of the table
+  stood near enough to where that put it to anchor, and the table was spaced
+  evenly down to the foot. Where that span is more than half again the
+  scan's own leading (the median step between two printed rows), the scan's
+  own is used.
+- **The page number stands at the foot.** The page's last line, matched to
+  the scan's last printed row, stands at that row: no anchor reaches across
+  the white above it, and it was set under the table.
+
+Measured after: 4.93 px (the PDF's 8 points less the OCR's own reading),
+each row of the table on its scan row, and the page number at the foot.
+`test-scan-layout.mjs` ("a scanned page of a ruled table").
+
 ### A form beside its PDF looks like the PDF (`placePages`, `columns.placeLine`, `pdfsync.lineItems`, `pdfFace`)
 
 The owner, in chat: "I want to use PDF viewer to compensate. Even if the

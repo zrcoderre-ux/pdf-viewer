@@ -127,10 +127,11 @@ async function open(browser, base, { text, pdf }, { turned = false } = {}) {
     if (turned) pg.setRotation(degrees(180));
     // Each row squeezed to the width the scan prints it at, as an OCR layer's
     // words are stretched to their boxes: its size is the OCR's, its width the page's.
-    for (const [t, y, size] of rows) {
-      const fit = Math.min(size, size * 468 / font.widthOfTextAtSize(t, size));
+    for (const [t, y, size, x] of rows) {
+      // (A cell of a table, `x` its left: drawn at its size, as its OCR read it.)
+      const fit = x != null ? size : Math.min(size, size * 468 / font.widthOfTextAtSize(t, size));
       if (turned) pg.drawText(t, { x: 612 - 72, y, size: fit, font, rotate: degrees(180) });
-      else pg.drawText(t, { x: 72, y: 792 - y, size: fit, font });
+      else pg.drawText(t, { x: x != null ? x : 72, y: 792 - y, size: fit, font });
     }
     await window.__textReaderPickPdfs([new File([await doc.save()], "Lease.pdf", { type: "application/pdf" })]);
   }, { rows: pdf, turned });
@@ -148,7 +149,7 @@ async function open(browser, base, { text, pdf }, { turned = false } = {}) {
       const r = document.createRange();
       r.selectNodeContents(lt);
       const tr = r.getBoundingClientRect();
-      return { top: (l.getBoundingClientRect().top - br.top) / scale, size: parseFloat(getComputedStyle(lt).fontSize) / scale, right: (tr.right - br.left) / scale };
+      return { top: (l.getBoundingClientRect().top - br.top) / scale, size: parseFloat(getComputedStyle(lt).fontSize) / scale, right: (tr.right - br.left) / scale, text: l.textContent };
     });
     return { height: br.height / scale, lines };
   });
@@ -183,6 +184,49 @@ try {
     const ts = t.lines.slice(1).map((l, k) => l.top - t.lines[k].top);
     check("…the lines down the page in order", ts.every((s) => s > 0), JSON.stringify(ts.map((s) => Math.round(s))));
     check("…and the page the paper's height", Math.round(t.height) === 792, String(t.height));
+    await t.close();
+  }
+
+  console.log("a scanned page of a ruled table (the owner: \"The text words are much smaller than the pdf\")");
+  {
+    // Four columns ruled all round, each row's cells wrapped to three or four
+    // lines at 8 points on a 9-point leading, a rule between two rows and the
+    // page number at the foot — the export's rows a hundred characters of
+    // cells padded to their bars.
+    const COLS = [[72, 26], [200, 24], [330, 40], [500, 8]];
+    const ROWS = [
+      [["EXIT ILLUMINATION"], ["Lack of 24-hour", "illumination in all", "required exit ways"], ["Missing or non-operational exit signage", "is a life-threatening violation that", "impedes egress and escape in case of", "fire or other emergency."], ["HIGH"]],
+      [["EXPOSED WIRING"], ["Unapproved electrical", "wiring"], ["Exposed wiring is a potentially life-", "threatening condition that may cause an", "electrical fire or electric shock."], ["HIGH"]],
+      [["FLOOR COVERING"], ["Floor covering defective,", "missing, or unsafe"], ["Failure to maintain safe and sanitary", "floor covering creates a minimally", "untenantable condition."], ["LOW"]],
+      [["INSECT SCREENS"], ["Missing or defective", "insect screening."], ["Failure to maintain legally required", "insect screen may allow pests."], ["LOW"]],
+    ];
+    const rule = (a, m, z) => a + COLS.map(([, w]) => "─".repeat(w + 2)).join(m) + z;
+    const exp = ["====== Page 1 — REVIEW: 40 word(s) of this page's OCR layer were CORRECTED to this run's own reading ======",
+      "The violations and their severity levels can be seen below.", rule("┌", "┬", "┐")];
+    const pdf = [["The violations and their severity levels can be seen below.", 100, 9, 72]];
+    let y = 120;
+    const lineTops = [];
+    ROWS.forEach((cells, r) => {
+      const n = Math.max(...cells.map((c) => c.length));
+      for (let i = 0; i < n; i++) {
+        exp.push("│" + cells.map((c, k) => " " + (c[i] || "").padEnd(COLS[k][1]) + " ").join("│") + "│");
+        cells.forEach((c, k) => { if (c[i]) pdf.push([c[i], y + i * 9, 8, COLS[k][0] + 2]); });
+        lineTops.push(y + i * 9 - 8);
+      }
+      y += n * 9 + 4;
+      exp.push(r < ROWS.length - 1 ? rule("├", "┼", "┤") : rule("└", "┴", "┘"));
+    });
+    exp.push("", "", "                                   25 of 28");
+    pdf.push(["25 of 28", 740, 10, 290]);
+    const t = await open(browser, srv.base, { text: exp.join("\n") + "\n", pdf });
+
+    const sz = [...new Set(t.lines.map((l) => Math.round(l.size * 10) / 10))];
+    check("the type the PDF's size, not shrunk to fit the table's padded rows across the page", sz.length === 1 && sz[0] >= 7.5 && sz[0] <= 9, JSON.stringify(sz));
+    const firstRow = t.lines[2], lastCell = t.lines[t.lines.length - 3];
+    check("…its first row where the scan prints it, and its last within a line of it (each rule no line's height)",
+      Math.abs(firstRow.top - lineTops[0]) <= 6 && Math.abs(lastCell.top - lineTops[lineTops.length - 1]) <= 9, `${Math.round(firstRow.top)} / ${lineTops[0]}, ${Math.round(lastCell.top)} / ${lineTops[lineTops.length - 1]}`);
+    check("…and the page number at the foot, where the scan prints it", Math.abs(t.lines[t.lines.length - 1].top - (740 - 10)) <= 8, String(Math.round(t.lines[t.lines.length - 1].top)));
+    check("no page errors", t.errors.length === 0, t.errors.join(" | "));
     await t.close();
   }
 
