@@ -151,9 +151,25 @@
 
   <!-- The pseudonym key, term by term, as it stands in the text: every name
        the key fakes on the pages on screen, in the order each first appears,
-       and every place each one stands. A reading, not a review: the keep and
-       flag choices are where they always are, on the name's own right-click. -->
+       and every place each one stands — and, as the Leaks bar does, a Fix?
+       answer for each (owner: "when I step through the pseudonym key I should
+       get the same yes no never, phrase and type replacement options that I
+       get for leaks"): yes leaves it faked, no and never keep it as the
+       right-click does, phrase and a typed answer go to PDF-Linker as
+       `fix: VALUE | ANSWER` in New Real Values.txt. Its controls are one row
+       at the top, as the Leaks bar's are, so they never move. -->
   <div id="key-bar" class="revbar" hidden>
+    <div class="lb-row lb-controls">
+      <span class="tb-label">Fix?</span>
+      <button data-kfix="yes" title="It is a pseudonym: leave it faked as the key has it, any keep or answer on it taken back">yes</button>
+      <button data-kfix="no" title="Leave it as it stands in this case: un-marked here now, un-faked in the file by PDF-Linker's next run">no</button>
+      <button data-kfix="never" title="Leave it as it stands in every case — the nuclear keep">never</button>
+      <button data-kfix="phrase" title="Fake it whole, kept words inside it too">phrase</button>
+      <span id="kb-answer" class="lb-answer"></span>
+      <input id="kb-typed" type="text" spellcheck="false" placeholder="or type: a new pseudonym for it · ~CORRECT SPELLING (a misspelling of it) · *CORRECT TEXT (a scan error; ** in every folder) · [part to keep]" title="Anything else a LEAKS Fix? cell accepts. Enter applies it and moves on to the next term. It goes to PDF-Linker in New Real Values.txt; a new pseudonym is put in by its next full run.">
+      <button id="kb-apply" title="Give the typed answer">Apply</button>
+      <button id="kb-clear" class="secondary" title="Take the answer off — decide later">clear</button>
+    </div>
     <div class="lb-row">
       <span class="lb-type key">key</span>
       <select id="kb-term" title="Every name the key fakes on these pages, in the order each first appears: the real name, the pseudonym the file carries, and how many times it stands. Pick one to go to its first appearance."></select>
@@ -388,6 +404,10 @@
         <div id="text-fixed-block" hidden>
           <p class="side-hint">Pages marked <strong>✎ Use my text</strong> — the OCR was bad and the text was typed in by hand. Saved to <code>New Real Values.txt</code> as <code>text corrected</code>, with the page's text as saved; PDF-Linker's next run keeps that text and writes the page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again. Save the page before the run, and click the page's button again to withdraw. Click a page here to go to it.</p>
           <ul id="text-fixed-list"></ul>
+        </div>
+        <div id="answers-block" hidden>
+          <p class="side-hint">Answers given in the <strong>walk through the key</strong> (Key terms): a typed replacement, or another Fix? answer, for a name the key fakes. Saved to <code>New Real Values.txt</code> as <code>fix: VALUE | ANSWER</code>, read by PDF-Linker as that name's Fix? cell; a new pseudonym for a name the exports carry is put in by its next full run (a click of Re-run PDF-Linker does it). × withdraws one.</p>
+          <ul id="answers-list"></ul>
         </div>
         <div id="master-block">
           <p class="side-hint" id="master-hint"></p>
