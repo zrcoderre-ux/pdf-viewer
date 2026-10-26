@@ -21041,7 +21041,13 @@ function scanTypeSize(texts, base, rows, bodyX) {
   const room = (PS.bodyRightOf(rows) || 0) - (left || 0);
   const face = { family: TD.fontCss(settings), bold: false, italic: false };
   const ws = [];
-  for (const t of texts) { const s = String(t || "").trim(); if (s.length >= 24) ws.push(faceEm(s, face)); }
+  // Not a table's rows or rules: a box is laid on the page's character grid,
+  // its bars where the PDF's rules stand (rules.js), so a row's width is the
+  // grid's and says nothing of the type. Measured with them, a scanned page of
+  // a ruled table (four columns, its rows a hundred and fifty characters of
+  // cells padded to their bars) was set at half the PDF's type — "The text
+  // words are much smaller than the pdf".
+  for (const t of texts) { const s = String(t || "").trim(); if (s.length >= 24 && !/[│─┌┐└┘├┤┬┴┼]/.test(s)) ws.push(faceEm(s, face)); }
   if (ws.length < 3 || !(room > 0)) return base;
   ws.sort((a, b) => a - b);
   // The longest line that is no runaway (within an eighth of the 85th
@@ -21851,7 +21857,13 @@ function applyMatchedLayoutNow() {
     // have. The blank lines under the last one did the same at the foot,
     // growing the sheet past its PDF page. A line with nothing on it — no
     // words and no margin number — is a gap, and a gap pushes nothing.
-    const room = boxes ? boxes.map((b, k) => (isEmptyLine(lines[k]) ? 0 : b)) : null;
+    // …and on a SCAN a line that is only a drawn rule holds the room the
+    // layout gave it (pdfsync.scanLayout: half a line, the gap between two of
+    // a table's rows), no more: a whole box apiece, each rule of a ruled
+    // table pushed the row under it down a line, and the table ran a tenth
+    // taller than the PDF's.
+    const room = boxes ? boxes.map((b, k) => (isEmptyLine(lines[k]) ? 0
+      : scan && !fixed && RULE_ONLY_RE.test((ltOf(lines[k]) || lines[k]).textContent) ? Math.min(b, (spread && spread[k]) || b / 2) : b)) : null;
     // ON PLEADING PAPER THE NUMBERS ARE THE GRID, and a numbered line stays on
     // its number whatever stands between it and the one above (fixed). A
     // caption's single-spaced lines between two numbers are set a type size
