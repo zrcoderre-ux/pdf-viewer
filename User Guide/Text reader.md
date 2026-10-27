@@ -2315,6 +2315,17 @@ app, which routes it to the reader tab.
   real name in a comment is written as its pseudonym**, as one typed on the
   page is, and shown as the real name here; a name the key binds that cannot
   be written as one stops the save the same way.
+  **Your name goes on your comments.** A new comment's box has a **Your
+  name** field; what you type there is the PDF viewer's **Your name on
+  comments** (Document properties) too, one setting for both, and stays
+  filled for the next comment. The comment's line ends `[by Your Name]`
+  before its id, the box and the Comments tab show it, and PDF-Linker puts it
+  on the PDF as the comment's author. It is written as you typed it, never
+  as a pseudonym, even where a party shares a word of it. For PDF-Linker to
+  keep it in the export, and to write your name on the comments you make in
+  the PDF viewer, set the same name as `comment_author` in
+  `pdf_linker.config`; a comment by anyone else is exported without its
+  author.
   **A comment outlives the next run.** A full PDF-Linker run rebuilds every
   export from its PDF, so the comment is kept where the run reads: in the
   PDF. Its next run (or the text-only pass) puts each new comment on the PDF

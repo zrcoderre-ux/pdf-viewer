@@ -14652,6 +14652,14 @@ var commentAt = null;    // the comment the box is open on: docComments' shape
 var commentMarks = [];   // [{ ranges, ref }]: each passage marked, and its comment
 var commentOpened = 0;   // when the box last opened: the scroll that took the page to it does not close it
 var commentPaintTimer = 0;
+// The operator's name on their comments: the PDF viewer's "Your name on
+// comments" (annotations.js, Document properties), one setting for both, as
+// the two pages share an origin. A comment made here carries it as its line's
+// `[by Name]`, which PDF-Linker puts on the PDF as the comment's author and,
+// where its `comment_author` setting names it, keeps in the export as it is.
+var AUTHOR_KEY = "pdfViewerAuthor";
+function myName() { try { return TD.commentAuthor(localStorage.getItem(AUTHOR_KEY) || ""); } catch { return ""; } }
+function setMyName(v) { try { localStorage.setItem(AUTHOR_KEY, TD.commentAuthor(v)); } catch { /* storage blocked */ } }
 
 /** The pages of the document page `i` belongs to, { from, to }: its reel member, and within it a Combined Text.txt member. Its comments block is on `to`. */
 function commentSpan(i) {
@@ -14769,6 +14777,7 @@ function openCommentPop(ref, range, { edit = false } = {}) {
   const on = commentShown(ref.c.on);
   $("comment-pop-on").textContent = on ? `on “${on.length > 140 ? on.slice(0, 140) + "…" : on}”` : "on the page";
   $("comment-pop-text").textContent = commentShown(ref.c.text);
+  $("comment-pop-by").textContent = ref.c.author ? `by ${ref.c.author}` : "";
   const ro = isCombinedHead();
   $("comment-pop-note").textContent = ro ? `Shown from ${TD.COMBINED_FILE}; change it on the document's own export.`
     : ref.page < 0 ? `Its document has no page ${ref.c.page} on screen.` : "";
@@ -14793,6 +14802,10 @@ function setCommentEditing(on) {
   $("comment-pop-edit").hidden = on || ro;
   $("comment-pop-delete").hidden = isNew || ro;
   $("comment-pop-close").textContent = on ? "Cancel" : "Close";
+  // A new comment is the operator's: their name goes on it, and can be set
+  // here. One already made keeps the author it has, changed or not.
+  $("comment-pop-me").hidden = !(on && isNew);
+  if (on && isNew) $("comment-pop-me-input").value = myName();
   if (on) {
     commentInput.value = commentAt ? commentShown(commentAt.c.text) : "";
     commentInput.focus();
@@ -14825,6 +14838,10 @@ function saveComment() {
   if (ref.k >= 0 && TD.commentFlat(typed) === TD.commentFlat(commentShown(ref.c.text))) { setCommentEditing(false); return; }
   const c = { ...ref.c, text: commentDisk(typed) };
   if (ref.k < 0) {
+    // As typed, not through the key: the operator's own name, never a fake.
+    const me = TD.commentAuthor($("comment-pop-me-input").value);
+    if (me !== myName()) setMyName(me);
+    c.author = me;
     // In page order: after the last comment on this page or one before it.
     let at = 0;
     list.forEach((x, k) => { if (x.raw == null && x.page <= c.page) at = k + 1; });
@@ -14907,8 +14924,14 @@ function renderCommentsList(all) {
     lv.className = "lv cmt-lv";
     lv.textContent = commentShown(ref.c.text);
     const on = commentShown(ref.c.on);
-    li.title = (on ? `On “${on}”: ` : "On the page: ") + commentShown(ref.c.text);
+    li.title = (on ? `On “${on}”: ` : "On the page: ") + commentShown(ref.c.text) + (ref.c.author ? ` — ${ref.c.author}` : "");
     li.append(tag, lv);
+    if (ref.c.author) {
+      const by = document.createElement("span");
+      by.className = "cmt-by";
+      by.textContent = `— ${ref.c.author}`;
+      li.appendChild(by);
+    }
     li.addEventListener("click", () => goToComment(ref));
     ul.appendChild(li);
   }
@@ -14962,6 +14985,10 @@ $("comment-pop-close").addEventListener("click", () => {
 });
 commentInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveComment(); }
+  else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideCommentPop(); }
+});
+$("comment-pop-me-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); saveComment(); }
   else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hideCommentPop(); }
 });
 document.addEventListener("keydown", (e) => {

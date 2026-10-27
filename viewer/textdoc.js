@@ -200,7 +200,7 @@ export const TRAILER_RE = /^\s*=+\s*Authorities cited\b.*?=+\s*$/i;
 // as its pseudonym, and the reader shows it through the key.
 export const COMMENTS_HEAD = "====== Comments (not part of the document) ======";
 export const COMMENTS_RE = /^\s*={6} Comments \(not part of the document\) ={6}\s*$/;
-const COMMENT_LINE_RE = /^\[c(\d+)\] Page (\d+)(?:, on "((?:[^"\\]|\\.)*)")?: (.*?)(?: \[id ([A-Za-z0-9._-]{1,80})\])?$/;
+const COMMENT_LINE_RE = /^\[c(\d+)\] Page (\d+)(?:, on "((?:[^"\\]|\\.)*)")?: (.*?)(?: \[by ([^[\]]{1,80})\])?(?: \[id ([A-Za-z0-9._-]{1,80})\])?$/;
 
 /** A passage or a comment as one line of the block: its whitespace folded. */
 export function commentFlat(s) {
@@ -209,8 +209,8 @@ export function commentFlat(s) {
 
 /**
  * The comments a block carries (its raw lines, head first): [{ page, on, text,
- * id }] in order, `on` "" for a comment on no passage and `id` null where the
- * line has none. A line that does not read as a comment (a blank, a line typed
+ * author, id }] in order, `on` "" for a comment on no passage, `author` "" and
+ * `id` null where the line has none. A line that does not read as a comment (a blank, a line typed
  * into the block by hand) is kept as `{ raw }`, so a block written again keeps it.
  */
 export function parseComments(lines) {
@@ -220,15 +220,26 @@ export function parseComments(lines) {
     if (COMMENTS_RE.test(s)) continue;
     const m = s.match(COMMENT_LINE_RE);
     if (!m) { if (s.trim()) out.push({ raw: s }); continue; }
-    out.push({ page: parseInt(m[2], 10), on: (m[3] || "").replace(/\\(.)/g, "$1"), text: m[4], id: m[5] || null });
+    out.push({ page: parseInt(m[2], 10), on: (m[3] || "").replace(/\\(.)/g, "$1"), text: m[4], author: m[5] || "", id: m[6] || null });
   }
   return out;
 }
 
-/** One comment as its line of the block, numbered `n`. */
+/** A comment's author as its line carries it ("Your name on comments"): one line, no brackets, at most 80 characters; "" for none. */
+export function commentAuthor(s) {
+  return commentFlat(String(s == null ? "" : s).replace(/[[\]]/g, "")).slice(0, 80).trim();
+}
+
+/**
+ * One comment as its line of the block, numbered `n`. Its author, where it has
+ * one, is written `[by Name]` before the id; the reader writes only the
+ * operator's own name there, and PDF-Linker keeps that name as it stands where
+ * its `comment_author` setting names it, and leaves out any other.
+ */
 export function commentLine(c, n) {
   const on = commentFlat(c.on);
-  return `[c${n}] Page ${c.page}` + (on ? `, on "${on.replace(/[\\"]/g, "\\$&")}"` : "") + `: ${commentFlat(c.text)}` + (c.id ? ` [id ${c.id}]` : "");
+  const by = commentAuthor(c.author);
+  return `[c${n}] Page ${c.page}` + (on ? `, on "${on.replace(/[\\"]/g, "\\$&")}"` : "") + `: ${commentFlat(c.text)}` + (by ? ` [by ${by}]` : "") + (c.id ? ` [id ${c.id}]` : "");
 }
 
 /**
@@ -922,7 +933,32 @@ export function spotsAfterSwaps(page, oldText, held, places, newText) {
 export function realsLeftInExport(plain, held, { reals = null, mask = null } = {}) {
   if (!reals) return [];
   const masked = mask ? mask(held, plain) : held;
-  return findReals(reals, blankRanges(masked, citedNameSpans(held).concat(headLineRanges(held))), { layout: plain });
+  return findReals(reals, blankRanges(masked, citedNameSpans(held).concat(headLineRanges(held), commentAuthorRanges(held))), { layout: plain });
+}
+/**
+ * Where a comment's author stands in an export's comments block, the name in
+ * its line's `[by Name]`: [[start, end), …]. It is the operator's own name
+ * (the reader writes "Your name on comments" there, and PDF-Linker writes only
+ * the name its `comment_author` setting gives and keeps it as it stands), so
+ * it is never a real name left to fake, even where a party shares a word of it.
+ */
+export function commentAuthorRanges(text) {
+  const out = [];
+  let at = 0, inside = false;
+  for (const line of String(text == null ? "" : text).split("\n")) {
+    const bare = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (COMMENTS_RE.test(bare)) inside = true;
+    else if (PAGE_HEADER_RE.test(bare) || DOC_BANNER_RE.test(bare)) inside = false;
+    else if (inside) {
+      const m = bare.match(COMMENT_LINE_RE);
+      if (m && m[5]) {
+        const end = bare.length - (m[6] ? ` [id ${m[6]}]`.length : 0) - 1;
+        out.push([at + end - m[5].length, at + end]);
+      }
+    }
+    at += line.length + 1;
+  }
+  return out;
 }
 /** Where an export's page headers and banners stand: [[start, end), …], each line without its break. */
 function headLineRanges(text) {

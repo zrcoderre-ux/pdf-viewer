@@ -1950,6 +1950,11 @@ export function canRedo() { return future.length > 0; }
 export function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
 export function getAuthor() { return author; }
+// The text reader sets the same name from its comment box (its AUTHOR_KEY):
+// taken up here at once where the viewer is open beside it.
+try {
+  window.addEventListener("storage", (e) => { if (e.key === "pdfViewerAuthor") author = String(e.newValue || "").trim(); });
+} catch { /* no window */ }
 export function setAuthor(name) {
   author = String(name || "").trim();
   try { localStorage.setItem("pdfViewerAuthor", author); } catch { /* storage blocked */ }

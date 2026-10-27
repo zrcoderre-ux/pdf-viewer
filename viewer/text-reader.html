@@ -478,9 +478,10 @@
     <button id="keep-menu-cancel" class="secondary">Cancel</button>
   </div>
   <div id="comment-pop" hidden role="dialog" aria-label="Comment">
-    <div class="cp-head"><b id="comment-pop-where"></b> <span id="comment-pop-on" class="cp-on"></span></div>
+    <div class="cp-head"><b id="comment-pop-where"></b> <span id="comment-pop-on" class="cp-on"></span> <span id="comment-pop-by" class="cp-by"></span></div>
     <div id="comment-pop-text" class="cp-text"></div>
     <textarea id="comment-pop-input" rows="4" spellcheck="true" placeholder="Your comment… (Ctrl+Enter saves, Esc cancels)"></textarea>
+    <label id="comment-pop-me" class="cp-me" title="Shown as the author of the comments you make here and in the PDF viewer (the same setting as its Document properties › Your name on comments). PDF-Linker keeps it as it is in the export, never faked, where its comment_author setting is the same name">Your name <input id="comment-pop-me-input" type="text" spellcheck="false" autocomplete="name" maxlength="80" placeholder="on your comments"></label>
     <p id="comment-pop-note" class="cp-note"></p>
     <div class="cp-actions">
       <button id="comment-pop-save" class="primary" title="Keep the comment (Ctrl+Enter) — 💾 Save writes it into the document">Save comment</button>
