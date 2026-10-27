@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git push origin main)"
+      "Bash(git push origin main)",
+      "mcp__claude-code-remote__add_repo"
     ]
   }
 }
