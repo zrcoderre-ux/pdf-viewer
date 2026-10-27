@@ -1699,14 +1699,13 @@ app, which routes it to the reader tab.
   is orange is what the save writes once decided, the run's fakes are never
   written into, and a name you said to fake that the save still cannot write
   is named in red rather than left silently.
-  **And closing on one asks first.** Nothing is lost by the close — the name
-  is still in the file, to be found again the next time the document is opened
-  — but what is left behind is a scrubbed export carrying a real value, with
-  the operator believing the document has been read. That is the mistake the
-  whole tool exists to prevent, so it is worth a prompt that sometimes says
-  what you already knew. Switching documents does **not** ask: the walk moves
-  from export to export by design, and a prompt at every step would be a
-  prompt nobody reads.
+  **Closing on one you have not decided does not ask.** Nothing is lost by
+  the close: the name is still in the file, marked orange again the next time
+  the document is opened, and a save would not have written it. The close
+  used to ask anyway, as a reminder, but the prompt said there were unsaved
+  changes when there were none. A name you said to fake and have not saved
+  yet is owed, and closing on it still asks. Switching documents never asks:
+  the walk moves from export to export by design.
 - **The case folder read on, without a combined file.** A case is one filing in
   pieces, and `Combined Text.txt` is the file you read when you want the case
   rather than the motion — but somebody has to have built it, it is stale the
