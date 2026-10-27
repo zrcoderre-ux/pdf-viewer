@@ -298,6 +298,44 @@ async function run() {
       check("no page errors", r.log.errors, []);
       await r.close();
     }
+    console.log("5. your name on your comments: set in the box, written as [by …], shown, kept out of the key");
+    {
+      const r = await newReader();
+      const p = r.page;
+      truthy("passage selected", await selectText(p, 0, "met the buyer", "Los Angeles"));
+      await p.keyboard.press("c");
+      await p.waitForTimeout(200);
+      check("a new comment asks for your name, empty at first", await p.evaluate(() => [document.getElementById("comment-pop-me").hidden, document.getElementById("comment-pop-me-input").value]), [false, ""]);
+      await p.keyboard.type("Check this.");
+      // The name is even the case's party's, which the key binds: it is still yours, as typed.
+      await p.fill("#comment-pop-me-input", "Corwin  Ashdale");
+      await p.press("#comment-pop-me-input", "Enter");
+      await p.waitForTimeout(400);
+      check("Enter in the name saves the comment", await pop(p), null);
+      check("…and the name is the PDF viewer's \"Your name on comments\"", await p.evaluate(() => localStorage.getItem("pdfViewerAuthor")), "Corwin Ashdale");
+      check("the list names you", await p.evaluate(() => document.querySelector("#comments-list li .cmt-by").textContent), "— Corwin Ashdale");
+      await p.keyboard.press("Control+s");
+      await p.waitForTimeout(1500);
+      const file = await readFile(p, "A Decl.txt");
+      truthy("saved, the name as typed and not as a pseudonym:\n" + file, /: Check this\. \[by Corwin Ashdale\] \[id rdc-[a-z]{10}\]\n$/.test(file));
+      await clickMark(p);
+      check("the comment says who made it", await p.evaluate(() => document.getElementById("comment-pop-by").textContent), "by Corwin Ashdale");
+      await p.click("#comment-pop-edit");
+      check("…and an edit does not ask for a name", await p.evaluate(() => document.getElementById("comment-pop-me").hidden), true);
+      await p.fill("#comment-pop-input", "Check this, too.");
+      await p.click("#comment-pop-save");
+      await p.waitForTimeout(300);
+      await p.keyboard.press("Control+s");
+      await p.waitForTimeout(1500);
+      truthy("changed, its author kept", /: Check this, too\. \[by Corwin Ashdale\] \[id rdc-[a-z]{10}\]\n$/.test(await readFile(p, "A Decl.txt")));
+      truthy("passage selected", await selectText(p, 1, "Further", "paid"));
+      await p.keyboard.press("c");
+      await p.waitForTimeout(200);
+      check("the next new comment has your name already", await p.evaluate(() => document.getElementById("comment-pop-me-input").value), "Corwin Ashdale");
+      await p.keyboard.press("Escape");
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
   } finally {
     if (browser) await browser.close();
     if (srv) srv.stop();

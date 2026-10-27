@@ -26,7 +26,7 @@ import {
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
   valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead, setAsideLines, notedBlocks,
-  COMMENTS_HEAD, parseComments, commentLine, commentsBlock, findPassage,
+  COMMENTS_HEAD, parseComments, commentLine, commentsBlock, findPassage, commentAuthor, commentAuthorRanges,
   launcherFolderToken, rerunUrl, runRequestText, RUN_REQUEST_FILE, LAUNCHER_STEMS,
   captionParens,
   captionEdit,
@@ -2147,9 +2147,25 @@ console.log("\ncomments on the document (the block after the last page)");
   check("the page's sum does not see it", pageTextSum(d.pages[0].lines), pageTextSum([" 1  Plaintiff Rasho filed.", " 2  The court denied it."]));
   const cs = parseComments(d.pages[0].comments);
   check("each line read as a comment", cs, [
-    { page: 1, on: "Rasho filed", text: "Check the \"date\" here", id: "rdc-abc" },
-    { page: 1, on: "", text: "A note on the page", id: null },
+    { page: 1, on: "Rasho filed", text: "Check the \"date\" here", author: "", id: "rdc-abc" },
+    { page: 1, on: "", text: "A note on the page", author: "", id: null },
   ]);
+  // The author, `[by Name]` before the id: the operator's "Your name on comments".
+  check("a comment's author is written before its id",
+    commentLine({ page: 2, on: "x", text: "see", author: " Mara\n [Pell] ", id: "rdc-a" }, 1), '[c1] Page 2, on "x": see [by Mara Pell] [id rdc-a]');
+  check("…and read back", parseComments(['[c1] Page 2, on "x": see [by Mara Pell] [id rdc-a]', "[c2] Page 3: no id [by Mara Pell]"]).map((c) => [c.text, c.author, c.id]),
+    [["see", "Mara Pell", "rdc-a"], ["no id", "Mara Pell", null]]);
+  check("…an empty one is none", [commentAuthor("  "), commentLine({ page: 1, text: "t", author: "[]" }, 1)], ["", "[c1] Page 1: t"]);
+  {
+    const authored = "====== Page 1 ======\nCorwin Ashdale filed.\n\n" + COMMENTS_HEAD + "\n[c1] Page 1: Corwin Ashdale again [by Corwin Ashdale] [id rdc-a]\n[c2] Page 1: x [by Corwin Ashdale]\n";
+    check("the author's place in the block", commentAuthorRanges(authored).map(([a, b]) => authored.slice(a, b)), ["Corwin Ashdale", "Corwin Ashdale"]);
+    const ca = compileReals({ pairs: [{ real: "Corwin Ashdale", fake: "Tobias Wrenfield" }], warn: [{ real: "Corwin Ashdale", fake: "Tobias Wrenfield" }] });
+    const onlyBy = "====== Page 1 ======\nTobias Wrenfield filed.\n\n" + COMMENTS_HEAD + "\n[c1] Page 1: see [by Corwin Ashdale] [id rdc-a]\n";
+    check("…which the standing assertion reads past", realsLeftInExport(onlyBy, onlyBy, { reals: ca }), []);
+    const inText = onlyBy.replace(": see [", ": see Corwin Ashdale [");
+    check("…and nowhere else: the same name in the comment's text is read", realsLeftInExport(inText, inText, { reals: ca }).map((w) => w.real), ["Corwin Ashdale"]);
+    check("…nor a [by …] on a page", commentAuthorRanges("====== Page 1 ======\n[c1] Page 1: x [by Corwin Ashdale]\n"), []);
+  }
   check("a quote in the passage is escaped",
     commentLine({ page: 4, on: 'the "Agreement"  of\nsale', text: "  why?\n ", id: "x1" }, 3),
     '[c3] Page 4, on "the \\"Agreement\\" of sale": why? [id x1]');

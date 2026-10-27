@@ -53,7 +53,8 @@ edited or deleted the same way.
   delete). **Undo / Redo** (Ctrl Z / Ctrl Y) cover every change.
 - **Comments list.** The speech-bubble button on the right lists every
   comment by page, with its author, date and text; search it, and click one to
-  go to it. The author name is set under Document properties.
+  go to it. The author name is set under Document properties (or in the
+  text reader's comment box: one setting for both).
 - **Fill & Sign.** Signatures and initials can be drawn, typed (in a choice of
   script fonts) or taken from an image, and are remembered for next time.
   Add text types straight onto the page (for flat forms); Checkmark, Cross and

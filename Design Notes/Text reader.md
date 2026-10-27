@@ -2453,6 +2453,28 @@ reopened, read, changed and deleted from its passage; a block PDF-Linker
 wrote shown and written back byte for byte by a save of other edits; refused
 on Combined Text.txt. `test-textdoc.mjs` pins the block's parse, write and
 `findPassage`.
+**The author is the operator's own name** (`myName`, `setMyName`,
+`AUTHOR_KEY`; textdoc.js `commentAuthor`, `commentAuthorRanges`). The owner
+asked for their name on the comments they add, and for PDF-Linker not to fake
+it there (2026-10-27). A comment's line carries it as `[by Name]` before its
+id; the name is one line, no brackets, at most 80 characters. The setting is
+the PDF viewer's "Your name on comments" (annotations.js, localStorage
+`pdfViewerAuthor`): the reader and the viewer share an origin in the
+extension, the desktop app and the site, so one name serves both, and a
+`storage` listener in annotations.js takes up a change the reader makes while
+the viewer is open. The box asks for it on a NEW comment only (`#comment-pop-me`,
+filled from the setting, written back on Save comment); an edit keeps the
+author the comment has. It is written as typed, not through `forwardText`, so
+a name a party shares stays the operator's, and the save's standing assertion
+reads past it (`realsLeftInExport` blanks `commentAuthorRanges` beside the page
+headers), else a name the key binds would stop every save of that comment.
+Only the author slot is spared: the same name in a comment's text is read as
+any. PDF-Linker writes the slot only for the names its `comment_author`
+setting gives, keeps them verbatim there, and leaves any other author out of
+the export; it puts the slot's name on the PDF as `/T` for a comment the
+reader made (its notes, "Text reader comments"). `test-comments.mjs` part 5
+pins the box, the setting, the file and the save with a bound name;
+`test-textdoc.mjs` the line and the blanking.
 
 **S̶ Strike: words struck through** (`strikeSelection`, `applyStrikeOp`,
 `dressStrikes`, `hideStrikeMark`, `atomStretches`; textdoc.js `STRIKE_MARK`,

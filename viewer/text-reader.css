@@ -1169,6 +1169,11 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
 #comment-pop[hidden] { display: none; }
 #comment-pop .cp-head { line-height: 1.4; word-break: break-word; }
 #comment-pop .cp-on { color: var(--text-muted); }
+#comment-pop .cp-by { color: var(--text-muted); font-style: italic; }
+#comment-pop .cp-by:empty { display: none; }
+#comment-pop .cp-me { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }
+#comment-pop .cp-me[hidden] { display: none; }
+#comment-pop .cp-me input { flex: 1; min-width: 0; font: inherit; font-size: 12px; background: var(--btn); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 3px 6px; }
 #comment-pop .cp-text { font-size: 13px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 40vh; overflow: auto; }
 #comment-pop textarea { font: inherit; font-size: 13px; line-height: 1.4; resize: vertical; min-height: 64px; background: var(--btn); color: var(--text); border: 1px solid var(--btn-border); border-radius: 4px; padding: 6px; }
 #comment-pop textarea[hidden], #comment-pop .cp-text[hidden], #comment-pop button[hidden] { display: none; }
@@ -1180,6 +1185,7 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
 #comment-pop button.danger { color: #e53935; font-weight: 600; }
 #comment-pop button.secondary { background: transparent; border-color: transparent; color: var(--text-muted); }
 #side-comments .cmt-lv { white-space: normal; }
+#side-comments .cmt-by { color: var(--text-muted); font-style: italic; margin-left: 4px; }
 #swap-pop {
   position: fixed; z-index: 35; display: flex; flex-direction: column; gap: 6px; width: 340px;
   background: var(--chrome); border: 1px solid var(--btn-border); border-radius: 6px; padding: 10px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-size: 12px;
