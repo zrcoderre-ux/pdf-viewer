@@ -367,8 +367,11 @@ walk on the document, its toast in front of the save's own
 - `owedNow()` is what `#st-dirty`, its tooltip and the Save button read: the
   unsaved documents, the decision files, the decided names here and
   elsewhere, a Master Keep removal, and the conflicts. `hasUnsaved()` (the
-  closing prompt, with `standingInTheClear()`, and the shell's
-  `__textReaderHasUnsaved`) asks the same things.
+  closing prompt and the shell's `__textReaderHasUnsaved`) asks the same
+  things. The closing prompt once also asked whenever a real name stood in
+  the clear on screen (`standingInTheClear()`, now gone), decided or not. The
+  owner asked for no prompt to save when nothing could be saved, and an
+  undecided name is no work for a save, so only a decided one asks now.
 
 ### The journal and the marker
 

@@ -990,7 +990,13 @@ test(8, "every decision is owed until Save writes it", async () => {
       await setReel(r.page, false);
       await adopt(r.page);
       await openDoc(r.page, "A Complaint.txt", { settle: 1200 });
+      // Undecided, the name in the clear is nothing a save would write: no prompt.
+      check("an undecided name in the clear is not owed", await hasUnsaved(r.page), false);
+      r.log.dialogs.length = 0;
+      await r.page.evaluate(() => { window.__closeAsks = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(window.__closeAsks); });
+      check("…and closing on it does not ask", await r.page.evaluate(() => window.__closeAsks.defaultPrevented), false);
       await fakeIt(r.page, "Corwin Ashdale");
+      check("decided “fake it” and not saved: closing asks", await r.page.evaluate(() => { const e = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; }), true);
       // Off the screen only: open B, which does not carry it.
       await openDoc(r.page, "B Answer.txt", { settle: 2500 });
       check("“fake it” is owed where the name stands off the screen", await hasUnsaved(r.page), true);

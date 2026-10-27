@@ -5558,17 +5558,11 @@ function pendingWrites() {
  * unlocking a protected document to make the button work is exactly what the
  * protection exists to prevent.
  *
- * Every hit of the last paint, settled or not — what a closing tab would
- * leave in the file. Kept values, spot keeps and the parties of cited
- * decisions are not in this count, because nothing is owed on them.
- */
-function standingInTheClear() {
-  return leakHits.filter((h) => h.range && h.range.startContainer && h.range.startContainer.isConnected).length;
-}
-/**
- * …and the share of them the SAVE will write: the ones the walk has settled
- * with "fake it". A name nobody has decided on is left as it stands
+ * Only the ones the walk has settled with "fake it" count: those are what the
+ * SAVE will write. A name nobody has decided on is left as it stands
  * (standingSpans), so it is no work for the save and does not light it.
+ * Kept values, spot keeps and the parties of cited decisions are not counted
+ * either, because nothing is owed on them.
  */
 function settledInTheClear() {
   return leakHits.filter((h) => isSettled(h.real) && h.range && h.range.startContainer && h.range.startContainer.isConnected).length;
@@ -7682,27 +7676,26 @@ document.addEventListener("keydown", (e) => {
 // on screen, or any document of the folder edited and left (the store), a
 // flagged list never written to the case folder, LEAKS decisions not yet in
 // the workbook, a name said to be faked that no save has written yet,
-// anywhere in the folder, a Master Keep removal the workbook refused, or a
-// real name the key binds still standing in the clear in the document on
-// screen. The decisions survive the close — they are remembered here — but
-// nothing downstream has them: PDF-Linker reads the folder, and the folder
-// has not been told.
+// anywhere in the folder, a Master Keep removal the workbook refused, or an
+// edit to a PDF open in PDF mode. The decisions survive the close — they are
+// remembered here — but nothing downstream has them: PDF-Linker reads the
+// folder, and the folder has not been told.
 //
-// THE LAST ONE IS THE FILE ITSELF. A name the run left in the clear is a real
-// value sitting in a scrubbed export, and until someone decides it — fake it,
-// or keep it — not even a save writes the pseudonym over it (standingSpans).
-// Closing on one that was decided and not yet saved loses the decision;
-// closing on one nobody decided loses nothing, but leaves the file carrying a
-// real value while the operator believes the document has been read, and
-// that is the mistake this whole tool exists to prevent. Better a prompt that
-// sometimes says what you already knew than a close that quietly leaves a
-// name in a filing.
+// ONLY WHAT A SAVE WOULD WRITE. A real name the run left in the clear that
+// nobody has decided is no work for a save (standingSpans leaves it as it
+// stands), so it does not ask: the owner's rule is no prompt to save when
+// nothing could be saved, and the dialog (Chrome's "Changes you made may not
+// be saved", PDF+'s "changes that are not saved") would say something untrue.
+// It used to ask, as a reminder that the document still carries a real value;
+// that reminder is the orange mark and the LEAKS bar, which are there the next
+// time the document is opened. A name decided "fake it" and not yet saved is
+// owed (decidedOwed, in hasUnsaved) and still asks.
 //
-// The browser's own dialog is all a page gets; which of the four it is, the
+// The browser's own dialog is all a page gets; which of these it is, the
 // panels and the status bar say.
 window.addEventListener("beforeunload", (e) => {
   if (openingLink) return; // a pdf-linker: link, which leaves the page where it is (rerunLinker)
-  if (!hasUnsaved() && !standingInTheClear() && !pdfModeUnsaved().length) return;
+  if (!hasUnsaved() && !pdfModeUnsaved().length) return;
   e.preventDefault();
   e.returnValue = "";
 });
