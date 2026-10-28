@@ -332,6 +332,171 @@ export function strikeRuns(line) {
 }
 
 /**
+ * A MARKDOWN DOCUMENT READ AS A WORD DOCUMENT (text-reader.js, dressMarkdown).
+ * The owner: "It should present the markdown like it was a word document in
+ * times new roman." My-Macros' `.md` is a Word draft written as Markdown, and
+ * the reader showed its marks as written: `#` before a heading, `**` round the
+ * bold, a `-` before each item. The page is still the file's text (a save
+ * writes it back byte for byte, and names are matched through the marks), so
+ * nothing is rendered away: per line, this says what the line IS — a heading,
+ * an item of a list, a quotation, a rule — which of its characters are marks
+ * the page hides (`hide`, [from, to) in the line's shown text), and which
+ * stretches are drawn bold, in italics, as code, as a link, or as a tracked
+ * change (`runs`, { from, to, cls }), the marks of each outside its stretch.
+ *
+ * `lines` are the lines' shown texts; `atoms`, per line, the [from, to)
+ * stretches nothing may part (a pseudonym, a spot keep): no mark is read
+ * inside one. Read top to bottom, since a fenced code block runs over lines.
+ * `~~struck~~` is dressStrikes', and is passed over here.
+ *
+ * Returns, per line: { block, depth, hide, runs }. `block` is "p", "blank",
+ * "h1"…"h6", "ul", "ol", "quote", "hr", "fence" (a ``` line), "code" (a line
+ * inside one) or "table"; `depth` an item's level, 0 for the outermost.
+ */
+export function markdownLines(lines, { atoms = null } = {}) {
+  let fence = null;
+  return (lines || []).map((raw, k) => {
+    const s = String(raw == null ? "" : raw);
+    const out = { block: "p", depth: 0, hide: [], runs: [] };
+    const f = /^\s{0,3}(`{3,}|~{3,})/.exec(s);
+    if (fence) {
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length && !s.slice(f[0].length).trim()) { fence = null; out.block = "fence"; out.hide.push([0, s.length]); }
+      else out.block = "code";
+      return out;
+    }
+    if (f) { fence = f[1]; out.block = "fence"; out.hide.push([0, s.length]); return out; }
+    if (!s.trim()) { out.block = "blank"; return out; }
+    if (/^\s{0,3}([-*])(?:\s*\1){2,}\s*$/.test(s)) { out.block = "hr"; out.hide.push([0, s.length]); return out; }
+    let from = 0;
+    let m;
+    if ((m = /^\s{0,3}(#{1,6})(?:\s+|$)/.exec(s))) {
+      out.block = "h" + m[1].length;
+      out.hide.push([0, m[0].length]);
+      from = m[0].length;
+      const tail = /\s+#+\s*$/.exec(s.slice(from));
+      if (tail) out.hide.push([from + tail.index, s.length]);
+      inlineMarks(s, from, tail ? from + tail.index : s.length, atoms && atoms[k], out);
+      return out;
+    }
+    if ((m = /^(\s{0,3}>\s?)+/.exec(s))) {
+      out.block = "quote";
+      out.hide.push([0, m[0].length]);
+      from = m[0].length;
+    } else if ((m = /^(\s*)([-*+])(\s+)(?=\S)/.exec(s))) {
+      out.block = "ul";
+      out.depth = Math.min(6, Math.floor(m[1].replace(/\t/g, "    ").length / 2));
+      out.hide.push([0, m[0].length]);
+      from = m[0].length;
+    } else if ((m = /^(\s*)(\d{1,9}[.)])(\s+)(?=\S)/.exec(s))) {
+      out.block = "ol";
+      out.depth = Math.min(6, Math.floor(m[1].replace(/\t/g, "    ").length / 3));
+      // The number stays, as Word shows it; the spaces round it are the indent's.
+      if (m[1].length) out.hide.push([0, m[1].length]);
+      if (m[3].length > 1) out.hide.push([m[1].length + m[2].length + 1, m[0].length]);
+      from = m[0].length;
+    } else if (/^\s*\|.*\|\s*$/.test(s)) {
+      out.block = "table";
+    }
+    inlineMarks(s, from, s.length, atoms && atoms[k], out);
+    return out;
+  });
+}
+const MD_ESCAPABLE = "\\`*_{}[]()#+-.!~|<>";
+const MD_PUNCT_RE = /[\p{P}\p{S}]/u;
+/** A line's inline marks from `from` to `to`, written into `out` (markdownLines). */
+function inlineMarks(s, from, to, atoms, out) {
+  const literal = new Uint8Array(s.length + 1);
+  for (const [a, b] of atoms || []) for (let i = Math.max(0, a); i < Math.min(b, s.length); i++) literal[i] = 1;
+  const free = (i, n = 1) => { for (let j = i; j < i + n; j++) if (j >= to || literal[j]) return false; return true; };
+  const take = (a, b) => { for (let i = a; i < b; i++) literal[i] = 1; };
+  // A backslash before a mark of punctuation: hidden, and its character is text.
+  for (let i = from; i < to - 1; i++) {
+    if (s[i] === "\\" && free(i, 2) && MD_ESCAPABLE.includes(s[i + 1])) { out.hide.push([i, i + 1]); take(i, i + 2); i++; }
+  }
+  // Code: a run of backticks to the next run as long; nothing inside it is a mark.
+  for (let i = from; i < to; i++) {
+    if (s[i] !== "`" || !free(i)) continue;
+    let n = 1;
+    while (s[i + n] === "`") n++;
+    const close = s.indexOf("`".repeat(n), i + n);
+    if (close < 0 || close + n > to || s[close + n] === "`") { i += n - 1; continue; }
+    out.hide.push([i, i + n], [close, close + n]);
+    out.runs.push({ from: i + n, to: close, cls: "md-code" });
+    take(i, close + n);
+    i = close + n - 1;
+  }
+  // A tracked change or a comment, as My-Macros writes a Word draft's: {++…++},
+  // {--…--}, {==…==}, {>>…<<}.
+  const critic = [["{++", "++}", "md-ins"], ["{--", "--}", "md-del"], ["{==", "==}", "md-hl"], ["{>>", "<<}", "md-cmt"]];
+  for (const [open, close, cls] of critic) {
+    for (let i = s.indexOf(open, from); i >= 0 && i < to; i = s.indexOf(open, i + 1)) {
+      if (!free(i, 3)) continue;
+      const j = s.indexOf(close, i + 3);
+      if (j < 0 || j + 3 > to || !free(j, 3)) continue;
+      out.hide.push([i, i + 3], [j, j + 3]);
+      out.runs.push({ from: i + 3, to: j, cls });
+      take(i, i + 3);
+      take(j, j + 3);
+    }
+  }
+  // A link: its text shown as a link, its brackets and address hidden.
+  const link = /\[([^\]\n]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  link.lastIndex = from;
+  for (let m = link.exec(s); m && m.index < to; m = link.exec(s)) {
+    const a = m.index, mid = a + 1 + m[1].length, end = a + m[0].length;
+    if (end > to || !free(a) || !free(mid, 2) || !free(end - 1)) continue;
+    out.hide.push([a, a + 1], [mid, end]);
+    out.runs.push({ from: a + 1, to: mid, cls: "md-link" });
+    take(a, a + 1);
+    take(mid, end);
+  }
+  // Emphasis: `*` and `_` runs, opened and closed as CommonMark does (a run
+  // that opens before a word, closes after one; an `_` inside a word is text,
+  // so "Rasho_Helen_Decl" is one word), the nearest opener first.
+  const runs = [];
+  for (let i = from; i < to; i++) {
+    const c = s[i];
+    if ((c !== "*" && c !== "_") || !free(i)) continue;
+    let n = 1;
+    while (i + n < to && s[i + n] === c && free(i + n)) n++;
+    const before = i > 0 ? s[i - 1] : " ", after = i + n < s.length ? s[i + n] : " ";
+    const ws = (ch) => /\s/.test(ch), pu = (ch) => MD_PUNCT_RE.test(ch);
+    const left = !ws(after) && (!pu(after) || ws(before) || pu(before));
+    const right = !ws(before) && (!pu(before) || ws(after) || pu(after));
+    const canOpen = c === "*" ? left : left && (!right || pu(before));
+    const canClose = c === "*" ? right : right && (!left || pu(after));
+    runs.push({ c, at: i, n, left: n, canOpen, canClose, used: [] });
+    i += n - 1;
+  }
+  const pairs = [];
+  for (let k = 0; k < runs.length; k++) {
+    const close = runs[k];
+    if (!close.canClose) continue;
+    for (let j = k - 1; j >= 0 && close.left > 0; j--) {
+      const open = runs[j];
+      if (open.c !== close.c || !open.canOpen || open.left <= 0) continue;
+      // (The rule of three: a run both ways matches only where the lengths allow.)
+      if ((open.canClose || close.canOpen) && (open.n + close.n) % 3 === 0 && (open.n % 3 || close.n % 3)) continue;
+      const use = open.left >= 2 && close.left >= 2 ? 2 : 1;
+      const oa = open.at + open.left - use, cb = close.at + (close.n - close.left);
+      pairs.push({ oa, ob: oa + use, ca: cb, cb2: cb + use, strong: use === 2 });
+      open.left -= use;
+      close.left -= use;
+      // Runs between them that are left open are text now.
+      for (let q = j + 1; q < k; q++) runs[q].left = 0;
+      if (open.left > 0) j++; // the same opener again, for what is left of the closer
+    }
+  }
+  for (const p of pairs) {
+    out.hide.push([p.oa, p.ob], [p.ca, p.cb2]);
+    out.runs.push({ from: p.ob, to: p.ca, cls: p.strong ? "md-b" : "md-i" });
+  }
+  out.hide.sort((a, b) => a[0] - b[0]);
+  // Outer stretches first, so an inner one is wrapped inside it.
+  out.runs.sort((a, b) => a.from - b.from || b.to - a.to);
+}
+
+/**
  * A line as the page LAYS IT OUT: a strike's ~~ marks are hidden on the page
  * and take no room there, so every column, indent and bar of the line is
  * counted in its text with the marks taken out — counted with them, a column

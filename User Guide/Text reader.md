@@ -34,7 +34,15 @@ app, which routes it to the reader tab.
   My-Macros writes from a Word draft is in its pseudonyms, like an export, so
   the reader opens it as it opens a `.txt` — from the picker, a drop, or the
   app's "open with" — and puts the real values from the key over the
-  pseudonyms on screen. The Markdown marks (`#`, `**`, `-`) show as written.
+  pseudonyms on screen. It is drawn as a Word document: Times New Roman at
+  12 points on an 8.5-inch page with an inch of margin each side, its
+  headings, bold and italics, bulleted and numbered lists, quotations,
+  links, and tracked changes and comments (`{++ ++}`, `{-- --}`, `{>> <<}`)
+  drawn as Word draws them, and the Markdown marks (`#`, `**`, `-`) out of
+  sight. The page keeps its proportions in a narrower window, so each line
+  breaks where it would in Word. The file is unchanged underneath: with
+  **✎ Edit** on, the marks show again, dimmed, so what you type goes in
+  among them. A table is left as written.
   Save writes it back to the same `.md`, in its pseudonyms — except the
   values you have **kept**: with **✎ Edit** on, Save writes each kept value
   as itself in place of the pseudonym the run wrongly put there, so the fix

@@ -27,8 +27,40 @@ pseudonyms, as an export does, so it takes the `.txt` path unchanged: the
 pickers, the drop, the file input, the PWA's `isTextFile` and its
 `file_handlers` all accept `.md`/`.markdown`, and `parseExport` reads it as
 it reads a headerless Word export, one page, round-tripped byte for byte. The
-Markdown is shown as written (`#`, `**`, list markers), not rendered: the page
-is the file's text, and a save writes that text back. It is never a document
+page is the file's text, and a save writes that text back.
+
+**…and drawn as a Word document** (`TD.markdownLines`, `dressMarkdown`,
+`.page-body.md`; 2026-10-28). The owner: "It should present the markdown like
+it was a word document in times new roman", and "make sure that it has the
+correct width. It currently has the document too wide." It was shown as
+written, `#`, `**` and list markers and all, in the reader's font on the
+reader's margins (48 pixels a side: a 7.5-inch column). Nothing is rendered
+away: `markdownLines` reads each line's shown text for what it is (a heading,
+an item and its level, a numbered item, a quotation, a rule, a fenced code
+block, a table) and which characters are marks (`hide`) and which stretches are
+bold, italic, code, a link or a tracked change (`runs`), CommonMark's
+flanking rules deciding `*` and `_` (an `_` inside a word is text,
+"Rasho_Helen_Decl"; a `*` between spaces is text), no mark read inside a
+pseudonym or a spot keep (`atoms`), and `~~strike~~` left to `dressStrikes`.
+`dressMarkdown` then marks each `.line` (`data-md`, `--md-depth`), hides the
+marks in `.mk` spans (as a strike's are hidden in `.sk`) and wraps each stretch
+in `.mdr` spans (`wrapStretch`: a name's span whole), the text unchanged, so
+the save, a copy, Find and the names' matching read the file exactly as
+before; it runs with `dressStrikes` (`dressBody`, `recolumnLater`, a strike),
+and checks a line's dressing a character at a time (`mdWanted`,
+`mdDressingOf`) so a line already dressed is not touched. `dressColumns` cuts
+no columns on a Markdown document: a Word page is paragraphs. The stylesheet
+makes the page Word's: `--md-in` is the sheet's width over 8.5, the margins an
+inch, the type Times New Roman at a sixth of an inch (12 points), a list item's
+text half an inch in a level with its bullet (•, o, ▪) or number a quarter inch
+before it, so a narrower window draws the same page smaller and each line
+breaks where Word's would. With ✎ Edit on the marks show, dimmed, and the
+bullets and rules give way to them. Tables are left as written. Tests:
+`test-markdown.mjs` (Times New Roman, 12 points, an inch each side and 6.5
+inches of text at the sheet's scale; the marks out of sight, the heading, the
+bold real name, the italic word and the bullet drawn; the text the file's; the
+marks back with Edit on; the save byte for byte), `test-textdoc.mjs`
+("a Markdown document read as a Word document"). It is never a document
 of the case folder — `isExportName` does not take it, so a folder listing, the
 reel and PDF-Linker's run do not see it — and `renameFixed` refuses it for
 that reason. `TD.docLabel` (the bar, the print title, the reel divider) and

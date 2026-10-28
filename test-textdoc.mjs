@@ -30,7 +30,7 @@ import {
   launcherFolderToken, rerunUrl, runRequestText, RUN_REQUEST_FILE, LAUNCHER_STEMS,
   captionParens,
   captionEdit,
-  STRIKE_MARK, strikeRuns, strikeEdit, unstruck, strikeLayout,
+  STRIKE_MARK, strikeRuns, strikeEdit, unstruck, strikeLayout, markdownLines,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans, translate, translateRuns } from "./viewer/pseudo-key.js";
 
@@ -2362,6 +2362,29 @@ console.log("margin numbers that run complete (pageNumbersComplete)");
   check("pleading paper 1 to 28: complete", pageNumbersComplete(Array.from({ length: 28 }, (_, k) => String(k + 1).padStart(2) + "  x")), true);
   check("three numbers an OCR caught on a page of eight lines: not", pageNumbersComplete([" 1  a", " 2  b", " 3  c", "d", "e", "f", "g", "h"]), false);
   check("no numbers: not", pageNumbersComplete(["a", "b"]), false);
+}
+console.log("a Markdown document read as a Word document (markdownLines)");
+{
+  // What the page shows of a line: its characters, the hidden ones out.
+  const seen = (line, o) => [...line].filter((_, i) => !o.hide.some(([a, b]) => i >= a && i < b)).join("");
+  const runs = (line, o) => o.runs.map((r) => `${r.cls}:${line.slice(r.from, r.to)}`);
+  const L = ["# Tentative Ruling", "", "**Plaintiff Ivy Larkspur** moves to *compel*.", "- first request", "  - nested _item_", "1. numbered", "> quoted \\*not bold\\*",
+    "Rasho_Helen_Decl and `code *x*` and [the rule](http://x.y)", "{++inserted++} and {--deleted--} {>>a comment<<}", "---", "```", "code **x**", "```", "| a | b |", "a ~~struck~~ word", "2 * 3 * 4 is not emphasis", "***both***"];
+  const o = markdownLines(L);
+  check("the blocks", o.map((x) => x.block), ["h1", "blank", "p", "ul", "ul", "ol", "quote", "p", "p", "hr", "fence", "code", "fence", "table", "p", "p", "p"]);
+  check("a heading without its #", seen(L[0], o[0]), "Tentative Ruling");
+  check("bold and italics, their marks hidden", [seen(L[2], o[2]), runs(L[2], o[2])], ["Plaintiff Ivy Larkspur moves to compel.", ["md-b:Plaintiff Ivy Larkspur", "md-i:compel"]]);
+  check("an item without its -, and its level", [seen(L[3], o[3]), o[3].depth, seen(L[4], o[4]), o[4].depth, runs(L[4], o[4])], ["first request", 0, "nested item", 1, ["md-i:item"]]);
+  check("a numbered item keeps its number", seen(L[5], o[5]), "1. numbered");
+  check("a quotation without its >, an escape's backslash hidden and its * text", [seen(L[6], o[6]), runs(L[6], o[6])], ["quoted *not bold*", []]);
+  check("an _ inside a word is text; code holds no marks; a link's address hidden", [seen(L[7], o[7]), runs(L[7], o[7])], ["Rasho_Helen_Decl and code *x* and the rule", ["md-code:code *x*", "md-link:the rule"]]);
+  check("tracked changes and a comment", [seen(L[8], o[8]), runs(L[8], o[8])], ["inserted and deleted a comment", ["md-ins:inserted", "md-del:deleted", "md-cmt:a comment"]]);
+  check("a rule and a fence's lines hidden, the code inside them read as written", [seen(L[9], o[9]), seen(L[10], o[10]), seen(L[11], o[11]), runs(L[11], o[11])], ["", "", "code **x**", []]);
+  check("a table and a strike left as they are (a strike is dressStrikes')", [seen(L[13], o[13]), seen(L[14], o[14]), runs(L[14], o[14])], ["| a | b |", "a ~~struck~~ word", []]);
+  check("a * between spaces is text", [seen(L[15], o[15]), runs(L[15], o[15])], ["2 * 3 * 4 is not emphasis", []]);
+  check("*** is bold and italics", [seen(L[16], o[16]), runs(L[16], o[16]).sort()], ["both", ["md-b:both", "md-i:**both**"]]);
+  const atoms = markdownLines(["**Ivy*Larkspur** here"], { atoms: [[[2, 14]]] });
+  check("no mark is read inside a name", runs("**Ivy*Larkspur** here", atoms[0]), ["md-b:Ivy*Larkspur"]);
 }
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);

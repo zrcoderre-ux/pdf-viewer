@@ -1112,6 +1112,57 @@ body.show-fakes.marks-off .pn { background: transparent; box-shadow: none; }
    stood. The line is the text's own colour, as a strike on paper is. */
 .lt .st { text-decoration: line-through; text-decoration-thickness: 0.08em; }
 .lt .sk { display: none; }
+/* A MARKDOWN DOCUMENT AS A WORD DOCUMENT (text-reader.js dressMarkdown,
+   textdoc.js markdownLines). The page is Word's: the sheet is 8.5 inches, an
+   inch of margin each side and top and bottom (a column 6.5 inches wide), the
+   type Times New Roman at 12 points — a sixth of an inch — every measure a
+   share of the sheet's width, so a narrower window draws the same page
+   smaller and every line breaks where it would in Word. The marks are hidden
+   (.mk) and the stretches dressed (.mdr); with ✎ Edit on the marks show,
+   dimmed, so what is typed is typed among them. */
+.page-body.md {
+  --md-in: calc(var(--reader-width-eff) / 8.5);
+  font-family: "Times New Roman", Times, "Liberation Serif", Tinos, serif;
+  font-size: calc(var(--md-in) / 6);
+  padding: var(--md-in);
+}
+.page-body.md .mk { display: none; }
+body.editing .page-body.md .mk { display: inline; color: #9aa0a6; }
+.page-body.md .md-b { font-weight: 700; }
+.page-body.md .md-i { font-style: italic; }
+.page-body.md .md-code { font-family: "Courier New", Courier, "Liberation Mono", monospace; font-size: 0.92em; }
+.page-body.md .md-link { color: #0563c1; text-decoration: underline; }
+/* Tracked changes and comments as Word marks them up. */
+.page-body.md .md-ins { color: #2e7d32; text-decoration: underline; }
+.page-body.md .md-del { color: #c62828; text-decoration: line-through; }
+.page-body.md .md-hl { background: #fff59d; }
+.page-body.md .md-cmt { font-size: 0.8em; background: #fdf3c4; border-left: 2px solid #e0b400; padding: 0 0.3em; color: #5f4b00; }
+/* Headings bold, in the body's face, as a pleading's are. */
+.page-body.md .line[data-md="h1"] > .lt { font-size: 1.33em; font-weight: 700; }
+.page-body.md .line[data-md="h2"] > .lt { font-size: 1.17em; font-weight: 700; }
+.page-body.md .line[data-md="h3"] > .lt { font-weight: 700; }
+.page-body.md .line[data-md="h4"] > .lt { font-weight: 700; font-style: italic; }
+.page-body.md .line[data-md="h5"] > .lt,
+.page-body.md .line[data-md="h6"] > .lt { font-style: italic; }
+/* A list item hangs its text half an inch in a level, its bullet or number a
+   quarter inch before it, as Word's default lists do. */
+.page-body.md .line[data-md="ul"] > .lt,
+.page-body.md .line[data-md="ol"] > .lt {
+  padding-left: calc(var(--md-in) * 0.5 * (var(--md-depth, 0) + 1));
+  text-indent: calc(var(--md-in) * -0.25);
+}
+.page-body.md .line[data-md="ul"] > .lt::before {
+  content: "\2022"; display: inline-block; width: calc(var(--md-in) * 0.25); text-indent: 0;
+}
+.page-body.md .line[data-md="ul"][style*="--md-depth: 1"] > .lt::before { content: "o"; }
+.page-body.md .line[data-md="ul"][style*="--md-depth: 2"] > .lt::before { content: "\25AA"; }
+body.editing .page-body.md .line[data-md="ul"] > .lt::before { content: none; }
+.page-body.md .line[data-md="quote"] > .lt { padding: 0 var(--md-in) 0 calc(var(--md-in) * 0.5); }
+.page-body.md .line[data-md="hr"] > .lt { min-height: 0; height: 0.75em; border-bottom: 1px solid #888; margin-bottom: 0.5em; }
+body.editing .page-body.md .line[data-md="hr"] > .lt { height: auto; border-bottom: 0; margin: 0; }
+.page-body.md .line[data-md="code"] > .lt { font-family: "Courier New", Courier, "Liberation Mono", monospace; font-size: 0.92em; }
+.page-body.md .line[data-md="fence"] > .lt { min-height: 0; }
+body.editing .page-body.md .line[data-md="fence"] > .lt { min-height: calc(var(--reader-lh) * 1em); }
 [data-here] { text-decoration: underline dotted #78909c; text-underline-offset: 2px; cursor: help; }
 [data-here]:hover { background: rgba(120, 144, 156, 0.18); border-radius: 2px; }
 body.marks-off [data-here] { text-decoration: none; }

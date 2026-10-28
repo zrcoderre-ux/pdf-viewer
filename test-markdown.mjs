@@ -4,7 +4,11 @@
 // and a save writes it back in its pseudonyms under its own name, an edit
 // with it — except a value kept, which the save of a .md being edited writes
 // as itself (clearKeptIn): no PDF-Linker run will ever un-fake it. In the app (the site pwa/build-site.sh
-// assembles) a .md picked opens in the reader's tab.
+// assembles) a .md picked opens in the reader's tab. And it is drawn as a
+// Word document (dressMarkdown, TD.markdownLines): Times New Roman at 12
+// points on an 8.5-inch sheet with an inch of margin each side, its marks
+// hidden and its headings, bold, italics and list items drawn, the text under
+// them the file's; with Edit on, the marks show.
 //
 // Run: node test-markdown.mjs   (from the repo root)
 //
@@ -100,7 +104,7 @@ const KEY_BYTES = buildKey([
   ["person", "Careau", "Halvorsen", "", "", "spreadsheet", 1],
 ]);
 // "Careau" is a street, faked by mistake: the keep is what the save carries out.
-const MD = "# Tentative Ruling\n\n**Plaintiff Tobias Wrenfield** moves to compel.\n\nThe store on Halvorsen Street.\n\n- Wrenfield's first request\n";
+const MD = "# Tentative Ruling\n\n**Plaintiff Tobias Wrenfield** moves to *compel*.\n\nThe store on Halvorsen Street.\n\n- Wrenfield's first request\n";
 
 /** The .md in the origin's private file system, opened in the reader in `w` as a lone file. */
 async function openMd(w) {
@@ -130,18 +134,52 @@ async function run() {
     await page.goto(srv.base + "/viewer/text-reader.html");
     await page.waitForFunction(() => !!window.__textReaderLoadLocal && !!window.__textReaderLoadKey);
 
-    console.log("1. opened: the real values on screen, the Markdown as written");
+    console.log("1. opened: the real values on screen, the Markdown drawn as a Word document");
     await openMd(page);
     const shown = await bodyText(page);
-    truthy("the real name is shown", shown.includes("**Plaintiff Corwin Ashdale** moves to compel."));
-    truthy("…in its possessive too", shown.includes("- Ashdale's first request"));
+    truthy("the real name is shown", shown.includes("Plaintiff Corwin Ashdale moves to compel."));
+    truthy("…in its possessive too", shown.includes("Ashdale's first request"));
     truthy("…and the pseudonym is not", !shown.includes("Wrenfield"));
-    truthy("the heading line stands as written", shown.startsWith("# Tentative Ruling"));
+    truthy("the heading reads without its #", shown.startsWith("Tentative Ruling"));
+    truthy("no mark is seen: no #, no **, no *, no list's -", !/[#*]|^- /m.test(shown));
+    const word = await page.evaluate(() => {
+      const body = document.querySelector("#pages .tpage .page-body");
+      const sheet = body.closest(".tpage").getBoundingClientRect().width;
+      const cs = getComputedStyle(body);
+      const lineOf = (t) => [...body.querySelectorAll(":scope > .line")].find((l) => l.textContent.includes(t));
+      const styleOf = (t) => {
+        const w = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+        for (let n = w.nextNode(); n; n = w.nextNode()) if (n.data.includes(t)) { const c = getComputedStyle(n.parentElement); return { weight: Number(c.fontWeight), italic: c.fontStyle === "italic" }; }
+        return null;
+      };
+      const h = lineOf("Tentative Ruling"), li = lineOf("first request");
+      return {
+        md: body.classList.contains("md"), family: cs.fontFamily, size: parseFloat(cs.fontSize), sheet,
+        left: parseFloat(cs.paddingLeft), right: parseFloat(cs.paddingRight), column: body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+        h1: h && h.dataset.md, h1Weight: h && Number(getComputedStyle(h.querySelector(".lt")).fontWeight),
+        ul: li && li.dataset.md, bullet: li && getComputedStyle(li.querySelector(".lt"), "::before").content,
+        name: styleOf("Corwin Ashdale"), compel: styleOf("compel"), moves: styleOf("moves to"),
+        text: body.textContent,
+      };
+    });
+    truthy("the page is a Markdown document's", word.md);
+    truthy("…in Times New Roman", /^"?Times New Roman/.test(word.family));
+    const near = (a, b) => Math.abs(a - b) <= 1;
+    truthy("…at 12 points: a sixth of an inch of an 8.5-inch sheet", near(word.size, word.sheet / 8.5 / 6) && word.size > 10);
+    truthy("…an inch of margin each side", near(word.left, word.sheet / 8.5) && near(word.right, word.sheet / 8.5));
+    truthy("…its text 6.5 inches wide", near(word.column, word.sheet * 6.5 / 8.5));
+    truthy("the heading drawn as one, bold", word.h1 === "h1" && word.h1Weight >= 700);
+    truthy("the bold party bold, its real name with it", !!word.name && word.name.weight >= 700);
+    truthy("…the italic word in italics, the words between them neither", !!word.compel && word.compel.italic && !!word.moves && word.moves.weight < 700 && !word.moves.italic);
+    truthy("the list item drawn with a bullet", word.ul === "ul" && /\u2022|•/.test(word.bullet));
+    truthy("the text under it is the file's, marks and all", word.text.includes("**Plaintiff Corwin Ashdale** moves to *compel*.") && word.text.includes("# Tentative Ruling") && word.text.includes("- Ashdale's first request"));
     check("the bar names it without .md", await page.evaluate(() => document.getElementById("doc-title").textContent), "Draft Order");
     truthy("the status bar names the file", await page.evaluate(() => document.getElementById("st-file").textContent.startsWith("Draft Order.md")));
 
     console.log("2. saved: in its pseudonyms, under its own name");
     await page.click("#edit-toggle");
+    await page.waitForTimeout(300);
+    truthy("with Edit on, the marks show to type among", (await bodyText(page)).includes("**Plaintiff Corwin Ashdale**"));
     await page.click("#pages .tpage .page-body");
     await page.keyboard.press("Control+End");
     await page.keyboard.type(" Granted.");
@@ -201,7 +239,7 @@ async function run() {
     const reader = shell.frames().find((f) => f.url().endsWith("/viewer/text-reader.html"));
     truthy("the tab is the text reader", reader);
     await reader.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0, null, { timeout: 20000 });
-    truthy("…reading the Markdown", (await reader.evaluate(() => document.querySelector("#pages .tpage .page-body").innerText)).includes("**Plaintiff"));
+    truthy("…reading the Markdown, drawn as a Word document", await reader.evaluate(() => { const b = document.querySelector("#pages .tpage .page-body"); return b.classList.contains("md") && b.innerText.includes("Plaintiff Tobias Wrenfield moves") && !b.innerText.includes("**"); }));
     check("no page errors in the app", appErrors, []);
     await app.close();
   } finally {
