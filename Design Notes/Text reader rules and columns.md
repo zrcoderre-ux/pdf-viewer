@@ -422,6 +422,24 @@ largest factor the run fits at by search (to the thousandth, never more than
 fits). A numbered line with nothing after its number holds no room
 (`bare`): its number is in the margin.
 
+**…and a caption's `)` side is no type** (`typeTextOf` in `text-reader.js`;
+2026-10-28). The owner, of a complaint whose caption is boxed by a column of
+`)`s: "The PDF does not have these weird sizing inconsistencies. And the
+counts should be in line with one another." The export put three of the
+caption's rows between lines 14 and 15 (") 2. QUANTUM MERUIT; AND",
+"ROCKHAVEN ENTERPRISES, INC., a California ) 3. FORECLOSURE OF", and line 14
+itself, nothing but its `)`), and each row's span ran through the `)` column,
+so every row stood over every other and the party block and the causes of
+action were no longer two columns. Line 14's `)` also held a line's room, so
+the three were stacked a type size apiece into one pitch, and `fitRuns` took
+the two under it to half their size. Now a line's span and its room are read
+off its text with the side `)` (the `.rb.paren` bar rules.js draws it as) a
+space: a row of the right-hand column alone stands over the right-hand column
+only, and a line holding only its `)` holds no room (`bare`), as a numbered
+line with nothing after its number does. Test: `test-caption-side.mjs` (the
+owner's caption: all of it at the PDF's 12 point, the causes of action at one
+left, no line on top of another).
+
 ### A pleading line's size is its first piece's, its face only where the face covers it (`pdfsync.firstPieceSize`, `faceCovers`)
 
 The owner, of the same caption page: "I am still getting incorrect sizing

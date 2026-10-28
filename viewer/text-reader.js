@@ -251,6 +251,28 @@ function fwdName() {
   const f = nameFwdMemo.fwd;
   return f ? (s) => PK.forwardRuns(f, s).map((r) => (r.t === "swap" ? r.to : r.s)).join("") : null;
 }
+/**
+ * A document's name as the reader SHOWS it: its pseudonyms put back to the
+ * real names, as the pages show them, with a case's key attached and Show
+ * fakes off. The owner: "when a case folder is open, the document titles
+ * should show the real values instead of the pseudonymized ones." The file's
+ * own name is unchanged and is what everything else is keyed on; this is for
+ * the eye only — the tab, the title, the status bar, the folder's list, the
+ * reel's dividers, the names bar. A screenshot fakes them again with the rest
+ * of the chrome (swapChrome), and a print is titled by the file (printTitle).
+ */
+let shownNameMemo = { rev: null, names: new Map() };
+function shownDocName(name) {
+  const n = String(name || "");
+  if (!n || !rev || settings.showFakes) return n;
+  if (shownNameMemo.rev !== rev) shownNameMemo = { rev, names: new Map() };
+  let out = shownNameMemo.names.get(n);
+  if (out == null) {
+    out = PK.translate(rev, n).text;
+    shownNameMemo.names.set(n, out);
+  }
+  return out;
+}
 let nameMatch = null;
 function nameMatchers() {
   if (!nameMatch || nameMatch.key !== key || nameMatch.docs !== folderDocs || nameMatch.pdfs !== folderPdfs) {
@@ -747,7 +769,7 @@ lhRange.addEventListener("input", () => { settings.lineHeight = Number(lhRange.v
 marksToggle.addEventListener("change", () => { settings.marks = marksToggle.checked; saveSettings(); applySettings(); hideTip(); });
 markColorEl.addEventListener("input", () => { settings.markColor = markColorEl.value; saveSettings(); applySettings(); });
 markAlphaEl.addEventListener("input", () => { settings.markAlpha = Number(markAlphaEl.value); saveSettings(); applySettings(); });
-fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.checked; saveSettings(); applySettings(); showFakes(settings.showFakes); });
+fakesToggle.addEventListener("change", () => { settings.showFakes = fakesToggle.checked; saveSettings(); applySettings(); showFakes(settings.showFakes); paintDocNames(); });
 // The grid is asked for, not assumed: a page laid on its PDF's geometry is a
 // different page to read — another width, another type size, every line moved
 // to its number's height — and the reader's first business is the words. Side
@@ -2338,6 +2360,7 @@ function compileKeyNow() {
   // A kept value is never offered, and a real that opens one stays partial.
   ahead = k ? PK.compileTypeahead(k, allKeeps().map((x) => x.value)) : null;
   warmMatchers();
+  paintDocNames(); // …and the titles in the names the key gives back (shownDocName)
 }
 // A key's matcher is one alternation over every name in it, and the ENGINE
 // does not build it until something is matched against it — a few thousand
@@ -3686,10 +3709,25 @@ function paintDocTitle() {
   const m = reelCurrent();
   docTitleEl.hidden = !m;
   if (!m) return;
-  docTitleEl.textContent = TD.docLabel(m.name);
+  docTitleEl.textContent = TD.docLabel(shownDocName(m.name));
   const why = renameFixed(m);
   docTitleEl.classList.toggle("fixed", !!why);
-  docTitleEl.title = m.name + " — " + (why ? "not renamed here: " + why : "click to rename it, and its PDF with it");
+  docTitleEl.title = shownDocName(m.name) + " — " + (why ? "not renamed here: " + why : "click to rename it, and its PDF with it");
+}
+/**
+ * Every place a document's name is shown, painted again: the key has come or
+ * changed, or Show fakes has been turned (shownDocName). Nothing is rebuilt.
+ */
+function paintDocNames() {
+  const m = reelCurrent();
+  const open = (m && m.name) || fileName;
+  if (open) document.title = shownDocName(open) + " — Text Reader";
+  renderReelState();
+  for (const li of docsList.children) {
+    const t = li.firstChild;
+    if (li.dataset.name && t && t.nodeType === 3) t.data = TD.docLabel(shownDocName(li.dataset.name));
+  }
+  for (const el of pagesEl.querySelectorAll(".reel-divider[data-name] > .rd-name")) el.textContent = TD.docLabel(shownDocName(el.parentElement.dataset.name));
 }
 /** Why the document cannot be renamed right now, or "". */
 async function renameBlocked(m) {
@@ -3712,7 +3750,8 @@ async function startRename() {
   const why = await renameBlocked(m);
   if (why) { toast(`${m ? m.name : "The document"} is not renamed: ${why}.`, { ms: 7000 }); return; }
   docTitleEl.dataset.editing = "1";
-  const current = TD.docLabel(m.name);
+  // (As it is shown, real names and all: renameDoc writes it in its pseudonyms.)
+  const current = TD.docLabel(shownDocName(m.name));
   const input = document.createElement("input");
   input.type = "text";
   input.id = "doc-title-input";
@@ -4320,7 +4359,7 @@ function openText(text, name, handle, built, { stash = null, d = null, base = nu
   clearHistory();
   document.body.classList.remove("editing");
   $("edit-toggle").setAttribute("aria-pressed", "false");
-  document.title = name + " — Text Reader";
+  document.title = shownDocName(name) + " — Text Reader";
   docSeq++;      // …whose own reading of what stands in its clear has yet to be made
   leakStep = -1; // a new document, a new walk through what stands in its clear
   answered = 0;
@@ -4788,7 +4827,7 @@ function renderDocListNow() {
   docsList.innerHTML = "";
   for (const d of folderDocs) {
     const li = document.createElement("li");
-    li.textContent = TD.docLabel(d.name);
+    li.textContent = TD.docLabel(shownDocName(d.name));
     if (d.combined) {
       const t = document.createElement("span");
       t.className = "tag combined";
@@ -13115,7 +13154,7 @@ function renderWaiting(on = "folder") {
   setOnward(true);
   $("nb-count").textContent = "none left here" + (answered ? ` · ${answered} answered here` : "");
   $("nb-type").textContent = "reading";
-  $("nb-value").textContent = here ? TD.docLabel(fileName) : folderName || "the folder";
+  $("nb-value").textContent = here ? TD.docLabel(shownDocName(fileName)) : folderName || "the folder";
   $("nb-value").title = here
     ? "This document is being read for names standing in the clear"
     : "The rest of the folder is being read for names standing in the clear";
@@ -13131,8 +13170,8 @@ function renderOnward(rest) {
   setOnward(true);
   $("nb-count").textContent = "none left here" + (answered ? ` · ${answered} answered here` : "");
   $("nb-type").textContent = "on to";
-  $("nb-value").textContent = TD.docLabel(next.doc.name);
-  $("nb-value").title = `${next.count} name${next.count === 1 ? "" : "s"} standing in the clear in ${next.doc.name}`;
+  $("nb-value").textContent = TD.docLabel(shownDocName(next.doc.name));
+  $("nb-value").title = `${next.count} name${next.count === 1 ? "" : "s"} standing in the clear in ${shownDocName(next.doc.name)}`;
   $("nb-where").textContent = `${next.count} standing in the clear`;
   $("nb-inst").textContent = "";
   $("nb-rest").textContent = rest.length > 1
@@ -18473,7 +18512,7 @@ function reelDivider(m, { back = false } = {}) {
   el.dataset.name = m.name;
   const label = document.createElement("span");
   label.className = "rd-name";
-  label.textContent = TD.docLabel(m.name);
+  label.textContent = TD.docLabel(shownDocName(m.name));
   const note = document.createElement("span");
   note.className = "rd-note";
   note.textContent = TD.isQuarantinedName(m.name) ? "quarantined by the leak gate"
@@ -18820,7 +18859,7 @@ function reelSyncCurrent() {
   fileName = now.name;
   fileHandle = now.handle;
   spots = now.spots;
-  document.title = now.name + " — Text Reader";
+  document.title = shownDocName(now.name) + " — Text Reader";
   renderSpots();
   markDocList();
   renderReelState();
@@ -18833,7 +18872,7 @@ function renderReelState() {
   paintDocTitle();
   if (!m) { $("st-file").textContent = "No document"; return; }
   const pages = m.count;
-  $("st-file").textContent = m.name + (TD.isQuarantinedName(m.name) ? " (quarantined by PDF-Linker's leak gate)" : "") +
+  $("st-file").textContent = shownDocName(m.name) + (TD.isQuarantinedName(m.name) ? " (quarantined by PDF-Linker's leak gate)" : "") +
     " · " + pages + " page" + (pages === 1 ? "" : "s") +
     (reel.length > 1 ? ` · ${reelAt + 1} of ${reel.length} on the reel` + reelEndNote() : "");
   updateDirty();
@@ -21339,6 +21378,27 @@ const LINE_BOX = 1.2;  // a line's box, in its own type size: what the next line
 function isEmptyLine(l) {
   return !l.classList.contains("num") && !l.textContent.trim();
 }
+/**
+ * A line's text as type: its `.lt` text with a caption's `)` side (the bar
+ * rules.js draws it as, `.rb.paren`) a space. That `)` is the box's side, not
+ * a word: counted as one, every row of a caption stood over every other
+ * across the page, and a numbered line holding nothing but its `)` held a
+ * line's room, so three of the caption's rows between two numbers were taken
+ * down to half their size (pdfsync.fitRuns). The owner: "The PDF does not
+ * have these weird sizing inconsistencies."
+ */
+function typeTextOf(line) {
+  const lt = ltOf(line);
+  if (!lt) return "";
+  const t = lt.textContent;
+  const bar = lt.querySelector(".rb.paren");
+  if (!bar) return t;
+  const r = document.createRange();
+  r.setStart(lt, 0);
+  r.setEndBefore(bar);
+  const at = r.toString().length;
+  return t.slice(0, at) + " " + t.slice(at + 1);
+}
 /** How many of a page's lines are empty before the first that is not. */
 function leadingEmpty(lines) {
   let n = 0;
@@ -21589,9 +21649,10 @@ function applyMatchedLayoutNow() {
       // In the FILE's columns: a numbered line's text stands after its number
       // and the spaces the file writes after it (.gutter), a half line's
       // after its own spaces, and the two are one grid only counted so.
+      // (A caption's `)` side is the box's bar, not type: typeTextOf.)
       spans = lines.map((l) => {
         const lt = ltOf(l);
-        const t = lt ? lt.textContent : "";
+        const t = typeTextOf(l);
         const a = t.search(/\S/);
         if (a < 0) return null;
         const g = l.querySelector(".gutter");
@@ -21853,11 +21914,12 @@ function applyMatchedLayoutNow() {
     // number is in the margin, and the half line under it stands where the
     // PDF's caption, single-spaced, has its next line.)
     // …nor a line that is only a drawn rule (a signature line, a box's top:
-    // rules.js draws it as a stroke, not as a line of type).
+    // rules.js draws it as a stroke, not as a line of type), or only a
+    // caption's `)` side (typeTextOf).
     const bare = (k) => {
       if (isEmptyLine(lines[k])) return true;
-      const t = (ltOf(lines[k]) || lines[k]).textContent;
-      return (fixed && fixed[k] && !t.trim()) || RULE_ONLY_RE.test(t);
+      const t = ltOf(lines[k]) ? typeTextOf(lines[k]) : lines[k].textContent;
+      return (fixed && fixed[k] && !t.trim()) || RULE_ONLY_RE.test(t) || (!t.trim() && !!lines[k].querySelector(".rb.paren"));
     };
     if (fixed && sizes && tops) {
       const f = PS.fitRuns(tops, sizes.map((h, k) => (bare(k) ? 0 : h)), fixed, { floor: FIT_FLOOR, spans });

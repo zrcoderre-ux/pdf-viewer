@@ -52,6 +52,12 @@ app, which routes it to the reader tab.
   belong to the window: the citation provider, **§ Authorities** and the
   theme. **Tools** at the head of the rail collapses it to an icon
   strip and back, and that choice is remembered.
+- **A document's name is shown in the real names** with a case folder's key
+  attached: the tab, the name in the top bar, the status bar, the
+  **Documents** list and the reel's dividers put its pseudonyms back, as the
+  pages do. The file on disk keeps its pseudonyms. *Show fakes* shows the
+  names as the files have them, and a screenshot or a print is titled in the
+  pseudonyms.
 - **Rename a document from its name in the top bar**, as in the PDF viewer:
   click the name, type, and press Enter (Esc leaves it). Here the file itself
   is renamed in the case folder, and its PDF with it, so the two still pair

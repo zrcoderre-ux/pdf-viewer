@@ -2,7 +2,10 @@
 // (viewer/text-reader.js startRename, renameDoc): the export is renamed on
 // disk in its pseudonyms and its PDF with it in its real names, so the pair
 // still pairs; Esc leaves both; a document with unsaved edits, or a name
-// already taken, is refused and nothing on disk moves.
+// already taken, is refused and nothing on disk moves. The name is SHOWN in
+// the real names the key gives back — the top bar, the tab's title, the
+// Documents list, the status bar — and in its pseudonyms with Show fakes on
+// (shownDocName).
 //
 // Run: node test-rename-doc.mjs   (from the repo root)
 //
@@ -150,27 +153,60 @@ async function run() {
     await page.waitForFunction(() => document.querySelectorAll("#pages .tpage").length > 0);
     await page.waitForTimeout(800);
 
-    console.log("1. the name in the top bar");
-    check("the export's name, in its pseudonyms", await title(page), "Tobias Wrenfield Decl");
+    console.log("1. the name in the top bar, in the real names");
+    check("the export's name, its pseudonyms put back", await title(page), "Corwin Ashdale Decl");
+    check("the tab's title too", await page.title(), "Corwin Ashdale Decl.txt — Text Reader");
+    check("the Documents list too", await page.evaluate(() => [...document.querySelectorAll("#docs-list li")].map((li) => li.firstChild.textContent)), ["B Letter", "Corwin Ashdale Decl"]);
+    truthy("the status bar too", /^Corwin Ashdale Decl\.txt · /.test(await page.evaluate(() => document.getElementById("st-file").textContent)));
     truthy("its PDF is matched", await page.evaluate(() => !document.getElementById("pdf-tab-btn").disabled));
+    const fakes = (on) => page.evaluate((on) => { const t = document.getElementById("fakes-toggle"); if (t.checked !== on) { t.checked = on; t.dispatchEvent(new Event("change")); } }, on);
+    await fakes(true);
+    check("Show fakes on: the bar in the pseudonyms", await title(page), "Tobias Wrenfield Decl");
+    check("…the tab's title", await page.title(), "Tobias Wrenfield Decl.txt — Text Reader");
+    check("…the Documents list", await page.evaluate(() => [...document.querySelectorAll("#docs-list li")].map((li) => li.firstChild.textContent)), ["B Letter", "Tobias Wrenfield Decl"]);
+    await fakes(false);
+    check("…and off again, the real names", await title(page), "Corwin Ashdale Decl");
+    // 📷 Screenshot: the picture is in the pseudonyms (swapChrome), the titles with it.
+    const shot = await page.evaluate(async () => {
+      const c0 = document.createElement("canvas"); c0.width = 8; c0.height = 8; c0.getContext("2d").fillRect(0, 0, 8, 8);
+      navigator.mediaDevices.getDisplayMedia = async () => c0.captureStream(5);
+      let seen = null;
+      const toBlob = HTMLCanvasElement.prototype.toBlob;
+      HTMLCanvasElement.prototype.toBlob = function (...a) {
+        if (!seen) seen = { title: document.getElementById("doc-title").textContent, list: [...document.querySelectorAll("#docs-list li")].map((li) => li.firstChild.textContent), status: document.getElementById("st-file").textContent };
+        return toBlob.apply(this, a);
+      };
+      document.getElementById("shot-btn").click();
+      for (let t = 0; t < 100 && !seen; t++) await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 500));
+      HTMLCanvasElement.prototype.toBlob = toBlob;
+      return seen;
+    });
+    check("in the screenshot, the bar in the pseudonyms", shot && shot.title, "Tobias Wrenfield Decl");
+    check("…the Documents list", shot && shot.list, ["B Letter", "Tobias Wrenfield Decl"]);
+    truthy("…the status bar", shot && /^Tobias Wrenfield Decl\.txt · /.test(shot.status));
+    check("…and the real names back after it", await title(page), "Corwin Ashdale Decl");
 
     console.log("2. Esc leaves it");
     truthy("a click makes it a field", await rename(page, "Something Else", "Escape"));
     check("nothing on disk moved", await names(page), { pdfs: ["Corwin Ashdale Decl.pdf"], txt: ["B Letter.txt", "Tobias Wrenfield Decl.txt"] });
-    check("the name as it was", await title(page), "Tobias Wrenfield Decl");
+    check("the name as it was", await title(page), "Corwin Ashdale Decl");
 
     console.log("3. renamed in its pseudonyms: the export as typed, the PDF in the real names");
     await rename(page, "Tobias Wrenfield Reply Decl");
     check("both renamed", await names(page), { pdfs: ["Corwin Ashdale Reply Decl.pdf"], txt: ["B Letter.txt", "Tobias Wrenfield Reply Decl.txt"] });
-    check("the bar shows the new name", await title(page), "Tobias Wrenfield Reply Decl");
-    check("the tab's title too", await page.title(), "Tobias Wrenfield Reply Decl.txt — Text Reader");
+    check("the bar shows the new name", await title(page), "Corwin Ashdale Reply Decl");
+    check("the tab's title too", await page.title(), "Corwin Ashdale Reply Decl.txt — Text Reader");
     truthy("…and its PDF is still its PDF", await page.evaluate(() => !document.getElementById("pdf-tab-btn").disabled));
-    check("the Documents list has it", await page.evaluate(() => [...document.querySelectorAll("#docs-list li")].map((li) => li.firstChild.textContent)), ["B Letter", "Tobias Wrenfield Reply Decl"]);
+    check("the Documents list has it", await page.evaluate(() => [...document.querySelectorAll("#docs-list li")].map((li) => li.firstChild.textContent)), ["B Letter", "Corwin Ashdale Reply Decl"]);
 
     console.log("4. a real name typed is written as its pseudonym in the export");
     await rename(page, "Corwin Ashdale Second Decl");
     check("export faked, PDF real", await names(page), { pdfs: ["Corwin Ashdale Second Decl.pdf"], txt: ["B Letter.txt", "Tobias Wrenfield Second Decl.txt"] });
-    check("the bar shows the export's name", await title(page), "Tobias Wrenfield Second Decl");
+    check("the bar shows the export's name, in the real names", await title(page), "Corwin Ashdale Second Decl");
+    console.log("4a. the field opens on the name as shown, and left as it is renames nothing");
+    await rename(page, "Corwin Ashdale Second Decl");
+    check("nothing moved", await names(page), { pdfs: ["Corwin Ashdale Second Decl.pdf"], txt: ["B Letter.txt", "Tobias Wrenfield Second Decl.txt"] });
 
     console.log("5. an export with no PDF: the export alone");
     await page.evaluate(() => window.__textReaderOpenDoc("B Letter.txt"));

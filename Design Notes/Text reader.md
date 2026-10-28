@@ -85,6 +85,25 @@ own correct reading) and a stand-in the applied sheet also reverses are not.
 nothing. The `# stand-in:` declaration line once planned for New Real
 Values.txt (P3(a)) is not built: PDF-Linker reads the exports themselves.
 
+**A document's name is SHOWN in the real names** (`shownDocName`,
+`paintDocNames`; 2026-10-28). The owner: "when a case folder is open, the
+document titles should show the real values instead of the pseudonymized
+ones." An export's file name is in its pseudonyms (PDF-Linker scrubs it), and
+the tab (`document.title`, which the PWA's shell reads for its tab label), the
+top bar's name, the status bar, the Documents list, the reel's dividers and the
+names bar showed it so. Now each runs the name through the key backward
+(`rev`, as the pages are shown), with Show fakes off; with it on, the file's
+name. Only the display changes: every lookup, the reel, the save and the
+LEAKS rows go on keyed by the file's name (`m.name`, `d.name`, `li.dataset.name`).
+`paintDocNames` paints them all again when the key is compiled and when Show
+fakes is turned. The rename field opens on the name as shown, and `renameDoc`
+writes a typed real name as its pseudonym as it always did
+(`RD.scrubbedStem`). A screenshot fakes the titles with the rest of the
+chrome, the shell's tab included (`swapChrome`), and a print is titled by the
+file (`printTitle`). Tests: `test-rename-doc.mjs` (case 1: the titles real,
+Show fakes, the screenshot in the pseudonyms; 4a: the field left as shown
+renames nothing).
+
 **📷 Screenshot** leaves the room like a print, so it is taken in the
 pseudonyms whichever way Show fakes sits (`fakesForShot`, which answers the
 function that puts the screen back). On the pages within a screen of the
