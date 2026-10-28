@@ -199,6 +199,7 @@ test-citation-memory.mjs             Node-runnable per-URL citation-memory tests
 test-section-lists.mjs               Node-runnable chained section-list tests (and / or / & connectors)
 test-lead-in-names.mjs               Node-runnable party names opening with State / California / Court, writ real-party short names
 test-sentence-openers.mjs            Node-runnable sentence-opening words (Discussing, Citing, However,) kept out of case names
+test-cite-after-short-name.mjs       Node-runnable case name after another cite's "(Short name) and" opens on its own first word
 test-rules.mjs                       Node-runnable page rule grid tests: one column per column of the file, bars whatever their row's count, runs to their bars and dividers to the box's side
 test-straight-rules.mjs              Browser test (Playwright, Chromium, an OPFS case folder): a form page and a separate statement on pleading paper, every straight rule straight, level, meeting and aligned, flowing and side by side; skips without them
 test-redact.mjs                      Node-runnable redaction tests: span mapping, sideways spans, box merging, a store per document, and the saved copy read back for text and metadata
