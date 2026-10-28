@@ -832,9 +832,27 @@ no family, which `putFace` reads as the weight and slant alone, a regular one
 written explicitly so a regular run inside a bold line reads regular. So a
 pleading's lines stand on their numbers in the reader's own type and at their
 row's size, bold where the PDF is bold and italic where it is italic, and
-`placePages` no longer gates on a page having lefts. The PDF's family is NOT
-applied on pleading paper: the owner asked for bold and italics, and a
-family change would move a caption's space-laid columns. Measured on the two
+`placePages` no longer gates on a page having lefts. The PDF's family was NOT
+applied on pleading paper at first: the owner asked for bold and italics, and
+a family change was thought to move a caption's space-laid columns.
+
+**…and in the PDF's family** (`planCells` with `place` false; 2026-10-28).
+The owner, of a complaint in Times beside its text in the reader's Georgia at
+the PDF's point size: "I think the font is slightly bigger in the text than in
+the pdf." Georgia runs about an eighth wider than Times and stands taller in
+its lowercase, so the text read as larger type, its long lines ran past the
+sheet's edge ("…Wyndham Jocelyn, D") and a caption's parties across their `)`
+side. Now a pleading page's faces carry their family as a form's do, and a
+line no piece of the PDF was found for (a stamp read off its picture, a line
+the PDF does not print) takes the face most of the page's items are set in,
+upright and regular, so no line stands in the reader's type among the PDF's.
+The caption's columns did not move: its rows are a box on the page's grid
+(rules.js), measured after the faces are on. A scan still has no face (its
+OCR layer's GlyphLessFont), and keeps the reader's. Test:
+`test-pleading-face.mjs` (the reader set to DejaVu Serif, standing in for
+Georgia, which the test machine lacks; a PDF in Times: the body and caption in
+Times, each line ending within six points of the PDF's, no party against its
+side — on the code before, the lines ran 65 to 85 points long). Measured on the two
 test pages: the form's pieces where they were to the pixel, the pleading's
 28 tops unchanged, both pages planned in a few milliseconds. Residuals: an OCR
 layer's type has no face (GlyphLessFont), so a scan takes none; an item

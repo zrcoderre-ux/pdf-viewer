@@ -502,8 +502,11 @@ try {
       const offTop = numbered.filter((l) => Math.abs(l.top - (geom.y1 + (l.num - 1) * geom.pitch) * scale) > 0.01);
       check("every numbered line stands exactly at its number on the PDF", numbered.length === 28 && offTop.length === 0,
         offTop.map((l) => `${l.num}: ${l.top} vs ${((geom.y1 + (l.num - 1) * geom.pitch) * scale).toFixed(3)}`).join(" | "));
-      check("…the pleading's lines are left where they were: in the reader's own family, no piece placed", laid.lines.every((l) => !l.face && !l.placed),
-        JSON.stringify(laid.lines.filter((l) => l.face || l.placed).map((l) => l.text.slice(0, 20))));
+      // (In the PDF's family, Times here, not the reader's: the owner, "I think
+      // the font is slightly bigger in the text than in the pdf".)
+      const inTimes = (l) => /Times/i.test(l.face);
+      check("…the pleading's lines are left where they were: in the PDF's own family, no piece placed", laid.lines.every((l) => !l.placed) && laid.lines.filter((l) => l.text.replace(/^\s*\d+/, "").trim()).every(inTimes),
+        JSON.stringify(laid.lines.filter((l) => l.placed || (l.text.replace(/^\s*\d+/, "").trim() && !inTimes(l))).map((l) => [l.text.slice(0, 20), l.face])));
       // …and in the PDF's weight and slant, run by run: each wanted word's
       // text node, and the style it is drawn in.
       const readFaces = () => page.evaluate(({ wanted }) => {
@@ -563,10 +566,10 @@ try {
       await page.waitForTimeout(800);
       const shut = await readPage();
       const kept = await readFaces();
-      check("…side by side shut, the pleading keeps its runs' weight and slant, the file unchanged",
+      check("…side by side shut, the pleading keeps its runs' faces, the file unchanged",
         shut.file === PLEAD_LINES.join("\n") && offWant(kept).length === 0 && shut.lines.filter((l) => l.faced).length === laid.lines.filter((l) => l.faced).length
-          && shut.lines.every((l) => !l.face && !l.placed),
-        sayOff(offWant(kept)) || JSON.stringify(shut.lines.filter((l) => l.face || l.placed).map((l) => l.text.slice(0, 20))));
+          && shut.lines.every((l) => !l.placed) && shut.lines.filter((l) => l.text.replace(/^\s*\d+/, "").trim()).every(inTimes),
+        sayOff(offWant(kept)) || JSON.stringify(shut.lines.filter((l) => l.placed || (l.text.replace(/^\s*\d+/, "").trim() && !inTimes(l))).map((l) => [l.text.slice(0, 20), l.face])));
     }
   }
 

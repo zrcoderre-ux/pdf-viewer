@@ -277,10 +277,13 @@ app, which routes it to the reader tab.
   up or down — and pleading paper is laid on its numbers as before. On every
   page beside its PDF, pleading paper included, each run of the text is bold
   where the PDF's is bold and italic where it is italic, a face that changes
-  in the middle of a word too (a case name in italics and its "'s"); pleading
-  paper keeps the reader's own type and takes the weight and slant alone, so
-  nothing on it moves. A line the PDF does not print (PDF-Linker's own notes)
-  keeps the reader's font, and a scan's OCR layer has no face to take —
+  in the middle of a word too (a case name in italics and its "'s"). Pleading
+  paper is drawn in the PDF's own typeface too (a complaint set in Times
+  reads as Times, whatever font the reader is set to), so its lines end where
+  the PDF's do; it is still laid on its numbers and nothing on it moves, and a
+  line on it the PDF does not print takes the face most of the page is set in.
+  Elsewhere a line the PDF does not print (PDF-Linker's own notes) keeps the
+  reader's font, and a scan's OCR layer has no face to take —
   except a scan of a court form PDF-Linker keeps the blank of (its `Form
   Templates` folder: the Judicial Council and Los Angeles forms there). Such a
   page is recognised against its blank, as PDF-Linker recognises it, and drawn
