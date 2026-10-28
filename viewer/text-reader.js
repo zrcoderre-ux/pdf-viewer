@@ -44,12 +44,22 @@ import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
 import { dressLines as dressRuleLines, fitRuleRows, placeholderIn } from "./rules.js";
-import { dressColumns as dressColumnsOf, alignColumns, charWidth, fitCells, lineMap, faceEm, faceSpace, placeLine, unplaceLine } from "./columns.js";
+import { dressColumns as dressColumnsOf, undressColumns, alignColumns, charWidth, fitCells, lineMap, faceEm, faceSpace, placeLine, unplaceLine } from "./columns.js";
 // Every caller goes through these two, so the lines the operator has set by
 // hand on a ✓ Use my text page are marked first (markOwnLines): columns.js
 // and rules.js leave those lines where their spaces put them.
 function dressLines(body) { markOwnLines(body); dressRuleLines(body); }
-function dressColumns(body) { markOwnLines(body); return dressColumnsOf(body); }
+function dressColumns(body) {
+  markOwnLines(body);
+  // A Markdown document is laid out as a Word document is, a paragraph a
+  // line: no columns are cut at its spaces (dressMarkdown).
+  if (mdDoc()) {
+    let had = false;
+    for (const lt of body.querySelectorAll(":scope > .line > .lt")) if (lt.querySelector(".cc, .cg") || lt.classList.contains("ci")) { undressColumns(lt); had = true; }
+    return had;
+  }
+  return dressColumnsOf(body);
+}
 import * as PS from "./pdfsync.js";
 import * as FT from "./form-templates.js";
 import * as LK from "./leaks.js";
@@ -5400,6 +5410,7 @@ function dressBody(body) {
   dressLines(body);
   dressColumns(body);
   dressStrikes(body); // …and each run struck through, which no column's cut parts
+  dressMarkdown(body); // …and a Markdown document drawn as a Word document
   markTrailer(body);
   slotLines(body);
   slotRowsSoon();
@@ -5654,7 +5665,8 @@ const recolumnLater = debounce(() => {
     const at = caretOffsetIn(body);
     const moved = dressColumns(body);
     // …and a run struck through dressed again: a mark typed, or its partner typed away.
-    if ((dressStrikes(body) || moved) && at >= 0) { const pt = pointAtOffset(body, at); if (pt) placeCaret(pt.node, pt.offset); }
+    const struck = dressStrikes(body);
+    if ((dressMarkdown(body) || struck || moved) && at >= 0) { const pt = pointAtOffset(body, at); if (pt) placeCaret(pt.node, pt.offset); }
   }
   recolumnPending.clear();
 }, 400);
@@ -15251,6 +15263,128 @@ function dressStrikes(body) {
   }
   return changed;
 }
+/**
+ * A MARKDOWN DOCUMENT DRAWN AS A WORD DOCUMENT (TD.markdownLines). The owner:
+ * "It should present the markdown like it was a word document in times new
+ * roman", "make sure that it has the correct width". Each line is marked as
+ * what it is (`data-md`: a heading, an item, a quotation…, `--md-depth` an
+ * item's level), its marks are hidden (`.mk`, as a strike's are, .sk) and its
+ * bold, italics, code, links and tracked changes wrapped (`.mdr`) — the text
+ * itself untouched, so the file, the save, a copy and the names' matching read
+ * it exactly as they did. The page is Word's: 8.5 inches with an inch each
+ * side, in Times New Roman at 12 points, all of it in proportion to the
+ * sheet's width (text-reader.css, `.page-body.md`). With ✎ Edit on the marks
+ * show again, dimmed, so what is typed is typed among them. Returns whether
+ * anything on the page moved.
+ */
+function mdDoc() { return TD.isMarkdownName(fileName || ""); }
+function dressMarkdown(body) {
+  const lines = [...body.querySelectorAll(":scope > .line")];
+  if (!mdDoc()) {
+    if (!body.classList.contains("md")) return false;
+    body.classList.remove("md");
+    for (const l of lines) undressMarkdownLine(l);
+    return true;
+  }
+  body.classList.add("md");
+  const lts = lines.map((l) => ltOf(l));
+  const texts = lts.map((lt) => (lt ? lt.textContent : ""));
+  const plan = TD.markdownLines(texts, { atoms: lts.map((lt) => (lt ? atomRangesIn(lt) : [])) });
+  let changed = false;
+  lines.forEach((l, k) => {
+    const lt = lts[k];
+    if (!lt) return;
+    const p = plan[k];
+    if (l.dataset.md !== p.block) l.dataset.md = p.block;
+    const depth = p.depth ? String(p.depth) : "";
+    if (l.style.getPropertyValue("--md-depth") !== depth) { if (depth) l.style.setProperty("--md-depth", depth); else l.style.removeProperty("--md-depth"); }
+    const want = mdWanted(p, texts[k].length);
+    if (mdDressingOf(lt) === want) return;
+    changed = true;
+    for (const w of lt.querySelectorAll(".mk, .mdr")) w.replaceWith(...w.childNodes);
+    lt.normalize();
+    for (let i = p.hide.length - 1; i >= 0; i--) wrapStretch(lt, p.hide[i][0], p.hide[i][1], "mk");
+    for (const r of p.runs) wrapStretch(lt, r.from, r.to, "mdr " + r.cls);
+  });
+  return changed;
+}
+function undressMarkdownLine(l) {
+  delete l.dataset.md;
+  l.style.removeProperty("--md-depth");
+  const lt = ltOf(l);
+  if (lt) for (const w of lt.querySelectorAll(".mk, .mdr")) w.replaceWith(...w.childNodes);
+}
+/** The stretches of a line's text that are a pseudonym or a spot keep, whole: no mark is read inside one. */
+function atomRangesIn(lt) {
+  const out = [];
+  let at = 0;
+  const w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+  let open = null;
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    const atom = atomOf(n);
+    if (atom && open && open.atom === atom) open.to = at + n.data.length;
+    else if (atom) { open = { atom, from: at, to: at + n.data.length }; out.push(open); }
+    else open = null;
+    at += n.data.length;
+  }
+  return out.map((x) => [x.from, x.to]);
+}
+/** What a line's dressing should be, a character at a time: hidden or not, and the stretches' classes over it. */
+function mdWanted(p, len) {
+  const cells = [];
+  for (let i = 0; i < len; i++) {
+    const hid = p.hide.some(([a, b]) => i >= a && i < b);
+    const cls = p.runs.filter((r) => i >= r.from && i < r.to).map((r) => r.cls).sort().join(".");
+    cells.push((hid ? "h" : "") + cls);
+  }
+  return cells.join(",");
+}
+/** …and what it is now, read off the line's wrappers. */
+function mdDressingOf(lt) {
+  const cells = [];
+  const w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    let hid = false;
+    const cls = [];
+    for (let e = n.parentElement; e && e !== lt; e = e.parentElement) {
+      if (e.classList.contains("mk")) hid = true;
+      if (e.classList.contains("mdr")) for (const c of e.classList) if (c.startsWith("md-")) cls.push(c);
+    }
+    const one = (hid ? "h" : "") + cls.sort().join(".");
+    for (let k = 0; k < n.data.length; k++) cells.push(one);
+  }
+  return cells.join(",");
+}
+/**
+ * The stretch [a, b) of `lt`'s text wrapped in spans of `cls`: its text parted
+ * at both ends (never inside a name, whose stretch is never parted), and each
+ * run of sibling nodes wholly inside it — a name's span whole — put in one.
+ */
+function wrapStretch(lt, a, b, cls) {
+  if (!(b > a)) return;
+  partAt(lt, b);
+  partAt(lt, a);
+  const units = [];
+  const visit = (node, start) => {
+    let at = start;
+    for (const c of [...node.childNodes]) {
+      const len = c.nodeType === 3 ? c.data.length : c.textContent.length;
+      const s0 = at, e0 = at + len;
+      if (len && s0 >= a && e0 <= b) units.push(c);
+      else if (len && e0 > a && s0 < b && c.nodeType === 1 && !c.matches(".pn, [data-here]")) visit(c, s0);
+      at = e0;
+    }
+  };
+  visit(lt, 0);
+  let group = null;
+  for (const n of units) {
+    if (group && group.nextSibling === n) { group.appendChild(n); continue; }
+    group = document.createElement("span");
+    group.className = cls;
+    n.before(group);
+    group.appendChild(n);
+  }
+}
 /** The ~~ at place `p` of `lt`'s text put in a hidden span (.sk) — two, one a character, where the line's text nodes part it — the spans returned; none inside a name. */
 function hideStrikeMark(lt, p) {
   partAt(lt, p + 2);
@@ -15335,6 +15469,7 @@ function strikeSelection() {
   for (const op of edit.ops) applyStrikeOp(body, op);
   dressColumns(body);
   dressStrikes(body);
+  dressMarkdown(body);
   if (body.querySelector("[data-here]")) syncSpots(body);
   setDirty(true, pageIndexOf(body));
   lastSnapPage = -1; // what is typed next is its own step
