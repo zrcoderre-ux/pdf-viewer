@@ -742,6 +742,37 @@ const CORP_SUFFIX_UPPER = new Set(["LLC", "LLP", "LP", "LLLP", "PLLC", "PC", "PL
 const ET_AL_RE = /,\s*et\s+al\.?\s*$/;
 const ET_AL_WINDOW = 48;
 
+// True when the text running up to `end` ends where a citation's tail does: on
+// a page number, a pincite or a reporter, or on a parenthetical that follows
+// one -- the short name of "695 (Gensler)", the date of "1 F.3d 2 (9th Cir.
+// 1993)". Read in a window, never from the start of the document (see
+// ET_AL_WINDOW). Mirrors _ends_citation in workup-search's citation_extractor.py.
+const CITE_END_WINDOW = 240;
+const REPORTER_TOKEN_RE = new RegExp(REPORTER_PATTERN);
+function endsCitation(text, end, minPos = 0) {
+  let s = text.slice(Math.max(minPos, end - CITE_END_WINDOW), end)
+    .replace(/[\s,.;:]+$/, "");
+  while (s.endsWith(")")) {
+    let depth = 0, i = s.length - 1;
+    for (; i >= 0; i--) {
+      if (s[i] === ")") depth++;
+      else if (s[i] === "(" && --depth === 0) break;
+    }
+    if (i < 0) return false;
+    s = s.slice(0, i).replace(/\s+$/, "");
+  }
+  const m = /(\S+)$/.exec(s);
+  if (!m) return false;
+  const lt = m[1].replace(/[,.;:]+$/, "");
+  if (/^\d+$/.test(lt)) {
+    // Unless the number belongs to a name: "Local 12 (AFL-CIO) v. ...".
+    const prev = /(\S+)\s*$/.exec(s.slice(0, m.index));
+    return !(prev && ["local", "loc", "no", "chapter", "ch"]
+      .includes(prev[1].replace(/[,.;:]+$/, "").toLowerCase()));
+  }
+  return REPORTER_TOKEN_RE.test(lt);
+}
+
 function walkBackForName(text, vPos, minPos = 0) {
   // `minPos` clips the walk-back's leftmost reach. Callers use it to prevent
   // walk-back from one citation's `v.` scanning past an earlier citation's
@@ -851,6 +882,25 @@ function walkBackForName(text, vPos, minPos = 0) {
       .replace(/^[(.,;:"'\u2010\u2011\u2012\u2013\u2014\u2212\-]+/, "")
       .replace(/[,.;:]+$/, "");
     if (!clean) break;
+
+    // Citation-join boundary: "...745 and Del Monte v. ..." -- an "and" or "&"
+    // whose left neighbour ends a citation separates two citations, not two
+    // words of one name.
+    if (tokens.length && (clean.toLowerCase() === "and" || clean === "&") &&
+        endsCitation(text, tokStart, minPos)) break;
+
+    // The parenthetical closing the citation before this one: its short name,
+    // "... 7 Cal.3d 695 (Gensler) and Truestone, Inc. v. ...". With the "and"
+    // crossed as a connector, "(Gensler)" read as a capitalized name word, the
+    // corp marker on "Inc." carried the walk over "695" and "7", and
+    // Truestone's plaintiff opened on Gensler's defendant -- overlapping
+    // Gensler's span, so Truestone went unlinked. A parenthetical inside a
+    // party name -- "NBC Subsidiary (KNBC-TV), Inc." -- follows a word, never
+    // a page number.
+    if (/\)[,.;:]*$/.test(tok) && endsCitation(text, tokEnd, minPos)) {
+      if (tokens.length) break;
+      return null;
+    }
 
     // Pure-digit tokens: appear in real party names ("Studio 1220, Inc.")
     // but ALSO as page numbers in TOAs that bleed into the walk-back after

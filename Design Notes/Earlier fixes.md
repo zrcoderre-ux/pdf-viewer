@@ -73,3 +73,16 @@ site — read the comments there for the why, not just the what.
    with the bypass token (`openAsTheSiteServesIt`), so the site shows it as it
    would without the extension (its viewer, or its sign-in page). Tests in
    `test-web-pdf.mjs`.
+
+7. **citation-linker.js — `walkBackForName`** — a case cited right after
+   another cite's short-name parenthetical, "... 7 Cal.3d 695 (Gensler) and
+   Truestone, Inc. v. Simi West Industrial Park II (1984) 163 Cal.App.3d
+   715", went unlinked. The walk-back crossed "and" as a name connector,
+   read "(Gensler)" as a capitalized name word, and (the corp marker on
+   "Inc." licensing bare numbers) ran on to Gensler's "v.", so Truestone's
+   span overlapped Gensler's. `endsCitation` now ends the walk at a
+   parenthetical, or an "and"/"&", that follows a page number, pincite or
+   reporter; one inside a party name ("NBC Subsidiary (KNBC-TV), Inc.",
+   "Local 12 (AFL)") still crosses. The same fix went into workup-search's
+   `_ends_citation` and the Word macro's `CaseNameLeftEdge`. Tests in
+   `test-cite-after-short-name.mjs`.
