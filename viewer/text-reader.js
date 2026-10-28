@@ -1052,6 +1052,87 @@ function shotEdit(edits, n, at, put, cut) {
   n.deleteData(at + put.length, cut.length);
   edits.push([n, at, put, cut]);
 }
+/**
+ * THE PICTURE'S LINES KEPT ON THE PAGE. The fakes go into the text nodes as
+ * they stand (swapInNodes) and nothing is laid out again, and a fake is often
+ * longer than the name it stands for: a line the layout had fitted to the
+ * sheet in the real names ran past its edge in the picture, and a caption's
+ * party ran across its `)` side into the case number. The owner, of such a
+ * screenshot: "The text is going off the page here." So each piece of text
+ * that can run on — a line, a column's cell (columns.js), a box row's cell
+ * (rules.js) — is read before the fakes go in (`shotFitRead`), and one that
+ * then runs further than it did, past the next bar, the next column's text or
+ * the sheet's edge, is drawn narrower to end where it did (`shotFitWrite`): a
+ * transform on the element, as the layout narrows a line too long for its
+ * sheet, put back by back(). No node moves and no line is laid out again.
+ */
+function shotFitRead(near) {
+  const out = [];
+  for (const sec of near) {
+    const body = sec.querySelector(".page-body");
+    if (!body) continue;
+    const edge = body.getBoundingClientRect().right - (parseFloat(getComputedStyle(body).paddingRight) || 0);
+    for (const line of body.querySelectorAll(":scope > .line")) {
+      const lt = ltOf(line);
+      if (!lt) continue;
+      const cells = line.classList.contains("rl") ? [...lt.querySelectorAll(":scope > .rc")] : [...lt.querySelectorAll(":scope > .cc")];
+      if (!cells.length) { out.push({ el: lt, limit: () => edge }); continue; }
+      cells.forEach((c, i) => {
+        const next = c.nextElementSibling;
+        // A box's cell ends a space short of the bar after it (as rules.js needOnGrid has it); a column's piece a space short of the next piece's text.
+        const limit = !next ? () => edge
+          : next.classList.contains("rb") ? () => next.getBoundingClientRect().left - 0.28 * (parseFloat(getComputedStyle(c).fontSize) || 0)
+          : () => { const r = shotTextSpan(next); return r ? r.left - 0.25 * (parseFloat(getComputedStyle(next).fontSize) || 0) : edge; };
+        out.push({ el: c, limit });
+      });
+    }
+  }
+  for (const x of out) x.was = shotTextSpan(x.el);
+  return out;
+}
+/** Where an element's text stands on the screen, its bars and leading and trailing spaces aside: { left, right }, or null. */
+function shotTextSpan(el) {
+  let left = Infinity, right = -Infinity;
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    const a = n.data.search(/\S/);
+    if (a < 0 || (n.parentElement && n.parentElement.closest(".rb, .rh"))) continue;
+    const b = n.data.search(/\S\s*$/);
+    const r = document.createRange();
+    r.setStart(n, a); r.setEnd(n, a + 1);
+    left = Math.min(left, r.getBoundingClientRect().left);
+    r.setStart(n, b); r.setEnd(n, b + 1);
+    right = Math.max(right, r.getBoundingClientRect().right);
+  }
+  return Number.isFinite(left) && right > left ? { left, right } : null;
+}
+/** …and each that the fakes have run on drawn narrower; returns what to put back. */
+function shotFitWrite(read) {
+  const fits = [];
+  for (const x of read) {
+    if (!x.was) continue;
+    const now = shotTextSpan(x.el);
+    if (!now) continue;
+    const limit = x.limit();
+    // As far as the screen had it, where that was already past the limit.
+    const end = Math.max(limit, x.was.right);
+    if (!(now.right > end + 0.5)) continue;
+    const st = x.el.style;
+    const m = /scaleX\(([\d.]+)\)/.exec(st.transform || "");
+    const box = x.el.getBoundingClientRect();
+    // A narrowed element keeps its origin, at its left; any other is narrowed toward its text's start.
+    const from = m ? box.left : now.left;
+    const k = (end - from) / (now.right - from);
+    if (!(k > 0 && k < 1)) continue;
+    fits.push({ el: x.el, transform: st.transform, origin: st.transformOrigin, f: Math.max(0.3, (m ? Number(m[1]) : 1) * k), at: m ? null : now.left - box.left });
+  }
+  for (const x of fits) {
+    x.el.style.transform = `scaleX(${x.f.toFixed(4)})`;
+    if (x.at != null) x.el.style.transformOrigin = `${x.at.toFixed(2)}px 0`;
+  }
+  return () => { for (const x of fits) { x.el.style.transform = x.transform; x.el.style.transformOrigin = x.origin; } };
+}
+
 function undoShotEdits(edits) {
   // A node changed since (rewritten by the reader itself) is left as it is now.
   const now = new Map();
@@ -1344,6 +1425,7 @@ function fakesForShot() {
 
   // Every page measured before any is written: one layout, not one a page.
   const near = [...pagesEl.querySelectorAll(".tpage:not(.shed)")].filter((sec) => nearWindow(sec.getBoundingClientRect(), 1));
+  const fitRead = shotFitRead(near); // where each line's text ends in the real names (shotFitRead)
   for (const sec of near) {
     if (fwd && fwd.rx) shotRaw(sec, edits);
     const body = sec.querySelector(".page-body");
@@ -1367,6 +1449,8 @@ function fakesForShot() {
     }
   }
   document.body.classList.add("show-fakes");
+  // …and a line the longer fakes have run on, past its bar or the sheet's edge, drawn narrower for the picture.
+  const unfit = shotFitWrite(fitRead);
   const pagesMoved = edits.length > 0;
   const relink = pagesMoved && !gridOn();
   if (relink) placeCitations();
@@ -1390,6 +1474,7 @@ function fakesForShot() {
     document.body.classList.remove("shot-taking");
     for (const c of covers) c.remove();
     for (const [el, v, f] of fields) if (el.value === f) el.value = v;
+    unfit();
     undoShotEdits(edits);
     for (const sec of near) { const body = sec.querySelector(".page-body"); if (body) escFindAgain(body); }
     document.body.classList.toggle("show-fakes", showed);

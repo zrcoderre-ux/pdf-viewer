@@ -148,6 +148,23 @@ nothing above. Hosted, the fakes go on only once the screen share is granted
 (`shareThisTab` answers the frame-taker), and a share that sends no frame is
 given up after five seconds, so the fakes never stay on.
 
+**…and its lines kept on the page** (`shotFitRead`, `shotFitWrite`;
+2026-10-28). Nothing is laid out again for the picture, and a fake is often
+longer than the name it stands for: a line fitted to the sheet in the real
+names ran past its edge in the pseudonyms, and a caption's party ran across its
+`)` side into the case number (the owner, of such a screenshot: "The text is
+going off the page here."). So before the fakes go in, each line, each column
+piece (`.cc`) and each box row's cell (`.rc`) on the pages within a screen is
+read for where its text ends; after, one that runs further than it did, past
+the sheet's edge, the next bar (a space short of it, as `needOnGrid` has it) or
+the next piece's text, is narrowed by a transform to end where it did, or at
+the limit where that is further on. A line the layout had narrowed keeps its
+origin; any other is narrowed toward its text's start. back() puts each
+transform back before the text, and no node moves, so no highlight range is
+disturbed. Test: `test-shot-fit.mjs` (fakes longer than the real names: on the
+screen and in the picture nothing past the sheet or across the side, and the
+screen as it was after).
+
 **A page shown ⇄ Raw is a page, not chrome (`shotRaw`).** It was left to
 `swapChrome`, which runs `egressSwaps` one text node at a time, and the raw
 sheet's orange marks split a name into a node a piece: a name wrapped down a
