@@ -1274,6 +1274,7 @@ function pdfNamesOn(sheet) {
   if (!swaps.length) return null;
   for (const v of withheldIn(swaps)) shotWithheld.add(v);
   const base = sheet.getBoundingClientRect();
+  const face = sheetFace(sheet);
   const out = [];
   for (const s of swaps) {
     const local = [];
@@ -1294,10 +1295,32 @@ function pdfNamesOn(sheet) {
     }
     if (!first) continue;
     const cs = getComputedStyle(first);
-    const rects = RD.mergeRects(local, 2);
-    if (rects.length) out.push({ rects, to: s.to, font: cs.fontFamily, size: parseFloat(cs.fontSize) || 0 });
+    // ONE COVER A LINE. pdf.js draws a justified line as a span a word or a
+    // few, and a name over two of them was two covers, its fake drawn squeezed
+    // into the first and the second left white: the owner, "notice how
+    // cramped some of the pseudonyms are drawn". The pieces of one name on one
+    // line are one stretch of it, the gaps between its words included, so
+    // they are one cover (a name wrapped onto the next line is still one more).
+    const h = local.length ? local.reduce((m, r) => Math.max(m, r.h), 0) : 0;
+    const rects = RD.mergeRects(local, Math.max(2, h * 4));
+    if (rects.length) out.push({ rects, to: s.to, font: face || cs.fontFamily, size: parseFloat(cs.fontSize) || 0 });
   }
   return out.length ? { sheet, names: out } : null;
+}
+/**
+ * The family most of a PDF page's text is set in (pdfsync.pdfFace, off the
+ * page's rows and the fonts read for them), or "" where it is not known. The
+ * text layer's own spans carry only "serif" or "sans-serif", and a cover in
+ * the wrong one was drawn wider than the name it covers, and squeezed.
+ */
+function sheetFace(sheet) {
+  const slot = sheet && sheet.parentElement;
+  const of = slot && slot.__pdfOf;
+  const rows = of && of.info && of.info.rows ? of.info.rows[of.page - 1] : null;
+  const faces = of && of.info && of.info.faces;
+  if (!rows || !faces) return "";
+  const f = mostFace(rows.flatMap((r) => r.items || []), (id) => { const x = id ? faces.get(id) : null; return x ? x.face : null; });
+  return f && f.family ? f.family : "";
 }
 /**
  * …and each painted over: a white box a pixel past the name all round, the
@@ -20650,6 +20673,7 @@ async function drawSlot(el, src, pageNo, cssWidth, want, seen) {
   try { page = await info.pdf.getPage(pageNo); } catch { return; }
   if (el.dataset.want !== want) return;
   el.__page = page; // …so the page can be let go of when the slot is released
+  el.__pdfOf = { info, page: pageNo }; // …and what the screenshot's covers read its face off (pdfNamesOn)
   // A page only NEAR the screen waits here for the pages on it (drawTurn) —
   // before its canvas is touched, so whatever it is showing meanwhile (the
   // worksheet's held bitmap, the last drawing at another width) stays up.
@@ -21836,10 +21860,10 @@ function applyMatchedLayoutNow() {
         const xs = rows[j].items.filter((it) => it.x >= bodyX - 1.5 && String(it.str).trim()).map((it) => it.x);
         if (xs.length && Math.min(...xs) - bodyX >= SCAN_INDENT_MIN) inds[k] = Math.min(...xs) - bodyX;
       });
-      // …AND THE PDF'S WEIGHT AND SLANT, RUN BY RUN (planCells with `place`
-      // false; columns.faceLine). Pleading paper is laid on its numbers and
-      // nothing on it moves — no piece is cut or set at the PDF's x, and the
-      // reader's own family and the row's size stay — but its type is bold
+      // …AND THE PDF'S FACE, RUN BY RUN (planCells with `place` false;
+      // columns.faceLine). Pleading paper is laid on its numbers and nothing
+      // on it moves — no piece is cut or set at the PDF's x, and the row's
+      // size stays — but its type is the PDF's family, bold
       // where the PDF's is bold and italic where it is italic, as a form's
       // is: the row at each line's number or half line, or the one its words
       // matched (pdfsync.numberedRowOf), its pieces found in the line
@@ -23003,16 +23027,29 @@ function matchItems(lines, texts, rowOf, rows, { skip = null } = {}) {
 function planCells(lines, texts, matched, rows, info, sizes, { place = true } = {}) {
   const faces = info.faces || new Map();
   const known = (id) => { const f = id ? faces.get(id) : null; return f ? f.face : null; };
-  const faceOf = place ? known : (id) => { const f = known(id); return f ? { family: "", bold: f.bold, italic: f.italic } : null; };
+  const faceOf = known;
+  // PLEADING PAPER IN THE PDF'S OWN FAMILY TOO, not the reader's. Set in the
+  // reader's Georgia at the PDF's point size, a page in Times ran an eighth
+  // wider than its PDF and its x-height stood taller: the owner, "I think the
+  // font is slightly bigger in the text than in the pdf", a caption's party
+  // across its `)` side and a long line past the sheet's edge. (Until then
+  // only the weight and slant were taken here, a family change being thought
+  // to move a caption's space-laid columns; its rows are a box on the page's
+  // grid now, rules.js.) A line no piece of the PDF was found for — a stamp
+  // read off its picture, a line the PDF does not print — takes the face most
+  // of the page is set in, upright and regular, so no line of the page stands
+  // in the reader's type among the PDF's.
+  const page = place ? null : mostFace(rows.flatMap((r) => r.items || []), faceOf);
+  const plain = page ? { ...page, bold: false, italic: false } : null;
   return lines.map((l, k) => {
     const m = matched[k];
-    if (!m) return null;
+    if (!m) return plain ? { text: null, cuts: [], places: [], face: plain } : null;
     const { row, map, found, shown } = m;
     const lt = l.querySelector(":scope > .lt");
     // The line's own face: the one most of what it carries is set in. Not its
     // row's alone — a box row the export writes as one line can be three of
     // the PDF's rows, and matched to the one in bold italics.
-    let face = mostFace(found.map((g) => g.item), faceOf) || mostFace(row.items, faceOf);
+    let face = mostFace(found.map((g) => g.item), faceOf) || mostFace(row.items, faceOf) || plain;
     if (l.classList.contains("rl")) return { text: null, cuts: [], places: [], face, cellFaces: boxCellFaces(lt, found, faceOf) };
     // …in bold or italics only where nearly all of it is: what no piece was
     // found for takes the line's face, and a line half the firm's name in bold

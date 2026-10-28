@@ -101,6 +101,8 @@ const PDF = [
   ["Defendants.", 14, 160],
 ];
 const PARENS = [9, 10, 11, 12, 13, 14];
+// A justified line, its name in two of the PDF's runs with a wide space between (pdf.js reads them as two spans).
+const SPLIT = [["COMES NOW, Defendant, IVO", 17, 108], ["TRUCKING LLC (\u201cCross-Complainant\u201d) and for its", 17, 290]];
 // The export, in the pseudonyms, as PDF-Linker writes the page.
 const pad = (s, n) => s + " ".repeat(Math.max(1, n - s.length));
 const L = (num, left, right = "") => (num ? String(num).padStart(2) + "  " : "    ") + pad(left, 46) + ")" + (right ? "  " + right : "");
@@ -118,6 +120,7 @@ const EXPORT = [
   L(13, "SPRINGVALE SABLEWOOD, LLC, and DOES 1 through 20,", "FIRST AMENDED CROSS-COMPLAINT"),
   L(14, "            Defendants."),
   "15", "16",
+  "17          COMES NOW, Defendant, SPRINGVALE SABLEWOOD LLC (\u201cCross-Complainant\u201d) and for its",
 ].join("\n") + "\n";
 
 const CASE = "Case Shot Fit";
@@ -130,14 +133,14 @@ try {
   page.on("dialog", (d) => d.accept().catch(() => {}));
   await page.goto(srv.base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
-  await page.evaluate(async ({ CASE, EXPORT, PDF, PARENS, keyBytes }) => {
+  await page.evaluate(async ({ CASE, EXPORT, PDF, PARENS, SPLIT, keyBytes }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.TimesRoman);
     const pg = doc.addPage([612, 792]);
     const base = (line) => 792 - (100 + (line - 1) * 24);
     for (let n = 1; n <= 28; n++) pg.drawText(String(n), { x: 46 - font.widthOfTextAtSize(String(n), 12), y: base(n), size: 12, font });
-    for (const [t, line, x] of PDF) pg.drawText(t, { x, y: base(line), size: 12, font });
+    for (const [t, line, x] of PDF.concat(SPLIT)) pg.drawText(t, { x, y: base(line), size: 12, font });
     for (const line of PARENS) pg.drawText(")", { x: 300, y: base(line), size: 12, font });
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry(CASE, { recursive: true }); } catch { /* none yet */ }
@@ -148,7 +151,7 @@ try {
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "FACC.txt", EXPORT);
     await window.__textReaderAdoptFolder(dir);
-  }, { CASE, EXPORT, PDF, PARENS, keyBytes: Array.from(KEY_BYTES) });
+  }, { CASE, EXPORT, PDF, PARENS, SPLIT, keyBytes: Array.from(KEY_BYTES) });
   await page.evaluate(() => window.__textReaderOpenDoc("FACC.txt"));
   await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
   await page.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 });
@@ -198,17 +201,32 @@ try {
     navigator.mediaDevices.getDisplayMedia = async () => c0.captureStream(5);
     let seen = null;
     const toBlob = HTMLCanvasElement.prototype.toBlob;
-    HTMLCanvasElement.prototype.toBlob = function (...a) { if (!seen) seen = measure(); return toBlob.apply(this, a); };
+    HTMLCanvasElement.prototype.toBlob = function (...a) {
+      if (!seen) {
+        seen = { rows: measure(), whole: document.querySelectorAll(".shot-cover.whole").length };
+        seen.covers = [...document.querySelectorAll(".shot-cover:not(.whole)")].map((c) => { const r = c.getBoundingClientRect(); return { text: c.textContent, font: getComputedStyle(c).fontFamily, top: r.top, left: r.left, w: r.width }; });
+      }
+      return toBlob.apply(this, a);
+    };
     document.getElementById("shot-btn").click();
     for (let t = 0; t < 100 && !seen; t++) await new Promise((r) => setTimeout(r, 100));
     await new Promise((r) => setTimeout(r, 800));
     HTMLCanvasElement.prototype.toBlob = toBlob;
     return seen;
   }, `(${measure.toString()})`);
-  check("the picture is in the pseudonyms", !!shot && shot.some((r) => /SPRINGVALE SABLEWOOD/.test(r.text)), JSON.stringify(shot && shot.map((r) => r.text)));
-  check("no line off the page, no party across the side", !!shot && bad(shot).length === 0, shot ? bad(shot).join(" | ") : "no picture taken");
+  const shotRows = shot && shot.rows;
+  check("the picture is in the pseudonyms", !!shotRows && shotRows.some((r) => /SPRINGVALE SABLEWOOD/.test(r.text)), JSON.stringify(shotRows && shotRows.map((r) => r.text)));
+  check("no line off the page, no party across the side", !!shotRows && bad(shotRows).length === 0, shotRows ? bad(shotRows).join(" | ") : "no picture taken");
+  console.log("3. the PDF's names covered");
+  const covers = (shot && shot.covers) || [];
+  const split = covers.filter((c) => /Springvale Sablewood|SPRINGVALE SABLEWOOD/i.test(c.text));
+  check("the PDF page is in the picture, not left out", !!shot && shot.whole === 0, JSON.stringify(shot && shot.whole));
+  check("the name split over two of the PDF's spans is covered", split.length >= 1, JSON.stringify(covers.map((c) => c.text)));
+  const blank = covers.filter((c) => !c.text.trim() && covers.some((o) => o !== c && o.text.trim() && Math.abs(o.top - c.top) < 2));
+  check("…by one cover on its line, its fake across all of it, no blank cover beside it", blank.length === 0, JSON.stringify(covers.map((c) => [c.text, Math.round(c.top), Math.round(c.left), Math.round(c.w)])));
+  check("…in the PDF's face (Times), not the text layer's generic one", covers.length > 0 && covers.every((c) => /Times/i.test(c.font)), JSON.stringify([...new Set(covers.map((c) => c.font))]));
 
-  console.log("3. the screen put back");
+  console.log("4. the screen put back");
   const after = await page.evaluate(`(${measure.toString()})()`);
   check("the real names again, laid out as before", JSON.stringify(after) === JSON.stringify(screen), JSON.stringify(after.filter((r, k) => JSON.stringify(r) !== JSON.stringify(screen[k]))));
   check("no page errors", errors.length === 0, errors.join(" | "));

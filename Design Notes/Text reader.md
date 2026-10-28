@@ -165,6 +165,24 @@ disturbed. Test: `test-shot-fit.mjs` (fakes longer than the real names: on the
 screen and in the picture nothing past the sheet or across the side, and the
 screen as it was after).
 
+**…and the PDF's names covered a line at a time, in the PDF's face**
+(`pdfNamesOn`, `sheetFace`, `coverPdfNames`; 2026-10-28). The owner, of a
+screenshot whose PDF pane had fakes drawn as slivers: "notice how cramped some
+of the pseudonyms are drawn?" pdf.js draws a justified line as a span a word or
+a few, and a name over two spans was two covers: its fake squeezed into the
+first and the second left white beside it ("MEADOWGATE COBALT, INC." as a
+17-pixel fake and a 41-pixel blank). The pieces of one name on one line are now
+merged into one cover (`RD.mergeRects` with a gap of four line heights; a name
+wrapped onto the next line is still a cover more, blank). And a cover took the
+text layer span's family, which pdf.js sets to "serif" or "sans-serif" only, so
+a Times page's names were covered in a wider sans and squeezed further: it
+takes the family most of the PDF page's items are set in (`sheetFace`, off
+`info.rows` and `info.faces`, the sheet's slot noting its PDF page in
+`drawSlot`, `__pdfOf`). A fake longer than its name is still drawn narrower to
+fit; that much is the cost of covering a picture. Test: `test-shot-fit.mjs`
+case 3 (a name in two of the PDF's spans: one cover, in Times; on the code
+before, a fake and a blank, in "serif").
+
 **A page shown ⇄ Raw is a page, not chrome (`shotRaw`).** It was left to
 `swapChrome`, which runs `egressSwaps` one text node at a time, and the raw
 sheet's orange marks split a name into a node a piece: a name wrapped down a
