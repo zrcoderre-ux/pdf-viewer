@@ -305,6 +305,15 @@ export function keyCellKind(cell, real) {
 }
 
 const ALT_STATUS = "alt spelling"; // forward-only: fake belongs to the canonical row
+// Reverse-only: a one-word row PDF-Linker never fakes standing alone — a word
+// of a party's name it pruned as the papers' own prose ("Provision" of
+// "Provision Holdings, LLC"), refused as a bare name, a judge's bare surname.
+// It is in the key so a composed fake reverses word by word, so it stays in
+// `pairs`; it is out of `warn` — never marked as a real left standing, never
+// written as its fake by a save, never offered as you type — because the run
+// never faked the word on its own (the owner's direction, 2026-10-29: what
+// PDF-Linker would not fake is not faked here either).
+const FULL_NAME_ONLY_STATUS = "full name only";
 
 // A POSSESSIVE is the party's own name, not a second party. Both marks,
 // because the spreadsheet exports the straight one and Word the typographic.
@@ -365,6 +374,7 @@ export function parseKey(sheets, name) {
         fake: kind === "control" ? "" : fake,
         control: kind === "control" ? fake : "",
         alt: statusCol !== -1 && fold(row[statusCol]) === ALT_STATUS,
+        lone: statusCol !== -1 && fold(row[statusCol]) === FULL_NAME_ONLY_STATUS,
         occ: isFinite(occ) && occ > 0 ? occ : 0,
         pinned,
         own: catCol !== -1 && srcCol !== -1 && OWN_SOURCES.has(fold(row[srcCol])) && OWN_CATEGORIES.has(fold(row[catCol])),
@@ -395,8 +405,8 @@ export function parseKey(sheets, name) {
     if (!baseReal || (!e.control && !baseFake) || haveReal.has(fold(baseReal))) continue;
     haveReal.add(fold(baseReal));
     derived.push(e.control
-      ? { real: baseReal, cat: e.cat, fake: "", control: e.control, alt: e.alt, occ: 0, pinned: e.pinned, ocr: e.ocr }
-      : { real: baseReal, cat: e.cat, fake: baseFake, alt: e.alt, occ: 0, pinned: e.pinned, ocr: e.ocr });
+      ? { real: baseReal, cat: e.cat, fake: "", control: e.control, alt: e.alt, lone: e.lone, occ: 0, pinned: e.pinned, ocr: e.ocr }
+      : { real: baseReal, cat: e.cat, fake: baseFake, alt: e.alt, lone: e.lone, occ: 0, pinned: e.pinned, ocr: e.ocr });
   }
   for (const d of derived) entries.push(d);
 
@@ -459,6 +469,7 @@ export function parseKey(sheets, name) {
     : { real: e.real, fake: e.fake, pinned: !!e.pinned, ocr: !!e.ocr },
   TOKEN_CATS.has(e.cat) ? { cat: e.cat } : null);
   for (const e of entries) {
+    if (e.lone) continue; // never faked alone (FULL_NAME_ONLY_STATUS)
     const k = fold(e.real);
     const at = seenReal.get(k);
     if (at === undefined) {

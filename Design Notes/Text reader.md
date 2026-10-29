@@ -1151,9 +1151,9 @@ and "Truenorth Hartland Company" still read "ABC". Both directions read it
 rule is in DeAnonymize.bas and the extension's `src/pseudo.js`. Residual: a key
 typed by hand pairing an acronym with a title-case fake ("XYZ Holdings" for
 "Meadowgate Holdings") titles the acronym ("Xyz") unless it is listed.
-PDF-Linker's round-trip port (`_rd_swap_to`) does not carry the rule; its
-node pin covers no such key. `test-pseudo-key.mjs`, "a shout in the key's real
-that its own fake does not make".
+PDF-Linker's round-trip port carries the rule (`_rd_key_spelled`, pinned
+under node by its `test_round_trip_check.py`). `test-pseudo-key.mjs`, "a shout
+in the key's real that its own fake does not make".
 
 **A one-word real PDF-Linker leaves in lower case is matched only where it is
 capitalised** (`capOnlyReal`, `never-fake-words.js`; the owner's direction,
@@ -1175,6 +1175,19 @@ regenerates the list. `test-never-fake-words.mjs` fails while the module, the
 copy and the list beside this checkout disagree. Not changed: a file name's
 scrub (`redact.boundValueStands`) reads `boundRows` with its own matcher.
 `test-pseudo-key.mjs`, "a one-word real PDF-Linker leaves in lower case".
+
+**…and a row PDF-Linker marks `full name only` is reversal alone**
+(`FULL_NAME_ONLY_STATUS`; the owner's direction, 2026-10-29: what PDF-Linker
+would not fake is not faked here either). PDF-Linker writes a key row for each
+word of a composed name so a bare stand-in reverses ("Dawnfield" of "Dawnfield
+Holdings, LLC"), and where its run never faked that word standing alone — it
+pruned "Provision" as the papers' own prose, refused a word as a bare name, or
+the word is a judge's bare surname — it now says so in the row's Status. Such a
+row stays in `pairs`, so "Dawnfield" still reads "Provision", and is left out
+of `warn`: never marked as a real left standing, never written as its fake by a
+save, never offered as you type. The full name, and a live bare surname whose
+Status is "no match", are faked as before. `test-pseudo-key.mjs`, "a row
+PDF-Linker marks full name only".
 
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each

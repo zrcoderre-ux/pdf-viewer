@@ -957,5 +957,23 @@ console.log("a shout in the key's real that its own fake does not make");
     "ABC Supply Company and ABC Supply Company");
 }
 
+console.log("a row PDF-Linker marks full name only");
+{
+  // A word of a party's name the run never faked on its own: it reverses,
+  // and nothing marks, writes or offers it.
+  const k = keyOf([
+    ["entity", "Provision Holdings, LLC", "Dawnfield Holdings, LLC", "", "replaced", "spreadsheet", 2],
+    ["entity-token", "Provision", "Dawnfield", "", "full name only", "spreadsheet", 2],
+    ["person-token", "Pellew", "Balfour", "", "no match", "spreadsheet", 0],
+  ]);
+  check("a bare fake still reverses", translate(compile(k), "Dawnfield sued.").text, "Provision sued.");
+  check("the bare word is not marked as a real left standing",
+    findRealSpans(compileReals(k), "Provision 4 applies.").length, 0);
+  check("…nor written as its fake", fakeFor(compileForward(k), "Provision"), null);
+  check("…nor offered as you type", compileTypeahead(k).some((e) => e.real === "Provision"), false);
+  check("the full name and a live bare surname still are",
+    findRealSpans(compileReals(k), "Provision Holdings, LLC and Pellew").length, 2);
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);
