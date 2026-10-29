@@ -4,7 +4,8 @@
 // line's text and no other, its size and its place down the page untouched;
 // the lines typed in are remembered when the document is opened again;
 // withdrawing it makes the page an ordinary one; pressing it turns ✎ Edit on;
-// and the Flagged panel's list goes to each page on it.
+// ☐ Checkbox shows in the toolbar on such a page and writes, ticks and clears
+// a box; and the Flagged panel's list goes to each page on it.
 //
 // Run: node test-free-page.mjs   (from the repo root)
 //
@@ -630,6 +631,55 @@ async function run() {
       await p.keyboard.press("Control+z");
       await p.waitForTimeout(400);
       check("…and Ctrl+Z puts the divider back", joints(await raw()), was);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+    console.log("11. ☐ Checkbox in the toolbar on a ✓ Use my text page: a box written at the caret, ticked and cleared");
+    {
+      const r = await newReader();
+      const p = r.page;
+      await p.evaluate((n) => window.__textReaderOpenDoc(n), "E Cover.txt");
+      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length === 1 && document.querySelector("#pages .page-body").textContent.includes("COMPLAINT"));
+      await p.waitForTimeout(600);
+      const shown = () => p.evaluate(() => !document.getElementById("checkbox-btn").hidden);
+      const fileLine = () => p.evaluate(() => {
+        const body = document.querySelector("#pages .tpage .page-body");
+        return [...body.querySelectorAll(":scope > .line")][7].textContent;
+      });
+      truthy("caret placed on an ordinary page", await caretBefore(p, 0, 7, "Plaintiff"));
+      await p.waitForTimeout(100);
+      check("…and the button is not in the toolbar", await shown(), false);
+      await fixClick(p, 0);
+      await p.waitForTimeout(600);
+      await caretBefore(p, 0, 7, "Plaintiff");
+      await p.waitForTimeout(100);
+      check("on a ✓ Use my text page it is", await shown(), true);
+      await p.click("#checkbox-btn");
+      await p.waitForTimeout(400);
+      check("pressed: an empty box written at the caret, a space after it", await fileLine(), " 8  [   ] Plaintiff alleges:");
+      await p.keyboard.type("A", { delay: 20 });
+      await p.waitForTimeout(300);
+      check("…the caret after it", await fileLine(), " 8  [   ] APlaintiff alleges:");
+      await p.keyboard.press("Backspace");
+      await p.waitForTimeout(300);
+      await caretBefore(p, 0, 7, "[");
+      await p.click("#checkbox-btn");
+      await p.waitForTimeout(400);
+      check("pressed on the box: ticked, the line's width the same", await fileLine(), " 8  [ X ] Plaintiff alleges:");
+      await p.evaluate(() => document.getElementById("edit-toggle").click());
+      await p.waitForTimeout(400);
+      check("with ✎ Edit off it is drawn as a ticked box", await p.evaluate(() => document.querySelectorAll('#pages .page-body .cb[data-cb="x"]').length), 1);
+      await caretBefore(p, 0, 7, "[");
+      await p.click("#checkbox-btn");
+      await p.waitForTimeout(400);
+      check("pressed again (it turns ✎ Edit back on): cleared", await fileLine(), " 8  [   ] Plaintiff alleges:");
+      truthy("…and ✎ Edit is on", await p.evaluate(() => document.body.classList.contains("editing")));
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(400);
+      check("Ctrl+Z ticks it again", await fileLine(), " 8  [ X ] Plaintiff alleges:");
+      await fixClick(p, 0);
+      await p.waitForTimeout(600);
+      check("withdrawn, the page takes the button off the toolbar", await shown(), false);
       check("no page errors", r.log.errors, []);
       await r.close();
     }

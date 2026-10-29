@@ -2244,6 +2244,11 @@ app, which routes it to the reader tab.
   **The same keys work in any table on any page**, a table ruled only between
   its columns included: Enter and Backspace move only the text of the column
   the caret is in, and the column lines never break.
+  **☐ Checkbox** appears in the toolbar while the caret is on a ✓ Use my
+  text page. Press it and a checkbox is written where the caret is, as
+  PDF-Linker writes a form's (`[   ]`); with ✎ Edit off it is drawn as a box.
+  With the caret on a box already, the same button ticks it (`[ X ]`) or
+  clears a ticked one, and nothing on the line moves. Ctrl+Z takes each back.
   **Backspace at the start of an indented line takes the indent off first,
   one space a press,** and leaves the line on its number until the indent is
   gone; the Backspace after that moves it up to the half line above, as
