@@ -41,8 +41,13 @@
 //                   the same values as rows, for a question asked of a name.
 //   All of them read through one scan (hitsFrom); the save and the leak
 //   readings ask for the column names with a `layout`, the text as it stands.
+//   A one-word real that PDF-Linker would match only where it is capitalised
+//   (capOnlyReal: a bare-token row, or a word on its never-fake list) is
+//   matched the same way by every reading of the REAL side.
 //
 // Pure: no DOM. Tested by test-pseudo-key.mjs.
+
+import { isNeverFakeWord } from "./never-fake-words.js";
 
 const KEY_FILE_RE = /^pseudonym[ _-]?key.*\.xlsx$/i;
 
@@ -300,6 +305,15 @@ export function keyCellKind(cell, real) {
 }
 
 const ALT_STATUS = "alt spelling"; // forward-only: fake belongs to the canonical row
+// Reverse-only: a one-word row PDF-Linker never fakes standing alone — a word
+// of a party's name it pruned as the papers' own prose ("Provision" of
+// "Provision Holdings, LLC"), refused as a bare name, a judge's bare surname.
+// It is in the key so a composed fake reverses word by word, so it stays in
+// `pairs`; it is out of `warn` — never marked as a real left standing, never
+// written as its fake by a save, never offered as you type — because the run
+// never faked the word on its own (the owner's direction, 2026-10-29: what
+// PDF-Linker would not fake is not faked here either).
+const FULL_NAME_ONLY_STATUS = "full name only";
 
 // A POSSESSIVE is the party's own name, not a second party. Both marks,
 // because the spreadsheet exports the straight one and Word the typographic.
@@ -356,9 +370,11 @@ export function parseKey(sheets, name) {
       const occ = occCol !== -1 ? parseInt(row[occCol], 10) : 0;
       entries.push({
         real,
+        cat: catCol !== -1 ? fold(row[catCol]) : "",
         fake: kind === "control" ? "" : fake,
         control: kind === "control" ? fake : "",
         alt: statusCol !== -1 && fold(row[statusCol]) === ALT_STATUS,
+        lone: statusCol !== -1 && fold(row[statusCol]) === FULL_NAME_ONLY_STATUS,
         occ: isFinite(occ) && occ > 0 ? occ : 0,
         pinned,
         own: catCol !== -1 && srcCol !== -1 && OWN_SOURCES.has(fold(row[srcCol])) && OWN_CATEGORIES.has(fold(row[catCol])),
@@ -389,8 +405,8 @@ export function parseKey(sheets, name) {
     if (!baseReal || (!e.control && !baseFake) || haveReal.has(fold(baseReal))) continue;
     haveReal.add(fold(baseReal));
     derived.push(e.control
-      ? { real: baseReal, fake: "", control: e.control, alt: e.alt, occ: 0, pinned: e.pinned, ocr: e.ocr }
-      : { real: baseReal, fake: baseFake, alt: e.alt, occ: 0, pinned: e.pinned, ocr: e.ocr });
+      ? { real: baseReal, cat: e.cat, fake: "", control: e.control, alt: e.alt, lone: e.lone, occ: 0, pinned: e.pinned, ocr: e.ocr }
+      : { real: baseReal, cat: e.cat, fake: baseFake, alt: e.alt, lone: e.lone, occ: 0, pinned: e.pinned, ocr: e.ocr });
   }
   for (const d of derived) entries.push(d);
 
@@ -446,10 +462,14 @@ export function parseKey(sheets, name) {
   // row's stand-in, and the fake beside it is the one the next run re-derives.
   const warn = [];
   const seenReal = new Map();
-  const rowOf = (e) => (e.control
+  // A bare-token row carries its Category, which is what makes it cap-only
+  // (capOnlyReal); no other row needs one.
+  const rowOf = (e) => Object.assign(e.control
     ? { real: e.real, fake: "", pinned: !!e.pinned, control: e.control }
-    : { real: e.real, fake: e.fake, pinned: !!e.pinned, ocr: !!e.ocr });
+    : { real: e.real, fake: e.fake, pinned: !!e.pinned, ocr: !!e.ocr },
+  TOKEN_CATS.has(e.cat) ? { cat: e.cat } : null);
   for (const e of entries) {
+    if (e.lone) continue; // never faked alone (FULL_NAME_ONLY_STATUS)
     const k = fold(e.real);
     const at = seenReal.get(k);
     if (at === undefined) {
@@ -1028,6 +1048,44 @@ export function isCommonReal(value) {
   return f.length < 2 || (COMMON_WORDS.has(f) && f.indexOf(" ") === -1);
 }
 
+// PDF-Linker's bare-token categories (`_PN_TOKEN_CATS`): a word split out of a
+// longer name, or a document's one-word short form for one. It never matches
+// an occurrence written in lower case there (`_pn_term_is_cap_only`).
+const TOKEN_CATS = new Set(["person-token", "entity-token", "short-name"]);
+
+/**
+ * Whether a warning row's real is matched only where it is CAPITALISED — an
+ * occurrence whose first letter is lower case is no name, so it is neither
+ * marked, refused nor written as its fake. PDF-Linker's own rule, so the reader
+ * fakes what the run fakes and leaves what the run left: a ONE-word real that
+ * is a bare-token row (its Category), or whose word is on PDF-Linker's
+ * never-fake list (never-fake-words.js, `Never Fake Words.txt`: English that is
+ * no surname, and the vocabulary its bare-token screens refuse). A party's
+ * "Provision" is still faked; the "provision" of a contract is not. A value of
+ * more than one word is matched in any case, as before.
+ */
+export function capOnlyReal(row) {
+  const real = String((row && row.real) || "").trim();
+  if (!real || /\s/.test(real)) return false;
+  if (TOKEN_CATS.has(row.cat)) return true;
+  return isNeverFakeWord(real.replace(POSS_TAIL_RE, ""));
+}
+const capOnlySet = (rows) => {
+  const out = new Set();
+  for (const w of rows) if (capOnlyReal(w)) out.add(fold(w.real));
+  return out.size ? out : null;
+};
+// A match a cap-only real does not take: written with a small first letter.
+// `hit` is lookup's (its suffix says which value matched); without one, the
+// match is read as a value and as a value's possessive (textdoc's own lookup).
+export function capOnlyMiss(compiled, matched, hit) {
+  if (!compiled || !compiled.capOnly || !/^\p{Ll}/u.test(matched)) return false;
+  const g = foldGaps(matched);
+  if (hit) return compiled.capOnly.has(fold(hit.suffix ? g.slice(0, -hit.suffix.length) : g));
+  const mp = g.match(POSS_MATCH_RE);
+  return compiled.capOnly.has(fold(g)) || (!!mp && compiled.capOnly.has(fold(g.slice(0, -mp[0].length))));
+}
+
 /**
  * The key's fakes that are ordinary words, as { fake, real }: retired from the
  * display (parseKey). Read off the pairs as well, for a key parsed and kept in
@@ -1076,13 +1134,15 @@ function warnRows(key) {
 export function compile(key, opts) {
   const pairs = pairRows(key).filter((p) => !isCommonReal(p.fake));
   const map = new Map(pairs.map((p) => [fold(p.fake), p.real]));
+  // The fake as the key spells it, for the casing (keySpelled).
+  const spell = new Map(pairs.map((p) => [fold(p.fake), p.fake]));
   const rx = buildMatcher(pairs.map((p) => p.fake));
   // `spare(text, next)` → [[start, end]]: ranges where a fake is no fake. The
   // run spares a cited decision's name, so a published party that shares a
   // word with a fake ("Smith v. Jones (2010) 50 Cal.4th 100", Smith a fake
   // here) is that case's party, and reversing it writes a wrong citation in
   // the real names. Kept off this module (textdoc imports it).
-  return { rx, map, spare: (opts && opts.spare) || null };
+  return { rx, map, spell, spare: (opts && opts.spare) || null };
 }
 
 /**
@@ -1113,9 +1173,10 @@ export function ownFakesOf(key) {
 export function compileForward(key) {
   const warn = warnRows(key).filter((w) => !isCommonReal(w.real));
   const map = new Map();
-  for (const w of warn) if (w.fake && !map.has(fold(w.real))) map.set(fold(w.real), w.fake);
+  const spell = new Map();
+  for (const w of warn) if (w.fake && !map.has(fold(w.real))) { map.set(fold(w.real), w.fake); spell.set(fold(w.real), w.real); }
   const rx = buildMatcher(warn.map((w) => w.real));
-  return { rx, map };
+  return { rx, map, spell, capOnly: capOnlySet(warn) };
 }
 
 /**
@@ -1156,7 +1217,7 @@ export function compileReals(key) {
   const map = new Map();
   for (const w of warn) if (!map.has(fold(w.real))) map.set(fold(w.real), w);
   const rx = buildMatcher(warn.map((w) => w.real));
-  return { rx, map };
+  return { rx, map, capOnly: capOnlySet(warn) };
 }
 
 /**
@@ -1184,12 +1245,14 @@ export function compileFakes(key) {
 // Look a match up in a compiled map, a possessive of a bare value included.
 function lookup(compiled, m) {
   const g = foldGaps(m);
-  let mapped = compiled.map.get(fold(g));
+  let k = fold(g);
+  let mapped = compiled.map.get(k);
   let suffix = "";
   const mp = g.match(POSS_MATCH_RE);
   if (mapped == null) {
     if (mp) {
-      mapped = compiled.map.get(fold(g.slice(0, -mp[0].length)));
+      k = fold(g.slice(0, -mp[0].length));
+      mapped = compiled.map.get(k);
       if (mapped != null) suffix = mp[0];
     }
   } else if (mp && POSS_TAIL_RE.test(mapped)) {
@@ -1199,7 +1262,9 @@ function lookup(compiled, m) {
     mapped = mapped.replace(POSS_TAIL_RE, "");
     suffix = mp[0];
   }
-  return mapped == null ? null : { mapped, suffix };
+  if (mapped == null) return null;
+  const spelled = compiled.spell ? compiled.spell.get(k) : undefined;
+  return spelled ? { mapped, suffix, spelled } : { mapped, suffix };
 }
 
 /**
@@ -1228,7 +1293,50 @@ function lineRanges(start, matched) {
 function swapTo(hit, matched) {
   const core = hit.suffix ? matched.slice(0, -hit.suffix.length) : matched;
   const sample = foldGaps(core);
-  return mirrorCase(sample, hit.mapped) + casedSuffix(caseShape(sample), hit.suffix);
+  const shape = caseShape(sample);
+  const value = shape === "title" ? keySpelled(hit.mapped, hit.spelled, sample) : hit.mapped;
+  return mirrorCase(sample, value) + casedSuffix(shape, hit.suffix);
+}
+
+// A word in capitals: "ACME", "PNC", a caption's "McALLISTER" (isShoutedWord).
+// One letter is an initial, no shout.
+function shoutedLetters(w) {
+  const words = String(w || "").match(WORD_RE) || [];
+  return words.join("").length >= 2 && words.every(isShoutedWord);
+}
+
+/**
+ * The stored value with the shouts the key itself contradicts titled.
+ * PDF-Linker writes a fake word in capitals where its real word is in capitals
+ * ("ABC Supply Company" goes out as "TRUENORTH Hartland Company"), so a word
+ * shouted in the stored value whose counterpart in the key's own searched
+ * spelling is NOT shouted — "ACME Cobalt Company" for "Meadowgate Cobalt
+ * Company" — is a capitals slip in the key, not an acronym, and in prose it
+ * reads "Acme". Word by word, only where the value and the key's spelling have
+ * the same number of words, and never where the text itself shouts that word
+ * ("MEADOWGATE Cobalt Company"). titleWord keeps a listed abbreviation.
+ * The same rule as DeAnonymize.bas's MatchCasingInPhrase and the extension's
+ * src/pseudo.js.
+ */
+export function keySpelled(value, keyText, sample) {
+  const v = String(value == null ? "" : value);
+  if (!keyText) return v;
+  const kw = String(keyText).trim().split(/\s+/);
+  const vw = v.trim().split(/\s+/);
+  if (vw.length < 2 || vw.length !== kw.length) return v;
+  const sw = String(sample || "").trim().split(/\s+/);
+  const aligned = sw.length === vw.length;
+  let i = -1;
+  return v.replace(/\S+/g, (w) => {
+    i++;
+    if (!shoutedLetters(w) || shoutedLetters(kw[i]) || (aligned && shoutedLetters(sw[i]))) return w;
+    let first = i === 0;
+    return w.replace(WORD_RE, (x) => {
+      const out = titleWord(x, first);
+      first = false;
+      return out;
+    });
+  });
 }
 
 /**
@@ -1535,7 +1643,7 @@ function hitsFrom(compiled, text, from, max, opts) {
   while ((m = rx.exec(text))) {
     while (ci < cols.length && cols[ci].start <= m.index) out.push(cols[ci++]);
     const hit = lookup(compiled, m[0]);
-    if (hit) {
+    if (hit && !capOnlyMiss(compiled, m[0], hit)) {
       const ranges = lineRanges(m.index, m[0]);
       if (!pieces.length || !touchesPieces(pieces, ranges)) out.push({ ranges, whole: m[0], hit, start: m.index });
     }
@@ -1719,6 +1827,8 @@ export function compileTypeahead(key, alsoLonger) {
       real: w.real,
       fake: w.fake,
       partial: openings.has(fold(w.real)),
+      // Not offered where it was typed with a small first letter (capOnlyReal).
+      cap: capOnlyReal(w),
       // One run of blank is one `\s+`, for the reason altFor gives: a chain of
       // them over a single run is every way of cutting that run up.
       rx: new RegExp("(?<![A-Za-z0-9_])" + escapeRe(String(w.real).trim()).replace(/\s+/g, "\\s+") + (POSS_TAIL_RE.test(w.real) ? "" : "(?:['’][sS])?") + "$", "i"),
@@ -1754,7 +1864,7 @@ export function endingReal(ahead, textBefore) {
   for (const e of ahead || []) {
     const tail = t.slice(-(e.real.length * 2 + 8));
     const m = e.rx.exec(tail);
-    if (m) {
+    if (m && !(e.cap && /^\p{Ll}/u.test(m[0]))) {
       // "Zachary's" typed against a bare "Zachary" row offers "John's".
       let fake = e.fake;
       const mp = m[0].match(POSS_MATCH_RE);

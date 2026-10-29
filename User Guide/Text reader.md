@@ -467,7 +467,15 @@ app, which routes it to the reader tab.
   folder's own. A file from Text Files opened on its own attaches the case
   folder above it whenever the reader knows that folder. Every fake is shown
   as its real value in the case the fake was written in, **lightly
-  highlighted**, and hovering shows the pseudonym underneath. **A fake inside
+  highlighted**, and hovering shows the pseudonym underneath. A one-word real
+  that PDF-Linker leaves unfaked in lower case — a party's bare word that is
+  ordinary English, like "Provision" — is faked, marked and offered only where
+  it is capitalised, as PDF-Linker does: the "provision" of a contract is left
+  alone. A word PDF-Linker never faked on its own (its key row says `full
+  name only`, such as the "Provision" of a party called Provision Holdings
+  whose papers use the word in prose) still reads back as the real name
+  where its fake stands, but is never marked, saved as a fake or offered as
+  you type. **A fake inside
   a cited decision's name is shown as the export has it.** PDF-Linker spared
   that name, so a word in it that matches one of this case's fakes is the
   published party's own — `Smith v. Jones (2010) 50 Cal.4th 100` where

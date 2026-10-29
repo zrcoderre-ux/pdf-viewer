@@ -88,6 +88,7 @@
         "viewer/form-templates.js",
         "viewer/form-templates/*.json",
         "viewer/pseudo-key.js",
+        "viewer/never-fake-words.js",
         "viewer/key-library.js",
         "viewer/redact.js",
         "viewer/pdf-edit.js",
