@@ -47,9 +47,11 @@ app, which routes it to the reader tab.
   values you have **kept**: with **✎ Edit** on, Save writes each kept value
   as itself in place of the pseudonym the run wrongly put there, so the fix
   is in the file, not only on screen (no PDF-Linker run will rewrite a `.md`
-  to do it later). It is a file on
-  its own, not one of the case folder's documents, so it is not listed in
-  Documents and is renamed where it is saved, not from the top bar.
+  to do it later). A `.md` in the case folder or its Text Files folder is
+  listed in **Documents** with the exports, in name order and tagged **MD**;
+  click it to open it. It is read on its own: **Read folder on** passes it
+  over, going from one export to the next. It is not PDF-Linker's and has no
+  PDF, so it is renamed where it is saved, not from the top bar.
 - **The tools stand down the left margin.** The reading, pseudonym, review and
   PDF tools are in a **Tools** panel on the left — the same rail the PDF viewer
   carries — in labelled groups: *Reading* (font, size, leading, width, line

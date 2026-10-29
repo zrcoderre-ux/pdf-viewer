@@ -299,7 +299,7 @@ function pdfForName(name) {
 /** The folder's export a File cell's name belongs to, or null. */
 function exportForName(name) {
   const m = nameMatchers();
-  if (!m.exportFor) m.exportFor = LK.exportMatcher(folderDocs.map((d) => d.name), m.fwdName);
+  if (!m.exportFor) m.exportFor = LK.exportMatcher(folderDocs.filter((d) => !d.md).map((d) => d.name), m.fwdName);
   return m.exportFor(name);
 }
 let editing = false;         // a document opens protected; ✎ Edit lifts it
@@ -2906,7 +2906,7 @@ async function caseFolderFor(fileHandle) {
 
 /** Read a case folder: its key, its exports and its flagged values. */
 async function scanFolder(h, { light = false } = {}) {
-  const found = { keyHandle: null, valuesHandle: null, leaksHandle: null, combined: null, textDir: null, docs: [], rootDocs: [], pdfs: [] };
+  const found = { keyHandle: null, valuesHandle: null, leaksHandle: null, combined: null, textDir: null, docs: [], rootDocs: [], mdDocs: [], pdfs: [] };
   for await (const [name, entry] of h.entries()) {
     if (entry.kind === "file") {
       // A PDF is counted even where a light attach lists none: having PDFs is
@@ -2919,6 +2919,7 @@ async function scanFolder(h, { light = false } = {}) {
       else if (TD.isCombinedName(name)) found.combined = { name, handle: entry, combined: true };
       else if (name.toLowerCase() === TD.VALUES_FILE.toLowerCase()) found.valuesHandle = entry;
       else if (TD.isExportName(name)) found.rootDocs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
+      else if (TD.isMarkdownName(name) && !light) found.mdDocs.push({ name, handle: entry, md: true });
     } else if (entry.kind === "directory" && name.toLowerCase() === TD.TEXT_SUBFOLDER.toLowerCase()) {
       found.textDir = entry;
     }
@@ -2930,12 +2931,24 @@ async function scanFolder(h, { light = false } = {}) {
   }
   if (found.textDir && !light) {
     for await (const [name, entry] of found.textDir.entries()) {
-      if (entry.kind === "file" && TD.isExportName(name)) found.docs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
+      if (entry.kind !== "file") continue;
+      if (TD.isExportName(name)) found.docs.push({ name, handle: entry, quarantined: TD.isQuarantinedName(name) });
+      else if (TD.isMarkdownName(name)) found.mdDocs.push({ name, handle: entry, md: true });
     }
   }
   // Under the older single-folder layout the exports sit in the case folder
   // itself; with a Text Files folder present, a root .txt is somebody's note.
   if (!found.docs.length) found.docs = found.rootDocs;
+  // My-Macros' Markdown drafts are listed with the exports, from the case
+  // folder and its Text Files folder alike (the owner: "markdown files should
+  // also be included in the case folder along with the text files in the
+  // documents menu"). They are the reader's documents, not PDF-Linker's: no
+  // run writes or reads them, so they pair with no PDF or LEAKS row and stay
+  // off the reel (mdDoc dresses the page by the head document's name). One
+  // of a name only: the list is looked up by name.
+  for (const d of found.mdDocs) {
+    if (!found.docs.some((x) => x.name.toLowerCase() === d.name.toLowerCase())) found.docs.push(d);
+  }
   found.docs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   found.pdfs.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   return found;
@@ -3818,7 +3831,7 @@ function renameFixed(m) {
   if (!m) return "no document open";
   if (TD.isCombinedName(m.name)) return "Combined Text.txt is PDF-Linker's own file, written again by every run, and is not renamed";
   if (TD.isQuarantinedName(m.name)) return "quarantined by PDF-Linker's leak gate — rename it once a run has released it";
-  if (TD.isMarkdownName(m.name)) return "a Markdown export is not one of the case folder's documents — rename it where it is saved";
+  if (TD.isMarkdownName(m.name)) return "a Markdown export is not PDF-Linker's and has no PDF to rename with it — rename it where it is saved";
   if (!folderOpen() || !m.d || !folderDocs.includes(m.d)) return "open its case folder to rename it — its PDF is renamed with it";
   return "";
 }
@@ -4582,14 +4595,14 @@ async function openFolderNow(h) {
   if (found.overtaken) return;
   if (folderDocs.length) {
     // A file already open from this folder just takes the key; otherwise the
-    // quarantined export, the one to read, else the first.
+    // quarantined export, the one to read, else the first (an export before a Markdown draft).
     // (Its spot keeps are this folder's from here, as they always were.)
     if (fileHandle && folderDocs.some((d) => d.handle === fileHandle)) { spotsFolder = stateFolder(); if (doc) retranslate(); markDocList(); return; }
     let mine = null;
     if (fileHandle) { try { mine = (await h.resolve(fileHandle)) ? fileHandle : null; } catch { mine = null; } }
     if (dirHandle !== h) return; // …and the same, should it come while that is asked
     if (mine && doc) { spotsFolder = stateFolder(); retranslate(); markDocList(); return; }
-    await openFolderDoc(folderDocs.find((d) => d.quarantined) || folderDocs.find((d) => !d.combined) || folderDocs[0]);
+    await openFolderDoc(folderDocs.find((d) => d.quarantined) || folderDocs.find((d) => !d.combined && !d.md) || folderDocs.find((d) => !d.combined) || folderDocs[0]);
   } else {
     doc = null; pagesEl.hidden = true; emptyEl.hidden = false;
     toast("No text exports in " + folderName + (found.textDir ? "" : " (no Text Files folder)"), { error: true });
@@ -4958,6 +4971,13 @@ function renderDocListNow() {
       t.className = "tag";
       t.textContent = "LEAK";
       t.title = "Quarantined by PDF-Linker's leak gate — read it to find what leaked";
+      li.appendChild(t);
+    }
+    if (d.md) {
+      const t = document.createElement("span");
+      t.className = "tag md";
+      t.textContent = "MD";
+      t.title = "A Markdown draft (My-Macros' export of a Word document) — drawn as a Word page, saved in its pseudonyms; opened on its own, never read on with the exports";
       li.appendChild(t);
     }
     li.addEventListener("click", () => openFolderDoc(d));
@@ -18779,6 +18799,9 @@ function reelNextDoc() {
     // The combined file is every other document over again: reading it INTO a
     // reel of those documents would be the folder read twice.
     if (d.combined) continue;
+    // A Markdown draft is drawn as a Word page, by the head's name (mdDoc): it
+    // is opened on its own from the list, never hung on a reel of exports.
+    if (d.md) continue;
     if (reel.some((m) => m.name === d.name)) continue;
     return d;
   }
@@ -18793,7 +18816,7 @@ function reelPrevDoc() {
   if (at < 0) return null;
   for (let i = at - 1; i >= 0; i--) {
     const d = folderDocs[i];
-    if (d.combined) continue; // as below: the case read twice
+    if (d.combined || d.md) continue; // as below: the case read twice, a Word page among exports
     if (reel.some((m) => m.name === d.name)) continue;
     return d;
   }
@@ -19131,7 +19154,7 @@ document.addEventListener("keydown", (e) => {
 function reelOn() {
   if (!doc || !dirHandle || folderDocs.length < 2 || settings.reel === false) return false;
   const head = reel[0];
-  return !!head && !folderDocs.some((d) => d.name === head.name && d.combined);
+  return !!head && !TD.isMarkdownName(head.name) && !folderDocs.some((d) => d.name === head.name && d.combined);
 }
 
 /**
