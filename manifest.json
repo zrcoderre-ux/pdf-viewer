@@ -73,6 +73,7 @@
         "viewer/pdf-fonts.js",
         "viewer/text-layer.js",
         "viewer/web-pdf.js",
+        "viewer/plain-urls.js",
         "viewer/ocr-store.js",
         "viewer/rotation.js",
         "viewer/web-shim.js",

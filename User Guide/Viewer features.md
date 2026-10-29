@@ -2,6 +2,11 @@
 
 In addition to citation linking, the viewer supports:
 
+- **Web addresses are clickable** — the PDF's own links work as they do in
+  Acrobat, and an address written out in the text (`https://…`, `http://…`,
+  `www.…`) is a link too where the PDF has none over it, including one wrapped
+  onto the next line after a `/` or `-`. Text that is only blue and underlined,
+  with no address in it, has nothing to link to.
 - **Sharp type at any screen scaling** — pages are drawn in the screen's own
   pixels, so on a Retina or 125%/150%-scaled display, or in a window zoomed
   past 100%, the page is no longer stretched to fit and its type stays crisp.

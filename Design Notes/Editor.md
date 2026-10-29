@@ -245,6 +245,21 @@ a file that came in protected is saved protected. `encryptPdf` always writes
 AES-256 (V5 R6). Permission bits are honoured by `Features.guard(kind)`; the
 owner password unlocks them.
 
+**The PDF's own links and addresses in its text** (`placeNativeLinksForPage`
+in `viewer.js`, `viewer/plain-urls.js`). Each page's `.pdfLinkLayer` holds an
+`a.pdf-link` over every link annotation with a URI or a destination, placed as
+the page is built. Once the page's text layer is laid out, `finishPageText`
+runs `placePlainUrls`, which reads the spans' texts for `https://`, `http://`
+and `www.` and adds an `a.pdf-link.plain-url` over each address the PDF does
+not already link (more than half of it under a native link: the native one
+stands). An address goes on past its span only into the next span on the same
+line with no gap (a face change), or onto the next line where the break says
+so: the line ends in `/ - _ = & ? # % ~` (`:` only before `//`), or the next
+line's first word holds a `/` or ends in a file extension; a line ending in
+`.` goes on only for a `/`. Trailing punctuation and an unbalanced `)` or `]`
+are taken off. Asked for after "native hyperlinks are not clickable": the one
+in question was blue, underlined text with no link behind it.
+
 **Selection vs. overlays.** Citation links, comments, redaction boxes and
 form fields all sit above the text layer. While a text drag is in progress
 (`body.text-dragging`, set on a left mousedown in a text layer) they take no
