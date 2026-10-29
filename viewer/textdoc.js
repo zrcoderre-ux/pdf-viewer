@@ -32,7 +32,7 @@
 //       right for what they write).
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
-import { caseShape, mirrorCase, fold as pkFold, translateRuns, findReals, findRealSpans, compile, ownFakesOf } from "./pseudo-key.js";
+import { caseShape, mirrorCase, fold as pkFold, translateRuns, findReals, findRealSpans, compile, ownFakesOf, capOnlyMiss, keySpelled } from "./pseudo-key.js";
 import { REPORTERS_SORTED, REPORTERS_ALL_SORTED } from "./reporters.js";
 
 // ---- the file as pages ---------------------------------------------------------
@@ -2356,7 +2356,8 @@ export function findRealsInPlain(compiledForward, segments) {
     rx.lastIndex = 0;
     let m;
     while ((m = rx.exec(text))) {
-      const fake = lookupForward(compiledForward, m[0]);
+      // A one-word real PDF-Linker matches only capitalised (pseudo-key's capOnlyReal).
+      const fake = capOnlyMiss(compiledForward, m[0]) ? null : lookupForward(compiledForward, m[0]);
       if (fake != null) out.push({ node: seg.node, start: m.index, end: m.index + m[0].length, matched: m[0], fake });
       if (m.index === rx.lastIndex) rx.lastIndex++;
     }
@@ -2380,12 +2381,14 @@ export function fakeFor(compiledForward, value) {
   return lookupForward(compiledForward, String(value == null ? "" : value));
 }
 function lookupForward(compiled, m) {
-  let fake = compiled.map.get(foldKey(m));
+  let k = foldKey(m);
+  let fake = compiled.map.get(k);
   let suffix = "";
   const mp = m.match(POSS_MATCH_RE);
   if (fake == null) {
     if (!mp) return null;
-    fake = compiled.map.get(foldKey(m.slice(0, -mp[0].length)));
+    k = foldKey(m.slice(0, -mp[0].length));
+    fake = compiled.map.get(k);
     if (fake == null) return null;
     suffix = mp[0];
   } else if (mp && POSS_TAIL_RE.test(fake)) {
@@ -2395,6 +2398,9 @@ function lookupForward(compiled, m) {
   }
   const core = suffix ? m.slice(0, -suffix.length) : m;
   const shape = caseShape(core);
+  // The key's spelling of the real decides a shout it does not make, as in
+  // pseudo-key's swapTo.
+  if (shape === "title" && compiled.spell) fake = keySpelled(fake, compiled.spell.get(k), core);
   const cased = mirrorCase(core, fake);
   if (!suffix) return cased;
   return cased + (shape === "upper" ? suffix.toUpperCase() : shape === "lower" ? suffix.toLowerCase() : suffix);

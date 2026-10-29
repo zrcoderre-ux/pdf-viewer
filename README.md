@@ -237,6 +237,7 @@ viewer/form-templates/               The blanks' text, sizes, faces and fields (
 viewer/rules.js                      Text reader's box-drawing glyphs drawn as boxes, every rule of a page on one column grid (grid pure; test-rules.mjs, test-straight-rules.mjs)
 viewer/columns.js                    Text reader's space-aligned columns laid out on the font's own grid (cuts pure in textdoc.js; test-textdoc.mjs)
 viewer/pseudo-key.js                 pseudonym_key.xlsx reader + fake↔real swaps (pure; test-pseudo-key.mjs)
+viewer/never-fake-words.js           PDF-Linker's never-fake list, built by build-never-fake-words.mjs (test-never-fake-words.mjs)
 viewer/xlsx-read.js                  Minimal .xlsx reader (pure; test-xlsx-read.mjs)
 viewer/xlsx-write.js                 Writes cells back into an .xlsx, the rest copied through (pure; test-xlsx-write.mjs)
 viewer/leaks.js                      Text reader's LEAKS.xlsx model: rows, Fix? cells, where a row points (pure; test-leaks.mjs)

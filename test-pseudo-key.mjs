@@ -10,8 +10,9 @@ import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, compileFakes, findReals, mirrorCase, caseShape, applyCase, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
-  wordFakesOf, keyCellKind, contactValue, boundRows, compilePinnedFakes,
+  wordFakesOf, keyCellKind, contactValue, boundRows, compilePinnedFakes, capOnlyReal,
 } from "./viewer/pseudo-key.js";
+import { findRealsInPlain, fakeFor } from "./viewer/textdoc.js";
 
 let fails = 0;
 function check(label, got, want) {
@@ -898,6 +899,62 @@ console.log("the bound values as rows");
     dropped: { keeps: 0, ambiguous: 0, words: 0, pinned: 0 } };
   check("a key kept from before: the instruction is no fake, the old keep binds nothing",
     boundRows(old).map((w) => [w.real, w.fake, w.control || ""]), [["Rashoe", "", "~Rasho"]]);
+}
+
+console.log("a one-word real PDF-Linker leaves in lower case (Never Fake Words.txt)");
+{
+  // A party's bare word as PDF-Linker writes it: an entity-token, cap-only by
+  // its Category. And the same word on a row with no token Category, cap-only
+  // because the word is on PDF-Linker's never-fake list.
+  const text = "Provision breached the provision. PROVISION's notice; the provision's term.";
+  for (const [label, cat] of [["entity-token row", "entity-token"], ["listed word, entity row", "entity"]]) {
+    const k = keyOf([
+      ["entity", "Provision Holdings, LLC", "Dawnfield Holdings, LLC", "", "replaced", "spreadsheet", 1],
+      [cat, "Provision", "Dawnfield", "", "replaced", "spreadsheet", 2],
+    ]);
+    check(`${label}: cap-only`, capOnlyReal(k.warn.find((w) => w.real === "Provision")), true);
+    check(`${label}: the save fakes it capitalised, never in lower case`,
+      forwardRuns(compileForward(k), text).map((r) => (r.t === "swap" ? r.to : r.s)).join(""),
+      "Dawnfield breached the provision. DAWNFIELD'S notice; the provision's term.");
+    check(`${label}: the warning marks only the capitalised ones`,
+      findRealSpans(compileReals(k), text).map((s) => s.matched), ["Provision", "PROVISION's"]);
+    const ahead = compileTypeahead(k);
+    check(`${label}: typing "provision" offers nothing`, endingReal(ahead, "the provision"), null);
+    check(`${label}: typing "Provision" offers its fake`, (endingReal(ahead, "says Provision") || {}).fake, "Dawnfield");
+    check(`${label}: the plain-text reading takes only the capitalised one`,
+      findRealsInPlain(compileForward(k), [{ node: null, text: "the provision of Provision" }]).map((h) => [h.matched, h.fake]),
+      [["Provision", "Dawnfield"]]);
+  }
+  // A surname is on no list, and a person row is matched in any case as before.
+  const p = keyOf([["person", "Rasho", "Strangeways", "", "replaced", "spreadsheet", 1]]);
+  check("a person row that is no word is matched in any case",
+    findRealSpans(compileReals(p), "rasho and Rasho").length, 2);
+  // A value of two words is matched in any case, its words ordinary or not.
+  const b = keyOf([["entity", "Cross River Bank", "Heddle Ford Bank", "", "replaced", "spreadsheet", 1]]);
+  check("a multi-word real is matched in any case", findRealSpans(compileReals(b), "cross river bank").length, 1);
+}
+
+console.log("a shout in the key's real that its own fake does not make");
+{
+  // PDF-Linker writes a real acronym's fake word in capitals too: "ABC Supply
+  // Company" goes out as "TRUENORTH Hartland Company". So "ACME" against a
+  // title-case "Meadowgate" is a capitals slip in the key.
+  const k = keyOf([
+    ["entity", "ACME Cobalt Company", "Meadowgate Cobalt Company", "", "replaced", "spreadsheet", 3],
+    ["entity", "ABC Supply Company", "TRUENORTH Hartland Company", "", "replaced", "spreadsheet", 3],
+  ]);
+  const c = compile(k);
+  check("a title-case fake reads its real in title case",
+    translate(c, "Meadowgate Cobalt Company sued.").text, "Acme Cobalt Company sued.");
+  check("…and a caption still shouts it",
+    translate(c, "MEADOWGATE COBALT COMPANY").text, "ACME COBALT COMPANY");
+  check("…and the text's own shout of the word is kept",
+    translate(c, "MEADOWGATE Cobalt Company").text, "ACME Cobalt Company");
+  check("the save writes the fake a slipped key's real stands for",
+    fakeFor(compileForward(k), "Acme Cobalt Company"), "Meadowgate Cobalt Company");
+  check("an acronym the key's fake also shouts keeps its capitals",
+    translate(c, "TRUENORTH Hartland Company and Truenorth Hartland Company").text,
+    "ABC Supply Company and ABC Supply Company");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

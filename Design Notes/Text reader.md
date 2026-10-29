@@ -1136,6 +1136,46 @@ and a word the replacement shares with the fake takes the fake's spelling
 ("SILVERGATE., Inc." → "U.S.A., Inc."). `test-pseudo-key.mjs`, "case: the
 fake's case, never the key's caps".
 
+**…and a shout the key's own fake does not make is a slip** (`keySpelled`,
+the owner's report of 2026-10-28). PDF-Linker writes a real acronym's fake word
+in capitals ("ABC Supply Company" goes out as "TRUENORTH Hartland Company"), so
+a key row binding "Meadowgate Cobalt Company" to "ACME Cobalt Company" has a
+capitals slip in its Real Value, and the rule above left it as written:
+"Meadowgate Cobalt Company" read "ACME Cobalt Company". Now, where the text is
+prose and the value and the key's own spelling of what was matched have the
+same number of words, a value word in capitals whose counterpart in the key's
+spelling is not is titled (titleWord, so a listed abbreviation keeps its
+capitals), unless the text shouts that word too. "TRUENORTH Hartland Company"
+and "Truenorth Hartland Company" still read "ABC". Both directions read it
+(`compile` and `compileForward` keep the key's spelling as `spell`); the same
+rule is in DeAnonymize.bas and the extension's `src/pseudo.js`. Residual: a key
+typed by hand pairing an acronym with a title-case fake ("XYZ Holdings" for
+"Meadowgate Holdings") titles the acronym ("Xyz") unless it is listed.
+PDF-Linker's round-trip port (`_rd_swap_to`) does not carry the rule; its
+node pin covers no such key. `test-pseudo-key.mjs`, "a shout in the key's real
+that its own fake does not make".
+
+**A one-word real PDF-Linker leaves in lower case is matched only where it is
+capitalised** (`capOnlyReal`, `never-fake-words.js`; the owner's direction,
+2026-10-28: every program that fakes from the key uses PDF-Linker's list of
+words it does not fake). A key bound a party's bare word "Provision"; the run
+left every "provision" of the contract as printed (a bare token is cap-only
+there, `_pn_term_is_cap_only`), while the reader's save, its marks and the
+typeahead took the word in any case. Now a one-word real that is a bare-token
+row (Category `person-token`, `entity-token` or `short-name`, which parseKey
+now keeps on the warning row) or whose word is on PDF-Linker's `Never Fake
+Words.txt` (English that is no surname, and the vocabulary its bare-token
+screens refuse) is neither marked, refused, offered nor written as its fake
+where its first letter is lower case — PDF-Linker's own test. "Provision",
+"PROVISION" and "Provision's" are still faked; a multi-word value is matched in
+any case as before. The list is PDF-Linker's file, copied here as `Never Fake
+Words.txt` and built into `viewer/never-fake-words.js` (a set made on first
+use) by `node build-never-fake-words.mjs`; run it whenever PDF-Linker
+regenerates the list. `test-never-fake-words.mjs` fails while the module, the
+copy and the list beside this checkout disagree. Not changed: a file name's
+scrub (`redact.boundValueStands`) reads `boundRows` with its own matcher.
+`test-pseudo-key.mjs`, "a one-word real PDF-Linker leaves in lower case".
+
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each
 line whole — "…; and QUARRY", the blank, ")  Case No.: 25STCV59720" — with
