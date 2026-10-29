@@ -286,7 +286,7 @@ body.home-open .tab-view.active { display: none; }
 .home-recent h2 { font-size: 12px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--c-text-3); margin: 0 0 10px; }
 .link-btn { border: none; background: none; color: var(--c-text-3); cursor: pointer; font-size: 12px; }
 .link-btn:hover { color: var(--c-accent); }
-#recent-list { border: 1px solid var(--c-border); border-radius: 12px; background: var(--c-card); overflow: hidden; }
+#recent-list, .case-list { border: 1px solid var(--c-border); border-radius: 12px; background: var(--c-card); overflow: hidden; }
 .recent-item {
   display: flex;
   align-items: center;
@@ -305,6 +305,25 @@ body.home-open .tab-view.active { display: none; }
 .recent-item.text .ri-icon { color: var(--c-accent); }
 .recent-item .ri-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .recent-item .ri-when { color: var(--c-text-3); font-size: 12px; white-space: nowrap; }
+
+/* Case folders: each with where it was found and what PDF-Linker is doing in it. */
+.case-head-btns { display: flex; gap: 14px; }
+.case-item .ri-icon { color: #eab308; }
+.case-item .ci-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.case-item .ci-main .ri-name { flex: none; }
+.case-item .ci-where { color: var(--c-text-3); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.case-item .ci-status { flex: none; max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; padding: 3px 9px; border-radius: 999px; background: var(--c-accent-soft); color: var(--c-text-3); }
+.case-item .ci-status.tone-run { color: var(--c-accent); }
+.case-item .ci-status.tone-run::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; animation: case-pulse 1.4s ease-in-out infinite; }
+.case-item .ci-status.tone-ok { color: #16a34a; background: rgba(34, 197, 94, 0.12); }
+.case-item .ci-status.tone-warn { color: #d97706; background: rgba(234, 179, 8, 0.14); }
+@keyframes case-pulse { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .case-item .ci-status.tone-run::before { animation: none; } }
+.case-empty { margin: 0; padding: 12px 14px; color: var(--c-text-3); font-size: 12.5px; }
+@media (max-width: 560px) {
+  .case-item { flex-wrap: wrap; }
+  .case-item .ci-status { max-width: 100%; margin-left: 30px; }
+}
 
 .home-more { margin-top: 26px; color: var(--c-text-2); }
 .home-more summary { cursor: pointer; color: var(--c-text-3); font-size: 12.5px; }

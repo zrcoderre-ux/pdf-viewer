@@ -6,7 +6,8 @@
   tab is a fully isolated viewer instance (its own zoom, comments, OCR, etc.)
   with no shared state. The shell hosts no viewer markup itself — that lives in
   the iframes — so there is nothing here to keep in sync with the extension.
-  The Home page (#dropzone) is the shell's own: open, combine, create, recent.
+  The Home page (#dropzone) is the shell's own: open, combine, create, case
+  folders with PDF-Linker's run status, recent files.
 -->
 <head>
   <meta charset="utf-8">
@@ -64,6 +65,11 @@
       </div>
 
       <p class="home-drop"><i data-icon="upload" data-icon-size="16"></i> Or drop files anywhere in this window. Once installed, PDFs you open from your computer land here too.</p>
+
+      <section id="case-folders" class="home-recent home-cases" hidden>
+        <div class="recent-head"><h2>Case folders</h2><span class="case-head-btns"><button id="case-downloads" class="link-btn">Show today's from Downloads…</button><button id="case-clear" class="link-btn" title="Forget the case folders opened here (today's in Downloads stay listed)" hidden>Clear</button></span></div>
+        <div id="case-list" class="case-list"></div>
+      </section>
 
       <section id="recent" class="home-recent" hidden>
         <div class="recent-head"><h2>Recent</h2><button id="recent-clear" class="link-btn">Clear</button></div>

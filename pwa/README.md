@@ -20,7 +20,7 @@ isolated viewer instance (its own zoom, highlights, OCR…) with no shared state
 
 | File | Purpose |
 |------|---------|
-| `index.html` | Tab-manager shell: a tab strip (with a Home tab) + iframe stage + the Home screen (Open, Open case folder, Combine files, Images to PDF, recent files). Hosts no viewer markup itself. |
+| `index.html` | Tab-manager shell: a tab strip (with a Home tab) + iframe stage + the Home screen (Open, Open case folder, Combine files, Images to PDF, case folders with PDF-Linker's run status, recent files). Hosts no viewer markup itself. |
 | `app-web.js` | Tab manager: opens PDFs in new tabs (+ button, drag-drop, OS file handler, or a routed `?file=` URL), switches/closes tabs, reorders them (drag a tab along the strip: the others slide aside, and the strip scrolls when a tab is held at either end), opens new windows and moves tabs between them (see *Separate windows*), syncs tab titles, registers the service worker. Local files reach a tab's viewer via `iframe.contentWindow.__pdfViewerLoadLocal`; tabs load lazily the first time they're shown so overlays get correct geometry. The active tab's iframe takes keyboard focus, so the viewer's shortcuts (auto-scroll's A / Space / [ / ], Shift+Space) work without clicking into the page. |
 | `app-web.css` | Styles the tab strip, iframe stage and Home screen, in the viewer's dark and light themes. |
 | `manifest.webmanifest` | `display: standalone` + `file_handlers` for `application/pdf`. |
@@ -117,11 +117,16 @@ signatures and text edits are stored as standard PDF annotations, so they
 reopen editable here and show in Acrobat and Preview. A password-protected
 file opens with a prompt and is saved back protected.
 
-The Home screen adds three things that do not need an open document:
+The Home screen adds four things that do not need an open document:
 **Combine files** (several PDFs into one, in file-name order — rearrange the
 pages afterwards with Organize pages), **Images to PDF**, and a **Recent files** list that reopens a file without the picker
 (the browser asks for permission again when needed). Ctrl O opens a file from
-anywhere in the app.
+anywhere in the app. Above it, **Case folders** lists the case folders opened
+in the app and, once **Show today's from Downloads…** has pointed it at your
+Downloads folder, the case folders that came into it today, each with what
+PDF-Linker is doing there (running with its ETA, finished, stopped part-way,
+LEAKS.xlsx to answer, exports held as `.LEAK`, not run yet). Click one to open
+the whole folder in one reader.
 
 In the extension, a web PDF can be edited too: **Save as…** saves a copy with
 the changes, and later saves go to that copy.
