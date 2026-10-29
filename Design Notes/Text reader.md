@@ -2466,6 +2466,25 @@ does not move. Widening a column does not pull wrapped text back up: the file
 does not say which rows were one item. Tested in `test-textdoc.mjs` and `test-free-page.mjs`
 (section 10, a cover page's parties and causes of action).
 
+**☐ Checkbox on a ✓ Use my text page** (`#checkbox-btn`, `insertCheckbox`,
+`refreshCheckboxBtn`, `checkboxBody`). The owner: "add a check box insert for
+text files that appears in the tool bar when I am in use my text." The button
+stands in the top toolbar beside ✎ Edit, hidden unless the page the caret last
+stood on is a ✓ Use my text page (`selectionchange`; a selection outside the
+pages leaves it as it was, and `refreshFixButtons` hides it when the page is
+withdrawn). Pressed, it writes `[   ]` at the caret, PDF-Linker's own empty
+box (`TD.checkboxRanges`), so nothing new is needed to draw or save it
+(`columns.dressCheckboxes`): a space after it unless one follows, a space
+before it unless one is there or the caret is at the line's head. It goes in
+by `insertText`, so the page's `input` paths run as for typing (a box row set
+back on its rules, a numbered line's gutter spacing). With the caret on a box
+(from its `[` to just past its `]`), the button ticks or clears it instead:
+`[   ]` ↔ `[ X ]` (a `?` ticks), the same width, through `rebuildFromLines`.
+That is the only way to tick one in the editor: an X typed into `[   ]` makes
+a sixth character, which no longer reads as a box. Pressed with ✎ Edit off it
+turns Edit on and puts the caret back. Each press is one undo step.
+`test-free-page.mjs` section 11.
+
 **A box's keys on every page, and a table ruled only between its columns**
 (`boxKey`, `boxReflowSoon`; `TD.boxEdit`, `TD.openBoxAround`). The owner, of a
 table of objections (Objection and Material │ Grounds Asserted │ Plaintiffs'

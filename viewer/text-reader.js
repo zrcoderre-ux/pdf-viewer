@@ -6791,6 +6791,71 @@ window.addEventListener("pointerup", (e) => {
 });
 $("colbox-btn").addEventListener("mousedown", (e) => e.preventDefault()); // the selection stays where it is
 $("colbox-btn").addEventListener("click", makeColumnBoxAtSelection);
+
+// ── ☐ Checkbox on a ✓ Use my text page ──────────────────────────────────────
+//
+// The owner: "add a check box insert for text files that appears in the tool
+// bar when I am in use my text." The toolbar's ☐ Checkbox is shown while the
+// caret stands on a ✓ Use my text page; pressed, it writes a box at the caret
+// as PDF-Linker writes a form's ("[   ]", TD.checkboxRanges), so the reader
+// draws it as one (columns.dressCheckboxes) and the file carries it as any
+// export does. It goes in as typing does (insertText), so a box row is set
+// back on its rules and a numbered line keeps its gutter. With the caret on a
+// box already it ticks it or clears it ("[   ]" ↔ "[ X ]", the same width, so
+// nothing on the line moves): an X typed into the box would be a sixth
+// character, and no box.
+let checkboxBody = null; // the page the caret last stood on
+function refreshCheckboxBtn() {
+  const on = !!doc && !!checkboxBody && checkboxBody.isConnected && checkboxBody.classList.contains("free");
+  const btn = $("checkbox-btn");
+  if (btn.hidden === on) btn.hidden = !on;
+}
+document.addEventListener("selectionchange", () => {
+  const sel = document.getSelection();
+  const n = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+  const el = n && (n.nodeType === 1 ? n : n.parentElement);
+  const body = el && el.closest("#pages .page-body");
+  if (body) checkboxBody = body; // a selection elsewhere (a panel, the find bar) leaves the button as it stood
+  refreshCheckboxBtn();
+});
+const CHECKBOX_TOGGLED = { "[   ]": "[ X ]", "[ ? ]": "[ X ]", "[ X ]": "[   ]", "[ ]": "[X]", "[?]": "[X]", "[X]": "[ ]" };
+function insertCheckbox() {
+  if (shotPut) return; // the page holds the picture's words (fakesForShot)
+  const body = checkboxBody;
+  const sel = document.getSelection();
+  const r = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+  if (!body || !body.isConnected || !body.classList.contains("free") || !r || !body.contains(r.startContainer)) {
+    toast("Put the caret where the box is to go on a ✓ Use my text page, then press ☐ Checkbox.", { error: true });
+    return;
+  }
+  if (refuseWhileBusy()) return;
+  if (!editing) {
+    setEditing(true);
+    body.focus({ preventScroll: true });
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+  const at = caretInText(body);
+  if (!at) { toast("Put the caret in the text, not on a name, where the box is to go.", { error: true }); return; }
+  const line = at.lines[at.line];
+  const hit = TD.checkboxRanges(line).find(([a, b]) => a <= at.col && at.col <= b);
+  snapshot(body, true);
+  if (hit) {
+    const [a, b] = hit;
+    const lines = at.lines.slice();
+    lines[at.line] = line.slice(0, a) + CHECKBOX_TOGGLED[line.slice(a, b)] + line.slice(b);
+    rebuildFromLines(body, lines, { line: at.line, col: at.col });
+  } else {
+    if (!r.collapsed) sel.collapseToStart();
+    const g = TD.gutterPrefix(line);
+    const before = at.col > (g ? g.gutter.length : 0) ? line[at.col - 1] : " ";
+    const after = line[at.col];
+    document.execCommand("insertText", false, (before === " " ? "" : " ") + "[   ]" + (after === " " ? "" : " "));
+  }
+  lastSnapPage = -1; // what is typed next is its own step
+}
+$("checkbox-btn").addEventListener("mousedown", (e) => e.preventDefault()); // the caret stays where it is
+$("checkbox-btn").addEventListener("click", insertCheckbox);
 // A paste goes in as ONE edit, its first piece typed where the caret stands
 // (so it replaces a selection, and the line numbers keep their guard) and the
 // rest laid into the slots below in a single pass.
@@ -11965,6 +12030,7 @@ function refreshFixButtons(indices) {
     if (setFree(b.closest(".tpage"), asked)) freed = true;
   }
   if (freed) afterTextChangeSoon(); // a withdrawn page's own lines laid out again
+  refreshCheckboxBtn();
 }
 /**
  * USE MY TEXT LEAVES THE OPERATOR'S SPACING ALONE — AND NOTHING ELSE CHANGES.
