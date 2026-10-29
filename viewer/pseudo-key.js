@@ -1314,7 +1314,9 @@ function shoutedLetters(w) {
  * Company" — is a capitals slip in the key, not an acronym, and in prose it
  * reads "Acme". Word by word, only where the value and the key's spelling have
  * the same number of words, and never where the text itself shouts that word
- * ("MEADOWGATE Cobalt Company"). titleWord keeps a listed abbreviation.
+ * ("MEADOWGATE Cobalt Company"), nor a word under four letters ("DOB"
+ * under an older build's pool word "Oxmoor"). titleWord keeps a listed
+ * abbreviation.
  * The same rule as DeAnonymize.bas's MatchCasingInPhrase and the extension's
  * src/pseudo.js.
  */
@@ -1329,7 +1331,10 @@ export function keySpelled(value, keyText, sample) {
   let i = -1;
   return v.replace(/\S+/g, (w) => {
     i++;
+    // Under four letters it is a label or a code ("DOB", "SSN", "PMK"), whose
+    // fake an older PDF-Linker drew from the pool in title case: kept.
     if (!shoutedLetters(w) || shoutedLetters(kw[i]) || (aligned && shoutedLetters(sw[i]))) return w;
+    if ((w.match(WORD_RE) || []).join("").length < 4) return w;
     let first = i === 0;
     return w.replace(WORD_RE, (x) => {
       const out = titleWord(x, first);

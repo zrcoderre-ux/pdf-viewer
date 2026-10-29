@@ -952,6 +952,9 @@ console.log("a shout in the key's real that its own fake does not make");
     translate(c, "MEADOWGATE Cobalt Company").text, "ACME Cobalt Company");
   check("the save writes the fake a slipped key's real stands for",
     fakeFor(compileForward(k), "Acme Cobalt Company"), "Meadowgate Cobalt Company");
+  const lab = keyOf([["person", "Odalys Pellingrove DOB", "Murchison Dorrington Oxmoor", "", "replaced", "spreadsheet", 1]]);
+  check("a code under four letters keeps its capitals whatever its fake",
+    translate(compile(lab), "Murchison Dorrington Oxmoor").text, "Odalys Pellingrove DOB");
   check("an acronym the key's fake also shouts keeps its capitals",
     translate(c, "TRUENORTH Hartland Company and Truenorth Hartland Company").text,
     "ABC Supply Company and ABC Supply Company");

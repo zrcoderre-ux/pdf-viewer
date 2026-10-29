@@ -1145,7 +1145,9 @@ capitals slip in its Real Value, and the rule above left it as written:
 prose and the value and the key's own spelling of what was matched have the
 same number of words, a value word in capitals whose counterpart in the key's
 spelling is not is titled (titleWord, so a listed abbreviation keeps its
-capitals), unless the text shouts that word too. "TRUENORTH Hartland Company"
+capitals), unless the text shouts that word too or it has under four letters
+(a label or a code: an older PDF-Linker's run-on label row binds "Odalys
+Pellingrove DOB" under the pool word "Oxmoor", and "DOB:" read "Dob:"). "TRUENORTH Hartland Company"
 and "Truenorth Hartland Company" still read "ABC". Both directions read it
 (`compile` and `compileForward` keep the key's spelling as `spell`); the same
 rule is in DeAnonymize.bas and the extension's `src/pseudo.js`. Residual: a key
