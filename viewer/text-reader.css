@@ -274,6 +274,7 @@ body {
 .side-body li .tag.fix.open { background: transparent; border: 1px solid var(--btn-border); color: var(--text-muted); }
 .side-body li .tag.fix.no { background: #455a64; }
 .side-body li .tag.combined { background: #174ea6; }
+.side-body li .tag.md { background: #5e35b1; }
 .side-body li .lv { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-body li.current .tag.fix.open { color: #fff; border-color: #fff; }
 

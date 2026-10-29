@@ -60,10 +60,21 @@ bullets and rules give way to them. Tables are left as written. Tests:
 inches of text at the sheet's scale; the marks out of sight, the heading, the
 bold real name, the italic word and the bullet drawn; the text the file's; the
 marks back with Edit on; the save byte for byte), `test-textdoc.mjs`
-("a Markdown document read as a Word document"). It is never a document
-of the case folder — `isExportName` does not take it, so a folder listing, the
-reel and PDF-Linker's run do not see it — and `renameFixed` refuses it for
-that reason. `TD.docLabel` (the bar, the print title, the reel divider) and
+("a Markdown document read as a Word document"). It is not an export —
+`isExportName` does not take it, so PDF-Linker's run, the LEAKS rows
+(`exportForName`) and `looksLikeTextFiles` do not see it — and `renameFixed`
+refuses it, there being no PDF to rename with it.
+
+**…and listed in the case folder's Documents** (`scanFolder`'s `mdDocs`, the
+`md` flag; 2026-10-29). The owner: "markdown files should also be included in
+the case folder along with the text files in the documents menu". A `.md` in
+the case folder or its Text Files folder is listed with the exports, in name
+order, tagged MD (`.tag.md`), one of a name. A click opens it as the lone file
+opens. An export is opened first when a folder is (`openFolderNow`), and the reel
+passes a draft over and never runs from one (`reelNextDoc`, `reelPrevDoc`,
+`reelOn`): `mdDoc` dresses the page by the head document's name, so a draft
+among exports would be drawn as the wrong kind of page. Find, Replace in
+folder and the leak sweep read it as they read an export. `TD.docLabel` (the bar, the print title, the reel divider) and
 `PS.normalizeStem` drop `.md` with the other extensions, and the Save picker
 offers a `.md` as Markdown. `test-markdown.mjs` covers it.
 
