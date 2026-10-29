@@ -3056,6 +3056,11 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   const text = looksLikeTextFiles(h, found);
   if (dirHandle === h) folderIsText = text;
   if (rec && rec.role !== (text ? "text" : "case")) await dirIdFor(h, () => (text ? "text" : "case"));
+  // Home's Case folders list in the app (pwa/app-web.js) lists every case
+  // folder a reader tab attached, however it came to it.
+  if (!text && window.parent !== window) {
+    try { window.parent.postMessage({ type: "textreader:folder", dir: h }, location.origin); } catch { /* not the app's shell */ }
+  }
   // …before an older build's state is moved, too: left where it is, it moves
   // the next time this folder is opened, and is said then.
   if (gone()) return overtaken();

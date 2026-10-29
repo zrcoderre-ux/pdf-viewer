@@ -54,7 +54,8 @@ function updateChrome() {
   document.body.classList.toggle("has-tabs", tabs.length > 0);
   document.body.classList.toggle("home-open", showHome && tabs.length > 0);
   homeTab.classList.toggle("active", showHome);
-  if (showHome) renderRecent();
+  if (showHome) { renderRecent(); renderCaseFolders(); }
+  else { clearTimeout(caseTimer); caseTimer = 0; }
 }
 function showHome(on) {
   homeOpen = on;
@@ -398,10 +399,13 @@ window.__appOpenPdf = (file, handle, page) => {
 
 // ---- Open affordances ------------------------------------------------------
 
-async function pickFiles() {
+// `startIn`: a folder to start the dialog in (a case folder with no exports
+// yet); anything else, such as the click that called it, is ignored.
+async function pickFiles(startIn = null) {
   if (window.showOpenFilePicker) {
     try {
       const handles = await window.showOpenFilePicker({
+        ...(startIn && startIn.kind === "directory" ? { startIn } : {}),
         types: [
           { description: "PDF document", accept: { "application/pdf": [".pdf"] } },
           { description: "Text export", accept: { "text/plain": [".txt", ".LEAK"] } },
@@ -448,6 +452,18 @@ async function pickCaseFolder() {
   let dir;
   try { dir = await window.showDirectoryPicker({ mode: "readwrite" }); }
   catch (e) { if (e && e.name !== "AbortError") alert(String(e.message || e)); return; }
+  await openCaseFolder(dir);
+}
+
+/** The case folder `dir` in one reader tab, as the pick above opens it; a
+ *  tab already reading it is brought to the front instead. */
+async function openCaseFolder(dir) {
+  for (const t of tabs) {
+    if (!t.text) continue;
+    let held = t.dir;
+    try { held = t.iframe.contentWindow.__textReaderSource?.()?.dir || held; } catch { /* not ready */ }
+    try { if (held && (await held.isSameEntry(dir))) { activate(t.id); return; } } catch { /* gone */ }
+  }
   let combined = null, textDir = null;
   const rootDocs = [];
   try {
@@ -467,10 +483,10 @@ async function pickCaseFolder() {
   if (combined) docs = [combined].concat(docs);
   if (!docs.length) {
     // Pointed at a folder that holds no exports, the app is still an app for
-    // opening files: say what was not there and offer the file picker rather
-    // than leaving a dead end behind the alert.
-    if (confirm("No text exports in " + dir.name + (textDir ? "" : " — and no " + TEXT_SUBFOLDER + " folder in it.")
-      + "\n\nOpen files instead?")) pickFiles();
+    // opening files: say what was not there and offer the file picker, in
+    // that folder, rather than leaving a dead end behind the alert.
+    if (confirm("No text exports in " + dir.name + (textDir ? "" : " — and no " + TEXT_SUBFOLDER + " folder in it: PDF-Linker has not run on it yet.")
+      + "\n\nOpen files from it instead?")) pickFiles(dir);
     return;
   }
   // The combined file is the whole matter in one document, so it is the one
@@ -481,10 +497,11 @@ async function pickCaseFolder() {
   try { file = await first.getFile(); }
   catch (e) { alert("Could not open " + first.name + ": " + (e.message || e)); return; }
   newTab({ initialLabel: first.name, file, handle: first, text: true, dir, focus: true });
+  rememberFolder(dir);
 }
 
-newTabBtn.addEventListener("click", pickFiles);
-document.getElementById("open-file")?.addEventListener("click", pickFiles);
+newTabBtn.addEventListener("click", () => pickFiles());
+document.getElementById("open-file")?.addEventListener("click", () => pickFiles());
 document.getElementById("combine-files")?.addEventListener("click", combineFiles);
 document.getElementById("images-to-pdf")?.addEventListener("click", imagesToPdf);
 const caseBtn = document.getElementById("open-case");
@@ -920,6 +937,280 @@ document.getElementById("recent-clear")?.addEventListener("click", async () => {
     db.transaction("files", "readwrite").objectStore("files").clear();
   } catch { /* ok */ }
   renderRecent();
+});
+
+// ---- Home: case folders ------------------------------------------------------
+//
+// The matters in hand, each with what PDF-Linker is doing in it: the case
+// folders opened here (Open a case folder, a row of this list, or a folder a
+// reader tab attached however it was opened: "textreader:folder"), and the
+// folders that came into Downloads TODAY, where the E-Court downloads land.
+// A click opens the whole folder in one reader, as Open a case folder does.
+//
+// DOWNLOADS IS LINKED ONCE. A page cannot read a folder by its path, so the
+// operator points the app at Downloads with one pick (the dialog starts
+// there), kept as a handle in IndexedDB beside the folders. Read leave only:
+// the folders are opened for writing one at a time, on their own click. A
+// browser may want that leave given again next session, on a click ("Allow
+// Downloads"); an installed app can keep it.
+//
+// STATUS is read off the run's own traces, as the reader's run bar reads them
+// (case-folders.js, folderStatus): the ETA and DONE markers, the key, the log,
+// LEAKS.xlsx and the quarantined exports. Looked at again while Home is up
+// (CASE_RECHECK_MS) and when the window comes back, and redrawn only where
+// something changed, so a hover or a keyboard focus is not knocked off a row.
+const FOLDERS_DB = "pdfviewer-folders";
+const CASE_RECHECK_MS = 15000;
+const CASE_ROWS_MAX = 15;
+const FOLDERS_KEPT = 12;
+const DOC_STATS_MAX = 6; // documents a folder's time is read from; the run's own files always are
+let caseLib = null;
+
+function foldersDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(FOLDERS_DB, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore("folders", { keyPath: "key" });
+      req.result.createObjectStore("places");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+/** One transaction on `store`; `fn(store)` returns a request whose result is the answer, or nothing. */
+async function foldersTx(store, mode, fn) {
+  const db = await foldersDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(store, mode);
+      const req = fn(tx.objectStore(store));
+      tx.oncomplete = () => resolve(req ? req.result : undefined);
+      tx.onerror = () => reject(tx.error);
+    });
+  } finally { db.close(); }
+}
+async function foldersAll() {
+  try { return ((await foldersTx("folders", "readonly", (s) => s.getAll())) || []).sort((a, b) => b.when - a.when); }
+  catch { return []; }
+}
+async function rememberFolder(dir) {
+  if (!dir || dir.kind !== "directory") return;
+  try {
+    const list = await foldersAll();
+    let key = null;
+    for (const r of list) {
+      if (r.name !== dir.name) continue;
+      try { if (await r.handle.isSameEntry(dir)) { key = r.key; break; } } catch { /* gone */ }
+    }
+    await foldersTx("folders", "readwrite", (s) => {
+      s.put({ key: key || `${Date.now()}-${Math.random().toString(36).slice(2)}`, name: dir.name, handle: dir, when: Date.now() });
+      for (const old of list.filter((r) => r.key !== key).slice(FOLDERS_KEPT - 1)) s.delete(old.key);
+    });
+  } catch { /* storage unavailable: the folder is simply not listed */ }
+  if (!dropzone.hidden) renderCaseFolders();
+}
+async function downloadsDir() {
+  try { const h = await foldersTx("places", "readonly", (s) => s.get("downloads")); return h && h.kind === "directory" ? h : null; }
+  catch { return null; }
+}
+
+async function permitted(h, mode, ask) {
+  try {
+    if (!h.queryPermission) return true;
+    if ((await h.queryPermission({ mode })) === "granted") return true;
+    return ask ? (await h.requestPermission({ mode })) === "granted" : false;
+  } catch { return false; }
+}
+
+/** One look at a folder: a listing for case-folders.js, the times read only off the files that say something. */
+async function readListing(dir) {
+  const files = [], dirs = [];
+  let textDir = null;
+  for await (const [name, entry] of dir.entries()) {
+    if (entry.kind === "directory") {
+      dirs.push(name);
+      if (name.toLowerCase() === TEXT_SUBFOLDER.toLowerCase()) textDir = entry;
+    } else files.push({ name, entry });
+  }
+  let docs = 0;
+  const out = [];
+  for (const f of files) {
+    const doc = /\.(pdf|docx?)$/i.test(f.name);
+    if (!caseLib.signalFile(f.name) || (doc && ++docs > DOC_STATS_MAX)) { out.push({ name: f.name }); continue; }
+    try { const file = await f.entry.getFile(); out.push({ name: f.name, size: file.size, at: file.lastModified }); }
+    catch { out.push({ name: f.name }); }
+  }
+  let held = 0;
+  if (textDir) {
+    try { for await (const [name, entry] of textDir.entries()) if (entry.kind === "file" && /\.txt\.leak$/i.test(name)) held++; }
+    catch { /* unreadable: nothing held that can be seen */ }
+  }
+  return { files: out, dirs, held };
+}
+
+// Downloads holds every case ever downloaded, so each folder in it is read by
+// its NAMES first, and its files' times only where the names changed since the
+// last look (a run renames its ETA marker after every PDF, and DONE replaces
+// it) or the day did. A zip's time never changes, so it is read once.
+const downloadsSeen = new Map(); // folder name → { sig, day, listing }
+const zipTimes = new Map();      // zip name → lastModified
+async function todayInDownloads(dl, now) {
+  const day = caseLib.startOfDay(now);
+  const zipsToday = new Set();
+  const subs = [];
+  for await (const [name, entry] of dl.entries()) {
+    if (entry.kind === "directory") { subs.push(entry); continue; }
+    if (!/\.zip$/i.test(name)) continue;
+    if (!zipTimes.has(name)) { try { zipTimes.set(name, (await entry.getFile()).lastModified); } catch { zipTimes.set(name, 0); } }
+    if (zipTimes.get(name) >= day) zipsToday.add(name.replace(/\.zip$/i, "").toLowerCase());
+  }
+  const rows = [];
+  const look = async (dir) => {
+    let names;
+    try { names = []; for await (const [n] of dir.entries()) names.push(n); } catch { return; }
+    const sig = names.sort().join("\n");
+    const seen = downloadsSeen.get(dir.name);
+    let listing = seen && seen.sig === sig && seen.day === day ? seen.listing : null;
+    if (!listing) {
+      try { listing = await readListing(dir); } catch { return; }
+      downloadsSeen.set(dir.name, { sig, day, listing });
+    }
+    if (!caseLib.isCaseListing(listing) || !caseLib.isToday(dir.name, listing, now, zipsToday)) return;
+    rows.push({ name: dir.name, handle: dir, listing, today: true, opened: 0 });
+  };
+  // A few at a time: a synced Downloads answers slowly, one folder after another.
+  for (let i = 0; i < subs.length; i += 4) await Promise.all(subs.slice(i, i + 4).map(look));
+  return rows;
+}
+
+let caseRendering = false, caseAgain = false, caseShown = "", caseTimer = 0;
+async function renderCaseFolders() {
+  if (caseRendering) { caseAgain = true; return; }
+  caseRendering = true;
+  try {
+    do { caseAgain = false; await renderCaseFoldersNow(); } while (caseAgain);
+  } catch (e) { console.warn(e); }
+  finally { caseRendering = false; }
+}
+async function renderCaseFoldersNow() {
+  const section = document.getElementById("case-folders");
+  const listEl = document.getElementById("case-list");
+  if (!section || !listEl || !window.showDirectoryPicker) return;
+  if (!caseLib) caseLib = await import("./viewer/case-folders.js");
+  section.hidden = false;
+  const now = Date.now();
+  const rows = [];
+  for (const r of await foldersAll()) {
+    const row = { name: r.name, handle: r.handle, opened: r.when, today: false, key: r.key };
+    if (await permitted(r.handle, "read", false)) {
+      try { row.listing = await readListing(r.handle); } catch { row.gone = true; }
+    } else row.locked = true;
+    rows.push(row);
+  }
+  const dl = await downloadsDir();
+  const dlState = !dl ? "none" : (await permitted(dl, "read", false)) ? "ok" : "locked";
+  if (dlState === "ok") {
+    let found = [];
+    try { found = await todayInDownloads(dl, now); } catch { /* Downloads unreadable this time */ }
+    for (const f of found) {
+      // A folder opened here AND downloaded today is one row.
+      let same = null;
+      for (const r of rows) {
+        if (r.name !== f.name) continue;
+        try { if (await r.handle.isSameEntry(f.handle)) { same = r; break; } } catch { /* gone */ }
+      }
+      if (same) { same.today = true; if (!same.listing) { same.listing = f.listing; same.locked = false; same.gone = false; } }
+      else rows.push(f);
+    }
+  }
+  for (const r of rows) {
+    r.status = r.listing ? caseLib.folderStatus(r.listing, now) : null;
+    r.activity = r.listing ? caseLib.lastActivity(r.listing) : 0;
+  }
+  const shown = caseLib.sortRows(rows).slice(0, CASE_ROWS_MAX);
+  const say = shown.map((r) => {
+    const st = r.gone ? { text: "Not found — moved or deleted?", title: "", tone: "warn" }
+      : r.locked ? { text: "Click to allow", title: "The browser wants your leave to read this folder again.", tone: "idle" }
+        : caseLib.statusText(r.status, now);
+    const where = [];
+    if (r.today) where.push("In Downloads today");
+    if (r.opened) where.push("Opened " + caseLib.whenText(r.opened, now));
+    return { r, st, where: where.join(" · ") };
+  });
+  // Redrawn only where something changed (the text of a row, Downloads' link).
+  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone].join("|")).join("\n");
+  scheduleCaseRecheck();
+  if (sig === caseShown) return;
+  caseShown = sig;
+  const dlBtn = document.getElementById("case-downloads");
+  dlBtn.textContent = dlState === "none" ? "Show today's from Downloads…" : dlState === "locked" ? "Allow Downloads" : "Change Downloads folder…";
+  dlBtn.title = dlState === "none"
+    ? "Point the app at your Downloads folder once, and the case folders that come into it each day are listed here"
+    : dlState === "locked" ? "The browser wants your leave to read Downloads again" : `Today's folders are read from ${dl.name}`;
+  document.getElementById("case-clear").hidden = !rows.some((r) => r.opened);
+  listEl.textContent = "";
+  if (!say.length) {
+    const p = document.createElement("p");
+    p.className = "case-empty";
+    p.textContent = dlState === "ok"
+      ? "No case folder in Downloads today, and none opened here yet."
+      : "Case folders you open here are listed with what PDF-Linker is doing in each" + (dlState === "none" ? " — and, once Downloads is linked, the ones downloaded today." : ".");
+    listEl.appendChild(p);
+    return;
+  }
+  for (const { r, st, where } of say) {
+    const b = document.createElement("button");
+    b.className = "recent-item case-item";
+    b.innerHTML = `<span class="ri-icon">${icon("folder", { size: 18 })}</span><span class="ci-main"><span class="ri-name"></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
+    b.querySelector(".ri-name").textContent = r.name;
+    b.querySelector(".ci-where").textContent = where;
+    const pill = b.querySelector(".ci-status");
+    pill.textContent = st.text;
+    pill.classList.add("tone-" + st.tone);
+    b.title = `Open ${r.name}, the whole case folder, in one reader` + (st.title ? ".\n" + st.title : "");
+    b.addEventListener("click", async () => {
+      // Asked first, while the click still counts as one: a reader saves into the folder.
+      if (!(await permitted(r.handle, "readwrite", true))) {
+        if (r.gone) shellToast(`“${r.name}” is not where it was — it may have been moved or deleted.`, 5000);
+        return;
+      }
+      try { await openCaseFolder(r.handle); }
+      catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); }
+    });
+    listEl.appendChild(b);
+  }
+}
+function scheduleCaseRecheck() {
+  clearTimeout(caseTimer);
+  caseTimer = 0;
+  if (dropzone.hidden || document.visibilityState !== "visible") return;
+  caseTimer = setTimeout(renderCaseFolders, CASE_RECHECK_MS);
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !dropzone.hidden) renderCaseFolders(); });
+window.addEventListener("focus", () => { if (!dropzone.hidden) renderCaseFolders(); });
+
+document.getElementById("case-downloads")?.addEventListener("click", async () => {
+  const dl = await downloadsDir();
+  // Linked but not readable this session: the leave is asked again. Refused
+  // (or the folder gone), the dialog follows, to link it afresh.
+  if (dl && !(await permitted(dl, "read", false)) && (await permitted(dl, "read", true))) { renderCaseFolders(); return; }
+  let h;
+  try { h = await window.showDirectoryPicker({ id: "downloads", startIn: dl || "downloads", mode: "read" }); }
+  catch (e) { if (e && e.name !== "AbortError") shellToast(String(e.message || e), 5000); return; }
+  try { await foldersTx("places", "readwrite", (s) => s.put(h, "downloads")); }
+  catch { shellToast("The Downloads folder could not be kept: this browser is not storing anything for the app.", 6000); return; }
+  downloadsSeen.clear();
+  renderCaseFolders();
+});
+document.getElementById("case-clear")?.addEventListener("click", async () => {
+  try { await foldersTx("folders", "readwrite", (s) => { s.clear(); }); } catch { /* ok */ }
+  renderCaseFolders();
+});
+// A reader tab says which case folder it attached, however it came to it.
+window.addEventListener("message", (e) => {
+  if (e.origin !== location.origin || !e.data || e.data.type !== "textreader:folder") return;
+  if (!tabs.some((t) => t.text && t.iframe.contentWindow === e.source)) return;
+  rememberFolder(e.data.dir);
 });
 
 // The theme follows the viewer's toggle (same-origin storage events).
