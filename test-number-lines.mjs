@@ -199,6 +199,7 @@ const caretBefore = (page, i, k, what) => page.evaluate(({ i, k, what }) => {
 }, { i, k, what });
 const own = (page, i) => page.evaluate((i) => [...document.querySelectorAll("#pages .tpage")[i].querySelectorAll(".page-body > .line")].map((l) => l.classList.contains("own")), i);
 const isFree = (page, i) => page.evaluate((i) => document.querySelectorAll("#pages .tpage")[i].querySelector(".page-body").classList.contains("free"), i);
+const fixOn = (page, i) => page.evaluate((i) => document.querySelectorAll("#pages .tpage")[i].querySelector(".page-label .fix-page").classList.contains("on"), i);
 const fixClick = (page, i) => page.evaluate((i) => document.querySelectorAll("#pages .tpage")[i].querySelector(".page-label .fix-page").click(), i);
 
 const lines = (page, i) => page.evaluate((i) => [...document.querySelectorAll("#pages .tpage")[i].querySelectorAll(".page-body > .line")].map((l) => l.textContent.replace(/\s+$/, "")), i);
@@ -222,22 +223,34 @@ async function run() {
       await p.waitForTimeout(400);
       check("that page numbered from 1, its few numbers taken off and put back, every line flush at one margin", await lines(p, 2),
         [" 1  One", " 2  Two", " 3  Three", " 4  Four", " 5  Five", " 6  Six", " 7  Seven", " 8  Eight"].concat(bare(9, 28)));
+      check("…✓ Use my text on with them", await fixOn(p, 2), true);
       await p.keyboard.press("Control+z");
       await p.waitForTimeout(300);
+      check("…and off again with Ctrl+Z", await fixOn(p, 2), false);
       await press(p, 0);
       await p.waitForTimeout(400);
       check("numbered in order, the margin taken off, bare numbers to 28", await lines(p, 0),
         [" 1  Alpha", " 2  Beta", " 3  Gamma", " 4  Delta"].concat(bare(5, 28)));
       check("…and the button gone", await shown(p, 0), false);
+      check("✓ Use my text turned on with them", await fixOn(p, 0), true);
       truthy("the page reads as numbered", await p.evaluate(() => document.querySelector("#pages .page-body").classList.contains("numbered")));
       await p.keyboard.press("Control+z");
       await p.waitForTimeout(300);
       check("Ctrl+Z takes them out", await lines(p, 0), ["", "      Alpha", "      Beta", "      Gamma", "      Delta"]);
       check("…and the button is back", await shown(p, 0), true);
+      check("…and ✓ Use my text off with them", await fixOn(p, 0), false);
+      await p.keyboard.press("Control+y");
+      await p.waitForTimeout(300);
+      check("Ctrl+Y puts them back, ✓ Use my text with them", [(await lines(p, 0))[0], await fixOn(p, 0)], [" 1  Alpha", true]);
+      await p.keyboard.press("Control+z");
+      await p.waitForTimeout(300);
       await press(p, 0);
+      await p.waitForTimeout(300);
       await p.keyboard.press("Control+s");
       await p.waitForTimeout(1500);
       truthy("the save writes them", (await file(p)).includes("====== Page 1 ======\n 1  Alpha\n 2  Beta\n 3  Gamma\n 4  Delta\n 5\n"));
+      const values = await p.evaluate(async () => { try { return await (await (await window.__case.getFileHandle("New Real Values.txt")).getFile()).text(); } catch { return ""; } });
+      check("…and hands page 1 to PDF-Linker as text corrected, page 3 not", [/text corrected: A Decl[^\n]*\| page 1 \|/.test(values), /\| page 3 \|/.test(values)], [true, false]);
       check("no page errors", r.log.errors, []);
       await r.close();
     }
