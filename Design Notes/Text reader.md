@@ -1358,7 +1358,11 @@ composed fake carrying the word ("Delacroix We") still reverses whole,
 longest first. `setKey` says so in the status bar and a toast naming the
 pairs, pointing at a full PDF-Linker run, which drops such rows on load
 (PDF-Linker's `_pn_key_word_stand_ins`) and no longer draws them
-(`_nick_front`, `fold_onto`).
+(`_nick_front`, `fold_onto`). "ye" is off the list since 2026-10-29 (owner):
+PDF-Linker draws "YE" for a two-letter acronym, no filing uses the word, and
+on the list the acronym's pair was retired from the key and a real surname
+"Ye" was never marked. PDF-Linker's round-trip port (`_RD_COMMON`) changed
+with it.
 
 **A control word in the key's Replacement cell** (`PK.keyCellKind`,
 `parseKey`'s `control` and `dropped.controls`): the key's Replacement column

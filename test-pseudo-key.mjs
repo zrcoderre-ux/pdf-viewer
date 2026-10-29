@@ -674,6 +674,12 @@ console.log("a fake that is an ordinary word");
   const old = { ...k, wordFakes: undefined, pairs: k.pairs.concat([{ fake: "We", real: "Dax" }]) };
   check("a key kept from before is guarded too", [wordFakesOf(old), translate(compile(old), "we agree").text], [[{ fake: "We", real: "Dax" }], "we agree"]);
   check("an ordinary key has none", wordFakesOf(keyOf([["person", "Helen Rasho", "Ingrid Strangeways", "", "", "", 1]])), []);
+  // "YE", PDF-Linker's draw for a two-letter acronym, is no word a filing uses.
+  const ye = keyOf([["short-name", "QM", "YE", "…", "", "document", 3]]);
+  check("an acronym's fake \"YE\" stays in the key and reverses",
+    [ye.pairs.some((p) => p.fake === "YE"), wordFakesOf(ye), translate(compile(ye), "YE filed.").text], [true, [], "QM filed."]);
+  check("…and a real surname \"Ye\" is marked",
+    findRealSpans(compileReals(keyOf([["person-token", "Ye", "Marchetti", "…", "", "spreadsheet", 2]])), "Ye signed.").length, 1);
 }
 
 // ---- control words in the Replacement cell ---------------------------------------

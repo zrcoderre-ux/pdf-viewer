@@ -1038,8 +1038,11 @@ const COMMON_WORDS = new Set(
     "per via etc et al mr mrs ms dr jr sr no. vs v " +
     // The pronouns and the rest of the two-letter words: a fake that is one
     // of them reads as the word wherever it stands (parseKey's wordFakes).
+    // Not "ye": no filing uses the word, PDF-Linker draws "YE" for a
+    // two-letter acronym, and on this list the pair was retired from the key
+    // and "Ye" as a real surname was never marked.
     "i me my mine we us our ours you your yours him hers theirs itself myself " +
-    "ourselves yourself themselves am go hi oh ok up ye"
+    "ourselves yourself themselves am go hi oh ok up"
   ).split(/\s+/)
 );
 
