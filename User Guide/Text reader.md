@@ -2310,8 +2310,11 @@ app, which routes it to the reader tab.
   down, 24 points a line, line 28 at least half an inch above the foot)
   fitted to where the scan prints its text, so the text stays where it is;
   otherwise the lines are numbered in order. Either way the numbers run 1 to
-  28. **✕ Remove numbers** on such a page takes them out again. Ctrl+Z takes
-  either back; Save writes them.
+  28. Numbering a page turns **✓ Use my text** on for it, so PDF-Linker's next
+  run keeps the numbers rather than rebuilding the page from the PDF.
+  **✕ Remove numbers** on such a page takes them out again. Ctrl+Z takes
+  either back (undoing the numbering turns ✓ Use my text off with it); Save
+  writes them.
   **Tab indents.** On an editable page (and in ⇄ Raw), Tab puts in spaces to
   the next stop of four and Shift+Tab takes them back; with several lines
   selected, each is indented or outdented by one stop. Ctrl+Z takes it back.

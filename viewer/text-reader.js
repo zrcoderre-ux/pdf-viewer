@@ -7721,13 +7721,15 @@ function stepHistory(from, to) {
   for (const snap of pages) {
     const body = bodyForPage(snap.page);
     // …with the strip's tag: the two sides of one step (strippedTextOf).
-    if (body) to.push({ ...snapshotOf(body), batch: snap.batch, nocr: snap.nocr, view: snap.view });
+    if (body) to.push({ ...snapshotOf(body), batch: snap.batch, nocr: snap.nocr, view: snap.view, fixOn: snap.fixOn });
     else {
       // A shed page: its other side is the text the reel keeps for it.
       const m = reelMemberOf(snap.page);
-      if (m && m.shed && doc.pages[snap.page]) to.push({ page: snap.page, text: doc.pages[snap.page].lines.join("\n"), caret: -1, spots: TD.spotsOnPage(m.spots || [], snap.page), batch: snap.batch, nocr: snap.nocr, view: snap.view });
+      if (m && m.shed && doc.pages[snap.page]) to.push({ page: snap.page, text: doc.pages[snap.page].lines.join("\n"), caret: -1, spots: TD.spotsOnPage(m.spots || [], snap.page), batch: snap.batch, nocr: snap.nocr, view: snap.view, fixOn: snap.fixOn });
     }
     restoreSnapshot(snap, { settle: pages.length === 1, lists: pages.length === 1 });
+    // # Number lines turned ✓ Use my text on with the numbers: off with them, on again with them.
+    if (snap.fixOn) stepNumberedFix(snap.fixOn, from !== undoStack, snap.page);
     const m = reelMemberOf(snap.page);
     if (m) restored.add(m.name);
   }
@@ -11627,7 +11629,9 @@ function numberPage(i) {
   }
   const lines = out.concat(tail);
   const text = lines.join("\n");
+  const depth = undoStack.length;
   snapshot(body, true);
+  const step = undoStack.length > depth ? undoStack[undoStack.length - 1] : null;
   convertTypedRealsSoon.cancel(body);
   hideTypeTip();
   buildBody(body, text, i);
@@ -11636,7 +11640,9 @@ function numberPage(i) {
   setDirty(true, i);
   refreshNocrButtons([i]);
   afterTextChange();
-  toast(`${where}: margin numbers put in, ${how}. Ctrl+Z takes them out; Save writes them.`, { ms: 7000 });
+  const fix = numberedUseMyText(i, lines);
+  if (step && fix.entry) step.fixOn = fix.entry;
+  toast(`${where}: margin numbers put in, ${how}.${fix.note} Ctrl+Z takes them out; Save writes them.`, { ms: 7000 });
 }
 /** Whether the PDF page behind page `i` prints its margin numbers as text (its own pleading paper, not one # Number lines gave it). */
 function pdfPrintsNumbers(i) {
@@ -11931,6 +11937,13 @@ function useMyText(i) {
     toast(`${where} carries the line “${furniture}”, which is shaped like PDF-Linker's own page heading — it would refuse the page. Take that line out, then press ✎ Use my text again.`, { error: true, ms: 9000 });
     return;
   }
+  handOver(entry, lines);
+  // The page is the operator's to type now: ✎ Edit comes on with it.
+  if (!editing) setEditing(true);
+  toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run keeps the text and writes this page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
+}
+/** ✎ Use my text turned on for `entry`, its text `lines`: as pressed by hand. */
+function handOver(entry, lines) {
   fixPressed.add(fixPressedKey(entry));
   releaseSetAside(entry); // pressed by hand: a page PDF-Linker set aside is the operator's to hand over again
   noOcr = TD.setNoOcr(noOcr, entry, false);
@@ -11939,9 +11952,43 @@ function useMyText(i) {
   textFixed = TD.setTextFixed(textFixed, { ...entry, sum: TD.pageTextSum(lines) }, true);
   persistValues();
   renderFlags();
-  // The page is the operator's to type now: ✎ Edit comes on with it.
-  if (!editing) setEditing(true);
-  toast(`${where}: your text is to be the page's own — Save writes the page and puts it on ${TD.VALUES_FILE}; PDF-Linker's next run keeps the text and writes this page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again. Click again to withdraw.`, { ms: 9000 });
+}
+/**
+ * # Number lines turns ✓ Use my text on with it, at the owner's word
+ * ("checking number lines is supposed to automatically check use my text"):
+ * the numbers are the operator's, and a full PDF-Linker run rebuilds the
+ * export from the PDF and would take them off again. Not where the button
+ * itself would refuse (Combined Text.txt, a page with no PDF page number, a
+ * line shaped like PDF-Linker's furniture) or before the case folder's list is
+ * read. What the toast adds, and the entry it turned on (null where it was
+ * already on or was not turned on), which the numbering's undo step carries
+ * so Ctrl+Z takes it off with the numbers (stepHistory).
+ */
+function numberedUseMyText(i, lines) {
+  const entry = isCombinedHead() || flagsFor !== valuesStoreKey() ? null : pageEntryAt(i);
+  if (!entry) return { entry: null, note: "" };
+  if (textFixed.some((e) => TD.sameNoOcr(e, entry))) return { entry: null, note: " ✓ Use my text stays on." };
+  const furniture = TD.pageFurnitureLine(lines);
+  if (furniture) return { entry: null, note: ` Not handed over as ✓ Use my text: the line “${furniture}” is shaped like PDF-Linker's own page heading.` };
+  handOver(entry, lines);
+  refreshFixButtons([i]);
+  return { entry, note: " ✓ Use my text is on with them, so PDF-Linker keeps them." };
+}
+/** A numbering's ✓ Use my text, taken off by its undo and put back by its redo. */
+function stepNumberedFix(entry, on, i) {
+  if (!entry || flagsFor !== valuesStoreKey()) return;
+  const has = textFixed.some((e) => TD.sameNoOcr(e, entry));
+  if (on === has) return;
+  if (on) {
+    const body = bodyForPage(i);
+    handOver(entry, body ? TD.serializeNodes(body).split("\n") : doc.pages[i].lines);
+  } else {
+    fixPressed.delete(fixPressedKey(entry));
+    textFixed = TD.setTextFixed(textFixed, entry, false);
+    persistValues();
+    renderFlags();
+  }
+  refreshFixButtons([i]);
 }
 /**
  * Each transcribed page of the documents a save just wrote (`members`) takes

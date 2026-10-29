@@ -2804,6 +2804,22 @@ margin and the blank lines above its text go, the Authorities cited trailer
 stays after it, and it is one undo step (`snapshot`, `buildBody`, as
 `markDidNotOcr`). `test-number-lines.mjs` (Chromium) pins both ways.
 
+**…and ✓ Use my text with it** (`numberedUseMyText`, `handOver`,
+`stepNumberedFix`). The owner: "checking number lines is supposed to
+automatically check use my text". The numbers are the operator's, and a full
+PDF-Linker run rebuilds the export from the PDF and would take them off, so
+`numberPage` hands the page over as a press of ✎ Use my text does
+(`handOver`, the press's own core), except where the press would refuse
+(Combined Text.txt, no PDF page number, a furniture line) or the case
+folder's list is not read yet; the toast says which. A page already on the
+list stays on it. The numbering's undo step carries the entry it turned on
+(`fixOn`), so Ctrl+Z takes ✓ Use my text off with the numbers and Ctrl+Y puts
+it back with them (`stepHistory`); a withdrawal there is not a
+`fixDeclined` one. Unlike a strike (tried and taken back, above), the
+numbers are text PDF-Linker does not keep by itself. `test-number-lines.mjs`
+section 1 pins the button, the undo and redo, and the save's `text
+corrected` line.
+
 **Tab indents** (`TAB_STOP`, `tabHost`, `gutterIndent`, `outdentGutter`). Tab
 on an editable page or raw sheet puts in spaces to the next stop of four
 (counted from the start of the line's text, after a margin number), and
