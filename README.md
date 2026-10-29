@@ -192,6 +192,10 @@ passwords, and — when Python's `pikepdf` is installed — opens RC4-40,
 RC4-128, AES-128 and AES-256 files it made and has it open a file protected
 here. `node test-textlayout.mjs` covers page reading, the Word and text
 exports, Compare's diff, Find's matching and the zip writer.
+`node test-plain-urls.mjs` covers web addresses in the text: trailing
+punctuation, `www.`, an address split across items or wrapped onto the next
+line, and in Chromium the links placed, on top and opening, with the PDF's own
+link left alone.
 `node test-text-layer.mjs` covers the text layer repair: spans laid out with
 no layout get their items' heights back, and a sound layer is left alone.
 `node test-pdf-text-edit.mjs` covers Edit text: the content-stream reader,
@@ -265,6 +269,7 @@ viewer/pdf-edit.js                   PDF writing (pdf-lib): comments, page plans
 viewer/key-library.js                The pseudonym keys this browser has been shown — one library, reader and viewer
 viewer/highlights.js                 Selection, markup from a selection, box select
 viewer/text-layer.js                 pdf.js text layer spans given their size back when laid out in a hidden tab (test-text-layer.mjs)
+viewer/plain-urls.js                 Web addresses written out in a page's text linked where the PDF has no link (test-plain-urls.mjs)
 viewer/citation-linker.js            Detection + URL resolution
 viewer/footer-naming.js              Footer-derived naming rule engine
 viewer/disambiguation.js             Cross-tab collision registry

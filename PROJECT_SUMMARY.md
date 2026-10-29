@@ -219,6 +219,7 @@ test-annot-pdf.mjs                   Node-runnable comment round trips (write, s
 test-pdf-crypt.mjs                   Node-runnable cipher vectors + protect/open round trips (+ pikepdf interop when installed)
 test-textlayout.mjs                  Node-runnable page reading, Word/text export, Compare diff, Find matching, zip
 test-text-layer.mjs                  Node-runnable text layer repair: zero-size spans resized from their items
+test-plain-urls.mjs                  Node-runnable address finding (+ Chromium: links placed, on top, opening; the PDF's own link kept); skips the browser part without it
 test-pdf-text-edit.mjs               Node-runnable Edit text: content parsing, layout, paragraphs, edits saved and read back
 test-review-instances.mjs            Browser test (Playwright, Chromium, an OPFS case folder): Instance ‹ › in the LEAKS bar and the names bar, and Alt+, / Alt+.; skips without them
 test-folder-save.mjs                 Browser test (Playwright, Chromium, an OPFS case folder): the folder-wide Replace all and the one Save, keeps PDF-Linker has spent (and still reachable to take off the master), Remove from Master Keep, two reader tabs on one folder, an accepted LEAKS suggestion kept and never counted unsaved; skips without them
@@ -245,6 +246,7 @@ viewer/viewer.js                     PDF.js loader, two-pass renderer (pages dra
 viewer/pdf-fonts.js                  The document pdf.js loads fonts into, drawing a page by way of it, and the screen-pixel scale it is drawn at (viewer + reader)
 viewer/text-layer.js                 pdf.js text layer spans given their size back when laid out in a hidden tab (viewer + reader)
 viewer/web-pdf.js                    A link's bytes checked for a PDF; SharePoint asked for the file itself (test-web-pdf.mjs)
+viewer/plain-urls.js                 Web addresses written out in a page's text linked where the PDF has no link (test-plain-urls.mjs)
 viewer/autoscroll.js                 Auto-scroll: ppm-paced reading scroll + its control bar
 viewer/rotation.js                   Page rotation: per-page angles, rotate bar, rotated geometry
 viewer/ocr-store.js                  Saved OCR: recognized pages in IndexedDB by file hash, kept N days since last use

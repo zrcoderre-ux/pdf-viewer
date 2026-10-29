@@ -68,6 +68,7 @@ import { pageRotation } from "./rotation.js";
 import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRatio } from "./pdf-fonts.js";
 import { repairTextLayer } from "./text-layer.js";
 import { fetchPdf } from "./web-pdf.js";
+import { placePlainUrls } from "./plain-urls.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
   "pdfjs/build/pdf.worker.mjs"
@@ -3076,7 +3077,7 @@ async function buildPageShell(pageNumber) {
 
   return {
     pageNumber, page, displayViewport: viewport, rotationDelta,
-    textContent: null, textLayerDiv, linkLayerDiv, annotLayerDiv,
+    textContent: null, textLayerDiv, linkLayerDiv, pdfLinkLayerDiv, annotLayerDiv,
     redactLayerDiv,
     pageWrapper: wrapper, viewport: userSpaceViewport,
     italicFontNames: new Set(),
@@ -3159,6 +3160,10 @@ function finishPageText(refs) {
 
   applySelectableArea(textLayerDiv);
   updateCropOverlay(refs.pageWrapper);
+  // Web addresses written out in the text, linked where the PDF has no link
+  // of its own over them (after applySelectableArea, so none is linked in a
+  // margin cropped away).
+  placePlainUrls(textLayerDiv, refs.pdfLinkLayerDiv);
   refs.italicFontNames = italicFontNamesFor(refs.page, refs.textContent);
 }
 
