@@ -399,12 +399,32 @@ window.__appOpenPdf = (file, handle, page) => {
 
 // ---- Open affordances ------------------------------------------------------
 
+// ONE DIALOG AT A TIME. Chromium refuses a second file dialog while one is
+// open, with "File picker already active", and a dialog can open behind the
+// window (PDF+ especially), so a second click on Home's buttons was the
+// natural thing to do and was answered with that message. Every dialog the
+// shell opens goes through here: a click while one is open says where to look,
+// and is then a cancel to its caller (AbortError), as is the browser's refusal
+// of a dialog some other frame has open.
+let dialogOpen = false;
+const DIALOG_OPEN_MSG = "A file dialog is already open — finish or cancel it first (it may be behind this window).";
+async function showPicker(name, opts) {
+  const cancel = () => new DOMException("A file dialog is already open", "AbortError");
+  if (dialogOpen) { shellToast(DIALOG_OPEN_MSG, 5000); throw cancel(); }
+  dialogOpen = true;
+  try { return await window[name](opts); }
+  catch (e) {
+    if (e && e.name === "InvalidStateError" && /already active/i.test(e.message || "")) { shellToast(DIALOG_OPEN_MSG, 5000); throw cancel(); }
+    throw e;
+  } finally { dialogOpen = false; }
+}
+
 // `startIn`: a folder to start the dialog in (a case folder with no exports
 // yet); anything else, such as the click that called it, is ignored.
 async function pickFiles(startIn = null) {
   if (window.showOpenFilePicker) {
     try {
-      const handles = await window.showOpenFilePicker({
+      const handles = await showPicker("showOpenFilePicker", {
         ...(startIn && startIn.kind === "directory" ? { startIn } : {}),
         types: [
           { description: "PDF document", accept: { "application/pdf": [".pdf"] } },
@@ -450,7 +470,7 @@ const isCombined = (name) => /^combined text\.txt$/i.test(name);
 async function pickCaseFolder() {
   if (!window.showDirectoryPicker) { alert("This browser cannot open a folder. Open the text files instead."); return; }
   let dir;
-  try { dir = await window.showDirectoryPicker({ mode: "readwrite" }); }
+  try { dir = await showPicker("showDirectoryPicker", { mode: "readwrite" }); }
   catch (e) { if (e && e.name !== "AbortError") alert(String(e.message || e)); return; }
   await openCaseFolder(dir);
 }
@@ -1195,7 +1215,7 @@ document.getElementById("case-downloads")?.addEventListener("click", async () =>
   // (or the folder gone), the dialog follows, to link it afresh.
   if (dl && !(await permitted(dl, "read", false)) && (await permitted(dl, "read", true))) { renderCaseFolders(); return; }
   let h;
-  try { h = await window.showDirectoryPicker({ id: "downloads", startIn: dl || "downloads", mode: "read" }); }
+  try { h = await showPicker("showDirectoryPicker", { id: "downloads", startIn: dl || "downloads", mode: "read" }); }
   catch (e) { if (e && e.name !== "AbortError") shellToast(String(e.message || e), 5000); return; }
   try { await foldersTx("places", "readwrite", (s) => s.put(h, "downloads")); }
   catch { shellToast("The Downloads folder could not be kept: this browser is not storing anything for the app.", 6000); return; }
