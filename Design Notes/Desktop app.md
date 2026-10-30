@@ -225,6 +225,26 @@ against the integrity hash electron-builder embeds. Playwright cannot drive
 a packaged build (it needs the inspector), so `test-desktop.mjs` runs the
 unpacked app from `desktop/`.
 
+### The taskbar icon: WATCH THIS after the next update
+
+After 0.2.37 (Oct 30, 2026) the taskbar showed Windows' blank page with a
+folded corner for PDF+, pinned or running, while the Start menu showed the
+icon. `ie4uinit.exe -show` did not fix it; deleting Explorer's icon caches
+(`%localappdata%\IconCache.db` and
+`%localappdata%\Microsoft\Windows\Explorer\iconcache*`, with Explorer
+stopped) and pinning again did.
+
+The icon was not the change: 0.2.35's and 0.2.37's `PDF+.exe` carry
+byte-identical icons. But every size electron-builder embeds from
+`build/icon.png` (16 to 256) is PNG-compressed, and Windows' shell expects
+the small sizes the taskbar draws as BMP (PNG is conventional only at 256).
+So it may be a stale cache entry, which the rebuild ended for good, or a
+taskbar that cannot read the small PNG frames, which would come back when
+an update replaces the exe. The owner chose to wait (Oct 30): **if the
+blank taskbar icon returns after an update, it is the format**, and the
+fix is a `build/icon.ico` with BMP frames at 16-128 and PNG at 256 (made by
+`gen-icon.py`), named in `win.icon` in `package.json`.
+
 ## Tests
 
 `test-desktop.mjs` launches the app with Playwright's Electron driver
