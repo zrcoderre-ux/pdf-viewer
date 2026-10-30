@@ -6,6 +6,7 @@
 // a reading that shares nothing with the reader's own, pdf.js).
 //
 //   node audit/layout-audit.mjs CASE_FOLDER [--pages 1-12] [--doc TEXT] [--out FILE.json] [--lines] [--shots DIR]
+//   (AUDIT_W=2600 widens the window, and with it the pages and the shots)
 //
 // CASE_FOLDER is a folder PDF-Linker has run on: its PDFs, `Text Files/`, its
 // `pseudonym_key.xlsx` and `pdf_linker.log` (which names each PDF's export).
@@ -15,6 +16,8 @@
 // Per page, graded (a scan's OCR sizes and faces are not):
 //   overlap    two lines' type drawn over each other (their text boxes cross
 //              by more than a quarter of the smaller's height)
+//   through    a line that is only a drawn rule, its hairline through the
+//              middle three-fifths of another line's type
 //   size       a word drawn more than 15% off the size the PDF prints it at
 //   bold+ / bold-, ital+ / ital-
 //              a word drawn bold (italic) the PDF does not set so, or not
@@ -111,7 +114,7 @@ async function readerPages(page) {
       const body = sec.querySelector(".page-body");
       if (!body) continue;
       const br = body.getBoundingClientRect();
-      const lines = [];
+      const lines = [], rules = [];
       for (const [k, l] of [...body.querySelectorAll(":scope > .line")].entries()) {
         if (l.classList.contains("lead") || getComputedStyle(l).display === "none") continue;
         const lt = l.querySelector(":scope > .lt") || l;
@@ -130,10 +133,25 @@ async function readerPages(page) {
           }
         }
         if (words.length) lines.push({ k, words });
+        // A line that is only drawn rules (rules.js draws each `─` run as a
+        // hairline at the middle of the element carrying it: the line's own
+        // text, a cell of a box row, or the run itself), for `through` below.
+        // A box's bars may stand on it; its runs are what cross a line.
+        if (/[\u2500\u2501\u2550]/.test(lt.textContent) && !lt.textContent.replace(/[\s\u2500-\u257F]/g, "")) {
+          const els = [lt, ...lt.querySelectorAll(".rc.rg, .rc.hf, .rh")].filter((e) => {
+            if (e === lt) return lt.classList.contains("rg");
+            if (e.classList.contains("rh")) return !e.closest(".rc.rg, .rc.hf, .lt.rg");
+            return true;
+          });
+          for (const e of els) {
+            const b = e.getBoundingClientRect();
+            if (b.width > 2) rules.push({ k, y: (b.top + b.bottom) / 2 - br.top, x0: b.left - br.left, x1: b.right - br.left, text: lt.textContent.trim().slice(0, 12) });
+          }
+        }
       }
       // (With --lines, the reader's own plan for the page too: each line's top, size and box in PDF units.)
       const pl = LINES && sec.__plan ? { tops: sec.__plan.tops, sizes: sec.__plan.sizes, boxes: sec.__plan.boxes, texts: [...body.querySelectorAll(":scope > .line")].map((l) => l.textContent.slice(0, 40)) } : null;
-      out.push({ n, index: Number(sec.dataset.index), width: br.width, height: br.height, fixed: body.classList.contains("fixed"), lines, plan: pl });
+      out.push({ n, index: Number(sec.dataset.index), width: br.width, height: br.height, fixed: body.classList.contains("fixed"), lines, rules, plan: pl });
     }
     return out;
   }, { P0, P1, SETTLE, LINES });
@@ -163,7 +181,7 @@ function grade(rp, tp) {
   const scale = rp.width / tp.w;
   const pt = (v) => v / scale;
   const issues = [];
-  const count = { overlap: 0, size: 0, "bold+": 0, "bold-": 0, "ital+": 0, "ital-": 0, register: 0, overflow: 0, grown: 0, words: 0, matched: 0 };
+  const count = { overlap: 0, through: 0, size: 0, "bold+": 0, "bold-": 0, "ital+": 0, "ital-": 0, register: 0, overflow: 0, grown: 0, words: 0, matched: 0 };
   // Each PDF word by its text, to be claimed once each, nearest first.
   const byText = new Map();
   for (const w of tp.words) { const k = norm(w.t); if (!k) continue; if (!byText.has(k)) byText.set(k, []); byText.get(k).push({ ...w, cy: (w.top + w.bottom) / 2, used: false }); }
@@ -221,6 +239,16 @@ function grade(rp, tp) {
       if (hit) { count.overlap++; issues.push({ kind: "overlap", line: lineText(rp.lines[a]), other: lineText(rp.lines[b]) }); }
     }
   }
+  // A rule drawn through a line's type: no line of the reader's goes through
+  // text but a strike (the owner), and a rule line stands in the gap above or
+  // below its neighbours, as the export's own lines do.
+  for (const r of rp.rules || []) {
+    const hit = rp.lines.find((l) => l.k !== r.k && l.words.some((w) => {
+      const h = w.bottom - w.top;
+      return r.y > w.top + 0.2 * h && r.y < w.bottom - 0.2 * h && Math.min(r.x1, w.x1) - Math.max(r.x0, w.x0) > 2;
+    }));
+    if (hit) { count.through++; issues.push({ kind: "through", rule: r.text, line: lineText(hit) }); }
+  }
   if (pt(rp.height) > tp.h + 2) { count.grown++; issues.push({ kind: "grown", by: +(pt(rp.height) - tp.h).toFixed(1) }); }
   return { count, issues };
 }
@@ -239,7 +267,7 @@ try {
     const t0 = Date.now();
     let tr;
     try { tr = truth(path.join(CASE, p.pdf)); } catch (e) { report.push({ ...p, error: String(e.message || e) }); continue; }
-    const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } });
+    const ctx = await browser.newContext({ viewport: { width: Number(process.env.AUDIT_W || 1500), height: 1000 } });
     const page = await ctx.newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -278,13 +306,13 @@ try {
       if (t.scan) doc.scans++;
       const scale = r.width / t.w;
       const geometry = LINES ? r.lines.map((l) => ({ text: l.words.map((w) => w.t).join(" "), top: +(Math.min(...l.words.map((w) => w.top)) / scale).toFixed(1), bottom: +(Math.max(...l.words.map((w) => w.bottom)) / scale).toFixed(1), size: +(l.words[0].size / scale).toFixed(1), bold: l.words.some((w) => w.bold) })) : undefined;
-      doc.pages.push({ n: r.n, scan: t.scan, fixed: r.fixed, ...g, geometry, plan: r.plan || undefined });
+      doc.pages.push({ n: r.n, scan: t.scan, fixed: r.fixed, rules: (r.rules || []).length, ...g, geometry, plan: r.plan || undefined });
       for (const [key, v] of Object.entries(g.count)) doc.total[key] = (doc.total[key] || 0) + v;
     }
     doc.ms = Date.now() - t0;
     report.push(doc);
     const c = doc.total;
-    console.log(`${p.txt}: ${doc.pages.length} page(s)${doc.scans ? `, ${doc.scans} scanned` : ""} — overlap ${c.overlap || 0}, size ${c.size || 0}, bold+ ${c["bold+"] || 0}, bold- ${c["bold-"] || 0}, ital+ ${c["ital+"] || 0}, ital- ${c["ital-"] || 0}, register ${c.register || 0}, overflow ${c.overflow || 0}, grown ${c.grown || 0} (${c.matched || 0}/${c.words || 0} words matched)${errors.length ? " — ERRORS: " + errors.slice(0, 2).join(" | ") : ""}`);
+    console.log(`${p.txt}: ${doc.pages.length} page(s)${doc.scans ? `, ${doc.scans} scanned` : ""} — overlap ${c.overlap || 0}, through ${c.through || 0}, size ${c.size || 0}, bold+ ${c["bold+"] || 0}, bold- ${c["bold-"] || 0}, ital+ ${c["ital+"] || 0}, ital- ${c["ital-"] || 0}, register ${c.register || 0}, overflow ${c.overflow || 0}, grown ${c.grown || 0} (${c.matched || 0}/${c.words || 0} words matched)${errors.length ? " — ERRORS: " + errors.slice(0, 2).join(" | ") : ""}`);
   }
 } finally {
   await browser.close();
