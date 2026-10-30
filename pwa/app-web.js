@@ -11,6 +11,7 @@
 // open from disk; viewing web PDFs is the browser extension's job.
 
 import { icon, hydrateIcons } from "./viewer/icons.js";
+import { createSplit } from "./viewer/split-view.js";
 
 const tabsEl = document.getElementById("tabs");
 const viewsEl = document.getElementById("tab-views");
@@ -54,6 +55,8 @@ function updateChrome() {
   document.body.classList.toggle("has-tabs", tabs.length > 0);
   document.body.classList.toggle("home-open", showHome && tabs.length > 0);
   homeTab.classList.toggle("active", showHome);
+  // A tab's PDF side by side goes and comes back with its tab.
+  for (const t of tabs) if (t.split) t.split.setVisible(!showHome && t.id === activeId);
   if (showHome) { renderRecent(); renderCaseFolders(); }
   else { clearTimeout(caseTimer); caseTimer = 0; }
 }
@@ -133,10 +136,42 @@ function syncShellTitle() {
 }
 
 function tabHasUnsaved(tab) {
+  if (tab.split && tab.split.hasUnsaved()) return true;
   try {
     const w = tab.iframe.contentWindow;
     return !!(tab.text ? w?.__textReaderHasUnsaved?.() : w?.__pdfViewerHasUnsaved?.());
   } catch { return false; }
+}
+
+// ⫴ Side by side (the viewer's button, viewer/split-view.js): a second PDF
+// to the right of a tab's own, in a viewer of its own, one split per tab. It
+// is part of its tab: hidden with it, closed with it (a close asks about
+// either side's unsaved changes), and not carried to a new window, where the
+// tab arrives alone. The card offers the other tabs' PDFs as they are on disk.
+function splitFor(tab) {
+  if (!tab.split) {
+    tab.split = createSplit({
+      stage: viewsEl,
+      scope: tab.iframe,
+      primary: () => tab.iframe.contentWindow,
+      choices: () => tabs.filter((t) => t !== tab && !t.text).map(tabChoice).filter(Boolean),
+      choicesLabel: "Open in other tabs",
+      wire: (w) => w.addEventListener("keydown", newWindowKey, true),
+    });
+    tab.split.setVisible(tab.id === activeId && !homeOpen);
+  }
+  return tab.split;
+}
+function tabChoice(t) {
+  let src = null, unsaved = false;
+  try {
+    const w = t.iframe.contentWindow;
+    src = w?.__pdfViewerSource?.() || null;
+    unsaved = !!w?.__pdfViewerHasUnsaved?.();
+  } catch { src = null; }
+  const handle = (src && src.handle) || t.handle || null;
+  if (!handle && !t.file) return null;
+  return { name: t.labelEl.textContent, handle, file: handle ? null : t.file, note: unsaved ? "as saved" : "" };
 }
 
 function closeTab(id) {
@@ -144,6 +179,7 @@ function closeTab(id) {
   if (idx < 0) return;
   if (tabHasUnsaved(tabs[idx]) && !confirm(`“${tabs[idx].labelEl.textContent}” has changes that are not saved. Close it anyway?`)) return;
   const [tab] = tabs.splice(idx, 1);
+  if (tab.split) tab.split.close({ force: true });
   // Removing an iframe discards its document without firing unload handlers,
   // so tell the viewer to drop its cross-tab naming-registry entry first —
   // otherwise the closed doc would keep disambiguating the remaining tabs.
@@ -370,6 +406,7 @@ function feedWhenReady(tab) {
     // The case folder goes with the document where the tab came from one: the
     // reader remembers it and attaches its key by itself.
     const opened = load(tab.file, tab.handle, tab.dir || undefined);
+    if (!tab.text) splitFor(tab).attach(w);
     if (tab.page > 1 && !tab.text) {
       Promise.resolve(opened).then(() => { try { w.__pdfViewerGoToPage?.(tab.page); } catch { /* gone */ } });
     }

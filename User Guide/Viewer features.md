@@ -2,6 +2,26 @@
 
 In addition to citation linking, the viewer supports:
 
+- **Two PDFs side by side** — the **Side by side** button in the top bar
+  (two columns, beside Find) opens a second PDF to the right of the one on
+  screen, each with the whole viewer: its own toolbar, tools, zoom, Find and
+  Save. A card on the right asks which PDF: **Open a PDF…** for any file, or,
+  in the app, a PDF open in another tab, and in the text reader's PDF mode,
+  another of the case folder's PDFs. The bar between them drags to make one
+  side wider (double-click it for half and half; the width is remembered).
+  Its buttons: **Scroll together** (the link), which moves the other side as
+  far as the one you scroll, page for page even at different zooms;
+  **Show another PDF on the right** (the folder); and **Close** (×). The
+  button in either toolbar closes it too: in the right-hand viewer it closes
+  that PDF, in the left-hand one the PDF beside it. A PDF on the right with
+  unsaved changes is asked about before it closes. In the app the split
+  belongs to its tab: switching tabs or going Home hides it, coming back
+  shows it, closing the tab closes it, and a tab moved to a new window
+  arrives alone. In PDF mode it stays while ‹ › change the PDF on the left,
+  and while the text is back. In Chrome, where the viewer is a tab of its
+  own, the button reopens the PDF at the same address in a page made for the
+  two (a PDF dropped on the viewer is carried over too); unsaved changes are
+  asked about first, as when leaving any page.
 - **Web addresses are clickable** — the PDF's own links work as they do in
   Acrobat, and an address written out in the text (`https://…`, `http://…`,
   `www.…`) is a link too where the PDF has none over it, including one wrapped

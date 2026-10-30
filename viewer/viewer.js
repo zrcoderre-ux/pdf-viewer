@@ -69,6 +69,7 @@ import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRa
 import { repairTextLayer } from "./text-layer.js";
 import { fetchPdf } from "./web-pdf.js";
 import { placePlainUrls } from "./plain-urls.js";
+import { stashFile } from "./split-view.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL(
   "pdfjs/build/pdf.worker.mjs"
@@ -2311,6 +2312,43 @@ window.__pdfViewerBuildCitation = () => buildCitationReference();
 // explicit hook the closed tab's registry entry would linger in the shared
 // sessionStorage and keep influencing sibling tabs' disambiguation.
 window.__pdfViewerUnregister = () => { try { unregisterEntry(); } catch { /* ok */ } };
+
+// ── Side by side ─────────────────────────────────────────────────────────────
+// A second PDF beside this one, in a viewer of its own (split-view.js). The
+// page holding this viewer lays the two out and sets __pdfSplitHost on it:
+// PDF mode in the text reader, the app's tab, or split.html. A viewer in a tab
+// of its own (the extension) has no host, so it moves to split.html with its
+// PDF: by address, or a dropped file kept in IndexedDB on the way. The page is
+// left as any page is left, so unsaved changes are asked about first
+// (beforeunload above).
+const splitToggleEl = document.getElementById("split-toggle");
+async function toggleSideBySide() {
+  const host = window.__pdfSplitHost;
+  if (host) { host.toggle(); return; }
+  if (window.top !== window) { toast("Side by side is not available here.", { kind: "error" }); return; }
+  const to = new URL("split.html", location.href);
+  if (fileUrl) to.searchParams.set("file", fileUrl);
+  else if (pdfBytes) {
+    try {
+      const file = localFileHandle ? await localFileHandle.getFile() : new File([pdfBytes.slice(0)], serverFilename || "document.pdf", { type: "application/pdf" });
+      await stashFile({ file, handle: localFileHandle || null });
+      to.searchParams.set("stash", "1");
+    } catch (e) {
+      toast(`Could not open side by side: ${e.message || e}`, { kind: "error" });
+      return;
+    }
+  }
+  location.assign(to.href);
+}
+if (splitToggleEl) splitToggleEl.addEventListener("click", toggleSideBySide);
+// The host says whether the split is open, and whether this is its second side.
+window.__pdfViewerSplitShown = (on, second) => {
+  if (!splitToggleEl) return;
+  splitToggleEl.setAttribute("aria-pressed", String(!!on));
+  splitToggleEl.title = !on ? "Side by side — open a second PDF beside this one"
+    : second ? "Close side by side — this PDF closes and the other fills the window"
+      : "Close side by side — the PDF on the right closes";
+};
 
 async function renderAllPages() {
   // Cancel any previous in-flight render (zoom-while-rendering, or Download

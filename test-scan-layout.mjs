@@ -220,7 +220,10 @@ try {
     pdf.push(["25 of 28", 740, 10, 290]);
     const t = await open(browser, srv.base, { text: exp.join("\n") + "\n", pdf });
 
-    const sz = [...new Set(t.lines.map((l) => Math.round(l.size * 10) / 10))];
+    // Of the lines with type: a table's rule line holds a thin slot of its
+    // own (text-reader.js HAIR_ROOM), its size a third of a line, no type's.
+    const typed = t.lines.filter((l) => !/^[\s\u2500-\u257F]*$/.test(l.text));
+    const sz = [...new Set(typed.map((l) => Math.round(l.size * 10) / 10))];
     check("the type the PDF's size, not shrunk to fit the table's padded rows across the page", sz.length === 1 && sz[0] >= 7.5 && sz[0] <= 9, JSON.stringify(sz));
     const firstRow = t.lines[2], lastCell = t.lines[t.lines.length - 3];
     check("…its first row where the scan prints it, and its last within a line of it (each rule no line's height)",
