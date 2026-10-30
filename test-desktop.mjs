@@ -665,6 +665,25 @@ try {
     check("a folder picked: the next dialog starts in it", (await win.evaluate(() => window.__asked)).slice(-1), ["directory Picked Case"]);
   }
 
+  // ── 14c. a folder Chromium holds back ────────────────────────────────────
+  // Downloads, the Desktop and the home folder themselves are restricted, and
+  // Electron asks the app (file-system-access-restricted); unanswered, the
+  // page's dialog call never came back. The question is put as Electron puts
+  // it, the native dialog that follows being Windows'.
+  console.log("14c. A restricted folder picked: Downloads let through, any other said and the dialog offered again");
+  {
+    const ask = (details, response = 0) => app.evaluate(({ BrowserWindow, dialog }, { details, response }) => new Promise((resolve) => {
+      const wc = BrowserWindow.getAllWindows()[0].webContents;
+      dialog.showMessageBox = async () => ({ response });
+      wc.session.emit("file-system-access-restricted", {}, { ...details, webContents: wc, frame: wc.mainFrame }, resolve);
+    }), { details, response });
+    const origin = await win.evaluate(() => location.origin + "/");
+    check("Downloads itself: allowed", await ask({ origin, isDirectory: true, path: downloads }), "allow");
+    check("the home folder: said, and the dialog offered again", await ask({ origin, isDirectory: true, path: os.homedir() }), "tryAgain");
+    check("…or, cancelled, refused", await ask({ origin, isDirectory: true, path: os.homedir() }, 1), "deny");
+    check("a page not the app's: refused", await ask({ origin: "https://example.com/", isDirectory: true, path: downloads }), "deny");
+  }
+
   check("no page errors", log.errors, []);
   check("no Content-Security-Policy refusals", log.csp, []);
 

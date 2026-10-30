@@ -158,6 +158,18 @@ times only (`Design Notes/Home case folders.md`). It names no path, and
 reads nothing a page could not already list through the Downloads handle
 the user linked.
 
+**Restricted folders.** Chromium holds back picking Downloads, the
+Desktop, Documents or the home folder ITSELF (`kDontBlockChildren`: a
+folder inside one is fine), and Electron asks the app through the session's
+`file-system-access-restricted` event. **With no listener the question is
+never answered**: the page's `showDirectoryPicker` waits for ever, no
+dialog on screen, and every later dialog is refused as "File picker already
+active" — which is what linking Downloads for the Case folders list did.
+`lockDownSession` answers it: `allow` for Downloads itself (by `pathKey`
+against `app.getPath("downloads")`), `deny` for a page not the app's, and
+for any other a message box, then `tryAgain` (the dialog again) or `deny`.
+`test-desktop.mjs` puts the question as Electron does (14c).
+
 ## Windows and closing
 
 New window and a tab pulled out of the strip use `window.open` with the

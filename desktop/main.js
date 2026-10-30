@@ -719,6 +719,32 @@ function lockDownSession(ses) {
     callback({ video: frame.top || frame });
   });
 
+  // A FOLDER CHROMIUM HOLDS BACK. Picking Downloads, the Desktop, Documents
+  // or the home folder ITSELF is restricted (a folder inside one is not),
+  // and Electron asks the app what to do (file-system-access-restricted).
+  // Nobody listened, so the answer never came: the page's dialog call waited
+  // for ever, with no dialog on screen, and every later click was refused as
+  // "File picker already active". Downloads is let through, for Home's Case
+  // folders list (pwa/app-web.js), which lists it and opens the folders in
+  // it; any other is said, with the dialog offered again, as Chrome does.
+  ses.on("file-system-access-restricted", async (_e, details, callback) => {
+    if (!isAppUrl(String(details.origin || "").replace(/\/?$/, "/"))) { callback("deny"); return; }
+    if (details.isDirectory && pathKey(details.path) === pathKey(app.getPath("downloads"))) { callback("allow"); return; }
+    const parent = details.webContents ? BrowserWindow.fromWebContents(details.webContents) : null;
+    const opts = {
+      type: "warning",
+      buttons: ["Choose another", "Cancel"],
+      defaultId: 0,
+      cancelId: 1,
+      message: `PDF+ can't open “${path.basename(details.path) || details.path}”.`,
+      detail: "It holds system files. Choose a folder inside it instead.",
+    };
+    try {
+      const { response } = parent ? await dialog.showMessageBox(parent, opts) : await dialog.showMessageBox(opts);
+      callback(response === 0 ? "tryAgain" : "deny");
+    } catch { callback("deny"); }
+  });
+
   // A download (the screenshot's PNG; a file saved where there is no save
   // picker) goes into Downloads with no question, as Chrome's do, under a
   // name of its own: "name (1).png" beside a "name.png" already there.
