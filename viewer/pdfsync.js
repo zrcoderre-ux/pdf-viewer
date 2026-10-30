@@ -1055,9 +1055,36 @@ export function scanLayout(lineTexts, rows, { size = 0, lineBox = 1.2, height = 
   // leading put every line of the table far from its row, no match stood
   // near enough to hold one, and the table was spaced evenly down to the
   // foot of the page.
-  const sorted = tops.slice().sort((a, b) => a - b);
-  const steps = sorted.slice(1).map((t, k) => t - sorted[k]).filter((d) => d > 0.5);
-  const rowStep = steps.length >= 3 ? median(steps) : 0;
+  // The step is read down each COLUMN of type (the pieces beginning within a
+  // row's height of one another across), from one piece to the next below
+  // it: a table's cells on a scan sit a point or two apart, a gutter apart
+  // across, and pdfRows makes each a row of its own. Stepped from every row
+  // to the next, a scanned invoice table's leading was a point or two, its
+  // type set at the floor (half the PDF's) and its rows crushed together —
+  // "The viewer shows this chart as way too small". Down a column, a leaning
+  // row's cells are no nearer one another than the scan's lines are. The
+  // lower quartile, not the median: a table's cells wrap a few lines at its
+  // leading, and most of a column's steps can be the gaps between its rows.
+  const tall = median(rows.map((r) => r.height));
+  const pts = [];
+  for (const r of rows) {
+    if (r.items && r.items.length) for (const it of r.items) pts.push({ x: it.x, top: it.base - it.h });
+    else pts.push({ x: r.left, top: r.top });
+  }
+  pts.sort((a, b) => a.x - b.x);
+  const cols = [];
+  for (const p of pts) {
+    const c = cols[cols.length - 1];
+    if (c && p.x - c.x <= tall) c.tops.push(p.top);
+    else cols.push({ x: p.x, tops: [p.top] });
+  }
+  const steps = [];
+  for (const c of cols) {
+    const s = c.tops.sort((a, b) => a - b);
+    for (let k = 1; k < s.length; k++) if (s[k] - s[k - 1] > tall * 0.6) steps.push(s[k] - s[k - 1]);
+  }
+  steps.sort((a, b) => a - b);
+  const rowStep = steps.length >= 3 ? steps[Math.floor((steps.length - 1) / 4)] : 0;
   const pitch = rowStep > 0 && spanPitch > rowStep * 1.5 ? rowStep : spanPitch;
   // One size, no larger than the leading holds.
   const s = Math.max(size * minFit, Math.min(size, pitch / (lineBox * squeeze)));
