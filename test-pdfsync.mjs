@@ -217,6 +217,23 @@ console.log("a page with no numbers: rows matched by their words");
     check("nothing matched: the page's lines evenly down the PDF's text, a blank line half a line", none.positions.map((p) => p.top), [100, 124, 136, 160]);
     check("…in one size", none.positions.map((p) => p.size), [10, 10, 10, 10]);
     check("no rows, no layout", scanLayout(texts, [], { size: 10 }), null);
+    // A scanned TABLE whose cells lean: twenty rows 11 points apart from 100,
+    // each row's three cells a point and a half lower than the one before, so
+    // pdfRows makes each cell a row of its own; the page number at the foot.
+    // Stepped row by row the leading was a point and a half, and the table
+    // was set at the floor, half its size, its rows crushed together.
+    const cells = [], lines = [];
+    const WORD = ["orientation", "meeting", "lumber", "scaffold", "harness", "ladder", "trench", "crane", "welding", "roofing",
+      "asbestos", "lead", "noise", "dust", "forklift", "electrical", "plumbing", "concrete", "framing", "drywall"];
+    for (let k = 0; k < 20; k++) {
+      [`invoice ${WORD[k]} inspections`, `${k + 1}/2/23`, `$${k + 1},800.00`].forEach((t, c) => cells.push({ top: 100 + k * 11 + c * 1.5, left: [72, 300, 450][c], height: 8, text: t }));
+      lines.push(`invoice ${WORD[k]} inspections          ${k + 1}/2/23       $${k + 1},800.00`);
+    }
+    cells.push({ top: 720, left: 290, height: 8, text: "56" });
+    const tab = scanLayout([...lines, "", "", "56"], cells, { size: 8, height: 792 });
+    check("a leaning scan's table: its type the size asked, not the floor", tab.size, 8);
+    // (Within the row's lean: a line may anchor on any cell of its row.)
+    check("…its rows where the scan prints them, 11 points apart", tab.positions.slice(0, 20).every((p, k) => p.top >= 100 + k * 11 - 0.5 && p.top <= 100 + k * 11 + 3.5), true);
   }
   {
     // NO LINE OVER ANOTHER ON PLEADING PAPER (fitRuns): lines 14 and 15 24

@@ -656,6 +656,30 @@ Measured after: 4.93 px (the PDF's 8 points less the OCR's own reading),
 each row of the table on its scan row, and the page number at the foot.
 `test-scan-layout.mjs` ("a scanned page of a ruled table").
 
+**A scanned table whose cells lean** (`scanLayout`'s scan leading). The
+owner, of a scanned invoice table (five unruled columns, thirty rows, a
+total and the page number at the foot) beside its PDF: "The viewer shows
+this chart as way too small" — the table at half the PDF's size, its rows
+packed into the top half of the page. A scan's OCR reads each cell a point
+or two above or below the one before it, and two pieces on baselines more
+than a seventh of their height apart and a gutter apart across are two rows
+(`pdfRows`, for a page set in two columns): each cell was a row of its own.
+The scan's own leading, the median step between one row's top and the
+next's, was then the step between two cells of one line, a point or two;
+the leading held the type only at the floor (`minFit`, half), and the
+anchors were spaced at it. It is now read down each COLUMN of type: every
+piece of every row (its items; a row with none by its left), grouped by
+where it begins across (within a row's height), each piece's step to the
+next below it in its column (more than 0.6 of a row's height), and the
+LOWER QUARTILE of those steps, since a ruled table's cells wrap a few lines
+at its leading and most of a column's steps can be the gaps between its
+rows. A leaning row's cells are each in a column of their own, so the lean
+never reaches the step. A synthetic copy, each cell a point lower than the
+one before: 6.5 points (a point and a half: 4.1) where the straight scan is
+8.3; now 8.3 at either, every row on its scan row. `test-pdfsync.mjs` ("a
+leaning scan's table") and `test-scan-layout.mjs` ("a scanned invoice
+table").
+
 ### A form beside its PDF looks like the PDF (`placePages`, `columns.placeLine`, `pdfsync.lineItems`, `pdfFace`)
 
 The owner, in chat: "I want to use PDF viewer to compensate. Even if the

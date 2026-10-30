@@ -1041,6 +1041,7 @@ async function shareThisTab() {
 // declared with the small helpers, which read it: see toast.)
 let shotLeftOut = 0; // …and how many PDF pages it left out whole (pdfNamesOn), for the toast
 let shotWithheld = new Set(); // …and the names it covered with WITHHELD (egressSwaps), for the toast
+let shotFlagged = new Set();  // …and the flagged values it covered (flaggedSwaps), folded, for the toast
 
 /** An element within `margin` screens of the window, above or below. */
 function nearWindow(rect, margin) {
@@ -1195,20 +1196,80 @@ function swapChrome(root, edits, fields) {
   });
   const nodes = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n);
+  const keyed = !!(fwd && fwd.rx);
   for (const n of nodes) {
-    const swaps = egressSwaps(n.data);
+    const swaps = withFlagged(keyed ? egressSwaps(n.data) : [], n.data);
     if (!swaps.length) continue;
     swapInNodes([{ node: n, start: 0, end: n.data.length }], swaps, edits);
     for (const v of withheldIn(swaps)) shotWithheld.add(v);
   }
   for (const el of root.querySelectorAll("input, textarea")) {
     if (!(el.tagName === "TEXTAREA" || el.type === "text" || el.type === "search") || !el.value || el.closest("[hidden]")) continue;
-    const fw = egressText(el.value);
-    if (!fw.swaps) continue;
+    const fw = keyed ? egressText(el.value) : { text: el.value, swaps: 0, places: [] };
+    // …and a flagged value in it (one typed into Find).
+    const fl = flaggedSwaps(fw.text);
+    const text = fl.length ? writtenWith(fw.text, fl).text : fw.text;
+    if (text === el.value) continue;
     for (const v of withheldIn(fw.places)) shotWithheld.add(v);
-    fields.push([el, el.value, fw.text]);
-    el.value = fw.text;
+    fields.push([el, el.value, text]);
+    el.value = text;
   }
+}
+
+/**
+ * WHAT THE SCREENSHOT COVERS THAT HAS NO FAKE: the flagged values. A name
+ * spotted unfaked and flagged is not in the key until PDF-Linker's next run,
+ * so the forward passes leave it as it reads — on the pages, in the bars and
+ * the Find box, over the PDF — and the picture carried it. The owner: "it
+ * should hide the words listed there as spotted unfaked to be pseudonymized";
+ * first the Flagged panel's list (body.shot-flags), then wherever else they
+ * stand. Each occurrence standing in the clear is covered as a name the key
+ * holds only an instruction for is (egressSwaps): WITHHELD on its first piece
+ * and nothing on the rest. `held` ([[start, end]], in order) are stretches
+ * not to touch — a pseudonym, a spot keep, the margin — as flagReading reads
+ * a page. The values covered are noted for the toast (shotFlagged).
+ */
+function flaggedSwaps(text, held = null) {
+  const rx = flaggedMatcher();
+  if (!rx || !text) return [];
+  const out = [];
+  rx.lastIndex = 0;
+  for (let m; (m = rx.exec(text)); ) {
+    const end = m.index + m[0].length;
+    const pieces = held ? TD.clearPieces(text, m.index, end, held) : [[m.index, end]];
+    pieces.forEach(([a, b], k) => out.push({ start: a, end: b, to: k ? "" : WITHHELD, piece: k }));
+    if (pieces.length) shotFlagged.add(PK.fold(m[0]));
+    if (m.index === rx.lastIndex) rx.lastIndex++;
+  }
+  return out;
+}
+/**
+ * `swaps` with the flagged values in `text` covered too (flaggedSwaps). A
+ * cover wins over a swap it overlaps: "Rosa Delgado" flagged, with "Delgado"
+ * bound, goes as WITHHELD, not "Rosa" and Delgado's fake.
+ */
+function withFlagged(swaps, text, held = null) {
+  const fl = flaggedSwaps(text, held);
+  if (!fl.length) return swaps;
+  return swaps.filter((s) => !fl.some((f) => s.start < f.end && s.end > f.start)).concat(fl).sort((x, y) => x.start - y.start);
+}
+/** A page's flagged values covered in its own text nodes, read as its red marks read it (flagReading). */
+function shotFlags(body, edits) {
+  const { text, segs, held } = flagReading(body);
+  swapInNodes(segs, flaggedSwaps(text, held), edits);
+}
+/** …and a page shown ⇄ Raw, in its sheet's text as it now reads (after shotRaw). */
+function shotRawFlags(sec, edits) {
+  const pre = sec.classList.contains("raw") ? sec.querySelector(".page-inner > .raw-sheet .raw-text") : null;
+  if (!pre) return;
+  const segs = [];
+  let text = "";
+  const walker = document.createTreeWalker(pre, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    segs.push({ node: n, start: text.length, end: text.length + n.data.length });
+    text += n.data;
+  }
+  swapInNodes(segs, flaggedSwaps(text), edits);
 }
 
 /**
@@ -1245,7 +1306,9 @@ function pdfNamesOn(sheet) {
   const { text, map } = RD.pageTextFromSpans(measured);
   // A name the key holds only an instruction for is covered with WITHHELD
   // (egressSwaps), as on the pages beside it.
-  const read = egressSwaps(text);
+  // …and a flagged value, which has no fake (flaggedSwaps).
+  const keyed = !!(fwd && fwd.rx);
+  const read = withFlagged(keyed ? egressSwaps(text) : [], text);
   // Nor can words that do not run across the screen (RD.sidewaysSpans): the
   // join reads lines by where spans sit on screen, and a portrait page turned
   // a quarter has its lines side by side, so it welds each line's end to the
@@ -1259,7 +1322,7 @@ function pdfNamesOn(sheet) {
   // and a name in its body, left out when its names might all have been
   // found; the toast counts it, and the export's page is the one to show.
   if (sideways
-      && (read.length || egressSwaps(measured.map((m) => m.text).join("\n")).length)) {
+      && (read.length || (() => { const t = measured.map((m) => m.text).join("\n"); return withFlagged(keyed ? egressSwaps(t) : [], t).length; })())) {
     return { sheet, names: [], whole: true };
   }
   let swaps = read.map((s) => ({ ...s, parts: [RD.spanRangeFor(map, s.start, s.end)], keys: RD.charKeys(map, s.start, s.end) }));
@@ -1270,7 +1333,7 @@ function pdfNamesOn(sheet) {
   // token), the column's name takes its words, so one cover says one name.
   const lay = RD.pageLayoutFromSpans(measured);
   const names = new Map();
-  for (const s of forwardSwaps(lay.text, null, null, null, { columnsOnly: true })) {
+  for (const s of keyed ? forwardSwaps(lay.text, null, null, null, { columnsOnly: true }) : []) {
     if (!names.has(s.whole)) names.set(s.whole, []);
     names.get(s.whole).push(s);
   }
@@ -1426,8 +1489,10 @@ function shotRaw(sec, edits) {
  */
 function fakesForShot() {
   hideTip();
-  if (!key || shotPut) return () => {};
+  // With no key there is nothing to fake, but a flagged value is still to cover (flaggedSwaps).
+  if (shotPut || (!key && !flaggedMatcher())) return () => {};
   shotWithheld = new Set();
+  shotFlagged = new Set();
   // THE WINDOW IS STILL LIVE WHILE THE PICTURE IS TAKEN. The fakes are up from
   // here until back(), and the frame is drawn 300 ms and two frames after the
   // share dialog closes (shareThisTab) — up to five seconds where the share is
@@ -1461,11 +1526,15 @@ function fakesForShot() {
   const fitRead = shotFitRead(near); // where each line's text ends in the real names (shotFitRead)
   for (const sec of near) {
     if (fwd && fwd.rx) shotRaw(sec, edits);
+    shotRawFlags(sec, edits);
     const body = sec.querySelector(".page-body");
     if (!body) continue;
     // The names Esc left as typed are written over in their own nodes below,
     // which takes their ranges with them: noted, to be found again (back).
     escNote(body);
+    // The flagged values first, on the page as it reads: a pseudonym inside
+    // one ("Rosa Delgado", "Delgado" faked) is held, and shows its fake.
+    shotFlags(body, edits);
     for (const s of body.querySelectorAll(".pn")) {
       const t = s.firstChild;
       if (s.childNodes.length !== 1 || t.nodeType !== 3 || t.data === s.dataset.fake) continue;
@@ -1488,11 +1557,11 @@ function fakesForShot() {
   const relink = pagesMoved && !gridOn();
   if (relink) placeCitations();
 
-  if (fwd && fwd.rx) {
+  if ((fwd && fwd.rx) || flaggedMatcher()) {
     swapChrome(document.body, edits, fields);
     try { if (window.top !== window && window.top.document.body) swapChrome(window.top.document.body, edits, fields); } catch { /* another origin above */ }
   }
-  const plans = fwd && fwd.rx
+  const plans = (fwd && fwd.rx) || flaggedMatcher()
     ? [...document.querySelectorAll(".pdf-sheet")].filter((s) => nearWindow(s.getBoundingClientRect(), 0)).map(pdfNamesOn).filter(Boolean)
     : [];
   const covers = plans.map(coverPdfNames);
@@ -1539,13 +1608,30 @@ function shotHeldBack(popWas) {
   for (const body of caretHeld) convertTypedRealsSoon(body);
 }
 
-/** One picture taken with the names in their pseudonyms, and the screen put back. */
+/**
+ * One picture taken with the names in their pseudonyms, and the screen put back.
+ *
+ * The Flagged panel's values are names spotted unfaked and not in the key
+ * yet, so no fake stands for them and every pass above leaves them as they
+ * read: with the panel open the picture carried the list of real names. Each
+ * is covered with WITHHELD while the picture is taken (body.shot-flags, in
+ * the stylesheet, so a list drawn again meanwhile is covered too), with a key
+ * open or none.
+ */
 async function withFakes(take) {
+  document.body.classList.add("shot-flags");
   const back = fakesForShot();
   try {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     return await take();
-  } finally { back(); }
+  } finally {
+    back();
+    document.body.classList.remove("shot-flags");
+  }
+}
+/** How many of the Flagged panel's values are on screen, to be covered in a screenshot (withFakes). */
+function flagsOnScreen() {
+  return document.body.classList.contains("side-hidden") || $("side-flags").hidden ? 0 : flagsList.children.length;
 }
 
 function saveShot(blob) {
@@ -1564,6 +1650,8 @@ $("shot-btn").addEventListener("click", async (e) => {
   e.currentTarget.blur(); // no focus ring on the button in the picture
   if (shooting) return;
   shooting = true;
+  const panelFlags = flagsOnScreen() ? flagged.map((v) => PK.fold(v)) : [];
+  shotFlagged = new Set();
   try {
     let blob = extensionShoots() ? await withFakes(shotByExtension) : null;
     if (!blob) {
@@ -1573,9 +1661,11 @@ $("shot-btn").addEventListener("click", async (e) => {
     if (!blob) { toast("This browser cannot take a screenshot of the page.", { error: true }); return; }
     saveShot(blob);
     const held = [...shotWithheld];
-    toast(!key ? "Screenshot saved to Downloads."
+    const flagsCovered = new Set([...shotFlagged, ...panelFlags]).size;
+    const flagsSay = flagsCovered ? ` ${flagsCovered === 1 ? "The flagged name is" : `${flagsCovered} flagged names are`} covered with ${WITHHELD}.` : "";
+    toast((!key ? "Screenshot saved to Downloads."
       : `Screenshot saved to Downloads, the names in their pseudonyms${shotLeftOut ? ` — and ${shotLeftOut} PDF page${shotLeftOut === 1 ? "" : "s"} left out of it, whose names could not be placed to be covered` : ""}`
-        + (held.length ? `${shotLeftOut ? ";" : " —"} ${withheldList(held)} covered with ${WITHHELD}: the key holds an instruction for ${held.length === 1 ? "it" : "them"}, not a pseudonym.` : "."),
+        + (held.length ? `${shotLeftOut ? ";" : " —"} ${withheldList(held)} covered with ${WITHHELD}: the key holds an instruction for ${held.length === 1 ? "it" : "them"}, not a pseudonym.` : ".")) + flagsSay,
       held.length ? { error: true } : undefined);
   } catch (err) {
     if (err && err.name === "NotAllowedError") return; // the share was declined
@@ -16375,7 +16465,11 @@ function renderFlags() {
   }
   for (const v of flagged) {
     const li = document.createElement("li");
-    li.textContent = v;
+    // Its own span, so a screenshot can cover it (body.shot-flags).
+    const fv = document.createElement("span");
+    fv.className = "fv";
+    fv.textContent = v;
+    li.appendChild(fv);
     // Several words can be made one phrase here, after they were flagged, as
     // well as from the selection — and made an ordinary flag again.
     const on = TD.isPhrase(phrases, v);
