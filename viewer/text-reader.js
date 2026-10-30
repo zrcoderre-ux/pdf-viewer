@@ -71,6 +71,7 @@ import * as pdfjsLib from "../pdfjs/build/pdf.mjs";
 import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRatio } from "./pdf-fonts.js";
 import { repairTextLayer } from "./text-layer.js";
 import { normalize as findNormalize, findIn as findInText } from "./find.js";
+import { createSplit } from "./split-view.js";
 import { documentKey as ocrDocKey, loadPage as ocrLoadPage, MAX_KEEP_DAYS as OCR_KEEP_MAX } from "./ocr-store.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdfjs/build/pdf.worker.mjs");
@@ -4881,6 +4882,19 @@ async function saveAllForRun() {
     try { ok = !!(w && w.__pdfViewerSave && (await w.__pdfViewerSave())); } catch { ok = false; }
     if (!ok) { toast(`${pmLabel(name)} was not saved in PDF mode, so PDF-Linker was not run.`, { error: true, ms: 8000 }); return false; }
   }
+  // …and the folder's PDF side by side, if that is what it shows: the run
+  // rewrites the folder's files, not one opened from elsewhere.
+  const beside = pmSplit.hasUnsaved() && pmSplit.shown();
+  if (beside && beside.handle) {
+    const own = pmList.find((p) => p.name === beside.name && p.handle);
+    let same = false;
+    try { same = !!own && (await own.handle.isSameEntry(beside.handle)); } catch { same = false; }
+    if (same) {
+      let ok = false;
+      try { ok = !!(await pmSplit.win().__pdfViewerSave()); } catch { ok = false; }
+      if (!ok) { toast(`${pmLabel(beside.name)} was not saved side by side, so PDF-Linker was not run.`, { error: true, ms: 8000 }); return false; }
+    }
+  }
   if (!hasUnsaved()) return true;
   const owed = unsavedNames().map((n) => TD.docLabel(n)).concat(pendingWrites());
   toast(`Not run: ${owed.length ? nameList(owed) + " " + (owed.length === 1 ? "is" : "are") : "something is"} still unsaved, and PDF-Linker would run without ${owed.length === 1 ? "it" : "them"}. Save, then press Re-run PDF-Linker again.`, { error: true, ms: 9000 });
@@ -8036,7 +8050,7 @@ document.addEventListener("keydown", (e) => {
 // panels and the status bar say.
 window.addEventListener("beforeunload", (e) => {
   if (openingLink) return; // a pdf-linker: link, which leaves the page where it is (rerunLinker)
-  if (!hasUnsaved() && !pdfModeUnsaved().length) return;
+  if (!hasUnsaved() && !pdfModeUnsaved().length && !pmSplitUnsaved().length) return;
   e.preventDefault();
   e.returnValue = "";
 });
@@ -24359,6 +24373,23 @@ let pmSumTimer = 0;
 let pmBusy = false;          // a PDF being brought up: the edge waits for it
 let pmEdge = { dir: 0, px: 0, t: 0 };
 let pmQuietUntil = 0;        // the wheel is spent, not obeyed, until then (Date.now)
+// ⫴ Side by side (the viewer's button, split-view.js): a second PDF to the
+// right of the one shown — another of the folder's, or any file. It stays
+// while ‹ › change the PDF on the left and while the text is back, with its
+// own unsaved changes, and goes only when it is closed. It is not one of the
+// folder's frames: scrolling past its end, its auto-scroll and its Find stay
+// in its own PDF.
+let pmSplitRec = null;       // { name, stamp } of what it opened, for the way back to the text
+const pmSplit = createSplit({
+  stage: pmStage,
+  primary: () => pmWin(),
+  choices: () => pmList.filter((p, i) => i !== pmAt),
+  choicesLabel: "This case folder's PDFs",
+  wire: (w) => w.addEventListener("keydown", (e) => { if (pmKey(e)) { e.preventDefault(); e.stopPropagation(); } }, true),
+  onLoad: (src, file) => { pmSplitRec = { name: src.name, stamp: `${file.size}:${file.lastModified}` }; },
+});
+/** The PDF beside, by name, where it holds unsaved changes. */
+function pmSplitUnsaved() { return pmSplit.hasUnsaved() ? [pmSplit.shown().name] : []; }
 
 /** Whether PDF mode reads on from one PDF into the next (scrolling, auto-scroll, Find): the reader's ↕ Read folder on. */
 function pmFolderOn() { return settings.reel !== false; }
@@ -24445,6 +24476,7 @@ function pmMakeFrame(src) {
     if (!file) throw new Error(`could not read ${src.name}`);
     f.stamp = `${file.size}:${file.lastModified}`;
     pmWire(w);
+    pmSplit.attach(w);
     await w.__pdfViewerLoadLocal(file, src.handle || null);
   })();
   f.ready.catch((e) => {
@@ -24711,7 +24743,9 @@ async function exitPdfMode() {
   try { const t = localStorage.getItem("pdfViewerTheme") === "light" ? "light" : "dark"; if (t !== currentTheme) { currentTheme = t; applyTheme(t); } } catch { /* ok */ }
   // A PDF saved in PDF mode is not the one the pane read: read again.
   let changed = false;
-  for (const [name, f] of pmFrames) {
+  const opened = [...pmFrames];
+  if (pmSplitRec && pmSplit.isOpen()) opened.push([pmSplitRec.name, pmSplitRec]);
+  for (const [name, f] of opened) {
     const p = pmList.find((x) => x.name === name);
     if (!p || !p.handle) continue;
     try {
@@ -24728,7 +24762,7 @@ async function exitPdfMode() {
     } catch { /* gone from the folder */ }
   }
   if (changed && doc) refreshPdf();
-  const unsaved = pdfModeUnsaved();
+  const unsaved = [...new Set([...pdfModeUnsaved(), ...pmSplitUnsaved()])];
   if (unsaved.length) toast(`${unsaved.map(pmLabel).join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes — kept in PDF mode until you save ${unsaved.length === 1 ? "it" : "them"} there.`, { ms: 6000 });
   if (src) await pmBackToText(src.name, page);
   if (autoOn) autoStart();
@@ -24766,7 +24800,7 @@ pmPick.addEventListener("change", () => pmShow(Number(pmPick.value)));
 window.addEventListener("keydown", (e) => {
   if (pmKey(e)) { e.preventDefault(); e.stopImmediatePropagation(); return; }
   if (!pdfModeOn) return;
-  if (e.target && e.target.closest && e.target.closest("#pm-controls, #pdf-mode-btn") && !e.ctrlKey && !e.metaKey && !e.altKey) return;
+  if (e.target && e.target.closest && e.target.closest("#pm-controls, #pdf-mode-btn, .pdf-split-pick") && !e.ctrlKey && !e.metaKey && !e.altKey) return;
   e.stopImmediatePropagation();
   if (e.ctrlKey || e.metaKey) e.preventDefault();
   try { const w = pmWin(); if (w) w.focus(); } catch { /* ok */ }

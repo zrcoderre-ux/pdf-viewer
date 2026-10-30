@@ -2433,6 +2433,14 @@ app, which routes it to the reader tab.
     of 12"). A scanned page is searched by the words the viewer recognized
     the last time it was opened. A search open in the reader's own Find is
     carried in.
+  - **Two side by side.** The viewer's **Side by side** button (the two
+    columns beside Find) puts a second PDF to the right: another of the
+    folder's PDFs, picked from the card, or any file. It stays while ‹ ›
+    change the PDF on the left and while the text is back, until it is
+    closed (× on the bar between them, or the button again); Scroll together
+    on that bar moves both. See *Two PDFs side by side* under Viewer
+    features. The PDF beside is not part of the folder's reading: scrolling
+    past its end, its auto-scroll and its Find stay in it.
   - **Both follow ↕ Read folder on** (the PDF group of the Tools panel).
     Turned off, each PDF ends where it ends: scrolling and auto-scroll stop at
     its last page, and Find searches this PDF only, going round it rather
