@@ -10622,11 +10622,17 @@ function decideKey(answer) {
   });
   persistValues();
   renderFlags();
+  // Said as it is: the answer is held here until Save writes it into
+  // New Real Values.txt, and the key itself is never written by the reader —
+  // pseudonym_key.xlsx changes only when the operator re-runs PDF-Linker
+  // (the owner, 2026-10-30: no writing the key on Save, and no run started
+  // by a Save; a re-run by hand).
   if (a !== "yes" && a !== "no" && a !== "never") {
-    toast(a === "phrase"
-      ? `"${real}" is to be faked whole, as one name — saved to ${TD.VALUES_FILE} for PDF-Linker's next run.`
-      : `"${real}" answered “${a}” — saved to ${TD.VALUES_FILE}, read by PDF-Linker as its Fix? cell.`
-        + (LK.classifyFix(a, real).kind === "replacement" ? " A new pseudonym for a name the files carry is put in by its next full run: a click of Re-run PDF-Linker does it." : ""));
+    toast((a === "phrase"
+      ? `"${real}" is to be faked whole, as one name.`
+      : `"${real}" answered “${a}”.`)
+      + ` Save writes it into ${TD.VALUES_FILE}; pseudonym_key.xlsx changes when you Re-run PDF-Linker.`
+      + (LK.classifyFix(a, real).kind === "replacement" ? " A new pseudonym for a name the files carry takes its full run, which Re-run PDF-Linker starts for it." : ""), { ms: 8000 });
   }
   const after = keyTerms();
   if (after.length > 1) stepKeyTerm(1);
