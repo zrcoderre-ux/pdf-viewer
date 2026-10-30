@@ -23342,6 +23342,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
   // in the reader's type among the PDF's.
   const page = place ? null : mostFace(rows.flatMap((r) => r.items || []), faceOf);
   const plain = page ? { ...page, bold: false, italic: false } : null;
+  const bodyRight = PS.bodyRightOf(rows) || 0;
   return lines.map((l, k) => {
     const m = matched[k];
     if (!m) return plain ? { text: null, cuts: [], places: [], face: plain } : null;
@@ -23367,7 +23368,14 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     // (On pleading paper each run at its own size too, where it is not its
     // line's: a form's pieces are placed at theirs already.)
     const runs = PS.faceRuns(shown, found, { fileAt: map.fileAt, atoms: map.atoms, faceOf, size: place ? 0 : sizes[k] });
-    if (!place) return { text: null, cuts: [], places: [], face, runs };
+    // A JUSTIFIED line (PS.justifiedRight): set evenly out to where the PDF
+    // ends it (justifyLines), as a word processor justifies — not single
+    // spaced and ragged, nor with its last word placed apart on its own and
+    // the whole of the line's stretch in front of it (the owner, 2026-10-30:
+    // "It adds a bunch of space before the last word rather than spacing it
+    // out like justified does on word").
+    const justify = PS.justifiedRight(shown, found, bodyRight, row.height > 0 ? row.height : sizes[k]);
+    if (!place) return { text: null, cuts: [], places: [], face, runs, justify };
     const first = shown.search(/\S/);
     // Each piece at its own size — its item's, the line's within a fifth of
     // it — and the line's here is its ROW's own, not the page's body that
@@ -23393,7 +23401,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     found.forEach((g, gi) => {
       const at = g.glued ? -1 : map.fileAt(markStart(g.at));
       if (!(at >= 0)) return;
-      if (g.at > first && !apart[gi] && !steps[gi]) return;
+      if (g.at > first && ((!apart[gi] && !steps[gi]) || justify)) return;
       const f = faceOf(g.item.font);
       const h = g.item.h > 0 ? g.item.h : own;
       const size = own > 0 && Math.abs(h - own) <= own * 0.2 ? own : h;
@@ -23401,7 +23409,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
       places.push([at, { x: g.x - (pre ? faceEm(pre, f || face) * size : 0), size, face: f }]);
       if (markStart(g.at) > markStart(first)) cuts.push(at);
     });
-    return { text: TD.serializeNodes(lt), cuts, places, face, runs };
+    return { text: TD.serializeNodes(lt), cuts, places, face, runs, justify };
   });
 }
 /**
@@ -23479,6 +23487,7 @@ function placePages(plans, near) {
     const composing = p.body === composingIn;
     const caret = composing ? -1 : caretOffsetIn(p.body);
     let moved = false;
+    const justified = [];
     p.lines.forEach((l, k) => {
       const lt = ltOf(l);
       const c = p.cells[k];
@@ -23488,6 +23497,7 @@ function placePages(plans, near) {
       const size = p.sizes[k] * s;
       // A numbered page (no lefts): the PDF's weight and slant, run by run,
       // and nothing placed (planCells with `place` false).
+      if (c.justify) justified.push([lt, c.justify * s]);
       if (!p.lefts) {
         if (placeLine(lt, { places: null, start: null, at: null, face: c.face, size, lead: 0, cellFaces: c.cellFaces || null, runs })) moved = true;
         return;
@@ -23502,8 +23512,38 @@ function placePages(plans, near) {
       if (placeLine(lt, { places, start, at: lineAt, face: c.face, size, lead, cellFaces: c.cellFaces || null, runs })) moved = true;
     });
     if (moved && caret >= 0) { const pt = pointAtOffset(p.body, caret); if (pt) placeCaret(pt.node, pt.offset); }
+    justifyLines(p.body, justified);
     p.body.__placed = true;
     formLook.placed++;
+  }
+}
+/**
+ * Each justified line (planCells' `justify`, the PDF's right end of it in the
+ * page's px) given the word spacing that ends it there: one read of every
+ * line's text, then one write, so a page costs one layout. Its spaces are the
+ * file's own (one between each word), widened alike; a line that would have
+ * to be squeezed, or stretched past a type height a space, is left as it is,
+ * and a line no longer justified has its spacing taken off.
+ */
+function justifyLines(body, justified) {
+  const want = new Map(justified);
+  const reads = [];
+  const origin = body.getBoundingClientRect().left;
+  for (const lt of body.querySelectorAll(":scope > .line > .lt")) {
+    if (!want.has(lt)) { if (lt.style.wordSpacing) lt.style.wordSpacing = ""; continue; }
+    const text = lt.textContent;
+    const a = text.search(/\S/), b = text.trimEnd().length;
+    const spaces = a < 0 ? 0 : (text.slice(a, b).match(/ /g) || []).length;
+    if (!spaces || a > 0) { if (lt.style.wordSpacing) lt.style.wordSpacing = ""; continue; }
+    const r = document.createRange();
+    r.selectNodeContents(lt);
+    const box = r.getBoundingClientRect();
+    reads.push([lt, spaces, box.right - origin, parseFloat(lt.style.wordSpacing) || 0, parseFloat(getComputedStyle(lt).fontSize) || 12]);
+  }
+  for (const [lt, spaces, right, had, size] of reads) {
+    const ws = had + (want.get(lt) - right) / spaces;
+    const v = ws > 0.05 && ws <= size ? ws.toFixed(2) + "px" : "";
+    if (lt.style.wordSpacing !== v) lt.style.wordSpacing = v;
   }
 }
 // The page an input method is composing on, while it is (placePages).

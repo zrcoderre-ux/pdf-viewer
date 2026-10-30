@@ -1333,6 +1333,23 @@ export function standApart(found, { em = APART_EM } = {}) {
 }
 
 /**
+ * Where the PDF ends a JUSTIFIED line, in PDF units, or null: a line of prose
+ * (four words or more, single spaced in the file: `shown`, its text) whose
+ * items found in it (lineItems' answer) run out to the right edge of the
+ * page's text (`bodyRight`), within half a type height (`size`). A
+ * paragraph's last line falls short of the edge, and a line of a column
+ * layout carries runs of spaces, so neither is one.
+ */
+export function justifiedRight(shown, found, bodyRight, size) {
+  if (!found || !found.length || !(bodyRight > 0)) return null;
+  const t = String(shown || "").trim();
+  if (!t || / {2,}/.test(t) || t.split(/ /).length < 4) return null;
+  let right = 0;
+  for (const g of found) if (g.item) right = Math.max(right, g.item.x + (g.item.w > 0 ? g.item.w : 0));
+  return right > 0 && right >= bodyRight - 0.5 * (size > 0 ? size : 10) ? right : null;
+}
+
+/**
  * Which of a line's found items (lineItems' answer, in order) change SIZE from
  * the one before by a fifth or more (typeSizes' tolerance): per item, false for
  * the first. A form's typed value runs on a few points after its 6-point label
