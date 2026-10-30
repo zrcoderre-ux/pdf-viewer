@@ -1006,5 +1006,18 @@ console.log("a street's name word, read off the address rows");
   check("two streets on one stand-in: neither", translate(compile(two), "Quillfeather Ave").text, "Quillfeather Ave");
 }
 
+// A real host is not standing where it heads or ends a LONGER host: the
+// court's own www.courts.ca.gov is another site from a key's "www.courts.ca"
+// (the owner, 2026-10-30), while the host alone, or with a path, still is.
+{
+  const host = compileReals({ warn: [{ real: "www.courts.ca", fake: "www.postbriar.org" }] });
+  const found = (t) => findRealSpans(host, t).map((h) => h.matched);
+  check("a host inside a longer host: not standing", found("See www.courts.ca.gov/forms.htm today."), []);
+  check("…nor under one", found("Visit forms.www.courts.ca today."), []);
+  check("the host alone: standing", found("Forms are at www.courts.ca."), ["www.courts.ca"]);
+  check("…with its path: standing", found("See www.courts.ca/forms now."), ["www.courts.ca"]);
+  check("a name is not a host", findRealSpans(compileReals({ warn: [{ real: "Helen Rasho", fake: "Ingrid Strangeways" }] }), "Helen Rasho.gov").map((h) => h.matched), ["Helen Rasho"]);
+}
+
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);
