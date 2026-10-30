@@ -923,6 +923,8 @@ export function docBodyRight(rowsByPage) {
   for (const rows of rowsByPage || []) { const r = bodyRightOf(rows); if (r != null) rs.push(r); }
   return rs.length ? median(rs) : null;
 }
+// A line of nothing but horizontal box-drawing runs: a drawn rule (rowLayout).
+const HAIR_RULE_RE = /^[\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*[\u2500\u2501\u2550][\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*$/;
 export function rowLayout(lineTexts, rows, { bodyLeft = null, height = 0, lineBox = 1.2 } = {}) {
   const map = alignLines(lineTexts, rows.map((r) => r.text));
   const matched = map.map((j, i) => (j == null ? null : i)).filter((i) => i != null);
@@ -945,8 +947,12 @@ export function rowLayout(lineTexts, rows, { bodyLeft = null, height = 0, lineBo
   const held = (x) => (floorAt == null ? x : Math.max(x, floorAt));
   const out = new Array(lineTexts.length).fill(null);
   let last = null, k = 0;
-  lineTexts.forEach((_, i) => {
+  lineTexts.forEach((t, i) => {
     if (map[i] != null) { last = rows[map[i]].top; k = 0; out[i] = { top: last, left: held(rows[map[i]].left), size: rows[map[i]].height }; }
+    // A rule the export writes straight under a line the PDF prints (a
+    // signature line, an underline) stands under that line's type, where the
+    // PDF draws it, not a whole line's pitch down on the next line's text.
+    else if (last != null && k === 0 && map[i - 1] != null && HAIR_RULE_RE.test(String(t || ""))) { k++; out[i] = { top: last + rows[map[i - 1]].height, left: left0, size: null }; }
     else if (last != null) { k++; out[i] = { top: last + k * pitch, left: left0, size: null }; }
   });
   // LINES THE PDF'S TEXT DOES NOT CARRY between two it does — a picture's

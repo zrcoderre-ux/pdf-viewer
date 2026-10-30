@@ -16,8 +16,9 @@
 // Per page, graded (a scan's OCR sizes and faces are not):
 //   overlap    two lines' type drawn over each other (their text boxes cross
 //              by more than a quarter of the smaller's height)
-//   through    a line that is only a drawn rule, its hairline through the
-//              middle three-fifths of another line's type
+//   through    a line that is only drawn rules, a hairline of it across
+//              another line's type (below the top eighth of its box and
+//              above the bottom tenth: from its ascenders to its descenders)
 //   size       a word drawn more than 15% off the size the PDF prints it at
 //   bold+ / bold-, ital+ / ital-
 //              a word drawn bold (italic) the PDF does not set so, or not
@@ -145,7 +146,13 @@ async function readerPages(page) {
           });
           for (const e of els) {
             const b = e.getBoundingClientRect();
-            if (b.width > 2) rules.push({ k, y: (b.top + b.bottom) / 2 - br.top, x0: b.left - br.left, x1: b.right - br.left, text: lt.textContent.trim().slice(0, 12) });
+            if (!(b.width > 2)) continue;
+            // A line's own runs are drawn as background strips (rules.js,
+            // drawRuns): each where its position and size put it, not the
+            // line's whole width.
+            const pos = e.style.backgroundPosition, size = e.style.backgroundSize;
+            const strips = pos && size ? pos.split(",").map((p, j) => [parseFloat(p), parseFloat(size.split(",")[j])]) : [[0, b.width]];
+            for (const [a, w] of strips) rules.push({ k, y: (b.top + b.bottom) / 2 - br.top, x0: b.left + a - br.left, x1: b.left + a + w - br.left, text: lt.textContent.trim().slice(0, 12) });
           }
         }
       }
@@ -245,7 +252,7 @@ function grade(rp, tp) {
   for (const r of rp.rules || []) {
     const hit = rp.lines.find((l) => l.k !== r.k && l.words.some((w) => {
       const h = w.bottom - w.top;
-      return r.y > w.top + 0.2 * h && r.y < w.bottom - 0.2 * h && Math.min(r.x1, w.x1) - Math.max(r.x0, w.x0) > 2;
+      return r.y > w.top + 0.12 * h && r.y < w.bottom - 0.1 * h && Math.min(r.x1, w.x1) - Math.max(r.x0, w.x0) > 2;
     }));
     if (hit) { count.through++; issues.push({ kind: "through", rule: r.text, line: lineText(hit) }); }
   }
@@ -306,7 +313,7 @@ try {
       if (t.scan) doc.scans++;
       const scale = r.width / t.w;
       const geometry = LINES ? r.lines.map((l) => ({ text: l.words.map((w) => w.t).join(" "), top: +(Math.min(...l.words.map((w) => w.top)) / scale).toFixed(1), bottom: +(Math.max(...l.words.map((w) => w.bottom)) / scale).toFixed(1), size: +(l.words[0].size / scale).toFixed(1), bold: l.words.some((w) => w.bold) })) : undefined;
-      doc.pages.push({ n: r.n, scan: t.scan, fixed: r.fixed, rules: (r.rules || []).length, ...g, geometry, plan: r.plan || undefined });
+      doc.pages.push({ n: r.n, scan: t.scan, fixed: r.fixed, rules: (r.rules || []).length, ruleYs: LINES ? r.rules : undefined, ...g, geometry, plan: r.plan || undefined });
       for (const [key, v] of Object.entries(g.count)) doc.total[key] = (doc.total[key] || 0) + v;
     }
     doc.ms = Date.now() - t0;

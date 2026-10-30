@@ -22286,6 +22286,11 @@ function applyMatchedLayoutNow() {
         if (lefts[k] != null) lefts[k] = edge;
       });
     }
+    // A line that is only a horizontal rule is a hairline in a thin slot of
+    // its own (HAIR_ROOM), never type a line's size: it is cleared, and
+    // clears, by that much (bare, below), so it stands in a gap.
+    const hair = lines.map((l) => HAIR_RULE_RE.test((ltOf(l) || l).textContent));
+    if (sizes && base > 0 && hair.some(Boolean)) sizes = sizes.map((h, k) => (hair[k] && h > 0 ? Math.min(h, base * HAIR_ROOM) : h));
     // Never on top of each other: a row the PDF (a scan's text layer, most
     // often) prints closer under the one above than that line's box is tall
     // is pushed down to clear it, and out of register with the PDF by that
@@ -22309,6 +22314,7 @@ function applyMatchedLayoutNow() {
     // caption's `)` side (typeTextOf).
     const bare = (k) => {
       if (isEmptyLine(lines[k])) return true;
+      if (hair[k]) return false; // (its thin slot: HAIR_ROOM)
       const t = ltOf(lines[k]) ? typeTextOf(lines[k]) : lines[k].textContent;
       return (fixed && fixed[k] && !t.trim()) || RULE_ONLY_RE.test(t) || (!t.trim() && !!lines[k].querySelector(".rb.paren"));
     };
@@ -22981,6 +22987,19 @@ const FIT_FLOOR = 0.4;
 const TYPE_SLACK = 0.05;
 // A line of box-drawing glyphs and nothing else: a rule, not type.
 const RULE_ONLY_RE = /^[\s\u2500-\u257F]*[\u2500-\u257F][\s\u2500-\u257F]*$/;
+// …and of those, a line of nothing but HORIZONTAL runs — a signature line, an
+// underline the PDF draws under a heading or a blank — with no box's bar or
+// corner on it (a box row's bars are drawn the height of its row).
+const HAIR_RULE_RE = /^[\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*[\u2500\u2501\u2550][\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*$/;
+// NO LINE IS DRAWN THROUGH TEXT BUT A STRIKE (the owner, 2026-10-30: "pdf
+// viewer should never have lines go through text unless it is a strike
+// though… It should be either above or below the text, like it is in raw").
+// Such a rule line held no room beside the PDF (`bare`), so the lines either
+// side closed over it and its hairline, drawn at the middle of its own box,
+// went through whichever stood there: a signature line through the name
+// typed under it. It holds a thin slot of its own instead, this much of the
+// body type — its box a third of a line — and the lines around it clear it.
+const HAIR_ROOM = 0.3;
 // …and a picture's words (rowLayout's `spread`, and the lines under the last
 // number the PDF does not print), set to fit the room the picture leaves:
 // smaller than the page's fit allows, since past it they would either stand

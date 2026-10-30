@@ -1387,7 +1387,31 @@ the line spacing from the line above it (`pdfsync.rowLayout`), so where the
 PDF sets the next row closer than that the rule is drawn over that row's text
 (MC-011, the underline under item 11b across 11c). Straight, and in its
 order in the file, but on the wrong side of the text; laying it between its
-neighbours instead would move the lines under it on every such page.
+neighbours instead would move the lines under it on every such page. (Since
+2026-10-30, at the owner's direction, it is changed: "pdf viewer should never
+have lines go through text unless it is a strike though… It should be either
+above or below the text, like it is in raw" — see "No line through text but a
+strike", below.)
+
+**No line through text but a strike** (`HAIR_RULE_RE`, `HAIR_ROOM`,
+text-reader.js; `pdfsync.rowLayout`; the owner, 2026-10-30). A line of nothing
+but horizontal runs (a signature line, an underline; no box's bar or corner on
+it) held no room beside the PDF (`bare`), so the lines either side closed over
+it and its hairline, drawn at the middle of its own box, went through whatever
+stood there: the owner's cross-complaint drew its signature line through the
+name typed under it, where the block under the line was a picture read by OCR
+(its lines spread, `spread`). Such a line is now a hairline in a thin slot of
+its own, `HAIR_ROOM` (0.3) of the body type, and clears and is cleared by
+that, so it stands in a gap; and where the PDF has no row for it, rowLayout
+lays it under the type of the line the export writes it after (where an
+underline is) rather than a pitch down on the next line. `audit/layout-audit.mjs`
+counts `through`: a hairline of a rule line across another line's type, read
+where each run is drawn. Measured: the cross-complaint's shape rebuilt from
+invented text, 1 before and 0 after; the eight blank forms of the fixture
+folder, no change but for the better (three pages no longer grown past their
+paper, register 52 to 49). Left: MC-010's foot, where the form's print-button
+labels are taken down to 2.7 points to fit the paper, still crosses at the
+default window width (not at a wider one).
 
 **A caption's `)` side is a bar** (`textdoc.captionParens`, `rules.js`
 `dressLines` and `markParen`; owner's request, 2026-10-22). Pleading paper
