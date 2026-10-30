@@ -150,6 +150,7 @@ try {
     await put(dir, "FACC.pdf", await doc.save());
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "FACC.txt", EXPORT);
+    await put(dir, "New Real Values.txt", "Quell Harbor\n"); // a name spotted unfaked, flagged
     await window.__textReaderAdoptFolder(dir);
   }, { CASE, EXPORT, PDF, PARENS, SPLIT, keyBytes: Array.from(KEY_BYTES) });
   await page.evaluate(() => window.__textReaderOpenDoc("FACC.txt"));
@@ -229,6 +230,30 @@ try {
   console.log("4. the screen put back");
   const after = await page.evaluate(`(${measure.toString()})()`);
   check("the real names again, laid out as before", JSON.stringify(after) === JSON.stringify(screen), JSON.stringify(after.filter((r, k) => JSON.stringify(r) !== JSON.stringify(screen[k]))));
+
+  console.log("5. with Flagged open, its values covered");
+  await page.click("#tab-flags");
+  await page.waitForFunction(() => [...document.querySelectorAll("#flags-list li")].some((li) => /Quell Harbor/.test(li.innerText)), null, { timeout: 5000 });
+  const flags = await page.evaluate(async () => {
+    const c0 = document.createElement("canvas"); c0.width = 8; c0.height = 8; c0.getContext("2d").fillRect(0, 0, 8, 8);
+    navigator.mediaDevices.getDisplayMedia = async () => c0.captureStream(5);
+    const read = () => [...document.querySelectorAll("#flags-list li")].map((li) => ({ text: li.innerText, before: getComputedStyle(li, "::before").content }));
+    let seen = null;
+    const toBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function (...a) {
+      if (!seen) seen = read();
+      return toBlob.apply(this, a);
+    };
+    document.getElementById("shot-btn").click();
+    for (let t = 0; t < 100 && !seen; t++) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 800));
+    HTMLCanvasElement.prototype.toBlob = toBlob;
+    return { seen, after: read(), toast: document.getElementById("toast").textContent };
+  });
+  check("in the picture, no flagged value is shown", !!flags.seen && flags.seen.length > 0 && flags.seen.every((r) => !/Quell|Harbor/.test(r.text)), JSON.stringify(flags.seen));
+  check("…each covered with the five blocks", !!flags.seen && flags.seen.every((r) => r.before === '"\u2588\u2588\u2588\u2588\u2588"'), JSON.stringify(flags.seen));
+  check("…and shown again after", flags.after.some((r) => /Quell Harbor/.test(r.text)) && flags.after.every((r) => r.before === "none"), JSON.stringify(flags.after));
+  check("the toast says the list was covered", /Flagged list's value is covered/.test(flags.toast), flags.toast);
   check("no page errors", errors.length === 0, errors.join(" | "));
 } finally {
   await browser.close();

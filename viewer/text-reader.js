@@ -1539,13 +1539,30 @@ function shotHeldBack(popWas) {
   for (const body of caretHeld) convertTypedRealsSoon(body);
 }
 
-/** One picture taken with the names in their pseudonyms, and the screen put back. */
+/**
+ * One picture taken with the names in their pseudonyms, and the screen put back.
+ *
+ * The Flagged panel's values are names spotted unfaked and not in the key
+ * yet, so no fake stands for them and every pass above leaves them as they
+ * read: with the panel open the picture carried the list of real names. Each
+ * is covered with WITHHELD while the picture is taken (body.shot-flags, in
+ * the stylesheet, so a list drawn again meanwhile is covered too), with a key
+ * open or none.
+ */
 async function withFakes(take) {
+  document.body.classList.add("shot-flags");
   const back = fakesForShot();
   try {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     return await take();
-  } finally { back(); }
+  } finally {
+    back();
+    document.body.classList.remove("shot-flags");
+  }
+}
+/** How many of the Flagged panel's values are on screen, to be covered in a screenshot (withFakes). */
+function flagsOnScreen() {
+  return document.body.classList.contains("side-hidden") || $("side-flags").hidden ? 0 : flagsList.children.length;
 }
 
 function saveShot(blob) {
@@ -1564,6 +1581,7 @@ $("shot-btn").addEventListener("click", async (e) => {
   e.currentTarget.blur(); // no focus ring on the button in the picture
   if (shooting) return;
   shooting = true;
+  const flagsCovered = flagsOnScreen();
   try {
     let blob = extensionShoots() ? await withFakes(shotByExtension) : null;
     if (!blob) {
@@ -1573,9 +1591,10 @@ $("shot-btn").addEventListener("click", async (e) => {
     if (!blob) { toast("This browser cannot take a screenshot of the page.", { error: true }); return; }
     saveShot(blob);
     const held = [...shotWithheld];
-    toast(!key ? "Screenshot saved to Downloads."
+    const flagsSay = flagsCovered ? ` The Flagged list's ${flagsCovered === 1 ? "value is" : `${flagsCovered} values are`} covered with ${WITHHELD}.` : "";
+    toast((!key ? "Screenshot saved to Downloads."
       : `Screenshot saved to Downloads, the names in their pseudonyms${shotLeftOut ? ` — and ${shotLeftOut} PDF page${shotLeftOut === 1 ? "" : "s"} left out of it, whose names could not be placed to be covered` : ""}`
-        + (held.length ? `${shotLeftOut ? ";" : " —"} ${withheldList(held)} covered with ${WITHHELD}: the key holds an instruction for ${held.length === 1 ? "it" : "them"}, not a pseudonym.` : "."),
+        + (held.length ? `${shotLeftOut ? ";" : " —"} ${withheldList(held)} covered with ${WITHHELD}: the key holds an instruction for ${held.length === 1 ? "it" : "them"}, not a pseudonym.` : ".")) + flagsSay,
       held.length ? { error: true } : undefined);
   } catch (err) {
     if (err && err.name === "NotAllowedError") return; // the share was declined
@@ -16369,7 +16388,11 @@ function renderFlags() {
   }
   for (const v of flagged) {
     const li = document.createElement("li");
-    li.textContent = v;
+    // Its own span, so a screenshot can cover it (body.shot-flags).
+    const fv = document.createElement("span");
+    fv.className = "fv";
+    fv.textContent = v;
+    li.appendChild(fv);
     // Several words can be made one phrase here, after they were flagged, as
     // well as from the selection — and made an ordinary flag again.
     const on = TD.isPhrase(phrases, v);
