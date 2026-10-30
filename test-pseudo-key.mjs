@@ -995,6 +995,10 @@ console.log("a street's name word, read off the address rows");
   check("the whole address still reverses", translate(compile(k), "123 Marjoram BLVD, Los Angeles, CA 90028").text, "123 Cordovale BLVD, Los Angeles, CA 90028");
   check("streetWord reads the one word changed", streetWord("9 S. Pellam Ave", "9 S. Quillfeather Ave"), { real: "Pellam", fake: "Quillfeather" });
   check("…and nothing where two words changed", streetWord("9 Pacific Coast Hwy", "9 Buckthorn Hwy"), null);
+  check("…a numbered street's ordinal", streetWord("100 S 5th St", "100 S Chestnut St"), { real: "5th", fake: "Chestnut" });
+  check("…and one with no house number", streetWord("S 5th St", "Hawthorn St"), { real: "5th", fake: "Hawthorn" });
+  const fifth = keyOf([["address", "100 S 5th St, Pasadena, CA 91101", "100 S Chestnut St, Pasadena, CA 91101", "", "replaced", "regex", 1]]);
+  check("a bare numbered street's stand-in reverses to its ordinal", translate(compile(fifth), "the Chestnut St gate").text, "the 5th St gate");
   const two = keyOf([
     ["address", "9 Pellam Ave", "9 Quillfeather Ave", "", "replaced", "regex", 1],
     ["address", "12 Trevanion Ave", "12 Quillfeather Ave", "", "replaced", "regex", 1],

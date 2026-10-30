@@ -1221,7 +1221,13 @@ forward direction's (`capOnlyMiss`), now asked by the column reading
 the same (`_rd_street_word_pairs`, pinned by `test_round_trip_check.py`), and
 PDF-Linker now gives a one-word street the stand-in its word has as a name or
 company word, so a company named after its building reverses through the
-word's own row. `test-pseudo-key.mjs`, "a street's name word".
+word's own row. `test-pseudo-key.mjs`, "a street's name word". A numbered street's word is its ordinal ("5th", read
+off "100 S 5th St" -> "100 S Chestnut St"), so a bare "Chestnut St" reads "5th
+St"; and an ordinal set in the matched text's case keeps its letters lower
+case (`applyCase`: "Chestnut" read back as "5Th" before), in PDF-Linker's port
+too (`_rd_apply_case`). PDF-Linker writes each address row's type in its
+other spelling as well ("St"/"Street", "BLVD"/"BOULEVARD"), so a draft that
+writes the street either way reads back.
 
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each

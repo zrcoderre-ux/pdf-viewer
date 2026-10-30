@@ -329,7 +329,9 @@ export function streetWord(real, fake) {
   if (r.length !== 1 || f.length !== 1) return null;
   const clean = (w) => w.replace(/[.,;:]+$/, "");
   const rw = clean(r[0]), fw = clean(f[0]);
-  if (!/^\p{L}{3,}$/u.test(rw) || !/^\p{L}{3,}$/u.test(fw)) return null;
+  // (A numbered street's word is its ordinal, "5th": PDF-Linker gives it a
+  // stand-in like any other.)
+  if (!(/^\p{L}{3,}$/u.test(rw) || /^\d{1,3}(?:st|nd|rd|th)$/i.test(rw)) || !/^\p{L}{3,}$/u.test(fw)) return null;
   return { real: rw, fake: fw };
 }
 // Reverse-only: a one-word row PDF-Linker never fakes standing alone — a word
@@ -1021,7 +1023,10 @@ export function applyCase(shape, value) {
     const both = core !== core.toUpperCase() && core !== core.toLowerCase();
     if (both && !mostlyShouted(core)) return v;
     let first = true;
-    return v.replace(WORD_RE, (w) => {
+    return v.replace(WORD_RE, (w, at) => {
+      // An ordinal's letters ("5th", a numbered street's word) are no word
+      // to capitalise: "Chestnut" read back as its street wrote "5Th".
+      if (at > 0 && /\d/.test(v[at - 1]) && /^(?:st|nd|rd|th)$/i.test(w)) { first = false; return w.toLowerCase(); }
       const out = !both || isShoutedWord(w) ? titleWord(w, first) : w;
       first = false;
       return out;
