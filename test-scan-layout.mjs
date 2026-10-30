@@ -230,6 +230,42 @@ try {
     await t.close();
   }
 
+  console.log("a scanned invoice table, its cells on baselines a point apart (the owner: \"The viewer shows this chart as way too small\")");
+  {
+    // Thirty rows of five columns, unruled, 7.5-point cells on an 11-point
+    // leading, each cell a point lower than the one before it, as a scan's
+    // OCR reads a table that leans: pdfRows makes each cell a row of its own,
+    // and the leading was read as the step between them. The export's columns
+    // padded with spaces; a total row and a page number at the foot.
+    const COLX = [96, 345, 395, 450, 505], PADS = [56, 14, 16, 18];
+    const exp = ["====== Page 1 — REVIEW: 40 word(s) of this page's OCR layer were CORRECTED to this run's own reading ======", ""];
+    const pdf = [];
+    const head = ["Invoice", "Date", "Invoice Total", "Reimbursables", "No Contract"];
+    exp.push(head.map((c, k) => (k < 4 ? c.padEnd(PADS[k]) : c)).join(""));
+    head.forEach((c, k) => pdf.push([c, 140, 7, COLX[k]]));
+    const tops = [];
+    for (let r = 0; r < 30; r++) {
+      const fee = `$${(1800 + 900 * (r % 3)).toLocaleString("en-US")}.00`;
+      const cells = [`#${String(r + 1).padStart(2, "0")}-${100 + r}-23 - Safety Inspections ${W[r % 20]} ${W[(r * 7) % 20]}`, `${(r % 12) + 1}/${r + 1}/23`, fee, "", fee];
+      exp.push(cells.map((c, k) => (k < 4 ? c.padEnd(PADS[k]) : c)).join(""));
+      const y = 155 + r * 11;
+      tops.push(y - 7.5);
+      cells.forEach((c, k) => { if (c) pdf.push([c, y + k, 7.5, COLX[k]]); });
+    }
+    exp.push("Total of all invoices".padEnd(PADS[0] + PADS[1]) + "$78,370.00".padEnd(PADS[2]) + "$0.00".padEnd(PADS[3]) + "$78,370.00", "", "", "                                   56");
+    ["Total of all invoices", "", "$78,370.00", "$0.00", "$78,370.00"].forEach((c, k) => { if (c) pdf.push([c, 155 + 30 * 11 + 6, 7.5, COLX[k]]); });
+    pdf.push(["56", 740, 10, 300]);
+    const t = await open(browser, srv.base, { text: exp.join("\n") + "\n", pdf });
+    const sz = [...new Set(t.lines.map((l) => Math.round(l.size * 10) / 10))];
+    check("the table in one size, near the PDF's, not half of it", sz.length === 1 && sz[0] >= 7, JSON.stringify(sz));
+    const first = t.lines[1], last = t.lines[30];
+    check("…its first and last rows where the scan prints them", Math.abs(first.top - tops[0]) <= 6 && Math.abs(last.top - tops[29]) <= 6,
+      `${Math.round(first.top)} / ${tops[0]}, ${Math.round(last.top)} / ${tops[29]}`);
+    check("…and across the page inside the PDF's text", t.lines.every((l) => l.right <= 560), JSON.stringify(t.lines.map((l) => Math.round(l.right)).filter((x) => x > 560)));
+    check("no page errors", t.errors.length === 0, t.errors.join(" | "));
+    await t.close();
+  }
+
   console.log("the same page, a born-digital PDF (no REVIEW clause): laid out as before, by its rows");
   const b = await open(browser, srv.base, build({ review: false }));
   const bs = new Set(b.lines.map((l) => Math.round(l.size * 100) / 100));
