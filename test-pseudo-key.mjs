@@ -10,7 +10,7 @@ import {
   parseKey, compile, translate, translateRuns, compileForward, forwardRuns,
   compileReals, compileFakes, findReals, mirrorCase, caseShape, applyCase, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
-  wordFakesOf, keyCellKind, contactValue, boundRows, compilePinnedFakes, capOnlyReal,
+  wordFakesOf, keyCellKind, contactValue, boundRows, compilePinnedFakes, capOnlyReal, streetWord,
 } from "./viewer/pseudo-key.js";
 import { findRealsInPlain, fakeFor } from "./viewer/textdoc.js";
 
@@ -976,6 +976,34 @@ console.log("a row PDF-Linker marks full name only");
   check("…nor offered as you type", compileTypeahead(k).some((e) => e.real === "Provision"), false);
   check("the full name and a live bare surname still are",
     findRealSpans(compileReals(k), "Provision Holdings, LLC and Pellew").length, 2);
+}
+
+console.log("a street's name word, read off the address rows");
+{
+  // PDF-Linker keys an address as a whole and fakes only its street name, so
+  // the key holds no row for the word: the reader reads it off the row.
+  const k = keyOf([
+    ["address", "123 Cordovale Blvd, Los Angeles, CA 90028", "123 Marjoram BLVD, Los Angeles, CA 90028", "", "replaced", "regex", 1],
+    ["address", "4500 W. Halvorsen Boulevard", "4500 Linden Boulevard", "", "replaced", "regex", 1],
+  ]);
+  check("the bare street word reverses, capitalised",
+    translate(compile(k), "Marjoram Boulevard frontage.").text, "Cordovale Boulevard frontage.");
+  check("…and in capitals", translate(compile(k), "MARJORAM BLVD LP").text, "CORDOVALE BLVD LP");
+  check("…never in lower case: the word of the language", translate(compile(k), "the marjoram in the garden").text, "the marjoram in the garden");
+  check("an older run's fake that dropped the directional", translate(compile(k), "West of Linden.").text, "West of Halvorsen.");
+  check("…display only: nothing written or refused by it", fakeFor(compileForward(k), "Cordovale"), null);
+  check("the whole address still reverses", translate(compile(k), "123 Marjoram BLVD, Los Angeles, CA 90028").text, "123 Cordovale BLVD, Los Angeles, CA 90028");
+  check("streetWord reads the one word changed", streetWord("9 S. Pellam Ave", "9 S. Quillfeather Ave"), { real: "Pellam", fake: "Quillfeather" });
+  check("…and nothing where two words changed", streetWord("9 Pacific Coast Hwy", "9 Buckthorn Hwy"), null);
+  check("…a numbered street's ordinal", streetWord("100 S 5th St", "100 S Chestnut St"), { real: "5th", fake: "Chestnut" });
+  check("…and one with no house number", streetWord("S 5th St", "Hawthorn St"), { real: "5th", fake: "Hawthorn" });
+  const fifth = keyOf([["address", "100 S 5th St, Pasadena, CA 91101", "100 S Chestnut St, Pasadena, CA 91101", "", "replaced", "regex", 1]]);
+  check("a bare numbered street's stand-in reverses to its ordinal", translate(compile(fifth), "the Chestnut St gate").text, "the 5th St gate");
+  const two = keyOf([
+    ["address", "9 Pellam Ave", "9 Quillfeather Ave", "", "replaced", "regex", 1],
+    ["address", "12 Trevanion Ave", "12 Quillfeather Ave", "", "replaced", "regex", 1],
+  ]);
+  check("two streets on one stand-in: neither", translate(compile(two), "Quillfeather Ave").text, "Quillfeather Ave");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

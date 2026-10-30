@@ -1229,6 +1229,33 @@ save, never offered as you type. The full name, and a live bare surname whose
 Status is "no match", are faked as before. `test-pseudo-key.mjs`, "a row
 PDF-Linker marks full name only".
 
+**A street's name word is read off the address rows** (`streetWord`,
+`STREET_CATS`, parseKey; `compile`'s `capOnly`; the owner, 2026-10-30).
+PDF-Linker fakes an address's street name and keeps the rest, and writes the
+whole address as its row ("123 Sunset Blvd, Los Angeles…" -> "123 Marjoram
+BLVD, Los Angeles…"), never the word. So wherever the street stood without its
+whole address — no house number, a company named after its building, a
+draft's passing mention — the reader showed "Marjoram" in place of the name.
+The one word an `address`, `address_street` or `address_fragment` row changes
+(the words its two sides share at either end set aside; a directional before
+the real word read past where an older run faked the two as one word) is now
+a pair of its own: display only, never in `warn` (nothing is written or
+refused by it), and reversed only where CAPITALISED, since a street's stand-in
+is often a word of the language. None where a row already owns that fake, or
+where two streets would give it two reals. The capital-only test is the
+forward direction's (`capOnlyMiss`), now asked by the column reading
+(`columnHits`) as well as the plain one. PDF-Linker's round-trip port reads
+the same (`_rd_street_word_pairs`, pinned by `test_round_trip_check.py`), and
+PDF-Linker now gives a one-word street the stand-in its word has as a name or
+company word, so a company named after its building reverses through the
+word's own row. `test-pseudo-key.mjs`, "a street's name word". A numbered street's word is its ordinal ("5th", read
+off "100 S 5th St" -> "100 S Chestnut St"), so a bare "Chestnut St" reads "5th
+St"; and an ordinal set in the matched text's case keeps its letters lower
+case (`applyCase`: "Chestnut" read back as "5Th" before), in PDF-Linker's port
+too (`_rd_apply_case`). PDF-Linker writes each address row's type in its
+other spelling as well ("St"/"Street", "BLVD"/"BOULEVARD"), so a draft that
+writes the street either way reads back.
+
 **A name wrapped inside a column** (`pseudo-key.columnHits`): a caption sets
 the parties in a column beside the case number, and the export writes each
 line whole — "…; and QUARRY", the blank, ")  Case No.: 25STCV59720" — with

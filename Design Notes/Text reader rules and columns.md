@@ -720,6 +720,22 @@ makes it a ticked box on the next pass, and a mark typed into something else
 is text again (re-derived on every pass, like the rule spans). Tested in
 `test-textdoc.mjs` and `test-columns.html`, in both views.
 
+**A form banner holds no box, and an older mark beside a new one is the
+OCR's** (`textdoc.isFormBanner`, `checkboxRanges`, `dressCheckboxes`,
+2026-10-30). PDF-Linker's note heading a form page ends "1 unreadable
+([ ? ])]", naming the state it counted, and the reader drew a box in the
+banner. And on a scanned form the OCR's own reading of a printed box, "[ ]"
+or "[X]", stood beside the five-character mark PDF-Linker wrote for that box
+and was drawn as a second one. Both are text now: a line that is a form
+banner (`[fillable …]`, `[printed …]`) is given no box, and on a line that
+carries a five-character mark the three-character spellings are not marks;
+an older export, which writes only the three-character ones, is drawn as
+before. PDF-Linker now drops those readings itself on a recognised page
+(its *Court forms filled with ink* notes, "…and the OCR's reading of a box's
+outline is not text"); this covers an export it wrote before that. The
+owner reported the shapes "[ X ] _]" and "CJ [   ]", which are PDF-Linker's
+to fix and are not marks here either way.
+
 **Each piece where the PDF prints it, at its own size** (`pdfsync.rowItemsNear`,
 `lineItems`; `text-reader.js`, `planCells`, `placePages`; `columns.placeLine`,
 `lineMap`). pdf.js hands a page's text over as ITEMS, a run of type each — a
@@ -1411,7 +1427,31 @@ the line spacing from the line above it (`pdfsync.rowLayout`), so where the
 PDF sets the next row closer than that the rule is drawn over that row's text
 (MC-011, the underline under item 11b across 11c). Straight, and in its
 order in the file, but on the wrong side of the text; laying it between its
-neighbours instead would move the lines under it on every such page.
+neighbours instead would move the lines under it on every such page. (Since
+2026-10-30, at the owner's direction, it is changed: "pdf viewer should never
+have lines go through text unless it is a strike though… It should be either
+above or below the text, like it is in raw" — see "No line through text but a
+strike", below.)
+
+**No line through text but a strike** (`HAIR_RULE_RE`, `HAIR_ROOM`,
+text-reader.js; `pdfsync.rowLayout`; the owner, 2026-10-30). A line of nothing
+but horizontal runs (a signature line, an underline; no box's bar or corner on
+it) held no room beside the PDF (`bare`), so the lines either side closed over
+it and its hairline, drawn at the middle of its own box, went through whatever
+stood there: the owner's cross-complaint drew its signature line through the
+name typed under it, where the block under the line was a picture read by OCR
+(its lines spread, `spread`). Such a line is now a hairline in a thin slot of
+its own, `HAIR_ROOM` (0.3) of the body type, and clears and is cleared by
+that, so it stands in a gap; and where the PDF has no row for it, rowLayout
+lays it under the type of the line the export writes it after (where an
+underline is) rather than a pitch down on the next line. `audit/layout-audit.mjs`
+counts `through`: a hairline of a rule line across another line's type, read
+where each run is drawn. Measured: the cross-complaint's shape rebuilt from
+invented text, 1 before and 0 after; the eight blank forms of the fixture
+folder, no change but for the better (three pages no longer grown past their
+paper, register 52 to 49). Left: MC-010's foot, where the form's print-button
+labels are taken down to 2.7 points to fit the paper, still crosses at the
+default window width (not at a wider one).
 
 **A caption's `)` side is a bar** (`textdoc.captionParens`, `rules.js`
 `dressLines` and `markParen`; owner's request, 2026-10-22). Pleading paper

@@ -10712,11 +10712,17 @@ function decideKey(answer) {
   });
   persistValues();
   renderFlags();
+  // Said as it is: the answer is held here until Save writes it into
+  // New Real Values.txt, and the key itself is never written by the reader —
+  // pseudonym_key.xlsx changes only when the operator re-runs PDF-Linker
+  // (the owner, 2026-10-30: no writing the key on Save, and no run started
+  // by a Save; a re-run by hand).
   if (a !== "yes" && a !== "no" && a !== "never") {
-    toast(a === "phrase"
-      ? `"${real}" is to be faked whole, as one name — saved to ${TD.VALUES_FILE} for PDF-Linker's next run.`
-      : `"${real}" answered “${a}” — saved to ${TD.VALUES_FILE}, read by PDF-Linker as its Fix? cell.`
-        + (LK.classifyFix(a, real).kind === "replacement" ? " A new pseudonym for a name the files carry is put in by its next full run: a click of Re-run PDF-Linker does it." : ""));
+    toast((a === "phrase"
+      ? `"${real}" is to be faked whole, as one name.`
+      : `"${real}" answered “${a}”.`)
+      + ` Save writes it into ${TD.VALUES_FILE}; pseudonym_key.xlsx changes when you Re-run PDF-Linker.`
+      + (LK.classifyFix(a, real).kind === "replacement" ? " A new pseudonym for a name the files carry takes its full run, which Re-run PDF-Linker starts for it." : ""), { ms: 8000 });
   }
   const after = keyTerms();
   if (after.length > 1) stepKeyTerm(1);
@@ -22374,6 +22380,11 @@ function applyMatchedLayoutNow() {
         if (lefts[k] != null) lefts[k] = edge;
       });
     }
+    // A line that is only a horizontal rule is a hairline in a thin slot of
+    // its own (HAIR_ROOM), never type a line's size: it is cleared, and
+    // clears, by that much (bare, below), so it stands in a gap.
+    const hair = lines.map((l) => HAIR_RULE_RE.test((ltOf(l) || l).textContent));
+    if (sizes && base > 0 && hair.some(Boolean)) sizes = sizes.map((h, k) => (hair[k] && h > 0 ? Math.min(h, base * HAIR_ROOM) : h));
     // Never on top of each other: a row the PDF (a scan's text layer, most
     // often) prints closer under the one above than that line's box is tall
     // is pushed down to clear it, and out of register with the PDF by that
@@ -22397,6 +22408,7 @@ function applyMatchedLayoutNow() {
     // caption's `)` side (typeTextOf).
     const bare = (k) => {
       if (isEmptyLine(lines[k])) return true;
+      if (hair[k]) return false; // (its thin slot: HAIR_ROOM)
       const t = ltOf(lines[k]) ? typeTextOf(lines[k]) : lines[k].textContent;
       return (fixed && fixed[k] && !t.trim()) || RULE_ONLY_RE.test(t) || (!t.trim() && !!lines[k].querySelector(".rb.paren"));
     };
@@ -23069,6 +23081,19 @@ const FIT_FLOOR = 0.4;
 const TYPE_SLACK = 0.05;
 // A line of box-drawing glyphs and nothing else: a rule, not type.
 const RULE_ONLY_RE = /^[\s\u2500-\u257F]*[\u2500-\u257F][\s\u2500-\u257F]*$/;
+// …and of those, a line of nothing but HORIZONTAL runs — a signature line, an
+// underline the PDF draws under a heading or a blank — with no box's bar or
+// corner on it (a box row's bars are drawn the height of its row).
+const HAIR_RULE_RE = /^[\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*[\u2500\u2501\u2550][\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*$/;
+// NO LINE IS DRAWN THROUGH TEXT BUT A STRIKE (the owner, 2026-10-30: "pdf
+// viewer should never have lines go through text unless it is a strike
+// though… It should be either above or below the text, like it is in raw").
+// Such a rule line held no room beside the PDF (`bare`), so the lines either
+// side closed over it and its hairline, drawn at the middle of its own box,
+// went through whichever stood there: a signature line through the name
+// typed under it. It holds a thin slot of its own instead, this much of the
+// body type — its box a third of a line — and the lines around it clear it.
+const HAIR_ROOM = 0.3;
 // …and a picture's words (rowLayout's `spread`, and the lines under the last
 // number the PDF does not print), set to fit the room the picture leaves:
 // smaller than the page's fit allows, since past it they would either stand
@@ -23411,6 +23436,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
   // in the reader's type among the PDF's.
   const page = place ? null : mostFace(rows.flatMap((r) => r.items || []), faceOf);
   const plain = page ? { ...page, bold: false, italic: false } : null;
+  const bodyRight = PS.bodyRightOf(rows) || 0;
   return lines.map((l, k) => {
     const m = matched[k];
     if (!m) return plain ? { text: null, cuts: [], places: [], face: plain } : null;
@@ -23436,7 +23462,14 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     // (On pleading paper each run at its own size too, where it is not its
     // line's: a form's pieces are placed at theirs already.)
     const runs = PS.faceRuns(shown, found, { fileAt: map.fileAt, atoms: map.atoms, faceOf, size: place ? 0 : sizes[k] });
-    if (!place) return { text: null, cuts: [], places: [], face, runs };
+    // A JUSTIFIED line (PS.justifiedRight): set evenly out to where the PDF
+    // ends it (justifyLines), as a word processor justifies — not single
+    // spaced and ragged, nor with its last word placed apart on its own and
+    // the whole of the line's stretch in front of it (the owner, 2026-10-30:
+    // "It adds a bunch of space before the last word rather than spacing it
+    // out like justified does on word").
+    const justify = PS.justifiedRight(shown, found, bodyRight, row.height > 0 ? row.height : sizes[k]);
+    if (!place) return { text: null, cuts: [], places: [], face, runs, justify };
     const first = shown.search(/\S/);
     // Each piece at its own size — its item's, the line's within a fifth of
     // it — and the line's here is its ROW's own, not the page's body that
@@ -23462,7 +23495,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
     found.forEach((g, gi) => {
       const at = g.glued ? -1 : map.fileAt(markStart(g.at));
       if (!(at >= 0)) return;
-      if (g.at > first && !apart[gi] && !steps[gi]) return;
+      if (g.at > first && ((!apart[gi] && !steps[gi]) || justify)) return;
       const f = faceOf(g.item.font);
       const h = g.item.h > 0 ? g.item.h : own;
       const size = own > 0 && Math.abs(h - own) <= own * 0.2 ? own : h;
@@ -23470,7 +23503,7 @@ function planCells(lines, texts, matched, rows, info, sizes, { place = true } = 
       places.push([at, { x: g.x - (pre ? faceEm(pre, f || face) * size : 0), size, face: f }]);
       if (markStart(g.at) > markStart(first)) cuts.push(at);
     });
-    return { text: TD.serializeNodes(lt), cuts, places, face, runs };
+    return { text: TD.serializeNodes(lt), cuts, places, face, runs, justify };
   });
 }
 /**
@@ -23548,6 +23581,7 @@ function placePages(plans, near) {
     const composing = p.body === composingIn;
     const caret = composing ? -1 : caretOffsetIn(p.body);
     let moved = false;
+    const justified = [];
     p.lines.forEach((l, k) => {
       const lt = ltOf(l);
       const c = p.cells[k];
@@ -23557,6 +23591,7 @@ function placePages(plans, near) {
       const size = p.sizes[k] * s;
       // A numbered page (no lefts): the PDF's weight and slant, run by run,
       // and nothing placed (planCells with `place` false).
+      if (c.justify) justified.push([lt, c.justify * s]);
       if (!p.lefts) {
         if (placeLine(lt, { places: null, start: null, at: null, face: c.face, size, lead: 0, cellFaces: c.cellFaces || null, runs })) moved = true;
         return;
@@ -23571,8 +23606,38 @@ function placePages(plans, near) {
       if (placeLine(lt, { places, start, at: lineAt, face: c.face, size, lead, cellFaces: c.cellFaces || null, runs })) moved = true;
     });
     if (moved && caret >= 0) { const pt = pointAtOffset(p.body, caret); if (pt) placeCaret(pt.node, pt.offset); }
+    justifyLines(p.body, justified);
     p.body.__placed = true;
     formLook.placed++;
+  }
+}
+/**
+ * Each justified line (planCells' `justify`, the PDF's right end of it in the
+ * page's px) given the word spacing that ends it there: one read of every
+ * line's text, then one write, so a page costs one layout. Its spaces are the
+ * file's own (one between each word), widened alike; a line that would have
+ * to be squeezed, or stretched past a type height a space, is left as it is,
+ * and a line no longer justified has its spacing taken off.
+ */
+function justifyLines(body, justified) {
+  const want = new Map(justified);
+  const reads = [];
+  const origin = body.getBoundingClientRect().left;
+  for (const lt of body.querySelectorAll(":scope > .line > .lt")) {
+    if (!want.has(lt)) { if (lt.style.wordSpacing) lt.style.wordSpacing = ""; continue; }
+    const text = lt.textContent;
+    const a = text.search(/\S/), b = text.trimEnd().length;
+    const spaces = a < 0 ? 0 : (text.slice(a, b).match(/ /g) || []).length;
+    if (!spaces || a > 0) { if (lt.style.wordSpacing) lt.style.wordSpacing = ""; continue; }
+    const r = document.createRange();
+    r.selectNodeContents(lt);
+    const box = r.getBoundingClientRect();
+    reads.push([lt, spaces, box.right - origin, parseFloat(lt.style.wordSpacing) || 0, parseFloat(getComputedStyle(lt).fontSize) || 12]);
+  }
+  for (const [lt, spaces, right, had, size] of reads) {
+    const ws = had + (want.get(lt) - right) / spaces;
+    const v = ws > 0.05 && ws <= size ? ws.toFixed(2) + "px" : "";
+    if (lt.style.wordSpacing !== v) lt.style.wordSpacing = v;
   }
 }
 // The page an input method is composing on, while it is (placePages).

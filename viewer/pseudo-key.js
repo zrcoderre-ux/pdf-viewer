@@ -305,6 +305,35 @@ export function keyCellKind(cell, real) {
 }
 
 const ALT_STATUS = "alt spelling"; // forward-only: fake belongs to the canonical row
+
+// The key's address rows (PDF-Linker's `address` detector and the street and
+// fragment terms `register_addresses` adds), whose street word parseKey reads.
+const STREET_CATS = new Set(["address", "address_street", "address_fragment"]);
+const STREET_DIRS = new Set(["n", "s", "e", "w", "ne", "nw", "se", "sw", "north", "south", "east", "west", "northeast", "northwest", "southeast", "southwest"]);
+/**
+ * The one word an address row changes, { real, fake }, or null: the words the
+ * row's two sides share at either end set aside (the house number, the street
+ * type, the City, ST ZIP), one word left on each side — or, on the real side,
+ * a directional and the word, an older run having faked the two as one.
+ */
+export function streetWord(real, fake) {
+  const words = (v) => trim(v).split(/\s+/).filter(Boolean);
+  const a = words(real), b = words(fake);
+  const same = (x, y) => fold(x) === fold(y);
+  let i = 0;
+  while (i < a.length && i < b.length && same(a[i], b[i])) i++;
+  let j = 0;
+  while (j < a.length - i && j < b.length - i && same(a[a.length - 1 - j], b[b.length - 1 - j])) j++;
+  let r = a.slice(i, a.length - j), f = b.slice(i, b.length - j);
+  if (r.length === 2 && f.length === 1 && STREET_DIRS.has(fold(r[0]).replace(/\.$/, ""))) r = r.slice(1);
+  if (r.length !== 1 || f.length !== 1) return null;
+  const clean = (w) => w.replace(/[.,;:]+$/, "");
+  const rw = clean(r[0]), fw = clean(f[0]);
+  // (A numbered street's word is its ordinal, "5th": PDF-Linker gives it a
+  // stand-in like any other.)
+  if (!(/^\p{L}{3,}$/u.test(rw) || /^\d{1,3}(?:st|nd|rd|th)$/i.test(rw)) || !/^\p{L}{3,}$/u.test(fw)) return null;
+  return { real: rw, fake: fw };
+}
 // Reverse-only: a one-word row PDF-Linker never fakes standing alone — a word
 // of a party's name it pruned as the papers' own prose ("Provision" of
 // "Provision Holdings, LLC"), refused as a bare name, a judge's bare surname.
@@ -447,6 +476,36 @@ export function parseKey(sheets, name) {
     // name typed is still written as the key says.
     if (isCommonReal(e.fake)) { wordFakes.push({ fake: e.fake, real: e.real }); continue; }
     pairs.push({ fake: e.fake, real: e.real });
+  }
+
+  // A STREET'S NAME WORD, read off the address rows. PDF-Linker fakes an
+  // address's street name and keeps the rest ("123 Sunset Blvd, Los Angeles"
+  // -> "123 Marjoram BLVD, Los Angeles"), and writes the whole address as its
+  // row, never the word: the key held no "Marjoram", so wherever the street
+  // stood without its whole address (no house number, a company named after
+  // the building, a draft's passing mention) the reader showed the stand-in
+  // in place of the name (the owner, 2026-10-30). The word each such row
+  // changes is read off it as a pair of its own: display only (never in
+  // `warn`, so nothing is written or refused by it), and only where it is
+  // CAPITALISED (`cap`), since a street's stand-in is often a word of the
+  // language ("Marjoram", "Maple"). None where a row already owns that fake or
+  // two streets would give it two reals. PDF-Linker's round-trip port reads
+  // the same (`_rd_street_word_pairs`).
+  const owned = new Set(pairs.map((p) => fold(p.fake)));
+  for (const w of wordFakes) owned.add(fold(w.fake));
+  for (const g of byFake.keys()) owned.add(g);
+  const streets = new Map();
+  for (const e of entries) {
+    if (e.pinned || e.control || e.alt || !STREET_CATS.has(e.cat)) continue;
+    const w = streetWord(e.real, e.fake);
+    if (!w) continue;
+    const k = fold(w.fake);
+    if (owned.has(k) || fold(w.fake) === fold(w.real)) continue;
+    if (!streets.has(k)) streets.set(k, { fake: w.fake, reals: new Set(), real: w.real });
+    streets.get(k).reals.add(fold(w.real));
+  }
+  for (const v of streets.values()) {
+    if (v.reals.size === 1) pairs.push({ fake: v.fake, real: v.real, cap: true });
   }
 
   // The warning / forward list: every real value the key binds, alt
@@ -964,7 +1023,10 @@ export function applyCase(shape, value) {
     const both = core !== core.toUpperCase() && core !== core.toLowerCase();
     if (both && !mostlyShouted(core)) return v;
     let first = true;
-    return v.replace(WORD_RE, (w) => {
+    return v.replace(WORD_RE, (w, at) => {
+      // An ordinal's letters ("5th", a numbered street's word) are no word
+      // to capitalise: "Chestnut" read back as its street wrote "5Th".
+      if (at > 0 && /\d/.test(v[at - 1]) && /^(?:st|nd|rd|th)$/i.test(w)) { first = false; return w.toLowerCase(); }
       const out = !both || isShoutedWord(w) ? titleWord(w, first) : w;
       first = false;
       return out;
@@ -1132,8 +1194,11 @@ function warnRows(key) {
 
 /** Reversal matcher: fake → real. A fake that is an ordinary word is never reversed (wordFakesOf). */
 export function compile(key, opts) {
-  const pairs = pairRows(key).filter((p) => !isCommonReal(p.fake));
+  // (A street's word, `cap`, reverses where it is capitalised only, so an
+  // ordinary word may be one: parseKey.)
+  const pairs = pairRows(key).filter((p) => p.cap || !isCommonReal(p.fake));
   const map = new Map(pairs.map((p) => [fold(p.fake), p.real]));
+  const capOnly = new Set(pairs.filter((p) => p.cap).map((p) => fold(p.fake)));
   // The fake as the key spells it, for the casing (keySpelled).
   const spell = new Map(pairs.map((p) => [fold(p.fake), p.fake]));
   const rx = buildMatcher(pairs.map((p) => p.fake));
@@ -1142,7 +1207,7 @@ export function compile(key, opts) {
   // word with a fake ("Smith v. Jones (2010) 50 Cal.4th 100", Smith a fake
   // here) is that case's party, and reversing it writes a wrong citation in
   // the real names. Kept off this module (textdoc imports it).
-  return { rx, map, spell, spare: (opts && opts.spare) || null };
+  return { rx, map, spell, spare: (opts && opts.spare) || null, capOnly: capOnly.size ? capOnly : null };
 }
 
 /**
@@ -1569,7 +1634,7 @@ function columnHits(compiled, text, layout) {
         if (m.index >= end0) break;
         const end = m.index + m[0].length;
         const hit = end > parts[1].v ? lookup(compiled, m[0]) : null;
-        if (hit) {
+        if (hit && !capOnlyMiss(compiled, m[0], hit)) {
           const ranges = parts
             .filter((p) => p.v < end && p.v + p.len > m.index)
             .map((p) => [p.abs + Math.max(m.index, p.v) - p.v, p.abs + Math.min(end, p.v + p.len) - p.v]);

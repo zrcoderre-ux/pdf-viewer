@@ -485,7 +485,11 @@ it was on screen.
   `TD.spotsAfterSwaps`; a folder save would have hit it in every document of
   that shape, and one refusal writes nothing.
 - The reader never writes `pseudonym_key.xlsx`; there are no key edits to
-  save.
+  save. Asked again by the owner (2026-10-30), and kept: neither writing the
+  key on Save nor a Save starting PDF-Linker by itself; a key answer reaches
+  the key when the operator clicks Re-run PDF-Linker. The Key terms bar's
+  answer says so (`decideKey`), where it had said "saved to New Real
+  Values.txt" before any Save had written it.
 - After the change, the same harness folder: the bar read "1 of 3 here · 3 in
   1 other document", the confirm named A and B on screen and C off it, and
   Save wrote A, B and C with D untouched. With every document hung on the
