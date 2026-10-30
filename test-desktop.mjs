@@ -495,6 +495,20 @@ try {
     }), "refused");
   }
 
+  // ── 11b. Home's Case folders: the day's folders in Downloads ─────────────
+  console.log("11b. Home's Case folders: the main process names the folders in Downloads that changed today");
+  {
+    fs.mkdirSync(path.join(downloads, "Case Delta"), { recursive: true });
+    fs.writeFileSync(path.join(downloads, "Case Delta", "Complaint.pdf"), "%PDF-1.4 stand-in");
+    fs.writeFileSync(path.join(downloads, "loose.pdf"), "%PDF-1.4 stand-in");
+    const today = await win.evaluate(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return window.pdfplusNative.downloadsToday(d.getTime()); });
+    check("Downloads by its name", today && today.name, "Downloads");
+    check("…its folders that changed today, files left out", today && today.folders.map((f) => f.name).sort(), ["Case Delta"]);
+    const later = await win.evaluate(() => window.pdfplusNative.downloadsToday(Date.now() + 3600000));
+    check("…and none that did not change since the time asked", later && later.folders, []);
+    check("…no path handed to the page", JSON.stringify(today).includes(downloads), false);
+  }
+
   // ── 12. updates ───────────────────────────────────────────────────────────
   console.log("12. Home's Check for updates: up to date, then a newer release shown, downloaded and ready to install");
   {

@@ -217,6 +217,32 @@ async function browserPart() {
     });
     await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-item")].some((b) => b.textContent.includes("Case Alpha") && b.querySelector(".ci-status").textContent.startsWith("Finished")), null, { timeout: 10000 });
     check("Case Alpha has finished", (await rows()).find((r) => r.name === "Case Alpha").status.startsWith("Finished "), true);
+
+    console.log("11. in PDF+: only the folders its main process says changed today are read");
+    await shell.evaluate(() => {
+      window.__askedSince = null;
+      window.pdfplusNative = {
+        downloadsToday: async (since) => {
+          window.__askedSince = since;
+          return { name: "downloads", folders: [{ name: "Case Alpha", at: Date.now() }, { name: "Holiday", at: Date.now() }, { name: "Gone Since", at: Date.now() }] };
+        },
+      };
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForFunction(() => window.__askedSince !== null, null, { timeout: 10000 });
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-item")].every((b) => !b.textContent.includes("Case Beta") || !b.querySelector(".ci-where").textContent.includes("In Downloads")), null, { timeout: 10000 });
+    got = await rows();
+    check("asked from local midnight", await shell.evaluate(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return window.__askedSince === d.getTime(); }), true);
+    check("Case Alpha, which it named, is today's; the pictures folder and a folder gone are not listed", got.filter((r) => r.where.includes("In Downloads")).map((r) => r.name), ["Case Alpha"]);
+    check("Case Beta, which it did not name, is listed as opened here only", got.find((r) => r.name === "Case Beta").where.startsWith("Opened "), true);
+
+    console.log("12. a PDF+ whose Downloads is not the linked folder: every folder is read, as before");
+    await shell.evaluate(() => {
+      window.pdfplusNative = { downloadsToday: async () => ({ name: "Elsewhere", folders: [] }) };
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-item")].some((b) => b.textContent.includes("Case Beta") && b.querySelector(".ci-where").textContent.includes("In Downloads")), null, { timeout: 10000 });
+    check("Case Beta is today's again", (await rows()).find((r) => r.name === "Case Beta").where.startsWith("In Downloads today"), true);
     check("no page errors", errors, []);
     await app.close();
   } finally {

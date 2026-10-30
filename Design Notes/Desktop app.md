@@ -150,6 +150,14 @@ it. The real pickers sit in `window.__pdfplusPickers`, where the test puts a
 stand-in dialog; that the real Windows dialog honours `startIn` is
 Chromium's, and is not tested here.
 
+## Downloads for Home's Case folders
+
+`pdfplus:downloads-today` answers the shell with the folders in Downloads
+that changed since a time it gives, by the folders' own times, names and
+times only (`Design Notes/Home case folders.md`). It names no path, and
+reads nothing a page could not already list through the Downloads handle
+the user linked.
+
 ## Windows and closing
 
 New window and a tab pulled out of the strip use `window.open` with the

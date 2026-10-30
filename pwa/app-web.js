@@ -1076,6 +1076,24 @@ const downloadsSeen = new Map(); // folder name → { sig, day, listing }
 const zipTimes = new Map();      // zip name → lastModified
 async function todayInDownloads(dl, now) {
   const day = caseLib.startOfDay(now);
+  // PDF+ knows each folder's own time (main.js, "pdfplus:downloads-today"),
+  // so only the day's folders are read at all. Where the linked folder is
+  // not the Downloads it lists (another folder was picked), or an older PDF+
+  // has no such call (app files run from a checkout), every folder is read.
+  let native = null;
+  try { native = window.pdfplusNative && window.pdfplusNative.downloadsToday ? await window.pdfplusNative.downloadsToday(day) : null; }
+  catch { native = null; }
+  if (native && Array.isArray(native.folders) && native.name.toLowerCase() === dl.name.toLowerCase()) {
+    const rows = [];
+    for (const f of native.folders) {
+      let dir;
+      try { dir = await dl.getDirectoryHandle(f.name); } catch { continue; }
+      let listing;
+      try { listing = await readListing(dir); } catch { continue; }
+      if (caseLib.isCaseListing(listing)) rows.push({ name: f.name, handle: dir, listing, today: true, opened: 0, activity: f.at });
+    }
+    return rows;
+  }
   const zipsToday = new Set();
   const subs = [];
   for await (const [name, entry] of dl.entries()) {
@@ -1145,7 +1163,7 @@ async function renderCaseFoldersNow() {
   }
   for (const r of rows) {
     r.status = r.listing ? caseLib.folderStatus(r.listing, now) : null;
-    r.activity = r.listing ? caseLib.lastActivity(r.listing) : 0;
+    r.activity = Math.max(r.activity || 0, r.listing ? caseLib.lastActivity(r.listing) : 0);
   }
   const shown = caseLib.sortRows(rows).slice(0, CASE_ROWS_MAX);
   const say = shown.map((r) => {
