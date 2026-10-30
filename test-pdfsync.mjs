@@ -4,7 +4,7 @@
 import {
   normalizeStem, spaceStem, matchPdf, pdfMatcher, pageSources, pdfPageOf,
   parsePageRanges, formatPageRanges, swapStoreKey, scrollPosition, scrollTopFor, anchorGeometry,
-  pleadingGeometry, lineTop, slotTops, betweenTops, pdfRows, lineSimilarity, alignLines, rowLayout, scanLayout, fitRuns, firstPieceSize, faceCovers, nearRows, fontProgramFace, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
+  pleadingGeometry, lineTop, slotTops, betweenTops, pdfRows, lineSimilarity, alignLines, rowLayout, HAIR_RULE_RE, scanLayout, fitRuns, firstPieceSize, faceCovers, nearRows, fontProgramFace, bodyLeftOf, docBodyLeft, bodyRightOf, docBodyRight, slotFit, paperGrid, fileLayout, standApart, captionAlign,
   matchedScale, spreadTops, evenHalfLines, pageTypeSize, docTypeSize, typeSizes, combinedMembers, pdfsNear,
   offGridTops, holdWithin, rowItemsNear, lineItems, pdfFace, faceKey, numberedRowOf, faceRuns,
 } from "./viewer/pdfsync.js";
@@ -188,6 +188,17 @@ console.log("a page with no numbers: rows matched by their words");
     const foot = rowLayout(["alpha bravo charlie", ...pic, ...pic.map((t) => t + " again"), "", ""], [R(600, "alpha bravo charlie")], { height: 792 });
     check("under the last, down to the foot of the page (its top margin up from the bottom)", Math.round(foot.positions[12].top * 10) / 10 < 792 - 72, true);
     check("…the closing blank lines no lines to make room for", Math.round(foot.positions[1].spread * 10) / 10, Math.round(((792 - 72 - 614.4) / 12) * 10) / 10);
+  }
+  {
+    // A TABLE's rule between two rows is a rule line too, its junctions where
+    // the column rule crosses it: laid under the type of the row above, as a
+    // signature line is, not a pitch down through the next row's names (the
+    // owner's service list, 2026-10-30).
+    for (const t of ["────────", "   ───┬───", "───┼───", "───┴───", "┌──┐", "│ ──── │"]) check(`a rule: ${t}`, HAIR_RULE_RE.test(t), true);
+    for (const t of ["│     │", "─ x ─", "a ───", ""]) check(`no rule across: ${JSON.stringify(t)}`, HAIR_RULE_RE.test(t), false);
+    const rows = [{ top: 100, left: 72, height: 11, text: "Van Nuys, CA 91411 Los Angeles, CA 90025" }, { top: 124, left: 72, height: 11, text: "Pellmont Ashby Cordell Vance Fernhill Dovecote" }];
+    const lay = rowLayout(["Van Nuys, CA 91411   │ Los Angeles, CA 90025", "──────────┼──────────", "Pellmont Ashby Cordell Vance │ Fernhill Dovecote"], rows);
+    check("the table's rule stands between the two rows, under the type above it", lay.positions[1].top >= 111 && lay.positions[1].top < 124, true);
   }
   {
     // A SCAN (scanLayout): thirty lines 12 points apart from 100, the OCR's

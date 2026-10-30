@@ -23081,10 +23081,10 @@ const FIT_FLOOR = 0.4;
 const TYPE_SLACK = 0.05;
 // A line of box-drawing glyphs and nothing else: a rule, not type.
 const RULE_ONLY_RE = /^[\s\u2500-\u257F]*[\u2500-\u257F][\s\u2500-\u257F]*$/;
-// …and of those, a line of nothing but HORIZONTAL runs — a signature line, an
-// underline the PDF draws under a heading or a blank — with no box's bar or
-// corner on it (a box row's bars are drawn the height of its row).
-const HAIR_RULE_RE = /^[\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*[\u2500\u2501\u2550][\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*$/;
+// …and of those, a line with a HORIZONTAL run across it (PS.HAIR_RULE_RE) — a
+// signature line, an underline the PDF draws under a heading or a blank, a
+// table's rule between two rows with its junctions ("───┼───").
+const HAIR_RULE_RE = PS.HAIR_RULE_RE;
 // NO LINE IS DRAWN THROUGH TEXT BUT A STRIKE (the owner, 2026-10-30: "pdf
 // viewer should never have lines go through text unless it is a strike
 // though… It should be either above or below the text, like it is in raw").

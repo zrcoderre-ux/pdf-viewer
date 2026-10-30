@@ -923,8 +923,12 @@ export function docBodyRight(rowsByPage) {
   for (const rows of rowsByPage || []) { const r = bodyRightOf(rows); if (r != null) rs.push(r); }
   return rs.length ? median(rs) : null;
 }
-// A line of nothing but horizontal box-drawing runs: a drawn rule (rowLayout).
-const HAIR_RULE_RE = /^[\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*[\u2500\u2501\u2550][\s\u2500\u2501\u2504\u2505\u2508\u2509\u254C\u254D\u2550]*$/;
+// A RULE line: box-drawing glyphs and nothing else, with a horizontal run on
+// it — a signature line, an underline, and a table's rule between its rows,
+// whose "┬", "┼" or "┴" is where a column's rule crosses it ("───┼───": the
+// owner's service list drew its row rules through the next row's names).
+// A line of bars alone ("│   │") is no rule across: it is the column's.
+export const HAIR_RULE_RE = /^(?=[\s\u2500-\u257F]*$)[\s\u2500-\u257F]*[\u2500\u2501\u2550]{2}/;
 export function rowLayout(lineTexts, rows, { bodyLeft = null, height = 0, lineBox = 1.2 } = {}) {
   const map = alignLines(lineTexts, rows.map((r) => r.text));
   const matched = map.map((j, i) => (j == null ? null : i)).filter((i) => i != null);

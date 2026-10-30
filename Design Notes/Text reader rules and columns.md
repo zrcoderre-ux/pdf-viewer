@@ -1453,6 +1453,21 @@ paper, register 52 to 49). Left: MC-010's foot, where the form's print-button
 labels are taken down to 2.7 points to fit the paper, still crosses at the
 default window width (not at a wider one).
 
+**…a table's rule between its rows too** (`pdfsync.HAIR_RULE_RE`, one
+definition, read by text-reader.js; 2026-10-30). The rule above was read only
+of a line of plain horizontal runs, "no box's bar or corner on it", and a
+table's rule between two rows carries a junction wherever a column's rule
+crosses it ("───┼───", "───┬───"). The owner's service list (a pleading page
+whose two-column table PDF-Linker writes with such rules) drew each row rule
+through the first line of the row under it ("the strike through fix didn't
+work"), every line after it one rule's room too high. A rule line is now any
+line of box-drawing glyphs alone with a horizontal run of two or more on it,
+junctions and corners included; a line of bars alone ("│   │") is the
+column's and not one. Its thin slot leaves the column's bars unbroken: the
+junction's bar is drawn the height of that slot, between the bars of the rows
+on either side. Measured: the service list's shape rebuilt from invented
+text, `through` 3 before and 0 after, its rows back on the PDF's.
+
 **A caption's `)` side is a bar** (`textdoc.captionParens`, `rules.js`
 `dressLines` and `markParen`; owner's request, 2026-10-22). Pleading paper
 boxes the parties with a column of `)`s and an underscore line under them,
