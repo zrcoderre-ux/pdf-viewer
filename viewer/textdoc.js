@@ -4290,15 +4290,29 @@ const CHECKBOX_STATE = { "[   ]": "", "[ ]": "", "[ X ]": "x", "[X]": "x", "[ ? 
 export function checkboxState(s) {
   return Object.prototype.hasOwnProperty.call(CHECKBOX_STATE, s) ? CHECKBOX_STATE[s] : null;
 }
-/** Every checkbox mark in a text, in order: [from, to, state] each. */
+// PDF-Linker's own note heading a form page, "[printed form JUD-100 — marks
+// READ FROM INK — …: 26 box(es), 8 marked, 1 unreadable ([ ? ])]": the "[ ? ]"
+// in it names a state, it is no box on the page.
+const FORM_BANNER_RE = /^\s*\[(?:fillable|printed) .*\]\s*$/;
+/** Whether a line is PDF-Linker's note heading a form page. */
+export function isFormBanner(line) {
+  return FORM_BANNER_RE.test(String(line == null ? "" : line));
+}
+/**
+ * Every checkbox mark in a text, in order: [from, to, state] each. A form
+ * banner holds none, and on a line that carries a five-character mark an
+ * older three-character one ("[X]", "[ ]") is not PDF-Linker's: it is the
+ * OCR's reading of the printed box beside the mark written for it, and drawn
+ * as a box it put a second box on the line.
+ */
 export function checkboxRanges(text) {
   const s = String(text == null ? "" : text);
   const out = [];
-  if (!s.includes("[")) return out;
+  if (!s.includes("[") || isFormBanner(s)) return out;
   CHECKBOX_RE.lastIndex = 0;
   let m;
   while ((m = CHECKBOX_RE.exec(s))) out.push([m.index, m.index + m[0].length, CHECKBOX_STATE[m[0]]]);
-  return out;
+  return out.some(([a, b]) => b - a === 5) ? out.filter(([a, b]) => b - a === 5) : out;
 }
 
 /**

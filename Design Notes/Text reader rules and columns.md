@@ -696,6 +696,22 @@ makes it a ticked box on the next pass, and a mark typed into something else
 is text again (re-derived on every pass, like the rule spans). Tested in
 `test-textdoc.mjs` and `test-columns.html`, in both views.
 
+**A form banner holds no box, and an older mark beside a new one is the
+OCR's** (`textdoc.isFormBanner`, `checkboxRanges`, `dressCheckboxes`,
+2026-10-30). PDF-Linker's note heading a form page ends "1 unreadable
+([ ? ])]", naming the state it counted, and the reader drew a box in the
+banner. And on a scanned form the OCR's own reading of a printed box, "[ ]"
+or "[X]", stood beside the five-character mark PDF-Linker wrote for that box
+and was drawn as a second one. Both are text now: a line that is a form
+banner (`[fillable …]`, `[printed …]`) is given no box, and on a line that
+carries a five-character mark the three-character spellings are not marks;
+an older export, which writes only the three-character ones, is drawn as
+before. PDF-Linker now drops those readings itself on a recognised page
+(its *Court forms filled with ink* notes, "…and the OCR's reading of a box's
+outline is not text"); this covers an export it wrote before that. The
+owner reported the shapes "[ X ] _]" and "CJ [   ]", which are PDF-Linker's
+to fix and are not marks here either way.
+
 **Each piece where the PDF prints it, at its own size** (`pdfsync.rowItemsNear`,
 `lineItems`; `text-reader.js`, `planCells`, `placePages`; `columns.placeLine`,
 `lineMap`). pdf.js hands a page's text over as ITEMS, a run of type each — a

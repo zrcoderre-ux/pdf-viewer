@@ -16,7 +16,7 @@ import {
   isExportName, isKeyName, isQuarantinedName, isMarkdownName, docLabel, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
   ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
   columnCuts, columnBands, columnWidths, lineIndent, placeColumns, COLUMN_GAP, COLUMN_REACH, COLUMN_SNAP, COLUMN_GUTTER, COLUMN_STRETCH,
-  checkboxRanges, checkboxState,
+  checkboxRanges, checkboxState, isFormBanner,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
   textFixedLine, setTextFixed, pageTextSum, pageFurnitureLine, headerSaysTextCorrected, headerSaysCondensed, TEXTFIXED_RE,
@@ -1293,9 +1293,18 @@ console.log("indents on the grid");
 // are worked out from (columnBands reads the same cuts) it begins nothing.
 console.log("checkboxes are one piece");
 {
-  check("the six spellings, each with its state",
-    checkboxRanges("a [   ] b [ X ] c [ ? ] d [ ] e [X] f [?]"),
-    [[2, 7, ""], [10, 15, "x"], [18, 23, "?"], [26, 29, ""], [32, 35, "x"], [38, 41, "?"]]);
+  check("the three spellings, each with its state",
+    checkboxRanges("a [   ] b [ X ] c [ ? ] d"), [[2, 7, ""], [10, 15, "x"], [18, 23, "?"]]);
+  check("\u2026and an older export's three",
+    checkboxRanges("d [ ] e [X] f [?]"), [[2, 5, ""], [8, 11, "x"], [14, 17, "?"]]);
+  // The OCR's reading of a printed box beside the mark written for it is no
+  // second box, and a form banner names a state but holds none.
+  check("beside a five-character mark an older one is the OCR's",
+    checkboxRanges("[ X ] [X] Dismissal entered"), [[0, 5, "x"]]);
+  check("a form banner holds no box",
+    checkboxRanges("[printed form JUD-100 \u2014 marks READ FROM INK \u2014 no form fields left; VERIFY against the PDF: 26 box(es), 8 marked, 1 unreadable ([ ? ])]"), []);
+  check("\u2026and a fillable one", isFormBanner("[fillable form APP-013: 3 checkbox(es), 0 checked]"), true);
+  check("\u2026but a line opening on a box is no banner", isFormBanner("[ X ] printed form attached"), false);
   check("\u2026and nothing else in brackets", checkboxRanges("[  ] [x] [XX] [ X] [Exhibit A] [sic]"), []);
   check("a mark's state, or null for what is not one whole mark",
     ["[   ]", "[ X ]", "[ ? ]", "[ ]", "[X]", "[?]", "[  ]", "[ X ] "].map(checkboxState), ["", "x", "?", "", "x", "?", null, null]);

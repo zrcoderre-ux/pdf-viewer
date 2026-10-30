@@ -59,7 +59,7 @@
 // dressed as its text says is left exactly as it is, so the editor's caret
 // text node on any other line is never replaced.
 
-import { checkboxRanges, checkboxState, columnBands, columnCuts, columnWidths, lineIndent, placeColumns, serializeNodes, strikeLayout, COLUMN_GUTTER } from "./textdoc.js";
+import { checkboxRanges, checkboxState, isFormBanner, columnBands, columnCuts, columnWidths, lineIndent, placeColumns, serializeNodes, strikeLayout, COLUMN_GUTTER } from "./textdoc.js";
 
 /** A node's length in the file: a pseudonym span counts its fake, as the cuts were made on. */
 const fileLength = (n) => (n.nodeType === 3 ? n.data.length : n.nodeType === 1 ? serializeNodes(n).length : 0);
@@ -99,16 +99,21 @@ export function dressCheckboxes(lt) {
   const had = lt.querySelectorAll(".cb");
   if (!had.length && !lt.textContent.includes("[")) return false;
   let changed = false;
+  // A form's banner names states; it holds no box (textdoc.isFormBanner). And
+  // a line with a five-character mark draws no older three-character one.
+  const banner = isFormBanner(lt.textContent);
+  const wide = !banner && checkboxRanges(lt.textContent).some(([a, b]) => b - a === 5);
   for (const c of had) {
     const state = checkboxState(c.textContent);
-    if (state == null || (c.parentElement && c.parentElement.closest(".pn, [data-here]"))) { c.replaceWith(...c.childNodes); changed = true; continue; }
+    if (state == null || banner || (wide && c.textContent.length !== 5)
+        || (c.parentElement && c.parentElement.closest(".pn, [data-here]"))) { c.replaceWith(...c.childNodes); changed = true; continue; }
     if ((c.getAttribute("data-cb") || "") !== state) {
       if (state) c.setAttribute("data-cb", state); else c.removeAttribute("data-cb");
       changed = true;
     }
   }
-  for (const n of boxableTexts(lt)) {
-    const marks = checkboxRanges(n.data);
+  for (const n of banner ? [] : boxableTexts(lt)) {
+    const marks = checkboxRanges(n.data).filter(([a, b]) => !wide || b - a === 5);
     // From the right, so the offsets of the marks before each one hold.
     for (let r = marks.length - 1; r >= 0; r--) {
       const [a, b, state] = marks[r];
