@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PDF Viewer</title>
+  <!-- Side by side for a viewer with no host of its own (the extension's tab):
+       the PDF it showed on the left, a second one on the right, each a viewer
+       of its own. split.js holds the page; split-view.js the split. -->
+  <meta name="citation-linker" content="own">
+  <style>
+    html, body { margin: 0; height: 100%; background: #16181c; overflow: hidden; }
+    :root[data-theme="light"] body { background: #eef0f3; }
+    #stage { position: fixed; inset: 0; }
+    #stage > iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+  </style>
+  <script src="theme-boot.js"></script>
+</head>
+<body>
+  <div id="stage"></div>
+  <script type="module" src="split.js"></script>
+</body>
+</html>
