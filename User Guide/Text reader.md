@@ -336,10 +336,11 @@ app, which routes it to the reader tab.
   covered with its fake (a name wrapped inside a caption's column there is
   covered half on each line). A name the key holds only an instruction for is
   covered with █████ in all of those places, and the message after the
-  picture names it. With the Flagged panel open, each name listed there as
-  spotted unfaked is covered with █████ too, since it has no fake yet, and
-  the message counts them (a flagged name on the page itself still reads as
-  it stands). A page shown ⇄ Raw is read whole, like the page itself, so
+  picture names it. A name you flagged as spotted unfaked has no fake yet,
+  so it is covered with █████ too: in the Flagged panel's list when it is
+  open, on the pages, in the bars and the Find box, and over the PDF — with a
+  key open or none — and the message counts them. A page shown ⇄ Raw is
+  read whole, like the page itself, so
   a name wrapped down a caption's column is faked or covered as one name. The
   flag pop-up and the keep menu are taken off the screen for the picture and
   come back after it; the bar warning that PDF-Linker is running keeps its

@@ -103,6 +103,8 @@ const PDF = [
 const PARENS = [9, 10, 11, 12, 13, 14];
 // A justified line, its name in two of the PDF's runs with a wide space between (pdf.js reads them as two spans).
 const SPLIT = [["COMES NOW, Defendant, IVO", 17, 108], ["TRUCKING LLC (\u201cCross-Complainant\u201d) and for its", 17, 290]];
+// A name spotted unfaked and flagged (New Real Values.txt): in no key, so no fake.
+const FLAGGED_LINE = ["Witness Quell Harbor was deposed.", 19, 108];
 // The export, in the pseudonyms, as PDF-Linker writes the page.
 const pad = (s, n) => s + " ".repeat(Math.max(1, n - s.length));
 const L = (num, left, right = "") => (num ? String(num).padStart(2) + "  " : "    ") + pad(left, 46) + ")" + (right ? "  " + right : "");
@@ -121,6 +123,8 @@ const EXPORT = [
   L(14, "            Defendants."),
   "15", "16",
   "17          COMES NOW, Defendant, SPRINGVALE SABLEWOOD LLC (\u201cCross-Complainant\u201d) and for its",
+  "18",
+  "19          Witness Quell Harbor was deposed.",
 ].join("\n") + "\n";
 
 const CASE = "Case Shot Fit";
@@ -131,28 +135,30 @@ try {
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("dialog", (d) => d.accept().catch(() => {}));
+  // The case folder, with the key or (keyBytes null) without one, opened at FACC.txt beside its PDF.
+  const openCase = async (page, CASE, keyBytes) => {
   await page.goto(srv.base + "/viewer/text-reader.html");
   await page.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
-  await page.evaluate(async ({ CASE, EXPORT, PDF, PARENS, SPLIT, keyBytes }) => {
+  await page.evaluate(async ({ CASE, EXPORT, PDF, PARENS, SPLIT, FLAGGED_LINE, keyBytes }) => {
     const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.TimesRoman);
     const pg = doc.addPage([612, 792]);
     const base = (line) => 792 - (100 + (line - 1) * 24);
     for (let n = 1; n <= 28; n++) pg.drawText(String(n), { x: 46 - font.widthOfTextAtSize(String(n), 12), y: base(n), size: 12, font });
-    for (const [t, line, x] of PDF.concat(SPLIT)) pg.drawText(t, { x, y: base(line), size: 12, font });
+    for (const [t, line, x] of PDF.concat(SPLIT, [FLAGGED_LINE])) pg.drawText(t, { x, y: base(line), size: 12, font });
     for (const line of PARENS) pg.drawText(")", { x: 300, y: base(line), size: 12, font });
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry(CASE, { recursive: true }); } catch { /* none yet */ }
     const dir = await top.getDirectoryHandle(CASE, { create: true });
     const put = async (d, name, data) => { const f = await (await d.getFileHandle(name, { create: true })).createWritable(); await f.write(data); await f.close(); };
-    await put(dir, "pseudonym_key.xlsx", new Uint8Array(keyBytes));
+    if (keyBytes) await put(dir, "pseudonym_key.xlsx", new Uint8Array(keyBytes));
     await put(dir, "FACC.pdf", await doc.save());
     const text = await dir.getDirectoryHandle("Text Files", { create: true });
     await put(text, "FACC.txt", EXPORT);
     await put(dir, "New Real Values.txt", "Quell Harbor\n"); // a name spotted unfaked, flagged
     await window.__textReaderAdoptFolder(dir);
-  }, { CASE, EXPORT, PDF, PARENS, SPLIT, keyBytes: Array.from(KEY_BYTES) });
+  }, { CASE, EXPORT, PDF, PARENS, SPLIT, FLAGGED_LINE, keyBytes });
   await page.evaluate(() => window.__textReaderOpenDoc("FACC.txt"));
   await page.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length > 0);
   await page.waitForFunction(() => !!document.querySelector("#pages .tpage.matched .page-body.fixed"), null, { timeout: 15000 });
@@ -160,6 +166,8 @@ try {
   const sbs = await page.$("#sbs-toggle");
   if (!(await sbs.evaluate((b) => b.getAttribute("aria-pressed") === "true"))) await sbs.click();
   await page.waitForTimeout(2500);
+  };
+  await openCase(page, CASE, Array.from(KEY_BYTES));
 
   // Per line with words: its text, how far its last letter runs past the sheet's
   // edge (px), and on a caption row how far its party runs across the `)` side.
@@ -231,29 +239,61 @@ try {
   const after = await page.evaluate(`(${measure.toString()})()`);
   check("the real names again, laid out as before", JSON.stringify(after) === JSON.stringify(screen), JSON.stringify(after.filter((r, k) => JSON.stringify(r) !== JSON.stringify(screen[k]))));
 
-  console.log("5. with Flagged open, its values covered");
+  console.log("5. with Flagged open, its values covered: in the list, on the page, in Find and over the PDF");
   await page.click("#tab-flags");
   await page.waitForFunction(() => [...document.querySelectorAll("#flags-list li")].some((li) => /Quell Harbor/.test(li.innerText)), null, { timeout: 5000 });
-  const flags = await page.evaluate(async () => {
+  await page.click("#find-btn");
+  await page.fill("#fb-input", "Quell Harbor"); // the name typed into Find
+  await page.waitForTimeout(500);
+  const where = () => ({
+    page: document.querySelector("#pages .tpage .page-body").textContent,
+    find: document.getElementById("fb-input").value,
+    pdf: [...document.querySelectorAll(".shot-cover:not(.whole)")].map((c) => c.textContent),
+  });
+  const before = await page.evaluate(`(${where.toString()})()`);
+  check("on the screen, the flagged name on the page and in Find", /Quell Harbor/.test(before.page) && /Quell Harbor/.test(before.find), JSON.stringify([before.find]));
+  const shootFlags = (page) => page.evaluate(async (w) => {
+    const where = eval(w);
     const c0 = document.createElement("canvas"); c0.width = 8; c0.height = 8; c0.getContext("2d").fillRect(0, 0, 8, 8);
     navigator.mediaDevices.getDisplayMedia = async () => c0.captureStream(5);
     const read = () => [...document.querySelectorAll("#flags-list li")].map((li) => ({ text: li.innerText, before: getComputedStyle(li, "::before").content }));
     let seen = null;
     const toBlob = HTMLCanvasElement.prototype.toBlob;
     HTMLCanvasElement.prototype.toBlob = function (...a) {
-      if (!seen) seen = read();
+      if (!seen) seen = { rows: read(), ...where() };
       return toBlob.apply(this, a);
     };
     document.getElementById("shot-btn").click();
     for (let t = 0; t < 100 && !seen; t++) await new Promise((r) => setTimeout(r, 100));
     await new Promise((r) => setTimeout(r, 800));
     HTMLCanvasElement.prototype.toBlob = toBlob;
-    return { seen, after: read(), toast: document.getElementById("toast").textContent };
-  });
-  check("in the picture, no flagged value is shown", !!flags.seen && flags.seen.length > 0 && flags.seen.every((r) => !/Quell|Harbor/.test(r.text)), JSON.stringify(flags.seen));
-  check("…each covered with the five blocks", !!flags.seen && flags.seen.every((r) => r.before === '"\u2588\u2588\u2588\u2588\u2588"'), JSON.stringify(flags.seen));
-  check("…and shown again after", flags.after.some((r) => /Quell Harbor/.test(r.text)) && flags.after.every((r) => r.before === "none"), JSON.stringify(flags.after));
-  check("the toast says the list was covered", /Flagged list's value is covered/.test(flags.toast), flags.toast);
+    return { seen, after: { rows: read(), ...where() }, toast: document.getElementById("toast").textContent };
+  }, `(${where.toString()})`);
+  const flags = await shootFlags(page);
+  const seen = flags.seen;
+  check("in the picture, no flagged value in the list", !!seen && seen.rows.length > 0 && seen.rows.every((r) => !/Quell|Harbor/.test(r.text)), JSON.stringify(seen && seen.rows));
+  check("…each covered with the five blocks", !!seen && seen.rows.every((r) => r.before === '"\u2588\u2588\u2588\u2588\u2588"'), JSON.stringify(seen && seen.rows));
+  check("…nor on the page, covered there with the blocks", !!seen && !/Quell|Harbor/.test(seen.page) && /Witness \u2588{5} was deposed/.test(seen.page), seen && seen.page.slice(-80));
+  check("…nor in the Find box", !!seen && !/Quell|Harbor/.test(seen.find) && seen.find.includes("\u2588"), JSON.stringify(seen && seen.find));
+  check("…and over the PDF, a cover with the blocks", !!seen && seen.pdf.some((t) => t === "\u2588".repeat(5)), JSON.stringify(seen && seen.pdf));
+  check("all shown again after", flags.after.rows.some((r) => /Quell Harbor/.test(r.text)) && flags.after.rows.every((r) => r.before === "none")
+    && flags.after.page === before.page && flags.after.find === before.find && flags.after.pdf.length === 0, JSON.stringify([flags.after.find, flags.after.pdf]));
+  check("the toast says the flagged name was covered", /The flagged name is covered/.test(flags.toast), flags.toast);
+
+  console.log("6. with no key open, the flagged name covered all the same");
+  const bare = await (await browser.newContext({ viewport: { width: 1400, height: 1000 } })).newPage();
+  bare.on("pageerror", (e) => errors.push(e.message));
+  bare.on("dialog", (d) => d.accept().catch(() => {}));
+  await openCase(bare, CASE + " No Key", null);
+  await bare.click("#tab-flags");
+  await bare.waitForFunction(() => [...document.querySelectorAll("#flags-list li")].some((li) => /Quell Harbor/.test(li.innerText)), null, { timeout: 5000 });
+  const bareFlags = await shootFlags(bare);
+  const bs = bareFlags.seen;
+  check("the page shows the flagged name", /Quell Harbor/.test(bareFlags.after.page), bareFlags.after.page.slice(-80));
+  check("in the picture, covered in the list, on the page and over the PDF",
+    !!bs && bs.rows.every((r) => !/Quell|Harbor/.test(r.text)) && /Witness \u2588{5} was deposed/.test(bs.page) && bs.pdf.some((t) => t === "\u2588".repeat(5)),
+    JSON.stringify(bs && { rows: bs.rows, page: bs.page.slice(-60), pdf: bs.pdf }));
+  check("the toast says so", /The flagged name is covered/.test(bareFlags.toast), bareFlags.toast);
   check("no page errors", errors.length === 0, errors.join(" | "));
 } finally {
   await browser.close();
