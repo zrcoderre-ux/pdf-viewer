@@ -671,6 +671,10 @@ body.side-hidden #side { display: none; }
 #pages-list.dragging li.picked:hover { background: rgba(26, 115, 232, 0.22); }
 /* No fake reaches into a picture: blurred while a screenshot is taken. */
 body.shot-taking #pages-list .pr-thumb > :is(img, canvas) { filter: blur(5px); }
+/* The Flagged panel's values are real names with no fake yet: covered while
+   a screenshot is taken (withFakes), five blocks whatever their length. */
+body.shot-flags #flags-list .fv { display: none; }
+body.shot-flags #flags-list li::before { content: "\2588\2588\2588\2588\2588"; }
 .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--btn-border); color: var(--text); font-size: 11px; text-align: center; }
 
 /* ── the auto-scroll pill ──────────────────────────────────────────────────── */

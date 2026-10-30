@@ -191,6 +191,33 @@ nothing above. Hosted, the fakes go on only once the screen share is granted
 (`shareThisTab` answers the frame-taker), and a share that sends no frame is
 given up after five seconds, so the fakes never stay on.
 
+**…and the Flagged panel's values covered** (`withFakes`, `body.shot-flags`,
+`.fv`; 2026-10-30). The owner: "When a screenshot is taken, if Flagged is
+open, it should hide the words listed there as spotted unfaked to be
+pseudonymized." Those values are names the key does not bind yet, so no fake
+stands for them and every pass above left them as they read: a screenshot
+with the panel open carried the list of real names. Each value is its own
+span in `#flags-list` now (`renderFlags`), and while the picture is taken the
+stylesheet hides it and draws `WITHHELD`'s five blocks in its place, the
+length the same whatever it covers. It is a class, not an edit of the nodes,
+so a list drawn again while the fakes are up is covered too, and it is set in
+`withFakes` around `fakesForShot`, so it holds with no key open as well. The
+toast counts the values covered (`flagsOnScreen`). Then, at the owner's
+"Do it", wherever else they stand (`flaggedSwaps`, `withFlagged`): on the
+pages within a screen of the window, read as their red marks read them
+(`shotFlags`, over `flagReading`, so a pseudonym inside a flagged name keeps
+its fake and the margin is passed over) and done before the key's pass; on a
+page shown ⇄ Raw (`shotRawFlags`, after `shotRaw`); in the window's other
+text and typed boxes, Find's included (`swapChrome`); and over the PDF pane
+(`pdfNamesOn`, a cover reading `WITHHELD`). Each occurrence is covered as a
+name the key holds only an instruction for is, `WITHHELD` on its first piece
+and nothing on the rest; in the window's text and over the PDF the cover
+wins over a key swap it overlaps, so no piece of a flagged name shows. With no
+key open `fakesForShot` no longer returns at once where anything is flagged.
+The toast counts the flagged names covered anywhere, the panel's included
+(`shotFlagged`). Print and copy are unchanged: a flagged name still prints and
+copies as it stands. Test: `test-shot-fit.mjs` cases 5 and 6 (with no key).
+
 **…and its lines kept on the page** (`shotFitRead`, `shotFitWrite`;
 2026-10-28). Nothing is laid out again for the picture, and a fake is often
 longer than the name it stands for: a line fitted to the sheet in the real
