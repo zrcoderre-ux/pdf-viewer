@@ -3516,3 +3516,21 @@ reader takes the file back and leaves the folder open. A launcher from an
 older PDF-Linker records no folder, and the button says to double-click it
 once. Tests: `test-textdoc.mjs` ("launcher folder token", "rerun link"), and
 PDF-Linker's `tests/test_reader_rerun_button.py`.
+
+**A real host is standing only whole** (`pseudo-key.hostRunsOn`, asked in
+`hitsFrom` of a `compileReals` matcher only; 2026-10-30). The owner: "It
+keeps flagging www.courts.ca as a leak inside of www.courts.ca.gov. It
+shouldn't". A key row binding "www.courts.ca" (a scan's misreading, or a
+`.gov` site the margin wrapped after "ca", which PDF-Linker faked as a site
+of its own) matched the court's own address wherever it stood whole, the
+"." after "ca" a word edge like any other, and the warning called it a real
+name left unfaked. A real value shaped like a web host (dotted labels, a
+lettered last one) no longer stands where the text runs on into another
+label after it (".gov") or stands under another before it ("forms."); the
+host alone, ending a sentence, or with a path, still stands. PDF-Linker
+fakes a host only whole, so the place was never one it would fake. Only the
+leak reading changes: showing a real name over its fake (`compile`) is as it
+was, so PDF-Linker's port of the reversal (`_rd_*`) does not move. PDF-Linker
+now keeps the wrapped court link too (its `_pn_url_wrap_whitelisted`).
+Tests: `test-pseudo-key.mjs`.
+

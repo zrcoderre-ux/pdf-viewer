@@ -1282,7 +1282,20 @@ export function compileReals(key) {
   const map = new Map();
   for (const w of warn) if (!map.has(fold(w.real))) map.set(fold(w.real), w);
   const rx = buildMatcher(warn.map((w) => w.real));
-  return { rx, map, capOnly: capOnlySet(warn) };
+  return { rx, map, capOnly: capOnlySet(warn), hostsWhole: true };
+}
+
+// A real value that is a web HOST ("www.courts.ca") standing as the head or
+// tail of a LONGER host ("www.courts.ca.gov", "forms.www.courts.ca") is not
+// that host standing: it is another site, and the warning called the court's
+// own .gov address a real name left unfaked (the owner, 2026-10-30: "It keeps
+// flagging www.courts.ca as a leak inside of www.courts.ca.gov"). PDF-Linker
+// fakes a host only whole (`_PN_WHOLE_ADDRESS_CATS`), so the place is not one
+// it would fake either.
+const HOST_RE = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i;
+export function hostRunsOn(text, start, end, value) {
+  if (!HOST_RE.test(String(value || "")) || !/[a-z]/i.test(String(value).split(".").pop())) return false;
+  return /^\.[a-z0-9]/i.test(text.slice(end, end + 2)) || /[a-z0-9-]\.$/i.test(text.slice(Math.max(0, start - 2), start));
 }
 
 /**
@@ -1713,7 +1726,8 @@ function hitsFrom(compiled, text, from, max, opts) {
   while ((m = rx.exec(text))) {
     while (ci < cols.length && cols[ci].start <= m.index) out.push(cols[ci++]);
     const hit = lookup(compiled, m[0]);
-    if (hit && !capOnlyMiss(compiled, m[0], hit)) {
+    if (hit && !capOnlyMiss(compiled, m[0], hit)
+        && !(compiled.hostsWhole && hostRunsOn(text, m.index, m.index + m[0].length, m[0]))) {
       const ranges = lineRanges(m.index, m[0]);
       if (!pieces.length || !touchesPieces(pieces, ranges)) out.push({ ranges, whole: m[0], hit, start: m.index });
     }
