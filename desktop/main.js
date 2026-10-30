@@ -560,6 +560,32 @@ function updateError(e) {
 }
 
 function registerUpdateIpc() {
+  // Home's Case folders list (pwa/app-web.js, todayInDownloads): the folders
+  // in Downloads that changed since `since`, by the FOLDERS' own times. A page
+  // can read only its files' times, which Windows keeps through a copy or an
+  // extract, and finding a day's folders that way meant reading every case
+  // folder Downloads ever held. A folder's time moves when anything is added
+  // to it, renamed or removed (a download, an extract, a run's ETA marker).
+  // Names and times of Downloads' own folders only, and no path: the page
+  // opens a folder through the Downloads handle it was given.
+  ipcMain.handle("pdfplus:downloads-today", async (event, since) => {
+    if (!fromApp(event)) return null;
+    const dir = app.getPath("downloads");
+    const from = Number(since) || 0;
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); }
+    catch { return { name: path.basename(dir), folders: [] }; }
+    const folders = [];
+    await Promise.all(entries.filter((e) => e.isDirectory()).map(async (e) => {
+      try {
+        const st = await fsp.stat(path.join(dir, e.name));
+        const at = Math.max(st.birthtimeMs || 0, st.mtimeMs || 0);
+        if (at >= from) folders.push({ name: e.name, at });
+      } catch { /* gone, or not ours to read */ }
+    }));
+    return { name: path.basename(dir), folders };
+  });
+
   ipcMain.handle("pdfplus:version", (event) => (fromApp(event) ? app.getVersion() : ""));
 
   ipcMain.handle("pdfplus:update-check", async (event) => {

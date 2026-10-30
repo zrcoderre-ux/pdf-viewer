@@ -26,6 +26,19 @@ brought to the front instead of a second reader).
   midnight, or a `.zip` of its name that came down today, since Windows'
   Extract All keeps the times the files had in the zip.
 
+**In PDF+ only the day's folders are read.** Reading every folder of
+Downloads for its files' times was slow on a Downloads holding years of
+cases, and the list showed nothing until it finished; and the files' times
+miss a case copied or extracted today, since Windows keeps the times a file
+had. So the main process lists Downloads' own folders by the FOLDERS' times
+(`pdfplus:downloads-today`: the later of created and modified, which moves
+when anything in it is added, renamed or removed, a run's ETA marker
+included) and hands back their names and times only, never a path; the page
+opens each through the linked handle (`getDirectoryHandle`) and keeps those
+that are case folders. Where the linked folder is not the Downloads it lists
+(compared by name), or the installed PDF+ predates the call (app files run
+from a newer checkout), every folder is read as in a browser.
+
 A folder in both is one row ("In Downloads today · Opened 3:14 PM").
 
 ## Status
