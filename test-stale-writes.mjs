@@ -6,7 +6,8 @@
 // reader did not write; an export a run rewrote is not written over by an
 // empty save; a lone file changed or renamed on disk is not written through
 // its old handle; the PDF viewer asks before saving over a PDF that changed on
-// disk; and a worksheet loaded by hand is never written into the case folder.
+// disk; a worksheet loaded by hand is never written into the case folder; and
+// ↺ Use the PDF's text asks for a TEXT CORRECTED page to be read from the PDF.
 //
 // Run: node test-stale-writes.mjs   (from the repo root)
 //
@@ -545,6 +546,35 @@ async function run() {
       await p.waitForTimeout(400);
       await save(p);
       check("marked again by hand: handed over again", await active(), [line]);
+      check("no page errors", r.log.errors, []);
+      await r.close();
+    }
+
+    // ── 10. ↺ Use the PDF's text ─────────────────────────────────────────────
+    console.log("10. ↺ Use the PDF's text on a page PDF-Linker writes off a kept transcription");
+    {
+      const r = await newReader();
+      const p = r.page;
+      const CORRECTED = "====== Page 1 — NOTE: TEXT CORRECTED by hand in the text reader; this page's text is the operator's transcription, kept by PDF-Linker and used on every run ======\n" + A.split("\n").slice(1).join("\n");
+      const again = async () => ((await readFile(p, "New Real Values.txt")) || "").split("\n").filter((l) => /^ocr again:/i.test(l.trim()));
+      const btn = () => p.evaluate(() => { const b = document.querySelector('.tpage[data-index="0"] > .page-label .unfix-page'); return b ? { hidden: b.hidden, on: b.classList.contains("on"), text: b.textContent } : null; });
+      truthy("a page that is not TEXT CORRECTED: no button", (await btn()).hidden);
+      await writeFile(p, "Text Files/A Complaint.txt", CORRECTED);
+      await p.evaluate(async () => { await window.__textReaderAdoptFolder(window.__case); await window.__textReaderOpenDoc("A Complaint.txt"); });
+      await p.waitForTimeout(1200);
+      check("a TEXT CORRECTED page: the button, off", await btn(), { hidden: false, on: false, text: "↺ Use the PDF's text" });
+      await p.evaluate(() => document.querySelector('.tpage[data-index="0"] > .page-label .unfix-page').click());
+      await p.waitForTimeout(300);
+      await save(p);
+      check("pressed and saved: the page goes on the file to be read again", await again(), ["ocr again: A Complaint.txt | page 1"]);
+      check("…the button on", (await btn()).on, true);
+      await p.evaluate(async () => { await window.__textReaderAdoptFolder(window.__case); await window.__textReaderOpenDoc("A Complaint.txt"); });
+      await p.waitForTimeout(1500);
+      check("the folder read again, the run not yet: the request stands", [(await btn()).on, await again()], [true, ["ocr again: A Complaint.txt | page 1"]]);
+      await p.evaluate(() => document.querySelector('.tpage[data-index="0"] > .page-label .unfix-page').click()); // withdraw
+      await p.waitForTimeout(300);
+      await save(p);
+      check("pressed again and saved: withdrawn", [(await btn()).on, await again()], [false, []]);
       check("no page errors", r.log.errors, []);
       await r.close();
     }

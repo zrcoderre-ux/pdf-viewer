@@ -3149,7 +3149,9 @@ export function pageListsAfter(lists, items, { drop = false, held = null } = {})
     if (marked) list = setNoOcr(list, entry, false);
     else if (reads) { if (!asked && !aside) list = setNoOcr(list, entry, true); }
     else if (drop) list = setNoOcr(list, entry, false);
-    if (asked && !marked && !reads) again = setOcrAgain(again, entry, false);
+    // …and a request on a page PDF-Linker writes off a kept transcription
+    // (↺ Use the PDF's text) stands until its header stops saying so.
+    if (asked && !marked && !reads && !headerSaysTextCorrected(p)) again = setOcrAgain(again, entry, false);
     if (reads) fixed = setTextFixed(fixed, entry, false);
   }
   return { noOcr: list, ocrAgain: again, textFixed: fixed };

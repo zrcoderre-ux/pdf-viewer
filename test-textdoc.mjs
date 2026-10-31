@@ -1805,6 +1805,12 @@ console.log("documents off the screen");
   check("…a page no longer reading it comes off only with drop",
     [pageListsAfter({ ...none, noOcr: [e1] }, [{ entry: e1, page: pg(["text"]) }]).noOcr.length, pageListsAfter({ ...none, noOcr: [e1] }, [{ entry: e1, page: pg(["text"]) }], { drop: true }).noOcr.length], [1, 0]);
   check("…a request to read again is done once the page reads", pageListsAfter({ ...none, ocrAgain: [e1] }, [{ entry: e1, page: pg(["text"]) }]).ocrAgain.length, 0);
+  // ↺ Use the PDF's text: a request on a page PDF-Linker writes off a kept
+  // transcription stands while its header says so, and is done once it does not.
+  const corrected = "====== Page 1 — NOTE: TEXT CORRECTED by hand in the text reader; this page's text is the operator's transcription, kept by PDF-Linker and used on every run ======";
+  check("…but not on a TEXT CORRECTED page, until the run reads it from the PDF",
+    [pageListsAfter({ ...none, ocrAgain: [e1] }, [{ entry: e1, page: pg(["text"], corrected) }]).ocrAgain.length,
+     pageListsAfter({ ...none, ocrAgain: [e1] }, [{ entry: e1, page: pg(["text"]) }]).ocrAgain.length], [1, 0]);
   check("…and a page reading [DID NOT OCR] has no transcription", pageListsAfter({ ...none, textFixed: [{ ...e1, sum: "00000000" }] }, [{ entry: e1, page: pg([DID_NOT_OCR]) }]).textFixed.length, 0);
   const same = { noOcr: [e1], ocrAgain: [], textFixed: [] };
   check("…and the same lists where nothing moved", pageListsAfter(same, [{ entry: e1, page: pg([DID_NOT_OCR]) }]).noOcr === same.noOcr, true);

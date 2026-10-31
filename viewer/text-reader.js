@@ -5333,6 +5333,15 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         f.addEventListener("click", (e) => { e.preventDefault(); useMyText(Number(sec.dataset.index)); });
         lab.appendChild(f);
         setFixButton(f, TD.readsDidNotOcr(p.lines), false, TD.headerSaysTextCorrected(p));
+        // ↺ Use the PDF's text: on a page PDF-Linker writes off a kept
+        // transcription, take the transcription back (useThePdfsText).
+        const u = document.createElement("button");
+        u.className = "unfix-page";
+        u.type = "button";
+        u.hidden = !TD.headerSaysTextCorrected(p);
+        u.addEventListener("click", (e) => { e.preventDefault(); useThePdfsText(Number(sec.dataset.index)); });
+        lab.appendChild(u);
+        setUnfixButton(u, false);
         // # Number lines: pleading paper's margin numbers, where the export
         // has none (numberPage). Only on a page without them.
         const nb = document.createElement("button");
@@ -12193,6 +12202,58 @@ function setFixButton(b, reads, asked, corrected) {
       : (corrected ? "PDF-Linker already uses your transcription for this page. Typed over it again? " : "The OCR was bad and you have typed this page's text in by hand? ")
         + `Hand it to PDF-Linker: Save puts the page on ${TD.VALUES_FILE}, and its next run keeps the text and writes the page's export from it on every run (into the PDF too, where the page is a scan), and never OCRs the page again.`;
 }
+/**
+ * ↺ Use the PDF's text, on a page whose header says TEXT CORRECTED: the
+ * operator's kept transcription (a ✎ Use my text, pressed or handed over by a
+ * save) is to stand for the page no more. The page goes on New Real Values.txt
+ * as `ocr again: FILE | page N`, which PDF-Linker's next full run reads as
+ * "drop the kept edit and take the corrected mark off": the page is read from
+ * the PDF again (the owner, 2026-10-31, asked for a way back). On a scanned
+ * page whose text layer the transcription was written into, that layer is the
+ * PDF's text now, so the page reads as transcribed until it is OCR'd again.
+ * A pending ✎ request for the page is withdrawn with it. A second click
+ * withdraws the request.
+ */
+function useThePdfsText(i) {
+  if (!doc) return;
+  const p = doc.pages[i];
+  if (!p || p.header == null || !TD.headerSaysTextCorrected(p)) return;
+  const m = reel.length > 1 ? reelMemberOf(i) : null;
+  const where = TD.pageLabel(p) + (m ? " of " + m.name : "");
+  const entry = pageEntryAt(i);
+  if (!entry) {
+    toast(`${where} carries no PDF page number, so PDF-Linker cannot be told which page to read again.`, { error: true });
+    return;
+  }
+  if (flagsFor !== valuesStoreKey()) {
+    toast("The case folder's list is still being read — try again in a moment.", { error: true });
+    return;
+  }
+  if (ocrAgain.some((e) => TD.sameNoOcr(e, entry))) {
+    ocrAgain = TD.setOcrAgain(ocrAgain, entry, false);
+    persistValues();
+    renderFlags();
+    refreshFixButtons([i]);
+    toast(`${where}: withdrawn — PDF-Linker keeps writing this page from your transcription.`);
+    return;
+  }
+  fixPressed.delete(fixPressedKey(entry));
+  textFixed = TD.setTextFixed(textFixed, entry, false);
+  fixDeclined = TD.setNoOcr(fixDeclined, entry, true); // …and a save does not hand it over again by itself
+  ocrAgain = TD.setOcrAgain(ocrAgain, entry, true);
+  persistValues();
+  renderFlags();
+  refreshFixButtons([i]);
+  toast(`${where}: your transcription is to be dropped — Save puts the page on ${TD.VALUES_FILE}, and PDF-Linker's next full run reads it from the PDF again. Click again to withdraw.`, { ms: 9000 });
+}
+function setUnfixButton(b, asked) {
+  b.classList.toggle("on", asked);
+  b.setAttribute("aria-pressed", asked ? "true" : "false");
+  b.textContent = asked ? "✓ Use the PDF's text" : "↺ Use the PDF's text";
+  b.title = asked
+    ? `Asked: PDF-Linker's next full run drops your transcription of this page and reads it from the PDF again. ${TD.VALUES_FILE} carries the request once it is written — Save writes it. Click to withdraw.`
+    : "PDF-Linker writes this page from your transcription on every run. Drop it and read the page from the PDF again?";
+}
 /** Set each page label's ✎ button from its page (`indices`, or every page on screen). */
 function refreshFixButtons(indices) {
   if (!doc) return;
@@ -12200,7 +12261,7 @@ function refreshFixButtons(indices) {
     ? indices.map((i) => pagesEl.querySelector(`.tpage[data-index="${i}"] > .page-label .fix-page`)).filter(Boolean)
     : [...pagesEl.querySelectorAll(".tpage > .page-label .fix-page")];
   if (!buttons.length) return;
-  const sources = textFixed.length ? docPageSources() : null;
+  const sources = textFixed.length || ocrAgain.length ? docPageSources() : null;
   let freed = false;
   for (const b of buttons) {
     const i = Number(b.closest(".tpage").dataset.index);
@@ -12209,6 +12270,11 @@ function refreshFixButtons(indices) {
     const e = sources ? pageEntryAt(i, sources) : null;
     const asked = !!e && textFixed.some((x) => TD.sameNoOcr(x, e));
     setFixButton(b, pageReadsDidNotOcr(i), asked, TD.headerSaysTextCorrected(p));
+    const u = b.parentElement && b.parentElement.querySelector(".unfix-page");
+    if (u) {
+      u.hidden = !TD.headerSaysTextCorrected(p);
+      setUnfixButton(u, !!e && ocrAgain.some((x) => TD.sameNoOcr(x, e)));
+    }
     if (setFree(b.closest(".tpage"), asked)) freed = true;
   }
   if (freed) afterTextChangeSoon(); // a withdrawn page's own lines laid out again

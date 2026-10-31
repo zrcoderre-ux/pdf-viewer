@@ -2888,6 +2888,24 @@ start of such a line's text takes it back from there, keeping the two spaces
 the export writes after every number, and tells the page with an `input`
 event. It used to move the focus off the page. `test-tab-indent.mjs`
 (Chromium) pins it.
+**…and a way back: ↺ Use the PDF's text** (`useThePdfsText`,
+`setUnfixButton`, `TD.pageListsAfter`; the owner, 2026-10-31). A page
+PDF-Linker writes off a kept transcription (its header says TEXT CORRECTED)
+had no way back short of typing an `ocr again:` line into New Real Values.txt
+by hand. Its label now carries ↺ Use the PDF's text: pressed, the page goes on
+`ocrAgain`, which the save writes as `ocr again: FILE | page N`, and
+PDF-Linker's next full run drops the kept edit and the corrected mark and
+reads the page from the PDF (its *Reader flags file* notes); a pending ✎
+request for the page is withdrawn with it and the page put on `fixDeclined`,
+so a save does not hand it over again by itself. A second press withdraws it.
+`pageListsAfter` keeps such a request while the page's header still says
+TEXT CORRECTED (it took an `ocrAgain` entry off as soon as the page did not
+read `[DID NOT OCR]`, which a corrected page never does), and drops it once a
+run has read the page from the PDF. Residual, stated: on a scanned page whose
+text layer the transcription was written into, that layer is the PDF's text
+now, so the page reads as transcribed until it is OCR'd again.
+`test-stale-writes.mjs` case 10 (Chromium), `test-textdoc.mjs`.
+
 **…and without the click** (`autoUseMyText`, `noteTyping`, `forgetTyping`,
 `fixDeclined`, `textdoc.wordsChanged`, `TD.AUTO_TEXT_FIXED_WORDS`), at the
 owner's direction. A page's text just before the first keystroke on it is kept
