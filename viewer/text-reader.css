@@ -793,6 +793,12 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
 .page-label .fix-page:hover:not(:disabled) { background: #e3e5e8; }
 .page-label .fix-page:disabled { opacity: 0.45; cursor: default; }
 .page-label .fix-page.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.page-label .unfix-page {
+  float: right; margin-right: 6px; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
+  font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.page-label .unfix-page:hover { background: #e3e5e8; }
+.page-label .unfix-page.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 /* 💬 n: the comments on this page; a click opens the first. */
 .page-label .cmt-page {
   float: right; margin-right: 6px; background: #fff3cd; border: 1px solid #ffc107; color: #5d4500; border-radius: 3px; padding: 0 6px; cursor: pointer;
@@ -1311,7 +1317,7 @@ body.flag-mode .page-body ::selection { background-color: rgba(244, 67, 54, 0.38
   #pages { zoom: var(--print-zoom, 1); }
   .tpage { max-width: none; margin: 0 auto 18px; box-shadow: none; border-radius: 0; break-after: page; }
   .tpage:last-child { break-after: auto; }
-  .page-label .swap-page, .page-label .raw-page, .page-label .nocr-page, .page-label .fix-page, .page-label .num-page, .page-label .unnum-page, .page-label .cmt-page { display: none; }
+  .page-label .swap-page, .page-label .raw-page, .page-label .nocr-page, .page-label .fix-page, .page-label .unfix-page, .page-label .num-page, .page-label .unnum-page, .page-label .cmt-page { display: none; }
   /* A page swapped for its PDF page prints its text, and its PDF page — the
      filing, which nothing scrubbed — never prints, whether or not the page
      was told a print was coming (body.printing does the same on screen). */
