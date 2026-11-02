@@ -32,7 +32,7 @@
 //       right for what they write).
 //   FONT_PRESETS / DEFAULT_SETTINGS   the reading settings.
 
-import { caseShape, mirrorCase, fold as pkFold, translateRuns, findReals, findRealSpans, compile, ownFakesOf, capOnlyMiss, keySpelled } from "./pseudo-key.js";
+import { caseShape, mirrorCase, fold as pkFold, translateRuns, findReals, findRealSpans, compile, ownFakesOf, capOnlyMiss, keySpelled, casedSuffix } from "./pseudo-key.js";
 import { REPORTERS_SORTED, REPORTERS_ALL_SORTED } from "./reporters.js";
 
 // ---- the file as pages ---------------------------------------------------------
@@ -2401,9 +2401,7 @@ function lookupForward(compiled, m) {
   // The key's spelling of the real decides a shout it does not make, as in
   // pseudo-key's swapTo.
   if (shape === "title" && compiled.spell) fake = keySpelled(fake, compiled.spell.get(k), core);
-  const cased = mirrorCase(core, fake);
-  if (!suffix) return cased;
-  return cased + (shape === "upper" ? suffix.toUpperCase() : shape === "lower" ? suffix.toLowerCase() : suffix);
+  return mirrorCase(core, fake) + casedSuffix(shape, suffix, compiled.spell && compiled.spell.get(k));
 }
 
 // ---- New Real Values.txt ----------------------------------------------------------
