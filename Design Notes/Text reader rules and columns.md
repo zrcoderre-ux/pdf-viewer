@@ -256,6 +256,67 @@ The cells are wrappers with no `data-fake`: serialization, Find, the LEAKS
 walk and every offset into the page are unchanged. Cost: about 2.5 ms per
 two-column page at open, about 0.4 ms per pleading page.
 
+### A drag down a column takes that column (`text-reader.js`, `applyColSel`, `colSelSkips`)
+
+The owner, of a permit's box whose right-hand cell is OCR noise: "I should be
+able to select the gibberish text on the right side of the line without it
+selecting the left. That is part of what the column should achieve." Each line
+is one block, its columns pieces of it (`.rc` cells of a box row, `.cc` cells
+and the bare run after the last of them), so the browser's drag from one row's
+right-hand cell to a row further down took everything between in the text's
+order, every left-hand cell included. A selection is one range, and Chrome
+holds one range at a time, so the range cannot leave the left of each row out;
+what it paints and copies can.
+
+A left press on a line of two pieces or more (`linePieces`: each cell its own
+piece, empty or not; each run of the line's other nodes that carries text; a
+box's bars and a rule's runs none) notes the column it is in (`columnAt`: from
+that piece's left to the next piece's on the line). Once the drag leaves the
+line, `applyColSel` takes, on every line of the page, the pieces that begin in
+that span (less 0.6 em, for a cell a character off); a line it takes whole is
+left alone, and the others are `.cs-line`, their taken pieces `.cs-pick`. A
+run of bare text it does not take (the run after a line's last `.cc`, a
+paragraph left of the column) is wrapped in a `.cs-wrap` span for as long as
+the column stands, since the stylesheet can reach an element and not a text
+node; `clearColSel` unwraps it. The stylesheet makes every child of a cut
+line's `.lt` but the taken ones `user-select: none`.
+
+Chrome honours `user-select: none` only in text that cannot be edited: in the
+editable page it painted those cells and Backspace deleted them. So the pieces
+left out are `-webkit-user-modify: read-only` as well, and the column's own
+pieces stay editable. Measured in Chromium with a two-cell table in a
+`plaintext-only` host: every line read-only (the column too) held the drag
+inside the cell it began in, whether set before the press or during the drag,
+and so did a taken cell made `read-write` inside a read-only line (it becomes
+an editing host of its own); only the left-out pieces read-only, set before
+the press or once the drag left the line, gave the column. That is why the
+column is cut only when the drag leaves its line: a drag along one line, or a
+click, is the browser's own, and a click's caret is where it always was.
+
+The range still runs through the text left out, so an edit over it is
+refused (`COLSEL_EDIT`): typing, Backspace, Delete, Enter and Tab, a paste,
+a drop and any other `beforeinput` (window capture listeners), a cut (copied,
+not cut), and a strike, comment, flag or phrase (each checks `colSel`); the
+selection pop-up is not shown over it. A copy reads the page as before
+(`copyOfBody`) with the text left out added to its skips (`colSelSkips`,
+beside the numbered margin's): every text node `inColSel` does not take, a
+taken cell's gap unless the piece after it is taken too, the bars and rule
+runs, and the line break of a line it takes nothing of, so the column comes
+away a line a row with no blank line for a rule between. A swap or a shown
+name wholly inside a left-out stretch is dropped, or clipText would write it
+in. The browser's own copy (no key) skips unselectable text by itself.
+
+The column lets go (`clearColSel`) on the next left press on the pages, on a
+selection that changes its anchor or collapses (Ctrl+A, Find, typing
+elsewhere), on Ctrl+A, and on a window resize, which can lay the page's cells
+out again. A right press keeps it, for the menu's Copy, and so do presses on
+the pop-up and the toolbar. Only the page the press was on is cut: a drag on
+into the next page takes that page's lines whole. The ⇄ Raw sheet is one
+`<pre>` with no pieces and is not cut. Tested in `test-column-select.mjs`
+(a box's right-hand cell under a name, a page in two columns laid out with
+spaces, either column, a drag along one line, an edit, a strike, a click and
+Ctrl+A after).
+
 ### The numbers never move on the grid (`pdfsync.spreadTops`)
 
 `spreadTops(tops, box, fixed)` keeps lines from landing on each other; with

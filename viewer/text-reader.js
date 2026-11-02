@@ -1772,8 +1772,14 @@ function copyOfBody(body, range) {
   const skip = body.classList.contains("numbered")
     ? disk.segs.filter((g) => g.node.parentElement && g.node.parentElement.closest(".gutter")).map((g) => [g.start, g.end])
     : [];
-  const swaps = fwd && fwd.rx ? egressSwaps(disk.text, disk.held, disk.pns, nextHeadOf(body)) : [];
-  const spans = (pick) => disk.pnNodes.map((el, k) => ({ start: disk.pns[k][0], end: disk.pns[k][1], to: pick(el) }));
+  // A column's selection takes the column, and none of the text beside it
+  // ("a drag down a column takes that column") — nor a name in that text,
+  // which a swap would otherwise write in whole.
+  const colSkip = colSelSkips(body, disk);
+  skip.push(...colSkip);
+  const outside = (w) => !colSkip.some(([x, y]) => w.start >= x && w.end <= y);
+  const swaps = (fwd && fwd.rx ? egressSwaps(disk.text, disk.held, disk.pns, nextHeadOf(body)) : []).filter(outside);
+  const spans = (pick) => disk.pnNodes.map((el, k) => ({ start: disk.pns[k][0], end: disk.pns[k][1], to: pick(el) })).filter(outside);
   const realSpans = spans((el) => el.dataset.real);
   const real = TD.clipText(disk.text, realSpans, a, b, skip);
   const esc = [];
@@ -1907,6 +1913,13 @@ document.addEventListener("cut", (e) => {
   // so does this.
   const sel = document.getSelection();
   const body = sel && sel.rangeCount ? bodyOfNode(sel.getRangeAt(0).startContainer) : null;
+  // A column's selection is copied and left where it is: its range runs
+  // through the text beside the column, which a deletion would take with it.
+  if (colSel && body) {
+    if (!copyFor(e, "Copied") && e.clipboardData) { e.preventDefault(); e.clipboardData.setData("text/plain", sel.toString()); }
+    toast("Copied, not cut — " + COLSEL_EDIT.charAt(0).toLowerCase() + COLSEL_EDIT.slice(1));
+    return;
+  }
   if (!editing || !body || !body.isContentEditable) return;
   if (!copyFor(e, "Cut")) return;
   // …then the selection goes, as the browser's own cut takes it (a selection
@@ -7567,6 +7580,257 @@ pagesEl.addEventListener("mousedown", (e) => {
   window.addEventListener("mouseup", up);
   stageEl.addEventListener("scroll", onScroll, { passive: true });
 });
+
+// ── a drag down a column takes that column ─────────────────────────────────────────────
+//
+// The owner, of a permit's box whose right-hand cell is OCR noise: "I should
+// be able to select the gibberish text on the right side of the line without
+// it selecting the left. That is part of what the column should achieve." A
+// page's lines are one block each, its columns pieces of every line, so the
+// browser's drag from the right-hand cell of one row to the right-hand cell of
+// a row further down took everything between in the text's order: the rest of
+// the first row, then every row's left-hand cell with its right. A selection is
+// one range, which cannot leave out the left of each row; what it paints and
+// copies can. A press on a line of two pieces or more (a box row's cells, the
+// cells `columns.js` cuts a line into at its spaces, and the run after the
+// last of them) that is dragged off its line takes the COLUMN it began in: on
+// every line of the page, the pieces that begin between that piece's left and
+// the next piece's on the press line. The rest of each line is unselectable
+// (`.page-body.colsel`: the stylesheet), so the selection paints the column
+// only, and a copy, a drag and the browser's own copy take only that
+// (`colSelSkips`, in copyOfBody). A line that is one piece — a paragraph across
+// both columns — is the column's where it begins in it, and passed over where
+// it begins left of it, as the left-hand column's text is.
+//
+// Chrome honours `user-select: none` only in text that cannot be edited — in
+// an editable page it painted and deleted the left-hand cells all the same —
+// so the pieces left out are read-only as well (`-webkit-user-modify`, the
+// stylesheet) and the column's own stay editable: made read-only too, Chrome
+// held the drag inside the piece it began in. Hence the column is cut only once
+// the drag leaves its line; a click, or a drag along one line, is the
+// browser's own. An edit of the selection would take the whole range, the
+// pieces it does not paint with it, so typing, a deletion, a paste, a cut, a
+// strike, a comment or a flag over it is refused with a word. The column lets
+// go with the next press on the pages, a selection made any other way (Ctrl+A,
+// Find), or the selection gone. Design Notes: "Text reader rules and columns".
+let colSel = null;   // { body, lines, picked: Set of a line's top-level nodes taken, anchor }
+let colPress = null; // the press that becomes one when it is dragged off its line
+const COLSEL_EDIT = "This selection is one column of the page: copy it, or click to edit the text.";
+/** Whether a piece of a line is a rule (a run across its cell, a box's bar), never text to take. */
+function ruleOnly(el) { return el.nodeType === 1 && (el.classList.contains("rb") || el.classList.contains("rh") || el.classList.contains("hf") || el.classList.contains("rg")); }
+/** The text of a line's piece, its gap's spaces and its rules left out. */
+function pieceText(nodes) {
+  let s = "";
+  for (const n of nodes) {
+    if (n.nodeType === 3) { s += n.data; continue; }
+    if (n.nodeType !== 1 || ruleOnly(n)) continue;
+    const walk = document.createTreeWalker(n, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t; t = walk.nextNode()) if (!t.parentElement.closest(".cg, .rh, .rb")) s += t.data;
+  }
+  return s;
+}
+/**
+ * A line's pieces, left to right: each box cell (`.rc`) and column cell
+ * (`.cc`) its own, empty or not, and each run of the line's other nodes
+ * between them that carries text; a box's bars and a rule's runs are none.
+ * Each with `left` (a cell's own edge, a run's first letter) and `right`.
+ */
+function linePieces(line) {
+  const lt = ltOf(line);
+  if (!lt) return [];
+  const out = [];
+  let run = [];
+  const flush = () => {
+    const nodes = run;
+    run = [];
+    const text = pieceText(nodes);
+    const at = text.search(/\S/);
+    if (at < 0) return;
+    // Its first letter: the run's own text nodes, in order, to the one it is in.
+    let left = null, right = null, seen = 0;
+    const r = document.createRange();
+    for (const n of nodes) {
+      const walk = n.nodeType === 3 ? [n] : (() => { const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT), a = []; for (let t = w.nextNode(); t; t = w.nextNode()) if (!t.parentElement.closest(".cg, .rh, .rb")) a.push(t); return a; })();
+      for (const t of walk) {
+        if (left == null && at < seen + t.data.length) {
+          r.setStart(t, at - seen); r.setEnd(t, at - seen + 1);
+          left = r.getBoundingClientRect().left;
+        }
+        seen += t.data.length;
+      }
+    }
+    r.setStartBefore(nodes[0]); r.setEndAfter(nodes[nodes.length - 1]);
+    right = r.getBoundingClientRect().right;
+    if (left != null) out.push({ nodes, left, right, cell: false });
+  };
+  for (const n of lt.childNodes) {
+    if (n.nodeType === 1 && (n.classList.contains("rc") || n.classList.contains("cc"))) {
+      flush();
+      if (ruleOnly(n)) continue;
+      const b = n.getBoundingClientRect();
+      out.push({ nodes: [n], left: b.left, right: b.right, cell: true });
+    } else if (n.nodeType === 1 && n.classList.contains("rb")) flush();
+    else run.push(n);
+  }
+  flush();
+  return out;
+}
+/** Whether a press at (x, y) on `line` begins a column's drag: a line of two pieces or more. */
+function columnAt(line, x) {
+  const ps = linePieces(line);
+  if (ps.length < 2) return null;
+  let k = ps.findIndex((p) => x >= p.left && x < p.right);
+  if (k < 0) {
+    // In a gap between two: the nearer.
+    let best = Infinity;
+    ps.forEach((p, j) => { const d = Math.min(Math.abs(x - p.left), Math.abs(x - p.right)); if (d < best) { best = d; k = j; } });
+  }
+  return { left: ps[k].left, right: k + 1 < ps.length ? ps[k + 1].left : Infinity };
+}
+/**
+ * The column from `left` to `right` taken on every line of `body`: the classes
+ * the stylesheet reads, and what a copy takes. A run of a line's own text
+ * beside the column (the run after its last cell, a line the column does not
+ * reach) is wrapped for as long as the column stands (`.cs-wrap`), since the
+ * stylesheet can reach an element and not a text node.
+ */
+function applyColSel(body, col) {
+  const tol = 0.6 * (parseFloat(getComputedStyle(body).fontSize) || 16);
+  const picked = new Set(), lines = [];
+  for (const line of body.querySelectorAll(":scope > .line")) {
+    const lt = ltOf(line);
+    if (!lt) continue;
+    const ps = linePieces(line);
+    const take = ps.filter((p) => p.left >= col.left - tol && p.left < col.right - tol);
+    // A line the column takes whole is left as it is; a line of rules only is none of it.
+    const rules = !ps.length && [...lt.childNodes].some(ruleOnly);
+    if (take.length === ps.length && !rules) continue;
+    line.classList.add("cs-line");
+    lines.push(line);
+    for (const p of ps) {
+      if (take.includes(p)) {
+        for (const n of p.nodes) { picked.add(n); if (n.nodeType === 1) n.classList.add("cs-pick"); }
+      } else if (!p.cell) {
+        const wrap = document.createElement("span");
+        wrap.className = "cs-wrap";
+        p.nodes[0].before(wrap);
+        wrap.append(...p.nodes);
+      }
+    }
+  }
+  body.classList.add("colsel");
+  return { body, lines, picked, anchor: null };
+}
+function clearColSel() {
+  if (!colSel) return;
+  const { body, lines } = colSel;
+  colSel = null;
+  body.classList.remove("colsel");
+  for (const line of lines) {
+    line.classList.remove("cs-line");
+    for (const el of line.querySelectorAll(".cs-pick")) el.classList.remove("cs-pick");
+    for (const w of line.querySelectorAll(".cs-wrap")) w.replaceWith(...w.childNodes);
+  }
+}
+/** Whether a text node of `body` is in the column's selection (a line it does not cut is). */
+function inColSel(node) {
+  const el = node.parentElement;
+  const line = el && el.closest(".line");
+  if (!line || !line.classList.contains("cs-line")) return true;
+  const lt = ltOf(line);
+  let top = node;
+  while (top && top.parentNode !== lt) top = top.parentNode;
+  if (!top || !colSel.picked.has(top)) return false;
+  // A cell's gap is the column's only where the piece after it is taken too.
+  if (el.closest(".cg") && top !== el) {
+    let nx = top.nextSibling;
+    while (nx && nx.nodeType === 3 && !nx.data) nx = nx.nextSibling;
+    return !!nx && colSel.picked.has(nx);
+  }
+  return !el.closest(".rb, .rh");
+}
+/**
+ * The stretches of a page's text (serializeHeld's `segs`) a copy of the
+ * column's selection leaves out: the text beside the column, and a line it
+ * takes none of with its line break, so the column comes away as its own lines.
+ */
+function colSelSkips(body, disk) {
+  if (!colSel || colSel.body !== body) return [];
+  const out = [], byLine = new Map();
+  for (const g of disk.segs) {
+    const el = g.node.parentElement;
+    const line = el && el.closest(".line");
+    if (!line || !line.classList.contains("cs-line")) continue;
+    const keep = inColSel(g.node);
+    if (!keep) out.push([g.start, g.end]);
+    const s = byLine.get(line) || { from: g.start, to: g.end, any: false };
+    s.from = Math.min(s.from, g.start); s.to = Math.max(s.to, g.end); s.any = s.any || (keep && g.end > g.start);
+    byLine.set(line, s);
+  }
+  for (const s of byLine.values()) if (!s.any && disk.text[s.to] === "\n") out.push([s.to, s.to + 1]);
+  return out;
+}
+pagesEl.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.detail > 1) return;
+  const t = e.target && e.target.nodeType === 1 ? e.target : null;
+  const line = t && t.closest(".page-body > .line");
+  if (!line || t.closest(".gutter, .raw-sheet")) return;
+  const col = columnAt(line, e.clientX);
+  if (!col) return;
+  const body = line.parentElement;
+  colPress = { body, line, col };
+  const lineBox = line.getBoundingClientRect();
+  const move = (ev) => {
+    if (!colPress || !(ev.buttons & 1) || e.defaultPrevented) { done(); return; }
+    if (colSel || (ev.clientY >= lineBox.top && ev.clientY <= lineBox.bottom)) return;
+    // Off the line it began on: the column is cut out of the page.
+    colSel = applyColSel(body, col);
+  };
+  const done = () => {
+    window.removeEventListener("mousemove", move, true);
+    window.removeEventListener("mouseup", up, true);
+    colPress = null;
+  };
+  const up = () => {
+    done();
+    if (!colSel) return;
+    const sel = document.getSelection();
+    if (!sel || sel.isCollapsed) { clearColSel(); return; }
+    colSel.anchor = { node: sel.anchorNode, offset: sel.anchorOffset };
+  };
+  window.addEventListener("mousemove", move, true);
+  window.addEventListener("mouseup", up, true);
+});
+// Any other press lets the column go first, so the browser's own selection and caret come back for it;
+// so does a new layout of the page, which re-cuts its lines.
+// Only a left press on the pages: a right one opens the menu that copies it,
+// and the selection pop-up's and the toolbar's buttons keep the selection.
+document.addEventListener("mousedown", (e) => { if (colSel && e.button === 0 && !e.shiftKey && pagesEl.contains(e.target)) clearColSel(); }, true);
+window.addEventListener("resize", () => clearColSel());
+document.addEventListener("selectionchange", () => {
+  if (!colSel || colPress || !colSel.anchor) return;
+  const sel = document.getSelection();
+  if (!sel || sel.isCollapsed || sel.anchorNode !== colSel.anchor.node || sel.anchorOffset !== colSel.anchor.offset) clearColSel();
+});
+window.addEventListener("keydown", (e) => {
+  if (!colSel) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && !e.altKey && (e.key === "a" || e.key === "A")) { clearColSel(); return; }
+  // Shift+Space opens the selection's links (shift-space-open.js): not an edit.
+  const edits = mod ? /^[vVxX]$/.test(e.key) : (e.key === "Backspace" || e.key === "Delete" || e.key === "Enter" || e.key === "Tab" || (e.key.length === 1 && !e.altKey && !(e.shiftKey && e.key === " ")));
+  if (!edits || (mod && /^[xX]$/.test(e.key))) return; // a cut is the cut event's (below), so the copy still goes
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  toast(COLSEL_EDIT);
+}, true);
+for (const type of ["beforeinput", "paste", "drop"]) {
+  window.addEventListener(type, (e) => {
+    if (!colSel || !e.target || !e.target.closest || !e.target.closest("#pages")) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    toast(COLSEL_EDIT);
+  }, true);
+}
 
 // ── undo / redo ───────────────────────────────────────────────────────────────────────
 //
@@ -15009,6 +15273,9 @@ function showFlagPop() {
   // The selection reads the picture's words while a screenshot's fakes are
   // up, and the note would name the key's real value over them (fakesForShot).
   if (shotPut) { flagPopHeld = true; return; }
+  // A column's selection is one range running through the text beside the
+  // column: a flag, a strike or a comment would take that text too.
+  if (colSel) { flagPop.hidden = true; return; }
   const s = flagDrag ? null : currentSelection();
   if (!s) { flagPop.hidden = true; return; }
   const problem = TD.flagProblem(s.text, s.allFaked);
@@ -15224,6 +15491,7 @@ function diskRanges(d, a, b) {
 /** Comment on the passage selected: the box opens to type it in. */
 function commentSelection() {
   if (shotPut) return; // the page holds the picture's words (fakesForShot)
+  if (colSel) { toast(COLSEL_EDIT); return; }
   const s = currentSelection();
   if (!s) { toast("Select the passage to comment on first, then press 💬 Comment (or C)."); return; }
   const i = pageIndexOf(s.body);
@@ -15768,6 +16036,7 @@ function applyStrikeOp(body, op) {
 /** S̶ Strike: the words selected struck through, or the strike taken off them where every one is struck already. */
 function strikeSelection() {
   if (shotPut) return; // the page holds the picture's words (fakesForShot)
+  if (colSel) { toast(COLSEL_EDIT); return; }
   const s = currentSelection();
   if (!s) { toast("Select the words the PDF strikes through, then press S̶ Strike (Ctrl+Shift+X)."); return; }
   if (refuseWhileBusy()) return;
@@ -15893,6 +16162,7 @@ function flagSelectionNow({ asked = false } = {}) {
   // While a screenshot's fakes are up the selection reads them: a flag would
   // hand PDF-Linker its own pseudonym, or the cover, as a real value.
   if (shotPut) return;
+  if (colSel) { toast(COLSEL_EDIT); return; }
   const s = currentSelection();
   const problem = s ? TD.flagProblem(s.text, s.allFaked) : "Select the unfaked name first.";
   if (problem) { toast(problem, { error: true }); return; }
@@ -15986,6 +16256,7 @@ function phraseFakedInFile(v) {
  * keeps on its own notwithstanding.
  */
 function phraseSelection() {
+  if (colSel) { toast(COLSEL_EDIT); return; }
   const s = currentSelection();
   const v = s ? realTextOf(s.range) : "";
   const problem = TD.phraseProblem(v);
