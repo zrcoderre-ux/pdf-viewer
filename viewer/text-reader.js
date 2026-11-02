@@ -4883,6 +4883,7 @@ async function runRequestTaken(dir) {
   catch (e) { return !!(e && e.name === "NotFoundError"); }
 }
 /** Everything this reader holds of the folder, written: true where nothing is left owed. */
+let runNote = "";      // what saveAllForRun left for the run, said as it starts
 async function saveAllForRun() {
   if (hasUnsaved()) {
     if (doc || unsavedDocs.size) { if (!(await saveDocument())) return false; }
@@ -4912,7 +4913,20 @@ async function saveAllForRun() {
   }
   if (!hasUnsaved()) return true;
   const owed = unsavedNames().map((n) => TD.docLabel(n)).concat(pendingWrites());
-  toast(`Not run: ${owed.length ? nameList(owed) + " " + (owed.length === 1 ? "is" : "are") : "something is"} still unsaved, and PDF-Linker would run without ${owed.length === 1 ? "it" : "them"}. Save, then press Re-run PDF-Linker again.`, { error: true, ms: 9000 });
+  if (dirty && fileName && !owed.includes(TD.docLabel(fileName))) owed.unshift(TD.docLabel(fileName));
+  // NAMES SAID TO BE FAKED THAT NO SAVE CAN WRITE are not a reason to hold
+  // the run: what the save could write it has written, and the rest — a name
+  // whose Replacement cell holds an instruction to PDF-Linker rather than a
+  // pseudonym, a name in a document the save made no change in — is the
+  // run's to write (instructionNote says as much). Counted as unsaved, they
+  // refused the run with "something is still unsaved" while Save said
+  // "Nothing to save.", and nothing the operator could press got past it.
+  if (!owed.length) {
+    const d = decidedOwed();
+    if (d.names) runNote = ` ${d.names} name${d.names === 1 ? "" : "s"} you said to fake ${d.names === 1 ? "is" : "are"} left for the run to write.`;
+    return true;
+  }
+  toast(`Not run: ${nameList(owed)} ${owed.length === 1 ? "is" : "are"} still unsaved, and PDF-Linker would run without ${owed.length === 1 ? "it" : "them"}. Save, then press Re-run PDF-Linker again.`, { error: true, ms: 9000 });
   return false;
 }
 /**
@@ -4962,6 +4976,7 @@ async function rerunLinker() {
   }
   const nonce = crypto.randomUUID();
   rerunning = true;
+  runNote = "";
   try {
     openLink(TD.rerunUrl(launcher.token, dir.name, nonce));
     toast("Saving everything before PDF-Linker runs…", { ms: 60000 });
@@ -4973,7 +4988,7 @@ async function rerunLinker() {
       return;
     }
     if (!saved) return; // saveAllForRun, or the save itself, has said why
-    toast(`Saved. Waiting for PDF-Linker to start on ${dir.name} — if Chrome asks whether to open PDF-Linker, say Open.`, { ms: RERUN_PICKUP_MS });
+    toast(`Saved.${runNote} Waiting for PDF-Linker to start on ${dir.name} — if Chrome asks whether to open PDF-Linker, say Open.`, { ms: RERUN_PICKUP_MS });
     const until = Date.now() + RERUN_PICKUP_MS;
     let taken = false;
     while (!(taken = await runRequestTaken(dir)) && Date.now() < until) await new Promise((r) => setTimeout(r, 500));
@@ -9035,6 +9050,10 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   // reach used to stay orange, out of the walk, save after save, with nothing
   // said. Now it is named.
   const stuck = [];
+  // Names said to be faked that stand in a document off the screen the save
+  // could not write a pseudonym for (no swap made there): said, not passed
+  // over as "Nothing to save." (saveAllForRun lets the run go past them).
+  const leftOff = [];
   // The documents a folder replace is holding, each member's text as it stood
   // before the pass: what a save of one tells the replace's journal.
   const journalled = new Set(replaceJournal.filter((r) => r.state === "done").flatMap((r) => r.docs.map((x) => x.name)));
@@ -9154,8 +9173,9 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
       if (pass.stop) { toast("Save stopped — nothing was written.", { error: true }); return false; }
       if (!r) continue;
       // A document only the names said to be faked brought in is written only
-      // where the pass changed something in it.
-      if (!r.entry && !r.swaps) continue;
+      // where the pass changed something in it — and where it changed nothing,
+      // its names are still owed, which the save says.
+      if (!r.entry && !r.swaps) { for (const v of t.names) leftOff.push({ v, doc: r.d.name }); continue; }
       ready2.push(r);
       forwarded += r.swaps;
       for (const v of r.stuck) stuck.push(v);
@@ -9473,7 +9493,14 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   const combined = wrote.length && folderDocs.some((d) => d.combined) ? ` · ${TD.COMBINED_FILE} is behind the exports until PDF-Linker's next run (Re-run PDF-Linker).` : "";
   const unreadWarn = elsewhereUnread ? ` · ⚠ ${folderName} could not be read through for the names you said to fake, so none was written off the screen — save again.` : "";
   const pinnedWarn = pinnedNote(writtenTexts);
-  const red = warn || unsureWarn || stuckWarn || conflictWarn || failWarn || unreadWarn || spentWarn || pinnedWarn || (leaksDirty() && leaksSaveNote);
+  const leftNames = [...new Set(leftOff.map((x) => String(x.v).trim()))];
+  const leftDocs = new Set(leftOff.map((x) => x.doc)).size;
+  const leftWarn = leftOff.length
+    ? ` · ⚠ ${leftNames.length} name${leftNames.length === 1 ? "" : "s"} you said to fake ${leftNames.length === 1 ? "is" : "are"} still unfaked in ${leftDocs} document${leftDocs === 1 ? "" : "s"} off the screen, where the save could not write ${leftNames.length === 1 ? "a pseudonym" : "pseudonyms"} — `
+      + leftNames.slice(0, 4).join(", ") + (leftNames.length > 4 ? "…" : "") + "."
+      + (instructionNote(leftNames) || " Re-run PDF-Linker writes them from your decisions.")
+    : "";
+  const red = leftWarn || warn || unsureWarn || stuckWarn || conflictWarn || failWarn || unreadWarn || spentWarn || pinnedWarn || (leaksDirty() && leaksSaveNote);
   // Named in the folder's order, six at most: a save of forty documents is not
   // a toast of forty names. And what went wrong first, where it is read — a
   // warning after a long list of names was a warning nobody saw.
@@ -9492,7 +9519,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
       + (typing.back ? ` · ${typing.back} left as typed — ${typing.back === 1 ? "a party" : "parties"} to a cited decision, never a pseudonym` : "")
       + handedNote(handed) + alsoList)
     + combined;
-  const reds = (conflictWarn + failWarn + unreadWarn + warn + unsureWarn + stuckWarn + spentWarn + pinnedWarn).replace(/^ · /, "");
+  const reds = (conflictWarn + failWarn + unreadWarn + warn + unsureWarn + stuckWarn + leftWarn + spentWarn + pinnedWarn).replace(/^ · /, "");
   // …the LEAKS note alone (red, but not among `reds`: it rides in `said`) opens on no " — ".
   toast(reds ? reds + " — " + said : said, { error: !!red, ms: red ? 12000 : wrote.length > 1 ? 6000 : undefined });
   return !conflicts.length && !failed.length && !unreadable.length && filesOk;
@@ -20100,7 +20127,7 @@ const pdfSizes = new Map(); // name → [{ w, h }]
 function forgetPdfs() {
   cancelPdfJobs();
   dropWarmPages();
-  for (const p of pdfCache.values()) p.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }).catch(() => {});
+  for (const p of pdfCache.values()) p.then(closePdfInfo).catch(() => {});
   pdfCache.clear();
   pdfInView.clear();
   pdfSizes.clear();
@@ -20217,7 +20244,7 @@ function trimPdfs() {
     if (held.has(name)) continue;
     const p = pdfCache.get(name);
     pdfCache.delete(name);
-    if (p) p.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }).catch(() => {});
+    if (p) p.then(closePdfInfo).catch(() => {});
   }
   // …and the ones that stay, but with nothing of theirs on screen, are told
   // to put down what they were holding for the pages that WERE: the operator
@@ -20263,6 +20290,8 @@ function trimPdfs() {
 const pdfJobs = [];        // queued work, each tagged with the PDF it is for
 let pdfJobBusy = false;
 const DRAW_WAIT_MAX = 1500; // ms the `later` work waits on the screen at most
+const PDF_JOB_STALL = 20000; // ms the queue waits on one job before it goes on without it
+const STALLED = Symbol("stalled");
 let pdfJobWake = 0;
 function pumpPdfJobs() {
   if (pdfJobBusy) return;
@@ -20273,7 +20302,16 @@ function pumpPdfJobs() {
         const k = nextPdfJob();
         if (k < 0) break;
         const job = pdfJobs.splice(k, 1)[0];
-        try { await job.run(); } catch { /* whoever asked for it reports it */ }
+        // A job that has not settled in PDF_JOB_STALL is left to finish on
+        // its own, and the queue goes on: one request pdf.js never answers
+        // must not leave every page "Loading…" (closePdfInfo, above).
+        let stall = 0;
+        const stalled = new Promise((res) => { stall = setTimeout(() => res(STALLED), PDF_JOB_STALL); });
+        try {
+          const got = await Promise.race([Promise.resolve().then(() => job.run()), stalled]);
+          if (got === STALLED) console.warn(`[Text Reader] a PDF job for ${job.name} took more than ${PDF_JOB_STALL / 1000} s; the queue goes on without it.`);
+        } catch { /* whoever asked for it reports it */ }
+        finally { clearTimeout(stall); }
       }
     } finally { pdfJobBusy = false; }
   })();
@@ -20321,7 +20359,7 @@ function loadPdf(src, { now = false } = {}) {
     p.__info = info;
     // Closed while it was still opening (trimPdfs): nothing is holding it, so
     // it is destroyed here rather than left open with no way back to it.
-    if (pdfCache.get(src.name) !== p) { try { info.pdf.destroy(); } catch { /* gone */ } }
+    if (pdfCache.get(src.name) !== p) closePdfInfo(info);
   }).catch(() => { if (pdfCache.get(src.name) === p) pdfCache.delete(src.name); });
   const job = {
     name: src.name,
@@ -20353,6 +20391,34 @@ function sharedPdfWorker() {
   if (!pdfWorker || pdfWorker.destroyed) pdfWorker = new pdfjsLib.PDFWorker();
   return pdfWorker;
 }
+// A PDF CLOSED UNDER A REQUEST MUST NOT HOLD THE QUEUE. trimPdfs closes the
+// PDFs the reading has left to keep the tab under PDF_BYTES — sooner, the
+// larger they are — and a job of the queue may be part way through one of
+// them. pdf.js answers most requests to a destroyed document (getPage and a
+// render reject, the text resolves), but NOT `getOperatorList`: asked of a
+// page and the document destroyed before the answer, it never settles
+// (measured: a page's operator list asked, `destroy()`, nothing after eight
+// seconds; a `cleanup()` in its place lets it answer). The grid asks for it
+// (noteFaces, hiddenTextShare) inside its job, and the queue runs one job at
+// a time, so every PDF opened after that — every page drawn in either pane,
+// the worksheet's pages ahead — waited behind it and said "Loading…" for as
+// long as the reader stayed open. The owner, of a 14.7 MB exhibit set: the
+// PDF column "says Loading... but never loads", with the long-task report
+// naming draws in flight for 3,500 seconds. So a reading of a PDF is closed
+// here, which says so first (`info.closed`), and every operator list is asked
+// for against that (opListOf); pumpPdfJobs stops waiting on any job past
+// PDF_JOB_STALL besides.
+function closePdfInfo(info) {
+  if (!info) return;
+  if (info.markClosed) info.markClosed();
+  try { info.pdf.destroy(); } catch { /* gone */ }
+}
+/** A page's operator list, or a rejection once the PDF it is read from is closed. */
+function opListOf(info, page) {
+  const ask = page.getOperatorList();
+  if (!info || !info.closed) return ask;
+  return Promise.race([ask, info.closed.then(() => { throw Object.assign(new Error("the PDF was closed"), { closed: true }); })]);
+}
 /**
  * The PDF, HANDED BACK THE MOMENT IT IS OPEN.
  *
@@ -20383,6 +20449,7 @@ async function openPdfNow(src) {
   const n = pdf.numPages;
   const hole = () => new Array(n).fill(null);
   const info = { pdf, count: n, sizes: hole(), name: src.name, lines: hole(), geoms: hole(), rows: hole(), gridRead: new Set(), gridQueued: true };
+  info.closed = new Promise((res) => { info.markClosed = res; });
   // The same array the measuring fills, so a slot sized from it later gets
   // the pages as they land — and keeps them after the PDF itself is closed.
   pdfSizes.set(src.name, info.sizes);
@@ -20515,7 +20582,7 @@ async function noteFaces(info, page, styles) {
   const fontOf = (id) => { try { return objs && objs.has(id) ? objs.get(id) : null; } catch { return null; } };
   if (ids.some((id) => !fontOf(id))) {
     const from = performance.now();
-    try { await page.getOperatorList(); } catch { /* the families alone, then */ }
+    try { await opListOf(info, page); } catch { /* the families alone, then */ }
     facesCost.ms += performance.now() - from;
     facesCost.pages++;
   }
@@ -20586,9 +20653,9 @@ const FORM_MIN_ITEMS = 20, FORM_OCR_SHARE = 0.8;
  * pdf.js builds to draw the page, so asked again it is in hand. 0 where it
  * cannot be read.
  */
-async function hiddenTextShare(page) {
+async function hiddenTextShare(info, page) {
   try {
-    const ops = await page.getOperatorList();
+    const ops = await opListOf(info, page);
     const O = pdfjsLib.OPS;
     const show = new Set([O.showText, O.showSpacedText, O.nextLineShowText, O.nextLineSetSpacingShowText]);
     let mode = 0, hidden = 0, all = 0;
@@ -20770,7 +20837,7 @@ async function readPdfGridNow(info, pass) {
       // its type in a font that names no face, or drawn invisibly over the
       // picture (text render mode 3), as every OCR layer is, whatever the font
       // it is set in calls itself.
-      (info.scans || (info.scans = []))[i - 1] = !typed && (ocrLayerPage(info, items) || (items.length >= FORM_MIN_ITEMS && await hiddenTextShare(page) >= FORM_OCR_SHARE));
+      (info.scans || (info.scans = []))[i - 1] = !typed && (ocrLayerPage(info, items) || (items.length >= FORM_MIN_ITEMS && await hiddenTextShare(info, page) >= FORM_OCR_SHARE));
       info.geoms[i - 1] = PS.pleadingGeometry(typed || items, sz);
       info.rows[i - 1] = PS.pdfRows(typed || items, sz);
     } catch { info.lines[i - 1] = null; }
@@ -25196,7 +25263,7 @@ async function exitPdfMode() {
         const held = pdfCache.get(name);
         pdfCache.delete(name);
         pdfSizes.delete(name);
-        if (held) held.then((info) => { try { info.pdf.destroy(); } catch { /* gone */ } }, () => {});
+        if (held) held.then(closePdfInfo, () => {});
         changed = true;
       }
     } catch { /* gone from the folder */ }

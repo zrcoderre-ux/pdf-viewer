@@ -3522,8 +3522,25 @@ button then asks to be pressed again (`navigator.userActivation`). PDF-Linker
 (`_serve_reader_request`) waits up to 15 minutes for `PDF-Linker Run
 Request.json` in the folder with the same nonce: "go" once `saveAllForRun`
 has written everything (`saveDocument`, then `__pdfViewerSave` in each PDF
-mode frame with unsaved changes, then `hasUnsaved()` must be false), "cancel"
-otherwise, so a run never starts on a folder half saved. The nonce is also
+mode frame with unsaved changes, then nothing the save could have written may
+be left: no edited document, no list, no worksheet, no Master Keep removal),
+"cancel" otherwise, so a run never starts on a folder half saved. A name said
+to be faked that no save can write does not count against the run (owner,
+2026-11-02: "When I click re-run pdf linker it refuses because it says
+something is not saved, but when I click save it says nothing to save"). Its
+Replacement cell holds an instruction to PDF-Linker, not a pseudonym
+(`instructionNote` itself says the next Re-run carries it out); or it stands in
+a document off the screen where the save's pass made no swap. `hasUnsaved()`
+counts such names (`decidedOwed`, which lights Save and the status bar), so the
+gate refused with "something is still unsaved" (its list named documents and
+files only), while the save, finding nothing to write, said "Nothing to save."
+Nothing the operator could press got past it. Now the gate refuses only on what
+it can name (an edited document, the one on screen included, and
+`pendingWrites`); decided names left over go ahead, and "Saved." says how many
+are left for the run (`runNote`). The save no longer passes over such a
+document in silence either: the names it could not write go into its toast in
+red, with `instructionNote` where the key holds an instruction (`leftOff`).
+`test-folder-save.mjs` case 40. The nonce is also
 the authority: any page can open the link, only one holding the folder can
 answer it. PDF-Linker deletes the file as it starts the launcher, which is
 the reader's sign the run began; only then is the folder closed: the app's
