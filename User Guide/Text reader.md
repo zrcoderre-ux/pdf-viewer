@@ -693,7 +693,8 @@ app, which routes it to the reader tab.
   longer matching its export) is not written back to apply — mark the page
   again once the next full run has written the export again.
 - **The key, term by term.** **🗝 Key terms** in the tools panel (or a click
-  on the pseudonym count in the status bar) puts a bar over the text that
+  on the pseudonym count in the status bar, or on a highlighted name in the
+  text, which opens it on that name where it stands) puts a bar over the text that
   walks the pseudonym key as it stands on the page. A **term** is one row of
   the key — its real name and the pseudonym the file carries, however the case
   is written — and the terms come in the order each first appears; the list on
@@ -2444,7 +2445,9 @@ app, which routes it to the reader tab.
     (Open case folder, or a row of the Case folders list) or from the
     reader's own Open case folder. The toast says so; **📝 Text mode** goes to
     the text. A folder still within the hour, with leaks to answer, or with a
-    run going opens on the text as before.
+    run going opens on the text as before — and so does one whose run
+    finished overnight (9:00 PM to before 8:00 AM), so its text gets one final
+    review.
 
   While it is on:
   - **Switch PDFs** with **‹ ›** or the list in the top bar (**Alt+PageUp** /

@@ -114,17 +114,29 @@ export function folderStatus(listing, now) {
 // PDF mode (text-reader.js, pdfModeIfSettled): the text has been reviewed, and
 // what is left to do is read the PDFs.
 export const SETTLED_MS = 60 * 60000;
+// …except a run that finished overnight, from 9:00 PM to before 8:00 AM local
+// time: nobody has reviewed its text yet, so the folder opens on the text for
+// one final review (the owner's decision of Nov 2).
+export const OVERNIGHT_FROM = 21;
+export const OVERNIGHT_UNTIL = 8;
+
+/** Whether `at` (ms) falls overnight, local time: 9:00 PM to before 8:00 AM. */
+export function finishedOvernight(at) {
+  const h = new Date(at).getHours();
+  return h >= OVERNIGHT_FROM || h < OVERNIGHT_UNTIL;
+}
 
 /**
  * Whether a case folder opens in PDF mode rather than the text: its last run
  * finished (a DONE stamp newer than any ETA marker) more than SETTLED_MS ago,
- * with no LEAKS.xlsx standing and no export held as .LEAK. `st` is
- * folderStatus's answer. A DONE stamp is written again by every run, a
- * --fix-leaks run included, so the hour counts from the run that left the
- * folder clean.
+ * in the day (not finishedOvernight), with no LEAKS.xlsx standing and no
+ * export held as .LEAK. `st` is folderStatus's answer. A DONE stamp is written
+ * again by every run, a --fix-leaks run included, so the hour, and the time of
+ * day, are the run's that left the folder clean.
  */
 export function opensInPdfMode(st, now) {
-  return !!st && st.state === "done" && !st.leaks && !st.held && typeof st.at === "number" && now - st.at > SETTLED_MS;
+  return !!st && st.state === "done" && !st.leaks && !st.held && typeof st.at === "number"
+    && now - st.at > SETTLED_MS && !finishedOvernight(st.at);
 }
 
 /** "3:04 PM" today, "Oct 28, 3:04 PM" another day. */

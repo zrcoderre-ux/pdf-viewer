@@ -5326,6 +5326,14 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         lab.appendChild(r);
       }
       lab.contentEditable = "false";
+      // The label's buttons, held in one row (.page-tools), placed ahead of
+      // the label's words so they stand on its first line at the right and
+      // the words wrap beside them: floated one by one, those that did not
+      // fit beside a long REVIEW note dropped to a row of their own, # Number
+      // lines most often (the owner: "all of the buttons on the same line").
+      const tools = document.createElement("span");
+      tools.className = "page-tools";
+      lab.prepend(tools);
       if (PS.pdfPageOf(p)) {
         // Swap this page for its PDF page, or back (the PDF section below).
         const b = document.createElement("button");
@@ -5334,7 +5342,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         // Read off the section at the click, never closed over: a document
         // hung ABOVE this one renumbers every page below it (reelShift).
         b.addEventListener("click", (e) => { e.preventDefault(); toggleSwap(Number(sec.dataset.index)); });
-        lab.appendChild(b);
+        tools.appendChild(b);
       }
       {
         // ⇄ Raw: this page as the file has it, in the page's place (a page as
@@ -5345,7 +5353,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         b.type = "button";
         b.addEventListener("click", (e) => { e.preventDefault(); toggleRaw(Number(sec.dataset.index)); });
         setRawButton(b, false);
-        lab.appendChild(b);
+        tools.appendChild(b);
       }
       if (p.header != null) {
         // Strip this page's text for DID_NOT_OCR (a page that did not OCR,
@@ -5355,7 +5363,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         b.className = "nocr-page";
         b.type = "button";
         b.addEventListener("click", (e) => { e.preventDefault(); nocrButtonClick(Number(sec.dataset.index)); });
-        lab.appendChild(b);
+        tools.appendChild(b);
         // As the page reads; whether a request is already made is settled
         // once the document is up and its lists are in hand (syncNoOcr).
         setNocrButton(b, TD.readsDidNotOcr(p.lines), false, TD.headerSaysDidNotOcr(p));
@@ -5365,7 +5373,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         f.className = "fix-page";
         f.type = "button";
         f.addEventListener("click", (e) => { e.preventDefault(); useMyText(Number(sec.dataset.index)); });
-        lab.appendChild(f);
+        tools.appendChild(f);
         setFixButton(f, TD.readsDidNotOcr(p.lines), false, TD.headerSaysTextCorrected(p));
         // ↺ Use the PDF's text: on a page PDF-Linker writes off a kept
         // transcription, take the transcription back (useThePdfsText).
@@ -5374,7 +5382,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         u.type = "button";
         u.hidden = !TD.headerSaysTextCorrected(p);
         u.addEventListener("click", (e) => { e.preventDefault(); useThePdfsText(Number(sec.dataset.index)); });
-        lab.appendChild(u);
+        tools.appendChild(u);
         setUnfixButton(u, false);
         // # Number lines: pleading paper's margin numbers, where the export
         // has none (numberPage). Only on a page without them.
@@ -5385,7 +5393,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         nb.title = "This page has no margin line numbers: give it pleading paper's 1–28 — each line on the number the PDF prints it at where the PDF is open beside it, else in order";
         nb.hidden = TD.pageNumbersComplete(p.lines) || TD.readsDidNotOcr(p.lines) || TD.headerSaysCondensed(p);
         nb.addEventListener("click", (e) => { e.preventDefault(); numberPage(Number(sec.dataset.index)); });
-        lab.appendChild(nb);
+        tools.appendChild(nb);
         // ✕ Remove numbers: the margin numbers taken out again (unnumberPage),
         // on a numbered page whose PDF prints none as text — the page
         // # Number lines numbered, or one numbered by hand.
@@ -5396,7 +5404,7 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
         ub.title = "Take this page's margin line numbers out again (Ctrl+Z puts them back)";
         ub.hidden = !TD.pageIsNumbered(p.lines) || TD.readsDidNotOcr(p.lines) || TD.headerSaysCondensed(p);
         ub.addEventListener("click", (e) => { e.preventDefault(); unnumberPage(Number(sec.dataset.index)); });
-        lab.appendChild(ub);
+        tools.appendChild(ub);
       }
       sec.appendChild(lab);
     }
@@ -11190,7 +11198,28 @@ function stepKeyAppearance(dir) {
   const n = terms[loc.ti].at.length;
   keyStand(terms, loc.ti, (((loc.ai + dir) % n) + n) % n);
 }
-function showKeyBar(on) {
+/** The appearance a span is part of, as { ti, ai }, or null. */
+function keyAppearanceOf(terms, span) {
+  for (let ti = 0; ti < terms.length; ti++) {
+    const ai = terms[ti].at.findIndex((a) => a.includes(span));
+    if (ai >= 0) return { ti, ai };
+  }
+  return null;
+}
+/**
+ * A pseudonym clicked on the page: the walk opened (or moved) to that term, at
+ * that appearance (the owner: "clicking on the highlighted real value should
+ * open the key stepthrough to that entry"). Not scrolled: it is where the
+ * reader is looking.
+ */
+function openKeyAt(span) {
+  if (!doc) return;
+  if (keyBar.hidden) { showKeyBar(true, { at: span }); return; }
+  const terms = keyTerms();
+  const h = keyAppearanceOf(terms, span);
+  if (h) keyStand(terms, h.ti, h.ai, { go: false });
+}
+function showKeyBar(on, { at = null } = {}) {
   const was = !keyBar.hidden;
   if (on && !doc) return;
   if (on && !was) reelAllLive(); // the walk reads every page of the reel
@@ -11200,11 +11229,13 @@ function showKeyBar(on) {
   if (!on) { keyTerm = null; keyAt = null; clearKeyMarks(); return; }
   if (was) return;
   // Opened: it starts where the reading is, on the first name at or under the
-  // top of the stage, rather than at the head of the document.
+  // top of the stage, rather than at the head of the document — or on the
+  // name clicked (`at`, openKeyAt), where it stands without scrolling.
   keyListSig = "";
   const terms = keyTerms();
-  const h = keyHere(terms);
-  if (h) keyStand(terms, h.ti, h.ai);
+  const clicked = at ? keyAppearanceOf(terms, at) : null;
+  const h = clicked || keyHere(terms);
+  if (h) keyStand(terms, h.ti, h.ai, { go: !clicked });
   else renderKeyBar(terms);
 }
 // The pages were rebuilt (an edit, the key changed, Show fakes, a document
@@ -11241,6 +11272,19 @@ keyBar.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { e.preventDefault(); showKeyBar(false); }
 });
 $("key-walk-btn").addEventListener("click", () => showKeyBar(keyBar.hidden));
+// A plain click on a highlighted pseudonym opens the walk on it. Not a drag
+// that selected, not with a key held (Shift extends a selection, Ctrl adds
+// to it), and not where a comment is under the click: that opens the comment.
+pagesEl.addEventListener("click", (e) => {
+  if (e.button !== 0 || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || !settings.marks) return;
+  const t = e.target && e.target.nodeType === 1 ? e.target : null;
+  const pn = t && t.closest(".pn");
+  if (!pn || t.closest(".page-label, a, button, .raw-sheet")) return;
+  const sel = document.getSelection();
+  if (sel && !sel.isCollapsed) return;
+  if (commentMarks.length && commentAtPoint(e.clientX, e.clientY)) return;
+  openKeyAt(pn);
+});
 // The count of pseudonyms opens the walk on the name at the reading; once it
 // is open, it steps on through the term.
 function keyFromCount(e) {
@@ -15760,7 +15804,7 @@ function paintComments() {
     const lab = sec.querySelector(":scope > .page-label");
     if (!lab) continue;
     const refs = perPage.get(Number(sec.dataset.index));
-    let b = lab.querySelector(":scope > .cmt-page");
+    let b = lab.querySelector(".cmt-page");
     if (!refs) { if (b) b.remove(); continue; }
     if (!b) {
       b = document.createElement("button");
@@ -15768,7 +15812,8 @@ function paintComments() {
       b.className = "cmt-page";
       // Read off the section at the click, as the label's other buttons are.
       b.addEventListener("click", (e) => { e.preventDefault(); openPageComment(Number(sec.dataset.index)); });
-      lab.appendChild(b);
+      // In the row with the others (buildPages' .page-tools), last, so leftmost.
+      (lab.querySelector(":scope > .page-tools") || lab).appendChild(b);
     }
     b.textContent = `💬 ${refs.length}`;
     b.title = refs.length === 1 ? "A comment on this page — click to read it" : `${refs.length} comments on this page — click for the first; the Comments tab lists them`;

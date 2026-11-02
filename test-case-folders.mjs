@@ -21,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   folderStatus, statusText, isCaseListing, isToday, signalFile, sortRows, startOfDay, RUN_STALE_MS,
-  opensInPdfMode, SETTLED_MS,
+  opensInPdfMode, SETTLED_MS, finishedOvernight,
 } from "./viewer/case-folders.js";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +73,15 @@ check("…done within the hour: the text", pm([f("DONE 2.40PM.txt", SETTLED_MS -
 check("…with LEAKS.xlsx standing: the text", pm([f("DONE 1.40PM.txt", SETTLED_MS + MIN), f("LEAKS.xlsx", SETTLED_MS + MIN, 800)]), false);
 check("…with an export held as .LEAK: the text", pm([f("DONE 1.40PM.txt", SETTLED_MS + MIN)], 1), false);
 check("…a run going since: the text", pm([f("DONE 1.40PM.txt", SETTLED_MS + MIN), f("ETA ~6.04PM (1 of 3).txt", 2 * MIN)]), false);
+// NOW is 3:00 PM; a stamp at a clock time, `daysBack` days before it.
+const at = (h, m, daysBack = 0) => { const d = new Date(NOW); d.setDate(d.getDate() - daysBack); d.setHours(h, m, 0, 0); return d.getTime(); };
+const pmAt = (t) => opensInPdfMode(folderStatus({ files: [{ name: "DONE x.txt", size: 0, at: t }] }, NOW), NOW);
+check("finished overnight, 9:00 PM to before 8:00 AM: the text, for a final review",
+  [pmAt(at(21, 0, 1)), pmAt(at(23, 30, 1)), pmAt(at(0, 15)), pmAt(at(7, 59))], [false, false, false, false]);
+check("…finished in the day, 8:00 AM to before 9:00 PM: PDF mode",
+  [pmAt(at(8, 0)), pmAt(at(12, 30)), pmAt(at(20, 59, 1))], [true, true, true]);
+check("…overnight stays overnight days later", pmAt(at(22, 0, 3)), false);
+check("the overnight hours, by the clock", [finishedOvernight(at(20, 59)), finishedOvernight(at(21, 0)), finishedOvernight(at(7, 59)), finishedOvernight(at(8, 0))], [false, true, true, false]);
 check("…a run with its stamp gone, or none: the text", [pm([f("pseudonym_key.xlsx", 2 * SETTLED_MS, 900)]), pm([f("Complaint.pdf", MIN, 5000)])], [false, false]);
 
 console.log("3. which folders are case folders, and today's");

@@ -3569,3 +3569,11 @@ was, so PDF-Linker's port of the reversal (`_rd_*`) does not move. PDF-Linker
 now keeps the wrapped court link too (its `_pn_url_wrap_whitelisted`).
 Tests: `test-pseudo-key.mjs`.
 
+**A click on a highlighted name opens 🗝 Key terms on it** (`openKeyAt`,
+`keyAppearanceOf`, 2026-11-02). A plain left click on a `.pn` — no key held,
+no selection made by the press, marks on, no comment under the click (that
+opens the comment) — opens the key walk standing on that appearance of that
+term, or, open already, moves it there; `showKeyBar(true, { at })` and
+`keyStand(…, { go: false })` leave the page where it is, since the name is
+where the reader is looking. Right-click is still the keep menu. Test:
+`test-key-answers.mjs` case 5.

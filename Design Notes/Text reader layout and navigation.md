@@ -227,6 +227,17 @@ edits" line covered ⇄ Text, the button that turns Raw off. Now the label grows
 to hold them, and the levelling above keeps its PDF page's label level with it.
 Test: `test-raw-edit.mjs` case 4.
 
+**…in one row** (`.page-tools`, 2026-11-02). Floated one by one, the buttons
+that did not fit beside a long REVIEW note dropped to a row of their own, #
+Number lines most often. They are now held in one span, `.page-tools`, put
+FIRST in the label (`lab.prepend`, before the label's words) and floated right
+as one flex row (`row-reverse`, so ⇄ PDF, the first built, stays at the
+right; `nowrap`; the buttons' own floats and margins off, `gap` between).
+Being first, the row stands on the label's first line and the words wrap
+beside it to the left. 💬 n (`paintComments`) joins the row, last and so
+leftmost. Every query for a button is a descendant one (`.page-label
+.num-page`), so the wrapper changes none of them.
+
 **A shed page was pinned at the wrong height, beside a slot of the wrong
 width.** `shedMember` took the page off the grid (`clearMatched`) and THEN read
 the height to pin, which was whatever its text came to flowing off the grid; and

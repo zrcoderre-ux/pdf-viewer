@@ -742,6 +742,15 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
   border-radius: 2px 2px 0 0; user-select: none;
 }
 .page-label.doc { background: #e8f0fe; color: #174ea6; font-weight: 600; font-size: 12px; }
+/* The label's buttons in one row, never wrapped: floated right as one, ahead
+   of the label's words, which wrap beside it. row-reverse keeps the order the
+   single floats gave them (the first built, ⇄ PDF, at the right). */
+.page-label .page-tools {
+  float: right; display: flex; flex-direction: row-reverse; flex-wrap: nowrap; align-items: center;
+  gap: 6px; margin-left: 12px; white-space: nowrap;
+}
+.page-label .page-tools:empty { display: none; }
+.page-label .page-tools > button { float: none; margin: 0; }
 .page-label .review { color: #b45309; margin-left: 8px; }
 /* The swap control on a page label: this page from the PDF, or back to text. */
 .page-label .swap-page {
@@ -756,7 +765,6 @@ body.dragging #empty .empty-inner { border-color: var(--accent); }
   float: right; background: transparent; border: 1px solid #c4c7cb; color: #444; border-radius: 3px; padding: 0 6px; cursor: pointer;
   font: 11px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-.page-label .swap-page + .raw-page { margin-right: 6px; }
 .page-label .raw-page:hover { background: #e3e5e8; }
 .tpage.raw .page-label .raw-page { background: var(--accent); border-color: var(--accent); color: #fff; }
 /* ⊘ Did not OCR, beside it: strips the page's text for [DID NOT OCR]. */

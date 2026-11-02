@@ -44,7 +44,11 @@ any ETA marker and older than the hour, no worksheet (any name `LK.isLeaksName`
 takes, mapped to `LEAKS.xlsx` for `folderStatus`) and no export held as
 `.LEAK` (`folderDocs`' `quarantined`). Every run rewrites DONE, a
 `--fix-leaks` run included, so the hour counts from the run that left the
-folder clean. It is read off the folder as it stands when it is opened.
+folder clean. A DONE stamp written overnight, 9:00 PM to before 8:00 AM local
+time (`finishedOvernight`, `OVERNIGHT_FROM`/`OVERNIGHT_UNTIL`, read off the
+stamp file's time), keeps the folder on the text however long ago it was: no
+one has reviewed an overnight run's text, and the owner does one final review
+of it. It is read off the folder as it stands when it is opened.
 
 It runs only where a case folder is OPENED: the reader's Open case folder
 (`openFolder`, not when the folder picked is the one already open), and the
@@ -54,7 +58,8 @@ A tab brought over from another window carries its folder without it, and
 opens on the text. Only a folder open in full (`folderOpen`, not a light
 attach or a Text Files folder) with PDFs, and only while it is still the
 folder open after the look. Tests: `test-case-folders.mjs` (the rule) and
-`test-pdf-mode.mjs` section 10 (the clock moved on in the page).
+`test-pdf-mode.mjs` section 10 (the clock moved on in the page, and a
+fixed-offset time zone putting the stamp at a chosen hour).
 
 ## Continuous scroll
 

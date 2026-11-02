@@ -193,6 +193,32 @@ async function run() {
     check("…and none in the file, the keep still there", [file.some((l) => l.startsWith("fix:")), file.includes("no: Pelham Grantwick")], [false, true]);
     check("no page errors", r.log.errors, []);
     await r.close();
+
+    console.log("5. a click on a highlighted name opens the walk on it");
+    const r2 = await newReader();
+    const q = r2.page;
+    const pnBox = (i) => q.evaluate((i) => { const b = document.querySelectorAll("#pages .pn")[i].getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }, i);
+    const top = () => q.evaluate(() => document.getElementById("stage").scrollTop);
+    check("the walk is shut", await q.evaluate(() => document.getElementById("key-bar").hidden), true);
+    let at = await pnBox(1);
+    await q.mouse.click(at.x, at.y);
+    await q.waitForTimeout(500);
+    check("clicked: the walk is open, on the name clicked", [await q.evaluate(() => document.getElementById("key-bar").hidden), (await bar(q)).term.startsWith("Pelham Grantwick → Dorian Fane")], [false, true]);
+    const t0 = await top();
+    at = await pnBox(0);
+    await q.mouse.click(at.x, at.y);
+    await q.waitForTimeout(500);
+    check("open, another name clicked: the walk moves to it", (await bar(q)).term.startsWith("Orla Vantreese → Mira Holt"), true);
+    check("…without scrolling the page", await top(), t0);
+    await q.evaluate(() => document.getElementById("kb-close").click());
+    at = await pnBox(1);
+    await q.keyboard.down("Shift");
+    await q.mouse.click(at.x, at.y);
+    await q.keyboard.up("Shift");
+    await q.waitForTimeout(400);
+    check("a Shift+click extends a selection; it does not open the walk", await q.evaluate(() => document.getElementById("key-bar").hidden), true);
+    check("no page errors", r2.log.errors, []);
+    await r2.close();
   } finally {
     await browser.close();
     srv.stop();

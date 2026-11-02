@@ -5,7 +5,7 @@
 // it go on into the next PDF; the viewer's Find goes on through the folder;
 // and the same button brings the text back at the page the PDF was on. A
 // case folder opened whose run finished over an hour ago with no leaks opens
-// in PDF mode by itself.
+// in PDF mode by itself, unless the run finished overnight (9 PM to 8 AM).
 //
 // Run: node test-pdf-mode.mjs   (from the repo root)
 //
@@ -320,8 +320,17 @@ async function run() {
     console.log("10. a case folder long done with, with no leaks, opens in PDF mode");
     // The clock is moved on in the page (__clockAhead), since a file of the
     // origin's private file system carries the time it was written.
-    const settled = async ({ ahead, held = false, leaks = false, how = "shell" }) => {
-      const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    // …and the page put in a time zone where the DONE stamp, written now,
+    // reads as written at `hour` local time (a fixed-offset Etc/GMT zone),
+    // so the day-or-overnight rule does not hang on when the test is run.
+    const zoneAt = (hour) => {
+      let off = hour - new Date().getUTCHours();
+      if (off > 14) off -= 24;
+      if (off < -12) off += 24;
+      return off === 0 ? "Etc/GMT" : off > 0 ? `Etc/GMT-${off}` : `Etc/GMT+${-off}`;
+    };
+    const settled = async ({ ahead, held = false, leaks = false, how = "shell", hour = 12 }) => {
+      const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, timezoneId: zoneAt(hour) });
       await ctx.addInitScript(() => { const real = Date.now.bind(Date); Date.now = () => real() + (window.__clockAhead || 0); });
       const p = await ctx.newPage();
       const errs = [];
@@ -371,6 +380,8 @@ async function run() {
     check("an export held as .LEAK: the text", await settled({ ahead: 2 * HOUR, held: true }), { shown: "text", errors: [] });
     check("a worksheet standing, under the legacy name: the text", (await settled({ ahead: 2 * HOUR, leaks: true })).shown, "text");
     check("a tab brought from another window, not a case folder opened: the text", await settled({ ahead: 2 * HOUR, how: "moved" }), { shown: "text", errors: [] });
+    check("finished overnight (11 PM): the text, for a final review", await settled({ ahead: 10 * HOUR, hour: 23 }), { shown: "text", errors: [] });
+    check("finished early morning (6 AM): the text", await settled({ ahead: 5 * HOUR, hour: 6 }), { shown: "text", errors: [] });
   } finally {
     if (browser) await browser.close();
     if (srv) srv.stop();
