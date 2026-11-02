@@ -1078,9 +1078,16 @@ function sharedWords(sample, out) {
   return out.replace(WORD_RE, (w) => (spelled.has(fold(w)) ? spelled.get(fold(w)) : w));
 }
 
-function casedSuffix(shape, suffix) {
+// The 's follows the sentence around it: shouted with a shout, quiet with a
+// quiet line, otherwise as typed. But an acronym's capitals are its spelling,
+// not a shout: where the key itself spells the matched word in capitals
+// (`keyText`, the searched side: "TRUENORTH", "PNC"), "TRUENORTH's" in a
+// sentence is prose, and reading it as a shout wrote "ABC'S". The 's is then
+// kept as typed, so a caption's "TRUENORTH'S" is still "ABC'S". The same rule
+// as the extension's src/pseudo.js.
+export function casedSuffix(shape, suffix, keyText) {
   if (!suffix) return "";
-  if (shape === "upper") return suffix.toUpperCase();
+  if (shape === "upper") return shoutedLetters(String(keyText || "").replace(POSS_TAIL_RE, "")) ? suffix : suffix.toUpperCase();
   if (shape === "lower") return suffix.toLowerCase();
   return suffix;
 }
@@ -1373,7 +1380,7 @@ function swapTo(hit, matched) {
   const sample = foldGaps(core);
   const shape = caseShape(sample);
   const value = shape === "title" ? keySpelled(hit.mapped, hit.spelled, sample) : hit.mapped;
-  return mirrorCase(sample, value) + casedSuffix(shape, hit.suffix);
+  return mirrorCase(sample, value) + casedSuffix(shape, hit.suffix, hit.spelled);
 }
 
 // A word in capitals: "ACME", "PNC", a caption's "McALLISTER" (isShoutedWord).

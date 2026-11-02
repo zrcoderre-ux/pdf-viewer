@@ -136,6 +136,20 @@ check("suffixes, O' names and accented letters",
     ["Zachary Coderre's motion", "Zachary Coderre’s motion", "ZACHARY CODERRE'S MOTION", "ZACHARY CODERRE'S motion", "zachary coderre's"]);
 }
 {
+  // An acronym's capitals are its spelling, not a shout: PDF-Linker writes its
+  // fake in capitals too, and "TRUENORTH's" in prose came back "ABC'S".
+  const ca = compile({ pairs: [{ real: "ABC", fake: "TRUENORTH" }] });
+  check("an acronym's 's stays as typed; a caption's shouted 's stays shouted",
+    ["TRUENORTH's motion", "TRUENORTH’s motion", "TRUENORTH'S MOTION"].map((t) => translate(ca, t).text),
+    ["ABC's motion", "ABC’s motion", "ABC'S MOTION"]);
+  const fa = compileForward(keyOf([["business", "ABC", "TRUENORTH", "", "replaced", "spreadsheet", 1]]));
+  check("…and the other way, through the forward lookup",
+    ["ABC's", "ABC'S"].map((t) => fakeFor(fa, t)), ["TRUENORTH's", "TRUENORTH'S"]);
+  const cn = compile({ pairs: [{ real: "Zachary Coderre", fake: "John Doe" }] });
+  check("…while a name the key spells in prose case still reads as shouted",
+    translate(cn, "JOHN DOE's motion").text, "ZACHARY CODERRE'S motion");
+}
+{
   const cs = compile({ pairs: [{ real: "U.S.A., INC.", fake: "SILVERGATE., INC." }, { real: "CROSS RIVER BANK, LLC", fake: "Zenith Bank, Llc" }] });
   check("a word the fake shares with the real is spelled the way the fake spells it",
     ["SILVERGATE., Inc. moved.", "Silvergate., Inc.'s motion", "SILVERGATE., INC.", "silvergate., inc.", "Zenith Bank, Llc"].map((t) => translate(cs, t).text),
