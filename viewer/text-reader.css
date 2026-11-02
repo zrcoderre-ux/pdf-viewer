@@ -959,6 +959,14 @@ body.gutter-off .page-body.numbered .gutter { font-size: var(--body-em); }
    span of no size would still stand on, and drop the line's text below its
    number by half of it. */
 body:not(.editing) .page-body .cg { font-size: 0; line-height: 0; }
+/* A drag down one column takes that column (text-reader.js, "a drag down a
+   column takes that column"): on the lines it cuts, every piece but the ones
+   it takes is unselectable, so the selection paints the column alone. Chrome
+   honours that only in text that cannot be edited, so those pieces are
+   read-only while it stands; the column's own text stays editable, since a
+   drag begun in it is held inside its piece once its own text turns read-only. */
+.page-body.colsel > .line.cs-line > .lt > :not(.cs-pick) { user-select: none; -webkit-user-modify: read-only; }
+.page-body.colsel > .line.cs-line > .lt > .cs-pick :is(.rb, .rh, .cg) { user-select: none; }
 /* A form's checkbox, drawn (columns.js, dressCheckboxes): a square at the
    line's own type size, an X in it where PDF-Linker read the box ticked and a
    ? where it could not tell. The mark's own characters are underneath, unseen

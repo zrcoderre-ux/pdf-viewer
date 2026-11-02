@@ -273,6 +273,20 @@ app, which routes it to the reader tab.
   the LEAKS walk read exactly what the file says. In the editor the gaps' own
   spaces are drawn, so what is typed into one is seen, and a line is laid out
   again once the typing stops.
+- **A drag down a column takes that column.** Press in one column of a
+  page in columns — a cell of a drawn box, or a column the export lays out
+  with spaces — and drag down off that line: the selection takes that column
+  on every line it passes, and none of the text beside it, so the right-hand
+  cell of a permit's box comes away without the name and address in the
+  left-hand one. It paints the column alone, and a copy, a cut's copy or a
+  drag carries it a line a row, without the box's bars or a blank line for a
+  rule between rows. A line that runs across both columns is taken where it
+  begins in the column and passed over where it begins left of it. A drag
+  along one line, or one begun on a line of a single piece, is the browser's
+  own, across the columns. Such a selection is for copying: typing, a
+  deletion, a paste, a strike, a comment or a flag over it is refused with a
+  word (the range underneath still runs through the cells it leaves out), and
+  the next click, Ctrl+A or a selection made any other way lets it go.
 - **A form looks like its PDF.** A checkbox PDF-Linker writes as `[   ]`,
   `[ X ]` or `[ ? ]` is drawn as a box at its line's type size — ticked with an
   X, or a ? where the run could not tell — and is never cut in half by the
