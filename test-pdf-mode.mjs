@@ -3,7 +3,9 @@
 // PDF and page being read; ‹ › step between the folder's PDFs, each kept open
 // in its own frame; scrolling on past the last page and auto-scroll reaching
 // it go on into the next PDF; the viewer's Find goes on through the folder;
-// and the same button brings the text back at the page the PDF was on.
+// and the same button brings the text back at the page the PDF was on. A
+// case folder opened whose run finished over an hour ago with no leaks opens
+// in PDF mode by itself.
 //
 // Run: node test-pdf-mode.mjs   (from the repo root)
 //
@@ -314,6 +316,61 @@ async function run() {
     truthy("…and back to the text", true);
     check("no page errors in the app", appErrors, []);
     await app.close();
+
+    console.log("10. a case folder long done with, with no leaks, opens in PDF mode");
+    // The clock is moved on in the page (__clockAhead), since a file of the
+    // origin's private file system carries the time it was written.
+    const settled = async ({ ahead, held = false, leaks = false, how = "shell" }) => {
+      const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+      await ctx.addInitScript(() => { const real = Date.now.bind(Date); Date.now = () => real() + (window.__clockAhead || 0); });
+      const p = await ctx.newPage();
+      const errs = [];
+      p.on("pageerror", (e) => errs.push(e.message));
+      p.on("dialog", (d) => d.accept().catch(() => {}));
+      await p.goto(srv.base + "/viewer/text-reader.html");
+      await p.waitForFunction(() => !!window.__textReaderLoadLocal);
+      await p.evaluate(async ({ CASE, A, B, keyBytes, ahead, held, leaks, how }) => {
+        const { PDFDocument, StandardFonts } = await import(new URL("vendor/pdf-lib/pdf-lib.esm.min.js", location.href).href);
+        const make = async (n, label) => {
+          const pdf = await PDFDocument.create();
+          const font = await pdf.embedFont(StandardFonts.TimesRoman);
+          for (let k = 1; k <= n; k++) pdf.addPage([612, 792]).drawText(`${label} page ${k}`, { x: 72, y: 700, size: 14, font });
+          return pdf.save();
+        };
+        const top = await navigator.storage.getDirectory();
+        const name = CASE + " settled";
+        try { await top.removeEntry(name, { recursive: true }); } catch { /* none yet */ }
+        const dir = await top.getDirectoryHandle(name, { create: true });
+        const put = async (d, n, data) => { const f = await (await d.getFileHandle(n, { create: true })).createWritable(); await f.write(data); await f.close(); };
+        await put(dir, "pseudonym_key.xlsx", new Uint8Array(keyBytes));
+        await put(dir, "A Decl.pdf", await make(3, "Declaration"));
+        await put(dir, "B Letter.pdf", await make(2, "Letter"));
+        await put(dir, "DONE 1.40PM.txt", "");
+        if (leaks) await put(dir, "pdf_linker_leaks.xlsx", "not read: its name is enough");
+        const text = await dir.getDirectoryHandle("Text Files", { create: true });
+        await put(text, "A Decl.txt", A);
+        await put(text, held ? "B Letter.txt.LEAK" : "B Letter.txt", B);
+        window.__clockAhead = ahead;
+        const h = await text.getFileHandle("A Decl.txt");
+        if (how === "shell") await window.__textReaderLoadLocal(await h.getFile(), h, dir, { caseFolder: true });
+        else await window.__textReaderLoadLocal(await h.getFile(), h, dir);
+      }, { CASE, A, B, keyBytes: Array.from(KEY_BYTES), ahead, held, leaks, how });
+      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length > 0 && !document.getElementById("pdf-mode-btn").disabled, null, { timeout: 20000 });
+      await p.waitForTimeout(1500);
+      const shown = await p.evaluate(() => {
+        if (!document.body.classList.contains("pdf-mode")) return "text";
+        const f = [...document.querySelectorAll("#pdf-mode iframe")].find((x) => !x.hidden);
+        return f ? f.title : "PDF mode, nothing shown";
+      });
+      await ctx.close();
+      return { shown, errors: errs };
+    };
+    const HOUR = 3600000;
+    check("done two hours ago, nothing to answer: PDF mode, on the PDF of the document opened", await settled({ ahead: 2 * HOUR }), { shown: "A Decl.pdf", errors: [] });
+    check("done half an hour ago: the text", await settled({ ahead: HOUR / 2 }), { shown: "text", errors: [] });
+    check("an export held as .LEAK: the text", await settled({ ahead: 2 * HOUR, held: true }), { shown: "text", errors: [] });
+    check("a worksheet standing, under the legacy name: the text", (await settled({ ahead: 2 * HOUR, leaks: true })).shown, "text");
+    check("a tab brought from another window, not a case folder opened: the text", await settled({ ahead: 2 * HOUR, how: "moved" }), { shown: "text", errors: [] });
   } finally {
     if (browser) await browser.close();
     if (srv) srv.stop();

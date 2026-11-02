@@ -63,6 +63,7 @@ function dressColumns(body) {
 import * as PS from "./pdfsync.js";
 import * as FT from "./form-templates.js";
 import * as LK from "./leaks.js";
+import { folderStatus, opensInPdfMode } from "./case-folders.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
 import * as RD from "./redact.js";
 import { buildRedactedPdf } from "./pdf-edit.js";
@@ -4693,8 +4694,11 @@ async function openFolder(startIn) {
   hideKeyOffer();
   // Held from the adoption until this folder's document is up: until then the
   // document on screen is the last folder's, under this folder's key.
+  const again = await sameFolder(h);
   adopting++;
   try { await openFolderNow(h); } finally { adopting--; }
+  // A folder long done with, opened (not the one already open, picked again), opens on its PDFs.
+  if (!again) pdfModeIfSettled(h).catch((e) => console.warn(e));
 }
 async function openFolderNow(h) {
   // A Text Files folder picked here is said so by the adoption itself
@@ -25294,6 +25298,35 @@ async function pmBackToText(name, page) {
   }
   if (i >= 0 && doc) goToPageFromList(doc.pages[i]);
 }
+/**
+ * A case folder long done with opens in PDF mode. Once PDF-Linker's last run
+ * has stood finished for over an hour with no leaks — no LEAKS.xlsx (under
+ * any name PDF-Linker reads it by) and no export held as .LEAK — the text has
+ * been reviewed, and what is left to do is read the PDFs (the owner's
+ * decision of Nov 2). The rule is Home's (case-folders.js, opensInPdfMode),
+ * read off the folder as it stands now. Only a case folder opened in full,
+ * with PDFs, and only while it is still the folder open; 📝 Text mode goes
+ * to the text as ever.
+ */
+async function pdfModeIfSettled(h) {
+  if (pdfModeOn || !(await sameFolder(h)) || !folderOpen() || folderIsText || !folderPdfs.length) return;
+  const dir = dirHandle;
+  const files = [];
+  try {
+    for await (const [name, entry] of dir.entries()) {
+      if (entry.kind !== "file") continue;
+      if (LK.isLeaksName(name)) { files.push({ name: LK.LEAKS_FILE }); continue; }
+      if (!TD.runMarker(name)) continue;
+      try { const f = await entry.getFile(); files.push({ name, size: f.size, at: f.lastModified }); } catch { /* gone */ }
+    }
+  } catch { return; }
+  const now = Date.now();
+  const st = folderStatus({ files, held: folderDocs.filter((d) => d.quarantined).length }, now);
+  if (!opensInPdfMode(st, now)) return;
+  if (pdfModeOn || dir !== dirHandle || !folderOpen() || pdfModeBtn.disabled) return;
+  await enterPdfMode();
+  if (pdfModeOn) toast(`${dir.name} opened in PDF mode: PDF-Linker finished ${agoText(now - st.at)}, with no leaks. 📝 Text mode (Ctrl+Shift+M) goes to the text.`, { ms: 6000 });
+}
 function togglePdfMode() {
   if (pdfModeOn) exitPdfMode(); else if (!pdfModeBtn.disabled) enterPdfMode();
 }
@@ -26655,9 +26688,14 @@ function toggleRaw(i) {
 // the folder with it: remembered first, so the document attaches its own key,
 // its PDFs and its worksheet on the way up rather than asking to be shown the
 // folder it plainly came from.
-window.__textReaderLoadLocal = async (file, handle, dir) => {
+// `caseFolder`: the shell opened the whole case folder (Home's Open case
+// folder, or a row of its Case folders list), not a tab brought over from
+// another window — so a folder long done with opens on its PDFs.
+window.__textReaderLoadLocal = async (file, handle, dir, { caseFolder = false } = {}) => {
   if (dir) { try { await rememberDir(dir); } catch (e) { console.warn(e); } }
-  return openFile(file, handle);
+  const opened = await openFile(file, handle);
+  if (dir && caseFolder) pdfModeIfSettled(dir).catch((e) => console.warn(e));
+  return opened;
 };
 window.__textReaderRememberDir = (h) => rememberDir(h);
 // What a tab would lose if it went: the shell asks before closing one, and

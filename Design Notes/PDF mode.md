@@ -33,6 +33,29 @@ them has unsaved changes.
   The frame gets a capture listener of its own for Ctrl+Shift+M and
   Alt+PageUp/PageDown.
 
+## A finished case opens in PDF mode
+
+`pdfModeIfSettled` enters PDF mode by itself when a case folder is opened
+whose last run finished over an hour ago with no leaks: the owner's
+decision of Nov 2, since by then the text has been reviewed and what is
+left is reading the PDFs. The rule is Home's (`case-folders.js`,
+`opensInPdfMode` over `folderStatus`, `SETTLED_MS`): a DONE stamp newer than
+any ETA marker and older than the hour, no worksheet (any name `LK.isLeaksName`
+takes, mapped to `LEAKS.xlsx` for `folderStatus`) and no export held as
+`.LEAK` (`folderDocs`' `quarantined`). Every run rewrites DONE, a
+`--fix-leaks` run included, so the hour counts from the run that left the
+folder clean. It is read off the folder as it stands when it is opened.
+
+It runs only where a case folder is OPENED: the reader's Open case folder
+(`openFolder`, not when the folder picked is the one already open), and the
+shell's `openCaseFolder` (Home's button and its Case folders rows), which
+passes `{ caseFolder: true }` as `__textReaderLoadLocal`'s fourth argument.
+A tab brought over from another window carries its folder without it, and
+opens on the text. Only a folder open in full (`folderOpen`, not a light
+attach or a Text Files folder) with PDFs, and only while it is still the
+folder open after the look. Tests: `test-case-folders.mjs` (the rule) and
+`test-pdf-mode.mjs` section 10 (the clock moved on in the page).
+
 ## Continuous scroll
 
 `pmWire` listens for `wheel` on each frame's window. Wheel turned past either

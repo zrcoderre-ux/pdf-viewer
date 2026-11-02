@@ -374,7 +374,7 @@ function dragTab(e, btn, id) {
 // Create a tab and feed its PDF to the viewer as soon as the viewer is ready —
 // even while the tab is hidden — so every open PDF resolves its real name (and
 // download filename) automatically, without waiting to be clicked.
-function newTab({ initialLabel, file, handle, text, dir, page = 0, focus = true }) {
+function newTab({ initialLabel, file, handle, text, dir, page = 0, focus = true, caseFolder = false }) {
   const id = ++seq;
   const iframe = document.createElement("iframe");
   iframe.className = "tab-view";
@@ -386,7 +386,7 @@ function newTab({ initialLabel, file, handle, text, dir, page = 0, focus = true 
   viewsEl.appendChild(iframe);
   const { btn, labelEl } = makeTabButton(id, initialLabel || "Loading…", !!text);
   // `page`: where the reader was, for a PDF brought over from another window.
-  const tab = { id, iframe, btn, labelEl, file, handle, text: !!text, dir: dir || null, page, fed: false, reflowed: false };
+  const tab = { id, iframe, btn, labelEl, file, handle, text: !!text, dir: dir || null, caseFolder: !!caseFolder, page, fed: false, reflowed: false };
   tabs.push(tab);
   feedWhenReady(tab);
   if (focus) activate(id);
@@ -404,8 +404,13 @@ function feedWhenReady(tab) {
     tab.fed = true;
     if (activeId === tab.id) tab.reflowed = true; // rendered while visible
     // The case folder goes with the document where the tab came from one: the
-    // reader remembers it and attaches its key by itself.
-    const opened = load(tab.file, tab.handle, tab.dir || undefined);
+    // reader remembers it and attaches its key by itself. Opened as a case
+    // folder (openCaseFolder), the reader may open it on its PDFs
+    // (text-reader.js, pdfModeIfSettled); a tab brought from another window
+    // opens as it was.
+    const opened = tab.text && tab.caseFolder
+      ? load(tab.file, tab.handle, tab.dir || undefined, { caseFolder: true })
+      : load(tab.file, tab.handle, tab.dir || undefined);
     if (!tab.text) splitFor(tab).attach(w);
     if (tab.page > 1 && !tab.text) {
       Promise.resolve(opened).then(() => { try { w.__pdfViewerGoToPage?.(tab.page); } catch { /* gone */ } });
@@ -553,7 +558,7 @@ async function openCaseFolder(dir) {
   let file;
   try { file = await first.getFile(); }
   catch (e) { alert("Could not open " + first.name + ": " + (e.message || e)); return; }
-  newTab({ initialLabel: first.name, file, handle: first, text: true, dir, focus: true });
+  newTab({ initialLabel: first.name, file, handle: first, text: true, dir, focus: true, caseFolder: true });
   rememberFolder(dir);
 }
 

@@ -86,6 +86,7 @@
         "viewer/text-reader.css",
         "viewer/reader-options.js",
         "viewer/textdoc.js",
+        "viewer/case-folders.js",
         "viewer/rules.js",
         "viewer/columns.js",
         "viewer/pdfsync.js",

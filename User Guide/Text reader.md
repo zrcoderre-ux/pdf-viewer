@@ -2437,7 +2437,16 @@ app, which routes it to the reader tab.
   Fill & Sign, edit text, organize pages, redact, OCR, Save, every tool the
   viewer has. Press it again (it reads **📝 Text mode** while PDF mode is on),
   or **Ctrl+Shift+M**, and the text comes back at the page the PDF was on,
-  opening that PDF's export if it is another document. While it is on:
+  opening that PDF's export if it is another document.
+  - **A finished case opens in PDF mode.** A case folder whose last
+    PDF-Linker run finished more than an hour ago, with no LEAKS.xlsx in it
+    and no export held as `.LEAK`, opens straight into PDF mode — from Home
+    (Open case folder, or a row of the Case folders list) or from the
+    reader's own Open case folder. The toast says so; **📝 Text mode** goes to
+    the text. A folder still within the hour, with leaks to answer, or with a
+    run going opens on the text as before.
+
+  While it is on:
   - **Switch PDFs** with **‹ ›** or the list in the top bar (**Alt+PageUp** /
     **Alt+PageDown**). Each PDF opened stays open, at its page and zoom and
     with any unsaved changes, until the case folder changes; Save writes the

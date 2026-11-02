@@ -21,6 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   folderStatus, statusText, isCaseListing, isToday, signalFile, sortRows, startOfDay, RUN_STALE_MS,
+  opensInPdfMode, SETTLED_MS,
 } from "./viewer/case-folders.js";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
@@ -64,6 +65,15 @@ check("finished, with what still needs a look", [doneSaid.text.startsWith("Finis
 check("a clean finish reads as one", statusText(folderStatus({ files: [f("DONE 2.40PM.txt", 20 * MIN)] }, NOW), NOW).tone, "ok");
 check("a run going", statusText(folderStatus({ files: [f("ETA ~6.04PM (6 of 13).txt", 2 * MIN)] }, NOW), NOW).text, "Running — ETA ~6:04 PM (6 of 13)");
 check("not run yet", statusText(folderStatus({ files: [] }, NOW), NOW).text, "Not run yet");
+
+console.log("2b. which folders open in PDF mode");
+const pm = (files, held = 0) => opensInPdfMode(folderStatus({ files, held }, NOW), NOW);
+check("done over an hour ago with no leaks: PDF mode", pm([f("DONE 1.40PM.txt", SETTLED_MS + MIN), f("pseudonym_key.xlsx", 2 * SETTLED_MS, 900)]), true);
+check("…done within the hour: the text", pm([f("DONE 2.40PM.txt", SETTLED_MS - MIN)]), false);
+check("…with LEAKS.xlsx standing: the text", pm([f("DONE 1.40PM.txt", SETTLED_MS + MIN), f("LEAKS.xlsx", SETTLED_MS + MIN, 800)]), false);
+check("…with an export held as .LEAK: the text", pm([f("DONE 1.40PM.txt", SETTLED_MS + MIN)], 1), false);
+check("…a run going since: the text", pm([f("DONE 1.40PM.txt", SETTLED_MS + MIN), f("ETA ~6.04PM (1 of 3).txt", 2 * MIN)]), false);
+check("…a run with its stamp gone, or none: the text", [pm([f("pseudonym_key.xlsx", 2 * SETTLED_MS, 900)]), pm([f("Complaint.pdf", MIN, 5000)])], [false, false]);
 
 console.log("3. which folders are case folders, and today's");
 check("documents make a case folder", isCaseListing({ files: [{ name: "Motion.PDF" }], dirs: [] }), true);

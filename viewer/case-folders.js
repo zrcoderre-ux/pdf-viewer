@@ -110,6 +110,23 @@ export function folderStatus(listing, now) {
   return { ...base, state: "new", label: "", at: 0 };
 }
 
+// A case folder whose run has stood finished and clean this long is opened in
+// PDF mode (text-reader.js, pdfModeIfSettled): the text has been reviewed, and
+// what is left to do is read the PDFs.
+export const SETTLED_MS = 60 * 60000;
+
+/**
+ * Whether a case folder opens in PDF mode rather than the text: its last run
+ * finished (a DONE stamp newer than any ETA marker) more than SETTLED_MS ago,
+ * with no LEAKS.xlsx standing and no export held as .LEAK. `st` is
+ * folderStatus's answer. A DONE stamp is written again by every run, a
+ * --fix-leaks run included, so the hour counts from the run that left the
+ * folder clean.
+ */
+export function opensInPdfMode(st, now) {
+  return !!st && st.state === "done" && !st.leaks && !st.held && typeof st.at === "number" && now - st.at > SETTLED_MS;
+}
+
 /** "3:04 PM" today, "Oct 28, 3:04 PM" another day. */
 export function whenText(at, now) {
   if (!at) return "";
