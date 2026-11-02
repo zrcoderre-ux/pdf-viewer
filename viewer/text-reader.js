@@ -1913,11 +1913,13 @@ document.addEventListener("cut", (e) => {
   // so does this.
   const sel = document.getSelection();
   const body = sel && sel.rangeCount ? bodyOfNode(sel.getRangeAt(0).startContainer) : null;
-  // A column's selection is copied and left where it is: its range runs
-  // through the text beside the column, which a deletion would take with it.
+  // A column's selection: its copy, and then the column taken out of each
+  // line and nothing beside it (deleteColSel), not the browser's deletion,
+  // which would take the whole range.
   if (colSel && body) {
-    if (!copyFor(e, "Copied") && e.clipboardData) { e.preventDefault(); e.clipboardData.setData("text/plain", sel.toString()); }
-    toast("Copied, not cut — " + COLSEL_EDIT.charAt(0).toLowerCase() + COLSEL_EDIT.slice(1));
+    if (!copyFor(e, "Cut") && e.clipboardData) { e.preventDefault(); e.clipboardData.setData("text/plain", sel.toString()); }
+    if (editing && body.isContentEditable && !shotPut) deleteColSel();
+    else e.preventDefault();
     return;
   }
   if (!editing || !body || !body.isContentEditable) return;
@@ -7608,14 +7610,15 @@ pagesEl.addEventListener("mousedown", (e) => {
 // stylesheet) and the column's own stay editable: made read-only too, Chrome
 // held the drag inside the piece it began in. Hence the column is cut only once
 // the drag leaves its line; a click, or a drag along one line, is the
-// browser's own. An edit of the selection would take the whole range, the
-// pieces it does not paint with it, so typing, a deletion, a paste, a cut, a
-// strike, a comment or a flag over it is refused with a word. The column lets
+// browser's own. The browser's edit of the selection would take the whole
+// range, the pieces it does not paint with it, so Backspace, Delete and a cut
+// take the column out of each line themselves (deleteColSel), and typing, a
+// paste, a strike, a comment or a flag over it is refused with a word. The column lets
 // go with the next press on the pages, a selection made any other way (Ctrl+A,
 // Find), or the selection gone. Design Notes: "Text reader rules and columns".
 let colSel = null;   // { body, lines, picked: Set of a line's top-level nodes taken, anchor }
 let colPress = null; // the press that becomes one when it is dragged off its line
-const COLSEL_EDIT = "This selection is one column of the page: copy it, or click to edit the text.";
+const COLSEL_EDIT = "This selection is one column of the page: copy, cut or delete it (Backspace), or click to type.";
 /** Whether a piece of a line is a rule (a run across its cell, a box's bar), never text to take. */
 function ruleOnly(el) { return el.nodeType === 1 && (el.classList.contains("rb") || el.classList.contains("rh") || el.classList.contains("hf") || el.classList.contains("rg")); }
 /** The text of a line's piece, its gap's spaces and its rules left out. */
@@ -7816,13 +7819,113 @@ window.addEventListener("keydown", (e) => {
   if (!colSel) return;
   const mod = e.ctrlKey || e.metaKey;
   if (mod && !e.altKey && (e.key === "a" || e.key === "A")) { clearColSel(); return; }
+  // Backspace and Delete (with Ctrl too, which would take words across the
+  // whole range) take the column out, and nothing beside it (deleteColSel).
+  if ((e.key === "Backspace" || e.key === "Delete") && !e.altKey) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    deleteColSel();
+    return;
+  }
   // Shift+Space opens the selection's links (shift-space-open.js): not an edit.
-  const edits = mod ? /^[vVxX]$/.test(e.key) : (e.key === "Backspace" || e.key === "Delete" || e.key === "Enter" || e.key === "Tab" || (e.key.length === 1 && !e.altKey && !(e.shiftKey && e.key === " ")));
+  const edits = mod ? /^[vVxX]$/.test(e.key) : (e.key === "Enter" || e.key === "Tab" || (e.key.length === 1 && !e.altKey && !(e.shiftKey && e.key === " ")));
   if (!edits || (mod && /^[xX]$/.test(e.key))) return; // a cut is the cut event's (below), so the copy still goes
   e.preventDefault();
   e.stopImmediatePropagation();
   toast(COLSEL_EDIT);
 }, true);
+/**
+ * Backspace, Delete or a cut over a column's selection: on each line of the
+ * page it reaches, the selected text of the pieces the column takes is taken
+ * out, and nothing else. A name the selection reaches into goes whole, as a
+ * strike takes it; the box's bars and a cell's gap stay. A cell with text
+ * after it on its line (the next column, the box's closing bar) is made up to
+ * its width again with spaces at its end — as many as the file's characters
+ * taken out of it, a name counted as its pseudonym — so every column after it
+ * stands where it stood, in the file and on the screen. A line the column
+ * takes all of is left as an empty line, so the rows beside it keep their
+ * places. One undo step; the page settles as after any edit (the input
+ * listeners). Returns whether it took anything out.
+ */
+function deleteColSel() {
+  const sel = document.getSelection();
+  if (!colSel || !sel || !sel.rangeCount || sel.isCollapsed) return false;
+  const body = colSel.body;
+  if (!editing || !body.isContentEditable) { toast("The document is protected: press ✎ Edit to change it."); return false; }
+  if (refuseWhileBusy()) return false;
+  const range = sel.getRangeAt(0);
+  const skipIn = (t) => !!t.parentElement.closest(".cg, .rb, .rh");
+  const isCell = (n) => n.nodeType === 1 && (n.classList.contains("cc") || n.classList.contains("rc"));
+  // The plan, made while the column stands: per piece, the stretches of its text nodes and the names to take out.
+  const plans = [];
+  for (const line of body.querySelectorAll(":scope > .line")) {
+    if (!range.intersectsNode(line)) continue;
+    const lt = ltOf(line);
+    if (!lt) continue;
+    const tops = line.classList.contains("cs-line") ? [...lt.childNodes].filter((n) => colSel.picked.has(n)) : [...lt.childNodes];
+    for (const top of tops) {
+      const texts = top.nodeType === 3 ? [top] : (() => { const w = document.createTreeWalker(top, NodeFilter.SHOW_TEXT), a = []; for (let t = w.nextNode(); t; t = w.nextNode()) a.push(t); return a; })();
+      const cuts = [], atoms = new Set();
+      for (const t of texts) {
+        if (skipIn(t)) continue;
+        const lo = t === range.startContainer ? range.startOffset : (range.comparePoint(t, 0) >= 0 ? 0 : t.data.length);
+        const hi = t === range.endContainer ? range.endOffset : (range.comparePoint(t, t.data.length) <= 0 ? t.data.length : 0);
+        if (hi <= lo) continue;
+        const atom = atomOf(t);
+        if (atom) atoms.add(atom); else cuts.push({ t, lo, hi });
+      }
+      if (!cuts.length && !atoms.size) continue;
+      plans.push({ line, lt, top, cuts, atoms: [...atoms] });
+    }
+  }
+  if (!plans.length) return false;
+  escNote(body);
+  noteTyping(body);
+  snapshot(body, true);
+  clearColSel();
+  let caret = null;
+  for (const { lt, top, cuts, atoms } of plans) {
+    let taken = 0;
+    for (const a of atoms) {
+      taken += TD.serializeNodes(a).length;
+      const blank = document.createTextNode("");
+      a.replaceWith(blank);
+      if (!caret) caret = { node: blank, offset: 0 };
+    }
+    for (const { t, lo, hi } of cuts.reverse()) {
+      t.deleteData(lo, hi - lo);
+      taken += hi - lo;
+      if (!caret || (caret.node === t)) caret = { node: t, offset: lo };
+    }
+    // Text after the piece on its line: the piece is made up to its width again.
+    const after = document.createRange();
+    after.setStartAfter(top);
+    after.setEnd(lt, lt.childNodes.length);
+    const rest = document.createElement("span");
+    rest.append(after.cloneContents());
+    if (isCell(top) && taken && /\S/.test(TD.serializeNodes(rest))) {
+      const gap = top.classList.contains("cc") ? top.querySelector(":scope > .cg") : null;
+      (gap || top).appendChild(document.createTextNode(" ".repeat(taken)));
+    } else if (!/\S/.test(TD.serializeNodes(rest))) {
+      // The end of the line: no spaces left standing after the last of its text.
+      const w = document.createTreeWalker(lt, NodeFilter.SHOW_TEXT), all = [];
+      for (let t = w.nextNode(); t; t = w.nextNode()) all.push(t);
+      for (let k = all.length - 1; k >= 0; k--) {
+        const t = all[k];
+        if (atomOf(t) || t.parentElement.closest(".rb, .rh")) break;
+        const kept = t.data.replace(/\s+$/, "");
+        if (kept.length < t.data.length) t.deleteData(kept.length, t.data.length - kept.length);
+        if (kept.length) break;
+      }
+    }
+  }
+  if (caret && caret.node.isConnected) placeCaret(caret.node, Math.min(caret.offset, caret.node.data.length));
+  else sel.removeAllRanges();
+  lastSnapPage = -1; // what is typed next is its own step
+  // The page settles as after a keystroke: lines, names, columns, the save.
+  body.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
+  return true;
+}
 for (const type of ["beforeinput", "paste", "drop"]) {
   window.addEventListener(type, (e) => {
     if (!colSel || !e.target || !e.target.closest || !e.target.closest("#pages")) return;

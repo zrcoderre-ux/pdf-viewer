@@ -283,10 +283,16 @@ app, which routes it to the reader tab.
   rule between rows. A line that runs across both columns is taken where it
   begins in the column and passed over where it begins left of it. A drag
   along one line, or one begun on a line of a single piece, is the browser's
-  own, across the columns. Such a selection is for copying: typing, a
-  deletion, a paste, a strike, a comment or a flag over it is refused with a
-  word (the range underneath still runs through the cells it leaves out), and
-  the next click, Ctrl+A or a selection made any other way lets it go.
+  own, across the columns. In ✎ Edit, **Backspace**, **Delete** or **Ctrl+X**
+  takes the column's selected text out of each line and nothing beside it: a
+  name it reaches into goes whole, the box's bars stay, and a cell with
+  something after it on its line is filled out with spaces to its width, so
+  the next column (or the box's closing bar) stays where it was, in the file
+  as on the screen. A line the column takes all of stays as an empty line.
+  One Ctrl+Z puts it all back. Typing, a paste, a strike, a comment or a flag
+  over such a selection is refused with a word (the range underneath still
+  runs through the cells it leaves out); click to type. The next click,
+  Ctrl+A or a selection made any other way lets it go.
 - **A form looks like its PDF.** A checkbox PDF-Linker writes as `[   ]`,
   `[ X ]` or `[ ? ]` is drawn as a box at its line's type size — ticked with an
   X, or a ? where the run could not tell — and is never cut in half by the
