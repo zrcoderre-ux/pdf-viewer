@@ -293,11 +293,25 @@ the press or once the drag left the line, gave the column. That is why the
 column is cut only when the drag leaves its line: a drag along one line, or a
 click, is the browser's own, and a click's caret is where it always was.
 
-The range still runs through the text left out, so an edit over it is
-refused (`COLSEL_EDIT`): typing, Backspace, Delete, Enter and Tab, a paste,
-a drop and any other `beforeinput` (window capture listeners), a cut (copied,
-not cut), and a strike, comment, flag or phrase (each checks `colSel`); the
-selection pop-up is not shown over it. A copy reads the page as before
+The range still runs through the text left out, so the browser's own edits
+over it are refused (`COLSEL_EDIT`): typing, Enter and Tab, a paste, a drop
+and any other `beforeinput` (window capture listeners), and a strike,
+comment, flag or phrase (each checks `colSel`); the selection pop-up is not
+shown over it. Backspace and Delete (Ctrl with them too) and a cut, after its
+copy, go to `deleteColSel` instead (the owner: "I should also be able to cut
+or backspace the selected text without it affecting the other columns"). It
+plans, while the column stands, each taken piece's stretches of text inside
+the range (a name it reaches into whole, as a strike takes it; the gap's
+spaces and the bars and rule runs never), then takes one undo step, lets the
+column go and deletes them. A CELL with text after it on its line (the next
+column, the box's closing bar) is made up to its width with as many spaces
+as the file's characters taken out of it, a name counted as its pseudonym,
+appended to its `.cg` (a `.cc`) or its end (a `.rc`): every column after it
+keeps its offset in the file, so `columnCuts` cuts the line where it did and
+the box row keeps its bars. A piece at the end of its line takes the line's
+trailing spaces with it. A line the column takes whole stays, empty, so the
+rows beside keep their places. The page then settles as after a keystroke,
+by an `input` event on the body (lines, names, columns, dirty, citations). A copy reads the page as before
 (`copyOfBody`) with the text left out added to its skips (`colSelSkips`,
 beside the numbered margin's): every text node `inColSel` does not take, a
 taken cell's gap unless the piece after it is taken too, the bars and rule
@@ -314,7 +328,9 @@ the pop-up and the toolbar. Only the page the press was on is cut: a drag on
 into the next page takes that page's lines whole. The ⇄ Raw sheet is one
 `<pre>` with no pieces and is not cut. Tested in `test-column-select.mjs`
 (a box's right-hand cell under a name, a page in two columns laid out with
-spaces, either column, a drag along one line, an edit, a strike, a click and
+spaces, either column, a drag along one line, typing and a strike refused,
+Backspace in the box, Delete of the left-hand column and a cut of the
+right-hand one, each read back from the saved file, Ctrl+Z, a click and
 Ctrl+A after).
 
 ### The numbers never move on the grid (`pdfsync.spreadTops`)

@@ -7,8 +7,11 @@
 // Checked, in the editor: a drag from a box's right-hand cell down to a row
 // further on paints and copies the right-hand cells only — none of the
 // left-hand cells' text, not the name in one of them, not the box's bars —
-// and a line of rules between gives no blank line; an edit over such a
-// selection is refused and the page is unchanged; a click lets it go and
+// and a line of rules between gives no blank line; typing or a strike over
+// such a selection is refused, and Backspace, Delete and a cut take the
+// column out of each line, the other column and the bars where they were in
+// the saved file (the owner: "I should also be able to cut or backspace the
+// selected text without it affecting the other columns"); a click lets it go and
 // typing works again; Ctrl+A takes the page whole. On a page whose columns are
 // laid out with spaces (columns.js), a drag down either column takes that
 // column alone; a drag along one line is the browser's own.
@@ -184,6 +187,18 @@ try {
     (at.nodeType === 1 ? at : at.parentElement).dispatchEvent(new ClipboardEvent("copy", { clipboardData: dt, bubbles: true, cancelable: true }));
     return dt.getData("text/plain");
   });
+  const rowTexts = (i) => page.evaluate((i) => [...document.querySelectorAll("#pages .tpage")[i].querySelectorAll(".page-body > .line")].map((l) => (l.querySelector(".lt") || l).textContent), i);
+  const save = async () => {
+    await page.keyboard.press("Control+s");
+    await page.waitForTimeout(400);
+    await page.waitForFunction(() => !/^Saving/.test(document.getElementById("st-dirty").textContent), null, { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(600);
+  };
+  const fileText = () => page.evaluate(async () => {
+    const top = await navigator.storage.getDirectory();
+    const t = await (await top.getDirectoryHandle("Case Columns")).getDirectoryHandle("Text Files");
+    return (await (await t.getFileHandle("Permit.txt")).getFile()).text();
+  });
   const state = () => page.evaluate(() => ({ colsel: !!document.querySelector(".page-body.colsel"), sel: getSelection().toString() }));
   const page1 = () => page.evaluate(() => document.querySelectorAll("#pages .tpage")[0].querySelector(".page-body").textContent);
 
@@ -210,11 +225,23 @@ try {
   await page.keyboard.press("Control+Shift+X");
   await page.waitForTimeout(150);
   check("a strike over it changes nothing", await page1(), before);
-  await page.keyboard.press("Backspace");
   await page.keyboard.type("Z");
   await page.waitForTimeout(150);
-  check("an edit over it changes nothing", await page1(), before);
+  check("typing over it changes nothing", await page1(), before);
   truthy("…and says why", toasts.some((t) => /one column/.test(t)), JSON.stringify(toasts));
+  const rowsBefore = await rowTexts(0);
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(700);
+  const rowsAfter = await rowTexts(0);
+  const blanked = rowsBefore.map((l) => RIGHT.reduce((x, r) => x.replace(r, " ".repeat(r.length)), l));
+  check("Backspace takes the right-hand cells out, the left-hand ones and the bars where they were", rowsAfter, blanked);
+  await save();
+  const disk = (await fileText()).split("\n");
+  check("…and the file: each row the same width, its left-hand cell as it was", disk.slice(3, 9).map((l) => l.length), DOC.split("\n").slice(3, 9).map((l) => l.length));
+  truthy("…the name in the left-hand cell still its pseudonym", disk[3].includes("Tobias Wrenfield") && !disk.some((l) => RIGHT.some((r) => l.includes(r))), JSON.stringify(disk.slice(2, 10)));
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(300);
+  check("Ctrl+Z puts it back in one step", await rowTexts(0), rowsBefore);
   // A click lets the column go, and typing works again.
   await pointOf(LEFT[1], 0, "left", true);
   const p = await pointOf(LEFT[1], 4);
@@ -250,6 +277,35 @@ try {
   const c4 = await copy();
   check("down the left-hand column: that column", c4.split("\n").map((l) => l.trim()), COLS.slice(0, 3).map((r) => r[0]));
   truthy("…painted alone", s.colsel && !s.sel.includes("Right"), JSON.stringify(s.sel));
+  // Delete the left-hand column: the right-hand one stays where it is in the file.
+  await page.keyboard.press("Delete");
+  await page.waitForTimeout(700);
+  await save();
+  let d2 = (await fileText()).split("\n");
+  let at = d2.indexOf("TWO COLUMNS");
+  check("Delete on the left-hand column: the right-hand column at its own place", d2.slice(at + 1, at + 5), [
+    ...COLS.slice(0, 3).map(([l, r]) => " ".repeat(34) + r), COLS[3][0].padEnd(34) + COLS[3][1]]);
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(300);
+  // Cut the right-hand column: copied, and taken off the end of each line.
+  await page.mouse.click(5, 5);
+  await drag([COLS[0][1], 0], [COLS[2][1], -1, "right"]);
+  const cut = await page.evaluate(() => {
+    const dt = new DataTransfer();
+    const sel = getSelection();
+    const at = sel.getRangeAt(0).startContainer;
+    (at.nodeType === 1 ? at : at.parentElement).dispatchEvent(new ClipboardEvent("cut", { clipboardData: dt, bubbles: true, cancelable: true }));
+    return dt.getData("text/plain");
+  });
+  check("a cut of the right-hand column: its copy", cut.split("\n").map((l) => l.trim()), COLS.slice(0, 3).map((r) => r[1]));
+  await page.waitForTimeout(700);
+  await save();
+  d2 = (await fileText()).split("\n");
+  at = d2.indexOf("TWO COLUMNS");
+  check("…and the column gone, the left-hand one untouched", d2.slice(at + 1, at + 5), [...COLS.slice(0, 3).map(([l]) => l), COLS[3][0].padEnd(34) + COLS[3][1]]);
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(300);
+  await save();
   await page.mouse.click(5, 5);
   await drag([COLS[1][0], 0], [COLS[1][1], -1, "right"]);
   s = await state();

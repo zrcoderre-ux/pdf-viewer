@@ -203,7 +203,7 @@ async function newReader({ presets = {} } = {}) {
   return { context, page, log, close: () => context.close() };
 }
 /** The case folder into OPFS: the key and the root files in it, the exports in Text Files. */
-async function writeFolder(page, { docs = BASE, root = ROOT, key = true } = {}) {
+async function writeFolder(page, { docs = BASE, root = ROOT, key = true, keyBytes = KEY_BYTES } = {}) {
   await page.evaluate(async ({ CASE, CASE_ID, docs, root, keyBytes }) => {
     const top = await navigator.storage.getDirectory();
     try { await top.removeEntry(CASE, { recursive: true }); } catch { /* none yet */ }
@@ -220,7 +220,7 @@ async function writeFolder(page, { docs = BASE, root = ROOT, key = true } = {}) 
       for (const [k, v] of Object.entries(window.__casePresets)) localStorage.setItem(k.split(CASE_ID).join(rec.id), JSON.stringify(v));
       window.__casePresets = null;
     }
-  }, { CASE, CASE_ID, docs, root, keyBytes: key ? Array.from(KEY_BYTES) : null });
+  }, { CASE, CASE_ID, docs, root, keyBytes: key ? Array.from(keyBytes) : null });
 }
 /**
  * The key a case folder's state is stored under: its id — the reader knows
@@ -2643,6 +2643,51 @@ test(39, "▶ Re-run PDF-Linker: the link at the click, everything saved before 
       check("no page errors", r.log.errors, []);
     } finally { await r.close(); }
   }
+});
+
+// ── 40. a name no save can write does not hold the run ─────────────────────
+// The owner: "When I click re-run pdf linker it refuses because it says
+// something is not saved, but when I click save it says nothing to save." A
+// name said to be faked whose Replacement cell holds an instruction to
+// PDF-Linker ("~Varnum"), standing in a document off the screen: the save has
+// no pseudonym to write and writes nothing, and the run — which is what
+// carries the instruction out — was refused as "something is still unsaved".
+test(40, "a decided name the save cannot write: Save says so, and Re-run PDF-Linker goes ahead", async () => {
+  const TOKEN = "QzpcQ2FzZXNcQ2FzZSBIYXJuZXNz";
+  const bat = "@echo off\r\nREM PDF-Linker re-run - double-click\r\nREM Folder, for the text reader's Re-run button: " + TOKEN + "\r\nstart \"x\" /min x\r\nexit /b\r\n";
+  const keyBytes = buildKeyXlsx([...KEY, ["person", "Odile Varnum", "~Varnum", "", "", "spreadsheet", 1]]);
+  const G = "====== Page 1 ======\nOdile Varnum wrote to the dealer.\n";
+  const r = await newReader({ presets: { [`textReader.settled.${CASE_ID}`]: ["Odile Varnum"] } });
+  try {
+    await writeFolder(r.page, { docs: { "A Complaint.txt": A, "G Letter.txt": G }, root: {}, keyBytes });
+    await r.page.evaluate(async (bat) => { const w = await (await window.__case.getFileHandle("Re-run PDF-Linker.bat", { create: true })).createWritable(); await w.write(bat); await w.close(); }, bat);
+    await setReel(r.page, false);
+    await adopt(r.page);
+    await openDoc(r.page, "A Complaint.txt", { settle: 1500 });
+    await r.page.waitForFunction(() => window.__textReaderHasUnsaved(), null, { timeout: 10000 }).catch(() => {});
+    truthy("the decided name off the screen counts as owed", await hasUnsaved(r.page));
+    r.log.answer = () => true; // write the document not yet opened, if asked
+    r.log.toasts.length = 0;
+    await save(r.page);
+    const said = r.log.toasts.filter((t) => /Nothing to save|Saved|Nothing saved/.test(t)).pop() || "";
+    truthy("Save names the name it could not write, not just \"Nothing to save.\"", /Odile Varnum/.test(said) && /could not write/.test(said), said);
+    check("…and the file is as it was", T(await readFolder(r.page), "G Letter.txt"), G);
+    await r.page.evaluate(() => {
+      window.__links = [];
+      const click = HTMLAnchorElement.prototype.click;
+      HTMLAnchorElement.prototype.click = function () { if (/^pdf-linker:/.test(this.href)) { window.__links.push(this.href); return; } return click.call(this); };
+    });
+    r.log.toasts.length = 0;
+    await r.page.click("#rerun-btn");
+    let q = null;
+    for (let t0 = Date.now(); !q && Date.now() - t0 < 15000; await r.page.waitForTimeout(150)) {
+      q = await r.page.evaluate(async () => { try { return JSON.parse(await (await (await window.__case.getFileHandle("PDF-Linker Run Request.json")).getFile()).text()); } catch { return null; } });
+    }
+    check("Re-run PDF-Linker: the word is go", q && q.state, "go");
+    truthy("…not refused as unsaved", !r.log.toasts.some((t) => /^Not run:/.test(t)), JSON.stringify(r.log.toasts));
+    truthy("…and it says the name is left for the run", r.log.toasts.some((t) => /left for the run to write/.test(t)), JSON.stringify(r.log.toasts));
+    check("no page errors", r.log.errors, []);
+  } finally { await r.close(); }
 });
 
 // ── run ─────────────────────────────────────────────────────────────────────

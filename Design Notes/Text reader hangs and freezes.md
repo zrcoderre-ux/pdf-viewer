@@ -336,3 +336,32 @@ bulk of a re-read and the reason the reader got slower the longer a
 document stayed open. Thirty lines pasted into a two-hundred-page export:
 22.6 s before, 13 ms after, with the same 4,824 underlines in the same
 places.
+
+### A PDF closed under a job held the queue for good (`closePdfInfo`, `opListOf`, `PDF_JOB_STALL`)
+
+The owner, of a 231-page, 14.7 MB exhibit set side by side: the PDF column
+"says Loading... but never loads". The long-task report named the cause. Every
+pass in flight was a draw (pages of the exhibit set, of a dozen other PDFs of
+the folder, and "drawing page 1 ahead for the worksheet", the oldest), each
+3,500 seconds in. Nothing had finished in an hour.
+
+The PDF queue (`pumpPdfJobs`) runs one job at a time and awaits each. One job
+had never settled. pdf.js answers most requests to a document destroyed under
+them: `getPage` and a render reject, and the text resolves. A page's
+`getOperatorList` never settles (measured in Chromium against pdf.js 4.6: asked,
+then `destroy()`, and nothing after eight seconds; a `cleanup()` in its place
+answers). The line grid asks for one inside its job (`noteFaces` for a page
+whose fonts are not loaded yet, `hiddenTextShare` for a scan's text layer).
+`trimPdfs` destroys the PDFs the reading has left to stay under `PDF_BYTES`,
+and it does so sooner the larger they are. So a grid read of a page, with its
+PDF trimmed in between, held the queue. Every open behind it waited, and so did
+every draw in either pane and the worksheet's pages ahead.
+
+A reading is now closed by `closePdfInfo`, which resolves `info.closed` before
+it destroys the document. Every operator list is asked for through
+`opListOf`, which rejects once its PDF is closed. Besides that, the queue waits
+on no job past `PDF_JOB_STALL` (20 s): a job that has not settled is left to
+finish on its own, the queue goes on, and the console names the PDF.
+`test-pdf-closed-midjob.mjs` hangs the operator list as pdf.js does, changes
+folder (which closes every PDF), and needs the next folder's page drawn within
+10 s. It is drawn at once; before, it never was.
