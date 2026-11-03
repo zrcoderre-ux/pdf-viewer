@@ -714,7 +714,11 @@ app, which routes it to the reader tab.
   (leave it a pseudonym), **no** (keep the name as it stands in this case),
   **never** (in every case), **phrase** (fake it whole), or type an answer
   (a new pseudonym for it, ~CORRECT SPELLING, *CORRECT TEXT or [part to
-  keep]) and press Enter. Each answer moves on to the next term. No and never
+  keep]) and press Enter. Each answer moves on to the next term — except where
+  you opened the bar (or moved it) by clicking a name in the text: then the
+  answer stays on that name, since you came to answer that one. Step on by
+  hand (Term or Appearance ‹ ›, Alt+J/K, the term list) and the answers after
+  that move on again. No and never
   take effect on screen at once. Phrase and a typed answer go to PDF-Linker
   in New Real Values.txt, are listed in the Flagged panel (× withdraws one),
   and are put in by the next Re-run PDF-Linker, which does a full run where
@@ -1289,7 +1293,12 @@ app, which routes it to the reader tab.
   and its own 🚩 Flag flags the name only if you press it, for a name that
   really is this case's own; Ctrl+Shift+F refuses it outright and says why.
   Click the button again to turn it off; it is never
-  on when a reader opens. The
+  on when a reader opens. **A value flagged already is marked red the moment
+  you flag it**, everywhere it stands, so you can see it is done as you read
+  on. Select it again and the pop-up says it is flagged already (and does not
+  offer the flag); a word of a longer flagged name says which name it is part
+  of. With 🚩 on, letting go over either flags nothing again: the selection
+  stays, with the pop-up saying so. The
   **Flagged** panel collects them and **Save list to case folder** writes `New
   Real Values.txt` beside the key, which PDF-Linker reads on its next run
   as if each line had been given with `--term`. **A flag needs no full

@@ -90,6 +90,29 @@ by its log, a run late by its log, one quiet but short of its projected
 finish, a log from the last run, the projected finish over midnight) and 2
 (the stalled hover).
 
+**A re-run started from the reader shows at once** (`textreader:run`,
+`runsStarted`, `withRunStart`; 2026-11-03). The owner: "there is a bit of a
+lag on the home screen between when the case folder closes and when it
+recognizes that a re-run has started. Let's have the re-run button tell the
+home screen directly." Home learned of a run only from its ETA marker, which
+PDF-Linker writes once it is under way, and only on the next look
+(`CASE_RECHECK_MS`). So the row went on saying the last run's "Finished …" after
+the tab closed. Now `rerunLinker`, the moment PDF-Linker takes the run request
+(`runRequestTaken`), posts `textreader:run` with the folder handle to the
+shell. The shell takes it only from one of its own reader tabs and records
+the start. Each look, `withRunStart` turns that folder's status into
+"starting" ("Re-run started — waiting for its ETA", listed with the runs
+going) until the folder's own traces confirm it: an ETA marker no older than
+a minute before the start (PDF-Linker can stamp it before the reader's
+half-second poll hears it was taken), or a DONE stamp after the start (the
+last run's DONE, however recent, never counts). Unconfirmed after
+`RUN_START_WAIT_MS` (ten minutes), the start is dropped. While a start waits,
+the list is looked at every `RUN_START_RECHECK_MS` (3 s) rather than 15, so
+the ETA appears as soon as it is written. A started folder in neither list is
+still listed. In PDF+ the handle comes through the shim's `MessageEvent.data`
+revival. Tests: `test-case-folders.mjs` parts 4b (the rule) and 9b (the list:
+started, then its ETA, with no nudge).
+
 ## Cost
 
 Every `getFile` is a trip to the disk, so a listing reads times only off the

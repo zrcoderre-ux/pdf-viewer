@@ -1369,6 +1369,30 @@ with a selection already made flags it as the click always did. The mode is
 per tab and never stored, and `body.flag-mode` paints the page's
 `::selection` in the flag's red. Ctrl+Shift+F is still `flagSelection` alone.
 
+**A value flagged already shows so, at once** (`markFlagNow`,
+`unmarkFlagNow`, `flagMarks`, `flaggedAt`; 2026-11-03). The owner: "when a
+value has already been flagged, it should be highlighted so I don't attempt
+to reflag it." The red mark was drawn only by the document-wide pass
+(`scanPassNow`), which shows nothing until it is whole and starts again
+whenever its ground moves — and a flag moves it. On a long reel, flagging name
+after name kept the pass from ever finishing, so names flagged a moment
+before stood unmarked further down and were selected and flagged again. Now
+`flagSelectionNow` and `markPhraseNow` mark the new value at once, over every
+page body, read as the pass reads it (`flagReading`, `TD.clearPieces`) under a
+one-value `PK.buildMatcher` — the row pass's cost (`rowRanges`), not the
+key's — added to the standing `flagged` highlight, which the pass replaces
+when it finishes. The × in the Flagged list takes that value's ranges out of
+it at once (`unmarkFlagNow`). The pass and `markFlagNow` both record each red
+mark with its value (`flagMarks`). `flaggedAt(s)` answers `same` where the
+selection is a flagged value's own words (on the list, marked or not) and
+`within` where it lies inside a mark of a longer one. The selection hides the
+mark under it, so `showFlagPop` says "flagged already" and disables Flag for
+`same`, or says which flagged name a `within` selection is part of and leaves
+Flag to press. `flagTakes` refuses both, so 🚩's release flags neither again
+and leaves the selection with the pop-up up. Ctrl+Shift+F is unchanged (a
+`same` flag is the no-op "already flagged" toast). Test:
+`test-flagged-marks.mjs`.
+
 **A cited decision's party is asked about, never flagged on a release**
 (`citedIn`, `CITED_FLAG`, `flagSelection({ asked })`). A flag is a line of
 `New Real Values.txt`, which PDF-Linker reads as an authoritative `--term`: a
@@ -3577,3 +3601,15 @@ term, or, open already, moves it there; `showKeyBar(true, { at })` and
 `keyStand(…, { go: false })` leave the page where it is, since the name is
 where the reader is looking. Right-click is still the keep menu. Test:
 `test-key-answers.mjs` case 5.
+
+**…and an answer there stays on that name** (`keyClickHold`, 2026-11-03).
+The owner: "when I click on a real value and it opens up the key walk
+through, it shouldn't advance to the next one automatically like it does when
+I open it up from the side bar … If I do manually advance from there, the walk
+can resume subsequently." `decideKey` ends on `stepKeyTerm(1)`; it now does so
+only where `keyClickHold` is off. `openKeyAt` (and `showKeyBar` opened with
+`at`) sets it; a step by hand clears it — `stepKeyTerm`, `stepKeyAppearance`
+(so Alt+J/K too), and a term chosen in the list — as does opening from the
+side bar or the status count, and closing. An answer under the hold repaints
+the term (`paintKey`, `renderKeyBar`) where it stands. Test:
+`test-key-answers.mjs` case 6.

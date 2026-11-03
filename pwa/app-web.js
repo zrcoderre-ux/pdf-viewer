@@ -1185,6 +1185,19 @@ async function todayInDownloads(dl, now) {
   return rows;
 }
 
+// Re-runs a reader has just started ("textreader:run"), shown as started until
+// the folder's own ETA says so (case-folders.js, withRunStart).
+const runsStarted = []; // [{ handle, name, at }]
+const RUN_START_RECHECK_MS = 3000; // looked at this often while one waits for its ETA
+/** The start a row's folder is waiting on, or null. */
+async function runStartFor(row) {
+  for (const s of runsStarted) {
+    if (s.name !== row.name) continue;
+    try { if (await s.handle.isSameEntry(row.handle)) return s; } catch { /* gone */ }
+  }
+  return null;
+}
+
 let caseRendering = false, caseAgain = false, caseShown = "", caseTimer = 0;
 async function renderCaseFolders() {
   if (caseRendering) { caseAgain = true; return; }
@@ -1235,9 +1248,24 @@ async function renderCaseFoldersNow() {
       else rows.push(f);
     }
   }
+  // A re-run started on a folder that is in neither list (forgotten meanwhile) is still listed.
+  for (const s of runsStarted) {
+    let found = false;
+    for (const r of rows) if (r.name === s.name) { try { if (await r.handle.isSameEntry(s.handle)) { found = true; break; } } catch { /* gone */ } }
+    if (found) continue;
+    const row = { name: s.name, handle: s.handle, opened: 0, today: false };
+    try { row.listing = await readListing(s.handle); } catch { row.listing = null; }
+    rows.push(row);
+  }
   for (const r of rows) {
     r.status = r.listing ? caseLib.folderStatus(r.listing, now) : null;
     r.activity = Math.max(r.activity || 0, r.listing ? caseLib.lastActivity(r.listing) : 0);
+    const start = runsStarted.length && !r.locked ? await runStartFor(r) : null;
+    if (start) {
+      const { status, keep } = caseLib.withRunStart(r.status, start.at, now);
+      r.status = status;
+      if (!keep) runsStarted.splice(runsStarted.indexOf(start), 1);
+    }
   }
   const shown = caseLib.sortRows(rows).slice(0, CASE_ROWS_MAX);
   const say = shown.map((r) => {
@@ -1292,7 +1320,7 @@ function scheduleCaseRecheck() {
   clearTimeout(caseTimer);
   caseTimer = 0;
   if (dropzone.hidden || document.visibilityState !== "visible") return;
-  caseTimer = setTimeout(renderCaseFolders, CASE_RECHECK_MS);
+  caseTimer = setTimeout(renderCaseFolders, runsStarted.length ? RUN_START_RECHECK_MS : CASE_RECHECK_MS);
 }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && !dropzone.hidden) renderCaseFolders(); });
 window.addEventListener("focus", () => { if (!dropzone.hidden) renderCaseFolders(); });
@@ -1313,6 +1341,20 @@ document.getElementById("case-downloads")?.addEventListener("click", async () =>
 document.getElementById("case-clear")?.addEventListener("click", async () => {
   try { await foldersTx("folders", "readwrite", (s) => { s.clear(); }); } catch { /* ok */ }
   renderCaseFolders();
+});
+// A reader's Re-run PDF-Linker has started the run (text-reader.js,
+// rerunLinker): said on Home at once, ahead of the ETA marker PDF-Linker
+// writes once it is under way.
+window.addEventListener("message", async (e) => {
+  if (e.origin !== location.origin || !e.data || e.data.type !== "textreader:run") return;
+  if (!tabs.some((t) => t.text && t.iframe.contentWindow === e.source)) return;
+  const dir = e.data.dir;
+  if (!dir || dir.kind !== "directory") return;
+  for (let i = runsStarted.length - 1; i >= 0; i--) {
+    try { if (runsStarted[i].name === dir.name && (await runsStarted[i].handle.isSameEntry(dir))) runsStarted.splice(i, 1); } catch { /* gone */ }
+  }
+  runsStarted.push({ handle: dir, name: dir.name, at: Date.now() });
+  if (!dropzone.hidden) renderCaseFolders();
 });
 // A reader tab says which case folder it attached, however it came to it.
 window.addEventListener("message", (e) => {

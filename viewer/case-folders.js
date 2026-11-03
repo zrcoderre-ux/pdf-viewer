@@ -156,6 +156,36 @@ export function folderStatus(listing, now) {
   return { ...base, state: "new", label: "", at: 0 };
 }
 
+// A run the reader's Re-run PDF-Linker has just started (text-reader.js
+// rerunLinker posts "textreader:run" the moment PDF-Linker takes the request).
+// The folder's own traces say so only once PDF-Linker writes its ETA marker,
+// and until then Home went on showing the last run's finish: the owner, "there
+// is a bit of a lag on the home screen between when the case folder closes and
+// when it recognizes that a re-run has started". So Home says it has started,
+// and gives way to the folder's own status once a marker newer than the start
+// is there — an ETA, or a DONE for a run quicker than a look. A start the
+// folder never confirms is let go after RUN_START_WAIT_MS.
+export const RUN_START_WAIT_MS = 10 * 60000;
+// The ETA marker may be written a moment before the reader hears the request
+// was taken (it looks every half second), so an ETA this much older counts.
+const RUN_START_SLACK_MS = 60000;
+
+/**
+ * The status Home shows for a folder whose re-run started at `startedAt`:
+ * { status, keep } — `status` folderStatus's own answer once the run's ETA
+ * (or a DONE) newer than the start is there, or after RUN_START_WAIT_MS,
+ * with `keep` false; until then a "starting" status, `keep` true.
+ */
+export function withRunStart(st, startedAt, now) {
+  if (!startedAt || now - startedAt > RUN_START_WAIT_MS) return { status: st, keep: false };
+  // The ETA may be stamped a moment before the start was heard; a DONE never
+  // is (the last run's DONE, a minute old, is not this run finishing).
+  const since = st && st.state === "done" ? startedAt + 1 : startedAt - RUN_START_SLACK_MS;
+  if (st && /^(running|stalled|done)$/.test(st.state) && typeof st.at === "number" && st.at >= since) return { status: st, keep: false };
+  const base = st || { leaks: false, held: 0, key: false };
+  return { status: { ...base, state: "starting", label: "", at: startedAt }, keep: true };
+}
+
 // A case folder whose run has stood finished and clean this long is opened in
 // PDF mode (text-reader.js, pdfModeIfSettled): the text has been reviewed, and
 // what is left to do is read the PDFs.
@@ -211,6 +241,12 @@ export function statusText(st, now) {
   if (st.leaks) extras.push("LEAKS.xlsx to answer");
   const tail = extras.length ? " · " + extras.join(" · ") : "";
   switch (st.state) {
+    case "starting":
+      return {
+        text: "Re-run started — waiting for its ETA",
+        title: `Re-run PDF-Linker started the run at ${whenText(st.at, now)}. Its ETA shows here as soon as PDF-Linker writes it.`,
+        tone: "run",
+      };
     case "running": {
       const logNote = st.alive > st.at ? `, pdf_linker.log ${agoText(now - st.alive)}` : "";
       return {
@@ -248,7 +284,7 @@ export function statusText(st, now) {
  * downloaded), newest first. A row is { name, opened, today, status, activity }.
  */
 export function sortRows(rows) {
-  const rank = (r) => (r.status && (r.status.state === "running") ? 0 : 1);
+  const rank = (r) => (r.status && /^(running|starting)$/.test(r.status.state) ? 0 : 1);
   const latest = (r) => Math.max(r.opened || 0, (r.status && r.status.at) || 0, r.activity || 0);
   return rows.slice().sort((a, b) => rank(a) - rank(b) || latest(b) - latest(a)
     || String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: "base" }));

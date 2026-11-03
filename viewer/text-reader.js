@@ -5007,6 +5007,11 @@ async function rerunLinker() {
       try { await dir.removeEntry(TD.RUN_REQUEST_FILE); }
       catch (e) { taken = !!(e && e.name === "NotFoundError"); } // taken at the last moment
     }
+    // Home is told at once that the run has started, not when PDF-Linker's
+    // ETA marker turns up a look or two later (app-web.js, "textreader:run").
+    if (taken && window.parent !== window) {
+      try { window.parent.postMessage({ type: "textreader:run", dir }, location.origin); } catch { /* not the app's shell */ }
+    }
     if (!taken) {
       toast(`PDF-Linker did not start. Everything is saved and ${dir.name} stays open. If this computer has not been set up for the button, double-click Register Reader Button.bat in the PDF-Linker folder once; until then, double-click ${launcher.name} in the case folder.`, { error: true, ms: 15000 });
       return;
@@ -10081,6 +10086,7 @@ function giveUpOnMarks(spent, page, pages) {
   leakHits = [];
   sheetHits = [];
   flaggedHits = new Map();
+  flagMarks = [];
   scannedDocs = new Set();
   scanSoon.cancel();
   try { CSS.highlights.delete("flagged"); CSS.highlights.delete("leak"); CSS.highlights.delete("kept"); CSS.highlights.delete("leakrows"); } catch { /* none to clear */ }
@@ -10121,6 +10127,7 @@ async function scanPassNow(pass) {
     || mark.phrases !== phrases || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots
     || mark.sheet !== sheetParsed();
   const flaggedRanges = [];
+  const flagFound = []; // …and which value each mark is (flagMarks)
   const leakRanges = [];
   const hits = [];
   const seen = new Set();
@@ -10297,9 +10304,9 @@ async function scanPassNow(pass) {
       let m, n = 0, mine = 0;
       while ((m = flagRx.exec(text))) {
         const pieces = TD.clearPieces(text, m.index, m.index + m[0].length, held);
-        let marked = false;
-        for (const [a, b] of pieces) { const r = rangeFor(all, a, b); if (r) { flaggedRanges.push(r); marked = true; } }
-        if (marked) mine++;
+        const put = [];
+        for (const [a, b] of pieces) { const r = rangeFor(all, a, b); if (r) { flaggedRanges.push(r); put.push(r); } }
+        if (put.length) { mine++; flagFound.push({ value: TD.normalizeValue(m[0]), pieces: put }); }
         if (m.index === flagRx.lastIndex) flagRx.lastIndex++;
         if (++n % HANDFUL === 0) {
           const held = flagRx.lastIndex;
@@ -10316,6 +10323,7 @@ async function scanPassNow(pass) {
   leakHits = hits;
   sheetHits = sheetFound;
   flaggedHits = flagCounts;
+  flagMarks = flagFound;
   scannedDocs = docsSeen;
   // The master workbook's list says which of its keeps stand here, and this
   // reading is the answer: it is drawn again when the answer moved.
@@ -10353,6 +10361,65 @@ async function scanPassNow(pass) {
 let leakHits = []; // where each real name from the key stands unfaked: [{ range, real, fake }], from the last paint
 let sheetHits = []; // …and each value the LEAKS worksheet has a row for: [{ range, fold }]
 let flaggedHits = new Map(); // …and per document on the page, how many flagged values stand in its clear
+// Each red mark on the page and the value it is ([{ value, pieces }]): what the
+// pop-up reads to say a selection is flagged already (flaggedAt).
+let flagMarks = [];
+/**
+ * A value just flagged, marked red at once wherever it stands in the clear.
+ *
+ * The document-wide pass (scanPassNow) puts every mark up only when it is
+ * whole, and a flag moves its ground: on a long reel, flagging name after name,
+ * each flag set the pass going again before the last had finished, and the
+ * names already flagged stood unmarked further down the page — so they were
+ * selected and flagged again. One value read over the pages is the row pass's
+ * cost (rowRanges), not the key's: it is put up here, read the way the pass
+ * reads it (flagReading, textdoc.clearPieces), and the pass replaces it.
+ */
+function markFlagNow(v) {
+  if (marksOff || !("highlights" in CSS) || typeof Highlight === "undefined") return;
+  const rx = PK.buildMatcher([TD.normalizeValue(v)]);
+  if (!rx) return;
+  let h = CSS.highlights.get("flagged");
+  if (!h) { h = new Highlight(); CSS.highlights.set("flagged", h); }
+  for (const body of pageBodies()) {
+    const { text, segs, held } = flagReading(body);
+    rx.lastIndex = 0;
+    let m;
+    while ((m = rx.exec(text))) {
+      const put = TD.clearPieces(text, m.index, m.index + m[0].length, held).map(([a, b]) => rangeFor(segs, a, b)).filter(Boolean);
+      for (const r of put) h.add(r);
+      if (put.length) flagMarks.push({ value: TD.normalizeValue(m[0]), pieces: put });
+      if (m.index === rx.lastIndex) rx.lastIndex++;
+    }
+  }
+}
+/** …and a flag withdrawn, its red marks taken down at once. */
+function unmarkFlagNow(v) {
+  const h = "highlights" in CSS ? CSS.highlights.get("flagged") : null;
+  const going = flagMarks.filter((f) => sameWords(f.value, v));
+  if (!going.length) return;
+  flagMarks = flagMarks.filter((f) => !going.includes(f));
+  if (h) for (const f of going) for (const r of f.pieces) h.delete(r);
+}
+/**
+ * Whether the selection is a value flagged already: `same` where it is the
+ * flagged value's own words (on the Flagged list, marked or not), `within`
+ * where it lies inside a red mark of a longer one ("Rosa" in a flagged "Rosa
+ * Delgado"). Either way the mark is under the selection, which hides it, so
+ * the pop-up says so rather than offer a flag the list already holds.
+ */
+function flaggedAt(s) {
+  const same = flagged.find((f) => sameWords(f, s.text));
+  if (same) return { value: same, same: true };
+  for (const f of flagMarks) {
+    const first = f.pieces[0], last = f.pieces[f.pieces.length - 1];
+    try {
+      if (s.range.compareBoundaryPoints(Range.START_TO_START, first) >= 0
+        && s.range.compareBoundaryPoints(Range.END_TO_END, last) <= 0) return { value: f.value, same: false };
+    } catch { /* a range from a page since rebuilt */ }
+  }
+  return null;
+}
 let scannedDocs = new Set(); // …and which documents that paint actually read (the reel sheds the far end)
 let docSeq = 0;              // documents opened, counted: what a reading was made OF
 let paintedSeq = -1;         // …and the one the last whole paint was made of
@@ -10963,6 +11030,12 @@ let keyTerm = null;   // the term the walk stands on: its pseudonym, folded
 let keyIdx = 0;       // …the appearance, by number
 let keyAt = null;     // …and by its first span, which survives the list being read again
 let keyDoc = null;    // the document all that is about
+// Opened (or moved) by a click on a name, the walk is about THAT name: an
+// answer stays on it rather than going on to the next term, as it does from
+// the side bar (the owner: "when I use the click method, I want to address
+// only that value"). A step by hand — Term or Appearance ‹ ›, Alt+J/K, the
+// term list — lets the walk go on again after the next answer.
+let keyClickHold = false;
 let keyPairsFor = null, keyPairs = null;
 
 /** The key's own row for a term: its real value and fake as the key writes them. */
@@ -11140,7 +11213,9 @@ function setKeyAnswer(value, answer) {
  * `no`/`never` keep it as the right-click does (setKeep: un-marked here at
  * once, handed to PDF-Linker as its line), and `phrase` or anything typed
  * goes to PDF-Linker as `fix: VALUE | ANSWER`, read there as the value's
- * Fix? cell. Then on to the next term.
+ * Fix? cell. Then on to the next term — unless a click on the name opened
+ * the walk on it and nothing has been stepped by hand since (keyClickHold):
+ * then it stays on the name answered.
  */
 function decideKey(answer) {
   const terms = keyTerms();
@@ -11182,8 +11257,8 @@ function decideKey(answer) {
       + (LK.classifyFix(a, real).kind === "replacement" ? " A new pseudonym for a name the files carry takes its full run, which Re-run PDF-Linker starts for it." : ""), { ms: 8000 });
   }
   const after = keyTerms();
-  if (after.length > 1) stepKeyTerm(1);
-  else renderKeyBar(after);
+  if (after.length > 1 && !keyClickHold) stepKeyTerm(1);
+  else { paintKey(after); renderKeyBar(after); }
 }
 for (const b of keyBar.querySelectorAll("button[data-kfix]")) b.addEventListener("click", () => decideKey(b.dataset.kfix));
 $("kb-apply").addEventListener("click", () => {
@@ -11208,6 +11283,7 @@ $("kb-typed").addEventListener("keydown", (e) => {
 });
 /** The next term (dir 1) or the one before (dir -1), at its first appearance. */
 function stepKeyTerm(dir) {
+  keyClickHold = false; // stepped by hand: the walk goes on after the next answer
   if (keyBar.hidden) { showKeyBar(true); return; }
   const terms = keyTerms();
   if (!terms.length) { renderKeyBar(terms); return; }
@@ -11218,6 +11294,7 @@ function stepKeyTerm(dir) {
 }
 /** The term's next appearance (dir 1) or the one before (dir -1), round at either end. */
 function stepKeyAppearance(dir) {
+  keyClickHold = false;
   if (keyBar.hidden) { showKeyBar(true); return; }
   const terms = keyTerms();
   if (!terms.length) { renderKeyBar(terms); return; }
@@ -11245,7 +11322,7 @@ function openKeyAt(span) {
   if (keyBar.hidden) { showKeyBar(true, { at: span }); return; }
   const terms = keyTerms();
   const h = keyAppearanceOf(terms, span);
-  if (h) keyStand(terms, h.ti, h.ai, { go: false });
+  if (h) { keyStand(terms, h.ti, h.ai, { go: false }); keyClickHold = true; }
 }
 function showKeyBar(on, { at = null } = {}) {
   const was = !keyBar.hidden;
@@ -11254,8 +11331,9 @@ function showKeyBar(on, { at = null } = {}) {
   keyBar.hidden = !on;
   setBarHeight();
   if (was !== !!on) relayout();
-  if (!on) { keyTerm = null; keyAt = null; clearKeyMarks(); return; }
+  if (!on) { keyTerm = null; keyAt = null; keyClickHold = false; clearKeyMarks(); return; }
   if (was) return;
+  keyClickHold = false; // set again below where a click opened it
   // Opened: it starts where the reading is, on the first name at or under the
   // top of the stage, rather than at the head of the document — or on the
   // name clicked (`at`, openKeyAt), where it stands without scrolling.
@@ -11265,6 +11343,7 @@ function showKeyBar(on, { at = null } = {}) {
   const h = clicked || keyHere(terms);
   if (h) keyStand(terms, h.ti, h.ai, { go: !clicked });
   else renderKeyBar(terms);
+  keyClickHold = !!clicked;
 }
 // The pages were rebuilt (an edit, the key changed, Show fakes, a document
 // opened or hung on the reel): the spans the walk held are gone, so it reads
@@ -11284,6 +11363,7 @@ const rekeySoon = debounce(() => {
 $("kb-term").addEventListener("change", () => {
   const terms = keyTerms();
   const ti = terms.findIndex((t) => t.term === $("kb-term").value);
+  keyClickHold = false; // a term chosen by hand: the walk goes on from it
   if (ti >= 0) keyStand(terms, ti, 0);
 });
 $("kb-term-prev").addEventListener("click", () => stepKeyTerm(-1));
@@ -15536,6 +15616,17 @@ function showFlagPop() {
     $("flag-pop-master").title = `Take ${what} off the Master Keep: ${held.length === 1 ? "it" : "they"} can then be faked here, and PDF-Linker fakes ${held.length === 1 ? "it" : "them"} on its next run`;
     $("flag-pop-master").onclick = (e) => { e.preventDefault(); flagPop.hidden = true; withdrawMaster(held); };
   }
+  // Flagged already: the red mark is under the selection, which hides it, so
+  // the pop-up says so, and the Flag is not offered for the value's own words.
+  const already = hereIn || row >= 0 || held.length ? null : flaggedAt(s);
+  if (already && already.same) {
+    flagPopBtn.disabled = true;
+    flagPopNote.textContent = `\u201c${already.value}\u201d is flagged already \u2014 it is on the Flagged list.`
+      + (pnIn && !s.allFaked ? ` Wrongly faked? Keep \u201c${pnIn.dataset.real}\u201d:` : leak ? ` Leave \u201c${leak.real}\u201d so?` : "");
+  } else if (already && !flagPopBtn.disabled) {
+    flagPopNote.textContent = `Part of \u201c${already.value}\u201d, flagged already. Flag \u201c${TD.normalizeValue(s.text)}\u201d on its own as well?`
+      + (flagPopNote.textContent ? " " + flagPopNote.textContent : "");
+  }
   // Several words, one of which the key already fakes or flags on its own, or
   // one already flagged: the question may be whether they go TOGETHER.
   const phrase = hereIn ? null : phraseIn(s, leak);
@@ -16316,6 +16407,8 @@ function flagTakes(s) {
   const leak = s.pn ? null : leakIn(s.range);
   if (leak && sameWords(s.text, leak.real)) return false;
   if (!leak && pendingRowIn(s) >= 0) return false;
+  // Flagged already, or inside a red mark: the pop-up says so (flaggedAt).
+  if (flaggedAt(s)) return false;
   return !masterHeldIn(s).length;
 }
 /** The selection flagged, or its question asked; whether it was flagged. */
@@ -16393,6 +16486,7 @@ function flagSelectionNow({ asked = false } = {}) {
   persistValues();
   renderFlags();
   paintHighlights();
+  if (flagged.length > before) markFlagNow(v); // red at once, wherever it stands (markFlagNow)
   flagPop.hidden = true;
   noteInFlagged();
   // A word of it already faked: the export carries that word's fake, so the
@@ -16489,6 +16583,7 @@ function markPhraseNow(v, faked) {
   persistValues();
   renderFlags();
   paintHighlights();
+  if (!was) markFlagNow(v); // red at once, wherever it stands (markFlagNow)
   sweepFolder(); // a phrase held whole changes what the rest of the folder is carrying
   const alone = flagged.filter((f) => holdsWords(v, f));
   toast((was ? `"${v}" is flagged as one phrase now` : `Flagged "${v}" as one phrase`) + " — PDF-Linker fakes the words whole, together."
@@ -17048,7 +17143,7 @@ function renderFlags() {
     x.className = "x";
     x.textContent = "×";
     x.title = "Withdraw this value";
-    x.addEventListener("click", (e) => { e.stopPropagation(); asDecision(() => { flagged = TD.removeValue(flagged, v); phrases = TD.removeValue(phrases, v); }); persistValues(); renderFlags(); paintHighlights(); });
+    x.addEventListener("click", (e) => { e.stopPropagation(); asDecision(() => { flagged = TD.removeValue(flagged, v); phrases = TD.removeValue(phrases, v); }); persistValues(); renderFlags(); paintHighlights(); unmarkFlagNow(v); });
     li.appendChild(x);
     flagsList.appendChild(li);
   }
