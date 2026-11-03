@@ -4284,6 +4284,7 @@ async function openFileTail(file, handle, d) {
   let src = file, built = null, text = null;
   if (!fromStore) {
     if (!src) src = await td.handle.getFile();
+    if (td && td.md) noteDraftSeen(td.name, src.lastModified); // shown at this writing (freshDraft)
     built = readyFor(src);
     if (!built) { openPdfAhead(src.name); text = await src.text(); }
   }
@@ -9007,6 +9008,8 @@ async function writeInPlace(handle, text) {
     w = await handle.createWritable();
     await w.write(new Blob([text], { type: "text/plain" }));
     await w.close();
+    // A Markdown draft the reader itself wrote is not a new one (freshDraft).
+    if (TD.isMarkdownName(handle.name)) handle.getFile().then((f) => noteDraftSeen(handle.name, f.lastModified), () => {});
     return { ok: true };
   } catch (e) {
     try { if (w) await w.abort(); } catch { /* gone already */ }
@@ -25488,6 +25491,40 @@ async function pmBackToText(name, page) {
  * with PDFs, and only while it is still the folder open; 📝 Text mode goes
  * to the text as ever.
  */
+// THE MARKDOWN DRAFTS THE READER HAS SHOWN, each at the writing it showed
+// (lastModified), per case folder (stateFolder): what tells a draft My-Macros
+// has written or rewritten since from one already read. Kept for the
+// DRAFTS_SEEN_FOLDERS folders opened last.
+const DRAFTS_SEEN_KEY = "textReader.draftsSeen";
+const DRAFTS_SEEN_FOLDERS = 60;
+function noteDraftSeen(name, at) {
+  const folder = stateFolder();
+  if (!folder || !name || typeof at !== "number") return;
+  const all = lsGet(DRAFTS_SEEN_KEY, {}) || {};
+  const mine = { ...(all[folder] && all[folder].files), [name]: at };
+  delete all[folder];
+  all[folder] = { files: mine, when: Date.now() };
+  const keys = Object.keys(all);
+  for (const k of keys.slice(0, Math.max(0, keys.length - DRAFTS_SEEN_FOLDERS))) delete all[k];
+  lsSet(DRAFTS_SEEN_KEY, all);
+}
+/**
+ * The case folder's Markdown draft written since `since` (the DONE stamp of
+ * the run that settled the folder) that the reader has not shown at that
+ * writing — new, or edited since it was read — the newest of them, as
+ * { d, at }; null where there is none.
+ */
+async function freshDraft(since) {
+  const seen = ((lsGet(DRAFTS_SEEN_KEY, {}) || {})[stateFolder()] || {}).files || {};
+  let best = null;
+  for (const d of folderDocs) {
+    if (!d.md) continue;
+    let at = 0;
+    try { at = (await d.handle.getFile()).lastModified; } catch { continue; }
+    if (at > since && seen[d.name] !== at && (!best || at > best.at)) best = { d, at };
+  }
+  return best;
+}
 async function pdfModeIfSettled(h) {
   if (pdfModeOn || !(await sameFolder(h)) || !folderOpen() || folderIsText || !folderPdfs.length) return;
   const dir = dirHandle;
@@ -25503,7 +25540,20 @@ async function pdfModeIfSettled(h) {
   const now = Date.now();
   const st = folderStatus({ files, held: folderDocs.filter((d) => d.quarantined).length }, now);
   if (!opensInPdfMode(st, now)) return;
-  if (pdfModeOn || dir !== dirHandle || !folderOpen() || pdfModeBtn.disabled) return;
+  // …EXCEPT A DRAFT TO READ. A Markdown draft My-Macros has written (or
+  // rewritten) since the run is the new work in the folder, and it has no PDF:
+  // the folder opens on it, in text mode, side by side off — for this opening,
+  // the setting itself left as it was (the owner, 2026-11-03).
+  const draft = await freshDraft(st.at);
+  if (pdfModeOn || dir !== dirHandle || !folderOpen()) return;
+  if (draft) {
+    if (fileName !== draft.d.name && !(await openFolderDoc(draft.d))) return;
+    if (dir !== dirHandle || pdfModeOn) return;
+    if (sbsOn) setSideBySide(false, { remember: false });
+    toast(`${dir.name} opened on ${TD.docLabel(draft.d.name)}, a Markdown draft written ${agoText(now - draft.at)}, since PDF-Linker's last run. 📑 PDF mode (Ctrl+Shift+M) goes to the PDFs.`, { ms: 7000 });
+    return;
+  }
+  if (pdfModeBtn.disabled) return;
   await enterPdfMode();
   if (pdfModeOn) toast(`${dir.name} opened in PDF mode: PDF-Linker finished ${agoText(now - st.at)}, with no leaks. 📝 Text mode (Ctrl+Shift+M) goes to the text.`, { ms: 6000 });
 }

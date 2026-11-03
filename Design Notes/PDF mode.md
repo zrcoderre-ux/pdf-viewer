@@ -50,6 +50,29 @@ stamp file's time), keeps the folder on the text however long ago it was: no
 one has reviewed an overnight run's text, and the owner does one final review
 of it. It is read off the folder as it stands when it is opened.
 
+**…except a draft to read** (`freshDraft`, `noteDraftSeen`,
+`textReader.draftsSeen`; 2026-11-03). The owner: "exception to the existing
+auto open in pdf mode rule. If there is a new or edited md. file, open to it
+in text mode, with side by side turned off." A My-Macros Markdown draft has no
+PDF, and one written after the folder settled is the new work in it. Where
+`opensInPdfMode` holds, `pdfModeIfSettled` first asks `freshDraft(st.at)`: a
+`.md` in `folderDocs` written after the DONE stamp whose `lastModified` is not
+the one the reader last showed it at. The reader records that time, per
+folder (`stateFolder`), whenever it reads a draft from disk to open it
+(`openFileTail`) and after it writes one (`writeInPlace`). So a draft the
+operator has read, or saved from the reader, does not pull the folder out of
+PDF mode again until My-Macros rewrites it. The newest such draft is opened
+(`openFolderDoc`) and side by side shut with `setSideBySide(false, { remember:
+false })`, the stored setting untouched. A draft from before the run is not
+new: there were no records before this rule, and an older draft would
+otherwise have kept every folder holding one out of PDF mode. The exception
+stands only where the folder would have opened in PDF mode. A folder that
+opens on the text anyway (within the hour, with leaks, overnight) opens on its
+export as before. The record keeps the last 60 folders. Test:
+`test-pdf-mode.mjs` section 10b (a draft after the stamp, side by side off and
+still stored on, opened again once read, rewritten and opened on it again, a
+draft from before the run, a folder not yet settled).
+
 It runs only where a case folder is OPENED: the reader's Open case folder
 (`openFolder`, not when the folder picked is the one already open), and the
 shell's `openCaseFolder` (Home's button and its Case folders rows), which
