@@ -4613,6 +4613,12 @@ try { setPageLayout(localStorage.getItem("pdfViewerLayout") || "single"); } catc
 // user can type whatever they want here — illegal chars get cleaned at
 // the boundary. Newlines and tabs are stripped on save just to keep the
 // UI sane.
+//
+// A document opened from disk through a handle (the app: PDF+, the PWA) is a
+// FILE, and the name is the file's: the rename renames it on disk
+// (renameOnDisk). Before, only the label and the next Save As's suggestion
+// changed, and the file kept its old name. A web PDF still only takes the name
+// for its first save.
 function startRename() {
   if (filenameEl.dataset.editing === "1") return;
   filenameEl.dataset.editing = "1";
@@ -4651,6 +4657,7 @@ function startRename() {
       // in the history. (commit() sets filenameEl.textContent directly rather
       // than going through paintDisplayName, so record it explicitly here.)
       recordFinalName(finalName);
+      if (localFileHandle) renameOnDisk(finalName, current);
     }
   }
 
@@ -4663,6 +4670,63 @@ function startRename() {
   filenameEl.replaceWith(input);
   input.focus();
   input.select();
+}
+
+// The name typed, as the name of the document's file: what Windows refuses in
+// a name made spaces (never underscores), no dot or space at the end, and the
+// file's own extension kept ("Reply" → "Reply.pdf", "Reply.pdf" left so).
+function diskNameFor(typed, fileName) {
+  const ext = (/\.[^.\\/]+$/.exec(fileName || "") || [".pdf"])[0];
+  let stem = String(typed).replace(/[\\/:*?"<>|\x00-\x1f]+/g, " ").replace(/\s+/g, " ").trim();
+  if (stem.toLowerCase().endsWith(ext.toLowerCase())) stem = stem.slice(0, -ext.length);
+  stem = stem.replace(/[. ]+$/, "");
+  return stem ? stem + ext : "";
+}
+
+// The document's file renamed to the name in the toolbar, in its own folder
+// and never over another file: Chromium's move() refuses a name that is taken
+// where it has no write grant on the folder (a file handle has none), and
+// PDF+'s bridge refuses one always. It is called straight from the Enter or
+// the click that ended the edit, because Chromium lets a file handle rename
+// only with the user's gesture fresh. The shell is told first, while the
+// handle is still the file it remembers, so Home's Recent follows the file
+// (__appRenamingFile). Not renamed, the name goes back to the file's.
+async function renameOnDisk(shown, was) {
+  const h = localFileHandle;
+  const to = diskNameFor(shown, h.name);
+  const back = (why) => {
+    if (localFileHandle !== h) return; // another document since
+    filenameEl.textContent = was;
+    serverFilename = was;
+    document.title = `${was} — PDF Viewer`;
+    filenameEl.title = "Click to rename";
+    recordFinalName(was);
+    toast(`Not renamed: ${why}`, { kind: "error", timeout: 8000 });
+  };
+  if (!to) { back("that is not a name a file can have."); return; }
+  if (to === h.name) return;
+  if (typeof h.move !== "function") { back("this browser cannot rename the file. Save as… writes a copy under the new name."); return; }
+  let after = null;
+  try { after = window.top !== window && window.top.__appRenamingFile ? await window.top.__appRenamingFile(h) : null; } catch { after = null; }
+  try {
+    await h.move(to);
+  } catch (e) {
+    const name = e && e.name;
+    back(name === "InvalidModificationError" ? `a file named “${to}” is already in that folder.`
+      : name === "NotFoundError" ? "the file is no longer where it was opened from."
+        : name === "NotAllowedError" ? "the browser did not allow it. Try the rename again."
+          : (e && e.message) || String(e));
+    return;
+  }
+  try { if (after) await after(h); } catch { /* Recent keeps the old entry */ }
+  if (localFileHandle !== h) return;
+  const shownNow = h.name.replace(/\.pdf$/i, "");
+  filenameEl.textContent = shownNow;
+  serverFilename = shownNow;
+  document.title = `${shownNow} — PDF Viewer`;
+  filenameEl.title = "Click to rename";
+  recordFinalName(shownNow);
+  toast(`Renamed the file to ${h.name}.`, { timeout: 4000 });
 }
 
 filenameEl.addEventListener("click", startRename);

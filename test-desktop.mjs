@@ -3,7 +3,8 @@
 // A PDF handed over on the command line (as Windows does for Open with and a
 // double-click) opens in a tab, takes a sticky note, and Save writes it back
 // into the same file; it is in Home's Recent list and opens again from there
-// (a stored PathFileHandle given its methods back); a second launch hands its
+// (a stored PathFileHandle given its methods back); the toolbar rename renames
+// the file on disk, never over another; a second launch hands its
 // file to the running window and exits; a text export opens in the text
 // reader; the bridge reads and writes no file it was not given; nothing is
 // fetched from the network; Westlaw links go to the browser at once, other
@@ -287,6 +288,58 @@ try {
     check("…and saves into the same file", saved ? await notesIn(saved) : 0, 2);
   }
 
+  // ── 3b. rename ────────────────────────────────────────────────────────────
+  // The toolbar's name is the file's: a rename renames the file on disk
+  // (it only changed the label before), never over another file, and Recent
+  // and Save follow the file to its new name.
+  console.log("3b. renaming in the toolbar renames the file on disk");
+  {
+    const rename = async (to) => {
+      await viewer.evaluate(() => document.getElementById("filename").click());
+      await viewer.waitForSelector("#filename-input");
+      await viewer.fill("#filename-input", to);
+      await viewer.press("#filename-input", "Enter");
+    };
+    const shown = () => viewer.evaluate(() => document.getElementById("filename").textContent);
+    const reply = path.join(files, "Reply Brief Final.pdf");
+
+    await rename("Exhibit B");
+    check("a name another file has is refused: the label goes back", await until(async () => (await shown()) === "Opening Brief" || null), true);
+    check("…both files as they were", [fs.existsSync(brief), fs.readFileSync(exhibit).toString("latin1").includes("Exhibit B")], [true, true]);
+
+    await rename("Reply Brief: Final");
+    truthy("the file is renamed on disk (the colon made a space)", await until(() => fs.existsSync(reply) && !fs.existsSync(brief)));
+    check("…the toolbar shows the file's name", await until(async () => (await shown()) === "Reply Brief Final" || null), true);
+    truthy("…and the tab", await until(async () => (await tabLabels(win)).some((l) => /Reply Brief Final/.test(l))));
+    check("…Recent lists it under the new name", await until(() => win.evaluate(() => {
+      const n = [...document.querySelectorAll("#recent-list .recent-item .ri-name")].map((e) => e.textContent);
+      return n.includes("Reply Brief Final.pdf") && !n.includes("Opening Brief.pdf") ? n.length : null;
+    })), 1);
+    const before = fs.readFileSync(reply);
+    await viewer.evaluate(() => document.querySelector('[data-tool="note"]').click());
+    await viewer.locator("#pages > .page-wrapper").first().click({ position: { x: 220, y: 460 } });
+    await sleep(500);
+    await win.keyboard.type("Renamed note");
+    await win.keyboard.press("Escape");
+    await sleep(300);
+    await viewer.evaluate(() => document.getElementById("save-edits").click());
+    const saved = await until(() => { const b = fs.readFileSync(reply); return !b.equals(before) && b; });
+    check("…Save writes into the renamed file", saved ? await notesIn(saved) : 0, 3);
+    check("…and makes no file under the old name", fs.existsSync(brief), false);
+
+    const bridge = await win.evaluate(async ([p, old]) => {
+      const out = {};
+      try { await window.pdfplusNative.renameFile(p, "../Elsewhere.pdf"); out.up = "renamed"; } catch { out.up = "refused"; }
+      try { await window.pdfplusNative.renameFile(old, "Again.pdf"); out.old = "renamed"; } catch { out.old = "refused"; }
+      return out;
+    }, [reply, brief]);
+    check("the bridge renames only within the folder, and only a file it holds", bridge, { up: "refused", old: "refused" });
+
+    await rename("Opening Brief");
+    truthy("renamed back", await until(() => fs.existsSync(brief) && !fs.existsSync(reply)));
+    check("…shown so", await until(async () => (await shown()) === "Opening Brief" || null), true);
+  }
+
   // ── 4. a second launch ────────────────────────────────────────────────────
   console.log("4. a second launch hands its files to the running window and exits");
   {
@@ -442,7 +495,7 @@ try {
     await sleep(300);
     await moved.evaluate(() => document.getElementById("save-edits").click());
     const saved = await until(() => { const b = fs.readFileSync(brief); return !b.equals(before) && b; });
-    check("…and saves into the same file from there", saved ? await notesIn(saved) : 0, 3);
+    check("…and saves into the same file from there", saved ? await notesIn(saved) : 0, 4);
     await win2.close();
     check("closed again: one window", await until(async () => (await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)) === 1), true);
   }

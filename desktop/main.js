@@ -147,6 +147,13 @@ function grant(p) {
   try { fs.writeFileSync(grantsFile, JSON.stringify(grants, null, 1)); } catch { /* kept for this run */ }
 }
 
+/** `from` renamed to `to`: the grant goes with the file. */
+function regrant(from, to) {
+  const k = pathKey(from);
+  grants = grants.filter((g) => pathKey(g) !== k);
+  grant(to);
+}
+
 function isGranted(p) {
   if (typeof p !== "string" || !p || !path.isAbsolute(p)) return false;
   const k = pathKey(p);
@@ -496,6 +503,30 @@ function registerIpc() {
     }
     const st = await fsp.stat(p);
     return { lastModified: st.mtimeMs, size: st.size };
+  });
+
+  // A file it was given renamed in its own folder: the viewer's toolbar name
+  // (PathFileHandle.move). Never over another file, as Chromium's move() of a
+  // file handle refuses one: a name taken by anything else is refused (only a
+  // change of case on a disk that ignores case is the same file). The message
+  // starts with the DOMException name the shim throws.
+  ipcMain.handle("pdfplus:rename", async (event, p, name) => {
+    if (!fromApp(event) || !isGranted(p)) throw new Error("PDF+ has not been given that file.");
+    name = String(name);
+    if (!name || name !== path.basename(name) || /[\\/:*?"<>|\x00-\x1f]/.test(name) || /^\.+$/.test(name) || /[. ]$/.test(name)) {
+      throw new Error(`TypeError: “${name}” is not a file name.`);
+    }
+    const to = path.join(path.dirname(p), name);
+    if (to === p) return { name, path: to };
+    if (pathKey(to) !== pathKey(p)) {
+      const taken = await fsp.lstat(to).then(() => true, (e) => e.code !== "ENOENT");
+      if (taken) throw new Error(`InvalidModificationError: a file named “${name}” is already in that folder.`);
+    }
+    try { await fsp.rename(p, to); } catch (e) {
+      throw new Error(e.code === "ENOENT" ? "NotFoundError: the file is no longer where it was." : `NotAllowedError: ${e.message}`);
+    }
+    regrant(p, to);
+    return { name, path: to };
   });
 
   ipcMain.handle("pdfplus:open-external", (event, url) => {

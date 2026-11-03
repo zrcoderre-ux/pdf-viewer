@@ -967,6 +967,25 @@ async function rememberRecent(handle, text) {
     for (const old of list.slice(11)) store.delete(old.key);
   } catch { /* storage unavailable: no recent list */ }
 }
+// The viewer renames its document's file (the name in its toolbar): asked
+// while `handle` is still the file Recent remembers, this finds that entry and
+// answers with what puts the renamed handle in its place. A stored handle
+// still names the old path, so after the move it is no longer the same entry.
+window.__appRenamingFile = async (handle) => {
+  const keys = [];
+  for (const r of await recentAll()) { try { if (await r.handle.isSameEntry(handle)) keys.push(r.key); } catch { /* stale */ } }
+  return async (moved) => {
+    if (!keys.length) return;
+    try {
+      const list = await recentAll();
+      const db = await recentDb();
+      const store = db.transaction("files", "readwrite").objectStore("files");
+      for (const r of list) if (keys.includes(r.key)) store.put({ ...r, name: moved.name, handle: moved });
+      await new Promise((resolve) => { store.transaction.oncomplete = store.transaction.onerror = resolve; });
+    } catch { /* storage unavailable */ }
+    renderRecent();
+  };
+};
 async function renderRecent() {
   const section = document.getElementById("recent");
   const listEl = document.getElementById("recent-list");

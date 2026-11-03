@@ -78,3 +78,13 @@ saved under; once the file is on disk, its name is yours.
 
 The toolbar dropdown still overrides this for one document: picking source or
 footer naming there is a deliberate ask, and the rules apply again.
+
+### Renaming the file
+
+Click the name in the toolbar (or ⋯ → Rename…), type, and press Enter. For a
+PDF opened from disk in the app (PDF+ or the installed web app), this renames
+the file itself, in the folder it is in, and Home's Recent list follows it.
+Characters Windows does not allow in a file name become spaces, and `.pdf` is
+kept. A name another file in that folder already has is refused, and the
+document keeps its old name. For a PDF you are reading from the web, the name
+is the one its first save will use.

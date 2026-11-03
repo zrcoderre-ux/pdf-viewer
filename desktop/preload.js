@@ -1,13 +1,14 @@
 // PDF+ — the bridge between the pages and the main process.
 //
 // Runs sandboxed, in the top frame of each window, before the page. It gives
-// the page (shim.js, really) exactly this much and nothing else: read and
-// write a file Windows handed the app, open a link in the browser, the path
-// of a File the user picked (to tell whether two handles are one file), the
-// files Windows hands over while the app runs, Home's update button and
-// app-files setting, and the names of the folders in Downloads that changed
-// today (Home's Case folders list). main.js checks every
-// path against the files it was given; a page cannot name one of its own.
+// the page (shim.js, really) exactly this much and nothing else: read, write
+// and rename (in its own folder) a file Windows handed the app, open a link in
+// the browser, the path of a File the user picked (to tell whether two handles
+// are one file), the files Windows hands over while the app runs, Home's
+// update button and app-files setting, and the names of the folders in
+// Downloads that changed today (Home's Case folders list). main.js checks
+// every path against the files it was given; a page cannot name one of its
+// own.
 
 "use strict";
 
@@ -17,6 +18,7 @@ contextBridge.exposeInMainWorld("pdfplusNative", {
   platform: process.platform,
   readFile: (p) => ipcRenderer.invoke("pdfplus:read", String(p)),
   writeFile: (p, bytes) => ipcRenderer.invoke("pdfplus:write", String(p), bytes),
+  renameFile: (p, name) => ipcRenderer.invoke("pdfplus:rename", String(p), String(name)),
   openExternal: (url) => ipcRenderer.invoke("pdfplus:open-external", String(url)),
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file) || ""; } catch { return ""; }

@@ -114,6 +114,10 @@ main process on that one path. The shim feeds these to the shell through a
 - **Writing.** `PathWritable` gathers the writes in memory and sends them at
   `close()`; `main.js` writes beside the file and renames over it, as
   Chrome's File System Access does with its `.crswap` file.
+- **Renaming.** `move(name)` renames the file in its folder (the viewer's
+  toolbar rename, `Design Notes/Naming.md`) through `pdfplus:rename`, which
+  refuses a name that is taken, anything but a plain file name, and a file
+  not granted, and moves the grant to the new path.
 - **Frames.** The handle is made in the shell's frame and used in a tab's
   iframe, whose `Blob` and `ArrayBuffer` are not the shell's. `toBytes` tells
   them apart by `Object.prototype.toString`, not `instanceof`: the
@@ -249,8 +253,8 @@ fix is a `build/icon.ico` with BMP frames at 16-128 and PNG at 256 (made by
 
 `test-desktop.mjs` launches the app with Playwright's Electron driver
 (`PDFPLUS_USER_DATA` gives it a profile of its own) and covers: a PDF from
-the command line opened and saved in place with a sticky note; Recent; a
-second launch handing its files over; a text export in the reader; the
+the command line opened and saved in place with a sticky note; Recent; the
+toolbar rename renaming the file on disk (a taken name refused); a second launch handing its files over; a text export in the reader; the
 bridge refusing a file it was not given; no network; links; a handle sent by
 `postMessage`; a tab moved to a new window and saved there; OCR under the
 CSP; the reader's screenshot in Downloads (and a camera still refused); the

@@ -10,7 +10,7 @@
 // Electron has no launchQueue, and no way to make a real handle from a path.
 // So a file Windows hands PDF+ arrives as a PathFileHandle: the same methods
 // the shell and the viewer call on a real one (getFile, createWritable,
-// queryPermission, requestPermission, isSameEntry, kind, name), carried out
+// queryPermission, requestPermission, isSameEntry, move, kind, name), carried out
 // by the main process on that one path, and fed to the shell through a
 // launchQueue of our own, so app-web.js's own launchQueue consumer opens it
 // as it would in the PWA (a tab, and a place in the Recent list).
@@ -73,6 +73,23 @@
       if (opts && opts.keepExistingData) w._buf = new Uint8Array(await (await this.getFile()).arrayBuffer());
       w._len = w._buf.length;
       return w;
+    }
+    // Renamed in its own folder (move(name), the viewer's toolbar rename);
+    // main.js refuses a name that is taken. Moving to another folder needs a
+    // folder handle, which PDF+ never gives for a file Windows opened.
+    async move(dest, newName) {
+      const to = typeof dest === "string" ? dest : newName;
+      if (typeof dest !== "string" && dest != null) {
+        throw new DOMException("PDF+ renames a file it was given only within its folder.", "NotSupportedError");
+      }
+      let r;
+      try { r = await native().renameFile(this[MARK], String(to)); } catch (e) {
+        const m = /(TypeError|InvalidModificationError|NotFoundError|NotAllowedError): (.*)$/.exec(String((e && e.message) || e));
+        if (m && m[1] === "TypeError") throw new TypeError(m[2]);
+        throw m ? new DOMException(m[2], m[1]) : e;
+      }
+      this[MARK] = r.path;
+      this.name = r.name;
     }
     async queryPermission() { return "granted"; }
     async requestPermission() { return "granted"; }
