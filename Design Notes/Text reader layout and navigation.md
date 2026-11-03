@@ -290,6 +290,23 @@ new headless mode (`channel: "chromium"`) with `--force-device-scale-factor` and
 a `--window-size`, and a one-pixel checkerboard canvas shows whole-pixel
 placement the way a 125% Windows screen does.
 
+**A pair the same height is anchored at one place in it** (`pdfGeometry`,
+2026-11-03). The sync maps each column by its pages' ANCHORS, a page's span
+running from its anchor to the next page's (`PS.anchorGeometry`). A text page's
+anchor is its first line with text on it (`firstLineOffset`), a PDF page's its
+first text item (`pdfFirstLine`, `info.lines`). Beside an exhibit slip sheet,
+an export page that did not OCR (blank, so anchored at its top) and a PDF page
+whose only text is "Exhibit “A”" under a picture (anchored at its foot), the
+PDF's span for the page before took in nearly the whole slip sheet as well:
+through that page the PDF ran ahead, 310 px by its foot on a letter page, and
+snapped back at the seam. The owner saw it as pages of different sizes growing
+worse with scrolling, and ⊘ Did not OCR on the slip sheet putting the page
+before right. A PDF page the same height as its text page (every page laid
+beside its PDF page; within a pixel) now takes the text page's own anchor, as
+a blank slot already did, so the pair scrolls box to box. The PDF's first line
+is the anchor only where the two differ in height. Test:
+`test-reel-sync.mjs`, the slip sheet case.
+
 ### Side by side across the reel's seams (`matchReelGaps`)
 
 The owner, in chat: "Side by side is not keeping the height of the text and

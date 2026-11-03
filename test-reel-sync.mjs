@@ -237,6 +237,78 @@ async function run() {
     check("side by side off, the wheel is the browser's", (await taken())[0], false);
     check("no page errors", errors, []);
     await context.close();
+
+    // A page whose export is blank beside a PDF page whose only text is at its
+    // foot (an exhibit slip sheet: a picture, and "Exhibit A" under it). Each
+    // column is anchored on its page's first line of text, so the PDF's anchor
+    // was near the foot of its page and the text's at its top: through the page
+    // before, the PDF ran ahead by nearly a page and snapped back at the seam.
+    {
+      const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+      const q = await ctx.newPage();
+      const errs = [];
+      q.on("pageerror", (e) => errs.push(e.message));
+      q.on("dialog", (d) => d.accept().catch(() => {}));
+      await q.goto(srv.base + "/viewer/text-reader.html");
+      await q.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
+      const D = ["====== Page 1 ======"].concat(Array.from({ length: 28 }, (_, k) => String(k + 1).padStart(2) + "  Declaration line " + (k + 1)))
+        .concat(["====== Page 2 — REVIEW: this page ======", "", "", ""])
+        .concat(["====== Page 3 ======"], Array.from({ length: 28 }, (_, k) => String(k + 1).padStart(2) + "  Exhibit line " + (k + 1))).join("\n") + "\n";
+      await q.evaluate(async ({ D, keyBytes }) => {
+        const top = await navigator.storage.getDirectory();
+        try { await top.removeEntry("Case Slip", { recursive: true }); } catch { /* none yet */ }
+        const dir = await top.getDirectoryHandle("Case Slip", { create: true });
+        const put = async (d, name, data) => { const w = await (await d.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); };
+        await put(dir, "pseudonym_key.xlsx", new Uint8Array(keyBytes));
+        const text = await dir.getDirectoryHandle("Text Files", { create: true });
+        await put(text, "D Decl.txt", D);
+        const { PDFDocument, StandardFonts, rgb } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+        const pdf = await PDFDocument.create();
+        const font = await pdf.embedFont(StandardFonts.TimesRoman);
+        for (let k = 0; k < 3; k++) {
+          const pg = pdf.addPage([612, 792]);
+          if (k === 1) {
+            pg.drawRectangle({ x: 280, y: 60, width: 50, height: 300, color: rgb(0.2, 0.45, 0.95) });
+            pg.drawText("Exhibit \u201cA\u201d", { x: 270, y: 40, size: 12, font });
+            continue;
+          }
+          for (let n = 1; n <= 28; n++) {
+            const y = 792 - (100 + (n - 1) * 24);
+            pg.drawText(String(n), { x: 46 - font.widthOfTextAtSize(String(n), 12), y, size: 12, font });
+            pg.drawText(`${k ? "Exhibit" : "Declaration"} line ${n}`, { x: 72, y, size: 12, font });
+          }
+        }
+        await put(dir, "D Decl.pdf", await pdf.save());
+        await window.__textReaderAdoptFolder(dir);
+      }, { D, keyBytes: Array.from(KEY_BYTES) });
+      await q.evaluate((n) => window.__textReaderOpenDoc(n), "D Decl.txt");
+      await q.waitForFunction(() => document.querySelectorAll("#pages .tpage .page-body").length === 3);
+      const sb = await q.$("#sbs-toggle");
+      if (!(await sb.evaluate((b) => b.getAttribute("aria-pressed") === "true"))) await sb.click();
+      await q.waitForFunction(() => !!document.querySelector("#pages .tpage.matched"), null, { timeout: 15000 });
+      await q.waitForTimeout(1500);
+      const worst = { by: 0, at: null };
+      for (let k = 0; k < 24; k++) {
+        await q.mouse.move(300, 500);
+        await q.mouse.wheel(0, 150);
+        await q.waitForTimeout(300);
+        const off = await q.evaluate(() => {
+          const pane = document.getElementById("pdf-pane");
+          let by = 0, at = null;
+          for (const sec of document.querySelectorAll("#pages .tpage")) {
+            const sl = pane.querySelector(`.pdf-slot[data-index="${sec.dataset.index}"]`);
+            if (!sl) continue;
+            const d = Math.abs(sec.getBoundingClientRect().top - sl.getBoundingClientRect().top);
+            if (d > by) { by = d; at = Number(sec.dataset.index); }
+          }
+          return { by: Math.round(by), at, heights: [...document.querySelectorAll("#pages .tpage")].map((s) => [s.offsetHeight, pane.querySelector(`.pdf-slot[data-index="${s.dataset.index}"]`)?.offsetHeight]) };
+        });
+        if (off.by > worst.by) { worst.by = off.by; worst.at = off; }
+      }
+      check("a blank page beside a PDF page with text only at its foot: every page level all the way down", worst.by <= 1 ? 0 : worst.at, 0);
+      check("…no page errors", errs, []);
+      await ctx.close();
+    }
   } finally {
     await browser.close();
     srv.stop();

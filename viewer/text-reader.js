@@ -24419,14 +24419,26 @@ function textGeometry() {
 function pdfGeometry() {
   const slots = [...pdfPane.querySelectorAll(".pdf-slot")];
   if (!slots.length) return { tops: [], heights: [] };
-  textAnchorsNow(); // the text pages' own offsets, for the slots that have no page
+  const secs = textAnchorsNow(); // the text pages' own offsets, for the slots that stand level with theirs
   const anchors = slots.map((el) => {
-    if (!el.classList.contains("blank")) return el.offsetTop + pdfFirstLine(el);
+    const at = Number(el.dataset.index);
+    const own = textLineTops && textLineTops[at] != null ? textLineTops[at] : null;
     // A slot with no PDF page of its own stands level with its text page and is
     // the same height as it (see applyMatchedLayout), so it takes that page's
     // own anchor: the pair then scrolls as one rather than a page-height apart.
-    const at = Number(el.dataset.index);
-    return el.offsetTop + (textLineTops && textLineTops[at] != null ? textLineTops[at] : 0);
+    if (el.classList.contains("blank")) return el.offsetTop + (own != null ? own : 0);
+    // …and so does a PDF page the same height as its text page, which is every
+    // page laid beside its PDF page: the two are one box, so they are anchored
+    // at one place in it. Each anchored on its own first line of text, a page
+    // whose export is blank (an exhibit slip sheet that did not OCR) beside a
+    // PDF page whose only text is at its foot ("Exhibit “A”" under a picture)
+    // had the text's anchor at the top and the PDF's at the foot: through the
+    // page before, the PDF ran ahead by nearly a page and snapped back at the
+    // seam (the owner: "the page sizes ... not lining up. It becomes more
+    // exaggerated as I scroll").
+    const sec = secs[at];
+    if (own != null && sec && Number(sec.dataset.index) === at && Math.abs(el.offsetHeight - sec.offsetHeight) <= 1) return el.offsetTop + own;
+    return el.offsetTop + pdfFirstLine(el);
   });
   const last = slots[slots.length - 1];
   return PS.anchorGeometry(anchors, last.offsetTop + last.offsetHeight);
