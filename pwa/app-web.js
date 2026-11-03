@@ -1180,12 +1180,22 @@ async function renderCaseFoldersNow() {
   section.hidden = false;
   const now = Date.now();
   const rows = [];
+  const goneKeys = [];
   for (const r of await foldersAll()) {
     const row = { name: r.name, handle: r.handle, opened: r.when, today: false, key: r.key };
     if (await permitted(r.handle, "read", false)) {
-      try { row.listing = await readListing(r.handle); } catch { row.gone = true; }
+      // A folder that cannot be read is not listed (the owner: "it should just
+      // stop listing that case", not "Not found — moved or deleted?"). One the
+      // disk says is gone (moved, renamed or deleted) is forgotten as well, so it
+      // does not hold one of the FOLDERS_KEPT places; any other failure (a
+      // synced or network drive away for now) only leaves it out of this look.
+      try { row.listing = await readListing(r.handle); }
+      catch (e) { if (e && e.name === "NotFoundError") goneKeys.push(r.key); continue; }
     } else row.locked = true;
     rows.push(row);
+  }
+  if (goneKeys.length) {
+    try { await foldersTx("folders", "readwrite", (s) => { for (const k of goneKeys) s.delete(k); }); } catch { /* not forgotten: left out again next look */ }
   }
   const dl = await downloadsDir();
   const dlState = !dl ? "none" : (await permitted(dl, "read", false)) ? "ok" : "locked";
@@ -1199,7 +1209,7 @@ async function renderCaseFoldersNow() {
         if (r.name !== f.name) continue;
         try { if (await r.handle.isSameEntry(f.handle)) { same = r; break; } } catch { /* gone */ }
       }
-      if (same) { same.today = true; if (!same.listing) { same.listing = f.listing; same.locked = false; same.gone = false; } }
+      if (same) { same.today = true; if (!same.listing) { same.listing = f.listing; same.locked = false; } }
       else rows.push(f);
     }
   }
@@ -1209,8 +1219,7 @@ async function renderCaseFoldersNow() {
   }
   const shown = caseLib.sortRows(rows).slice(0, CASE_ROWS_MAX);
   const say = shown.map((r) => {
-    const st = r.gone ? { text: "Not found — moved or deleted?", title: "", tone: "warn" }
-      : r.locked ? { text: "Click to allow", title: "The browser wants your leave to read this folder again.", tone: "idle" }
+    const st = r.locked ? { text: "Click to allow", title: "The browser wants your leave to read this folder again.", tone: "idle" }
         : caseLib.statusText(r.status, now);
     const where = [];
     if (r.today) where.push("In Downloads today");
@@ -1250,12 +1259,9 @@ async function renderCaseFoldersNow() {
     b.title = `Open ${r.name}, the whole case folder, in one reader` + (st.title ? ".\n" + st.title : "");
     b.addEventListener("click", async () => {
       // Asked first, while the click still counts as one: a reader saves into the folder.
-      if (!(await permitted(r.handle, "readwrite", true))) {
-        if (r.gone) shellToast(`“${r.name}” is not where it was — it may have been moved or deleted.`, 5000);
-        return;
-      }
+      if (!(await permitted(r.handle, "readwrite", true))) return;
       try { await openCaseFolder(r.handle); }
-      catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); }
+      catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
     listEl.appendChild(b);
   }

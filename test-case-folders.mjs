@@ -262,6 +262,23 @@ async function browserPart() {
     });
     await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-item")].some((b) => b.textContent.includes("Case Beta") && b.querySelector(".ci-where").textContent.includes("In Downloads")), null, { timeout: 10000 });
     check("Case Beta is today's again", (await rows()).find((r) => r.name === "Case Beta").where.startsWith("In Downloads today"), true);
+
+    console.log("13. a folder opened here that is gone: no longer listed, and forgotten");
+    await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      await dl.removeEntry("Case Beta", { recursive: true });
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForFunction(() => ![...document.querySelectorAll("#case-list .case-item .ri-name")].some((e) => e.textContent === "Case Beta"), null, { timeout: 10000 });
+    got = await rows();
+    check("Case Beta's row is gone, Case Alpha's still there", got.map((r) => r.name), ["Case Alpha"]);
+    check("…nothing says Not found", (await shell.textContent("#case-list")).includes("Not found"), false);
+    check("…and it is no longer remembered as opened here", await shell.evaluate(async () => {
+      const db = await new Promise((resolve, reject) => { const req = indexedDB.open("pdfviewer-folders"); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
+      const n = await new Promise((resolve) => { const r = db.transaction("folders").objectStore("folders").count(); r.onsuccess = () => resolve(r.result); });
+      db.close();
+      return n;
+    }), 0);
     check("no page errors", errors, []);
     await app.close();
   } finally {

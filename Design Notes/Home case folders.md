@@ -15,6 +15,11 @@ brought to the front instead of a second reader).
   Kept in the `pdfviewer-folders` IndexedDB (`folders`, newest twelve, one per
   folder by `isSameEntry`), a database of its own so no other window's open
   connection to `pdfviewer-recent` blocks an upgrade. **Clear** forgets them.
+  One that cannot be read is not listed (it used to say "Not found — moved or
+  deleted?"; the owner: "it should just stop listing that case"), and one the
+  disk answers `NotFoundError` for (moved, renamed or deleted) is forgotten
+  too, so it does not hold one of the twelve places. Any other failure, a
+  synced or network drive away for now, only leaves it out of that look.
 - **In Downloads today.** A page cannot read a folder by its path, so
   Downloads is linked once through a dialog that starts there
   (`startIn: "downloads"`), with read leave only, and the handle kept in the
@@ -67,4 +72,5 @@ redrawn only where a row's text changed, so a hover or a keyboard focus is
 not knocked off it.
 
 Tests: `test-case-folders.mjs` (the rules in node; the list in the assembled
-site over an OPFS stand-in for Downloads).
+site over an OPFS stand-in for Downloads, a folder deleted from it dropping
+out of the list).
