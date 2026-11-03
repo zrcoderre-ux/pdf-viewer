@@ -161,3 +161,38 @@ Footer extraction (`tryResolveFooterTitle`) always runs regardless of
 mode — the structured result is needed for the disambiguation registry,
 and toggle-flipping should be instant. Whether the result reaches the
 registry is decided separately, by `syncDisambiguationEntry()`.
+
+### Rename renames the file (`renameOnDisk`, 2026-11-03)
+
+The owner: "The in app document rename function does not work in PDF+ … It
+doesn't save to the actual file". The toolbar's click-to-rename (and the ⋯
+menu's Rename…) changed only the label, the tab and the name a later Save As
+suggests; the file on disk kept its name. Now, for a document opened through a
+file handle (the app's tabs, PWA and PDF+), `startRename`'s commit calls
+`renameOnDisk`, which renames the file in its own folder through the handle's
+`move(name)`:
+
+- **The name.** `diskNameFor` makes the typed name a file name: the characters
+  Windows refuses become spaces (never underscores: "Reply Brief: Final" is
+  `Reply Brief Final.pdf`), no dot or space at the end, the file's extension
+  kept and not doubled. The toolbar then shows the file's name.
+- **Never over another file.** Chromium's `move()` of a file handle with no
+  write grant on its folder renames only to a free name
+  (`kAllowRenameWithoutOverwrite`, `InvalidModificationError` otherwise), and
+  only with the user's gesture fresh, which is why the rename runs straight
+  from the Enter or the click that ended the edit. PDF+'s `PathFileHandle`
+  (`desktop/shim.js`) does the same through `pdfplus:rename` in `main.js`,
+  which refuses a taken name, a path, and a file it was not given, and moves
+  the grant to the new path (`regrant`).
+- **Not renamed** (taken, gone, refused, a browser with no `move`), the label
+  goes back to the file's name and a toast says why.
+- **Recent.** A stored handle names the old path, so after the move it is no
+  longer `isSameEntry` with the file. The viewer first asks the shell
+  (`__appRenamingFile`, `pwa/app-web.js`) which Recent entry the handle is,
+  then, once renamed, the shell puts the moved handle and its name in that
+  entry.
+
+A web PDF (no handle) works as before: the name is the first Save As's. Test:
+`test-desktop.mjs` 3b (a taken name refused and both files left; the rename on
+disk, the toolbar, tab and Recent; Save into the renamed file; the bridge
+refusing a path and a file it no longer holds).
