@@ -1132,7 +1132,7 @@ async function readListing(dir) {
 // Downloads holds every case ever downloaded, so each folder in it is read by
 // its NAMES first, and its files' times only where the names changed since the
 // last look (a run renames its ETA marker after every PDF, and DONE replaces
-// it) or the day did. A zip's time never changes, so it is read once.
+// it), the day did, or a run is going in it. A zip's time never changes, so it is read once.
 const downloadsSeen = new Map(); // folder name → { sig, day, listing }
 const zipTimes = new Map();      // zip name → lastModified
 async function todayInDownloads(dl, now) {
@@ -1170,6 +1170,9 @@ async function todayInDownloads(dl, now) {
     const sig = names.sort().join("\n");
     const seen = downloadsSeen.get(dir.name);
     let listing = seen && seen.sig === sig && seen.day === day ? seen.listing : null;
+    // A run going is read again each look: the names hold still through a
+    // long PDF, and pdf_linker.log's time is what says the run is alive.
+    if (listing && /^(running|stalled)$/.test(caseLib.folderStatus(listing, now).state)) listing = null;
     if (!listing) {
       try { listing = await readListing(dir); } catch { return; }
       downloadsSeen.set(dir.name, { sig, day, listing });

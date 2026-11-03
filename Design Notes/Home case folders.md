@@ -50,13 +50,36 @@ A folder in both is one row ("In Downloads today · Opened 3:14 PM").
 
 `folderStatus` reads the run's own traces as the reader's run bar does
 (`runMarkersIn`, `checkRun`): an empty ETA marker newer than any DONE stamp
-is a run going, "stalled" once untouched for `RUN_STALE_MS` (the reader's
-age); a DONE stamp is a finish, shown at the stamp file's time (the stamp's
+is a run going, "stalled" only where the run looks dead (`runLooksStalled`,
+below); a DONE stamp is a finish, shown at the stamp file's time (the stamp's
 name has a clock and no date); a key or log with no marker is an earlier run
 whose stamp is gone; nothing at all is "Not run yet". `LEAKS.xlsx` standing
 and quarantined exports (`Text Files/*.txt.LEAK`) are said beside a finish.
 Runs going are listed first, then by the newest of opened, the run's trace
 and today's files (`sortRows`).
+
+**Stopped part-way? (2026-11-03).** The owner: "For large case folders that
+take a long time to finish, the home screen falsely flags them as Stopped
+part-way". The rule was the ETA marker's age alone (30 minutes), but
+PDF-Linker rewrites the marker only after each PDF (`_write_eta_marker` in
+its run loop), and before the first it OCRs the whole folder
+(`_pre_ocr_folder`): a large folder, or one long scanned filing, holds the
+marker still for an hour or more while the run writes `pdf_linker.log` file
+by file. Now a run is "stalled" only where neither the marker nor the log has
+been written for `RUN_STALE_MS` (a log older than the marker is the last
+run's and does not count) AND the finish the marker projects
+(`projectedFinish`: its clock, on the first day from the marker's time, so
+"~1:10 AM" written at 11:40 PM is the next day) is `RUN_STALE_MS` past; a
+marker with no clock ("(estimating...)") goes by the writing alone. Home's
+hover says when the log was last written, and the stalled one says why it is
+thought so. The reader's run bar asks the same (`runMarkersIn` reads the
+log's time; `showRunning`). In a browser, a Downloads folder with a run going
+is read again on every look, since its names hold still through a long PDF
+and only the log's time moves (`todayInDownloads`; PDF+ reads the day's
+folders each look anyway). Tests: `test-case-folders.mjs` part 1 (a long run
+by its log, a run late by its log, one quiet but short of its projected
+finish, a log from the last run, the projected finish over midnight) and 2
+(the stalled hover).
 
 ## Cost
 

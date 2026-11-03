@@ -21,7 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   folderStatus, statusText, isCaseListing, isToday, signalFile, sortRows, startOfDay, RUN_STALE_MS,
-  opensInPdfMode, SETTLED_MS, finishedOvernight,
+  opensInPdfMode, SETTLED_MS, finishedOvernight, projectedFinish, runLooksStalled,
 } from "./viewer/case-folders.js";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
@@ -43,9 +43,34 @@ const f = (name, ago, size = 0) => ({ name, size, at: NOW - ago });
 console.log("1. the run's state, off its markers");
 check("an ETA marker newer than DONE is a run going",
   folderStatus({ files: [f("ETA ~6.04PM (6 of 13).txt", 2 * MIN), f("pseudonym_key.xlsx", 3 * 24 * 60 * MIN, 900)] }, NOW),
-  { leaks: false, held: 0, key: true, state: "running", label: "~6:04 PM (6 of 13)", at: NOW - 2 * MIN });
-check("…untouched past the stale age, it may be a dead run's",
-  folderStatus({ files: [f("ETA ~1.10PM (2 of 9).txt", RUN_STALE_MS + MIN)] }, NOW).state, "stalled");
+  { leaks: false, held: 0, key: true, state: "running", label: "~6:04 PM (6 of 13)", at: NOW - 2 * MIN, alive: NOW - 2 * MIN });
+check("…untouched past the stale age and its projected finish, it may be a dead run's",
+  folderStatus({ files: [f("ETA ~2.10PM (2 of 9).txt", 60 * MIN)] }, NOW).state, "stalled");
+check("…with no clock to go by, untouched past the stale age",
+  folderStatus({ files: [f("ETA (estimating...).txt", RUN_STALE_MS + MIN)] }, NOW).state, "stalled");
+// A large folder: the marker goes up before the whole folder is OCR'd, and is
+// rewritten only after each PDF, so it stands for an hour and more while the
+// run writes pdf_linker.log (the owner: "the home screen falsely flags them
+// as Stopped part-way").
+check("a long run: the marker an hour and a half old, the log written lately: running",
+  folderStatus({ files: [f("ETA (estimating...).txt", 90 * MIN), f("pdf_linker.log", 2 * MIN, 90000)] }, NOW),
+  { leaks: false, held: 0, key: false, state: "running", label: "(estimating...)", at: NOW - 90 * MIN, alive: NOW - 2 * MIN });
+check("…running late, past its projected finish, the log still written: running",
+  folderStatus({ files: [f("ETA ~2.10PM (2 of 9).txt", 60 * MIN), f("pdf_linker.log", 5 * MIN, 90000)] }, NOW).state, "running");
+check("…nothing written for an hour, but its projected finish not come: running",
+  folderStatus({ files: [f("ETA ~6.04PM (6 of 13).txt", 60 * MIN), f("pdf_linker.log", 60 * MIN, 90000)] }, NOW).state, "running");
+check("…nor within half an hour of it",
+  folderStatus({ files: [f("ETA ~2.40PM (6 of 13).txt", 60 * MIN)] }, NOW).state, "running");
+check("…a log older than the marker is the last run's: the marker alone",
+  folderStatus({ files: [f("ETA ~2.10PM (2 of 9).txt", 60 * MIN), f("pdf_linker.log", 3 * 24 * 60 * MIN, 90000)] }, NOW).state, "stalled");
+const at2 = (h, m, dayShift = 0) => { const d = new Date(NOW); d.setDate(d.getDate() + dayShift); d.setHours(h, m, 0, 0); return d.getTime(); };
+check("the projected finish: the marker's clock on its day",
+  projectedFinish("~6:04 PM (6 of 13)", at2(14, 0)), at2(18, 4));
+check("…past midnight, the next day", projectedFinish("~1:10 AM (2 of 9)", at2(23, 40)), at2(1, 10, 1));
+check("…a clock a minute behind the marker (seconds dropped) is the same day",
+  projectedFinish("~2:00 PM (8 of 9)", at2(14, 0) + 30000), at2(14, 0));
+check("…none for an estimate with no clock", projectedFinish("(estimating...)", at2(14, 0)), 0);
+check("runLooksStalled: nothing at all standing", runLooksStalled(null, 0, NOW), false);
 check("a DONE stamp newer than the ETA marker is a finished run",
   folderStatus({ files: [f("ETA ~1.10PM (2 of 9).txt", 90 * MIN), f("DONE 2.40PM.txt", 20 * MIN)] }, NOW).state, "done");
 check("a marker that is not empty is the operator's own file, not a marker",
@@ -65,6 +90,12 @@ check("finished, with what still needs a look", [doneSaid.text.startsWith("Finis
 check("a clean finish reads as one", statusText(folderStatus({ files: [f("DONE 2.40PM.txt", 20 * MIN)] }, NOW), NOW).tone, "ok");
 check("a run going", statusText(folderStatus({ files: [f("ETA ~6.04PM (6 of 13).txt", 2 * MIN)] }, NOW), NOW).text, "Running — ETA ~6:04 PM (6 of 13)");
 check("not run yet", statusText(folderStatus({ files: [] }, NOW), NOW).text, "Not run yet");
+const stalledSaid = statusText(folderStatus({ files: [f("ETA ~2.10PM (2 of 9).txt", 60 * MIN)] }, NOW), NOW);
+check("stopped part-way, and why it is thought so",
+  [stalledSaid.text, stalledSaid.tone, /Neither the ETA file nor pdf_linker\.log has been written for 60 minutes, and the finish it projected has passed/.test(stalledSaid.title)],
+  ["Stopped part-way? ETA ~2:10 PM (2 of 9)", "warn", true]);
+check("a long run says when the log was written",
+  /pdf_linker\.log 2 minutes ago/.test(statusText(folderStatus({ files: [f("ETA (estimating...).txt", 90 * MIN), f("pdf_linker.log", 2 * MIN, 90000)] }, NOW), NOW).title), true);
 
 console.log("2b. which folders open in PDF mode");
 const pm = (files, held = 0) => opensInPdfMode(folderStatus({ files, held }, NOW), NOW);
