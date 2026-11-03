@@ -11054,16 +11054,17 @@ let keyListSig = "";
 function renderKeyBar(terms) {
   if (keyBar.hidden) return;
   const sel = $("kb-term");
-  const sig = terms.map((t) => t.term + ":" + t.at.length + (t.kept ? "k" : "")).join("|");
+  const tags = terms.map(keyTermTag);
+  const sig = terms.map((t, k) => t.term + ":" + t.at.length + ":" + tags[k]).join("|");
   if (sig !== keyListSig) {
     keyListSig = sig;
     sel.textContent = "";
-    for (const t of terms) {
+    terms.forEach((t, k) => {
       const o = document.createElement("option");
       o.value = t.term;
-      o.textContent = `${t.real} → ${t.fake} · ${t.at.length}${t.kept ? " · kept" : ""}`;
+      o.textContent = `${t.real} → ${t.fake} · ${t.at.length}${tags[k] ? " · " + tags[k] : ""}`;
       sel.appendChild(o);
-    }
+    });
   }
   const loc = keyLocate(terms);
   sel.value = loc ? terms[loc.ti].term : "";
@@ -11087,6 +11088,26 @@ function renderKeyBar(terms) {
   typed.disabled = $("kb-apply").disabled = !t;
   $("kb-clear").disabled = !t || !cell || keptBy(t.real) === "master";
   if (document.activeElement !== typed) typed.value = cell && !LK.CONTROLS.includes(c.kind) ? cell : "";
+}
+/**
+ * What the term list says of a term's answer, so the drop-down shows which
+ * names are already decided (the owner: "should show if I have marked a
+ * currently faked word keep, never or phrase"): "keep" (no, this case),
+ * "never" (every case; "never · master" where the master workbook keeps it),
+ * "phrase", "answered" for any other answer (a new pseudonym, a misspelling,
+ * a scan error), "kept" for a name kept where it stands only, else "".
+ */
+function keyTermTag(t) {
+  const cell = keyAnswerCell(t.real);
+  if (cell) {
+    const kind = LK.classifyFix(cell, t.real).kind;
+    if (kind === "no") return "keep";
+    if (kind === "never") return keptBy(t.real) === "master" ? "never · master" : "never";
+    if (kind === "phrase" || kind === "phrase-part") return "phrase";
+    if (kind === "yes" || kind === "error") return t.kept ? "kept" : "";
+    return "answered";
+  }
+  return t.kept ? "kept" : "";
 }
 /**
  * The Fix? answer a term stands under, as a LEAKS cell would read: its keep

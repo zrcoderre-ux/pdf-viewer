@@ -698,8 +698,9 @@ app, which routes it to the reader tab.
   walks the pseudonym key as it stands on the page. A **term** is one row of
   the key — its real name and the pseudonym the file carries, however the case
   is written — and the terms come in the order each first appears; the list on
-  the bar names every one with how many times it stands, and picking one goes
-  to it. **Term ‹ ›** (Alt+J, Shift+Alt+J back) goes to the next term's first
+  the bar names every one with how many times it stands and what you have
+  answered it (keep, never, phrase, or answered for any other answer), and
+  picking one goes to it. **Term ‹ ›** (Alt+J, Shift+Alt+J back) goes to the next term's first
   appearance; **Appearance ‹ ›** (Alt+K, Shift+Alt+K back) goes to the place the
   current term next stands, round to its first after its last, a name wrapped
   across two lines being one place. The bar says which appearance of how many,

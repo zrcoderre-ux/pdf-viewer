@@ -130,6 +130,7 @@ const goTerm = (p, real) => p.evaluate((real) => {
   sel.value = o.value;
   sel.dispatchEvent(new Event("change"));
 }, real);
+const termList = (p) => p.evaluate(() => [...document.getElementById("kb-term").options].map((o) => o.textContent));
 const answersShown = (p) => p.evaluate(() => [...document.querySelectorAll("#answers-list li")].map((li) => li.firstChild.textContent));
 async function savedFile(p) {
   await p.evaluate(() => document.getElementById("flags-save").click());
@@ -163,6 +164,7 @@ async function run() {
     await p.waitForTimeout(500);
     check("the walk moves on to the next term", (await bar(p)).term.startsWith("Pelham Grantwick"), true);
     check("…the answer listed in the Flagged panel", await answersShown(p), ["Orla Vantreese → Bertram Ollivant"]);
+    check("…and in the term list, the other still undecided", await termList(p), ["Orla Vantreese → Mira Holt · 1 · answered", "Pelham Grantwick → Dorian Fane · 1"]);
     await goTerm(p, "Orla Vantreese");
     await p.waitForTimeout(300);
     const b1 = await bar(p);
@@ -175,6 +177,7 @@ async function run() {
     await p.click('#key-bar button[data-kfix="no"]');
     await p.waitForTimeout(600);
     let file = lines(await savedFile(p));
+    check("the term list says keep", (await termList(p))[1], "Pelham Grantwick → Dorian Fane · 1 · keep");
     check("a typed answer goes as a fix line, a no as its keep line", [file.includes("fix: Orla Vantreese | Bertram Ollivant"), file.includes("no: Pelham Grantwick")], [true, true]);
 
     console.log("4. phrase, then yes takes the answer back");
@@ -186,9 +189,20 @@ async function run() {
     await goTerm(p, "Orla Vantreese");
     await p.waitForTimeout(300);
     check("…and is shown lit", (await bar(p)).on, ["phrase"]);
+    check("…and said in the term list", (await termList(p))[0], "Orla Vantreese → Mira Holt · 1 · phrase");
     await p.click('#key-bar button[data-kfix="yes"]');
     await p.waitForTimeout(500);
     check("yes: no answer left", await answersShown(p), []);
+    check("…and none in the term list", (await termList(p))[0], "Orla Vantreese → Mira Holt · 1");
+    await goTerm(p, "Pelham Grantwick");
+    await p.waitForTimeout(300);
+    await p.click('#key-bar button[data-kfix="never"]');
+    await p.waitForTimeout(500);
+    check("never: said in the term list", (await termList(p))[1], "Pelham Grantwick → Dorian Fane · 1 · never");
+    await goTerm(p, "Pelham Grantwick");
+    await p.waitForTimeout(300);
+    await p.click('#key-bar button[data-kfix="no"]');
+    await p.waitForTimeout(500);
     file = lines(await savedFile(p));
     check("…and none in the file, the keep still there", [file.some((l) => l.startsWith("fix:")), file.includes("no: Pelham Grantwick")], [false, true]);
     check("no page errors", r.log.errors, []);
