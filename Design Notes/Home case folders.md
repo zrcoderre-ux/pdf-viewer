@@ -76,7 +76,16 @@ thought so. The reader's run bar asks the same (`runMarkersIn` reads the
 log's time; `showRunning`). In a browser, a Downloads folder with a run going
 is read again on every look, since its names hold still through a long PDF
 and only the log's time moves (`todayInDownloads`; PDF+ reads the day's
-folders each look anyway). Tests: `test-case-folders.mjs` part 1 (a long run
+folders each look anyway). **…and PDF-Linker now keeps the marker stamped**
+(the owner: "Estimating tends to be the longest stretch, so i think the rule
+is still going to have too many false positives"): one big scanned exhibit
+in the estimating stretch can keep both the marker and the log silent past
+any cutoff, which nothing on this side can tell from a dead run. Since
+PDF-Linker's `_eta_heartbeat_on` (2026-11-03) a live run re-stamps its
+marker's time every two minutes in every phase, so a live run never reaches
+`RUN_STALE_MS`; a run that ended without clearing its marker stops stamping
+it. The rule here is unchanged and still holds for an older PDF-Linker,
+which stamps the marker only after each PDF. Tests: `test-case-folders.mjs` part 1 (a long run
 by its log, a run late by its log, one quiet but short of its projected
 finish, a log from the last run, the projected finish over midnight) and 2
 (the stalled hover).
