@@ -21,6 +21,10 @@ import { runMarker, isKeyName, isExportName, TEXT_SUBFOLDER } from "./textdoc.js
 // "stalled" only where neither the marker nor the log has been written for
 // RUN_STALE_MS AND the finish the marker projects is RUN_STALE_MS past
 // (runLooksStalled). The reader's run bar asks the same (text-reader.js).
+// A PDF-Linker since 2026-11-03 re-stamps the marker's time every two minutes
+// while the run lives (its `_eta_heartbeat_on`), whatever it is doing, so a
+// live run's marker never reaches this age; the log and the projected finish
+// are for an older PDF-Linker, which stamps it only after each PDF.
 export const RUN_STALE_MS = 30 * 60000;
 
 /**
