@@ -329,16 +329,20 @@ async function run() {
       if (off < -12) off += 24;
       return off === 0 ? "Etc/GMT" : off > 0 ? `Etc/GMT-${off}` : `Etc/GMT+${-off}`;
     };
-    const settled = async ({ ahead, held = false, leaks = false, how = "shell", hour = 12 }) => {
+    // `draft`: a Markdown draft in Text Files, written "after" the DONE stamp
+    // or "before" it; `sbs`: side by side on as the reader opens; `twice`: the
+    // folder opened again in the same browser after the first look.
+    const settled = async ({ ahead, held = false, leaks = false, how = "shell", hour = 12, draft = null, sbs = false, twice = false, rewrite = false }) => {
       const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, timezoneId: zoneAt(hour) });
       await ctx.addInitScript(() => { const real = Date.now.bind(Date); Date.now = () => real() + (window.__clockAhead || 0); });
+      if (sbs) await ctx.addInitScript(() => { try { localStorage.setItem("textReader.sbs", "true"); } catch { /* ok */ } });
       const p = await ctx.newPage();
       const errs = [];
       p.on("pageerror", (e) => errs.push(e.message));
       p.on("dialog", (d) => d.accept().catch(() => {}));
       await p.goto(srv.base + "/viewer/text-reader.html");
       await p.waitForFunction(() => !!window.__textReaderLoadLocal);
-      await p.evaluate(async ({ CASE, A, B, keyBytes, ahead, held, leaks, how }) => {
+      await p.evaluate(async ({ CASE, A, B, keyBytes, ahead, held, leaks, how, draft }) => {
         const { PDFDocument, StandardFonts } = await import(new URL("vendor/pdf-lib/pdf-lib.esm.min.js", location.href).href);
         const make = async (n, label) => {
           const pdf = await PDFDocument.create();
@@ -354,25 +358,58 @@ async function run() {
         await put(dir, "pseudonym_key.xlsx", new Uint8Array(keyBytes));
         await put(dir, "A Decl.pdf", await make(3, "Declaration"));
         await put(dir, "B Letter.pdf", await make(2, "Letter"));
-        await put(dir, "DONE 1.40PM.txt", "");
-        if (leaks) await put(dir, "pdf_linker_leaks.xlsx", "not read: its name is enough");
         const text = await dir.getDirectoryHandle("Text Files", { create: true });
+        const md = "# Opposition\n\nCorwin Ashdale's motion should be denied.\n";
+        if (draft === "before") { await put(text, "Opposition Draft.md", md); await new Promise((r) => setTimeout(r, 50)); }
+        await put(dir, "DONE 1.40PM.txt", "");
+        if (draft === "after") { await new Promise((r) => setTimeout(r, 50)); await put(text, "Opposition Draft.md", md); }
+        if (leaks) await put(dir, "pdf_linker_leaks.xlsx", "not read: its name is enough");
         await put(text, "A Decl.txt", A);
         await put(text, held ? "B Letter.txt.LEAK" : "B Letter.txt", B);
         window.__clockAhead = ahead;
         const h = await text.getFileHandle("A Decl.txt");
         if (how === "shell") await window.__textReaderLoadLocal(await h.getFile(), h, dir, { caseFolder: true });
         else await window.__textReaderLoadLocal(await h.getFile(), h, dir);
-      }, { CASE, A, B, keyBytes: Array.from(KEY_BYTES), ahead, held, leaks, how });
-      await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length > 0 && !document.getElementById("pdf-mode-btn").disabled, null, { timeout: 20000 });
-      await p.waitForTimeout(1500);
-      const shown = await p.evaluate(() => {
-        if (!document.body.classList.contains("pdf-mode")) return "text";
-        const f = [...document.querySelectorAll("#pdf-mode iframe")].find((x) => !x.hidden);
-        return f ? f.title : "PDF mode, nothing shown";
-      });
+      }, { CASE, A, B, keyBytes: Array.from(KEY_BYTES), ahead, held, leaks, how, draft });
+      const look = async () => {
+        await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length > 0 && !document.getElementById("pdf-mode-btn").disabled, null, { timeout: 20000 });
+        await p.waitForTimeout(1500);
+        return p.evaluate(() => {
+          if (!document.body.classList.contains("pdf-mode")) return "text";
+          const f = [...document.querySelectorAll("#pdf-mode iframe")].find((x) => !x.hidden);
+          return f ? f.title : "PDF mode, nothing shown";
+        });
+      };
+      const shown = await look();
+      const out = { shown, errors: errs };
+      if (draft || sbs) {
+        out.doc = await p.evaluate(() => window.__textReaderSource().handle.name);
+        out.sbs = await p.evaluate(() => document.getElementById("sbs-toggle").getAttribute("aria-pressed"));
+        out.sbsKept = await p.evaluate(() => localStorage.getItem("textReader.sbs"));
+      }
+      if (twice) {
+        // (`rewrite`: the draft written again by My-Macros, between the two.)
+        if (rewrite) {
+          await p.evaluate(async (CASE) => {
+            const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(CASE + " settled");
+            const f = await (await (await dir.getDirectoryHandle("Text Files")).getFileHandle("Opposition Draft.md")).createWritable();
+            await f.write("# Opposition, revised\n\nCorwin Ashdale's motion should be denied in full.\n");
+            await f.close();
+          }, CASE);
+        }
+        await p.reload();
+        await p.waitForFunction(() => !!window.__textReaderLoadLocal);
+        await p.evaluate(async ({ CASE, ahead }) => {
+          window.__clockAhead = ahead;
+          const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(CASE + " settled");
+          const h = await (await dir.getDirectoryHandle("Text Files")).getFileHandle("A Decl.txt");
+          await window.__textReaderLoadLocal(await h.getFile(), h, dir, { caseFolder: true });
+        }, { CASE, ahead });
+        out.again = await look();
+        out.againDoc = await p.evaluate(() => window.__textReaderSource().handle.name);
+      }
       await ctx.close();
-      return { shown, errors: errs };
+      return out;
     };
     const HOUR = 3600000;
     check("done two hours ago, nothing to answer: PDF mode, on the PDF of the document opened", await settled({ ahead: 2 * HOUR }), { shown: "A Decl.pdf", errors: [] });
@@ -382,6 +419,19 @@ async function run() {
     check("a tab brought from another window, not a case folder opened: the text", await settled({ ahead: 2 * HOUR, how: "moved" }), { shown: "text", errors: [] });
     check("finished overnight (11 PM): the text, for a final review", await settled({ ahead: 10 * HOUR, hour: 23 }), { shown: "text", errors: [] });
     check("finished early morning (6 AM): the text", await settled({ ahead: 5 * HOUR, hour: 6 }), { shown: "text", errors: [] });
+
+    console.log("10b. …unless a Markdown draft is new since the run: the folder opens on it, side by side off");
+    const fresh = await settled({ ahead: 2 * HOUR, draft: "after", sbs: true, twice: true });
+    check("a draft written after the DONE stamp: the text, on the draft", [fresh.shown, fresh.doc], ["text", "Opposition Draft.md"]);
+    check("…side by side off, the setting itself left on", [fresh.sbs, fresh.sbsKept], ["false", "true"]);
+    check("…and opened again, the draft read already: PDF mode", fresh.again, "A Decl.pdf");
+    check("…no page errors", fresh.errors, []);
+    const edited = await settled({ ahead: 2 * HOUR, draft: "after", twice: true, rewrite: true });
+    check("read, then written again by My-Macros: opened again on it", [edited.shown, edited.again, edited.againDoc], ["text", "text", "Opposition Draft.md"]);
+    const old = await settled({ ahead: 2 * HOUR, draft: "before" });
+    check("a draft from before the run: PDF mode, as before", [old.shown, old.doc], ["A Decl.pdf", "A Decl.txt"]);
+    const soon = await settled({ ahead: HOUR / 2, draft: "after" });
+    check("a new draft in a folder not yet settled: the text, on the export, as before", [soon.shown, soon.doc], ["text", "A Decl.txt"]);
   } finally {
     if (browser) await browser.close();
     if (srv) srv.stop();

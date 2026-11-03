@@ -2457,7 +2457,13 @@ app, which routes it to the reader tab.
     the text. A folder still within the hour, with leaks to answer, or with a
     run going opens on the text as before — and so does one whose run
     finished overnight (9:00 PM to before 8:00 AM), so its text gets one final
-    review.
+    review. **A new draft comes first:** where a Markdown draft (`.md`) in the
+    folder was written or edited since that run, and you have not read it in
+    the reader since, the folder opens on the draft instead, in text mode with
+    side by side off (for that opening only: your side-by-side setting is kept
+    for the exports). Once you have read it, or saved it from the reader, the
+    folder goes back to opening in PDF mode, until My-Macros writes the draft
+    again.
 
   While it is on:
   - **Switch PDFs** with **‹ ›** or the list in the top bar (**Alt+PageUp** /
