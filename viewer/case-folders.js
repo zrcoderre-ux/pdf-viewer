@@ -13,10 +13,46 @@
 
 import { runMarker, isKeyName, isExportName, TEXT_SUBFOLDER } from "./textdoc.js";
 
-// An ETA marker PDF-Linker has not rewritten for this long may be a dead run's
-// (it is rewritten after every PDF). The reader's run bar says so at the same
-// age (text-reader.js, RUN_STALE_MS).
+// A run with nothing written for this long may be a dead one. The ETA marker
+// alone is not that sign: PDF-Linker rewrites it only after each PDF, and
+// before the first it OCRs the whole folder (`_pre_ocr_folder`), so a large
+// folder, or one long scanned filing, leaves it untouched for an hour or more
+// while the run narrates every file into pdf_linker.log. So a run is
+// "stalled" only where neither the marker nor the log has been written for
+// RUN_STALE_MS AND the finish the marker projects is RUN_STALE_MS past
+// (runLooksStalled). The reader's run bar asks the same (text-reader.js).
 export const RUN_STALE_MS = 30 * 60000;
+
+/**
+ * The finish an ETA marker projects, in ms, or 0 where it names no clock
+ * ("(estimating...)"). `label` is runMarker's ("~6:04 PM (6 of 13)"), `at`
+ * the marker's time; the clock has no date, so it is the first such clock
+ * from the marker on (PDF-Linker drops the seconds, so a minute before it
+ * counts as the same).
+ */
+export function projectedFinish(label, at) {
+  const m = /(\d{1,2}):(\d{2}) ?(AM|PM)/i.exec(String(label || ""));
+  if (!m || typeof at !== "number") return 0;
+  let h = Number(m[1]) % 12;
+  if (/pm/i.test(m[3])) h += 12;
+  const d = new Date(at);
+  d.setHours(h, Number(m[2]), 0, 0);
+  if (d.getTime() < at - 60000) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+/**
+ * Whether a run whose newest ETA marker is `eta` ({ label, at }) looks dead
+ * at `now`: neither the marker nor pdf_linker.log (`logAt`, ms, 0 unknown)
+ * written for RUN_STALE_MS, and the finish the marker projects, if any,
+ * RUN_STALE_MS past.
+ */
+export function runLooksStalled(eta, logAt, now) {
+  if (!eta) return false;
+  if (now - Math.max(eta.at || 0, logAt || 0) <= RUN_STALE_MS) return false;
+  const finish = projectedFinish(eta.label, eta.at);
+  return !(finish && now <= finish + RUN_STALE_MS);
+}
 
 const LOG_FILE = "pdf_linker.log";
 const LEAKS_FILE = "leaks.xlsx";
@@ -74,13 +110,15 @@ export function isToday(name, listing, now, zipsToday = new Set()) {
  * What PDF-Linker is doing in the folder, read off its traces:
  *   { state, label, at, leaks, held, key }
  * state is
- *   "running"  an ETA marker newer than any DONE stamp, rewritten lately
- *   "stalled"  the same, but untouched for RUN_STALE_MS: a run that stopped part-way
+ *   "running"  an ETA marker newer than any DONE stamp
+ *   "stalled"  the same, but the run looks dead (runLooksStalled): nothing
+ *              written for RUN_STALE_MS and past its projected finish
  *   "done"     a DONE stamp newer than any ETA marker
  *   "ran"      no marker, but a key or a log: an earlier run's, its stamp gone
  *   "new"      nothing a run leaves: not run yet
  * `label` is the marker's own words ("~6:04 PM (6 of 13)"), `at` the time of
- * the trace the state was read from. Markers count only when empty, as
+ * the trace the state was read from (with a run going, `alive` is the newer
+ * of the marker and the log). Markers count only when empty, as
  * PDF-Linker scopes its own (`_marker_mtime`) and the reader does
  * (runMarkersIn): a file the operator named "ETA notes.txt" is not one.
  */
@@ -103,7 +141,11 @@ export function folderStatus(listing, now) {
   const held = (listing && listing.held) || 0;
   const base = { leaks, held, key: !!key };
   if (eta && (!done || eta.at > done.at)) {
-    return { ...base, state: now - eta.at > RUN_STALE_MS ? "stalled" : "running", label: eta.label, at: eta.at };
+    const logAt = log && log.at > eta.at ? log.at : 0;
+    return {
+      ...base, state: runLooksStalled(eta, logAt, now) ? "stalled" : "running",
+      label: eta.label, at: eta.at, alive: Math.max(eta.at, logAt),
+    };
   }
   if (done) return { ...base, state: "done", label: done.label, at: done.at };
   if (key || log) return { ...base, state: "ran", label: "", at: Math.max((key && key.at) || 0, (log && log.at) || 0) };
@@ -165,16 +207,18 @@ export function statusText(st, now) {
   if (st.leaks) extras.push("LEAKS.xlsx to answer");
   const tail = extras.length ? " · " + extras.join(" · ") : "";
   switch (st.state) {
-    case "running":
+    case "running": {
+      const logNote = st.alive > st.at ? `, pdf_linker.log ${agoText(now - st.alive)}` : "";
       return {
         text: `Running — ETA ${st.label}`,
-        title: `PDF-Linker is running on this folder (its ETA file was updated ${agoText(now - st.at)}). Opening it now shows the last run's text, which the run is replacing.`,
+        title: `PDF-Linker is running on this folder (its ETA file was updated ${agoText(now - st.at)}${logNote}). Opening it now shows the last run's text, which the run is replacing.`,
         tone: "run",
       };
+    }
     case "stalled":
       return {
         text: `Stopped part-way? ETA ${st.label}`,
-        title: `The ETA file was last updated ${agoText(now - st.at)}: a run that stopped part-way leaves it behind. pdf_linker.log in the folder says whether one is still going.`,
+        title: `Neither the ETA file nor pdf_linker.log has been written for ${agoText(now - (st.alive || st.at)).replace(/ ago$/, "")}${projectedFinish(st.label, st.at) ? ", and the finish it projected has passed" : ""}: a run that stopped part-way leaves its ETA file behind. pdf_linker.log in the folder says how it ended.`,
         tone: "warn",
       };
     case "done":

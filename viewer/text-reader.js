@@ -63,7 +63,7 @@ function dressColumns(body) {
 import * as PS from "./pdfsync.js";
 import * as FT from "./form-templates.js";
 import * as LK from "./leaks.js";
-import { folderStatus, opensInPdfMode } from "./case-folders.js";
+import { folderStatus, opensInPdfMode, runLooksStalled } from "./case-folders.js";
 import { keyLibrary, storeKey, fillKeySelect, keyIds } from "./key-library.js";
 import * as RD from "./redact.js";
 import { buildRedactedPdf } from "./pdf-edit.js";
@@ -3697,12 +3697,13 @@ $("key-offer-close").addEventListener("click", hideKeyOffer);
 // on warning about one that is over, and offers the folder read again: what
 // is open is what stood before it did. A run that died part-way leaves its
 // marker behind until the next run clears it (a crashed --fix-leaks clears
-// its own), so the bar gives the marker's age — it is rewritten after every
-// PDF, and one untouched for a long while is that — and × puts it away until
-// the next document is opened.
+// its own), so the bar says when the run looks dead (runLooksStalled, Home's
+// rule: neither the marker nor pdf_linker.log written for half an hour, and
+// past the finish the marker projects; the marker alone is rewritten only
+// after each PDF, and a large folder's OCR goes an hour without one) — and ×
+// puts it away until the next document is opened.
 const runBar = $("run-bar");
 const RUN_RECHECK_MS = 30000;
-const RUN_STALE_MS = 30 * 60000; // untouched this long, the marker may be a dead run's
 let runShown = null;  // { dir, state: "running" | "ended" } while the bar is up
 let runTimer = 0;
 let runBarHeld = null; // showRunBar's arguments, held while a screenshot's fakes are up (shotHeldBack)
@@ -3725,14 +3726,19 @@ $("run-bar-close").addEventListener("click", () => {
 
 /**
  * The newest ETA and DONE markers in the case folder `dir`, each
- * { label, at }, or null where the folder cannot be read now. Empty files
- * only, as PDF-Linker scopes its own (`_marker_mtime`).
+ * { label, at }, and the time pdf_linker.log was last written (`logAt`, 0
+ * where there is none), or null where the folder cannot be read now. Empty
+ * files only, as PDF-Linker scopes its own (`_marker_mtime`).
  */
 async function runMarkersIn(dir) {
-  let eta = null, done = null;
+  let eta = null, done = null, logAt = 0;
   try {
     for await (const [name, entry] of dir.entries()) {
       if (entry.kind !== "file") continue;
+      if (name.toLowerCase() === "pdf_linker.log") {
+        try { logAt = (await entry.getFile()).lastModified; } catch { /* unread: the marker alone */ }
+        continue;
+      }
       const m = TD.runMarker(name);
       if (!m) continue;
       let f;
@@ -3743,7 +3749,7 @@ async function runMarkersIn(dir) {
       else if (!done || hit.at > done.at) done = hit;
     }
   } catch { return null; }
-  return { eta, done };
+  return { eta, done, logAt };
 }
 
 function agoText(ms) {
@@ -3775,8 +3781,8 @@ async function checkRun({ opening = false } = {}) {
   if ((await permissionOf(dir, "read")) !== "granted") return;
   const seen = await runMarkersIn(dir);
   if (seq !== runSeq || dir !== dirHandle || !seen) return;
-  const { eta, done } = seen;
-  if (eta && (!done || eta.at > done.at)) { showRunning(dir, eta); return; }
+  const { eta, done, logAt } = seen;
+  if (eta && (!done || eta.at > done.at)) { showRunning(dir, eta, logAt); return; }
   // No run going. A bar that was warning about one says it has ended, and
   // stays up until the folder is read again or it is put away: an export
   // opened after the run is the new text, but the key in hand is still the
@@ -3834,7 +3840,7 @@ async function lookForChange(dir) {
     if (dir !== dirHandle || (runShown && runShown.dir === dir)) return;
     const seen = await runMarkersIn(dir);
     if (dir !== dirHandle || (runShown && runShown.dir === dir)) return;
-    if (seen && seen.eta && (!seen.done || seen.eta.at > seen.done.at)) { showRunning(dir, seen.eta); return; }
+    if (seen && seen.eta && (!seen.done || seen.eta.at > seen.done.at)) { showRunning(dir, seen.eta, seen.logAt); return; }
     if (!hasUnsaved() && !saving && !opening && !adopting) { await readFolderAfterRun(); return; }
     showFolderChanged(dir, { key: keyNews ? k : "", leaks: leaksNews ? lk : "" }, { look: true });
   } catch (e) { console.warn(e); }
@@ -3861,10 +3867,11 @@ function showRunBar(dir, state, text, action) {
   runTimer = state === "running" ? setInterval(() => { checkRun(); }, RUN_RECHECK_MS) : 0;
 }
 
-function showRunning(dir, eta) {
-  const age = Date.now() - eta.at;
-  const stale = age > RUN_STALE_MS
-    ? ` Its ETA file was last updated ${agoText(age)}: a run that stopped part-way leaves it behind, and pdf_linker.log says whether one is still going.`
+function showRunning(dir, eta, logAt = 0) {
+  const now = Date.now();
+  const age = now - Math.max(eta.at, logAt || 0);
+  const stale = runLooksStalled(eta, logAt, now)
+    ? ` Neither its ETA file nor pdf_linker.log has been written for ${agoText(age).replace(/ ago$/, "")}: a run that stopped part-way leaves its ETA file behind, and pdf_linker.log says how it ended.`
     : "";
   showRunBar(dir, "running",
     `⚠ PDF-Linker is running on ${dir.name} — ETA ${eta.label}. It is rewriting the exports, and then the key and LEAKS.xlsx: what you open now may be replaced while you read it, and anything you save before it finishes can be overwritten.${stale}`);
