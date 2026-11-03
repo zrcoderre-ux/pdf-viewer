@@ -4,7 +4,8 @@
 // no never, phrase and type replacement options that I get for leaks." No and
 // never keep the name as the right-click does; phrase and a typed answer go to
 // PDF-Linker as `fix: VALUE | ANSWER` lines of New Real Values.txt; yes takes
-// an answer back.
+// an answer back. Opened by a click on a name, an answer stays on that name
+// (keyClickHold) until a step by hand lets the walk go on.
 //
 // Run: node test-key-answers.mjs   (from the repo root)
 //
@@ -233,6 +234,47 @@ async function run() {
     check("a Shift+click extends a selection; it does not open the walk", await q.evaluate(() => document.getElementById("key-bar").hidden), true);
     check("no page errors", r2.log.errors, []);
     await r2.close();
+
+    console.log("6. opened by a click, an answer stays on the name; a step by hand lets the walk go on");
+    const r3 = await newReader();
+    const w = r3.page;
+    const pnAt = (i) => w.evaluate((i) => { const b = document.querySelectorAll("#pages .pn")[i].getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }, i);
+    let pt = await pnAt(0);
+    await w.mouse.click(pt.x, pt.y);
+    await w.waitForTimeout(500);
+    check("clicked: on the name clicked", (await bar(w)).term.startsWith("Orla Vantreese"), true);
+    await w.click('#key-bar button[data-kfix="phrase"]');
+    await w.waitForTimeout(500);
+    const h1 = await bar(w);
+    check("answered: the walk stays on it, its answer lit", [h1.term.startsWith("Orla Vantreese"), h1.on], [true, ["phrase"]]);
+    await w.fill("#kb-typed", "Bertram Ollivant");
+    await w.press("#kb-typed", "Enter");
+    await w.waitForTimeout(500);
+    check("…a typed answer stays on it too", (await bar(w)).term.startsWith("Orla Vantreese"), true);
+    await w.evaluate(() => document.getElementById("kb-term-next").click());
+    await w.waitForTimeout(300);
+    await w.evaluate(() => document.getElementById("kb-term-next").click());
+    await w.waitForTimeout(300);
+    check("stepped by hand, round to it again", (await bar(w)).term.startsWith("Orla Vantreese"), true);
+    await w.click('#key-bar button[data-kfix="yes"]');
+    await w.waitForTimeout(500);
+    check("…and the next answer goes on to the next term", (await bar(w)).term.startsWith("Pelham Grantwick"), true);
+    await w.evaluate(() => document.getElementById("kb-close").click());
+    await w.evaluate(() => document.getElementById("key-walk-btn").click());
+    await w.waitForTimeout(500);
+    await goTerm(w, "Orla Vantreese");
+    await w.waitForTimeout(300);
+    await w.click('#key-bar button[data-kfix="phrase"]');
+    await w.waitForTimeout(500);
+    check("opened from the side bar: an answer goes on", (await bar(w)).term.startsWith("Pelham Grantwick"), true);
+    pt = await pnAt(0);
+    await w.mouse.click(pt.x, pt.y);
+    await w.waitForTimeout(500);
+    await w.click('#key-bar button[data-kfix="yes"]');
+    await w.waitForTimeout(500);
+    check("open, a name clicked: an answer stays on that name", (await bar(w)).term.startsWith("Orla Vantreese"), true);
+    check("no page errors", r3.log.errors, []);
+    await r3.close();
   } finally {
     await browser.close();
     srv.stop();

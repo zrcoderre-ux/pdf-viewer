@@ -21,6 +21,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   folderStatus, statusText, isCaseListing, isToday, signalFile, sortRows, startOfDay, RUN_STALE_MS,
+  withRunStart, RUN_START_WAIT_MS,
   opensInPdfMode, SETTLED_MS, finishedOvernight, projectedFinish, runLooksStalled,
 } from "./viewer/case-folders.js";
 
@@ -133,6 +134,21 @@ check("a run going first, then the newest",
     { name: "Newer", opened: NOW - 5 * MIN, status: { state: "new", at: 0 } },
   ]).map((r) => r.name),
   ["Going", "Newer", "Older"]);
+
+console.log("4b. a re-run the reader has just started (withRunStart)");
+{
+  const lastDone = folderStatus({ files: [f("DONE 2.40PM.txt", 30 * MIN)] }, NOW);
+  const started = withRunStart(lastDone, NOW - MIN, NOW);
+  check("the last run's DONE standing: shown as started, and kept", [started.status.state, started.keep], ["starting", true]);
+  check("…said so on Home", statusText(started.status, NOW).text, "Re-run started — waiting for its ETA");
+  check("…and listed first", sortRows([{ name: "Older", opened: NOW, status: lastDone }, { name: "Started", opened: 0, status: started.status }]).map((r) => r.name), ["Started", "Older"]);
+  const eta = folderStatus({ files: [f("ETA (estimating...).txt", 0)] }, NOW);
+  check("its ETA written: the folder's own status, and let go", [withRunStart(eta, NOW - MIN, NOW).status.state, withRunStart(eta, NOW - MIN, NOW).keep], ["running", false]);
+  check("…an ETA from before the start does not count", withRunStart(folderStatus({ files: [f("ETA ~1.10PM (2 of 9).txt", 20 * MIN)] }, NOW), NOW - MIN, NOW).status.state, "starting");
+  check("…a DONE after it: finished already", withRunStart(folderStatus({ files: [f("DONE 3.12PM.txt", 0)] }, NOW), NOW - MIN, NOW).status.state, "done");
+  check("…the last run's DONE, written a moment before the start, does not", withRunStart(folderStatus({ files: [f("DONE 3.10PM.txt", 2 * MIN)] }, NOW), NOW - MIN, NOW).status.state, "starting");
+  check("…never confirmed: let go after the wait", withRunStart(lastDone, NOW - RUN_START_WAIT_MS - MIN, NOW), { status: lastDone, keep: false });
+}
 
 // ── the list in the app ──────────────────────────────────────────────────────
 const PW = "/opt/node-tools/node_modules/playwright/index.mjs";
@@ -256,8 +272,29 @@ async function browserPart() {
     check("no second reader", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), 1);
     check("…its tab in front", await shell.evaluate(() => document.getElementById("dropzone").hidden), true);
 
-    console.log("10. the run ends: the row says so on the next look");
+    console.log("9b. Re-run PDF-Linker started: Home says so before the ETA is written");
+    await reader.evaluate(() => window.parent.postMessage({ type: "textreader:run", dir: window.__textReaderSource().dir }, location.origin));
     await shell.click("#home-tab");
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-item")].some((b) => b.textContent.includes("Case Beta") && b.querySelector(".ci-status").textContent.startsWith("Re-run started")), null, { timeout: 10000 });
+    got = await rows();
+    check("Case Beta: started, listed with the runs going", [got.find((r) => r.name === "Case Beta").status, got.findIndex((r) => r.name === "Case Beta") < 2], ["Re-run started — waiting for its ETA", true]);
+    await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const beta = await dl.getDirectoryHandle("Case Beta");
+      const w = await (await beta.getFileHandle("ETA (estimating...).txt", { create: true })).createWritable(); await w.close();
+    });
+    // No focus or nudge: the list is looked at again on its own while a start waits.
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-item")].some((b) => b.textContent.includes("Case Beta") && b.querySelector(".ci-status").textContent.startsWith("Running")), null, { timeout: 10000 });
+    check("…then its ETA, as soon as PDF-Linker writes it", (await rows()).find((r) => r.name === "Case Beta").status, "Running — ETA (estimating...)");
+    await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const beta = await dl.getDirectoryHandle("Case Beta");
+      await beta.removeEntry("ETA (estimating...).txt");
+      const w = await (await beta.getFileHandle("DONE 3.20PM.txt", { create: true })).createWritable(); await w.close();
+    });
+
+    console.log("10. the run ends: the row says so on the next look");
+    if (await shell.evaluate(() => document.getElementById("dropzone").hidden)) await shell.click("#home-tab");
     await shell.evaluate(async () => {
       const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
       const alpha = await dl.getDirectoryHandle("Case Alpha");
