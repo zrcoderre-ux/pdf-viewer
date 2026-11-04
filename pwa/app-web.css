@@ -312,9 +312,22 @@ body.home-open .tab-view.active { display: none; }
 .case-row { display: flex; align-items: center; border-bottom: 1px solid var(--c-border); }
 .case-row:last-child { border-bottom: none; }
 .case-row > .case-item { flex: 1; min-width: 0; border-bottom: none; }
+/* The hover spans the row, the buttons beside the folder included. */
+.case-row:hover { background: var(--c-card-hover); }
+.case-row > .case-item:hover { background: transparent; }
 .ci-takeover { flex: none; margin-right: 14px; padding: 4px 10px; border: 1px solid rgba(217, 119, 6, 0.5); border-radius: 999px; background: transparent; color: #d97706; font-size: 12px; cursor: pointer; white-space: nowrap; }
 .ci-takeover:hover, .ci-takeover:focus-visible { background: rgba(234, 179, 8, 0.14); }
 .ci-takeover.armed { background: #d97706; border-color: #d97706; color: #fff; }
+/* PDF-Linker's line: Prioritize on a row not in it, its place and moves on one that is. */
+.ci-line { flex: none; display: inline-flex; align-items: center; gap: 2px; margin-right: 10px; }
+.ci-line-add { padding: 4px 10px; border: 1px solid var(--c-border); border-radius: 999px; background: transparent; color: var(--c-text-3); font-size: 12px; cursor: pointer; white-space: nowrap; opacity: 0.55; }
+.case-row:hover .ci-line-add, .ci-line-add:focus-visible { opacity: 1; }
+.ci-line-add:hover, .ci-line-add:focus-visible { background: var(--c-accent-soft); color: var(--c-accent); border-color: var(--c-accent); }
+.ci-line-add:disabled { display: none; }
+.ci-place { min-width: 34px; padding: 3px 8px; border-radius: 999px; background: var(--c-accent); color: #fff; font-size: 12px; font-weight: 600; text-align: center; margin-right: 4px; cursor: default; }
+.ci-line-btn { width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--c-text-3); font-size: 11px; line-height: 1; cursor: pointer; }
+.ci-line-btn:hover:not(:disabled), .ci-line-btn:focus-visible { background: var(--c-accent-soft); color: var(--c-accent); }
+.ci-line-btn:disabled { opacity: 0.3; cursor: default; }
 .case-item .ri-icon { color: #eab308; }
 .case-item .ci-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .case-item .ci-main .ri-name { flex: none; }
@@ -330,6 +343,8 @@ body.home-open .tab-view.active { display: none; }
 @media (max-width: 560px) {
   .case-row { flex-wrap: wrap; }
   .ci-takeover { margin: 0 14px 10px 44px; }
+  .ci-line { margin: 0 6px 10px 44px; }
+  .ci-line-add { opacity: 1; }
   .case-item { flex-wrap: wrap; }
   .case-item .ci-status { max-width: 100%; margin-left: 30px; }
 }

@@ -23,6 +23,7 @@ import {
   folderStatus, statusText, isCaseListing, isToday, signalFile, sortRows, startOfDay, RUN_STALE_MS,
   withRunStart, RUN_START_WAIT_MS,
   opensInPdfMode, SETTLED_MS, finishedOvernight, projectedFinish, runLooksStalled,
+  PRIORITY_FILE, RANK_MAX, priorityText, parsePriority, liveRank, changeLine, ordinal, lineTitle,
 } from "./viewer/case-folders.js";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
@@ -154,6 +155,43 @@ console.log("4b. a re-run the reader has just started (withRunStart)");
   check("a take over: the stuck run's ETA still standing, shown as taken over",
     [took.status.state, took.keep, statusText(took.status, NOW).text], ["starting", true, "Taken over — waiting for its ETA"]);
   check("…the stalled row's hover offers it", /Take over ends the run/.test(statusText(stalled, NOW).title), true);
+}
+
+console.log("4c. PDF-Linker's line");
+{
+  check("the file is the name PDF-Linker reads", PRIORITY_FILE, "PDF-Linker Priority.json");
+  check("its words, as PDF-Linker's _run_priority_read takes them", JSON.parse(priorityText(2, NOW)), { rank: 2, set: NOW });
+  check("…read back", parsePriority(priorityText(3, NOW)), { rank: 3, set: NOW });
+  check("a file that says no place is none",
+    ["", "x", "[]", '{"rank":0,"set":1}', `{"rank":${RANK_MAX + 1},"set":1}`, '{"rank":"2","set":1}', '{"rank":2.5,"set":1}', '{"rank":2}'].map(parsePriority),
+    [null, null, null, null, null, null, null, null]);
+  const ranked = (set, ...files) => ({ files, priority: { rank: 2, set } });
+  check("a place given after the last finish stands (a finished case to be run again)",
+    liveRank(ranked(NOW - MIN, f("DONE 2.40PM.txt", 20 * MIN))), 2);
+  check("…one given before it is spent: the case left the line when its run finished",
+    liveRank(ranked(NOW - 30 * MIN, f("DONE 2.40PM.txt", 20 * MIN))), 0);
+  check("…a run going leaves it standing", liveRank(ranked(NOW - 30 * MIN, f("ETA ~6.04PM (6 of 13).txt", MIN))), 2);
+  check("…a DONE file that is not a stamp (not empty) does not spend it", liveRank(ranked(NOW - 30 * MIN, f("DONE notes.txt", MIN, 40))), 2);
+  check("no file, no place", liveRank({ files: [f("DONE 2.40PM.txt", MIN)] }), 0);
+  const L = ["a", "b", "c"];
+  check("Prioritize puts a folder at the end", changeLine(L, "d", "add"), ["a", "b", "c", "d"]);
+  check("…once", changeLine(L, "b", "add"), L);
+  check("up and down swap with the neighbour", [changeLine(L, "c", "up"), changeLine(L, "a", "down")], [["a", "c", "b"], ["b", "a", "c"]]);
+  check("…and stop at the ends", [changeLine(L, "a", "up"), changeLine(L, "c", "down")], [L, L]);
+  check("out of the line", changeLine(L, "b", "remove"), ["a", "c"]);
+  check("the line never passes RANK_MAX", changeLine(Array.from({ length: RANK_MAX }, (_, i) => i), "x", "add").length, RANK_MAX);
+  check("places said as people say them", [1, 2, 3, 4, 11, 12, 13, 21, 22, 101].map(ordinal), ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "101st"]);
+  check("the hover says what the place does and when it ends",
+    [/2nd in PDF-Linker's line/.test(lineTitle(2, "Case X")), /below-normal CPU priority/.test(lineTitle(2, "Case X")), /leaves the line when a run of it finishes/.test(lineTitle(2, "Case X"))], [true, true, true]);
+  const run = { state: "running", at: NOW - MIN };
+  const done = { state: "done", at: NOW - 5 * MIN };
+  check("the line first, in its order; then the runs going; then the newest",
+    sortRows([
+      { name: "Newest", status: done, opened: NOW },
+      { name: "Second", status: done, rank: 2 },
+      { name: "Going", status: run },
+      { name: "First", status: run, rank: 1 },
+    ]).map((r) => r.name), ["First", "Second", "Going", "Newest"]);
 }
 
 // ── the list in the app ──────────────────────────────────────────────────────
@@ -400,6 +438,44 @@ async function browserPart() {
       [req.state, link.startsWith("pdf-linker://run?f=QzpcQ2FzZSBHYW1tYQ&d=Case%20Gamma&n="), link.endsWith("&n=" + req.nonce)], ["takeover", true, true]);
     await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-row")].some((r) => r.querySelector(".ri-name").textContent === "Case Gamma" && r.querySelector(".ci-status").textContent.startsWith("Taken over")), null, { timeout: 10000 });
     check("…and the row says so until the new run's ETA", [await shell.textContent(`${gammaRow} .ci-status`), await shell.$$eval("#case-list .ci-takeover", (bs) => bs.length)], ["Taken over — waiting for its ETA", 0]);
+
+    console.log("15. PDF-Linker's line: Prioritize, move up, take out, spent by a finish");
+    await shell.evaluate(() => { Date.now = () => new Date().getTime(); window.dispatchEvent(new Event("focus")); });
+    const rowOf = (name) => `#case-list .case-row:has(.ri-name:text-is('${name}'))`;
+    const readPlace = (name) => shell.evaluate(async (name) => {
+      const dir = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle(name);
+      try { return JSON.parse(await (await (await dir.getFileHandle("PDF-Linker Priority.json")).getFile()).text()).rank; }
+      catch { return 0; }
+    }, name);
+    const order = () => shell.$$eval("#case-list .case-row", (rs) => rs.map((r) => [r.querySelector(".ri-name").textContent, (r.querySelector(".ci-place") || {}).textContent || ""]));
+    await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-line-add`, { timeout: 10000 });
+    check("a row not in line offers Prioritize", await shell.textContent(`${rowOf("Case Alpha")} .ci-line-add`), "Prioritize");
+    await shell.click(`${rowOf("Case Alpha")} .ci-line-add`);
+    await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-place`, { timeout: 10000 });
+    check("Prioritize: 1st in line, its place written into the folder", [await shell.textContent(`${rowOf("Case Alpha")} .ci-place`), await readPlace("Case Alpha")], ["1st", 1]);
+    check("…and the click opened no reader", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), readers);
+    await shell.click(`${rowOf("Case Gamma")} .ci-line-add`);
+    await shell.waitForSelector(`${rowOf("Case Gamma")} .ci-place`, { timeout: 10000 });
+    check("a second: 2nd, listed after the first", await order(), [["Case Alpha", "1st"], ["Case Gamma", "2nd"]]);
+    check("…the first can only go down, the last only up",
+      await shell.evaluate(() => [...document.querySelectorAll("#case-list .ci-line-btn")].map((b) => b.disabled)), [true, false, false, false, true, false]);
+    await shell.click(`${rowOf("Case Gamma")} .ci-line-btn[aria-label^='Move Case Gamma up']`);
+    await shell.waitForFunction(() => document.querySelector("#case-list .case-row .ri-name").textContent === "Case Gamma", null, { timeout: 10000 });
+    check("▲ swaps them, on Home and in the folders", [await order(), await readPlace("Case Gamma"), await readPlace("Case Alpha")], [[["Case Gamma", "1st"], ["Case Alpha", "2nd"]], 1, 2]);
+    await shell.click(`${rowOf("Case Gamma")} .ci-line-btn[aria-label^='Take Case Gamma out']`);
+    await shell.waitForSelector(`${rowOf("Case Gamma")} .ci-line-add`, { timeout: 10000 });
+    check("✕ takes it out, its file removed, the one behind moved up to 1st",
+      [await readPlace("Case Gamma"), await readPlace("Case Alpha"), await shell.textContent(`${rowOf("Case Alpha")} .ci-place`)], [0, 1, "1st"]);
+    // PDF-Linker finishes Case Alpha: a DONE stamp newer than its place.
+    await shell.evaluate(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      const alpha = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Alpha");
+      await alpha.removeEntry("DONE 3.12PM.txt");
+      const w = await (await alpha.getFileHandle("DONE 3.31PM.txt", { create: true })).createWritable(); await w.close();
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-line-add`, { timeout: 10000 });
+    check("a run that finishes after its place was given takes the case out of the line", await shell.$$eval("#case-list .ci-place", (e) => e.length), 0);
     check("no page errors", errors, []);
     await app.close();
   } finally {
