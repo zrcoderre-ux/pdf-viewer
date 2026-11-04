@@ -176,6 +176,15 @@ for any other a message box, then `tryAgain` (the dialog again) or `deny`.
 
 ## Windows and closing
 
+The window PDF+ opens at its start (a PDF Windows handed over, or the app on
+its own) opens MAXIMIZED: made hidden, maximized, then shown, so the 1280 x
+860 it restores to is never seen first (`createWindow`). A window the app opens
+itself keeps the size and place it is opened at, and a file arriving in a
+window already open leaves it at the size it was given. On Linux it is the
+window manager that maximizes, and `xvfb-run` starts none: `test-desktop.mjs`
+starts openbox on the display where it is installed (CI installs it) and
+passes over that one check where it is not.
+
 New window and a tab pulled out of the strip use `window.open` with the
 opener kept; `setWindowOpenHandler` allows app URLs as a window like the
 first. Electron shows no dialog for `beforeunload`: the close is simply

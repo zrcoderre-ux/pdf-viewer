@@ -5,7 +5,13 @@
 // already taken, is refused and nothing on disk moves. The name is SHOWN in
 // the real names the key gives back — the top bar, the tab's title, the
 // Documents list, the status bar — and in its pseudonyms with Show fakes on
-// (shownDocName).
+// (shownDocName). And a PDF renamed from the PDF VIEWER's toolbar
+// (viewer.js renameOnDisk → text-reader.js renamePdfHere): one of a case
+// folder a reader has open, paired with an export, is renamed by the reader
+// and its export with it — from PDF mode's frame, and from a viewer beside the
+// reader (the app's tabs, a split view) — its frame kept; a PDF no export
+// pairs with is renamed alone; and a refusal is said in the viewer and moves
+// nothing.
 //
 // Run: node test-rename-doc.mjs   (from the repo root)
 //
@@ -241,6 +247,138 @@ async function run() {
 
     check("no page errors", errors, []);
     await context.close();
+
+    // ── renamed from the PDF viewer ─────────────────────────────────────────
+    const C2 = "Case Rename Viewer";
+    const setUp = async (pg, inFrame) => pg.evaluate(async ({ C2, A, keyBytes, inFrame }) => {
+      const w = inFrame ? document.getElementById("r").contentWindow : window;
+      const { PDFDocument, StandardFonts } = await import(new URL("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js", location.href).href);
+      const mk = async (words) => { const pdf = await PDFDocument.create(); const f = await pdf.embedFont(StandardFonts.TimesRoman); for (const t of words) pdf.addPage([612, 792]).drawText(t, { x: 72, y: 700, size: 12, font: f }); return pdf.save(); };
+      const top = await navigator.storage.getDirectory();
+      try { await top.removeEntry(C2, { recursive: true }); } catch { /* none yet */ }
+      const dir = await top.getDirectoryHandle(C2, { create: true });
+      const put = async (d, name, data) => { const f = await (await d.getFileHandle(name, { create: true })).createWritable(); await f.write(data); await f.close(); };
+      await put(dir, "pseudonym_key.xlsx", new Uint8Array(keyBytes));
+      await put(dir, "Corwin Ashdale Decl.pdf", await mk(["Declaration page one", "Declaration page two"]));
+      await put(dir, "Exhibit Photo.pdf", await mk(["A photograph"]));
+      const text = await dir.getDirectoryHandle("Text Files", { create: true });
+      await put(text, "Tobias Wrenfield Decl.txt", A);
+      await w.__textReaderAdoptFolder(dir);
+      const t = w.document.getElementById("reel-toggle"); if (t && t.checked) { t.checked = false; t.dispatchEvent(new Event("change")); }
+      await w.__textReaderOpenDoc("Tobias Wrenfield Decl.txt");
+    }, { C2, A, keyBytes: Array.from(KEY_BYTES), inFrame });
+    const names2 = (pg) => pg.evaluate(async (C2) => {
+      const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(C2);
+      const list = async (d) => { const out = []; for await (const [n, e] of d.entries()) if (e.kind === "file") out.push(n); return out.sort(); };
+      return { pdfs: (await list(dir)).filter((n) => n.endsWith(".pdf")), txt: await list(await dir.getDirectoryHandle("Text Files")) };
+    }, C2);
+    /** The viewer's toolbar rename, in frame `f`: click the name, type, Enter. */
+    const viewerRename = async (f, to) => {
+      await f.click("#filename");
+      await f.waitForSelector("#filename-input", { timeout: 5000 });
+      await f.fill("#filename-input", to);
+      await f.press("#filename-input", "Enter");
+      await f.page().waitForTimeout(2500);
+    };
+    const label = (f) => f.evaluate(() => document.getElementById("filename").textContent);
+    const toasts = (f) => f.evaluate(() => [...document.querySelectorAll("#toast-host .toast")].map((t) => t.textContent).join(" | "));
+
+    console.log("9. PDF mode: the viewer's rename renames the export with the PDF");
+    {
+      const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+      const pg = await ctx.newPage();
+      const errs = [];
+      pg.on("pageerror", (e) => errs.push(e.message));
+      pg.on("dialog", (d) => d.accept().catch(() => {}));
+      await pg.goto(srv.base + "/viewer/text-reader.html");
+      await pg.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
+      await setUp(pg, false);
+      await pg.waitForFunction(() => document.querySelectorAll("#pages .tpage").length > 0);
+      await pg.waitForTimeout(800);
+      await pg.click("#pdf-mode-btn");
+      await pg.waitForFunction(() => { const f = [...document.querySelectorAll("#pdf-mode iframe")].find((x) => !x.hidden); return f && f.title === "Corwin Ashdale Decl.pdf"; }, null, { timeout: 20000 });
+      const frameOf = async (name) => { const el = await pg.$(`#pdf-mode iframe[title="${name}"]`); return el && el.contentFrame(); };
+      let f = await frameOf("Corwin Ashdale Decl.pdf");
+      await f.waitForFunction(() => document.querySelectorAll("#pages > .page-wrapper").length > 0, null, { timeout: 20000 });
+      await pg.waitForTimeout(800);
+      check("the viewer shows the PDF's name", await label(f), "Corwin Ashdale Decl");
+      await viewerRename(f, "Corwin Ashdale Reply Decl");
+      check("both renamed: the PDF as typed, the export in its pseudonyms", await names2(pg), { pdfs: ["Corwin Ashdale Reply Decl.pdf", "Exhibit Photo.pdf"], txt: ["Tobias Wrenfield Reply Decl.txt"] });
+      check("…the viewer shows the new name", await label(f), "Corwin Ashdale Reply Decl");
+      check("…its frame kept, under the new name, and the only one", await pg.evaluate(() => [...document.querySelectorAll("#pdf-mode iframe")].map((x) => x.title)), ["Corwin Ashdale Reply Decl.pdf"]);
+      check("…PDF mode's list has it", await pg.evaluate(() => { const s = document.getElementById("pm-pick"); return s.options[s.selectedIndex].textContent; }), "Corwin Ashdale Reply Decl");
+      check("…the viewer's handle followed the file", await f.evaluate(() => window.__pdfViewerSource().handle.name), "Corwin Ashdale Reply Decl.pdf");
+      await f.evaluate(() => window.__pdfViewerSave()).catch(() => {});
+      await pg.waitForTimeout(1500);
+      check("…so the viewer's Save writes the renamed file, and the old name does not come back", await names2(pg), { pdfs: ["Corwin Ashdale Reply Decl.pdf", "Exhibit Photo.pdf"], txt: ["Tobias Wrenfield Reply Decl.txt"] });
+      await pg.click("#pdf-mode-btn"); // back to the text
+      await pg.waitForTimeout(1500);
+      check("back in the text: the document under its new name, its PDF matched", [await title(pg), await pg.evaluate(() => !document.getElementById("pdf-tab-btn").disabled)], ["Corwin Ashdale Reply Decl", true]);
+
+      console.log("10. a PDF no export pairs with: the viewer renames it alone");
+      await pg.click("#pdf-mode-btn");
+      await pg.waitForTimeout(1000);
+      await pg.evaluate(() => { const s = document.getElementById("pm-pick"); const i = [...s.options].findIndex((o) => o.textContent === "Exhibit Photo"); s.value = String(i); s.dispatchEvent(new Event("change")); });
+      await pg.waitForFunction(() => { const f = [...document.querySelectorAll("#pdf-mode iframe")].find((x) => !x.hidden); return f && f.title === "Exhibit Photo.pdf"; }, null, { timeout: 20000 });
+      f = await frameOf("Exhibit Photo.pdf");
+      await f.waitForFunction(() => document.querySelectorAll("#pages > .page-wrapper").length > 0, null, { timeout: 20000 });
+      await pg.waitForTimeout(500);
+      await viewerRename(f, "Exhibit A Photo");
+      check("the PDF alone renamed", await names2(pg), { pdfs: ["Corwin Ashdale Reply Decl.pdf", "Exhibit A Photo.pdf"], txt: ["Tobias Wrenfield Reply Decl.txt"] });
+      check("…the viewer shows it", await label(f), "Exhibit A Photo");
+
+      console.log("11. refused: unsaved edits in the reader keep both names, and the viewer says why");
+      await pg.click("#pdf-mode-btn");
+      await pg.waitForTimeout(1200);
+      await pg.click("#edit-toggle");
+      await pg.click("#pages .tpage .page-body");
+      await pg.keyboard.press("End");
+      await pg.keyboard.type(" More.");
+      await pg.waitForTimeout(400);
+      await pg.click("#pdf-mode-btn");
+      await pg.waitForFunction(() => { const f = [...document.querySelectorAll("#pdf-mode iframe")].find((x) => !x.hidden); return f && f.title === "Corwin Ashdale Reply Decl.pdf"; }, null, { timeout: 20000 });
+      f = await frameOf("Corwin Ashdale Reply Decl.pdf");
+      await pg.waitForTimeout(800);
+      await viewerRename(f, "Never Renamed");
+      check("nothing moved", await names2(pg), { pdfs: ["Corwin Ashdale Reply Decl.pdf", "Exhibit A Photo.pdf"], txt: ["Tobias Wrenfield Reply Decl.txt"] });
+      check("…the viewer's name put back", await label(f), "Corwin Ashdale Reply Decl");
+      truthy("…and the viewer says why", /save your edits first/.test(await toasts(f)));
+      check("no page errors (PDF mode)", errs, []);
+      await ctx.close();
+    }
+
+    console.log("12. a viewer beside the reader (the app's tabs, a split view): the reader renames both");
+    {
+      const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+      const pg = await ctx.newPage();
+      const errs = [];
+      pg.on("pageerror", (e) => errs.push(e.message));
+      pg.on("dialog", (d) => d.accept().catch(() => {}));
+      await pg.goto(srv.base + "/viewer/");
+      await pg.evaluate(() => {
+        document.body.innerHTML = '<iframe id="r" src="text-reader.html" style="width:780px;height:880px"></iframe><iframe id="v" src="viewer.html" style="width:780px;height:880px"></iframe>';
+      });
+      const rf = await (await pg.$("#r")).contentFrame();
+      const vf = await (await pg.$("#v")).contentFrame();
+      await rf.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc, null, { timeout: 20000 });
+      await vf.waitForFunction(() => typeof window.__pdfViewerLoadLocal === "function", null, { timeout: 20000 });
+      await setUp(pg, true);
+      await rf.waitForFunction(() => document.querySelectorAll("#pages .tpage").length > 0, null, { timeout: 20000 });
+      // The viewer opens the PDF through a handle of its own, as a tab of the app would.
+      await vf.evaluate(async (C2) => {
+        const h = await (await (await navigator.storage.getDirectory()).getDirectoryHandle(C2)).getFileHandle("Corwin Ashdale Decl.pdf");
+        await window.__pdfViewerLoadLocal(await h.getFile(), h);
+      }, C2);
+      await vf.waitForFunction(() => document.querySelectorAll("#pages > .page-wrapper").length > 0, null, { timeout: 20000 });
+      await pg.waitForTimeout(800);
+      await viewerRename(vf, "Corwin Ashdale Amended Decl");
+      check("both renamed", await names2(pg), { pdfs: ["Corwin Ashdale Amended Decl.pdf", "Exhibit Photo.pdf"], txt: ["Tobias Wrenfield Amended Decl.txt"] });
+      check("…the viewer shows the new name", await label(vf), "Corwin Ashdale Amended Decl");
+      check("…the viewer's own handle followed the file", await vf.evaluate(() => window.__pdfViewerSource().handle.name), "Corwin Ashdale Amended Decl.pdf");
+      check("…the reader's document under its new name", await rf.evaluate(() => document.getElementById("doc-title").textContent), "Corwin Ashdale Amended Decl");
+      check("no page errors (beside)", errs, []);
+      await ctx.close();
+    }
   } finally {
     await browser.close();
     srv.stop();
