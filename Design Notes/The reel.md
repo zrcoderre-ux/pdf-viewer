@@ -98,3 +98,73 @@ edits began.
 - **`REEL_MAX = 25`,** either end. A folder can hold three hundred exports;
   read end to end that is a tab that stops answering. The ceiling degrades
   into a message.
+
+### A long document is shed by the page (`LONG_DOC_PAGES`)
+
+The reel lets go of a DOCUMENT at a time and never of the one being read, which
+is the right piece for a folder of pleadings and the wrong one for a deposition
+of 1,200 pages. Measured over a case folder holding one (and a few five-page
+filings beside it), every page of it was built at the open — **15.1 s** of a tab
+that answered nothing, two of them building the DOM and the rest the browser
+laying out thirty thousand lines — and every pass that lays the pages out (the
+grid, the fit, the citations) then ran over all twelve hundred: 5.4 s turning
+side by side on, and 111 holds of up to 738 ms scrolling down it.
+
+A member longer than `LONG_DOC_PAGES` (150) is shed a page at a time:
+
+- **It goes up with `LONG_DOC_OPEN` (12) pages built** (`buildPages`'s `live`
+  range; the reel's `reelExtend` and `reelPrepend` build the end nearest the
+  reading the same way). The rest stand as shed sheets (`shellPage`): the
+  section and its label, no body, at `height: var(--page-guess)`. The guess is
+  the median height of the pages built (`guessPageHeight`), set once on
+  `#pages` and re-read after every change, so a page never built is as tall as
+  the run of the document. One body-building path serves the first build and a
+  page built back (`fillPageInner`), so a page built back carries its restored
+  margin numbers, its condensed sheet and its ✓ Use my text as it did; the old
+  `unshedMember` built a bare body.
+- **`reelTrimNow` trims it by the page** (`trimPagesOf`): built within
+  `REEL_KEEP_SCREENS` of the screen, let go of past half as far again, so a
+  page at the edge is not built and shed on alternate scrolls. The page the
+  reading stands on is measured before and the scroll put back from where it
+  stood after, since a page built above the reading comes up at its own height
+  rather than the guess.
+- **A page is never let go of where its body holds something the text does
+  not** (`pageMustStay`): an edit (its text is not `__built`, which is what a
+  typed real name is measured against), a name Esc left as typed, the caret
+  while editing, a selection, or its PDF page swapped in. So the old rule
+  "anything typed in stays" still holds, at the page. A document out of the
+  store keeps its pages' baselines in `m.built`, and a page of it built later
+  takes its own (`buildShedSections`).
+- **Shed is a page's state, not only a member's.** `m.shed` still means a
+  whole document let go of; a page shed out of a long one is `.tpage.shed` on
+  its own (`pageShedAt`, `reelHasShed`). The undo history (`restoreSnapshot`,
+  the redo side) and the save's "names to fake reach a shed member" ask the
+  page. Spot keeps of a page let go of are filed through
+  `spotsListOf`/`setSpotsListOf`, since the page may be the open document's.
+- **A re-layout does not build it back** (`reelLiveForLayout`). The old
+  answer to a resize or a setting — build every shed page, measure, shed again
+  — is the fifteen seconds over again; a long document's shed pages are stood
+  at the guess instead, re-measured once the layout has run. That moves every
+  page above the reading at once, and the scroll clamped to the column's new
+  foot let `holdReading` go as though the reader had scrolled: the reading
+  landed 150 pages on. `keepReadingOver` measures the page being read before
+  and after and puts the scroll back from where it stood.
+- **Find reads the pages not built off their text** (`scanFindHere`): a hit
+  there is `{ page, nth }` in its place in the order, counted on the page as
+  it would read (`shownPageText`, `textdoc.shownPages`, kept per page while
+  its lines, the key and the face stay). Standing on one builds the page and
+  finds its `nth` hit on it (`hitRangeOf`); `ensurePageLive` builds a page
+  either side of it, not the document. Under the find bar the long document is
+  still built as the reading comes to it and nothing of it let go of, since a
+  hit's range is a place in a body. Ctrl+F was 11.2 s with every page built
+  back for it; it is now a hold of about 0.7 s for the first query (the pages'
+  shown text read once).
+- **What still builds every page:** the LEAKS walk, the names walk, the key
+  bar, the redaction tool, Replace all and the save's names-to-fake pass. Each
+  reads or edits page bodies throughout (`reelAllLive`), and on a long document
+  that is the eleven seconds, paid when the tool opens rather than at every
+  open.
+
+Measured on the same folder after: the open 0.7–1.1 s, side by side 0.47 s,
+the longest hold scrolling 145–195 ms, PDF mode unchanged (its viewer was
+already `content-visibility: auto`). `test-long-document.mjs` drives it.

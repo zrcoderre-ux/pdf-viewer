@@ -365,3 +365,12 @@ finish on its own, the queue goes on, and the console names the PDF.
 `test-pdf-closed-midjob.mjs` hangs the operator list as pdf.js does, changes
 folder (which closes every PDF), and needs the next folder's page drawn within
 10 s. It is drawn at once; before, it never was.
+
+### The folder sweep reads a long document in pieces
+
+The folder sweep (`sweepFolder`) read each document whole in one task, so a
+1,200-page deposition held the tab for half a second at every sweep, which runs again
+at every decision. It reads `SWEEP_PAGES` (60) pages at a time now
+(`textdoc.clearReading`'s `pages`/`from`/`to`, each page still read with the
+one after it) and the run's pseudonyms in pieces cut at a page header
+(`textdoc.slicesAtHeaders`), looking at the clock between: 605 ms → 82 ms.

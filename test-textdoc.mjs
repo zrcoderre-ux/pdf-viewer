@@ -14,7 +14,7 @@ import {
   addValue, removeValue, setAnswer, answerFor, answerLine, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
   keepNeedsRun, owedKeeps, owe, settleLocal, makeKeep,
   isExportName, isKeyName, isQuarantinedName, isMarkdownName, docLabel, runMarker, normalizeSettings, fontCss, VALUES_FILE, PAGE_WIDTH,
-  ruleParts, ruleShape, clearReading, clearPieces, didNotOcrLines, DID_NOT_OCR,
+  ruleParts, ruleShape, clearReading, slicesAtHeaders, clearPieces, didNotOcrLines, DID_NOT_OCR,
   columnCuts, columnBands, columnWidths, lineIndent, placeColumns, COLUMN_GAP, COLUMN_REACH, COLUMN_SNAP, COLUMN_GUTTER, COLUMN_STRETCH,
   checkboxRanges, checkboxState, isFormBanner,
   noOcrLine, setNoOcr, sameNoOcr, readsDidNotOcr, headerSaysDidNotOcr, NOOCR_RE,
@@ -1363,6 +1363,26 @@ console.log("clear reading (the folder's ⚠ and the page agree)");
   check("a flagged value inside a fake is not standing in the clear",
     clearReading(pg(1, ["Mary Jones and Jones."]), { rev: opts.rev, flagRx }).flags, 1);
   check("no key and no flags, nothing to read", clearReading(pg(1, ["Quillmark"]), {}), { values: [], flags: 0 });
+  // A long document is read a slice of pages at a time (the folder sweep):
+  // the same answer, each page read with the page after it whichever slice
+  // that falls in, and a spot keep filed by its page in the whole document.
+  const many = Array.from({ length: 9 }, (_, k) => pg(k + 1, ["Quillmark and Mary Jones.", k % 2 ? "Jones again." : "Hepworth."])).join("");
+  const sliced = (o, step) => {
+    const pages = parseExport(many).pages, out = { values: [], flags: 0 };
+    for (let a = 0; a < pages.length; a += step) {
+      const r = clearReading(many, { ...o, pages, from: a, to: a + step });
+      out.values.push(...r.values); out.flags += r.flags;
+    }
+    return out;
+  };
+  const whole = { ...opts, flagRx, spots: [makeSpot(6, "Quillmark", 0)] };
+  check("read in slices of pages, the answer of the whole", sliced(whole, 2), clearReading(many, whole));
+  check("…in slices of one page", sliced(whole, 1), clearReading(many, whole));
+  check("…a spot keep on page 7 still spares that page's occurrence", clearReading(many, whole).values.filter((v) => v === "Quillmark").length, 8);
+  check("slices cut at a page header, and joined are the text",
+    [slicesAtHeaders(many, 60).join("") === many, slicesAtHeaders(many, 60).every((x) => x.startsWith("====== Page ")), slicesAtHeaders(many, 60).length > 1], [true, true, true]);
+  check("…a text with no header past the size is one piece", slicesAtHeaders("no headers here at all", 4), ["no headers here at all"]);
+  check("…nothing, no pieces", slicesAtHeaders("", 4), []);
   // A flagged NAME with a pseudonym in it: "Rosa" in the clear, "Quillmark"
   // faked as "Mary Jones". Read as the page shows it, it stands half in the clear.
   const partly = buildMatcher(["Rosa Quillmark"]);
