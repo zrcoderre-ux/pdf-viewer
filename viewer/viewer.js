@@ -4708,6 +4708,32 @@ async function renameOnDisk(shown, was) {
   if (typeof h.move !== "function") { back("this browser cannot rename the file. Save as… writes a copy under the new name."); return; }
   let after = null;
   try { after = window.top !== window && window.top.__appRenamingFile ? await window.top.__appRenamingFile(h) : null; } catch { after = null; }
+  // A PDF of a case folder a text reader has open, paired with an export:
+  // the reader renames it, and the export with it, so the two still pair
+  // (text-reader.js renamePdfHere). Its reasons are said here.
+  const paired = await renameThroughReader(h, shown);
+  if (paired) {
+    if (!paired.ok) {
+      if (localFileHandle !== h) return;
+      filenameEl.textContent = was;
+      serverFilename = was;
+      document.title = `${was} — PDF Viewer`;
+      filenameEl.title = "Click to rename";
+      recordFinalName(was);
+      return;
+    }
+    const nh = paired.handle || h;
+    try { if (after) await after(nh); } catch { /* Recent keeps the old entry */ }
+    if (localFileHandle !== h) return;
+    localFileHandle = nh;
+    const shownNow = nh.name.replace(/\.pdf$/i, "");
+    filenameEl.textContent = shownNow;
+    serverFilename = shownNow;
+    document.title = `${shownNow} — PDF Viewer`;
+    filenameEl.title = "Click to rename";
+    recordFinalName(shownNow);
+    return;
+  }
   try {
     await h.move(to);
   } catch (e) {
@@ -4727,6 +4753,42 @@ async function renameOnDisk(shown, was) {
   filenameEl.title = "Click to rename";
   recordFinalName(shownNow);
   toast(`Renamed the file to ${h.name}.`, { timeout: 4000 });
+}
+
+/**
+ * The text readers this viewer can reach — PDF mode's own (its parent), a
+ * split view's beside it, the app's other tabs — asked in turn, nearest
+ * first, to rename the file as one of their case folder's PDFs with its
+ * export (__textReaderRenamePdf). The first that holds the file answers
+ * { ok, why, handle }; null where none does, and the file is renamed alone.
+ */
+function readerWindows() {
+  const out = [], seen = new Set();
+  const visit = (w, depth) => {
+    if (!w || seen.has(w) || depth > 4) return;
+    seen.add(w);
+    try { if (w !== window && typeof w.__textReaderRenamePdf === "function") out.push(w); } catch { return; /* another origin */ }
+    let n = 0;
+    try { n = w.frames.length; } catch { return; }
+    for (let i = 0; i < n; i++) { let c = null; try { c = w.frames[i]; } catch { /* gone */ } visit(c, depth + 1); }
+  };
+  // Up the chain first, so PDF mode's own reader is asked before any other.
+  for (let w = window.parent; w && w !== window; w = w.parent) {
+    try { if (typeof w.__textReaderRenamePdf === "function" && !seen.has(w)) { out.push(w); seen.add(w); } } catch { break; }
+    if (w === w.parent) break;
+  }
+  try { visit(window.top, 0); } catch { /* none */ }
+  return out;
+}
+async function renameThroughReader(h, shown) {
+  const say = (msg, o = {}) => toast(msg, { kind: o.error ? "error" : undefined, timeout: o.ms || (o.error ? 8000 : 5000) });
+  for (const w of readerWindows()) {
+    try {
+      const r = await w.__textReaderRenamePdf(h, shown, { say });
+      if (r) return r;
+    } catch { /* that reader could not answer: ask the next */ }
+  }
+  return null;
 }
 
 filenameEl.addEventListener("click", startRename);

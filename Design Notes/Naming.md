@@ -192,6 +192,10 @@ file handle (the app's tabs, PWA and PDF+), `startRename`'s commit calls
   then, once renamed, the shell puts the moved handle and its name in that
   entry.
 
+A PDF of a case folder a text reader has open, paired with an export, is
+renamed by the reader instead, the export with it (`renameThroughReader`;
+`Design Notes/Text reader.md`, "…and from the PDF viewer").
+
 A web PDF (no handle) works as before: the name is the first Save As's. Test:
 `test-desktop.mjs` 3b (a taken name refused and both files left; the rename on
 disk, the toolbar, tab and Recent; Save into the renamed file; the bridge

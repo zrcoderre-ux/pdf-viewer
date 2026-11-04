@@ -410,8 +410,17 @@ function trackWindow(win) {
   });
 }
 
+// The app's own window, opened at its start (a PDF Windows handed over, or
+// the app alone): MAXIMIZED, as a document is read full screen. Made hidden
+// and maximized before it is shown, so the 1280 x 860 window is never seen
+// first; that size is what it restores to. A window the app opens itself
+// (New window, a tab pulled out of the strip) keeps the size and place it is
+// opened at (setWindowOpenHandler), and a window already open is left at the
+// size it was given when a file arrives in it (deliverFiles).
 function createWindow() {
-  const win = new BrowserWindow(windowOptions());
+  const win = new BrowserWindow(windowOptions({ show: false }));
+  win.maximize(); // …which shows it, maximized, but does not focus it:
+  win.show();     // a window just launched is the one in front
   trackWindow(win);
   lastWindow = win;
   win.loadURL(`${ORIGIN}/index.html`);

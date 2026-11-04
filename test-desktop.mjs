@@ -47,9 +47,16 @@ let ELECTRON;
 try { ELECTRON = createRequire(path.join(DESKTOP, "package.json"))("electron"); } catch { skip("Electron is not installed: cd desktop && npm install"); }
 if (typeof ELECTRON !== "string" || !fs.existsSync(ELECTRON)) skip("Electron's binary is not installed in desktop/node_modules");
 
+// A window is maximized by the window manager on Linux, and xvfb-run starts
+// none: where openbox is installed it is started on the display first
+// (PDFPLUS_WM), else the one check that needs it says so and is passed over.
+const hasOpenbox = process.platform === "linux" && spawnSync("sh", ["-c", "command -v openbox"]).status === 0;
 if (process.platform === "linux" && !process.env.DISPLAY && !process.env.PDFPLUS_UNDER_XVFB) {
-  const r = spawnSync("xvfb-run", ["-a", process.execPath, ...process.argv.slice(1)], {
-    stdio: "inherit", env: { ...process.env, PDFPLUS_UNDER_XVFB: "1" },
+  const args = hasOpenbox
+    ? ["-a", "sh", "-c", 'openbox >/dev/null 2>&1 & sleep 1; exec "$@"', "sh", process.execPath, ...process.argv.slice(1)]
+    : ["-a", process.execPath, ...process.argv.slice(1)];
+  const r = spawnSync("xvfb-run", args, {
+    stdio: "inherit", env: { ...process.env, PDFPLUS_UNDER_XVFB: "1", ...(hasOpenbox ? { PDFPLUS_WM: "1" } : {}) },
   });
   if (r.error) skip("no display, and xvfb-run is not installed");
   process.exit(r.status ?? 1);
@@ -239,6 +246,13 @@ try {
     })));
   }
   truthy("the window wears the document's name", await until(async () => /— PDF\+$/.test(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getTitle()))));
+  // Opened from a PDF Windows handed over: the window maximized, in front.
+  if (process.platform !== "linux" || !process.env.PDFPLUS_UNDER_XVFB || process.env.PDFPLUS_WM) {
+    check("…maximized, visible and in front", await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; return [w.isMaximized(), w.isVisible(), w.isFocused()]; }), [true, true, true]);
+  } else {
+    console.log("  SKIP  …maximized: xvfb-run has no window manager to maximize it (install openbox to check it here)");
+    check("…visible and in front", await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; return [w.isVisible(), w.isFocused()]; }), [true, true]);
+  }
 
   // ── 2. edit and save in place ─────────────────────────────────────────────
   console.log("2. a sticky note, saved into the same file with no picker");

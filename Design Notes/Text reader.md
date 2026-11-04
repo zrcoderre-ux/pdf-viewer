@@ -2226,6 +2226,30 @@ and is not the reader's to rewrite: unsaved edits, a run going
 `.txt.LEAK`, a document outside an open case folder). Tests in
 `test-rename-doc.mjs`.
 
+**…and from the PDF viewer** (`renamePdfHere`, `window.__textReaderRenamePdf`).
+A PDF renamed in the viewer's toolbar (`viewer.js` `renameOnDisk`) used to be
+renamed alone, which left a PDF no export pairs with: the reader stopped
+finding it for side by side and PDF mode. Before it moves the file, the viewer
+now asks every text reader it can reach (`readerWindows`: its parent chain
+first, so PDF mode's own reader answers, then every same-origin frame of the
+top window, which is a split view's reader and the app's other tabs) whether
+the file is one of its case folder's PDFs paired with an export. The reader
+compares the handles both ways round (a browser's handle cannot compare
+itself with PDF+'s `PathFileHandle`, which can compare itself with a
+browser's) and answers null where the folder does not hold it, or holds it
+with no export, and the viewer renames it alone as before. Where it does, the
+rename is `renameDoc`'s, with every refusal it makes (`renameBlocked`), said in
+the viewer's toast (`say`) and the viewer's name put back. The PDF is moved
+through the VIEWER's own handle first (`pdfHandle`), which then follows the
+file, so the viewer's next Save writes the renamed file rather than making the
+old one again; failing that, through the folder's, and the handle that comes
+back is the viewer's from then on. renameDoc answers `{ ok, why, txt, pdf,
+handle }`, and reopens the document only where it was the one being read. A
+PDF open in PDF mode keeps its frame, unsaved changes and all, under its new
+name (`pmRenamed`; `pmTakeList({ sameFolder })` drops only the frames of PDFs
+no longer in the list). Tests: `test-rename-doc.mjs` 9–12 (PDF mode, a PDF
+with no export, a refusal said in the viewer, a viewer beside the reader).
+
 **The panels' rail** (`#side-rail`) replaced the tab strip across the head
 of `#side`, which had grown to five tabs and a chevron and cut their names
 short. As in the PDF viewer, a button per panel stands down the right edge

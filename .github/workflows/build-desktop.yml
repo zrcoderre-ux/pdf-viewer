@@ -65,6 +65,10 @@ jobs:
           npm init -y > /dev/null
           npm install --no-audit --no-fund playwright@1.56.1
 
+      - name: A window manager for xvfb (PDF+ opens maximized, which needs one on Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q openbox
+
       - name: Assemble the app
         run: node desktop/assemble.mjs
 

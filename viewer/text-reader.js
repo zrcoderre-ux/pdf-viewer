@@ -4076,18 +4076,27 @@ function moveStored(from, to) {
     localStorage.removeItem(from);
   } catch { /* no storage: nothing was kept under it */ }
 }
-async function renameDoc(m, typed) {
+/**
+ * Rename document `m` (a reel member, or { name, d, from } for one of the
+ * folder's documents not open) to `typed`, as it is shown: its export in its
+ * pseudonyms and its PDF with it. → { ok, why, txt, pdf, handle } — `handle`
+ * the PDF's handle under its new name. `pdfHandle` is the handle the PDF is
+ * moved through (the PDF viewer's own, when the rename began there, so the
+ * viewer's handle follows the file), and `say` where the reasons go (the
+ * reader's toast, or the viewer's).
+ */
+async function renameDoc(m, typed, { pdfHandle = null, say = (msg, o) => toast(msg, o) } = {}) {
+  const no = (why, o = { error: true }) => { say(why, o); return { ok: false, why }; };
   const why = await renameBlocked(m);
-  if (why) { toast(`${m.name} is not renamed: ${why}.`, { ms: 7000 }); return; }
+  if (why) return no(`${m.name} is not renamed: ${why}.`, { ms: 7000 });
   const stem = String(typed).replace(/[\r\n\t]+/g, " ").replace(/\.(txt(\.leak)?|pdf)$/i, "")
     .replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
-  if (!stem) return;
+  if (!stem) return { ok: false, why: "" };
   const forward = fwdName();
   const scrub = { forward, rows: key ? PK.boundRows(key) : [] };
   const fake = RD.scrubbedStem(stem, scrub);
   if (!fake || (/^document [0-9a-f]+$/i.test(fake) && !/^document [0-9a-f]+$/i.test(stem))) {
-    toast(`Not renamed: “${stem}” would still carry a real name the key binds once its pseudonyms were put in. Type it in its pseudonyms.`, { error: true, ms: 8000 });
-    return;
+    return no(`Not renamed: “${stem}” would still carry a real name the key binds once its pseudonyms were put in. Type it in its pseudonyms.`, { error: true, ms: 8000 });
   }
   const oldName = m.name, newName = fake + ".txt";
   const oldPdf = pdfForName(oldName);
@@ -4096,27 +4105,35 @@ async function renameDoc(m, typed) {
     const real = rev ? PK.translate(rev, fake).text.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() : fake;
     const pairs = (pdf) => PS.pdfMatcher([pdf], forward)(newName) === pdf;
     newPdf = real && pairs(real + ".pdf") ? real + ".pdf" : fake + ".pdf";
-    if (!pairs(newPdf)) { toast(`Not renamed: ${newPdf} would not be found again as ${newName}'s PDF.`, { error: true }); return; }
+    if (!pairs(newPdf)) return no(`Not renamed: ${newPdf} would not be found again as ${newName}'s PDF.`);
   }
-  if (newName === oldName && (!oldPdf || newPdf === oldPdf)) return;
+  if (newName === oldName && (!oldPdf || newPdf === oldPdf)) return { ok: true, why: "", txt: oldName, pdf: oldPdf, handle: pdfHandle };
   if ((await permissionOf(dirHandle, "readwrite")) !== "granted") {
-    try { if ((await dirHandle.requestPermission({ mode: "readwrite" })) !== "granted") throw new Error("leave to write to " + dirHandle.name + " was not given"); } catch (e) { toast("Not renamed: " + (e.message || e), { error: true }); return; }
+    try { if ((await dirHandle.requestPermission({ mode: "readwrite" })) !== "granted") throw new Error("leave to write to " + dirHandle.name + " was not given"); } catch (e) { return no("Not renamed: " + (e.message || e)); }
   }
   const d = m.d;
   const txtDir = await parentDirOf(d.handle);
   const pdfEntry = oldPdf ? folderPdfs.find((p) => p.name === oldPdf) : null;
   const pdfDir = pdfEntry ? await parentDirOf(pdfEntry.handle) : null;
-  if (!txtDir || (oldPdf && !pdfDir)) { toast(`Not renamed: ${oldName} is not where the folder was read from — read the folder again.`, { error: true }); return; }
+  if (!txtDir || (oldPdf && !pdfDir)) return no(`Not renamed: ${oldName} is not where the folder was read from — read the folder again.`);
   const taken = (newName.toLowerCase() !== oldName.toLowerCase() && await entryExists(txtDir, newName)) ? newName
     : (newPdf && newPdf.toLowerCase() !== oldPdf.toLowerCase() && await entryExists(pdfDir, newPdf)) ? newPdf : "";
-  if (taken) { toast(`Not renamed: there is already a ${taken} in the folder.`, { error: true }); return; }
+  if (taken) return no(`Not renamed: there is already a ${taken} in the folder.`);
 
-  // Where the reading is, to be put back once the document is read again.
-  const at = Math.max(0, readingPage() - (m.from || 0));
-  let txtHandle = d.handle;
+  // Where the reading is, to be put back once the document is read again —
+  // where it is the document being read.
+  const wasOpen = reel.some((x) => x.name === oldName);
+  const at = wasOpen ? Math.max(0, readingPage() - (m.from || 0)) : 0;
+  let txtHandle = d.handle, pdfNow = pdfHandle || (pdfEntry && pdfEntry.handle);
   if (newName !== oldName) txtHandle = await renameEntry(txtDir, d.handle, newName);
   if (newPdf && newPdf !== oldPdf) {
-    try { await renameEntry(pdfDir, pdfEntry.handle, newPdf); } catch (e) {
+    // Through the viewer's own handle first, which then follows the file (a
+    // browser's or PDF+'s); else through the folder's, by move or by copy.
+    let moved = false;
+    if (pdfHandle && typeof pdfHandle.move === "function") {
+      try { await pdfHandle.move(newPdf); moved = true; } catch { /* the folder's way, below */ }
+    }
+    try { if (!moved) pdfNow = await renameEntry(pdfDir, pdfEntry.handle, newPdf); } catch (e) {
       // The pair stays a pair: the export goes back to the name it had.
       if (newName !== oldName) { try { await renameEntry(txtDir, txtHandle, oldName); } catch { /* said below */ } }
       throw new Error(`${oldPdf} could not be renamed (${e.message || e}), so ${oldName} keeps its name`);
@@ -4129,20 +4146,58 @@ async function renameDoc(m, typed) {
   if (newPdf && redactStores.has(oldPdf)) { redactStores.set(newPdf, redactStores.get(oldPdf)); redactStores.delete(oldPdf); }
   for (const set of [seenDocs, confirmedDocs]) if (set.delete(oldName)) set.add(newName);
 
-  // The folder read again, as after a run, and the document opened under its new name.
+  // The folder read again, as after a run, and the document opened under its
+  // new name where it was the one being read.
   forgetPdfs();
   dropReady();
   const found = await adoptFolder(dirHandle, { quiet: true, light: folderLight });
-  if (!found || found.overtaken) return;
-  const nd = folderDocs.find((x) => x.name === newName);
+  const done = { ok: true, why: "", txt: newName, pdf: newPdf || oldPdf, handle: pdfNow };
+  if (newPdf && newPdf !== oldPdf) pmRenamed(oldPdf, newPdf);
+  if (!found || found.overtaken) return done;
+  const nd = wasOpen && folderDocs.find((x) => x.name === newName);
   if (nd && await openFolderDoc(nd)) {
     const cur = reelCurrent();
     const p = doc && doc.pages[(cur ? cur.from : 0) + at];
     if (p && at) goToPageFromList(p);
   }
-  toast(`Renamed to ${newName}` + (newPdf && newPdf !== oldPdf ? `, and its PDF to ${newPdf}` : "") +
+  say(`Renamed to ${newName}` + (newPdf && newPdf !== oldPdf ? `, and its PDF to ${newPdf}` : "") +
     (fake !== stem ? " — the name in its pseudonyms, as PDF-Linker names an export" : "") + ".", { ms: 7000 });
+  return done;
 }
+
+/**
+ * A PDF renamed in the PDF VIEWER (its toolbar's click-to-rename) that is one
+ * of the open case folder's, paired with an export: renamed here instead, the
+ * export with it, as the top bar's rename does (renameDoc) — renamed on its
+ * own it is a PDF no export pairs with, and the reader stops finding it for
+ * side by side and PDF mode. The viewer asks every reader it can reach (PDF
+ * mode's frames are this page's; a split view's and the app's tabs are its
+ * siblings), and a reader whose folder does not hold the file answers null,
+ * leaving the viewer to rename it alone. `handle` is the viewer's own, which
+ * the move goes through so that it follows the file. → renameDoc's answer,
+ * with `say` the viewer's toast.
+ */
+async function renamePdfHere(handle, typed, { say } = {}) {
+  if (!dirHandle || !handle || !folderPdfs.length) return null;
+  let entry = null;
+  // Asked both ways round: a browser's handle cannot compare itself with
+  // PDF+'s (desktop/shim.js), which can compare itself with a browser's.
+  const same = async (a, b) => { try { return !!(a && b && typeof a.isSameEntry === "function" && await a.isSameEntry(b)); } catch { return false; } };
+  for (const p of folderPdfs) {
+    if (p.handle && (await same(p.handle, handle) || await same(handle, p.handle))) { entry = p; break; }
+  }
+  if (!entry) return null;
+  const d = folderDocs.find((x) => !x.combined && !x.md && pdfForName(x.name) === entry.name);
+  if (!d) return null; // a PDF no export pairs with: the viewer renames it alone
+  const m = reel.find((x) => x.name === d.name) || { name: d.name, d, from: 0 };
+  try { return await renameDoc(m, typed, { pdfHandle: handle, say: say || ((msg, o) => toast(msg, o)) }); }
+  catch (e) {
+    const why = "Not renamed: " + (e.message || e);
+    (say || toast)(why, { error: true });
+    return { ok: false, why };
+  }
+}
+window.__textReaderRenamePdf = (handle, typed, opts) => renamePdfHere(handle, typed, opts);
 
 /**
  * A document opened on its own: attach the key of the case folder it sits
@@ -25703,16 +25758,21 @@ function pmDropFrame(name) {
   f.frame.remove();
   pmFrames.delete(name);
 }
-/** A new list of PDFs (another folder): the frames of the old one go, unless that would lose an edit. */
-function pmTakeList() {
+/**
+ * A new list of PDFs (another folder): the frames of the old one go, unless
+ * that would lose an edit. `sameFolder`: the list is this folder's read again
+ * (a PDF renamed, pmRenamed), and only the frames of PDFs no longer in it go.
+ */
+function pmTakeList({ sameFolder = false } = {}) {
   const list = pdfModeList();
   if (list === pmListOf && pmList.length) return true;
   const same = list.length === pmList.length && list.every((p, i) => p.name === pmList[i].name);
   if (!same) {
-    const unsaved = pdfModeUnsaved();
+    const keep = sameFolder ? new Set(list.map((p) => p.name)) : new Set();
+    const unsaved = pdfModeUnsaved().filter((n) => !keep.has(n));
     if (unsaved.length && !confirm(`${unsaved.join(", ")} ${unsaved.length === 1 ? "has" : "have"} unsaved changes in PDF mode from the last folder. Discard them?`)) return false;
-    for (const name of [...pmFrames.keys()]) pmDropFrame(name);
-    pmText.clear();
+    for (const name of [...pmFrames.keys()]) if (!keep.has(name)) pmDropFrame(name);
+    for (const name of [...pmText.keys()]) if (!keep.has(name)) pmText.delete(name);
   }
   pmList = list.slice();
   pmListOf = list;
@@ -25724,6 +25784,23 @@ function pmTakeList() {
     pmPick.appendChild(o);
   });
   return true;
+}
+/**
+ * A PDF of the folder renamed (renameDoc): its frame, still holding the file
+ * through a handle that followed it, is kept under the new name, and PDF mode's
+ * list is the folder's as read again, standing on the PDF it stood on.
+ */
+function pmRenamed(oldPdf, newPdf) {
+  const f = pmFrames.get(oldPdf);
+  if (f) { pmFrames.delete(oldPdf); pmFrames.set(newPdf, f); f.frame.title = newPdf; }
+  pmText.delete(oldPdf);
+  if (pmSplitRec && pmSplitRec.name === oldPdf) pmSplitRec.name = newPdf;
+  if (!pmListOf) return; // PDF mode never opened: its list is made when it is
+  const shown = pmList[pmAt] && pmList[pmAt].name;
+  const want = shown === oldPdf ? newPdf : shown;
+  if (!pmTakeList({ sameFolder: true })) return;
+  pmAt = Math.max(0, pmList.findIndex((p) => p.name === want));
+  pmSyncBar();
 }
 function pmSyncBar() {
   pmPick.value = String(pmAt);
