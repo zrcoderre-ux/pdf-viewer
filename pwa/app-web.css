@@ -308,6 +308,13 @@ body.home-open .tab-view.active { display: none; }
 
 /* Case folders: each with where it was found and what PDF-Linker is doing in it. */
 .case-head-btns { display: flex; gap: 14px; }
+/* A row: the folder (a button that opens it) and, on a run stopped part-way, Take over beside it. */
+.case-row { display: flex; align-items: center; border-bottom: 1px solid var(--c-border); }
+.case-row:last-child { border-bottom: none; }
+.case-row > .case-item { flex: 1; min-width: 0; border-bottom: none; }
+.ci-takeover { flex: none; margin-right: 14px; padding: 4px 10px; border: 1px solid rgba(217, 119, 6, 0.5); border-radius: 999px; background: transparent; color: #d97706; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.ci-takeover:hover, .ci-takeover:focus-visible { background: rgba(234, 179, 8, 0.14); }
+.ci-takeover.armed { background: #d97706; border-color: #d97706; color: #fff; }
 .case-item .ri-icon { color: #eab308; }
 .case-item .ci-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .case-item .ci-main .ri-name { flex: none; }
@@ -321,6 +328,8 @@ body.home-open .tab-view.active { display: none; }
 @media (prefers-reduced-motion: reduce) { .case-item .ci-status.tone-run::before { animation: none; } }
 .case-empty { margin: 0; padding: 12px 14px; color: var(--c-text-3); font-size: 12.5px; }
 @media (max-width: 560px) {
+  .case-row { flex-wrap: wrap; }
+  .ci-takeover { margin: 0 14px 10px 44px; }
   .case-item { flex-wrap: wrap; }
   .case-item .ci-status { max-width: 100%; margin-left: 30px; }
 }

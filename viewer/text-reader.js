@@ -43,6 +43,7 @@ import { createToaPanel } from "./toa.js";
 import { parseXlsx } from "./xlsx-read.js";
 import * as PK from "./pseudo-key.js";
 import * as TD from "./textdoc.js";
+import { folderLauncher, writeRunRequest, awaitPickup } from "./run-request.js";
 import { dressLines as dressRuleLines, fitRuleRows, placeholderIn } from "./rules.js";
 import { dressColumns as dressColumnsOf, undressColumns, alignColumns, charWidth, fitCells, lineMap, faceEm, faceSpace, placeLine, unplaceLine } from "./columns.js";
 // Every caller goes through these two, so the lines the operator has set by
@@ -4858,18 +4859,6 @@ $("forget-folder").addEventListener("click", () => { forgetFolder(); });
 const RERUN_PICKUP_MS = 90000;
 let openingLink = false; // the beforeunload guard stands aside for the link
 let rerunning = false;
-/** The folder's launcher and the folder token it records: { name, token }, or null where it has none. */
-async function folderLauncher(dir) {
-  for (const stem of TD.LAUNCHER_STEMS) {
-    for (const ext of [".bat", ".command"]) {
-      let fh;
-      try { fh = await dir.getFileHandle(stem + ext); } catch { continue; }
-      try { return { name: stem + ext, token: TD.launcherFolderToken(await (await fh.getFile()).text()) }; }
-      catch { return { name: stem + ext, token: "" }; }
-    }
-  }
-  return null;
-}
 /** Open `url` without leaving the page: an outside program's link (the reader's own guard against leaving is held off for it). */
 function openLink(url) {
   const a = document.createElement("a");
@@ -4882,17 +4871,6 @@ function openLink(url) {
     a.remove();
     setTimeout(() => { openingLink = false; }, 1000);
   }
-}
-async function writeRunRequest(dir, nonce, state) {
-  const fh = await dir.getFileHandle(TD.RUN_REQUEST_FILE, { create: true });
-  const w = await fh.createWritable();
-  await w.write(TD.runRequestText(nonce, state));
-  await w.close();
-}
-/** Whether the request file is gone: PDF-Linker took it, and started the run. */
-async function runRequestTaken(dir) {
-  try { await dir.getFileHandle(TD.RUN_REQUEST_FILE); return false; }
-  catch (e) { return !!(e && e.name === "NotFoundError"); }
 }
 /** Everything this reader holds of the folder, written: true where nothing is left owed. */
 let runNote = "";      // what saveAllForRun left for the run, said as it starts
@@ -5001,13 +4979,7 @@ async function rerunLinker() {
     }
     if (!saved) return; // saveAllForRun, or the save itself, has said why
     toast(`Saved.${runNote} Waiting for PDF-Linker to start on ${dir.name} — if Chrome asks whether to open PDF-Linker, say Open.`, { ms: RERUN_PICKUP_MS });
-    const until = Date.now() + RERUN_PICKUP_MS;
-    let taken = false;
-    while (!(taken = await runRequestTaken(dir)) && Date.now() < until) await new Promise((r) => setTimeout(r, 500));
-    if (!taken) {
-      try { await dir.removeEntry(TD.RUN_REQUEST_FILE); }
-      catch (e) { taken = !!(e && e.name === "NotFoundError"); } // taken at the last moment
-    }
+    const taken = await awaitPickup(dir, RERUN_PICKUP_MS);
     // Home is told at once that the run has started, not when PDF-Linker's
     // ETA marker turns up a look or two later (app-web.js, "textreader:run").
     if (taken && window.parent !== window) {

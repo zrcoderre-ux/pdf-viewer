@@ -174,16 +174,18 @@ const RUN_START_SLACK_MS = 60000;
  * The status Home shows for a folder whose re-run started at `startedAt`:
  * { status, keep } — `status` folderStatus's own answer once the run's ETA
  * (or a DONE) newer than the start is there, or after RUN_START_WAIT_MS,
- * with `keep` false; until then a "starting" status, `keep` true.
+ * with `keep` false; until then a "starting" status, `keep` true. `how` is
+ * "takeover" for a start from Home's Take over (app-web.js, takeOverRun),
+ * which the status carries so the row says so.
  */
-export function withRunStart(st, startedAt, now) {
+export function withRunStart(st, startedAt, now, how = "rerun") {
   if (!startedAt || now - startedAt > RUN_START_WAIT_MS) return { status: st, keep: false };
   // The ETA may be stamped a moment before the start was heard; a DONE never
   // is (the last run's DONE, a minute old, is not this run finishing).
   const since = st && st.state === "done" ? startedAt + 1 : startedAt - RUN_START_SLACK_MS;
   if (st && /^(running|stalled|done)$/.test(st.state) && typeof st.at === "number" && st.at >= since) return { status: st, keep: false };
   const base = st || { leaks: false, held: 0, key: false };
-  return { status: { ...base, state: "starting", label: "", at: startedAt }, keep: true };
+  return { status: { ...base, state: "starting", label: "", at: startedAt, how }, keep: true };
 }
 
 // A case folder whose run has stood finished and clean this long is opened in
@@ -242,6 +244,13 @@ export function statusText(st, now) {
   const tail = extras.length ? " · " + extras.join(" · ") : "";
   switch (st.state) {
     case "starting":
+      if (st.how === "takeover") {
+        return {
+          text: "Taken over — waiting for its ETA",
+          title: `Take over asked PDF-Linker at ${whenText(st.at, now)} to end the run that stopped part-way and start the folder's Re-run PDF-Linker. Its ETA shows here as soon as the new run writes it; pdf_linker.log says what was ended.`,
+          tone: "run",
+        };
+      }
       return {
         text: "Re-run started — waiting for its ETA",
         title: `Re-run PDF-Linker started the run at ${whenText(st.at, now)}. Its ETA shows here as soon as PDF-Linker writes it.`,
@@ -258,7 +267,7 @@ export function statusText(st, now) {
     case "stalled":
       return {
         text: `Stopped part-way? ETA ${st.label}`,
-        title: `Neither the ETA file nor pdf_linker.log has been written for ${agoText(now - (st.alive || st.at)).replace(/ ago$/, "")}${projectedFinish(st.label, st.at) ? ", and the finish it projected has passed" : ""}: a run that stopped part-way leaves its ETA file behind. pdf_linker.log in the folder says how it ended.`,
+        title: `Neither the ETA file nor pdf_linker.log has been written for ${agoText(now - (st.alive || st.at)).replace(/ ago$/, "")}${projectedFinish(st.label, st.at) ? ", and the finish it projected has passed" : ""}: a run that stopped part-way leaves its ETA file behind. pdf_linker.log in the folder says how it ended. Take over ends the run if it is still holding the folder and starts it again; what it finished stays done.`,
         tone: "warn",
       };
     case "done":

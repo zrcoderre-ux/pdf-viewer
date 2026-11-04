@@ -148,6 +148,12 @@ console.log("4b. a re-run the reader has just started (withRunStart)");
   check("…a DONE after it: finished already", withRunStart(folderStatus({ files: [f("DONE 3.12PM.txt", 0)] }, NOW), NOW - MIN, NOW).status.state, "done");
   check("…the last run's DONE, written a moment before the start, does not", withRunStart(folderStatus({ files: [f("DONE 3.10PM.txt", 2 * MIN)] }, NOW), NOW - MIN, NOW).status.state, "starting");
   check("…never confirmed: let go after the wait", withRunStart(lastDone, NOW - RUN_START_WAIT_MS - MIN, NOW), { status: lastDone, keep: false });
+  // Home's Take over, on a run stopped part-way: its ETA stays until the new run's replaces it.
+  const stalled = folderStatus({ files: [f("ETA ~2.10PM (2 of 9).txt", 60 * MIN)] }, NOW);
+  const took = withRunStart(stalled, NOW - MIN, NOW, "takeover");
+  check("a take over: the stuck run's ETA still standing, shown as taken over",
+    [took.status.state, took.keep, statusText(took.status, NOW).text], ["starting", true, "Taken over — waiting for its ETA"]);
+  check("…the stalled row's hover offers it", /Take over ends the run/.test(statusText(stalled, NOW).title), true);
 }
 
 // ── the list in the app ──────────────────────────────────────────────────────
@@ -251,7 +257,7 @@ async function browserPart() {
     check("the link now changes Downloads", await shell.textContent("#case-downloads"), "Change Downloads folder…");
 
     console.log("7. a click opens the whole folder in one reader");
-    await shell.click("#case-list .case-item:nth-child(2)");
+    await shell.click("#case-list .case-row:nth-child(2) .case-item");
     await shell.waitForFunction(() => document.querySelectorAll("iframe.tab-view").length === 1, null, { timeout: 15000 });
     const reader = await (async () => { for (let k = 0; k < 100; k++) { const fr = shell.frames().find((x) => x.url().endsWith("/viewer/text-reader.html")); if (fr) return fr; await shell.waitForTimeout(100); } return null; })();
     await reader.waitForFunction(() => { const s = window.__textReaderSource && window.__textReaderSource(); return !!(s && s.dir && s.handle); }, null, { timeout: 20000 });
@@ -347,6 +353,53 @@ async function browserPart() {
       db.close();
       return n;
     }), 0);
+    console.log("14. a run stopped part-way: Take over asks PDF-Linker to end it and run again");
+    await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const put = async (d, name, data) => { const w = await (await d.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); };
+      const gamma = await dl.getDirectoryHandle("Case Gamma", { create: true });
+      await put(gamma, "Complaint.pdf", "%PDF-1.4 stand-in");
+      await put(gamma, "ETA (estimating...).txt", "");
+      await put(gamma, "Re-run PDF-Linker.bat", "@echo off\r\nREM Folder, for the text reader's Re-run button: QzpcQ2FzZSBHYW1tYQ\r\n");
+      // Two hours on: nothing in Case Gamma has been written since.
+      const real = Date.now.bind(Date);
+      Date.now = () => real() + 2 * 3600000;
+      // The pdf-linker: link, kept rather than handed to the system.
+      window.__links = [];
+      document.addEventListener("click", (e) => {
+        const a = e.target.closest && e.target.closest("a[href^='pdf-linker:']");
+        if (a) { window.__links.push(a.getAttribute("href")); e.preventDefault(); }
+      }, true);
+      // PDF-Linker's half: take the request file and keep what it said.
+      window.__request = null;
+      const poll = setInterval(async () => {
+        try {
+          const fh = await gamma.getFileHandle("PDF-Linker Run Request.json");
+          window.__request = JSON.parse(await (await fh.getFile()).text());
+          await gamma.removeEntry("PDF-Linker Run Request.json");
+          clearInterval(poll);
+        } catch { /* not yet */ }
+      }, 200);
+      window.dispatchEvent(new Event("focus"));
+    });
+    const gammaRow = "#case-list .case-row:has(.ri-name:text-is('Case Gamma'))";
+    await shell.waitForSelector(`${gammaRow} .ci-takeover`, { timeout: 10000 });
+    check("the row says stopped part-way, with Take over beside it",
+      [(await shell.textContent(`${gammaRow} .ci-status`)).startsWith("Stopped part-way?"), await shell.textContent(`${gammaRow} .ci-takeover`)], [true, "Take over"]);
+    check("…and no other row offers it", await shell.$$eval("#case-list .ci-takeover", (bs) => bs.length), 1);
+    const readers = await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length);
+    await shell.click(`${gammaRow} .ci-takeover`);
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .ci-takeover")].some((b) => b.dataset.armed), null, { timeout: 5000 });
+    check("the first click only asks again", [await shell.textContent(`${gammaRow} .ci-takeover`), await shell.evaluate(() => [window.__links.length, window.__request])], ["Click again to end it", [0, null]]);
+    check("…and opens no reader", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), readers);
+    await shell.click(`${gammaRow} .ci-takeover`);
+    await shell.waitForFunction(() => window.__request !== null, null, { timeout: 10000 });
+    const req = await shell.evaluate(() => window.__request);
+    const link = await shell.evaluate(() => window.__links[0] || "");
+    check("the second asks PDF-Linker to take over, by the launcher's folder token and one nonce",
+      [req.state, link.startsWith("pdf-linker://run?f=QzpcQ2FzZSBHYW1tYQ&d=Case%20Gamma&n="), link.endsWith("&n=" + req.nonce)], ["takeover", true, true]);
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-row")].some((r) => r.querySelector(".ri-name").textContent === "Case Gamma" && r.querySelector(".ci-status").textContent.startsWith("Taken over")), null, { timeout: 10000 });
+    check("…and the row says so until the new run's ETA", [await shell.textContent(`${gammaRow} .ci-status`), await shell.$$eval("#case-list .ci-takeover", (bs) => bs.length)], ["Taken over — waiting for its ETA", 0]);
     check("no page errors", errors, []);
     await app.close();
   } finally {

@@ -3730,6 +3730,13 @@ export function runMarker(name) {
  * nonce into `RUN_REQUEST_FILE` in that folder: the save's "go", and the proof
  * that the page asking holds the folder. The tag, the token's alphabet, the
  * link and the file's fields change only in step with PDF-Linker.
+ *
+ * Home's "Take over" on a run that stopped part-way (pwa/app-web.js,
+ * takeOverRun) sends the same link and writes "takeover" in place of "go":
+ * PDF-Linker (`_serve_reader_request`, since 2026-11-04) then ends the run
+ * still holding the folder, if one does and it has written nothing for ten
+ * minutes, and starts the launcher as for "go". A PDF-Linker from before
+ * reads "takeover" as "cancel" and starts nothing.
  */
 export const RUN_REQUEST_FILE = "PDF-Linker Run Request.json";
 export const LAUNCHER_STEMS = ["Re-run PDF-Linker", "Run PDF-Linker"];
@@ -3744,7 +3751,7 @@ export function launcherFolderToken(text) {
 export function rerunUrl(token, folderName, nonce) {
   return `pdf-linker://run?f=${token}&d=${encodeURIComponent(folderName || "")}&n=${nonce}`;
 }
-/** The request file's text: `go` once everything is saved, `cancel` where a save did not finish. */
+/** The request file's text: `go` once everything is saved, `cancel` where a save did not finish, `takeover` from Home's Take over. */
 export function runRequestText(nonce, state) {
   return JSON.stringify({ nonce, state }) + "\n";
 }

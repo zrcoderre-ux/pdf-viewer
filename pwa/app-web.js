@@ -1187,7 +1187,7 @@ async function todayInDownloads(dl, now) {
 
 // Re-runs a reader has just started ("textreader:run"), shown as started until
 // the folder's own ETA says so (case-folders.js, withRunStart).
-const runsStarted = []; // [{ handle, name, at }]
+const runsStarted = []; // [{ handle, name, at, how }]: how "rerun" (a reader's) or "takeover" (Home's)
 const RUN_START_RECHECK_MS = 3000; // looked at this often while one waits for its ETA
 /** The start a row's folder is waiting on, or null. */
 async function runStartFor(row) {
@@ -1262,7 +1262,7 @@ async function renderCaseFoldersNow() {
     r.activity = Math.max(r.activity || 0, r.listing ? caseLib.lastActivity(r.listing) : 0);
     const start = runsStarted.length && !r.locked ? await runStartFor(r) : null;
     if (start) {
-      const { status, keep } = caseLib.withRunStart(r.status, start.at, now);
+      const { status, keep } = caseLib.withRunStart(r.status, start.at, now, start.how);
       r.status = status;
       if (!keep) runsStarted.splice(runsStarted.indexOf(start), 1);
     }
@@ -1298,6 +1298,8 @@ async function renderCaseFoldersNow() {
     return;
   }
   for (const { r, st, where } of say) {
+    const row = document.createElement("div");
+    row.className = "case-row";
     const b = document.createElement("button");
     b.className = "recent-item case-item";
     b.innerHTML = `<span class="ri-icon">${icon("folder", { size: 18 })}</span><span class="ci-main"><span class="ri-name"></span><span class="ci-where"></span></span><span class="ci-status"></span>`;
@@ -1313,7 +1315,110 @@ async function renderCaseFoldersNow() {
       try { await openCaseFolder(r.handle); }
       catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
-    listEl.appendChild(b);
+    row.appendChild(b);
+    if (!r.locked && r.status && r.status.state === "stalled") row.appendChild(takeOverButton(r));
+    listEl.appendChild(row);
+  }
+}
+
+// ---- Home: take over a run that stopped part-way -----------------------------
+//
+// The owner (2026-11-04): "an easy way to do a takeover run in pdf linker when
+// the previous run is hung, as evidenced by the stopped part way check in
+// pdf+'s home screen". PDF-Linker's own launchers never take over (a second
+// double-click on a folder in flight is more often a misclick than a
+// decision, and it costs the run its file and its pre-scan), so a stuck run
+// was ended only by the command line pdf_linker.log names. Here the button
+// stands only on a row Home already reads as stopped part-way (folderStatus's
+// "stalled": nothing written for RUN_STALE_MS and past its projected finish),
+// and asks a second click before it acts. It goes the way the reader's Re-run
+// goes (run-request.js; textdoc.js, "THE RE-RUN BUTTON"): the folder's
+// launcher's `pdf-linker:` link, then the request file, saying "takeover" in
+// place of "go". PDF-Linker (`_serve_reader_request`) ends the run still
+// holding the folder, unless the run has written its ETA marker or log in the
+// last ten minutes, and starts the folder's Re-run PDF-Linker. The row then
+// says "Taken over" until the new run's ETA is there (withRunStart).
+const TAKEOVER_ARM_MS = 6000;     // the second click must come this soon
+const TAKEOVER_PICKUP_MS = 90000; // PDF-Linker has this long to take the request
+let takingOver = false;
+let openingAppLink = false;       // the beforeunload guard stands aside for the link
+function takeOverButton(r) {
+  const t = document.createElement("button");
+  t.className = "ci-takeover";
+  t.textContent = "Take over";
+  t.title = `End the PDF-Linker run that seems stuck on ${r.name} and start it again from the folder's Re-run PDF-Linker. What it finished stays done; the file it was on is redone.`;
+  t.addEventListener("click", (e) => { e.stopPropagation(); takeOverRun(r, t); });
+  return t;
+}
+function disarm(btn) {
+  clearTimeout(btn._armT);
+  delete btn.dataset.armed;
+  btn.classList.remove("armed");
+  btn.textContent = "Take over";
+}
+/** Open an outside program's link (pdf-linker:) without leaving Home. */
+function openAppLink(url) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.rel = "noopener";
+  a.hidden = true;
+  document.body.appendChild(a);
+  openingAppLink = true;
+  try { a.click(); } finally {
+    a.remove();
+    setTimeout(() => { openingAppLink = false; }, 1000);
+  }
+}
+async function takeOverRun(r, btn) {
+  if (takingOver) return;
+  const dir = r.handle;
+  if (!btn.dataset.armed) {
+    // The leave to write into the folder is asked on the first click, so the
+    // second still counts as a click: Chrome opens an outside program only on one.
+    if (!(await permitted(dir, "readwrite", true))) { shellToast(`Not taken over: PDF+ may not write into ${r.name}.`, 6000); return; }
+    btn.dataset.armed = "1";
+    btn.classList.add("armed");
+    btn.textContent = "Click again to end it";
+    btn._armT = setTimeout(() => disarm(btn), TAKEOVER_ARM_MS);
+    return;
+  }
+  disarm(btn);
+  takingOver = true;
+  try {
+    const lib = await import("./viewer/run-request.js");
+    const TD = await import("./viewer/textdoc.js");
+    // Looked at afresh: a run that has written since the last look is alive.
+    let st = null;
+    try { st = caseLib.folderStatus(await readListing(dir), Date.now()); } catch { st = null; }
+    if (!st || st.state !== "stalled") {
+      shellToast(`${r.name} no longer looks stopped part-way, so nothing was ended.`, 6000);
+      renderCaseFolders();
+      return;
+    }
+    const launcher = await lib.folderLauncher(dir);
+    if (!launcher) { shellToast(`${r.name} has no Re-run PDF-Linker launcher, so PDF+ cannot reach PDF-Linker for it. pdf_linker.log in the folder names the command line that takes the run over.`, 12000); return; }
+    if (!launcher.token) {
+      shellToast(`${launcher.name} in ${r.name} was written by a PDF-Linker from before the Re-run button, so it does not say where the folder is. pdf_linker.log in the folder names the command line that takes the run over.`, 12000);
+      return;
+    }
+    const nonce = crypto.randomUUID();
+    openAppLink(TD.rerunUrl(launcher.token, dir.name, nonce));
+    try { await lib.writeRunRequest(dir, nonce, "takeover"); }
+    catch (e) { shellToast(`Not taken over: PDF+ could not write ${TD.RUN_REQUEST_FILE} into ${r.name} (${e.message || e}).`, 9000); return; }
+    shellToast(`Asking PDF-Linker to take over ${r.name} — if the browser asks whether to open PDF-Linker, say Open.`, TAKEOVER_PICKUP_MS);
+    const taken = await lib.awaitPickup(dir, TAKEOVER_PICKUP_MS);
+    if (!taken) {
+      shellToast(`PDF-Linker did not answer, so nothing was ended. If this computer has not been set up for the Re-run button, double-click Register Reader Button.bat in the PDF-Linker folder once; pdf_linker.log in ${r.name} names the command line that takes the run over by hand.`, 15000);
+      return;
+    }
+    for (let i = runsStarted.length - 1; i >= 0; i--) {
+      try { if (runsStarted[i].name === dir.name && (await runsStarted[i].handle.isSameEntry(dir))) runsStarted.splice(i, 1); } catch { /* gone */ }
+    }
+    runsStarted.push({ handle: dir, name: dir.name, at: Date.now(), how: "takeover" });
+    shellToast(`PDF-Linker is taking over ${r.name}: it ends the stuck run and starts Re-run PDF-Linker. pdf_linker.log says what it did.`, 9000);
+    renderCaseFolders();
+  } finally {
+    takingOver = false;
   }
 }
 function scheduleCaseRecheck() {
@@ -1353,7 +1458,7 @@ window.addEventListener("message", async (e) => {
   for (let i = runsStarted.length - 1; i >= 0; i--) {
     try { if (runsStarted[i].name === dir.name && (await runsStarted[i].handle.isSameEntry(dir))) runsStarted.splice(i, 1); } catch { /* gone */ }
   }
-  runsStarted.push({ handle: dir, name: dir.name, at: Date.now() });
+  runsStarted.push({ handle: dir, name: dir.name, at: Date.now(), how: "rerun" });
   if (!dropzone.hidden) renderCaseFolders();
 });
 // A reader tab says which case folder it attached, however it came to it.
@@ -1373,6 +1478,7 @@ setInterval(() => {
   for (const t of tabs) t.btn.classList.toggle("dirty", tabHasUnsaved(t));
 }, 1500);
 window.addEventListener("beforeunload", (e) => {
+  if (openingAppLink) return; // a pdf-linker: link, which leaves Home where it is (takeOverRun)
   if (tabs.some(tabHasUnsaved)) { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("keydown", (e) => {
