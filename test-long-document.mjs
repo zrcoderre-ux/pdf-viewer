@@ -9,7 +9,12 @@
 // page level with its PDF page; a page typed in kept built and its edit saved,
 // the rest of the file byte for byte; a resize not building the whole of it;
 // Find counting the hits on pages not built, standing on them, Replace on one;
-// and the folder's other, ordinary documents beside it.
+// and the folder's other, ordinary documents beside it. Then the review
+// ("a long document under the review"): the names in the clear counted on
+// pages not built, the LEAKS row on a far page landing at once, the names walk
+// opened from the count and walked into the long document from a short one,
+// every name counted and stood on, fake it and the save, and scrolling under
+// the review — each with only the pages it reads built.
 //
 // Run: node test-long-document.mjs   (from the repo root)
 //
@@ -101,6 +106,25 @@ wb.save(sys.argv[1])
 }
 const KEY_BYTES = buildKey([
   ["person", "Corwin Ashdale", "Tobias Wrenfield", "", "", "spreadsheet", 4],
+  ["entity", "Pellmont Motors", "Quarrow Motors", "", "", "spreadsheet", 2],
+]);
+// The LEAKS worksheet, one row a value the key does not bind, on pages of the
+// long document far apart.
+function buildLeaks(rows) {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "long-doc-")), "LEAKS.xlsx");
+  const py = `
+import json, sys, openpyxl
+wb = openpyxl.Workbook(); ws = wb.active; ws.title = "LEAKS"
+ws.append(["Value", "Fix? (yes/no)", "Context", "File", "Type", "Where (page:line)", "Notes"])
+for r in json.loads(sys.argv[2]): ws.append(r)
+wb.save(sys.argv[1])
+`;
+  execFileSync("python3", ["-I", "-c", py, out, JSON.stringify(rows)]);
+  return fs.readFileSync(out);
+}
+const LEAKS_BYTES = buildLeaks([
+  ["Gravenor", "", "Gravenor signed.", "B Depo.pdf", "LEAK", "p.10", ""],
+  ["Halloway", "", "Halloway said.", "B Depo.pdf", "LEAK", "p.330", ""],
 ]);
 
 const CASE = "Case Long";
@@ -307,6 +331,131 @@ async function run() {
     await p.waitForFunction(() => document.querySelectorAll("#pages .tpage").length === 5, null, { timeout: 15000 });
     check("an ordinary document after it: five pages, every one built", (await state()).live, 5);
     check("no page errors", errors, []);
+    await context.close();
+
+    // ── the review ─────────────────────────────────────────────────────────
+    console.log("the review over a long document");
+    const NAMED = Array.from({ length: PAGES / 50 }, (_, k) => (k + 1) * 50); // a real name in the clear on pages 50, 100, … 400
+    const extra = { 10: "Gravenor signed the notice.", 330: "Halloway said so." };
+    const REVIEWED = Array.from({ length: PAGES }, (_, k) => `====== Page ${k + 1} ======\n` + Array.from({ length: 28 }, (_, j) => String(j + 1).padStart(2) + "  "
+      + (j === 4 && extra[k + 1] ? extra[k + 1] : j === 6 && (k + 1) % 50 === 0 ? `Corwin Ashdale was asked on page ${k + 1}.` : `Deposition page ${k + 1} line ${j + 1}, Tobias Wrenfield testified.`)).join("\n")).join("\n") + "\n";
+    const ctx2 = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    const q = await ctx2.newPage();
+    const errs = [];
+    q.on("pageerror", (e) => errs.push(e.message));
+    q.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) errs.push("console: " + m.text()); });
+    q.on("dialog", (d) => d.accept().catch(() => {}));
+    await q.goto(srv.base + "/viewer/text-reader.html");
+    await q.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc);
+    await q.evaluate(async ({ T, A, keyBytes, leaksBytes, PAGES }) => {
+      const top = await navigator.storage.getDirectory();
+      try { await top.removeEntry("Case Long Review", { recursive: true }); } catch { /* none yet */ }
+      const dir = await top.getDirectoryHandle("Case Long Review", { create: true });
+      const put = async (d, name, data) => { const w = await (await d.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); };
+      await put(dir, "pseudonym_key.xlsx", new Uint8Array(keyBytes));
+      await put(dir, "LEAKS.xlsx", new Uint8Array(leaksBytes));
+      const text = await dir.getDirectoryHandle("Text Files", { create: true });
+      await put(text, "A Brief.txt", A);
+      await put(text, "B Depo.txt", T);
+      const { PDFDocument, StandardFonts } = await import("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js");
+      const mk = async (name, n, line) => {
+        const pdf = await PDFDocument.create();
+        const font = await pdf.embedFont(StandardFonts.TimesRoman);
+        for (let k = 0; k < n; k++) { const pg = pdf.addPage([612, 792]); for (let j = 0; j < 28; j++) pg.drawText(line(k, j), { x: 72, y: 720 - j * 22, size: 11, font }); }
+        await put(dir, name, await pdf.save());
+      };
+      await mk("B Depo.pdf", PAGES, (k, j) => `${j + 1}  Deposition page ${k + 1} line ${j + 1}.`);
+      await mk("A Brief.pdf", 5, (k, j) => `A Brief page ${k + 1}, line ${j + 1}.`);
+      window.__dir = dir;
+      await window.__textReaderAdoptFolder(dir);
+    }, { T: REVIEWED, A: SHORT("A Brief").replace("A Brief page 2, line 3.", "Pellmont Motors was named."), keyBytes: Array.from(KEY_BYTES), leaksBytes: Array.from(LEAKS_BYTES), PAGES });
+    // Each document on its own: the walk goes from one into the other.
+    await q.evaluate(() => { const t = document.getElementById("reel-toggle"); if (t && t.checked) { t.checked = false; t.dispatchEvent(new Event("change")); } });
+    const rv = () => q.evaluate(() => ({
+      live: document.querySelectorAll("#pages .tpage:not(.shed)").length,
+      st: document.getElementById("st-leaks").textContent,
+      nb: document.getElementById("nb-value").textContent + " " + document.getElementById("nb-count").textContent,
+      lb: document.getElementById("lb-inst").textContent,
+    }));
+    const mark = () => q.evaluate(() => {
+      const h = CSS.highlights.get("leakrow-here"), r = h && [...h][0];
+      if (!r) return null;
+      const el = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+      const st = document.getElementById("stage").getBoundingClientRect(), b = r.getBoundingClientRect();
+      return { text: r.toString(), page: Number(el.closest(".tpage").dataset.index) + 1, onScreen: b.top >= st.top && b.bottom <= st.bottom };
+    });
+    const closeLeaks = () => q.evaluate(() => { if (!document.getElementById("leaks-bar").hidden) document.getElementById("lb-close").click(); });
+
+    await q.evaluate((n) => window.__textReaderOpenDoc(n), "B Depo.txt");
+    await q.waitForFunction((n) => document.querySelectorAll("#pages .tpage").length === n, PAGES, { timeout: 30000 });
+    await q.waitForFunction(() => /standing unfaked/.test(document.getElementById("st-leaks").textContent), null, { timeout: 20000 });
+    await q.waitForTimeout(1500);
+    let r2 = await rv();
+    check(`no bar up: the status counts all ${NAMED.length} names in the clear, on pages not built`, [new RegExp(`^⚠ ${NAMED.length} real names`).test(r2.st), r2.live < 40], [true, true]);
+
+    // A LEAKS row on a page far down: its page built, and the row stood on.
+    await q.evaluate(() => window.__textReaderGoToLeak(1));
+    await q.waitForFunction(() => /instance/.test(document.getElementById("lb-inst").textContent), null, { timeout: 15000 });
+    await q.waitForTimeout(3000);
+    r2 = await rv();
+    check("a LEAKS row on page 330: stood on there, on screen", [await mark(), r2.lb], [{ text: "Halloway", page: 330, onScreen: true }, "· instance 1 of 1 · Page 330:5"]);
+    check("…only the pages the review reads built", r2.live < 50, true);
+    await q.evaluate(() => window.__textReaderGoToLeak(0));
+    await q.waitForTimeout(3000);
+    check("…and the row on page 10", (await mark()) || {}, { text: "Gravenor", page: 10, onScreen: true });
+    await closeLeaks();
+
+    // The names walk from the count: the document's first name, all counted.
+    await q.evaluate(() => document.getElementById("st-leaks").click());
+    await q.waitForFunction((n) => document.getElementById("nb-count").textContent === `1 of ${n}`, NAMED.length, { timeout: 20000 }).catch(() => {});
+    await q.waitForTimeout(2500);
+    check("the count clicked: the walk on the document's first name, every one counted", [(await rv()).nb, await mark()], [`Corwin Ashdale 1 of ${NAMED.length}`, { text: "Corwin Ashdale", page: NAMED[0], onScreen: true }]);
+    const stops = [];
+    for (let k = 1; k < NAMED.length; k++) {
+      await q.evaluate(() => document.getElementById("nb-next").click());
+      await q.waitForTimeout(2500);
+      const m = await mark();
+      stops.push(m && m.onScreen ? m.page : null);
+    }
+    check("…Name › stands on each in turn, on screen", stops, NAMED.slice(1));
+    check("…only the pages the review reads built", (await rv()).live < 50, true);
+    for (let k = 0; k < 12; k++) { await q.mouse.move(300, 500); await q.mouse.wheel(0, -1500); await q.waitForTimeout(200); }
+    await q.waitForTimeout(1500);
+    check("scrolling under the review: still only a few built", (await rv()).live < 60, true);
+    await q.evaluate(() => document.getElementById("nb-close") && document.getElementById("nb-close").click());
+
+    // Into the long document from a short one: the walk waits for its names.
+    await q.evaluate((n) => window.__textReaderOpenDoc(n), "A Brief.txt");
+    await q.waitForFunction(() => /standing unfaked/.test(document.getElementById("st-leaks").textContent), null, { timeout: 20000 });
+    await q.waitForTimeout(1000);
+    await closeLeaks();
+    await q.evaluate(() => document.getElementById("st-leaks").click());
+    await q.waitForTimeout(1500);
+    check("the walk in the short document", (await rv()).nb, "Pellmont Motors 1 of 1");
+    await q.evaluate(() => document.getElementById("nb-next").click());
+    await q.waitForFunction(() => /B Depo/.test(document.title), null, { timeout: 30000 });
+    await q.waitForFunction((n) => document.getElementById("nb-count").textContent === `1 of ${n}`, NAMED.length, { timeout: 30000 }).catch(() => {});
+    await q.waitForTimeout(2500);
+    check("…› into the long one: on its first name, every one counted, not the pages built first", [(await rv()).nb, await mark()], [`Corwin Ashdale 1 of ${NAMED.length}`, { text: "Corwin Ashdale", page: NAMED[0], onScreen: true }]);
+    // Keep just this one: the walk goes straight on to the next, with no
+    // waiting on the document being read again (a keep only takes names out
+    // of the clear), and the count says one fewer.
+    await q.evaluate(() => document.getElementById("nb-here").click());
+    await q.waitForTimeout(600);
+    check("keep just here: on to the next at once, one fewer counted", [(await rv()).nb, ((await mark()) || {}).page], [`Corwin Ashdale 1 of ${NAMED.length - 1} · 1 answered here`, NAMED[1]]);
+    // Fake it, read away, save: every one written as its pseudonym.
+    await q.evaluate(() => document.getElementById("nb-fake").click());
+    await q.waitForTimeout(1500);
+    await q.evaluate(() => { document.getElementById("stage").scrollTop = 0; });
+    await q.waitForTimeout(1500);
+    await q.evaluate(() => document.getElementById("save").click());
+    await q.waitForTimeout(4000);
+    const saved = await q.evaluate(async () => (await (await (await window.__dir.getDirectoryHandle("Text Files")).getFileHandle("B Depo.txt")).getFile()).text());
+    check("fake it and Save: every other name written as its pseudonym, pages not built among them", (saved.match(/Tobias Wrenfield was asked/g) || []).length, NAMED.length - 1);
+    check("…the one kept just there standing as it reads", saved.includes(`Corwin Ashdale was asked on page ${NAMED[0]}.`), true);
+    check("…and nothing else in the file changed", saved.replace(/Tobias Wrenfield was asked/g, "Corwin Ashdale was asked"), REVIEWED);
+    check("no page errors (the review)", errs, []);
+    await ctx2.close();
   } finally {
     await browser.close();
     srv.stop();

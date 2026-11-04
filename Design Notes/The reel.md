@@ -159,12 +159,80 @@ A member longer than `LONG_DOC_PAGES` (150) is shed a page at a time:
   hit's range is a place in a body. Ctrl+F was 11.2 s with every page built
   back for it; it is now a hold of about 0.7 s for the first query (the pages'
   shown text read once).
-- **What still builds every page:** the LEAKS walk, the names walk, the key
-  bar, the redaction tool, Replace all and the save's names-to-fake pass. Each
-  reads or edits page bodies throughout (`reelAllLive`), and on a long document
-  that is the eleven seconds, paid when the tool opens rather than at every
-  open.
+- **What still builds every page:** the key bar, the redaction tool, Replace
+  all, and a save's names-to-fake pass outside a long document (in one, that
+  pass builds only the pages carrying a name in the clear,
+  `buildReviewPagesNow`). Each reads or edits page bodies throughout
+  (`reelAllLive`). The LEAKS and names walks no longer do: below.
 
 Measured on the same folder after: the open 0.7–1.1 s, side by side 0.47 s,
 the longest hold scrolling 145–195 ms, PDF mode unchanged (its viewer was
 already `content-visibility: auto`). `test-long-document.mjs` drives it.
+
+### A long document under the review (`reviewPreload`, `pageReview`)
+
+The LEAKS walk and the names walk read their document off its pages, and both
+had the whole reel built as they opened. On the 1,200-page deposition with a
+worksheet of three rows: 24 s to the first row, the tab held for 4.8 s at a
+time and the row's mark not on screen when it settled, 4.9 s more opening the
+names walk, and holds of up to 358 ms scrolling under the review, every pass
+laying out all twelve hundred pages. Building them in batches would have ended
+the freeze and kept the last of those, so the review builds what it reads:
+
+- **A page not built is read off its text** (`pageReview`, kept per page while
+  its lines, the key, the flags and the keeps stay): the real names from the
+  key in the clear and the flagged values standing in the clear, by
+  `textdoc.clearReading` over that one page (the folder sweep's reading of a
+  file, which is the page's own by construction), and the kept values the
+  master's list asks about. Spot keeps are not subtracted, so the answer is
+  never short of what the page built would say.
+- **The marks pass reads them too** (`scanPassNow`, after the bodies): the
+  names in the clear on pages not built go into `shedLeakHits`, the flags into
+  the Documents list's counts and the kept values into what the master's list
+  sees. So the status bar's count is the document's, not the dozen pages built
+  (the page-by-page shedding had left it counting only those, and with none
+  near the reading the count was empty and could not start the walk), and
+  `settledInTheClear` and `decidedOwed` light the save for a name said to be
+  faked on a page not built.
+- **The review's pages are built in batches** (`reviewPreload`). With either
+  bar up over a reel holding a long document, the pages not built are asked
+  `pageNeedsReview` nearest the reading first, and those carrying something are
+  built `REVIEW_BATCH` (8) at a time on the idle clock, the reading held
+  through each (`keepReadingOver`) and the pages shaped once a second rather
+  than at every batch. It starts as a bar opens, and again from
+  `paintHighlights` whenever its answer is stale (a new document, key, flag or
+  keep: `reviewKey`). Under the review the trim still builds and lets go of
+  pages with the reading, but never one the review reads, one a mark stands in
+  (`reviewHitSections`), or the row in front's (`rowHold`).
+- **The document is not read until the batches are in and read**
+  (`reviewPending`, in `readHere`). A count made of part of the document would
+  send the walk out of it early: walking in from a short document, the bar
+  stood on "1 of 4" and ran off the end of the four into the next document.
+  `reviewPre.painted` is set only by a marks pass begun after the last batch
+  went up. A step off the end, or the walk's first stop, waits
+  (`awaitReviewPages`: the names bar opened if it is not, a page with a name
+  still not built built at once) and is taken from `renderLeakStatus` once the
+  reading is in (`stepAfterReview`); the bar says "+ (reading the rest)" in the
+  meantime. After each pass the walk is put back on the name it stands on, by
+  its range, since pages built above it put names before it in the count.
+- **The row in front is built where its value stands** (`buildRowPages`, from
+  `locateLeak` after its document is open): a page whose text has the value as
+  a whole word, or a name wrapped over its line with its first and last words
+  on it; inside a word only where no page has it whole, as `rowRanges` reads
+  it; nearest the row's Where first, `ROW_PAGES_MAX` (150) at most. A value
+  standing inside a pseudonym is the faked occurrence there, and the file
+  carries the fake, so the text as the file has it is the right one to read.
+- **One preload loop fix worth remembering**: `paintHighlights` starts a
+  preload only where the batches are not in (`reviewPreloaded`), never where
+  only the reading after them is owed. Asking on `reviewPending` started a new
+  preload at every paint, each one cleared `painted`, and the walk waited for
+  ever on "reading the rest".
+
+Measured on the same folder after: the first LEAKS row's longest hold 120–148
+ms (was 4.8 s, and 24 s to land), rows on pages 600 and 1150 under 100 ms,
+opening the names walk at most 135–201 ms (was 4.9 s of holds), stepping it
+under 110 ms, scrolling under the review at most 80–99 ms (was 358 ms), about
+twenty pages built where it was all twelve hundred. `test-long-document.mjs`
+drives the review on a 400-page document: the count with no bar up, a LEAKS row
+on a far page, the walk from the count and into the long document from a short
+one, every name stood on in turn, and fake it with the save writing every one.
