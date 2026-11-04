@@ -4630,6 +4630,7 @@ function openText(text, name, handle, built, { stash = null, d = null, base = nu
   if (stash) {
     // Unsaved, as it was left, and out of the store: its text is on the reel now.
     stash.built.forEach((t, k) => { const b = bodyForPage(k); if (b && t != null) b.__built = t; });
+    reel[0].built = stash.built.slice(); // …and for a page of a long one built later (buildShedSections)
     reel[0].dirty = true;
     reel[0].conflict = !!stash.conflict;
     dirty = true;
@@ -5290,7 +5291,7 @@ document.addEventListener("drop", (e) => {
  * them, so a long document can go up a piece at a time without the page
  * going unresponsive; `theirSpots` are that document's own spot keeps.
  */
-function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpots = null, editable = false } = {}) {
+function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpots = null, editable = false, live = null } = {}) {
   const fixedSrc = into === pagesEl && doc && textFixed.length ? docPageSources() : null;
   for (let i = from; i < to; i++) {
     const p = pages[i];
@@ -5395,30 +5396,46 @@ function buildPages(into, pages, { from = 0, to = pages.length, spots: theirSpot
     }
     const inner = document.createElement("div");
     inner.className = "page-inner";
-    const body = document.createElement("div");
-    body.className = "page-body";
-    body.contentEditable = editable ? "plaintext-only" : "false";
-    body.spellcheck = false;
-    // The margin numbers put back on this page (readExport), marked as the
-    // body is built — and built again, since the body element stays.
-    body.__restored = p.restored ? new Set(p.restored) : null;
-    if (sec.classList.contains("condensed")) body.classList.add("condensed");
-    // A page asked for as ✓ Use my text is built free of the PDF (setFree).
-    if (fixedSrc && pages[i] === doc.pages[i]) {
-      const e = pageEntryAt(i, fixedSrc);
-      if (e && textFixed.some((x) => TD.sameNoOcr(x, e))) {
-        body.classList.add("free");
-        const kept = readFreeFrom()[`${valuesStoreKey()}|${e.doc}|${e.page}`];
-        body.__freeFrom = Array.isArray(kept) ? kept : p.lines.slice();
-      }
-    }
-    buildBody(body, p.lines.join("\n"), i, theirSpots);
-    const layer = document.createElement("div");
-    layer.className = "link-layer";
-    inner.append(body, layer);
+    // A long document goes up with only the pages near the reading built;
+    // the rest stand as shed sheets of the height a built page has, and are
+    // built as the reading comes near them (reelTrim, "a long document by the
+    // page").
+    if (live && (i < live[0] || i >= live[1])) shellPage(sec);
+    else fillPageInner(inner, sec, p, i, { spots: theirSpots, editable, fixedSrc: fixedSrc && pages[i] === doc.pages[i] ? fixedSrc : null });
     sec.appendChild(inner);
     into.appendChild(sec);
   }
+}
+/**
+ * A page's body and link layer, built into its `.page-inner` — at the first
+ * build, and again where the reel built a shed page back. One way to build a
+ * body, so a page built back is the page it was: its restored margin
+ * numbers, a condensed sheet's own numbering, a ✓ Use my text page free of
+ * the PDF.
+ */
+function fillPageInner(inner, sec, p, i, { spots: theirSpots = null, editable = false, fixedSrc = null } = {}) {
+  const body = document.createElement("div");
+  body.className = "page-body";
+  body.contentEditable = editable ? "plaintext-only" : "false";
+  body.spellcheck = false;
+  // The margin numbers put back on this page (readExport), marked as the
+  // body is built — and built again, since the body element stays.
+  body.__restored = p.restored ? new Set(p.restored) : null;
+  if (sec.classList.contains("condensed")) body.classList.add("condensed");
+  // A page asked for as ✓ Use my text is built free of the PDF (setFree).
+  if (fixedSrc) {
+    const e = pageEntryAt(i, fixedSrc);
+    if (e && textFixed.some((x) => TD.sameNoOcr(x, e))) {
+      body.classList.add("free");
+      const kept = readFreeFrom()[`${valuesStoreKey()}|${e.doc}|${e.page}`];
+      body.__freeFrom = Array.isArray(kept) ? kept : p.lines.slice();
+    }
+  }
+  buildBody(body, p.lines.join("\n"), i, theirSpots);
+  const layer = document.createElement("div");
+  layer.className = "link-layer";
+  inner.append(body, layer);
+  return body;
 }
 
 function render() {
@@ -5426,10 +5443,12 @@ function render() {
   pagesEl.innerHTML = "";
   emptyEl.hidden = true;
   pagesEl.hidden = false;
-  during("building the document's pages", () => buildPages(pagesEl, doc.pages, { editable: editing }));
+  const live = doc.pages.length > LONG_DOC_PAGES ? [0, LONG_DOC_OPEN] : null;
+  during("building the document's pages", () => buildPages(pagesEl, doc.pages, { editable: editing, live }));
   stageEl.scrollTop = 0;
   afterTextChange();
   autoRemeasure({ newDoc: true });
+  if (live) { guessPageHeight(); reelTrimSoon(); }
 }
 /** The keeps as they stand, so a built document can tell whether they have moved. */
 function keepsSignature() { return allKeeps().map((k) => k.control + ":" + k.value).join("|"); }
@@ -5774,7 +5793,7 @@ const placeCitationsSoon = debounce(() => placeCitations(), 450);
 // Whatever asks for the pages to be laid out again has the reading held
 // through it (holdReading): the page being read stays the page on the screen.
 function relayout() { holdReading(); relayoutSoon(); }
-const relayoutSoon = debounce(() => { reelAllLive(); syncOfferHeight(); syncRunHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); autoRemeasure(); reelTrimSoon(); }, 150);
+const relayoutSoon = debounce(() => { keepReadingOver(() => { reelLiveForLayout(); syncOfferHeight(); syncRunHeight(); textAnchors = null; textLineTops = null; applyMatchedLayout(); applyPageWidth(); if (reel.some(isLongMember)) guessPageHeight(); }); placeCitations(); refitPdf(); if (sbsOn) syncScroll("text", true); autoRemeasure(); reelTrimSoon(); }, 150);
 window.addEventListener("resize", relayout);
 
 function updateCounts() {
@@ -8140,9 +8159,11 @@ function restoreSnapshot(snap, { settle = true, lists = true } = {}) {
     // keeps it (`doc.pages`, the member's spots), and is built from there when
     // the reading comes near it again. Dirty, it is not shed again.
     const m = reelMemberOf(snap.page);
-    if (!m || !m.shed || !doc.pages[snap.page]) return;
+    if (!m || !pageShedAt(snap.page) || !doc.pages[snap.page]) return;
     doc.pages[snap.page].lines = snap.text.split("\n");
-    m.spots = (m.spots || []).filter((x) => x.page !== snap.page).concat(snap.spots || []);
+    // Filed under the member that owns the page, which may be the open
+    // document (a page shed out of a long one): its list is the global one.
+    setSpotsListOf(snap.page, spotsListOf(snap.page).filter((x) => x.page !== snap.page).concat(snap.spots || []));
     persistMemberSpots(m);
     setDirty(true, snap.page);
     syncNoOcr([snap.page], { drop: true });
@@ -8222,7 +8243,7 @@ function stepHistory(from, to) {
     else {
       // A shed page: its other side is the text the reel keeps for it.
       const m = reelMemberOf(snap.page);
-      if (m && m.shed && doc.pages[snap.page]) to.push({ page: snap.page, text: doc.pages[snap.page].lines.join("\n"), caret: -1, spots: TD.spotsOnPage(m.spots || [], snap.page), batch: snap.batch, nocr: snap.nocr, view: snap.view, fixOn: snap.fixOn });
+      if (m && pageShedAt(snap.page) && doc.pages[snap.page]) to.push({ page: snap.page, text: doc.pages[snap.page].lines.join("\n"), caret: -1, spots: TD.spotsOnPage(spotsListOf(snap.page), snap.page), batch: snap.batch, nocr: snap.nocr, view: snap.view, fixOn: snap.fixOn });
     }
     restoreSnapshot(snap, { settle: pages.length === 1, lists: pages.length === 1 });
     // # Number lines turned ✓ Use my text on with the numbers: off with them, on again with them.
@@ -9009,7 +9030,7 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   const keyAt = { rev, fwd, reals };
   // The names said to be faked reach a member the reel has let go of too: it
   // is built back, so the pass over the pages on screen covers it.
-  if (doc && (settled.size || sheetFakes.size) && reel.some((m) => m.shed)) reelAllLive();
+  if (doc && (settled.size || sheetFakes.size) && reelHasShed()) reelAllLive();
   // THE TYPING IS FINISHED FIRST. The converter waits a quarter second after
   // the last key, and a save inside that wait read the page as the typing had
   // left it. Two things went into the export that way. A party marked at the
@@ -10629,7 +10650,7 @@ function showNamesBar(on) {
 // the names the key did its job on), and a folder counted that way would send
 // the walk into documents with nothing on screen that matches.
 let findQuery = "";
-let findHits = [];    // the open document's hits, in order: [{ range }]
+let findHits = [];    // the open document's hits, in order: [{ range }] — or [{ page, nth }] on a page not built (hitRangeOf)
 let findStep = -1;
 let findJump = false; // a document opened by the walk: stand on its first hit
 let findRows = [];    // the rest of the folder: [{ doc, count }]
@@ -10667,40 +10688,97 @@ async function findPagesOf(d) {
   return pages;
 }
 
-/** The open document's hits, read off the page the way the marks are. */
+/**
+ * The open document's hits, read off the page the way the marks are — and,
+ * on a page of a long document the reel has not built (a long document by
+ * the page), off the text it keeps for it, read as the page would show it
+ * (shownPageText). Those are counted in their place in the order and carry
+ * which of the page's hits they are; the page is built when the walk stands
+ * on one (hitRangeOf). Building twelve hundred pages to count them was eleven
+ * seconds of a tab that answered nothing, at every Ctrl+F.
+ */
 function scanFindHere() {
   findHits = [];
   const rx = findMatcherFor(findQuery);
   if (!rx) { paintFind(); return; }
-  for (const body of pageBodies()) {
-    // The gutter numbers blanked, so a phrase wrapped at the margin is one
-    // phrase; the pseudonym spans NOT blanked, because what the operator is
-    // searching is what the page says.
-    const { text, segs } = flatten(body, { blankGutters: true });
-    rx.lastIndex = 0;
-    let m;
-    while ((m = rx.exec(text))) {
-      const r = rangeFor(segs, m.index, m.index + m[0].length);
-      if (r) findHits.push({ range: r });
-      if (m.index === rx.lastIndex) rx.lastIndex++;
+  for (const sec of pagesEl.querySelectorAll(".tpage")) {
+    const body = sec.querySelector(".page-body");
+    if (!body) {
+      if (!sec.classList.contains("shed")) continue;
+      const i = Number(sec.dataset.index);
+      const n = doc.pages[i] ? countMatches(rx, shownPageText(i)) : 0;
+      for (let k = 0; k < n; k++) findHits.push({ page: i, nth: k });
+      continue;
     }
+    for (const r of findRangesIn(body, rx)) findHits.push({ range: r });
   }
   if (findStep >= findHits.length) findStep = findHits.length - 1;
   paintFind();
+}
+/**
+ * A body's hits as ranges. The gutter numbers blanked, so a phrase wrapped at
+ * the margin is one phrase; the pseudonym spans NOT blanked, because what the
+ * operator is searching is what the page says.
+ */
+function findRangesIn(body, rx) {
+  const out = [];
+  const { text, segs } = flatten(body, { blankGutters: true });
+  rx.lastIndex = 0;
+  let m;
+  while ((m = rx.exec(text))) {
+    const r = rangeFor(segs, m.index, m.index + m[0].length);
+    if (r) out.push(r);
+    if (m.index === rx.lastIndex) rx.lastIndex++;
+  }
+  return out;
+}
+/**
+ * A page not built, as its body would read: through the key, the margin
+ * numbers blanked (textdoc.shownPages, which is how Find reads the rest of
+ * the folder). Kept per page while its text, the key and the face stay as
+ * they were: a query asks every page again at each word typed.
+ */
+const shownTexts = new WeakMap(); // page → { lines, rev, fakes, next, text }
+function shownPageText(i) {
+  const p = doc.pages[i], next = doc.pages[i + 1] || null;
+  const had = shownTexts.get(p);
+  if (had && had.lines === p.lines && had.rev === rev && had.fakes === settings.showFakes && had.next === (next && next.lines)) return had.text;
+  const text = TD.shownPages({ pages: next ? [p, next] : [p] }, { rev, showFakes: settings.showFakes })[0];
+  shownTexts.set(p, { lines: p.lines, rev, fakes: settings.showFakes, next: next && next.lines, text });
+  return text;
+}
+/**
+ * A hit's range — built, where it stands on a page the reel has not built:
+ * the page goes up and the hit is found on it, the same one of its hits it
+ * was counted as. Null where the page no longer has it.
+ */
+function hitRangeOf(h) {
+  if (!h) return null;
+  if (h.range || h.page == null) return h.range || null;
+  if (pageShedAt(h.page)) ensurePageLive(h.page);
+  const body = bodyForPage(h.page);
+  const rx = body && findMatcherFor(findQuery);
+  if (!rx) return null;
+  const rs = findRangesIn(body, rx);
+  h.range = rs[Math.min(h.nth, rs.length - 1)] || null;
+  // The page's other hits are ranges now too, and the marks are painted on them.
+  refindSoon();
+  return h.range;
 }
 /** Stand on the first hit of a document just read, the way a find does as you type. */
 function findLandHere() {
   if (findStep >= 0 || !findHits.length) return false;
   findStep = 0;
+  const r = hitRangeOf(findHits[0]);
   paintFind();
-  scrollRangeTo(findHits[0].range);
+  if (r) scrollRangeTo(r);
   return true;
 }
 function paintFind() {
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   try {
-    CSS.highlights.set("find", highlightOf(findHits.map((h) => h.range)));
-    const here = findStep >= 0 && findHits[findStep] ? [findHits[findStep].range] : [];
+    CSS.highlights.set("find", highlightOf(findHits.filter((h) => h.range).map((h) => h.range)));
+    const here = findStep >= 0 && findHits[findStep] && findHits[findStep].range ? [findHits[findStep].range] : [];
     CSS.highlights.set("findhere", highlightOf(here));
   } catch { /* a range from a page since rebuilt */ }
 }
@@ -10824,7 +10902,7 @@ function renderFindBar() {
     : findScanning ? "reading the folder…"
     : "none here";
   const h = n && findStep >= 0 ? findHits[findStep] : null;
-  $("fb-where").textContent = h ? whereInText(h.range) : "";
+  $("fb-where").textContent = !h ? "" : h.range ? whereInText(h.range) : (TD.pageLabel(doc.pages[h.page]) || `Page ${h.page + 1}`);
   $("fb-rest").textContent = !findQuery ? ""
     : findScanning ? `· reading ${folderName || "the folder"}…`
     : others.length ? `· ${rest} in ${others.length} other document${others.length === 1 ? "" : "s"}${n ? "" : ` — › opens ${TD.docLabel(others[0].doc.name)}`}` + combNote
@@ -10884,9 +10962,9 @@ function stepFind(dir = 1) {
     return;
   }
   findStep = (((findStep + dir) % n) + n) % n;
-  const h = findHits[findStep];
+  const r = hitRangeOf(findHits[findStep]);
   paintFind();
-  scrollRangeTo(h.range);
+  if (r) scrollRangeTo(r);
   renderFindBar();
 }
 function jumpToFind(row) {
@@ -10935,7 +11013,10 @@ function restartFind() {
 }
 function showFindBar(on, { replace = false } = {}) {
   const was = !findBar.hidden;
-  if (on && !was) reelAllLive(); // the search looks at every page of the reel
+  // The search looks at every page of the reel: whole documents are built
+  // back for it, and a long document's pages not built are read from the
+  // text the reel keeps for them (scanFindHere).
+  if (on && !was) reelAllLive({ long: false });
   findBar.hidden = !on;
   // Closing puts Replace away with it; Ctrl+H brings the bar back with it open.
   showReplaceRow(on && (replace || (was && replaceOpen())));
@@ -11577,12 +11658,13 @@ function replaceOne() {
   if (!rx) return;
   if (findStep < 0 || !findHits[findStep]) { stepFind(1); return; }
   const cur = findHits[findStep];
+  hitRangeOf(cur); // a hit on a page not built: built, and found on it
   const hit = hitNow(cur, rx);
   if (!hit) {
     // The page moved under the hit since it was read (an edit a beat ago):
     // read it again and show what is in front now, rather than guess.
     scanFindHere();
-    if (!findLandHere() && findHits[findStep]) scrollRangeTo(findHits[findStep].range);
+    if (!findLandHere() && findHits[findStep]) { const r = hitRangeOf(findHits[findStep]); if (r) scrollRangeTo(r); }
     renderFindBar();
     return;
   }
@@ -11615,10 +11697,12 @@ function replaceOne() {
   // which may carry what is being looked for — and round to the top of the
   // document where that was the last.
   scanFindHere();
-  const next = after ? findHits.findIndex((h) => { try { return h.range.compareBoundaryPoints(Range.START_TO_START, after) >= 0; } catch { return false; } }) : -1;
+  // A hit on a page not built stands on a page after the one replaced in, or before it.
+  const afterPage = pageIndexOf(hit.body);
+  const next = after ? findHits.findIndex((h) => { if (!h.range) return h.page > afterPage; try { return h.range.compareBoundaryPoints(Range.START_TO_START, after) >= 0; } catch { return false; } }) : -1;
   findStep = next >= 0 ? next : findHits.length ? 0 : -1;
   paintFind();
-  if (findStep >= 0) scrollRangeTo(findHits[findStep].range);
+  if (findStep >= 0) { const r = hitRangeOf(findHits[findStep]); paintFind(); if (r) scrollRangeTo(r); }
   $("fb-rnote").textContent = "";
   renderFindBar();
 }
@@ -13869,6 +13953,8 @@ function folderRest() {
 // drops it. So there it waits for a gap, as the documents built ahead do, and
 // what the bar says in the meantime is the last reading's answer.
 const SWEEP_QUIET = 1200;
+const SWEEP_PAGES = 60;          // pages of a document read for names in the clear between looks at the clock
+const SWEEP_CHARS = 128 * 1024;  // …and characters read for the run's pseudonyms
 const SWEEP_DOC_SAY = 1500; // ms one document may take before the console names it
 let sweepTimer = 0;
 let sweepWaiters = []; // what is waiting on the sweep running to end (sweepNow)
@@ -13947,7 +14033,21 @@ async function sweepFolderNow() {
         // ("Jones" in "Mary Jones"), or a name kept just there.
         step("looking for the key's real values and the flagged ones", text.length);
         const theirSpots = TD.normalizeSpots(got.entry ? got.entry.spots : lsGet(spotKeyFor(d.name), []));
-        const { values, flags } = TD.clearReading(text, { rev, reals, flagRx, spots: theirSpots, mask: maskKept });
+        // A LONG DOCUMENT IS READ A PIECE AT A TIME. Read whole, a deposition
+        // of twelve hundred pages held the tab for half a second at every
+        // sweep, and the sweep runs again at every decision.
+        const pages = TD.parseExport(text).pages;
+        const values = [];
+        let flags = 0;
+        for (let a = 0; a < pages.length; a += SWEEP_PAGES) {
+          const part = TD.clearReading(text, { rev, reals, flagRx, spots: theirSpots, mask: maskKept, pages, from: a, to: a + SWEEP_PAGES });
+          for (const v of part.values) values.push(v);
+          flags += part.flags;
+          if (a + SWEEP_PAGES < pages.length && (!clock || clock.timeRemaining() < SLICE_LEFT)) {
+            clock = await idleClock();
+            if (sweep.stamp !== mine) return; // the key moved under it: this answer is stale
+          }
+        }
         if (values.length || flags) sweep.rows.push({ doc: d, values, flags });
         // …and, from the same reading, which PSEUDONYMS stand here. That is
         // the other half of the folder's answer: a name in the clear is a leak,
@@ -13958,7 +14058,14 @@ async function sweepFolderNow() {
         // fake cannot say whose it is, and does not have to.
         if (fakesFor && fakesRx && !open) {
           step("looking for the pseudonyms the run wrote", text.length);
-          for (const w of PK.findReals(fakesRx, text, { columns: true })) fakesFor.set.add(PK.fold(w.fake));
+          // …in pieces cut at a page's own header line, which no name crosses.
+          for (const piece of TD.slicesAtHeaders(text, SWEEP_CHARS)) {
+            for (const w of PK.findReals(fakesRx, piece, { columns: true })) fakesFor.set.add(PK.fold(w.fake));
+            if (piece.length < text.length && (!clock || clock.timeRemaining() < SLICE_LEFT)) {
+              clock = await idleClock();
+              if (sweep.stamp !== mine) return;
+            }
+          }
         }
       } catch { readAll = false; /* unreadable: it is not a document this review can answer */ }
       // A DOCUMENT THAT TOOK TOO LONG SAYS WHICH ONE IT WAS. The sweep reads
@@ -19678,7 +19785,7 @@ async function reelExtend() {
     m.divider = reelDivider(m);
     frag.appendChild(m.divider);
     during("hanging the next document on the reel", () =>
-      buildPages(frag, doc.pages, { from, to: from + m.count, spots: theirSpots, editable: editing }));
+      buildPages(frag, doc.pages, { from, to: from + m.count, spots: theirSpots, editable: editing, live: isLongMember(m) ? [from, from + LONG_DOC_OPEN] : null }));
     pagesEl.appendChild(frag);
     hungFromStore(m, entry);
     reelChanged();
@@ -19867,7 +19974,7 @@ async function reelPrepend() {
     m.divider = reelDivider(m, { back: true });
     frag.appendChild(m.divider);
     during("hanging the document before this one on the reel", () =>
-      buildPages(frag, doc.pages, { from: 0, to: n, spots: theirSpots, editable: editing }));
+      buildPages(frag, doc.pages, { from: 0, to: n, spots: theirSpots, editable: editing, live: isLongMember(m) ? [n - LONG_DOC_OPEN, n] : null }));
     pagesEl.insertBefore(frag, pagesEl.firstChild);
     hungFromStore(m, entry);
     reelChanged();
@@ -20067,6 +20174,16 @@ function memberSections(m, byIndex) {
 
 function shedMember(m, secs) {
   if (m.shed) return;
+  shedSections(secs);
+  m.shed = true;
+  // Its undo steps stay. They used to go — the page had no body to put them
+  // back into — which made a Replace all across several members, saved and
+  // then read away from, come back only in part on Ctrl+Z, and say nothing.
+  // A shed page is put back in `doc.pages` instead (restoreSnapshot), and
+  // built from there when it comes near again.
+}
+/** Pages let go of: each pinned at the height it stands at, its text and keeps kept in memory. */
+function shedSections(secs) {
   // The height each page is pinned at is the height it STANDS at, read before
   // the grid comes off it. Side by side that is its PDF page's height, the
   // same as the slot beside it; read after, it was whatever its text came to
@@ -20087,8 +20204,10 @@ function shedMember(m, secs) {
     clearMatched(sec);
     // Everything the page knows, taken off it before it goes: the text as the
     // FILE carries it (serializeNodes writes the fakes, never the real names),
-    // and the places this document keeps in the clear.
-    m.spots = m.spots.filter((x) => x.page !== i).concat(spotsFromBody(body, i));
+    // and the places this document keeps in the clear — filed under the
+    // member that owns the page, which is the open document's own list where
+    // the page is the open document's (spotsListOf).
+    setSpotsListOf(i, spotsListOf(i).filter((x) => x.page !== i).concat(spotsFromBody(body, i)));
     doc.pages[i].lines = TD.serializeNodes(body).split("\n");
     sec.style.height = (Math.round(heights[k] * 100) / 100) + "px"; // measured before it is emptied
     inner.innerHTML = "";
@@ -20096,40 +20215,156 @@ function shedMember(m, secs) {
     rawPages.delete(sec);
     sec.classList.add("shed");
   });
-  m.shed = true;
-  // Its undo steps stay. They used to go — the page had no body to put them
-  // back into — which made a Replace all across several members, saved and
-  // then read away from, come back only in part on Ctrl+Z, and say nothing.
-  // A shed page is put back in `doc.pages` instead (restoreSnapshot), and
-  // built from there when it comes near again.
 }
 
 function unshedMember(m, secs) {
-  if (!m.shed) return;
+  buildShedSections(m, secs);
+  m.shed = false;
+}
+/** Shed pages built back from what the reel kept of them. */
+function buildShedSections(m, secs) {
+  const fixedSrc = textFixed.length ? docPageSources() : null;
   for (const sec of secs) {
     const inner = sec.querySelector(".page-inner");
     if (!inner || inner.firstChild) continue;
     const i = Number(sec.dataset.index);
-    const body = document.createElement("div");
-    body.className = "page-body";
-    body.contentEditable = editing ? "plaintext-only" : "false";
-    body.spellcheck = false;
-    buildBody(body, doc.pages[i].lines.join("\n"), i, m.spots);
-    const layer = document.createElement("div");
-    layer.className = "link-layer";
-    inner.append(body, layer);
+    const body = fillPageInner(inner, sec, doc.pages[i], i, { editable: editing, fixedSrc });
+    // A page of a document that came out of the store of unsaved documents is
+    // measured against the text it was first built from, not the text it
+    // carries now: a name typed into it in the last session is still a name
+    // typed (convertTypedReals).
+    const k = i - m.from;
+    if (m.built && m.built[k] != null) body.__built = m.built[k];
     sec.classList.remove("shed");
     sec.style.height = "";
   }
-  m.shed = false;
+}
+
+// ── a long document by the page ──────────────────────────────────────────────
+//
+// The reel lets go of a DOCUMENT at a time, and never of the one being read.
+// That is the right size of piece for a folder of pleadings and the wrong one
+// for a deposition of 1,200 pages: every page of it built at the open (15 s
+// holding the tab, measured: the build is two of them, the browser laying out
+// thirty thousand lines the rest), and every pass that lays the pages out —
+// the grid, the fit, the citations — over all twelve hundred again on every
+// scroll. So a document longer than LONG_DOC_PAGES is shed by the PAGE: it
+// goes up with its first LONG_DOC_OPEN pages built and the rest standing as
+// shed sheets at the height a built page has (`--page-guess`, the median of
+// the pages built), and the trim builds the pages coming near the reading and
+// lets go of those it has left, as it does whole documents. Everything that
+// already passed a shed page over — the grid, the fit, the slots beside it,
+// the undo history, the save — takes a page shed out of a long document the
+// same way.
+//
+// A page is NOT let go of where it carries something only its body holds: an
+// edit (its text is not the text it was built from, which is what a typed
+// name is measured against), a name Esc left as typed, the caret or the
+// selection, or its PDF page swapped in.
+const LONG_DOC_PAGES = 150; // a member longer than this is shed a page at a time
+const LONG_DOC_OPEN = 12;   // …and goes up with this many pages built
+const PAGE_GUESS = "var(--page-guess, 1100px)";
+function isLongMember(m) { return !!m && m.count > LONG_DOC_PAGES; }
+/** A page put up shed, never built: the height a built page stands at, until it is. */
+function shellPage(sec) {
+  sec.classList.add("shed");
+  sec.style.height = PAGE_GUESS;
+}
+/**
+ * The height a page never built (or shed under another layout) stands at: the
+ * median of the pages built, so a page built back is as tall as the place it
+ * held to within its own difference from the run of the document.
+ */
+function guessPageHeight() {
+  const hs = [];
+  for (const sec of pagesEl.querySelectorAll(".tpage:not(.shed)")) {
+    if (sec.classList.contains("swapped") || sec.classList.contains("raw")) continue;
+    const h = sec.offsetHeight;
+    if (h > 0) hs.push(h);
+    if (hs.length >= 41) break;
+  }
+  if (!hs.length) return;
+  hs.sort((x, y) => x - y);
+  const px = hs[hs.length >> 1] + "px";
+  if (pagesEl.style.getPropertyValue("--page-guess") !== px) pagesEl.style.setProperty("--page-guess", px);
+}
+/** Whether a page carries something only its body holds, and so must stay built. */
+function pageMustStay(sec) {
+  if (sec.classList.contains("swapped")) return true;
+  const body = sec.querySelector(".page-body");
+  if (!body) return false;
+  if (escaped.has(body)) return true;
+  const a = document.activeElement;
+  if (a && sec.contains(a) && a !== document.body) {
+    const sel = getSelection();
+    if (editing || (sel && sel.rangeCount && !sel.isCollapsed)) return true;
+  }
+  const sel = getSelection();
+  if (sel && sel.rangeCount && !sel.isCollapsed && (sec.contains(sel.anchorNode) || sec.contains(sel.focusNode))) return true;
+  if (body.__built != null && TD.serializeNodes(body) !== body.__built) return true;
+  return false;
+}
+/**
+ * A long member trimmed by the page: built within `pad` of the screen, let go
+ * of past half as far again (so a page at the edge is not built and shed on
+ * alternate scrolls). → whether anything changed.
+ */
+function trimPagesOf(m, secs, top, bottom, pad, { shed: letGo = true } = {}) {
+  const build = [], shed = [];
+  const far = pad * 1.5;
+  for (const sec of secs) {
+    const a = sec.offsetTop, b = a + sec.offsetHeight;
+    const isShed = sec.classList.contains("shed");
+    if (isShed) { if (b >= top - pad && a <= bottom + pad) build.push(sec); }
+    else if (letGo && (b < top - far || a > bottom + far) && !pageMustStay(sec)) shed.push(sec);
+  }
+  if (shed.length) shedSections(shed);
+  if (build.length) buildShedSections(m, build);
+  m.shed = false; // by the page, never the whole of it at once
+  return !!(shed.length || build.length);
+}
+/**
+ * `fn` run with the page the reading stands on held where it stands, for a
+ * long document: its pages not built are all as tall as the guess, and a
+ * re-layout that moves the guess moves every one of them above the reading at
+ * once — a thousand pages a few hundred pixels shorter, the scroll clamped to
+ * the new foot of the column, and the reading's own hold (holdReading) let go
+ * by that clamp as by a scroll of the reader's. So the page is measured before
+ * and after, and the scroll put back from where it stood rather than from
+ * where the clamp left it.
+ */
+function keepReadingOver(fn) {
+  if (!doc || !reel.some(isLongMember)) { fn(); return; }
+  const top = stageEl.scrollTop;
+  let anchor = null;
+  for (const sec of pagesEl.querySelectorAll(".tpage")) if (sec.offsetTop + sec.offsetHeight > top) { anchor = sec; break; }
+  const was = anchor ? anchor.offsetTop : 0;
+  fn();
+  if (!anchor || !anchor.isConnected) return;
+  const d = anchor.offsetTop - was;
+  if (Math.abs(d) >= 1) { stageEl.scrollTop = top + d; reelLastTop = stageEl.scrollTop; }
+}
+/** Any page of the reel standing shed, whole documents or pages of a long one. */
+function reelHasShed() { return !!pagesEl.querySelector(".tpage.shed"); }
+/** Whether page `i` is a shed page (no body; its text kept in `doc.pages`). */
+function pageShedAt(i) {
+  const sec = pagesEl.querySelector(`.tpage[data-index="${i}"]`);
+  return !!sec && sec.classList.contains("shed");
 }
 
 /** Build a shed page back because something is about to want it (a leak row, a jump). */
 function ensurePageLive(i) {
   const m = reelMemberOf(i);
-  if (!m || !m.shed) return;
+  if (!m || !pageShedAt(i)) return;
   const byIndex = sectionsByIndex();
-  unshedMember(m, memberSections(m, byIndex));
+  // A long document is built back where it is wanted, a page either side,
+  // not twelve hundred pages for the sake of one.
+  if (isLongMember(m)) {
+    const secs = [];
+    for (let k = Math.max(m.from, i - 1); k <= Math.min(m.from + m.count - 1, i + 1); k++) { const sec = byIndex.get(k); if (sec) secs.push(sec); }
+    buildShedSections(m, secs);
+    m.shed = false;
+  } else unshedMember(m, memberSections(m, byIndex));
   afterShedChange();
 }
 
@@ -20142,7 +20377,8 @@ function sectionsByIndex() {
 /**
  * Let go of what is far away, and build back what has come near. Cheap enough
  * to run on a scroll: it is a pass over the members, and a member that is
- * already in the state it should be in costs a comparison.
+ * already in the state it should be in costs a comparison — a long one, a
+ * comparison a page.
  */
 function reelTrim() {
   return during('letting go of the pages the reading has left', () => reelTrimNow());
@@ -20150,19 +20386,31 @@ function reelTrim() {
 function reelTrimNow() {
   // Two documents are worth shedding between where the documents are long:
   // two exhibit sets of two hundred pages is four hundred sections held for
-  // the sake of the one being read.
-  if (!doc || reel.length < 2) return;
+  // the sake of the one being read. And one document is, where it is long
+  // enough to be shed by the page.
+  if (!doc || !reel.length || (reel.length < 2 && !isLongMember(reel[0]))) return;
   // A review is a walk over the whole document: nothing is let go of under it.
   // The redaction tool is one too — its check reads every pseudonym the export
   // carries, and a shed page carries none. So is a find: its count of the
   // reel's documents is read off their pages (the folder's rows leave them
   // out, onReel), and a member shed under it was counted nowhere — "none here
   // · nowhere else", Replace all off, and Replace walking on past it.
-  if (!leaksBar.hidden || !namesBar.hidden || !findBar.hidden || redactOn) return;
+  //
+  // Under the find bar a long document is still BUILT as the reading comes to
+  // it — Find counts its pages not built off the text kept for them — and
+  // nothing of it is let go of: a hit's range is a place in a page's body.
+  const findOnly = !findBar.hidden && leaksBar.hidden && namesBar.hidden && !redactOn;
+  if (!leaksBar.hidden || !namesBar.hidden || redactOn || (!findBar.hidden && !reel.some(isLongMember))) return;
   const top = stageEl.scrollTop;
   const bottom = top + stageEl.clientHeight;
   const pad = Math.max(stageEl.clientHeight * REEL_KEEP_SCREENS, 1200);
   const byIndex = sectionsByIndex();
+  // The page the reading stands on, and where: pages built above it come up
+  // at their own height rather than the guess they stood at, and the reading
+  // is put back by what they moved it.
+  let anchor = null;
+  for (const sec of byIndex.values()) if (sec.offsetTop + sec.offsetHeight > top) { anchor = sec; break; }
+  const anchorWas = anchor ? anchor.offsetTop : 0;
   let changed = false;
   for (let k = 0; k < reel.length; k++) {
     const m = reel[k];
@@ -20172,12 +20420,21 @@ function reelTrimNow() {
     const a = secs[0].offsetTop;
     const b = last.offsetTop + last.offsetHeight;
     const far = b < top - pad || a > bottom + pad;
-    // The one being read, and anything typed in, stay whatever the distance.
+    // The one being read, and anything typed in, stay whatever the distance —
+    // a long one by the page, which is as much of it as the reading can see.
     const held = k === reelAt || m.dirty;
-    if (far && !held && !m.shed) { shedMember(m, secs); changed = true; }
+    if (findOnly) { if (isLongMember(m) && (!far || held) && trimPagesOf(m, secs, top, bottom, pad, { shed: false })) changed = true; continue; }
+    if (isLongMember(m) && (!far || held)) { if (trimPagesOf(m, secs, top, bottom, pad)) changed = true; }
+    else if (far && !held && !m.shed) { shedMember(m, secs); changed = true; }
     else if ((!far || held) && m.shed) { unshedMember(m, secs); changed = true; }
   }
-  if (changed) afterShedChange();
+  if (changed) {
+    afterShedChange();
+    if (anchor && anchor.isConnected) {
+      const d = anchor.offsetTop - anchorWas;
+      if (Math.abs(d) >= 1) { stageEl.scrollTop = top + d; reelLastTop = stageEl.scrollTop; }
+    }
+  }
 }
 
 /**
@@ -20193,6 +20450,8 @@ function reelTrimNow() {
 function afterShedChange() {
   applyMatchedLayout();
   applyPageWidth(); // …which shapes the sheets, which is what makes it stable
+  if (reel.some(isLongMember)) guessPageHeight();
+  if (!findBar.hidden && findQuery) refindSoon(); // a hit on a page just built is a range now
   textAnchors = null; textLineTops = null;
   textEpoch++;
   placeCitationsSoon();
@@ -20217,15 +20476,46 @@ function afterShedChange() {
  * nothing is shed at all (`reelTrim`), so this is asked once, as it opens —
  * and the find bar is the same, whose count of the reel reads its pages.
  */
-function reelAllLive() {
-  return during("building the reel's pages back for the review", () => reelAllLiveNow());
+function reelAllLive({ long = true } = {}) {
+  return during("building the reel's pages back for the review", () => reelAllLiveNow({ long }));
 }
-function reelAllLiveNow() {
-  if (!reel.some((m) => m.shed)) return false;
+/** `long: false` leaves a long document's pages as they are (Find reads them where they are shed). */
+function reelAllLiveNow({ long = true } = {}) {
+  if (!reelHasShed()) return false;
   const byIndex = sectionsByIndex();
-  for (const m of reel) if (m.shed) unshedMember(m, memberSections(m, byIndex));
-  afterShedChange();
-  return true;
+  let changed = false;
+  for (const m of reel) {
+    if (!long && isLongMember(m)) {
+      // …though a long document shed whole is stood up by the page.
+      m.shed = false;
+      continue;
+    }
+    const secs = memberSections(m, byIndex).filter((sec) => sec.classList.contains("shed"));
+    if (secs.length) { unshedMember(m, secs); changed = true; }
+  }
+  if (changed) afterShedChange();
+  return changed;
+}
+/**
+ * A re-layout over a reel holding a long document. Building all of it back to
+ * measure it is the fifteen seconds the page-by-page shedding is there to
+ * spare, so its shed pages are not built: each is stood at the guess again,
+ * which the pages built are re-measured for once the layout has run — the
+ * same answer a page never built has. Whole documents are built back as
+ * before (reelAllLive).
+ */
+function reelLiveForLayout() {
+  if (!reel.some(isLongMember)) { reelAllLive(); return; }
+  const byIndex = sectionsByIndex();
+  let changed = false;
+  for (const m of reel) {
+    const secs = memberSections(m, byIndex);
+    if (isLongMember(m)) {
+      for (const sec of secs) if (sec.classList.contains("shed") && sec.style.height !== PAGE_GUESS) sec.style.height = PAGE_GUESS;
+      m.shed = false;
+    } else if (m.shed) { unshedMember(m, secs); changed = true; }
+  }
+  if (changed) afterShedChange();
 }
 
 // ── the PDF beside the text ──────────────────────────────────────────────────────────

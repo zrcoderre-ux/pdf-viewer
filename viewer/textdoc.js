@@ -1812,6 +1812,30 @@ export function blankRanges(text, ranges, fill = "\u0000") {
 }
 
 /**
+ * `text` cut into pieces of about `size` characters, each cut made just before
+ * a page header line ("====== Page N ======"), so a piece is whole pages and
+ * nothing read across a page's text is cut. Joined, the pieces are `text`; a
+ * text with no header past the size is one piece.
+ */
+export function slicesAtHeaders(text, size) {
+  const src = String(text == null ? "" : text);
+  const out = [];
+  let at = 0;
+  while (at < src.length) {
+    let cut = src.length;
+    if (src.length - at > size) {
+      const re = /\n====== Page \d/g;
+      re.lastIndex = at + size;
+      const m = re.exec(src);
+      if (m) cut = m.index + 1;
+    }
+    out.push(src.slice(at, cut));
+    at = cut;
+  }
+  return out;
+}
+
+/**
  * What a document's FILE is carrying in the clear, read THE WAY THE PAGE READS
  * IT — so the ⚠ beside a document in the folder's list and the walk through
  * the names, which reads the page, give the same answer about it.
@@ -1836,12 +1860,15 @@ export function blankRanges(text, ranges, fill = "\u0000") {
  * decisions spared from the leaks.
  * → { values: [the real value of every occurrence], flags: count }
  */
-export function clearReading(text, { rev = null, reals = null, flagRx = null, spots = null, mask = null } = {}) {
+export function clearReading(text, { rev = null, reals = null, flagRx = null, spots = null, mask = null, pages: parsed = null, from = 0, to = Infinity } = {}) {
   const values = [];
   let flags = 0;
   if (!reals && !flagRx) return { values, flags };
-  const pages = parseExport(text).pages;
-  for (let i = 0; i < pages.length; i++) {
+  // `pages` (the text parsed already) with `from`/`to` reads a slice of them,
+  // so a long document can be read a piece at a time with the same answer:
+  // each page is read with the page after it, whichever slice that is in.
+  const pages = parsed || parseExport(text).pages;
+  for (let i = Math.max(0, from); i < Math.min(to, pages.length); i++) {
     const raw = pages[i].lines.join("\n");
     const next = pages[i + 1] ? pages[i + 1].lines.slice(0, 12).join("\n") : "";
     const blank = spotRanges(raw, spotsOnPage(spots, i));
