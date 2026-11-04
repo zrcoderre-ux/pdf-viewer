@@ -1115,7 +1115,12 @@ async function readListing(dir) {
   }
   let docs = 0;
   const out = [];
+  let priority = null;
   for (const f of files) {
+    if (f.name.toLowerCase() === caseLib.PRIORITY_FILE.toLowerCase()) {
+      // The folder's place in PDF-Linker's line: its words, not its time.
+      try { priority = caseLib.parsePriority(await (await f.entry.getFile()).text()); } catch { priority = null; }
+    }
     const doc = /\.(pdf|docx?)$/i.test(f.name);
     if (!caseLib.signalFile(f.name) || (doc && ++docs > DOC_STATS_MAX)) { out.push({ name: f.name }); continue; }
     try { const file = await f.entry.getFile(); out.push({ name: f.name, size: file.size, at: file.lastModified }); }
@@ -1126,7 +1131,7 @@ async function readListing(dir) {
     try { for await (const [name, entry] of textDir.entries()) if (entry.kind === "file" && /\.txt\.leak$/i.test(name)) held++; }
     catch { /* unreadable: nothing held that can be seen */ }
   }
-  return { files: out, dirs, held };
+  return { files: out, dirs, held, priority };
 }
 
 // Downloads holds every case ever downloaded, so each folder in it is read by
@@ -1259,6 +1264,7 @@ async function renderCaseFoldersNow() {
   }
   for (const r of rows) {
     r.status = r.listing ? caseLib.folderStatus(r.listing, now) : null;
+    r.rank = r.listing && !r.locked ? caseLib.liveRank(r.listing) : 0;
     r.activity = Math.max(r.activity || 0, r.listing ? caseLib.lastActivity(r.listing) : 0);
     const start = runsStarted.length && !r.locked ? await runStartFor(r) : null;
     if (start) {
@@ -1268,6 +1274,10 @@ async function renderCaseFoldersNow() {
     }
   }
   const shown = caseLib.sortRows(rows).slice(0, CASE_ROWS_MAX);
+  const line = shown.filter((r) => r.rank > 0);
+  lineShown = line;
+  rowsShown = shown;
+  compactLine(line);
   const say = shown.map((r) => {
     const st = r.locked ? { text: "Click to allow", title: "The browser wants your leave to read this folder again.", tone: "idle" }
         : caseLib.statusText(r.status, now);
@@ -1277,7 +1287,7 @@ async function renderCaseFoldersNow() {
     return { r, st, where: where.join(" · ") };
   });
   // Redrawn only where something changed (the text of a row, Downloads' link).
-  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone].join("|")).join("\n");
+  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length].join("|")).join("\n");
   scheduleCaseRecheck();
   if (sig === caseShown) return;
   caseShown = sig;
@@ -1316,9 +1326,122 @@ async function renderCaseFoldersNow() {
       catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
     row.appendChild(b);
+    if (!r.locked && r.listing) row.appendChild(lineControls(r, line));
     if (!r.locked && r.status && r.status.state === "stalled") row.appendChild(takeOverButton(r));
     listEl.appendChild(row);
   }
+}
+
+// ---- Home: PDF-Linker's line --------------------------------------------------
+//
+// The owner (2026-11-04): "indicate the priority order of cases running or to
+// be run with PDF Linker. The higher priority indicates that i need it done
+// sooner, and it should cut the line for access to cores and whatever other
+// processing it needs that is in short supply." Each row can be put in the
+// line (Prioritize), moved up or down in it, or taken out; the line is listed
+// first, in its order. Each folder's place is written into its own
+// PRIORITY_FILE (case-folders.js, "PDF-Linker's line"), which the run reads
+// as it goes (PDF-Linker's `_start_run_priority`), so a reorder reaches a run
+// already going within its next look (15 s). A case leaves the line when a
+// run of it finishes.
+let lineShown = [];   // the rows in line, first first, as last looked at
+let rowsShown = [];   // every row listed, as last looked at
+let lineBusy = false;
+/**
+ * The row of the last look for the folder a button was drawn for: a look
+ * that changes no row's text does not redraw (so a hover stays put), and its
+ * rows are new objects all the same.
+ */
+async function currentRow(r) {
+  for (const x of rowsShown) {
+    if (x === r) return x;
+    if (x.name !== r.name) continue;
+    try { if (await x.handle.isSameEntry(r.handle)) return x; } catch { /* gone */ }
+  }
+  return null;
+}
+function lineControls(r, line) {
+  const box = document.createElement("span");
+  const place = line.indexOf(r) + 1;
+  const btn = (cls, text, label, op, disabled = false) => {
+    const x = document.createElement("button");
+    x.className = cls;
+    x.textContent = text;
+    x.title = label;
+    x.setAttribute("aria-label", label);
+    x.disabled = disabled;
+    x.addEventListener("click", (e) => { e.stopPropagation(); changeLineFor(r, op); });
+    return x;
+  };
+  if (!place) {
+    box.className = "ci-line";
+    const behind = line.length ? `, behind the ${line.length} case${line.length === 1 ? "" : "s"} already in it` : "";
+    box.appendChild(btn("ci-line-add", "Prioritize", `Put ${r.name} in PDF-Linker's line${behind}: while it runs, its OCR takes the cores ahead of every run behind it, and those runs drop to below-normal CPU priority. It leaves the line when a run of it finishes.`, "add", line.length >= caseLib.RANK_MAX));
+    return box;
+  }
+  box.className = "ci-line in-line";
+  const tag = document.createElement("span");
+  tag.className = "ci-place";
+  tag.textContent = caseLib.ordinal(place);
+  tag.title = caseLib.lineTitle(place, r.name);
+  box.appendChild(tag);
+  box.appendChild(btn("ci-line-btn", "▲", `Move ${r.name} up in PDF-Linker's line`, "up", place === 1));
+  box.appendChild(btn("ci-line-btn", "▼", `Move ${r.name} down in PDF-Linker's line`, "down", place === line.length));
+  box.appendChild(btn("ci-line-btn", "✕", `Take ${r.name} out of PDF-Linker's line`, "remove"));
+  return box;
+}
+/** Write `line` (rows, first first) into the folders whose place changed, and take `out` out. */
+async function writeLine(line, out = []) {
+  const set = Date.now();
+  const writes = line.map((r, i) => ({ r, rank: i + 1 })).filter(({ r, rank }) => r.rank !== rank);
+  // Asked first, while the click still counts as one (PDF+ grants it).
+  for (const r of [...writes.map((w) => w.r), ...out]) {
+    if (!(await permitted(r.handle, "readwrite", true))) { shellToast(`The line was not changed: PDF+ may not write into ${r.name}.`, 6000); return false; }
+  }
+  try {
+    for (const { r, rank } of writes) {
+      const w = await (await r.handle.getFileHandle(caseLib.PRIORITY_FILE, { create: true })).createWritable();
+      await w.write(caseLib.priorityText(rank, set));
+      await w.close();
+      r.rank = rank;
+      downloadsSeen.delete(r.name);
+    }
+    for (const r of out) {
+      try { await r.handle.removeEntry(caseLib.PRIORITY_FILE); } catch (e) { if (!e || e.name !== "NotFoundError") throw e; }
+      r.rank = 0;
+      downloadsSeen.delete(r.name);
+    }
+  } catch (e) {
+    shellToast(`The line was only partly changed: ${e.message || e}`, 8000);
+    return false;
+  }
+  return true;
+}
+async function changeLineFor(r, op) {
+  if (lineBusy) return;
+  lineBusy = true;
+  try {
+    const cur = await currentRow(r);
+    if (!cur) return;
+    const next = caseLib.changeLine(lineShown, cur, op);
+    if (next.length === lineShown.length && next.every((x, i) => x === lineShown[i])) return;
+    if (await writeLine(next, op === "remove" ? [cur] : [])) caseShown = "";
+  } finally {
+    lineBusy = false;
+    renderCaseFolders();
+  }
+}
+/**
+ * Close the gaps a finished run leaves (PDF-Linker removes its folder's place
+ * when the run finishes), so each folder's file says the place Home shows.
+ * Only where Home may already write into those folders: a look is no click,
+ * and nothing is asked.
+ */
+async function compactLine(line) {
+  if (lineBusy || line.every((r, i) => r.rank === i + 1)) return;
+  for (const [i, r] of line.entries()) if (r.rank !== i + 1 && !(await permitted(r.handle, "readwrite", false))) return;
+  lineBusy = true;
+  try { await writeLine(line); } finally { lineBusy = false; }
 }
 
 // ---- Home: take over a run that stopped part-way -----------------------------
@@ -1444,7 +1567,16 @@ document.getElementById("case-downloads")?.addEventListener("click", async () =>
   renderCaseFolders();
 });
 document.getElementById("case-clear")?.addEventListener("click", async () => {
-  try { await foldersTx("folders", "readwrite", (s) => { s.clear(); }); } catch { /* ok */ }
+  // A folder in PDF-Linker's line stays listed: it could not be moved or
+  // taken out of the line from here once it was forgotten.
+  if (!caseLib) caseLib = await import("./viewer/case-folders.js");
+  const forget = [];
+  for (const r of await foldersAll()) {
+    let inLine = false;
+    if (await permitted(r.handle, "read", false)) { try { inLine = caseLib.liveRank(await readListing(r.handle)) > 0; } catch { /* unreadable: forgotten */ } }
+    if (!inLine) forget.push(r.key);
+  }
+  try { await foldersTx("folders", "readwrite", (s) => { for (const k of forget) s.delete(k); }); } catch { /* ok */ }
   renderCaseFolders();
 });
 // A reader's Re-run PDF-Linker has started the run (text-reader.js,

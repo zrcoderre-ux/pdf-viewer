@@ -287,14 +287,99 @@ export function statusText(st, now) {
   }
 }
 
+// ---- PDF-Linker's line (the owner, 2026-11-04) ------------------------------
+//
+// "a way where I can, from the home screen on PDF+, indicate the priority
+// order of cases running or to be run with PDF Linker. The higher priority
+// indicates that i need it done sooner, and it should cut the line for access
+// to cores and whatever other processing it needs that is in short supply."
+// Home keeps a LINE of case folders, and writes each one's place into
+// PRIORITY_FILE in that folder: a page cannot reach a machine-wide place, but
+// it can write into a folder it holds, and the run reads its own folder.
+// PDF-Linker (`_run_priority_read`, `_start_run_priority`) gives a run with a
+// place ahead of another its OCR cores first and lowers the other's CPU
+// priority while both run; a run with no place stands behind every one that
+// has one. The format changes only in step with PDF-Linker's reader.
+//
+// A place is spent once the folder finishes a run after it was given: a file
+// whose `set` is older than the folder's newest DONE stamp is no place, here
+// and in PDF-Linker, and the run that finishes removes it. So a case leaves
+// the line when it is done, and a finished case ranked again (to be re-run)
+// stands in it until that run finishes.
+export const PRIORITY_FILE = "PDF-Linker Priority.json";
+export const RANK_MAX = 99;
+
+/** The file's text for place `rank` (1 first), given at `set` (ms). */
+export function priorityText(rank, set) {
+  return JSON.stringify({ rank, set }) + "\n";
+}
+
+/** { rank, set } from the file's text, or null where it says no place. */
+export function parsePriority(text) {
+  let data;
+  try { data = JSON.parse(String(text || "")); } catch { return null; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const { rank, set } = data;
+  if (!Number.isInteger(rank) || rank < 1 || rank > RANK_MAX) return null;
+  if (typeof set !== "number" || !Number.isFinite(set)) return null;
+  return { rank, set };
+}
+
 /**
- * The rows in the order Home lists them: runs going first, then by the
- * latest thing that happened to each (opened here, a run's trace, a file
- * downloaded), newest first. A row is { name, opened, today, status, activity }.
+ * The folder's place in line, or 0 for none: the listing's `priority`
+ * ({ rank, set }, read off PRIORITY_FILE) where no DONE stamp is newer than
+ * the time it was given.
+ */
+export function liveRank(listing) {
+  const p = listing && listing.priority;
+  if (!p) return 0;
+  for (const f of listing.files || []) {
+    const m = runMarker(f.name);
+    if (m && m.kind === "DONE" && f.size === 0 && typeof f.at === "number" && f.at > p.set) return 0;
+  }
+  return p.rank;
+}
+
+/**
+ * The line after one change: `line` is the folders in line, first first (any
+ * values compared with ===), `who` the one the change is about, `op` "add"
+ * (to the end), "up", "down" or "remove". A move past either end changes
+ * nothing; the line never grows past RANK_MAX.
+ */
+export function changeLine(line, who, op) {
+  const out = line.slice();
+  const i = out.indexOf(who);
+  if (op === "add") { if (i < 0 && out.length < RANK_MAX) out.push(who); return out; }
+  if (i < 0) return out;
+  if (op === "remove") out.splice(i, 1);
+  else if (op === "up" && i > 0) [out[i - 1], out[i]] = [out[i], out[i - 1]];
+  else if (op === "down" && i < out.length - 1) [out[i + 1], out[i]] = [out[i], out[i + 1]];
+  return out;
+}
+
+/** "1st", "2nd", "3rd", "11th", "22nd". */
+export function ordinal(n) {
+  const t = n % 100;
+  const suffix = t >= 11 && t <= 13 ? "th" : ({ 1: "st", 2: "nd", 3: "rd" })[n % 10] || "th";
+  return n + suffix;
+}
+
+/** The hover on a row's place in line. */
+export function lineTitle(place, name) {
+  return `${name} is ${ordinal(place)} in PDF-Linker's line. While it runs, its OCR takes the cores ahead of every run behind it, and those runs drop to below-normal CPU priority so it is served first wherever the computer is short. The others keep working, just slower. It leaves the line when a run of it finishes.`;
+}
+
+/**
+ * The rows in the order Home lists them: the line first, in its order, then
+ * the runs going, then by the latest thing that happened to each (opened
+ * here, a run's trace, a file downloaded), newest first. A row is
+ * { name, opened, today, status, activity, rank } (rank 0: not in line).
  */
 export function sortRows(rows) {
+  const line = (r) => (r.rank > 0 ? r.rank : Infinity);
   const rank = (r) => (r.status && /^(running|starting)$/.test(r.status.state) ? 0 : 1);
   const latest = (r) => Math.max(r.opened || 0, (r.status && r.status.at) || 0, r.activity || 0);
-  return rows.slice().sort((a, b) => rank(a) - rank(b) || latest(b) - latest(a)
+  return rows.slice().sort((a, b) => (line(a) === line(b) ? 0 : line(a) < line(b) ? -1 : 1)
+    || rank(a) - rank(b) || latest(b) - latest(a)
     || String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: "base" }));
 }

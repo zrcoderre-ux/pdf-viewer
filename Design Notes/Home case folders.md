@@ -156,6 +156,57 @@ first click arming, the second sending the link and `"takeover"` with one
 nonce, the row then taken over); PDF-Linker's side in its
 `tests/test_reader_rerun_button.py`.
 
+## PDF-Linker's line (2026-11-04)
+
+The owner: "I want to add a way where I can, from the home screen on PDF+,
+indicate the priority order of cases running or to be run with PDF Linker.
+The higher priority indicates that i need it done sooner, and it should cut
+the line for access to cores and whatever other processing it needs that is
+in short supply." Each row (one Home can read) carries the line's controls
+(`lineControls`): **Prioritize** on a row not in line puts the folder at the
+end of it; a row in line shows its place ("1st", `ordinal`) with ▲, ▼ and ✕
+(up, down, out; `changeLine`). The line is listed first, in its order, ahead
+of the runs going (`sortRows`), and holds running folders and ones still to
+be run alike: a place given before the run starts is waiting for it.
+
+**Where the place lives.** A page cannot write anywhere machine-wide, and
+each PDF-Linker run reads only its own folder, so each folder's place is
+written into it as `PDF-Linker Priority.json`, `{"rank": n, "set": <ms>}`
+(`PRIORITY_FILE`, `priorityText`; PDF-Linker's `_run_priority_read` reads
+it, and the two change only in step). A change writes only the folders whose
+place moved, after asking leave to write into each on the click (PDF+ grants
+it; a browser may ask once per folder), and drops each from `downloadsSeen`
+so the next look reads it again; `readListing` reads the file's words
+(`parsePriority`), not just its time. A look that finds gaps (PDF-Linker
+removes a folder's place when its run finishes) closes them where Home may
+already write (`compactLine`; nothing is asked on a look), so each file says
+the place Home shows. The buttons find their folder's row of the latest
+look by `isSameEntry` (`currentRow`): a look that changes no text does not
+redraw, and its rows are new objects.
+
+**A place is spent once the folder finishes a run after it was given**
+(`liveRank`): a DONE stamp newer than `set` means the case is done, here and
+in PDF-Linker, and the finishing run also removes the file. A finished case
+put in line again (to be re-run) stands until that run finishes.
+
+**What PDF-Linker does with it** (its notes, "OCR", the line): a run ahead of
+another takes OCR cores first whenever one of its passes is short of them
+(the others narrow to one core between chunks, within about a page), and the
+others drop to below-normal CPU priority while it lives, so it is served
+first wherever the computer is short. A run with no place stands behind
+every run that has one. Nobody is stopped. A run already going reads a
+reorder within 15 seconds.
+
+**Clear** forgets the folders opened here except those in line, which could
+no longer be moved or taken out from Home once forgotten.
+
+Residuals. A folder in line that drops out of the twelve kept (twelve newer
+folders opened) is no longer listed and keeps its place until its run
+finishes. A PDF-Linker from before 2026-11-04 ignores the file. Tests:
+`test-case-folders.mjs` parts 4c (the file's words, spent places, the line's
+moves, the order) and 15 (Prioritize, ▲, ✕, the files written and removed,
+and a finish taking the case out).
+
 ## Cost
 
 Every `getFile` is a trip to the disk, so a listing reads times only off the
