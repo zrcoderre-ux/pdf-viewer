@@ -113,6 +113,49 @@ still listed. In PDF+ the handle comes through the shim's `MessageEvent.data`
 revival. Tests: `test-case-folders.mjs` parts 4b (the rule) and 9b (the list:
 started, then its ETA, with no nudge).
 
+**Take over (2026-11-04).** The owner: "can we make an easy way to do a
+takeover run in pdf linker when the previous run is hung, as evidenced by the
+stopped part way check in pdf+'s home screen?" PDF-Linker's launchers never
+take over (its notes, "Diagnosing a run that stops": a second double-click on
+a folder in flight is more often a misclick than a decision), so a hung run
+was ended only by the command line its refusal wrote into `pdf_linker.log`.
+Now a row whose status is "stalled" carries a **Take over** button beside it
+(`takeOverButton`; rows are `.case-row` divs holding the folder's button and
+this one, since a button cannot hold another). The misclick the launchers
+guard against is answered twice over: the button stands only where Home
+already reads the run as stopped part-way, and it acts only on a second click
+within `TAKEOVER_ARM_MS` (6 s; the first asks for write access and arms it). A
+second click rather than a `confirm()`, because Chrome opens an outside
+program only on a click, and a dialog can outlast that.
+
+`takeOverRun` looks at the folder afresh (a run that wrote since the last
+look is no longer "stalled", and nothing is sent), reads the launcher's
+folder token, opens the same `pdf-linker:` link the reader's Re-run opens
+(`openAppLink`; the shell's `beforeunload` stands aside for it as the
+reader's does), and writes the request file with state `"takeover"` where the
+reader writes `"go"` (`run-request.js`, shared with `rerunLinker`). PDF-Linker
+(`_serve_reader_request`, `_reader_take_over`) refuses where the folder's ETA
+marker or log was written in the last ten minutes (a live run's heartbeat
+stamps the marker every two minutes), else ends the run holding the folder's
+lock (`_take_over_folder`, as `--takeover` does; nothing where the run died
+and the lock went with it) and starts the folder's launcher as for "go". The
+request taken, the row says "Taken over — waiting for its ETA"
+(`withRunStart(..., "takeover")`) until the new run's marker replaces the
+stuck one's. Not answered in 90 s (the computer not set up for the button,
+the browser's question declined), the request file is taken back and the toast
+names `Register Reader Button.bat` and the log's command line.
+
+Residuals. A PDF-Linker from before 2026-11-04 reads `"takeover"` as
+`"cancel"`: it logs "called off" and starts nothing, and the row says "Taken
+over" until `RUN_START_WAIT_MS` lets it go and the run reads as stopped
+part-way again. A folder whose launcher records no folder token (written
+before the Re-run button) cannot be reached from here; the toast points to
+the log's command line. Tests: `test-case-folders.mjs` part 4b (the taken-over
+status and the stalled hover) and 14 (the button on a stalled row only, the
+first click arming, the second sending the link and `"takeover"` with one
+nonce, the row then taken over); PDF-Linker's side in its
+`tests/test_reader_rerun_button.py`.
+
 ## Cost
 
 Every `getFile` is a trip to the disk, so a listing reads times only off the

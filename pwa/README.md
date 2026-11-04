@@ -126,7 +126,13 @@ in the app and, once **Show today's from Downloads…** has pointed it at your
 Downloads folder, the case folders that came into it today, each with what
 PDF-Linker is doing there (running with its ETA, finished, stopped part-way,
 LEAKS.xlsx to answer, exports held as `.LEAK`, not run yet). Click one to open
-the whole folder in one reader.
+the whole folder in one reader. A run that looks stopped part-way has a
+**Take over** button beside it: click it, then click again within six seconds,
+and PDF-Linker ends the stuck run (if it still holds the folder) and starts
+the folder's `Re-run PDF-Linker`. What the stuck run finished stays done; the
+file it was on is redone. It uses the same one-time setup as the reader's
+Re-run button (`Register Reader Button.bat`), and PDF-Linker refuses it where
+the run has written its ETA file or log in the last ten minutes.
 
 In the extension, a web PDF can be edited too: **Save as…** saves a copy with
 the changes, and later saves go to that copy.
