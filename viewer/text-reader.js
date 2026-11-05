@@ -9118,8 +9118,15 @@ async function saveNow({ inFolder, offscreen, grant, seqAt }) {
   // is built back, so the pass over the pages on screen covers it.
   if (doc && (settled.size || sheetFakes.size) && reelHasShed()) {
     // …a long document's by the pages that carry a name in the clear, which
-    // is every page a name said to be faked can stand on.
-    if (reel.some(isLongMember)) { buildReviewPagesNow(); reelAllLive({ long: false }); }
+    // is every page a name said to be faked can stand on: only those carrying
+    // a name said to be faked (settledShedLeaks), where no worksheet row's
+    // yes is to be written too (a worksheet value is not read off a page not
+    // built, so those still take every page that carries anything).
+    if (reel.some(isLongMember)) {
+      if (sheetFakes.size) buildReviewPagesNow();
+      else buildSettledPagesNow();
+      reelAllLive({ long: false });
+    }
     else reelAllLive();
   }
   // THE TYPING IS FINISHED FIRST. The converter waits a quarter second after
@@ -10138,7 +10145,6 @@ function scanStale() {
     || scanned.sheet !== sheetParsed();
 }
 function paintHighlights() {
-  if (reviewOpen() && reel.some(isLongMember) && !reviewPre.running && !reviewPreloaded()) reviewPreloadSoon(); // a new document, key, flag or keep: the review's pages asked again
   refreshRawPages(); // a raw page's text, and the names standing in it
   if (!("highlights" in CSS) || typeof Highlight === "undefined") return;
   paintRowMarks();
@@ -10212,7 +10218,7 @@ const MARK_BUDGET = 8000; // ms of work, added up across the slices
 let marksOff = false;     // …and whether it has given up
 async function scanPassNow(pass) {
   const mark = { epoch: textEpoch, reals, flagged, phrases, keeps, master: masterKeeps, spots, sheet: sheetParsed() };
-  const preloaded = reviewPreloaded(); // a long document's review pages all built as this reading starts
+  const builtAt = shedBuilt.seq; // the names walk's pages built as this reading starts
   const moved = () => mark.epoch !== textEpoch || mark.reals !== reals || mark.flagged !== flagged
     || mark.phrases !== phrases || mark.keeps !== keeps || mark.master !== masterKeeps || mark.spots !== spots
     || mark.sheet !== sheetParsed();
@@ -10442,8 +10448,8 @@ async function scanPassNow(pass) {
   if (keptMoved && masterInfo) renderMaster();
   scanned = mark;
   paintedSeq = docSeq;
-  if (preloaded && reviewPreloaded()) reviewPre.painted = true;
-  // A long document's names arrive in batches (reviewPreload), and pages
+  shedBuilt.read = builtAt;
+  // A long document's pages are built as the names walk comes to them (awaitShedNames), and pages
   // built above the name in front put names before it: the walk stays on the
   // name it stands on, not on its old place in the count.
   if (leakHere && reel.some(isLongMember)) {
@@ -10676,7 +10682,7 @@ function stepLeak(dir = 1, { auto = false } = {}) {
   const rest = restOfFolder();
   // …and the walk's first stop in a long document waits for its names to be
   // in, so it is the document's first and not the first of the pages built.
-  if ((!hits.length || leakStep < 0) && awaitReviewPages(dir)) return;
+  if ((!hits.length || leakStep < 0) && awaitShedNames(dir)) return;
   if (!hits.length) {
     // Nothing here, but the folder is not this document: the walk goes on in
     // the next one that has something standing in the clear — as far as it is
@@ -10716,9 +10722,10 @@ function stepLeak(dir = 1, { auto = false } = {}) {
   // again. The names arrive with the paint, so where to stand is left as a
   // note for the paint to pick up (leakJump).
   const next = leakStep + dir;
-  // Off the end of a long document whose pages are still coming in is not
-  // off the end of it: the step waits for them and is taken then.
-  if ((next >= hits.length || next < 0) && awaitReviewPages(dir)) return;
+  // The next name standing on a page not built, before the next one built (or
+  // off the end of the pages built): that page is built and the step taken
+  // once it is read.
+  if (awaitShedNames(dir)) return;
   if ((next >= hits.length || next < 0) && rest.length) {
     jumpToDoc(dir < 0 ? rest[rest.length - 1] : rest[0]);
     return;
@@ -10749,7 +10756,7 @@ function showNamesBar(on) {
   // The walk looks at every page of the reel: whole documents are built back
   // for it, and a long one builds the pages it reads ("a long document under
   // the review").
-  if (on && !was) { reelAllLive({ long: false }); reviewPreloadSoon(); bounces = 0; }
+  if (on && !was) { reelAllLive({ long: false }); bounces = 0; }
   namesBar.hidden = !on;
   setBarHeight();
   if (was !== !!on) relayout();
@@ -14266,7 +14273,17 @@ async function sweepFolderNow() {
  * move on. Nothing owed, nothing written — an untouched document is left as
  * it stands, bytes and timestamp alike.
  */
+let jumpingTo = ""; // the document a jump is opening: a second click while it does waits on it
 async function jumpToDoc(row) {
+  // Asked again while the last jump is still saving or opening (a slow
+  // document, a click that seemed to do nothing): not a second save, which
+  // refuses under the first ("Wait for the save to finish", "Wait for the
+  // document to open") and stopped the walk saying the document was not written.
+  if (jumpingTo || saving || opening) { toast(`Still opening ${TD.docLabel(jumpingTo || row.doc.name)} — one moment.`); return; }
+  jumpingTo = row.doc.name;
+  try { await jumpToDocNow(row); } finally { jumpingTo = ""; }
+}
+async function jumpToDocNow(row) {
   if (!(await saveOnTheWayOut())) return;
   leakJump = true;
   bounces++; // …and nothing found in it yet: the walk counts the documents it opens
@@ -14306,27 +14323,6 @@ async function saveOnTheWayOut() {
   }
   return ok;
 }
-/**
- * A step the names on a long document's pages not built are owed: the names
- * bar opened (which builds them, reviewPreload) and the step taken once they
- * are in and read (renderLeakStatus). True where the step waits.
- */
-function awaitReviewPages(dir) {
-  if (!doc || !reel.some(isLongMember)) return false;
-  const pending = reviewPending();
-  const shedNames = liveShedLeaks().length > 0;
-  if (!pending && !shedNames) return false;
-  stepAfterReview = dir;
-  if (namesBar.hidden) { showNamesBar(true); return true; }
-  if (!pending) {
-    // Up, its batches in, and a page with a name still not built: built now,
-    // and the walk waits on the reading made of it.
-    buildReviewPagesNow();
-    reviewPre.painted = false;
-  }
-  renderNamesBar();
-  return true;
-}
 /** The hits of the last paint whose pages are still on the page. */
 function liveLeaks() {
   return leakHits.filter((h) => !isSettled(h.real) && h.range && h.range.startContainer && h.range.startContainer.isConnected);
@@ -14360,7 +14356,15 @@ function renderNamesBar() {
   setOnward(false);
   const i = Math.min(Math.max(leakStep, 0), hits.length - 1);
   const h = hits[i];
-  $("nb-count").textContent = `${i + 1} of ${hits.length}${reviewPending() ? "+ (reading the rest)" : ""}` + (answered ? ` · ${answered} answered here` : "");
+  // …counted with the names on a long document's pages not built, read off
+  // their text: where this one stands among all of them, not among the pages
+  // the walk has built so far. Those of the last reading, whether or not the
+  // page has been built since: a page built after it has no hit in `hits`
+  // until the next reading, and filtered out here it was counted nowhere.
+  const shed = shedLeakHits.filter((x) => !isSettled(x.real));
+  const at = shed.length ? hitPage(h) : -1;
+  const before = shed.length ? shed.filter((x) => x.page < at).length : 0;
+  $("nb-count").textContent = `${i + 1 + before} of ${hits.length + shed.length}` + (answered ? ` · ${answered} answered here` : "");
   $("nb-value").textContent = h.real;
   $("nb-value").title = "A real name from the key, standing in the clear";
   $("nb-where").textContent = leakWhere(h);
@@ -14370,7 +14374,7 @@ function renderNamesBar() {
       : "fake it writes its pseudonym");
   $("nb-answer").title = $("nb-answer").textContent; // it takes the room there is, and a long one is cut short
   $("nb-fake").disabled = !h.fake;
-  $("nb-prev").disabled = $("nb-next").disabled = hits.length < 2 && !restOfFolder().length;
+  $("nb-prev").disabled = $("nb-next").disabled = hits.length + shed.length < 2 && !restOfFolder().length;
   const same = sameNameStops(hits, i);
   const k = same.indexOf(i);
   $("nb-inst").textContent = same.length > 1 ? `· instance ${k + 1} of ${same.length}` : "· its only instance here";
@@ -20583,20 +20587,21 @@ function pageShedAt(i) {
 // whole. Each page not built is read off the text the reel keeps for it, the
 // way the folder sweep reads a file (textdoc.clearReading: a real name from
 // the key in the clear, or a flagged value; and a kept value, which the
-// master's list asks about), and the pages that carry one are built in
-// batches while the tab is idle, nearest the reading first
-// (`reviewPreload`). Those pages stay built while the review is up; every
-// other page is built and let go of with the reading as usual. Until the
-// batches are in, the document is not READ (`readHere`), so the walk waits
-// rather than taking a count made of half the document for the answer.
+// master's list asks about). The names walk builds the pages its next stop
+// stands on as it comes to them (`awaitShedNames`, `buildNamePages`): a step
+// whose next name is on a page not built builds that page and the next few
+// carrying one, and is taken once they are read. The pages built for it stay
+// built while the walk is up; every other page is built and let go of with
+// the reading as usual. Until a build is read, the document is not READ
+// (`readHere`), so the walk waits rather than stepping past a name.
 //
 // The worksheet's row in front is the other half: its value's pages are found
 // the same way and built at once when the row is gone to (`buildRowPages`),
 // so the row lands on its page the moment it is asked for.
-const REVIEW_BATCH = 8;      // pages built at a time by the review's preload
+const WALK_AHEAD = 8;        // pages carrying a name the names walk builds at a time, from its next stop on
 const ROW_PAGES_MAX = 150;   // …and the most a worksheet row's value may build, nearest its Where first
-let reviewPre = { running: false, again: false, done: null, doc: null, painted: false };
-let stepAfterReview = 0; // a step off the end of the names asked while the pages were coming in: taken when they are
+let shedBuilt = { seq: 0, read: 0 }; // the walk's builds, and the last one a reading of the marks was made after
+let stepAfterReview = 0; // a step asked while the pages it needs were being built and read: taken when they are
 let rowHold = new Set();     // the sections built for the row in front: kept while it is in front
 let reviewKeyMemo = null;
 /** What a page's answer for the review is made of: when any of it moves, every page is asked again. */
@@ -20606,20 +20611,8 @@ function reviewKey() {
   return (reviewKeyMemo = { reals, flagged, keeps, master: masterKeeps, rev });
 }
 /**
- * …and what the preload's answer is made of: the key and the flags. Not the
- * keeps — a keep only ever takes a name OUT of the clear, so the pages built
- * for the review are still every page it reads, and a walk deciding name
- * after name is not sent to wait on the document being read again at each.
- */
-let preloadKeyMemo = null;
-function preloadKey() {
-  const k = preloadKeyMemo;
-  if (k && k.reals === reals && k.flagged === flagged && k.rev === rev) return k;
-  return (preloadKeyMemo = { reals, flagged, rev });
-}
-/**
- * Whether the names walk is up: the review that reads every page carrying a
- * name in the clear, and so the one the preload builds them for. The LEAKS
+ * Whether the names walk is up: the review that walks every page carrying a
+ * name in the clear, and so the one that builds them as it goes. The LEAKS
  * worksheet alone does not walk those names (advanceLeak sweeps a page's
  * names only with the names bar up): its row's pages are built for it
  * (buildRowPages) and the rest of a long document is built and let go of with
@@ -20662,7 +20655,7 @@ function pageReview(i) {
   reviewReads.set(p, { lines: p.lines, key, read });
   return read;
 }
-/** Whether page `i` carries anything the review reads: what its preload builds and its trim keeps. */
+/** Whether page `i` carries anything the review reads: what its trim keeps, and a save builds for a name to fake. */
 function pageNeedsReview(i) {
   const r = pageReview(i);
   return r.values.length > 0 || r.flags > 0 || r.kept.length > 0;
@@ -20672,30 +20665,10 @@ let shedLeakHits = []; // the names in the clear on a long document's pages not 
 function liveShedLeaks() { return shedLeakHits.filter((h) => !isSettled(h.real) && pageShedAt(h.page)); }
 /** …and said to be faked, which a save still has to write. */
 function settledShedLeaks() { return shedLeakHits.filter((h) => isSettled(h.real) && pageShedAt(h.page)); }
-/** Whether the review's pages of the document in front are still being built. */
+/** Whether pages the names walk built are still to be read: the walk waits on that reading. */
 function reviewPending() {
   if (!reviewOpen() || !reel.some(isLongMember)) return false;
-  return !reviewPreloaded() || !reviewPre.painted;
-}
-/** The batches are in for the document in front, as the review's answer now stands… */
-function reviewPreloaded() { return !reviewPre.running && reviewPre.done === preloadKey() && reviewPre.doc === doc; }
-/**
- * …and the marks have been read over them: a reading begun before the last
- * batch went up is a count of part of the document (scanPassNow sets
- * `painted` only for a reading begun after).
- */
-const reviewPreloadSoon = debounce(() => reviewPreload(), 60);
-async function reviewPreload() {
-  if (!reviewOpen() || !reel.some(isLongMember) || reviewPreloaded()) return;
-  if (reviewPre.running) { reviewPre.again = true; return; }
-  reviewPre.running = true;
-  try { await duringAsync("building the pages the review reads", (pass) => reviewPreloadNow(pass)); }
-  catch (e) { console.error("[text-reader] the review's pages could not be built:", e); reviewPre.done = preloadKey(); reviewPre.doc = doc; reviewPre.painted = false; }
-  finally { reviewPre.running = false; }
-  if (reviewPre.again) { reviewPre.again = false; reviewPreload(); return; }
-  // In, or given up on: the reading the walk waits on is made now.
-  paintHighlights();
-  renderLeakStatus();
+  return shedBuilt.read !== shedBuilt.seq;
 }
 /** The pages of `secs` built, each by its own member's lists. */
 function buildSectionsByMember(secs) {
@@ -20708,37 +20681,81 @@ function buildSectionsByMember(secs) {
   }
   for (const [m, list] of by) { buildShedSections(m, list); m.shed = false; }
 }
-async function reviewPreloadNow(pass) {
-  const key = preloadKey(), mine = doc;
-  const at = readingPage();
-  const secs = [...pagesEl.querySelectorAll(".tpage.shed")]
-    .filter((sec) => isLongMember(reelMemberOf(Number(sec.dataset.index))))
-    .sort((a, b) => Math.abs(Number(a.dataset.index) - at) - Math.abs(Number(b.dataset.index) - at));
-  let batch = [], built = 0, laid = performance.now();
-  const flush = (lay) => {
-    if (batch.length) { const b = batch; batch = []; keepReadingOver(() => buildSectionsByMember(b)); built += b.length; }
-    // The pages built are shaped and laid on the grid once a second, not at
-    // every batch: a pass over the pages built is the cost of one batch
-    // again, and twelve hundred pages is a hundred and fifty batches.
-    if (lay || performance.now() - laid > 1000) { keepReadingOver(() => afterShedChange()); laid = performance.now(); }
-  };
-  let clock = await idleClock();
-  let k = 0;
-  for (const sec of secs) {
-    if (doc !== mine || !reviewOpen() || preloadKey() !== key) { flush(true); return; }
-    k++;
-    if (sec.isConnected && sec.classList.contains("shed") && pageNeedsReview(Number(sec.dataset.index))) batch.push(sec);
-    if (batch.length >= REVIEW_BATCH) flush(false);
-    if (!clock || clock.timeRemaining() < SLICE_LEFT) {
-      flush(false);
-      noteDoing(pass, `building the pages the review reads (${k} of ${secs.length} read, ${built} built)`);
-      clock = await idleClock();
-    }
+/** The reel index of the page a hit stands on. */
+function hitPage(h) {
+  const n = h && h.range && h.range.startContainer;
+  const el = n && (n.nodeType === 1 ? n : n.parentElement);
+  const sec = el && el.closest && el.closest(".tpage");
+  return sec ? Number(sec.dataset.index) : -1;
+}
+/**
+ * The pages carrying a name in the clear not built, from `page` on in `dir`
+ * (the page itself first), WALK_AHEAD of them, built now; the walk waits for
+ * the reading made after them (reviewPending). True where any was built.
+ */
+function buildNamePages(page, dir) {
+  const want = [...new Set(liveShedLeaks().map((h) => h.page))]
+    .filter((p) => (dir < 0 ? p <= page : p >= page))
+    .sort((a, b) => (dir < 0 ? b - a : a - b))
+    .slice(0, WALK_AHEAD);
+  const byIndex = sectionsByIndex();
+  const secs = want.map((i) => byIndex.get(i)).filter((sec) => sec && sec.classList.contains("shed"));
+  if (!secs.length) return false;
+  shedBuilt.seq++;
+  keepReadingOver(() => { buildSectionsByMember(secs); afterShedChange(); });
+  return true;
+}
+/**
+ * A step of the names walk whose next name may stand on a page not built:
+ * the next name the pages built offer, or none, against the nearest page
+ * not built that carries one (shedLeakHits, read off its text). Where that
+ * page comes first, it and the next few are built and the step is taken once
+ * they are read (renderLeakStatus, stepAfterReview). So the walk's first stop
+ * in a long document is the document's first name, a step goes to the next
+ * name down the document wherever it stands, and nothing waits on the whole
+ * document being built. True where the step waits.
+ */
+function awaitShedNames(dir) {
+  if (!doc || !reel.some(isLongMember)) return false;
+  if (reviewPending()) {
+    stepAfterReview = dir;
+    if (namesBar.hidden) showNamesBar(true);
+    else renderNamesBar();
+    return true;
   }
-  flush(true);
-  reviewPre.done = key;
-  reviewPre.doc = mine;
-  reviewPre.painted = false; // …and the reading the walk waits on is the one made after this
+  const shed = liveShedLeaks();
+  if (!shed.length) return false;
+  const hits = liveLeaks();
+  const nearest = (from) => {
+    let best = null;
+    for (const h of shed) if (dir < 0 ? h.page < from : h.page > from) { if (best == null || (dir < 0 ? h.page > best : h.page < best)) best = h.page; }
+    return best;
+  };
+  const first = !hits.length || leakStep < 0 || leakStep >= hits.length;
+  let from = first ? (dir < 0 ? Infinity : -Infinity) : hitPage(hits[leakStep]);
+  let cand = first ? (dir < 0 ? hits[hits.length - 1] : hits[0]) : hits[leakStep + dir];
+  let s = nearest(from);
+  // Off the end of the pages built with nothing not built past it: round to
+  // the other end, as the walk goes round, unless a page there comes first.
+  if (s == null && !cand && !first) {
+    from = dir < 0 ? Infinity : -Infinity;
+    cand = dir < 0 ? hits[hits.length - 1] : hits[0];
+    s = nearest(from);
+  }
+  if (s == null) return false;
+  if (cand) { const c = hitPage(cand); if (c >= 0 && (dir < 0 ? c > s : c < s)) return false; }
+  if (!buildNamePages(s, dir)) return false;
+  stepAfterReview = dir;
+  if (namesBar.hidden) showNamesBar(true);
+  else renderNamesBar();
+  return true;
+}
+/** The pages not built carrying a name said to be faked, built now: for a save, which writes each one. */
+function buildSettledPagesNow() {
+  const want = new Set(settledShedLeaks().map((h) => h.page));
+  if (!want.size) return;
+  const secs = [...pagesEl.querySelectorAll(".tpage.shed")].filter((sec) => want.has(Number(sec.dataset.index)));
+  if (secs.length) keepReadingOver(() => { buildSectionsByMember(secs); afterShedChange(); });
 }
 /** Every page the review reads, built now: for a save, which has to reach them all at once. */
 function buildReviewPagesNow() {

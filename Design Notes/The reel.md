@@ -194,7 +194,9 @@ the freeze and kept the last of those, so the review builds what it reads:
   near the reading the count was empty and could not start the walk), and
   `settledInTheClear` and `decidedOwed` light the save for a name said to be
   faked on a page not built.
-- **The review's pages are built in batches** (`reviewPreload`). With either
+- **The review's pages are built in batches** (`reviewPreload`; removed
+  since: the names walk now builds its next stop's pages as it comes to
+  them, "The names walk builds its next stop's pages" below). With either
   bar up over a reel holding a long document, the pages not built are asked
   `pageNeedsReview` nearest the reading first, and those carrying something are
   built `REVIEW_BATCH` (8) at a time on the idle clock, the reading held
@@ -257,8 +259,8 @@ bar. Under the worksheet alone a long document is built and let go of with the
 reading as with no bar up, and the trim holds only the row's pages and the
 sections its marks stand in (`reviewHitSections({ names: false })`). The names
 in the clear on pages not built are still counted off their text
-(`shedLeakHits`). Opening the names bar over the worksheet starts the preload
-as before.
+(`shedLeakHits`). Opening the names bar over the worksheet started the preload
+as before (the preload is gone since: below).
 
 `rowRanges` also no longer flattens every built body for the row's value. A
 body whose `textContent` lacks one of the ASCII word runs of the value's first
@@ -274,3 +276,43 @@ Measured on the same export: the bar up, no holds (was 30 s of them); scrolling
 under it, none (was 16); a row answered, 0–2 holds of at most 80 ms (was about
 300 ms); about 30 pages built (was 1,000). `test-long-document.mjs` checks that
 a far page with a name in the clear stays unbuilt under the worksheet alone.
+
+### The names walk builds its next stop's pages (`awaitShedNames`, `buildNamePages`)
+
+The owner, 2026-11-05: "The pdf viewer warning click to go on is also very
+slow." The status bar's "⚠ none left here, and N in 1 other document — click
+to go on" opens that document and stands the walk on its first name. Into a
+1,000-page export naming someone on every page, that took 48–72 s. The walk's
+first stop waited for the preload to build every page carrying a name, and the
+preload's once-a-second `afterShedChange` (citations over every page built)
+held the tab 400–500 times on the way.
+
+The preload is gone. The walk asks, at each step, whether the next name the
+built pages offer comes before the nearest page not built that carries one
+(`liveShedLeaks`, read off its text). Where the page not built comes first,
+it and the next `WALK_AHEAD` (8) pages carrying a name in the step's direction
+are built (`buildNamePages`). The step is then taken once the marks have been
+read over them (`shedBuilt`: `reviewPending` is a build not yet read, and
+`renderLeakStatus` takes `stepAfterReview`). The first stop is the document's
+first name, a step goes to the next name wherever it stands, the walk goes
+round from the end to the first page and back from the first to the last, and
+the scan pass keeps the walk on the name it stands on as pages are built
+around it. The bar counts the names on pages not built from the last reading,
+filtered by page state, so a page built and not yet read is not counted twice
+or left out.
+
+The save that writes names said to be faked used to build every page carrying
+a name (`buildReviewPagesNow`). It now builds only the pages carrying a settled
+one (`buildSettledPagesNow`), unless a worksheet row's yes is to be written
+too, since worksheet values are not read off pages not built.
+
+A second click while a jump is still saving or opening is not a second save
+(`jumpToDoc`, `jumpingTo`): it used to be refused under the first ("Wait for
+the save to finish", "Wait for the document to open"), and the walk stopped
+saying the document "was not written". It now says it is still opening.
+
+Measured on the same export: the click to the first name 1.9–2.3 s (was
+48–72 s), 12 pages built (was 1,000); each step 0.2–0.3 s, and 0.6–1.4 s
+where it builds the next eight. Walked forward over 30 names, back over 12
+across the wrap, and over a name every 37th page, each stop the next page in
+order and the count right.

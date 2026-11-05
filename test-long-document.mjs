@@ -441,6 +441,7 @@ async function run() {
     await q.waitForFunction((n) => document.getElementById("nb-count").textContent === `1 of ${n}`, NAMED.length, { timeout: 30000 }).catch(() => {});
     await q.waitForTimeout(2500);
     check("…› into the long one: on its first name, every one counted, not the pages built first", [(await rv()).nb, await mark()], [`Corwin Ashdale 1 of ${NAMED.length}`, { text: "Corwin Ashdale", page: NAMED[0], onScreen: true }]);
+    check("…with only the pages near it built, not every page carrying a name", (await rv()).live < 40, true);
     // Keep just this one: the walk goes straight on to the next, with no
     // waiting on the document being read again (a keep only takes names out
     // of the clear), and the count says one fewer.
