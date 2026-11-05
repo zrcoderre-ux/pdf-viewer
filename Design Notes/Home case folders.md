@@ -227,6 +227,41 @@ and would put real names back. A folder last run by a PDF-Linker older than
 the copy has no file and no button; PDF-Linker's `--share-log` writes one from
 its log. Tests: `test-case-folders.mjs` part 16.
 
+## Word documents (2026-11-05)
+
+The owner: "Add a button to open the word document(s) inside that case folder
+to the pdf+ home screen". A page cannot start Word, so the button stands only
+in PDF+ (`canOpenWord`: the bridge's `openDocument`, absent from an installed
+PDF+ older than the app files it runs). preload.js reads the file's path
+(`webUtils.getPathForFile`, on a File the page holds) and main.js
+(`pdfplus:open-document`) opens it with `shell.openPath` only where it is an
+existing Word-type file (`WORD_DOC`: .docx .docm .doc .dotx .rtf), never
+Word's `~$` lock file, and only for PDF+'s own pages. The documents are the
+folder's own, not its subfolders' (`wordDocs`); one opens at the click,
+several are listed under the button with Open all. The list stands on the
+page (`position: fixed`), not inside the row, since the case list's box
+clipped it; a scroll or a resize closes it. Tests: `test-case-folders.mjs`
+part 17 (with a stand-in bridge; the desktop test does not cover it).
+
+## When the run going started (2026-11-05)
+
+The owner: "update the home screen case folders run to show what time the
+run started and how long it has been going". Nothing Home read said so: the
+ETA marker is renamed as the run goes and re-stamped every two minutes. Every
+PDF-Linker opens its run with a "Run started for folder:" line in
+pdf_linker.log, so the start is that line's time (`lastRunStart`), read only
+while an ETA marker stands. `readRunStart` (app-web.js) reads the log from its
+end in 512 KB pieces (up to 64 MB) until it finds one, then on later looks
+only what the log added, by folder name and the log's size; a log that
+shrank is read again from its end. A start older than the last DONE stamp is
+the last run's and is not shown. The row's second line says it ("Started
+1:04 PM · going 1h 15m", `runningSub`), for a run going and one stopped
+part-way, whose hover says it too; the pill keeps the ETA, which a longer
+pill cut off. Tests: `test-case-folders.mjs` parts 4b2 and 18. The test's
+part 14 moves the clock two hours on, so run late in the evening it crosses
+midnight and the folder is no longer "today": run it with `TZ` set to a zone
+where it is daytime.
+
 ## Cost
 
 Every `getFile` is a trip to the disk, so a listing reads times only off the

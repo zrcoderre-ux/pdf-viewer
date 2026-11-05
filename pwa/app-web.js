@@ -1126,12 +1126,45 @@ async function readListing(dir) {
     try { const file = await f.entry.getFile(); out.push({ name: f.name, size: file.size, at: file.lastModified }); }
     catch { out.push({ name: f.name }); }
   }
+  // When the run going started, read off pdf_linker.log only while an ETA
+  // marker says a run is going (case-folders.js, lastRunStart).
+  let runStart = 0;
+  const logEntry = files.find((f) => f.name.toLowerCase() === "pdf_linker.log");
+  if (logEntry && files.some((f) => { const m = caseLib.runMarker(f.name); return m && m.kind === "ETA"; })) {
+    try { runStart = await readRunStart(dir.name, logEntry.entry); } catch { runStart = 0; }
+  }
   let held = 0;
   if (textDir) {
     try { for await (const [name, entry] of textDir.entries()) if (entry.kind === "file" && /\.txt\.leak$/i.test(name)) held++; }
     catch { /* unreadable: nothing held that can be seen */ }
   }
-  return { files: out, dirs, held, priority };
+  return { files: out, dirs, held, priority, runStart };
+}
+
+// The last "Run started" line of each folder's log, by folder name: the log
+// only grows during a run, so after the first look only what it added since
+// is read. A log that shrank (a new one) is read again from its end.
+const RUN_START_CHUNK = 512 * 1024;
+const RUN_START_SCAN_MAX = 64 * 1024 * 1024;
+const runStartSeen = new Map();
+async function readRunStart(key, entry) {
+  const file = await entry.getFile();
+  const size = file.size;
+  const was = runStartSeen.get(key);
+  if (was && was.size === size) return was.start;
+  let start = 0;
+  if (was && size > was.size) {
+    start = caseLib.lastRunStart(await file.slice(Math.max(0, was.size - 200), size).text()) || was.start;
+  } else {
+    // From the end back, a chunk at a time, each reaching a little into the
+    // next so a line cut by a chunk's end is read whole.
+    for (let end = size; end > 0 && size - end < RUN_START_SCAN_MAX && !start; end -= RUN_START_CHUNK) {
+      const from = Math.max(0, end - RUN_START_CHUNK);
+      start = caseLib.lastRunStart(await file.slice(from, Math.min(size, end + 200)).text());
+    }
+  }
+  runStartSeen.set(key, { size, start });
+  return start;
 }
 
 // Downloads holds every case ever downloaded, so each folder in it is read by
@@ -1284,6 +1317,8 @@ async function renderCaseFoldersNow() {
     const where = [];
     if (r.today) where.push("In Downloads today");
     if (r.opened) where.push("Opened " + caseLib.whenText(r.opened, now));
+    // A run going: when it started and how long it has gone (runningSub).
+    if (st.sub) where.unshift(st.sub);
     return { r, st, where: where.join(" · ") };
   });
   // Redrawn only where something changed (the text of a row, Downloads' link).

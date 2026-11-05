@@ -12,6 +12,7 @@
 // the disk; the others carry only their name.
 
 import { runMarker, isKeyName, isExportName, TEXT_SUBFOLDER } from "./textdoc.js";
+export { runMarker };
 
 // A run with nothing written for this long may be a dead one. The ETA marker
 // alone is not that sign: PDF-Linker rewrites it only after each PDF, and
@@ -135,6 +136,35 @@ export function isToday(name, listing, now, zipsToday = new Set()) {
   return zipsToday.has(String(name || "").toLowerCase());
 }
 
+// ---- When the run going started --------------------------------------------
+//
+// The owner (2026-11-05): "update the home screen case folders run to show
+// what time the run started and how long it has been going". Nothing Home
+// already read says when a run began: the ETA marker is renamed as the run
+// goes and re-stamped every two minutes. Every PDF-Linker opens its run with
+// a "Run started for folder:" line in pdf_linker.log, at the time it was
+// written, so the start is that line's time (`lastRunStart`); app-web.js
+// reads the log from its end until it finds one, and after that only what
+// the run has added (`readRunStart`).
+const RUN_START_RE = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d),(\d{3}) \[[A-Z]+\] Run started for folder:/gm;
+
+/** The local time (ms) of the last "Run started for folder:" line in `text`, or 0. */
+export function lastRunStart(text) {
+  let at = 0;
+  for (const m of String(text || "").matchAll(RUN_START_RE)) {
+    at = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], +m[7]).getTime();
+  }
+  return at;
+}
+
+/** A duration as the row says it: "45m", "3h 12m", "under a minute". */
+export function durationText(ms) {
+  const min = Math.floor(Math.max(0, ms) / 60000);
+  if (min < 1) return "under a minute";
+  const h = Math.floor(min / 60);
+  return h ? `${h}h ${min % 60}m` : `${min}m`;
+}
+
 /**
  * What PDF-Linker is doing in the folder, read off its traces:
  *   { state, label, at, leaks, held, key }
@@ -171,9 +201,14 @@ export function folderStatus(listing, now) {
   const base = { leaks, held, key: !!key };
   if (eta && (!done || eta.at > done.at)) {
     const logAt = log && log.at > eta.at ? log.at : 0;
+    // The start the log names, where it belongs to this run: after the last
+    // finish, and not in the future.
+    const rs = (listing && listing.runStart) || 0;
+    const started = rs && rs <= now && (!done || rs > done.at) ? rs : 0;
     return {
       ...base, state: runLooksStalled(eta, logAt, now) ? "stalled" : "running",
       label: eta.label, at: eta.at, alive: Math.max(eta.at, logAt),
+      ...(started ? { started } : {}),
     };
   }
   if (done) return { ...base, state: "done", label: done.label, at: done.at };
@@ -262,6 +297,11 @@ function agoText(ms) {
  * The status as Home says it: { text, title, tone } — `tone` the pill's
  * colour ("run", "warn", "ok", "idle"), `title` the longer word on hover.
  */
+/** The row's second line for a run going: "Started 1:03 PM · going 1h 15m", or "" with no start. */
+export function runningSub(st, now) {
+  return st && st.started ? `Started ${whenText(st.started, now)} · going ${durationText(now - st.started)}` : "";
+}
+
 export function statusText(st, now) {
   const extras = [];
   if (st.held) extras.push(`${st.held} held as .LEAK`);
@@ -285,14 +325,16 @@ export function statusText(st, now) {
       const logNote = st.alive > st.at ? `, pdf_linker.log ${agoText(now - st.alive)}` : "";
       return {
         text: `Running — ETA ${st.label}`,
-        title: `PDF-Linker is running on this folder (its ETA file was updated ${agoText(now - st.at)}${logNote}). Opening it now shows the last run's text, which the run is replacing.`,
+        sub: runningSub(st, now),
+        title: `PDF-Linker is running on this folder${st.started ? `: it started at ${whenText(st.started, now)} and has been going ${durationText(now - st.started)}` : ""} (its ETA file was updated ${agoText(now - st.at)}${logNote}). Opening it now shows the last run's text, which the run is replacing.`,
         tone: "run",
       };
     }
     case "stalled":
       return {
         text: `Stopped part-way? ETA ${st.label}`,
-        title: `Neither the ETA file nor pdf_linker.log has been written for ${agoText(now - (st.alive || st.at)).replace(/ ago$/, "")}${projectedFinish(st.label, st.at) ? ", and the finish it projected has passed" : ""}: a run that stopped part-way leaves its ETA file behind. pdf_linker.log in the folder says how it ended. Take over ends the run if it is still holding the folder and starts it again; what it finished stays done.`,
+        sub: runningSub(st, now),
+        title: `${st.started ? `The run started at ${whenText(st.started, now)}, ${durationText(now - st.started)} ago. ` : ""}Neither the ETA file nor pdf_linker.log has been written for ${agoText(now - (st.alive || st.at)).replace(/ ago$/, "")}${projectedFinish(st.label, st.at) ? ", and the finish it projected has passed" : ""}: a run that stopped part-way leaves its ETA file behind. pdf_linker.log in the folder says how it ended. Take over ends the run if it is still holding the folder and starts it again; what it finished stays done.`,
         tone: "warn",
       };
     case "done":

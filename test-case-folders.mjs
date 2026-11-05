@@ -24,6 +24,7 @@ import {
   withRunStart, RUN_START_WAIT_MS,
   opensInPdfMode, SETTLED_MS, finishedOvernight, projectedFinish, runLooksStalled,
   PRIORITY_FILE, RANK_MAX, priorityText, parsePriority, liveRank, changeLine, ordinal, lineTitle,
+  lastRunStart, durationText, whenText, runningSub,
 } from "./viewer/case-folders.js";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
@@ -155,6 +156,28 @@ console.log("4b. a re-run the reader has just started (withRunStart)");
   check("a take over: the stuck run's ETA still standing, shown as taken over",
     [took.status.state, took.keep, statusText(took.status, NOW).text], ["starting", true, "Taken over — waiting for its ETA"]);
   check("…the stalled row's hover offers it", /Take over ends the run/.test(statusText(stalled, NOW).title), true);
+}
+
+console.log("4b2. when the run going started, and how long it has gone");
+{
+  const at = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")},123`;
+  const first = new Date(NOW - 5 * 3600000), second = new Date(NOW - (3 * 60 + 12) * MIN);
+  const log = `${at(first)} [INFO] Run started for folder: C:\\Cases\\X (provider=lexis) — on PC\n${at(first)} [INFO] Done: 3 succeeded\n`
+    + `${at(second)} [INFO] Run started for folder: C:\\Cases\\X (provider=lexis) — on PC\n${at(second)} [INFO]     Pre-scan 1/15: a.pdf\n`
+    + "  Run started for folder: an indented line is no start\n";
+  check("the start is the log's last \"Run started\" line, to the millisecond", lastRunStart(log), second.getTime() + 123);
+  check("…none in the log: 0", lastRunStart("2026-11-05 10:00:00,000 [INFO] Processing: a.pdf\n"), 0);
+  check("durations as the row says them", [durationText(20000), durationText(45 * MIN), durationText(192 * MIN)], ["under a minute", "45m", "3h 12m"]);
+  const going = folderStatus({ files: [f("ETA (estimating...).txt", 0)], runStart: NOW - 192 * MIN }, NOW);
+  check("a run going says when it started and how long it has gone, on the row's second line",
+    [statusText(going, NOW).text, statusText(going, NOW).sub], ["Running — ETA (estimating...)", `Started ${whenText(NOW - 192 * MIN, NOW)} · going 3h 12m`]);
+  check("…and its hover too", /it started at .* and has been going 3h 12m/.test(statusText(going, NOW).title), true);
+  check("…no start in the log: as before", statusText(folderStatus({ files: [f("ETA (estimating...).txt", 0)] }, NOW), NOW).sub, "");
+  check("…a start from before the last finish is the last run's, not this one's",
+    folderStatus({ files: [f("ETA (estimating...).txt", 0), f("DONE 2.40PM.txt", 30 * MIN)], runStart: NOW - 60 * MIN }, NOW).started, undefined);
+  const stuck = folderStatus({ files: [f("ETA ~2.10PM (2 of 9).txt", 60 * MIN)], runStart: NOW - 300 * MIN }, NOW);
+  check("a run stopped part-way says when it started, on its second line and in its hover",
+    [statusText(stuck, NOW).sub, statusText(stuck, NOW).title.startsWith(`The run started at ${whenText(NOW - 300 * MIN, NOW)}, 5h 0m ago.`)], [`Started ${whenText(NOW - 300 * MIN, NOW)} · going 5h 0m`, true]);
 }
 
 console.log("4c. PDF-Linker's line");
@@ -538,6 +561,36 @@ async function browserPart() {
     await shell.waitForFunction(() => window.__openedDocs.length === 4, null, { timeout: 5000 });
     check("…Open all opens every one", await shell.evaluate(() => window.__openedDocs.slice(2)), ["Opposition draft.docx", "Reply draft.docx"]);
     check("…and no click opened a reader or a folder", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), tabsWord);
+    console.log("18. a run going says when it started, read off the end of pdf_linker.log");
+    const stamp = (ms) => { const d = new Date(ms); const p = (n, w = 2) => String(n).padStart(w, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())},000`; };
+    const t0 = Date.now() - 75 * 60000;
+    await shell.evaluate(async ({ head, filler }) => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const delta = await dl.getDirectoryHandle("Case Delta", { create: true });
+      const put = async (name, data) => { const w = await (await delta.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); };
+      await put("Complaint.pdf", "%PDF-1.4 stand-in");
+      // A long log: the start line far from its end, past one 512 KB look.
+      await put("pdf_linker.log", head + filler);
+      await put("ETA ~4.10PM (1 of 3).txt", "");
+      window.dispatchEvent(new Event("focus"));
+    }, { head: `${stamp(t0)} [INFO] Run started for folder: C:\\Cases\\Delta (provider=lexis) — on PC\n`, filler: `${stamp(t0)} [INFO]     Pre-scan 1/3: a.pdf\n`.repeat(20000) });
+    const deltaRow = "#case-list .case-row:has(.ri-name:text-is('Case Delta'))";
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-row")].some((r) => r.querySelector(".ri-name").textContent === "Case Delta" && r.querySelector(".ci-where").textContent.startsWith("Started")), null, { timeout: 10000 });
+    const sub = await shell.textContent(`${deltaRow} .ci-where`);
+    check("the row says when the run started and how long it has gone", /^Started \d{1,2}:\d\d\s?[AP]M · going 1h 1[45]m · In Downloads today$/.test(sub) ? "ok" : sub, "ok");
+    check("…and its pill still shows the ETA whole", await shell.$eval(`${deltaRow} .ci-status`, (e) => e.scrollWidth <= e.clientWidth), true);
+    const t1 = Date.now() - 2 * 60000;
+    await shell.evaluate(async (line) => {
+      const delta = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Delta");
+      const fh = await delta.getFileHandle("pdf_linker.log");
+      const size = (await fh.getFile()).size;
+      const w = await fh.createWritable({ keepExistingData: true }); await w.seek(size); await w.write(line); await w.close();
+      const m = await (await delta.getFileHandle("ETA ~4.12PM (1 of 3).txt", { create: true })).createWritable(); await m.close();
+      await delta.removeEntry("ETA ~4.10PM (1 of 3).txt");
+      window.dispatchEvent(new Event("focus"));
+    }, `${stamp(t1)} [INFO] Run started for folder: C:\\Cases\\Delta (provider=lexis) — on PC\n`);
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-row")].some((r) => r.querySelector(".ri-name").textContent === "Case Delta" && /going (2|3)m/.test(r.querySelector(".ci-where").textContent)), null, { timeout: 10000 });
+    check("…a new run's start, added to the log, is read on the next look", /^Started .* · going (2|3)m/.test(await shell.textContent(`${deltaRow} .ci-where`)), true);
     check("no page errors", errors, []);
     await app.close();
   } finally {
