@@ -554,9 +554,10 @@ app, which routes it to the reader tab.
   in the case. It now leaves those words as they are, says so in the status
   bar and in a message naming the pair, and keeps writing the name as the key
   says when you type it. A full PDF-Linker run gives the name a stand-in of
-  its own (current PDF-Linker repairs such a key as it reads it): **Re-run
-  PDF-Linker** does one on its first click after PDF-Linker is updated, or
-  once `PDF-Linker Run Record.json` is deleted from the folder.
+  its own (current PDF-Linker repairs such a key as it reads it): delete
+  `PDF-Linker Run Record.json` from the folder, and the next click of
+  **Re-run PDF-Linker** does one. (An update to PDF-Linker makes that click a
+  full run only when the update changes how exports are written.)
   The last few keys are
   remembered, so a lone `.txt` can be read under a key already loaded. A real
   name from the key standing **unfaked** in an export is counted in the status
