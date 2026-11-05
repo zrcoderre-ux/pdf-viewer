@@ -24,6 +24,7 @@ import {
   withRunStart, RUN_START_WAIT_MS,
   opensInPdfMode, SETTLED_MS, finishedOvernight, projectedFinish, runLooksStalled,
   PRIORITY_FILE, RANK_MAX, priorityText, parsePriority, liveRank, changeLine, ordinal, lineTitle,
+  lastRunStart, durationText, whenText, runningSub,
 } from "./viewer/case-folders.js";
 
 const REPO = path.dirname(fileURLToPath(import.meta.url));
@@ -155,6 +156,28 @@ console.log("4b. a re-run the reader has just started (withRunStart)");
   check("a take over: the stuck run's ETA still standing, shown as taken over",
     [took.status.state, took.keep, statusText(took.status, NOW).text], ["starting", true, "Taken over — waiting for its ETA"]);
   check("…the stalled row's hover offers it", /Take over ends the run/.test(statusText(stalled, NOW).title), true);
+}
+
+console.log("4b2. when the run going started, and how long it has gone");
+{
+  const at = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")},123`;
+  const first = new Date(NOW - 5 * 3600000), second = new Date(NOW - (3 * 60 + 12) * MIN);
+  const log = `${at(first)} [INFO] Run started for folder: C:\\Cases\\X (provider=lexis) — on PC\n${at(first)} [INFO] Done: 3 succeeded\n`
+    + `${at(second)} [INFO] Run started for folder: C:\\Cases\\X (provider=lexis) — on PC\n${at(second)} [INFO]     Pre-scan 1/15: a.pdf\n`
+    + "  Run started for folder: an indented line is no start\n";
+  check("the start is the log's last \"Run started\" line, to the millisecond", lastRunStart(log), second.getTime() + 123);
+  check("…none in the log: 0", lastRunStart("2026-11-05 10:00:00,000 [INFO] Processing: a.pdf\n"), 0);
+  check("durations as the row says them", [durationText(20000), durationText(45 * MIN), durationText(192 * MIN)], ["under a minute", "45m", "3h 12m"]);
+  const going = folderStatus({ files: [f("ETA (estimating...).txt", 0)], runStart: NOW - 192 * MIN }, NOW);
+  check("a run going says when it started and how long it has gone, on the row's second line",
+    [statusText(going, NOW).text, statusText(going, NOW).sub], ["Running — ETA (estimating...)", `Started ${whenText(NOW - 192 * MIN, NOW)} · going 3h 12m`]);
+  check("…and its hover too", /it started at .* and has been going 3h 12m/.test(statusText(going, NOW).title), true);
+  check("…no start in the log: as before", statusText(folderStatus({ files: [f("ETA (estimating...).txt", 0)] }, NOW), NOW).sub, "");
+  check("…a start from before the last finish is the last run's, not this one's",
+    folderStatus({ files: [f("ETA (estimating...).txt", 0), f("DONE 2.40PM.txt", 30 * MIN)], runStart: NOW - 60 * MIN }, NOW).started, undefined);
+  const stuck = folderStatus({ files: [f("ETA ~2.10PM (2 of 9).txt", 60 * MIN)], runStart: NOW - 300 * MIN }, NOW);
+  check("a run stopped part-way says when it started, on its second line and in its hover",
+    [statusText(stuck, NOW).sub, statusText(stuck, NOW).title.startsWith(`The run started at ${whenText(NOW - 300 * MIN, NOW)}, 5h 0m ago.`)], [`Started ${whenText(NOW - 300 * MIN, NOW)} · going 5h 0m`, true]);
 }
 
 console.log("4c. PDF-Linker's line");
@@ -476,6 +499,98 @@ async function browserPart() {
     });
     await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-line-add`, { timeout: 10000 });
     check("a run that finishes after its place was given takes the case out of the line", await shell.$$eval("#case-list .ci-place", (e) => e.length), 0);
+    console.log("16. the log to share: offered where PDF-Linker wrote it, opened over Home as plain text");
+    check("…no row offers it before the file is there", await shell.$$eval("#case-list .ci-share-log", (b) => b.length), 0);
+    const SHARED = "2026-11-05 13:33:58,374 [INFO] Processing: Declaration of […].pdf\n2026-11-05 13:34:01,002 [INFO]   Pseudonymize: leak scans done in 6s\n";
+    await shell.evaluate(async (body) => {
+      const alpha = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Alpha");
+      const w = await (await alpha.getFileHandle("PDF-Linker Log to Share.txt", { create: true })).createWritable(); await w.write(body); await w.close();
+      window.dispatchEvent(new Event("focus"));
+    }, SHARED);
+    await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-share-log`, { timeout: 10000 });
+    check("Case Alpha's row offers it, and only that row", [await shell.textContent(`${rowOf("Case Alpha")} .ci-share-log`), await shell.$$eval("#case-list .ci-share-log", (b) => b.length)], ["Log to share", 1]);
+    const tabsBefore = await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length);
+    await shell.click(`${rowOf("Case Alpha")} .ci-share-log`);
+    await shell.waitForSelector("dialog.share-log-dialog[open]", { timeout: 5000 });
+    check("…a click opens the file's text, as it is, in a dialog", await shell.textContent("dialog.share-log-dialog .sl-text"), SHARED);
+    check("…and opens no reader", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), tabsBefore);
+    await shell.click("dialog.share-log-dialog .sl-close");
+    check("Close takes it away", await shell.$$eval("dialog.share-log-dialog", (d) => d.length), 0);
+    console.log("17. Word: the folder's Word documents open in Word, in PDF+ only");
+    await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const put = async (d, name) => { const w = await (await d.getFileHandle(name, { create: true })).createWritable(); await w.write("PK stand-in"); await w.close(); };
+      const alpha = await dl.getDirectoryHandle("Case Alpha");
+      await put(alpha, "Opposition draft.docx");
+      await put(alpha, "Reply draft.docx");
+      await put(alpha, "~$ply draft.docx");          // Word's lock file, while it has one open
+      const gamma = await dl.getDirectoryHandle("Case Gamma");
+      await put(gamma, "Notes.docx");
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForTimeout(1500);
+    check("…in a browser no row offers it: a page cannot start Word", await shell.$$eval("#case-list .ci-word-btn", (b) => b.length), 0);
+    await shell.evaluate(() => {
+      // PDF+'s bridge (desktop/preload.js), kept here rather than opening Word.
+      window.__openedDocs = [];
+      window.pdfplusNative = { openDocument: async (file) => { window.__openedDocs.push(file.name); return true; } };
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-word-btn`, { timeout: 10000 });
+    check("in PDF+ each row with Word documents offers them, counted, the lock file left out",
+      [await shell.textContent(`${rowOf("Case Alpha")} .ci-word-btn`), await shell.textContent(`${rowOf("Case Gamma")} .ci-word-btn`)], ["Word (2)", "Word"]);
+    const tabsWord = await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length);
+    await shell.click(`${rowOf("Case Gamma")} .ci-word-btn`);
+    await shell.waitForFunction(() => window.__openedDocs.length === 1, null, { timeout: 5000 });
+    check("one document opens at the click", await shell.evaluate(() => window.__openedDocs.slice()), ["Notes.docx"]);
+    await shell.click(`${rowOf("Case Alpha")} .ci-word-btn`);
+    await shell.waitForSelector(".ci-word-menu[data-folder='Case Alpha']", { timeout: 5000 });
+    check("several are listed under the button, with Open all", await shell.$$eval(".ci-word-menu .ci-word-item", (xs) => xs.map((x) => x.textContent)), ["Opposition draft.docx", "Reply draft.docx", "Open all 2"]);
+    check("…the list is on screen in full, under the button", await shell.evaluate(() => {
+      const m = document.querySelector(".ci-word-menu").getBoundingClientRect();
+      const b = document.querySelector(".ci-word-btn.open").getBoundingClientRect();
+      const hit = document.elementFromPoint(m.left + 10, m.bottom - 6);
+      return m.top >= b.bottom && m.bottom <= window.innerHeight && !!hit && !!hit.closest(".ci-word-menu");
+    }), true);
+    await shell.screenshot({ path: process.env.WORD_SHOT || "/dev/null" }).catch(() => {});
+    await shell.click(".ci-word-menu .ci-word-item:text-is('Reply draft.docx')");
+    await shell.waitForFunction(() => window.__openedDocs.length === 2, null, { timeout: 5000 });
+    check("…one opens from the list, and the list closes", [await shell.evaluate(() => window.__openedDocs[1]), await shell.$$eval(".ci-word-menu", (m) => m.length)], ["Reply draft.docx", 0]);
+    await shell.click(`${rowOf("Case Alpha")} .ci-word-btn`);
+    await shell.click(".ci-word-menu .ci-word-all");
+    await shell.waitForFunction(() => window.__openedDocs.length === 4, null, { timeout: 5000 });
+    check("…Open all opens every one", await shell.evaluate(() => window.__openedDocs.slice(2)), ["Opposition draft.docx", "Reply draft.docx"]);
+    check("…and no click opened a reader or a folder", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), tabsWord);
+    console.log("18. a run going says when it started, read off the end of pdf_linker.log");
+    const stamp = (ms) => { const d = new Date(ms); const p = (n, w = 2) => String(n).padStart(w, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())},000`; };
+    const t0 = Date.now() - 75 * 60000;
+    await shell.evaluate(async ({ head, filler }) => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const delta = await dl.getDirectoryHandle("Case Delta", { create: true });
+      const put = async (name, data) => { const w = await (await delta.getFileHandle(name, { create: true })).createWritable(); await w.write(data); await w.close(); };
+      await put("Complaint.pdf", "%PDF-1.4 stand-in");
+      // A long log: the start line far from its end, past one 512 KB look.
+      await put("pdf_linker.log", head + filler);
+      await put("ETA ~4.10PM (1 of 3).txt", "");
+      window.dispatchEvent(new Event("focus"));
+    }, { head: `${stamp(t0)} [INFO] Run started for folder: C:\\Cases\\Delta (provider=lexis) — on PC\n`, filler: `${stamp(t0)} [INFO]     Pre-scan 1/3: a.pdf\n`.repeat(20000) });
+    const deltaRow = "#case-list .case-row:has(.ri-name:text-is('Case Delta'))";
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-row")].some((r) => r.querySelector(".ri-name").textContent === "Case Delta" && r.querySelector(".ci-where").textContent.startsWith("Started")), null, { timeout: 10000 });
+    const sub = await shell.textContent(`${deltaRow} .ci-where`);
+    check("the row says when the run started and how long it has gone", /^Started \d{1,2}:\d\d\s?[AP]M · going 1h 1[45]m · In Downloads today$/.test(sub) ? "ok" : sub, "ok");
+    check("…and its pill still shows the ETA whole", await shell.$eval(`${deltaRow} .ci-status`, (e) => e.scrollWidth <= e.clientWidth), true);
+    const t1 = Date.now() - 2 * 60000;
+    await shell.evaluate(async (line) => {
+      const delta = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Delta");
+      const fh = await delta.getFileHandle("pdf_linker.log");
+      const size = (await fh.getFile()).size;
+      const w = await fh.createWritable({ keepExistingData: true }); await w.seek(size); await w.write(line); await w.close();
+      const m = await (await delta.getFileHandle("ETA ~4.12PM (1 of 3).txt", { create: true })).createWritable(); await m.close();
+      await delta.removeEntry("ETA ~4.10PM (1 of 3).txt");
+      window.dispatchEvent(new Event("focus"));
+    }, `${stamp(t1)} [INFO] Run started for folder: C:\\Cases\\Delta (provider=lexis) — on PC\n`);
+    await shell.waitForFunction(() => [...document.querySelectorAll("#case-list .case-row")].some((r) => r.querySelector(".ri-name").textContent === "Case Delta" && /going (2|3)m/.test(r.querySelector(".ci-where").textContent)), null, { timeout: 10000 });
+    check("…a new run's start, added to the log, is read on the next look", /^Started .* · going (2|3)m/.test(await shell.textContent(`${deltaRow} .ci-where`)), true);
     check("no page errors", errors, []);
     await app.close();
   } finally {

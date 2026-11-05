@@ -1126,12 +1126,45 @@ async function readListing(dir) {
     try { const file = await f.entry.getFile(); out.push({ name: f.name, size: file.size, at: file.lastModified }); }
     catch { out.push({ name: f.name }); }
   }
+  // When the run going started, read off pdf_linker.log only while an ETA
+  // marker says a run is going (case-folders.js, lastRunStart).
+  let runStart = 0;
+  const logEntry = files.find((f) => f.name.toLowerCase() === "pdf_linker.log");
+  if (logEntry && files.some((f) => { const m = caseLib.runMarker(f.name); return m && m.kind === "ETA"; })) {
+    try { runStart = await readRunStart(dir.name, logEntry.entry); } catch { runStart = 0; }
+  }
   let held = 0;
   if (textDir) {
     try { for await (const [name, entry] of textDir.entries()) if (entry.kind === "file" && /\.txt\.leak$/i.test(name)) held++; }
     catch { /* unreadable: nothing held that can be seen */ }
   }
-  return { files: out, dirs, held, priority };
+  return { files: out, dirs, held, priority, runStart };
+}
+
+// The last "Run started" line of each folder's log, by folder name: the log
+// only grows during a run, so after the first look only what it added since
+// is read. A log that shrank (a new one) is read again from its end.
+const RUN_START_CHUNK = 512 * 1024;
+const RUN_START_SCAN_MAX = 64 * 1024 * 1024;
+const runStartSeen = new Map();
+async function readRunStart(key, entry) {
+  const file = await entry.getFile();
+  const size = file.size;
+  const was = runStartSeen.get(key);
+  if (was && was.size === size) return was.start;
+  let start = 0;
+  if (was && size > was.size) {
+    start = caseLib.lastRunStart(await file.slice(Math.max(0, was.size - 200), size).text()) || was.start;
+  } else {
+    // From the end back, a chunk at a time, each reaching a little into the
+    // next so a line cut by a chunk's end is read whole.
+    for (let end = size; end > 0 && size - end < RUN_START_SCAN_MAX && !start; end -= RUN_START_CHUNK) {
+      const from = Math.max(0, end - RUN_START_CHUNK);
+      start = caseLib.lastRunStart(await file.slice(from, Math.min(size, end + 200)).text());
+    }
+  }
+  runStartSeen.set(key, { size, start });
+  return start;
 }
 
 // Downloads holds every case ever downloaded, so each folder in it is read by
@@ -1284,10 +1317,12 @@ async function renderCaseFoldersNow() {
     const where = [];
     if (r.today) where.push("In Downloads today");
     if (r.opened) where.push("Opened " + caseLib.whenText(r.opened, now));
+    // A run going: when it started and how long it has gone (runningSub).
+    if (st.sub) where.unshift(st.sub);
     return { r, st, where: where.join(" · ") };
   });
   // Redrawn only where something changed (the text of a row, Downloads' link).
-  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length].join("|")).join("\n");
+  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length, caseLib.hasShareLog(r.listing) ? 1 : 0, canOpenWord() ? caseLib.wordDocs(r.listing).join("/") : ""].join("|")).join("\n");
   scheduleCaseRecheck();
   if (sig === caseShown) return;
   caseShown = sig;
@@ -1326,10 +1361,161 @@ async function renderCaseFoldersNow() {
       catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
     row.appendChild(b);
+    if (!r.locked && canOpenWord() && caseLib.wordDocs(r.listing).length) row.appendChild(wordButton(r));
+    if (!r.locked && caseLib.hasShareLog(r.listing)) row.appendChild(shareLogButton(r));
     if (!r.locked && r.listing) row.appendChild(lineControls(r, line));
     if (!r.locked && r.status && r.status.state === "stalled") row.appendChild(takeOverButton(r));
     listEl.appendChild(row);
   }
+}
+
+// ---- Home: open the case folder's Word documents ------------------------------
+//
+// The owner (2026-11-05): "Add a button to open the word document(s) inside
+// that case folder to the pdf+ home screen". A page cannot start Word, so the
+// button stands only in PDF+, whose main process opens a Word document in
+// the program Windows opens it with (desktop/main.js, pdfplus:open-document;
+// preload.js reads the file's path). The documents are the folder's own,
+// not its subfolders' (case-folders.js, wordDocs). One opens at the click;
+// several are listed under the button, each to open, with Open all.
+function canOpenWord() {
+  return !!(window.pdfplusNative && typeof window.pdfplusNative.openDocument === "function");
+}
+function wordButton(r) {
+  const docs = caseLib.wordDocs(r.listing);
+  const box = document.createElement("span");
+  box.className = "ci-word";
+  const b = document.createElement("button");
+  b.className = "ci-word-btn";
+  b.textContent = docs.length === 1 ? "Word" : `Word (${docs.length})`;
+  b.title = docs.length === 1 ? `Open ${docs[0]} in Word` : `Open one or all of the ${docs.length} Word documents in ${r.name}`;
+  b.setAttribute("aria-haspopup", docs.length > 1 ? "menu" : "false");
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (docs.length === 1) { openWordDocs(r, docs); return; }
+    toggleWordMenu(box, r, docs);
+  });
+  box.appendChild(b);
+  return box;
+}
+function closeWordMenus() {
+  for (const m of document.querySelectorAll(".ci-word-menu")) m.remove();
+  for (const b of document.querySelectorAll(".ci-word-btn.open")) b.classList.remove("open");
+}
+// The list stands on the page, under the button, so the case list's own box
+// does not clip it; a scroll or a resize closes it rather than leave it adrift.
+function toggleWordMenu(box, r, docs) {
+  const btn = box.querySelector(".ci-word-btn");
+  const wasOpen = btn.classList.contains("open");
+  closeWordMenus();
+  if (wasOpen) return;
+  const menu = document.createElement("div");
+  menu.className = "ci-word-menu";
+  menu.setAttribute("role", "menu");
+  menu.dataset.folder = r.name;
+  const item = (text, names, cls = "") => {
+    const x = document.createElement("button");
+    x.className = "ci-word-item" + (cls ? " " + cls : "");
+    x.setAttribute("role", "menuitem");
+    x.textContent = text;
+    x.title = names.length === 1 ? `Open ${names[0]} in Word` : `Open all ${names.length} in Word`;
+    x.addEventListener("click", (e) => { e.stopPropagation(); closeWordMenus(); openWordDocs(r, names); });
+    return x;
+  };
+  for (const d of docs) menu.appendChild(item(d, [d]));
+  menu.appendChild(item(`Open all ${docs.length}`, docs, "ci-word-all"));
+  document.body.appendChild(menu);
+  const at = btn.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(at.right - w, window.innerWidth - w - 8)) + "px";
+  menu.style.top = (at.bottom + 4 + h > window.innerHeight - 8 ? Math.max(8, at.top - 4 - h) : at.bottom + 4) + "px";
+  btn.classList.add("open");
+  setTimeout(() => {
+    document.addEventListener("click", closeWordMenus, { once: true });
+    window.addEventListener("resize", closeWordMenus, { once: true });
+    document.addEventListener("scroll", closeWordMenus, { once: true, capture: true });
+  }, 0);
+}
+async function openWordDocs(r, names) {
+  if (!(await permitted(r.handle, "read", true))) return;
+  const failed = [];
+  for (const name of names) {
+    try {
+      const file = await (await r.handle.getFileHandle(name)).getFile();
+      await window.pdfplusNative.openDocument(file);
+    } catch (e) {
+      failed.push(`${name} (${String((e && e.message) || e).replace(/^Error invoking remote method '[^']*': (Error: )?/, "")})`);
+    }
+  }
+  if (failed.length) shellToast(`Could not open ${failed.join("; ")}`, 7000);
+}
+
+// ---- Home: the log to share --------------------------------------------------
+//
+// The owner (2026-11-05): "a tool into the homescreen of PDF+ that lets me
+// open copy of pdf_linker.log that has all real names removed that is free to
+// share for diagnostic purposes". PDF-Linker writes that copy itself, as the
+// run goes (its `_SHARE_LOG_FILE`): it knows where in each message it set a
+// value, keeps its own wording and takes the values out, so no key is read
+// here and nothing is redacted on this side. The button stands on a row whose
+// folder holds the file; the copy opens over Home as plain text (never in the
+// text reader, which would read it through a key), to copy or save.
+function shareLogButton(r) {
+  const b = document.createElement("button");
+  b.className = "ci-share-log";
+  b.textContent = "Log to share";
+  b.title = `Open ${caseLib.SHARE_LOG_FILE} for ${r.name}: PDF-Linker's log with every name, file, folder, number and address it was handed taken out, so it can be sent for diagnosis. The real log, pdf_linker.log, stays in the folder.`;
+  b.addEventListener("click", (e) => { e.stopPropagation(); showShareLog(r); });
+  return b;
+}
+async function showShareLog(r) {
+  let text;
+  try {
+    if (!(await permitted(r.handle, "read", true))) return;
+    const fh = await r.handle.getFileHandle(caseLib.SHARE_LOG_FILE);
+    text = await (await fh.getFile()).text();
+  } catch (e) {
+    shellToast(`${caseLib.SHARE_LOG_FILE} could not be read in ${r.name}: ${(e && e.message) || e}`, 6000);
+    return;
+  }
+  const dlg = document.createElement("dialog");
+  dlg.className = "share-log-dialog";
+  dlg.innerHTML = `<div class="sl-head"><span class="sl-title"></span><span class="sl-actions"><button class="sl-copy">Copy</button><button class="sl-save">Save…</button><button class="sl-close" aria-label="Close">Close</button></span></div><p class="sl-note"></p><pre class="sl-text"></pre>`;
+  dlg.querySelector(".sl-title").textContent = caseLib.SHARE_LOG_FILE;
+  dlg.querySelector(".sl-note").textContent = "Every name, file, folder, number and address PDF-Linker was handed is shown as […]. The wording is PDF-Linker's own; lines it cannot place are redacted whole.";
+  dlg.querySelector(".sl-text").textContent = text;
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.querySelector(".sl-close").addEventListener("click", close);
+  dlg.addEventListener("cancel", (e) => { e.preventDefault(); close(); });
+  dlg.querySelector(".sl-copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(text); shellToast("The log to share is on the clipboard.", 2500); }
+    catch (e) { shellToast(`Could not copy: ${(e && e.message) || e}`, 5000); }
+  });
+  dlg.querySelector(".sl-save").addEventListener("click", async () => {
+    const blob = new Blob([text], { type: "text/plain" });
+    try {
+      if (window.showSaveFilePicker) {
+        const h = await window.showSaveFilePicker({ suggestedName: caseLib.SHARE_LOG_FILE, types: [{ description: "Text", accept: { "text/plain": [".txt"] } }] });
+        const w = await h.createWritable();
+        await w.write(blob);
+        await w.close();
+      } else {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = caseLib.SHARE_LOG_FILE;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      }
+    } catch (e) {
+      if (!e || e.name !== "AbortError") shellToast(`Could not save: ${(e && e.message) || e}`, 5000);
+    }
+  });
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  const pre = dlg.querySelector(".sl-text");
+  pre.scrollTop = pre.scrollHeight; // the newest lines, where a run going is
 }
 
 // ---- Home: PDF-Linker's line --------------------------------------------------

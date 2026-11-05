@@ -23,6 +23,14 @@ contextBridge.exposeInMainWorld("pdfplusNative", {
   pathForFile: (file) => {
     try { return webUtils.getPathForFile(file) || ""; } catch { return ""; }
   },
+  // A Word document of a case folder, opened in the program Windows opens
+  // .docx with (Home's Word button). The path is read here, where Electron
+  // lets a File say where it lives; main.js opens only a Word document.
+  openDocument: (file) => {
+    let p = "";
+    try { p = webUtils.getPathForFile(file) || ""; } catch { p = ""; }
+    return ipcRenderer.invoke("pdfplus:open-document", p);
+  },
   version: () => ipcRenderer.invoke("pdfplus:version"),
   checkForUpdate: () => ipcRenderer.invoke("pdfplus:update-check"),
   downloadUpdate: () => ipcRenderer.invoke("pdfplus:update-download"),

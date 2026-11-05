@@ -74,6 +74,7 @@ import { fontDocument, fontCanvas, renderPageOnto, pageOutputScale, watchPixelRa
 import { repairTextLayer } from "./text-layer.js";
 import { normalize as findNormalize, findIn as findInText } from "./find.js";
 import { createSplit } from "./split-view.js";
+import * as DO from "./doc-order.js";
 import { documentKey as ocrDocKey, loadPage as ocrLoadPage, MAX_KEEP_DAYS as OCR_KEEP_MAX } from "./ocr-store.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("pdfjs/build/pdf.worker.mjs");
@@ -3198,6 +3199,13 @@ async function adoptFolderNow(h, { quiet = false, light = false } = {}) {
   // file holding every export, and the one the drafting model was handed.
   folderDocs = light ? [] : (found.combined ? [found.combined].concat(found.docs) : found.docs);
   folderPdfs = light ? [] : found.pdfs;
+  // …in the order the operator set for this folder, where one was set
+  // (THE FOLDER'S ORDER): the combined file first whatever it says.
+  if (!light) {
+    const ord = DO.orderOf(lsGet, stateFolder());
+    folderDocs = DO.applyOrder(folderDocs, ord.docs, (d) => d.name, (d) => !!d.combined);
+    folderPdfs = DO.applyOrder(folderPdfs, ord.pdfs);
+  }
   folderLight = light;
   // The same folder read again: the documents on the reel and in the store
   // are its documents still, found again by name in the list just read.
@@ -5167,6 +5175,87 @@ async function openFolderDoc(d) {
 function renderDocList() {
   return during("listing the folder's documents", () => renderDocListNow());
 }
+
+// ── THE FOLDER'S ORDER ──────────────────────────────────────────────────────
+// The owner (2026-11-05): "Add the ability to rearrange the documents in the
+// case folder, with a drag and drop and up and down arrows in pdf viewer for
+// both PDF mode and Text mode. This would change the order in which they are
+// displayed and when they appear when using continuous scroll. These
+// preferences should outlast the current session." The Documents list's rows
+// and PDF mode's ⇅ list are dragged, or moved with their ↑ ↓; the order is
+// the one folderDocs and folderPdfs are held in, which the list, ‹ ›, the
+// reel and PDF mode's scrolling on all follow. A move in one list is carried
+// to the other (doc-order.js, carryOrder, through pdfForName/exportForName),
+// and both are kept per folder (stateFolder) in localStorage. The lists are
+// put in order IN PLACE: every cache keyed on the list itself (the folder's
+// name sweep, Find's folder read) holds for any order of the same documents.
+function exportDocOfPdf(p) {
+  const n = exportForName(p.name);
+  return n ? folderDocs.find((d) => d.name === n) || null : null;
+}
+function pdfOfExportDoc(d) {
+  const n = pdfForName(d.name);
+  return n ? folderPdfs.find((p) => p.name === n) || null : null;
+}
+function moveFolderDoc(from, to) {
+  if (!folderDocs[from] || folderDocs[from].combined || (folderDocs[to] && folderDocs[to].combined)) return;
+  const docs = DO.moveItem(folderDocs, from, to);
+  const pdfs = DO.carryOrder(folderPdfs, docs, (p) => exportDocOfPdf(p));
+  takeFolderOrder(docs, pdfs, folderDocs[from]);
+}
+function moveFolderPdf(from, to) {
+  if (!folderPdfs[from]) return;
+  const pdfs = DO.moveItem(folderPdfs, from, to);
+  const docs = DO.carryOrder(folderDocs, pdfs, (d) => pdfOfExportDoc(d), (d) => !!d.combined);
+  takeFolderOrder(docs, pdfs, null);
+}
+async function takeFolderOrder(docs, pdfs, moved) {
+  folderDocs.splice(0, folderDocs.length, ...docs);
+  folderPdfs.splice(0, folderPdfs.length, ...pdfs);
+  nameMatch = null; // a matcher may break a tie by the order it was given
+  DO.saveOrder(lsGet, lsSet, stateFolder(), { docs: folderDocs.map((d) => d.name), pdfs: folderPdfs.map((p) => p.name) });
+  renderDocList();
+  if (moved) {
+    const li = [...docsList.children].find((x) => x.dataset.name === moved.name);
+    if (li) li.scrollIntoView({ block: "nearest" });
+  }
+  // PDF mode's list, standing on the PDF it stood on.
+  if (pmListOf) {
+    const shown = pmList[pmAt] && pmList[pmAt].name;
+    pmListOf = null;
+    if (pmTakeList({ sameFolder: true })) {
+      pmAt = Math.max(0, pmList.findIndex((p) => p.name === shown));
+      pmSyncBar();
+    }
+  }
+  pmRenderOrder();
+  await reelFollowOrder();
+}
+/**
+ * The reel on screen read in the new order: where its documents no longer
+ * stand one after another in the folder's order, it is hung again from the
+ * document being read, at the page being read. A reel holding unsaved edits
+ * is left as it is (re-hanging it would put them through the store) and the
+ * order holds from the next document opened.
+ */
+async function reelFollowOrder() {
+  if (reel.length < 2 || !doc) return;
+  const line = folderDocs.filter((d) => !d.combined && !d.md).map((d) => d.name);
+  const at = reel.map((m) => line.indexOf(m.name));
+  if (at.every((x, i) => x >= 0 && (i === 0 || x === at[i - 1] + 1))) return;
+  if (reelDirtyMembers().length) {
+    toast("The new order holds from the next document you open — the documents read on here have unsaved edits, so they stay where they are.");
+    return;
+  }
+  const page = readingPage();
+  const m = reelMemberOf(page);
+  if (!m) return;
+  const off = page - m.from;
+  const d = m.d || folderDocs.find((x) => x.name === m.name);
+  if (!d || !(await openFolderDoc(d))) return;
+  const p = doc && doc.pages[Math.min(off, doc.pages.length - 1)];
+  if (p) goToPageFromList(p);
+}
 function renderDocListNow() {
   docsList.innerHTML = "";
   for (const d of folderDocs) {
@@ -5196,6 +5285,14 @@ function renderDocListNow() {
     li.addEventListener("click", () => openFolderDoc(d));
     li.dataset.name = d.name;
     docsList.appendChild(li);
+  }
+  // Drag a row, or its ↑ ↓, to set the order the folder is read in.
+  if (dirHandle && folderDocs.length > 1) {
+    DO.wireReorder(docsList, {
+      movable: (i) => !!folderDocs[i] && !folderDocs[i].combined,
+      onMove: (from, to) => moveFolderDoc(from, to),
+      label: (i) => TD.docLabel(shownDocName(folderDocs[i].name)),
+    });
   }
   renderDocReady();
   markDocList();
@@ -25905,6 +26002,7 @@ function pmTakeList({ sameFolder = false } = {}) {
     o.textContent = pmLabel(p.name);
     pmPick.appendChild(o);
   });
+  pmRenderOrder();
   return true;
 }
 /**
@@ -25924,7 +26022,52 @@ function pmRenamed(oldPdf, newPdf) {
   pmAt = Math.max(0, pmList.findIndex((p) => p.name === want));
   pmSyncBar();
 }
+/**
+ * PDF mode's ⇅: the folder's PDFs in a list under the bar, dragged or moved
+ * with ↑ ↓ (THE FOLDER'S ORDER). A click on a name opens that PDF. Shown only
+ * where the PDFs stepped through are the folder's own.
+ */
+const pmOrderBtn = $("pm-order");
+const pmOrderPanel = $("pm-order-panel");
+// On the body: inside the bar it shared the bar's stacking, and the PDF's
+// frame stood over it.
+if (pmOrderPanel) document.body.appendChild(pmOrderPanel);
+function pmRenderOrder() {
+  if (pmOrderBtn) pmOrderBtn.hidden = !(folderPdfs.length > 1 && pdfModeList() === folderPdfs);
+  if (!pmOrderPanel || pmOrderPanel.hidden) return;
+  const ul = pmOrderPanel.querySelector("ul");
+  ul.innerHTML = "";
+  folderPdfs.forEach((p, i) => {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.className = "pm-order-name";
+    name.textContent = pmLabel(p.name);
+    li.appendChild(name);
+    li.dataset.name = p.name;
+    li.classList.toggle("current", pmList[pmAt] && pmList[pmAt].name === p.name);
+    li.addEventListener("click", () => { const k = pmList.findIndex((x) => x.name === p.name); if (k >= 0) pmShow(k); });
+    ul.appendChild(li);
+  });
+  DO.wireReorder(ul, { onMove: (from, to) => moveFolderPdf(from, to), label: (i) => pmLabel(folderPdfs[i].name) });
+}
+function pmToggleOrder(open = pmOrderPanel.hidden) {
+  pmOrderPanel.hidden = !open;
+  pmOrderBtn.setAttribute("aria-expanded", String(open));
+  if (!open) return;
+  pmRenderOrder();
+  // On the page, under the button, so the bar's own box does not clip it.
+  const at = pmOrderBtn.getBoundingClientRect();
+  pmOrderPanel.style.top = `${Math.round(at.bottom + 4)}px`;
+  pmOrderPanel.style.left = `${Math.round(Math.max(8, Math.min(at.left, window.innerWidth - pmOrderPanel.offsetWidth - 8)))}px`;
+}
+if (pmOrderBtn) {
+  pmOrderBtn.addEventListener("click", (e) => { e.stopPropagation(); pmToggleOrder(); });
+  document.addEventListener("click", (e) => { if (!pmOrderPanel.hidden && !pmOrderPanel.contains(e.target) && e.target !== pmOrderBtn) pmToggleOrder(false); });
+  // Asked first: PDF mode's own key handling hands keys to the frame.
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape" && !pmOrderPanel.hidden) { e.preventDefault(); e.stopPropagation(); pmToggleOrder(false); } }, true);
+}
 function pmSyncBar() {
+  if (pmOrderPanel && !pmOrderPanel.hidden) for (const li of pmOrderPanel.querySelectorAll("li")) li.classList.toggle("current", pmList[pmAt] && pmList[pmAt].name === li.dataset.name);
   pmPick.value = String(pmAt);
   pmPrevBtn.disabled = pmAt <= 0;
   pmNextBtn.disabled = pmAt >= pmList.length - 1;
@@ -26072,6 +26215,8 @@ function pmEdgeHint(dir, name = "") {
 function pmKey(e) {
   if (e.ctrlKey && e.shiftKey && !e.altKey && (e.key === "M" || e.key === "m")) { togglePdfMode(); return true; }
   if (!pdfModeOn) return false;
+  // ⇅'s list closes on Escape wherever the keys are, the PDF's frame too.
+  if (e.key === "Escape" && pmOrderPanel && !pmOrderPanel.hidden) { pmToggleOrder(false); return true; }
   if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === "PageDown" || e.key === "PageUp")) {
     pmShow(pmAt + (e.key === "PageDown" ? 1 : -1), e.key === "PageDown" ? { page: 1 } : {});
     return true;

@@ -51,6 +51,8 @@ const APP_NAME = "PDF+";
 // What Windows may hand the app: the PWA's file handlers, as in
 // pwa/manifest.webmanifest.
 const OPENABLE = /\.(pdf|txt|leak|md|markdown)$/i;
+/** What Home's Word button may hand to the desktop (pdfplus:open-document). */
+const WORD_DOC = /\.(docx|docm|doc|dotx|rtf)$/i;
 
 // Links that open in the browser without asking: the citation links' own
 // targets (viewer/code-tables.js). Any other link is shown first.
@@ -536,6 +538,22 @@ function registerIpc() {
     }
     regrant(p, to);
     return { name, path: to };
+  });
+
+  // Home's Word button: a case folder's Word document, opened in the program
+  // Windows opens it with. Only a Word document that is there (never a
+  // program, never Word's own "~$" lock file), and only for PDF+'s pages:
+  // the path comes from a File the page holds (preload.js, openDocument).
+  ipcMain.handle("pdfplus:open-document", async (event, p) => {
+    if (!fromApp(event)) throw new Error("Not PDF+'s page.");
+    if (typeof p !== "string" || !path.isAbsolute(p) || !WORD_DOC.test(p) || path.basename(p).startsWith("~$")) {
+      throw new Error("PDF+ opens only a Word document this way.");
+    }
+    const st = await fsp.stat(p);
+    if (!st.isFile()) throw new Error("That is not a file.");
+    const err = await shell.openPath(p);
+    if (err) throw new Error(err);
+    return true;
   });
 
   ipcMain.handle("pdfplus:open-external", (event, url) => {

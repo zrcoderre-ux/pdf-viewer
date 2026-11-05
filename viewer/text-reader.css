@@ -1384,3 +1384,26 @@ body.pdf-mode #statusbar { display: none; }
 }
 .pm-edge.down { bottom: 18px; }
 .pm-edge.up { top: 64px; }
+
+/* THE FOLDER'S ORDER (text-reader.js; doc-order.js): a document row is
+   dragged, or moved with its ↑ ↓, which show on hover or focus. Where it will
+   land is marked by a line above or below the row under the pointer. */
+#docs-list li.reorderable, .pm-order-panel li.reorderable { cursor: grab; }
+#docs-list li.dragging, .pm-order-panel li.dragging { opacity: 0.45; }
+#docs-list li.drop-before, .pm-order-panel li.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+#docs-list li.drop-after, .pm-order-panel li.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.reorder-btns { display: inline-flex; gap: 2px; margin-left: 6px; flex: none; opacity: 0; }
+li:hover > .reorder-btns, li:focus-within > .reorder-btns, .pm-order-panel .reorder-btns { opacity: 1; }
+.reorder-btn { width: 20px; height: 20px; padding: 0; border: 1px solid var(--btn-border); border-radius: 4px; background: var(--btn); color: var(--text); font-size: 11px; line-height: 1; cursor: pointer; }
+.reorder-btn:hover:not(:disabled), .reorder-btn:focus-visible { background: var(--accent); border-color: var(--accent); }
+.reorder-btn:disabled { opacity: 0.3; cursor: default; }
+#docs-list li .reorder-btns { order: 3; margin-left: auto; }
+#docs-list li.reorderable.ready::after { order: 4; margin-left: 6px; }
+.pm-order-panel { position: fixed; z-index: 60; width: min(460px, 90vw); max-height: 60vh; overflow: auto; padding: 8px; border: 1px solid var(--btn-border); border-radius: 8px; background: var(--chrome); color: var(--text); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45); }
+.pm-order-panel[hidden] { display: none; }
+.pm-order-hint { margin: 0 4px 6px; font-size: 12px; color: var(--text-muted); }
+.pm-order-panel ul { list-style: none; margin: 0; padding: 0; }
+.pm-order-panel li { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 6px; font-size: 13px; }
+.pm-order-panel li:hover { background: var(--btn); }
+.pm-order-panel li.current { background: var(--accent); color: #fff; }
+.pm-order-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
