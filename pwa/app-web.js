@@ -1287,7 +1287,7 @@ async function renderCaseFoldersNow() {
     return { r, st, where: where.join(" · ") };
   });
   // Redrawn only where something changed (the text of a row, Downloads' link).
-  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length, caseLib.hasShareLog(r.listing) ? 1 : 0].join("|")).join("\n");
+  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length, caseLib.hasShareLog(r.listing) ? 1 : 0, canOpenWord() ? caseLib.wordDocs(r.listing).join("/") : ""].join("|")).join("\n");
   scheduleCaseRecheck();
   if (sig === caseShown) return;
   caseShown = sig;
@@ -1326,11 +1326,93 @@ async function renderCaseFoldersNow() {
       catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
     row.appendChild(b);
+    if (!r.locked && canOpenWord() && caseLib.wordDocs(r.listing).length) row.appendChild(wordButton(r));
     if (!r.locked && caseLib.hasShareLog(r.listing)) row.appendChild(shareLogButton(r));
     if (!r.locked && r.listing) row.appendChild(lineControls(r, line));
     if (!r.locked && r.status && r.status.state === "stalled") row.appendChild(takeOverButton(r));
     listEl.appendChild(row);
   }
+}
+
+// ---- Home: open the case folder's Word documents ------------------------------
+//
+// The owner (2026-11-05): "Add a button to open the word document(s) inside
+// that case folder to the pdf+ home screen". A page cannot start Word, so the
+// button stands only in PDF+, whose main process opens a Word document in
+// the program Windows opens it with (desktop/main.js, pdfplus:open-document;
+// preload.js reads the file's path). The documents are the folder's own,
+// not its subfolders' (case-folders.js, wordDocs). One opens at the click;
+// several are listed under the button, each to open, with Open all.
+function canOpenWord() {
+  return !!(window.pdfplusNative && typeof window.pdfplusNative.openDocument === "function");
+}
+function wordButton(r) {
+  const docs = caseLib.wordDocs(r.listing);
+  const box = document.createElement("span");
+  box.className = "ci-word";
+  const b = document.createElement("button");
+  b.className = "ci-word-btn";
+  b.textContent = docs.length === 1 ? "Word" : `Word (${docs.length})`;
+  b.title = docs.length === 1 ? `Open ${docs[0]} in Word` : `Open one or all of the ${docs.length} Word documents in ${r.name}`;
+  b.setAttribute("aria-haspopup", docs.length > 1 ? "menu" : "false");
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (docs.length === 1) { openWordDocs(r, docs); return; }
+    toggleWordMenu(box, r, docs);
+  });
+  box.appendChild(b);
+  return box;
+}
+function closeWordMenus() {
+  for (const m of document.querySelectorAll(".ci-word-menu")) m.remove();
+  for (const b of document.querySelectorAll(".ci-word-btn.open")) b.classList.remove("open");
+}
+// The list stands on the page, under the button, so the case list's own box
+// does not clip it; a scroll or a resize closes it rather than leave it adrift.
+function toggleWordMenu(box, r, docs) {
+  const btn = box.querySelector(".ci-word-btn");
+  const wasOpen = btn.classList.contains("open");
+  closeWordMenus();
+  if (wasOpen) return;
+  const menu = document.createElement("div");
+  menu.className = "ci-word-menu";
+  menu.setAttribute("role", "menu");
+  menu.dataset.folder = r.name;
+  const item = (text, names, cls = "") => {
+    const x = document.createElement("button");
+    x.className = "ci-word-item" + (cls ? " " + cls : "");
+    x.setAttribute("role", "menuitem");
+    x.textContent = text;
+    x.title = names.length === 1 ? `Open ${names[0]} in Word` : `Open all ${names.length} in Word`;
+    x.addEventListener("click", (e) => { e.stopPropagation(); closeWordMenus(); openWordDocs(r, names); });
+    return x;
+  };
+  for (const d of docs) menu.appendChild(item(d, [d]));
+  menu.appendChild(item(`Open all ${docs.length}`, docs, "ci-word-all"));
+  document.body.appendChild(menu);
+  const at = btn.getBoundingClientRect();
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(at.right - w, window.innerWidth - w - 8)) + "px";
+  menu.style.top = (at.bottom + 4 + h > window.innerHeight - 8 ? Math.max(8, at.top - 4 - h) : at.bottom + 4) + "px";
+  btn.classList.add("open");
+  setTimeout(() => {
+    document.addEventListener("click", closeWordMenus, { once: true });
+    window.addEventListener("resize", closeWordMenus, { once: true });
+    document.addEventListener("scroll", closeWordMenus, { once: true, capture: true });
+  }, 0);
+}
+async function openWordDocs(r, names) {
+  if (!(await permitted(r.handle, "read", true))) return;
+  const failed = [];
+  for (const name of names) {
+    try {
+      const file = await (await r.handle.getFileHandle(name)).getFile();
+      await window.pdfplusNative.openDocument(file);
+    } catch (e) {
+      failed.push(`${name} (${String((e && e.message) || e).replace(/^Error invoking remote method '[^']*': (Error: )?/, "")})`);
+    }
+  }
+  if (failed.length) shellToast(`Could not open ${failed.join("; ")}`, 7000);
 }
 
 // ---- Home: the log to share --------------------------------------------------

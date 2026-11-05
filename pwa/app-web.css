@@ -319,6 +319,14 @@ body.home-open .tab-view.active { display: none; }
 .ci-takeover:hover, .ci-takeover:focus-visible { background: rgba(234, 179, 8, 0.14); }
 .ci-takeover.armed { background: #d97706; border-color: #d97706; color: #fff; }
 /* PDF-Linker's line: Prioritize on a row not in it, its place and moves on one that is. */
+.ci-word { position: relative; flex: none; margin-right: 8px; }
+.ci-word-btn { padding: 4px 10px; border: 1px solid var(--c-border); border-radius: 999px; background: transparent; color: var(--c-text-3); font-size: 12px; cursor: pointer; white-space: nowrap; opacity: 0.55; }
+.case-row:hover .ci-word-btn, .ci-word-btn:focus-visible, .ci-word-btn.open { opacity: 1; }
+.ci-word-btn:hover, .ci-word-btn:focus-visible { background: var(--c-accent-soft); color: var(--c-accent); border-color: var(--c-accent); }
+.ci-word-menu { position: fixed; z-index: 50; min-width: 240px; max-width: 420px; max-height: 320px; overflow: auto; padding: 4px; border: 1px solid var(--c-border); border-radius: 8px; background: var(--c-card); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); display: flex; flex-direction: column; }
+.ci-word-item { text-align: left; padding: 6px 10px; border: none; border-radius: 6px; background: transparent; color: var(--c-text); font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ci-word-item:hover, .ci-word-item:focus-visible { background: var(--c-accent-soft); color: var(--c-accent); }
+.ci-word-all { margin-top: 4px; border-top: 1px solid var(--c-border); border-radius: 0 0 6px 6px; font-weight: 600; }
 .ci-share-log { flex: none; margin-right: 8px; padding: 4px 10px; border: 1px solid var(--c-border); border-radius: 999px; background: transparent; color: var(--c-text-3); font-size: 12px; cursor: pointer; white-space: nowrap; opacity: 0.55; }
 .case-row:hover .ci-share-log, .ci-share-log:focus-visible { opacity: 1; }
 .ci-share-log:hover, .ci-share-log:focus-visible { background: var(--c-accent-soft); color: var(--c-accent); border-color: var(--c-accent); }

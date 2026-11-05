@@ -67,6 +67,18 @@ const LOG_FILE = "pdf_linker.log";
  */
 export const SHARE_LOG_FILE = "PDF-Linker Log to Share.txt";
 
+/**
+ * The Word documents in a case folder's own listing (not its subfolders),
+ * by name, for Home's Word button: a draft, a Word filing. Word's "~$" lock
+ * file, which stands beside a document while Word has it open, is none.
+ */
+export function wordDocs(listing) {
+  return ((listing && listing.files) || [])
+    .map((f) => String(f.name || ""))
+    .filter((n) => /\.(docx|docm|doc|dotx|rtf)$/i.test(n) && !n.startsWith("~$"))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+}
+
 /** Whether a folder's listing holds the log to share. */
 export function hasShareLog(listing) {
   const want = SHARE_LOG_FILE.toLowerCase();

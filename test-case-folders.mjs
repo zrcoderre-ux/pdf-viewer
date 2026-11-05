@@ -493,6 +493,51 @@ async function browserPart() {
     check("…and opens no reader", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), tabsBefore);
     await shell.click("dialog.share-log-dialog .sl-close");
     check("Close takes it away", await shell.$$eval("dialog.share-log-dialog", (d) => d.length), 0);
+    console.log("17. Word: the folder's Word documents open in Word, in PDF+ only");
+    await shell.evaluate(async () => {
+      const dl = await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads");
+      const put = async (d, name) => { const w = await (await d.getFileHandle(name, { create: true })).createWritable(); await w.write("PK stand-in"); await w.close(); };
+      const alpha = await dl.getDirectoryHandle("Case Alpha");
+      await put(alpha, "Opposition draft.docx");
+      await put(alpha, "Reply draft.docx");
+      await put(alpha, "~$ply draft.docx");          // Word's lock file, while it has one open
+      const gamma = await dl.getDirectoryHandle("Case Gamma");
+      await put(gamma, "Notes.docx");
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForTimeout(1500);
+    check("…in a browser no row offers it: a page cannot start Word", await shell.$$eval("#case-list .ci-word-btn", (b) => b.length), 0);
+    await shell.evaluate(() => {
+      // PDF+'s bridge (desktop/preload.js), kept here rather than opening Word.
+      window.__openedDocs = [];
+      window.pdfplusNative = { openDocument: async (file) => { window.__openedDocs.push(file.name); return true; } };
+      window.dispatchEvent(new Event("focus"));
+    });
+    await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-word-btn`, { timeout: 10000 });
+    check("in PDF+ each row with Word documents offers them, counted, the lock file left out",
+      [await shell.textContent(`${rowOf("Case Alpha")} .ci-word-btn`), await shell.textContent(`${rowOf("Case Gamma")} .ci-word-btn`)], ["Word (2)", "Word"]);
+    const tabsWord = await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length);
+    await shell.click(`${rowOf("Case Gamma")} .ci-word-btn`);
+    await shell.waitForFunction(() => window.__openedDocs.length === 1, null, { timeout: 5000 });
+    check("one document opens at the click", await shell.evaluate(() => window.__openedDocs.slice()), ["Notes.docx"]);
+    await shell.click(`${rowOf("Case Alpha")} .ci-word-btn`);
+    await shell.waitForSelector(".ci-word-menu[data-folder='Case Alpha']", { timeout: 5000 });
+    check("several are listed under the button, with Open all", await shell.$$eval(".ci-word-menu .ci-word-item", (xs) => xs.map((x) => x.textContent)), ["Opposition draft.docx", "Reply draft.docx", "Open all 2"]);
+    check("…the list is on screen in full, under the button", await shell.evaluate(() => {
+      const m = document.querySelector(".ci-word-menu").getBoundingClientRect();
+      const b = document.querySelector(".ci-word-btn.open").getBoundingClientRect();
+      const hit = document.elementFromPoint(m.left + 10, m.bottom - 6);
+      return m.top >= b.bottom && m.bottom <= window.innerHeight && !!hit && !!hit.closest(".ci-word-menu");
+    }), true);
+    await shell.screenshot({ path: process.env.WORD_SHOT || "/dev/null" }).catch(() => {});
+    await shell.click(".ci-word-menu .ci-word-item:text-is('Reply draft.docx')");
+    await shell.waitForFunction(() => window.__openedDocs.length === 2, null, { timeout: 5000 });
+    check("…one opens from the list, and the list closes", [await shell.evaluate(() => window.__openedDocs[1]), await shell.$$eval(".ci-word-menu", (m) => m.length)], ["Reply draft.docx", 0]);
+    await shell.click(`${rowOf("Case Alpha")} .ci-word-btn`);
+    await shell.click(".ci-word-menu .ci-word-all");
+    await shell.waitForFunction(() => window.__openedDocs.length === 4, null, { timeout: 5000 });
+    check("…Open all opens every one", await shell.evaluate(() => window.__openedDocs.slice(2)), ["Opposition draft.docx", "Reply draft.docx"]);
+    check("…and no click opened a reader or a folder", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), tabsWord);
     check("no page errors", errors, []);
     await app.close();
   } finally {
