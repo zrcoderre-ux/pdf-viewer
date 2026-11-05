@@ -219,6 +219,8 @@ try {
     globalThis.__asked = [];
     globalThis.__answer = 1; // Cancel
     shell.openExternal = async (u) => { globalThis.__opened.push(u); };
+    globalThis.__openedPaths = [];
+    shell.openPath = async (p) => { globalThis.__openedPaths.push(p); return ""; };
     dialog.showMessageBox = async (...a) => {
       const o = a.find((x) => x && typeof x === "object" && "buttons" in x);
       globalThis.__asked.push(o ? o.detail || o.message : "");
@@ -390,6 +392,33 @@ try {
     check("…left as it was", fs.readFileSync(secret).toString("latin1").includes("Never handed to the app"), true);
     const node = await win.evaluate(() => [typeof require, typeof process].join(","));
     check("no Node in the page", node, "undefined,undefined");
+  }
+  {
+    // Home's Word button: the bridge hands a Word document of a case folder
+    // to the program Windows opens it with (shell.openPath, kept here), and
+    // nothing else: not a program, not Word's lock file.
+    const caseDir = path.join(tmp, "Word Case");
+    fs.mkdirSync(caseDir, { recursive: true });
+    const names = ["Opposition draft.docx", "~$position draft.docx", "Setup.exe"];
+    for (const n of names) fs.writeFileSync(path.join(caseDir, n), "PK stand-in");
+    await win.evaluate(() => {
+      const i = document.createElement("input");
+      i.type = "file"; i.multiple = true; i.id = "word-test-input"; i.hidden = true;
+      document.body.appendChild(i);
+    });
+    await win.setInputFiles("#word-test-input", names.map((n) => path.join(caseDir, n)));
+    const got = await win.evaluate(async () => {
+      const out = {};
+      for (const f of document.getElementById("word-test-input").files) {
+        try { await window.pdfplusNative.openDocument(f); out[f.name] = "opened"; } catch { out[f.name] = "refused"; }
+      }
+      try { await window.pdfplusNative.openDocument(new File(["x"], "Made up.docx")); out.unbacked = "opened"; } catch { out.unbacked = "refused"; }
+      document.getElementById("word-test-input").remove();
+      return out;
+    });
+    check("Word documents only: a .docx opens, a lock file, a program and a file with no path do not", got,
+      { "Opposition draft.docx": "opened", "~$position draft.docx": "refused", "Setup.exe": "refused", unbacked: "refused" });
+    check("…handed to the desktop by its own path", await app.evaluate(() => globalThis.__openedPaths.slice()), [path.join(caseDir, "Opposition draft.docx")]);
   }
 
   // ── 6. no network ─────────────────────────────────────────────────────────
