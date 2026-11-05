@@ -27,6 +27,8 @@
     <span id="pm-controls" class="pm-controls" hidden>
       <button id="pm-prev" title="The folder's PDF before this one (Alt+PageUp)">‹</button>
       <select id="pm-pick" title="Every PDF in the case folder — pick one to open it. A PDF opened here stays open, at its page and with any unsaved edits, until the folder changes"></select>
+      <button id="pm-order" hidden aria-expanded="false" title="Set the order of the case folder's PDFs: drag them, or move them with ↑ ↓. The order is kept for this folder, and the Documents list follows it">⇅</button>
+      <div id="pm-order-panel" class="pm-order-panel" hidden><p class="pm-order-hint">Drag to reorder, or use ↑ ↓. The text's Documents list follows.</p><ul></ul></div>
       <button id="pm-next" title="The folder's next PDF (Alt+PageDown). Scrolling on past the last page — or auto-scroll reaching it — goes on into it too">›</button>
       <span id="pm-where" class="pm-where"></span>
       <span id="pm-find" class="pm-where" title="The viewer's Find (Ctrl+F) reads the whole case folder in PDF mode: past the last match in this PDF, › goes on to the next PDF that has one"></span>

@@ -1302,3 +1302,33 @@ folder on Text Files: the bar survives the first document and names the stray
 file; a handle-less LEAKS attach and a stray `LEAKS.xlsx` are never written
 there. With the case folder and its Text Files both remembered by an older
 build, a file opened alone adopts the case folder.
+
+**The folder's order** (`viewer/doc-order.js`; text-reader.js, "THE FOLDER'S
+ORDER": `moveFolderDoc`, `moveFolderPdf`, `takeFolderOrder`,
+`reelFollowOrder`, `pmRenderOrder`; `test-doc-order.mjs`). The owner,
+2026-11-05: "Add the ability to rearrange the documents in the case folder,
+with a drag and drop and up and down arrows in pdf viewer for both PDF mode
+and Text mode. This would change the order in which they are displayed and
+when they appear when using continuous scroll. These preferences should
+outlast the current session." The order is the one `folderDocs` (the
+Documents list, ‹ › and the reel) and `folderPdfs` (PDF mode's switcher, ‹ ›,
+scrolling on and auto-scroll) are held in, so everything that walked them by
+name walks them in the order set. Each Documents row is draggable and has ↑ ↓
+(shown on hover or focus); PDF mode's ⇅ beside the switcher opens the same
+list of PDFs, placed on the body (inside the bar, the PDF's frame stood over
+it), closed by Escape whether the keys are in the reader or the frame
+(`pmKey`). A move in one list is carried to the other (`carryOrder`, through
+`exportForName`/`pdfForName`): an export and its PDF stand at the same place,
+and a PDF or export with no partner stays behind the one it stood behind. The
+combined file stays first and is not moved. Both lists are rearranged IN
+PLACE, since every cache keyed on the list itself (the name sweep, Find's
+folder read) holds for any order of the same documents; the name matcher is
+dropped, since a matcher may break a tie by the order it was given. A reel on
+screen whose documents no longer follow one another in the new order is
+hung again from the document being read, at the page being read
+(`reelFollowOrder`), unless it holds unsaved edits, when the order holds
+from the next document opened, and a toast says so. The order is kept per
+folder (`stateFolder`) in localStorage (`textReader.docOrder`, the last 60
+folders) and applied as the folder is read (`applyOrder`): a name the folder
+no longer has is dropped, a document the order does not name (a new filing)
+goes after the ones it does, in name order.
