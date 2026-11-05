@@ -374,3 +374,32 @@ at every decision. It reads `SWEEP_PAGES` (60) pages at a time now
 (`textdoc.clearReading`'s `pages`/`from`/`to`, each page still read with the
 one after it) and the run's pseudonyms in pieces cut at a page header
 (`textdoc.slicesAtHeaders`), looking at the clock between: 605 ms → 82 ms.
+
+### "Keep in this case" set every page's buttons (`labelButtons`, `buttonsRead`)
+
+The owner, 2026-11-05: "On large documents, it is not responsive when I try to
+mark a current real value no". A keep calls `renderFlags`, and `renderFlags`
+ended with `refreshNocrButtons()`, which set every page label's ⊘ / ↻ / ✎ / ↺ /
+# buttons over again: each page read once more (`pageReadsDidNotOcr`, and
+`serializeNodes` for the number buttons) and every button's text, title and
+pressed state written, whether anything had changed or not. Measured on a
+1,000-page export with a 3,000-row key: the click on the names bar's "keep in
+this case" held the tab for 0.7 s with a few pages built and 2.2 s once the
+review had built most of them.
+
+Two changes. A refresh of the whole document passes over shed pages
+(`labelButtons`), and a page built back sets its own label's buttons
+(`buildShedSections`). And `renderFlags` sets them only where a page list or
+the document has changed since the last whole-document refresh, which the
+open's `syncNoOcr` makes too (`buttonsRead`). The lists are only ever replaced,
+never changed in place, so the comparison is by identity. A keep or a flag
+leaves the lists alone, and an edit to a page refreshes that page by its
+index, as it always did. The same click: 0.35 s, mostly `compileKey` (the key
+recompiled without the kept value, about 150 ms on 3,000 rows) and
+`remarkKept`.
+
+Not changed: while the names bar is open on a long document,
+`reviewPreloadNow` builds the pages the review reads in idle slices, but its
+`afterShedChange` (once a second) lays out every page built so far in one
+task, 300–450 ms by the time most of the document is built. That runs with or
+without a decision, and a click can wait behind one.

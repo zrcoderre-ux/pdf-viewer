@@ -257,12 +257,21 @@ let placeHold = null;        // …and the hold keeping it there through a re-la
 // keeps have left it would make the folder's own names stop matching the
 // moment a name in one of them was kept, and would throw the index away on
 // every decision — a folder of PDFs costs a translation each to index.
-let nameFwdMemo = { key: null, fwd: null };
+//
+// …and then a NAME'S WORDS, each by the word of its fake in the same place
+// (PK.nameWordPairs): a key binding "Corwin Ashdale" and no "Ashdale" alone
+// left "Ashdale Reply" real, and a PDF renamed so gave its export the real
+// name. Over a file name only, never the pages.
+let nameFwdMemo = { key: null, fwd: null, words: null };
+function nameWords() {
+  if (nameFwdMemo.key !== key) nameFwdMemo = { key, fwd: key ? PK.compileForward(key) : null, words: key ? PK.nameWordPairs(key) : null };
+  return nameFwdMemo.words;
+}
 /** real → fake over a file NAME, through the whole key; null where there is none. */
 function fwdName() {
-  if (nameFwdMemo.key !== key) nameFwdMemo = { key, fwd: key ? PK.compileForward(key) : null };
+  const words = nameWords();
   const f = nameFwdMemo.fwd;
-  return f ? (s) => PK.forwardRuns(f, s).map((r) => (r.t === "swap" ? r.to : r.s)).join("") : null;
+  return f ? (s) => PK.nameWordsForward(words, PK.forwardRuns(f, s).map((r) => (r.t === "swap" ? r.to : r.s)).join("")) : null;
 }
 /**
  * A document's name as the reader SHOWS it: its pseudonyms put back to the
@@ -281,7 +290,8 @@ function shownDocName(name) {
   if (shownNameMemo.rev !== rev) shownNameMemo = { rev, names: new Map() };
   let out = shownNameMemo.names.get(n);
   if (out == null) {
-    out = PK.translate(rev, n).text;
+    // …and a name's words the export's name was given one by one (nameWords).
+    out = PK.nameWordsBack(nameWords(), PK.translate(rev, n).text);
     shownNameMemo.names.set(n, out);
   }
   return out;
@@ -4092,8 +4102,20 @@ async function renameDoc(m, typed, { pdfHandle = null, say = (msg, o) => toast(m
   const stem = String(typed).replace(/[\r\n\t]+/g, " ").replace(/\.(txt(\.leak)?|pdf)$/i, "")
     .replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/, "");
   if (!stem) return { ok: false, why: "" };
+  // With no key in hand nothing can be faked, and the name typed would be
+  // written into Text Files as it stands, real names and all. …nor under a key
+  // that is not this folder's own (keyFolder): the key in hand outlives the
+  // folder it came from, and its fakes are another case's.
+  if (!key || !TD.keyAnswersFlags(keyFolder, valuesStoreKey())) return no(`Not renamed: no pseudonym key is attached, so ${m.name}'s new name cannot be put in its pseudonyms. Open the case folder with its pseudonym_key.xlsx, then rename it.`, { error: true, ms: 8000 });
   const forward = fwdName();
-  const scrub = { forward, rows: key ? PK.boundRows(key) : [] };
+  const scrub = { forward, rows: PK.boundRows(key) };
+  // A word of two names the key fakes two ways ("Vantreece" of "Mara
+  // Vantreece" and of "Dov Vantreece"): there is no one fake to write for it
+  // alone, and "type it in its pseudonyms" (below) would ask the impossible.
+  const torn = PK.nameWordClashes(nameWords(), forward(stem));
+  if (torn.length) {
+    return no(`Not renamed: “${torn.join("”, “")}” belongs to more than one name in the key, each faked differently, so it has no one pseudonym on its own. Type the whole name.`, { error: true, ms: 9000 });
+  }
   const fake = RD.scrubbedStem(stem, scrub);
   if (!fake || (/^document [0-9a-f]+$/i.test(fake) && !/^document [0-9a-f]+$/i.test(stem))) {
     return no(`Not renamed: “${stem}” would still carry a real name the key binds once its pseudonyms were put in. Type it in its pseudonyms.`, { error: true, ms: 8000 });
@@ -4102,9 +4124,16 @@ async function renameDoc(m, typed, { pdfHandle = null, say = (msg, o) => toast(m
   const oldPdf = pdfForName(oldName);
   let newPdf = null;
   if (oldPdf) {
-    const real = rev ? PK.translate(rev, fake).text.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim() : fake;
+    // The PDF keeps the name as TYPED, real names and all — any pseudonyms
+    // typed in it turned back, whole names and a name's words alike — and
+    // failing that, the export's name turned back (a name's word whose fake is
+    // an ordinary word is never turned back, so "Helix Dynamics" faked as
+    // "Norvane Systems" would come back half real); failing both, the
+    // export's own name.
+    const clean = (t) => String(t).replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim();
+    const back = (t) => clean(PK.nameWordsBack(nameWords(), rev ? PK.translate(rev, t).text : t));
     const pairs = (pdf) => PS.pdfMatcher([pdf], forward)(newName) === pdf;
-    newPdf = real && pairs(real + ".pdf") ? real + ".pdf" : fake + ".pdf";
+    newPdf = [back(stem), back(fake)].map((r) => r && r + ".pdf").find((r) => r && pairs(r)) || fake + ".pdf";
     if (!pairs(newPdf)) return no(`Not renamed: ${newPdf} would not be found again as ${newName}'s PDF.`);
   }
   if (newName === oldName && (!oldPdf || newPdf === oldPdf)) return { ok: true, why: "", txt: oldName, pdf: oldPdf, handle: pdfHandle };
@@ -12974,9 +13003,7 @@ function setUnfixButton(b, asked) {
 /** Set each page label's ✎ button from its page (`indices`, or every page on screen). */
 function refreshFixButtons(indices) {
   if (!doc) return;
-  const buttons = indices && indices.length <= 20
-    ? indices.map((i) => pagesEl.querySelector(`.tpage[data-index="${i}"] > .page-label .fix-page`)).filter(Boolean)
-    : [...pagesEl.querySelectorAll(".tpage > .page-label .fix-page")];
+  const buttons = labelButtons("fix-page", indices);
   if (!buttons.length) return;
   const sources = textFixed.length || ocrAgain.length ? docPageSources() : null;
   let freed = false;
@@ -13123,12 +13150,32 @@ function setNocrButton(b, reads, asked, marked) {
       : `Undo ⊘ Did not OCR. Where the reader still holds the page's text and the mark never reached the case folder, the text comes straight back; otherwise the page goes on ${TD.VALUES_FILE} and PDF-Linker's next full run reads it again.`;
   }
 }
-/** Set each page label's button from its page (`indices`, or every page on screen). */
+/**
+ * The page labels' buttons of class `cls` to set: those of `indices` (asked by
+ * name where they are few), or of every page BUILT. A shed page's label is set
+ * when the page is built again (buildShedSections): setting all of them on
+ * every keep, flag and save walked a 1,000-page deposition's every label, each
+ * reading its page again — half a second of the click on "keep in this case"
+ * (the owner, 2026-11-05: "not responsive when I try to mark a current real
+ * value no").
+ */
+function labelButtons(cls, indices) {
+  if (indices && indices.length <= 20) {
+    return indices.map((i) => pagesEl.querySelector(`.tpage[data-index="${i}"] > .page-label .${cls}`)).filter(Boolean);
+  }
+  const want = indices ? new Set(indices) : null;
+  const out = [...pagesEl.querySelectorAll(`.tpage:not(.shed) > .page-label .${cls}`)];
+  return want ? out.filter((b) => want.has(Number(b.closest(".tpage").dataset.index))) : out;
+}
+// What the page buttons were last set from, the whole document over (the
+// open's syncNoOcr, or renderFlags): renderFlags sets them again only where a
+// list or the document has changed since.
+let buttonsRead = { doc: null, noOcr: null, ocrAgain: null, textFixed: null };
+/** Set each page label's button from its page (`indices`, or every page built). */
 function refreshNocrButtons(indices) {
   if (!doc) return;
-  const buttons = indices && indices.length <= 20
-    ? indices.map((i) => pagesEl.querySelector(`.tpage[data-index="${i}"] > .page-label .nocr-page`)).filter(Boolean)
-    : [...pagesEl.querySelectorAll(".tpage > .page-label .nocr-page")];
+  if (!indices || indices.length >= doc.pages.length) buttonsRead = { doc, noOcr, ocrAgain, textFixed };
+  const buttons = labelButtons("nocr-page", indices);
   if (!buttons.length) return;
   const sources = ocrAgain.length ? docPageSources() : null;
   for (const b of buttons) {
@@ -17297,7 +17344,13 @@ function renderFlags() {
     li.appendChild(x);
     answersList.appendChild(li);
   }
-  refreshNocrButtons();
+  // The page labels' buttons read the page lists, so they are set again when
+  // a list is — not on every keep and flag, which leave the lists as they are.
+  // The lists are only ever replaced, never changed in place. On a deposition
+  // the review had built, setting every label's buttons was a second of the
+  // click on "keep in this case" (labelButtons). An edit to a page sets that
+  // page's own (refreshNocrButtons([i])).
+  if (buttonsRead.doc !== doc || buttonsRead.noOcr !== noOcr || buttonsRead.ocrAgain !== ocrAgain || buttonsRead.textFixed !== textFixed) refreshNocrButtons();
   renderSpots();
   renderMaster();
   renderSettled();
@@ -20354,6 +20407,7 @@ function unshedMember(m, secs) {
 /** Shed pages built back from what the reel kept of them. */
 function buildShedSections(m, secs) {
   const fixedSrc = textFixed.length ? docPageSources() : null;
+  const built = [];
   for (const sec of secs) {
     const inner = sec.querySelector(".page-inner");
     if (!inner || inner.firstChild) continue;
@@ -20367,7 +20421,11 @@ function buildShedSections(m, secs) {
     if (m.built && m.built[k] != null) body.__built = m.built[k];
     sec.classList.remove("shed");
     sec.style.height = "";
+    built.push(i);
   }
+  // …and its label's buttons, which a refresh of the whole passes over while
+  // the page is shed (labelButtons).
+  if (built.length) refreshNocrButtons(built);
 }
 
 // ── a long document by the page ──────────────────────────────────────────────

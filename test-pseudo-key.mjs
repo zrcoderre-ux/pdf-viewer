@@ -11,6 +11,7 @@ import {
   compileReals, compileFakes, findReals, mirrorCase, caseShape, applyCase, isKeyFileName, keySignature, sameCaseKey,
   compileTypeahead, endingReal, swapsOnSpace, findRealSpans, findRealSpansFrom, foldGaps, buildMatcher, buildFindMatcher,
   wordFakesOf, keyCellKind, contactValue, boundRows, compilePinnedFakes, capOnlyReal, streetWord,
+  nameWordPairs, nameWordsForward, nameWordsBack, nameWordClashes,
 } from "./viewer/pseudo-key.js";
 import { findRealsInPlain, fakeFor } from "./viewer/textdoc.js";
 
@@ -1031,6 +1032,31 @@ console.log("a street's name word, read off the address rows");
   check("the host alone: standing", found("Forms are at www.courts.ca."), ["www.courts.ca"]);
   check("…with its path: standing", found("See www.courts.ca/forms now."), ["www.courts.ca"]);
   check("a name is not a host", findRealSpans(compileReals({ warn: [{ real: "Helen Rasho", fake: "Ingrid Strangeways" }] }), "Helen Rasho.gov").map((h) => h.matched), ["Helen Rasho"]);
+}
+
+// A name's words in a FILE NAME (nameWordPairs): a key binding "Corwin
+// Ashdale" and no "Ashdale" alone gave "Ashdale Reply" no fake (the owner,
+// 2026-11-05). Each word of a multi-word row lends its fake's word in the same
+// place; a word two rows fake two ways is a clash, never paired.
+{
+  console.log("nameWordPairs");
+  const k = keyOf([
+    ["person", "Corwin Ashdale", "Tobias Wrenfield", "", "", "spreadsheet", 4],
+    ["person", "Mara Vantreece", "Jolene Fenwick", "", "", "spreadsheet", 2],
+    ["person", "Dov Vantreece", "Rhett Holloway", "", "", "spreadsheet", 2],
+    ["entity", "Helix Dynamics, Inc.", "Norvane Systems, Inc.", "", "", "spreadsheet", 3],
+    ["person", "Ann Lee Brook", "Kim Moss", "", "", "spreadsheet", 1],
+  ]);
+  const w = nameWordPairs(k);
+  check("a surname alone", nameWordsForward(w, "Ashdale Reply"), "Wrenfield Reply");
+  check("…a given name, in capitals, possessive", nameWordsForward(w, "CORWIN'S Reply"), "TOBIAS'S Reply");
+  check("a word on the never-fake list: capitalised only", [nameWordsForward(w, "Helix Reply"), nameWordsForward(w, "helix reply")], ["Norvane Reply", "helix reply"]);
+  check("…the same word in both (Inc.) untouched", nameWordsForward(w, "Inc. Reply"), "Inc. Reply");
+  check("a row whose words do not line up lends none", nameWordsForward(w, "Brook Reply"), "Brook Reply");
+  check("a surname faked two ways is a clash, not paired", [nameWordsForward(w, "Vantreece Reply"), nameWordClashes(w, "Vantreece Reply")], ["Vantreece Reply", ["Vantreece"]]);
+  check("back, for the name shown", nameWordsBack(w, "Wrenfield Reply"), "Ashdale Reply");
+  check("…a fake on the never-fake list is not turned back", nameWordsBack(w, "Systems Reply"), "Systems Reply");
+  check("no key, nothing", nameWordsForward(nameWordPairs(null), "Ashdale Reply"), "Ashdale Reply");
 }
 
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");

@@ -2250,6 +2250,47 @@ name (`pmRenamed`; `pmTakeList({ sameFolder })` drops only the frames of PDFs
 no longer in the list). Tests: `test-rename-doc.mjs` 9–12 (PDF mode, a PDF
 with no export, a refusal said in the viewer, a viewer beside the reader).
 
+**A name's word alone in a renamed file** (`PK.nameWordPairs`, 2026-11-05).
+The owner: "It should keep the pdf real and fake the text file if there is a
+real value." A PDF renamed "Ashdale Reply" in a case whose key binds "Corwin
+Ashdale" → "Tobias Wrenfield", with no row for "Ashdale" alone (PDF-Linker
+never faked the surname on its own), gave its export the real name too: the
+forward pass binds whole values, and the surname alone is none, so
+`RD.scrubbedStem` had nothing to swap and its check nothing to refuse. Now,
+over a FILE NAME only, every row of two words or more lends its words in step
+with its fake's ("Corwin" → "Tobias", "Ashdale" → "Wrenfield"; "Helix
+Dynamics, Inc." → "Norvane Systems, Inc." lends "Helix" and "Dynamics", "Inc."
+being the same word). `fwdName` applies them after the key's own pass, so the
+export is "Wrenfield Reply.txt", and the PDF still pairs with it
+(`PS.pdfMatcher` indexes each PDF's faked stem through `fwdName`, beside its
+raw one, so pairs made before are unchanged); `shownDocName` turns them back
+(`nameWordsBack`), so the reader shows "Ashdale Reply". The pages are never
+read this way: what PDF-Linker never faked on its own stays as it is there.
+Left out: words under three letters, common English (`isCommonReal`), a word
+already bound by a row of its own, a real word that is a fake anywhere in the
+key and a fake word that is a real anywhere; a word on the never-fake list
+("Helix") is swapped only capitalised, and a fake on it ("Systems") is never
+turned back. A word two rows fake two ways ("Vantreece" of "Mara Vantreece"
+and "Dov Vantreece") is a clash: not paired, and a name keeping it is refused
+("belongs to more than one name in the key … Type the whole name"), asked
+before the general refusal, whose "type it in its pseudonyms" it cannot meet.
+
+The PDF's new name is now the name as TYPED, any pseudonyms typed in it turned
+back (whole names through `rev`, words through `nameWordsBack`), then the
+export's name turned back, then the export's own: turned back from the export
+alone, "Helix Dynamics Reply" came back "Helix Systems Reply", "Systems" never
+being turned back.
+
+**No key of the case's own, no rename.** With no key in hand `scrubbedStem`
+has no forward and no rows and answers the name as typed, so the export was
+written in the real names; and the key in hand outlives the folder it came
+from (a folder with no key file reads under the last case's), whose fakes are
+another case's. `renameDoc` now refuses unless the key is the folder's own
+(`TD.keyAnswersFlags(keyFolder, valuesStoreKey())`, as the flags ask). Tests:
+`test-rename-doc.mjs` 13–14 (from the viewer beside the reader: a surname
+alone, a given name and a surname apart, a shared surname refused, another
+case's key refused), `test-pseudo-key.mjs` "nameWordPairs".
+
 **The panels' rail** (`#side-rail`) replaced the tab strip across the head
 of `#side`, which had grown to five tabs and a chevron and cut their names
 short. As in the PDF viewer, a button per panel stands down the right edge
