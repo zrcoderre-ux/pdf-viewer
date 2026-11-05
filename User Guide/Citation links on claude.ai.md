@@ -130,3 +130,23 @@ still enabled, still counting authorities, just nowhere the user can see it,
 which looks exactly like the Table of Authorities having switched itself off.
 Only the applied position is clamped, never the saved one, so widening the
 window again puts the panel back where you left it.
+
+## Handing the links to another extension
+
+Claude Usage Meter puts a **Links** button beside its Ruling button, which
+opens every citation in a tentative ruling the way Shift+Space opens a
+selection's: cases first, then code sections and the rest. That extension runs
+in a different isolated world, so it cannot read `__shiftSpaceLinkSources`, and
+the strips it can see are only the ones `paint()` drew, which are the ones on
+screen. So `content/claude-citations.js` answers a page event with the whole
+inventory:
+
+- The asker dispatches `cl-citations-request` on `document`.
+- This script answers at once with `cl-citations` on `document`. Its `detail`
+  is a JSON string, the one payload that crosses between worlds intact:
+  `{ v: 1, provider, citations: [{ url, kind, key, rects }] }`. Every citation
+  in the loaded text is listed, drawn or not, and `rects` are viewport
+  coordinates (`left`, `top`, `right`, `bottom`) at the moment of asking.
+
+It is read-only: nothing the asker sends is used. `test-citation-memory.mjs`
+checks the reply.

@@ -670,6 +670,44 @@
     return out;
   });
 
+  // The same inventory for ANOTHER extension on claude.ai: Claude Usage
+  // Meter's Links button, which opens every citation in a tentative ruling the
+  // way Shift+Space opens a selection's. Its content script lives in a
+  // different isolated world, so it can neither read __shiftSpaceLinkSources
+  // nor see a strip paint() skipped for being off screen. A DOM event is the
+  // one thing both worlds share, and a string is the one payload that crosses
+  // between them intact, so the protocol is two events on `document`,
+  // answered synchronously — the asker has its answer when dispatchEvent
+  // returns:
+  //
+  //   asker:  dispatchEvent(new CustomEvent("cl-citations-request"))
+  //   here:   dispatchEvent(new CustomEvent("cl-citations", { detail: JSON }))
+  //
+  // detail = { v: 1, provider, citations: [{ url, kind, key, rects }] }, rects
+  // in viewport coordinates at the moment of asking ({ left, top, right,
+  // bottom }), every citation in the loaded text whether drawn or not. Read
+  // only: nothing the asker sends is used.
+  document.addEventListener("cl-citations-request", () => {
+    const out = [];
+    for (const c of citations) {
+      let rects;
+      try { rects = c.range.getClientRects(); } catch (e) { continue; }
+      const boxes = [];
+      for (const r of rects) {
+        if (r.width < 1 || r.height < 1) continue;
+        boxes.push({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+      }
+      if (boxes.length) out.push({ url: c.url, kind: c.kind, key: c.key, rects: boxes });
+    }
+    let detail;
+    try {
+      detail = JSON.stringify({ v: 1, provider, citations: out });
+    } catch (e) {
+      return;
+    }
+    document.dispatchEvent(new CustomEvent("cl-citations", { detail }));
+  });
+
   function paint() {
     const overlay = ensureOverlay();
     overlay.dataset.provider = provider;
