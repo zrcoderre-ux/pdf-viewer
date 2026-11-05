@@ -236,3 +236,41 @@ twenty pages built where it was all twelve hundred. `test-long-document.mjs`
 drives the review on a 400-page document: the count with no bar up, a LEAKS row
 on a far page, the walk from the count and into the long document from a short
 one, every name stood on in turn, and fake it with the save writing every one.
+
+### The worksheet alone builds only its row's pages (`reviewOpen`, `rowNeedles`)
+
+The owner, 2026-11-05: "Leaks is still something of an issue, it makes
+everything less responsive". The preload above ran under either bar, and what
+it builds is every page carrying a name in the clear (`pageNeedsReview`). On a
+deposition whose witness is named on every page that is the whole document:
+measured on a 1,000-page export with a 400-row key and a 40-row worksheet, the
+LEAKS bar opened onto 30 s of holds while all 1,000 pages were built (each
+second's `afterShedChange` running "finding the citations" over every page
+built, 220–280 ms at a time), and after it a scroll held the tab 16 times in
+4 s and each row answered for about 300 ms.
+
+The worksheet does not walk those names. Its row's pages are built for it
+(`buildRowPages`), and a page's names are swept on the way to the next row only
+with the names bar up (`pageSweepFor`). So `reviewOpen`, which the preload,
+`reviewPending` and the trim's hold on review pages ask, now means the names
+bar. Under the worksheet alone a long document is built and let go of with the
+reading as with no bar up, and the trim holds only the row's pages and the
+sections its marks stand in (`reviewHitSections({ names: false })`). The names
+in the clear on pages not built are still counted off their text
+(`shedLeakHits`). Opening the names bar over the worksheet starts the preload
+as before.
+
+`rowRanges` also no longer flattens every built body for the row's value. A
+body whose `textContent` lacks one of the ASCII word runs of the value's first
+or last word is passed over (`rowNeedles`). Every reading `leakMatches` makes
+needs those runs: the whole-word pattern writes a word run literally and folds
+an ASCII letter only onto its own other case (no u flag); the reading inside
+words looks for the value itself; the reading down a column is asked only
+where the first and last words stand. `flatten`'s text is the body's text with
+line breaks added and pseudonyms blanked, so it holds no run the
+`textContent` does not. Runs in another script are not used as needles.
+
+Measured on the same export: the bar up, no holds (was 30 s of them); scrolling
+under it, none (was 16); a row answered, 0–2 holds of at most 80 ms (was about
+300 ms); about 30 pages built (was 1,000). `test-long-document.mjs` checks that
+a far page with a name in the clear stays unbuilt under the worksheet alone.

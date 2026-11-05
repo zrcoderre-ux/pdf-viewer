@@ -400,6 +400,10 @@ async function run() {
     r2 = await rv();
     check("a LEAKS row on page 330: stood on there, on screen", [await mark(), r2.lb], [{ text: "Halloway", page: 330, onScreen: true }, "· instance 1 of 1 · Page 330:5"]);
     check("…only the pages the review reads built", r2.live < 50, true);
+    // The worksheet alone does not walk the names in the clear, so the pages
+    // carrying one are not built for it: page 50 has a name and is far away.
+    check("…under the worksheet alone a far page with a name in the clear is not built",
+      await q.evaluate((i) => document.querySelector(`#pages .tpage[data-index="${i}"]`).classList.contains("shed"), NAMED[0] - 1), true);
     await q.evaluate(() => window.__textReaderGoToLeak(0));
     await q.waitForTimeout(3000);
     check("…and the row on page 10", (await mark()) || {}, { text: "Gravenor", page: 10, onScreen: true });
