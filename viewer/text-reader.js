@@ -18042,7 +18042,7 @@ if (typeof ResizeObserver !== "undefined") {
 }
 function showLeaksBar(on) {
   const was = !leaksBar.hidden;
-  if (on && !was) { reelAllLive({ long: false }); reviewPreloadSoon(); } // as the names walk (showNamesBar)
+  if (on && !was) reelAllLive({ long: false }); // as the names walk (showNamesBar), though a long document's pages are left as they are: its row's are built for it (buildRowPages)
   leaksBar.hidden = !on;
   setBarHeight();
   updateLeaksButton();
@@ -18243,11 +18243,41 @@ async function goToLeak(i, { locate = true, trail = true } = {}) {
 function rowRanges(value) {
   if (!value) return [];
   const sources = docPageSources();
-  const per = pageBodies().map((body) => ({ body, member: sources[pageIndexOf(body)] || "", whole: leakMatches(body, value) }));
+  // A page that cannot hold the value is not walked for it (rowNeedles): with
+  // the review's pages built that is hundreds of bodies flattened at every
+  // paint, for a value standing on a handful of them.
+  const needles = rowNeedles(value);
+  const may = (body) => { if (!needles.length) return true; const t = body.textContent.toLowerCase(); return needles.every((w) => t.includes(w)); };
+  const per = pageBodies().map((body) => {
+    const fits = may(body);
+    return { body, fits, member: sources[pageIndexOf(body)] || "", whole: fits ? leakMatches(body, value) : [] };
+  });
   const found = new Set(per.filter((p) => p.whole.length).map((p) => p.member));
   const out = [];
-  for (const p of per) for (const m of found.has(p.member) ? p.whole : leakMatches(p.body, value, { inside: true })) out.push({ body: p.body, range: m.range, pieces: m.pieces });
+  for (const p of per) for (const m of found.has(p.member) ? p.whole : p.fits ? leakMatches(p.body, value, { inside: true }) : []) out.push({ body: p.body, range: m.range, pieces: m.pieces });
   return out;
+}
+/**
+ * What a page's text must carry, lower-cased, for leakMatches to find `value`
+ * on it at all: the ASCII word runs of its first and last words. Every reading
+ * leakMatches makes needs them. The whole-word pattern writes a word run
+ * literally (pseudo-key's altFor) and, without the u flag, folds an ASCII
+ * letter only onto its own other case; the reading inside words looks for the
+ * value itself; the reading down a column is asked only where the first and
+ * last words stand. And the text it reads (flatten) is the body's text with
+ * line breaks put in and pseudonyms blanked, so a run it holds the body's
+ * textContent holds too. A run of another script is left out: there the
+ * pattern's case folding and toLowerCase need not agree.
+ */
+let rowNeedlesMemo = { value: null, needles: [] };
+function rowNeedles(value) {
+  if (rowNeedlesMemo.value === value) return rowNeedlesMemo.needles;
+  const words = TD.normalizeValue(value).split(" ").filter(Boolean);
+  const ends = words.length > 1 ? [words[0], words[words.length - 1]] : words;
+  const needles = [];
+  for (const w of ends) for (const run of w.match(/[\p{L}\p{N}]+/gu) || []) if (/^[A-Za-z0-9]+$/.test(run)) needles.push(run.toLowerCase());
+  rowNeedlesMemo = { value, needles };
+  return needles;
 }
 /**
  * Every place `value` stands on a page body: as a whole word, or (`inside`) as
@@ -20587,7 +20617,17 @@ function preloadKey() {
   if (k && k.reals === reals && k.flagged === flagged && k.rev === rev) return k;
   return (preloadKeyMemo = { reals, flagged, rev });
 }
-function reviewOpen() { return !!doc && (!leaksBar.hidden || !namesBar.hidden); }
+/**
+ * Whether the names walk is up: the review that reads every page carrying a
+ * name in the clear, and so the one the preload builds them for. The LEAKS
+ * worksheet alone does not walk those names (advanceLeak sweeps a page's
+ * names only with the names bar up): its row's pages are built for it
+ * (buildRowPages) and the rest of a long document is built and let go of with
+ * the reading, as with no bar up. Building them under the worksheet too built
+ * the whole of a deposition whose witness is named on every page, and every
+ * pass after it — a row answered, a scroll, the citations — ran over all of it.
+ */
+function reviewOpen() { return !!doc && !namesBar.hidden; }
 const reviewReads = new WeakMap(); // page → { lines, key, read }
 /**
  * What page `i` carries that the marks read, off the text the reel keeps for
@@ -20762,8 +20802,12 @@ function buildRowPages(row) {
   for (const sec of want) rowHold.add(sec);
   keepReadingOver(() => { buildSectionsByMember(want); afterShedChange(); });
 }
-/** The sections the review's marks stand in: never let go of while it is up. */
-function reviewHitSections() {
+/**
+ * The sections the review's marks stand in: never let go of while it is up.
+ * Under the worksheet alone (`names` false) only its row's: the names in the
+ * clear are the names walk's, and a page built with one is let go of as any.
+ */
+function reviewHitSections({ names = true } = {}) {
   const out = new Set();
   const add = (r) => {
     const n = r && r.startContainer;
@@ -20771,8 +20815,9 @@ function reviewHitSections() {
     const sec = el && el.closest && el.closest(".tpage");
     if (sec) out.add(sec);
   };
-  for (const h of leakHits) add(h.range);
   for (const h of leakRowRanges) add(h.range);
+  if (!names) return out;
+  for (const h of leakHits) add(h.range);
   for (const f of flagMarks) for (const r of f.pieces || []) add(r);
   return out;
 }
@@ -20826,14 +20871,16 @@ function reelTrimNow() {
   // nothing of it is let go of: a hit's range is a place in a page's body.
   //
   // Under the LEAKS or names walk, a long document is built and let go of with
-  // the reading too — but never a page the review reads (pageNeedsReview,
-  // which the review's preload built), the row in front's (rowHold), or one
-  // its marks stand in ("a long document under the review").
+  // the reading too — but never the row in front's pages (rowHold) or one its
+  // marks stand in, and under the names walk never a page it reads
+  // (pageNeedsReview, which the review's preload built) or one a name in the
+  // clear is marked on ("a long document under the review").
   const finding = !findBar.hidden;
   const review = !leaksBar.hidden || !namesBar.hidden;
   if (redactOn || ((finding || review) && !reel.some(isLongMember))) return;
-  const hits = review ? reviewHitSections() : null;
-  const stay = review ? (sec) => rowHold.has(sec) || hits.has(sec) || pageNeedsReview(Number(sec.dataset.index)) : null;
+  const walking = !namesBar.hidden;
+  const hits = review ? reviewHitSections({ names: walking }) : null;
+  const stay = review ? (sec) => rowHold.has(sec) || hits.has(sec) || (walking && pageNeedsReview(Number(sec.dataset.index))) : null;
   const top = stageEl.scrollTop;
   const bottom = top + stageEl.clientHeight;
   const pad = Math.max(stageEl.clientHeight * REEL_KEEP_SCREENS, 1200);
