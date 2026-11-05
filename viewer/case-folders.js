@@ -59,6 +59,19 @@ export function runLooksStalled(eta, logAt, now) {
 }
 
 const LOG_FILE = "pdf_linker.log";
+/**
+ * PDF-Linker's copy of its log with every value it set into a message taken
+ * out (PDF-Linker's `_SHARE_LOG_FILE`, `_share_redact_value`): no party, file
+ * or folder name, so it can be sent to whoever is diagnosing a run. Written
+ * as the run goes; Home's "Log to share" opens it (app-web.js, showShareLog).
+ */
+export const SHARE_LOG_FILE = "PDF-Linker Log to Share.txt";
+
+/** Whether a folder's listing holds the log to share. */
+export function hasShareLog(listing) {
+  const want = SHARE_LOG_FILE.toLowerCase();
+  return !!listing && (listing.files || []).some((f) => String(f.name || "").toLowerCase() === want);
+}
 const LEAKS_FILE = "leaks.xlsx";
 const RUN_RECORD_FILE = "pdf-linker run record.json";
 const isDocName = (n) => /\.(pdf|docx?)$/i.test(n);

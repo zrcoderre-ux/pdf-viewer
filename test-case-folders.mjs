@@ -476,6 +476,23 @@ async function browserPart() {
     });
     await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-line-add`, { timeout: 10000 });
     check("a run that finishes after its place was given takes the case out of the line", await shell.$$eval("#case-list .ci-place", (e) => e.length), 0);
+    console.log("16. the log to share: offered where PDF-Linker wrote it, opened over Home as plain text");
+    check("…no row offers it before the file is there", await shell.$$eval("#case-list .ci-share-log", (b) => b.length), 0);
+    const SHARED = "2026-11-05 13:33:58,374 [INFO] Processing: Declaration of […].pdf\n2026-11-05 13:34:01,002 [INFO]   Pseudonymize: leak scans done in 6s\n";
+    await shell.evaluate(async (body) => {
+      const alpha = await (await (await navigator.storage.getDirectory()).getDirectoryHandle("Downloads")).getDirectoryHandle("Case Alpha");
+      const w = await (await alpha.getFileHandle("PDF-Linker Log to Share.txt", { create: true })).createWritable(); await w.write(body); await w.close();
+      window.dispatchEvent(new Event("focus"));
+    }, SHARED);
+    await shell.waitForSelector(`${rowOf("Case Alpha")} .ci-share-log`, { timeout: 10000 });
+    check("Case Alpha's row offers it, and only that row", [await shell.textContent(`${rowOf("Case Alpha")} .ci-share-log`), await shell.$$eval("#case-list .ci-share-log", (b) => b.length)], ["Log to share", 1]);
+    const tabsBefore = await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length);
+    await shell.click(`${rowOf("Case Alpha")} .ci-share-log`);
+    await shell.waitForSelector("dialog.share-log-dialog[open]", { timeout: 5000 });
+    check("…a click opens the file's text, as it is, in a dialog", await shell.textContent("dialog.share-log-dialog .sl-text"), SHARED);
+    check("…and opens no reader", await shell.evaluate(() => document.querySelectorAll("iframe.tab-view").length), tabsBefore);
+    await shell.click("dialog.share-log-dialog .sl-close");
+    check("Close takes it away", await shell.$$eval("dialog.share-log-dialog", (d) => d.length), 0);
     check("no page errors", errors, []);
     await app.close();
   } finally {

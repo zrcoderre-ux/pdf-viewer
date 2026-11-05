@@ -1287,7 +1287,7 @@ async function renderCaseFoldersNow() {
     return { r, st, where: where.join(" · ") };
   });
   // Redrawn only where something changed (the text of a row, Downloads' link).
-  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length].join("|")).join("\n");
+  const sig = dlState + "\n" + say.map(({ r, st, where }) => [r.name, where, st.text, st.tone, r.rank > 0 ? line.indexOf(r) + 1 : 0, line.length, caseLib.hasShareLog(r.listing) ? 1 : 0].join("|")).join("\n");
   scheduleCaseRecheck();
   if (sig === caseShown) return;
   caseShown = sig;
@@ -1326,10 +1326,79 @@ async function renderCaseFoldersNow() {
       catch (e) { shellToast(`“${r.name}” could not be opened — it may have been moved or deleted.`, 5000); renderCaseFolders(); }
     });
     row.appendChild(b);
+    if (!r.locked && caseLib.hasShareLog(r.listing)) row.appendChild(shareLogButton(r));
     if (!r.locked && r.listing) row.appendChild(lineControls(r, line));
     if (!r.locked && r.status && r.status.state === "stalled") row.appendChild(takeOverButton(r));
     listEl.appendChild(row);
   }
+}
+
+// ---- Home: the log to share --------------------------------------------------
+//
+// The owner (2026-11-05): "a tool into the homescreen of PDF+ that lets me
+// open copy of pdf_linker.log that has all real names removed that is free to
+// share for diagnostic purposes". PDF-Linker writes that copy itself, as the
+// run goes (its `_SHARE_LOG_FILE`): it knows where in each message it set a
+// value, keeps its own wording and takes the values out, so no key is read
+// here and nothing is redacted on this side. The button stands on a row whose
+// folder holds the file; the copy opens over Home as plain text (never in the
+// text reader, which would read it through a key), to copy or save.
+function shareLogButton(r) {
+  const b = document.createElement("button");
+  b.className = "ci-share-log";
+  b.textContent = "Log to share";
+  b.title = `Open ${caseLib.SHARE_LOG_FILE} for ${r.name}: PDF-Linker's log with every name, file, folder, number and address it was handed taken out, so it can be sent for diagnosis. The real log, pdf_linker.log, stays in the folder.`;
+  b.addEventListener("click", (e) => { e.stopPropagation(); showShareLog(r); });
+  return b;
+}
+async function showShareLog(r) {
+  let text;
+  try {
+    if (!(await permitted(r.handle, "read", true))) return;
+    const fh = await r.handle.getFileHandle(caseLib.SHARE_LOG_FILE);
+    text = await (await fh.getFile()).text();
+  } catch (e) {
+    shellToast(`${caseLib.SHARE_LOG_FILE} could not be read in ${r.name}: ${(e && e.message) || e}`, 6000);
+    return;
+  }
+  const dlg = document.createElement("dialog");
+  dlg.className = "share-log-dialog";
+  dlg.innerHTML = `<div class="sl-head"><span class="sl-title"></span><span class="sl-actions"><button class="sl-copy">Copy</button><button class="sl-save">Save…</button><button class="sl-close" aria-label="Close">Close</button></span></div><p class="sl-note"></p><pre class="sl-text"></pre>`;
+  dlg.querySelector(".sl-title").textContent = caseLib.SHARE_LOG_FILE;
+  dlg.querySelector(".sl-note").textContent = "Every name, file, folder, number and address PDF-Linker was handed is shown as […]. The wording is PDF-Linker's own; lines it cannot place are redacted whole.";
+  dlg.querySelector(".sl-text").textContent = text;
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.querySelector(".sl-close").addEventListener("click", close);
+  dlg.addEventListener("cancel", (e) => { e.preventDefault(); close(); });
+  dlg.querySelector(".sl-copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(text); shellToast("The log to share is on the clipboard.", 2500); }
+    catch (e) { shellToast(`Could not copy: ${(e && e.message) || e}`, 5000); }
+  });
+  dlg.querySelector(".sl-save").addEventListener("click", async () => {
+    const blob = new Blob([text], { type: "text/plain" });
+    try {
+      if (window.showSaveFilePicker) {
+        const h = await window.showSaveFilePicker({ suggestedName: caseLib.SHARE_LOG_FILE, types: [{ description: "Text", accept: { "text/plain": [".txt"] } }] });
+        const w = await h.createWritable();
+        await w.write(blob);
+        await w.close();
+      } else {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = caseLib.SHARE_LOG_FILE;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      }
+    } catch (e) {
+      if (!e || e.name !== "AbortError") shellToast(`Could not save: ${(e && e.message) || e}`, 5000);
+    }
+  });
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  const pre = dlg.querySelector(".sl-text");
+  pre.scrollTop = pre.scrollHeight; // the newest lines, where a run going is
 }
 
 // ---- Home: PDF-Linker's line --------------------------------------------------

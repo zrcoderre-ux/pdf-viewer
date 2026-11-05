@@ -207,6 +207,26 @@ finishes. A PDF-Linker from before 2026-11-04 ignores the file. Tests:
 moves, the order) and 15 (Prioritize, ▲, ✕, the files written and removed,
 and a finish taking the case out).
 
+## The log to share (2026-11-05)
+
+The owner: "a tool into the homescreen of PDF+ that lets me open copy of
+pdf_linker.log that has all real names removed that is free to share for
+diagnostic purposes", and, on a first design that read the key: "We shouldn't
+need a key, because structurally pdf linker knows where it places real
+values". So PDF-Linker writes the copy itself (its `_SHARE_LOG_FILE`,
+`PDF-Linker Log to Share.txt`, beside the log): every message keeps the wording
+of the logging call that wrote it, read off PDF-Linker's own source, and each
+value set into it keeps a word only where it cannot be a name (its notes,
+"Diagnosing a run that stops"). It is written from the log as it stands at the
+start of each run and then line by line, so a run still going can be read.
+This side redacts nothing and reads no key: a row whose folder holds the file
+(`hasShareLog`, `SHARE_LOG_FILE`) offers **Log to share**, which opens the
+file's text in a dialog over Home (`showShareLog`), with Copy and Save. Never
+in the text reader: a reader reads a lone `.txt` through a key it remembers,
+and would put real names back. A folder last run by a PDF-Linker older than
+the copy has no file and no button; PDF-Linker's `--share-log` writes one from
+its log. Tests: `test-case-folders.mjs` part 16.
+
 ## Cost
 
 Every `getFile` is a trip to the disk, so a listing reads times only off the
