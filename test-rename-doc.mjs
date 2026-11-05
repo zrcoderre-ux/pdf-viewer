@@ -11,7 +11,10 @@
 // and its export with it — from PDF mode's frame, and from a viewer beside the
 // reader (the app's tabs, a split view) — its frame kept; a PDF no export
 // pairs with is renamed alone; and a refusal is said in the viewer and moves
-// nothing.
+// nothing. A name's word alone ("Ashdale" of a key binding only "Corwin
+// Ashdale") is written in the export by its word's own fake, the PDF keeping
+// it as typed; a word two names fake two ways is refused, and so is a rename
+// with no key in hand.
 //
 // Run: node test-rename-doc.mjs   (from the repo root)
 //
@@ -377,6 +380,89 @@ async function run() {
       check("…the viewer's own handle followed the file", await vf.evaluate(() => window.__pdfViewerSource().handle.name), "Corwin Ashdale Amended Decl.pdf");
       check("…the reader's document under its new name", await rf.evaluate(() => document.getElementById("doc-title").textContent), "Corwin Ashdale Amended Decl");
       check("no page errors (beside)", errs, []);
+      await ctx.close();
+    }
+
+    // A key binding only FULL names, as PDF-Linker writes one where it never
+    // faked the surname alone (the owner, 2026-11-05: "It should keep the pdf
+    // real and fake the text file if there is a real value"). "Ashdale Reply"
+    // typed in the viewer: the PDF keeps it, the export is "Wrenfield Reply".
+    // "Vantreece" is the surname of two parties faked two ways, and is refused.
+    console.log("13. a name's word alone: the PDF as typed, the export by the word's own fake");
+    const KEY3 = buildKey([
+      ["person", "Corwin Ashdale", "Tobias Wrenfield", "", "", "spreadsheet", 4],
+      ["person", "Mara Vantreece", "Jolene Fenwick", "", "", "spreadsheet", 2],
+      ["person", "Dov Vantreece", "Rhett Holloway", "", "", "spreadsheet", 2],
+    ]);
+    const C3a = "Case Rename Words", C3b = "Case Rename No Key";
+    {
+      const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
+      const pg = await ctx.newPage();
+      const errs = [];
+      pg.on("pageerror", (e) => errs.push(e.message));
+      pg.on("dialog", (d) => d.accept().catch(() => {}));
+      await pg.goto(srv.base + "/viewer/");
+      await pg.evaluate(() => {
+        document.body.innerHTML = '<iframe id="r" src="text-reader.html" style="width:780px;height:880px"></iframe><iframe id="v" src="viewer.html" style="width:780px;height:880px"></iframe>';
+      });
+      const rf = await (await pg.$("#r")).contentFrame();
+      const vf = await (await pg.$("#v")).contentFrame();
+      await rf.waitForFunction(() => !!window.__textReaderAdoptFolder && !!window.__textReaderOpenDoc, null, { timeout: 20000 });
+      await vf.waitForFunction(() => typeof window.__pdfViewerLoadLocal === "function", null, { timeout: 20000 });
+      const setUp3 = (keyBytes, C3) => pg.evaluate(async ({ C3, A, keyBytes }) => {
+        const w = document.getElementById("r").contentWindow;
+        const { PDFDocument } = await import(new URL("/viewer/vendor/pdf-lib/pdf-lib.esm.min.js", location.href).href);
+        const pdf = await PDFDocument.create(); pdf.addPage([612, 792]);
+        const top = await navigator.storage.getDirectory();
+        try { await top.removeEntry(C3, { recursive: true }); } catch { /* none yet */ }
+        const dir = await top.getDirectoryHandle(C3, { create: true });
+        const put = async (d, name, data) => { const f = await (await d.getFileHandle(name, { create: true })).createWritable(); await f.write(data); await f.close(); };
+        if (keyBytes) await put(dir, "pseudonym_key.xlsx", new Uint8Array(keyBytes));
+        await put(dir, "Corwin Ashdale Decl.pdf", await pdf.save());
+        const text = await dir.getDirectoryHandle("Text Files", { create: true });
+        await put(text, "Tobias Wrenfield Decl.txt", A);
+        await w.__textReaderAdoptFolder(dir);
+        const t = w.document.getElementById("reel-toggle"); if (t && t.checked) { t.checked = false; t.dispatchEvent(new Event("change")); }
+        await w.__textReaderOpenDoc("Tobias Wrenfield Decl.txt");
+      }, { C3, A, keyBytes: keyBytes ? Array.from(keyBytes) : null });
+      const names3 = (C3 = C3a) => pg.evaluate(async (C3) => {
+        const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle(C3);
+        const list = async (d) => { const out = []; for await (const [n, e] of d.entries()) if (e.kind === "file") out.push(n); return out.sort(); };
+        return { pdfs: (await list(dir)).filter((n) => n.endsWith(".pdf")), txt: await list(await dir.getDirectoryHandle("Text Files")) };
+      }, C3);
+      const openInViewer = async (name, C3 = C3a) => {
+        await vf.evaluate(async ({ C3, name }) => {
+          const h = await (await (await navigator.storage.getDirectory()).getDirectoryHandle(C3)).getFileHandle(name);
+          await window.__pdfViewerLoadLocal(await h.getFile(), h);
+        }, { C3, name });
+        await vf.waitForFunction(() => document.querySelectorAll("#pages > .page-wrapper").length > 0, null, { timeout: 20000 });
+        await pg.waitForTimeout(800);
+      };
+      await setUp3(KEY3, C3a);
+      await rf.waitForFunction(() => document.querySelectorAll("#pages .tpage").length > 0, null, { timeout: 20000 });
+      await openInViewer("Corwin Ashdale Decl.pdf");
+      await viewerRename(vf, "Ashdale Reply");
+      check("the PDF as typed, the export faked word by word", await names3(), { pdfs: ["Ashdale Reply.pdf"], txt: ["Wrenfield Reply.txt"] });
+      check("…the viewer shows the PDF's name", await label(vf), "Ashdale Reply");
+      check("…the reader shows it in the real names", await rf.evaluate(() => document.getElementById("doc-title").textContent), "Ashdale Reply");
+      truthy("…and its PDF is still its PDF", await rf.evaluate(() => !document.getElementById("pdf-tab-btn").disabled));
+      await viewerRename(vf, "Corwin Reply re Ashdale");
+      check("a given name and a surname apart", await names3(), { pdfs: ["Corwin Reply re Ashdale.pdf"], txt: ["Tobias Reply re Wrenfield.txt"] });
+      await viewerRename(vf, "Vantreece Reply");
+      check("a surname two names share is refused: nothing moved", await names3(), { pdfs: ["Corwin Reply re Ashdale.pdf"], txt: ["Tobias Reply re Wrenfield.txt"] });
+      check("…the viewer's name put back", await label(vf), "Corwin Reply re Ashdale");
+      truthy("…and the viewer says why", /Vantreece.*more than one name/.test(await toasts(vf)));
+      check("no page errors (words)", errs, []);
+
+      console.log("14. no key of the case's own in hand: the export is not renamed");
+      // (Another case's folder, with no key file: the key in hand is still
+      // Case Rename Words', and its fakes are not this case's.)
+      await setUp3(null, C3b);
+      await rf.waitForFunction(() => document.querySelectorAll("#pages .tpage").length > 0, null, { timeout: 20000 });
+      await openInViewer("Corwin Ashdale Decl.pdf", C3b);
+      await viewerRename(vf, "Corwin Ashdale Reply");
+      check("nothing moved", await names3(C3b), { pdfs: ["Corwin Ashdale Decl.pdf"], txt: ["Tobias Wrenfield Decl.txt"] });
+      truthy("…and the viewer says why", /no pseudonym key is attached/.test(await toasts(vf)));
       await ctx.close();
     }
   } finally {

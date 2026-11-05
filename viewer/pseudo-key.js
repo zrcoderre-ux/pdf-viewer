@@ -1283,6 +1283,106 @@ export function boundRows(key) {
   return warnRows(key).filter((w) => !isCommonReal(w.real));
 }
 
+/**
+ * A NAME'S WORDS IN A FILE NAME (`nameWordPairs`, `nameWordsForward`,
+ * `nameWordsBack`). The owner, 2026-11-05: a PDF renamed "Ashdale Reply" in a
+ * case whose key binds "Corwin Ashdale" → "Tobias Wrenfield", and no row for
+ * "Ashdale" alone, gave its export the real name, "Ashdale Reply.txt": the
+ * forward pass binds whole values, and the surname alone is none. "It should
+ * keep the pdf real and fake the text file if there is a real value."
+ *
+ * So for a file NAME only, every row of two words or more lends its words: the
+ * real's words and the fake's are read in step where they are as many, and
+ * each word that differs is a pair ("Corwin" → "Tobias", "Ashdale" →
+ * "Wrenfield"; "Helix Dynamics, Inc." → "Norvane Systems, Inc." lends
+ * "Helix" → "Norvane" and "Dynamics" → "Systems", "Inc." being the same
+ * word). Never the page's text: what PDF-Linker never faked on its own stays
+ * as it is there (FULL_NAME_ONLY_STATUS).
+ *
+ * Left out: a word of fewer than three letters, a common English word
+ * (isCommonReal) — one on the never-fake list is swapped only capitalised; a word already bound as a row
+ * of its own (the forward pass has it); a real word that is a fake anywhere in
+ * the key, and a fake word that is a real anywhere, so that neither pass can
+ * turn the other's work over. A real word two rows give two fakes is a CLASH:
+ * not paired, and listed (`clash`) so a name that keeps it is refused rather
+ * than written real. → { fwd, rev: Map fold → { to, cap }, clash: Set of folds }.
+ */
+const NAME_WORD_RE = /^[\p{L}][\p{L}'’-]*[\p{L}]$/u;
+function nameWordsOf(value) {
+  return String(value || "").split(/\s+/).map((w) => w.replace(/^[("“‘]+|[)"”’,.;:]+$/g, "").replace(/['’]s$/i, "")).filter(Boolean);
+}
+export function nameWordPairs(key) {
+  const empty = { fwd: new Map(), rev: new Map(), clash: new Set() };
+  if (!key) return empty;
+  const rows = warnRows(key).filter((w) => w && w.real && w.fake && !w.control);
+  const realWhole = new Set(), fakeWords = new Set(), realWords = new Set();
+  for (const w of rows) {
+    realWhole.add(fold(w.real));
+    for (const x of nameWordsOf(w.fake)) fakeWords.add(fold(x));
+    for (const x of nameWordsOf(w.real)) realWords.add(fold(x));
+  }
+  for (const p of pairRows(key)) for (const x of nameWordsOf(p.fake)) fakeWords.add(fold(x));
+  const fwd = new Map(), rev = new Map(), clash = new Set(), revClash = new Set();
+  for (const w of rows) {
+    const r = nameWordsOf(w.real), f = nameWordsOf(w.fake);
+    if (r.length < 2 || r.length !== f.length) continue;
+    for (let i = 0; i < r.length; i++) {
+      const rk = fold(r[i]), fk = fold(f[i]);
+      if (rk === fk || rk.length < 3 || fk.length < 3) continue;
+      if (!NAME_WORD_RE.test(r[i]) || !NAME_WORD_RE.test(f[i])) continue;
+      if (isCommonReal(rk) || realWhole.has(rk)) continue;
+      if (fakeWords.has(rk) || realWords.has(fk)) continue;
+      if (clash.has(rk)) continue;
+      const had = fwd.get(rk);
+      if (had && fold(had.to) !== fk) { fwd.delete(rk); clash.add(rk); continue; }
+      // A word on the never-fake list is English as well as a name ("Helix"):
+      // swapped only where it is capitalised, as PDF-Linker matches a one-word
+      // real of that list (capOnlyReal). A FAKE on it is never shown back:
+      // "Systems" in a name is as likely the word as the stand-in.
+      const cap = isNeverFakeWord(r[i]);
+      fwd.set(rk, { to: f[i], cap });
+      if (isNeverFakeWord(f[i])) continue;
+      const back = rev.get(fk);
+      if (back && fold(back.to) !== rk) revClash.add(fk);
+      else rev.set(fk, { to: r[i], cap: false });
+    }
+  }
+  for (const k of revClash) rev.delete(k);
+  for (const [fk, b] of [...rev]) if (!fwd.has(fold(b.to))) rev.delete(fk);
+  return { fwd, rev, clash };
+}
+// A word swapped in the case it stands in: all capitals, all lower case, or
+// as the key spells it.
+function recaseWord(matched, to) {
+  if (matched.length > 1 && matched === matched.toUpperCase() && matched !== matched.toLowerCase()) return to.toUpperCase();
+  if (matched === matched.toLowerCase()) return to.toLowerCase();
+  return to;
+}
+function swapNameWords(map, s) {
+  if (!map || !map.size || !s) return s;
+  return String(s).replace(/[\p{L}][\p{L}'’-]*[\p{L}]/gu, (m) => {
+    const poss = /['’]s$/i.exec(m);
+    const core = poss ? m.slice(0, -2) : m;
+    const e = map.get(fold(core));
+    if (!e || (e.cap && !/^\p{Lu}/u.test(core))) return m;
+    return recaseWord(core, e.to) + (poss ? poss[0] : "");
+  });
+}
+/** A file name's real words written as their fakes (nameWordPairs). */
+export function nameWordsForward(pairs, s) { return swapNameWords(pairs && pairs.fwd, s); }
+/** …and back, for the name as it is shown. */
+export function nameWordsBack(pairs, s) { return swapNameWords(pairs && pairs.rev, s); }
+/** The clashing real words (nameWordPairs) that stand in `s`. */
+export function nameWordClashes(pairs, s) {
+  if (!pairs || !pairs.clash || !pairs.clash.size) return [];
+  const out = [];
+  for (const m of String(s || "").match(/[\p{L}][\p{L}'’-]*[\p{L}]/gu) || []) {
+    const core = m.replace(/['’]s$/i, "");
+    if (pairs.clash.has(fold(core)) && !out.includes(core)) out.push(core);
+  }
+  return out;
+}
+
 /** Warning matcher over the REAL values — common English left out; a row holding an instruction kept in, `control` and all. */
 export function compileReals(key) {
   const warn = boundRows(key);
