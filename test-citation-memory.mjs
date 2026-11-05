@@ -237,8 +237,17 @@ async function loadPage(href, blocks, store = {}) {
     },
     getElementById: () => null,
     querySelectorAll: () => [],
-    addEventListener: () => {},
+    addEventListener: (type, fn) => {
+      if (!docListeners.has(type)) docListeners.set(type, []);
+      docListeners.get(type).push(fn);
+    },
+    dispatchEvent(ev) {
+      for (const fn of docListeners.get(ev.type) || []) fn(ev);
+      return true;
+    },
   };
+  const docListeners = new Map();
+  globalThis.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } };
 
   const listeners = new Map();
   globalThis.window = globalThis;
@@ -312,6 +321,16 @@ async function loadPage(href, blocks, store = {}) {
       return overlay.children.map((a) => a.title.replace(/ → .*$/, ""));
     },
     body,
+    // What another extension's content script gets when it asks for the
+    // inventory (the "cl-citations-request" event): the parsed reply, or null.
+    inventory() {
+      let got = null;
+      const fn = (ev) => { got = ev.detail; };
+      doc.addEventListener("cl-citations", fn);
+      doc.dispatchEvent(new CustomEvent("cl-citations-request"));
+      docListeners.set("cl-citations", (docListeners.get("cl-citations") || []).filter((f) => f !== fn));
+      return got === null ? null : JSON.parse(got);
+    },
     // Re-run the scan the way a DOM change does, debounce and all.
     async rescan() { observerCb && observerCb(); await settle(600); },
     async navigate(nextHref) {
@@ -532,6 +551,23 @@ console.log("\n--- a code named in prose is enough for a bare section ---");
     para("Section 871.29 comes first. The Code of Civil Procedure is named after."),
   ], {});
   check("a section before any code is named stays unlinked", page.toaKeys(), []);
+}
+
+console.log("\n--- another extension can ask for the whole inventory ---");
+{
+  const page = await loadPage("https://claude.ai/chat/inv", [
+    para(`The court in ${AGUILAR}, 850, set the standard.`),
+    para("The Evidence Code governs, and section 1152 applies."),
+  ], {});
+  const got = page.inventory();
+  check("it answers, synchronously, in version 1", got && got.v, 1);
+  check("every loaded citation, with its kind",
+    (got ? got.citations : []).map((c) => [c.key, c.kind]),
+    [[AGUILAR, "case"], ["EVID § 1152", "statute"]]);
+  check("each with a link and where it sits on screen",
+    (got ? got.citations : []).every((c) => /^https?:/.test(c.url) && c.rects.length &&
+      ["left", "top", "right", "bottom"].every((k) => typeof c.rects[0][k] === "number")),
+    true);
 }
 
 console.log("\n" + "=".repeat(60));
