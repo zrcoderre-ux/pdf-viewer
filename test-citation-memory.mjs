@@ -331,6 +331,16 @@ async function loadPage(href, blocks, store = {}) {
       docListeners.set("cl-citations", (docListeners.get("cl-citations") || []).filter((f) => f !== fn));
       return got === null ? null : JSON.parse(got);
     },
+    // The same, over a text handed in ("cl-citations-in-text").
+    citationsInText(text) {
+      let got = null;
+      const fn = (ev) => { got = ev.detail; };
+      doc.addEventListener("cl-citations-in-text-result", fn);
+      doc.dispatchEvent(new CustomEvent("cl-citations-in-text", { detail: JSON.stringify({ text }) }));
+      docListeners.set("cl-citations-in-text-result",
+        (docListeners.get("cl-citations-in-text-result") || []).filter((f) => f !== fn));
+      return got === null ? null : JSON.parse(got);
+    },
     // Re-run the scan the way a DOM change does, debounce and all.
     async rescan() { observerCb && observerCb(); await settle(600); },
     async navigate(nextHref) {
@@ -568,6 +578,19 @@ console.log("\n--- another extension can ask for the whole inventory ---");
     (got ? got.citations : []).every((c) => /^https?:/.test(c.url) && c.rects.length &&
       ["left", "top", "right", "bottom"].every((k) => typeof c.rects[0][k] === "number")),
     true);
+}
+
+console.log("\n--- and can hand in a text of its own ---");
+{
+  const page = await loadPage("https://claude.ai/chat/txt", [para("Nothing cited on the page.")], {});
+  const text = `NATURE OF PROCEEDINGS\n\nThe court in ${AGUILAR}, 850, set the standard. ` +
+    "The Evidence Code governs, and section 1152 applies.\n\nCONCLUSION\n\nGranted.";
+  const got = page.citationsInText(text);
+  check("it answers over the text, with kinds", (got ? got.citations : []).map((c) => [c.key, c.kind]),
+    [[AGUILAR, "case"], ["EVID § 1152", "statute"]]);
+  check("with offsets into the text", got && got.citations[0] &&
+    text.slice(got.citations[0].start, got.citations[0].end).startsWith("Aguilar"), true);
+  check("and the page's own table is untouched", page.toaKeys(), []);
 }
 
 console.log("\n" + "=".repeat(60));

@@ -150,3 +150,19 @@ inventory:
 
 It is read-only: nothing the asker sends is used. `test-citation-memory.mjs`
 checks the reply.
+
+The same extension's bottom Links button acts for a ruling that may not be on
+the page at all, since claude.ai unloads replies scrolled far out of view. It
+has the ruling's text, so it can hand that text in:
+
+- The asker dispatches `cl-citations-in-text` on `document`, with `detail` a
+  JSON string `{ text }`.
+- This script answers at once with `cl-citations-in-text-result`, whose
+  `detail` is a JSON string `{ v: 1, provider, citations: [{ url, kind, key,
+  start, end }] }`. The `start` and `end` offsets are into the text.
+
+The text is read by the same passes `scan()` runs over the page
+(`detectCitations`: full citations, bare UCC sections, and bare sections
+inheriting the code named before them). Nothing is painted or remembered.
+There is no answer before the engine has loaded, or on a site the reader has
+excepted, and the asker then falls back to what it can do without one.

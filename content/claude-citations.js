@@ -245,6 +245,98 @@
     scanTimer = setTimeout(scan, 400);
   }
 
+  // Every citation in a string, in the order the passes find them: full
+  // citations (findAllCitations), then bare model-UCC sections, then bare
+  // sections inheriting the code most recently named before them. → [{ kind,
+  // key, span }]. scan() runs it over the page read as one string; the
+  // "cl-citations-in-text" request (below) runs it over a text another
+  // extension hands in.
+  function detectCitations(docText, italicRanges) {
+    let hits = [];
+    if (docText.length >= 6) {
+      try {
+        hits = findAllCitations(docText, {
+          italicRanges,
+          // Cases already seen on this page. An app that unmounts what scrolls
+          // out of view takes the full citation with it, and without this an
+          // italicized "Market Lofts" further down would have nothing left to
+          // resolve against.
+          priorCases: memory ? memory.priorCases() : [],
+        });
+      } catch { hits = []; }
+    }
+
+    const matchedSpans = [];
+    const markers = [];   // { pos, code, kind } where a code is named
+    const out = [];
+    const addCitation = (cite) => { out.push(cite); };
+
+    for (const cite of hits) {
+      matchedSpans.push(cite.span);
+      if (cite.kind === "statute" || cite.kind === "regulation") {
+        const i = cite.key.indexOf(" § ");
+        if (i > 0) {
+          markers.push({ pos: cite.span[0], code: cite.key.slice(0, i), kind: cite.kind });
+        }
+      }
+      addCitation(cite);
+    }
+
+    // A code can be named without being cited — "Chapter 12 of Title 10 of Part
+    // 2 of the Code of Civil Procedure", "under the Evidence Code". No section
+    // number, so nothing to link, but the reader who then meets "section 871.29"
+    // reads it as that code's, and carry-forward has to as well. Without these,
+    // only a code cited WITH a section could be inherited from, so a paragraph
+    // that names its code in prose left every later section unlinked.
+    if (findCodeNameMentions) {
+      try {
+        for (const mention of findCodeNameMentions(docText)) {
+          markers.push({ pos: mention.pos, code: mention.code, kind: mention.kind });
+        }
+      } catch { /* an engine build without the helper: citations still carry */ }
+    }
+    markers.sort((a, b) => a.pos - b.pos);
+
+    // Bare model-UCC sections first ("§ 3-310"): identified by the hyphen
+    // alone, so no carry-forward is needed. Recorded into matchedSpans so the
+    // carry-forward pass below skips them (its section pattern would otherwise
+    // grab a wrong "§ 3").
+    let m;
+    BARE_UCC_RE.lastIndex = 0;
+    while ((m = BARE_UCC_RE.exec(docText)) !== null) {
+      const s = m.index;
+      const e = m.index + m[0].length;
+      if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
+      addCitation({ kind: "statute", key: `UCC § ${m.groups.sec}`, span: [s, e] });
+      matchedSpans.push([s, e]);
+    }
+
+    // Carry-forward inheritance: a bare "§ N" / "section N" reference (no code
+    // name of its own) inherits the most recently NAMED code that appears
+    // before it in reading order. Bare sections before any code is ever named
+    // stay unlinked (nothing to inherit). The single-named-code case is just
+    // the special case where every bare section follows that one code. The
+    // kind travels with the code, so a section inheriting "Treas. Reg." is
+    // still grouped and colored as a regulation, not a statute.
+    BARE_SECTION_RE.lastIndex = 0;
+    while ((m = BARE_SECTION_RE.exec(docText)) !== null) {
+      const s = m.index;
+      const e = m.index + m[0].length;
+      // Skip references already covered by a full citation above.
+      if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
+      // Nearest code named at or before this section.
+      let code = null;
+      for (const mk of markers) {
+        if (mk.pos <= s) code = mk;
+        else break;
+      }
+      if (!code) continue;
+      addCitation({ kind: code.kind, key: `${code.code} § ${m.groups.sec}`, span: [s, e] });
+    }
+
+    return out;
+  }
+
   function scan() {
     if (suppressed || !findAllCitations) return;
     // Another conversation is another set of authorities. The same one — its
@@ -338,27 +430,6 @@
     };
     walkRoot(document.body);
 
-    let hits = [];
-    if (docText.length >= 6) {
-      try {
-        hits = findAllCitations(docText, {
-          italicRanges,
-          // Cases already seen on this page. An app that unmounts what scrolls
-          // out of view takes the full citation with it, and without this an
-          // italicized "Market Lofts" further down would have nothing left to
-          // resolve against.
-          priorCases: memory ? memory.priorCases() : [],
-        });
-      } catch { hits = []; }
-    }
-
-    const matchedSpans = [];
-    const markers = [];   // { pos, code, kind } where a code is named
-
-    // Link one detected citation and remember its authority. A match running
-    // past the end of the block it starts in is an artifact of reading the page
-    // as one string — two adjacent blocks that happen to read as one sentence —
-    // and is dropped, because no reader sees one citation there.
     const addCitation = (cite) => {
       const seg = segmentFor(segments, cite.span[0]);
       if (!seg || cite.span[1] > seg.end) return;
@@ -372,69 +443,11 @@
       if (!range) return;
       citations.push({ range, url, key: cite.key, kind: cite.kind, clipEls: seg.clipEls });
     };
-
-    for (const cite of hits) {
-      matchedSpans.push(cite.span);
-      if (cite.kind === "statute" || cite.kind === "regulation") {
-        const i = cite.key.indexOf(" § ");
-        if (i > 0) {
-          markers.push({ pos: cite.span[0], code: cite.key.slice(0, i), kind: cite.kind });
-        }
-      }
-      addCitation(cite);
-    }
-
-    // A code can be named without being cited — "Chapter 12 of Title 10 of Part
-    // 2 of the Code of Civil Procedure", "under the Evidence Code". No section
-    // number, so nothing to link, but the reader who then meets "section 871.29"
-    // reads it as that code's, and carry-forward has to as well. Without these,
-    // only a code cited WITH a section could be inherited from, so a paragraph
-    // that names its code in prose left every later section unlinked.
-    if (findCodeNameMentions) {
-      try {
-        for (const mention of findCodeNameMentions(docText)) {
-          markers.push({ pos: mention.pos, code: mention.code, kind: mention.kind });
-        }
-      } catch { /* an engine build without the helper: citations still carry */ }
-    }
-    markers.sort((a, b) => a.pos - b.pos);
-
-    // Bare model-UCC sections first ("§ 3-310"): identified by the hyphen
-    // alone, so no carry-forward is needed. Recorded into matchedSpans so the
-    // carry-forward pass below skips them (its section pattern would otherwise
-    // grab a wrong "§ 3").
-    let m;
-    BARE_UCC_RE.lastIndex = 0;
-    while ((m = BARE_UCC_RE.exec(docText)) !== null) {
-      const s = m.index;
-      const e = m.index + m[0].length;
-      if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
-      addCitation({ kind: "statute", key: `UCC § ${m.groups.sec}`, span: [s, e] });
-      matchedSpans.push([s, e]);
-    }
-
-    // Carry-forward inheritance: a bare "§ N" / "section N" reference (no code
-    // name of its own) inherits the most recently NAMED code that appears
-    // before it in reading order. Bare sections before any code is ever named
-    // stay unlinked (nothing to inherit). The single-named-code case is just
-    // the special case where every bare section follows that one code. The
-    // kind travels with the code, so a section inheriting "Treas. Reg." is
-    // still grouped and colored as a regulation, not a statute.
-    BARE_SECTION_RE.lastIndex = 0;
-    while ((m = BARE_SECTION_RE.exec(docText)) !== null) {
-      const s = m.index;
-      const e = m.index + m[0].length;
-      // Skip references already covered by a full citation above.
-      if (matchedSpans.some(([a, b]) => s < b && e > a)) continue;
-      // Nearest code named at or before this section.
-      let code = null;
-      for (const mk of markers) {
-        if (mk.pos <= s) code = mk;
-        else break;
-      }
-      if (!code) continue;
-      addCitation({ kind: code.kind, key: `${code.code} § ${m.groups.sec}`, span: [s, e] });
-    }
+    // A match running past the end of the block it starts in is an artifact of
+    // reading the page as one string — two adjacent blocks that happen to read
+    // as one sentence — and is dropped (addCitation), because no reader sees
+    // one citation there.
+    for (const cite of detectCitations(docText, italicRanges)) addCitation(cite);
 
     // The Table of Authorities is CUMULATIVE for as long as the reader stays on
     // this page. A chat app unmounts the messages that scroll out of view, so a
@@ -706,6 +719,50 @@
       return;
     }
     document.dispatchEvent(new CustomEvent("cl-citations", { detail }));
+  });
+
+  // The same engine over a TEXT the asker hands in, for a ruling that is not
+  // on the page at all: claude.ai unloads a reply scrolled far out of view,
+  // and Claude Usage Meter's bottom Links button still has the ruling's text
+  // (its kept copy, or claude.ai's own copy of the conversation).
+  //
+  //   asker:  dispatchEvent(new CustomEvent("cl-citations-in-text",
+  //             { detail: JSON.stringify({ text }) }))
+  //   here:   dispatchEvent(new CustomEvent("cl-citations-in-text-result",
+  //             { detail: JSON }))
+  //
+  // detail = { v: 1, provider, citations: [{ url, kind, key, start, end }] },
+  // start/end being offsets into the text, in the order the passes find them.
+  // No answer before the engine has loaded, or on a site the reader excepted:
+  // the asker falls back to what it can do without one. Nothing is painted
+  // and nothing is remembered — the text is the asker's, not the page's.
+  const MAX_ASKED_TEXT = 400000;
+  document.addEventListener("cl-citations-in-text", (ev) => {
+    if (suppressed || !findAllCitations || !resolveUrl) return;
+    let text = "";
+    try {
+      const d = JSON.parse(ev.detail);
+      text = String((d && d.text) || "").slice(0, MAX_ASKED_TEXT);
+    } catch (e) {
+      return;
+    }
+    const out = [];
+    for (const cite of detectCitations(text, [])) {
+      // Across a blank line is two paragraphs that happen to read as one
+      // sentence — the same artifact scan() drops at a block's end.
+      if (/\n\s*\n/.test(text.slice(cite.span[0], cite.span[1]))) continue;
+      let url;
+      try { url = resolveUrl(cite, repo, provider); } catch (e) { continue; }
+      if (!url) continue;
+      out.push({ url, kind: cite.kind, key: cite.key, start: cite.span[0], end: cite.span[1] });
+    }
+    let detail;
+    try {
+      detail = JSON.stringify({ v: 1, provider, citations: out });
+    } catch (e) {
+      return;
+    }
+    document.dispatchEvent(new CustomEvent("cl-citations-in-text-result", { detail }));
   });
 
   function paint() {
