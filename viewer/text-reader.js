@@ -2640,7 +2640,7 @@ function setKey(parsed) {
   if (wordy.length) {
     const which = wordy.slice(0, 3).map((w) => `\u201c${w.fake}\u201d for \u201c${w.real}\u201d`).join(", ") + (wordy.length > 3 ? ` and ${wordy.length - 3} more` : "");
     $("st-key").textContent += ` (${wordy.length} pseudonym${wordy.length === 1 ? " is an ordinary word" : "s are ordinary words"}: shown as written)`;
-    toast(`The key fakes ${which} — ${wordy.length === 1 ? "a pseudonym that is" : "pseudonyms that are"} an ordinary word, so nothing tells the run's from the word itself. The reader shows ${wordy.length === 1 ? "it" : "them"} as written rather than turning every one into the name. A full PDF-Linker run gives ${wordy.length === 1 ? "that name a stand-in" : "those names stand-ins"} of ${wordy.length === 1 ? "its" : "their"} own: Re-run PDF-Linker does one on the first click after PDF-Linker is updated, or once PDF-Linker Run Record.json is deleted from the folder.`, { ms: 12000 });
+    toast(`The key fakes ${which} — ${wordy.length === 1 ? "a pseudonym that is" : "pseudonyms that are"} an ordinary word, so nothing tells the run's from the word itself. The reader shows ${wordy.length === 1 ? "it" : "them"} as written rather than turning every one into the name. A full PDF-Linker run gives ${wordy.length === 1 ? "that name a stand-in" : "those names stand-ins"} of ${wordy.length === 1 ? "its" : "their"} own: delete PDF-Linker Run Record.json from the folder, and the next click of Re-run PDF-Linker does one.`, { ms: 12000 });
   }
   // Another key binds other values: what the last one proposed over a PDF is
   // its reading, not this one's, and goes. Boxes drawn by hand stay — they
