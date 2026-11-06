@@ -452,6 +452,36 @@ try {
       [doc, path.join(dlDir, "Word Case", "Opposition draft.docx")]);
     fs.rmSync(path.join(dlDir, "Word Case"), { recursive: true, force: true });
   }
+  {
+    // …and with nothing but the folder's name (Home not linked to
+    // Downloads, no launcher): found by name under Downloads, a subfolder
+    // deep, and remembered for the next click.
+    const doc = path.join(tmp, "Word Case", "Opposition draft.docx");
+    const st = fs.statSync(doc);
+    const dlDir = path.join(tmp, "Downloads");
+    const deep = path.join(dlDir, "November", "Word Case Two");
+    fs.mkdirSync(deep, { recursive: true });
+    fs.copyFileSync(doc, path.join(deep, "Opposition draft.docx"));
+    fs.utimesSync(path.join(deep, "Opposition draft.docx"), st.atime, st.mtime);
+    await app.evaluate(({ app: a }, d) => { a.setPath("downloads", d); globalThis.__openedPaths.length = 0; }, dlDir);
+    const got = await win.evaluate(async ({ mtime }) => {
+      const same = () => new File(["PK stand-in"], "Opposition draft.docx", { lastModified: mtime });
+      const tryOpen = async (f, where) => { try { await window.pdfplusNative.openDocument(f, where); return "opened"; } catch (e) { return String(e.message || e).replace(/^Error invoking remote method '[^']*': (Error: )?/, ""); } };
+      return {
+        byName: await tryOpen(same(), { folder: "Word Case Two" }),
+        again: await tryOpen(same(), { folder: "Word Case Two" }),
+        other: await tryOpen(new File(["something else"], "Opposition draft.docx", { lastModified: mtime }), { folder: "Word Case Two" }),
+      };
+    }, { mtime: st.mtimeMs });
+    check("a folder found by its name under Downloads, a subfolder down, and remembered", {
+      byName: got.byName, again: got.again, other: /could not find .*have its name but not its size or time/.test(got.other),
+    }, { byName: "opened", again: "opened", other: true });
+    const ud = await app.evaluate(({ app: a }) => a.getPath("userData"));
+    let known = false;
+    try { known = JSON.parse(fs.readFileSync(path.join(ud, "known-folders.json"), "utf8")).some((x) => x.endsWith("Word Case Two")); } catch { known = false; }
+    check("…remembered in the app's own data", known, true);
+    fs.rmSync(path.join(dlDir, "November"), { recursive: true, force: true });
+  }
 
   // ── 6. no network ─────────────────────────────────────────────────────────
   console.log("6. nothing is fetched from the network");

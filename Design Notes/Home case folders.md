@@ -262,6 +262,19 @@ so and to open it from File Explorer. The desktop test now hands the bridge
 a File with no path, opened through the launcher's folder and through
 Downloads, and refused where the file there is another or the parts climb.
 
+**Still "could not find" on a folder in a Downloads subfolder (2026-11-06).**
+Home links Downloads only once the operator points it there, and the
+launcher's path did not match, so neither place held the document. main.js
+now also looks where it knows folders are: every folder the user grants the
+app leave to read (the session's permission handler names it, `filePath`
+of a `fileSystem` request) and every one the button found before, kept in
+`known-folders.json` in the app's data (`rememberFolder`,
+`knownFoldersNamed`); and, failing those, it looks for a folder of the
+row's name under Downloads, Desktop and Documents, four levels down and
+five seconds at most (`findFoldersNamed`), the document still matched by
+name, size and time. A find is remembered. The refusal now says where it
+looked and whether a same-named document there differed.
+
 ## When the run going started (2026-11-05)
 
 The owner: "update the home screen case folders run to show what time the

@@ -1441,7 +1441,7 @@ function toggleWordMenu(box, r, docs) {
 // handle's own `resolve`), and the folder its PDF-Linker launcher records.
 // The desktop opens a document there only where it is this very File.
 async function wordDocPlaces(r) {
-  const where = { downloads: null, folders: [] };
+  const where = { downloads: null, folders: [], folder: r.handle.name };
   try {
     const dl = await downloadsDir();
     const parts = dl ? await dl.resolve(r.handle) : null;

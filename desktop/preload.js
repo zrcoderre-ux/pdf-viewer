@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld("pdfplusNative", {
       mtime: Number(file && file.lastModified),
       downloads: Array.isArray(w.downloads) ? w.downloads.map(String) : null,
       folders: Array.isArray(w.folders) ? w.folders.map(String) : [],
+      folder: typeof w.folder === "string" ? w.folder : "",
     });
   },
   version: () => ipcRenderer.invoke("pdfplus:version"),

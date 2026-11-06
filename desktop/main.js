@@ -67,29 +67,108 @@ async function wordDocAt(req) {
   const r = req && typeof req === "object" ? req : {};
   const refuse = () => { throw new Error("PDF+ opens only a Word document this way."); };
   const name = typeof r.name === "string" ? r.name : "";
+  const folder = typeof r.folder === "string" && isPart(r.folder) ? r.folder : "";
   const places = [];
   if (r.path) places.push({ p: String(r.path), same: !name });
   if (name && isPart(name)) {
     if (Array.isArray(r.downloads) && r.downloads.length && r.downloads.every(isPart)) {
-      places.push({ p: path.join(app.getPath("downloads"), ...r.downloads, name) });
+      places.push({ p: path.join(app.getPath("downloads"), ...r.downloads, name), how: "downloads" });
     }
     for (const f of Array.isArray(r.folders) ? r.folders : []) {
-      if (typeof f === "string" && path.isAbsolute(f)) places.push({ p: path.join(f, name) });
+      if (typeof f === "string" && path.isAbsolute(f)) places.push({ p: path.join(f, name), how: "launcher" });
+    }
+    for (const f of knownFoldersNamed(folder)) places.push({ p: path.join(f, name), how: "known" });
+  }
+  const isWord = WORD_DOC.test(name) && !name.startsWith("~$");
+  if (!places.length && !isWord) refuse();
+  let differs = 0;
+  const check = async ({ p, same }) => {
+    if (!isWordDoc(p) || (name && path.basename(p) !== name)) return false;
+    let st;
+    try { st = await fsp.stat(p); } catch { return false; }
+    if (!st.isFile()) return false;
+    if (!same && name && !(st.size === Number(r.size) && Math.abs(st.mtimeMs - Number(r.mtime)) < 2000)) { differs++; return false; }
+    return true;
+  };
+  for (const pl of places) if (await check(pl)) { rememberFolder(path.dirname(pl.p)); return pl.p; }
+  if (places.some(({ p }) => !isWordDoc(p))) refuse();
+  // Not where the page said: the folder looked for by its name under the
+  // user's own folders (Downloads, Desktop, Documents and the folders in
+  // them), the document by its name, size and time. What it finds is
+  // remembered, so the next click goes straight there.
+  let searched = 0;
+  if (isWord && folder) {
+    const found = await findFoldersNamed(folder);
+    searched = found.length;
+    for (const f of found) {
+      const p = path.join(f, name);
+      if (await check({ p })) { rememberFolder(f); return p; }
     }
   }
-  const lost = () => { throw new Error("PDF+ could not find where this document is on the computer. Open it from the folder in File Explorer."); };
-  if (!places.length) { if (WORD_DOC.test(name) && !name.startsWith("~$")) lost(); refuse(); }
-  for (const { p, same } of places) {
-    if (!isWordDoc(p)) continue;
-    if (name && path.basename(p) !== name) continue;
-    let st;
-    try { st = await fsp.stat(p); } catch { continue; }
-    if (!st.isFile()) continue;
-    if (!same && name && !(st.size === Number(r.size) && Math.abs(st.mtimeMs - Number(r.mtime)) < 2000)) continue;
-    return p;
+  const what = [
+    r.downloads ? "its place under Downloads" : null,
+    (r.folders || []).length ? "the folder its PDF-Linker launcher records" : null,
+    knownFoldersNamed(folder).length ? "the folders PDF+ remembers" : null,
+    folder ? `${searched} folder(s) named "${folder}" under Downloads, Desktop and Documents` : null,
+  ].filter(Boolean);
+  throw new Error(`PDF+ could not find where this document is on the computer (it looked in ${what.join(", ") || "nowhere it could name"}`
+    + (differs ? `; ${differs} document(s) there have its name but not its size or time` : "")
+    + "). Open it from the folder in File Explorer.");
+}
+
+// The folders PDF+ knows the place of, by name: each one the user gave the
+// app leave to read (the session's permission handler, `fileSystem`, names
+// it), and each one the Word button found. Kept in the app's own data, so a
+// folder opened once is found again after a restart.
+const KNOWN_FOLDERS_LIMIT = 400;
+let knownFolders = null; // [path], newest first
+const knownFoldersFile = () => path.join(app.getPath("userData"), "known-folders.json");
+function loadKnownFolders() {
+  if (knownFolders) return knownFolders;
+  try { knownFolders = JSON.parse(fs.readFileSync(knownFoldersFile(), "utf8")).filter((p) => typeof p === "string" && path.isAbsolute(p)); }
+  catch { knownFolders = []; }
+  return knownFolders;
+}
+function rememberFolder(p) {
+  if (typeof p !== "string" || !path.isAbsolute(p)) return;
+  const list = loadKnownFolders().filter((x) => pathKey(x) !== pathKey(p));
+  list.unshift(p);
+  knownFolders = list.slice(0, KNOWN_FOLDERS_LIMIT);
+  try { fs.writeFileSync(knownFoldersFile(), JSON.stringify(knownFolders)); } catch { /* kept for this session */ }
+}
+function knownFoldersNamed(name) {
+  if (!name) return [];
+  const want = process.platform === "win32" ? name.toLowerCase() : name;
+  return loadKnownFolders().filter((p) => (process.platform === "win32" ? path.basename(p).toLowerCase() : path.basename(p)) === want);
+}
+/** Folders named `name` under Downloads, Desktop and Documents, four levels down at most, in about five seconds at most. */
+async function findFoldersNamed(name, { depth = 4, ms = 5000 } = {}) {
+  const want = process.platform === "win32" ? name.toLowerCase() : name;
+  const roots = [];
+  for (const k of ["downloads", "desktop", "documents"]) { try { roots.push(app.getPath(k)); } catch { /* none */ } }
+  const out = [];
+  const seen = new Set();
+  const until = Date.now() + ms;
+  let level = roots.map((p) => [p, 0]);
+  while (level.length && Date.now() < until) {
+    const next = [];
+    for (const [dir, d] of level) {
+      if (Date.now() >= until) break;
+      const key = pathKey(dir);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      let ents;
+      try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { continue; }
+      for (const e of ents) {
+        if (!e.isDirectory() || e.name.startsWith(".") || e.name.startsWith("$") || e.name === "node_modules") continue;
+        const p = path.join(dir, e.name);
+        if ((process.platform === "win32" ? e.name.toLowerCase() : e.name) === want) out.push(p);
+        if (d + 1 < depth) next.push([p, d + 1]);
+      }
+    }
+    level = next;
   }
-  if (places.some(({ p }) => !isWordDoc(p))) refuse();
-  lost();
+  return out;
 }
 
 // Links that open in the browser without asking: the citation links' own
@@ -800,6 +879,11 @@ function lockDownSession(ses) {
   ses.setPermissionCheckHandler((_wc, permission, origin) => allowed.has(permission) && isAppUrl(String(origin || "").replace(/\/?$/, "/")));
   ses.setPermissionRequestHandler((wc, permission, cb, details) => {
     const from = (details && details.requestingUrl) || (wc && wc.getURL()) || "";
+    // A folder the user lets the app read: its place, for Home's Word
+    // button, which is handed the folder's files without one (wordDocAt).
+    if (permission === "fileSystem" && details && typeof details.filePath === "string" && isAppUrl(from)) {
+      rememberFolder(details.isDirectory ? details.filePath : path.dirname(details.filePath));
+    }
     // A screen share (getDisplayMedia) asks for "display-capture" (Electron
     // 45 on; "media" before it); setDisplayMediaRequestHandler then gives it
     // the app's own window, with no sound, and nothing else. A camera or a
