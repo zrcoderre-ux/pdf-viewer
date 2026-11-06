@@ -420,6 +420,38 @@ try {
       { "Opposition draft.docx": "opened", "~$position draft.docx": "refused", "Setup.exe": "refused", unbacked: "refused" });
     check("…handed to the desktop by its own path", await app.evaluate(() => globalThis.__openedPaths.slice()), [path.join(caseDir, "Opposition draft.docx")]);
   }
+  {
+    // …and as Home reads it: a File from the folder's handle carries no
+    // path, so the page says where the folder may be (its launcher's
+    // folder, its place under Downloads), and the desktop opens it there
+    // only where the document is that same File by name, size and time.
+    const caseDir = path.join(tmp, "Word Case");
+    const doc = path.join(caseDir, "Opposition draft.docx");
+    const st = fs.statSync(doc);
+    const dlDir = path.join(tmp, "Downloads");
+    fs.mkdirSync(path.join(dlDir, "Word Case"), { recursive: true });
+    fs.copyFileSync(doc, path.join(dlDir, "Word Case", "Opposition draft.docx"));
+    fs.utimesSync(path.join(dlDir, "Word Case", "Opposition draft.docx"), st.atime, st.mtime);
+    await app.evaluate(({ app: a }, d) => { a.setPath("downloads", d); globalThis.__openedPaths.length = 0; }, dlDir);
+    const got = await win.evaluate(async ({ dir, mtime }) => {
+      const out = {};
+      const same = () => new File(["PK stand-in"], "Opposition draft.docx", { lastModified: mtime });
+      const tryOpen = async (f, where) => { try { await window.pdfplusNative.openDocument(f, where); return "opened"; } catch (e) { return String(e.message || e).replace(/^Error invoking remote method '[^']*': (Error: )?/, ""); } };
+      out.launcher = await tryOpen(same(), { folders: [dir] });
+      out.downloads = await tryOpen(same(), { downloads: ["Word Case"] });
+      out.nowhere = await tryOpen(same(), {});
+      out.otherFile = await tryOpen(new File(["something else"], "Opposition draft.docx", { lastModified: mtime }), { folders: [dir] });
+      out.climb = await tryOpen(same(), { downloads: ["..", "Word Case"] });
+      return out;
+    }, { dir: caseDir, mtime: st.mtimeMs });
+    check("a File with no path opens where the page says its folder is, and only as itself", {
+      launcher: got.launcher, downloads: got.downloads,
+      nowhere: /could not find/.test(got.nowhere), otherFile: /could not find/.test(got.otherFile), climb: /could not find/.test(got.climb),
+    }, { launcher: "opened", downloads: "opened", nowhere: true, otherFile: true, climb: true });
+    check("…handed to the desktop by the places that hold it", await app.evaluate(() => globalThis.__openedPaths.slice()),
+      [doc, path.join(dlDir, "Word Case", "Opposition draft.docx")]);
+    fs.rmSync(path.join(dlDir, "Word Case"), { recursive: true, force: true });
+  }
 
   // ── 6. no network ─────────────────────────────────────────────────────────
   console.log("6. nothing is fetched from the network");

@@ -243,6 +243,25 @@ page (`position: fixed`), not inside the row, since the case list's box
 clipped it; a scroll or a resize closes it. Tests: `test-case-folders.mjs`
 part 17 (with a stand-in bridge; the desktop test does not cover it).
 
+**It opened nothing (2026-11-06; the first build above is wrong on this).**
+The owner: "Could not open … Petition to Confirm Minor's Compromise
+11.9.2026.docx (PDF+ opens only a Word document this way.)". Home reads a
+case folder through its handle, and a File read that way carries no path:
+`getPathForFile` gives "", which main.js refused as no Word document. The
+desktop test had handed the bridge files from an `<input>`, which do carry
+one, so it passed while the button never worked. Now the page also says
+where the folder may be (`wordDocPlaces`): its place under the Downloads
+Home lists (`dl.resolve(handle)`, joined by main.js to the computer's own
+Downloads) and the folder its PDF-Linker launcher records (`folderLauncher`,
+`folderPathOfToken`, the Re-run button's token). main.js (`wordDocAt`) opens
+the first such place where a Word document stands with the File's own name,
+size and time to the second, so the page can point at nothing it did not
+read; a folder part may not be "..", a separator or empty. A folder outside
+Downloads that no PDF-Linker has run on has no place to name: the toast says
+so and to open it from File Explorer. The desktop test now hands the bridge
+a File with no path, opened through the launcher's folder and through
+Downloads, and refused where the file there is another or the parts climb.
+
 ## When the run going started (2026-11-05)
 
 The owner: "update the home screen case folders run to show what time the

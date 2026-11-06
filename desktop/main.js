@@ -53,6 +53,44 @@ const APP_NAME = "PDF+";
 const OPENABLE = /\.(pdf|txt|leak|md|markdown)$/i;
 /** What Home's Word button may hand to the desktop (pdfplus:open-document). */
 const WORD_DOC = /\.(docx|docm|doc|dotx|rtf)$/i;
+const isWordDoc = (p) => typeof p === "string" && path.isAbsolute(p) && WORD_DOC.test(p) && !path.basename(p).startsWith("~$");
+/** A folder name of a path under Downloads: no separator, not "." or "..". */
+const isPart = (x) => typeof x === "string" && x !== "" && x !== "." && x !== ".." && !/[\\/]/.test(x) && !x.includes("\0");
+
+/**
+ * The Word document Home's Word button means (pdfplus:open-document): the
+ * first of the places `req` names where a Word document stands that is the
+ * File the page read, by its name, size and time to the second. `req.path`
+ * alone (a File that gave its path) needs only to be a Word document.
+ */
+async function wordDocAt(req) {
+  const r = req && typeof req === "object" ? req : {};
+  const refuse = () => { throw new Error("PDF+ opens only a Word document this way."); };
+  const name = typeof r.name === "string" ? r.name : "";
+  const places = [];
+  if (r.path) places.push({ p: String(r.path), same: !name });
+  if (name && isPart(name)) {
+    if (Array.isArray(r.downloads) && r.downloads.length && r.downloads.every(isPart)) {
+      places.push({ p: path.join(app.getPath("downloads"), ...r.downloads, name) });
+    }
+    for (const f of Array.isArray(r.folders) ? r.folders : []) {
+      if (typeof f === "string" && path.isAbsolute(f)) places.push({ p: path.join(f, name) });
+    }
+  }
+  const lost = () => { throw new Error("PDF+ could not find where this document is on the computer. Open it from the folder in File Explorer."); };
+  if (!places.length) { if (WORD_DOC.test(name) && !name.startsWith("~$")) lost(); refuse(); }
+  for (const { p, same } of places) {
+    if (!isWordDoc(p)) continue;
+    if (name && path.basename(p) !== name) continue;
+    let st;
+    try { st = await fsp.stat(p); } catch { continue; }
+    if (!st.isFile()) continue;
+    if (!same && name && !(st.size === Number(r.size) && Math.abs(st.mtimeMs - Number(r.mtime)) < 2000)) continue;
+    return p;
+  }
+  if (places.some(({ p }) => !isWordDoc(p))) refuse();
+  lost();
+}
 
 // Links that open in the browser without asking: the citation links' own
 // targets (viewer/code-tables.js). Any other link is shown first.
@@ -544,13 +582,16 @@ function registerIpc() {
   // Windows opens it with. Only a Word document that is there (never a
   // program, never Word's own "~$" lock file), and only for PDF+'s pages:
   // the path comes from a File the page holds (preload.js, openDocument).
-  ipcMain.handle("pdfplus:open-document", async (event, p) => {
+  //
+  // A File read through a folder handle, which is how Home reads a case
+  // folder, carries no path, so the page says where it may be: a path the
+  // File itself gave (a picked or dropped file), its folders under
+  // Downloads, the folder PDF-Linker's launcher records. A place is used
+  // only where a Word document stands there with the File's own name, size
+  // and time (`wordDocAt`), so the page can point at nothing it did not read.
+  ipcMain.handle("pdfplus:open-document", async (event, req) => {
     if (!fromApp(event)) throw new Error("Not PDF+'s page.");
-    if (typeof p !== "string" || !path.isAbsolute(p) || !WORD_DOC.test(p) || path.basename(p).startsWith("~$")) {
-      throw new Error("PDF+ opens only a Word document this way.");
-    }
-    const st = await fsp.stat(p);
-    if (!st.isFile()) throw new Error("That is not a file.");
+    const p = await wordDocAt(typeof req === "string" ? { path: req } : req);
     const err = await shell.openPath(p);
     if (err) throw new Error(err);
     return true;

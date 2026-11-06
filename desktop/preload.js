@@ -24,12 +24,23 @@ contextBridge.exposeInMainWorld("pdfplusNative", {
     try { return webUtils.getPathForFile(file) || ""; } catch { return ""; }
   },
   // A Word document of a case folder, opened in the program Windows opens
-  // .docx with (Home's Word button). The path is read here, where Electron
-  // lets a File say where it lives; main.js opens only a Word document.
-  openDocument: (file) => {
+  // .docx with (Home's Word button). A File read through a folder handle
+  // carries no path (getPathForFile gives ""), so the page also says where
+  // the file may be: its folders under Downloads, and the folder its
+  // PDF-Linker launcher records. main.js opens only a Word document at one
+  // of those places whose name, size and time are the File's own.
+  openDocument: (file, where) => {
     let p = "";
     try { p = webUtils.getPathForFile(file) || ""; } catch { p = ""; }
-    return ipcRenderer.invoke("pdfplus:open-document", p);
+    const w = where && typeof where === "object" ? where : {};
+    return ipcRenderer.invoke("pdfplus:open-document", {
+      path: p,
+      name: String(file && file.name || ""),
+      size: Number(file && file.size),
+      mtime: Number(file && file.lastModified),
+      downloads: Array.isArray(w.downloads) ? w.downloads.map(String) : null,
+      folders: Array.isArray(w.folders) ? w.folders.map(String) : [],
+    });
   },
   version: () => ipcRenderer.invoke("pdfplus:version"),
   checkForUpdate: () => ipcRenderer.invoke("pdfplus:update-check"),

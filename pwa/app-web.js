@@ -1436,13 +1436,33 @@ function toggleWordMenu(box, r, docs) {
     document.addEventListener("scroll", closeWordMenus, { once: true, capture: true });
   }, 0);
 }
+// A File read through the folder handle carries no path, so PDF+ is told
+// where the folder may be: its place under the Downloads Home lists (the
+// handle's own `resolve`), and the folder its PDF-Linker launcher records.
+// The desktop opens a document there only where it is this very File.
+async function wordDocPlaces(r) {
+  const where = { downloads: null, folders: [] };
+  try {
+    const dl = await downloadsDir();
+    const parts = dl ? await dl.resolve(r.handle) : null;
+    if (parts && parts.length) where.downloads = parts;
+  } catch { /* not under Downloads, or Downloads not readable */ }
+  try {
+    const lib = await import("./viewer/run-request.js");
+    const launcher = await lib.folderLauncher(r.handle);
+    const p = launcher && launcher.token ? lib.folderPathOfToken(launcher.token) : "";
+    if (p) where.folders.push(p);
+  } catch { /* no launcher */ }
+  return where;
+}
 async function openWordDocs(r, names) {
   if (!(await permitted(r.handle, "read", true))) return;
   const failed = [];
+  const where = await wordDocPlaces(r);
   for (const name of names) {
     try {
       const file = await (await r.handle.getFileHandle(name)).getFile();
-      await window.pdfplusNative.openDocument(file);
+      await window.pdfplusNative.openDocument(file, where);
     } catch (e) {
       failed.push(`${name} (${String((e && e.message) || e).replace(/^Error invoking remote method '[^']*': (Error: )?/, "")})`);
     }
