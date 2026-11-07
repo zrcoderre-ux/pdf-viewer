@@ -2660,9 +2660,14 @@ function extractDistinctiveSubstring(needle) {
   return null;
 }
 
-function rectsForRange(start, end, _itemRanges, textLayerDiv, linkLayerDiv, citeText, consumedDomStarts) {
+// A page's text layer read once: every span, their text joined (domText), the
+// whitespace-collapsed haystack and the map back from it. placeLinksForPage
+// builds it once for the page and hands it to every rectsForRange call; it
+// used to be rebuilt for each citation — on a brief of three hundred pages
+// with a dozen cites a page, four seconds of the main thread, during which no
+// page could be drawn.
+function textLayerIndex(textLayerDiv) {
   const allSpans = Array.from(textLayerDiv.querySelectorAll("span"));
-  if (!allSpans.length) return [];
 
   // Build domText (concatenation of every span's text) and a parallel
   // map from each character index in domText to its source span and
@@ -2689,28 +2694,7 @@ function rectsForRange(start, end, _itemRanges, textLayerDiv, linkLayerDiv, cite
     if (node && typeof node.data === "string") domText += node.data;
   }
 
-  // The PDF.js item-joined text and the DOM-concatenated text differ in
-  // their inter-item separators (we add one space; joined text may add
-  // a space or a newline depending on item positions). Both are then
-  // collapsed by `norm` below into single-space runs, so the citation's
-  // literal text — passed in as citeText — should match either way.
-  if (!citeText || !citeText.length) return [];
-
-  // Find all occurrences of citeText in domText, then pick the one
-  // whose position best matches the hint. Hint mapping: positions in
-  // domText vs. positions in joined text differ by roughly the number
-  // of inter-item separators, but both grow monotonically with reading
-  // order, so the nearest-by-position match is reliable.
-  // Use a normalized comparison: collapse runs of whitespace in both
-  // strings so a citation spanning a line break (joined: "Civil Code\n
-  // section 3287(a)", DOM: "Civil Code   section 3287(a)") still matches.
-
-  const matches = [];
-  const norm = (s) => s.replace(/\s+/g, " ");
   const haystack = norm(domText);
-  const needle = norm(citeText).trim();
-  if (!needle) return [];
-
   // To get back from a haystack offset to a domText offset, build an
   // inverse map: haystackPos[i] = domText index that produced haystack
   // character i.
@@ -2733,6 +2717,33 @@ function rectsForRange(start, end, _itemRanges, textLayerDiv, linkLayerDiv, cite
     // Trailing sentinel so we can compute end positions safely.
     while (hi < haystack.length) haystackPos[hi++] = domText.length;
   }
+  return { allSpans, spanStartOffsets, domText, haystack, haystackPos };
+}
+const norm = (s) => s.replace(/\s+/g, " ");
+
+function rectsForRange(start, end, _itemRanges, textLayerDiv, linkLayerDiv, citeText, consumedDomStarts, index, layerRect) {
+  const { allSpans, spanStartOffsets, haystack, haystackPos } = index || textLayerIndex(textLayerDiv);
+  if (!allSpans.length) return [];
+
+  // The PDF.js item-joined text and the DOM-concatenated text differ in
+  // their inter-item separators (we add one space; joined text may add
+  // a space or a newline depending on item positions). Both are then
+  // collapsed by `norm` below into single-space runs, so the citation's
+  // literal text — passed in as citeText — should match either way.
+  if (!citeText || !citeText.length) return [];
+
+  // Find all occurrences of citeText in domText, then pick the one
+  // whose position best matches the hint. Hint mapping: positions in
+  // domText vs. positions in joined text differ by roughly the number
+  // of inter-item separators, but both grow monotonically with reading
+  // order, so the nearest-by-position match is reliable.
+  // Use a normalized comparison: collapse runs of whitespace in both
+  // strings so a citation spanning a line break (joined: "Civil Code\n
+  // section 3287(a)", DOM: "Civil Code   section 3287(a)") still matches.
+
+  const matches = [];
+  const needle = norm(citeText).trim();
+  if (!needle) return [];
 
   let effectiveNeedle = needle;
   let searchFrom = 0;
@@ -2861,7 +2872,7 @@ function rectsForRange(start, end, _itemRanges, textLayerDiv, linkLayerDiv, cite
   const clientRects = range.getClientRects();
   if (!clientRects.length) return [];
 
-  const layerRect = linkLayerDiv.getBoundingClientRect();
+  if (!layerRect) layerRect = linkLayerDiv.getBoundingClientRect();
   const out = [];
   for (const cr of clientRects) {
     const w = cr.width;
@@ -2971,14 +2982,22 @@ export function placeLinksForPage(pageNumber, textLayerDiv, linkLayerDiv) {
   // multiple times on a page, each documentCites entry claims a different
   // DOM occurrence so all visual occurrences get linked.
   const consumedDomStarts = new Set();
+  // Every citation measured first and every overlay written after: a write
+  // between two measurements made the browser lay the page out again for
+  // each citation.
+  let index = null, layerRect = null;
+  const found = [];
   for (const cite of documentCites) {
     const [s, e] = cite.span;
     if (s < joinedStart || e > pageEnd) continue;
+    if (!index) { index = textLayerIndex(textLayerDiv); layerRect = linkLayerDiv.getBoundingClientRect(); }
     const localStart = s - joinedStart;
     const localEnd = e - joinedStart;
     const citeText = documentText.slice(s, e);
-    const rects = rectsForRange(localStart, localEnd, itemRanges, textLayerDiv, linkLayerDiv, citeText, consumedDomStarts);
-    if (!rects.length) continue;
+    const rects = rectsForRange(localStart, localEnd, itemRanges, textLayerDiv, linkLayerDiv, citeText, consumedDomStarts, index, layerRect);
+    if (rects.length) found.push({ cite, rects });
+  }
+  for (const { cite, rects } of found) {
     const url = resolveUrl(cite, documentRepo, documentProvider);
     let kind;
     if (cite.isSupra) kind = "supra";

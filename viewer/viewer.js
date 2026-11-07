@@ -2508,9 +2508,22 @@ async function renderAllPages() {
     // Feed the Table of Authorities panel (deduped authorities for this doc).
     if (toaPanel) toaPanel.render(getAuthorities(citationRepo, provider), provider);
 
-    // Pass 3: place links on each page.
-    for (const refs of pageRefs) {
+    // Pass 3: place links on each page — the page being read first and the
+    // rest outward from it, handing the thread back between pages once a few
+    // milliseconds have gone. Done in one sitting, page order, a long brief
+    // held the thread for seconds, and a page scrolled to in that time stayed
+    // blank until the last page had its links.
+    const here = visiblePageNumber();
+    const order = [...pageRefs].sort((a, b) =>
+      Math.abs(a.pageNumber - here) - Math.abs(b.pageNumber - here) || a.pageNumber - b.pageNumber);
+    let slice = performance.now();
+    for (const refs of order) {
       if (signal.aborted) return;
+      if (performance.now() - slice > 12) {
+        await new Promise((r) => setTimeout(r, 0));
+        if (signal.aborted) return;
+        slice = performance.now();
+      }
       totalLinks += placeLinksForPage(
         refs.pageNumber, refs.textLayerDiv, refs.linkLayerDiv
       );
@@ -3251,8 +3264,14 @@ function guardSelection(textLayerDiv) {
     document.body.classList.add("text-dragging");
   });
 }
+// Called for every page's layer on each click and selection change, so a layer
+// already at rest is left untouched: moving its block (even to where it already
+// stands) or writing its style dirties the layer's layout, and on a three-
+// hundred-page document that was a third of a second of relayout per click —
+// the pages on screen waited behind it to be drawn.
 function resetTextLayerEnd(end, div) {
-  div.appendChild(end);
+  if (div.lastChild === end && !end.style.width && !end.style.height && !div.classList.contains("selecting")) return;
+  if (div.lastChild !== end) div.appendChild(end);
   end.style.width = "";
   end.style.height = "";
   div.classList.remove("selecting");
