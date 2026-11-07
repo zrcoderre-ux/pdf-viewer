@@ -168,6 +168,32 @@ the thread about a second (300 pages) — the text is laid out once without the
 pane and again beside it; and a scanned page's decode is pdf.js 4.6's own JPEG
 decoder.
 
+### Nothing holds the thread while pages wait to be drawn (`viewer.js`, `citation-linker.js`)
+
+A page's bitmap is drawn on the main thread, so anything that holds the
+thread holds the drawing. Profiled on a 300-page brief at 2×, two did:
+
+- **The selection guard** (`resetTextLayerEnd`). Every click and every
+  `selectionchange` put each page's `endOfContent` block back with
+  `appendChild`, even where it already stood last — 300 text layers
+  re-laid-out, about 300 ms each time, and the pages a jump had just brought
+  on screen waited behind it. A layer already at rest is now left untouched.
+- **Placing the citation links** (Pass 3 of `renderAllPages`). `rectsForRange`
+  rebuilt the page's span text, haystack and offset map for every citation,
+  and each overlay written between two measurements made the browser lay the
+  page out again: four seconds in one unbroken loop, during which a page
+  scrolled to stayed blank. `placeLinksForPage` now builds the page's index
+  once (`textLayerIndex`), measures every citation before writing any overlay,
+  and Pass 3 goes outward from the page being read, handing the thread back
+  every 12 ms. `rectsForRange` still builds its own index when called without
+  one, and how it matches a citation to the DOM is unchanged.
+
+| PDF viewer, 300-page brief at 2× | before | after |
+|---|---|---|
+| a jump into the document, until the pages on screen are drawn | 270–400 ms | 100–150 ms |
+| every page's links placed | 6.2–6.7 s | 2.1–2.6 s |
+| `rectsForRange`, main-thread time over the open | 3.7 s | 0.09 s |
+
 ### The page is drawn in the screen's own pixels (`viewer.js`)
 
 A page's canvas used to be sized to the page's CSS size, one bitmap pixel to
