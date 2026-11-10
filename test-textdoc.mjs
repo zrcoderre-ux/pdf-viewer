@@ -22,7 +22,7 @@ import {
   textFixedLine, setTextFixed, pageTextSum, pageFurnitureLine, headerSaysTextCorrected, headerSaysCondensed, TEXTFIXED_RE,
   wordsChanged, AUTO_TEXT_FIXED_WORDS, decisionDelta, applyDecisionDelta,
   marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
-  readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport, compileDisplay,
+  readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
   valuesLineKey, valuesLineKeys, linesNotOurs, withLinesNotOurs, sameBytes, KEY_FILE, keyRank, noteLinesRead, setAsideLines, notedBlocks,
@@ -33,6 +33,7 @@ import {
   STRIKE_MARK, strikeRuns, strikeEdit, unstruck, strikeLayout, markdownLines,
 } from "./viewer/textdoc.js";
 import { parseKey, compileForward, compile, compileReals, buildMatcher, buildFindMatcher, forwardRuns, findRealSpans, translate, translateRuns } from "./viewer/pseudo-key.js";
+import { readFileSync } from "node:fs";
 
 let fails = 0;
 function check(label, got, want) {
@@ -2132,43 +2133,56 @@ console.log("the lines of New Real Values.txt the reader did not write");
     spendLines({ keeps: [], textFixed: [fixed] }, noteLinesRead("", fileNow, listNow), "Quell Harbor\n").spentFixed, [fixed]);
 }
 
-// ---- the way back spares what the way out spared ----------------------------
-// A fake inside a cited decision's name is that decision's party, not this
-// case's: the run spared the name, and a published party can share a word with
-// a fake. The page shows it as the export has it.
-console.log("cited names on the way back");
+// ---- every fake reads back, a case name included ----------------------------
+// The run fakes inside case names: a trial-court case's parties, this case's
+// own prior appeal, a writ's real party in interest. The reader's pages used
+// a matcher that left a fake standing in anything shaped like a cited
+// decision's name, so those showed the stand-ins, or half a name. It reads
+// every fake back now, through the matcher PDF-Linker's round trip is pinned
+// to (test_round_trip_check.py runs PK.compile under node).
+console.log("fakes inside case names on the way back");
 {
   const key = parseKey([{ name: "Pseudonym Key", rows: [HEADERS,
-    ["person", "Helen Rasho", "Ingrid Smith", "", "", "spreadsheet", 4],
-    ["person", "Rasho", "Smith", "", "", "spreadsheet", 3],
-    ["entity", "Quillmark, Inc.", "Jones Holdings, Inc.", "", "", "spreadsheet", 2],
-    ["person", "Gregory Walton", "Ford", "", "", "harvested", 1],
+    ["person", "Helen Rasho", "Ingrid Stroud", "", "", "spreadsheet", 4],
+    ["person-token", "Rasho", "Stroud", "", "", "spreadsheet", 3],
+    ["entity", "Quillmark, Inc.", "Pellow Holdings, Inc.", "", "", "spreadsheet", 2],
+    ["person", "Corwin Ashgrove", "Wendell Varnham", "", "", "court case", 1],
+    ["entity", "Hartwick Dairy Co.", "Brackley Lorne Co.", "", "", "court case", 1],
+    ["person-token", "Trevathan", "Saltmarsh", "", "", "court case", 1],
   ] }], "k");
-  const rev = compileDisplay(key);
-  check("a cited decision's party who shares a word with a fake keeps its name; the sentence around it reads back",
-    translate(rev, "Smith relies on Smith v. Ford Motor Co. (2010) 50 Cal.4th 100, 105.").text,
-    "Rasho relies on Smith v. Ford Motor Co. (2010) 50 Cal.4th 100, 105.");
-  check("…a writ's real party in interest with it",
-    translate(rev, "See Ford v. Superior Court (Smith) (2019) 7 Cal.5th 1.").text,
-    "See Ford v. Superior Court (Smith) (2019) 7 Cal.5th 1.");
-  check("…and a short cite",
-    translate(rev, "(Smith, supra, 50 Cal.4th at p. 105.)").text, "(Smith, supra, 50 Cal.4th at p. 105.)");
-  check("this case's own caption, cited, was faked and reads back",
-    translate(rev, "In Smith v. Jones Holdings, Inc. (2023) 90 Cal.App.5th 100, the court remanded.").text,
-    "In Rasho v. Quillmark, Inc. (2023) 90 Cal.App.5th 100, the court remanded.");
-  check("a caption with no cite after it is this case and reads back",
-    translate(rev, "SMITH v. JONES HOLDINGS, INC.").text, "RASHO v. QUILLMARK, INC.");
-  const p1 = "Plaintiff relies on Smith v. Ford Motor Co.";
-  check("a cite whose year opens the next page is spared there too",
-    [translate(rev, p1, { next: " 1  (2010) 50 Cal.4th 100." }).text, translate(rev, p1).text],
-    [p1, "Plaintiff relies on Rasho v. Gregory Walton Motor Co."]);
-  const doc = readExport("====== Page 1 ======\n 1  " + p1 + "\n====== Page 2 ======\n 1  (2010) 50 Cal.4th 100.\n");
-  check("…and the page as Find reads it agrees",
-    shownPages(doc, { rev })[0].includes("Smith v. Ford Motor Co."), true);
-  check("a matcher compiled without the reader's spare reverses everything, as before",
-    translate(compile(key), "Smith v. Ford Motor Co. (2010) 50 Cal.4th 100").text, "Rasho v. Gregory Walton Motor Co. (2010) 50 Cal.4th 100");
-  check("the runs carry the spared fake as text, never as a pseudonym",
-    translateRuns(rev, "Smith v. Ford (2010) 50 Cal.4th 1").filter((r) => r.t === "swap").length, 0);
+  const rev = compile(key);
+  const back = (t) => translate(rev, t).text;
+  check("a trial-court case with its year in the parentheses reads back, both sides",
+    back("See Wendell Varnham v. Brackley Lorne Co. (Super. Ct. Orange County, 2019)."),
+    "See Corwin Ashgrove v. Hartwick Dairy Co. (Super. Ct. Orange County, 2019).");
+  check("…a one-party matter with a year after it",
+    back("In re Marriage of Saltmarsh (2017) Riverside County Superior Court Case No. STZV1701234 was dismissed."),
+    "In re Marriage of Trevathan (2017) Riverside County Superior Court Case No. STZV1701234 was dismissed.");
+  check("this case's own prior appeal reads back whole, never half",
+    back("The prior appeal is Stroud v. Pellow Holdings, Inc. (2023) 90 Cal.App.5th 100."),
+    "The prior appeal is Rasho v. Quillmark, Inc. (2023) 90 Cal.App.5th 100.");
+  check("…its short cite",
+    back("(Stroud, supra, 90 Cal.App.5th at p. 105.)"), "(Rasho, supra, 90 Cal.App.5th at p. 105.)");
+  check("…a party faked beside a published one",
+    back("Quillmark was sued in Ruiz v. Pellow Holdings, Inc. (C.D. Cal. 2019) 2019 WL 1234567."),
+    "Quillmark was sued in Ruiz v. Quillmark, Inc. (C.D. Cal. 2019) 2019 WL 1234567.");
+  check("…and a writ's real party in interest",
+    back("See Stroud v. Superior Court (Pellow Holdings, Inc.) (2024) 99 Cal.App.5th 200."),
+    "See Rasho v. Superior Court (Quillmark, Inc.) (2024) 99 Cal.App.5th 200.");
+  const p1 = "Plaintiff relies on Stroud v. Pellow Holdings, Inc.";
+  const doc = readExport("====== Page 1 ======\n 1  " + p1 + "\n====== Page 2 ======\n 1  (2023) 90 Cal.App.5th 100.\n");
+  check("a cite whose year opens the next page reads back, on the page as Find reads it",
+    shownPages(doc, { rev })[0].includes("Rasho v. Quillmark, Inc."), true);
+  check("every fake in a case name is a pseudonym run, so a save writes the fake back",
+    translateRuns(rev, "Stroud v. Pellow Holdings, Inc. (2023) 90 Cal.App.5th 100").filter((r) => r.t === "swap").map((r) => r.from),
+    ["Stroud", "Pellow Holdings, Inc."]);
+  check("a published authority no fake stands in is untouched",
+    back("(Greenspan v. LADT LLC (2010) 191 Cal.App.4th 486, 511.)"), "(Greenspan v. LADT LLC (2010) 191 Cal.App.4th 486, 511.)");
+  // The pages are built with this matcher and no other: the one PDF-Linker's
+  // round trip reads every export back through.
+  const src = readFileSync(new URL("./viewer/text-reader.js", import.meta.url), "utf8");
+  check("the reader's pages are built with PK.compile, the round trip's matcher",
+    /\n  rev = key \? PK\.compile\(key\) : null;\n/.test(src) && !/compileDisplay/.test(src), true);
 }
 
 console.log("\ncomments on the document (the block after the last page)");

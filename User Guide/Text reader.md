@@ -501,15 +501,17 @@ app, which routes it to the reader tab.
   name only`, such as the "Provision" of a party called Provision Holdings
   whose papers use the word in prose) still reads back as the real name
   where its fake stands, but is never marked, saved as a fake or offered as
-  you type. **A fake inside
-  a cited decision's name is shown as the export has it.** PDF-Linker spared
-  that name, so a word in it that matches one of this case's fakes is the
-  published party's own — `Smith v. Jones (2010) 50 Cal.4th 100` where
-  `Smith` is also your plaintiff's fake — and the real name over it would be
-  a wrong citation, copied out of the reader in the real names. It stays
-  unmarked, and Find, the folder's ⚠ and a save read it the same way. This
-  case's own caption cited with a year is the exception PDF-Linker makes too:
-  it was faked, and it reads back.
+  you type. **Every fake is shown as its real value wherever it stands, a
+  case name included.** PDF-Linker fakes inside case names too — both parties
+  of a trial-court case, this case's own prior appeal, your party in a
+  related federal cite, a writ's real party in interest — and each reads
+  back, highlighted like any other name. (The reader used to leave a fake
+  standing inside anything shaped like a cited decision, which left those
+  showing the stand-ins.) The one thing to know: if a published decision's
+  party really is named the same as one of this case's stand-ins, the real
+  name shows over it, highlighted; PDF-Linker keeps the authorities a folder
+  cites out of its stand-ins, and names the place in its log when a re-run
+  cannot.
   The highlight's **colour and intensity** are yours to set (the swatch and
   slider beside "Mark pseudonyms", or under Options), and are remembered like
   the font — **written the moment you choose them.** Every reading setting is
