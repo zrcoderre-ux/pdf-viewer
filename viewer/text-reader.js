@@ -4736,6 +4736,9 @@ function openText(text, name, handle, built, { stash = null, d = null, base = nu
   if (fixedUp && fixedUp.numbers) {
     toast(`${fixedUp.numbers} margin number${fixedUp.numbers === 1 ? "" : "s"} the OCR missed or misread ${fixedUp.numbers === 1 ? "is" : "are"} put back, on ${fixedUp.pages} page${fixedUp.pages === 1 ? "" : "s"} (in italics in the margin). The file has them once it is saved.`, { ms: 7000 });
   }
+  if (fixedUp && fixedUp.doubled) {
+    toast(`${fixedUp.doubled} margin number${fixedUp.doubled === 1 ? "" : "s"} the OCR read a second time, into the text of ${fixedUp.doubled === 1 ? "its line, is" : "their lines, are"} taken out. The file has ${fixedUp.doubled === 1 ? "it" : "them"} out once it is saved.`, { ms: 7000 });
+  }
   setupPdfForDoc();
   markDocList();
   renderReelState();

@@ -887,6 +887,69 @@ export function restoreMarginNumbers(lines, { last = 0 } = {}) {
   return { lines: out, added: added.sort((x, y) => x - y) };
 }
 
+const DOUBLED_RE = /^( *)(\d{1,2}) (?=\S)/;
+/**
+ * A page's lines with the margin numbers the OCR read a SECOND time, into
+ * the text, taken out, as { lines, dropped } (the numbers taken out, in
+ * order), or null where there is none. On a scan whose text is not set on its
+ * numbers the export writes the margin's numbers down the page and the OCR's
+ * line beside one still opens with it: "    5 He learned…" under line 4, or
+ * "18  18 returning to…". The owner: "I'm getting a lot of left over double
+ * number margins in the text."
+ *
+ * Only on a page that carries its numbers (RESTORE_MIN of them climbing), and
+ * only a number from 1 to `last` with one space after it that
+ * - already stands in the page's margin (so it is a second reading, and the
+ *   line is not the one a missing number belongs to),
+ * - is the number of the margin beside its line: its own line's, the one
+ *   above's or the one below's, or one past the doubled number taken off the
+ *   line above (a run of unnumbered lines, each with the next number),
+ * - and is not alone on the page, unless it is its own line's number or
+ *   stands against that number's empty line. A lone line of text that opens
+ *   "10 days…" beside line 10 keeps its 10.
+ */
+export function dropDoubledNumbers(lines, { last = MARGIN_LAST } = {}) {
+  const src = (lines || []).map((l) => String(l == null ? "" : l));
+  let end = src.findIndex((l) => TRAILER_RE.test(l));
+  if (end < 0) end = src.length;
+  const top = last > 0 ? last : MARGIN_LAST;
+  const nums = src.slice(0, end).map(marginNumber);
+  const chain = numberChain(nums.map((n) => (n > top ? null : n)));
+  const have = new Set();
+  chain.forEach((on, i) => { if (on) have.add(nums[i]); });
+  if (have.size < RESTORE_MIN) return null;
+  const below = new Array(end).fill(null); // the margin number under each line
+  for (let i = end - 1, nx = null; i >= 0; i--) { below[i] = nx; if (chain[i]) nx = i; }
+  const bare = (i) => i != null && i >= 0 && i < end && chain[i] && !gutterPrefix(src[i]).rest.trim();
+  const found = [];
+  let above = null, run = 0; // the margin number over the line; the last doubled number taken off since
+  for (let i = 0; i < end; i++) {
+    if (chain[i]) { above = i; run = 0; }
+    const g = gutterPrefix(src[i]);
+    if (g && !chain[i]) continue; // a number out of its order: restoreMarginNumbers' to leave or put right
+    const text = g ? g.rest : src[i];
+    const m = text.match(DOUBLED_RE);
+    if (!m) continue;
+    const n = parseInt(m[2], 10);
+    if (!(n >= 1 && n <= top) || !have.has(n)) continue;
+    let sure = false, ok = false;
+    if (g) { ok = sure = n === nums[i] && !m[1]; }
+    else {
+      const a = above != null ? nums[above] : null, b = below[i] != null ? nums[below[i]] : null;
+      ok = n === a || n === b || (run > 0 && n === run + 1);
+      sure = (n === a && bare(above)) || (n === b && bare(below[i]));
+    }
+    if (!ok) continue;
+    run = n;
+    found.push({ i, n, sure, cut: (g ? g.gutter.length : 0) + m[1].length, len: m[0].length - m[1].length });
+  }
+  const take = found.length >= 2 ? found : found.filter((f) => f.sure);
+  if (!take.length) return null;
+  const out = src.slice();
+  for (const f of take) out[f.i] = src[f.i].slice(0, f.cut) + src[f.i].slice(f.cut + f.len);
+  return { lines: out, dropped: take.map((f) => f.n) };
+}
+
 /**
  * The export as the reader opens it: its pages, with the margin numbers the
  * OCR missed put back on every page that carries enough of its numbers to be
@@ -903,17 +966,21 @@ export function restoreMarginNumbers(lines, { last = 0 } = {}) {
 export function readExport(text) {
   const parsed = parseExport(text);
   const last = pleadingLast(parsed.pages);
-  let pages = 0, numbers = 0;
+  let pages = 0, numbers = 0, doubled = 0;
   for (const p of parsed.pages) {
     if (p.header == null || headerSaysCondensed(p)) continue;
     const r = restoreMarginNumbers(p.lines, { last });
-    if (!r) continue;
-    p.lines = r.lines;
-    p.restored = r.added;
-    pages++;
-    numbers += r.added.length;
+    if (r) {
+      p.lines = r.lines;
+      p.restored = r.added;
+      pages++;
+      numbers += r.added.length;
+    }
+    // …and the ones it read twice taken out of the text (dropDoubledNumbers).
+    const d = dropDoubledNumbers(p.lines, { last: last || MARGIN_LAST });
+    if (d) { p.lines = d.lines; doubled += d.dropped.length; }
   }
-  parsed.restored = { pages, numbers };
+  parsed.restored = { pages, numbers, doubled };
   return parsed;
 }
 

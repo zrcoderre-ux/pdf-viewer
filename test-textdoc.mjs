@@ -21,7 +21,7 @@ import {
   ocrAgainLine, setOcrAgain, OCRAGAIN_RE,
   textFixedLine, setTextFixed, pageTextSum, pageFurnitureLine, headerSaysTextCorrected, headerSaysCondensed, TEXTFIXED_RE,
   wordsChanged, AUTO_TEXT_FIXED_WORDS, decisionDelta, applyDecisionDelta,
-  marginNumber, numberChain, misreadNumber, restoreMarginNumbers, pleadingLast,
+  marginNumber, numberChain, misreadNumber, restoreMarginNumbers, dropDoubledNumbers, pleadingLast,
   readExport, cloneDoc, shownPages, splitFolderRows, pageScan, spotsAfterSwaps, realsLeftInExport,
   pageListsAfter, fixedSumsFor, readerFileHasLines,
   keepLines, carriesKeep, spendLines, forgetKeepLines, noteKeepLines, keepLinesCarried, writtenBaseline,
@@ -1728,7 +1728,7 @@ console.log("documents off the screen");
       if (!r) continue;
       p.lines = r.lines; p.restored = r.added; pages++; numbers += r.added.length;
     }
-    parsed.restored = { pages, numbers };
+    parsed.restored = { pages, numbers, doubled: 0 };
     return parsed;
   };
   const numPage = (n, skip) => [`====== Page ${n} ======`, ...Array.from({ length: 28 }, (_, k) => (k + 1 === skip ? "" : String(k + 1).padStart(2) + "  line " + (k + 1)))];
@@ -2434,6 +2434,51 @@ console.log("a Markdown document read as a Word document (markdownLines)");
   check("*** is bold and italics", [seen(L[16], o[16]), runs(L[16], o[16]).sort()], ["both", ["md-b:both", "md-i:**both**"]]);
   const atoms = markdownLines(["**Ivy*Larkspur** here"], { atoms: [[[2, 14]]] });
   check("no mark is read inside a name", runs("**Ivy*Larkspur** here", atoms[0]), ["md-b:Ivy*Larkspur"]);
+}
+
+// ── margin numbers the OCR read a second time, into the text ────────────────
+{
+  const body = (n) => `Line ${n} of the motion.`;
+  // A scan whose text is not set on its numbers: the margin's numbers down the
+  // page, and the OCR's line beside one still opening with it.
+  const page = (over = {}) => {
+    const out = ["", ""];
+    for (let n = 1; n <= 28; n++) {
+      const v = n in over ? over[n] : String(n).padStart(2) + "  " + body(n);
+      for (const l of [].concat(v)) out.push(l);
+    }
+    return out;
+  };
+  check("a page read once has nothing to take out", dropDoubledNumbers(page()), null);
+  const scan = page({
+    5: [" 5", "    6 first attempt at passing the test."],          // under its number's empty line… the next one's
+    6: [" 6"],
+    9: [" 9  School prior to being selected,", "    10 start of the school."],
+    10: ["10", "    11 and had not been sent."],
+    11: ["11"],
+    15: ["15  he could give up his position", "    16 the training and be sent", "    17 that he could resume"],
+    16: ["16"], 17: ["17"],
+    18: ["18  18 returning to the station,"],
+    24: ["24  candidates, as well as the manner", "    24 concurrent candidates, whose ages"],
+  });
+  const d = dropDoubledNumbers(scan);
+  check("the numbers read twice are taken out, in order", d.dropped, [6, 10, 11, 16, 17, 18, 24]);
+  check("…each out of its line, the line's indent and its margin number kept",
+    d.lines.filter((l, i) => l !== scan[i]),
+    ["    first attempt at passing the test.", "    start of the school.", "    and had not been sent.", "    the training and be sent", "    that he could resume", "18  returning to the station,", "    concurrent candidates, whose ages"]);
+  check("…and no other line is touched", d.lines.length, scan.length);
+  const lone = page({ 10: ["10  within", "    10 days of service of the notice."] });
+  check("a lone line of text opening with the number beside it keeps it", dropDoubledNumbers(lone), null);
+  check("…a lone one under its number's empty line does not", dropDoubledNumbers(page({ 10: ["10", "    10 days of nothing."] })).dropped, [10]);
+  check("…nor one on its own number's line", dropDoubledNumbers(page({ 7: [" 7  7 would be able to learn"] })).lines[8], " 7  would be able to learn");
+  const far = page({ 3: [" 3  no later than", "    20 days after the hearing,"], 9: [" 9  and", "    15 U.S.C. section 1"] });
+  check("a number that is not the margin's beside its line is the text's", dropDoubledNumbers(far), null);
+  const gap = ["", "", ...Array.from({ length: 8 }, (_, k) => String(k + 1).padStart(2) + "  " + body(k + 1)), "9 Line nine, its number one space off.", "10  " + body(10)];
+  check("a number the margin does not have is not a second reading", dropDoubledNumbers(gap), null);
+  const few = [" 1  a", "    2 b", " 2", "    3 c", " 3"];
+  check("a page that does not carry its numbers is left alone", dropDoubledNumbers(few), null);
+  const read = readExport(["====== Page 1 ======", ...scan, ""].join("\n"));
+  check("readExport takes them out and counts them", [read.restored.doubled, read.pages[0].lines.some((l) => /^ {4}\d/.test(l))], [7, false]);
 }
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);
