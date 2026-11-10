@@ -29,11 +29,12 @@
 //                   fake first, whole words only, case-insensitive, and the
 //                   real is written in the case the fake was written in. A
 //                   name wrapped down a column (a caption's, with the other
-//                   column between its halves) is one name (columnHits). A
-//                   matcher compiled with `spare` leaves a fake inside the
-//                   ranges it names exactly as it stands — the reader's
-//                   cited decisions (textdoc.citedNameSpans), whose names
-//                   the run never faked.
+//                   column between its halves) is one name (columnHits).
+//                   EVERY fake is reversed wherever it stands, a case name
+//                   included: this is the matcher PDF-Linker's round trip
+//                   reads each export back through (`_rd_*`,
+//                   test_round_trip_check.py), so the page shows what that
+//                   check proved.
 //   compileForward / forwardRuns   real → fake, the direction a SAVE needs:
 //                   a real name typed into the reader is written to disk as
 //                   its pseudonym, never as itself.
@@ -1199,8 +1200,23 @@ function warnRows(key) {
   return out;
 }
 
-/** Reversal matcher: fake → real. A fake that is an ordinary word is never reversed (wordFakesOf). */
-export function compile(key, opts) {
+/**
+ * Reversal matcher: fake → real. A fake that is an ordinary word is never reversed (wordFakesOf).
+ *
+ * WHEREVER THE FAKE STANDS, with no reading of what is around it. The reader's
+ * pages used a matcher that left a fake standing inside anything shaped like a
+ * cited decision's name (textdoc.citedNameSpans), on the theory that the run
+ * never fakes there. The run does: a trial-court case's parties, this case's
+ * own prior appeal, an operator's party beside a docket, a writ's real party
+ * in interest, and every name its own guard reads differently from the
+ * reader's. Those pages showed the stand-ins, or half a name ("Redgrave v.
+ * Oakhaven Farms LLC"), with nothing over them. PDF-Linker reads every export
+ * back through THIS matcher against the original (its round trip) and keeps
+ * the authorities its folder cites out of the fake pools, so a fake on the
+ * page is the run's; a shape test of the reader's own could only disagree
+ * with it (the owner, 2026-11-10: every real value shown where the fake is).
+ */
+export function compile(key) {
   // (A street's word, `cap`, reverses where it is capitalised only, so an
   // ordinary word may be one: parseKey.)
   const pairs = pairRows(key).filter((p) => p.cap || !isCommonReal(p.fake));
@@ -1209,22 +1225,7 @@ export function compile(key, opts) {
   // The fake as the key spells it, for the casing (keySpelled).
   const spell = new Map(pairs.map((p) => [fold(p.fake), p.fake]));
   const rx = buildMatcher(pairs.map((p) => p.fake));
-  // `spare(text, next)` → [[start, end]]: ranges where a fake is no fake. The
-  // run spares a cited decision's name, so a published party that shares a
-  // word with a fake ("Smith v. Jones (2010) 50 Cal.4th 100", Smith a fake
-  // here) is that case's party, and reversing it writes a wrong citation in
-  // the real names. Kept off this module (textdoc imports it).
-  return { rx, map, spell, spare: (opts && opts.spare) || null, capOnly: capOnly.size ? capOnly : null };
-}
-
-/**
- * The fakes this case's own parties went out under (`own`, parseKey's): what
- * a cited caption of THIS case reads in, which the run did fake, since
- * citedNameSpans exempts the case's own caption from what it spares.
- */
-export function ownFakesOf(key) {
-  const own = new Set(((key && key.own) || []).map(fold));
-  return pairRows(key).filter((p) => p.fake && own.has(fold(p.real))).map((p) => p.fake);
+  return { rx, map, spell, capOnly: capOnly.size ? capOnly : null };
 }
 
 /**
@@ -1865,12 +1866,7 @@ function runsWith(compiled, text, opts) {
   if (!text) return out;
   if (!compiled || !compiled.rx) return [{ t: "text", s: text }];
   const places = [];
-  let hits = hitsFrom(compiled, text, 0, Infinity, opts).hits;
-  if (compiled.spare && hits.length) {
-    // Read only where there is a fake to spare: most of a page has none.
-    const spans = compiled.spare(text, (opts && opts.next) || "") || [];
-    if (spans.length) hits = hits.filter((h) => !h.ranges.some(([a, b]) => spans.some(([x, y]) => a < y && x < b)));
-  }
+  const hits = hitsFrom(compiled, text, 0, Infinity, opts).hits;
   for (const h of hits) {
     const swaps = h.ranges.map(([a, b]) => ({ t: "swap", from: text.slice(a, b) }));
     dealOut(swaps, swapTo(h.hit, h.whole), h.whole);
@@ -1889,11 +1885,10 @@ function runsWith(compiled, text, opts) {
 
 /**
  * fake → real, as runs. The reader's display: a name wrapped down a column
- * included. `opts.next`: the opening of the page after, for a cite whose year
- * is there (the matcher's `spare`).
+ * included, and every fake wherever it stands (compile).
  */
-export function translateRuns(compiled, text, opts) {
-  return runsWith(compiled, text, { columns: true, next: (opts && opts.next) || "" });
+export function translateRuns(compiled, text) {
+  return runsWith(compiled, text, { columns: true });
 }
 
 /**
@@ -1905,9 +1900,9 @@ export function forwardRuns(compiledForward, text, opts) {
   return runsWith(compiledForward, text, opts);
 }
 
-/** Display translation as one string, `opts` as translateRuns takes them. Returns { text, count }. */
-export function translate(compiled, text, opts) {
-  const runs = runsWith(compiled, text, { columns: true, next: (opts && opts.next) || "" });
+/** Display translation as one string. Returns { text, count }. */
+export function translate(compiled, text) {
+  const runs = runsWith(compiled, text, { columns: true });
   let count = 0;
   let out = "";
   for (const r of runs) {

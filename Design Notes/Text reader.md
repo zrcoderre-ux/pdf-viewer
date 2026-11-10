@@ -3572,7 +3572,10 @@ one way to force a full run where nothing else asks for one: deleting
 `PDF-Linker Run Record.json` from the folder.
 
 **The way back spares what the way out spared** (`TD.compileDisplay`,
-`PK.compile(key, { spare })`, `PK.ownFakesOf`). The reverse matcher reversed
+`PK.compile(key, { spare })`, `PK.ownFakesOf`). REVERSED on 2026-11-10 at the
+owner's direction: the pages reverse every fake again, and `compileDisplay`,
+the `spare` option and `ownFakesOf` are gone (see "Every fake is shown as its
+real value", just below). What follows is the rule as it stood. The reverse matcher reversed
 every fake, including one standing inside a cited decision's name that
 PDF-Linker had spared: "Smith v. Jones (2010) 50 Cal.4th 100" in a case where
 "Smith" is also the plaintiff's fake read "Coderre v. Jones" on the page, and a
@@ -3591,6 +3594,39 @@ swap. A matcher compiled without `spare` (`PK.compile(key)`) still reverses
 everything, which is what the folder-save parity test used until it was
 pointed at `compileDisplay`. Tests in `test-textdoc.mjs` ("cited names on the
 way back"). The Claude extension does the same on claude.ai.
+
+**Every fake is shown as its real value, wherever it stands** (`PK.compile`,
+`compileKeyNow`; the owner, 2026-11-10: "Every real value should be shown
+highlighted where the fake value actually is"). The spare above was meant to
+mirror PDF-Linker's citation guard from this side, and it could not. The run
+fakes inside a case name by rules `citedNameSpans` knows nothing of: both
+parties of a trial-court case ("… (Super. Ct. Orange County, 2019)", whose
+year in the court's parentheses reads here as a cite's), this case's own
+prior appeal and its short cite, an operator's party beside a docket or in a
+federal cite, a writ's real party in interest. Each showed the stand-ins with
+nothing over them, or half a name where one side was spared and the other was
+not; a small page of such cites, run through PDF-Linker and read back, left
+six lines that way. PDF-Linker's round trip did not see it, because it reads
+every export back through the plain matcher (`PK.compile`, pinned under node
+by its `test_round_trip_check.py`), not the one the pages were built with.
+So `rev` is `PK.compile(key)`: the page shows what the round trip proved, a
+fake in a case name is a pseudonym span like any other (highlighted, written
+back as the fake by a save, blanked before the save and the marks read the
+page), and no shape test of the reader's stands between a fake and its real
+value. `citedNameSpans` is unchanged and still decides the other direction:
+a REAL name typed or standing in a cited decision's name is not marked, not
+faked by a save and not flagged without a question.
+What is given up: a published party whose name IS one of the key's fakes
+("Stockton v. Superior Court" where "Stockton" is a party's stand-in) now
+reads as the real party, highlighted. In an export PDF-Linker keeps the
+authorities its folder cites out of the fake pools on a first run, and on a
+run that reuses its key its round trip names the place in the log ("printed
+'X', exported 'X', the text reader shows 'Y'"). In a Markdown draft nothing
+stands behind the text, and Word's DeAnonymize macro reverses the same word
+the same way. The Claude extension still spares on claude.ai; it is another
+repository. Tests in `test-textdoc.mjs` ("fakes inside case names on the way
+back", which also pins `compileKeyNow`'s line), and PDF-Linker's
+`test_reader_shows_every_fake.py` from the other side.
 
 **▶ Re-run PDF-Linker** (`rerunLinker`, `folderLauncher`, `openLink`,
 `saveAllForRun`, `closeForRun`, `letGoOfFolder`; `textdoc.launcherFolderToken`,
