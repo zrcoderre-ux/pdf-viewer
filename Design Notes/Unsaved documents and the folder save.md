@@ -444,6 +444,26 @@ of the text as written). The alternative, parsing without restoring for a
 smaller diff, would write the same document two ways depending on whether
 it was on screen.
 
+### Margin numbers read twice are taken out
+
+The owner, of a scanned motion whose 31 lines of text are not set on the
+paper's 28 numbers: "I'm getting a lot of left over double number margins in
+the text." The export writes the margin's numbers down the page, several on
+empty lines of their own, and the OCR's line beside one still opens with it:
+`    5 He learned…` under line 4, `18  18 returning to…`. `readExport` now
+runs `TD.dropDoubledNumbers` on each page after `restoreMarginNumbers`, so
+every document is read, shown and saved without them (the toast counts them;
+`doc.restored.doubled`). A number goes only where it is plainly a second
+reading: the page carries its numbers (`RESTORE_MIN` climbing); the number is
+1 to the pages' last, one space after it, and already stands in the page's
+margin; it is the margin number of its own line, the one above or the one
+below, or one past the doubled number taken off the line above (unnumbered
+lines in a run); and it is not the only one on the page unless it is its own
+line's number or stands against that number's empty line, so one line of
+text opening "10 days…" beside line 10 keeps its 10. The line keeps its
+indent. Not handled: a doubled number more than a line away from its own.
+`test-textdoc.mjs` pins each rule.
+
 ### What is never done
 
 - The bar never writes a file; nothing but Save writes an export.
