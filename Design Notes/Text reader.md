@@ -102,12 +102,17 @@ name among the marks is faked) and the leak check. `test-pseudo-key.mjs`,
 **A keep in a Markdown export is carried out by its save** (`clearKeptIn`).
 In a PDF-Linker export a value kept where the run faked it stays faked on
 disk until the next run un-fakes it through `New Real Values.txt`. Nothing
-will ever rewrite a `.md`, so a save of one being edited (Edit on, or dirty)
-first takes each `.pn.kept` span off the page and leaves its `data-real` as
+will ever rewrite a `.md`, so every save of one first takes each `.pn.kept` span off the page and leaves its `data-real` as
 plain text, one undo step a page, and adds the member to `touched` so it is
 written. The forward pass and the last check already read past a kept value
 in the clear (`maskKept`), so the save neither re-fakes it nor refuses it,
 and the file opened again shows it as kept text. A `.txt` is untouched by this.
+Until 2026-11-11 this ran only on a `.md` being edited (Edit on, or dirty), so
+a keep marked with Edit off and saved with nothing typed left the fake on disk
+while the page showed it resolved. The owner: "Pressing save … should
+overwrite that change onto the text file immediately on save". The gate is
+gone; `test-markdown.mjs` steps 4b and 5 pin a keep alone, saved, as a lone
+file and from a case folder.
 
 **A stand-in only the pinned sheet holds is named at the save**
 (`PK.compilePinnedFakes`, `pinnedFakes`, `pinnedNote`). PDF-Linker puts a

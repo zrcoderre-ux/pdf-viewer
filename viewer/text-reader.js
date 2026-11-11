@@ -9166,15 +9166,16 @@ async function prepareOffscreenSave(t, pass) {
 // A KEEP IN A MARKDOWN EXPORT IS CARRIED OUT BY ITS SAVE. In a PDF-Linker
 // export a value kept where the run faked it stays faked on disk until the
 // next run un-fakes it (New Real Values.txt). My-Macros' Markdown export has
-// no run to wait for: nothing will ever rewrite it. So a save of one being
-// edited writes each kept pseudonym as the real value it shows — the span
+// no run to wait for: nothing will ever rewrite it. So every save of one,
+// a keep alone with Edit off and nothing typed included, writes each kept
+// pseudonym as the real value it shows — the span
 // taken off the page and its value left as plain text, which the save's
 // forward pass and its last check already read past (maskKept), and which
 // reads as kept when the file is opened again. One undo step for the page.
 /** Whether `body` had kept pseudonyms turned into their values, for member `m`'s save. */
 function clearKeptIn(body, m) {
   const name = m ? m.name : fileName;
-  if (!TD.isMarkdownName(name) || !(editing || (m ? m.dirty : dirty))) return false;
+  if (!TD.isMarkdownName(name)) return false;
   const kept = [...body.querySelectorAll(".pn.kept")];
   if (!kept.length) return false;
   snapshot(body, true);

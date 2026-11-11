@@ -2,7 +2,7 @@
 // isMarkdownName): a .md in its pseudonyms opens like a lone .txt — the real
 // values from the key on screen, the name without its extension in the bar —
 // and a save writes it back in its pseudonyms under its own name, an edit
-// with it — except a value kept, which the save of a .md being edited writes
+// with it — except a value kept, which every save of a .md writes
 // as itself (clearKeptIn): no PDF-Linker run will ever un-fake it. In the app (the site pwa/build-site.sh
 // assembles) a .md picked opens in the reader's tab. And it is drawn as a
 // Word document (dressMarkdown, TD.markdownLines): Times New Roman at 12
@@ -221,6 +221,24 @@ async function run() {
     await page.waitForTimeout(1000);
     truthy("Careau Street, with no pseudonym", await page.evaluate(() => document.querySelector("#pages .tpage .page-body").innerText.includes("Careau Street") && !document.querySelector('#pages .pn[data-real="Careau"]')));
     truthy("Corwin Ashdale still put back over its pseudonym", (await bodyText(page)).includes("Corwin Ashdale"));
+
+    console.log("4b. a keep alone, Edit off and nothing typed: Save writes it at once");
+    await openMd(page);
+    if (await page.evaluate(() => document.getElementById("edit-toggle").getAttribute("aria-pressed") === "true")) await page.click("#edit-toggle");
+    truthy("Edit is off", await page.evaluate(() => document.getElementById("edit-toggle").getAttribute("aria-pressed") !== "true"));
+    await page.evaluate(() => {
+      const pn = [...document.querySelectorAll("#pages .tpage .page-body .pn")].find((el) => el.dataset.real === "Careau");
+      const r = pn.getBoundingClientRect();
+      pn.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 2, clientY: r.top + r.height / 2 }));
+    });
+    await page.waitForFunction(() => !document.getElementById("keep-menu").hidden, null, { timeout: 4000 });
+    await page.evaluate(() => document.getElementById("keep-menu-no").click());
+    await page.waitForTimeout(500);
+    truthy("…kept, and marked so", await page.evaluate(() => !!document.querySelector('#pages .pn.kept[data-real="Careau"]')));
+    truthy("…and Save is offered", await page.evaluate(() => !document.getElementById("save").disabled));
+    await page.keyboard.press("Control+s");
+    await page.waitForTimeout(1500);
+    check("the kept value is written as itself on that save", await onDisk(page), MD.replace("Halvorsen Street", "Careau Street"));
     console.log("5. in a case folder: listed in Documents with the exports, opened from there");
     await page.evaluate(async ({ MD, keyBytes }) => {
       const top = await navigator.storage.getDirectory();
@@ -245,6 +263,18 @@ async function run() {
     await page.waitForTimeout(800);
     truthy("a draft clicked opens, drawn as a Word document with its real names", await page.evaluate(() => { const b = document.querySelector("#pages .tpage .page-body"); return b.classList.contains("md") && b.innerText.includes("Plaintiff Corwin Ashdale moves to compel.") && !b.innerText.includes("**"); }));
     check("…on its own: no export hung under it", await page.evaluate(() => window.__textReaderReel().members.map((m) => m.name)), ["Draft Order.md"]);
+    await page.evaluate(() => {
+      const pn = [...document.querySelectorAll("#pages .tpage .page-body .pn")].find((el) => el.dataset.real === "Careau");
+      const r = pn.getBoundingClientRect();
+      pn.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: r.left + 2, clientY: r.top + r.height / 2 }));
+    });
+    await page.waitForFunction(() => !document.getElementById("keep-menu").hidden, null, { timeout: 4000 });
+    await page.evaluate(() => document.getElementById("keep-menu-no").click());
+    await page.waitForTimeout(500);
+    await page.keyboard.press("Control+s");
+    await page.waitForTimeout(2000);
+    const folderMd = await page.evaluate(async () => (await (await (await window.__case.getDirectoryHandle("Text Files")).getFileHandle("Draft Order.md")).getFile()).text());
+    check("a keep alone, saved in the folder, writes the kept value into the .md", folderMd, MD.replace("Halvorsen Street", "Careau Street"));
     await page.evaluate(() => window.__textReaderOpenDoc("Brief.txt"));
     await page.waitForTimeout(1200);
     const reel = await page.evaluate(() => window.__textReaderReel().members.map((m) => m.name));
