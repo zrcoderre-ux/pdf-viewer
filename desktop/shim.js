@@ -446,11 +446,45 @@
     n.onUpdateProgress((pct) => {
       if (stage === "downloading") $(".pa-get").textContent = `Downloading… ${pct}%`;
     });
+    // Once the update is downloaded PDF+ restarts to install it by itself, after
+    // a short count the button shows (the owner, in chat: one click to download
+    // and install, with a grace period so the restart does not catch you mid-
+    // task). A click during the count cancels it: the button then reads
+    // Restart and install, and the update otherwise installs when PDF+ closes.
+    const RESTART_COUNT = 5; // seconds
+    let countdown = null;
+    const readyButton = () => {
+      $(".pa-get").disabled = false;
+      $(".pa-get").textContent = "Restart and install";
+      $(".pa-hint").hidden = false;
+      $(".pa-hint").textContent = "PDF+ closes, installs the update and opens again. A document with unsaved changes is asked about first; if you keep PDF+ open, the update installs the next time it closes.";
+    };
+    const install = async () => {
+      $(".pa-get").disabled = true;
+      $(".pa-get").textContent = "Installing…";
+      await n.installUpdate();
+      // Still open a while later (Cancel on a document's unsaved changes): the button back.
+      setTimeout(() => { if (stage === "ready") readyButton(); }, 8000);
+    };
+    const startCountdown = () => {
+      let left = RESTART_COUNT;
+      const show = () => { $(".pa-get").textContent = `Restarting in ${left} s — Cancel`; };
+      $(".pa-get").disabled = false;
+      $(".pa-hint").hidden = false;
+      $(".pa-hint").textContent = "Downloaded. PDF+ is about to close, install the update and open again; a document with unsaved changes is asked about first. Click the button to wait: the update then installs when you restart or close PDF+.";
+      show();
+      countdown = setInterval(() => {
+        left--;
+        if (left > 0) { show(); return; }
+        clearInterval(countdown);
+        countdown = null;
+        install();
+      }, 1000);
+    };
     $(".pa-get").addEventListener("click", async () => {
       if (stage === "ready") {
-        $(".pa-get").disabled = true;
-        $(".pa-get").textContent = "Installing…";
-        await n.installUpdate();
+        if (countdown) { clearInterval(countdown); countdown = null; readyButton(); return; }
+        await install();
         return;
       }
       if (stage !== "available") return;
@@ -470,10 +504,7 @@
         return;
       }
       stage = "ready";
-      $(".pa-get").disabled = false;
-      $(".pa-get").textContent = "Restart and install";
-      $(".pa-hint").hidden = false;
-      $(".pa-hint").textContent = "PDF+ closes, installs the update and opens again. A document with unsaved changes is asked about first; if you keep PDF+ open, the update installs the next time it closes.";
+      startCountdown();
     });
   }
 
