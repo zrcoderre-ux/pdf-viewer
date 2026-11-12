@@ -4762,8 +4762,14 @@ export function reflowBox(lines, i, caret = null, { numbered = false, breakAt = 
   const room = (j) => Math.max(1, width(j) - 2);
   const out = lines.slice();
   // The box's rows, top to bottom, and each one's cells' text.
+  // …within the rules either side of row `i`: a rule across the box (a drawn
+  // horizontal line, ├─┼─┤) closes a row's cells off from the next row's, so a
+  // column's text wraps and moves down within its own row of the table.
+  let top = i, foot = i;
+  while (top > box.from && !isBoxRule(out[top - 1])) top--;
+  while (foot < box.to && !isBoxRule(out[foot + 1])) foot++;
   const rows = [];
-  for (let k = box.from; k <= box.to; k++) if (isBoxRow(out[k]) && boxBars(out[k]).length === own.length) rows.push(k);
+  for (let k = top; k <= foot; k++) if (isBoxRow(out[k]) && boxBars(out[k]).length === own.length) rows.push(k);
   const text = new Map(rows.map((k) => {
     const b = boxBars(out[k]);
     return [k, b.slice(0, -1).map((x, j) => out[k].slice(x + 1, b[j + 1]).trim())];
@@ -4873,8 +4879,8 @@ export function boxBackspace(lines, i, col, { numbered = false } = {}) {
   }
   if (j < 0) return null;
   let p = i - 1;
-  while (p >= box.from && !isBoxRow(lines[p])) p--;
-  if (p < box.from) return { lines: lines.slice(), caret: { line: i, col } }; // the first row: nothing above to join to
+  while (p >= box.from && !isBoxRow(lines[p]) && !isBoxRule(lines[p])) p--;
+  if (p < box.from || isBoxRule(lines[p])) return { lines: lines.slice(), caret: { line: i, col } }; // the first row (of the box, or under a rule across it): nothing above to join to
   const out = lines.slice();
   const pb = boxBars(out[p]), ib = boxBars(out[i]);
   const above = out[p].slice(pb[j] + 1, pb[j + 1]).trim();
@@ -4885,7 +4891,7 @@ export function boxBackspace(lines, i, col, { numbered = false } = {}) {
   // The column's rows below come up one, as far as its first empty row — as
   // Enter sent them down.
   const rows = [];
-  for (let k = i; k <= box.to; k++) if (isBoxRow(out[k]) && boxBars(out[k]).length === ib.length) rows.push(k);
+  for (let k = i; k <= box.to && !isBoxRule(out[k]); k++) if (isBoxRow(out[k]) && boxBars(out[k]).length === ib.length) rows.push(k);
   const cell = (k) => { const b = boxBars(out[k]); return out[k].slice(b[j] + 1, b[j + 1]).trim(); };
   for (let q = 0; q < rows.length; q++) {
     const next = q + 1 < rows.length ? cell(rows[q + 1]) : "";
@@ -4966,11 +4972,20 @@ function closeBox(lines, box, rules) {
  * on (a row Enter added, a foot rule moved under it), its rules as they stood
  * and its rows without their closing `│`s.
  */
-function openBox(lines, box, rules, bars) {
+function openBox(lines, box, rules, bars, end = Infinity) {
   const out = lines.slice();
-  for (let k = box.from; k < out.length; k++) {
+  for (let k = box.from; k < out.length && k <= end; k++) {
     const s = String(out[k]);
     if (rules.has(s)) { out[k] = rules.get(s); continue; }
+    if (end !== Infinity && isBoxRule(s) && boxBars(s).length === bars) {
+      // A rule a drawn line made or changed (drawVerticalLine,
+      // drawHorizontalLine): its closing glyphs taken back off where they stand.
+      let t = s;
+      if (box.left != null) t = t.slice(0, box.left) + t.slice(box.left + 1);
+      if (box.right != null) t = t.slice(0, box.right);
+      out[k] = t;
+      continue;
+    }
     if (!isBoxRow(s) || boxBars(s).length !== bars) break;
     let t = s;
     if (box.right != null) { t = t.trimEnd(); if (t.endsWith("│")) t = t.slice(0, -1); }
@@ -5063,4 +5078,154 @@ export function resizeBox(lines, i, j, col, { numbered = false } = {}) {
     if (res) out = res.lines;
   }
   return out;
+}
+
+// ---- lines drawn on a ✓ Use my text page --------------------------------------
+//
+// The owner, in chat: "I want to make it easier to draw in missing columns. I
+// should be able to click a button that lets me draw a vertical line or
+// horizontal line in text view when using use my text. This would then get
+// draw into the raw. These new lines should be treated like the existing
+// columns. One thing this would fix is that currently, I can't make a table
+// with more than two columns." A line is written in the file in box-drawing
+// rules, as PDF-Linker writes a form's, so it is a column (or a row's rule)
+// of a box like any other: typing, Enter, Backspace and a drag of its rule
+// act on it as on a ⊞ Column box's (boxEdit, resizeBox).
+
+const RULE_GLYPHS = /[│─┌└├┐┘┤┬┴┼]/;
+/** Whether a line is a rule of nothing but ─ (no joint): a horizontal line drawn on its own. */
+function isPlainRule(line) {
+  return isBoxRule(line) && !boxBars(line).length;
+}
+/** Whether a line is a row of a box, ruled on every side or only between its columns. */
+function isAnyBoxRow(line) {
+  const s = String(line || "");
+  return s.includes("│") && !/[─┌┐└┘├┤┬┴┼]/.test(s);
+}
+/** A box row among lines `from`…`to` (or a rule's neighbour), or -1. */
+function boxRowIn(lines, from, to) {
+  for (let k = from; k <= to; k++) if (isAnyBoxRow(lines[k])) return k;
+  for (let k = from; k <= to; k++) {
+    if (!isBoxRule(lines[k]) || isPlainRule(lines[k])) continue;
+    if (isAnyBoxRow(lines[k + 1])) return k + 1;
+    if (isAnyBoxRow(lines[k - 1])) return k - 1;
+  }
+  return -1;
+}
+/** The box's columns (its rule's joints, else a row's bars) in closed lines, and its extent. */
+function boxFrame(work, row) {
+  const box = boxAround(work, row);
+  if (!box) return null;
+  const own = boxBars(work[row]);
+  let bars = null;
+  for (let k = box.from; k <= box.to && !bars; k++) if (isBoxRule(work[k]) && boxBars(work[k]).length === own.length) bars = boxBars(work[k]);
+  return { box, bars: bars || own };
+}
+
+/**
+ * A vertical line drawn down lines `from`…`to` at column `col` of the line
+ * (a margin number and its spaces counted). Through a box (ruled on every side
+ * or only between its columns), a new column of it: the column the line falls
+ * in is split there on every row of the box, top to foot (a word the line
+ * would cut goes right of it), a joint put in each of its rules, the box no
+ * wider — the right-hand half's text wrapped down its column where it no
+ * longer fits (reflowBox). On lines of text, a two-column box made of them
+ * (makeColumnBox), a line of nothing but ─ just over or under them (or at the
+ * ends of the drag) taken for its rule. Returns { lines, caret } or
+ * { error } naming why nothing was drawn.
+ */
+export function drawVerticalLine(lines, from, to, col, { numbered = false, across = 0 } = {}) {
+  if (from > to) [from, to] = [to, from];
+  const row = boxRowIn(lines, from, to);
+  if (row >= 0) {
+    const open = openBoxAround(lines, row);
+    const rules = new Map();
+    const work = open ? closeBox(lines, open, rules) : lines.slice();
+    const c = col + (open && open.left != null && col >= open.left ? 1 : 0);
+    const frame = boxFrame(work, row);
+    if (!frame) return { error: "box" };
+    const { box, bars } = frame;
+    if (bars.includes(c)) return { error: "on" };
+    const j = bars.findIndex((x, q) => q + 1 < bars.length && x < c && c < bars[q + 1]);
+    if (j < 0) return { error: "outside" };
+    if (c - bars[j] - 1 < BOX_MIN || bars[j + 1] - c - 1 < BOX_MIN) return { error: "narrow" };
+    let out = work.slice();
+    const rows = [];
+    for (let k = box.from; k <= box.to; k++) {
+      const s = String(out[k]);
+      const b = boxBars(s);
+      if (b.length !== bars.length || !b.every((x, q) => x === bars[q])) continue;
+      if (isBoxRule(s)) {
+        out[k] = s.slice(0, c) + (k === box.from ? "┬" : k === box.to ? "┴" : "┼") + s.slice(c + 1);
+      } else if (isBoxRow(s)) {
+        // A word the line would cut goes right of it, and so does each word
+        // the left-hand cell then has no room for (with a space either side).
+        const room = c - bars[j] - 3;
+        let cut = c;
+        while (cut > bars[j] + 1 && /\S/.test(s[cut - 1]) && /\S/.test(s[cut])) cut--;
+        while (cut > bars[j] + 1 && s.slice(bars[j] + 1, cut).trim().length > room) {
+          cut--;
+          while (cut > bars[j] + 1 && !/\S/.test(s[cut - 1])) cut--;
+          while (cut > bars[j] + 1 && /\S/.test(s[cut - 1])) cut--;
+        }
+        const left = s.slice(bars[j] + 1, cut).trim(), right = s.slice(cut, bars[j + 1]).trim();
+        out[k] = s.slice(0, bars[j] + 1) + (" " + left).padEnd(c - bars[j] - 1) + "│" + (" " + right).padEnd(bars[j + 1] - c - 1) + s.slice(bars[j + 1]);
+        rows.push(k);
+      }
+    }
+    // Each row whose text the new column no longer holds, wrapped down it.
+    let grown = 0;
+    for (const k0 of rows) {
+      const k = k0 + grown;
+      if (!isBoxRow(out[k])) continue;
+      const res = reflowBox(out, k, null, { numbered });
+      if (res) { grown += res.lines.length - out.length; out = res.lines; }
+    }
+    if (open) out = openBox(out, open, rules, bars.length + 1, box.to + (out.length - work.length));
+    const at = out[row].indexOf("│", open && open.left != null ? c - 1 : c);
+    return { lines: out, caret: { line: row, col: at >= 0 ? at + 2 : 0 } };
+  }
+  // Lines of text: a box of them, a ─ line at either end its rule.
+  while (from < to && isPlainRule(lines[from])) from++;
+  while (to > from && isPlainRule(lines[to])) to--;
+  if (lines.slice(from, to + 1).some((l) => RULE_GLYPHS.test(l))) return { error: "rule" };
+  const made = makeColumnBox(lines, from, to, col, { numbered, across });
+  let out = made.lines, first = made.first;
+  const below = made.last + 2;
+  if (isPlainRule(out[below])) out.splice(below, 1);
+  if (from > 0 && isPlainRule(out[from - 1])) { out.splice(from - 1, 1); first--; }
+  return { lines: out, caret: { line: first, col: out[first].indexOf("│") + 2 } };
+}
+
+/**
+ * A horizontal line drawn between line `at - 1` and line `at`, from column
+ * `c0` to `c1`. Between two rows of a box, a rule across the box (├─┼─┤, or
+ * ─ to its ends where its sides are open), joining its columns. Elsewhere a
+ * line of ─ over those columns, put in as a line of its own — between two
+ * numbers on a numbered page, as PDF-Linker writes a half line; a vertical
+ * line drawn after down the lines under it makes a box of them with this
+ * for its top rule. Returns { lines, caret } or { error }.
+ */
+export function drawHorizontalLine(lines, at, c0, c1, { numbered = false } = {}) {
+  at = Math.max(0, Math.min(lines.length, at));
+  const above = lines[at - 1], below = lines[at];
+  if (isBoxRule(above) || isBoxRule(below)) return { error: "rule" };
+  if (isAnyBoxRow(above) && isAnyBoxRow(below)) {
+    const open = openBoxAround(lines, at - 1);
+    const rules = new Map();
+    const work = open ? closeBox(lines, open, rules) : lines.slice();
+    const frame = boxFrame(work, at - 1);
+    if (!frame || at > frame.box.to) return { error: "box" };
+    const { box, bars } = frame;
+    const rule = " ".repeat(bars[0]) + "├" + bars.slice(1).map((x, q) => "─".repeat(x - bars[q] - 1)).join("┼") + "┤";
+    let out = work.slice(0, at).concat([rule], work.slice(at));
+    if (open) out = openBox(out, open, rules, bars.length, box.to + 1);
+    return { lines: out, caret: { line: at + 1, col: 0 } };
+  }
+  if (isAnyBoxRow(above) || isAnyBoxRow(below)) return { error: "edge" };
+  let a = Math.min(c0, c1), z = Math.max(c0, c1);
+  if (numbered) a = Math.max(4, a);
+  if (z - a < 2) return { error: "short" };
+  const out = lines.slice(0, at).concat([" ".repeat(a) + "─".repeat(z - a + 1)], lines.slice(at));
+  return { lines: out, caret: { line: Math.min(at + 1, out.length - 1), col: 0 } };
 }

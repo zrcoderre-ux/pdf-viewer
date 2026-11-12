@@ -7179,8 +7179,11 @@ $("colbox-btn").addEventListener("click", makeColumnBoxAtSelection);
 let checkboxBody = null; // the page the caret last stood on
 function refreshCheckboxBtn() {
   const on = !!doc && !!checkboxBody && checkboxBody.isConnected && checkboxBody.classList.contains("free");
-  const btn = $("checkbox-btn");
-  if (btn.hidden === on) btn.hidden = !on;
+  for (const id of ["checkbox-btn", "vline-btn", "hline-btn"]) {
+    const btn = $(id);
+    if (btn.hidden === on) btn.hidden = !on;
+  }
+  if (!on && lineMode) setLineMode(null);
 }
 document.addEventListener("selectionchange", () => {
   const sel = document.getSelection();
@@ -7228,6 +7231,184 @@ function insertCheckbox() {
 }
 $("checkbox-btn").addEventListener("mousedown", (e) => e.preventDefault()); // the caret stays where it is
 $("checkbox-btn").addEventListener("click", insertCheckbox);
+
+// ── │ Line and ─ Line on a ✓ Use my text page (TD.drawVerticalLine, drawHorizontalLine) ──
+//
+// The owner, in chat: "I want to make it easier to draw in missing columns. I
+// should be able to click a button that lets me draw a vertical line or
+// horizontal line in text view when using use my text. This would then get
+// draw into the raw. These new lines should be treated like the existing
+// columns. One thing this would fix is that currently, I can't make a table
+// with more than two columns." A press of │ Line or ─ Line turns drawing on
+// (the button lit, a crosshair over ✓ Use my text pages) until it is pressed
+// again or Esc; each drag on such a page draws one line, a dashed guide
+// following the pointer in whole lines and characters, and on letting go the
+// line is written into the page's text in box-drawing rules (one undo step),
+// the page rebuilt from it as a column box's edit is (rebuildFromLines). The
+// line's column is read where the drag began, through the text at that
+// point; past a line's end, in the reader's grid characters (--col-u).
+let lineMode = null; // "v" | "h" while a line is to be drawn
+let lineDraw = null; // the drag drawing one
+function setLineMode(mode) {
+  lineMode = mode;
+  $("vline-btn").setAttribute("aria-pressed", String(mode === "v"));
+  $("hline-btn").setAttribute("aria-pressed", String(mode === "h"));
+  pagesEl.classList.toggle("drawing-line", !!mode);
+  if (!mode && lineDraw) { lineDraw.guide.remove(); lineDraw = null; }
+}
+function pressLineBtn(mode) {
+  if (lineMode === mode) { setLineMode(null); return; }
+  const body = checkboxBody;
+  if (!body || !body.isConnected || !body.classList.contains("free")) {
+    toast("Lines are drawn on a ✓ Use my text page: put the caret on one first.", { error: true });
+    return;
+  }
+  setLineMode(mode);
+  toast(mode === "v"
+    ? "Drag DOWN a ✓ Use my text page where the column is to divide. Through a box it adds a column; on lines of text it makes them a two-column box. Esc stops."
+    : "Drag ACROSS a ✓ Use my text page between two lines. Between two rows of a box it rules the box across; elsewhere it is a line of its own. Esc stops.", { ms: 6000 });
+}
+/** The page's lines as elements, one to a line of its text. */
+function bodyLines(body) { return [...body.querySelectorAll(":scope > .line")]; }
+/** The line of `body` at height `y`: its index (the nearest line's where none is there). */
+function lineIndexAtY(body, y) {
+  const els = bodyLines(body);
+  let best = -1, gap = Infinity;
+  els.forEach((el, k) => {
+    const r = el.getBoundingClientRect();
+    if (!r.height) return;
+    const d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+    if (d < gap) { gap = d; best = k; }
+  });
+  return best;
+}
+/** The gap between two lines nearest height `y`: the index of the line under it (0 over the first, n under the last). */
+function lineGapAtY(body, y) {
+  const els = bodyLines(body);
+  const k = lineIndexAtY(body, y);
+  if (k < 0) return 0;
+  const r = els[k].getBoundingClientRect();
+  return y > r.top + r.height / 2 ? k + 1 : k;
+}
+/** One grid character of `body`, in px. */
+function gridUnit(body) {
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;width:var(--col-u);height:0";
+  body.appendChild(probe);
+  const w = probe.getBoundingClientRect().width;
+  probe.remove();
+  return w > 0 ? w : 8;
+}
+/** The column of line `k` of `body` at x, as an offset in its text (past its end, in grid characters). */
+function columnAtX(body, k, x, text) {
+  const el = bodyLines(body)[k];
+  if (!el) return 0;
+  const r = el.getBoundingClientRect();
+  const y = r.top + r.height / 2;
+  const unit = gridUnit(body);
+  // Off a name (diskOffsetOfPoint has no offset inside one), a step left at a time.
+  for (let dx = 0; dx < 400; dx += Math.max(2, unit / 2)) {
+    const p = textPointAt(x - dx, y);
+    if (!p || !el.contains(p.node)) continue;
+    const pos = diskOffsetOfPoint(body, p.node, p.offset);
+    if (pos < 0) continue;
+    const at = lineColOf(text.join("\n"), pos);
+    if (at.line !== k) continue;
+    let px = x - dx;
+    try {
+      const rg = document.createRange();
+      rg.setStart(p.node, p.offset);
+      const rr = rg.getClientRects()[0] || rg.getBoundingClientRect();
+      if (rr && (rr.left || rr.right)) px = rr.left;
+    } catch { /* the point's own x will do */ }
+    // Past the line's end, or right of a name stepped off: the rest in grid characters.
+    return Math.max(0, at.col + Math.max(0, Math.round((x - px) / unit)));
+  }
+  // No text under the line's height there: the grid from the line's left.
+  return Math.max(0, Math.round((x - r.left) / unit));
+}
+pagesEl.addEventListener("pointerdown", (e) => {
+  if (!lineMode || e.button !== 0) return;
+  const body = e.target && e.target.closest && e.target.closest(".page-body");
+  if (!body) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (!body.classList.contains("free")) { toast("Lines are drawn on a ✓ Use my text page.", { error: true }); return; }
+  if (shotPut || refuseWhileBusy()) return;
+  if (!editing) setEditing(true);
+  const guide = document.createElement("div");
+  guide.className = "box-guide" + (lineMode === "h" ? " h" : "");
+  guide.style.position = "fixed";
+  document.body.appendChild(guide);
+  lineDraw = { body, mode: lineMode, x0: e.clientX, y0: e.clientY, guide };
+  drawGuide(e);
+  try { body.setPointerCapture(e.pointerId); } catch { /* the window's moves will do */ }
+}, true);
+/** The guide drawn from where the drag began to the pointer: down the lines it spans, or along the gap it is in. */
+function drawGuide(e) {
+  const d = lineDraw;
+  const els = bodyLines(d.body);
+  if (!els.length) return;
+  if (d.mode === "v") {
+    const a = lineIndexAtY(d.body, d.y0), b = lineIndexAtY(d.body, e.clientY);
+    const top = els[Math.min(a, b)].getBoundingClientRect().top, foot = els[Math.max(a, b)].getBoundingClientRect().bottom;
+    Object.assign(d.guide.style, { left: d.x0 + "px", top: top + "px", height: Math.max(8, foot - top) + "px" });
+  } else {
+    const g = lineGapAtY(d.body, d.y0);
+    const y = g < els.length ? els[g].getBoundingClientRect().top : els[els.length - 1].getBoundingClientRect().bottom;
+    const x = Math.min(d.x0, e.clientX);
+    Object.assign(d.guide.style, { left: x + "px", top: y + "px", width: Math.max(8, Math.abs(e.clientX - d.x0)) + "px" });
+  }
+}
+window.addEventListener("pointermove", (e) => { if (lineDraw) drawGuide(e); });
+const LINE_REFUSED = {
+  on: "A line stands there already.",
+  outside: "Draw the line inside the box, between its sides.",
+  narrow: `The line is too close to a rule: each column is at least ${TD.BOX_MIN} characters wide.`,
+  rule: "A rule stands there already — draw the line between two lines of text, or through a box.",
+  edge: "Draw the line between two rows of the box, or clear of it.",
+  short: "Drag further: a line is at least three characters long.",
+  box: "The box's rules there cannot be read.",
+};
+window.addEventListener("pointerup", (e) => {
+  if (!lineDraw) return;
+  const d = lineDraw;
+  lineDraw = null;
+  d.guide.remove();
+  const body = d.body;
+  if (!body.isConnected) return;
+  const text = TD.serializeNodes(body);
+  const lines = text.split("\n");
+  const numbered = body.classList.contains("numbered");
+  let res;
+  if (d.mode === "v") {
+    const a = lineIndexAtY(body, d.y0), b = lineIndexAtY(body, e.clientY);
+    if (a < 0) return;
+    const across = Math.max(0, ...lines.map((l) => { const g = TD.gutterPrefix(l); return (g ? l.slice(g.gutter.length) : l).trimEnd().length; }));
+    // Drawn at a word's end, the line goes in the gap after it: the word keeps
+    // a space before the rule, as every cell of a box does.
+    let col = columnAtX(body, a, d.x0, lines);
+    const s = String(lines[a] || "");
+    if (s[col] === " " && /\S/.test(s[col - 1] || "") && s[col + 1] !== "│") col++;
+    res = TD.drawVerticalLine(lines, Math.min(a, b), Math.max(a, b), col, { numbered, across });
+  } else {
+    const g = lineGapAtY(body, d.y0);
+    const k = Math.max(0, Math.min(lines.length - 1, g < lines.length ? g : g - 1));
+    res = TD.drawHorizontalLine(lines, g, columnAtX(body, k, d.x0, lines), columnAtX(body, k, e.clientX, lines), { numbered });
+  }
+  if (!res || res.error) { toast(LINE_REFUSED[res && res.error] || "No line drawn there.", { error: true }); return; }
+  if (res.lines.join("\n") === text) return;
+  snapshot(body, true);
+  rebuildFromLines(body, res.lines, res.caret);
+  lastSnapPage = -1; // what is typed next is its own step
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && lineMode) { e.preventDefault(); setLineMode(null); }
+});
+for (const [id, mode] of [["vline-btn", "v"], ["hline-btn", "h"]]) {
+  $(id).addEventListener("mousedown", (e) => e.preventDefault()); // the caret stays where it is
+  $(id).addEventListener("click", () => pressLineBtn(mode));
+}
 // A paste goes in as ONE edit, its first piece typed where the caret stands
 // (so it replaces a selection, and the line numbers keep their guard) and the
 // rest laid into the slots below in a single pass.

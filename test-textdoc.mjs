@@ -8,7 +8,7 @@
 
 import {
   markCss,
-  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace, boxEdit, openBoxAround, resizeBox, pageNumbersComplete,
+  parseExport, serializeExport, pageLabel, gutterPrefix, pageIsNumbered, shiftDown, shiftUp, tidyGutters, makeColumnBox, reflowBox, boxBackspace, boxEdit, openBoxAround, resizeBox, drawVerticalLine, drawHorizontalLine, pageNumbersComplete,
   serializeNodes, textOf, findRealsInPlain,
   serializeHeld, serializeMapped, clipText, editedSpans, spanEdited, typedReals, typedPseudonymsCited, typedSpans, withoutEscaped, escapedPlace, blankRanges, citedNameSpans, insideSpans, setOwnPartyWords, ownPartyWordsOf, occurrencesOf, makeSpot, normalizeSpots, sameSpot, spotsOnPage, spotRanges, fakeFor,
   addValue, removeValue, setAnswer, answerFor, answerLine, dropFlagsInKey, keyAnswersFlags, folderStateMoves, legacyStateHold, legacyListSplit, mergeStoredLists, formatValuesFile, parseValuesFile, parseReaderFile, addKeep, removeKeep, keptControl, flagProblem, phraseProblem, isPhrase,
@@ -2303,6 +2303,45 @@ console.log("answers from the walk through the key (fix: VALUE | ANSWER)");
   check("an answer is a decision step, undone and made again", [applyDecisionDelta(st({ answers: list }), d, true).answers, applyDecisionDelta(st({}), d, false).answers], [[], list]);
   check("merged: the list's own answer wins, the other's joins", mergeStoredLists({ answers: list }, { answers: [{ value: "Orla Vantreese", answer: "x" }, { value: "Pelham Grantwick", answer: "phrase" }] }).answers,
     list.concat([{ value: "Pelham Grantwick", answer: "phrase" }]));
+}
+console.log("lines drawn on a ✓ Use my text page (drawVerticalLine, drawHorizontalLine)");
+{
+  const cells = (l) => { const b = [...l].map((c, k) => (c === "│" ? k : -1)).filter((k) => k >= 0); return b.slice(0, -1).map((x, j) => l.slice(x + 1, b[j + 1]).trim()); };
+  const straight = (ls) => new Set(ls.filter((l) => /[│┌└├]/.test(l)).map((l) => [...l].map((c, k) => ("│┌┐┬└┘┴├┤┼".includes(c) ? k : -1)).filter((k) => k >= 0).join(","))).size;
+  const L = ["Party one          Cause one", "Party two          Cause two is long", "Party three        Cause three"];
+  const a = drawVerticalLine(L, 0, 2, 19, { across: 50 });
+  check("down lines of text: a two-column box of them", a.lines.filter((l) => l.includes("│")).map(cells), [["Party one", "Cause one"], ["Party two", "Cause two is long"], ["Party three", "Cause three"]]);
+  const b = drawVerticalLine(a.lines, 1, 3, 30);
+  check("through the box: a third column, every row split at the line, the box no wider", [b.lines.filter((l) => /^│/.test(l)).map(cells), b.lines[0].length === a.lines[0].length, straight(b.lines)],
+    [[["Party one", "Cause one", ""], ["Party two", "Cause two", "is long"], ["Party three", "Cause", "three"]], true, 1]);
+  check("…its rules jointed where the line crosses them", [b.lines[0][30], b.lines[4][30]], ["┬", "┴"]);
+  check("…drawn over only part of the box, it still runs top to foot", drawVerticalLine(a.lines, 2, 2, 30).lines, b.lines);
+  check("on a rule already: refused", drawVerticalLine(b.lines, 1, 3, 30).error, "on");
+  check("too close to a rule: refused", drawVerticalLine(b.lines, 1, 3, 33).error, "narrow");
+  const h = drawHorizontalLine(b.lines, 2, 0, 40);
+  check("between two rows of a box: a rule across it, its columns jointed", h.lines[2], b.lines[0].replace("┌", "├").replace(/┬/g, "┼").replace("┐", "┤"));
+  check("…a column's Enter then moves its text down within its own row of the table", boxEdit(h.lines, 1, h.lines[1].indexOf("Cause one"), "Enter").lines.slice(1, 5).map(cells),
+    [["Party one", "", ""], ["", "Cause one", ""], [], ["Party two", "Cause two", "is long"]]);
+  check("…and Backspace at the head of the row under a rule joins nothing across it", boxEdit(h.lines, 3, h.lines[3].indexOf("Party two"), "Backspace").lines, h.lines);
+  check("against a rule: refused", drawHorizontalLine(h.lines, 3, 0, 40).error, "rule");
+  check("at a box's edge: refused", drawHorizontalLine(["Text above", ...b.lines.slice(1, 4)], 1, 0, 40).error, "edge");
+  const N = [" 1  JOHN DOE,                    Case No. 123", " 2  Plaintiff,                   COMPLAINT FOR:", " 3  v.", " 4  ACME CO.,", " 5"];
+  const t = drawHorizontalLine(N, 0, 0, 50, { numbered: true });
+  check("on lines of text: a line of ─ of its own, between two numbers past the margin", t.lines[0], "    " + "─".repeat(47));
+  const u = drawHorizontalLine(t.lines, 5, 0, 50, { numbered: true });
+  const v = drawVerticalLine(u.lines, 0, 5, 33, { numbered: true, across: 50 });
+  check("…a vertical line down the lines between two drawn: a box, they its rules", [v.lines.length, v.lines[0].trim()[0], v.lines[5].trim()[0], v.lines.filter((l) => l.includes("│")).map(cells)[1]],
+    [N.length + 2, "┌", "└", ["Plaintiff,", "COMPLAINT FOR:"]]);
+  // A table ruled only between its columns: the line added, its sides left open.
+  const R = "    ───────────────────────────┼──────────────────────┼─────────────────────────";
+  const row = (lead, x, y, z) => ((lead + " " + x).padEnd(31) + "│ " + y.padEnd(21) + "│ " + z).trimEnd();
+  const T = [R, row(" 8  ", "1. Paragraph 4;", "Hearsay; the", "Overrule."), row(" 9  ", "Exhibit 18", "deposition", "Paragraph 4"), R.replace(/┼/g, "┴"), "10"];
+  const o = drawVerticalLine(T, 1, 2, 19, { numbered: true });
+  check("through a table open at its sides: a column added, the sides still open", [o.lines[0].slice(0, 5), o.lines[0].length, o.lines[0][19], o.lines.slice(1, 3).map((l) => l.split("│").map((x) => x.trim()))],
+    ["    ─", R.length, "┬", [["8   1. Paragraph", "4;", "Hearsay; the", "Overrule."], ["9   Exhibit 18", "", "deposition", "Paragraph 4"]]]);
+  const oh = drawHorizontalLine(o.lines, 2, 0, 9, { numbered: true });
+  check("…a rule across it between two rows, open at its ends as its rules are", [oh.lines[2].length, oh.lines[2].slice(0, 5), oh.lines[2][19], oh.lines[2][31]], [R.length, "    ─", "┼", "┼"]);
+  check("…the box's other lines as they were", [oh.lines[0], oh.lines[1], oh.lines[3]], [o.lines[0], o.lines[1], o.lines[2]]);
 }
 console.log("a table ruled only between its columns: keys kept in the column (openBoxAround, boxEdit)");
 {

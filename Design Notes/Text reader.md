@@ -2644,6 +2644,51 @@ a sixth character, which no longer reads as a box. Pressed with ✎ Edit off it
 turns Edit on and puts the caret back. Each press is one undo step.
 `test-free-page.mjs` section 11.
 
+**│ Line and ─ Line on a ✓ Use my text page** (`#vline-btn`, `#hline-btn`,
+`setLineMode`, `columnAtX`, `lineGapAtY`; `TD.drawVerticalLine`,
+`TD.drawHorizontalLine`). The owner: "I want to make it easier to draw in
+missing columns. I should be able to click a button that lets me draw a
+vertical line or horizontal line in text view when using use my text. This
+would then get draw into the raw. These new lines should be treated like the
+existing columns. One thing this would fix is that currently, I can't make a
+table with more than two columns." Both buttons stand beside ☐ Checkbox and
+show on its condition (`refreshCheckboxBtn`). A press turns drawing on until a
+second press, Esc, or the caret leaving ✓ Use my text pages; each drag on such
+a page (a capture-phase `pointerdown`, so neither the selection nor a box
+rule's own drag starts) draws one line, a dashed `.box-guide` following it,
+and on letting go the line is written into the text and the page rebuilt
+(`rebuildFromLines`, one undo step). The column is read off the line the drag
+began on through the text at that point (`textPointAt`, `diskOffsetOfPoint`,
+stepping left off a name), past its end in grid characters (`--col-u`,
+measured by a probe); a vertical line at a word's end goes in the gap after it.
+
+A vertical line through a box (any row of the drag's lines a box row, or a
+rule beside one) adds a column of it TOP TO FOOT, whatever part the drag
+covered: a box's columns are its rows' bars, and a bar on only some rows
+would be no column `reflowBox` can read. The column it falls in is split at
+the line on every row, the box no wider (a joint ┬/┼/┴ put in each rule); a
+word the line would cut, and each word the left-hand cell then has no room
+for, goes right of it, and what the narrower right-hand cell no longer holds
+wraps down its column (`reflowBox`). Not within `BOX_MIN` of a rule (refused
+with a toast, as on a rule). A table open at its sides is closed for the edit
+and opened after (`closeBox`/`openBox`; `openBox` takes an `end` and strips the
+closing glyphs off a rule the line made or changed, which it otherwise does
+not know). On lines of text a vertical line is `makeColumnBox`, a plain ─ line
+just over or under them (or at the drag's ends) taken for its rule, so drawn
+lines build a box. A horizontal line between two rows of a box is a rule
+across it (├─┼─┤, open at its ends where the box is); elsewhere a line of ─ of
+its own over the columns dragged, put in between the lines (on pleading paper
+a half line, past the margin number). Refused against a rule or at a box's
+edge.
+
+A rule across a box now bounds a column's flow: `reflowBox` wraps and moves a
+column's text only among the rows between the rules either side of the row
+(a row added above the rule where it runs out), and `boxBackspace` joins
+nothing across one, as at the box's first row. Before, Enter in a separate
+statement's fact pushed its column into the next fact's rows. A box with only
+a top and foot rule is unchanged. `test-textdoc.mjs` ("lines drawn on a ✓ Use
+my text page") and `test-free-page.mjs` section 12.
+
 **A box's keys on every page, and a table ruled only between its columns**
 (`boxKey`, `boxReflowSoon`; `TD.boxEdit`, `TD.openBoxAround`). The owner, of a
 table of objections (Objection and Material │ Grounds Asserted │ Plaintiffs'
